@@ -19,8 +19,6 @@ type Profile struct {
 	Cache   *backends.Spec `yaml:"cache,omitempty"`
 	Logs    *backends.Spec `yaml:"logs,omitempty"`
 
-	MirrorLocal *bool `yaml:"mirror_local,omitempty"`
-
 	// RerunImage is the runner image `sparkwing debug rerun` starts its
 	// debug pod from on this profile's cluster.
 	RerunImage string `yaml:"rerun_image,omitempty"`
@@ -83,13 +81,6 @@ func (p *Profile) Surfaces() backends.Surfaces {
 	}
 }
 
-func (p *Profile) EffectiveMirrorLocal() bool {
-	if p == nil || p.MirrorLocal == nil {
-		return true
-	}
-	return *p.MirrorLocal
-}
-
 // Config is the profiles section of config.yaml: profile name to profile.
 type Config struct {
 	Profiles map[string]*Profile
@@ -139,9 +130,6 @@ func (p *Profile) validateSurfaceFields() error {
 		if err := spec.ValidateFields(surface); err != nil {
 			return err
 		}
-	}
-	if p.Cache != nil && p.Cache.Binaries != nil {
-		return p.Cache.Binaries.ValidateFields("cache.binaries")
 	}
 	return nil
 }

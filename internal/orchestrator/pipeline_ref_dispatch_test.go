@@ -92,7 +92,7 @@ func main() {
 			output := filepath.Join(t.TempDir(), "result")
 			t.Setenv("SPARKWING_RETRY_TEST_OUTPUT", output)
 			before := runGitForRetryTest(t, repo, "worktree", "list", "--porcelain")
-			if err := dispatchLocalTrigger(t.Context(), trigger, "", "", cache, logger, nil); err != nil {
+			if err := dispatchLocalTrigger(t.Context(), trigger, "", cache, logger, nil); err != nil {
 				t.Fatal(err)
 			}
 			got, err := os.ReadFile(output)
@@ -133,7 +133,7 @@ func TestPipelineRefDispatchRejectsMissingSource(t *testing.T) {
 			PipelineRevKey:   "abc123",
 			PipelineDirKey:   filepath.Join(t.TempDir(), "reclaimed"),
 		},
-	}, "", repoDir, cache, logger, nil)
+	}, repoDir, cache, logger, nil)
 	if err == nil || !strings.Contains(err.Error(), "--sw-pipeline-ref") {
 		t.Fatalf("dispatch = %v, want a failure naming the missing pipeline tree", err)
 	}
@@ -156,7 +156,7 @@ func TestDeclaredSourceLocalTriggerIgnoresCallerPipeline(t *testing.T) {
 	trigger := &store.Trigger{ID: "source-trigger", Pipeline: "pre-push", TriggerEnv: map[string]string{SubmitRepoDirKey: repo}}
 	output := filepath.Join(t.TempDir(), "output")
 	t.Setenv("SPARKWING_RETRY_TEST_OUTPUT", output)
-	if err := dispatchLocalTrigger(t.Context(), trigger, "", "", cache, logger, nil); err != nil {
+	if err := dispatchLocalTrigger(t.Context(), trigger, "", cache, logger, nil); err != nil {
 		t.Fatal(err)
 	}
 	body, err := os.ReadFile(output)

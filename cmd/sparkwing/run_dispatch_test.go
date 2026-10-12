@@ -88,7 +88,7 @@ func TestParseRunFlags_UnknownFlagsPassThrough(t *testing.T) {
 	}
 }
 
-func TestParseRunFlags_Profile(t *testing.T) {
+func TestParseRunFlags_ProfileNeverReachesThePipeline(t *testing.T) {
 	cases := []struct {
 		name string
 		args []string
@@ -96,7 +96,7 @@ func TestParseRunFlags_Profile(t *testing.T) {
 	}{
 		{"space-separated", []string{"--profile", "fictional-production"}, "fictional-production"},
 		{"equals-form", []string{"--profile=fictional-production"}, "fictional-production"},
-		{"empty-trailing-flag-falls-through", []string{"--profile"}, ""},
+		{"trailing-flag", []string{"--profile"}, "<name>"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -104,20 +104,24 @@ func TestParseRunFlags_Profile(t *testing.T) {
 			if flags.profile != testCase.want {
 				t.Errorf("profile = %q, want %q", flags.profile, testCase.want)
 			}
-			if testCase.want == "" && !slices.Contains(passthroughArgs, "--profile") {
-				t.Errorf("incomplete --profile should pass through; got passthrough=%v", passthroughArgs)
+			if len(passthroughArgs) != 0 {
+				t.Errorf("--profile reached the pipeline arguments: %v", passthroughArgs)
 			}
 		})
 	}
 }
 
-func TestParseRunFlags_ProfileSetTargetFallsThrough(t *testing.T) {
-	flags, passthroughArgs := parseRunFlags([]string{"--profile", "fictional-local", "--target", "fictional-production"})
-	if flags.profile != "fictional-local" {
-		t.Errorf("profile = %q, want fictional-local", flags.profile)
+func TestDispatchRun_RefusesProfileBeforeSideEffects(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", "")
+	empty := t.TempDir()
+	t.Chdir(empty)
+	err := dispatchRun([]string{"deploy", "--profile", "prod"})
+	if err == nil || !strings.Contains(err.Error(), "--profile is removed") ||
+		!strings.Contains(err.Error(), "sparkwing pipeline trigger deploy --profile prod") {
+		t.Fatalf("dispatch error = %v, want the removal and the pipeline trigger command", err)
 	}
-	if !slices.Contains(passthroughArgs, "--target") || !slices.Contains(passthroughArgs, "fictional-production") {
-		t.Errorf("--target should fall through to pipeline args; passthrough=%v", passthroughArgs)
+	if os.Getenv("SPARKWING_HOME") != "" {
+		t.Error("refused --profile changed the environment")
 	}
 }
 
@@ -341,8 +345,8 @@ func TestSetupRefWorktreeCleanupLeavesNothingRegistered(t *testing.T) {
 }
 
 func TestParseRunFlags_OneOffSwitches(t *testing.T) {
-	flags, rest := parseRunFlags([]string{"--sw-no-bincache", "--sw-hash-all-files", "--sw-artifact-digest-backfill", "--sw-allow-unadmitted", "--keep"})
-	if !flags.noBincache || !flags.hashAllFiles || !flags.digestBackfill || !flags.allowUnadmitted {
+	flags, rest := parseRunFlags([]string{"--sw-no-bincache", "--sw-hash-all-files", "--sw-allow-unadmitted", "--keep"})
+	if !flags.noBincache || !flags.hashAllFiles || !flags.allowUnadmitted {
 		t.Fatalf("flags = %+v, want every one-off switch set", flags)
 	}
 	if len(rest) != 1 || rest[0] != "--keep" {

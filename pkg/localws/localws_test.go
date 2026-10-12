@@ -132,105 +132,6 @@ func TestRun_ReadOnly_BlocksWrites(t *testing.T) {
 	}
 }
 
-func TestRun_S3OnlyMode_ServesRuns(t *testing.T) {
-	t.Parallel()
-
-	home := t.TempDir()
-	logRoot := filepath.Join(t.TempDir(), "remote-logs")
-	ls, err := fs.NewLogStore(logRoot)
-	if err != nil {
-		t.Fatalf("NewLogStore: %v", err)
-	}
-	artRoot := filepath.Join(t.TempDir(), "remote-art")
-	as, err := fs.NewArtifactStore(artRoot)
-	if err != nil {
-		t.Fatalf("NewArtifactStore: %v", err)
-	}
-
-	dump := `{"kind":"run","data":{"id":"abc","pipeline":"p","status":"success","started_at":"2026-01-01T00:00:00Z"}}
-{"kind":"node","data":{"run_id":"abc","node_id":"n1","status":"completed"}}
-`
-	if err := as.Put(context.Background(), "runs/abc/state.ndjson",
-		strings.NewReader(dump)); err != nil {
-		t.Fatalf("Put dump: %v", err)
-	}
-
-	addr := startLocalws(t, Options{
-		Home:               home,
-		LogStore:           ls,
-		LogStoreLabel:      "fs",
-		ArtifactStore:      as,
-		ArtifactStoreLabel: "fs",
-		NoLocalStore:       true,
-	})
-
-	resp := mustGet(t, "http://"+addr+"/api/v1/capabilities")
-	defer resp.Body.Close()
-	var caps backend.Capabilities
-	if err := json.NewDecoder(resp.Body).Decode(&caps); err != nil {
-		t.Fatalf("decode caps: %v", err)
-	}
-	if caps.Mode != "s3-only" {
-		t.Errorf("caps.Mode = %q, want s3-only", caps.Mode)
-	}
-	if caps.Storage.Runs != "s3" {
-		t.Errorf("caps.Storage.Runs = %q, want s3", caps.Storage.Runs)
-	}
-	if !caps.ReadOnly {
-		t.Errorf("caps.ReadOnly = false, want true")
-	}
-
-	resp2 := mustGet(t, "http://"+addr+"/api/v1/runs")
-	defer resp2.Body.Close()
-	if resp2.StatusCode != http.StatusOK {
-		t.Fatalf("/runs status = %d", resp2.StatusCode)
-	}
-	var listed struct {
-		Runs []map[string]any `json:"runs"`
-	}
-	if err := json.NewDecoder(resp2.Body).Decode(&listed); err != nil {
-		t.Fatalf("decode runs: %v", err)
-	}
-	if len(listed.Runs) != 1 {
-		t.Fatalf("got %d runs, want 1", len(listed.Runs))
-	}
-	if listed.Runs[0]["id"] != "abc" {
-		t.Errorf("runs[0].id = %v", listed.Runs[0]["id"])
-	}
-
-	resp3 := mustGet(t, "http://"+addr+"/api/v1/runs/abc?include=nodes")
-	defer resp3.Body.Close()
-	if resp3.StatusCode != http.StatusOK {
-		t.Fatalf("/runs/abc status = %d", resp3.StatusCode)
-	}
-	var wrap struct {
-		Run   map[string]any   `json:"run"`
-		Nodes []map[string]any `json:"nodes"`
-	}
-	if err := json.NewDecoder(resp3.Body).Decode(&wrap); err != nil {
-		t.Fatalf("decode get-run: %v", err)
-	}
-	if wrap.Run["id"] != "abc" {
-		t.Errorf("wrap.run.id = %v", wrap.Run["id"])
-	}
-	if len(wrap.Nodes) != 1 {
-		t.Errorf("got %d nodes, want 1", len(wrap.Nodes))
-	}
-
-	cancelReq, _ := http.NewRequest(http.MethodPost,
-		"http://"+addr+"/api/v1/runs/abc/cancel", nil)
-	resp4, err := authedDo(cancelReq)
-	if err != nil {
-		t.Fatalf("cancel: %v", err)
-	}
-	defer resp4.Body.Close()
-	if resp4.StatusCode == http.StatusOK || resp4.StatusCode == http.StatusNoContent {
-		t.Errorf("cancel status = %d, want non-2xx (no controller in s3-only mode)", resp4.StatusCode)
-	}
-}
-
-// safety: the real bundle is gitignored, so a checkout that has not built the
-// dashboard has none to serve; the suite carries its own shell instead.
 func fixtureShell() fstest.MapFS {
 	return fstest.MapFS{
 		"index.html": &fstest.MapFile{Data: []byte(
@@ -382,10 +283,10 @@ func TestBuildHandler_ServesDashboardConfigAndSecurityHeaders(t *testing.T) {
 			`<html><head><script src="/sparkwing-runtime.js"></script></head><body></body></html>`)},
 	}
 	handler := buildHandler(ctx, cancel, Options{Addr: "127.0.0.1:4343", Version: "v1.2.3"}, handlerParts{
-		paths:   paths,
-		backend: backend.NewStoreBackend(st, paths, nil),
-		store:   st,
-	}, bundle)
+		paths: paths,
+		store: st,
+		ctrl:  controller.New(st, nil).WithDashboard(controller.Dashboard{Local: true, Bundle: bundle, Version: "v1.2.3"}),
+	})
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 
@@ -429,11 +330,10 @@ func TestBuildHandler_SecurityHeadersOnEveryLocalRoute(t *testing.T) {
 		"index.html": &fstest.MapFile{Data: []byte("<html><body>stub dashboard</body></html>")},
 	}
 	handler := buildHandler(ctx, cancel, Options{Addr: "127.0.0.1:4343", Version: "v1.2.3"}, handlerParts{
-		paths:   paths,
-		backend: backend.NewStoreBackend(st, paths, nil),
-		store:   st,
-		ctrl:    controller.New(st, nil),
-	}, bundle)
+		paths: paths,
+		store: st,
+		ctrl:  controller.New(st, nil).WithDashboard(controller.Dashboard{Local: true, Bundle: bundle, Version: "v1.2.3"}),
+	})
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 

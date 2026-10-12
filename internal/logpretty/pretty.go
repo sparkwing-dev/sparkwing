@@ -14,7 +14,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -1071,10 +1070,6 @@ func (p *PrettyRenderer) writeSetupBlock(w io.Writer, runStart, plan *sparkwing.
 		}
 	}
 
-	if runStart != nil {
-		p.writeProfileBlock(w, runStart)
-	}
-
 	if plan != nil {
 		fmt.Fprintln(w)
 		p.writePlan(w, *plan)
@@ -1087,46 +1082,6 @@ func (p *PrettyRenderer) writeSetupBlock(w io.Writer, runStart, plan *sparkwing.
 		fmt.Fprintln(w, "  "+p.color("status ", ansiDim)+" "+p.color("sparkwing runs status --run "+runID, ansiCyan))
 	}
 	fmt.Fprintln(w, p.sectionRule("Logs"))
-}
-
-func (p *PrettyRenderer) writeProfileBlock(w io.Writer, runStart *sparkwing.LogRecord) {
-	prof := anyMap(runStart.Attrs["profile"])
-	if len(prof) == 0 {
-		return
-	}
-	backends := anyMap(runStart.Attrs["backends"])
-	name, _ := prof["name"].(string)
-	source, _ := prof["source"].(string)
-	detectVia, _ := prof["detect_via"].(string)
-	mirrorLocal, _ := prof["mirror_local"].(bool)
-	state, _ := backends["state"].(string)
-	logs, _ := backends["logs"].(string)
-	cache, _ := backends["cache"].(string)
-
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, p.color("profile:", ansiDim)+"  "+name)
-	fmt.Fprintln(w, "  "+p.color(padRight("via:", 7), ansiDim)+" "+profileViaPhrase(source, detectVia))
-	fmt.Fprintln(w, "  "+p.color(padRight("state:", 7), ansiDim)+" "+state)
-	fmt.Fprintln(w, "  "+p.color(padRight("logs:", 7), ansiDim)+" "+logs)
-	fmt.Fprintln(w, "  "+p.color(padRight("cache:", 7), ansiDim)+" "+cache)
-	if !strings.HasPrefix(state, "sqlite") {
-		mirror := "off"
-		if mirrorLocal {
-			mirror = "on"
-		}
-		fmt.Fprintln(w, "  "+p.color(padRight("mirror:", 7), ansiDim)+" "+mirror)
-	}
-}
-
-func profileViaPhrase(source, _ string) string {
-	switch source {
-	case string(profile.ChainSourceFlag):
-		return "--profile flag"
-	case string(profile.ChainSourceNone):
-		return "no --profile (local store)"
-	default:
-		return source
-	}
 }
 
 func outcomeIcon(outcome string) (icon, code string) {

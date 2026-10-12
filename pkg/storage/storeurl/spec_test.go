@@ -53,7 +53,7 @@ func TestOpenFromSpec_UnrecognizedType(t *testing.T) {
 		}{
 			{cacheErr, "(use filesystem, s3 or controller)"},
 			{logsErr, "(use filesystem, s3, stdout or controller)"},
-			{stateErr, "(use sqlite, postgres, s3 or controller)"},
+			{stateErr, "(use sqlite or controller)"},
 		} {
 			if tc.err == nil || !strings.Contains(tc.err.Error(), tc.want) {
 				t.Errorf("type %q: err = %v, want it to name %s", ty, tc.err, tc.want)
@@ -123,40 +123,6 @@ func TestOpenStateStoreFromSpec_SQLiteMissingPath(t *testing.T) {
 	}
 }
 
-func TestOpenStateStoreFromSpec_PostgresInvalidDSN(t *testing.T) {
-	_, err := storeurl.OpenStateStoreFromSpec(context.Background(),
-		backends.Spec{Type: backends.TypePostgres, URL: "x"}, nil)
-	if err == nil {
-		t.Fatal("expected error for malformed dsn")
-	}
-	if strings.Contains(err.Error(), "not implemented") {
-		t.Errorf("postgres should be implemented; got: %v", err)
-	}
-}
-
-func TestOpenStateStoreFromSpec_PostgresURLSourceEmpty(t *testing.T) {
-	t.Setenv("SPARKWING_PG_URL_TEST_EMPTY", "")
-	_, err := storeurl.OpenStateStoreFromSpec(context.Background(),
-		backends.Spec{Type: backends.TypePostgres, URLSource: "env:SPARKWING_PG_URL_TEST_EMPTY"}, nil)
-	if err == nil {
-		t.Fatal("expected error when env var is empty")
-	}
-	if !strings.Contains(err.Error(), "empty or unset") {
-		t.Errorf("want 'empty or unset', got: %v", err)
-	}
-}
-
-func TestOpenStateStoreFromSpec_PostgresURLSourceMalformed(t *testing.T) {
-	_, err := storeurl.OpenStateStoreFromSpec(context.Background(),
-		backends.Spec{Type: backends.TypePostgres, URLSource: "literal-url-no-env-prefix"}, nil)
-	if err == nil {
-		t.Fatal("expected error for missing env: prefix")
-	}
-	if !strings.Contains(err.Error(), "env:VAR") {
-		t.Errorf("want hint about env:VAR form, got: %v", err)
-	}
-}
-
 func TestOpenStateStoreFromSpec_Controller(t *testing.T) {
 	lookup := func(name string) (string, string, error) {
 		if name != "prod" {
@@ -189,7 +155,7 @@ func TestOpenStateStoreFromSpec_ControllerRequiresLookup(t *testing.T) {
 func TestOpenStateStoreFromSpec_UnrecognizedType(t *testing.T) {
 	_, err := storeurl.OpenStateStoreFromSpec(context.Background(),
 		backends.Spec{Type: backends.TypeFilesystem, Path: "/tmp/x"}, nil)
-	if err == nil || !strings.Contains(err.Error(), "(use sqlite, postgres, s3 or controller)") {
+	if err == nil || !strings.Contains(err.Error(), "(use sqlite or controller)") {
 		t.Errorf("want the supported state types, got: %v", err)
 	}
 }

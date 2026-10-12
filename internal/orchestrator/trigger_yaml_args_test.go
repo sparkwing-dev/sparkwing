@@ -304,3 +304,36 @@ func mustRun(t *testing.T, st *store.Store, runID string) *store.Run {
 	}
 	return run
 }
+
+// A checkout whose sparkwing.yaml names a key a release removed fails the run
+// with the parse error, rather than planning without the project's defaults.
+func TestExecuteClaimedTrigger_RemovedConfigKeyFailsTheRunNamingIt(t *testing.T) {
+	registerTriggerYAMLPipe(t)
+	setCapturedRegion("")
+	triggerCheckout(t, `defaults:
+  args:
+    region: eu-west
+profiles:
+  prod:
+    mirror_local: false
+pipelines:
+  - name: trigger-yaml-pipe
+    entrypoint: TriggerYAMLPipe
+`)
+	rig := newTriggerWorkerRig(t)
+	trig := rig.claim(t, store.Trigger{
+		ID: "trg-removed-key", Pipeline: "trigger-yaml-pipe", TriggerSource: "dashboard",
+	})
+
+	orchestrator.ExecuteClaimedTrigger(context.Background(),
+		orchestrator.WorkerOptions{Logger: rig.logger}, rig.backend, rig.client, trig)
+
+	if got := capturedRegion(); got != "" {
+		t.Fatalf("a run with an unreadable config executed (region=%q)", got)
+	}
+	run := mustRun(t, rig.st, trig.ID)
+	if run.Status != "failed" || !strings.Contains(run.Error, "field mirror_local not found") ||
+		!strings.Contains(run.Error, "sparkwing.yaml") {
+		t.Fatalf("run = status %q, error %q; want failed naming the removed key and the file", run.Status, run.Error)
+	}
+}

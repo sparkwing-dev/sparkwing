@@ -96,7 +96,15 @@ func newClaimRouteFixture(t *testing.T) claimRouteFixture {
 	mux.Handle("GET /api/v1/runs/{id}", requireScope(ScopeRunsRead, echo))
 	return claimRouteFixture{
 		st: st, srv: srv, raw: raw, plan: plan, runner: runner, results: results,
-		handler: srv.authenticated(mux, srv.teamBoundary(mux, mux)),
+		handler: srv.authenticated(mux, srv.boundaryOver(map[string]tenantResource{
+			"GET /api/v1/runs/{id}/probe":                  resRun,
+			"GET /api/v1/runs/{id}/source":                 resRun,
+			"GET /api/v1/secrets/{name}":                   resSecret,
+			"GET /api/v1/by-query":                         resNone,
+			"POST /api/v1/runs/{id}/nodes/{nodeID}/report": resRun,
+			"POST /api/v1/runs/{id}/nodes/{nodeID}/result": resRun,
+			"GET /api/v1/runs/{id}":                        resRun,
+		}, mux, mux)),
 	}
 }
 

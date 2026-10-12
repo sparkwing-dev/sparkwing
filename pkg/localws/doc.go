@@ -25,10 +25,8 @@
 // # Embedding
 //
 // [Options] tunes the composition: pre-built listener, alternative
-// [storage.ArtifactStore] / [storage.LogStore] backends (e.g. S3 for
-// shared-state mode), read-only mode for safe consoles, and
-// NoLocalStore to drive the dashboard purely from object-storage
-// reads without opening the local sqlite.
+// [storage.ArtifactStore] / [storage.LogStore] backends, and read-only
+// mode for safe consoles.
 //
 // # Cluster mode
 //

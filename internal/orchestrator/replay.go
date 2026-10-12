@@ -6,7 +6,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log/slog"
 	"os"
 	"time"
 
@@ -36,7 +35,7 @@ func runReplayNodeCLI(args []string) error {
 		return fmt.Errorf("ensure root: %w", err)
 	}
 	ctx := context.Background()
-	backends, _, releaseBackends, err := localTriggerBackends(ctx, paths, "")
+	backends, _, releaseBackends, err := localTriggerBackends(ctx, paths)
 	if err != nil {
 		return err
 	}
@@ -95,7 +94,10 @@ func RunReplayNode(ctx context.Context, paths Paths, backends Backends, runID, n
 		DryRun:    dryRunFromEnv(),
 	}
 
-	invokeArgs := checkoutInvokeArgs(run.Pipeline, run.Args, slog.Default())
+	invokeArgs, err := checkoutInvokeArgs(run.Pipeline, run.Args)
+	if err != nil {
+		return runner.Result{}, err
+	}
 	// safety: no logger here on purpose. Every dispatching process re-plans,
 	// so a sink would repeat one authored line once per node.
 	plan, err := reg.Invoke(ctx, invokeArgs, rc)

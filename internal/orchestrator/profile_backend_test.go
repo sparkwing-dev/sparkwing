@@ -2,8 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,7 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -23,25 +20,6 @@ func neutralizeEnv(t *testing.T) {
 		os.Unsetenv(k)
 	}
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-}
-
-func TestOpenReadBackendForProfile_S3State(t *testing.T) {
-	neutralizeEnv(t)
-	t.Setenv("AWS_REGION", "us-east-1")
-	t.Setenv("AWS_ACCESS_KEY_ID", "test")
-	t.Setenv("AWS_SECRET_ACCESS_KEY", "test")
-	p := &profile.Profile{
-		Name:  "team",
-		State: &backends.Spec{Type: backends.TypeS3, Bucket: "team", Prefix: "state"},
-	}
-	b, closer, err := OpenReadBackendForProfile(context.Background(), Paths{Root: t.TempDir()}, p)
-	if err != nil {
-		t.Fatalf("OpenReadBackendForProfile: %v", err)
-	}
-	defer closer.Close()
-	if _, ok := b.(*backend.S3Backend); !ok {
-		t.Fatalf("backend = %T, want *backend.S3Backend", b)
-	}
 }
 
 func TestOpenReadBackendForProfile_SQLiteState(t *testing.T) {
@@ -77,89 +55,32 @@ func TestOpenReadBackendForProfile_ControllerProfile(t *testing.T) {
 	}
 }
 
-func TestApplyProfileBackends_SQLiteState(t *testing.T) {
-	neutralizeEnv(t)
-	dbPath := filepath.Join(t.TempDir(), "state.db")
-	p := &profile.Profile{Name: "local", State: &backends.Spec{Type: backends.TypeSQLite, Path: dbPath}}
-	opts := Options{}
-	if err := ApplyProfileBackends(context.Background(), &opts, p); err != nil {
-		t.Fatalf("ApplyProfileBackends: %v", err)
+func TestResolveLocalBackends_OpensThisMachinesStore(t *testing.T) {
+	paths := Paths{Root: t.TempDir()}
+	opts := Options{DefaultStateDB: filepath.Join(paths.Root, "state.db")}
+	if err := resolveLocalBackends(&opts, paths, false); err != nil {
+		t.Fatalf("resolveLocalBackends: %v", err)
 	}
-	if opts.State == nil {
-		t.Fatal("State not populated")
-	}
-	defer opts.State.Close()
-	if _, ok := opts.State.(*store.Store); !ok {
+	st, ok := opts.State.(*store.Store)
+	if !ok {
 		t.Fatalf("State = %T, want *store.Store", opts.State)
 	}
-}
-
-func segmentKeepingController(t *testing.T) string {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/capabilities" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"logs":{"segments":true}}`))
-	}))
-	t.Cleanup(srv.Close)
-	return srv.URL
-}
-
-func TestApplyProfileBackends_ControllerProfile(t *testing.T) {
-	neutralizeEnv(t)
-	p := &profile.Profile{Name: "prod", Controller: &profile.ControllerSpec{URL: segmentKeepingController(t), Token: "swu_test"}}
-	opts := Options{}
-	if err := ApplyProfileBackends(context.Background(), &opts, p); err != nil {
-		t.Fatalf("ApplyProfileBackends(controller): %v", err)
-	}
-	if opts.State == nil {
-		t.Fatal("State nil")
-	}
-	defer opts.State.Close()
-	if _, ok := opts.State.(*client.Client); !ok {
-		t.Fatalf("State = %T, want *client.Client", opts.State)
-	}
-	seg, ok := opts.LogStore.(*segmentLogStore)
-	if !ok || opts.ArtifactStore == nil {
-		t.Fatalf("logs = %T, cache = %T; want segments and the controller cache", opts.LogStore, opts.ArtifactStore)
-	}
-	seg.Close(context.Background())
-}
-
-func TestApplyProfileBackends_LocalOnlyShortCircuits(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
-	}
-	neutralizeEnv(t)
-	p := &profile.Profile{Name: "prod", Controller: &profile.ControllerSpec{URL: "https://api.example.dev"}}
-	opts := Options{LocalOnly: true, DefaultStateDB: filepath.Join(t.TempDir(), "state.db")}
-	if err := ApplyProfileBackends(context.Background(), &opts, p); err != nil {
-		t.Fatalf("ApplyProfileBackends(LocalOnly): %v", err)
-	}
-	defer opts.State.Close()
-	if _, ok := opts.State.(*store.Store); !ok {
-		t.Fatalf("LocalOnly state = %T, want *store.Store", opts.State)
-	}
-	if opts.LogStore != nil || opts.ArtifactStore != nil {
-		t.Error("LocalOnly should leave logs + cache nil")
+	defer st.Close()
+	if opts.ArtifactStore == nil {
+		t.Error("no local artifact cache")
 	}
 }
 
-func TestApplyProfileBackends_RespectsPreSetState(t *testing.T) {
-	neutralizeEnv(t)
-	preDB := filepath.Join(t.TempDir(), "pre.db")
-	pre, err := store.Open(preDB)
+func TestResolveLocalBackends_RespectsPreSetState(t *testing.T) {
+	pre, err := store.Open(filepath.Join(t.TempDir(), "pre.db"))
 	if err != nil {
 		t.Fatalf("pre open: %v", err)
 	}
 	defer pre.Close()
-	p := &profile.Profile{Name: "local", State: &backends.Spec{Type: backends.TypeSQLite, Path: filepath.Join(t.TempDir(), "should-not-win.db")}}
-	opts := Options{State: pre}
-	if err := ApplyProfileBackends(context.Background(), &opts, p); err != nil {
-		t.Fatalf("ApplyProfileBackends: %v", err)
+	paths := Paths{Root: t.TempDir()}
+	opts := Options{State: pre, DefaultStateDB: filepath.Join(paths.Root, "should-not-win.db")}
+	if err := resolveLocalBackends(&opts, paths, false); err != nil {
+		t.Fatalf("resolveLocalBackends: %v", err)
 	}
 	if opts.State != pre {
 		t.Error("pre-set State was overwritten")
