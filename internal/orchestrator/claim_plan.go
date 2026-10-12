@@ -8,7 +8,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/signal"
 	"slices"
@@ -49,7 +48,11 @@ func runPlanCLI(args []string) error {
 	}
 	rc := runContextFor(run)
 	sparkwing.SetGit(rc.Git)
-	plan, err := reg.Invoke(sparkwingruntime.WithLogger(ctx, NewJSONRenderer()), checkoutInvokeArgs(run.Pipeline, run.Args, slog.Default()), rc)
+	invokeArgs, err := checkoutInvokeArgs(run.Pipeline, run.Args)
+	if err != nil {
+		return err
+	}
+	plan, err := reg.Invoke(sparkwingruntime.WithLogger(ctx, NewJSONRenderer()), invokeArgs, rc)
 	if err != nil {
 		return fmt.Errorf("build plan: %w", err)
 	}

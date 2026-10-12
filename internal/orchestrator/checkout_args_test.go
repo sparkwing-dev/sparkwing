@@ -1,8 +1,6 @@
 package orchestrator
 
 import (
-	"bytes"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,10 +34,6 @@ func writeProjectConfig(t *testing.T, root, yaml string) {
 	}
 }
 
-func captureLog(buf *bytes.Buffer) *slog.Logger {
-	return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
-}
-
 func TestCheckoutInvokeArgs_LayersYAMLUnderStored(t *testing.T) {
 	checkoutAt(t, `defaults:
   args:
@@ -52,7 +46,10 @@ pipelines:
       tier: premium
       token: from-entry
 `)
-	got := checkoutInvokeArgs("deploy", map[string]string{"region": "us-east"}, slog.Default())
+	got, err := checkoutInvokeArgs("deploy", map[string]string{"region": "us-east"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := map[string]string{
 		"region": "us-east",
 		"tier":   "premium",
@@ -78,7 +75,10 @@ pipelines:
     args:
       tier: premium
 `)
-	got := checkoutInvokeArgs("deploy", nil, slog.Default())
+	got, err := checkoutInvokeArgs("deploy", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got["region"] != "eu-west" {
 		t.Errorf("region = %q, want eu-west", got["region"])
 	}
@@ -91,7 +91,10 @@ func TestCheckoutInvokeArgs_NoProjectReturnsStored(t *testing.T) {
 	pointRuntimeAt(t, t.TempDir())
 
 	stored := map[string]string{"region": "us-east"}
-	got := checkoutInvokeArgs("deploy", stored, slog.Default())
+	got, err := checkoutInvokeArgs("deploy", stored)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 1 || got["region"] != "us-east" {
 		t.Errorf("checkoutInvokeArgs = %v, want the stored args verbatim", got)
 	}
@@ -109,26 +112,34 @@ func TestCheckoutInvokeArgs_AncestorConfigIsNotMerged(t *testing.T) {
 	}
 	pointRuntimeAt(t, child)
 
-	got := checkoutInvokeArgs("deploy", map[string]string{"tier": "premium"}, slog.Default())
+	got, err := checkoutInvokeArgs("deploy", map[string]string{"tier": "premium"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, leaked := got["region"]; leaked {
 		t.Fatalf("an ancestor's project config reached this run's args: %v", got)
 	}
 }
 
-func TestCheckoutInvokeArgs_MalformedConfigWarnsAndFallsBack(t *testing.T) {
+func TestCheckoutInvokeArgs_MalformedConfigFailsNamingTheFile(t *testing.T) {
 	checkoutAt(t, "defaults:\n  args:\n   - this is not a map\n\tand this is a tab\n")
 
-	var buf bytes.Buffer
-	got := checkoutInvokeArgs("deploy", map[string]string{"region": "us-east"}, captureLog(&buf))
-	if got["region"] != "us-east" {
-		t.Errorf("fallback lost the caller's args: %v", got)
+	if _, err := checkoutInvokeArgs("deploy", map[string]string{"region": "us-east"}); err == nil ||
+		!strings.Contains(err.Error(), "sparkwing.yaml") {
+		t.Fatalf("checkoutInvokeArgs = %v, want the parse error naming sparkwing.yaml", err)
 	}
-	logged := buf.String()
-	if !strings.Contains(logged, "project config unreadable") {
-		t.Fatalf("a malformed project config was swallowed; log was:\n%s", logged)
+	opts := Options{Pipeline: "deploy"}
+	if err := applyCheckoutProjectConfig(&opts); err == nil || !strings.Contains(err.Error(), "sparkwing.yaml") {
+		t.Fatalf("applyCheckoutProjectConfig = %v, want the parse error naming sparkwing.yaml", err)
 	}
-	if !strings.Contains(logged, "sparkwing.yaml") {
-		t.Errorf("warning does not name the offending file:\n%s", logged)
+}
+
+// A key a release removed makes the checkout's config unreadable, and the run
+// fails on it instead of planning without the project's defaults and guards.
+func TestCheckoutConfig_ARemovedKeyFailsTheRun(t *testing.T) {
+	checkoutAt(t, "profiles:\n  prod:\n    mirror_local: false\npipelines:\n  - name: deploy\n    entrypoint: Deploy\n")
+	if _, err := checkoutInvokeArgs("deploy", nil); err == nil || !strings.Contains(err.Error(), "field mirror_local not found") {
+		t.Fatalf("checkoutInvokeArgs = %v, want the unknown-field error", err)
 	}
 }
 
@@ -146,7 +157,9 @@ pipelines:
       tier: premium
 `)
 	opts := Options{Pipeline: "deploy"}
-	applyCheckoutProjectConfig(&opts, slog.Default())
+	if err := applyCheckoutProjectConfig(&opts); err != nil {
+		t.Fatal(err)
+	}
 
 	if opts.DefaultArgs["region"] != "eu-west" {
 		t.Errorf("DefaultArgs = %v, want the defaults.args block", opts.DefaultArgs)
@@ -175,7 +188,9 @@ pipelines:
 		Pipeline:    "deploy",
 		DefaultArgs: map[string]string{"region": "caller-supplied"},
 	}
-	applyCheckoutProjectConfig(&opts, slog.Default())
+	if err := applyCheckoutProjectConfig(&opts); err != nil {
+		t.Fatal(err)
+	}
 	if opts.DefaultArgs["region"] != "caller-supplied" {
 		t.Errorf("DefaultArgs = %v, want the caller's own", opts.DefaultArgs)
 	}

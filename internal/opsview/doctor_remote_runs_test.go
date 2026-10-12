@@ -68,15 +68,7 @@ func TestDiagnose_KeepsRunDirWhenAProfileRecordsRunsElsewhere(t *testing.T) {
 	home := shortHome(t)
 	ownHome(t, home, `profiles:
   fleet:
-    state:
-      type: s3
-      bucket: team
-      prefix: state
-    logs:
-      type: s3
-      bucket: team
-      prefix: logs
-    mirror_local: false
+    controller: { url: https://controller.example }
 `)
 	p, ghost := seedRunDirHomeAt(t, home, time.Hour)
 

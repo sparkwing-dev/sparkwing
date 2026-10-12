@@ -118,13 +118,12 @@ func (s *LogStore) DeleteRun(context.Context, string) error { return nil }
 // surfaces loudly instead of having Bucket / Path quietly ignored.
 // Fields are checked in declaration order so the error message is
 // deterministic.
-func CheckSpec(bucket, prefix, path, url, urlSource, token string) error {
+func CheckSpec(bucket, prefix, path, url, token string) error {
 	for _, f := range []struct{ name, value string }{
 		{"bucket", bucket},
 		{"prefix", prefix},
 		{"path", path},
 		{"url", url},
-		{"url_source", urlSource},
 		{"token", token},
 	} {
 		if f.value != "" {

@@ -1,16 +1,16 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Sparkwing node protocol: log record",
-  "description": "One line of the NDJSON log stream a node process writes to stdout. Each line is one JSON object terminated by a newline. A property whose description starts with 'Target:' is part of the contract the engine-hosted model needs and no SDK emits yet; every other property is emitted today.",
+  "description": "One log record frame a node process writes on its frame pipe. Each line is one JSON object terminated by a newline.",
   "type": "object",
   "properties": {
     "ts": { "type": "string", "description": "RFC 3339 timestamp with fractional seconds. The host may replace it with its own receive time." },
     "level": { "enum": ["debug", "info", "warn", "error"] },
-    "node": { "type": "string", "description": "Id of the node that wrote the record." },
-    "step": { "type": "string", "description": "Id of the active step, when one is running." },
+    "node": { "type": "string", "description": "Id of the node that wrote the record. The host overwrites it with the process's node." },
+    "step": { "type": "string", "description": "Id of the step the record belongs to. The host keeps it only while that step has a run_step in flight." },
     "event": {
       "type": "string",
-      "description": "Empty or absent for a plain message. Known values a node writes: node_annotation, node_summary, step_start, step_end, step_skipped, work_fail_fast, exec_start, exec_line, and the Target exec_end. The engine writes further values of its own, such as node_start, node_end and retry."
+      "description": "Empty or absent for a plain message. Values an SDK writes: node_annotation, node_summary, exec_start, exec_line and exec_end. The host writes step_start, step_end, step_skipped, work_fail_fast, node_start, node_end, retry and similar values itself, and stores an SDK record carrying one of them as a plain message."
     },
     "msg": { "type": "string", "description": "The message. May carry raw ANSI from a child process; the other fields never do." },
     "attrs": { "type": "object", "description": "Event-specific fields." }
@@ -37,10 +37,10 @@
       "description": "attrs of a node_annotation record.",
       "properties": {
         "message": { "type": "string" },
-        "level": { "enum": ["notice", "warning", "error"], "description": "Target: the annotation's severity; absent means notice." },
-        "file": { "type": "string", "description": "Target: repository-relative path the annotation points at." },
-        "line": { "type": "integer", "minimum": 1, "description": "Target: 1-based line in file." },
-        "end_line": { "type": "integer", "minimum": 1, "description": "Target: last line of the range in file." }
+        "level": { "enum": ["notice", "warning", "error"], "description": "The annotation's severity; absent means notice." },
+        "file": { "type": "string", "description": "Repository-relative path the annotation points at." },
+        "line": { "type": "integer", "minimum": 1, "description": "1-based line in file." },
+        "end_line": { "type": "integer", "minimum": 1, "description": "Last line of the range in file." }
       },
       "required": ["message"],
       "additionalProperties": false
@@ -56,7 +56,7 @@
     },
     "execEnd": {
       "type": "object",
-      "description": "Target: attrs of an exec_end record, the per-command resource numbers an SDK reports when it has them.",
+      "description": "attrs of an exec_end record: per-command numbers an SDK reports when it has them. The host's own measurement of the process session is authoritative.",
       "properties": {
         "exit_code": { "type": "integer" },
         "cpu_ms": { "type": "integer", "minimum": 0 },

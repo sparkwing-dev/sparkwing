@@ -357,9 +357,9 @@ custom pull-request actions, or pull-request base-branch matching;
 
 ## Unsatisfiable guards (`guard-misuse`)
 
-A pipeline's `guards:` block gates dispatch on the resolved profile,
-args, and git branch -- `profile:local` / `profile:controller` /
-`profile:name=NAME`, `arg:FLAG=VALUE`, and `git:branch=NAME` /
+A pipeline's `guards:` block gates dispatch on where the run is
+dispatched, args, and git branch -- `profile:local` / `profile:controller`,
+`arg:FLAG=VALUE`, and `git:branch=NAME` /
 `git:branch=default`. `require` blocks the run when not every token
 matches; `reject` blocks it when any token matches. A token in both
 lists or a `require` naming two mutually exclusive profiles prevents
