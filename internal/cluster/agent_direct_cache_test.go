@@ -117,7 +117,6 @@ func TestAnOffClusterAgentUsesTheAnnouncedCacheWithItsGrant(t *testing.T) {
 		t.Setenv(name, "")
 	}
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	t.Setenv(authwire.CacheGrantKeyEnv, cacheGrantKey)
 	discovery.ResetCache()
 	t.Cleanup(discovery.ResetCache)
 
@@ -197,7 +196,7 @@ func TestAnOffClusterAgentUsesTheAnnouncedCacheWithItsGrant(t *testing.T) {
 	// safety: built after the tokens exist, because a controller whose tokens
 	// table is empty serves every request unauthenticated.
 	ctrlSrv := httptest.NewServer(countPaths(controller.New(st, discardLogger()).
-		WithCacheCredentials(cacheSrv.URL, operatorCacheToken).
+		WithCacheCredentials(cacheSrv.URL, operatorCacheToken).WithCacheGrantKey(cacheGrantKey).
 		WithCachePodURL(cacheSrv.URL).
 		EnableAuthFromStore().Handler(), &proxied, "/gitcache"))
 	t.Cleanup(ctrlSrv.Close)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -162,7 +163,13 @@ func TestLocalRunLogDir_UnwritableRootReportsNothing(t *testing.T) {
 		t.Skip("root ignores directory permissions")
 	}
 	root := filepath.Join(t.TempDir(), "home")
-	if err := os.Mkdir(root, 0o500); err != nil {
+	var setupErr error
+	if runtime.GOOS == "windows" {
+		setupErr = os.WriteFile(root, []byte("blocked"), 0o600)
+	} else {
+		setupErr = os.Mkdir(root, 0o500)
+	}
+	if err := setupErr; err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 	if dir := localRunLogDir(localLogs{paths: Paths{Root: root}}, "run-1"); dir != "" {

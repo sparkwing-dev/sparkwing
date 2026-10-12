@@ -33,31 +33,18 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
-// BusyTimeoutEnvVar names the environment override for the SQLite
-// busy_timeout Open and OpenReadOnly apply, in milliseconds. Unset or
-// empty keeps [DefaultBusyTimeoutMS]; anything else must be a positive
-// integer or Open fails loudly, naming the variable and value -- a
-// typo'd override silently reverting to the default would hide the
-// misconfiguration. The knob exists for hosts whose contention profile
-// makes 30s wrong in either direction: diagnostic tooling that wants
-// to fail fast on a wedged database, or a heavily shared host that
-// wants writers to wait longer before erroring with SQLITE_BUSY.
-const BusyTimeoutEnvVar = "SPARKWING_SQLITE_BUSY_TIMEOUT_MS"
-
-// DefaultBusyTimeoutMS is the SQLite busy_timeout applied when
-// [BusyTimeoutEnvVar] is unset. See Open for why 30s.
+// DefaultBusyTimeoutMS is the SQLite busy_timeout Open and OpenReadOnly
+// apply, in milliseconds. See Open for why 30s.
 const DefaultBusyTimeoutMS = 30000
 
-func busyTimeoutMS() (int, error) {
-	raw := os.Getenv(BusyTimeoutEnvVar)
-	if raw == "" {
-		return DefaultBusyTimeoutMS, nil
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil || n <= 0 {
-		return 0, fmt.Errorf("%s=%q: want a positive integer of milliseconds", BusyTimeoutEnvVar, raw)
-	}
-	return n, nil
+var busyTimeoutMS = DefaultBusyTimeoutMS
+
+// SetTestBusyTimeout makes every SQLite store this process opens use ms as
+// its busy_timeout until the test ends.
+func SetTestBusyTimeout(t interface{ Cleanup(func()) }, ms int) {
+	original := busyTimeoutMS
+	t.Cleanup(func() { busyTimeoutMS = original })
+	busyTimeoutMS = ms
 }
 
 // Failure reason codes; empty = no structured reason.
@@ -89,7 +76,7 @@ const (
 	// work may well have succeeded, but its record of that work is
 	// incomplete, so the same rule as FailureLogsAuth applies: a run
 	// nobody can read is not a run anybody should trust. Adopters who
-	// prefer the lossy behavior set SPARKWING_LOGS_DROP_POLICY=warn.
+	// prefer the lossy behavior set logs.drop_policy: warn in config.yaml.
 	FailureLogsDropped = "logs_dropped"
 	// FailureSourceUnavailable: a launcher Job's init container was refused
 	// the run's source credential, which answers the same on every attempt,
@@ -133,7 +120,7 @@ func (s *Store) Dialect() Dialect { return s.dialect }
 
 // Open initializes a SQLite database at path with WAL + foreign keys.
 //
-// busy_timeout defaults high (30s; override via [BusyTimeoutEnvVar]) so
+// busy_timeout is high (30s) so
 // that under N concurrent writers on
 // one host -- multiple `sparkwing run` invocations plus the dashboard
 // daemon sharing one state.db -- a writer waits on a busy lock instead
@@ -179,10 +166,7 @@ func Open(path string) (*Store, error) {
 	} else if err := tightenExistingSQLite(path); err != nil {
 		return nil, err
 	}
-	dsn, err := sqliteDSN(path)
-	if err != nil {
-		return nil, err
-	}
+	dsn := sqliteDSN(path)
 	backupDir := ""
 	if !newDatabase {
 		backupDir = filepath.Join(filepath.Dir(path), "backups")
@@ -264,12 +248,8 @@ func tightenSQLiteFile(name string) error {
 	return nil
 }
 
-func sqliteDSN(path string) (string, error) {
-	ms, err := busyTimeoutMS()
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%s?_txlock=immediate&_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(on)", sqliteURI(path), ms), nil
+func sqliteDSN(path string) string {
+	return fmt.Sprintf("%s?_txlock=immediate&_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(on)", sqliteURI(path), busyTimeoutMS)
 }
 
 // safety: SQLite ends a file: URI path at the first unescaped `?` or `#` and
@@ -286,24 +266,20 @@ func sqliteURI(path string) string {
 	return "file:" + escaped
 }
 
-func sqliteReadOnlyDSN(path string) (string, error) {
+func sqliteReadOnlyDSN(path string) string {
 	return sqliteReadOnlyDSNWithMode(path, false)
 }
 
-func sqliteReadOnlySnapshotDSN(path string) (string, error) {
+func sqliteReadOnlySnapshotDSN(path string) string {
 	return sqliteReadOnlyDSNWithMode(path, true)
 }
 
-func sqliteReadOnlyDSNWithMode(path string, immutable bool) (string, error) {
-	ms, err := busyTimeoutMS()
-	if err != nil {
-		return "", err
-	}
+func sqliteReadOnlyDSNWithMode(path string, immutable bool) string {
 	mode := "mode=ro"
 	if immutable {
 		mode += "&immutable=1"
 	}
-	return fmt.Sprintf("%s?%s&_pragma=busy_timeout(%d)&_pragma=query_only(true)", sqliteURI(path), mode, ms), nil
+	return fmt.Sprintf("%s?%s&_pragma=busy_timeout(%d)&_pragma=query_only(true)", sqliteURI(path), mode, busyTimeoutMS)
 }
 
 // OpenReadOnly opens an existing SQLite state database for reads only.
@@ -318,8 +294,7 @@ func sqliteReadOnlyDSNWithMode(path string, immutable bool) (string, error) {
 // its own Open). Opening a database whose schema this binary doesn't
 // understand surfaces as query errors at read time, not here.
 func OpenReadOnly(path string) (*Store, error) {
-	dsn, err := sqliteReadOnlyDSN(path)
-	st, err := openReadOnlyDSN(dsn, err)
+	st, err := openReadOnlyDSN(sqliteReadOnlyDSN(path))
 	if err == nil {
 		st.outputDir = filepath.Dir(path)
 	}
@@ -348,8 +323,7 @@ func OpenReadOnlySnapshot(path string) (*Store, error) {
 		_ = cleanup()
 		return nil, err
 	}
-	dsn, err := sqliteReadOnlySnapshotDSN(snapshotPath)
-	st, err := openReadOnlyDSN(dsn, err)
+	st, err := openReadOnlyDSN(sqliteReadOnlySnapshotDSN(snapshotPath))
 	if err != nil {
 		_ = cleanup()
 		return nil, err
@@ -505,10 +479,7 @@ func checkpointSQLiteCopy(path string) error {
 	return errors.Join(checkErr, checkpointErr, db.Close())
 }
 
-func openReadOnlyDSN(dsn string, err error) (*Store, error) {
-	if err != nil {
-		return nil, err
-	}
+func openReadOnlyDSN(dsn string) (*Store, error) {
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
@@ -4213,10 +4184,36 @@ type RunFilter struct {
 	ParentRunID    string
 	RootOnly       bool
 
+	// The Exclude lists drop a run matching any of their values.
+	ExcludePipelines      []string
+	ExcludeStatuses       []string
+	ExcludeGitSHAPrefixes []string
+	ExcludeGitBranches    []string
+	TriggerSources        []string
+	ExcludeTriggerSources []string
+	// RepoNames match the name the dashboard labels a run with: the last path segment of
+	// its declared repository, else of its GitHub repository, else "unknown".
+	RepoNames        []string
+	ExcludeRepoNames []string
+	// StartedBefore, FinishedAfter and FinishedBefore are inclusive bounds; a finished
+	// bound excludes every unfinished run.
+	StartedBefore  time.Time
+	FinishedAfter  time.Time
+	FinishedBefore time.Time
+	// Text keeps runs containing every term, and ExcludeText drops runs containing any,
+	// in the id, pipeline, repository, branch, SHA, error, trigger source or status. Only
+	// ASCII letters match regardless of case, the same on every backend.
+	Text        []string
+	ExcludeText []string
+
 	// AfterStartedAt and AfterID resume a listing after one already-seen run. The id
 	// breaks ties among runs sharing an instant, which an instant alone would skip.
 	AfterStartedAt int64
 	AfterID        string
+	// BeforeStartedAt and BeforeID page the other way: the Limit runs just newer than
+	// one already-seen run, still returned newest first.
+	BeforeStartedAt int64
+	BeforeID        string
 
 	// ProbeMayBeClamped marks a limit this process chose rather than one a caller asked
 	// for. A server clamping the probe row away then leaves the result reported as cut
@@ -4227,6 +4224,9 @@ type RunFilter struct {
 // HasCursor reports whether the filter resumes after an already-seen run. It keys on
 // the id alone, because a run started at the Unix epoch carries an instant of zero.
 func (f RunFilter) HasCursor() bool { return f.AfterID != "" }
+
+// HasBeforeCursor reports whether the filter pages toward newer runs.
+func (f RunFilter) HasBeforeCursor() bool { return f.BeforeID != "" }
 
 // ListRuns returns runs ordered newest-first, then by id descending, filtered
 // by f. The cursor clause depends on that order.
@@ -4239,7 +4239,7 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) (_ []*Run, err error)
 }
 
 func (s *Store) listRuns(ctx context.Context, scope teamScope, f RunFilter) (_ []*Run, err error) {
-	where, args, err := runFilterWhere(scope, f)
+	where, args, err := runFilterWhere(s.dialect, scope, f)
 	if err != nil {
 		return nil, err
 	}
@@ -4251,10 +4251,14 @@ func (s *Store) listRuns(ctx context.Context, scope teamScope, f RunFilter) (_ [
 	limit = min(limit, maxRunListFetch)
 	args = append(args, limit)
 
+	order := "started_at DESC, id DESC"
+	if f.HasBeforeCursor() {
+		order = "started_at ASC, id ASC"
+	}
 	query := `
 SELECT ` + runColumns + `
   FROM runs` + where + `
- ORDER BY started_at DESC, id DESC
+ ORDER BY ` + order + `
  LIMIT ?`
 
 	rows, err := s.query(ctx, query, args...)
@@ -4274,6 +4278,9 @@ SELECT ` + runColumns + `
 			return nil, err
 		}
 		out = append(out, r)
+	}
+	if f.HasBeforeCursor() {
+		slices.Reverse(out)
 	}
 	return out, rows.Err()
 }
@@ -4306,7 +4313,7 @@ func (s *Store) CountRuns(ctx context.Context, f RunFilter) (int, error) {
 }
 
 func (s *Store) countRuns(ctx context.Context, scope teamScope, f RunFilter) (int, error) {
-	where, args, err := runFilterWhere(scope, f)
+	where, args, err := runFilterWhere(s.dialect, scope, f)
 	if err != nil {
 		return 0, err
 	}
@@ -4318,21 +4325,17 @@ func (s *Store) countRuns(ctx context.Context, scope teamScope, f RunFilter) (in
 	return n, nil
 }
 
-func runFilterWhere(scope teamScope, f RunFilter) (string, []any, error) {
+func runFilterWhere(dialect Dialect, scope teamScope, f RunFilter) (string, []any, error) {
 	if !scope.all && scope.team == "" {
 		return "", nil, ErrNoTeam
 	}
-	normalizedPrefixes := make([]string, len(f.GitSHAPrefixes))
-	for i, prefix := range f.GitSHAPrefixes {
-		prefix = strings.ToLower(strings.TrimSpace(prefix))
-		if prefix == "" || strings.IndexFunc(prefix, func(r rune) bool {
-			return (r < '0' || r > '9') && (r < 'a' || r > 'f')
-		}) >= 0 {
-			return "", nil, fmt.Errorf("git SHA prefix %q must contain hexadecimal characters", prefix)
-		}
-		normalizedPrefixes[i] = prefix
+	var err error
+	if f.GitSHAPrefixes, err = normalizeSHAPrefixes(f.GitSHAPrefixes); err != nil {
+		return "", nil, err
 	}
-	f.GitSHAPrefixes = normalizedPrefixes
+	if f.ExcludeGitSHAPrefixes, err = normalizeSHAPrefixes(f.ExcludeGitSHAPrefixes); err != nil {
+		return "", nil, err
+	}
 
 	where := ""
 	args := []any{}
@@ -4370,18 +4373,8 @@ func runFilterWhere(scope teamScope, f RunFilter) (string, []any, error) {
 		args = append(args, values...)
 	}
 	if len(f.GitSHAPrefixes) > 0 {
-		parts := make([]string, 0, len(f.GitSHAPrefixes))
-		values := make([]any, 0, len(f.GitSHAPrefixes)*2)
-		for _, prefix := range f.GitSHAPrefixes {
-			if upper, ok := prefixUpperBound(prefix); ok {
-				parts = append(parts, "(git_sha >= ? AND git_sha < ?)")
-				values = append(values, prefix, upper)
-			} else {
-				parts = append(parts, "git_sha = ?")
-				values = append(values, prefix)
-			}
-		}
-		addClause("("+strings.Join(parts, " OR ")+")", values...)
+		clause, values := shaPrefixClause(f.GitSHAPrefixes)
+		addClause(clause, values...)
 	}
 	if f.ParentRunID != "" {
 		addClause("parent_run_id = ?", f.ParentRunID)
@@ -4391,8 +4384,17 @@ func runFilterWhere(scope teamScope, f RunFilter) (string, []any, error) {
 	if !f.Since.IsZero() {
 		addClause("started_at >= ?", f.Since.UnixNano())
 	}
+	if f.HasCursor() && f.HasBeforeCursor() {
+		return "", nil, errBothCursors
+	}
 	if f.HasCursor() {
 		addClause(runCursorClause(f.AfterStartedAt), runCursorArgs(f)...)
+	}
+	if f.HasBeforeCursor() {
+		addClause(runBeforeCursorClause(f.BeforeStartedAt), runBeforeCursorArgs(f)...)
+	}
+	for _, c := range runDisplayFilterClauses(dialect, f) {
+		addClause(c.sql, c.args...)
 	}
 	return where, args, nil
 }

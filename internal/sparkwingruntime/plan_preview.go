@@ -39,9 +39,7 @@ type PreviewNode struct {
 }
 
 type PreviewWork struct {
-	Steps     []PreviewItem `json:"steps,omitempty"`
-	Spawns    []PreviewItem `json:"spawns,omitempty"`
-	SpawnEach []PreviewItem `json:"spawn_each,omitempty"`
+	Steps []PreviewItem `json:"steps,omitempty"`
 }
 
 type PreviewItem struct {
@@ -53,10 +51,6 @@ type PreviewItem struct {
 	SkipReason string `json:"skip_reason,omitempty"`
 
 	SkipDetail string `json:"skip_detail,omitempty"`
-
-	Cardinality string `json:"cardinality,omitempty"`
-
-	CardinalitySource string `json:"cardinality_source,omitempty"`
 
 	Risks []string `json:"risks,omitempty"`
 }
@@ -131,12 +125,10 @@ func previewNode(ctx context.Context, n *sparkwing.JobNode, onFailureOf string, 
 
 	allSkipped := true
 	hasVisible := false
-	for _, items := range [][]PreviewItem{pw.Steps, pw.Spawns, pw.SpawnEach} {
-		for _, it := range items {
-			hasVisible = true
-			if it.Decision != "would_skip" {
-				allSkipped = false
-			}
+	for _, it := range pw.Steps {
+		hasVisible = true
+		if it.Decision != "would_skip" {
+			allSkipped = false
 		}
 	}
 	if hasVisible && allSkipped {
@@ -166,17 +158,6 @@ func previewWork(ctx context.Context, w *sparkwing.Work, opts PreviewOptions) *P
 			}
 		}
 		pw.Steps = append(pw.Steps, item)
-	}
-	for _, sp := range w.Spawns() {
-		pw.Spawns = append(pw.Spawns, previewItem(ctx, sp.ID(), sp.DepIDs(), rangeSkips, sp.SkipPredicates()))
-	}
-	for _, g := range w.SpawnGens() {
-		item := previewItem(ctx, g.ID(), g.DepIDs(), rangeSkips, nil)
-		item.Cardinality = "unresolved"
-		if deps := g.DepIDs(); len(deps) > 0 {
-			item.CardinalitySource = deps[0]
-		}
-		pw.SpawnEach = append(pw.SpawnEach, item)
 	}
 	return pw
 }

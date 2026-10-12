@@ -46,7 +46,7 @@ function tree(hash, directory, source, relative = "") {
     const name = path.posix.join(relative, entry.name);
     if (source && ((relative === "" && generatedDirectories.has(entry.name)) || entry.name.endsWith(".tsbuildinfo") ||
       name === "next-env.d.ts" || /^(npm|yarn|pnpm)-debug\.log/.test(entry.name) || entry.name === ".DS_Store")) continue;
-    const full = path.join(directory, name);
+    const full = path.resolve(directory, name);
     if (entry.isDirectory()) {
       add(hash, name, "directory");
       tree(hash, directory, source, name);
@@ -69,6 +69,24 @@ function tree(hash, directory, source, relative = "") {
   }
 }
 
+function pnpmOutput(command) {
+  const options = {
+    cwd: web, encoding: "utf8", timeout: 10000, stdio: ["ignore", "pipe", "pipe"],
+  };
+  // bug: Windows cannot exec pnpm.cmd directly; fixed commands need its native shell.
+  if (process.platform === "win32") {
+    const executable = (process.env.PATH || "").split(path.delimiter)
+      .flatMap((directory) => ["pnpm.exe", "pnpm.cmd", "pnpm.bat"].map((name) => path.resolve(directory, name)))
+      .find((candidate) => fs.existsSync(candidate) && fs.statSync(candidate).isFile());
+    if (!executable) throw new Error("pnpm unavailable");
+    return execFileSync(process.env.ComSpec || "cmd.exe", ["/d", "/v:off", "/s", "/c", `""%SPARKWING_PROOF_PNPM%" ${command}"`], {
+      ...options, windowsVerbatimArguments: true,
+      env: { ...process.env, SPARKWING_PROOF_PNPM: executable },
+    });
+  }
+  return execFileSync("pnpm", command.split(" "), options);
+}
+
 function inputs() {
   if (process.env.NODE_OPTIONS || process.env.NODE_PATH || Object.entries(process.env).some(
     ([name, value]) => /^npm_config_node_options$/i.test(name) && value,
@@ -80,14 +98,10 @@ function inputs() {
     add(hash, name, fs.readFileSync(path.join(root, "bin", name)));
   }
   add(hash, "node", JSON.stringify([process.version, process.platform, process.arch]));
-  const pnpm = execFileSync("pnpm", ["--version"], {
-    cwd: web, encoding: "utf8", timeout: 10000, stdio: ["ignore", "pipe", "pipe"],
-  }).trim();
+  const pnpm = pnpmOutput("--version").trim();
   if (!pnpm) throw new Error("pnpm version missing");
   add(hash, "pnpm", pnpm);
-  const config = JSON.parse(execFileSync("pnpm", ["config", "list", "--json"], {
-    cwd: web, encoding: "utf8", timeout: 10000, stdio: ["ignore", "pipe", "pipe"],
-  }));
+  const config = JSON.parse(pnpmOutput("config list --json"));
   if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("pnpm config unavailable");
   if (config["node-options"] || config["script-shell"]) throw new Error("external pnpm hooks are not reusable");
   add(hash, "pnpm-config", JSON.stringify(ordered(config)));

@@ -180,7 +180,7 @@ func refusingHook(out string) (string, bool) {
 		return "", false
 	}
 	path, _, _ := strings.Cut(rest, "\n")
-	return strings.TrimSpace(path), true
+	return nativeGitPath(strings.TrimSpace(path)), true
 }
 
 func runGitIn(dir string, env []string, args ...string) (string, error) {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -122,8 +123,12 @@ func TestStageConsumedArtifacts_PreservesMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	if info.Mode().Perm() != 0o755 {
-		t.Errorf("mode = %o, want 755", info.Mode().Perm())
+	wantMode := os.FileMode(0o755)
+	if runtime.GOOS == "windows" {
+		wantMode = 0o666
+	}
+	if info.Mode().Perm() != wantMode {
+		t.Errorf("mode = %o, want %o", info.Mode().Perm(), wantMode)
 	}
 }
 
@@ -286,8 +291,12 @@ func TestStageConsumedArtifacts_MasksManifestMode(t *testing.T) {
 	if info.Mode()&^os.FileMode(0o777) != 0 {
 		t.Fatalf("staged mode kept bits outside 0o777: %v", info.Mode())
 	}
-	if info.Mode().Perm() != 0o755 {
-		t.Fatalf("mode = %o, want 755", info.Mode().Perm())
+	wantMode := os.FileMode(0o755)
+	if runtime.GOOS == "windows" {
+		wantMode = 0o666
+	}
+	if info.Mode().Perm() != wantMode {
+		t.Fatalf("mode = %o, want %o", info.Mode().Perm(), wantMode)
 	}
 }
 

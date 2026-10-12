@@ -137,7 +137,6 @@ const (
 	NodeExecutionActionToolSlot NodeExecutionActionKind = "tool_slot"
 	NodeExecutionActionAwait    NodeExecutionActionKind = "await"
 	NodeExecutionActionRef      NodeExecutionActionKind = "ref"
-	NodeExecutionActionSpawn    NodeExecutionActionKind = "spawn"
 )
 
 // NodeExecutionGrant is a closed union. Exactly one member matching Kind must
@@ -148,7 +147,6 @@ type NodeExecutionGrant struct {
 	ToolSlot *NodeToolSlotGrant      `json:"tool_slot,omitempty"`
 	Await    *NodeAwaitGrant         `json:"await,omitempty"`
 	Ref      *NodeRefGrant           `json:"ref,omitempty"`
-	Spawn    *NodeSpawnGrant         `json:"spawn,omitempty"`
 }
 
 type NodeToolSlotGrant struct {
@@ -178,12 +176,6 @@ type NodeRefGrant struct {
 	NodeID      string `json:"node_id"`
 	MaxAgeNanos int64  `json:"max_age_nanos"`
 	MaxBytes    uint64 `json:"max_bytes"`
-}
-
-type NodeSpawnGrant struct {
-	SpawnID            string `json:"spawn_id"`
-	TargetWorkIdentity string `json:"target_work_identity"`
-	MaxChildren        int    `json:"max_children"`
 }
 
 // Sealed is the canonical result of validating one policy. Callers receive
@@ -719,7 +711,7 @@ func normalizeExecutionGrant(grant *NodeExecutionGrant) error {
 		return err
 	}
 	present := 0
-	for _, ok := range []bool{grant.ToolSlot != nil, grant.Await != nil, grant.Ref != nil, grant.Spawn != nil} {
+	for _, ok := range []bool{grant.ToolSlot != nil, grant.Await != nil, grant.Ref != nil} {
 		if ok {
 			present++
 		}
@@ -747,11 +739,6 @@ func normalizeExecutionGrant(grant *NodeExecutionGrant) error {
 	case NodeExecutionActionRef:
 		if grant.Ref != nil && grant.Ref.MaxAgeNanos >= 0 && grant.Ref.MaxBytes > 0 && grant.Ref.MaxBytes <= maxExecutionEventBytes &&
 			validateExactIdentity("ref pipeline", grant.Ref.Pipeline) == nil && validateExactIdentity("ref node_id", grant.Ref.NodeID) == nil {
-			return nil
-		}
-	case NodeExecutionActionSpawn:
-		if grant.Spawn != nil && grant.Spawn.MaxChildren >= 1 && grant.Spawn.MaxChildren <= maxExecutionPolicyItems &&
-			validateExactIdentity("spawn id", grant.Spawn.SpawnID) == nil && validateDigest("spawn target work identity", grant.Spawn.TargetWorkIdentity) == nil {
 			return nil
 		}
 	}
@@ -818,10 +805,6 @@ func cloneExecutionPolicy(policy NodeExecutionPolicy) NodeExecutionPolicy {
 		if policy.Actions[i].Ref != nil {
 			value := *policy.Actions[i].Ref
 			policy.Actions[i].Ref = &value
-		}
-		if policy.Actions[i].Spawn != nil {
-			value := *policy.Actions[i].Spawn
-			policy.Actions[i].Spawn = &value
 		}
 	}
 	return policy

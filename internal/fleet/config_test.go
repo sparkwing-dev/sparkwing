@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
@@ -19,7 +20,7 @@ func writeConfig(t *testing.T, body string) string {
 func writeRawConfig(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), userconfig.Filename)
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+	if err := fssecure.WriteFile(path, []byte(body)); err != nil {
 		t.Fatal(err)
 	}
 	return path

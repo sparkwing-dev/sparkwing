@@ -1,9 +1,12 @@
 package fssecure
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -73,6 +76,16 @@ func TestOpenPrivateConfigDetectsSameFileSymlinkSwap(t *testing.T) {
 	})
 	if f != nil {
 		_ = f.Close()
+	}
+	if runtime.GOOS == "windows" && errors.Is(err, syscall.Errno(32)) {
+		// safety: the fixture's os.Open handle denies replacement before the symlink swap can occur.
+		if _, statErr := os.Lstat(realPath); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("blocked replacement left a renamed target: %v", statErr)
+		}
+		if f != nil {
+			t.Fatal("failed replacement returned a readable file")
+		}
+		return
 	}
 	if err == nil || !strings.Contains(err.Error(), "changed while it was opened") {
 		t.Fatalf("same-file symlink swap error = %v", err)

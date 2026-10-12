@@ -26,7 +26,7 @@ func ListRunsHandler(b backend.Backend) http.HandlerFunc {
 		if runs == nil {
 			runs = []*store.Run{}
 		}
-		w.Header().Set("X-Sparkwing-Run-Filter-Version", backend.RunFilterVersionFor(b))
+		w.Header().Set("X-Sparkwing-Run-Filter-Version", store.RunFilterVersion)
 		writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
 	}
 }

@@ -55,16 +55,64 @@ Controller in-cluster URL (for runners / external clients in the same cluster):
   {{ include "sparkwing-full.controller.serviceURL" . }}
 
 {{- if not .Values.controller.secretsKey.name }}
+{{- if include "sparkwing-full.controller.credentialsBundle" . }}
 
-NOTE: controller.secretsKey.name is empty -- secrets stored via the
-controller will be plaintext at rest in the state DB. Generate and
-attach a key for production installs:
+NOTE: controller.credentialsSecret is set and the chart cannot see its keys.
+If it carries secrets-key, that is the live key every stored secret is sealed
+under: keep an owner-only backup of it, and never replace it except by moving
+it to controller.secretsPreviousKey, setting the new key, and running
+`sparkwing secrets rotate`.
+{{- if not .Values.controller.databaseSecret.name }}
+If it carries no secrets-key, what happens depends on whether it carries
+pg-url. With pg-url, the controller runs on PostgreSQL and refuses to store
+secrets until it has a key. Without it, the controller runs on SQLite and
+generates its own key at /data/secrets.key on its first secret write. A
+different key cannot open those secrets, so back that file up, owner-only,
+once a secret exists:
 
-  openssl rand -base64 32 > /tmp/sparkwing-key
+  (umask 077 && kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "sparkwing-full.controller.fullname" . }} -- \
+    cat /data/secrets.key > sparkwing-secrets.key)
+{{- else }}
+If it carries none, this PostgreSQL controller refuses to store secrets until
+it has a key.
+{{- end }}
+{{- else if .Values.controller.databaseSecret.name }}
+
+NOTE: controller.secretsKey.name is empty, so this PostgreSQL controller
+refuses to store secrets until it has a key. It has stored none yet, so a new
+key is safe:
+
+  (umask 077 && openssl rand -base64 32 > /tmp/sparkwing-key)
   kubectl -n {{ .Release.Namespace }} create secret generic sparkwing-secrets-key \
     --from-file=key=/tmp/sparkwing-key
   helm upgrade {{ .Release.Name }} sparkwing/sparkwing-full \
     --reuse-values --set controller.secretsKey.name=sparkwing-secrets-key
+{{- else }}
+
+NOTE: controller.secretsKey.name is empty, so on its first secret write this
+SQLite controller generates its own key at /data/secrets.key. Every stored
+secret is sealed under that key; a different key cannot open them and the
+controller refuses to start. Back it up, owner-only, once a secret exists:
+
+  (umask 077 && kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "sparkwing-full.controller.fullname" . }} -- \
+    cat /data/secrets.key > sparkwing-secrets.key)
+{{- if eq .Values.controller.storage.type "emptyDir" }}
+
+  controller.storage.type is emptyDir, so the key and the state DB both go
+  with the pod; supply a key before storing anything you need to keep.
+{{- end }}
+
+To manage the key as a Secret, create it from that same file, never from a
+new key:
+
+  kubectl -n {{ .Release.Namespace }} create secret generic sparkwing-secrets-key \
+    --from-file=key=sparkwing-secrets.key
+  helm upgrade {{ .Release.Name }} sparkwing/sparkwing-full \
+    --reuse-values --set controller.secretsKey.name=sparkwing-secrets-key
+
+To change keys later, set the old key as controller.secretsPreviousKey and the
+new one as controller.secretsKey, then run `sparkwing secrets rotate`.
+{{- end }}
 {{- end }}
 
 Inspect controller logs:

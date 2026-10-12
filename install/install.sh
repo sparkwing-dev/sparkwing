@@ -174,6 +174,10 @@ if [ -z "$PREFIX" ]; then
   [ -n "${HOME:-}" ] || err "HOME is unset; pass --prefix to choose an install directory."
   PREFIX="$HOME/.local/bin"
 fi
+if [ "$GOOS" = windows ]; then
+  command -v cygpath >/dev/null 2>&1 || err "cygpath is required to resolve install paths under Git Bash."
+  PREFIX="$(cygpath -u -- "$PREFIX")"
+fi
 
 fetch() { curl -fsSL "$1" -o "$2" || err "could not download $1"; }
 
@@ -242,7 +246,9 @@ either a mistake in the release or a downgrade attempt." ;;
 esac
 log "verified the binary reports $VERSION"
 
-mkdir -p "$PREFIX"
+if [ "$GOOS" != windows ] || [ ! -d "$PREFIX" ]; then
+  mkdir -p "$PREFIX"
+fi
 # `install` replaces the binary atomically, so a running sparkwing survives.
 install -m 0755 "$WORK/$ASSET" "$PREFIX/sparkwing$EXT"
 log "installed $PREFIX/sparkwing$EXT"

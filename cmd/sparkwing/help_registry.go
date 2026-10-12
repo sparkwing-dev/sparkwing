@@ -1,16 +1,9 @@
 package main
 
-import (
-	"runtime"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
-)
+import "github.com/sparkwing-dev/sparkwing/sparkwing"
 
 func helpExampleScratchDir(name string) string {
-	if runtime.GOOS == "windows" {
-		return `%TEMP%\` + name
-	}
-	return "/tmp/" + name
+	return "./" + name
 }
 
 var cmdSparkwing = Command{
@@ -362,10 +355,11 @@ after install, then run 'sparkwing pipeline new --name <name>'
 inside each project to scaffold .sparkwing/ + your first pipeline
 in one step (no separate init needed).
 
-Re-running on an already-set-up laptop re-applies 0700 to
-~/.config/sparkwing/ and reports each config file's mode, naming any
-that group or other users can read. --dry-run skips both the mkdir
-and the permission fix so the command reports existing state.
+Re-running on an already-set-up laptop prepares ~/.config/sparkwing/
+and reports files that other users can read. Unix reports
+permission modes and applies 0700 to the directory; Windows checks
+access lists and names Windows Security permissions for review.
+--dry-run skips directory creation and permission changes.
 
 Run inside a sparkwing project, it also reports whether this
 checkout's declared git hooks fire, and names the command that
@@ -435,16 +429,14 @@ The ceiling shape controls its reach:
 
 With no flags, prints the current hold and where it is set. The hold
 persists in the user config (XDG_CONFIG_HOME or ~/.config/sparkwing/
-version-hold); the SPARKWING_VERSION_HOLD environment variable
-overrides the file for a shell or a whole fleet. Releases beyond the
-hold still show in 'sparkwing version' so the operator sees what is
+version-hold). Releases beyond the hold still show in 'sparkwing version' so the operator sees what is
 being deferred.
 
 SPARKWING_HOME does not move this file; it is the state, cache and
 logs root, and the hold is machine-wide even though the toolchains it
 governs live under that root. A --set or --clear from a command
 running under a home of its own is refused rather than applied to the
-machine's hold: set SPARKWING_VERSION_HOLD to hold that shell alone.`,
+machine's hold.`,
 	Flags: []FlagSpec{
 		{Name: "set", Argument: "VERSION", Desc: "Set the ceiling (vMAJOR.MINOR or vMAJOR.MINOR.PATCH)", Group: "Action"},
 		{Name: "clear", Desc: "Remove the hold so upgrades are unrestricted", Group: "Action"},
@@ -880,8 +872,8 @@ var cmdCachePrune = Command{
 	Synopsis: "Evict least recently used binaries down to the ceilings",
 	Description: `Removes the least recently used cached binaries until the cache
 fits both the byte ceiling and the entry ceiling. Defaults come
-from $SPARKWING_CACHE_MAX_BYTES and $SPARKWING_CACHE_MAX_ENTRIES;
-either accepts 0 to disable that dimension.
+from cache.max_bytes and cache.max_entries in config.yaml; either
+accepts 0 to disable that dimension.
 
 An execution lease protects each running binary. Prune skips active
 and busy entries, bounds the number examined, and reports observed
@@ -959,8 +951,8 @@ pipeline binary; they never land in tracked code.
   error. Skipped / cancelled / OnFailure-recovered nodes do not
   pause -- only Run errors.
 
-Paused nodes hold for 30 minutes by default; set
-SPARKWING_PAUSE_TIMEOUT=<duration> to change. An expired pause
+Paused nodes hold for 30 minutes by default; set debug.pause_timeout
+in config.yaml (a duration such as 10m) to change it. An expired pause
 is released with reason 'timeout-released' and surfaces in the
 run record.
 
@@ -1008,6 +1000,7 @@ exits 0.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "ID", Desc: "Run ID holding the paused node", Required: true, Group: "Target"},
 		{Name: "node", Argument: "NAME", Desc: "Node ID to attach to", Required: true, Group: "Target"},
+		{Name: "namespace", Argument: "NAME", Desc: "Kubernetes namespace of the runner pods", Default: "sparkwing", Group: "Target"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name (cluster mode)", Group: "System"},
 	},
 	Examples: []Example{
@@ -1021,7 +1014,8 @@ var cmdDebugRerun = Command{
 	Description: `Opens an interactive shell using a node's recorded environment and working
 directory. Local execution writes upstream reference outputs beneath the
 run's rerun directory. Cluster execution creates a temporary pod using
---image or SPARKWING_RERUN_IMAGE, attaches to it, and deletes it on exit.
+--image, else the profile's rerun_image in config.yaml, attaches to it,
+and deletes it on exit.
 
 Snapshots omit credential names and values and remove URL credentials.
 Controller access to the captured environment requires an admin token.
@@ -1507,9 +1501,12 @@ PIPELINE resolves against the checkout you are standing in (or the
 one 'sparkwing -C DIR run' names) first, then the repo registry, and the chosen
 checkout is recorded on the run. A detached run executes with an
 allow-listed snapshot of the launching environment -- SPARKWING_*,
-GITHUB_*, PATH, HOME, HOSTNAME, and KUBERNETES_SERVICE_HOST, minus
-every credential-shaped name -- widened by naming variables in
-SPARKWING_SUBMIT_ENV_ALLOW. A consumer starts automatically if none
+GITHUB_*, PATH, HOME, HOSTNAME, KUBERNETES_SERVICE_HOST, XDG_CONFIG_HOME,
+AWS_ENDPOINT_URL and AWS_ENDPOINT_URL_S3 -- widened by the names and NAME_*
+prefixes listed in run.submit_env_allow in config.yaml. Windows also
+preserves its user profile, system, shell, temporary, and application
+data paths, plus absolute Sparkwing key-file paths. Credential values
+and credential-shaped names are filtered. A consumer starts automatically if none
 is running and exits after five idle minutes; see
 'sparkwing runs consumer'.`,
 	PosArgs: []PosArg{
@@ -2745,7 +2742,7 @@ var cmdSecretRotate = Command{
 store without --profile, and writes it back sealed under the key that
 controller or this machine's daemon is running with now, in one
 transaction. Run it after moving onto a new key with the old one still
-configured as --secrets-previous-key-file or SPARKWING_SECRETS_PREVIOUS_KEY
+configured as the controller's secrets-key.previous credential
 (locally: set SPARKWING_SECRETS_KEY and SPARKWING_SECRETS_PREVIOUS_KEY and
 run 'sparkwing daemon restart'); drop the old key once a rotation reports
 nothing skipped. A value the controller was holding as plaintext comes out
@@ -3070,12 +3067,9 @@ state appears on 'sparkwing cloud status' and on the controller's
 Prometheus metrics as sparkwing_object_store_requests_total,
 sparkwing_object_store_trips_total, and sparkwing_object_store_tripped.
 
-Budgets come from SPARKWING_OBJECT_STORE_<CLASS>_PER_MINUTE and
-SPARKWING_OBJECT_STORE_<CLASS>_PER_DAY on the controller process.
-SPARKWING_OBJECT_STORE_TRIP_RESET chooses whether a tripped class
-clears when its day window rolls (day, the default) or waits for an
-operator (manual). A local process that must finish past a tripped
-budget sets SPARKWING_OBJECT_STORE_BREAKER=off.
+Budgets come from the controller's --object-store-budget, as
+class:window=count entries such as put:minute=600. A class tripped by its
+day budget clears when the day window rolls.
 
 The same breaker carries the bucket ceiling. A controller started with
 --max-bucket-bytes or --max-bucket-objects measures the bucket on an
@@ -3492,8 +3486,9 @@ SDK upgrades. 'add', 'remove' and 'prune' edit the registry of checkouts.
 The registry maps pipeline names to local checkouts so
 cross-repo RunAndAwait calls resolve without hardcoded WithFreshRepo
 annotations. Auto-populated when you run 'sparkwing run <pipeline>'
-in a .sparkwing/-bearing repo (set SPARKWING_NO_AUTO_REGISTER=1 to
-disable).
+in a .sparkwing/-bearing repo; set repos.auto_register: false in
+config.yaml to disable it, and repos.include_worktrees: true to let it
+register linked git worktrees, which it otherwise skips.
 
 The registry is the repos section of config.yaml: $SPARKWING_CONFIG
 (if set), else $XDG_CONFIG_HOME/sparkwing/config.yaml, else

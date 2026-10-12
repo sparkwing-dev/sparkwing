@@ -40,8 +40,9 @@ func TestRemoteExecutionChildEnvironmentDropsSupervisorAuthority(t *testing.T) {
 		"SPARKWING_NODE_CLAIM_MEMBERSHIP=membership-secret",
 		"SPARKWING_NODE_CLAIM_RESERVATION=reservation-secret",
 	}
+	writeMachineSettings(t, "run:\n  submit_env_allow: [AWS_REGION]\n")
 	got, err := remoteExecutionChildEnvironment(append(private,
-		"PATH=/safe/bin", "AWS_REGION=us-west-2", submissionEnvironmentAllowKey+"=AWS_REGION"))
+		"PATH=/safe/bin", "AWS_REGION=us-west-2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -379,7 +380,6 @@ func TestRemoteExecutionBrokerMemoizedSlot(t *testing.T) {
 		{http.MethodPost, "/api/v1/concurrency/" + key + "/release", `{"holder_id":"run-2/node-a","outcome":"success"}`},
 		{http.MethodPost, "/api/v1/concurrency/" + key + "/heartbeat", `{"holder_id":"run-2/node-a"}`},
 		{http.MethodPost, "/api/v1/concurrency/" + key + "/cancel-waiter", `{"run_id":"run-2","node_id":"node-a"}`},
-		{http.MethodPost, "/api/v1/concurrency/" + key + "/force-release", `{}`},
 	} {
 		r, err := http.NewRequest(req.method, broker.URL()+req.path, strings.NewReader(req.body))
 		if err != nil {
@@ -651,5 +651,21 @@ func TestRemoteExecutionBrokerReadsHierarchicalNodeIDs(t *testing.T) {
 	defer mu.Unlock()
 	if len(forwarded) != 3 || forwarded[0] != "/api/v1/runs/run-1/nodes/build%2Flinux" {
 		t.Fatalf("forwarded %v, want the three hierarchical reads with their escaping intact", forwarded)
+	}
+}
+
+func TestRemoteExecutionChildEnvironmentKeepsTheEndpointAndConfigDirectory(t *testing.T) {
+	writeMachineSettings(t, "repos: {}\n")
+	got, err := remoteExecutionChildEnvironment([]string{
+		"AWS_ENDPOINT_URL_S3=http://minio:9000", "AWS_ENDPOINT_URL=http://r2.example", "XDG_CONFIG_HOME=/srv/agent/.config",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(got, "\n")
+	for _, want := range []string{"AWS_ENDPOINT_URL_S3=http://minio:9000", "AWS_ENDPOINT_URL=http://r2.example", "XDG_CONFIG_HOME=/srv/agent/.config"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("child environment %v lacks %s", got, want)
+		}
 	}
 }

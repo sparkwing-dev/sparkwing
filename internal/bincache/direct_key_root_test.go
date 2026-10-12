@@ -51,7 +51,7 @@ func TestSSHCredentialNeedsATmpfsInCloudMode(t *testing.T) {
 	if err := checkout(true); err != nil {
 		t.Fatalf("cloud mode with a tmpfs = %v", err)
 	}
-	if got := readRecord(t, record, "keypath"); !strings.HasPrefix(got, mem+string(os.PathSeparator)) {
+	if got := readRecord(t, record, "keypath"); !strings.HasPrefix(filepath.Clean(got), filepath.Clean(mem)+string(os.PathSeparator)) {
 		t.Fatalf("the key was written to %s, want under the tmpfs %s", got, mem)
 	}
 }

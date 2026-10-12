@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -15,7 +16,11 @@ import (
 func listeningUnixSocket(t *testing.T) string {
 	t.Helper()
 	// hack: Darwin limits Unix socket paths to 104 bytes; /tmp leaves room for race-test nesting.
-	dir, err := os.MkdirTemp("/tmp", "swg")
+	socketRoot := os.TempDir()
+	if runtime.GOOS != "windows" {
+		socketRoot = "/tmp"
+	}
+	dir, err := os.MkdirTemp(socketRoot, "swg")
 	if err != nil {
 		t.Fatalf("create socket directory: %v", err)
 	}
@@ -50,21 +55,12 @@ func TestTheTestStepKeepsLiveServicesAwayFromTheSuitesItRuns(t *testing.T) {
 	t.Setenv("SPARKWING_LOGS_URL", "http://127.0.0.1:4345")
 	t.Setenv("SPARKWING_CACHE_URL", "http://127.0.0.1:8090")
 	t.Setenv("SPARKWING_AGENT_TOKEN", "an inherited bearer")
-	unsetForTest(t, devEnvDisableVar)
 
 	if err := forEachGoModule(ctx, "go test", "go test ./...", ""); err == nil {
 		t.Fatal("the probe must fail while the ambient bindings reach it, or the pass below proves nothing")
 	}
 	if err := runTest(ctx); err != nil {
 		t.Fatalf("the test step handed its suites a live service or the dev.env fallback: %v", err)
-	}
-}
-
-func TestTheDevEnvKillSwitchNamesTheProductConstant(t *testing.T) {
-	want := `const DevEnvDisableEnv = "` + devEnvDisableVar + `"`
-	if source := readProductSource(t, "internal", "orchestrator", "devenv.go"); !strings.Contains(source, want) {
-		t.Fatalf("the pipeline module pins %q, which internal/orchestrator no longer declares as %s",
-			devEnvDisableVar, want)
 	}
 }
 
@@ -177,9 +173,6 @@ func TestNoLiveServiceIsWithinReach(t *testing.T) {
 		if value := os.Getenv(name); value != "" {
 			t.Fatalf("%s=%s reached the suite", name, value)
 		}
-	}
-	if os.Getenv("SPARKWING_DEV_ENV_DISABLE") == "" {
-		t.Fatal("the dev.env fallback is armed, so an unset URL still resolves to a service")
 	}
 	home := os.Getenv("SPARKWING_HOME")
 	if home == "" {

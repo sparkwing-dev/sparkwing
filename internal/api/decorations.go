@@ -106,12 +106,10 @@ type NodeModifiers struct {
 	HasSkipIf           bool   `json:"has_skip_if,omitempty"`
 }
 
-// NodeWork is the inner-Work tree (Step + Spawn + SpawnEach
-// declarations) the dashboard renders inside each node card.
+// NodeWork is the inner-Work tree (Step declarations) the dashboard
+// renders inside each node card.
 type NodeWork struct {
 	Steps      []NodeStep      `json:"steps,omitempty"`
-	Spawns     []NodeSpawn     `json:"spawns,omitempty"`
-	SpawnEach  []NodeSpawnEach `json:"spawn_each,omitempty"`
 	StepGroups []NodeStepGroup `json:"step_groups,omitempty"`
 	ResultStep string          `json:"result_step,omitempty"`
 }
@@ -164,22 +162,6 @@ type NodeApprovalState struct {
 	TimeoutMS   int64      `json:"timeout_ms,omitempty"`
 	OnTimeout   string     `json:"on_timeout,omitempty"`
 	Message     string     `json:"message,omitempty"`
-}
-
-type NodeSpawn struct {
-	ID         string    `json:"id"`
-	Needs      []string  `json:"needs,omitempty"`
-	TargetJob  string    `json:"target_job,omitempty"`
-	TargetWork *NodeWork `json:"target_work,omitempty"`
-	HasSkipIf  bool      `json:"has_skip_if,omitempty"`
-}
-
-type NodeSpawnEach struct {
-	ID               string    `json:"id"`
-	Needs            []string  `json:"needs,omitempty"`
-	TargetJob        string    `json:"target_job,omitempty"`
-	ItemTemplateWork *NodeWork `json:"item_template_work,omitempty"`
-	Note             string    `json:"note,omitempty"`
 }
 
 // NodeWithDecorations is the wrapped per-node response shape used on
@@ -353,15 +335,5 @@ func stampWork(w *NodeWork, lookup map[string]*store.NodeStep) {
 		}
 		s.Annotations = row.Annotations
 		s.Summary = row.Summary
-	}
-	for i := range w.Spawns {
-		if w.Spawns[i].TargetWork != nil {
-			stampWork(w.Spawns[i].TargetWork, lookup)
-		}
-	}
-	for i := range w.SpawnEach {
-		if w.SpawnEach[i].ItemTemplateWork != nil {
-			stampWork(w.SpawnEach[i].ItemTemplateWork, lookup)
-		}
 	}
 }

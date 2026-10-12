@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -133,6 +134,11 @@ func pointResolverAt(t *testing.T, srv *httptest.Server) {
 
 func fakeGo(t *testing.T) {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Setenv("SPARKWING_TEST_NATIVE_FAKE_GO", "1")
+		t.Setenv("SPARKS_GO_BIN", os.Args[0])
+		return
+	}
 	dir := t.TempDir()
 	script := "#!/bin/sh\n" +
 		"for arg in \"$@\"; do\n" +
@@ -150,6 +156,26 @@ func fakeGo(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("SPARKS_GO_BIN", bin)
+}
+
+func init() {
+	if runNativeFakeGo() {
+		os.Exit(0)
+	}
+}
+
+func runNativeFakeGo() bool {
+	if runtime.GOOS != "windows" || os.Getenv("SPARKWING_TEST_NATIVE_FAKE_GO") != "1" {
+		return false
+	}
+	for _, arg := range os.Args[1:] {
+		if mod, ok := strings.CutPrefix(arg, "-modfile="); ok {
+			if err := os.WriteFile(strings.TrimSuffix(mod, ".mod")+".sum", nil, 0o600); err != nil {
+				os.Exit(1)
+			}
+		}
+	}
+	return true
 }
 
 func TestResolveSparks_NoManifest_FastPath(t *testing.T) {
@@ -192,17 +218,6 @@ func TestResolveSparks_NoUpdate_SkipsResolve(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".resolved.mod")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("--no-update should not write overlay, stat err: %v", err)
-	}
-}
-
-func TestResolveSparks_EnvVar_SkipsResolve(t *testing.T) {
-	t.Setenv("GOPROXY", "http://proxy.invalid.example")
-	t.Setenv("SPARKWING_NO_SPARKS_RESOLVE", "1")
-	manifest := "libraries:\n  - name: sparks-core\n    source: example.com/sparks-core\n    version: latest\n"
-	dir := newSparksFixture(t, manifest)
-
-	if err := resolveSparks(context.Background(), dir, compileOptions{}); err != nil {
-		t.Fatalf("SPARKWING_NO_SPARKS_RESOLVE should bypass resolve, got: %v", err)
 	}
 }
 

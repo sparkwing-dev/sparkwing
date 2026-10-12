@@ -13,7 +13,7 @@ func OpenPrivateConfig(path string) (*os.File, error) {
 }
 
 func openPrivateConfig(path string, open func(string) (*os.File, error)) (*os.File, error) {
-	info, err := os.Lstat(path)
+	info, err := privateConfigSnapshot(path)
 	if err != nil {
 		return nil, err
 	}

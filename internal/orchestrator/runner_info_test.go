@@ -61,13 +61,13 @@ func TestPodRunnerInfo_FromEnv(t *testing.T) {
 	}
 }
 
-func TestPodRunnerInfo_TypeDefaultsToKubernetes(t *testing.T) {
+func TestPodRunnerInfo_TypeStaysUnclassifiedWhenUnset(t *testing.T) {
 	t.Setenv("SPARKWING_RUNNER_NAME", "static-mac")
 	os.Unsetenv("SPARKWING_RUNNER_TYPE")
 	os.Unsetenv("SPARKWING_RUNNER_LABELS")
 	info := podRunnerInfo()
-	if info == nil || info.Type != "kubernetes" {
-		t.Errorf("type = %v, want kubernetes default", info)
+	if info == nil || info.Name != "static-mac" || info.Type != "" {
+		t.Errorf("info = %+v, want the name and no type", info)
 	}
 }
 

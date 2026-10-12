@@ -5,11 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -91,6 +92,10 @@ func runWingdDaemon(ctx context.Context, opts WingdOptions, tune func(*wingd.Con
 		}
 	}
 	api := newWingdAPI(runs, opts.ArtifactStore, opts.Logger, ring)
+	typeSafeKey := ""
+	if admissionPolicy.Mode == admission.ModeJev {
+		typeSafeKey = readTypeSafeAPIKey(runs.paths.StateDB(), logf)
+	}
 	cfg := wingd.Config{
 		Home:               opts.Home,
 		Version:            opts.Version,
@@ -99,7 +104,7 @@ func runWingdDaemon(ctx context.Context, opts WingdOptions, tune func(*wingd.Con
 		BudgetSource:       opts.BudgetSource,
 		BudgetOrigin:       opts.BudgetOrigin,
 		AdmissionPolicy:    &admissionPolicy,
-		TypeSafeAPIKey:     os.Getenv("TYPESAFE_API_KEY"),
+		TypeSafeAPIKey:     typeSafeKey,
 		Runs:               runs,
 		StoreSchemaVersion: store.ExpectedSchemaVersion(),
 		StoreRequirements:  store.KnownRequirements(),
@@ -200,4 +205,26 @@ func reapSummary(res store.ConcurrencyMaintenanceResult) string {
 	add(int(res.CacheOrphaned), "orphaned cache row(s)")
 	add(int(res.CacheEvicted), "evicted cache row(s)")
 	return strings.Join(parts, ", ")
+}
+
+// TypeSafeAPIKeySecret names the local secret the jev admission policy reads
+// its TypeSafe key from.
+const TypeSafeAPIKeySecret = "TYPESAFE_API_KEY"
+
+// safety: jev admits without an advisor when it has no key, so a missing or
+// unreadable secret is logged and the daemon still serves.
+func readTypeSafeAPIKey(stateDB string, logf func(string, ...any)) string {
+	return typeSafeAPIKeyFrom(localsecrets.StoreSource(stateDB, ""), logf)
+}
+
+// safety: a key stored from a file usually ends in a newline, which is not
+// valid in the Authorization header it goes into.
+func typeSafeAPIKeyFrom(src secrets.Source, logf func(string, ...any)) string {
+	value, _, err := src.Read(TypeSafeAPIKeySecret)
+	if err != nil {
+		logf("jev admission needs the %s secret (sparkwing secrets set --name %s --file <path>): %v",
+			TypeSafeAPIKeySecret, TypeSafeAPIKeySecret, err)
+		return ""
+	}
+	return strings.TrimSpace(value)
 }

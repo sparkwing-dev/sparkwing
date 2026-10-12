@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -16,7 +15,7 @@ import (
 )
 
 type identityFlags struct {
-	LicenseFile        string
+	License            string
 	GoogleClientID     string
 	GoogleClientSecret string
 	GitHubClientID     string
@@ -25,24 +24,10 @@ type identityFlags struct {
 	SignUpGate         string
 }
 
-func readLicense(path string) (string, error) {
-	if path == "" {
-		return os.Getenv("SPARKWING_LICENSE"), nil
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("--license-file: %w", err)
-	}
-	return string(data), nil
-}
-
 // safety: an unusable license only logs, because a local install runs without one; a half-configured
 // Google client is refused, because it would draw a sign-in button that cannot finish.
 func configureIdentity(srv *controller.Server, f identityFlags, logger *slog.Logger) error {
-	raw, err := readLicense(f.LicenseFile)
-	if err != nil {
-		return err
-	}
+	raw := f.License
 	key, err := license.EmbeddedKey()
 	if err != nil {
 		return err
@@ -90,9 +75,8 @@ func providerConfigured(label, flag, id, secret string) (bool, error) {
 		return false, nil
 	}
 	if id == "" || secret == "" {
-		upper := strings.ToUpper(flag)
-		return false, fmt.Errorf("%s sign-in needs both --%s-client-id (SPARKWING_%s_CLIENT_ID) and SPARKWING_%s_CLIENT_SECRET",
-			label, flag, upper, upper)
+		return false, fmt.Errorf("%s sign-in needs both --%s-client-id and the %s-client-secret credential",
+			label, flag, flag)
 	}
 	return true, nil
 }
@@ -100,7 +84,7 @@ func providerConfigured(label, flag, id, secret string) (bool, error) {
 func redirectAllowlist(raw string) ([]string, error) {
 	uris := splitCSV(raw)
 	if len(uris) == 0 {
-		return nil, fmt.Errorf("sign-in needs --oauth-redirect-uris (SPARKWING_OAUTH_REDIRECT_URIS), " +
+		return nil, fmt.Errorf("sign-in needs --oauth-redirect-uris, " +
 			"the dashboard callback URLs a provider may send a browser back to")
 	}
 	for _, u := range uris {

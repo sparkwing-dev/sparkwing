@@ -51,7 +51,7 @@ func TestInterruptedUploadDoesNotPublishBlobWithoutDigest(t *testing.T) {
 			if err := bincache.UploadToArtifactStore(t.Context(), store, "key", src); err != nil {
 				t.Fatal(err)
 			}
-			if err := bincache.FetchFromArtifactStore(t.Context(), store, "key", filepath.Join(t.TempDir(), "fetched")); err != nil {
+			if err := bincache.FetchFromArtifactStore(t.Context(), store, "key", filepath.Join(t.TempDir(), "fetched"), false); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -97,7 +97,7 @@ func TestConcurrentArtifactDownloadsHaveIndependentStaging(t *testing.T) {
 	run := func(body *gatedDownload) <-chan error {
 		done := make(chan error, 1)
 		go func() {
-			done <- bincache.FetchFromArtifactStore(t.Context(), downloadStore{body: body, digest: hex.EncodeToString(sum[:])}, "key", dest)
+			done <- bincache.FetchFromArtifactStore(t.Context(), downloadStore{body: body, digest: hex.EncodeToString(sum[:])}, "key", dest, false)
 		}()
 		return done
 	}
@@ -147,7 +147,7 @@ func TestFailedBinaryPublicationRemovesStaging(t *testing.T) {
 				release := make(chan struct{})
 				close(release)
 				body := &gatedDownload{reader: strings.NewReader(payload), entered: make(chan struct{}), release: release}
-				err = bincache.FetchFromArtifactStore(t.Context(), downloadStore{body: body, digest: hex.EncodeToString(sum[:])}, "key", dest)
+				err = bincache.FetchFromArtifactStore(t.Context(), downloadStore{body: body, digest: hex.EncodeToString(sum[:])}, "key", dest, false)
 			}
 			if err == nil {
 				t.Fatal("published over destination directory")

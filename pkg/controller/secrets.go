@@ -56,19 +56,19 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 	}
 	// safety: the envelope is sealed to the team the row is written into, so
 	// one tenant serves both and they cannot drift apart.
-	stored := req.Value
-	if s.secretsCipher != nil {
-		binding := secretBinding{Team: tn.Team(), Name: req.Name, Scope: req.Pipeline, Shared: req.Shared, Masked: masked}
-		sealed, sErr := sealSecret(s.secretsCipher, binding, req.Value)
-		if errors.Is(sErr, secrets.ErrKeyRefused) {
-			writeError(w, http.StatusConflict, sErr)
-			return
-		}
-		if sErr != nil {
-			writeError(w, http.StatusInternalServerError, sErr)
-			return
-		}
-		stored = sealed
+	if s.secretsCipher == nil {
+		writeError(w, http.StatusServiceUnavailable, errNoSecretsCipher)
+		return
+	}
+	binding := secretBinding{Team: tn.Team(), Name: req.Name, Scope: req.Pipeline, Shared: req.Shared, Masked: masked}
+	stored, sErr := sealSecret(s.secretsCipher, binding, req.Value)
+	if errors.Is(sErr, secrets.ErrKeyRefused) {
+		writeError(w, http.StatusConflict, sErr)
+		return
+	}
+	if sErr != nil {
+		writeError(w, http.StatusInternalServerError, sErr)
+		return
 	}
 	if err := tn.CreateOrReplaceSecret(store.Secret{
 		Name:      req.Name,
@@ -87,9 +87,13 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 	}
 	noteAuditTarget(r.Context(), "secret_name", req.Name)
 	s.logger.Info("secret written", "name", req.Name, "principal", principal,
-		"pipeline", req.Pipeline, "encrypted", s.secretsCipher != nil, "masked", masked, "shared", req.Shared)
+		"pipeline", req.Pipeline, "masked", masked, "shared", req.Shared)
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// safety: a server built without a cipher would otherwise store or serve
+// plaintext, so it refuses secret reads and writes outright.
+var errNoSecretsCipher = errors.New("secrets cipher: this controller has no secrets key, so it stores and serves no secret")
 
 // safety: the name rule guards new rows only, so a row written under an older rule can still be rotated.
 func validateSecretName(tn *store.Tenant, name, pipeline string) error {
@@ -157,10 +161,7 @@ func noStore(next http.Handler) http.Handler {
 
 func (s *Server) openStoredSecret(team store.Team, sec *store.Secret) (string, error) {
 	if s.secretsCipher == nil {
-		if secrets.IsEncrypted(sec.Value) {
-			return "", errors.New("secrets cipher: encrypted value but no key configured")
-		}
-		return sec.Value, nil
+		return "", errNoSecretsCipher
 	}
 	opened, err := openSecret(s.secretsCipher, bindingForRow(team, sec), sec.Value)
 	if err != nil {

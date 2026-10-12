@@ -153,6 +153,10 @@ func newFleetSourceFixture(t *testing.T) fleetSourceFixture {
 	if err := os.WriteFile(filepath.Join(repo, ".sparkwing", "exact.txt"), []byte("exact bytes\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// safety: an inherited core.autocrlf=true, Git for Windows' default, would rewrite the materialized bytes.
+	if err := os.WriteFile(filepath.Join(repo, ".sparkwing", ".gitattributes"), []byte("* -text\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	runGit("-C", repo, "add", "-A")
 	tree := runGit("-C", repo, "write-tree")
 	sha := runGit("-C", repo, "commit-tree", tree)

@@ -49,6 +49,11 @@ type runFlags struct {
 	noUpdate bool
 	verbose  bool
 
+	noBincache      bool
+	hashAllFiles    bool
+	digestBackfill  bool
+	allowUnadmitted bool
+
 	secrets string
 
 	mode string
@@ -193,6 +198,18 @@ func parseRunFlags(args []string) (runFlags, []string) {
 			argumentIndex++
 		case argument == "--sw-no-update":
 			flags.noUpdate = true
+			argumentIndex++
+		case argument == "--sw-no-bincache":
+			flags.noBincache = true
+			argumentIndex++
+		case argument == "--sw-hash-all-files":
+			flags.hashAllFiles = true
+			argumentIndex++
+		case argument == "--sw-artifact-digest-backfill":
+			flags.digestBackfill = true
+			argumentIndex++
+		case argument == "--sw-allow-unadmitted":
+			flags.allowUnadmitted = true
 			argumentIndex++
 		case argument == "--sw-verbose", argument == "-v":
 			flags.verbose = true

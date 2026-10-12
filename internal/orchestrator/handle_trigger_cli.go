@@ -14,8 +14,8 @@ import (
 
 func runHandleTriggerCLI(args []string) error {
 	fs := flag.NewFlagSet("handle-trigger", flag.ExitOnError)
-	controllerURL := fs.String("controller", ResolveDevEnvURL("SPARKWING_CONTROLLER_URL"),
-		"controller URL (env: SPARKWING_CONTROLLER_URL, falls back to $SPARKWING_HOME/dev.env)")
+	controllerURL := fs.String("controller", os.Getenv("SPARKWING_CONTROLLER_URL"),
+		"controller URL (env: SPARKWING_CONTROLLER_URL)")
 	logsURL := fs.String("logs", os.Getenv("SPARKWING_LOGS_URL"),
 		"node log endpoint of the engine process that started this one (env: SPARKWING_LOGS_URL); the engine sets it")
 	token := fs.String("token", agentToken,

@@ -2,6 +2,7 @@ package sparkwing
 
 import (
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 )
@@ -48,7 +49,7 @@ func TestWalkUpToProject_FindsMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := walkUpToProject(root + "/sub/deep")
-	if got != root {
+	if got != filepath.Clean(root) {
 		t.Fatalf("walkUpToProject = %q, want %q", got, root)
 	}
 }

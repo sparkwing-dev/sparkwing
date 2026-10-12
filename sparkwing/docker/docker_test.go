@@ -13,6 +13,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/testshell"
 )
 
 func requireDocker(t *testing.T) {
@@ -110,11 +112,9 @@ if [ "$1" = "buildx" ] && [ "$2" = "inspect" ]; then
   exit 0
 fi
 exit 0
-`, payload)
+`, filepath.ToSlash(payload))
 	fakeDocker := filepath.Join(dir, "docker")
-	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake docker: %v", err)
-	}
+	testshell.Install(t, fakeDocker, script)
 	t.Setenv("PATH", dir)
 	return dir
 }
@@ -234,9 +234,7 @@ fi
 exit 0
 `
 	fakeDocker := filepath.Join(dir, "docker")
-	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake docker: %v", err)
-	}
+	testshell.Install(t, fakeDocker, script)
 	t.Setenv("PATH", dir)
 
 	_, err := Build(context.Background(), BuildConfig{
@@ -261,11 +259,9 @@ for a in "$@"; do
   printf '%%s\n' "$a" >> %q
 done
 exit 0
-`, stdinFile, argvFile)
+`, filepath.ToSlash(stdinFile), filepath.ToSlash(argvFile))
 	fakeDocker := filepath.Join(binDir, "docker")
-	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake docker: %v", err)
-	}
+	testshell.Install(t, fakeDocker, script)
 	t.Setenv("PATH", binDir)
 
 	const secret = "s3cret-do-not-leak"
@@ -304,11 +300,9 @@ func TestPushComputesCorrectArgs(t *testing.T) {
 	script := fmt.Sprintf(`#!/bin/sh
 printf '%%s\n' "$*" >> %q
 exit 0
-`, logFile)
+`, filepath.ToSlash(logFile))
 	fakeDocker := filepath.Join(binDir, "docker")
-	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake docker: %v", err)
-	}
+	testshell.Install(t, fakeDocker, script)
 	t.Setenv("PATH", binDir)
 
 	err := Push(context.Background(), "myapp:latest", []string{"v1", "v2"}, []string{"reg1.example.com", "reg2.example.com"})

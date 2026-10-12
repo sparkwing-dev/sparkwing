@@ -42,7 +42,9 @@ sign() { "$SSL" pkeyutl -sign -inkey "$1" -rawin -in "$2" -out "$3"; }
 
 GOOS="$(GOWORK=off go -C "$ROOT" env GOOS)"
 GOARCH="$(GOWORK=off go -C "$ROOT" env GOARCH)"
-ASSET="sparkwing-${GOOS}-${GOARCH}"
+EXT=""
+if [ "$GOOS" = windows ]; then EXT=".exe"; fi
+ASSET="sparkwing-${GOOS}-${GOARCH}${EXT}"
 
 # The one fixture the whole suite runs on: the real CLI, stamped like a release.
 note "building $ASSET from ./cmd/sparkwing stamped $TAG"
@@ -85,13 +87,22 @@ run_install() {
   shift 3
   run_prefix="$WORK/prefix-$run_name"
   rm -rf "$run_prefix"
+  if [ "${EXISTING_PREFIX_UNDER_TEST:-0}" = 1 ]; then mkdir -p "$run_prefix"; fi
+  install_prefix="$run_prefix"
+  release_url="file://$releases"
+  if [ "$GOOS" = windows ]; then
+    release_url="file:///$(cygpath -m -- "$releases")"
+    if [ "${NATIVE_PREFIX_UNDER_TEST:-0}" = 1 ]; then
+      install_prefix="$(cygpath -w -- "$run_prefix")"
+    fi
+  fi
   run_home="$WORK/home-$run_name"
   mkdir -p "$run_home"
   set +e
   env "$@" \
     HOME="$run_home" SPARKWING_HOME="$run_home/.sparkwing" \
-    SPARKWING_RELEASE_BASE_URL="file://$releases" \
-    "${SHELL_UNDER_TEST:-sh}" "$INSTALLER" --version "$run_tag" --prefix "$run_prefix" \
+    SPARKWING_RELEASE_BASE_URL="$release_url" \
+    "${SHELL_UNDER_TEST:-sh}" "$INSTALLER" --version "$run_tag" --prefix "$install_prefix" \
     >"$WORK/$run_name.out" 2>"$WORK/$run_name.err"
   run_status=$?
   set -e
@@ -108,7 +119,7 @@ refuses() {
     case_failed "$refuse_name" "refusal does not say $refuse_message: $(tr '\n' ' ' <"$WORK/$refuse_name.err")"
     return
   fi
-  if [ -e "$WORK/prefix-$refuse_name/sparkwing" ]; then
+  if [ -e "$WORK/prefix-$refuse_name/sparkwing$EXT" ]; then
     case_failed "$refuse_name" "left a binary behind after refusing"
   fi
 }
@@ -121,8 +132,20 @@ stage_release "$GOOD" "$TAG"
 run_install good "$GOOD" "$TAG"
 if [ "$run_status" -ne 0 ]; then
   case_failed good "refused a correctly signed release: $(tr '\n' ' ' <"$WORK/good.err")"
-elif [ "$("$WORK/prefix-good/sparkwing" version -o plain --offline)" != "$TAG" ]; then
+elif [ "$("$WORK/prefix-good/sparkwing$EXT" version -o plain --offline)" != "$TAG" ]; then
   case_failed good "installed a binary that does not report $TAG"
+fi
+EXISTING_PREFIX_UNDER_TEST=1 run_install existing-prefix "$GOOD" "$TAG"
+if [ "$run_status" -ne 0 ]; then
+  case_failed existing-prefix "failed in an existing install directory: $(tr '\n' ' ' <"$WORK/existing-prefix.err")"
+fi
+if [ "$GOOS" = windows ]; then
+  NATIVE_PREFIX_UNDER_TEST=1 run_install native-prefix "$GOOD" "$TAG"
+  if [ "$run_status" -ne 0 ]; then
+    case_failed native-prefix "failed with a native Windows prefix: $(tr '\n' ' ' <"$WORK/native-prefix.err")"
+  elif [ "$("$WORK/prefix-native-prefix/sparkwing.exe" version -o plain --offline)" != "$TAG" ]; then
+    case_failed native-prefix "native prefix did not install the signed .exe"
+  fi
 fi
 
 # The same release under dash and bash: the site tells adopters to pipe this

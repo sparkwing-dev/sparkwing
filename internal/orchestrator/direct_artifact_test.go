@@ -18,7 +18,6 @@ import (
 
 func TestSupervisorArtifactsPreferAnnouncedDirectUpload(t *testing.T) {
 	t.Setenv(ArtifactStoreEnvVar, "")
-	t.Setenv(DevEnvDisableEnv, "1")
 	body := []byte("unknown length artifact")
 	sum := sha256.Sum256(body)
 	digest := fmt.Sprintf("%x", sum)

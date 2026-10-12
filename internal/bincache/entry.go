@@ -136,6 +136,12 @@ func (e Entry) AcquireOrMaterialize(ctx context.Context, write func(string) erro
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
 	}
+	// safety: read before the hit path too, so a broken ceiling fails every
+	// call rather than only the one that publishes.
+	limits, err := ConfiguredLimits()
+	if err != nil {
+		return nil, false, fmt.Errorf("pipeline cache ceilings: %w", err)
+	}
 	if lease, found, acquireErr := e.Acquire(ctx); acquireErr != nil {
 		return nil, false, acquireErr
 	} else if found {
@@ -214,7 +220,7 @@ func (e Entry) AcquireOrMaterialize(ctx context.Context, write func(string) erro
 		return nil, false, err
 	}
 	writerOpen = false
-	if _, pruneErr := pruneToLimitsAtRoot(ctx, e.root, ConfiguredMaxBytes(), ConfiguredMaxEntries(), false); pruneErr != nil {
+	if _, pruneErr := pruneToLimitsAtRoot(ctx, e.root, limits.MaxBytes, limits.MaxEntries, false); pruneErr != nil {
 		return nil, true, fmt.Errorf("enforce pipeline cache ceilings after publication: %w", pruneErr)
 	}
 	leaseReturned = true
@@ -373,7 +379,13 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 				if os.IsNotExist(renameErr) {
 					continue
 				}
-				pruneErr = errors.Join(pruneErr, renameErr)
+				busy, busyErr := legacyRetirementBusy(ctx, candidate.path, renameErr)
+				if busy {
+					result.ExaminedEntries++
+					result.ActiveSkippedEntries++
+					continue
+				}
+				pruneErr = errors.Join(pruneErr, renameErr, busyErr)
 				continue
 			}
 			if timeErr := os.Chtimes(retiredPath, cacheNow(), cacheNow()); timeErr != nil {

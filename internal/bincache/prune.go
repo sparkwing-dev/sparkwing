@@ -11,14 +11,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
 const (
 	DefaultMaxCacheBytes   int64 = 2 << 30
 	DefaultMaxCacheEntries       = 20
-
-	MaxCacheBytesEnv   = "SPARKWING_CACHE_MAX_BYTES"
-	MaxCacheEntriesEnv = "SPARKWING_CACHE_MAX_ENTRIES"
 )
 
 var (
@@ -116,28 +115,41 @@ func pruneToLimitsAtRoot(ctx context.Context, root string, maxBytes int64, maxEn
 	return result, err
 }
 
-func ConfiguredMaxBytes() int64 {
-	raw := os.Getenv(MaxCacheBytesEnv)
-	if raw == "" {
-		return DefaultMaxCacheBytes
-	}
-	n, err := ParseBytes(raw)
-	if err != nil {
-		return DefaultMaxCacheBytes
-	}
-	return n
+// Limits are the pipeline binary cache ceilings. Zero disables one.
+type Limits struct {
+	MaxBytes   int64
+	MaxEntries int
 }
 
-func ConfiguredMaxEntries() int {
-	raw := os.Getenv(MaxCacheEntriesEnv)
-	if raw == "" {
-		return DefaultMaxCacheEntries
+type cacheConfigFile struct {
+	MaxBytes   string `yaml:"max_bytes"`
+	MaxEntries *int   `yaml:"max_entries"`
+}
+
+// ConfiguredLimits reads cache.max_bytes and cache.max_entries from
+// config.yaml, defaulting each one the file leaves unset. A value that does
+// not parse is an error naming the file and key.
+func ConfiguredLimits() (Limits, error) {
+	limits := Limits{MaxBytes: DefaultMaxCacheBytes, MaxEntries: DefaultMaxCacheEntries}
+	var raw cacheConfigFile
+	path, _, err := userconfig.ReadDefault(userconfig.Cache, &raw)
+	if err != nil {
+		return limits, err
 	}
-	n, err := strconv.Atoi(strings.TrimSpace(raw))
-	if err != nil || n < 0 {
-		return DefaultMaxCacheEntries
+	if v := strings.TrimSpace(raw.MaxBytes); v != "" {
+		n, err := ParseBytes(v)
+		if err != nil {
+			return limits, fmt.Errorf("%s cache.max_bytes: %w", path, err)
+		}
+		limits.MaxBytes = n
 	}
-	return n
+	if raw.MaxEntries != nil {
+		if *raw.MaxEntries < 0 {
+			return limits, fmt.Errorf("%s cache.max_entries: %d is negative; 0 disables the entry ceiling", path, *raw.MaxEntries)
+		}
+		limits.MaxEntries = *raw.MaxEntries
+	}
+	return limits, nil
 }
 
 func ParseBytes(raw string) (int64, error) {

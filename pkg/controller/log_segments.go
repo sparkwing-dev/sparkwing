@@ -232,11 +232,9 @@ func (s *Server) handleLogSegments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	count := min(req.Count, logSegmentBatch, maxLogSegmentNumber-req.Next+1)
-	if limiter, err := objectguard.Shared(); err == nil {
-		if err := limiter.Ceiling().Allow(); err != nil {
-			writeError(w, http.StatusInsufficientStorage, err)
-			return
-		}
+	if err := objectguard.Shared().Ceiling().Allow(); err != nil {
+		writeError(w, http.StatusInsufficientStorage, err)
+		return
 	}
 	team, ok := s.logWriterTeam(w, r)
 	if !ok {

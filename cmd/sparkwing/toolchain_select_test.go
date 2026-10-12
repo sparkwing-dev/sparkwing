@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 )
 
 func writeSparkwingModule(t *testing.T, body string) string {
@@ -198,7 +200,7 @@ func TestSwitchToolchainRefusesAMislabelledRelease(t *testing.T) {
 		t.Fatal("a child that is not the version it was switched to kept running")
 	}
 	for _, want := range []string{"v0.40.0", "v0.39.0", "toolchains/v0.40.0"} {
-		if !strings.Contains(err.Error(), want) {
+		if !strings.Contains(filepath.ToSlash(err.Error()), want) {
 			t.Errorf("error %q does not contain %q", err.Error(), want)
 		}
 	}
@@ -259,7 +261,7 @@ func TestInfoSDKPinReportsBothVersions(t *testing.T) {
 	if !pin.Switches || pin.Runs != "v0.40.0" {
 		t.Fatalf("pin = %+v, want a switch to v0.40.0", pin)
 	}
-	if pin.RunsFrom != filepath.Join(home, "toolchains", "v0.40.0", "sparkwing") {
+	if pin.RunsFrom != filepath.Join(home, "toolchains", "v0.40.0", installsite.ExeName()) {
 		t.Fatalf("runs_from = %q", pin.RunsFrom)
 	}
 	line := sdkPinLine(pin)

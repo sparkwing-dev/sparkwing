@@ -163,12 +163,26 @@ controller:
     # the proxy routes answer 404.
     url: ""
 
-  # Secrets-store encryption key. When set, the controller encrypts
-  # secret values stored in the state DB at rest. Without it, the
-  # controller logs a WARNING at startup and stores plaintext.
-  # Generate with `openssl rand -base64 32`.
+  # A Secret whose keys are credential file names the controller reads
+  # from --credentials-dir: license, oidc-key, oidc-key.published,
+  # github-client-secret, google-client-secret, github-app-key,
+  # github-app-webhook-secret, cloudfront-key,
+  # billing-token, and the others below. Every key is mounted under its
+  # own name; a key the controller does not know is ignored. The single
+  # Secret values below land in the same directory under their fixed
+  # names.
+  # Helm cannot read a Secret's keys, so with this set the chart stops
+  # checking that a bootstrap token or a current secrets key is
+  # configured; the controller refuses at startup, naming what is missing.
+  credentialsSecret:
+    name: ""
+
+  # Secrets-store encryption key, mounted as the secrets-key credential.
+  # Without it a SQLite controller creates its own key beside state.db on
+  # the first secret write, a PostgreSQL controller refuses secret
+  # writes, and a multi-team controller refuses to start. Generate with
+  # `openssl rand -base64 32`.
   secretsKey:
-    # Empty name disables; controller runs with plaintext secrets.
     name: ""
     key: key
 
@@ -245,8 +259,59 @@ controller:
   tolerations: []
   affinity: {}
 
+  # Base URL the controller answers on from outside the cluster
+  # (--external-url), such as https://sparkwing.example.com. Sign-in
+  # callbacks and links the controller hands out start here.
+  externalURL: ""
+
+  # Comma-separated dashboard callback URLs a sign-in may return to
+  # (--oauth-redirect-uris).
+  oauthRedirectURIs: ""
+
+  # Comma-separated account ids whose dashboard sessions may use the
+  # operator console (--operator-accounts).
+  operatorAccounts: ""
+
+  # Dashboard sign-in providers. Each secret is a credential file:
+  # github-client-secret and google-client-secret in credentialsSecret.
+  github:
+    # GitHub OAuth app client id (--github-client-id).
+    clientID: ""
+    # The deployment's GitHub App (--github-app-id, --github-app-slug).
+    # Its private key and webhook secret are the github-app-key and
+    # github-app-webhook-secret credential files.
+    appID: ""
+    appSlug: ""
+  google:
+    # Google OAuth client id (--google-client-id).
+    clientID: ""
+
+  # Invitation email through Amazon SES (--email-sender,
+  # --email-configuration-set).
+  email:
+    sender: ""
+    configurationSet: ""
+
+  # CloudFront signing for public-ingress downloads (--cloudfront-domain,
+  # --cloudfront-key-pair-id); the signing key is the cloudfront-key
+  # credential file.
+  cloudfront:
+    domain: ""
+    keyPairID: ""
+
+  # Further controller flags, passed verbatim after the ones above, for a
+  # setting with no value of its own here, such as
+  # --object-store-budget, --cache-blob-store,
+  # --billing-url or --egress-max-downloads. Run
+  # `sparkwing-controller --help` for the list. Never put a secret here;
+  # secrets are credential files.
+  extraArgs: []
+  # - --object-store-budget=put:hour=20000
+
   # Extra env passed to the controller container. Useful for
-  # forwarding GOPRIVATE, OTEL_*, etc.
+  # forwarding GOPRIVATE, OTEL_*, etc. The controller itself reads no
+  # SPARKWING_* setting from the environment; use the values above or
+  # extraArgs.
   extraEnv: []
   # - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
   #   value: http://tempo.monitoring.svc.cluster.local:4318/v1/traces

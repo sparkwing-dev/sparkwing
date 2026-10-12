@@ -40,7 +40,7 @@ func parseRerunFlags(args []string) (rerunFlags, error) {
 	nodeID := fs.String("node", "", "node id")
 	on := fs.String("profile", "", "profile name (cluster mode)")
 	seq := fs.Int("seq", -1, "attempt index; -1 selects most recent")
-	image := fs.String("image", "", "runner image for cluster-mode debug pod (overrides $SPARKWING_RERUN_IMAGE)")
+	image := fs.String("image", "", "runner image for cluster-mode debug pod (overrides the profile's rerun_image)")
 	if err := parseAndCheck(cmdDebugRerun, fs, args); err != nil {
 		return rerunFlags{}, err
 	}
@@ -145,10 +145,10 @@ func runDebugRerunCluster(ctx context.Context, t rerunFlags) error {
 
 	image := t.image
 	if image == "" {
-		image = os.Getenv("SPARKWING_RERUN_IMAGE")
+		image = prof.RerunImage
 	}
 	if image == "" {
-		return errors.New("cluster-mode rerun needs an image: pass --image or set SPARKWING_RERUN_IMAGE")
+		return fmt.Errorf("cluster-mode rerun needs an image: pass --image or set rerun_image on profile %s in config.yaml", prof.Name)
 	}
 
 	envMap, err := decodeSnapshotEnv(snap.EnvJSON)

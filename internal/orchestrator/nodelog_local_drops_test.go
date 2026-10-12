@@ -265,21 +265,21 @@ func TestLocalLogCloseFailure_FailsNodeInsteadOfReportingSuccess(t *testing.T) {
 }
 
 func TestLocalLogWriteFailure_WarnPolicyKeepsRunGreen(t *testing.T) {
-	t.Setenv(LogsDropPolicyEnvVar, "warn")
+	writeMachineSettings(t, "logs:\n  drop_policy: warn\n")
 	res, _ := dropRun(t, "localdropwarn-demo", func(nodeID string) *nodeLogger {
 		return newStubNodeLogger(nodeID, &stubLogFile{writeErr: errLocalLogWrite})
 	})
 	if res.Status != "success" {
-		t.Errorf("Status: got %q, want success under %s=warn", res.Status, LogsDropPolicyEnvVar)
+		t.Errorf("Status: got %q, want success under logs.drop_policy: warn", res.Status)
 	}
 }
 
 func TestLocalLogCloseFailure_WarnPolicyKeepsRunGreen(t *testing.T) {
-	t.Setenv(LogsDropPolicyEnvVar, "warn")
+	writeMachineSettings(t, "logs:\n  drop_policy: warn\n")
 	res, _ := dropRun(t, "localdropclosewarn-demo", func(nodeID string) *nodeLogger {
 		return newStubNodeLogger(nodeID, &stubLogFile{closeErr: errLocalLogClose})
 	})
 	if res.Status != "success" {
-		t.Errorf("Status: got %q, want success under %s=warn", res.Status, LogsDropPolicyEnvVar)
+		t.Errorf("Status: got %q, want success under logs.drop_policy: warn", res.Status)
 	}
 }

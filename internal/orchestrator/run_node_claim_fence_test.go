@@ -94,9 +94,8 @@ func pinRunNodeEnvironment(t *testing.T) {
 	}
 }
 
-// safety: both URLs travel as flags because ResolveDevEnvURL falls back to a
-// dev.env it caches for the life of the process, which an empty variable loses
-// to.
+// safety: both URLs travel as flags so the inherited SPARKWING_CONTROLLER_URL
+// and SPARKWING_LOGS_URL of the test process never reach the node.
 func runNodeArgs(controllerURL, runID, nodeID string) []string {
 	return []string{"--controller", controllerURL, "--logs", "", runID, nodeID}
 }

@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -45,7 +46,7 @@ func TestCandidateInstallUsesSelectedSourceAndPrivateDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 	trace := filepath.Join(fixture, "compiler-trace")
-	compiler := `#!/usr/bin/env bash
+	compiler := `#!/bin/bash
 set -euo pipefail
 printf '%s\n' "$GOWORK" "$@" > "$CANDIDATE_TRACE"
 if command -v flock >/dev/null 2>&1; then
@@ -84,14 +85,15 @@ chmod +x "$out"
 	if out, err := run(); err != nil {
 		t.Fatalf("install: %v\n%s", err, out)
 	}
-	if info, err := os.Stat(dest); err != nil || info.Mode()&0o111 == 0 {
+	if info, err := os.Stat(dest); err != nil || !info.Mode().IsRegular() || (runtime.GOOS != "windows" && info.Mode()&0o111 == 0) {
 		t.Fatalf("candidate executable: %v", err)
 	}
 	content, err := os.ReadFile(trace)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(string(content), "off\n-C\n"+filepath.Join(source, "")+"\nbuild\n") {
+	traceLines := strings.Split(string(content), "\n")
+	if len(traceLines) < 4 || traceLines[0] != "off" || traceLines[1] != "-C" || filepath.Clean(installerNativePath(t, traceLines[2])) != filepath.Clean(source) || traceLines[3] != "build" {
 		t.Fatalf("compiler arguments = %s", content)
 	}
 	if content, err := os.ReadFile(filepath.Join(source, "web-rebuilt")); err != nil || string(content) != "rebuilt" {

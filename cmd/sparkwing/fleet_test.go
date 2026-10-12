@@ -47,7 +47,7 @@ func TestDirectTailnetFleetConfigIsExplicitAndUnambiguous(t *testing.T) {
 
 func TestFleetInitCreatesCredentialFreePolicyAndRefusesReplacement(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(configPath, []byte("# this machine\nprofiles:\n  laptop: {}\n"), 0o600); err != nil {
+	if err := writePrivateConfigFixture(configPath, []byte("# this machine\nprofiles:\n  laptop: {}\n")); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("SPARKWING_CONFIG", configPath)

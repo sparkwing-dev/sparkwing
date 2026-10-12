@@ -113,11 +113,20 @@ func writeDashboardRecord(dp dashboardPaths, r dashboardRecord) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(dp.home, ".dashboard-state-*")
+	privateDir, err := fssecure.MkdirPrivateTemp(dp.home, ".dashboard-state-")
+	if err != nil {
+		return err
+	}
+	defer func() { dashboardCleanupError("remove temporary dashboard directory", os.Remove(privateDir)) }()
+	f, err := os.CreateTemp(privateDir, ".dashboard-state-*")
 	if err != nil {
 		return err
 	}
 	defer func() { dashboardCleanupError("remove temporary dashboard state", os.Remove(f.Name())) }()
+	if err = fssecure.SecurePrivateConfig(f.Name()); err != nil {
+		f.Close()
+		return err
+	}
 	if _, err = f.Write(b); err != nil {
 		f.Close()
 		return err

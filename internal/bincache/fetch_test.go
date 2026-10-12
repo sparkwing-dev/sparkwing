@@ -29,10 +29,15 @@ func gitExecPath(t *testing.T) string {
 		return ""
 	}
 	dir := strings.TrimSpace(string(out))
-	if _, err := os.Stat(filepath.Join(dir, "git-http-backend")); err != nil {
+	if _, err := exec.LookPath(filepath.Join(dir, "git-http-backend")); err != nil {
 		return ""
 	}
 	return dir
+}
+
+func gitHTTPBackend(execPath string) string {
+	path, _ := exec.LookPath(filepath.Join(execPath, "git-http-backend"))
+	return path
 }
 
 func startGitcacheTestServer(t *testing.T, repoParent string) *httptest.Server {
@@ -48,7 +53,7 @@ func startGitcacheTestServer(t *testing.T, repoParent string) *httptest.Server {
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
 	mux.Handle("/git/", &cgi.Handler{
-		Path: filepath.Join(execPath, "git-http-backend"),
+		Path: gitHTTPBackend(execPath),
 		Env: []string{
 			"GIT_PROJECT_ROOT=" + repoParent,
 			"GIT_HTTP_EXPORT_ALL=1",
@@ -263,7 +268,7 @@ func TestFetchPipelineSource_RegistersWithCache(t *testing.T) {
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
 	mux.Handle("/git/", &cgi.Handler{
-		Path: filepath.Join(execPath, "git-http-backend"),
+		Path: gitHTTPBackend(execPath),
 		Env:  []string{"GIT_PROJECT_ROOT=" + repoParent, "GIT_HTTP_EXPORT_ALL=1"},
 		Root: "/git",
 	})
@@ -309,7 +314,7 @@ func TestFetchPipelineSource_RegistersDistinctNamesForEqualBasenames(t *testing.
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
 	mux.Handle("/git/", &cgi.Handler{
-		Path: filepath.Join(execPath, "git-http-backend"),
+		Path: gitHTTPBackend(execPath),
 		Env:  []string{"GIT_PROJECT_ROOT=" + repoParent, "GIT_HTTP_EXPORT_ALL=1"},
 		Root: "/git",
 	})
@@ -338,7 +343,7 @@ func TestFetchPipelineSourceWithCredentials_AuthenticatesRegisterAndGit(t *testi
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
 	mux.Handle("/api/v1/gitcache/git/", &cgi.Handler{
-		Path: filepath.Join(execPath, "git-http-backend"),
+		Path: gitHTTPBackend(execPath),
 		Env:  []string{"GIT_PROJECT_ROOT=" + repoParent, "GIT_HTTP_EXPORT_ALL=1"},
 		Root: "/api/v1/gitcache/git",
 	})
@@ -378,7 +383,7 @@ func TestFetchPipelineSourceWithCredentials_DoesNotSendControllerTokenToDirectCa
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
 	mux.Handle("/git/", &cgi.Handler{
-		Path: filepath.Join(execPath, "git-http-backend"),
+		Path: gitHTTPBackend(execPath),
 		Env:  []string{"GIT_PROJECT_ROOT=" + repoParent, "GIT_HTTP_EXPORT_ALL=1"},
 		Root: "/git",
 	})
@@ -565,7 +570,7 @@ func TestFetchPipelineSourceWithCredentials_UsesOnlyTheDirectCacheToken(t *testi
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
 	mux.Handle("/git/", &cgi.Handler{
-		Path: filepath.Join(execPath, "git-http-backend"),
+		Path: gitHTTPBackend(execPath),
 		Env:  []string{"GIT_PROJECT_ROOT=" + repoParent, "GIT_HTTP_EXPORT_ALL=1"},
 		Root: "/git",
 	})
@@ -914,7 +919,7 @@ func TestFetchPipelineSourceWithAGrantSurvivesARefusedRegistration(t *testing.T)
 		http.Error(w, "mirror registration takes the cache's operator token", http.StatusForbidden)
 	})
 	mux.Handle("/git/", &cgi.Handler{
-		Path: filepath.Join(execPath, "git-http-backend"),
+		Path: gitHTTPBackend(execPath),
 		Env:  []string{"GIT_PROJECT_ROOT=" + repoParent, "GIT_HTTP_EXPORT_ALL=1"},
 		Root: "/git",
 	})

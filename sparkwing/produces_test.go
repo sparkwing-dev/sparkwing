@@ -132,20 +132,6 @@ func TestProduces_OnFailureRecoveryAppliesContract(t *testing.T) {
 	parent.OnFailure("recover", &markerOnlyJob{})
 }
 
-func TestProduces_NewDetachedNodeAppliesContract(t *testing.T) {
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("NewDetachedNode with marker-without-typed-return should panic")
-		}
-		msg, _ := r.(string)
-		if !strings.Contains(msg, "Produces[") || !strings.Contains(msg, "Work") {
-			t.Fatalf("panic should mention Produces and Work, got %q", msg)
-		}
-	}()
-	sparkwing.NewDetachedNode("spawn-child", &markerOnlyJob{})
-}
-
 func TestOutput_WiresFromMarker(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	n := sparkwing.Job(plan, "build", &producedJob{})

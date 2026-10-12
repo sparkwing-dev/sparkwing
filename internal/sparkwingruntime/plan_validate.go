@@ -59,12 +59,6 @@ func workKnownIDs(w *sparkwing.Work) map[string]struct{} {
 	for _, s := range w.Steps() {
 		out[s.ID()] = struct{}{}
 	}
-	for _, sp := range w.Spawns() {
-		out[sp.ID()] = struct{}{}
-	}
-	for _, sg := range w.SpawnGens() {
-		out[sg.ID()] = struct{}{}
-	}
 	return out
 }
 

@@ -49,6 +49,8 @@ type executionPolicyPlanWork struct {
 	Steps []struct {
 		ID string `json:"id"`
 	} `json:"steps,omitempty"`
+	// safety: a pipeline built on an SDK that still had JobSpawn records its
+	// spawns here, and a node that inserts nodes gets no execution policy.
 	Spawns    []json.RawMessage `json:"spawns,omitempty"`
 	SpawnEach []json.RawMessage `json:"spawn_each,omitempty"`
 }

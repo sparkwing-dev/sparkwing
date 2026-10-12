@@ -2,6 +2,14 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+windows=0
+exe_suffix=""
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) windows=1; exe_suffix=".exe" ;;
+esac
+shell_path() {
+  cygpath -u -- "$1"
+}
 reuse_web=0
 if [[ "${1:-}" == --reuse-web && $# == 1 ]]; then
   reuse_web=1
@@ -14,6 +22,9 @@ if [ -z "${SPARKWING_INSTALL_BIN:-}" ] && [ -z "${HOME:-}" ]; then
   exit 1
 fi
 DEST="${SPARKWING_INSTALL_BIN:-$HOME/.local/bin}"
+if (( windows )); then
+  DEST="$(shell_path "$DEST")"
+fi
 # A named build (SPARKWING_INSTALL_NAME=sparkwing-crons) sits beside the real
 # binary and shares its home, so a branch can be exercised against real runs
 # without replacing the sparkwing every other repo and the timer resolve.
@@ -24,13 +35,15 @@ if ! printf '%s' "$NAME" | grep -Eq '^sparkwing(-[a-z0-9-]+)?$'; then
   echo "install.sh: SPARKWING_INSTALL_NAME must be sparkwing or sparkwing-<slug>, got $NAME" >&2
   exit 1
 fi
-mkdir -p "$DEST"
+if (( ! windows )) || [ ! -d "$DEST" ]; then
+  mkdir -p "$DEST"
+fi
 
 export GOPRIVATE='github.com/sparkwing-dev/*'
 
 # shellcheck source=bin/web-build-lock.sh
 source "$ROOT/bin/web-build-lock.sh"
-sparkwing_lock_web_build "$ROOT"
+sparkwing_lock_web_build "$ROOT" "$@"
 
 if [ "${SKIP_WEB_BUILD:-0}" = "1" ]; then
   echo "SKIP_WEB_BUILD=1 set; using existing internal/web/next-out/ as-is"
@@ -48,9 +61,9 @@ elif ! command -v pnpm >/dev/null 2>&1; then
   fi
 else
   if (( reuse_web )); then
-    bash "$ROOT/bin/build-web.sh" --reuse
+    "$BASH" "$ROOT/bin/build-web.sh" --reuse
   else
-    bash "$ROOT/bin/build-web.sh"
+    "$BASH" "$ROOT/bin/build-web.sh"
   fi
 fi
 
@@ -64,15 +77,15 @@ fi
 echo "build $NAME $VERSION"
 # -trimpath and -s -w are the flags .github/workflows/release.yaml passes, so a
 # local install and a released binary strip and trim the same way.
-GOWORK=off go -C "$ROOT" build -trimpath -ldflags "-s -w -X main.Version=$VERSION" -o "$DEST/$NAME" ./cmd/sparkwing
+GOWORK=off go -C "$ROOT" build -trimpath -ldflags "-s -w -X main.Version=$VERSION" -o "$DEST/$NAME$exe_suffix" ./cmd/sparkwing
 if [ "$NAME" != sparkwing ]; then
   echo
-  echo "Installed to $DEST/$NAME (the sparkwing beside it is untouched)"
+  echo "Installed to $DEST/$NAME$exe_suffix (the sparkwing beside it is untouched)"
   exit 0
 fi
 
 echo "build sparkwing-runner $VERSION"
-GOWORK=off go -C "$ROOT" build -trimpath -ldflags "-s -w -X main.Version=$VERSION" -o "$DEST/sparkwing-runner" ./cmd/sparkwing-runner
+GOWORK=off go -C "$ROOT" build -trimpath -ldflags "-s -w -X main.Version=$VERSION" -o "$DEST/sparkwing-runner$exe_suffix" ./cmd/sparkwing-runner
 
 declare -a STALE=(
   sparkwing-cache
@@ -83,6 +96,9 @@ declare -a STALE=(
   sparkwing.dev
   sparkwing.predeploy
 )
+if (( windows )); then
+  for s in "${STALE[@]}"; do STALE+=("$s.exe"); done
+fi
 for s in "${STALE[@]}"; do
   if [ -e "$DEST/$s" ]; then
     rm -f "$DEST/$s"
@@ -92,7 +108,11 @@ done
 gopath_all="$(go env GOPATH 2>/dev/null || true)"
 gopath_bin=""
 if [ -n "$gopath_all" ]; then
-  gopath_bin="${gopath_all%%:*}/bin"
+  if (( windows )); then
+    gopath_bin="$(shell_path "${gopath_all%%;*}")/bin"
+  else
+    gopath_bin="${gopath_all%%:*}/bin"
+  fi
 fi
 if [ -n "$gopath_bin" ] && [ -d "$gopath_bin" ] && [ "$gopath_bin" != "$DEST" ]; then
   for s in "${STALE[@]}"; do
@@ -103,9 +123,11 @@ if [ -n "$gopath_bin" ] && [ -d "$gopath_bin" ] && [ "$gopath_bin" != "$DEST" ];
 fi
 
 report_competing_installs() {
-  local installed="$DEST/sparkwing"
+  local installed="$DEST/sparkwing$exe_suffix"
   local -a scan_dirs=() reported=()
-  local d p r dup found=0
+  local -a suffixes=("$exe_suffix")
+  if (( windows )); then suffixes+=(""); fi
+  local d p r dup suffix found=0
   IFS=':' read -r -a scan_dirs <<< "${PATH:-}"
   if [ -n "${HOME:-}" ]; then
     scan_dirs+=("$HOME/.local/bin" "$HOME/go/bin")
@@ -115,11 +137,16 @@ report_competing_installs() {
   fi
   scan_dirs+=(/usr/local/bin /opt/homebrew/bin)
   if [ -n "${GOBIN:-}" ]; then
-    scan_dirs+=("$GOBIN")
+    if (( windows )); then
+      scan_dirs+=("$(shell_path "$GOBIN")")
+    else
+      scan_dirs+=("$GOBIN")
+    fi
   fi
 
   for d in "${scan_dirs[@]}"; do
-    p="$d/sparkwing"
+    for suffix in "${suffixes[@]}"; do
+    p="$d/sparkwing$suffix"
     if [ ! -f "$p" ] || [ ! -x "$p" ]; then continue; fi
     if [ "$p" -ef "$installed" ]; then continue; fi
     dup=0
@@ -137,6 +164,7 @@ report_competing_installs() {
     printf '      to retire it: test ! -e %q && test ! -L %q && mv -n -- %q %q && test ! -e %q && test ! -L %q   (undo: test ! -e %q && test ! -L %q && mv -n -- %q %q && test ! -e %q && test ! -L %q)\n' \
       "$p.superseded" "$p.superseded" "$p" "$p.superseded" "$p" "$p" \
       "$p" "$p" "$p.superseded" "$p" "$p.superseded" "$p.superseded"
+    done
   done
   if [ "$found" = 1 ]; then
     echo "      \`sparkwing doctor\` reports the full picture."

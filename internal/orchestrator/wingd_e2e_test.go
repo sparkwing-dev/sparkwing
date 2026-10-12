@@ -2252,6 +2252,9 @@ func TestWingd_DaemonFirstCancelRemovesQueuedWaiterWithoutDashboard(t *testing.T
 }
 
 func TestRunLocal_SIGINTFinalizesRunAsCancelledAndReleasesLease(t *testing.T) {
+	if runIsolatedInterruptTest(t) {
+		return
+	}
 	registerWingdE2EPipelines()
 	home := wingdTestHome(t)
 	startWingd(t, home, 2)

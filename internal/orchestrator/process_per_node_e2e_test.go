@@ -16,7 +16,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestProcessPerNode_EveryNodeRunsInItsOwnProcess(t *testing.T) {
@@ -197,80 +196,6 @@ func assertNodesRecordedTheirUsage(t *testing.T, home, pipeline string, nodeIDs 
 			t.Errorf("node %q measured %.2f cores; a %d-core host cannot have given that, so the span is not the one the CPU was drawn over",
 				id, measured, runtime.NumCPU())
 		}
-	}
-}
-
-func TestProcessPerNode_SpawnNodeRunsInsideItsParentsProcess(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 5.4s of real work; the fast class runs under -short")
-	}
-	mod, bin := buildProcPerNodeBinary(t)
-
-	home := t.TempDir()
-	stopHomeDaemon(t, home)
-	probe := t.TempDir()
-	runEnv := append(os.Environ(),
-		"SPARKWING_HOME="+home,
-		"SPARKWING_WINGD_BIN="+wingdHostBin(t),
-		"SPARKWING_LOG_FORMAT=json",
-		"PROC_PROBE_DIR="+probe,
-	)
-
-	runBin(t, mod, runEnv, bin, "spawnnode")
-
-	dispatcher := readPID(t, probe, "dispatcher")
-	parent := readPID(t, probe, "spawn-parent")
-	child := readPID(t, probe, "spawn-child")
-	if parent == dispatcher {
-		t.Errorf("the spawning node ran in the dispatcher's process (%d)", dispatcher)
-	}
-	if child != parent {
-		t.Errorf("spawned child ran in pid %d, its parent in %d; a spawn is the parent node's own sub-work",
-			child, parent)
-	}
-
-	st, err := store.Open(orchestrator.PathsAt(home).StateDB())
-	if err != nil {
-		t.Fatalf("open run store: %v", err)
-	}
-	defer func() { _ = st.Close() }()
-	ctx := context.Background()
-	runs, err := st.ListRuns(ctx, store.RunFilter{Pipelines: []string{"spawnnode"}})
-	if err != nil || len(runs) == 0 {
-		t.Fatalf("list runs: %v (%d found)", err, len(runs))
-	}
-	runID := runs[0].ID
-
-	nodes, err := st.ListNodes(ctx, runID)
-	if err != nil {
-		t.Fatalf("list nodes: %v", err)
-	}
-	parentRow, childRow := find(nodes, "parent"), find(nodes, "parent/scan")
-	if parentRow == nil || childRow == nil {
-		t.Fatalf("missing nodes; have %v", nodeIDs(nodes))
-	}
-	if parentRow.Outcome != string(sparkwing.Success) {
-		t.Errorf("parent outcome = %q (err=%q), want success", parentRow.Outcome, parentRow.Error)
-	}
-	if childRow.Outcome != string(sparkwing.Success) {
-		t.Errorf("child outcome = %q (err=%q), want success", childRow.Outcome, childRow.Error)
-	}
-	if got, err := st.GetNodeOutput(ctx, runID, "parent/scan"); err != nil || string(got) != `{"findings":7}` {
-		t.Errorf("child output = %s, %v, want {\"findings\":7}", got, err)
-	}
-
-	events, err := st.ListEventsAfter(ctx, runID, 0, 500)
-	if err != nil {
-		t.Fatalf("list events: %v", err)
-	}
-	var dispatched bool
-	for _, ev := range events {
-		if ev.Kind == "spawn_dispatched" && ev.NodeID == "parent" && string(ev.Payload) == `"parent/scan"` {
-			dispatched = true
-		}
-	}
-	if !dispatched {
-		t.Error("no spawn_dispatched event on the parent naming parent/scan")
 	}
 }
 
@@ -716,44 +641,6 @@ func (j *Consume) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	}), nil
 }
 
-type ScanOut struct {
-	Findings int ` + "`json:\"findings\"`" + `
-}
-
-type SpawnScan struct {
-	sparkwing.Base
-	sparkwing.Produces[ScanOut]
-}
-
-func (j *SpawnScan) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	return sparkwing.Step(w, "scan", func(ctx context.Context) (ScanOut, error) {
-		StampPID("spawn-child")
-		return ScanOut{Findings: 7}, nil
-	}), nil
-}
-
-type SpawnParent struct{ sparkwing.Base }
-
-func (j *SpawnParent) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	setup := sparkwing.Step(w, "setup", func(ctx context.Context) error {
-		StampPID("spawn-parent")
-		return nil
-	})
-	scan := sparkwing.JobSpawn(w, "scan", &SpawnScan{}).Needs(setup)
-	sparkwing.Step(w, "after", func(ctx context.Context) error {
-		sparkwing.Info(ctx, "parent resumed after its spawned child")
-		return nil
-	}).Needs(scan)
-	return nil, nil
-}
-
-type Spawnnode struct{ sparkwing.Base }
-
-func (p *Spawnnode) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
-	sparkwing.Job(plan, "parent", &SpawnParent{})
-	return nil
-}
-
 type Orphanproof struct{ sparkwing.Base }
 
 func (p *Orphanproof) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
@@ -971,7 +858,6 @@ func (p *Bounceproof) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.
 func init() {
 	sparkwing.Register("spawnproof", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Spawnproof{} })
 	sparkwing.Register("orphanproof", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Orphanproof{} })
-	sparkwing.Register("spawnnode", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Spawnnode{} })
 	sparkwing.Register("bounceproof", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Bounceproof{} })
 	sparkwing.Register("nestedchild", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Nestedchild{} })
 	sparkwing.Register("nestedparent", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Nestedparent{} })
@@ -996,7 +882,7 @@ func main() {
 	}
 	// Every node process rebuilds the plan, so the dispatcher has to
 	// stamp its identity from the entrypoint that only it reaches.
-	if len(os.Args) > 1 && (os.Args[1] == "handle-trigger" || os.Args[1] == "spawnproof" || os.Args[1] == "orphanproof" || os.Args[1] == "spawnnode") {
+	if len(os.Args) > 1 && (os.Args[1] == "handle-trigger" || os.Args[1] == "spawnproof" || os.Args[1] == "orphanproof") {
 		jobs.StampPID("dispatcher")
 	}
 	runner.Main()

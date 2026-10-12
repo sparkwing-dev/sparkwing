@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -37,9 +36,6 @@ func (s *Server) counterCaller(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	token := s.cacheToken
-	if token == "" {
-		token = bincache.CacheToken()
-	}
 	if token == "" || subtle.ConstantTimeCompare([]byte(raw), []byte(token)) != 1 {
 		writeError(w, http.StatusUnauthorized, errors.New("the storage counter routes answer the cache's operator token"))
 		return false

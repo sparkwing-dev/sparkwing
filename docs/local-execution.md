@@ -23,6 +23,55 @@ container images. This means:
 
 ## How it works
 
+### Windows with Git Bash
+
+Use the native Windows Go toolchain and Sparkwing executable from Git Bash;
+WSL is not required. The website's install command is the same on each OS:
+
+```sh
+curl -fsSL https://sparkwing.dev/install.sh | sh
+```
+
+The installer selects a Windows `.exe` in Git Bash. In WSL it selects the
+Linux binary, and on macOS it selects the macOS binary.
+Git for Windows supplies `bash` and the Unix shell utilities;
+its `bin` and `usr/bin` directories must be visible to child processes through
+`PATH`. `sparkwing.Bash` continues to execute Bash, including on Windows.
+
+The Windows local node runner uses kill-on-close Job Objects. It starts each
+node suspended, assigns it to its job, and then resumes it, so descendants
+inherit ownership. Cancellation terminates that job immediately. Normal node
+exit also cleans up remaining descendants, and dispatcher exit closes the
+handle and terminates the job. Windows does not use the Unix fd 3 liveness
+pipe or the Unix termination grace period.
+
+The pipeline executable contains the SDK version selected by `.sparkwing/go.mod`.
+Installing a newer CLI alone does not update that SDK. Windows local execution
+needs the Windows-capable runner in both the CLI and the pipeline SDK. When
+testing SDK changes from source, use an untracked Go workspace that includes
+both the SDK checkout and the pipeline's `.sparkwing` module.
+
+The source installer accepts native Windows paths and writes `.exe` files.
+`SPARKWING_INSTALL_NAME=sparkwing-<name>` installs a candidate alongside the
+normal executable. Pipeline commands still need their own Windows support:
+invoke JavaScript CLI entrypoints through `node.exe` instead of executing
+`.cmd` files with `sparkwing.Exec`. Go race tests also need a native C compiler,
+such as LLVM MinGW, on `PATH`; `CC` can select its compiler explicitly.
+
+From the Sparkwing source checkout, run `sparkwing run windows-verify` to check
+native process cleanup, SDK command execution, npm cache configuration,
+daemon discovery, and run-handle publication with the race detector. It also
+checks template executable paths, file locking, disk space, and both Git Bash
+installers. Every check reports its result, and any failure fails the pipeline.
+
+Pipeline code still has to compile for Windows: Git Bash does not supply Unix
+Go system calls or turn Windows into Linux. A pipeline that requires Linux
+tools or services can instead run in WSL or through `pipeline trigger` on a
+Linux runner. Install and authenticate any tools the particular pipeline uses
+before attempting a release.
+
+### Execution commands
+
 ```bash
 # Run locally -- uses your Docker, your caches, your machine
 sparkwing run build-deploy
@@ -247,8 +296,10 @@ The outer CLI passes the path to the pipeline process through
 
 A foreground run inherits the whole environment of the shell that starts
 it. A detached run carries a filtered snapshot of it: every `SPARKWING_*`
-and `GITHUB_*` variable, plus `PATH`, `HOME`, `HOSTNAME`, and
-`KUBERNETES_SERVICE_HOST`. Sparkwing drops the credential-shaped part of
+and `GITHUB_*` variable, plus `PATH`, `HOME`, `HOSTNAME`,
+`KUBERNETES_SERVICE_HOST`, `XDG_CONFIG_HOME` (so the run reads the same
+config.yaml), and the S3 endpoint names `AWS_ENDPOINT_URL` and
+`AWS_ENDPOINT_URL_S3`. Sparkwing drops the credential-shaped part of
 that set -- names carrying `TOKEN`, `SECRET`, `PASSWORD`, `KEY`, `AUTH`,
 `PAT` and similar, bearer headers, PEM blocks, JSON documents with a
 credential field, and URLs whose userinfo, query, or path names a
@@ -256,16 +307,16 @@ credential -- so a queued run never writes one to disk. A submission never
 inherits values from the shell that started the consumer or from another
 submission.
 
-Set `SPARKWING_SUBMIT_ENV_ALLOW` to a comma-separated list to widen the
-snapshot; an entry ending in `*` matches a prefix, and a bare `*` is
-refused rather than silently allowing nothing. The credential filter still
-applies to what the list names, and logs at warn the names it drops, so a
-pipeline that needs a credential takes it from the secret store rather than
-the submitting shell.
+List more names under `run.submit_env_allow` in
+[config.yaml](machine-config.md) to widen the snapshot; an entry ending in
+`*` matches a prefix, and a bare `*` is refused rather than silently
+allowing nothing. The credential filter still applies to what the list
+names, and logs at warn the names it drops, so a pipeline that needs a
+credential takes it from the secret store rather than the submitting shell.
 
-```bash
-SPARKWING_SUBMIT_ENV_ALLOW='AWS_PROFILE,AWS_REGION,KUBECONFIG,DOCKER_HOST,SSH_AUTH_SOCK' \
-  sparkwing run deploy --sw-detached
+```yaml
+run:
+  submit_env_allow: [AWS_PROFILE, AWS_REGION, KUBECONFIG, DOCKER_HOST, SSH_AUTH_SOCK]
 ```
 
 Sparkwing stores the snapshot outside the runs database with mode `0600`,
@@ -867,8 +918,8 @@ its awarded run and node. Execution start, finish, and logs also require the
 acknowledged attempt ordinal. That capability cannot claim or renew work,
 manage the fleet, or call administrative routes. The child inherits only the
 minimum runtime environment plus non-credential variables explicitly named by
-`SPARKWING_SUBMIT_ENV_ALLOW`, not the agent service's arbitrary cloud, cache,
-or service credentials.
+`run.submit_env_allow` in the agent machine's config.yaml, not the agent
+service's arbitrary cloud, cache, or service credentials.
 
 This is credential isolation, not an OS sandbox. Pipeline code can still read
 files, use the network, and start processes with every permission the agent OS
@@ -1229,12 +1280,12 @@ daemon that is not behind this pipeline, so the block carries the
 daemon's own reason and points at `sparkwing daemon status` rather than
 at an upgrade.
 
-**`SPARKWING_ALLOW_UNADMITTED=1` is set** -- the operator asked for the
-direct path, for a box whose other work they know. The block says so and
-names `unset SPARKWING_ALLOW_UNADMITTED`; it is read strictly, so only
-the exact value `1` turns the check off. The variable is an environment
-variable rather than a flag because the runs that need it are the ones no
-CLI launched.
+**`--sw-allow-unadmitted` is set** -- the operator asked for the direct
+path, for a box whose other work they know. The block says so and names
+the run without the flag as the way back. `sparkwing run` carries the flag
+to the pipeline binary as `SPARKWING_ALLOW_UNADMITTED=1`; a pipeline binary
+no CLI launched reads that variable the same way, strictly, so only the
+exact value `1` turns the check off.
 
 A pipeline that reserves host capacity with a plan-level or node-level
 `.Resources()` pin is not an exception. It runs standalone rather than
@@ -1681,22 +1732,17 @@ ignore-external # admit against total capacity, ignoring external load
 
 #### Where to set it
 
-The same value is read from several settings, resolved in the order the
-rest of the wing family uses -- the more specific setting wins:
+The budget is read from two settings, and the more specific one wins:
 
 | Setting | Reaches | Lives until |
 |---|---|---|
 | Internal daemon `--budget` argument (not a public CLI command) | that daemon process | that daemon exits |
-| `SPARKWING_BUDGET` in the environment | any daemon spawned from that environment | that daemon exits |
 | `admission.budget` in `~/.config/sparkwing/config.yaml` (see [Machine settings](machine-config.md)) | every daemon on the machine | you edit or delete the key |
 
-The config.yaml key is the durable one, and it is the setting to reach for
-when you mean "this machine, from now on". The admission daemon is
-started on demand by whichever run needs it first, inheriting that
-process's environment, so a budget exported in one shell applies to
-whatever daemon that shell happened to spawn and disappears with it. The
-file is read at daemon startup, so a budget written there is in force
-again the moment a daemon respawns.
+The config.yaml key is the setting to reach for. The admission daemon is
+started on demand by whichever run needs it first, and it reads the file at
+startup, so a budget written there is in force again the moment a daemon
+respawns.
 
 The key holds one setting in the grammar above, and a YAML comment keeps
 the reason a budget is in force next to the budget:

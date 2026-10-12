@@ -264,10 +264,7 @@ func TestFindLegacyFiles_AnUnreadableDirectoryFailsTheImport(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(locked, "mine.env"), []byte("MINE=1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(locked, 0); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
+	makeLegacyDirectoryUnreadable(t, locked)
 	t.Setenv("SPARKWING_SECRETS", filepath.Join(locked, "mine.env"))
 	if files, err := localsecrets.FindLegacyFiles(); err == nil {
 		t.Fatalf("FindLegacyFiles past an unreadable directory = %+v, want an error", files)

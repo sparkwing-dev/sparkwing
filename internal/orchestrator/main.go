@@ -144,8 +144,15 @@ func Main() {
 
 	pipelineYAML := loadPipelineYAML(pipeline)
 
+	dispatchWait, err := dispatchWaitSetting()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, pipeline+":", err)
+		os.Exit(1)
+	}
+
 	delegate := selectRunRenderer()
 	opts := Options{
+		DispatchWaitTimeout:       dispatchWait,
 		Pipeline:                  pipeline,
 		RunHandlePath:             os.Getenv("SPARKWING_RUN_HANDLE_FILE"),
 		Args:                      argsMap,
@@ -171,7 +178,6 @@ func Main() {
 		FleetSourceBytes:          positiveEnvInt64("SPARKWING_FLEET_SOURCE_BYTES"),
 		FleetBundleBytes:          positiveEnvInt64("SPARKWING_FLEET_SOURCE_BUNDLE_BYTES"),
 		MaxParallel:               runtime.NumCPU(),
-		DispatchWaitTimeout:       parseDispatchWaitTimeout(os.Getenv("SPARKWING_DISPATCH_WAIT_TIMEOUT")),
 		PipelineYAML:              pipelineYAML,
 		// safety: this binary serves `run-node` a few lines above, so it can
 		// re-enter itself for each node.
@@ -585,22 +591,12 @@ func parseTypedFlags(pipeline string, args []string) (map[string]string, error) 
 		} else {
 			i++
 		}
-		if len(arg.Enum) > 0 && !inEnumList(value, arg.Enum) {
-			return nil, fmt.Errorf("--%s=%q not allowed (must be one of %s)",
-				arg.Name, value, strings.Join(arg.Enum, ", "))
+		if err := arg.CheckEnum(value); err != nil {
+			return nil, err
 		}
 		out[arg.Name] = value
 	}
 	return out, nil
-}
-
-func inEnumList(v string, enum []string) bool {
-	for _, e := range enum {
-		if e == v {
-			return true
-		}
-	}
-	return false
 }
 
 func readDebugDirectivesFromEnv() DebugDirectives {

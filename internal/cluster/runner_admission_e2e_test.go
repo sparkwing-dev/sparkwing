@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"testing"
 	"time"
 
@@ -111,7 +112,11 @@ func holdLease(t *testing.T, home, runID string, cores float64, origin wingwire.
 }
 
 func TestRunnerAdmissionE2E(t *testing.T) {
-	home, err := os.MkdirTemp("/tmp", "sw-e2e")
+	tempRoot := "/tmp"
+	if runtime.GOOS == "windows" {
+		tempRoot = os.TempDir()
+	}
+	home, err := os.MkdirTemp(tempRoot, "sw-e2e")
 	if err != nil {
 		t.Fatal(err)
 	}

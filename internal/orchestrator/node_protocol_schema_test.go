@@ -237,8 +237,6 @@ func TestDescribeSchemaDeclaresEveryEmittedField(t *testing.T) {
 		"modifiers":      reflect.TypeFor[snapshotModifiers](),
 		"work":           reflect.TypeFor[snapshotWork](),
 		"step":           reflect.TypeFor[snapshotStep](),
-		"spawn":          reflect.TypeFor[snapshotSpawn](),
-		"spawnEach":      reflect.TypeFor[snapshotSpawnEach](),
 		"stepGroup":      reflect.TypeFor[snapshotStepGroup](),
 	} {
 		s.requireFieldsDeclared(t, def, typ)
@@ -277,7 +275,6 @@ type protocolStepsJob struct{}
 func (protocolStepsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	build := sparkwing.Step(w, "build", func(context.Context) error { return nil })
 	sparkwing.Step(w, "test", func(context.Context) error { return nil }).Needs(build)
-	sparkwing.JobSpawn(w, "scan", snapshotChildJob{}).Needs(build)
 	return nil, nil
 }
 

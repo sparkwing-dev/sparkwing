@@ -10,7 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/testhome"
 )
 
 func TestApplySecretsProfileOverride_NormalReadsRemoteProfile(t *testing.T) {
@@ -32,7 +34,7 @@ func TestApplySecretsProfileOverride_NormalReadsRemoteProfile(t *testing.T) {
 	defer srv.Close()
 
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	testhome.Set(t, tmpHome)
 	t.Setenv("XDG_CONFIG_HOME", "")
 	cfgDir := filepath.Join(tmpHome, ".config", "sparkwing")
 	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
@@ -45,7 +47,7 @@ func TestApplySecretsProfileOverride_NormalReadsRemoteProfile(t *testing.T) {
       token: t-stage
 `, srv.URL)
 	cfgPath := filepath.Join(cfgDir, "config.yaml")
-	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
+	if err := fssecure.WriteFile(cfgPath, []byte(yaml)); err != nil {
 		t.Fatalf("write config.yaml: %v", err)
 	}
 	t.Setenv("SPARKWING_CONFIG", cfgPath)
@@ -73,10 +75,10 @@ func TestApplySecretsProfileOverride_NormalReadsRemoteProfile(t *testing.T) {
 
 func TestApplySecretsProfileOverride_LocalOnlyDoesNotOpenRemoteProfile(t *testing.T) {
 	profiles := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(profiles, []byte(`profiles:
+	if err := fssecure.WriteFile(profiles, []byte(`profiles:
   dead:
     controller: { url: http://127.0.0.1:1 }
-`), 0o600); err != nil {
+`)); err != nil {
 		t.Fatalf("write profiles: %v", err)
 	}
 	t.Setenv("SPARKWING_CONFIG", profiles)
@@ -93,7 +95,7 @@ func TestApplySecretsProfileOverride_LocalOnlyDoesNotOpenRemoteProfile(t *testin
 
 func TestRemoteSecretSource_BadProfileErrors(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	testhome.Set(t, tmpHome)
 	t.Setenv("XDG_CONFIG_HOME", "")
 	if err := os.MkdirAll(filepath.Join(tmpHome, ".config", "sparkwing"), 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -102,7 +104,7 @@ func TestRemoteSecretSource_BadProfileErrors(t *testing.T) {
   only: {}
 `
 	cfgPath := filepath.Join(tmpHome, ".config", "sparkwing", "config.yaml")
-	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
+	if err := fssecure.WriteFile(cfgPath, []byte(yaml)); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	t.Setenv("SPARKWING_CONFIG", cfgPath)

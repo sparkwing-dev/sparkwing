@@ -97,6 +97,7 @@ func (g *trustedGit) git(ctx context.Context, dir string, remote bool, args ...s
 
 func (g *trustedGit) gitRaw(ctx context.Context, dir string, remote bool, args ...string) ([]byte, error) {
 	env, extra := g.localEnv, []*os.File(nil)
+	cleanup := func() error { return nil }
 	full := []string{"-C", dir, "-c", "core.hooksPath=/dev/null"}
 	if remote {
 		if g.opts.fetchTimeout > 0 {
@@ -104,22 +105,22 @@ func (g *trustedGit) gitRaw(ctx context.Context, dir string, remote bool, args .
 			ctx, cancel = context.WithTimeout(ctx, g.opts.fetchTimeout)
 			defer cancel()
 		}
-		if g.pipe {
-			pipe, err := credentialPipe(g.cred.Username, g.cred.Secret, fetchCredentialAsks)
-			if err != nil {
-				return nil, fmt.Errorf("source credential pipe: %w", err)
-			}
-			defer func() { _ = pipe.Close() }()
-			extra = []*os.File{pipe}
-		}
 		// safety: a redirect would carry the credential to a host nothing checked.
 		env, full = g.fetchEnv, append(full, "-c", "http.followRedirects=false", "-c", "protocol.file.allow=never")
+		if g.pipe {
+			var err error
+			env, extra, cleanup, err = prepareCredentialTransport(env, g.cred.Username, g.cred.Secret, fetchCredentialAsks)
+			if err != nil {
+				return nil, fmt.Errorf("source credential transport: %w", err)
+			}
+		}
 	}
 	cmd := exec.CommandContext(ctx, "git", append(full, args...)...)
 	cmd.Env = env
 	cmd.ExtraFiles = extra
 	killGroupOnCancel(cmd)
-	out, err := cmd.Output()
+	out, err := gitCommandOutput(cmd)
+	err = errors.Join(err, cleanup())
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
 		err = fmt.Errorf("%w: %s", err, strings.TrimSpace(string(exit.Stderr)))

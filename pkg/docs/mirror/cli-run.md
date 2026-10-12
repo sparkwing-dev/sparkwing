@@ -92,9 +92,12 @@ PIPELINE resolves against the checkout you are standing in (or the
 one 'sparkwing -C DIR run' names) first, then the repo registry, and the chosen
 checkout is recorded on the run. A detached run executes with an
 allow-listed snapshot of the launching environment -- SPARKWING_*,
-GITHUB_*, PATH, HOME, HOSTNAME, and KUBERNETES_SERVICE_HOST, minus
-every credential-shaped name -- widened by naming variables in
-SPARKWING_SUBMIT_ENV_ALLOW. A consumer starts automatically if none
+GITHUB_*, PATH, HOME, HOSTNAME, KUBERNETES_SERVICE_HOST, XDG_CONFIG_HOME,
+AWS_ENDPOINT_URL and AWS_ENDPOINT_URL_S3 -- widened by the names and NAME_*
+prefixes listed in run.submit_env_allow in config.yaml. Windows also
+preserves its user profile, system, shell, temporary, and application
+data paths, plus absolute Sparkwing key-file paths. Credential values
+and credential-shaped names are filtered. A consumer starts automatically if none
 is running and exits after five idle minutes; see
 'sparkwing runs consumer'.
 
@@ -121,6 +124,11 @@ is running and exits after five idle minutes; see
 | `--sw-no-cache` | Ignore cached per-node results (writes still happen) |
 | `--sw-priority VALUE` | Local admission priority: an integer, or front/back for one step past the queue as it stands; overrides the plan's own Priority |
 | `--sw-local-only` | Force local secrets, state, cache, and logs for this run; ignore any configured shared backends |
+| `--sw-no-update` | Compile against the committed sparks overlay instead of resolving sparks first; CI sets it so the runner needs no resolve |
+| `--sw-no-bincache` | Build a temporary pipeline binary with debug symbols instead of using the binary cache |
+| `--sw-hash-all-files` | Hash files Git ignores into the binary cache key, for a build that embeds them |
+| `--sw-artifact-digest-backfill` | Accept a shared-store binary with no digest sidecar and write the sidecar; use only with a trusted store |
+| `--sw-allow-unadmitted` | Run without the admission daemon even when the pipeline reserves host capacity |
 | `--sw-fleet` | Let explicitly enrolled helpers execute nodes under this foreground process's authority |
 | `--sw-dry-run` | Run each step's dry-run probe instead of its real action |
 | `--sw-allow LABEL[,LABEL...]` | Authorize risk-labeled steps (repeatable) |

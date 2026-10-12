@@ -233,7 +233,7 @@ func forEachRunPage(
 			return "reached the scan horizon", nil
 		}
 		next := filter
-		next.AfterStartedAt, next.AfterID = runStartedAtKey(resume.StartedAt), resume.ID
+		next.AfterStartedAt, next.AfterID = store.RunCursorKey(resume.StartedAt), resume.ID
 		runs, err := b.ListRuns(ctx, next)
 		if err != nil {
 			return "", err

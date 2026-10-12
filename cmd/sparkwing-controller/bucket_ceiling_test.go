@@ -7,27 +7,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 )
 
-func TestApplyBucketCeilingAcceptsTheEnvironmentItReads(t *testing.T) {
-	cfg, err := objectguard.ConfigFromEnv(func(name string) string {
-		if name == objectguard.EnvBucketReconcile {
-			return "0"
-		}
-		return ""
-	})
-	if err != nil {
-		t.Fatalf("ConfigFromEnv: %v", err)
+func TestApplyBucketCeilingConfiguresTheSharedLimiter(t *testing.T) {
+	if err := applyBucketCeiling(objectguard.CeilingConfig{
+		Limit: objectguard.CeilingLimit{MaxBytes: 1 << 30},
+	}); err != nil {
+		t.Fatalf("applyBucketCeiling: %v", err)
 	}
-	cfg.Ceiling.Limit.MaxBytes = 1 << 30
-	if err := applyBucketCeiling(cfg.Ceiling); err != nil {
-		t.Fatalf("the controller refused the ceiling its own environment produced: %v", err)
-	}
-	limiter, err := objectguard.Shared()
-	if err != nil {
-		t.Fatalf("shared limiter: %v", err)
-	}
+	limiter := objectguard.Shared()
 	t.Cleanup(func() { limiter.Ceiling().Configure(objectguard.CeilingConfig{}) })
 	if got := limiter.Ceiling().Reconcile(); got != 0 {
-		t.Errorf("reconcile interval = %s, want the 0 the environment asked for", got)
+		t.Errorf("reconcile interval = %s, want the 0 that was configured", got)
 	}
 }
 

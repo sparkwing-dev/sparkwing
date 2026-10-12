@@ -209,7 +209,7 @@ func WriteOutputFileDurably(path string, data []byte) error {
 		err = closeErr
 	}
 	if err == nil {
-		err = os.Rename(tmp.Name(), path)
+		err = renameOutputFile(tmp.Name(), path)
 	}
 	if err != nil {
 		return errors.Join(err, os.Remove(tmp.Name()))
@@ -221,7 +221,7 @@ func WriteOutputFileDurably(path string, data []byte) error {
 // cache, so it is synced before anything records it done, and its digest is
 // read back from the synced file.
 func syncIfMatches(path string, data []byte) (bool, error) {
-	f, err := os.Open(path)
+	f, err := openOutputForSync(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
@@ -239,14 +239,6 @@ func syncIfMatches(path string, data []byte) (bool, error) {
 	}
 	want := sha256.Sum256(data)
 	return n == int64(len(data)) && string(h.Sum(nil)) == string(want[:]), nil
-}
-
-func syncDir(dir string) error {
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	return errors.Join(d.Sync(), d.Close())
 }
 
 const metaKeyOutputsConverted = "outputs_converted"

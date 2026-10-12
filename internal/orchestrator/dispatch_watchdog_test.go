@@ -100,7 +100,7 @@ func TestDispatchWatchdog_NegativeDisables(t *testing.T) {
 	p := newPathsWithStore(t)
 
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
-		Pipeline:            "spawn-single",
+		Pipeline:            "orch-ok",
 		DispatchWaitTimeout: -1,
 	})
 	wg.Done()

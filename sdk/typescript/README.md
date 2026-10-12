@@ -7,7 +7,7 @@ Nothing in the Sparkwing engine starts it yet.
 It shows how small a Sparkwing SDK becomes when the engine hosts execution:
 the SDK builds plans and runs bodies, and the engine owns scheduling,
 retries, timeouts, caching, secrets and log handling. The design is in
-[docs/design/engine-hosted-execution.md](../../docs/design/engine-hosted-execution.md);
+[design/engine-hosted-execution.md](../../design/engine-hosted-execution.md);
 the wire shapes follow the node protocol specification (`docs/node-protocol.md`
 and its JSON Schemas).
 

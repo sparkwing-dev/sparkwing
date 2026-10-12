@@ -28,7 +28,7 @@
 {{- end -}}
 {{- end -}}
 {{- if .Values.logs -}}
-{{- fail "sparkwing-runner-bundle: logs was removed with the sparkwing-logs Deployment; runners upload node logs to the controller now. Unset logs and follow the migration guide section \"Node logs reach the controller as segments\"" -}}
+{{- fail "sparkwing-runner-bundle: logs was removed with the sparkwing-logs Deployment; runners upload node logs to the controller now. Unset logs and follow the migration guide section \"The logs service is removed\"" -}}
 {{- end -}}
 {{- if not (has .Values.runner.triggerRunner.kind (list "inprocess" "k8s" "warm")) -}}
 {{- fail "sparkwing-runner-bundle: runner.triggerRunner.kind must be inprocess, k8s, or warm" -}}

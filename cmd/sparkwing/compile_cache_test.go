@@ -10,8 +10,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -84,12 +86,24 @@ func (s *fakeCacheServer) has(hash string) bool {
 
 func TestTryRemoteBinary_Hit(t *testing.T) {
 	fake := newFakeCacheServer()
-	fake.store["aaaaaaaa-bbbbbbbb"] = []byte("the binary bytes")
+	payload := []byte("the binary bytes")
+	if runtime.GOOS == "windows" {
+		var err error
+		payload, err = os.ReadFile(os.Args[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	fake.store["aaaaaaaa-bbbbbbbb"] = payload
 
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
 
-	dest := filepath.Join(t.TempDir(), "bin", "pipeline")
+	name := "pipeline"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	dest := filepath.Join(t.TempDir(), "bin", name)
 	if err := bincache.TryBinary(context.Background(), srv.URL, "", "aaaaaaaa-bbbbbbbb", dest); err != nil {
 		t.Fatalf("hit path returned err: %v", err)
 	}
@@ -98,7 +112,7 @@ func TestTryRemoteBinary_Hit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read dest: %v", err)
 	}
-	if !bytes.Equal(got, []byte("the binary bytes")) {
+	if !bytes.Equal(got, payload) {
 		t.Errorf("payload mismatch: %q", got)
 	}
 
@@ -106,7 +120,11 @@ func TestTryRemoteBinary_Hit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat dest: %v", err)
 	}
-	if info.Mode().Perm()&0o100 == 0 {
+	if runtime.GOOS == "windows" {
+		if out, err := exec.Command(dest, "-test.list=^$").CombinedOutput(); err != nil {
+			t.Fatalf("cached executable failed: %v\n%s", err, out)
+		}
+	} else if info.Mode().Perm()&0o100 == 0 {
 		t.Errorf("destination not executable: %v", info.Mode())
 	}
 }

@@ -3,8 +3,52 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
+
+func init() {
+	if os.Getenv("SPARKWING_TEST_GH_HELPER") != "1" {
+		return
+	}
+	args := os.Args[1:]
+	if len(args) != 4 || args[0] != "api" || args[1] != "--paginate" || args[2] != "--slurp" || args[3] != "repos/"+os.Getenv("GITHUB_REPOSITORY")+"/releases?per_page=100" {
+		os.Exit(64)
+	}
+	_, _ = os.Stdout.WriteString(os.Getenv("SPARKWING_TEST_GH_RESPONSE"))
+	if os.Getenv("SPARKWING_TEST_GH_FAIL") == "1" {
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+func latestGHFixture(t *testing.T, dir, script, response string, fail bool) {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "gh.exe"), body, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SPARKWING_TEST_GH_HELPER", "1")
+	t.Setenv("SPARKWING_TEST_GH_RESPONSE", response)
+	if fail {
+		t.Setenv("SPARKWING_TEST_GH_FAIL", "1")
+	} else {
+		t.Setenv("SPARKWING_TEST_GH_FAIL", "0")
+	}
+}
 
 func TestLatestReleaseSelectionCommand(t *testing.T) {
 	dir := t.TempDir()
@@ -12,9 +56,7 @@ func TestLatestReleaseSelectionCommand(t *testing.T) {
 test "$1" = api && test "$2" = --paginate && test "$3" = --slurp && test "$4" = 'repos/fixture/release/releases?per_page=100' || exit 1
 printf '%s' '[[{"tag_name":"v0.52.1","draft":false,"prerelease":false}],[{"tag_name":"v0.52.2","draft":false,"prerelease":false}]]'
 `
-	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(stub), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	latestGHFixture(t, dir, stub, `[[{"tag_name":"v0.52.1","draft":false,"prerelease":false}],[{"tag_name":"v0.52.2","draft":false,"prerelease":false}]]`, false)
 	t.Setenv("PATH", dir)
 	t.Setenv("GITHUB_REPOSITORY", "fixture/release")
 	if err := run([]string{"--latest-tag", "v0.52.3"}); err != nil {
@@ -28,9 +70,7 @@ func TestLatestLookupKeepsRepositoryInOneEndpointArgument(t *testing.T) {
 test "$#" -eq 4 && test "$1" = api && test "$2" = --paginate && test "$3" = --slurp && test "$4" = "repos/$GITHUB_REPOSITORY/releases?per_page=100" || exit 1
 printf '%s' '[[]]'
 `
-	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(stub), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	latestGHFixture(t, dir, stub, `[[]]`, false)
 	t.Setenv("PATH", dir)
 	t.Setenv("GITHUB_REPOSITORY", "--hostname=example.invalid/$(exit 99); exit 99")
 	if err := run([]string{"--latest-tag", "v1.0.0"}); err != nil {
@@ -66,9 +106,7 @@ func TestLatestUsesEveryPublishedStableVersion(t *testing.T) {
 
 func TestLatestRefusesAFailedPublishedReleaseLookup(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte("#!/bin/sh\nprintf '[[]]'\nexit 1\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	latestGHFixture(t, dir, "#!/bin/sh\nprintf '[[]]'\nexit 1\n", `[[]]`, true)
 	t.Setenv("PATH", dir)
 	t.Setenv("GITHUB_REPOSITORY", "fixture/release")
 	if err := run([]string{"--latest-tag", "v1.0.0"}); err == nil {
