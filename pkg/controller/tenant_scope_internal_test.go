@@ -139,7 +139,7 @@ func TestTeamBoundaryRunIDIsTheIDTheHandlerReads(t *testing.T) {
 				target := sp(base)
 				req := httptest.NewRequest(method, target, nil)
 				_, matched := mux.Handler(req)
-				boundaryID, scoped := teamBoundaryRunID(matched, req)
+				boundaryID, scoped := boundaryRunID(matched, req), tenantRoutes[matched].owner == ownerRun
 				got = nil
 				mux.ServeHTTP(httptest.NewRecorder(), req)
 				if got == nil {
