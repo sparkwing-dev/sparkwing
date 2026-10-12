@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -225,19 +226,19 @@ func TestDescribeSchemaDeclaresEveryEmittedField(t *testing.T) {
 		"arg":            reflect.TypeFor[sparkwing.DescribeArg](),
 		"envVar":         reflect.TypeFor[sparkwing.EnvVarDoc](),
 		"stepRisks":      reflect.TypeFor[sparkwing.DescribeStepRisks](),
-		"plan":           reflect.TypeFor[planSnapshot](),
-		"source":         reflect.TypeFor[snapshotSource](),
+		"plan":           reflect.TypeFor[nodeproto.PlanDoc](),
+		"source":         reflect.TypeFor[nodeproto.PlanSource](),
 		"secret":         reflect.TypeFor[pipelines.SecretEntry](),
-		"concurrencyKey": reflect.TypeFor[snapshotConc](),
-		"resources":      reflect.TypeFor[snapshotResources](),
-		"node":           reflect.TypeFor[snapshotNode](),
-		"consume":        reflect.TypeFor[snapshotConsume](),
-		"approval":       reflect.TypeFor[snapshotApproval](),
-		"pipelineRef":    reflect.TypeFor[snapshotPipelineRef](),
-		"modifiers":      reflect.TypeFor[snapshotModifiers](),
-		"work":           reflect.TypeFor[snapshotWork](),
-		"step":           reflect.TypeFor[snapshotStep](),
-		"stepGroup":      reflect.TypeFor[snapshotStepGroup](),
+		"concurrencyKey": reflect.TypeFor[nodeproto.PlanConc](),
+		"resources":      reflect.TypeFor[nodeproto.PlanResources](),
+		"node":           reflect.TypeFor[nodeproto.PlanNode](),
+		"consume":        reflect.TypeFor[nodeproto.PlanConsume](),
+		"approval":       reflect.TypeFor[nodeproto.PlanApproval](),
+		"pipelineRef":    reflect.TypeFor[nodeproto.PlanPipelineRef](),
+		"modifiers":      reflect.TypeFor[nodeproto.PlanModifiers](),
+		"work":           reflect.TypeFor[nodeproto.PlanWork](),
+		"step":           reflect.TypeFor[nodeproto.PlanStep](),
+		"stepGroup":      reflect.TypeFor[nodeproto.PlanStepGroup](),
 	} {
 		s.requireFieldsDeclared(t, def, typ)
 	}

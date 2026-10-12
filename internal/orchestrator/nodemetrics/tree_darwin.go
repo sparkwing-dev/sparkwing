@@ -7,7 +7,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func processSnapshot(root int) (map[int]processSample, bool) {
+func snapshotProcesses(selected func(map[int]processSample) map[int]processSample) (map[int]processSample, bool) {
 	entries, err := unix.SysctlKinfoProcSlice("kern.proc.all")
 	frequency, freqErr := unix.SysctlUint64("hw.tbfrequency")
 	if err != nil || freqErr != nil || frequency == 0 {
@@ -20,7 +20,7 @@ func processSnapshot(root int) (map[int]processSample, bool) {
 		processes[pid] = processSample{parent: int(entry.Eproc.Ppid)}
 		zombies[pid] = entry.Proc.P_stat == 5
 	}
-	for pid, p := range treeProcesses(root, processes) {
+	for pid, p := range selected(processes) {
 		var usage [18]uint64
 		// #nosec G103 -- rusage_info_v1 contains eighteen 64-bit words, including its UUID.
 		_, _, errno := unix.Syscall6(336, 9, uintptr(pid), 1, 0, uintptr(unsafe.Pointer(&usage)), 0)

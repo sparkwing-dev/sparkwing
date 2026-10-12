@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func processSnapshot(root int) (map[int]processSample, bool) {
+func snapshotProcesses(selected func(map[int]processSample) map[int]processSample) (map[int]processSample, bool) {
 	entries, err := os.ReadDir("/proc")
 	frequency := processClockTicks()
 	if err != nil || frequency == 0 {
@@ -34,7 +34,7 @@ func processSnapshot(root int) (map[int]processSample, bool) {
 		}
 		processes[pid], zombies[pid] = p, zombie
 	}
-	for pid, p := range treeProcesses(root, processes) {
+	for pid, p := range selected(processes) {
 		if !zombies[pid] {
 			raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/smaps_rollup")
 			p.rss, p.valid = processResidentBytes(string(raw))

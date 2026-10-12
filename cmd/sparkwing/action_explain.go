@@ -12,75 +12,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
-
-type planSnapshotDoc struct {
-	Pipeline string             `json:"pipeline"`
-	RunID    string             `json:"run_id"`
-	Nodes    []planSnapshotNode `json:"nodes"`
-}
-
-type planSnapshotNode struct {
-	ID          string                 `json:"id"`
-	Deps        []string               `json:"deps,omitempty"`
-	Env         map[string]string      `json:"env,omitempty"`
-	Groups      []string               `json:"groups,omitempty"`
-	Dynamic     bool                   `json:"dynamic,omitempty"`
-	Approval    *planSnapshotApprove   `json:"approval,omitempty"`
-	OnFailureOf string                 `json:"on_failure_of,omitempty"`
-	Modifiers   *planSnapshotModifiers `json:"modifiers,omitempty"`
-	Work        *planSnapshotWork      `json:"work,omitempty"`
-}
-
-type planSnapshotApprove struct {
-	Message   string `json:"message,omitempty"`
-	TimeoutMS int64  `json:"timeout_ms,omitempty"`
-	OnTimeout string `json:"on_timeout,omitempty"`
-}
-
-type planSnapshotModifiers struct {
-	Retry               int      `json:"retry,omitempty"`
-	RetryBackoffMS      int64    `json:"retry_backoff_ms,omitempty"`
-	RetryAuto           bool     `json:"retry_auto,omitempty"`
-	TimeoutMS           int64    `json:"timeout_ms,omitempty"`
-	RunsOn              []string `json:"runs_on,omitempty"`
-	Cache               bool     `json:"cache,omitempty"`
-	CacheTTLMS          int64    `json:"cache_ttl_ms,omitempty"`
-	ConcGroup           string   `json:"conc_group,omitempty"`
-	ConcCapacity        int      `json:"conc_capacity,omitempty"`
-	ConcCost            int      `json:"conc_cost,omitempty"`
-	ConcScope           string   `json:"conc_scope,omitempty"`
-	ConcOnLimit         string   `json:"conc_on_limit,omitempty"`
-	ConcQueueTimeoutMS  int64    `json:"conc_queue_timeout_ms,omitempty"`
-	ConcCancelTimeoutMS int64    `json:"conc_cancel_timeout_ms,omitempty"`
-	Inline              bool     `json:"inline,omitempty"`
-	Optional            bool     `json:"optional,omitempty"`
-	ContinueOnError     bool     `json:"continue_on_error,omitempty"`
-	OnFailure           string   `json:"on_failure,omitempty"`
-	HasBeforeRun        bool     `json:"has_before_run,omitempty"`
-	HasAfterRun         bool     `json:"has_after_run,omitempty"`
-	HasSkipIf           bool     `json:"has_skip_if,omitempty"`
-}
-
-type planSnapshotWork struct {
-	Steps      []planSnapshotStep      `json:"steps,omitempty"`
-	StepGroups []planSnapshotStepGroup `json:"step_groups,omitempty"`
-	ResultStep string                  `json:"result_step,omitempty"`
-}
-
-type planSnapshotStepGroup struct {
-	Name    string   `json:"name,omitempty"`
-	Members []string `json:"members"`
-}
-
-type planSnapshotStep struct {
-	ID        string   `json:"id"`
-	Needs     []string `json:"needs,omitempty"`
-	IsResult  bool     `json:"is_result,omitempty"`
-	HasSkipIf bool     `json:"has_skip_if,omitempty"`
-
-	Risks []string `json:"risks,omitempty"`
-}
 
 type pipelineExplainArgs struct {
 	output      string
@@ -180,7 +113,7 @@ func runPipelineExplain(args []string) error {
 		_, _ = os.Stdout.Write(stdout.Bytes())
 		return nil
 	}
-	var snap planSnapshotDoc
+	var snap nodeproto.PlanDoc
 	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &snap); err != nil {
 		_, _ = os.Stdout.Write(stdout.Bytes())
 		return nil
@@ -235,7 +168,7 @@ func runPipelineExplainAll(format string) error {
 				failed++
 			}
 		} else {
-			var snap planSnapshotDoc
+			var snap nodeproto.PlanDoc
 			if jerr := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &snap); jerr == nil {
 				row.Status = "ok"
 				row.Nodes = len(snap.Nodes)
@@ -304,7 +237,7 @@ func printAllExplainTable(results []allExplainResult, failed int) {
 	}
 }
 
-func printPlanSnapshot(snap *planSnapshotDoc) {
+func printPlanSnapshot(snap *nodeproto.PlanDoc) {
 	if snap.Pipeline != "" {
 		fmt.Printf("Plan: %s\n", snap.Pipeline)
 	}
@@ -319,7 +252,7 @@ func printPlanSnapshot(snap *planSnapshotDoc) {
 	printPlanEdges(snap.Nodes)
 }
 
-func printNode(n *planSnapshotNode, indent string) {
+func printNode(n *nodeproto.PlanNode, indent string) {
 	tag := "Node"
 	if n.Approval != nil {
 		tag = "Approval"
@@ -345,7 +278,7 @@ func printNode(n *planSnapshotNode, indent string) {
 	}
 }
 
-func nodeModifiersSuffix(n *planSnapshotNode) string {
+func nodeModifiersSuffix(n *nodeproto.PlanNode) string {
 	var bits []string
 	if n.Dynamic {
 		bits = append(bits, "dynamic")
@@ -431,7 +364,7 @@ func nodeModifiersSuffix(n *planSnapshotNode) string {
 	return " (" + strings.Join(bits, " ") + ")"
 }
 
-func printWork(w *planSnapshotWork, indent string) {
+func printWork(w *nodeproto.PlanWork, indent string) {
 	fmt.Printf("%sWork\n", indent)
 	groupByStep := map[string][]string{}
 	for _, g := range w.StepGroups {
@@ -464,7 +397,7 @@ func printWork(w *planSnapshotWork, indent string) {
 	}
 }
 
-func printPlanEdges(nodes []planSnapshotNode) {
+func printPlanEdges(nodes []nodeproto.PlanNode) {
 	type edge struct{ From, To string }
 	var edges []edge
 	for _, n := range nodes {
