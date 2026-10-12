@@ -164,7 +164,7 @@ type pipelineStats struct {
 
 func runJobsStats(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsStats.Path, flag.ContinueOnError)
-	on := fs.String("profile", "", "read against the named profile (default: $SPARKWING_PROFILE, then the project's defaults.profile)")
+	on := fs.String("profile", "", "read against the named profile instead of this machine's store")
 	pipeline := fs.String("pipeline", "", "restrict to one pipeline")
 	since := lookbackDuration(fs, "since", 0, "only runs newer than this (e.g. 7d)")
 	capacityView := fs.Bool("capacity", false, "show measured capacity profiles")
@@ -195,7 +195,7 @@ func runJobsStats(ctx context.Context, paths orchestrator.Paths, args []string) 
 	if perr != nil {
 		return perr
 	}
-	if prof != nil && (*on != "" || prof.ControllerURL() != "") {
+	if prof != nil {
 		if err := requireController(prof, "runs stats"); err != nil {
 			return err
 		}

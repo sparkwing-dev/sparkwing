@@ -132,7 +132,7 @@ func installStepControlsFromEnv(ctx context.Context, plan *sparkwing.Plan) (cont
 
 func coordinatedChildSurfaces(ctx context.Context, runID, pipeline string) (secrets.Source, storage.ArtifactStore, LogBackend, error) {
 	projectCfg := bindProjectPipelines()
-	prof, _, err := resolveActiveProfile(loadPipelineYAML(pipeline), projectCfg)
+	prof, _, err := resolveActiveProfile(projectCfg)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("run-node --coordinated: resolve profile: %w", err)
 	}

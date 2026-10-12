@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
@@ -100,13 +101,15 @@ func runPipelineTrigger(args []string) error {
 		return exitErrorf(2, "pipeline trigger: --profile NAME is required (the controller this trigger submits to)")
 	}
 
+	if err := refuseOtherThanPinnedProfile(flags.pipeline, flags.profile, flags.workingTree); err != nil {
+		return err
+	}
 	prof, err := resolveProfileFlag(flags.profile)
 	if err != nil {
 		return err
 	}
 	if prof.ControllerURL() == "" {
-		return fmt.Errorf("pipeline trigger: profile %q has no controller; `pipeline trigger` requires a profile that defines controller:. "+
-			"Use sparkwing run --profile %s for local execution against this profile's storage instead", prof.Name, prof.Name)
+		return fmt.Errorf("pipeline trigger: profile %q has no controller; `pipeline trigger` requires a profile that defines a controller", prof.Name)
 	}
 
 	source := triggerSource("pipeline-trigger")
@@ -172,4 +175,29 @@ func statusOrUnknown(status string) string {
 		return "unknown"
 	}
 	return status
+}
+
+// safety: the pin guards against sending a pipeline to the wrong controller by
+// mistake; the controller still decides who may run it.
+func refuseOtherThanPinnedProfile(pipelineName, profileName string, workingTree bool) error {
+	// safety: the runner compiles the .sparkwing/ at the root of the checkout
+	// the trigger submits, so that file holds the pin, never a nested one.
+	top, err := gitOutput(context.Background(), ".", nil, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return fmt.Errorf("pipeline trigger: find the git checkout to read pipeline %s's pin: %w", pipelineName, err)
+	}
+	// safety: without --working-tree the controller runs the commit HEAD names,
+	// so that commit's sparkwing.yaml holds the pin, not the working tree's.
+	ref := "HEAD"
+	if workingTree {
+		ref = ""
+	}
+	entry, err := pinnedPipelineAt(filepath.Join(strings.TrimSpace(top), ".sparkwing"), ref, pipelineName)
+	if err != nil {
+		return fmt.Errorf("pipeline trigger: %w", err)
+	}
+	if entry == nil || entry.Profile == "" || entry.Profile == profileName {
+		return nil
+	}
+	return fmt.Errorf("pipeline trigger: pipeline %s is pinned to profile %s; pass --profile %s", pipelineName, entry.Profile, entry.Profile)
 }

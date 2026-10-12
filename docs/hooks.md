@@ -128,7 +128,6 @@ public dashboard base URL to make each check run link to `/runs?run=<run-id>`.
 
 ```bash
 sparkwing run build-deploy                                  # local execution
-sparkwing run build-deploy --profile prod                   # local, state via prod
 sparkwing pipeline trigger build-deploy --profile prod      # remote dispatch
 ```
 
@@ -167,10 +166,8 @@ names. `--output pretty` keeps the readable report and repair instructions.
 If configuration loading fails, status still lists installed hooks, reports
 the error on stderr, and exits nonzero. It emits no JSON summary in that case.
 
-
-Hooks installed without `--profile` prove and run their pipelines with
-`--sw-local-only`, even when the project selects a default profile. Pass
-`--profile NAME` to install a hook that uses shared storage.
+Every hook proves and runs its pipelines on this machine with
+`--sw-local-only`.
 
 Each managed hook carries a marker comment so `uninstall` and `status`
 can distinguish sparkwing-installed hooks from hand-written ones.

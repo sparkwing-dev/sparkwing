@@ -8,13 +8,10 @@ import (
 	"sync"
 )
 
-// ResolveDevEnvURL returns key from the environment, else the address the
-// local dashboard wrote to dev.env under $SPARKWING_HOME, which is how a CLI
-// verb finds that dashboard.
-func ResolveDevEnvURL(key string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
+// LocalDashboardURL returns the address the local dashboard wrote to dev.env
+// under key, ignoring the process environment, so a CLI verb without
+// --profile reaches only this machine's dashboard.
+func LocalDashboardURL(key string) string {
 	return devEnvFile()[key]
 }
 

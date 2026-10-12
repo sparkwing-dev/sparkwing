@@ -76,19 +76,25 @@ before attempting a release.
 # Run locally -- uses your Docker, your caches, your machine
 sparkwing run build-deploy
 
-# Run locally, but record state to a remote profile's backend
-sparkwing run build-deploy --profile prod
+# Run locally, but record state to an S3 or Postgres state profile
+sparkwing run build-deploy --profile shared
 
 # Trigger remote execution -- the cluster runs it via the controller
 sparkwing pipeline trigger build-deploy --profile prod
 ```
 
-`sparkwing run` always executes on the machine you invoke it from.
-`--profile` only changes *where state/cache/logs live* and which auth is
-used to reach them; the work still happens locally. To hand execution to
-a cluster, use `sparkwing pipeline trigger` (covered below). All three
-run the same pipeline code -- the difference is where the work happens and
-where its records land.
+`sparkwing run` always executes on the machine you invoke it from. Without
+`--profile` it records to this machine's SQLite store, logs, and cache,
+and reads its local secrets. `--profile` is accepted only for a profile
+with no controller whose state is an S3 bucket or a Postgres database: it
+changes *where state/cache/logs live*, which auth reaches them, and, when
+the profile names a `secrets:` surface, where secrets resolve. The work
+still happens locally. That is a temporary exception for teams that
+coordinate through shared storage, slated for removal. Any other profile
+is refused with a message naming the trigger command. To hand execution to
+a cluster, use `sparkwing pipeline trigger <pipeline> --profile NAME`
+(covered below). All three run the same pipeline code -- the difference is
+where the work happens and where its records land.
 
 ### Local execution
 
@@ -147,12 +153,13 @@ stopped daemon stays stopped. A
 release-pinned pipeline can use that refreshed daemon without replacing it
 with the older release build.
 
-When you run locally against a remote profile (`sparkwing run X --profile
-prod`), the run dual-writes state to both the profile's backend and the
-local SQLite store. The remote is canonical; the local copy is a free
-byproduct, so `sparkwing runs list` on your laptop sees the run afterward
-even with no network. Set `mirror_local: false` on a profile to skip the
-local copy for automated workers that fire off many runs.
+When you run locally against an S3 or Postgres state profile (`sparkwing
+run X --profile shared`), the run dual-writes state to both the profile's
+backend and the local SQLite store. The remote is canonical; the local
+copy is a free byproduct, so `sparkwing runs list` on your laptop sees
+the run afterward even with no network. Set `mirror_local: false` on a
+profile to skip the local copy for automated workers that fire off many
+runs.
 
 See [native-mode.md](native-mode.md) for the full local-mode design.
 
@@ -247,8 +254,8 @@ refused with the reason rather than silently ignored: `--sw-index`
 (the index binding is a live path the launching process holds open),
 `--sw-dry-run`, `--sw-start-at`, `--sw-stop-at`, `--sw-only`,
 `--sw-no-cache`, `--sw-mode`, `--sw-workers`, `--sw-allow`,
-`--sw-local-only`, `--sw-secrets`, `--sw-no-update`, `--sw-fleet`, and
-`--profile`. Run those in the foreground with
+`--sw-local-only`, `--sw-no-update`, `--sw-fleet`, and `--profile`. Run
+those in the foreground with
 `sparkwing run`. Everything else after the pipeline name is passed to the
 pipeline as its own arguments.
 
@@ -279,7 +286,7 @@ unresolved on the trigger, so `front` and `back` are measured against the
 queue the run actually joins when the consumer launches it.
 
 Detaching is local-only. To hand a run to a cluster, use
-`sparkwing pipeline trigger --profile <p> --detach`.
+`sparkwing pipeline trigger <pipeline> --profile <p> --detach`.
 
 #### Publishing a foreground run handle
 
@@ -503,9 +510,11 @@ The controller is the gatekeeper for prod-side execution: only the
 cluster can push to ECR, update gitops, and dispatch warm runners.
 
 `sparkwing pipeline trigger <pipeline> --profile prod` submits the trigger
-to the profile's controller for remote execution. The chosen profile must
-have a `controller:` set; passing a controller-less profile errors with a
-clear message. By default the command follows the remote run until it
+to the profile's controller for remote execution. `--profile` is required,
+and the chosen profile must have a `controller:` set; passing a
+controller-less profile errors with a clear message. A pipeline pinned to
+a profile in `.sparkwing/sparkwing.yaml` accepts only that profile; see
+[pinning a pipeline to a profile](backends.md#pinning-a-pipeline-to-a-profile). By default the command follows the remote run until it
 reaches a terminal state, streaming the run's node logs through the
 controller. Pass
 `--detach` to return as soon as the trigger is registered without
@@ -1074,7 +1083,7 @@ sparkwing to block them.
 | Mode | Where it runs | Speed | When to use |
 |------|--------------|-------|-------------|
 | `sparkwing run <pipeline>` | Your laptop | Fast (local caches) | Day-to-day development, fast iteration, local-only deploys |
-| `sparkwing run <pipeline> --profile prof` | Your laptop | Fast | Local execution that records state to a shared profile's backend |
+| `sparkwing run <pipeline> --profile shared` | Your laptop | Fast | Local execution that records state to an S3 or Postgres state profile's backends (temporary exception slated for removal) |
 | `sparkwing run <pipeline> --sw-detached` | Your laptop, detached | Fast | Work that must outlive the terminal: long deploys over ssh, hand-kicked jobs, agents that must not block |
 | `sparkwing pipeline trigger <pipeline> --profile prof` | Cluster | Medium (remote build) | Production deploys, deploys requiring cluster credentials, parity with webhook flow |
 | Git push -> webhook | Cluster | Medium | Automated CI/CD on every commit |
@@ -1224,7 +1233,8 @@ than falling back to the uid.
 `GET /api/v1/health` is answered by the daemon rather than by a controller,
 so it reports on a home that has no runs store. Alongside the usual
 `status` and `auth` it carries `store`: `absent` when this home has no
-state file (a machine running only object-store profiles, which is healthy
+state file (a machine that only triggers remote runs or runs under
+object-store profiles with `mirror_local: false`, which is healthy
 and stays that way, because a probe never creates the file), `ready` when
 the daemon can read it, and `error: <reason>` with a 503 when a store that
 exists will not open.

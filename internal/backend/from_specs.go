@@ -74,8 +74,8 @@ func FromSpecs(
 		if !ok {
 			return nil, nopCloser{}, fmt.Errorf("state backend type=controller did not return *client.Client")
 		}
-		// safety: the controller serves every node's log, from its segments or from the logs service, so a
-		// reader of a controller profile asks it rather than a logs URL the profile or announcement names.
+		// safety: the controller serves every node's log from its segments, so a reader of a controller profile
+		// asks it whatever logs surface the profile names for its own runs.
 		if logsSpec == nil || logsSpec.Type == backends.TypeController {
 			logStore = c.NodeLogs()
 		}

@@ -24,6 +24,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -56,21 +57,15 @@ func runHooksInstall(args []string) error {
 	fs := flag.NewFlagSet(cmdHooksInstall.Path, flag.ContinueOnError)
 	fleet := fs.Bool("fleet", false, "install into every registered repo")
 	noProve := fs.Bool("no-prove", false, "claim core.hooksPath without running the gate first")
-	profileName := fs.String("profile", "", "pin the hook's runs to this storage profile (default: local-only)")
 	if err := parseAndCheck(cmdHooksInstall, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	opts := installOptions{profile: *profileName}
-	if opts.profile != "" {
-		if _, err := resolveProfileFlag(opts.profile); err != nil {
-			return fmt.Errorf("hooks install: %w", err)
-		}
-	}
+	opts := installOptions{}
 	if !*noProve {
-		opts.prove = runPipelineForProof(opts.profile)
+		opts.prove = runPipelineForProof()
 	}
 	if *fleet {
 		return installFleet(opts)
@@ -161,8 +156,6 @@ type Prover func(repoRoot, pipeline string) error
 
 type installOptions struct {
 	prove Prover
-
-	profile string
 }
 
 func declaredHooks(sparkwingDir string) (map[string][]string, error) {
@@ -247,7 +240,7 @@ func installHooks(git githooks.Git, repoRoot, sparkwingDir string, opts installO
 	installed, skipped := 0, 0
 	for _, hookName := range slices.Sorted(maps.Keys(hooksToRun)) {
 		pipes := hooksToRun[hookName]
-		wrote, err := writeManagedHook(hooksDir, hookName, renderHookScript(hookName, pipes, globalHooks[hookName], opts.profile))
+		wrote, err := writeManagedHook(hooksDir, hookName, renderHookScript(hookName, pipes, globalHooks[hookName]))
 		if err != nil {
 			return false, errors.Join(err, snapshot.restore(git, repoRoot, hooksDir))
 		}
@@ -263,7 +256,7 @@ func installHooks(git githooks.Git, repoRoot, sparkwingDir string, opts installO
 		if _, ours := hooksToRun[hookName]; ours {
 			continue
 		}
-		wrote, err := writeManagedHook(hooksDir, hookName, renderHookScript(hookName, nil, true, opts.profile))
+		wrote, err := writeManagedHook(hooksDir, hookName, renderHookScript(hookName, nil, true))
 		if err != nil {
 			return false, errors.Join(err, snapshot.restore(git, repoRoot, hooksDir))
 		}
@@ -653,9 +646,9 @@ func proveGates(prove Prover, repoRoot string, hooksToRun map[string][]string) m
 	return failed
 }
 
-func runPipelineForProof(profileName string) Prover {
+func runPipelineForProof() Prover {
 	return func(repoRoot, pipeline string) error {
-		cmd, err := pipelineProofCommand(repoRoot, pipeline, profileName)
+		cmd, err := pipelineProofCommand(repoRoot, pipeline)
 		if err != nil {
 			return err
 		}
@@ -667,20 +660,15 @@ func runPipelineForProof(profileName string) Prover {
 	}
 }
 
-func pipelineProofCommand(repoRoot, pipeline, profileName string) (*exec.Cmd, error) {
+func pipelineProofCommand(repoRoot, pipeline string) (*exec.Cmd, error) {
 	args := []string{"run", pipeline, "--sw-local-only"}
-	if profileName != "" {
-		args = []string{"run", pipeline, "--profile", profileName}
-	}
 	self, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("locate sparkwing executable: %w", err)
 	}
 	cmd := exec.Command(self, args...)
 	cmd.Dir = repoRoot
-	env := removeEnv(os.Environ(), "SPARKWING_PROFILE")
-	env = removeEnv(env, "SPARKWING_SECRETS_PROFILE")
-	cmd.Env = append(env, "SPARKWING_LOG_FORMAT=quiet")
+	cmd.Env = append(handoffProfiles(os.Environ(), ""), "SPARKWING_LOG_FORMAT=quiet")
 	return cmd, nil
 }
 
@@ -1100,7 +1088,7 @@ func isProjectDotSparkwing(dir string) (bool, error) {
 	return false, nil
 }
 
-func renderHookScript(hookName string, pipes []string, chainGlobal bool, profileName string) string {
+func renderHookScript(hookName string, pipes []string, chainGlobal bool) string {
 	blocking := hookName != "post-commit"
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
@@ -1130,14 +1118,10 @@ func renderHookScript(hookName string, pipes []string, chainGlobal bool, profile
 		b.WriteString("(\n")
 		b.WriteString(gitenv.ShellUnbind())
 
-		b.WriteString("unset SPARKWING_PROFILE SPARKWING_SECRETS_PROFILE\n")
-		flag := " --sw-local-only"
-		if profileName != "" {
-			flag = " --profile " + shellSingleQuote(profileName)
-		}
+		b.WriteString("unset " + orchestrator.ProfileEnv + " " + orchestrator.SecretsProfileEnv + "\n")
 		for _, p := range pipes {
 			// safety: pipeline names come from repo config, so quote before they reach sh.
-			fmt.Fprintf(&b, "sparkwing run %s%s%s%s\n", shellSingleQuote(p), flag, stdin, tolerate)
+			fmt.Fprintf(&b, "sparkwing run %s --sw-local-only%s%s\n", shellSingleQuote(p), stdin, tolerate)
 		}
 		b.WriteString(")\n")
 	}

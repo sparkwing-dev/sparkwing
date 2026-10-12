@@ -1123,7 +1123,7 @@ func profileViaPhrase(source, _ string) string {
 	case string(profile.ChainSourceFlag):
 		return "--profile flag"
 	case string(profile.ChainSourceNone):
-		return "no --profile (project defaults)"
+		return "no --profile (local store)"
 	default:
 		return source
 	}

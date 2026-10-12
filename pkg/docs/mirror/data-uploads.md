@@ -50,7 +50,7 @@ token. Only that run's live trigger or node claim can sign a source download.
 A retry must upload a new bundle. `runs retry` and Cloud
 `RunAndAwait` children cannot inherit an older run's one-run bundle; both
 are refused before admission. Submit a new Cloud run from the checkout
-(`sparkwing run <pipeline> --profile <cloud-profile>`) to upload fresh bytes. A source consumes the cache share of the
+(`sparkwing pipeline trigger <pipeline> --profile <cloud-profile> --working-tree`) to upload fresh bytes. A source consumes the cache share of the
 team's 1 GiB free allowance and is limited to 500 MiB. The hourly storage
 pass removes an unused source 24 hours after commit, or a bound source 24
 hours after the run finishes. Pending and running runs retain their sources until the bucket's absolute

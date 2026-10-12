@@ -79,7 +79,7 @@ func TestProfileBanner_ViaPhrasePerSource(t *testing.T) {
 		source, want string
 	}{
 		{"flag", "via:    --profile flag"},
-		{"none", "via:    no --profile (project defaults)"},
+		{"none", "via:    no --profile (local store)"},
 	}
 	for _, tc := range cases {
 		out := renderRunStart(t,

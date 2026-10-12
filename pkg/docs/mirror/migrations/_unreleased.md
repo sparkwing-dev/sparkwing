@@ -710,9 +710,15 @@ controller is upgraded, or its pushes and pull requests stop starting runs.
   `GITHUB_WEBHOOK_BINDINGS` document or `GITHUB_WEBHOOK_SECRET`, and the
   controller's `GITHUB_TOKEN` posted commit statuses for its pull request runs.
 - **After:** the [GitHub App](../github-app.md) is the only signed GitHub
-  trigger. The old route, the bindings API and table, the `sparkwing cluster
-  webhooks` commands, the three environment settings and the chart values
+  trigger. The old `/webhooks/github/{pipeline}` route, the
+  `/api/v1/webhooks/github/bindings` API (`POST` to connect, `DELETE` to
+  disconnect) and its table, the `sparkwing cluster webhooks` commands, the
+  three environment settings and the chart values
   `controller.githubWebhookSecret` and `controller.githubStatusToken` are gone.
+  The OpenAPI document drops the bindings API's bodies,
+  `components.schemas.GitHubWebhookBindingRequest`,
+  `components.schemas.GitHubWebhookBindingResponse` and
+  `components.schemas.GitHubWebhookDisconnectResponse`.
   A delivery to the old URL answers `404`. Schema v92 drops the stored bindings
   and their secrets; nothing reads them back.
 
@@ -774,7 +780,7 @@ To move a repository:
 (`/upload`, `/uploads/<id>`), ancestor negotiation and bundle seeding
 (`/sync/negotiate`, `/sync/seed`), an eager mirror fetch (`/git/refresh`) and
 job-ID artifacts (`/artifacts/<job>`). The controller proxied seeding and
-refresh as `POST /api/v1/gitcache/seed` and `POST /api/v1/gitcache/refresh`.
+refresh as `POST` on `/api/v1/gitcache/seed` and `/api/v1/gitcache/refresh`.
 All of them took the cache's operator token or `admin`, except
 `/artifacts/<job>`, which also took a run's cache grant.
 
@@ -871,13 +877,15 @@ surface accepts.
 
 **Before:** `sparkwing-controller --pool` kept a set of PVCs labeled
 `sparkwing.dev/pool=cache` warm with privileged `docker:27-dind` pods and
-served `GET /api/v1/pool` and `POST /api/v1/pool/{checkout,return,heartbeat}`.
+served `GET` on `/api/v1/pool` and `POST` on `/api/v1/pool/checkout`,
+`/api/v1/pool/return` and `/api/v1/pool/heartbeat`.
 `sparkwing-full` turned it on by default (`controller.pool.enabled: true`) and
 gave the controller a Role over PVCs, pods, configmaps, events and namespaces,
 a ClusterRole over StorageClasses, and a warmer ServiceAccount.
 
 **After:** the controller has no pool and makes no Kubernetes API calls. The
-four routes answer 404. Nothing Sparkwing ships ever checked a PVC out, so no
+four routes answer 404, and the OpenAPI document drops the list response,
+`components.schemas.PoolListResponse`. Nothing Sparkwing ships ever checked a PVC out, so no
 build loses a cache it was using.
 
 **Operator steps:**
@@ -910,7 +918,8 @@ template ever mounted one of its PVCs.
 held a server-sent event stream open for up to 30 minutes and sent one
 `ready`, `superseded` or `stream_end` event when the waiter resolved.
 
-**After:** the route answers 404. Nothing Sparkwing ships opened it.
+**After:** `/api/v1/concurrency/{key}/notify` answers 404. Nothing Sparkwing
+ships opened it.
 
 **Upgrade:** a client of your own that waited on the stream polls
 `GET /api/v1/concurrency/{key}/resolve?run_id=...&node_id=...` instead. It
@@ -926,7 +935,8 @@ was attack surface with no caller.
 `GET /api/v1/artifacts/{key}` to a `runs.read` caller, run keys to the run's
 team and content-addressed keys to the operator.
 
-**After:** the route answers 404. Nothing Sparkwing ships called it.
+**After:** `/api/v1/artifacts/{key}` answers 404. Nothing Sparkwing ships
+called it.
 
 **Upgrade:** a script that read artifacts this way reads the artifact store
 its profile names directly, the local directory or the bucket. On a cluster
@@ -944,7 +954,8 @@ top consumers (`GET /api/v1/egress`), read a named team's credit balance
 `--free-team-slots` (`PUT /api/v1/storage/teams/{team}/free-slot`). The cache's
 operator token could list its mirror files with `GET /repos`.
 
-**After:** all four answer 404.
+**After:** `/api/v1/egress`, `/api/v1/credits/teams/{team}`,
+`/api/v1/storage/teams/{team}/free-slot` and the cache's `/repos` answer 404.
 
 **What replaces each:**
 
@@ -1024,16 +1035,72 @@ instead of naming its replacement.
   still names a registered repository on `repos`, and an `OWNER/NAME`
   filter on `runs` and `cluster` verbs.
 - `--profile NAME` may also go before the verb, for verbs that accept it.
-  Without `--profile`, verbs that read runs (`runs list/status/logs/stats`,
-  `run`, `pipeline hooks`, `serve`, `pipeline trigger`) use
-  `SPARKWING_PROFILE`, then the project's `defaults.profile`. `runs stats`
-  read the local store unless `--profile` was given; it now follows that
-  chain, so a repository with `defaults.profile` reads its controller. Verbs
-  that change state elsewhere (`secrets`, `crons`, `runs cancel/retry/bounce/prune`,
-  `cluster`) still act locally unless `--profile` is given.
-- `SPARKWING_PROFILE` is set for a pipeline's own process by
-  `sparkwing run --profile P`, so a `sparkwing runs ...` call inside a step
-  now reads P's store.
+  Without it, every verb acts on the local store; see
+  [The default profile is removed](#the-default-profile-is-removed). `run`
+  accepts `--profile` only for an S3 or Postgres state profile; see
+  [sparkwing run takes --profile only for S3 or Postgres state](#sparkwing-run-takes---profile-only-for-s3-or-postgres-state).
+
+## The default profile is removed
+
+A command reaches a controller only when `--profile` names it on that
+invocation. Neither the project config nor the environment selects a
+profile, so a script or shell history shows every remote it touches.
+
+| Before | After |
+|---|---|
+| `defaults: {profile: prod}` in `.sparkwing/sparkwing.yaml` | Remove the key and pass `--profile prod` to each command that should reach `prod`. The key fails the config load with `field profile not found in type projectconfig.Defaults`. |
+| `sparkwing cloud connect ... --set-default` | `sparkwing cloud connect ...`, then `--profile NAME` on each command |
+| `export SPARKWING_PROFILE=prod; sparkwing runs list` | `sparkwing --profile prod runs list` |
+| `sparkwing runs ...` in a pipeline step, reading the profile the run used | Pass `--profile P` to that call; without it the call reads the local store |
+| `SPARKWING_CONTROLLER_URL=URL sparkwing runs cancel --run ID` | `sparkwing runs cancel --run ID --profile NAME`, with NAME a profile for URL |
+
+- Every verb that accepts `--profile` (`runs`, `serve`, `pipeline trigger`,
+  `debug`, `secrets`, `crons`, `cluster`, and similar) acts on the local store
+  without it. `runs cancel`, `retry`, `bounce` and `prune` without
+  `--profile` reach only the local dashboard that `sparkwing serve` recorded
+  in `dev.env`.
+- `crons install --profile P` installs the schedules on P's controller;
+  without it the schedules arm this machine's timer. A cron or wrapper
+  script that reached a controller through `defaults.profile` or an exported
+  `SPARKWING_PROFILE` acts on the local store. Reinstall it with the profile
+  named: `sparkwing crons install --profile prod`.
+
+## sparkwing run takes --profile only for S3 or Postgres state
+
+`sparkwing run` executes a pipeline on this machine. It accepts `--profile P`
+only when P has no controller and its `state:` is an S3 bucket or a Postgres
+database; such a run records to P's backends as it did before. That is a
+temporary exception for teams that coordinate through shared storage, and it
+is slated for removal. `sparkwing pipeline trigger <pipeline> --profile P`
+runs a pipeline on P's controller.
+
+| Before | After |
+|---|---|
+| `sparkwing run deploy --profile prod` with a controller profile | `sparkwing pipeline trigger deploy --profile prod` (add `--working-tree` to run uncommitted changes), or `sparkwing run deploy` to run locally |
+| `sparkwing run build --profile shared` with an S3 or Postgres `state:` | unchanged |
+| `sparkwing run deploy --sw-secrets prod` | `sparkwing secrets set --name NAME` on this machine for a local run, or `sparkwing pipeline trigger deploy --profile prod` to use prod's controller secrets |
+| `SPARKWING_SECRETS_PROFILE=prod sparkwing run deploy` | as above; the variable is dropped before the pipeline process starts |
+| `pipeline hooks install --profile P` | `pipeline hooks install`; every hook runs its pipelines `--sw-local-only` |
+| a pipeline with `profile: prod` in `sparkwing.yaml`, run with `sparkwing run release` against prod's backends | `sparkwing pipeline trigger release --profile prod`; `sparkwing run release` refuses a pinned pipeline |
+
+- **Pinned pipelines:** a pipeline's `profile:` field pins it to that
+  controller profile. `sparkwing run` refuses it with `pipeline release is
+  pinned to profile prod; use sparkwing pipeline trigger release --profile
+  prod`, and so does a detached run, a cron and a child pipeline started on
+  this machine. `pipeline trigger` still requires `--profile` and refuses any
+  profile other than the pin. `pipeline describe` reports `pinned_profile`, and
+  `pipeline plan` prints the pin. The pin guards against mistakes; the
+  controller decides who may run a pipeline.
+- **Hooks:** a hook installed with `--profile` keeps `--profile 'P'` on its
+  `sparkwing run` lines. With a controller profile, `run` refuses it and the
+  commit or push fails until you reinstall: `sparkwing pipeline hooks
+  install`.
+- **Secrets:** a local run reads this machine's secrets. A run under an S3 or
+  Postgres state profile reads that profile's `secrets:` surface, as before.
+  Controller secrets otherwise reach only runs executing on the controller.
+- **Pipeline processes from an older SDK:** `sparkwing run` and the run
+  consumer drop an inherited `SPARKWING_PROFILE` and `SPARKWING_SECRETS_PROFILE`
+  before starting a pipeline binary, so an exported value selects nothing.
 
 ## Runs verbs fold into status, list and logs
 
@@ -1062,10 +1129,9 @@ instead of naming its replacement.
 - **Defaults:** `runs find` looked back one hour by default; `runs list` has no
   default lookback, so pass `--since 1h` to keep that window. `runs failures`
   printed one row per failed run; that is `--group-by run`.
-- **Profiles:** `runs get`, `wait`, `last`, `find`, `failures`, `grep` and the
-  views read the local store unless `--profile` was given. Their replacements
-  follow `runs status`: `--profile`, then `SPARKWING_PROFILE`, then the
-  project's `defaults.profile`.
+- **Profiles:** the replacements read the local store unless `--profile` is
+  given, as `runs get`, `wait`, `last`, `find`, `failures`, `grep` and the
+  views did.
 
 ## Pipeline verbs fold into list, plan and hooks status
 
@@ -1477,12 +1543,24 @@ host to the controller Service.
 `sparkwing serve` runs the controller in local mode with the dashboard
 attached and needs nothing.
 
-**Removed routes:** `POST /api/v1/auth/oauth/{google,github}/{start,exchange}`,
-`POST /api/v1/me/identities/{provider}/link` and `/link/complete`,
-`POST /api/v1/team/github-app/connect`, `/connect/available`,
-`/connect/select` and `/connect/complete`, `GET /api/v1/operator/session` and
-`GET /api/v1/auth/bootstrap-needed` answer 404. No CLI command called them; a
-client of your own drives the browser pages that replace them.
+**Removed routes:** these answer 404. No CLI command called them; a client
+of your own drives the browser pages that replace them.
+
+| Method | Path |
+|---|---|
+| `POST` | `/api/v1/auth/oauth/google/start` |
+| `POST` | `/api/v1/auth/oauth/google/exchange` |
+| `POST` | `/api/v1/auth/oauth/github/start` |
+| `POST` | `/api/v1/auth/oauth/github/exchange` |
+| `POST` | `/api/v1/me/identities/{provider}/link` |
+| `POST` | `/api/v1/me/identities/{provider}/link/complete` |
+| `POST` | `/api/v1/team/github-app/connect` |
+| `POST` | `/api/v1/team/github-app/connect/available` |
+| `POST` | `/api/v1/team/github-app/connect/select` |
+| `POST` | `/api/v1/team/github-app/connect/complete` |
+| `GET` | `/api/v1/operator/session` |
+| `GET` | `/api/v1/auth/bootstrap-needed` |
+
 `/api/v1/auth/login`, `/api/v1/auth/session` and `/api/v1/auth/logout` remain.
 
 **Why:** two processes split one browser surface, and the proxy's route

@@ -67,11 +67,10 @@ type Pipeline struct {
 	// WithArgs[T].
 	Args map[string]string `yaml:"args,omitempty"`
 
-	// Profile names the project profile (from sparkwing.yaml's
-	// profiles map) this pipeline uses. Empty means "fall back to
-	// the project's defaults.profile selector". The CLI's --profile
-	// flag (which targets ~/.config/sparkwing/config.yaml)
-	// overrides this when present.
+	// Profile pins the pipeline to the controller profile it names:
+	// `sparkwing run` refuses it, and `sparkwing pipeline trigger`
+	// accepts only --profile with this name. Empty leaves the pipeline
+	// unpinned.
 	Profile string `yaml:"profile,omitempty"`
 
 	// Requires are runner-label requirements all jobs in this

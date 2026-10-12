@@ -2,145 +2,19 @@ package orchestrator
 
 import (
 	"context"
-	"fmt"
-	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	fsstore "github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
-
-func setCoordinatedControllerProfile(t *testing.T, controllerURL string) {
-	t.Helper()
-	writeInnerProfiles(t, fmt.Sprintf(`
-profiles:
-  remote:
-    controller: { url: %s }
-    secrets: { type: controller }
-    state: { type: controller }
-    cache: { type: controller }
-    logs: { type: controller }
-`, controllerURL))
-	t.Setenv("SPARKWING_PROFILE", "remote")
-}
-
-func seedStoreSecret(t *testing.T, dbPath, name, value string) {
-	t.Helper()
-	t.Setenv(localsecrets.KeyFileEnv, filepath.Join(t.TempDir(), "secrets.key"))
-	t.Setenv(localsecrets.KeyEnv, "")
-	ring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{Create: true})
-	if err != nil {
-		t.Fatalf("load keyring: %v", err)
-	}
-	st, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer func() { _ = st.Close() }()
-	row := store.Secret{Name: name, Masked: true, Shared: true}
-	sealed, err := controller.SealSecretValue(ring.For(st), store.DefaultTeam, &row, value)
-	if err != nil {
-		t.Fatalf("seal %s: %v", name, err)
-	}
-	row.Value = sealed
-	if err := st.CreateOrReplaceSecret(row, time.Now()); err != nil {
-		t.Fatalf("seed %s: %v", name, err)
-	}
-}
-
-func TestCoordinatedChildSurfaces_LocalOnlyNeverOpensProfileBackends(t *testing.T) {
-	var requests atomic.Int64
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		requests.Add(1)
-		http.Error(w, "remote surface reached", http.StatusInternalServerError)
-	}))
-	defer srv.Close()
-	setCoordinatedControllerProfile(t, srv.URL)
-	t.Setenv("SPARKWING_LOCAL_ONLY", "1")
-
-	home := t.TempDir()
-	t.Setenv("SPARKWING_HOME", home)
-	t.Setenv(wingwire.APISocketEnv, "")
-	seedStoreSecret(t, filepath.Join(home, "state.db"), "TOKEN", "local-token")
-
-	source, art, logs, err := coordinatedChildSurfaces(context.Background(), "run-1", "gate")
-	if err != nil {
-		t.Fatalf("coordinatedChildSurfaces: %v", err)
-	}
-	if _, ok := art.(*fsstore.ArtifactStore); !ok || logs != nil {
-		t.Fatalf("local-only child surfaces: cache=%T logs=%T; want local cache and no remote logs", art, logs)
-	}
-	value, _, err := source.Read("TOKEN")
-	if err != nil || value != "local-token" {
-		t.Fatalf("local secret = %q, %v; want local-token", value, err)
-	}
-	if got := requests.Load(); got != 0 {
-		t.Fatalf("local-only child made %d controller request(s)", got)
-	}
-}
-
-func TestCoordinatedChildSurfaces_ProfileBackendsRemainRemoteWithoutLocalOnly(t *testing.T) {
-	var requests atomic.Int64
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests.Add(1)
-		switch {
-		case r.URL.Path == "/api/v1/secrets/TOKEN":
-			fmt.Fprintln(w, `{"value":"remote-token","masked":true}`)
-		case r.URL.Path == "/bin/probe":
-			w.WriteHeader(http.StatusNotFound)
-		case r.URL.Path == "/api/v1/capabilities":
-			fmt.Fprintln(w, `{"logs":{"segments":true}}`)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer srv.Close()
-	setCoordinatedControllerProfile(t, srv.URL)
-	t.Setenv("SPARKWING_LOCAL_ONLY", "")
-
-	source, art, logs, err := coordinatedChildSurfaces(context.Background(), "run-1", "gate")
-	if err != nil {
-		t.Fatalf("coordinatedChildSurfaces: %v", err)
-	}
-	value, masked, err := source.Read("TOKEN")
-	if err != nil || value != "remote-token" || !masked {
-		t.Fatalf("remote secret = %q, masked=%v, err=%v", value, masked, err)
-	}
-	if found, err := art.Has(context.Background(), "probe"); err != nil || found {
-		t.Fatalf("remote cache probe = %v, %v; want missing", found, err)
-	}
-	if logs == nil {
-		t.Fatal("normal child opened no controller logs")
-	}
-	if got := requests.Load(); got != 3 {
-		t.Fatalf("normal child made %d controller request(s), want secrets, cache and capabilities", got)
-	}
-}
-
-func TestCoordinatedChildSurfaces_UnreachableProfileStillFailsWithoutLocalOnly(t *testing.T) {
-	srv := httptest.NewServer(http.NotFoundHandler())
-	controllerURL := srv.URL
-	srv.Close()
-	setCoordinatedControllerProfile(t, controllerURL)
-	t.Setenv("SPARKWING_LOCAL_ONLY", "")
-
-	_, _, logs, err := coordinatedChildSurfaces(context.Background(), "run-1", "gate")
-	if err == nil || logs != nil || !strings.Contains(err.Error(), controllerURL) {
-		t.Fatalf("unreachable profile: logs=%T err=%v; want an error naming %s", logs, err, controllerURL)
-	}
-}
 
 func TestCoordinatedLogBackend_NoLogsSurfaceKeepsTheRunsOwnFiles(t *testing.T) {
 	ctx := context.Background()

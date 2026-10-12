@@ -449,7 +449,7 @@ runs past a threshold or by id (see [cli-runs.md](cli-runs.md)).
 
 ## Service logs
 
-`sparkwing-controller`, `sparkwing-cache`, `sparkwing-logs`, `sparkwing-runner
+`sparkwing-controller`, `sparkwing-cache`, `sparkwing-runner
 runner` and `sparkwing-runner launch` write their own log to stderr.
 `--log-format` picks `text` (the default) or `json`, and `--log-level` picks the
 lowest level written: `debug`, `info` (the default), `warn` or `error`. A value

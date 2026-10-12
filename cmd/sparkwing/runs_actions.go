@@ -29,7 +29,7 @@ func resolveRunsClient(onFlag, cmd string) (*client.Client, error) {
 		}
 		return client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken()), nil
 	}
-	ctrlURL := orchestrator.ResolveDevEnvURL("SPARKWING_CONTROLLER_URL")
+	ctrlURL := orchestrator.LocalDashboardURL("SPARKWING_CONTROLLER_URL")
 	if ctrlURL == "" {
 		return nil, fmt.Errorf("%s: no --profile profile and no local dashboard running "+
 			"(start it with `sparkwing serve start`, or pass --profile <profile>)", cmd)

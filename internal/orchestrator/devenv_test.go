@@ -41,12 +41,3 @@ func TestServiceURLsReadOnlyTheProcessEnvironment(t *testing.T) {
 		t.Fatalf("artifact store = %v, %v; want none, since dev.env is no longer a fallback", store, err)
 	}
 }
-
-func TestResolveDevEnvURLPrefersTheProcessValue(t *testing.T) {
-	t.Setenv("SPARKWING_HOME", writeDevEnv(t, "SPARKWING_LOGS_URL=http://127.0.0.1:4345\n"))
-	t.Setenv("SPARKWING_LOGS_URL", "http://127.0.0.1:9999")
-
-	if got := ResolveDevEnvURL("SPARKWING_LOGS_URL"); got != "http://127.0.0.1:9999" {
-		t.Fatalf("logs URL = %q, want the caller's own binding", got)
-	}
-}

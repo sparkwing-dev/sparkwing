@@ -212,9 +212,9 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		guardCtx := pipelines.GuardContext{
 			Args: invokeArgs,
 		}
+		guardCtx.ProfileIsLocal = backends.dispatchesLocally()
 		if opts.Profile != nil {
 			guardCtx.ProfileName = opts.Profile.Name
-			guardCtx.ProfileIsLocal = opts.Profile.ControllerURL() == ""
 		}
 		if opts.Git != nil {
 			guardCtx.GitBranch = opts.Git.Branch
@@ -1101,13 +1101,18 @@ func mergeInvokeArgs(opts Options) map[string]string {
 	return merged
 }
 
-func checkoutProjectConfig(logger *slog.Logger) *projectconfig.Config {
+func loadCheckoutProjectConfig() (*projectconfig.Config, string, error) {
 	root := sparkwing.CurrentRuntime().WorkDir
 	if root == "" {
-		return nil
+		return nil, "", nil
 	}
 	path := filepath.Join(root, ".sparkwing", projectconfig.Filename)
 	cfg, err := projectconfig.Load(path)
+	return cfg, path, err
+}
+
+func checkoutProjectConfig(logger *slog.Logger) *projectconfig.Config {
+	cfg, path, err := loadCheckoutProjectConfig()
 	if err != nil {
 		if logger == nil {
 			logger = slog.Default()
@@ -1288,11 +1293,8 @@ func buildRunFlags(opts Options) map[string]any {
 		flags["no_update"] = true
 	}
 	if !opts.LocalOnly {
-		if v := os.Getenv("SPARKWING_PROFILE"); v != "" {
+		if v := handoffProfile(); v != "" {
 			flags["profile"] = v
-		}
-		if v := os.Getenv("SPARKWING_SECRETS_PROFILE"); v != "" {
-			flags["secrets"] = v
 		}
 	}
 	if v := os.Getenv("SPARKWING_MODE"); v != "" {

@@ -61,7 +61,7 @@ func resolveNodeBouncer(ctx context.Context, on, home, runID string) (nodeBounce
 		c, err := resolveRunsClient(on, cmdJobsBounce.Path)
 		return c, noop, err
 	}
-	if home == "" && orchestrator.ResolveDevEnvURL("SPARKWING_CONTROLLER_URL") != "" {
+	if home == "" && orchestrator.LocalDashboardURL("SPARKWING_CONTROLLER_URL") != "" {
 		if c, err := resolveRunsClient("", cmdJobsBounce.Path); err == nil {
 			return c, noop, nil
 		}

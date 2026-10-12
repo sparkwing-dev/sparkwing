@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
@@ -11,17 +12,84 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
-func resolveActiveProfile(pipelineYAML *pipelines.Pipeline, projectCfg *projectconfig.Config) (*profile.Profile, *profile.Chain, error) {
-	if name := os.Getenv("SPARKWING_PROFILE"); name != "" {
-		return resolveNamedProfile(name, projectCfg)
+// ProfileEnv hands the --profile of a `sparkwing run` invocation to the
+// pipeline process the CLI execs. The CLI writes it only from that flag, and
+// only for a remote-state profile, and clears an inherited value first, so an
+// exported variable never selects a profile.
+const ProfileEnv = "SPARKWING_PROFILE"
+
+// SecretsProfileEnv names the variable a pipeline binary built against an
+// older SDK reads to pick a controller secrets source. Nothing here reads it;
+// the CLI and the run consumer drop it before starting a pipeline process.
+const SecretsProfileEnv = "SPARKWING_SECRETS_PROFILE"
+
+func handoffProfile() string { return os.Getenv(ProfileEnv) }
+
+func resolveActiveProfile(projectCfg *projectconfig.Config) (*profile.Profile, *profile.Chain, error) {
+	name := handoffProfile()
+	if name == "" {
+		return nil, &profile.Chain{Source: profile.ChainSourceNone}, nil
 	}
-	if pipelineYAML != nil && pipelineYAML.Profile != "" {
-		return resolveProjectProfile(pipelineYAML.Profile, projectCfg, "pipeline")
+	p, chain, err := resolveNamedProfile(name, projectCfg)
+	if err != nil {
+		return nil, nil, err
 	}
-	if projectCfg != nil && projectCfg.Defaults.Profile != "" {
-		return resolveDefaultProfile(projectCfg.Defaults.Profile, projectCfg)
+	if err := RemoteStateProfile(p); err != nil {
+		return nil, nil, err
 	}
-	return nil, &profile.Chain{Source: profile.ChainSourceNone}, nil
+	return p, chain, nil
+}
+
+// RemoteStateProfile reports whether `sparkwing run --profile` may use p: only
+// a profile with no controller whose state is an S3 bucket or a Postgres
+// database. This is a temporary exception for teams that coordinate through
+// shared storage; every other profile runs on its controller through
+// `sparkwing pipeline trigger`.
+func RemoteStateProfile(p *profile.Profile) error {
+	if p == nil {
+		return nil
+	}
+	state := p.Surfaces().State
+	if p.ControllerURL() == "" && state != nil && (state.Type == backends.TypeS3 || state.Type == backends.TypePostgres) {
+		return nil
+	}
+	return fmt.Errorf("profile %q is not an S3 or Postgres state profile; sparkwing run executes locally, so run on its controller with sparkwing pipeline trigger <pipeline> --profile %s",
+		p.Name, p.Name)
+}
+
+// RefusePinnedLocalRun returns an error when the pipeline's sparkwing.yaml
+// entry pins it to a profile: a pinned pipeline runs only on that profile's
+// controller, through `sparkwing pipeline trigger`.
+func RefusePinnedLocalRun(p *pipelines.Pipeline) error {
+	if p == nil || p.Profile == "" {
+		return nil
+	}
+	return fmt.Errorf("pipeline %s is pinned to profile %s; use sparkwing pipeline trigger %s --profile %s",
+		p.Name, p.Profile, p.Name, p.Profile)
+}
+
+// safety: the dispatcher checks the execution checkout's pin before it starts
+// the pipeline binary, because a binary built against an older SDK skips the
+// check in handle-trigger. A config that cannot be read refuses the run.
+func refusePinnedIn(sparkwingDir, pipeline string) error {
+	path := filepath.Join(sparkwingDir, projectconfig.Filename)
+	cfg, err := projectconfig.Load(path)
+	if err != nil {
+		return fmt.Errorf("read %s to check pipeline %s's profile pin: %w", path, pipeline, err)
+	}
+	if cfg == nil {
+		return nil
+	}
+	return RefusePinnedLocalRun((&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipeline))
+}
+
+// safety: a config that cannot be read hides the pin, so the run fails rather
+// than executing a pipeline that may be pinned to a controller.
+func refusePinnedCheckoutRun(entry *pipelines.Pipeline) error {
+	if _, path, err := loadCheckoutProjectConfig(); err != nil {
+		return fmt.Errorf("read %s to check the pipeline's profile pin: %w", path, err)
+	}
+	return RefusePinnedLocalRun(entry)
 }
 
 func fleetProfileUsesRemoteAuthority(p *profile.Profile) bool {
@@ -92,35 +160,4 @@ func resolveUserProfile(name string) (*profile.Profile, *profile.Chain, error) {
 		return nil, nil, fmt.Errorf("--profile %s: %w", name, err)
 	}
 	return p, &chain, nil
-}
-
-// safety: defaults.profile may name a connection `sparkwing cloud connect`
-// wrote to the user's config.yaml, which is where its token stays, so the
-// project block is preferred but not required.
-func resolveDefaultProfile(name string, cfg *projectconfig.Config) (*profile.Profile, *profile.Chain, error) {
-	if cfg != nil && cfg.Profiles != nil {
-		if p, ok := cfg.Profiles[name]; ok && p != nil {
-			return p, &profile.Chain{Selected: name, Source: profile.ChainSourceProjectDefault}, nil
-		}
-	}
-	p, chain, err := resolveUserProfile(name)
-	if err != nil {
-		if !errors.Is(err, profile.ErrProfileNotFound) {
-			return nil, nil, err
-		}
-		return nil, nil, fmt.Errorf("defaults.profile names profile %q, which is declared neither in sparkwing.yaml profiles nor in %s",
-			name, userProfilesPathForError())
-	}
-	return p, &profile.Chain{Selected: chain.Selected, Source: profile.ChainSourceProjectDefault}, nil
-}
-
-func resolveProjectProfile(name string, cfg *projectconfig.Config, origin string) (*profile.Profile, *profile.Chain, error) {
-	if cfg == nil || cfg.Profiles == nil {
-		return nil, nil, fmt.Errorf("%s names profile %q but sparkwing.yaml declares no profiles", origin, name)
-	}
-	p, ok := cfg.Profiles[name]
-	if !ok || p == nil {
-		return nil, nil, fmt.Errorf("%s names profile %q which is not declared in sparkwing.yaml profiles", origin, name)
-	}
-	return p, &profile.Chain{Selected: name, Source: profile.ChainSourceFlag}, nil
 }

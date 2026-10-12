@@ -89,7 +89,7 @@ profiles:
 	}
 }
 
-func TestResolveProfileChain_FlagThenEnvThenProjectDefault(t *testing.T) {
+func TestResolveProfileChain_OnlyTheFlagSelects(t *testing.T) {
 	writeProfilesFixture(t, `
 profiles:
   prod: { controller: { url: https://api.example.dev } }
@@ -102,12 +102,21 @@ profiles:
 		t.Fatalf("flag: %v %+v %v", p, chain, err)
 	}
 	p, chain, _, err = resolveProfileChain("")
-	if err != nil || p.Name != "dev" || chain.Source != "env" {
-		t.Fatalf("env: %v %+v %v", p, chain, err)
-	}
-	t.Setenv("SPARKWING_PROFILE", "")
-	p, chain, _, err = resolveProfileChain("")
 	if err != nil || p != nil || chain.Source != "none" {
-		t.Fatalf("none: %v %+v %v", p, chain, err)
+		t.Fatalf("an exported SPARKWING_PROFILE selected %v %+v %v; only --profile may", p, chain, err)
+	}
+}
+
+func TestDispatchRun_RefusesAControllerProfileAndNamesTrigger(t *testing.T) {
+	writeProfilesFixture(t, `
+profiles:
+  prod: { controller: { url: https://api.example.dev } }
+  lite: { state: { type: sqlite } }
+`)
+	for _, name := range []string{"prod", "lite"} {
+		err := dispatchRun([]string{"deploy", "--profile", name})
+		if err == nil || !strings.Contains(err.Error(), "sparkwing pipeline trigger deploy --profile "+name) {
+			t.Errorf("run deploy --profile %s = %v, want a refusal naming pipeline trigger", name, err)
+		}
 	}
 }

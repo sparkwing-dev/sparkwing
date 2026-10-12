@@ -81,6 +81,11 @@ type Command struct {
 	Hidden bool
 
 	HideFromComplete bool
+
+	// ReachesController marks a verb that can act on a controller or a
+	// profile's remote backends. It reaches one only when --profile names
+	// it on that invocation, so every such verb must accept --profile.
+	ReachesController bool
 }
 
 var helpFlag = FlagSpec{

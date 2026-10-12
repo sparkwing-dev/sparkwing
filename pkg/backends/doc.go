@@ -8,8 +8,8 @@
 // # Selection at process start
 //
 // The resolved profile's state / cache / logs specs decide each surface.
-// A profile is selected explicitly (--profile NAME) or via the project's
-// defaults.profile; there is no environment-based auto-selection.
+// A profile is selected by --profile NAME or by the pipeline's own
+// profile: field; neither the environment nor a project default selects one.
 //
 // # Shape (yaml)
 //

@@ -3,54 +3,15 @@ package orchestrator
 import (
 	"context"
 	"errors"
-	"fmt"
-	"os"
 
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func applySecretsProfileOverride(opts *Options) error {
-	if opts.LocalOnly {
-		return nil
-	}
-	prof := os.Getenv("SPARKWING_SECRETS_PROFILE")
-	if prof == "" {
-		return nil
-	}
-	src, err := remoteSecretSource(prof, opts.RunID)
-	if err != nil {
-		return err
-	}
-	opts.SecretSource = src
-	return nil
-}
-
-func remoteSecretSource(profName, runID string) (secrets.Source, error) {
-	if profName == "" {
-		return nil, errors.New("profile name is required")
-	}
-	cfgPath, err := profile.DefaultPath()
-	if err != nil {
-		return nil, err
-	}
-	cfg, err := profile.Load(cfgPath)
-	if err != nil {
-		return nil, err
-	}
-	prof, _, err := profile.Resolve(profName, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("resolve profile %q: %w", profName, err)
-	}
-	if prof.ControllerURL() == "" {
-		return nil, fmt.Errorf("profile %q has no controller URL", prof.Name)
-	}
-	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
-	return controllerSecretSource(context.Background(), c, runID), nil
-}
-
+// safety: a run the controller dispatched (a cluster worker or a remote runner
+// node) reads controller secrets; a local run reaches them only through the
+// secrets surface of the remote-state profile its --profile named.
 func controllerSecretSource(ctx context.Context, c *client.Client, runID string) secrets.Source {
 	return secrets.SourceFunc(func(name string) (string, bool, error) {
 		sec, gerr := c.GetSecretForRun(ctx, name, runID)

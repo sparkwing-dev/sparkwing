@@ -53,6 +53,17 @@ type Backends struct {
 	APISocket string
 }
 
+// safety: profile:local and profile:controller guards test this. A
+// run this machine dispatches is local whatever store holds its state; a run a
+// controller dispatched is not.
+func (b Backends) dispatchesLocally() bool {
+	if b.LocalCoordination {
+		return true
+	}
+	_, objectStore := canonicalState(b.State).(s3StateAdapter)
+	return objectStore
+}
+
 // RunCoordination is the store surface a run needs for its own
 // coordination rather than for node state: the child triggers it
 // dispatches, the capacity profile it measures and is priced from, and the

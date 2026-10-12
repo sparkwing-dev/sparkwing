@@ -54,8 +54,6 @@ type runFlags struct {
 	digestBackfill  bool
 	allowUnadmitted bool
 
-	secrets string
-
 	mode string
 
 	workers int
@@ -213,17 +211,6 @@ func parseRunFlags(args []string) (runFlags, []string) {
 			argumentIndex++
 		case argument == "--sw-verbose", argument == "-v":
 			flags.verbose = true
-			argumentIndex++
-		case argument == "--sw-secrets":
-			if argumentIndex+1 < len(args) {
-				flags.secrets = args[argumentIndex+1]
-				argumentIndex += 2
-				continue
-			}
-			passthroughArgs = append(passthroughArgs, argument)
-			argumentIndex++
-		case strings.HasPrefix(argument, "--sw-secrets="):
-			flags.secrets = strings.TrimPrefix(argument, "--sw-secrets=")
 			argumentIndex++
 		case argument == "--sw-mode":
 			if argumentIndex+1 < len(args) {

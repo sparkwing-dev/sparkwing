@@ -30,6 +30,9 @@ Each top-level key is a section with one owner:
 Any other top-level key, and any key a section does not define, fails the read
 with the file, line and key named.
 
+A profile in this file is used only by a command that names it with
+`--profile`; no setting here or in the environment makes one the default.
+
 ```yaml
 # ~/.config/sparkwing/config.yaml
 profiles:

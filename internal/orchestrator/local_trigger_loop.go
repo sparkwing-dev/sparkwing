@@ -224,6 +224,10 @@ func dispatchLocalTrigger(ctx context.Context, trig *store.Trigger,
 		return fmt.Errorf("no .sparkwing/ at %s: %w", sparkwingDir, err)
 	}
 
+	if err := refusePinnedIn(filepath.Join(repoDir, ".sparkwing"), trig.Pipeline); err != nil {
+		return err
+	}
+
 	binPath, err := pinnedTriggerBinary(trig)
 	if err != nil {
 		return err
@@ -267,7 +271,7 @@ func submissionExecutionEnvironment(captured []string, home string) []string {
 		"SPARKWING_RUN_HANDLE_FILE": {},
 		"SPARKWING_START_AT":        {}, "SPARKWING_STOP_AT": {}, "SPARKWING_ONLY": {},
 		"SPARKWING_NO_CACHE": {}, "SPARKWING_DRY_RUN": {}, "SPARKWING_LOCAL_ONLY": {},
-		"SPARKWING_ALLOW": {}, "SPARKWING_REF": {}, "SPARKWING_SECRETS_PROFILE": {},
+		"SPARKWING_ALLOW": {}, "SPARKWING_REF": {}, ProfileEnv: {}, SecretsProfileEnv: {},
 		"SPARKWING_MODE": {}, "SPARKWING_WORKERS": {},
 		PriorityEnv:                    {},
 		AdmissionClassEnv:              {},

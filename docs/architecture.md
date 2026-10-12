@@ -338,7 +338,6 @@ profiles:
       token: <api-token>
 ```
 
-Select it per run with `--profile prod`, or make it the project default
-by setting `defaults.profile: prod` in `.sparkwing/sparkwing.yaml`. The
+Select it per command with `--profile prod`. The
 same pipelines run against any sparkwing controller without changes;
 only the profile and registries differ.
