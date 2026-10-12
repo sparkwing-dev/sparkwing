@@ -28,8 +28,16 @@ func TestRun_RefusesAPinnedPipelineAndNamesTrigger(t *testing.T) {
 
 func TestPipelineTrigger_RefusesAProfileOtherThanThePin(t *testing.T) {
 	writeProfilesFixture(t, "profiles:\n  prod: { controller: { url: http://127.0.0.1:1 } }\n  staging: { controller: { url: http://127.0.0.1:1 } }\n")
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
 	projectAt(t, pinnedProject)
-	err := runPipelineTrigger([]string{"release", "--profile", "staging", "--working-tree"})
+	root, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, root, "init", "-q")
+	err = runPipelineTrigger([]string{"release", "--profile", "staging", "--working-tree"})
 	if err == nil || !strings.Contains(err.Error(), "pipeline release is pinned to profile prod; pass --profile prod") {
 		t.Fatalf("trigger release --profile staging = %v, want the pin refusal", err)
 	}
@@ -187,6 +195,35 @@ func TestPipelineTrigger_ReadsThePinWithoutMainGoAndFailsOnABadConfig(t *testing
 	for _, workingTree := range []bool{false, true} {
 		if err := refuseOtherThanPinnedProfile("release", "staging", workingTree); err == nil {
 			t.Fatalf("workingTree=%v: an unparseable sparkwing.yaml read as no pin", workingTree)
+		}
+	}
+}
+
+// The runner compiles the root .sparkwing/, so a config-only .sparkwing/ in a
+// subdirectory must not hide the root pipeline's pin.
+func TestPipelineTrigger_ANestedConfigDoesNotHideTheRootPin(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	projectAt(t, pinnedProject)
+	root, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(root, "service", ".sparkwing")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "sparkwing.yaml"), []byte("pipelines:\n  - name: release\n    entrypoint: Release\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, root, "init", "-q")
+	gitIn(t, root, "add", ".")
+	gitIn(t, root, "commit", "-q", "-m", "root pins release; a nested config does not")
+	t.Chdir(filepath.Dir(nested))
+	for _, workingTree := range []bool{false, true} {
+		if err := refuseOtherThanPinnedProfile("release", "staging", workingTree); err == nil || !strings.Contains(err.Error(), "pinned to profile prod") {
+			t.Fatalf("workingTree=%v: trigger from the nested directory = %v, want the root pin refusal", workingTree, err)
 		}
 	}
 }

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -191,16 +190,11 @@ func statusOrUnknown(status string) string {
 // safety: the pin guards against sending a pipeline to the wrong controller by
 // mistake; the controller still decides who may run it.
 func refuseOtherThanPinnedProfile(pipelineName, profileName string, workingTree bool) error {
-	cwd, err := os.Getwd()
+	// safety: the runner compiles the .sparkwing/ at the root of the checkout
+	// the trigger submits, so that file holds the pin, never a nested one.
+	top, err := gitOutput(context.Background(), ".", nil, "rev-parse", "--show-toplevel")
 	if err != nil {
-		return fmt.Errorf("pipeline trigger: %w", err)
-	}
-	// safety: the pin is read wherever sparkwing.yaml lives, with or without a
-	// main.go beside it, and a project that cannot be found or read is an error
-	// rather than an unpinned pipeline.
-	dir, ok, err := nearestDotSparkwing(cwd)
-	if err != nil {
-		return fmt.Errorf("pipeline trigger: find the project to check pipeline %s's pin: %w", pipelineName, err)
+		return fmt.Errorf("pipeline trigger: find the git checkout to read pipeline %s's pin: %w", pipelineName, err)
 	}
 	// safety: without --working-tree the controller runs the commit HEAD names,
 	// so that commit's sparkwing.yaml holds the pin, not the working tree's.
@@ -208,17 +202,7 @@ func refuseOtherThanPinnedProfile(pipelineName, profileName string, workingTree 
 	if workingTree {
 		ref = ""
 	}
-	if !ok {
-		if workingTree {
-			return nil
-		}
-		top, gitErr := exec.Command("git", "-C", cwd, "rev-parse", "--show-toplevel").Output()
-		if gitErr != nil {
-			return fmt.Errorf("pipeline trigger: no .sparkwing/ in %s or above it and no git checkout to read pipeline %s's pin from: %w", cwd, pipelineName, gitErr)
-		}
-		dir = filepath.Join(strings.TrimSpace(string(top)), ".sparkwing")
-	}
-	entry, err := pinnedPipelineAt(dir, ref, pipelineName)
+	entry, err := pinnedPipelineAt(filepath.Join(strings.TrimSpace(top), ".sparkwing"), ref, pipelineName)
 	if err != nil {
 		return fmt.Errorf("pipeline trigger: %w", err)
 	}
