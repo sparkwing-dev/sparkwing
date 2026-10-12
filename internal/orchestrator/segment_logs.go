@@ -91,12 +91,14 @@ func (n *nodeLogSink) ServeHTTP(w http.ResponseWriter, r *http.Request) { n.hand
 func (n *nodeLogSink) close(ctx context.Context, stopped bool) {
 	n.closeOnce.Do(func() {
 		watchedSinks.CompareAndDelete(watchKey(n.runID, n.nodeID), n)
+		// safety: a renewal in flight holds the uploader for up to its own
+		// minute, so it is cancelled before the seal's budget starts.
+		n.stopFresh()
+		<-n.freshDone
 		sealCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), childLogSealBudget)
 		defer cancel()
 		m, err := n.sink.Close(sealCtx, logseg.End{Stopped: stopped})
 		n.live.close()
-		n.stopFresh()
-		<-n.freshDone
 		switch {
 		case errors.Is(err, logseg.ErrSealed):
 			n.logger.Warn("node log sealed by the controller before this runner sealed it",
