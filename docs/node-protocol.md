@@ -179,7 +179,7 @@ The host treats a missing code, or one it does not know, as `sdk_error` and keep
 
 ## Closures
 
-A closure is customer code that the host calls by id. The plan lists each node's closures under `closures`, and each step's under the step's own `closures`. The SDK assigns the ids. An id is opaque to the host, and it must be unique within the plan together with every generated node. The host refuses a plan with duplicate ids (`plan_invalid`). The Go SDK's ids look like `deploy/skip_if/0`, but an SDK that builds ids from node and step ids must keep them unique when those ids contain `/`.
+A closure is customer code that the host calls by id. The plan lists each node's closures under `closures`, and each step's under the step's own `closures`. The SDK assigns the ids. An id is opaque to the host, and it must be unique within the plan together with every generated node. The host refuses a plan with duplicate ids (`plan_invalid`). The Go SDK's ids look like `deploy/skip_if/0`; its encoding, described on `$defs/closures` in the schema, escapes `/` in node and step ids so they stay unique. Any SDK that builds ids from node and step ids must keep them unique when those ids contain `/`.
 
 | Kind | Where the host evaluates it | `input` | `value` | When `error` is set |
 |---|---|---|---|---|
@@ -291,6 +291,7 @@ An error response is `{"error": "<message>", "code": "<code>"}`. Every route can
 - 401 `unauthorized`: the bearer is missing, unknown or expired.
 - 426 `protocol_mismatch`: the version header is missing or is not `1`. The body adds `"supported": ["1"]`.
 - 400 `bad_request`: the body or the query is malformed.
+- 429 `too_many_requests`: the node already has as many requests open as the route allows. See the limits below the table. The SDK may retry once one of its requests ends.
 - 502 `upstream_unavailable`: the host could not reach the controller. The SDK may retry after a delay.
 
 The host adds the controller credential and the claim fence when it forwards a request. The SDK never holds either.
@@ -299,16 +300,22 @@ The host adds the controller credential and the claim fence when it forwards a r
 | Method | Path | Request | Response | Errors |
 |---|---|---|---|---|
 | GET | `/node/v1/secrets/{name}` | none | 200 `{value, masked}`. When `masked` is true, the host registers `value` with its masker before it answers | 404 `secret_not_found` |
-| GET | `/node/v1/nodes/{node}/output` | none; `{node}` is any node of the bearer's run | 200 `{output}`, the node's JSON output, `null` when it produced none | 404 `unknown_node`; 409 `not_ready` until the node finishes; 404 `no_output` when it finished without succeeding |
+| GET | `/node/v1/nodes/{node}/output` | none; `{node}` is a node of the bearer's run that the bearer's node depends on, directly or through other nodes | 200 `{output}`, the node's JSON output, `null` when it produced none | 404 `unknown_node`; 409 `not_ready` until the node finishes; 404 `no_output` when it finished without succeeding; 403 `not_dependency` when the bearer's node does not depend on it |
 | POST | `/node/v1/oidc-token` | `{audience}` | 200 `{token, expires_at}`; the host masks `token` | 404 `oidc_unavailable` when the controller holds no signing key |
 | POST | `/node/v1/cleanups` | `{argv: [string], description?}` | 201 `{id}`. When the process exits, the host runs `argv` once, with no shell, unless the cleanup was released | none beyond the common ones |
 | DELETE | `/node/v1/cleanups/{id}` | none; releases the cleanup | 204 | 404 `unknown_cleanup` |
-| POST | `/node/v1/children` | `{pipeline, args?: {name: value}, repo?, branch?}` | 201 `{run_id}`. The host records the node as the parent, links the new run to the run started by the node's previous attempt, and passes the trigger environment | 409 `cycle` when the pipeline is already among the run's ancestors |
+| POST | `/node/v1/children` | `{pipeline, args?: {name: value}, repo?, branch?}`, at most 64 KiB | 201 `{run_id}`. The host records the node as the parent, links the new run to the run started by the node's previous attempt, and passes the trigger environment | 409 `cycle` when the pipeline is already among the run's ancestors; 422 `child_repo` when `repo` or `branch` names another repository or branch than the parent run's |
 | GET | `/node/v1/children/{run}/await` | query `node?`, the node whose output to return, and `wait_ms?`, at most 60000 (default 30000) | 200 `{run_id, status, error?, output?}`. `status` is `pending`, `running`, `success`, `failed` or `cancelled`. The host holds the request until the run finishes or `wait_ms` passes. `output` is the named node's output once `status` is `success` | 404 `unknown_child` for a run this node did not start |
-| GET | `/node/v1/pipelines/{name}/latest` | query `node`, and `max_age_ms?` | 200 `{run_id, output}` from the newest successful run of the pipeline in the team | 404 `no_run` when none matches; 404 `no_output` when that run's node has none |
+| GET | `/node/v1/pipelines/{name}/latest` | query `node`, and `max_age_ms?` | 200 `{run_id, output}` from the newest successful run of the pipeline in the team | 404 `no_run` when none matches; 404 `no_output` when that run's node has none; 403 `reference_undeclared` when the node's plan declares no reference to that pipeline and node |
 <!-- node-routes:end -->
 
 Notes on the routes:
+
+- **Limits.** The host counts requests per claimed node attempt, across every process bound to it:
+  - at most 4 open requests among `nodes/{node}/output`, `pipelines/{name}/latest`, `oidc-token` and `POST children`;
+  - at most 64 open `children/{run}/await` requests, which do not count toward the 4.
+
+  A request past either limit gets 429 `too_many_requests` at once, and is never queued. Every open `await` of one child run shares one poll of the controller a second.
 
 - **Cleanups.** A cleanup is for a resource outside the process session, such as a container or a cloud object, which killing the session would leave behind. `argv` must be idempotent. The host runs it once, after the process exits for any reason, in the repository root with the node's environment, and bounds it in time.
 - **Child runs.** A child run that waits in plan admission does not count against the parent node's wall timeout while an `await` request for it is open. The SDK enforces its own wait limit, such as `RunAndAwait`'s `WithFreshTimeout`, by not calling `await` again.

@@ -25,6 +25,8 @@ type Node struct {
 	Secrets  []string
 	Resolver secretsource.Resolver
 	Masker   *secrets.Masker
+	// Claim forwards the routes that reach the controller; nil answers them 502.
+	Claim *Claim
 }
 
 type grant struct {

@@ -103,6 +103,7 @@ type submittedModifiers struct {
 	HasBeforeRun        bool     `json:"has_before_run"`
 	HasAfterRun         bool     `json:"has_after_run"`
 	HasSkipIf           bool     `json:"has_skip_if"`
+	HasVerify           bool     `json:"has_verify"`
 }
 
 type plannedNode struct {
