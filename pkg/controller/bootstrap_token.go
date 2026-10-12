@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"time"
@@ -16,20 +17,21 @@ const BootstrapAdminPrincipal = "bootstrap:admin"
 // CheckoutServicePrincipal labels the token [EnsureCheckoutToken] writes.
 const CheckoutServicePrincipal = "checkout-service"
 
-// EnsureCheckoutToken stores raw as the checkout service's token, a service
-// token carrying only [ScopeCreditsGrant], unless a token with its prefix is
-// already stored, and reports whether it created one. An empty raw creates
-// nothing. The controller's API never mints that scope, so this credential,
-// provisioned beside the controller's other secrets, is the only way the
-// checkout service gets one.
-func EnsureCheckoutToken(st *store.Store, raw string, now time.Time) (bool, error) {
+// EnsureCheckoutToken seeds raw as the checkout service's token, a service
+// token carrying only [ScopeCreditsGrant], through [store.Store.SeedToken],
+// and reports whether it created one. An empty raw creates nothing; a raw
+// whose token was revoked returns [store.ErrSeededTokenRevoked] and is never
+// seeded again. The controller's API never mints that scope, so this
+// credential, provisioned beside the controller's other secrets, is the only
+// way the checkout service gets one.
+func EnsureCheckoutToken(ctx context.Context, st *store.Store, raw string, now time.Time) (bool, error) {
 	if raw == "" {
 		return false, nil
 	}
 	if st == nil {
 		return false, errors.New("checkout token: no store")
 	}
-	return st.CreateTokenIfAbsent(raw, CheckoutServicePrincipal, store.TokenKindService,
+	return st.SeedToken(ctx, raw, CheckoutServicePrincipal, store.TokenKindService,
 		[]string{ScopeCreditsGrant}, now)
 }
 

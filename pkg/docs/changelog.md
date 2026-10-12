@@ -45,7 +45,7 @@ unlock.
 
 ### Changed
 - **store + controller (Breaking):** `Store.ReleaseCreditFreezes` takes the actor and reason its business events record, and `Store.DisputeTeam` is removed
-  `BillingStanding` reports `DailyCapOverrideCents`, `RungOverrideCents` and `RunnerCapOverride`, and `controller.OperatorReason` checks the reason the console and the break-glass command record; `Store.CreateTokenIfAbsent` and `controller.EnsureCheckoutToken` seed the checkout service's token from the `credits-token` credential, and an empty hold id is refused by `Store.ReleaseCreditFreezes` rather than read as every hold. See [migration guide](docs/migrations/_unreleased.md#operator-powers-need-the-operator-console).
+  `BillingStanding` reports `DailyCapOverrideCents`, `RungOverrideCents` and `RunnerCapOverride`, and `controller.OperatorReason` checks the reason the console and the break-glass command record; `Store.SeedToken` and `controller.EnsureCheckoutToken` seed the checkout service's token from the `credits-token` credential once, refusing a revoked value with `store.ErrSeededTokenRevoked`, and an empty hold id is refused by `Store.ReleaseCreditFreezes` rather than read as every hold. See [migration guide](docs/migrations/_unreleased.md#operator-powers-need-the-operator-console).
 
 - **cli:** `sparkwing runs logs --profile`, `--follow` and `--grep` read through the profile's controller instead of a logs service
   The controller serves each node from its segments, or from the logs service for a node that wrote none, so a profile no longer needs a logs URL to read logs. `GET /api/v1/runs/{id}/logs/{node}` applies `tail`, `head`, `lines` and `grep`, and `line_numbers=1` with `max_matches` answers numbered grep matches.

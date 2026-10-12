@@ -203,10 +203,15 @@ value once and give the same string to the checkout service:
 printf 'sws_%s' "$(openssl rand -hex 24)" > credits-token
 ```
 
-Each start writes the token if no token with its prefix is stored, and leaves
-a revoked one revoked. To rotate it, put a new value in the file and in the
+The controller seeds each value once and records that it did, so a restart
+with the same file writes nothing. Once that token is revoked, the value is
+never seeded again, even after the revoked row is pruned: the controller logs
+an `ERROR` naming the `credits-token` credential at every start until the file
+holds a new value. To rotate it, put a new value in the file and in the
 checkout service, restart the controller, then revoke the old prefix with
-`sparkwing cluster tokens revoke`. A controller with no `--billing-url` sells no credits
+`sparkwing cluster tokens revoke`. A token stored under the file's prefix
+before it was provisioned, such as one minted by an earlier release, is
+adopted as it stands. A controller with no `--billing-url` sells no credits
 and answers the checkout route with `503` and
 `"code": "checkout_unavailable"`.
 

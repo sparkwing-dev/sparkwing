@@ -865,6 +865,7 @@ var ErrRunnerTokenLimit = errors.New("store: this team holds as many machine tok
 var ErrSecretInputHash = errors.New("inputs_hash is forbidden when a secret argument is supplied")
 var ErrSecretLimit = errors.New("store: secret limit reached")
 var ErrSecretUndeclared = errors.New("store: the run's pipeline does not declare this secret")
+var ErrSeededTokenRevoked = errors.New("tokens: this provisioned credential was revoked; replace it")
 var ErrSessionBackend = errors.New("sessions: backend unavailable")
 var ErrSlotUndeclared = errors.New("store: the run's accepted plan declares no such slot for this node")
 var ErrSlugTaken = errors.New("store: that team slug is taken")
@@ -2244,7 +2245,6 @@ func (s *Store) CreateRetryWithRun(ctx context.Context, sourceRunID string, trig
 func (s *Store) CreateRun(ctx context.Context, r Run) error
 func (s *Store) CreateTeam(ctx context.Context, accountID string, slug Team, displayName string, now time.Time) (TeamInfo, error)
 func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error)
-func (s *Store) CreateTokenIfAbsent(raw, principal, kind string, scopes []string, now time.Time) (bool, error)
 func (s *Store) CreateTokenIfNoneExist(raw, principal, kind string, scopes []string, now time.Time) (bool, error)
 func (s *Store) CreateTokenSession(ctx context.Context, tokenPrefix, principal string, team Team, ttl time.Duration, now time.Time) (rawSession string, sess *Session, err error)
 func (s *Store) CreateTokenWith(
@@ -2491,6 +2491,7 @@ func (s *Store) RunStoragePassLeased(ctx context.Context, holder string, window,
 func (s *Store) SampleSealedSecrets(ctx context.Context, sealedPrefix string, limit int) (_ []TeamSecret, err error)
 func (s *Store) SearchTeams(ctx context.Context, q string) (_ []TeamMatch, err error)
 func (s *Store) SeedStorageRetention(ctx context.Context, days int64) (bool, error)
+func (s *Store) SeedToken(ctx context.Context, raw, principal, kind string, scopes []string, now time.Time) (_ bool, err error)
 func (s *Store) SetActiveTeam(ctx context.Context, accountID string, team Team, now time.Time) error
 func (s *Store) SetComputeLimit(ctx context.Context, name string, value int64) error
 func (s *Store) SetComputeLimits(ctx context.Context, updates map[string]int64) (_ ComputeLimits, err error)

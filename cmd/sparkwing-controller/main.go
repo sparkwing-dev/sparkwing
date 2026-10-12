@@ -439,9 +439,16 @@ func run(args []string) error {
 		}
 	}
 
-	if created, err := controller.EnsureCheckoutToken(st, creds.CreditsToken, time.Now().UTC()); err != nil {
+	switch created, err := controller.EnsureCheckoutToken(ctx, st, creds.CreditsToken, time.Now().UTC()); {
+	case errors.Is(err, store.ErrSeededTokenRevoked):
+		// safety: a revoked credential is never seeded again; the controller
+		// starts without a checkout token so selling credits stops visibly.
+		fmt.Fprintln(os.Stderr, "sparkwing-controller: ERROR: the "+credCreditsToken+
+			" credential holds a checkout token that was revoked; it is not seeded again. "+
+			"Write a new sws_ value to the credential and to the checkout service, then restart.")
+	case err != nil:
 		return fmt.Errorf("%s credential: %w", credCreditsToken, err)
-	} else if created {
+	case created:
 		fmt.Fprintln(os.Stderr, "sparkwing-controller: checkout service token created from the "+credCreditsToken+" credential")
 	}
 

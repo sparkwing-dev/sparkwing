@@ -136,23 +136,29 @@ func ScopesForRole(role store.Role) []string {
 	return store.ScopesForRole(role)
 }
 
-func validateScopes(scopes []string) error {
-	var unknown []string
+// safety: a token request's scopes are normalized once, here, and every later
+// check and the stored row read the result, so no check can see a spelling the
+// store would not keep. A scope that is not exactly a known one is refused.
+func normalizeScopes(scopes []string) ([]string, error) {
+	var out, unknown []string
 	for _, s := range scopes {
 		trimmed := strings.TrimSpace(s)
-		if trimmed == "" || slices.Contains(allScopes, trimmed) || slices.Contains(unknown, s) {
-			continue
+		switch {
+		case trimmed == "" || slices.Contains(out, trimmed):
+		case slices.Contains(allScopes, trimmed):
+			out = append(out, trimmed)
+		case !slices.Contains(unknown, s):
+			unknown = append(unknown, s)
 		}
-		unknown = append(unknown, s)
 	}
 	if len(unknown) == 0 {
-		return nil
+		return out, nil
 	}
 	noun := "scope"
 	if len(unknown) > 1 {
 		noun = "scopes"
 	}
-	return fmt.Errorf(
+	return nil, fmt.Errorf(
 		"unknown %s %s (valid: %s)",
 		noun, quoteScopes(unknown), strings.Join(allScopes, ", "),
 	)

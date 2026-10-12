@@ -3,12 +3,14 @@ package controller_test
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -25,7 +27,7 @@ import (
 func (f *identityFixture) creditsGrantToken() string {
 	f.t.Helper()
 	raw := "sws_" + rand.Text() + rand.Text()
-	if created, err := controller.EnsureCheckoutToken(f.store, raw, time.Now()); err != nil || !created {
+	if created, err := controller.EnsureCheckoutToken(context.Background(), f.store, raw, time.Now()); err != nil || !created {
 		f.t.Fatalf("seed the checkout token = %v, %v", created, err)
 	}
 	return "Bearer " + raw
@@ -201,27 +203,83 @@ func TestCreditsGrantScopeIsNeverMintedThroughTheAPI(t *testing.T) {
 }
 
 // The credits-token credential seeds its token once: a restart with the same
-// file writes nothing, and a token the operator revoked stays revoked.
+// file writes nothing, and once the token is revoked the file is refused, even
+// after pruning has deleted the revoked row.
 func TestCheckoutTokenSeedsOnceAndNeverRevives(t *testing.T) {
 	f := newIdentityFixture(t)
+	ctx := context.Background()
 	raw := "sws_" + rand.Text() + rand.Text()
 	now := time.Now()
 	for i, want := range []bool{true, false} {
-		if created, err := controller.EnsureCheckoutToken(f.store, raw, now); err != nil || created != want {
+		if created, err := controller.EnsureCheckoutToken(ctx, f.store, raw, now); err != nil || created != want {
 			t.Fatalf("seed #%d = %v, %v; want %v", i+1, created, err, want)
 		}
 	}
-	if created, err := controller.EnsureCheckoutToken(f.store, "", now); err != nil || created {
+	if created, err := controller.EnsureCheckoutToken(ctx, f.store, "", now); err != nil || created {
 		t.Fatalf("an empty credential = %v, %v; want nothing written", created, err)
 	}
 	if code := f.call("DELETE", "/api/v1/tokens/"+raw[:store.PrefixLen], "Bearer "+f.admin, nil, nil); code >= 300 {
 		t.Fatalf("revoke = %d", code)
 	}
-	if created, err := controller.EnsureCheckoutToken(f.store, raw, now); err != nil || created {
-		t.Fatalf("reseeding a revoked token = %v, %v; want it left revoked", created, err)
+	if _, err := controller.EnsureCheckoutToken(ctx, f.store, raw, now); !errors.Is(err, store.ErrSeededTokenRevoked) {
+		t.Fatalf("reseeding a revoked token = %v; want ErrSeededTokenRevoked", err)
+	}
+	later := now.Add(store.SpentIdentityRetention + 24*time.Hour)
+	pruned, err := f.store.PruneSpentIdentity(ctx, later)
+	if err != nil || pruned.Tokens == 0 {
+		t.Fatalf("prune = %+v, %v; want the revoked token deleted", pruned, err)
+	}
+	if _, err := f.store.LookupTokenByPrefix(raw[:store.PrefixLen]); err == nil {
+		t.Fatal("the revoked row survived pruning, so the test proves nothing")
+	}
+	if created, err := controller.EnsureCheckoutToken(ctx, f.store, raw, later); created || !errors.Is(err, store.ErrSeededTokenRevoked) {
+		t.Fatalf("the restart after pruning = %v, %v; want the credential refused, not revived", created, err)
 	}
 	if code := f.call("GET", "/api/v1/credits/units", "Bearer "+raw, nil, nil); code != http.StatusUnauthorized {
-		t.Errorf("the revoked checkout token = %d, want 401", code)
+		t.Errorf("the revoked checkout token after a restart = %d, want 401", code)
+	}
+
+	minted, _, err := f.store.CreateToken("old-checkout", store.TokenKindService, []string{controller.ScopeCreditsGrant}, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created, err := controller.EnsureCheckoutToken(ctx, f.store, minted, now); err != nil || created {
+		t.Fatalf("adopting a token minted before provisioning = %v, %v; want it kept, nothing written", created, err)
+	}
+}
+
+// The token routes normalize the scopes they are handed once, so a padded or
+// re-cased spelling of the checkout scope is refused like the plain one.
+func TestCreateTokenRefusesEverySpellingOfTheCheckoutScope(t *testing.T) {
+	f := newIdentityFixture(t)
+	admin := "Bearer " + f.admin
+	for scope, want := range map[string]int{
+		"credits.grant":     http.StatusForbidden,
+		" credits.grant ":   http.StatusForbidden,
+		"credits.grant\t":   http.StatusForbidden,
+		"\tcredits.grant\n": http.StatusForbidden,
+		"Credits.Grant":     http.StatusBadRequest,
+		"CREDITS.GRANT":     http.StatusBadRequest,
+	} {
+		var minted struct {
+			Token string `json:"token"`
+		}
+		code := f.call("POST", "/api/v1/tokens", admin, map[string]any{
+			"principal": "checkout", "kind": "service", "scopes": []string{"runs.read", scope},
+		}, &minted)
+		if code != want || minted.Token != "" {
+			t.Errorf("minting %q = %d, token %q; want %d and none", scope, code, minted.Token, want)
+		}
+	}
+	var minted struct {
+		Metadata struct {
+			Scopes []string `json:"scopes"`
+		} `json:"metadata"`
+	}
+	if code := f.call("POST", "/api/v1/tokens", admin, map[string]any{
+		"principal": "reader", "kind": "user", "scopes": []string{" runs.read ", "runs.read", ""},
+	}, &minted); code != http.StatusCreated || !slices.Equal(minted.Metadata.Scopes, []string{"runs.read"}) {
+		t.Errorf("a padded known scope = %d %v, want 201 storing [runs.read]", code, minted.Metadata.Scopes)
 	}
 }
 

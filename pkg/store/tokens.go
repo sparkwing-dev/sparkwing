@@ -243,12 +243,22 @@ func (s *Store) CreateTokenIfNoneExist(raw, principal, kind string, scopes []str
 	return n == 1, nil
 }
 
-// CreateTokenIfAbsent stores raw as a token for principal unless a token
-// with raw's prefix is already stored, live or not, and reports whether it
-// wrote one. A credential a deployment provisions from a file is seeded this
-// way on every start: the same file writes nothing again, and a token the
-// operator revoked stays revoked until a new file replaces it.
-func (s *Store) CreateTokenIfAbsent(raw, principal, kind string, scopes []string, now time.Time) (bool, error) {
+// ErrSeededTokenRevoked is returned by [Store.SeedToken] when the credential
+// it was handed was seeded before and has since been revoked, or pruned after
+// its revocation. Seeding it again would revive a credential the operator
+// withdrew, so the file holding it must be replaced.
+var ErrSeededTokenRevoked = errors.New("tokens: this provisioned credential was revoked; replace it")
+
+// SeedToken stores raw as a token for principal the first time it is handed
+// raw, and reports whether it wrote one. A credential a deployment provisions
+// from a file is seeded this way on every start. The seeding is recorded in
+// sparkwing_meta, which pruning never touches, so once a credential has been
+// seeded it is never created again: a later start with the same file writes
+// nothing while the token is live, and returns [ErrSeededTokenRevoked] once it
+// has been revoked, whether or not its row has been pruned since. A token
+// already stored under raw's prefix, as one minted before it was provisioned
+// from a file, is adopted the same way.
+func (s *Store) SeedToken(ctx context.Context, raw, principal, kind string, scopes []string, now time.Time) (_ bool, err error) {
 	if principal == "" {
 		return false, errors.New("tokens: principal is required")
 	}
@@ -259,22 +269,47 @@ func (s *Store) CreateTokenIfAbsent(raw, principal, kind string, scopes []string
 	if err != nil {
 		return false, err
 	}
-	res, err := s.execNoCtx(`
+	prefix := raw[:PrefixLen]
+	marker := "seeded-token:" + prefix
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	var seeded int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sparkwing_meta WHERE key = ?`, marker).Scan(&seeded); err != nil {
+		return false, fmt.Errorf("tokens: seed: %w", err)
+	}
+	var revoked sql.NullInt64
+	rowErr := tx.QueryRowContext(ctx, `SELECT revoked_at FROM tokens WHERE prefix = ?`, prefix).Scan(&revoked)
+	stored := rowErr == nil
+	if rowErr != nil && !errors.Is(rowErr, sql.ErrNoRows) {
+		return false, fmt.Errorf("tokens: seed: %w", rowErr)
+	}
+	if (stored && revoked.Valid) || (!stored && seeded > 0) {
+		return false, ErrSeededTokenRevoked
+	}
+	created := false
+	if !stored {
+		if _, err := tx.ExecContext(ctx, `
         INSERT INTO tokens (hash, prefix, principal, kind, scopes, created_at, expires_at)
-        SELECT ?, ?, ?, ?, ?, ?, NULL
-         WHERE NOT EXISTS (SELECT 1 FROM tokens WHERE prefix = ?)
-    `, hash, raw[:PrefixLen], principal, kind, strings.Join(dedupeScopes(scopes), ","), now.UTC().Unix(), raw[:PrefixLen])
-	if err != nil {
-		if isTokenPrefixCollision(err) {
-			return false, nil
+        VALUES (?, ?, ?, ?, ?, ?, NULL)`,
+			hash, prefix, principal, kind, strings.Join(dedupeScopes(scopes), ","), now.UTC().Unix()); err != nil {
+			// safety: the prefix is derived from raw, so a collision is a peer replica seeding this same credential.
+			if isTokenPrefixCollision(err) {
+				return false, nil
+			}
+			return false, fmt.Errorf("tokens: seed: %w", err)
 		}
-		return false, fmt.Errorf("tokens: seed: %w", err)
+		created = true
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("tokens: seed: %w", err)
+	if seeded == 0 {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
+		 ON CONFLICT (key) DO NOTHING`, marker, principal, now.UnixNano()); err != nil {
+			return false, fmt.Errorf("tokens: seed marker: %w", err)
+		}
 	}
-	return n == 1, nil
+	return created, tx.Commit()
 }
 
 func createTokenRow(

@@ -154,11 +154,14 @@ that keep the logs service running.
 - **The checkout service's token:** `POST /api/v1/tokens` and
   `POST /api/v1/tokens/{prefix}/rotate` refuse `credits.grant` with `403`,
   and its routes answer only a service token, never an anonymous caller.
+  `POST /api/v1/tokens` trims each scope and refuses any that is not
+  exactly a known scope, so a padded spelling is checked as the plain one.
   The token the checkout service already holds keeps working. Before the
   next rotation, put its value in the controller's `credits-token`
-  credential so a restart re-seeds it; to rotate, write a new
+  credential so the controller adopts it; to rotate, write a new
   `sws_` value there and in the checkout service, restart, and revoke the
-  old prefix.
+  old prefix. A value whose token was revoked is never seeded again; the
+  controller logs an error at start until the file holds a new value.
 - **Go:** pass the actor, the reason and the one hold's id to
   `Store.ReleaseCreditFreezes`, which refuses an empty id; a
   caller of the removed `Store.DisputeTeam` reads the team from the hold it
