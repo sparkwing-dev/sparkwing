@@ -24,6 +24,8 @@ type Server struct {
 	listener net.Listener
 	http     *http.Server
 	logger   *slog.Logger
+	ctx      context.Context
+	cancel   context.CancelFunc
 
 	mu     sync.RWMutex
 	grants map[[bearerHashSize]byte]*grant
@@ -40,13 +42,16 @@ func Start(logger *slog.Logger) (*Server, error) {
 		logger = slog.New(slog.DiscardHandler)
 	}
 	s := &Server{listener: listener, logger: logger, grants: map[[bearerHashSize]byte]*grant{}}
+	s.ctx, s.cancel = context.WithCancel(context.Background())
 	mux := http.NewServeMux()
 	s.handle(mux, "GET /node/v1/secrets/{name}", s.serveSecret)
 	s.http = &http.Server{
 		Handler:           s.requireProtocol(mux),
+		BaseContext:       func(net.Listener) context.Context { return s.ctx },
+		MaxHeaderBytes:    8 << 10,
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      65 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      resolveTimeout + 5*time.Second,
 		IdleTimeout:       30 * time.Second,
 	}
 	go func() {
@@ -60,8 +65,9 @@ func Start(logger *slog.Logger) (*Server, error) {
 // URL is the base URL a node process reaches the routes at.
 func (s *Server) URL() string { return "http://" + s.listener.Addr().String() }
 
-// Close stops the server, waiting briefly for requests in flight.
+// Close stops the server and cancels every request in flight.
 func (s *Server) Close() error {
+	s.cancel()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	return s.http.Shutdown(ctx)
@@ -87,8 +93,9 @@ func (s *Server) requireProtocol(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := r.Header.Get(authwire.NodeProtocolHeader)
 		if got != authwire.NodeProtocolVersion {
+			// safety: the header is attacker-sized and unauthenticated, so it is never echoed.
 			s.writeJSON(w, http.StatusUpgradeRequired, map[string]any{
-				"error":     fmt.Sprintf("node protocol %q unsupported", got),
+				"error":     "node protocol unsupported",
 				"supported": []string{authwire.NodeProtocolVersion},
 			})
 			return

@@ -81,10 +81,12 @@ func (r *remoteControllerResolver) Resolve(ctx context.Context, name string) (st
 	if base == "" {
 		return "", false, fmt.Errorf("secrets backend: url is empty")
 	}
+	shown := redactURL(base)
 	endpoint := base + "/api/v1/secrets/" + url.PathEscape(name)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return "", false, fmt.Errorf("secrets backend %s: build request: %w", base, err)
+		// safety: a parse error quotes the raw URL, credentials included.
+		return "", false, fmt.Errorf("secrets backend %s: invalid url", shown)
 	}
 	if tok := r.spec.ResolvedToken(); tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
@@ -93,7 +95,7 @@ func (r *remoteControllerResolver) Resolve(ctx context.Context, name string) (st
 	req.Header.Set(authwire.NodeProtocolHeader, authwire.NodeProtocolVersion)
 	resp, err := r.client.Do(req)
 	if err != nil {
-		return "", false, fmt.Errorf("secrets backend %s: %w", base, err)
+		return "", false, fmt.Errorf("secrets backend %s: %w", shown, err)
 	}
 	defer resp.Body.Close()
 	switch resp.StatusCode {
@@ -101,23 +103,33 @@ func (r *remoteControllerResolver) Resolve(ctx context.Context, name string) (st
 	case http.StatusNotFound:
 		return "", false, ErrMissing
 	case http.StatusUnauthorized, http.StatusForbidden:
-		return "", false, fmt.Errorf("secrets backend %s: %d %s", base, resp.StatusCode, http.StatusText(resp.StatusCode))
+		return "", false, fmt.Errorf("secrets backend %s: %d %s", shown, resp.StatusCode, http.StatusText(resp.StatusCode))
 	default:
 		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		detail := strings.TrimSpace(string(body))
 		if readErr != nil {
 			detail += fmt.Sprintf(" (reading the body failed: %v)", readErr)
 		}
-		return "", false, fmt.Errorf("secrets backend %s: %d %s: %s", base, resp.StatusCode, http.StatusText(resp.StatusCode), detail)
+		return "", false, fmt.Errorf("secrets backend %s: %d %s: %s", shown, resp.StatusCode, http.StatusText(resp.StatusCode), detail)
 	}
 	var body struct {
 		Value  string `json:"value"`
 		Masked bool   `json:"masked"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return "", false, fmt.Errorf("secrets backend %s: decode response: %w", base, err)
+		return "", false, fmt.Errorf("secrets backend %s: decode response: %w", shown, err)
 	}
 	return body.Value, body.Masked, nil
+}
+
+// safety: errors name the backend URL, so its userinfo is dropped first.
+func redactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "(invalid url)"
+	}
+	u.User = nil
+	return u.String()
 }
 
 type fileResolver struct {

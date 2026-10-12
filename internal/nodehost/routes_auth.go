@@ -1,6 +1,7 @@
 package nodehost
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -30,6 +31,9 @@ type grant struct {
 	Node
 	bearer   string
 	declared map[string]bool
+	// safety: revoking the grant cancels this, ending its requests in flight.
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // Admit issues a fresh bearer bound to n alone. The node process sends it as
@@ -47,6 +51,7 @@ func (s *Server) Admit(n Node) (bearer string, revoke func(), err error) {
 		return "", nil, fmt.Errorf("node bearer: %w", err)
 	}
 	g := &grant{Node: n, bearer: base64.RawURLEncoding.EncodeToString(raw), declared: map[string]bool{}}
+	g.ctx, g.cancel = context.WithCancel(s.ctx)
 	for _, name := range n.Secrets {
 		g.declared[name] = true
 	}
@@ -58,6 +63,7 @@ func (s *Server) Admit(n Node) (bearer string, revoke func(), err error) {
 		s.mu.Lock()
 		delete(s.grants, key)
 		s.mu.Unlock()
+		g.cancel()
 	}, nil
 }
 
