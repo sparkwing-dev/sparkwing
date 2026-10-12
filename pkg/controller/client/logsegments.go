@@ -3,6 +3,8 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/md5" // #nosec G501 -- S3's Content-MD5 integrity check, not a security digest
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -81,70 +83,86 @@ func (c *Client) KeepsLogSegments(ctx context.Context) (bool, error) {
 	return caps.Logs.Segments, nil
 }
 
-// LogSegments asks the controller for upload URLs for a node attempt's
-// log segments. A controller that keeps no segments answers
+// LogSegment asks the controller to sign the upload of one log segment
+// of a node attempt, or with req.N zero names the attempt the writer
+// writes. A controller that keeps no segments answers
 // [ErrLogSegmentsUnavailable].
-func (c *Client) LogSegments(ctx context.Context, runID, nodeID string, req store.LogSegmentsRequest) (store.LogSegmentsGrant, error) {
+func (c *Client) LogSegment(ctx context.Context, runID, nodeID string, req store.LogSegmentRequest) (store.LogSegmentGrant, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
-		return store.LogSegmentsGrant{}, err
+		return store.LogSegmentGrant{}, err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+claimNodePath(runID, nodeID, "log-segments"), bytes.NewReader(body))
+	resp, err := c.postLogWrite(ctx, runID, nodeID, "log-segments", body)
 	if err != nil {
-		return store.LogSegmentsGrant{}, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set(authwire.NodeProtocolHeader, authwire.NodeProtocolVersion)
-	setNodeClaimFenceHeaders(httpReq, ctx)
-	resp, err := c.do(httpReq)
-	if err != nil {
-		return store.LogSegmentsGrant{}, err
+		return store.LogSegmentGrant{}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
 		if err := classifyNotFound(resp); errors.Is(err, ErrControllerLacksRoute) || errors.Is(err, ErrForeignNotFound) {
-			return store.LogSegmentsGrant{}, fmt.Errorf("%w: %w", ErrLogSegmentsUnavailable, err)
+			return store.LogSegmentGrant{}, fmt.Errorf("%w: %w", ErrLogSegmentsUnavailable, err)
 		}
-		return store.LogSegmentsGrant{}, fmt.Errorf("log segments: run %s node %s not found", runID, nodeID)
+		return store.LogSegmentGrant{}, fmt.Errorf("log segments: run %s node %s not found", runID, nodeID)
 	case resp.StatusCode == http.StatusServiceUnavailable && resp.Header.Get("Retry-After") == "":
-		return store.LogSegmentsGrant{}, fmt.Errorf("%w: %w", ErrLogSegmentsUnavailable, readHTTPError(resp))
+		return store.LogSegmentGrant{}, fmt.Errorf("%w: %w", ErrLogSegmentsUnavailable, readHTTPError(resp))
 	case resp.StatusCode != http.StatusOK:
-		return store.LogSegmentsGrant{}, fmt.Errorf("log segments: %w", readHTTPError(resp))
+		return store.LogSegmentGrant{}, fmt.Errorf("log segments: %w", readHTTPError(resp))
 	}
-	var grant store.LogSegmentsGrant
+	var grant store.LogSegmentGrant
 	if err := json.NewDecoder(resp.Body).Decode(&grant); err != nil {
-		return store.LogSegmentsGrant{}, fmt.Errorf("decode log segments grant: %w", err)
+		return store.LogSegmentGrant{}, fmt.Errorf("decode log segment grant: %w", err)
 	}
 	return grant, nil
 }
 
-const (
-	logSegmentLowWater     = 4
-	logSegmentRefreshAhead = 2 * time.Minute
-	logSegmentPutTimeout   = time.Minute
-	// safety: half the controller's 60 s seal grace, so one lost touch
-	// never lets it seal a live writer's attempt.
-	logSegmentTouch = 30 * time.Second
-)
+// SealLog posts the manifest that seals a node attempt's log. The
+// controller checks it against the segments it signed and answers
+// [logseg.ErrSealed] when the attempt already has a manifest.
+func (c *Client) SealLog(ctx context.Context, runID, nodeID string, m logseg.Manifest) error {
+	body, err := m.Marshal()
+	if err != nil {
+		return err
+	}
+	resp, err := c.postLogWrite(ctx, runID, nodeID, "log-manifest", body)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	switch resp.StatusCode {
+	case http.StatusNoContent:
+		return nil
+	case http.StatusPreconditionFailed:
+		return logseg.ErrSealed
+	default:
+		return fmt.Errorf("seal log: %w", readHTTPError(resp))
+	}
+}
+
+func (c *Client) postLogWrite(ctx context.Context, runID, nodeID, route string, body []byte) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+claimNodePath(runID, nodeID, route), bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(authwire.NodeProtocolHeader, authwire.NodeProtocolVersion)
+	setNodeClaimFenceHeaders(req, ctx)
+	return c.do(req)
+}
+
+const logSegmentPutTimeout = time.Minute
 
 // LogSegmentUploader is the [logseg.Uploader] a node's log sink writes
-// through: it asks this client's controller for presigned URLs in
-// batches and PUTs each segment and the manifest to them.
+// through: it has the controller sign each sealed segment for its exact
+// size and digests, PUTs it to the signed URL, and posts the manifest to
+// the controller.
 type LogSegmentUploader struct {
 	c             *Client
 	base          context.Context
 	runID, nodeID string
 
-	mu       sync.Mutex
-	grant    store.LogSegmentsGrant
-	urls     map[int]store.LogSegmentURL
-	through  int
-	stored   int64
-	received bool
-
-	onWatched func(bool)
-	heard     chan bool
+	mu                  sync.Mutex
+	attempt, generation int64
+	onWatched           func(bool)
 }
 
 var _ logseg.Uploader = (*LogSegmentUploader)(nil)
@@ -154,54 +172,32 @@ var _ logseg.Uploader = (*LogSegmentUploader)(nil)
 func (u *LogSegmentUploader) LiveAttempt() string {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	if u.grant.Attempt == 0 {
+	if u.attempt == 0 {
 		return ""
 	}
-	return store.LiveLogAttempt(u.grant.Attempt, u.grant.Generation)
+	return store.LiveLogAttempt(u.attempt, u.generation)
 }
 
 // NewLogSegmentUploader returns an uploader for one node's log. Every
 // request it makes carries the values of base, such as the node's claim
 // fence; base's cancellation is not inherited.
 func (c *Client) NewLogSegmentUploader(base context.Context, runID, nodeID string) *LogSegmentUploader {
-	return &LogSegmentUploader{
-		c: c, base: context.WithoutCancel(base), runID: runID, nodeID: nodeID,
-		urls: map[int]store.LogSegmentURL{}, heard: make(chan bool, 1),
-	}
+	return &LogSegmentUploader{c: c, base: context.WithoutCancel(base), runID: runID, nodeID: nodeID}
 }
 
 // OnWatched hands fn the watched flag every reply from the controller
-// carries. Set it before Open.
-func (u *LogSegmentUploader) OnWatched(fn func(bool)) { u.onWatched = fn }
-
-// safety: the flag is handed on after mu is released, so the callback may
-// take its own locks; a newer flag replaces one not yet handed on.
-func (u *LogSegmentUploader) noteWatched(watched bool) {
-	select {
-	case <-u.heard:
-	default:
-	}
-	u.heard <- watched
-}
-
-func (u *LogSegmentUploader) handOnWatched() {
-	select {
-	case watched := <-u.heard:
-		if u.onWatched != nil {
-			u.onWatched(watched)
-		}
-	default:
-	}
-}
-
-// Open takes the attempt's first URL batch, which records where its log
-// lives. It answers [ErrLogSegmentsUnavailable] when the controller
-// keeps no segments, so the caller can keep the log another way.
-func (u *LogSegmentUploader) Open(ctx context.Context) error {
+// carries.
+func (u *LogSegmentUploader) OnWatched(fn func(bool)) {
 	u.mu.Lock()
-	err := u.refreshLocked(ctx, 1)
-	u.mu.Unlock()
-	u.handOnWatched()
+	defer u.mu.Unlock()
+	u.onWatched = fn
+}
+
+// Open asks the controller which attempt the writer writes, which records
+// where its log lives. It answers [ErrLogSegmentsUnavailable] when the
+// controller keeps no segments, so the caller can keep the log another way.
+func (u *LogSegmentUploader) Open(ctx context.Context) error {
+	_, err := u.request(ctx, store.LogSegmentRequest{})
 	return err
 }
 
@@ -214,172 +210,73 @@ func (u *LogSegmentUploader) requestCtx(ctx context.Context) (context.Context, c
 	}
 }
 
-// safety: the caller holds mu.
-func (u *LogSegmentUploader) refreshLocked(ctx context.Context, next int) error {
-	rc, cancel := u.requestCtx(ctx)
-	defer cancel()
-	req := store.LogSegmentsRequest{Next: next, Count: 16, UploadedThrough: u.through, StoredBytes: u.stored}
-	if u.received {
-		req.Attempt, req.Generation = u.grant.Attempt, u.grant.Generation
-	}
-	grant, err := u.c.LogSegments(rc, u.runID, u.nodeID, req)
-	if err != nil {
-		return err
-	}
-	u.grant, u.received = grant, true
-	u.noteWatched(grant.Watched)
-	clear(u.urls)
-	for _, s := range grant.URLs {
-		u.urls[s.N] = s
-	}
-	return nil
-}
-
-// safety: the caller holds mu. A refresh the controller refuses, as it
-// does once the node's claim has ended, still leaves the URLs of the
-// batch in hand usable until it expires; the last segments of a node
-// that already reported its outcome go up through them.
-func (u *LogSegmentUploader) urlLocked(ctx context.Context, n int) (store.LogSegmentURL, error) {
-	s, held := u.urls[n]
-	live := u.received && time.Now().Before(u.grant.ExpiresAt)
-	fresh := u.received && time.Until(u.grant.ExpiresAt) > logSegmentRefreshAhead
-	_, ahead := u.urls[n+logSegmentLowWater-1]
-	if held && fresh && ahead {
-		return s, nil
-	}
-	err := u.refreshLocked(ctx, n)
-	if err != nil {
-		if held && live {
-			return s, nil
-		}
-		return store.LogSegmentURL{}, err
-	}
-	s, ok := u.urls[n]
-	if !ok {
-		return store.LogSegmentURL{}, fmt.Errorf("log segments: the controller issued no URL for segment %d", n)
-	}
-	return s, nil
-}
-
-// KeepFresh tells the controller the writer is alive every
-// logSegmentTouch, so it does not seal the attempt as abandoned while a
-// node sits silent, and renews the URL batch before it expires, so the
-// writer still holds a usable manifest URL when the node finishes.
-// onError hears each request that failed; the next tick tries again.
-func (u *LogSegmentUploader) KeepFresh(ctx context.Context, onError func(error)) {
-	t := time.NewTicker(logSegmentTouch)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		}
-		u.mu.Lock()
-		var err error
-		if !u.received || time.Until(u.grant.ExpiresAt) <= logSegmentRefreshAhead {
-			err = u.refreshLocked(ctx, u.through+1)
-		} else {
-			err = u.touchLocked(ctx)
-		}
-		u.mu.Unlock()
-		u.handOnWatched()
-		if err != nil && ctx.Err() == nil {
-			onError(err)
-		}
-	}
-}
-
-// safety: the caller holds mu.
-func (u *LogSegmentUploader) touchLocked(ctx context.Context) error {
-	rc, cancel := u.requestCtx(ctx)
-	defer cancel()
-	grant, err := u.c.LogSegments(rc, u.runID, u.nodeID, store.LogSegmentsRequest{
-		Attempt: u.grant.Attempt, Generation: u.grant.Generation,
-		Next: u.through + 1, UploadedThrough: u.through, StoredBytes: u.stored,
-	})
-	if err == nil {
-		u.noteWatched(grant.Watched)
-	}
-	return err
-}
-
-// PutSegment uploads one segment.
-func (u *LogSegmentUploader) PutSegment(ctx context.Context, seg logseg.Segment, body []byte) error {
+func (u *LogSegmentUploader) request(ctx context.Context, req store.LogSegmentRequest) (store.LogSegmentGrant, error) {
 	u.mu.Lock()
-	target, err := u.urlLocked(ctx, seg.N)
+	req.Attempt, req.Generation = u.attempt, u.generation
 	u.mu.Unlock()
-	u.handOnWatched()
+	rc, cancel := u.requestCtx(ctx)
+	defer cancel()
+	grant, err := u.c.LogSegment(rc, u.runID, u.nodeID, req)
 	if err != nil {
-		return err
+		return grant, err
 	}
-	if err := u.put(ctx, target, body); err != nil {
+	u.mu.Lock()
+	u.attempt, u.generation = grant.Attempt, grant.Generation
+	onWatched := u.onWatched
+	u.mu.Unlock()
+	if onWatched != nil {
+		onWatched(grant.Watched)
+	}
+	return grant, nil
+}
+
+// PutSegment has the controller sign seg for body's size and digests, then
+// uploads body.
+func (u *LogSegmentUploader) PutSegment(ctx context.Context, seg logseg.Segment, body []byte) error {
+	sum := md5.Sum(body)
+	grant, err := u.request(ctx, store.LogSegmentRequest{
+		N: seg.N, Size: int64(len(body)), MD5: base64.StdEncoding.EncodeToString(sum[:]), SHA256: seg.SHA256,
+	})
+	if err != nil {
+		return fmt.Errorf("sign log segment %d: %w", seg.N, err)
+	}
+	if err := u.put(ctx, grant, body); err != nil {
 		return fmt.Errorf("upload log segment %d: %w", seg.N, err)
 	}
-	u.mu.Lock()
-	u.through = max(u.through, seg.N)
-	u.stored += seg.StoredBytes
-	u.mu.Unlock()
 	return nil
 }
 
-// PutManifest writes the manifest that seals the log, stamped with the
-// attempt the controller named.
+// PutManifest seals the log, stamped with the attempt the controller
+// named.
 func (u *LogSegmentUploader) PutManifest(ctx context.Context, m logseg.Manifest) error {
 	u.mu.Lock()
-	if !u.received || time.Until(u.grant.ExpiresAt) <= logSegmentRefreshAhead {
-		err := u.refreshLocked(ctx, u.through+1)
-		if err != nil && (!u.received || !time.Now().Before(u.grant.ExpiresAt)) {
-			u.mu.Unlock()
-			return err
-		}
-	}
-	target := u.grant.ManifestURL
-	m.Attempt, m.Generation = u.grant.Attempt, u.grant.Generation
+	m.Attempt, m.Generation = u.attempt, u.generation
 	u.mu.Unlock()
-	raw, err := m.Marshal()
-	if err != nil {
-		return err
-	}
-	err = u.put(ctx, target, raw)
-	var status *putStatusError
-	if errors.As(err, &status) && status.code == http.StatusPreconditionFailed {
-		return logseg.ErrSealed
-	}
-	if err != nil {
-		return fmt.Errorf("upload log manifest: %w", err)
-	}
-	return nil
-}
-
-type putStatusError struct {
-	code int
-	err  error
-}
-
-func (e *putStatusError) Error() string { return fmt.Sprintf("HTTP %d: %v", e.code, e.err) }
-func (e *putStatusError) Unwrap() error { return e.err }
-
-func (u *LogSegmentUploader) put(ctx context.Context, target store.LogSegmentURL, body []byte) error {
 	rc, cancel := u.requestCtx(ctx)
 	defer cancel()
-	req, err := http.NewRequestWithContext(rc, http.MethodPut, u.c.blobURL(target.URL), bytes.NewReader(body))
+	return u.c.SealLog(rc, u.runID, u.nodeID, m)
+}
+
+func (u *LogSegmentUploader) put(ctx context.Context, grant store.LogSegmentGrant, body []byte) error {
+	rc, cancel := u.requestCtx(ctx)
+	defer cancel()
+	req, err := http.NewRequestWithContext(rc, http.MethodPut, u.c.blobURL(grant.URL), bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
-	for k, v := range target.Headers {
+	for k, v := range grant.Headers {
 		if !strings.EqualFold(k, "Content-Length") && !strings.EqualFold(k, "Host") {
 			req.Header.Set(k, v)
 		}
 	}
 	req.ContentLength = int64(len(body))
-	resp, err := u.c.blobClient(target.URL).Do(req)
+	resp, err := u.c.blobClient(grant.URL).Do(req)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode/100 != 2 {
-		return &putStatusError{code: resp.StatusCode, err: readHTTPError(resp)}
+		return fmt.Errorf("HTTP %d: %w", resp.StatusCode, readHTTPError(resp))
 	}
 	return nil
 }

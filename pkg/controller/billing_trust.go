@@ -27,6 +27,9 @@ type billingTrustJSON struct {
 	TrustAt            int64  `json:"trust_at,omitempty"`
 	TrustReason        string `json:"trust_reason,omitempty"`
 	LimitOverrideCents int64  `json:"limit_override_cents,omitempty"`
+	DailyCapCents      int64  `json:"daily_cap_cents,omitempty"`
+	RungCents          int64  `json:"rung_cents,omitempty"`
+	RunnerCap          int64  `json:"runner_cap,omitempty"`
 	PurchaseLimitCents int64  `json:"purchase_limit_cents"`
 	Purchased30dCents  int64  `json:"purchased_30d_cents"`
 }
@@ -43,6 +46,7 @@ func billingTrustBody(team store.Team, b store.BillingStanding) billingTrustJSON
 	out := billingTrustJSON{
 		Team: string(team), Trust: trust, Trusted: b.Trusted, TrustBy: b.TrustBy,
 		TrustReason: b.TrustReason, LimitOverrideCents: b.LimitOverrideCents,
+		DailyCapCents: b.DailyCapOverrideCents, RungCents: b.RungOverrideCents, RunnerCap: b.RunnerCapOverride,
 		PurchaseLimitCents: b.LimitMicro / store.MicroCreditsPerCent,
 		Purchased30dCents:  b.PurchasedMicro / store.MicroCreditsPerCent,
 	}
@@ -50,19 +54,6 @@ func billingTrustBody(team store.Team, b store.BillingStanding) billingTrustJSON
 		out.TrustAt = b.TrustAt.Unix()
 	}
 	return out
-}
-
-func (s *Server) handleBillingTrustShow(w http.ResponseWriter, r *http.Request) {
-	t, ok := s.namedTenant(w, r, r.PathValue("team"))
-	if !ok {
-		return
-	}
-	b, err := t.BillingStanding(r.Context(), time.Now())
-	if err != nil {
-		s.writeInternalError(w, r, "billing trust", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, billingTrustBody(t.Team(), b))
 }
 
 func (s *Server) handleBillingTrustSet(w http.ResponseWriter, r *http.Request) {

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -118,8 +119,8 @@ func planConcurrencyKeys(raw []byte) ([]string, error) {
 		return nil, nil
 	}
 	var snapshot struct {
-		PlanConcurrency   *snapshotConc  `json:"plan_concurrency"`
-		PlanConcurrencies []snapshotConc `json:"plan_concurrency_groups"`
+		PlanConcurrency   *nodeproto.PlanConc  `json:"plan_concurrency"`
+		PlanConcurrencies []nodeproto.PlanConc `json:"plan_concurrency_groups"`
 	}
 	if err := json.Unmarshal(raw, &snapshot); err != nil {
 		return nil, err

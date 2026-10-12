@@ -27,7 +27,10 @@ and ref, as [Cache service](#cache-service) describes.
 **Operators and service credentials have separate authority.** `admin` is
 deployment authority. Service scopes such as `credits.grant`, `claims.launch`
 and `storage.count` cross teams for their documented operations. Team membership
-does not grant them. Operators who control the database, encryption keys or
+does not grant them, and `admin` does not stand in for `credits.grant`.
+Operator powers over a team's billing standing and the sign-up waitlist answer
+only a listed operator's own console session, never a bearer token; see
+[Operator console](auth.md#operator-console). Operators who control the database, encryption keys or
 cluster remain trusted with tenant data. See [Authentication](auth.md) for
 individual scope and claim contracts.
 
@@ -188,7 +191,8 @@ argon2id hashes, and never logged in full. The complete model -- token
 kinds, the scope set, per-endpoint enforcement, the unauthenticated
 endpoints, and first-visit admin bootstrap -- is in
 [auth.md](auth.md). Sparkwing does not have a "root token"; the `admin`
-scope is the superset.
+scope is the superset of the deployment's scopes, short of `credits.grant` and
+the operator console.
 
 ### Request audit log
 

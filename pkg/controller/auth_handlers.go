@@ -158,15 +158,20 @@ func (s *Server) handleRotateToken(w http.ResponseWriter, r *http.Request) {
 		))
 		return
 	}
+	old, err := s.store.LookupTokenByPrefix(prefix)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if scope := provisionedOnlyScope(old.Scopes); scope != "" {
+		writeError(w, http.StatusForbidden, fmt.Errorf(
+			"a token carrying %s is never rotated through the API; replace the controller's credits-token credential", scope))
+		return
+	}
 	var ttl time.Duration
 	if req.TTLSecs > 0 {
 		ttl = time.Duration(req.TTLSecs) * time.Second
 	} else {
-		old, err := s.store.LookupTokenByPrefix(prefix)
-		if err != nil {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
 		if old.ExpiresAt != nil {
 			ttl = time.Until(*old.ExpiresAt)
 			if ttl < 0 {

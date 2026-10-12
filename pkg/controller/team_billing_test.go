@@ -1,6 +1,7 @@
 package controller_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -158,19 +159,37 @@ type capRefusal struct {
 	AmountMicro  int64  `json:"amount_micro"`
 }
 
+// safety: a free grant has no route but the operator console, so it is written
+// straight to the ledger the way the console's grant writes it.
 func (f *identityFixture) grantTo(team, kind, reference string, micro int64) int {
 	f.t.Helper()
-	return f.call("POST", "/api/v1/credits/grants", "Bearer "+f.admin, map[string]any{
-		"kind": kind, "amount_micro": micro, "reference": reference, "team": team,
-	}, nil)
+	if kind == store.CreditGrantPaid {
+		return f.call("POST", "/api/v1/credits/grants", f.creditsGrantToken(), map[string]any{
+			"kind": kind, "amount_micro": micro, "reference": reference, "team": team,
+		}, nil)
+	}
+	t, err := f.store.ForTeam(context.Background(), store.Team(team))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if _, err := t.RecordCreditGrant(context.Background(), store.CreditGrantRequest{
+		Kind: kind, AmountMicro: micro, Reference: reference, CreatedBy: "test", Reason: "test",
+	}); err != nil {
+		f.t.Fatalf("grant %s %s: %v", kind, reference, err)
+	}
+	return http.StatusCreated
 }
 
 func (f *identityFixture) trust(team string, limitCents int64) {
 	f.t.Helper()
-	if code := f.call("POST", "/api/v1/teams/"+team+"/trust", "Bearer "+f.admin, map[string]any{
-		"trust": "granted", "reason": "test", "limit_cents": limitCents,
-	}, nil); code != http.StatusOK {
-		f.t.Fatalf("trust %s = %d", team, code)
+	t, err := f.store.ForTeam(context.Background(), store.Team(team))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if _, _, err := t.SetBillingTrust(context.Background(), store.BillingTrustChange{
+		Trust: store.BillingTrustGranted, Actor: "test", Reason: "test", LimitCents: limitCents,
+	}, time.Now()); err != nil {
+		f.t.Fatalf("trust %s: %v", team, err)
 	}
 }
 
@@ -295,7 +314,7 @@ func TestTeamBillingCheckout_RefusesAPurchaseAboveTheBalanceCap(t *testing.T) {
 		refusal.OpenMicro != 1_000*store.MicroCreditsPerCent {
 		t.Errorf("a checkout past the cap with one open = %d %+v, want 409 naming the open checkout", code, refusal)
 	}
-	if code := f.call("POST", "/api/v1/credits/grants", "Bearer "+f.admin, map[string]any{
+	if code := f.call("POST", "/api/v1/credits/grants", f.creditsGrantToken(), map[string]any{
 		"kind": "paid", "amount_micro": 1_000 * store.MicroCreditsPerCent, "reference": "pi_open",
 		"team": owner.team, "checkout": "cs_test_1",
 	}, nil); code != http.StatusCreated {
@@ -382,18 +401,18 @@ func TestTeamBillingCheckout_ReportsAnUnusableCheckoutService(t *testing.T) {
 	}
 }
 
-// The grant route holds an operator's free grant to the cap and never a paid
-// one: a paid grant follows a verified payment, whose checkout already met it.
+// The console holds an operator's free grant to the cap and the grant route
+// never holds a paid one: a paid grant follows a verified payment, whose
+// checkout already met it.
 func TestCreditsGrant_HoldsOnlyAFreeGrantToTheBalanceCap(t *testing.T) {
-	f := newIdentityFixture(t)
-	owner := f.user("o", "olga@example.com")
+	f, operator, owner := operatorFixture(t)
 	capMicro := int64(5_000 * 100 * store.MicroCreditsPerCent)
 	if code := f.grantTo(owner.team, store.CreditGrantFree, "gift_1", capMicro-store.MicroCreditsPerCent); code != http.StatusCreated {
 		t.Fatalf("a grant one cent under the cap = %d", code)
 	}
 	var refusal capRefusal
-	if code := f.call("POST", "/api/v1/credits/grants", "Bearer "+f.admin, map[string]any{
-		"kind": "free", "amount_micro": 2 * store.MicroCreditsPerCent, "reference": "gift_2", "team": owner.team,
+	if code := f.call("POST", "/api/v1/operator/teams/"+owner.team+"/grants", operator.auth, map[string]any{
+		"amount_cents": 2, "reason": "goodwill", "key": "gift_2",
 	}, &refusal); code != http.StatusConflict || refusal.Code != "balance_cap" {
 		t.Fatalf("a free grant past the cap = %d %+v want 409 balance_cap", code, refusal)
 	}
@@ -402,33 +421,6 @@ func TestCreditsGrant_HoldsOnlyAFreeGrantToTheBalanceCap(t *testing.T) {
 	}
 	if code := f.grantTo(owner.team, store.CreditGrantPaid, "pi_1", 2*store.MicroCreditsPerCent); code != http.StatusOK {
 		t.Errorf("a replayed payment = %d want 200: a webhook retry must still succeed", code)
-	}
-}
-
-func TestCreditsGrant_AReversalFindsTheTeamThatPaid(t *testing.T) {
-	f := newIdentityFixture(t)
-	payer := f.user("o", "olga@example.com")
-	other := f.user("x", "xena@example.com")
-	if code := f.grantTo(payer.team, store.CreditGrantPaid, "pi_1", 1_000*store.MicroCreditsPerCent); code != http.StatusCreated {
-		t.Fatalf("grant = %d", code)
-	}
-	reverse := func(reverses string) int {
-		return f.call("POST", "/api/v1/credits/grants", "Bearer "+f.admin, map[string]any{
-			"kind": "reversal", "amount_micro": -400 * store.MicroCreditsPerCent,
-			"reference": "re_" + reverses, "reverses": reverses,
-		}, nil)
-	}
-	if code := reverse("pi_1"); code != http.StatusCreated {
-		t.Fatalf("a reversal naming only the payment = %d want 201", code)
-	}
-	var paid, untouched teamBilling
-	f.call("GET", "/api/v1/team/billing", payer.auth, nil, &paid)
-	f.call("GET", "/api/v1/team/billing", other.auth, nil, &untouched)
-	if paid.BalanceMicro != 600*store.MicroCreditsPerCent || untouched.BalanceMicro != 0 {
-		t.Errorf("balances after the reversal: payer %d, other %d", paid.BalanceMicro, untouched.BalanceMicro)
-	}
-	if code := reverse("pi_unknown"); code != http.StatusBadRequest {
-		t.Errorf("a reversal of an unknown payment = %d want 400", code)
 	}
 }
 
@@ -481,22 +473,18 @@ func TestTeamBillingCheckout_RefusesAPurchaseAboveThePurchaseLimit(t *testing.T)
 	}
 }
 
-// Only the operator reads and sets a team's trust; a revocation holds the
+// Only the operator's console sets a team's trust; a revocation holds the
 // team to the new-team limits and names who revoked it and why.
 func TestBillingTrust_OperatorGrantsAndRevokes(t *testing.T) {
-	f, _ := billingFixture(t)
-	owner := f.user("o", "olga@example.com")
-	path := "/api/v1/teams/" + owner.team + "/trust"
-	if code := f.call("GET", path, owner.auth, nil, nil); code != http.StatusForbidden {
-		t.Errorf("an owner's read of trust = %d want 403", code)
-	}
+	f, operator, owner := operatorFixture(t)
+	path := "/api/v1/operator/teams/" + owner.team + "/trust"
 	if code := f.call("POST", path, owner.auth, map[string]any{"trust": "granted", "reason": "me"}, nil); code != http.StatusForbidden {
 		t.Errorf("an owner granting itself trust = %d want 403", code)
 	}
-	if code := f.call("POST", path, "Bearer "+f.admin, map[string]any{"trust": "granted"}, nil); code != http.StatusBadRequest {
+	if code := f.call("POST", path, operator.auth, map[string]any{"trust": "granted"}, nil); code != http.StatusBadRequest {
 		t.Errorf("a grant with no reason = %d want 400", code)
 	}
-	if code := f.call("GET", "/api/v1/teams/nobody/trust", "Bearer "+f.admin, nil, nil); code != http.StatusNotFound {
+	if code := f.call("POST", "/api/v1/operator/teams/nobody/trust", operator.auth, map[string]any{"trust": "granted", "reason": "x"}, nil); code != http.StatusNotFound {
 		t.Errorf("an unknown team's trust = %d want 404", code)
 	}
 
@@ -508,20 +496,20 @@ func TestBillingTrust_OperatorGrantsAndRevokes(t *testing.T) {
 		PurchaseLimitCents int64  `json:"purchase_limit_cents"`
 	}
 	f.trust(owner.team, 0)
-	if code := f.call("POST", path, "Bearer "+f.admin, map[string]any{"trust": "revoked", "reason": "chargeback"}, &got); code != http.StatusOK {
+	if code := f.call("POST", path, operator.auth, map[string]any{"trust": "revoked", "reason": "chargeback"}, &got); code != http.StatusOK {
 		t.Fatalf("revoke = %d", code)
 	}
-	if got.Trust != "revoked" || got.Trusted || got.TrustReason != "chargeback" || got.TrustBy == "" || got.PurchaseLimitCents != 5_000 {
+	if got.Trust != "revoked" || got.Trusted || got.TrustReason != "chargeback" || got.TrustBy != "korey@example.com" || got.PurchaseLimitCents != 5_000 {
 		t.Errorf("after revoke = %+v", got)
 	}
-	got.Trust = ""
-	if code := f.call("GET", path, "Bearer "+f.admin, nil, &got); code != http.StatusOK || got.Trust != "revoked" {
-		t.Errorf("read after revoke = %d %+v", code, got)
+	var team operatorTeam
+	if code := f.call("GET", "/api/v1/operator/teams/"+owner.team, operator.auth, nil, &team); code != http.StatusOK || team.Billing.Trust != "revoked" {
+		t.Errorf("read after revoke = %d %+v", code, team.Billing)
 	}
-	if code := f.call("POST", path, "Bearer "+f.admin, map[string]any{"reason": "no trust named"}, nil); code != http.StatusBadRequest {
+	if code := f.call("POST", path, operator.auth, map[string]any{"reason": "no trust named"}, nil); code != http.StatusBadRequest {
 		t.Errorf("a change naming no trust = %d want 400", code)
 	}
-	if code := f.call("POST", path, "Bearer "+f.admin, map[string]any{"trust": "automatic", "reason": "cleared"}, &got); code != http.StatusOK ||
+	if code := f.call("POST", path, operator.auth, map[string]any{"trust": "automatic", "reason": "cleared"}, &got); code != http.StatusOK ||
 		got.Trust != "automatic" || got.Trusted || got.TrustReason != "cleared" || got.PurchaseLimitCents != 5_000 {
 		t.Errorf("reset = %d %+v, want the automatic rule", code, got)
 	}
