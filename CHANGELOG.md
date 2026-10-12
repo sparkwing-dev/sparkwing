@@ -21,6 +21,7 @@ unlock.
 ## [Unreleased]
 
 ### Added
+- **engine:** an SDK process session that runs `<entry> --sw-node-protocol` as a process-session leader, exchanges requests and frames on fds 3 and 4, records stdout and stderr as text, measures the session's usage, and kills the whole session on cancel
 - **engine:** a loopback node route server with one bearer per node; `GET /node/v1/secrets/{name}` serves only the node's declared secrets and answers 426 to any other protocol version
 - **controller:** `sparkwing-controller admin freeze|unfreeze --team T --reason R [--hold ID]` holds or releases a team from inside the controller pod when console sign-in is down
   It acts on the state database directly and commits the console's `team.frozen` and `team.unfrozen` business events with `sparkwing-controller admin` as the actor, and writes an `audit` line to stderr. See [Break-glass](docs/auth.md#break-glass).

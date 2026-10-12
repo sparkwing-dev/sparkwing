@@ -44,6 +44,7 @@ const (
 	CodeProtocolMismatch ErrorCode = "protocol_mismatch"
 	CodeProtocolError    ErrorCode = "protocol_error"
 	CodeSDKExited        ErrorCode = "sdk_exited"
+	CodeFramesClosed     ErrorCode = "frames_closed"
 	CodeSDKError         ErrorCode = "sdk_error"
 )
 
