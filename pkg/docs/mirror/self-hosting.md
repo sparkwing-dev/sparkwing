@@ -137,7 +137,8 @@ replaces one pod with the next. The maintenance sweep, which fails runs and
 claims whose runners went silent, times out approvals and queued nodes, and
 records why waiting nodes have no agent, runs in one of them at a time under
 a store lease, as the cron tick and the storage pass do. A controller that
-dies mid-sweep holds the lease for at most a minute. The sweep judges a
+dies mid-sweep holds the lease for at most a minute, and a slow sweep stops
+ten seconds before that and leaves the rest to the next one. The sweep judges a
 waiting node from the runners connected to the controller holding the lease,
 so a runner reporting only to the other one reads as offline until it
 reconnects. GitHub check runs and commit statuses are written under a

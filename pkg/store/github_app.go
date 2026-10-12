@@ -655,19 +655,29 @@ func (t *Tenant) RecordGitHubCheckRun(ctx context.Context, runID string, checkRu
 	return t.GitHubCheckRun(ctx, runID)
 }
 
-// LockGitHubCheck runs fn while t holds runID's GitHub report lock, so one
+// ReportGitHubCheck runs fn while t holds runID's GitHub report lock, so one
 // controller at a time creates or moves the check run or commit status that
-// reports the run. fn's error is returned.
+// reports the run. fn gets the recorded check run id, 0 when none is, and
+// returns the id of a check run it created, or 0; that id is recorded before
+// the lock is released. ErrNotFound when t has no trigger runID.
 //
-// safety: on Postgres the lock is a transaction-scoped advisory lock, which a
-// process that dies mid-write gives up with its session, so no claim row can
-// outlive its holder. A SQLite store serves one controller process, so a lock
-// in the Store covers every reporter that shares it.
-func (t *Tenant) LockGitHubCheck(ctx context.Context, runID string, fn func(context.Context) error) error {
+// safety: on Postgres the lock is a transaction-scoped advisory lock and the
+// id is recorded in that transaction, so a holder cut off by its deadline
+// releases the lock and its record together; a SQLite store serves one
+// controller process, so a lock in the Store covers every reporter in it.
+func (t *Tenant) ReportGitHubCheck(ctx context.Context, runID string, fn func(ctx context.Context, checkRun int64) (int64, error)) error {
 	if t.s.dialect != DialectPostgres {
 		t.s.githubCheckMu.Lock()
 		defer t.s.githubCheckMu.Unlock()
-		return fn(ctx)
+		id, err := t.GitHubCheckRun(ctx, runID)
+		if err != nil {
+			return err
+		}
+		if id, err = fn(ctx, id); err != nil || id == 0 {
+			return err
+		}
+		_, err = t.RecordGitHubCheckRun(ctx, runID, id)
+		return err
 	}
 	tx, err := t.s.beginTx(ctx)
 	if err != nil {
@@ -678,8 +688,23 @@ func (t *Tenant) LockGitHubCheck(ctx context.Context, runID string, fn func(cont
 		"sparkwing/github-check/"+string(t.team)+"/"+runID); err != nil {
 		return err
 	}
-	if err := fn(ctx); err != nil {
+	var id int64
+	err = tx.QueryRowContext(ctx, `SELECT github_check_run_id FROM triggers WHERE team = ? AND id = ?`,
+		string(t.team), runID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return notFound("trigger", runID)
+	}
+	if err != nil {
 		return err
+	}
+	if id, err = fn(ctx, id); err != nil {
+		return err
+	}
+	if id != 0 {
+		if _, err := tx.ExecContext(ctx, `UPDATE triggers SET github_check_run_id = ?
+			WHERE team = ? AND id = ? AND github_check_run_id = 0`, id, string(t.team), runID); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

@@ -682,9 +682,9 @@ func TestGitHubAppOverlappingControllersCreateOneCheckRun(t *testing.T) {
 	}
 }
 
-// A controller holding an update older than the run's recorded state sends
-// the recorded state instead, so a finished check run or commit status never
-// goes back to running or pending.
+// A controller holding a non-final update for a run that has finished drops
+// it, so a finished check run or commit status never goes back to running or
+// pending.
 func TestGitHubAppStaleUpdateNeverReopensAFinishedRun(t *testing.T) {
 	for _, checks := range []bool{true, false} {
 		t.Run(map[bool]string{true: "check run", false: "commit status"}[checks], func(t *testing.T) {
@@ -718,5 +718,44 @@ func TestGitHubAppStaleUpdateNeverReopensAFinishedRun(t *testing.T) {
 				t.Fatalf("statuses = %+v, want the last one to stay failure", statuses)
 			}
 		})
+	}
+}
+
+// Queue expiry stores a run as failed and reports it timed_out; a queued update
+// another controller still holds arrives afterwards and leaves the timed_out
+// conclusion in place.
+func TestGitHubAppStaleQueuedUpdateKeepsATimedOutConclusion(t *testing.T) {
+	f := newAppFixture(t)
+	other, _ := f.replica()
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "build", nil)
+	runID := f.pushRun(headSHA)
+	f.drainChecks()
+
+	ctx := context.Background()
+	team, err := f.store.AsOperator().RunTeam(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenant, err := f.store.ForTeam(ctx, team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tenant.FinishRun(ctx, runID, "failed", "reaped: queue deadline"); err != nil {
+		t.Fatal(err)
+	}
+	controller.ReportGitHubRunState(ctx, f.srv, runID, "timed_out")
+	f.drainChecks()
+	controller.ReportGitHubRunState(ctx, other, runID, "pending")
+	drain, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := controller.DrainGitHubChecks(drain, other); err != nil {
+		t.Fatalf("drain the second controller: %v", err)
+	}
+
+	calls := f.app.CheckRunCalls()
+	if last := calls[len(calls)-1]; last.Status != "completed" || last.Conclusion != "timed_out" {
+		t.Fatalf("check run writes = %+v, want the last one to stay completed timed_out", calls)
 	}
 }

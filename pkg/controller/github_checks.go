@@ -309,39 +309,36 @@ func (r *githubCheckReporter) writeCheckRun(ctx context.Context, u githubCheckUp
 	// safety: the lock spans the read of the recorded id through recording a
 	// new one, so of two controllers reporting the same run one creates the
 	// check run and the other updates it.
-	return tenant.LockGitHubCheck(ctx, u.runID, func(ctx context.Context) error {
-		run := liftToRecordedRun(ctx, tenant, &u)
-		id, err := tenant.GitHubCheckRun(ctx, u.runID)
-		if err != nil {
-			return err
+	var created int64
+	err = tenant.ReportGitHubCheck(ctx, u.runID, func(ctx context.Context, id int64) (int64, error) {
+		run, stale := staleForRun(ctx, tenant, u)
+		if stale {
+			return 0, nil
 		}
 		check := r.checkRun(ctx, tenant, u, run)
 		if id != 0 {
-			return r.client.UpdateCheckRun(ctx, tok.Token, u.owner, u.repo, id, check)
+			return 0, r.client.UpdateCheckRun(ctx, tok.Token, u.owner, u.repo, id, check)
 		}
-		id, err = r.client.CreateCheckRun(ctx, tok.Token, u.owner, u.repo, check)
-		if err != nil {
-			return err
-		}
-		if _, err := tenant.RecordGitHubCheckRun(context.WithoutCancel(ctx), u.runID, id); err != nil {
-			return fmt.Errorf("%w: check run %d: %w", errGitHubCheckRunUnrecorded, id, err)
-		}
-		return nil
+		id, err := r.client.CreateCheckRun(ctx, tok.Token, u.owner, u.repo, check)
+		created = id
+		return id, err
 	})
+	if err != nil && created != 0 {
+		return fmt.Errorf("%w: check run %d: %w", errGitHubCheckRunUnrecorded, created, err)
+	}
+	return err
 }
 
-// safety: a run's status only moves forward, so lifting an update to it under
-// the report lock never sends less than an earlier holder sent; a controller
-// holding a stale update repeats the final state instead of moving GitHub back.
-func liftToRecordedRun(ctx context.Context, tenant *store.Tenant, u *githubCheckUpdate) *store.Run {
+// safety: a run's status only moves forward and its final update is sent by
+// whoever finished it, so a non-final update read under the report lock after
+// the run finished is dropped; repeating the stored status instead would
+// overwrite a reported conclusion, such as timed_out, the store keeps as failed.
+func staleForRun(ctx context.Context, tenant *store.Tenant, u githubCheckUpdate) (*store.Run, bool) {
 	run, err := tenant.GetRun(ctx, u.runID)
 	if err != nil {
-		return nil
+		return nil, false
 	}
-	if githubCheckPhaseFor(run.Status) > u.phase() {
-		u.runStatus = run.Status
-	}
-	return run
+	return run, u.phase() != githubCheckCompleted && githubCheckPhaseFor(run.Status) == githubCheckCompleted
 }
 
 // safety: a check run GitHub created but the store did not record is not
@@ -357,14 +354,16 @@ func (r *githubCheckReporter) writeCommitStatus(ctx context.Context, u githubChe
 	if err != nil {
 		return err
 	}
-	return tenant.LockGitHubCheck(ctx, u.runID, func(ctx context.Context) error {
-		liftToRecordedRun(ctx, tenant, &u)
+	return tenant.ReportGitHubCheck(ctx, u.runID, func(ctx context.Context, _ int64) (int64, error) {
+		if _, stale := staleForRun(ctx, tenant, u); stale {
+			return 0, nil
+		}
 		status := "pending"
 		if u.phase() == githubCheckCompleted {
 			status = u.runStatus
 		}
 		state, description := githubCommitState(status)
-		return r.client.CreateCommitStatus(ctx, tok.Token, u.owner, u.repo, u.sha, githubCommitStatusRequest{
+		return 0, r.client.CreateCommitStatus(ctx, tok.Token, u.owner, u.repo, u.sha, githubCommitStatusRequest{
 			State: state, TargetURL: githubRunTargetURL(r.dashboardURL, u.runID),
 			Description: description, Context: "sparkwing/" + u.pipeline,
 		})
