@@ -45,13 +45,18 @@ func Start(logger *slog.Logger) (*Server, error) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	mux := http.NewServeMux()
 	s.handle(mux, "GET /node/v1/secrets/{name}", s.serveSecret)
+	s.handle(mux, "GET /node/v1/nodes/{node}/output", s.serveNodeOutput)
+	s.handle(mux, "GET /node/v1/pipelines/{name}/latest", s.servePipelineLatest)
+	s.handle(mux, "POST /node/v1/oidc-token", s.serveOIDCToken)
+	s.handle(mux, "POST /node/v1/children", s.serveStartChild)
+	s.handle(mux, "GET /node/v1/children/{run}/await", s.serveAwaitChild)
 	s.http = &http.Server{
 		Handler:           s.requireProtocol(mux),
 		BaseContext:       func(net.Listener) context.Context { return s.ctx },
 		MaxHeaderBytes:    8 << 10,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      resolveTimeout + 5*time.Second,
+		WriteTimeout:      maxAwait + 5*time.Second,
 		IdleTimeout:       30 * time.Second,
 	}
 	go func() {
