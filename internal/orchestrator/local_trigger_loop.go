@@ -224,6 +224,10 @@ func dispatchLocalTrigger(ctx context.Context, trig *store.Trigger,
 		return fmt.Errorf("no .sparkwing/ at %s: %w", sparkwingDir, err)
 	}
 
+	if err := refusePinnedIn(filepath.Join(repoDir, ".sparkwing"), trig.Pipeline); err != nil {
+		return err
+	}
+
 	binPath, err := pinnedTriggerBinary(trig)
 	if err != nil {
 		return err
