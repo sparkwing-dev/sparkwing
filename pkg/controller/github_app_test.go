@@ -65,7 +65,7 @@ func newAppFixture(t *testing.T, opts ...func(*controller.Server) *controller.Se
 	logs := &syncBuffer{}
 	logger := slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	replica := func() (*controller.Server, string) {
-		srv := controller.New(st, logger).EnableAuthFromStore().
+		srv := controller.New(st, logger).EnableAuthFromStore().WithSecretsCipher(testCipher(t)).
 			WithLicense(license.Resolve(raw, pub, time.Now(), nil)).
 			WithGoogleSignIn(googleauth.New(google.Config()), []string{dashRedirect}).
 			WithGitHubSignIn(githubauth.New(gh.Config()), []string{githubRedirect, appCallback}).

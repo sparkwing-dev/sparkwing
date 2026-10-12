@@ -3,9 +3,11 @@ package profile_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
@@ -52,7 +54,7 @@ func TestInheritControllerDefaults(t *testing.T) {
 
 func TestSaveKeepsInheritedLogsURLDiscoverable(t *testing.T) {
 	path := savedAt(t, filepath.Join(t.TempDir(), "config.yaml"))
-	if err := os.WriteFile(path, []byte("profiles:\n  prod:\n    controller: {url: https://ctrl.example}\n    logs: {type: controller}\n"), 0o600); err != nil {
+	if err := fssecure.WriteFile(path, []byte("profiles:\n  prod:\n    controller: {url: https://ctrl.example}\n    logs: {type: controller}\n")); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := profile.Load(path)
@@ -121,13 +123,16 @@ func TestSave_0600Mode(t *testing.T) {
 	if err := profile.Save(path, &profile.Config{}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	info, err := os.Stat(path)
+	if runtime.GOOS != "windows" {
+		if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("private file mode = %v, %v; want 0600", info, err)
+		}
+	}
+	file, err := fssecure.OpenPrivateConfig(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("saved config is not private: %v", err)
 	}
-	if info.Mode().Perm() != 0o600 {
-		t.Errorf("mode = %v, want 0600 (file carries tokens)", info.Mode().Perm())
-	}
+	_ = file.Close()
 }
 
 func TestNames_Sorted(t *testing.T) {
@@ -158,7 +163,7 @@ func TestDefaultPath_XDG(t *testing.T) {
 	t.Setenv("SPARKWING_CONFIG", "")
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg")
 	got, err := profile.DefaultPath()
-	if err != nil || got != "/tmp/xdg/sparkwing/config.yaml" {
+	if err != nil || got != filepath.Join("/tmp/xdg", "sparkwing", "config.yaml") {
 		t.Errorf("got (%q, %v), want /tmp/xdg/sparkwing/config.yaml", got, err)
 	}
 }
@@ -188,7 +193,7 @@ func TestSurfaces_NilSafe(t *testing.T) {
 func TestSaveRewritesOnlyTheProfilesSection(t *testing.T) {
 	path := savedAt(t, filepath.Join(t.TempDir(), "config.yaml"))
 	before := "# this machine\nadmission:\n  budget: 50%,8gb # leave the desktop room\nprofiles:\n  old: {}\n"
-	if err := os.WriteFile(path, []byte(before), 0o600); err != nil {
+	if err := fssecure.WriteFile(path, []byte(before)); err != nil {
 		t.Fatal(err)
 	}
 	cfg := &profile.Config{Profiles: map[string]*profile.Profile{"prod": {Controller: &profile.ControllerSpec{URL: "https://ctrl.example"}}}}

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -29,8 +30,8 @@ func gitRun(t *testing.T, env []string, args ...string) string {
 // bug: The fixture rejects unauthenticated requests so token scoping is observable.
 func authGitServer(t *testing.T, dir, tok string) (*httptest.Server, *atomic.Int32) {
 	t.Helper()
-	backend := filepath.Join(strings.TrimSpace(gitRun(t, os.Environ(), "--exec-path")), "git-http-backend")
-	if _, err := os.Stat(backend); err != nil {
+	backend, err := exec.LookPath(filepath.Join(strings.TrimSpace(gitRun(t, os.Environ(), "--exec-path")), "git-http-backend"))
+	if err != nil {
 		t.Skipf("no git-http-backend: %v", err)
 	}
 	cgiHandler := &cgi.Handler{Path: backend, Env: []string{"GIT_PROJECT_ROOT=" + dir, "GIT_HTTP_EXPORT_ALL=1"}}
@@ -55,7 +56,7 @@ func authGitServer(t *testing.T, dir, tok string) (*httptest.Server, *atomic.Int
 func TestGitHubTokenReachesOnlyTheFetch(t *testing.T) {
 	home, repos := t.TempDir(), t.TempDir()
 	base := []string{
-		"HOME=" + home, "PATH=" + os.Getenv("PATH"), "GIT_TERMINAL_PROMPT=0",
+		"HOME=" + home, "PATH=" + os.Getenv("PATH"), "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=0", "GIT_ASKPASS=",
 		"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull,
 		"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=credential.helper", "GIT_CONFIG_VALUE_0=!printf 'username=x-access-token\\npassword=ambient\\n'",
 	}
@@ -73,13 +74,17 @@ func TestGitHubTokenReachesOnlyTheFetch(t *testing.T) {
 		gitRun(t, base, "init", "--quiet", "--bare", mirror)
 		cmd := exec.Command("git", "-C", mirror, "fetch", "--quiet", "--depth", "1", "--", remote, "refs/heads/main")
 		cmd.Env = env
-		if pipeTok != "" {
-			cred, err := credentialPipe("x-access-token", pipeTok, 1)
+		if pipeTok != "" || runtime.GOOS == "windows" {
+			transportEnv, extra, cleanup, err := prepareCredentialTransport(env, "x-access-token", pipeTok, 1)
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer func() { _ = cred.Close() }()
-			cmd.ExtraFiles = []*os.File{cred}
+			defer func() {
+				if err := cleanup(); err != nil {
+					t.Error("credential cleanup failed")
+				}
+			}()
+			cmd.Env, cmd.ExtraFiles = transportEnv, extra
 		} else {
 			// safety: FD 3 can be inherited as an open channel, so this case needs EOF.
 			empty, err := os.Open(os.DevNull)
@@ -89,7 +94,7 @@ func TestGitHubTokenReachesOnlyTheFetch(t *testing.T) {
 			defer func() { _ = empty.Close() }()
 			cmd.ExtraFiles = []*os.File{empty}
 		}
-		out, err := cmd.CombinedOutput()
+		out, err := gitCommandCombinedOutput(cmd)
 		if err != nil {
 			return fmt.Errorf("%w: %s", err, out)
 		}

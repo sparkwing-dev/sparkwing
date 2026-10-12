@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -337,7 +338,12 @@ func (s *Server) restoreRun(ctx context.Context, root *os.Root, runID string, id
 	if err != nil {
 		return err
 	}
-	defer s.closeRoot(stageRoot, "restore run")
+	stageOpen := true
+	defer func() {
+		if stageOpen {
+			s.closeRoot(stageRoot, "restore run")
+		}
+	}()
 	var kept []archivedFile
 	for _, f := range idx.Files {
 		if !safeArchivedRel(f.Rel) {
@@ -368,6 +374,13 @@ func (s *Server) restoreRun(ctx context.Context, root *os.Root, runID string, id
 	}
 	if err := stageRoot.WriteFile(runMetaFile, data, s.fileMode); err != nil {
 		return err
+	}
+	if runtime.GOOS == "windows" {
+		// bug: Windows directory handles prevent publishing the restored directory by rename.
+		if err := stageRoot.Close(); err != nil {
+			return err
+		}
+		stageOpen = false
 	}
 	if err := os.Rename(tmp, filepath.Join(s.root, "runs", runID)); err != nil {
 		// safety: a restore racing another for the same run loses to it, and

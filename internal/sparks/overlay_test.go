@@ -31,6 +31,10 @@ func writeGoMod(t *testing.T, dir string, requires map[string]string) {
 
 func fakeGoBin(t *testing.T) {
 	t.Helper()
+	if bin, ok := nativeSparksGo(t, "", ""); ok {
+		t.Setenv("SPARKS_GO_BIN", bin)
+		return
+	}
 	dir := t.TempDir()
 	script := `#!/bin/sh
 # no-op; touch the sum file for the -modfile arg so behavior is realistic.

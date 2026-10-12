@@ -121,7 +121,7 @@ func (p *PRGate) Plan(_ context.Context, plan *sw.Plan, _ sw.NoInputs, rc sw.Run
 
 **Status reporting.** Each run the App started reports as one check run
 named `sparkwing/<pipeline>` on the commit it builds; see
-[GitHub App](github-app.md#check-runs). Set `SPARKWING_DASHBOARD_URL` to the
+[GitHub App](github-app.md#check-runs). Set the controller's `--dashboard-url` to the
 public dashboard base URL to make each check run link to `/runs?run=<run-id>`.
 
 ## Manual / API invocation

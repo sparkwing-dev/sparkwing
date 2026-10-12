@@ -15,6 +15,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/logutil"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
@@ -42,7 +43,8 @@ func run(args []string) error {
 			"deletes every run's logs for anyone who can reach it. Leave unset "+
 			"for laptop-local use.")
 
-	readEgress := egress.Bind(fs, nil, egress.ServiceLogs, egress.LogsSurfaces)
+	readEgress := egress.Bind(fs, egress.LogsSurfaces)
+	readLog := logutil.Bind(fs)
 
 	defaults := logs.DefaultLimits()
 	maxNodeBytes := fs.Int64("max-node-bytes", defaults.MaxNodeBytes,
@@ -190,7 +192,7 @@ func run(args []string) error {
 		}
 		archive = &logs.ArchiveOptions{Store: store, Idle: *archiveIdle}
 	}
-	tel, err := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-logs"})
+	tel, err := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-logs", Log: readLog()})
 	if err != nil {
 		return err
 	}

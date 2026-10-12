@@ -11,13 +11,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func TestDataDownloadPreservesClaimOutputBoundary(t *testing.T) {
-	t.Setenv(authwire.CacheGrantKeyEnv, "private-fixture-key")
 	f := newDispatchRouteFixture(t)
 	plan := f.claim(t, store.PlanNodeID, store.ClaimTokenPlan)
 	wantPost(t, f, planPath, plan, `{"nodes":[{"id":"a","deps":[],`+dispatchHash+`},{"id":"b","deps":[],`+dispatchHash+`}]}`, http.StatusOK, "accepted")
@@ -35,7 +33,7 @@ func TestDataDownloadPreservesClaimOutputBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := s3.NewFromConfig(aws.Config{Region: "us-west-2", Credentials: credentials.NewStaticCredentialsProvider("FIXTURE", "FIXTURE", "")})
-	srv := New(f.st, nil).EnableAuthFromStore()
+	srv := New(f.st, nil).EnableAuthFromStore().WithCacheGrantKey("private-fixture-key")
 	if err := srv.WithSignedDownloads(bucket, nil, client, "", "", ""); err != nil {
 		t.Fatal(err)
 	}

@@ -7,7 +7,7 @@ import (
 )
 
 func TestScopeKey_GlobalNameWithSeparatorDoesNotCollideWithBox(t *testing.T) {
-	t.Setenv("SPARKWING_BOX_ID", "advbox-host")
+	SetTestBoxID(t, "advbox-host")
 
 	global := sparkwing.NewConcurrencyGroup("collide@advbox-host", sparkwing.ConcurrencyLimit{
 		Capacity: 1, Scope: sparkwing.ScopeGlobal,
@@ -24,7 +24,7 @@ func TestScopeKey_GlobalNameWithSeparatorDoesNotCollideWithBox(t *testing.T) {
 }
 
 func TestScopeKey_LabelReadsSchemeTagNotSeparator(t *testing.T) {
-	t.Setenv("SPARKWING_BOX_ID", "host1")
+	SetTestBoxID(t, "host1")
 
 	cases := []struct {
 		group *sparkwing.ConcurrencyGroup

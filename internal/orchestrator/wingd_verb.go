@@ -29,7 +29,7 @@ func runWingdCLI(args []string) error {
 	fs := flag.NewFlagSet("wingd run", flag.ContinueOnError)
 	home := fs.String("home", "", "sparkwing home (default: $SPARKWING_HOME or ~/.sparkwing)")
 	version := fs.String("version", "", "binary version to advertise (default: the compiled SDK version)")
-	budget := fs.String("budget", "", "machine budget cap (default: $SPARKWING_BUDGET, then admission.budget in config.yaml)")
+	budget := fs.String("budget", "", "machine budget cap (default: admission.budget in config.yaml)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}

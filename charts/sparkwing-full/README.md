@@ -93,8 +93,10 @@ running install:
 kubectl -n sparkwing create secret generic sparkwing-bootstrap-admin \
     --from-file=token="$HOME/sparkwing-bootstrap-admin"
 
-# At-rest encryption key for the controller's secrets store.
-# Skip and the controller logs a WARNING + stores plaintext.
+# At-rest encryption key for the controller's secrets store. Skip it and a
+# SQLite controller creates its own key on the first secret write, a
+# PostgreSQL controller refuses secret writes, and a multi-team controller
+# refuses to start; it never stores a secret as plaintext.
 openssl rand -base64 32 > /tmp/sparkwing-key
 kubectl -n sparkwing create secret generic sparkwing-secrets-key \
     --from-file=key=/tmp/sparkwing-key
@@ -236,10 +238,11 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `controller.storage.pvc.size` | State DB volume size. | `5Gi` |
 | `controller.storage.pvc.storageClassName` | Override default StorageClass. | `""` |
 | `controller.storage.pvc.keepOnUninstall` | Annotate PVC `helm.sh/resource-policy: keep`. | `true` |
-| `controller.databaseSecret.name` | Secret containing a PostgreSQL DSN. Empty keeps SQLite. | `""` |
+| `controller.credentialsSecret.name` | Secret whose keys are [credential file names](../../docs/self-hosting.md#controller-credentials) (`license`, `oidc-key`, `github-app-key`, and the rest), projected whole into the controller's `--credentials-dir`. Helm cannot read its keys, so with it set the chart skips its bootstrap-token and current-key checks and the controller refuses at startup instead. | `""` |
+| `controller.databaseSecret.name` | Secret containing a PostgreSQL DSN, mounted as the `pg-url` credential. Empty keeps SQLite. | `""` |
 | `controller.databaseSecret.key` | Key holding the PostgreSQL DSN. | `dsn` |
 | `controller.dashboardURL` | Query-free HTTP(S) dashboard base URL for GitHub App check run links; invalid values omit the link. | `""` |
-| `controller.secretsKey.name` | Secret holding 32-byte encryption key, mounted as a file and named with `--secrets-key-file`. | `""` |
+| `controller.secretsKey.name` | Secret holding the 32-byte encryption key, mounted as the `secrets-key` credential. | `""` |
 | `controller.secretsPreviousKey.name` | Secret holding the key values were sealed under before `secretsKey`; read-only fallback for the window before `sparkwing secrets rotate` runs. | `""` |
 | `controller.bootstrapAdminToken.name` | Secret holding the first admin token, stored as an admin credential before the listener binds when the tokens table is empty. | `""` |
 | `controller.requireAuth` | Refuse to start when no live token exists. Without `bootstrapAdminToken` the render refuses unless `allowOpenBootstrap` is true, because a fresh controller would have no way to mint its first token. | `true` |
@@ -247,6 +250,15 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `controller.argon2MemoryBudgetMB` | Memory ceiling in MiB for concurrent argon2id hashing; each hash holds 64 MiB. | `256` |
 | `controller.logs.url` | The logs service the controller announces to clients and reads dashboard log panes from, passed as `--logs-url`. | (auto-computed from sub-chart) |
 | `controller.cache.url` | The cache the controller's gitcache proxy forwards to. | (auto-computed from sub-chart) |
+| `controller.externalURL` | Base URL the controller answers on from outside the cluster, passed as `--external-url`. | `""` |
+| `controller.oauthRedirectURIs` | Comma-separated sign-in callback URLs, passed as `--oauth-redirect-uris`. | `""` |
+| `controller.operatorAccounts` | Comma-separated account ids allowed into the operator console, passed as `--operator-accounts`. | `""` |
+| `controller.github.clientID` | GitHub OAuth client id, passed as `--github-client-id`; the secret is the `github-client-secret` credential. | `""` |
+| `controller.github.appID` / `appSlug` | The GitHub App, passed as `--github-app-id` and `--github-app-slug`; its key and webhook secret are the `github-app-key` and `github-app-webhook-secret` credentials. | `""` |
+| `controller.google.clientID` | Google OAuth client id, passed as `--google-client-id`; the secret is the `google-client-secret` credential. | `""` |
+| `controller.email.sender` / `configurationSet` | SES invitation email, passed as `--email-sender` and `--email-configuration-set`. | `""` |
+| `controller.cloudfront.domain` / `keyPairID` | CloudFront download signing, passed as `--cloudfront-domain` and `--cloudfront-key-pair-id`; the key is the `cloudfront-key` credential. | `""` |
+| `controller.extraArgs` | Further controller flags, verbatim, for settings without a value above (`--object-store-budget`, `--cache-blob-store`, `--billing-url`, ...). Never a secret. | `[]` |
 
 ### Security and volume ownership
 
@@ -351,9 +363,10 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
    `sparkwing-runner-bundle.controller.tokenSecret` is also the logs
    service's signal to resolve callers against the controller.
    `sparkwing-runner-bundle.cache.tokenSecret` is what the cache reads as the
-   credential file `cache-token` and the controller as `SPARKWING_CACHE_TOKEN`,
-   and `sparkwing-runner-bundle.cache.grantKeySecret` what the cache reads as
-   `cache-grant-key` and the controller as `SPARKWING_CACHE_GRANT_KEY`. A cache-enabled install without the cache
+   credential file `cache-token`, and
+   `sparkwing-runner-bundle.cache.grantKeySecret` what both read as
+   `cache-grant-key`; the chart mounts each into both services' credentials
+   directories. A cache-enabled install without the cache
    token fails at render time unless
    `sparkwing-runner-bundle.cache.allowUnauthenticated=true`, and a
    logs-enabled one without the runner token unless
@@ -423,9 +436,9 @@ with their own ingress controller / Gateway / cloud LB. Set
 which serves the API, webhooks (including the GitHub App's
 `POST /webhooks/github-app`), and dashboard on one port. A console host
 and an API host can both point at that Service; a reverse proxy in front
-can still split them. The App's settings come from
-`SPARKWING_GITHUB_APP_*` variables set through `controller.extraEnv`; see
-the GitHub App guide.
+can still split them. The App's settings come from `controller.github`
+and the `github-app-key` and `github-app-webhook-secret` credentials in
+`controller.credentialsSecret`; see the GitHub App guide.
 
 ## Sub-chart dependency
 

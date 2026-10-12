@@ -119,6 +119,16 @@ func TestChildEnv_OmitsEmptyAndUnavailableValues(t *testing.T) {
 	}
 }
 
+func TestChildEnv_DropsAnInheritedBearerWhenTheRunHasNone(t *testing.T) {
+	cfg := testConfig()
+	cfg.AgentToken = ""
+	env := childEnv(context.Background(), []string{"SPARKWING_AGENT_TOKEN=outer-run"}, cfg,
+		runner.Request{RunID: "run-1", NodeID: "build"})
+	if got, ok := lastValue(env, "SPARKWING_AGENT_TOKEN"); ok {
+		t.Fatalf("SPARKWING_AGENT_TOKEN = %q, want the outer run's bearer dropped", got)
+	}
+}
+
 func TestChildEnv_APISocketCarriesNoBearer(t *testing.T) {
 	cfg := testConfig()
 	cfg.APISocket = "/tmp/sparkwing-501-abc/api.sock"

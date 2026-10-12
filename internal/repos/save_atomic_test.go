@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -97,11 +98,22 @@ func TestSave_AFailedWriteLeavesThePreviousRegistryIntact(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := os.Chmod(dir, 0o500); err != nil {
-		t.Fatal(err)
+	if runtime.GOOS == "windows" {
+		// bug: Windows chmod does not make a directory unwritable; a directory at the lock path forces a real save failure.
+		lock := path + ".lock"
+		if err := os.Remove(lock); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(lock, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Remove(lock) })
+	} else {
+		if err := os.Chmod(dir, 0o500); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 	}
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
-
 	if err := Save(path, &Config{Repos: []*Entry{{Path: "/never/lands"}}}); err == nil {
 		t.Fatal("Save into a read-only directory reported success")
 	}

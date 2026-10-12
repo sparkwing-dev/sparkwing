@@ -12,8 +12,8 @@ func TestCheckCacheGrantKey_MultiTeamWithACacheRefusesAMissingOrSharedKey(t *tes
 	for _, tc := range []struct {
 		name, cacheURL, podURL, key, token, want string
 	}{
-		{"no key", "http://cache:8080", "", "", "op-token", "SPARKWING_CACHE_GRANT_KEY"},
-		{"no key, pod URL only", "", "https://cache.example", "", "", "SPARKWING_CACHE_GRANT_KEY"},
+		{"no key", "http://cache:8080", "", "", "op-token", credCacheGrantKey},
+		{"no key, pod URL only", "", "https://cache.example", "", "", credCacheGrantKey},
 		{"key is the operator token", "http://cache:8080", "", "op-token", "op-token", "operator token"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

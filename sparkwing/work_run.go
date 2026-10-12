@@ -341,7 +341,7 @@ func (e *StepError) Unwrap() error {
 
 func emitStepEvent(ctx context.Context, stepID, event string, elapsed time.Duration, err error) {
 	attrs := map[string]any{"step": stepID}
-	if elapsed > 0 {
+	if elapsed > 0 || event == "step_end" {
 		attrs["duration_ms"] = elapsed.Milliseconds()
 	}
 	level := "info"

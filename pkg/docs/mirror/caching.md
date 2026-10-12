@@ -231,8 +231,9 @@ therefore compute the same key from different directories and share one
 compiled binary, instead of each building their own.
 
 **Files Git ignores are excluded from the key.** Directories outside a
-Git repository hash every file. Set `SPARKWING_HASH_ALL_FILES=1` when a
-build depends on ignored files, including generated assets embedded by Go.
+Git repository hash every file. Pass `sparkwing run --sw-hash-all-files`
+when a build depends on ignored files, including generated assets embedded
+by Go.
 
 Builds pass `-trimpath`, which keeps the build directory out of the
 binary. That is what lets two checkouts produce byte-identical output;
@@ -243,18 +244,22 @@ Builds also pass `-ldflags "-s -w"`, which drops the symbol table and
 DWARF and takes roughly 30% off the binary and a third off its link
 time. Panic tracebacks and `runtime/debug.ReadBuildInfo` survive. A
 debugger still attaches, without variable names or line numbers, and a
-core dump cannot be symbolised. Set `SPARKWING_NO_BINCACHE=1` to run the
-pipeline from a temporary build with debug symbols when you need those.
+core dump cannot be symbolised. Pass `sparkwing run --sw-no-bincache` to
+run the pipeline from a temporary build with debug symbols when you need
+those.
 
 ### Bounding the cache
 
 After each new entry, Sparkwing reclaims inactive entries to fit a byte
 ceiling and an entry count.
 
-| Variable | Default | Meaning |
+| [config.yaml](machine-config.md) key | Default | Meaning |
 | --- | --- | --- |
-| `SPARKWING_CACHE_MAX_BYTES` | `2GiB` | Total size ceiling. Accepts a suffix (`512MiB`, `4GB`). `0` disables. |
-| `SPARKWING_CACHE_MAX_ENTRIES` | `20` | Entry count ceiling. `0` disables. |
+| `cache.max_bytes` | `2GiB` | Total size ceiling. Accepts a suffix (`512MiB`, `4GB`). `0` disables. |
+| `cache.max_entries` | `20` | Entry count ceiling. `0` disables. |
+
+`sparkwing cache prune --max-bytes` and `--max-entries` override them for
+one prune.
 
 Pruning advances through a bounded second-chance queue. An entry used
 since it entered the queue moves behind the other candidates, so use
@@ -312,8 +317,8 @@ When other cached entries came from the same checkout, `explain` lists
 them with the inputs that changed since, which is the direct answer to
 why the last run recompiled.
 
-To skip the binary cache entirely for one invocation, set
-`SPARKWING_NO_BINCACHE=1`; sparkwing builds a temporary binary with debug
+To skip the binary cache entirely for one invocation, pass
+`--sw-no-bincache`; sparkwing builds a temporary binary with debug
 symbols, then runs it with your original environment. The Go toolchain floor
 adjustment applies only while building.
 
@@ -324,6 +329,6 @@ binaries across machines. The publisher writes a `.sha256` sidecar, and
 a fetch discards a binary whose digest differs. Store write permissions
 determine who can publish binaries.
 
-A missing sidecar causes the run to compile from source. Set
-`SPARKWING_ARTIFACT_DIGEST_BACKFILL=1` only for a trusted store to accept
-blobs without sidecars and write digests from the downloaded bytes.
+A missing sidecar causes the run to compile from source. Pass
+`sparkwing run --sw-artifact-digest-backfill` only for a trusted store to
+accept blobs without sidecars and write digests from the downloaded bytes.

@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
 
 type fleetish struct {
@@ -19,7 +22,7 @@ type fleetish struct {
 func writeFile(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), Filename)
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+	if err := fssecure.WriteFile(path, []byte(body)); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv(PathEnv, path)
@@ -72,8 +75,16 @@ func TestReadRejectsWhatItDoesNotKnow(t *testing.T) {
 }
 
 func TestReadRefusesAFileOthersCanRead(t *testing.T) {
-	if os.Getuid() < 0 {
-		t.Skip("owner-only modes are a unix check")
+	if runtime.GOOS == "windows" {
+		path := filepath.Join(t.TempDir(), Filename)
+		if err := os.WriteFile(path, []byte("fleet: {}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var got fleetish
+		if _, err := Read(path, Fleet, &got); err == nil || !strings.Contains(err.Error(), "owner-only") {
+			t.Fatalf("Read error = %v, want inherited ACL refusal", err)
+		}
+		return
 	}
 	path := writeFile(t, "fleet: {}\n")
 	if err := os.Chmod(path, 0o644); err != nil {
@@ -117,7 +128,7 @@ fleet:
 			t.Errorf("rewritten file lost %q:\n%s", want, body)
 		}
 	}
-	if info, err := os.Stat(path); err == nil && info.Mode().Perm() != 0o600 && os.Getuid() >= 0 {
+	if info, err := os.Stat(path); err == nil && info.Mode().Perm() != 0o600 && runtime.GOOS != "windows" {
 		t.Errorf("mode = %v, want 0600", info.Mode().Perm())
 	}
 }

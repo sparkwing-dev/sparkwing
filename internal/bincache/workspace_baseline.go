@@ -125,7 +125,7 @@ func AdoptWorkspaceBaseline(ctx context.Context, checkoutDir, gcURL, token, snap
 	run := func(args ...string) error {
 		cmd := exec.CommandContext(ctx, "git", append([]string{"-C", checkoutDir}, args...)...)
 		cmd.Env = gitHTTPEnv(gcURL, token)
-		if out, runErr := cmd.CombinedOutput(); runErr != nil {
+		if out, runErr := gitCommandCombinedOutput(cmd); runErr != nil {
 			return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), runErr, strings.TrimSpace(string(out)))
 		}
 		return nil
@@ -150,7 +150,7 @@ func AdoptWorkspaceBaseline(ctx context.Context, checkoutDir, gcURL, token, snap
 func originServesMoreThanTheSnapshot(ctx context.Context, checkoutDir, gcURL, token, snapshotSHA string) (bool, error) {
 	cmd := exec.CommandContext(ctx, "git", "-C", checkoutDir, "ls-remote", "--refs", "origin")
 	cmd.Env = gitHTTPEnv(gcURL, token)
-	out, err := cmd.CombinedOutput()
+	out, err := gitCommandCombinedOutput(cmd)
 	if err != nil {
 		return false, fmt.Errorf("list the source refs: %w: %s", err, strings.TrimSpace(string(out)))
 	}

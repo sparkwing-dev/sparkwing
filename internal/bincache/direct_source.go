@@ -239,7 +239,7 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest string,
 		cmd.Env = env
 		cmd.ExtraFiles = extra
 		killGroupOnCancel(cmd)
-		out, err := cmd.CombinedOutput()
+		out, err := gitCommandCombinedOutput(cmd)
 		if err != nil {
 			return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(string(out)))
 		}
@@ -303,16 +303,18 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest string,
 			defer cancel()
 		}
 		var extra []*os.File
+		env := fetchEnv
+		cleanup := func() error { return nil }
 		if pipeCred {
-			cred, err := credentialPipe(opts.cred.Username, opts.cred.Secret, fetchCredentialAsks)
+			var err error
+			env, extra, cleanup, err = prepareCredentialTransport(env, opts.cred.Username, opts.cred.Secret, fetchCredentialAsks)
 			if err != nil {
-				return fmt.Errorf("source credential pipe: %w", err)
+				return fmt.Errorf("source credential transport: %w", err)
 			}
-			defer func() { _ = cred.Close() }()
-			extra = []*os.File{cred}
 		}
-		_, err := runWith(fetchCtx, fetchEnv, extra, "-C", mirror, "-c", "http.followRedirects=false",
+		_, err := runWith(fetchCtx, env, extra, "-C", mirror, "-c", "http.followRedirects=false",
 			"fetch", "--quiet", "--no-tags", "--depth", "1", "--", remote, ref)
+		err = errors.Join(err, cleanup())
 		if err != nil && ctx.Err() == nil && errors.Is(fetchCtx.Err(), context.DeadlineExceeded) {
 			return fmt.Errorf("timed out after %s", opts.fetchTimeout)
 		}

@@ -100,6 +100,7 @@ type Server struct {
 
 	cacheURL                     string
 	cacheToken                   string
+	cacheGrantKey                string
 	downloadFree, downloadFunded int64
 
 	teamStorage        TeamStorage
@@ -358,6 +359,13 @@ func (s *Server) WithDashboardURL(url string) *Server {
 // gitcache registration and clone routes.
 func (s *Server) WithCacheURL(url string) *Server {
 	s.cacheURL = url
+	return s
+}
+
+// WithCacheGrantKey sets the key the controller signs cache grants with and
+// verifies a grant presented to it with. Empty mints and accepts no grants.
+func (s *Server) WithCacheGrantKey(key string) *Server {
+	s.cacheGrantKey = key
 	return s
 }
 
@@ -809,7 +817,7 @@ func (s *Server) EnableAuthFromStore() *Server {
 	if !s.tokensTableNonEmpty() {
 		s.logger.Warn("multi-team controller requires authentication with an empty tokens table: " +
 			"only signed-in sessions are accepted until an admin token exists; supply one with " +
-			"--bootstrap-admin-token-file (SPARKWING_BOOTSTRAP_ADMIN_TOKEN)")
+			"the bootstrap-admin-token file in the controller's --credentials-dir")
 	}
 	s.auth = s.storeAuthenticator()
 	return s

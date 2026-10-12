@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,8 +22,6 @@ import (
 )
 
 const SubmissionEnvironmentCapturedKey = "_SPARKWING_SUBMISSION_ENV_CAPTURED"
-
-const submissionEnvironmentAllowKey = "SPARKWING_SUBMIT_ENV_ALLOW"
 
 const (
 	submissionEnvironmentDir          = "submission-environments"
@@ -52,7 +51,7 @@ type submissionEnvironmentSnapshot struct {
 	Environment []string `json:"environment"`
 }
 
-func CaptureSubmissionEnvironment(home, runID string, env []string, logger *slog.Logger) error {
+func CaptureSubmissionEnvironment(home, runID string, env []string, logger *slog.Logger) (err error) {
 	layout, err := ConsumerLayoutFor(home)
 	if err != nil {
 		return err
@@ -70,13 +69,18 @@ func CaptureSubmissionEnvironment(home, runID string, env []string, logger *slog
 		return fmt.Errorf("encode submission environment: %w", err)
 	}
 	path := submissionEnvironmentPath(layout.Home, runID)
-	tmp, err := os.CreateTemp(dir, ".submission-environment-*")
+	privateDir, err := fssecure.MkdirPrivateTemp(dir, ".submission-environment-")
+	if err != nil {
+		return fmt.Errorf("create private submission environment directory: %w", err)
+	}
+	defer func() { err = errors.Join(err, os.Remove(privateDir)) }()
+	tmp, err := os.CreateTemp(privateDir, "snapshot-*")
 	if err != nil {
 		return fmt.Errorf("create submission environment: %w", err)
 	}
 	tmpPath := tmp.Name()
 	defer func() { _ = os.Remove(tmpPath) }()
-	if err := tmp.Chmod(0o600); err != nil {
+	if err := fssecure.SecurePrivateConfig(tmpPath); err != nil {
 		_ = tmp.Close()
 		return err
 	}
@@ -97,12 +101,7 @@ func CaptureSubmissionEnvironment(home, runID string, env []string, logger *slog
 	if err := os.Remove(tmpPath); err != nil {
 		return fmt.Errorf("remove submission environment temporary file: %w", err)
 	}
-	d, err := os.Open(dir)
-	if err != nil {
-		return fmt.Errorf("open submission environment directory: %w", err)
-	}
-	defer func() { _ = d.Close() }()
-	if err := d.Sync(); err != nil {
+	if err := syncSubmissionEnvironmentDirectory(dir); err != nil {
 		return fmt.Errorf("sync submission environment directory: %w", err)
 	}
 	return nil
@@ -146,7 +145,7 @@ func submissionEnvironment(home string, trig *store.Trigger) ([]string, error) {
 }
 
 func filterSubmissionEnvironment(env []string, logger *slog.Logger) ([]string, error) {
-	names, prefixes, err := submissionEnvironmentAllowList(env)
+	names, prefixes, err := submissionEnvironmentAllowList()
 	if err != nil {
 		return nil, err
 	}
@@ -157,8 +156,8 @@ func filterSubmissionEnvironment(env []string, logger *slog.Logger) ([]string, e
 		if !ok || !submissionEnvironmentAllowed(key, names, prefixes) {
 			continue
 		}
-		// safety: the snapshot outlives the shell, so a credential-shaped name or value never reaches it.
-		if envredact.CredentialName(key) || envredact.CredentialValue(value) || envredact.RedactValue(value) != value {
+		// safety: snapshots outlive the shell, so credential values and names are filtered before publication.
+		if submissionEnvironmentCredentialName(key, value) || envredact.CredentialValue(value) || envredact.RedactValue(value) != value {
 			if names[key] {
 				dropped = append(dropped, key)
 			}
@@ -168,39 +167,37 @@ func filterSubmissionEnvironment(env []string, logger *slog.Logger) ([]string, e
 	}
 	if len(dropped) > 0 && logger != nil {
 		logger.Warn("submission environment: credential filter dropped allow-listed names",
-			"names", strings.Join(dropped, ","), "allow_key", submissionEnvironmentAllowKey)
+			"names", strings.Join(dropped, ","), "allow_key", submitEnvAllowKey)
 	}
 	return out, nil
 }
 
-func submissionEnvironmentAllowList(env []string) (map[string]bool, []string, error) {
+func submissionEnvironmentAllowList() (map[string]bool, []string, error) {
+	items, path, err := submitEnvAllowSetting()
+	if err != nil {
+		return nil, nil, err
+	}
 	names := map[string]bool{}
 	var prefixes []string
-	for _, entry := range env {
-		key, value, ok := strings.Cut(entry, "=")
-		if !ok || key != submissionEnvironmentAllowKey {
-			continue
-		}
-		for _, item := range strings.Split(value, ",") {
-			item = strings.TrimSpace(item)
-			switch {
-			case item == "":
-			case item == "*":
-				return nil, nil, fmt.Errorf(
-					"%s: %q is not a wildcard; name each variable or give a prefix such as AWS_*",
-					submissionEnvironmentAllowKey, item)
-			case strings.HasSuffix(item, "*"):
-				prefixes = append(prefixes, strings.TrimSuffix(item, "*"))
-			default:
-				names[item] = true
-			}
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		switch {
+		case item == "":
+		case item == "*":
+			return nil, nil, fmt.Errorf(
+				"%s %s: %q is not a wildcard; name each variable or give a prefix such as AWS_*",
+				path, submitEnvAllowKey, item)
+		case strings.HasSuffix(item, "*"):
+			prefixes = append(prefixes, strings.TrimSuffix(item, "*"))
+		default:
+			names[item] = true
 		}
 	}
 	return names, prefixes, nil
 }
 
 func submissionEnvironmentAllowed(key string, names map[string]bool, prefixes []string) bool {
-	if envAllowed(key) || names[key] {
+	if nativeSubmissionEnvironmentAllowed(key) || envAllowed(key) || names[key] {
 		return true
 	}
 	for _, prefix := range prefixes {
@@ -209,6 +206,25 @@ func submissionEnvironmentAllowed(key string, names map[string]bool, prefixes []
 		}
 	}
 	return false
+}
+
+func nativeSubmissionEnvironmentAllowed(key string) bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	switch strings.ToUpper(key) {
+	case "PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "COMSPEC", "TEMP", "TMP", "APPDATA", "LOCALAPPDATA", "SPARKWING_CONFIG", "SPARKWING_SECRETS_KEY_FILE":
+		return true
+	}
+	return false
+}
+
+func submissionEnvironmentCredentialName(key, value string) bool {
+	// safety: an absolute key-file path selects the private file without carrying its key bytes.
+	if runtime.GOOS == "windows" && strings.EqualFold(key, "SPARKWING_SECRETS_KEY_FILE") && filepath.IsAbs(value) {
+		return false
+	}
+	return envredact.CredentialName(key)
 }
 
 func consumeSubmissionEnvironment(home string, trig *store.Trigger, logger *slog.Logger) ([]string, error) {
@@ -242,7 +258,7 @@ func ReconcileSubmissionEnvironments(ctx context.Context, home string, st *store
 	}
 	files := entries[:0]
 	for _, entry := range entries {
-		if !entry.IsDir() && (strings.HasSuffix(entry.Name(), ".json") || strings.HasPrefix(entry.Name(), ".submission-environment-")) {
+		if (!entry.IsDir() && strings.HasSuffix(entry.Name(), ".json")) || strings.HasPrefix(entry.Name(), ".submission-environment-") {
 			files = append(files, entry)
 		}
 	}
@@ -266,7 +282,13 @@ func ReconcileSubmissionEnvironments(ctx context.Context, home string, st *store
 				return removed, infoErr
 			}
 			if time.Since(info.ModTime()) >= abandonedSubmissionEnvironmentAge {
-				if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				var removeErr error
+				if entry.IsDir() {
+					removeErr = removeAbandonedSubmissionDirectory(path)
+				} else {
+					removeErr = os.Remove(path)
+				}
+				if removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
 					return removed, removeErr
 				}
 				removed++
@@ -305,4 +327,40 @@ func ReconcileSubmissionEnvironments(ctx context.Context, home string, st *store
 		}
 	}
 	return removed, nil
+}
+
+func removeAbandonedSubmissionDirectory(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("submission temporary path is not a directory: %s", path)
+	}
+	if err := fssecure.VerifyPrivateConfig(path, info); err != nil {
+		return fmt.Errorf("submission temporary directory is not private: %w", err)
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return err
+	}
+	// safety: inspect every entry before removing anything; unknown files and links are not capture residue.
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !strings.HasPrefix(entry.Name(), "snapshot-") || !info.Mode().IsRegular() {
+			return fmt.Errorf("unexpected submission temporary entry: %s", filepath.Join(path, entry.Name()))
+		}
+		if err := fssecure.VerifyPrivateConfig(filepath.Join(path, entry.Name()), info); err != nil {
+			return fmt.Errorf("submission temporary snapshot is not private: %w", err)
+		}
+	}
+	for _, entry := range entries {
+		if err := os.Remove(filepath.Join(path, entry.Name())); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return os.Remove(path)
 }

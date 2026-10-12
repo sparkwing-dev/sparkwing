@@ -449,7 +449,7 @@ func TestDispatchSnapshot_RecordsRedactedKeys(t *testing.T) {
 
 func TestCollectDispatchEnv_RedactsCredentialValues(t *testing.T) {
 	t.Setenv("SPARKWING_CACHE_URL", "postgres://sparkwing:hunter2@db.example/sparkwing?sslmode=require")
-	t.Setenv("SPARKWING_S3_ENDPOINT", "https://api.example/v1")
+	t.Setenv("SPARKWING_GITCACHE_URL", "https://api.example/v1")
 
 	node := buildNode(t, "deploy", &stubJob{}).
 		Env("SERVICE_ACCOUNT", `{"kind":"sa","token":"ya29.body"}`).
@@ -461,7 +461,7 @@ func TestCollectDispatchEnv_RedactsCredentialValues(t *testing.T) {
 	if v := got.values["SPARKWING_CACHE_URL"]; v != "postgres://redacted@db.example/sparkwing?sslmode=require" {
 		t.Fatalf("DSN userinfo survived capture: %q", v)
 	}
-	if v := got.values["SPARKWING_S3_ENDPOINT"]; v != "https://api.example/v1" {
+	if v := got.values["SPARKWING_GITCACHE_URL"]; v != "https://api.example/v1" {
 		t.Fatalf("a URL without userinfo should be untouched: %q", v)
 	}
 	for _, k := range []string{"SERVICE_ACCOUNT", "SIGNING_MATERIAL", "UPSTREAM_HEADER"} {

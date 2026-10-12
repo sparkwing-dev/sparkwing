@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -90,7 +91,7 @@ func TestClaimedDefinedPipelineSetupFailureFailsRun(t *testing.T) {
 		{name: "run absent", pending: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv(orchestrator.StoreWedgeBudgetEnvVar, "secret-should-not-be-shown")
+			orchestrator.SetTestStoreWedgeBudget(t, 0, errors.New("store wedge budget secret-should-not-be-shown"))
 			ctx := context.Background()
 			st, err := teststore.Open(filepath.Join(t.TempDir(), "controller.db"))
 			if err != nil {
@@ -141,7 +142,7 @@ func TestClaimedDefinedPipelineSetupFailureFailsRun(t *testing.T) {
 
 func TestClaimedSetupFailureKeepsTriggerOpenWhenRunWriteUnavailable(t *testing.T) {
 	registerRemotePipelines(t)
-	t.Setenv(orchestrator.StoreWedgeBudgetEnvVar, "invalid-duration")
+	orchestrator.SetTestStoreWedgeBudget(t, 0, errors.New("store wedge budget invalid-duration"))
 	var runRead, triggerDone atomic.Bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -167,7 +168,7 @@ func TestClaimedSetupFailureKeepsTriggerOpenWhenRunWriteUnavailable(t *testing.T
 
 func TestClaimedSetupFailureConfirmsAmbiguousRunWrite(t *testing.T) {
 	registerRemotePipelines(t)
-	t.Setenv(orchestrator.StoreWedgeBudgetEnvVar, "invalid-duration")
+	orchestrator.SetTestStoreWedgeBudget(t, 0, errors.New("store wedge budget invalid-duration"))
 	for _, tc := range []struct {
 		name       string
 		finalState string

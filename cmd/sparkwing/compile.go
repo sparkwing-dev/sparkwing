@@ -49,7 +49,7 @@ func newPipelineRun(sparkwingDir string, opts compileOptions) *pipelineRun {
 		raiseInterrupt: raiseInterrupt,
 		sparkwingDir:   sparkwingDir,
 		opts:           opts,
-		uncached:       os.Getenv("SPARKWING_NO_BINCACHE") != "",
+		uncached:       opts.NoBincache,
 	}
 }
 
@@ -76,7 +76,7 @@ func (r *pipelineRun) materialize(env []string) error {
 		return nil
 	}
 
-	lease, source, err := pipelineBinary(r.ctx, r.sparkwingDir, key, keyParts, env, r.opts.Profile)
+	lease, source, err := pipelineBinary(r.ctx, r.sparkwingDir, key, keyParts, env, r.opts.Profile, r.opts.DigestBackfill)
 	if err != nil {
 		return err
 	}
@@ -154,6 +154,7 @@ func pipelineBinary(
 	keyParts []bincache.KeyPart,
 	env []string,
 	profileName string,
+	digestBackfill bool,
 ) (*bincache.Lease, string, error) {
 	entry, err := bincache.PipelineEntry(key)
 	if err != nil {
@@ -163,7 +164,7 @@ func pipelineBinary(
 	lease, published, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
 		if cache, lookup := resolveBinaryCacheSpec(profileName); cache != nil {
 			if store, openErr := storeurl.OpenArtifactStoreFromSpec(ctx, *cache, lookup); openErr == nil {
-				if fetchErr := bincache.FetchFromArtifactStore(ctx, store, key, tempPath); fetchErr == nil {
+				if fetchErr := bincache.FetchFromArtifactStore(ctx, store, key, tempPath, digestBackfill); fetchErr == nil {
 					source = "artifact-store"
 					return nil
 				} else if !bincache.IsNotFound(fetchErr) {
@@ -270,8 +271,10 @@ func fleetExecutionEnv(env []string) bool {
 }
 
 type compileOptions struct {
-	ExecutionDir string
-	NoUpdate     bool
+	ExecutionDir   string
+	NoUpdate       bool
+	NoBincache     bool
+	DigestBackfill bool
 
 	// safety: the pipeline process selects its profile from this alone, never
 	// from a value the caller's environment carried in.
@@ -284,8 +287,7 @@ type compileOptions struct {
 }
 
 func resolveSparks(ctx context.Context, sparkwingDir string, opts compileOptions) error {
-	noUpdate := opts.NoUpdate || os.Getenv("SPARKWING_NO_SPARKS_RESOLVE") != ""
-	if noUpdate {
+	if opts.NoUpdate {
 		return nil
 	}
 	m, err := projectconfig.LoadSparksManifest(sparkwingDir)

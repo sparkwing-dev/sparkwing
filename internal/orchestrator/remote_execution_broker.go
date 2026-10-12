@@ -135,6 +135,11 @@ func (b *remoteExecutionBroker) Close() {
 
 func (b *remoteExecutionBroker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	route, segments := b.route(r)
+	if route != nil && route.signed() {
+		b.forwardSigned(w, r)
+		return
+	}
 	got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if len(got) != len(b.capability) || subtle.ConstantTimeCompare([]byte(got), []byte(b.capability)) != 1 {
 		http.Error(w, "execution capability required", http.StatusUnauthorized)
@@ -142,7 +147,8 @@ func (b *remoteExecutionBroker) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 	b.protocol.observe(r)
 	logsRequest := strings.HasPrefix(r.URL.Path, "/api/v1/logs/")
-	if !b.allow(r) || (logsRequest && b.logs == nil) {
+	allowed := route != nil && (route.check == nil || route.check(b, r, segments))
+	if !allowed || (logsRequest && b.logs == nil) {
 		http.Error(w, "execution capability does not allow this route", http.StatusForbidden)
 		return
 	}
@@ -162,6 +168,22 @@ func (b *remoteExecutionBroker) ServeHTTP(w http.ResponseWriter, r *http.Request
 		}
 		b.logs.ServeHTTP(w, r)
 		return
+	}
+	r.Host = b.controllerHost
+	b.controller.ServeHTTP(w, r)
+}
+
+func (b *remoteExecutionBroker) forwardSigned(w http.ResponseWriter, r *http.Request) {
+	b.protocol.observe(r)
+	r.Header["X-Forwarded-For"] = nil
+	r.Header.Del("X-Forwarded-Host")
+	r.Header.Del("X-Forwarded-Proto")
+	r.Header.Del("Authorization")
+	for _, header := range []string{
+		store.ClaimHolderHeader, store.ClaimMembershipHeader, store.ClaimReservationHeader,
+		store.ClaimGenerationHeader, store.TriggerGenerationHeader,
+	} {
+		r.Header.Del(header)
 	}
 	r.Host = b.controllerHost
 	b.controller.ServeHTTP(w, r)
@@ -263,28 +285,35 @@ func (b *remoteExecutionBroker) putArtifact(r *http.Request, key string) error {
 	return b.artifact.Put(r.Context(), key, tmp)
 }
 
-// safety: {run} and {node} match only this broker's own run and node, {other} any one-part
-// node id of this run, {spawned} any node id including hierarchical ones such as build/linux,
-// {name} any one segment, and a trailing {name...} the rest of the path. {other} stays one
-// part because an upstream that decodes %2F would read a/metrics as another node's route.
+// safety: {run} and {node} are this broker's run and node, {anyrun} any run, {other} any one-part
+// node of the run, {spawned} any node id, {name} one segment, {name...} the rest. {other} stays
+// one part because an upstream decoding %2F would read a/metrics as another node's route.
 type brokerRoute struct {
 	method, pattern string
 	check           func(b *remoteExecutionBroker, r *http.Request, segments map[string]string) bool
 }
 
+// safety: an output grant's URL is signed for one object and carries no bearer, so the
+// broker forwards it without the capability and without the runner's credential or fence.
+func (r brokerRoute) signed() bool { return strings.HasPrefix(r.pattern, "/api/v1/outputs/") }
+
 // safety: this is everything a brokered node reaches; docs/node-protocol.md lists the
 // same set, and a test holds the two equal.
 var brokerRoutes = []brokerRoute{
-	{http.MethodGet, "/api/v1/runs/{run}", nil},
+	{http.MethodGet, "/api/v1/runs/{anyrun}", secretsOfThisRunOnly},
 	{http.MethodGet, "/api/v1/triggers/{run}", nil},
+	{http.MethodPost, "/api/v1/triggers", triggeredByThisNode},
+	{http.MethodGet, "/api/v1/triggers/spawned-child", spawnedChildOfThisNode},
+	{http.MethodGet, "/api/v1/pipelines/{name}/latest", nil},
 	{http.MethodGet, "/api/v1/runs/{run}/steps", nil},
 	{http.MethodGet, "/api/v1/runs/{run}/nodes/{node}", nil},
 	{http.MethodGet, "/api/v1/runs/{run}/nodes/{other}", nil},
-	{http.MethodGet, "/api/v1/runs/{run}/nodes/{spawned}/output", nil},
+	{http.MethodGet, "/api/v1/runs/{anyrun}/nodes/{spawned}/output", nil},
 	{http.MethodGet, "/api/v1/runs/{run}/nodes/{node}/bounce", nil},
 	{http.MethodGet, "/api/v1/secrets/{name}", secretForThisRun},
 	{http.MethodPost, "/api/v1/runs/{run}/events", nil},
 	{http.MethodPost, "/api/v1/runs/{run}/heartbeat", nil},
+	{http.MethodPost, "/api/v1/runs/{run}/oidc-token", nil},
 	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/start", nil},
 	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/finish", nil},
 	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/deps", nil},
@@ -308,33 +337,35 @@ var brokerRoutes = []brokerRoute{
 	{http.MethodPost, "/api/v1/runs/{run}/nodes/{node}/status", nil},
 	{http.MethodGet, "/api/v1/concurrency/{key}/holder", concurrencyForThisNode},
 	{http.MethodGet, "/api/v1/concurrency/{key}/resolve", concurrencyForThisNode},
+	{http.MethodGet, "/api/v1/concurrency/{key}/state", oneSegmentKey},
 	{http.MethodPost, "/api/v1/concurrency/{key}/acquire", concurrencyForThisNode},
 	{http.MethodPost, "/api/v1/concurrency/{key}/heartbeat", concurrencyForThisNode},
 	{http.MethodPost, "/api/v1/concurrency/{key}/release", concurrencyForThisNode},
 	{http.MethodPost, "/api/v1/concurrency/{key}/cancel-waiter", concurrencyForThisNode},
+	{http.MethodPost, "/api/v1/concurrency/{key}/force-release", oneSegmentKey},
 	{http.MethodGet, "/api/v1/logs/{run}/{node}", nil},
 	{http.MethodPost, "/api/v1/logs/{run}/{node}", nil},
 	{http.MethodGet, "/api/v1/logs/{run}/{node}/seal", nil},
 	{http.MethodPost, "/api/v1/logs/{run}/{node}/seal", nil},
 	{http.MethodGet, "/api/v1/logs/{run}/{node}/stream", nil},
+	{http.MethodPut, "/api/v1/outputs/uploads/{upload}", nil},
+	{http.MethodGet, "/api/v1/outputs/objects/{key...}", nil},
 	{http.MethodGet, "/bin/{key...}", nil},
 	{http.MethodHead, "/bin/{key...}", nil},
 	{http.MethodPut, "/bin/{key...}", nil},
 }
 
-func (b *remoteExecutionBroker) allow(r *http.Request) bool {
+func (b *remoteExecutionBroker) route(r *http.Request) (*brokerRoute, map[string]string) {
 	path := strings.Split(strings.TrimPrefix(r.URL.EscapedPath(), "/"), "/")
-	for _, route := range brokerRoutes {
-		if route.method != r.Method {
+	for i := range brokerRoutes {
+		if brokerRoutes[i].method != r.Method {
 			continue
 		}
-		segments, ok := b.matchRoute(route.pattern, path)
-		if !ok {
-			continue
+		if segments, ok := b.matchRoute(brokerRoutes[i].pattern, path); ok {
+			return &brokerRoutes[i], segments
 		}
-		return route.check == nil || route.check(b, r, segments)
 	}
-	return false
+	return nil, nil
 }
 
 func (b *remoteExecutionBroker) matchRoute(pattern string, path []string) (map[string]string, bool) {
@@ -359,6 +390,11 @@ func (b *remoteExecutionBroker) matchRoute(pattern string, path []string) (map[s
 			}
 		case w == "{node}":
 			if got != url.PathEscape(b.nodeID) {
+				return nil, false
+			}
+		case w == "{anyrun}":
+			run, err := url.PathUnescape(got)
+			if err != nil || run == "" || run == "." || run == ".." || strings.ContainsAny(run, "/\\") {
 				return nil, false
 			}
 		case w == "{other}":
@@ -394,6 +430,34 @@ func runNodeID(id string) bool {
 	return true
 }
 
+// safety: another run's record is readable for RunAndAwait and pipeline references, but its
+// unredacted secret arguments belong to that run's own nodes.
+func secretsOfThisRunOnly(b *remoteExecutionBroker, r *http.Request, _ map[string]string) bool {
+	return r.URL.EscapedPath() == "/api/v1/runs/"+url.PathEscape(b.runID) ||
+		!strings.Contains(r.URL.Query().Get("include"), store.IncludeSecretValues)
+}
+
+// safety: a child run started from this node names it as the parent, so the controller checks
+// the parent claim the broker's fence headers carry.
+func triggeredByThisNode(b *remoteExecutionBroker, r *http.Request, _ map[string]string) bool {
+	var trigger struct {
+		ParentRunID  string `json:"parent_run_id"`
+		ParentNodeID string `json:"parent_node_id"`
+	}
+	return readBrokeredBody(r, &trigger) && trigger.ParentRunID == b.runID && trigger.ParentNodeID == b.nodeID
+}
+
+// safety: a retried node looks up the child its earlier attempt started, whose parent run is the
+// run this one retries, so only the parent node is bound.
+func spawnedChildOfThisNode(b *remoteExecutionBroker, r *http.Request, _ map[string]string) bool {
+	return r.URL.Query().Get("parent_node_id") == b.nodeID
+}
+
+func oneSegmentKey(_ *remoteExecutionBroker, _ *http.Request, segments map[string]string) bool {
+	key, err := url.PathUnescape(segments["key"])
+	return err == nil && key != "" && !strings.Contains(key, "/")
+}
+
 func secretForThisRun(b *remoteExecutionBroker, r *http.Request, _ map[string]string) bool {
 	return r.URL.Query().Get("run") == b.runID
 }
@@ -411,19 +475,13 @@ func concurrencyForThisNode(b *remoteExecutionBroker, r *http.Request, segments 
 	case "resolve":
 		return r.URL.Query().Get("run_id") == b.runID && r.URL.Query().Get("node_id") == b.nodeID
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20+1))
-	if err != nil || len(body) > 1<<20 {
-		return false
-	}
-	_ = r.Body.Close()
-	r.Body = io.NopCloser(bytes.NewReader(body))
 	var slot struct {
 		HolderID          string `json:"holder_id"`
 		InheritedHolderID string `json:"inherited_holder_id"`
 		RunID             string `json:"run_id"`
 		NodeID            string `json:"node_id"`
 	}
-	if json.Unmarshal(body, &slot) != nil {
+	if !readBrokeredBody(r, &slot) {
 		return false
 	}
 	if action == "cancel-waiter" {
@@ -437,6 +495,17 @@ func concurrencyForThisNode(b *remoteExecutionBroker, r *http.Request, segments 
 			slot.InheritedHolderID == ""
 	}
 	return true
+}
+
+// safety: the check reads the body the upstream receives, so it is buffered and put back.
+func readBrokeredBody(r *http.Request, into any) bool {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20+1))
+	if err != nil || len(body) > 1<<20 {
+		return false
+	}
+	_ = r.Body.Close()
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	return json.Unmarshal(body, into) == nil
 }
 
 func (b *remoteExecutionBroker) bindRequest(r *http.Request) error {

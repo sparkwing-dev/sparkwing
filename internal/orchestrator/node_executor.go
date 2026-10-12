@@ -897,27 +897,21 @@ func nodeLogFatal(nlog NodeLog) error {
 	return nil
 }
 
-const LogsDropPolicyEnvVar = "SPARKWING_LOGS_DROP_POLICY"
-
 func droppedLogsError(count int, reason string) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d log line(s) lost: the log store stayed unreachable past the append retry budget", count)
 	b.WriteString("\n  check: the logs backend this run named in invocation.backends")
-	b.WriteString("\n         (for s3: the bucket, AWS_REGION, credentials, SPARKWING_S3_ENDPOINT)")
+	b.WriteString("\n         (for s3: the bucket, AWS_REGION, credentials, AWS_ENDPOINT_URL_S3)")
 
 	if strings.Contains(reason, "404") {
 		b.WriteString("\n  note:  the store answered 404, so nothing serves log appends at that URL.")
 		b.WriteString("\n         A controller does not; sparkwing-logs is a separate service.")
 	}
-	fmt.Fprintf(&b, "\n  keep such runs green with %s=warn", LogsDropPolicyEnvVar)
+	fmt.Fprintf(&b, "\n  keep such runs green with %s: %s in config.yaml", logsDropPolicyKey, logsDropPolicyWarn)
 	if reason != "" {
 		fmt.Fprintf(&b, "\n  cause: %s", reason)
 	}
 	return errors.New(b.String())
-}
-
-func logsDropIsFatal() bool {
-	return os.Getenv(LogsDropPolicyEnvVar) != "warn"
 }
 
 func nodeLogDrops(nlog NodeLog) (int, string) {

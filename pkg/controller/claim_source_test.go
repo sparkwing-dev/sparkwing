@@ -134,8 +134,8 @@ func TestRunSourceCredential_NeedsTheGitHubApp(t *testing.T) {
 // of the grant re-checks the claim, so it stops working when the run is
 // cancelled, and a plan claim's grant uploads only a binary.
 func TestRunCacheGrant_IsBoundToTheClaim(t *testing.T) {
-	t.Setenv(authwire.CacheGrantKeyEnv, "claim-grant-signing-key")
 	f := newAppFixture(t)
+	f.srv.WithCacheGrantKey("claim-grant-signing-key")
 	olga := f.ghUser(501, "olga")
 	tok := f.launchedRun(olga, "run-grant", "acme", "widgets")
 	var out controller.CacheGrantResponse

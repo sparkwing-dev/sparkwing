@@ -24,7 +24,7 @@ func TestDocsMigrationsValidatesWebBoundsBeforeFetching(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { calls.Add(1); w.Write([]byte("[]")) }))
 	defer srv.Close()
-	t.Setenv(docs.BaseURLEnvVar, srv.URL)
+	docs.SetTestBaseURL(t, srv.URL)
 	for _, args := range [][]string{{"--from", "bogus", "--to", "v1.2.3"}, {"--from", "v1.0.0", "--to", "bogus"}} {
 		var err error
 		captureStdout(t, func() { err = runDocsMigrations(append(args, "--web", "--no-cache")) })

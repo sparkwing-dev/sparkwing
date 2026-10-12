@@ -33,7 +33,7 @@ func TestGitcacheProxy_RejectsCacheRedirects(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = st.Close() }()
-	srv := httptest.NewServer(controller.New(st, nil).WithCacheURL(cache.URL).Handler())
+	srv := httptest.NewServer(controller.New(st, nil).WithCacheCredentials(cache.URL, "cache-secret").Handler())
 	defer srv.Close()
 	for name, request := range map[string]*http.Request{
 		"register": mustRequest(t, http.MethodPost,
@@ -70,7 +70,6 @@ func TestGitcacheProxy_ReadsRequireAdminAndStripBearer(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	t.Setenv("SPARKWING_CACHE_TOKEN", "cache-secret")
 	var cacheRequests []string
 	cache := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer cache-secret" {
@@ -110,7 +109,7 @@ func TestGitcacheProxy_ReadsRequireAdminAndStripBearer(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctrl := controller.New(st, nil).
-		WithCacheURL(cache.URL).
+		WithCacheCredentials(cache.URL, "cache-secret").
 		WithAuthenticator(controller.NewAuthenticator(st, time.Minute))
 	srv := httptest.NewServer(ctrl.Handler())
 	defer srv.Close()
@@ -167,7 +166,6 @@ func TestGitcacheProxy_ClaimedRunnerReadsOnlyItsRunSource(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
-	t.Setenv("SPARKWING_CACHE_TOKEN", "cache-secret")
 	repoURL := "git@github.com:acme/widgets.git"
 	cacheName := sourceurl.ClaimedRepoNameFromURL(repoURL)
 	var cacheRequests []string
@@ -243,7 +241,7 @@ func TestGitcacheProxy_ClaimedRunnerReadsOnlyItsRunSource(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctrl := controller.New(st, nil).WithCacheURL(cache.URL).EnableAuthFromStore()
+	ctrl := controller.New(st, nil).WithCacheCredentials(cache.URL, "cache-secret").EnableAuthFromStore()
 	srv := httptest.NewServer(ctrl.Handler())
 	defer srv.Close()
 	for range 2 {
@@ -335,7 +333,7 @@ func TestGitcacheProxy_AllowsSlowPackStreamBeyondDefaultDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = st.Close() }()
-	server := httptest.NewUnstartedServer(controller.New(st, nil).WithCacheURL(cache.URL).Handler())
+	server := httptest.NewUnstartedServer(controller.New(st, nil).WithCacheCredentials(cache.URL, "cache-secret").Handler())
 	server.Config.WriteTimeout = 20 * time.Millisecond
 	server.Start()
 	defer server.Close()
@@ -357,7 +355,6 @@ func TestGitcacheProxy_AllowsSlowPackStreamBeyondDefaultDeadline(t *testing.T) {
 // mirrors, even of the repository the run names: the mirror's name is the
 // URL's digest, the same for every team.
 func TestGitcacheProxy_AnotherTeamsRunOpensNoMirror(t *testing.T) {
-	t.Setenv("SPARKWING_CACHE_TOKEN", "cache-secret")
 	repoURL := "git@github.com:victim/app.git"
 	cacheName := sourceurl.ClaimedRepoNameFromURL(repoURL)
 	var cacheRequests []string
@@ -402,7 +399,7 @@ func TestGitcacheProxy_AnotherTeamsRunOpensNoMirror(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctrl := controller.New(st, nil).WithCacheURL(cache.URL).EnableAuthFromStore()
+	ctrl := controller.New(st, nil).WithCacheCredentials(cache.URL, "cache-secret").EnableAuthFromStore()
 	srv := httptest.NewServer(ctrl.Handler())
 	defer srv.Close()
 	claimed, err := client.NewWithToken(srv.URL, nil, runner).

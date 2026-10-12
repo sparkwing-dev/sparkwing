@@ -144,8 +144,15 @@ func Main() {
 
 	pipelineYAML := loadPipelineYAML(pipeline)
 
+	dispatchWait, err := dispatchWaitSetting()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, pipeline+":", err)
+		os.Exit(1)
+	}
+
 	delegate := selectRunRenderer()
 	opts := Options{
+		DispatchWaitTimeout:       dispatchWait,
 		Pipeline:                  pipeline,
 		RunHandlePath:             os.Getenv("SPARKWING_RUN_HANDLE_FILE"),
 		Args:                      argsMap,
@@ -171,7 +178,6 @@ func Main() {
 		FleetSourceBytes:          positiveEnvInt64("SPARKWING_FLEET_SOURCE_BYTES"),
 		FleetBundleBytes:          positiveEnvInt64("SPARKWING_FLEET_SOURCE_BUNDLE_BYTES"),
 		MaxParallel:               runtime.NumCPU(),
-		DispatchWaitTimeout:       parseDispatchWaitTimeout(os.Getenv("SPARKWING_DISPATCH_WAIT_TIMEOUT")),
 		PipelineYAML:              pipelineYAML,
 		// safety: this binary serves `run-node` a few lines above, so it can
 		// re-enter itself for each node.

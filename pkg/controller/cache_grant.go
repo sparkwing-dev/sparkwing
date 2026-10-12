@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -47,18 +46,14 @@ func (s *Server) handleRunCacheGrant(teamOf func(*http.Request) (store.Team, err
 			writeGitHubFenceRefusal(w, p, "a GitHub Actions runner credential gets no cache grant; its job builds without the shared cache")
 			return
 		}
-		key := os.Getenv(authwire.CacheGrantKeyEnv)
+		key := s.cacheGrantKey
 		if key == "" {
 			writeError(w, http.StatusNotFound, errors.New("this controller holds no cache grant key, so it mints no cache grants"))
 			return
 		}
-		cacheToken := s.cacheToken
-		if cacheToken == "" {
-			cacheToken = bincache.CacheToken()
-		}
-		if key == cacheToken {
+		if key == s.cacheToken {
 			writeError(w, http.StatusServiceUnavailable, errors.New(
-				"the cache grant key is the cache's operator token; give "+authwire.CacheGrantKeyEnv+" a secret of its own"))
+				"the cache grant key is the cache's operator token; give "+authwire.CacheGrantKeyCredential+" a secret of its own"))
 			return
 		}
 		team, err := teamOf(r)

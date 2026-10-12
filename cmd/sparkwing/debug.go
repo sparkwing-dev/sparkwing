@@ -130,23 +130,30 @@ func runDebugRun(args []string) error {
 }
 
 type debugTargetFlags struct {
-	run  string
-	node string
-	on   string
+	run       string
+	node      string
+	on        string
+	namespace string
 }
+
+const defaultDebugNamespace = "sparkwing"
 
 func parseDebugTarget(cmd Command, args []string) (debugTargetFlags, error) {
 	fs := flag.NewFlagSet(cmd.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "run identifier")
 	nodeID := fs.String("node", "", "node id")
 	on := fs.String("profile", "", "profile name (cluster mode)")
+	namespace := defaultDebugNamespace
+	if cmd.Path == cmdDebugAttach.Path {
+		fs.StringVar(&namespace, "namespace", defaultDebugNamespace, "Kubernetes namespace of the runner pods")
+	}
 	if err := parseAndCheck(cmd, fs, args); err != nil {
 		return debugTargetFlags{}, err
 	}
 	if *runID == "" || *nodeID == "" {
 		return debugTargetFlags{}, fmt.Errorf("%s: --run and --node are required", cmd.Path)
 	}
-	return debugTargetFlags{run: *runID, node: *nodeID, on: *on}, nil
+	return debugTargetFlags{run: *runID, node: *nodeID, on: *on, namespace: namespace}, nil
 }
 
 func runDebugRelease(args []string) error {
@@ -229,7 +236,8 @@ func runDebugAttach(args []string) error {
 		return fmt.Errorf("node %s/%s has no claim holder (not currently running on a runner)",
 			t.run, t.node)
 	}
-	pod, ns := claimToPod(node.ClaimedBy)
+	pod := claimToPod(node.ClaimedBy)
+	ns := t.namespace
 	if pod == "" {
 		return fmt.Errorf("claim holder %q does not map to a cluster pod (agent-owned claim?)",
 			node.ClaimedBy)
@@ -309,18 +317,14 @@ func runDebugEnv(args []string) error {
 	return nil
 }
 
-func claimToPod(claim string) (pod, namespace string) {
-	namespace = os.Getenv("SPARKWING_NAMESPACE")
-	if namespace == "" {
-		namespace = "sparkwing"
-	}
+func claimToPod(claim string) string {
 	switch {
 	case strings.HasPrefix(claim, "runner:"):
-		return strings.TrimPrefix(claim, "runner:"), namespace
+		return strings.TrimPrefix(claim, "runner:")
 	case strings.HasPrefix(claim, "pod:"):
-		return strings.TrimPrefix(claim, "pod:"), namespace
+		return strings.TrimPrefix(claim, "pod:")
 	}
-	return "", namespace
+	return ""
 }
 
 func whoami() string {

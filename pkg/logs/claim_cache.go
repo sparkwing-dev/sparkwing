@@ -85,3 +85,10 @@ func (c *claimCache) remember(key [sha256.Size]byte, e claimEntry) {
 func (s *Server) claimCacheTTL() time.Duration {
 	return min(s.authCacheTTL, MaxClaimCacheTTL)
 }
+
+func (s *Server) claimTime() time.Time {
+	if s.claimNow != nil {
+		return s.claimNow()
+	}
+	return time.Now()
+}

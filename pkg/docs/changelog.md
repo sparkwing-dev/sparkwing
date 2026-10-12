@@ -21,6 +21,7 @@ unlock.
 ## [Unreleased]
 
 ### Added
+- **Windows verification:** A `windows-verify` pipeline runs native runtime race tests, template platform checks, and both Git Bash installer suites, retaining every failed result
 
 - **controller + web:** Team → GitHub previews repository-declared push and pull request pipelines, with separate owner consent for automatic triggers and GitHub Actions workers
   The controller reads `.sparkwing/sparkwing.yaml` at the verified default-branch head without executing repository code. Existing manual subscriptions keep precedence. Runner setup resolves GitHub repository and owner identities server-side and supplies a workflow using the team's canonical slug.
@@ -83,6 +84,32 @@ unlock.
 - **helm chart (Breaking):** `sparkwing-full` defaults `controller.requireAuth` to `true` and refuses to render without `controller.bootstrapAdminToken.name` unless `controller.allowOpenBootstrap=true`, so a default install no longer serves token minting and first-admin creation unauthenticated to anything that reaches the controller Service. See [migration guide](docs/migrations/_unreleased.md#sparkwing-full-requires-a-bootstrap-admin-token).
 
 ### Fixed
+- **Windows shell commands:** Run owned commands without console windows, and preserve long Git Bash programs, standard input, and exit status when running native pipeline commands
+- **Windows dashboard builds:** Keep build locks across nested installer commands, preserve paths and exported settings across Git Bash and MSYS2, and verify build receipts through native pnpm launchers
+- **Windows configuration:** Create private configuration and secrets files with protected access lists before writing bytes, retain file identity during permission checks, and report Windows permissions correctly in `configure init`
+- **Windows dashboard:** Verify process ownership before stopping or restarting a local dashboard, and protect its state record before writing it
+- **Windows daemon:** Launch the background daemon without a console window, keep runs on the same daemon when home paths differ in slashes or drive-letter casing or when processes set different `TEMP` or `TMP` values, capture diagnostic dump identities before replacement, and stop signaling reaped children
+- **Windows Git cache:** Own Git subprocess trees with Job Objects so cancellation and completed commands clean up their helpers, and disable interactive credential prompts for unattended requests
+- **Windows detached runs:** Publish private submission snapshots without unsupported directory synchronization, preserve native runtime settings, keep the shared daemon available after cancellation, and reclaim abandoned temporary snapshots
+- **Windows worktree snapshots:** Materialize a run's exact source checkout with Git long paths enabled and without line-ending conversion, so a node sees the committed bytes
+- **Windows output storage:** Flush output files through writable handles, replace them durably, and publish restored log archives after closing staging directory handles
+- **Windows Git hooks:** Resolve Git Bash drive paths and detect runnable hooks without relying on Unix executable permission bits
+- **Windows caches:** Reject rooted archive paths, restore contained relative symlinks, and retire completed cache entries after their open writers release them
+- **Windows worktrees:** Keep lease locks readable and remove completed leases through retained handles that allow native deletion
+- **Windows filesystem profiles:** Resolve drive paths and file URLs consistently for local state and repository identity
+- **Maintenance leases:** Keep sweep claim generations distinct when the clock repeats or moves backwards, so an old owner cannot clear a newer claim
+- **Windows installer checks:** Stage native executable assets and file URLs, and preserve Windows tool paths in install-to-green and Xwing candidate installation
+- **runner:** A node behind the execution broker mints OIDC ID tokens: `POST /api/v1/runs/{id}/oidc-token` for the node's own run is on the broker's route table, and the controller still requires the runner's live claim on the run.
+- **runner:** `RunAndAwait` works from a node behind the execution broker: the broker forwards `POST /api/v1/triggers` naming the node as the parent, the spawned-child lookup for the node, reads of the child run and its node outputs, and `GET /api/v1/concurrency/{key}/state` for the child's plan admission. Another run's `include=secret_values` read stays refused.
+- **runner:** Pipeline references and cache hits recorded by another run resolve from a node behind the execution broker: the broker forwards `GET /api/v1/pipelines/{name}/latest` and another run's node output reads.
+- **runner:** A `CancelOthers` holder behind the execution broker can force-release the holders it superseded after their cancel timeout; the broker forwards `POST /api/v1/concurrency/{key}/force-release` and the controller keeps it admin-only.
+- **runner:** Node outputs upload and download through the execution broker when the run's loopback shim grants a relative URL: the broker forwards a signed `PUT /api/v1/outputs/uploads/{id}` or `GET /api/v1/outputs/objects/...` without its capability and without the runner's credential, where before the node got 401.
+- **runner:** A local run whose state is not a SQLite store serves the bounce poll and consume and `execution-start` and `execution-finish` from its loopback shim, so the local runner's bounce poll gets 204 rather than 404 `unsupported`, and a state backend that records bounces or execution attempts serves them.
+- **runner:** Every execution path sets `SPARKWING_RUN_ID`, `SPARKWING_NODE_ID` and `SPARKWING_LOG_FORMAT=json` for the node process: the brokered child got its ids in argv only, and the brokered child and the Kubernetes and launcher Jobs did not set the log format.
+- **runner:** A node behind the execution broker sees its runner through `Runtime().Runner` and `WhenRunner`: the broker supervisor sets `SPARKWING_RUNNER_NAME`, `SPARKWING_RUNNER_TYPE` and `SPARKWING_RUNNER_LABELS` from the runner pool's holder prefix and labels, or passes on its own, and a launcher Job names itself as a `kubernetes` runner. A runner that sets no `SPARKWING_RUNNER_TYPE` now reads as unclassified rather than `kubernetes`.
+- **runner:** A node process removes `SPARKWING_PARENT_LIVENESS_FD` from its environment and marks the descriptor close-on-exec once it reads it, so a step command or a nested run no longer inherits a variable naming a descriptor it does not hold, and it watches the descriptor whenever the host names one rather than only under `--coordinated`.
+- **runner:** `run-node` closes the `SPARKWING_MASK_VALUES_FD` descriptor when the node finishes, as the node protocol asks of an SDK, rather than leaving it to process exit.
+- **runner:** The local runner drops a `SPARKWING_AGENT_TOKEN` its process inherited from an outer run even when this run has no bearer of its own; before, it passed the outer bearer on unless an API socket was set. `docs/node-protocol.md` moves `TRACEPARENT` out of today's environment contract, since no path sets or reads it, and states which paths set the cache URLs and the bearer.
 - **cli:** `sparkwing run` accepts several allowed values for a `[]string` input with an `enum` tag
   The run parser compared the whole comma-separated value against the enum, so `--envs dev,prod` failed even when both were allowed. It now checks each element, with the same rule the pipeline applies when it resolves Inputs and job args; `DescribeArg.CheckEnum` exposes that rule.
 
@@ -141,6 +168,16 @@ unlock.
 - **Daemon startup:** Recheck cancellation after dialing and socket preparation before starting a daemon.
 - **Shell completion:** Handle empty completion arrays under nounset on macOS Bash 3.
 - **Install-to-green:** Find an existing OpenSSL that can stage Ed25519-signed fixtures on macOS while retaining explicit tool selection.
+- **Windows queue:** Report an absent daemon after its socket directory is removed instead of a misleading network failure
+- **Windows run handles:** Publish run-handle files without attempting unsupported directory synchronization
+- **Source checks:** Parse touched tests for scoped wait checks while retaining repository-wide boundary audits
+- **Windows cancellation:** Report commands terminated by their cancellation handler as cancelled while preserving ordinary failure exit codes
+- **Windows checkout:** Keep formatted Go source, API snapshots, shell scripts, workflows, security configuration, and module files in LF format under Git's Windows line-ending conversion
+- **Windows dependency cache:** Resolve npm's configured cache through Node and use the native Windows cache fallback when npm is absent
+- **Windows installation:** Preserve `.exe` names and native paths in Git Bash source and signed-release installs, including repeated installs into an existing directory
+- **Windows local runner:** Own pipeline nodes and descendants with separate kill-on-close Job Objects, including simultaneous launches
+- **API checks:** Recognize the SDK module in CRLF go.mod files when checking a Windows checkout
+- **Windows pipelines:** Use native file locking, disk-space checks, and executable names so the repository's pipeline module runs from Git Bash
 - **Live logs:** Authenticate streams while retaining unlimited stream duration and normal redirect credential boundaries.
 - **Controller secrets:** Resolve foreground and coordinated-node secrets using the current run's pipeline scope without changing standalone unscoped lookups.
 - **Check pipelines:** Bound four-core hosted ordinary and PostgreSQL test commands to one Go runtime thread per package while retaining package coverage and timeouts.
@@ -158,6 +195,31 @@ unlock.
 
 - **cli + orchestrator (Breaking):** `sparkwing run --profile` accepts only a profile with S3 or Postgres state; `--sw-secrets` and `pipeline hooks install --profile` are removed, and a pipeline's `profile:` pins it to a controller
   `run --profile P` with a controller profile, or one without S3 or Postgres state, refuses and names `sparkwing pipeline trigger <pipeline> --profile P`. A run under an S3 or Postgres state profile behaves as before; that is a temporary exception slated for removal. A local run otherwise reads only this machine's secrets, and no part of it contacts a controller. A pinned pipeline is refused by `run`, detached runs, crons and local child pipelines; `pipeline trigger` refuses any `--profile` other than the pin; `pipeline describe` and `plan` show it. Hooks always run `--sw-local-only`. `profile:local` guards hold for every run this machine dispatches. `sparkwing run` and the run consumer drop an inherited `SPARKWING_PROFILE` and `SPARKWING_SECRETS_PROFILE` before starting a pipeline binary. See [migration guide](docs/migrations/_unreleased.md#sparkwing-run-takes---profile-only-for-s3-or-postgres-state).
+- **cli + orchestrator (Breaking):** The remaining laptop and test variables are removed
+  `SPARKWING_DISPATCH_WAIT_TIMEOUT` becomes `run.dispatch_wait` in config.yaml, `SPARKWING_NAMESPACE` becomes `sparkwing debug attach --namespace`, and the admission daemon reads `TYPESAFE_API_KEY` from the local secret store. `SPARKWING_STORE_WEDGE_BUDGET`, `SPARKWING_SQLITE_BUSY_TIMEOUT_MS`, `SPARKWING_DOCS_BASE_URL` and `SPARKWING_DEV_ENV_DISABLE` are gone, as is the run-node and trigger fallback to `$SPARKWING_HOME/dev.env`. `pkg/store.BusyTimeoutEnvVar` and `pkg/docs.BaseURLEnvVar` give way to `store.SetTestBusyTimeout` and `docs.SetTestBaseURL`. See [migration guide](docs/migrations/_unreleased.md#the-remaining-laptop-variables-are-removed).
+
+- **cli (Breaking):** One-off run switches are `--sw-*` flags, not environment variables
+  `sparkwing run` gains `--sw-no-bincache`, `--sw-hash-all-files`, `--sw-artifact-digest-backfill` and `--sw-allow-unadmitted`; `SPARKWING_NO_BINCACHE`, `SPARKWING_HASH_ALL_FILES` and `SPARKWING_ARTIFACT_DIGEST_BACKFILL` are no longer read, and `SPARKWING_NO_SPARKS_RESOLVE` gives way to the existing `--sw-no-update`. `SPARKWING_ALLOW_UNADMITTED` stays only as the variable that carries the flag to the pipeline binary. See [migration guide](docs/migrations/_unreleased.md#one-off-run-switches-become---sw--flags).
+
+- **cli + orchestrator (Breaking):** Machine settings read config.yaml, not the environment
+  `SPARKWING_BUDGET`, `SPARKWING_CACHE_MAX_BYTES`, `SPARKWING_CACHE_MAX_ENTRIES`, `SPARKWING_VERSION_HOLD`, `SPARKWING_NO_AUTO_REGISTER`, `SPARKWING_AUTO_REGISTER_WORKTREES`, `SPARKWING_BOX_ID`, `SPARKWING_LOGS_DROP_POLICY`, `SPARKWING_PAUSE_TIMEOUT`, `SPARKWING_SUBMIT_ENV_ALLOW` and `SPARKWING_RERUN_IMAGE` are no longer read. config.yaml gains the `cache`, `machine`, `logs`, `debug` and `run` sections, `repos.auto_register` and `repos.include_worktrees`, and a profile's `rerun_image`; the cache ceilings and the submit allow-list refuse a value they cannot parse. See [migration guide](docs/migrations/_unreleased.md#machine-settings-move-from-the-environment-to-configyaml).
+
+- **services (Breaking):** Every service takes `--log-format` and `--log-level`; the cache stops reading `SPARKWING_LOG_FORMAT` and `SPARKWING_LOG_LEVEL`
+  The controller, cache, logs service, runner and launcher write their own log to stderr as `text` or `json` at the level the flags name, and refuse an unknown value. The cache wrote to stdout before. See [migration guide](docs/migrations/_unreleased.md#services-take---log-format-and---log-level).
+
+- **storage (Breaking):** `AWS_ENDPOINT_URL_S3` replaces `SPARKWING_S3_ENDPOINT`
+  Every S3 client takes its endpoint from the AWS SDK's own `AWS_ENDPOINT_URL_S3` (or `AWS_ENDPOINT_URL`) and addresses buckets path-style when either is set; no process reads `SPARKWING_S3_ENDPOINT`. See [migration guide](docs/migrations/_unreleased.md#aws_endpoint_url_s3-replaces-sparkwing_s3_endpoint).
+
+- **controller (Breaking):** `sparkwing-controller` reads settings from flags only
+  None of the 41 configuration variables it read is read any more; each has a flag or is gone. `--cloudfront-domain`, `--cloudfront-key-pair-id` and `--object-store-budget` (`class:window=count` entries) are new, replacing the variables that had no flag. `SPARKWING_OBJECT_STORE_BREAKER` and `SPARKWING_OBJECT_STORE_TRIP_RESET` are gone without replacement, and no process reads the object-store budget variables any more. `sparkwing-full` passes `--dashboard-url` and `--cache-url`, and gains `controller.externalURL`, `controller.oauthRedirectURIs`, `controller.operatorAccounts`, `controller.github`, `controller.google`, `controller.email`, `controller.cloudfront` and a `controller.extraArgs` passthrough, which replace settings an install set through `controller.extraEnv`. See [migration guide](docs/migrations/_unreleased.md#sparkwing-controller-reads-settings-from-flags-only).
+
+- **controller (Breaking):** The controller never stores a secret as plaintext
+  Without the `secrets-key` credential a single-team SQLite controller creates its key on the first secret write and keeps it in `secrets.key` beside `state.db`, and a single-team PostgreSQL controller starts but refuses secret writes with `409`. A multi-team controller still refuses to start without a key. Plaintext rows an older controller wrote are sealed at startup; a PostgreSQL controller without a key refuses to start while any remain. A `pkg/controller` server with no cipher refuses secret reads and writes. See [migration guide](docs/migrations/_unreleased.md#the-controller-never-stores-a-secret-as-plaintext).
+
+- **controller (Breaking):** `sparkwing-controller` reads every secret from `--credentials-dir`, one file per credential
+  The files are `pg-url`, `secrets-key`, `secrets-key.previous`, `bootstrap-admin-token`, `license`, `oidc-key`, `oidc-key.published`, `google-client-secret`, `github-client-secret`, `github-app-key`, `github-app-webhook-secret`, `cloudfront-key`, `logs-delete-token`, `billing-token`, `cache-token` and `cache-grant-key`. The sixteen environment variables they replace are no longer read, and `--secrets-key-file`, `--secrets-previous-key-file`, `--bootstrap-admin-token-file`, `--license-file`, `--oidc-key-file` and `--oidc-published-key-file` are gone. `sparkwing-full` projects its existing Secret values into the directory and adds `controller.credentialsSecret` for the rest. In `pkg/controller`, `Server.WithCacheGrantKey` sets the grant key and the server reads neither it nor the cache token from the environment. See [migration guide](docs/migrations/_unreleased.md#sparkwing-controller-reads-its-secrets-from-a-credentials-directory).
+
+ **store (Breaking):** `Store.ActiveExecutorActivity` and `Store.PrincipalHoldsPipelineClaim` are removed, and `Store.FailNodeForUnpricedClass` moves to `Tenant`
 - **sdk (Breaking):** Remove `JobSpawn` and `JobSpawnEach`; `JobFanOutDynamic` inserts runtime-decided Jobs
   `JobSpawn`, `JobSpawnEach`, `SpawnSpec`, `SpawnGenSpec`, `SpawnHandler`, `SpawnHandlerFunc`, `Work.Spawns`, `Work.SpawnGens`, `CoerceSpawnEachJob` and `NewDetachedNode` are gone, with the engine's spawn handlers and the `spawn_dispatched` event. Split the spawned unit into its own Job ordered with `Needs`, or produce the item list from a Job and expand it with `JobFanOutDynamic`; the source Job's runner exits before its children dispatch instead of staying suspended. Plan snapshots, `pipeline plan --json`, `pipeline explain` and the run API's node work tree no longer carry `spawns` or `spawn_each`; a plan recorded by an older SDK that has them still gets no execution policy. See [migration guide](docs/migrations/_unreleased.md#jobspawn-and-jobspawneach-are-removed).
 
@@ -285,6 +347,8 @@ unlock.
   `controller.Serve`, `controller.AuditFields`, `logs.Serve`, `logs.ServeWithTokens`, `logs.ServePrivateWithTokens`, `sparkwinglogs.FromClient`, `store.DetectDialect`, `store.SetArgon2AcquireTimeout` and `backends.LayerSurfaces` are gone. See [migration guide](docs/migrations/_unreleased.md#unused-pkg-functions-are-removed).
 
 ### Security
+- **Release images:** The controller, runner, cache and logs images and release binaries build with Go 1.26.9 and `golang.org/x/net` v0.60.0, which fix vulnerabilities in `net/http`, `net/textproto`, `crypto/tls` and `x/net` (GO-2026-6607 through GO-2026-6617).
+
 - **sdk + orchestrator (Breaking):** Commands a pipeline starts no longer inherit `SPARKWING_AGENT_TOKEN`
   The pipeline binary moves the token out of its environment when it starts and masks it in node output, so a step's `sparkwing.Exec`, `os/exec` child or shell cannot read the runner's bearer from its environment or print it. The dependency cache (`.CacheDir`) authenticates only with `SPARKWING_CACHE_GRANT` or `SPARKWING_CACHE_TOKEN` and no longer falls back to the agent token. See the [migration guide](docs/migrations/_unreleased.md#pipeline-steps-no-longer-see-sparkwing_agent_token).
 

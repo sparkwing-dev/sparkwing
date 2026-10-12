@@ -15,17 +15,19 @@ import (
 	"time"
 )
 
-// DefaultBaseURL is the production host. Override via
-// SPARKWING_DOCS_BASE_URL (read by NewWebClient) for testing or
-// against a staging site. The override is honored as-is -- callers
-// pinning a custom BaseURL via the struct field also bypass the env
-// lookup.
+// DefaultBaseURL is the production host NewWebClient points at. A caller
+// that needs another host sets WebClient.BaseURL.
 const DefaultBaseURL = "https://sparkwing.dev"
 
-// BaseURLEnvVar names the env var that overrides DefaultBaseURL when
-// constructing a WebClient via NewWebClient. Empty / unset means use
-// the default.
-const BaseURLEnvVar = "SPARKWING_DOCS_BASE_URL"
+var newWebClientBaseURL = DefaultBaseURL
+
+// SetTestBaseURL points every WebClient NewWebClient builds at base until the
+// test ends.
+func SetTestBaseURL(t interface{ Cleanup(func()) }, base string) {
+	original := newWebClientBaseURL
+	t.Cleanup(func() { newWebClientBaseURL = original })
+	newWebClientBaseURL = strings.TrimRight(base, "/")
+}
 
 // IndexTTL is the freshness window for index files and unversioned markdown.
 // Per-version markdown
@@ -39,9 +41,8 @@ const IndexTTL = 24 * time.Hour
 // across multiple goroutines and processes (writes go through
 // temp-file + rename).
 //
-// Zero value is not usable; construct via NewWebClient (which honors
-// SPARKWING_DOCS_BASE_URL) or by setting BaseURL / HTTP / CacheDir
-// explicitly.
+// Zero value is not usable; construct via NewWebClient or by setting
+// BaseURL / HTTP / CacheDir explicitly.
 type WebClient struct {
 	BaseURL   string
 	HTTP      *http.Client
@@ -72,16 +73,9 @@ var ErrUnavailable = errors.New("docs: web fetch unavailable")
 // timeout, one retry on 5xx / connection error, host-locked redirect
 // policy, UA carrying CLI + Go version, cache in
 // $XDG_CACHE_HOME/sparkwing/web/ (or ~/.cache/sparkwing/web/).
-//
-// SPARKWING_DOCS_BASE_URL, if set, overrides DefaultBaseURL. Empty /
-// unset falls back to the default.
 func NewWebClient() *WebClient {
-	base := strings.TrimRight(os.Getenv(BaseURLEnvVar), "/")
-	if base == "" {
-		base = DefaultBaseURL
-	}
 	return &WebClient{
-		BaseURL:   base,
+		BaseURL:   newWebClientBaseURL,
 		HTTP:      defaultHTTPClient(),
 		CacheDir:  DefaultCacheDir(),
 		UserAgent: defaultUserAgent(),

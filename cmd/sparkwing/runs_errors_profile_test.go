@@ -3,9 +3,10 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
 
 func TestRunsErrorsReadsTheProfilesController(t *testing.T) {
@@ -21,7 +22,7 @@ func TestRunsErrorsReadsTheProfilesController(t *testing.T) {
 	home := t.TempDir()
 	profiles := filepath.Join(home, "config.yaml")
 	body := "profiles:\n  prod:\n    controller:\n      url: " + srv.URL + "\n"
-	if err := os.WriteFile(profiles, []byte(body), 0o600); err != nil {
+	if err := fssecure.WriteFile(profiles, []byte(body)); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("SPARKWING_CONFIG", profiles)

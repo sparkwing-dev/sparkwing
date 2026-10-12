@@ -35,7 +35,7 @@ func TestRunDocsListVersions_WebMergesRemote(t *testing.T) {
 		_, _ = w.Write([]byte(`{"latest":"v0.5.0","versions":["v0.5.0","v0.4.0","v0.3.0"]}`))
 	}))
 	t.Cleanup(srv.Close)
-	t.Setenv(docs.BaseURLEnvVar, srv.URL)
+	docs.SetTestBaseURL(t, srv.URL)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
 	out := captureStdout(t, func() {
@@ -70,7 +70,7 @@ func TestRunDocsListVersions_WebFailureNonZeroExit(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	t.Cleanup(srv.Close)
-	t.Setenv(docs.BaseURLEnvVar, srv.URL)
+	docs.SetTestBaseURL(t, srv.URL)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
 	err := runDocsList([]string{"--versions", "--web"})
@@ -101,7 +101,7 @@ func TestRunDocsRead_WebFetchesPerVersion(t *testing.T) {
 		}
 	}))
 	t.Cleanup(srv.Close)
-	t.Setenv(docs.BaseURLEnvVar, srv.URL)
+	docs.SetTestBaseURL(t, srv.URL)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
 	out := captureStdout(t, func() {
@@ -128,7 +128,7 @@ func TestRunDocsRead_WebLatestUsesUnversionedURL(t *testing.T) {
 		}
 	}))
 	t.Cleanup(srv.Close)
-	t.Setenv(docs.BaseURLEnvVar, srv.URL)
+	docs.SetTestBaseURL(t, srv.URL)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
 	out := captureStdout(t, func() {
@@ -153,7 +153,7 @@ func TestRunDocsRead_WebUnknownVersionMessagesVersionList(t *testing.T) {
 		http.NotFound(w, r)
 	}))
 	t.Cleanup(srv.Close)
-	t.Setenv(docs.BaseURLEnvVar, srv.URL)
+	docs.SetTestBaseURL(t, srv.URL)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
 	err := runDocsRead([]string{"--topic", "pipelines", "--version", "v9.9.9", "--web"})
@@ -177,7 +177,7 @@ func TestRunDocsMigrations_VersionWebFetches(t *testing.T) {
 		}
 	}))
 	t.Cleanup(srv.Close)
-	t.Setenv(docs.BaseURLEnvVar, srv.URL)
+	docs.SetTestBaseURL(t, srv.URL)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
 	out := captureStdout(t, func() {

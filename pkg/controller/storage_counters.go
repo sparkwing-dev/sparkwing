@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -43,9 +42,6 @@ func (s *Server) counterCaller(w http.ResponseWriter, r *http.Request) (counterC
 		return counterCaller{}, false
 	}
 	token := s.cacheToken
-	if token == "" {
-		token = bincache.CacheToken()
-	}
 	if token != "" && subtle.ConstantTimeCompare([]byte(raw), []byte(token)) == 1 {
 		return counterCaller{service: true}, true
 	}

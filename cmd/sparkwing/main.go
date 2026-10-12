@@ -15,6 +15,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/fleet"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
@@ -260,12 +261,18 @@ func dispatchRun(args []string) error {
 	if flags.localOnly {
 		env = append(env, "SPARKWING_LOCAL_ONLY=1")
 	}
+	if flags.allowUnadmitted {
+		env = setEnv(env, orchestrator.AllowUnadmittedEnv, "1")
+	}
+	bincache.SetHashAllFiles(flags.hashAllFiles)
 	var fleetSnapshot *worktreeSnapshot
 	run := newPipelineRun(dir, compileOptions{
-		NoUpdate:     flags.noUpdate || flags.fleet,
-		ExecutionDir: executionDir,
-		AfterChild:   afterChild,
-		Profile:      flags.profile,
+		NoUpdate:       flags.noUpdate || flags.fleet,
+		NoBincache:     flags.noBincache,
+		DigestBackfill: flags.digestBackfill,
+		ExecutionDir:   executionDir,
+		AfterChild:     afterChild,
+		Profile:        flags.profile,
 	})
 	defer run.stop()
 	run.ctx = gotoolchain.WithSession(run.ctx, env, nil)

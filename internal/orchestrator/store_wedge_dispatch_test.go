@@ -80,7 +80,7 @@ func TestWaitThenRun_ContinuousResolveFailureTripsWedgeBudget(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
 	}
-	t.Setenv(orchestrator.StoreWedgeBudgetEnvVar, "250ms")
+	orchestrator.SetTestStoreWedgeBudget(t, 250*time.Millisecond, nil)
 	conc := &wedgeConcurrency{failResolves: -1, resolveErr: errors.New("database is locked (5) (SQLITE_BUSY)")}
 
 	res, state := runWedgePipe(t, conc)
@@ -127,8 +127,8 @@ func TestWaitThenRun_LockingProtocolIsImmediatelyTerminal(t *testing.T) {
 	}
 }
 
-func TestRun_InvalidWedgeBudgetEnvFailsLoudly(t *testing.T) {
-	t.Setenv(orchestrator.StoreWedgeBudgetEnvVar, "sometime")
+func TestRun_WedgeBudgetErrorFailsLoudly(t *testing.T) {
+	orchestrator.SetTestStoreWedgeBudget(t, 0, errors.New("store wedge budget sometime"))
 	register("wedge-pipe", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &wedgePipe{} })
 	fakes := newFakeBackends()
 	state := &nodeErrRecordingState{fakeState: fakes.state, nodeErrs: map[string]string{}}
@@ -138,9 +138,9 @@ func TestRun_InvalidWedgeBudgetEnvFailsLoudly(t *testing.T) {
 		orchestrator.Options{Pipeline: "wedge-pipe"})
 
 	if err == nil {
-		t.Fatalf("Run succeeded; want a startup error on invalid %s", orchestrator.StoreWedgeBudgetEnvVar)
+		t.Fatal("Run succeeded; want a startup error from the wedge budget")
 	}
-	if !strings.Contains(err.Error(), orchestrator.StoreWedgeBudgetEnvVar) {
-		t.Errorf("error %q does not name %s", err, orchestrator.StoreWedgeBudgetEnvVar)
+	if !strings.Contains(err.Error(), "store wedge budget sometime") {
+		t.Errorf("error %q does not carry the budget error", err)
 	}
 }

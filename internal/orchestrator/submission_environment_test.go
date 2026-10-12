@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -45,8 +47,8 @@ func TestSubmissionEnvironmentIsOwnerOnlyAndDiscarded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := info.Mode().Perm(); got != 0o600 {
-		t.Fatalf("snapshot mode = %04o, want 0600", got)
+	if err := fssecure.VerifyPrivateConfig(path, info); err != nil {
+		t.Fatalf("snapshot is not private: %v", err)
 	}
 	env, err := submissionEnvironment(home, &store.Trigger{
 		ID: runID,
@@ -172,6 +174,81 @@ func TestReconcileSubmissionEnvironmentsRemovesAbandonedTemporaryFile(t *testing
 	}
 }
 
+func TestReconcileSubmissionEnvironmentsHandlesTemporaryDirectories(t *testing.T) {
+	for _, tc := range []struct {
+		name, unexpected string
+		old, nested      bool
+	}{
+		{name: "abandoned", old: true},
+		{name: "fresh"},
+		{name: "unknown file", unexpected: "user-notes.txt", old: true},
+		{name: "nested directory", unexpected: "snapshot-nested", old: true, nested: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			st := consumerTestStore(t, home)
+			dir := filepath.Join(home, submissionEnvironmentDir)
+			if err := fssecure.EnsureConfigDir(dir); err != nil {
+				t.Fatal(err)
+			}
+			temporary, err := fssecure.MkdirPrivateTemp(dir, ".submission-environment-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot := filepath.Join(temporary, "snapshot-crash")
+			if err := os.WriteFile(snapshot, []byte(`{"environment":["SPARKWING_PROFILE=dev"]}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := fssecure.SecurePrivateConfig(snapshot); err != nil {
+				t.Fatal(err)
+			}
+			if tc.unexpected != "" {
+				path := filepath.Join(temporary, tc.unexpected)
+				if tc.nested {
+					err = os.Mkdir(path, 0o700)
+				} else {
+					err = os.WriteFile(path, []byte("preserve"), 0o600)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.old {
+				old := time.Now().Add(-abandonedSubmissionEnvironmentAge - time.Minute)
+				if err := os.Chtimes(temporary, old, old); err != nil {
+					t.Fatal(err)
+				}
+			}
+			removed, err := ReconcileSubmissionEnvironments(t.Context(), home, st, 100)
+			if tc.unexpected != "" {
+				if err == nil || removed != 0 {
+					t.Fatalf("unknown residue cleanup = %d, %v", removed, err)
+				}
+				if _, err := os.Stat(snapshot); err != nil {
+					t.Fatalf("snapshot removed before all entries were validated: %v", err)
+				}
+				if _, err := os.Stat(filepath.Join(temporary, tc.unexpected)); err != nil {
+					t.Fatalf("unexpected entry removed: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.old {
+				if removed != 1 {
+					t.Fatalf("removed = %d, want 1", removed)
+				}
+				if _, err := os.Stat(temporary); !os.IsNotExist(err) {
+					t.Fatalf("abandoned directory remains: %v", err)
+				}
+			} else if removed != 0 {
+				t.Fatalf("fresh directory removed: %d", removed)
+			}
+		})
+	}
+}
+
 func TestReconcileSubmissionEnvironmentsPreservesFreshSnapshotBeforeTriggerCommit(t *testing.T) {
 	home := t.TempDir()
 	st := consumerTestStore(t, home)
@@ -203,14 +280,20 @@ func TestSubmissionWithoutCapturedEnvironmentUsesConsumerEnvironment(t *testing.
 
 func TestCaptureSubmissionEnvironmentKeepsOnlyAllowedNonCredentialVariables(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		env  []string
-		want []string
+		name  string
+		allow string
+		env   []string
+		want  []string
 	}{
 		{
 			name: "keeps the dispatch snapshot shape",
 			env:  []string{"SPARKWING_PROFILE=dev", "GITHUB_REF_NAME=main", "PATH=/bin", "HOME=/u", "AWS_REGION=us-east-1"},
 			want: []string{"SPARKWING_PROFILE=dev", "GITHUB_REF_NAME=main", "PATH=/bin", "HOME=/u"},
+		},
+		{
+			name: "carries the S3 endpoint and the config directory",
+			env:  []string{"AWS_ENDPOINT_URL_S3=http://minio:9000", "AWS_ENDPOINT_URL=http://r2.example", "XDG_CONFIG_HOME=/u/.cfg", "AWS_PROFILE=x"},
+			want: []string{"AWS_ENDPOINT_URL_S3=http://minio:9000", "AWS_ENDPOINT_URL=http://r2.example", "XDG_CONFIG_HOME=/u/.cfg"},
 		},
 		{
 			name: "drops credential-shaped names",
@@ -223,26 +306,20 @@ func TestCaptureSubmissionEnvironmentKeepsOnlyAllowedNonCredentialVariables(t *t
 			want: []string{"SPARKWING_PROFILE=dev"},
 		},
 		{
-			name: "honours the operator allow-list",
+			name:  "honors the operator allow-list",
+			allow: "[AWS_REGION, DOCKER_*]",
 			env: []string{
-				submissionEnvironmentAllowKey + "=AWS_REGION,DOCKER_*",
 				"AWS_REGION=us-east-1", "DOCKER_HOST=tcp://h:1", "DOCKER_PASSWORD=p", "LANG=C",
 			},
-			want: []string{
-				submissionEnvironmentAllowKey + "=AWS_REGION,DOCKER_*",
-				"AWS_REGION=us-east-1", "DOCKER_HOST=tcp://h:1",
-			},
+			want: []string{"AWS_REGION=us-east-1", "DOCKER_HOST=tcp://h:1"},
 		},
 		{
-			name: "carries the allow-listed agent socket and docker certificate directory",
+			name:  "carries the allow-listed agent socket and docker certificate directory",
+			allow: "[SSH_AUTH_SOCK, DOCKER_CERT_PATH]",
 			env: []string{
-				submissionEnvironmentAllowKey + "=SSH_AUTH_SOCK,DOCKER_CERT_PATH",
 				"SSH_AUTH_SOCK=/tmp/agent.sock", "DOCKER_CERT_PATH=/home/u/.docker",
 			},
-			want: []string{
-				submissionEnvironmentAllowKey + "=SSH_AUTH_SOCK,DOCKER_CERT_PATH",
-				"SSH_AUTH_SOCK=/tmp/agent.sock", "DOCKER_CERT_PATH=/home/u/.docker",
-			},
+			want: []string{"SSH_AUTH_SOCK=/tmp/agent.sock", "DOCKER_CERT_PATH=/home/u/.docker"},
 		},
 		{
 			name: "drops a credential hidden in a URL query or path",
@@ -262,6 +339,7 @@ func TestCaptureSubmissionEnvironmentKeepsOnlyAllowedNonCredentialVariables(t *t
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			writeMachineSettings(t, "run:\n  submit_env_allow: "+cmp.Or(tc.allow, "[]")+"\n")
 			home := t.TempDir()
 			const runID = "run-filter"
 			if err := CaptureSubmissionEnvironment(home, runID, tc.env, quietLogger()); err != nil {
@@ -282,13 +360,14 @@ func TestCaptureSubmissionEnvironmentKeepsOnlyAllowedNonCredentialVariables(t *t
 }
 
 func TestCaptureSubmissionEnvironmentRejectsABareWildcard(t *testing.T) {
+	writeMachineSettings(t, "run:\n  submit_env_allow: [\"*\"]\n")
 	err := CaptureSubmissionEnvironment(t.TempDir(), "run-wildcard",
-		[]string{submissionEnvironmentAllowKey + "=*", "AWS_REGION=us-east-1"}, quietLogger())
+		[]string{"AWS_REGION=us-east-1"}, quietLogger())
 	if err == nil {
 		t.Fatal("CaptureSubmissionEnvironment error = nil, want a rejection of the bare wildcard")
 	}
-	if !strings.Contains(err.Error(), submissionEnvironmentAllowKey) {
-		t.Fatalf("error = %v, want it to name %s", err, submissionEnvironmentAllowKey)
+	if !strings.Contains(err.Error(), submitEnvAllowKey) {
+		t.Fatalf("error = %v, want it to name %s", err, submitEnvAllowKey)
 	}
 }
 

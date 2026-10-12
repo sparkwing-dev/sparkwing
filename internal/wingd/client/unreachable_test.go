@@ -5,7 +5,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -44,10 +46,13 @@ func TestQuery_UnreachableSocketIsNotAnIdleMachine(t *testing.T) {
 	if !errors.Is(err, ErrDaemonUnreachable) {
 		t.Fatalf("Query against a blocked socket: got %v, want ErrDaemonUnreachable", err)
 	}
+	if runtime.GOOS == "windows" && !errors.Is(err, syscall.Errno(10061)) {
+		t.Errorf("error does not retain native connection refusal: %v", err)
+	}
 	if errors.Is(err, ErrNoDaemon) {
 		t.Errorf("a blocked socket was reported as no daemon running: %v", err)
 	}
-	if !strings.Contains(err.Error(), "permission denied") {
+	if runtime.GOOS != "windows" && !strings.Contains(err.Error(), "permission denied") {
 		t.Errorf("error does not name why the socket refused to answer: %v", err)
 	}
 }

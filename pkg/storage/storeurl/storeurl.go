@@ -11,7 +11,7 @@
 // else $SPARKWING_CACHE_TOKEN, the bearer the cache requires on its routes.
 //
 // S3 credentials + region come from the standard AWS credential
-// chain. $SPARKWING_S3_ENDPOINT overrides BaseEndpoint (R2, MinIO, etc.).
+// chain. AWS_ENDPOINT_URL_S3 points it at R2, MinIO and the like.
 package storeurl
 
 import (
@@ -19,6 +19,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
@@ -105,6 +107,14 @@ func fsPath(rest string) (string, error) {
 	if rest == "" {
 		return "", errors.New("storeurl: fs:// requires a path")
 	}
+	if runtime.GOOS == "windows" {
+		if strings.HasPrefix(rest, "/") && filepath.IsAbs(rest[1:]) {
+			rest = rest[1:]
+		}
+		if filepath.IsAbs(rest) {
+			return filepath.FromSlash(rest), nil
+		}
+	}
 	if !strings.HasPrefix(rest, "/") && !strings.HasPrefix(rest, "~") {
 		return "", fmt.Errorf("storeurl: fs path must be absolute, got %q", rest)
 	}
@@ -153,11 +163,7 @@ func newS3Client(ctx context.Context, budgeted bool) (*awss3.Client, error) {
 	if !budgeted {
 		return s3store.NewClient(ctx)
 	}
-	limiter, err := sharedLimiter()
-	if err != nil {
-		return nil, fmt.Errorf("object-store request budget: %w", err)
-	}
-	return s3store.NewClient(ctx, objectguard.WithBudget(limiter))
+	return s3store.NewClient(ctx, objectguard.WithBudget(sharedLimiter()))
 }
 
 // hack: an indirection so a test can hand newS3Client a budget of its own

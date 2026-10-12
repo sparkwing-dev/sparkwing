@@ -2,7 +2,7 @@ package orchestrator
 
 import (
 	"context"
-	"log/slog"
+	"fmt"
 	"runtime"
 	"sync"
 	"time"
@@ -284,20 +284,18 @@ func watchdogKnownNodes(plan *sparkwing.Plan, state *dispatchState) []*sparkwing
 	return known
 }
 
-func parseDispatchWaitTimeout(raw string) time.Duration {
+func parseDispatchWaitTimeout(raw string) (time.Duration, error) {
 	switch raw {
 	case "":
-		return 0
+		return 0, nil
 	case "0", "off", "disable", "disabled":
-		return -1
+		return -1, nil
 	}
 	d, err := time.ParseDuration(raw)
-	if err != nil {
-		slog.Warn("SPARKWING_DISPATCH_WAIT_TIMEOUT: unparseable; using default",
-			"value", raw, "err", err)
-		return 0
+	if err != nil || d < 0 {
+		return 0, fmt.Errorf("%q is not a duration or off", raw)
 	}
-	return d
+	return d, nil
 }
 
 func dumpAllGoroutineStacks(maxBytes int) string {

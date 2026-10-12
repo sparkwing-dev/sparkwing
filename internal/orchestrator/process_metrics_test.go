@@ -60,6 +60,9 @@ func TestProcessNodeAccountingRequiresExactOwnership(t *testing.T) {
 }
 
 func TestCommandSampleLossMarksNodeWithoutRetry(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip(windowsLacksCommandSampler)
+	}
 	st, backends := metricExecutionFixture(t)
 	backends.State = &rejectCommandMetric{localState: localState{st: st}, reject: true}
 	ctx := withProcessNode(t.Context(), "run", "build")

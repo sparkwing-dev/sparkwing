@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
 
 func TestWaitForListenerOrExit_FailsFastOnEarlyExit(t *testing.T) {
@@ -94,7 +96,7 @@ func TestProbeDashboardVersion_MissingEndpoint(t *testing.T) {
 func TestTailFileFrom_OnlyNewInstanceLines(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dashboard.log")
 	prev := "old request line 1\nold request line 2\n"
-	if err := os.WriteFile(path, []byte(prev), 0o600); err != nil {
+	if err := fssecure.WriteFile(path, []byte(prev)); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	offset := fileSize(path)
@@ -119,7 +121,7 @@ func TestTailFileFrom_OnlyNewInstanceLines(t *testing.T) {
 
 func TestTailFileFrom_EmptyWhenNoNewOutput(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dashboard.log")
-	if err := os.WriteFile(path, []byte("only old lines\n"), 0o600); err != nil {
+	if err := fssecure.WriteFile(path, []byte("only old lines\n")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	if got := tailFileFrom(path, fileSize(path), 40); got != "" {
@@ -129,11 +131,11 @@ func TestTailFileFrom_EmptyWhenNoNewOutput(t *testing.T) {
 
 func TestTailFileFrom_TruncatedLogRetainsNewFailure(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dashboard.log")
-	if err := os.WriteFile(path, []byte(strings.Repeat("old\n", 100)), 0o600); err != nil {
+	if err := fssecure.WriteFile(path, []byte(strings.Repeat("old\n", 100))); err != nil {
 		t.Fatal(err)
 	}
 	offset := fileSize(path)
-	if err := os.WriteFile(path, []byte("new instance failed\n"), 0o600); err != nil {
+	if err := fssecure.WriteFile(path, []byte("new instance failed\n")); err != nil {
 		t.Fatal(err)
 	}
 	if got := tailFileFrom(path, offset, 40); got != "new instance failed" {
@@ -150,7 +152,7 @@ func TestResolveDashboardPaths_Precedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveDashboardPaths: %v", err)
 	}
-	if dp.home != explicit {
+	if dp.home != filepath.Clean(explicit) {
 		t.Errorf("--home = %q, want the explicit override %q", dp.home, explicit)
 	}
 	if want := filepath.Join(explicit, dashboardPIDFile); dp.pid != want {
@@ -161,7 +163,7 @@ func TestResolveDashboardPaths_Precedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveDashboardPaths: %v", err)
 	}
-	if dp.home != env {
+	if dp.home != filepath.Clean(env) {
 		t.Errorf("home = %q, want the SPARKWING_HOME value %q", dp.home, env)
 	}
 	if want := filepath.Join(env, dashboardLogFile); dp.log != want {

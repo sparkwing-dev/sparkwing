@@ -886,6 +886,7 @@ func (r *Runner) buildJob(
 		{Name: "GOMODCACHE", Value: "/tmp/go-mod"},
 		{Name: "SPARKWING_RUNNER_NAME", Value: name},
 		{Name: "SPARKWING_RUNNER_TYPE", Value: "kubernetes"},
+		{Name: "SPARKWING_LOG_FORMAT", Value: "json"},
 	}
 	if len(r.cfg.Labels) > 0 {
 		env = append(env, corev1.EnvVar{Name: "SPARKWING_RUNNER_LABELS", Value: strings.Join(r.cfg.Labels, ",")})

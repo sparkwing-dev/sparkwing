@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 )
 
@@ -660,7 +661,7 @@ func writeRegistry(t *testing.T, path, body string) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(nested), 0o600); err != nil {
+	if err := fssecure.WriteFile(path, []byte(nested)); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("SPARKWING_CONFIG", path)

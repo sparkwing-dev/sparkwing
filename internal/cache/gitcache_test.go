@@ -24,6 +24,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/internal/testhome"
 )
 
 func TestHandleHealth(t *testing.T) {
@@ -771,7 +772,7 @@ func TestSetupSSHFailsWhenTheKeyCannotBeStaged(t *testing.T) {
 	if err := os.WriteFile(home, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
+	testhome.Set(t, home)
 	t.Setenv("XDG_CONFIG_HOME", "")
 
 	err := setupSSH()

@@ -404,7 +404,7 @@ func TestGitHubRunnerWorkflowDocMatchesTheRenderedTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc := string(raw)
+	doc := strings.ReplaceAll(string(raw), "\r\n", "\n")
 	want := controller.GitHubRunnerWorkflow("https://sparkwing.example.com", "acme")
 	if !strings.Contains(doc, want) {
 		t.Fatalf("docs/github-actions-runners.md does not carry the workflow the controller renders:\n%s", want)

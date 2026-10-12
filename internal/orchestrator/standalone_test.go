@@ -69,10 +69,10 @@ const standaloneDaemonFaultBlock = `sparkwing: the admission daemon (v0.41.0) ca
     sparkwing daemon status
 `
 
-const standaloneForcedBlock = `sparkwing: SPARKWING_ALLOW_UNADMITTED is set, so this run is standalone. It cannot see other runs on this machine and they cannot see it, so together they may oversubscribe it. Everything else works.
+const standaloneForcedBlock = `sparkwing: --sw-allow-unadmitted is set, so this run is standalone. It cannot see other runs on this machine and they cannot see it, so together they may oversubscribe it. Everything else works.
 
   to rejoin the daemon
-    unset SPARKWING_ALLOW_UNADMITTED
+    run it without --sw-allow-unadmitted
 `
 
 func TestStandaloneWarning_TextIsFixed(t *testing.T) {

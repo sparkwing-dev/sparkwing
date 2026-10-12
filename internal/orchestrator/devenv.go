@@ -8,29 +8,10 @@ import (
 	"sync"
 )
 
-// DevEnvDisableEnv turns off the dev.env fallback while it holds any value. A
-// process that sets it resolves a service URL from its own environment and
-// nowhere else, which is how a test suite stays off the services the
-// operator's dev.env names.
-const DevEnvDisableEnv = "SPARKWING_DEV_ENV_DISABLE"
-
-func ResolveDevEnvURL(key string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	if os.Getenv(DevEnvDisableEnv) != "" {
-		return ""
-	}
-	return devEnvFile()[key]
-}
-
 // LocalDashboardURL returns the address the local dashboard wrote to dev.env
 // under key, ignoring the process environment, so a CLI verb without
 // --profile reaches only this machine's dashboard.
 func LocalDashboardURL(key string) string {
-	if os.Getenv(DevEnvDisableEnv) != "" {
-		return ""
-	}
 	return devEnvFile()[key]
 }
 
@@ -38,7 +19,7 @@ func LocalDashboardURL(key string) string {
 // address that dashboard wrote to dev.env, and "" for any other URL, so the
 // token never travels to a server the dashboard did not name.
 func LocalServeToken(url string) string {
-	if url == "" || os.Getenv(DevEnvDisableEnv) != "" {
+	if url == "" {
 		return ""
 	}
 	env := devEnvFile()

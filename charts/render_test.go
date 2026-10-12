@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"slices"
@@ -1020,8 +1021,12 @@ func TestRunnerWarmTimingIsNotChartConfiguration(t *testing.T) {
 
 func renderController(t *testing.T, sets ...string) renderedContainer {
 	t.Helper()
-	rendered := helmRender(t, "./sparkwing-full", "templates/controller-deployment.yaml", "sparkwing", sets...)
-	return runnerContainer(t, rendered)
+	return runnerContainer(t, renderControllerYAML(t, sets...))
+}
+
+func renderControllerYAML(t *testing.T, sets ...string) string {
+	t.Helper()
+	return helmRender(t, "./sparkwing-full", "templates/controller-deployment.yaml", "sparkwing", sets...)
 }
 
 func TestControllerLimitsProfileAndRequestBudgetsReachTheArgs(t *testing.T) {
@@ -1043,50 +1048,183 @@ func TestControllerLimitsProfileAndRequestBudgetsReachTheArgs(t *testing.T) {
 	}
 }
 
-func TestControllerDashboardURLEnvironment(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
-	}
-	defaultController := renderController(t)
-	for _, env := range defaultController.Env {
-		if env.Name == "SPARKWING_DASHBOARD_URL" {
-			t.Errorf("default controller unexpectedly sets %s", env.Name)
+func TestControllerSettingsValuesRenderAsFlags(t *testing.T) {
+	args := renderController(t).Args
+	for _, flag := range []string{"--external-url=", "--github-app-id=", "--google-client-id=", "--cloudfront-domain="} {
+		if arg, ok := hasFlag(args, flag); ok {
+			t.Errorf("default controller passes %s", arg)
 		}
 	}
-
-	configured := renderController(t, "controller.dashboardURL=https://sparkwing.example.com/team")
-	dashboardURL := ""
-	for i := range configured.Env {
-		if configured.Env[i].Name == "SPARKWING_DASHBOARD_URL" {
-			dashboardURL = configured.Env[i].Value
+	args = renderController(t,
+		"controller.externalURL=https://sw.example",
+		"controller.oauthRedirectURIs=https://sw.example/cb",
+		"controller.operatorAccounts=acct-1",
+		"controller.github.clientID=Iv1.abc",
+		"controller.github.appID=12345",
+		"controller.github.appSlug=sparkwing-ci",
+		"controller.google.clientID=g-123",
+		"controller.email.sender=noreply@sw.example",
+		"controller.email.configurationSet=sw-mail",
+		"controller.cloudfront.domain=d1.cloudfront.net",
+		"controller.cloudfront.keyPairID=K2ABC",
+		"controller.extraArgs[0]=--object-store-budget=put:hour=20000",
+		"controller.extraArgs[1]=--billing-url=https://billing.example").Args
+	for _, want := range []string{
+		"--external-url=https://sw.example",
+		"--oauth-redirect-uris=https://sw.example/cb",
+		"--operator-accounts=acct-1",
+		"--github-client-id=Iv1.abc",
+		"--github-app-id=12345",
+		"--github-app-slug=sparkwing-ci",
+		"--google-client-id=g-123",
+		"--email-sender=noreply@sw.example",
+		"--email-configuration-set=sw-mail",
+		"--cloudfront-domain=d1.cloudfront.net",
+		"--cloudfront-key-pair-id=K2ABC",
+		"--object-store-budget=put:hour=20000",
+		"--billing-url=https://billing.example",
+	} {
+		if !containsArg(args, want) {
+			t.Errorf("controller args = %v, want %q", args, want)
 		}
-	}
-	if dashboardURL != "https://sparkwing.example.com/team" {
-		t.Errorf("SPARKWING_DASHBOARD_URL = %q", dashboardURL)
 	}
 }
 
-func TestControllerDatabaseEnvironmentUsesSecret(t *testing.T) {
+func TestControllerNumbersFromAValuesFileRenderWhole(t *testing.T) {
+	helm, err := exec.LookPath("helm")
+	if err != nil {
+		t.Skip("helm not installed; chart rendering not exercised")
+	}
+	values := filepath.Join(t.TempDir(), "values.yaml")
+	body := "controller:\n  github:\n    appID: 1234567\n  bucketCeiling:\n    maxBytes: 107374182400\n"
+	if err := os.WriteFile(values, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	args := append(helmArgs("./sparkwing-full", "sparkwing", nil, "--show-only", "templates/controller-deployment.yaml"), "-f", values)
+	out, err := exec.Command(helm, args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm template: %v\n%s", err, out)
+	}
+	got := runnerContainer(t, string(out)).Args
+	for _, want := range []string{"--github-app-id=1234567", "--max-bucket-bytes=107374182400"} {
+		if !containsArg(got, want) {
+			t.Errorf("controller args = %v, want %q", got, want)
+		}
+	}
+}
+
+// safety: helm cannot see a Secret's keys, so a credentials bundle stands in
+// for a bootstrap token and a current secrets key, and the controller's own
+// startup checks decide.
+func TestControllerCredentialsBundleSkipsTheChartsKeyChecks(t *testing.T) {
+	args := renderController(t,
+		"controller.allowOpenBootstrap=false",
+		"controller.credentialsSecret.name=sparkwing-credentials",
+		"controller.secretsPreviousKey.name=sparkwing-old-key").Args
+	if !containsArg(args, "--require-auth") || !containsArg(args, "--credentials-dir=/etc/sparkwing/credentials") {
+		t.Fatalf("controller args = %v, want --require-auth and the credentials directory", args)
+	}
+	out := helmRenderError(t, "./sparkwing-full", "sparkwing", "controller.secretsPreviousKey.name=sparkwing-old-key")
+	if !strings.Contains(out, "without a current key") {
+		t.Fatalf("previous key with no current key and no bundle = %s, want a refusal", out)
+	}
+}
+
+// safety: --reuse-values carries an older release's values, which have no
+// credentialsSecret map at all.
+func TestControllerRendersValuesFromBeforeTheCredentialsBundle(t *testing.T) {
+	renderController(t, "controller.credentialsSecret=null", "controller.allowOpenBootstrap=false",
+		"controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin")
+	if notes := renderNotes(t, "controller.credentialsSecret=null"); !strings.Contains(notes, "/data/secrets.key") {
+		t.Errorf("notes for values without credentialsSecret:\n%s", notes)
+	}
+}
+
+func renderNotes(t *testing.T, sets ...string) string {
+	t.Helper()
+	helm, err := exec.LookPath("helm")
+	if err != nil {
+		t.Skip("helm not installed; chart rendering not exercised")
+	}
+	args := helmArgs("./sparkwing-full", "sparkwing", sets)
+	args[0] = "install"
+	out, err := exec.Command(helm, append(args, "--dry-run=client")...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm install --dry-run: %v\n%s", err, out)
+	}
+	_, notes, ok := strings.Cut(string(out), "NOTES:")
+	if !ok {
+		t.Fatalf("helm install --dry-run printed no NOTES:\n%s", out)
+	}
+	return notes
+}
+
+// safety: the notes are the first instructions an operator follows, and an
+// SQLite controller's generated key cannot be replaced by a new one once a
+// secret is sealed under it.
+func TestNotesMatchHowTheControllerKeysItsSecrets(t *testing.T) {
+	notes := renderNotes(t)
+	for _, want := range []string{"/data/secrets.key", "never from a\nnew key", "secretsPreviousKey", "(umask 077 && kubectl"} {
+		if !strings.Contains(notes, want) {
+			t.Errorf("SQLite notes lack %q:\n%s", want, notes)
+		}
+	}
+	if strings.Contains(notes, "plaintext") || strings.Contains(notes, "openssl rand") {
+		t.Errorf("SQLite notes still describe plaintext storage or a fresh key:\n%s", notes)
+	}
+	notes = renderNotes(t, "controller.databaseSecret.name=sparkwing-db", "controller.storage.type=emptyDir")
+	if !strings.Contains(notes, "refuses to store secrets until it has a key") || strings.Contains(notes, "/data/secrets.key") {
+		t.Errorf("PostgreSQL notes:\n%s", notes)
+	}
+	if notes := renderNotes(t, "controller.secretsKey.name=sparkwing-secrets-key"); strings.Contains(notes, "secretsKey.name is empty") {
+		t.Errorf("notes with a key still warn about a missing one:\n%s", notes)
+	}
+	notes = renderNotes(t, "controller.credentialsSecret.name=sparkwing-credentials")
+	if !strings.Contains(notes, "that is the live key") || !strings.Contains(notes, "secretsPreviousKey") {
+		t.Errorf("notes with a credentials bundle lack the live-key warning:\n%s", notes)
+	}
+	if strings.Contains(notes, "openssl rand") || strings.Contains(notes, "secretsKey.name is empty") {
+		t.Errorf("notes with a credentials bundle claim a key state the chart cannot see:\n%s", notes)
+	}
+	if !strings.Contains(notes, "/data/secrets.key") || !strings.Contains(notes, "(umask 077 && kubectl") || !strings.Contains(notes, "With pg-url") {
+		t.Errorf("notes with a credentials bundle must cover both backends it may select:\n%s", notes)
+	}
+	notes = renderNotes(t, "controller.credentialsSecret.name=sparkwing-credentials", "controller.databaseSecret.name=sparkwing-db")
+	if strings.Contains(notes, "/data/secrets.key") || !strings.Contains(notes, "refuses to store secrets until") {
+		t.Errorf("PostgreSQL notes with a credentials bundle:\n%s", notes)
+	}
+}
+
+func TestControllerDashboardURLFlag(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
+	}
+	if arg, ok := hasFlag(renderController(t).Args, "--dashboard-url="); ok {
+		t.Errorf("default controller unexpectedly passes %s", arg)
+	}
+	args := renderController(t, "controller.dashboardURL=https://sparkwing.example.com/team").Args
+	if !containsArg(args, "--dashboard-url=https://sparkwing.example.com/team") {
+		t.Errorf("controller args = %v, want --dashboard-url", args)
+	}
+}
+
+func TestControllerDatabaseURLIsACredentialFile(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	controller := renderController(t,
+	rendered := renderControllerYAML(t,
 		"controller.databaseSecret.name=sparkwing-database",
 		"controller.databaseSecret.key=connection",
 	)
-	for _, env := range controller.Env {
-		if env.Name != "SPARKWING_PG_URL" {
-			continue
-		}
-		if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil {
-			t.Fatalf("SPARKWING_PG_URL is not a secretKeyRef: %+v", env)
-		}
-		if got := *env.ValueFrom.SecretKeyRef; got.Name != "sparkwing-database" || got.Key != "connection" {
-			t.Fatalf("SPARKWING_PG_URL secretKeyRef = %+v", got)
-		}
-		return
+	ref := credentialRef(t, rendered, "pg-url")
+	if ref == nil || ref.Name != "sparkwing-database" || ref.Key != "connection" {
+		t.Fatalf("pg-url credential = %+v, want sparkwing-database/connection", ref)
 	}
-	t.Fatal("controller has no SPARKWING_PG_URL secretKeyRef")
+	for _, env := range runnerContainer(t, rendered).Env {
+		if env.Name == "SPARKWING_PG_URL" {
+			t.Fatal("the database URL still reaches the controller as an environment variable")
+		}
+	}
 }
 
 func renderLogs(t *testing.T, sets ...string) string {
@@ -2138,43 +2276,26 @@ func TestControllerCarriesTheCacheToken(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	controller := renderController(t, "sparkwing-runner-bundle.cache.tokenSecret.name=cache-operator",
+	rendered := renderControllerYAML(t, "sparkwing-runner-bundle.cache.tokenSecret.name=cache-operator",
 		"sparkwing-runner-bundle.cache.tokenSecret.key=bearer")
-	for _, env := range controller.Env {
-		if env.Name != "SPARKWING_CACHE_TOKEN" {
-			continue
-		}
-		if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil {
-			t.Fatalf("SPARKWING_CACHE_TOKEN is not a secretKeyRef: %+v", env)
-		}
-		ref := *env.ValueFrom.SecretKeyRef
-		if ref.Name != "cache-operator" || ref.Key != "bearer" {
-			t.Errorf("controller cache token = %+v, want the cache's operator token Secret", ref)
-		}
-		return
+	ref := credentialRef(t, rendered, "cache-token")
+	if ref == nil || ref.Name != "cache-operator" || ref.Key != "bearer" {
+		t.Errorf("controller cache-token credential = %+v, want the cache's operator token Secret", ref)
 	}
-	t.Fatalf("controller has no SPARKWING_CACHE_TOKEN env: %+v", controller.Env)
 }
 
 func TestControllerCarriesTheCacheURLBesideTheToken(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	controller := renderController(t, "sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token")
-	env := map[string]string{}
-	var tokenRef *renderedSecretKeyRef
-	for _, e := range controller.Env {
-		env[e.Name] = e.Value
-		if e.Name == "SPARKWING_CACHE_TOKEN" && e.ValueFrom != nil {
-			tokenRef = e.ValueFrom.SecretKeyRef
-		}
-	}
-	const want = "http://sparkwing-sparkwing-runner-bundle-cache.default.svc.cluster.local"
-	if got := env["SPARKWING_CACHE_URL"]; got != want {
-		t.Errorf("SPARKWING_CACHE_URL = %q, want %q", got, want)
+	rendered := renderControllerYAML(t, "sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token")
+	tokenRef := credentialRef(t, rendered, "cache-token")
+	const want = "--cache-url=http://sparkwing-sparkwing-runner-bundle-cache.default.svc.cluster.local"
+	if args := runnerContainer(t, rendered).Args; !containsArg(args, want) {
+		t.Errorf("controller args = %v, want %s", args, want)
 	}
 	if tokenRef == nil {
-		t.Error("controller has no SPARKWING_CACHE_TOKEN secretKeyRef")
+		t.Error("controller projects no cache-token credential")
 	}
 }
 
@@ -2184,10 +2305,8 @@ func TestControllerCacheURLOverrideWins(t *testing.T) {
 	}
 	controller := renderController(t, "sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token",
 		"controller.cache.url=http://cache.elsewhere:8090")
-	for _, e := range controller.Env {
-		if e.Name == "SPARKWING_CACHE_URL" && e.Value != "http://cache.elsewhere:8090" {
-			t.Errorf("SPARKWING_CACHE_URL = %q, want the explicit override", e.Value)
-		}
+	if !containsArg(controller.Args, "--cache-url=http://cache.elsewhere:8090") {
+		t.Errorf("controller args = %v, want the explicit --cache-url override", controller.Args)
 	}
 }
 
@@ -2196,10 +2315,8 @@ func TestControllerHasNoCacheURLWhenNoCacheIsDeployed(t *testing.T) {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
 	controller := renderController(t, "sparkwing-runner-bundle.enabled=false")
-	for _, e := range controller.Env {
-		if e.Name == "SPARKWING_CACHE_URL" {
-			t.Errorf("rendered SPARKWING_CACHE_URL=%q with no cache deployed", e.Value)
-		}
+	if arg, ok := hasFlag(controller.Args, "--cache-url="); ok {
+		t.Errorf("rendered %s with no cache deployed", arg)
 	}
 }
 
@@ -2637,76 +2754,38 @@ func TestFullChartCarriesTheJobCeiling(t *testing.T) {
 	}
 }
 
-func secretVolume(volumes []renderedVolume, name string) string {
-	for _, volume := range volumes {
-		if volume.Name == name && volume.Secret != nil {
-			return volume.Secret.SecretName
-		}
-	}
-	return ""
-}
-
 func TestFullChartCarriesControllerCredentialsAsFiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.9s of real work; the fast class runs under -short")
 	}
-	for _, test := range []struct {
-		name   string
-		set    string
-		flag   string
-		volume string
-		mount  string
-		env    string
-	}{
-		{
-			name:   "secrets key",
-			set:    "controller.secretsKey.name=sparkwing-secrets-key",
-			flag:   "--secrets-key-file=/etc/sparkwing/secrets-key/key",
-			volume: "secrets-key",
-			mount:  "/etc/sparkwing/secrets-key",
-			env:    "SPARKWING_SECRETS_KEY",
-		},
-		{
-			name:   "previous secrets key",
-			set:    "controller.secretsPreviousKey.name=sparkwing-secrets-key-old",
-			flag:   "--secrets-previous-key-file=/etc/sparkwing/secrets-previous-key/key",
-			volume: "secrets-previous-key",
-			mount:  "/etc/sparkwing/secrets-previous-key",
-			env:    "SPARKWING_SECRETS_PREVIOUS_KEY",
-		},
-		{
-			name:   "bootstrap admin token",
-			set:    "controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin",
-			flag:   "--bootstrap-admin-token-file=/etc/sparkwing/bootstrap-admin-token/token",
-			volume: "bootstrap-admin-token",
-			mount:  "/etc/sparkwing/bootstrap-admin-token",
-			env:    "SPARKWING_BOOTSTRAP_ADMIN_TOKEN",
-		},
+	rendered := renderControllerYAML(t,
+		"controller.secretsKey.name=sparkwing-secrets-key",
+		"controller.secretsPreviousKey.name=sparkwing-secrets-key-old",
+		"controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin",
+		"controller.credentialsSecret.name=sparkwing-controller-credentials")
+	container := runnerContainer(t, rendered)
+	if !slices.Contains(container.Args, "--credentials-dir=/etc/sparkwing/credentials") {
+		t.Fatalf("args = %+v, want --credentials-dir=/etc/sparkwing/credentials", container.Args)
+	}
+	if !hasMount(container.VolumeMounts, "credentials", "/etc/sparkwing/credentials") {
+		t.Fatalf("volume mounts = %+v, want the credentials volume", container.VolumeMounts)
+	}
+	for file, want := range map[string]renderedSecretKeyRef{
+		"secrets-key":           {Name: "sparkwing-secrets-key", Key: "key"},
+		"secrets-key.previous":  {Name: "sparkwing-secrets-key-old", Key: "key"},
+		"bootstrap-admin-token": {Name: "sparkwing-bootstrap-admin", Key: "token"},
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			sets := []string{test.set}
-			if test.volume == "secrets-previous-key" {
-				sets = append(sets, "controller.secretsKey.name=sparkwing-secrets-key")
-			}
-			rendered := helmRender(t, "./sparkwing-full",
-				"templates/controller-deployment.yaml", "sparkwing", sets...)
-			container := runnerContainer(t, rendered)
-			if !slices.Contains(container.Args, test.flag) {
-				t.Fatalf("args = %+v, want %s", container.Args, test.flag)
-			}
-			if !hasMount(container.VolumeMounts, test.volume, test.mount) {
-				t.Fatalf("volume mounts = %+v, want %s at %s", container.VolumeMounts, test.volume, test.mount)
-			}
-			secretName := strings.TrimPrefix(test.set[strings.Index(test.set, "=")+1:], "")
-			if got := secretVolume(deploymentDocument(t, rendered).Spec.Template.Spec.Volumes, test.volume); got != secretName {
-				t.Fatalf("volume %s reads Secret %q, want %q", test.volume, got, secretName)
-			}
-			for _, e := range container.Env {
-				if e.Name == test.env {
-					t.Fatalf("%s still reaches the container as an environment variable", test.env)
-				}
-			}
-		})
+		if got := credentialRef(t, rendered, file); got == nil || got.Name != want.Name || got.Key != want.Key {
+			t.Errorf("%s credential = %+v, want %s/%s", file, got, want.Name, want.Key)
+		}
+	}
+	if !strings.Contains(rendered, `name: "sparkwing-controller-credentials"`) {
+		t.Errorf("the credentialsSecret is not projected whole:\n%s", rendered)
+	}
+	for _, e := range container.Env {
+		if e.ValueFrom != nil && e.ValueFrom.SecretKeyRef != nil {
+			t.Errorf("%s still reaches the container as an environment variable", e.Name)
+		}
 	}
 }
 
@@ -2714,15 +2793,14 @@ func TestFullChartRequiresAuthWithABootstrapTokenByDefault(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
 	}
-	container := runnerContainer(t, helmRender(t, "./sparkwing-full",
-		"templates/controller-deployment.yaml", "sparkwing",
+	rendered := renderControllerYAML(t,
 		"controller.allowOpenBootstrap=false",
-		"controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin"))
-	if !slices.Contains(container.Args, "--require-auth") {
-		t.Fatalf("args = %+v, want --require-auth by default", container.Args)
+		"controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin")
+	if args := runnerContainer(t, rendered).Args; !slices.Contains(args, "--require-auth") {
+		t.Fatalf("args = %+v, want --require-auth by default", args)
 	}
-	if !slices.Contains(container.Args, "--bootstrap-admin-token-file=/etc/sparkwing/bootstrap-admin-token/token") {
-		t.Fatalf("args = %+v, want the bootstrap token file", container.Args)
+	if ref := credentialRef(t, rendered, "bootstrap-admin-token"); ref == nil {
+		t.Fatal("the bootstrap admin token is not a credential file")
 	}
 }
 
@@ -2745,11 +2823,12 @@ func TestFullChartAllowOpenBootstrapDropsRequireAuth(t *testing.T) {
 	for _, sets := range [][]string{
 		{"controller.allowOpenBootstrap=true"},
 		{"controller.allowOpenBootstrap=false", "controller.requireAuth=false"},
+		{"controller.allowOpenBootstrap=true", "controller.credentialsSecret.name=sparkwing-credentials"},
 	} {
 		container := runnerContainer(t, helmRender(t, "./sparkwing-full",
 			"templates/controller-deployment.yaml", "sparkwing", sets...))
 		for _, arg := range container.Args {
-			if arg == "--require-auth" || strings.HasPrefix(arg, "--bootstrap-admin-token-file") {
+			if arg == "--require-auth" {
 				t.Fatalf("%v: args = %+v, want neither --require-auth nor a bootstrap token", sets, container.Args)
 			}
 		}
@@ -2760,6 +2839,20 @@ func TestFullChartAllowOpenBootstrapDropsRequireAuth(t *testing.T) {
 		"controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin"))
 	if !slices.Contains(container.Args, "--require-auth") {
 		t.Fatalf("args = %+v, want --require-auth once a bootstrap token closes the window", container.Args)
+	}
+}
+
+func TestFullChartIngressRefusesOpenBootstrapWithOnlyACredentialBundle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: helm render")
+	}
+	out := helmRenderError(t, "./sparkwing-full", "sparkwing",
+		"controller.allowOpenBootstrap=true",
+		"controller.credentialsSecret.name=sparkwing-credentials",
+		"ingress.enabled=true",
+		"ingress.tls[0].secretName=sparkwing-tls")
+	if !strings.Contains(out, "publishes the whole controller API") {
+		t.Fatalf("render output = %s, want the published-controller refusal", out)
 	}
 }
 

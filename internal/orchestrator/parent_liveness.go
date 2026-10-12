@@ -29,12 +29,18 @@ func openParentLivenessPipe() *os.File {
 	if raw == "" {
 		return nil
 	}
+	// safety: a process this one starts would watch an unrelated descriptor of its own under
+	// the same number, so neither the name nor the descriptor passes on.
+	if err := os.Unsetenv(local.ParentLivenessFDEnv); err != nil {
+		slog.Default().Warn("parent-liveness variable stays in the environment", "err", err)
+	}
 	fd, err := strconv.Atoi(raw)
 	if err != nil || fd < local.ParentLivenessFD {
 		slog.Default().Warn("ignoring malformed parent-liveness descriptor",
 			"env", local.ParentLivenessFDEnv, "value", raw)
 		return nil
 	}
+	closeOnExec(fd)
 	f := os.NewFile(uintptr(fd), "sparkwing-parent-liveness")
 	if f == nil {
 		return nil

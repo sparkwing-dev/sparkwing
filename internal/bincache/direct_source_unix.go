@@ -12,3 +12,11 @@ func killGroupOnCancel(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 }
+
+func gitCommandCombinedOutput(cmd *exec.Cmd) ([]byte, error) {
+	return cmd.CombinedOutput()
+}
+
+func gitCommandOutput(cmd *exec.Cmd) ([]byte, error) {
+	return cmd.Output()
+}

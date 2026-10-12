@@ -9,7 +9,10 @@ import (
 )
 
 func (s *Store) claimSweepWindow(ctx context.Context, key, claimKey string, minInterval, claimTTL time.Duration) (bool, string, error) {
-	now := time.Now()
+	return s.claimSweepWindowAt(ctx, key, claimKey, minInterval, claimTTL, time.Now())
+}
+
+func (s *Store) claimSweepWindowAt(ctx context.Context, key, claimKey string, minInterval, claimTTL time.Duration, now time.Time) (bool, string, error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return false, "", err
@@ -27,20 +30,23 @@ func (s *Store) claimSweepWindow(ctx context.Context, key, claimKey string, minI
 		claimCutoff = now.Add(-claimTTL).UnixNano()
 	}
 	token := strconv.FormatInt(now.UnixNano(), 10)
-	res, err := tx.ExecContext(ctx,
+	// safety: retained generations prevent stale clears from matching a later
+	// owner when the clock repeats or moves backward across processes.
+	err = tx.QueryRowContext(ctx,
 		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
-		 ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-		 WHERE CAST(sparkwing_meta.value AS BIGINT) <= ?`,
-		claimKey, token, now.UnixNano(), claimCutoff)
-	if err != nil {
-		return false, "", err
-	}
-	changed, err := res.RowsAffected()
-	if err != nil {
-		return false, "", err
-	}
-	if changed == 0 {
+		 ON CONFLICT (key) DO UPDATE SET
+		 value = CAST(CASE WHEN sparkwing_meta.updated_at >= excluded.updated_at
+		                  THEN sparkwing_meta.updated_at + 1 ELSE excluded.updated_at END AS TEXT),
+		 updated_at = CASE WHEN sparkwing_meta.updated_at >= excluded.updated_at
+		                   THEN sparkwing_meta.updated_at + 1 ELSE excluded.updated_at END
+		 WHERE CAST(sparkwing_meta.value AS BIGINT) <= ?
+		 RETURNING value`,
+		claimKey, token, now.UnixNano(), claimCutoff).Scan(&token)
+	if errors.Is(err, sql.ErrNoRows) {
 		return false, "", nil
+	}
+	if err != nil {
+		return false, "", err
 	}
 	var prev string
 	err = tx.QueryRowContext(ctx,
@@ -73,7 +79,7 @@ func (s *Store) stampSweepWindow(ctx context.Context, key string) error {
 }
 
 func (s *Store) clearSweepClaim(ctx context.Context, claimKey, token string) error {
-	_, err := s.exec(ctx, `DELETE FROM sparkwing_meta WHERE key = ? AND value = ?`, claimKey, token)
+	_, err := s.exec(ctx, `UPDATE sparkwing_meta SET value = '0' WHERE key = ? AND value = ?`, claimKey, token)
 	return err
 }
 

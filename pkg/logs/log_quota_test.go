@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 	"github.com/sparkwing-dev/sparkwing/internal/storagequota/storagequotatest"
@@ -68,11 +70,19 @@ func TestAFailedAppendHoldsNothing(t *testing.T) {
 		t.Fatalf("first append = %d", code)
 	}
 	dir := filepath.Join(f.root, "runs", "run-b")
-	if err := os.Chmod(dir, 0o555); err != nil {
+	if runtime.GOOS == "windows" {
+		if err := os.Mkdir(filepath.Join(dir, "second.log"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	} else if err := os.Chmod(dir, 0o555); err != nil {
 		t.Fatal(err)
 	}
 	code, _ := f.do(t, http.MethodPost, "/api/v1/logs/run-b/second", "Bearer b", line(250))
-	if err := os.Chmod(dir, 0o755); err != nil {
+	if runtime.GOOS == "windows" {
+		if err := os.Remove(filepath.Join(dir, "second.log")); err != nil {
+			t.Fatal(err)
+		}
+	} else if err := os.Chmod(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if code != http.StatusInternalServerError {
@@ -137,6 +147,9 @@ func (f *archiveFixture) appendAs(t *testing.T, bearer, runID, nodeID string, ge
 func TestTenThousandLinesCostAHandfulOfControllerCalls(t *testing.T) {
 	counter := storagequotatest.New(1<<30, 0)
 	f := newArchiveFixtureWith(t, 0, counter)
+	// safety: this proof stays inside one cache interval regardless of filesystem throughput.
+	now := time.Now()
+	f.srv.claimNow = func() time.Time { return now }
 	const lines, width = 10000, 200
 	for i := range lines {
 		if code := f.appendAs(t, "Bearer a", "run-a", "build", 1, line(width)); code != http.StatusNoContent {

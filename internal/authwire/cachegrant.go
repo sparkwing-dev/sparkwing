@@ -104,14 +104,8 @@ func cacheGrantKey(signingKey string) []byte {
 	return sum[:]
 }
 
-// CacheGrantKeyEnv names the variable the controller and the cache read the
-// grant signing key from. The key is a secret of its own: never the cache's
-// operator token and never a runner's token, because pipeline code can read
-// a runner's token and whoever holds the key can open any team's cache tree.
-const CacheGrantKeyEnv = "SPARKWING_CACHE_GRANT_KEY"
-
 // MintClaimCacheGrant signs a grant for team and run with signingKey, the key
-// named by [CacheGrantKeyEnv], valid until now+ttl, bound to the live claim
+// from the [CacheGrantKeyCredential] file, valid until now+ttl, bound to the live claim
 // that asked for it and the repository and refs of its run. The controller and
 // the cache hold that key; a runner does not, so it cannot mint.
 func MintClaimCacheGrant(signingKey, team, run string, now time.Time, ttl time.Duration, claim *CacheClaim, scope *CacheScope) (string, error) {

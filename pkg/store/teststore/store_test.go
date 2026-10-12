@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 	"time"
@@ -41,7 +42,11 @@ func TestOpenKeepsStateAndIdentitySeparate(t *testing.T) {
 			t.Fatal(err)
 		}
 		info, err := os.Stat(path)
-		if err != nil || info.Mode().Perm() != 0o600 {
+		expectedMode := os.FileMode(0o600)
+		if runtime.GOOS == "windows" {
+			expectedMode = 0o666
+		}
+		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != expectedMode {
 			t.Fatalf("fixture permissions: %v, %v", info, err)
 		}
 	}

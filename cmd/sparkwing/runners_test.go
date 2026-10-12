@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/agentservice"
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -60,6 +62,9 @@ func newRunnersFixture(t *testing.T) *runnersFixture {
 		failExec: map[string]string{},
 		binary:   "/usr/local/bin/sparkwing-runner",
 	}
+	if runtime.GOOS == "windows" {
+		f.binary = "C:/usr/local/bin/sparkwing-runner.exe"
+	}
 	t.Cleanup(swapRunnerServiceHost(func(configPath string) (agentservice.Host, error) {
 		return agentservice.Host{
 			GOOS:       "linux",
@@ -84,8 +89,10 @@ func newRunnersFixture(t *testing.T) *runnersFixture {
 
 func swapRunnerServiceHost(fn func(string) (agentservice.Host, error)) func() {
 	prev := runnerServiceHost
+	previousGOOS := runnerServiceGOOS
+	runnerServiceGOOS = "linux"
 	runnerServiceHost = fn
-	return func() { runnerServiceHost = prev }
+	return func() { runnerServiceHost = prev; runnerServiceGOOS = previousGOOS }
 }
 
 func (f *runnersFixture) runnerTokens(t *testing.T) []store.Token {
@@ -168,7 +175,11 @@ func TestRunnersAddMintsAScopedTokenAndWritesTheClaimModeConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat config: %v", err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	if runtime.GOOS == "windows" {
+		if err := fssecure.VerifyPrivateConfig(f.config, info); err != nil {
+			t.Fatal(err)
+		}
+	} else if info.Mode().Perm() != 0o600 {
 		t.Errorf("config mode = %04o, want 0600", info.Mode().Perm())
 	}
 	raw, err := agentconfig.Load(f.config)
@@ -232,7 +243,7 @@ func TestRunnersAddSkipsTheServiceWhenAsked(t *testing.T) {
 
 func TestRunnersAddRefusesAnExistingConfigAndMintsNothing(t *testing.T) {
 	f := newRunnersFixture(t)
-	if err := os.WriteFile(f.config, []byte("agent:\n  controller: http://elsewhere\n  token: keep-me\n"), 0o600); err != nil {
+	if err := fssecure.WriteFile(f.config, []byte("agent:\n  controller: http://elsewhere\n  token: keep-me\n")); err != nil {
 		t.Fatal(err)
 	}
 	err := runRunners([]string{"add", "--profile", "prod", "--name", "desk", "--config", f.config})
@@ -253,7 +264,7 @@ func TestRunnersAddRefusesAnExistingConfigAndMintsNothing(t *testing.T) {
 
 func TestRunnersAddForceReplacesTheConfig(t *testing.T) {
 	f := newRunnersFixture(t)
-	if err := os.WriteFile(f.config, []byte("# desk\nfleet:\n  listen: 127.0.0.1:4346\nagent:\n  controller: http://elsewhere\n  token: replace-me\n"), 0o600); err != nil {
+	if err := fssecure.WriteFile(f.config, []byte("# desk\nfleet:\n  listen: 127.0.0.1:4346\nagent:\n  controller: http://elsewhere\n  token: replace-me\n")); err != nil {
 		t.Fatal(err)
 	}
 	captureStdout(t, func() {
@@ -443,7 +454,11 @@ func TestRunnersAddForceTwiceKeepsTheLatestConfigReadable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	if runtime.GOOS == "windows" {
+		if err := fssecure.VerifyPrivateConfig(f.config, info); err != nil {
+			t.Fatal(err)
+		}
+	} else if info.Mode().Perm() != 0o600 {
 		t.Errorf("config mode after a replace = %04o, want 0600", info.Mode().Perm())
 	}
 	entries, err := os.ReadDir(filepath.Dir(f.config))
@@ -490,7 +505,7 @@ func TestRunnersRemoveRefusesANonRunnerToken(t *testing.T) {
 		t.Fatalf("CreateToken: %v", err)
 	}
 	body := fmt.Sprintf("agent:\n  controller: http://localhost:4344\n  token: %s\n  holder_prefix: desk\n", raw)
-	if err := os.WriteFile(f.config, []byte(body), 0o600); err != nil {
+	if err := fssecure.WriteFile(f.config, []byte(body)); err != nil {
 		t.Fatal(err)
 	}
 

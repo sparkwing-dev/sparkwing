@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -89,6 +90,12 @@ func TestDiagnose_NamesADaemonBuiltFromAScratchModule(t *testing.T) {
 	report := diagnoseHome(t, home)
 	if !slices.Contains(straySockets(report), straySock) {
 		t.Fatalf("stray daemons %v do not name the scratch-built daemon at %q", straySockets(report), straySock)
+	}
+	if runtime.GOOS == "windows" {
+		if !report.PermissionAuditUnverified || report.Clean() {
+			t.Fatal("native Windows must retain its unverified permission audit")
+		}
+		report.PermissionAuditUnverified = false
 	}
 	if !report.Clean() {
 		t.Errorf("another home's process made this home's report unclean: %+v", report)
@@ -220,6 +227,12 @@ func TestDiagnose_NamesAPeerWhoseProbeFailed(t *testing.T) {
 	}
 	if slices.Contains(straySockets(report), sock) {
 		t.Errorf("a peer that answered nothing was reported as a stray daemon: %q", sock)
+	}
+	if runtime.GOOS == "windows" {
+		if !report.PermissionAuditUnverified || report.Clean() {
+			t.Fatal("native Windows must retain its unverified permission audit")
+		}
+		report.PermissionAuditUnverified = false
 	}
 	if !report.Clean() {
 		t.Errorf("another home's wedged daemon made this home's report unclean: %+v", report)

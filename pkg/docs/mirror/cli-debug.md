@@ -46,6 +46,7 @@ exits 0.
 |---|---|
 | `--run ID` | Run ID holding the paused node (required) |
 | `--node NAME` | Node ID to attach to (required) |
+| `--namespace NAME` | Kubernetes namespace of the runner pods (default: sparkwing) |
 | `--profile NAME` | Profile name (cluster mode) |
 
 ### Examples
@@ -152,7 +153,8 @@ Reproduce a node's dispatch frame in an interactive shell
 Opens an interactive shell using a node's recorded environment and working
 directory. Local execution writes upstream reference outputs beneath the
 run's rerun directory. Cluster execution creates a temporary pod using
---image or SPARKWING_RERUN_IMAGE, attaches to it, and deletes it on exit.
+--image, else the profile's rerun_image in config.yaml, attaches to it,
+and deletes it on exit.
 
 Snapshots omit credential names and values and remove URL credentials.
 Controller access to the captured environment requires an admin token.
@@ -200,8 +202,8 @@ pipeline binary; they never land in tracked code.
   error. Skipped / cancelled / OnFailure-recovered nodes do not
   pause -- only Run errors.
 
-Paused nodes hold for 30 minutes by default; set
-SPARKWING_PAUSE_TIMEOUT=<duration> to change. An expired pause
+Paused nodes hold for 30 minutes by default; set debug.pause_timeout
+in config.yaml (a duration such as 10m) to change it. An expired pause
 is released with reason 'timeout-released' and surfaces in the
 run record.
 

@@ -665,6 +665,7 @@ func TestLocalSetupFailureChild(t *testing.T) {
 	if os.Getenv("SPARKWING_LOCAL_SETUP_TEST_CHILD") != "1" {
 		t.Skip("child process fixture")
 	}
+	SetTestStoreWedgeBudget(t, 0, errors.New("store wedge budget secret-should-not-be-shown"))
 	if err := HandleClaimedTriggerLocal(context.Background(), os.Getenv("SPARKWING_LOCAL_SETUP_TEST_RUN"), ""); err != nil {
 		t.Fatal(err)
 	}
@@ -686,7 +687,6 @@ func TestLocalConsumerKeepsSafeSetupFailure(t *testing.T) {
 			t.Setenv("SPARKWING_HOME", home)
 			t.Setenv("SPARKWING_LOCAL_SETUP_TEST_CHILD", "1")
 			t.Setenv("SPARKWING_LOCAL_SETUP_TEST_RUN", "local-setup-failure")
-			t.Setenv(StoreWedgeBudgetEnvVar, "secret-should-not-be-shown")
 			binary, err := os.Executable()
 			if err != nil {
 				t.Fatal(err)
@@ -705,8 +705,8 @@ func TestLocalConsumerKeepsSafeSetupFailure(t *testing.T) {
 			const id = "local-setup-failure"
 			// safety: a local submission carries its captured environment, and the
 			// child fixture reads its switches from it.
-			if err := CaptureSubmissionEnvironment(home, id, append(os.Environ(),
-				"SPARKWING_SUBMIT_ENV_ALLOW=SPARKWING_LOCAL_SETUP_TEST_*"), quietLogger()); err != nil {
+			writeMachineSettings(t, "run:\n  submit_env_allow: [SPARKWING_LOCAL_SETUP_TEST_*]\n")
+			if err := CaptureSubmissionEnvironment(home, id, os.Environ(), quietLogger()); err != nil {
 				t.Fatal(err)
 			}
 			if err := st.CreateTrigger(ctx, store.Trigger{
@@ -742,7 +742,15 @@ func TestLocalConsumerKeepsSafeSetupFailure(t *testing.T) {
 }
 
 func TestExecLocalChildCarriesTheChildsStderrInItsError(t *testing.T) {
-	err := execLocalChild(context.Background(), "/bin/sh", t.TempDir(),
+	shell := "/bin/sh"
+	if runtime.GOOS == "windows" {
+		var err error
+		shell, err = exec.LookPath("bash")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	err := execLocalChild(context.Background(), shell, t.TempDir(),
 		[]string{"-c", "echo noise; echo 'wingd/client: daemon build differs from this client' >&2; exit 1"}, nil)
 	if err == nil {
 		t.Fatal("expected the child's failure")

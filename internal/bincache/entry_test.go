@@ -337,8 +337,7 @@ func TestAcquireOrMaterializeClosesPublicationToLeaseGap(t *testing.T) {
 
 func TestAcquireOrMaterializeAutomaticallyPrunesAfterNonCLIWrite(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	t.Setenv(MaxCacheBytesEnv, "0")
-	t.Setenv(MaxCacheEntriesEnv, "1")
+	writeCacheConfig(t, "cache:\n  max_bytes: 0\n  max_entries: 1\n")
 
 	root := filepath.Join(SparkwingHome(), "cache", "pipelines", pipelineCacheSchema)
 	old := testEntry(t, root, "11111111-11111111")
@@ -519,6 +518,9 @@ func TestPruneRetiresLegacyEntriesAutomatically(t *testing.T) {
 }
 
 func TestPruneQuarantinesActiveLegacyWriterUntilGraceExpires(t *testing.T) {
+	if testNativeActiveLegacyWriter(t) {
+		return
+	}
 	originalNow := cacheNow
 	t.Cleanup(func() { cacheNow = originalNow })
 	now := time.Unix(100, 0)
@@ -611,4 +613,31 @@ func (e Entry) Materialize(ctx context.Context, write func(string) error) (publi
 func cacheCandidates(ctx context.Context, root string, limit int) ([]cacheCandidate, error) {
 	candidates, _, err := cacheCandidatesBounded(ctx, root, limit)
 	return candidates, err
+}
+
+func TestAcquireOrMaterializeRefusesABrokenCeilingOnEveryPath(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	writeCacheConfig(t, "cache:\n  max_bytes: lots\n")
+	root := filepath.Join(SparkwingHome(), "cache", "pipelines", pipelineCacheSchema)
+
+	fresh := testEntry(t, root, "33333333-33333333")
+	writes := 0
+	if _, _, err := fresh.AcquireOrMaterialize(context.Background(), func(path string) error {
+		writes++
+		return os.WriteFile(path, []byte("new"), 0o755)
+	}); err == nil || !strings.Contains(err.Error(), "cache.max_bytes") {
+		t.Fatalf("materialize error = %v, want the broken ceiling named", err)
+	}
+	if writes != 0 {
+		t.Fatalf("materializer ran %d times; a broken ceiling must refuse before publishing", writes)
+	}
+
+	cached := testEntry(t, root, "44444444-44444444")
+	seedEntry(t, cached, "cached", time.Unix(1, 0))
+	if _, _, err := cached.AcquireOrMaterialize(context.Background(), func(string) error {
+		t.Fatal("a cached entry was rebuilt")
+		return nil
+	}); err == nil || !strings.Contains(err.Error(), "cache.max_bytes") {
+		t.Fatalf("cache-hit error = %v, want the broken ceiling named", err)
+	}
 }

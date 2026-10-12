@@ -342,7 +342,7 @@ Everything else is environment, and every runner needs it:
 |---|---|---|
 | `AWS_REGION` | Yes | The SDK resolves no endpoint without it. Unset is the default state of a runner that has static credentials and no `~/.aws/config`. |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, or any other link in the standard AWS credential chain | Yes | Authenticates every read and write. Profiles hold no credential fields. |
-| `SPARKWING_S3_ENDPOINT` | Only for non-AWS S3 | Points the SDK at MinIO, R2, or another S3-compatible endpoint. Setting it also forces path-style addressing, and it applies process-wide: every surface -- state, cache, logs, and the binaries cache -- goes to that endpoint, so one profile cannot mix a MinIO cache with a real-AWS state. |
+| `AWS_ENDPOINT_URL_S3` (or `AWS_ENDPOINT_URL`) | Only for non-AWS S3 | The AWS SDK's own variable; points it at MinIO, R2, or another S3-compatible endpoint. Sparkwing addresses buckets path-style whenever either is set, and it applies process-wide: every surface -- state, cache, logs, and the binaries cache -- goes to that endpoint, so one profile cannot mix a MinIO cache with a real-AWS state. |
 
 Secrets are the exception to "no controller": the secrets surface
 takes `controller`, `filesystem`, `env`, or `none`, and has no
@@ -473,7 +473,8 @@ A practical decision order:
    [Shared object storage](#shared-object-storage) or
    [Postgres and object storage](#postgres-and-object-storage), a
    temporary exception slated for removal. Each runner needs the
-   environment the profile does not carry; see
+   environment the profile does not carry (`AWS_REGION`, credentials, and
+   `AWS_ENDPOINT_URL_S3` for a non-AWS store); see
    [what each runner needs](#what-each-runner-needs-beyond-the-profile).
 
 You can move between shapes by editing a profile; pipeline code doesn't
