@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -639,5 +640,172 @@ func TestGitHubAppRunFinishLeavesAnotherTeamsCheckUnderTheSameID(t *testing.T) {
 
 	if calls := f.app.CheckRunCalls(); len(calls) != 0 {
 		t.Fatalf("check run writes = %+v, want none for another team's trigger", calls)
+	}
+}
+
+// Two controllers reporting the same run while a deploy overlaps them create
+// one check run between them: the second waits for the first's create and
+// updates the check run it recorded.
+func TestGitHubAppOverlappingControllersCreateOneCheckRun(t *testing.T) {
+	f := newAppFixture(t)
+	other, _ := f.replica()
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "build", nil)
+
+	arrived, minted, release := f.app.HoldCheckRunCreates()
+	t.Cleanup(release)
+	runID := f.pushRun(headSHA)
+	<-arrived
+	for len(minted) > 0 {
+		<-minted
+	}
+	controller.ReportGitHubRunState(context.Background(), other, runID, "pending")
+	<-minted
+	// safety: the yields let the second controller reach its read of the
+	// recorded id before the first records one, which is the interleaving
+	// that made two creates; they bias the race and decide nothing.
+	for range 1000 {
+		runtime.Gosched()
+	}
+	release()
+	f.drainChecks()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := controller.DrainGitHubChecks(ctx, other); err != nil {
+		t.Fatalf("drain the second controller: %v", err)
+	}
+
+	calls := f.app.CheckRunCalls()
+	if len(calls) != 2 || calls[0].Method != "create" || calls[1].Method != "update" || calls[1].ID != calls[0].ID {
+		t.Fatalf("check run writes = %+v, want one create and an update of it", calls)
+	}
+}
+
+// A controller holding a non-final update for a run that has finished drops
+// it, so a finished check run or commit status never goes back to running or
+// pending.
+func TestGitHubAppStaleUpdateNeverReopensAFinishedRun(t *testing.T) {
+	for _, checks := range []bool{true, false} {
+		t.Run(map[bool]string{true: "check run", false: "commit status"}[checks], func(t *testing.T) {
+			f := newAppFixture(t)
+			other, _ := f.replica()
+			olga := f.ghUser(501, "olga")
+			f.connect(olga, 501, 7, acmeAdmin)
+			f.subscribe(olga, "acme/widgets", "build", nil)
+			f.app.SetChecksGranted(7, checks)
+
+			runID := f.pushRun(headSHA)
+			f.finishRun(f.startRun(olga, runID), runID, "failed", "")
+			f.drainChecks()
+			controller.ReportGitHubRunState(context.Background(), other, runID, "running")
+			controller.ReportGitHubRunState(context.Background(), other, runID, "pending")
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := controller.DrainGitHubChecks(ctx, other); err != nil {
+				t.Fatalf("drain the second controller: %v", err)
+			}
+
+			if checks {
+				calls := f.app.CheckRunCalls()
+				if last := calls[len(calls)-1]; last.Status != "completed" || last.Conclusion != "failure" {
+					t.Fatalf("check run writes = %+v, want the last one to stay completed failure", calls)
+				}
+				return
+			}
+			statuses := f.app.Statuses()
+			if last := statuses[len(statuses)-1]; last.State != "failure" {
+				t.Fatalf("statuses = %+v, want the last one to stay failure", statuses)
+			}
+		})
+	}
+}
+
+// Queue expiry stores a run as failed and reports it timed_out; a queued update
+// another controller still holds arrives afterwards and leaves the timed_out
+// conclusion in place.
+func TestGitHubAppStaleQueuedUpdateKeepsATimedOutConclusion(t *testing.T) {
+	f := newAppFixture(t)
+	other, _ := f.replica()
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "build", nil)
+	runID := f.pushRun(headSHA)
+	f.drainChecks()
+
+	ctx := context.Background()
+	team, err := f.store.AsOperator().RunTeam(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenant, err := f.store.ForTeam(ctx, team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tenant.FinishRun(ctx, runID, "failed", "reaped: queue deadline"); err != nil {
+		t.Fatal(err)
+	}
+	controller.ReportGitHubRunState(ctx, f.srv, runID, "timed_out")
+	f.drainChecks()
+	controller.ReportGitHubRunState(ctx, other, runID, "pending")
+	drain, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := controller.DrainGitHubChecks(drain, other); err != nil {
+		t.Fatalf("drain the second controller: %v", err)
+	}
+
+	calls := f.app.CheckRunCalls()
+	if last := calls[len(calls)-1]; last.Status != "completed" || last.Conclusion != "timed_out" {
+		t.Fatalf("check run writes = %+v, want the last one to stay completed timed_out", calls)
+	}
+}
+
+// A check run GitHub created whose id the store lost is found by its external
+// id and adopted, so the next update edits it rather than creating another.
+func TestGitHubAppAdoptsACheckRunWhoseRecordWasLost(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "build", nil)
+	runID := f.pushRun(headSHA)
+	f.drainChecks()
+	if _, err := f.store.DB().Exec(`UPDATE triggers SET github_check_run_id = 0 WHERE id = ?`, runID); err != nil {
+		t.Fatal(err)
+	}
+
+	f.startRun(olga, runID)
+	f.drainChecks()
+	calls := f.app.CheckRunCalls()
+	if len(calls) != 2 || calls[1].Method != "update" || calls[1].ID != calls[0].ID || calls[1].Status != "in_progress" {
+		t.Fatalf("check run writes = %+v, want the lost check run updated, not a second create", calls)
+	}
+	var recorded int64
+	if err := f.store.DB().QueryRow(`SELECT github_check_run_id FROM triggers WHERE id = ?`, runID).Scan(&recorded); err != nil || recorded != calls[0].ID {
+		t.Fatalf("recorded check run = %d, %v; want the adopted %d", recorded, err, calls[0].ID)
+	}
+}
+
+// A queued update another controller delivers after the run started is dropped,
+// so the check run stays in_progress.
+func TestGitHubAppDelayedQueuedUpdateLeavesARunningCheck(t *testing.T) {
+	f := newAppFixture(t)
+	other, _ := f.replica()
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "build", nil)
+	runID := f.pushRun(headSHA)
+	f.startRun(olga, runID)
+	f.drainChecks()
+
+	ctx := context.Background()
+	controller.ReportGitHubRunState(ctx, other, runID, "pending")
+	drain, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := controller.DrainGitHubChecks(drain, other); err != nil {
+		t.Fatalf("drain the second controller: %v", err)
+	}
+	calls := f.app.CheckRunCalls()
+	if last := calls[len(calls)-1]; last.Status != "in_progress" {
+		t.Fatalf("check run writes = %+v, want the last one to stay in_progress", calls)
 	}
 }

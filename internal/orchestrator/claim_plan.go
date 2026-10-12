@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -68,7 +69,7 @@ func runPlanCLI(args []string) error {
 
 // safety: a node's pod plans again and compares its node's hash with the one
 // the accepted plan holds, so it never runs a node that plan does not hold.
-func claimPlanSnapshot(plan *sparkwing.Plan, rc sparkwing.RunContext, reg *sparkwing.Registration) (planSnapshot, error) {
+func claimPlanSnapshot(plan *sparkwing.Plan, rc sparkwing.RunContext, reg *sparkwing.Registration) (nodeproto.PlanDoc, error) {
 	meta := planSnapshotMeta{Secrets: sparkwingruntime.ReflectSecretsField(reg)}
 	if y := loadPipelineYAML(rc.Pipeline); y != nil {
 		meta.PipelineRequires = y.Requires
@@ -90,7 +91,7 @@ func claimPlanSnapshot(plan *sparkwing.Plan, rc sparkwing.RunContext, reg *spark
 		if c.FullHistory {
 			depth = 0
 		}
-		snap.Source = &snapshotSource{Depth: depth, Tags: c.Tags, Submodules: c.Submodules, LFS: c.LFS}
+		snap.Source = &nodeproto.PlanSource{Depth: depth, Tags: c.Tags, Submodules: c.Submodules, LFS: c.LFS}
 	}
 	return snap, nil
 }

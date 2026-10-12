@@ -130,6 +130,24 @@ numbered. A run that names no team goes under `--default-team`
 stopped and run again; a run converted after an interrupted pass picks up
 where it stopped.
 
+### Overlapping controllers during an upgrade
+
+Two controllers on one PostgreSQL store can overlap while a deployment
+replaces one pod with the next. The maintenance sweep, which fails runs and
+claims whose runners went silent, times out approvals and queued nodes, and
+records why waiting nodes have no agent, runs in one of them at a time under
+a store lease, as the cron tick and the storage pass do. A controller that
+dies mid-sweep holds the lease for at most a minute. A sweep that runs past
+that can overlap the next one; its writes are conditional on the state they
+read, and GitHub reports are guarded per run. The sweep judges a
+waiting node from the runners connected to the controller holding the lease,
+so a runner reporting only to the other one reads as offline until it
+reconnects. GitHub check runs and commit statuses are written under a
+per-run lock in the store, so the two create one check run per run between
+them. The overlap is meant to last a deploy: runner presence, the egress
+meter and the object-store budget still belong to each process, so run one
+controller otherwise. A SQLite store serves one controller process.
+
 ### Controller credentials
 
 `sparkwing-controller` reads every secret from one directory, named with
