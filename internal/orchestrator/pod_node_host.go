@@ -1,7 +1,6 @@
 package orchestrator
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -157,8 +156,22 @@ func podRunContext(run *store.Run) nodeproto.RunContext {
 	return nodeproto.RunContext{
 		RunID: run.ID, StartedAt: run.StartedAt,
 		Git:     &nodeproto.Git{SHA: run.GitSHA, Branch: run.GitBranch, Repo: run.DeclaredRepo, RepoURL: run.RepoURL},
-		Trigger: &nodeproto.Trigger{Source: cmp.Or(run.TriggerSource, "manual")},
+		Trigger: &nodeproto.Trigger{Source: protocolTriggerSource(run.TriggerSource)},
 	}
+}
+
+// safety: the node protocol knows four sources, and a run's recorded source is
+// any of the surfaces that start runs (cli, api, retry, await-pipeline, a
+// working-tree snapshot), so each is named by the protocol source it means;
+// one the protocol does not know would fail the plan.
+func protocolTriggerSource(recorded string) string {
+	switch recorded {
+	case "schedule", "push", "webhook":
+		return recorded
+	case "github":
+		return "webhook"
+	}
+	return "manual"
 }
 
 // safety: one log for every process of the attempt, sealed once by

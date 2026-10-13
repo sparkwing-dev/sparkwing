@@ -149,7 +149,7 @@ func hostedRunContext(trig *store.Trigger, started time.Time) nodeproto.RunConte
 	rc := nodeproto.RunContext{
 		RunID: trig.ID, StartedAt: started,
 		Git:     &nodeproto.Git{SHA: trig.GitSHA, Branch: trig.GitBranch, Repo: trig.Repo, RepoURL: trig.RepoURL},
-		Trigger: &nodeproto.Trigger{Source: cmp.Or(trig.TriggerSource, "manual"), User: trig.TriggerUser},
+		Trigger: &nodeproto.Trigger{Source: protocolTriggerSource(trig.TriggerSource), User: trig.TriggerUser},
 	}
 	if pr := sparkwing.PullRequestFromEnv(trig.TriggerEnv); pr != nil {
 		rc.Trigger.PullRequest = &nodeproto.PullRequest{

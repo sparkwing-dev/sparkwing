@@ -510,7 +510,7 @@ func TestDispatchThrough_BoundsTheNodeByAllItsAttempts(t *testing.T) {
 func TestTriggerHost_PlansWithTheTriggersActorAndPullRequest(t *testing.T) {
 	envOut := filepath.Join(t.TempDir(), "env")
 	h := newHostedTriggerWith(t, map[string]string{"envout": envOut}, func(trig *store.Trigger) {
-		trig.TriggerUser = "alice"
+		trig.TriggerUser, trig.TriggerSource = "alice", "github"
 		trig.TriggerEnv = map[string]string{
 			sparkwing.EnvGitHubEventName: sparkwing.EventPullRequest, sparkwing.EnvPRNumber: "42",
 			sparkwing.EnvPRBaseRef: "main", sparkwing.EnvPRHeadRef: "feature",
@@ -526,5 +526,20 @@ func TestTriggerHost_PlansWithTheTriggersActorAndPullRequest(t *testing.T) {
 	}
 	if env, err := os.ReadFile(envOut); err != nil || !strings.Contains(string(env), "ACTOR=alice#42") {
 		t.Fatalf("build env lacks ACTOR=alice#42 (%v):\n%s", err, env)
+	}
+}
+
+// safety: a run's recorded source is whatever surface started it, and the node
+// protocol knows four, so a source it does not know plans as the one it means
+// rather than failing the plan.
+func TestProtocolTriggerSourceNamesEveryRecordedSource(t *testing.T) {
+	for recorded, want := range map[string]string{
+		"": "manual", "manual": "manual", "cli": "manual", "api": "manual", "runs-submit": "manual",
+		"retry": "manual", "await-pipeline": "manual", "pipeline-working-tree@laptop": "manual",
+		"schedule": "schedule", "push": "push", "webhook": "webhook", "github": "webhook",
+	} {
+		if got := protocolTriggerSource(recorded); got != want {
+			t.Errorf("protocolTriggerSource(%q) = %q, want %q", recorded, got, want)
+		}
 	}
 }
