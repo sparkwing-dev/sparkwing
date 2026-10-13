@@ -71,6 +71,25 @@ func TestDescribeReportsAnExitWithoutAReply(t *testing.T) {
 	}
 }
 
+func TestDescribeFailsAProtocolViolationAtOnce(t *testing.T) {
+	for name, body := range map[string]string{
+		"unknown reply id": `printf '{"reply":"2","ok":true,"result":{}}\n' >&4; exec sleep 300`,
+		"garbage frame":    `printf 'not json\n' >&4; exec sleep 300`,
+		// safety: the child stays blocked writing the rest of a line the host
+		// stopped reading, which is the wait that must not happen.
+		"oversized frame": `head -c 20000000 /dev/zero | tr '\0' a >&4; exec sleep 300`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			bin, _ := fakeSDK(t, body)
+			_, err := Describe(context.Background(), bin, t.TempDir())
+			var perr *nodeproto.Error
+			if !errors.As(err, &perr) || perr.Code != nodeproto.CodeProtocolError {
+				t.Fatalf("err = %v, want protocol_error", err)
+			}
+		})
+	}
+}
+
 func TestDescribeStopsAtTheDeadline(t *testing.T) {
 	bin, _ := fakeSDK(t, `exec sleep 30`)
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)

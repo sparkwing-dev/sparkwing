@@ -11,18 +11,24 @@ import (
 )
 
 // safety: a cache miss describes the binary again so the reason it cannot
-// describe reaches the operator instead of an empty pipeline list.
+// describe reaches the operator instead of an empty pipeline list. A run that
+// executes in another checkout binds that checkout's pipeline names, so it is
+// described there and never from the source's cache.
 func (r *pipelineRun) describedPipeline(pipelineName string) (sparkwing.DescribePipeline, error) {
 	var schemas []sparkwing.DescribePipeline
-	if key, err := bincache.PipelineCacheKey(r.sparkwingDir); err == nil {
-		schemas = readDescribeFile(describeCachePath(key))
+	bindDir := r.opts.ExecutionDir
+	if bindDir == "" {
+		bindDir = r.sparkwingDir
+		if key, err := bincache.PipelineCacheKey(r.sparkwingDir); err == nil {
+			schemas = readDescribeFile(describeCachePath(key))
+		}
 	}
 	if schemas == nil {
 		bin := r.uncachedBinary
 		if bin == "" {
 			bin = r.lease.Path()
 		}
-		doc, err := describeBinary(r.ctx, r.sparkwingDir, bin)
+		doc, err := describeBinary(r.ctx, bindDir, bin)
 		if err != nil {
 			return sparkwing.DescribePipeline{}, err
 		}

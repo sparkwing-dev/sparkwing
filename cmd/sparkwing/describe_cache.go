@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
@@ -18,8 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
-
-const metadataDescribeTimeout = 2 * time.Second
 
 func describeCachePath(key string) string {
 	return filepath.Join(bincache.SparkwingHome(),
@@ -72,10 +69,6 @@ func readDescribeFile(path string) []sparkwing.DescribePipeline {
 }
 
 func refreshDescribeFromBinary(ctx context.Context, sparkwingDir, binPath, key string) ([]sparkwing.DescribePipeline, error) {
-	// safety: completion and catalogs read through here, so a slow binary
-	// must not hold the prompt.
-	ctx, cancel := context.WithTimeout(ctx, metadataDescribeTimeout)
-	defer cancel()
 	doc, err := describeBinary(ctx, sparkwingDir, binPath)
 	if err != nil {
 		return nil, err

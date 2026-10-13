@@ -16,11 +16,18 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
+// DescribeTimeout bounds one describe call from start to reply.
+const DescribeTimeout = 30 * time.Second
+
 // Describe starts the pipeline binary at binPath in dir with
 // --sw-node-protocol, sends one describe request and returns the reply. A
-// binary that speaks another protocol version is refused.
+// binary that speaks another protocol version is refused, and one that has not
+// answered within [DescribeTimeout] is killed with every process it started.
 func Describe(ctx context.Context, binPath, dir string) (sdkserve.DescribeDoc, error) {
 	var doc sdkserve.DescribeDoc
+	ctx, cancel := context.WithTimeoutCause(ctx, DescribeTimeout,
+		fmt.Errorf("describe %s: no reply within %s: %w", binPath, DescribeTimeout, context.DeadlineExceeded))
+	defer cancel()
 	reqR, reqW, err := os.Pipe()
 	if err != nil {
 		return doc, err
@@ -35,28 +42,40 @@ func Describe(ctx context.Context, binPath, dir string) (sdkserve.DescribeDoc, e
 
 	var stderr bytes.Buffer
 	// #nosec G204 -- this executes the selected pipeline binary without a shell.
-	cmd := exec.CommandContext(ctx, binPath, protofd.Arg)
+	cmd := exec.Command(binPath, protofd.Arg)
 	cmd.Dir, cmd.Stderr = dir, &stderr
-	// safety: a grandchild holding stderr must not extend the describe deadline.
+	// safety: a grandchild holding stderr must not hold Wait past the kill.
 	cmd.WaitDelay = 100 * time.Millisecond
-	if err = passPipes(cmd, reqR, frameW); err == nil {
-		err = cmd.Start()
-	}
+	tree, err := startTree(cmd, reqR, frameW)
 	_, _ = reqR.Close(), frameW.Close()
 	if err != nil {
 		return doc, err
 	}
-	// safety: the frame read below is the only wait that ignores ctx otherwise.
-	defer context.AfterFunc(ctx, func() { _ = frameR.Close() })()
+	defer tree.release()
+	killed := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		tree.kill()
+		close(killed)
+	})
 
 	reply, err := describeReply(reqW, frameR)
+	if !stop() && ctx.Err() != nil {
+		// safety: the group is signaled before Wait reaps its leader, never after.
+		<-killed
+	}
+	if err != nil {
+		// safety: the child may be blocked writing a frame no one reads, so it
+		// dies before the wait.
+		tree.kill()
+	}
 	// safety: the SDK drops replies once its input ends, so the request pipe
-	// closes only after the reply is in.
-	_ = reqW.Close()
+	// closes only after the reply is in; closing the frame pipe first fails
+	// any write the SDK makes after it rather than leaving Wait behind it.
+	_, _ = reqW.Close(), frameR.Close()
 	waitErr := cmd.Wait()
 	switch {
 	case ctx.Err() != nil:
-		return doc, ctx.Err()
+		return doc, context.Cause(ctx)
 	case err != nil:
 		return doc, describeFailure(err, waitErr, stderr.String())
 	}
@@ -74,19 +93,27 @@ func Describe(ctx context.Context, binPath, dir string) (sdkserve.DescribeDoc, e
 	return doc, nil
 }
 
+const describeID = "1"
+
 func describeReply(requests io.Writer, frames io.Reader) (nodeproto.Reply, error) {
-	if err := nodeproto.NewWriter(requests).Send(nodeproto.Request{ID: "1", Op: nodeproto.OpDescribe}); err != nil {
+	if err := nodeproto.NewWriter(requests).Send(nodeproto.Request{ID: describeID, Op: nodeproto.OpDescribe}); err != nil {
 		return nodeproto.Reply{}, err
 	}
 	r := nodeproto.NewReader(frames)
 	for {
 		f, err := r.Next()
-		if err != nil {
+		switch {
+		case errors.Is(err, io.EOF):
 			return nodeproto.Reply{}, err
+		case err != nil:
+			return nodeproto.Reply{}, &nodeproto.Error{Code: nodeproto.CodeProtocolError, Message: err.Error()}
+		case f.Kind != nodeproto.KindReply:
+			continue
+		case f.Reply.ID != describeID:
+			msg := fmt.Sprintf("%v: %s", nodeproto.ErrUnknownReply, f.Reply.ID)
+			return nodeproto.Reply{}, &nodeproto.Error{Code: nodeproto.CodeProtocolError, Message: msg}
 		}
-		if f.Kind == nodeproto.KindReply && f.Reply.ID == "1" {
-			return f.Reply, nil
-		}
+		return f.Reply, nil
 	}
 }
 

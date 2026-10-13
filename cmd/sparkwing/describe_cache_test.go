@@ -128,3 +128,33 @@ func TestEnsureDescribeCacheRewritesALegacyEntry(t *testing.T) {
 		t.Fatalf("binary started %d times, want once", n)
 	}
 }
+
+func TestSourceRunDescribesWithTheCallersBinding(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	source := filepath.Join(t.TempDir(), "source", ".sparkwing")
+	caller := filepath.Join(t.TempDir(), "caller", ".sparkwing")
+	writeRepoFile(t, filepath.Join(source, "go.mod"), "module fixture\n\ngo 1.26\n")
+	writeRepoFile(t, filepath.Join(caller, "go.mod"), "module fixture\n\ngo 1.26\n")
+	fixture := filepath.Join(t.TempDir(), "pipeline")
+	// safety: the fixture names its one pipeline after the checkout it was
+	// started in, standing in for the YAML binding that checkout declares.
+	writeExec(t, fixture, "#!/bin/sh\nread -r _ <&3\n"+
+		`printf '{"reply":"1","ok":true,"result":{"protocol":"1","pipelines":[{"name":"%s"}]}}\n' "$(basename "$PWD")" >&4`+"\n")
+	key, err := bincache.PipelineCacheKey(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeRepoFile(t, describeCachePath(key), `{"protocol":"1","pipelines":[{"name":"source"}]}`)
+
+	run := &pipelineRun{ctx: context.Background(), sparkwingDir: source, uncachedBinary: fixture}
+	if _, err := run.describedPipeline("source"); err != nil {
+		t.Fatalf("an in-place run: %v", err)
+	}
+	run.opts.ExecutionDir = caller
+	if _, err := run.describedPipeline("caller"); err != nil {
+		t.Fatalf("a source run resolved against the source binding: %v", err)
+	}
+	if _, err := run.describedPipeline("source"); err == nil {
+		t.Fatal("a source run accepted a name only the source binds")
+	}
+}
