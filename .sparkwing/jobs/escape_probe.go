@@ -36,7 +36,7 @@ type EscapeProbeArgs struct {
 }
 
 // EscapeProbe checks that a customer-code pod cannot reach the credentials and
-// services the containment design fences off. It probes at plan time and in a
+// services the containment design fences off. It probes in a run's plan and in a
 // work node, reports pass or fail per probe and never a value, and fails the
 // run if any probe reaches what it should not.
 type EscapeProbe struct {
@@ -138,14 +138,23 @@ type prober struct {
 	siblingWait time.Duration
 }
 
+// hack: every connection a default prober opens goes through this one dialer,
+// so a test can see whether describe reached the network.
+var probeDial = (&net.Dialer{}).DialContext
+
 func defaultProber(args EscapeProbeArgs) prober {
 	return prober{
-		args:        args,
-		env:         os.Environ(),
-		readFile:    os.ReadFile,
-		dial:        net.DialTimeout,
+		args:     args,
+		env:      os.Environ(),
+		readFile: os.ReadFile,
+		dial: func(network, address string, timeout time.Duration) (net.Conn, error) {
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+			return probeDial(ctx, network, address)
+		},
 		siblingWait: 2 * time.Minute,
 		httpClient: &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{
+			DialContext: probeDial,
 			// #nosec G402 -- the probe asks whether the API answers at all; trusting its certificate would add nothing
 			TLSClientConfig: insecureTLS(),
 		}},
@@ -549,9 +558,14 @@ func (j *escapeProbeNode) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	}), nil
 }
 
-func (p *EscapeProbe) Plan(ctx context.Context, plan *sparkwing.Plan, in EscapeProbeArgs, _ sparkwing.RunContext) error {
-	if err := reportProbes(ctx, "plan", defaultProber(in).run()); err != nil {
-		return err
+// safety: describe plans every pipeline with no run to learn its risks and
+// job args, and probing there would hang every describe on the fenced
+// addresses, so only a run's plan probes.
+func (p *EscapeProbe) Plan(ctx context.Context, plan *sparkwing.Plan, in EscapeProbeArgs, rc sparkwing.RunContext) error {
+	if rc.RunID != "" {
+		if err := reportProbes(ctx, "plan", defaultProber(in).run()); err != nil {
+			return err
+		}
 	}
 	sparkwing.Job(plan, outputSibling, escapeProbeSibling{})
 	sparkwing.Job(plan, "probe-node", &escapeProbeNode{args: in})

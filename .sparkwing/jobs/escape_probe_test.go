@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"context"
 	"errors"
 	"io"
 	"io/fs"
@@ -9,11 +10,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -340,4 +343,46 @@ func TestEscapeProbe_OutputProbesFenceNonAncestorsAndOtherRuns(t *testing.T) {
 	if r := byName(missing.outputProbes())["controller other run output"]; r.verdict != inconclusive {
 		t.Errorf("no --other-run: %s, want INCONCLUSIVE", r.verdict)
 	}
+}
+
+// Describe plans every registered pipeline with no run and no args, and a
+// plan that dials there makes every describe wait out the fenced addresses'
+// timeouts. A run's plan must still probe, or the hook proves nothing.
+func TestEscapeProbe_DescribeOpensNoConnection(t *testing.T) {
+	var mu sync.Mutex
+	var dials []string
+	prev := probeDial
+	probeDial = func(_ context.Context, _, addr string) (net.Conn, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		dials = append(dials, addr)
+		return nil, refused
+	}
+	t.Cleanup(func() { probeDial = prev })
+	attempts := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), dials...)
+	}
+
+	for _, name := range sparkwing.Registered() {
+		reg, _ := sparkwing.Lookup(name)
+		describePlan(reg)
+	}
+	if got := attempts(); len(got) > 0 {
+		t.Fatalf("describe opened %d connections, first %q; plan code must not touch the network outside a run", len(got), got[0])
+	}
+
+	reg, _ := sparkwing.Lookup("escape-probe")
+	_, _ = reg.Invoke(context.Background(), map[string]string{}, sparkwing.RunContext{Pipeline: "escape-probe", RunID: "run-probe"})
+	if len(attempts()) == 0 {
+		t.Fatal("a run's plan opened no connection, so the probe no longer dials through probeDial")
+	}
+}
+
+// safety: the SDK's describe recovers a panicking plan and ignores its error,
+// so this does too and judges only the connections the plan opened.
+func describePlan(reg *sparkwing.Registration) {
+	defer func() { _ = recover() }()
+	_, _ = reg.Invoke(sparkwing.SkipArgResolve(context.Background()), nil, sparkwing.RunContext{Pipeline: reg.Name})
 }
