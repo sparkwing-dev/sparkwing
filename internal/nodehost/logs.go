@@ -41,6 +41,8 @@ type LogSinkConfig struct {
 	Masker *secrets.Masker
 	// Now stamps each record; nil means time.Now.
 	Now func() time.Time
+	// Progress, when set, is called for each record stored.
+	Progress func()
 }
 
 // LogSink is the [Sink] that stores one node's SDK output: it masks every
@@ -229,4 +231,7 @@ func (s *LogSink) emit(rec sparkwing.LogRecord) {
 	rec.TS = s.cfg.Now()
 	rec.JobID = s.cfg.NodeID
 	s.cfg.Log.Emit(rec)
+	if s.cfg.Progress != nil {
+		s.cfg.Progress()
+	}
 }

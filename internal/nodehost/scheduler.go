@@ -40,6 +40,8 @@ type Config struct {
 	Logger   *slog.Logger
 	// Heartbeat is the run heartbeat interval; zero means 30 seconds.
 	Heartbeat time.Duration
+	// Admission admits each node before it runs; nil admits every node at once.
+	Admission *Admission
 }
 
 // Result is how one node ended.
@@ -47,8 +49,9 @@ type Result struct {
 	Outcome sparkwing.Outcome
 	Err     error
 	// Reason is the store's failure reason, such as [store.FailureVerify].
-	Reason string
-	Output json.RawMessage
+	Reason     string
+	Output     json.RawMessage
+	expansions []expansion
 }
 
 // RunResult is how a hosted run ended. Status is success, failed or
@@ -75,6 +78,16 @@ type NodeRun struct {
 	Failure *nodeproto.Failure
 	// Attempt is the 1-based attempt number; zero means 1.
 	Attempt int
+	// Generator is the closure that added the node; empty for a node of the
+	// accepted plan.
+	Generator string
+	// Progress, when set, is called for each log line or record the attempt
+	// stores; the no-progress timeout restarts its count on it.
+	Progress func()
+	// Pause, when set, stops the no-progress count until the returned resume
+	// is called, which restarts it in full. A wait the node makes on the host,
+	// such as a child-run await, holds it.
+	Pause func() (resume func())
 }
 
 // Run is the hosted run an executor works within.
@@ -126,8 +139,12 @@ type Layer func(cfg *Config, next Executor) Executor
 // safety: the order is the envelope's nesting, outermost first: approvals and recovery, debug pauses,
 // admission, skip_if, memo, artifacts, caches, retries and timeouts, attempt closures, steps, expansion.
 var layers = []Layer{
+	approvalsLayer,
+	admissionLayer,
 	artifactsLayer,
 	cachesLayer,
+	retryLayer,
+	timeoutLayer,
 }
 
 // Execute plans the run in a short-lived SDK process, records the run and
@@ -279,6 +296,8 @@ type scheduler struct {
 	results map[string]Result
 	started map[string]bool
 	order   []string
+	groups  map[string]*genGroup
+	addedBy map[string]string
 }
 
 type finished struct {
@@ -327,12 +346,17 @@ func (s *scheduler) startReady(ctx context.Context, done chan<- finished, runnin
 			progressed = true
 			continue
 		}
-		waits := waitsOn(n, byID)
-		if slices.ContainsFunc(waits, func(id string) bool { _, ok := s.results[id]; return !ok }) {
+		waits, generated, expErr := s.generatedWaits(n, waitsOn(n, byID))
+		if expErr != nil {
+			s.terminal(ctx, n.ID, sparkwing.Cancelled, fmt.Sprintf("expansion failed: %v", expErr))
+			progressed = true
+			continue
+		}
+		if !generated || slices.ContainsFunc(waits, func(id string) bool { _, ok := s.results[id]; return !ok }) {
 			continue
 		}
 		progressed = true
-		node := &NodeRun{Run: s.run, Plan: n}
+		node := &NodeRun{Run: s.run, Plan: n, Generator: s.addedBy[n.ID]}
 		if parent := n.OnFailureOf; parent != "" {
 			pr := s.results[parent]
 			if pr.Outcome != sparkwing.Failed {
@@ -391,6 +415,7 @@ func (s *scheduler) finish(ctx context.Context, id string, res Result) {
 		res.Outcome, res.Err = sparkwing.Failed, errors.Join(res.Err, fmt.Errorf("record node result: %w", err))
 	}
 	s.results[id] = res
+	s.expand(ctx, id, res)
 }
 
 func (s *scheduler) terminal(ctx context.Context, id string, outcome sparkwing.Outcome, reason string) {

@@ -40,12 +40,15 @@ type PlanSource struct {
 }
 
 type PlanNode struct {
-	ID           string            `json:"id"`
-	Deps         []string          `json:"deps"`
-	OptionalDeps []string          `json:"optional_deps,omitempty"`
-	Env          map[string]string `json:"env,omitempty"`
-	Outputs      []string          `json:"outputs,omitempty"`
-	Consumes     []PlanConsume     `json:"consumes,omitempty"`
+	ID           string   `json:"id"`
+	Deps         []string `json:"deps"`
+	OptionalDeps []string `json:"optional_deps,omitempty"`
+	// NeedsGenerated lists generator closure ids; the node waits for every
+	// node each of those generators adds.
+	NeedsGenerated []string          `json:"needs_generated,omitempty"`
+	Env            map[string]string `json:"env,omitempty"`
+	Outputs        []string          `json:"outputs,omitempty"`
+	Consumes       []PlanConsume     `json:"consumes,omitempty"`
 
 	Groups   []string      `json:"groups,omitempty"`
 	Dynamic  bool          `json:"dynamic,omitempty"`

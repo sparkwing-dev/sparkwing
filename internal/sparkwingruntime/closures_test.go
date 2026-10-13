@@ -109,3 +109,26 @@ func TestClosureIDsAreUniqueWhenIDsHoldSlashes(t *testing.T) {
 		t.Error("LookupClosure resolved an id no closure was assigned")
 	}
 }
+
+func TestNeedsGeneratedNamesTheGeneratorsAWaiterNeeds(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	src := sparkwing.Job(plan, "src", &closureSource{})
+	first := sparkwing.JobFanOutDynamic(plan, "first", src, func(s string) (string, any) { return s, noop })
+	second := sparkwing.JobFanOutDynamic(plan, "second", src, func(s string) (string, any) { return s, noop })
+	sparkwing.Job(plan, "both", noop).Needs(second, first)
+	sparkwing.Job(plan, "one", noop).Needs(second)
+
+	if got := sparkwingruntime.NeedsGeneratedIDs(plan, plan.Job("both")); !slices.Equal(got, []string{"src/generator/0", "src/generator/1"}) {
+		t.Errorf("both needs %v, want both generators in plan order", got)
+	}
+	got := sparkwingruntime.NeedsGeneratedIDs(plan, plan.Job("one"))
+	if !slices.Equal(got, []string{"src/generator/1"}) {
+		t.Errorf("one needs %v, want src/generator/1", got)
+	}
+	if c, ok := sparkwingruntime.LookupClosure(plan, got[0]); !ok || c.Kind != sparkwingruntime.ClosureGenerator || c.Node != src {
+		t.Errorf("LookupClosure(%q) = %+v, %v; want a generator of src", got[0], c, ok)
+	}
+	if got := sparkwingruntime.NeedsGeneratedIDs(plan, src); got != nil {
+		t.Errorf("src needs %v, want none", got)
+	}
+}
