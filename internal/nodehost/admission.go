@@ -1,10 +1,12 @@
 package nodehost
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -27,9 +29,6 @@ type Admission struct {
 	// Slots is the coordination store. A node whose group it would run fails
 	// when it is nil.
 	Slots ConcurrencySlots
-	// RunLeaseToken is the run's own daemon lease, which proves each node
-	// lease belongs to the run.
-	RunLeaseToken string
 	// Priority, when set, replaces the plan's priority, as --sw-priority does.
 	Priority *int
 	// Class is the admission class the trigger implies; the plan's own class
@@ -48,13 +47,15 @@ type Admitter interface {
 	Acquire(ctx context.Context, req wingwire.AdmissionRequest, onQueued func(wingwire.Queued)) (Lease, error)
 }
 
-// Lease is a granted daemon lease. Watch is the lease connection's only
+// Lease is a granted daemon lease. Token names it to the daemon; a node lease
+// carries its run lease's token as proof that it belongs to the run. Watch is the lease connection's only
 // reader for the lease's whole life: it answers the daemon's liveness probes,
 // calls onEvicted when a cancel_others arrival takes the lease's semaphore and
 // onCancel when the daemon cancels the holder, and returns once Release ends
 // the lease, or with [wingdclient.ErrReattachRejected] when a restarted daemon
 // no longer has it.
 type Lease interface {
+	Token() string
 	Release() error
 	Watch(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel)) error
 }
@@ -114,7 +115,7 @@ func (a *Admission) admit(ctx context.Context, n *NodeRun, next Executor) Result
 	if a.Slots == nil {
 		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("concurrency group %q: no coordination store", m.ConcGroup)}
 	}
-	return a.underSlot(ctx, n, g, func(ctx context.Context) Result { return a.withHost(ctx, n, next) })
+	return a.underSlot(ctx, a.nodeHolder(ctx, n), g, func(ctx context.Context) Result { return a.withHost(ctx, n, next) })
 }
 
 func (a *Admission) boxID() string {
@@ -138,12 +139,9 @@ func hostAdmitted(doc nodeproto.PlanDoc) bool {
 func (a *Admission) request(n *NodeRun, claim *wingwire.SemaphoreClaim) wingwire.AdmissionRequest {
 	doc, id := n.Run.Doc, base64.RawURLEncoding.EncodeToString([]byte(n.Plan.ID))
 	req := wingwire.AdmissionRequest{
-		OwnerRunID: n.Run.ID, OwnerLeaseToken: a.RunLeaseToken,
+		OwnerRunID: n.Run.ID, OwnerLeaseToken: n.Run.leaseToken,
 		DisplayRunID: n.Run.ID + "/" + n.Plan.ID, Pipeline: doc.Pipeline,
-		SubLease: true, Priority: doc.Priority,
-	}
-	if a.Priority != nil {
-		req.Priority = *a.Priority
+		SubLease: true, Priority: a.priority(doc),
 	}
 	if claim != nil {
 		req.Semaphores = []wingwire.SemaphoreClaim{*claim}
@@ -153,17 +151,22 @@ func (a *Admission) request(n *NodeRun, claim *wingwire.SemaphoreClaim) wingwire
 		return req
 	}
 	req.RunID = n.Run.ID + "/node-host/" + id
-	req.Class = doc.AdmissionClass
-	if req.Class == "" {
-		req.Class = a.Class
-	}
-	if req.Class == "" {
-		req.Class = string(sparkwing.AdmissionNormal)
-	}
+	req.Class = a.class(doc)
 	if m := n.Plan.Modifiers; m != nil {
 		req.Resources = wingwire.HostResources{Cores: m.ResCores, MemoryBytes: m.ResMemoryBytes}
 	}
 	return req
+}
+
+func (a *Admission) priority(doc nodeproto.PlanDoc) int {
+	if a.Priority != nil {
+		return *a.Priority
+	}
+	return doc.Priority
+}
+
+func (a *Admission) class(doc nodeproto.PlanDoc) string {
+	return cmp.Or(doc.AdmissionClass, a.Class, string(sparkwing.AdmissionNormal))
 }
 
 func (a *Admission) withHost(ctx context.Context, n *NodeRun, next Executor) Result {
@@ -316,10 +319,24 @@ func queueTimedOut(g group) Result {
 	}
 }
 
-func (a *Admission) underSlot(ctx context.Context, n *NodeRun, g group, run func(context.Context) Result) Result {
-	holder := n.Run.ID + "/" + n.Plan.ID
+// safety: the store knows a whole run's hold by an empty node and the holder
+// <run>/-, as the dispatcher writes it.
+type slotHolder struct {
+	runID, nodeID, holder string
+	activity              func(detail string)
+	log                   *slog.Logger
+}
+
+func (a *Admission) nodeHolder(ctx context.Context, n *NodeRun) slotHolder {
+	return slotHolder{
+		runID: n.Run.ID, nodeID: n.Plan.ID, holder: n.Run.ID + "/" + n.Plan.ID,
+		activity: func(d string) { a.activity(ctx, n, d) }, log: n.Run.Logger,
+	}
+}
+
+func (a *Admission) underSlot(ctx context.Context, h slotHolder, g group, run func(context.Context) Result) Result {
 	resp, err := a.Slots.AcquireSlot(ctx, store.AcquireSlotRequest{
-		Key: g.key, HolderID: holder, RunID: n.Run.ID, NodeID: n.Plan.ID,
+		Key: g.key, HolderID: h.holder, RunID: h.runID, NodeID: h.nodeID,
 		Capacity: g.capacity, Cost: g.cost, Policy: g.policy, CancelTimeout: g.cancelTO,
 	})
 	if err != nil {
@@ -327,27 +344,27 @@ func (a *Admission) underSlot(ctx context.Context, n *NodeRun, g group, run func
 	}
 	switch resp.Kind {
 	case store.AcquireGranted:
-		return a.holdSlot(ctx, n, g, holder, run)
+		return a.holdSlot(ctx, h, g, h.holder, run)
 	case store.AcquireSkipped:
 		return Result{Outcome: sparkwing.SkippedConcurrent}
 	case store.AcquireFailed:
 		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("concurrency key %q slot full under OnLimit:Fail", g.key)}
 	case store.AcquireQueued, store.AcquireCancellingOthers:
-		return a.waitSlot(ctx, n, g, resp, run)
+		return a.waitSlot(ctx, h, g, resp, run)
 	}
 	return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("concurrency acquire(%q) returned unexpected kind %q", g.key, resp.Kind)}
 }
 
-func (a *Admission) waitSlot(ctx context.Context, n *NodeRun, g group, initial store.AcquireSlotResponse, run func(context.Context) Result) Result {
+func (a *Admission) waitSlot(ctx context.Context, h slotHolder, g group, initial store.AcquireSlotResponse, run func(context.Context) Result) Result {
 	if initial.Kind == store.AcquireQueued {
-		a.activity(ctx, n, fmt.Sprintf("queued in %s: %d ahead", g.key, initial.Position))
+		h.activity(fmt.Sprintf("queued in %s: %d ahead", g.key, initial.Position))
 	}
 	if initial.Kind == store.AcquireCancellingOthers && g.cancelTO > 0 {
 		timer := time.AfterFunc(g.cancelTO, func() {
 			fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancel()
 			if _, err := a.Slots.ForceReleaseSuperseded(fctx, g.key); err != nil {
-				n.Run.Logger.Warn("nodehost: force-release after cancel timeout", "key", g.key, "err", err)
+				h.log.Warn("nodehost: force-release after cancel timeout", "key", g.key, "err", err)
 			}
 		})
 		defer timer.Stop()
@@ -359,8 +376,8 @@ func (a *Admission) waitSlot(ctx context.Context, n *NodeRun, g group, initial s
 	cancelWaiter := func() {
 		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		if _, err := a.Slots.CancelWaiter(cctx, g.key, n.Run.ID, n.Plan.ID); err != nil {
-			n.Run.Logger.Warn("nodehost: cancel concurrency waiter; the reaper sweeps it", "key", g.key, "err", err)
+		if _, err := a.Slots.CancelWaiter(cctx, g.key, h.runID, h.nodeID); err != nil {
+			h.log.Warn("nodehost: cancel concurrency waiter; the reaper sweeps it", "key", g.key, "err", err)
 		}
 	}
 	tick := time.NewTicker(waiterPoll)
@@ -373,7 +390,7 @@ func (a *Admission) waitSlot(ctx context.Context, n *NodeRun, g group, initial s
 			return admissionFailed(ctx, ctx.Err())
 		case <-tick.C:
 		}
-		res, err := a.Slots.ResolveWaiter(ctx, g.key, n.Run.ID, n.Plan.ID, "", "", "", false)
+		res, err := a.Slots.ResolveWaiter(ctx, g.key, h.runID, h.nodeID, "", "", "", false)
 		if err != nil {
 			// safety: a store failing for the dispatcher's whole wedge budget, or with
 			// a lock-protocol error retrying cannot clear, fails the node.
@@ -394,8 +411,8 @@ func (a *Admission) waitSlot(ctx context.Context, n *NodeRun, g group, initial s
 				return queueTimedOut(g)
 			}
 		case store.WaiterPromoted:
-			a.activity(ctx, n, "")
-			return a.holdSlot(ctx, n, g, res.HolderID, run)
+			h.activity("")
+			return a.holdSlot(ctx, h, g, res.HolderID, run)
 		case store.WaiterCancelled:
 			return Result{Outcome: sparkwing.Superseded, Err: fmt.Errorf("concurrency key %q: waiter was cancelled or superseded", g.key)}
 		default:
@@ -406,27 +423,29 @@ func (a *Admission) waitSlot(ctx context.Context, n *NodeRun, g group, initial s
 }
 
 // safety: a holder superseded or out of contact past its lease stops its
-// node, so two holders of one slot never keep running together.
-func (a *Admission) holdSlot(ctx context.Context, n *NodeRun, g group, holder string, run func(context.Context) Result) Result {
-	execCtx, cancelExec := context.WithCancel(ctx)
-	defer cancelExec()
+// node or run, so two holders of one slot never keep running together. The
+// cancel cause marks a run so stopped as cancelled rather than failed.
+func (a *Admission) holdSlot(ctx context.Context, h slotHolder, g group, holder string, run func(context.Context) Result) Result {
+	execCtx, cancelExec := context.WithCancelCause(ctx)
+	defer cancelExec(nil)
+	lostErr := &CancelError{Reason: fmt.Sprintf("concurrency key %q: holder superseded by newer arrival", g.key)}
 	var lost atomic.Bool
 	done := make(chan struct{})
 	watching := make(chan struct{})
 	go func() {
 		defer close(watching)
-		a.watchSlot(execCtx, g, holder, done, func() { lost.Store(true); cancelExec() })
+		a.watchSlot(execCtx, g, holder, done, func() { lost.Store(true); cancelExec(lostErr) })
 	}()
 	res := run(execCtx)
 	close(done)
 	<-watching
 	if lost.Load() {
-		res = Result{Outcome: sparkwing.Superseded, Err: fmt.Errorf("concurrency key %q: holder superseded by newer arrival", g.key)}
+		res = Result{Outcome: sparkwing.Superseded, Err: lostErr}
 	}
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if err := a.Slots.ReleaseSlot(rctx, g.key, holder, slotOutcome(res.Outcome), holder, "", 0); err != nil {
-		n.Run.Logger.Warn("nodehost: concurrency release failed; the reaper sweeps it", "key", g.key, "err", err)
+		h.log.Warn("nodehost: concurrency release failed; the reaper sweeps it", "key", g.key, "err", err)
 	}
 	return res
 }

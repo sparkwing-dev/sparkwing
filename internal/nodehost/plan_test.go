@@ -43,6 +43,45 @@ func TestExecutePlansWithTheSDK(t *testing.T) {
 	t.Run("APlanFailureFinishesTheRunRow", func(t *testing.T) { aPlanFailureFinishesTheRunRow(t, config) })
 	t.Run("AnUnknownPipelineWritesNoRun", func(t *testing.T) { anUnknownPipelineWritesNoRun(t, config) })
 	t.Run("AnUnrecordedFinishFailsTheRun", func(t *testing.T) { anUnrecordedFinishFailsTheRun(t, config) })
+	t.Run("TheRunLeaseOutlivesTheRunRow", func(t *testing.T) { theRunLeaseOutlivesTheRunRow(t, config) })
+}
+
+type leaseAtFinish struct {
+	*store.Store
+	d    *fakeDaemon
+	live chan int
+}
+
+func (s leaseAtFinish) FinishRun(ctx context.Context, runID, status, errMsg string) error {
+	live := 0
+	if l := s.d.lease(runID); l != nil {
+		select {
+		case <-l.done:
+		default:
+			live = 1
+		}
+	}
+	s.live <- live
+	return s.Store.FinishRun(ctx, runID, status, errMsg)
+}
+
+func theRunLeaseOutlivesTheRunRow(t *testing.T, config configFn) {
+	st, d := openStore(t), newFakeDaemon()
+	cfg := config(st, "run-leased", map[string]string{"env": "prod"}, (&fakeExec{}).run)
+	at := leaseAtFinish{Store: st, d: d, live: make(chan int, 1)}
+	cfg.State, cfg.Admission = at, &Admission{Daemon: d}
+	if _, err := Execute(t.Context(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if live := <-at.live; live != 1 {
+		t.Error("the run lease ended before the run row went terminal")
+	}
+	if l := d.lease("run-leased"); l == nil {
+		t.Fatal("Execute took no run lease")
+	}
+	if live, _, _ := d.counts(); live != 0 {
+		t.Errorf("%d leases live after Execute, want the run lease released", live)
+	}
 }
 
 type refusingFinish struct{ *store.Store }

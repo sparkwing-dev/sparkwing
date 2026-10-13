@@ -107,6 +107,8 @@ type Run struct {
 	State    storage.StateStore
 	Logger   *slog.Logger
 	adds     chan addRequest
+	// safety: set once, before any node starts, so node goroutines read it unlocked.
+	leaseToken string
 }
 
 type addRequest struct {
@@ -190,6 +192,11 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 
 	res = RunResult{RunID: cfg.Run.RunID, Nodes: map[string]Result{}}
 	finishCtx := context.WithoutCancel(ctx)
+	// safety: registered before FinishRun's defer so the run lease ends only
+	// once the run row is terminal; the daemon finalizes a run whose lease
+	// ends while its row still runs as orphaned.
+	releaseLease := func() {}
+	defer func() { releaseLease() }()
 	// safety: registered before the heartbeat's defer so the heartbeat has
 	// stopped before the run row goes terminal.
 	defer func() {
@@ -220,15 +227,42 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 		ID: res.RunID, Doc: doc, Pipeline: cfg.Pipeline, Args: args, Context: cfg.Run,
 		StartAt: cfg.StartAt, StopAt: cfg.StopAt, State: cfg.State, Logger: cfg.Logger, adds: make(chan addRequest),
 	}
-	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg)}
-	if err := s.add(ctx, ctx, doc.Nodes); err != nil {
-		res.Status, res.Err = "failed", err
-		return res, nil
-	}
-	s.loop(ctx)
-	res.Order = s.order
-	res.Status, res.Err = s.verdict(ctx)
+	releaseLease = runPlanned(ctx, &cfg, run, &res)
 	return res, nil
+}
+
+// safety: the run lease outlives runPlanned; its caller calls release once the
+// run row is terminal.
+func runPlanned(ctx context.Context, cfg *Config, run *Run, res *RunResult) (release func()) {
+	release = func() {}
+	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(cfg)}
+	if err := s.add(ctx, ctx, run.Doc.Nodes); err != nil {
+		res.Status, res.Err = "failed", err
+		return release
+	}
+	runCtx, cancelRun := context.WithCancelCause(ctx)
+	defer cancelRun(nil)
+	body := func(ctx context.Context) runEnd {
+		s.loop(ctx)
+		status, err := s.verdict(ctx)
+		return runEnd{status: status, err: err}
+	}
+	var end runEnd
+	if cfg.Admission == nil {
+		end = body(runCtx)
+	} else {
+		end, release = cfg.Admission.hostRun(runCtx, run, cancelRun, body)
+	}
+	if end.skipped {
+		s.skipAll(ctx)
+		end.status, end.err = s.nodeVerdict()
+	} else if len(s.started) < len(s.nodes) {
+		// safety: a run refused before its first node leaves no node row pending.
+		s.cancelAll(ctx, end.err)
+	}
+	res.Order = s.order
+	res.Status, res.Err = end.status, end.err
+	return release
 }
 
 func runRow(cfg Config, args map[string]string) store.Run {
@@ -420,6 +454,20 @@ func (s *scheduler) finish(ctx context.Context, id string, res Result) {
 	}
 	s.results[id] = res
 	s.expand(ctx, id, res)
+}
+
+func (s *scheduler) skipAll(ctx context.Context) {
+	for _, n := range s.nodes {
+		s.terminal(ctx, n.ID, sparkwing.SkippedConcurrent, "a plan concurrency group is full under OnLimit:Skip")
+	}
+}
+
+func (s *scheduler) cancelAll(ctx context.Context, cause error) {
+	for _, n := range s.nodes {
+		if !s.started[n.ID] {
+			s.terminal(ctx, n.ID, sparkwing.Cancelled, "run not admitted: "+errText(cause))
+		}
+	}
 }
 
 func (s *scheduler) terminal(ctx context.Context, id string, outcome sparkwing.Outcome, reason string) {

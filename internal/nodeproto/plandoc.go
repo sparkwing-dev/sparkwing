@@ -82,8 +82,15 @@ type PlanConsume struct {
 	Into     string `json:"into,omitempty"`
 }
 
+// PlanConc is one plan-level concurrency group the whole run holds. Key is
+// already scoped, so its prefix says whether the group is box- or run-scoped.
 type PlanConc struct {
-	Key string `json:"key,omitempty"`
+	Key             string `json:"key,omitempty"`
+	Capacity        int    `json:"capacity,omitempty"`
+	Cost            int    `json:"cost,omitempty"`
+	OnLimit         string `json:"on_limit,omitempty"`
+	QueueTimeoutMS  int64  `json:"queue_timeout_ms,omitempty"`
+	CancelTimeoutMS int64  `json:"cancel_timeout_ms,omitempty"`
 }
 
 type PlanResources struct {

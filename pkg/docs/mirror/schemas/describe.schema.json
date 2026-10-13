@@ -134,7 +134,14 @@
     },
     "concurrencyKey": {
       "type": "object",
-      "properties": { "key": { "type": "string" } },
+      "properties": {
+        "key": { "type": "string" },
+        "capacity": { "type": "integer" },
+        "cost": { "type": "integer" },
+        "on_limit": { "type": "string" },
+        "queue_timeout_ms": { "type": "integer" },
+        "cancel_timeout_ms": { "type": "integer" }
+      },
       "additionalProperties": false
     },
     "resources": {
