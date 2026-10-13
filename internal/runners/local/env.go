@@ -4,29 +4,17 @@ import (
 	"context"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// safety: the daemon authenticates an api.sock caller by its peer uid, and
-// a bearer inherited from this process would be looked up on the daemon's
-// writing handle instead, behind whatever it is doing.
-var tokenEnvNames = []string{"SPARKWING_AGENT_TOKEN"}
-
 func childEnv(ctx context.Context, base []string, cfg Config, req runner.Request) []string {
 	env := make([]string, 0, len(base)+16)
-	// safety: the dispatcher decides where this node's controller calls go, so
-	// an inherited socket is dropped whichever way it decided. A pipeline run
-	// from inside another run's node inherits that run's socket otherwise, and
-	// dials a daemon that has never heard of it. The parent's run-handle path is
-	// also process-local: a nested run would contend for the same output file.
-	// The dispatcher already applied --only to the parent plan, so carrying it
-	// into a node would filter any nested run against the parent's job names.
-	drop := []string{wingwire.APISocketEnv, "SPARKWING_RUN_HANDLE_FILE", "SPARKWING_ONLY", ParentLivenessFDEnv}
-	// safety: an inherited bearer is the outer run's, so it goes whether or not this run has one.
-	drop = append(drop, tokenEnvNames...)
-	base = withoutEnv(base, drop)
-	env = append(env, base...)
+	// safety: the node runs authored init code, so it inherits nothing the engine owns: not a bearer or secrets key,
+	// nor an outer run's socket, --only or run-handle path. cfg sets what it needs; over the API socket that is no
+	// bearer, because the daemon takes the connection's peer uid as the principal.
+	env = append(env, engineenv.Strip(base)...)
 
 	set := func(k, v string) {
 		if v == "" {
@@ -70,25 +58,11 @@ func childEnv(ctx context.Context, base []string, cfg Config, req runner.Request
 	if cfg.DryRun {
 		set("SPARKWING_DRY_RUN", "1")
 	}
+	if cfg.NoCache {
+		set("SPARKWING_NO_CACHE", "1")
+	}
 	set("SPARKWING_START_AT", cfg.StartAt)
 	set("SPARKWING_STOP_AT", cfg.StopAt)
 
 	return env
-}
-
-func withoutEnv(base, names []string) []string {
-	out := make([]string, 0, len(base))
-	for _, kv := range base {
-		drop := false
-		for _, name := range names {
-			if strings.HasPrefix(kv, name+"=") {
-				drop = true
-				break
-			}
-		}
-		if !drop {
-			out = append(out, kv)
-		}
-	}
-	return out
 }

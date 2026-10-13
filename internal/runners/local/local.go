@@ -62,6 +62,7 @@ type Config struct {
 	LeaseTokens func(context.Context) (lease, child string)
 
 	DryRun  bool
+	NoCache bool
 	StartAt string
 	StopAt  string
 

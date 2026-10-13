@@ -67,8 +67,7 @@ func TestWindowsNodeHelper(t *testing.T) {
 
 func windowsNodeHelper(mode, path string) *exec.Cmd {
 	cmd := exec.Command(os.Args[0], "-test.run=^TestWindowsNodeHelper$")
-	cmd.Env = append(withoutEnv(os.Environ(), []string{"SPARKWING_WINDOWS_NODE_TEST", "SPARKWING_WINDOWS_NODE_PID"}),
-		"SPARKWING_WINDOWS_NODE_TEST="+mode, "SPARKWING_WINDOWS_NODE_PID="+path)
+	cmd.Env = append(os.Environ(), "SPARKWING_WINDOWS_NODE_TEST="+mode, "SPARKWING_WINDOWS_NODE_PID="+path)
 	return cmd
 }
 
