@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
+	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -158,7 +159,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 		return nil, err
 	}
 	cfg := nodehost.Config{
-		Session:  nodehost.SessionConfig{Entry: entry.Program, Dir: entry.Dir, Env: nodehost.PipelineEnv(entry.Env), Sink: hostedPlanSink{delegate}},
+		Session:  nodehost.SessionConfig{Entry: entry.Program, Dir: entry.Dir, Env: engineenv.Strip(entry.Env), Sink: hostedPlanSink{delegate}},
 		Pipeline: opts.Pipeline, Args: invokeArgs, Run: hostedRunContext(opts, runID),
 		StartAt: opts.StartAt, StopAt: opts.StopAt, Only: opts.Only, Workers: opts.MaxParallel,
 		State: state, Artifacts: backends.Artifact, Attempts: attempts, Admission: admission,

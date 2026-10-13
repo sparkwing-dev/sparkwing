@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/protofd"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -268,49 +269,6 @@ func MinimalEnv() []string {
 	return env
 }
 
-// safety: the SPARKWING_* names the engine owns - credentials (tokens, the local secrets key), run options the
-// host now holds, and plumbing the node protocol replaces. Every other SPARKWING_* name, a sparks setting, the
-// caller's cache URLs or their own, reaches pipeline code as it did. A trailing _ matches a prefix, and
-// engineenv_test.go fails on an engine name this list does not classify.
-var engineEnv = []string{
-	"_SPARKWING_", "SPARKWING_AGENT_TOKEN", "SPARKWING_CONTROLLER_URL", "SPARKWING_LOGS_URL",
-	"SPARKWING_API_SOCKET", "SPARKWING_PARENT_LIVENESS_FD", "SPARKWING_CACHE_GRANT", "SPARKWING_RUN_HANDLE_FILE",
-	"SPARKWING_STANDALONE_REASON", "SPARKWING_STATE_DB", "SPARKWING_NODE_CLAIM_", "SPARKWING_NODE_SPEC_HASH",
-	"SPARKWING_BROKERED_", "SPARKWING_EXECUTION_CAPABILITY", "SPARKWING_EXECUTION_CAPABILITY_STDIN",
-	"SPARKWING_LEASE_TOKEN", "SPARKWING_CHILD_LEASE_TOKEN", "SPARKWING_MASK_VALUES_FD", "SPARKWING_PROTOCOL_HANDLES",
-	"SPARKWING_NODE_URL", "SPARKWING_NODE_TOKEN", "SPARKWING_RUN_ID", "SPARKWING_NODE_ID", "SPARKWING_START_AT",
-	"SPARKWING_STOP_AT", "SPARKWING_ONLY", "SPARKWING_NO_CACHE", "SPARKWING_NO_UPDATE", "SPARKWING_REF",
-	"SPARKWING_ALLOW", "SPARKWING_ALLOW_UNADMITTED", "SPARKWING_MODE", "SPARKWING_WORKERS", "SPARKWING_PRIORITY",
-	"SPARKWING_LOG_LEVEL", "SPARKWING_BINARY_SOURCE", "SPARKWING_PIPELINE_REV", "SPARKWING_DEBUG_PAUSE_",
-	"SPARKWING_PROFILE", "SPARKWING_SECRETS_PROFILE", "SPARKWING_SECRETS_KEY", "SPARKWING_SECRETS_KEY_FILE",
-	"SPARKWING_SECRETS_PREVIOUS_KEY", "SPARKWING_SOURCE_TOKEN", "SPARKWING_SOURCE_DIR",
-	"SPARKWING_SOURCE_BUNDLE_OBJECT", "SPARKWING_WORKTREE_BASE_", "SPARKWING_RERUN", "SPARKWING_RERUN_REFS_DIR",
-	"SPARKWING_FLEET_PARENT_",
-}
-
-func engineOwned(key string) bool {
-	// safety: Windows reads variable names without regard to case, so a lower-case spelling is the same variable.
-	key = strings.ToUpper(key)
-	return slices.ContainsFunc(engineEnv, func(name string) bool {
-		if strings.HasSuffix(name, "_") {
-			return strings.HasPrefix(key, name)
-		}
-		return key == name
-	})
-}
-
-// PipelineEnv is env without the SPARKWING_* variables the engine owns.
-func PipelineEnv(env []string) []string {
-	out := make([]string, 0, len(env))
-	for _, kv := range env {
-		k, _, _ := strings.Cut(kv, "=")
-		if !engineOwned(k) {
-			out = append(out, kv)
-		}
-	}
-	return out
-}
-
 // safety: the dispatcher's rule for what a child attaches to: the run's lease when it holds the host or the
 // plan's groups, which a node lease lacks, else the node's own lease, which holds the cores the node runs on.
 func childLease(n *NodeRun) string {
@@ -355,7 +313,7 @@ func attemptEnv(base []string, nodeEnv map[string]string, runID, nodeID, url, be
 		base = MinimalEnv()
 	}
 	env := make([]string, 0, len(base)+len(nodeEnv)+4)
-	env = append(env, PipelineEnv(base)...)
+	env = append(env, engineenv.Strip(base)...)
 	keys := make([]string, 0, len(nodeEnv))
 	for k := range nodeEnv {
 		keys = append(keys, k)

@@ -8,11 +8,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/protofd"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
@@ -99,11 +99,9 @@ func Converse(ctx context.Context, binPath, dir string, talk func(*Session) erro
 	// #nosec G204 -- this executes the selected pipeline binary without a shell.
 	cmd := exec.Command(binPath, protofd.Arg)
 	cmd.Dir, cmd.Stderr = dir, &stderr
-	// bug: a CLI run from inside a node inherits that node's route URL without its bearer, and an SDK
-	// process that finds the one without the other refuses to start; this describe serves no node.
-	cmd.Env = slices.DeleteFunc(os.Environ(), func(kv string) bool {
-		return strings.HasPrefix(kv, protofd.NodeURLEnv+"=") || strings.HasPrefix(kv, protofd.NodeTokenEnv+"=")
-	})
+	// safety: no engine credential or node route reaches pipeline code; a CLI run inside a node would otherwise pass
+	// on that node's route URL, and an SDK process holding it without its bearer refuses to start.
+	cmd.Env = engineenv.Strip(os.Environ())
 	// safety: a grandchild holding stderr must not hold Wait past the kill.
 	cmd.WaitDelay = 100 * time.Millisecond
 	tree, err := startTree(cmd, reqR, frameW)
