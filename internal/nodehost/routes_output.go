@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // safety: the run is always the grant's, so a node never names one.
@@ -12,6 +13,10 @@ func (s *Server) serveNodeOutput(w http.ResponseWriter, r *http.Request, g *gran
 	node := r.PathValue("node")
 	if !validNodeID(node) {
 		s.writeError(w, http.StatusBadRequest, "bad_request", "the node id is malformed")
+		return
+	}
+	if node == g.NodeID && g.Output != nil {
+		s.writeJSON(w, http.StatusOK, map[string]any{"output": g.Output})
 		return
 	}
 	claim, ctx, done, ok := s.forward(w, r, g)
@@ -37,7 +42,7 @@ func (s *Server) serveNodeOutput(w http.ResponseWriter, r *http.Request, g *gran
 	case row.Status != "done":
 		s.writeError(w, http.StatusConflict, "not_ready", "node "+quote(node)+" has not finished")
 		return
-	case row.Outcome != "success":
+	case row.Outcome != string(sparkwing.Success) && row.Outcome != string(sparkwing.Cached):
 		s.writeError(w, http.StatusNotFound, "no_output", "node "+quote(node)+" finished without succeeding")
 		return
 	}
