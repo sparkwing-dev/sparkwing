@@ -519,7 +519,8 @@ func (s *Store) createAgentLossRetryTx(ctx context.Context, tx *storeTx, sourceR
     (team, id, pipeline, args_json, trigger_source, trigger_user, trigger_env, git_branch, git_sha,
      status, created_at, parent_run_id, repo, repo_url, github_owner, github_repo,
      retry_of, retry_source, "full", available_at, github_repo_id)
- SELECT team, ?, pipeline, args_json, ?, '', ?, git_branch, git_sha,
+ SELECT team, ?, pipeline, args_json, ?,
+        COALESCE((SELECT trigger_user FROM triggers WHERE team = runs.team AND id = runs.id), ''), ?, git_branch, git_sha,
         ?, ?, parent_run_id, declared_repo, repo_url, github_owner, github_repo,
         id, ?, 0, ?,
         COALESCE((SELECT github_repo_id FROM triggers WHERE team = runs.team AND id = runs.id), 0)
@@ -645,8 +646,7 @@ func agentLossRetryProvenance(planJSON []byte, definitionPlanHash string, invoca
 		if revision != "" {
 			env[retryprovenance.PipelineRevisionKey] = revision
 		}
-		raw, _ := json.Marshal(env) //nolint:errcheck // String maps contain no unsupported JSON values.
-		return raw, ""
+		return agentLossRetryEnv(env, triggerEnv), ""
 	}
 	if strings.HasPrefix(triggerSource, "pipeline-working-tree@") || (repoURL == "" && (githubOwner == "" || githubRepo == "")) {
 		return nil, "missing_provenance"
@@ -654,8 +654,27 @@ func agentLossRetryProvenance(planJSON []byte, definitionPlanHash string, invoca
 	if !validAgentLossRevision(gitSHA) {
 		return nil, "invalid_provenance"
 	}
-	raw, _ := json.Marshal(map[string]string{retryprovenance.PlanHashKey: provenance["plan_hash"]})
-	return raw, ""
+	return agentLossRetryEnv(map[string]string{retryprovenance.PlanHashKey: provenance["plan_hash"]}, triggerEnv), ""
+}
+
+// hack: these are the keys sparkwing.PullRequestFromEnv reads, listed here
+// because the store does not import the SDK;
+// TestAgentLossRetryTriggerKeepsActorAndPullRequest holds the lists together.
+var agentLossPullRequestEnvKeys = []string{
+	"GITHUB_EVENT_NAME", "GITHUB_PR_NUMBER", "GITHUB_PR_ACTION",
+	"GITHUB_BASE_REF", "GITHUB_BASE_SHA", "GITHUB_HEAD_REF", "GITHUB_HEAD_SHA",
+}
+
+// safety: planning reads the pull request from the trigger, so a retry that
+// dropped the source's would plan as a push.
+func agentLossRetryEnv(env, source map[string]string) []byte {
+	for _, key := range agentLossPullRequestEnvKeys {
+		if value, ok := source[key]; ok {
+			env[key] = value
+		}
+	}
+	raw, _ := json.Marshal(env) //nolint:errcheck // String maps contain no unsupported JSON values.
+	return raw
 }
 
 func validAgentLossRevision(revision string) bool {
