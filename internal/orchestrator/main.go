@@ -248,7 +248,11 @@ func bindProjectPipelines() (*projectconfig.Config, error) {
 }
 
 func selectLocalRenderer() sparkwing.Logger {
-	switch strings.ToLower(os.Getenv("SPARKWING_LOG_FORMAT")) {
+	return localRenderer(os.Getenv("SPARKWING_LOG_FORMAT"))
+}
+
+func localRenderer(format string) sparkwing.Logger {
+	switch strings.ToLower(format) {
 	case "json":
 		return NewJSONRenderer()
 	case "pretty":
@@ -540,6 +544,9 @@ func parseTypedFlags(pipeline string, args []string) (map[string]string, error) 
 	return out, nil
 }
 
+// DebugDirectivesFromEnv reads the pauses `sparkwing debug run` asks for.
+func DebugDirectivesFromEnv() DebugDirectives { return readDebugDirectivesFromEnv() }
+
 func readDebugDirectivesFromEnv() DebugDirectives {
 	d := DebugDirectives{}
 	if v := os.Getenv("SPARKWING_DEBUG_PAUSE_BEFORE"); v != "" {
@@ -579,24 +586,39 @@ func splitCommaClean(s string) []string {
 }
 
 func detectGit() *sparkwing.Git {
-	g := &sparkwing.Git{}
-	if cwd, err := os.Getwd(); err == nil {
-		g = sparkwing.NewGit(cwd, "", "", "", "", "")
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = ""
 	}
-	if out, err := exec.Command("git", "rev-parse", "HEAD").Output(); err == nil {
+	return DetectGit(cwd)
+}
+
+// DetectGit reads the checkout at dir: HEAD, branch, origin's default branch
+// and its GitHub repository.
+func DetectGit(dir string) *sparkwing.Git {
+	g := &sparkwing.Git{}
+	if dir != "" {
+		g = sparkwing.NewGit(dir, "", "", "", "", "")
+	}
+	git := func(args ...string) ([]byte, error) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		return cmd.Output()
+	}
+	if out, err := git("rev-parse", "HEAD"); err == nil {
 		g.SHA = strings.TrimSpace(string(out))
 	}
-	if out, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
+	if out, err := git("rev-parse", "--abbrev-ref", "HEAD"); err == nil {
 		branch := strings.TrimSpace(string(out))
 		if branch != "HEAD" {
 			g.Branch = branch
 		}
 	}
-	if out, err := exec.Command("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD").Output(); err == nil {
+	if out, err := git("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); err == nil {
 		name := strings.TrimSpace(string(out))
 		g.DefaultBranch = strings.TrimPrefix(name, "origin/")
 	}
-	if out, err := exec.Command("git", "remote", "get-url", "origin").Output(); err == nil {
+	if out, err := git("remote", "get-url", "origin"); err == nil {
 		g.RepoURL = strings.TrimSpace(string(out))
 		owner, repo := parseGithubURL(g.RepoURL)
 		if owner != "" && repo != "" {

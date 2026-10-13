@@ -60,6 +60,12 @@ type Lease interface {
 	Watch(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel)) error
 }
 
+// HostHolder is a [Lease] that reports whether it holds host capacity, as a
+// run attached to its parent's lease does without pinning any of its own.
+type HostHolder interface {
+	HoldsHost() bool
+}
+
 // ConcurrencySlots is the coordination store's slot surface, the part of the
 // dispatcher's concurrency backend a concurrency group uses.
 type ConcurrencySlots interface {
@@ -281,7 +287,9 @@ func (a *Admission) runLeased(ctx context.Context, n *NodeRun, lease Lease, next
 			n.Run.Logger.Warn("nodehost: admission lease watch ended; the node continues unwatched", "node", n.Plan.ID, "err", err)
 		}
 	}()
-	res := next(execCtx, n)
+	held := *n
+	held.nodeLease = lease.Token()
+	res := next(execCtx, &held)
 	a.release(n, lease)
 	<-watching
 	if r := ended.Load(); r != nil {

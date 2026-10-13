@@ -1,0 +1,127 @@
+package nodehost_test
+
+import (
+	"context"
+	"net/http"
+	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+)
+
+type localStore struct {
+	nodes   map[string]*store.Node
+	outputs map[string]string
+	latest  *store.Run
+}
+
+func (l *localStore) GetNode(_ context.Context, runID, nodeID string) (*store.Node, error) {
+	if n, ok := l.nodes[runID+"/"+nodeID]; ok {
+		return n, nil
+	}
+	return nil, store.ErrNotFound
+}
+
+func (l *localStore) GetNodeOutput(_ context.Context, runID, nodeID string) ([]byte, error) {
+	if _, ok := l.nodes[runID+"/"+nodeID]; !ok {
+		return nil, store.ErrNotFound
+	}
+	return []byte(l.outputs[runID+"/"+nodeID]), nil
+}
+
+func (l *localStore) GetLatestRun(_ context.Context, _ string, _ []string, _ time.Duration) (*store.Run, error) {
+	if l.latest == nil {
+		return nil, store.ErrNotFound
+	}
+	return l.latest, nil
+}
+
+func localRuns() *localStore {
+	node := func(id, status, outcome string, deps ...string) *store.Node {
+		return &store.Node{NodeID: id, Status: status, Outcome: outcome, Deps: deps}
+	}
+	return &localStore{
+		nodes: map[string]*store.Node{
+			"run-1/build":   node("build", "done", "success"),
+			"run-1/test":    node("test", "done", "success", "build"),
+			"run-1/deploy":  node("deploy", "running", "", "absent", "test", "lint", "flaky", "slow", "memo"),
+			"run-1/memo":    node("memo", "done", "cached"),
+			"run-1/lint":    node("lint", "done", "success"),
+			"run-1/flaky":   node("flaky", "done", "failed"),
+			"run-1/slow":    node("slow", "running", ""),
+			"run-1/sibling": node("sibling", "done", "success"),
+			"run-0/build":   node("build", "done", "success"),
+		},
+		outputs: map[string]string{"run-1/build": `{"tag":"v1"}`, "run-1/memo": `"reused"`, "run-0/build": `"old"`},
+	}
+}
+
+func TestLocalOutputsServeADependencysOutputWithoutAController(t *testing.T) {
+	cases := []struct {
+		name, path, code string
+		status           int
+		output           any
+	}{
+		{name: "transitive dependency", path: outputPath("build"), status: http.StatusOK, output: map[string]any{"tag": "v1"}},
+		{name: "memo hit", path: outputPath("memo"), status: http.StatusOK, output: "reused"},
+		{name: "no output recorded", path: outputPath("lint"), status: http.StatusOK, output: nil},
+		{name: "not a dependency", path: outputPath("sibling"), status: http.StatusForbidden, code: "not_dependency"},
+		{name: "unknown", path: outputPath("nope"), status: http.StatusNotFound, code: "unknown_node"},
+		{name: "running", path: outputPath("slow"), status: http.StatusConflict, code: "not_ready"},
+		{name: "failed", path: outputPath("flaky"), status: http.StatusNotFound, code: "no_output"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, logs := start(t)
+			bearer := admit(t, s, nodehost.Node{
+				RunID: "run-1", NodeID: "deploy", Resolver: &fakeResolver{}, Masker: secrets.NewMasker(), Local: localRuns(),
+			})
+			got := ask(t, s, http.MethodGet, tc.path, bearer, "")
+			if got.status != tc.status || (tc.code != "" && got.body["code"] != tc.code) {
+				t.Fatalf("status %d body %v", got.status, got.body)
+			}
+			if tc.code == "" {
+				if out, ok := got.body["output"]; !ok || !sameJSON(out, tc.output) {
+					t.Fatalf("output %v, want %v", got.body["output"], tc.output)
+				}
+			}
+			noLeak(t, logs)
+		})
+	}
+}
+
+func TestLocalPipelineLatestReadsTheNewestSuccessfulRun(t *testing.T) {
+	s, _ := start(t)
+	st := localRuns()
+	bearer := admit(t, s, nodehost.Node{RunID: "run-1", NodeID: "deploy", Resolver: &fakeResolver{}, Masker: secrets.NewMasker(), Local: st})
+	if got := ask(t, s, http.MethodGet, "/node/v1/pipelines/other/latest?node=build", bearer, ""); got.status != http.StatusNotFound || got.body["code"] != "no_run" {
+		t.Fatalf("status %d body %v", got.status, got.body)
+	}
+	st.latest = &store.Run{ID: "run-0"}
+	got := ask(t, s, http.MethodGet, "/node/v1/pipelines/other/latest?node=build", bearer, "")
+	if got.status != http.StatusOK || got.body["run_id"] != "run-0" || got.body["output"] != "old" {
+		t.Fatalf("status %d body %v", got.status, got.body)
+	}
+}
+
+func sameJSON(a, b any) bool {
+	am, aok := a.(map[string]any)
+	bm, bok := b.(map[string]any)
+	if aok != bok {
+		return false
+	}
+	if !aok {
+		return a == b
+	}
+	if len(am) != len(bm) {
+		return false
+	}
+	for k, v := range am {
+		if bm[k] != v {
+			return false
+		}
+	}
+	return true
+}

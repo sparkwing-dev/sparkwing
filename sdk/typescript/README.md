@@ -15,7 +15,7 @@ and its JSON Schemas).
 
 | File | Purpose |
 |---|---|
-| `src/plan.ts` | The plan DSL: `definePipeline`, `Plan.job`, `Job.needs`, `retry`, `timeout`, `step`, `Step.result`, `skipIf`, `generate`, `needsGenerated` |
+| `src/plan.ts` | The plan DSL: `definePipeline`, `Plan.job`, `Plan.approval`, the job envelope (`needs`, `retry`, `timeout`, `requires`, `concurrency`, `resources`, `cacheDir`, `memoize`, `onFailure`), its closures (`skipIf`, `beforeRun`, `verify`, `afterRun`, `generate`), and steps (`step`, `Step.result`, `skipIf`, `finally`, `dryRun`) |
 | `src/describe.ts` | The describe document (protocol version, SDK and pipelines) and the plan document types |
 | `src/protocol.ts` | Framing: requests on the request pipe, replies and log records on the frame pipe, and the reply error codes |
 | `src/runner.ts` | The loop that answers `describe`, `plan`, `run_node`, `run_step`, `cancel` and `eval` |
@@ -67,9 +67,16 @@ Requests run as they arrive, since the engine may have several `eval` and
 `run_step` requests in flight. A failed reply carries the protocol's
 `error.code`, such as `no_plan` or `unknown_node`.
 
-Not supported yet: Windows, where the protocol pipes are inherited handles,
-and the closures and modifiers beyond `skipIf` and `generate` (`cache_key`,
-`before_run`, `verify`, `after_run`, `on_failure`, step `skipIf`).
+The engine's conformance suite (`internal/nodeproto/conformance`) drives
+`test/fixtures/conformance.ts`, the same fixture pipeline the Go SDK
+implements, through every request and checks each reply against the node
+protocol's schemas.
+
+Not supported yet: Windows, where the protocol pipes are inherited handles;
+plan-level concurrency groups with `box` scope, whose key needs the engine's
+machine id; and the plan document fields the Go SDK has that this package
+does not declare (artifacts, pipeline references, tools, `whenRunner`,
+`inline`, step groups and risks, plan priority and admission class).
 
 ## Running the tests
 

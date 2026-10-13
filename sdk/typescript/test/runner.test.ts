@@ -360,16 +360,18 @@ test("a generator adds nodes after its source, and each added node runs by id", 
     deps: [],
     dynamic: true,
     closures: { generator: ["targets/generator/0"] },
+    work: { steps: [{ id: "run", is_result: true }], result_step: "run" },
   });
   assert.deepEqual(doc.nodes[1], {
     id: "report",
     deps: [],
     needs_generated: ["targets/generator/0"],
+    work: { steps: [{ id: "run", is_result: true }], result_step: "run" },
   });
   assert.deepEqual(out.reply("g")?.["result"], {
     value: [
-      { id: "test-linux", deps: ["targets"] },
-      { id: "test-darwin", deps: ["targets"] },
+      { id: "test-linux", deps: ["targets"], work: { steps: [{ id: "run", is_result: true }], result_step: "run" } },
+      { id: "test-darwin", deps: ["targets"], work: { steps: [{ id: "run", is_result: true }], result_step: "run" } },
     ],
   });
   assert.deepEqual(out.reply("n")?.["result"], { outcome: "success" });
@@ -392,7 +394,7 @@ test("a generated node's own process reads the source's output through the route
     new NodeRoutes({ baseUrl: "http://engine", token: "t", fetch: fake }),
   );
   assert.deepEqual(out.reply("g")?.["result"], {
-    value: [{ id: "test-linux", deps: ["targets"] }],
+    value: [{ id: "test-linux", deps: ["targets"], work: { steps: [{ id: "run", is_result: true }], result_step: "run" } }],
   });
   assert.deepEqual(out.reply("n")?.["result"], { outcome: "success" });
 
@@ -446,7 +448,9 @@ test("a generator whose stepped source has no result step reads null in the sour
     new NodeRoutes({ baseUrl: "http://engine", token: "t", fetch: notReady }),
   );
   assert.deepEqual(out.reply("s")?.["result"], { outcome: "success" });
-  assert.deepEqual(out.reply("g")?.["result"], { value: [{ id: "child", deps: ["source"] }] });
+  assert.deepEqual(out.reply("g")?.["result"], {
+    value: [{ id: "child", deps: ["source"], work: { steps: [{ id: "run", is_result: true }], result_step: "run" } }],
+  });
   assert.equal(seen, null);
 });
 
@@ -481,4 +485,66 @@ test("cancelling a step aborts its pending route request", { timeout: 10_000 }, 
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+test("a dry run runs a step's dry-run body; an approval has no body; after_run needs an outcome; cache_key returns a string or null", async () => {
+  definePipeline({
+    name: "dsl",
+    plan(p) {
+      const j = p.job("j");
+      j.step("apply", () => "applied")
+        .dryRun(() => "planned")
+        .result();
+      p.approval("gate", { message: "ship?" });
+      p.job("memo", () => undefined)
+        .memoize((() => 7) as unknown as () => string)
+        .afterRun(() => undefined);
+    },
+  });
+  const dsl = { id: "p", op: "plan", pipeline: "dsl", args: {}, run: { ...run, dry_run: true } };
+  const out = await converse([
+    dsl,
+    { id: "s", op: "run_step", node: "j", step: "apply", attempt: 1 },
+    { id: "g", op: "run_node", node: "gate", attempt: 1 },
+    { id: "a", op: "eval", closure: "memo/after_run/0", input: { outcome: "maybe" } },
+    { id: "k", op: "eval", closure: "memo/cache_key/0" },
+  ]);
+  assert.deepEqual(out.reply("s")?.["result"], { outcome: "success", output: "planned" });
+  assert.equal((out.reply("g")?.["error"] as { code: string }).code, "bad_request");
+  assert.equal((out.reply("a")?.["error"] as { code: string }).code, "bad_request");
+  assert.deepEqual(out.reply("k")?.["result"], {
+    value: null,
+    error: "cache_key closure memo/cache_key/0 returned number, not a string or null",
+  });
+});
+
+test("a generated job's recovery closures answer eval; run_node refuses a node with several steps", async () => {
+  definePipeline({
+    name: "gen",
+    plan(p) {
+      p.job("src", () => ["a"]).generate<string[]>((gen, ids) => {
+        for (const id of ids ?? []) {
+          const child = gen.job(`child-${id}`, () => undefined).onFailure(`recover-${id}`, () => undefined);
+          child.recovery?.beforeRun(() => undefined);
+        }
+      });
+      const multi = p.job("multi");
+      multi.step("a", () => undefined);
+      multi.step("b", () => undefined);
+    },
+  });
+  const out = await converse([
+    { id: "p", op: "plan", pipeline: "gen", args: {}, run },
+    { id: "s", op: "run_node", node: "src", attempt: 1 },
+    { id: "g", op: "eval", closure: "src/generator/0" },
+    { id: "b", op: "eval", closure: "recover-a/before_run/0" },
+    { id: "m", op: "run_node", node: "multi", attempt: 1 },
+  ]);
+  const nodes = (out.reply("g")?.["result"] as { value: Array<{ id: string }> }).value;
+  assert.deepEqual(
+    nodes.map((n) => n.id),
+    ["child-a", "recover-a"],
+  );
+  assert.deepEqual(out.reply("b")?.["result"], { value: null });
+  assert.equal((out.reply("m")?.["error"] as { code: string }).code, "bad_request");
 });

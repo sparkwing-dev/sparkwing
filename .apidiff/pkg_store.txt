@@ -1777,6 +1777,9 @@ type Run struct {
 	LastHeartbeatAt *time.Time
 
 	NeedsAttention string
+
+	TriggerUser string
+	PullRequest *RunPullRequest
 }
 func (r Run) RedactedForDisplay() Run
 func (r Run) SecretArgNames() []string
@@ -1829,6 +1832,14 @@ type RunFilter struct {
 func (f RunFilter) HasBeforeCursor() bool
 func (f RunFilter) HasCursor() bool
 const RunFilterVersion = "3"
+type RunPullRequest struct {
+	Number  int
+	Action  string
+	BaseRef string
+	BaseSHA string
+	HeadRef string
+	HeadSHA string
+}
 type RunTrend struct {
 	RunID      string
 	Pipeline   string

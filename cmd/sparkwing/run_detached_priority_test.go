@@ -2,10 +2,6 @@ package main
 
 import (
 	"context"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -65,62 +61,6 @@ func TestRunDetached_RefusesAnUnusablePriority(t *testing.T) {
 	}
 	if !strings.Contains(errOut, "--sw-priority") {
 		t.Fatalf("the refusal does not name the flag: %s", errOut)
-	}
-}
-
-const priorityFixtureSource = `package main
-
-import (
-	"bufio"
-	"fmt"
-	"os"
-)
-
-func main() {
-	if len(os.Args) == 2 && os.Args[1] == "--sw-node-protocol" {
-		_, _ = bufio.NewReader(os.NewFile(3, "requests")).ReadString('\n')
-		fmt.Fprintln(os.NewFile(4, "frames"), "{\"reply\":\"1\",\"ok\":true,\"result\":{\"protocol\":\"1\",\"pipelines\":[{\"name\":\"fixture\"}]}}")
-		return
-	}
-	fmt.Println("observed-priority=" + os.Getenv("SPARKWING_PRIORITY"))
-}
-`
-
-// safety: --sw-dry-run keeps the pre-warm from starting a daemon in the
-// temporary home; the env plumbing under test happens either way.
-func TestRun_PriorityReachesThePipelineProgramUnresolved(t *testing.T) {
-	t.Parallel()
-	if runtime.GOOS == "windows" {
-		t.Skip("the compile-and-exec path is exercised on POSIX process semantics")
-	}
-	bin := buildSubmitCLI(t)
-	home, repoDir := t.TempDir(), t.TempDir()
-	sparkwingDir := filepath.Join(repoDir, ".sparkwing")
-	if err := os.MkdirAll(sparkwingDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(sparkwingDir, "go.mod"),
-		[]byte("module priorityfixture\n\ngo 1.22\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(sparkwingDir, "main.go"),
-		[]byte(priorityFixtureSource), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cmd := exec.Command(bin, "run", "fixture", "--sw-priority", "front", "--sw-dry-run")
-	cmd.Dir = repoDir
-	cmd.Env = append(os.Environ(),
-		"SPARKWING_HOME="+home,
-		"SPARKWING_CONFIG="+filepath.Join(home, "config.yaml"),
-		"SPARKWING_NO_UPDATE=1",
-	)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("sparkwing run: %v\n%s", err, out)
-	}
-	if !strings.Contains(string(out), "observed-priority=front") {
-		t.Fatalf("pipeline program saw %q, want an unresolved front", out)
 	}
 }
 

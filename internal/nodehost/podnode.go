@@ -43,7 +43,7 @@ func PlanDocument(ctx context.Context, cfg SessionConfig, req PlanRequest) (Plan
 	if cfg.Sink == nil {
 		cfg.Sink = discardSink{}
 	}
-	sess, err := StartSession(ctx, cfg)
+	sess, err := StartSession(ctx, dryRunSession(cfg, req.Run.DryRun))
 	if err != nil {
 		return PlannedRun{}, err
 	}
@@ -84,11 +84,9 @@ func hostRequires(doc nodeproto.PlanDoc, raw []byte, requires []string) (nodepro
 	return doc, raw, err
 }
 
-// safety: the layers a pod hosts around its node, in the scheduler's order.
-// The controller owns approvals and retry_auto, whose every attempt is another
-// claim and so another pod; a plain retry re-runs in the pod, as the in-pod
-// executor did. Memo reads and records through the claim, and admission runs
-// only the node's concurrency group.
+// safety: a pod's layers in scheduler order. The controller owns approvals and retry_auto, whose every
+// attempt is another claim and pod; a plain retry re-runs in the pod as the in-pod executor did. Memo
+// reads and records through the claim, and admission runs only the node's concurrency group.
 var (
 	podLayers     = []Layer{skipIfLayer, memoLayer, admissionLayer, artifactsLayer, cachesLayer, retryLayer, timeoutLayer}
 	podAutoLayers = []Layer{skipIfLayer, memoLayer, admissionLayer, artifactsLayer, cachesLayer, timeoutLayer}

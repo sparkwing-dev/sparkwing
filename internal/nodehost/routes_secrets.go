@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/secretsource"
 )
 
@@ -29,7 +30,7 @@ func (s *Server) serveSecret(w http.ResponseWriter, r *http.Request, g *grant) {
 	defer context.AfterFunc(g.ctx, cancel)()
 	value, masked, err := g.Resolver.Resolve(ctx, name)
 	switch {
-	case errors.Is(err, secretsource.ErrMissing):
+	case errors.Is(err, secretsource.ErrMissing), errors.Is(err, secrets.ErrSecretMissing):
 		s.writeError(w, http.StatusNotFound, "secret_not_found", fmt.Sprintf("secret %q is not set", name))
 		return
 	case err != nil:

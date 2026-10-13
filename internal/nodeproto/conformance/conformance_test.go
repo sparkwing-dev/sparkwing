@@ -72,6 +72,18 @@ func TestGoSDKConforms(t *testing.T) {
 	runSuite(t, "go", []string{bin})
 }
 
+func TestTypeScriptSDKConforms(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not on PATH")
+	}
+	fixture, err := filepath.Abs(filepath.Join("..", "..", "..", "sdk", "typescript", "test", "fixtures", "conformance.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runSuite(t, "ts", []string{node, fixture})
+}
+
 // safety: sessions run in file order because same_plan_as compares a plan
 // with one an earlier session recorded.
 func runSuite(t *testing.T, sdk string, command []string) {
@@ -304,6 +316,9 @@ func (p *proc) check(send, reply map[string]any, logs []map[string]any, want exp
 		if err := subset(want.Result, result, "result"); err != nil {
 			p.t.Errorf("%s: %v; got %v", at, err, result)
 		}
+	}
+	if msg, _ := result["error"].(string); !strings.Contains(msg, want.MessageContains) {
+		p.t.Errorf("%s: result error %q, want it to contain %q", at, msg, want.MessageContains)
 	}
 	for _, key := range want.Absent {
 		if _, has := result[key]; has {

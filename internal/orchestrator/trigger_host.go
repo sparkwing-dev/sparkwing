@@ -79,7 +79,7 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	slots := NewHTTPConcurrency(h.ControllerURL, nil, h.Token, store.DefaultConcurrencyLease)
 	dispatch := h.Runner
 	if dispatch == nil {
-		dispatch = &claimedNodeHost{controllerURL: h.ControllerURL, binary: h.Binary, dir: h.Dir, ctrl: c, trigger: trig, logger: logger}
+		dispatch = &claimedNodeHost{controllerURL: h.ControllerURL, binary: h.Binary, dir: h.Dir, ctrl: c, logger: logger}
 	}
 	hostLog := &triggerHostLog{out: os.Stderr}
 	shuttingDown := shuttingDownOn(ctx)
@@ -134,31 +134,22 @@ func triggerHostArgs(ctx context.Context, c *client.Client, trig *store.Trigger,
 	return orig.Args
 }
 
-// safety: the run host and every node host it dispatches to derive the
-// context with [hostedRunContext] from the trigger and the run row's start
-// time, so their plans hash alike.
+// safety: one derivation, [podRunContext], for the run host and every node host: the host applies it to the row it
+// is about to record, the controller's run read (start time, the trigger's actor and pull request) with the trigger's
+// git snapshot and source laid over it as the run row's upsert lays them, so each node host reads back that row.
 func triggerRunContext(ctx context.Context, c *client.Client, trig *store.Trigger) nodeproto.RunContext {
-	started := time.Now().UTC()
-	if row, err := c.GetRunForExecution(ctx, trig.ID); err == nil && !row.StartedAt.IsZero() {
-		started = row.StartedAt
+	row, err := c.GetRunForExecution(ctx, trig.ID)
+	if err != nil || row == nil {
+		row = &store.Run{ID: trig.ID, TriggerUser: trig.TriggerUser}
 	}
-	return hostedRunContext(trig, started)
-}
-
-// safety: the one derivation of a hosted run's context, from its trigger's git snapshot, source, actor and pull
-// request and the start time its row holds, which the run host and each node host share.
-func hostedRunContext(trig *store.Trigger, started time.Time) nodeproto.RunContext {
-	rc := nodeproto.RunContext{
-		RunID: trig.ID, StartedAt: started,
-		Git:     &nodeproto.Git{SHA: trig.GitSHA, Branch: trig.GitBranch, Repo: trig.Repo, RepoURL: trig.RepoURL},
-		Trigger: &nodeproto.Trigger{Source: protocolTriggerSource(trig.TriggerSource), User: trig.TriggerUser},
+	planned := *row
+	planned.ID, planned.TriggerSource = trig.ID, trig.TriggerSource
+	planned.GitSHA, planned.GitBranch = trig.GitSHA, trig.GitBranch
+	planned.DeclaredRepo, planned.RepoURL = cmp.Or(row.DeclaredRepo, trig.Repo), cmp.Or(row.RepoURL, trig.RepoURL)
+	if planned.StartedAt.IsZero() {
+		planned.StartedAt = time.Now().UTC()
 	}
-	if pr := sparkwing.PullRequestFromEnv(trig.TriggerEnv); pr != nil {
-		rc.Trigger.PullRequest = &nodeproto.PullRequest{
-			Number: pr.Number, Action: pr.Action, BaseRef: pr.BaseRef, BaseSHA: pr.BaseSHA, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA,
-		}
-	}
-	return rc
+	return podRunContext(&planned)
 }
 
 // HeartbeatTrigger renews triggerID's claim every interval until stop is
@@ -210,7 +201,6 @@ func dispatchThrough(r runner.Runner, pipeline string) nodehost.Executor {
 type claimedNodeHost struct {
 	controllerURL, binary, dir string
 	ctrl                       *client.Client
-	trigger                    *store.Trigger
 	logger                     *slog.Logger
 }
 
@@ -247,7 +237,7 @@ func (h *claimedNodeHost) RunNode(ctx context.Context, req runner.Request) runne
 		var res runner.Result
 		if res, err = hostDispatchedNode(ctx, podNode{
 			binary: h.binary, dir: h.dir, controllerURL: h.controllerURL, token: n.ClaimToken,
-			runID: req.RunID, nodeID: req.NodeID, trigger: h.trigger, cacheGrant: grant, artifacts: art, logger: h.logger,
+			runID: req.RunID, nodeID: req.NodeID, cacheGrant: grant, artifacts: art, logger: h.logger,
 		}); err == nil {
 			return res
 		}

@@ -21,7 +21,8 @@ const (
 	maxChildBody = 64 << 10
 )
 
-type childRequest struct {
+// ChildRequest is a node's request to start a child run.
+type ChildRequest struct {
 	Pipeline string            `json:"pipeline"`
 	Args     map[string]string `json:"args,omitempty"`
 	Repo     string            `json:"repo,omitempty"`
@@ -31,12 +32,21 @@ type childRequest struct {
 // safety: the controller reads the parent run, node and attempt from the
 // claim, so the node names none of them.
 func (s *Server) serveStartChild(w http.ResponseWriter, r *http.Request, g *grant) {
+	if g.Claim == nil && g.Children != nil {
+		var req ChildRequest
+		if !decodeBody(r, maxChildBody, &req) || !validName(req.Pipeline) || len(req.Args) > 256 {
+			s.writeError(w, http.StatusBadRequest, "bad_request", "the body must name a pipeline, in at most 64 KiB")
+			return
+		}
+		s.serveLocalStartChild(w, r, g, req)
+		return
+	}
 	claim, ctx, done, ok := s.forward(w, r, g)
 	if !ok {
 		return
 	}
 	defer done()
-	var req childRequest
+	var req ChildRequest
 	if !decodeBody(r, maxChildBody, &req) || !validName(req.Pipeline) || len(req.Args) > 256 {
 		s.writeError(w, http.StatusBadRequest, "bad_request", "the body must name a pipeline, in at most 64 KiB")
 		return
@@ -51,7 +61,7 @@ func (s *Server) serveStartChild(w http.ResponseWriter, r *http.Request, g *gran
 	}
 	status, code, err := claim.call(ctx, http.MethodPost, runPath(g.RunID, "children"), struct {
 		Ordinal int64 `json:"ordinal"`
-		childRequest
+		ChildRequest
 	}{claim.nextChild, req}, &out)
 	// safety: an ordinal is spent only once the controller answered, so a
 	// retry after a lost reply returns the child the first call started.
@@ -80,6 +90,10 @@ func (s *Server) serveAwaitChild(w http.ResponseWriter, r *http.Request, g *gran
 	wait, waitOK := waitParam(r.URL.Query().Get("wait_ms"))
 	if !validName(child) || (node != "" && !validNodeID(node)) || !waitOK {
 		s.writeError(w, http.StatusBadRequest, "bad_request", "the run id, node or wait_ms is malformed")
+		return
+	}
+	if g.Claim == nil && g.Children != nil {
+		s.serveLocalAwaitChild(w, r, g, child, node, wait)
 		return
 	}
 	if g.Claim == nil {

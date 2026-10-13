@@ -290,7 +290,7 @@ func dispatchedHeld(t *testing.T, stop func(context.CancelCauseFunc)) *hostedTri
 	args := map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "hold": hold}
 	h := newHostedTrigger(t, args)
 	planned, err := nodehost.PlanDocument(t.Context(), nodehost.SessionConfig{Entry: h.bin, Dir: t.TempDir()}, nodehost.PlanRequest{
-		Pipeline: "podnode", Args: args, Run: hostedRunContext(h.trig, h.run(t).StartedAt),
+		Pipeline: "podnode", Args: args, Run: triggerRunContext(t.Context(), client.NewWithToken(h.url, nil, h.token), h.trig),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -322,7 +322,7 @@ func dispatchedHeld(t *testing.T, stop func(context.CancelCauseFunc)) *hostedTri
 	go func() {
 		_, err := hostDispatchedNode(hostCtx, podNode{
 			binary: h.bin, dir: t.TempDir(), controllerURL: h.url, token: n.ClaimToken,
-			runID: h.trig.ID, nodeID: "held", trigger: h.trig, logger: slog.New(slog.DiscardHandler),
+			runID: h.trig.ID, nodeID: "held", logger: slog.New(slog.DiscardHandler),
 		})
 		done <- err
 	}()
@@ -432,7 +432,7 @@ func TestTriggerHost_TakesTheResultOfTheHolderThatWonTheClaim(t *testing.T) {
 			t.Errorf("claim: %v", err)
 			return runner.Result{Outcome: sparkwing.Failed, Err: err}
 		}
-		host := &claimedNodeHost{controllerURL: h.url, binary: h.bin, dir: t.TempDir(), ctrl: c, trigger: h.trig, logger: slog.New(slog.DiscardHandler)}
+		host := &claimedNodeHost{controllerURL: h.url, binary: h.bin, dir: t.TempDir(), ctrl: c, logger: slog.New(slog.DiscardHandler)}
 		res := host.RunNode(ctx, req)
 		fenced := store.WithNodeClaimFence(context.WithoutCancel(ctx), store.NodeClaimFence{
 			HolderID: won.ClaimedBy, MembershipID: won.ClaimMembershipID, ReservationID: won.ReservationID, ClaimGeneration: won.ClaimGeneration,

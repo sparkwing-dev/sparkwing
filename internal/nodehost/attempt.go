@@ -12,10 +12,12 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/protofd"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/secretsource"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -39,8 +41,13 @@ type Attempts struct {
 	Routes   *Server
 	Resolver secretsource.Resolver
 	Masker   *secrets.Masker
-	// Claim forwards the controller-backed routes; nil answers them 502.
+	// Claim forwards the controller-backed routes; nil answers them 502,
+	// except the output routes Local answers.
 	Claim *Claim
+	Local LocalOutputs
+	// Children starts the child runs of a run no controller holds; nil
+	// answers the child routes 502 there.
+	Children LocalChildren
 	// OpenLog opens the node's log; the executor closes it once the attempt's
 	// last record, cleanup output included, is written.
 	OpenLog func(ctx context.Context, runID, nodeID string) (NodeLog, error)
@@ -93,8 +100,8 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 		names = append(names, s.Name)
 	}
 	bearer, revoke, err := a.Routes.Admit(Node{
-		RunID: run.ID, NodeID: id, Secrets: names, Resolver: a.Resolver, Masker: a.Masker, Claim: a.Claim,
-		Pause: n.Pause, Output: n.memoOutput,
+		RunID: run.ID, NodeID: id, Secrets: names, Resolver: a.Resolver, Masker: a.Masker, Claim: a.Claim, Local: a.Local,
+		Children: a.Children, LeaseToken: childLease(n), Pause: n.Pause, Hold: n.Hold, Output: n.memoOutput,
 	})
 	if err != nil {
 		return failed(fmt.Errorf("admit node %s: %w", id, err))
@@ -104,6 +111,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	cfg := base
 	cfg.Sink = sink
 	cfg.Env = attemptEnv(base.Env, n.Plan.Env, run.ID, id, a.Routes.URL(), bearer)
+	cfg.Env = append(cfg.Env, hostEnv(n)...)
 	res := Result{}
 	sess, err := StartSession(ctx, cfg)
 	if err == nil {
@@ -261,19 +269,51 @@ func MinimalEnv() []string {
 	return env
 }
 
-// safety: the engine's own SPARKWING_* variables never reach the node; its
-// contract variables are set last so neither the engine nor the node's env
-// overrides them.
+// safety: the dispatcher's rule for what a child attaches to: the run's lease when it holds the host or the
+// plan's groups, which a node lease lacks, else the node's own lease, which holds the cores the node runs on.
+func childLease(n *NodeRun) string {
+	r := n.Run
+	if hostAdmitted(r.Doc) || r.leaseHoldsGroups || r.leaseHoldsHost {
+		return r.leaseToken
+	}
+	return cmp.Or(n.nodeLease, r.leaseToken)
+}
+
+// safety: a sparkwing run the node starts attaches to the lease the node holds instead of queueing behind it,
+// and sparks-core echoes mutating commands instead of running them only when it sees SPARKWING_DRY_RUN.
+func hostEnv(n *NodeRun) []string {
+	var env []string
+	if lease := childLease(n); lease != "" {
+		env = append(env, wingwire.LeaseTokenEnv+"="+lease)
+	}
+	if n.Run.Context.DryRun {
+		env = append(env, "SPARKWING_DRY_RUN=1")
+	}
+	return env
+}
+
+// safety: the plan process sees the dry-run switch its node processes see, so plan code that reads it plans
+// the run each later process plans again, and no attempt fails with plan_drift.
+func planSession(cfg Config) SessionConfig { return dryRunSession(cfg.Session, cfg.Run.DryRun) }
+
+func dryRunSession(s SessionConfig, dryRun bool) SessionConfig {
+	if dryRun {
+		base := s.Env
+		if base == nil {
+			base = MinimalEnv()
+		}
+		s.Env = append(slices.Clone(base), "SPARKWING_DRY_RUN=1")
+	}
+	return s
+}
+
+// safety: the node's contract variables are set last so neither the engine nor the node's env overrides them.
 func attemptEnv(base []string, nodeEnv map[string]string, runID, nodeID, url, bearer string) []string {
 	if base == nil {
 		base = MinimalEnv()
 	}
 	env := make([]string, 0, len(base)+len(nodeEnv)+4)
-	for _, kv := range base {
-		if !strings.HasPrefix(kv, "SPARKWING_") {
-			env = append(env, kv)
-		}
-	}
+	env = append(env, engineenv.Strip(base)...)
 	keys := make([]string, 0, len(nodeEnv))
 	for k := range nodeEnv {
 		keys = append(keys, k)

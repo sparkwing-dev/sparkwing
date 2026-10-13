@@ -607,3 +607,42 @@ kept for S3 and Postgres state profiles.
   `storeurl.OpenStateStoreFromSpec` opens `sqlite` and `controller` only.
   `pkg/localws` drops `Options.NoLocalStore`. `pkg/pipelines` drops
   `KindProfileName` and `GuardContext.ProfileName`.
+
+## Pipelines run on the engine host
+
+The engine now hosts the run. `sparkwing run` and a launcher Job start the
+pipeline binary as `<binary> --sw-node-protocol`, plan in one process,
+and run each node in a process of its own, as the
+[node protocol](../node-protocol.md) describes. A `.sparkwing` module built
+against an older SDK does not answer that protocol, so it no longer runs.
+Nothing converts an old pin.
+
+- **Steps:** move the pin to this release's SDK with
+  `sparkwing repos update --in-place`, or `go get` the SDK version in
+  `.sparkwing/go.mod`, then run the pipeline once. A module that replaces
+  the SDK with a local checkout needs that checkout at this release.
+- **Refusal:** an old binary fails before the run starts with `pipeline
+  entry exited without answering describe; rebuild .sparkwing against a
+  matching SDK`. A binary that speaks another protocol version names both
+  versions and its SDK.
+- **Plan code must be deterministic.** Every node process plans the run
+  again, and a node whose plan entry differs from the one the run accepted
+  fails with `plan_drift`. Read time, randomness and the environment in
+  step bodies, not in `Plan`.
+- **Run options are not environment variables.** `--sw-start-at`,
+  `--sw-stop-at`, `--sw-only`, `--sw-no-cache` and the other run flags no
+  longer reach pipeline code as `SPARKWING_*` variables. A dry run still
+  sets `SPARKWING_DRY_RUN`. A node sees every other `SPARKWING_*` variable
+  you set; the engine strips its own credentials and plumbing, such as
+  `SPARKWING_SECRETS_KEY`, `SPARKWING_AGENT_TOKEN` and
+  `SPARKWING_API_SOCKET`.
+- **Limits:** a node's output is at most 16 MiB as JSON, a cleanup runs
+  for at most 2 minutes, the SDK retries a `429` from a node route for at
+  most 2 minutes, and `after_run` after a timeout runs for at most 2
+  minutes. See [node protocol limits](../node-protocol.md#limits).
+- **Inspection:** `sparkwing pipeline plan` evaluates each step's
+  `skip_if` in the pipeline process, as a run does, and no longer reports
+  lint warnings or `--sw-dry-run` decisions. An unknown pipeline flag
+  fails as invalid arguments instead of being dropped.
+- **Plan document:** dependency caches are listed under `caches` instead
+  of `dir_caches`, including in `sparkwing pipeline plan --static -o json`.

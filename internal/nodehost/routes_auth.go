@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/secretsource"
@@ -26,11 +27,20 @@ type Node struct {
 	Secrets  []string
 	Resolver secretsource.Resolver
 	Masker   *secrets.Masker
-	// Claim forwards the routes that reach the controller; nil answers them 502.
+	// Claim forwards the routes that reach the controller; nil answers them 502,
+	// except the output routes Local answers.
 	Claim *Claim
+	Local LocalOutputs
+	// Children starts and reads child runs through this machine's trigger
+	// queue when no controller holds the run; LeaseToken is the run's
+	// admission lease, which the child attaches to.
+	Children   LocalChildren
+	LeaseToken string
 	// Pause, when set, holds the node's no-progress timeout while a route
 	// waits on its behalf; see [NodeRun.Pause].
 	Pause func() (resume func())
+	// Hold stops the node's wall timeout while a child it awaits waits in plan admission.
+	Hold func() (resume func())
 	// Output is the node's own output when the host already holds it, as after
 	// a memo hit; the output route serves it to the node without the controller.
 	Output json.RawMessage
@@ -40,6 +50,7 @@ type grant struct {
 	Node
 	bearer   string
 	declared map[string]bool
+	started  sync.Map
 	// safety: revoking the grant cancels this, ending its requests in flight.
 	ctx    context.Context
 	cancel context.CancelFunc

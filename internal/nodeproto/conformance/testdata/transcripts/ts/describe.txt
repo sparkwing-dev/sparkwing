@@ -1,0 +1,2 @@
+-> {"id":"1","op":"describe"}
+<- {"ok":true,"reply":"1","result":{"pipelines":[{"args":[{"desc":"Target environment","go_name":"env","name":"env","required":true,"type":"string"},{"default":"3","desc":"Replicas","go_name":"count","name":"count","required":false,"type":"int"},{"desc":"Fail the plan function","go_name":"fail-plan","name":"fail-plan","required":false,"type":"bool"}],"name":"conformance","short":"Node protocol conformance fixture"}],"protocol":"1","sdk":{"language":"typescript","version":"<version>"}}}

@@ -31,8 +31,10 @@ func timeoutLayer(cfg *Config, next Executor) Executor {
 		defer cancel(nil)
 		attempt := *n
 		if wall > 0 {
-			t := time.AfterFunc(wall, func() { cancel(errWallTimeout) })
-			defer t.Stop()
+			wt := &wallTimer{left: wall, since: time.Now()}
+			wt.t = time.AfterFunc(wall, func() { cancel(errWallTimeout) })
+			defer wt.t.Stop()
+			attempt.Hold = wt.hold
 		}
 		if idle > 0 {
 			it := &idleTimer{d: idle}
@@ -102,6 +104,35 @@ func (it *idleTimer) pause() (resume func()) {
 			defer it.mu.Unlock()
 			if it.paused--; it.paused == 0 {
 				it.t.Reset(it.d)
+			}
+		})
+	}
+}
+
+// safety: holds nest like the idle count, and a resume restarts only the budget left, so time spent held is
+// excluded rather than refunded.
+type wallTimer struct {
+	t     *time.Timer
+	mu    sync.Mutex
+	held  int
+	left  time.Duration
+	since time.Time
+}
+
+func (wt *wallTimer) hold() (resume func()) {
+	wt.mu.Lock()
+	if wt.held++; wt.held == 1 && wt.t.Stop() {
+		wt.left -= time.Since(wt.since)
+	}
+	wt.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			wt.mu.Lock()
+			defer wt.mu.Unlock()
+			if wt.held--; wt.held == 0 {
+				wt.since = time.Now()
+				wt.t.Reset(max(wt.left, 0))
 			}
 		})
 	}

@@ -538,18 +538,22 @@ func (la *LocalAdmission) acquireBlocking(
 		return nil, admitProceed, fmt.Errorf("local admission: %w", err)
 	}
 	if reporter.waited() {
-		appendAdmissionEvent(ctx, backends, runID, participant, "admission_granted", admissionRequestPayload(req.RunID))
-		if la.Delegate != nil {
-			la.Delegate.Emit(sparkwing.LogRecord{
-				TS:    time.Now(),
-				Level: "info",
-				Event: "admission_granted",
-				Msg:   "admitted; starting run",
-			})
-		}
-		fmt.Fprintf(la.out(), "admitted; starting run: participant %s\n", displayID)
+		la.reportGranted(ctx, backends, runID, participant, req.RunID, displayID)
 	}
 	return lease, admitProceed, nil
+}
+
+func (la *LocalAdmission) reportGranted(ctx context.Context, backends Backends, runID, participant, requestID, displayID string) {
+	appendAdmissionEvent(ctx, backends, runID, participant, "admission_granted", admissionRequestPayload(requestID))
+	if la.Delegate != nil {
+		la.Delegate.Emit(sparkwing.LogRecord{
+			TS:    time.Now(),
+			Level: "info",
+			Event: "admission_granted",
+			Msg:   "admitted; starting run",
+		})
+	}
+	fmt.Fprintf(la.out(), "admitted; starting run: participant %s\n", displayID)
 }
 
 type queueWaitReporter struct {

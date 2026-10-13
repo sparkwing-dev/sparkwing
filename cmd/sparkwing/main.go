@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -200,21 +199,14 @@ func dispatchRun(args []string) error {
 		executionDir = ""
 	}
 
-	env := os.Environ()
-	env = removeEnv(env, "SPARKWING_PIPELINE_REV")
-	if source != "" {
-		env = setEnv(env, "SPARKWING_PIPELINE_REV", string(source))
-	}
-	env = removeEnv(env, "SPARKWING_RUN_HANDLE_FILE")
+	env := removeEnv(removeEnv(os.Environ(), "SPARKWING_PIPELINE_REV"), "SPARKWING_RUN_HANDLE_FILE")
 	logFormat := os.Getenv("SPARKWING_LOG_FORMAT")
 	if logFormat == "" {
 		logFormat = logFormatJSON
 		if color.IsInteractiveStdout() {
 			logFormat = logFormatPretty
 		}
-		env = append(env, "SPARKWING_LOG_FORMAT="+logFormat)
 	}
-
 	if flags.index != "" {
 		bound, bindErr := bindRunIndex(env, flags.index, os.Stdout, logFormat)
 		if bindErr != nil {
@@ -222,33 +214,13 @@ func dispatchRun(args []string) error {
 		}
 		env = bound
 	}
+	runHandle := ""
 	if flags.runHandleFile != "" {
 		path, pathErr := filepath.Abs(flags.runHandleFile)
 		if pathErr != nil {
 			return fmt.Errorf("--sw-run-handle-file %s: %w", flags.runHandleFile, pathErr)
 		}
-		env = setEnv(env, "SPARKWING_RUN_HANDLE_FILE", path)
-	}
-	if flags.verbose {
-		env = append(env, "SPARKWING_LOG_LEVEL=debug")
-	}
-	if flags.startAt != "" {
-		env = append(env, "SPARKWING_START_AT="+flags.startAt)
-	}
-	if flags.stopAt != "" {
-		env = append(env, "SPARKWING_STOP_AT="+flags.stopAt)
-	}
-	if flags.dryRun {
-		env = append(env, "SPARKWING_DRY_RUN=1")
-	}
-	if flags.only != "" {
-		env = append(env, "SPARKWING_ONLY="+flags.only)
-	}
-	if flags.noCache {
-		env = append(env, "SPARKWING_NO_CACHE=1")
-	}
-	if flags.allowUnadmitted {
-		env = setEnv(env, orchestrator.AllowUnadmittedEnv, "1")
+		runHandle = path
 	}
 	bincache.SetHashAllFiles(flags.hashAllFiles)
 	run := newPipelineRun(dir, compileOptions{
@@ -259,27 +231,6 @@ func dispatchRun(args []string) error {
 	})
 	defer run.stop()
 	run.ctx = gotoolchain.WithSession(run.ctx, env, nil)
-	if len(flags.allow) > 0 {
-		env = append(env, "SPARKWING_ALLOW="+strings.Join(flags.allow, ","))
-	}
-	if flags.ref != "" {
-		env = append(env, "SPARKWING_REF="+flags.ref)
-	}
-	if flags.noUpdate {
-		env = append(env, "SPARKWING_NO_UPDATE=1")
-	}
-
-	if flags.mode != "" {
-		env = setEnv(env, "SPARKWING_MODE", flags.mode)
-	}
-	if flags.workers > 0 {
-		env = setEnv(env, "SPARKWING_WORKERS", strconv.Itoa(flags.workers))
-	}
-
-	// safety: relative priority resolves against the queue at admission time.
-	if priority != "" {
-		env = setEnv(env, orchestrator.PriorityEnv, priority)
-	}
 
 	run.sparkwingDir = dir
 	run.opts.ExecutionDir = executionDir
@@ -295,14 +246,16 @@ func dispatchRun(args []string) error {
 		}
 		return run.finish(err)
 	}
-	if runInvokesAdmission(passthrough) {
-		schema, err := run.describedPipeline(pipelineName)
-		if err == nil {
-			_, err = parsePipelineArgs(schema, passthrough)
-		}
-		if err != nil {
-			return run.finish(fmt.Errorf("%s: %w", pipelineName, err))
-		}
+	if !runInvokesAdmission(passthrough) {
+		return run.finish(run.exec(append([]string{pipelineName}, passthrough...), binaryVerbEnv(env, flags, logFormat)))
+	}
+	schema, err := run.describedPipeline(pipelineName)
+	var pipelineArgs map[string]string
+	if err == nil {
+		pipelineArgs, err = parsePipelineArgs(schema, passthrough)
+	}
+	if err != nil {
+		return run.finish(fmt.Errorf("%s: %w", pipelineName, err))
 	}
 	findings := declaredRisks(run.ctx, dir, pipelineName)
 	if err := enforceRiskGate(pipelineName, findings, flags); err != nil {
@@ -313,7 +266,22 @@ func dispatchRun(args []string) error {
 		ensureRunDaemonFn()
 	}
 	sweepStraySessionsBeforeRun()
-	return run.finish(run.exec(append([]string{pipelineName}, passthrough...), env))
+	return run.finish(run.host(hostedRun{
+		schema: schema, args: pipelineArgs, flags: flags, env: env, source: string(source),
+		priority: priority, logFormat: logFormat, runHandle: runHandle,
+	}))
+}
+
+// hack: config and --explain still run inside the pipeline binary and read these from the environment.
+func binaryVerbEnv(env []string, flags runFlags, logFormat string) []string {
+	env = setEnv(env, "SPARKWING_LOG_FORMAT", logFormat)
+	if flags.dryRun {
+		env = append(env, "SPARKWING_DRY_RUN=1")
+	}
+	if flags.noCache {
+		env = append(env, "SPARKWING_NO_CACHE=1")
+	}
+	return env
 }
 
 // safety: a pipeline binary built against an older SDK selects a profile from

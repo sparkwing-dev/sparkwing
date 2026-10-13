@@ -138,7 +138,7 @@ func runNodeRemote(
 	}
 	return hostDispatchedNode(ctx, podNode{
 		binary: binary.path, dir: filepath.Dir(sparkwingDir), controllerURL: controllerURL, token: token,
-		runID: runID, nodeID: nodeID, trigger: trigger, cacheGrant: cacheGrant, artifacts: art, logger: logger,
+		runID: runID, nodeID: nodeID, cacheGrant: cacheGrant, artifacts: art, logger: logger,
 	})
 }
 

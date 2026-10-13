@@ -38,8 +38,6 @@ type podNode struct {
 	// safety: a node a run host dispatched already ran its skip_if, memo and admission there, and its accepted
 	// spec_hash is the one the run host recorded on its row.
 	dispatched bool
-	// safety: a dispatched node plans with the context its run host derived from this trigger.
-	trigger *store.Trigger
 	// safety: a dispatched node's caches use its own run's grant, since its host may serve other runs.
 	cacheGrant string
 	state      storage.StateStore
@@ -62,14 +60,7 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 			return nodehost.Result{}, fmt.Errorf("read node %s: %w", p.nodeID, err)
 		}
 		p.specHash = row.SpecHash
-	}
-	rc := podRunContext(run)
-	if p.dispatched {
 		ctx = depcache.WithCacheGrant(ctx, p.cacheGrant)
-		if p.trigger == nil {
-			return nodehost.Result{}, fmt.Errorf("run %s has no trigger to plan its node with", p.runID)
-		}
-		rc = hostedRunContext(p.trigger, run.StartedAt)
 	}
 	masker := secrets.NewMasker()
 	masker.Register(p.token)
@@ -96,7 +87,7 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 	defer planSink.end()
 	cfg := nodehost.Config{
 		Session:  nodehost.SessionConfig{Entry: p.binary, Dir: p.dir, Sink: planSink, Env: podSessionEnv(masker)},
-		Pipeline: run.Pipeline, Args: run.Args, Run: rc,
+		Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run),
 		State: p.state, Artifacts: p.artifacts, Logger: p.logger,
 		Attempts: &nodehost.Attempts{
 			Routes: routes, Resolver: podSecrets{c: c, runID: p.runID}, Masker: masker, Claim: claim,
@@ -193,19 +184,30 @@ func PipelineRequires(dir, pipeline string) ([]string, error) {
 	if path == "" || cfg == nil {
 		return nil, nil
 	}
-	if p := (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipeline); p != nil {
-		return slices.Clone(p.Requires), nil
+	p := (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipeline)
+	switch {
+	case p == nil:
+		return nil, nil
+	case len(p.Requires) == 0:
+		// safety: a pipeline that names no requires takes the project's defaults, as the dispatcher's did.
+		return slices.Clone(cfg.Defaults.Requires), nil
 	}
-	return nil, nil
+	return slices.Clone(p.Requires), nil
 }
 
 // safety: the planning claim and every node's pod plan from one context, so their spec hashes compare.
 func podRunContext(run *store.Run) nodeproto.RunContext {
-	return nodeproto.RunContext{
+	rc := nodeproto.RunContext{
 		RunID: run.ID, StartedAt: run.StartedAt,
 		Git:     &nodeproto.Git{SHA: run.GitSHA, Branch: run.GitBranch, Repo: run.DeclaredRepo, RepoURL: run.RepoURL},
-		Trigger: &nodeproto.Trigger{Source: protocolTriggerSource(run.TriggerSource)},
+		Trigger: &nodeproto.Trigger{Source: protocolTriggerSource(run.TriggerSource), User: run.TriggerUser},
 	}
+	if pr := run.PullRequest; pr != nil {
+		rc.Trigger.PullRequest = &nodeproto.PullRequest{
+			Number: pr.Number, Action: pr.Action, BaseRef: pr.BaseRef, BaseSHA: pr.BaseSHA, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA,
+		}
+	}
+	return rc
 }
 
 // safety: the node protocol knows four sources, and a run's recorded source is

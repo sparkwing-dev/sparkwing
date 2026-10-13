@@ -143,7 +143,10 @@ func (a *Admission) runLease(ctx context.Context, run *Run, claims []wingwire.Se
 	if err != nil {
 		return release, refusedRun(ctx, acquireCtx, run, claims, err), false
 	}
-	run.leaseToken = lease.Token()
+	run.leaseToken, run.leaseHoldsGroups = lease.Token(), len(claims) > 0
+	if h, ok := lease.(HostHolder); ok {
+		run.leaseHoldsHost = h.HoldsHost()
+	}
 	watching := make(chan struct{})
 	go func() {
 		defer close(watching)

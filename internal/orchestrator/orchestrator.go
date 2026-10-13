@@ -56,6 +56,10 @@ type Options struct {
 
 	Admission *LocalAdmission
 
+	// AllowUnadmitted is `sparkwing run --sw-allow-unadmitted`: run without
+	// the admission daemon even when one answers.
+	AllowUnadmitted bool
+
 	RetryOf string
 
 	RetrySource string
@@ -660,66 +664,16 @@ func statusForRunError(err error) string {
 }
 
 func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err error) {
-	if err := paths.EnsureRoot(); err != nil {
-		return nil, fmt.Errorf("ensure sparkwing root: %w", err)
-	}
-	if opts.DefaultStateDB == "" {
-		opts.DefaultStateDB = paths.StateDB()
-	}
-	ownsState := opts.State == nil
-	hosted, selection, closeHosted, selectErr := hostedBackendsForRun(ctx, paths, &opts)
-	if selectErr != nil {
-		return nil, selectErr
-	}
-	defer closeHosted()
-	if hosted.APISocket != "" {
-		// safety: profile resolution opens this machine's store only when no
-		// state backend is set yet, so the daemon's client goes in before it
-		// runs and the run opens nothing.
-		opts.State = hosted.State
-	} else if selection.standalone != "" {
-		st, sa, release, serr := openStandaloneStore(paths, opts.DryRun)
-		if serr != nil {
-			return nil, serr
-		}
-		sa.reason = selection.standalone
-		sa.warning = standaloneWarning(selection, sparkwingModuleVersion())
-		opts.State = st
-		opts.DefaultStateDB = sa.stateDB
-		opts.standalone = sa
-		// safety: registered so they unwind handle first, then the decision
-		// this run's ending settles, then the lock: a discard must never run
-		// while this run's own handle still holds the file it is removing.
-		defer release()
-		defer sa.settle()
-		defer func() { _ = st.Close() }()
-		ownsState = false
-	}
-	// safety: a standalone run holds the store the fallback already chose, so
-	// backend resolution must not reopen or replace it.
-	keepState := hosted.APISocket != "" || opts.standalone != nil
-	if err := resolveLocalBackends(&opts, paths, keepState); err != nil {
+	backends, closeBackends, err := localRunBackends(ctx, paths, &opts)
+	if err != nil {
 		return nil, err
 	}
-	var backends Backends
-	if hosted.APISocket != "" {
-		hosted.Artifact = opts.ArtifactStore
-		backends = hosted
-	} else {
-		st, ok := opts.State.(*store.Store)
-		if !ok {
-			return nil, fmt.Errorf("state backend: unrecognized implementation %T", opts.State)
-		}
-		if ownsState {
-			defer func() { err = errors.Join(err, st.Close()) }()
-		}
-		backends = LocalBackends(paths, st, opts.ArtifactStore)
-	}
+	defer func() { err = errors.Join(err, closeBackends()) }()
 	if opts.RunID == "" {
 		opts.RunID = newRunID()
 	}
 	if opts.SecretSource == nil {
-		opts.SecretSource = localSecretsFor(ctx, paths, hosted, opts.RunID, opts.Pipeline)
+		opts.SecretSource = localSecretsFor(ctx, paths, backends, opts.RunID, opts.Pipeline)
 		opts.localSecrets = true
 	}
 	if err := paths.EnsureRunDir(opts.RunID); err != nil {
@@ -747,6 +701,77 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 	}
 
 	return Run(ctx, backends, opts)
+}
+
+// safety: closeAll releases what was opened in reverse order, as the defers it replaces did.
+func localRunBackends(ctx context.Context, paths Paths, opts *Options) (_ Backends, closeAll func() error, err error) {
+	var closers []func() error
+	closeAll = func() error {
+		var errs error
+		for i := len(closers) - 1; i >= 0; i-- {
+			errs = errors.Join(errs, closers[i]())
+		}
+		return errs
+	}
+	defer func() {
+		if err != nil {
+			warnHostedClose("run backends", closeAll())
+		}
+	}()
+	if err := paths.EnsureRoot(); err != nil {
+		return Backends{}, closeAll, fmt.Errorf("ensure sparkwing root: %w", err)
+	}
+	if opts.DefaultStateDB == "" {
+		opts.DefaultStateDB = paths.StateDB()
+	}
+	ownsState := opts.State == nil
+	hosted, selection, closeHosted, err := hostedBackendsForRun(ctx, paths, opts)
+	if err != nil {
+		return Backends{}, closeAll, err
+	}
+	closers = append(closers, func() error { closeHosted(); return nil })
+	if hosted.APISocket != "" {
+		// safety: profile resolution opens this machine's store only when no
+		// state backend is set yet, so the daemon's client goes in before it
+		// runs and the run opens nothing.
+		opts.State = hosted.State
+	} else if selection.standalone != "" {
+		st, sa, release, serr := openStandaloneStore(paths, opts.DryRun)
+		if serr != nil {
+			return Backends{}, closeAll, serr
+		}
+		sa.reason = selection.standalone
+		sa.warning = standaloneWarning(selection, sparkwingModuleVersion())
+		opts.State = st
+		opts.DefaultStateDB = sa.stateDB
+		opts.standalone = sa
+		// safety: they unwind handle first, then the decision this run's
+		// ending settles, then the lock: a discard must never run while this
+		// run's own handle still holds the file it is removing.
+		closers = append(closers,
+			func() error { release(); return nil },
+			func() error { sa.settle(); return nil },
+			func() error { warnHostedClose("standalone store", st.Close()); return nil })
+		ownsState = false
+	}
+	// safety: a standalone run holds the store the fallback already chose, so
+	// backend resolution must not reopen or replace it.
+	keepState := hosted.APISocket != "" || opts.standalone != nil
+	if err := resolveLocalBackends(opts, paths, keepState); err != nil {
+		return Backends{}, closeAll, err
+	}
+	if hosted.APISocket != "" {
+		hosted.Artifact = opts.ArtifactStore
+		return hosted, closeAll, nil
+	}
+	st, ok := opts.State.(*store.Store)
+	if !ok {
+		return Backends{}, closeAll, fmt.Errorf("state backend: unrecognized implementation %T", opts.State)
+	}
+	if ownsState {
+		closers = append(closers, st.Close)
+	}
+	return LocalBackends(paths, st, opts.ArtifactStore), closeAll, nil
 }
 
 func dispatch(
@@ -1021,9 +1046,6 @@ func buildRunInvocation(opts Options, runID, logDir string, secretArgs []string)
 	if revision := os.Getenv("SPARKWING_PIPELINE_REV"); revision != "" {
 		inv["pipeline_revision"] = revision
 	}
-	if src := os.Getenv("SPARKWING_BINARY_SOURCE"); src != "" {
-		inv["binary_source"] = src
-	}
 	if wd := sparkwing.WorkDir(); wd != "" {
 		inv["cwd"] = wd
 	} else if cwd, err := os.Getwd(); err == nil && cwd != "" {
@@ -1104,24 +1126,9 @@ func buildRunFlags(opts Options) map[string]any {
 	if opts.MaxParallel > 0 {
 		flags["max_parallel"] = opts.MaxParallel
 	}
-	if v := os.Getenv("SPARKWING_ALLOW"); v != "" {
-		flags["allow"] = v
-	}
-	if v := os.Getenv("SPARKWING_REF"); v != "" {
-		flags["ref"] = v
-	}
-	if os.Getenv("SPARKWING_NO_UPDATE") == "1" {
-		flags["no_update"] = true
-	}
-	if v := os.Getenv("SPARKWING_MODE"); v != "" {
-		flags["mode"] = v
-	}
 	if opts.prioritySet {
 		flags["priority"] = opts.priority.value
 		flags["priority_source"] = opts.priority.source
-	}
-	if os.Getenv("SPARKWING_LOG_LEVEL") == "debug" {
-		flags["verbose"] = true
 	}
 	return flags
 }
@@ -1144,23 +1151,23 @@ func hashBytes(buf []byte) string {
 }
 
 func buildReproducer(opts Options, _ string) string {
-	parts := []string{"sparkwing", "run", opts.Pipeline}
-	flagKeys := make([]string, 0)
-	flags := buildRunFlags(opts)
+	return reproducerFor(opts.Pipeline, buildRunFlags(opts), opts.Args)
+}
+
+// safety: every recorded flag is rendered with the --sw- spelling sparkwing run accepts today, so the line
+// re-runs what it records; retry_of and full come from `sparkwing runs retry`, not run flags, and are left out.
+func reproducerFor(pipeline string, flags map[string]any, args map[string]string) string {
+	parts := []string{"sparkwing", "run", pipeline}
+	flagKeys := make([]string, 0, len(flags))
 	for k := range flags {
 		flagKeys = append(flagKeys, k)
 	}
 	sort.Strings(flagKeys)
 	for _, k := range flagKeys {
-		// safety: priority_source records how the number was reached; only
-		// the number itself is a flag the reader can re-type.
-		if k == "max_parallel" || k == "priority_source" {
+		if k == "max_parallel" || k == "priority_source" || k == "retry_of" || k == "full" {
 			continue
 		}
-		flagName := "--" + strings.ReplaceAll(k, "_", "-")
-		if k == "priority" {
-			flagName = "--sw-priority"
-		}
+		flagName := "--sw-" + strings.ReplaceAll(k, "_", "-")
 		switch v := flags[k].(type) {
 		case bool:
 			if v {
@@ -1174,13 +1181,13 @@ func buildReproducer(opts Options, _ string) string {
 			parts = append(parts, fmt.Sprintf("%s=%v", flagName, v))
 		}
 	}
-	argKeys := make([]string, 0, len(opts.Args))
-	for k := range opts.Args {
+	argKeys := make([]string, 0, len(args))
+	for k := range args {
 		argKeys = append(argKeys, k)
 	}
 	sort.Strings(argKeys)
 	for _, k := range argKeys {
-		parts = append(parts, "--"+k+"="+opts.Args[k])
+		parts = append(parts, "--"+k+"="+args[k])
 	}
 	return strings.Join(parts, " ")
 }

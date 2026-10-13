@@ -153,6 +153,7 @@ test("one process per node attempt plans, runs its node through the routes and e
       id: "publish",
       deps: ["build"],
       modifiers: { retry: 2, retry_backoff_ms: 1000, timeout_ms: 60000 },
+      work: { steps: [{ id: "run", is_result: true }], result_step: "run" },
     });
     assert.deepEqual(result(build, "2"), {
       outcome: "success",

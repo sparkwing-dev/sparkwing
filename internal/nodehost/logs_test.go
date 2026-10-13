@@ -335,3 +335,28 @@ func TestLogSinkWritesTheControllerLogStore(t *testing.T) {
 	writeThrough(t, orchestrator.NewLogStoreBackend(store, nil))
 	checkStored(t, readLines(t, &store.data))
 }
+
+type textLog struct {
+	recordLog
+	text []sparkwing.LogRecord
+}
+
+func (l *textLog) EmitText(rec sparkwing.LogRecord) { l.text = append(l.text, rec) }
+
+func TestLogSinkHandsPrintedTextToATextWriter(t *testing.T) {
+	log := &textLog{}
+	sink := newSink(t, log, &fakeState{})
+	sink.Record(nodeproto.LogRecord{Level: "info", Msg: "from the sdk"})
+	sink.Text(nodehost.LevelInfo, "printed "+logSecret)
+	sink.Text(nodehost.LevelWarn, "to stderr")
+	if got, exp := encoded(t, log.records), encoded(t, []sparkwing.LogRecord{{TS: hostNow, Level: "info", JobID: "build", Msg: "from the sdk"}}); got != exp {
+		t.Errorf("records:\n got %s\nwant %s", got, exp)
+	}
+	want := []sparkwing.LogRecord{
+		{TS: hostNow, Level: "info", JobID: "build", Msg: "printed ***"},
+		{TS: hostNow, Level: "warn", JobID: "build", Msg: "to stderr"},
+	}
+	if got, exp := encoded(t, log.text), encoded(t, want); got != exp {
+		t.Errorf("text:\n got %s\nwant %s", got, exp)
+	}
+}

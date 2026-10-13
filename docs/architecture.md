@@ -216,18 +216,37 @@ These are set on every runner pod:
 
 ### Environment variables set on a local node process
 
-A local run executes each node as its own process, so the same
-variables above are set on it. A run whose state lives behind the
-admission daemon also gets `SPARKWING_API_SOCKET` and no
-`SPARKWING_AGENT_TOKEN`: the node sends its state and concurrency calls
-down that unix socket and the daemon takes its peer uid as the
-principal. `SPARKWING_CONTROLLER_URL` is set either way, but on that
-path it is a placeholder host the socket transport ignores, so a step
-that dials it reaches nothing. A run that opens the store itself points
-that variable at a loopback controller the dispatcher mounts for the
-run and passes that controller's token. More variables describe the
-process boundary itself. Sparkwing sets all of them; they are not
-knobs.
+`sparkwing run` hosts the run in its own process and runs each node in a
+`--sw-node-protocol` process of the pipeline binary. The CLI talks to the
+admission daemon over its `api.sock`; the node process does not. It gets
+the user's environment without the `SPARKWING_*` variables the engine
+owns, plus the variables the [node protocol](node-protocol.md#environment-contract)
+names:
+
+| Variable | Purpose |
+|----------|---------|
+| `SPARKWING_RUN_ID` | The run the node belongs to |
+| `SPARKWING_NODE_ID` | The node the process runs |
+| `SPARKWING_NODE_URL` | The loopback base URL of the node's `/node/v1` routes |
+| `SPARKWING_NODE_TOKEN` | The bearer for those routes; the SDK removes it before any package's `init` runs |
+| `SPARKWING_DRY_RUN` | `1` in a dry run |
+| `SPARKWING_LEASE_TOKEN` | The admission lease a `sparkwing run` started inside the node attaches to instead of queueing behind it |
+
+A node reaches its run's state only through those routes, never through
+the daemon's socket or the runs store.
+
+A child run a local node starts, a detached run and a run the trigger
+runner executes still run in the pipeline binary's own dispatcher. Each of
+those node processes gets `SPARKWING_RUN_ID`, `SPARKWING_NODE_ID` and the
+variables below. A run whose state lives behind the admission daemon also
+gets `SPARKWING_API_SOCKET` and no `SPARKWING_AGENT_TOKEN`: the node sends
+its state and concurrency calls down that unix socket and the daemon takes
+its peer uid as the principal. `SPARKWING_CONTROLLER_URL` is set either
+way, but on that path it is a placeholder host the socket transport
+ignores, so a step that dials it reaches nothing. A run that opens the
+store itself points that variable at a loopback controller the dispatcher
+mounts for the run and passes that controller's token. Sparkwing sets all
+of them; they are not knobs.
 
 | Variable | Purpose |
 |----------|---------|
@@ -269,8 +288,9 @@ The controller's full route set, methods, and required scopes are in
 ```
 sparkwing run build-deploy
   → compiles .sparkwing/ into a binary
-  → runs the binary locally
-  → pipeline does whatever its code says (build, test, deploy, etc.)
+  → asks the binary for the plan over the node protocol
+  → runs each node in its own process of the binary
+  → each node does whatever its code says (build, test, deploy, etc.)
 ```
 
 ### Remote Execution (pipeline trigger)

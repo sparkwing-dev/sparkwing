@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -52,6 +53,8 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID string) error {
 		}
 	}()
 
+	attachToken := cmp.Or(childAttachTokenFromEnv(trigger.TriggerEnv), childAttachTokenFromProcessEnv())
+	warnUnattachedChild(logger, trigger, attachToken, backends.LocalCoordination)
 	args := resolveTriggerArgs(ctx, backends.State, trigger, logger)
 	opts := Options{
 		standalone:        childStandalone(backends, selection),
@@ -60,7 +63,8 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID string) error {
 		Args:              args,
 		Priority:          submittedTriggerPriority(trigger),
 		ParentRunID:       trigger.ParentRunID,
-		Admission:         pipelineAdmission(childAttachTokenFromEnv(trigger.TriggerEnv), wingwire.OriginLocal),
+		Admission:         pipelineAdmission(attachToken, wingwire.OriginLocal),
+		DryRun:            trigger.TriggerEnv[envDryRun] == "1",
 		RetryOf:           trigger.RetryOf,
 		RetrySource:       trigger.RetrySource,
 		RetryRepoDir:      trigger.TriggerEnv[retryprovenance.RepoDirKey],
@@ -178,4 +182,15 @@ func openLocalTriggerStore(paths Paths) (*store.Store, error) {
 		return nil, fmt.Errorf("open local store %s: %w", path, err)
 	}
 	return st, nil
+}
+
+// bug: an awaited child claimed outside its parent's trigger loop, such as by the resident consumer, has no
+// lease to attach to and queues on its own, possibly behind the parent waiting on it; it is said, not hidden.
+func warnUnattachedChild(logger *slog.Logger, trigger *store.Trigger, attachToken string, coordinated bool) {
+	awaited := trigger.ParentRunID != "" && strings.HasPrefix(trigger.TriggerSource, "await-pipeline")
+	if attachToken != "" || !awaited || !coordinated {
+		return
+	}
+	logger.Warn("awaited child run has no parent lease to attach to; it is admitted on its own and may "+
+		"queue behind the parent run waiting on it", "run_id", trigger.ID, "parent_run_id", trigger.ParentRunID)
 }
