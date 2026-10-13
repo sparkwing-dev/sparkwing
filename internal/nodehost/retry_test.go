@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -16,13 +17,44 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-type retryState struct{ storage.StateStore }
+type retryState struct {
+	storage.StateStore
+	consumed int
+}
 
 func (retryState) AppendEvent(context.Context, string, string, string, []byte) error { return nil }
+
+func (s retryState) GetNode(context.Context, string, string) (*store.Node, error) {
+	return &store.Node{AttemptsConsumed: s.consumed}, nil
+}
 
 func retryNode(m nodeproto.PlanModifiers) *NodeRun {
 	run := &Run{ID: testRunID, State: retryState{}, Logger: slog.New(slog.DiscardHandler)}
 	return &NodeRun{Run: run, Plan: nodeproto.PlanNode{ID: "flaky", Modifiers: &m}}
+}
+
+func TestRetryStartsPastTheAttemptsTheNodeAlreadySpent(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		consumed int
+		want     []int
+	}{
+		{"one spent", 1, []int{2, 3}},
+		{"every attempt spent", 3, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &failUntil{}
+			n := retryNode(nodeproto.PlanModifiers{Retry: 2, RetryAuto: true})
+			n.Run.State = retryState{consumed: tc.consumed}
+			res := retryLayer(nil, f.run)(t.Context(), n)
+			if fmt.Sprint(f.attempts) != fmt.Sprint(tc.want) || res.Outcome != sparkwing.Failed {
+				t.Fatalf("attempts %v outcome %s, want %v failed", f.attempts, res.Outcome, tc.want)
+			}
+			if tc.want == nil && !strings.Contains(errText(res.Err), "exhausted its 3 execution-attempt budget") {
+				t.Fatalf("err = %v, want the exhausted budget", res.Err)
+			}
+		})
+	}
 }
 
 type failUntil struct {

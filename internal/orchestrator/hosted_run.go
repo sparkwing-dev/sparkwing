@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -97,7 +98,8 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 	defer func() { warnHostedClose("node routes", routes.Close()) }()
 	state := &hostedRunState{
 		StateBackend: backends.State, logs: backends.Logs, delegate: delegate, diskRoot: backends.DiskRoot, starts: map[string]time.Time{},
-		lineage: store.Run{ParentRunID: opts.ParentRunID, RetryOf: opts.RetryOf, RetrySource: opts.RetrySource, TriggerSource: opts.Trigger.Source},
+		lineage:       store.Run{ParentRunID: opts.ParentRunID, RetryOf: opts.RetryOf, RetrySource: opts.RetrySource, TriggerSource: opts.Trigger.Source},
+		retryPlanHash: opts.RetryPlanHash,
 	}
 	admission, err := hostedAdmission(ctx, &opts, backends, state.planDoc)
 	if err != nil {
@@ -177,6 +179,9 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 				return backends.State.GetNodeOutput(ctx, runID, nodeID)
 			},
 		},
+	}
+	if cfg.Rehydrate, err = hostedRehydration(ctx, backends.State, opts, runID); err != nil {
+		return nil, err
 	}
 	if backends.LocalCoordination {
 		stopTriggers, err := hostedTriggerLoop(ctx, backends.State, runID, entry.Dir, opts.standalone)
@@ -284,6 +289,8 @@ type hostedRunState struct {
 	// safety: the run row records the surface that started the run, such as a child's await-pipeline, which
 	// the node protocol's run context names only by the protocol source it means.
 	lineage store.Run
+	// safety: a retry copies its source run's results only when it planned the same plan.
+	retryPlanHash string
 
 	mu     sync.Mutex
 	doc    *nodeproto.PlanDoc
@@ -311,6 +318,14 @@ func (s *hostedRunState) CreateRun(ctx context.Context, r store.Run) error {
 }
 
 func (s *hostedRunState) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {
+	if s.retryPlanHash != "" {
+		// safety: the plan names its own run, so the retry's is compared under the source run's id, as the
+		// source's hash was taken.
+		source := bytes.Replace(snapshot, []byte(`"run_id":"`+runID+`"`), []byte(`"run_id":"`+s.lineage.RetryOf+`"`), 1)
+		if got := hashBytes(source); got != s.retryPlanHash {
+			return fmt.Errorf("retry provenance drift: source plan %s, checkout plan %s", s.retryPlanHash, got)
+		}
+	}
 	if err := s.StateBackend.UpdatePlanSnapshot(ctx, runID, snapshot); err != nil {
 		return err
 	}
@@ -639,4 +654,25 @@ func (l hostedNodeLog) EmitText(rec sparkwing.LogRecord) {
 		rec.Level = nodehost.LevelWarn
 	}
 	l.delegate.Emit(rec)
+}
+
+// safety: a retry copies the nodes its source run already finished instead of running them, as the dispatcher
+// did, and an automatic retry with causes copies every node but those and what they reach.
+func hostedRehydration(ctx context.Context, state StateBackend, opts Options, runID string) (*nodehost.Rehydration, error) {
+	if opts.RetryOf == "" || opts.Full {
+		return nil, nil
+	}
+	r := &nodehost.Rehydration{SourceRunID: opts.RetryOf}
+	if opts.RetrySource != store.RetrySourceAuto {
+		return r, nil
+	}
+	row, err := state.GetRun(ctx, runID)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+	case err != nil:
+		return nil, fmt.Errorf("read retry run %s: %w", runID, err)
+	default:
+		r.Causes = row.RetryCauseNodeIDs
+	}
+	return r, nil
 }

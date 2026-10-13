@@ -2,9 +2,11 @@ package nodehost
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -15,22 +17,40 @@ import (
 func retryLayer(cfg *Config, next Executor) Executor {
 	return func(ctx context.Context, n *NodeRun) Result {
 		m := n.Plan.Modifiers
-		if m == nil || m.Retry <= 0 {
-			return next(ctx, n)
+		first, budget := max(n.Attempt, 1), 1
+		if m != nil {
+			budget += max(m.Retry, 0)
 		}
-		first, budget := max(n.Attempt, 1), m.Retry+1
+		// safety: attempts an earlier run of the node's lineage spent, as an agent-loss retry's row carries, come
+		// out of its budget, so a node that keeps losing its executor stops being retried.
+		row, err := n.Run.State.GetNode(ctx, n.Run.ID, n.Plan.ID)
+		switch {
+		case err != nil && !errors.Is(err, store.ErrNotFound):
+			return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("read execution attempt budget: %w", err), Final: true}
+		case err == nil && row.AttemptsConsumed >= budget:
+			return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("node %s exhausted its %d execution-attempt budget", n.Plan.ID, budget), Final: true}
+		}
+		left := budget
+		if err == nil {
+			first, left = first+row.AttemptsConsumed, budget-row.AttemptsConsumed
+		}
+		if left == 1 {
+			attempt := *n
+			attempt.Attempt = first
+			return next(ctx, &attempt)
+		}
 		backoff := millis(m.RetryBackoffMS)
 		// safety: one rule for both the loop and the attempt's Retried, so after_run
 		// runs in exactly the attempt the loop ends on.
 		retries := func(r Result) bool { return r.Outcome == sparkwing.Failed && !r.Final && ctx.Err() == nil }
 		var res Result
-		for i := range budget {
+		for i := range left {
 			if i > 0 && !retryAnnounce(ctx, cfg, n, first+i, budget, scaledBackoff(backoff, i)) {
 				return res
 			}
 			attempt := *n
 			attempt.Attempt = first + i
-			attempt.Retried = func(r Result) bool { return i+1 < budget && retries(r) }
+			attempt.Retried = func(r Result) bool { return i+1 < left && retries(r) }
 			res = next(ctx, &attempt)
 			// safety: a cancelled node is never retried, nor a failure the run's cancel caused,
 			// nor a Final one.

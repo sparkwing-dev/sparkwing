@@ -59,6 +59,9 @@ type Config struct {
 	// Workers caps how many non-inline nodes run an attempt at once; zero
 	// leaves them uncapped.
 	Workers int
+	// Rehydrate, when set, copies the results of a retried run's nodes
+	// instead of running them; nil runs every node.
+	Rehydrate *Rehydration
 }
 
 // Result is how one node ended.
@@ -288,6 +291,7 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 func runPlanned(ctx context.Context, cfg *Config, run *Run, res *RunResult) (release func()) {
 	release = func() {}
 	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(cfg)}
+	s.rehydrate, s.rerun = cfg.Rehydrate, map[string]bool{}
 	if err := s.add(ctx, ctx, run.Doc.Nodes); err != nil {
 		res.Status, res.Err = "failed", err
 		return release
@@ -392,6 +396,10 @@ type scheduler struct {
 	order   []string
 	groups  map[string]*genGroup
 	addedBy map[string]string
+	// safety: rerun records the nodes a retry runs again, so a node waiting on its deps is looked up in the
+	// source run once; only the scheduler goroutine reads it.
+	rehydrate *Rehydration
+	rerun     map[string]bool
 }
 
 type finished struct {
@@ -437,6 +445,12 @@ func (s *scheduler) startReady(ctx context.Context, done chan<- finished, runnin
 		}
 		if ctx.Err() != nil {
 			s.terminal(ctx, n.ID, sparkwing.Cancelled, "ctx-cancelled")
+			progressed = true
+			continue
+		}
+		if res, ok := s.rehydrated(ctx, n, byID); ok {
+			s.started[n.ID] = true
+			s.finish(ctx, n.ID, res)
 			progressed = true
 			continue
 		}

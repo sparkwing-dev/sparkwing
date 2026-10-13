@@ -11,6 +11,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
+	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -65,19 +66,23 @@ func HostClaimedTrigger(ctx context.Context, triggerID, program string) error {
 	admission := pipelineAdmission("", wingwire.OriginLocal)
 	admission.ParentRunID, admission.ParentNodeID = trigger.ParentRunID, trigger.ParentNodeID
 	opts := Options{
-		standalone:  childStandalone(backends, selection),
-		Pipeline:    trigger.Pipeline,
-		RunID:       trigger.ID,
-		Args:        resolveTriggerArgs(ctx, backends.State, trigger, logger),
-		Priority:    submittedTriggerPriority(trigger),
-		ParentRunID: trigger.ParentRunID,
-		Admission:   admission,
-		DryRun:      trigger.TriggerEnv[envDryRun] == "1",
-		RetryOf:     trigger.RetryOf,
-		RetrySource: trigger.RetrySource,
-		Full:        trigger.Full,
-		MaxParallel: runtime.NumCPU(),
-		Delegate:    quietRunLog{},
+		standalone:        childStandalone(backends, selection),
+		Pipeline:          trigger.Pipeline,
+		RunID:             trigger.ID,
+		Args:              resolveTriggerArgs(ctx, backends.State, trigger, logger),
+		Priority:          submittedTriggerPriority(trigger),
+		ParentRunID:       trigger.ParentRunID,
+		Admission:         admission,
+		DryRun:            trigger.TriggerEnv[envDryRun] == "1",
+		RetryOf:           trigger.RetryOf,
+		RetrySource:       trigger.RetrySource,
+		RetryRepoDir:      trigger.TriggerEnv[retryprovenance.RepoDirKey],
+		RetryRepoIdentity: trigger.TriggerEnv[retryprovenance.RepoIdentityKey],
+		RetryRevision:     trigger.TriggerEnv[retryprovenance.RevisionKey],
+		RetryPlanHash:     trigger.TriggerEnv[retryprovenance.PlanHashKey],
+		Full:              trigger.Full,
+		MaxParallel:       runtime.NumCPU(),
+		Delegate:          quietRunLog{},
 		Trigger: sparkwing.TriggerInfo{
 			Source:      trigger.TriggerSource,
 			User:        trigger.TriggerUser,
