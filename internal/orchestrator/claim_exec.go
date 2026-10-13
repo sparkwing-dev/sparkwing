@@ -111,7 +111,7 @@ func runLaunchedNode(ctx context.Context, controllerURL, runID, nodeID, token st
 	if err := c.ReportAttempt(context.WithoutCancel(ctx), runID, nodeID, report); err != nil {
 		return fmt.Errorf("report the attempt: %w", err)
 	}
-	if report.Outcome != string(sparkwing.Success) && report.Outcome != string(sparkwing.Skipped) {
+	if !sparkwing.Outcome(report.Outcome).OK() {
 		return fmt.Errorf("node %s/%s %s: %s", runID, nodeID, report.Outcome, report.Error)
 	}
 	return nil

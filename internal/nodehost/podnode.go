@@ -87,10 +87,11 @@ func hostRequires(doc nodeproto.PlanDoc, raw []byte, requires []string) (nodepro
 // safety: the layers a pod hosts around its node, in the scheduler's order.
 // The controller owns approvals and retry_auto, whose every attempt is another
 // claim and so another pod; a plain retry re-runs in the pod, as the in-pod
-// executor did. Admission runs only the node's concurrency group.
+// executor did. Memo reads and records through the claim, and admission runs
+// only the node's concurrency group.
 var (
-	podLayers     = []Layer{skipIfLayer, admissionLayer, artifactsLayer, cachesLayer, retryLayer, timeoutLayer}
-	podAutoLayers = []Layer{skipIfLayer, admissionLayer, artifactsLayer, cachesLayer, timeoutLayer}
+	podLayers     = []Layer{skipIfLayer, memoLayer, admissionLayer, artifactsLayer, cachesLayer, retryLayer, timeoutLayer}
+	podAutoLayers = []Layer{skipIfLayer, memoLayer, admissionLayer, artifactsLayer, cachesLayer, timeoutLayer}
 )
 
 // HostNode runs node nodeID of cfg's run, as a pod that claimed it does, and

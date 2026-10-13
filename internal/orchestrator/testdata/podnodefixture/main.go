@@ -26,6 +26,7 @@ type inputs struct {
 	Group  bool   `flag:"group" desc:"Put the node in a concurrency group"`
 	Refuse bool   `flag:"refuse" desc:"The traced node's before_run refuses"`
 	Pass   string `flag:"pass" secret:"true" desc:"A secret the node prints"`
+	Memo   string `flag:"memo" desc:"File a memoized node appends to each time its body runs"`
 }
 
 type pipeline struct{ sparkwing.Base }
@@ -65,6 +66,16 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 		} else {
 			build.Retry(2)
 		}
+	}
+	if in.Memo != "" {
+		sparkwing.Job(plan, "memoized", func(context.Context) error {
+			f, err := os.OpenFile(in.Memo, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(f, "body")
+			return errors.Join(err, f.Close())
+		}).Memoize(func(context.Context) (sparkwing.CacheKey, error) { return "pod-memo-v1", nil })
 	}
 	if in.Group {
 		build.Concurrency(sparkwing.NewConcurrencyGroup("pod-group", sparkwing.ConcurrencyLimit{Capacity: 1}))

@@ -81,14 +81,8 @@ func newLaunchedRun(t *testing.T, args map[string]string) *launchedRun {
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := httptest.NewServer(controller.New(st, quiet).EnableAuthFromStore().Handler())
 	t.Cleanup(srv.Close)
-	ctx := t.Context()
 	r := &launchedRun{st: st, url: srv.URL, runID: "run-pod-host"}
-	if err := st.CreateRun(ctx, store.Run{ID: r.runID, Pipeline: "podnode", Status: "pending", Args: args, StartedAt: time.Now()}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreatePlanNode(ctx, store.DefaultTeam, r.runID, time.Now()); err != nil {
-		t.Fatal(err)
-	}
+	r.create(t, args)
 	prevBinary := resolveLaunchedBinary
 	t.Cleanup(func() { resolveLaunchedBinary = prevBinary })
 	resolveLaunchedBinary = func(context.Context, string, string, string, string, string, string, *slog.Logger) (remoteBinary, error) {
@@ -97,6 +91,38 @@ func newLaunchedRun(t *testing.T, args map[string]string) *launchedRun {
 	r.src = t.TempDir()
 	t.Setenv("SPARKWING_SOURCE_DIR", r.src)
 	return r
+}
+
+// safety: a run of a GitHub repository dispatched to the controller, the only
+// kind whose claims the controller lets memoize.
+func (r *launchedRun) create(t *testing.T, args map[string]string) {
+	t.Helper()
+	ctx, now := store.WithoutCreditMetering(t.Context()), time.Now()
+	if _, err := r.st.DB().ExecContext(ctx, `INSERT INTO repos (team, repo, dispatch, updated_at) VALUES (?, ?, ?, ?)
+ON CONFLICT DO NOTHING`, string(store.DefaultTeam), store.RepoKey("acme", "widgets"), string(store.RepoDispatchController), now.UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	tn, err := r.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tn.CreateTriggerWithRun(ctx, store.Trigger{
+		ID: r.runID, Pipeline: "podnode", GithubOwner: "acme", GithubRepo: "widgets", Repo: "acme/widgets",
+		GithubRepoID: 701, GitBranch: "main", GitSHA: strings.Repeat("a", 40), CreatedAt: now,
+	}, store.Run{
+		ID: r.runID, Pipeline: "podnode", Status: "pending", Args: args, GithubOwner: "acme", GithubRepo: "widgets",
+		DeclaredRepo: "acme/widgets", CreatedAt: now, StartedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// safety: the same store, controller and checkout, so a memo entry one run records is another's to hit.
+func (r *launchedRun) another(t *testing.T, runID string, args map[string]string) *launchedRun {
+	t.Helper()
+	next := &launchedRun{st: r.st, url: r.url, runID: runID, src: r.src}
+	next.create(t, args)
+	return next
 }
 
 func (r *launchedRun) claim(t *testing.T, nodeID string) string {
@@ -369,4 +395,25 @@ func TestPodNodeLog_SealsIncompleteAfterALoss(t *testing.T) {
 	if m := ctrl.log(t).Manifest; m == nil || m.Status != logseg.StatusIncomplete || m.DroppedLines != 2 {
 		t.Fatalf("manifest = %+v, want incomplete with 2 dropped lines", m)
 	}
+}
+
+// A memoized node's second run copies the first's result through its claim
+// instead of running the body again.
+func TestLaunchedNode_MemoHitsThroughTheClaim(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "memo")
+	args := map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "memo": marker}
+	first := newLaunchedRun(t, args)
+	second := first.another(t, "run-pod-host-2", args)
+	for i, r := range []*launchedRun{first, second} {
+		if _, err := r.host(t, store.PlanNodeID); err != nil {
+			t.Fatalf("plan %d: %v", i, err)
+		}
+		if _, err := r.host(t, "memoized"); err != nil {
+			t.Fatalf("host memoized in run %d: %v", i, err)
+		}
+	}
+	if n := second.node(t, "memoized"); n.Status != "done" || n.Outcome != string(sparkwing.Cached) {
+		t.Fatalf("second run's memoized = %s/%s (%s), want done/cached", n.Status, n.Outcome, n.Error)
+	}
+	wantTrace(t, marker, "body\n")
 }

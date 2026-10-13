@@ -62,13 +62,19 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 		p.logger.Warn("pod node: the forwarded routes are off", "run_id", p.runID, "node_id", p.nodeID, "err", err)
 		claim = nil
 	}
+	slots := NewHTTPConcurrency(p.controllerURL, nil, p.token, store.DefaultConcurrencyLease)
 	nlog := &podNodeLog{sink: openNodeLogSink(ctx, c, p.runID, p.nodeID, p.logger), out: os.Stdout, logger: p.logger}
 	res := nodehost.HostNode(ctx, nodehost.Config{
 		Session:  nodehost.SessionConfig{Entry: p.binary, Dir: p.dir, Sink: podPlanSink{masker: masker}},
 		Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run),
 		State: p.state, Artifacts: p.artifacts, Logger: p.logger,
-		// safety: the node's concurrency group runs through the claim, which the controller binds to this node.
-		Admission: &nodehost.Admission{Slots: NewHTTPConcurrency(p.controllerURL, nil, p.token, store.DefaultConcurrencyLease)},
+		// safety: the node's concurrency group and memo entry run through the claim, which the controller binds to
+		// this node; a memo hit's output is the one the controller picks for the claim's key.
+		Admission: &nodehost.Admission{Slots: slots},
+		Memo: &nodehost.Memo{Slots: slots, Claimed: true, Output: func(ctx context.Context, in store.ClaimInputRequest, _, _ string) ([]byte, error) {
+			_, data, err := c.ClaimInput(ctx, p.runID, p.nodeID, in)
+			return data, err
+		}},
 		Attempts: &nodehost.Attempts{
 			Routes: routes, Resolver: podSecrets{c: c, runID: p.runID}, Masker: masker, Claim: claim,
 			OpenLog: func(context.Context, string, string) (nodehost.NodeLog, error) { return nlog, nil },
