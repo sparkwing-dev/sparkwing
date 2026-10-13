@@ -65,7 +65,7 @@ func memoLayer(cfg *Config, next Executor) Executor {
 		if mod := n.Plan.Modifiers; mod != nil {
 			g.memoTTL = time.Duration(mod.CacheTTLMS) * time.Millisecond
 		}
-		mr := &memoRun{m: m, adm: &Admission{Slots: m.Slots}, n: n, next: next, g: g}
+		mr := &memoRun{cfg: cfg, m: m, adm: &Admission{Slots: m.Slots}, n: n, next: next, g: g}
 		res, copied := mr.run(ctx, m.NoCache)
 		if copied {
 			res.expansions = memoGenerate(ctx, cfg, n, res.Output)
@@ -124,6 +124,7 @@ func (m *Memo) key(ctx context.Context, n *NodeRun, hash string) (string, error)
 }
 
 type memoRun struct {
+	cfg  *Config
 	m    *Memo
 	adm  *Admission
 	n    *NodeRun
@@ -244,7 +245,9 @@ func (r *memoRun) hit(ctx context.Context, srcRun, srcNode string, bypass bool) 
 	case err != nil:
 		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("cache hit: fetch output: %w", err)}, false
 	}
-	r.copied(ctx, srcRun, srcNode, "cache hit: reusing the result of "+srcRun+"/"+srcNode)
+	r.copied(ctx, srcRun, srcNode, sparkwing.Cached, "cache_hit", map[string]any{
+		"key": r.g.key, "cache_key_hash": r.g.memoHash, "origin_run_id": srcRun, "origin_node_id": srcNode,
+	}, map[string]any{"cache_hit": true})
 	return Result{Outcome: sparkwing.Cached, Output: output}, true
 }
 
@@ -256,22 +259,27 @@ func (r *memoRun) follow(ctx context.Context, leaderRun, leaderNode string) (Res
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("fetch leader output: %w", err)}, false
 	}
-	r.copied(ctx, leaderRun, leaderNode, "coalesced: reusing the result of "+leaderRun+"/"+leaderNode)
+	r.copied(ctx, leaderRun, leaderNode, sparkwing.Success, "coalesced", map[string]any{
+		"key": r.g.key, "leader_run_id": leaderRun, "leader_node_id": leaderNode, "leader_outcome": string(sparkwing.Success),
+	}, map[string]any{"coalesced_from": leaderRun + "/" + leaderNode})
 	return Result{Outcome: sparkwing.Success, Output: output}, true
 }
 
-func (r *memoRun) copied(ctx context.Context, srcRun, srcNode, msg string) {
+// safety: the event kinds, payloads and log attrs are the dispatcher's, which the dashboard's live stream reads.
+func (r *memoRun) copied(ctx context.Context, srcRun, srcNode string, outcome sparkwing.Outcome, kind string, event, attrs map[string]any) {
 	run, id := r.n.Run, r.n.Plan.ID
 	wctx := context.WithoutCancel(ctx)
 	if err := run.State.StartNode(wctx, run.ID, id); err != nil {
 		run.Logger.Warn("nodehost: start copied node", "node", id, "err", err)
 	}
+	hostEventJSON(wctx, run, id, kind, event)
 	if src, err := run.State.GetNode(wctx, srcRun, srcNode); err == nil && src != nil && src.ArtifactManifest != "" {
 		if err := run.State.SetNodeArtifactManifest(wctx, run.ID, id, src.ArtifactManifest); err != nil {
 			run.Logger.Warn("nodehost: copy artifact manifest", "node", id, "err", err)
 		}
 	}
-	run.Logger.Info("nodehost: "+msg, "run", run.ID, "node", id)
+	attrs["outcome"], attrs["duration_ms"] = string(outcome), int64(0)
+	hostNodeLog(wctx, r.cfg, r.n, sparkwing.LogRecord{Level: LevelInfo, Event: "node_end", Attrs: attrs})
 }
 
 // safety: a copied source never ran in a process, so its generators run in an

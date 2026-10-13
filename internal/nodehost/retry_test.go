@@ -11,12 +11,17 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
+type retryState struct{ storage.StateStore }
+
+func (retryState) AppendEvent(context.Context, string, string, string, []byte) error { return nil }
+
 func retryNode(m nodeproto.PlanModifiers) *NodeRun {
-	run := &Run{ID: testRunID, Logger: slog.New(slog.DiscardHandler)}
+	run := &Run{ID: testRunID, State: retryState{}, Logger: slog.New(slog.DiscardHandler)}
 	return &NodeRun{Run: run, Plan: nodeproto.PlanNode{ID: "flaky", Modifiers: &m}}
 }
 

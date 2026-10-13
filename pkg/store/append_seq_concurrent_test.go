@@ -17,43 +17,35 @@ const (
 	seqAppendsExpected = seqAppenders * seqAppendsEach
 )
 
-func appendEventsConcurrently(t *testing.T, st *store.Store, runID string) []int64 {
+func appendEventsConcurrently(t *testing.T, st *store.Store, runID string) int {
 	t.Helper()
 	ctx := context.Background()
 	var mu sync.Mutex
-	var seqs []int64
+	landed := 0
 	var wg sync.WaitGroup
 	for i := 0; i < seqAppenders; i++ {
 		wg.Add(1)
 		go func(worker int) {
 			defer wg.Done()
 			for j := 0; j < seqAppendsEach; j++ {
-				seq, err := st.AppendEvent(ctx, runID, fmt.Sprintf("n-%d", worker), "log", nil)
-				if err != nil {
+				if err := st.AppendEvent(ctx, runID, fmt.Sprintf("n-%d", worker), "log", nil); err != nil {
 					t.Errorf("AppendEvent(worker %d, append %d): %v", worker, j, err)
 					return
 				}
 				mu.Lock()
-				seqs = append(seqs, seq)
+				landed++
 				mu.Unlock()
 			}
 		}(i)
 	}
 	wg.Wait()
-	return seqs
+	return landed
 }
 
-func checkAppendedSeqs(t *testing.T, st *store.Store, runID string, seqs []int64) {
+func checkAppendedSeqs(t *testing.T, st *store.Store, runID string, landed int) {
 	t.Helper()
-	if len(seqs) != seqAppendsExpected {
-		t.Fatalf("appends that returned a seq = %d, want %d", len(seqs), seqAppendsExpected)
-	}
-	seen := make(map[int64]bool, len(seqs))
-	for _, seq := range seqs {
-		if seen[seq] {
-			t.Errorf("seq %d handed out twice", seq)
-		}
-		seen[seq] = true
+	if landed != seqAppendsExpected {
+		t.Fatalf("appends that landed = %d, want %d", landed, seqAppendsExpected)
 	}
 	events, err := st.ListEventsAfter(context.Background(), runID, 0, seqAppendsExpected+1)
 	if err != nil {
@@ -61,6 +53,13 @@ func checkAppendedSeqs(t *testing.T, st *store.Store, runID string, seqs []int64
 	}
 	if len(events) != seqAppendsExpected {
 		t.Errorf("stored events = %d, want %d", len(events), seqAppendsExpected)
+	}
+	seen := make(map[int64]bool, len(events))
+	for _, ev := range events {
+		if seen[ev.Seq] {
+			t.Errorf("seq %d handed out twice", ev.Seq)
+		}
+		seen[ev.Seq] = true
 	}
 }
 

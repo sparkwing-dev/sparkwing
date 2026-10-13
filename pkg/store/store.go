@@ -3748,29 +3748,24 @@ func lockRunRow(ctx context.Context, tx *storeTx, runID string) error {
 	return nil
 }
 
-// AppendEvent writes an ordered event; returns the assigned seq.
-func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) (int64, error) {
+// AppendEvent writes the run's next event in order.
+func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 	if nodeID != "" {
 		if err := s.assertNodeMutationFenceInRunsTeamTx(ctx, tx, runID, nodeID); err != nil {
-			return 0, err
+			return err
 		}
 	} else if err := s.assertRunMutationFenceInRunsTeamTx(ctx, tx, runID); err != nil {
-		return 0, err
+		return err
 	}
-
-	seq, err := appendRunEventTx(ctx, tx, runID, nodeID, kind, payload, time.Now())
-	if err != nil {
-		return 0, err
+	if _, err := appendRunEventTx(ctx, tx, runID, nodeID, kind, payload, time.Now()); err != nil {
+		return err
 	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return seq, nil
+	return tx.Commit()
 }
 
 func appendEventTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID, kind string, payload any, at time.Time) (int64, error) {

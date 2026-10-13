@@ -36,7 +36,9 @@ func artifactsLayer(cfg *Config, next Executor) Executor {
 			if err != nil {
 				return artifactFailure("stage consumed artifacts", err)
 			}
-			n.Run.Logger.Debug("nodehost: staged artifacts", "run", n.Run.ID, "node", n.Plan.ID, "files", staged)
+			if staged > 0 {
+				hostEventJSON(ctx, n.Run, n.Plan.ID, "artifacts_staged", map[string]any{"files": staged})
+			}
 		}
 		res := next(ctx, n)
 		if res.Outcome != sparkwing.Success || len(outputs) == 0 {
@@ -51,6 +53,9 @@ func artifactsLayer(cfg *Config, next Executor) Executor {
 		}
 		if err != nil {
 			return artifactFailure("publish artifacts", err)
+		}
+		if digest != "" {
+			hostEventJSON(ctx, n.Run, n.Plan.ID, "artifacts_published", map[string]any{"manifest_digest": digest})
 		}
 		return res
 	}

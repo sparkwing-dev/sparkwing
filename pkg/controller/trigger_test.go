@@ -574,7 +574,7 @@ func TestListRoutes_ClampTheirLimit(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := st.AppendEvent(ctx, "run-1", "node-1", "log", []byte(`{"line":"x"}`)); err != nil {
+		if err := st.AppendEvent(ctx, "run-1", "node-1", "log", []byte(`{"line":"x"}`)); err != nil {
 			t.Fatal(err)
 		}
 	}

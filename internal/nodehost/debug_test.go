@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -46,10 +47,14 @@ func (d *debugStore) AppendEvent(_ context.Context, _, nodeID, kind string, _ []
 	return nil
 }
 
+// hack: the lifecycle events every node writes are events_test.go's, so these tests read only the debug ones.
 func (d *debugStore) eventList() []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return slices.Clone(d.events)
+	return slices.DeleteFunc(slices.Clone(d.events), func(e string) bool {
+		_, kind, _ := strings.Cut(e, ":")
+		return slices.Contains([]string{"node_started", "node_succeeded", "node_failed", "node_cancelled", "node_skipped"}, kind)
+	})
 }
 
 func fastDebugPolls(t *testing.T) {

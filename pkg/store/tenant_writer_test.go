@@ -270,7 +270,7 @@ func TestRunOwnedRowsCarryTheRunsTeam(t *testing.T) {
 	}
 	now := time.Now()
 
-	if _, err := st.AppendEvent(ctx, "run-acme", "build", "custom", []byte(`{}`)); err != nil {
+	if err := st.AppendEvent(ctx, "run-acme", "build", "custom", []byte(`{}`)); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	if err := acme.CreateDebugPause(ctx, store.DebugPause{
@@ -362,7 +362,7 @@ func TestTriggerHolderMutatesItsOwnTeamsRun(t *testing.T) {
 		t.Fatalf("AcknowledgeNodeExecutionStart: %v", err)
 	}
 	for _, nodeID := range []string{"build", ""} {
-		if _, err := st.AppendEvent(fenced, "run-acme", nodeID, "custom", []byte(`{}`)); err != nil {
+		if err := st.AppendEvent(fenced, "run-acme", nodeID, "custom", []byte(`{}`)); err != nil {
 			t.Fatalf("AppendEvent(node %q): %v", nodeID, err)
 		}
 	}

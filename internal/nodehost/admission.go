@@ -198,6 +198,7 @@ func (a *Admission) underDaemon(ctx context.Context, n *NodeRun, g group, next E
 	// not on host capacity, so it restarts whenever the wait moves off the key.
 	var mu sync.Mutex
 	var timer *time.Timer
+	queuedOnce := false
 	defer func() {
 		mu.Lock()
 		if timer != nil {
@@ -206,6 +207,12 @@ func (a *Admission) underDaemon(ctx context.Context, n *NodeRun, g group, next E
 		mu.Unlock()
 	}()
 	onQueued := func(q wingwire.Queued) {
+		if !queuedOnce {
+			queuedOnce = true
+			hostEventJSON(ctx, n.Run, n.Plan.ID, "concurrency_wait", map[string]any{
+				"key": g.key, "kind": "queued", "position": q.Position, "queue_length": q.QueueLength,
+			})
+		}
 		if (g.policy != store.OnLimitQueue && g.policy != "") || g.queueTO <= 0 {
 			return
 		}
@@ -225,6 +232,7 @@ func (a *Admission) underDaemon(ctx context.Context, n *NodeRun, g group, next E
 		var admErr *wingdclient.AdmissionError
 		switch {
 		case errors.Is(context.Cause(acquireCtx), errQueueTimeout) && ctx.Err() == nil:
+			hostEventJSON(ctx, n.Run, n.Plan.ID, "concurrency_queue_timeout", map[string]any{"key": g.key, "queue_timeout": g.queueTO.String()})
 			return queueTimedOut(g)
 		case ctx.Err() != nil:
 			return admissionFailed(ctx, ctx.Err())
@@ -236,6 +244,7 @@ func (a *Admission) underDaemon(ctx context.Context, n *NodeRun, g group, next E
 		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("concurrency acquire(%q): %w", g.key, err)}
 	}
 	if waited() {
+		hostEvent(ctx, n.Run, n.Plan.ID, "concurrency_promoted", nil)
 		a.activity(ctx, n, "")
 	}
 	return a.runLeased(ctx, n, lease, next)
@@ -325,6 +334,7 @@ func queueTimedOut(g group) Result {
 // safety: the store knows a whole run's hold by an empty node and the holder
 // <run>/-, as the dispatcher writes it.
 type slotHolder struct {
+	run                   *Run
 	runID, nodeID, holder string
 	activity              func(detail string)
 	log                   *slog.Logger
@@ -332,7 +342,7 @@ type slotHolder struct {
 
 func (a *Admission) nodeHolder(ctx context.Context, n *NodeRun) slotHolder {
 	return slotHolder{
-		runID: n.Run.ID, nodeID: n.Plan.ID, holder: n.Run.ID + "/" + n.Plan.ID,
+		run: n.Run, runID: n.Run.ID, nodeID: n.Plan.ID, holder: n.Run.ID + "/" + n.Plan.ID,
 		activity: func(d string) { a.activity(ctx, n, d) }, log: n.Run.Logger,
 	}
 }
@@ -345,12 +355,23 @@ func (a *Admission) underSlot(ctx context.Context, h slotHolder, g group, run fu
 	if err != nil {
 		return admissionFailed(ctx, fmt.Errorf("concurrency acquire(%q): %w", g.key, err))
 	}
+	if resp.DriftNote != "" {
+		h.concEvent(ctx, g, "concurrency_drift", map[string]any{
+			"key": g.key, "previous_capacity": resp.PreviousCapacity, "new_capacity": g.capacity, "note": resp.DriftNote,
+		})
+	}
 	switch resp.Kind {
 	case store.AcquireGranted:
 		return a.holdSlot(ctx, h, g, h.holder, run)
 	case store.AcquireSkipped:
+		if h.nodeID == "" {
+			hostEvent(ctx, h.run, "", "plan_skipped_concurrent", nil)
+		}
 		return Result{Outcome: sparkwing.SkippedConcurrent}
 	case store.AcquireFailed:
+		if h.nodeID == "" {
+			hostEvent(ctx, h.run, "", "plan_failed_concurrent", nil)
+		}
 		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("concurrency key %q slot full under OnLimit:Fail", g.key)}
 	case store.AcquireQueued, store.AcquireCancellingOthers:
 		return a.waitSlot(ctx, h, g, resp, run)
@@ -359,6 +380,11 @@ func (a *Admission) underSlot(ctx context.Context, h slotHolder, g group, run fu
 }
 
 func (a *Admission) waitSlot(ctx context.Context, h slotHolder, g group, initial store.AcquireSlotResponse, run func(context.Context) Result) Result {
+	h.concEvent(ctx, g, "concurrency_wait", map[string]any{
+		"key": g.key, "kind": string(initial.Kind), "position": initial.Position,
+		"queue_length": initial.QueueLength, "holders": concHolders(initial.Holders),
+		"leader_run_id": initial.LeaderRunID, "leader_node_id": initial.LeaderNodeID,
+	})
 	if initial.Kind == store.AcquireQueued {
 		h.activity(fmt.Sprintf("queued in %s: %d ahead", g.key, initial.Position))
 	}
@@ -411,12 +437,15 @@ func (a *Admission) waitSlot(ctx context.Context, h slotHolder, g group, initial
 		case store.WaiterStillWaiting:
 			if !deadline.IsZero() && time.Now().After(deadline) {
 				cancelWaiter()
+				h.concEvent(ctx, g, "concurrency_queue_timeout", map[string]any{"key": g.key, "queue_timeout": g.queueTO.String()})
 				return queueTimedOut(g)
 			}
 		case store.WaiterPromoted:
+			h.concEvent(ctx, g, "concurrency_promoted", nil)
 			h.activity("")
 			return a.holdSlot(ctx, h, g, res.HolderID, run)
 		case store.WaiterCancelled:
+			h.concEvent(ctx, g, "concurrency_cancelled", nil)
 			return Result{Outcome: sparkwing.Superseded, Err: fmt.Errorf("concurrency key %q: waiter was cancelled or superseded", g.key)}
 		default:
 			cancelWaiter()
@@ -494,6 +523,28 @@ func (a *Admission) watchSlot(ctx context.Context, g group, holder string, done 
 			}
 		}
 	}
+}
+
+// safety: a plan group's event is the run's, scoped as the dispatcher writes
+// it, so a reader tells a run's wait from a node's. A node's promoted and
+// cancelled events carry no payload, as the dispatcher's do.
+func (h slotHolder) concEvent(ctx context.Context, g group, kind string, fields map[string]any) {
+	if h.nodeID == "" {
+		if fields == nil {
+			fields = map[string]any{}
+		}
+		fields["key"], fields["scope"], fields["resource"] = g.key, "plan", "plan_admission"
+	}
+	hostEventJSON(ctx, h.run, h.nodeID, kind, fields)
+}
+
+// safety: capped as the dispatcher caps a plan wait's holders, so one event stays small.
+func concHolders(holders []store.ConcurrencyHolder) []map[string]any {
+	out := make([]map[string]any, 0, min(len(holders), 8))
+	for _, h := range holders[:min(len(holders), 8)] {
+		out = append(out, map[string]any{"run_id": h.RunID, "node_id": h.NodeID, "holder_id": h.HolderID, "lease_expires_at": h.LeaseExpiresAt})
+	}
+	return out
 }
 
 func slotOutcome(o sparkwing.Outcome) string {

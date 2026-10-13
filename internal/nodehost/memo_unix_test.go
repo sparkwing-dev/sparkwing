@@ -4,7 +4,9 @@ package nodehost
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -99,6 +101,36 @@ func TestMemo(t *testing.T) {
 		}
 		if n := bodies("memoized"); n != 1 {
 			t.Errorf("memoized body ran %d times, want once", n)
+		}
+	})
+
+	t.Run("AHitWritesTheDispatchersCacheHitEvent", func(t *testing.T) {
+		events, err := st.ListEventsAfter(t.Context(), "run-memo-2", 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload map[string]string
+		for _, e := range events {
+			if e.NodeID == "memoized" && e.Kind == "cache_hit" {
+				if err := json.Unmarshal(e.Payload, &payload); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		want := map[string]string{"key": "memo:memo-v1", "cache_key_hash": "memo-v1", "origin_run_id": "run-memo-1", "origin_node_id": "memoized"}
+		if !maps.Equal(payload, want) {
+			t.Errorf("cache_hit payload = %v, want %v", payload, want)
+		}
+		var end map[string]any
+		logs.mu.Lock()
+		for _, r := range logs.records["run-memo-2/memoized"] {
+			if r.Event == "node_end" {
+				end = r.Attrs
+			}
+		}
+		logs.mu.Unlock()
+		if end["cache_hit"] != true || end["outcome"] != string(sparkwing.Cached) {
+			t.Errorf("memoized node_end attrs = %v, want a cached cache_hit", end)
 		}
 	})
 

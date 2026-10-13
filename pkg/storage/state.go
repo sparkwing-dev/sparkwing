@@ -17,8 +17,8 @@ import (
 // a controller opens its SQLite or Postgres *store.Store directly.
 // Methods whose wrappers add
 // adapter logic on top of the store (output extraction, trigger
-// cycle detection, simplified-error AppendEvent) live on the
-// orchestrator's runtime interface that embeds this one, not here.
+// cycle detection) live on the orchestrator's runtime interface that
+// embeds this one, not here.
 type StateStore interface {
 	// Lifecycle.
 	Close() error
@@ -52,6 +52,9 @@ type StateStore interface {
 	AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
 	SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error
 	ListNodeSteps(ctx context.Context, runID string) ([]*store.NodeStep, error)
+
+	// Events. Payload is stored as given; most kinds carry JSON.
+	AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
 
 	// Metric samples (advisory; drop-on-error is acceptable).
 	AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample store.MetricSample) error

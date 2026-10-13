@@ -74,7 +74,7 @@ func stoppedRun(ctx context.Context, err error) runEnd {
 
 func runHolder(run *Run) slotHolder {
 	return slotHolder{
-		runID: run.ID, holder: run.ID + "/-", log: run.Logger,
+		run: run, runID: run.ID, holder: run.ID + "/-", log: run.Logger,
 		activity: func(d string) {
 			if d != "" {
 				run.Logger.Info("nodehost: run queued for a plan concurrency group", "run", run.ID, "detail", d)
@@ -141,7 +141,7 @@ func (a *Admission) runLease(ctx context.Context, run *Run, claims []wingwire.Se
 		run.Logger.Info("nodehost: run queued for local admission", "run", run.ID, "key", q.Key, "position", q.Position)
 	})
 	if err != nil {
-		return release, refusedRun(ctx, acquireCtx, claims, err), false
+		return release, refusedRun(ctx, acquireCtx, run, claims, err), false
 	}
 	run.leaseToken = lease.Token()
 	watching := make(chan struct{})
@@ -166,7 +166,7 @@ func (a *Admission) runLease(ctx context.Context, run *Run, claims []wingwire.Se
 	}, runEnd{}, true
 }
 
-func refusedRun(ctx, acquireCtx context.Context, claims []wingwire.SemaphoreClaim, err error) runEnd {
+func refusedRun(ctx, acquireCtx context.Context, run *Run, claims []wingwire.SemaphoreClaim, err error) runEnd {
 	var admErr *wingdclient.AdmissionError
 	var cancelled *wingdclient.CancelledError
 	switch {
@@ -177,8 +177,13 @@ func refusedRun(ctx, acquireCtx context.Context, claims []wingwire.SemaphoreClai
 	case errors.As(err, &cancelled):
 		return runEnd{status: "cancelled", err: &CancelError{Reason: cmp.Or(cancelled.Reason, "cancelled via the admission daemon")}}
 	case errors.As(err, &admErr) && admErr.Policy == wingwire.PolicySkip:
+		hostEvent(ctx, run, "", "plan_skipped_concurrent", nil)
 		return runEnd{status: "success", skipped: true}
-	case errors.As(err, &admErr) && admErr.Policy == wingwire.PolicyFail && slices.ContainsFunc(claims, func(c wingwire.SemaphoreClaim) bool { return c.Name == admErr.Key }):
+	case errors.As(err, &admErr) && admErr.Policy == wingwire.PolicyFail:
+		hostEvent(ctx, run, "", "plan_failed_concurrent", nil)
+		if !slices.ContainsFunc(claims, func(c wingwire.SemaphoreClaim) bool { return c.Name == admErr.Key }) {
+			break
+		}
 		return runEnd{status: "failed", err: fmt.Errorf("plan concurrency group %q: slot full under OnLimit:Fail; run `sparkwing queue` to see who holds it", admErr.Key)}
 	}
 	return runEnd{status: "failed", err: fmt.Errorf("local admission: %w", err)}
