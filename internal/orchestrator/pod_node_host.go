@@ -102,10 +102,15 @@ func PipelineRequires(dir, pipeline string) ([]string, error) {
 	if path == "" || cfg == nil {
 		return nil, nil
 	}
-	if p := (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipeline); p != nil {
-		return slices.Clone(p.Requires), nil
+	p := (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipeline)
+	switch {
+	case p == nil:
+		return nil, nil
+	case len(p.Requires) == 0:
+		// safety: a pipeline that names no requires takes the project's defaults, as the dispatcher's did.
+		return slices.Clone(cfg.Defaults.Requires), nil
 	}
-	return nil, nil
+	return slices.Clone(p.Requires), nil
 }
 
 // safety: the planning claim and every node's pod plan from one context, so their spec hashes compare.

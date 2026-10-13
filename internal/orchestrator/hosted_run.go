@@ -151,10 +151,6 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 	if err != nil {
 		return nil, err
 	}
-	// safety: the dispatcher fell back to the project's defaults.requires for a pipeline that names none.
-	if p := opts.PipelineYAML; len(requires) == 0 && p != nil {
-		requires = p.Requires
-	}
 	cfg := nodehost.Config{
 		Session:  nodehost.SessionConfig{Entry: entry.Program, Dir: entry.Dir, Env: nodehost.PipelineEnv(entry.Env), Sink: hostedPlanSink{delegate}},
 		Pipeline: opts.Pipeline, Args: invokeArgs, Run: hostedRunContext(opts, runID),
@@ -227,9 +223,6 @@ func applyHostedProjectConfig(opts *Options, dir string) error {
 	if p := opts.PipelineYAML; p != nil {
 		if p.Guards.IsEmpty() {
 			p.Guards = cfg.Defaults.Guards
-		}
-		if len(p.Requires) == 0 {
-			p.Requires = cfg.Defaults.Requires
 		}
 	}
 	return RefusePinnedLocalRun(opts.PipelineYAML)
