@@ -30,7 +30,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sesv2 v1.61.0
 	github.com/aws/smithy-go v1.25.1
 	github.com/jackc/pgx/v5 v5.9.2
-	github.com/johannesboyne/gofakes3 v0.0.0-20260208201424-4c385a1f6a73
+	github.com/johannesboyne/gofakes3 v1.2.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/sparkwing-dev/sparks-core/templates v0.33.5
 	github.com/spf13/pflag v1.0.10
