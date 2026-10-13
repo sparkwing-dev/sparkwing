@@ -490,7 +490,11 @@ func (q *sinkQueue) run(sink Sink) {
 			q.mu.Unlock()
 			switch {
 			case dropped > 0:
-				sink.Text(LevelWarn, fmt.Sprintf("sparkwing: %d log lines dropped while the log sink was behind", dropped))
+				// safety: a record, not text, so the notice never joins a stream's split line.
+				sink.Record(nodeproto.LogRecord{
+					TS: time.Now().UTC().Format(time.RFC3339Nano), Level: LevelWarn,
+					Msg: fmt.Sprintf("sparkwing: %d log lines dropped while the log sink was behind", dropped),
+				})
 			case closed:
 				return
 			default:
