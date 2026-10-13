@@ -37,6 +37,16 @@ type claimState struct {
 	mu       sync.Mutex
 	finished bool
 	report   store.AttemptReport
+	manifest string
+}
+
+// safety: the manifest rides in the attempt's report, the one write a claim
+// makes to its node.
+func (s *claimState) SetNodeArtifactManifest(_ context.Context, _, _, digest string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.manifest = digest
+	return nil
 }
 
 func (s *claimState) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error {
@@ -130,7 +140,9 @@ func (s *claimState) attempt(res runner.Result, runErr error) store.AttemptRepor
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.finished {
-		return s.report
+		report := s.report
+		report.ArtifactManifest = s.manifest
+		return report
 	}
 	report := store.AttemptReport{Outcome: string(sparkwing.Failed), FailureReason: store.FailureUnknown}
 	if err := errors.Join(runErr, res.Err); err != nil {

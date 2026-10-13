@@ -94,7 +94,7 @@ func skipIfEval(ctx context.Context, sess *Session, log Sink, id string, i int, 
 // generators only once verify passes, and after_run only once no attempt follows.
 func withClosures(ctx context.Context, sess *Session, log Sink, n *NodeRun, body func() Result) Result {
 	c := closuresOf(n)
-	if max(n.Attempt, 1) == 1 {
+	if max(n.Attempt, 1) == 1 || n.BeforeRunEachAttempt {
 		for i, id := range c.BeforeRun {
 			msg, err := closureEval(ctx, sess, id, nil)
 			if err == nil && msg == nil {

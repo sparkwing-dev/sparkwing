@@ -229,6 +229,10 @@ func (r *memoRun) wait(ctx context.Context, initial store.AcquireSlotResponse, b
 func (r *memoRun) hit(ctx context.Context, srcRun, srcNode string, bypass bool) (Result, bool) {
 	n := r.n
 	if len(n.Plan.Outputs) > 0 {
+		// bug: a claim cannot read another run's node yet, so a claimed hit with artifacts runs as a miss.
+		if r.m.Claimed {
+			return r.run(ctx, true)
+		}
 		src, err := n.Run.State.GetNode(ctx, srcRun, srcNode)
 		switch {
 		case errors.Is(err, store.ErrNotFound) || (err == nil && (src == nil || src.ArtifactManifest == "")):
@@ -256,6 +260,11 @@ func (r *memoRun) hit(ctx context.Context, srcRun, srcNode string, bypass bool) 
 func (r *memoRun) follow(ctx context.Context, leaderRun, leaderNode string) (Result, bool) {
 	in := store.ClaimInputRequest{Kind: store.ClaimInputCoalesced, Key: r.g.key, CacheKeyHash: r.g.memoHash}
 	output, err := r.m.Output(ctx, in, leaderRun, leaderNode)
+	if errors.Is(err, store.ErrNotFound) && r.m.Claimed {
+		// safety: a claim finds no output once the entry expired after its leader released, so the node runs
+		// rather than succeed with nothing.
+		return r.run(ctx, true)
+	}
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("fetch leader output: %w", err)}, false
 	}

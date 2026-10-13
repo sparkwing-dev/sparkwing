@@ -2,23 +2,19 @@ package orchestrator
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"golang.org/x/mod/modfile"
-	"golang.org/x/mod/module"
-	"golang.org/x/mod/semver"
-
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -35,8 +31,8 @@ const claimLease = 2 * time.Minute
 var errRunCancelled = errors.New("the run was cancelled")
 
 // safety: this is the launcher Job's trusted process; no pipeline code runs
-// before the execution start is recorded, and the claim token is the only
-// credential the pipeline process gets.
+// before the execution start is recorded, and the pipeline process gets no
+// credential: it reaches the controller only through this process's routes.
 func runLaunchedNode(ctx context.Context, controllerURL, runID, nodeID, token string, logger *slog.Logger) error {
 	c := client.NewWithToken(controllerURL, nil, token).WithWatchObserver(NoteWatch)
 	ctx, abandon := context.WithCancelCause(ctx)
@@ -73,115 +69,82 @@ func runLaunchedNode(ctx context.Context, controllerURL, runID, nodeID, token st
 		return cause
 	}
 	src := os.Getenv("SPARKWING_SOURCE_DIR")
-	if nodeID == store.PlanNodeID {
-		if err := planSDKGap(filepath.Join(src, ".sparkwing", "go.mod")); err != nil {
-			return fail(err)
-		}
-	}
 	if err := applyGoEnvFile(filepath.Join(filepath.Dir(src), GoEnvFile)); err != nil {
 		return fail(err)
 	}
 	grant := RequestRunCacheGrant(ctx, controllerURL, token, runID, logger)
-	binary, err := resolveRemoteBinary(ctx, filepath.Join(src, ".sparkwing"), controllerURL, token, runID, "", grant, logger)
+	binary, err := resolveLaunchedBinary(ctx, filepath.Join(src, ".sparkwing"), controllerURL, token, runID, "", grant, logger)
 	if err != nil {
 		return fail(fmt.Errorf("build the pipeline: %w", err))
 	}
 	defer binary.release()
-	args := []string{"run-node", runID, nodeID}
 	if nodeID == store.PlanNodeID {
-		args = []string{"plan", "--json"}
+		return planLaunchedRun(ctx, c, src, binary.path, runID, fail)
 	}
-	// #nosec G204,G702 -- the pipeline binary this process built, run as argv without a shell
-	cmd := exec.Command(binary.path, args...)
-	cmd.Dir = src
-	cmd.Env = append(os.Environ(), authwire.CacheGrantEnv+"="+grant, SpecHashEnv+"="+specHash)
-	var logSink *nodeLogSink
-	if nodeID != store.PlanNodeID {
-		logSink = openNodeLogSink(ctx, c, runID, nodeID, logger)
-	}
-	if logSink != nil {
-		defer logSink.close(ctx, true)
-		logsURL, stopLogs, err := serveLoopbackLogs(logSink, token, logger)
-		if err != nil {
-			return fail(fmt.Errorf("serve the node's log: %w", err))
+	// safety: the grant feeds this process's cache and artifact clients; the node's process never sees it.
+	if grant != "" {
+		if err := os.Setenv(authwire.CacheGrantEnv, grant); err != nil {
+			return fail(err)
 		}
-		defer stopLogs(ctx)
-		cmd.Env = append(cmd.Env, "SPARKWING_LOGS_URL="+logsURL)
+		go renewCacheGrant(ctx, controllerURL, token, runID)
 	}
-	values, err := secrets.ShareWithChild(cmd)
+	art, err := supervisorArtifactStore(ctx, controllerURL, runID, "", grant)
+	if err != nil {
+		return fail(fmt.Errorf("open the artifact store: %w", err))
+	}
+	row, err := c.GetNode(ctx, runID, nodeID)
+	if err != nil {
+		return fail(fmt.Errorf("read the node's attempts: %w", err))
+	}
+	state := &claimState{Client: c, runID: runID, nodeID: nodeID, specHash: specHash}
+	res, err := hostPodNode(ctx, podNode{
+		binary: binary.path, dir: src, controllerURL: controllerURL, token: token, runID: runID, nodeID: nodeID,
+		specHash: specHash, attempt: row.AttemptsConsumed + 1, state: state, artifacts: art, logger: logger,
+	})
 	if err != nil {
 		return fail(err)
 	}
-	defer values.Close()
-	cmd.Stderr = values.Writer(os.Stderr)
-	var plan bytes.Buffer
-	cmd.Stdout = values.Writer(os.Stdout)
-	if nodeID == store.PlanNodeID {
-		cmd.Stdout = &plan
+	report := state.attempt(runner.Result{Outcome: res.Outcome, Err: res.Err}, nil)
+	if errors.Is(context.Cause(ctx), errRunCancelled) {
+		report.Outcome, report.FailureReason = string(sparkwing.Cancelled), ""
 	}
-	outcome, err := runAssistedChildProcess(ctx, cmd, logger)
-	if logSink != nil {
-		logSink.close(ctx, err != nil || outcome.cancelCause != nil || !exitedOnItsOwn(outcome.waitErr))
+	if err := c.ReportAttempt(context.WithoutCancel(ctx), runID, nodeID, report); err != nil {
+		return fmt.Errorf("report the attempt: %w", err)
 	}
-	switch {
-	case err != nil:
-		return fail(fmt.Errorf("start the pipeline: %w", err))
-	case outcome.cancelCause != nil:
-		return fail(fmt.Errorf("the pipeline was stopped: %w", outcome.cancelCause))
-	case outcome.waitErr != nil && nodeID == store.PlanNodeID:
-		return fail(fmt.Errorf("the pipeline could not plan the run (controller dispatch needs a sparkwing SDK with `plan --json`, %s or later): %w", MinPlanSDK, outcome.waitErr))
-	case outcome.waitErr != nil:
-		return fail(fmt.Errorf("the pipeline exited: %w", outcome.waitErr))
-	case nodeID == store.PlanNodeID:
-		if err := c.SubmitPlan(ctx, runID, plan.Bytes()); err != nil {
-			return fail(fmt.Errorf("submit the plan: %w", err))
-		}
+	if !sparkwing.Outcome(report.Outcome).OK() {
+		return fmt.Errorf("node %s/%s %s: %s", runID, nodeID, report.Outcome, report.Error)
 	}
 	return nil
 }
 
-// MinPlanSDK is the first sparkwing release whose pipeline binaries answer
-// `plan --json`, which a controller-dispatched run plans with.
-const MinPlanSDK = "v0.66.0"
+// hack: a variable so tests stand in a prebuilt binary for the build.
+var resolveLaunchedBinary = resolveRemoteBinary
 
-const sdkModule = "github.com/sparkwing-dev/sparkwing"
-
-// perf: a pin too old to plan fails before the build, the longest billed step.
-// A pseudo-version names a commit whose history this pod cannot read, so only
-// one based on MinPlanSDK or later is known to plan; a local replacement is
-// judged by the plan itself, and a missing module by the build.
-func planSDKGap(goMod string) error {
-	// #nosec G703 -- the checkout under the SPARKWING_SOURCE_DIR the launcher Job set
-	raw, err := os.ReadFile(goMod)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
+// safety: the plan is the team's code, so it runs in the pipeline's own
+// process with the minimal environment, and only the host's stamped and
+// validated plan document reaches the controller.
+func planLaunchedRun(ctx context.Context, c *client.Client, src, binary, runID string, fail func(error) error) error {
+	run, err := c.GetRunForExecution(ctx, runID)
 	if err != nil {
-		return err
+		return fail(fmt.Errorf("read run %s: %w", runID, err))
 	}
-	mf, err := modfile.Parse(goMod, raw, nil)
+	requires, err := PipelineRequires(src, run.Pipeline)
 	if err != nil {
-		return fmt.Errorf("read the pipeline's module: %w", err)
+		return fail(err)
 	}
-	for _, r := range mf.Replace {
-		if r.Old.Path == sdkModule {
-			return nil
-		}
+	masker := secrets.NewMasker()
+	sink, err := newPodPlanSink(ctx, runID, masker, os.Stderr)
+	if err != nil {
+		return fail(err)
 	}
-	for _, r := range mf.Require {
-		if r.Mod.Path != sdkModule {
-			continue
-		}
-		v := r.Mod.Version
-		if !module.IsPseudoVersion(v) {
-			if semver.Compare(v, MinPlanSDK) < 0 {
-				return fmt.Errorf("this repository's .sparkwing pins sparkwing %s, which lacks `plan --json`; pin %s or later to run on controller dispatch", v, MinPlanSDK)
-			}
-			return nil
-		}
-		if base, err := module.PseudoVersionBase(v); err != nil || semver.Compare(base, MinPlanSDK) < 0 {
-			return fmt.Errorf("this repository's .sparkwing pins sparkwing commit %s, which cannot be checked for `plan --json` before the build; pin %s or later, or a commit after it, to run on controller dispatch", v, MinPlanSDK)
-		}
+	plan, err := nodehost.PlanDocument(ctx, nodehost.SessionConfig{Entry: binary, Dir: src, Sink: sink},
+		nodehost.PlanRequest{Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run), Requires: requires, Masker: masker})
+	sink.end()
+	if err != nil {
+		return fail(fmt.Errorf("the pipeline could not plan the run: %s", masker.Mask(err.Error())))
+	}
+	if err := c.SubmitPlan(ctx, runID, plan.JSON); err != nil {
+		return fail(fmt.Errorf("submit the plan: %w", err))
 	}
 	return nil
 }

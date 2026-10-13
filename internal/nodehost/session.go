@@ -113,6 +113,7 @@ type Session struct {
 	closeOnce sync.Once
 	usage     Usage
 	closeErr  error
+	lost      int
 }
 
 // StartSession starts cfg.Entry as the leader of a new process session with
@@ -287,8 +288,12 @@ func (s *Session) Close() (Usage, error) {
 			close(delivered)
 		}()
 		// safety: a sink that never returns is abandoned after the grace so
-		// the session still ends and its sampler stops.
-		s.await(delivered)
+		// the session still ends and its sampler stops; what it never got is
+		// counted, so the log does not read as complete.
+		abandoned := !s.await(delivered)
+		for _, q := range s.queues {
+			s.lost += q.lost(abandoned)
+		}
 		s.usage = s.sampler.Stop(s.cmd.ProcessState)
 		err := s.failure()
 		if errors.Is(err, ErrClosed) {
@@ -300,6 +305,11 @@ func (s *Session) Close() (Usage, error) {
 	})
 	return s.usage, s.closeErr
 }
+
+// Lost is how many output lines and records the sink missed: those dropped
+// while it was behind, and those still queued or in delivery when [Session.Close]
+// gave up waiting for it. Read it only after Close returns.
+func (s *Session) Lost() int { return s.lost }
 
 func (s *Session) fail(err error) {
 	s.mu.Lock()
@@ -458,6 +468,7 @@ type sinkQueue struct {
 	items   []sinkItem
 	bytes   int
 	dropped int
+	total   int
 	closed  bool
 	wake    chan struct{}
 	done    chan struct{}
@@ -473,12 +484,28 @@ func (q *sinkQueue) push(item sinkItem) {
 	q.mu.Lock()
 	if q.bytes > 0 && q.bytes+item.size > sinkQueueBytes {
 		q.dropped++
+		q.total++
 	} else {
 		q.items = append(q.items, item)
 		q.bytes += item.size
 	}
 	q.mu.Unlock()
 	q.signal()
+}
+
+// safety: an abandoned queue still runs, so its item in delivery counts as lost too.
+func (q *sinkQueue) lost(abandoned bool) int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	n := q.total
+	if abandoned {
+		select {
+		case <-q.done:
+		default:
+			n += len(q.items) + 1
+		}
+	}
+	return n
 }
 
 func (q *sinkQueue) close() {

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 type describeDoc struct {
@@ -16,13 +17,16 @@ type describeDoc struct {
 		Args []struct {
 			Name    string `json:"name"`
 			Default string `json:"default"`
+			Secret  bool   `json:"secret"`
 		} `json:"args"`
 	} `json:"pipelines"`
 }
 
 // safety: describe runs before the run row exists, so an entry that speaks
 // another protocol or lacks the pipeline is refused without recording a run.
-func describeArgs(ctx context.Context, s *Session, pipeline string, args map[string]string) (map[string]string, error) {
+// The value of every flag describe marks secret is registered with masker,
+// when set, before any process of the run can print it.
+func describeArgs(ctx context.Context, s *Session, pipeline string, args map[string]string, masker *secrets.Masker) (map[string]string, error) {
 	var doc describeDoc
 	if err := ask(ctx, s, nodeproto.Request{Op: nodeproto.OpDescribe}, &doc); err != nil {
 		return nil, err
@@ -42,6 +46,11 @@ func describeArgs(ctx context.Context, s *Session, pipeline string, args map[str
 		}
 		for k, v := range args {
 			merged[k] = v
+		}
+		for _, a := range p.Args {
+			if a.Secret && masker != nil && merged[a.Name] != "" {
+				masker.Register(merged[a.Name])
+			}
 		}
 		return merged, nil
 	}
