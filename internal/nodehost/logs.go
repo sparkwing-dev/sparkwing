@@ -1,6 +1,7 @@
 package nodehost
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -52,10 +53,21 @@ type LogSink struct {
 
 	mu sync.Mutex
 	// safety: the session splits a line longer than maxTextLine, so the tail
-	// of a long piece waits for the next piece, and a secret spanning the
-	// split is masked whole.
-	carry map[string]string
+	// of a long piece waits for the next piece of the same stream, and a
+	// secret spanning the split is masked whole.
+	carry [2]string
 }
+
+// safety: only the stdout reader sends LevelInfo text and only the stderr
+// reader LevelWarn, so the level names the stream a carry belongs to.
+func stream(level string) int {
+	if level == LevelInfo {
+		return 0
+	}
+	return 1
+}
+
+var streamLevels = [2]string{LevelInfo, LevelWarn}
 
 // safety: an allowlist, so an event the SDK invents can never pass as a host lifecycle record.
 var sdkEvents = map[string]bool{
@@ -77,17 +89,18 @@ func NewLogSink(ctx context.Context, cfg LogSinkConfig) (*LogSink, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	return &LogSink{cfg: cfg, ctx: context.WithoutCancel(ctx), carry: map[string]string{}}, nil
+	return &LogSink{cfg: cfg, ctx: context.WithoutCancel(ctx)}, nil
 }
 
 // Text stores one stdout or stderr line as a plain message at level.
 func (s *LogSink) Text(level, line string) {
+	src := stream(level)
 	s.mu.Lock()
-	text := s.carry[level] + line
-	delete(s.carry, level)
+	text := s.carry[src] + line
+	s.carry[src] = ""
 	if len(line) >= maxTextLine {
 		cut := s.safeCut(text)
-		text, s.carry[level] = text[:cut], text[cut:]
+		text, s.carry[src] = text[:cut], text[cut:]
 	}
 	s.mu.Unlock()
 	if text != "" {
@@ -99,15 +112,18 @@ func (s *LogSink) Text(level, line string) {
 func (s *LogSink) Flush() {
 	s.mu.Lock()
 	carry := s.carry
-	s.carry = map[string]string{}
+	s.carry = [2]string{}
 	s.mu.Unlock()
-	for level, text := range carry {
-		s.emit(sparkwing.LogRecord{Level: level, Msg: s.cfg.Masker.Mask(text)})
+	for src, text := range carry {
+		if text != "" {
+			s.emit(sparkwing.LogRecord{Level: streamLevels[src], Msg: s.cfg.Masker.Mask(text)})
+		}
 	}
 }
 
-// safety: no masked value may straddle the cut, and the held rest is shorter
-// than the longest value, so the next piece can complete it.
+// safety: the held rest is shorter than the longest value, so the next piece
+// can complete a value it starts; a value straddling the cut moves the cut
+// past its end, which bounds both the hold and the scan.
 func (s *LogSink) safeCut(text string) int {
 	values := s.cfg.Masker.Values()
 	longest := 0
@@ -123,7 +139,7 @@ func (s *LogSink) safeCut(text string) int {
 				continue
 			}
 			if i := strings.Index(text[lo:hi], v); i >= 0 && lo+i < cut {
-				cut, moved = lo+i, true
+				cut, moved = lo+i+len(v), true
 			}
 		}
 	}
@@ -141,11 +157,7 @@ func (s *LogSink) Record(rec nodeproto.LogRecord) {
 		out.Event = rec.Event
 	}
 	if len(rec.Attrs) > 0 {
-		// safety: attrs that fail to decode are left out rather than stored unmasked.
-		if err := json.Unmarshal(rec.Attrs, &out.Attrs); err != nil {
-			out.Attrs = nil
-		}
-		out.Attrs = s.cfg.Masker.MaskAttrs(out.Attrs)
+		out.Attrs = s.maskAttrs(rec.Attrs)
 	}
 	if err := s.persist(out); err != nil {
 		s.emit(sparkwing.LogRecord{
@@ -155,6 +167,31 @@ func (s *LogSink) Record(rec nodeproto.LogRecord) {
 		})
 	}
 	s.emit(out)
+}
+
+// safety: masking the canonical JSON text as a whole reaches keys and numbers
+// too; text the masking left unparseable is stored as one masked string.
+func (s *LogSink) maskAttrs(raw json.RawMessage) map[string]any {
+	text := string(raw)
+	var v any
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if dec.Decode(&v) == nil {
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		if enc.Encode(v) == nil {
+			text = strings.TrimSuffix(buf.String(), "\n")
+		}
+	}
+	masked := s.cfg.Masker.Mask(text)
+	var out map[string]any
+	dec = json.NewDecoder(strings.NewReader(masked))
+	dec.UseNumber()
+	if dec.Decode(&out) != nil || dec.More() {
+		return map[string]any{"masked_attrs": masked}
+	}
+	return out
 }
 
 func (s *LogSink) persist(rec sparkwing.LogRecord) error {

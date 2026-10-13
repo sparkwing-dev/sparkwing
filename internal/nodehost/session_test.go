@@ -425,7 +425,12 @@ func (b *blockingSink) Text(level, line string) {
 	b.text = append(b.text, level+" "+line)
 }
 
-func (b *blockingSink) Record(nodeproto.LogRecord) { <-b.release }
+func (b *blockingSink) Record(rec nodeproto.LogRecord) {
+	<-b.release
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.text = append(b.text, rec.Level+" "+rec.Msg)
+}
 
 func TestSessionBlockedSinkNeitherStallsRepliesNorClose(t *testing.T) {
 	sink := &blockingSink{release: make(chan struct{})}

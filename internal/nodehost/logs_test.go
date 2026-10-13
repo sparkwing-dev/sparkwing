@@ -67,10 +67,12 @@ func (s *fakeState) SetStepSummary(_ context.Context, run, node, step, md string
 	return s.note("step-summary " + run + "/" + node + "/" + step + " " + md)
 }
 
-func newSink(t *testing.T, log nodehost.RecordWriter, state nodehost.NodeState) *nodehost.LogSink {
+func newSink(t *testing.T, log nodehost.RecordWriter, state nodehost.NodeState, more ...string) *nodehost.LogSink {
 	t.Helper()
 	masker := secrets.NewMasker()
-	masker.Register(logSecret)
+	for _, v := range append([]string{logSecret}, more...) {
+		masker.Register(v)
+	}
 	sink, err := nodehost.NewLogSink(context.Background(), nodehost.LogSinkConfig{
 		RunID: "run-1", NodeID: "build", Log: log, State: state, Masker: masker,
 		Now: func() time.Time { return hostNow },
@@ -125,6 +127,64 @@ func TestLogSinkMasksSecretSplitAcrossLinePieces(t *testing.T) {
 	}
 	if warn.String() != long {
 		t.Fatalf("held tail of an unfinished line not flushed: got %d bytes, want %d", warn.Len(), len(long))
+	}
+}
+
+func TestLogSinkMasksAttrKeysNumbersAndNestedValues(t *testing.T) {
+	log := &recordLog{}
+	sink := newSink(t, log, &fakeState{}, "1234567")
+	sink.Record(nodeproto.LogRecord{TS: "x", Attrs: json.RawMessage(`{"` + logSecret + `":"ok","n":3}`)})
+	sink.Record(nodeproto.LogRecord{TS: "x", Attrs: json.RawMessage(`{"pin":1234567,"big":12345678}`)})
+	sink.Record(nodeproto.LogRecord{TS: "x", Attrs: json.RawMessage(`{"a":{"b":["x","<` + logSecret + `>"]}}`)})
+	got := encoded(t, log.records)
+	if strings.Contains(got, logSecret) || strings.Contains(got, "1234567") {
+		t.Fatalf("attrs not masked: %s", got)
+	}
+	if log.records[0].Attrs["***"] != "ok" || log.records[0].Attrs["n"] != json.Number("3") {
+		t.Errorf("masked key record = %+v", log.records[0].Attrs)
+	}
+	if log.records[1].Attrs["masked_attrs"] != `{"big":***8,"pin":***}` {
+		t.Errorf("unparseable masked attrs = %+v", log.records[1].Attrs)
+	}
+	if b, _ := log.records[2].Attrs["a"].(map[string]any)["b"].([]any); len(b) != 2 || b[1] != "<***>" {
+		t.Errorf("nested secret not masked in place: %+v", log.records[2].Attrs)
+	}
+}
+
+func TestLogSinkKeepsDropNoticesOutOfASplitStderrSecret(t *testing.T) {
+	log := &recordLog{}
+	sink := newSink(t, log, &fakeState{})
+	head := strings.Repeat("x", nodehost.MaxTextLine-4)
+	sink.Text(nodehost.LevelWarn, head+logSecret[:4])
+	sink.Record(nodeproto.LogRecord{TS: "x", Level: "warn", Msg: "sparkwing: 3 log lines dropped while the log sink was behind"})
+	sink.Text(nodehost.LevelWarn, logSecret[4:]+" tail")
+	sink.Flush()
+	var stderr strings.Builder
+	for _, rec := range log.records {
+		if !strings.Contains(rec.Msg, "dropped") {
+			stderr.WriteString(rec.Msg)
+		}
+	}
+	if stderr.String() != head+"*** tail" || strings.Contains(encoded(t, log.records), logSecret[4:]) {
+		t.Fatal("drop notice broke the split stderr secret apart")
+	}
+}
+
+func TestLogSinkHoldsAtMostOneValueOfOverlappingText(t *testing.T) {
+	log := &recordLog{}
+	sink := newSink(t, log, &fakeState{}, "aa")
+	run := strings.Repeat("a", nodehost.MaxTextLine)
+	for i := range 3 {
+		sink.Text(nodehost.LevelInfo, run)
+		if len(log.records) != i+1 || len(log.records[i].Msg) < nodehost.MaxTextLine {
+			t.Fatalf("piece %d held back: %d records stored", i, len(log.records))
+		}
+	}
+	sink.Flush()
+	for _, rec := range log.records {
+		if strings.Contains(rec.Msg, "aa") {
+			t.Fatalf("overlapping secret stored unmasked in a %d-byte record", len(rec.Msg))
+		}
 	}
 }
 
