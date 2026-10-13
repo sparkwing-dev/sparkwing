@@ -506,8 +506,7 @@ func openSQL(ctx context.Context, driver, dsn string, dialect Dialect, remedy st
 
 	s := &Store{db: db, dialect: dialect}
 	if err := s.migrate(ctx, remedy); err != nil {
-		_ = db.Close()
-		return nil, err
+		return nil, errors.Join(err, db.Close())
 	}
 	return s, nil
 }
@@ -608,7 +607,9 @@ func appendRunAnnotation(tx *storeTx, team Team, runID, msg string) error {
 	}
 	var list []string
 	if len(blob) > 0 {
-		_ = json.Unmarshal(blob, &list)
+		if err := json.Unmarshal(blob, &list); err != nil {
+			return fmt.Errorf("read run %s annotations: %w", runID, err)
+		}
 	}
 	if len(list) >= MaxRunAnnotations {
 		return ErrRunAnnotationLimit
@@ -6287,6 +6288,14 @@ func (s *Store) createBaseline(ctx context.Context, remedy string) error {
 	case expectedSchemaVersion:
 		return nil
 	case 0:
+		empty, err := databaseEmpty(ctx, tx)
+		if err != nil {
+			return fmt.Errorf("inspect the database before creating the baseline: %w", err)
+		}
+		if !empty {
+			return errors.New("sparkwing: this database is not empty and is not a Sparkwing store " +
+				"(it holds tables but no sparkwing_schema_version); point sparkwing at an empty database")
+		}
 	default:
 		return fmt.Errorf("sparkwing: this store predates the baseline (it records schema version %d, this build "+
 			"creates version %d and upgrades none); %s and start again", version, expectedSchemaVersion, remedy)
@@ -6325,4 +6334,15 @@ func recordedSchemaVersion(ctx context.Context, tx *storeTx) (int, error) {
 	var version int
 	err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM sparkwing_schema_version`).Scan(&version)
 	return version, err
+}
+
+// safety: a database with no version table may still be someone else's, and the baseline must not land beside it.
+func databaseEmpty(ctx context.Context, tx *storeTx) (bool, error) {
+	q := `SELECT COUNT(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'`
+	if tx.dialect == DialectPostgres {
+		q = `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema()`
+	}
+	var n int
+	err := tx.QueryRowContext(ctx, q).Scan(&n)
+	return n == 0, err
 }

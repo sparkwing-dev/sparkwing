@@ -3,6 +3,7 @@ package store_test
 import (
 	"database/sql"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -257,4 +258,59 @@ func rows(t *testing.T, db *sql.DB, query string, args ...any) [][]string {
 		t.Fatal(err)
 	}
 	return out
+}
+
+// A database holding someone else's tables is refused rather than given the
+// baseline beside them, whatever the dialect.
+func TestOpenRefusesANonEmptyForeignDatabase(t *testing.T) {
+	t.Run("sqlite", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "foreign.db")
+		db, err := sql.Open("sqlite", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seedForeignTable(t, db)
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.Open(path); err == nil || !strings.Contains(err.Error(), "not empty") {
+			t.Fatalf("Open over a foreign database = %v, want the not-empty refusal", err)
+		}
+		db, err = sql.Open("sqlite", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = db.Close() }()
+		if got := column(t, db, `SELECT name FROM sqlite_master WHERE type = 'table'`); !slices.Equal(got, []string{"customer_records"}) {
+			t.Fatalf("tables after the refused open = %v, want only the foreign one", got)
+		}
+	})
+	t.Run("postgres", func(t *testing.T) {
+		dsn := storetest.NewPostgres(t).DSN()
+		db, err := sql.Open("pgx", dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = db.Close() }()
+		seedForeignTable(t, db)
+		if _, err := store.OpenPostgres(t.Context(), dsn); err == nil || !strings.Contains(err.Error(), "not empty") {
+			t.Fatalf("OpenPostgres over a foreign schema = %v, want the not-empty refusal", err)
+		}
+		got := column(t, db, `SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema()`)
+		if !slices.Equal(got, []string{"customer_records"}) {
+			t.Fatalf("tables after the refused open = %v, want only the foreign one", got)
+		}
+	})
+}
+
+func seedForeignTable(t *testing.T, db *sql.DB) {
+	t.Helper()
+	for _, q := range []string{
+		`CREATE TABLE customer_records (id INTEGER PRIMARY KEY, value TEXT)`,
+		`INSERT INTO customer_records (id, value) VALUES (1, 'foreign data')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
 }

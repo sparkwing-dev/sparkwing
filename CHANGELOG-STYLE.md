@@ -165,7 +165,8 @@ The store has one baseline schema, `pkg/store/schema_sqlite.sql` and
 store at any other schema version. Change both files together and bump
 `expectedSchemaVersion` in `pkg/store/store.go`, which strands every
 existing store, so the change needs a `(Breaking)` entry naming the
-schema. Compatibility, and migrations with it, start again at paid
+schema. The release refuses a tag whose baseline SQL differs from the
+previous release's while the version stays the same. Compatibility, and migrations with it, start again at paid
 launch with the baseline as version 1.
 
 ## Pre-release manicuring (what the agent does)

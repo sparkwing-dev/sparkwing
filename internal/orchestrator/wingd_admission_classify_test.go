@@ -100,18 +100,20 @@ func TestReasonlessDaemonKeysKeepTheirPreviousShape(t *testing.T) {
 	}
 }
 
-func TestDaemonStoreSchemaSkewAcceptsMatchingAndUnknownDaemons(t *testing.T) {
+func TestDaemonStoreSchemaSkewAcceptsOnlyAMatchingDaemon(t *testing.T) {
+	if err := daemonStoreSchemaSkew("v0.39.0", "v0.39.0", 26, 26); err != nil {
+		t.Fatalf("skew error = %v, want none for a matching daemon", err)
+	}
 	for _, tc := range []struct {
 		name         string
 		daemonSchema int
 	}{
 		{"daemon predates the field", 0},
-		{"daemon matches", 26},
 		{"daemon is ahead", 27},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := daemonStoreSchemaSkew("v0.39.0", "v0.39.0", tc.daemonSchema, 26); err != nil {
-				t.Fatalf("skew error = %v, want none", err)
+			if err := daemonStoreSchemaSkew("v0.39.0", "v0.39.0", tc.daemonSchema, 26); !errors.Is(err, ErrDaemonStoreSchemaTooOld) {
+				t.Fatalf("skew error = %v, want ErrDaemonStoreSchemaTooOld", err)
 			}
 		})
 	}

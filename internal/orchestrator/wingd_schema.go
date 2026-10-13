@@ -30,12 +30,12 @@ func (la *LocalAdmission) ensureDaemon(ctx context.Context) (*wingdclient.Client
 }
 
 func daemonStoreSchemaSkew(daemonVersion, selfVersion string, daemonSchema, selfSchema int) error {
-	if daemonSchema == 0 || daemonSchema >= selfSchema {
+	if daemonSchema == selfSchema {
 		return nil
 	}
 	return storeSchemaRemedy(fmt.Sprintf(
 		"daemon %s understands runs-store schema %d, this binary is %s at schema %d, "+
-			"and the store both share is migrated to the newer one",
+			"and each refuses a store the other creates",
 		describeVersion(daemonVersion), daemonSchema, describeVersion(selfVersion), selfSchema), selfSchema)
 }
 

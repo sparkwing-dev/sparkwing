@@ -123,3 +123,25 @@ func TestLintSchemaBreak_SchemaMentionWithoutBreakingMarkerFails(t *testing.T) {
 			len(issues), formatAllIssues(issues))
 	}
 }
+
+func TestSchemaSQLDrift(t *testing.T) {
+	same := map[string]string{
+		"pkg/store/schema_sqlite.sql":   "CREATE TABLE runs (id TEXT);\n",
+		"pkg/store/schema_postgres.sql": "CREATE TABLE runs (id text);\n",
+	}
+	if err := schemaSQLDrift("v0.70.0", 1, same, same); err != nil {
+		t.Fatalf("identical baselines = %v, want none", err)
+	}
+	edited := map[string]string{
+		"pkg/store/schema_sqlite.sql":   "CREATE TABLE runs (run_id TEXT);\n",
+		"pkg/store/schema_postgres.sql": same["pkg/store/schema_postgres.sql"],
+	}
+	err := schemaSQLDrift("v0.70.0", 1, same, edited)
+	if err == nil || !strings.Contains(err.Error(), "schema SQL changed without bumping the schema version") ||
+		!strings.Contains(err.Error(), "schema_sqlite.sql") || strings.Contains(err.Error(), "schema_postgres.sql") {
+		t.Fatalf("an edited SQLite baseline = %v, want the drift refusal naming only that file", err)
+	}
+	if err := schemaSQLDrift("v0.70.0", 1, map[string]string{}, same); err == nil {
+		t.Fatal("a tag without the baseline files passed the drift check")
+	}
+}

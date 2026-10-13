@@ -1510,7 +1510,7 @@ const OnLimitFail = "fail"
 const OnLimitQueue = "queue"
 const OnLimitSkip = "skip"
 func Open(path string) (*Store, error)
-func OpenPostgres(_ context.Context, dsn string) (*Store, error)
+func OpenPostgres(ctx context.Context, dsn string) (*Store, error)
 func OpenReadOnly(path string) (*Store, error)
 func OpenReadOnlySnapshot(path string) (*Store, error)
 type Operator struct{}

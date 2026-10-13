@@ -798,6 +798,25 @@ const storeSchemaSourcePath = "pkg/store/store.go"
 
 var storeSchemaConstRe = regexp.MustCompile(`(?m)^const\s+expectedSchemaVersion\s*=\s*(\d+)\b`)
 
+var storeSchemaSQLPaths = []string{"pkg/store/schema_sqlite.sql", "pkg/store/schema_postgres.sql"}
+
+// safety: a store at an unchanged version is accepted as-is, so a baseline edit that keeps the
+// number would open old stores against a schema they do not have.
+func schemaSQLDrift(prevTag string, schema int, prev, cur map[string]string) error {
+	var changed []string
+	for _, path := range storeSchemaSQLPaths {
+		if before, ok := prev[path]; !ok || before != cur[path] {
+			changed = append(changed, path)
+		}
+	}
+	if len(changed) == 0 {
+		return nil
+	}
+	return fmt.Errorf("release: schema SQL changed without bumping the schema version: %s differ from %s at schema %d; "+
+		"bump expectedSchemaVersion in %s and mark the change (Breaking)",
+		strings.Join(changed, " and "), prevTag, schema, storeSchemaSourcePath)
+}
+
 func parseStoreSchemaVersion(goSource string) (int, error) {
 	m := storeSchemaConstRe.FindStringSubmatch(goSource)
 	if m == nil {
@@ -851,6 +870,21 @@ func checkSchemaBreak(ctx context.Context, repoDir, version string) error {
 		return fmt.Errorf("release: schema at %s: %w", prevTag, err)
 	}
 	if prevSchema == curSchema {
+		prevSQL, curSQL := map[string]string{}, map[string]string{}
+		for _, path := range storeSchemaSQLPaths {
+			cur, err := os.ReadFile(filepath.Join(repoDir, filepath.FromSlash(path)))
+			if err != nil {
+				return fmt.Errorf("release: read %s: %w", path, err)
+			}
+			curSQL[path] = string(cur)
+			// safety: a file the tag lacks reads as changed, which fails loudly rather than passing a schema nobody compared.
+			if prev, err := runGitIn(ctx, repoDir, "show", prevTag+":"+path); err == nil {
+				prevSQL[path] = prev
+			}
+		}
+		if err := schemaSQLDrift(prevTag, curSchema, prevSQL, curSQL); err != nil {
+			return err
+		}
 		sparkwing.Info(ctx, "runs-store schema unchanged since %s (schema %d); gate passes", prevTag, curSchema)
 		return nil
 	}

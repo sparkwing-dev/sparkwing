@@ -60,6 +60,9 @@ func startWingd(t *testing.T, home string, cores float64) {
 
 func startWingdCfg(t *testing.T, cfg wingd.Config) {
 	t.Helper()
+	if cfg.StoreSchemaVersion == 0 {
+		cfg.StoreSchemaVersion = store.ExpectedSchemaVersion()
+	}
 	if cfg.Runs == nil {
 		runs, err := NewHeldRunStore(cfg.Home)
 		if err != nil {
