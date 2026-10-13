@@ -166,11 +166,15 @@ func (r *compactRunRenderer) Err() error {
 }
 
 func selectRunRenderer() sparkwing.Logger {
-	format := strings.ToLower(os.Getenv("SPARKWING_LOG_FORMAT"))
-	if (format == "json" || (format == "" && !isInteractiveStdout())) && os.Getenv("SPARKWING_LOG_LEVEL") != "debug" {
+	return runRenderer(os.Getenv("SPARKWING_LOG_FORMAT"), os.Getenv("SPARKWING_LOG_LEVEL") == "debug")
+}
+
+func runRenderer(format string, verbose bool) sparkwing.Logger {
+	format = strings.ToLower(format)
+	if (format == "json" || (format == "" && !isInteractiveStdout())) && !verbose {
 		return newCompactRunRenderer(os.Stdout)
 	}
-	return selectLocalRenderer()
+	return localRenderer(format)
 }
 
 func runDisplayError(renderer sparkwing.Logger, err error) string {

@@ -660,66 +660,16 @@ func statusForRunError(err error) string {
 }
 
 func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err error) {
-	if err := paths.EnsureRoot(); err != nil {
-		return nil, fmt.Errorf("ensure sparkwing root: %w", err)
-	}
-	if opts.DefaultStateDB == "" {
-		opts.DefaultStateDB = paths.StateDB()
-	}
-	ownsState := opts.State == nil
-	hosted, selection, closeHosted, selectErr := hostedBackendsForRun(ctx, paths, &opts)
-	if selectErr != nil {
-		return nil, selectErr
-	}
-	defer closeHosted()
-	if hosted.APISocket != "" {
-		// safety: profile resolution opens this machine's store only when no
-		// state backend is set yet, so the daemon's client goes in before it
-		// runs and the run opens nothing.
-		opts.State = hosted.State
-	} else if selection.standalone != "" {
-		st, sa, release, serr := openStandaloneStore(paths, opts.DryRun)
-		if serr != nil {
-			return nil, serr
-		}
-		sa.reason = selection.standalone
-		sa.warning = standaloneWarning(selection, sparkwingModuleVersion())
-		opts.State = st
-		opts.DefaultStateDB = sa.stateDB
-		opts.standalone = sa
-		// safety: registered so they unwind handle first, then the decision
-		// this run's ending settles, then the lock: a discard must never run
-		// while this run's own handle still holds the file it is removing.
-		defer release()
-		defer sa.settle()
-		defer func() { _ = st.Close() }()
-		ownsState = false
-	}
-	// safety: a standalone run holds the store the fallback already chose, so
-	// backend resolution must not reopen or replace it.
-	keepState := hosted.APISocket != "" || opts.standalone != nil
-	if err := resolveLocalBackends(&opts, paths, keepState); err != nil {
+	backends, closeBackends, err := localRunBackends(ctx, paths, &opts)
+	if err != nil {
 		return nil, err
 	}
-	var backends Backends
-	if hosted.APISocket != "" {
-		hosted.Artifact = opts.ArtifactStore
-		backends = hosted
-	} else {
-		st, ok := opts.State.(*store.Store)
-		if !ok {
-			return nil, fmt.Errorf("state backend: unrecognized implementation %T", opts.State)
-		}
-		if ownsState {
-			defer func() { err = errors.Join(err, st.Close()) }()
-		}
-		backends = LocalBackends(paths, st, opts.ArtifactStore)
-	}
+	defer func() { err = errors.Join(err, closeBackends()) }()
 	if opts.RunID == "" {
 		opts.RunID = newRunID()
 	}
 	if opts.SecretSource == nil {
-		opts.SecretSource = localSecretsFor(ctx, paths, hosted, opts.RunID, opts.Pipeline)
+		opts.SecretSource = localSecretsFor(ctx, paths, backends, opts.RunID, opts.Pipeline)
 		opts.localSecrets = true
 	}
 	if err := paths.EnsureRunDir(opts.RunID); err != nil {
@@ -747,6 +697,77 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 	}
 
 	return Run(ctx, backends, opts)
+}
+
+// safety: closeAll releases what was opened in reverse order, as the defers it replaces did.
+func localRunBackends(ctx context.Context, paths Paths, opts *Options) (_ Backends, closeAll func() error, err error) {
+	var closers []func() error
+	closeAll = func() error {
+		var errs error
+		for i := len(closers) - 1; i >= 0; i-- {
+			errs = errors.Join(errs, closers[i]())
+		}
+		return errs
+	}
+	defer func() {
+		if err != nil {
+			warnHostedClose("run backends", closeAll())
+		}
+	}()
+	if err := paths.EnsureRoot(); err != nil {
+		return Backends{}, closeAll, fmt.Errorf("ensure sparkwing root: %w", err)
+	}
+	if opts.DefaultStateDB == "" {
+		opts.DefaultStateDB = paths.StateDB()
+	}
+	ownsState := opts.State == nil
+	hosted, selection, closeHosted, err := hostedBackendsForRun(ctx, paths, opts)
+	if err != nil {
+		return Backends{}, closeAll, err
+	}
+	closers = append(closers, func() error { closeHosted(); return nil })
+	if hosted.APISocket != "" {
+		// safety: profile resolution opens this machine's store only when no
+		// state backend is set yet, so the daemon's client goes in before it
+		// runs and the run opens nothing.
+		opts.State = hosted.State
+	} else if selection.standalone != "" {
+		st, sa, release, serr := openStandaloneStore(paths, opts.DryRun)
+		if serr != nil {
+			return Backends{}, closeAll, serr
+		}
+		sa.reason = selection.standalone
+		sa.warning = standaloneWarning(selection, sparkwingModuleVersion())
+		opts.State = st
+		opts.DefaultStateDB = sa.stateDB
+		opts.standalone = sa
+		// safety: they unwind handle first, then the decision this run's
+		// ending settles, then the lock: a discard must never run while this
+		// run's own handle still holds the file it is removing.
+		closers = append(closers,
+			func() error { release(); return nil },
+			func() error { sa.settle(); return nil },
+			func() error { warnHostedClose("standalone store", st.Close()); return nil })
+		ownsState = false
+	}
+	// safety: a standalone run holds the store the fallback already chose, so
+	// backend resolution must not reopen or replace it.
+	keepState := hosted.APISocket != "" || opts.standalone != nil
+	if err := resolveLocalBackends(opts, paths, keepState); err != nil {
+		return Backends{}, closeAll, err
+	}
+	if hosted.APISocket != "" {
+		hosted.Artifact = opts.ArtifactStore
+		return hosted, closeAll, nil
+	}
+	st, ok := opts.State.(*store.Store)
+	if !ok {
+		return Backends{}, closeAll, fmt.Errorf("state backend: unrecognized implementation %T", opts.State)
+	}
+	if ownsState {
+		closers = append(closers, st.Close)
+	}
+	return LocalBackends(paths, st, opts.ArtifactStore), closeAll, nil
 }
 
 func dispatch(

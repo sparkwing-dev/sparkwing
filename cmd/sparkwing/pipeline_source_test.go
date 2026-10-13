@@ -45,7 +45,9 @@ import("context"; "os"; "github.com/sparkwing-dev/sparkwing/sparkwing"; "github.
 type Fixture struct { sparkwing.Base }
 func (*Fixture) Plan(_ context.Context, p *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
  sparkwing.Job(p,"subject",func(context.Context) error {
-  return os.WriteFile(os.Getenv("SPARKWING_SUBMIT_TEST_MARKER"), []byte("selected\n"+sparkwing.WorkDir()+"\n"+os.Getenv("SPARKWING_PIPELINE_REV")),0600)
+  marker := os.Getenv("SUBMIT_TEST_MARKER")
+  if marker == "" { marker = os.Getenv("SPARKWING_SUBMIT_TEST_MARKER") }
+  return os.WriteFile(marker, []byte("selected\n"+sparkwing.WorkDir()+"\n"),0600)
  })
  return nil
 }
@@ -89,8 +91,12 @@ func TestDeclaredPipelineSourceForeground(t *testing.T) {
 			if err != nil || !strings.HasPrefix(string(body), "selected\n"+cwd+"\n") {
 				t.Fatalf("execution = %q, %v", body, err)
 			}
-			if len(strings.Split(string(body), "\n")[2]) != 40 {
-				t.Fatalf("missing source revision: %s", body)
+			run, err := e.store().GetLatestRun(t.Context(), "fixture", nil, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rev, _ := run.Invocation["pipeline_revision"].(string); len(rev) != 40 {
+				t.Fatalf("missing source revision: %v", run.Invocation)
 			}
 		})
 	}

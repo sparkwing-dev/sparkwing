@@ -70,6 +70,7 @@ unlock.
 
 ### Changed
 - **sdk:** under `--sw-node-protocol`, `run_node` answers the body's own error, as `run_step` does, and writes no `step_start`, `step_end`, `step_skipped` or `work_fail_fast` records, which the host writes. A panicking step reads `step "<id>" panicked: ...` instead of `item "<id>" panicked: ...` everywhere
+- **cli (Breaking):** `sparkwing run` hosts the run itself: it plans in, and runs every node, closure and generator in, its own `--sw-node-protocol` process of the pipeline binary, and no longer passes run options to the binary as `SPARKWING_*` variables. A `.sparkwing` module built against an older SDK cannot run; rebuild `.sparkwing` against the new SDK. `--sw-only` and `--sw-workers` are refused until the host supports them
 - **sdk (Breaking):** The plan document lists a node's dependency caches under `caches` instead of `dir_caches`
 - **cli (Breaking):** The CLI reads a pipeline binary's pipelines, flags and help through the node protocol's `describe` instead of `--describe`
   `sparkwing run <pipeline> --help` renders help and `sparkwing run` checks pipeline flags before the run starts; a binary that does not answer `describe` is refused, naming the rebuild. A describe that has not answered within 30 seconds is killed with every process it started.
