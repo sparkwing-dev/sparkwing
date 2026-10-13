@@ -118,6 +118,33 @@ func Restore(ctx context.Context, spec Spec, node, workdir string) *Run {
 	return st
 }
 
+// RestoreAll restores each of a node's caches into workdir, or into the
+// process's working directory when workdir is empty. Pass the result to
+// [SaveAll] once the node has finished.
+func RestoreAll(ctx context.Context, specs []Spec, node, workdir string) []*Run {
+	if len(specs) == 0 {
+		return nil
+	}
+	if workdir == "" {
+		workdir = "."
+		if cwd, err := os.Getwd(); err == nil {
+			workdir = cwd
+		}
+	}
+	runs := make([]*Run, len(specs))
+	for i, spec := range specs {
+		runs[i] = Restore(ctx, spec, node, workdir)
+	}
+	return runs
+}
+
+// SaveAll saves each restored cache; runErr non-nil skips them all.
+func SaveAll(ctx context.Context, runs []*Run, runErr error) {
+	for _, r := range runs {
+		r.Save(ctx, runErr)
+	}
+}
+
 func (st *Run) restore(ctx context.Context, workdir string) {
 	lockPath, ok := firstExisting(workdir, st.spec.KeyFiles)
 	if !ok {

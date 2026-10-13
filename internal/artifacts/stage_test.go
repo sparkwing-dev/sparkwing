@@ -1,4 +1,4 @@
-package orchestrator
+package artifacts
 
 import (
 	"bytes"
@@ -13,7 +13,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type stubNodeReader struct{ nodes map[string]*store.Node }
@@ -28,9 +27,9 @@ func publishProducer(t *testing.T, art storage.ArtifactStore, producerID string,
 	for rel, data := range files {
 		writeArtifactFile(t, ws, rel, data, 0o644)
 	}
-	digest, err := captureArtifacts(context.Background(), art, ws, []string{"**"})
+	digest, err := Capture(context.Background(), art, ws, []string{"**"}, noWarn)
 	if err != nil {
-		t.Fatalf("captureArtifacts: %v", err)
+		t.Fatalf("Capture: %v", err)
 	}
 	return stubNodeReader{nodes: map[string]*store.Node{
 		producerID: {NodeID: producerID, ArtifactManifest: digest},
@@ -54,8 +53,8 @@ func TestStageConsumedArtifacts_WritesAtDeclaredPaths(t *testing.T) {
 	})
 	consumerWS := t.TempDir()
 
-	n, err := stageConsumedArtifacts(context.Background(), art, reader, "run-1", consumerWS,
-		[]sparkwing.ConsumeEdge{{Producer: "build"}})
+	n, err := Stage(context.Background(), art, reader, "run-1", consumerWS,
+		[]Edge{{Producer: "build"}})
 	if err != nil {
 		t.Fatalf("stage: %v", err)
 	}
@@ -75,8 +74,8 @@ func TestStageConsumedArtifacts_IntoPrefixPreservesStructure(t *testing.T) {
 	reader := publishProducer(t, art, "build", map[string][]byte{"dist/a.txt": []byte("alpha")})
 	consumerWS := t.TempDir()
 
-	if _, err := stageConsumedArtifacts(context.Background(), art, reader, "run-1", consumerWS,
-		[]sparkwing.ConsumeEdge{{Producer: "build", Into: "vendor/build"}}); err != nil {
+	if _, err := Stage(context.Background(), art, reader, "run-1", consumerWS,
+		[]Edge{{Producer: "build", Into: "vendor/build"}}); err != nil {
 		t.Fatalf("stage: %v", err)
 	}
 	if got := readStagedFile(t, consumerWS, "vendor/build/dist/a.txt"); got != "alpha" {
@@ -93,8 +92,8 @@ func TestStageConsumedArtifacts_OverwritesExistingFile(t *testing.T) {
 	consumerWS := t.TempDir()
 	writeArtifactFile(t, consumerWS, "dist/a.txt", []byte("stale"), 0o600)
 
-	if _, err := stageConsumedArtifacts(context.Background(), art, reader, "run-1", consumerWS,
-		[]sparkwing.ConsumeEdge{{Producer: "build"}}); err != nil {
+	if _, err := Stage(context.Background(), art, reader, "run-1", consumerWS,
+		[]Edge{{Producer: "build"}}); err != nil {
 		t.Fatalf("stage: %v", err)
 	}
 	if got := readStagedFile(t, consumerWS, "dist/a.txt"); got != "fresh" {
@@ -106,7 +105,7 @@ func TestStageConsumedArtifacts_PreservesMode(t *testing.T) {
 	art := newTestArtifactStore(t)
 	ws := t.TempDir()
 	writeArtifactFile(t, ws, "bin/run.sh", []byte("#!/bin/sh\n"), 0o755)
-	digest, err := captureArtifacts(context.Background(), art, ws, []string{"**"})
+	digest, err := Capture(context.Background(), art, ws, []string{"**"}, noWarn)
 	if err != nil {
 		t.Fatalf("capture: %v", err)
 	}
@@ -115,8 +114,8 @@ func TestStageConsumedArtifacts_PreservesMode(t *testing.T) {
 	}}
 	consumerWS := t.TempDir()
 
-	if _, err := stageConsumedArtifacts(context.Background(), art, reader, "run-1", consumerWS,
-		[]sparkwing.ConsumeEdge{{Producer: "build"}}); err != nil {
+	if _, err := Stage(context.Background(), art, reader, "run-1", consumerWS,
+		[]Edge{{Producer: "build"}}); err != nil {
 		t.Fatalf("stage: %v", err)
 	}
 	info, err := os.Stat(filepath.Join(consumerWS, "bin", "run.sh"))
@@ -139,8 +138,8 @@ func TestStageConsumedArtifacts_MissingManifestIsNoOp(t *testing.T) {
 	}}
 	consumerWS := t.TempDir()
 
-	n, err := stageConsumedArtifacts(context.Background(), art, reader, "run-1", consumerWS,
-		[]sparkwing.ConsumeEdge{{Producer: "build"}})
+	n, err := Stage(context.Background(), art, reader, "run-1", consumerWS,
+		[]Edge{{Producer: "build"}})
 	if err != nil {
 		t.Fatalf("stage: %v", err)
 	}
@@ -154,8 +153,8 @@ func TestStageConsumedArtifacts_RejectsEscapingPath(t *testing.T) {
 	reader := publishProducer(t, art, "build", map[string][]byte{"a.txt": []byte("x")})
 	consumerWS := t.TempDir()
 
-	_, err := stageConsumedArtifacts(context.Background(), art, reader, "run-1", consumerWS,
-		[]sparkwing.ConsumeEdge{{Producer: "build", Into: "../escape"}})
+	_, err := Stage(context.Background(), art, reader, "run-1", consumerWS,
+		[]Edge{{Producer: "build", Into: "../escape"}})
 	if err == nil {
 		t.Fatal("expected error for path escaping the workspace")
 	}
@@ -165,7 +164,7 @@ func publishMaliciousManifest(t *testing.T, art storage.ArtifactStore, producerI
 	t.Helper()
 	ctx := context.Background()
 	blobDigest := fmt.Sprintf("%x", sha256.Sum256([]byte("pwned")))
-	if err := putBytes(ctx, art, artifactBlobKey(blobDigest), []byte("pwned")); err != nil {
+	if err := putBytes(ctx, art, BlobKey(blobDigest), []byte("pwned")); err != nil {
 		t.Fatalf("put blob: %v", err)
 	}
 	mb, err := json.Marshal(artifactManifest{Entries: []artifactEntry{
@@ -175,7 +174,7 @@ func publishMaliciousManifest(t *testing.T, art storage.ArtifactStore, producerI
 		t.Fatalf("marshal manifest: %v", err)
 	}
 	manifestDigest := fmt.Sprintf("%x", sha256.Sum256(mb))
-	if err := putBytes(ctx, art, artifactManifestKey(manifestDigest), mb); err != nil {
+	if err := putBytes(ctx, art, ManifestKey(manifestDigest), mb); err != nil {
 		t.Fatalf("put manifest: %v", err)
 	}
 	return stubNodeReader{nodes: map[string]*store.Node{
@@ -202,8 +201,8 @@ func TestStageConsumedArtifacts_RejectsEscapingManifestPath(t *testing.T) {
 			}
 			reader := publishMaliciousManifest(t, art, "build", tc.path(outer))
 
-			_, err := stageConsumedArtifacts(context.Background(), art, reader, "run-1", consumerWS,
-				[]sparkwing.ConsumeEdge{{Producer: "build"}})
+			_, err := Stage(context.Background(), art, reader, "run-1", consumerWS,
+				[]Edge{{Producer: "build"}})
 			if err == nil {
 				t.Fatalf("expected error for manifest path %q escaping workspace", tc.path(outer))
 			}
@@ -223,7 +222,7 @@ func publishManifestEntry(t *testing.T, art storage.ArtifactStore, producerID, p
 	t.Helper()
 	ctx := context.Background()
 	blobDigest := fmt.Sprintf("%x", sha256.Sum256(body))
-	if err := putBytes(ctx, art, artifactBlobKey(blobDigest), body); err != nil {
+	if err := putBytes(ctx, art, BlobKey(blobDigest), body); err != nil {
 		t.Fatalf("put blob: %v", err)
 	}
 	mb, err := json.Marshal(artifactManifest{Entries: []artifactEntry{
@@ -233,7 +232,7 @@ func publishManifestEntry(t *testing.T, art storage.ArtifactStore, producerID, p
 		t.Fatalf("marshal manifest: %v", err)
 	}
 	manifestDigest := fmt.Sprintf("%x", sha256.Sum256(mb))
-	if err := putBytes(ctx, art, artifactManifestKey(manifestDigest), mb); err != nil {
+	if err := putBytes(ctx, art, ManifestKey(manifestDigest), mb); err != nil {
 		t.Fatalf("put manifest: %v", err)
 	}
 	return stubNodeReader{nodes: map[string]*store.Node{
@@ -261,8 +260,8 @@ func TestStageConsumedArtifacts_RefusesSymlinkedDestination(t *testing.T) {
 	}
 	reader := publishManifestEntry(t, art, "build", "dist/a.txt", 0o644, []byte("pwned"))
 
-	if _, err := stageConsumedArtifacts(context.Background(), art, reader, "run-1", consumerWS,
-		[]sparkwing.ConsumeEdge{{Producer: "build"}}); err == nil {
+	if _, err := Stage(context.Background(), art, reader, "run-1", consumerWS,
+		[]Edge{{Producer: "build"}}); err == nil {
 		t.Fatal("expected an error staging through a symlink out of the workspace")
 	}
 	got, err := os.ReadFile(victim)
@@ -280,8 +279,8 @@ func TestStageConsumedArtifacts_MasksManifestMode(t *testing.T) {
 		uint32(os.ModeSetuid|os.ModeSetgid|0o755), []byte("#!/bin/sh\n"))
 	consumerWS := t.TempDir()
 
-	if _, err := stageConsumedArtifacts(context.Background(), art, reader, "run-1", consumerWS,
-		[]sparkwing.ConsumeEdge{{Producer: "build"}}); err != nil {
+	if _, err := Stage(context.Background(), art, reader, "run-1", consumerWS,
+		[]Edge{{Producer: "build"}}); err != nil {
 		t.Fatalf("stage: %v", err)
 	}
 	info, err := os.Stat(filepath.Join(consumerWS, "bin", "run.sh"))
@@ -309,8 +308,8 @@ func TestStageConsumedArtifacts_RejectsOversizedBlob(t *testing.T) {
 	reader := publishManifestEntry(t, art, "build", "big.bin", 0o644, make([]byte, 64<<10))
 	consumerWS := t.TempDir()
 
-	if _, err := stageConsumedArtifacts(context.Background(), art, reader, "run-1", consumerWS,
-		[]sparkwing.ConsumeEdge{{Producer: "build"}}); err == nil {
+	if _, err := Stage(context.Background(), art, reader, "run-1", consumerWS,
+		[]Edge{{Producer: "build"}}); err == nil {
 		t.Fatal("oversized blob staged past the cap")
 	}
 }
@@ -331,31 +330,13 @@ func TestStageConsumedArtifacts_RejectsOversizedManifestTotal(t *testing.T) {
 	})
 	consumerWS := t.TempDir()
 
-	staged, err := stageConsumedArtifacts(context.Background(), art, reader, "run-1", consumerWS,
-		[]sparkwing.ConsumeEdge{{Producer: "build"}})
+	staged, err := Stage(context.Background(), art, reader, "run-1", consumerWS,
+		[]Edge{{Producer: "build"}})
 	if err == nil {
 		t.Fatal("manifest staged past the total cap")
 	}
 	if staged >= 3 {
 		t.Fatalf("staged %d entries, want the run cut short before the third", staged)
-	}
-}
-
-func TestResolveArtifactStoreFromEnv_OpensURL(t *testing.T) {
-	t.Setenv(ArtifactStoreEnvVar, "fs://"+t.TempDir())
-	s, err := resolveArtifactStoreFromEnv(context.Background())
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if s == nil {
-		t.Fatal("expected a store for a set fs:// URL")
-	}
-}
-
-func TestResolveArtifactStoreFromEnv_BadURLErrors(t *testing.T) {
-	t.Setenv(ArtifactStoreEnvVar, "nonsense://x")
-	if _, err := resolveArtifactStoreFromEnv(context.Background()); err == nil {
-		t.Fatal("expected an error for an unsupported scheme")
 	}
 }
 
@@ -369,8 +350,8 @@ func TestStageConsumedArtifacts_LastEdgeWinsOnOverlap(t *testing.T) {
 	}}
 	consumerWS := t.TempDir()
 
-	if _, err := stageConsumedArtifacts(context.Background(), art, reader, "run-1", consumerWS,
-		[]sparkwing.ConsumeEdge{{Producer: "first"}, {Producer: "second"}}); err != nil {
+	if _, err := Stage(context.Background(), art, reader, "run-1", consumerWS,
+		[]Edge{{Producer: "first"}, {Producer: "second"}}); err != nil {
 		t.Fatalf("stage: %v", err)
 	}
 	if got := readStagedFile(t, consumerWS, "shared.txt"); got != "from-second" {
@@ -388,20 +369,20 @@ func TestStageConsumedArtifactsRejectsBadCacheBytes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			key := artifactBlobKey(manifest.Entries[0].Digest)
+			key := BlobKey(manifest.Entries[0].Digest)
 			switch kind {
 			case "missing-blob":
 				err = art.Delete(t.Context(), key)
 			case "corrupt-blob":
 				err = art.Put(t.Context(), key, bytes.NewBufferString("changed!"))
 			case "corrupt-manifest":
-				err = art.Put(t.Context(), artifactManifestKey(manifestDigest), bytes.NewBufferString(`{"entries":[]}`))
+				err = art.Put(t.Context(), ManifestKey(manifestDigest), bytes.NewBufferString(`{"entries":[]}`))
 			}
 			if err != nil {
 				t.Fatal(err)
 			}
 			ws := t.TempDir()
-			if _, err := stageConsumedArtifacts(t.Context(), art, reader, "run", ws, []sparkwing.ConsumeEdge{{Producer: "build"}}); err == nil {
+			if _, err := Stage(t.Context(), art, reader, "run", ws, []Edge{{Producer: "build"}}); err == nil {
 				t.Fatal("bad cache bytes staged successfully")
 			}
 			if _, err := os.Stat(filepath.Join(ws, "output.txt")); !os.IsNotExist(err) {

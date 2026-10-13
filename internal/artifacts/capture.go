@@ -1,4 +1,4 @@
-package orchestrator
+package artifacts
 
 import (
 	"context"
@@ -16,7 +16,6 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type artifactManifest struct {
@@ -34,11 +33,16 @@ var (
 	errArtifactUnresolvable     = errors.New("cannot resolve")
 )
 
-func artifactBlobKey(digest string) string { return "artifacts/blobs/" + digest }
+// BlobKey is the store key of a file's bytes, by their sha256.
+func BlobKey(digest string) string { return "artifacts/blobs/" + digest }
 
-func artifactManifestKey(digest string) string { return "artifacts/manifests/" + digest }
+// ManifestKey is the store key of a manifest, by its sha256.
+func ManifestKey(digest string) string { return "artifacts/manifests/" + digest }
 
-func captureArtifacts(ctx context.Context, store storage.ArtifactStore, workspace string, globs []string) (string, error) {
+// Capture uploads the workspace files that globs match and returns the digest
+// of the manifest naming them. A match that resolves outside the workspace is
+// skipped with a warning, unless a glob names it literally.
+func Capture(ctx context.Context, store storage.ArtifactStore, workspace string, globs []string, warn func(msg string)) (string, error) {
 	wsRoot, err := filepath.EvalSymlinks(workspace)
 	if err != nil {
 		return "", fmt.Errorf("resolve workspace: %w", err)
@@ -76,7 +80,7 @@ func captureArtifacts(ctx context.Context, store storage.ArtifactStore, workspac
 		if nerr != nil {
 			// safety: a wildcard sweep or an outside directory publishes nothing, so skip instead of failing the node
 			if errors.Is(nerr, errArtifactOutsideWorkspace) && (!globNamesLiterally(globs, rel) || resolvesToDirectory(p)) {
-				sparkwing.LoggerFromContext(ctx).Log("warn", fmt.Sprintf("artifact %q resolves outside the workspace; skipping", rel))
+				warn(fmt.Sprintf("artifact %q resolves outside the workspace; skipping", rel))
 				return nil
 			}
 			return fmt.Errorf("artifact %q: %w", rel, nerr)
@@ -110,7 +114,7 @@ func captureArtifacts(ctx context.Context, store storage.ArtifactStore, workspac
 	}
 	sum := sha256.Sum256(manifestBytes)
 	digest := hex.EncodeToString(sum[:])
-	if err := putBytes(ctx, store, artifactManifestKey(digest), manifestBytes); err != nil {
+	if err := putBytes(ctx, store, ManifestKey(digest), manifestBytes); err != nil {
 		return "", fmt.Errorf("store manifest: %w", err)
 	}
 	return digest, nil
@@ -159,7 +163,7 @@ func storeArtifactFile(ctx context.Context, store storage.ArtifactStore, root *o
 		return "", err
 	}
 	digest := hex.EncodeToString(h.Sum(nil))
-	key := artifactBlobKey(digest)
+	key := BlobKey(digest)
 	if ok, herr := store.Has(ctx, key); herr == nil && ok {
 		return digest, nil
 	}
