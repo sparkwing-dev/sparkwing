@@ -39,7 +39,8 @@ type Attempts struct {
 	// last record, cleanup output included, is written.
 	OpenLog func(ctx context.Context, runID, nodeID string) (NodeLog, error)
 	// Usage receives each attempt's measured session usage; nil drops it.
-	Usage func(n *NodeRun, u Usage)
+	// [RecordUsage] builds the one that records it.
+	Usage func(ctx context.Context, n *NodeRun, u Usage)
 }
 
 // safety: every message the attempt returns is masked, since the scheduler
@@ -102,7 +103,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun) 
 			run.Logger.Warn("nodehost: sdk session", "run", run.ID, "node", id, "err", cerr)
 		}
 		if a.Usage != nil {
-			a.Usage(n, usage)
+			a.Usage(ctx, n, usage)
 		}
 	} else {
 		res = failed(err)
