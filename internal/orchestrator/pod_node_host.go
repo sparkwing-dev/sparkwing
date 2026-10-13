@@ -138,39 +138,45 @@ func podSessionEnv(masker *secrets.Masker) []string {
 	return env
 }
 
-// safety: the whole value and each ','/'|' member are masked whole, covering a comma-split password's pieces; so are
-// each member's userinfo (before its last '@', past any scheme://) and its password, raw and percent-decoded. A value
-// with no '@' carries no credential, and GOPROXY's direct and off keywords stay readable.
+// safety: the whole value and each ','/'|' member are masked whole. The userinfo (after any scheme://, up to the
+// last '@') and its password, raw and percent-decoded, are taken from each member and from the unsplit value, so a
+// password holding a ',', '|' or '@' is masked whole. A value with no '@' carries no credential, and GOPROXY's direct
+// and off keywords stay readable.
 func maskProxyCredentials(masker *secrets.Masker, value string) {
 	if !strings.Contains(value, "@") {
 		return
 	}
 	masker.Register(value)
+	maskUserinfo(masker, value)
 	for _, member := range strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == '|' }) {
 		if member != "direct" && member != "off" {
 			masker.Register(member)
 		}
-		_, rest, ok := strings.Cut(member, "://")
-		if !ok {
-			rest = member
-		}
-		at := strings.LastIndex(rest, "@")
-		if at < 0 {
+		maskUserinfo(masker, member)
+	}
+}
+
+func maskUserinfo(masker *secrets.Masker, s string) {
+	_, rest, ok := strings.Cut(s, "://")
+	if !ok {
+		rest = s
+	}
+	at := strings.LastIndex(rest, "@")
+	if at < 0 {
+		return
+	}
+	userinfo := rest[:at]
+	parts := []string{userinfo}
+	if _, password, ok := strings.Cut(userinfo, ":"); ok {
+		parts = append(parts, password)
+	}
+	for _, raw := range parts {
+		if raw == "" {
 			continue
 		}
-		userinfo := rest[:at]
-		parts := []string{userinfo}
-		if _, password, ok := strings.Cut(userinfo, ":"); ok {
-			parts = append(parts, password)
-		}
-		for _, raw := range parts {
-			if raw == "" {
-				continue
-			}
-			masker.Register(raw)
-			if decoded, err := url.PathUnescape(raw); err == nil {
-				masker.Register(decoded)
-			}
+		masker.Register(raw)
+		if decoded, err := url.PathUnescape(raw); err == nil {
+			masker.Register(decoded)
 		}
 	}
 }

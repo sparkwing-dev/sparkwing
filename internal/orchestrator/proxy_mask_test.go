@@ -30,8 +30,26 @@ func TestMaskProxyCredentialsCoversEveryFormOfTheCredential(t *testing.T) {
 		{
 			name:    "a comma in the password",
 			value:   "https://reader:npm-prefix,npm-suffix@cache.invalid/npm",
-			logged:  []string{"https://reader:npm-prefix,npm-suffix@cache.invalid/npm", "https://reader:npm-prefix", "npm-suffix@cache.invalid/npm"},
+			logged:  []string{"https://reader:npm-prefix,npm-suffix@cache.invalid/npm", "https://reader:npm-prefix", "npm-suffix@cache.invalid/npm", "npm-prefix,npm-suffix"},
 			secrets: []string{"npm-prefix", "npm-suffix"},
+		},
+		{
+			name:    "a pipe in the password",
+			value:   "https://reader:npm-prefix|npm-suffix@cache.invalid/npm",
+			logged:  []string{"npm-prefix|npm-suffix", "reader:npm-prefix|npm-suffix"},
+			secrets: []string{"npm-prefix", "npm-suffix"},
+		},
+		{
+			name:    "an @ and a comma in the password",
+			value:   "https://reader:safe@private-tail,comma-suffix@cache.invalid/npm",
+			logged:  []string{"safe@private-tail,comma-suffix", "reader:safe@private-tail,comma-suffix"},
+			secrets: []string{"private-tail", "comma-suffix"},
+		},
+		{
+			name:    "an @ and a pipe in the password",
+			value:   "https://reader:safe@private-tail|pipe-suffix@cache.invalid/npm",
+			logged:  []string{"safe@private-tail|pipe-suffix", "reader:safe@private-tail|pipe-suffix"},
+			secrets: []string{"private-tail", "pipe-suffix"},
 		},
 		{
 			name:    "an encoded password",
