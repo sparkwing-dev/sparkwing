@@ -2,7 +2,8 @@
 // one node that writes its environment to a file and prints a file's
 // content; when asked, a plan that drifts between processes, a failing node
 // with retries whose before_run and after_run calls are traced, and a node in a
-// concurrency group.
+// concurrency group. The trigger's actor and pull request, when set, reach
+// the build node's environment as ACTOR.
 package main
 
 import (
@@ -32,7 +33,7 @@ type inputs struct {
 
 type pipeline struct{ sparkwing.Base }
 
-func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ sparkwing.RunContext) error {
+func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, rc sparkwing.RunContext) error {
 	build := sparkwing.Job(plan, "build", func(ctx context.Context) error {
 		echo, _ := os.ReadFile(in.Echo)
 		fmt.Println("echo " + string(echo))
@@ -80,6 +81,13 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 		if in.Publish {
 			memoized.Outputs("dist/*")
 		}
+	}
+	if pr := rc.Trigger.PullRequest; rc.Trigger.User != "" || pr != nil {
+		actor := rc.Trigger.User
+		if pr != nil {
+			actor += "#" + strconv.Itoa(pr.Number)
+		}
+		build.Env("ACTOR", actor)
 	}
 	if in.Group {
 		build.Concurrency(sparkwing.NewConcurrencyGroup("pod-group", sparkwing.ConcurrencyLimit{Capacity: 1}))

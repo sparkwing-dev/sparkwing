@@ -700,6 +700,22 @@ type Run struct {
 	// NeedsAttention says why a ready node of the run waits with no agent
 	// able to claim it; empty when none does.
 	NeedsAttention string `json:"needs_attention,omitempty"`
+	// TriggerUser and PullRequest are the actor of the run's trigger and
+	// the pull request it fired for. The runs row does not hold them: the
+	// controller's single-run read fills them from the trigger, so every
+	// host that plans the run sees the same values without the trigger.
+	TriggerUser string          `json:"trigger_user,omitempty"`
+	PullRequest *RunPullRequest `json:"pull_request,omitempty"`
+}
+
+// RunPullRequest is the pull request a run's trigger fired for.
+type RunPullRequest struct {
+	Number  int    `json:"number"`
+	Action  string `json:"action,omitempty"`
+	BaseRef string `json:"base_ref,omitempty"`
+	BaseSHA string `json:"base_sha,omitempty"`
+	HeadRef string `json:"head_ref,omitempty"`
+	HeadSHA string `json:"head_sha,omitempty"`
 }
 
 // CreateRun inserts a run row, or upgrades an existing 'pending' row
