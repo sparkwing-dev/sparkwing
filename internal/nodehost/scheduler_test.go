@@ -1,0 +1,354 @@
+package nodehost
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
+)
+
+const testRunID = "run-sched"
+
+func openStore(t *testing.T) *store.Store {
+	t.Helper()
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	return st
+}
+
+type fakeExec struct {
+	mu     sync.Mutex
+	calls  []string
+	bodies map[string]Executor
+	seen   map[string]*NodeRun
+}
+
+func (f *fakeExec) run(ctx context.Context, n *NodeRun) Result {
+	f.mu.Lock()
+	f.calls = append(f.calls, n.Plan.ID)
+	if f.seen == nil {
+		f.seen = map[string]*NodeRun{}
+	}
+	f.seen[n.Plan.ID] = n
+	body := f.bodies[n.Plan.ID]
+	f.mu.Unlock()
+	if body == nil {
+		return Result{Outcome: sparkwing.Success}
+	}
+	return body(ctx, n)
+}
+
+func (f *fakeExec) ran(id string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Contains(f.calls, id)
+}
+
+func hostDoc(t *testing.T, ctx context.Context, st *store.Store, doc nodeproto.PlanDoc, exec Executor) RunResult {
+	t.Helper()
+	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateNodes(doc.Nodes); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	return hostAccepted(t, ctx, st, doc, exec)
+}
+
+func hostAccepted(t *testing.T, ctx context.Context, st *store.Store, doc nodeproto.PlanDoc, exec Executor) RunResult {
+	t.Helper()
+	cfg := Config{Execute: exec}
+	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest)}
+	res := RunResult{RunID: testRunID, Nodes: map[string]Result{}}
+	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg)}
+	if err := s.add(ctx, doc.Nodes); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	s.loop(ctx)
+	res.Order = s.order
+	res.Status, res.Err = s.verdict(ctx)
+	return res
+}
+
+func nodeRow(t *testing.T, st *store.Store, id string) *store.Node {
+	t.Helper()
+	row, err := st.GetNode(t.Context(), testRunID, id)
+	if err != nil {
+		t.Fatalf("node %s: %v", id, err)
+	}
+	return row
+}
+
+func wantRow(t *testing.T, st *store.Store, id string, outcome sparkwing.Outcome, errHas string) {
+	t.Helper()
+	row := nodeRow(t, st, id)
+	if row.Status != "done" || row.Outcome != string(outcome) || !strings.Contains(row.Error, errHas) {
+		t.Errorf("node %s row status=%q outcome=%q error=%q, want done/%s containing %q", id, row.Status, row.Outcome, row.Error, outcome, errHas)
+	}
+}
+
+func deps(ids ...string) []string { return ids }
+
+func TestSchedulerRunsADiamondInOrderAndInParallel(t *testing.T) {
+	st := openStore(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	bIn, cIn := make(chan struct{}), make(chan struct{})
+	meet := func(mine, theirs chan struct{}) Executor {
+		return func(ctx context.Context, _ *NodeRun) Result {
+			close(mine)
+			select {
+			case <-theirs:
+				return Result{Outcome: sparkwing.Success, Output: []byte(`{"ok":true}`)}
+			case <-ctx.Done():
+				return Result{Outcome: sparkwing.Failed, Err: errors.New("b and c never ran together")}
+			}
+		}
+	}
+	fx := &fakeExec{bodies: map[string]Executor{"b": meet(bIn, cIn), "c": meet(cIn, bIn)}}
+	doc := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{
+		{ID: "d", Deps: deps("b", "c")},
+		{ID: "b", Deps: deps("a")},
+		{ID: "c", Deps: deps("a")},
+		{ID: "a"},
+	}}
+
+	res := hostDoc(t, ctx, st, doc, fx.run)
+	if res.Status != "success" || res.Err != nil {
+		t.Fatalf("status=%s err=%v, want success", res.Status, res.Err)
+	}
+	if len(res.Order) != 4 || res.Order[0] != "a" || res.Order[3] != "d" {
+		t.Errorf("order = %v, want a first and d last", res.Order)
+	}
+	for _, id := range []string{"a", "b", "c", "d"} {
+		wantRow(t, st, id, sparkwing.Success, "")
+	}
+	out, err := st.GetNodeOutput(t.Context(), testRunID, "b")
+	if err != nil || string(out) != `{"ok":true}` {
+		t.Errorf("b output = %s (err %v), want the executor's output", out, err)
+	}
+}
+
+func TestSchedulerPropagatesFailureAsTheDispatcherDoes(t *testing.T) {
+	st := openStore(t)
+	fail := func(context.Context, *NodeRun) Result {
+		return Result{Outcome: sparkwing.Failed, Err: errors.New("broke"), Reason: store.FailureVerify}
+	}
+	fx := &fakeExec{bodies: map[string]Executor{"build": fail, "lint": fail, "flaky": fail, "maybe": fail}}
+	doc := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{
+		{ID: "build", Modifiers: &nodeproto.PlanModifiers{OnFailure: "build-recover"}},
+		{ID: "test", Deps: deps("build")},
+		{ID: "deploy", Deps: deps("test")},
+		{ID: "build-recover", OnFailureOf: "build"},
+		{ID: "docs"},
+		{ID: "docs-recover", OnFailureOf: "docs"},
+		{ID: "lint", Modifiers: &nodeproto.PlanModifiers{ContinueOnError: true}},
+		{ID: "after-lint", Deps: deps("lint")},
+		{ID: "flaky"},
+		{ID: "after-flaky", OptionalDeps: deps("flaky", "absent")},
+		{ID: "maybe", Modifiers: &nodeproto.PlanModifiers{Optional: true}},
+	}}
+
+	res := hostDoc(t, t.Context(), st, doc, fx.run)
+
+	wantRow(t, st, "build", sparkwing.Failed, "broke")
+	wantRow(t, st, "test", sparkwing.Cancelled, "upstream-failed")
+	wantRow(t, st, "deploy", sparkwing.Cancelled, "upstream-failed")
+	wantRow(t, st, "build-recover", sparkwing.Success, "")
+	wantRow(t, st, "docs-recover", sparkwing.Skipped, `parent "docs" did not fail`)
+	wantRow(t, st, "after-lint", sparkwing.Success, "")
+	wantRow(t, st, "after-flaky", sparkwing.Cancelled, "upstream-failed")
+	wantRow(t, st, "maybe", sparkwing.Failed, "broke")
+	for _, id := range []string{"test", "deploy", "docs-recover", "after-flaky"} {
+		if fx.ran(id) {
+			t.Errorf("node %s ran", id)
+		}
+	}
+	if f := fx.seen["build-recover"].Failure; f == nil || *f != (nodeproto.Failure{Node: "build", Stage: "verify", Message: "broke"}) {
+		t.Errorf("recovery failure = %+v, want build's verify failure", f)
+	}
+	want := "nodes failed: [build lint flaky]; 3 more cancelled with the run"
+	if res.Status != "failed" || res.Err == nil || res.Err.Error() != want {
+		t.Errorf("status=%s err=%v, want failed with %q", res.Status, res.Err, want)
+	}
+}
+
+func TestSchedulerOptionalFailureLeavesTheRunGreen(t *testing.T) {
+	st := openStore(t)
+	fx := &fakeExec{bodies: map[string]Executor{"maybe": func(context.Context, *NodeRun) Result {
+		return Result{Outcome: sparkwing.Failed, Err: errors.New("broke")}
+	}}}
+	doc := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{
+		{ID: "maybe", Modifiers: &nodeproto.PlanModifiers{Optional: true}},
+		{ID: "after", OptionalDeps: deps("absent")},
+	}}
+	res := hostDoc(t, t.Context(), st, doc, fx.run)
+	if res.Status != "success" {
+		t.Errorf("status=%s err=%v, want success: an optional node's failure does not fail the run", res.Status, res.Err)
+	}
+	wantRow(t, st, "after", sparkwing.Success, "")
+}
+
+func TestSchedulerCancelMidRunFinishesEveryRow(t *testing.T) {
+	st := openStore(t)
+	ctx, cancel := context.WithCancelCause(t.Context())
+	defer cancel(nil)
+	fx := &fakeExec{bodies: map[string]Executor{"slow": func(ctx context.Context, _ *NodeRun) Result {
+		cancel(errors.New("interrupted by SIGINT"))
+		<-ctx.Done()
+		return Result{Outcome: sparkwing.Failed, Err: ctx.Err()}
+	}}}
+	doc := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{
+		{ID: "slow"},
+		{ID: "next", Deps: deps("slow")},
+		{ID: "later", Deps: deps("next")},
+	}}
+
+	res := hostDoc(t, ctx, st, doc, fx.run)
+	if res.Status != "cancelled" || res.Err == nil || res.Err.Error() != "interrupted by SIGINT" {
+		t.Errorf("status=%s err=%v, want cancelled with the cause", res.Status, res.Err)
+	}
+	wantRow(t, st, "slow", sparkwing.Cancelled, "cancelled: run failing")
+	wantRow(t, st, "next", sparkwing.Cancelled, "ctx-cancelled")
+	wantRow(t, st, "later", sparkwing.Cancelled, "ctx-cancelled")
+	if fx.ran("next") || fx.ran("later") {
+		t.Error("a node started after the run was cancelled")
+	}
+}
+
+func TestSchedulerAStalledPlanFailsItsPendingNodes(t *testing.T) {
+	st := openStore(t)
+	if err := st.CreateRun(t.Context(), store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	fx := &fakeExec{}
+	doc := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "a", Deps: deps("b")}, {ID: "b", Deps: deps("a")}}}
+	cfg := Config{Execute: fx.run}
+	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler)}
+	s := &scheduler{run: run, results: map[string]Result{}, started: map[string]bool{}, exec: chain(&cfg), nodes: doc.Nodes}
+	for _, n := range doc.Nodes {
+		if err := st.CreateNode(t.Context(), pendingRow(run, n)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.loop(t.Context())
+	if len(s.order) != 0 || len(fx.calls) != 0 {
+		t.Fatalf("started %v from a plan where nothing is ready", s.order)
+	}
+	wantRow(t, st, "a", sparkwing.Failed, "never became ready")
+	wantRow(t, st, "b", sparkwing.Failed, "never became ready")
+}
+
+func TestSchedulerWithoutAnExecutorFailsTheNode(t *testing.T) {
+	st := openStore(t)
+	res := hostDoc(t, t.Context(), st, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "a"}}}, nil)
+	if res.Status != "failed" {
+		t.Errorf("status = %s, want failed", res.Status)
+	}
+	wantRow(t, st, "a", sparkwing.Failed, "no attempt executor")
+}
+
+func TestSchedulerAddsNodesWhileTheRunGoes(t *testing.T) {
+	st := openStore(t)
+	var addErrs []error
+	fx := &fakeExec{bodies: map[string]Executor{"targets": func(ctx context.Context, n *NodeRun) Result {
+		addErrs = append(addErrs,
+			n.Run.Add(ctx, nodeproto.PlanNode{ID: "test-linux", Deps: deps("targets")}, nodeproto.PlanNode{ID: "test-darwin", Deps: deps("targets")}),
+			n.Run.Add(ctx, nodeproto.PlanNode{ID: "targets"}))
+		return Result{Outcome: sparkwing.Success}
+	}}}
+	res := hostDoc(t, t.Context(), st, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "targets"}}}, fx.run)
+	if res.Status != "success" || !slices.Equal(res.Order[:1], []string{"targets"}) || len(res.Order) != 3 {
+		t.Fatalf("status=%s order=%v, want targets then its two generated nodes", res.Status, res.Order)
+	}
+	if addErrs[0] != nil {
+		t.Errorf("add: %v", addErrs[0])
+	}
+	var perr *nodeproto.Error
+	if !errors.As(addErrs[1], &perr) || perr.Code != nodeproto.CodePlanInvalid {
+		t.Errorf("adding a duplicate node: err = %v, want plan_invalid", addErrs[1])
+	}
+	wantRow(t, st, "test-linux", sparkwing.Success, "")
+	wantRow(t, st, "test-darwin", sparkwing.Success, "")
+}
+
+func TestSchedulerWritesPendingRowsFromThePlan(t *testing.T) {
+	st := openStore(t)
+	fx := &fakeExec{bodies: map[string]Executor{"gpu": func(ctx context.Context, n *NodeRun) Result {
+		row, err := st.GetNode(ctx, testRunID, n.Plan.ID)
+		if err != nil || row.Status != "running" || row.StartedAt == nil {
+			return Result{Outcome: sparkwing.Failed, Err: errors.New("row not started before the executor ran")}
+		}
+		return Result{Outcome: sparkwing.Success}
+	}}}
+	doc := nodeproto.PlanDoc{Requires: []string{"linux"}, Nodes: []nodeproto.PlanNode{
+		{ID: "base"},
+		{ID: "gpu", Deps: deps("base"), OptionalDeps: deps("extra"), Modifiers: &nodeproto.PlanModifiers{
+			RunsOn: []string{"gpu", "linux"}, WhenRunner: []string{"big"}, Prefers: []string{"fast"},
+			ResCores: 4, ResMemoryBytes: 1 << 30,
+		}},
+	}}
+	res := hostDoc(t, t.Context(), st, doc, fx.run)
+	if res.Status != "success" {
+		t.Fatalf("status=%s err=%v", res.Status, res.Err)
+	}
+	row := nodeRow(t, st, "gpu")
+	if !slices.Equal(row.Deps, []string{"base", "extra"}) || !slices.Equal(row.NeedsLabels, []string{"gpu", "linux", "big"}) ||
+		!slices.Equal(row.PrefersLabels, []string{"fast"}) || row.RequestedCores != 4 || row.RequestedMemoryBytes != 1<<30 {
+		t.Errorf("gpu row deps=%v needs=%v prefers=%v cores=%v mem=%d", row.Deps, row.NeedsLabels, row.PrefersLabels, row.RequestedCores, row.RequestedMemoryBytes)
+	}
+	if base := nodeRow(t, st, "base"); !slices.Equal(base.NeedsLabels, []string{"linux"}) {
+		t.Errorf("base needs %v, want the pipeline's requires", base.NeedsLabels)
+	}
+}
+
+func TestValidateNodesRefusesAnInvalidPlan(t *testing.T) {
+	for name, tc := range map[string]struct {
+		nodes []nodeproto.PlanNode
+		want  string
+	}{
+		"cycle": {
+			nodes: []nodeproto.PlanNode{{ID: "a", Deps: deps("c")}, {ID: "b", Deps: deps("a")}, {ID: "c", Deps: deps("b")}},
+			want:  "dependency cycle a -> c -> b -> a",
+		},
+		"missing dep":      {nodes: []nodeproto.PlanNode{{ID: "a", Deps: deps("ghost")}}, want: "needs ghost"},
+		"duplicate node":   {nodes: []nodeproto.PlanNode{{ID: "a"}, {ID: "a"}}, want: "node a twice"},
+		"no id":            {nodes: []nodeproto.PlanNode{{}}, want: "no id"},
+		"missing recovery": {nodes: []nodeproto.PlanNode{{ID: "r", OnFailureOf: "ghost"}}, want: "recovers ghost"},
+		"optional dep cycle": {
+			nodes: []nodeproto.PlanNode{{ID: "a", OptionalDeps: deps("b")}, {ID: "b", Deps: deps("a")}},
+			want:  "dependency cycle",
+		},
+		"duplicate closure": {
+			nodes: []nodeproto.PlanNode{
+				{ID: "a", Closures: &nodeproto.PlanClosures{SkipIf: []string{"x"}}},
+				{ID: "b", Work: &nodeproto.PlanWork{Steps: []nodeproto.PlanStep{{ID: "s", Closures: &nodeproto.PlanClosures{Verify: "x"}}}}},
+			},
+			want: "closure id x belongs to both node a and step b/s",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := validateNodes(tc.nodes)
+			var perr *nodeproto.Error
+			if !errors.As(err, &perr) || perr.Code != nodeproto.CodePlanInvalid || !strings.Contains(perr.Message, tc.want) {
+				t.Fatalf("err = %v, want plan_invalid naming %q", err, tc.want)
+			}
+		})
+	}
+	if err := validateNodes([]nodeproto.PlanNode{{ID: "a", OptionalDeps: deps("absent")}, {ID: "r", OnFailureOf: "a"}}); err != nil {
+		t.Errorf("a plan with an absent optional dependency and a recovery node: %v", err)
+	}
+}

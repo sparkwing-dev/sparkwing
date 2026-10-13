@@ -22,6 +22,7 @@ var declaredRepoReaders = map[string]string{
 	"pkg/controller/client/client.go":            "sends the ?repo= list filter",
 	"internal/runretry/create.go":                "copies the source run's repository onto the retry's rows",
 	"internal/orchestrator/orchestrator.go":      "records the repository the run was started from",
+	"internal/nodehost/scheduler.go":             "records the repository the run was started from",
 	"internal/orchestrator/replay.go":            "copies the replayed run's repository onto the replay",
 	"internal/orchestrator/backends.go":          "copies a parent run's repository onto a child trigger",
 	"internal/orchestrator/run_node.go":          "stamps the repository into the node's environment",
