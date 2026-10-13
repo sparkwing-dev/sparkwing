@@ -398,22 +398,22 @@ sparkwing pipeline new --name gate --template ci-pr-check --on manual
 Render the runtime-resolved DAG without dispatching any jobs
 
 Compiles the pipeline and evaluates its plan under the supplied arguments.
-Each step reports would_run or would_skip with its reason. Step actions are
-not executed.
+Each step reports would_run, would_skip or may_skip with its reason. Step
+actions and SkipIf predicates are not executed.
 
 Skip reasons:
-  user_skipif  the SkipIf predicate matches
-  range_skip   the step falls outside --start-at and --stop-at
+  user_skipif  the step has a SkipIf predicate, which only a run evaluates
+               (may_skip)
+  range_skip   the step falls outside --start-at and --stop-at (would_skip)
 
 Dynamic fan-out counts remain unresolved when they require execution.
-Skipping a state-loading step with --start-at leaves that state empty;
-downstream predicates are evaluated with the resulting state.
 
 --static prints the Plan DAG as the pipeline declares it -- nodes,
-dependencies, approval gates -- without resolving runtime skips. Missing
-required arguments are tolerated so the plan can be inspected before every
-input is supplied. --static --all constructs every declared pipeline with
-no extra arguments and exits non-zero if any plan fails validation
+dependencies, approval gates -- without resolving runtime skips. Arguments
+are checked against the pipeline's flags, and a missing required argument
+fails. --static --all constructs every declared pipeline with no extra
+arguments, reports the ones that need arguments as skipped, and exits
+non-zero if any other plan fails validation
 (mismatched typed references, inconsistent declared outputs, duplicate node
 IDs, and similar errors), which makes it a CI gate.
 
