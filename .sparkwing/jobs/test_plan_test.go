@@ -14,7 +14,7 @@ import (
 
 func TestTestPipelineMeasuresAndBoundsItsCPU(t *testing.T) {
 	plan := sparkwing.NewPlan()
-	if err := (&Test{}).Plan(context.Background(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "test"}); err != nil {
+	if err := (&Test{}).Plan(context.Background(), plan, TestArgs{}, sparkwing.RunContext{Pipeline: "test"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -54,14 +54,16 @@ func TestTestPipelineMeasuresAndBoundsItsCPU(t *testing.T) {
 	if err := format.Node(&formatted, token.NewFileSet(), runDecl); err != nil {
 		t.Fatal(err)
 	}
-	want := `func (p *Test) run(ctx context.Context) error {
-	return withProductTestHome(func(home string) error {
-		if _, err := sparkwing.Bash(ctx, productTestScript(testGoCommand(currentHost()), home)).Run(); err != nil {
-			return err
-		}
-		sparkwing.Info(ctx, "go test: all packages passed")
-		return nil
-	})
+	want := `func (p *Test) run(cmd string) func(context.Context) error {
+	return func(ctx context.Context) error {
+		return withProductTestHome(func(home string) error {
+			if _, err := sparkwing.Bash(ctx, productTestScript(cmd, home)).Run(); err != nil {
+				return err
+			}
+			sparkwing.Info(ctx, "go test: all packages passed")
+			return nil
+		})
+	}
 }`
 	if formatted.String() != want {
 		t.Fatalf("Test.run must execute only the bounded test command, scrubbed of the node's "+
