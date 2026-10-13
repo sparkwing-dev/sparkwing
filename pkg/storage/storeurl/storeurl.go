@@ -1,5 +1,5 @@
 // Package storeurl parses storage backend URLs and constructs the
-// matching ArtifactStore / LogStore.
+// matching ArtifactStore.
 //
 // Supported schemes:
 //
@@ -59,34 +59,6 @@ func OpenArtifactStore(ctx context.Context, raw string) (storage.ArtifactStore, 
 		return s3store.NewArtifactStore(bucket, prefix, client), nil
 	case "http", "https":
 		return sparkwingcache.New(raw, authwire.CacheBearerFromEnv(), nil), nil
-	default:
-		return nil, fmt.Errorf("storeurl: unsupported scheme %q in %q", scheme, raw)
-	}
-}
-
-// OpenLogStore parses raw and returns the matching backend.
-func OpenLogStore(ctx context.Context, raw string) (storage.LogStore, error) {
-	scheme, rest, err := splitScheme(raw)
-	if err != nil {
-		return nil, err
-	}
-	switch scheme {
-	case "fs":
-		path, err := fsPath(rest)
-		if err != nil {
-			return nil, err
-		}
-		return fs.NewLogStore(path)
-	case "s3":
-		bucket, prefix, err := s3store.ParseURL("s3://" + rest)
-		if err != nil {
-			return nil, err
-		}
-		client, err := newS3Client(ctx, true)
-		if err != nil {
-			return nil, err
-		}
-		return s3store.NewLogStore(bucket, prefix, client), nil
 	default:
 		return nil, fmt.Errorf("storeurl: unsupported scheme %q in %q", scheme, raw)
 	}

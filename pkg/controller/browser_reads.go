@@ -47,8 +47,8 @@ func (s *Server) dashboardPaths() paths.Paths {
 // safety: a laptop dashboard reads the runs on its own disk, so a nil store there sends reads to the run
 // directories; elsewhere nil means a controller with nowhere to keep segments, so a read finds no log.
 func (s *Server) dashboardLogs(team store.Team) storage.LogStore {
-	if s.dashboard != nil && (s.dashboard.Logs != nil || s.dashboard.Local) {
-		return s.dashboard.Logs
+	if s.dashboard != nil && s.dashboard.Local {
+		return nil
 	}
 	objs := s.logObjects()
 	if objs == nil {

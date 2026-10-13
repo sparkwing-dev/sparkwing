@@ -266,7 +266,7 @@ func submissionExecutionEnvironment(captured []string, home string) []string {
 		wingdclient.HostBinEnv:      {},
 		"SPARKWING_RUN_HANDLE_FILE": {},
 		"SPARKWING_START_AT":        {}, "SPARKWING_STOP_AT": {}, "SPARKWING_ONLY": {},
-		"SPARKWING_NO_CACHE": {}, "SPARKWING_DRY_RUN": {}, "SPARKWING_LOCAL_ONLY": {},
+		"SPARKWING_NO_CACHE": {}, "SPARKWING_DRY_RUN": {},
 		"SPARKWING_ALLOW": {}, "SPARKWING_REF": {}, ProfileEnv: {}, SecretsProfileEnv: {},
 		"SPARKWING_MODE": {}, "SPARKWING_WORKERS": {},
 		PriorityEnv:                    {},

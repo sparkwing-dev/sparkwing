@@ -166,8 +166,7 @@ names. `--output pretty` keeps the readable report and repair instructions.
 If configuration loading fails, status still lists installed hooks, reports
 the error on stderr, and exits nonzero. It emits no JSON summary in that case.
 
-Every hook proves and runs its pipelines on this machine with
-`--sw-local-only`.
+Every hook proves and runs its pipelines on this machine.
 
 Each managed hook carries a marker comment so `uninstall` and `status`
 can distinguish sparkwing-installed hooks from hand-written ones.

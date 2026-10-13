@@ -13,22 +13,12 @@ type Spec struct {
 	TokenEnv string
 
 	Controller string
-
-	BatchInterval time.Duration
-
-	BatchBytes int
-
-	MaxLogObjects int
-
-	MaxLogBytes int64
 }
 func (s *Spec) ResolvedToken() string
 func (s *Spec) ValidateFields(surface string) error
 func (s *Spec) ValidateSecrets() error
 type Surfaces struct {
 	Secrets *Spec
-	Cache   *Spec
-	Logs    *Spec
 	State   *Spec
 }
 func (s Surfaces) Validate(name string) error
@@ -38,4 +28,3 @@ const TypeFilesystem = "filesystem"
 const TypeNone = "none"
 const TypeS3 = "s3"
 const TypeSQLite = "sqlite"
-const TypeStdout = "stdout"

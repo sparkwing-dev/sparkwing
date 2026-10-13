@@ -19,7 +19,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -40,25 +39,18 @@ func TestLocalPaths_ExplicitHomeDoesNotMutateEnvironment(t *testing.T) {
 	}
 }
 
-func TestRun_LogStore_EndToEnd(t *testing.T) {
+func TestRun_ReadsRunDirectoryLogs(t *testing.T) {
 	t.Parallel()
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
 
 	home := t.TempDir()
-	logRoot := filepath.Join(t.TempDir(), "remote-logs")
-	ls, err := fs.NewLogStore(logRoot)
-	if err != nil {
-		t.Fatalf("NewLogStore: %v", err)
-	}
-	if err := ls.Append(context.Background(), "run1", "node1",
-		[]byte(`{"msg":"hello-from-fs"}`)); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-
 	paths := orchestrator.PathsAt(home)
-	if err := paths.EnsureRoot(); err != nil {
+	if err := paths.EnsureRunDir("run1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.NodeLog("run1", "node1"), []byte(`{"msg":"hello-from-fs"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	seed, err := store.Open(paths.StateDB())
@@ -73,11 +65,7 @@ func TestRun_LogStore_EndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	addr := startLocalws(t, Options{
-		Home:          home,
-		LogStore:      ls,
-		LogStoreLabel: "fs",
-	})
+	addr := startLocalws(t, Options{Home: home})
 
 	resp := mustGet(t, "http://"+addr+"/api/v1/capabilities")
 	defer resp.Body.Close()

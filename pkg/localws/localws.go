@@ -21,7 +21,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/originguard"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -41,18 +40,6 @@ type Options struct {
 	// usual channels (dev.env, baseURL) -- callers should set Addr to
 	// the listener's address for those side effects to be correct.
 	Listener net.Listener
-
-	// LogStore, when non-nil, routes dashboard log reads through this
-	// backend instead of the default filesystem reader rooted at Home.
-	LogStore storage.LogStore
-	// LogStoreLabel is a short tag ("fs", "s3", ...) surfaced on
-	// /api/v1/capabilities. Empty when LogStore is nil.
-	LogStoreLabel string
-
-	// ArtifactStore, when non-nil, feeds the capabilities endpoint and
-	// the bucket ceiling's measurement.
-	ArtifactStore      storage.ArtifactStore
-	ArtifactStoreLabel string
 
 	// ReadOnly, when true, rejects state-mutating methods on every
 	// /api/v1/* path except /api/v1/auth/* with 405. Auth stays open
@@ -142,7 +129,6 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 		return fmt.Errorf("local secrets key: %w", err)
 	}
 	ctrl := controller.New(st, nil).
-		WithArtifactStore(opts.ArtifactStore).
 		WithSecretsCipher(ring.For(st)).
 		WithLocalExecution().
 		WithReconcileHook(func(rctx context.Context) error {
@@ -153,11 +139,10 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 			Local:   true,
 			Bundle:  bundle,
 			Version: opts.Version,
-			Logs:    opts.LogStore,
 			Paths:   paths,
 			Capabilities: backend.Capabilities{
 				Mode:     "local",
-				Storage:  backendCapabilitiesStorage(opts, "sqlite"),
+				Storage:  backend.CapabilitiesStorage{Artifacts: "fs", Logs: "fs", Runs: "sqlite"},
 				Features: localFeatures(),
 			},
 		})
@@ -267,29 +252,11 @@ func localPaths(home string) (orchestrator.Paths, error) {
 	return paths, nil
 }
 
-func backendCapabilitiesStorage(opts Options, runs string) backend.CapabilitiesStorage {
-	out := backend.CapabilitiesStorage{Artifacts: "fs", Logs: "fs", Runs: runs}
-	if opts.LogStore != nil {
-		out.Logs = nonEmpty(opts.LogStoreLabel, "custom")
-	}
-	if opts.ArtifactStore != nil {
-		out.Artifacts = nonEmpty(opts.ArtifactStoreLabel, "custom")
-	}
-	return out
-}
-
 func localFeatures() []string {
 	return []string{
 		"pipelines", "runs", "logs",
 		"secrets", "approvals", "cross-pipeline-refs",
 	}
-}
-
-func nonEmpty(s, fallback string) string {
-	if s == "" {
-		return fallback
-	}
-	return s
 }
 
 func readOnlyMiddleware(next http.Handler) http.Handler {

@@ -22,6 +22,7 @@ unlock.
 
 ### Added
 - **sdk:** a pipeline binary started with `--sw-node-protocol` answers `describe` and `plan` requests on descriptors 3 and 4 (inherited handles named by `SPARKWING_PROTOCOL_HANDLES` on Windows), with the run context taken from the request
+- **sdk:** under `--sw-node-protocol`, `run_node` runs a planned node and answers its outcome and output, and `eval` runs a node's `skip_if`, `cache_key`, `before_run`, `verify`, `after_run` or step `skip_if` closure by id, alongside a running node
 - **sdk:** `sparkwing.InputError` is the error a `Registration`'s `Invoke` returns when args fail the declared flags of the pipeline or of a job's `WithArgs`; find it with `errors.As`
 - **engine:** a loopback node route server with one bearer per node; `GET /node/v1/secrets/{name}` serves only the node's declared secrets and answers 426 to any other protocol version
 - **engine:** node routes for another node's output, OIDC tokens, child runs and their results, and a pipeline's latest run; the host forwards them to the controller with the node's claim token, which the node process never holds. A node has at most 4 of these requests open at once besides awaits, and at most 64 awaits, and gets 429 `too_many_requests` beyond either; every await of one child run shares one poll a second. A child run's request body is at most 64 KiB
@@ -101,10 +102,16 @@ unlock.
   Runners upload node logs as segments through the controller and need no logs URL. An agent `config.yaml` with `logs:` fails to load with `field logs not found`. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
 
 - **cli (Breaking):** `sparkwing cluster runners add --logs` and the profile's `logs.url` are removed
-  A url on a controller logs surface is refused. `sparkwing serve` runs no logs service and writes only `SPARKWING_CONTROLLER_URL` to `dev.env`; its dashboard reads node logs from the run directories, and deleting a run there removes its directory. `sparkwing pipeline trigger` always follows the run's logs through the controller. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
+  `sparkwing serve` runs no logs service and writes only `SPARKWING_CONTROLLER_URL` to `dev.env`; its dashboard reads node logs from the run directories, and deleting a run there removes its directory. `sparkwing pipeline trigger` always follows the run's logs through the controller. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
 
 - **helm chart (Breaking):** `sparkwing-runner-bundle` (0.1.11) no longer deploys `sparkwing-logs`, and `sparkwing-full` drops `controller.logs.url` and `--logs-url`
   The logs Deployment, Service, ServiceAccount and PVC template, the `logs:` values and the runner's `--logs` argument are gone; a values file that still sets `logs` or `controller.logs` fails to render. The logs PVC is kept by its resource policy until you delete it. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
+
+- **cli (Breaking):** A profile's `logs` and `cache` surfaces, the log batching keys, the `stdout` logs type and `sparkwing serve --log-store` and `--artifact-store` are removed
+  Nothing wrote what they read once S3 and Postgres state went. A profile naming `logs`, `cache`, `batch_interval`, `batch_bytes`, `max_log_objects` or `max_log_bytes` fails to load as an unknown field. Read verbs take node logs from this machine's run directories or the profile's controller, `configure profiles list` drops its `LOGS` column, and `configure profiles show -o json` drops `logs` and `cache`. In Go, `pkg/storage/logbatch`, `pkg/storage/stdoutlogs`, the S3 `LogStore`, `storeurl.OpenLogStore`, `OpenLogStoreFromSpec` and `OpenArtifactStoreFromSpec`, `storage.FlushNode` and `FlushLosses`, `backends.Surfaces.Cache` and `Logs`, `localws.Options.LogStore` and `ArtifactStore`, and `controller.Dashboard.Logs` are gone.
+
+- **cli (Breaking):** `sparkwing run --sw-local-only` and `SPARKWING_LOCAL_ONLY` are removed
+  Every `sparkwing run` already records to this machine, so the flag only kept node processes off `SPARKWING_CACHE_URL`; unset that variable instead. `--sw-local-only` is refused as an unknown runner flag, and a managed git hook installed before this release fails until `sparkwing pipeline hooks install` rewrites it.
 
 - **release (Breaking):** Releases no longer build, sign or publish `ghcr.io/sparkwing-dev/sparkwing-logs` or the `sparkwing-logs` binaries
   See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).

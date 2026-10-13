@@ -249,9 +249,6 @@ func dispatchRun(args []string) error {
 	if flags.noCache {
 		env = append(env, "SPARKWING_NO_CACHE=1")
 	}
-	if flags.localOnly {
-		env = append(env, "SPARKWING_LOCAL_ONLY=1")
-	}
 	if flags.allowUnadmitted {
 		env = setEnv(env, orchestrator.AllowUnadmittedEnv, "1")
 	}
