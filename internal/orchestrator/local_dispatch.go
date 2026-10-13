@@ -32,7 +32,6 @@ func setupLocalExecution(ctx context.Context, paths Paths, opts *Options, backen
 		// cache URL is not part of this run's selected profile.
 		CacheURL: os.Getenv(ArtifactStoreEnvVar),
 		DryRun:   opts.DryRun,
-		NoCache:  opts.NoCache,
 		StartAt:  opts.StartAt,
 		StopAt:   opts.StopAt,
 		Labels:   defaultLocalLabels(),

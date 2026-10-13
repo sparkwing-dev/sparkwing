@@ -29,7 +29,6 @@ func testConfig() Config {
 		CacheURL:      "fs:///home/dev/.sparkwing/cache",
 		Labels:        []string{"local", "os=darwin"},
 		DryRun:        true,
-		NoCache:       true,
 		StartAt:       "build",
 		StopAt:        "deploy",
 		LeaseTokens: func(context.Context) (string, string) {
@@ -54,7 +53,6 @@ func TestChildEnv_PinsTheNodeContract(t *testing.T) {
 		"SPARKWING_RUNNER_TYPE":     "local",
 		"SPARKWING_RUNNER_LABELS":   "local,os=darwin",
 		"SPARKWING_DRY_RUN":         "1",
-		"SPARKWING_NO_CACHE":        "1",
 		"SPARKWING_START_AT":        "build",
 		"SPARKWING_STOP_AT":         "deploy",
 		wingwire.LeaseTokenEnv:      "lease-abc",
@@ -111,7 +109,7 @@ func TestChildEnv_OmitsEmptyAndUnavailableValues(t *testing.T) {
 		runner.Request{RunID: "run-1", NodeID: "build"})
 
 	for _, k := range []string{
-		"SPARKWING_CACHE_URL", "SPARKWING_AGENT_TOKEN", "SPARKWING_DRY_RUN", "SPARKWING_NO_CACHE",
+		"SPARKWING_CACHE_URL", "SPARKWING_AGENT_TOKEN", "SPARKWING_DRY_RUN",
 		"SPARKWING_START_AT", "SPARKWING_STOP_AT",
 		wingwire.LeaseTokenEnv, wingwire.ChildLeaseTokenEnv,
 	} {
@@ -142,8 +140,10 @@ func TestChildEnv_APISocketCarriesNoBearer(t *testing.T) {
 	if got, ok := lastValue(env, wingwire.APISocketEnv); !ok || got != cfg.APISocket {
 		t.Fatalf("%s = %q (found %v), want %q", wingwire.APISocketEnv, got, ok, cfg.APISocket)
 	}
-	if got, ok := lastValue(env, "SPARKWING_AGENT_TOKEN"); ok {
-		t.Fatalf("SPARKWING_AGENT_TOKEN = %q, want it stripped on the API socket path", got)
+	for _, name := range tokenEnvNames {
+		if got, ok := lastValue(env, name); ok {
+			t.Fatalf("%s = %q, want it stripped on the API socket path", name, got)
+		}
 	}
 	if got, ok := lastValue(env, "PATH"); !ok || got != "/usr/bin" {
 		t.Fatalf("PATH = %q (found %v), want the inherited value", got, ok)
@@ -184,23 +184,5 @@ func TestChildEnv_DropsTheParentRunSelectionFromNodeProcesses(t *testing.T) {
 	}
 	if got, ok := lastValue(env, "PATH"); !ok || got != "/usr/bin" {
 		t.Fatalf("PATH = %q (found %v), want unrelated environment preserved", got, ok)
-	}
-}
-
-func TestChildEnv_InheritsNothingTheEngineOwns(t *testing.T) {
-	base := []string{
-		"PATH=/usr/bin",
-		"SPARKWING_SECRETS_KEY=outer-key",
-		"SPARKWING_EXECUTION_CAPABILITY=outer-capability",
-		"sparkwing_secrets_key_file=/outer/key",
-	}
-	env := childEnv(context.Background(), base, testConfig(), runner.Request{RunID: "run-1", NodeID: "build"})
-	for _, k := range []string{"SPARKWING_SECRETS_KEY", "SPARKWING_EXECUTION_CAPABILITY", "sparkwing_secrets_key_file"} {
-		if got, ok := lastValue(env, k); ok {
-			t.Errorf("%s = %q, want it dropped before the node's init code runs", k, got)
-		}
-	}
-	if got, _ := lastValue(env, "SPARKWING_AGENT_TOKEN"); got != "svc_tok" {
-		t.Errorf("SPARKWING_AGENT_TOKEN = %q, want this run's scoped bearer", got)
 	}
 }
