@@ -124,9 +124,6 @@ type NodeRun struct {
 	BeforeRunEachAttempt bool
 	// safety: set only for a memoized node that did not run, whose generators read it through the output route.
 	memoOutput json.RawMessage
-	// safety: the lease admission granted this node, which a child run it starts attaches to;
-	// a child that queued for the cores its parent holds would wait for its own parent.
-	nodeLease string
 }
 
 // Run is the hosted run an executor works within.
@@ -147,9 +144,6 @@ type Run struct {
 	onlySkips map[string]string
 	// safety: set once, before any node starts, so node goroutines read it unlocked.
 	leaseToken string
-	// safety: set with leaseToken; a run lease that holds plan groups or host capacity, as an attached run's
-	// does, is what a child must attach to.
-	leaseHoldsGroups, leaseHoldsHost bool
 }
 
 type addRequest struct {

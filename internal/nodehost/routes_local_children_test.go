@@ -53,7 +53,7 @@ func TestLocalChildrenStartAndAwaitWithoutAController(t *testing.T) {
 	var holds, resumes int
 	bearer := admit(t, s, nodehost.Node{
 		RunID: "run-1", NodeID: "deploy", Resolver: &fakeResolver{}, Masker: secrets.NewMasker(),
-		Local: st, Children: kids, LeaseToken: "lease-1",
+		Local: st, Children: kids,
 		Hold: func() func() { holds++; return func() { resumes++ } },
 	})
 
@@ -67,8 +67,8 @@ func TestLocalChildrenStartAndAwaitWithoutAController(t *testing.T) {
 	if got.status != http.StatusCreated || got.body["run_id"] != "child-1" {
 		t.Fatalf("start: status %d body %v", got.status, got.body)
 	}
-	if want := (nodehost.ChildParent{RunID: "run-1", NodeID: "deploy", LeaseToken: "lease-1"}); len(kids.parents) != 1 || kids.parents[0] != want {
-		t.Fatalf("parents = %v, want %v: the child would queue behind the run that waits on it", kids.parents, want)
+	if want := (nodehost.ChildParent{RunID: "run-1", NodeID: "deploy"}); len(kids.parents) != 1 || kids.parents[0] != want {
+		t.Fatalf("parents = %v, want %v: the child attaches to what that node holds", kids.parents, want)
 	}
 
 	if got := ask(t, s, http.MethodGet, "/node/v1/children/child-1/await?wait_ms=300&node=build", bearer, ""); got.status != http.StatusOK || got.body["status"] != "pending" {

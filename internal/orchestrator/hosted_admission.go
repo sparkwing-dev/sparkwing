@@ -44,9 +44,6 @@ func hostedAdmission(ctx context.Context, opts *Options, backends Backends, plan
 	if la.Delegate == nil {
 		la.Delegate = opts.Delegate
 	}
-	if la.ParentLeaseToken != "" && la.ParentRunID == "" {
-		la.ParentRunID = parentRunIDFromContext(ctx)
-	}
 	a.Daemon = &hostedAdmitter{la: la, backends: backends, pipeline: opts.Pipeline, plan: plan}
 	return a, nil
 }
@@ -65,7 +62,7 @@ type hostedAdmitter struct {
 
 func (h *hostedAdmitter) Acquire(ctx context.Context, req wingwire.AdmissionRequest, onQueued func(wingwire.Queued)) (nodehost.Lease, error) {
 	switch {
-	case h.la.ParentLeaseToken != "" && req.OwnerRunID == "":
+	case h.la.ParentNodeID != "" && req.OwnerRunID == "":
 		return h.attach(ctx, req)
 	case h.attachedHost && !req.SemaphoresOnly:
 		// safety: the parent's lease already holds the host for an attached run, so its nodes take none,
@@ -144,15 +141,15 @@ func (h *hostedAdmitter) profileCost(ctx context.Context, req *wingwire.Admissio
 
 type hostedLease struct{ l *wingdclient.Lease }
 
-func (h hostedLease) Token() string   { return h.l.Token }
-func (h hostedLease) HoldsHost() bool { return leaseCarriesHost(h.l) }
-func (h hostedLease) Release() error  { return h.l.Release() }
+func (h hostedLease) Token() string  { return h.l.Token }
+func (h hostedLease) Release() error { return h.l.Release() }
 func (h hostedLease) Watch(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel)) error {
 	return h.l.WatchOwnership(onEvicted, onCancel, nil)
 }
 
-// safety: a nested run attaches to the lease of the node that started it, as the dispatcher's attachChildRun
-// did, so it never queues behind the parent waiting on it; plan groups the parent lease lacks queue on their own.
+// safety: a nested run attaches to what the node that started it holds, so it never queues behind the parent
+// waiting on it; the daemon resolves that from the parent run and node, across every run above them, and
+// refuses when they hold nothing. Plan groups none of them hold queue on their own.
 func (h *hostedAdmitter) attach(ctx context.Context, req wingwire.AdmissionRequest) (nodehost.Lease, error) {
 	cl, err := h.la.ensureDaemon(ctx)
 	if err != nil {
@@ -160,11 +157,11 @@ func (h *hostedAdmitter) attach(ctx context.Context, req wingwire.AdmissionReque
 	}
 	lease, err := cl.Acquire(ctx, wingwire.AdmissionRequest{
 		RunID: req.RunID, Pipeline: req.Pipeline, Repo: currentRepoShortName(),
-		ParentLeaseToken: h.la.ParentLeaseToken, ParentRunID: h.la.ParentRunID, Origin: h.la.Origin,
+		ParentRunID: h.la.ParentRunID, ParentNodeID: h.la.ParentNodeID, Origin: h.la.Origin,
 	}, nil)
 	if err != nil {
 		warnHostedClose("admission client", cl.Close())
-		return nil, fmt.Errorf("local admission: attach to parent lease: %w", err)
+		return nil, fmt.Errorf("local admission: attach to parent run %s node %s: %w", h.la.ParentRunID, h.la.ParentNodeID, err)
 	}
 	h.attachToken, h.attachedHost = lease.Token, leaseCarriesHost(lease)
 	var extra []wingwire.SemaphoreClaim
@@ -177,7 +174,7 @@ func (h *hostedAdmitter) attach(ctx context.Context, req wingwire.AdmissionReque
 		return hostedLease{lease}, nil
 	}
 	sems, err := h.Acquire(ctx, wingwire.AdmissionRequest{
-		RunID: req.RunID + localPlanSemsID, OwnerRunID: req.RunID, OwnerLeaseToken: lease.Token,
+		RunID: wingwire.PlanSemaphoresParticipant(req.RunID), OwnerRunID: req.RunID, OwnerLeaseToken: lease.Token,
 		DisplayRunID: req.RunID, SemaphoresOnly: true, Semaphores: extra, SubLease: true, Priority: req.Priority,
 	}, nil)
 	if err != nil {

@@ -1319,9 +1319,17 @@ Ctrl-C cancels the wait cleanly. When a run process dies -- crash, kill, or
 power event -- the kernel closes the connection and the daemon releases the
 lease immediately, finalizes the orphaned run record, and admits the next
 waiter. There are no lease heartbeats to tune. Nested runs never double-charge the
-host: a parent passes its active lease to children it spawns (via
-`RunAndAwait` or a step that shells out to `sparkwing run`), and each
-child attaches to the parent's lease instead of re-admitting.
+host: a child run (started by `RunAndAwait`, or by a step that shells out to
+`sparkwing run`) names its parent run and node, and the daemon attaches it to
+what that node holds instead of re-admitting it. The child joins the lease
+that holds the node's cores, or the run's lease when the run pins the host,
+and it holds every concurrency group held by the node, its run, and each run
+above them, so a grandchild that shares a group with its grandparent never
+waits on it. A sibling node's groups are not passed down. This holds whichever
+process claims the child: the parent's own run or the resident consumer. A
+child whose named parent holds no lease, because the node has finished or the
+parent ran without the daemon, fails with that reason instead of queueing on
+its own.
 
 The ledger survives daemon restarts the same way runs survive daemon
 handoffs: every transition is persisted, and a restarting daemon

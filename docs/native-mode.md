@@ -11,7 +11,7 @@ No daemon, no controller pod, no queue, no cluster lifecycle commands.
 
 ## What gets written per run
 
-Run state lives in the SQLite store at `~/.sparkwing/state.db`. Per-run artifacts live under `~/.sparkwing/runs/<runID>/`: one `.log` file per node. A run you invoke yourself also gets `_envelope.ndjson` there for run-level events (run start, plan, finish); a child run dispatched locally by `sparkwing.RunAndAwait` writes only its node logs, since the envelope belongs to the invocation that owns the terminal. The dashboard reads both the store and the logs.
+Run state lives in the SQLite store at `~/.sparkwing/state.db`. Per-run artifacts live under `~/.sparkwing/runs/<runID>/`: one `.log` file per node. Each run, including a child run dispatched locally by `sparkwing.RunAndAwait`, also gets `_envelope.ndjson` there for run-level events (run start, plan, finish). The dashboard reads both the store and the logs.
 
 Run IDs are timestamp-prefixed, so they sort chronologically.
 

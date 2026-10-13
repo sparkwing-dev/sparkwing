@@ -3870,6 +3870,12 @@ var cmdRunsConsume = Command{
 	Hidden:   true,
 }
 
+var cmdTriggerHost = Command{
+	Path:     "sparkwing __host-trigger",
+	Synopsis: "Host one claimed local trigger's run (spawned by the trigger loop)",
+	Hidden:   true,
+}
+
 var cmdHandleTrigger = Command{
 	Path:     "sparkwing handle-trigger",
 	Synopsis: "Run one claimed trigger (spawned by cluster worker)",

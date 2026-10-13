@@ -48,7 +48,7 @@ var allCommands = []*Command{
 	&cmdCrons, &cmdCronsInstall, &cmdCronsUninstall, &cmdCronsList,
 	&cmdCronsShow, &cmdCronsSet, &cmdCronsRun, &cmdCronsTick,
 	&cmdWingd, &cmdWingdRun, &cmdWingdSupervise, &cmdDashboardSupervise, &cmdRunsConsume,
-	&cmdHandleTrigger, &cmdComplete,
+	&cmdHandleTrigger, &cmdTriggerHost, &cmdComplete,
 }
 
 type CommandIndexJSON struct {

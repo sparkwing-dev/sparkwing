@@ -50,30 +50,21 @@ func runHandleTriggerCLI(args []string) error {
 	k8sTeamNodes := fs.Bool("runner-team-nodes", false,
 		"keep each band node to the team whose Job booted it by selecting sparkwing.dev/team-node; "+
 			"the band pool must stamp that label on its nodes")
-	local := fs.Bool("local", false,
-		"run against the laptop SQLite store; no controller required")
 	positional, err := parseInterspersed(fs, args)
 	if err != nil {
 		return err
 	}
 
 	if len(positional) < 1 {
-		return errors.New("usage: handle-trigger <trigger-id> [--controller URL --token T | --local]")
+		return errors.New("usage: handle-trigger <trigger-id> --controller URL --token T")
 	}
 	triggerID := positional[0]
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	if *local {
-		if err := HandleClaimedTriggerLocal(ctx, triggerID); err != nil {
-			return fmt.Errorf("handle %s (local): %w", triggerID, err)
-		}
-		return nil
-	}
-
 	if *controllerURL == "" {
-		return errors.New("--controller (or SPARKWING_CONTROLLER_URL) required (or pass --local)")
+		return errors.New("--controller (or SPARKWING_CONTROLLER_URL) required")
 	}
 	opts := WorkerOptions{
 		ControllerURL:     *controllerURL,

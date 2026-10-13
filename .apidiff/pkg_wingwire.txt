@@ -23,6 +23,8 @@ type AdmissionRequest struct {
 
 	ParentRunID string
 
+	ParentNodeID string
+
 	SemaphoresOnly bool
 
 	SubLease bool
@@ -279,9 +281,12 @@ type Message interface {
 }
 type MessageType string
 const MinProtocolMajor = 1
+func NodeHostParticipant(runID, nodeID string) string
+func NodeSemaphoreParticipant(runID, nodeID string) string
 type Origin string
 const OriginController Origin = "controller"
 const OriginLocal Origin = "local"
+func PlanSemaphoresParticipant(runID string) string
 type Policy string
 const PolicyCancelOthers Policy = "cancel_others"
 const PolicyFail Policy = "fail"
