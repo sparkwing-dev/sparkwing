@@ -108,7 +108,9 @@ type Layer func(cfg *Config, next Executor) Executor
 
 // safety: the order is the envelope's nesting, outermost first: approvals and recovery, debug pauses,
 // admission, skip_if, memo, artifacts, caches, retries and timeouts, attempt closures, steps, expansion.
-var layers = []Layer{}
+var layers = []Layer{
+	cachesLayer,
+}
 
 // Execute plans the run in a short-lived SDK process, records the run and
 // its nodes, and runs the nodes in dependency order. An error means no run
