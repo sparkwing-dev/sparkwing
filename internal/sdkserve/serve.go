@@ -196,7 +196,19 @@ func (l frameLogger) Log(level, msg string) {
 	l.Emit(sparkwing.LogRecord{TS: time.Now(), Level: level, Msg: msg})
 }
 
+// safety: the host writes step and fail-fast records from what it drives, so
+// the ones RunWork emits inside a run_node would duplicate or contradict them.
+var hostEvents = map[string]bool{
+	sparkwing.EventStepStart:    true,
+	sparkwing.EventStepEnd:      true,
+	sparkwing.EventStepSkipped:  true,
+	sparkwing.EventWorkFailFast: true,
+}
+
 func (l frameLogger) Emit(rec sparkwing.LogRecord) {
+	if hostEvents[rec.Event] {
+		return
+	}
 	if rec.TS.IsZero() {
 		rec.TS = time.Now()
 	}

@@ -22,8 +22,11 @@ func runStep(ctx context.Context, s *server, req nodeproto.Request) (any, error)
 	if step == nil {
 		return nil, &nodeproto.Error{Code: nodeproto.CodeUnknownStep, Message: fmt.Sprintf("node %q has no step %q", req.Node, req.Step)}
 	}
-	ctx = withFailure(s.nodeContext(ctx, planned, node, step), req.Failure)
-	out, err := runStepBody(ctx, work, step)
+	ctx, err := s.nodeContext(ctx, planned, node, step)
+	if err != nil {
+		return bodyResult(nil, err), nil
+	}
+	out, err := runStepBody(withFailure(ctx, req.Failure), work, step)
 	if step != node.ResultStep() {
 		out = nil
 	}
