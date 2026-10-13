@@ -138,3 +138,24 @@ func TestDispatchCancelledRunCancelsTheOutstandingNode(t *testing.T) {
 	wantRow(t, st, "build", sparkwing.Cancelled, "")
 	wantRow(t, st, "test", sparkwing.Cancelled, "")
 }
+
+// safety: a row another holder claims is that holder's to finish, so the run
+// host leaves it however the dispatch reads.
+func TestDispatchLeavesARowAnotherHolderClaims(t *testing.T) {
+	st := openStore(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "build"}}},
+		func(ctx context.Context, n *NodeRun) Result {
+			if _, err := st.ClaimNamedNode(ctx, store.ClaimIdentity{}, n.Run.ID, n.Plan.ID, "pool:other", time.Minute, store.NamedClaimOptions{}); err != nil {
+				t.Errorf("claim: %v", err)
+			}
+			return Result{Outcome: sparkwing.Failed, Err: store.ErrLockHeld}
+		})
+	if res.Status != "failed" {
+		t.Fatalf("run = %+v, want failed", res)
+	}
+	if row := nodeRow(t, st, "build"); row.Status == "done" || row.ClaimedBy != "pool:other" {
+		t.Fatalf("build row = %s/%s claimed by %q, want left to its holder", row.Status, row.Outcome, row.ClaimedBy)
+	}
+}

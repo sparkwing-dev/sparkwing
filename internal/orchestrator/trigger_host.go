@@ -35,19 +35,18 @@ type TriggerHost struct {
 	// Runner dispatches each node, as a Kubernetes Job or to a warm runner.
 	// Nil hosts each node in this process under a claim of its own.
 	Runner runner.Runner
-	// Heartbeat, when positive, renews the trigger claim and cancels the run
-	// when the claim ends or an operator cancels it. Zero leaves the claim to
-	// the caller, which cancels ctx with a [nodehost.CancelError] for an
-	// operator's cancel.
-	Heartbeat time.Duration
-	Logger    *slog.Logger
+	Logger *slog.Logger
 }
 
 var errTriggerClaimEnded = errors.New("the trigger claim ended, so the run stopped")
 
 // HostTriggerRun plans h's run in a short-lived process of its pipeline,
 // runs the scheduler, dispatches each node, and finishes the trigger once
-// the run row is terminal. An error means no run row was recorded.
+// the run row is terminal. An error means no run row was recorded. The caller
+// renews the trigger claim, as [HeartbeatTrigger] does, and cancels ctx with a
+// [nodehost.CancelError] for an operator's cancel; a ctx cancelled with no
+// cause, as a runner shutting down is, leaves the run and trigger to the
+// claim's lease.
 //
 // safety: plan code and every closure run in processes with the minimal
 // environment and only their node's route bearer; the runner's token stays in
@@ -58,11 +57,6 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	trig := h.Trigger
 	ctx = DispatchContext(ctx, trig)
 	c := client.NewWithToken(h.ControllerURL, nil, h.Token)
-	if h.Heartbeat > 0 {
-		var stop func()
-		ctx, stop = heartbeatTrigger(ctx, c, trig.ID, h.Heartbeat, logger)
-		defer stop()
-	}
 	requires, err := PipelineRequires(h.Dir, trig.Pipeline)
 	if err != nil {
 		return err
@@ -85,23 +79,25 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	slots := NewHTTPConcurrency(h.ControllerURL, nil, h.Token, store.DefaultConcurrencyLease)
 	dispatch := h.Runner
 	if dispatch == nil {
-		dispatch = &claimedNodeHost{controllerURL: h.ControllerURL, binary: h.Binary, dir: h.Dir, ctrl: c, logger: logger}
+		dispatch = &claimedNodeHost{controllerURL: h.ControllerURL, binary: h.Binary, dir: h.Dir, ctrl: c, trigger: trig, logger: logger}
 	}
 	hostLog := &triggerHostLog{out: os.Stderr}
+	shuttingDown := shuttingDownOn(ctx)
 	res, err := nodehost.Execute(ctx, nodehost.Config{
 		Session:  nodehost.SessionConfig{Entry: h.Binary, Dir: h.Dir, Sink: planSink},
 		Pipeline: trig.Pipeline, Args: triggerHostArgs(ctx, c, trig, logger),
 		Run: triggerRunContext(ctx, c, trig), Requires: requires,
 		ParentRunID: trig.ParentRunID, RetryOf: trig.RetryOf, RetrySource: trig.RetrySource,
-		State: c, Logger: logger,
+		State: stoppingHostState{Client: c, shuttingDown: shuttingDown}, Logger: logger,
 		Admission: &nodehost.Admission{Slots: slots},
 		Memo: &nodehost.Memo{Slots: slots, Output: func(ctx context.Context, _ store.ClaimInputRequest, runID, nodeID string) ([]byte, error) {
 			return c.GetNodeOutput(ctx, runID, nodeID)
 		}},
-		// safety: the run host's eval processes get no forwarded routes, since only a node's claim backs them,
-		// and their lines go to this runner's log, since the node's log belongs to the host that runs it.
+		// safety: the run host's eval processes read secrets through the trigger's claim, which the controller
+		// releases them to, but get no forwarded routes, since only a node's claim backs them; their lines go to
+		// this runner's log, since the node's log belongs to the host that runs it.
 		Attempts: &nodehost.Attempts{
-			Routes: routes, Resolver: podSecrets{c: c, runID: trig.ID}, Masker: masker,
+			Routes: routes, Resolver: podSecrets{c: client.NewWithToken(h.ControllerURL, nil, trig.ClaimToken), runID: trig.ID}, Masker: masker,
 			OpenLog: func(context.Context, string, string) (nodehost.NodeLog, error) { return hostLog, nil },
 		},
 		Dispatch: dispatchThrough(dispatch, trig.Pipeline),
@@ -109,6 +105,11 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	planSink.end()
 	if err != nil {
 		return err
+	}
+	if shuttingDown() {
+		// safety: the trigger stays claimed and its run unfinished, so its lease returns it to the queue.
+		logger.Warn("trigger host: stopped before the run ended; its claim's lease returns it", "run_id", res.RunID)
+		return nil
 	}
 	logger.Info("trigger host: run finished", "run_id", res.RunID, "status", res.Status, "err", res.Err)
 	if err := c.FinishTrigger(context.WithoutCancel(ctx), trig.ID); err != nil {
@@ -131,25 +132,39 @@ func triggerHostArgs(ctx context.Context, c *client.Client, trig *store.Trigger,
 	return orig.Args
 }
 
-// safety: the context is the one [podRunContext] derives from the run row
-// this host records, so each dispatched node's plan hashes alike: the start
-// time the row holds, the trigger's git snapshot and its source, and nothing
-// the row does not carry.
+// safety: the run host and every node host it dispatches to derive the
+// context with [hostedRunContext] from the trigger and the run row's start
+// time, so their plans hash alike.
 func triggerRunContext(ctx context.Context, c *client.Client, trig *store.Trigger) nodeproto.RunContext {
 	started := time.Now().UTC()
 	if row, err := c.GetRunForExecution(ctx, trig.ID); err == nil && !row.StartedAt.IsZero() {
 		started = row.StartedAt
 	}
-	return nodeproto.RunContext{
-		RunID: trig.ID, StartedAt: started,
-		Git:     &nodeproto.Git{SHA: trig.GitSHA, Branch: trig.GitBranch, Repo: trig.Repo, RepoURL: trig.RepoURL},
-		Trigger: &nodeproto.Trigger{Source: cmp.Or(trig.TriggerSource, "manual")},
-	}
+	return hostedRunContext(trig, started)
 }
 
-// safety: the claim's cancel is a cancel, which the run records as
-// cancelled; a claim that ended any other way fails the run.
-func heartbeatTrigger(ctx context.Context, c *client.Client, triggerID string, interval time.Duration, logger *slog.Logger) (context.Context, func()) {
+// safety: the one derivation of a hosted run's context, from its trigger's git snapshot, source, actor and pull
+// request and the start time its row holds, which the run host and each node host share.
+func hostedRunContext(trig *store.Trigger, started time.Time) nodeproto.RunContext {
+	rc := nodeproto.RunContext{
+		RunID: trig.ID, StartedAt: started,
+		Git:     &nodeproto.Git{SHA: trig.GitSHA, Branch: trig.GitBranch, Repo: trig.Repo, RepoURL: trig.RepoURL},
+		Trigger: &nodeproto.Trigger{Source: cmp.Or(trig.TriggerSource, "manual"), User: trig.TriggerUser},
+	}
+	if pr := sparkwing.PullRequestFromEnv(trig.TriggerEnv); pr != nil {
+		rc.Trigger.PullRequest = &nodeproto.PullRequest{
+			Number: pr.Number, Action: pr.Action, BaseRef: pr.BaseRef, BaseSHA: pr.BaseSHA, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA,
+		}
+	}
+	return rc
+}
+
+// HeartbeatTrigger renews triggerID's claim every interval until stop is
+// called, and cancels the returned context when the claim ends: with a
+// [nodehost.CancelError] for an operator's cancel, which the run records as
+// cancelled, and with an error that fails the run when the claim ended any
+// other way.
+func HeartbeatTrigger(ctx context.Context, c *client.Client, triggerID string, interval time.Duration, logger *slog.Logger) (context.Context, func()) {
 	ctx, cancel := context.WithCancelCause(ctx)
 	var cancelled atomic.Bool
 	beatCtx, stopBeat := context.WithCancel(ctx)
@@ -173,8 +188,9 @@ func dispatchThrough(r runner.Runner, pipeline string) nodehost.Executor {
 			RunID: n.Run.ID, NodeID: n.Plan.ID, Pipeline: pipeline,
 			ClaimWait: time.Duration(n.Run.Doc.ClaimWaitMS) * time.Millisecond,
 		}
+		// safety: the node's retries and their backoff run on its host, so its Job outlives them all.
+		req.Timeout = nodehost.AttemptsBudget(n.Plan)
 		if m := n.Plan.Modifiers; m != nil {
-			req.Timeout = time.Duration(m.TimeoutMS) * time.Millisecond
 			req.Cores, req.MemoryBytes = m.ResCores, m.ResMemoryBytes
 		}
 		res := r.RunNode(ctx, req)
@@ -192,6 +208,7 @@ func dispatchThrough(r runner.Runner, pipeline string) nodehost.Executor {
 type claimedNodeHost struct {
 	controllerURL, binary, dir string
 	ctrl                       *client.Client
+	trigger                    *store.Trigger
 	logger                     *slog.Logger
 }
 
@@ -228,7 +245,7 @@ func (h *claimedNodeHost) RunNode(ctx context.Context, req runner.Request) runne
 		var res runner.Result
 		if res, err = hostDispatchedNode(ctx, podNode{
 			binary: h.binary, dir: h.dir, controllerURL: h.controllerURL, token: n.ClaimToken,
-			runID: req.RunID, nodeID: req.NodeID, artifacts: art, logger: h.logger,
+			runID: req.RunID, nodeID: req.NodeID, trigger: h.trigger, cacheGrant: grant, artifacts: art, logger: h.logger,
 		}); err == nil {
 			return res
 		}

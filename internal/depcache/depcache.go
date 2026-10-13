@@ -178,7 +178,7 @@ func (st *Run) restore(ctx context.Context, workdir string) {
 	unlock := lockDir(dir)
 	defer unlock()
 
-	b := selectBackend()
+	b := selectBackend(ctx)
 	hit, err := b.exists(ctx, key)
 	if err != nil {
 		slog.Warn("depcache: backend probe failed; running uncached",
@@ -231,7 +231,7 @@ func (st *Run) Save(ctx context.Context, runErr error) {
 		return
 	}
 
-	b := selectBackend()
+	b := selectBackend(ctx)
 	start := time.Now()
 	size, err := b.store(ctx, st.key, st.dir)
 	if err != nil {

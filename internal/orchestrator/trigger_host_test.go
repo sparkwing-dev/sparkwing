@@ -17,7 +17,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -37,6 +39,11 @@ type hostedTrigger struct {
 // a route the host reaches for beyond it fails the test.
 func newHostedTrigger(t *testing.T, args map[string]string) *hostedTrigger {
 	t.Helper()
+	return newHostedTriggerWith(t, args, func(*store.Trigger) {})
+}
+
+func newHostedTriggerWith(t *testing.T, args map[string]string, shape func(*store.Trigger)) *hostedTrigger {
+	t.Helper()
 	t.Setenv("GORACE", "atexit_sleep_ms=0")
 	h := &hostedTrigger{bin: podFixture(t)}
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
@@ -45,10 +52,6 @@ func newHostedTrigger(t *testing.T, args map[string]string) *hostedTrigger {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	h.st = st
-	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := httptest.NewServer(controller.New(st, quiet).EnableAuthFromStore().Handler())
-	t.Cleanup(srv.Close)
-	h.url = srv.URL
 	h.token, _, err = st.CreateToken("trigger-runner", store.TokenKindRunner, []string{
 		controller.ScopeTriggersClaim, controller.ScopeTriggersRead, controller.ScopeRunsState,
 		controller.ScopeRunsRead, controller.ScopeNodesClaim, controller.ScopeLogsRead,
@@ -56,11 +59,27 @@ func newHostedTrigger(t *testing.T, args map[string]string) *hostedTrigger {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// safety: built after the token exists, because a controller whose tokens table is empty serves every
+	// request unauthenticated.
+	key, err := secrets.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cipher, err := secrets.NewCipher(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(controller.New(st, quiet).EnableAuthFromStore().WithSecretsCipher(cipher).Handler())
+	t.Cleanup(srv.Close)
+	h.url = srv.URL
 	ctx, now := store.WithoutCreditMetering(t.Context()), time.Now()
-	if err := st.CreateTriggerWithRun(ctx, store.Trigger{
+	trig := store.Trigger{
 		ID: "run-hosted", Pipeline: "podnode", Args: args, Repo: "acme/widgets",
 		GitBranch: "main", GitSHA: strings.Repeat("b", 40), CreatedAt: now,
-	}, store.Run{ID: "run-hosted", Pipeline: "podnode", Status: "pending", Args: args, CreatedAt: now, StartedAt: now}); err != nil {
+	}
+	shape(&trig)
+	if err := st.CreateTriggerWithRun(ctx, trig, store.Run{ID: "run-hosted", Pipeline: "podnode", Status: "pending", Args: args, CreatedAt: now, StartedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	h.trig, err = client.NewWithToken(h.url, nil, h.token).ClaimTriggerFor(t.Context(), nil, nil)
@@ -72,9 +91,15 @@ func newHostedTrigger(t *testing.T, args map[string]string) *hostedTrigger {
 
 func (h *hostedTrigger) host(t *testing.T, ctx context.Context, r runner.Runner, heartbeat time.Duration) error {
 	t.Helper()
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if heartbeat > 0 {
+		var stop func()
+		ctx, stop = HeartbeatTrigger(DispatchContext(ctx, h.trig), client.NewWithToken(h.url, nil, h.token), h.trig.ID, heartbeat, quiet)
+		defer stop()
+	}
 	return HostTriggerRun(ctx, TriggerHost{
 		ControllerURL: h.url, Token: h.token, Trigger: h.trig, Binary: h.bin, Dir: t.TempDir(),
-		Runner: r, Heartbeat: heartbeat, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Runner: r, Logger: quiet,
 	})
 }
 
@@ -101,6 +126,8 @@ func (h *hostedTrigger) node(t *testing.T, id string) *store.Node {
 // for that node, and finishes the trigger. Neither the runner's token nor a
 // claim token reaches the node.
 func TestTriggerHost_HostsTheRunWithEachNodeUnderItsOwnClaim(t *testing.T) {
+	t.Setenv("GOPROXY", "https://cache.example/proxy/golang")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "runner-aws")
 	envOut := filepath.Join(t.TempDir(), "env")
 	h := newHostedTrigger(t, map[string]string{"envout": envOut})
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
@@ -121,6 +148,10 @@ func TestTriggerHost_HostsTheRunWithEachNodeUnderItsOwnClaim(t *testing.T) {
 	}
 	if strings.Contains(string(env), h.token) || strings.Contains(string(env), store.ClaimTokenPrefix+"_") {
 		t.Fatalf("the node's environment holds a controller credential:\n%s", env)
+	}
+	// safety: the runner's dependency proxy reaches go in the node, and nothing else of its environment does.
+	if !strings.Contains(string(env), "GOPROXY=https://cache.example/proxy/golang") || strings.Contains(string(env), "runner-aws") {
+		t.Fatalf("the node's environment = \n%s\nwant the runner's GOPROXY and none of its other settings", env)
 	}
 	trig, err := h.st.GetTrigger(t.Context(), h.trig.ID)
 	if err != nil || trig.Status != "done" {
@@ -256,7 +287,7 @@ func dispatchedHeld(t *testing.T, stop func(context.CancelCauseFunc)) *hostedTri
 	args := map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "hold": hold}
 	h := newHostedTrigger(t, args)
 	planned, err := nodehost.PlanDocument(t.Context(), nodehost.SessionConfig{Entry: h.bin, Dir: t.TempDir()}, nodehost.PlanRequest{
-		Pipeline: "podnode", Args: args, Run: podRunContext(h.run(t)),
+		Pipeline: "podnode", Args: args, Run: hostedRunContext(h.trig, h.run(t).StartedAt),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -268,6 +299,9 @@ func dispatchedHeld(t *testing.T, stop func(context.CancelCauseFunc)) *hostedTri
 		}
 	}
 	ctx := store.WithoutCreditMetering(t.Context())
+	if err := h.st.UpdatePlanSnapshot(ctx, h.trig.ID, planned.JSON); err != nil {
+		t.Fatal(err)
+	}
 	if err := h.st.CreateNode(ctx, store.Node{RunID: h.trig.ID, NodeID: "held", Status: "pending", SpecHash: hash}); err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +319,7 @@ func dispatchedHeld(t *testing.T, stop func(context.CancelCauseFunc)) *hostedTri
 	go func() {
 		_, err := hostDispatchedNode(hostCtx, podNode{
 			binary: h.bin, dir: t.TempDir(), controllerURL: h.url, token: n.ClaimToken,
-			runID: h.trig.ID, nodeID: "held", logger: slog.New(slog.DiscardHandler),
+			runID: h.trig.ID, nodeID: "held", trigger: h.trig, logger: slog.New(slog.DiscardHandler),
 		})
 		done <- err
 	}()
@@ -346,5 +380,151 @@ func TestDispatchedNode_WithoutASourceIsRefused(t *testing.T) {
 		nil, slog.New(slog.DiscardHandler), nil, ClaimedNodeAttempt(node))
 	if err == nil || !strings.Contains(err.Error(), "no repository or working-tree source") {
 		t.Fatalf("RunNodeOnce = %v, want the sourceless node refused", err)
+	}
+}
+
+// safety: a guard that reads a secret answers on the run host through the
+// trigger's claim, so a guard set to skip skips the deploy rather than fail
+// open for want of the secret.
+func TestTriggerHost_ASecretBackedSkipIfSkipsTheNode(t *testing.T) {
+	guard := filepath.Join(t.TempDir(), "deployed")
+	h := newHostedTrigger(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "guard": guard})
+	admin, _, err := h.st.CreateToken("secrets-owner", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.NewWithToken(h.url, nil, admin).CreateSecretForPipeline(t.Context(), "DEPLOY_GUARD", "skip", "podnode", true, false); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+	if err := h.host(t, ctx, nil, 0); err != nil {
+		t.Fatalf("host: %v", err)
+	}
+	if n := h.node(t, "deploy"); n.Outcome != string(sparkwing.Skipped) {
+		t.Fatalf("deploy = %s/%s (%s), want skipped by its guard", n.Status, n.Outcome, n.Error)
+	}
+	if _, err := os.Stat(guard); !os.IsNotExist(err) {
+		t.Fatalf("the guarded deploy ran: %v", err)
+	}
+}
+
+type runnerFunc func(context.Context, runner.Request) runner.Result
+
+func (f runnerFunc) RunNode(ctx context.Context, req runner.Request) runner.Result {
+	return f(ctx, req)
+}
+
+// safety: a node another holder won the claim to is that holder's to finish,
+// so the run host neither finishes its row nor runs it.
+func TestTriggerHost_LeavesANodeAnotherHolderClaimedToThatHolder(t *testing.T) {
+	envOut := filepath.Join(t.TempDir(), "env")
+	h := newHostedTrigger(t, map[string]string{"envout": envOut})
+	c := client.NewWithToken(h.url, nil, h.token)
+	r := runnerFunc(func(ctx context.Context, req runner.Request) runner.Result {
+		if _, err := c.ClaimNodeByID(store.WithoutClaimFences(ctx), req.RunID, req.NodeID, "pool:legitimate", time.Minute, false, nil); err != nil {
+			t.Errorf("claim: %v", err)
+		}
+		host := &claimedNodeHost{controllerURL: h.url, binary: h.bin, dir: t.TempDir(), ctrl: c, logger: slog.New(slog.DiscardHandler)}
+		return host.RunNode(ctx, req)
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+	if err := h.host(t, ctx, r, 0); err != nil {
+		t.Fatalf("host: %v", err)
+	}
+	if n := h.node(t, "build"); n.Status == "done" || n.ClaimedBy != "pool:legitimate" {
+		t.Fatalf("build = %s/%s claimed by %q, want left running under its holder's claim", n.Status, n.Outcome, n.ClaimedBy)
+	}
+	if _, err := os.Stat(envOut); !os.IsNotExist(err) {
+		t.Fatalf("the refused host ran the node: %v", err)
+	}
+}
+
+// safety: a runner shutting down is stopped with no cause of its own, so the
+// run, its running node and its trigger stay unfinished and claimed, and the
+// lease hands them to another runner rather than the run failing for a deploy.
+func TestTriggerHost_ShutdownLeavesTheRunToItsLease(t *testing.T) {
+	hold, pids := heldNodePID(t)
+	h := newHostedTrigger(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "hold": hold})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- h.host(t, ctx, nil, 100*time.Millisecond) }()
+	waitCtx, stop := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer stop()
+	waitForPID(t, waitCtx, pids, done)
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("host: %v", err)
+		}
+	case <-waitCtx.Done():
+		t.Fatal("the host did not stop")
+	}
+	trig, err := h.st.GetTrigger(t.Context(), h.trig.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, n := h.run(t), h.node(t, "held")
+	if run.Status != "running" || trig.Status == "done" || n.Status == "done" {
+		t.Fatalf("after shutdown run=%s trigger=%s held=%s/%s, want all left to their leases", run.Status, trig.Status, n.Status, n.Outcome)
+	}
+}
+
+// A dispatched recovery node is handed how its parent failed, as the run
+// host recorded it, so rollback code that branches on the failure sees it.
+func TestTriggerHost_ADispatchedRecoverySeesItsParentsFailure(t *testing.T) {
+	recovered := filepath.Join(t.TempDir(), "recovered")
+	h := newHostedTrigger(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "recover": recovered})
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+	if err := h.host(t, ctx, nil, 0); err != nil {
+		t.Fatalf("host: %v", err)
+	}
+	got, err := os.ReadFile(recovered)
+	if n := h.node(t, "recover"); err != nil || !strings.Contains(string(got), "broken on purpose") {
+		t.Fatalf("recover = %s/%s (%s), recorded %q %v; want the parent's error", n.Status, n.Outcome, n.Error, got, err)
+	}
+}
+
+// safety: a dispatched node's Job is bounded by every attempt its retries
+// allow on its host, and the backoff between them, not by one attempt.
+func TestDispatchThrough_BoundsTheNodeByAllItsAttempts(t *testing.T) {
+	var got runner.Request
+	exec := dispatchThrough(runnerFunc(func(_ context.Context, req runner.Request) runner.Result {
+		got = req
+		return runner.Result{Outcome: sparkwing.Success}
+	}), "p")
+	exec(t.Context(), &nodehost.NodeRun{Run: &nodehost.Run{ID: "r"}, Plan: nodeproto.PlanNode{ID: "n", Modifiers: &nodeproto.PlanModifiers{
+		TimeoutMS: 5 * 60_000, Retry: 1, RetryAuto: true, RetryBackoffMS: 6 * 60_000, ResCores: 4, ResMemoryBytes: 8 << 30,
+	}}})
+	if got.Timeout != 16*time.Minute || got.Cores != 4 || got.MemoryBytes != 8<<30 {
+		t.Fatalf("request timeout=%s cores=%v memory=%d, want 16m, 4 cores and 8 GiB", got.Timeout, got.Cores, got.MemoryBytes)
+	}
+}
+
+// The trigger's actor and pull request reach plan code on the run host and on
+// the node's host alike, so a plan that reads them hashes the same in both.
+func TestTriggerHost_PlansWithTheTriggersActorAndPullRequest(t *testing.T) {
+	envOut := filepath.Join(t.TempDir(), "env")
+	h := newHostedTriggerWith(t, map[string]string{"envout": envOut}, func(trig *store.Trigger) {
+		trig.TriggerUser = "alice"
+		trig.TriggerEnv = map[string]string{
+			sparkwing.EnvGitHubEventName: sparkwing.EventPullRequest, sparkwing.EnvPRNumber: "42",
+			sparkwing.EnvPRBaseRef: "main", sparkwing.EnvPRHeadRef: "feature",
+		}
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+	if err := h.host(t, ctx, nil, 0); err != nil {
+		t.Fatalf("host: %v", err)
+	}
+	if n := h.node(t, "build"); n.Outcome != string(sparkwing.Success) {
+		t.Fatalf("build = %s/%s (%s), want success with matching plans", n.Status, n.Outcome, n.Error)
+	}
+	if env, err := os.ReadFile(envOut); err != nil || !strings.Contains(string(env), "ACTOR=alice#42") {
+		t.Fatalf("build env lacks ACTOR=alice#42 (%v):\n%s", err, env)
 	}
 }

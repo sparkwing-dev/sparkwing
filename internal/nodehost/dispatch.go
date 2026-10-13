@@ -25,11 +25,17 @@ func dispatchChain(cfg *Config) Executor {
 }
 
 // safety: the remote host wrote the node's terminal row under its own claim,
-// so the row is the result and finish leaves it alone; a row the remote host
-// never finished, such as one cancelled before its claim, is finished here.
+// so the row is the result and finish leaves it alone. A row another holder
+// still claims is that holder's to finish, or the reaper's once its lease
+// lapses; only an unclaimed row, such as one cancelled before any claim, is
+// finished here.
 func adoptDispatchedRow(ctx context.Context, n *NodeRun, res Result) Result {
 	row, err := n.Run.State.GetNode(context.WithoutCancel(ctx), n.Run.ID, n.Plan.ID)
-	if err != nil || row == nil || row.Status != "done" || row.Outcome == "" {
+	if err != nil || row == nil {
+		return res
+	}
+	if row.Status != "done" || row.Outcome == "" {
+		res.recorded = row.Claimed
 		return res
 	}
 	res.Outcome, res.Reason, res.recorded = sparkwing.Outcome(row.Outcome), row.FailureReason, true

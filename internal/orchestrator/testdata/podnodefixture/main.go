@@ -2,7 +2,10 @@
 // one node that writes its environment to a file and prints a file's
 // content; when asked, a plan that drifts between processes, a failing node
 // with retries whose before_run and after_run calls are traced, and a node in a
-// concurrency group; when asked, a node that waits until it is stopped.
+// concurrency group; when asked, a node that waits until it is stopped, and a
+// deploy node whose skip_if reads a secret, and a failing node whose recovery
+// records the failure it was handed. The trigger's actor and pull request, when
+// set, reach the build node's environment as ACTOR.
 package main
 
 import (
@@ -29,11 +32,19 @@ type inputs struct {
 	Memo    string `flag:"memo" desc:"File a memoized node appends to each time its body runs"`
 	Publish bool   `flag:"publish" desc:"The memoized node publishes an artifact"`
 	Hold    string `flag:"hold" desc:"File a held node writes its pid to before it waits to be stopped"`
+	Guard   string `flag:"guard" desc:"File a deploy node writes unless its skip_if, which reads DEPLOY_GUARD, says skip"`
+	Recover string `flag:"recover" desc:"File a failing node's recovery writes the parent's error to"`
+}
+
+type fixtureSecrets struct {
+	Guard string `sw:"DEPLOY_GUARD,optional"`
 }
 
 type pipeline struct{ sparkwing.Base }
 
-func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ sparkwing.RunContext) error {
+func (pipeline) Secrets() any { return &fixtureSecrets{} }
+
+func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, rc sparkwing.RunContext) error {
 	build := sparkwing.Job(plan, "build", func(ctx context.Context) error {
 		echo, _ := os.ReadFile(in.Echo)
 		fmt.Println("echo " + string(echo))
@@ -90,6 +101,33 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 			<-ctx.Done()
 			return ctx.Err()
 		}).Needs(build)
+	}
+	if in.Guard != "" {
+		sparkwing.Job(plan, "deploy", func(context.Context) error {
+			return os.WriteFile(in.Guard, []byte("deployed"), 0o600)
+		}).SkipIf(func(ctx context.Context) bool {
+			guard, err := sparkwing.Secret(ctx, "DEPLOY_GUARD")
+			if err != nil {
+				panic(err)
+			}
+			return guard == "skip"
+		})
+	}
+	if pr := rc.Trigger.PullRequest; rc.Trigger.User != "" || pr != nil {
+		actor := rc.Trigger.User
+		if pr != nil {
+			actor += "#" + strconv.Itoa(pr.Number)
+		}
+		build.Env("ACTOR", actor)
+	}
+	if in.Recover != "" {
+		sparkwing.Job(plan, "broken", func(context.Context) error { return errors.New("broken on purpose") }).
+			OnFailure("recover", func(_ context.Context, f sparkwing.Failure) error {
+				if f.Err == nil {
+					return errors.New("the parent's failure was dropped")
+				}
+				return os.WriteFile(in.Recover, []byte(f.Err.Error()), 0o600)
+			})
 	}
 	if in.Group {
 		build.Concurrency(sparkwing.NewConcurrencyGroup("pod-group", sparkwing.ConcurrencyLimit{Capacity: 1}))

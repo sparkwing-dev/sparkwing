@@ -153,8 +153,9 @@ func addHooks(plan *sparkwing.Plan, marker string) {
 		SkipIf(func(context.Context) bool { return false }).
 		SkipIf(func(context.Context) bool { return true })
 	sparkwing.Job(plan, "kept", func(context.Context) error { trace("kept", "body"); return nil }).
-		SkipIf(func(context.Context) bool { panic("no answer") }).
 		SkipIf(func(ctx context.Context) bool { <-ctx.Done(); return true }, sparkwing.SkipBudget(300*time.Millisecond))
+	sparkwing.Job(plan, "guarded", func(context.Context) error { trace("guarded", "body"); return nil }).
+		SkipIf(func(context.Context) bool { panic("no answer") })
 	sparkwing.Job(plan, "hooked", func(context.Context) error {
 		data, _ := os.ReadFile(filepath.Join(marker, "hooked"))
 		trace("hooked", "body")

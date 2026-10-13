@@ -166,6 +166,9 @@ Set by Sparkwing for pipeline code and node processes.
 | `GOPATH` | Go toolchain |
 | `GOPRIVATE` | Go toolchain |
 | `GOPROXY` | Go toolchain |
+| `PIP_INDEX_URL` | pip; a runner's dependency proxy setting, which a node process receives |
+| `PIP_TRUSTED_HOST` | pip; a runner's dependency proxy setting, which a node process receives |
+| `npm_config_registry` | npm; a runner's dependency proxy setting, which a node process receives |
 | `GOWORK` | Go toolchain |
 | `PATH` | the operating system |
 | `SHELL` | the operating system |

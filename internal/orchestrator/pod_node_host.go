@@ -13,8 +13,11 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/sparkwing-dev/sparkwing/internal/depcache"
+
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	k8srunner "github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
@@ -34,6 +37,10 @@ type podNode struct {
 	// safety: a node a run host dispatched already ran its skip_if, memo and admission there, and its accepted
 	// spec_hash is the one the run host recorded on its row.
 	dispatched bool
+	// safety: a dispatched node plans with the context its run host derived from this trigger.
+	trigger *store.Trigger
+	// safety: a dispatched node's caches use its own run's grant, since its host may serve other runs.
+	cacheGrant string
 	state      storage.StateStore
 	artifacts  storage.ArtifactStore
 	logger     *slog.Logger
@@ -54,6 +61,14 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 			return nodehost.Result{}, fmt.Errorf("read node %s: %w", p.nodeID, err)
 		}
 		p.specHash = row.SpecHash
+	}
+	rc := podRunContext(run)
+	if p.dispatched {
+		ctx = depcache.WithCacheGrant(ctx, p.cacheGrant)
+		if p.trigger == nil {
+			return nodehost.Result{}, fmt.Errorf("run %s has no trigger to plan its node with", p.runID)
+		}
+		rc = hostedRunContext(p.trigger, run.StartedAt)
 	}
 	masker := secrets.NewMasker()
 	masker.Register(p.token)
@@ -79,8 +94,8 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 	}
 	defer planSink.end()
 	cfg := nodehost.Config{
-		Session:  nodehost.SessionConfig{Entry: p.binary, Dir: p.dir, Sink: planSink},
-		Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run),
+		Session:  nodehost.SessionConfig{Entry: p.binary, Dir: p.dir, Sink: planSink, Env: podSessionEnv()},
+		Pipeline: run.Pipeline, Args: run.Args, Run: rc,
 		State: p.state, Artifacts: p.artifacts, Logger: p.logger,
 		Attempts: &nodehost.Attempts{
 			Routes: routes, Resolver: podSecrets{c: c, runID: p.runID}, Masker: masker, Claim: claim,
@@ -104,6 +119,19 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 	}
 	nlog.seal(ctx, ctx.Err() != nil || res.Outcome == sparkwing.Cancelled)
 	return res, nil
+}
+
+// safety: the minimal environment plus only the dependency proxy settings the
+// pod's Job or runner was given, so go, npm and pip in the node use the cache's
+// proxy and no other engine variable reaches pipeline code.
+func podSessionEnv() []string {
+	env := nodehost.MinimalEnv()
+	for _, name := range k8srunner.DependencyProxyEnvNames {
+		if v, ok := os.LookupEnv(name); ok {
+			env = append(env, name+"="+v)
+		}
+	}
+	return env
 }
 
 // PipelineRequires is the placement labels the pipeline's entry in the

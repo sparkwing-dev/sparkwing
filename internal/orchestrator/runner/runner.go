@@ -24,7 +24,8 @@ type Request struct {
 	Trigger  sparkwing.TriggerInfo
 
 	Node *sparkwing.JobNode
-	// Timeout is the node's declared wall-clock timeout; zero is none.
+	// Timeout bounds the node's whole run on its host, every attempt that
+	// runs there included; zero is none.
 	Timeout time.Duration
 	// Cores and MemoryBytes are the node's resource pin; zero is unpinned.
 	Cores       float64

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1530,4 +1531,16 @@ func TestBuildJob_OnlyABandJobRefusesDisruption(t *testing.T) {
 // node fails with.
 func (r *Runner) observeUnschedulable(ctx context.Context, jobName string) string {
 	return unschedulableMessage(r.unschedulablePod(ctx, jobName))
+}
+
+// safety: the node host passes exactly these names through to pipeline
+// processes, so the list and the Job's settings stay one set.
+func TestDependencyProxyEnvSetsExactlyItsNames(t *testing.T) {
+	var got []string
+	for _, e := range DependencyProxyEnv("http://cache.example") {
+		got = append(got, e.Name)
+	}
+	if !slices.Equal(got, DependencyProxyEnvNames) {
+		t.Fatalf("DependencyProxyEnv sets %v, want %v", got, DependencyProxyEnvNames)
+	}
 }

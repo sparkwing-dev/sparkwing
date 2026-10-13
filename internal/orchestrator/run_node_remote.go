@@ -138,17 +138,29 @@ func runNodeRemote(
 	}
 	return hostDispatchedNode(ctx, podNode{
 		binary: binary.path, dir: filepath.Dir(sparkwingDir), controllerURL: controllerURL, token: token,
-		runID: runID, nodeID: nodeID, artifacts: art, logger: logger,
+		runID: runID, nodeID: nodeID, trigger: trigger, cacheGrant: cacheGrant, artifacts: art, logger: logger,
 	})
 }
 
 // safety: a host stopped with no cause of its own, as a runner shutting down
-// is, leaves the node's row to its claim's lease, so the controller hands the
-// node to another runner rather than record it cancelled; a run's cancel, a
-// lost claim or a timeout carries a cause and is recorded.
+// is, leaves its node and run rows to their claims' leases, so the controller
+// hands them to another runner rather than record them cancelled or failed; a
+// run's cancel, a lost claim or a timeout carries a cause and is recorded.
 type stoppingHostState struct {
 	*client.Client
 	shuttingDown func() bool
+}
+
+// safety: no cause of its own is how a runner shutting down stops a host; every other stop names its reason.
+func shuttingDownOn(ctx context.Context) func() bool {
+	return func() bool { return errors.Is(context.Cause(ctx), context.Canceled) }
+}
+
+func (s stoppingHostState) FinishRun(ctx context.Context, runID, status, errMsg string) error {
+	if s.shuttingDown() {
+		return nil
+	}
+	return s.Client.FinishRun(ctx, runID, status, errMsg)
 }
 
 func (s stoppingHostState) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error {
@@ -166,7 +178,7 @@ func hostDispatchedNode(ctx context.Context, p podNode) (runner.Result, error) {
 	p.dispatched = true
 	p.state = stoppingHostState{
 		Client:       client.NewWithToken(p.controllerURL, nil, p.token),
-		shuttingDown: func() bool { return errors.Is(context.Cause(ctx), context.Canceled) },
+		shuttingDown: shuttingDownOn(ctx),
 	}
 	res, err := hostPodNode(ctx, p)
 	if err != nil {

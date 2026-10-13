@@ -450,11 +450,7 @@ func (s *scheduler) startReady(ctx context.Context, done chan<- finished, runnin
 				s.terminal(ctx, n.ID, sparkwing.Skipped, fmt.Sprintf("parent %q did not fail (outcome=%s)", parent, pr.Outcome))
 				continue
 			}
-			stage := "action"
-			if pr.Reason == store.FailureVerify {
-				stage = "verify"
-			}
-			node.Failure = &nodeproto.Failure{Node: parent, Stage: stage, Message: errText(pr.Err)}
+			node.Failure = parentFailure(parent, pr.Reason, errText(pr.Err))
 		} else if s.upstreamFailed(waits, byID) {
 			s.terminal(ctx, n.ID, sparkwing.Cancelled, "upstream-failed")
 			continue
@@ -465,6 +461,16 @@ func (s *scheduler) startReady(ctx context.Context, done chan<- finished, runnin
 		go func() { done <- finished{id: n.ID, res: s.exec(ctx, node)} }()
 	}
 	return progressed
+}
+
+// safety: one rule for the run host and a dispatched recovery node's host,
+// which reads its parent's reason and error from the row this host recorded.
+func parentFailure(parent, reason, message string) *nodeproto.Failure {
+	stage := "action"
+	if reason == store.FailureVerify {
+		stage = "verify"
+	}
+	return &nodeproto.Failure{Node: parent, Stage: stage, Message: message}
 }
 
 // safety: a continue_on_error upstream's failure does not hold back its

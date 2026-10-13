@@ -170,6 +170,13 @@ func podAttempt(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash
 	layers := podLayers
 	if m := n.Plan.Modifiers; dispatched {
 		layers = podDispatchedLayers
+		if parent := n.Plan.OnFailureOf; parent != "" {
+			row, err := run.State.GetNode(ctx, run.ID, parent)
+			if err != nil {
+				return failed(fmt.Errorf("read how %s failed: %w", parent, err))
+			}
+			n.Failure = parentFailure(parent, row.FailureReason, row.Error)
+		}
 	} else if m != nil && m.RetryAuto {
 		// safety: the attempt report cannot tell the controller a failed before_run is final, so every
 		// dispatch runs before_run again and a refused hook never lets a later dispatch run the body.

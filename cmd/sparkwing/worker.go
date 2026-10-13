@@ -14,6 +14,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/tokenpark"
@@ -119,15 +120,25 @@ func claimTriggers(ctx context.Context, profileName string, poll, heartbeat time
 // safety: the run is hosted in this process from the pipeline this checkout
 // builds; plan code and every node run in its own process with the minimal
 // environment, so the profile's token stays here.
+// safety: the claim is renewed from before the build, so a cold build longer
+// than the claim's lease keeps it; a worker shutting down leaves the trigger
+// to that lease, and a run that never started fails here, or ends cancelled
+// for an operator's cancel.
 func hostTrigger(ctx context.Context, cli *client.Client, trigger *store.Trigger, controllerURL, token string, heartbeat time.Duration) error {
-	err := hostTriggerFromCheckout(ctx, trigger, controllerURL, token, heartbeat)
-	if err == nil {
-		return nil
+	runCtx, stop := orchestrator.HeartbeatTrigger(orchestrator.DispatchContext(ctx, trigger), cli, trigger.ID, heartbeat, slog.Default())
+	defer stop()
+	err := hostTriggerFromCheckout(runCtx, trigger, controllerURL, token)
+	cause := context.Cause(runCtx)
+	if err == nil || errors.Is(cause, context.Canceled) {
+		return err
 	}
-	// safety: no run was recorded, so the run fails here and the trigger is released rather than left for its lease.
-	finishCtx, cancel := context.WithTimeout(orchestrator.DispatchContext(context.WithoutCancel(ctx), trigger), 5*time.Second)
+	status := "failed"
+	if cancel := (*nodehost.CancelError)(nil); errors.As(cause, &cancel) {
+		status = "cancelled"
+	}
+	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(runCtx), 5*time.Second)
 	defer cancel()
-	if ferr := cli.FinishRun(finishCtx, trigger.ID, "failed", err.Error()); ferr != nil &&
+	if ferr := cli.FinishRun(finishCtx, trigger.ID, status, err.Error()); ferr != nil &&
 		!orchestrator.ConfirmTerminalRunAfterWriteError(finishCtx, cli, trigger.ID) {
 		return errors.Join(err, fmt.Errorf("finish the run: %w", ferr))
 	}
@@ -137,27 +148,38 @@ func hostTrigger(ctx context.Context, cli *client.Client, trigger *store.Trigger
 	return err
 }
 
-func hostTriggerFromCheckout(ctx context.Context, trigger *store.Trigger, controllerURL, token string, heartbeat time.Duration) error {
+// hack: a variable so tests stand in for the build.
+var buildCheckoutPipeline = func(ctx context.Context) (binary, dir string, release func(), err error) {
 	sparkwingDir, err := findSparkwingDir()
 	if err != nil {
-		return err
+		return "", "", nil, err
 	}
 	key, keyParts, err := bincache.ExplainCacheKey(sparkwingDir)
 	if err != nil {
-		return fmt.Errorf("read .sparkwing/: %w", err)
+		return "", "", nil, fmt.Errorf("read .sparkwing/: %w", err)
 	}
 	lease, _, err := pipelineBinary(ctx, sparkwingDir, key, keyParts, os.Environ())
 	if err != nil {
-		return fmt.Errorf("build the pipeline: %w", err)
+		return "", "", nil, fmt.Errorf("build the pipeline: %w", err)
 	}
-	defer func() {
+	return lease.Path(), filepath.Dir(sparkwingDir), func() {
 		if err := lease.Release(); err != nil {
 			slog.Default().Debug("pipeline binary lease release failed", "err", err)
 		}
-	}()
-	return orchestrator.HostTriggerRun(ctx, orchestrator.TriggerHost{
-		ControllerURL: controllerURL, Token: token, Trigger: trigger,
-		Binary: lease.Path(), Dir: filepath.Dir(sparkwingDir), Heartbeat: heartbeat,
+	}, nil
+}
+
+// hack: a variable so tests stand in for the run host.
+var hostTriggerRun = orchestrator.HostTriggerRun
+
+func hostTriggerFromCheckout(ctx context.Context, trigger *store.Trigger, controllerURL, token string) error {
+	binary, dir, release, err := buildCheckoutPipeline(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return hostTriggerRun(ctx, orchestrator.TriggerHost{
+		ControllerURL: controllerURL, Token: token, Trigger: trigger, Binary: binary, Dir: dir,
 	})
 }
 

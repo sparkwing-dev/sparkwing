@@ -1139,6 +1139,10 @@ func pullPolicyOrDefault(p corev1.PullPolicy) corev1.PullPolicy {
 	return p
 }
 
+// DependencyProxyEnvNames are the variables [DependencyProxyEnv] sets, which
+// a pod's node host hands its pipeline processes.
+var DependencyProxyEnvNames = []string{"GOPROXY", "npm_config_registry", "PIP_INDEX_URL", "PIP_TRUSTED_HOST"}
+
 // DependencyProxyEnv points a pod's go, npm and pip at the cache's public
 // dependency proxy at base; an unusable base gives nothing.
 func DependencyProxyEnv(base string) []corev1.EnvVar {
