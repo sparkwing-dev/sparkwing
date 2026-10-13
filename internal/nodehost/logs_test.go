@@ -387,3 +387,29 @@ func TestLogSinkBoundsAnOversizedSummary(t *testing.T) {
 		t.Errorf("small summary = %q, want it unchanged", state.ops[2])
 	}
 }
+
+// An annotation goes through the same controller body limit as a summary.
+func TestLogSinkBoundsAnOversizedAnnotation(t *testing.T) {
+	state := &fakeState{}
+	sink := newSink(t, &recordLog{}, state)
+	huge := strings.Repeat("\x01", 128<<10-200) + logSecret + strings.Repeat("\x01", 1<<20)
+	sink.Record(nodeproto.LogRecord{Event: sparkwing.EventNodeAnnotation, Msg: huge})
+	sink.Record(nodeproto.LogRecord{Event: sparkwing.EventNodeAnnotation, Step: "s", Msg: huge})
+	sink.Record(nodeproto.LogRecord{Event: sparkwing.EventNodeAnnotation, Msg: "built"})
+	if len(state.ops) != 3 {
+		t.Fatalf("ops = %d, want 3", len(state.ops))
+	}
+	for _, op := range state.ops[:2] {
+		body, err := json.Marshal(map[string]string{"step_id": "s", "message": op})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(body) > 1<<20 || !strings.Contains(op, "annotation truncated") || strings.Contains(op, logSecret[:8]) {
+			t.Errorf("annotation body is %d bytes, notes the cut %v, leaks the secret %v",
+				len(body), strings.Contains(op, "annotation truncated"), strings.Contains(op, logSecret[:8]))
+		}
+	}
+	if state.ops[2] != "node-annotation run-1/build built" {
+		t.Errorf("small annotation = %q, want it unchanged", state.ops[2])
+	}
+}

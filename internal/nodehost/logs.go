@@ -208,7 +208,7 @@ func (s *LogSink) persist(rec sparkwing.LogRecord) error {
 	c, run, node := s.cfg, s.cfg.RunID, s.cfg.NodeID
 	switch rec.Event {
 	case sparkwing.EventNodeAnnotation:
-		message := attrString(rec.Attrs, "message", rec.Msg)
+		message := boundedRecord(attrString(rec.Attrs, "message", rec.Msg), "annotation")
 		switch {
 		case message == "":
 			return nil
@@ -218,7 +218,7 @@ func (s *LogSink) persist(rec sparkwing.LogRecord) error {
 			return c.State.AppendNodeAnnotation(s.ctx, run, node, message)
 		}
 	case sparkwing.EventNodeSummary:
-		markdown := boundedSummary(attrString(rec.Attrs, "markdown", rec.Msg))
+		markdown := boundedRecord(attrString(rec.Attrs, "markdown", rec.Msg), "summary")
 		if rec.Step != "" {
 			return c.State.SetStepSummary(s.ctx, run, node, rec.Step, markdown)
 		}
@@ -228,17 +228,17 @@ func (s *LogSink) persist(rec sparkwing.LogRecord) error {
 }
 
 // safety: the controller refuses a JSON body over 1 MiB and escaping can grow
-// text up to sixfold, so a stored summary is bounded well below that.
-const maxSummaryBytes = 128 << 10
+// text up to sixfold, so a stored summary or annotation is bounded well below that.
+const maxRecordBytes = 128 << 10
 
 // safety: the record is masked before this cut, so no secret is split; the
-// summary keeps its start, where its headline is, and says what it dropped.
-func boundedSummary(markdown string) string {
-	if len(markdown) <= maxSummaryBytes {
-		return markdown
+// text keeps its start, where its headline is, and says what it dropped.
+func boundedRecord(text, kind string) string {
+	if len(text) <= maxRecordBytes {
+		return text
 	}
-	kept := strings.ToValidUTF8(markdown[:maxSummaryBytes-128], "")
-	return fmt.Sprintf("%s\n\n… (summary truncated: %d bytes elided)\n", kept, len(markdown)-len(kept))
+	kept := strings.ToValidUTF8(text[:maxRecordBytes-128], "")
+	return fmt.Sprintf("%s\n\n… (%s truncated: %d bytes elided)\n", kept, kind, len(text)-len(kept))
 }
 
 func attrString(attrs map[string]any, key, fallback string) string {
