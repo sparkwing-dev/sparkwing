@@ -1586,11 +1586,9 @@ application/json. --allow-remote widens the Host check only.`,
 		{Name: "addr", Argument: "HOST:PORT", Desc: "Bind address", Default: "127.0.0.1:4343", Group: "Bind"},
 		{Name: "allow-remote", Desc: "Serve a non-loopback --addr. Every host that reaches it can try the serve token, and a holder of the token can run pipelines and list, overwrite and delete this machine's local secrets. It never serves a masked value.", Group: "Bind"},
 		{Name: "allow-origin", Argument: "ORIGINS", Desc: "Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones, as Origin and as Host. Needed when a same-host proxy or --allow-remote serves the dashboard under a name that is not the --addr host.", Group: "Bind"},
-		{Name: "log-store", Argument: "URL", Desc: "Pluggable log backend URL (fs:///abs/path, s3://bucket/prefix)", Group: "Storage"},
-		{Name: "artifact-store", Argument: "URL", Desc: "Pluggable artifact backend URL (fs:///abs/path, s3://bucket/prefix)", Group: "Storage"},
-		{Name: "read-only", Desc: "Reject writes on /api/v1/* (auth + webhooks remain open)", Group: "Storage"},
+		{Name: "read-only", Desc: "Reject writes on /api/v1/* (auth + webhooks remain open)", Group: "Behavior"},
 	},
-	GroupOrder: []string{"Bind", "Storage", "System", "Other"},
+	GroupOrder: []string{"Bind", "Behavior", "System", "Other"},
 	Examples: []Example{
 		{"Start with defaults", "sparkwing serve start"},
 		{"Use an alternate port", "sparkwing serve start --addr 127.0.0.1:5000"},
@@ -1618,7 +1616,7 @@ An absent service succeeds.`,
 var cmdDashboardRestart = Command{
 	Path:        "sparkwing serve restart",
 	Synopsis:    "Replace an owned dashboard and wait for readiness",
-	Description: "Stops the verified owned instance, then starts the invoked binary. Preserves effective options unless explicitly overridden. Address and storage URL syntax are checked before stopping; a valid replacement can still fail during startup. Unknown ownership is refused.",
+	Description: "Stops the verified owned instance, then starts the invoked binary. Preserves effective options unless explicitly overridden. The address is checked before stopping; a valid replacement can still fail during startup. Unknown ownership is refused.",
 	Flags:       cmdDashboardStart.Flags,
 	Examples:    []Example{{"Restart with existing options", "sparkwing serve restart"}},
 }
@@ -1785,7 +1783,7 @@ Add a profile with 'sparkwing cloud connect', check it with
 var cmdProfilesList = Command{
 	Path:     "sparkwing configure profiles list",
 	Synopsis: "Print every registered profile",
-	Description: `Prints a table of profile name, controller URL, logs surface, and
+	Description: `Prints a table of profile name, controller URL, and
 token. JSON is one profile per line; the token is redacted in
 every mode.`,
 	Flags: []FlagSpec{
@@ -2196,8 +2194,7 @@ exclusive views of the unified stream.
 local run (run_start, node_start, run_finish, ...). A run read through a
 backend emits that run's stored event records instead (admission_wait,
 concurrency_wait, cache_hit, ...) -- a different record shape. That is
-any profile whose state is a shared database, an object store or a
-controller, and any profile that declares its own logs surface.
+any profile whose state is a controller.
 
 --grep without --run searches the logs of recent runs instead, scanning up
 to --limit runs the run filters (--pipeline, --status, --branch, --sha,
@@ -2516,7 +2513,7 @@ an installation failure restores prior managed hooks, forwarders, modes,
 and configuration. A rejected installation exits nonzero and reports its
 reason on stderr. --no-prove skips gate execution.
 
-Every hook runs its pipelines with --sw-local-only on this machine. --fleet
+Every hook runs its pipelines on this machine. --fleet
 processes registered repositories and distinguishes installed gates, gates
 that could not execute, and repositories declaring no blocking gate.`,
 	Flags: []FlagSpec{

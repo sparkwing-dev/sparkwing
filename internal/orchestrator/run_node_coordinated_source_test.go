@@ -64,7 +64,7 @@ func testSourcedTriggerRouting(t *testing.T, coordinated bool) {
 	isolateCheckout(t)
 	isolateProfiles(t)
 	t.Setenv("SPARKWING_GITCACHE_URL", "")
-	t.Setenv("SPARKWING_LOCAL_ONLY", "1")
+	t.Setenv(orchestrator.ArtifactStoreEnvVar, "")
 
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)

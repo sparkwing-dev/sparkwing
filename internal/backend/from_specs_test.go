@@ -19,7 +19,7 @@ func TestFromSpecs_SQLite(t *testing.T) {
 	paths := newTempPaths(t, dir)
 	stateSpec := &backends.Spec{Type: backends.TypeSQLite, Path: filepath.Join(dir, "state.db")}
 
-	b, closer, err := backend.FromSpecs(context.Background(), stateSpec, nil, nil, paths, nil)
+	b, closer, err := backend.FromSpecs(context.Background(), stateSpec, paths, nil)
 	if err != nil {
 		t.Fatalf("FromSpecs: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestFromSpecs_RefusesRemovedStateTypes(t *testing.T) {
 		{Type: backends.TypeS3, Bucket: "b"},
 		{Type: "postgres", URL: "postgres://db/sw"},
 	} {
-		if _, _, err := backend.FromSpecs(context.Background(), &spec, nil, nil, paths, nil); err == nil {
+		if _, _, err := backend.FromSpecs(context.Background(), &spec, paths, nil); err == nil {
 			t.Errorf("FromSpecs(%s) opened a removed state type", spec.Type)
 		}
 	}
@@ -64,7 +64,7 @@ func TestFromSpecs_Controller(t *testing.T) {
 	paths := newTempPaths(t, t.TempDir())
 	stateSpec := &backends.Spec{Type: backends.TypeController, Controller: "prod"}
 
-	b, closer, err := backend.FromSpecs(context.Background(), stateSpec, nil, nil, paths, storeurl.ProfileLookup(lookup))
+	b, closer, err := backend.FromSpecs(context.Background(), stateSpec, paths, storeurl.ProfileLookup(lookup))
 	if err != nil {
 		t.Fatalf("FromSpecs(controller): %v", err)
 	}
@@ -84,30 +84,26 @@ func TestFromSpecs_Controller(t *testing.T) {
 
 func TestFromSpecs_NilState(t *testing.T) {
 	paths := newTempPaths(t, t.TempDir())
-	_, _, err := backend.FromSpecs(context.Background(), nil, nil, nil, paths, nil)
+	_, _, err := backend.FromSpecs(context.Background(), nil, paths, nil)
 	if err == nil {
 		t.Fatal("expected error when state spec is nil")
 	}
 }
 
-func TestFromSpecs_CapabilitiesTagsFlow(t *testing.T) {
+func TestFromSpecs_SQLiteReadsRunDirectoryLogs(t *testing.T) {
 	dir := t.TempDir()
 	paths := newTempPaths(t, dir)
 	stateSpec := &backends.Spec{Type: backends.TypeSQLite, Path: filepath.Join(dir, "state.db")}
-	logsSpec := &backends.Spec{Type: backends.TypeFilesystem, Path: filepath.Join(dir, "logs")}
 
-	b, closer, err := backend.FromSpecs(context.Background(), stateSpec, logsSpec, nil, paths, nil)
+	b, closer, err := backend.FromSpecs(context.Background(), stateSpec, paths, nil)
 	if err != nil {
 		t.Fatalf("FromSpecs: %v", err)
 	}
 	defer func() { _ = closer.Close() }()
 
 	caps, _ := b.Capabilities(context.Background())
-	if caps.Storage.Runs != "sqlite" {
-		t.Errorf("Runs = %q, want sqlite", caps.Storage.Runs)
-	}
-	if caps.Storage.Logs != "filesystem" {
-		t.Errorf("Logs = %q, want filesystem", caps.Storage.Logs)
+	if caps.Storage.Logs != "fs" || caps.Storage.Artifacts != "fs" {
+		t.Errorf("Storage = %+v, want fs logs and artifacts", caps.Storage)
 	}
 }
 

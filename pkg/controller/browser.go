@@ -13,7 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -40,11 +39,6 @@ type Dashboard struct {
 	// way [web.BundleFS] returns it. Nil serves pages that report the bundle
 	// missing; the API and sign-in pages work either way.
 	Bundle fs.FS
-
-	// Logs reads durable node logs for the dashboard. Nil reads the node log
-	// segments, or for a [Dashboard.Local] dashboard the node log files under
-	// Paths.
-	Logs storage.LogStore
 
 	// Paths locates a local dashboard's run directories.
 	Paths paths.Paths

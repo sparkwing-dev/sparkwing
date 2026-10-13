@@ -131,7 +131,7 @@ an installation failure restores prior managed hooks, forwarders, modes,
 and configuration. A rejected installation exits nonzero and reports its
 reason on stderr. --no-prove skips gate execution.
 
-Every hook runs its pipelines with --sw-local-only on this machine. --fleet
+Every hook runs its pipelines on this machine. --fleet
 processes registered repositories and distinguishes installed gates, gates
 that could not execute, and repositories declaring no blocking gate.
 

@@ -320,7 +320,7 @@ func readsMachineStore(paths Paths, p *profile.Profile) bool {
 		}
 		p = resolved
 	}
-	spec, _, _ := profileSurfaceSpecs(p, paths.StateDB())
+	spec := profileStateSpec(p, paths.StateDB())
 	return spec != nil && spec.Type == backends.TypeSQLite && spec.Path == paths.StateDB()
 }
 

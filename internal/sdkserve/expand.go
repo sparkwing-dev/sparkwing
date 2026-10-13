@@ -96,3 +96,15 @@ func generate(ctx context.Context, exp sparkwing.Expansion) (children []*sparkwi
 	}()
 	return exp.Gen(ctx), nil
 }
+
+// hack: until the node routes serve other nodes' outputs, Ref.Get and a
+// generator read only the output of a node that ran in this process, such as
+// a source whose attempt process evaluates its generator.
+func localOutput(planned *Planned, id string) ([]byte, bool) {
+	n := planned.Plan.Job(id)
+	if n == nil || n.ResultStep() == nil || n.ResultStep().Output() == nil {
+		return nil, false
+	}
+	raw, err := json.Marshal(n.ResultStep().Output())
+	return raw, err == nil
+}

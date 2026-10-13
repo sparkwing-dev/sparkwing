@@ -180,7 +180,6 @@ func Main() {
 		Priority:            os.Getenv(PriorityEnv),
 		AdmissionClass:      admissionClassFromEnv(),
 		DryRun:              dryRunFromEnv(),
-		LocalOnly:           os.Getenv("SPARKWING_LOCAL_ONLY") == "1",
 		MaxParallel:         runtime.NumCPU(),
 		PipelineYAML:        pipelineYAML,
 		// safety: this binary serves `run-node` a few lines above, so it can
@@ -196,14 +195,6 @@ func Main() {
 			}
 			if len(pipelineYAML.Requires) == 0 {
 				pipelineYAML.Requires = projectCfg.Defaults.Requires
-			}
-		}
-	}
-	if pipelineYAML != nil {
-		for _, r := range pipelineYAML.Requires {
-			if r == "local" {
-				opts.LocalOnly = true
-				break
 			}
 		}
 	}

@@ -71,8 +71,6 @@ type runFlags struct {
 
 	allow []string
 
-	localOnly bool
-
 	allowSecretFiles []string
 
 	index string
@@ -289,9 +287,6 @@ func parseRunFlags(args []string) (runFlags, []string) {
 			argumentIndex++
 		case argument == "--sw-no-cache":
 			flags.noCache = true
-			argumentIndex++
-		case argument == "--sw-local-only":
-			flags.localOnly = true
 			argumentIndex++
 		case argument == "--sw-dry-run", argument == "--dry-run=true":
 			flags.dryRun = true

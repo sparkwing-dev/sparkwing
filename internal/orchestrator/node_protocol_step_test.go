@@ -6,14 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
-	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -32,6 +30,7 @@ type stepFixturePipeline struct{ sparkwing.Base }
 
 func (stepFixturePipeline) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
 	sparkwing.Job(plan, "compose", &composeJob{})
+	fanOut(plan)
 	sparkwing.Job(plan, "steps", stepsJob{}).OnFailure("steps-recover", func(ctx context.Context, f sparkwing.Failure) error {
 		sparkwing.Info(ctx, "recovering from %s: %v", f.Stage, f.Err)
 		return nil
@@ -77,62 +76,28 @@ func (stepsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return nil, nil
 }
 
-func (s *entrySession) send(req nodeproto.Request) string {
-	s.t.Helper()
-	s.nextID++
-	req.ID = fmt.Sprint(s.nextID)
-	line, err := json.Marshal(req)
-	if err != nil {
-		s.t.Fatal(err)
-	}
-	s.proto.mustValidate(s.t, "request", jsonValue(s.t, line))
-	if _, err := s.req.Write(append(line, '\n')); err != nil {
-		s.t.Fatal(err)
-	}
-	return req.ID
-}
-
-// safety: replies may arrive in any order, so this reads frames until n
-// replies are in, checking each run result against the schema.
 func (s *entrySession) replies(n int) (map[string]nodeproto.Reply, []map[string]any) {
 	s.t.Helper()
 	got := map[string]nodeproto.Reply{}
 	var logs []map[string]any
 	for len(got) < n {
-		raw, err := s.frames.ReadLine()
-		if err != nil {
-			s.t.Fatalf("frame pipe: %v; stdout: %s", err, s.stdout.String())
-		}
-		frame, err := nodeproto.ParseFrame(raw)
-		if err != nil {
-			s.t.Fatalf("frame %s: %v", raw, err)
-		}
-		v := jsonValue(s.t, raw)
-		if frame.Kind == nodeproto.KindLog {
-			s.record.mustValidate(s.t, "", v)
-			logs = append(logs, v.(map[string]any))
-			continue
-		}
-		s.proto.mustValidate(s.t, "reply", v)
-		if frame.Reply.OK {
-			s.proto.mustValidate(s.t, "runResult", jsonValue(s.t, frame.Reply.Result))
-		}
-		got[frame.Reply.ID] = frame.Reply
+		reply, more := s.next()
+		got[reply.ID] = reply
+		logs = append(logs, more...)
 	}
 	return got, logs
 }
 
 func (s *entrySession) step(node, step string, failure *nodeproto.Failure) (nodeproto.RunResult, nodeproto.Reply, []map[string]any) {
 	s.t.Helper()
-	id := s.send(nodeproto.Request{Op: nodeproto.OpRunStep, Node: node, Step: step, Attempt: 1, Failure: failure})
-	got, logs := s.replies(1)
+	reply, logs := s.call(nodeproto.Request{Op: nodeproto.OpRunStep, Node: node, Step: step, Attempt: 1, Failure: failure})
 	var res nodeproto.RunResult
-	if reply := got[id]; reply.OK {
+	if reply.OK {
 		if err := reply.Decode(&res); err != nil {
 			s.t.Fatal(err)
 		}
 	}
-	return res, got[id], logs
+	return res, reply, logs
 }
 
 func TestNodeProtocolEntryRunsSteps(t *testing.T) {
@@ -192,80 +157,56 @@ type targetsJob struct {
 }
 
 func (*targetsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	return sparkwing.Step(w, "list", func(context.Context) ([]string, error) { return nil, nil }), nil
+	return sparkwing.Step(w, "list", func(context.Context) ([]string, error) { return []string{"linux", "darwin"}, nil }), nil
 }
 
-func TestExpandAnswersGeneratedNodeDocuments(t *testing.T) {
-	plan := sparkwing.NewPlan()
+func fanOut(plan *sparkwing.Plan) {
 	targets := sparkwing.Job(plan, "targets", &targetsJob{})
 	sparkwing.JobFanOutDynamic[string](plan, "tests", targets, func(os string) (string, any) {
-		return "test-" + os, func(context.Context) error { return nil }
-	})
-	rc := sparkwing.RunContext{RunID: "run-1", Pipeline: "fanout"}
-	doc, err := planDocument(plan, rc, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var gen string
-	for _, n := range doc.Nodes {
-		if n.ID == "targets" && n.Closures != nil && len(n.Closures.Generator) == 1 {
-			gen = n.Closures.Generator[0]
+		return "test-" + os, func(ctx context.Context) error {
+			sparkwing.Info(ctx, "testing %s", os)
+			return nil
 		}
-	}
-	if gen == "" {
-		t.Fatalf("plan %+v lists no generator on targets", doc.Nodes)
-	}
-	planned := &sdkserve.Planned{Plan: plan, Run: rc, Doc: doc}
-	cfg := sdkserve.Config{PlanDoc: planDocument}
-
-	if _, err := sdkserve.Expand(context.Background(), cfg, planned, "targets/skip_if/0"); !hasCode(err, nodeproto.CodeUnknownClosure) {
-		t.Errorf("expand of a non-generator = %v, want unknown_closure", err)
-	}
-
-	ctx := sparkwingruntime.WithJSONResolver(context.Background(), func(id string) ([]byte, bool) {
-		return []byte(`["linux","darwin"]`), id == "targets"
 	})
-	res, err := sdkserve.Expand(ctx, cfg, planned, gen)
-	if err != nil || res.Error != nil {
-		t.Fatalf("expand = %+v, %v", res, err)
-	}
-	schema := loadProtocolSchema(t, "describe.schema.json")
-	var nodes []any
-	if err := json.Unmarshal(res.Value, &nodes); err != nil {
-		t.Fatal(err)
-	}
-	var ids []string
-	for _, n := range nodes {
-		schema.mustValidate(t, "node", n)
-		node := n.(map[string]any)
-		ids = append(ids, node["id"].(string))
-		if deps, _ := node["deps"].([]any); len(deps) != 1 || deps[0] != "targets" {
-			t.Errorf("generated node %v does not depend on its source", node)
-		}
-	}
-	if strings.Join(ids, ",") != "test-linux,test-darwin" {
-		t.Errorf("generated ids %v, want test-linux and test-darwin", ids)
-	}
-	if plan.Job("test-linux") == nil {
-		t.Error("the generated node is not in the process's plan for later requests")
-	}
-
-	if _, err := sdkserve.Expand(ctx, cfg, planned, gen); !hasCode(err, nodeproto.CodeBadRequest) {
-		t.Errorf("second expand = %v, want bad_request", err)
-	}
 }
 
 func TestExpandReportsAPanickingGenerator(t *testing.T) {
 	plan := sparkwing.NewPlan()
-	targets := sparkwing.Job(plan, "targets", &targetsJob{})
-	sparkwing.JobFanOutDynamic[string](plan, "tests", targets, func(os string) (string, any) {
-		return "test-" + os, func(context.Context) error { return nil }
-	})
+	fanOut(plan)
 	planned := &sdkserve.Planned{Plan: plan, Run: sparkwing.RunContext{RunID: "run-1"}}
 	res, err := sdkserve.Expand(context.Background(), sdkserve.Config{PlanDoc: planDocument}, planned, "targets/generator/0")
 	if err != nil || res.Error == nil || !strings.Contains(*res.Error, "panicked") {
 		t.Errorf("expand without a resolver = %+v, %v, want the generator's panic as the closure's error", res, err)
 	}
+}
+
+func TestNodeProtocolEntryExpandsGenerators(t *testing.T) {
+	s := startEntry(t)
+	if reply, _ := s.call(planRequestFor(stepPipeline, map[string]string{})); !reply.OK {
+		t.Fatalf("plan = %+v", reply)
+	}
+	reply, _ := s.call(nodeproto.Request{Op: nodeproto.OpRunNode, Node: "targets", Attempt: 1})
+	if res := runResult(t, reply); res.Outcome != nodeproto.OutcomeSuccess {
+		t.Fatalf("targets = %+v", res)
+	}
+
+	reply, _ = s.call(nodeproto.Request{Op: nodeproto.OpEval, Closure: "targets/generator/0"})
+	value, errMsg := evalResult(t, reply)
+	var nodes []any
+	if err := json.Unmarshal([]byte(value), &nodes); err != nil || errMsg != nil || len(nodes) != 2 {
+		t.Fatalf("generator = value %s error %v, want two node documents", value, deref(errMsg))
+	}
+	for _, n := range nodes {
+		s.doc.mustValidate(t, "node", n)
+	}
+
+	res, _, logs := s.step("test-darwin", "run", nil)
+	if res.Outcome != nodeproto.OutcomeSuccess || !hasLog(logs, "test-darwin", "testing darwin") {
+		t.Errorf("generated step = %+v with logs %v, want it to run in the process that generated it", res, logs)
+	}
+	reply, _ = s.call(nodeproto.Request{Op: nodeproto.OpEval, Closure: "targets/generator/0"})
+	wantCode(t, reply, nodeproto.CodeBadRequest)
+	s.end()
 }
 
 func hasCode(err error, code nodeproto.ErrorCode) bool {

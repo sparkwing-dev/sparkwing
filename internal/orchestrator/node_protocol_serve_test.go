@@ -171,43 +171,12 @@ func startEntry(t *testing.T) *entrySession {
 // can see plan code's logging went to the frame pipe.
 func (s *entrySession) call(req nodeproto.Request) (nodeproto.Reply, []map[string]any) {
 	s.t.Helper()
-	s.nextID++
-	req.ID = fmt.Sprint(s.nextID)
-	line, err := json.Marshal(req)
-	if err != nil {
-		s.t.Fatal(err)
+	id := s.send(req)
+	reply, logs := s.next()
+	if reply.ID != id {
+		s.t.Fatalf("reply to %s while %s is the only request in flight", reply.ID, id)
 	}
-	s.proto.mustValidate(s.t, "request", jsonValue(s.t, line))
-	s.ops[req.ID] = req.Op
-	if _, err := s.req.Write(append(line, '\n')); err != nil {
-		s.t.Fatal(err)
-	}
-	var logs []map[string]any
-	for {
-		raw, err := s.frames.ReadLine()
-		if err != nil {
-			s.t.Fatalf("frame pipe after request %s: %v; stdout: %s", req.ID, err, s.stdout.String())
-		}
-		frame, err := nodeproto.ParseFrame(raw)
-		if err != nil {
-			s.t.Fatalf("frame %s: %v", raw, err)
-		}
-		v := jsonValue(s.t, raw)
-		if frame.Kind == nodeproto.KindLog {
-			s.record.mustValidate(s.t, "", v)
-			logs = append(logs, v.(map[string]any))
-			continue
-		}
-		s.proto.mustValidate(s.t, "reply", v)
-		if frame.Reply.ID != req.ID {
-			s.t.Fatalf("reply to %s while %s is the only request in flight", frame.Reply.ID, req.ID)
-		}
-		if frame.Reply.OK {
-			def := map[nodeproto.Op]string{nodeproto.OpDescribe: "", nodeproto.OpPlan: "plan"}[req.Op]
-			s.doc.mustValidate(s.t, def, jsonValue(s.t, frame.Reply.Result))
-		}
-		return frame.Reply, logs
-	}
+	return reply, logs
 }
 
 // safety: closing the request pipe is how the host ends a process, which must
@@ -264,14 +233,6 @@ func TestNodeProtocolEntryServesDescribeAndPlan(t *testing.T) {
 		return p.Name == servePipeline
 	}) {
 		t.Errorf("describe = %+v, want protocol %s listing %s", described, nodeproto.Version, servePipeline)
-	}
-
-	for _, req := range []nodeproto.Request{
-		{Op: nodeproto.OpRunNode, Node: "build", Attempt: 1},
-		{Op: nodeproto.OpEval, Closure: "deploy/skip_if/0"},
-	} {
-		reply, _ := s.call(req)
-		wantCode(t, reply, nodeproto.CodeUnknownOp)
 	}
 
 	reply, logs := s.call(planRequest(map[string]string{"env": "prod"}))

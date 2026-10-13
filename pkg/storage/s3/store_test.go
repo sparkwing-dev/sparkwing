@@ -87,65 +87,6 @@ func TestArtifactStore_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestLogStore_RoundTrip(t *testing.T) {
-	t.Parallel()
-	client, closer := fakeS3(t)
-	defer closer()
-
-	ls := NewLogStore(testBucket, "logs", client)
-	ctx := context.Background()
-
-	if err := ls.Append(ctx, "run1", "n1", []byte(`{"msg":"hello"}`)); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-	if err := ls.Append(ctx, "run1", "n1", []byte(`{"msg":"world"}`)); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-	if err := ls.Append(ctx, "run1", "n2", []byte(`{"msg":"alpha"}`)); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-
-	got, err := ls.Read(ctx, "run1", "n1", storage.ReadOpts{})
-	if err != nil {
-		t.Fatalf("Read: %v", err)
-	}
-	if !strings.Contains(string(got), "hello") || !strings.Contains(string(got), "world") {
-		t.Fatalf("Read = %q", got)
-	}
-
-	got, err = ls.Read(ctx, "run1", "n1", storage.ReadOpts{Tail: 1})
-	if err != nil {
-		t.Fatalf("Read tail: %v", err)
-	}
-	if strings.Contains(string(got), "hello") || !strings.Contains(string(got), "world") {
-		t.Fatalf("Read tail = %q", got)
-	}
-
-	got, err = ls.ReadRun(ctx, "run1")
-	if err != nil {
-		t.Fatalf("ReadRun: %v", err)
-	}
-	if !strings.Contains(string(got), "=== n1 ===") || !strings.Contains(string(got), "=== n2 ===") {
-		t.Fatalf("ReadRun = %q", got)
-	}
-
-	got, err = ls.Read(ctx, "run1", "missing", storage.ReadOpts{})
-	if err != nil || got != nil {
-		t.Fatalf("Read missing = (%q, %v)", got, err)
-	}
-
-	if err := ls.DeleteRun(ctx, "run1"); err != nil {
-		t.Fatalf("DeleteRun: %v", err)
-	}
-	got, _ = ls.ReadRun(ctx, "run1")
-	if len(got) != 0 {
-		t.Fatalf("ReadRun after delete = %q", got)
-	}
-	if err := ls.DeleteRun(ctx, "run1"); err != nil {
-		t.Fatalf("DeleteRun idempotent: %v", err)
-	}
-}
-
 func TestArtifactStore_PrefixIsolation(t *testing.T) {
 	t.Parallel()
 	client, closer := fakeS3(t)

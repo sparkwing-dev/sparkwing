@@ -49,7 +49,7 @@ func newRunnersFixture(t *testing.T) *runnersFixture {
 	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
 	t.Cleanup(srv.Close)
 	writeProfilesFixture(t, fmt.Sprintf(
-		"profiles:\n  prod:\n    controller: { url: %s, token: %s }\n    logs: { type: controller }\n",
+		"profiles:\n  prod:\n    controller: { url: %s, token: %s }\n",
 		srv.URL, admin))
 
 	calls := []string{}

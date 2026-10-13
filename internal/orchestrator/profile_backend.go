@@ -16,8 +16,7 @@ import (
 )
 
 func OpenReadBackendForProfile(ctx context.Context, paths Paths, p *profile.Profile) (backend.Backend, io.Closer, error) {
-	state, logs, cache := profileSurfaceSpecs(p, paths.StateDB())
-	return backend.FromSpecs(ctx, state, logs, cache, paths, profileControllerLookup(p))
+	return backend.FromSpecs(ctx, profileStateSpec(p, paths.StateDB()), paths, profileControllerLookup(p))
 }
 
 // safety: keepState is set by a run whose state already reaches this
@@ -52,26 +51,19 @@ func resolveLocalBackends(opts *Options, paths Paths, keepState bool) error {
 // path opened it.
 var storeOpen = store.Open
 
-func profileSurfaceSpecs(p *profile.Profile, stateDBPath string) (state, logs, cache *backends.Spec) {
-	surf := p.Surfaces()
-	if surf.State == nil && surf.Logs == nil && surf.Cache == nil {
-		if p != nil && p.ControllerURL() != "" {
-			ctrl := func() *backends.Spec { return &backends.Spec{Type: backends.TypeController, Controller: p.Name} }
-			return ctrl(), ctrl(), ctrl()
-		}
-		return &backends.Spec{Type: backends.TypeSQLite, Path: stateDBPath}, nil, nil
-	}
-
-	state = surf.State
+func profileStateSpec(p *profile.Profile, stateDBPath string) *backends.Spec {
+	state := p.Surfaces().State
 	switch {
+	case state == nil && p != nil && p.ControllerURL() != "":
+		return &backends.Spec{Type: backends.TypeController, Controller: p.Name}
 	case state == nil:
-		state = &backends.Spec{Type: backends.TypeSQLite, Path: stateDBPath}
+		return &backends.Spec{Type: backends.TypeSQLite, Path: stateDBPath}
 	case state.Type == backends.TypeSQLite && state.Path == "":
 		filled := *state
 		filled.Path = stateDBPath
-		state = &filled
+		return &filled
 	}
-	return state, surf.Logs, surf.Cache
+	return state
 }
 
 func profileControllerLookup(p *profile.Profile) storeurl.ProfileLookup {
