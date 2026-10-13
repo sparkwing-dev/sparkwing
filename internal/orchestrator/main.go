@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -38,20 +37,6 @@ func Main() {
 		os.Exit(1)
 	}
 	projectCfg, projectErr := bindProjectPipelines()
-
-	if len(os.Args) > 1 && os.Args[1] == "--describe" {
-		described, err := sparkwingruntime.DescribeAll()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "describe:", err)
-			os.Exit(1)
-		}
-		enc := json.NewEncoder(os.Stdout)
-		if err := enc.Encode(described); err != nil {
-			fmt.Fprintln(os.Stderr, "describe encode:", err)
-			os.Exit(1)
-		}
-		return
-	}
 
 	if len(os.Args) > 1 && os.Args[1] == "handle-trigger" {
 		if err := runHandleTriggerCLI(os.Args[2:]); err != nil {
@@ -290,7 +275,6 @@ func isInteractiveStdout() bool {
 
 func printUsage() {
 	fmt.Fprintln(os.Stderr, "usage: <pipeline> [--flag VALUE ...]")
-	fmt.Fprintln(os.Stderr, "       --describe")
 	fmt.Fprintln(os.Stderr, "       handle-trigger <id> --controller URL")
 	fmt.Fprintln(os.Stderr, "       run-node <runID> <nodeID> --controller URL")
 	if registered := sparkwing.Registered(); len(registered) > 0 {
