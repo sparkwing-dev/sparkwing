@@ -69,6 +69,10 @@ type SessionConfig struct {
 	// closes, and between SIGTERM and SIGKILL. Zero means
 	// procgroup.DefaultTerminationGrace.
 	Grace time.Duration
+	// Started, when set, is called with each SDK process's pid as soon as it
+	// starts, before any request, so a caller can record the process session
+	// to reap if this host dies without reaping it.
+	Started func(pid int)
 }
 
 type sessionProcess interface {
@@ -154,6 +158,9 @@ func StartSession(ctx context.Context, cfg SessionConfig) (*Session, error) {
 	if err != nil {
 		closeAll(parent)
 		return nil, fmt.Errorf("start sdk process: %w", err)
+	}
+	if cfg.Started != nil {
+		cfg.Started(cmd.Process.Pid)
 	}
 	s := &Session{
 		cfg:       cfg,

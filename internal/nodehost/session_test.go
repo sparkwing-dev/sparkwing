@@ -32,8 +32,6 @@ func TestMain(m *testing.M) {
 		fakeSDK()
 	case "sleep":
 		select {}
-	case "crash-host":
-		crashHost()
 	}
 	testleak.Main(m)
 }

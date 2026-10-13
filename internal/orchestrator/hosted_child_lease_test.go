@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -134,7 +135,7 @@ func TestAnAttachedChildsNodeRunsUnderTheGroupItsParentNodeHolds(t *testing.T) {
 	_ = inner.Release()
 }
 
-func TestAnInheritedGroupStaysHeldUntilTheChildEnds(t *testing.T) {
+func TestAChildEndsWithTheRunWhoseGroupItInherited(t *testing.T) {
 	home := t.TempDir()
 	startWingd(t, home, 2)
 	ctx := t.Context()
@@ -158,20 +159,27 @@ func TestAnInheritedGroupStaysHeldUntilTheChildEnds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := run.Release(); err != nil {
-		t.Fatal(err)
-	}
+	defer child.Release()
+	ended := make(chan string, 1)
+	go func() {
+		_ = child.Watch(func(ev wingwire.Evicted) { ended <- "evicted" }, func(c wingwire.Cancel) { ended <- c.Reason })
+	}()
 	other := &hostedAdmitter{la: testWingdAdmission(home, nil)}
 	if lease, err := other.Acquire(ctx, wingwire.AdmissionRequest{RunID: "other", SemaphoresOnly: true, Semaphores: []wingwire.SemaphoreClaim{g}}, nil); err == nil {
 		_ = lease.Release()
 		t.Fatal("an unrelated run took the group a running child inherited")
 	}
-	if err := child.Release(); err != nil {
+	if err := run.Release(); err != nil {
 		t.Fatal(err)
 	}
-	lease, err := other.Acquire(ctx, wingwire.AdmissionRequest{RunID: "after", SemaphoresOnly: true, Semaphores: []wingwire.SemaphoreClaim{g}}, nil)
-	if err != nil {
-		t.Fatalf("the group stayed held after the child ended: %v", err)
+	bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	select {
+	case reason := <-ended:
+		if !strings.Contains(reason, "ancestor") {
+			t.Fatalf("child ended with %q, want the ancestor-ended cancel", reason)
+		}
+	case <-bounded.Done():
+		t.Fatal("the child kept running after the run whose group it inherited ended")
 	}
-	_ = lease.Release()
 }

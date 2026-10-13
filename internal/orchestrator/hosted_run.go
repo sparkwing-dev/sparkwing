@@ -44,6 +44,10 @@ type HostedEntry struct {
 	BinarySource     string
 	// Flags are the invocation flags only the CLI knows, such as ref and allow.
 	Flags map[string]any
+	// SessionLog, when set, is the file each SDK process's session is recorded
+	// in as it starts, which the process that started this host reaps once
+	// the host exits, however it exits.
+	SessionLog string
 }
 
 // RunHosted runs opts.Pipeline on this machine through the engine host: every
@@ -164,7 +168,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 		return nil, err
 	}
 	cfg := nodehost.Config{
-		Session:  nodehost.SessionConfig{Entry: entry.Program, Dir: entry.Dir, Env: engineenv.Strip(entry.Env), Sink: hostedPlanSink{delegate}},
+		Session:  nodehost.SessionConfig{Entry: entry.Program, Dir: entry.Dir, Env: engineenv.Strip(entry.Env), Sink: hostedPlanSink{delegate}, Started: sessionRecorder(entry.SessionLog)},
 		Pipeline: opts.Pipeline, Args: invokeArgs, Run: hostedRunContext(opts, runID),
 		StartAt: opts.StartAt, StopAt: opts.StopAt, Only: opts.Only, Workers: opts.MaxParallel,
 		State: state, Artifacts: backends.Artifact, Attempts: attempts, Admission: admission,

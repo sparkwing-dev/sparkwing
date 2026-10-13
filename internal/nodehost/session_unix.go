@@ -9,20 +9,12 @@ import (
 	"os/exec"
 	"time"
 
-	"golang.org/x/sys/unix"
-
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
 func startProcess(cmd *exec.Cmd, requests, frames *os.File) (sessionProcess, error) {
 	cmd.ExtraFiles = []*os.File{requests, frames}
-	start := procgroup.StartSession
-	// safety: a host that leads its own session, as a claimed trigger's host does, keeps each SDK process in it
-	// as a process group, so whoever reaps the host's session, even after killing it, reaps every node too.
-	if sid, err := unix.Getsid(0); err == nil && sid == os.Getpid() {
-		start = procgroup.Start
-	}
-	g, err := start(cmd)
+	g, err := procgroup.StartSession(cmd)
 	if err != nil {
 		return nil, err
 	}

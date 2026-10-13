@@ -262,7 +262,14 @@ func dispatchLocalTrigger(ctx context.Context, trig *store.Trigger,
 		return fmt.Errorf("prepare local dispatch admission: %w", err)
 	}
 	defer closeAdmission()
-	return execLocalChild(ctx, host, repoDir, []string{TriggerHostVerb, "--program", binPath, trig.ID}, env)
+	sessions, err := os.CreateTemp("", "sparkwing-trigger-sessions-")
+	if err != nil {
+		return fmt.Errorf("record the trigger host's node sessions: %w", err)
+	}
+	_ = sessions.Close()
+	//nolint:contextcheck // the reap runs after the dispatch, whose context may already be cancelled.
+	defer reapRecordedSessions(sessions.Name(), logger)
+	return execLocalChild(ctx, host, repoDir, []string{TriggerHostVerb, "--program", binPath, "--sessions", sessions.Name(), trig.ID}, env)
 }
 
 // TriggerHostVerb is the hidden sparkwing verb that hosts one claimed local

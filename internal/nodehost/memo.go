@@ -305,13 +305,17 @@ func memoGenerate(ctx context.Context, cfg *Config, n *NodeRun, output json.RawM
 		held.memoOutput = json.RawMessage("null")
 	}
 	var out []expansion
-	res := cfg.Attempts.process(ctx, cfg.Session, &held, func(ctx context.Context, sess *Session, _ *LogSink) Result {
-		if err := nodeReplan(ctx, sess, &held); err != nil {
-			return failed(err)
-		}
-		out = generate(ctx, sess, &held)
-		return Result{Outcome: sparkwing.Success}
-	})
+	// safety: the eval runs the node's own code, so it is held to the node's timeout like an attempt; a hung
+	// generator would otherwise hold the scheduler until the run itself ends.
+	res := timeoutLayer(cfg, func(ctx context.Context, attempt *NodeRun) Result {
+		return cfg.Attempts.process(ctx, cfg.Session, attempt, func(ctx context.Context, sess *Session, _ *LogSink) Result {
+			if err := nodeReplan(ctx, sess, attempt); err != nil {
+				return failed(err)
+			}
+			out = generate(ctx, sess, attempt)
+			return Result{Outcome: sparkwing.Success}
+		})
+	})(ctx, &held)
 	if res.Outcome != sparkwing.Success {
 		out = out[:0]
 		for _, id := range c.Generator {

@@ -91,9 +91,9 @@ type lease struct {
 	claims      []claim
 	members     map[string]struct{}
 	parents     map[string]string
-	// safety: pins are members of other leases this lease's claims are handed down to, so the claims outlive
-	// the lease's own members until every one of them is released.
-	pins map[string]struct{}
+	// safety: dependents are runs attached below this lease that were handed its claims, so when the lease
+	// ends or is evicted they are told to end too, rather than keep running under claims nobody holds.
+	dependents map[string]struct{}
 }
 
 type semaphore struct {
@@ -436,31 +436,20 @@ func (l *Ledger) Release(id LeaseID, memberID string) ([]Event, error) {
 		}
 		departed = parent
 	}
-	var events []Event
-	for _, other := range l.sortedLeaseIDs() {
-		pinned := l.leases[other]
-		if _, ok := pinned.pins[memberID]; !ok {
-			continue
-		}
-		delete(pinned.pins, memberID)
-		if other != id && len(pinned.members) == 0 && len(pinned.pins) == 0 {
-			events = append(events, l.free(pinned))
-		}
+	for _, other := range l.leases {
+		delete(other.dependents, memberID)
 	}
-	if len(le.members) == 0 && len(le.pins) == 0 {
-		events = append(events, l.free(le))
-	}
-	if len(events) == 0 {
+	if len(le.members) > 0 {
 		l.mustHoldInvariants()
 		return nil, nil
 	}
-	events = append(events, l.promote()...)
+	events := append(l.free(le), l.promote()...)
 	l.pruneOverrides()
 	l.mustHoldInvariants()
 	return events, nil
 }
 
-func (l *Ledger) free(le *lease) Event {
+func (l *Ledger) free(le *lease) []Event {
 	delete(l.leases, le.id)
 	delete(l.tokens, le.token)
 	l.usedMilliCores -= le.milliCores
@@ -473,17 +462,28 @@ func (l *Ledger) free(le *lease) Event {
 	}
 	ev := l.newEvent(EventReleased, le.requestID)
 	ev.Lease = le.id
-	return ev
+	return append([]Event{ev}, l.orphan(le)...)
 }
 
-// Pin keeps each of leases, and the claims it holds, alive until memberID is
-// released, though the lease's own members leave first. An attached child
-// pins the ancestor leases whose concurrency groups it was handed.
-func (l *Ledger) Pin(memberID string, leases []LeaseID) error {
+// safety: sorted, so a cascade reaches the same dependents in the same order on every daemon.
+func (l *Ledger) orphan(le *lease) []Event {
+	var events []Event
+	for _, dep := range sortedKeys(le.dependents) {
+		ev := l.newEvent(EventOrphaned, dep)
+		ev.Lease = le.id
+		events = append(events, ev)
+	}
+	return events
+}
+
+// Depend records memberID, an attached run, as a dependent of each of leases:
+// when one is released or evicted, an [EventOrphaned] names memberID so its
+// holder is told to end. An attached child depends on every lease whose
+// concurrency groups it was handed, and on the lease it joined.
+func (l *Ledger) Depend(memberID string, leases []LeaseID) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	own, ok := l.memberOf[memberID]
-	if !ok {
+	if _, ok := l.memberOf[memberID]; !ok {
 		return fmt.Errorf("%w: %q", ErrUnknownMember, memberID)
 	}
 	for _, id := range leases {
@@ -491,13 +491,10 @@ func (l *Ledger) Pin(memberID string, leases []LeaseID) error {
 		if !ok {
 			return fmt.Errorf("%w: %s", ErrUnknownLease, id)
 		}
-		if id == own {
-			continue
+		if le.dependents == nil {
+			le.dependents = map[string]struct{}{}
 		}
-		if le.pins == nil {
-			le.pins = map[string]struct{}{}
-		}
-		le.pins[memberID] = struct{}{}
+		le.dependents[memberID] = struct{}{}
 	}
 	l.mustHoldInvariants()
 	return nil
@@ -1310,7 +1307,7 @@ func (l *Ledger) evictForClaim(c claim, by LeaseID) ([]LeaseID, []Event) {
 		ev.Key = c.key
 		ev.SupersededBy = by
 		victims = append(victims, h.lease)
-		events = append(events, ev)
+		events = append(append(events, ev), l.orphan(l.leases[h.lease])...)
 	}
 	return victims, events
 }

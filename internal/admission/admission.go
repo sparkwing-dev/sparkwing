@@ -122,6 +122,10 @@ const (
 	EventReleased EventKind = "released"
 
 	EventReprioritized EventKind = "reprioritized"
+
+	// EventOrphaned names, as RequestID, an attached run whose ancestor Lease
+	// was released or evicted.
+	EventOrphaned EventKind = "orphaned"
 )
 
 type Event struct {

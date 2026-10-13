@@ -116,6 +116,12 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 			}
 		case admission.EventReprioritized:
 			queueChanged = true
+		case admission.EventOrphaned:
+			reason := "an ancestor run's admission lease ended or was evicted, so this run no longer holds what it was attached under"
+			d.recordJournal("orphaned", &conn{runID: ev.RequestID}, map[string]any{"lease_id": ev.Lease})
+			if c := d.byRun[ev.RequestID]; c != nil {
+				out = append(out, delivery{c, &wingwire.Cancel{RunID: ev.RequestID, Reason: reason}})
+			}
 		case admission.EventReleased:
 			d.recordJournal("release", &conn{runID: ev.RequestID}, map[string]any{"lease_id": ev.Lease})
 			queueChanged = true

@@ -1322,10 +1322,10 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "parent", Policy: wingwire.PolicyFail})
 		return
 	}
-	// safety: the groups handed down stay held by their ancestor leases until this child is released, so a run
-	// that ends before its child does not let another run take a group the child still runs under.
-	if err := d.ledger.Pin(req.RunID, holders); err != nil {
-		d.cfg.logf("child attach: pin ancestor leases for %s: %v", req.RunID, err)
+	// safety: the child runs inside what its ancestors hold, so when any lease it joined or was handed groups
+	// from ends or is evicted, the child is told to end too, before another run takes a group it runs under.
+	if err := d.ledger.Depend(req.RunID, append(holders, leaseID)); err != nil {
+		d.cfg.logf("child attach: record %s's ancestors: %v", req.RunID, err)
 	}
 	lease, _ := d.ledger.LeaseByID(leaseID)
 	c.runID = req.RunID
@@ -1365,8 +1365,8 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 }
 
 // safety: a child attaches to the lease that holds its parent node's cores, so it never queues for the cores
-// its waiting parent holds, and it is handed every group its parent node, run and each run above them hold, so
-// a group it shares with an ancestor never waits on that ancestor. A sibling node's groups are not handed down.
+// its waiting parent holds, and it is handed every group its parent node and run hold and every group its parent
+// was itself handed, so a group it shares with any ancestor never waits on it. A sibling node's groups are not.
 func parentHoldings(snap admission.Snapshot, runID, nodeID string) (admission.LeaseID, []string, []admission.LeaseID, error) {
 	if runID == "" || nodeID == "" {
 		return "", nil, nil, fmt.Errorf("a child attach names both its parent run and node, got run %q node %q", runID, nodeID)
@@ -1405,10 +1405,12 @@ func parentHoldings(snap admission.Snapshot, runID, nodeID string) (admission.Le
 	}
 	hold(nodeHost)
 	hold(byRequest[wingwire.NodeSemaphoreParticipant(runID, nodeID)])
-	parents := leaseParents(snap)
-	for ancestor, hops := runID, 0; ancestor != "" && hops <= len(parents); ancestor, hops = parents[ancestor], hops+1 {
-		hold(memberOf[ancestor])
-		hold(byRequest[wingwire.PlanSemaphoresParticipant(ancestor)])
+	hold(memberOf[runID])
+	hold(byRequest[wingwire.PlanSemaphoresParticipant(runID)])
+	for _, le := range snap.Leases {
+		if slices.Contains(le.Dependents, runID) {
+			hold(le)
+		}
 	}
 	return target.ID, held, holders, nil
 }
