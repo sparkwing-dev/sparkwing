@@ -144,7 +144,7 @@ func planConcurrencyKeys(raw []byte) ([]string, error) {
 func filterGlobalScopeKeys(keys []string) []string {
 	out := make([]string, 0, len(keys))
 	for _, key := range keys {
-		if strings.HasPrefix(key, scopeKeyGlobalPrefix) {
+		if strings.HasPrefix(key, nodeproto.ConcurrencyKeyGlobalPrefix) {
 			out = append(out, key)
 		}
 	}

@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -84,31 +85,12 @@ const memoKeyPrefix = "memo:"
 
 func memoKeyFor(contentHash string) string { return memoKeyPrefix + contentHash }
 
-const (
-	scopeKeyGlobalPrefix = "g:"
-	scopeKeyRunPrefix    = "r:"
-	scopeKeyBoxPrefix    = "b:"
-	scopeKeyLenSep       = ":"
-)
-
 func scopedGroupKey(g *sparkwing.ConcurrencyGroup, runID string) string {
-	name := g.Name()
-	switch g.Limit().Scope {
-	case sparkwing.ScopeRun:
-		return qualifiedKey(scopeKeyRunPrefix, runID, name)
-	case sparkwing.ScopeBox:
-		return qualifiedKey(scopeKeyBoxPrefix, boxHostID(), name)
-	default:
-		return scopeKeyGlobalPrefix + name
-	}
-}
-
-func qualifiedKey(prefix, qualifier, name string) string {
-	return prefix + strconv.Itoa(len(qualifier)) + scopeKeyLenSep + qualifier + name
+	return nodeproto.ConcurrencyGroupKey(g.Name(), string(g.Limit().Scope), runID, boxHostID)
 }
 
 func qualifierFromKey(rest string) string {
-	sep := strings.IndexByte(rest, scopeKeyLenSep[0])
+	sep := strings.IndexByte(rest, nodeproto.ConcurrencyKeyLenSep[0])
 	if sep < 0 {
 		return ""
 	}
@@ -123,12 +105,12 @@ func ScopeLabelFromKey(key string) string {
 	switch {
 	case strings.HasPrefix(key, memoKeyPrefix):
 		return "content-cache"
-	case strings.HasPrefix(key, scopeKeyGlobalPrefix):
+	case strings.HasPrefix(key, nodeproto.ConcurrencyKeyGlobalPrefix):
 		return "global"
-	case strings.HasPrefix(key, scopeKeyRunPrefix):
-		return "run (" + qualifierFromKey(key[len(scopeKeyRunPrefix):]) + ")"
-	case strings.HasPrefix(key, scopeKeyBoxPrefix):
-		return "box (" + qualifierFromKey(key[len(scopeKeyBoxPrefix):]) + ")"
+	case strings.HasPrefix(key, nodeproto.ConcurrencyKeyRunPrefix):
+		return "run (" + qualifierFromKey(key[len(nodeproto.ConcurrencyKeyRunPrefix):]) + ")"
+	case strings.HasPrefix(key, nodeproto.ConcurrencyKeyBoxPrefix):
+		return "box (" + qualifierFromKey(key[len(nodeproto.ConcurrencyKeyBoxPrefix):]) + ")"
 	default:
 		return "global"
 	}

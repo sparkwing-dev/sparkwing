@@ -32,6 +32,8 @@ type Config struct {
 	Logger  *slog.Logger
 	// Heartbeat is the run heartbeat interval; zero means 30 seconds.
 	Heartbeat time.Duration
+	// Admission admits each node before it runs; nil admits every node at once.
+	Admission *Admission
 }
 
 // Result is how one node ended.
@@ -108,7 +110,9 @@ type Layer func(cfg *Config, next Executor) Executor
 
 // safety: the order is the envelope's nesting, outermost first: approvals and recovery, debug pauses,
 // admission, skip_if, memo, artifacts, caches, retries and timeouts, attempt closures, steps, expansion.
-var layers = []Layer{}
+var layers = []Layer{
+	admissionLayer,
+}
 
 // Execute plans the run in a short-lived SDK process, records the run and
 // its nodes, and runs the nodes in dependency order. An error means no run
