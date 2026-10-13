@@ -368,6 +368,20 @@ func TestGateRunsFrontendUnitSuiteAsAnIndependentStep(t *testing.T) {
 	}
 }
 
+func TestGateRunsTheTypeScriptSDKSuiteAsAnIndependentStep(t *testing.T) {
+	w := sparkwing.NewWork()
+	if _, err := (&Gate{}).Work(w); err != nil {
+		t.Fatal(err)
+	}
+	step := w.StepByID("sdk-typescript")
+	if step == nil {
+		t.Fatal("gate does not run sdk-typescript")
+	}
+	if deps := step.DepIDs(); len(deps) != 0 {
+		t.Fatalf("sdk-typescript dependencies = %v, want an independent fast check", deps)
+	}
+}
+
 func TestGateRunsFrontendChecksBeforeBrowserSmoke(t *testing.T) {
 	w := sparkwing.NewWork()
 	if _, err := (&Gate{}).Work(w); err != nil {

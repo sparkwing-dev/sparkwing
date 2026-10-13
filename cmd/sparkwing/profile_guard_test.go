@@ -55,6 +55,7 @@ func TestALocalRunReachesNoProfileOrControllerSecrets(t *testing.T) {
 			handoff: map[string]bool{"submissionExecutionEnvironment": true, "refuseProfileHandoff": true},
 			controllerSecrets: map[string]bool{
 				"controllerSecretSource": true, "ExecuteClaimedTrigger": true, "RunNodeOnce": true,
+				"podSecrets.Resolve": true,
 			},
 		},
 	}
@@ -91,6 +92,9 @@ func TestALocalRunReachesNoProfileOrControllerSecrets(t *testing.T) {
 				owner := ""
 				if fn, ok := decl.(*ast.FuncDecl); ok {
 					owner = fn.Name.Name
+					if fn.Recv != nil {
+						owner = receiverName(fn.Recv.List[0].Type) + "." + owner
+					}
 				}
 				ast.Inspect(decl, func(n ast.Node) bool {
 					switch n := n.(type) {
@@ -133,4 +137,14 @@ func declaresHandoff(decl ast.Decl, handoff map[string]bool) bool {
 		}
 	}
 	return true
+}
+
+func receiverName(expr ast.Expr) string {
+	if star, ok := expr.(*ast.StarExpr); ok {
+		expr = star.X
+	}
+	if id, ok := expr.(*ast.Ident); ok {
+		return id.Name
+	}
+	return ""
 }

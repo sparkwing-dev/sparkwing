@@ -16,7 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/internal/secretsource"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -252,7 +251,7 @@ func (s podSecrets) Resolve(ctx context.Context, name string) (string, bool, err
 	sec, err := s.c.GetSecretForRun(ctx, name, s.runID)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
-		return "", false, secretsource.ErrMissing
+		return "", false, secrets.ErrSecretMissing
 	case err != nil:
 		return "", false, err
 	}

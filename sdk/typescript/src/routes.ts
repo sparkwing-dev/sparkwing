@@ -1,44 +1,62 @@
-// Thin clients for the node-facing routes the engine's node host serves.
-// The host resolves secrets and registers them with its masker before it
-// answers, so the SDK never masks anything itself.
+// Thin clients for the /node/v1 routes the engine serves to a node-bound
+// process. The host resolves secrets and registers them with its masker
+// before it answers, so the SDK never masks anything itself.
 
-import { createHash } from "node:crypto";
 import { PROTOCOL_VERSION } from "./describe.ts";
+
+export const NODE_URL_ENV = "SPARKWING_NODE_URL";
+export const NODE_TOKEN_ENV = "SPARKWING_NODE_TOKEN";
 
 export interface NodeRouteConfig {
   baseUrl: string;
-  token?: string;
+  token: string;
   fetch?: typeof fetch;
 }
 
-/** Reads the route location from the node environment the engine sets. */
-export function routeConfigFromEnv(env: Record<string, string | undefined>): NodeRouteConfig {
-  const baseUrl = env["SPARKWING_CONTROLLER_URL"];
-  if (!baseUrl) {
-    throw new Error("SPARKWING_CONTROLLER_URL is not set; the engine did not start this process as a node");
+/**
+ * Reads the route location and bearer from the node environment the engine
+ * sets. It returns undefined for a process bound to no node, which gets
+ * neither variable.
+ */
+export function routeConfigFromEnv(env: Record<string, string | undefined>): NodeRouteConfig | undefined {
+  const baseUrl = env[NODE_URL_ENV] ?? "";
+  const token = env[NODE_TOKEN_ENV] ?? "";
+  if (baseUrl === "" && token === "") return undefined;
+  if (!loopback(baseUrl)) {
+    // safety: the URL is not echoed, since a wrong one may carry userinfo.
+    throw new Error(`${NODE_URL_ENV} must be http://127.0.0.1:<port>, http://[::1]:<port> or http://localhost:<port>`);
   }
-  const token = env["SPARKWING_AGENT_TOKEN"];
-  return token ? { baseUrl, token } : { baseUrl };
+  if (token === "") throw new Error(`${NODE_TOKEN_ENV} is empty`);
+  return { baseUrl, token };
 }
 
+function loopback(raw: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "http:" || u.username !== "" || u.password !== "" || u.search !== "" || u.hash !== "" || u.pathname !== "/")
+    return false;
+  return u.port !== "" && ["127.0.0.1", "[::1]", "localhost"].includes(u.hostname);
+}
+
+/** A route answered with an error; code is the route's error code, such as secret_not_found. */
 export class RouteError extends Error {
   readonly status: number;
+  readonly code: string | undefined;
 
-  constructor(route: string, status: number, body: string) {
-    super(`${route}: HTTP ${status}${body ? `: ${body}` : ""}`);
+  constructor(route: string, status: number, message: string, code: string | undefined) {
+    super(`${route}: HTTP ${status}${code ? ` ${code}` : ""}${message ? `: ${message}` : ""}`);
     this.status = status;
+    this.code = code;
   }
-}
-
-interface OutputGrant {
-  url?: string;
-  sha256?: string;
-  size?: number;
 }
 
 export class NodeRoutes {
   readonly #base: string;
-  readonly #token: string | undefined;
+  readonly #token: string;
   readonly #fetch: typeof fetch;
 
   constructor(cfg: NodeRouteConfig) {
@@ -48,47 +66,46 @@ export class NodeRoutes {
   }
 
   /** Returns the secret's value; an unset secret is an error, never an empty string. */
-  async secret(name: string): Promise<string> {
-    const body = (await this.#route("GET", `/node/v1/secrets/${encodeURIComponent(name)}`)) as { value?: unknown } | null;
+  async secret(name: string, signal?: AbortSignal): Promise<string> {
+    const body = (await this.#route("GET", `/node/v1/secrets/${encodeURIComponent(name)}`, signal)) as { value?: unknown } | null;
     if (typeof body?.value !== "string") {
       throw new Error(`secret ${name}: the engine answered without a string value`);
     }
     return body.value;
   }
 
-  /**
-   * Returns the JSON output another node of this run produced, or null when
-   * it recorded none. The route answers with a signed grant; the bytes come
-   * from the grant's URL and must match its size and sha256, so a grant that
-   * names an object without both is refused.
-   */
-  async output<T = unknown>(nodeId: string): Promise<T | null> {
-    const route = `/node/v1/nodes/${encodeURIComponent(nodeId)}/output`;
-    const grant = (await this.#route("GET", route)) as OutputGrant | null;
-    if (!grant?.url) return null;
-    if (typeof grant.sha256 !== "string" || grant.sha256 === "" || typeof grant.size !== "number") {
-      throw new Error(`output of ${nodeId}: the grant names an object without its size and sha256`);
-    }
-    const res = await this.#fetch(new URL(grant.url, this.#base + "/"));
-    const bytes = Buffer.from(await res.arrayBuffer());
-    if (!res.ok) throw new RouteError(`GET output of ${nodeId}`, res.status, bytes.toString("utf8").slice(0, 512));
-    if (bytes.length !== grant.size) {
-      throw new Error(`output of ${nodeId}: ${bytes.length} bytes, the grant says ${grant.size}`);
-    }
-    const got = createHash("sha256").update(bytes).digest("hex");
-    if (got !== grant.sha256) throw new Error(`output of ${nodeId}: sha256 ${got}, the grant says ${grant.sha256}`);
-    return JSON.parse(bytes.toString("utf8")) as T;
+  /** Returns the JSON output another node of this run produced, or null when it recorded none. */
+  async output<T = unknown>(nodeId: string, signal?: AbortSignal): Promise<T | null> {
+    const body = (await this.#route("GET", `/node/v1/nodes/${encodeURIComponent(nodeId)}/output`, signal)) as { output?: unknown } | null;
+    if (body === null || !("output" in body)) throw new Error(`output of ${nodeId}: the engine answered without an output field`);
+    return (body.output ?? null) as T | null;
   }
 
-  async #route(method: string, path: string): Promise<unknown> {
+  async #route(method: string, path: string, signal: AbortSignal | undefined): Promise<unknown> {
     const headers: Record<string, string> = {
       accept: "application/json",
+      authorization: `Bearer ${this.#token}`,
       "sparkwing-node-protocol": PROTOCOL_VERSION,
     };
-    if (this.#token) headers["authorization"] = `Bearer ${this.#token}`;
-    const res = await this.#fetch(this.#base + path, { method, headers });
+    // safety: a redirect could carry the bearer to another local service, so
+    // none is followed and a 3xx is an error.
+    const res = await this.#fetch(this.#base + path, {
+      method,
+      headers,
+      redirect: "manual",
+      signal: signal ?? null,
+    });
     const text = await res.text();
-    if (!res.ok) throw new RouteError(`${method} ${path}`, res.status, text.slice(0, 512));
+    if (res.status !== 200) {
+      let parsed: { error?: unknown; code?: unknown } = {};
+      try {
+        parsed = JSON.parse(text) as typeof parsed;
+      } catch {
+        // A body that is not the route error shape keeps only the status.
+      }
+      const message = typeof parsed.error === "string" ? parsed.error : "";
+      throw new RouteError(`${method} ${path}`, res.status, message, typeof parsed.code === "string" ? parsed.code : undefined);
+    }
     return text === "" ? null : JSON.parse(text);
   }
 }
