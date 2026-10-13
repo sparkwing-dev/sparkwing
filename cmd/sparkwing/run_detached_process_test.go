@@ -274,6 +274,7 @@ func TestRunDetached_UsesEachSubmissionEnvironment(t *testing.T) {
 		t.Skip("slow: 1.5s of real work; the fast class runs under -short")
 	}
 	e := newSubmitTestEnv(t)
+	e.useHostedFixture(t, hostedFixtureSource)
 	e.extraEnv = []string{"SPARKWING_SUBMIT_TEST_ENV=first"}
 	e.submit()
 	waitUntil(t, "first submitted environment", 90*time.Second, func() bool {
@@ -433,6 +434,7 @@ func TestRunDetached_ExecutionOutlivesTheSubmittingProcess(t *testing.T) {
 		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
 	}
 	e := newSubmitTestEnv(t)
+	e.useHostedFixture(t, hostedFixtureSource)
 
 	ack := e.submit()
 	if ack.RunID == "" {
@@ -575,6 +577,7 @@ func TestRunDetached_PendingWorkRecoversAfterConsumerRestart(t *testing.T) {
 		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
 	}
 	e := newSubmitTestEnv(t)
+	e.useHostedFixture(t, hostedFixtureSource)
 
 	first := e.submit()
 	waitUntil(t, "the first submitted run to execute", 90*time.Second, func() bool {
@@ -751,30 +754,40 @@ func TestRunDetached_RefusesAPipelineNothingDeclares(t *testing.T) {
 const blockingFixtureSource = `package main
 
 import (
-	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strconv"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/runner"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func main() {
-	if len(os.Args) == 2 && os.Args[1] == "--sw-node-protocol" {
-		_, _ = bufio.NewReader(os.NewFile(3, "requests")).ReadString('\n')
-		fmt.Fprintln(os.NewFile(4, "frames"), "{\"reply\":\"1\",\"ok\":true,\"result\":{\"protocol\":\"1\",\"pipelines\":[{\"name\":\"fixture\"}]}}")
-		return
-	}
+type Fixture struct{ sparkwing.Base }
+
+func (*Fixture) Plan(_ context.Context, p *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	sparkwing.Job(p, "work", hold)
+	return nil
+}
+
+func hold(ctx context.Context) error {
 	marker := os.Getenv("SPARKWING_SUBMIT_TEST_MARKER")
-	id := os.Args[len(os.Args)-1]
+	id := os.Getenv("SPARKWING_RUN_ID")
 	appendLine(marker, "START "+id+" pid="+strconv.Itoa(os.Getpid()))
-	resp, err := http.Get(os.Getenv("ADV_HOLD_URL"))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, os.Getenv("ADV_HOLD_URL"), nil)
 	if err != nil {
-		panic(err)
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	appendLine(marker, "END "+id+" pid="+strconv.Itoa(os.Getpid()))
+	return nil
 }
 
 func appendLine(path, line string) {
@@ -785,14 +798,86 @@ func appendLine(path, line string) {
 	defer f.Close()
 	fmt.Fprintln(f, line)
 }
+
+func main() {
+	sparkwing.Register("fixture", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Fixture{} })
+	runner.Main()
+}
 `
+
+// safety: the engine host plans and runs the pipeline it is handed, so a test that waits on execution needs one
+// built against this module's SDK; its one node records the run id and the submitted environment.
+const hostedFixtureSource = `package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/runner"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
+)
+
+type Fixture struct{ sparkwing.Base }
+
+func (*Fixture) Plan(_ context.Context, p *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	sparkwing.Job(p, "work", func(context.Context) error {
+		appendLine(os.Getenv("SPARKWING_SUBMIT_TEST_MARKER"), os.Getenv("SPARKWING_RUN_ID"))
+		if marker := os.Getenv("SPARKWING_SUBMIT_TEST_ENV_MARKER"); marker != "" {
+			appendLine(marker, os.Getenv("SPARKWING_SUBMIT_TEST_ENV"))
+		}
+		return nil
+	})
+	return nil
+}
+
+func appendLine(path, line string) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	fmt.Fprintln(f, line)
+}
+
+func main() {
+	sparkwing.Register("fixture", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Fixture{} })
+	runner.Main()
+}
+`
+
+func (e *submitTestEnv) useHostedFixture(t *testing.T, source string) {
+	t.Helper()
+	writeSDKFixture(t, filepath.Join(e.repoDir, ".sparkwing"), source)
+}
+
+func writeSDKFixture(t *testing.T, sparkwingDir, source string) {
+	t.Helper()
+	root, err := moduleRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"go.mod", "go.sum"} {
+		body, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if name == "go.mod" {
+			body = []byte(strings.Replace(string(body), "module github.com/sparkwing-dev/sparkwing", "module sdkfixture", 1) +
+				fmt.Sprintf("\nrequire github.com/sparkwing-dev/sparkwing v0.0.0\nreplace github.com/sparkwing-dev/sparkwing => %q\n", root))
+		}
+		if err := os.WriteFile(filepath.Join(sparkwingDir, name), body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(sparkwingDir, "main.go"), []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func (e *submitTestEnv) useBlockingFixture(t *testing.T) <-chan struct{} {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(e.repoDir, ".sparkwing", "main.go"),
-		[]byte(blockingFixtureSource), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	e.useHostedFixture(t, blockingFixtureSource)
 	started := make(chan struct{})
 	var startedOnce sync.Once
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1052,6 +1137,7 @@ func TestRunDetached_ReplacesAConsumerFromAnotherBuild(t *testing.T) {
 		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
 	}
 	e := newSubmitTestEnv(t)
+	e.useHostedFixture(t, hostedFixtureSource)
 
 	old := exec.Command(e.bin, "__runs-consume", "--home", e.home,
 		"--idle", "10m", "--version", "v0.0.1-old")

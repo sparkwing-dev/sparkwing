@@ -16,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
@@ -268,11 +269,14 @@ func dispatchLocalTrigger(ctx context.Context, trig *store.Trigger,
 // trigger's run: `sparkwing __host-trigger --program <pipeline> <trigger-id>`.
 const TriggerHostVerb = "__host-trigger"
 
-// safety: the process that claimed the trigger is the sparkwing CLI, so the run is hosted by that same build.
-// A test binary is not one, so a test names the CLI in $SPARKWING_WINGD_BIN, as it does for the daemon.
+// safety: the process that claimed the trigger is the sparkwing CLI, so the run is hosted by that same build,
+// which keeps the engine values its host needs; every pipeline process the host starts gets the stripped
+// environment. A test binary is not a CLI, so a test names one in $SPARKWING_WINGD_BIN.
 func triggerHostBinary() (string, error) {
-	if bin := os.Getenv(wingdclient.HostBinEnv); bin != "" {
-		return bin, nil
+	if paths.UnderTest() {
+		if bin := os.Getenv(wingdclient.HostBinEnv); bin != "" {
+			return bin, nil
+		}
 	}
 	bin, err := os.Executable()
 	if err != nil {

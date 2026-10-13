@@ -38,8 +38,7 @@ func TestHostedChildOfAPinnedRunInheritsItsCores(t *testing.T) {
 	previous.release()
 	t.Log("old dispatcher child inherited pinned parent's occupied core")
 	next := testWingdAdmission(home, nil)
-	next.ParentLeaseToken = parent.Token()
-	next.ParentRunID = "pinned-parent"
+	next.ParentRunID, next.ParentNodeID = "pinned-parent", "parent"
 	hosted := &hostedAdmitter{la: next, pipeline: "child"}
 	child, err := hosted.Acquire(ctx, wingwire.AdmissionRequest{RunID: "new-child", Pipeline: "child", SemaphoresOnly: true}, nil)
 	if err != nil {
@@ -85,8 +84,7 @@ func TestHostedChildOfAGroupedRunInheritsItsGroup(t *testing.T) {
 	previous.release()
 	t.Log("old child attaches and inherits shared plan semaphore without reacquisition")
 	next := testWingdAdmission(home, nil)
-	next.ParentLeaseToken = parent.Token()
-	next.ParentRunID = "group-parent"
+	next.ParentRunID, next.ParentNodeID = "group-parent", "parent"
 	hosted := &hostedAdmitter{la: next, pipeline: "child"}
 	childctx, stop := context.WithTimeout(ctx, 300*time.Millisecond)
 	defer stop()

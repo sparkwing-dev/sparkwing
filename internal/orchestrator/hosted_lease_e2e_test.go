@@ -4,6 +4,7 @@ package orchestrator_test
 
 import (
 	"context"
+	"encoding/base64"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +21,7 @@ const leaseFixtureJobs = `package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,6 +33,9 @@ import (
 func main() { runner.Main() }
 
 func mark(name string) error {
+	if os.Getenv("SPARKWING_SECRETS_KEY") != "" {
+		return errors.New("the engine's secrets key reached a node process")
+	}
 	return os.WriteFile(filepath.Join(os.Getenv("C3_MARKER"), name), nil, 0o600)
 }
 
@@ -230,6 +235,8 @@ func runLeaseCase(t *testing.T, pipeline string, args ...string) map[string]bool
 	cmd.Dir = repo
 	cmd.Env = append(os.Environ(), "HOME="+home, "SPARKWING_HOME="+home, "SPARKWING_CONFIG="+filepath.Join(home, "config.yaml"),
 		"SPARKWING_WINGD_BIN="+cli, "C3_MARKER="+marker, "C3_CLI="+cli, "SPARKWING_DRY_RUN=", "SPARKWING_LOG_FORMAT=json",
+		// safety: every node marks only when the engine's credential stays out of it, including a claimed child's.
+		"SPARKWING_SECRETS_KEY="+base64.StdEncoding.EncodeToString(make([]byte, 32)),
 		"GOCACHE="+goEnv(t, "GOCACHE"), "GOMODCACHE="+goEnv(t, "GOMODCACHE"), "GOWORK=off", "GOTOOLCHAIN=local")
 	// safety: a child that outlives a killed run holds its output open, so the wait is bounded past the kill.
 	cmd.WaitDelay = 5 * time.Second
