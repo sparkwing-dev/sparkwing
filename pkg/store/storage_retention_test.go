@@ -26,7 +26,7 @@ func TestRetentionReleasesRunsByWhenTheyFinished(t *testing.T) {
 		{"recent", 2 * day, day},
 	} {
 		seedRunWithNode(t, st, run.id, "n1", "running")
-		if _, err := st.AppendEvent(ctx, run.id, "n1", "k", nil); err != nil {
+		if err := st.AppendEvent(ctx, run.id, "n1", "k", nil); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := st.DB().Exec(storetest.Rebind(st,

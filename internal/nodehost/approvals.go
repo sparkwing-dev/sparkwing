@@ -16,11 +16,6 @@ var approvalPoll = 500 * time.Millisecond
 // safety: a store whose every read fails for this long is wedged, not busy, so the gate fails.
 var approvalStoreBudget = 5 * time.Minute
 
-// safety: the bare store's AppendEvent has another shape, so a run on it records no approval event.
-type eventAppender interface {
-	AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
-}
-
 // safety: a gate never reaches the inner layers, so it holds no admission
 // lease, starts no process and runs no envelope while a human decides.
 func approvalsLayer(cfg *Config, next Executor) Executor {
@@ -55,6 +50,7 @@ func approvalGate(ctx context.Context, cfg *Config, n *NodeRun) Result {
 	if err := run.State.StartNode(writeCtx, run.ID, id); err != nil {
 		return failed(fmt.Errorf("start node %s: %w", id, err))
 	}
+	hostEvent(writeCtx, run, id, "node_started", nil)
 	start := time.Now()
 	onTimeout := gate.OnTimeout
 	if onTimeout == "" {
@@ -67,15 +63,7 @@ func approvalGate(ctx context.Context, cfg *Config, n *NodeRun) Result {
 	if err := run.State.CreateApproval(writeCtx, appr); err != nil {
 		return failed(fmt.Errorf("CreateApproval: %w", err))
 	}
-	if events, ok := run.State.(eventAppender); ok {
-		payload, err := json.Marshal(map[string]any{"message": gate.Message, "timeout_ms": gate.TimeoutMS})
-		if err == nil {
-			err = events.AppendEvent(writeCtx, run.ID, id, "approval_requested", payload)
-		}
-		if err != nil {
-			run.Logger.Warn("nodehost: approval event", "run", run.ID, "node", id, "err", err)
-		}
-	}
+	hostEventJSON(writeCtx, run, id, "approval_requested", map[string]any{"message": gate.Message, "timeout_ms": gate.TimeoutMS})
 	emit(sparkwing.LogRecord{
 		TS: time.Now(), Level: "info", Event: "approval_requested", Msg: gate.Message,
 		Attrs: map[string]any{"timeout_ms": gate.TimeoutMS},

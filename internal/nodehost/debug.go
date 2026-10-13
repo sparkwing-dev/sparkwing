@@ -2,7 +2,6 @@ package nodehost
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"slices"
 	"time"
@@ -129,21 +128,7 @@ func debugSetStatus(ctx context.Context, n *NodeRun, status string) {
 }
 
 func debugEvent(ctx context.Context, n *NodeRun, kind string, attrs map[string]any) {
-	events, ok := n.Run.State.(eventAppender)
-	if !ok {
-		return
-	}
-	var payload []byte
-	var err error
-	if attrs != nil {
-		payload, err = json.Marshal(attrs)
-	}
-	if err == nil {
-		err = events.AppendEvent(ctx, n.Run.ID, n.Plan.ID, kind, payload)
-	}
-	if err != nil {
-		n.Run.Logger.Warn("nodehost: debug event", "run", n.Run.ID, "node", n.Plan.ID, "kind", kind, "err", err)
-	}
+	hostEventJSON(ctx, n.Run, n.Plan.ID, kind, attrs)
 }
 
 // safety: inside admission, so a bounced node keeps the lease it was admitted
