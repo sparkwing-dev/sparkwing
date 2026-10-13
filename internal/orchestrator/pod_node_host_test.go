@@ -98,9 +98,14 @@ func newLaunchedRun(t *testing.T, args map[string]string) *launchedRun {
 
 func (r *launchedRun) claim(t *testing.T, nodeID string) string {
 	t.Helper()
+	now := time.Now()
+	// safety: a retry waits out its backoff before the launcher may claim it, and these tests claim it at once.
+	if n := r.node(t, nodeID); n.ReadyAt != nil && n.ReadyAt.After(now) {
+		now = *n.ReadyAt
+	}
 	c, err := r.st.ClaimLaunch(t.Context(), store.ClaimIdentity{Principal: "launcher", TokenPrefix: "swr_launch"},
 		store.LaunchClaimRequest{HolderID: "job-" + nodeID, Lease: time.Minute, Deadline: time.Hour, RunID: r.runID, NodeID: nodeID},
-		time.Now())
+		now)
 	if err != nil || c == nil {
 		t.Fatalf("claim %s: %+v %v", nodeID, c, err)
 	}
@@ -232,5 +237,71 @@ func TestPodNode_WithoutAnAcceptedHashFailsClosed(t *testing.T) {
 	}
 	if _, err := os.Stat(envOut); !os.IsNotExist(err) {
 		t.Fatalf("the node's body ran: %v", err)
+	}
+}
+
+// A retry_auto node's every attempt is its own claim and pod: before_run runs
+// in the first only and after_run in the last, the one the controller does not
+// retry.
+func TestLaunchedNode_RetryAutoRunsBeforeRunFirstAndAfterRunLast(t *testing.T) {
+	trace := filepath.Join(t.TempDir(), "trace")
+	r := newLaunchedRun(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "trace": trace, "auto": "true"})
+	if _, err := r.host(t, store.PlanNodeID); err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	for attempt := 1; attempt <= 3; attempt++ {
+		if _, err := r.host(t, "build"); err == nil {
+			t.Fatalf("attempt %d of a failing node succeeded", attempt)
+		}
+		want := "pending"
+		if attempt == 3 {
+			want = "done"
+		}
+		if n := r.node(t, "build"); n.Status != want || n.AttemptsConsumed != attempt {
+			t.Fatalf("after attempt %d build = %s with %d attempts (%q), want %s", attempt, n.Status, n.AttemptsConsumed, n.Error, want)
+		}
+	}
+	wantTrace(t, trace, "before\nafter:step \"run\": still broken\n")
+}
+
+// A plain retry re-runs in the one pod its claim started, with before_run in
+// the first attempt and after_run in the last.
+func TestLaunchedNode_PlainRetryRunsInThePod(t *testing.T) {
+	trace := filepath.Join(t.TempDir(), "trace")
+	r := newLaunchedRun(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "trace": trace})
+	if _, err := r.host(t, store.PlanNodeID); err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if _, err := r.host(t, "build"); err == nil {
+		t.Fatal("a failing node succeeded")
+	}
+	if n := r.node(t, "build"); n.Status != "done" || n.Outcome != string(sparkwing.Failed) || n.AttemptsConsumed != 1 {
+		t.Fatalf("build = %s/%s with %d claims, want done/failed with 1", n.Status, n.Outcome, n.AttemptsConsumed)
+	}
+	wantTrace(t, trace, "before\nafter:step \"run\": still broken\n")
+}
+
+func wantTrace(t *testing.T, path, want string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != want {
+		t.Fatalf("hook calls = %q, want %q", data, want)
+	}
+}
+
+// A node in a concurrency group takes and releases its slot through its claim.
+func TestLaunchedNode_RunsItsConcurrencyGroupThroughTheClaim(t *testing.T) {
+	r := newLaunchedRun(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "group": "true"})
+	if _, err := r.host(t, store.PlanNodeID); err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if _, err := r.host(t, "build"); err != nil {
+		t.Fatalf("host build: %v", err)
+	}
+	if n := r.node(t, "build"); n.Status != "done" || n.Outcome != string(sparkwing.Success) {
+		t.Fatalf("build = %s/%s (%s), want done/success", n.Status, n.Outcome, n.Error)
 	}
 }

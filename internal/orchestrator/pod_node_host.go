@@ -25,7 +25,9 @@ type podNode struct {
 	binary, dir                         string
 	controllerURL, token, runID, nodeID string
 	// safety: the accepted plan's hash for the node, which the pod's own plan of it must match.
-	specHash  string
+	specHash string
+	// safety: the claim's 1-based attempt ordinal, which decides before_run and after_run under retry_auto.
+	attempt   int
 	state     storage.StateStore
 	artifacts storage.ArtifactStore
 	logger    *slog.Logger
@@ -62,12 +64,14 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 		Session:  nodehost.SessionConfig{Entry: p.binary, Dir: p.dir, Sink: podPlanSink{masker: masker}},
 		Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run),
 		State: p.state, Artifacts: p.artifacts, Logger: p.logger,
+		// safety: the node's concurrency group runs through the claim, which the controller binds to this node.
+		Admission: &nodehost.Admission{Slots: NewHTTPConcurrency(p.controllerURL, nil, p.token, store.DefaultConcurrencyLease)},
 		Attempts: &nodehost.Attempts{
 			Routes: routes, Resolver: podSecrets{c: c, runID: p.runID}, Masker: masker, Claim: claim,
 			OpenLog: func(context.Context, string, string) (nodehost.NodeLog, error) { return nlog, nil },
 			Usage:   nodehost.RecordUsage(nil),
 		},
-	}, p.nodeID, p.specHash)
+	}, p.nodeID, p.specHash, p.attempt)
 	if nlog.sink != nil {
 		nlog.sink.close(ctx, ctx.Err() != nil || res.Outcome == sparkwing.Cancelled)
 	}
