@@ -552,17 +552,24 @@ func (s *scheduler) add(ctx, writeCtx context.Context, nodes []nodeproto.PlanNod
 	if err := validateNodes(append(slices.Clone(s.nodes), nodes...)); err != nil {
 		return err
 	}
+	existing, err := s.resumedRows(writeCtx, nodes)
+	if err != nil {
+		return err
+	}
 	for i, n := range nodes {
-		reused, err := s.reuseRow(writeCtx, n)
-		if err == nil && !reused {
-			err = s.run.State.CreateNode(writeCtx, pendingRow(s.run, n))
+		if row, ok := existing[n.ID]; ok {
+			s.reuseRow(writeCtx, n.ID, row)
+			continue
 		}
-		if err != nil {
+		if err := s.run.State.CreateNode(writeCtx, pendingRow(s.run, n)); err != nil {
 			err = fmt.Errorf("create node %s: %w", n.ID, err)
 			s.nodes = append(s.nodes, nodes[:i]...)
-			for _, created := range nodes[:i] {
-				if !s.started[created.ID] {
-					s.terminal(ctx, created.ID, sparkwing.Failed, err.Error())
+			// safety: only rows this host created are failed; a reused row is its holder's or its run's record.
+			for _, prior := range nodes[:i] {
+				if _, reused := existing[prior.ID]; !reused {
+					s.terminal(ctx, prior.ID, sparkwing.Failed, err.Error())
+				} else {
+					s.started[prior.ID] = true
 				}
 			}
 			return err
@@ -572,39 +579,48 @@ func (s *scheduler) add(ctx, writeCtx context.Context, nodes []nodeproto.PlanNod
 	return nil
 }
 
+// safety: a resumed run reads every row an earlier host left before it
+// writes any, so a node planned under another spec_hash refuses the whole
+// resume with plan_drift and no row, a live holder's included, is touched.
+func (s *scheduler) resumedRows(ctx context.Context, nodes []nodeproto.PlanNode) (map[string]*store.Node, error) {
+	if !s.resume {
+		return nil, nil
+	}
+	rows := map[string]*store.Node{}
+	for _, n := range nodes {
+		row, err := s.run.State.GetNode(ctx, s.run.ID, n.ID)
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			continue
+		case err != nil:
+			return nil, fmt.Errorf("read node %s: %w", n.ID, err)
+		case row.SpecHash != n.SpecHash:
+			return nil, &nodeproto.Error{Code: nodeproto.CodePlanDrift, Message: fmt.Sprintf(
+				"node %s was planned as %s by an earlier host of this run and as %s now; plan code must be deterministic for a run",
+				n.ID, row.SpecHash, n.SpecHash)}
+		}
+		rows[n.ID] = row
+	}
+	return rows, nil
+}
+
 // safety: a resumed run's finished node keeps the result its row records and
 // is never run or written again; an unfinished row, or one the reaper failed
-// because its holder was lost, is run again. A row planned under another
-// spec_hash is refused, since a trigger must plan the same run every time.
-func (s *scheduler) reuseRow(ctx context.Context, n nodeproto.PlanNode) (bool, error) {
-	if !s.resume {
-		return false, nil
-	}
-	row, err := s.run.State.GetNode(ctx, s.run.ID, n.ID)
-	switch {
-	case errors.Is(err, store.ErrNotFound):
-		return false, nil
-	case err != nil:
-		return false, err
-	case row.SpecHash != n.SpecHash:
-		return false, &nodeproto.Error{Code: nodeproto.CodePlanDrift, Message: fmt.Sprintf(
-			"node %s was planned as %s by an earlier host of this run and as %s now; plan code must be deterministic for a run",
-			n.ID, row.SpecHash, n.SpecHash)}
-	}
+// because its holder was lost, is run again.
+func (s *scheduler) reuseRow(ctx context.Context, id string, row *store.Node) {
 	if row.Status != "done" || row.Outcome == "" {
-		return true, nil
+		return
 	}
 	if row.FailureReason == store.FailureAgentLost {
-		if r, ok := s.run.State.(lostNodeResetter); ok && r.ResetNodeForAutoRetry(ctx, s.run.ID, n.ID) == nil {
-			return true, nil
+		if r, ok := s.run.State.(lostNodeResetter); ok && r.ResetNodeForAutoRetry(ctx, s.run.ID, id) == nil {
+			return
 		}
 	}
 	res := Result{Outcome: sparkwing.Outcome(row.Outcome), Reason: row.FailureReason, recorded: true}
 	if row.Error != "" {
 		res.Err = errors.New(row.Error)
 	}
-	s.started[n.ID], s.results[n.ID] = true, res
-	return true, nil
+	s.started[id], s.results[id] = true, res
 }
 
 // safety: the store reopens a node whose holder was lost only for the run's own trigger holder, and only while no

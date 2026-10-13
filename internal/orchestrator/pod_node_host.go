@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -139,19 +138,29 @@ func podSessionEnv(masker *secrets.Masker) []string {
 	return env
 }
 
-// safety: the raw value is scanned for every `://userinfo@`, with no list
-// parsing a comma in a password could break, and each userinfo, its password
-// and their decoded forms are masked, so a member logged on its own or a
-// decoded credential shows as neither.
+// safety: the whole value and each ','/'|' member are masked whole, covering a comma-split password's pieces; so are
+// each member's userinfo (before its last '@', past any scheme://) and its password, raw and percent-decoded. A value
+// with no '@' carries no credential, and GOPROXY's direct and off keywords stay readable.
 func maskProxyCredentials(masker *secrets.Masker, value string) {
-	matches := proxyUserinfo.FindAllStringSubmatch(value, -1)
-	if len(matches) == 0 {
+	if !strings.Contains(value, "@") {
 		return
 	}
 	masker.Register(value)
-	for _, m := range matches {
-		parts := []string{m[1]}
-		if _, password, ok := strings.Cut(m[1], ":"); ok {
+	for _, member := range strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == '|' }) {
+		if member != "direct" && member != "off" {
+			masker.Register(member)
+		}
+		_, rest, ok := strings.Cut(member, "://")
+		if !ok {
+			rest = member
+		}
+		at := strings.LastIndex(rest, "@")
+		if at < 0 {
+			continue
+		}
+		userinfo := rest[:at]
+		parts := []string{userinfo}
+		if _, password, ok := strings.Cut(userinfo, ":"); ok {
 			parts = append(parts, password)
 		}
 		for _, raw := range parts {
@@ -165,8 +174,6 @@ func maskProxyCredentials(masker *secrets.Masker, value string) {
 		}
 	}
 }
-
-var proxyUserinfo = regexp.MustCompile(`://([^/@\s]+)@`)
 
 // PipelineRequires is the placement labels the pipeline's entry in the
 // sparkwing.yaml found from dir upward requires; none when there is no such

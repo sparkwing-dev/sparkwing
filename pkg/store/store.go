@@ -2728,8 +2728,8 @@ func (t *Tenant) markNodeReady(ctx context.Context, runID, nodeID string, policy
 
 // ResetNodeForAutoRetry returns a failed node to pending so it runs again.
 // A node whose holder was lost (agent_lost) resets only for its run's
-// trigger holder, resuming the run, and only while no agent-loss retry run
-// took the run over.
+// trigger holder, resuming the run, only while no agent-loss retry run took
+// the run over, and never once the run finished or a cancel was requested.
 func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error {
 	return s.defaultTenant().ResetNodeForAutoRetry(ctx, runID, nodeID)
 }
@@ -2772,7 +2772,15 @@ func (t *Tenant) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string
 			string(t.team), runID).Scan(&retried); err != nil {
 			return err
 		}
-		if !triggerClaim || retried > 0 {
+		var runStatus string
+		var cancelRequested sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT r.status, t.cancel_requested_at FROM runs r
+  LEFT JOIN triggers t ON t.team = r.team AND t.id = r.id
+ WHERE r.team = ? AND r.id = ?`, string(t.team), runID).Scan(&runStatus, &cancelRequested); err != nil {
+			return err
+		}
+		// safety: a cancelled or finished run, or one with a cancel requested, never reopens a node.
+		if !triggerClaim || retried > 0 || isTerminalRunStatus(runStatus) || cancelRequested.Valid {
 			return ErrLockHeld
 		}
 		lostReset = FailureAgentLost

@@ -195,22 +195,43 @@ func TestDispatchStopsWaitingOnAHolderWhoseLeaseLapsed(t *testing.T) {
 }
 
 // safety: a resumed run keeps an earlier host's result only for the node it
-// plans now; a node planned differently fails the run as plan drift.
+// plans now; a node planned differently fails the run as plan drift before any
+// row is written, so a live holder's row and a lost node's reason stand.
 func TestResumeRefusesARowPlannedUnderAnotherSpec(t *testing.T) {
 	st := openStore(t)
 	ctx := t.Context()
 	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreateNode(ctx, store.Node{RunID: testRunID, NodeID: "build", Status: "pending", SpecHash: "sha256:old"}); err != nil {
+	for _, row := range []store.Node{
+		{RunID: testRunID, NodeID: "held", Status: "pending", SpecHash: "sha256:held"},
+		{RunID: testRunID, NodeID: "lost", Status: "pending", SpecHash: "sha256:lost"},
+		{RunID: testRunID, NodeID: "build", Status: "pending", SpecHash: "sha256:old"},
+	} {
+		if err := st.CreateNode(ctx, row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.ClaimNamedNode(ctx, store.ClaimIdentity{}, testRunID, "held", "pool:live", time.Hour, store.NamedClaimOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishNodeWithReason(ctx, testRunID, "lost", "failed", "holder lost", nil, store.FailureAgentLost, nil); err != nil {
 		t.Fatal(err)
 	}
 	run := &Run{ID: testRunID, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest)}
 	s := &scheduler{run: run, results: map[string]Result{}, started: map[string]bool{}, resume: true}
-	err := s.add(ctx, ctx, []nodeproto.PlanNode{{ID: "build", SpecHash: "sha256:new"}})
+	err := s.add(ctx, ctx, []nodeproto.PlanNode{
+		{ID: "held", SpecHash: "sha256:held"}, {ID: "lost", SpecHash: "sha256:lost"}, {ID: "build", SpecHash: "sha256:new"},
+	})
 	var perr *nodeproto.Error
 	if !errors.As(err, &perr) || perr.Code != nodeproto.CodePlanDrift {
 		t.Fatalf("add = %v, want plan_drift", err)
+	}
+	if row := nodeRow(t, st, "held"); row.Status == "done" || row.ClaimedBy != "pool:live" {
+		t.Errorf("held = %s/%s claimed by %q, want left to its live holder", row.Status, row.Outcome, row.ClaimedBy)
+	}
+	if row := nodeRow(t, st, "lost"); row.FailureReason != store.FailureAgentLost {
+		t.Errorf("lost = %s/%s (%s), want its agent_lost record kept", row.Status, row.Outcome, row.FailureReason)
 	}
 }
 

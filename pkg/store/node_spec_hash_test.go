@@ -33,8 +33,9 @@ func TestCreateNode_KeepsTheAcceptedSpecHashForTheClaim(t *testing.T) {
 }
 
 // safety: a node failed as agent_lost runs again only for its run's own
-// trigger holder resuming the run, and never once an agent-loss retry run took
-// the run over, so the node cannot run in both.
+// trigger holder resuming the run, never once a cancel was requested, and
+// never once an agent-loss retry run took the run over, so the node cannot
+// run in both.
 func TestResetNodeForAutoRetry_ReopensALostNodeOnlyForItsResumingTriggerHolder(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
@@ -50,7 +51,7 @@ func TestResetNodeForAutoRetry_ReopensALostNodeOnlyForItsResumingTriggerHolder(t
 	if err := s.CreateRun(host, store.Run{ID: trigger.ID, Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{"lost", "retried"} {
+	for _, id := range []string{"lost", "retried", "cancelled"} {
 		if err := s.CreateNode(host, store.Node{RunID: trigger.ID, NodeID: id, Status: "pending"}); err != nil {
 			t.Fatal(err)
 		}
@@ -67,8 +68,14 @@ func TestResetNodeForAutoRetry_ReopensALostNodeOnlyForItsResumingTriggerHolder(t
 	if n, err := s.GetNode(ctx, trigger.ID, "lost"); err != nil || n.Status != "pending" || n.FailureReason != "" {
 		t.Fatalf("lost after the reset = %+v %v, want pending", n, err)
 	}
-	if _, err := s.DB().ExecContext(ctx, `INSERT INTO agent_loss_retries (run_id, source_run_id, root_run_id, cause_nodes_json, available_at, deadline_at, retry_count)
-VALUES (?, ?, ?, '["retried"]', 0, 0, 1)`, trigger.ID, trigger.ID, trigger.ID); err != nil {
+	if err := s.RequestCancel(ctx, trigger.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ResetNodeForAutoRetry(host, trigger.ID, "cancelled"); !errors.Is(err, store.ErrLockHeld) {
+		t.Fatalf("reset after a cancel was requested = %v, want refused", err)
+	}
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `INSERT INTO agent_loss_retries (run_id, source_run_id, root_run_id, cause_nodes_json, available_at, deadline_at, retry_count)
+VALUES (?, ?, ?, '["retried"]', 0, 0, 1)`), trigger.ID, trigger.ID, trigger.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.ResetNodeForAutoRetry(host, trigger.ID, "retried"); !errors.Is(err, store.ErrLockHeld) {
