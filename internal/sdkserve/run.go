@@ -23,15 +23,19 @@ func runNode(ctx context.Context, s *server, req nodeproto.Request) (any, error)
 	if n.Work() == nil {
 		return nil, &nodeproto.Error{Code: nodeproto.CodeBadRequest, Message: fmt.Sprintf("node %q has no body to run", req.Node)}
 	}
-	ctx = s.nodeContext(ctx, planned, n, nil)
-	if f := req.Failure; f != nil {
-		stage := sparkwing.StageAction
-		if f.Stage == "verify" {
-			stage = sparkwing.StageVerify
-		}
-		ctx = sparkwing.WithFailure(ctx, sparkwing.Failure{Stage: stage, Err: errors.New(f.Message)})
-	}
+	ctx = withFailure(s.nodeContext(ctx, planned, n, nil), req.Failure)
 	return bodyResult(runBody(ctx, n)), nil
+}
+
+func withFailure(ctx context.Context, f *nodeproto.Failure) context.Context {
+	if f == nil {
+		return ctx
+	}
+	stage := sparkwing.StageAction
+	if f.Stage == "verify" {
+		stage = sparkwing.StageVerify
+	}
+	return sparkwing.WithFailure(ctx, sparkwing.Failure{Stage: stage, Err: errors.New(f.Message)})
 }
 
 // safety: a body's error is still a successful reply, since the body ran.
@@ -72,7 +76,9 @@ func (s *server) nodeContext(ctx context.Context, planned *Planned, n *sparkwing
 	ctx = sparkwingruntime.WithNode(sparkwingruntime.WithLogger(ctx, frameLogger{s}), n.ID())
 	if step != nil {
 		ctx = sparkwing.WithStep(ctx, step.ID())
+		ctx = sparkwingruntime.WithLogger(ctx, stepLogger{frameLogger{s}, step.ID()})
 	}
+	ctx = sparkwingruntime.WithJSONResolver(ctx, func(id string) ([]byte, bool) { return localOutput(planned, id) })
 	if in := planned.Plan.Inputs(); in != nil {
 		ctx = sparkwingruntime.WithInputs(ctx, in)
 	}

@@ -23,7 +23,7 @@ func eval(ctx context.Context, s *server, req nodeproto.Request) (any, error) {
 		return nil, &nodeproto.Error{Code: nodeproto.CodeUnknownClosure, Message: fmt.Sprintf("closure %q is not in this process's plan", req.Closure)}
 	}
 	if c.Kind == sparkwingruntime.ClosureGenerator {
-		return nil, &nodeproto.Error{Message: "this SDK does not evaluate generator closures yet"}
+		return Expand(s.nodeContext(ctx, planned, c.Node, nil), s.cfg, planned, req.Closure)
 	}
 	var nodeErr error
 	if c.Kind == sparkwingruntime.ClosureAfterRun {

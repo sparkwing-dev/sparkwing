@@ -235,13 +235,6 @@ func TestNodeProtocolEntryServesDescribeAndPlan(t *testing.T) {
 		t.Errorf("describe = %+v, want protocol %s listing %s", described, nodeproto.Version, servePipeline)
 	}
 
-	for _, req := range []nodeproto.Request{
-		{Op: nodeproto.OpRunStep, Node: "build", Step: "build", Attempt: 1},
-	} {
-		reply, _ := s.call(req)
-		wantCode(t, reply, nodeproto.CodeUnknownOp)
-	}
-
 	reply, logs := s.call(planRequest(map[string]string{"env": "prod"}))
 	var doc nodeproto.PlanDoc
 	if err := reply.Decode(&doc); err != nil {

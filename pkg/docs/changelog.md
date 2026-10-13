@@ -22,6 +22,7 @@ unlock.
 
 ### Added
 - **sdk:** a pipeline binary started with `--sw-node-protocol` answers `describe` and `plan` requests on descriptors 3 and 4 (inherited handles named by `SPARKWING_PROTOCOL_HANDLES` on Windows), with the run context taken from the request
+- **sdk:** under `--sw-node-protocol`, `run_step` runs one step body of a planned node, several at once, and keeps step outputs in the process for later `StepGet` calls; a generator closure's eval adds its nodes to the process's plan and answers their node documents. Until the node routes serve outputs, `Ref.Get` there reads only a node that ran in the same process
 - **sdk:** under `--sw-node-protocol`, `run_node` runs a planned node and answers its outcome and output, and `eval` runs a node's `skip_if`, `cache_key`, `before_run`, `verify`, `after_run` or step `skip_if` closure by id, alongside a running node
 - **sdk:** `sparkwing.InputError` is the error a `Registration`'s `Invoke` returns when args fail the declared flags of the pipeline or of a job's `WithArgs`; find it with `errors.As`
 - **engine:** a loopback node route server with one bearer per node; `GET /node/v1/secrets/{name}` serves only the node's declared secrets and answers 426 to any other protocol version

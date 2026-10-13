@@ -382,3 +382,21 @@ func emitStepTerminal(ctx context.Context, stepID string, elapsed time.Duration,
 		},
 	}))
 }
+
+func runStep(ctx context.Context, w *Work, s *WorkStep) (any, error) {
+	// safety: the host sends a step only after its needs end, so a need still
+	// unresolved here was skipped or failed under ContinueOnError; resolving it
+	// to no output keeps StepGet from blocking forever, as RunWork does for a
+	// skipped step.
+	for _, id := range s.needs {
+		if need := w.StepByID(id); need != nil {
+			need.markDone(nil)
+		}
+	}
+	out, err := dispatchItem(WithStep(ctx, s.id), &workItem{id: s.id, step: s})
+	if err != nil {
+		return nil, err
+	}
+	s.markDone(out)
+	return out, nil
+}
