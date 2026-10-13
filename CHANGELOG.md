@@ -52,6 +52,7 @@ unlock.
   Each distinct number is a retention class under `<cache prefix>/logs/r<days>/` with its own bucket lifecycle rule.
 - **sdk:** The plan document carries `protocol`, the node protocol version it was written for
 - **sdk:** The plan document lists each node's and step's closure ids under `closures`, and also carries `memo_key.closure`, `modifiers.has_verify` and step `continue_on_error` and `optional`
+- **sdk:** A node protocol conformance suite (`internal/nodeproto/conformance`) drives an SDK entry through describe, plan, run_node, run_step, eval and the error codes against a fixture pipeline every SDK implements, checking each frame against `docs/schemas` and golden transcripts; the Go SDK passes it
 
 ### Changed
 - **sdk (Breaking):** The plan document lists a node's dependency caches under `caches` instead of `dir_caches`

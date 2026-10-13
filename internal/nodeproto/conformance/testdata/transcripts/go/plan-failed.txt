@@ -1,0 +1,4 @@
+-> {"args":{"env":"prod","fail-plan":"true"},"id":"1","op":"plan","pipeline":"conformance","run":{"git":{"branch":"main","repo":"acme/app","sha":"4f2c1e0"},"run_id":"run-1","trigger":{"source":"push"}}}
+<- {"error":{"code":"plan_failed","message":"plan refused"},"ok":false,"reply":"1"}
+-> {"id":"2","op":"describe"}
+<- {"ok":true,"reply":"2","result":{"pipelines":[{"args":[{"desc":"Target environment","go_name":"Env","name":"env","required":true,"type":"string"},{"default":"3","desc":"Replicas","go_name":"Count","name":"count","required":false,"type":"int"},{"desc":"Fail the plan function","go_name":"FailPlan","name":"fail-plan","required":false,"type":"bool"}],"name":"conformance","short":"Node protocol conformance fixture"}],"protocol":"1","sdk":{"language":"go","version":"<version>"}}}

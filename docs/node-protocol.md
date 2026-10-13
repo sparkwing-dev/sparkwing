@@ -4,6 +4,8 @@ The node protocol is the contract between the engine, which hosts a run, and an 
 
 Status: specification. Until a release note says the engine hosts runs this way, the engine and the Go SDK still run pipelines inside the pipeline binary, and this page is the contract both are moving to.
 
+The conformance suite in `internal/nodeproto/conformance` in the source repository checks an SDK against this page. `testdata/fixture.json` there describes a fixture pipeline that each SDK implements and the replies the suite expects from it.
+
 ## Overview
 
 - **The host runs everything that is not customer code.** It handles DAG order, retries, timeouts, memo, dependency caches, artifacts, admission, approvals, secrets, masking, logs, process cleanup and usage measurement.
