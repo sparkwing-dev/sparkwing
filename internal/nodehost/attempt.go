@@ -138,12 +138,22 @@ func drive(ctx context.Context, sess *Session, sink *LogSink, n *NodeRun) Result
 	if err != nil {
 		return failed(err)
 	}
+	res := body(ctx, sess, sink, n)
+	if res.Outcome == sparkwing.Success {
+		// safety: generators run in the body's process, after it succeeds, so
+		// they read the result step's output the process still holds.
+		res.expansions = generate(ctx, sess, n)
+	}
+	return res
+}
+
+func body(ctx context.Context, sess *Session, sink *LogSink, n *NodeRun) Result {
 	attempt := max(n.Attempt, 1)
 	if w := n.Plan.Work; w != nil && len(w.Steps) > 0 {
 		return driveSteps(ctx, sess, sink, n, attempt)
 	}
 	var rr nodeproto.RunResult
-	err = ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpRunNode, Node: n.Plan.ID, Attempt: attempt, Failure: n.Failure}, &rr)
+	err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpRunNode, Node: n.Plan.ID, Attempt: attempt, Failure: n.Failure}, &rr)
 	if err == nil {
 		err = rr.Validate()
 	}
@@ -157,7 +167,7 @@ func drive(ctx context.Context, sess *Session, sink *LogSink, n *NodeRun) Result
 		}
 		return failed(errors.New(msg))
 	}
-	return Result{Outcome: sparkwing.Success, Output: rr.Output, expansions: generate(ctx, sess, n)}
+	return Result{Outcome: sparkwing.Success, Output: rr.Output}
 }
 
 // safety: the node runs only as the run accepted it, so a process that plans
