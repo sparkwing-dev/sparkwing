@@ -78,6 +78,7 @@ type Run struct {
 }
 
 type addRequest struct {
+	ctx   context.Context
 	nodes []nodeproto.PlanNode
 	reply chan error
 }
@@ -85,10 +86,16 @@ type addRequest struct {
 // Add validates nodes against the run's nodes, records their rows and
 // schedules them. Only an executor of a running node of this run may call it.
 func (r *Run) Add(ctx context.Context, nodes ...nodeproto.PlanNode) error {
-	req := addRequest{nodes: nodes, reply: make(chan error, 1)}
+	// safety: the reply is buffered so the scheduler never waits on a caller that gave up.
+	req := addRequest{ctx: ctx, nodes: nodes, reply: make(chan error, 1)}
 	select {
 	case r.adds <- req:
-		return <-req.reply
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case err := <-req.reply:
+		return err
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -158,15 +165,16 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 		err = cfg.State.UpdatePlanSnapshot(ctx, res.RunID, raw)
 	}
 	if err != nil {
-		res.Status, res.Err = "failed", fmt.Errorf("plan: %w", err)
+		res.Err = fmt.Errorf("plan: %w", err)
 		if cause := context.Cause(ctx); cause != nil {
-			res.Status, res.Err = "cancelled", cause
+			res.Err = cause
 		}
+		res.Status = runStatus(res.Err)
 		return res, nil
 	}
 	run := &Run{ID: res.RunID, Doc: doc, State: cfg.State, Logger: cfg.Logger, adds: make(chan addRequest)}
 	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg)}
-	if err := s.add(ctx, doc.Nodes); err != nil {
+	if err := s.add(ctx, ctx, doc.Nodes); err != nil {
 		res.Status, res.Err = "failed", err
 		return res, nil
 	}
@@ -271,7 +279,7 @@ func (s *scheduler) loop(ctx context.Context) {
 			running--
 			s.finish(ctx, f.id, f.res)
 		case req := <-s.run.adds:
-			req.reply <- s.add(ctx, req.nodes)
+			req.reply <- s.add(ctx, req.ctx, req.nodes)
 		}
 	}
 }
@@ -338,10 +346,16 @@ func (s *scheduler) finish(ctx context.Context, id string, res Result) {
 	case res.Outcome == "":
 		res.Outcome = sparkwing.Failed
 		res.Err = errors.Join(res.Err, fmt.Errorf("node %s reported no outcome", id))
-	case res.Outcome == sparkwing.Failed && ctx.Err() != nil:
+	case res.Outcome == sparkwing.Failed && errors.Is(ctx.Err(), context.Canceled):
 		res.Outcome, res.Err = sparkwing.Cancelled, errors.New("cancelled: run failing")
 	}
-	err := s.run.State.FinishNodeWithReason(context.WithoutCancel(ctx), s.run.ID, id, string(res.Outcome), errText(res.Err), res.Output, res.Reason, nil)
+	writeCtx := context.WithoutCancel(ctx)
+	err := s.run.State.FinishNodeWithReason(writeCtx, s.run.ID, id, string(res.Outcome), errText(res.Err), res.Output, res.Reason, nil)
+	if errors.Is(err, store.ErrOutputNotStored) {
+		// safety: a refused output fails the node in its row too, so the row never stays running.
+		res = Result{Outcome: sparkwing.Failed, Err: err}
+		err = s.run.State.FinishNodeWithReason(writeCtx, s.run.ID, id, string(res.Outcome), err.Error(), nil, store.FailureUnknown, nil)
+	}
 	if err != nil {
 		// safety: a result the store never took must not read as a success downstream.
 		s.run.Logger.Error("nodehost: record node result", "node", id, "err", err)
@@ -355,12 +369,12 @@ func (s *scheduler) terminal(ctx context.Context, id string, outcome sparkwing.O
 	s.finish(ctx, id, Result{Outcome: outcome, Err: errors.New(reason)})
 }
 
-func (s *scheduler) add(ctx context.Context, nodes []nodeproto.PlanNode) error {
+func (s *scheduler) add(ctx, writeCtx context.Context, nodes []nodeproto.PlanNode) error {
 	if err := validateNodes(append(slices.Clone(s.nodes), nodes...)); err != nil {
 		return err
 	}
 	for i, n := range nodes {
-		if err := s.run.State.CreateNode(ctx, pendingRow(s.run, n)); err != nil {
+		if err := s.run.State.CreateNode(writeCtx, pendingRow(s.run, n)); err != nil {
 			err = fmt.Errorf("create node %s: %w", n.ID, err)
 			s.nodes = append(s.nodes, nodes[:i]...)
 			for _, created := range nodes[:i] {
@@ -397,12 +411,39 @@ func appendNew(to, from []string) []string {
 	return to
 }
 
-// safety: recovery and optional nodes never decide the run's status, as in
-// the in-process dispatcher, and a cancelled run reads as cancelled.
-func (s *scheduler) verdict(ctx context.Context) (string, error) {
-	if cause := context.Cause(ctx); cause != nil {
-		return "cancelled", cause
+// CancelError is the cause to cancel a run's context with when the run is
+// cancelled rather than failed: an interrupt, an eviction, a supersession or
+// a daemon's cancel. Any other cause, a deadline included, fails the run.
+type CancelError struct{ Reason string }
+
+func (e *CancelError) Error() string { return e.Reason }
+
+func runStatus(err error) string {
+	var cancel *CancelError
+	switch {
+	case err == nil:
+		return "success"
+	case errors.As(err, &cancel):
+		return "cancelled"
 	}
+	return "failed"
+}
+
+// safety: recovery and optional nodes never decide the run's status, and a
+// cause other than a plain cancel or deadline decides it, as in the dispatcher.
+func (s *scheduler) verdict(ctx context.Context) (string, error) {
+	cause := context.Cause(ctx)
+	if cause != nil && !errors.Is(cause, context.Canceled) && !errors.Is(cause, context.DeadlineExceeded) {
+		return runStatus(cause), cause
+	}
+	status, err := s.nodeVerdict()
+	if err == nil && cause != nil {
+		return "failed", cause
+	}
+	return status, err
+}
+
+func (s *scheduler) nodeVerdict() (string, error) {
 	var failed, cancelled, superseded []string
 	for _, n := range s.nodes {
 		oc := s.results[n.ID].Outcome

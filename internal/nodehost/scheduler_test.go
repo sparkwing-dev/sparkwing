@@ -3,6 +3,7 @@ package nodehost
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"slices"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -57,7 +59,7 @@ func (f *fakeExec) ran(id string) bool {
 	return slices.Contains(f.calls, id)
 }
 
-func hostDoc(t *testing.T, ctx context.Context, st *store.Store, doc nodeproto.PlanDoc, exec Executor) RunResult {
+func hostDoc(t *testing.T, ctx context.Context, st storage.StateStore, doc nodeproto.PlanDoc, exec Executor) RunResult {
 	t.Helper()
 	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
@@ -68,13 +70,13 @@ func hostDoc(t *testing.T, ctx context.Context, st *store.Store, doc nodeproto.P
 	return hostAccepted(t, ctx, st, doc, exec)
 }
 
-func hostAccepted(t *testing.T, ctx context.Context, st *store.Store, doc nodeproto.PlanDoc, exec Executor) RunResult {
+func hostAccepted(t *testing.T, ctx context.Context, st storage.StateStore, doc nodeproto.PlanDoc, exec Executor) RunResult {
 	t.Helper()
 	cfg := Config{Execute: exec}
 	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest)}
 	res := RunResult{RunID: testRunID, Nodes: map[string]Result{}}
 	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg)}
-	if err := s.add(ctx, doc.Nodes); err != nil {
+	if err := s.add(ctx, ctx, doc.Nodes); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 	s.loop(ctx)
@@ -207,7 +209,7 @@ func TestSchedulerCancelMidRunFinishesEveryRow(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(t.Context())
 	defer cancel(nil)
 	fx := &fakeExec{bodies: map[string]Executor{"slow": func(ctx context.Context, _ *NodeRun) Result {
-		cancel(errors.New("interrupted by SIGINT"))
+		cancel(&CancelError{Reason: "interrupted by SIGINT"})
 		<-ctx.Done()
 		return Result{Outcome: sparkwing.Failed, Err: ctx.Err()}
 	}}}
@@ -350,5 +352,91 @@ func TestValidateNodesRefusesAnInvalidPlan(t *testing.T) {
 	}
 	if err := validateNodes([]nodeproto.PlanNode{{ID: "a", OptionalDeps: deps("absent")}, {ID: "r", OnFailureOf: "a"}}); err != nil {
 		t.Errorf("a plan with an absent optional dependency and a recovery node: %v", err)
+	}
+}
+
+func TestSchedulerDeadlineFailsTheRun(t *testing.T) {
+	st := openStore(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	fx := &fakeExec{bodies: map[string]Executor{"slow": func(ctx context.Context, _ *NodeRun) Result {
+		<-ctx.Done()
+		return Result{Outcome: sparkwing.Failed, Err: ctx.Err()}
+	}}}
+	doc := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "slow"}, {ID: "next", Deps: deps("slow")}}}
+
+	res := hostDoc(t, ctx, st, doc, fx.run)
+	want := "nodes failed: [slow]; 1 more cancelled with the run"
+	if res.Status != "failed" || res.Err == nil || res.Err.Error() != want {
+		t.Errorf("status=%s err=%v, want failed with %q", res.Status, res.Err, want)
+	}
+	wantRow(t, st, "slow", sparkwing.Failed, "deadline exceeded")
+	wantRow(t, st, "next", sparkwing.Cancelled, "ctx-cancelled")
+}
+
+func TestSchedulerPlainCancelFailsTheRun(t *testing.T) {
+	st := openStore(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	fx := &fakeExec{bodies: map[string]Executor{"a": func(context.Context, *NodeRun) Result {
+		cancel()
+		return Result{Outcome: sparkwing.Success}
+	}}}
+	res := hostDoc(t, ctx, st, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "a"}}}, fx.run)
+	if res.Status != "failed" || !errors.Is(res.Err, context.Canceled) {
+		t.Errorf("status=%s err=%v, want failed with the cancel", res.Status, res.Err)
+	}
+}
+
+type refusingOutput struct{ *store.Store }
+
+func (r refusingOutput) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error {
+	if output != nil {
+		return fmt.Errorf("%w: over the 64 MiB limit", store.ErrOutputNotStored)
+	}
+	return r.Store.FinishNodeWithReason(ctx, runID, nodeID, outcome, errMsg, output, reason, exitCode)
+}
+
+func TestSchedulerARefusedOutputFailsTheNodeRow(t *testing.T) {
+	st := openStore(t)
+	fx := &fakeExec{bodies: map[string]Executor{"big": func(context.Context, *NodeRun) Result {
+		return Result{Outcome: sparkwing.Success, Output: []byte(`"huge"`)}
+	}}}
+	doc := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "big"}, {ID: "after", Deps: deps("big")}}}
+	res := hostDoc(t, t.Context(), refusingOutput{st}, doc, fx.run)
+	if res.Status != "failed" {
+		t.Errorf("status=%s err=%v, want failed", res.Status, res.Err)
+	}
+	wantRow(t, st, "big", sparkwing.Failed, "the node's output was not stored")
+	wantRow(t, st, "after", sparkwing.Cancelled, "upstream-failed")
+}
+
+type stallingCreate struct{ *store.Store }
+
+func (s stallingCreate) CreateNode(ctx context.Context, n store.Node) error {
+	if n.NodeID == "child" {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return s.Store.CreateNode(ctx, n)
+}
+
+func TestSchedulerAddHonoursTheCallersDeadline(t *testing.T) {
+	st := openStore(t)
+	var addErr error
+	fx := &fakeExec{bodies: map[string]Executor{"gen": func(ctx context.Context, n *NodeRun) Result {
+		addCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+		defer cancel()
+		addErr = n.Run.Add(addCtx, nodeproto.PlanNode{ID: "child", Deps: deps("gen")})
+		return Result{Outcome: sparkwing.Success}
+	}}}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	res := hostDoc(t, ctx, stallingCreate{st}, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "gen"}}}, fx.run)
+	if !errors.Is(addErr, context.DeadlineExceeded) {
+		t.Errorf("add err = %v, want the caller's deadline", addErr)
+	}
+	if res.Status != "success" || ctx.Err() != nil {
+		t.Errorf("status=%s err=%v ctx=%v, want the run to finish without its node", res.Status, res.Err, ctx.Err())
 	}
 }
