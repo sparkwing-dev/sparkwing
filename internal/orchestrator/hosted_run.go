@@ -47,6 +47,8 @@ type HostedEntry struct {
 // node runs in its own SDK process of entry.Program, and this process owns
 // the DAG, the store writes and the envelope.
 func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry) (res *Result, err error) {
+	// safety: a sparkwing run started inside a dry-run node is a dry run too, as the dispatcher read it.
+	opts.DryRun = opts.DryRun || dryRunFromEnv()
 	if err := applyHostedProjectConfig(&opts, entry.Dir); err != nil {
 		return nil, err
 	}

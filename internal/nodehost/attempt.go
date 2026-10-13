@@ -100,7 +100,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	}
 	bearer, revoke, err := a.Routes.Admit(Node{
 		RunID: run.ID, NodeID: id, Secrets: names, Resolver: a.Resolver, Masker: a.Masker, Claim: a.Claim, Local: a.Local,
-		Children: a.Children, LeaseToken: cmp.Or(n.nodeLease, run.leaseToken), Pause: n.Pause, Hold: n.Hold, Output: n.memoOutput,
+		Children: a.Children, LeaseToken: childLease(n), Pause: n.Pause, Hold: n.Hold, Output: n.memoOutput,
 	})
 	if err != nil {
 		return failed(fmt.Errorf("admit node %s: %w", id, err))
@@ -268,20 +268,35 @@ func MinimalEnv() []string {
 	return env
 }
 
-// safety: the SPARKWING_* names the engine owns - credentials, service URLs, run options the host now holds, and
-// plumbing the node protocol replaces (docs/environment-variables.md). Every other SPARKWING_* name, a sparks
-// setting or the caller's own, reaches pipeline code as it did; a trailing _ matches a prefix.
+// safety: the SPARKWING_* names the engine owns - credentials (tokens, the local secrets key), run options the
+// host now holds, and plumbing the node protocol replaces. Every other SPARKWING_* name, a sparks setting, the
+// caller's cache URLs or their own, reaches pipeline code as it did. A trailing _ matches a prefix, and
+// engineenv_test.go fails on an engine name this list does not classify.
 var engineEnv = []string{
-	"SPARKWING_AGENT_TOKEN", "SPARKWING_CONTROLLER_URL", "SPARKWING_LOGS_URL", "SPARKWING_API_SOCKET",
-	"SPARKWING_PARENT_LIVENESS_FD", "SPARKWING_CACHE_GRANT", "SPARKWING_RUN_HANDLE_FILE",
+	"_SPARKWING_", "SPARKWING_AGENT_TOKEN", "SPARKWING_CONTROLLER_URL", "SPARKWING_LOGS_URL",
+	"SPARKWING_API_SOCKET", "SPARKWING_PARENT_LIVENESS_FD", "SPARKWING_CACHE_GRANT", "SPARKWING_RUN_HANDLE_FILE",
 	"SPARKWING_STANDALONE_REASON", "SPARKWING_STATE_DB", "SPARKWING_NODE_CLAIM_", "SPARKWING_NODE_SPEC_HASH",
-	"SPARKWING_BROKERED_", "SPARKWING_EXECUTION_CAPABILITY_STDIN", "SPARKWING_LEASE_TOKEN",
-	"SPARKWING_CHILD_LEASE_TOKEN", "SPARKWING_MASK_VALUES_FD", "SPARKWING_PROTOCOL_HANDLES", "SPARKWING_NODE_URL",
-	"SPARKWING_NODE_TOKEN", "SPARKWING_RUN_ID", "SPARKWING_NODE_ID", "SPARKWING_START_AT", "SPARKWING_STOP_AT",
-	"SPARKWING_ONLY", "SPARKWING_NO_CACHE", "SPARKWING_NO_UPDATE", "SPARKWING_REF", "SPARKWING_ALLOW",
-	"SPARKWING_ALLOW_UNADMITTED", "SPARKWING_MODE", "SPARKWING_WORKERS", "SPARKWING_PRIORITY",
+	"SPARKWING_BROKERED_", "SPARKWING_EXECUTION_CAPABILITY", "SPARKWING_EXECUTION_CAPABILITY_STDIN",
+	"SPARKWING_LEASE_TOKEN", "SPARKWING_CHILD_LEASE_TOKEN", "SPARKWING_MASK_VALUES_FD", "SPARKWING_PROTOCOL_HANDLES",
+	"SPARKWING_NODE_URL", "SPARKWING_NODE_TOKEN", "SPARKWING_RUN_ID", "SPARKWING_NODE_ID", "SPARKWING_START_AT",
+	"SPARKWING_STOP_AT", "SPARKWING_ONLY", "SPARKWING_NO_CACHE", "SPARKWING_NO_UPDATE", "SPARKWING_REF",
+	"SPARKWING_ALLOW", "SPARKWING_ALLOW_UNADMITTED", "SPARKWING_MODE", "SPARKWING_WORKERS", "SPARKWING_PRIORITY",
 	"SPARKWING_LOG_LEVEL", "SPARKWING_BINARY_SOURCE", "SPARKWING_PIPELINE_REV", "SPARKWING_DEBUG_PAUSE_",
-	"SPARKWING_PROFILE", "SPARKWING_SECRETS_PROFILE",
+	"SPARKWING_PROFILE", "SPARKWING_SECRETS_PROFILE", "SPARKWING_SECRETS_KEY", "SPARKWING_SECRETS_KEY_FILE",
+	"SPARKWING_SECRETS_PREVIOUS_KEY", "SPARKWING_SOURCE_TOKEN", "SPARKWING_SOURCE_DIR",
+	"SPARKWING_SOURCE_BUNDLE_OBJECT", "SPARKWING_WORKTREE_BASE_", "SPARKWING_RERUN", "SPARKWING_RERUN_REFS_DIR",
+	"SPARKWING_FLEET_PARENT_",
+}
+
+func engineOwned(key string) bool {
+	// safety: Windows reads variable names without regard to case, so a lower-case spelling is the same variable.
+	key = strings.ToUpper(key)
+	return slices.ContainsFunc(engineEnv, func(name string) bool {
+		if strings.HasSuffix(name, "_") {
+			return strings.HasPrefix(key, name)
+		}
+		return key == name
+	})
 }
 
 // PipelineEnv is env without the SPARKWING_* variables the engine owns.
@@ -289,29 +304,48 @@ func PipelineEnv(env []string) []string {
 	out := make([]string, 0, len(env))
 	for _, kv := range env {
 		k, _, _ := strings.Cut(kv, "=")
-		if !slices.ContainsFunc(engineEnv, func(name string) bool {
-			if strings.HasSuffix(name, "_") {
-				return strings.HasPrefix(k, name)
-			}
-			return k == name
-		}) {
+		if !engineOwned(k) {
 			out = append(out, kv)
 		}
 	}
 	return out
 }
 
+// safety: the dispatcher's rule for what a child attaches to: the run's lease when it holds the host or the
+// plan's groups, which a node lease lacks, else the node's own lease, which holds the cores the node runs on.
+func childLease(n *NodeRun) string {
+	r := n.Run
+	if hostAdmitted(r.Doc) || r.leaseHoldsGroups {
+		return r.leaseToken
+	}
+	return cmp.Or(n.nodeLease, r.leaseToken)
+}
+
 // safety: a sparkwing run the node starts attaches to the lease the node holds instead of queueing behind it,
 // and sparks-core echoes mutating commands instead of running them only when it sees SPARKWING_DRY_RUN.
 func hostEnv(n *NodeRun) []string {
 	var env []string
-	if lease := cmp.Or(n.nodeLease, n.Run.leaseToken); lease != "" {
+	if lease := childLease(n); lease != "" {
 		env = append(env, wingwire.LeaseTokenEnv+"="+lease)
 	}
 	if n.Run.Context.DryRun {
 		env = append(env, "SPARKWING_DRY_RUN=1")
 	}
 	return env
+}
+
+// safety: the plan process sees the dry-run switch its node processes see, so plan code that reads it plans
+// the run each later process plans again, and no attempt fails with plan_drift.
+func planSession(cfg Config) SessionConfig {
+	s := cfg.Session
+	if cfg.Run.DryRun {
+		base := s.Env
+		if base == nil {
+			base = MinimalEnv()
+		}
+		s.Env = append(slices.Clone(base), "SPARKWING_DRY_RUN=1")
+	}
+	return s
 }
 
 // safety: the node's contract variables are set last so neither the engine nor the node's env overrides them.

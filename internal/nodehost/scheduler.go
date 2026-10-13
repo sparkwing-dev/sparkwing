@@ -147,6 +147,8 @@ type Run struct {
 	onlySkips map[string]string
 	// safety: set once, before any node starts, so node goroutines read it unlocked.
 	leaseToken string
+	// safety: set with leaseToken; a run lease that holds plan groups is what a child must attach to.
+	leaseHoldsGroups bool
 }
 
 type addRequest struct {
@@ -215,7 +217,7 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 	if cfg.Run.Trigger == nil {
 		cfg.Run.Trigger = &nodeproto.Trigger{Source: "manual"}
 	}
-	sess, err := StartSession(ctx, cfg.Session)
+	sess, err := StartSession(ctx, planSession(cfg))
 	if err != nil {
 		return RunResult{}, err
 	}
