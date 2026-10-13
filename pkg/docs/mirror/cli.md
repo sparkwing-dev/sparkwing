@@ -57,10 +57,8 @@ The runner also consumes `--profile`, `-C`, `-v`, and the explicit
 `--sw-allow` is enforced by the CLI before it dispatches a foreground run. A
 step declares its labels in Go, so the CLI builds the `.sparkwing/` binary
 first and weighs the declarations that build emits, on every invocation. The
-labels you authorize are forwarded to the run as `SPARKWING_ALLOW`
-(comma-separated) so the run's own record shows what was authorized -- setting
-that variable by hand authorizes nothing, because the gate has already run by
-then.
+labels you authorize are recorded among the run's invocation flags, so the
+run's own record shows what was authorized.
 
 A queued run of a pipeline that declares a risk is refused. The trigger carries
 no allow, so the launch weighs the declarations before it persists the run, and

@@ -1183,10 +1183,8 @@ at an upgrade.
 
 **`--sw-allow-unadmitted` is set** -- the operator asked for the direct
 path, for a box whose other work they know. The block says so and names
-the run without the flag as the way back. `sparkwing run` carries the flag
-to the pipeline binary as `SPARKWING_ALLOW_UNADMITTED=1`; a pipeline binary
-no CLI launched reads that variable the same way, strictly, so only the
-exact value `1` turns the check off.
+the run without the flag as the way back. The flag is run state the host
+holds; no environment variable turns the check off.
 
 A pipeline that reserves host capacity with a plan-level or node-level
 `.Resources()` pin is not an exception. It runs standalone rather than
