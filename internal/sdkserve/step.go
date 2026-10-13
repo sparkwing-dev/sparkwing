@@ -33,6 +33,41 @@ func runStep(ctx context.Context, s *server, req nodeproto.Request) (any, error)
 	return bodyResult(out, err), nil
 }
 
+// safety: registered by the read loop before the run_step is dispatched, and
+// a cancel that arrives first leaves a nil entry, so the step starts cancelled
+// whichever request the SDK reads first.
+func (s *server) track(ctx context.Context, req nodeproto.Request) (context.Context, func()) {
+	if req.Op != nodeproto.OpRunStep {
+		return ctx, func() {}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	key := [2]string{req.Node, req.Step}
+	s.mu.Lock()
+	if early, ok := s.steps[key]; ok && early == nil {
+		cancel()
+	}
+	s.steps[key] = cancel
+	s.mu.Unlock()
+	return ctx, func() {
+		s.mu.Lock()
+		delete(s.steps, key)
+		s.mu.Unlock()
+		cancel()
+	}
+}
+
+func cancelStep(_ context.Context, s *server, req nodeproto.Request) (any, error) {
+	key := [2]string{req.Node, req.Step}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cancel := s.steps[key]; cancel != nil {
+		cancel()
+	} else {
+		s.steps[key] = nil
+	}
+	return struct{}{}, nil
+}
+
 // safety: a body that panics ran and failed, which the host reads as outcome
 // failed; the server's own recover would answer a failed reply instead.
 func runStepBody(ctx context.Context, work *sparkwing.Work, step *sparkwing.WorkStep) (out any, err error) {

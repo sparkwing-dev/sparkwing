@@ -89,7 +89,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun) 
 	res := Result{}
 	sess, err := StartSession(ctx, cfg)
 	if err == nil {
-		res = drive(ctx, sess, n)
+		res = drive(ctx, sess, sink, n)
 		usage, cerr := sess.Close()
 		var perr *nodeproto.Error
 		switch {
@@ -118,7 +118,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun) 
 	return res
 }
 
-func drive(ctx context.Context, sess *Session, n *NodeRun) Result {
+func drive(ctx context.Context, sess *Session, sink *LogSink, n *NodeRun) Result {
 	run := n.Run
 	args := run.Args
 	if args == nil {
@@ -134,6 +134,9 @@ func drive(ctx context.Context, sess *Session, n *NodeRun) Result {
 		return failed(err)
 	}
 	attempt := max(n.Attempt, 1)
+	if w := n.Plan.Work; w != nil && len(w.Steps) > 0 {
+		return driveSteps(ctx, sess, sink, n, attempt)
+	}
 	var rr nodeproto.RunResult
 	err = ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpRunNode, Node: n.Plan.ID, Attempt: attempt, Failure: n.Failure}, &rr)
 	if err == nil {

@@ -81,6 +81,9 @@ type server struct {
 	mu       sync.Mutex
 	planSeen bool
 	planned  *Planned
+	// safety: keyed by node and step, since the host never has one step in
+	// flight twice in a process.
+	steps map[[2]string]context.CancelFunc
 }
 
 type handler struct {
@@ -96,6 +99,7 @@ var handlers = map[nodeproto.Op]handler{
 	nodeproto.OpRunNode:  {needsPlan: true, run: runNode},
 	nodeproto.OpRunStep:  {needsPlan: true, run: runStep},
 	nodeproto.OpEval:     {needsPlan: true, run: eval},
+	nodeproto.OpCancel:   {run: cancelStep},
 }
 
 // Serve answers each request read from in with a reply on out until in ends.
@@ -105,7 +109,7 @@ var handlers = map[nodeproto.Op]handler{
 func Serve(ctx context.Context, in io.Reader, out io.Writer, cfg Config) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	s := &server{cfg: cfg, frames: nodeproto.NewWriter(out)}
+	s := &server{cfg: cfg, frames: nodeproto.NewWriter(out), steps: map[[2]string]context.CancelFunc{}}
 	r := nodeproto.NewReader(in)
 	for {
 		req, err := r.NextRequest()
@@ -119,7 +123,11 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, cfg Config) error {
 			s.reply(req.ID, nil, err)
 			continue
 		}
-		go s.dispatch(ctx, req)
+		rctx, untrack := s.track(ctx, req)
+		go func() {
+			defer untrack()
+			s.dispatch(rctx, req)
+		}()
 	}
 }
 

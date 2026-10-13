@@ -148,9 +148,11 @@ type PlanStep struct {
 
 	Risks []string `json:"risks,omitempty"`
 
-	ContinueOnError bool          `json:"continue_on_error,omitempty"`
-	Optional        bool          `json:"optional,omitempty"`
-	Closures        *PlanClosures `json:"closures,omitempty"`
+	ContinueOnError   bool          `json:"continue_on_error,omitempty"`
+	Optional          bool          `json:"optional,omitempty"`
+	HasDryRun         bool          `json:"has_dry_run,omitempty"`
+	SafeWithoutDryRun bool          `json:"safe_without_dry_run,omitempty"`
+	Closures          *PlanClosures `json:"closures,omitempty"`
 }
 
 // PlanMemoKey names the inputs the host hashes into a node's memo key.

@@ -73,7 +73,6 @@ func (s protocolSchema) mustValidate(t *testing.T, def string, v any) {
 var notYetEmitted = map[string][]string{
 	"node":      {"needs_generated", "tools"},
 	"modifiers": {"skip_if_budget_ms"},
-	"step":      {"has_dry_run", "safe_without_dry_run"},
 	"memoKey":   {"const", "env", "files"},
 }
 

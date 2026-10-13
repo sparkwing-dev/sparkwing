@@ -25,8 +25,11 @@ type Config struct {
 	Args map[string]string
 	// Run is the run context plan code reads. RunID is required; a zero
 	// StartedAt means now and an empty trigger source means manual.
-	Run   nodeproto.RunContext
-	State storage.StateStore
+	Run nodeproto.RunContext
+	// StartAt and StopAt bound the steps that run, as --sw-start-at and
+	// --sw-stop-at; each must name a step in the plan.
+	StartAt, StopAt string
+	State           storage.StateStore
 	// Artifacts holds the files nodes publish with outputs and stage with
 	// consumes; nil turns both off.
 	Artifacts storage.ArtifactStore
@@ -84,6 +87,8 @@ type Run struct {
 	Pipeline string
 	Args     map[string]string
 	Context  nodeproto.RunContext
+	StartAt  string
+	StopAt   string
 	State    storage.StateStore
 	Logger   *slog.Logger
 	adds     chan addRequest
@@ -177,6 +182,9 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 	doc, raw, err := planRun(ctx, sess, cfg.Pipeline, args, cfg.Run)
 	closeSession()
 	if err == nil {
+		err = validateStepRange(doc, cfg.StartAt, cfg.StopAt)
+	}
+	if err == nil {
 		err = cfg.State.UpdatePlanSnapshot(ctx, res.RunID, raw)
 	}
 	if err != nil {
@@ -189,7 +197,7 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 	}
 	run := &Run{
 		ID: res.RunID, Doc: doc, Pipeline: cfg.Pipeline, Args: args, Context: cfg.Run,
-		State: cfg.State, Logger: cfg.Logger, adds: make(chan addRequest),
+		StartAt: cfg.StartAt, StopAt: cfg.StopAt, State: cfg.State, Logger: cfg.Logger, adds: make(chan addRequest),
 	}
 	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg)}
 	if err := s.add(ctx, ctx, doc.Nodes); err != nil {

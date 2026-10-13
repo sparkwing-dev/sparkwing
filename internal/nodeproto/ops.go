@@ -16,6 +16,9 @@ const (
 	OpRunNode  Op = "run_node"
 	OpRunStep  Op = "run_step"
 	OpEval     Op = "eval"
+	// OpCancel cancels the run_step in flight for a node and step; that
+	// run_step still gets its own reply.
+	OpCancel Op = "cancel"
 )
 
 // ErrorCode classifies why an SDK could not do what a request asked, or why
@@ -60,9 +63,9 @@ type Request struct {
 	Args     map[string]string `json:"args,omitzero"`
 	Run      *RunContext       `json:"run,omitempty"`
 
-	// Node names the node for run_node and run_step.
+	// Node names the node for run_node, run_step and cancel.
 	Node string `json:"node,omitempty"`
-	// Step names the step for run_step.
+	// Step names the step for run_step and cancel.
 	Step string `json:"step,omitempty"`
 	// Attempt is the 1-based attempt number of run_node and run_step.
 	Attempt int `json:"attempt,omitempty"`
@@ -153,6 +156,10 @@ func (r Request) Validate() error {
 		}
 		if f := r.Failure; f != nil && (f.Node == "" || !oneOf(f.Stage, "action", "verify")) {
 			return bad("failure needs a node and a stage of action or verify")
+		}
+	case OpCancel:
+		if r.Node == "" || r.Step == "" {
+			return bad("cancel names no node or step")
 		}
 	case OpEval:
 		if r.Closure == "" {
