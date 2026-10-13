@@ -86,6 +86,9 @@ func fakeSDK() {
 			ok(req.ID, map[string]any{"outcome": "success"})
 		case req.Node == "exit":
 			os.Exit(3)
+		case req.Op == nodeproto.OpPlan:
+			node := map[string]any{"id": "reply-then-garbage", "deps": []any{}}
+			ok(req.ID, map[string]any{"protocol": "1", "pipeline": req.Pipeline, "run_id": req.Run.RunID, "nodes": []any{node}})
 		case req.Node == "garbage":
 			_, _ = frames.WriteString("not a frame\n")
 		case req.Node == "unknown-reply":
@@ -111,12 +114,21 @@ func fakeSDK() {
 		}
 	}
 	r := nodeproto.NewReader(requests)
+	// safety: written once the host closes the request pipe, so the break lands while Close drains.
+	garbageAtEOF := false
 	for {
 		req, err := r.NextRequest()
 		if err != nil {
+			if garbageAtEOF {
+				_, _ = frames.WriteString("not a frame\n")
+			}
 			os.Exit(0)
 		}
 		switch req.Node {
+		case "reply-then-garbage":
+			ok(req.ID, map[string]any{"outcome": "success"})
+			garbageAtEOF = true
+			continue
 		case "deaf":
 			ok(req.ID, map[string]any{"outcome": "success"})
 			select {}
