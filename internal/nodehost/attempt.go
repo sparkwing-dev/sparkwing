@@ -315,7 +315,7 @@ func PipelineEnv(env []string) []string {
 // plan's groups, which a node lease lacks, else the node's own lease, which holds the cores the node runs on.
 func childLease(n *NodeRun) string {
 	r := n.Run
-	if hostAdmitted(r.Doc) || r.leaseHoldsGroups {
+	if hostAdmitted(r.Doc) || r.leaseHoldsGroups || r.leaseHoldsHost {
 		return r.leaseToken
 	}
 	return cmp.Or(n.nodeLease, r.leaseToken)
@@ -336,9 +336,10 @@ func hostEnv(n *NodeRun) []string {
 
 // safety: the plan process sees the dry-run switch its node processes see, so plan code that reads it plans
 // the run each later process plans again, and no attempt fails with plan_drift.
-func planSession(cfg Config) SessionConfig {
-	s := cfg.Session
-	if cfg.Run.DryRun {
+func planSession(cfg Config) SessionConfig { return dryRunSession(cfg.Session, cfg.Run.DryRun) }
+
+func dryRunSession(s SessionConfig, dryRun bool) SessionConfig {
+	if dryRun {
 		base := s.Env
 		if base == nil {
 			base = MinimalEnv()

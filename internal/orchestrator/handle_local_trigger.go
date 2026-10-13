@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -60,7 +61,8 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID string) error {
 		Args:              args,
 		Priority:          submittedTriggerPriority(trigger),
 		ParentRunID:       trigger.ParentRunID,
-		Admission:         pipelineAdmission(childAttachTokenFromEnv(trigger.TriggerEnv), wingwire.OriginLocal),
+		Admission:         pipelineAdmission(cmp.Or(childAttachTokenFromEnv(trigger.TriggerEnv), childAttachTokenFromProcessEnv()), wingwire.OriginLocal),
+		DryRun:            trigger.TriggerEnv[envDryRun] == "1",
 		RetryOf:           trigger.RetryOf,
 		RetrySource:       trigger.RetrySource,
 		RetryRepoDir:      trigger.TriggerEnv[retryprovenance.RepoDirKey],

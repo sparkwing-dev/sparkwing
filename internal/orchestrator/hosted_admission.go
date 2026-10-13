@@ -144,8 +144,9 @@ func (h *hostedAdmitter) profileCost(ctx context.Context, req *wingwire.Admissio
 
 type hostedLease struct{ l *wingdclient.Lease }
 
-func (h hostedLease) Token() string  { return h.l.Token }
-func (h hostedLease) Release() error { return h.l.Release() }
+func (h hostedLease) Token() string   { return h.l.Token }
+func (h hostedLease) HoldsHost() bool { return leaseCarriesHost(h.l) }
+func (h hostedLease) Release() error  { return h.l.Release() }
 func (h hostedLease) Watch(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel)) error {
 	return h.l.WatchOwnership(onEvicted, onCancel, nil)
 }

@@ -147,8 +147,9 @@ type Run struct {
 	onlySkips map[string]string
 	// safety: set once, before any node starts, so node goroutines read it unlocked.
 	leaseToken string
-	// safety: set with leaseToken; a run lease that holds plan groups is what a child must attach to.
-	leaseHoldsGroups bool
+	// safety: set with leaseToken; a run lease that holds plan groups or host capacity, as an attached run's
+	// does, is what a child must attach to.
+	leaseHoldsGroups, leaseHoldsHost bool
 }
 
 type addRequest struct {

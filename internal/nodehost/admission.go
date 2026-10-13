@@ -60,6 +60,12 @@ type Lease interface {
 	Watch(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel)) error
 }
 
+// HostHolder is a [Lease] that reports whether it holds host capacity, as a
+// run attached to its parent's lease does without pinning any of its own.
+type HostHolder interface {
+	HoldsHost() bool
+}
+
 // ConcurrencySlots is the coordination store's slot surface, the part of the
 // dispatcher's concurrency backend a concurrency group uses.
 type ConcurrencySlots interface {

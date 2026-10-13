@@ -135,9 +135,13 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 	state.preflight = func(ctx context.Context, doc nodeproto.PlanDoc) error {
 		return hostedSecretPreflight(ctx, resolver, doc, opts)
 	}
+	children := hostedChildren{
+		state: backends.State, concurrency: backends.Concurrency, admission: opts.Admission, masker: masker,
+		dryRun: opts.DryRun, leases: &sync.Map{},
+	}
 	attempts := &nodehost.Attempts{
 		Routes: routes, Masker: masker, Resolver: resolver,
-		Local: backends.State, Children: hostedChildren{state: backends.State, concurrency: backends.Concurrency, admission: opts.Admission, masker: masker},
+		Local: backends.State, Children: children,
 		OpenLog: func(ctx context.Context, runID, nodeID string) (nodehost.NodeLog, error) {
 			log, err := backends.Logs.OpenNodeLog(ctx, runID, nodeID, nil)
 			if err != nil {
@@ -171,7 +175,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 		},
 	}
 	if backends.LocalCoordination {
-		stopTriggers, err := hostedTriggerLoop(ctx, backends.State, runID, entry.Dir, opts.standalone)
+		stopTriggers, err := hostedTriggerLoop(ctx, backends.State, runID, entry.Dir, opts.standalone, children.childEnv)
 		if err != nil {
 			return nil, err
 		}
@@ -552,14 +556,32 @@ type hostedChildren struct {
 	concurrency ConcurrencyBackend
 	admission   *LocalAdmission
 	masker      *secrets.Masker
+	dryRun      bool
+	// safety: a child's lease stays in this process, which drains the child's trigger, because a token in
+	// trigger_env would be readable by every triggers.read principal, and the daemon API drops it. Keyed by
+	// the parent node, so it is stored before the enqueue the trigger loop can claim at once.
+	leases *sync.Map
+}
+
+func childLeaseKey(runID, nodeID string) string { return runID + "\x00" + nodeID }
+
+func (h hostedChildren) childEnv(t *store.Trigger) []string {
+	if token, ok := h.leases.Load(childLeaseKey(t.ParentRunID, t.ParentNodeID)); ok {
+		return []string{wingwire.ChildLeaseTokenEnv + "=" + token.(string)}
+	}
+	return nil
 }
 
 // safety: the child carries the parent run's lease, so the admission daemon attaches it to the parent's
 // rather than queueing it behind the run that waits on it.
 func (h hostedChildren) StartChild(ctx context.Context, parent nodehost.ChildParent, req nodehost.ChildRequest) (string, error) {
-	var env map[string]string
 	if parent.LeaseToken != "" {
-		env = map[string]string{wingwire.LeaseTokenEnv: parent.LeaseToken}
+		h.leases.Store(childLeaseKey(parent.RunID, parent.NodeID), parent.LeaseToken)
+	}
+	var env map[string]string
+	// safety: a child of a dry run is a dry run, recorded on its trigger so it holds however it is dispatched.
+	if h.dryRun {
+		env = map[string]string{envDryRun: "1"}
 	}
 	id, err := enqueueTriggerWithEnv(ctx, h.state, req.Pipeline, req.Args, parent.RunID, parent.NodeID, "",
 		"await-pipeline", "", req.Repo, req.Branch, env)
@@ -586,7 +608,7 @@ func (h hostedChildren) GetRun(ctx context.Context, runID string) (*store.Run, e
 
 // safety: a node's child runs queue on this machine's trigger queue, and this run drains its own children
 // there as the dispatcher did; stop waits for the loop's last store write, which races the store's close.
-func hostedTriggerLoop(ctx context.Context, state StateBackend, runID, repoDir string, standalone *standaloneRun) (stop func(), err error) {
+func hostedTriggerLoop(ctx context.Context, state StateBackend, runID, repoDir string, standalone *standaloneRun, childEnv func(*store.Trigger) []string) (stop func(), err error) {
 	budget, err := storeWedgeBudget()
 	if err != nil {
 		return nil, err
@@ -595,6 +617,7 @@ func hostedTriggerLoop(ctx context.Context, state StateBackend, runID, repoDir s
 	if standalone != nil {
 		child = childStoreEnv{path: standalone.stateDB, reason: standalone.reason}
 	}
+	child.extra = childEnv
 	loopCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {

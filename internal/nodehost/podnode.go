@@ -43,7 +43,7 @@ func PlanDocument(ctx context.Context, cfg SessionConfig, req PlanRequest) (Plan
 	if cfg.Sink == nil {
 		cfg.Sink = discardSink{}
 	}
-	sess, err := StartSession(ctx, cfg)
+	sess, err := StartSession(ctx, dryRunSession(cfg, req.Run.DryRun))
 	if err != nil {
 		return PlannedRun{}, err
 	}

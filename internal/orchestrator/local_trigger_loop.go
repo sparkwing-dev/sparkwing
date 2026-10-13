@@ -29,6 +29,23 @@ var gitObjectRE = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
 type childStoreEnv struct {
 	path   string
 	reason string
+	// safety: extra adds variables for one trigger's child, such as the lease it attaches to.
+	extra func(*store.Trigger) []string
+}
+
+func (c childStoreEnv) forTrigger(t *store.Trigger) []string {
+	env := c.apply(nil)
+	if c.extra == nil {
+		return env
+	}
+	more := c.extra(t)
+	if len(more) == 0 {
+		return env
+	}
+	if env == nil {
+		env = os.Environ()
+	}
+	return append(env, more...)
 }
 
 // safety: an empty path is the pre-design default on purpose: the dashboard's
@@ -97,7 +114,7 @@ func runLocalTriggerLoop(ctx context.Context, state StateBackend, runID, parentR
 		wg.Add(1)
 		go func(t *store.Trigger) {
 			defer wg.Done()
-			if err := dispatchLocalTrigger(ctx, t, parentRepoDir, cache, logger, childStore.apply(nil)); err != nil {
+			if err := dispatchLocalTrigger(ctx, t, parentRepoDir, cache, logger, childStore.forTrigger(t)); err != nil {
 				recordLocalTriggerFailure(ctx, state, t, err, logger)
 			}
 		}(trig)

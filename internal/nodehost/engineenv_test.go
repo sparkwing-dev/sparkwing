@@ -1,11 +1,15 @@
 package nodehost
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -38,7 +42,7 @@ func listed(list []string, key string) bool {
 	})
 }
 
-var envLiteral = regexp.MustCompile(`"(_?SPARKWING_[A-Z0-9_]*)`)
+var envName = regexp.MustCompile(`^(_?SPARKWING_[A-Z0-9_]*)`)
 
 func TestEveryEngineEnvNameIsClassified(t *testing.T) {
 	root := filepath.Join("..", "..")
@@ -54,13 +58,23 @@ func TestEveryEngineEnvNameIsClassified(t *testing.T) {
 			if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 				return nil
 			}
-			data, err := os.ReadFile(path)
+			file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
 			if err != nil {
 				return err
 			}
-			for _, m := range envLiteral.FindAllStringSubmatch(string(data), -1) {
-				seen[m[1]] = path
-			}
+			// safety: every string literal, quoted or raw, so a name spelled with backticks cannot slip past.
+			ast.Inspect(file, func(n ast.Node) bool {
+				lit, ok := n.(*ast.BasicLit)
+				if !ok || lit.Kind != token.STRING {
+					return true
+				}
+				if v, err := strconv.Unquote(lit.Value); err == nil {
+					if m := envName.FindStringSubmatch(v); m != nil {
+						seen[m[1]] = path
+					}
+				}
+				return true
+			})
 			return nil
 		})
 		if err != nil {
