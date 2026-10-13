@@ -114,10 +114,9 @@ rather than work inside one.
 A test renders that table from a pipeline run and fails if this page and the
 runtime disagree.
 
-The table describes a run. `sparkwing pipeline plan` evaluates each step's skip
-predicate in the pipeline process, as a run does, to report which steps a run
-would skip, so a predicate's side effects happen there too.
-`sparkwing pipeline plan --static` evaluates no predicate.
+The table describes a run. `sparkwing pipeline plan` evaluates no skip
+predicate, so an inspection command never executes an author's side effects:
+it reports a step with a SkipIf as `may_skip`, decided at run time.
 
 ## Exec and Bash - running a shell command in a step
 
@@ -531,7 +530,8 @@ dry-run flag), read `sparkwing.IsDryRun(ctx)` directly -- the public
 way to detect dry-run from inside a step.
 
 `sparkwing pipeline plan` does not preview dry-run: it reports
-`would_run` or `would_skip` from SkipIf and the step range only.
+`would_run`, `would_skip` from the step range, or `may_skip` for a step
+with a SkipIf, which only a run evaluates.
 
 Declare `step.DryRun(fn)` on mutating steps; `--sw-dry-run` selects
 those callbacks (see *Flag namespace* below).
