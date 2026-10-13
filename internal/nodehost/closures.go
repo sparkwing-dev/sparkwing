@@ -14,6 +14,9 @@ import (
 
 const defaultSkipBudget = 30 * time.Second
 
+// safety: bounds the after_run eval process of a timed-out attempt, whose own budget is spent.
+const afterRunTimeoutLimit = 2 * time.Minute
+
 // safety: the skip_if closures run in an eval process of their own before the
 // node starts, so a skipped node never gets an attempt, and a closure past its
 // budget dies with that process instead of running beside the body. A custom
@@ -33,7 +36,7 @@ func skipIfLayer(cfg *Config, next Executor) Executor {
 		}
 		reason := ""
 		res := cfg.Attempts.process(ctx, cfg.Session, n, func(ctx context.Context, sess *Session, log Sink) Result {
-			if err := replan(ctx, sess, n); err != nil {
+			if err := nodeReplan(ctx, sess, n); err != nil {
 				return failed(err)
 			}
 			for i, id := range ids {
@@ -41,8 +44,8 @@ func skipIfLayer(cfg *Config, next Executor) Executor {
 				if len(ids) > 1 {
 					msg = fmt.Sprintf("evaluating SkipIf predicate %d/%d (budget %s)", i+1, len(ids), budget)
 				}
-				note(log, LevelInfo, msg)
-				skip, err := evalSkip(ctx, sess, log, id, i, budget)
+				closureNote(log, LevelInfo, msg)
+				skip, err := skipIfEval(ctx, sess, log, id, i, budget)
 				if err != nil {
 					return failed(err)
 				}
@@ -65,19 +68,19 @@ func skipIfLayer(cfg *Config, next Executor) Executor {
 
 // safety: a closure that errors or overruns counts as don't-skip, as in the
 // in-process dispatcher; only a failed reply or a broken session fails the node.
-func evalSkip(ctx context.Context, sess *Session, log Sink, id string, i int, budget time.Duration) (bool, error) {
+func skipIfEval(ctx context.Context, sess *Session, log Sink, id string, i int, budget time.Duration) (bool, error) {
 	bctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	var er nodeproto.EvalResult
 	err := ask(bctx, sess, nodeproto.Request{Op: nodeproto.OpEval, Closure: id}, &er)
 	switch {
 	case err != nil && ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded):
-		note(log, "error", fmt.Sprintf("SkipIf predicate %d exceeded %s budget (defaulting to don't-skip); raise via SkipIf(fn, sparkwing.SkipBudget(d))", i, budget))
+		closureNote(log, "error", fmt.Sprintf("SkipIf predicate %d exceeded %s budget (defaulting to don't-skip); raise via SkipIf(fn, sparkwing.SkipBudget(d))", i, budget))
 		return false, nil
 	case err != nil:
 		return false, err
 	case er.Error != nil:
-		note(log, "error", fmt.Sprintf("SkipIf predicate %d failed: %s (defaulting to don't-skip)", i, *er.Error))
+		closureNote(log, "error", fmt.Sprintf("SkipIf predicate %d failed: %s (defaulting to don't-skip)", i, *er.Error))
 		return false, nil
 	}
 	var skip bool
@@ -93,13 +96,13 @@ func withClosures(ctx context.Context, sess *Session, log Sink, n *NodeRun, body
 	c := closuresOf(n)
 	if max(n.Attempt, 1) == 1 {
 		for i, id := range c.BeforeRun {
-			msg, err := evalHook(ctx, sess, id, nil)
+			msg, err := closureEval(ctx, sess, id, nil)
 			if err == nil && msg == nil {
 				continue
 			}
 			if err == nil {
 				err = fmt.Errorf("BeforeRun hook %d: %s", i, *msg)
-				note(log, "error", err.Error())
+				closureNote(log, "error", err.Error())
 			}
 			res := failed(err)
 			res.Final = true
@@ -108,35 +111,63 @@ func withClosures(ctx context.Context, sess *Session, log Sink, n *NodeRun, body
 	}
 	res := body()
 	if res.Outcome == sparkwing.Success && c.Verify != "" {
-		msg, err := evalHook(ctx, sess, c.Verify, nil)
+		msg, err := closureEval(ctx, sess, c.Verify, nil)
 		switch {
 		case err != nil:
 			res = failed(err)
 		case msg != nil:
 			verr := &sparkwing.VerifyError{Err: errors.New(*msg)}
-			note(log, "error", verr.Error())
+			closureNote(log, "error", verr.Error())
 			res = Result{Outcome: sparkwing.Failed, Err: verr, Reason: store.FailureVerify}
 		}
 	}
-	if len(c.AfterRun) == 0 || (!res.Final && n.Retried != nil && n.Retried(res)) {
+	// safety: an attempt stopped by its timeout or the run's cancel has a dying process;
+	// the timeout layer runs after_run in an eval process instead.
+	if ctx.Err() != nil || !afterRunDue(n, res) {
 		return res
 	}
-	input, err := json.Marshal(afterRunInput(res))
+	return afterRunEval(ctx, sess, log, c.AfterRun, res)
+}
+
+func afterRunDue(n *NodeRun, res Result) bool {
+	return len(closuresOf(n).AfterRun) > 0 && (res.Final || n.Retried == nil || !n.Retried(res))
+}
+
+// safety: a failed reply fails only a node that succeeded; a failed node keeps
+// its own error, which is the one worth reading.
+func afterRunEval(ctx context.Context, sess *Session, log Sink, ids []string, res Result) Result {
+	input, err := json.Marshal(afterRunArgOf(res))
 	if err != nil {
 		return failed(err)
 	}
-	for i, id := range c.AfterRun {
-		msg, err := evalHook(ctx, sess, id, input)
+	for i, id := range ids {
+		msg, err := closureEval(ctx, sess, id, input)
 		switch {
 		case err != nil && res.Outcome == sparkwing.Success:
 			res = failed(fmt.Errorf("AfterRun hook %d: %w", i, err))
 		case err != nil:
-			note(log, "error", fmt.Sprintf("AfterRun hook %d: %v", i, err))
+			closureNote(log, "error", fmt.Sprintf("AfterRun hook %d: %v", i, err))
 		case msg != nil:
-			note(log, "error", fmt.Sprintf("AfterRun hook %d: %s", i, *msg))
+			closureNote(log, "error", fmt.Sprintf("AfterRun hook %d: %s", i, *msg))
 		}
 	}
 	return res
+}
+
+// safety: a timed-out attempt's process is gone, so after_run gets a fresh one, as today's executor still ran it.
+func afterRunAfterTimeout(ctx context.Context, cfg *Config, n *NodeRun, res Result) {
+	if cfg == nil || cfg.Attempts == nil || ctx.Err() != nil || !afterRunDue(n, res) {
+		return
+	}
+	lctx, cancel := context.WithTimeout(ctx, afterRunTimeoutLimit)
+	defer cancel()
+	cfg.Attempts.process(lctx, cfg.Session, n, func(ctx context.Context, sess *Session, log Sink) Result {
+		if err := nodeReplan(ctx, sess, n); err != nil {
+			closureNote(log, "error", fmt.Sprintf("AfterRun hooks after the timeout: %v", err))
+			return failed(err)
+		}
+		return afterRunEval(ctx, sess, log, closuresOf(n).AfterRun, res)
+	})
 }
 
 type afterRunArg struct {
@@ -144,7 +175,7 @@ type afterRunArg struct {
 	Error   string            `json:"error,omitempty"`
 }
 
-func afterRunInput(res Result) afterRunArg {
+func afterRunArgOf(res Result) afterRunArg {
 	if res.Outcome == sparkwing.Success {
 		return afterRunArg{Outcome: nodeproto.OutcomeSuccess}
 	}
@@ -152,7 +183,7 @@ func afterRunInput(res Result) afterRunArg {
 }
 
 // safety: msg is the closure's own error and err a failed reply or broken session, which callers treat differently.
-func evalHook(ctx context.Context, sess *Session, id string, input json.RawMessage) (msg *string, err error) {
+func closureEval(ctx context.Context, sess *Session, id string, input json.RawMessage) (msg *string, err error) {
 	var er nodeproto.EvalResult
 	if err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpEval, Closure: id, Input: input}, &er); err != nil {
 		return nil, err
@@ -167,6 +198,6 @@ func closuresOf(n *NodeRun) nodeproto.PlanClosures {
 	return nodeproto.PlanClosures{}
 }
 
-func note(log Sink, level, msg string) {
+func closureNote(log Sink, level, msg string) {
 	log.Record(nodeproto.LogRecord{TS: time.Now().UTC().Format(time.RFC3339Nano), Level: level, Msg: msg})
 }

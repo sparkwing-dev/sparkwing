@@ -27,6 +27,9 @@ type Node struct {
 	Masker   *secrets.Masker
 	// Claim forwards the routes that reach the controller; nil answers them 502.
 	Claim *Claim
+	// Pause, when set, holds the node's no-progress timeout while a route
+	// waits on its behalf; see [NodeRun.Pause].
+	Pause func() (resume func())
 }
 
 type grant struct {

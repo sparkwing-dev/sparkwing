@@ -39,8 +39,9 @@ type Attempts struct {
 	// last record, cleanup output included, is written.
 	OpenLog func(ctx context.Context, runID, nodeID string) (NodeLog, error)
 	// Usage receives the measured session usage of each process bound to a
-	// node, its skip_if eval process included; nil drops it.
-	Usage func(n *NodeRun, u Usage)
+	// node, its eval processes included; nil drops it. [RecordUsage] builds
+	// the one that records it.
+	Usage func(ctx context.Context, n *NodeRun, u Usage)
 }
 
 func (a *Attempts) executor(cfg *Config) Executor {
@@ -51,11 +52,11 @@ func (a *Attempts) executor(cfg *Config) Executor {
 	}
 }
 
-type processBody func(ctx context.Context, sess *Session, log Sink) Result
+type nodeProcessBody func(ctx context.Context, sess *Session, log Sink) Result
 
 // safety: every message the process returns is masked, since the scheduler
 // stores it in the node row, past the log sink's masking.
-func (a *Attempts) process(ctx context.Context, base SessionConfig, n *NodeRun, body processBody) Result {
+func (a *Attempts) process(ctx context.Context, base SessionConfig, n *NodeRun, body nodeProcessBody) Result {
 	res := a.attempt(ctx, base, n, body)
 	if res.Err != nil {
 		res.Err = errors.New(a.Masker.Mask(res.Err.Error()))
@@ -65,8 +66,9 @@ func (a *Attempts) process(ctx context.Context, base SessionConfig, n *NodeRun, 
 
 // safety: the bearer is revoked before the cleanups run, so the process
 // cannot register a cleanup that never runs.
-func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, body processBody) Result {
+func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, body nodeProcessBody) Result {
 	run, id := n.Run, n.Plan.ID
+	// safety: a node's eval processes and its attempts each open its log, so OpenLog must append.
 	nlog, err := a.OpenLog(ctx, run.ID, id)
 	if err != nil {
 		return failed(fmt.Errorf("open node log: %w", err))
@@ -76,7 +78,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 			run.Logger.Warn("nodehost: close node log", "run", run.ID, "node", id, "err", err)
 		}
 	}()
-	sink, err := NewLogSink(ctx, LogSinkConfig{RunID: run.ID, NodeID: id, Log: nlog, State: run.State, Masker: a.Masker})
+	sink, err := NewLogSink(ctx, LogSinkConfig{RunID: run.ID, NodeID: id, Log: nlog, State: run.State, Masker: a.Masker, Progress: n.Progress})
 	if err != nil {
 		return failed(err)
 	}
@@ -86,6 +88,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	}
 	bearer, revoke, err := a.Routes.Admit(Node{
 		RunID: run.ID, NodeID: id, Secrets: names, Resolver: a.Resolver, Masker: a.Masker, Claim: a.Claim,
+		Pause: n.Pause,
 	})
 	if err != nil {
 		return failed(fmt.Errorf("admit node %s: %w", id, err))
@@ -110,7 +113,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 			run.Logger.Warn("nodehost: sdk session", "run", run.ID, "node", id, "err", cerr)
 		}
 		if a.Usage != nil {
-			a.Usage(n, usage)
+			a.Usage(ctx, n, usage)
 		}
 	} else {
 		res = failed(err)
@@ -128,13 +131,13 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 }
 
 func drive(ctx context.Context, sess *Session, log Sink, n *NodeRun) Result {
-	if err := replan(ctx, sess, n); err != nil {
+	if err := nodeReplan(ctx, sess, n); err != nil {
 		return failed(err)
 	}
-	return withClosures(ctx, sess, log, n, func() Result { return nodeBody(ctx, sess, n) })
+	return withClosures(ctx, sess, log, n, func() Result { return attemptNodeBody(ctx, sess, n) })
 }
 
-func replan(ctx context.Context, sess *Session, n *NodeRun) error {
+func nodeReplan(ctx context.Context, sess *Session, n *NodeRun) error {
 	run := n.Run
 	args := run.Args
 	if args == nil {
@@ -148,7 +151,7 @@ func replan(ctx context.Context, sess *Session, n *NodeRun) error {
 	return checkDrift(raw, n.Plan)
 }
 
-func nodeBody(ctx context.Context, sess *Session, n *NodeRun) Result {
+func attemptNodeBody(ctx context.Context, sess *Session, n *NodeRun) Result {
 	var rr nodeproto.RunResult
 	err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpRunNode, Node: n.Plan.ID, Attempt: max(n.Attempt, 1), Failure: n.Failure}, &rr)
 	if err == nil {

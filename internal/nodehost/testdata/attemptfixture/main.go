@@ -104,8 +104,16 @@ func addHooks(plan *sparkwing.Plan, marker string) {
 		Verify(func(context.Context) error { return errors.New("health check: 503") }).
 		AfterRun(after("unverified"))
 	sparkwing.Job(plan, "unready", func(context.Context) error { trace("unready", "body"); return nil }).
-		BeforeRun(func(context.Context) error { return errors.New("not ready") }).
-		AfterRun(after("unready"))
+		BeforeRun(func(context.Context) error { trace("unready", "before"); return errors.New("not ready") }).
+		AfterRun(after("unready")).
+		Retry(2)
+	sparkwing.Job(plan, "flaky", func(context.Context) error { trace("flaky", "body"); return errors.New("still broken") }).
+		BeforeRun(func(context.Context) error { trace("flaky", "before"); return nil }).
+		AfterRun(after("flaky")).
+		Retry(2)
+	sparkwing.Job(plan, "slow", func(ctx context.Context) error { trace("slow", "body"); <-ctx.Done(); return ctx.Err() }).
+		AfterRun(after("slow")).
+		Timeout(500 * time.Millisecond)
 }
 
 type buildOutput struct {

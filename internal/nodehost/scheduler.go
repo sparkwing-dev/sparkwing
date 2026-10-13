@@ -79,6 +79,13 @@ type NodeRun struct {
 	// one that ended with res; nil means none follows. The attempt runs its
 	// after_run closures only when none does.
 	Retried func(res Result) bool
+	// Progress, when set, is called for each log line or record the attempt
+	// stores; the no-progress timeout restarts its count on it.
+	Progress func()
+	// Pause, when set, stops the no-progress count until the returned resume
+	// is called, which restarts it in full. A wait the node makes on the host,
+	// such as a child-run await, holds it.
+	Pause func() (resume func())
 }
 
 // Run is the hosted run an executor works within.
@@ -132,6 +139,8 @@ var layers = []Layer{
 	skipIfLayer,
 	artifactsLayer,
 	cachesLayer,
+	retryLayer,
+	timeoutLayer,
 }
 
 // Execute plans the run in a short-lived SDK process, records the run and

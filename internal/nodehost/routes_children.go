@@ -98,6 +98,10 @@ func (s *Server) serveAwaitChild(w http.ResponseWriter, r *http.Request, g *gran
 		return
 	}
 	defer done()
+	// safety: a node blocked on its child prints nothing, so the await holds its no-progress timeout, as in-process.
+	if g.Pause != nil {
+		defer g.Pause()()
+	}
 	run, status, err := claim.await(ctx, g, child, wait)
 	switch {
 	case err != nil:

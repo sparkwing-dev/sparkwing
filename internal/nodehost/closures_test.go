@@ -96,13 +96,29 @@ func TestClosures(t *testing.T) {
 		}
 	})
 
-	t.Run("AFailingBeforeRunEndsTheNodeWithoutItsBody", func(t *testing.T) {
+	t.Run("AFailingBeforeRunEndsTheNodeWithoutItsBodyOrARetry", func(t *testing.T) {
 		r := res.Nodes["unready"]
 		if r.Outcome != sparkwing.Failed || !r.Final || r.Err == nil || r.Err.Error() != "BeforeRun hook 0: not ready" {
 			t.Errorf("unready = %+v, want a final failure from before_run", r)
 		}
-		if got := trace("unready"); got != "" {
-			t.Errorf("unready trace = %q, want neither body nor after_run", got)
+		if got := trace("unready"); got != "before\n" {
+			t.Errorf("unready trace = %q, want one before_run and neither body, retry nor after_run", got)
+		}
+	})
+
+	t.Run("AfterRunRunsOnlyInTheLastOfThreeAttempts", func(t *testing.T) {
+		if got := trace("flaky"); got != "before\nbody\nbody\nbody\nafter:still broken\n" {
+			t.Errorf("flaky trace = %q, want before_run once, three bodies, then after_run once with the error", got)
+		}
+	})
+
+	t.Run("ATimedOutAttemptStillRunsAfterRun", func(t *testing.T) {
+		r := row("slow")
+		if r.Outcome != string(sparkwing.Failed) || r.FailureReason != store.FailureTimeout {
+			t.Errorf("slow row outcome=%q reason=%q error=%q, want failed with timeout", r.Outcome, r.FailureReason, r.Error)
+		}
+		if got := trace("slow"); got != "body\nafter:timeout exceeded (500ms): context deadline exceeded\n" {
+			t.Errorf("slow trace = %q, want the body, then after_run with the timeout error", got)
 		}
 	})
 
