@@ -142,7 +142,6 @@ func standaloneRunLocal(t *testing.T, pipeline string) (*Result, Paths, *storeOp
 	registerHostTestPipelines()
 	home := wingdTestHome(t)
 	t.Setenv("SPARKWING_HOME", home)
-	t.Setenv(AllowUnadmittedEnv, "")
 	paths := PathsAt(home)
 	opens := countStoreOpens(t)
 	warnings := captureStandaloneWarnings(t)
@@ -258,7 +257,6 @@ func noDaemonHome(t *testing.T) string {
 	t.Helper()
 	home := wingdTestHome(t)
 	t.Setenv("SPARKWING_HOME", home)
-	t.Setenv(AllowUnadmittedEnv, "")
 	t.Setenv(wingdclient.HostBinEnv, "")
 	t.Setenv("PATH", t.TempDir())
 	return home

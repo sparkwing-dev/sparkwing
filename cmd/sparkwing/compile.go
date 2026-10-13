@@ -104,7 +104,6 @@ func (r *pipelineRun) exec(args, env []string) error {
 	if execDir == "" {
 		execDir = r.sparkwingDir
 	}
-	env = append(env, "SPARKWING_BINARY_SOURCE="+r.source)
 	if err := r.ctx.Err(); err != nil {
 		return err
 	}

@@ -243,7 +243,7 @@ func TestHostedSelection_FallsBackWhenTheSocketIsGone(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
-	sel, err := selectHostedAPI(ctx, testWingdAdmission(home, nil))
+	sel, err := selectHostedAPI(ctx, testWingdAdmission(home, nil), false)
 	if err != nil {
 		t.Fatalf("selectHostedAPI: %v", err)
 	}
@@ -261,10 +261,9 @@ func TestHostedSelection_FallsBackWhenTheSocketIsGone(t *testing.T) {
 func TestHostedSelection_ForcedWhileADaemonAnswers(t *testing.T) {
 	home := wingdTestHome(t)
 	startAPIDaemon(t, home, nil)
-	t.Setenv(AllowUnadmittedEnv, "1")
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
-	sel, err := selectHostedAPI(ctx, testWingdAdmission(home, nil))
+	sel, err := selectHostedAPI(ctx, testWingdAdmission(home, nil), true)
 	if err != nil {
 		t.Fatalf("selectHostedAPI: %v", err)
 	}
@@ -278,10 +277,9 @@ func TestHostedSelection_ForcedWhileADaemonAnswers(t *testing.T) {
 
 func TestHostedSelection_ForcedStillSaysNoDaemonWhenThereIsNone(t *testing.T) {
 	home := wingdTestHome(t)
-	t.Setenv(AllowUnadmittedEnv, "1")
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
-	sel, err := selectHostedAPI(ctx, unhostedAdmission(home, io.Discard))
+	sel, err := selectHostedAPI(ctx, unhostedAdmission(home, io.Discard), true)
 	if err != nil {
 		t.Fatalf("selectHostedAPI: %v", err)
 	}
@@ -580,7 +578,6 @@ func TestHostedRun_ARefusedRunLeavesNoBlockAndNoStore(t *testing.T) {
 	registerHostedPipelines(t)
 	home := wingdTestHome(t)
 	t.Setenv("SPARKWING_HOME", home)
-	t.Setenv(AllowUnadmittedEnv, "")
 	paths := PathsAt(home)
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatalf("ensure root: %v", err)

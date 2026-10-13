@@ -96,14 +96,12 @@ Set by Sparkwing for pipeline code and node processes.
 | `SPARKWING_NODE_CLAIM_RESERVATION` | [local-execution](local-execution.md) |
 | `SPARKWING_TOOLCHAIN_ACTIVE` | [versioning](versioning.md) |
 | `SPARKWING_GATE_INDEX` | [hooks](hooks.md) |
-| `SPARKWING_ALLOW` | [cli](cli.md) |
 | `SPARKWING_START_AT` | [security](security.md) |
 
 ## Plumbing
 
 | Variable | Why it stays |
 |---|---|
-| `SPARKWING_BINARY_SOURCE` | The in-process dispatcher reads it to record where the pipeline binary came from; `sparkwing run` records that itself and never sets it. |
 | `SPARKWING_BROKERED_ARTIFACTS` | Set to `1` for a remote node's child process when its artifacts go through the parent's broker. |
 | `SPARKWING_BROKERED_NODE_CLAIM` | Set to `1` for a remote node's child process when the parent holds a node claim, so the child runs as that claim. |
 | `SPARKWING_EXECUTION_CAPABILITY_STDIN` | Set to `1` for a remote node's child process, which then reads its execution capability from stdin, keeping it off argv and out of the environment. |
@@ -115,17 +113,13 @@ Set by Sparkwing for pipeline code and node processes.
 | `SPARKWING_LOG_LEVEL` | The in-process dispatcher reads it; `sparkwing run` hosts the run itself and passes `--sw-verbose` (`-v`) as run state, never as this variable. |
 | `SPARKWING_MASK_VALUES_FD` | The inherited pipe the pipeline binary writes registered secret values to, so the launcher masks them in the child's stdout and stderr. |
 | `SPARKWING_NO_CACHE` | The in-process dispatcher reads it; `sparkwing run` hosts the run itself and passes `--sw-no-cache` as run state, never as this variable. |
-| `SPARKWING_NO_UPDATE` | The in-process dispatcher reads it; `sparkwing run` hosts the run itself and passes `--sw-no-update` as run state, never as this variable. |
-| `SPARKWING_ALLOW_UNADMITTED` | Carries `--sw-allow-unadmitted` to the run `sparkwing run` hosts; a run no CLI launched reads it the same way. See [local-execution](local-execution.md). |
 | `SPARKWING_ONLY` | The in-process dispatcher reads it; `sparkwing run` hosts the run itself and passes `--sw-only` as run state, never as this variable. |
 | `SPARKWING_PROTOCOL_HANDLES` | Windows only: the host sets it for a process it starts with `--sw-node-protocol`, naming the inherited request and frame pipe handles as `<request>,<frame>`. The SDK removes it at startup. Never set it by hand. See [node-protocol](node-protocol.md). |
 | `SPARKWING_NODE_URL` | The host sets it for a process it starts with `--sw-node-protocol`: the loopback base URL of the node's `/node/v1` routes. The SDK refuses any URL other than `http://127.0.0.1`, `http://[::1]` or `http://localhost` with a port. Never set it by hand. See [node-protocol](node-protocol.md). |
 | `SPARKWING_NODE_TOKEN` | The host sets it for a process it starts with `--sw-node-protocol`: the bearer for the node's `/node/v1` routes, valid until the process exits. The SDK removes it at startup, before any package's `init` can start a command, so no command inherits it. Never set it by hand. See [node-protocol](node-protocol.md). |
 | `SPARKWING_PROFILE` | Set only by a CLI from before `sparkwing run --profile` was removed. A pipeline binary that finds it refuses the run, naming `sparkwing pipeline trigger`, rather than recording locally; `sparkwing run` drops an inherited value, so exporting it selects nothing. |
-| `SPARKWING_REF` | The in-process dispatcher reads it; `sparkwing run` hosts the run itself and passes `--sw-ref` as run state, never as this variable. |
 | `SPARKWING_STOP_AT` | The in-process dispatcher reads it; `sparkwing run` hosts the run itself and passes `--sw-stop-at` as run state, never as this variable. |
 | `SPARKWING_NODE_SPEC_HASH` | Fences a claimed node to the plan it was claimed under, across the exec into the node process. |
-| `SPARKWING_MODE` | The in-process dispatcher reads it; `sparkwing run` hosts the run itself and passes `--sw-mode` as run state, never as this variable. |
 | `SPARKWING_WORKERS` | Caps how many nodes a run executes at once, as `--sw-workers` does; `sparkwing run` reads it from its own environment when the flag is absent. |
 
 ## Test

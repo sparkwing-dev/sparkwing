@@ -43,11 +43,6 @@ func (r *pipelineRun) host(h hostedRun) error {
 			}
 		}
 	}
-	if flags.allowUnadmitted {
-		if err := os.Setenv(orchestrator.AllowUnadmittedEnv, "1"); err != nil {
-			return err
-		}
-	}
 	var secretArgs []string
 	for _, a := range h.schema.Args {
 		if a.Secret {
@@ -89,6 +84,8 @@ func (r *pipelineRun) host(h hostedRun) error {
 		NoCache:       flags.noCache,
 		DryRun:        flags.dryRun,
 		Priority:      h.priority,
+
+		AllowUnadmitted: flags.allowUnadmitted,
 	}
 	// safety: the host takes over interrupts as the pipeline binary did, so
 	// one Ctrl-C cancels the run once rather than killing this process.

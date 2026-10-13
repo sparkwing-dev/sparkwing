@@ -115,11 +115,17 @@ func PipelineRequires(dir, pipeline string) ([]string, error) {
 
 // safety: the planning claim and every node's pod plan from one context, so their spec hashes compare.
 func podRunContext(run *store.Run) nodeproto.RunContext {
-	return nodeproto.RunContext{
+	rc := nodeproto.RunContext{
 		RunID: run.ID, StartedAt: run.StartedAt,
 		Git:     &nodeproto.Git{SHA: run.GitSHA, Branch: run.GitBranch, Repo: run.DeclaredRepo, RepoURL: run.RepoURL},
-		Trigger: &nodeproto.Trigger{Source: cmp.Or(run.TriggerSource, "manual")},
+		Trigger: &nodeproto.Trigger{Source: cmp.Or(run.TriggerSource, "manual"), User: run.TriggerUser},
 	}
+	if pr := run.PullRequest; pr != nil {
+		rc.Trigger.PullRequest = &nodeproto.PullRequest{
+			Number: pr.Number, Action: pr.Action, BaseRef: pr.BaseRef, BaseSHA: pr.BaseSHA, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA,
+		}
+	}
+	return rc
 }
 
 // safety: one log for every process of the attempt, sealed once by

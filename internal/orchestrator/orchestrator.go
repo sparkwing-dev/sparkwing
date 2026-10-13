@@ -56,6 +56,10 @@ type Options struct {
 
 	Admission *LocalAdmission
 
+	// AllowUnadmitted is `sparkwing run --sw-allow-unadmitted`: run without
+	// the admission daemon even when one answers.
+	AllowUnadmitted bool
+
 	RetryOf string
 
 	RetrySource string
@@ -1042,9 +1046,6 @@ func buildRunInvocation(opts Options, runID, logDir string, secretArgs []string)
 	if revision := os.Getenv("SPARKWING_PIPELINE_REV"); revision != "" {
 		inv["pipeline_revision"] = revision
 	}
-	if src := os.Getenv("SPARKWING_BINARY_SOURCE"); src != "" {
-		inv["binary_source"] = src
-	}
 	if wd := sparkwing.WorkDir(); wd != "" {
 		inv["cwd"] = wd
 	} else if cwd, err := os.Getwd(); err == nil && cwd != "" {
@@ -1125,24 +1126,9 @@ func buildRunFlags(opts Options) map[string]any {
 	if opts.MaxParallel > 0 {
 		flags["max_parallel"] = opts.MaxParallel
 	}
-	if v := os.Getenv("SPARKWING_ALLOW"); v != "" {
-		flags["allow"] = v
-	}
-	if v := os.Getenv("SPARKWING_REF"); v != "" {
-		flags["ref"] = v
-	}
-	if os.Getenv("SPARKWING_NO_UPDATE") == "1" {
-		flags["no_update"] = true
-	}
-	if v := os.Getenv("SPARKWING_MODE"); v != "" {
-		flags["mode"] = v
-	}
 	if opts.prioritySet {
 		flags["priority"] = opts.priority.value
 		flags["priority_source"] = opts.priority.source
-	}
-	if os.Getenv("SPARKWING_LOG_LEVEL") == "debug" {
-		flags["verbose"] = true
 	}
 	return flags
 }
