@@ -28,8 +28,8 @@ func TestXrepoListDescribesEachRepositoryOnce(t *testing.T) {
 		sw := filepath.Join(root, ".sparkwing")
 		writeRepoFile(t, filepath.Join(sw, "go.mod"), fmt.Sprintf("module example.com/fixture%d\ngo 1.26\n", i))
 		writeRepoFile(t, filepath.Join(sw, "main.go"), `package main
-import("fmt";"os")
-func main(){ f,err:=os.OpenFile(os.Getenv("SPARKWING_TEST_DESCRIBES"),os.O_CREATE|os.O_WRONLY|os.O_APPEND,0600);if err!=nil{panic(err)};fmt.Fprintln(f,"describe");f.Close();fmt.Println("[{\"name\":\"demo\"}]") }
+import("bufio";"fmt";"os")
+func main(){ f,err:=os.OpenFile(os.Getenv("SPARKWING_TEST_DESCRIBES"),os.O_CREATE|os.O_WRONLY|os.O_APPEND,0600);if err!=nil{panic(err)};fmt.Fprintln(f,"describe");f.Close();_,_=bufio.NewReader(os.NewFile(3,"requests")).ReadString('\n');fmt.Fprintln(os.NewFile(4,"frames"),"{\"reply\":\"1\",\"ok\":true,\"result\":{\"protocol\":\"1\",\"pipelines\":[{\"name\":\"demo\"}]}}") }
 `)
 		if _, err := runGit(root, "add", "."); err != nil {
 			t.Fatal(err)

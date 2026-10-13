@@ -1234,7 +1234,7 @@ func profilesKeepRunRowsLocal(p paths.Paths) bool {
 			if prof.State.Type != backends.TypeSQLite {
 				return false
 			}
-			// safety: profileSurfaceSpecs redirects a sqlite spec to this home
+			// safety: profileStateSpec redirects a sqlite spec to this home
 			// only when its path is empty, so a spec naming another database
 			// records runs somewhere this doctor never reads.
 			if prof.State.Path != "" && filepath.Clean(prof.State.Path) != filepath.Clean(p.StateDB()) {

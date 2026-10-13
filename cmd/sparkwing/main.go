@@ -247,9 +247,6 @@ func dispatchRun(args []string) error {
 	if flags.noCache {
 		env = append(env, "SPARKWING_NO_CACHE=1")
 	}
-	if flags.localOnly {
-		env = append(env, "SPARKWING_LOCAL_ONLY=1")
-	}
 	if flags.allowUnadmitted {
 		env = setEnv(env, orchestrator.AllowUnadmittedEnv, "1")
 	}
@@ -289,6 +286,23 @@ func dispatchRun(args []string) error {
 	run.opts.AfterChild = afterChild
 	if err := run.materialize(env); err != nil {
 		return run.finish(err)
+	}
+	inspectsConfig := len(passthrough) > 0 && passthrough[0] == "config"
+	if !inspectsConfig && (slices.Contains(passthrough, "-h") || slices.Contains(passthrough, "--help")) {
+		schema, err := run.describedPipeline(pipelineName)
+		if err == nil {
+			printPipelineHelp(os.Stdout, schema)
+		}
+		return run.finish(err)
+	}
+	if runInvokesAdmission(passthrough) {
+		schema, err := run.describedPipeline(pipelineName)
+		if err == nil {
+			_, err = parsePipelineArgs(schema, passthrough)
+		}
+		if err != nil {
+			return run.finish(fmt.Errorf("%s: %w", pipelineName, err))
+		}
 	}
 	findings := declaredRisks(run.ctx, dir, pipelineName)
 	if err := enforceRiskGate(pipelineName, findings, flags); err != nil {

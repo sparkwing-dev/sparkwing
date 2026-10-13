@@ -6,6 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
 func TestDirectHomeWritersCreatePrivatePaths(t *testing.T) {
@@ -17,8 +20,11 @@ func TestDirectHomeWritersCreatePrivatePaths(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	describe := filepath.Join(home, "cache", "describe", "schema.json")
-	writeDescribeFile(describe, []byte(`[]`))
+	t.Setenv("SPARKWING_HOME", home)
+	if err := storeDescribe(t.TempDir(), "schema", sdkserve.DescribeDoc{Protocol: nodeproto.Version}); err != nil {
+		t.Fatal(err)
+	}
+	describe := describeCachePath("schema")
 	assertLocalPermission(t, filepath.Dir(describe), 0o700)
 	assertLocalPermission(t, describe, 0o600)
 

@@ -6,13 +6,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/repos"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -52,37 +54,30 @@ func readDescribeCache(ctx context.Context, sparkwingDir string) ([]sparkwing.De
 	return readDescribeFile(byRepoDescribePath(sparkwingDir)), nil
 }
 
+// safety: a document another protocol version wrote reads as a miss, so it
+// is described again rather than trusted.
 func readDescribeFile(path string) []sparkwing.DescribePipeline {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
-	var out []sparkwing.DescribePipeline
-	if err := json.Unmarshal(raw, &out); err != nil {
+	var doc sdkserve.DescribeDoc
+	if err := json.Unmarshal(raw, &doc); err != nil || doc.Protocol != nodeproto.Version || doc.Pipelines == nil {
 		return nil
 	}
-	return out
+	return doc.Pipelines
 }
 
 func refreshDescribeFromBinary(ctx context.Context, sparkwingDir, binPath, key string) ([]sparkwing.DescribePipeline, error) {
-	raw, err := runDescribeBinary(ctx, sparkwingDir, binPath)
+	doc, err := describeBinary(ctx, sparkwingDir, binPath)
 	if err != nil {
-		return nil, fmt.Errorf("run %s --describe: %w", binPath, err)
+		return nil, err
 	}
-	var schemas []sparkwing.DescribePipeline
-	if err := json.Unmarshal(raw, &schemas); err != nil {
-		return nil, fmt.Errorf("parse --describe output: %w", err)
+	// safety: a home that takes no writes still answers from the binary.
+	if err := storeDescribe(sparkwingDir, key, doc); err != nil {
+		slog.Default().Debug("describe cache write failed", "err", err, "hash", key)
 	}
-	writeDescribeFile(describeCachePath(key), raw)
-	writeDescribeFile(byRepoDescribePath(sparkwingDir), raw)
-	return schemas, nil
-}
-
-func writeDescribeFile(path string, raw []byte) {
-	if err := fssecure.EnsureDir(filepath.Dir(path)); err != nil {
-		return
-	}
-	_ = fssecure.WriteFile(path, raw)
+	return doc.Pipelines, nil
 }
 
 func writeDescribeCache(ctx context.Context, sparkwingDir, binPath string) error {
@@ -90,27 +85,26 @@ func writeDescribeCache(ctx context.Context, sparkwingDir, binPath string) error
 	if err != nil {
 		return fmt.Errorf("cache key: %w", err)
 	}
-
-	out, err := runDescribeBinary(ctx, sparkwingDir, binPath)
+	doc, err := describeBinary(ctx, sparkwingDir, binPath)
 	if err != nil {
-		return fmt.Errorf("run %s --describe: %w", binPath, err)
+		return err
 	}
-	return storeDescribe(sparkwingDir, key, out)
+	return storeDescribe(sparkwingDir, key, doc)
 }
 
-func storeDescribe(sparkwingDir, key string, raw []byte) error {
-	var schemas []sparkwing.DescribePipeline
-	if err := json.Unmarshal(raw, &schemas); err != nil {
-		return fmt.Errorf("parse --describe output: %w", err)
+func storeDescribe(sparkwingDir, key string, doc sdkserve.DescribeDoc) error {
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		return err
 	}
-	path := describeCachePath(key)
-	if err := fssecure.EnsureDir(filepath.Dir(path)); err != nil {
-		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
+	for _, path := range []string{describeCachePath(key), byRepoDescribePath(sparkwingDir)} {
+		if err := fssecure.EnsureDir(filepath.Dir(path)); err != nil {
+			return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
+		}
+		if err := fssecure.WriteFile(path, raw); err != nil {
+			return fmt.Errorf("write %s: %w", path, err)
+		}
 	}
-	if err := fssecure.WriteFile(path, raw); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	writeDescribeFile(byRepoDescribePath(sparkwingDir), raw)
 	return nil
 }
 
@@ -127,17 +121,10 @@ func pipelineFlagsFromCache(ctx context.Context, sparkwingDir, pipelineName stri
 	return nil, nil
 }
 
-func runDescribeBinary(ctx context.Context, sparkwingDir, binPath string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	// #nosec G702 -- this intentionally executes the selected pipeline binary without a shell.
-	cmd := exec.CommandContext(ctx, binPath, "--describe")
-	cmd.Dir = filepath.Dir(sparkwingDir)
-	// safety: inherited output pipes must not extend the metadata deadline.
-	cmd.WaitDelay = 100 * time.Millisecond
-	out, err := cmd.Output()
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
+func describeBinary(ctx context.Context, sparkwingDir, binPath string) (sdkserve.DescribeDoc, error) {
+	doc, err := repos.Describe(ctx, binPath, filepath.Dir(sparkwingDir))
+	if err != nil {
+		return doc, fmt.Errorf("describe %s: %w", binPath, err)
 	}
-	return out, err
+	return doc, nil
 }

@@ -71,8 +71,8 @@ scheduled run goes through the same submission and is refused the same way.
 declarations, so a retry of a risk-declaring run is not refused. Run a
 risk-labeled pipeline in the foreground, where `--sw-allow` authorizes it.
 
-`--profile NAME` selects the storage and dispatch addressing
-(state/cache/logs, and any controller auth). Execution still happens
+`--profile NAME` selects the store a read verb reads (this machine's
+state or a controller, and any controller auth). Execution still happens
 locally; to hand a run to a cluster, use `sparkwing pipeline trigger`
 for remote execution.
 

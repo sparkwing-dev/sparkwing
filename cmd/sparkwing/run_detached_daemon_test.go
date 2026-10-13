@@ -12,13 +12,15 @@ import (
 const detachedDaemonFixtureSource = `package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 )
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "--describe" {
-		fmt.Print("[{\"name\":\"warmfixture\"}]")
+	if len(os.Args) == 2 && os.Args[1] == "--sw-node-protocol" {
+		_, _ = bufio.NewReader(os.NewFile(3, "requests")).ReadString('\n')
+		fmt.Fprintln(os.NewFile(4, "frames"), "{\"reply\":\"1\",\"ok\":true,\"result\":{\"protocol\":\"1\",\"pipelines\":[{\"name\":\"warmfixture\"}]}}")
 		return
 	}
 	_ = os.Getenv("SPARKWING_HOME")

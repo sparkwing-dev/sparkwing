@@ -12,6 +12,8 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/sparkwing-dev/sparkwing/internal/protofd"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
@@ -21,6 +23,15 @@ import (
 )
 
 func Main() {
+	// safety: ahead of the other verbs' startup, which claims an inherited
+	// descriptor and SPARKWING_* variables that the protocol leaves to the host.
+	if len(os.Args) == 2 && os.Args[1] == protofd.Arg {
+		if _, err := bindProjectPipelines(); err != nil {
+			fmt.Fprintln(os.Stderr, "sw-node-protocol:", err)
+			os.Exit(1)
+		}
+		os.Exit(sdkserve.Main(sdkserve.Config{SDKVersion: sparkwingModuleVersion(), PlanDoc: planDocument}))
+	}
 	secrets.ShareRegisteredFromEnv()
 	if err := takeAgentToken(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -169,7 +180,6 @@ func Main() {
 		Priority:            os.Getenv(PriorityEnv),
 		AdmissionClass:      admissionClassFromEnv(),
 		DryRun:              dryRunFromEnv(),
-		LocalOnly:           os.Getenv("SPARKWING_LOCAL_ONLY") == "1",
 		MaxParallel:         runtime.NumCPU(),
 		PipelineYAML:        pipelineYAML,
 		// safety: this binary serves `run-node` a few lines above, so it can
@@ -185,14 +195,6 @@ func Main() {
 			}
 			if len(pipelineYAML.Requires) == 0 {
 				pipelineYAML.Requires = projectCfg.Defaults.Requires
-			}
-		}
-	}
-	if pipelineYAML != nil {
-		for _, r := range pipelineYAML.Requires {
-			if r == "local" {
-				opts.LocalOnly = true
-				break
 			}
 		}
 	}

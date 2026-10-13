@@ -7,11 +7,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	neturl "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	flag "github.com/spf13/pflag"
@@ -31,8 +29,6 @@ func dashboardFlags(command Command, args []string, start bool) (dashboardOption
 	output := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 	if start {
 		fs.StringVar(&o.Addr, "addr", o.Addr, "bind address")
-		fs.StringVar(&o.LogStore, "log-store", "", "log backend URL")
-		fs.StringVar(&o.ArtifactStore, "artifact-store", "", "artifact backend URL")
 		fs.StringVar(&o.AllowOrigins, "allow-origin", "", "browser origins")
 		fs.BoolVar(&o.ReadOnly, "read-only", false, "reject writes")
 		fs.BoolVar(&o.AllowRemote, "allow-remote", false, "allow non-loopback bind")
@@ -92,14 +88,6 @@ func runDashboardLaunch(args []string, restart bool) error {
 	}
 	if _, err = net.ResolveTCPAddr("tcp", o.Addr); err != nil {
 		return fmt.Errorf("invalid --addr: %w", err)
-	}
-	for _, store := range []struct {
-		flag, value string
-		artifact    bool
-	}{{"log-store", o.LogStore, false}, {"artifact-store", o.ArtifactStore, true}} {
-		if err = validateDashboardStoreURL(store.value, store.artifact); err != nil {
-			return fmt.Errorf("--%s: %w", store.flag, err)
-		}
 	}
 	if !o.AllowRemote && !localws.LoopbackBind(o.Addr) {
 		return fmt.Errorf("--addr %s is not loopback; pass --allow-remote to allow network access", o.Addr)
@@ -191,44 +179,10 @@ func runDashboardLaunch(args []string, restart bool) error {
 	return renderDashboard(result, mode)
 }
 
-func validateDashboardStoreURL(raw string, artifact bool) error {
-	if raw == "" {
-		return nil
-	}
-	// Opening a backend may create directories or load credentials, so preflight checks syntax only.
-	scheme, rest, found := strings.Cut(raw, "://")
-	if !found {
-		return errors.New("storage URL requires scheme://")
-	}
-	switch scheme {
-	case "fs":
-		if strings.HasPrefix(rest, "/") || strings.HasPrefix(rest, "~") {
-			return nil
-		}
-		return errors.New("filesystem storage requires an absolute path")
-	case "s3":
-		u, err := neturl.Parse(raw)
-		if err == nil && u.Host != "" {
-			return nil
-		}
-		return errors.New("S3 storage requires a valid bucket URL")
-	case "http", "https":
-		if artifact {
-			u, err := neturl.Parse(raw)
-			if err == nil && u.Host != "" {
-				return nil
-			}
-		}
-	}
-	return errors.New("unsupported storage URL; use fs or s3 for logs, or fs, s3, http or https for artifacts")
-}
-
 func dashboardOptionArgs(o dashboardOptions) []string {
 	a := []string{"--addr", o.Addr}
-	for _, v := range [][2]string{{"--log-store", o.LogStore}, {"--artifact-store", o.ArtifactStore}, {"--allow-origin", o.AllowOrigins}} {
-		if v[1] != "" {
-			a = append(a, v[0], v[1])
-		}
+	if o.AllowOrigins != "" {
+		a = append(a, "--allow-origin", o.AllowOrigins)
 	}
 	for _, v := range []struct {
 		name  string
@@ -244,12 +198,6 @@ func dashboardOptionArgs(o dashboardOptions) []string {
 func mergeDashboardOptions(old, next dashboardOptions, fs *flag.FlagSet) dashboardOptions {
 	if fs.Changed("addr") {
 		old.Addr = next.Addr
-	}
-	if fs.Changed("log-store") {
-		old.LogStore = next.LogStore
-	}
-	if fs.Changed("artifact-store") {
-		old.ArtifactStore = next.ArtifactStore
 	}
 	if fs.Changed("allow-origin") {
 		old.AllowOrigins = next.AllowOrigins

@@ -119,21 +119,9 @@ func TestOpenArtifactStore_HTTP(t *testing.T) {
 	}
 }
 
-func TestOpenLogStore_FS(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	s, err := OpenLogStore(context.Background(), "fs://"+dir)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	if s == nil {
-		t.Fatal("nil store")
-	}
-}
-
 func TestOpen_BadScheme(t *testing.T) {
 	t.Parallel()
-	if _, err := OpenLogStore(context.Background(), "no-scheme"); err == nil {
+	if _, err := OpenArtifactStore(context.Background(), "no-scheme"); err == nil {
 		t.Error("expected err for missing scheme")
 	}
 	_, err := OpenArtifactStore(context.Background(), "ftp://x")

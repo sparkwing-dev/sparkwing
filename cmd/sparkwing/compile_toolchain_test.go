@@ -88,7 +88,7 @@ while [ $# -gt 0 ]; do
   shift
   cat > "$1" <<'PIPELINE'
 #!/bin/sh
-if [ "$1" = --describe ]; then printf '[]\n'; exit 0; fi
+if [ "$1" = --sw-node-protocol ]; then read -r _ <&3; printf '{"reply":"1","ok":true,"result":{"protocol":"1","pipelines":[]}}\n' >&4; exit 0; fi
 printf '%s\n' "$GOTOOLCHAIN" > "$RUNTIME_LOG"
 PIPELINE
   chmod +x "$1"

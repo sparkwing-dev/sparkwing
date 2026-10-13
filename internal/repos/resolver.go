@@ -2,11 +2,9 @@ package repos
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
@@ -80,18 +78,11 @@ func PipelineNamesIfBuilt(absPath string) (names []string, ok bool) {
 }
 
 func describePipelines(binPath, workDir string) ([]sparkwing.DescribePipeline, error) {
-	cmd := exec.Command(binPath, "--describe")
-	cmd.Dir = workDir
-	cmd.Stderr = os.Stderr
-	out, err := cmd.Output()
+	doc, err := Describe(context.Background(), binPath, workDir)
 	if err != nil {
 		return nil, fmt.Errorf("describe %s: %w", binPath, err)
 	}
-	var schemas []sparkwing.DescribePipeline
-	if err := json.Unmarshal(out, &schemas); err != nil {
-		return nil, fmt.Errorf("parse describe output from %s: %w", binPath, err)
-	}
-	return schemas, nil
+	return doc.Pipelines, nil
 }
 
 func pipelineNames(schemas []sparkwing.DescribePipeline) []string {

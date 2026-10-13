@@ -74,8 +74,6 @@ type Options struct {
 
 	NoCache bool
 
-	LocalOnly bool
-
 	DryRun bool
 
 	Debug DebugDirectives
@@ -720,7 +718,7 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 	if opts.RunID == "" {
 		opts.RunID = newRunID()
 	}
-	if opts.LocalOnly || opts.SecretSource == nil {
+	if opts.SecretSource == nil {
 		opts.SecretSource = localSecretsFor(ctx, paths, hosted, opts.RunID, opts.Pipeline)
 		opts.localSecrets = true
 	}
@@ -1061,13 +1059,6 @@ func buildRunInvocation(opts Options, runID, logDir string, secretArgs []string)
 	if flags := buildRunFlags(opts); len(flags) > 0 {
 		inv["flags"] = flags
 	}
-	if opts.LocalOnly {
-		inv["backends"] = map[string]any{
-			"state": "sqlite",
-			"logs":  "filesystem",
-			"cache": "filesystem",
-		}
-	}
 	inv["reproducer"] = buildReproducer(opts, runID)
 	return inv
 }
@@ -1103,9 +1094,6 @@ func buildRunFlags(opts Options) map[string]any {
 	}
 	if opts.DryRun {
 		flags["dry_run"] = true
-	}
-	if opts.LocalOnly {
-		flags["local_only"] = true
 	}
 	if opts.StartAt != "" {
 		flags["start_at"] = opts.StartAt
@@ -1170,9 +1158,6 @@ func buildReproducer(opts Options, _ string) string {
 			continue
 		}
 		flagName := "--" + strings.ReplaceAll(k, "_", "-")
-		if k == "local_only" {
-			flagName = "--sw-local-only"
-		}
 		if k == "priority" {
 			flagName = "--sw-priority"
 		}
@@ -2919,11 +2904,7 @@ func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnap
 				OnTimeout: string(cfg.OnExpiry),
 			}
 		}
-		sn.Modifiers = nodeModifiersSnapshot(n)
-		sn.DirCaches = nodeDirCaches(n)
-		if w := n.Work(); w != nil {
-			sn.Work = snapshotWorkOf(w, n.ResultStep())
-		}
+		snapshotNodeEnvelope(p, n, &sn)
 		snap.Nodes = append(snap.Nodes, sn)
 		seen[n.ID()] = true
 	}
@@ -2941,17 +2922,26 @@ func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnap
 			Consumes:     snapshotConsumeEdges(rec.ConsumeEdges()),
 			Groups:       p.JobGroupNames(rec.ID()),
 			OnFailureOf:  n.ID(),
-			Modifiers:    nodeModifiersSnapshot(rec),
-			DirCaches:    nodeDirCaches(rec),
 			PipelineRefs: snapshotPipelineRefs(rec.PipelineRefs()),
 		}
-		if w := rec.Work(); w != nil {
-			recSnap.Work = snapshotWorkOf(w, rec.ResultStep())
-		}
+		snapshotNodeEnvelope(p, rec, &recSnap)
 		snap.Nodes = append(snap.Nodes, recSnap)
 		seen[rec.ID()] = true
 	}
 	return snap, nil
+}
+
+func snapshotNodeEnvelope(p *sparkwing.Plan, n *sparkwing.JobNode, sn *nodeproto.PlanNode) {
+	sn.Modifiers = nodeModifiersSnapshot(n)
+	sn.Caches = nodeDirCaches(n)
+	closures, stepClosures := sparkwingruntime.NodeClosureIDs(p, n)
+	sn.Closures = closures
+	if closures != nil && closures.CacheKey != "" {
+		sn.MemoKey = &nodeproto.PlanMemoKey{Closure: closures.CacheKey}
+	}
+	if w := n.Work(); w != nil {
+		sn.Work = snapshotWorkOf(w, n.ResultStep(), stepClosures)
+	}
 }
 
 func snapshotConsumeEdges(edges []sparkwing.ConsumeEdge) []nodeproto.PlanConsume {
@@ -3056,6 +3046,7 @@ func nodeModifiersSnapshot(n *sparkwing.JobNode) *nodeproto.PlanModifiers {
 		HasBeforeRun:        len(n.BeforeRunHooks()) > 0,
 		HasAfterRun:         len(n.AfterRunHooks()) > 0,
 		HasSkipIf:           len(n.SkipPredicates()) > 0,
+		HasVerify:           n.Verifier() != nil,
 	}
 	if rec := n.OnFailureNode(); rec != nil {
 		m.OnFailure = rec.ID()
@@ -3110,10 +3101,11 @@ func isZeroModifiers(m nodeproto.PlanModifiers) bool {
 		m.OnFailure == "" &&
 		!m.HasBeforeRun &&
 		!m.HasAfterRun &&
-		!m.HasSkipIf
+		!m.HasSkipIf &&
+		!m.HasVerify
 }
 
-func snapshotWorkOf(work *sparkwing.Work, resultStep *sparkwing.WorkStep) *nodeproto.PlanWork {
+func snapshotWorkOf(work *sparkwing.Work, resultStep *sparkwing.WorkStep, closures map[string]*nodeproto.PlanClosures) *nodeproto.PlanWork {
 	out := &nodeproto.PlanWork{FailurePolicy: string(work.ParallelFailurePolicy())}
 	if resultStep != nil {
 		out.ResultStep = resultStep.ID()
@@ -3126,6 +3118,10 @@ func snapshotWorkOf(work *sparkwing.Work, resultStep *sparkwing.WorkStep) *nodep
 			HasSkipIf: len(s.SkipPredicates()) > 0,
 			Finally:   s.IsFinally(),
 			Risks:     s.Risks(),
+
+			ContinueOnError: s.IsContinueOnError(),
+			Optional:        s.IsOptional(),
+			Closures:        closures[s.ID()],
 		})
 	}
 	for _, g := range work.Groups() {

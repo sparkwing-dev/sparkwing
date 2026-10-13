@@ -15,7 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/health"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
-	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
@@ -137,15 +136,10 @@ func probeAuth(ctx context.Context, prof *profile.Profile) profileProbeResult {
 }
 
 func probeLogs(ctx context.Context, prof *profile.Profile) profileProbeResult {
-	r := profileProbeResult{Name: "logs", Target: profile.SpecString(prof.Logs)}
-	if prof.Logs != nil && prof.Logs.Type != backends.TypeController {
-		r.Status = "ok"
-		r.Detail = "logs backend: " + profile.SpecString(prof.Logs)
-		return r
-	}
+	r := profileProbeResult{Name: "logs", Target: prof.ControllerURL()}
 	if !prof.HasController() {
-		r.Status = "warn"
-		r.Detail = "no logs: backend configured"
+		r.Status = "skip"
+		r.Detail = "no controller on profile (node logs stay in this machine's run directories)"
 		return r
 	}
 	keeps, err := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken()).KeepsLogSegments(ctx)

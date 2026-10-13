@@ -14,35 +14,25 @@ func SpecString(s *backends.Spec) string {
 			return "sqlite:" + s.Path
 		}
 		return "sqlite"
-	case backends.TypeS3:
-		out := s.Type + "://" + s.Bucket
-		if s.Prefix != "" {
-			out += "/" + s.Prefix
-		}
-		return out
 	case backends.TypeFilesystem:
 		return "filesystem:" + s.Path
 	case backends.TypeController:
 		return "controller://" + s.Controller
-	case backends.TypeStdout:
-		return "stdout"
 	default:
 		return s.Type
 	}
 }
 
-func (p *Profile) SurfaceStrings() (state, logs, cache string) {
-	if p == nil {
-		return "-", "-", "-"
+// StateString names where p's run records live.
+func (p *Profile) StateString() string {
+	switch {
+	case p == nil:
+		return "-"
+	case p.State != nil:
+		return SpecString(p.State)
+	case p.ControllerURL() != "":
+		return "controller://" + p.Name
+	default:
+		return "sqlite"
 	}
-	surf := p.Surfaces()
-	if surf.State == nil && surf.Cache == nil && surf.Logs == nil && p.ControllerURL() != "" {
-		c := "controller://" + p.Name
-		return c, c, c
-	}
-	state = SpecString(surf.State)
-	if surf.State == nil && p.ControllerURL() == "" {
-		state = "sqlite"
-	}
-	return state, SpecString(surf.Logs), SpecString(surf.Cache)
 }

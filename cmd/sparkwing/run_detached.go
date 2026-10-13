@@ -628,7 +628,6 @@ func foregroundOnlyReasons(wf runFlags) []struct {
 		{"--sw-mode", wf.mode != "", "execution mode is not carried on the trigger yet; run it in the foreground"},
 		{"--sw-workers", wf.workers > 0, "worker capping is not carried on the trigger yet; run it in the foreground"},
 		{"--sw-allow", len(wf.allow) > 0, "risk authorization is not carried on the trigger yet; run it in the foreground"},
-		{"--sw-local-only", wf.localOnly, "backend overrides are not carried on the trigger yet; run it in the foreground"},
 		{"--sw-no-update", wf.noUpdate, "the consumer compiles the run, and the flag is not carried on the trigger; run it in the foreground"},
 		{"--sw-no-bincache", wf.noBincache, "the consumer compiles the run, and the flag is not carried on the trigger; run it in the foreground"},
 		{"--sw-hash-all-files", wf.hashAllFiles, "the consumer compiles the run, and the flag is not carried on the trigger; run it in the foreground"},
@@ -655,13 +654,11 @@ func (g riskGate) check(execDir, pinnedBinary string) error {
 	declared := g.Declared
 	switch {
 	case pinnedBinary != "":
-		raw, err := runDescribeBinary(context.Background(), sparkwingDir, pinnedBinary)
+		doc, err := describeBinary(context.Background(), sparkwingDir, pinnedBinary)
 		if err != nil {
 			return fmt.Errorf("%s: read what %s pins: %w", g.Surface, g.Pipeline, err)
 		}
-		if err := json.Unmarshal(raw, &declared); err != nil {
-			return fmt.Errorf("%s: read what %s pins: %w", g.Surface, g.Pipeline, err)
-		}
+		declared = doc.Pipelines
 	case declared == nil || execDir != g.SubmitDir:
 		var err error
 		declared, err = repos.DescribeRepo(execDir)

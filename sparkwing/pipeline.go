@@ -7,6 +7,9 @@ import (
 	"sort"
 	"sync"
 
+	// safety: initializes before every package that imports the SDK, so no
+	// init there can start a command that inherits the protocol pipes.
+	_ "github.com/sparkwing-dev/sparkwing/internal/protofd"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
 )
 
@@ -42,6 +45,22 @@ var (
 
 	entrypointRegistry = map[string]*Registration{}
 )
+
+// InputError is what a Registration's Invoke returns when args fail the
+// declared flags of the pipeline or of a job's [WithArgs]: a missing required
+// flag, a value of the wrong type or outside its enum, or a flag nothing
+// declares. Any other Invoke error comes from the pipeline's Plan. Tell them
+// apart with errors.As:
+//
+//	var inErr *sparkwing.InputError
+//	if errors.As(err, &inErr) { ... }
+type InputError struct {
+	Err error
+}
+
+func (e *InputError) Error() string { return e.Err.Error() }
+
+func (e *InputError) Unwrap() error { return e.Err }
 
 // Register installs a pipeline under the given name. The factory is
 // called once per invocation to produce a fresh instance, avoiding
@@ -114,7 +133,7 @@ func buildRegistration[T any](name string, factory func() Pipeline[T], callerLab
 		var in T
 		if t != nil && t.Kind() == reflect.Struct {
 			if err := populateInputs(schema, reflect.ValueOf(&in).Elem(), pipeArgs); err != nil {
-				return nil, fmt.Errorf("inputs for pipeline %q: %w", name, err)
+				return nil, &InputError{Err: fmt.Errorf("inputs for pipeline %q: %w", name, err)}
 			}
 		}
 		p := factory()
@@ -134,12 +153,12 @@ func buildRegistration[T any](name string, factory func() Pipeline[T], callerLab
 		}
 		if len(extraArgs) > 0 {
 			if err := assertJobArgsCoverage(plan, extraArgs); err != nil {
-				return nil, fmt.Errorf("inputs for pipeline %q: %w", name, err)
+				return nil, &InputError{Err: fmt.Errorf("inputs for pipeline %q: %w", name, err)}
 			}
 		}
 		if !skipArgResolveFromContext(ctx) {
 			if err := resolveAndBindJobArgs(plan, args); err != nil {
-				return nil, fmt.Errorf("pipeline %q: %w", name, err)
+				return nil, &InputError{Err: fmt.Errorf("pipeline %q: %w", name, err)}
 			}
 		}
 		return plan, nil

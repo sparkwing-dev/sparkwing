@@ -961,7 +961,6 @@ using the `sw-` prefix for its long control options:
     --sw-only GLOB        // run only matching jobs (+ their Needs)
     --sw-no-cache         // ignore cached per-node results
     --sw-priority VALUE   // local admission priority: N, front, back
-    --sw-local-only       // force local secrets/state/cache/logs
     --sw-dry-run          // run each step's dry-run probe
     --sw-allow LABEL,...  // authorize risk-labeled steps
     --sw-no-update        // skip the sparks auto-resolve step

@@ -18,8 +18,8 @@ import (
 //
 // Subtests that hit a read path the implementation has opted out of
 // (returning an error that wraps [storage.ErrNotSupported]) are
-// skipped, not failed -- this lets write-only stores like
-// [stdoutlogs.LogStore] still run the suite for the Append path.
+// skipped, not failed, so a write-only store still runs the suite for
+// the Append path.
 func TestLogStore(t *testing.T, factory func() storage.LogStore) {
 	t.Helper()
 

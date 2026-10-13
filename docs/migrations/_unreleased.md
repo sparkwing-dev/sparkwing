@@ -77,8 +77,7 @@ that keep the logs service running.
   from an agent's `config.yaml`, which now fails to load with
   `field logs not found`. `sparkwing cluster runners add` has no `--logs`.
   Drop any `SPARKWING_LOGS_EGRESS_*` variables; nothing reads them.
-- **Profiles:** a `logs: {type: controller}` surface takes no `url`; remove
-  it.
+- **Profiles:** the `logs` and `cache` surfaces are gone; remove them.
 - **Credentials and API:** the `logs.write` and `logs.delete` scopes are
   gone, and minting a token with either is refused; runner tokens carry
   `nodes.claim`, `triggers.claim`, `runs.state` and `secrets.read`.
@@ -571,7 +570,7 @@ kept for S3 and Postgres state profiles.
 | `mirror_local:` on a profile | Delete it. The config fails to load with `field mirror_local not found`. |
 | `cache: {binaries: {...}}` | Delete the `binaries:` block. The config fails to load with `field binaries not found`. Runs fetch prebuilt binaries from the git cache `SPARKWING_GITCACHE_URL` names. |
 | `sparkwing run X --sw-artifact-digest-backfill` | Delete the flag; it applied only to binaries fetched from a profile's cache. `run` refuses it as an unknown runner flag. |
-| `sparkwing serve start --profile P [--no-local-store]` | `sparkwing serve start` for this machine's runs, or the controller's dashboard for shared ones. `--log-store` and `--artifact-store` remain. |
+| `sparkwing serve start --profile P [--no-local-store]` | `sparkwing serve start` for this machine's runs, or the controller's dashboard for shared ones. |
 | `guards: {require: [profile:name=prod]}` | `profile:local`, `profile:controller` or an `arg:` token. A run never has a named profile, so the token never matched; a config naming it now fails to load. |
 | `sparkwing runs list --profile shared` against an S3 or Postgres state profile | Nothing reads that history any more. The bucket or database is yours to keep or delete. |
 
@@ -594,8 +593,8 @@ kept for S3 and Postgres state profiles.
   `install/terraform/mode3-postgres` module now documents the controller's
   database alone.
 - **Output:** a run no longer writes `runs/<id>/state.ndjson` into this
-  machine's cache directory. `run_start` reports a `backends` block only
-  for `--sw-local-only`, and never a `profile` block.
+  machine's cache directory. `run_start` reports no `backends` or
+  `profile` block.
   `sparkwing configure profiles show -o json` drops `mirror_local`. The
   controller's health no longer reports `object_store.stalled`.
 - **Go packages:** `pkg/storage/s3state` is removed. `pkg/controller`
