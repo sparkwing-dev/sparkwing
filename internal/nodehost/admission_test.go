@@ -32,7 +32,7 @@ func runAdmitted(t *testing.T, ctx context.Context, st *store.Store, doc nodepro
 		adm.BoxID = func() string { return testBox }
 	}
 	cfg := Config{Execute: exec, Admission: adm}
-	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest)}
+	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), leaseToken: "tok"}
 	res := RunResult{RunID: testRunID, Nodes: map[string]Result{}}
 	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg)}
 	if err := s.add(ctx, ctx, doc.Nodes); err != nil {
@@ -152,6 +152,8 @@ type fakeLease struct {
 	acks     chan string
 	watching sync.WaitGroup
 }
+
+func (l *fakeLease) Token() string { return "lease-" + l.req.RunID }
 
 func (l *fakeLease) Release() error {
 	l.once.Do(func() {
@@ -300,7 +302,7 @@ func TestAdmissionLeasesHostAroundEachNode(t *testing.T) {
 		}
 		return Result{Outcome: sparkwing.Success}
 	}
-	res := runAdmitted(t, ctx, st, doc, &Admission{Daemon: d, RunLeaseToken: "tok", Class: "batch"}, exec)
+	res := runAdmitted(t, ctx, st, doc, &Admission{Daemon: d, Class: "batch"}, exec)
 	if got := res.Nodes["ok"]; got.Outcome != sparkwing.Success {
 		t.Fatalf("ok: %+v", got)
 	}

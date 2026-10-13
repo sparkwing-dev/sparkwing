@@ -2865,18 +2865,23 @@ func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnap
 		// safety: an empty plan still writes "nodes": [], the shape every SDK and reader expects.
 		Nodes: []nodeproto.PlanNode{},
 	}
-	if group := p.ConcurrencyGroupRef(); group != nil {
-		snap.PlanConc = &nodeproto.PlanConc{
-			Key: scopedGroupKey(group, rc.RunID),
-		}
-	}
 	for _, membership := range p.PlanConcurrency() {
 		if membership.Group == nil {
 			continue
 		}
-		snap.PlanConcs = append(snap.PlanConcs, nodeproto.PlanConc{
-			Key: scopedGroupKey(membership.Group, rc.RunID),
-		})
+		limit := membership.Group.Limit()
+		pc := nodeproto.PlanConc{
+			Key:             scopedGroupKey(membership.Group, rc.RunID),
+			Capacity:        limit.Capacity,
+			Cost:            membership.Cost,
+			OnLimit:         string(limit.OnLimit),
+			QueueTimeoutMS:  limit.QueueTimeout.Milliseconds(),
+			CancelTimeoutMS: limit.CancelTimeout.Milliseconds(),
+		}
+		if snap.PlanConc == nil {
+			snap.PlanConc = &pc
+		}
+		snap.PlanConcs = append(snap.PlanConcs, pc)
 	}
 	if rh := p.ResourceHints(); rh != nil {
 		snap.Resources = &nodeproto.PlanResources{

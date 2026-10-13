@@ -241,7 +241,8 @@ In a dry run, the host runs a step only when the step has `has_dry_run` or `safe
 - closure ids under `closures`;
 - tools the node needs on `PATH` under `tools`;
 - artifacts: `outputs` (globs the node publishes after success) and `consumes` (producers whose artifacts the host stages first);
-- approvals, which only the host runs, plus the node's declared secrets, the source checkout, and plan-level concurrency and resources;
+- approvals, which only the host runs, plus the node's declared secrets, the source checkout, and plan-level resources;
+- plan-level concurrency groups under `plan_concurrency_groups`, each a scoped `key` with its `capacity`, `cost`, `on_limit`, `queue_timeout_ms` and `cancel_timeout_ms`, which the run holds from before its first node starts until it ends;
 - steps under `work`, with `needs`, `finally`, `is_result`, `continue_on_error`, `optional`, `has_dry_run`, `safe_without_dry_run`, `closures`, and the node's `failure_policy`;
 - `protocol`, the protocol version the SDK speaks.
 

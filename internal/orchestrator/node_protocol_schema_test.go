@@ -227,6 +227,9 @@ func TestDescribeAndPlanOutputMatchTheSchema(t *testing.T) {
 		ContinueOnError().
 		OnFailure("rollback", func(context.Context) error { return nil })
 	sparkwing.JobApproval(plan, "approve", sparkwing.ApprovalConfig{Message: "ship it?", Timeout: time.Hour}).Needs(build)
+	plan.Concurrency(sparkwing.NewConcurrencyGroup("deploys", sparkwing.ConcurrencyLimit{
+		Capacity: 3, OnLimit: sparkwing.CancelOthers, CancelTimeout: time.Minute,
+	}), 2)
 
 	raw, err := marshalPlanSnapshot(plan, sparkwing.RunContext{Pipeline: "demo", RunID: "run-1"},
 		planSnapshotMeta{Secrets: pipelines.SecretsField{{Name: "TOKEN", Required: true}}, PipelineRequires: []string{"linux"}})
