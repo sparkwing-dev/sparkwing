@@ -566,7 +566,7 @@ func checkDocsMirror(ctx context.Context) error {
 // safety: a node hands each child the run's own bindings, so a suite that
 // reads one reaches the machine's admission daemon, the operator's controller
 // or cache, or a credential of the run's, and reds only inside a gate.
-// internal/runners/local/env.go is the injector these names track.
+// internal/runners/local/env.go and the node host's attempt environment are the injectors these names track.
 var productTestUnset = []string{
 	wingwire.LeaseTokenEnv,
 	wingwire.ChildLeaseTokenEnv,
@@ -578,6 +578,7 @@ var productTestUnset = []string{
 	"SPARKWING_DRY_RUN",
 	"SPARKWING_LOGS_URL",
 	"SPARKWING_NODE_ID",
+	"SPARKWING_NODE_URL",
 	"SPARKWING_PARENT_LIVENESS_FD",
 	"SPARKWING_RUN_ID",
 }
