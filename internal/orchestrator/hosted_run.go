@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -140,18 +141,22 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 	}
 	attempts := &nodehost.Attempts{
 		Routes: routes, Masker: masker, Resolver: resolver,
-		Local: backends.State,
+		Local: backends.State, Children: hostedChildren{state: backends.State, masker: masker},
 		OpenLog: func(ctx context.Context, runID, nodeID string) (nodehost.NodeLog, error) {
-			return backends.Logs.OpenNodeLog(ctx, runID, nodeID, delegate)
+			log, err := backends.Logs.OpenNodeLog(ctx, runID, nodeID, nil)
+			if err != nil {
+				return nil, err
+			}
+			return hostedNodeLog{NodeLog: log, delegate: delegate}, nil
 		},
 	}
 	if backends.LocalCoordination {
 		attempts.Usage = nodehost.RecordUsage(backends.State)
 	}
 	cfg := nodehost.Config{
-		Session:  nodehost.SessionConfig{Entry: entry.Program, Dir: entry.Dir, Env: hostedEnv(entry.Env), Sink: hostedPlanSink{delegate}},
+		Session:  nodehost.SessionConfig{Entry: entry.Program, Dir: entry.Dir, Env: nodehost.PipelineEnv(entry.Env), Sink: hostedPlanSink{delegate}},
 		Pipeline: opts.Pipeline, Args: invokeArgs, Run: hostedRunContext(opts, runID),
-		StartAt: opts.StartAt, StopAt: opts.StopAt,
+		StartAt: opts.StartAt, StopAt: opts.StopAt, Only: opts.Only, Workers: opts.MaxParallel,
 		State: state, Artifacts: backends.Artifact, Attempts: attempts, Admission: admission,
 		Debug: nodehost.Debug{
 			PauseBefore: opts.Debug.PauseBefore, PauseAfter: opts.Debug.PauseAfter,
@@ -164,6 +169,13 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 				return backends.State.GetNodeOutput(ctx, runID, nodeID)
 			},
 		},
+	}
+	if backends.LocalCoordination {
+		stopTriggers, err := hostedTriggerLoop(ctx, backends.State, runID, entry.Dir, opts.standalone)
+		if err != nil {
+			return nil, err
+		}
+		defer stopTriggers()
 	}
 	execStart := time.Now()
 	out, err := nodehost.Execute(ctx, cfg)
@@ -219,18 +231,6 @@ func applyHostedProjectConfig(opts *Options, dir string) error {
 		}
 	}
 	return RefusePinnedLocalRun(opts.PipelineYAML)
-}
-
-// safety: the engine's own SPARKWING_* variables never reach pipeline code,
-// in the plan process as in every attempt.
-func hostedEnv(env []string) []string {
-	out := make([]string, 0, len(env))
-	for _, kv := range env {
-		if !strings.HasPrefix(kv, "SPARKWING_") {
-			out = append(out, kv)
-		}
-	}
-	return out
 }
 
 func hostedRunContext(opts Options, runID string) nodeproto.RunContext {
@@ -523,6 +523,14 @@ func RunHostedCommand(ctx context.Context, opts Options, entry HostedEntry, logF
 	if !verbose {
 		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
 	}
+	if opts.MaxParallel == 0 {
+		if err := applyCIEmbeddedEnv(&opts); err != nil {
+			return nil, err
+		}
+	}
+	if opts.MaxParallel == 0 {
+		opts.MaxParallel = runtime.NumCPU()
+	}
 	delegate := runRenderer(logFormat, verbose)
 	opts.Delegate = delegate
 	opts.AdmissionClass = admissionClassFromEnv()
@@ -543,4 +551,74 @@ func RunHostedCommand(ctx context.Context, opts Options, entry HostedEntry, logF
 		return res, errors.New(runDisplayError(delegate, res.Error))
 	}
 	return res, fmt.Errorf("run %s", res.Status)
+}
+
+type hostedChildren struct {
+	state  StateBackend
+	masker *secrets.Masker
+}
+
+// safety: the child carries the parent run's lease, so the admission daemon attaches it to the parent's
+// rather than queueing it behind the run that waits on it.
+func (h hostedChildren) StartChild(ctx context.Context, parent nodehost.ChildParent, req nodehost.ChildRequest) (string, error) {
+	var env map[string]string
+	if parent.LeaseToken != "" {
+		env = map[string]string{wingwire.LeaseTokenEnv: parent.LeaseToken}
+	}
+	id, err := enqueueTriggerWithEnv(ctx, h.state, req.Pipeline, req.Args, parent.RunID, parent.NodeID, "",
+		"await-pipeline", "", req.Repo, req.Branch, env)
+	if errors.Is(err, errTriggerCycle) {
+		return "", errors.Join(nodehost.ErrChildCycle, err)
+	}
+	if err != nil {
+		return "", err
+	}
+	if payload, err := json.Marshal(map[string]any{"child_run_id": id, "pipeline": req.Pipeline, "args": req.Args}); err == nil {
+		noteEvent(ctx, h.state, parent.RunID, parent.NodeID, "child_run_start", maskEventPayload(h.masker, payload))
+	}
+	return id, nil
+}
+
+func (h hostedChildren) GetRun(ctx context.Context, runID string) (*store.Run, error) {
+	return h.state.GetRun(ctx, runID)
+}
+
+// safety: a node's child runs queue on this machine's trigger queue, and this run drains its own children
+// there as the dispatcher did; stop waits for the loop's last store write, which races the store's close.
+func hostedTriggerLoop(ctx context.Context, state StateBackend, runID, repoDir string, standalone *standaloneRun) (stop func(), err error) {
+	budget, err := storeWedgeBudget()
+	if err != nil {
+		return nil, err
+	}
+	child := childStoreEnv{}
+	if standalone != nil {
+		child = childStoreEnv{path: standalone.stateDB, reason: standalone.reason}
+	}
+	loopCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runLocalTriggerLoop(loopCtx, state, runID, repoDir, nil, budget, child)
+	}()
+	return func() { cancel(); <-done }, nil
+}
+
+// safety: what a node prints to stdout is stored at info but rendered at warn, as the dispatcher's local
+// runner did, so the compact renderer, which drops info, still shows it.
+type hostedNodeLog struct {
+	NodeLog
+	delegate sparkwing.Logger
+}
+
+func (l hostedNodeLog) Emit(rec sparkwing.LogRecord) {
+	l.NodeLog.Emit(rec)
+	l.delegate.Emit(rec)
+}
+
+func (l hostedNodeLog) EmitText(rec sparkwing.LogRecord) {
+	l.NodeLog.Emit(rec)
+	if rec.Level == nodehost.LevelInfo {
+		rec.Level = nodehost.LevelWarn
+	}
+	l.delegate.Emit(rec)
 }

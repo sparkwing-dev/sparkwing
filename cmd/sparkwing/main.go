@@ -138,9 +138,6 @@ func dispatchRun(args []string) error {
 	if err := refuseDetachedOnlyFlags(flags); err != nil {
 		return err
 	}
-	if err := refuseUnhostedFlags(flags); err != nil {
-		return err
-	}
 	projectStart := ""
 	if cwd, workingDirectoryErr := os.Getwd(); workingDirectoryErr == nil {
 		projectStart = cwd

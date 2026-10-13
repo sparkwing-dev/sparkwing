@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,17 +20,6 @@ type hostedRun struct {
 	priority  string
 	logFormat string
 	runHandle string
-}
-
-// safety: run options travel as host state, never as environment variables, so pipeline code cannot read or forge them.
-func refuseUnhostedFlags(flags runFlags) error {
-	switch {
-	case flags.only != "":
-		return errors.New("--sw-only is not supported by the engine host yet")
-	case flags.workers > 0:
-		return errors.New("--sw-workers is not supported by the engine host yet")
-	}
-	return nil
 }
 
 func (r *pipelineRun) host(h hostedRun) error {
@@ -90,6 +78,8 @@ func (r *pipelineRun) host(h hostedRun) error {
 		Debug:         orchestrator.DebugDirectivesFromEnv(),
 		StartAt:       flags.startAt,
 		StopAt:        flags.stopAt,
+		Only:          flags.only,
+		MaxParallel:   flags.workers,
 		NoCache:       flags.noCache,
 		DryRun:        flags.dryRun,
 		Priority:      h.priority,

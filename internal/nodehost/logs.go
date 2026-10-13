@@ -21,6 +21,13 @@ type RecordWriter interface {
 	Emit(rec sparkwing.LogRecord)
 }
 
+// TextWriter is a [RecordWriter] that takes the stdout and stderr text
+// records apart from the SDK's records, so a renderer can show what customer
+// code printed differently from how the record is stored.
+type TextWriter interface {
+	EmitText(rec sparkwing.LogRecord)
+}
+
 // NodeState stores the annotations and summaries a node's records carry. The
 // orchestrator's state backends satisfy it.
 type NodeState interface {
@@ -106,7 +113,7 @@ func (s *LogSink) Text(level, line string) {
 	}
 	s.mu.Unlock()
 	if text != "" {
-		s.emit(sparkwing.LogRecord{Level: level, Msg: s.cfg.Masker.Mask(text)})
+		s.emitText(sparkwing.LogRecord{Level: level, Msg: s.cfg.Masker.Mask(text)})
 	}
 }
 
@@ -118,7 +125,7 @@ func (s *LogSink) Flush() {
 	s.mu.Unlock()
 	for src, text := range carry {
 		if text != "" {
-			s.emit(sparkwing.LogRecord{Level: streamLevels[src], Msg: s.cfg.Masker.Mask(text)})
+			s.emitText(sparkwing.LogRecord{Level: streamLevels[src], Msg: s.cfg.Masker.Mask(text)})
 		}
 	}
 }
@@ -231,6 +238,20 @@ func (s *LogSink) emit(rec sparkwing.LogRecord) {
 	rec.TS = s.cfg.Now()
 	rec.JobID = s.cfg.NodeID
 	s.cfg.Log.Emit(rec)
+	if s.cfg.Progress != nil {
+		s.cfg.Progress()
+	}
+}
+
+func (s *LogSink) emitText(rec sparkwing.LogRecord) {
+	tw, ok := s.cfg.Log.(TextWriter)
+	if !ok {
+		s.emit(rec)
+		return
+	}
+	rec.TS = s.cfg.Now()
+	rec.JobID = s.cfg.NodeID
+	tw.EmitText(rec)
 	if s.cfg.Progress != nil {
 		s.cfg.Progress()
 	}

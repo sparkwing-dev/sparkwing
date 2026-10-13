@@ -49,6 +49,12 @@ type Config struct {
 	Invocation map[string]any
 	// Memo reuses memoized nodes' earlier results; nil runs every node.
 	Memo *Memo
+	// Only, as --sw-only, runs only the plan's nodes whose ID matches the
+	// glob and the nodes they depend on, skipping the rest.
+	Only string
+	// Workers caps how many non-inline nodes run an attempt at once; zero
+	// leaves them uncapped.
+	Workers int
 }
 
 // Result is how one node ended.
@@ -115,14 +121,15 @@ type Run struct {
 	Doc nodeproto.PlanDoc
 	// Pipeline, Args and Context are the accepted plan's request; every
 	// later process of the run plans with the same.
-	Pipeline string
-	Args     map[string]string
-	Context  nodeproto.RunContext
-	StartAt  string
-	StopAt   string
-	State    storage.StateStore
-	Logger   *slog.Logger
-	adds     chan addRequest
+	Pipeline  string
+	Args      map[string]string
+	Context   nodeproto.RunContext
+	StartAt   string
+	StopAt    string
+	State     storage.StateStore
+	Logger    *slog.Logger
+	adds      chan addRequest
+	onlySkips map[string]string
 	// safety: set once, before any node starts, so node goroutines read it unlocked.
 	leaseToken string
 }
@@ -159,7 +166,7 @@ type Layer func(cfg *Config, next Executor) Executor
 // safety: the order is the envelope's nesting, outermost first: debug pauses, then skip_if, which the
 // dispatcher checks after a pause-before but before a gate waits, then approvals and recovery, memo, which
 // copies a hit before any admission lease or group slot is taken, admission, bounce, artifacts, caches,
-// retries and timeouts, expansion. The attempt closures and steps run inside the attempt executor.
+// retries, the worker cap and timeouts, expansion. The attempt closures and steps run inside the attempt executor.
 var layers = []Layer{
 	debugLayer,
 	skipIfLayer,
@@ -170,6 +177,7 @@ var layers = []Layer{
 	artifactsLayer,
 	cachesLayer,
 	retryLayer,
+	workersLayer,
 	timeoutLayer,
 }
 
@@ -232,6 +240,10 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 	if err == nil {
 		err = validateStepRange(doc, cfg.StartAt, cfg.StopAt)
 	}
+	var skips map[string]string
+	if err == nil {
+		skips, err = onlySkips(doc, cfg.Only, cfg.StartAt, cfg.StopAt)
+	}
 	if err == nil {
 		err = cfg.State.UpdatePlanSnapshot(ctx, res.RunID, raw)
 	}
@@ -246,6 +258,7 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 	run := &Run{
 		ID: res.RunID, Doc: doc, Pipeline: cfg.Pipeline, Args: args, Context: cfg.Run,
 		StartAt: cfg.StartAt, StopAt: cfg.StopAt, State: cfg.State, Logger: cfg.Logger, adds: make(chan addRequest),
+		onlySkips: skips,
 	}
 	releaseLease = runPlanned(ctx, &cfg, run, &res)
 	return res, nil
@@ -405,6 +418,11 @@ func (s *scheduler) startReady(ctx context.Context, done chan<- finished, runnin
 		}
 		if ctx.Err() != nil {
 			s.terminal(ctx, n.ID, sparkwing.Cancelled, "ctx-cancelled")
+			progressed = true
+			continue
+		}
+		if reason, ok := s.run.onlySkips[n.ID]; ok {
+			s.terminal(ctx, n.ID, sparkwing.Skipped, reason)
 			progressed = true
 			continue
 		}

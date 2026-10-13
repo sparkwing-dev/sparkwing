@@ -450,7 +450,7 @@ func (l localState) EnqueueTriggerWithEnv(
 		chain := append([]string{parent.Pipeline}, ancestors...)
 		for _, p := range chain {
 			if p == pipeline {
-				return "", fmt.Errorf("cycle: %s would re-enter itself", pipeline)
+				return "", fmt.Errorf("%w: %s would re-enter itself", errTriggerCycle, pipeline)
 			}
 		}
 	}
@@ -493,6 +493,8 @@ func (l localState) EnqueueTriggerWithEnv(
 	}
 	return runID, nil
 }
+
+var errTriggerCycle = errors.New("cycle")
 
 type triggerEnqueuerWithEnv interface {
 	EnqueueTriggerWithEnv(

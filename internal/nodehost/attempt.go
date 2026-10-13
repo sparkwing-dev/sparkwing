@@ -37,6 +37,9 @@ type Attempts struct {
 	// except the output routes Local answers.
 	Claim *Claim
 	Local LocalOutputs
+	// Children starts the child runs of a run no controller holds; nil
+	// answers the child routes 502 there.
+	Children LocalChildren
 	// OpenLog opens the node's log; the executor closes it once the attempt's
 	// last record, cleanup output included, is written.
 	OpenLog func(ctx context.Context, runID, nodeID string) (NodeLog, error)
@@ -90,7 +93,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	}
 	bearer, revoke, err := a.Routes.Admit(Node{
 		RunID: run.ID, NodeID: id, Secrets: names, Resolver: a.Resolver, Masker: a.Masker, Claim: a.Claim, Local: a.Local,
-		Pause: n.Pause, Output: n.memoOutput,
+		Children: a.Children, LeaseToken: run.leaseToken, Pause: n.Pause, Output: n.memoOutput,
 	})
 	if err != nil {
 		return failed(fmt.Errorf("admit node %s: %w", id, err))
@@ -254,19 +257,37 @@ func MinimalEnv() []string {
 	return env
 }
 
-// safety: the engine's own SPARKWING_* variables never reach the node; its
-// contract variables are set last so neither the engine nor the node's env
-// overrides them.
+// safety: the SPARKWING_* variables docs/environment-variables.md says pipeline code reads - the hook's staged
+// index, the SDK's debug switch, and the CLI configuration a step running sparkwing needs to reach the same
+// store. Every other one is the engine's (a token, URL, run option or protocol plumbing) and never reaches a node.
+var pipelineEnv = []string{
+	"SPARKWING_GATE_INDEX", "SPARKWING_DEBUG", "SPARKWING_TOOLCHAIN_ACTIVE",
+	"SPARKWING_HOME", "SPARKWING_CONFIG", "SPARKWING_CONFIG_ENV", "SPARKWING_FLEET_CONFIG",
+	"SPARKWING_PROFILES", "SPARKWING_REPOS", "SPARKWING_SECRETS", "SPARKWING_SECRETS_KEY",
+	"SPARKWING_SECRETS_KEY_FILE", "SPARKWING_SECRETS_PREVIOUS_KEY", "SPARKWING_TOOLCHAIN",
+	"SPARKWING_WINGD_BIN", "SPARKWING_ADMISSION_CLASS", "SPARKWING_LOG_FORMAT",
+}
+
+// PipelineEnv is env without the engine's SPARKWING_* variables, keeping the
+// ones pipeline code reads.
+func PipelineEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		k, _, _ := strings.Cut(kv, "=")
+		if !strings.HasPrefix(k, "SPARKWING_") || slices.Contains(pipelineEnv, k) {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
+// safety: the node's contract variables are set last so neither the engine nor the node's env overrides them.
 func attemptEnv(base []string, nodeEnv map[string]string, runID, nodeID, url, bearer string) []string {
 	if base == nil {
 		base = MinimalEnv()
 	}
 	env := make([]string, 0, len(base)+len(nodeEnv)+4)
-	for _, kv := range base {
-		if !strings.HasPrefix(kv, "SPARKWING_") {
-			env = append(env, kv)
-		}
-	}
+	env = append(env, PipelineEnv(base)...)
 	keys := make([]string, 0, len(nodeEnv))
 	for k := range nodeEnv {
 		keys = append(keys, k)

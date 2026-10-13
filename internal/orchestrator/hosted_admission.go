@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"runtime"
@@ -36,6 +37,9 @@ func hostedAdmission(ctx context.Context, opts *Options, backends Backends, plan
 		return nil, err
 	}
 	warnHostedClose("admission probe", cl.Close())
+	if la.Delegate == nil {
+		la.Delegate = opts.Delegate
+	}
 	a.Daemon = &hostedAdmitter{la: la, backends: backends, pipeline: opts.Pipeline, plan: plan}
 	return a, nil
 }
@@ -58,10 +62,31 @@ func (h *hostedAdmitter) Acquire(ctx context.Context, req wingwire.AdmissionRequ
 	if err != nil {
 		return nil, err
 	}
-	lease, err := cl.Acquire(ctx, req, onQueued)
+	runID, node, _ := strings.Cut(req.RunID, "/node-host/")
+	if raw, err := base64.RawURLEncoding.DecodeString(node); err == nil {
+		node = string(raw)
+	}
+	reporter := &queueWaitReporter{
+		la: h.la, backends: h.backends, runID: runID, nodeID: node,
+		displayID: cmp.Or(req.DisplayRunID, req.RunID), requestID: req.RunID, request: req,
+		snapshot: func(queryCtx context.Context) (wingwire.QueueState, error) {
+			return wingdclient.Query(queryCtx, h.la.clientOptions())
+		},
+	}
+	stopNarration := reporter.startHeartbeat(ctx)
+	lease, err := cl.Acquire(ctx, req, func(q wingwire.Queued) {
+		reporter.onQueued(q)
+		if onQueued != nil {
+			onQueued(q)
+		}
+	})
+	stopNarration()
 	if err != nil {
 		warnHostedClose("admission client", cl.Close())
 		return nil, err
+	}
+	if reporter.waited() {
+		h.la.reportGranted(ctx, h.backends, runID, node, req.RunID, reporter.displayID)
 	}
 	return hostedLease{lease}, nil
 }

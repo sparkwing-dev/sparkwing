@@ -169,16 +169,6 @@ func TestDispatchRun_SeparatorPassesRetiredFlagsToPipeline(t *testing.T) {
 	}
 }
 
-func TestDispatchRun_RefusesWhatTheHostDoesNotSupportBeforeProjectLookup(t *testing.T) {
-	t.Chdir(t.TempDir())
-	for _, args := range [][]string{{"--sw-workers", "3"}, {"--sw-only", "build"}} {
-		err := dispatchRun(append([]string{"missing-pipeline"}, args...))
-		if err == nil || !strings.Contains(err.Error(), "not supported by the engine host") {
-			t.Fatalf("%v error=%v", args, err)
-		}
-	}
-}
-
 func TestDispatchRunRejectsMalformedWorkersBeforeProjectLookup(t *testing.T) {
 	t.Chdir(t.TempDir())
 	for _, args := range [][]string{{"--sw-workers=four"}, {"--sw-workers=-2"}, {"--sw-workers", "four"}, {"--sw-workers", "-2"}, {"--sw-workers"}} {
