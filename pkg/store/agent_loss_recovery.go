@@ -372,7 +372,7 @@ func (s *Store) createAgentLossRetryTx(ctx context.Context, tx *storeTx, sourceR
 	err := tx.QueryRowContext(ctx, `SELECT pipeline, status, trigger_source, retried_as, repo_url, git_sha,
 	   github_owner, github_repo, plan_json, invocation_json,
 	   COALESCE((SELECT plan_hash FROM run_definition_plans WHERE run_id = runs.id), ''),
-	   (SELECT trigger_env FROM triggers WHERE id = runs.id)
+	   (SELECT trigger_env FROM triggers WHERE team = runs.team AND id = runs.id)
   FROM runs WHERE id = ?`+s.forUpdate(), sourceRunID).Scan(
 		&pipeline, &status, &triggerSource, &retriedAs, &repoURL, &gitSHA,
 		&githubOwner, &githubRepo, &planJSON, &invocationJSON, &definitionPlanHash, &triggerEnvJSON)
