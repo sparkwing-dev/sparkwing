@@ -288,6 +288,44 @@ func TestHostedSelection_ForcedStillSaysNoDaemonWhenThereIsNone(t *testing.T) {
 	}
 }
 
+func TestHostedSelection_ChildOfAForcedParentReadsTheParentsStore(t *testing.T) {
+	home := wingdTestHome(t)
+	t.Setenv("SPARKWING_HOME", home)
+	_, runs := startAPIDaemon(t, home, nil)
+	ctx := context.Background()
+	if _, _, err := runs.Create(ctx); err != nil {
+		t.Fatal(err)
+	}
+	paths := PathsAt(home)
+	st, sa, release, err := openStandaloneStore(paths, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	defer func() { _ = st.Close() }()
+	if err := st.CreateRun(ctx, store.Run{ID: "parent", Pipeline: "parent", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	id, err := (localState{st: st}).EnqueueTrigger(ctx, "child", nil, "parent", "job", "", "await-pipeline", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(StandaloneStateDBEnv, sa.stateDB)
+	t.Setenv(StandaloneReasonEnv, standaloneForced)
+
+	backends, sel, closeBackends, err := localTriggerBackends(ctx, paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeBackends()
+	if backends.APISocket != "" || sel.standalone != standaloneForced {
+		t.Fatalf("socket = %q, reason = %q; want the child forced standalone like its parent", backends.APISocket, sel.standalone)
+	}
+	if _, err := backends.State.GetTrigger(ctx, id); err != nil {
+		t.Fatalf("child could not read its trigger from the parent's store: %v", err)
+	}
+}
+
 func TestHostedRun_UnreadableDaemonStoreRefusesTheRun(t *testing.T) {
 	registerHostedPipelines(t)
 	home := wingdTestHome(t)

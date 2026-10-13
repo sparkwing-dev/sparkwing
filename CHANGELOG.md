@@ -88,6 +88,7 @@ unlock.
 
 ### Fixed
 - **cli + runner:** `config`, `--explain`, `--plan`, `debug replay` and each local node process no longer inherit the variables the engine owns, such as `SPARKWING_SECRETS_KEY`, so pipeline init code cannot read them
+- **orchestrator:** A child run of `sparkwing run --sw-allow-unadmitted` stays standalone and finds its trigger in its parent's store when a daemon answers
 - **secrets:** a controller secrets backend error no longer quotes credentials embedded in the backend URL
 - **controller:** A node waiting for an agent no longer reports that no agent of its team can run it when the agent's token expires
   Claim attention listed only tokens that never expire, because it compared their expiry in seconds against the clock in nanoseconds, so every runner and machine token dropped out; it also read an offline agent's last use as a 1970 date. Both now read seconds.
