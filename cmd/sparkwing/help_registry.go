@@ -1418,20 +1418,14 @@ IDs, and similar errors), which makes it a CI gate.`,
 }
 
 var cmdRun = Command{
-	Path:              "sparkwing run",
-	ReachesController: true,
-	Synopsis:          "Invoke a pipeline",
+	Path:     "sparkwing run",
+	Synopsis: "Invoke a pipeline",
 	Description: `Compiles the nearest .sparkwing/ binary and exec's it
 with the named pipeline. A run executes on this machine against its local
 store and secrets. A pipeline whose sparkwing.yaml entry names a profile: is
-pinned to that controller, and run refuses it.
-
---profile NAME is accepted only for a profile with no controller whose state
-is an S3 bucket or a Postgres database: the run executes here and records its
-state, logs and cache to that profile's backends. This is a temporary
-exception for teams that coordinate through shared storage, slated for
-removal; a controller profile is refused with the 'sparkwing pipeline
-trigger' command to use instead.
+pinned to that controller, and run refuses it. run takes no --profile; it
+refuses one with the 'sparkwing pipeline trigger' command that runs the
+pipeline on that profile's controller.
 
 Pipeline-module builds honor the highest go directive in go.mod and an active
 resolved overlay. A fixed GOTOOLCHAIN below that floor selects the required Go
@@ -1561,9 +1555,8 @@ port.`,
 }
 
 var cmdDashboardStart = Command{
-	Path:              "sparkwing serve start",
-	ReachesController: true,
-	Synopsis:          "Start the dashboard, preserving every running instance",
+	Path:     "sparkwing serve start",
+	Synopsis: "Start the dashboard, preserving every running instance",
 	Description: `Detaches a child process that runs the in-process
 dashboard + API + logs server (pkg/localws). PID is written to
 $SPARKWING_HOME/dashboard.pid; stdout/stderr are appended to
@@ -1593,18 +1586,13 @@ application/json. --allow-remote widens the Host check only.`,
 		{Name: "addr", Argument: "HOST:PORT", Desc: "Bind address", Default: "127.0.0.1:4343", Group: "Bind"},
 		{Name: "allow-remote", Desc: "Serve a non-loopback --addr. Every host that reaches it can try the serve token, and a holder of the token can run pipelines and list, overwrite and delete this machine's local secrets. It never serves a masked value.", Group: "Bind"},
 		{Name: "allow-origin", Argument: "ORIGINS", Desc: "Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones, as Origin and as Host. Needed when a same-host proxy or --allow-remote serves the dashboard under a name that is not the --addr host.", Group: "Bind"},
-		{Name: "profile", Argument: "PROFILE", Desc: "Profile from ~/.config/sparkwing/config.yaml (uses its logs + cache surfaces)", Group: "Storage"},
-		{Name: "log-store", Argument: "URL", Desc: "Pluggable log backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile.", Group: "Storage"},
-		{Name: "artifact-store", Argument: "URL", Desc: "Pluggable artifact backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile.", Group: "Storage"},
-		{Name: "read-only", Desc: "Reject writes on /api/v1/* (auth + webhooks remain open)", Group: "Storage"},
-		{Name: "no-local-store", Desc: "Skip local SQLite; list runs from --artifact-store. Requires --log-store + --artifact-store.", Group: "Storage"},
+		{Name: "read-only", Desc: "Reject writes on /api/v1/* (auth + webhooks remain open)", Group: "Behavior"},
 	},
-	GroupOrder: []string{"Bind", "Storage", "System", "Other"},
+	GroupOrder: []string{"Bind", "Behavior", "System", "Other"},
 	Examples: []Example{
 		{"Start with defaults", "sparkwing serve start"},
 		{"Use an alternate port", "sparkwing serve start --addr 127.0.0.1:5000"},
 		{"Isolate state under a scratch dir", "SPARKWING_HOME=" + helpExampleScratchDir("sparkwing-x") + " sparkwing serve start"},
-		{"Tail CI runs from S3 (no SQLite)", "sparkwing serve start --profile ci-smoke --no-local-store --read-only"},
 		{"Serve a LAN bind under a browser-facing name", "sparkwing serve start --addr 192.168.1.20:4343 --allow-remote --allow-origin http://dashboard.example.com:4343"},
 	},
 }
@@ -1626,12 +1614,11 @@ An absent service succeeds.`,
 }
 
 var cmdDashboardRestart = Command{
-	Path:              "sparkwing serve restart",
-	ReachesController: true,
-	Synopsis:          "Replace an owned dashboard and wait for readiness",
-	Description:       "Stops the verified owned instance, then starts the invoked binary. Preserves effective options unless explicitly overridden. Address and storage URL syntax are checked before stopping; a valid replacement can still fail during startup. Unknown ownership is refused.",
-	Flags:             cmdDashboardStart.Flags,
-	Examples:          []Example{{"Restart with existing options", "sparkwing serve restart"}},
+	Path:        "sparkwing serve restart",
+	Synopsis:    "Replace an owned dashboard and wait for readiness",
+	Description: "Stops the verified owned instance, then starts the invoked binary. Preserves effective options unless explicitly overridden. The address is checked before stopping; a valid replacement can still fail during startup. Unknown ownership is refused.",
+	Flags:       cmdDashboardStart.Flags,
+	Examples:    []Example{{"Restart with existing options", "sparkwing serve restart"}},
 }
 
 var cmdDashboardLogs = Command{
@@ -1796,7 +1783,7 @@ Add a profile with 'sparkwing cloud connect', check it with
 var cmdProfilesList = Command{
 	Path:     "sparkwing configure profiles list",
 	Synopsis: "Print every registered profile",
-	Description: `Prints a table of profile name, controller URL, logs surface, and
+	Description: `Prints a table of profile name, controller URL, and
 token. JSON is one profile per line; the token is redacted in
 every mode.`,
 	Flags: []FlagSpec{
@@ -2207,8 +2194,7 @@ exclusive views of the unified stream.
 local run (run_start, node_start, run_finish, ...). A run read through a
 backend emits that run's stored event records instead (admission_wait,
 concurrency_wait, cache_hit, ...) -- a different record shape. That is
-any profile whose state is a shared database, an object store or a
-controller, and any profile that declares its own logs surface.
+any profile whose state is a controller.
 
 --grep without --run searches the logs of recent runs instead, scanning up
 to --limit runs the run filters (--pipeline, --status, --branch, --sha,
@@ -2527,7 +2513,7 @@ an installation failure restores prior managed hooks, forwarders, modes,
 and configuration. A rejected installation exits nonzero and reports its
 reason on stderr. --no-prove skips gate execution.
 
-Every hook runs its pipelines with --sw-local-only on this machine. --fleet
+Every hook runs its pipelines on this machine. --fleet
 processes registered repositories and distinguishes installed gates, gates
 that could not execute, and repositories declaring no blocking gate.`,
 	Flags: []FlagSpec{

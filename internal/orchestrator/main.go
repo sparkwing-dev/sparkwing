@@ -12,6 +12,8 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/sparkwing-dev/sparkwing/internal/protofd"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
@@ -21,12 +23,21 @@ import (
 )
 
 func Main() {
+	// safety: ahead of the other verbs' startup, which claims an inherited
+	// descriptor and SPARKWING_* variables that the protocol leaves to the host.
+	if len(os.Args) == 2 && os.Args[1] == protofd.Arg {
+		if _, err := bindProjectPipelines(); err != nil {
+			fmt.Fprintln(os.Stderr, "sw-node-protocol:", err)
+			os.Exit(1)
+		}
+		os.Exit(sdkserve.Main(sdkserve.Config{SDKVersion: sparkwingModuleVersion(), PlanDoc: planDocument}))
+	}
 	secrets.ShareRegisteredFromEnv()
 	if err := takeAgentToken(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	projectCfg := bindProjectPipelines()
+	projectCfg, projectErr := bindProjectPipelines()
 
 	if len(os.Args) > 1 && os.Args[1] == "--describe" {
 		described, err := sparkwingruntime.DescribeAll()
@@ -55,6 +66,13 @@ func Main() {
 			os.Exit(1)
 		}
 		return
+	}
+	// safety: handle-trigger and run-node record a config error against the
+	// run they serve; every other verb has no run to record it on, so it stops
+	// here rather than planning without the project's defaults and guards.
+	if projectErr != nil {
+		fmt.Fprintln(os.Stderr, "sparkwing:", projectErr)
+		os.Exit(1)
 	}
 	// safety: only the exact form is the verb, so a pipeline named plan still
 	// runs under its own flags.
@@ -162,7 +180,6 @@ func Main() {
 		Priority:            os.Getenv(PriorityEnv),
 		AdmissionClass:      admissionClassFromEnv(),
 		DryRun:              dryRunFromEnv(),
-		LocalOnly:           os.Getenv("SPARKWING_LOCAL_ONLY") == "1",
 		MaxParallel:         runtime.NumCPU(),
 		PipelineYAML:        pipelineYAML,
 		// safety: this binary serves `run-node` a few lines above, so it can
@@ -181,25 +198,14 @@ func Main() {
 			}
 		}
 	}
-	if pipelineYAML != nil {
-		for _, r := range pipelineYAML.Requires {
-			if r == "local" {
-				opts.LocalOnly = true
-				break
-			}
-		}
-	}
 	if pinErr := RefusePinnedLocalRun(pipelineYAML); pinErr != nil {
 		fmt.Fprintln(os.Stderr, "sparkwing run:", pinErr)
 		os.Exit(1)
 	}
-	prof, profChain, profErr := resolveActiveProfile(projectCfg)
-	if profErr != nil {
-		fmt.Fprintln(os.Stderr, "sparkwing run:", profErr)
+	if profileErr := refuseProfileHandoff(); profileErr != nil {
+		fmt.Fprintln(os.Stderr, "sparkwing run:", profileErr)
 		os.Exit(1)
 	}
-	opts.Profile = prof
-	opts.ProfileChain = profChain
 	if applyErr := applyCIEmbeddedEnv(&opts); applyErr != nil {
 		fmt.Fprintln(os.Stderr, "sparkwing run:", applyErr)
 		os.Exit(1)
@@ -225,17 +231,20 @@ func Main() {
 	}
 }
 
-func bindProjectPipelines() *projectconfig.Config {
+func bindProjectPipelines() (*projectconfig.Config, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("find the project config: %w", err)
 	}
 	_, cfg, err := projectconfig.Discover(cwd)
-	if err != nil || cfg == nil {
-		return nil
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil {
+		return nil, nil
 	}
 	sparkwing.BindPipelinesFromYAML(&pipelines.Config{Pipelines: cfg.Pipelines})
-	return cfg
+	return cfg, nil
 }
 
 func selectLocalRenderer() sparkwing.Logger {

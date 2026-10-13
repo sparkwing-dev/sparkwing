@@ -21,7 +21,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/originguard"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -42,29 +41,10 @@ type Options struct {
 	// the listener's address for those side effects to be correct.
 	Listener net.Listener
 
-	// LogStore, when non-nil, routes dashboard log reads through this
-	// backend instead of the default filesystem reader rooted at Home.
-	LogStore storage.LogStore
-	// LogStoreLabel is a short tag ("fs", "s3", ...) surfaced on
-	// /api/v1/capabilities. Empty when LogStore is nil.
-	LogStoreLabel string
-
-	// ArtifactStore, when non-nil, feeds the capabilities endpoint and
-	// the bucket ceiling's measurement.
-	ArtifactStore      storage.ArtifactStore
-	ArtifactStoreLabel string
-
 	// ReadOnly, when true, rejects state-mutating methods on every
 	// /api/v1/* path except /api/v1/auth/* with 405. Auth stays open
 	// so operators can still log in to a read-only console.
 	ReadOnly bool
-
-	// NoLocalStore, when true, skips opening the local SQLite store
-	// and routes the dashboard's runs list through ArtifactStore
-	// instead. Requires LogStore + ArtifactStore to be set. Implies a
-	// read-only experience: the controller is not mounted, so write
-	// endpoints are absent rather than 405.
-	NoLocalStore bool
 
 	// AllowRemote lets the server bind a non-loopback Addr and answer
 	// requests whose Host is not loopback. Hosts holding the serve token
@@ -138,57 +118,36 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 		return fmt.Errorf("serve token: %w", err)
 	}
 
-	useS3OnlyReader := opts.NoLocalStore && opts.LogStore != nil && opts.ArtifactStore != nil
-
-	var st *store.Store
-	if !useS3OnlyReader {
-		s, err := store.Open(paths.StateDB())
-		if err != nil {
-			return fmt.Errorf("open %s: %w", paths.StateDB(), err)
-		}
-		st = s
-		defer func() { _ = st.Close() }()
+	st, err := store.Open(paths.StateDB()) //nolint:contextcheck // Store.Open owns its bounded migration context and has no caller-context variant.
+	if err != nil {
+		return fmt.Errorf("open %s: %w", paths.StateDB(), err)
 	}
+	defer func() { retErr = errors.Join(retErr, st.Close()) }()
 
-	var ctrl *controller.Server
-	var dashBackend backend.Backend
-	if useS3OnlyReader {
-		s3b := backend.NewS3Backend(opts.ArtifactStore, opts.LogStore)
-		s3b.SetCapabilities(backend.Capabilities{
-			Mode:     "s3-only",
-			Storage:  backendCapabilitiesStorage(opts, "s3"),
-			Features: []string{"pipelines", "runs", "logs"},
-			ReadOnly: true,
-		})
-		dashBackend = s3b
-	} else {
-		ring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{})
-		if err != nil {
-			return fmt.Errorf("local secrets key: %w", err)
-		}
-		ctrl = controller.New(st, nil).
-			WithArtifactStore(opts.ArtifactStore).
-			WithSecretsCipher(ring.For(st)).
-			WithLocalExecution().
-			WithReconcileHook(func(rctx context.Context) error {
-				_, err := orchestrator.ReconcileOrphanedLocalRuns(rctx, st, 0)
-				return err
-			}).
-			WithDashboard(controller.Dashboard{
-				Local:   true,
-				Bundle:  bundle,
-				Version: opts.Version,
-				Logs:    opts.LogStore,
-				Paths:   paths,
-				Capabilities: backend.Capabilities{
-					Mode:     "local",
-					Storage:  backendCapabilitiesStorage(opts, "sqlite"),
-					Features: localFeatures(),
-				},
-			})
-		if err := orchestrator.RunLocalTriggerConsumer(ctx, paths.Root, st, nil, opts.Version); err != nil {
+	ring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{})
+	if err != nil {
+		return fmt.Errorf("local secrets key: %w", err)
+	}
+	ctrl := controller.New(st, nil).
+		WithSecretsCipher(ring.For(st)).
+		WithLocalExecution().
+		WithReconcileHook(func(rctx context.Context) error {
+			_, err := orchestrator.ReconcileOrphanedLocalRuns(rctx, st, 0)
 			return err
-		}
+		}).
+		WithDashboard(controller.Dashboard{
+			Local:   true,
+			Bundle:  bundle,
+			Version: opts.Version,
+			Paths:   paths,
+			Capabilities: backend.Capabilities{
+				Mode:     "local",
+				Storage:  backend.CapabilitiesStorage{Artifacts: "fs", Logs: "fs", Runs: "sqlite"},
+				Features: localFeatures(),
+			},
+		})
+	if err := orchestrator.RunLocalTriggerConsumer(ctx, paths.Root, st, nil, opts.Version); err != nil {
+		return err
 	}
 
 	baseURL := "http://" + opts.Addr
@@ -202,13 +161,11 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 	defer cancel()
 
 	handler := buildHandler(ctx, cancel, opts, handlerParts{
-		paths:        paths,
-		backend:      dashBackend,
-		store:        st,
-		ctrl:         ctrl,
-		s3OnlyReader: useS3OnlyReader,
-		serveToken:   serveToken,
-	}, bundle)
+		paths:      paths,
+		store:      st,
+		ctrl:       ctrl,
+		serveToken: serveToken,
+	})
 
 	srv := &http.Server{
 		Addr:              opts.Addr,
@@ -247,12 +204,10 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 }
 
 type handlerParts struct {
-	paths        orchestrator.Paths
-	backend      backend.Backend
-	store        *store.Store
-	ctrl         *controller.Server
-	s3OnlyReader bool
-	serveToken   string
+	paths      orchestrator.Paths
+	store      *store.Store
+	ctrl       *controller.Server
+	serveToken string
 }
 
 func buildHandler(
@@ -260,28 +215,20 @@ func buildHandler(
 	cancel context.CancelFunc,
 	opts Options,
 	parts handlerParts,
-	bundle fs.FS,
 ) http.Handler {
 	root := http.NewServeMux()
 	root.Handle("GET /api/v1/version", versionHandler(opts.Version, opts.Instance))
 	root.Handle("GET /api/v1/pipelines", aggregatedPipelinesHandler())
 	root.Handle("GET /api/v1/queue", queueHandler(parts.paths.Root, opts.Version))
 	registerCronRoutes(root, &cronsAPI{store: parts.store, paths: parts.paths, readOnly: opts.ReadOnly})
-	if parts.ctrl != nil {
-		// safety: this API has no sign-in, so a masked value never leaves it;
-		// the dashboard lists, writes and deletes rows without reading one.
-		root.Handle("GET /api/v1/secrets/{name}", http.NotFoundHandler())
-		root.Handle("/", parts.ctrl.Handler())
-	} else {
-		registerObjectStoreDashboard(root, parts.backend, opts.Version, bundle)
-	}
+	// safety: this API has no sign-in, so a masked value never leaves it;
+	// the dashboard lists, writes and deletes rows without reading one.
+	root.Handle("GET /api/v1/secrets/{name}", http.NotFoundHandler())
+	root.Handle("/", parts.ctrl.Handler())
 
-	var handler http.Handler = root
-	if parts.store != nil {
-		guard := newSchemaGuard(parts.store, cancel)
-		handler = guard.middleware(root)
-		go guard.poll(ctx, schemaPollInterval)
-	}
+	guard := newSchemaGuard(parts.store, cancel)
+	var handler http.Handler = guard.middleware(root)
+	go guard.poll(ctx, schemaPollInterval)
 	if opts.ReadOnly {
 		handler = readOnlyMiddleware(handler)
 	}
@@ -292,24 +239,6 @@ func buildHandler(
 	}
 	return web.SecurityHeaders(false,
 		originguard.Guard(handler, originguard.NewPolicy(opts.Addr, opts.AllowRemote, opts.AllowOrigins)))
-}
-
-// safety: with no local store there is no controller, so the object-store reader answers the dashboard's reads
-// itself; it has no write route to offer.
-func registerObjectStoreDashboard(mux *http.ServeMux, b backend.Backend, version string, bundle fs.FS) {
-	mux.Handle("GET /api/v1/capabilities", web.CapabilitiesHandler(b))
-	mux.Handle("GET /api/v1/runs", web.ListRunsHandler(b))
-	mux.Handle("GET /api/v1/runs/{id}", web.GetRunHandler(b))
-	mux.Handle("GET /api/v1/runs/{id}/logs", web.RunLogsHandler(b))
-	mux.Handle("GET /api/v1/runs/{id}/logs/search", web.RunLogsSearchHandler(b, web.SearchBounds{}))
-	mux.Handle("GET /api/v1/runs/{id}/logs/{node}", web.NodeLogsHandler(b))
-	mux.Handle("GET /api/v1/runs/{id}/logs/{node}/stream", web.NodeLogStreamHandler(b))
-	mux.Handle("GET /api/v1/runs/{id}/logs/{node}/completeness", web.NodeLogCompletenessHandler(b))
-	mux.Handle("GET /api/v1/runs/grep", web.RunsGrepHandler(b, web.SearchBounds{}))
-	mux.Handle("GET /api/v1/runs/{id}/events/stream", web.EventsStreamHandler(b))
-	mux.Handle("GET /sparkwing-runtime.js", web.RuntimeConfig(version, false))
-	mux.Handle("/api/", http.NotFoundHandler())
-	mux.Handle("/", web.Pages(bundle))
 }
 
 func localPaths(home string) (orchestrator.Paths, error) {
@@ -323,29 +252,11 @@ func localPaths(home string) (orchestrator.Paths, error) {
 	return paths, nil
 }
 
-func backendCapabilitiesStorage(opts Options, runs string) backend.CapabilitiesStorage {
-	out := backend.CapabilitiesStorage{Artifacts: "fs", Logs: "fs", Runs: runs}
-	if opts.LogStore != nil {
-		out.Logs = nonEmpty(opts.LogStoreLabel, "custom")
-	}
-	if opts.ArtifactStore != nil {
-		out.Artifacts = nonEmpty(opts.ArtifactStoreLabel, "custom")
-	}
-	return out
-}
-
 func localFeatures() []string {
 	return []string{
 		"pipelines", "runs", "logs",
 		"secrets", "approvals", "cross-pipeline-refs",
 	}
-}
-
-func nonEmpty(s, fallback string) string {
-	if s == "" {
-		return fallback
-	}
-	return s
 }
 
 func readOnlyMiddleware(next http.Handler) http.Handler {

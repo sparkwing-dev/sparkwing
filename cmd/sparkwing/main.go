@@ -117,6 +117,10 @@ func dispatchRun(args []string) error {
 	}
 	var err error
 
+	if flags.profile != "" {
+		return fmt.Errorf("run: --profile is removed; sparkwing run executes on this machine against its own store, so run on the profile's controller with sparkwing pipeline trigger %s --profile %s",
+			pipelineName, flags.profile)
+	}
 	if flags.unknownRunnerFlag != "" {
 		return fmt.Errorf("run: unknown runner flag %q; see `sparkwing run --help`, or put pipeline arguments after --", flags.unknownRunnerFlag)
 	}
@@ -136,15 +140,6 @@ func dispatchRun(args []string) error {
 	}
 	if err := refuseDetachedOnlyFlags(flags); err != nil {
 		return err
-	}
-	if flags.profile != "" {
-		p, profileErr := resolveProfileFlag(flags.profile)
-		if profileErr != nil {
-			return profileErr
-		}
-		if stateErr := orchestrator.RemoteStateProfile(p); stateErr != nil {
-			return fmt.Errorf("run: %s", strings.Replace(stateErr.Error(), "<pipeline>", pipelineName, 1))
-		}
 	}
 	projectStart := ""
 	if cwd, workingDirectoryErr := os.Getwd(); workingDirectoryErr == nil {
@@ -254,20 +249,15 @@ func dispatchRun(args []string) error {
 	if flags.noCache {
 		env = append(env, "SPARKWING_NO_CACHE=1")
 	}
-	if flags.localOnly {
-		env = append(env, "SPARKWING_LOCAL_ONLY=1")
-	}
 	if flags.allowUnadmitted {
 		env = setEnv(env, orchestrator.AllowUnadmittedEnv, "1")
 	}
 	bincache.SetHashAllFiles(flags.hashAllFiles)
 	run := newPipelineRun(dir, compileOptions{
-		NoUpdate:       flags.noUpdate,
-		NoBincache:     flags.noBincache,
-		DigestBackfill: flags.digestBackfill,
-		ExecutionDir:   executionDir,
-		AfterChild:     afterChild,
-		Profile:        flags.profile,
+		NoUpdate:     flags.noUpdate,
+		NoBincache:   flags.noBincache,
+		ExecutionDir: executionDir,
+		AfterChild:   afterChild,
 	})
 	defer run.stop()
 	run.ctx = gotoolchain.WithSession(run.ctx, env, nil)
@@ -299,6 +289,23 @@ func dispatchRun(args []string) error {
 	if err := run.materialize(env); err != nil {
 		return run.finish(err)
 	}
+	inspectsConfig := len(passthrough) > 0 && passthrough[0] == "config"
+	if !inspectsConfig && (slices.Contains(passthrough, "-h") || slices.Contains(passthrough, "--help")) {
+		schema, err := run.describedPipeline(pipelineName)
+		if err == nil {
+			printPipelineHelp(os.Stdout, schema)
+		}
+		return run.finish(err)
+	}
+	if runInvokesAdmission(passthrough) {
+		schema, err := run.describedPipeline(pipelineName)
+		if err == nil {
+			_, err = parsePipelineArgs(schema, passthrough)
+		}
+		if err != nil {
+			return run.finish(fmt.Errorf("%s: %w", pipelineName, err))
+		}
+	}
 	findings := declaredRisks(run.ctx, dir, pipelineName)
 	if err := enforceRiskGate(pipelineName, findings, flags); err != nil {
 		return run.finish(err)
@@ -311,15 +318,11 @@ func dispatchRun(args []string) error {
 	return run.finish(run.exec(append([]string{pipelineName}, passthrough...), env))
 }
 
-// safety: the pipeline process selects its profile from ProfileEnv, and one
-// built against an older SDK its secrets source from SecretsProfileEnv, so an
-// inherited value would target a remote the invocation never named.
-func handoffProfiles(env []string, profileName string) []string {
-	env = removeEnv(removeEnv(env, orchestrator.ProfileEnv), orchestrator.SecretsProfileEnv)
-	if profileName != "" {
-		env = append(env, orchestrator.ProfileEnv+"="+profileName)
-	}
-	return env
+// safety: a pipeline binary built against an older SDK selects a profile from
+// ProfileEnv and a secrets source from SecretsProfileEnv, so an inherited value
+// would point it at a remote the invocation never named.
+func dropProfileEnv(env []string) []string {
+	return removeEnv(removeEnv(env, orchestrator.ProfileEnv), orchestrator.SecretsProfileEnv)
 }
 
 func pinnedPipeline(sparkwingDir, pipelineName string) (*pipelines.Pipeline, error) {

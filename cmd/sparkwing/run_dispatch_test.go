@@ -60,13 +60,10 @@ func TestRemoveEnvDropsAmbientRunHandle(t *testing.T) {
 	}
 }
 
-func TestParseRunFlags_LocalOnly(t *testing.T) {
+func TestParseRunFlags_RetiredSwLocalOnlyIsUnknown(t *testing.T) {
 	flags, passthroughArgs := parseRunFlags([]string{"--sw-local-only"})
-	if !flags.localOnly {
-		t.Errorf("localOnly: want true got false")
-	}
-	if len(passthroughArgs) != 0 {
-		t.Errorf("passthrough should be empty, got %v", passthroughArgs)
+	if flags.unknownRunnerFlag != "--sw-local-only" {
+		t.Errorf("--sw-local-only should be refused as an unknown runner flag; got %q (passthrough %v)", flags.unknownRunnerFlag, passthroughArgs)
 	}
 }
 
@@ -88,7 +85,7 @@ func TestParseRunFlags_UnknownFlagsPassThrough(t *testing.T) {
 	}
 }
 
-func TestParseRunFlags_Profile(t *testing.T) {
+func TestParseRunFlags_ProfileNeverReachesThePipeline(t *testing.T) {
 	cases := []struct {
 		name string
 		args []string
@@ -96,7 +93,7 @@ func TestParseRunFlags_Profile(t *testing.T) {
 	}{
 		{"space-separated", []string{"--profile", "fictional-production"}, "fictional-production"},
 		{"equals-form", []string{"--profile=fictional-production"}, "fictional-production"},
-		{"empty-trailing-flag-falls-through", []string{"--profile"}, ""},
+		{"trailing-flag", []string{"--profile"}, "<name>"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -104,20 +101,24 @@ func TestParseRunFlags_Profile(t *testing.T) {
 			if flags.profile != testCase.want {
 				t.Errorf("profile = %q, want %q", flags.profile, testCase.want)
 			}
-			if testCase.want == "" && !slices.Contains(passthroughArgs, "--profile") {
-				t.Errorf("incomplete --profile should pass through; got passthrough=%v", passthroughArgs)
+			if len(passthroughArgs) != 0 {
+				t.Errorf("--profile reached the pipeline arguments: %v", passthroughArgs)
 			}
 		})
 	}
 }
 
-func TestParseRunFlags_ProfileSetTargetFallsThrough(t *testing.T) {
-	flags, passthroughArgs := parseRunFlags([]string{"--profile", "fictional-local", "--target", "fictional-production"})
-	if flags.profile != "fictional-local" {
-		t.Errorf("profile = %q, want fictional-local", flags.profile)
+func TestDispatchRun_RefusesProfileBeforeSideEffects(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", "")
+	empty := t.TempDir()
+	t.Chdir(empty)
+	err := dispatchRun([]string{"deploy", "--profile", "prod"})
+	if err == nil || !strings.Contains(err.Error(), "--profile is removed") ||
+		!strings.Contains(err.Error(), "sparkwing pipeline trigger deploy --profile prod") {
+		t.Fatalf("dispatch error = %v, want the removal and the pipeline trigger command", err)
 	}
-	if !slices.Contains(passthroughArgs, "--target") || !slices.Contains(passthroughArgs, "fictional-production") {
-		t.Errorf("--target should fall through to pipeline args; passthrough=%v", passthroughArgs)
+	if os.Getenv("SPARKWING_HOME") != "" {
+		t.Error("refused --profile changed the environment")
 	}
 }
 
@@ -187,10 +188,17 @@ func TestDispatchRun_ConsumesSeparatorBeforeExecutingPipeline(t *testing.T) {
 		"go.mod": "module example.com/fictional\n\ngo 1.26\n",
 		"main.go": `package main
 import (
+ "bufio"
  "encoding/json"
+ "fmt"
  "os"
 )
 func main() {
+ if len(os.Args) == 2 && os.Args[1] == "--sw-node-protocol" {
+  _, _ = bufio.NewReader(os.NewFile(3, "requests")).ReadString('\n')
+  fmt.Fprintln(os.NewFile(4, "frames"), "{\"reply\":\"1\",\"ok\":true,\"result\":{\"protocol\":\"1\",\"pipelines\":[{\"name\":\"fictional\",\"extra\":true}]}}")
+  return
+ }
  data, err := json.Marshal(os.Args[1:])
  if err != nil { panic(err) }
  if err := os.WriteFile(os.Getenv("FICTIONAL_ARGUMENTS_FILE"), data, 0600); err != nil { panic(err) }
@@ -245,12 +253,19 @@ func TestDispatchRun_CarriesTheWorkerCapWithoutAMode(t *testing.T) {
 		"go.mod": "module example.com/fictional\n\ngo 1.26\n",
 		"main.go": `package main
 import (
+ "bufio"
  "encoding/json"
+ "fmt"
  "os"
  "sort"
  "strings"
 )
 func main() {
+ if len(os.Args) == 2 && os.Args[1] == "--sw-node-protocol" {
+  _, _ = bufio.NewReader(os.NewFile(3, "requests")).ReadString('\n')
+  fmt.Fprintln(os.NewFile(4, "frames"), "{\"reply\":\"1\",\"ok\":true,\"result\":{\"protocol\":\"1\",\"pipelines\":[{\"name\":\"fictional\"}]}}")
+  return
+ }
  carried := []string{}
  for _, entry := range os.Environ() {
   if strings.HasPrefix(entry, "SPARKWING_WORKERS=") || strings.HasPrefix(entry, "SPARKWING_MODE=") { carried = append(carried, entry) }
@@ -341,8 +356,8 @@ func TestSetupRefWorktreeCleanupLeavesNothingRegistered(t *testing.T) {
 }
 
 func TestParseRunFlags_OneOffSwitches(t *testing.T) {
-	flags, rest := parseRunFlags([]string{"--sw-no-bincache", "--sw-hash-all-files", "--sw-artifact-digest-backfill", "--sw-allow-unadmitted", "--keep"})
-	if !flags.noBincache || !flags.hashAllFiles || !flags.digestBackfill || !flags.allowUnadmitted {
+	flags, rest := parseRunFlags([]string{"--sw-no-bincache", "--sw-hash-all-files", "--sw-allow-unadmitted", "--keep"})
+	if !flags.noBincache || !flags.hashAllFiles || !flags.allowUnadmitted {
 		t.Fatalf("flags = %+v, want every one-off switch set", flags)
 	}
 	if len(rest) != 1 || rest[0] != "--keep" {

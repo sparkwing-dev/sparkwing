@@ -48,7 +48,11 @@ func setupLocalExecution(ctx context.Context, paths Paths, opts *Options, backen
 		ctrl = c
 		cleanup = func() {}
 	} else {
-		loopback, lerr := startRunLoopback(ctx, opts, backends, logger)
+		local, ok := backends.State.(localState)
+		if !ok {
+			return nil, fmt.Errorf("local execution: state backend %T is neither this machine's store nor a controller", backends.State)
+		}
+		loopback, lerr := startLoopbackController(ctx, local.st, opts.ArtifactStore, opts.RunID, logger)
 		if lerr != nil {
 			return nil, lerr
 		}
@@ -59,11 +63,4 @@ func setupLocalExecution(ctx context.Context, paths Paths, opts *Options, backen
 	}
 
 	return &localExecution{runner: localrunner.New(ctrl, cfg), cleanup: cleanup}, nil
-}
-
-func startRunLoopback(ctx context.Context, opts *Options, backends Backends, logger *slog.Logger) (*loopbackController, error) {
-	if local, ok := backends.State.(localState); ok {
-		return startLoopbackController(ctx, local.st, opts.ArtifactStore, opts.RunID, logger)
-	}
-	return startLoopbackShim(backends.State, backends.Concurrency, opts.RunID, logger)
 }

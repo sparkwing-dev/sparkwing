@@ -22,15 +22,11 @@ import (
 )
 
 type dashboardOptions struct {
-	Addr          string `json:"addr"`
-	Home          string `json:"-"`
-	LogStore      string `json:"log_store,omitempty"`
-	ArtifactStore string `json:"artifact_store,omitempty"`
-	Profile       string `json:"profile,omitempty"`
-	AllowOrigins  string `json:"allow_origins,omitempty"`
-	ReadOnly      bool   `json:"read_only"`
-	NoLocalStore  bool   `json:"no_local_store"`
-	AllowRemote   bool   `json:"allow_remote"`
+	Addr         string `json:"addr"`
+	Home         string `json:"-"`
+	AllowOrigins string `json:"allow_origins,omitempty"`
+	ReadOnly     bool   `json:"read_only"`
+	AllowRemote  bool   `json:"allow_remote"`
 }
 
 type dashboardArtifact struct {

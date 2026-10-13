@@ -846,8 +846,8 @@ emitted text.
 Redaction is applied when a run is read, not when it is written. The
 run row keeps the plaintext argument, because the masker derives its
 redaction set from it and retrying or replaying a run re-executes with
-it. Treat the state database, its backups, and the `state.ndjson` run
-dumps as holding the value in the clear, and protect them accordingly.
+it. Treat the state database and its backups as holding the value in the
+clear, and protect them accordingly.
 
 Limits worth knowing:
 
@@ -961,7 +961,6 @@ using the `sw-` prefix for its long control options:
     --sw-only GLOB        // run only matching jobs (+ their Needs)
     --sw-no-cache         // ignore cached per-node results
     --sw-priority VALUE   // local admission priority: N, front, back
-    --sw-local-only       // force local secrets/state/cache/logs
     --sw-dry-run          // run each step's dry-run probe
     --sw-allow LABEL,...  // authorize risk-labeled steps
     --sw-no-update        // skip the sparks auto-resolve step

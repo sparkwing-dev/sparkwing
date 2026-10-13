@@ -264,33 +264,3 @@ func TestRefusalNamesBothRemedies(t *testing.T) {
 		}
 	}
 }
-
-func TestStallsAreReportedAndCleared(t *testing.T) {
-	const path = "objectguard-test stall path"
-	objectguard.ClearStall(path)
-	t.Cleanup(func() { objectguard.ClearStall(path) })
-
-	objectguard.ReportStall(path, errors.New("bucket refuses every write"))
-	found := false
-	for _, s := range objectguard.Stalls() {
-		if s.Path == path {
-			found = true
-			if s.Error != "bucket refuses every write" {
-				t.Errorf("the stall carries %q", s.Error)
-			}
-			if s.Since.IsZero() {
-				t.Error("the stall carries no time")
-			}
-		}
-	}
-	if !found {
-		t.Fatal("a reported stall does not appear in Stalls")
-	}
-
-	objectguard.ClearStall(path)
-	for _, s := range objectguard.Stalls() {
-		if s.Path == path {
-			t.Fatal("a cleared stall still appears in Stalls")
-		}
-	}
-}

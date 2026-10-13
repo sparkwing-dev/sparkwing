@@ -621,9 +621,6 @@ func foregroundOnlyReasons(wf runFlags) []struct {
 			"Run it in the foreground with `sparkwing run --sw-index`"},
 		{"--sw-dry-run", wf.dryRun, "a dry run finishes in seconds and reports to your terminal; run it in the foreground with `sparkwing run --sw-dry-run`"},
 
-		{"--profile", wf.profile != "", "the resident consumer executes against this home's local store, " +
-			"so a profile's backends would not receive the run; run profile-backed runs in the foreground"},
-
 		{"--sw-start-at", wf.startAt != "", "step-window selection is not carried on the trigger yet; run it in the foreground"},
 		{"--sw-stop-at", wf.stopAt != "", "step-window selection is not carried on the trigger yet; run it in the foreground"},
 		{"--sw-only", wf.only != "", "job filtering is not carried on the trigger yet; run it in the foreground"},
@@ -631,11 +628,9 @@ func foregroundOnlyReasons(wf runFlags) []struct {
 		{"--sw-mode", wf.mode != "", "execution mode is not carried on the trigger yet; run it in the foreground"},
 		{"--sw-workers", wf.workers > 0, "worker capping is not carried on the trigger yet; run it in the foreground"},
 		{"--sw-allow", len(wf.allow) > 0, "risk authorization is not carried on the trigger yet; run it in the foreground"},
-		{"--sw-local-only", wf.localOnly, "backend overrides are not carried on the trigger yet; run it in the foreground"},
 		{"--sw-no-update", wf.noUpdate, "the consumer compiles the run, and the flag is not carried on the trigger; run it in the foreground"},
 		{"--sw-no-bincache", wf.noBincache, "the consumer compiles the run, and the flag is not carried on the trigger; run it in the foreground"},
 		{"--sw-hash-all-files", wf.hashAllFiles, "the consumer compiles the run, and the flag is not carried on the trigger; run it in the foreground"},
-		{"--sw-artifact-digest-backfill", wf.digestBackfill, "the consumer compiles the run, and the flag is not carried on the trigger; run it in the foreground"},
 		{"--sw-allow-unadmitted", wf.allowUnadmitted, "admission bypass is not carried on the trigger; run it in the foreground"},
 	}
 }
@@ -659,13 +654,11 @@ func (g riskGate) check(execDir, pinnedBinary string) error {
 	declared := g.Declared
 	switch {
 	case pinnedBinary != "":
-		raw, err := runDescribeBinary(context.Background(), sparkwingDir, pinnedBinary)
+		doc, err := describeBinary(context.Background(), sparkwingDir, pinnedBinary)
 		if err != nil {
 			return fmt.Errorf("%s: read what %s pins: %w", g.Surface, g.Pipeline, err)
 		}
-		if err := json.Unmarshal(raw, &declared); err != nil {
-			return fmt.Errorf("%s: read what %s pins: %w", g.Surface, g.Pipeline, err)
-		}
+		declared = doc.Pipelines
 	case declared == nil || execDir != g.SubmitDir:
 		var err error
 		declared, err = repos.DescribeRepo(execDir)

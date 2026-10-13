@@ -48,12 +48,11 @@ type Pipeline struct {
 	// stays invocable by exact name and shows under `list --all`.
 	Hidden bool `yaml:"hidden,omitempty"`
 
-	// Guards gate dispatch on the resolved profile, args, and git
+	// Guards gate dispatch on where the run is dispatched, args, and git
 	// branch. Reject fires before any step runs when any token
 	// matches; Require fires when not every token matches. Token
 	// vocabulary: `profile:local`, `profile:controller`,
-	// `profile:name=<name>`, `arg:<flag>=<value>`,
-	// `git:branch=<name>`, `git:branch=default`. A literal branch matches
+	// `arg:<flag>=<value>`, `git:branch=<name>`, `git:branch=default`. A literal branch matches
 	// the checked-out head. The default token matches only when the
 	// dispatch supplies default-branch metadata. `arg:` tokens read the
 	// merged argument set the run executes with, so a value supplied by
@@ -77,7 +76,7 @@ type Pipeline struct {
 	// pipeline must satisfy in addition to their own Job.Requires().
 	// Wholesale replaces defaults.requires when non-empty. The
 	// reserved label "local" keeps fleet helpers from claiming the
-	// node; --sw-local-only instead selects local storage backends.
+	// node.
 	Requires []string `yaml:"requires,omitempty"`
 }
 

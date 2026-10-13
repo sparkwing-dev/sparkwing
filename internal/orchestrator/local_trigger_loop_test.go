@@ -118,7 +118,7 @@ func TestRunLocalTriggerLoopClaimsPendingTriggerImmediately(t *testing.T) {
 		finished := make(chan struct{})
 		go func() {
 			defer close(finished)
-			runLocalTriggerLoop(ctx, state, "parent", "", "", quietLogger(), time.Second, childStoreEnv{})
+			runLocalTriggerLoop(ctx, state, "parent", "", quietLogger(), time.Second, childStoreEnv{})
 		}()
 		defer func() {
 			cancel()
@@ -190,7 +190,7 @@ func TestDispatchLocalTrigger_RunAndAwaitCachedExecutableSurvivesCacheRemovalWhi
 			Pipeline:     "child",
 			ParentRunID:  "parent-live",
 			ParentNodeID: "spawn-child",
-		}, "", repoDir, cache, logger, nil)
+		}, repoDir, cache, logger, nil)
 	}
 
 	if err := dispatch("child-one"); err != nil {
@@ -238,13 +238,15 @@ func TestExecLocalChild_MissingLeaseExplainsCacheProvenanceAndRecovery(t *testin
 const cacheLeaseExecutableSource = `package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 )
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "--describe" {
-		fmt.Print("[{\"name\":\"child\"}]")
+	if len(os.Args) == 2 && os.Args[1] == "--sw-node-protocol" {
+		_, _ = bufio.NewReader(os.NewFile(3, "requests")).ReadString('\n')
+		fmt.Fprintln(os.NewFile(4, "frames"), "{\"reply\":\"1\",\"ok\":true,\"result\":{\"protocol\":\"1\",\"pipelines\":[{\"name\":\"child\"}]}}")
 		return
 	}
 	f, err := os.OpenFile(os.Getenv("SPARKWING_CACHE_LEASE_TEST_OUTPUT"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
@@ -495,7 +497,7 @@ func TestPrepareTriggerRepo_RetrySnapshotsRecordedRevisionDespiteDirtySource(t *
 			t.Errorf("close local compile cache: %v", err)
 		}
 	})
-	if err := dispatchLocalTrigger(context.Background(), trig, "", "", cache, logger, nil); err != nil {
+	if err := dispatchLocalTrigger(context.Background(), trig, "", cache, logger, nil); err != nil {
 		t.Fatalf("dispatchLocalTrigger: %v", err)
 	}
 	raw, err = os.ReadFile(outputPath)
@@ -666,7 +668,7 @@ func TestLocalSetupFailureChild(t *testing.T) {
 		t.Skip("child process fixture")
 	}
 	SetTestStoreWedgeBudget(t, 0, errors.New("store wedge budget secret-should-not-be-shown"))
-	if err := HandleClaimedTriggerLocal(context.Background(), os.Getenv("SPARKWING_LOCAL_SETUP_TEST_RUN"), ""); err != nil {
+	if err := HandleClaimedTriggerLocal(context.Background(), os.Getenv("SPARKWING_LOCAL_SETUP_TEST_RUN")); err != nil {
 		t.Fatal(err)
 	}
 }

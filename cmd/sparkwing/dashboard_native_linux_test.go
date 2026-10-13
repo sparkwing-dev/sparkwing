@@ -91,12 +91,6 @@ func TestServeNativeLifecyclePreservesRunningArtifactAndOptions(t *testing.T) {
 			t.Fatalf("invalid restart changed service: %+v %v %s", retained, e, stderr)
 		}
 	}
-	if _, _, e := run("restart", "--log-store", "invalid-scheme://fixture"); e == nil {
-		t.Fatal("restart accepted invalid storage scheme")
-	}
-	if retained, _, e := run("status"); e != nil || retained.PID != first.PID || retained.Readiness != "ready" {
-		t.Fatalf("invalid storage restart changed service: %+v %v", retained, e)
-	}
 	third, stderr, err := run("restart")
 	if err != nil {
 		t.Fatalf("restart: %v %s", err, stderr)
@@ -131,11 +125,17 @@ func TestServeNativeLifecyclePreservesRunningArtifactAndOptions(t *testing.T) {
 	if e == nil || blocked.Outcome != "failed" || blocked.State != "stopped" {
 		t.Fatalf("occupied port: %+v %v", blocked, e)
 	}
-	blockedStore := filepath.Join(root, "blocked-store")
-	if e = os.WriteFile(blockedStore, []byte("not a directory"), 0o600); e != nil {
+	// safety: a directory where the state database belongs fails only the child, which opens it after the
+	// launcher has handed over.
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if e = os.Remove(filepath.Join(state, "state.db"+suffix)); e != nil && !os.IsNotExist(e) {
+			t.Fatal(e)
+		}
+	}
+	if e = os.Mkdir(filepath.Join(state, "state.db"), 0o700); e != nil {
 		t.Fatal(e)
 	}
-	failed, _, e := run("start", "--addr", "127.0.0.1:0", "--log-store", "fs://"+filepath.Join(blockedStore, "child"))
+	failed, _, e := run("start", "--addr", "127.0.0.1:0")
 	if e == nil || failed.Outcome != "failed" || failed.State != "stopped" {
 		t.Fatalf("early exit: %+v %v", failed, e)
 	}

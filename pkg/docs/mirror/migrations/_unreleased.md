@@ -10,10 +10,9 @@
   `sparkwing runs logs --profile` and `runs logs --grep --profile` read the
   logs service the profile or the controller named.
 - **After:** against a controller that keeps segments, every one of those
-  runners, and `sparkwing run` on a laptop whose profile keeps the run's
-  state on that controller, uploads each node's log as gzip segments, each
-  through a URL the controller signs for its exact size and Content-MD5, plus
-  a sealing manifest it posts to the controller, into the controller's cache bucket
+  runners uploads each node's log as gzip segments, each through a URL the
+  controller signs for its exact size and Content-MD5, plus a sealing
+  manifest it posts to the controller, into the controller's cache bucket
   (`--cache-blob-store`) or, without one, its output directory, whether or
   not it has a logs URL. The dashboard and the CLI read every node through
   the controller, which serves segments first and the logs service for a
@@ -56,8 +55,7 @@ that keep the logs service running.
 - **After:** the controller is the only place node logs go. It keeps them
   as segments in its cache bucket (`--cache-blob-store`) or, without one,
   its output directory; a controller with neither keeps no node logs, so a
-  runner keeps the log on its own disk and a laptop run against it fails
-  at start naming the controller. Pipeline binaries built against any SDK
+  runner keeps the log on its own disk. Pipeline binaries built against any SDK
   keep logging unchanged: the runner serves their appends on loopback.
 - **Before you upgrade:** scale the logs service and the controller to
   zero and run this release's `sparkwing-controller migrate-logs` once,
@@ -89,11 +87,7 @@ that keep the logs service running.
   from an agent's `config.yaml`, which now fails to load with
   `field logs not found`. `sparkwing cluster runners add` has no `--logs`.
   Drop any `SPARKWING_LOGS_EGRESS_*` variables; nothing reads them.
-- **Profiles:** a `logs: {type: controller}` surface takes no `url`; remove
-  it. That surface now needs the profile's `state:` on the same
-  controller, because the controller keeps only the logs of runs it holds;
-  a profile that keeps state locally and sent logs to a logs service
-  chooses a `filesystem` or `s3` logs surface instead.
+- **Profiles:** the `logs` and `cache` surfaces are gone; remove them.
 - **Credentials and API:** the `logs.write` and `logs.delete` scopes are
   gone, and minting a token with either is refused; runner tokens carry
   `nodes.claim`, `triggers.claim`, `runs.state` and `secrets.read`.
@@ -569,3 +563,60 @@ To upgrade:
    `store.GitCredentialRelease`; code that decoded
    `controller.GitCredentialResponse` or `controller.SourceTokenResponse`
    decodes `store.SourceCredential`.
+
+## S3 and Postgres state profiles are removed
+
+`sparkwing run` executes on this machine and records to this machine's
+store. It no longer takes `--profile`, and a profile's `state:` is
+`sqlite` or `controller`. Shared run history lives on a controller:
+`sparkwing pipeline trigger <pipeline> --profile P` runs a pipeline there.
+This ends the temporary exception
+[v0.67.0](v0.67.0.md#sparkwing-run-takes---profile-only-for-s3-or-postgres-state)
+kept for S3 and Postgres state profiles.
+
+| Before | After |
+|---|---|
+| `sparkwing run build --profile shared` with an S3 or Postgres `state:` | `sparkwing pipeline trigger build --profile prod` to run on a controller, or `sparkwing run build` to run here |
+| `state: {type: s3, ...}` or `state: {type: postgres, ...}` in a machine profile (`~/.config/sparkwing/config.yaml`) | Delete the `state:` key, or the profile, or replace it with a controller profile (`sparkwing cloud connect`). The config fails to load with `state.type: s3 is removed` (or `postgres`) and a pointer to this section. |
+| The same in a project profile (`.sparkwing/sparkwing.yaml`) | A project profile declares all four surfaces, so deleting `state:` alone fails with `state surface is required`. Remove the profile, or set `state: {type: sqlite}` for this machine or `state: {type: controller}` for the profile's controller. Both errors name these choices. |
+| `url_source: env:VAR` on any surface | Delete it; it named the Postgres state DSN. The config fails to load with `field url_source not found`; a Postgres `state:` that carries it fails on that key before its type is checked. |
+| `mirror_local:` on a profile | Delete it. The config fails to load with `field mirror_local not found`. |
+| `cache: {binaries: {...}}` | Delete the `binaries:` block. The config fails to load with `field binaries not found`. Runs fetch prebuilt binaries from the git cache `SPARKWING_GITCACHE_URL` names. |
+| `sparkwing run X --sw-artifact-digest-backfill` | Delete the flag; it applied only to binaries fetched from a profile's cache. `run` refuses it as an unknown runner flag. |
+| `sparkwing serve start --profile P [--no-local-store]` | `sparkwing serve start` for this machine's runs, or the controller's dashboard for shared ones. |
+| `guards: {require: [profile:name=prod]}` | `profile:local`, `profile:controller` or an `arg:` token. A run never has a named profile, so the token never matched; a config naming it now fails to load. |
+| `sparkwing runs list --profile shared` against an S3 or Postgres state profile | Nothing reads that history any more. The bucket or database is yours to keep or delete. |
+
+- **Refusal:** `sparkwing run deploy --profile prod` fails before it
+  compiles anything: `run: --profile is removed; sparkwing run executes on
+  this machine against its own store, so run on the profile's controller
+  with sparkwing pipeline trigger deploy --profile prod`. `--profile`
+  before the verb fails the same way.
+- **Hooks:** a hook installed before v0.67.0 with `--profile 'P'` on its
+  `sparkwing run` lines fails until you reinstall it with `sparkwing
+  pipeline hooks install`.
+- **Mixed versions:** a pipeline binary built against this SDK refuses a
+  run that an older CLI started with `--profile`, naming `sparkwing
+  pipeline trigger`, rather than recording it locally. This CLI still
+  drops an inherited `SPARKWING_PROFILE` and `SPARKWING_SECRETS_PROFILE`,
+  so a pipeline binary from an older SDK cannot be pointed at a remote
+  store either.
+- **Controllers:** a controller on PostgreSQL is unchanged; only a laptop
+  or CI run opening a shared database or bucket itself is removed. The
+  `install/terraform/mode3-postgres` module now documents the controller's
+  database alone.
+- **Output:** a run no longer writes `runs/<id>/state.ndjson` into this
+  machine's cache directory. `run_start` reports no `backends` or
+  `profile` block.
+  `sparkwing configure profiles show -o json` drops `mirror_local`. The
+  controller's health no longer reports `object_store.stalled`.
+- **Go packages:** `pkg/storage/s3state` is removed. `pkg/controller`
+  drops `Loopback`, `LoopbackState`, `LoopbackConcurrency` and
+  `NewLoopback`; a local run's node processes reach the full controller.
+  `pkg/backends` drops `TypePostgres`, `Spec.Binaries` and
+  `Surfaces.BinaryCache` and `Spec.URLSource` and adds
+  `MigrationGuideURL`. `stdoutlogs.CheckSpec` drops its `urlSource`
+  parameter.
+  `storeurl.OpenStateStoreFromSpec` opens `sqlite` and `controller` only.
+  `pkg/localws` drops `Options.NoLocalStore`. `pkg/pipelines` drops
+  `KindProfileName` and `GuardContext.ProfileName`.

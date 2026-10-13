@@ -145,7 +145,7 @@ func writeTriggerProfilesWithLogs(t *testing.T, controllerURL string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	body := "profiles:\n" +
-		"  prod: { controller: { url: " + controllerURL + " }, logs: { type: controller } }\n"
+		"  prod: { controller: { url: " + controllerURL + " } }\n"
 	if err := fssecure.WriteFile(path, []byte(body)); err != nil {
 		t.Fatalf("write profiles: %v", err)
 	}

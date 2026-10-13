@@ -1234,7 +1234,7 @@ func profilesKeepRunRowsLocal(p paths.Paths) bool {
 			if prof.State.Type != backends.TypeSQLite {
 				return false
 			}
-			// safety: profileSurfaceSpecs redirects a sqlite spec to this home
+			// safety: profileStateSpec redirects a sqlite spec to this home
 			// only when its path is empty, so a spec naming another database
 			// records runs somewhere this doctor never reads.
 			if prof.State.Path != "" && filepath.Clean(prof.State.Path) != filepath.Clean(p.StateDB()) {
@@ -1603,7 +1603,7 @@ func renderDoctorPretty(w io.Writer, r DoctorReport) error {
 		if n == 1 {
 			noun = "directory"
 		}
-		fmt.Fprintf(w, "\nnotice: doctor left %d run %s under runs/ in place, with no row in this home's state database\n  a run directory is unlinked only when the local store is where its run would be recorded; a profile that keeps run state in S3, Postgres, or a controller, and a store that has never recorded a run, both leave a missing row proving nothing\n", n, noun)
+		fmt.Fprintf(w, "\nnotice: doctor left %d run %s under runs/ in place, with no row in this home's state database\n  a run directory is unlinked only when the local store is where its run would be recorded; a profile that keeps run state on a controller or in another database file, and a store that has never recorded a run, both leave a missing row proving nothing\n", n, noun)
 	}
 
 	for _, rej := range r.AdmissionRejections {

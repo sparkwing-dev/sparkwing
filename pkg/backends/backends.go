@@ -1,57 +1,34 @@
-// Package backends defines the typed backend specs (state, cache, logs)
-// a storage profile resolves to, plus the per-profile environment-detect
-// predicate. The specs are consumed by the storeurl factories
-// ([pkg/storage/storeurl]) to open concrete stores and by
+// Package backends defines the typed backend specs (secrets, state) a
+// storage profile resolves to. The specs are consumed by the storeurl
+// factories ([pkg/storage/storeurl]) to open concrete stores and by
 // [internal/profile] to describe where a profile's runs persist.
 package backends
 
 import (
-	"errors"
 	"fmt"
 	"os"
-	"time"
 )
 
-// Surfaces groups the four persistence destinations a run touches.
+// Surfaces groups the persistence destinations a profile declares.
 // A nil pointer means "not declared at this layer."
 type Surfaces struct {
 	Secrets *Spec `yaml:"secrets,omitempty"`
-	Cache   *Spec `yaml:"cache,omitempty"`
-	Logs    *Spec `yaml:"logs,omitempty"`
 	State   *Spec `yaml:"state,omitempty"`
-}
-
-// BinaryCache returns the backend that serves compiled pipeline binaries
-// (bin/<hash>). That is the cache surface itself unless the surface
-// declares a binaries sub-spec, which isolates binaries to their own
-// destination -- a shared s3 bucket while the rest of the cache stays on
-// local disk, say.
-//
-// Only one level is read. Binaries lives on Spec, so it recurses
-// structurally, but a binaries block inside a binaries block is ignored
-// rather than rejected: refusing it would fail a config that loads today.
-func (s Surfaces) BinaryCache() *Spec {
-	if s.Cache == nil {
-		return nil
-	}
-	if s.Cache.Binaries != nil {
-		return s.Cache.Binaries
-	}
-	return s.Cache
 }
 
 // Spec is one backend declaration. Type is the discriminator; the
 // remaining fields are interpreted per-type by the storeurl factories
-// (state/cache/logs) and the secrets resolver (secrets).
+// (state) and the secrets resolver (secrets).
 type Spec struct {
 	Type string `yaml:"type"`
 
-	Bucket    string `yaml:"bucket,omitempty"`
-	Prefix    string `yaml:"prefix,omitempty"`
-	Path      string `yaml:"path,omitempty"`
-	URL       string `yaml:"url,omitempty"`
-	URLSource string `yaml:"url_source,omitempty"`
-	Token     string `yaml:"token,omitempty"`
+	// Bucket is read by nothing; it lets a profile that still names an S3
+	// state bucket decode far enough to get the removal refusal.
+	Bucket string `yaml:"bucket,omitempty"`
+	Prefix string `yaml:"prefix,omitempty"`
+	Path   string `yaml:"path,omitempty"`
+	URL    string `yaml:"url,omitempty"`
+	Token  string `yaml:"token,omitempty"`
 
 	// TokenEnv names an env var the runtime reads to populate Token
 	// at use time. Set TokenEnv on checked-in config so the token
@@ -65,33 +42,6 @@ type Spec struct {
 	// and bearer token via the same profile-lookup callback used by
 	// profile secret sources.
 	Controller string `yaml:"controller,omitempty"`
-
-	// Binaries is an optional nested override on Cache that isolates
-	// compiled pipeline binaries to a separate destination (e.g.
-	// shared s3 bucket while the rest of cache stays on disk). Only
-	// valid on the cache surface, and read through Surfaces.BinaryCache.
-	Binaries *Spec `yaml:"binaries,omitempty"`
-
-	// BatchInterval bounds how long a log line waits in the per-node
-	// buffer before the logs surface writes it as an object. Object
-	// store logs surfaces only; zero selects 2s.
-	BatchInterval time.Duration `yaml:"batch_interval,omitempty"`
-
-	// BatchBytes flushes a node's log buffer early once it holds this
-	// many bytes, so one object never grows without bound. Object
-	// store logs surfaces only; zero selects 262144 (256 KiB).
-	BatchBytes int `yaml:"batch_bytes,omitempty"`
-
-	// MaxLogObjects caps how many log objects one node writes. Past
-	// the cap the backend drops further lines and ends the node's log
-	// with one marker line counting them. Object store logs surfaces
-	// only; zero selects 2000.
-	MaxLogObjects int `yaml:"max_log_objects,omitempty"`
-
-	// MaxLogBytes caps how many log bytes one node writes, enforced
-	// the same way as MaxLogObjects. Object store logs surfaces only;
-	// zero selects 67108864 (64 MiB).
-	MaxLogBytes int64 `yaml:"max_log_bytes,omitempty"`
 }
 
 // Backend type discriminators.
@@ -99,17 +49,14 @@ const (
 	TypeFilesystem = "filesystem"
 	TypeS3         = "s3"
 	TypeController = "controller"
-	TypeStdout     = "stdout"
 	TypeSQLite     = "sqlite"
-	TypePostgres   = "postgres"
 	TypeEnv        = "env"  // env vars; valid only on the secrets surface
 	TypeNone       = "none" // explicit "no backend"; valid only on the secrets surface
 )
 
-// ValidateBundle enforces that a Surfaces bundle declares all four
-// surfaces (secrets, state, cache, logs). Per-surface invariants are
-// checked alongside. The name is woven into the error so the operator
-// can tell which profile is invalid.
+// Validate enforces that a Surfaces bundle declares both surfaces
+// (secrets, state), with each surface's own invariants. The name is woven
+// into the error so the operator can tell which profile is invalid.
 func (s Surfaces) Validate(name string) error {
 	if s.Secrets == nil {
 		return fmt.Errorf("profile %q: secrets surface is required (use type=none for pipelines that never call Secret())", name)
@@ -118,7 +65,8 @@ func (s Surfaces) Validate(name string) error {
 		return fmt.Errorf("profile %q: %w", name, err)
 	}
 	if s.State == nil {
-		return fmt.Errorf("profile %q: state surface is required", name)
+		return fmt.Errorf("profile %q: state surface is required: a project profile declares state: {type: sqlite} "+
+			"for this machine or state: {type: controller} for its controller; or remove the profile", name)
 	}
 	if s.State.Type == TypeNone || s.State.Type == TypeEnv {
 		return fmt.Errorf("profile %q: state cannot be type=%s", name, s.State.Type)
@@ -126,38 +74,12 @@ func (s Surfaces) Validate(name string) error {
 	if err := s.State.ValidateFields("state"); err != nil {
 		return fmt.Errorf("profile %q: %w", name, err)
 	}
-	if s.Cache == nil {
-		return fmt.Errorf("profile %q: cache surface is required", name)
-	}
-	if s.Cache.Type == TypeNone || s.Cache.Type == TypeEnv {
-		return fmt.Errorf("profile %q: cache cannot be type=%s", name, s.Cache.Type)
-	}
-	if err := s.Cache.ValidateFields("cache"); err != nil {
-		return fmt.Errorf("profile %q: %w", name, err)
-	}
-	if s.Cache.Binaries != nil {
-		if err := s.Cache.Binaries.ValidateFields("cache.binaries"); err != nil {
-			return fmt.Errorf("profile %q: %w", name, err)
-		}
-	}
-	if s.Logs == nil {
-		return fmt.Errorf("profile %q: logs surface is required", name)
-	}
-	if s.Logs.Type == TypeNone || s.Logs.Type == TypeEnv {
-		return fmt.Errorf("profile %q: logs cannot be type=%s", name, s.Logs.Type)
-	}
-	if err := s.Logs.ValidateFields("logs"); err != nil {
-		return fmt.Errorf("profile %q: %w", name, err)
-	}
 	return nil
 }
 
 // ValidateFields enforces the fields a backend type cannot work
-// without. The storeurl factories document this contract -- "the spec
-// must already have passed pkg/backends validation (required fields per
-// type)" -- and nothing enforced it, so `{type: s3}` with no bucket
-// validated clean, rendered as `s3://`, and failed only when a run
-// tried to write to a bucket named "".
+// without, so a spec missing one fails when its config loads rather than
+// when a command first opens it.
 //
 // A type whose missing field has a real default is deliberately absent:
 // sqlite without a path is filled in with the host's own state database
@@ -167,68 +89,38 @@ func (s *Spec) ValidateFields(surface string) error {
 	if s == nil {
 		return nil
 	}
+	if err := s.refuseRemovedState(surface); err != nil {
+		return err
+	}
 	switch s.Type {
 	case "":
 		return fmt.Errorf("%s backend: type is required", surface)
-	case TypeS3:
-		if s.Bucket == "" {
-			return fmt.Errorf("%s backend type=%s requires bucket", surface, s.Type)
-		}
 	case TypeFilesystem:
 		if s.Path == "" {
 			return fmt.Errorf("%s backend type=filesystem requires path", surface)
 		}
-	case TypePostgres:
-		if s.URL == "" && s.URLSource == "" {
-			return fmt.Errorf("%s backend type=%s requires url or url_source", surface, s.Type)
-		}
 	case TypeController:
-		if surface == "logs" && s.URL != "" {
-			return errors.New("logs backend type=controller takes no url: the controller keeps node logs itself; name its profile with controller: <profile-name>")
-		}
 		if s.Controller == "" && s.URL == "" {
 			return fmt.Errorf("%s backend type=controller requires controller: <profile-name>", surface)
 		}
 	}
-	return s.validateLogBatching(surface)
-}
-
-// safety: these are the logs surfaces that write one object per append,
-// so they are the only ones the batching keys reach.
-var objectStoreLogSurfaces = map[string]bool{
-	TypeS3: true,
-}
-
-// safety: a batching key reads as tuning wherever it is written, so one
-// on a filesystem logs surface or on state would be silently inert.
-func (s *Spec) validateLogBatching(surface string) error {
-	set := map[string]bool{
-		"batch_interval":  s.BatchInterval != 0,
-		"batch_bytes":     s.BatchBytes != 0,
-		"max_log_objects": s.MaxLogObjects != 0,
-		"max_log_bytes":   s.MaxLogBytes != 0,
-	}
-	negative := map[string]bool{
-		"batch_interval":  s.BatchInterval < 0,
-		"batch_bytes":     s.BatchBytes < 0,
-		"max_log_objects": s.MaxLogObjects < 0,
-		"max_log_bytes":   s.MaxLogBytes < 0,
-	}
-	for _, key := range []string{"batch_interval", "batch_bytes", "max_log_objects", "max_log_bytes"} {
-		if !set[key] {
-			continue
-		}
-		if negative[key] {
-			return fmt.Errorf("%s backend: %s must be positive", surface, key)
-		}
-		if surface != "logs" {
-			return fmt.Errorf("%s backend: %s applies only to the logs surface", surface, key)
-		}
-		if !objectStoreLogSurfaces[s.Type] {
-			return fmt.Errorf("logs backend: %s applies only to an object-store logs surface (s3), not type=%s", key, s.Type)
-		}
-	}
 	return nil
+}
+
+// MigrationGuideURL is where the removal of S3 and Postgres state is
+// explained, under "S3 and Postgres state profiles are removed".
+const MigrationGuideURL = "https://sparkwing.dev/docs/migration-guide/"
+
+// safety: a removed state type that loaded would leave the profile's runs
+// recording nowhere it names, so the config fails to load instead.
+func (s *Spec) refuseRemovedState(surface string) error {
+	if surface != "state" || (s.Type != TypeS3 && s.Type != "postgres") {
+		return nil
+	}
+	return fmt.Errorf("state.type: %s is removed: S3 and Postgres state profiles are gone and sparkwing run records to this machine; "+
+		"in config.yaml delete the profile's state key or the profile, in .sparkwing/sparkwing.yaml set state to sqlite or controller or remove the profile, "+
+		"and run on a controller with sparkwing pipeline trigger <pipeline> --profile <name> "+
+		"(see \"S3 and Postgres state profiles are removed\" in %s)", s.Type, MigrationGuideURL)
 }
 
 // ResolvedToken returns Token directly when it's set, else reads

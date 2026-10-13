@@ -222,7 +222,7 @@ func TestAClaimedTriggerHoldsItsTreeAgainstTheSweep(t *testing.T) {
 	dispatched := false
 	origin := dispatchLocalTriggerFn
 	dispatchLocalTriggerFn = func(
-		context.Context, *store.Trigger, string, string, *localCompileCache, *slog.Logger, []string,
+		context.Context, *store.Trigger, string, *localCompileCache, *slog.Logger, []string,
 	) error {
 		dispatched = true
 		if ferr := st.FinishTrigger(ctx, "run-dispatching"); ferr != nil {

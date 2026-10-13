@@ -11,11 +11,11 @@ import (
 // approvals, dispatches, debug pauses, and the schema migrations the
 // orchestrator depends on.
 //
-// State is opened from a backends.Spec via
-// pkg/storage/storeurl.OpenStateStoreFromSpec, which selects an
-// implementation by spec type: the SQLite- and Postgres-backed
-// *store.Store, the S3 NDJSON store (with a local durability outbox),
-// or the controller HTTP client. Methods whose wrappers add
+// A profile's state is opened from a backends.Spec via
+// pkg/storage/storeurl.OpenStateStoreFromSpec, which selects the
+// SQLite-backed *store.Store or the controller HTTP client by spec type;
+// a controller opens its SQLite or Postgres *store.Store directly.
+// Methods whose wrappers add
 // adapter logic on top of the store (output extraction, trigger
 // cycle detection, simplified-error AppendEvent) live on the
 // orchestrator's runtime interface that embeds this one, not here.

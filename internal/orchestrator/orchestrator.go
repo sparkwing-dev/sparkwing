@@ -20,20 +20,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/api"
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -79,8 +74,6 @@ type Options struct {
 
 	NoCache bool
 
-	LocalOnly bool
-
 	DryRun bool
 
 	Debug DebugDirectives
@@ -92,8 +85,6 @@ type Options struct {
 	MaxParallel int
 
 	DispatchWaitTimeout time.Duration
-
-	LogStore storage.LogStore
 
 	ArtifactStore storage.ArtifactStore
 
@@ -121,15 +112,7 @@ type Options struct {
 	priority    priorityRequest
 	prioritySet bool
 
-	ProfileLookup storeurl.ProfileLookup
-
-	Profile *profile.Profile
-
-	ProfileChain *profile.Chain
-
 	DefaultArgs map[string]string
-
-	MirrorLocal *store.Store
 }
 
 type DebugDirectives struct {
@@ -197,10 +180,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		guardCtx := pipelines.GuardContext{
 			Args: invokeArgs,
 		}
-		guardCtx.ProfileIsLocal = backends.dispatchesLocally()
-		if opts.Profile != nil {
-			guardCtx.ProfileName = opts.Profile.Name
-		}
+		guardCtx.ProfileIsLocal = backends.LocalCoordination
 		if opts.Git != nil {
 			guardCtx.GitBranch = opts.Git.Branch
 			guardCtx.GitDefaultBranch = opts.Git.DefaultBranch
@@ -396,17 +376,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		r = NewNodeExecutor(backends)
 	}
 	ctx = secrets.WithMasker(ctx, masker)
-	secretOpts := opts
-	secretOpts.RunID = runID
-	if resolver, rerr := selectSecretResolver(ctx, secretOpts); rerr != nil {
-		if err := backends.State.FinishRun(ctx, runID, "failed", rerr.Error()); err != nil {
-			noteLostStateWrite(ctx, "finish run", runID, err)
-		}
-		return &Result{RunID: runID, Status: "failed", Error: rerr}, nil
-	} else if resolver != nil {
-		ctx = sparkwing.WithSecretResolver(ctx,
-			secrets.NewCached(resolver, masker).AsResolver())
-	} else if opts.SecretSource != nil {
+	if opts.SecretSource != nil {
 		ctx = sparkwing.WithSecretResolver(ctx,
 			secrets.NewCached(opts.SecretSource, masker).AsResolver())
 	}
@@ -425,10 +395,6 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	}
 
 	if backends.LocalCoordination {
-		profileName := ""
-		if opts.Profile != nil {
-			profileName = opts.Profile.Name
-		}
 		consumerCtx, cancelConsumer := context.WithCancel(ctx)
 		child := childStoreEnv{}
 		if opts.standalone != nil {
@@ -441,7 +407,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		defer cancelConsumer()
 		go func() {
 			defer triggerLoop.Done()
-			runLocalTriggerLoop(consumerCtx, canonicalState(backends.State), runID, profileName, parentTriggerRepoDir(), nil, wedgeBudget, child)
+			runLocalTriggerLoop(consumerCtx, backends.State, runID, parentTriggerRepoDir(), nil, wedgeBudget, child)
 		}()
 	}
 
@@ -731,78 +697,29 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 		ownsState = false
 	}
 	// safety: a standalone run holds the store the fallback already chose, so
-	// profile resolution must not reopen or replace it.
+	// backend resolution must not reopen or replace it.
 	keepState := hosted.APISocket != "" || opts.standalone != nil
-	if err := applyProfileBackendsWithMirror(ctx, &opts, opts.Profile, paths, keepState); err != nil {
-		return nil, fmt.Errorf("profile backends: %w", err)
-	}
-	if opts.State == nil {
-		return nil, fmt.Errorf("state backend: no store resolved (no spec configured and no default)")
+	if err := resolveLocalBackends(&opts, paths, keepState); err != nil {
+		return nil, err
 	}
 	var backends Backends
-	var st *store.Store
 	if hosted.APISocket != "" {
 		hosted.Artifact = opts.ArtifactStore
 		backends = hosted
 	} else {
-		switch s := opts.State.(type) {
-		case *store.Store:
-			st = s
-			if ownsState {
-				defer func() { _ = st.Close() }()
-			}
-			if err := localOutputsReady(st); err != nil {
-				return nil, err
-			}
-			backends = LocalBackends(paths, st, opts.ArtifactStore)
-		case *s3state.Backend:
-			if opts.LogStore == nil {
-				return nil, fmt.Errorf("state backend: S3-only mode requires LogStore to be configured")
-			}
-			if ownsState {
-				defer func() {
-					cerr := s.Close()
-					if cerr == nil || err != nil || res == nil || res.Error != nil {
-						return
-					}
-					// safety: in S3-only mode the bucket is the run's only copy, so
-					// state left on this machine's disk is not a finished run.
-					res.Error = fmt.Errorf("persist run state: %w", cerr)
-					res.Status = "failed"
-				}()
-			}
-			backends = S3Backends(opts.LogStore, s, opts.ArtifactStore)
-		case *client.Client:
-			if opts.LogStore == nil {
-				seg, err := controllerSegmentLogs(ctx, s, nil)
-				if err != nil {
-					return nil, err
-				}
-				opts.LogStore = seg
-			}
-			if _, ok := opts.LogStore.(*segmentLogStore); ok {
-				s.WithWatchObserver(NoteWatch)
-			}
-			logsBackend := NewLogStoreBackend(opts.LogStore, nil)
-			backends = RemoteBackends(s, logsBackend, opts.ArtifactStore, nil, 0)
-		default:
+		st, ok := opts.State.(*store.Store)
+		if !ok {
 			return nil, fmt.Errorf("state backend: unrecognized implementation %T", opts.State)
 		}
-	}
-	if seg, ok := opts.LogStore.(*segmentLogStore); ok {
-		defer seg.Close(ctx)
-	}
-	if opts.MirrorLocal != nil {
-		backends.State = newMirrorStateBackend(backends.State, opts.MirrorLocal, nil)
-		defer func() { _ = opts.MirrorLocal.Close() }()
-	}
-	if opts.LogStore != nil {
-		backends.Logs = NewLogStoreBackend(opts.LogStore, nil)
+		if ownsState {
+			defer func() { err = errors.Join(err, st.Close()) }()
+		}
+		backends = LocalBackends(paths, st, opts.ArtifactStore)
 	}
 	if opts.RunID == "" {
 		opts.RunID = newRunID()
 	}
-	if opts.LocalOnly || opts.SecretSource == nil {
+	if opts.SecretSource == nil {
 		opts.SecretSource = localSecretsFor(ctx, paths, hosted, opts.RunID, opts.Pipeline)
 		opts.localSecrets = true
 	}
@@ -830,36 +747,7 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 		}
 	}
 
-	res, runErr := Run(ctx, backends, opts)
-	if backends.LocalCoordination && opts.ArtifactStore != nil && res != nil && res.RunID != "" {
-		if err := dumpRunState(ctx, canonicalState(backends.State), res.RunID, opts.ArtifactStore); err != nil {
-			fmt.Fprintf(os.Stderr, "warn: state dump failed: %v\n", err)
-		}
-	}
-	return res, runErr
-}
-
-func dumpRunState(ctx context.Context, state StateBackend, runID string, art storage.ArtifactStore) error {
-	run, err := state.GetRun(ctx, runID)
-	if err != nil {
-		return fmt.Errorf("read run: %w", err)
-	}
-	nodes, err := state.ListNodes(ctx, runID)
-	if err != nil {
-		return fmt.Errorf("list nodes: %w", err)
-	}
-	var buf strings.Builder
-	enc := json.NewEncoder(&buf)
-	if err := enc.Encode(map[string]any{"kind": "run", "data": run}); err != nil {
-		return err
-	}
-	for _, n := range nodes {
-		if err := enc.Encode(map[string]any{"kind": "node", "data": api.PublicNode(n)}); err != nil {
-			return err
-		}
-	}
-	key := "runs/" + runID + "/state.ndjson"
-	return art.Put(ctx, key, strings.NewReader(buf.String()))
+	return Run(ctx, backends, opts)
 }
 
 func dispatch(
@@ -1067,39 +955,44 @@ func loadCheckoutProjectConfig() (*projectconfig.Config, string, error) {
 	return cfg, path, err
 }
 
-func checkoutProjectConfig(logger *slog.Logger) *projectconfig.Config {
-	cfg, path, err := loadCheckoutProjectConfig()
+// safety: a config that does not parse hides the run's defaults, guards and
+// runner requirements, so the run fails naming the error rather than planning
+// with the caller's arguments alone.
+func checkoutProjectConfig() (*projectconfig.Config, error) {
+	cfg, _, err := loadCheckoutProjectConfig()
 	if err != nil {
-		if logger == nil {
-			logger = slog.Default()
-		}
-		logger.Warn("project config unreadable; running with the caller's arguments only, "+
-			"which may differ from the arguments this run was dispatched with",
-			"path", path, "err", err)
-		return nil
+		return nil, &projectConfigError{err: err}
 	}
-	return cfg
+	return cfg, nil
 }
 
-func checkoutInvokeArgs(pipeline string, stored map[string]string, logger *slog.Logger) map[string]string {
-	cfg := checkoutProjectConfig(logger)
-	if cfg == nil {
-		return stored
+// safety: a parse error describes the author's own config, so a failed run
+// records it in full rather than the generic setup-failure text.
+type projectConfigError struct{ err error }
+
+func (e *projectConfigError) Error() string { return "project config: " + e.err.Error() }
+
+func (e *projectConfigError) Unwrap() error { return e.err }
+
+func checkoutInvokeArgs(pipeline string, stored map[string]string) (map[string]string, error) {
+	cfg, err := checkoutProjectConfig()
+	if err != nil || cfg == nil {
+		return stored, err
 	}
 	return mergeInvokeArgs(Options{
 		Args:         stored,
 		DefaultArgs:  cfg.Defaults.Args,
 		PipelineYAML: (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipeline),
-	})
+	}), nil
 }
 
-func applyCheckoutProjectConfig(opts *Options, logger *slog.Logger) {
+func applyCheckoutProjectConfig(opts *Options) error {
 	if opts.DefaultArgs != nil && opts.PipelineYAML != nil {
-		return
+		return nil
 	}
-	cfg := checkoutProjectConfig(logger)
-	if cfg == nil {
-		return
+	cfg, err := checkoutProjectConfig()
+	if err != nil || cfg == nil {
+		return err
 	}
 	if opts.DefaultArgs == nil {
 		opts.DefaultArgs = cfg.Defaults.Args
@@ -1111,6 +1004,7 @@ func applyCheckoutProjectConfig(opts *Options, logger *slog.Logger) {
 		}
 		opts.PipelineYAML = entry
 	}
+	return nil
 }
 
 func buildRunInvocation(opts Options, runID, logDir string, secretArgs []string) map[string]any {
@@ -1166,25 +1060,6 @@ func buildRunInvocation(opts Options, runID, logDir string, secretArgs []string)
 	if flags := buildRunFlags(opts); len(flags) > 0 {
 		inv["flags"] = flags
 	}
-	if opts.LocalOnly {
-		inv["backends"] = map[string]any{
-			"state": "sqlite",
-			"logs":  "filesystem",
-			"cache": "filesystem",
-		}
-	} else if opts.Profile != nil && opts.ProfileChain != nil {
-		state, logs, cache := opts.Profile.SurfaceStrings()
-		inv["profile"] = map[string]any{
-			"name":         opts.ProfileChain.Selected,
-			"source":       string(opts.ProfileChain.Source),
-			"mirror_local": opts.Profile.EffectiveMirrorLocal(),
-		}
-		inv["backends"] = map[string]any{
-			"state": state,
-			"logs":  logs,
-			"cache": cache,
-		}
-	}
 	inv["reproducer"] = buildReproducer(opts, runID)
 	return inv
 }
@@ -1221,9 +1096,6 @@ func buildRunFlags(opts Options) map[string]any {
 	if opts.DryRun {
 		flags["dry_run"] = true
 	}
-	if opts.LocalOnly {
-		flags["local_only"] = true
-	}
 	if opts.StartAt != "" {
 		flags["start_at"] = opts.StartAt
 	}
@@ -1241,11 +1113,6 @@ func buildRunFlags(opts Options) map[string]any {
 	}
 	if os.Getenv("SPARKWING_NO_UPDATE") == "1" {
 		flags["no_update"] = true
-	}
-	if !opts.LocalOnly {
-		if v := handoffProfile(); v != "" {
-			flags["profile"] = v
-		}
 	}
 	if v := os.Getenv("SPARKWING_MODE"); v != "" {
 		flags["mode"] = v
@@ -1292,9 +1159,6 @@ func buildReproducer(opts Options, _ string) string {
 			continue
 		}
 		flagName := "--" + strings.ReplaceAll(k, "_", "-")
-		if k == "local_only" {
-			flagName = "--sw-local-only"
-		}
 		if k == "priority" {
 			flagName = "--sw-priority"
 		}
@@ -1673,9 +1537,6 @@ func newDispatchState(
 
 func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 	return sparkwing.PipelineAwaiterFunc(func(ctx context.Context, req sparkwing.AwaitRequest) (*sparkwing.ResolvedPipelineRef, error) {
-		if err := s.backends.checkTriggerDispatch(); err != nil {
-			return nil, err
-		}
 		localAdmission, _, _ := localAdmissionFromContext(ctx)
 		config := childAwaitConfig{
 			state:               s.backends.State,
@@ -3044,11 +2905,7 @@ func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnap
 				OnTimeout: string(cfg.OnExpiry),
 			}
 		}
-		sn.Modifiers = nodeModifiersSnapshot(n)
-		sn.DirCaches = nodeDirCaches(n)
-		if w := n.Work(); w != nil {
-			sn.Work = snapshotWorkOf(w, n.ResultStep())
-		}
+		snapshotNodeEnvelope(p, n, &sn)
 		snap.Nodes = append(snap.Nodes, sn)
 		seen[n.ID()] = true
 	}
@@ -3066,17 +2923,26 @@ func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnap
 			Consumes:     snapshotConsumeEdges(rec.ConsumeEdges()),
 			Groups:       p.JobGroupNames(rec.ID()),
 			OnFailureOf:  n.ID(),
-			Modifiers:    nodeModifiersSnapshot(rec),
-			DirCaches:    nodeDirCaches(rec),
 			PipelineRefs: snapshotPipelineRefs(rec.PipelineRefs()),
 		}
-		if w := rec.Work(); w != nil {
-			recSnap.Work = snapshotWorkOf(w, rec.ResultStep())
-		}
+		snapshotNodeEnvelope(p, rec, &recSnap)
 		snap.Nodes = append(snap.Nodes, recSnap)
 		seen[rec.ID()] = true
 	}
 	return snap, nil
+}
+
+func snapshotNodeEnvelope(p *sparkwing.Plan, n *sparkwing.JobNode, sn *nodeproto.PlanNode) {
+	sn.Modifiers = nodeModifiersSnapshot(n)
+	sn.Caches = nodeDirCaches(n)
+	closures, stepClosures := sparkwingruntime.NodeClosureIDs(p, n)
+	sn.Closures = closures
+	if closures != nil && closures.CacheKey != "" {
+		sn.MemoKey = &nodeproto.PlanMemoKey{Closure: closures.CacheKey}
+	}
+	if w := n.Work(); w != nil {
+		sn.Work = snapshotWorkOf(w, n.ResultStep(), stepClosures)
+	}
 }
 
 func snapshotConsumeEdges(edges []sparkwing.ConsumeEdge) []nodeproto.PlanConsume {
@@ -3181,6 +3047,7 @@ func nodeModifiersSnapshot(n *sparkwing.JobNode) *nodeproto.PlanModifiers {
 		HasBeforeRun:        len(n.BeforeRunHooks()) > 0,
 		HasAfterRun:         len(n.AfterRunHooks()) > 0,
 		HasSkipIf:           len(n.SkipPredicates()) > 0,
+		HasVerify:           n.Verifier() != nil,
 	}
 	if rec := n.OnFailureNode(); rec != nil {
 		m.OnFailure = rec.ID()
@@ -3235,10 +3102,11 @@ func isZeroModifiers(m nodeproto.PlanModifiers) bool {
 		m.OnFailure == "" &&
 		!m.HasBeforeRun &&
 		!m.HasAfterRun &&
-		!m.HasSkipIf
+		!m.HasSkipIf &&
+		!m.HasVerify
 }
 
-func snapshotWorkOf(work *sparkwing.Work, resultStep *sparkwing.WorkStep) *nodeproto.PlanWork {
+func snapshotWorkOf(work *sparkwing.Work, resultStep *sparkwing.WorkStep, closures map[string]*nodeproto.PlanClosures) *nodeproto.PlanWork {
 	out := &nodeproto.PlanWork{FailurePolicy: string(work.ParallelFailurePolicy())}
 	if resultStep != nil {
 		out.ResultStep = resultStep.ID()
@@ -3251,6 +3119,10 @@ func snapshotWorkOf(work *sparkwing.Work, resultStep *sparkwing.WorkStep) *nodep
 			HasSkipIf: len(s.SkipPredicates()) > 0,
 			Finally:   s.IsFinally(),
 			Risks:     s.Risks(),
+
+			ContinueOnError: s.IsContinueOnError(),
+			Optional:        s.IsOptional(),
+			Closures:        closures[s.ID()],
 		})
 	}
 	for _, g := range work.Groups() {

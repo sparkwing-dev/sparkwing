@@ -246,6 +246,11 @@ type HelpProvider interface {
 	Help() string
 }
 func Info(ctx context.Context, format string, args ...any)
+type InputError struct {
+	Err error
+}
+func (e *InputError) Error() string
+func (e *InputError) Unwrap() error
 type InputField struct {
 	Name        string
 	Short       string
@@ -598,6 +603,7 @@ var RuntimePlumbing = struct {
 		JobGroupFinalize:   (*JobGroup).finalize,
 		WorkStepFn:         func(s *WorkStep) func(ctx context.Context) (any, error) { return s.fn },
 		WorkStepMarkDone:   (*WorkStep).markDone,
+		WorkRunStep:        runStep,
 		NodeDirCaches:      dirCacheSpecs,
 	},
 }

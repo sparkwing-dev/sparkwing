@@ -103,8 +103,8 @@ pair `.Memoize()` with `Outputs`.
 
 ## Both execution modes
 
-Local runs store artifacts in `cache/` under their resolved Sparkwing home.
-`--sw-local-only` selects that same local store. Staging checks blob and manifest
+Local runs store artifacts in `cache/` under their resolved Sparkwing home,
+or in the store `SPARKWING_CACHE_URL` names. Staging checks blob and manifest
 digests and fails when cached bytes are missing or corrupt. Memo entries without
 a required artifact manifest are cache misses and rebuild the producer.
 

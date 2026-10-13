@@ -11,8 +11,7 @@
 //     (the run / node / event HTTP surface) backed by a sqlite
 //     [github.com/sparkwing-dev/sparkwing/pkg/store.Store] at
 //     <Home>/state.db.
-//   - Node log reads from the run directories under <Home>/runs, or from
-//     [Options.LogStore] when one is set.
+//   - Node log reads from the run directories under <Home>/runs.
 //   - The embedded Next.js dashboard bundle, which the controller serves at
 //     / in local mode: no sign-in pages, with the serve token as the
 //     credential.
@@ -24,11 +23,8 @@
 //
 // # Embedding
 //
-// [Options] tunes the composition: pre-built listener, alternative
-// [storage.ArtifactStore] / [storage.LogStore] backends (e.g. S3 for
-// shared-state mode), read-only mode for safe consoles, and
-// NoLocalStore to drive the dashboard purely from object-storage
-// reads without opening the local sqlite.
+// [Options] tunes the composition: pre-built listener and read-only
+// mode for safe consoles.
 //
 // # Cluster mode
 //

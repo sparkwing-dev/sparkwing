@@ -35,8 +35,6 @@ profiles:
   prod:
     secrets: { type: controller, url: https://controller.prod.example.com, token_env: PROD_TOKEN }
     state:   { type: sqlite, path: .sparkwing/state.db }
-    cache:   { type: filesystem, path: .sparkwing/cache }
-    logs:    { type: filesystem, path: .sparkwing/logs }
 
 pipelines:
   - name: release
@@ -245,5 +243,36 @@ func TestLoad_RefusesADefaultProfile(t *testing.T) {
 	_, err := projectconfig.Load(path)
 	if err == nil || !strings.Contains(err.Error(), "field profile not found") {
 		t.Fatalf("a project default profile must fail the load, since only --profile selects one; got %v", err)
+	}
+}
+
+// A project profile declares both surfaces, so the error a user meets after
+// dropping a removed state type names the states it accepts.
+func TestLoad_AProjectProfileErrorNamesTheSupportedStates(t *testing.T) {
+	const surfaces = "    secrets: { type: none }\n"
+	for name, state := range map[string]string{
+		"removed type": "    state: { type: s3, bucket: b }\n",
+		"no state":     "",
+	} {
+		path := writeYAML(t, t.TempDir(), projectconfig.Filename, "profiles:\n  shared:\n"+surfaces+state)
+		_, err := projectconfig.Load(path)
+		if err == nil || !strings.Contains(err.Error(), "sqlite") || !strings.Contains(err.Error(), "controller") ||
+			!strings.Contains(err.Error(), "remove the profile") {
+			t.Errorf("%s: Load = %v, want the supported states and removing the profile named", name, err)
+		}
+	}
+	ok := writeYAML(t, t.TempDir(), projectconfig.Filename, "profiles:\n  shared:\n"+surfaces+"    state: { type: sqlite }\n")
+	if _, err := projectconfig.Load(ok); err != nil {
+		t.Fatalf("a sqlite project profile: %v", err)
+	}
+}
+
+func TestLoad_RefusesTheRemovedLogsAndCacheSurfaces(t *testing.T) {
+	for _, key := range []string{"logs", "cache"} {
+		path := writeYAML(t, t.TempDir(), projectconfig.Filename,
+			"profiles:\n  shared:\n    secrets: { type: none }\n    state: { type: sqlite }\n    "+key+": { type: filesystem, path: /tmp/x }\n")
+		if _, err := projectconfig.Load(path); err == nil || !strings.Contains(err.Error(), "field "+key+" not found") {
+			t.Errorf("Load = %v, want %s refused as an unknown field", err, key)
+		}
 	}
 }

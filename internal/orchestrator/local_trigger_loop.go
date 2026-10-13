@@ -44,7 +44,7 @@ func (c childStoreEnv) apply(env []string) []string {
 	return append(env, StandaloneStateDBEnv+"="+c.path, StandaloneReasonEnv+"="+c.reason)
 }
 
-func runLocalTriggerLoop(ctx context.Context, state StateBackend, runID, profileName, parentRepoDir string, logger *slog.Logger, wedgeBudget time.Duration, childStore childStoreEnv) {
+func runLocalTriggerLoop(ctx context.Context, state StateBackend, runID, parentRepoDir string, logger *slog.Logger, wedgeBudget time.Duration, childStore childStoreEnv) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -97,7 +97,7 @@ func runLocalTriggerLoop(ctx context.Context, state StateBackend, runID, profile
 		wg.Add(1)
 		go func(t *store.Trigger) {
 			defer wg.Done()
-			if err := dispatchLocalTrigger(ctx, t, profileName, parentRepoDir, cache, logger, childStore.apply(nil)); err != nil {
+			if err := dispatchLocalTrigger(ctx, t, parentRepoDir, cache, logger, childStore.apply(nil)); err != nil {
 				recordLocalTriggerFailure(ctx, state, t, err, logger)
 			}
 		}(trig)
@@ -170,7 +170,7 @@ func claimChildTrigger(ctx context.Context, state RunCoordination, runID string)
 }
 
 func dispatchLocalTrigger(ctx context.Context, trig *store.Trigger,
-	profileName, parentRepoDir string, cache *localCompileCache, logger *slog.Logger, env []string,
+	parentRepoDir string, cache *localCompileCache, logger *slog.Logger, env []string,
 ) error {
 	repoDir, cleanup, err := prepareTriggerRepo(ctx, trig, parentRepoDir)
 	if err != nil {
@@ -249,11 +249,7 @@ func dispatchLocalTrigger(ctx context.Context, trig *store.Trigger,
 		"pinned", pinned,
 	)
 
-	args := []string{"handle-trigger", "--local"}
-	if profileName != "" {
-		args = append(args, "--profile", profileName)
-	}
-	args = append(args, trig.ID)
+	args := []string{"handle-trigger", "--local", trig.ID}
 	closeAdmission, err := prepareLocalDispatchAdmission(ctx, env)
 	if err != nil {
 		return fmt.Errorf("prepare local dispatch admission: %w", err)
@@ -270,7 +266,7 @@ func submissionExecutionEnvironment(captured []string, home string) []string {
 		wingdclient.HostBinEnv:      {},
 		"SPARKWING_RUN_HANDLE_FILE": {},
 		"SPARKWING_START_AT":        {}, "SPARKWING_STOP_AT": {}, "SPARKWING_ONLY": {},
-		"SPARKWING_NO_CACHE": {}, "SPARKWING_DRY_RUN": {}, "SPARKWING_LOCAL_ONLY": {},
+		"SPARKWING_NO_CACHE": {}, "SPARKWING_DRY_RUN": {},
 		"SPARKWING_ALLOW": {}, "SPARKWING_REF": {}, ProfileEnv: {}, SecretsProfileEnv: {},
 		"SPARKWING_MODE": {}, "SPARKWING_WORKERS": {},
 		PriorityEnv:                    {},

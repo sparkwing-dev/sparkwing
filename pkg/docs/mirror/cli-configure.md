@@ -112,7 +112,7 @@ Add a profile with 'sparkwing cloud connect', check it with
 
 Print every registered profile
 
-Prints a table of profile name, controller URL, logs surface, and
+Prints a table of profile name, controller URL, and
 token. JSON is one profile per line; the token is redacted in
 every mode.
 

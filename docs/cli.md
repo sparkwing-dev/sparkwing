@@ -71,8 +71,8 @@ scheduled run goes through the same submission and is refused the same way.
 declarations, so a retry of a risk-declaring run is not refused. Run a
 risk-labeled pipeline in the foreground, where `--sw-allow` authorizes it.
 
-`--profile NAME` selects the storage and dispatch addressing
-(state/cache/logs, and any controller auth). Execution still happens
+`--profile NAME` selects the store a read verb reads (this machine's
+state or a controller, and any controller auth). Execution still happens
 locally; to hand a run to a cluster, use `sparkwing pipeline trigger`
 for remote execution.
 
@@ -127,8 +127,7 @@ indexed in [cli-reference.md](cli-reference.md):
   a profile, so a command reaches a controller only when its own command
   line names one. Every verb that can reach a controller accepts
   `--profile`. `sparkwing run` always executes
-  locally; it accepts `--profile` only for a profile with no controller
-  whose state is S3 or Postgres, a temporary exception slated for removal.
+  locally and takes no `--profile`.
   `sparkwing pipeline trigger <pipeline> --profile NAME` is the verb for
   remote (cluster) execution.
 - **Required flags.** Marked `[required]` in `--help`; missing ones fail

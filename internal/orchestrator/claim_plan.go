@@ -8,9 +8,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/signal"
+	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
@@ -48,7 +48,11 @@ func runPlanCLI(args []string) error {
 	}
 	rc := runContextFor(run)
 	sparkwing.SetGit(rc.Git)
-	plan, err := reg.Invoke(sparkwingruntime.WithLogger(ctx, NewJSONRenderer()), checkoutInvokeArgs(run.Pipeline, run.Args, slog.Default()), rc)
+	invokeArgs, err := checkoutInvokeArgs(run.Pipeline, run.Args)
+	if err != nil {
+		return err
+	}
+	plan, err := reg.Invoke(sparkwingruntime.WithLogger(ctx, NewJSONRenderer()), invokeArgs, rc)
 	if err != nil {
 		return fmt.Errorf("build plan: %w", err)
 	}
@@ -67,13 +71,12 @@ func runPlanCLI(args []string) error {
 // safety: a node's pod plans again and compares its node's hash with the one
 // the accepted plan holds, so it never runs a node that plan does not hold.
 func claimPlanSnapshot(plan *sparkwing.Plan, rc sparkwing.RunContext, reg *sparkwing.Registration) (nodeproto.PlanDoc, error) {
-	meta := planSnapshotMeta{Secrets: sparkwingruntime.ReflectSecretsField(reg)}
-	if y := loadPipelineYAML(rc.Pipeline); y != nil {
-		meta.PipelineRequires = y.Requires
-	}
-	snap, err := buildPlanSnapshot(plan, rc, meta)
+	snap, err := planDocument(plan, rc, reg)
 	if err != nil {
 		return snap, err
+	}
+	if y := loadPipelineYAML(rc.Pipeline); y != nil {
+		snap.Requires = slices.Clone(y.Requires)
 	}
 	for i := range snap.Nodes {
 		raw, err := json.Marshal(snap.Nodes[i])
@@ -82,6 +85,16 @@ func claimPlanSnapshot(plan *sparkwing.Plan, rc sparkwing.RunContext, reg *spark
 		}
 		sum := sha256.Sum256(raw)
 		snap.Nodes[i].SpecHash = "sha256:" + hex.EncodeToString(sum[:])
+	}
+	return snap, nil
+}
+
+// safety: leaves out requires and spec_hash, which the node protocol gives to
+// the host.
+func planDocument(plan *sparkwing.Plan, rc sparkwing.RunContext, reg *sparkwing.Registration) (nodeproto.PlanDoc, error) {
+	snap, err := buildPlanSnapshot(plan, rc, planSnapshotMeta{Secrets: sparkwingruntime.ReflectSecretsField(reg)})
+	if err != nil {
+		return snap, err
 	}
 	if c := plan.CheckoutValue(); c != nil {
 		depth := max(c.Depth, 1)

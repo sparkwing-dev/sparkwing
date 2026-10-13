@@ -52,17 +52,13 @@ func runHandleTriggerCLI(args []string) error {
 			"the band pool must stamp that label on its nodes")
 	local := fs.Bool("local", false,
 		"run against the laptop SQLite store; no controller required")
-	profileName := fs.String("profile", "",
-		"profile to resolve backends from (local mode only). Forwarded by "+
-			"the parent's local trigger dispatcher so the child opens the "+
-			"same state backend the parent enqueued the trigger in.")
 	positional, err := parseInterspersed(fs, args)
 	if err != nil {
 		return err
 	}
 
 	if len(positional) < 1 {
-		return errors.New("usage: handle-trigger <trigger-id> [--controller URL --token T | --local [--profile NAME]]")
+		return errors.New("usage: handle-trigger <trigger-id> [--controller URL --token T | --local]")
 	}
 	triggerID := positional[0]
 
@@ -70,7 +66,7 @@ func runHandleTriggerCLI(args []string) error {
 	defer stop()
 
 	if *local {
-		if err := HandleClaimedTriggerLocal(ctx, triggerID, *profileName); err != nil {
+		if err := HandleClaimedTriggerLocal(ctx, triggerID); err != nil {
 			return fmt.Errorf("handle %s (local): %w", triggerID, err)
 		}
 		return nil

@@ -8,9 +8,8 @@
 // [ArtifactStore] is a content-addressed blob store. [LogStore]
 // persists per-node log streams keyed by (runID, nodeID). [StateStore]
 // is the run-record handle (runs, nodes, steps, annotations,
-// approvals, dispatches, debug pauses). The SQLite-backed
-// *store.Store satisfies it today; Postgres, HTTP (controller), and
-// object-store NDJSON backends slot in behind the same interface.
+// approvals, dispatches, debug pauses). The SQLite- and
+// Postgres-backed *store.Store and the controller HTTP client satisfy it.
 //
 // # Implementations
 //
@@ -18,22 +17,20 @@
 // execution mode:
 //
 //   - [fs] -- filesystem (laptop / local dev)
-//   - [s3] -- any S3-compatible object store (ci-embedded, distributed)
+//   - [s3] -- any S3-compatible object store (artifacts only)
 //   - [sparkwingcache] -- the sparkwing-cache HTTP service (distributed)
-//   - [stdoutlogs] -- write-only stream to process stdout (ephemeral CI)
 //
 // Default backend per execution mode:
 //
 //	local         filesystem            filesystem
-//	ci-embedded   S3 (or compatible)    S3 (or compatible)
 //	distributed   sparkwing-cache HTTP  controller segments ([logseg])
 //
 // # Opening backends
 //
 // Production code does not instantiate implementations directly.
-// Use [storeurl.OpenArtifactStore] / [storeurl.OpenLogStore], which
-// parse a backend URL (`fs:///...`, `s3://bucket/prefix`, ...) and
-// return the matching implementation behind the interface. State is
+// Use [storeurl.OpenArtifactStore], which parses a backend URL
+// (`fs:///...`, `s3://bucket/prefix`, ...) and returns the matching
+// implementation behind the interface. State is
 // opened from a backends.Spec via [storeurl.OpenStateStoreFromSpec].
 //
 // # Adding a backend

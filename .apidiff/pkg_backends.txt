@@ -1,45 +1,30 @@
 # pkg/backends
 
+const MigrationGuideURL = "https://sparkwing.dev/docs/migration-guide/"
 type Spec struct {
 	Type string
 
-	Bucket    string
-	Prefix    string
-	Path      string
-	URL       string
-	URLSource string
-	Token     string
+	Bucket string
+	Prefix string
+	Path   string
+	URL    string
+	Token  string
 
 	TokenEnv string
 
 	Controller string
-
-	Binaries *Spec
-
-	BatchInterval time.Duration
-
-	BatchBytes int
-
-	MaxLogObjects int
-
-	MaxLogBytes int64
 }
 func (s *Spec) ResolvedToken() string
 func (s *Spec) ValidateFields(surface string) error
 func (s *Spec) ValidateSecrets() error
 type Surfaces struct {
 	Secrets *Spec
-	Cache   *Spec
-	Logs    *Spec
 	State   *Spec
 }
-func (s Surfaces) BinaryCache() *Spec
 func (s Surfaces) Validate(name string) error
 const TypeController = "controller"
 const TypeEnv = "env"
 const TypeFilesystem = "filesystem"
 const TypeNone = "none"
-const TypePostgres = "postgres"
 const TypeS3 = "s3"
 const TypeSQLite = "sqlite"
-const TypeStdout = "stdout"

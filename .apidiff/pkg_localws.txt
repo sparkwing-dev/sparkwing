@@ -7,16 +7,7 @@ type Options struct {
 
 	Listener net.Listener
 
-	LogStore storage.LogStore
-
-	LogStoreLabel string
-
-	ArtifactStore      storage.ArtifactStore
-	ArtifactStoreLabel string
-
 	ReadOnly bool
-
-	NoLocalStore bool
 
 	AllowRemote bool
 

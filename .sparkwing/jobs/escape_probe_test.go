@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"context"
 	"errors"
 	"io"
 	"io/fs"
@@ -9,11 +10,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -340,4 +343,51 @@ func TestEscapeProbe_OutputProbesFenceNonAncestorsAndOtherRuns(t *testing.T) {
 	if r := byName(missing.outputProbes())["controller other run output"]; r.verdict != inconclusive {
 		t.Errorf("no --other-run: %s, want INCONCLUSIVE", r.verdict)
 	}
+}
+
+// Plan must do no work, so planning any pipeline, for describe or for a run,
+// opens no connection. The node probe must still dial through probeDial, or
+// the hook proves nothing.
+func TestEscapeProbe_PlansOpenNoConnection(t *testing.T) {
+	var mu sync.Mutex
+	var dials []string
+	prev := probeDial
+	probeDial = func(_ context.Context, _, addr string) (net.Conn, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		dials = append(dials, addr)
+		return nil, refused
+	}
+	t.Cleanup(func() { probeDial = prev })
+	attempts := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), dials...)
+	}
+
+	for _, name := range sparkwing.Registered() {
+		reg, _ := sparkwing.Lookup(name)
+		for _, rc := range []sparkwing.RunContext{{Pipeline: name}, {Pipeline: name, RunID: "run-probe"}} {
+			planOnce(reg, rc)
+		}
+	}
+	if got := attempts(); len(got) > 0 {
+		t.Fatalf("planning opened %d connections, first %q; Plan must not touch the network", len(got), got[0])
+	}
+
+	_ = (&escapeProbeNode{}).probe(context.Background())
+	if len(attempts()) == 0 {
+		t.Fatal("the node probe opened no connection, so it no longer dials through probeDial")
+	}
+}
+
+// safety: the SDK's describe recovers a panicking plan and ignores its error,
+// so this does too and judges only the connections the plan opened.
+func planOnce(reg *sparkwing.Registration, rc sparkwing.RunContext) {
+	defer func() { _ = recover() }()
+	ctx := context.Background()
+	if rc.RunID == "" {
+		ctx = sparkwing.SkipArgResolve(ctx)
+	}
+	_, _ = reg.Invoke(ctx, map[string]string{}, rc)
 }

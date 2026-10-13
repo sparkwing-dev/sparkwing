@@ -661,14 +661,14 @@ func runPipelineForProof() Prover {
 }
 
 func pipelineProofCommand(repoRoot, pipeline string) (*exec.Cmd, error) {
-	args := []string{"run", pipeline, "--sw-local-only"}
+	args := []string{"run", pipeline}
 	self, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("locate sparkwing executable: %w", err)
 	}
 	cmd := exec.Command(self, args...)
 	cmd.Dir = repoRoot
-	cmd.Env = append(handoffProfiles(os.Environ(), ""), "SPARKWING_LOG_FORMAT=quiet")
+	cmd.Env = append(dropProfileEnv(os.Environ()), "SPARKWING_LOG_FORMAT=quiet")
 	return cmd, nil
 }
 
@@ -1121,7 +1121,7 @@ func renderHookScript(hookName string, pipes []string, chainGlobal bool) string 
 		b.WriteString("unset " + orchestrator.ProfileEnv + " " + orchestrator.SecretsProfileEnv + "\n")
 		for _, p := range pipes {
 			// safety: pipeline names come from repo config, so quote before they reach sh.
-			fmt.Fprintf(&b, "sparkwing run %s --sw-local-only%s%s\n", shellSingleQuote(p), stdin, tolerate)
+			fmt.Fprintf(&b, "sparkwing run %s%s%s\n", shellSingleQuote(p), stdin, tolerate)
 		}
 		b.WriteString(")\n")
 	}

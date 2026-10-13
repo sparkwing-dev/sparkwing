@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/logbatch"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -47,15 +46,9 @@ func TestNodeTerminalWriteMustBeAcknowledged(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			st, backends := terminalExecutionFixture(t)
 			durable := &bufferedLogStore{}
-			batcher := logbatch.New(durable, logbatch.WithFlushInterval(time.Hour), logbatch.WithBufferThreshold(1<<20))
-			t.Cleanup(func() {
-				if err := batcher.Close(); err != nil {
-					t.Error(err)
-				}
-			})
 			state := &terminalWriteState{localState: localState{st: st}, durable: durable, failure: tc.failure, commit: tc.commit}
 			backends.State = state
-			backends.Logs = NewLogStoreBackend(batcher, nil)
+			backends.Logs = NewLogStoreBackend(durable, nil)
 			node := sparkwing.Job(sparkwing.NewPlan(), "build", func(ctx context.Context) error { sparkwing.Info(ctx, "body reached completion"); return nil })
 			result := NewNodeExecutor(backends).RunNode(t.Context(), runner.Request{RunID: "run", NodeID: "build", Node: node})
 			want := sparkwing.Success

@@ -26,8 +26,6 @@ func TestInheritControllerDefaults(t *testing.T) {
 		Controller: &profile.ControllerSpec{URL: "https://ctrl.example", Token: "tok-from-ctrl"},
 		Secrets:    &backends.Spec{Type: backends.TypeController},
 		State:      &backends.Spec{Type: backends.TypeController, URL: "https://state.override", Token: "tok-state"},
-		Cache:      &backends.Spec{Type: backends.TypeController, TokenEnv: prefilledTokenEnv},
-		Logs:       &backends.Spec{Type: backends.TypeSQLite, Path: "/var/sw.db"},
 	}
 	p.InheritControllerDefaults()
 	if p.Secrets.URL != "https://ctrl.example" || p.Secrets.Token != "tok-from-ctrl" {
@@ -36,25 +34,18 @@ func TestInheritControllerDefaults(t *testing.T) {
 	if p.State.URL != "https://state.override" || p.State.Token != "tok-state" {
 		t.Errorf("State (explicit) was overwritten: %+v", p.State)
 	}
-	if p.Cache.URL != "https://ctrl.example" || p.Cache.TokenEnv != prefilledTokenEnv || p.Cache.Token != "" {
-		t.Errorf("Cache: URL should fill but Token must stay empty when TokenEnv is set: %+v", p.Cache)
-	}
-	if p.Logs.URL != "/var/sw.db"[:0]+"" || p.Logs.Path != "/var/sw.db" {
-		t.Errorf("Logs (non-controller type) must not be touched: %+v", p.Logs)
-	}
-}
 
-// TestInheritControllerDefaultsLeavesLogsURLEmpty covers a controller logs
-// surface: the controller keeps the logs itself, so it inherits the
-// controller's token but never its URL, which validation would refuse.
-func TestInheritControllerDefaultsLeavesLogsURLEmpty(t *testing.T) {
-	p := &profile.Profile{
+	envSecrets := &profile.Profile{
 		Controller: &profile.ControllerSpec{URL: "https://ctrl.example", Token: "tok-from-ctrl"},
-		Logs:       &backends.Spec{Type: backends.TypeController},
+		Secrets:    &backends.Spec{Type: backends.TypeController, TokenEnv: prefilledTokenEnv},
+		State:      &backends.Spec{Type: backends.TypeSQLite, Path: "/var/sw.db"},
 	}
-	p.InheritControllerDefaults()
-	if p.Logs.URL != "" || p.Logs.Token != "tok-from-ctrl" {
-		t.Fatalf("controller logs spec = %+v, want no URL and the controller token", p.Logs)
+	envSecrets.InheritControllerDefaults()
+	if envSecrets.Secrets.URL != "https://ctrl.example" || envSecrets.Secrets.Token != "" {
+		t.Errorf("Secrets: URL should fill but Token must stay empty when TokenEnv is set: %+v", envSecrets.Secrets)
+	}
+	if envSecrets.State.URL != "" || envSecrets.State.Path != "/var/sw.db" {
+		t.Errorf("State (non-controller type) must not be touched: %+v", envSecrets.State)
 	}
 }
 
@@ -70,13 +61,11 @@ func TestLoad_MissingFile(t *testing.T) {
 
 func TestLoadSaveRoundTrip(t *testing.T) {
 	path := savedAt(t, filepath.Join(t.TempDir(), "config.yaml"))
-	mirror := false
 	cfg := &profile.Config{
 		Profiles: map[string]*profile.Profile{
 			"prod": {
-				Controller:  &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_x"},
-				State:       &backends.Spec{Type: backends.TypeSQLite, Path: "/var/state.db"},
-				MirrorLocal: &mirror,
+				Controller: &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_x"},
+				State:      &backends.Spec{Type: backends.TypeSQLite, Path: "/var/state.db"},
 			},
 		},
 	}
@@ -96,9 +85,6 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 	}
 	if prod.State == nil || prod.State.Type != backends.TypeSQLite {
 		t.Errorf("state: %+v", prod.State)
-	}
-	if prod.MirrorLocal == nil || *prod.MirrorLocal != false {
-		t.Errorf("mirror_local: %+v", prod.MirrorLocal)
 	}
 }
 
@@ -152,24 +138,49 @@ func TestDefaultPath_XDG(t *testing.T) {
 	}
 }
 
-func TestEffectiveMirrorLocal_DefaultsTrue(t *testing.T) {
-	if !(*profile.Profile)(nil).EffectiveMirrorLocal() {
-		t.Error("nil profile should report MirrorLocal=true (laptop default)")
+func TestLoad_RefusesARemovedStateProfile(t *testing.T) {
+	for name, body := range map[string]string{
+		"s3":       "profiles:\n  shared:\n    state: {type: s3, bucket: b, prefix: state}\n",
+		"postgres": "profiles:\n  shared:\n    state: {type: postgres, url: postgres://db/sparkwing}\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := savedAt(t, filepath.Join(t.TempDir(), "config.yaml"))
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := profile.Load(path)
+			if err == nil {
+				t.Fatal("Load accepted a removed state profile")
+			}
+			for _, want := range []string{`profile "shared"`, "is removed", backends.MigrationGuideURL} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q should mention %q", err, want)
+				}
+			}
+		})
 	}
-	p := &profile.Profile{}
-	if !p.EffectiveMirrorLocal() {
-		t.Error("unset MirrorLocal should default to true")
-	}
-	f := false
-	p.MirrorLocal = &f
-	if p.EffectiveMirrorLocal() {
-		t.Error("MirrorLocal=false should report false")
+}
+
+func TestLoad_RefusesRemovedKeys(t *testing.T) {
+	for key, body := range map[string]string{
+		"mirror_local": "profiles:\n  prod:\n    mirror_local: false\n",
+		"logs":         "profiles:\n  prod:\n    logs: {type: controller}\n",
+		"cache":        "profiles:\n  prod:\n    cache: {type: filesystem, path: /tmp/c}\n",
+		"batch_bytes":  "profiles:\n  prod:\n    state: {type: sqlite, batch_bytes: 1024}\n",
+	} {
+		path := savedAt(t, filepath.Join(t.TempDir(), "config.yaml"))
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := profile.Load(path); err == nil || !strings.Contains(err.Error(), "field "+key+" not found") {
+			t.Errorf("Load = %v, want %s refused as an unknown field", err, key)
+		}
 	}
 }
 
 func TestSurfaces_NilSafe(t *testing.T) {
 	got := (*profile.Profile)(nil).Surfaces()
-	if got.State != nil || got.Cache != nil || got.Logs != nil {
+	if got.State != nil || got.Secrets != nil {
 		t.Errorf("nil profile should yield zero Surfaces; got %+v", got)
 	}
 }
