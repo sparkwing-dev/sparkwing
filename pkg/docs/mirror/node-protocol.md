@@ -63,7 +63,7 @@ For one node attempt the host sends requests in this order:
 7. On the last attempt, whether it succeeded or ran out of retries, `eval` for each `after_run` closure.
 8. Close the request pipe.
 
-The host evaluates `skip_if` and `cache_key` closures before the first attempt starts, so a skipped or memoized node never gets an attempt. It evaluates a `generator` in its source node's attempt process. It may use a separate eval process on the run's host for `skip_if` and `cache_key`, or an attempt process, and the SDK answers the same way in both.
+The host evaluates `skip_if` and `cache_key` closures before the first attempt starts, so a skipped or memoized node never gets an attempt. It evaluates a `generator` in its source node's attempt process, or in an eval process when memo copied the source's result. It may use a separate eval process on the run's host for `skip_if` and `cache_key`, or an attempt process, and the SDK answers the same way in both.
 
 ## Framing
 
@@ -190,13 +190,13 @@ A closure is customer code that the host calls by id. The plan lists each node's
 | Kind | Where the host evaluates it | `input` | `value` | When `error` is set |
 |---|---|---|---|---|
 | `skip_if` | eval process, before the first attempt. A step's runs in the attempt process, before that step | none | boolean; `true` skips the node or step. The host ORs several together | the host treats a node's as `false`; a step's fails that step |
-| `cache_key` | eval process, before the first attempt | none | a string the host namespaces into the memo key, or `null` to run without memo | the node fails before it runs |
+| `cache_key` | eval process, before the first attempt | none | a string the host namespaces into the memo key, or `null` to run without memo. An empty string fails the node before it runs | the node fails before it runs |
 | `before_run` | attempt process, attempt 1, before the body | none | `null` | the node fails without retrying |
 | `verify` | attempt process, after each successful body | none | `null` | the attempt fails with reason `verify`, and retry and `on_failure` apply |
 | `after_run` | the last attempt's process, after the body and verify | `{outcome, error?}`: the node's final outcome and error | `null` | the host logs it and leaves the node's outcome unchanged |
-| `generator` | the source's attempt process, after its body succeeds; again in each generated node's own processes | none | an array of node documents | the generated group fails, and nodes that need it are cancelled |
+| `generator` | the source's attempt process, after its body succeeds, or an eval process when the source's result was copied by memo; again in each generated node's own processes | none | an array of node documents | the generated group fails, and nodes that need it are cancelled |
 
-The host bounds each node `skip_if` by the node's `modifiers.skip_if_budget_ms`, or by 30 seconds when that is absent. A `skip_if` that overruns its budget counts as `false`. Every other closure is bounded by the node's wall timeout.
+The host bounds each node `skip_if` by the node's `modifiers.skip_if_budget_ms`, or by 30 seconds when that is absent. A `skip_if` that overruns its budget counts as `false`. A `cache_key` closure has its own 30-second limit, and one that overruns it fails the node. Every other closure is bounded by the node's wall timeout.
 
 A failed reply to `eval` (for example `unknown_closure`) is never read as `false` or as a skipped check. The attempt fails.
 
@@ -205,6 +205,7 @@ A failed reply to `eval` (for example `unknown_closure`) is never read as `false
 A generator closure adds nodes at run time. Its source node lists the closure under `closures.generator`. A node that waits for every generated node lists the closure id under `needs_generated`.
 
 1. After the source's body succeeds, the host evaluates the generator in the source's attempt process, where the SDK still holds the source's output. It records the source's outcome and output before it adds any node. In a generated node's own processes the generator reads that output through `GET /node/v1/nodes/{node}/output`.
+   - A memoized source whose result the host copied from an earlier run gets no attempt. The host evaluates its generators in an eval process instead, where `GET /node/v1/nodes/{node}/output` for the source itself answers the copied output.
 2. `value` is an array of node documents in the plan document's node shape. Each one lists the source in its `deps`.
 3. The host validates the new nodes against the plan (`plan_invalid`), records them with the run, and schedules them. A node with `needs_generated` becomes ready once every generated node has finished.
 4. Each generated node's eval and attempt processes evaluate the same generator again after `plan`, then run the node. The host compares the regenerated node's `spec_hash` as in step 1 of the attempt order. A generator must therefore return the same nodes for the same source output.
@@ -307,7 +308,7 @@ The host adds the controller credential and the claim fence when it forwards a r
 | Method | Path | Request | Response | Errors |
 |---|---|---|---|---|
 | GET | `/node/v1/secrets/{name}` | none | 200 `{value, masked}`. When `masked` is true, the host registers `value` with its masker before it answers | 404 `secret_not_found` |
-| GET | `/node/v1/nodes/{node}/output` | none; `{node}` is a node of the bearer's run that the bearer's node depends on, directly or through other nodes | 200 `{output}`, the node's JSON output, `null` when it produced none | 404 `unknown_node`; 409 `not_ready` until the node finishes; 404 `no_output` when it finished without succeeding; 403 `not_dependency` when the bearer's node does not depend on it |
+| GET | `/node/v1/nodes/{node}/output` | none; `{node}` is a node of the bearer's run that the bearer's node depends on, directly or through other nodes, or the bearer's own node when memo copied its result | 200 `{output}`, the node's JSON output, `null` when it produced none | 404 `unknown_node`; 409 `not_ready` until the node finishes; 404 `no_output` when it finished neither successful nor cached; 403 `not_dependency` when the bearer's node does not depend on it |
 | POST | `/node/v1/oidc-token` | `{audience}` | 200 `{token, expires_at}`; the host masks `token` | 404 `oidc_unavailable` when the controller holds no signing key |
 | POST | `/node/v1/cleanups` | `{argv: [string], description?}` | 201 `{id}`. When the process exits, the host runs `argv` once, with no shell, unless the cleanup was released | none beyond the common ones |
 | DELETE | `/node/v1/cleanups/{id}` | none; releases the cleanup | 204 | 404 `unknown_cleanup` |

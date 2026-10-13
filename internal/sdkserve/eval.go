@@ -70,12 +70,10 @@ func callClosure(ctx context.Context, c sparkwingruntime.Closure, nodeErr error)
 		return fn(ctx), nil
 	case sparkwing.CacheKeyFn:
 		key, err := fn(ctx)
-		switch {
-		case err != nil || key.IsNoCache():
+		if err != nil || key.IsNoCache() {
 			return nil, err
-		case key == "":
-			return nil, fmt.Errorf("resolve cache key for %s: empty key", c.Node.ID())
 		}
+		// safety: an empty key goes back as is, so the host enforces the CacheKeyFn contract for every SDK.
 		return string(key), nil
 	case sparkwing.BeforeRunFn:
 		return nil, fn(ctx)

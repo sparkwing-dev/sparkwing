@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -32,6 +33,9 @@ type Node struct {
 	// Pause, when set, holds the node's no-progress timeout while a route
 	// waits on its behalf; see [NodeRun.Pause].
 	Pause func() (resume func())
+	// Output is the node's own output when the host already holds it, as after
+	// a memo hit; the output route serves it to the node without the controller.
+	Output json.RawMessage
 }
 
 type grant struct {
