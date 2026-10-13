@@ -113,6 +113,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 		}
 		maps.Copy(flags, entry.Flags)
 		invocation["flags"] = flags
+		invocation["reproducer"] = reproducerFor(opts.Pipeline, flags, opts.Args)
 	}
 	if opts.RunHandlePath != "" {
 		release, err := ReserveRunHandle(opts.RunHandlePath)
@@ -120,8 +121,8 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 			return nil, fmt.Errorf("reserve run handle: %w", err)
 		}
 		defer release()
-		if err := PublishRunHandle(opts.RunHandlePath, NewRunHandle(runID, opts.Pipeline, logDir, "running")); err != nil {
-			return nil, fmt.Errorf("publish run handle: %w", err)
+		state.publishHandle = func() error {
+			return PublishRunHandle(opts.RunHandlePath, NewRunHandle(runID, opts.Pipeline, logDir, "running"))
 		}
 	}
 	emitRunStart(opts.Delegate, invocation, backends.DiskRoot)
@@ -134,7 +135,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 	}
 	attempts := &nodehost.Attempts{
 		Routes: routes, Masker: masker, Resolver: resolver,
-		Local: backends.State, Children: hostedChildren{state: backends.State, masker: masker},
+		Local: backends.State, Children: hostedChildren{state: backends.State, concurrency: backends.Concurrency, admission: opts.Admission, masker: masker},
 		OpenLog: func(ctx context.Context, runID, nodeID string) (nodehost.NodeLog, error) {
 			log, err := backends.Logs.OpenNodeLog(ctx, runID, nodeID, nil)
 			if err != nil {
@@ -278,10 +279,30 @@ type hostedRunState struct {
 	diskRoot string
 
 	preflight func(context.Context, nodeproto.PlanDoc) error
+	// safety: the handle is published only once its run row exists, so it never names a run the store lacks.
+	publishHandle func() error
 
 	mu     sync.Mutex
 	doc    *nodeproto.PlanDoc
 	starts map[string]time.Time
+}
+
+func (s *hostedRunState) CreateRun(ctx context.Context, r store.Run) error {
+	if err := s.StateBackend.CreateRun(ctx, r); err != nil {
+		return err
+	}
+	if s.publishHandle == nil {
+		return nil
+	}
+	if err := s.publishHandle(); err != nil {
+		msg := fmt.Sprintf("publish run handle: %v", err)
+		// safety: the run never starts, so its row must not stay running.
+		if ferr := s.StateBackend.FinishRun(context.WithoutCancel(ctx), r.ID, "failed", msg); ferr != nil {
+			noteLostStateWrite(context.WithoutCancel(ctx), "finish run", r.ID, ferr)
+		}
+		return errors.New(msg)
+	}
+	return nil
 }
 
 func (s *hostedRunState) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {
@@ -532,8 +553,10 @@ func RunHostedCommand(ctx context.Context, opts Options, entry HostedEntry, logF
 }
 
 type hostedChildren struct {
-	state  StateBackend
-	masker *secrets.Masker
+	state       StateBackend
+	concurrency ConcurrencyBackend
+	admission   *LocalAdmission
+	masker      *secrets.Masker
 }
 
 // safety: the child carries the parent run's lease, so the admission daemon attaches it to the parent's
@@ -555,6 +578,11 @@ func (h hostedChildren) StartChild(ctx context.Context, parent nodehost.ChildPar
 		noteEvent(ctx, h.state, parent.RunID, parent.NodeID, "child_run_start", maskEventPayload(h.masker, payload))
 	}
 	return id, nil
+}
+
+func (h hostedChildren) Queued(ctx context.Context, runID string) (bool, error) {
+	st, err := childAdmissionStatus(ctx, h.state, h.concurrency, h.admission, runID)
+	return st.Status == childPlanAdmissionQueued, err
 }
 
 func (h hostedChildren) GetRun(ctx context.Context, runID string) (*store.Run, error) {

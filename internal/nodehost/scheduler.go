@@ -114,12 +114,19 @@ type NodeRun struct {
 	// is called, which restarts it in full. A wait the node makes on the host,
 	// such as a child-run await, holds it.
 	Pause func() (resume func())
+	// Hold, when set, stops the wall timeout until the returned resume is
+	// called, which restarts what was left of it. A child run of the node
+	// waiting in plan admission holds it.
+	Hold func() (resume func())
 	// BeforeRunEachAttempt runs before_run in every attempt rather than only
 	// the first, for an attempt that cannot learn whether an earlier one's
 	// before_run refused.
 	BeforeRunEachAttempt bool
 	// safety: set only for a memoized node that did not run, whose generators read it through the output route.
 	memoOutput json.RawMessage
+	// safety: the lease admission granted this node, which a child run it starts attaches to;
+	// a child that queued for the cores its parent holds would wait for its own parent.
+	nodeLease string
 }
 
 // Run is the hosted run an executor works within.

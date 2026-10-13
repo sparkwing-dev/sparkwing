@@ -102,6 +102,10 @@ func localAncestor(ctx context.Context, st LocalOutputs, runID, node, target str
 	for len(queue) > 0 {
 		row, err := st.GetNode(ctx, runID, queue[0])
 		queue = queue[1:]
+		// safety: an optional dependency the plan never added has no row and leads nowhere.
+		if errors.Is(err, store.ErrNotFound) {
+			continue
+		}
 		if err != nil {
 			return false, err
 		}

@@ -46,7 +46,7 @@ func localRuns() *localStore {
 		nodes: map[string]*store.Node{
 			"run-1/build":   node("build", "done", "success"),
 			"run-1/test":    node("test", "done", "success", "build"),
-			"run-1/deploy":  node("deploy", "running", "", "test", "lint", "flaky", "slow", "memo"),
+			"run-1/deploy":  node("deploy", "running", "", "absent", "test", "lint", "flaky", "slow", "memo"),
 			"run-1/memo":    node("memo", "done", "cached"),
 			"run-1/lint":    node("lint", "done", "success"),
 			"run-1/flaky":   node("flaky", "done", "failed"),

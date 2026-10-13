@@ -24,6 +24,8 @@ type ChildParent struct {
 type LocalChildren interface {
 	StartChild(ctx context.Context, parent ChildParent, req ChildRequest) (runID string, err error)
 	GetRun(ctx context.Context, runID string) (*store.Run, error)
+	// Queued reports whether the child run waits in plan admission.
+	Queued(ctx context.Context, runID string) (bool, error)
 }
 
 // perf: a local store read is cheap, so a child's end reaches its parent within a quarter second.
@@ -56,6 +58,13 @@ func (s *Server) serveLocalAwaitChild(w http.ResponseWriter, r *http.Request, g 
 		defer g.Pause()()
 	}
 	ctx := r.Context()
+	// safety: as in the dispatcher and docs/sdk.md, a child's wait in plan admission is not the parent's runtime.
+	var resumeWall func()
+	defer func() {
+		if resumeWall != nil {
+			resumeWall()
+		}
+	}()
 	deadline := time.Now().Add(wait)
 	status, errMsg := "pending", ""
 	for {
@@ -68,6 +77,16 @@ func (s *Server) serveLocalAwaitChild(w http.ResponseWriter, r *http.Request, g 
 			return
 		default:
 			status, errMsg = run.Status, run.Error
+		}
+		if g.Hold != nil && !terminalRun(status) {
+			queued, err := g.Children.Queued(ctx, child)
+			switch {
+			case err == nil && queued && resumeWall == nil:
+				resumeWall = g.Hold()
+			case err == nil && !queued && resumeWall != nil:
+				resumeWall()
+				resumeWall = nil
+			}
 		}
 		if terminalRun(status) || !time.Now().Before(deadline) {
 			break

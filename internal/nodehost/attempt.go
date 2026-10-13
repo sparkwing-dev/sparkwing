@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/protofd"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/secretsource"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -99,7 +100,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	}
 	bearer, revoke, err := a.Routes.Admit(Node{
 		RunID: run.ID, NodeID: id, Secrets: names, Resolver: a.Resolver, Masker: a.Masker, Claim: a.Claim, Local: a.Local,
-		Children: a.Children, LeaseToken: run.leaseToken, Pause: n.Pause, Output: n.memoOutput,
+		Children: a.Children, LeaseToken: cmp.Or(n.nodeLease, run.leaseToken), Pause: n.Pause, Hold: n.Hold, Output: n.memoOutput,
 	})
 	if err != nil {
 		return failed(fmt.Errorf("admit node %s: %w", id, err))
@@ -109,6 +110,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	cfg := base
 	cfg.Sink = sink
 	cfg.Env = attemptEnv(base.Env, n.Plan.Env, run.ID, id, a.Routes.URL(), bearer)
+	cfg.Env = append(cfg.Env, hostEnv(n)...)
 	res := Result{}
 	sess, err := StartSession(ctx, cfg)
 	if err == nil {
@@ -266,28 +268,50 @@ func MinimalEnv() []string {
 	return env
 }
 
-// safety: the SPARKWING_* variables docs/environment-variables.md says pipeline code reads - the hook's staged
-// index, the SDK's debug switch, and the CLI configuration a step running sparkwing needs to reach the same
-// store. Every other one is the engine's (a token, URL, run option or protocol plumbing) and never reaches a node.
-var pipelineEnv = []string{
-	"SPARKWING_GATE_INDEX", "SPARKWING_DEBUG", "SPARKWING_TOOLCHAIN_ACTIVE",
-	"SPARKWING_HOME", "SPARKWING_CONFIG", "SPARKWING_CONFIG_ENV", "SPARKWING_FLEET_CONFIG",
-	"SPARKWING_PROFILES", "SPARKWING_REPOS", "SPARKWING_SECRETS", "SPARKWING_SECRETS_KEY",
-	"SPARKWING_SECRETS_KEY_FILE", "SPARKWING_SECRETS_PREVIOUS_KEY", "SPARKWING_TOOLCHAIN",
-	"SPARKWING_WINGD_BIN", "SPARKWING_ADMISSION_CLASS", "SPARKWING_LOG_FORMAT",
+// safety: the SPARKWING_* names the engine owns - credentials, service URLs, run options the host now holds, and
+// plumbing the node protocol replaces (docs/environment-variables.md). Every other SPARKWING_* name, a sparks
+// setting or the caller's own, reaches pipeline code as it did; a trailing _ matches a prefix.
+var engineEnv = []string{
+	"SPARKWING_AGENT_TOKEN", "SPARKWING_CONTROLLER_URL", "SPARKWING_LOGS_URL", "SPARKWING_API_SOCKET",
+	"SPARKWING_PARENT_LIVENESS_FD", "SPARKWING_CACHE_GRANT", "SPARKWING_RUN_HANDLE_FILE",
+	"SPARKWING_STANDALONE_REASON", "SPARKWING_STATE_DB", "SPARKWING_NODE_CLAIM_", "SPARKWING_NODE_SPEC_HASH",
+	"SPARKWING_BROKERED_", "SPARKWING_EXECUTION_CAPABILITY_STDIN", "SPARKWING_LEASE_TOKEN",
+	"SPARKWING_CHILD_LEASE_TOKEN", "SPARKWING_MASK_VALUES_FD", "SPARKWING_PROTOCOL_HANDLES", "SPARKWING_NODE_URL",
+	"SPARKWING_NODE_TOKEN", "SPARKWING_RUN_ID", "SPARKWING_NODE_ID", "SPARKWING_START_AT", "SPARKWING_STOP_AT",
+	"SPARKWING_ONLY", "SPARKWING_NO_CACHE", "SPARKWING_NO_UPDATE", "SPARKWING_REF", "SPARKWING_ALLOW",
+	"SPARKWING_ALLOW_UNADMITTED", "SPARKWING_MODE", "SPARKWING_WORKERS", "SPARKWING_PRIORITY",
+	"SPARKWING_LOG_LEVEL", "SPARKWING_BINARY_SOURCE", "SPARKWING_PIPELINE_REV", "SPARKWING_DEBUG_PAUSE_",
+	"SPARKWING_PROFILE", "SPARKWING_SECRETS_PROFILE",
 }
 
-// PipelineEnv is env without the engine's SPARKWING_* variables, keeping the
-// ones pipeline code reads.
+// PipelineEnv is env without the SPARKWING_* variables the engine owns.
 func PipelineEnv(env []string) []string {
 	out := make([]string, 0, len(env))
 	for _, kv := range env {
 		k, _, _ := strings.Cut(kv, "=")
-		if !strings.HasPrefix(k, "SPARKWING_") || slices.Contains(pipelineEnv, k) {
+		if !slices.ContainsFunc(engineEnv, func(name string) bool {
+			if strings.HasSuffix(name, "_") {
+				return strings.HasPrefix(k, name)
+			}
+			return k == name
+		}) {
 			out = append(out, kv)
 		}
 	}
 	return out
+}
+
+// safety: a sparkwing run the node starts attaches to the lease the node holds instead of queueing behind it,
+// and sparks-core echoes mutating commands instead of running them only when it sees SPARKWING_DRY_RUN.
+func hostEnv(n *NodeRun) []string {
+	var env []string
+	if lease := cmp.Or(n.nodeLease, n.Run.leaseToken); lease != "" {
+		env = append(env, wingwire.LeaseTokenEnv+"="+lease)
+	}
+	if n.Run.Context.DryRun {
+		env = append(env, "SPARKWING_DRY_RUN=1")
+	}
+	return env
 }
 
 // safety: the node's contract variables are set last so neither the engine nor the node's env overrides them.

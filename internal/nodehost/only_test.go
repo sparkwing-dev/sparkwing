@@ -3,6 +3,7 @@ package nodehost
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -119,5 +120,15 @@ func TestWorkersCapsTheNodesRunningAtOnce(t *testing.T) {
 	}
 	if peak != 2 {
 		t.Errorf("peak running = %d, want the cap of 2", peak)
+	}
+}
+
+func TestHostEnvHandsTheNodeLeaseAndDryRunToTheNode(t *testing.T) {
+	run := &Run{leaseToken: "run-lease", Context: nodeproto.RunContext{DryRun: true}}
+	if got := hostEnv(&NodeRun{Run: run, nodeLease: "node-lease"}); !slices.Equal(got, []string{"SPARKWING_LEASE_TOKEN=node-lease", "SPARKWING_DRY_RUN=1"}) {
+		t.Errorf("env = %v, want the node's own lease, which a child attaches to, and the dry-run switch", got)
+	}
+	if got := hostEnv(&NodeRun{Run: &Run{leaseToken: "run-lease"}}); !slices.Equal(got, []string{"SPARKWING_LEASE_TOKEN=run-lease"}) {
+		t.Errorf("env = %v, want the run lease when the node holds none", got)
 	}
 }

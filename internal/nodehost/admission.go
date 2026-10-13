@@ -281,7 +281,9 @@ func (a *Admission) runLeased(ctx context.Context, n *NodeRun, lease Lease, next
 			n.Run.Logger.Warn("nodehost: admission lease watch ended; the node continues unwatched", "node", n.Plan.ID, "err", err)
 		}
 	}()
-	res := next(execCtx, n)
+	held := *n
+	held.nodeLease = lease.Token()
+	res := next(execCtx, &held)
 	a.release(n, lease)
 	<-watching
 	if r := ended.Load(); r != nil {

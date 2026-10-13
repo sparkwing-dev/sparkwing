@@ -136,7 +136,8 @@ func TestAttemptExecutor(t *testing.T) {
 	}
 
 	t.Run("RunsANodeEndToEnd", func(t *testing.T) {
-		env := append(os.Environ(), "SPARKWING_LEAK=engine", "SPARKWING_GATE_INDEX=/repo/.git/gate-index", "AWS_SECRET_ACCESS_KEY=caller-aws")
+		env := append(os.Environ(), "SPARKWING_AGENT_TOKEN=engine", "SPARKWING_GATE_INDEX=/repo/.git/gate-index",
+			"SPARKWING_TEST_PG_URL=postgres://caller", "AWS_SECRET_ACCESS_KEY=caller-aws")
 		h, res := host(t, "run-attempt", map[string]string{}, env)
 		if res.Status != "success" {
 			t.Fatalf("status=%s err=%v, want success", res.Status, res.Err)
@@ -149,9 +150,12 @@ func TestAttemptExecutor(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var out struct{ Env, Run, Leak, Gate, AWS string }
+		var out struct{ Env, Run, Leak, Gate, PG, AWS string }
 		if err := json.Unmarshal(raw, &out); err != nil || out.Env != "from-plan" || out.Run != "run-attempt" || out.Leak != "" || out.AWS != "caller-aws" {
 			t.Errorf("build output = %s (err %v), want the node env, run id and caller's env and no engine SPARKWING_ variable", raw, err)
+		}
+		if out.PG != "postgres://caller" {
+			t.Errorf("the node saw SPARKWING_TEST_PG_URL=%q; a caller's own SPARKWING_* setting must reach pipeline code", out.PG)
 		}
 		if out.Gate != "/repo/.git/gate-index" {
 			t.Errorf("the node saw SPARKWING_GATE_INDEX=%q; a hook's staged-diff step reads the working tree instead of the commit", out.Gate)

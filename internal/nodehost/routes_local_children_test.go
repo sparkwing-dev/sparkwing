@@ -16,6 +16,13 @@ type localChildren struct {
 	mu      sync.Mutex
 	parents []nodehost.ChildParent
 	runs    map[string]*store.Run
+	queued  bool
+}
+
+func (l *localChildren) Queued(_ context.Context, _ string) (bool, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.queued, nil
 }
 
 func (l *localChildren) StartChild(_ context.Context, parent nodehost.ChildParent, req nodehost.ChildRequest) (string, error) {
@@ -42,10 +49,12 @@ func TestLocalChildrenStartAndAwaitWithoutAController(t *testing.T) {
 	st := localRuns()
 	st.nodes["child-1/build"] = &store.Node{NodeID: "build", Status: "done", Outcome: "success"}
 	st.outputs["child-1/build"] = `{"tag":"v2"}`
-	kids := &localChildren{runs: map[string]*store.Run{}}
+	kids := &localChildren{runs: map[string]*store.Run{}, queued: true}
+	var holds, resumes int
 	bearer := admit(t, s, nodehost.Node{
 		RunID: "run-1", NodeID: "deploy", Resolver: &fakeResolver{}, Masker: secrets.NewMasker(),
 		Local: st, Children: kids, LeaseToken: "lease-1",
+		Hold: func() func() { holds++; return func() { resumes++ } },
 	})
 
 	if got := ask(t, s, http.MethodGet, "/node/v1/children/child-1/await?wait_ms=0", bearer, ""); got.status != http.StatusNotFound || got.body["code"] != "unknown_child" {
@@ -64,6 +73,9 @@ func TestLocalChildrenStartAndAwaitWithoutAController(t *testing.T) {
 
 	if got := ask(t, s, http.MethodGet, "/node/v1/children/child-1/await?wait_ms=300&node=build", bearer, ""); got.status != http.StatusOK || got.body["status"] != "pending" {
 		t.Fatalf("queued child: status %d body %v", got.status, got.body)
+	}
+	if holds != 1 || resumes != 1 {
+		t.Fatalf("holds=%d resumes=%d: a child waiting in plan admission must hold the parent's wall timeout, then let go", holds, resumes)
 	}
 	kids.mu.Lock()
 	kids.runs["child-1"] = &store.Run{ID: "child-1", Status: "success"}

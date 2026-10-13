@@ -4,8 +4,12 @@ import (
 	"cmp"
 	"context"
 	"encoding/base64"
+	"errors"
+	"fmt"
 	"runtime"
+	"slices"
 	"strings"
+	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -40,6 +44,9 @@ func hostedAdmission(ctx context.Context, opts *Options, backends Backends, plan
 	if la.Delegate == nil {
 		la.Delegate = opts.Delegate
 	}
+	if la.ParentLeaseToken != "" && la.ParentRunID == "" {
+		la.ParentRunID = parentRunIDFromContext(ctx)
+	}
 	a.Daemon = &hostedAdmitter{la: la, backends: backends, pipeline: opts.Pipeline, plan: plan}
 	return a, nil
 }
@@ -51,11 +58,28 @@ type hostedAdmitter struct {
 	backends Backends
 	pipeline string
 	plan     func() *nodeproto.PlanDoc
+	// safety: set by the run lease, which is granted before any node asks, so node requests read them unlocked.
+	attachToken  string
+	attachedHost bool
 }
 
 func (h *hostedAdmitter) Acquire(ctx context.Context, req wingwire.AdmissionRequest, onQueued func(wingwire.Queued)) (nodehost.Lease, error) {
-	if !req.SemaphoresOnly && req.Resources == (wingwire.HostResources{}) {
+	switch {
+	case h.la.ParentLeaseToken != "" && req.OwnerRunID == "":
+		return h.attach(ctx, req)
+	case h.attachedHost && !req.SemaphoresOnly:
+		// safety: the parent's lease already holds the host for an attached run, so its nodes take none,
+		// as the dispatcher's did, and a node's group still queues on its own semaphore.
+		if len(req.Semaphores) == 0 {
+			return &heldLease{token: h.attachToken, done: make(chan struct{})}, nil
+		}
+		req.SemaphoresOnly, req.Resources, req.Class = true, wingwire.HostResources{}, ""
+	case !req.SemaphoresOnly && req.Resources == (wingwire.HostResources{}):
 		h.profileCost(ctx, &req)
+	case !req.SemaphoresOnly && req.CostSource == "":
+		// safety: resources a request names come from a .Resources() pin, which the daemon refuses
+		// rather than shrinks when the machine cannot hold it.
+		req.CostSource = wingwire.CostSourcePin
 	}
 	req.Repo, req.Origin, req.PID = currentRepoShortName(), h.la.Origin, 0
 	cl, err := h.la.ensureDaemon(ctx)
@@ -124,4 +148,75 @@ func (h hostedLease) Token() string  { return h.l.Token }
 func (h hostedLease) Release() error { return h.l.Release() }
 func (h hostedLease) Watch(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel)) error {
 	return h.l.WatchOwnership(onEvicted, onCancel, nil)
+}
+
+// safety: a nested run attaches to the lease of the node that started it, as the dispatcher's attachChildRun
+// did, so it never queues behind the parent waiting on it; plan groups the parent lease lacks queue on their own.
+func (h *hostedAdmitter) attach(ctx context.Context, req wingwire.AdmissionRequest) (nodehost.Lease, error) {
+	cl, err := h.la.ensureDaemon(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("local admission: %w", err)
+	}
+	lease, err := cl.Acquire(ctx, wingwire.AdmissionRequest{
+		RunID: req.RunID, Pipeline: req.Pipeline, Repo: currentRepoShortName(),
+		ParentLeaseToken: h.la.ParentLeaseToken, ParentRunID: h.la.ParentRunID, Origin: h.la.Origin,
+	}, nil)
+	if err != nil {
+		warnHostedClose("admission client", cl.Close())
+		return nil, fmt.Errorf("local admission: attach to parent lease: %w", err)
+	}
+	h.attachToken, h.attachedHost = lease.Token, leaseCarriesHost(lease)
+	var extra []wingwire.SemaphoreClaim
+	for _, c := range req.Semaphores {
+		if !slices.Contains(lease.Semaphores, c.Name) {
+			extra = append(extra, c)
+		}
+	}
+	if len(extra) == 0 {
+		return hostedLease{lease}, nil
+	}
+	sems, err := h.Acquire(ctx, wingwire.AdmissionRequest{
+		RunID: req.RunID + localPlanSemsID, OwnerRunID: req.RunID, OwnerLeaseToken: lease.Token,
+		DisplayRunID: req.RunID, SemaphoresOnly: true, Semaphores: extra, SubLease: true, Priority: req.Priority,
+	}, nil)
+	if err != nil {
+		warnHostedClose("parent attach lease", lease.Release())
+		return nil, err
+	}
+	return attachedLease{hostedLease{lease}, sems}, nil
+}
+
+type attachedLease struct {
+	hostedLease
+	sems nodehost.Lease
+}
+
+func (l attachedLease) Release() error {
+	return errors.Join(l.sems.Release(), l.hostedLease.Release())
+}
+
+func (l attachedLease) Watch(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel)) error {
+	done := make(chan error, 1)
+	go func() { done <- l.sems.Watch(onEvicted, onCancel) }()
+	err := l.hostedLease.Watch(onEvicted, onCancel)
+	return errors.Join(err, <-done)
+}
+
+// safety: stands for a host lease the parent run already holds, so it ends only when released.
+type heldLease struct {
+	token string
+	done  chan struct{}
+	once  sync.Once
+}
+
+func (l *heldLease) Token() string { return l.token }
+
+func (l *heldLease) Release() error {
+	l.once.Do(func() { close(l.done) })
+	return nil
+}
+
+func (l *heldLease) Watch(func(wingwire.Evicted), func(wingwire.Cancel)) error {
+	<-l.done
+	return nil
 }

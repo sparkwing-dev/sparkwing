@@ -195,6 +195,7 @@ type buildOutput struct {
 	Run  string `json:"run"`
 	Leak string `json:"leak"`
 	Gate string `json:"gate"`
+	PG   string `json:"pg"`
 	AWS  string `json:"aws"`
 }
 
@@ -219,7 +220,7 @@ func (j *buildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 				return buildOutput{}, err
 			}
 		}
-		return buildOutput{Env: os.Getenv("FIXTURE_ENV"), Run: os.Getenv("SPARKWING_RUN_ID"), Leak: os.Getenv("SPARKWING_LEAK"), Gate: os.Getenv("SPARKWING_GATE_INDEX"), AWS: os.Getenv("AWS_SECRET_ACCESS_KEY")}, nil
+		return buildOutput{Env: os.Getenv("FIXTURE_ENV"), Run: os.Getenv("SPARKWING_RUN_ID"), Leak: os.Getenv("SPARKWING_AGENT_TOKEN"), Gate: os.Getenv("SPARKWING_GATE_INDEX"), PG: os.Getenv("SPARKWING_TEST_PG_URL"), AWS: os.Getenv("AWS_SECRET_ACCESS_KEY")}, nil
 	}), nil
 }
 

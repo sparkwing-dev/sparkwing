@@ -170,3 +170,27 @@ func TestTimeoutPausesNestUntilTheLastResume(t *testing.T) {
 		}
 	})
 }
+
+func TestWallTimerHoldExcludesTheHeldTime(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		fired := make(chan struct{})
+		wt := &wallTimer{left: 10 * time.Second, since: time.Now()}
+		wt.t = time.AfterFunc(10*time.Second, func() { close(fired) })
+		time.Sleep(4 * time.Second)
+		resume := wt.hold()
+		time.Sleep(time.Hour)
+		resume()
+		time.Sleep(5 * time.Second)
+		select {
+		case <-fired:
+			t.Fatal("the wall timeout fired after 9s of unheld time; the held hour counted against it")
+		default:
+		}
+		time.Sleep(2 * time.Second)
+		select {
+		case <-fired:
+		default:
+			t.Fatal("the wall timeout never fired once its 10s of unheld time ran out")
+		}
+	})
+}

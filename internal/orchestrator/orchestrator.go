@@ -1165,23 +1165,23 @@ func hashBytes(buf []byte) string {
 }
 
 func buildReproducer(opts Options, _ string) string {
-	parts := []string{"sparkwing", "run", opts.Pipeline}
-	flagKeys := make([]string, 0)
-	flags := buildRunFlags(opts)
+	return reproducerFor(opts.Pipeline, buildRunFlags(opts), opts.Args)
+}
+
+// safety: every recorded flag is rendered with the --sw- spelling sparkwing run accepts today, so the line
+// re-runs what it records; retry_of and full come from `sparkwing runs retry`, not run flags, and are left out.
+func reproducerFor(pipeline string, flags map[string]any, args map[string]string) string {
+	parts := []string{"sparkwing", "run", pipeline}
+	flagKeys := make([]string, 0, len(flags))
 	for k := range flags {
 		flagKeys = append(flagKeys, k)
 	}
 	sort.Strings(flagKeys)
 	for _, k := range flagKeys {
-		// safety: priority_source records how the number was reached; only
-		// the number itself is a flag the reader can re-type.
-		if k == "max_parallel" || k == "priority_source" {
+		if k == "max_parallel" || k == "priority_source" || k == "retry_of" || k == "full" {
 			continue
 		}
-		flagName := "--" + strings.ReplaceAll(k, "_", "-")
-		if k == "priority" {
-			flagName = "--sw-priority"
-		}
+		flagName := "--sw-" + strings.ReplaceAll(k, "_", "-")
 		switch v := flags[k].(type) {
 		case bool:
 			if v {
@@ -1195,13 +1195,13 @@ func buildReproducer(opts Options, _ string) string {
 			parts = append(parts, fmt.Sprintf("%s=%v", flagName, v))
 		}
 	}
-	argKeys := make([]string, 0, len(opts.Args))
-	for k := range opts.Args {
+	argKeys := make([]string, 0, len(args))
+	for k := range args {
 		argKeys = append(argKeys, k)
 	}
 	sort.Strings(argKeys)
 	for _, k := range argKeys {
-		parts = append(parts, "--"+k+"="+opts.Args[k])
+		parts = append(parts, "--"+k+"="+args[k])
 	}
 	return strings.Join(parts, " ")
 }

@@ -70,6 +70,12 @@ func (r *pipelineRun) host(h hostedRun) error {
 	if flags.verbose {
 		extra["verbose"] = true
 	}
+	if flags.only != "" {
+		extra["only"] = flags.only
+	}
+	if flags.workers > 0 {
+		extra["workers"] = flags.workers
+	}
 	opts := orchestrator.Options{
 		Pipeline:      h.schema.Name,
 		RunHandlePath: h.runHandle,
