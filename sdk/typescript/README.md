@@ -15,12 +15,13 @@ and its JSON Schemas).
 
 | File | Purpose |
 |---|---|
-| `src/plan.ts` | The plan DSL: `definePipeline`, `Plan.job`, `Job.needs`, `retry`, `timeout`, `step`, `skipIf` |
-| `src/describe.ts` | The describe document (protocol version and pipelines) and the plan document types |
-| `src/protocol.ts` | Stdio framing: requests on stdin, replies and log records on stdout |
-| `src/runner.ts` | The loop that answers `describe`, `plan`, `run_node`, `run_step` and `eval` |
+| `src/plan.ts` | The plan DSL: `definePipeline`, `Plan.job`, `Plan.approval`, the job envelope (`needs`, `retry`, `timeout`, `requires`, `concurrency`, `resources`, `cacheDir`, `memoize`, `onFailure`), its closures (`skipIf`, `beforeRun`, `verify`, `afterRun`, `generate`), and steps (`step`, `Step.result`, `skipIf`, `finally`, `dryRun`) |
+| `src/describe.ts` | The describe document (protocol version, SDK and pipelines) and the plan document types |
+| `src/protocol.ts` | Framing: requests on the request pipe, replies and log records on the frame pipe, and the reply error codes |
+| `src/runner.ts` | The loop that answers `describe`, `plan`, `run_node`, `run_step`, `cancel` and `eval` |
+| `src/main.ts` | The `--sw-node-protocol` entry: finds the pipes on descriptors 3 and 4 and takes the bearer out of the environment |
 | `src/log.ts` | NDJSON log records with the engine's field names |
-| `src/routes.ts` | Clients for the node routes: a secret by name, and another node's output through its signed grant |
+| `src/routes.ts` | Clients for the node routes at `SPARKWING_NODE_URL`: a secret by name, and another node's output |
 | `examples/hello/pipeline.ts` | A two-job pipeline |
 
 ## A pipeline
@@ -47,22 +48,35 @@ definePipeline({
 process.exitCode = await main();
 ```
 
-`node pipeline.ts --describe` prints the describe document. `node pipeline.ts
---sw-node-protocol` answers engine requests, one JSON object per line, until
-stdin ends. The engine starts one such process per node attempt and sends
-`plan` before `run_node`:
+The engine starts `node pipeline.ts --sw-node-protocol` with the request pipe
+on descriptor 3 and the frame pipe on descriptor 4, and sends one JSON request
+per line. stdout and stderr stay with pipeline code; the engine never parses
+them. The engine starts one process per node attempt and sends `plan` before
+`run_node`:
 
 ```text
--> {"id":"1","op":"plan","pipeline":"hello","args":{},"run":{"run_id":"r1","pipeline":"hello"}}
+-> {"id":"1","op":"plan","pipeline":"hello","args":{},"run":{"run_id":"r1"}}
 <- {"reply":"1","ok":true,"result":{"protocol":"1","pipeline":"hello","run_id":"r1","nodes":[...]}}
--> {"id":"2","op":"run_node","node":"build","attempt":1,"options":{"dry_run":false}}
+-> {"id":"2","op":"run_node","node":"build","attempt":1}
 <- {"ts":"...","level":"info","node":"build","msg":"building"}
 <- {"reply":"2","ok":true,"result":{"outcome":"success","output":{"digest":"sha-hello"}}}
 ```
 
-A stdout line with `reply` answers a request; every other line is a log
-record. Requests run one at a time, except `eval`, which the SDK answers
-while a node body runs.
+A frame with `reply` answers a request; every other frame is a log record.
+Requests run as they arrive, since the engine may have several `eval` and
+`run_step` requests in flight. A failed reply carries the protocol's
+`error.code`, such as `no_plan` or `unknown_node`.
+
+The engine's conformance suite (`internal/nodeproto/conformance`) drives
+`test/fixtures/conformance.ts`, the same fixture pipeline the Go SDK
+implements, through every request and checks each reply against the node
+protocol's schemas.
+
+Not supported yet: Windows, where the protocol pipes are inherited handles;
+plan-level concurrency groups with `box` scope, whose key needs the engine's
+machine id; and the plan document fields the Go SDK has that this package
+does not declare (artifacts, pipeline references, tools, `whenRunner`,
+`inline`, step groups and risks, plan priority and admission class).
 
 ## Running the tests
 
@@ -74,4 +88,5 @@ node --test "test/**/*.test.ts"
 ```
 
 `npm run typecheck` needs the `typescript` and `@types/node` dev
-dependencies installed.
+dependencies, which `npm ci` installs. The repository's `gate` pipeline runs
+both.

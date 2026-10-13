@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
-import { describe } from "../src/describe.ts";
+import { readFileSync } from "node:fs";
+import { describe, SDK_VERSION } from "../src/describe.ts";
 import { definePipeline, resetPipelines } from "../src/plan.ts";
 
 beforeEach(() => resetPipelines());
@@ -18,6 +19,7 @@ test("describe names the protocol and every pipeline with its args", () => {
   });
   assert.deepEqual(describe(), {
     protocol: "1",
+    sdk: { language: "typescript", version: SDK_VERSION },
     pipelines: [
       {
         name: "alpha",
@@ -35,4 +37,9 @@ test("describe names the protocol and every pipeline with its args", () => {
 test("a pipeline name is defined once", () => {
   definePipeline({ name: "p", plan: () => undefined });
   assert.throws(() => definePipeline({ name: "p", plan: () => undefined }), /already defined/);
+});
+
+test("describe names the version package.json declares", () => {
+  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
+  assert.equal(SDK_VERSION, pkg.version);
 });
