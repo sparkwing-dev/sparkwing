@@ -49,13 +49,15 @@ func TestPreviewPlan_SingleStepWouldRun(t *testing.T) {
 	}
 }
 
+var previewPredicateCalls atomic.Int32
+
 type previewSkipPipe struct{ sparkwing.Base }
 
 type previewSkipJob struct{ sparkwing.Base }
 
 func (previewSkipJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "a", nopStep)
-	sparkwing.Step(w, "b", nopStep).SkipIf(func(context.Context) bool { return true })
+	sparkwing.Step(w, "b", nopStep).SkipIf(func(context.Context) bool { previewPredicateCalls.Add(1); return true })
 	return nil, nil
 }
 
@@ -85,7 +87,10 @@ func TestPreviewPlan_UserSkipIfReportedAsUserSkipIf(t *testing.T) {
 		t.Fatalf("expected one node with Work, got %+v", preview.Nodes)
 	}
 	steps := preview.Nodes[0].Work.Steps
-	want := map[string]string{"a": "would_run", "b": "would_skip"}
+	if n := previewPredicateCalls.Load(); n != 0 {
+		t.Fatalf("PreviewPlan ran the SkipIf predicate %d times", n)
+	}
+	want := map[string]string{"a": "would_run", "b": "may_skip"}
 	for _, s := range steps {
 		if s.Decision != want[s.ID] {
 			t.Errorf("step %q decision: got %q, want %q", s.ID, s.Decision, want[s.ID])

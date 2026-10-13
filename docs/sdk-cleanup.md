@@ -8,7 +8,7 @@ Import as `swcleanup "github.com/sparkwing-dev/sparkwing/sparkwing/cleanup"`. Th
 
 ## Functions
 
-- `func Register(ctx context.Context, spec Spec) (release func(), err error)` -- Register records a cleanup tied to this node's liveness and returns the release to call once the library has cleaned up itself.
+- `func Register(ctx context.Context, spec Spec) (release func(), err error)` -- Register records a cleanup that runs if the registering process exits before the library calls the release it returns.
 
 ## Types
 
