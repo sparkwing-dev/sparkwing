@@ -100,7 +100,6 @@ func buildHostTestPlan(t *testing.T, name string) *sparkwing.Plan {
 }
 
 func TestUnhostedOutcome_DegradesOnEveryStandaloneSentinel(t *testing.T) {
-	t.Setenv(AllowUnadmittedEnv, "")
 	degrading := []error{
 		fmt.Errorf("x: %w", wingdclient.ErrNoDaemonHost),
 		fmt.Errorf("x: %w", wingdclient.ErrDaemonHostUnusable),
@@ -118,7 +117,6 @@ func TestUnhostedOutcome_DegradesOnEveryStandaloneSentinel(t *testing.T) {
 }
 
 func TestUnhostedOutcome_KeepsEveryOtherFailure(t *testing.T) {
-	t.Setenv(AllowUnadmittedEnv, "")
 	other := []error{
 		fmt.Errorf("x: %w", wingdclient.ErrDaemonUnreachable),
 		fmt.Errorf("x: %w", wingdclient.ErrTakeoverExhausted),
@@ -144,7 +142,6 @@ func TestUnhostedOutcome_KeepsEveryOtherFailure(t *testing.T) {
 }
 
 func TestUnhostedOutcome_APinnedRunDegradesLikeAnyOther(t *testing.T) {
-	t.Setenv(AllowUnadmittedEnv, "")
 	noHost := fmt.Errorf("local admission: %w", wingdclient.ErrNoDaemonHost)
 	for _, pipeline := range []string{"host-plan-resources", "host-node-resources", "host-implicit"} {
 		buildHostTestPlan(t, pipeline)
@@ -156,7 +153,6 @@ func TestUnhostedOutcome_APinnedRunDegradesLikeAnyOther(t *testing.T) {
 }
 
 func TestUnhostedOutcome_RefusesADaemonThatCannotReadItsOwnStore(t *testing.T) {
-	t.Setenv(AllowUnadmittedEnv, "")
 	refusal := fmt.Errorf("local admission: %w", &wingdclient.AdmissionError{
 		Policy: wingwire.PolicyFail,
 		Key:    terminalCheckKey,
@@ -175,7 +171,6 @@ func TestUnhostedOutcome_RefusesADaemonThatCannotReadItsOwnStore(t *testing.T) {
 }
 
 func TestUnhostedOutcome_AnnouncesADegradeNoBlockCovered(t *testing.T) {
-	t.Setenv(AllowUnadmittedEnv, "")
 	var lines []string
 	la := &LocalAdmission{
 		PipelineClient: true,
@@ -198,7 +193,6 @@ func TestUnhostedOutcome_AnnouncesADegradeNoBlockCovered(t *testing.T) {
 }
 
 func TestUnhostedOutcome_SaysNothingWhenABlockAlreadyDid(t *testing.T) {
-	t.Setenv(AllowUnadmittedEnv, "")
 	var lines []string
 	la := &LocalAdmission{
 		PipelineClient: true,
@@ -212,19 +206,6 @@ func TestUnhostedOutcome_SaysNothingWhenABlockAlreadyDid(t *testing.T) {
 	}
 	if len(lines) != 0 {
 		t.Fatalf("degrade printed %d line(s) beside the run's own standalone block: %v", len(lines), lines)
-	}
-}
-
-func TestAllowUnadmitted_OnlyExactlyOne(t *testing.T) {
-	for _, value := range []string{"", "0", "off", "no", "false", "true", "yes", "TRUE", " 1", "1 ", "2"} {
-		t.Setenv(AllowUnadmittedEnv, value)
-		if allowUnadmitted() {
-			t.Errorf("%s=%q was read as authorization; only exactly 1 turns the check off", AllowUnadmittedEnv, value)
-		}
-	}
-	t.Setenv(AllowUnadmittedEnv, "1")
-	if !allowUnadmitted() {
-		t.Errorf("%s=1 did not turn the check off", AllowUnadmittedEnv)
 	}
 }
 
@@ -326,7 +307,6 @@ func unhostedAdmission(home string, warnings io.Writer) *LocalAdmission {
 }
 
 func TestRun_EmptyBoxRunsAPinnedPipelineAnyway(t *testing.T) {
-	t.Setenv(AllowUnadmittedEnv, "")
 	for _, pipeline := range []string{"host-plan-resources", "host-implicit"} {
 		res, warnings := runHostTest(t, pipeline)
 		if res.Status != "success" {
@@ -340,14 +320,6 @@ func TestRun_EmptyBoxRunsAPinnedPipelineAnyway(t *testing.T) {
 	}
 }
 
-func TestRun_EscapeHatchLetsAPinnedRunProceedUnadmitted(t *testing.T) {
-	t.Setenv(AllowUnadmittedEnv, "1")
-	res, _ := runHostTest(t, "host-plan-resources")
-	if res.Status != "success" {
-		t.Fatalf("pinned run under the escape hatch = %q (%v), want success", res.Status, res.Error)
-	}
-}
-
 func TestRun_DegradedConcurrencyGroupsStillSerialize(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
@@ -358,7 +330,6 @@ func TestRun_DegradedConcurrencyGroupsStillSerialize(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv(AllowUnadmittedEnv, "")
 			registerHostTestPipelines()
 			home := wingdTestHome(t)
 			backends, st, _ := openWingdBackends(t, home)
@@ -438,7 +409,6 @@ func TestRun_DegradedConcurrencyGroupsStillSerialize(t *testing.T) {
 }
 
 func TestRun_DegradedRunScopeStillSerializes(t *testing.T) {
-	t.Setenv(AllowUnadmittedEnv, "")
 	registerHostTestPipelines()
 	home := wingdTestHome(t)
 	backends, st, _ := openWingdBackends(t, home)

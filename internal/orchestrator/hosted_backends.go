@@ -97,7 +97,7 @@ type hostedSelection struct {
 // api.sock is available, so selection happens before anything opens a store
 // and never mid-run: once a run row exists on the daemon, an API failure is
 // a run failure through the client's retry policy.
-func selectHostedAPI(ctx context.Context, adm *LocalAdmission) (hostedSelection, error) {
+func selectHostedAPI(ctx context.Context, adm *LocalAdmission, allowUnadmitted bool) (hostedSelection, error) {
 	// safety: a run with no admission configured is an embedder driving the
 	// orchestrator, not a pipeline binary answering to this machine's daemon,
 	// so it keeps the store it was pointed at.
@@ -116,7 +116,7 @@ func selectHostedAPI(ctx context.Context, adm *LocalAdmission) (hostedSelection,
 	// safety: the operator asked for the direct path with a daemon answering,
 	// so the run says that rather than a sentence about a daemon that is not
 	// there. Asked after the handshake because only it proves which is true.
-	if allowUnadmitted() {
+	if allowUnadmitted {
 		sel.standalone = standaloneForced
 		return sel, nil
 	}
@@ -272,7 +272,7 @@ func hostedBackendsForRun(ctx context.Context, paths Paths, opts *Options) (Back
 	if opts.State != nil || !runsOnMachineStore(opts, paths) {
 		return Backends{}, hostedSelection{}, noop, nil
 	}
-	sel, err := selectHostedAPI(ctx, opts.Admission)
+	sel, err := selectHostedAPI(ctx, opts.Admission, opts.AllowUnadmitted)
 	if err != nil {
 		return Backends{}, hostedSelection{}, noop, err
 	}

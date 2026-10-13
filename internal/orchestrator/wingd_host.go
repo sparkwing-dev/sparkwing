@@ -1,15 +1,9 @@
 package orchestrator
 
 import (
-	"os"
-
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
-
-// AllowUnadmittedEnv carries `sparkwing run --sw-allow-unadmitted` to the
-// pipeline binary, which then runs without the admission daemon.
-const AllowUnadmittedEnv = "SPARKWING_ALLOW_UNADMITTED"
 
 const installAdvice = "curl -fsSL https://sparkwing.dev/install.sh | sh"
 
@@ -25,10 +19,6 @@ func pipelineAdmission(parentLeaseToken string, origin wingwire.Origin) *LocalAd
 		Spawn:            spawn,
 		PipelineClient:   true,
 	}
-}
-
-func allowUnadmitted() bool {
-	return os.Getenv(AllowUnadmittedEnv) == "1"
 }
 
 type unhosted struct {
