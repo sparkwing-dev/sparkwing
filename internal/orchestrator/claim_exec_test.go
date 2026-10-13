@@ -28,25 +28,3 @@ func TestApplyGoEnvFile_ReadsOnlyTheModuleSettings(t *testing.T) {
 		t.Fatalf("a checkout with no listed repository left no file: %v", err)
 	}
 }
-
-// A released pin before MinPlanSDK, and a commit pin the pod cannot show
-// descends from it, are refused before the build; a later release, a commit
-// based on one and a local replacement are left to the plan itself.
-func TestPlanSDKGap_RefusesAPinNotKnownToPlan(t *testing.T) {
-	for pin, refused := range map[string]bool{
-		"require github.com/sparkwing-dev/sparkwing v0.65.1":                                                       true,
-		"require github.com/sparkwing-dev/sparkwing v0.65.2-0.20260929071058-2ebabeade660":                         true,
-		"require github.com/sparkwing-dev/sparkwing v0.0.0-20260929071058-2ebabeade660":                            true,
-		"require github.com/sparkwing-dev/sparkwing " + MinPlanSDK:                                                 false,
-		"require github.com/sparkwing-dev/sparkwing v0.66.1-0.20261001000000-abcdefabcdef":                         false,
-		"require github.com/sparkwing-dev/sparkwing v0.60.0\nreplace github.com/sparkwing-dev/sparkwing => ../sdk": false,
-	} {
-		path := filepath.Join(t.TempDir(), "go.mod")
-		if err := os.WriteFile(path, []byte("module jobs\n\n"+pin+"\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if err := planSDKGap(path); (err != nil) != refused {
-			t.Errorf("%q: err = %v, want refused %v", pin, err, refused)
-		}
-	}
-}

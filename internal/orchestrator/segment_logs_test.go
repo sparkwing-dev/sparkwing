@@ -66,7 +66,12 @@ func newSegmentController(t *testing.T) (segmentController, string) {
 
 func (c segmentController) log(t *testing.T) *logseg.Log {
 	t.Helper()
-	rec, err := c.st.LatestNodeLog(t.Context(), store.DefaultTeam, "run-s", "a")
+	return c.nodeLog(t, "run-s", "a")
+}
+
+func (c segmentController) nodeLog(t *testing.T, runID, nodeID string) *logseg.Log {
+	t.Helper()
+	rec, err := c.st.LatestNodeLog(t.Context(), store.DefaultTeam, runID, nodeID)
 	if err != nil {
 		t.Fatal(err)
 	}
