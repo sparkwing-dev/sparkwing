@@ -488,17 +488,6 @@ func TestMaintainConcurrencyThrottled_ConcurrentCallersShareOneClaim(t *testing.
 	}
 }
 
-func TestMigration_V4CreatesMetaTable(t *testing.T) {
-	s := storetest.Open(t)
-	if store.ExpectedSchemaVersion() < 4 {
-		t.Fatalf("ExpectedSchemaVersion = %d, want >= 4", store.ExpectedSchemaVersion())
-	}
-	var n int
-	if err := s.DB().QueryRow(`SELECT COUNT(*) FROM sparkwing_meta`).Scan(&n); err != nil {
-		t.Fatalf("sparkwing_meta not queryable after open: %v", err)
-	}
-}
-
 // A memo entry whose origin run is gone can only fail the node that hits
 // it, and entries written before deletes cleaned them up outlive the run
 // by their whole TTL.

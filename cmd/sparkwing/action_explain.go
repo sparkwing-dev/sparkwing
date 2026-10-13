@@ -1,12 +1,11 @@
 package main
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -95,28 +94,17 @@ func runPipelineExplain(args []string) error {
 	if err != nil {
 		return err
 	}
-	jsonOut := format == "json"
-	pipelineArgs := []string{"run", pipeline, "--explain"}
-	pipelineArgs = append(pipelineArgs, passthrough...)
-	binary, err := os.Executable()
+	var snap nodeproto.PlanDoc
+	err = withPipelineBinary(pipeline, func(ctx context.Context, bin, dir string) error {
+		planned, err := planOverProtocol(ctx, bin, dir, pipeline, passthrough, "explain", false)
+		snap = planned.doc
+		return err
+	})
 	if err != nil {
-		binary = "sparkwing"
-	}
-	var stdout bytes.Buffer
-	cmd := exec.Command(binary, pipelineArgs...)
-	cmd.Stdout = &stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("plan --static: %w", err)
 	}
-	if jsonOut {
-		_, _ = os.Stdout.Write(stdout.Bytes())
-		return nil
-	}
-	var snap nodeproto.PlanDoc
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &snap); err != nil {
-		_, _ = os.Stdout.Write(stdout.Bytes())
-		return nil
+	if format == "json" {
+		return json.NewEncoder(os.Stdout).Encode(snap)
 	}
 	printPin(pipeline)
 	printPlanSnapshot(&snap)
@@ -141,42 +129,23 @@ func runPipelineExplainAll(format string) error {
 	if len(catalog) == 0 {
 		return errors.New("plan --static --all: no pipelines found in .sparkwing/sparkwing.yaml")
 	}
-	binary, err := os.Executable()
-	if err != nil {
-		binary = "sparkwing"
-	}
-	pipelinePrefix := []string{"run"}
 	results := make([]allExplainResult, 0, len(catalog))
 	failed := 0
 	for _, p := range catalog {
 		row := allExplainResult{Pipeline: p.Name}
-		pipelineArgs := append(append([]string(nil), pipelinePrefix...), p.Name, "--explain")
-		var stdout, stderr bytes.Buffer
-		cmd := exec.Command(binary, pipelineArgs...)
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-		if err := cmd.Run(); err != nil {
-			msg := strings.TrimSpace(stderr.String())
-			if msg == "" {
-				msg = err.Error()
-			}
-			row.Error = msg
-			if isMissingInputsError(msg) {
-				row.Status = "skipped"
-			} else {
-				row.Status = "fail"
-				failed++
-			}
-		} else {
-			var snap nodeproto.PlanDoc
-			if jerr := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &snap); jerr == nil {
-				row.Status = "ok"
-				row.Nodes = len(snap.Nodes)
-			} else {
-				row.Status = "fail"
-				row.Error = fmt.Sprintf("explain returned non-JSON output: %v", jerr)
-				failed++
-			}
+		err := withPipelineBinary(p.Name, func(ctx context.Context, bin, dir string) error {
+			planned, err := planOverProtocol(ctx, bin, dir, p.Name, nil, "explain", false)
+			row.Nodes = len(planned.doc.Nodes)
+			return err
+		})
+		switch {
+		case err == nil:
+			row.Status = "ok"
+		case isInvalidArgs(err):
+			row.Status, row.Error = "skipped", err.Error()
+		default:
+			row.Status, row.Error = "fail", err.Error()
+			failed++
 		}
 		results = append(results, row)
 	}
@@ -191,16 +160,6 @@ func runPipelineExplainAll(format string) error {
 		return fmt.Errorf("plan --static --all: %d of %d pipelines failed", failed, len(results))
 	}
 	return nil
-}
-
-func isMissingInputsError(msg string) bool {
-	if strings.Contains(msg, "panic:") ||
-		strings.Contains(msg, "runtime error") ||
-		strings.Contains(msg, "[running]") {
-		return false
-	}
-	return strings.Contains(msg, "build plan:") ||
-		strings.Contains(msg, "inputs for pipeline")
 }
 
 func printAllExplainTable(results []allExplainResult, failed int) {

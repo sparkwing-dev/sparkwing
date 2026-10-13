@@ -185,9 +185,9 @@ func (r Ref[T]) getInRun(ctx context.Context) (T, bool, error) {
 	if jsonResolve == nil {
 		return out, false, fmt.Errorf("sparkwing: Ref[%T].Get called without a resolver in context", out)
 	}
-	data, ok := jsonResolve(r.NodeID)
-	if !ok {
-		return out, false, fmt.Errorf("sparkwing: Ref[%T].Get: %w", out, absentInRun(r.NodeID))
+	data, err := jsonResolve(ctx, r.NodeID)
+	if err != nil {
+		return out, false, fmt.Errorf("sparkwing: Ref[%T].Get: %w", out, err)
 	}
 	if err := json.Unmarshal(data, &out); err != nil {
 		var zero T
@@ -309,9 +309,22 @@ func RefToLastRun[T any](pipeline, nodeID string, opts ...RefOption) Ref[T] {
 	}
 }
 
-func jsonResolverFromContext(ctx context.Context) func(nodeID string) ([]byte, bool) {
-	f, _ := ctx.Value(keyJSONRefResolver).(func(string) ([]byte, bool))
-	return f
+// safety: a reader that returns an error can tell an absent output, marked
+// with ErrRefAbsent, from one it failed to read, which Ref.TryGet must not
+// take for a miss; a resolver returning a bool cannot.
+func jsonResolverFromContext(ctx context.Context) func(context.Context, string) ([]byte, error) {
+	switch f := ctx.Value(keyJSONRefResolver).(type) {
+	case func(context.Context, string) ([]byte, error):
+		return f
+	case func(string) ([]byte, bool):
+		return func(_ context.Context, nodeID string) ([]byte, error) {
+			if data, ok := f(nodeID); ok {
+				return data, nil
+			}
+			return nil, absentInRun(nodeID)
+		}
+	}
+	return nil
 }
 
 // PipelineRefs returns the other pipelines' nodes this node's job holds a

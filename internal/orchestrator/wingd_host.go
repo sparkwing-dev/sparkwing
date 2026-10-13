@@ -1,7 +1,6 @@
 package orchestrator
 
 import (
-	"errors"
 	"os"
 
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
@@ -34,7 +33,6 @@ func allowUnadmitted() bool {
 
 type unhosted struct {
 	reason string
-	skew   bool
 	hosted bool
 }
 
@@ -47,25 +45,13 @@ func (la *LocalAdmission) unhostedOutcome(err error, state unhosted) bool {
 		return false
 	}
 	reason := standaloneReasonFor(err)
-	if reason == "" && !la.storeSkewRefusal(err, state) {
+	if reason == "" {
 		return false
 	}
 	if state.reason == "" {
 		la.announceUnadmitted(err, state.hosted)
 	}
 	return true
-}
-
-// safety: the daemon whose store skew sent this run standalone answers
-// admission with that same store error. Gated on the skew rather than on the
-// whole branch so a corrupt store on a daemon serving no api.sock still
-// refuses, which is the one refusal the design reserves.
-func (la *LocalAdmission) storeSkewRefusal(err error, state unhosted) bool {
-	if !state.skew || state.reason != standaloneDaemonOlder {
-		return false
-	}
-	var admErr *wingdclient.AdmissionError
-	return errors.As(err, &admErr) && admErr.Key == terminalCheckKey
 }
 
 func (la *LocalAdmission) announceUnadmitted(err error, hosted bool) {

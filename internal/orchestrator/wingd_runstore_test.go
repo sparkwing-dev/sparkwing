@@ -421,16 +421,8 @@ func blockTheStoreOpen(t *testing.T, home string) *sql.Tx {
 	if err := foreign.CreateRun(ctx, store.Run{ID: "r1", Pipeline: "p", Status: "success", StartedAt: time.Now()}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	// safety: the next open only migrates, and so only takes the write lock
-	// the foreign transaction holds, when the applied versions are gone.
-	if _, err := foreign.DB().ExecContext(ctx, `DELETE FROM sparkwing_schema_version`); err != nil {
-		t.Fatalf("clear the applied schema versions: %v", err)
-	}
-	if _, err := foreign.DB().ExecContext(ctx, `DELETE FROM sparkwing_requirements WHERE name IN (
-        'executor-enrollment-v1', 'executor-offer-arbitration-v1', 'agent-loss-attempt-fencing-v1'
-    )`); err != nil {
-		t.Fatalf("clear future Fleet requirements: %v", err)
-	}
+	// safety: every open reads the schema version in a write transaction, so it
+	// waits on the write lock the foreign transaction holds.
 	tx, err := foreign.DB().BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("foreign begin: %v", err)

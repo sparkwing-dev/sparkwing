@@ -26,52 +26,6 @@ const sourceBundleRetention = 24 * time.Hour
 // DirectCacheMaxAge is the controller's retention window for cache keys.
 const DirectCacheMaxAge = 30 * 24 * time.Hour
 
-const directUploadTablesSQL = `CREATE TABLE IF NOT EXISTS uploads (
-    id TEXT PRIMARY KEY,
-    team TEXT NOT NULL,
-    run_id TEXT NOT NULL,
-    store TEXT NOT NULL,
-    key TEXT NOT NULL,
-    size BIGINT NOT NULL,
-    sha256 TEXT NOT NULL,
-    principal TEXT NOT NULL,
-    claim_prefix TEXT NOT NULL,
-    provenance TEXT NOT NULL,
-    expires_at BIGINT NOT NULL,
-    committed_at BIGINT NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_uploads_expiry ON uploads(expires_at);
-CREATE TABLE IF NOT EXISTS data_objects (
-    team TEXT NOT NULL,
-    key TEXT NOT NULL,
-    store TEXT NOT NULL,
-    size BIGINT NOT NULL,
-    sha256 TEXT NOT NULL,
-    principal TEXT NOT NULL,
-    provenance TEXT NOT NULL,
-    committed_at BIGINT NOT NULL,
-    PRIMARY KEY (team, key, provenance)
-);
-CREATE TABLE IF NOT EXISTS team_build_trust (
-    team TEXT PRIMARY KEY,
-    trust_local_builds BIGINT NOT NULL DEFAULT 0
-);`
-
-func applyDirectUploadMigration(ctx context.Context, tx *storeTx) error {
-	return execStatements(ctx, tx, directUploadTablesSQL)
-}
-
-// safety: an empty ref marks every object written before v88 and by any
-// caller that is not a claim token, which a claim never reads; a claim's
-// object carries its run's git ref.
-var cacheRefCols = map[string]string{"ref": "TEXT NOT NULL DEFAULT ''", "repo": "TEXT NOT NULL DEFAULT ''"}
-
-func applyCacheRefMigration(ctx context.Context, tx *storeTx, postgres bool) error {
-	return addDispatchColumnsTx(ctx, tx, postgres, map[string]map[string]string{
-		"uploads": cacheRefCols, "data_objects": cacheRefCols,
-	})
-}
-
 // UploadRequest declares an exact object before the client sends its bytes.
 type UploadRequest struct {
 	Team        Team

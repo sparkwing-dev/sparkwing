@@ -16,11 +16,15 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"os"
+	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeclient"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
 )
+
+const releaseTimeout = 10 * time.Second
 
 // Spec describes a cleanup to run if the registering node dies first.
 type Spec struct {
@@ -40,7 +44,13 @@ type Spec struct {
 // before release runs, a later sweep runs Spec.Argv. Outside a pipeline node
 // -- no run and node in the environment -- there is nothing to reap for, so
 // Register is a no-op returning a no-op release.
+//
+// In a process the engine runs over the node protocol, the engine holds the
+// cleanup and runs Spec.Argv once the process exits, unless it was released.
 func Register(ctx context.Context, spec Spec) (release func(), err error) {
+	if c, bound := nodeclient.Bound(); bound {
+		return registerWithHost(ctx, c, spec)
+	}
 	run := os.Getenv("SPARKWING_RUN_ID")
 	node := os.Getenv("SPARKWING_NODE_ID")
 	if run == "" || node == "" || len(spec.Argv) == 0 {
@@ -72,6 +82,24 @@ func Register(ctx context.Context, spec Spec) (release func(), err error) {
 		return func() {}, err
 	}
 	return rel, nil
+}
+
+func registerWithHost(ctx context.Context, c *nodeclient.Client, spec Spec) (func(), error) {
+	if c == nil || len(spec.Argv) == 0 {
+		return func() {}, nil
+	}
+	id, err := c.RegisterCleanup(ctx, spec.Argv, spec.Description)
+	if err != nil {
+		return func() {}, err
+	}
+	// safety: a release runs after the library cleaned up, often once the
+	// step's context has ended; a release that fails only costs a second run
+	// of an idempotent argv.
+	return func() {
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), releaseTimeout)
+		defer cancel()
+		_ = c.ReleaseCleanup(rctx, id) //nolint:errcheck // a failed release only reruns an idempotent argv
+	}, nil
 }
 
 func argvString(argv []string) string {

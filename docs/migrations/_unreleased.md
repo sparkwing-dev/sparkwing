@@ -30,10 +30,8 @@
   its own disk needs no rule and keeps them until their run is deleted.
   On a multi-team controller segment bytes count against the team's log
   storage.
-- **Logs the service already holds:** run `sparkwing-controller migrate-logs`
-  once against the service's root and archive and the controller's cache
-  bucket and state database (see [self-hosting.md](../self-hosting.md#moving-the-logs-services-logs-to-segments))
-  before you retire the service; logs not converted become unreadable.
+- **Logs the service already holds:** nothing converts them; they become
+  unreadable when you retire the service.
 - **Mixed versions:** upgrade the controller first. A runner that predates
   segments keeps writing to its logs URL, which the controller still reads
   through. A runner of this release against an older controller finds no
@@ -57,16 +55,8 @@ that keep the logs service running.
   its output directory; a controller with neither keeps no node logs, so a
   runner keeps the log on its own disk. Pipeline binaries built against any SDK
   keep logging unchanged: the runner serves their appends on loopback.
-- **Before you upgrade:** scale the logs service and the controller to
-  zero and run this release's `sparkwing-controller migrate-logs` once,
-  `--dry-run` first, as a Job that mounts the logs PVC and the controller's
-  data volume with the controller's credentials, as
-  [self-hosting.md](../self-hosting.md#moving-the-logs-services-logs-to-segments)
-  describes in order. It reads the service's volume and archive directly,
-  records each converted log in the controller's state database, skips
-  what it already converted, and can run again. It names and leaves
-  unconverted any run it cannot convert whole, such as one the controller's
-  database does not hold. Logs not converted become unreadable.
+- **Before you upgrade:** nothing converts the service's logs; delete its
+  volume once you no longer need the files.
 - **Helm:** delete `sparkwing-runner-bundle.logs` (or `logs` for a
   standalone runner bundle) and `controller.logs` from your values; a
   values file that still sets them fails to render. The upgrade removes the
@@ -208,10 +198,8 @@ Before upgrading:
   for the CLI.
 - An open controller (empty tokens table) serves the dashboard without
   sign-in, as before, and its `/login` redirects to the page asked for.
-- Rollback: schema v96 declares the `token-sessions-v1` requirement, so an
-  older controller or CLI refuses to open the upgraded store and names the
-  release it needs. Roll back by restoring the SQLite copy the upgrade wrote
-  under `backups/`, or a PostgreSQL backup taken before the upgrade.
+- Rollback: an older controller or CLI refuses the new store. Roll back by
+  restoring a backup taken before the upgrade.
 
 ## Team CLI and runner tokens become team tokens
 
@@ -292,9 +280,8 @@ runners, which claim nodes the way warm trigger runners always have.
   that was enrolled. `GET /api/v1/agents` and `sparkwing cluster agents list`
   show the runners that claimed in the last hour with the labels, slot limit
   and headroom they advertised; `active_slots`, `base_priority`,
-  `priority_ceiling`, `budget` and the `gateway` type are gone. Schema v98
-  drops the executor and offer tables. An older controller refuses the
-  upgraded database through the requirement v96 declares.
+  `priority_ceiling`, `budget` and the `gateway` type are gone. The store
+  has no executor or offer tables, and an older controller refuses it.
 
 To upgrade:
 

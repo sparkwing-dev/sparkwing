@@ -8,40 +8,6 @@ import (
 	"time"
 )
 
-const nodeLogsTableSQL = `CREATE TABLE IF NOT EXISTS node_logs (
-    team TEXT NOT NULL,
-    run_id TEXT NOT NULL,
-    node_id TEXT NOT NULL,
-    attempt BIGINT NOT NULL,
-    generation BIGINT NOT NULL,
-    prefix TEXT NOT NULL,
-    uploaded_through BIGINT NOT NULL DEFAULT 0,
-    stored_bytes BIGINT NOT NULL DEFAULT 0,
-    charged_bytes BIGINT NOT NULL DEFAULT 0,
-    sealed_at BIGINT,
-    created_at BIGINT NOT NULL,
-    updated_at BIGINT NOT NULL,
-    PRIMARY KEY (team, run_id, node_id, attempt, generation)
-);
-CREATE INDEX IF NOT EXISTS idx_node_logs_unsealed ON node_logs(updated_at) WHERE sealed_at IS NULL;`
-
-func applyNodeLogsMigration(ctx context.Context, tx *storeTx) error {
-	return execStatements(ctx, tx, nodeLogsTableSQL)
-}
-
-const nodeLogSegmentsTableSQL = `CREATE TABLE IF NOT EXISTS node_log_segments (
-    team TEXT NOT NULL,
-    run_id TEXT NOT NULL,
-    node_id TEXT NOT NULL,
-    attempt BIGINT NOT NULL,
-    generation BIGINT NOT NULL,
-    n BIGINT NOT NULL,
-    stored_bytes BIGINT NOT NULL,
-    md5 TEXT NOT NULL,
-    sha256 TEXT NOT NULL,
-    PRIMARY KEY (team, run_id, node_id, attempt, generation, n)
-);`
-
 // NodeLogSealGrace is how long after a node attempt ends its writer may
 // still upload the attempt's log and seal it, and how long the controller
 // waits before it seals the attempt as abandoned.

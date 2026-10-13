@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -22,8 +21,7 @@ func (la *LocalAdmission) ensureDaemon(ctx context.Context) (*wingdclient.Client
 	}
 	skew := daemonStoreSchemaSkew(
 		cl.DaemonVersion(), la.Version,
-		cl.DaemonStoreSchema(), cl.DaemonStoreRequirements(),
-		store.ExpectedSchemaVersion())
+		cl.DaemonStoreSchema(), store.ExpectedSchemaVersion())
 	if skew != nil {
 		cl.Close()
 		return nil, skew
@@ -31,25 +29,13 @@ func (la *LocalAdmission) ensureDaemon(ctx context.Context) (*wingdclient.Client
 	return cl, nil
 }
 
-func daemonStoreSchemaSkew(daemonVersion, selfVersion string, daemonSchema int, daemonRequirements []string, selfSchema int) error {
-	if daemonSchema == 0 {
-		return nil
-	}
-	if daemonRequirements != nil {
-		missing := store.MissingRequirements(daemonRequirements, store.KnownRequirements())
-		if len(missing) == 0 {
-			return nil
-		}
-		return storeSchemaRemedy(fmt.Sprintf(
-			"daemon %s does not understand runs-store requirement(s) %s, which this binary (%s) stamps into the store they share",
-			describeVersion(daemonVersion), strings.Join(missing, ", "), describeVersion(selfVersion)), selfSchema)
-	}
-	if daemonSchema >= selfSchema {
+func daemonStoreSchemaSkew(daemonVersion, selfVersion string, daemonSchema, selfSchema int) error {
+	if daemonSchema == selfSchema {
 		return nil
 	}
 	return storeSchemaRemedy(fmt.Sprintf(
 		"daemon %s understands runs-store schema %d, this binary is %s at schema %d, "+
-			"and the store both share is migrated to the newer one",
+			"and each refuses a store the other creates",
 		describeVersion(daemonVersion), daemonSchema, describeVersion(selfVersion), selfSchema), selfSchema)
 }
 

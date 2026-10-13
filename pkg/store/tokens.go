@@ -348,9 +348,6 @@ const agentNameIndexName = "idx_tokens_agent_name"
 // outside it, while [refuseTakenAgentName] still counts it until that time.
 const agentNameIndexedRow = `kind IN ('runner', 'team') AND revoked_at IS NULL AND substr(principal, 1, 6) = 'agent:'`
 
-const agentNameIndex = `CREATE UNIQUE INDEX IF NOT EXISTS ` + agentNameIndexName +
-	` ON tokens(team, principal) WHERE ` + agentNameIndexedRow
-
 // safety: an expired agent token still holds its name's index slot, so a mint
 // stamps its death as a revocation at the moment it expired, which leaves
 // [Token.IsValid] answering exactly as before.
@@ -372,51 +369,6 @@ func isAgentNameCollision(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, agentNameIndexName) || strings.Contains(msg, "tokens.team, tokens.principal")
-}
-
-func scanAgentNameDuplicates(rows *sql.Rows) (dupes []string, err error) {
-	defer closeRowsInto(rows, &err)
-	for rows.Next() {
-		var team, principal string
-		var n int
-		if err := rows.Scan(&team, &principal, &n); err != nil {
-			return nil, err
-		}
-		dupes = append(dupes, fmt.Sprintf("team %s %s (%d tokens)", team, principal, n))
-	}
-	return dupes, rows.Err()
-}
-
-func applyAgentNameIndexMigration(ctx context.Context, q migrationQueryExecer, now time.Time) error {
-	if _, err := q.ExecContext(ctx, `UPDATE tokens SET revoked_at = expires_at
-		WHERE `+agentNameIndexedRow+` AND expires_at IS NOT NULL AND expires_at <= ?`, now.UTC().Unix()); err != nil {
-		return err
-	}
-	rows, err := q.QueryContext(ctx, `SELECT team, principal, COUNT(*) FROM tokens
-		WHERE `+agentNameIndexedRow+`
-		GROUP BY team, principal HAVING COUNT(*) > 1 ORDER BY team, principal`)
-	if err != nil {
-		return err
-	}
-	dupes, err := scanAgentNameDuplicates(rows)
-	if err != nil {
-		return err
-	}
-	if len(dupes) > 0 {
-		return fmt.Errorf("tokens: more than one live agent token carries the same agent name: %s; "+
-			"revoke all but one token of each name, then upgrade", strings.Join(dupes, ", "))
-	}
-	_, err = q.ExecContext(ctx, agentNameIndex)
-	return err
-}
-
-// safety: an index built under the runner-only predicate survives CREATE ... IF
-// NOT EXISTS, so it is dropped first and rebuilt to hold machine team tokens too.
-func widenAgentNameIndex(ctx context.Context, q migrationQueryExecer, now time.Time) error {
-	if _, err := q.ExecContext(ctx, `DROP INDEX IF EXISTS `+agentNameIndexName); err != nil {
-		return err
-	}
-	return applyAgentNameIndexMigration(ctx, q, now)
 }
 
 // safety: every mint path passes through here, so a second live agent token

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 )
@@ -239,21 +238,6 @@ func oneTeam(team Team) teamScope { return teamScope{team: team} }
 
 func allTeams() teamScope { return teamScope{all: true} }
 
-const teamsTableSQLite = `CREATE TABLE IF NOT EXISTS teams (
-    name       TEXT PRIMARY KEY,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
-);`
-
-var teamsTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(teamsTableSQLite)
-
-// safety: the default is what carries an install that predates the column,
-// because a statement written before the port names no team at all and its
-// rows have to land in the team the migration put the existing rows in.
-var teamColumn = map[string]string{
-	"team": "TEXT NOT NULL DEFAULT '" + string(DefaultTeam) + "'",
-}
-
 // safety: a table is on this list or on operatorTables and never on both,
 // because a scoped query on an unclassified table cannot be written; the
 // guard in tenant_classification_internal_test.go refuses either mistake.
@@ -326,24 +310,6 @@ var tenantTables = []string{
 	"triggers",
 }
 
-// safety: these tables are created after v49 with the team column already
-// in their schema, so the v49 ladder step that adds the column to every
-// tenant-owned table runs before they exist and skips them.
-var keyedAtCreation = []string{
-	"credit_checkouts", "credit_freezes", "free_slots", "git_credential_machines", "git_credential_releases",
-	"git_credentials", "github_app_automation", "github_app_extra_repos", "github_app_installations", "github_app_triggers",
-	"github_runner_bindings", "github_runner_credentials", "invitations", "memberships",
-	"storage_commit_receipts", "storage_reservations", "team_download_day", "team_storage",
-	"uploads", "data_objects",
-	"team_build_trust",
-	"claim_tokens", "child_invocations", "trigger_claim_tokens",
-	"business_events",
-	"repos",
-	"card_charges", "card_attempts", "card_refunds", "team_spend_days",
-	"node_outputs", "output_runs", "output_tombstones",
-	"node_logs", "node_log_segments",
-}
-
 // safety: sparkwing_meta is the deployment's bag, so per-team keys need their own table. A human
 // belongs to the deployment and reaches teams through tenant-owned memberships. signup_gate and
 // signup_admissions gate new accounts deployment-wide.
@@ -359,93 +325,11 @@ var operatorTables = []string{
 	"signup_admissions",
 	"signup_gate",
 	"sparkwing_meta",
-	"sparkwing_requirements",
 	"invitation_email_log",
 	"payment_warnings",
 	"sparkwing_schema_version",
 	"team_deletions",
 	"teams",
-}
-
-// safety: a tenant listing orders by started_at within one team, and
-// the index it would otherwise use leads with started_at across every
-// team, so without this one team's listing scans the fleet's runs.
-const runsTeamIndex = `CREATE INDEX IF NOT EXISTS idx_runs_team_started ON runs(team, started_at DESC);`
-
-// safety: releases v0.61.0 through v0.63.0 numbered their claim token migration v49, so their databases
-// read as v49 without the tenant key that v50 onward assume. The idempotent tenant-key migration rerun
-// at v49 completes either lineage, and a stray teams table fails the open before v50 commits. v74
-// carries that claim token column on this lineage.
-func bridgeMainLineageTenantKey(ctx context.Context, tx *storeTx, version int, postgres bool) error {
-	switch {
-	case version != 49:
-		return nil
-	case postgres:
-		return applyTenantKeyMigrationPostgres(ctx, tx)
-	default:
-		return applyTenantKeyMigrationSQLite(ctx, tx)
-	}
-}
-
-// safety: v0.65.0 and v0.65.1 spent v50 and v51 on metric migrations (v89 here), so their databases lack
-// this lineage's v49 to v51; those idempotent migrations run before the loop resumes at v52.
-func bridgeMainLineageMetricKind(ctx context.Context, tx *storeTx, version int, listed []SchemaRequirement, postgres bool) error {
-	if version != 50 && version != 51 {
-		return nil
-	}
-	if !slices.ContainsFunc(listed, func(r SchemaRequirement) bool { return r.Name == metricSampleKindRequirement }) {
-		return nil
-	}
-	steps := []func(context.Context, *storeTx) error{
-		applyTenantKeyMigrationSQLite, applyTeamCreditStateMigrationSQLite, applyUserKeyTeamScopeMigrationSQLite,
-	}
-	if postgres {
-		steps = []func(context.Context, *storeTx) error{
-			applyTenantKeyMigrationPostgres, applyTeamCreditStateMigrationPostgres, applyUserKeyTeamScopeMigrationPostgres,
-		}
-	}
-	for _, step := range steps {
-		if err := step(ctx, tx); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func applyTenantKeyMigrationSQLite(ctx context.Context, tx *storeTx) error {
-	if _, err := tx.ExecContext(ctx, teamsTableSQLite); err != nil {
-		return err
-	}
-	for _, table := range tenantTables {
-		if slices.Contains(keyedAtCreation, table) {
-			continue
-		}
-		if err := ensureColumnsSQLite(ctx, tx, table, teamColumn); err != nil {
-			return err
-		}
-	}
-	if _, err := tx.ExecContext(ctx, runsTeamIndex); err != nil {
-		return err
-	}
-	return recordDefaultTeamTx(ctx, tx)
-}
-
-func applyTenantKeyMigrationPostgres(ctx context.Context, tx *storeTx) error {
-	if _, err := tx.ExecContext(ctx, teamsTablePostgres); err != nil {
-		return err
-	}
-	for _, table := range tenantTables {
-		if slices.Contains(keyedAtCreation, table) {
-			continue
-		}
-		if err := addColumnsTx(ctx, tx, table, teamColumn); err != nil {
-			return err
-		}
-	}
-	if _, err := tx.ExecContext(ctx, runsTeamIndex); err != nil {
-		return err
-	}
-	return recordDefaultTeamTx(ctx, tx)
 }
 
 // safety: the column's default names a team, so it is registered here too,

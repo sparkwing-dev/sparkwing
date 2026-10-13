@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"strings"
 	"time"
 )
 
@@ -404,48 +403,6 @@ func storageWatermarkWon(res sql.Result) error {
 
 func storageChargedThroughKey(team Team, principal string) string {
 	return metaKeyStorageChargedThroughPrefix + string(team) + "/" + principal
-}
-
-// safety: the watermark key gains the team in the migration that starts
-// reading it that way, because a key left in the old shape reads as a team
-// that has never been billed and the next pass forgives the interval since
-// the last one.
-func backfillStorageWatermarkTeamTx(ctx context.Context, tx *storeTx) error {
-	// safety: the keys are read out before any of them is rewritten, because
-	// SQLite runs one statement at a time on the connection a transaction
-	// holds and a write issued mid-scan would fail.
-	old, err := storageWatermarkKeysTx(ctx, tx)
-	if err != nil {
-		return err
-	}
-	for _, key := range old {
-		principal := strings.TrimPrefix(key, metaKeyStorageChargedThroughPrefix)
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE sparkwing_meta SET key = ? WHERE key = ?`,
-			storageChargedThroughKey(DefaultTeam, principal), key); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func storageWatermarkKeysTx(ctx context.Context, tx *storeTx) (_ []string, err error) {
-	rows, err := tx.QueryContext(ctx,
-		`SELECT key FROM sparkwing_meta WHERE key LIKE ?`,
-		metaKeyStorageChargedThroughPrefix+"%")
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	var out []string
-	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
-			return nil, err
-		}
-		out = append(out, key)
-	}
-	return out, rows.Err()
 }
 
 type storageCharge struct {

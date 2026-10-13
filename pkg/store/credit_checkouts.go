@@ -9,61 +9,7 @@ import (
 	"time"
 )
 
-// safety: an open checkout is money a team may pay at any moment, and the
-// grant that follows a verified payment is never refused, so the balance cap
-// is held when a checkout opens by counting every checkout still open. A row
-// stops counting once its payment is granted or its session expires.
-const creditCheckoutsTableSQLite = `CREATE TABLE IF NOT EXISTS credit_checkouts (
-    id           TEXT PRIMARY KEY,
-    team         TEXT NOT NULL,
-    session_id   TEXT NOT NULL DEFAULT '',
-    amount_micro INTEGER NOT NULL,
-    opened_at    INTEGER NOT NULL,
-    expires_at   INTEGER NOT NULL,
-    paid_at      INTEGER
-);
-CREATE INDEX IF NOT EXISTS idx_credit_checkouts_team_expires ON credit_checkouts(team, expires_at);
-CREATE INDEX IF NOT EXISTS idx_credit_checkouts_session ON credit_checkouts(session_id);`
-
 const checkoutCloseWindow = 7 * 24 * time.Hour
-
-var creditCheckoutCloseCols = map[string]string{"closed_at": "INTEGER"}
-
-var creditCheckoutsTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(creditCheckoutsTableSQLite)
-
-// safety: a freeze is one row per dispute, so one dispute's outcome never
-// releases another's hold; a team is frozen while any row is unreleased. The
-// dispute id is the key and the row names the payment it disputes, so a
-// dispute is bound to one payment and one team.
-const creditFreezesTableSQLite = `CREATE TABLE IF NOT EXISTS credit_freezes (
-    dispute_id  TEXT PRIMARY KEY,
-    team        TEXT NOT NULL,
-    payment_id  TEXT NOT NULL DEFAULT '',
-    reason      TEXT NOT NULL DEFAULT '',
-    created_at  INTEGER NOT NULL,
-    released_at INTEGER
-);
-CREATE INDEX IF NOT EXISTS idx_credit_freezes_team ON credit_freezes(team, released_at);`
-
-var creditFreezesTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(creditFreezesTableSQLite)
-
-func applyCreditCheckoutMigrationSQLite(ctx context.Context, tx *storeTx) error {
-	for _, stmt := range splitStatements(creditCheckoutsTableSQLite + "\n" + creditFreezesTableSQLite) {
-		if _, err := tx.ExecContext(ctx, stmt); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func applyCreditCheckoutMigrationPostgres(ctx context.Context, tx *storeTx) error {
-	for _, stmt := range splitStatements(creditCheckoutsTablePostgres + "\n" + creditFreezesTablePostgres) {
-		if _, err := tx.ExecContext(ctx, stmt); err != nil {
-			return err
-		}
-	}
-	return nil
-}
 
 // OpenCreditCheckout records a checkout of amountMicro that stays open until
 // hold from now, and returns its id. It refuses with a

@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"testing"
 	"time"
 
@@ -28,10 +27,6 @@ func TestOpenKeepsStateSeparate(t *testing.T) {
 		version, err := st.CurrentSchemaVersion(ctx)
 		if err != nil || version != store.ExpectedSchemaVersion() {
 			t.Fatalf("store %d schema = %d, %v", i, version, err)
-		}
-		requirements, err := st.Requirements(ctx)
-		if err != nil || !slices.Equal(requirements, store.KnownRequirements()) {
-			t.Fatalf("store %d requirements = %v, %v", i, requirements, err)
 		}
 		var runs int
 		if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM runs`).Scan(&runs); err != nil || runs != 0 {

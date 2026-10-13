@@ -616,7 +616,6 @@ func (d *Daemon) serveConn(c *conn) {
 		BuildIdentity:       wingwire.BuildIdentity,
 		Draining:            draining,
 		StoreSchemaVersion:  d.cfg.StoreSchemaVersion,
-		StoreRequirements:   d.cfg.StoreRequirements,
 	}
 	if d.cfg.ServeAPI != nil {
 		apiReady, apiErr := d.apiState()

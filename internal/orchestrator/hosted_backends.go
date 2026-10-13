@@ -33,14 +33,9 @@ const hostedAPITimeout = APIRequestTimeout + 15*time.Second
 
 const hostedAPIProbeTimeout = 3 * time.Second
 
-// safety: the two ways a daemon's store answer ends a hosted run. Skew is the
-// daemon being too old for a store a newer pin migrated, which is age and so
-// degrades; a fault is a file the operator must fix, and is the only reason
-// left to refuse a run outright.
-var (
-	errHostedStoreSkew  = errors.New("the admission daemon is too old for this machine's runs store")
-	errHostedStoreFault = errors.New("the admission daemon cannot read this machine's runs store")
-)
+// safety: a daemon that cannot read its runs store holds a file the operator
+// must fix, which is the one store answer that refuses a run outright.
+var errHostedStoreFault = errors.New("the admission daemon cannot read this machine's runs store")
 
 // NewAPISocketClient returns an HTTP client that reaches the daemon's
 // controller API over the unix socket at sock. Requests carry no bearer
@@ -96,7 +91,6 @@ type hostedSelection struct {
 	daemon     string
 	standalone string
 	fault      string
-	storeSkew  bool
 }
 
 // safety: the handshake is the only place the daemon's own answer about
@@ -137,7 +131,6 @@ func selectHostedAPI(ctx context.Context, adm *LocalAdmission) (hostedSelection,
 		}
 		if reason := standaloneReasonFor(err); reason != "" {
 			sel.standalone = reason
-			sel.storeSkew = errors.Is(err, errHostedStoreSkew)
 			return sel, nil
 		}
 		sel.standalone, sel.fault = standaloneDaemonFault, err.Error()
@@ -215,11 +208,6 @@ func hostedAPIReachable(ctx context.Context, sock string) error {
 	}()
 	var health hostedHealth
 	decodeErr := json.NewDecoder(resp.Body).Decode(&health)
-	if decodeErr == nil {
-		if reason, skewed := strings.CutPrefix(health.Store, "skew: "); skewed {
-			return fmt.Errorf("%w: %s reports %s", errHostedStoreSkew, sock, reason)
-		}
-	}
 	if resp.StatusCode != http.StatusOK {
 		if decodeErr == nil && health.Store != "" {
 			return fmt.Errorf("%w: %s answered %s for GET /api/v1/health with its runs store %q",

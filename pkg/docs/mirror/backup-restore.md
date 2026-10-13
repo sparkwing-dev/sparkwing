@@ -1,8 +1,8 @@
 # Backup, restore, and upgrade
 
 How to take a backup of a self-hosted controller, prove the backup is
-good, and upgrade the controller without betting the install on the
-migration working. Every command here is meant to be typed as written.
+good, and upgrade the controller. Every command here is meant to be
+typed as written.
 
 ## What controller state is
 
@@ -151,9 +151,9 @@ sparkwing-controller: version vX.Y.Z, runs-store schema NN, commit ...
 
 Then run the checks in [Verify the install](#verify-the-install)
 against the scratch controller. When they pass, stop it and delete the
-scratch directory and the verification database. Starting a controller
-against a copy migrates that copy to the binary's schema, which is why
-this is done on a copy and never on the archive itself.
+scratch directory and the verification database. A controller at
+another schema refuses the copy, so verify with the build that took the
+backup.
 
 ## Restore
 
@@ -191,106 +191,32 @@ backup and the restore.
 
 ## Upgrade
 
-Work through the stages in order. Each one names what rollback means
-while you are standing in it.
-
-### Read what the release changes
-
-```bash
-sparkwing docs migrations
-sparkwing docs migrations --version <vX.Y.Z>
-```
-
-A guide exists only for a release carrying a breaking change. It names
-whether that release's migration adds to the schema or rebuilds a
-table, which is the difference between the two rollback stories below.
-
-*Rollback:* nothing has happened yet.
-
-### Stop the controller and back up
-
-Stop the controller, take the backup for your database from
-[Back up](#back-up), and run [Verify the backup](#verify-the-backup) on
-it. Verify before you migrate, not after, because after the migration
-the backup is the only way back and a bad one is discovered too late.
-
-*Rollback:* start the controller you already have.
-
-### Rehearse the migration on a copy
-
-Do this before the live database is touched, because it is the only way
-to learn what rollback will mean while rollback still means nothing.
-
-Restore the backup into a scratch directory the way
-[Verify the backup](#verify-the-backup) does, then run the **new**
-controller against that copy. It migrates the copy and prints the schema
-it reached:
-
-```bash
-SPARKWING_HOME="$SCRATCH/controller-home" \
-    <new sparkwing-controller> --addr 127.0.0.1:4456 --credentials-dir "$SCRATCH/credentials"
-```
-
-Stop it, and start the **previous** controller against the same migrated
-copy. A binary opens a database whose schema version is higher than its
-own as long as it understands every requirement the database lists. A
-migration that only adds columns, tables or indexes lists no new
-requirement, so the previous binary starts. A migration that the
-previous binary cannot be trusted with stamps a requirement, and that
-binary refuses:
+Until paid launch the store has one baseline schema and no upgrade path.
+A controller opens a database at its own schema version, creates the
+baseline in an empty one, and refuses any other:
 
 ```text
-sparkwing: this state database uses <requirement>, which needs sparkwing >= vX.Y.Z;
-you have vA.B.C. Run `sparkwing update` to upgrade.
+sparkwing: this store predates the baseline (it records schema version NN, this build creates version 1 and upgrades none); delete <path> (or drop the database) and start again
 ```
 
-Starting is not the whole test. A migration that rebuilds a table's
-primary key leaves the previous binary able to start and unable to
-write, because its upserts name a unique index that no longer exists.
-Register a profile against the scratch controller and write through it:
+An upgrade between two builds at the same schema needs nothing beyond
+installing the new binary or image and starting it. Its first line names
+the schema it opened:
 
-```bash
-sparkwing cloud connect --name rehearsal --controller http://127.0.0.1:4456 --token-stdin
-sparkwing secrets set --profile rehearsal --name ROLLBACK_PROBE --value probe
-sparkwing secrets delete --profile rehearsal --name ROLLBACK_PROBE
+```text
+sparkwing-controller: version vX.Y.Z, runs-store schema 1, commit ...
 ```
 
-A probe that is stored and deleted means binary rollback is real. A
-probe that fails means it is not, whatever the start-up line said. Stop
-the scratch controller and delete its directory either way.
+An upgrade to a build at another schema, including the first build with
+the baseline, discards the database: stop the controller, delete
+`$SPARKWING_HOME/state.db` with its `-wal` and `-shm` files or drop and
+recreate the PostgreSQL database, then start the new controller. Runs,
+credit history, secrets and credentials go with the database, so add the
+secrets and runner tokens again. A backup taken before the upgrade
+restores only under a controller at the old schema.
 
-*Rollback:* nothing has happened yet.
-
-### The point of no return
-
-**The migration that rebuilds a primary key is the point of no return.**
-Before it, rollback means reinstalling the previous binary and starting
-it against the same database. After it, rollback means restoring the
-backup, and every run, credit charge and secret change recorded since
-the backup is gone with it.
-
-The release's migration guide names which migrations rebuild a table.
-When you cannot tell, treat the upgrade as past the point of no return:
-the cost of assuming so is a restore drill, and the cost of assuming
-otherwise is the install.
-
-Binary rollback before that point is not free either. The previous
-binary writes through the columns it knows, so rows it creates against
-an already-migrated database take the new columns' defaults. Those rows
-stay that way when you upgrade again. Roll back to serve reads and to
-buy time, and keep the window short.
-
-### Install and start the new controller
-
-Install the new binary or image, start it, and read its first line. It
-migrates the database on open and prints the schema it reached.
-
-*Rollback:* whichever of the two stories the stage above established.
-
-### Verify
-
-Run [Verify the install](#verify-the-install). Until it passes, treat
-the upgrade as unfinished and keep the backup where you can reach it.
+*Rollback:* start the previous controller against the backup from
+[Back up](#back-up).
 
 ## Verify the install
 

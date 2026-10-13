@@ -42,8 +42,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).StorageMarks":          "the storage pass reconciles every team's count of one store from one bucket listing",
 	"(*Store).TeamsOverFreeLogShare": "the storage pass finds every team whose logs are past its share, slot or no slot",
 	"lockCommittedTx":                "the storage pass reconciles every team's count of one store from one bucket listing",
-	"applyAgentNameIndexMigration": "the schema migration retires expired agent tokens and refuses duplicate agent names in every team " +
-		"before it builds the index that spans them",
 	"(*Store).PruneDownloadDays": "drops every team's download days past the window, which is a deployment-wide " +
 		"retention, not one team's data",
 	"expiredClaimRunsTx": "the expired-claim reaper finds every team's runs holding a lapsed claim, " +
@@ -66,15 +64,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).ClaimNamedNode": "shares the claim scan's runtime predicate and its refusal",
 	"refuseEventOverLimitsTx": "reads one run's event counters for a cap on that run; the run id " +
 		"names one team's row and the fence checked before it proves the caller holds that run",
-	"backfillRunEventUsageTx": "a v52 migration that counts every run's events onto that run's own row",
-	"invalidateNodeMeasurementHistory": "a v89 migration that marks every node's resource history in every team as " +
-		"predating labeled readings; each marker row takes its node's own team",
-	"applyMetricSampleKindMigration": "a v89 migration that labels every team's readings that carried command CPU time",
-	"applyTriggerCreditCursorMigration": "a v73 migration check that refuses the upgrade while any team " +
-		"holds an open trigger reservation, because the schema is the deployment's and a reservation open in any team " +
-		"predates the paid cursor the migration adds",
-	"duplicateTeamGrantReferences": "a v52 migration check that groups every team's grants by team to find " +
-		"the rows the per-team reference key would refuse",
 	"(*Store).runnerTeams": "asks which team each live runner's credential belongs to, so an " +
 		"answer scoped to the asker is no answer; it is how another team's runner is dropped",
 	"(*Store).RecordAgentLabels": "writes the one credential the claim authenticated with; a token " +
@@ -100,7 +89,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).sweepExpiredConcurrencyCache":  "an expiry sweep is the deployment's, and a memo past its TTL answers no team",
 	"(*Store).sweepLRUConcurrencyCache":      "the row ceiling is the deployment's, so eviction ranks every team's memos together",
 	"(*Store).sweepOrphanedConcurrencyCache": "drops memos whose origin run is gone anywhere on the deployment",
-	"rewriteLegacyInheritedHolderMarkers":    "a v27 migration, and the team column arrives in v49",
 	"selectSecretsTx":                        "reads every team's secret so one key rotation reseals the whole table, and rewrites each row under its own team",
 	"selectGitCredentialsTx":                 "reads every team's git credential so one key rotation reseals the whole table, and rewrites each row under its own team",
 	"(*Store).secretsNotSealed":              "finds every team's secret still held as plaintext or a pre-team envelope, so the startup reseal binds each to its own team",
@@ -144,28 +132,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"launches each one through its own team's handle",
 	"disputeHoldTx": "asks which payment and team a dispute's hold names, so a hold or reversal naming it for " +
 		"another team is refused; a dispute id is unique across teams",
-	"applyMigrationSQLite": "the SQLite schema ladder rewrites every team's rows, and its early steps run before the team " +
-		"column exists",
-	"(*Store).applyMigrationPostgresTx": "the PostgreSQL schema ladder rewrites every team's rows, and its early steps run " +
-		"before the team column exists",
-	"applyFleetMigrationSQLite":   "a schema step that backfills every team's node offer and attempt columns",
-	"applyFleetMigrationPostgres": "a schema step that backfills every team's node offer and attempt columns",
-	"addNodeMetricsRunCascadePostgres": "a schema repair that drops node metric rows whose run is gone in any team before " +
-		"it adds the cascade",
-	"backfillAgentLossRetryNodeSourcesTx": "a schema step that records every team's pre-snapshot agent-loss retries as " +
-		"deny-all, before the source table carries a team",
-	"backfillRunAnnotationRollup": "an open-time backfill of every team's run annotation rollup, which also runs as schema " +
-		"v1 before the team column exists",
-	"gatherRunAnnotations": "reads one run's node and step annotations for the open-time rollup backfill, which names the " +
-		"run from its own scan and predates the team column",
-	"scrubSecretInputHashes": "a schema step that strips secret input hashes from every team's run invocations",
-	"dropPasswordUsers":      "a schema step that ends every team's password sessions along with the table that opened them",
-	"rehashSessions": "a schema step that drops every team's sessions minted under the retired digest, so each signs in " +
-		"again",
-	"duplicateGrantReferences": "a migration check that finds grant references repeated anywhere, because the index it " +
-		"gates is created over the whole table",
-	"duplicateTokenPrefixes": "a migration check that finds token prefixes repeated anywhere, because a token prefix is " +
-		"unique across teams",
 	"(*Store).reapExpiredTriggers": "the trigger-lease reaper returns every team's lapsed claims to the queue, because a " +
 		"sweep that only reaped one team would leave the rest held",
 	"(*Store).reapQueueExpiredRuns": "the queue-deadline sweep ends every team's runs no claimant took; each write names a " +

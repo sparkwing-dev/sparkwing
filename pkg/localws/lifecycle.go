@@ -1,14 +1,9 @@
 package localws
 
 import (
-	"context"
 	"encoding/json"
-	"log"
 	"net/http"
 	"os"
-	"strings"
-	"sync"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -40,90 +35,3 @@ func versionHandler(version string, instances ...string) http.HandlerFunc {
 		})
 	}
 }
-
-type schemaGuard struct {
-	st     *store.Store
-	cancel context.CancelFunc
-	once   sync.Once
-}
-
-func newSchemaGuard(st *store.Store, cancel context.CancelFunc) *schemaGuard {
-	return &schemaGuard{st: st, cancel: cancel}
-}
-
-// safety: a schema number above this build's own is not a reason to stop; an
-// additive migration leaves every requirement known and this dashboard keeps serving.
-func (g *schemaGuard) check(ctx context.Context) {
-	if g == nil || g.st == nil {
-		return
-	}
-	listed, err := g.st.Requirements(ctx)
-	if err != nil {
-		return
-	}
-	unknown := store.UnknownRequirements(listed)
-	if len(unknown) == 0 {
-		return
-	}
-	g.once.Do(func() {
-		log.Printf(
-			"dashboard: state database uses %s, which this dashboard does not understand. "+
-				"Shutting down cleanly -- restart with a sparkwing that does (sparkwing update).",
-			strings.Join(unknown, ", "))
-		g.cancel()
-	})
-}
-
-func (g *schemaGuard) poll(ctx context.Context, interval time.Duration) {
-	t := time.NewTicker(interval)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			g.check(ctx)
-		}
-	}
-}
-
-func (g *schemaGuard) middleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sc := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(sc, r)
-		if sc.status >= http.StatusInternalServerError {
-			g.check(r.Context())
-		}
-	})
-}
-
-type statusRecorder struct {
-	http.ResponseWriter
-	status      int
-	wroteHeader bool
-}
-
-func (s *statusRecorder) WriteHeader(code int) {
-	if !s.wroteHeader {
-		s.status = code
-		s.wroteHeader = true
-	}
-	s.ResponseWriter.WriteHeader(code)
-}
-
-func (s *statusRecorder) Write(b []byte) (int, error) {
-	if !s.wroteHeader {
-		s.wroteHeader = true
-	}
-	return s.ResponseWriter.Write(b)
-}
-
-// Flush and Unwrap keep streaming endpoints (log/event SSE) working
-// through the wrapper.
-func (s *statusRecorder) Flush() {
-	if f, ok := s.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
-}
-
-func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }

@@ -12,13 +12,13 @@ func TestLifecycleGuard_StatusLiteralsStayCanonical(t *testing.T) {
 	storeSrc := storePackageSource(t)
 
 	for needle, allowed := range map[string]int{
-		"status != 'done'":                    2,
+		"status != 'done'":                    1,
 		"status = 'done', outcome = 'failed'": 1,
-		"WHERE status = 'pending'":            1,
-		"WHERE status = 'claimed'":            1,
+		"WHERE status = 'pending'":            0,
+		"WHERE status = 'claimed'":            0,
 	} {
 		if got := strings.Count(storeSrc, needle); got != allowed {
-			t.Errorf("%q appears %d times in pkg/store sources, want %d (lifecycle.go fragments + schema DDL); route new sites through lifecycle.go", needle, got, allowed)
+			t.Errorf("%q appears %d times in pkg/store sources, want %d (lifecycle.go fragments); route new sites through lifecycle.go", needle, got, allowed)
 		}
 	}
 

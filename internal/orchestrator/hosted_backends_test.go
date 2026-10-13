@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -291,45 +290,6 @@ func TestHostedSelection_ForcedStillSaysNoDaemonWhenThereIsNone(t *testing.T) {
 	}
 }
 
-func TestHostedRun_SkewedDaemonStoreRunsStandalone(t *testing.T) {
-	registerHostedPipelines(t)
-	home := wingdTestHome(t)
-	paths := PathsAt(home)
-	if err := paths.EnsureRoot(); err != nil {
-		t.Fatalf("ensure root: %v", err)
-	}
-
-	// safety: separate homes let admission succeed while the API reads an unsupported store.
-	brokenHome := wingdTestHome(t)
-	requireUnknownFeature(t, PathsAt(brokenHome).StateDB())
-	startAPIDaemonOnFaultedStore(t, home, brokenHome)
-
-	opens := countStoreOpens(t)
-	warnings := captureStandaloneWarnings(t)
-	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
-	defer cancel()
-	res, err := RunLocal(ctx, paths, Options{Pipeline: "hosted-memo", Admission: testWingdAdmission(home, nil)})
-	if err != nil {
-		t.Fatalf("RunLocal: %v", err)
-	}
-	if res.Status != "success" {
-		t.Fatalf("status = %q (%v), want success", res.Status, res.Error)
-	}
-	if got := opens.opened(paths.StateDB()); got != 0 {
-		t.Fatalf("the run opened this machine's shared store %d times, want 0", got)
-	}
-	if got := opens.opened(paths.StandaloneStateDB()); got != 1 {
-		t.Fatalf("the run opened %s %d times, want 1", paths.StandaloneStateDB(), got)
-	}
-	block := warnings.String()
-	if !strings.Contains(block, "predates this pipeline's SDK") {
-		t.Fatalf("stderr block = %q, want the daemon-older branch", block)
-	}
-	if !strings.Contains(block, "(test)") {
-		t.Fatalf("stderr block = %q, want it to name the daemon's version", block)
-	}
-}
-
 func TestHostedRun_UnreadableDaemonStoreRefusesTheRun(t *testing.T) {
 	registerHostedPipelines(t)
 	home := wingdTestHome(t)
@@ -398,38 +358,6 @@ func TestHostedAPIReachable_RefusesADegradedDaemon(t *testing.T) {
 	}
 	if standaloneReasonFor(err) != "" {
 		t.Fatalf("an unreadable store degraded to %q", standaloneReasonFor(err))
-	}
-}
-
-func TestHostedAPIReachable_ASkewedStoreDegradesRatherThanRefuses(t *testing.T) {
-	sock := serveStubAPI(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = w.Write([]byte(`{"status":"degraded","auth":"enabled",` +
-			`"store":"skew: sparkwing: this state database uses a-feature-from-the-future, which needs sparkwing >= v99.0.0"}`))
-	}))
-	err := hostedAPIReachable(context.Background(), sock)
-	if err == nil {
-		t.Fatal("a daemon too old for this home's store was accepted as this run's host")
-	}
-	if errors.Is(err, errHostedStoreFault) {
-		t.Fatalf("err = %v, want age rather than a fault", err)
-	}
-	if got := standaloneReasonFor(err); got != standaloneDaemonOlder {
-		t.Fatalf("standaloneReasonFor(%v) = %q, want %q", err, got, standaloneDaemonOlder)
-	}
-	if !strings.Contains(err.Error(), "a-feature-from-the-future") {
-		t.Fatalf("err = %v, want it to carry the daemon's own message", err)
-	}
-}
-
-func TestStoreHealthState_SplitsSkewFromFault(t *testing.T) {
-	skew := &store.SkewError{DBVersion: 99, BinaryVersion: 27, Requirements: []string{"a-feature-from-the-future"}}
-	if got := storeHealthState(fmt.Errorf("open: %w", skew)); !strings.HasPrefix(got, "skew: ") {
-		t.Errorf("storeHealthState(skew) = %q, want a skew: prefix", got)
-	}
-	if got := storeHealthState(errors.New("disk is on fire")); !strings.HasPrefix(got, "error: ") {
-		t.Errorf("storeHealthState(fault) = %q, want an error: prefix", got)
 	}
 }
 
@@ -645,31 +573,6 @@ func TestWingdAPI_UnknownRouteAnswersUnsupportedWithNoStore(t *testing.T) {
 	}
 	if body.Error != controller.UnsupportedRouteError || body.Route == "" {
 		t.Fatalf("body = %+v, want the unsupported-route answer", body)
-	}
-}
-
-func requireUnknownFeature(t *testing.T, path string) {
-	t.Helper()
-	st, err := store.Open(path)
-	if err != nil {
-		t.Fatalf("open %s: %v", path, err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatalf("close %s: %v", path, err)
-	}
-	db, err := sql.Open("sqlite", "file:"+path)
-	if err != nil {
-		t.Fatalf("reopen %s: %v", path, err)
-	}
-	defer func() { _ = db.Close() }()
-	if _, err := db.Exec(
-		`INSERT INTO sparkwing_requirements (name, added_at, added_by_version) VALUES (?, ?, ?)`,
-		"a-feature-from-the-future", time.Now().UnixNano(), "v99.0.0",
-	); err != nil {
-		t.Fatalf("stamp the requirement: %v", err)
-	}
-	if _, err := store.Open(path); err == nil {
-		t.Fatal("the store still opens after an unknown requirement was stamped")
 	}
 }
 

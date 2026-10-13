@@ -78,54 +78,6 @@ func teamRunnerCapTx(ctx context.Context, tx *storeTx, team Team, limits Compute
 	return DefaultTeamCloudNodes, nil
 }
 
-// safety: the runner counts read every node with an open charge window and the
-// hourly count reads one principal's recent runs, so both get an index rather
-// than a table scan inside the claim transaction.
-const computeGuardIndexes = `
-CREATE INDEX IF NOT EXISTS idx_nodes_credit_active ON nodes(credit_charged_through);
-CREATE INDEX IF NOT EXISTS idx_nodes_credit_principal ON nodes(claim_principal, credit_charged_through);
-CREATE INDEX IF NOT EXISTS idx_runs_created ON runs(created_at);
-CREATE INDEX IF NOT EXISTS idx_runs_principal_created ON runs(created_principal, created_at);`
-
-// safety: the column sweep that supplies created_at stops running a few versions in,
-// so a database carried past those versions before it joined the sweep reaches this
-// step without it. created_principal is this step's own, and nothing else on the row
-// records the principal that created a run.
-var computeGuardRunsCols = map[string]string{
-	"created_principal": "TEXT NOT NULL DEFAULT ''",
-	"created_at":        "INTEGER NOT NULL DEFAULT 0",
-}
-
-// safety: both columns the node indexes name reach this step only from an earlier
-// step, and claim_principal reaches it only from the sweep that stops a few versions
-// in. This step carries every column it indexes rather than assuming an earlier one did.
-var computeGuardNodesCols = map[string]string{
-	"claim_principal":        "TEXT NOT NULL DEFAULT ''",
-	"credit_charged_through": "INTEGER NOT NULL DEFAULT 0",
-}
-
-func applyComputeGuardsMigrationSQLite(ctx context.Context, tx *storeTx) error {
-	if err := ensureColumnsSQLite(ctx, tx, "runs", computeGuardRunsCols); err != nil {
-		return err
-	}
-	if err := ensureColumnsSQLite(ctx, tx, "nodes", computeGuardNodesCols); err != nil {
-		return err
-	}
-	_, err := tx.ExecContext(ctx, computeGuardIndexes)
-	return err
-}
-
-func applyComputeGuardsMigrationPostgres(ctx context.Context, tx *storeTx) error {
-	if err := addColumnsTx(ctx, tx, "runs", computeGuardRunsCols); err != nil {
-		return err
-	}
-	if err := addColumnsTx(ctx, tx, "nodes", computeGuardNodesCols); err != nil {
-		return err
-	}
-	_, err := tx.ExecContext(ctx, computeGuardIndexes)
-	return err
-}
-
 // EventKindComputeLimitBlocked records work a compute guard refused, so a run
 // that is waiting or was cut short says which cap it met.
 const EventKindComputeLimitBlocked = "compute_limit_blocked"

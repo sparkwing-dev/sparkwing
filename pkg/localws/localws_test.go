@@ -264,13 +264,11 @@ func TestBuildHandler_ServesDashboardConfigAndSecurityHeaders(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	bundle := fstest.MapFS{
 		"index.html": &fstest.MapFile{Data: []byte(
 			`<html><head><script src="/sparkwing-runtime.js"></script></head><body></body></html>`)},
 	}
-	handler := buildHandler(ctx, cancel, Options{Addr: "127.0.0.1:4343", Version: "v1.2.3"}, handlerParts{
+	handler := buildHandler(Options{Addr: "127.0.0.1:4343", Version: "v1.2.3"}, handlerParts{
 		paths: paths,
 		store: st,
 		ctrl:  controller.New(st, nil).WithDashboard(controller.Dashboard{Local: true, Bundle: bundle, Version: "v1.2.3"}),
@@ -312,12 +310,10 @@ func TestBuildHandler_SecurityHeadersOnEveryLocalRoute(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	bundle := fstest.MapFS{
 		"index.html": &fstest.MapFile{Data: []byte("<html><body>stub dashboard</body></html>")},
 	}
-	handler := buildHandler(ctx, cancel, Options{Addr: "127.0.0.1:4343", Version: "v1.2.3"}, handlerParts{
+	handler := buildHandler(Options{Addr: "127.0.0.1:4343", Version: "v1.2.3"}, handlerParts{
 		paths: paths,
 		store: st,
 		ctrl:  controller.New(st, nil).WithDashboard(controller.Dashboard{Local: true, Bundle: bundle, Version: "v1.2.3"}),

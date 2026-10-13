@@ -94,7 +94,7 @@ func TestDiagnoseStandaloneStores_SaysNothingWithoutOne(t *testing.T) {
 // older pipeline binary still opens, so reading one must not migrate it.
 func TestDiagnoseStandaloneStores_LeavesAStoreAtAnotherSchemaAlone(t *testing.T) {
 	p := paths.PathsAt(t.TempDir())
-	path := writeStandaloneRuns(t, p, store.ExpectedSchemaVersion()-1, "a")
+	path := writeStandaloneRuns(t, p, store.ExpectedSchemaVersion()+1, "a")
 	before, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -102,7 +102,7 @@ func TestDiagnoseStandaloneStores_LeavesAStoreAtAnotherSchemaAlone(t *testing.T)
 
 	var report DoctorReport
 	diagnoseStandaloneStores(p, &report)
-	if len(report.StandaloneStores) != 1 || report.StandaloneStores[0].Schema != store.ExpectedSchemaVersion()-1 {
+	if len(report.StandaloneStores) != 1 || report.StandaloneStores[0].Schema != store.ExpectedSchemaVersion()+1 {
 		t.Fatalf("stores = %+v, want the neighboring-schema directory listed", report.StandaloneStores)
 	}
 

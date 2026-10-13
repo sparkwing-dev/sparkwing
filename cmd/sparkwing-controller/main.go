@@ -37,12 +37,6 @@ import (
 func main() {
 	run := run
 	args := os.Args[1:]
-	if len(args) > 0 && args[0] == "migrate-outputs" {
-		run = func(args []string) error { return runMigrateOutputs(args[1:], os.Stdout) }
-	}
-	if len(args) > 0 && args[0] == "migrate-logs" {
-		run = func(args []string) error { return runMigrateLogs(args[1:], os.Stdout) }
-	}
 	if len(args) > 0 && args[0] == "admin" {
 		run = func(args []string) error { return runAdmin(args[1:], os.Stdout, os.Stderr) }
 	}
@@ -399,7 +393,6 @@ func run(args []string) error {
 	}
 
 	emitStartupProvenance(os.Stderr)
-	stampBinaryVersion()
 
 	p, perr := paths.DefaultPaths()
 	if perr != nil {
@@ -410,7 +403,7 @@ func run(args []string) error {
 	}
 	st, serr := openControllerStore(context.Background(), p.StateDB(), creds.PGURL)
 	if serr != nil {
-		return mapStoreOpenError(serr)
+		return fmt.Errorf("open state db: %w", serr)
 	}
 	defer func() { _ = st.Close() }()
 

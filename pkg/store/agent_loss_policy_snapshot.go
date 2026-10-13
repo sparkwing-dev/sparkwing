@@ -239,38 +239,3 @@ func agentLossRetryMaterializedMismatch(source *agentLossRetryNodeSource, node *
 	}
 	return ""
 }
-
-func backfillAgentLossRetryNodeSourcesTx(ctx context.Context, tx *storeTx) error {
-	rows, err := tx.QueryContext(ctx, `SELECT run_id, source_run_id FROM agent_loss_retries ORDER BY run_id`+tx.forUpdate())
-	if err != nil {
-		return err
-	}
-	type retry struct{ id, source string }
-	var retries []retry
-	for rows.Next() {
-		var item retry
-		if err := rows.Scan(&item.id, &item.source); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		retries = append(retries, item)
-	}
-	err = rows.Err()
-	_ = rows.Close()
-	if err != nil {
-		return err
-	}
-	for _, item := range retries {
-		if err := snapshotAgentLossRetryNodesTx(ctx, tx, item.id, item.source); err != nil {
-			if !errors.Is(err, errExecutionPolicyInvalid) && !errors.Is(err, errExecutionUpgradeRequired) {
-				return err
-			}
-			if _, markerErr := tx.ExecContext(ctx, `INSERT INTO agent_loss_retry_legacy_deny_all
-    (retry_run_id, source_run_id, reason) VALUES (?, ?, ?)
-ON CONFLICT (retry_run_id) DO NOTHING`, item.id, item.source, err.Error()); markerErr != nil {
-				return markerErr
-			}
-		}
-	}
-	return nil
-}
