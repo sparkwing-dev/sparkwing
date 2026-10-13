@@ -1,4 +1,6 @@
-package orchestrator
+// Package artifacts publishes a node's declared outputs to the artifact store
+// and stages a producer's published outputs into a consumer's workspace.
+package artifacts
 
 import (
 	"context"
@@ -13,14 +15,24 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-type nodeManifestReader interface {
+// Edge names a producer whose published artifacts a node stages, and the
+// workspace prefix they land under; an empty Into keeps their own paths.
+type Edge struct {
+	Producer string
+	Into     string
+}
+
+// ManifestReader reads the node row that carries a producer's manifest digest.
+type ManifestReader interface {
 	GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error)
 }
 
-func stageConsumedArtifacts(ctx context.Context, store storage.ArtifactStore, state nodeManifestReader, runID, workspace string, edges []sparkwing.ConsumeEdge) (int, error) {
+// Stage writes each producer's published files into workspace and returns
+// how many it wrote. A producer with no manifest stages nothing; a missing or
+// corrupt blob, or a path escaping the workspace, is an error.
+func Stage(ctx context.Context, store storage.ArtifactStore, state ManifestReader, runID, workspace string, edges []Edge) (int, error) {
 	staged := 0
 	var total int64
 	if len(edges) == 0 {
@@ -63,7 +75,7 @@ func stageConsumedArtifacts(ctx context.Context, store storage.ArtifactStore, st
 }
 
 func fetchManifest(ctx context.Context, store storage.ArtifactStore, digest string) (artifactManifest, error) {
-	rc, err := store.Get(ctx, artifactManifestKey(digest))
+	rc, err := store.Get(ctx, ManifestKey(digest))
 	if err != nil {
 		return artifactManifest{}, err
 	}
@@ -89,7 +101,7 @@ var (
 )
 
 func stageBlob(ctx context.Context, store storage.ArtifactStore, root *os.Root, entry artifactEntry, rel string, remaining int64) (int64, error) {
-	rc, err := store.Get(ctx, artifactBlobKey(entry.Digest))
+	rc, err := store.Get(ctx, BlobKey(entry.Digest))
 	if err != nil {
 		return 0, err
 	}
@@ -144,4 +156,21 @@ func stageRel(into, relPath string) (string, error) {
 		return "", fmt.Errorf("staged path %q escapes workspace", rel)
 	}
 	return rel, nil
+}
+
+// CheckPaths refuses an output glob or a staging prefix that is absolute or
+// climbs out of the workspace, so a node fails before it runs instead of
+// publishing or staging nothing.
+func CheckPaths(globs []string, edges []Edge) error {
+	for _, g := range globs {
+		if _, err := stageRel(g, "."); err != nil {
+			return fmt.Errorf("output %q must stay inside the workspace", g)
+		}
+	}
+	for _, e := range edges {
+		if _, err := stageRel(e.Into, "."); err != nil {
+			return fmt.Errorf("consume %q into %q: prefix must stay inside the workspace", e.Producer, e.Into)
+		}
+	}
+	return nil
 }

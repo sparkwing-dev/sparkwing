@@ -22,6 +22,7 @@ unlock.
 
 ### Added
 - **engine:** an SDK process session that runs `<entry> --sw-node-protocol` as a process-session leader, exchanges requests and frames on fds 3 and 4, records stdout and stderr as text, measures the session's usage, and kills the whole session on cancel
+- **engine:** the host scheduler stages a node's `consumes` into its workspace before it runs and publishes its `outputs` with their digests after it succeeds; an output glob or `into` prefix that leaves the workspace fails the node before it runs
 - **engine:** a host scheduler that plans a run in a short-lived `--sw-node-protocol` process, fills unset flags from describe's defaults, refuses a plan with a cycle, an unknown dependency or a duplicate node or closure id (`plan_invalid`), records the run and node rows, and runs the nodes in dependency order with the in-process dispatcher's failure propagation, optional and continue-on-error semantics and cancellation; no command runs it yet
 - **sdk:** a pipeline binary started with `--sw-node-protocol` answers `describe` and `plan` requests on descriptors 3 and 4 (inherited handles named by `SPARKWING_PROTOCOL_HANDLES` on Windows), with the run context taken from the request
 - **engine:** a node-host log sink that masks each SDK stdout, stderr and frame log line, stamps it with the host's clock and node, stores it in the run's node log, writes `node_annotation` and `node_summary` records to the store, and stores host-reserved events from the SDK as plain messages
