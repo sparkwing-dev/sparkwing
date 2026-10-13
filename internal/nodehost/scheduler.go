@@ -328,6 +328,10 @@ func chain(cfg *Config) Executor {
 		if err := n.Run.State.StartNode(ctx, n.Run.ID, n.Plan.ID); err != nil {
 			return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("start node %s: %w", n.Plan.ID, err)}
 		}
+		// safety: the dispatcher starts a node once per dispatch, and only retry_auto re-dispatches.
+		if m := n.Plan.Modifiers; n.Attempt <= 1 || (m != nil && m.RetryAuto) {
+			hostEvent(ctx, n.Run, n.Plan.ID, "node_started", nil)
+		}
 		return inner(ctx, n)
 	}
 	for i := len(layers) - 1; i >= 0; i-- {
@@ -462,6 +466,7 @@ func (s *scheduler) finish(ctx context.Context, id string, res Result) {
 		s.run.Logger.Error("nodehost: record node result", "node", id, "err", err)
 		res.Outcome, res.Err = sparkwing.Failed, errors.Join(res.Err, fmt.Errorf("record node result: %w", err))
 	}
+	nodeEndEvent(writeCtx, s.run, id, res)
 	s.results[id] = res
 	s.expand(ctx, id, res)
 }

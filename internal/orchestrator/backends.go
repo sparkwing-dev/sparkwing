@@ -88,8 +88,6 @@ type StateBackend interface {
 	storage.StateStore
 	RunCoordination
 
-	AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
-
 	GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error)
 
 	EnqueueTrigger(ctx context.Context, pipeline string, args map[string]string, parentRunID, parentNodeID, retryOf, source, user, repo, branch string) (runID string, err error)
@@ -567,8 +565,7 @@ func firstNonEmptyStr(a, b string) string {
 }
 
 func (l localState) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error {
-	_, err := l.st.AppendEvent(ctx, runID, nodeID, kind, payload)
-	return err
+	return l.st.AppendEvent(ctx, runID, nodeID, kind, payload)
 }
 
 func (l localState) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]store.MetricSample, error) {

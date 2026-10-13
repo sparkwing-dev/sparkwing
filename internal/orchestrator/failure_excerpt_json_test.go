@@ -147,7 +147,7 @@ func TestJobsRemoteJSON_CarriesFailureExcerpt(t *testing.T) {
 		t.Fatalf("finish deploy: %v", err)
 	}
 	payload := []byte(`{"log_excerpt":"undefined: Helper\nFAIL","log_excerpt_truncated":true}`)
-	if _, err := st.AppendEvent(ctx, runID, failedID, "node_failure_excerpt", payload); err != nil {
+	if err := st.AppendEvent(ctx, runID, failedID, "node_failure_excerpt", payload); err != nil {
 		t.Fatalf("append excerpt event: %v", err)
 	}
 

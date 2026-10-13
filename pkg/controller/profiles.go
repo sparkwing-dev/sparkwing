@@ -164,7 +164,9 @@ func (s *Server) emitNodeDrift(ctx context.Context, t *store.Tenant, run *store.
 	if err != nil {
 		return
 	}
-	_, _ = s.store.AppendEvent(ctx, run.ID, nodeID, "resource_pin_drift", payload)
+	if err := s.store.AppendEvent(ctx, run.ID, nodeID, "resource_pin_drift", payload); err != nil {
+		s.logger.Warn("append run event", "kind", "resource_pin_drift", "run_id", run.ID, "node_id", nodeID, "err", err)
+	}
 }
 
 func samplePeaks(samples []store.MetricSample) (float64, int64, bool) {

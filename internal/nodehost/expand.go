@@ -135,13 +135,16 @@ func (s *scheduler) addGenerated(ctx context.Context, source string, e expansion
 		s.addedBy = map[string]string{}
 	}
 	g := s.group(e.closure)
+	children := 0
 	for _, n := range e.nodes {
 		s.addedBy[n.ID] = e.closure
 		if n.OnFailureOf == "" {
 			g.members = append(g.members, n.ID)
+			children++
 		}
 	}
 	s.run.Logger.Info("nodehost: expansion generated", "run", s.run.ID, "source", source, "generator", e.closure, "nodes", len(e.nodes))
+	hostEvent(ctx, s.run, source, "expansion_generated", fmt.Appendf(nil, "%d children", children))
 	for _, w := range s.nodes {
 		if !slices.Contains(w.NeedsGenerated, e.closure) {
 			continue

@@ -27,7 +27,7 @@ func TestJobLogsRemoteReadsEventsWithoutALogsService(t *testing.T) {
 	if err := st.CreateRun(ctx, store.Run{ID: "run-events", Pipeline: "demo", Status: "success", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AppendEvent(ctx, "run-events", "build", "node_started", []byte(`{}`)); err != nil {
+	if err := st.AppendEvent(ctx, "run-events", "build", "node_started", []byte(`{}`)); err != nil {
 		t.Fatal(err)
 	}
 

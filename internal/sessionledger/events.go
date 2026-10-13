@@ -12,7 +12,7 @@ const EventKind = "stray_session_reaped"
 
 // EventAppender is the store method a sweep needs to record its outcomes.
 type EventAppender interface {
-	AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) (int64, error)
+	AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
 }
 
 // EventPayload is the JSON body of an [EventKind] event.
@@ -64,7 +64,7 @@ func RecordOutcomes(ctx context.Context, st EventAppender, reaper string, outcom
 			p.Error = o.Err.Error()
 		}
 		body, _ := json.Marshal(p)
-		if _, err := st.AppendEvent(ctx, o.Record.Run, o.Record.Node, EventKind, body); err != nil {
+		if err := st.AppendEvent(ctx, o.Record.Run, o.Record.Node, EventKind, body); err != nil {
 			errs = append(errs, err)
 		}
 	}

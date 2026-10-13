@@ -81,7 +81,7 @@ func TestEscapedChildEventSecretsStayMaskedInStoreAndReaderHTTP(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := st.AppendEvent(ctx, "parent", "", event.kind, maskEventPayload(m, raw)); err != nil {
+				if err := st.AppendEvent(ctx, "parent", "", event.kind, maskEventPayload(m, raw)); err != nil {
 					t.Fatal(err)
 				}
 			}
