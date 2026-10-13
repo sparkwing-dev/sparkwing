@@ -254,7 +254,7 @@ func (it *workItem) isFinally() bool {
 func runOneItem(ctx context.Context, it *workItem, done chan<- stepResult) {
 	defer func() {
 		if r := recover(); r != nil {
-			done <- stepResult{id: it.id, err: fmt.Errorf("item %q panicked: %v", it.id, r)}
+			done <- stepResult{id: it.id, err: fmt.Errorf("step %q panicked: %v", it.id, r)}
 		}
 	}()
 

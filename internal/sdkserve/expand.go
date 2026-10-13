@@ -37,8 +37,7 @@ func Expand(ctx context.Context, cfg Config, planned *Planned, closure string) (
 	}
 	if err != nil {
 		sparkwing.RuntimePlumbing.Fns.JobGroupFinalize(exp.Group, nil, err)
-		msg := err.Error()
-		return nodeproto.EvalResult{Value: json.RawMessage("null"), Error: &msg}, nil
+		return closureFailed(err), nil
 	}
 	sparkwing.RuntimePlumbing.Fns.JobGroupFinalize(exp.Group, children, nil)
 
