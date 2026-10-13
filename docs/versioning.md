@@ -141,12 +141,12 @@ re-checks that signature offline against the same release keys
 the manifest entry, so a cache hit touches no network and anything that
 does not check out is fetched again.
 
-A selected CLI can start a successor daemon and migrate the shared runs
-store. Daemon succession preserves active leases so compatible pipelines
-can reconnect; it does not stop every old agent, consumer or schedule.
-The [schema requirements rule](deployment-modes.md#schema-versioning)
-decides whether older direct database clients can reopen the store. It
-does not translate incompatible HTTP output requests.
+A selected CLI can start a successor daemon. Daemon succession preserves
+active leases so compatible pipelines can reconnect; it does not stop every
+old agent, consumer or schedule. A runs store is never upgraded: a build
+refuses a store at any schema version but its own (see
+[schema versioning](deployment-modes.md#schema-versioning)), so every
+binary sharing one store must be built at the same schema.
 
 For a breaking store or execution change, follow its migration guide and
 drain the affected old writers before upgrading. Moving SDK pins with

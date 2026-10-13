@@ -202,7 +202,7 @@ func TestRunLocal_StandaloneRunsAResourcesPin(t *testing.T) {
 	}
 }
 
-func TestOpenStandaloneStore_SharesOneFileUntilItIsRefused(t *testing.T) {
+func TestOpenStandaloneStore_RefusesAStoreFromAnotherBaseline(t *testing.T) {
 	home := wingdTestHome(t)
 	paths := PathsAt(home)
 
@@ -210,26 +210,19 @@ func TestOpenStandaloneStore_SharesOneFileUntilItIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openStandaloneStore: %v", err)
 	}
+	if sa.stateDB != paths.StandaloneStateDB() {
+		t.Fatalf("path = %q, want the shared standalone store %q", sa.stateDB, paths.StandaloneStateDB())
+	}
+	if _, err := st.DB().Exec(`INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (100, 1)`); err != nil {
+		t.Fatalf("stamp another baseline: %v", err)
+	}
 	discard()
 	if err := st.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	if sa.stateDB != paths.StandaloneStateDB() {
-		t.Fatalf("path = %q, want the shared standalone store %q", sa.stateDB, paths.StandaloneStateDB())
-	}
 
-	// safety: the shared file now records a requirement this binary does not
-	// know, which is the only thing that may send it to a store of its own.
-	requireUnknownFeature(t, paths.StandaloneStateDB())
-
-	st, sa, discard, err = openStandaloneStore(paths, false)
-	if err != nil {
-		t.Fatalf("openStandaloneStore after a refusal: %v", err)
-	}
-	defer discard()
-	defer func() { _ = st.Close() }()
-	if sa.stateDB != paths.StandaloneSchemaStateDB() {
-		t.Fatalf("path = %q, want the per-schema fallback %q", sa.stateDB, paths.StandaloneSchemaStateDB())
+	if _, _, _, err := openStandaloneStore(paths, false); err == nil || !strings.Contains(err.Error(), "predates the baseline") {
+		t.Fatalf("openStandaloneStore over another baseline = %v, want the refusal", err)
 	}
 }
 

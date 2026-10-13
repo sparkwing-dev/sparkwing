@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -125,47 +124,6 @@ func inheritedHolderNodeID(holderID string) string {
 
 func isInheritedHolderNodeID(nodeID string) bool {
 	return strings.HasPrefix(nodeID, inheritedHolderNodePrefix)
-}
-
-// safety: SQLite's length, substr and LIKE stop at the embedded NUL, so
-// the legacy marker can only be matched through hex() and rewritten row
-// by row. It carries no team because it is v27 and the column arrives in
-// v49, and at v27 the holder key is unique without one.
-func rewriteLegacyInheritedHolderMarkers(ctx context.Context, tx *storeTx) error {
-	legacyHex := strings.ToUpper(hex.EncodeToString([]byte(legacyInheritedHolderPrefix)))
-	rows, err := tx.QueryContext(
-		ctx,
-		`SELECT key, holder_id, node_id FROM concurrency_holders WHERE hex(node_id) LIKE ?`,
-		legacyHex+"%",
-	)
-	if err != nil {
-		return err
-	}
-	type marker struct{ key, holderID, nodeID string }
-	var stale []marker
-	for rows.Next() {
-		var m marker
-		if err := rows.Scan(&m.key, &m.holderID, &m.nodeID); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		stale = append(stale, m)
-	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	for _, m := range stale {
-		rewritten := inheritedHolderNodePrefix + strings.TrimPrefix(m.nodeID, legacyInheritedHolderPrefix)
-		if _, err := tx.ExecContext(
-			ctx,
-			`UPDATE concurrency_holders SET node_id = ? WHERE key = ? AND holder_id = ?`,
-			rewritten, m.key, m.holderID,
-		); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func holderBudgetCost(cost, declaredCapacity int) int {

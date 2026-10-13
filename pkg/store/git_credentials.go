@@ -5,54 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 )
-
-const gitCredentialsTableSQLite = `CREATE TABLE IF NOT EXISTS git_credentials (
-    id           TEXT PRIMARY KEY,
-    team         TEXT NOT NULL,
-    host         TEXT NOT NULL,
-    kind         TEXT NOT NULL,
-    username     TEXT NOT NULL DEFAULT '',
-    secret       TEXT NOT NULL,
-    known_hosts  TEXT NOT NULL DEFAULT '',
-    fingerprint  TEXT NOT NULL DEFAULT '',
-    confirmed_at INTEGER,
-    created_by   TEXT NOT NULL DEFAULT '',
-    created_at   INTEGER NOT NULL,
-    updated_at   INTEGER NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_git_credentials_team_host ON git_credentials(team, host);
-CREATE TABLE IF NOT EXISTS git_credential_releases (
-    id            TEXT PRIMARY KEY,
-    team          TEXT NOT NULL,
-    credential_id TEXT NOT NULL,
-    host          TEXT NOT NULL,
-    run_id        TEXT NOT NULL,
-    runner        TEXT NOT NULL,
-    token_prefix  TEXT NOT NULL,
-    released_at   INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_git_credential_releases_team ON git_credential_releases(team, released_at);
-CREATE TABLE IF NOT EXISTS git_credential_machines (
-    team         TEXT NOT NULL,
-    token_prefix TEXT NOT NULL,
-    enabled_by   TEXT NOT NULL DEFAULT '',
-    enabled_at   INTEGER NOT NULL,
-    PRIMARY KEY (team, token_prefix)
-);`
-
-var gitCredentialsTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(gitCredentialsTableSQLite)
-
-func applyGitCredentialsMigration(ctx context.Context, tx *storeTx, ddl string) error {
-	for _, stmt := range splitStatements(ddl) {
-		if _, err := tx.ExecContext(ctx, stmt); err != nil {
-			return err
-		}
-	}
-	return nil
-}
 
 // Kinds of [GitCredential].
 const (

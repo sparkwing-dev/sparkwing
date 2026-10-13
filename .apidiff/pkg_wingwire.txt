@@ -199,8 +199,6 @@ type HelloAck struct {
 
 	StoreSchemaVersion int
 
-	StoreRequirements []string
-
 	StoreReady *bool
 
 	StoreError string

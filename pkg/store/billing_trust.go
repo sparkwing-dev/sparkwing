@@ -90,27 +90,6 @@ func (e *PurchaseLimitError) Error() string {
 // Unwrap reports [ErrPurchaseLimit].
 func (e *PurchaseLimitError) Unwrap() error { return ErrPurchaseLimit }
 
-var billingTrustCols = map[string]string{
-	"billing_trust":                "TEXT NOT NULL DEFAULT ''",
-	"billing_trust_by":             "TEXT NOT NULL DEFAULT ''",
-	"billing_trust_at":             "INTEGER NOT NULL DEFAULT 0",
-	"billing_trust_reason":         "TEXT NOT NULL DEFAULT ''",
-	"billing_purchase_limit_cents": "INTEGER NOT NULL DEFAULT 0",
-}
-
-var billingTrustColsPostgres = map[string]string{
-	"billing_trust":                "TEXT NOT NULL DEFAULT ''",
-	"billing_trust_by":             "TEXT NOT NULL DEFAULT ''",
-	"billing_trust_at":             "BIGINT NOT NULL DEFAULT 0",
-	"billing_trust_reason":         "TEXT NOT NULL DEFAULT ''",
-	"billing_purchase_limit_cents": "BIGINT NOT NULL DEFAULT 0",
-}
-
-// safety: v80 moves the purchase limit onto the team, so a binary predating
-// it would open checkouts past the new-team limit; the requirement makes that
-// binary refuse the store instead.
-const billingTrustRequirement = "billing-trust-v1"
-
 // BillingStanding reports what t may buy as of now.
 func (t *Tenant) BillingStanding(ctx context.Context, now time.Time) (BillingStanding, error) {
 	return billingStandingTx(ctx, storeRowQuerier{t.s}, t.team, now)

@@ -1,7 +1,6 @@
 package localws
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -156,13 +155,11 @@ func TestMuxSpecificity_DocsReachesTheDocsHandler(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	const shellMarker = "stub dashboard shell"
 	bundle := fstest.MapFS{
 		"index.html": &fstest.MapFile{Data: []byte("<html><body>" + shellMarker + "</body></html>")},
 	}
-	handler := buildHandler(ctx, cancel, Options{Addr: "127.0.0.1:4343", Version: "v1.2.3"}, handlerParts{
+	handler := buildHandler(Options{Addr: "127.0.0.1:4343", Version: "v1.2.3"}, handlerParts{
 		paths: paths,
 		store: st,
 		ctrl:  controller.New(st, nil).WithDashboard(controller.Dashboard{Local: true, Bundle: bundle, Version: "v1.2.3"}),

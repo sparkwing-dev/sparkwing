@@ -57,21 +57,14 @@ func CheckChangelogLint(ctx context.Context, repoRoot string) error {
 	return fmt.Errorf("%s", b.String())
 }
 
-const (
-	schemaBreakCategory  = "unmarked-schema-break"
-	schemaChangeCategory = "unlogged-schema-change"
-)
+const schemaBreakCategory = "unmarked-schema-break"
 
 // LintSchemaBreak checks that a runs-store schema change is described in the
-// changelog section being cut. addedRequirements names the schema requirements
-// this release introduces: adding one strands every older binary and needs a
-// `(Breaking)` entry plus a migration guide, while a purely additive bump keeps
-// older binaries reading and writing and needs only a plain `**store:**` entry.
-// A release that adds a requirement is checked even when the schema number
-// does not move, because reclassifying an already-released migration strands
-// binaries just as thoroughly as a bump does.
-func LintSchemaBreak(body, version string, prevSchema, curSchema int, addedRequirements []string) []ChangelogIssue {
-	if prevSchema == curSchema && len(addedRequirements) == 0 {
+// changelog section being cut. Open refuses a store recording any other schema
+// version, so every change strands the stores before it and needs a
+// `(Breaking)` entry naming the schema.
+func LintSchemaBreak(body, version string, prevSchema, curSchema int) []ChangelogIssue {
+	if prevSchema == curSchema {
 		return nil
 	}
 	sections := parseChangelogSections(body)
@@ -84,13 +77,8 @@ func LintSchemaBreak(body, version string, prevSchema, curSchema int, addedRequi
 			unreleasedSec = &sections[i]
 		}
 	}
-	breaking := len(addedRequirements) > 0
-	satisfied := sectionHasStoreEntry
-	if breaking {
-		satisfied = sectionHasSchemaBreakEntry
-	}
 	for _, s := range []*changelogSection{versionSec, unreleasedSec} {
-		if s != nil && satisfied(*s) {
+		if s != nil && sectionHasSchemaBreakEntry(*s) {
 			return nil
 		}
 	}
@@ -104,21 +92,12 @@ func LintSchemaBreak(body, version string, prevSchema, curSchema int, addedRequi
 		line = unreleasedSec.startLine
 		label = unreleasedSec.version
 	}
-	if breaking {
-		return []ChangelogIssue{{
-			Line:     line,
-			Category: schemaBreakCategory,
-			Message: fmt.Sprintf(
-				"%s and adds requirement(s) %s, so a binary without them refuses the database, but [%s] has no `(Breaking)` entry naming the schema; mark the change `(Breaking)` and ship a docs/migrations/%s.md schema section",
-				describeSchemaDelta(prevSchema, curSchema), strings.Join(addedRequirements, ", "), label, version),
-		}}
-	}
 	return []ChangelogIssue{{
 		Line:     line,
-		Category: schemaChangeCategory,
+		Category: schemaBreakCategory,
 		Message: fmt.Sprintf(
-			"%s and adds no requirement, so older binaries keep opening the database, but [%s] has no `**store:**` entry describing it; add one",
-			describeSchemaDelta(prevSchema, curSchema), label),
+			"runs-store schema changed %d -> %d, so this release refuses every existing store, but [%s] has no `(Breaking)` entry naming the schema; mark the change `(Breaking)`",
+			prevSchema, curSchema, label),
 	}}
 }
 
@@ -409,25 +388,9 @@ func describeWireCuts(cuts []wireCut) string {
 	return fmt.Sprintf("the daemon's wire surface cuts %d entries (%s)", len(described), strings.Join(described, "; "))
 }
 
-func describeSchemaDelta(prevSchema, curSchema int) string {
-	if prevSchema == curSchema {
-		return fmt.Sprintf("runs-store schema stays at %d", curSchema)
-	}
-	return fmt.Sprintf("runs-store schema changed %d -> %d", prevSchema, curSchema)
-}
-
 func sectionHasSchemaBreakEntry(s changelogSection) bool {
 	for _, e := range s.entries {
 		if breakingScopeRe.MatchString(e.body) && strings.Contains(strings.ToLower(e.body), "schema") {
-			return true
-		}
-	}
-	return false
-}
-
-func sectionHasStoreEntry(s changelogSection) bool {
-	for _, e := range s.entries {
-		if storeScopeRe.MatchString(e.body) {
 			return true
 		}
 	}
@@ -455,7 +418,6 @@ var (
 	sectionHeadingRe    = regexp.MustCompile(`^##\s+(.+)$`)
 	subHeadingRe        = regexp.MustCompile(`^###\s+(.+)$`)
 	breakingScopeRe     = regexp.MustCompile(`(?m)^-\s+\*\*([^*]+?)\s*\(Breaking\)\s*:\*\*`)
-	storeScopeRe        = regexp.MustCompile(`(?m)^-\s+\*\*[^*]*store[^*]*:\*\*`)
 	migrationLinkRe     = regexp.MustCompile(`\(docs/migrations/([^)]+)\)`)
 	sectionVersionLabel = regexp.MustCompile(`\[?(Unreleased|v\d+\.\d+\.\d+)\]?`)
 )
@@ -540,36 +502,6 @@ func lintSectionHeadingsDedupe(s changelogSection) []ChangelogIssue {
 
 func normalizeHeadingName(s string) string { return s }
 
-// safety: these released entries shipped with no migration guide and editing a
-// published changelog cannot undo that. A version cutoff would forgive whatever
-// sits below it; this list has to be enlarged on purpose. Reflowing a listed
-// entry's opening words re-arms the failure, which is the loud direction.
-var unguidedBreakingEntries = map[string]string{
-	"v0.40.0": "Revoking a token, rotating one, or deleting a user",
-}
-
-func shippedWithoutGuide(version, body string) bool {
-	opening, ok := unguidedBreakingEntries[version]
-	return ok && strings.Contains(body, opening)
-}
-
-// safety: a permalink pinned to the release tag resolves to the sections that
-// release shipped, which _unreleased.md in the current tree no longer describes.
-var pinnedMigrationLinkRe = regexp.MustCompile(
-	`\]\(https://github\.com/sparkwing-dev/sparkwing/blob/(v\d+\.\d+\.\d+)/docs/migrations/[^)/]+\.md#[^)/]+\)`)
-
-// safety: the pin has to name this section's own release. A permalink to some
-// other tag documents a different set of changes and would satisfy the check
-// while telling an adopter the wrong thing.
-func pinnedToOwnRelease(version, body string) bool {
-	for _, m := range pinnedMigrationLinkRe.FindAllStringSubmatch(body, -1) {
-		if m[1] == version {
-			return true
-		}
-	}
-	return false
-}
-
 func lintSectionBreakingEntries(s changelogSection, migrations fs.FS) []ChangelogIssue {
 	var issues []ChangelogIssue
 	isUnreleased := strings.EqualFold(s.version, "Unreleased")
@@ -577,21 +509,9 @@ func lintSectionBreakingEntries(s changelogSection, migrations fs.FS) []Changelo
 		if !breakingScopeRe.MatchString(e.body) {
 			continue
 		}
-		linkMatches := migrationLinkRe.FindAllStringSubmatch(e.body, -1)
-		if len(linkMatches) == 0 {
-			if isUnreleased || pinnedToOwnRelease(s.version, e.body) ||
-				shippedWithoutGuide(s.version, e.body) {
-				continue
-			}
-			issues = append(issues, ChangelogIssue{
-				Line:     e.titleLine,
-				Category: "missing-migration-link",
-				Message: fmt.Sprintf("(Breaking) entry in [%s] is missing a `docs/migrations/v%s.md#<anchor>` link",
-					s.version, strings.TrimPrefix(s.version, "v")),
-			})
-			continue
-		}
-		for _, m := range linkMatches {
+		// safety: no store, binary or pipeline is carried forward until paid launch,
+		// so a (Breaking) entry may ship without a guide; a link it carries must resolve.
+		for _, m := range migrationLinkRe.FindAllStringSubmatch(e.body, -1) {
 			issues = append(issues, validateMigrationLink(s, e, m[1], migrations, isUnreleased)...)
 		}
 	}

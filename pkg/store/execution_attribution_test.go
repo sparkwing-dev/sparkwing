@@ -3,7 +3,6 @@ package store_test
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -88,38 +87,6 @@ func TestMeteredTriggerOwnedAttemptRecordsCloudHost(t *testing.T) {
 	}
 	if len(attempts) != 1 || attempts[0].ExecutorName != "cloud-pod-1" || attempts[0].ExecutorKind != "cloud" || attempts[0].ExecutorLocation != "cloud" {
 		t.Fatalf("metered trigger attempt = %+v, want cloud-pod-1 in cloud", attempts)
-	}
-}
-
-func TestSchemaV68PreservesExistingGitHubCredentials(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "state.db")
-	st, err := store.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.DB().Exec(`INSERT INTO github_runner_credentials (team, prefix, branch, sha, expires_at) VALUES (?, ?, ?, ?, ?)`, string(store.DefaultTeam), "old-token", "main", "abcdef", time.Now().Add(time.Hour).Unix()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.DB().Exec(`ALTER TABLE github_runner_credentials DROP COLUMN run_id`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 68`); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-	upgraded, err := store.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer upgraded.Close()
-	var branch, runID string
-	if err := upgraded.DB().QueryRow(`SELECT branch, run_id FROM github_runner_credentials WHERE prefix = ?`, "old-token").Scan(&branch, &runID); err != nil {
-		t.Fatal(err)
-	}
-	if branch != "main" || runID != "" {
-		t.Fatalf("migrated credential = %q %q, want main and empty run ID", branch, runID)
 	}
 }
 

@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -33,41 +32,6 @@ var (
 	ErrLastSignInMethod        = errors.New("store: an account keeps at least one sign-in method")
 	ErrIdentityUnlinked        = errors.New("store: sign-in method is no longer linked to this account")
 )
-
-// safety: an older binary reads a linked identity as one that signed in, and
-// so lets its sign-ins set the account's email, until this binary runs again.
-var identityLinkedCols = map[string]string{"linked": "INTEGER NOT NULL DEFAULT 0"}
-
-const identityLinkTablesSQLite = `
-CREATE TABLE IF NOT EXISTS identity_link_states (
-    nonce      TEXT PRIMARY KEY,
-    expires_at INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS identity_unlinks (
-    provider    TEXT NOT NULL,
-    subject     TEXT NOT NULL,
-    account_id  TEXT NOT NULL,
-    unlinked_at INTEGER NOT NULL,
-    PRIMARY KEY (provider, subject, account_id)
-);
-CREATE INDEX IF NOT EXISTS idx_identity_unlinks_account ON identity_unlinks(account_id)
-`
-
-var identityLinkTablesPostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(identityLinkTablesSQLite)
-
-func applyIdentityLinkMigrationSQLite(ctx context.Context, tx *storeTx) error {
-	if err := ensureColumnsSQLite(ctx, tx, "identities", identityLinkedCols); err != nil {
-		return err
-	}
-	return execStatements(ctx, tx, identityLinkTablesSQLite)
-}
-
-func applyIdentityLinkMigrationPostgres(ctx context.Context, tx *storeTx) error {
-	if err := addColumnsTx(ctx, tx, "identities", identityLinkedCols); err != nil {
-		return err
-	}
-	return execStatements(ctx, tx, identityLinkTablesPostgres)
-}
 
 // AccountIdentities lists the sign-in methods attached to accountID, oldest
 // first.

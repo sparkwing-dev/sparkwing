@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
-	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
@@ -64,27 +63,11 @@ type openStandalone struct {
 // than silently dropped or surfaced as driver text.
 func OpenStandaloneStores(ctx context.Context, paths Paths) *StandaloneStores {
 	s := &StandaloneStores{}
-	needed := map[string]int{}
-	var order []string
 	for _, entry := range paths.StandaloneStores() {
 		label := standaloneLabel(paths, entry.Path)
 		st, err := store.OpenReadOnly(entry.Path)
 		if err != nil {
 			s.notes = append(s.notes, unopenableNote(label, err))
-			continue
-		}
-		skew, err := st.RequirementSkew(ctx)
-		if err != nil {
-			_ = st.Close()
-			s.notes = append(s.notes, unopenableNote(label, err))
-			continue
-		}
-		if skew != nil {
-			_ = st.Close()
-			if _, seen := needed[skew.MinVersion]; !seen {
-				order = append(order, skew.MinVersion)
-			}
-			needed[skew.MinVersion]++
 			continue
 		}
 		if note, ok := unreadableNote(ctx, st, label); ok {
@@ -94,15 +77,11 @@ func OpenStandaloneStores(ctx context.Context, paths Paths) *StandaloneStores {
 		}
 		s.open = append(s.open, openStandalone{label: label, path: entry.Path, st: st})
 	}
-	for _, version := range order {
-		s.notes = append(s.notes, skewNote(needed[version], version))
-	}
 	return s
 }
 
-// safety: the requirements rule governs whether a store may be opened, not
-// whether this build's SELECT matches its columns, so a store at an older
-// store schema passes it and still lacks a column a later migration added.
+// safety: a read-only open checks no schema version, so a store from another
+// baseline opens and then fails this build's SELECT.
 func unreadableNote(ctx context.Context, st *store.Store, label string) (string, bool) {
 	_, err := st.ListRuns(ctx, store.RunFilter{Limit: 1})
 	if err == nil {
@@ -148,17 +127,6 @@ func standaloneLabel(paths Paths, path string) string {
 		return path
 	}
 	return filepath.ToSlash(rel)
-}
-
-func skewNote(count int, minVersion string) string {
-	subject := "standalone stores need"
-	if count == 1 {
-		subject = "standalone store needs"
-	}
-	if minVersion == "" || minVersion == "(devel)" {
-		return fmt.Sprintf("%d %s a newer sparkwing", count, subject)
-	}
-	return fmt.Sprintf("%d %s sparkwing >= %s", count, subject, minVersion)
 }
 
 // Close releases every store handle the set holds.
@@ -357,10 +325,6 @@ func OpenStoreForRun(ctx context.Context, paths Paths, runID string) (*store.Sto
 // that changes a run changes it where it lives. The shared store answers first;
 // a run found only in a standalone store is written in that store.
 //
-// A standalone store is opened read-write only when catching it up to this
-// binary's schema would stamp no requirement it does not already list, because
-// a requirement it lacks is what puts the file out of reach of the pipeline
-// binary that owns it. Otherwise the returned error names that requirement.
 // The label is [SharedStoreLabel] when no store holds the run, so the caller
 // reports the shared store's own not-found.
 func OpenStoreForRunWrite(
@@ -378,26 +342,15 @@ func OpenStoreForRunWrite(
 	}
 
 	standalone := OpenStandaloneStores(ctx, paths)
-	held, label, _, ok := standalone.Find(ctx, runID)
+	_, label, _, ok := standalone.Find(ctx, runID)
 	if !ok {
 		WriteStandaloneNotes(os.Stderr, standalone.Notes())
 		_ = standalone.Close()
 		return shared, SharedStoreLabel, closeShared, nil
 	}
 	path := standalonePathFor(standalone, label)
-	adds, aerr := held.RequirementsWritingWouldAdd(ctx)
 	_ = standalone.Close()
 	closeShared()
-	if aerr != nil {
-		return nil, "", nil, fmt.Errorf("%s: standalone store %s cannot be read: %w", verb, path, aerr)
-	}
-	if len(adds) > 0 {
-		return nil, "", nil, fmt.Errorf(
-			"%s: run %s lives in the standalone store %s, and writing to it would add the schema %s, "+
-				"which would put the file out of reach of the pipeline binary that wrote it; "+
-				"leave it to that binary, or delete the store when its runs no longer matter",
-			verb, runID, path, requirementPhrase(adds))
-	}
 	writable, werr := store.Open(path)
 	if werr != nil {
 		return nil, "", nil, fmt.Errorf("%s: standalone store %s: %w", verb, path, werr)
@@ -412,13 +365,6 @@ func standalonePathFor(s *StandaloneStores, label string) string {
 		}
 	}
 	return label
-}
-
-func requirementPhrase(names []string) string {
-	if len(names) == 1 {
-		return "requirement " + names[0]
-	}
-	return "requirements " + strings.Join(names, ", ")
 }
 
 // StandaloneCancelRefusal explains that a standalone run cannot be cancelled,

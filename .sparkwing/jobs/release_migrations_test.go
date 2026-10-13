@@ -180,7 +180,7 @@ func indexRow(t *testing.T, index, version string) string {
 	return ""
 }
 
-func TestReleaseCutRefusesABreakingEntryWithNoMigrationLink(t *testing.T) {
+func TestReleaseCutAcceptsABreakingEntryWithNoMigrationLink(t *testing.T) {
 	changelog := `# Changelog
 
 ## [v0.9.0] - 2026-03-04
@@ -192,17 +192,8 @@ func TestReleaseCutRefusesABreakingEntryWithNoMigrationLink(t *testing.T) {
 `
 	dir := migrationRepo(t, changelog, freshUnreleasedGuide, migrationIndexFixture)
 
-	_, err := planMigrationRollIn(dir, changelog, "v0.9.0", "2026-03-04")
-	if err == nil {
-		t.Fatalf("the cut accepted a (Breaking) entry with no migration link")
-	}
-	for _, want := range []string{"CHANGELOG.md:7", "missing-migration-link", "written by a person"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("refusal does not name %q:\n%v", want, err)
-		}
-	}
-	if _, statErr := os.Stat(filepath.Join(dir, filepath.FromSlash(migrationsDirRel), "v0.9.0.md")); statErr == nil {
-		t.Errorf("the refused cut wrote a guide anyway")
+	if _, err := planMigrationRollIn(dir, changelog, "v0.9.0", "2026-03-04"); err != nil {
+		t.Fatalf("the cut refused a (Breaking) entry with no migration link: %v", err)
 	}
 }
 

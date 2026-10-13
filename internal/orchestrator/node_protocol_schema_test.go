@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -16,158 +15,37 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/depcache"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto/conformance"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type protocolSchema struct {
+	*conformance.Schema
 	root map[string]any
 }
 
 func loadProtocolSchema(t *testing.T, name string) protocolSchema {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "schemas", name))
+	s, err := conformance.LoadSchema(filepath.Join("..", "..", "docs", "schemas", name))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var root map[string]any
-	if err := json.Unmarshal(raw, &root); err != nil {
-		t.Fatalf("%s: %v", name, err)
-	}
-	return protocolSchema{root: root}
+	return protocolSchema{Schema: s, root: s.Root}
 }
 
 func (s protocolSchema) def(t *testing.T, name string) map[string]any {
 	t.Helper()
-	if name == "" {
-		return s.root
-	}
-	defs, _ := s.root["$defs"].(map[string]any)
-	d, ok := defs[name].(map[string]any)
+	d, ok := s.Def(name)
 	if !ok {
 		t.Fatalf("schema has no $defs/%s", name)
 	}
 	return d
 }
 
-// safety: a keyword outside the subset fails the test, so a schema this check
-// does not understand is never passed silently.
 func (s protocolSchema) validate(schema map[string]any, value any, at string) []string {
-	var errs []string
-	for key, want := range schema {
-		switch key {
-		case "$schema", "$defs", "title", "description":
-		case "$ref":
-			ref, _ := want.(string)
-			name, ok := strings.CutPrefix(ref, "#/$defs/")
-			defs, _ := s.root["$defs"].(map[string]any)
-			target, found := defs[name].(map[string]any)
-			if !ok || !found {
-				errs = append(errs, fmt.Sprintf("%s: unresolvable $ref %q", at, ref))
-				continue
-			}
-			errs = append(errs, s.validate(target, value, at)...)
-		case "type":
-			if !matchesType(want, value) {
-				errs = append(errs, fmt.Sprintf("%s: %v is not of type %v", at, value, want))
-			}
-		case "enum":
-			if !slices.ContainsFunc(want.([]any), func(v any) bool { return reflect.DeepEqual(v, value) }) {
-				errs = append(errs, fmt.Sprintf("%s: %v is not one of %v", at, value, want))
-			}
-		case "const":
-			if !reflect.DeepEqual(want, value) {
-				errs = append(errs, fmt.Sprintf("%s: %v is not %v", at, value, want))
-			}
-		case "minimum":
-			if n, ok := value.(float64); ok && n < want.(float64) {
-				errs = append(errs, fmt.Sprintf("%s: %v is below %v", at, n, want))
-			}
-		case "required":
-			obj, ok := value.(map[string]any)
-			for _, name := range want.([]any) {
-				if _, has := obj[name.(string)]; ok && !has {
-					errs = append(errs, fmt.Sprintf("%s: missing required %q", at, name))
-				}
-			}
-		case "properties":
-			obj, _ := value.(map[string]any)
-			for name, sub := range want.(map[string]any) {
-				if v, has := obj[name]; has {
-					errs = append(errs, s.validate(sub.(map[string]any), v, at+"."+name)...)
-				}
-			}
-		case "additionalProperties":
-			obj, ok := value.(map[string]any)
-			if !ok {
-				continue
-			}
-			props, _ := schema["properties"].(map[string]any)
-			for name, v := range obj {
-				if _, declared := props[name]; declared {
-					continue
-				}
-				switch extra := want.(type) {
-				case bool:
-					if !extra {
-						errs = append(errs, fmt.Sprintf("%s: undeclared property %q", at, name))
-					}
-				case map[string]any:
-					errs = append(errs, s.validate(extra, v, at+"."+name)...)
-				}
-			}
-		case "items":
-			if arr, ok := value.([]any); ok {
-				for i, v := range arr {
-					errs = append(errs, s.validate(want.(map[string]any), v, fmt.Sprintf("%s[%d]", at, i))...)
-				}
-			}
-		case "allOf":
-			for _, sub := range want.([]any) {
-				errs = append(errs, s.validate(sub.(map[string]any), value, at)...)
-			}
-		case "if":
-			if len(s.validate(want.(map[string]any), value, at)) == 0 {
-				if then, ok := schema["then"].(map[string]any); ok {
-					errs = append(errs, s.validate(then, value, at)...)
-				}
-			}
-		case "then":
-		default:
-			errs = append(errs, fmt.Sprintf("%s: schema keyword %q is outside the subset this test validates", at, key))
-		}
-	}
-	return errs
-}
-
-func matchesType(want, value any) bool {
-	if list, ok := want.([]any); ok {
-		return slices.ContainsFunc(list, func(w any) bool { return matchesType(w, value) })
-	}
-	switch want {
-	case "object":
-		_, ok := value.(map[string]any)
-		return ok
-	case "array":
-		_, ok := value.([]any)
-		return ok
-	case "string":
-		_, ok := value.(string)
-		return ok
-	case "boolean":
-		_, ok := value.(bool)
-		return ok
-	case "number":
-		_, ok := value.(float64)
-		return ok
-	case "integer":
-		n, ok := value.(float64)
-		return ok && n == math.Trunc(n)
-	case "null":
-		return value == nil
-	}
-	return false
+	return s.Validate(schema, value, at)
 }
 
 func asJSONValue(t *testing.T, v any) any {

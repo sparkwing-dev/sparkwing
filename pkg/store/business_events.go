@@ -46,34 +46,6 @@ type BusinessEvent struct {
 	Attrs     map[string]any
 }
 
-const businessEventsTableSQL = `CREATE TABLE IF NOT EXISTS business_events (
-    id         TEXT PRIMARY KEY,
-    ts         INTEGER NOT NULL,
-    team       TEXT NOT NULL DEFAULT '',
-    account    TEXT NOT NULL DEFAULT '',
-    kind       TEXT NOT NULL,
-    subject_id TEXT NOT NULL DEFAULT '',
-    actor      TEXT NOT NULL DEFAULT '',
-    attrs      TEXT NOT NULL DEFAULT '{}'
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_business_events_subject ON business_events(team, kind, subject_id);
-CREATE INDEX IF NOT EXISTS idx_business_events_team_ts ON business_events(team, ts);
-CREATE INDEX IF NOT EXISTS idx_business_events_kind_ts ON business_events(kind, ts);`
-
-func applyBusinessEventsMigration(ctx context.Context, tx *storeTx, postgres bool) error {
-	if !postgres {
-		if err := ensureColumnsSQLite(ctx, tx, "credit_checkouts", creditCheckoutCloseCols); err != nil {
-			return err
-		}
-		return execStatements(ctx, tx, businessEventsTableSQL)
-	}
-	if err := addColumnsTx(ctx, tx, "credit_checkouts", map[string]string{"closed_at": "BIGINT"}); err != nil {
-		return err
-	}
-	return execStatements(ctx, tx, strings.NewReplacer(
-		"INTEGER", "BIGINT", "TEXT NOT NULL DEFAULT '{}'", "JSONB NOT NULL DEFAULT '{}'").Replace(businessEventsTableSQL))
-}
-
 // RecordBusinessEvent writes ev inside tx, the transaction making the
 // change it describes. A zero At is now, and Attrs is stored as JSON of at
 // most 4 KiB. An event whose team, kind and subject are already recorded

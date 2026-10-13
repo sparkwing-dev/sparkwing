@@ -503,15 +503,15 @@ See the migration guide section "The controller serves the dashboard".
 An upgrade from a chart that deployed `sparkwing-logs` removes its
 Deployment, Service and ServiceAccount; runners upload node logs to the
 controller instead. The logs PVC carries `helm.sh/resource-policy: keep`
-by default, so it survives the upgrade: convert its logs with
-`sparkwing-controller migrate-logs` before upgrading, then delete it. A values file
+by default, so it survives the upgrade; nothing reads it, so delete it. A values file
 that still sets `controller.logs` or `sparkwing-runner-bundle.logs` fails
 to render. See the migration guide section "The logs service is removed".
 
-State-DB compatibility: the controller's SQLite schema migrates
-forward automatically on startup. There is no rollback story for
-schema migrations -- if you need to downgrade across a schema
-change, restore from a backup of `/data` taken before the upgrade.
+State-DB compatibility: the controller creates its schema in an empty
+database and refuses one at any other schema version, naming the file to
+delete. Upgrading from a release before the store baseline means deleting
+`state.db` from `/data`; to downgrade, restore a backup of `/data` taken
+before the upgrade.
 
 ## Uninstall
 

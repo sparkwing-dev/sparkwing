@@ -67,10 +67,6 @@ func TestGitHubAppAutomationConsentIsolationAndRevocation(t *testing.T) {
 	}
 }
 
-func TestV94GitHubAutomationUpgradesSQLite(t *testing.T) {
-	assertAutomationUpgrade(t, storetest.NewSQLite(t))
-}
-
 func TestGitHubAppAutomationAdmissionChecksConsentGeneration(t *testing.T) {
 	st := storetest.Open(t)
 	acme := teamHandle(t, st, "acme")
@@ -109,37 +105,5 @@ func TestGitHubAppAutomationAdmissionChecksConsentGeneration(t *testing.T) {
 	}
 	if err := acme.CreateGitHubAutomationTriggerWithRun(ctx, trig, run, grant); err != nil {
 		t.Fatalf("current generation refused = %v", err)
-	}
-}
-
-func TestV94GitHubAutomationUpgradesPostgres(t *testing.T) {
-	assertAutomationUpgrade(t, storetest.NewPostgres(t))
-}
-
-func assertAutomationUpgrade(t *testing.T, target *storetest.Target) {
-	t.Helper()
-	st, err := target.TryOpen()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, sql := range []string{`DROP TABLE github_app_automation`, `DELETE FROM sparkwing_schema_version WHERE version >= 94`} {
-		if _, err := st.DB().ExecContext(t.Context(), sql); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
-	up, err := target.TryOpen()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = up.Close() }()
-	acme := teamHandle(t, up, "acme")
-	if _, err := acme.GitHubAppAutomations(t.Context()); err != nil {
-		t.Fatalf("upgraded automation table: %v", err)
-	}
-	if version, err := up.CurrentSchemaVersion(t.Context()); err != nil || version != store.ExpectedSchemaVersion() {
-		t.Fatalf("version=%d,%v", version, err)
 	}
 }

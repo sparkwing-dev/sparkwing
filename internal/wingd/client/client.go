@@ -639,10 +639,6 @@ func (cl *Client) DaemonVersion() string { return cl.ack.BinaryVersion }
 // the skew cannot be detected before it reads the store.
 func (cl *Client) DaemonStoreSchema() int { return cl.ack.StoreSchemaVersion }
 
-// DaemonStoreRequirements returns the runs-store schema requirements the
-// daemon advertised, or nil from a daemon that predates the field.
-func (cl *Client) DaemonStoreRequirements() []string { return cl.ack.StoreRequirements }
-
 // APIReady reports whether the connected daemon serves the controller HTTP
 // API on its api.sock. A daemon that predates the field advertises nothing,
 // which reads as false.

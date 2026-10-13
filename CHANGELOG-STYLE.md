@@ -72,10 +72,11 @@ The marker sits **inside** the bold scope: `- **sdk (Breaking):**`, not
 written the other way is invisible to every check below -- including the
 one that requires a migration guide to exist.
 
-Every `(Breaking)` entry MUST link to a section in the release's
-migration guide. Write that section in `docs/migrations/_unreleased.md`
-as the change lands and link the entry to its anchor there; the release
-pipeline rolls the file to `vX.Y.Z.md` and repoints the link.
+Until paid launch nothing is carried forward for existing users, so a
+`(Breaking)` entry needs no migration guide. A link it does carry must
+resolve: write that section in `docs/migrations/_unreleased.md` and link
+the entry to its anchor there; the release pipeline rolls the file to
+`vX.Y.Z.md` and repoints the link.
 
 ## Migration guides
 
@@ -139,16 +140,13 @@ Two layers, with deliberately separate concerns:
 - **`sparkwing run lint`** (the CHANGELOG-style gate in
   `.sparkwing/jobs/changelog_lint.go`) catches the mechanical
   violations: duplicate `### Category` sub-headings inside a single
-  version section, missing or wrong migration-guide links on
-  `(Breaking)` entries (file must exist, anchor must resolve to an
-  H2 in the file, version in the link path must match the section's
-  version), and, at release time, an undescribed runs-store schema
-  change: when the embedded schema version differs from the previous
-  release, the section being cut -- or `[Unreleased]` before the rename
-  -- must describe it. A bump that adds a schema requirement needs a
-  `(Breaking)` entry naming the schema, or the release is refused
-  (`unmarked-schema-break`); a bump that adds none needs a plain
-  `**store:**` entry (`unlogged-schema-change`). Output shape:
+  version section, broken migration-guide links on `(Breaking)` entries
+  (file must exist, anchor must resolve to an H2 in the file, version in
+  the link path must match the section's version), and, at release time,
+  an undescribed runs-store schema change: when the embedded schema
+  version differs from the previous release, the section being cut -- or
+  `[Unreleased]` before the rename -- needs a `(Breaking)` entry naming
+  the schema (`unmarked-schema-break`). Output shape:
   `CHANGELOG.md:<line>: <category>: <message>`, one issue per violation,
   exit non-zero with a final `<N> issue(s)` summary. Always-on; no
   env-var gate.
@@ -160,41 +158,16 @@ Two layers, with deliberately separate concerns:
   *what's wrong*; the agent decides *how to fix it*; the release
   pipeline does the mechanical rename, index row and link repointing.
 
-## Additive versus breaking migrations
+## Runs-store schema changes
 
-Which changelog entry a runs-store migration needs follows from one
-decision in the code, so make that decision first.
-
-A migration is **additive** when a binary that predates it keeps reading
-and writing the migrated database: a new table, a column with a default,
-an index whose partial predicate excludes every row an older binary
-writes. It declares nothing, and it needs a plain `**store:**` entry.
-
-A migration is **breaking** when an older binary reads a row it can no
-longer parse, writes one that now violates a constraint, or selects a
-column that is gone. It declares one or more requirements in
-`migrationRequirements` in `pkg/store/store.go`, keyed by the schema
-version that introduces them, and needs a `(Breaking)` entry plus a
-section in `docs/migrations/_unreleased.md`.
-
-A requirement name is a short kebab-case noun for the feature --
-`repo-scoped-secrets`, `unique-token-prefix` -- never a version number
-and never a ticket id. The name reaches operators verbatim in the
-refusal message, so name the feature, not the change.
-
-The two tests worth knowing: `pkg/store` fails any non-declaring version
-that adds a `NOT NULL` column with no default, because an older binary's
-insert cannot satisfy it. Neither that test nor the gate catches a
-*semantic* break -- a defaulted column whose empty value the newer binary
-misreads when an older binary writes a row without it -- so ask that
-question by hand before declaring a migration additive.
-
-The release gate reads the registry out of the source, so a bump that
-declares a requirement and ships only a plain entry fails, and so does a
-bump that declares none and ships nothing. It also diffs the registry
-against the previous tag, so declaring a requirement on an
-already-released version without bumping the schema needs the same
-`(Breaking)` entry.
+The store has one baseline schema, `pkg/store/schema_sqlite.sql` and
+`pkg/store/schema_postgres.sql`, and no migrations: a build refuses a
+store at any other schema version. Change both files together and bump
+`expectedSchemaVersion` in `pkg/store/store.go`, which strands every
+existing store, so the change needs a `(Breaking)` entry naming the
+schema. The release refuses a tag whose baseline SQL differs from the
+previous release's while the version stays the same. Compatibility, and migrations with it, start again at paid
+launch with the baseline as version 1.
 
 ## Pre-release manicuring (what the agent does)
 
@@ -207,11 +180,10 @@ Before cutting `vX.Y.Z`, the agent applies this rubric to `[Unreleased]`:
    prose stays; only the prefix is added.
 3. **Surface breaking changes.** Every breaking entry gets the
    `(Breaking)` marker inline after the scope.
-4. **Check the migration guide.** `docs/migrations/_unreleased.md` needs
-   one H2 per breaking entry, and each breaking entry needs a link to
-   its anchor. The release pipeline rolls the file and the index; it
-   refuses to tag when an entry has no section, because the prose is
-   yours to write.
+4. **Check the migration guide.** Each link a breaking entry carries
+   needs its H2 in `docs/migrations/_unreleased.md`. The release pipeline
+   rolls the file and the index; it refuses to tag when a link names no
+   section, because the prose is yours to write.
 5. **Optional polish.** Tighten prose; merge near-duplicate entries
    (e.g., two `### Added` bullets for related work); pull pure
    internal-cleanup entries that don't belong (those are dev-facing,
@@ -231,9 +203,7 @@ held to it too.
 ## What goes in `[Unreleased]` between releases
 
 Same shape as a released section, just under the `[Unreleased]`
-heading. A breaking entry links
+heading. A breaking entry that has a guide links
 `docs/migrations/_unreleased.md#<anchor>`, which the linter accepts
 inside `[Unreleased]` and which the release repoints to the rolled
-guide. The linter tolerates a breaking entry with no link at all while
-it sits in `[Unreleased]`, but the release refuses to tag one, so write
-the section before the cut rather than during it.
+guide. Until paid launch a breaking entry may carry no link at all.

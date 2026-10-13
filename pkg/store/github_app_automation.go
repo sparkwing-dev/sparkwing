@@ -8,18 +8,6 @@ import (
 	"time"
 )
 
-const githubAppAutomationTable = `CREATE TABLE IF NOT EXISTS github_app_automation (
-    team TEXT NOT NULL,
-    repository_id BIGINT NOT NULL,
-    repository TEXT NOT NULL,
-    installation_id BIGINT NOT NULL,
-    enabled_by TEXT NOT NULL,
-    enabled_at BIGINT NOT NULL,
-    PRIMARY KEY (team, repository_id),
-    FOREIGN KEY (installation_id) REFERENCES github_app_installations(installation_id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_github_app_automation_installation ON github_app_automation(installation_id);`
-
 // GitHubAppAutomation grants repository-managed event dispatch through an installation.
 type GitHubAppAutomation struct {
 	RepositoryID   int64     `json:"repository_id"`

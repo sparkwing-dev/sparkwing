@@ -573,8 +573,8 @@ file. Other syntax and workflow checks remain active.
   sides opened the same `###` heading, `bash bin/check-changelog.sh --fix`
   collapses it into one block and re-syncs the mirror.
 - **Changelog:** notable adopter-facing behavior belongs in `[Unreleased]` and
-  follows `CHANGELOG-STYLE.md`. Mark breaking changes and supply migration
-  guidance before release. Keep the embedded changelog mirror byte-identical.
+  follows `CHANGELOG-STYLE.md`. Mark breaking changes; until paid launch
+  they need no migration guide. Keep the embedded changelog mirror byte-identical.
 - **Tests:** record the focused checks selected, or why execution was waived.
   Do not run every race, Docker, or integration suite by default.
 - **Release:** merging is not a release; a release is a tag push. The local
@@ -605,8 +605,8 @@ file. Other syntax and workflow checks remain active.
   branch against real runs without replacing the binary every other repo and
   timer resolve, install it under its own name beside the real one:
   `SPARKWING_INSTALL_NAME=sparkwing-crons bash bin/install.sh` writes
-  `~/.local/bin/sparkwing-crons`, which shares the home and store; an additive
-  store migration keeps the older `sparkwing` working on the same database. Verify SDK,
+  `~/.local/bin/sparkwing-crons`, which shares the home and store, so it must
+  be built at the same store schema as the real one. Verify SDK,
   templates, integrations, browser behavior, or release assets when those
   surfaces changed.
 

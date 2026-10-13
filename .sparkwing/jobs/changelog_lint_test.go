@@ -171,19 +171,15 @@ Before/after content.
 	}
 }
 
-func TestLintChangelog_Breaking_VersionedSection_MissingLink(t *testing.T) {
+func TestLintChangelog_Breaking_VersionedSection_NeedsNoLink(t *testing.T) {
 	body := `## [v0.4.0] - 2026-05-20
 
 ### Changed
 
 - **sdk (Breaking):** Needs(...any) replaced with Needs(...Dep).
 `
-	issues := LintChangelog(body, fstest.MapFS{})
-	if len(issues) != 1 {
-		t.Fatalf("expected 1 issue, got %d: %v", len(issues), formatAllIssues(issues))
-	}
-	if issues[0].Category != "missing-migration-link" {
-		t.Errorf("category: got %q", issues[0].Category)
+	if issues := LintChangelog(body, fstest.MapFS{}); len(issues) != 0 {
+		t.Fatalf("a (Breaking) entry with no guide link should pass, got %v", formatAllIssues(issues))
 	}
 }
 

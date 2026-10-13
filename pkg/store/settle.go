@@ -38,49 +38,6 @@ func outcomeOK(outcome string) bool {
 	return false
 }
 
-// safety: every v77 column is defaulted, so a binary predating it keeps writing
-// nodes and runs, which it never marks as controller-dispatched.
-var controllerDispatchNodeCols = map[string]string{
-	"kind":              "TEXT NOT NULL DEFAULT ''",
-	"spec_hash":         "TEXT NOT NULL DEFAULT ''",
-	"on_failure_of":     "TEXT NOT NULL DEFAULT ''",
-	"continue_on_error": "INTEGER NOT NULL DEFAULT 0",
-	"optional":          "INTEGER NOT NULL DEFAULT 0",
-	"retry_budget":      "INTEGER NOT NULL DEFAULT 0",
-	"retry_backoff_ms":  "INTEGER NOT NULL DEFAULT 0",
-	"failure_json":      "BLOB",
-}
-
-var controllerDispatchRunCols = map[string]string{
-	"plan_accepted_generation": "INTEGER NOT NULL DEFAULT 0",
-}
-
-func applyControllerDispatchMigration(ctx context.Context, tx *storeTx, postgres bool) error {
-	return addDispatchColumnsTx(ctx, tx, postgres, map[string]map[string]string{
-		"nodes": controllerDispatchNodeCols, "runs": controllerDispatchRunCols,
-	})
-}
-
-func addDispatchColumnsTx(ctx context.Context, tx *storeTx, postgres bool, tables map[string]map[string]string) error {
-	pg := strings.NewReplacer("INTEGER", "BIGINT", "BLOB", "BYTEA")
-	for table, cols := range tables {
-		if !postgres {
-			if err := ensureColumnsSQLite(ctx, tx, table, cols); err != nil {
-				return err
-			}
-			continue
-		}
-		converted := make(map[string]string, len(cols))
-		for name, def := range cols {
-			converted[name] = pg.Replace(def)
-		}
-		if err := addColumnsTx(ctx, tx, table, converted); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 type settleNode struct {
 	id, kind, status, outcome, onFailureOf string
 	deps                                   []string

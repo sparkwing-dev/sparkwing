@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func blockQueueSocket(t *testing.T, home string) {
@@ -72,7 +73,7 @@ func serveQueueDaemon(t *testing.T, home string) {
 }
 
 func queueDaemonConfig(home string) wingd.Config {
-	return wingd.Config{Home: home, Version: "v1.0.0", Sampler: queueTestHostSampler{}}
+	return wingd.Config{Home: home, Version: "v1.0.0", Sampler: queueTestHostSampler{}, StoreSchemaVersion: store.ExpectedSchemaVersion()}
 }
 
 type queueTestHostSampler struct{}

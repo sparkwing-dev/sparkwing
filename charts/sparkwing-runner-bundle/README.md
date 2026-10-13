@@ -376,8 +376,7 @@ For zero-downtime cache, run a separate cache deployment with
 An upgrade from a chart that deployed `sparkwing-logs` removes its
 Deployment, Service and ServiceAccount; runners upload node logs to the
 controller instead. The logs PVC carries `helm.sh/resource-policy: keep`
-by default, so it survives the upgrade: convert its logs with
-`sparkwing-controller migrate-logs` before upgrading, then delete it. A
+by default, so it survives the upgrade; nothing reads it, so delete it. A
 values file that still sets `logs` fails to render. See the migration
 guide section "The logs service is removed".
 

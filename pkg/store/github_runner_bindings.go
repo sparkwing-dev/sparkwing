@@ -33,42 +33,6 @@ type GitHubRunnerBinding struct {
 	CreatedAt  time.Time
 }
 
-const githubRunnerBindingsTableSQLite = `
-CREATE TABLE IF NOT EXISTS github_runner_bindings (
-    team                TEXT NOT NULL,
-    repository_id       INTEGER NOT NULL,
-    repository_owner_id INTEGER NOT NULL,
-    repository          TEXT NOT NULL,
-    created_by          TEXT NOT NULL DEFAULT '',
-    created_at          INTEGER NOT NULL,
-    PRIMARY KEY (team, repository_id)
-)`
-
-var githubRunnerBindingsTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(githubRunnerBindingsTableSQLite)
-
-const githubRunnerCredentialsTableSQLite = `
-CREATE TABLE IF NOT EXISTS github_runner_credentials (
-    team       TEXT NOT NULL,
-    prefix     TEXT NOT NULL,
-    branch     TEXT NOT NULL,
-    sha        TEXT NOT NULL,
-    expires_at INTEGER NOT NULL,
-    PRIMARY KEY (team, prefix)
-)`
-
-var githubRunnerCredentialsTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(githubRunnerCredentialsTableSQLite)
-
-var githubRunnerRunCols = map[string]string{"run_id": "TEXT NOT NULL DEFAULT ''"}
-
-func applyGitHubRunnerBindingsMigration(ctx context.Context, tx *storeTx, ddl ...string) error {
-	for _, stmt := range ddl {
-		if _, err := tx.ExecContext(ctx, stmt); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // GitHubRunnerBindings lists t's bindings, oldest first.
 func (t *Tenant) GitHubRunnerBindings(ctx context.Context) (_ []GitHubRunnerBinding, err error) {
 	rows, err := t.s.query(ctx, `
