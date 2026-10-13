@@ -121,6 +121,7 @@ type Layer func(cfg *Config, next Executor) Executor
 // safety: the order is the envelope's nesting, outermost first: approvals and recovery, debug pauses,
 // admission, skip_if, memo, artifacts, caches, retries and timeouts, attempt closures, steps, expansion.
 var layers = []Layer{
+	approvalsLayer,
 	artifactsLayer,
 	cachesLayer,
 }
