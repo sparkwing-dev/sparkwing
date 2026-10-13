@@ -5,6 +5,7 @@ package nodehost
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -91,7 +92,7 @@ func TestAttemptExecutor(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", bin, "./testdata/attemptfixture").CombinedOutput(); err != nil {
 		t.Fatalf("build the fixture: %v\n%s", err, out)
 	}
-	host := func(t *testing.T, runID string, args map[string]string) (*attemptHarness, RunResult) {
+	host := func(t *testing.T, runID string, args map[string]string, env []string) (*attemptHarness, RunResult) {
 		t.Helper()
 		srv, err := Start(nil)
 		if err != nil {
@@ -105,7 +106,7 @@ func TestAttemptExecutor(t *testing.T) {
 		res, err := Execute(ctx, Config{
 			Session: SessionConfig{
 				Entry: bin, Dir: t.TempDir(), Grace: 2 * time.Second,
-				Env: append(os.Environ(), "SPARKWING_LEAK=engine"),
+				Env: env,
 			},
 			Pipeline: "attempts", Args: args,
 			Run:   nodeproto.RunContext{RunID: runID},
@@ -135,7 +136,8 @@ func TestAttemptExecutor(t *testing.T) {
 	}
 
 	t.Run("RunsANodeEndToEnd", func(t *testing.T) {
-		h, res := host(t, "run-attempt", map[string]string{})
+		env := append(os.Environ(), "SPARKWING_LEAK=engine", "AWS_SECRET_ACCESS_KEY=caller-aws")
+		h, res := host(t, "run-attempt", map[string]string{}, env)
 		if res.Status != "success" {
 			t.Fatalf("status=%s err=%v, want success", res.Status, res.Err)
 		}
@@ -147,9 +149,9 @@ func TestAttemptExecutor(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var out struct{ Env, Run, Leak string }
-		if err := json.Unmarshal(raw, &out); err != nil || out.Env != "from-plan" || out.Run != "run-attempt" || out.Leak != "" {
-			t.Errorf("build output = %s (err %v), want the node env and run id and no engine SPARKWING_ variable", raw, err)
+		var out struct{ Env, Run, Leak, AWS string }
+		if err := json.Unmarshal(raw, &out); err != nil || out.Env != "from-plan" || out.Run != "run-attempt" || out.Leak != "" || out.AWS != "caller-aws" {
+			t.Errorf("build output = %s (err %v), want the node env, run id and caller's env and no engine SPARKWING_ variable", raw, err)
 		}
 		logs := h.logs.text("build")
 		if strings.Contains(logs, fixtureToken) {
@@ -160,8 +162,8 @@ func TestAttemptExecutor(t *testing.T) {
 				t.Errorf("node log lacks %q:\n%s", want, logs)
 			}
 		}
-		if _, err := os.Stat(filepath.Join(h.marker, "build")); err != nil {
-			t.Errorf("the node's cleanup did not run: %v", err)
+		if got, err := os.ReadFile(filepath.Join(h.marker, "build")); err != nil || string(got) != "caller-aws\n" {
+			t.Errorf("cleanup wrote %q (err %v), want the caller's environment", got, err)
 		}
 		if u, ok := h.usage["build"]; !ok || u.Wall <= 0 {
 			t.Errorf("usage hook got %+v (called %v)", u, ok)
@@ -176,8 +178,34 @@ func TestAttemptExecutor(t *testing.T) {
 		}
 	})
 
+	t.Run("TheEngineEnvironmentStaysOutByDefault", func(t *testing.T) {
+		t.Setenv("AWS_SECRET_ACCESS_KEY", "host-aws")
+		h, res := host(t, "run-minimal", map[string]string{}, nil)
+		if res.Status != "success" {
+			t.Fatalf("status=%s err=%v, want success", res.Status, res.Err)
+		}
+		raw, err := h.st.GetNodeOutput(t.Context(), "run-minimal", "build")
+		if err != nil || strings.Contains(string(raw), "host-aws") {
+			t.Errorf("build output = %s (err %v), want no engine credential", raw, err)
+		}
+		if got, err := os.ReadFile(filepath.Join(h.marker, "build")); err != nil || string(got) != "\n" {
+			t.Errorf("cleanup wrote %q (err %v), want no engine credential", got, err)
+		}
+	})
+
+	t.Run("AFailureMessageIsMasked", func(t *testing.T) {
+		h, res := host(t, "run-leak", map[string]string{"leak": "true"}, nil)
+		if res.Status != "failed" {
+			t.Fatalf("status=%s err=%v, want failed", res.Status, res.Err)
+		}
+		row := h.row(t, "run-leak", "leak")
+		if !strings.Contains(row.Error, "deploy refused token") || strings.Contains(row.Error, fixtureToken) {
+			t.Errorf("leak row error = %q, want the message with the secret masked", row.Error)
+		}
+	})
+
 	t.Run("APlanThatDriftsFailsTheNode", func(t *testing.T) {
-		h, res := host(t, "run-drift", map[string]string{"counter": filepath.Join(t.TempDir(), "count")})
+		h, res := host(t, "run-drift", map[string]string{"counter": filepath.Join(t.TempDir(), "count")}, nil)
 		if res.Status != "failed" {
 			t.Fatalf("status=%s err=%v, want failed", res.Status, res.Err)
 		}
@@ -191,7 +219,7 @@ func TestAttemptExecutor(t *testing.T) {
 	})
 
 	t.Run("AnSDKExitMidNodeFailsIt", func(t *testing.T) {
-		h, res := host(t, "run-crash", map[string]string{"crash": "true"})
+		h, res := host(t, "run-crash", map[string]string{"crash": "true"}, nil)
 		if res.Status != "failed" || res.Nodes["build"].Outcome != sparkwing.Success {
 			t.Fatalf("status=%s err=%v build=%+v, want failed with build still a success", res.Status, res.Err, res.Nodes["build"])
 		}
@@ -203,6 +231,55 @@ func TestAttemptExecutor(t *testing.T) {
 			t.Errorf("the crashed node's cleanup did not run: %v", err)
 		}
 	})
+}
+
+func TestAProtocolBreakAfterTheReplyFailsTheNode(t *testing.T) {
+	srv, err := Start(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+	hash, err := nodeproto.SpecHash([]byte(`{"id":"reply-then-garbage","deps":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs := &memLogs{records: map[string][]sparkwing.LogRecord{}}
+	masker := secrets.NewMasker()
+	a := &Attempts{
+		Routes: srv, Resolver: fixtureResolver{}, Masker: masker,
+		OpenLog: func(_ context.Context, _, node string) (NodeLog, error) { return memLog{logs: logs, node: node}, nil },
+	}
+	cfg := &Config{Session: SessionConfig{
+		Entry: os.Args[0], Grace: 500 * time.Millisecond,
+		// bug: the race runtime otherwise sleeps a second at exit, past the grace.
+		Env: append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0"),
+	}}
+	run := &Run{
+		ID: "run-garble", Pipeline: "p", Context: nodeproto.RunContext{RunID: "run-garble"},
+		State: openStore(t), Logger: slog.New(slog.DiscardHandler),
+	}
+	res := a.executor(cfg)(t.Context(), &NodeRun{Run: run, Plan: nodeproto.PlanNode{ID: "reply-then-garbage", SpecHash: hash}})
+	if res.Outcome != sparkwing.Failed || res.Reason != string(nodeproto.CodeProtocolError) {
+		t.Errorf("result = %+v, want failed with protocol_error despite the success reply", res)
+	}
+	if len(masker.Values()) == 0 {
+		t.Error("the attempt's bearer was not registered with the run's masker")
+	}
+}
+
+func TestSpecHashRefusesAliasesAndDuplicates(t *testing.T) {
+	for name, plan := range map[string]string{
+		"folded spec_hash": `{"protocol":"1","nodes":[{"id":"a","deps":[],"\u017fpec_hash":"fixed"}]}`,
+		"cased spec_hash":  `{"protocol":"1","nodes":[{"id":"a","deps":[],"Spec_Hash":"fixed"}]}`,
+		"duplicate key":    `{"protocol":"1","nodes":[{"id":"a","deps":[],"env":{"X":"1","X":"2"}}]}`,
+		"folded nodes":     `{"protocol":"1","nodes":[],"NODES":[{"id":"a","spec_hash":"fixed"}]}`,
+	} {
+		_, err := nodeproto.StampSpecHashes([]byte(plan))
+		var perr *nodeproto.Error
+		if !errors.As(err, &perr) || perr.Code != nodeproto.CodePlanInvalid {
+			t.Errorf("%s: err = %v, want plan_invalid", name, err)
+		}
+	}
 }
 
 func TestSpecHashIgnoresKeyOrderAndItsOwnField(t *testing.T) {

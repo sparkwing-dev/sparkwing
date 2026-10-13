@@ -59,7 +59,10 @@ type SessionConfig struct {
 	Entry string
 	// Dir is the repository root.
 	Dir string
-	// Env is the process's whole environment; nil inherits the engine's.
+	// Env is the process's whole environment, which the caller sets on
+	// purpose: a local run passes the user's, a pod the minimal set. Nil is
+	// [MinimalEnv], so the engine's credentials never reach pipeline code
+	// implicitly.
 	Env  []string
 	Sink Sink
 	// Grace is how long the process gets to exit after its request pipe
@@ -95,7 +98,10 @@ type Session struct {
 	mu       sync.Mutex
 	inflight map[string]call
 	err      error
-	failed   chan struct{}
+	// safety: a protocol break found while Close drains the frame pipe still
+	// taints the replies before it, so Close reports it.
+	closingErr error
+	failed     chan struct{}
 
 	reads     []*os.File
 	queues    []*sinkQueue
@@ -137,6 +143,9 @@ func StartSession(ctx context.Context, cfg SessionConfig) (*Session, error) {
 		}
 	}
 	cmd := exec.Command(cfg.Entry, "--sw-node-protocol")
+	if cfg.Env == nil {
+		cfg.Env = MinimalEnv()
+	}
 	cmd.Dir, cmd.Env = cfg.Dir, cfg.Env
 	cmd.Stdout, cmd.Stderr = child[2], child[3]
 	proc, err := startProcess(cmd, child[0], child[1])
@@ -283,7 +292,9 @@ func (s *Session) Close() (Usage, error) {
 		s.usage = s.sampler.Stop(s.cmd.ProcessState)
 		err := s.failure()
 		if errors.Is(err, ErrClosed) {
-			err = nil
+			s.mu.Lock()
+			err = s.closingErr
+			s.mu.Unlock()
 		}
 		s.closeErr = errors.Join(err, s.reapErr)
 	})
@@ -293,6 +304,10 @@ func (s *Session) Close() (Usage, error) {
 func (s *Session) fail(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	var perr *nodeproto.Error
+	if errors.Is(s.err, ErrClosed) && s.closingErr == nil && errors.As(err, &perr) && perr.Code == nodeproto.CodeProtocolError {
+		s.closingErr = err
+	}
 	if s.err == nil {
 		s.err = err
 		close(s.failed)

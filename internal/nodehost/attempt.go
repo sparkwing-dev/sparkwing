@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"slices"
 	"strings"
 
@@ -41,8 +42,16 @@ type Attempts struct {
 	Usage func(n *NodeRun, u Usage)
 }
 
+// safety: every message the attempt returns is masked, since the scheduler
+// stores it in the node row, past the log sink's masking.
 func (a *Attempts) executor(cfg *Config) Executor {
-	return func(ctx context.Context, n *NodeRun) Result { return a.attempt(ctx, cfg.Session, n) }
+	return func(ctx context.Context, n *NodeRun) Result {
+		res := a.attempt(ctx, cfg.Session, n)
+		if res.Err != nil {
+			res.Err = errors.New(a.Masker.Mask(res.Err.Error()))
+		}
+		return res
+	}
 }
 
 // safety: the bearer is revoked before the cleanups run, so the process
@@ -72,6 +81,8 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun) 
 	if err != nil {
 		return failed(fmt.Errorf("admit node %s: %w", id, err))
 	}
+	// safety: registered before the process starts, so an environment dump never logs a live bearer.
+	a.Masker.Register(bearer)
 	cfg := base
 	cfg.Sink = sink
 	cfg.Env = attemptEnv(base.Env, n.Plan.Env, run.ID, id, a.Routes.URL(), bearer)
@@ -80,7 +91,13 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun) 
 	if err == nil {
 		res = drive(ctx, sess, n)
 		usage, cerr := sess.Close()
-		if cerr != nil && res.Outcome == sparkwing.Success {
+		var perr *nodeproto.Error
+		switch {
+		case cerr == nil || res.Outcome != sparkwing.Success:
+		case errors.As(cerr, &perr):
+			// safety: a session that broke the protocol after its reply cannot vouch for that reply.
+			res = failed(cerr)
+		default:
 			run.Logger.Warn("nodehost: sdk session", "run", run.ID, "node", id, "err", cerr)
 		}
 		if a.Usage != nil {
@@ -183,12 +200,38 @@ func failed(err error) Result {
 	return Result{Outcome: sparkwing.Failed, Err: err, Reason: reason}
 }
 
+// safety: the one list of engine variables a process inherits when its caller passes no environment.
+var minimalEnv = []string{
+	"PATH", "HOME", "TMPDIR", "LANG", "LC_*", "TZ", "USER",
+	"SystemRoot", "ComSpec", "PATHEXT", "TEMP", "TMP",
+}
+
+// MinimalEnv is the engine's environment cut to the variables a process
+// needs to run at all: PATH, HOME, TMPDIR, LANG, LC_*, TZ and USER, and on
+// Windows SystemRoot, ComSpec, PATHEXT, TEMP and TMP.
+func MinimalEnv() []string {
+	env := []string{}
+	for _, kv := range os.Environ() {
+		k, _, _ := strings.Cut(kv, "=")
+		if slices.ContainsFunc(minimalEnv, func(name string) bool {
+			prefix, wild := strings.CutSuffix(name, "*")
+			if runtime.GOOS == "windows" {
+				k, name, prefix = strings.ToUpper(k), strings.ToUpper(name), strings.ToUpper(prefix)
+			}
+			return k == name || (wild && strings.HasPrefix(k, prefix))
+		}) {
+			env = append(env, kv)
+		}
+	}
+	return env
+}
+
 // safety: the engine's own SPARKWING_* variables never reach the node; its
 // contract variables are set last so neither the engine nor the node's env
 // overrides them.
 func attemptEnv(base []string, nodeEnv map[string]string, runID, nodeID, url, bearer string) []string {
 	if base == nil {
-		base = os.Environ()
+		base = MinimalEnv()
 	}
 	env := make([]string, 0, len(base)+len(nodeEnv)+4)
 	for _, kv := range base {
