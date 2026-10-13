@@ -135,7 +135,12 @@ class Session {
         // safety: only the result step's output is the node's output; the host
         // records whatever a run_step reply carries.
         if (!step.isResult) delete result.output;
-        else if (result.outcome === "success") this.#nodeOutputs.set(job.id, result.output ?? null);
+        if (result.outcome === "success" && (step.isResult || !job.steps.some((s) => s.isResult))) {
+          // safety: a node with no result step has no output, and its own
+          // generator reads that null here rather than asking the host for a
+          // node still running.
+          this.#nodeOutputs.set(job.id, result.output ?? null);
+        }
         return result;
       }
       case "cancel":
@@ -246,7 +251,11 @@ class Session {
   }
 
   async #invoke(req: Request, job: Job, step: string | undefined, body: (ctx: NodeContext) => unknown): Promise<NodeResult> {
-    const ctx = this.#context(req, job, step);
+    const attempt = req["attempt"];
+    if (typeof attempt !== "number" || !Number.isInteger(attempt) || attempt < 1) {
+      throw new ProtocolError("bad_request", "attempt must be an integer of at least 1");
+    }
+    const ctx = this.#context(req, job, step, attempt);
     try {
       ctx.signal.throwIfAborted();
       const output = await body(ctx);
@@ -279,10 +288,10 @@ class Session {
     this.#controllers.delete(this.#controllerKey(req));
   }
 
-  #context(req: Request, job: Job, step: string | undefined): NodeContext {
+  #context(req: Request, job: Job, step: string | undefined, attempt?: number): NodeContext {
     const { run } = this.#current();
     const nodeLog = new LogWriter(this.#frames, { node: job.id });
-    const attempt = req["attempt"];
+    const signal = this.#controller(this.#controllerKey(req)).signal;
     const routes = (): NodeRoutes => {
       if (!this.#routes) throw new Error("the engine gave this process no node routes");
       return this.#routes;
@@ -290,13 +299,13 @@ class Session {
     return {
       runId: run.runId,
       nodeId: job.id,
-      attempt: typeof attempt === "number" ? attempt : 1,
+      attempt: attempt ?? 1,
       args: run.args,
       dryRun: run.dryRun,
       log: step === undefined ? nodeLog : nodeLog.forStep(step),
-      signal: this.#controller(this.#controllerKey(req)).signal,
-      secret: (name) => routes().secret(name),
-      output: (id) => routes().output(id),
+      signal,
+      secret: (name) => routes().secret(name, signal),
+      output: (id) => routes().output(id, signal),
       stepOutput: <T>(id: string) => this.#stepOutputs.get(job.id)?.get(id) as T | undefined,
     };
   }

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { beforeEach, test } from "node:test";
 import { definePipeline, resetPipelines } from "../src/plan.ts";
 import { NodeRoutes } from "../src/routes.ts";
@@ -402,4 +404,81 @@ test("a generated node's own process reads the source's output through the route
     value: null,
     error: "the engine gave this process no node routes",
   });
+});
+
+test("run_node and run_step refuse an attempt that is not an integer of at least 1, without running the body", async () => {
+  let calls = 0;
+  definePipeline({ name: "counted", plan: (p) => void p.job("body", () => void calls++) });
+  const reqs = [{}, { attempt: 0 }, { attempt: 1.5 }, { attempt: "oops" }].map((a, i) => ({
+    id: `n${i}`,
+    op: "run_node",
+    node: "body",
+    ...a,
+  }));
+  const stepped = { id: "s", op: "run_step", node: "deploy", step: "fetch", attempt: 0 };
+  const out = await converse([{ id: "p", op: "plan", pipeline: "counted", args: {}, run }, ...reqs]);
+  for (const r of reqs) assert.equal((out.reply(r.id)?.["error"] as { code: string }).code, "bad_request", r.id);
+  assert.equal(calls, 0);
+  const steps = await converse([plan, stepped]);
+  assert.equal((steps.reply("s")?.["error"] as { code: string }).code, "bad_request");
+});
+
+test("a generator whose stepped source has no result step reads null in the source's process", async () => {
+  let seen: unknown = "unset";
+  definePipeline({
+    name: "stepsource",
+    plan(p) {
+      const source = p.job("source");
+      source.step("work", () => "not the node's output");
+      source.generate((g, output) => {
+        seen = output;
+        g.job("child", () => undefined);
+      });
+    },
+  });
+  const notReady = (async () => new Response(JSON.stringify({ error: "running", code: "not_ready" }), { status: 409 })) as typeof fetch;
+  const out = await converse(
+    [
+      { id: "p", op: "plan", pipeline: "stepsource", args: {}, run },
+      { id: "s", op: "run_step", node: "source", step: "work", attempt: 1 },
+      { id: "g", op: "eval", closure: "source/generator/0" },
+    ],
+    new NodeRoutes({ baseUrl: "http://engine", token: "t", fetch: notReady }),
+  );
+  assert.deepEqual(out.reply("s")?.["result"], { outcome: "success" });
+  assert.deepEqual(out.reply("g")?.["result"], { value: [{ id: "child", deps: ["source"] }] });
+  assert.equal(seen, null);
+});
+
+test("cancelling a step aborts its pending route request", { timeout: 10_000 }, async () => {
+  definePipeline({
+    name: "slowsecret",
+    plan: (p) =>
+      void p
+        .job("work")
+        .step("fetch", (ctx) => ctx.secret("API_KEY"))
+        .result(),
+  });
+  let arrived: () => void = () => undefined;
+  const requestArrived = new Promise<void>((resolve) => (arrived = resolve));
+  let peerClosed: () => void = () => undefined;
+  const closed = new Promise<void>((resolve) => (peerClosed = resolve));
+  const server = createServer((_req, res) => {
+    res.on("close", peerClosed);
+    arrived();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const c = new Conversation(new NodeRoutes({ baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, token: "t" }));
+    await c.send({ id: "p", op: "plan", pipeline: "slowsecret", args: {}, run });
+    c.write({ id: "s", op: "run_step", node: "work", step: "fetch", attempt: 1 });
+    await requestArrived;
+    await c.send({ id: "c", op: "cancel", node: "work", step: "fetch" });
+    assert.equal(((await c.out.waitReply("s"))["result"] as { outcome: string }).outcome, "failed");
+    await closed;
+    await c.end();
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });

@@ -66,8 +66,8 @@ export class NodeRoutes {
   }
 
   /** Returns the secret's value; an unset secret is an error, never an empty string. */
-  async secret(name: string): Promise<string> {
-    const body = (await this.#route("GET", `/node/v1/secrets/${encodeURIComponent(name)}`)) as { value?: unknown } | null;
+  async secret(name: string, signal?: AbortSignal): Promise<string> {
+    const body = (await this.#route("GET", `/node/v1/secrets/${encodeURIComponent(name)}`, signal)) as { value?: unknown } | null;
     if (typeof body?.value !== "string") {
       throw new Error(`secret ${name}: the engine answered without a string value`);
     }
@@ -75,13 +75,13 @@ export class NodeRoutes {
   }
 
   /** Returns the JSON output another node of this run produced, or null when it recorded none. */
-  async output<T = unknown>(nodeId: string): Promise<T | null> {
-    const body = (await this.#route("GET", `/node/v1/nodes/${encodeURIComponent(nodeId)}/output`)) as { output?: unknown } | null;
+  async output<T = unknown>(nodeId: string, signal?: AbortSignal): Promise<T | null> {
+    const body = (await this.#route("GET", `/node/v1/nodes/${encodeURIComponent(nodeId)}/output`, signal)) as { output?: unknown } | null;
     if (body === null || !("output" in body)) throw new Error(`output of ${nodeId}: the engine answered without an output field`);
     return (body.output ?? null) as T | null;
   }
 
-  async #route(method: string, path: string): Promise<unknown> {
+  async #route(method: string, path: string, signal: AbortSignal | undefined): Promise<unknown> {
     const headers: Record<string, string> = {
       accept: "application/json",
       authorization: `Bearer ${this.#token}`,
@@ -93,6 +93,7 @@ export class NodeRoutes {
       method,
       headers,
       redirect: "manual",
+      signal: signal ?? null,
     });
     const text = await res.text();
     if (res.status !== 200) {
