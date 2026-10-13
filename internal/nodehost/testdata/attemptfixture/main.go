@@ -1,7 +1,8 @@
 // Command attemptfixture is a pipeline the attempt executor's tests run end
 // to end: a node that reads a secret, prints it, registers a cleanup and
 // returns an output; a node that exits mid-body; a plan that drifts
-// between processes; and nodes with every attempt closure.
+// between processes; nodes with every attempt closure; and a dynamic fan-out
+// with a node that waits for it.
 package main
 
 import (
@@ -25,6 +26,7 @@ type inputs struct {
 	Crash   bool   `flag:"crash" desc:"Add a node that exits mid-body"`
 	Leak    bool   `flag:"leak" desc:"Add a node whose error quotes the secret"`
 	Hooks   bool   `flag:"hooks" desc:"Add nodes with skip_if, before_run, verify and after_run closures"`
+	FanOut  string `flag:"fanout" desc:"Comma-separated targets to fan out over; boom fails the generator, hang blocks it"`
 }
 
 type fixtureSecrets struct {
@@ -54,6 +56,20 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 			os.Exit(3)
 			return nil
 		})
+	}
+	if in.FanOut != "" {
+		targets := sparkwing.Job(plan, "targets", &targetsJob{list: in.FanOut})
+		tests := sparkwing.JobFanOutDynamic(plan, "tests", targets, func(target string) (string, any) {
+			switch target {
+			case "boom":
+				panic("no target boom")
+			case "hang":
+				fmt.Println("generator hangs")
+				select {}
+			}
+			return "test-" + target, func(context.Context) error { return nil }
+		})
+		sparkwing.Job(plan, "summary", func(context.Context) error { return nil }).Needs(tests)
 	}
 	if in.Leak {
 		sparkwing.Job(plan, "leak", func(ctx context.Context) error {
@@ -114,6 +130,12 @@ func addHooks(plan *sparkwing.Plan, marker string) {
 	sparkwing.Job(plan, "slow", func(ctx context.Context) error { trace("slow", "body"); <-ctx.Done(); return ctx.Err() }).
 		AfterRun(after("slow")).
 		Timeout(500 * time.Millisecond)
+	source := sparkwing.Job(plan, "unverified-source", &targetsJob{list: "a"}).
+		Verify(func(context.Context) error { return errors.New("bad target list") })
+	sparkwing.JobFanOutDynamic(plan, "unverified-fanout", source, func(target string) (string, any) {
+		trace("unverified-source", "generated")
+		return "unverified-" + target, func(context.Context) error { return nil }
+	})
 }
 
 type buildOutput struct {
@@ -142,6 +164,17 @@ func (j *buildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 			}
 		}
 		return buildOutput{Env: os.Getenv("FIXTURE_ENV"), Run: os.Getenv("SPARKWING_RUN_ID"), Leak: os.Getenv("SPARKWING_LEAK"), AWS: os.Getenv("AWS_SECRET_ACCESS_KEY")}, nil
+	}), nil
+}
+
+type targetsJob struct {
+	sparkwing.Produces[[]string]
+	list string
+}
+
+func (j *targetsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	return sparkwing.Step(w, "list", func(context.Context) ([]string, error) {
+		return strings.Split(j.list, ","), nil
 	}), nil
 }
 

@@ -145,8 +145,12 @@ func nodeReplan(ctx context.Context, sess *Session, n *NodeRun) error {
 	}
 	rc := run.Context
 	var raw json.RawMessage
-	if err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: run.Pipeline, Args: args, Run: &rc}, &raw); err != nil {
+	err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: run.Pipeline, Args: args, Run: &rc}, &raw)
+	switch {
+	case err != nil:
 		return err
+	case n.Generator != "":
+		return regenerate(ctx, sess, n)
 	}
 	return checkDrift(raw, n.Plan)
 }

@@ -1,6 +1,7 @@
 package sparkwingruntime
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -93,6 +94,21 @@ func NodeClosureIDs(p *sparkwing.Plan, n *sparkwing.JobNode) (*nodeproto.PlanClo
 		steps[c.Step.ID()] = appendClosureID(steps[c.Step.ID()], c.Kind, id)
 	})
 	return node, steps
+}
+
+// NeedsGeneratedIDs returns the ids of the generator closures whose nodes n
+// waits for, in plan order; nil when it waits for none.
+func NeedsGeneratedIDs(p *sparkwing.Plan, n *sparkwing.JobNode) []string {
+	var ids []string
+	perSource := map[*sparkwing.JobNode]int{}
+	for _, exp := range p.Expansions() {
+		i := perSource[exp.Source]
+		perSource[exp.Source]++
+		if slices.Contains(n.NeedsGroups(), exp.Group) {
+			ids = append(ids, closureID(exp.Source.ID(), nil, ClosureGenerator, i))
+		}
+	}
+	return ids
 }
 
 func appendClosureID(ids *nodeproto.PlanClosures, kind, id string) *nodeproto.PlanClosures {

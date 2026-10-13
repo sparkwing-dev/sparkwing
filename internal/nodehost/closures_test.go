@@ -96,6 +96,19 @@ func TestClosures(t *testing.T) {
 		}
 	})
 
+	t.Run("AFailingVerifyNeverFansOut", func(t *testing.T) {
+		r := row("unverified-source")
+		if r.Outcome != string(sparkwing.Failed) || r.FailureReason != store.FailureVerify {
+			t.Errorf("source row outcome=%q reason=%q error=%q, want failed with verify", r.Outcome, r.FailureReason, r.Error)
+		}
+		if got := trace("unverified-source"); got != "" {
+			t.Errorf("source trace = %q, want the generator never run", got)
+		}
+		if _, err := cfg.State.GetNode(t.Context(), "run-hooks", "unverified-a"); err == nil {
+			t.Error("a node was generated from a source whose verify failed")
+		}
+	})
+
 	t.Run("AFailingBeforeRunEndsTheNodeWithoutItsBodyOrARetry", func(t *testing.T) {
 		r := res.Nodes["unready"]
 		if r.Outcome != sparkwing.Failed || !r.Final || r.Err == nil || r.Err.Error() != "BeforeRun hook 0: not ready" {

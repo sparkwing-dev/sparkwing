@@ -91,7 +91,7 @@ func skipIfEval(ctx context.Context, sess *Session, log Sink, id string, i int, 
 }
 
 // safety: the protocol's attempt order: before_run on attempt 1 only, verify after a successful body,
-// and after_run only once no attempt follows, so each sees the state today's dispatcher gives it.
+// generators only once verify passes, and after_run only once no attempt follows.
 func withClosures(ctx context.Context, sess *Session, log Sink, n *NodeRun, body func() Result) Result {
 	c := closuresOf(n)
 	if max(n.Attempt, 1) == 1 {
@@ -120,6 +120,9 @@ func withClosures(ctx context.Context, sess *Session, log Sink, n *NodeRun, body
 			closureNote(log, "error", verr.Error())
 			res = Result{Outcome: sparkwing.Failed, Err: verr, Reason: store.FailureVerify}
 		}
+	}
+	if res.Outcome == sparkwing.Success {
+		res.expansions = generate(ctx, sess, n)
 	}
 	// safety: an attempt stopped by its timeout or the run's cancel has a dying process;
 	// the timeout layer runs after_run in an eval process instead.
