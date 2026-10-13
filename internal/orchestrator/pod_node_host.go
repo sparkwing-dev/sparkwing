@@ -11,6 +11,7 @@ import (
 	"os"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -68,7 +69,7 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 	if err != nil {
 		return nodehost.Result{}, err
 	}
-	defer planSink.Flush()
+	defer planSink.end()
 	res := nodehost.HostNode(ctx, nodehost.Config{
 		Session:  nodehost.SessionConfig{Entry: p.binary, Dir: p.dir, Sink: planSink},
 		Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run),
@@ -177,22 +178,38 @@ func (l *podNodeLog) seal(ctx context.Context, stopped bool) {
 
 // safety: plan code's output goes to out, the container's stderr, through a
 // node-host log sink, which masks a value even across the session's split of
-// a long line; the planning claim has no node log. Flush it once the plan
+// a long line; the planning claim has no node log. Call end once the plan
 // process ends.
-func newPodPlanSink(ctx context.Context, runID string, masker *secrets.Masker, out io.Writer) (*nodehost.LogSink, error) {
-	return nodehost.NewLogSink(ctx, nodehost.LogSinkConfig{
-		RunID: runID, NodeID: store.PlanNodeID, Log: &podPlanLog{out: out}, State: podPlanState{}, Masker: masker,
+func newPodPlanSink(ctx context.Context, runID string, masker *secrets.Masker, out io.Writer) (podPlanSink, error) {
+	log := &podPlanLog{out: out}
+	sink, err := nodehost.NewLogSink(ctx, nodehost.LogSinkConfig{
+		RunID: runID, NodeID: store.PlanNodeID, Log: log, State: podPlanState{}, Masker: masker,
 	})
+	return podPlanSink{LogSink: sink, log: log}, err
 }
 
+type podPlanSink struct {
+	*nodehost.LogSink
+	log *podPlanLog
+}
+
+// safety: ending drops the held tail of a split line and every later line
+// rather than flushing them, since a queue the session abandoned can still
+// deliver the rest of a secret whose start a flush would print.
+func (s podPlanSink) end() { s.log.ended.Store(true) }
+
 type podPlanLog struct {
-	mu  sync.Mutex
-	out io.Writer
+	mu    sync.Mutex
+	out   io.Writer
+	ended atomic.Bool
 }
 
 func (l *podPlanLog) Emit(rec sparkwing.LogRecord) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.ended.Load() {
+		return
+	}
 	if _, err := fmt.Fprintln(l.out, rec.Msg); err != nil {
 		return
 	}

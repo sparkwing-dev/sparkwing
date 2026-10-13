@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -448,8 +449,66 @@ func TestPodPlanSink_MasksASecretAcrossASplitLine(t *testing.T) {
 	head := strings.Repeat("x", 1<<20-10) + secret[:10]
 	sink.Text(nodehost.LevelInfo, head)
 	sink.Text(nodehost.LevelInfo, secret[10:]+" tail")
-	sink.Flush()
+	sink.end()
 	if got := strings.ReplaceAll(out.String(), "\n", ""); strings.Contains(got, secret[:10]) || !strings.Contains(got, "*** tail") {
 		t.Fatalf("plan output ends %q, want the split secret masked whole", got[max(0, len(got)-80):])
 	}
+}
+
+// A plan whose stderr blocks past the session's grace ends with the head of a
+// split secret still held and its rest still queued; ending the sink then
+// prints neither piece.
+func TestPodPlanSink_EndingDropsAHeldSecretAndItsLateRest(t *testing.T) {
+	const secret = "hunter2-straddles-the-split"
+	masker := secrets.NewMasker()
+	masker.Register(secret)
+	out := &blockingStderr{entered: make(chan struct{}), release: make(chan struct{})}
+	sink, err := newPodPlanSink(t.Context(), "run-blocked", masker, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivered := make(chan struct{})
+	go func() {
+		defer close(delivered)
+		sink.Text(nodehost.LevelInfo, strings.Repeat("x", 1<<20-10)+secret[:10])
+		sink.Text(nodehost.LevelInfo, secret[10:]+" tail")
+	}()
+	<-out.entered
+	ended := make(chan struct{})
+	go func() {
+		defer close(ended)
+		sink.end()
+	}()
+	close(out.release)
+	<-ended
+	<-delivered
+	got := out.String()
+	if strings.Contains(got, secret[:10]) || strings.Contains(got, secret[10:]) {
+		t.Fatalf("plan output after the end holds a piece of the secret: ...%q", got[max(0, len(got)-80):])
+	}
+}
+
+// hack: holds its first write until release, standing in for a stalled container log.
+type blockingStderr struct {
+	mu      sync.Mutex
+	buf     strings.Builder
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (w *blockingStderr) Write(p []byte) (int, error) {
+	w.once.Do(func() {
+		close(w.entered)
+		<-w.release
+	})
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.Write(p)
+}
+
+func (w *blockingStderr) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
 }

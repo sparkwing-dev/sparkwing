@@ -139,7 +139,7 @@ func planLaunchedRun(ctx context.Context, c *client.Client, src, binary, runID s
 	}
 	plan, err := nodehost.PlanDocument(ctx, nodehost.SessionConfig{Entry: binary, Dir: src, Sink: sink},
 		nodehost.PlanRequest{Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run), Requires: requires, Masker: masker})
-	sink.Flush()
+	sink.end()
 	if err != nil {
 		return fail(fmt.Errorf("the pipeline could not plan the run: %s", masker.Mask(err.Error())))
 	}
