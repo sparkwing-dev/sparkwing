@@ -511,7 +511,7 @@ func (s *scheduler) finish(ctx context.Context, id string, res Result) {
 	writeCtx := context.WithoutCancel(ctx)
 	var err error
 	if !res.memoRecorded {
-		err = s.run.State.FinishNodeWithReason(writeCtx, s.run.ID, id, string(res.Outcome), errText(res.Err), res.Output, res.Reason, nil)
+		err = s.run.State.FinishNodeWithReason(writeCtx, s.run.ID, id, string(res.Outcome), recordedErrText(res.Err), res.Output, res.Reason, nil)
 	}
 	if errors.Is(err, store.ErrOutputNotStored) {
 		// safety: a refused output fails the node in its row too, so the row never stays running.
@@ -662,7 +662,14 @@ func errText(err error) string {
 	if err == nil {
 		return ""
 	}
-	return boundedNodeErrText(err.Error())
+	return err.Error()
+}
+
+// safety: only the node's row and end event are shortened; a cut taken before
+// masking could split a secret the masker no longer recognizes, so hook and
+// recovery inputs keep the whole error.
+func recordedErrText(err error) string {
+	return boundedNodeErrText(errText(err))
 }
 
 // safety: the first line names what failed and the tail is where a command's

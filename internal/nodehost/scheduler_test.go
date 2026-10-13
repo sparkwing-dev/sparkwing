@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -446,6 +447,43 @@ func TestSchedulerRecordsAFailedCommandWithHugeOutput(t *testing.T) {
 		if !strings.Contains(row.Error, want) {
 			t.Errorf("recorded error lacks %q:\n%s", want, row.Error)
 		}
+	}
+}
+
+type recordingLog struct{ records []sparkwing.LogRecord }
+
+func (l *recordingLog) Emit(rec sparkwing.LogRecord) { l.records = append(l.records, rec) }
+
+// A cut taken before masking would leave a fragment of a secret the masker no
+// longer recognizes, so after_run's input keeps the whole error, and a bounded
+// recorded error is cut only from text already masked.
+func TestNodeErrorBoundingNeverSplitsASecret(t *testing.T) {
+	secret := "private-token-ABCDEFGHIJKLMN"
+	for name, tc := range map[string]struct{ raw, fragment string }{
+		"head": {strings.Repeat("H", 500) + secret + "\n" + strings.Repeat("filler\n", 1800), "private-toke"},
+		"tail": {"failed\n" + strings.Repeat("X", 2600) + secret + strings.Repeat("Y", 7540), "HIJKLMN"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			masker := secrets.NewMasker()
+			masker.Register(secret)
+			arg := afterRunArgOf(Result{Outcome: sparkwing.Failed, Err: errors.New(tc.raw)})
+			if arg.Error != tc.raw {
+				t.Errorf("after_run input is %d bytes, want the whole %d-byte error", len(arg.Error), len(tc.raw))
+			}
+			log := &recordingLog{}
+			sink, err := NewLogSink(t.Context(), LogSinkConfig{RunID: "run", NodeID: "node", State: noState{}, Log: log, Masker: masker})
+			if err != nil {
+				t.Fatal(err)
+			}
+			sink.Record(nodeproto.LogRecord{Level: "error", Msg: arg.Error})
+			if len(log.records) != 1 || strings.Contains(log.records[0].Msg, tc.fragment) {
+				t.Errorf("a hook logging its error leaked %q: %+v", tc.fragment, log.records)
+			}
+			recorded := recordedErrText(errors.New(masker.Mask(tc.raw)))
+			if strings.Contains(recorded, tc.fragment) || len(recorded) > nodeErrTextMaxBytes {
+				t.Errorf("recorded error is %d bytes and leaks %q: %q", len(recorded), tc.fragment, recorded)
+			}
+		})
 	}
 }
 
