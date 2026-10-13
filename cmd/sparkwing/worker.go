@@ -125,9 +125,17 @@ func claimTriggers(ctx context.Context, profileName string, poll, heartbeat time
 // to that lease, and a run that never started fails here, or ends cancelled
 // for an operator's cancel.
 func hostTrigger(ctx context.Context, cli *client.Client, trigger *store.Trigger, controllerURL, token string, heartbeat time.Duration) error {
+	return hostTriggerWith(ctx, cli, trigger, controllerURL, token, heartbeat, buildCheckoutPipeline, orchestrator.HostTriggerRun)
+}
+
+type checkoutBuild func(ctx context.Context) (binary, dir string, release func(), err error)
+
+func hostTriggerWith(ctx context.Context, cli *client.Client, trigger *store.Trigger, controllerURL, token string,
+	heartbeat time.Duration, build checkoutBuild, host func(context.Context, orchestrator.TriggerHost) error,
+) error {
 	runCtx, stop := orchestrator.HeartbeatTrigger(orchestrator.DispatchContext(ctx, trigger), cli, trigger.ID, heartbeat, slog.Default())
 	defer stop()
-	err := hostTriggerFromCheckout(runCtx, trigger, controllerURL, token)
+	err := hostTriggerFromCheckout(runCtx, trigger, controllerURL, token, build, host)
 	cause := context.Cause(runCtx)
 	if err == nil || errors.Is(cause, context.Canceled) {
 		return err
@@ -148,8 +156,7 @@ func hostTrigger(ctx context.Context, cli *client.Client, trigger *store.Trigger
 	return err
 }
 
-// hack: a variable so tests stand in for the build.
-var buildCheckoutPipeline = func(ctx context.Context) (binary, dir string, release func(), err error) {
+func buildCheckoutPipeline(ctx context.Context) (binary, dir string, release func(), err error) {
 	sparkwingDir, err := findSparkwingDir()
 	if err != nil {
 		return "", "", nil, err
@@ -169,16 +176,15 @@ var buildCheckoutPipeline = func(ctx context.Context) (binary, dir string, relea
 	}, nil
 }
 
-// hack: a variable so tests stand in for the run host.
-var hostTriggerRun = orchestrator.HostTriggerRun
-
-func hostTriggerFromCheckout(ctx context.Context, trigger *store.Trigger, controllerURL, token string) error {
-	binary, dir, release, err := buildCheckoutPipeline(ctx)
+func hostTriggerFromCheckout(ctx context.Context, trigger *store.Trigger, controllerURL, token string,
+	build checkoutBuild, host func(context.Context, orchestrator.TriggerHost) error,
+) error {
+	binary, dir, release, err := build(ctx)
 	if err != nil {
 		return err
 	}
 	defer release()
-	return hostTriggerRun(ctx, orchestrator.TriggerHost{
+	return host(ctx, orchestrator.TriggerHost{
 		ControllerURL: controllerURL, Token: token, Trigger: trigger, Binary: binary, Dir: dir,
 	})
 }

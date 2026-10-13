@@ -58,6 +58,10 @@ type Config struct {
 	Dispatch Executor
 	// ParentRunID, RetryOf and RetrySource are the run row's lineage.
 	ParentRunID, RetryOf, RetrySource string
+	// Resume reuses the node rows an earlier host of this run left, as a
+	// trigger reclaimed after its runner stopped has: a finished node keeps
+	// its result and an unfinished one runs again.
+	Resume bool
 }
 
 // Result is how one node ended.
@@ -276,7 +280,7 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 // run row is terminal.
 func runPlanned(ctx context.Context, cfg *Config, run *Run, res *RunResult) (release func()) {
 	release = func() {}
-	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(cfg)}
+	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(cfg), resume: cfg.Resume}
 	if err := s.add(ctx, ctx, run.Doc.Nodes); err != nil {
 		res.Status, res.Err = "failed", err
 		return release
@@ -385,6 +389,7 @@ type scheduler struct {
 	order   []string
 	groups  map[string]*genGroup
 	addedBy map[string]string
+	resume  bool
 }
 
 type finished struct {
@@ -539,17 +544,46 @@ func (s *scheduler) add(ctx, writeCtx context.Context, nodes []nodeproto.PlanNod
 		return err
 	}
 	for i, n := range nodes {
-		if err := s.run.State.CreateNode(writeCtx, pendingRow(s.run, n)); err != nil {
+		reused, err := s.reuseRow(writeCtx, n.ID)
+		if err == nil && !reused {
+			err = s.run.State.CreateNode(writeCtx, pendingRow(s.run, n))
+		}
+		if err != nil {
 			err = fmt.Errorf("create node %s: %w", n.ID, err)
 			s.nodes = append(s.nodes, nodes[:i]...)
 			for _, created := range nodes[:i] {
-				s.terminal(ctx, created.ID, sparkwing.Failed, err.Error())
+				if !s.started[created.ID] {
+					s.terminal(ctx, created.ID, sparkwing.Failed, err.Error())
+				}
 			}
 			return err
 		}
 	}
 	s.nodes = append(s.nodes, nodes...)
 	return nil
+}
+
+// safety: a resumed run's finished node keeps the result its row records and
+// is never run or written again; an unfinished row is run again as it stands.
+func (s *scheduler) reuseRow(ctx context.Context, id string) (bool, error) {
+	if !s.resume {
+		return false, nil
+	}
+	row, err := s.run.State.GetNode(ctx, s.run.ID, id)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		return false, nil
+	case err != nil:
+		return false, err
+	}
+	if row.Status == "done" && row.Outcome != "" {
+		res := Result{Outcome: sparkwing.Outcome(row.Outcome), Reason: row.FailureReason, recorded: true}
+		if row.Error != "" {
+			res.Err = errors.New(row.Error)
+		}
+		s.started[id], s.results[id] = true, res
+	}
+	return true, nil
 }
 
 func pendingRow(run *Run, n nodeproto.PlanNode) store.Node {

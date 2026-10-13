@@ -101,6 +101,8 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 			OpenLog: func(context.Context, string, string) (nodehost.NodeLog, error) { return hostLog, nil },
 		},
 		Dispatch: dispatchThrough(dispatch, trig.Pipeline),
+		// safety: a reclaimed trigger finds the rows its stopped host left, which the run keeps.
+		Resume: true,
 	})
 	planSink.end()
 	if err != nil {

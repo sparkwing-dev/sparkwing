@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -93,7 +95,7 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 	}
 	defer planSink.end()
 	cfg := nodehost.Config{
-		Session:  nodehost.SessionConfig{Entry: p.binary, Dir: p.dir, Sink: planSink, Env: podSessionEnv()},
+		Session:  nodehost.SessionConfig{Entry: p.binary, Dir: p.dir, Sink: planSink, Env: podSessionEnv(masker)},
 		Pipeline: run.Pipeline, Args: run.Args, Run: rc,
 		State: p.state, Artifacts: p.artifacts, Logger: p.logger,
 		Attempts: &nodehost.Attempts{
@@ -122,15 +124,34 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 
 // safety: the minimal environment plus only the dependency proxy settings the
 // pod's Job or runner was given, so go, npm and pip in the node use the cache's
-// proxy and no other engine variable reaches pipeline code.
-func podSessionEnv() []string {
+// proxy and no other engine variable reaches pipeline code. A proxy URL can
+// carry a credential, so each one's password, and the whole value, is masked
+// before any process of the node runs.
+func podSessionEnv(masker *secrets.Masker) []string {
 	env := nodehost.MinimalEnv()
 	for _, name := range k8srunner.DependencyProxyEnvNames {
 		if v, ok := os.LookupEnv(name); ok {
 			env = append(env, name+"="+v)
+			maskProxyCredentials(masker, v)
 		}
 	}
 	return env
+}
+
+// safety: GOPROXY lists several URLs split by commas and pipes, so each one's userinfo is masked.
+func maskProxyCredentials(masker *secrets.Masker, value string) {
+	for _, part := range strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == '|' }) {
+		u, err := url.Parse(strings.TrimSpace(part))
+		if err != nil || u.User == nil {
+			continue
+		}
+		masker.Register(value)
+		if password, ok := u.User.Password(); ok && password != "" {
+			masker.Register(password)
+		} else {
+			masker.Register(u.User.Username())
+		}
+	}
 }
 
 // PipelineRequires is the placement labels the pipeline's entry in the

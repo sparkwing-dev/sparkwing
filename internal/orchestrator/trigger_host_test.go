@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -22,6 +23,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -415,26 +418,43 @@ func (f runnerFunc) RunNode(ctx context.Context, req runner.Request) runner.Resu
 	return f(ctx, req)
 }
 
-// safety: a node another holder won the claim to is that holder's to finish,
-// so the run host neither finishes its row nor runs it.
-func TestTriggerHost_LeavesANodeAnotherHolderClaimedToThatHolder(t *testing.T) {
+// safety: a node another holder won the claim to is that holder's to run and
+// finish, so the run host neither runs it nor fails the run: it takes the
+// holder's result as the node's.
+func TestTriggerHost_TakesTheResultOfTheHolderThatWonTheClaim(t *testing.T) {
 	envOut := filepath.Join(t.TempDir(), "env")
 	h := newHostedTrigger(t, map[string]string{"envout": envOut})
 	c := client.NewWithToken(h.url, nil, h.token)
+	finished := make(chan error, 1)
 	r := runnerFunc(func(ctx context.Context, req runner.Request) runner.Result {
-		if _, err := c.ClaimNodeByID(store.WithoutClaimFences(ctx), req.RunID, req.NodeID, "pool:legitimate", time.Minute, false, nil); err != nil {
+		won, err := c.ClaimNodeByID(store.WithoutClaimFences(ctx), req.RunID, req.NodeID, "pool:legitimate", time.Minute, false, nil)
+		if err != nil {
 			t.Errorf("claim: %v", err)
+			return runner.Result{Outcome: sparkwing.Failed, Err: err}
 		}
-		host := &claimedNodeHost{controllerURL: h.url, binary: h.bin, dir: t.TempDir(), ctrl: c, logger: slog.New(slog.DiscardHandler)}
-		return host.RunNode(ctx, req)
+		host := &claimedNodeHost{controllerURL: h.url, binary: h.bin, dir: t.TempDir(), ctrl: c, trigger: h.trig, logger: slog.New(slog.DiscardHandler)}
+		res := host.RunNode(ctx, req)
+		fenced := store.WithNodeClaimFence(context.WithoutCancel(ctx), store.NodeClaimFence{
+			HolderID: won.ClaimedBy, MembershipID: won.ClaimMembershipID, ReservationID: won.ReservationID, ClaimGeneration: won.ClaimGeneration,
+		})
+		go func() {
+			finished <- client.NewWithToken(h.url, nil, won.ClaimToken).FinishNodeWithReason(fenced, req.RunID, req.NodeID, string(sparkwing.Success), "", nil, "", nil)
+		}()
+		return res
 	})
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 	if err := h.host(t, ctx, r, 0); err != nil {
 		t.Fatalf("host: %v", err)
 	}
-	if n := h.node(t, "build"); n.Status == "done" || n.ClaimedBy != "pool:legitimate" {
-		t.Fatalf("build = %s/%s claimed by %q, want left running under its holder's claim", n.Status, n.Outcome, n.ClaimedBy)
+	if err := <-finished; err != nil {
+		t.Fatalf("the holder's finish: %v", err)
+	}
+	if run := h.run(t); run.Status != "success" {
+		t.Fatalf("run = %s (%s), want the holder's success", run.Status, run.Error)
+	}
+	if n := h.node(t, "build"); n.Outcome != string(sparkwing.Success) || n.ClaimedBy != "pool:legitimate" {
+		t.Fatalf("build = %s/%s claimed by %q, want the holder's success", n.Status, n.Outcome, n.ClaimedBy)
 	}
 	if _, err := os.Stat(envOut); !os.IsNotExist(err) {
 		t.Fatalf("the refused host ran the node: %v", err)
@@ -541,5 +561,122 @@ func TestProtocolTriggerSourceNamesEveryRecordedSource(t *testing.T) {
 		if got := protocolTriggerSource(recorded); got != want {
 			t.Errorf("protocolTriggerSource(%q) = %q, want %q", recorded, got, want)
 		}
+	}
+}
+
+// safety: a trigger reclaimed after its runner stopped resumes the run its
+// rows record: a finished node keeps its result and is not run again, and an
+// unfinished one, its claim reaped, runs on the new host.
+func TestTriggerHost_AReclaimedTriggerResumesItsRun(t *testing.T) {
+	hold, pids := heldNodePID(t)
+	h := newHostedTrigger(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "hold": hold})
+	ctx, shutdown := context.WithCancel(t.Context())
+	defer shutdown()
+	done := make(chan error, 1)
+	go func() { done <- h.host(t, ctx, nil, 100*time.Millisecond) }()
+	waitCtx, stop := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer stop()
+	waitForPID(t, waitCtx, pids, done)
+	shutdown()
+	if err := <-done; err != nil {
+		t.Fatalf("shutdown host: %v", err)
+	}
+	if n := h.node(t, "build"); n.Outcome != string(sparkwing.Success) {
+		t.Fatalf("build before the reclaim = %s/%s, want success", n.Status, n.Outcome)
+	}
+	if _, err := h.st.DB().ExecContext(t.Context(), `UPDATE triggers SET lease_expires_at = 1 WHERE id = ?`, h.trig.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.st.DB().ExecContext(t.Context(), `UPDATE nodes SET lease_expires_at = 1 WHERE run_id = ? AND node_id = 'held'`, h.trig.ID); err != nil {
+		t.Fatal(err)
+	}
+	if nodes, err := h.st.ReapExpiredNodeClaims(t.Context()); err != nil || len(nodes) != 1 {
+		t.Fatalf("reaped node claims = %v, %v; want held's", nodes, err)
+	}
+	if triggers, err := store.Maintenance.ReapExpiredTriggers(h.st, t.Context()); err != nil || len(triggers) != 1 {
+		t.Fatalf("reaped triggers = %v, %v; want this run's", triggers, err)
+	}
+	claimed, err := client.NewWithToken(h.url, nil, h.token).ClaimTriggerFor(t.Context(), nil, nil)
+	if err != nil || claimed == nil || claimed.ClaimSeq <= h.trig.ClaimSeq {
+		t.Fatalf("reclaim = %+v, %v; want a newer claim", claimed, err)
+	}
+	h.trig = claimed
+	var dispatched []string
+	r := runnerFunc(func(ctx context.Context, req runner.Request) runner.Result {
+		dispatched = append(dispatched, req.NodeID)
+		n, err := client.NewWithToken(h.url, nil, h.token).ClaimNodeByID(store.WithoutClaimFences(ctx), req.RunID, req.NodeID, "successor", time.Minute, false, nil)
+		if err != nil {
+			return runner.Result{Outcome: sparkwing.Failed, Err: err}
+		}
+		fenced := store.WithNodeClaimFence(store.WithoutClaimFences(ctx), store.NodeClaimFence{
+			HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID, ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
+		})
+		if err := client.NewWithToken(h.url, nil, n.ClaimToken).FinishNodeWithReason(fenced, req.RunID, req.NodeID, string(sparkwing.Success), "", nil, "", nil); err != nil {
+			return runner.Result{Outcome: sparkwing.Failed, Err: err}
+		}
+		return runner.Result{Outcome: sparkwing.Success}
+	})
+	resumeCtx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+	if err := h.host(t, resumeCtx, r, 0); err != nil {
+		t.Fatalf("resumed host: %v", err)
+	}
+	trig, err := h.st.GetTrigger(t.Context(), h.trig.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run := h.run(t); run.Status != "success" || trig.Status != "done" || !slices.Equal(dispatched, []string{"held"}) {
+		t.Fatalf("resumed run = %s (%s), trigger %s, dispatched %v; want success with only held run again", run.Status, run.Error, trig.Status, dispatched)
+	}
+}
+
+// safety: a dependency proxy URL can carry a credential, which the node
+// receives to reach the proxy but which no stored log may show.
+func TestTriggerHost_MasksTheProxyCredentialsANodeReceives(t *testing.T) {
+	dir := t.TempDir()
+	envOut, echo := filepath.Join(dir, "env"), filepath.Join(dir, "echo")
+	values := map[string]string{
+		"GOPROXY":             "https://cache-reader:go-proxy-password@cache.invalid/proxy/golang|https://proxy.golang.org,direct",
+		"npm_config_registry": "https://cache-reader:npm-proxy-password@cache.invalid/proxy/npm",
+		"PIP_INDEX_URL":       "https://pip-proxy-token@cache.invalid/proxy/pypi/simple",
+	}
+	var echoed []string
+	for name, value := range values {
+		t.Setenv(name, value)
+		echoed = append(echoed, name+"="+value)
+	}
+	if err := os.WriteFile(echo, []byte(strings.Join(echoed, " ")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := newHostedTrigger(t, map[string]string{"envout": envOut, "echo": echo})
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+	if err := h.host(t, ctx, nil, 0); err != nil {
+		t.Fatalf("host: %v", err)
+	}
+	env, err := os.ReadFile(envOut)
+	if err != nil {
+		t.Fatal(err)
+	}
+	objs, err := fs.NewArtifactStore(h.st.OutputDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs, err := segmentController{st: h.st}.nodeLog(t, h.trig.ID, "build").Read(t.Context(), objs, storage.ReadOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range values {
+		if !strings.Contains(string(env), name+"="+value) {
+			t.Errorf("the node did not receive %s", name)
+		}
+	}
+	for _, secret := range []string{"go-proxy-password", "npm-proxy-password", "pip-proxy-token"} {
+		if strings.Contains(string(logs), secret) {
+			t.Errorf("the build log shows %s", secret)
+		}
+	}
+	if !strings.Contains(string(logs), "GOPROXY=***") {
+		t.Errorf("the build log = %s, want the echoed proxy settings masked", logs)
 	}
 }

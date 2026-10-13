@@ -140,22 +140,39 @@ func TestDispatchCancelledRunCancelsTheOutstandingNode(t *testing.T) {
 }
 
 // safety: a row another holder claims is that holder's to finish, so the run
-// host leaves it however the dispatch reads.
-func TestDispatchLeavesARowAnotherHolderClaims(t *testing.T) {
+// host waits for that holder's result and takes it as the node's, rather than
+// fail the run with its own refused dispatch.
+func TestDispatchAdoptsTheResultOfTheHolderThatWonTheClaim(t *testing.T) {
+	prev := claimedRowPoll
+	claimedRowPoll = 5 * time.Millisecond
+	t.Cleanup(func() { claimedRowPoll = prev })
 	st := openStore(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
+	finished := make(chan error, 1)
 	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "build"}}},
 		func(ctx context.Context, n *NodeRun) Result {
-			if _, err := st.ClaimNamedNode(ctx, store.ClaimIdentity{}, n.Run.ID, n.Plan.ID, "pool:other", time.Minute, store.NamedClaimOptions{}); err != nil {
+			won, err := st.ClaimNamedNode(ctx, store.ClaimIdentity{}, n.Run.ID, n.Plan.ID, "pool:other", time.Minute, store.NamedClaimOptions{})
+			if err != nil {
 				t.Errorf("claim: %v", err)
+				return Result{Outcome: sparkwing.Failed, Err: err}
 			}
+			fenced := store.WithNodeClaimFence(context.WithoutCancel(ctx), store.NodeClaimFence{
+				HolderID: won.ClaimedBy, MembershipID: won.ClaimMembershipID, ReservationID: won.ReservationID, ClaimGeneration: won.ClaimGeneration,
+			})
+			// safety: the holder may finish after the refused dispatch returns, so the host waits for its result.
+			go func() {
+				finished <- st.FinishNodeWithReason(fenced, n.Run.ID, n.Plan.ID, string(sparkwing.Success), "", nil, "", nil)
+			}()
 			return Result{Outcome: sparkwing.Failed, Err: store.ErrLockHeld}
 		})
-	if res.Status != "failed" {
-		t.Fatalf("run = %+v, want failed", res)
+	if err := <-finished; err != nil {
+		t.Fatalf("the holder's finish: %v", err)
 	}
-	if row := nodeRow(t, st, "build"); row.Status == "done" || row.ClaimedBy != "pool:other" {
-		t.Fatalf("build row = %s/%s claimed by %q, want left to its holder", row.Status, row.Outcome, row.ClaimedBy)
+	if res.Status != "success" {
+		t.Fatalf("run = %+v, want the holder's success", res)
+	}
+	if row := nodeRow(t, st, "build"); row.Outcome != string(sparkwing.Success) || row.ClaimedBy != "pool:other" {
+		t.Fatalf("build row = %s/%s claimed by %q, want the holder's success", row.Status, row.Outcome, row.ClaimedBy)
 	}
 }

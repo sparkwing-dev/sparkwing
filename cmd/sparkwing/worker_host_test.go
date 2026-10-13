@@ -45,32 +45,29 @@ func newWorkerController(t *testing.T) *workerController {
 	return c
 }
 
-func stubWorkerHost(t *testing.T, build func(ctx context.Context) error) {
-	t.Helper()
-	prevBuild, prevHost := buildCheckoutPipeline, hostTriggerRun
-	t.Cleanup(func() { buildCheckoutPipeline, hostTriggerRun = prevBuild, prevHost })
-	buildCheckoutPipeline = func(ctx context.Context) (string, string, func(), error) {
-		return "pipeline", "dir", func() {}, build(ctx)
-	}
-	hostTriggerRun = func(context.Context, orchestrator.TriggerHost) error { return nil }
+func hostWithBuild(ctx context.Context, ctrl *workerController, trig *store.Trigger, heartbeat time.Duration, build func(ctx context.Context) error) error {
+	return hostTriggerWith(ctx, client.New(ctrl.URL, nil), trig, ctrl.URL, "token", heartbeat,
+		func(ctx context.Context) (string, string, func(), error) {
+			return "pipeline", "dir", func() {}, build(ctx)
+		},
+		func(context.Context, orchestrator.TriggerHost) error { return nil })
 }
 
 // safety: the worker renews the trigger claim while it builds the pipeline,
 // so a cold build longer than the claim's lease keeps the claim.
 func TestWorkerRenewsTheClaimWhileItBuilds(t *testing.T) {
 	ctrl := newWorkerController(t)
-	stubWorkerHost(t, func(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	trig := &store.Trigger{ID: "run-built", Pipeline: "p"}
+	if err := hostWithBuild(ctx, ctrl, trig, 100*time.Millisecond, func(ctx context.Context) error {
 		select {
 		case <-ctrl.beat:
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-	})
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
-	defer cancel()
-	trig := &store.Trigger{ID: "run-built", Pipeline: "p"}
-	if err := hostTrigger(ctx, client.New(ctrl.URL, nil), trig, ctrl.URL, "token", 100*time.Millisecond); err != nil {
+	}); err != nil {
 		t.Fatalf("the build never saw a heartbeat: %v", err)
 	}
 }
@@ -80,18 +77,17 @@ func TestWorkerRenewsTheClaimWhileItBuilds(t *testing.T) {
 func TestWorkerShutdownMidBuildLeavesTheTriggerToItsLease(t *testing.T) {
 	ctrl := newWorkerController(t)
 	building := make(chan struct{})
-	stubWorkerHost(t, func(ctx context.Context) error {
-		close(building)
-		<-ctx.Done()
-		return ctx.Err()
-	})
 	ctx, cancel := context.WithCancel(t.Context())
 	go func() {
 		<-building
 		cancel()
 	}()
 	trig := &store.Trigger{ID: "run-stopped", Pipeline: "p"}
-	_ = hostTrigger(ctx, client.New(ctrl.URL, nil), trig, ctrl.URL, "token", time.Hour)
+	_ = hostWithBuild(ctx, ctrl, trig, time.Hour, func(ctx context.Context) error {
+		close(building)
+		<-ctx.Done()
+		return ctx.Err()
+	})
 	ctrl.mu.Lock()
 	defer ctrl.mu.Unlock()
 	if len(ctrl.finished) != 0 {
