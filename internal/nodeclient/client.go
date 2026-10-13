@@ -77,6 +77,7 @@ type Client struct {
 	token  string
 	http   *http.Client
 	budget time.Duration
+	now    func() time.Time
 }
 
 // New binds a client to the routes at baseURL with bearer. baseURL must be
@@ -95,7 +96,7 @@ func New(baseURL, bearer string) (*Client, error) {
 	// safety: the bearer goes to the host alone, never through a proxy.
 	transport.Proxy = nil
 	return &Client{
-		base: strings.TrimRight(baseURL, "/"), token: bearer, budget: retryBudget,
+		base: strings.TrimRight(baseURL, "/"), token: bearer, budget: retryBudget, now: time.Now,
 		http: &http.Client{
 			Transport: transport,
 			// safety: a redirect could carry the bearer to another local
@@ -149,9 +150,9 @@ func (c *Client) do(ctx context.Context, method, path string, timeout time.Durat
 
 // safety: tries bounds only 502 retries; a 429 is refused before the host
 // forwards anything, so retrying it never repeats a request, and the budget
-// bounds it. Every retry, its request included, ends by the budget, and one
-// cut short there reports the refusal before it; the first request keeps its
-// own timeout, since an await may hold longer than the budget.
+// bounds it. The budget starts at the first refusal, since an await may hold
+// longer than the budget before it is refused; every retry, its request
+// included, ends by then, and one cut short there reports the refusal.
 func (c *Client) call(ctx context.Context, method, path string, timeout time.Duration, body, out any, want, tries int) error {
 	var payload []byte
 	if body != nil {
@@ -161,12 +162,12 @@ func (c *Client) call(ctx context.Context, method, path string, timeout time.Dur
 		}
 	}
 	delay := 25 * time.Millisecond
-	giveUp := time.Now().Add(c.budget)
+	var giveUp time.Time
 	var refused error
 	for try := 1; ; try++ {
 		reqCtx, cancel := ctx, context.CancelFunc(func() {})
 		if refused != nil {
-			reqCtx, cancel = context.WithDeadline(ctx, giveUp)
+			reqCtx, cancel = context.WithTimeout(ctx, giveUp.Sub(c.now()))
 		}
 		err := c.once(reqCtx, method, path, timeout, payload, out, want)
 		spent := err != nil && reqCtx.Err() != nil && ctx.Err() == nil
@@ -174,12 +175,15 @@ func (c *Client) call(ctx context.Context, method, path string, timeout time.Dur
 		if spent {
 			return refused
 		}
+		if refused == nil {
+			giveUp = c.now().Add(c.budget)
+		}
 		refused = err
 		var e *Error
 		switch {
 		case !errors.As(err, &e):
 			return err
-		case time.Now().Add(delay).After(giveUp):
+		case c.now().Add(delay).After(giveUp):
 			return err
 		case e.Code == CodeTooManyRequests:
 		case e.Code == CodeUpstreamUnavailable && try < tries:

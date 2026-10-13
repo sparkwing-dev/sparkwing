@@ -396,3 +396,28 @@ func TestA429RetryThatStallsEndsAtTheRetryBudget(t *testing.T) {
 		t.Fatalf("host asked %d times, want a retry", n)
 	}
 }
+
+func TestTheRetryBudgetStartsAtTheFirstRefusal(t *testing.T) {
+	var calls atomic.Int32
+	var clock atomic.Int64
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			// safety: the refusal arrives an hour into the call, far past the budget.
+			clock.Add(int64(time.Hour))
+			answer(http.StatusTooManyRequests, map[string]string{"error": "slots full", "code": nodeclient.CodeTooManyRequests})(w, r)
+			return
+		}
+		answer(http.StatusOK, map[string]any{"value": "ready", "masked": true})(w, r)
+	}))
+	t.Cleanup(host.Close)
+	c, err := nodeclient.New(host.URL, "bearer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodeclient.SetRetryBudget(c, 2*time.Minute)
+	nodeclient.SetClock(c, func() time.Time { return time.Unix(0, clock.Load()) })
+	value, _, err := c.Secret(context.Background(), "X")
+	if err != nil || value != "ready" || calls.Load() != 2 {
+		t.Fatalf("value %q err %v after %d requests, want the retry to succeed", value, err, calls.Load())
+	}
+}
