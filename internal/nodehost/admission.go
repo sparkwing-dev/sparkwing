@@ -95,6 +95,9 @@ type group struct {
 	key, policy       string
 	capacity, cost    int
 	queueTO, cancelTO time.Duration
+	// safety: set only by the memo layer, so a concurrency group's release records no memo entry.
+	memoHash string
+	memoTTL  time.Duration
 }
 
 func (a *Admission) admit(ctx context.Context, n *NodeRun, next Executor) Result {
@@ -473,7 +476,7 @@ func (a *Admission) holdSlot(ctx context.Context, h slotHolder, g group, holder 
 	}
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if err := a.Slots.ReleaseSlot(rctx, g.key, holder, slotOutcome(res.Outcome), holder, "", 0); err != nil {
+	if err := a.Slots.ReleaseSlot(rctx, g.key, holder, slotOutcome(res.Outcome), holder, g.memoHash, g.memoTTL); err != nil {
 		h.log.Warn("nodehost: concurrency release failed; the reaper sweeps it", "key", g.key, "err", err)
 	}
 	return res

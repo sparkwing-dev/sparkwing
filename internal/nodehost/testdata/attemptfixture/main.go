@@ -1,8 +1,8 @@
 // Command attemptfixture is a pipeline the attempt executor's tests run end
 // to end: a node that reads a secret, prints it, registers a cleanup and
 // returns an output; a node that exits mid-body; a plan that drifts
-// between processes; nodes with every attempt closure; and a dynamic fan-out
-// with a node that waits for it.
+// between processes; nodes with every attempt closure; a dynamic fan-out
+// with a node that waits for it; and memoized nodes.
 package main
 
 import (
@@ -28,6 +28,7 @@ type inputs struct {
 	Hooks   bool   `flag:"hooks" desc:"Add nodes with skip_if, before_run, verify and after_run closures"`
 	FanOut  string `flag:"fanout" desc:"Comma-separated targets to fan out over; boom fails the generator, hang blocks it"`
 	Pass    string `flag:"pass" secret:"true" desc:"A secret input the build node prints"`
+	Memo    bool   `flag:"memo" desc:"Add memoized nodes, one of them a fan-out source"`
 }
 
 type fixtureSecrets struct {
@@ -84,7 +85,55 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 	if in.Hooks {
 		addHooks(plan, in.Marker)
 	}
+	if in.Memo {
+		addMemo(plan, in.Marker)
+	}
 	return nil
+}
+
+// addMemo adds memoized nodes whose bodies write "body" to <marker>/<node>.
+func addMemo(plan *sparkwing.Plan, marker string) {
+	key := func(k sparkwing.CacheKey, err error) sparkwing.CacheKeyFn {
+		return func(context.Context) (sparkwing.CacheKey, error) { return k, err }
+	}
+	body := func(node string, fail bool) func(context.Context) (string, error) {
+		return func(ctx context.Context) (string, error) {
+			_, statErr := os.Stat(filepath.Join(marker, node))
+			traceBody(marker, node)
+			if fail && statErr != nil {
+				return "", errors.New("first run fails")
+			}
+			return "from " + os.Getenv("SPARKWING_RUN_ID"), nil
+		}
+	}
+	group := sparkwing.NewConcurrencyGroup("memo-group", sparkwing.ConcurrencyLimit{Capacity: 1, OnLimit: sparkwing.Queue})
+	sparkwing.Job(plan, "memoized", &memoJob{body: body("memoized", false)}).Memoize(key("memo-v1", nil)).Concurrency(group)
+	sparkwing.Job(plan, "memo-flaky", &memoJob{body: body("memo-flaky", true)}).Memoize(key("flaky-v1", nil))
+	sparkwing.Job(plan, "nocache", &memoJob{body: body("nocache", false)}).Memoize(key(sparkwing.NoCache, nil))
+	sparkwing.Job(plan, "emptykey", &memoJob{body: body("emptykey", false)}).Memoize(key("", nil))
+	sparkwing.Job(plan, "keyfail", &memoJob{body: body("keyfail", false)}).Memoize(key("", errors.New("no lockfile")))
+	source := sparkwing.Job(plan, "memo-targets", &targetsJob{list: "x,y", marker: marker}).Memoize(key("targets-v1", nil))
+	tests := sparkwing.JobFanOutDynamic(plan, "memo-tests", source, func(target string) (string, any) {
+		return "memo-test-" + target, func(context.Context) error { return nil }
+	})
+	sparkwing.Job(plan, "memo-summary", func(context.Context) error { return nil }).Needs(tests)
+}
+
+func traceBody(marker, node string) {
+	f, err := os.OpenFile(filepath.Join(marker, node), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err == nil {
+		_, _ = fmt.Fprintln(f, "body")
+		_ = f.Close()
+	}
+}
+
+type memoJob struct {
+	sparkwing.Produces[string]
+	body func(context.Context) (string, error)
+}
+
+func (j *memoJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	return sparkwing.Step(w, "run", j.body), nil
 }
 
 // addHooks adds nodes that write each closure's call to <marker>/<node>, one
@@ -176,10 +225,15 @@ func (j *buildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 type targetsJob struct {
 	sparkwing.Produces[[]string]
 	list string
+	// marker, when set, is where the body writes "body" to <marker>/<node>.
+	marker string
 }
 
 func (j *targetsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	return sparkwing.Step(w, "list", func(context.Context) ([]string, error) {
+	return sparkwing.Step(w, "list", func(ctx context.Context) ([]string, error) {
+		if j.marker != "" {
+			traceBody(j.marker, sparkwing.NodeFromContext(ctx))
+		}
 		return strings.Split(j.list, ","), nil
 	}), nil
 }

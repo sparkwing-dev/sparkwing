@@ -255,7 +255,7 @@ func TestNodeProtocolEntryEvaluatesClosures(t *testing.T) {
 		{closure: "nocache/cache_key/0", value: "null"},
 		{closure: "keyfail/cache_key/0", value: "null", err: ptr("no lockfile")},
 		{closure: "stepped/step/lint/skip_if/0", value: "true"},
-		{closure: "emptykey/cache_key/0", value: "null", err: ptr("resolve cache key for emptykey: empty key")},
+		{closure: "emptykey/cache_key/0", value: `""`},
 		{closure: "inputs/skip_if/0", value: "true"},
 	} {
 		reply, logs := s.call(nodeproto.Request{Op: nodeproto.OpEval, Closure: tc.closure, Input: tc.input})

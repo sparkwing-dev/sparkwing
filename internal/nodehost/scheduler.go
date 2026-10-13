@@ -48,6 +48,8 @@ type Config struct {
 	Admission *Admission
 	// Debug holds the run's debug pauses and bounce requests.
 	Debug Debug
+	// Memo reuses memoized nodes' earlier results; nil runs every node.
+	Memo *Memo
 }
 
 // Result is how one node ended.
@@ -61,6 +63,8 @@ type Result struct {
 	// failed before_run does: a later attempt would run the body without it.
 	Final      bool
 	expansions []expansion
+	// safety: the memo layer writes the row before its release records the entry, so finish must not write it again.
+	memoRecorded bool
 }
 
 // RunResult is how a hosted run ended. Status is success, failed or
@@ -101,6 +105,8 @@ type NodeRun struct {
 	// is called, which restarts it in full. A wait the node makes on the host,
 	// such as a child-run await, holds it.
 	Pause func() (resume func())
+	// safety: set only for a memoized node that did not run, whose generators read it through the output route.
+	memoOutput json.RawMessage
 }
 
 // Run is the hosted run an executor works within.
@@ -152,13 +158,14 @@ func (r *Run) Add(ctx context.Context, nodes ...nodeproto.PlanNode) error {
 type Layer func(cfg *Config, next Executor) Executor
 
 // safety: the order is the envelope's nesting, outermost first: debug pauses, then skip_if, which the
-// dispatcher checks after a pause-before but before a gate waits, then approvals and recovery, admission,
-// bounce, memo, artifacts, caches, retries and timeouts, expansion. The attempt closures and steps run
-// inside the attempt executor, since they share the attempt's process.
+// dispatcher checks after a pause-before but before a gate waits, then approvals and recovery, memo, which
+// copies a hit before any admission lease or group slot is taken, admission, bounce, artifacts, caches,
+// retries and timeouts, expansion. The attempt closures and steps run inside the attempt executor.
 var layers = []Layer{
 	debugLayer,
 	skipIfLayer,
 	approvalsLayer,
+	memoLayer,
 	admissionLayer,
 	bounceLayer,
 	artifactsLayer,
@@ -466,7 +473,10 @@ func (s *scheduler) finish(ctx context.Context, id string, res Result) {
 		res.Outcome, res.Err = sparkwing.Cancelled, errors.New("cancelled: run failing")
 	}
 	writeCtx := context.WithoutCancel(ctx)
-	err := s.run.State.FinishNodeWithReason(writeCtx, s.run.ID, id, string(res.Outcome), errText(res.Err), res.Output, res.Reason, nil)
+	var err error
+	if !res.memoRecorded {
+		err = s.run.State.FinishNodeWithReason(writeCtx, s.run.ID, id, string(res.Outcome), errText(res.Err), res.Output, res.Reason, nil)
+	}
 	if errors.Is(err, store.ErrOutputNotStored) {
 		// safety: a refused output fails the node in its row too, so the row never stays running.
 		res = Result{Outcome: sparkwing.Failed, Err: err}
