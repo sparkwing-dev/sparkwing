@@ -53,12 +53,15 @@ type expect struct {
 	MessageContains string           `json:"message_contains"`
 	Result          map[string]any   `json:"result"`
 	Absent          []string         `json:"absent"`
-	ErrorContains   string           `json:"error_contains"`
 	PlanNodes       map[string]any   `json:"plan_nodes"`
 	Logs            []map[string]any `json:"logs"`
 }
 
 type schemas struct{ proto, doc, record *Schema }
+
+// safety: the host writes these from what it drives, so an SDK record that
+// carries one would duplicate or contradict the host's.
+var hostEvents = []string{"step_start", "step_end", "step_skipped", "work_fail_fast", "node_start", "node_end", "retry"}
 
 func TestGoSDKConforms(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "gofixture")
@@ -233,6 +236,9 @@ func (p *proc) await(ids []string) (map[string]map[string]any, []map[string]any)
 		p.transcript = append(p.transcript, "<- "+normalize(p.t, obj))
 		if frame.Kind == nodeproto.KindLog {
 			p.validate(p.sc.record, "", obj, "log record")
+			if ev, _ := obj["event"].(string); slices.Contains(hostEvents, ev) {
+				p.t.Errorf("log record carries event %s, which only the host writes: %s", ev, line)
+			}
 			logs = append(logs, obj)
 			continue
 		}
@@ -303,9 +309,6 @@ func (p *proc) check(send, reply map[string]any, logs []map[string]any, want exp
 		if _, has := result[key]; has {
 			p.t.Errorf("%s: result carries %q, want it absent: %v", at, key, result)
 		}
-	}
-	if msg, _ := result["error"].(string); want.ErrorContains != "" && !strings.Contains(msg, want.ErrorContains) {
-		p.t.Errorf("%s: result error %q, want it to contain %q", at, msg, want.ErrorContains)
 	}
 	if send["op"] == "plan" {
 		p.checkPlan(result, want.PlanNodes)

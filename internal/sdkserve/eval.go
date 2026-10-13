@@ -22,8 +22,12 @@ func eval(ctx context.Context, s *server, req nodeproto.Request) (any, error) {
 	if !ok {
 		return nil, &nodeproto.Error{Code: nodeproto.CodeUnknownClosure, Message: fmt.Sprintf("closure %q is not in this process's plan", req.Closure)}
 	}
+	ctx, err := s.nodeContext(ctx, planned, c.Node, c.Step)
+	if err != nil {
+		return closureFailed(err), nil
+	}
 	if c.Kind == sparkwingruntime.ClosureGenerator {
-		return Expand(s.nodeContext(ctx, planned, c.Node, nil), s.cfg, planned, req.Closure)
+		return Expand(ctx, s.cfg, planned, req.Closure)
 	}
 	var nodeErr error
 	if c.Kind == sparkwingruntime.ClosureAfterRun {
@@ -35,7 +39,6 @@ func eval(ctx context.Context, s *server, req nodeproto.Request) (any, error) {
 			nodeErr = errors.New(in.Error)
 		}
 	}
-	ctx = s.nodeContext(ctx, planned, c.Node, c.Step)
 	value, err := callClosure(ctx, c, nodeErr)
 	var res nodeproto.EvalResult
 	if err != nil {
@@ -47,6 +50,11 @@ func eval(ctx context.Context, s *server, req nodeproto.Request) (any, error) {
 		return nil, err
 	}
 	return res, nil
+}
+
+func closureFailed(err error) nodeproto.EvalResult {
+	msg := err.Error()
+	return nodeproto.EvalResult{Value: json.RawMessage("null"), Error: &msg}
 }
 
 // safety: a panic in a closure is the closure failing, so it answers error
