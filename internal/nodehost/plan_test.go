@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -29,7 +30,7 @@ func TestExecutePlansWithTheSDK(t *testing.T) {
 	}
 	config := func(st *store.Store, runID string, args map[string]string, exec Executor) Config {
 		return Config{
-			Session:   SessionConfig{Entry: bin, Dir: t.TempDir(), Grace: 2 * time.Second},
+			Session:   SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second},
 			Pipeline:  "conformance",
 			Args:      args,
 			Run:       nodeproto.RunContext{RunID: runID, Git: &nodeproto.Git{SHA: "4f2c1e0", Branch: "main", Repo: "acme/app"}},

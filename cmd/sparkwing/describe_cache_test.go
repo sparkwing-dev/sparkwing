@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 )
 
 func protocolFixture(t *testing.T, path, counter, pipelines string) {
@@ -119,8 +120,8 @@ func TestEnsureDescribeCacheRewritesALegacyEntry(t *testing.T) {
 	fixture, counter := filepath.Join(t.TempDir(), "pipeline"), filepath.Join(t.TempDir(), "starts")
 	protocolFixture(t, fixture, counter, `[{"name":"build"}]`)
 
-	ensureDescribeCache(context.Background(), sparkwingDir, key, fixture)
-	ensureDescribeCache(context.Background(), sparkwingDir, key, fixture)
+	ensureDescribeCache(context.Background(), sparkwingDir, key, pipelineentry.Binary(fixture))
+	ensureDescribeCache(context.Background(), sparkwingDir, key, pipelineentry.Binary(fixture))
 	if got := readDescribeFile(describeCachePath(key)); len(got) != 1 || got[0].Name != "build" {
 		t.Fatalf("cache after ensure = %+v", got)
 	}
@@ -146,7 +147,7 @@ func TestSourceRunDescribesWithTheCallersBinding(t *testing.T) {
 	}
 	writeRepoFile(t, describeCachePath(key), `{"protocol":"1","pipelines":[{"name":"source"}]}`)
 
-	run := &pipelineRun{ctx: context.Background(), sparkwingDir: source, uncachedBinary: fixture}
+	run := &pipelineRun{ctx: context.Background(), sparkwingDir: source, entry: pipelineentry.Binary(fixture)}
 	if _, err := run.describedPipeline("source"); err != nil {
 		t.Fatalf("an in-place run: %v", err)
 	}

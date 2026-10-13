@@ -15,6 +15,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
@@ -25,7 +26,8 @@ import (
 )
 
 type podNode struct {
-	binary, dir                         string
+	entry                               pipelineentry.Command
+	dir                                 string
 	controllerURL, token, runID, nodeID string
 	// safety: the accepted plan's hash for the node, which the pod's own plan of it must match.
 	specHash string
@@ -70,7 +72,7 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 	}
 	defer planSink.end()
 	res := nodehost.HostNode(ctx, nodehost.Config{
-		Session:  nodehost.SessionConfig{Entry: p.binary, Dir: p.dir, Sink: planSink},
+		Session:  nodehost.SessionConfig{Entry: p.entry, Dir: p.dir, Sink: planSink},
 		Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run),
 		State: p.state, Artifacts: p.artifacts, Logger: p.logger,
 		// safety: the node's concurrency group and memo entry run through the claim, which the controller binds to

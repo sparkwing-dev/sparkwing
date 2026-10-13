@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
@@ -55,8 +56,8 @@ type Sink interface {
 
 // SessionConfig says how to start an SDK process.
 type SessionConfig struct {
-	// Entry is the program run as "<Entry> --sw-node-protocol".
-	Entry string
+	// Entry is the command run with --sw-node-protocol appended.
+	Entry pipelineentry.Command
 	// Dir is the repository root.
 	Dir string
 	// Env is the process's whole environment, which the caller sets on
@@ -143,7 +144,7 @@ func StartSession(ctx context.Context, cfg SessionConfig) (*Session, error) {
 			parent, child = append(parent, r), append(child, w)
 		}
 	}
-	cmd := exec.Command(cfg.Entry, "--sw-node-protocol")
+	cmd := cfg.Entry.Exec()
 	if cfg.Env == nil {
 		cfg.Env = MinimalEnv()
 	}

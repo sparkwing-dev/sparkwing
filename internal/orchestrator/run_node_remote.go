@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -134,9 +135,12 @@ func runNodeRemote(
 		return runner.Result{}, fmt.Errorf("resolve binary: %w", err)
 	}
 	defer binary.release()
+	if len(binary.entry) != 1 {
+		return runner.Result{}, errors.New("a TypeScript pipeline runs only on the pod node host")
+	}
 	logger.Info("runNodeRemote: binary ready",
-		"run_id", runID, "node_id", nodeID, "bin", binary.path)
-	return runNodeChild(ctx, binary.path, filepath.Dir(sparkwingDir), controllerURL, token, binaryCacheURL, cacheGrant, runID, nodeID, logger)
+		"run_id", runID, "node_id", nodeID, "bin", binary.entry[0])
+	return runNodeChild(ctx, binary.entry[0], filepath.Dir(sparkwingDir), controllerURL, token, binaryCacheURL, cacheGrant, runID, nodeID, logger)
 }
 
 // safety: a pooled agent serves many runs from one process, so the cache grant is the node's,
@@ -429,7 +433,7 @@ func triggerGitHubRepository(trigger *store.Trigger) string {
 }
 
 type remoteBinary struct {
-	path  string
+	entry pipelineentry.Command
 	lease *bincache.Lease
 }
 
@@ -440,13 +444,21 @@ func (b remoteBinary) release() {
 }
 
 func resolveRemoteBinary(ctx context.Context, sparkwingDir, controllerURL, controllerToken, runID, gcURL, token string, logger *slog.Logger) (remoteBinary, error) {
+	ts, err := pipelineentry.IsTypeScript(sparkwingDir)
+	if err != nil {
+		return remoteBinary{}, err
+	}
+	if ts {
+		cmd, err := pipelineentry.Prepare(ctx, sparkwingDir, os.Environ())
+		return remoteBinary{entry: cmd}, err
+	}
 	key, err := bincache.PipelineCacheKey(sparkwingDir)
 	if err != nil {
 		tmp := filepath.Join(sparkwingDir, ".sparkwing-runner-bin")
 		if cerr := bincache.CompilePipeline(ctx, sparkwingDir, tmp); cerr != nil {
 			return remoteBinary{}, cerr
 		}
-		return remoteBinary{path: tmp}, nil
+		return remoteBinary{entry: pipelineentry.Binary(tmp)}, nil
 	}
 	entry, err := bincache.PipelineEntry(key)
 	if err != nil {
@@ -472,5 +484,5 @@ func resolveRemoteBinary(ctx context.Context, sparkwingDir, controllerURL, contr
 			logger.Warn("runNodeRemote: bin cache upload failed", "err", err, "hash", key)
 		}
 	}
-	return remoteBinary{path: lease.Path(), lease: lease}, nil
+	return remoteBinary{entry: pipelineentry.Binary(lease.Path()), lease: lease}, nil
 }

@@ -164,7 +164,7 @@ func TestDispatchRun_SeparatorPassesRetiredFlagsToPipeline(t *testing.T) {
 	empty := t.TempDir()
 	t.Chdir(empty)
 	err := dispatchRun([]string{"fictional", "--", "--sw-profile", "fictional"})
-	if err == nil || !strings.Contains(err.Error(), "no .sparkwing/main.go found from "+empty) {
+	if err == nil || !strings.Contains(err.Error(), "no .sparkwing/main.go or TypeScript .sparkwing/package.json found from "+empty) {
 		t.Fatalf("dispatch error = %v, want pipeline directory lookup", err)
 	}
 }

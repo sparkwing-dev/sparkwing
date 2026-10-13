@@ -7,14 +7,13 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/protofd"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
@@ -65,23 +64,22 @@ func (s *Session) Describe() (sdkserve.DescribeDoc, error) {
 	return doc, nil
 }
 
-// Describe starts the pipeline binary at binPath in dir and returns its
-// describe reply.
-func Describe(ctx context.Context, binPath, dir string) (sdkserve.DescribeDoc, error) {
+// Describe starts the pipeline entry in dir and returns its describe reply.
+func Describe(ctx context.Context, entry pipelineentry.Command, dir string) (sdkserve.DescribeDoc, error) {
 	var doc sdkserve.DescribeDoc
-	err := Converse(ctx, binPath, dir, func(s *Session) (err error) {
+	err := Converse(ctx, entry, dir, func(s *Session) (err error) {
 		doc, err = s.Describe()
 		return err
 	})
 	return doc, err
 }
 
-// Converse starts the pipeline binary at binPath in dir with
-// --sw-node-protocol and hands talk a [Session] on it. A process that has not
-// finished within [SessionTimeout] is killed with every process it started.
-func Converse(ctx context.Context, binPath, dir string, talk func(*Session) error) error {
+// Converse starts the pipeline entry in dir with --sw-node-protocol and hands
+// talk a [Session] on it. A process that has not finished within
+// [SessionTimeout] is killed with every process it started.
+func Converse(ctx context.Context, entry pipelineentry.Command, dir string, talk func(*Session) error) error {
 	ctx, cancel := context.WithTimeoutCause(ctx, SessionTimeout,
-		fmt.Errorf("%s: no reply within %s: %w", binPath, SessionTimeout, context.DeadlineExceeded))
+		fmt.Errorf("%s: no reply within %s: %w", entry[len(entry)-1], SessionTimeout, context.DeadlineExceeded))
 	defer cancel()
 	reqR, reqW, err := os.Pipe()
 	if err != nil {
@@ -96,8 +94,7 @@ func Converse(ctx context.Context, binPath, dir string, talk func(*Session) erro
 	defer func() { _ = frameR.Close() }()
 
 	var stderr bytes.Buffer
-	// #nosec G204 -- this executes the selected pipeline binary without a shell.
-	cmd := exec.Command(binPath, protofd.Arg)
+	cmd := entry.Exec()
 	cmd.Dir, cmd.Stderr = dir, &stderr
 	// safety: no engine credential or node route reaches pipeline code; a CLI run inside a node would otherwise pass
 	// on that node's route URL, and an SDK process holding it without its bearer refuses to start.

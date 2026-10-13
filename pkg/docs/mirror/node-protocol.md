@@ -36,7 +36,12 @@ sequenceDiagram
 
 ## Processes
 
-The host starts the SDK process with exactly one argument, `--sw-node-protocol`, from the repository root, the directory that holds `.sparkwing/`. A process either is bound to one node or is not bound to any:
+The host starts the SDK process from the repository root, the directory that holds `.sparkwing/`, with `--sw-node-protocol` as the last argument of the entry's command:
+
+- **Go.** A `.sparkwing/` Go module is compiled, and the entry is the binary, so the command is `<binary> --sw-node-protocol`.
+- **TypeScript.** A `.sparkwing/package.json` that depends on `@sparkwing/sdk` is a TypeScript pipeline. Its `main` field names the entry file. The command is `node --import <bootstrap> <main> --sw-node-protocol`, where `<bootstrap>` is the file URL of the installed SDK's `./bootstrap` export. Node.js evaluates that preload before any module of the entry, so it removes `SPARKWING_NODE_TOKEN` and `SPARKWING_PROTOCOL_HANDLES` before entry code or a module the entry imports can copy them. The SDK refuses to serve a process that was not started with that preload. The host runs `npm ci` in `.sparkwing/` first when `node_modules` lacks the SDK, and needs Node.js 22.18 or later on `PATH`.
+
+A process either is bound to one node or is not bound to any:
 
 | Process | Bound to | Requests it receives | Environment |
 |---|---|---|---|
@@ -275,6 +280,9 @@ The host builds a node-bound process's environment from scratch. It removes ever
 | `SPARKWING_PROTOCOL_HANDLES` | every process, Windows only | The request and frame pipe handles, as `<request>,<frame>` in decimal. |
 
 The SDK removes `SPARKWING_NODE_TOKEN` from the environment of every command it starts, so a step's tools never hold the bearer.
+
+- The TypeScript SDK removes it in the bootstrap preload, before any entry code runs.
+- The Go SDK removes it while packages initialize, before the `init` of any package that imports the SDK. A package that does not import the SDK can initialize first and read it, as with the protocol pipes.
 
 The host also sets variables that other tools already define, and the SDK needs to do nothing with them:
 

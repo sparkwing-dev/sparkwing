@@ -13,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 )
@@ -134,8 +135,8 @@ func runPipelinePlan(args []string) error {
 		return err
 	}
 	var doc planPreviewDoc
-	err = withPipelineBinary(parsed.pipeline, func(ctx context.Context, bin, dir string) error {
-		planned, err := planOverProtocol(ctx, bin, dir, parsed.pipeline, parsed.passthrough, "plan", true)
+	err = withPipelineEntry(parsed.pipeline, func(ctx context.Context, entry pipelineentry.Command, dir string) error {
+		planned, err := planOverProtocol(ctx, entry, dir, parsed.pipeline, parsed.passthrough, "plan", true)
 		if err == nil {
 			doc, err = previewPlan(planned, parsed.startAt, parsed.stopAt)
 		}
@@ -154,7 +155,7 @@ func runPipelinePlan(args []string) error {
 
 // safety: a pipeline with a declared source plans from that revision, as a run
 // of it would execute.
-func withPipelineBinary(pipeline string, fn func(ctx context.Context, bin, dir string) error) error {
+func withPipelineEntry(pipeline string, fn func(ctx context.Context, entry pipelineentry.Command, dir string) error) error {
 	dir, err := findSparkwingDir()
 	if err != nil {
 		return err
@@ -180,11 +181,7 @@ func withPipelineBinary(pipeline string, fn func(ctx context.Context, bin, dir s
 	if err := run.materialize(os.Environ()); err != nil {
 		return run.finish(err)
 	}
-	bin := run.uncachedBinary
-	if bin == "" {
-		bin = run.lease.Path()
-	}
-	return run.finish(fn(run.ctx, bin, filepath.Dir(bindDir)))
+	return run.finish(fn(run.ctx, run.entry, filepath.Dir(bindDir)))
 }
 
 type planned struct {
@@ -196,9 +193,9 @@ type planned struct {
 
 // safety: describe, plan and the evals share one process because the SDK
 // answers plan once per process and evaluates closures only of its own plan.
-func planOverProtocol(ctx context.Context, bin, dir, pipeline string, args []string, runID string, evalSkips bool) (planned, error) {
+func planOverProtocol(ctx context.Context, entry pipelineentry.Command, dir, pipeline string, args []string, runID string, evalSkips bool) (planned, error) {
 	out := planned{pipeline: pipeline, skipped: map[string]string{}}
-	err := repos.Converse(ctx, bin, dir, func(s *repos.Session) error {
+	err := repos.Converse(ctx, entry, dir, func(s *repos.Session) error {
 		described, err := s.Describe()
 		if err != nil {
 			return err

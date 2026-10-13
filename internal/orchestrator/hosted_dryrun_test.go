@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -74,7 +75,7 @@ func runDryRunFixtureIn(t *testing.T, dir string, opts Options, flags map[string
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	out, err := RunHosted(ctx, paths, opts, HostedEntry{
-		Program: os.Args[0], Dir: dir,
+		Command: pipelineentry.Binary(os.Args[0]), Dir: dir,
 		Env:   append(os.Environ(), nodeProtocolEntryEnv+"=1", "HOSTED_DRYRUN_MARKER="+marker, "GORACE=atexit_sleep_ms=0"),
 		Flags: flags,
 	})

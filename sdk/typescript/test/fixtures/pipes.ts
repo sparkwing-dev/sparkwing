@@ -1,11 +1,9 @@
 // A pipeline that prints a line shaped like a reply to stdout and stderr, and
 // reports which protocol descriptors and variables a command it starts holds.
 
+import { moduleEnv } from "./early-env.ts";
 import { execFileSync } from "node:child_process";
 import { definePipeline, main } from "../../src/index.ts";
-
-// A copy taken at module level, before main runs, must already lack the bearer.
-const moduleEnv = { ...process.env };
 const forged = `{"reply":"1","ok":true,"result":{"forged":true}}`;
 
 definePipeline({

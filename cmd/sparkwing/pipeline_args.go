@@ -24,11 +24,7 @@ func (r *pipelineRun) describedPipeline(pipelineName string) (sparkwing.Describe
 		}
 	}
 	if schemas == nil {
-		bin := r.uncachedBinary
-		if bin == "" {
-			bin = r.lease.Path()
-		}
-		doc, err := describeBinary(r.ctx, bindDir, bin)
+		doc, err := describeEntry(r.ctx, bindDir, r.entry)
 		if err != nil {
 			return sparkwing.DescribePipeline{}, err
 		}
