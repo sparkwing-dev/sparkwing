@@ -14,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -92,5 +93,37 @@ func TestExecuteMasksSecretInputs(t *testing.T) {
 	}
 	if text := logs.text("build"); strings.Contains(text, "input-secret-4242") || !strings.Contains(text, "pass=***") {
 		t.Fatalf("build's log = %s, want its secret input masked", text)
+	}
+}
+
+// A claimed follower whose leader's entry expired before it read the output
+// runs the node itself rather than succeed with nothing.
+func TestClaimedMemoFollowerWithNoOutputRunsTheNode(t *testing.T) {
+	st := openStore(t)
+	if err := st.CreateRun(t.Context(), store.Run{ID: "run-follower", Pipeline: "p", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(t.Context(), store.Node{RunID: "run-follower", NodeID: "n", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	m := &Memo{
+		Slots: storeSlots{st: st}, Claimed: true,
+		Output: func(context.Context, store.ClaimInputRequest, string, string) ([]byte, error) {
+			return nil, store.ErrNotFound
+		},
+	}
+	run := &Run{ID: "run-follower", State: st, Logger: slog.New(slog.DiscardHandler)}
+	ran := false
+	r := &memoRun{
+		cfg: &Config{}, m: m, adm: &Admission{Slots: m.Slots}, n: &NodeRun{Run: run, Plan: nodeproto.PlanNode{ID: "n"}},
+		next: func(context.Context, *NodeRun) Result {
+			ran = true
+			return Result{Outcome: sparkwing.Success, Output: []byte(`"own"`)}
+		},
+		g: group{key: memoKeyPrefix + "h", policy: store.OnLimitCoalesce, capacity: 1, cost: 1, memoHash: "h"},
+	}
+	res, copied := r.follow(t.Context(), "run-leader", "n")
+	if !ran || copied || res.Outcome != sparkwing.Success || string(res.Output) != `"own"` {
+		t.Fatalf("follower = %+v (ran %v, copied %v), want the node run as a miss", res, ran, copied)
 	}
 }

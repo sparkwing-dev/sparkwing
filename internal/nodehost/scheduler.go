@@ -105,6 +105,10 @@ type NodeRun struct {
 	// is called, which restarts it in full. A wait the node makes on the host,
 	// such as a child-run await, holds it.
 	Pause func() (resume func())
+	// BeforeRunEachAttempt runs before_run in every attempt rather than only
+	// the first, for an attempt that cannot learn whether an earlier one's
+	// before_run refused.
+	BeforeRunEachAttempt bool
 	// safety: set only for a memoized node that did not run, whose generators read it through the output route.
 	memoOutput json.RawMessage
 }

@@ -133,8 +133,13 @@ func planLaunchedRun(ctx context.Context, c *client.Client, src, binary, runID s
 		return fail(err)
 	}
 	masker := secrets.NewMasker()
-	plan, err := nodehost.PlanDocument(ctx, nodehost.SessionConfig{Entry: binary, Dir: src, Sink: podPlanSink{masker: masker}},
+	sink, err := newPodPlanSink(ctx, runID, masker, os.Stderr)
+	if err != nil {
+		return fail(err)
+	}
+	plan, err := nodehost.PlanDocument(ctx, nodehost.SessionConfig{Entry: binary, Dir: src, Sink: sink},
 		nodehost.PlanRequest{Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run), Requires: requires, Masker: masker})
+	sink.Flush()
 	if err != nil {
 		return fail(fmt.Errorf("the pipeline could not plan the run: %s", masker.Mask(err.Error())))
 	}

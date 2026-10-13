@@ -4,6 +4,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http/httptest"
@@ -15,7 +16,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -45,6 +48,7 @@ type launchedRun struct {
 	url   string
 	runID string
 	src   string
+	bin   string
 }
 
 func newLaunchedRun(t *testing.T, args map[string]string) *launchedRun {
@@ -58,7 +62,7 @@ func newLaunchedRun(t *testing.T, args map[string]string) *launchedRun {
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := httptest.NewServer(controller.New(st, quiet).EnableAuthFromStore().Handler())
 	t.Cleanup(srv.Close)
-	r := &launchedRun{st: st, url: srv.URL, runID: "run-pod-host"}
+	r := &launchedRun{st: st, url: srv.URL, runID: "run-pod-host", bin: bin}
 	r.create(t, args)
 	prevBinary := resolveLaunchedBinary
 	t.Cleanup(func() { resolveLaunchedBinary = prevBinary })
@@ -255,6 +259,7 @@ func TestPodNode_WithoutAnAcceptedHashFailsClosed(t *testing.T) {
 func TestLaunchedNode_RetryAutoRunsAfterRunLast(t *testing.T) {
 	trace := filepath.Join(t.TempDir(), "trace")
 	r := newLaunchedRun(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "trace": trace, "auto": "true"})
+	requests := r.recordRequests(t)
 	if _, err := r.host(t, store.PlanNodeID); err != nil {
 		t.Fatalf("plan: %v", err)
 	}
@@ -271,6 +276,30 @@ func TestLaunchedNode_RetryAutoRunsAfterRunLast(t *testing.T) {
 		}
 	}
 	wantTrace(t, trace, "before\nbefore\nbefore\nafter:step \"run\": still broken\n")
+	sent, err := os.ReadFile(requests)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 1; attempt <= 3; attempt++ {
+		if !strings.Contains(string(sent), fmt.Sprintf(`"op":"run_step","node":"build","step":"run","attempt":%d`, attempt)) {
+			t.Errorf("no run_step for attempt %d in the requests:\n%s", attempt, sent)
+		}
+	}
+}
+
+// hack: the Go SDK ignores the attempt ordinal, so a wrapper copies every request to the returned file instead.
+func (r *launchedRun) recordRequests(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	log, wrapper := filepath.Join(dir, "requests"), filepath.Join(dir, "pipeline")
+	script := fmt.Sprintf("#!/bin/sh\ntee -a '%s' <&3 3<&- 4>&- | '%s' \"$@\" 3<&0 0</dev/null\n", log, r.bin)
+	if err := os.WriteFile(wrapper, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	resolveLaunchedBinary = func(context.Context, string, string, string, string, string, string, *slog.Logger) (remoteBinary, error) {
+		return remoteBinary{path: wrapper}, nil
+	}
+	return log
 }
 
 // A retry_auto node whose before_run refuses never runs its body, though the
@@ -403,4 +432,24 @@ func podMemoRuns(t *testing.T, publish bool, want sparkwing.Outcome, bodies stri
 		t.Fatalf("second run's memoized = %s/%s (%s), want done/%s", n.Status, n.Outcome, n.Error, want)
 	}
 	wantTrace(t, marker, bodies)
+}
+
+// A secret that straddles the session's split of a long plan line is masked
+// whole, never printed as two fragments.
+func TestPodPlanSink_MasksASecretAcrossASplitLine(t *testing.T) {
+	const secret = "hunter2-straddles-the-split"
+	masker := secrets.NewMasker()
+	masker.Register(secret)
+	var out strings.Builder
+	sink, err := newPodPlanSink(t.Context(), "run-split", masker, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := strings.Repeat("x", 1<<20-10) + secret[:10]
+	sink.Text(nodehost.LevelInfo, head)
+	sink.Text(nodehost.LevelInfo, secret[10:]+" tail")
+	sink.Flush()
+	if got := strings.ReplaceAll(out.String(), "\n", ""); strings.Contains(got, secret[:10]) || !strings.Contains(got, "*** tail") {
+		t.Fatalf("plan output ends %q, want the split secret masked whole", got[max(0, len(got)-80):])
+	}
 }

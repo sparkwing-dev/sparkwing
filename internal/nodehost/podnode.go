@@ -151,7 +151,7 @@ func podAttempt(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash
 	if m := n.Plan.Modifiers; m != nil && m.RetryAuto {
 		// safety: the attempt report cannot tell the controller a failed before_run is final, so every
 		// dispatch runs before_run again and a refused hook never lets a later dispatch run the body.
-		layers = podAutoLayers
+		layers, n.Attempt, n.BeforeRunEachAttempt = podAutoLayers, attempt, true
 		budget := min(max(m.Retry, 0), store.MaxNodeRetries)
 		// safety: the controller's rule for claiming the node again, so after_run runs in the attempt it does not.
 		n.Retried = func(r Result) bool {

@@ -260,6 +260,11 @@ func (r *memoRun) hit(ctx context.Context, srcRun, srcNode string, bypass bool) 
 func (r *memoRun) follow(ctx context.Context, leaderRun, leaderNode string) (Result, bool) {
 	in := store.ClaimInputRequest{Kind: store.ClaimInputCoalesced, Key: r.g.key, CacheKeyHash: r.g.memoHash}
 	output, err := r.m.Output(ctx, in, leaderRun, leaderNode)
+	if errors.Is(err, store.ErrNotFound) && r.m.Claimed {
+		// safety: a claim finds no output once the entry expired after its leader released, so the node runs
+		// rather than succeed with nothing.
+		return r.run(ctx, true)
+	}
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("fetch leader output: %w", err)}, false
 	}

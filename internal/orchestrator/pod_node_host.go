@@ -64,8 +64,13 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 	}
 	slots := NewHTTPConcurrency(p.controllerURL, nil, p.token, store.DefaultConcurrencyLease)
 	nlog := &podNodeLog{sink: openNodeLogSink(ctx, c, p.runID, p.nodeID, p.logger), out: os.Stdout, logger: p.logger}
+	planSink, err := newPodPlanSink(ctx, p.runID, masker, os.Stderr)
+	if err != nil {
+		return nodehost.Result{}, err
+	}
+	defer planSink.Flush()
 	res := nodehost.HostNode(ctx, nodehost.Config{
-		Session:  nodehost.SessionConfig{Entry: p.binary, Dir: p.dir, Sink: podPlanSink{masker: masker}},
+		Session:  nodehost.SessionConfig{Entry: p.binary, Dir: p.dir, Sink: planSink},
 		Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run),
 		State: p.state, Artifacts: p.artifacts, Logger: p.logger,
 		// safety: the node's concurrency group and memo entry run through the claim, which the controller binds to
@@ -170,13 +175,38 @@ func (l *podNodeLog) seal(ctx context.Context, stopped bool) {
 	l.sink.close(ctx, stopped)
 }
 
-// safety: plan code's output goes to the container's stderr, masked, since
-// the planning claim has no node log.
-type podPlanSink struct{ masker *secrets.Masker }
+// safety: plan code's output goes to out, the container's stderr, through a
+// node-host log sink, which masks a value even across the session's split of
+// a long line; the planning claim has no node log. Flush it once the plan
+// process ends.
+func newPodPlanSink(ctx context.Context, runID string, masker *secrets.Masker, out io.Writer) (*nodehost.LogSink, error) {
+	return nodehost.NewLogSink(ctx, nodehost.LogSinkConfig{
+		RunID: runID, NodeID: store.PlanNodeID, Log: &podPlanLog{out: out}, State: podPlanState{}, Masker: masker,
+	})
+}
 
-func (s podPlanSink) Text(_, line string) { fmt.Fprintln(os.Stderr, s.masker.Mask(line)) }
+type podPlanLog struct {
+	mu  sync.Mutex
+	out io.Writer
+}
 
-func (s podPlanSink) Record(rec nodeproto.LogRecord) { fmt.Fprintln(os.Stderr, s.masker.Mask(rec.Msg)) }
+func (l *podPlanLog) Emit(rec sparkwing.LogRecord) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if _, err := fmt.Fprintln(l.out, rec.Msg); err != nil {
+		return
+	}
+}
+
+// safety: plan code has no node row, so its annotations and summaries are dropped.
+type podPlanState struct{}
+
+func (podPlanState) AppendNodeAnnotation(context.Context, string, string, string) error { return nil }
+func (podPlanState) AppendStepAnnotation(context.Context, string, string, string, string) error {
+	return nil
+}
+func (podPlanState) SetNodeSummary(context.Context, string, string, string) error         { return nil }
+func (podPlanState) SetStepSummary(context.Context, string, string, string, string) error { return nil }
 
 // safety: a secret is released only through the claim, under the plan's
 // declaration, as the controller rules for the claim's kind.
