@@ -100,7 +100,10 @@ func (d *fakeDaemon) Acquire(ctx context.Context, req wingwire.AdmissionRequest,
 			for _, c := range req.Semaphores {
 				d.used[c.Name] += max(1, c.Cost)
 			}
-			l := &fakeLease{d: d, req: req, done: make(chan struct{}), evict: make(chan wingwire.Evicted, 1)}
+			l := &fakeLease{
+				d: d, req: req, done: make(chan struct{}), evict: make(chan wingwire.Evicted, 1),
+				cancel: make(chan wingwire.Cancel, 1), lose: make(chan error, 1), probes: make(chan string), acks: make(chan string, 1),
+			}
 			d.leases[req.RunID] = l
 			d.live++
 			d.granted++
@@ -138,11 +141,16 @@ func (d *fakeDaemon) requests() []wingwire.AdmissionRequest {
 }
 
 type fakeLease struct {
-	d     *fakeDaemon
-	req   wingwire.AdmissionRequest
-	once  sync.Once
-	done  chan struct{}
-	evict chan wingwire.Evicted
+	d        *fakeDaemon
+	req      wingwire.AdmissionRequest
+	once     sync.Once
+	done     chan struct{}
+	evict    chan wingwire.Evicted
+	cancel   chan wingwire.Cancel
+	lose     chan error
+	probes   chan string
+	acks     chan string
+	watching sync.WaitGroup
 }
 
 func (l *fakeLease) Release() error {
@@ -162,13 +170,39 @@ func (l *fakeLease) Release() error {
 	return nil
 }
 
-func (l *fakeLease) Watch(onEvicted func(wingwire.Evicted)) {
-	select {
-	case <-l.done:
-	case ev := <-l.evict:
-		onEvicted(ev)
-		<-l.done
+// hack: the fake answers liveness probes only while Watch runs, as the real
+// client answers them only from its lease watcher.
+func (l *fakeLease) Watch(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel)) error {
+	l.watching.Add(1)
+	defer l.watching.Done()
+	for {
+		select {
+		case <-l.done:
+			return nil
+		case ev := <-l.evict:
+			onEvicted(ev)
+		case c := <-l.cancel:
+			onCancel(c)
+		case err := <-l.lose:
+			return err
+		case nonce := <-l.probes:
+			l.acks <- nonce
+		}
 	}
+}
+
+func (d *fakeDaemon) only(t *testing.T) *fakeLease {
+	t.Helper()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.leases) != 1 {
+		t.Errorf("%d leases, want 1", len(d.leases))
+		return nil
+	}
+	for _, l := range d.leases {
+		return l
+	}
+	return nil
 }
 
 type storeSlots struct {
@@ -499,30 +533,139 @@ func TestAdmissionCancelWhileWaitingForHost(t *testing.T) {
 	}
 }
 
-func TestAdmissionEvictionSupersedesTheNode(t *testing.T) {
+func TestAdmissionHostLeaseIsWatchedWhileTheNodeRuns(t *testing.T) {
 	st := openStore(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	d, g := newFakeDaemon(), newGauge()
-	go func() {
-		recv(t, ctx, g.entered)
-		d.mu.Lock()
-		var l *fakeLease
-		for _, held := range d.leases {
-			l = held
+	d := newFakeDaemon()
+	var l *fakeLease
+	exec := func(ctx context.Context, _ *NodeRun) Result {
+		l = d.only(t)
+		select {
+		case l.probes <- "n1":
+		case <-ctx.Done():
+			return Result{Outcome: sparkwing.Failed, Err: errors.New("no watcher took the probe")}
 		}
-		d.mu.Unlock()
-		l.evict <- wingwire.Evicted{Key: "db", SupersededBy: "newer", Policy: wingwire.PolicyCancelOthers}
-	}()
-	res := runAdmitted(t, ctx, st, nodeproto.PlanDoc{Nodes: grouped("box", "cancel_others", 1, 0, "a")}, &Admission{Daemon: d}, g.exec)
-	if got := res.Nodes["a"]; got.Outcome != sparkwing.Superseded || !strings.Contains(errText(got.Err), "newer") {
-		t.Fatalf("result %+v, want superseded by newer", got)
+		if got := <-l.acks; got != "n1" {
+			return Result{Outcome: sparkwing.Failed, Err: errors.New("wrong ack " + got)}
+		}
+		return Result{Outcome: sparkwing.Success}
 	}
-	if res.Status != "cancelled" {
-		t.Fatalf("run status %s, want cancelled", res.Status)
+	res := runAdmitted(t, ctx, st, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "a"}}}, &Admission{Daemon: d}, exec)
+	if got := res.Nodes["a"]; got.Outcome != sparkwing.Success {
+		t.Fatalf("result %+v", got)
 	}
-	if live, _, released := d.counts(); live != 0 || released != 1 {
-		t.Fatalf("live=%d released=%d", live, released)
+	// safety: Wait returns at once only if the watcher already exited after release.
+	l.watching.Wait()
+	select {
+	case l.probes <- "late":
+		t.Fatal("a watcher still answers after release")
+	default:
+	}
+}
+
+func TestAdmissionLeaseEndings(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		grouped bool
+		send    func(l *fakeLease)
+		want    sparkwing.Outcome
+		errHas  string
+	}{
+		{"evicted", true, func(l *fakeLease) {
+			l.evict <- wingwire.Evicted{Key: "db", SupersededBy: "newer", Policy: wingwire.PolicyCancelOthers}
+		}, sparkwing.Superseded, "newer"},
+		{"daemon cancel", false, func(l *fakeLease) { l.cancel <- wingwire.Cancel{Reason: "operator said stop"} }, sparkwing.Cancelled, "operator said stop"},
+		{"rejected after restart", false, func(l *fakeLease) { l.lose <- wingdclient.ErrReattachRejected }, sparkwing.Superseded, "lease lost"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			st := openStore(t)
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			defer cancel()
+			d, g := newFakeDaemon(), newGauge()
+			go func() {
+				recv(t, ctx, g.entered)
+				if l := d.only(t); l != nil {
+					c.send(l)
+				}
+			}()
+			nodes := []nodeproto.PlanNode{{ID: "a"}}
+			if c.grouped {
+				nodes = grouped("box", "cancel_others", 1, 0, "a")
+			}
+			res := runAdmitted(t, ctx, st, nodeproto.PlanDoc{Nodes: nodes}, &Admission{Daemon: d}, g.exec)
+			if got := res.Nodes["a"]; got.Outcome != c.want || !strings.Contains(errText(got.Err), c.errHas) {
+				t.Fatalf("result %+v, want %s with %q", got, c.want, c.errHas)
+			}
+			if live, _, released := d.counts(); live != 0 || released != 1 {
+				t.Fatalf("live=%d released=%d", live, released)
+			}
+		})
+	}
+}
+
+// hack: resolveFlaky fails ResolveWaiter while the fake outage clock stays under outage.
+type resolveFlaky struct {
+	storeSlots
+	clock  *fakeClock
+	outage time.Duration
+}
+
+func (s resolveFlaky) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (store.WaiterResolution, error) {
+	if s.clock.advance(time.Minute) < s.outage {
+		return store.WaiterResolution{}, errors.New("database is locked")
+	}
+	return s.storeSlots.ResolveWaiter(ctx, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID, bypassRead)
+}
+
+type fakeClock struct {
+	mu      sync.Mutex
+	elapsed time.Duration
+}
+
+func (c *fakeClock) advance(d time.Duration) time.Duration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.elapsed += d
+	return c.elapsed
+}
+
+func (c *fakeClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return time.Unix(0, 0).Add(c.elapsed)
+}
+
+func TestAdmissionStoreOutageToleranceMatchesTheDispatcher(t *testing.T) {
+	for _, c := range []struct {
+		outage time.Duration
+		want   sparkwing.Outcome
+	}{
+		{4*time.Minute + 10*time.Second, sparkwing.Success},
+		{7 * time.Minute, sparkwing.Failed},
+	} {
+		t.Run(c.outage.String(), func(t *testing.T) {
+			st := openStore(t)
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			defer cancel()
+			clock := &fakeClock{}
+			outageClock = clock.now
+			t.Cleanup(func() { outageClock = time.Now })
+			holdSlotOutside(t, st, "g:db")
+			slots := resolveFlaky{storeSlots: storeSlots{st: st, queued: make(chan string, 1)}, clock: clock, outage: c.outage}
+			go func() {
+				recv(t, ctx, slots.queued)
+				if _, _, _, err := st.ReleaseAndNotify(ctx, "g:db", "other/x", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
+					t.Error(err)
+				}
+			}()
+			res := runAdmitted(t, ctx, st, nodeproto.PlanDoc{Nodes: grouped("", "queue", 1, 0, "b")}, &Admission{Slots: slots},
+				func(context.Context, *NodeRun) Result { return Result{Outcome: sparkwing.Success} })
+			if got := res.Nodes["b"]; got.Outcome != c.want {
+				t.Fatalf("result %+v, want %s", got, c.want)
+			}
+			wantSlotsEmpty(t, st, "g:db")
+		})
 	}
 }
 

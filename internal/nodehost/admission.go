@@ -48,11 +48,15 @@ type Admitter interface {
 	Acquire(ctx context.Context, req wingwire.AdmissionRequest, onQueued func(wingwire.Queued)) (Lease, error)
 }
 
-// Lease is a granted daemon lease. Watch blocks until the lease ends and
-// calls onEvicted if a cancel_others arrival takes the lease's semaphore.
+// Lease is a granted daemon lease. Watch is the lease connection's only
+// reader for the lease's whole life: it answers the daemon's liveness probes,
+// calls onEvicted when a cancel_others arrival takes the lease's semaphore and
+// onCancel when the daemon cancels the holder, and returns once Release ends
+// the lease, or with [wingdclient.ErrReattachRejected] when a restarted daemon
+// no longer has it.
 type Lease interface {
 	Release() error
-	Watch(onEvicted func(wingwire.Evicted))
+	Watch(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel)) error
 }
 
 // ConcurrencySlots is the coordination store's slot surface, the part of the
@@ -68,6 +72,13 @@ type ConcurrencySlots interface {
 }
 
 var waiterPoll = 100 * time.Millisecond
+
+// safety: mirrors orchestrator.DefaultStoreWedgeBudget, so a store outage
+// fails a queued node no sooner than the dispatcher fails it.
+const storeOutageBudget = 5 * time.Minute
+
+// hack: the outage clock is swappable so a test can cross the budget without waiting minutes.
+var outageClock = time.Now
 
 var errQueueTimeout = errors.New("queue timeout")
 
@@ -164,11 +175,10 @@ func (a *Admission) withHost(ctx context.Context, n *NodeRun, next Executor) Res
 	if err != nil {
 		return failed(ctx, fmt.Errorf("local admission: %w", err))
 	}
-	defer a.release(n, lease)
 	if waited() {
 		a.activity(ctx, n, "")
 	}
-	return next(ctx, n)
+	return a.runLeased(ctx, n, lease, next)
 }
 
 func (a *Admission) underDaemon(ctx context.Context, n *NodeRun, g group, next Executor) Result {
@@ -219,20 +229,48 @@ func (a *Admission) underDaemon(ctx context.Context, n *NodeRun, g group, next E
 		}
 		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("concurrency acquire(%q): %w", g.key, err)}
 	}
-	defer a.release(n, lease)
 	if waited() {
 		a.activity(ctx, n, "")
 	}
+	return a.runLeased(ctx, n, lease, next)
+}
+
+// safety: the watcher answers wingd's liveness probes for the lease's whole
+// life, or wingd reclaims the capacity while the node still runs.
+func (a *Admission) runLeased(ctx context.Context, n *NodeRun, lease Lease, next Executor) Result {
 	execCtx, cancelExec := context.WithCancel(ctx)
 	defer cancelExec()
-	var evicted atomic.Pointer[wingwire.Evicted]
-	go lease.Watch(func(ev wingwire.Evicted) {
-		evicted.Store(&ev)
+	var ended atomic.Pointer[Result]
+	end := func(r Result) {
+		ended.CompareAndSwap(nil, &r)
 		cancelExec()
-	})
+	}
+	watching := make(chan struct{})
+	go func() {
+		defer close(watching)
+		err := lease.Watch(func(ev wingwire.Evicted) {
+			end(Result{Outcome: sparkwing.Superseded, Err: fmt.Errorf("concurrency key %q: superseded by run %s under %s", ev.Key, ev.SupersededBy, ev.Policy)})
+		}, func(c wingwire.Cancel) {
+			reason := c.Reason
+			if reason == "" {
+				reason = "cancelled via the admission daemon"
+			}
+			end(Result{Outcome: sparkwing.Cancelled, Err: errors.New(reason)})
+		})
+		switch {
+		case errors.Is(err, wingdclient.ErrReattachRejected):
+			end(Result{Outcome: sparkwing.Superseded, Err: fmt.Errorf("local admission lease lost: %w", err)})
+		case err != nil:
+			// safety: an unreachable daemon admits no one else, so the node keeps
+			// running unwatched, as a dispatcher run does.
+			n.Run.Logger.Warn("nodehost: admission lease watch ended; the node continues unwatched", "node", n.Plan.ID, "err", err)
+		}
+	}()
 	res := next(execCtx, n)
-	if ev := evicted.Load(); ev != nil {
-		return Result{Outcome: sparkwing.Superseded, Err: fmt.Errorf("concurrency key %q: superseded by run %s under %s", ev.Key, ev.SupersededBy, ev.Policy)}
+	a.release(n, lease)
+	<-watching
+	if r := ended.Load(); r != nil {
+		return *r
 	}
 	return res
 }
@@ -337,11 +375,12 @@ func (a *Admission) waitSlot(ctx context.Context, n *NodeRun, g group, initial s
 		}
 		res, err := a.Slots.ResolveWaiter(ctx, g.key, n.Run.ID, n.Plan.ID, "", "", "", false)
 		if err != nil {
-			// safety: a store that stays unreachable for a whole lease fails the
-			// node rather than leaving it queued forever.
+			// safety: a store failing for the dispatcher's whole wedge budget, or with
+			// a lock-protocol error retrying cannot clear, fails the node.
 			if failingSince.IsZero() {
-				failingSince = time.Now()
-			} else if time.Since(failingSince) >= store.DefaultConcurrencyLease && ctx.Err() == nil {
+				failingSince = outageClock()
+			}
+			if store.IsProtocolErr(err) || outageClock().Sub(failingSince) >= storeOutageBudget {
 				cancelWaiter()
 				return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("concurrency key %q: resolve waiter: %w", g.key, err)}
 			}
