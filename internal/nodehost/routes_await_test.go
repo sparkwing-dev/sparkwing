@@ -7,7 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 )
 
 func TestTenAwaitsOnTenChildrenAllSucceed(t *testing.T) {
@@ -56,6 +57,9 @@ func TestAwaitsOnOneChildShareOnePoller(t *testing.T) {
 	c := newChildController(t, started("child-1"))
 	var polls atomic.Int32
 	firstPoll, secondPoll, finish := make(chan struct{}, 1), make(chan struct{}, 1), make(chan struct{})
+	// safety: the held poll is released however the test ends, so a failed
+	// assertion cannot leave the fake controller unable to close.
+	release := sync.OnceFunc(func() { close(finish) })
 	c.handle("GET /api/v1/runs/run-1/children/child-1", func(w http.ResponseWriter, r *http.Request) {
 		switch polls.Add(1) {
 		case 1:
@@ -69,7 +73,9 @@ func TestAwaitsOnOneChildShareOnePoller(t *testing.T) {
 			answer(http.StatusOK, map[string]string{"status": "success"})(w, r)
 		}
 	})
-	bearer, _ := admitClaim(t, s, "deploy", claimFor(t, c.fakeController))
+	claim := claimFor(t, c.fakeController)
+	bearer, _ := admitClaim(t, s, "deploy", claim)
+	t.Cleanup(release)
 	ask(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`)
 
 	const awaits = 64
@@ -80,20 +86,11 @@ func TestAwaitsOnOneChildShareOnePoller(t *testing.T) {
 	for range awaits - 1 {
 		go openRequest(context.Background(), s, http.MethodGet, path, bearer, "", done)
 	}
-	// safety: a probe that is admitted answers at once from the poll already
-	// made, so a 429 means all 64 awaits hold their places.
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		got := ask(t, s, http.MethodGet, "/node/v1/children/child-1/await?wait_ms=0", bearer, "")
-		if got.status == http.StatusTooManyRequests && got.body["code"] == "too_many_requests" {
-			break
-		}
-		if got.status != http.StatusOK || time.Now().After(deadline) {
-			t.Fatalf("probe: status %d body %v", got.status, got.body)
-		}
-	}
+	<-nodehost.AwaitsHeld(claim, awaits)
+	wantRefusal(t, ask(t, s, http.MethodGet, "/node/v1/children/child-1/await?wait_ms=0", bearer, ""),
+		http.StatusTooManyRequests, "too_many_requests")
 	<-secondPoll
-	close(finish)
+	release()
 	for range awaits {
 		if got := <-done; got != http.StatusOK {
 			t.Fatalf("an await answered %d", got)

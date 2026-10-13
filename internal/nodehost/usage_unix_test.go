@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"syscall"
 	"testing"
 	"time"
@@ -15,6 +16,21 @@ import (
 )
 
 const orphanBytes = 128 << 20
+
+// safety: on Linux a process starts with the peak RSS of the one that forked
+// it, so the leader's peak can be the test binary's; the orphan allocates
+// that much more than the test binary has ever held, so only it can reach it.
+func orphanAllocation() int64 {
+	var ru syscall.Rusage
+	if syscall.Getrusage(syscall.RUSAGE_SELF, &ru) != nil {
+		return orphanBytes
+	}
+	self := ru.Maxrss
+	if runtime.GOOS == "linux" {
+		self *= 1024
+	}
+	return self + orphanBytes
+}
 
 func helper(role string) *exec.Cmd {
 	cmd := exec.Command(os.Args[0], "-test.run=^TestUsageHelperProcess$")
@@ -61,7 +77,11 @@ func TestUsageHelperProcess(t *testing.T) {
 		if _, err := io.Copy(io.Discard, os.Stdin); err != nil {
 			os.Exit(2)
 		}
-		memory := make([]byte, orphanBytes)
+		size, err := strconv.ParseInt(os.Getenv("SW_USAGE_ORPHAN_BYTES"), 10, 64)
+		if err != nil {
+			os.Exit(2)
+		}
+		memory := make([]byte, size)
 		for i := 0; i < len(memory); i += os.Getpagesize() {
 			memory[i] = 1
 		}
@@ -78,7 +98,9 @@ func TestUsageMeasuresWholeSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tree.Close()
+	alloc := orphanAllocation()
 	cmd := helper("leader")
+	cmd.Env = append(cmd.Env, "SW_USAGE_ORPHAN_BYTES="+strconv.FormatInt(alloc, 10))
 	cmd.Stdout = treeOut
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	err = cmd.Start()
@@ -99,7 +121,7 @@ func TestUsageMeasuresWholeSession(t *testing.T) {
 	if !u.SessionWide || u.CPUTime < leaderCPU+400*time.Millisecond {
 		t.Fatalf("usage = %+v, want session-wide CPU of at least leader %v plus the orphan's 500ms", u, leaderCPU)
 	}
-	if leaderRSS := maxRSSBytes(cmd.ProcessState); leaderRSS >= orphanBytes || u.MaxRSSBytes < orphanBytes {
-		t.Fatalf("usage = %+v, leader peak %d; want the orphan's %d only in the session peak", u, leaderRSS, orphanBytes)
+	if leaderRSS := maxRSSBytes(cmd.ProcessState); leaderRSS >= alloc || u.MaxRSSBytes < alloc {
+		t.Fatalf("usage = %+v, leader peak %d; want the orphan's %d only in the session peak", u, leaderRSS, alloc)
 	}
 }
