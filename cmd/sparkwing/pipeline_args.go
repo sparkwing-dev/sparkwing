@@ -34,6 +34,10 @@ func (r *pipelineRun) describedPipeline(pipelineName string) (sparkwing.Describe
 		}
 		schemas = doc.Pipelines
 	}
+	return findPipelineSchema(schemas, pipelineName)
+}
+
+func findPipelineSchema(schemas []sparkwing.DescribePipeline, pipelineName string) (sparkwing.DescribePipeline, error) {
 	names := make([]string, 0, len(schemas))
 	for _, s := range schemas {
 		if s.Name == pipelineName {
