@@ -93,7 +93,8 @@ its records land.
 ```
 Your laptop:
   1. sparkwing run compiles the pipeline from .sparkwing/
-  2. Pipeline runs whatever its code says (test, build, deploy, etc.)
+  2. sparkwing run plans the run in the pipeline binary and runs each
+     node in its own process of it (test, build, deploy, etc.)
   3. sparkwing run records the run through the admission daemon,
      which owns ~/.sparkwing/state.db; log files stay per-run on disk
 ```
@@ -104,12 +105,15 @@ involved. Each invocation's outcome lands in the SQLite store under
 Run `sparkwing serve start` once and leave it up to watch
 concurrent runs in a browser without needing any remote service.
 
-The run does not open that store. It sends its run, node, event, and
-concurrency calls to the admission daemon over the daemon's `api.sock`,
-and hands each node subprocess the same socket; the child runs it
-dispatches and any node replayed from it choose the same way. No process
-in a hosted run holds the file open, so the store's schema is out of a
-pipeline binary's contract. The CLI verbs that read the file -- `sparkwing
+The run does not open that store. `sparkwing run` hosts the run: it
+sends its run, node, event, and concurrency calls to the admission daemon
+over the daemon's `api.sock`, and starts each node as a
+`--sw-node-protocol` process of the pipeline binary that reaches the run
+only through the CLI's loopback node routes (see [node
+protocol](node-protocol.md)). The child runs a node starts, and any node
+replayed from them, run in the pipeline binary's own dispatcher and reach
+the daemon over the same socket. No process in a hosted run holds the file
+open, so the store's schema is out of a pipeline binary's contract. The CLI verbs that read the file -- `sparkwing
 runs`, `sparkwing doctor`, the dashboard -- are the
 installed build or a peer of it and still open it directly.
 

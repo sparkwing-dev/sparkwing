@@ -34,6 +34,16 @@ Both layers use `sw.<Verb>(<container>, ...args).<modifier>(...)`.
 A Plan holds jobs, which are dispatch units. Each job's Work graph holds
 steps that execute in the job's process. See [Pipelines](pipelines.md).
 
+`sparkwing run` hosts the run itself. It starts the compiled `.sparkwing`
+binary with `--sw-node-protocol`, asks it for the plan, and then runs each
+job in a process of its own, where the engine sends one request per step or
+callback. Retries, timeouts, caching, memo, artifacts, admission and log
+masking happen in the engine, not in the binary. A binary built against an
+older SDK does not answer the protocol and must be rebuilt.
+[Node protocol](node-protocol.md) is the contract, and its
+[limits](node-protocol.md#limits) table bounds a job's output, cleanups and
+route calls.
+
 ## Plan() must be pure
 
 `Pipeline.Plan(ctx, plan, in, rc)` declares the DAG by registering
@@ -47,6 +57,12 @@ runtime with a message naming the helper and pointing back here.
 `Plan` and `Work` construct the graph during inspection as well as
 execution. Put side effects in registered job or step callbacks, and
 return typed outputs for downstream `Ref[T]` consumers.
+
+Every job's process plans the run again before it runs the job, and a job
+whose plan entry differs from the one the run accepted fails with
+`plan_drift`. `Plan` must build the same graph from the same inputs and run
+context, so read the clock, random values and the environment in callbacks,
+not in `Plan`.
 
 `.Inline()` selects the dispatcher's host. A local inline job still runs
 in its own process, and its `Work` method still constructs the graph
@@ -98,10 +114,10 @@ rather than work inside one.
 A test renders that table from a pipeline run and fails if this page and the
 runtime disagree.
 
-The table describes a run. `sparkwing pipeline plan` and `--describe` seal instead, so a step
-skip predicate that reaches a guarded helper is refused there and the step is
-reported as skipped, so an inspection command never executes an author's side
-effects.
+The table describes a run. `sparkwing pipeline plan` evaluates each step's skip
+predicate in the pipeline process, as a run does, to report which steps a run
+would skip, so a predicate's side effects happen there too.
+`sparkwing pipeline plan --static` evaluates no predicate.
 
 ## Exec and Bash - running a shell command in a step
 
