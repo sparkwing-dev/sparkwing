@@ -1,0 +1,140 @@
+package nodehost
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
+)
+
+func hostDispatched(t *testing.T, ctx context.Context, st *store.Store, doc nodeproto.PlanDoc, dispatch Executor) RunResult {
+	t.Helper()
+	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{Dispatch: dispatch}
+	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest)}
+	res := RunResult{RunID: testRunID, Nodes: map[string]Result{}}
+	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg)}
+	if err := s.add(ctx, ctx, doc.Nodes); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	s.loop(ctx)
+	res.Status, res.Err = s.verdict(ctx)
+	return res
+}
+
+// hack: a stand-in pod, which starts and finishes the node's row itself, as a node host under its own claim does.
+func remoteHost(st *store.Store, outcome sparkwing.Outcome, errMsg string, output []byte) Executor {
+	return func(ctx context.Context, n *NodeRun) Result {
+		if err := st.StartNode(ctx, n.Run.ID, n.Plan.ID); err != nil {
+			return Result{Outcome: sparkwing.Failed, Err: err}
+		}
+		if err := st.FinishNodeWithReason(ctx, n.Run.ID, n.Plan.ID, string(outcome), errMsg, output, store.FailureUnknown, nil); err != nil {
+			return Result{Outcome: sparkwing.Failed, Err: err}
+		}
+		return Result{Outcome: sparkwing.Failed, Err: errors.New("the dispatcher's own view, which the row overrides")}
+	}
+}
+
+// The row the remote host wrote is the node's result: the run host neither
+// rewrites it nor trusts the dispatcher's own reading over it, and a
+// dependent sees the outcome the row holds.
+func TestDispatchAdoptsTheRowTheRemoteHostWrote(t *testing.T) {
+	st := openStore(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	var downstream atomic.Bool
+	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{
+		{ID: "build"}, {ID: "test", Deps: deps("build")},
+	}}, func(ctx context.Context, n *NodeRun) Result {
+		if n.Plan.ID == "test" {
+			downstream.Store(true)
+		}
+		return remoteHost(st, sparkwing.Success, "", []byte(`{"digest":"abc"}`))(ctx, n)
+	})
+	if res.Status != "success" || !downstream.Load() {
+		t.Fatalf("run = %+v (downstream ran %v), want success with test dispatched after build", res, downstream.Load())
+	}
+	row := nodeRow(t, st, "build")
+	if row.Outcome != string(sparkwing.Success) || row.Error != "" || row.OutputRef == nil {
+		t.Fatalf("build row = %+v, want the remote host's success and output left as written", row)
+	}
+}
+
+// A node the remote host never finished, such as one refused before its
+// claim, is finished by the run host with the dispatcher's result.
+func TestDispatchFinishesARowTheRemoteHostNeverWrote(t *testing.T) {
+	st := openStore(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "build"}}},
+		func(context.Context, *NodeRun) Result {
+			return Result{Outcome: sparkwing.Failed, Err: errors.New("claim refused: credits exhausted")}
+		})
+	if res.Status != "failed" {
+		t.Fatalf("run = %+v, want failed", res)
+	}
+	wantRow(t, st, "build", sparkwing.Failed, "claim refused")
+}
+
+// safety: retries and timeouts belong to the host that runs the node, so the
+// run host dispatches a node once however many attempts it declares; a
+// second dispatch would race the first pod for the same claim.
+func TestDispatchSendsANodeOnceWhateverItsRetries(t *testing.T) {
+	st := openStore(t)
+	var calls atomic.Int32
+	ctx := t.Context()
+	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{
+		ID: "flaky", Modifiers: &nodeproto.PlanModifiers{Retry: 3, RetryAuto: true, TimeoutMS: 1},
+	}}}, func(ctx context.Context, n *NodeRun) Result {
+		calls.Add(1)
+		// safety: the remote host owns the node's timeout, so the run host's context carries no deadline of its own.
+		if _, bounded := ctx.Deadline(); bounded {
+			t.Error("the run host bounded a dispatched node by its timeout")
+		}
+		return remoteHost(st, sparkwing.Failed, "still broken", nil)(ctx, n)
+	})
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("dispatched %d times, want once", got)
+	}
+	if res.Status != "failed" {
+		t.Fatalf("run = %+v, want failed", res)
+	}
+	wantRow(t, st, "flaky", sparkwing.Failed, "still broken")
+}
+
+// A run cancelled while a node is out stops the dispatch, and the node that
+// never reached a remote host is recorded cancelled; its dependents never go.
+func TestDispatchCancelledRunCancelsTheOutstandingNode(t *testing.T) {
+	st := openStore(t)
+	ctx, cancel := context.WithCancelCause(t.Context())
+	defer cancel(nil)
+	out := make(chan struct{})
+	var downstream atomic.Bool
+	go func() {
+		<-out
+		cancel(&CancelError{Reason: "cancelled by operator"})
+	}()
+	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{
+		{ID: "build"}, {ID: "test", Deps: deps("build")},
+	}}, func(ctx context.Context, n *NodeRun) Result {
+		if n.Plan.ID == "test" {
+			downstream.Store(true)
+		}
+		close(out)
+		<-ctx.Done()
+		return Result{Outcome: sparkwing.Cancelled, Err: ctx.Err()}
+	})
+	if res.Status != "cancelled" || downstream.Load() {
+		t.Fatalf("run = %+v (downstream dispatched %v), want cancelled with test never dispatched", res, downstream.Load())
+	}
+	wantRow(t, st, "build", sparkwing.Cancelled, "")
+	wantRow(t, st, "test", sparkwing.Cancelled, "")
+}

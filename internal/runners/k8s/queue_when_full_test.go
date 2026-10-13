@@ -148,8 +148,7 @@ func TestRunNode_ImpossibleRequestFailsBeforeCreatingJob(t *testing.T) {
 		Namespace: "default", Image: "runner", ControllerURL: srv.URL,
 		CPURequest: "100m", MemoryRequest: "128Mi",
 	}, nil)
-	pin := (&sparkwing.JobNode{}).Resources(sparkwing.Cores(1))
-	result := r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build", Node: pin})
+	result := r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build", Cores: 1})
 	if result.Outcome != sparkwing.Failed || result.Err == nil ||
 		!strings.Contains(result.Err.Error(), "allocatable") {
 		t.Fatalf("result = %+v, want immediate allocatable-capacity failure", result)

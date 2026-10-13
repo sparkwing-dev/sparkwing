@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
@@ -17,13 +15,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwingcache"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 const (
@@ -136,7 +132,47 @@ func runNodeRemote(
 	defer binary.release()
 	logger.Info("runNodeRemote: binary ready",
 		"run_id", runID, "node_id", nodeID, "bin", binary.path)
-	return runNodeChild(ctx, binary.path, filepath.Dir(sparkwingDir), controllerURL, token, binaryCacheURL, cacheGrant, runID, nodeID, logger)
+	art, err := supervisorArtifactStore(ctx, controllerURL, runID, binaryCacheURL, cacheGrant)
+	if err != nil {
+		return runner.Result{}, fmt.Errorf("open the artifact store: %w", err)
+	}
+	return hostDispatchedNode(ctx, podNode{
+		binary: binary.path, dir: filepath.Dir(sparkwingDir), controllerURL: controllerURL, token: token,
+		runID: runID, nodeID: nodeID, artifacts: art, logger: logger,
+	})
+}
+
+// safety: a host stopped with no cause of its own, as a runner shutting down
+// is, leaves the node's row to its claim's lease, so the controller hands the
+// node to another runner rather than record it cancelled; a run's cancel, a
+// lost claim or a timeout carries a cause and is recorded.
+type stoppingHostState struct {
+	*client.Client
+	shuttingDown func() bool
+}
+
+func (s stoppingHostState) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error {
+	if s.shuttingDown() {
+		return nil
+	}
+	return s.Client.FinishNodeWithReason(ctx, runID, nodeID, outcome, errMsg, output, reason, exitCode)
+}
+
+// safety: the node runs under the claim the dispatcher or this runner took,
+// whose fence ctx carries, so every row and log write the host makes is
+// checked against it and the node's terminal row is the result the
+// dispatcher reads.
+func hostDispatchedNode(ctx context.Context, p podNode) (runner.Result, error) {
+	p.dispatched = true
+	p.state = stoppingHostState{
+		Client:       client.NewWithToken(p.controllerURL, nil, p.token),
+		shuttingDown: func() bool { return errors.Is(context.Cause(ctx), context.Canceled) },
+	}
+	res, err := hostPodNode(ctx, p)
+	if err != nil {
+		return runner.Result{}, err
+	}
+	return runner.Result{Outcome: res.Outcome, Err: res.Err}, nil
 }
 
 // safety: a pooled agent serves many runs from one process, so the cache grant is the node's,
@@ -183,137 +219,6 @@ func adoptNodeBaseline(ctx context.Context, trigger *store.Trigger, checkoutDir,
 		logger.Warn("runNodeRemote: baseline unavailable; a step that diffs against it judges this checkout against nothing",
 			"run_id", runID, "node_id", nodeID, "ref", baseline.Ref, "sha", baseline.SHA, "err", err)
 	}
-}
-
-func runNodeIsolated(
-	ctx context.Context,
-	controllerURL, runID, nodeID, token, cacheGrant string,
-	logger *slog.Logger,
-) (runner.Result, error) {
-	binary, err := os.Executable()
-	if err != nil {
-		return runner.Result{}, fmt.Errorf("resolve runner executable: %w", err)
-	}
-	dir := sparkwing.CurrentRuntime().WorkDir
-	if dir == "" {
-		dir, err = os.Getwd()
-		if err != nil {
-			return runner.Result{}, fmt.Errorf("resolve runner work directory: %w", err)
-		}
-	}
-	return runNodeChild(ctx, binary, dir, controllerURL, token, "", cacheGrant, runID, nodeID, logger)
-}
-
-var runNodeIsolatedFn = runNodeIsolated
-
-// safety: the child is the team's own code, so of this process's credentials it receives only
-// the run's cache grant and reaches the controller through the broker.
-func runNodeChild(
-	ctx context.Context,
-	binary, dir, controllerURL, token, cacheURL, cacheGrant, runID, nodeID string,
-	logger *slog.Logger,
-) (runner.Result, error) {
-	fence, _ := store.NodeClaimFenceFromContext(ctx)
-	artifact, err := supervisorArtifactStore(ctx, controllerURL, runID, cacheURL, cacheGrant)
-	if err != nil {
-		return runner.Result{}, fmt.Errorf("open supervisor artifact store: %w", err)
-	}
-	broker, err := startRemoteExecutionBroker(controllerURL, token, runID, nodeID, fence, artifact, logger)
-	if err != nil {
-		return runner.Result{}, err
-	}
-	defer broker.Close()
-	childLogsURL := ""
-	if sink := openNodeLogSink(ctx, client.NewWithToken(controllerURL, nil, token), runID, nodeID, logger); sink != nil {
-		defer sink.close(ctx, true)
-		broker.logSink = sink
-		childLogsURL = broker.URL()
-	}
-	childBaseEnv, err := remoteExecutionChildEnvironment(os.Environ())
-	if err != nil {
-		return runner.Result{}, err
-	}
-	childEnv := append(
-		childBaseEnv,
-		"SPARKWING_CONTROLLER_URL="+broker.URL(),
-		"SPARKWING_LOGS_URL="+childLogsURL,
-		"SPARKWING_RUN_ID="+runID,
-		"SPARKWING_NODE_ID="+nodeID,
-		// safety: this process forwards the child's stdout as log records, whatever the operator chose.
-		"SPARKWING_LOG_FORMAT=json",
-		remoteExecutionCapabilityInputEnv+"=1",
-	)
-	if fence.ClaimGeneration > 0 {
-		childEnv = append(childEnv, remoteBrokeredClaimEnv+"=1")
-	}
-	if artifact != nil {
-		childEnv = append(childEnv, remoteBrokeredArtifactEnv+"=1")
-	}
-	if cacheGrant != "" {
-		childEnv = append(childEnv, authwire.CacheGrantEnv+"="+cacheGrant)
-	}
-	runnerInfo := sparkwing.Runner(ctx)
-	if runnerInfo == nil {
-		runnerInfo = podRunnerInfo()
-	}
-	childEnv = slices.DeleteFunc(childEnv, func(item string) bool {
-		return strings.HasPrefix(item, "SPARKWING_RUNNER_")
-	})
-	if runnerInfo != nil {
-		for name, value := range map[string]string{
-			"SPARKWING_RUNNER_NAME": runnerInfo.Name, "SPARKWING_RUNNER_TYPE": runnerInfo.Type,
-			"SPARKWING_RUNNER_LABELS": strings.Join(runnerInfo.Labels, ","),
-		} {
-			if value != "" {
-				childEnv = append(childEnv, name+"="+value)
-			}
-		}
-	}
-
-	// #nosec G702 -- the node runner binary this process resolved, run as argv without a shell
-	cmd := exec.Command(binary, "run-node", runID, nodeID)
-	cmd.Dir = dir
-	cmd.Env = childEnv
-	cmd.Stdin = strings.NewReader(broker.capability + "\n")
-	values, err := secrets.ShareWithChild(cmd)
-	if err != nil {
-		return runner.Result{}, err
-	}
-	defer values.Close()
-	cmd.Stdout = values.Writer(os.Stdout)
-	cmd.Stderr = values.Writer(os.Stderr)
-
-	outcome, startErr := runAssistedChildProcess(ctx, cmd, logger)
-	broker.sealChildLogs(ctx, outcome, startErr, logger)
-	if startErr != nil {
-		logger.Warn("runNodeRemote: child failed to start",
-			"run_id", runID, "node_id", nodeID, "err", startErr)
-		return runner.Result{
-			Outcome: sparkwing.Failed,
-			Err:     fmt.Errorf("child run-node: %w", startErr),
-		}, nil
-	}
-	if outcome.cancelCause != nil {
-		logger.Warn("runNodeRemote: child canceled after owned process cleanup",
-			"run_id", runID, "node_id", nodeID,
-			"ownership_boundary", assistedChildOwnershipBoundary)
-		return runner.Result{
-			Outcome: sparkwing.Failed,
-			Err:     fmt.Errorf("child run-node canceled: %w", outcome.cancelCause),
-		}, nil
-	}
-	if outcome.waitErr != nil {
-		logger.Warn("runNodeRemote: child exited non-zero",
-			"run_id", runID, "node_id", nodeID, "err", outcome.waitErr)
-		return runner.Result{
-			Outcome: sparkwing.Failed,
-			Err:     fmt.Errorf("child run-node: %w", outcome.waitErr),
-		}, nil
-	}
-	logger.Debug("runNodeRemote: child ownership released",
-		"run_id", runID, "node_id", nodeID,
-		"ownership_boundary", assistedChildOwnershipBoundary)
-	return runner.Result{Outcome: sparkwing.Success}, nil
 }
 
 func remoteExecutionChildEnvironment(env []string) ([]string, error) {

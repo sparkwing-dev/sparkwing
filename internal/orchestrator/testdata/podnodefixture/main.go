@@ -2,7 +2,7 @@
 // one node that writes its environment to a file and prints a file's
 // content; when asked, a plan that drifts between processes, a failing node
 // with retries whose before_run and after_run calls are traced, and a node in a
-// concurrency group.
+// concurrency group; when asked, a node that waits until it is stopped.
 package main
 
 import (
@@ -28,6 +28,7 @@ type inputs struct {
 	Pass    string `flag:"pass" secret:"true" desc:"A secret the node prints"`
 	Memo    string `flag:"memo" desc:"File a memoized node appends to each time its body runs"`
 	Publish bool   `flag:"publish" desc:"The memoized node publishes an artifact"`
+	Hold    string `flag:"hold" desc:"File a held node writes its pid to before it waits to be stopped"`
 }
 
 type pipeline struct{ sparkwing.Base }
@@ -80,6 +81,15 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 		if in.Publish {
 			memoized.Outputs("dist/*")
 		}
+	}
+	if in.Hold != "" {
+		sparkwing.Job(plan, "held", func(ctx context.Context) error {
+			if err := os.WriteFile(in.Hold, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+				return err
+			}
+			<-ctx.Done()
+			return ctx.Err()
+		}).Needs(build)
 	}
 	if in.Group {
 		build.Concurrency(sparkwing.NewConcurrencyGroup("pod-group", sparkwing.ConcurrencyLimit{Capacity: 1}))

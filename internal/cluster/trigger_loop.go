@@ -15,7 +15,9 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -62,6 +64,8 @@ type TriggerLoopOptions struct {
 	MaxConcurrent int
 
 	Sources []string
+
+	nodeRunner func(orchestrator.Backends, *store.Trigger) runner.Runner
 }
 
 func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
@@ -86,6 +90,11 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 		return fmt.Errorf("mkdir work-root: %w", err)
 	}
 	sweepLeftoverDeployKeys(logger)
+	factory, err := triggerNodeRunner(opts)
+	if err != nil {
+		return fmt.Errorf("trigger loop: %w", err)
+	}
+	opts.nodeRunner = factory
 
 	nodeRunner := opts.RunnerKind
 	if nodeRunner == "" {
@@ -215,8 +224,8 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 		}
 	}
 
-	childCtx, cancelChild := context.WithCancel(ctx)
-	defer cancelChild()
+	childCtx, cancelChild := context.WithCancelCause(ctx)
+	defer cancelChild(nil)
 
 	outcomeCh := make(chan triggerClaimOutcome, 1)
 	go func() {
@@ -230,7 +239,7 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 		}
 	}()
 	awaitHeartbeat := func() bool {
-		cancelChild()
+		cancelChild(nil)
 		outcome := <-outcomeCh
 		cancelled = outcome == triggerClaimCancelled
 		return outcome == triggerClaimSilenced
@@ -330,127 +339,48 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 	logBinaryReady(logger, trigger.ID, binary)
 	defer binary.release()
 
-	execErr := execHandleTrigger(childCtx, binary.path, executionDir, trigger, opts, grant, logger)
-	return awaitHeartbeat(), execErr
+	hostErr := hostTriggerRun(childCtx, binary.path, executionDir, trigger, opts, logger)
+	return awaitHeartbeat(), hostErr
 }
 
-func execHandleTrigger(ctx context.Context, binPath, workDir string, trigger *store.Trigger, opts TriggerLoopOptions, cacheGrant string, logger *slog.Logger) error {
-	// safety: the child is the team's own code, so it reaches the controller
-	// through a broker that admits only its run's routes, and the runner's
-	// token stays here. The Jobs a Kubernetes or warm child creates cannot
-	// reach this loopback broker, so they carry their nodes' claim tokens and
-	// the controller's own address.
-	opts.K8sCtrlURL = cmp.Or(opts.K8sCtrlURL, opts.ControllerURL)
-	broker, err := orchestrator.StartTriggerBroker(opts.ControllerURL, opts.Token, trigger, logger)
-	if err != nil {
-		return fmt.Errorf("start trigger broker: %w", err)
-	}
-	defer broker.Close(ctx)
-	// safety: the child writes its logs on this machine unless the controller keeps segments, because a
-	// controller that does not keeps nothing the broker could hand an append to.
-	segments, err := client.NewWithToken(opts.ControllerURL, nil, opts.Token).KeepsLogSegments(ctx)
-	if err != nil {
-		logger.Warn("trigger loop: could not ask the controller whether it keeps log segments; logs stay local",
-			"run_id", trigger.ID, "err", err)
-	}
-	opts.ControllerURL, opts.Token = broker.URL(), broker.Capability()
-	if segments {
-		opts.LogsURL = broker.URL()
-	}
-	childArgs := handleTriggerArgs(trigger.ID, opts)
-	homeScratch := filepath.Join(bincache.SparkwingHome(), "tmp")
-	if err := fssecure.EnsureDir(homeScratch); err != nil {
-		return fmt.Errorf("prepare trigger home scratch: %w", err)
-	}
-	childHome, err := os.MkdirTemp(homeScratch, "trigger-home-")
-	if err != nil {
-		return fmt.Errorf("create trigger home: %w", err)
-	}
-	defer func() {
-		if err := os.RemoveAll(childHome); err != nil {
-			logger.Warn("trigger loop: remove trigger home", "path", childHome, "err", err)
-		}
-	}()
-	childHome, err = filepath.Abs(childHome)
-	if err != nil {
-		return fmt.Errorf("resolve trigger home: %w", err)
-	}
+// hack: a variable so tests stand in for the run host.
+var hostTriggerRunFn = orchestrator.HostTriggerRun
 
-	childCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+// safety: a run hosted here is bounded as its handler process was, so a wedged
+// run frees its slot rather than hold it until the runner restarts.
+const triggerRunLimit = 30 * time.Minute
+
+func hostTriggerRun(ctx context.Context, binPath, workDir string, trigger *store.Trigger, opts TriggerLoopOptions, logger *slog.Logger) error {
+	var nodeRunner runner.Runner
+	if opts.nodeRunner != nil {
+		nodeRunner = opts.nodeRunner(orchestrator.Backends{}, trigger)
+	}
+	ctx, cancel := context.WithTimeout(ctx, triggerRunLimit)
 	defer cancel()
-	cmd := exec.CommandContext(childCtx, binPath, childArgs...)
-	if workDir != "" {
-		cmd.Dir = workDir
-	}
-	env := append(triggerChildEnv(os.Environ(), opts, cacheGrant), "SPARKWING_HOME="+childHome)
-	cmd.Env = orchestrator.PipelineSourceEnvironment(env, trigger.TriggerEnv[orchestrator.PipelineRevKey])
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	logger.Info("trigger loop: exec child",
-		"trigger_id", trigger.ID, "bin", binPath, "dir", workDir)
-	runErr := cmd.Run()
-	var exitErr *exec.ExitError
-	broker.SealLogs(ctx, runErr != nil && (!errors.As(runErr, &exitErr) || !exitErr.Exited()))
-	if runErr != nil {
-		return fmt.Errorf("child pipeline binary: %w", runErr)
-	}
-	return nil
+	logger.Info("trigger loop: hosting the run", "trigger_id", trigger.ID, "bin", binPath, "dir", workDir)
+	return hostTriggerRunFn(ctx, orchestrator.TriggerHost{
+		ControllerURL: opts.ControllerURL, Token: opts.Token, Trigger: trigger,
+		Binary: binPath, Dir: workDir, Runner: nodeRunner, Logger: logger,
+	})
 }
 
-func handleTriggerArgs(triggerID string, opts TriggerLoopOptions) []string {
-	// safety: the child reads the bearer from SPARKWING_AGENT_TOKEN; argv is world-readable in /proc.
-	childArgs := []string{
-		"handle-trigger",
-		"--controller", opts.ControllerURL,
-	}
-	childArgs = append(childArgs, triggerRunnerArgs(opts)...)
-	childArgs = append(childArgs, triggerID)
-	return childArgs
-}
-
-func triggerRunnerArgs(opts TriggerLoopOptions) []string {
-	if opts.RunnerKind == "" || opts.RunnerKind == "inprocess" {
-		return nil
-	}
-	args := []string{"--runner", opts.RunnerKind}
-	appendFlag := func(name, val string) {
-		if val != "" {
-			args = append(args, name, val)
-		}
-	}
-	appendFlag("--namespace", opts.K8sNamespace)
-	appendFlag("--image", opts.K8sImage)
-	appendFlag("--runner-sa", opts.K8sRunnerSA)
-	appendFlag("--image-pull-secret", opts.K8sPullSecret)
-	appendFlag("--runner-controller-url", opts.K8sCtrlURL)
-	appendFlag("--kubeconfig", opts.Kubeconfig)
-	appendFlag("--artifact-store", opts.ArtifactStore)
-	appendFlag("--image-pull-policy", opts.K8sImagePullPolicy)
-	appendFlag("--k8s-cpu-ceiling", opts.K8sCPUCeiling)
-	appendFlag("--k8s-memory-ceiling", opts.K8sMemoryCeiling)
+// safety: the Jobs and warm runners a node goes to reach the controller
+// themselves, under the claim each node's dispatch takes, so they get the
+// controller's address and never this runner's token.
+func triggerNodeRunner(opts TriggerLoopOptions) (func(orchestrator.Backends, *store.Trigger) runner.Runner, error) {
+	var deadline string
 	if opts.K8sJobDeadline > 0 {
-		args = append(args, "--k8s-job-deadline", opts.K8sJobDeadline.String())
+		deadline = opts.K8sJobDeadline.String()
 	}
-	// safety: the flag goes only when set, so a pipeline built from an SDK older
-	// than it still runs every trigger that does not ask for team nodes.
-	if opts.K8sTeamNodes {
-		args = append(args, "--runner-team-nodes")
-	}
-	if opts.DependencyProxy != "" {
-		args = append(args, "--dependency-proxy", opts.DependencyProxy)
-	} else {
-		args = append(args, "--dependency-proxy", "off")
-	}
-	for _, val := range opts.K8sLabels {
-		appendFlag("--runner-label", val)
-	}
-	for _, val := range opts.K8sNodeSelector {
-		appendFlag("--runner-node-selector", val)
-	}
-	for _, val := range opts.K8sTolerations {
-		appendFlag("--runner-toleration", val)
-	}
-	return args
+	return orchestrator.BuildTriggerRunnerFactory(opts.RunnerKind, orchestrator.K8sRunnerFactoryConfig{
+		Kubeconfig: opts.Kubeconfig, Namespace: opts.K8sNamespace, Image: opts.K8sImage,
+		ServiceAccount: opts.K8sRunnerSA, ImagePullSecret: opts.K8sPullSecret,
+		ControllerURL: cmp.Or(opts.K8sCtrlURL, opts.ControllerURL), DispatcherURL: opts.ControllerURL,
+		ArtifactStoreURL: opts.ArtifactStore, GitcacheURL: opts.GitcacheURL, AgentToken: opts.Token,
+		Labels: opts.K8sLabels, TeamNodes: opts.K8sTeamNodes,
+		DependencyProxyURL: cmp.Or(opts.DependencyProxy, "off"), ImagePullPolicy: opts.K8sImagePullPolicy,
+		CPUCeiling: opts.K8sCPUCeiling, MemoryCeiling: opts.K8sMemoryCeiling, JobDeadline: deadline,
+	}, opts.K8sNodeSelector, opts.K8sTolerations)
 }
 
 func shipCompileOutput(ctx context.Context, compileLog *orchestrator.EngineNodeLog, runID string, buildErr error, logger *slog.Logger) {
@@ -687,7 +617,7 @@ var (
 	triggerHeartbeatTimeout = 2 * time.Second
 )
 
-func triggerClaimHeartbeat(ctx context.Context, cli *client.Client, triggerID string, killChild context.CancelFunc, logger *slog.Logger) triggerClaimOutcome {
+func triggerClaimHeartbeat(ctx context.Context, cli *client.Client, triggerID string, killChild context.CancelCauseFunc, logger *slog.Logger) triggerClaimOutcome {
 	t := time.NewTicker(triggerHeartbeatInterval)
 	defer t.Stop()
 	lastOK := time.Now()
@@ -702,8 +632,8 @@ func triggerClaimHeartbeat(ctx context.Context, cli *client.Client, triggerID st
 			cancel()
 			if err == nil {
 				if status != nil && status.CancelRequested {
-					logger.Warn("trigger loop: cancellation requested; killing child", "trigger_id", triggerID)
-					killChild()
+					logger.Warn("trigger loop: cancellation requested; stopping the run", "trigger_id", triggerID)
+					killChild(&nodehost.CancelError{Reason: errTriggerCancelled.Error()})
 					return triggerClaimCancelled
 				}
 				lastOK = time.Now()
@@ -713,18 +643,18 @@ func triggerClaimHeartbeat(ctx context.Context, cli *client.Client, triggerID st
 				return triggerClaimCtxDone
 			}
 			if client.IsTokenDead(err) || errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrLockHeld) {
-				logger.Error("trigger loop: trigger claim ended; killing child",
+				logger.Error("trigger loop: trigger claim ended; stopping the run",
 					"trigger_id", triggerID, "err", err)
-				killChild()
+				killChild(fmt.Errorf("the trigger claim ended: %w", err))
 				return triggerClaimReaped
 			}
 			silence := time.Since(lastOK)
 			if silence >= maxTriggerHeartbeatSilence {
-				logger.Error("trigger loop: controller unreachable beyond lease window; killing child and self-terminating",
+				logger.Error("trigger loop: controller unreachable beyond lease window; stopping the run and self-terminating",
 					"trigger_id", triggerID,
 					"silence", silence.Round(time.Second),
 					"err", err)
-				killChild()
+				killChild(fmt.Errorf("the controller was unreachable for %s: %w", silence.Round(time.Second), err))
 				return triggerClaimSilenced
 			}
 			if wait, ok := client.UnavailableBackoff(err, minShedBackoff); ok {

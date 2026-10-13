@@ -1596,6 +1596,10 @@ type Node struct {
 	// token the node's process authenticates with in place of the runner's
 	// own credential. It stops working when the claim ends.
 	ClaimToken string `json:"claim_token,omitempty"`
+	// SpecHash is the node's spec_hash in the plan its run host accepted. A
+	// remote host of the node runs it only when its own plan of the node
+	// hashes the same.
+	SpecHash string `json:"spec_hash,omitempty"`
 }
 
 // CreateNode inserts a node in the "pending" state.
@@ -1678,7 +1682,7 @@ INSERT INTO nodes (team, run_id, node_id, status, deps_json, needs_labels, prefe
 			       execution_policy_json, execution_policy_hash, execution_policy_version, execution_body_protocol,
 			       execution_supervisor_requirements_json, execution_supervisor_requirements_hash,
 			       execution_body_requirements_json, execution_body_requirements_hash,
-			       seq)
+			       spec_hash, seq)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_coordinator_id FROM runs WHERE team = ? AND id = ?), ''),
 		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_executor_kind FROM runs WHERE team = ? AND id = ?), ''),
@@ -1689,6 +1693,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 		?,
 		?,
 		?, ?, ?, ?, ?, ?, ?, ?,
+		?,
 		(SELECT COALESCE(MAX(seq), 0) + 1 FROM nodes WHERE team = ? AND run_id = ?))`,
 		string(team), n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON, prefersJSON,
 		n.RequestedCores, n.RequestedMemoryBytes, requestedSlots,
@@ -1703,6 +1708,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 		policyJSON, policyHash, policyVersion, bodyProtocol,
 		supervisorRequirementsJSON, supervisorRequirementsHash,
 		bodyRequirementsJSON, bodyRequirementsHash,
+		n.SpecHash,
 		string(team), n.RunID)
 	if err != nil {
 		return err
@@ -2090,7 +2096,7 @@ const nodeSelectColumns = `run_id, node_id, status, outcome, deps_json, error,
 	   execution_supervisor_requirements_json, execution_supervisor_requirements_hash,
 	   execution_body_requirements_json, execution_body_requirements_hash,
 	   avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until,
-	   placement_reason, placement_hold_from, credit_cpu_class,
+	   placement_reason, placement_hold_from, credit_cpu_class, spec_hash,
 	   (SELECT pipeline FROM runs WHERE runs.team = nodes.team AND runs.id = nodes.run_id)`
 
 func scanNodeRow(rs rowScanner, n *nodeRecord) error {
@@ -2120,7 +2126,7 @@ func scanNodeRow(rs rowScanner, n *nodeRecord) error {
 		&supervisorRequirementsJSON, &supervisorRequirementsHash,
 		&bodyRequirementsJSON, &bodyRequirementsHash,
 		&n.AvoidCoordinatorID, &n.AvoidExecutorKind, &n.AvoidExecutorID, &avoidUntilNS,
-		&n.PlacementReason, &holdFromNS, &n.CreditCPUClassCores, &pipeline)
+		&n.PlacementReason, &holdFromNS, &n.CreditCPUClassCores, &n.SpecHash, &pipeline)
 	if errors.Is(err, sql.ErrNoRows) {
 		return notFound("node", "")
 	}

@@ -31,10 +31,13 @@ type podNode struct {
 	// safety: the accepted plan's hash for the node, which the pod's own plan of it must match.
 	specHash string
 	// safety: the claim's 1-based attempt ordinal, which decides before_run and after_run under retry_auto.
-	attempt   int
-	state     storage.StateStore
-	artifacts storage.ArtifactStore
-	logger    *slog.Logger
+	attempt int
+	// safety: a node a run host dispatched already ran its skip_if, memo and admission there, and its accepted
+	// spec_hash is the one the run host recorded on its row.
+	dispatched bool
+	state      storage.StateStore
+	artifacts  storage.ArtifactStore
+	logger     *slog.Logger
 }
 
 // safety: the node's process gets the minimal environment and its own route
@@ -45,6 +48,13 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 	run, err := c.GetRunForExecution(ctx, p.runID)
 	if err != nil {
 		return nodehost.Result{}, fmt.Errorf("read run %s: %w", p.runID, err)
+	}
+	if p.dispatched {
+		row, err := c.GetNode(ctx, p.runID, p.nodeID)
+		if err != nil {
+			return nodehost.Result{}, fmt.Errorf("read node %s: %w", p.nodeID, err)
+		}
+		p.specHash = row.SpecHash
 	}
 	masker := secrets.NewMasker()
 	masker.Register(p.token)
@@ -63,30 +73,36 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 		p.logger.Warn("pod node: the forwarded routes are off", "run_id", p.runID, "node_id", p.nodeID, "err", err)
 		claim = nil
 	}
-	slots := NewHTTPConcurrency(p.controllerURL, nil, p.token, store.DefaultConcurrencyLease)
 	nlog := &podNodeLog{sink: openNodeLogSink(ctx, c, p.runID, p.nodeID, p.logger), out: os.Stdout, logger: p.logger}
 	planSink, err := newPodPlanSink(ctx, p.runID, masker, os.Stderr)
 	if err != nil {
 		return nodehost.Result{}, err
 	}
 	defer planSink.end()
-	res := nodehost.HostNode(ctx, nodehost.Config{
+	cfg := nodehost.Config{
 		Session:  nodehost.SessionConfig{Entry: p.binary, Dir: p.dir, Sink: planSink},
 		Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run),
 		State: p.state, Artifacts: p.artifacts, Logger: p.logger,
-		// safety: the node's concurrency group and memo entry run through the claim, which the controller binds to
-		// this node; a memo hit's output is the one the controller picks for the claim's key.
-		Admission: &nodehost.Admission{Slots: slots},
-		Memo: &nodehost.Memo{Slots: slots, Claimed: true, Output: func(ctx context.Context, in store.ClaimInputRequest, _, _ string) ([]byte, error) {
-			_, data, err := c.ClaimInput(ctx, p.runID, p.nodeID, in)
-			return data, err
-		}},
 		Attempts: &nodehost.Attempts{
 			Routes: routes, Resolver: podSecrets{c: c, runID: p.runID}, Masker: masker, Claim: claim,
 			OpenLog: func(context.Context, string, string) (nodehost.NodeLog, error) { return nlog, nil },
 			Usage:   nodehost.RecordUsage(nil),
 		},
-	}, p.nodeID, p.specHash, p.attempt)
+	}
+	var res nodehost.Result
+	if p.dispatched {
+		res = nodehost.HostDispatchedNode(ctx, cfg, p.nodeID, p.specHash)
+	} else {
+		slots := NewHTTPConcurrency(p.controllerURL, nil, p.token, store.DefaultConcurrencyLease)
+		// safety: the node's concurrency group and memo entry run through the claim, which the controller binds to
+		// this node; a memo hit's output is the one the controller picks for the claim's key.
+		cfg.Admission = &nodehost.Admission{Slots: slots}
+		cfg.Memo = &nodehost.Memo{Slots: slots, Claimed: true, Output: func(ctx context.Context, in store.ClaimInputRequest, _, _ string) ([]byte, error) {
+			_, data, err := c.ClaimInput(ctx, p.runID, p.nodeID, in)
+			return data, err
+		}}
+		res = nodehost.HostNode(ctx, cfg, p.nodeID, p.specHash, p.attempt)
+	}
 	nlog.seal(ctx, ctx.Err() != nil || res.Outcome == sparkwing.Cancelled)
 	return res, nil
 }

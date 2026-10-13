@@ -238,7 +238,7 @@ func TestAnOffClusterAgentUsesTheAnnouncedCacheWithItsGrant(t *testing.T) {
 		return string(got)
 	}
 
-	if node := execute(laptopA, "run-a1"); node.Outcome == string(sparkwing.Failed) || ran() != "run-node run-a1 build" {
+	if node := execute(laptopA, "run-a1"); !hostedToyPipeline(node) || ran() != toyProtocolArgv {
 		t.Fatalf("team A's first node = outcome %q error %q, marker %q; want the pipeline run", node.Outcome, node.Error, ran())
 	}
 	if proxied.Load() != 0 {
@@ -271,21 +271,36 @@ func TestAnOffClusterAgentUsesTheAnnouncedCacheWithItsGrant(t *testing.T) {
 
 	gitOnlyPath(t)
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	if node := execute(podA, "run-a2"); node.Outcome == string(sparkwing.Failed) || ran() != "run-node run-a2 build" {
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
+	if node := execute(podA, "run-a2"); !hostedToyPipeline(node) || ran() != toyProtocolArgv {
 		t.Fatalf("team A's second runner = outcome %q error %q, marker %q; want the cached binary run", node.Outcome, node.Error, ran())
 	}
 
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	node := execute(laptopB, "run-b1")
 	if node.Outcome != string(sparkwing.Failed) || !strings.Contains(node.Error, "go toolchain not on PATH") {
 		t.Fatalf("team B's node = outcome %q error %q; want it failed to compile, having read no binary", node.Outcome, node.Error)
 	}
-	if ran() != "run-node run-a2 build" {
+	if ran() != "" {
 		t.Fatalf("team B's runner ran a binary: marker %q", ran())
 	}
 	if proxied.Load() != 0 {
 		t.Fatalf("%d requests went through the controller's gitcache routes, want none", proxied.Load())
 	}
+}
+
+const toyProtocolArgv = "--sw-node-protocol"
+
+// safety: the toy pipeline records its argv and speaks no node protocol, so
+// a node it ran fails its plan as an exited SDK; any earlier failure, such as
+// a fetch or build, means the host never started it.
+func hostedToyPipeline(n *store.Node) bool {
+	return n.Outcome == string(sparkwing.Failed) && strings.Contains(n.Error, "sdk_exited")
 }
 
 func post(t *testing.T, url, bearer string) (int, string) {

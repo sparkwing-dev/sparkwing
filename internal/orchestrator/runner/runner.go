@@ -24,6 +24,11 @@ type Request struct {
 	Trigger  sparkwing.TriggerInfo
 
 	Node *sparkwing.JobNode
+	// Timeout is the node's declared wall-clock timeout; zero is none.
+	Timeout time.Duration
+	// Cores and MemoryBytes are the node's resource pin; zero is unpinned.
+	Cores       float64
+	MemoryBytes int64
 	// ClaimWait is how long the node may wait for a claim; zero is the default.
 	ClaimWait time.Duration
 

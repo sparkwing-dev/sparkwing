@@ -50,6 +50,14 @@ type Config struct {
 	Debug Debug
 	// Memo reuses memoized nodes' earlier results; nil runs every node.
 	Memo *Memo
+	// Dispatch, when set, runs each admitted node elsewhere, whole: the
+	// remote host runs its artifacts, caches, retries, timeouts and attempts
+	// and records its start and result. Debug pauses, skip_if, approvals,
+	// memo and admission stay in this host, with Attempts for their eval
+	// processes and logs. Nil runs every node in this process.
+	Dispatch Executor
+	// ParentRunID, RetryOf and RetrySource are the run row's lineage.
+	ParentRunID, RetryOf, RetrySource string
 }
 
 // Result is how one node ended.
@@ -63,8 +71,9 @@ type Result struct {
 	// failed before_run does: a later attempt would run the body without it.
 	Final      bool
 	expansions []expansion
-	// safety: the memo layer writes the row before its release records the entry, so finish must not write it again.
-	memoRecorded bool
+	// safety: the memo layer writes the row before its release records the entry, and a dispatched node's
+	// remote host writes its own, so finish must not write it again.
+	recorded bool
 }
 
 // RunResult is how a hosted run ended. Status is success, failed or
@@ -302,6 +311,7 @@ func runRow(cfg Config, args map[string]string) store.Run {
 	row := store.Run{
 		ID: rc.RunID, Pipeline: cfg.Pipeline, Status: "running", Args: args,
 		TriggerSource: rc.Trigger.Source, StartedAt: rc.StartedAt,
+		ParentRunID: cfg.ParentRunID, RetryOf: cfg.RetryOf, RetrySource: cfg.RetrySource,
 	}
 	if g := rc.Git; g != nil {
 		row.GitBranch, row.GitSHA, row.DeclaredRepo, row.RepoURL = g.Branch, g.SHA, g.Repo, g.RepoURL
@@ -336,6 +346,9 @@ func heartbeat(ctx context.Context, cfg Config, runID string) (stop func()) {
 }
 
 func chain(cfg *Config) Executor {
+	if cfg.Dispatch != nil {
+		return dispatchChain(cfg)
+	}
 	exec := cfg.Execute
 	if exec == nil && cfg.Attempts != nil {
 		exec = cfg.Attempts.executor(cfg)
@@ -478,7 +491,7 @@ func (s *scheduler) finish(ctx context.Context, id string, res Result) {
 	}
 	writeCtx := context.WithoutCancel(ctx)
 	var err error
-	if !res.memoRecorded {
+	if !res.recorded {
 		err = s.run.State.FinishNodeWithReason(writeCtx, s.run.ID, id, string(res.Outcome), errText(res.Err), res.Output, res.Reason, nil)
 	}
 	if errors.Is(err, store.ErrOutputNotStored) {
@@ -535,7 +548,7 @@ func (s *scheduler) add(ctx, writeCtx context.Context, nodes []nodeproto.PlanNod
 
 func pendingRow(run *Run, n nodeproto.PlanNode) store.Node {
 	row := store.Node{
-		RunID: run.ID, NodeID: n.ID, Status: "pending", RequestedSlots: 1,
+		RunID: run.ID, NodeID: n.ID, Status: "pending", RequestedSlots: 1, SpecHash: n.SpecHash,
 		Deps: append(slices.Clone(n.Deps), n.OptionalDeps...),
 	}
 	var runsOn, whenRunner []string

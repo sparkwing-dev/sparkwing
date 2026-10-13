@@ -847,10 +847,8 @@ func TestResolveResources_ClearsControllerPinWhenNodeDeclaresNone(t *testing.T) 
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 
-	plan := sparkwing.NewPlan()
-	node := sparkwing.Job(plan, "build", func(context.Context) error { return nil })
 	k8sRunner := &Runner{ctrl: client.New(srv.URL, nil), cfg: defaultsCfg}
-	_ = k8sRunner.resolveResources(ctx, runner.Request{Pipeline: "deploy", NodeID: "build", Node: node})
+	_ = k8sRunner.resolveResources(ctx, runner.Request{Pipeline: "deploy", NodeID: "build"})
 
 	profile, err := st.GetPipelineProfile(ctx, "deploy", "build")
 	if err != nil || profile == nil {
@@ -884,10 +882,7 @@ func TestResolveResources_AnnouncesTheClampOnBothChannels(t *testing.T) {
 		cfg:    ceilingCfg,
 		logger: slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})),
 	}
-	plan := sparkwing.NewPlan()
-	node := sparkwing.Job(plan, "build", func(context.Context) error { return nil }).
-		Resources(sparkwing.Cores(64), sparkwing.MemoryGB(128))
-	req := runner.Request{RunID: "run-1", Pipeline: "deploy", NodeID: "build", Node: node}
+	req := runner.Request{RunID: "run-1", Pipeline: "deploy", NodeID: "build", Cores: 64, MemoryBytes: 128 << 30}
 
 	if res := r.resolveResources(ctx, req); res.Cores != 64 {
 		t.Fatalf("resolved cores = %v, want the unclamped charge; podResources owns the clamp", res.Cores)
@@ -921,10 +916,7 @@ func TestResolveResources_StaysQuietUnderTheCeiling(t *testing.T) {
 		cfg:    ceilingCfg,
 		logger: slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})),
 	}
-	plan := sparkwing.NewPlan()
-	node := sparkwing.Job(plan, "build", func(context.Context) error { return nil }).
-		Resources(sparkwing.Cores(1), sparkwing.MemoryGB(1))
-	r.resolveResources(ctx, runner.Request{RunID: "run-1", Pipeline: "deploy", NodeID: "build", Node: node})
+	r.resolveResources(ctx, runner.Request{RunID: "run-1", Pipeline: "deploy", NodeID: "build", Cores: 1, MemoryBytes: 1 << 30})
 	if logs.Len() != 0 {
 		t.Fatalf("log = %q, want silence when the ceiling does not bite", logs.String())
 	}
@@ -1195,10 +1187,8 @@ func TestBuildJob_BoundsAPodThatNeverFinishes(t *testing.T) {
 }
 
 func TestBuildJob_LetsTheNodeTimeoutFireBeforeKubernetesKillsThePod(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	node := sparkwing.Job(plan, "slow", func(context.Context) error { return nil }).Timeout(time.Hour)
 	r := &Runner{cfg: Config{Image: "img"}}
-	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "slow", Node: node},
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "slow", Timeout: time.Hour},
 		capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{}, "")
 	if want := int64((time.Hour + jobDeadlineSlack).Seconds()); *job.Spec.ActiveDeadlineSeconds != want {
 		t.Fatalf("ActiveDeadlineSeconds = %d, want the node's timeout plus slack (%d)",
@@ -1207,9 +1197,7 @@ func TestBuildJob_LetsTheNodeTimeoutFireBeforeKubernetesKillsThePod(t *testing.T
 }
 
 func TestBuildJob_ADeclaredTimeoutCannotOutliveTheCeiling(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	node := sparkwing.Job(plan, "forever", func(context.Context) error { return nil }).Timeout(30 * 24 * time.Hour)
-	req := runner.Request{RunID: "run-1", NodeID: "forever", Node: node}
+	req := runner.Request{RunID: "run-1", NodeID: "forever", Timeout: 30 * 24 * time.Hour}
 	r := &Runner{cfg: Config{Image: "img"}}
 	job := r.buildJob("job-name", req, capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{}, "")
 	if want := int64(MaxDeclaredJobActiveDeadline.Seconds()); *job.Spec.ActiveDeadlineSeconds != want {

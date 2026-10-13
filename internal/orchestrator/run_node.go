@@ -111,7 +111,8 @@ func RunNodeOnce(
 			return runNodeRemote(ctx, trigger, run, controllerURL, cfg.gitcacheURL, cfg.gitcacheGrant,
 				runID, nodeID, token, cfg.repoAllowlist, logger)
 		}
-		return runNodeIsolatedFn(ctx, controllerURL, runID, nodeID, token, cfg.gitcacheGrant, logger)
+		return runner.Result{}, fmt.Errorf("run %s names no repository or working-tree source, so there is no pipeline for node %s to build",
+			runID, nodeID)
 	}
 	// safety: coordinated nodes use the same pipeline binary as their local dispatcher.
 	if !cfg.coordinated && shouldRunRemote(trigger, cfg.brokeredChild || cfg.claim != nil) {

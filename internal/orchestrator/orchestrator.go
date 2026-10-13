@@ -2199,6 +2199,10 @@ func (s *dispatchState) runOneNode(ctx context.Context, node *sparkwing.JobNode)
 			dispatchCtx = store.WithExecutionAttemptOrdinal(dispatchCtx, autoConsumed+autoAttempt+1)
 		}
 		dispatched := false
+		pin := node.ResourceHints()
+		if pin == nil {
+			pin = &sparkwing.ResourceHints{}
+		}
 		res = s.runWithCap(ctx, node, func(slot *workerSlot) runner.Result {
 			dispatched = true
 			return activeRunner.RunNode(dispatchCtx, runner.Request{
@@ -2206,6 +2210,9 @@ func (s *dispatchState) runOneNode(ctx context.Context, node *sparkwing.JobNode)
 				NodeID:              node.ID(),
 				Pipeline:            s.pipeline,
 				Node:                node,
+				Timeout:             node.TimeoutDuration(),
+				Cores:               pin.Cores,
+				MemoryBytes:         pin.MemoryBytes,
 				ClaimWait:           s.plan.ClaimWaitValue(),
 				Delegate:            s.delegate,
 				ReleaseWorkerSlot:   slot.release,

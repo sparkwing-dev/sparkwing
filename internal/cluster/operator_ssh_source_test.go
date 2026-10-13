@@ -86,8 +86,8 @@ func TestOperatorRunBuildsFromAnSSHMirrorThroughItsGrant(t *testing.T) {
 	}()
 	select {
 	case got := <-ran:
-		if !strings.Contains(string(got), "handle-trigger") || !strings.Contains(string(got), "operator-run") {
-			t.Fatalf("the pipeline ran with %q, want the handle-trigger call for operator-run", got)
+		if string(got) != toyProtocolArgv {
+			t.Fatalf("the pipeline ran with %q, want the run host's %q", got, toyProtocolArgv)
 		}
 	case err := <-loopDone:
 		t.Fatalf("trigger loop stopped before the pipeline ran: %v", err)
@@ -263,14 +263,16 @@ func TestDispatchedNodeFetchesAnSSHMirrorThroughItsOwnGrant(t *testing.T) {
 	t.Setenv("SPARKWING_NODE_CLAIM_RESERVATION", claimed.ReservationID)
 	t.Setenv("SPARKWING_NODE_CLAIM_LEASE_SECONDS", "600")
 
-	if err := orchestrator.RunNodeCommand([]string{"--controller", ctrlSrv.URL, "--logs", "", runID, nodeID}); err != nil {
-		t.Fatalf("run-node: %v", err)
+	// safety: the toy pipeline speaks no node protocol, so the node host that started it fails its plan.
+	if err := orchestrator.RunNodeCommand([]string{"--controller", ctrlSrv.URL, "--logs", "", runID, nodeID}); err == nil ||
+		!strings.Contains(err.Error(), "sdk_exited") {
+		t.Fatalf("run-node: %v, want the toy pipeline's plan to fail", err)
 	}
 	got, err := os.ReadFile(marker)
 	if err != nil {
 		t.Fatalf("the node's pipeline never ran: %v", err)
 	}
-	if want := "run-node " + runID + " " + nodeID; string(got) != want {
-		t.Fatalf("the pipeline ran with %q, want %q", got, want)
+	if string(got) != toyProtocolArgv {
+		t.Fatalf("the pipeline ran with %q, want %q", got, toyProtocolArgv)
 	}
 }

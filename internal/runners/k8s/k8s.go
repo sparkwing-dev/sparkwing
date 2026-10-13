@@ -607,10 +607,8 @@ func claimRetryBound(req runner.Request) time.Duration {
 	if bound <= 0 {
 		bound = match.DefaultClaimWait
 	}
-	if req.Node != nil {
-		if timeout := req.Node.TimeoutDuration(); timeout > 0 {
-			bound = min(bound, timeout)
-		}
+	if req.Timeout > 0 {
+		bound = min(bound, req.Timeout)
 	}
 	return bound
 }
@@ -641,10 +639,8 @@ func (r *Runner) jobActiveDeadline(req runner.Request) *int64 {
 	if deadline <= 0 {
 		deadline = DefaultJobActiveDeadline
 	}
-	if req.Node != nil {
-		if declared := req.Node.TimeoutDuration(); declared > 0 {
-			deadline = min(declared+jobDeadlineSlack, max(deadline, MaxDeclaredJobActiveDeadline))
-		}
+	if req.Timeout > 0 {
+		deadline = min(req.Timeout+jobDeadlineSlack, max(deadline, MaxDeclaredJobActiveDeadline))
 	}
 	secs := int64(deadline.Seconds())
 	if secs < 1 {
@@ -821,7 +817,7 @@ func (r *Runner) resolveResources(ctx context.Context, req runner.Request) capac
 			pipeline = run.Pipeline
 		}
 	}
-	pin := nodePin(req.Node)
+	pin := nodePin(req)
 	var profile *store.PipelineProfile
 	if pipeline != "" {
 		profile, _ = r.ctrl.GetPipelineProfile(ctx, pipeline, req.NodeID)
@@ -842,15 +838,11 @@ func (r *Runner) resolveResources(ctx context.Context, req runner.Request) capac
 	return res
 }
 
-func nodePin(node *sparkwing.JobNode) *capacity.Pin {
-	if node == nil {
+func nodePin(req runner.Request) *capacity.Pin {
+	if req.Cores <= 0 && req.MemoryBytes <= 0 {
 		return nil
 	}
-	h := node.ResourceHints()
-	if h == nil || (h.Cores <= 0 && h.MemoryBytes <= 0) {
-		return nil
-	}
-	return &capacity.Pin{Cores: h.Cores, MemoryBytes: h.MemoryBytes}
+	return &capacity.Pin{Cores: req.Cores, MemoryBytes: req.MemoryBytes}
 }
 
 // JobBinary is the executable a fallback Job runs. The runner image installs
