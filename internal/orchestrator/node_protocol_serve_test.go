@@ -61,10 +61,10 @@ func (serveFixturePipeline) Plan(ctx context.Context, plan *sparkwing.Plan, in s
 		return fmt.Errorf("%s is still set to %q", protofd.HandlesEnv, v)
 	}
 	if initHeld != "" {
-		return fmt.Errorf("a subprocess started during package init inherited protocol descriptors %q", initHeld)
+		return fmt.Errorf("a subprocess started during package init inherited protocol descriptors or the node bearer %q", initHeld)
 	}
 	if held := heldProtocolFDs(); held != "" {
-		return fmt.Errorf("a subprocess inherited protocol descriptors %q", held)
+		return fmt.Errorf("a subprocess inherited protocol descriptors or the node bearer %q", held)
 	}
 	build := sparkwing.Job(plan, "build", protocolStepsJob{})
 	sparkwing.Job(plan, "deploy", &serveDeployJob{}).Needs(build)
@@ -73,7 +73,7 @@ func (serveFixturePipeline) Plan(ctx context.Context, plan *sparkwing.Plan, in s
 
 func heldProtocolFDs() string {
 	held, err := exec.Command("sh", "-c",
-		`(: <&3) 2>/dev/null && echo 3; (: >&4) 2>/dev/null && echo 4; true`).Output()
+		`(: <&3) 2>/dev/null && echo 3; (: >&4) 2>/dev/null && echo 4; [ -n "$SPARKWING_NODE_TOKEN" ] && echo token; true`).Output()
 	if err != nil {
 		return err.Error()
 	}
@@ -148,7 +148,8 @@ func startEntry(t *testing.T) *entrySession {
 	if err := os.WriteFile(filepath.Join(s.cmd.Dir, ".sparkwing", "sparkwing.yaml"), []byte(yaml), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	s.cmd.Env = append(os.Environ(), nodeProtocolEntryEnv+"=1", protofd.HandlesEnv+"=3,4")
+	s.cmd.Env = append(os.Environ(), nodeProtocolEntryEnv+"=1", protofd.HandlesEnv+"=3,4",
+		protofd.NodeURLEnv+"=http://127.0.0.1:1", protofd.NodeTokenEnv+"=swn_entry-bearer")
 	s.cmd.ExtraFiles = []*os.File{reqR, frW}
 	s.cmd.Stdout = &s.stdout
 	if err := s.cmd.Start(); err != nil {

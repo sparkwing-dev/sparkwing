@@ -78,7 +78,11 @@ func (s *server) nodeContext(ctx context.Context, planned *Planned, n *sparkwing
 		ctx = sparkwing.WithStep(ctx, step.ID())
 		ctx = sparkwingruntime.WithLogger(ctx, stepLogger{frameLogger{s}, step.ID()})
 	}
-	ctx = sparkwingruntime.WithJSONResolver(ctx, func(id string) ([]byte, bool) { return localOutput(planned, id) })
+	if c := s.cfg.Node; c != nil {
+		ctx = withNodeRoutes(ctx, c, planned)
+	} else {
+		ctx = sparkwingruntime.WithJSONResolver(ctx, func(id string) ([]byte, bool) { return localOutput(planned, id) })
+	}
 	if in := planned.Plan.Inputs(); in != nil {
 		ctx = sparkwingruntime.WithInputs(ctx, in)
 	}
