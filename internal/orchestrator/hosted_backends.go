@@ -272,9 +272,9 @@ func hostedBackendsForRun(ctx context.Context, paths Paths, opts *Options) (Back
 	if opts.State != nil || !runsOnMachineStore(opts, paths) {
 		return Backends{}, hostedSelection{}, noop, nil
 	}
-	// safety: a child of a run forced standalone reads its trigger from the parent's store, so it is forced
-	// too rather than picking the daemon's store, where that trigger does not exist.
-	allowUnadmitted := opts.AllowUnadmitted || parentStandaloneReason() == standaloneForced
+	// safety: a trigger child of a run forced standalone reads its trigger from the store the parent named, so it
+	// is forced too rather than picking the daemon's store; without that store the reason is not a parent's.
+	allowUnadmitted := opts.AllowUnadmitted || (parentStateDB() != "" && parentStandaloneReason() == standaloneForced)
 	sel, err := selectHostedAPI(ctx, opts.Admission, allowUnadmitted)
 	if err != nil {
 		return Backends{}, hostedSelection{}, noop, err

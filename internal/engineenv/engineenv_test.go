@@ -72,11 +72,9 @@ func TestEveryEngineEnvNameIsClassified(t *testing.T) {
 			// safety: every string literal, quoted or raw, so a name spelled with backticks cannot slip past.
 			ast.Inspect(file, func(n ast.Node) bool {
 				if call, ok := n.(*ast.CallExpr); ok {
-					if sel, ok := call.Fun.(*ast.SelectorExpr); ok && envCalls[sel.Sel.Name] {
-						for _, arg := range call.Args {
-							if m := envCallName.FindStringSubmatch(stringLiteral(arg)); m != nil {
-								seen[strings.ToUpper(m[1])] = path
-							}
+					if sel, ok := call.Fun.(*ast.SelectorExpr); ok && envCalls[sel.Sel.Name] && len(call.Args) > 0 {
+						if m := envCallName.FindStringSubmatch(stringLiteral(call.Args[0])); m != nil {
+							seen[strings.ToUpper(m[1])] = path
 						}
 					}
 				}

@@ -326,6 +326,28 @@ func TestHostedSelection_ChildOfAForcedParentReadsTheParentsStore(t *testing.T) 
 	}
 }
 
+func TestHostedSelection_AForcedReasonWithoutAParentStoreIsIgnored(t *testing.T) {
+	home := wingdTestHome(t)
+	t.Setenv("SPARKWING_HOME", home)
+	_, runs := startAPIDaemon(t, home, nil)
+	ctx := context.Background()
+	if _, _, err := runs.Create(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(StandaloneStateDBEnv, "")
+	t.Setenv(StandaloneReasonEnv, standaloneForced)
+	paths := PathsAt(home)
+	opts := Options{DefaultStateDB: paths.StateDB(), Admission: testWingdAdmission(home, nil)}
+	backends, sel, release, err := hostedBackendsForRun(ctx, paths, &opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if backends.APISocket == "" || sel.standalone != "" {
+		t.Fatalf("socket = %q, reason = %q; want the daemon, since no parent named a standalone store", backends.APISocket, sel.standalone)
+	}
+}
+
 func TestHostedRun_UnreadableDaemonStoreRefusesTheRun(t *testing.T) {
 	registerHostedPipelines(t)
 	home := wingdTestHome(t)
