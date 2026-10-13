@@ -44,11 +44,15 @@ type Job struct {
 	handle windows.Handle
 }
 
-// NewJob creates a named, kill-on-close job with no members yet.
+// NewJob creates a named, kill-on-close job with no members yet. An empty
+// name creates an unnamed job, which only the returned handle can reach.
 func NewJob(name string) (*Job, error) {
-	wide, err := windows.UTF16PtrFromString(name)
-	if err != nil {
-		return nil, err
+	var wide *uint16
+	if name != "" {
+		var err error
+		if wide, err = windows.UTF16PtrFromString(name); err != nil {
+			return nil, err
+		}
 	}
 	job, err := windows.CreateJobObject(nil, wide)
 	if err != nil {

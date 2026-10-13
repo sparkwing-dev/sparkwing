@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -90,6 +92,14 @@ func fakeSDK() {
 			ok("999", map[string]any{"outcome": "success"})
 		case req.Node == "close-frames":
 			_ = frames.Close()
+		case req.Node == "term-reply":
+			term := make(chan os.Signal, 1)
+			signal.Notify(term, syscall.SIGTERM)
+			log("", "armed")
+			<-term
+			ok(req.ID, map[string]any{"outcome": "success"})
+			log("", "replied")
+			os.Exit(0)
 		case req.Node == "grandchild":
 			child := exec.Command(os.Args[0])
 			child.Env = append(os.Environ(), fakeSDKEnv+"=sleep")
@@ -104,6 +114,14 @@ func fakeSDK() {
 	for {
 		req, err := r.NextRequest()
 		if err != nil {
+			os.Exit(0)
+		}
+		switch req.Node {
+		case "deaf":
+			ok(req.ID, map[string]any{"outcome": "success"})
+			select {}
+		case "reply-exit":
+			ok(req.ID, map[string]any{"outcome": "success"})
 			os.Exit(0)
 		}
 		go handle(req)
@@ -162,6 +180,9 @@ func startFake(t *testing.T, ctx context.Context, sink *recorder) *Session {
 	}
 	t.Cleanup(func() {
 		_, _ = s.Close()
+		if s.cmd.ProcessState == nil {
+			t.Errorf("sdk process %d was left unreaped", s.cmd.Process.Pid)
+		}
 		if after := openFDs(t); after != before {
 			t.Errorf("open fds went from %d to %d", before, after)
 		}
@@ -373,5 +394,159 @@ func TestSessionCancelKillsGrandchildren(t *testing.T) {
 		if p.PID == pid && !p.Terminated() {
 			t.Fatalf("grandchild %d outlived the cancel: %+v", pid, p)
 		}
+	}
+}
+
+type blockingSink struct {
+	release chan struct{}
+	mu      sync.Mutex
+	text    []string
+}
+
+func (b *blockingSink) Text(level, line string) {
+	<-b.release
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.text = append(b.text, level+" "+line)
+}
+
+func (b *blockingSink) Record(nodeproto.LogRecord) { <-b.release }
+
+func TestSessionBlockedSinkNeitherStallsRepliesNorClose(t *testing.T) {
+	sink := &blockingSink{release: make(chan struct{})}
+	t.Cleanup(func() { close(sink.release) })
+	before := openFDs(t)
+	s, err := StartSession(context.Background(), SessionConfig{
+		Entry: os.Args[0],
+		Env:   append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0"),
+		Sink:  sink,
+		Grace: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	for range 3 {
+		if _, err := s.Call(callCtx(t), runNode("echo")); err != nil {
+			t.Fatalf("run_node behind a blocked sink: %v", err)
+		}
+	}
+	if _, err := s.Close(); err != nil {
+		t.Fatalf("close behind a blocked sink: %v", err)
+	}
+	if after := openFDs(t); after != before {
+		t.Errorf("open fds went from %d to %d", before, after)
+	}
+}
+
+func TestSinkQueueCountsDrops(t *testing.T) {
+	defer func(old int) { sinkQueueBytes = old }(sinkQueueBytes)
+	sinkQueueBytes = 1000
+	sink := &blockingSink{release: make(chan struct{})}
+	q := newSinkQueue()
+	go q.run(sink)
+	for i := range 50 {
+		q.push(sinkItem{level: LevelInfo, text: strings.Repeat("x", 90) + strconv.Itoa(i), size: 92})
+	}
+	close(sink.release)
+	q.close()
+	<-q.done
+	kept := len(sink.text) - 1
+	want := fmt.Sprintf("warn sparkwing: %d log lines dropped while the log sink was behind", 50-kept)
+	if kept >= 50 || sink.text[len(sink.text)-1] != want {
+		t.Fatalf("delivered %d lines ending %q, want drops counted as %q", kept, sink.text[len(sink.text)-1], want)
+	}
+}
+
+func TestSessionStuckWriteHonorsDeadlines(t *testing.T) {
+	s := startFake(t, context.Background(), &recorder{})
+	if _, err := s.Call(callCtx(t), runNode("deaf")); err != nil {
+		t.Fatalf("run_node: %v", err)
+	}
+	// safety: larger than any pipe buffer, so the write blocks once the fake
+	// stops reading.
+	big := json.RawMessage(`{"pad":"` + strings.Repeat("x", 1<<20) + `"}`)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+			defer cancel()
+			if _, err := s.Call(ctx, nodeproto.Request{Op: nodeproto.OpEval, Closure: "c", Input: big}); err == nil {
+				t.Error("a call whose write never finished succeeded")
+			}
+		}()
+	}
+	wg.Wait()
+	if _, err := s.Close(); hostCode(err) != nodeproto.CodeProtocolError {
+		t.Fatalf("close = %v, want protocol_error", err)
+	}
+}
+
+func TestSessionReplyAfterCancelIsNotSuccess(t *testing.T) {
+	sink := &recorder{notify: make(chan nodeproto.LogRecord, 2)}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := startFake(t, ctx, sink)
+	called := make(chan error, 1)
+	go func() {
+		_, err := s.Call(callCtx(t), runNode("term-reply"))
+		called <- err
+	}()
+	next := func(want string) {
+		select {
+		case rec := <-sink.notify:
+			if rec.Msg != want {
+				t.Fatalf("fake logged %q, want %q", rec.Msg, want)
+			}
+		case <-callCtx(t).Done():
+			t.Fatalf("the fake never logged %q", want)
+		}
+	}
+	next("armed")
+	s.mu.Lock()
+	var pending call
+	for _, c := range s.inflight {
+		pending = c
+	}
+	s.mu.Unlock()
+	cancel()
+	if err := <-called; !errors.Is(err, context.Canceled) {
+		t.Fatalf("call = %v, want the cancel even though the SDK replied on SIGTERM", err)
+	}
+	// safety: the record follows the reply on the frame pipe, so the reply
+	// has been read by the time it arrives.
+	next("replied")
+	if len(pending.reply) != 0 {
+		t.Fatal("a reply read after the cancel was delivered to the call")
+	}
+}
+
+func TestSessionWriteFailureDuringExitIsSDKExited(t *testing.T) {
+	s := startFake(t, context.Background(), &recorder{})
+	failed := make(chan struct{})
+	go func() {
+		s.writeFailed(errors.New("broken pipe"))
+		close(failed)
+	}()
+	if err := s.cmd.Process.Kill(); err != nil {
+		t.Fatalf("kill: %v", err)
+	}
+	<-failed
+	if err := s.failure(); hostCode(err) != nodeproto.CodeSDKExited {
+		t.Fatalf("failure = %v, want sdk_exited for a write that broke as the SDK exited", err)
+	}
+}
+
+func TestSessionReapsLeaderWhenCleanupTimesOut(t *testing.T) {
+	defer func(old time.Duration) { reapTimeout = old }(reapTimeout)
+	reapTimeout = 100 * time.Millisecond
+	s := startFake(t, context.Background(), &recorder{})
+	s.proc.(groupProcess).SetDescendantProbe(func(int, bool, bool) (bool, error) { return false, nil })
+	if _, err := s.Close(); !errors.Is(err, procgroup.ErrCleanup) {
+		t.Fatalf("close = %v, want the cleanup timeout", err)
+	}
+	if s.cmd.ProcessState == nil {
+		t.Fatal("the leader was left unreaped")
 	}
 }

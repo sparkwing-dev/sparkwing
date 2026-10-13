@@ -35,7 +35,11 @@ const maxTextLine = 1 << 20
 
 // safety: bounds the wait for the session's members to die after the kill, so
 // a process stuck in the kernel cannot hold the session open.
-const reapTimeout = 10 * time.Second
+var reapTimeout = 10 * time.Second
+
+// safety: bounds what a slow sink can make one stream hold; past it the
+// stream's lines are dropped and counted rather than stalling the pipe.
+var sinkQueueBytes = 8 << 20
 
 // Sink receives everything an SDK process writes other than replies. The
 // session calls it from several goroutines at once. Masking and storage are
@@ -94,6 +98,7 @@ type Session struct {
 	failed   chan struct{}
 
 	reads     []*os.File
+	queues    []*sinkQueue
 	streams   sync.WaitGroup
 	frameEOF  chan struct{}
 	watchDone chan struct{}
@@ -153,10 +158,15 @@ func StartSession(ctx context.Context, cfg SessionConfig) (*Session, error) {
 		frameEOF:  make(chan struct{}),
 		watchDone: make(chan struct{}),
 	}
+	for range 3 {
+		q := newSinkQueue()
+		s.queues = append(s.queues, q)
+		go q.run(cfg.Sink)
+	}
 	s.streams.Add(3)
-	go s.readFrames(parent[1])
-	go s.readText(parent[2], LevelInfo)
-	go s.readText(parent[3], LevelWarn)
+	go s.readFrames(parent[1], s.queues[0])
+	go s.readText(parent[2], LevelInfo, s.queues[1])
+	go s.readText(parent[3], LevelWarn, s.queues[2])
 	go s.watch(ctx)
 	return s, nil
 }
@@ -164,7 +174,9 @@ func StartSession(ctx context.Context, cfg SessionConfig) (*Session, error) {
 // Call sends req, with a fresh id, and waits for its reply. A failed reply is
 // returned as a reply; the error reports a session that can no longer answer,
 // as a [*nodeproto.Error] with a host code where the protocol names one.
-// Cancelling ctx stops only the wait: the request stays in flight.
+// Cancelling ctx once the request is written stops only the wait: the request
+// stays in flight. Cancelling it while the write is blocked fails the session
+// with protocol_error, since the request pipe may hold half a request.
 func (s *Session) Call(ctx context.Context, req nodeproto.Request) (nodeproto.Reply, error) {
 	req.ID = "0"
 	if err := req.Validate(); err != nil {
@@ -186,13 +198,27 @@ func (s *Session) Call(ctx context.Context, req nodeproto.Request) (nodeproto.Re
 	s.inflight[req.ID] = c
 	s.mu.Unlock()
 
-	if err := s.writer.Send(req); err != nil {
-		s.fail(fmt.Errorf("write sdk request: %w", err))
+	// safety: the write runs apart from the caller so a process that stops
+	// reading cannot hold a call, or the calls queued behind its write, past
+	// their deadlines; tearing the session down unblocks it.
+	written := make(chan error, 1)
+	go func() { written <- s.writer.Send(req) }()
+	select {
+	case err := <-written:
+		if err != nil {
+			s.writeFailed(err)
+		}
+	case <-s.failed:
+	case <-ctx.Done():
+		s.fail(hostError(nodeproto.CodeProtocolError, "request %s (%s) not written before its deadline", req.ID, req.Op))
+		return nodeproto.Reply{}, ctx.Err()
 	}
 	select {
 	case r := <-c.reply:
 		return r, nil
 	case <-s.failed:
+		// safety: a reply is delivered only while the session is live, so a
+		// buffered one predates the failure.
 		select {
 		case r := <-c.reply:
 			return r, nil
@@ -202,6 +228,15 @@ func (s *Session) Call(ctx context.Context, req nodeproto.Request) (nodeproto.Re
 	case <-ctx.Done():
 		return nodeproto.Reply{}, ctx.Err()
 	}
+}
+
+func (s *Session) writeFailed(err error) {
+	// safety: a write usually breaks because the process exited, and the
+	// watcher needs a moment to record that as sdk_exited.
+	if s.failure() == nil && s.await(s.proc.LeaderExited()) {
+		<-s.failed
+	}
+	s.fail(hostError(nodeproto.CodeProtocolError, "write sdk request: %v", err))
 }
 
 func conflicts(op, other nodeproto.Op) bool {
@@ -232,6 +267,19 @@ func (s *Session) Close() (Usage, error) {
 			}
 			<-done
 		}
+		delivered := make(chan struct{})
+		go func() {
+			for _, q := range s.queues {
+				q.close()
+			}
+			for _, q := range s.queues {
+				<-q.done
+			}
+			close(delivered)
+		}()
+		// safety: a sink that never returns is abandoned after the grace so
+		// the session still ends and its sampler stops.
+		s.await(delivered)
 		s.usage = s.sampler.Stop(s.cmd.ProcessState)
 		err := s.failure()
 		if errors.Is(err, ErrClosed) {
@@ -307,7 +355,7 @@ func (s *Session) watch(ctx context.Context) {
 	s.fail(hostError(nodeproto.CodeSDKExited, "sdk exited (%s)", status))
 }
 
-func (s *Session) readFrames(f *os.File) {
+func (s *Session) readFrames(f *os.File, q *sinkQueue) {
 	defer s.streams.Done()
 	defer f.Close()
 	defer close(s.frameEOF)
@@ -321,7 +369,8 @@ func (s *Session) readFrames(f *os.File) {
 		case err != nil:
 			return
 		case frame.Kind == nodeproto.KindLog:
-			s.cfg.Sink.Record(s.attribute(frame.Log))
+			rec := s.attribute(frame.Log)
+			q.push(sinkItem{rec: &rec, size: len(rec.Msg) + len(rec.Attrs)})
 			continue
 		}
 		if _, err := s.tracker.Resolve(frame.Reply); err != nil {
@@ -329,10 +378,12 @@ func (s *Session) readFrames(f *os.File) {
 			return
 		}
 		s.mu.Lock()
-		c := s.inflight[frame.Reply.ID]
+		c, ok := s.inflight[frame.Reply.ID]
 		delete(s.inflight, frame.Reply.ID)
+		if ok && s.err == nil {
+			c.reply <- frame.Reply
+		}
 		s.mu.Unlock()
-		c.reply <- frame.Reply
 	}
 }
 
@@ -351,7 +402,7 @@ func (s *Session) attribute(rec nodeproto.LogRecord) nodeproto.LogRecord {
 	return rec
 }
 
-func (s *Session) readText(f *os.File, level string) {
+func (s *Session) readText(f *os.File, level string, q *sinkQueue) {
 	defer s.streams.Done()
 	defer f.Close()
 	br := bufio.NewReaderSize(f, 64<<10)
@@ -370,11 +421,92 @@ func (s *Session) readText(f *os.File, level string) {
 					end--
 				}
 			}
-			s.cfg.Sink.Text(level, string(line[:end]))
+			q.push(sinkItem{level: level, text: string(line[:end]), size: end})
 			line = line[:0]
 		}
 		if err != nil && !errors.Is(err, bufio.ErrBufferFull) {
 			return
+		}
+	}
+}
+
+type sinkItem struct {
+	level, text string
+	rec         *nodeproto.LogRecord
+	size        int
+}
+
+// safety: each stream's lines reach the sink through its own queue, so a pipe
+// reader never waits on the sink.
+type sinkQueue struct {
+	mu      sync.Mutex
+	items   []sinkItem
+	bytes   int
+	dropped int
+	closed  bool
+	wake    chan struct{}
+	done    chan struct{}
+}
+
+func newSinkQueue() *sinkQueue {
+	return &sinkQueue{wake: make(chan struct{}, 1), done: make(chan struct{})}
+}
+
+func (q *sinkQueue) push(item sinkItem) {
+	// safety: a fixed overhead per line bounds a flood of empty lines too.
+	item.size += 64
+	q.mu.Lock()
+	if q.bytes > 0 && q.bytes+item.size > sinkQueueBytes {
+		q.dropped++
+	} else {
+		q.items = append(q.items, item)
+		q.bytes += item.size
+	}
+	q.mu.Unlock()
+	q.signal()
+}
+
+func (q *sinkQueue) close() {
+	q.mu.Lock()
+	q.closed = true
+	q.mu.Unlock()
+	q.signal()
+}
+
+func (q *sinkQueue) signal() {
+	select {
+	case q.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (q *sinkQueue) run(sink Sink) {
+	defer close(q.done)
+	for {
+		q.mu.Lock()
+		if len(q.items) == 0 {
+			dropped, closed := q.dropped, q.closed
+			q.dropped = 0
+			q.mu.Unlock()
+			switch {
+			case dropped > 0:
+				sink.Text(LevelWarn, fmt.Sprintf("sparkwing: %d log lines dropped while the log sink was behind", dropped))
+			case closed:
+				return
+			default:
+				<-q.wake
+			}
+			continue
+		}
+		item := q.items[0]
+		q.items[0] = sinkItem{}
+		q.items = q.items[1:]
+		q.bytes -= item.size
+		q.mu.Unlock()
+		if item.rec != nil {
+			sink.Record(*item.rec)
+		} else {
+			sink.Text(item.level, item.text)
 		}
 	}
 }

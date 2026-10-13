@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -16,8 +15,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
-
-var sessionJobSequence atomic.Uint64
 
 // hack: Windows has neither descriptor numbering nor process sessions, so the pipes travel as inherited
 // handles named in SPARKWING_PROTOCOL_HANDLES and a kill-on-close job stands in for the session.
@@ -30,8 +27,9 @@ func startProcess(cmd *exec.Cmd, requests, frames *os.File) (sessionProcess, err
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{AdditionalInheritedHandles: handles}
 	cmd.Env = append(cmd.Environ(), fmt.Sprintf("SPARKWING_PROTOCOL_HANDLES=%d,%d", handles[0], handles[1]))
-	name := fmt.Sprintf(`Local\sparkwing-sdk-%d-%d`, os.Getpid(), sessionJobSequence.Add(1))
-	job, err := procgroup.NewJob(name)
+	// safety: an unnamed job has no handle but the host's, so no other
+	// process can keep it, and its members, alive past Close.
+	job, err := procgroup.NewJob("")
 	if err != nil {
 		return nil, err
 	}
@@ -64,9 +62,10 @@ func (p *jobProcess) LeaderExited() <-chan struct{} { return p.exited }
 func (p *jobProcess) Finish(ctx context.Context, _ time.Duration) error {
 	select {
 	case <-p.exited:
-		return errors.Join(p.waitErr, p.job.Close())
+		return errors.Join(p.waitErr, p.job.Terminate(), p.job.Close())
 	case <-ctx.Done():
-		return errors.Join(fmt.Errorf("%w: wait for sdk process: %w", procgroup.ErrCleanup, ctx.Err()), p.job.Close())
+		return errors.Join(fmt.Errorf("%w: wait for sdk process: %w", procgroup.ErrCleanup, ctx.Err()),
+			p.job.Terminate(), p.job.Close())
 	}
 }
 
