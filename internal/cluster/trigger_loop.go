@@ -346,9 +346,9 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 // hack: a variable so tests stand in for the run host.
 var hostTriggerRunFn = orchestrator.HostTriggerRun
 
-// safety: a run hosted here is bounded as its handler process was, so a wedged
-// run frees its slot rather than hold it until the runner restarts.
-const triggerRunLimit = 30 * time.Minute
+// safety: a wedged run frees its slot rather than hold it until the runner
+// restarts; six hours is GitHub Actions' default job timeout.
+const triggerRunLimit = 6 * time.Hour
 
 func hostTriggerRun(ctx context.Context, binPath, workDir string, trigger *store.Trigger, opts TriggerLoopOptions, logger *slog.Logger) error {
 	var nodeRunner runner.Runner

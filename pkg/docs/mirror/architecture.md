@@ -95,6 +95,8 @@ a claim it takes for that node. Every node records the `spec_hash` the run's
 accepted plan gave it, and the host that runs a node refuses it with
 `plan_drift` when its own plan of the node hashes otherwise. Pipeline
 processes get the minimal environment; the runner's token never reaches them.
+A run the trigger runner hosts is stopped and fails after six hours, GitHub
+Actions' default job timeout, so a wedged run frees the runner's slot.
 
 Off-cluster runners (developer machines, workstations, and servers) connect to
 the controller and claim nodes through its claim API; the route set and scopes
