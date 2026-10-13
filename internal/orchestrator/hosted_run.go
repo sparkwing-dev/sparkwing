@@ -82,12 +82,8 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 		return nil, err
 	}
 
+	// safety: nodehost registers the secret-flagged args with this masker while it plans, before any node runs.
 	masker := secrets.NewMasker()
-	for _, name := range entry.SecretArgs {
-		if v := invokeArgs[name]; v != "" {
-			masker.Register(v)
-		}
-	}
 	delegate := secrets.MaskingLogger(opts.Delegate, masker)
 	routes, err := nodehost.Start(slog.Default())
 	if err != nil {
@@ -133,9 +129,6 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 
 	resolver := secrets.NewCached(localSecretsFor(ctx, paths, backends, runID, opts.Pipeline), masker)
 	opts.localSecrets = true
-	if p := opts.PipelineYAML; p != nil {
-		state.requires = p.Requires
-	}
 	state.preflight = func(ctx context.Context, doc nodeproto.PlanDoc) error {
 		return hostedSecretPreflight(ctx, resolver, doc, opts)
 	}
@@ -153,6 +146,14 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 	if backends.LocalCoordination {
 		attempts.Usage = nodehost.RecordUsage(backends.State)
 	}
+	requires, err := PipelineRequires(entry.Dir, opts.Pipeline)
+	if err != nil {
+		return nil, err
+	}
+	// safety: the dispatcher fell back to the project's defaults.requires for a pipeline that names none.
+	if p := opts.PipelineYAML; len(requires) == 0 && p != nil {
+		requires = p.Requires
+	}
 	cfg := nodehost.Config{
 		Session:  nodehost.SessionConfig{Entry: entry.Program, Dir: entry.Dir, Env: nodehost.PipelineEnv(entry.Env), Sink: hostedPlanSink{delegate}},
 		Pipeline: opts.Pipeline, Args: invokeArgs, Run: hostedRunContext(opts, runID),
@@ -162,7 +163,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 			PauseBefore: opts.Debug.PauseBefore, PauseAfter: opts.Debug.PauseAfter,
 			PauseOnFailure: opts.Debug.PauseOnFailure, PauseTimeout: pauseTimeout(), Bounces: hostedBounces(backends.State),
 		},
-		Invocation: invocation,
+		Invocation: invocation, Requires: requires,
 		Memo: &nodehost.Memo{
 			Slots: backends.Concurrency, NoCache: opts.NoCache,
 			Output: func(ctx context.Context, _ store.ClaimInputRequest, runID, nodeID string) ([]byte, error) {
@@ -277,7 +278,6 @@ type hostedRunState struct {
 	diskRoot string
 
 	preflight func(context.Context, nodeproto.PlanDoc) error
-	requires  []string
 
 	mu     sync.Mutex
 	doc    *nodeproto.PlanDoc
@@ -285,10 +285,6 @@ type hostedRunState struct {
 }
 
 func (s *hostedRunState) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {
-	snapshot, err := withHostedRequires(snapshot, s.requires)
-	if err != nil {
-		return err
-	}
 	if err := s.StateBackend.UpdatePlanSnapshot(ctx, runID, snapshot); err != nil {
 		return err
 	}
@@ -303,24 +299,6 @@ func (s *hostedRunState) UpdatePlanSnapshot(ctx context.Context, runID string, s
 		}
 	}
 	return nil
-}
-
-// safety: requires is the host's placement constraint from sparkwing.yaml, which the SDK's plan never carries,
-// so the accepted snapshot gets it here as the dispatcher's snapshot did.
-func withHostedRequires(snapshot []byte, requires []string) ([]byte, error) {
-	if len(requires) == 0 {
-		return snapshot, nil
-	}
-	var doc map[string]json.RawMessage
-	if err := json.Unmarshal(snapshot, &doc); err != nil {
-		return nil, fmt.Errorf("plan snapshot: %w", err)
-	}
-	raw, err := json.Marshal(requires)
-	if err != nil {
-		return nil, err
-	}
-	doc["requires"] = raw
-	return json.Marshal(doc)
 }
 
 // safety: a run missing a required secret stops before any node starts, naming each one with its fix, as the
