@@ -46,8 +46,8 @@ A pipeline node that fails fails the GHA job (exit code propagates).
 
 ## How it works
 
-1. `--sw-mode=ci-embedded` plumbs through `sparkwing` -> the pipeline binary
-   via env vars (`SPARKWING_MODE`, `SPARKWING_WORKERS`).
+1. `sparkwing run` hosts the run itself and holds `--sw-mode` and
+   `--sw-workers` as run state.
 2. The orchestrator records run and node state in the runner's local
    SQLite store, per-node logs under `~/.sparkwing/runs/<id>/`, and cache
    entries on local disk.
