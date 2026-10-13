@@ -53,6 +53,9 @@ func planRun(ctx context.Context, s *Session, pipeline string, args map[string]s
 	var doc nodeproto.PlanDoc
 	err := ask(ctx, s, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: pipeline, Args: args, Run: &rc}, &raw)
 	if err == nil {
+		raw, err = nodeproto.StampSpecHashes(raw)
+	}
+	if err == nil {
 		err = json.Unmarshal(raw, &doc)
 	}
 	switch {

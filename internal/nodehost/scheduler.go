@@ -27,9 +27,11 @@ type Config struct {
 	// StartedAt means now and an empty trigger source means manual.
 	Run   nodeproto.RunContext
 	State storage.StateStore
-	// Execute runs one attempt of a node. Nil fails every node it reaches.
-	Execute Executor
-	Logger  *slog.Logger
+	// Execute runs one attempt of a node. Nil runs it with Attempts, and
+	// fails every node it reaches when Attempts is nil too.
+	Execute  Executor
+	Attempts *Attempts
+	Logger   *slog.Logger
 	// Heartbeat is the run heartbeat interval; zero means 30 seconds.
 	Heartbeat time.Duration
 }
@@ -65,16 +67,23 @@ type NodeRun struct {
 	Plan nodeproto.PlanNode
 	// Failure says how the parent failed; it is set only for an on_failure node.
 	Failure *nodeproto.Failure
+	// Attempt is the 1-based attempt number; zero means 1.
+	Attempt int
 }
 
 // Run is the hosted run an executor works within.
 type Run struct {
 	ID string
 	// Doc is the accepted plan. Nodes added with [Run.Add] are not in it.
-	Doc    nodeproto.PlanDoc
-	State  storage.StateStore
-	Logger *slog.Logger
-	adds   chan addRequest
+	Doc nodeproto.PlanDoc
+	// Pipeline, Args and Context are the accepted plan's request; every
+	// later process of the run plans with the same.
+	Pipeline string
+	Args     map[string]string
+	Context  nodeproto.RunContext
+	State    storage.StateStore
+	Logger   *slog.Logger
+	adds     chan addRequest
 }
 
 type addRequest struct {
@@ -172,7 +181,10 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 		res.Status = runStatus(res.Err)
 		return res, nil
 	}
-	run := &Run{ID: res.RunID, Doc: doc, State: cfg.State, Logger: cfg.Logger, adds: make(chan addRequest)}
+	run := &Run{
+		ID: res.RunID, Doc: doc, Pipeline: cfg.Pipeline, Args: args, Context: cfg.Run,
+		State: cfg.State, Logger: cfg.Logger, adds: make(chan addRequest),
+	}
 	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg)}
 	if err := s.add(ctx, ctx, doc.Nodes); err != nil {
 		res.Status, res.Err = "failed", err
@@ -224,6 +236,9 @@ func heartbeat(ctx context.Context, cfg Config, runID string) (stop func()) {
 
 func chain(cfg *Config) Executor {
 	exec := cfg.Execute
+	if exec == nil && cfg.Attempts != nil {
+		exec = cfg.Attempts.executor(cfg)
+	}
 	if exec == nil {
 		exec = func(context.Context, *NodeRun) Result {
 			return Result{Outcome: sparkwing.Failed, Err: errors.New("nodehost: no attempt executor")}
