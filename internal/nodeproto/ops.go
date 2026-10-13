@@ -214,10 +214,19 @@ type RunResult struct {
 	Output  json.RawMessage `json:"output,omitempty"`
 }
 
-// Validate checks the outcome.
+// Validate checks the outcome and that the output fits in [MaxOutputBytes].
 func (r RunResult) Validate() error {
 	if r.Outcome != OutcomeSuccess && r.Outcome != OutcomeFailed {
 		return fmt.Errorf("%w: unknown outcome %q", ErrMalformed, r.Outcome)
+	}
+	return CheckOutputSize(len(r.Output))
+}
+
+// CheckOutputSize refuses a step output of n bytes of JSON above
+// [MaxOutputBytes].
+func CheckOutputSize(n int) error {
+	if n > MaxOutputBytes {
+		return fmt.Errorf("step output is %d bytes as JSON, over the %d MiB limit", n, MaxOutputBytes>>20)
 	}
 	return nil
 }

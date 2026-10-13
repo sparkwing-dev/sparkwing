@@ -372,3 +372,27 @@ func TestPersistent429EndsAtTheRetryBudget(t *testing.T) {
 	_, err = c.StartChild(context.Background(), nodeclient.ChildRequest{Pipeline: "build"})
 	wantCode(t, h, err, nodeclient.CodeTooManyRequests)
 }
+
+func TestA429RetryThatStallsEndsAtTheRetryBudget(t *testing.T) {
+	var calls atomic.Int32
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) > 1 {
+			<-r.Context().Done()
+			return
+		}
+		answer(http.StatusTooManyRequests, map[string]string{"error": "slots full", "code": nodeclient.CodeTooManyRequests})(w, r)
+	}))
+	t.Cleanup(host.Close)
+	c, err := nodeclient.New(host.URL, "bearer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodeclient.SetRetryBudget(c, 200*time.Millisecond)
+	_, _, err = c.Secret(context.Background(), "X")
+	if !nodeclient.HasCode(err, nodeclient.CodeTooManyRequests) {
+		t.Fatalf("err = %v, want the 429 the budget ended on", err)
+	}
+	if n := calls.Load(); n < 2 {
+		t.Fatalf("host asked %d times, want a retry", n)
+	}
+}

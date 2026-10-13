@@ -149,7 +149,9 @@ func (c *Client) do(ctx context.Context, method, path string, timeout time.Durat
 
 // safety: tries bounds only 502 retries; a 429 is refused before the host
 // forwards anything, so retrying it never repeats a request, and the budget
-// bounds it.
+// bounds it. Every retry, its request included, ends by the budget, and one
+// cut short there reports the refusal before it; the first request keeps its
+// own timeout, since an await may hold longer than the budget.
 func (c *Client) call(ctx context.Context, method, path string, timeout time.Duration, body, out any, want, tries int) error {
 	var payload []byte
 	if body != nil {
@@ -160,8 +162,19 @@ func (c *Client) call(ctx context.Context, method, path string, timeout time.Dur
 	}
 	delay := 25 * time.Millisecond
 	giveUp := time.Now().Add(c.budget)
+	var refused error
 	for try := 1; ; try++ {
-		err := c.once(ctx, method, path, timeout, payload, out, want)
+		reqCtx, cancel := ctx, context.CancelFunc(func() {})
+		if refused != nil {
+			reqCtx, cancel = context.WithDeadline(ctx, giveUp)
+		}
+		err := c.once(reqCtx, method, path, timeout, payload, out, want)
+		spent := err != nil && reqCtx.Err() != nil && ctx.Err() == nil
+		cancel()
+		if spent {
+			return refused
+		}
+		refused = err
 		var e *Error
 		switch {
 		case !errors.As(err, &e):

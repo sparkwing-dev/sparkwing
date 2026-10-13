@@ -2,11 +2,14 @@ package sparkwing
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 // RunWork executes w's step DAG. Items run in dependency
@@ -303,7 +306,18 @@ func dispatchItem(ctx context.Context, it *workItem) (any, error) {
 	if IsDryRun(ctx) && it.step.dryRunFn != nil {
 		return nil, it.step.dryRunFn(ctx)
 	}
-	return it.step.fn(ctx)
+	out, err := it.step.fn(ctx)
+	if err != nil || out == nil {
+		return out, err
+	}
+	// safety: a value with no JSON form never leaves this process, so only
+	// what can be measured is held to the limit.
+	if raw, merr := json.Marshal(out); merr == nil {
+		if err := nodeproto.CheckOutputSize(len(raw)); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 func (it *workItem) markDone(out any) { it.step.markDone(out) }

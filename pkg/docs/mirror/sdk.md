@@ -96,23 +96,22 @@ than by the linter, and a method on the pipeline is not followed.
 
 Which callback you are in decides whether a guarded helper runs, and
 what `NodeFromContext` and `StepFromContext` answer. A `JobNode.SkipIf` predicate and a
-`CacheKeyFn` carry no node id: both are orchestrator decisions *about* a node
-rather than work inside one.
+`CacheKeyFn` carry the id of the node they decide about, and no step id.
 
 <!-- BEGIN measured-context-table -->
 | Callback | Side effects | Node id | Step id |
 |---|---|---|---|
 | Pipeline.Plan | no | no | no |
-| JobNode.SkipIf | yes | no | no |
-| CacheKeyFn | yes | no | no |
+| JobNode.SkipIf | yes | yes | no |
+| CacheKeyFn | yes | yes | no |
 | Job body step | yes | yes | yes |
 | Verify | yes | yes | no |
 | BeforeRun | yes | yes | no |
 | AfterRun | yes | yes | no |
 <!-- END measured-context-table -->
 
-A test renders that table from a pipeline run and fails if this page and the
-runtime disagree.
+A test renders that table from the requests a run's host sends and fails if
+this page and the SDK disagree.
 
 The table describes a run. `sparkwing pipeline plan` evaluates each step's skip
 predicate in the pipeline process, as a run does, to report which steps a run

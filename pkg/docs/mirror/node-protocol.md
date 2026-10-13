@@ -69,13 +69,13 @@ The host evaluates `skip_if` and `cache_key` closures before the first attempt s
 
 - **Streams.** The SDK reads requests from the request pipe and writes replies and log records to the frame pipe. On Unix these are descriptors 3 and 4. On Windows they are inherited pipe handles, and `SPARKWING_PROTOCOL_HANDLES` holds their values as `<request>,<frame>` in decimal. stdin is the null device (`/dev/null`, or `NUL` on Windows).
 - **Close-on-exec.** At startup the SDK marks both protocol descriptors close-on-exec, or makes both handles non-inheritable, and removes `SPARKWING_PROTOCOL_HANDLES` from its environment. A command the SDK starts therefore never holds them.
-  - The Go SDK does this while packages initialize, before the `init` of any package that imports the SDK. A package that does not import the SDK is not ordered after it, so a command its `init` starts can still inherit both pipes. Pipeline code should not start commands during package initialization.
+  - The Go SDK does this, and removes `SPARKWING_NODE_TOKEN` from its environment, while packages initialize, before the `init` of any package that imports the SDK. A package that does not import the SDK is not ordered after it, so its `init` can read the bearer, and a command its `init` starts can inherit both pipes and the bearer. Pipeline code should not read the environment or start commands during package initialization.
 - **User text.** stdout and stderr belong to customer code and the commands it starts. The host stores each stdout line verbatim as an `info` text record and each stderr line as a `warn` text record, and never parses either stream. Nothing a customer prints can forge a reply or a record.
 - **Requests.** The host writes one JSON object per line to the request pipe, in the form `{"id": "<id>", "op": "<op>", ...fields}`. The host assigns ids as decimal strings counting from `"1"`, unique within the process.
-- **Lines.** Every line on the frame pipe is at most 16 MiB, newline included. The host strips a trailing `\r`.
+- **Lines.** Every line on the frame pipe is at most 17 MiB, newline included. The host strips a trailing `\r`.
 - **Replies.** A frame that is a JSON object with a `reply` key is a reply, and it must be well formed. A successful reply is `{"reply": "<id>", "ok": true, "result": {...}}` and carries no `error`. A failed reply is `{"reply": "<id>", "ok": false, "error": {"code": "<code>", "message": "..."}}` and carries no `result`. `ok` is a JSON boolean, `error.message` is required and `error.code` is optional.
 - **Log records.** Every other frame is a log record: a JSON object with a string `ts` and correctly typed known fields (see [Log records](#log-records)). The host ignores keys it does not know.
-- **Protocol errors.** The host fails the attempt with `protocol_error` for a frame that is neither a well-formed reply nor a log record, a frame over 16 MiB, a reply to an id the host never sent, or a second reply to the same id.
+- **Protocol errors.** The host fails the attempt with `protocol_error` for a frame that is neither a well-formed reply nor a log record, a frame over 17 MiB, a reply to an id the host never sent, or a second reply to the same id.
 - **Concurrency.** The host may have several `eval` and `run_step` requests in flight in one process, and the SDK may answer them in any order. A `cancel` may be sent at any time. At most one `run_node` is in flight. `run_node` and `run_step` are never in flight together, and `describe` and `plan` are always sent alone.
 - **End of input.** End of file on the request pipe means the host is done with the process. The SDK cancels any request still running, writes nothing further, and exits with status 0. The host closes the pipe only after every reply arrives, so a close mid-request means the host stopped the attempt or is itself gone.
 - **Early end of output.** If the SDK exits, or closes the frame pipe, with a request still unanswered, the attempt fails with `sdk_exited` or `frames_closed`.
@@ -139,7 +139,7 @@ The result has these fields:
 
 - `outcome` is `success` or `failed`.
 - `error` is the error message, a string, when the body returned an error or threw. It is a successful reply with `outcome: failed`, because the body ran. A failed reply means the node could not run at all.
-- `output` is the body's JSON output. For `run_step` only the result step carries it, and the host records it as the node's output. An absent `output` means the node has none. Because the reply must fit in one 16 MiB line, a node output is at most 16 MiB less the reply's own bytes.
+- `output` is the body's JSON output. For `run_step` only the result step carries it, and the host records it as the node's output. An absent `output` means the node has none. A step's output, whether or not it travels, is at most 16 MiB as JSON; the SDK fails a step whose output is larger, and the host fails a node whose reply carries a larger one.
 
 A step output stays in the SDK process's memory, so a later step in the same process can read it. The host never asks for it.
 
@@ -279,7 +279,7 @@ From that base the host removes the `SPARKWING_*` variables the engine owns: cre
 | `TRACEPARENT` | every process | The W3C trace context of the run, or of the node for a node-bound process. |
 | `SPARKWING_PROTOCOL_HANDLES` | every process, Windows only | The request and frame pipe handles, as `<request>,<frame>` in decimal. |
 
-The SDK removes `SPARKWING_NODE_TOKEN` from the environment of every command it starts, so a step's tools never hold the bearer.
+The SDK removes `SPARKWING_NODE_TOKEN` from the environment of every command it starts, so a step's tools never hold the bearer. A command started during package initialization can still hold it; see [Framing](#framing).
 
 In a dry run the host adds `SPARKWING_DRY_RUN=1` to every process, the plan process included, so plan code and the commands a node starts see the same switch.
 
@@ -332,7 +332,7 @@ Notes on the routes:
 
   A request past either limit gets 429 `too_many_requests` at once, and is never queued. Every open `await` of one child run shares one poll of the controller a second.
 
-- **Cleanups.** A cleanup is for a resource outside the process session, such as a container or a cloud object, which killing the session would leave behind. `argv` must be idempotent. The host runs it once, after the process exits for any reason, newest first, in the repository root with the node's environment, and ends it with every process it started after 2 minutes. A node holds at most 16 cleanups, each with at most 64 arguments; a seventeenth answers 400 `bad_request`.
+- **Cleanups.** A cleanup is for a resource outside the process session, such as a container or a cloud object, which killing the session would leave behind. `argv` must be idempotent. The host runs it once, after the process exits for any reason, newest first, in the repository root with the node's environment, and ends it with every process it started after 2 minutes. A node holds at most 16 cleanups, each with at most 64 arguments, a `description` of at most 256 bytes and a request body of at most 16 KiB; a seventeenth, or one past those bounds, answers 400 `bad_request`.
 - **Child runs.** A child run that waits in plan admission does not count against the parent node's wall timeout while an `await` request for it is open. The SDK enforces its own wait limit, such as `RunAndAwait`'s `WithFreshTimeout`, by not calling `await` again.
 - **Pipeline references.** `latest` reads another pipeline's newest successful run, as `RefToLastRun` does.
 
@@ -362,18 +362,19 @@ Content-Type: application/json
 
 | What | Bound | Past the bound |
 |---|---|---|
-| One frame | 16 MiB, newline included | The attempt fails with `protocol_error`. |
-| A node's output | One reply frame, so 16 MiB as JSON less the reply's own bytes. Only the result step's output, or a `run_node` output, travels; other step outputs stay in the SDK process | The Go SDK answers a failed reply, and the node fails. |
+| One frame | 17 MiB, newline included | The attempt fails with `protocol_error`. |
+| A step's output | 16 MiB as JSON, for every step. Only the result step's output, or a `run_node` output, travels; other step outputs stay in the SDK process | The SDK fails the step, and the host fails a node whose reply carries a larger output. |
 | A node `skip_if` | `modifiers.skip_if_budget_ms`, 30 seconds by default | The node runs. |
 | A `cache_key` closure | 30 seconds | The node fails. |
 | `after_run` after a timeout | 2 minutes, in its own eval process | The process is killed and the node's outcome stands. |
 | One cleanup | 2 minutes | The host ends it and every process it started. |
-| Cleanups per node | 16, each with at most 64 arguments | 400 `bad_request` |
+| Cleanups per node | 16, each with at most 64 arguments, a 256-byte `description` and a 16 KiB request body | 400 `bad_request` |
 | Open route requests | 4 besides awaits, plus 64 awaits | 429 `too_many_requests` |
 | Retries of a 429 by the Go SDK | 2 minutes in all for one call | The call returns the 429. |
 | A child run's request body | 64 KiB | 400 `bad_request` |
 | One `await` | `wait_ms` up to 60000, 30000 by default | 400 `bad_request` |
 | A `describe` from the CLI | 30 seconds | The CLI kills the process and every process it started. |
+| The run host's `describe` | 30 seconds | The run fails before it is recorded. |
 
 ## Log records
 
