@@ -90,6 +90,7 @@ unlock.
 - **cli:** `config`, `--explain`, `--plan` and `debug replay` no longer inherit the variables the engine owns, such as `SPARKWING_SECRETS_KEY`, so pipeline init code cannot read them
 - **orchestrator:** A child run of `sparkwing run --sw-allow-unadmitted` stays standalone and finds its trigger in its parent's store when a daemon answers
 - **orchestrator:** A direct run under `SPARKWING_LOG_LEVEL=debug` records `verbose`, so its reproducer keeps `--sw-verbose`
+- **launcher:** a controller-dispatched run plans with its trigger's actor and pull request: the single-run read (`GET /api/v1/runs/{id}`) now carries `trigger_user` and `pull_request` from the run's trigger, and the launcher's planning and node Jobs derive the run context from it
 - **secrets:** a controller secrets backend error no longer quotes credentials embedded in the backend URL
 - **controller:** A node waiting for an agent no longer reports that no agent of its team can run it when the agent's token expires
   Claim attention listed only tokens that never expire, because it compared their expiry in seconds against the clock in nanoseconds, so every runner and machine token dropped out; it also read an offline agent's last use as a 1970 date. Both now read seconds.
