@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -66,6 +67,7 @@ type launchedRun struct {
 	st    *store.Store
 	url   string
 	runID string
+	src   string
 }
 
 func newLaunchedRun(t *testing.T, args map[string]string) *launchedRun {
@@ -92,7 +94,8 @@ func newLaunchedRun(t *testing.T, args map[string]string) *launchedRun {
 	resolveLaunchedBinary = func(context.Context, string, string, string, string, string, string, *slog.Logger) (remoteBinary, error) {
 		return remoteBinary{path: bin}, nil
 	}
-	t.Setenv("SPARKWING_SOURCE_DIR", t.TempDir())
+	r.src = t.TempDir()
+	t.Setenv("SPARKWING_SOURCE_DIR", r.src)
 	return r
 }
 
@@ -148,7 +151,7 @@ func TestLaunchedNode_PlansHostsAndReports(t *testing.T) {
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "runner-aws")
 	t.Setenv("GORACE", "atexit_sleep_ms=0")
 	envOut, echo := filepath.Join(t.TempDir(), "env"), filepath.Join(t.TempDir(), "echo")
-	r := newLaunchedRun(t, map[string]string{"envout": envOut, "echo": echo})
+	r := newLaunchedRun(t, map[string]string{"envout": envOut, "echo": echo, "pass": "pod-secret-value-123"})
 	if _, err := r.host(t, store.PlanNodeID); err != nil {
 		t.Fatalf("plan: %v", err)
 	}
@@ -190,6 +193,9 @@ func TestLaunchedNode_PlansHostsAndReports(t *testing.T) {
 	}
 	if strings.Contains(string(logs), token) || !strings.Contains(string(logs), "echo ***") {
 		t.Errorf("the node's log = %s, want its token masked", logs)
+	}
+	if strings.Contains(string(logs), "pod-secret-value-123") || !strings.Contains(string(logs), "pass ***") {
+		t.Errorf("the node's log = %s, want its secret input masked", logs)
 	}
 }
 
@@ -241,9 +247,9 @@ func TestPodNode_WithoutAnAcceptedHashFailsClosed(t *testing.T) {
 }
 
 // A retry_auto node's every attempt is its own claim and pod: before_run runs
-// in the first only and after_run in the last, the one the controller does not
-// retry.
-func TestLaunchedNode_RetryAutoRunsBeforeRunFirstAndAfterRunLast(t *testing.T) {
+// in each, as every dispatch did, and after_run in the last, the one the
+// controller does not retry.
+func TestLaunchedNode_RetryAutoRunsAfterRunLast(t *testing.T) {
 	trace := filepath.Join(t.TempDir(), "trace")
 	r := newLaunchedRun(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "trace": trace, "auto": "true"})
 	if _, err := r.host(t, store.PlanNodeID); err != nil {
@@ -261,7 +267,30 @@ func TestLaunchedNode_RetryAutoRunsBeforeRunFirstAndAfterRunLast(t *testing.T) {
 			t.Fatalf("after attempt %d build = %s with %d attempts (%q), want %s", attempt, n.Status, n.AttemptsConsumed, n.Error, want)
 		}
 	}
-	wantTrace(t, trace, "before\nafter:step \"run\": still broken\n")
+	wantTrace(t, trace, "before\nbefore\nbefore\nafter:step \"run\": still broken\n")
+}
+
+// A retry_auto node whose before_run refuses never runs its body, though the
+// controller dispatches it again.
+func TestLaunchedNode_RetryAutoNeverRunsABodyItsBeforeRunRefused(t *testing.T) {
+	envOut := filepath.Join(t.TempDir(), "env")
+	r := newLaunchedRun(t, map[string]string{
+		"envout": envOut, "trace": filepath.Join(t.TempDir(), "trace"), "auto": "true", "refuse": "true",
+	})
+	if _, err := r.host(t, store.PlanNodeID); err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	for attempt := 1; attempt <= 3; attempt++ {
+		if _, err := r.host(t, "build"); err == nil {
+			t.Fatalf("attempt %d of a refused node succeeded", attempt)
+		}
+		if _, err := os.Stat(envOut); !os.IsNotExist(err) {
+			t.Fatalf("attempt %d ran the body of a refused node: %v", attempt, err)
+		}
+	}
+	if n := r.node(t, "build"); n.Status != "done" || n.Outcome != string(sparkwing.Failed) {
+		t.Fatalf("build = %s/%s, want done/failed", n.Status, n.Outcome)
+	}
 }
 
 // A plain retry re-runs in the one pod its claim started, with before_run in
@@ -303,5 +332,41 @@ func TestLaunchedNode_RunsItsConcurrencyGroupThroughTheClaim(t *testing.T) {
 	}
 	if n := r.node(t, "build"); n.Status != "done" || n.Outcome != string(sparkwing.Success) {
 		t.Fatalf("build = %s/%s (%s), want done/success", n.Status, n.Outcome, n.Error)
+	}
+}
+
+// The placement labels in the pipeline's YAML survive the planning claim, as
+// plan code never names them.
+func TestLaunchedNode_PlanKeepsThePipelinesRequires(t *testing.T) {
+	r := newLaunchedRun(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env")})
+	yaml := "pipelines:\n  - name: podnode\n    entrypoint: Podnode\n    requires: [trusted]\n"
+	if err := os.MkdirAll(filepath.Join(r.src, ".sparkwing"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(r.src, ".sparkwing", "sparkwing.yaml"), []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.host(t, store.PlanNodeID); err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if got := r.node(t, "build").NeedsLabels; !slices.Contains(got, "trusted") {
+		t.Fatalf("build needs %v, want trusted from the pipeline's YAML", got)
+	}
+}
+
+// A log that lost lines seals as incomplete, so readers never take the prefix
+// for the whole log.
+func TestPodNodeLog_SealsIncompleteAfterALoss(t *testing.T) {
+	ctrl, tok := newSegmentController(t)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	nlog := &podNodeLog{sink: openNodeLogSink(t.Context(), client.NewWithToken(ctrl.url, nil, tok), "run-s", "a", logger), logger: logger}
+	if nlog.sink == nil {
+		t.Fatal("the controller issued no segment URLs")
+	}
+	nlog.Emit(sparkwing.LogRecord{Msg: "kept"})
+	nlog.RecordLoss(2)
+	nlog.seal(t.Context(), false)
+	if m := ctrl.log(t).Manifest; m == nil || m.Status != logseg.StatusIncomplete || m.DroppedLines != 2 {
+		t.Fatalf("manifest = %+v, want incomplete with 2 dropped lines", m)
 	}
 }

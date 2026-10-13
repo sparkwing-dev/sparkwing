@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -26,6 +27,9 @@ type Config struct {
 	// Run is the run context plan code reads. RunID is required; a zero
 	// StartedAt means now and an empty trigger source means manual.
 	Run nodeproto.RunContext
+	// Requires are the placement labels the host reads from the pipeline's
+	// YAML; they join the plan's own.
+	Requires []string
 	// StartAt and StopAt bound the steps that run, as --sw-start-at and
 	// --sw-stop-at; each must name a step in the plan.
 	StartAt, StopAt string
@@ -191,7 +195,11 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 			cfg.Logger.Warn("nodehost: plan process", "err", err)
 		}
 	}
-	args, err := describeArgs(ctx, sess, cfg.Pipeline, cfg.Args)
+	var masker *secrets.Masker
+	if cfg.Attempts != nil {
+		masker = cfg.Attempts.Masker
+	}
+	args, err := describeArgs(ctx, sess, cfg.Pipeline, cfg.Args, masker)
 	if err == nil {
 		err = cfg.State.CreateRun(ctx, runRow(cfg, args))
 	}
@@ -218,6 +226,9 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 	defer stopHeartbeat()
 
 	doc, raw, err := planRun(ctx, sess, cfg.Pipeline, args, cfg.Run)
+	if err == nil {
+		doc, raw, err = hostRequires(doc, raw, cfg.Requires)
+	}
 	closeSession()
 	if err == nil {
 		err = validateStepRange(doc, cfg.StartAt, cfg.StopAt)

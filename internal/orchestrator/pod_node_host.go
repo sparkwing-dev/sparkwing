@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"slices"
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -16,6 +17,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/secretsource"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -72,10 +75,26 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 			Usage:   nodehost.RecordUsage(nil),
 		},
 	}, p.nodeID, p.specHash, p.attempt)
-	if nlog.sink != nil {
-		nlog.sink.close(ctx, ctx.Err() != nil || res.Outcome == sparkwing.Cancelled)
-	}
+	nlog.seal(ctx, ctx.Err() != nil || res.Outcome == sparkwing.Cancelled)
 	return res, nil
+}
+
+// PipelineRequires is the placement labels the pipeline's entry in the
+// sparkwing.yaml found from dir upward requires; none when there is no such
+// file or entry. The host joins them to the plan, which plan code cannot
+// drop them from.
+func PipelineRequires(dir, pipeline string) ([]string, error) {
+	path, cfg, err := projectconfig.Discover(dir)
+	if err != nil {
+		return nil, fmt.Errorf("read the pipeline's placement: %w", err)
+	}
+	if path == "" || cfg == nil {
+		return nil, nil
+	}
+	if p := (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipeline); p != nil {
+		return slices.Clone(p.Requires), nil
+	}
+	return nil, nil
 }
 
 // safety: the planning claim and every node's pod plan from one context, so their spec hashes compare.
@@ -95,8 +114,12 @@ type podNodeLog struct {
 	out    io.Writer
 	logger *slog.Logger
 	mu     sync.Mutex
-	lost   bool
+	seq    int64
+	lost   int64
 }
+
+// safety: the host numbers its lines on one stream, so the seal can say how many it lost.
+const podLogStream = "host"
 
 func (l *podNodeLog) Emit(rec sparkwing.LogRecord) {
 	line, err := json.Marshal(rec)
@@ -108,18 +131,38 @@ func (l *podNodeLog) Emit(rec sparkwing.LogRecord) {
 	switch {
 	case err != nil:
 	case l.sink != nil:
-		err = l.sink.sink.Append(line, "", 0, 0)
+		l.seq++
+		err = l.sink.sink.Append(line, podLogStream, l.seq, l.seq)
 	default:
 		_, err = l.out.Write(line)
 	}
-	// safety: warned once, since a log that refuses one line refuses the rest.
-	if err != nil && !l.lost {
-		l.lost = true
-		l.logger.Warn("pod node: node log lines lost", "err", err)
+	if err != nil {
+		// safety: warned once, since a log that refuses one line refuses the rest.
+		if l.lost == 0 {
+			l.logger.Warn("pod node: node log lines lost", "err", err)
+		}
+		l.lost++
 	}
 }
 
 func (l *podNodeLog) Close() error { return nil }
+
+func (l *podNodeLog) RecordLoss(lines int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.lost += int64(lines)
+}
+
+// safety: a log that lost lines seals as incomplete, so no reader takes the prefix for the whole log.
+func (l *podNodeLog) seal(ctx context.Context, stopped bool) {
+	if l.sink == nil {
+		return
+	}
+	l.mu.Lock()
+	l.sink.sink.WriterSealed(podLogStream, l.seq, l.lost)
+	l.mu.Unlock()
+	l.sink.close(ctx, stopped)
+}
 
 // safety: plan code's output goes to the container's stderr, masked, since
 // the planning claim has no node log.

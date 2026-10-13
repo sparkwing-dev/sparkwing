@@ -2,37 +2,85 @@ package nodehost
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// PlanDocument plans pipeline in a short-lived SDK process and returns the
-// plan with the host's spec_hash on every node, validated as a hosted run's
-// plan is, together with its stamped JSON.
-func PlanDocument(ctx context.Context, cfg SessionConfig, pipeline string, args map[string]string, rc nodeproto.RunContext) (nodeproto.PlanDoc, []byte, error) {
+// PlanRequest is what [PlanDocument] asks a pipeline process to plan.
+type PlanRequest struct {
+	Pipeline string
+	// Args are the run's flag values; describe's defaults fill in the rest.
+	Args map[string]string
+	Run  nodeproto.RunContext
+	// Requires are the placement labels the host reads from the pipeline's
+	// YAML; they join the plan's own.
+	Requires []string
+	// Masker, when set, has the value of every flag describe marks secret
+	// registered before plan code runs.
+	Masker *secrets.Masker
+}
+
+// PlannedRun is a plan [PlanDocument] accepted: the document with the host's
+// spec_hash on every node, its JSON, and the flag values it was planned with,
+// which every later process of the run must plan with too.
+type PlannedRun struct {
+	Doc  nodeproto.PlanDoc
+	JSON []byte
+	Args map[string]string
+}
+
+// PlanDocument plans a pipeline in a short-lived SDK process, as a hosted
+// run's plan process does, and validates the plan the same way.
+func PlanDocument(ctx context.Context, cfg SessionConfig, req PlanRequest) (PlannedRun, error) {
 	if cfg.Sink == nil {
 		cfg.Sink = discardSink{}
 	}
-	if args == nil {
-		args = map[string]string{}
-	}
 	sess, err := StartSession(ctx, cfg)
 	if err != nil {
-		return nodeproto.PlanDoc{}, nil, err
+		return PlannedRun{}, err
 	}
-	doc, raw, err := planRun(ctx, sess, pipeline, args, rc)
+	var out PlannedRun
+	out.Args, err = describeArgs(ctx, sess, req.Pipeline, req.Args, req.Masker)
+	if err == nil {
+		out.Doc, out.JSON, err = planRun(ctx, sess, req.Pipeline, out.Args, req.Run)
+	}
+	if err == nil {
+		out.Doc, out.JSON, err = hostRequires(out.Doc, out.JSON, req.Requires)
+	}
 	_, cerr := sess.Close()
 	var perr *nodeproto.Error
 	if err == nil && errors.As(cerr, &perr) {
 		// safety: a process that broke the protocol after its reply cannot vouch for that plan.
-		return doc, nil, cerr
+		return PlannedRun{}, cerr
 	}
+	return out, err
+}
+
+// safety: placement labels from the pipeline's YAML are the host's, so plan
+// code can add labels but never drop them.
+func hostRequires(doc nodeproto.PlanDoc, raw []byte, requires []string) (nodeproto.PlanDoc, []byte, error) {
+	if len(requires) == 0 {
+		return doc, raw, nil
+	}
+	doc.Requires = appendNew(slices.Clone(doc.Requires), requires)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return doc, nil, err
+	}
+	labels, err := json.Marshal(doc.Requires)
+	if err != nil {
+		return doc, nil, err
+	}
+	fields["requires"] = labels
+	raw, err = json.Marshal(fields)
 	return doc, raw, err
 }
 
@@ -50,7 +98,8 @@ var (
 // afresh, and it runs only when its spec_hash equals acceptedHash, the one the
 // run's accepted plan holds; otherwise it fails with plan_drift. attempt is
 // the claim's 1-based attempt ordinal: a retry_auto node runs only that
-// attempt, the last one when it exhausts the node's retry budget, capped at
+// attempt, with before_run as every dispatch did, and after_run only when it
+// is the last, the one that exhausts the node's retry budget, capped at
 // [store.MaxNodeRetries] as the controller caps it; any other node runs its
 // plain retries in this process. cfg.Attempts is required.
 func HostNode(ctx context.Context, cfg Config, nodeID, acceptedHash string, attempt int) Result {
@@ -76,11 +125,14 @@ func podAttempt(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash
 	if cfg.Attempts == nil {
 		return failed(errors.New("nodehost: no attempt executor"))
 	}
-	doc, _, err := PlanDocument(ctx, cfg.Session, cfg.Pipeline, cfg.Args, cfg.Run)
+	planned, err := PlanDocument(ctx, cfg.Session, PlanRequest{
+		Pipeline: cfg.Pipeline, Args: cfg.Args, Run: cfg.Run, Requires: cfg.Requires, Masker: cfg.Attempts.Masker,
+	})
 	if err != nil {
 		return failed(fmt.Errorf("plan: %w", err))
 	}
-	run.Doc = doc
+	doc := planned.Doc
+	run.Doc, run.Args = doc, planned.Args
 	i := slices.IndexFunc(doc.Nodes, func(n nodeproto.PlanNode) bool { return n.ID == nodeID })
 	drift := func(format string, args ...any) Result {
 		return failed(&nodeproto.Error{Code: nodeproto.CodePlanDrift, Message: fmt.Sprintf(format, args...)})
@@ -96,7 +148,9 @@ func podAttempt(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash
 	n := &NodeRun{Run: run, Plan: doc.Nodes[i]}
 	layers := podLayers
 	if m := n.Plan.Modifiers; m != nil && m.RetryAuto {
-		layers, n.Attempt = podAutoLayers, attempt
+		// safety: the attempt report cannot tell the controller a failed before_run is final, so every
+		// dispatch runs before_run again and a refused hook never lets a later dispatch run the body.
+		layers = podAutoLayers
 		budget := min(max(m.Retry, 0), store.MaxNodeRetries)
 		// safety: the controller's rule for claiming the node again, so after_run runs in the attempt it does not.
 		n.Retried = func(r Result) bool {

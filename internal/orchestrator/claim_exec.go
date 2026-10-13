@@ -128,12 +128,17 @@ func planLaunchedRun(ctx context.Context, c *client.Client, src, binary, runID s
 	if err != nil {
 		return fail(fmt.Errorf("read run %s: %w", runID, err))
 	}
-	_, plan, err := nodehost.PlanDocument(ctx, nodehost.SessionConfig{Entry: binary, Dir: src, Sink: podPlanSink{masker: secrets.NewMasker()}},
-		run.Pipeline, run.Args, podRunContext(run))
+	requires, err := PipelineRequires(src, run.Pipeline)
 	if err != nil {
-		return fail(fmt.Errorf("the pipeline could not plan the run: %w", err))
+		return fail(err)
 	}
-	if err := c.SubmitPlan(ctx, runID, plan); err != nil {
+	masker := secrets.NewMasker()
+	plan, err := nodehost.PlanDocument(ctx, nodehost.SessionConfig{Entry: binary, Dir: src, Sink: podPlanSink{masker: masker}},
+		nodehost.PlanRequest{Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run), Requires: requires, Masker: masker})
+	if err != nil {
+		return fail(fmt.Errorf("the pipeline could not plan the run: %s", masker.Mask(err.Error())))
+	}
+	if err := c.SubmitPlan(ctx, runID, plan.JSON); err != nil {
 		return fail(fmt.Errorf("submit the plan: %w", err))
 	}
 	return nil

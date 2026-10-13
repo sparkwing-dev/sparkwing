@@ -27,6 +27,7 @@ type inputs struct {
 	Leak    bool   `flag:"leak" desc:"Add a node whose error quotes the secret"`
 	Hooks   bool   `flag:"hooks" desc:"Add nodes with skip_if, before_run, verify and after_run closures"`
 	FanOut  string `flag:"fanout" desc:"Comma-separated targets to fan out over; boom fails the generator, hang blocks it"`
+	Pass    string `flag:"pass" secret:"true" desc:"A secret input the build node prints"`
 }
 
 type fixtureSecrets struct {
@@ -159,6 +160,9 @@ func (j *buildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 			return buildOutput{}, err
 		}
 		fmt.Println("stdout token=" + token)
+		if j.in.Pass != "" {
+			fmt.Println("stdout pass=" + j.in.Pass)
+		}
 		sparkwing.Info(ctx, "record token=%s", token)
 		if j.in.Marker != "" {
 			if _, err := cleanup.Register(ctx, cleanup.Spec{Argv: []string{"sh", "-c", "echo \"$AWS_SECRET_ACCESS_KEY\" > " + j.in.Marker + "/build; echo cleaned " + token}}); err != nil {

@@ -26,6 +26,12 @@ type NodeLog interface {
 	Close() error
 }
 
+// LossRecorder is a [NodeLog] that records lines the attempt's process wrote
+// but the log never received, so it seals as incomplete rather than complete.
+type LossRecorder interface {
+	RecordLoss(lines int)
+}
+
 // Attempts is what the default executor needs to run each attempt in its own
 // SDK process: the node routes the process reaches, where the node's secrets
 // resolve from, the run's masker, and where its log goes.
@@ -103,6 +109,9 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	if err == nil {
 		res = body(ctx, sess, sink)
 		usage, cerr := sess.Close()
+		if lost, ok := nlog.(LossRecorder); ok && sess.Lost() > 0 {
+			lost.RecordLoss(sess.Lost())
+		}
 		var perr *nodeproto.Error
 		switch {
 		case cerr == nil || res.Outcome != sparkwing.Success:

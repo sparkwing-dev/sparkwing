@@ -24,6 +24,8 @@ type inputs struct {
 	Trace  string `flag:"trace" desc:"File the node's before_run and after_run calls append to; set, the node fails and retries twice"`
 	Auto   bool   `flag:"auto" desc:"Retry the traced node with retry_auto"`
 	Group  bool   `flag:"group" desc:"Put the node in a concurrency group"`
+	Refuse bool   `flag:"refuse" desc:"The traced node's before_run refuses"`
+	Pass   string `flag:"pass" secret:"true" desc:"A secret the node prints"`
 }
 
 type pipeline struct{ sparkwing.Base }
@@ -32,6 +34,7 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 	build := sparkwing.Job(plan, "build", func(ctx context.Context) error {
 		echo, _ := os.ReadFile(in.Echo)
 		fmt.Println("echo " + string(echo))
+		fmt.Println("pass " + in.Pass)
 		sparkwing.Info(ctx, "record %s", echo)
 		if err := os.WriteFile(in.EnvOut, []byte(strings.Join(os.Environ(), "\n")), 0o600); err != nil {
 			return err
@@ -49,7 +52,13 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 				_ = f.Close()
 			}
 		}
-		build.BeforeRun(func(context.Context) error { trace("before"); return nil }).
+		build.BeforeRun(func(context.Context) error {
+			trace("before")
+			if in.Refuse {
+				return errors.New("not authorized")
+			}
+			return nil
+		}).
 			AfterRun(func(_ context.Context, err error) { trace(fmt.Sprintf("after:%v", err)) })
 		if in.Auto {
 			build.Retry(2, sparkwing.RetryAuto())
