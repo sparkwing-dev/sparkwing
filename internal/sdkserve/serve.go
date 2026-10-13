@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeclient"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/protofd"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -30,6 +31,10 @@ type Config struct {
 	// PlanDoc turns a built plan into the plan document the plan request
 	// answers with.
 	PlanDoc func(*sparkwing.Plan, sparkwing.RunContext, *sparkwing.Registration) (nodeproto.PlanDoc, error)
+	// Node reaches the host's /node/v1 routes; nil leaves secrets, other
+	// nodes' outputs, OIDC and child runs unreachable. Main sets it from the
+	// environment.
+	Node *nodeclient.Client
 }
 
 // Main serves the protocol on the inherited pipes until the host closes the
@@ -41,10 +46,16 @@ func Main(cfg Config) int {
 		// names handles it does not hold.
 		err = os.Unsetenv(protofd.HandlesEnv)
 	}
+	if err == nil {
+		cfg.Node, err = nodeclient.FromEnv()
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "sw-node-protocol:", err)
 		return 2
 	}
+	// safety: bound before any pipeline code runs, so cleanup.Register never
+	// falls back to the session ledger in this process.
+	nodeclient.Bind(cfg.Node)
 	if err := Serve(context.Background(), req, frames, cfg); err != nil {
 		fmt.Fprintln(os.Stderr, "sw-node-protocol:", err)
 		return 1
