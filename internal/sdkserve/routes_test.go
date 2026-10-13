@@ -91,6 +91,10 @@ func (j *deployJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 		release()
 		return err
 	})
+	sparkwing.Step(w, "bounded", func(ctx context.Context) error {
+		_, err := sparkwing.RunAndAwait[digest, sparkwing.NoInputs](ctx, "build", "build", sparkwing.WithFreshTimeout(300*time.Millisecond))
+		return check(errors.Is(err, context.DeadlineExceeded), "await past its timeout = %v, want DeadlineExceeded", err)
+	})
 	return sparkwing.Step(w, "refs", func(ctx context.Context) (string, error) { return j.Build.Get(ctx).Digest, nil }), nil
 }
 
@@ -218,5 +222,23 @@ func TestStepsReachTheHostThroughTheNodeRoutes(t *testing.T) {
 	}
 	if strings.Contains(h.Logs.String(), h.Bearer) {
 		t.Errorf("host logs leak the bearer:\n%s", h.Logs.String())
+	}
+}
+
+func TestFreshTimeoutBoundsRunAndAwait(t *testing.T) {
+	h := nodeclienttest.Start(t, "deploy", nil)
+	h.Handle("POST /api/v1/runs/run-1/children", nodeclienttest.Answer(http.StatusAccepted, map[string]string{"run_id": "child-1"}))
+	h.Handle("GET /api/v1/runs/run-1/children/child-1", nodeclienttest.Answer(http.StatusOK, map[string]string{"status": "running"}))
+	s := serve(t, h.Client)
+	plan := nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: routesPipeline, Args: map[string]string{}, Run: &nodeproto.RunContext{RunID: nodeclienttest.RunID}}
+	if reply := s.call(plan); !reply.OK {
+		t.Fatalf("plan = %+v", reply.Error)
+	}
+	if res := s.run(nodeproto.OpRunStep, "deploy", "bounded"); res.Outcome != nodeproto.OutcomeSuccess {
+		t.Errorf("a child that never finishes: %+v", res)
+	}
+	h.FillForwardSlots(t)
+	if res := s.run(nodeproto.OpRunStep, "deploy", "bounded"); res.Outcome != nodeproto.OutcomeSuccess {
+		t.Errorf("a start refused with 429 throughout: %+v", res)
 	}
 }

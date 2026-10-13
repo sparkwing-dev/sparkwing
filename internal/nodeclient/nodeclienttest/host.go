@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeclient"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -99,6 +100,34 @@ func (h *Host) Object(key string, data []byte) store.OutputReadGrant {
 	h.Handle("GET /objects/"+key, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(data) })
 	sum := sha256.Sum256(data)
 	return store.OutputReadGrant{URL: "/objects/" + key, SHA256: hex.EncodeToString(sum[:]), Size: int64(len(data))}
+}
+
+// FillForwardSlots holds the node's four forward slots with OIDC reads the
+// controller answers only once the test ends, so every other forward gets 429.
+func (h *Host) FillForwardSlots(t testing.TB) {
+	t.Helper()
+	entered, release := make(chan struct{}, 4), make(chan struct{})
+	h.Handle("POST /api/v1/runs/run-1/oidc-token", func(w http.ResponseWriter, r *http.Request) {
+		entered <- struct{}{}
+		<-release
+		Answer(http.StatusOK, map[string]any{"token": "tok", "expires_at": time.Unix(1e9, 0).UTC()})(w, r)
+	})
+	done := make(chan struct{}, 4)
+	for range 4 {
+		go func() {
+			_, _, _ = h.Client.OIDCToken(context.Background(), "sts") //nolint:errcheck // the reads only hold slots
+			done <- struct{}{}
+		}()
+	}
+	for range 4 {
+		<-entered
+	}
+	t.Cleanup(func() {
+		close(release)
+		for range 4 {
+			<-done
+		}
+	})
 }
 
 // Answer replies status with body as JSON.

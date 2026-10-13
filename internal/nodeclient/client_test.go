@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeclient"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeclient/nodeclienttest"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/protofd"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -295,29 +296,79 @@ func TestTooManyRequestsIsRetriedUntilASlotFrees(t *testing.T) {
 	noLeakInLogs(t, h)
 }
 
-func TestFromEnvTakesTheBearerOutOfTheEnvironment(t *testing.T) {
-	h := nodeclienttest.Start(t, "deploy", nil)
-	t.Setenv(nodeclient.URLEnv, h.Server.URL())
-	t.Setenv(nodeclient.TokenEnv, "swn_secret")
-	c, err := nodeclient.FromEnv()
-	if err != nil || c == nil {
-		t.Fatalf("FromEnv = %v, %v", c, err)
+func TestFromProcessIsNilOutsideTheProtocol(t *testing.T) {
+	t.Setenv(protofd.NodeURLEnv, "http://127.0.0.1:1")
+	t.Setenv(protofd.NodeTokenEnv, "swn_secret")
+	if c, err := nodeclient.FromProcess(); c != nil || err != nil {
+		t.Fatalf("FromProcess in a process not started with %s = %v, %v", protofd.Arg, c, err)
 	}
-	if _, set := os.LookupEnv(nodeclient.TokenEnv); set {
-		t.Fatal("the bearer is still in the environment, where commands inherit it")
+}
+
+func TestOnlyLoopbackURLsGetTheBearer(t *testing.T) {
+	for _, raw := range []string{"http://127.0.0.1:41873", "http://[::1]:41873", "http://localhost:41873/"} {
+		if _, err := nodeclient.New(raw, "swn_secret"); err != nil {
+			t.Errorf("New(%s) = %v", raw, err)
+		}
+	}
+	for _, raw := range []string{
+		"https://127.0.0.1:41873", "http://127.0.0.1", "http://127.0.0.2:41873", "http://10.0.0.1:80",
+		"http://node.example.com:80", "http://user:hunter2@127.0.0.1:41873", "http://127.0.0.1:41873/api",
+		"http://127.0.0.1:41873?x=1", "http://127.0.0.1:0", "127.0.0.1:41873",
+	} {
+		_, err := nodeclient.New(raw, "swn_secret")
+		if err == nil || !strings.Contains(err.Error(), "loopback") || strings.Contains(err.Error(), "hunter2") {
+			t.Errorf("New(%s) = %v, want a refusal that names loopback and quotes no URL", raw, err)
+		}
+	}
+}
+
+func TestRedirectsAreNeverFollowed(t *testing.T) {
+	var reached atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached.Add(1)
+		if r.Header.Get("Authorization") != "" {
+			t.Error("the bearer followed a redirect")
+		}
+	}))
+	t.Cleanup(other.Close)
+	redirector := httptest.NewServer(http.RedirectHandler(other.URL+"/steal", http.StatusTemporaryRedirect))
+	t.Cleanup(redirector.Close)
+	c, err := nodeclient.New(redirector.URL, "swn_secret")
+	if err != nil {
+		t.Fatal(err)
 	}
 	_, _, err = c.Secret(context.Background(), "X")
-	if !nodeclient.HasCode(err, "unauthorized") || strings.Contains(err.Error(), "swn_secret") {
-		t.Fatalf("unknown bearer = %v, want unauthorized without the bearer", err)
+	var e *nodeclient.Error
+	if !errors.As(err, &e) || e.Status != http.StatusTemporaryRedirect || strings.Contains(err.Error(), "swn_secret") {
+		t.Fatalf("redirected read = %v, want a 307 refusal", err)
 	}
+	if reached.Load() != 0 {
+		t.Fatal("the client followed the redirect")
+	}
+}
 
-	t.Setenv(nodeclient.URLEnv, "")
-	if c, err := nodeclient.FromEnv(); c != nil || err != nil {
-		t.Fatalf("FromEnv without variables = %v, %v", c, err)
+func TestChildStartIsNotRetriedOn502(t *testing.T) {
+	h := nodeclienttest.Start(t, "deploy", nil)
+	var calls atomic.Int32
+	h.Handle("POST /api/v1/runs/run-1/children", func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		answer(http.StatusInternalServerError, map[string]string{"error": "lost"})(w, r)
+	})
+	_, err := h.Client.StartChild(context.Background(), nodeclient.ChildRequest{Pipeline: "build"})
+	wantCode(t, h, err, nodeclient.CodeUpstreamUnavailable)
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("controller asked %d times, want 1: a retry may start a second child", n)
 	}
-	t.Setenv(nodeclient.URLEnv, "http://user:pass@127.0.0.1:1")
-	t.Setenv(nodeclient.TokenEnv, "swn_secret")
-	if _, err := nodeclient.FromEnv(); err == nil || strings.Contains(err.Error(), "pass") {
-		t.Fatalf("FromEnv with userinfo = %v", err)
+}
+
+func TestPersistent429EndsAtTheRetryBudget(t *testing.T) {
+	h := nodeclienttest.Start(t, "deploy", nil)
+	h.FillForwardSlots(t)
+	c, err := nodeclient.New(h.Server.URL(), h.Bearer)
+	if err != nil {
+		t.Fatal(err)
 	}
+	nodeclient.SetRetryBudget(c, 200*time.Millisecond)
+	_, err = c.StartChild(context.Background(), nodeclient.ChildRequest{Pipeline: "build"})
+	wantCode(t, h, err, nodeclient.CodeTooManyRequests)
 }

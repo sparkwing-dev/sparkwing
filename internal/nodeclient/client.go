@@ -13,18 +13,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
-)
-
-const (
-	URLEnv   = "SPARKWING_NODE_URL"
-	TokenEnv = "SPARKWING_NODE_TOKEN"
+	"github.com/sparkwing-dev/sparkwing/internal/protofd"
 )
 
 // Codes the SDK acts on; docs/node-protocol.md lists every code a route
@@ -51,6 +46,9 @@ const (
 	maxReply      = 65 << 20
 	maxRetryDelay = time.Second
 	upstreamTries = 3
+	// safety: a node whose slots stay full past this gets the 429, so a
+	// call without a deadline still ends.
+	retryBudget = 2 * time.Minute
 )
 
 // Error is a refusal from a node route: its status and the spec's code.
@@ -75,36 +73,57 @@ func HasCode(err error, code string) bool {
 
 // Client calls one node's routes. It is safe for concurrent use.
 type Client struct {
-	base  string
-	token string
-	http  *http.Client
+	base   string
+	token  string
+	http   *http.Client
+	budget time.Duration
 }
 
-// New binds a client to the routes at baseURL with bearer.
+// New binds a client to the routes at baseURL with bearer. baseURL must be
+// http on loopback with an explicit port: http://127.0.0.1:<port>,
+// http://[::1]:<port> or http://localhost:<port>.
 func New(baseURL, bearer string) (*Client, error) {
-	u, err := url.Parse(baseURL)
-	if err != nil || u.Host == "" || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		return nil, fmt.Errorf("%s must be an absolute http(s) URL without userinfo", URLEnv)
+	if !loopback(baseURL) {
+		// safety: the URL is not echoed, since a wrong one may carry userinfo.
+		return nil, fmt.Errorf("%s must be http://127.0.0.1:<port>, http://[::1]:<port> or http://localhost:<port>; "+
+			"the node routes are served on loopback only", protofd.NodeURLEnv)
 	}
 	if bearer == "" {
-		return nil, fmt.Errorf("%s is empty", TokenEnv)
+		return nil, fmt.Errorf("%s is empty", protofd.NodeTokenEnv)
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	// safety: the bearer goes to the host alone, never through a proxy.
 	transport.Proxy = nil
-	return &Client{base: strings.TrimRight(u.String(), "/"), token: bearer, http: &http.Client{Transport: transport}}, nil
+	return &Client{
+		base: strings.TrimRight(baseURL, "/"), token: bearer, budget: retryBudget,
+		http: &http.Client{
+			Transport: transport,
+			// safety: a redirect could carry the bearer to another local
+			// service, so none is followed and a 3xx is an error.
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		},
+	}, nil
 }
 
-// FromEnv builds the client the host's environment names, and removes the
-// bearer from the environment so no command the process starts inherits it.
-// It returns nil when the host set neither variable.
-func FromEnv() (*Client, error) {
-	base, token := os.Getenv(URLEnv), os.Getenv(TokenEnv)
+func loopback(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "http" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+		return false
+	}
+	host, port := u.Hostname(), u.Port()
+	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		return false
+	}
+	return host == "127.0.0.1" || host == "::1" || host == "localhost"
+}
+
+// FromProcess builds the client from the URL and bearer the host passed to
+// this --sw-node-protocol process, which protofd took from the environment
+// at initialization. It returns nil when the host passed neither.
+func FromProcess() (*Client, error) {
+	base, token := protofd.NodeRoutes()
 	if base == "" && token == "" {
 		return nil, nil
-	}
-	if err := os.Unsetenv(TokenEnv); err != nil {
-		return nil, err
 	}
 	return New(base, token)
 }
@@ -125,6 +144,13 @@ func Bind(c *Client) {
 func Bound() (*Client, bool) { return process.Load(), bound.Load() }
 
 func (c *Client) do(ctx context.Context, method, path string, timeout time.Duration, body, out any, want int) error {
+	return c.call(ctx, method, path, timeout, body, out, want, upstreamTries)
+}
+
+// safety: tries bounds only 502 retries; a 429 is refused before the host
+// forwards anything, so retrying it never repeats a request, and the budget
+// bounds it.
+func (c *Client) call(ctx context.Context, method, path string, timeout time.Duration, body, out any, want, tries int) error {
 	var payload []byte
 	if body != nil {
 		var err error
@@ -133,16 +159,17 @@ func (c *Client) do(ctx context.Context, method, path string, timeout time.Durat
 		}
 	}
 	delay := 25 * time.Millisecond
-	for tries := 1; ; tries++ {
+	giveUp := time.Now().Add(c.budget)
+	for try := 1; ; try++ {
 		err := c.once(ctx, method, path, timeout, payload, out, want)
 		var e *Error
 		switch {
 		case !errors.As(err, &e):
 			return err
-		// safety: a 429 means this node's own requests fill its slots, and they
-		// end, so waiting is bounded by them and by ctx.
+		case time.Now().Add(delay).After(giveUp):
+			return err
 		case e.Code == CodeTooManyRequests:
-		case e.Code == CodeUpstreamUnavailable && tries < upstreamTries:
+		case e.Code == CodeUpstreamUnavailable && try < tries:
 		default:
 			return err
 		}
@@ -192,6 +219,9 @@ func (c *Client) once(ctx context.Context, method, path string, timeout time.Dur
 		}
 		if json.Unmarshal(raw, &body) == nil {
 			e.Message, e.Code = body.Error, body.Code
+		}
+		if resp.StatusCode/100 == 3 {
+			e.Message = "the node routes never redirect; refused to follow"
 		}
 		if e.Message == "" {
 			e.Message = http.StatusText(resp.StatusCode)
@@ -267,7 +297,9 @@ func (c *Client) StartChild(ctx context.Context, req ChildRequest) (string, erro
 	var out struct {
 		RunID string `json:"run_id"`
 	}
-	err := c.do(ctx, http.MethodPost, "/node/v1/children", requestTimeout, req, &out, http.StatusCreated)
+	// safety: a lost reply can leave a started child behind, and a retry
+	// racing another call's would start a second, so a 502 is returned.
+	err := c.call(ctx, http.MethodPost, "/node/v1/children", requestTimeout, req, &out, http.StatusCreated, 1)
 	return out.RunID, err
 }
 

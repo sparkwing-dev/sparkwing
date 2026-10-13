@@ -62,29 +62,39 @@ func absentOn(err error, codes ...string) error {
 }
 
 // safety: the host holds each await at most a minute, so the SDK asks again
-// until the child finishes, and enforces req.Timeout by not asking past it.
-func awaitChild(ctx context.Context, c *nodeclient.Client, req sparkwing.AwaitRequest) (*sparkwing.ResolvedPipelineRef, error) {
-	var deadline time.Time
+// until the child finishes. req.Timeout bounds the whole call, retries
+// included, through the context every request runs under.
+func awaitChild(parent context.Context, c *nodeclient.Client, req sparkwing.AwaitRequest) (*sparkwing.ResolvedPipelineRef, error) {
+	ctx := parent
 	if req.Timeout > 0 {
-		deadline = time.Now().Add(req.Timeout)
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(parent, req.Timeout)
+		defer cancel()
+	}
+	timedOut := func(what string, err error) error {
+		if parent.Err() == nil && ctx.Err() != nil {
+			return fmt.Errorf("%s did not finish within %s: %w", what, req.Timeout, context.DeadlineExceeded)
+		}
+		return err
 	}
 	run, err := c.StartChild(ctx, nodeclient.ChildRequest{Pipeline: req.Pipeline, Args: req.Args, Repo: req.Repo, Branch: req.Branch})
 	if err != nil {
-		return nil, fmt.Errorf("start child run: %w", err)
+		return nil, timedOut("child run of "+req.Pipeline, fmt.Errorf("start child run: %w", err))
 	}
 	for {
 		wait := nodeclient.MaxAwait
-		if !deadline.IsZero() {
+		if deadline, ok := ctx.Deadline(); ok {
 			left := time.Until(deadline)
 			if left < time.Millisecond {
-				return nil, fmt.Errorf("child run %s did not finish within %s: %w", run, req.Timeout, context.DeadlineExceeded)
+				<-ctx.Done()
+				return nil, timedOut("child run "+run, ctx.Err())
 			}
 			wait = min(wait, left)
 		}
 		st, err := c.AwaitChild(ctx, run, req.NodeID, wait)
 		switch {
 		case err != nil:
-			return nil, fmt.Errorf("await child run %s: %w", run, err)
+			return nil, timedOut("child run "+run, fmt.Errorf("await child run %s: %w", run, err))
 		case st.Status == "success":
 			return &sparkwing.ResolvedPipelineRef{RunID: run, Data: st.Output}, nil
 		case st.Status == "failed":

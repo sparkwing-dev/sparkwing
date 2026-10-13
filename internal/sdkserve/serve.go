@@ -32,8 +32,8 @@ type Config struct {
 	// answers with.
 	PlanDoc func(*sparkwing.Plan, sparkwing.RunContext, *sparkwing.Registration) (nodeproto.PlanDoc, error)
 	// Node reaches the host's /node/v1 routes; nil leaves secrets, other
-	// nodes' outputs, OIDC and child runs unreachable. Main sets it from the
-	// environment.
+	// nodes' outputs, OIDC and child runs unreachable. Main sets it from what
+	// protofd read at initialization.
 	Node *nodeclient.Client
 }
 
@@ -47,7 +47,7 @@ func Main(cfg Config) int {
 		err = os.Unsetenv(protofd.HandlesEnv)
 	}
 	if err == nil {
-		cfg.Node, err = nodeclient.FromEnv()
+		cfg.Node, err = nodeclient.FromProcess()
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "sw-node-protocol:", err)
