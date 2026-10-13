@@ -44,6 +44,9 @@ type Config struct {
 	Admission *Admission
 	// Debug holds the run's debug pauses and bounce requests.
 	Debug Debug
+	// Invocation is the run row's invocation record, which the read paths
+	// redact secret arguments by.
+	Invocation map[string]any
 }
 
 // Result is how one node ended.
@@ -279,7 +282,7 @@ func runRow(cfg Config, args map[string]string) store.Run {
 	rc := cfg.Run
 	row := store.Run{
 		ID: rc.RunID, Pipeline: cfg.Pipeline, Status: "running", Args: args,
-		TriggerSource: rc.Trigger.Source, StartedAt: rc.StartedAt,
+		TriggerSource: rc.Trigger.Source, StartedAt: rc.StartedAt, Invocation: cfg.Invocation,
 	}
 	if g := rc.Git; g != nil {
 		row.GitBranch, row.GitSHA, row.DeclaredRepo, row.RepoURL = g.Branch, g.SHA, g.Repo, g.RepoURL

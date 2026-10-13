@@ -33,8 +33,10 @@ type Attempts struct {
 	Routes   *Server
 	Resolver secretsource.Resolver
 	Masker   *secrets.Masker
-	// Claim forwards the controller-backed routes; nil answers them 502.
+	// Claim forwards the controller-backed routes; nil answers them 502,
+	// except the output routes Local answers.
 	Claim *Claim
+	Local LocalOutputs
 	// OpenLog opens the node's log; the executor closes it once the attempt's
 	// last record, cleanup output included, is written.
 	OpenLog func(ctx context.Context, runID, nodeID string) (NodeLog, error)
@@ -87,7 +89,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 		names = append(names, s.Name)
 	}
 	bearer, revoke, err := a.Routes.Admit(Node{
-		RunID: run.ID, NodeID: id, Secrets: names, Resolver: a.Resolver, Masker: a.Masker, Claim: a.Claim,
+		RunID: run.ID, NodeID: id, Secrets: names, Resolver: a.Resolver, Masker: a.Masker, Claim: a.Claim, Local: a.Local,
 		Pause: n.Pause,
 	})
 	if err != nil {

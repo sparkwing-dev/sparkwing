@@ -25,8 +25,10 @@ type Node struct {
 	Secrets  []string
 	Resolver secretsource.Resolver
 	Masker   *secrets.Masker
-	// Claim forwards the routes that reach the controller; nil answers them 502.
+	// Claim forwards the routes that reach the controller; nil answers them 502,
+	// except the output routes Local answers.
 	Claim *Claim
+	Local LocalOutputs
 	// Pause, when set, holds the node's no-progress timeout while a route
 	// waits on its behalf; see [NodeRun.Pause].
 	Pause func() (resume func())

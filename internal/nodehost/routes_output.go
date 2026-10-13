@@ -3,6 +3,7 @@ package nodehost
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -12,6 +13,10 @@ func (s *Server) serveNodeOutput(w http.ResponseWriter, r *http.Request, g *gran
 	node := r.PathValue("node")
 	if !validNodeID(node) {
 		s.writeError(w, http.StatusBadRequest, "bad_request", "the node id is malformed")
+		return
+	}
+	if g.Claim == nil && g.Local != nil {
+		s.serveLocalNodeOutput(w, r, g, node)
 		return
 	}
 	claim, ctx, done, ok := s.forward(w, r, g)
@@ -71,6 +76,10 @@ func (s *Server) servePipelineLatest(w http.ResponseWriter, r *http.Request, g *
 	}
 	if !validName(pipeline) || !validNodeID(node) || !ageOK {
 		s.writeError(w, http.StatusBadRequest, "bad_request", "the pipeline, node or max_age_ms is malformed")
+		return
+	}
+	if g.Claim == nil && g.Local != nil {
+		s.serveLocalPipelineLatest(w, r, g, pipeline, node, time.Duration(maxAge)*time.Millisecond)
 		return
 	}
 	claim, ctx, done, ok := s.forward(w, r, g)
