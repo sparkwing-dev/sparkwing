@@ -68,7 +68,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun) 
 			run.Logger.Warn("nodehost: close node log", "run", run.ID, "node", id, "err", err)
 		}
 	}()
-	sink, err := NewLogSink(ctx, LogSinkConfig{RunID: run.ID, NodeID: id, Log: nlog, State: run.State, Masker: a.Masker})
+	sink, err := NewLogSink(ctx, LogSinkConfig{RunID: run.ID, NodeID: id, Log: nlog, State: run.State, Masker: a.Masker, Progress: n.Progress})
 	if err != nil {
 		return failed(err)
 	}
@@ -78,6 +78,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun) 
 	}
 	bearer, revoke, err := a.Routes.Admit(Node{
 		RunID: run.ID, NodeID: id, Secrets: names, Resolver: a.Resolver, Masker: a.Masker, Claim: a.Claim,
+		Pause: n.Pause,
 	})
 	if err != nil {
 		return failed(fmt.Errorf("admit node %s: %w", id, err))
@@ -128,7 +129,10 @@ func drive(ctx context.Context, sess *Session, n *NodeRun) Result {
 	rc := run.Context
 	var raw json.RawMessage
 	err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: run.Pipeline, Args: args, Run: &rc}, &raw)
-	if err == nil {
+	switch {
+	case err == nil && n.Generator != "":
+		err = regenerate(ctx, sess, n)
+	case err == nil:
 		err = checkDrift(raw, n.Plan)
 	}
 	if err != nil {
@@ -150,7 +154,7 @@ func drive(ctx context.Context, sess *Session, n *NodeRun) Result {
 		}
 		return failed(errors.New(msg))
 	}
-	return Result{Outcome: sparkwing.Success, Output: rr.Output}
+	return Result{Outcome: sparkwing.Success, Output: rr.Output, expansions: generate(ctx, sess, n)}
 }
 
 // safety: the node runs only as the run accepted it, so a process that plans

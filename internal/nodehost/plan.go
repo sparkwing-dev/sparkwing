@@ -126,7 +126,20 @@ func validateNodes(nodes []nodeproto.PlanNode) error {
 			}
 		}
 	}
+	sources := map[string]string{}
 	for _, n := range nodes {
+		if n.Closures != nil {
+			for _, id := range n.Closures.Generator {
+				sources[id] = n.ID
+			}
+		}
+	}
+	for _, n := range nodes {
+		for _, g := range n.NeedsGenerated {
+			if _, ok := sources[g]; !ok {
+				return invalid("node %s needs the nodes of generator %s, which the plan does not hold", n.ID, g)
+			}
+		}
 		for _, d := range n.Deps {
 			if _, ok := byID[d]; !ok {
 				return invalid("node %s needs %s, which the plan does not hold", n.ID, d)
@@ -147,7 +160,11 @@ func validateNodes(nodes []nodeproto.PlanNode) error {
 			return invalid("the plan has a dependency cycle %s", strings.Join(append(path, id), " -> "))
 		}
 		state[id] = visiting
-		for _, d := range waitsOn(byID[id], byID) {
+		next := waitsOn(byID[id], byID)
+		for _, g := range byID[id].NeedsGenerated {
+			next = append(next, sources[g])
+		}
+		for _, d := range next {
 			if err := visit(d, append(path, id)); err != nil {
 				return err
 			}

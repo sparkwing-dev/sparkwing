@@ -13,3 +13,6 @@ func AwaitsHeld(c *Claim, n int) <-chan struct{} {
 	}()
 	return held
 }
+
+// TimeoutLayer is the timeout layer around next.
+func TimeoutLayer(next Executor) Executor { return timeoutLayer(nil, next) }

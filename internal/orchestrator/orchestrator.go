@@ -2936,6 +2936,7 @@ func snapshotNodeEnvelope(p *sparkwing.Plan, n *sparkwing.JobNode, sn *nodeproto
 	sn.Caches = nodeDirCaches(n)
 	closures, stepClosures := sparkwingruntime.NodeClosureIDs(p, n)
 	sn.Closures = closures
+	sn.NeedsGenerated = sparkwingruntime.NeedsGeneratedIDs(p, n)
 	if closures != nil && closures.CacheKey != "" {
 		sn.MemoKey = &nodeproto.PlanMemoKey{Closure: closures.CacheKey}
 	}
