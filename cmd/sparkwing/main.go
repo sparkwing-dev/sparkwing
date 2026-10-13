@@ -906,14 +906,11 @@ func findSparkwingDirFrom(start string) (string, error) {
 	for {
 		candidate := filepath.Join(dir, ".sparkwing")
 		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			if _, err := os.Stat(filepath.Join(candidate, "main.go")); err == nil {
-				return candidate, nil
-			}
-			ts, err := pipelineentry.IsTypeScript(candidate)
+			ok, err := pipelineentry.IsPipelineDir(candidate)
 			if err != nil {
 				return "", err
 			}
-			if ts {
+			if ok {
 				return candidate, nil
 			}
 		}

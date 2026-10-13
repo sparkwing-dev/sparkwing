@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
@@ -840,6 +841,22 @@ func keyParts(sparkwingDir, goos, goarch string) ([]KeyPart, error) {
 			Label: label, Detail: detail,
 			Digest: digestOf(material), material: material,
 		})
+	}
+
+	ts, err := pipelineentry.IsTypeScript(sparkwingDir)
+	if err != nil {
+		return nil, err
+	}
+	// safety: a TypeScript pipeline compiles nothing, so its key is its tree, package-lock.json included, with no go.mod.
+	if ts {
+		var tree bytes.Buffer
+		stats, err := hashDirIntoCounted(&tree, sparkwingDir, allFiles)
+		if err != nil {
+			return nil, err
+		}
+		add("runtime", "typescript", []byte("runtime:typescript\n"))
+		add("module tree", stats.String(), tree.Bytes())
+		return parts, nil
 	}
 
 	add("go toolchain", goMajorMinor(), []byte(fmt.Sprintf("go:%s\n", goMajorMinor())))

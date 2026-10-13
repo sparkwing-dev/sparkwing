@@ -2,27 +2,26 @@
 // node --import <this module> <entry> --sw-node-protocol. Node.js evaluates
 // it before it loads the entry, so the bearer and the handle list leave
 // process.env before any entry or sibling-import code runs, whatever order
-// that code imports in. It imports only Node.js built-ins for the same reason.
+// that code imports in. It imports only Node.js built-ins and its own
+// startup module for the same reason. It exports nothing: what it captures
+// goes to that unexported module, which main empties.
+//
+// The preload keeps the bearer from the tools a step starts, not from the
+// repository's own code: that code, node_modules included, is trusted with
+// its node's bearer, and can choose the installed SDK or NODE_OPTIONS.
 
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { NODE_TOKEN_ENV, NODE_URL_ENV, PROTOCOL_ARG, record } from "./startup.ts";
 
-/** The one argument the engine starts an SDK process with. */
-export const PROTOCOL_ARG = "--sw-node-protocol";
-
-export const NODE_URL_ENV = "SPARKWING_NODE_URL";
-export const NODE_TOKEN_ENV = "SPARKWING_NODE_TOKEN";
 const HANDLES_ENV = "SPARKWING_PROTOCOL_HANDLES";
 
-const env: Record<string, string | undefined> = {};
-let preloaded = false;
 if (process.argv.length === 3 && process.argv[2] === PROTOCOL_ARG) {
-  env[NODE_URL_ENV] = process.env[NODE_URL_ENV];
-  env[NODE_TOKEN_ENV] = process.env[NODE_TOKEN_ENV];
+  const env = { [NODE_URL_ENV]: process.env[NODE_URL_ENV], [NODE_TOKEN_ENV]: process.env[NODE_TOKEN_ENV] };
   delete process.env[NODE_TOKEN_ENV];
   delete process.env[HANDLES_ENV];
-  preloaded = importedByFlag();
+  record(env, importedByFlag());
 }
 
 // safety: the same module reached through the entry's own imports runs only
@@ -42,12 +41,4 @@ function importedByFlag(): boolean {
     }
   }
   return false;
-}
-
-/**
- * The node routes' variables as the host passed them, and whether this
- * module ran as the --import preload, before any entry code.
- */
-export function startup(): { env: Readonly<Record<string, string | undefined>>; preloaded: boolean } {
-  return { env, preloaded };
 }

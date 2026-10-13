@@ -1,6 +1,6 @@
 import { fstatSync } from "node:fs";
 import { Socket } from "node:net";
-import { PROTOCOL_ARG, startup } from "./bootstrap.ts";
+import { PROTOCOL_ARG, take } from "./startup.ts";
 import { NodeRoutes, routeConfigFromEnv } from "./routes.ts";
 import { serve } from "./runner.ts";
 
@@ -52,7 +52,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     if (process.platform === "win32") {
       throw new Error("the TypeScript SDK does not yet open the Windows protocol handles");
     }
-    const boot = startup();
+    const boot = take();
     if (!boot.preloaded) {
       throw new Error(`the entry was not started with node --import @sparkwing/sdk/bootstrap; only a sparkwing host starts ${PROTOCOL_ARG}`);
     }

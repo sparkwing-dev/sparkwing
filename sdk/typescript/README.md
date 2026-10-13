@@ -19,6 +19,7 @@ and its JSON Schemas).
 | `src/protocol.ts` | Framing: requests on the request pipe, replies and log records on the frame pipe, and the reply error codes |
 | `src/runner.ts` | The loop that answers `describe`, `plan`, `run_node`, `run_step`, `cancel` and `eval` |
 | `src/bootstrap.ts` | The `./bootstrap` preload the engine starts every entry with: takes the bearer and the handle list out of the environment before any entry code runs |
+| `src/startup.ts` | Holds what the preload captured until `main` takes it; the package does not export it |
 | `src/main.ts` | The `--sw-node-protocol` entry: refuses a process started without the preload and finds the pipes on descriptors 3 and 4 |
 | `src/log.ts` | NDJSON log records with the engine's field names |
 | `src/routes.ts` | Clients for the node routes at `SPARKWING_NODE_URL`: a secret by name, and another node's output |

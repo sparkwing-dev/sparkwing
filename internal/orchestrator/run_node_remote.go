@@ -130,14 +130,19 @@ func runNodeRemote(
 	if cacheGrant == "" || bincache.ControllerGitcacheToken(gcURL, controllerURL, token) != "" {
 		binaryCacheURL = ""
 	}
+	// safety: refused before resolving, which for TypeScript would run the repository's install hooks.
+	ts, err := pipelineentry.IsTypeScript(sparkwingDir)
+	if err != nil {
+		return runner.Result{}, err
+	}
+	if ts {
+		return runner.Result{}, errors.New("a TypeScript pipeline runs only on the pod node host")
+	}
 	binary, err := resolveRemoteBinary(ctx, sparkwingDir, controllerURL, token, runID, binaryCacheURL, cacheGrant, logger)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("resolve binary: %w", err)
 	}
 	defer binary.release()
-	if len(binary.entry) != 1 {
-		return runner.Result{}, errors.New("a TypeScript pipeline runs only on the pod node host")
-	}
 	logger.Info("runNodeRemote: binary ready",
 		"run_id", runID, "node_id", nodeID, "bin", binary.entry[0])
 	return runNodeChild(ctx, binary.entry[0], filepath.Dir(sparkwingDir), controllerURL, token, binaryCacheURL, cacheGrant, runID, nodeID, logger)
@@ -449,7 +454,7 @@ func resolveRemoteBinary(ctx context.Context, sparkwingDir, controllerURL, contr
 		return remoteBinary{}, err
 	}
 	if ts {
-		cmd, err := pipelineentry.Prepare(ctx, sparkwingDir, os.Environ())
+		cmd, err := pipelineentry.Prepare(ctx, sparkwingDir, pipelineentry.InstallEnv())
 		return remoteBinary{entry: cmd}, err
 	}
 	key, err := bincache.PipelineCacheKey(sparkwingDir)

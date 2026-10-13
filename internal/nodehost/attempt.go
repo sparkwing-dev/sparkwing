@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"runtime"
 	"slices"
 	"strings"
 
@@ -243,32 +241,6 @@ func failed(err error) Result {
 	return Result{Outcome: sparkwing.Failed, Err: err, Reason: reason}
 }
 
-// safety: the one list of engine variables a process inherits when its caller passes no environment.
-var minimalEnv = []string{
-	"PATH", "HOME", "TMPDIR", "LANG", "LC_*", "TZ", "USER",
-	"SystemRoot", "ComSpec", "PATHEXT", "TEMP", "TMP",
-}
-
-// MinimalEnv is the engine's environment cut to the variables a process
-// needs to run at all: PATH, HOME, TMPDIR, LANG, LC_*, TZ and USER, and on
-// Windows SystemRoot, ComSpec, PATHEXT, TEMP and TMP.
-func MinimalEnv() []string {
-	env := []string{}
-	for _, kv := range os.Environ() {
-		k, _, _ := strings.Cut(kv, "=")
-		if slices.ContainsFunc(minimalEnv, func(name string) bool {
-			prefix, wild := strings.CutSuffix(name, "*")
-			if runtime.GOOS == "windows" {
-				k, name, prefix = strings.ToUpper(k), strings.ToUpper(name), strings.ToUpper(prefix)
-			}
-			return k == name || (wild && strings.HasPrefix(k, prefix))
-		}) {
-			env = append(env, kv)
-		}
-	}
-	return env
-}
-
 // safety: the dispatcher's rule for what a child attaches to: the run's lease when it holds the host or the
 // plan's groups, which a node lease lacks, else the node's own lease, which holds the cores the node runs on.
 func childLease(n *NodeRun) string {
@@ -300,7 +272,7 @@ func dryRunSession(s SessionConfig, dryRun bool) SessionConfig {
 	if dryRun {
 		base := s.Env
 		if base == nil {
-			base = MinimalEnv()
+			base = engineenv.Minimal()
 		}
 		s.Env = append(slices.Clone(base), "SPARKWING_DRY_RUN=1")
 	}
@@ -310,7 +282,7 @@ func dryRunSession(s SessionConfig, dryRun bool) SessionConfig {
 // safety: the node's contract variables are set last so neither the engine nor the node's env overrides them.
 func attemptEnv(base []string, nodeEnv map[string]string, runID, nodeID, url, bearer string) []string {
 	if base == nil {
-		base = MinimalEnv()
+		base = engineenv.Minimal()
 	}
 	env := make([]string, 0, len(base)+len(nodeEnv)+4)
 	env = append(env, engineenv.Strip(base)...)

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
@@ -62,7 +63,7 @@ type SessionConfig struct {
 	Dir string
 	// Env is the process's whole environment, which the caller sets on
 	// purpose: a local run passes the user's, a pod the minimal set. Nil is
-	// [MinimalEnv], so the engine's credentials never reach pipeline code
+	// [engineenv.Minimal], so the engine's credentials never reach pipeline code
 	// implicitly.
 	Env  []string
 	Sink Sink
@@ -146,7 +147,7 @@ func StartSession(ctx context.Context, cfg SessionConfig) (*Session, error) {
 	}
 	cmd := cfg.Entry.Exec()
 	if cfg.Env == nil {
-		cfg.Env = MinimalEnv()
+		cfg.Env = engineenv.Minimal()
 	}
 	cmd.Dir, cmd.Env = cfg.Dir, cfg.Env
 	cmd.Stdout, cmd.Stderr = child[2], child[3]

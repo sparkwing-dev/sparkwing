@@ -3,6 +3,7 @@ package pipelineentry
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -82,6 +83,10 @@ func TestTypeScriptPreloadsTheInstalledSDKBootstrap(t *testing.T) {
 	if _, err := TypeScript(dir); err == nil || !strings.Contains(err.Error(), "./bootstrap") {
 		t.Fatalf("an SDK without the bootstrap export: %v", err)
 	}
+	writeFile(t, filepath.Join(sdk, "package.json"), `{"exports":"./src/index.ts"}`)
+	if _, err := TypeScript(dir); err == nil || !strings.Contains(err.Error(), "./bootstrap") {
+		t.Fatalf("an SDK whose exports is a string: %v", err)
+	}
 	writeFile(t, filepath.Join(sdk, "package.json"), `{"exports":{".":"./src/index.ts","./bootstrap":"./src/bootstrap.ts"}}`)
 	writeFile(t, filepath.Join(sdk, "src", "bootstrap.ts"), "")
 	got, err := TypeScript(dir)
@@ -103,5 +108,60 @@ func TestTypeScriptPreloadsTheInstalledSDKBootstrap(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "package.json"), `{"dependencies":{"@sparkwing/sdk":"1"}}`)
 	if _, err := TypeScript(dir); err == nil || !strings.Contains(err.Error(), `"main"`) {
 		t.Fatalf("a package.json without main: %v", err)
+	}
+}
+
+func TestIsTypeScriptReadsOnlyTheDependencies(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "package.json"), `{"main":7,"exports":"./index.js","dependencies":{"left-pad":"1"}}`)
+	if ts, err := IsTypeScript(dir); err != nil || ts {
+		t.Fatalf("a tooling manifest shaped another way: %v, %v", ts, err)
+	}
+}
+
+func TestInstallHooksGetOnlyTheInstallEnvironment(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the hook writes its environment with env")
+	}
+	if _, err := exec.LookPath("npm"); err != nil {
+		t.Skip("npm is not on PATH")
+	}
+	t.Setenv("GITHUB_TOKEN", "runner-github")
+	t.Setenv("AWS_ACCESS_KEY_ID", "runner-aws")
+	t.Setenv("NODE_OPTIONS", "--no-deprecation")
+	t.Setenv("npm_config_registry", "http://127.0.0.1:9/")
+	dir := t.TempDir()
+	out := filepath.Join(dir, "hook-env")
+	writeFile(t, filepath.Join(dir, "package.json"),
+		`{"name":"hooked","version":"1.0.0","scripts":{"postinstall":"env > hook-env"}}`)
+	writeFile(t, filepath.Join(dir, "package-lock.json"),
+		`{"name":"hooked","version":"1.0.0","lockfileVersion":3,"requires":true,"packages":{"":{"name":"hooked","version":"1.0.0","hasInstallScript":true}}}`)
+	if err := InstallTypeScript(t.Context(), dir, InstallEnv()); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := string(raw)
+	for _, leaked := range []string{"runner-github", "runner-aws", "NODE_OPTIONS="} {
+		if strings.Contains(env, leaked) {
+			t.Errorf("an install hook saw %q", leaked)
+		}
+	}
+	if !strings.Contains(env, "npm_config_registry=http://127.0.0.1:9/") {
+		t.Error("an install hook lost the package proxy")
+	}
+}
+
+func TestIsPipelineDirFindsGoAndTypeScript(t *testing.T) {
+	goDir, tsDir, neither := t.TempDir(), t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(goDir, "main.go"), "package main\n")
+	writeFile(t, filepath.Join(tsDir, "package.json"), `{"devDependencies":{"@sparkwing/sdk":"0.1.0"}}`)
+	writeFile(t, filepath.Join(neither, "package.json"), `{"exports":"./x.js"}`)
+	for dir, want := range map[string]bool{goDir: true, tsDir: true, neither: false} {
+		if got, err := IsPipelineDir(dir); err != nil || got != want {
+			t.Errorf("IsPipelineDir(%s) = %v, %v; want %v", dir, got, err, want)
+		}
 	}
 }

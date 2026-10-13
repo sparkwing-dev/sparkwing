@@ -100,6 +100,12 @@ test("a pipeline entry refuses any argument but --sw-node-protocol, a start with
   assert.match(bare.stderr, /descriptor 3/);
 });
 
+test("neither the bootstrap nor the SDK's index exports what the preload captured", async () => {
+  assert.deepEqual(Object.keys(await import(bootstrap)), []);
+  const sdk = await import("../src/index.ts");
+  for (const name of ["take", "record", "startup"]) assert.equal(name in sdk, false, name);
+});
+
 function spawnSyncNode(args: string[]): { status: number | null; stderr: string } {
   try {
     execFileSync(process.execPath, args, {

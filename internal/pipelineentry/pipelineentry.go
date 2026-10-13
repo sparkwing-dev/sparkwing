@@ -53,29 +53,27 @@ func (c Command) Exec() *exec.Cmd {
 	return exec.Command(c[0], append(slices.Clone(c[1:]), ProtocolArg)...)
 }
 
-type packageJSON struct {
-	Main            string                     `json:"main"`
-	Dependencies    map[string]string          `json:"dependencies"`
-	DevDependencies map[string]string          `json:"devDependencies"`
-	Exports         map[string]json.RawMessage `json:"exports"`
-}
-
-func readPackage(path string) (packageJSON, error) {
-	var pkg packageJSON
+// safety: each reader decodes only the fields it needs, so a valid manifest
+// shaped another way, such as a string exports, never fails a Go pipeline.
+func readPackage(path string, into any) error {
 	raw, err := os.ReadFile(path) // #nosec G304 -- a package.json under the pipeline directory.
 	if err != nil {
-		return pkg, err
+		return err
 	}
-	if err := json.Unmarshal(raw, &pkg); err != nil {
-		return pkg, fmt.Errorf("%s: %w", path, err)
+	if err := json.Unmarshal(raw, into); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
 	}
-	return pkg, nil
+	return nil
 }
 
 // IsTypeScript reports whether sparkwingDir holds a TypeScript pipeline: a
 // package.json that depends on [SDKPackage].
 func IsTypeScript(sparkwingDir string) (bool, error) {
-	pkg, err := readPackage(filepath.Join(sparkwingDir, "package.json"))
+	var pkg struct {
+		Dependencies    map[string]json.RawMessage `json:"dependencies"`
+		DevDependencies map[string]json.RawMessage `json:"devDependencies"`
+	}
+	err := readPackage(filepath.Join(sparkwingDir, "package.json"), &pkg)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
 	}
@@ -87,11 +85,22 @@ func IsTypeScript(sparkwingDir string) (bool, error) {
 	return dep || dev, nil
 }
 
+// IsPipelineDir reports whether dir is a .sparkwing that holds a pipeline:
+// a Go main package or a TypeScript pipeline.
+func IsPipelineDir(dir string) (bool, error) {
+	if _, err := os.Stat(filepath.Join(dir, "main.go")); err == nil {
+		return true, nil
+	}
+	return IsTypeScript(dir)
+}
+
 // TypeScript returns the command for the TypeScript pipeline in sparkwingDir.
 // It wraps [ErrNotInstalled] when node_modules lacks the SDK.
 func TypeScript(sparkwingDir string) (Command, error) {
-	pkg, err := readPackage(filepath.Join(sparkwingDir, "package.json"))
-	if err != nil {
+	var pkg struct {
+		Main string `json:"main"`
+	}
+	if err := readPackage(filepath.Join(sparkwingDir, "package.json"), &pkg); err != nil {
 		return nil, err
 	}
 	if pkg.Main == "" {
@@ -102,15 +111,19 @@ func TypeScript(sparkwingDir string) (Command, error) {
 		return nil, fmt.Errorf("pipeline entry: %w", err)
 	}
 	sdkDir := filepath.Join(sparkwingDir, "node_modules", filepath.FromSlash(SDKPackage))
-	sdk, err := readPackage(filepath.Join(sdkDir, "package.json"))
+	var sdk struct {
+		Exports json.RawMessage `json:"exports"`
+	}
+	err := readPackage(filepath.Join(sdkDir, "package.json"), &sdk)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("%w: %s has no %s", ErrNotInstalled, sparkwingDir, SDKPackage)
 	}
 	if err != nil {
 		return nil, err
 	}
+	var exports map[string]json.RawMessage
 	var rel string
-	if err := json.Unmarshal(sdk.Exports["./bootstrap"], &rel); err != nil || rel == "" {
+	if json.Unmarshal(sdk.Exports, &exports) != nil || json.Unmarshal(exports["./bootstrap"], &rel) != nil || rel == "" {
 		return nil, fmt.Errorf("the installed %s exports no ./bootstrap preload; install an SDK that matches this engine", SDKPackage)
 	}
 	// safety: the preload must be the very module the SDK imports, and Node.js
@@ -127,6 +140,14 @@ func TypeScript(sparkwingDir string) (Command, error) {
 		return nil, err
 	}
 	return Node(node, bootstrap, entry), nil
+}
+
+// InstallEnv is the environment a runner installs a TypeScript pipeline's
+// dependencies with: [engineenv.Minimal] plus the package proxy and CA
+// variables npm reads, so install hooks never see the runner's credentials.
+func InstallEnv() []string {
+	return engineenv.Minimal("npm_config_registry", "npm_config_cache", "NODE_EXTRA_CA_CERTS",
+		"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy")
 }
 
 // InstallTypeScript runs npm ci in sparkwingDir with env, less the engine's
