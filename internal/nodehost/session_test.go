@@ -156,18 +156,35 @@ func (r *recorder) snapshot() ([]string, []nodeproto.LogRecord) {
 	return append([]string(nil), r.text...), append([]nodeproto.LogRecord(nil), r.records...)
 }
 
-func openFDs(t *testing.T) int {
+// safety: only pipes are compared, since other tests' connections may close
+// while a session test runs, and a session leaks nothing but pipes.
+func openPipes(t *testing.T) map[string]bool {
 	t.Helper()
 	entries, err := os.ReadDir("/dev/fd")
 	if err != nil {
 		t.Fatalf("list fds: %v", err)
 	}
-	return len(entries)
+	pipes := map[string]bool{}
+	for _, e := range entries {
+		if target, err := os.Readlink("/dev/fd/" + e.Name()); err == nil && strings.HasPrefix(target, "pipe:") {
+			pipes[e.Name()+" "+target] = true
+		}
+	}
+	return pipes
+}
+
+func checkNoNewPipes(t *testing.T, before map[string]bool) {
+	t.Helper()
+	for fd := range openPipes(t) {
+		if !before[fd] {
+			t.Errorf("pipe fd %s left open", fd)
+		}
+	}
 }
 
 func startFake(t *testing.T, ctx context.Context, sink *recorder) *Session {
 	t.Helper()
-	before := openFDs(t)
+	before := openPipes(t)
 	s, err := StartSession(ctx, SessionConfig{
 		Entry: os.Args[0],
 		// bug: the race runtime otherwise sleeps a second at exit, past the grace.
@@ -183,9 +200,7 @@ func startFake(t *testing.T, ctx context.Context, sink *recorder) *Session {
 		if s.cmd.ProcessState == nil {
 			t.Errorf("sdk process %d was left unreaped", s.cmd.Process.Pid)
 		}
-		if after := openFDs(t); after != before {
-			t.Errorf("open fds went from %d to %d", before, after)
-		}
+		checkNoNewPipes(t, before)
 	})
 	return s
 }
@@ -415,7 +430,7 @@ func (b *blockingSink) Record(nodeproto.LogRecord) { <-b.release }
 func TestSessionBlockedSinkNeitherStallsRepliesNorClose(t *testing.T) {
 	sink := &blockingSink{release: make(chan struct{})}
 	t.Cleanup(func() { close(sink.release) })
-	before := openFDs(t)
+	before := openPipes(t)
 	s, err := StartSession(context.Background(), SessionConfig{
 		Entry: os.Args[0],
 		Env:   append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0"),
@@ -433,9 +448,7 @@ func TestSessionBlockedSinkNeitherStallsRepliesNorClose(t *testing.T) {
 	if _, err := s.Close(); err != nil {
 		t.Fatalf("close behind a blocked sink: %v", err)
 	}
-	if after := openFDs(t); after != before {
-		t.Errorf("open fds went from %d to %d", before, after)
-	}
+	checkNoNewPipes(t, before)
 }
 
 func TestSinkQueueCountsDrops(t *testing.T) {
