@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -217,13 +218,27 @@ func (s *LogSink) persist(rec sparkwing.LogRecord) error {
 			return c.State.AppendNodeAnnotation(s.ctx, run, node, message)
 		}
 	case sparkwing.EventNodeSummary:
-		markdown := attrString(rec.Attrs, "markdown", rec.Msg)
+		markdown := boundedSummary(attrString(rec.Attrs, "markdown", rec.Msg))
 		if rec.Step != "" {
 			return c.State.SetStepSummary(s.ctx, run, node, rec.Step, markdown)
 		}
 		return c.State.SetNodeSummary(s.ctx, run, node, markdown)
 	}
 	return nil
+}
+
+// safety: the controller refuses a JSON body over 1 MiB and escaping can grow
+// text up to sixfold, so a stored summary is bounded well below that.
+const maxSummaryBytes = 128 << 10
+
+// safety: the record is masked before this cut, so no secret is split; the
+// summary keeps its start, where its headline is, and says what it dropped.
+func boundedSummary(markdown string) string {
+	if len(markdown) <= maxSummaryBytes {
+		return markdown
+	}
+	kept := strings.ToValidUTF8(markdown[:maxSummaryBytes-128], "")
+	return fmt.Sprintf("%s\n\n… (summary truncated: %d bytes elided)\n", kept, len(markdown)-len(kept))
 }
 
 func attrString(attrs map[string]any, key, fallback string) string {
