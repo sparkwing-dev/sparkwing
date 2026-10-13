@@ -3047,6 +3047,7 @@ func nodeModifiersSnapshot(n *sparkwing.JobNode) *nodeproto.PlanModifiers {
 		HasAfterRun:         len(n.AfterRunHooks()) > 0,
 		HasSkipIf:           len(n.SkipPredicates()) > 0,
 		HasVerify:           n.Verifier() != nil,
+		SkipIfBudgetMS:      n.SkipIfBudget().Milliseconds(),
 	}
 	if rec := n.OnFailureNode(); rec != nil {
 		m.OnFailure = rec.ID()
@@ -3102,7 +3103,8 @@ func isZeroModifiers(m nodeproto.PlanModifiers) bool {
 		!m.HasBeforeRun &&
 		!m.HasAfterRun &&
 		!m.HasSkipIf &&
-		!m.HasVerify
+		!m.HasVerify &&
+		m.SkipIfBudgetMS == 0
 }
 
 func snapshotWorkOf(work *sparkwing.Work, resultStep *sparkwing.WorkStep, closures map[string]*nodeproto.PlanClosures) *nodeproto.PlanWork {

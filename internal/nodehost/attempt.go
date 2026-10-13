@@ -38,25 +38,34 @@ type Attempts struct {
 	// OpenLog opens the node's log; the executor closes it once the attempt's
 	// last record, cleanup output included, is written.
 	OpenLog func(ctx context.Context, runID, nodeID string) (NodeLog, error)
-	// Usage receives each attempt's measured session usage; nil drops it.
+	// Usage receives the measured session usage of each process bound to a
+	// node, its skip_if eval process included; nil drops it.
 	Usage func(n *NodeRun, u Usage)
 }
 
-// safety: every message the attempt returns is masked, since the scheduler
-// stores it in the node row, past the log sink's masking.
 func (a *Attempts) executor(cfg *Config) Executor {
 	return func(ctx context.Context, n *NodeRun) Result {
-		res := a.attempt(ctx, cfg.Session, n)
-		if res.Err != nil {
-			res.Err = errors.New(a.Masker.Mask(res.Err.Error()))
-		}
-		return res
+		return a.process(ctx, cfg.Session, n, func(ctx context.Context, sess *Session, log Sink) Result {
+			return drive(ctx, sess, log, n)
+		})
 	}
+}
+
+type processBody func(ctx context.Context, sess *Session, log Sink) Result
+
+// safety: every message the process returns is masked, since the scheduler
+// stores it in the node row, past the log sink's masking.
+func (a *Attempts) process(ctx context.Context, base SessionConfig, n *NodeRun, body processBody) Result {
+	res := a.attempt(ctx, base, n, body)
+	if res.Err != nil {
+		res.Err = errors.New(a.Masker.Mask(res.Err.Error()))
+	}
+	return res
 }
 
 // safety: the bearer is revoked before the cleanups run, so the process
 // cannot register a cleanup that never runs.
-func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun) Result {
+func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, body processBody) Result {
 	run, id := n.Run, n.Plan.ID
 	nlog, err := a.OpenLog(ctx, run.ID, id)
 	if err != nil {
@@ -89,7 +98,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun) 
 	res := Result{}
 	sess, err := StartSession(ctx, cfg)
 	if err == nil {
-		res = drive(ctx, sess, n)
+		res = body(ctx, sess, sink)
 		usage, cerr := sess.Close()
 		var perr *nodeproto.Error
 		switch {
@@ -118,7 +127,14 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun) 
 	return res
 }
 
-func drive(ctx context.Context, sess *Session, n *NodeRun) Result {
+func drive(ctx context.Context, sess *Session, log Sink, n *NodeRun) Result {
+	if err := replan(ctx, sess, n); err != nil {
+		return failed(err)
+	}
+	return withClosures(ctx, sess, log, n, func() Result { return nodeBody(ctx, sess, n) })
+}
+
+func replan(ctx context.Context, sess *Session, n *NodeRun) error {
 	run := n.Run
 	args := run.Args
 	if args == nil {
@@ -126,16 +142,15 @@ func drive(ctx context.Context, sess *Session, n *NodeRun) Result {
 	}
 	rc := run.Context
 	var raw json.RawMessage
-	err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: run.Pipeline, Args: args, Run: &rc}, &raw)
-	if err == nil {
-		err = checkDrift(raw, n.Plan)
+	if err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: run.Pipeline, Args: args, Run: &rc}, &raw); err != nil {
+		return err
 	}
-	if err != nil {
-		return failed(err)
-	}
-	attempt := max(n.Attempt, 1)
+	return checkDrift(raw, n.Plan)
+}
+
+func nodeBody(ctx context.Context, sess *Session, n *NodeRun) Result {
 	var rr nodeproto.RunResult
-	err = ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpRunNode, Node: n.Plan.ID, Attempt: attempt, Failure: n.Failure}, &rr)
+	err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpRunNode, Node: n.Plan.ID, Attempt: max(n.Attempt, 1), Failure: n.Failure}, &rr)
 	if err == nil {
 		err = rr.Validate()
 	}

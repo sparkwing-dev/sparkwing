@@ -125,6 +125,7 @@ type PlanModifiers struct {
 	HasAfterRun     bool    `json:"has_after_run,omitempty"`
 	HasSkipIf       bool    `json:"has_skip_if,omitempty"`
 	HasVerify       bool    `json:"has_verify,omitempty"`
+	SkipIfBudgetMS  int64   `json:"skip_if_budget_ms,omitempty"`
 }
 
 type PlanWork struct {

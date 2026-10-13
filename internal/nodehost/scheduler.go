@@ -46,6 +46,9 @@ type Result struct {
 	// Reason is the store's failure reason, such as [store.FailureVerify].
 	Reason string
 	Output json.RawMessage
+	// Final ends the node with this result whatever retries remain, as a
+	// failed before_run does: a later attempt would run the body without it.
+	Final bool
 }
 
 // RunResult is how a hosted run ended. Status is success, failed or
@@ -72,6 +75,10 @@ type NodeRun struct {
 	Failure *nodeproto.Failure
 	// Attempt is the 1-based attempt number; zero means 1.
 	Attempt int
+	// Retried reports whether the retries layer starts another attempt after
+	// one that ended with res; nil means none follows. The attempt runs its
+	// after_run closures only when none does.
+	Retried func(res Result) bool
 }
 
 // Run is the hosted run an executor works within.
@@ -119,8 +126,10 @@ func (r *Run) Add(ctx context.Context, nodes ...nodeproto.PlanNode) error {
 type Layer func(cfg *Config, next Executor) Executor
 
 // safety: the order is the envelope's nesting, outermost first: approvals and recovery, debug pauses,
-// admission, skip_if, memo, artifacts, caches, retries and timeouts, attempt closures, steps, expansion.
+// admission, skip_if, memo, artifacts, caches, retries and timeouts, steps, expansion. The attempt
+// closures run inside the attempt executor, since they share the attempt's process.
 var layers = []Layer{
+	skipIfLayer,
 	artifactsLayer,
 	cachesLayer,
 }
