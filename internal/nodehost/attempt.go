@@ -111,7 +111,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	cfg := base
 	cfg.Sink = sink
 	cfg.Env = attemptEnv(base.Env, n.Plan.Env, run.ID, id, a.Routes.URL(), bearer)
-	cfg.Env = append(append(cfg.Env, hostEnv(n)...), runnerEnv()...)
+	cfg.Env = append(append(withoutRunnerEnv(cfg.Env), hostEnv(n)...), runnerEnv()...)
 	res := Result{}
 	sess, err := StartSession(ctx, cfg)
 	if err == nil {
@@ -308,6 +308,14 @@ func runnerEnv() []string {
 		}
 	}
 	return env
+}
+
+// safety: a runner variable the host leaves unset must not survive from the caller's or the plan's env, or a
+// node in a launcher Job could report the labels a pipeline wrote, such as local.
+func withoutRunnerEnv(env []string) []string {
+	return slices.DeleteFunc(env, func(kv string) bool {
+		return strings.HasPrefix(strings.ToUpper(kv), "SPARKWING_RUNNER_")
+	})
 }
 
 // safety: the plan process sees the dry-run switch its node processes see, so plan code that reads it plans

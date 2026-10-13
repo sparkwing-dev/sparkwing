@@ -114,9 +114,10 @@ rather than work inside one.
 A test renders that table from a pipeline run and fails if this page and the
 runtime disagree.
 
-The table describes a run. `sparkwing pipeline plan` evaluates no skip
-predicate, so an inspection command never executes an author's side effects:
-it reports a step with a SkipIf as `may_skip`, decided at run time.
+The table describes a run. `sparkwing pipeline plan` still runs the
+pipeline's `Plan`, as describe does, but no step action and no skip
+predicate: it reports a step with a SkipIf as `may_skip`, decided at run
+time.
 
 ## Exec and Bash - running a shell command in a step
 
