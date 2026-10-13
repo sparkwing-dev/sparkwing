@@ -27,6 +27,9 @@ type Config struct {
 	// StartedAt means now and an empty trigger source means manual.
 	Run   nodeproto.RunContext
 	State storage.StateStore
+	// Artifacts holds the files nodes publish with outputs and stage with
+	// consumes; nil turns both off.
+	Artifacts storage.ArtifactStore
 	// Execute runs one attempt of a node. Nil fails every node it reaches.
 	Execute Executor
 	Logger  *slog.Logger
@@ -109,6 +112,7 @@ type Layer func(cfg *Config, next Executor) Executor
 // safety: the order is the envelope's nesting, outermost first: approvals and recovery, debug pauses,
 // admission, skip_if, memo, artifacts, caches, retries and timeouts, attempt closures, steps, expansion.
 var layers = []Layer{
+	artifactsLayer,
 	cachesLayer,
 }
 

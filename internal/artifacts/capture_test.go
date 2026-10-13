@@ -1,4 +1,4 @@
-package orchestrator
+package artifacts
 
 import (
 	"context"
@@ -10,13 +10,10 @@ import (
 	"runtime"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	fsstore "github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func newTestArtifactStore(t *testing.T) storage.ArtifactStore {
@@ -41,7 +38,7 @@ func writeArtifactFile(t *testing.T, root, rel string, data []byte, mode os.File
 
 func readManifest(t *testing.T, store storage.ArtifactStore, digest string) artifactManifest {
 	t.Helper()
-	rc, err := store.Get(context.Background(), artifactManifestKey(digest))
+	rc, err := store.Get(context.Background(), ManifestKey(digest))
 	if err != nil {
 		t.Fatalf("get manifest %s: %v", digest, err)
 	}
@@ -64,9 +61,9 @@ func TestCaptureArtifacts_StoresFilesAndManifest(t *testing.T) {
 	writeArtifactFile(t, ws, "dist/sub/b.txt", []byte("bravo"), 0o755)
 	writeArtifactFile(t, ws, "ignored/c.txt", []byte("charlie"), 0o644)
 
-	digest, err := captureArtifacts(context.Background(), store, ws, []string{"dist/**"})
+	digest, err := Capture(context.Background(), store, ws, []string{"dist/**"}, noWarn)
 	if err != nil {
-		t.Fatalf("captureArtifacts: %v", err)
+		t.Fatalf("Capture: %v", err)
 	}
 	m := readManifest(t, store, digest)
 	if len(m.Entries) != 2 {
@@ -82,7 +79,7 @@ func TestCaptureArtifacts_StoresFilesAndManifest(t *testing.T) {
 	if m.Entries[1].Mode != wantMode {
 		t.Fatalf("mode bits not preserved: got %o want %o", m.Entries[1].Mode, wantMode)
 	}
-	rc, err := store.Get(context.Background(), artifactBlobKey(m.Entries[0].Digest))
+	rc, err := store.Get(context.Background(), BlobKey(m.Entries[0].Digest))
 	if err != nil {
 		t.Fatalf("get blob: %v", err)
 	}
@@ -98,9 +95,9 @@ func TestCaptureArtifacts_EmptyMatchYieldsEmptyManifest(t *testing.T) {
 	store := newTestArtifactStore(t)
 	writeArtifactFile(t, ws, "other.txt", []byte("x"), 0o644)
 
-	digest, err := captureArtifacts(context.Background(), store, ws, []string{"dist/**"})
+	digest, err := Capture(context.Background(), store, ws, []string{"dist/**"}, noWarn)
 	if err != nil {
-		t.Fatalf("captureArtifacts: %v", err)
+		t.Fatalf("Capture: %v", err)
 	}
 	if digest == "" {
 		t.Fatal("empty match should still produce a manifest digest")
@@ -116,9 +113,9 @@ func TestCaptureArtifacts_DirectoryNameExpandsToFiles(t *testing.T) {
 	writeArtifactFile(t, ws, "dist/a.txt", []byte("a"), 0o644)
 	writeArtifactFile(t, ws, "dist/b.txt", []byte("b"), 0o644)
 
-	digest, err := captureArtifacts(context.Background(), store, ws, []string{"dist"})
+	digest, err := Capture(context.Background(), store, ws, []string{"dist"}, noWarn)
 	if err != nil {
-		t.Fatalf("captureArtifacts: %v", err)
+		t.Fatalf("Capture: %v", err)
 	}
 	if m := readManifest(t, store, digest); len(m.Entries) != 2 {
 		t.Fatalf("naming a directory should capture its files; got %+v", m.Entries)
@@ -131,9 +128,9 @@ func TestCaptureArtifacts_DedupsIdenticalContent(t *testing.T) {
 	writeArtifactFile(t, ws, "a.txt", []byte("same"), 0o644)
 	writeArtifactFile(t, ws, "b.txt", []byte("same"), 0o644)
 
-	digest, err := captureArtifacts(context.Background(), store, ws, []string{"*.txt"})
+	digest, err := Capture(context.Background(), store, ws, []string{"*.txt"}, noWarn)
 	if err != nil {
-		t.Fatalf("captureArtifacts: %v", err)
+		t.Fatalf("Capture: %v", err)
 	}
 	m := readManifest(t, store, digest)
 	if len(m.Entries) != 2 {
@@ -151,15 +148,15 @@ func TestCaptureArtifacts_FollowsSymlinkToContent(t *testing.T) {
 	if err := os.Symlink(filepath.Join(ws, "real.txt"), filepath.Join(ws, "link.txt")); err != nil {
 		t.Skipf("symlink unsupported: %v", err)
 	}
-	digest, err := captureArtifacts(context.Background(), store, ws, []string{"link.txt"})
+	digest, err := Capture(context.Background(), store, ws, []string{"link.txt"}, noWarn)
 	if err != nil {
-		t.Fatalf("captureArtifacts: %v", err)
+		t.Fatalf("Capture: %v", err)
 	}
 	m := readManifest(t, store, digest)
 	if len(m.Entries) != 1 {
 		t.Fatalf("want 1 entry, got %+v", m.Entries)
 	}
-	rc, err := store.Get(context.Background(), artifactBlobKey(m.Entries[0].Digest))
+	rc, err := store.Get(context.Background(), BlobKey(m.Entries[0].Digest))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +173,7 @@ func TestCaptureArtifacts_BrokenSymlinkInDeclaredPathErrors(t *testing.T) {
 	if err := os.Symlink(filepath.Join(ws, "missing.txt"), filepath.Join(ws, "dangling.txt")); err != nil {
 		t.Skipf("symlink unsupported: %v", err)
 	}
-	if _, err := captureArtifacts(context.Background(), store, ws, []string{"dangling.txt"}); err == nil {
+	if _, err := Capture(context.Background(), store, ws, []string{"dangling.txt"}, noWarn); err == nil {
 		t.Fatal("broken symlink in a declared path should error")
 	}
 }
@@ -229,9 +226,8 @@ func TestCaptureArtifacts_SymlinkOutOfWorkspace(t *testing.T) {
 			store := newTestArtifactStore(t)
 			c.setup(t, ws, outside)
 
-			log := &artifactWarnLogger{}
-			ctx := sparkwingruntime.WithLogger(context.Background(), log)
-			digest, err := captureArtifacts(ctx, store, ws, c.globs)
+			warned := false
+			digest, err := Capture(context.Background(), store, ws, c.globs, func(string) { warned = true })
 			if c.wantErr {
 				if err == nil {
 					t.Fatalf("want refusal, got manifest %+v", readManifest(t, store, digest))
@@ -245,7 +241,7 @@ func TestCaptureArtifacts_SymlinkOutOfWorkspace(t *testing.T) {
 				return
 			}
 			if err != nil {
-				t.Fatalf("captureArtifacts: %v", err)
+				t.Fatalf("Capture: %v", err)
 			}
 			m := readManifest(t, store, digest)
 			var paths []string
@@ -255,7 +251,7 @@ func TestCaptureArtifacts_SymlinkOutOfWorkspace(t *testing.T) {
 			if !slices.Equal(paths, c.wantPaths) {
 				t.Fatalf("paths = %v, want %v", paths, c.wantPaths)
 			}
-			if !log.sawWarning() {
+			if !warned {
 				t.Fatal("skipping an out-of-workspace match should warn")
 			}
 		})
@@ -268,7 +264,7 @@ func TestCaptureArtifacts_UnresolvableMatchHidesOutsidePath(t *testing.T) {
 	store := newTestArtifactStore(t)
 	symlinkOrSkip(t, filepath.Join(outside, "missing", "secret.txt"), filepath.Join(ws, "report.txt"))
 
-	_, err := captureArtifacts(context.Background(), store, ws, []string{"report.txt"})
+	_, err := Capture(context.Background(), store, ws, []string{"report.txt"}, noWarn)
 	if err == nil {
 		t.Fatal("an unresolvable declared path should error")
 	}
@@ -305,15 +301,15 @@ func TestCaptureArtifacts_UploadsTheBytesItHashed(t *testing.T) {
 		},
 	}
 
-	digest, err := captureArtifacts(context.Background(), store, ws, []string{"a.txt"})
+	digest, err := Capture(context.Background(), store, ws, []string{"a.txt"}, noWarn)
 	if err != nil {
-		t.Fatalf("captureArtifacts: %v", err)
+		t.Fatalf("Capture: %v", err)
 	}
 	m := readManifest(t, store, digest)
 	if len(m.Entries) != 1 {
 		t.Fatalf("want 1 entry, got %+v", m.Entries)
 	}
-	rc, err := store.Get(context.Background(), artifactBlobKey(m.Entries[0].Digest))
+	rc, err := store.Get(context.Background(), BlobKey(m.Entries[0].Digest))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,28 +332,7 @@ func (s *replaceOnLookupStore) Has(ctx context.Context, key string) (bool, error
 	return s.ArtifactStore.Has(ctx, key)
 }
 
-type artifactWarnLogger struct {
-	mu    sync.Mutex
-	warns int
-}
-
-func (l *artifactWarnLogger) Log(level, msg string) {
-	l.Emit(sparkwing.LogRecord{Level: level, Msg: msg})
-}
-
-func (l *artifactWarnLogger) Emit(rec sparkwing.LogRecord) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if rec.Level == "warn" {
-		l.warns++
-	}
-}
-
-func (l *artifactWarnLogger) sawWarning() bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.warns > 0
-}
+func noWarn(string) {}
 
 func symlinkOrSkip(t *testing.T, target, link string) {
 	t.Helper()
