@@ -145,7 +145,18 @@ func (p *Gate) workForCPU(w *sparkwing.Work, cpuCount int) (*sparkwing.WorkStep,
 	frontendLint := sparkwing.Step(w, "frontend-lint", runFrontendLint)
 	frontendBuild := sparkwing.Step(w, "frontend-build", runFrontendBuild).Needs(frontendUnit, frontendLint)
 	sparkwing.Step(w, "frontend-browser", runFrontendBrowser).Needs(frontendBuild)
+	sparkwing.Step(w, "sdk-typescript", runTypeScriptSDK)
 	return nil, nil
+}
+
+// safety: npm ci installs exactly the lockfile, so the typecheck judges the
+// package with the compiler it pins; node --test alone strips types unchecked.
+func runTypeScriptSDK(ctx context.Context) error {
+	const sdk = "npm --prefix sdk/typescript"
+	if _, err := sparkwing.Bash(ctx, sdk+" ci --ignore-scripts --no-audit --no-fund && "+sdk+" run typecheck && "+sdk+" test").Run(); err != nil {
+		return fmt.Errorf("TypeScript SDK suite: %w", err)
+	}
+	return nil
 }
 
 func runFrontendUnit(ctx context.Context) error {

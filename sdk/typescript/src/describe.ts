@@ -1,11 +1,14 @@
 // The describe and plan documents, shaped by the node protocol's describe
-// schema. describe is static: the protocol version and the pipelines. The
-// plan document depends on a run's args, so the engine asks for it per run.
+// schema. describe is static: the protocol version, this SDK and the
+// pipelines. The plan document depends on a run's args, so the engine asks
+// for it per run.
 
 import { pipelines } from "./plan.ts";
-import type { LineSink } from "./log.ts";
 
 export const PROTOCOL_VERSION = "1";
+
+/** This package's version, sent in describe so a refusal can name the SDK to upgrade. */
+export const SDK_VERSION = "0.0.0";
 
 export interface DescribeArg {
   name: string;
@@ -27,16 +30,19 @@ export interface DescribePipeline {
 
 export interface DescribeDoc {
   protocol: string;
+  sdk: { language: string; version: string };
   pipelines: DescribePipeline[];
 }
 
 export interface Closures {
   skip_if?: string[];
+  generator?: string[];
 }
 
 export interface PlanStep {
   id: string;
   needs?: string[];
+  is_result?: boolean;
 }
 
 export interface Modifiers {
@@ -49,9 +55,11 @@ export interface Modifiers {
 export interface PlanNode {
   id: string;
   deps: string[];
+  dynamic?: boolean;
   modifiers?: Modifiers;
-  work?: { steps: PlanStep[] };
+  work?: { steps: PlanStep[]; result_step?: string };
   closures?: Closures;
+  needs_generated?: string[];
 }
 
 export interface PlanDoc {
@@ -64,11 +72,17 @@ export interface PlanDoc {
 export function describe(): DescribeDoc {
   return {
     protocol: PROTOCOL_VERSION,
+    sdk: { language: "typescript", version: SDK_VERSION },
     pipelines: pipelines().map((p) => {
       const out: DescribePipeline = {
         name: p.name,
         args: (p.args ?? []).map((a) => {
-          const arg: DescribeArg = { name: a.name, go_name: a.name, type: a.type ?? "string", required: a.required ?? false };
+          const arg: DescribeArg = {
+            name: a.name,
+            go_name: a.name,
+            type: a.type ?? "string",
+            required: a.required ?? false,
+          };
           if (a.desc !== undefined) arg.desc = a.desc;
           if (a.default !== undefined) arg.default = a.default;
           if (a.enum !== undefined) arg.enum = [...a.enum];
@@ -81,8 +95,4 @@ export function describe(): DescribeDoc {
       return out;
     }),
   };
-}
-
-export function emitDescribe(out: LineSink): void {
-  out.write(JSON.stringify(describe()) + "\n");
 }

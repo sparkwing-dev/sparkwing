@@ -5,11 +5,38 @@
 import type { LogWriter } from "./log.ts";
 import { PROTOCOL_VERSION, type PlanDoc, type PlanNode } from "./describe.ts";
 
+export interface Trigger {
+  source: "manual" | "push" | "schedule" | "webhook";
+  user?: string;
+  pull_request?: {
+    number: number;
+    action?: string;
+    base_ref?: string;
+    base_sha?: string;
+    head_ref?: string;
+    head_sha?: string;
+  };
+}
+
+export interface GitInfo {
+  sha: string;
+  branch: string;
+  default_branch?: string;
+  repo?: string;
+  repo_url?: string;
+}
+
+/** The run a plan is built for, from the plan request's run context. */
 export interface RunContext {
   runId: string;
   pipeline: string;
   args: Record<string, string>;
-  git: Record<string, unknown>;
+  startedAt?: string;
+  trigger?: Trigger;
+  git?: GitInfo;
+  dryRun: boolean;
+  noCache: boolean;
+  log: LogWriter;
 }
 
 export interface NodeContext {
@@ -19,12 +46,20 @@ export interface NodeContext {
   args: Record<string, string>;
   dryRun: boolean;
   log: LogWriter;
+  /** Aborts when the engine cancels this step or stops asking. */
+  signal: AbortSignal;
   secret(name: string): Promise<string>;
+  /** Another node's output, read through the engine's output route. */
   output<T = unknown>(nodeId: string): Promise<T | null>;
+  /** The output of a step of this node that already ran in this process. */
+  stepOutput<T = unknown>(stepId: string): T | undefined;
 }
 
 export type Body = (ctx: NodeContext) => unknown;
 export type Predicate = (ctx: NodeContext) => boolean | Promise<boolean>;
+
+/** Adds the nodes of a dynamic fan-out from its source node's output. */
+export type GenerateFn<T = unknown> = (gen: Generated, output: T | null, ctx: NodeContext) => void | Promise<void>;
 
 export interface RetryOptions {
   backoffMs?: number;
@@ -40,6 +75,7 @@ export class Step {
   readonly id: string;
   readonly body: Body;
   readonly #needs: string[] = [];
+  #result = false;
 
   constructor(id: string, body: Body) {
     checkId("step", id);
@@ -52,8 +88,48 @@ export class Step {
     return this;
   }
 
+  /** Makes this step's output the node's output; a job has at most one result step. */
+  result(): this {
+    this.#result = true;
+    return this;
+  }
+
   get needIds(): readonly string[] {
     return this.#needs;
+  }
+
+  get isResult(): boolean {
+    return this.#result;
+  }
+}
+
+/** A generator closure of a job; pass it to needsGenerated to wait for its nodes. */
+export class Generator {
+  readonly id: string;
+  readonly source: Job;
+  readonly fn: GenerateFn<never>;
+
+  constructor(id: string, source: Job, fn: GenerateFn<never>) {
+    this.id = id;
+    this.source = source;
+    this.fn = fn;
+  }
+}
+
+/** Collects the jobs a generator adds; each one depends on the generator's source. */
+export class Generated {
+  readonly jobs: Job[] = [];
+  readonly #source: Job;
+
+  constructor(source: Job) {
+    this.#source = source;
+  }
+
+  job(id: string, body?: Body): Job {
+    if (this.jobs.some((j) => j.id === id)) throw new Error(`duplicate job ${id}`);
+    const j = new Job(id, body).needs(this.#source);
+    this.jobs.push(j);
+    return j;
   }
 }
 
@@ -62,7 +138,9 @@ export class Job {
   readonly body: Body | undefined;
   readonly steps: Step[] = [];
   readonly skipIfs: Predicate[] = [];
+  readonly generators: Generator[] = [];
   #deps: string[] = [];
+  #needsGenerated: string[] = [];
   #retry: { attempts: number; backoffMs?: number } | undefined;
   #timeoutMs: number | undefined;
 
@@ -75,6 +153,12 @@ export class Job {
   /** Runs this job only after every named job succeeds. */
   needs(...jobs: Array<Job | string>): this {
     for (const j of jobs) this.#deps.push(typeof j === "string" ? j : j.id);
+    return this;
+  }
+
+  /** Runs this job only after every node each generator adds has finished. */
+  needsGenerated(...gens: Generator[]): this {
+    for (const g of gens) this.#needsGenerated.push(g.id);
     return this;
   }
 
@@ -95,7 +179,7 @@ export class Job {
     return this;
   }
 
-  /** Adds a step; the engine runs steps one request at a time in dependency order. */
+  /** Adds a step; the engine runs each step with its own request, in dependency order. */
   step(id: string, body: Body): Step {
     if (this.body) throw new Error(`job ${this.id} has a body, so it cannot also have steps`);
     if (this.steps.some((s) => s.id === id)) throw new Error(`job ${this.id}: duplicate step ${id}`);
@@ -110,12 +194,25 @@ export class Job {
     return this;
   }
 
+  /**
+   * Adds a generator the engine evaluates after this job succeeds. It gets
+   * this job's output and adds jobs that run after it. It must add the same
+   * jobs for the same output, because each added job's own process runs it
+   * again.
+   */
+  generate<T = unknown>(fn: GenerateFn<T>): Generator {
+    const g = new Generator(`${this.id}/generator/${this.generators.length}`, this, fn as GenerateFn<never>);
+    this.generators.push(g);
+    return g;
+  }
+
   skipIfIds(): string[] {
     return this.skipIfs.map((_, i) => `${this.id}/skip_if/${i}`);
   }
 
   toNode(): PlanNode {
     const node: PlanNode = { id: this.id, deps: [...this.#deps] };
+    if (this.generators.length > 0) node.dynamic = true;
     const m: NonNullable<PlanNode["modifiers"]> = {};
     if (this.#retry) {
       m.retry = this.#retry.attempts;
@@ -126,10 +223,23 @@ export class Job {
     if (Object.keys(m).length > 0) node.modifiers = m;
     if (this.steps.length > 0) {
       node.work = {
-        steps: this.steps.map((s) => (s.needIds.length > 0 ? { id: s.id, needs: [...s.needIds] } : { id: s.id })),
+        steps: this.steps.map((s) => {
+          const step: NonNullable<PlanNode["work"]>["steps"][number] = {
+            id: s.id,
+          };
+          if (s.needIds.length > 0) step.needs = [...s.needIds];
+          if (s.isResult) step.is_result = true;
+          return step;
+        }),
       };
+      const result = this.steps.find((s) => s.isResult);
+      if (result) node.work.result_step = result.id;
     }
-    if (this.skipIfs.length > 0) node.closures = { skip_if: this.skipIfIds() };
+    const closures: NonNullable<PlanNode["closures"]> = {};
+    if (this.skipIfs.length > 0) closures.skip_if = this.skipIfIds();
+    if (this.generators.length > 0) closures.generator = this.generators.map((g) => g.id);
+    if (Object.keys(closures).length > 0) node.closures = closures;
+    if (this.#needsGenerated.length > 0) node.needs_generated = [...this.#needsGenerated];
     return node;
   }
 }
@@ -151,14 +261,45 @@ export class Plan {
 
   /** Validates the graph and returns the plan document the engine schedules. */
   toDoc(pipeline: string, runId: string): PlanDoc {
-    const nodes = this.jobs.map((j) => j.toNode());
-    for (const j of this.jobs) {
-      if (!j.body && j.steps.length === 0) throw new Error(`job ${j.id} has neither a body nor steps`);
-      assertAcyclic(`job ${j.id} steps`, j.steps.map((s) => ({ id: s.id, deps: [...s.needIds] })));
-    }
-    assertAcyclic("plan", nodes);
+    const nodes = checkJobs(this.jobs, this.jobs);
     return { protocol: PROTOCOL_VERSION, pipeline, run_id: runId, nodes };
   }
+
+  /**
+   * Adds the jobs a generator produced, after checking them against the
+   * plan, and returns their node documents.
+   */
+  insert(added: Job[]): PlanNode[] {
+    for (const j of added) {
+      if (this.lookup(j.id)) throw new Error(`generated job ${j.id} collides with a job of the plan`);
+    }
+    const nodes = checkJobs(added, [...this.jobs, ...added]);
+    this.jobs.push(...added);
+    return nodes;
+  }
+}
+
+function checkJobs(jobs: Job[], all: Job[]): PlanNode[] {
+  for (const j of jobs) {
+    if (!j.body && j.steps.length === 0) throw new Error(`job ${j.id} has neither a body nor steps`);
+    if (j.steps.filter((s) => s.isResult).length > 1) throw new Error(`job ${j.id} has more than one result step`);
+    assertAcyclic(
+      `job ${j.id} steps`,
+      j.steps.map((s) => ({ id: s.id, deps: [...s.needIds] })),
+    );
+  }
+  const generators = new Set(all.flatMap((j) => j.generators.map((g) => g.id)));
+  const nodes = jobs.map((j) => j.toNode());
+  for (const n of nodes) {
+    for (const g of n.needs_generated ?? []) {
+      if (!generators.has(g)) throw new Error(`job ${n.id} waits on generator ${g}, which does not exist`);
+    }
+  }
+  assertAcyclic(
+    "plan",
+    all.map((j) => j.toNode()),
+  );
+  return nodes;
 }
 
 function assertAcyclic(what: string, nodes: Array<{ id: string; deps: string[] }>): void {
@@ -195,6 +336,31 @@ export interface PipelineDef {
   help?: string;
   args?: ArgSpec[];
   plan(plan: Plan, run: RunContext): void | Promise<void>;
+}
+
+/**
+ * Checks plan args against the pipeline's declared flags and fills in
+ * defaults. It returns the problem as a string so the caller can answer
+ * invalid_args.
+ */
+export function resolveArgs(def: PipelineDef, args: Record<string, string>): Record<string, string> | string {
+  const specs = new Map((def.args ?? []).map((a) => [a.name, a]));
+  for (const name of Object.keys(args)) {
+    if (!specs.has(name)) return `pipeline ${def.name} has no flag --${name}`;
+  }
+  const out: Record<string, string> = {};
+  for (const spec of specs.values()) {
+    const v = args[spec.name] ?? spec.default;
+    if (v === undefined) {
+      if (spec.required) return `--${spec.name} is required`;
+      continue;
+    }
+    if (spec.type === "int" && !/^-?\d+$/.test(v)) return `--${spec.name}: ${JSON.stringify(v)} is not an integer`;
+    if (spec.type === "bool" && v !== "true" && v !== "false") return `--${spec.name}: ${JSON.stringify(v)} is not true or false`;
+    if (spec.enum && !spec.enum.includes(v)) return `--${spec.name}: ${JSON.stringify(v)} is not one of ${spec.enum.join(", ")}`;
+    out[spec.name] = v;
+  }
+  return out;
 }
 
 const registry = new Map<string, PipelineDef>();

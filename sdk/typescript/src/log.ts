@@ -1,5 +1,5 @@
-// Log records the SDK writes to stdout, one JSON object per line. The field
-// names match the engine's LogRecord so the host forwards them unchanged.
+// Log records the SDK writes to the frame pipe, one JSON object per line. The
+// field names match the engine's LogRecord so the host forwards them unchanged.
 
 export type Level = "debug" | "info" | "warn" | "error";
 

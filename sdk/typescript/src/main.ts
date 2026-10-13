@@ -1,34 +1,85 @@
-import { emitDescribe } from "./describe.ts";
+import { fstatSync } from "node:fs";
+import { Socket } from "node:net";
+import { NodeRoutes, NODE_TOKEN_ENV, routeConfigFromEnv } from "./routes.ts";
 import { serve } from "./runner.ts";
 
+/** The one argument the engine starts an SDK process with. */
+export const PROTOCOL_ARG = "--sw-node-protocol";
+
+const HANDLES_ENV = "SPARKWING_PROTOCOL_HANDLES";
+const REQUEST_FD = 3;
+const FRAME_FD = 4;
+
 // A pipe is written asynchronously, so process.exit before the queue empties
-// drops whatever the body logged last. An empty write's callback fires after
+// drops whatever was written last. An empty write's callback fires after
 // every earlier write; 'drain' is not a barrier, since it fires only after a
 // write that returned false. The loop catches writes a drain handler queues.
-async function drained(stream: NodeJS.WriteStream): Promise<void> {
+async function drained(stream: NodeJS.WritableStream & { writableLength: number }): Promise<void> {
   do {
     await new Promise<void>((resolve) => stream.write("", () => resolve()));
     await new Promise<void>((resolve) => setImmediate(resolve));
   } while (stream.writableLength > 0);
 }
 
+// safety: Node.js calls libuv's uv_disable_stdio_inheritance at startup, which
+// marks every inherited descriptor close-on-exec, so a command pipeline code
+// starts never holds the protocol pipes. The pipes test guards it.
+function protocolPipe(fd: number): number {
+  let fifo = false;
+  try {
+    fifo = fstatSync(fd).isFIFO();
+  } catch {
+    // A closed descriptor reads as no pipe.
+  }
+  if (!fifo) throw new Error(`descriptor ${fd} is not a pipe; only a sparkwing host starts ${PROTOCOL_ARG}`);
+  return fd;
+}
+
 /**
- * The entry point a pipeline file calls after defining its pipelines.
- * `--describe` prints the describe document; `--sw-node-protocol` answers
- * engine requests on stdin and stdout until stdin ends, then exits the
- * process, so a timer or server a body left running cannot keep the node
- * alive after the engine has stopped asking.
+ * The entry point a pipeline file calls after defining its pipelines. With
+ * --sw-node-protocol it answers engine requests from the request pipe until
+ * that pipe ends, then exits the process, so a timer or server a body left
+ * running cannot keep the node alive after the engine has stopped asking.
  */
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
-  if (argv.length === 1 && argv[0] === "--describe") {
-    emitDescribe(process.stdout);
-    return 0;
+  if (argv.length !== 1 || argv[0] !== PROTOCOL_ARG) {
+    process.stderr.write(`usage: <pipeline file> ${PROTOCOL_ARG}\nOnly a sparkwing host starts a pipeline entry.\n`);
+    return 2;
   }
-  if (argv.length === 1 && argv[0] === "--sw-node-protocol") {
-    await serve({ input: process.stdin, output: process.stdout });
-    await Promise.all([drained(process.stdout), drained(process.stderr)]);
-    process.exit(0);
+  let input: Socket;
+  let frames: Socket;
+  let routes: NodeRoutes | undefined;
+  try {
+    if (process.platform === "win32") {
+      throw new Error("the TypeScript SDK does not yet open the Windows protocol handles");
+    }
+    // safety: read and removed before any pipeline code runs, so no command it
+    // starts inherits the bearer or a handle list naming handles it lacks.
+    const cfg = routeConfigFromEnv(process.env);
+    delete process.env[NODE_TOKEN_ENV];
+    delete process.env[HANDLES_ENV];
+    if (cfg) routes = new NodeRoutes(cfg);
+    input = new Socket({
+      fd: protocolPipe(REQUEST_FD),
+      readable: true,
+      writable: false,
+    });
+    frames = new Socket({
+      fd: protocolPipe(FRAME_FD),
+      readable: false,
+      writable: true,
+    });
+  } catch (err) {
+    process.stderr.write(`sw-node-protocol: ${err instanceof Error ? err.message : String(err)}\n`);
+    return 2;
   }
-  process.stderr.write("usage: <pipeline file> --describe | --sw-node-protocol\n");
-  return 2;
+  let status = 0;
+  try {
+    await serve(routes ? { input, output: frames, routes } : { input, output: frames });
+  } catch (err) {
+    process.stderr.write(`sw-node-protocol: ${err instanceof Error ? err.message : String(err)}\n`);
+    status = 1;
+  }
+  await Promise.all([drained(frames), drained(process.stdout), drained(process.stderr)]);
+  process.exit(status);
 }
