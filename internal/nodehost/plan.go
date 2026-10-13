@@ -117,6 +117,9 @@ func validateNodes(nodes []nodeproto.PlanNode) error {
 		if err := claim("node "+n.ID, n.Closures); err != nil {
 			return err
 		}
+		if err := validateSteps(n); err != nil {
+			return err
+		}
 		if n.Work == nil {
 			continue
 		}
