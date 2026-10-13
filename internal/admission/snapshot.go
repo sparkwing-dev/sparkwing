@@ -42,6 +42,8 @@ type LeaseState struct {
 	Claims      []ClaimState      `json:"claims,omitempty"`
 	Members     []string          `json:"members"`
 	Parents     map[string]string `json:"parents,omitempty"`
+	// Pins are members of other leases that keep this one alive; see [Ledger.Pin].
+	Pins []string `json:"pins,omitempty"`
 }
 
 type ClaimState struct {
@@ -131,6 +133,7 @@ func (l *Ledger) Snapshot() Snapshot {
 			Claims:      claimStates(le.claims),
 			Members:     members,
 			Parents:     cloneParents(le.parents),
+			Pins:        sortedKeys(le.pins),
 		})
 	}
 	keys := make([]string, 0, len(l.sems))
@@ -306,7 +309,7 @@ func (l *Ledger) restoreLease(ls LeaseState) error {
 	if err := validateStoredOwnerRank(ls.OwnerID, ls.OwnerAdmit, ls.Admit, l.admitSeq, "lease "+string(ls.ID)); err != nil {
 		return err
 	}
-	if len(ls.Members) == 0 {
+	if len(ls.Members) == 0 && len(ls.Pins) == 0 {
 		return fmt.Errorf("%w: lease %s has no members", ErrInvalidSnapshot, ls.ID)
 	}
 	claims, err := restoreClaims(ls.Claims)
@@ -333,6 +336,12 @@ func (l *Ledger) restoreLease(ls LeaseState) error {
 		claims:      claims,
 		members:     make(map[string]struct{}, len(ls.Members)),
 		parents:     make(map[string]string, len(ls.Members)),
+	}
+	for _, m := range ls.Pins {
+		if le.pins == nil {
+			le.pins = map[string]struct{}{}
+		}
+		le.pins[m] = struct{}{}
 	}
 	for _, m := range ls.Members {
 		if m == "" {
@@ -479,4 +488,16 @@ func restoreClaims(states []ClaimState) ([]claim, error) {
 		claims = append(claims, c)
 	}
 	return claims, nil
+}
+
+func sortedKeys(set map[string]struct{}) []string {
+	if len(set) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(set))
+	for k := range set {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

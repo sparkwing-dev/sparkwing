@@ -1329,7 +1329,12 @@ waits on it. A sibling node's groups are not passed down. This holds whichever
 process claims the child: the parent's own run or the resident consumer. A
 child whose named parent holds no lease, because the node has finished or the
 parent ran without the daemon, fails with that reason instead of queueing on
-its own.
+its own. The groups a child is handed stay held by the ancestor that held them
+until the child ends, even when that ancestor finishes first, and a node of the
+child that declares one of them runs under it rather than queueing. The daemon
+refuses a process of another user, but any process of the same user may name
+any parent: a Sparkwing home is not a security boundary, since that user can
+read every home's files and tokens.
 
 The ledger survives daemon restarts the same way runs survive daemon
 handoffs: every transition is persisted, and a restarting daemon

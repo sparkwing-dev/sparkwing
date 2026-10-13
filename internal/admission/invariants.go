@@ -97,8 +97,13 @@ func (l *Ledger) leaseInvariants() error {
 		if le.id != id {
 			return fmt.Errorf("lease %s indexed under %s", le.id, id)
 		}
-		if len(le.members) == 0 {
+		if len(le.members) == 0 && len(le.pins) == 0 {
 			return fmt.Errorf("lease %s is alive with no members", id)
+		}
+		for m := range le.pins {
+			if _, live := l.memberOf[m]; !live {
+				return fmt.Errorf("lease %s is pinned by %q, which holds no lease", id, m)
+			}
 		}
 		if le.seq == 0 || le.seq > l.leaseSeq {
 			return fmt.Errorf("lease %s seq %d outside counter %d", id, le.seq, l.leaseSeq)

@@ -292,6 +292,11 @@ func runPlanned(ctx context.Context, cfg *Config, run *Run, res *RunResult) (rel
 	release = func() {}
 	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(cfg)}
 	s.rehydrate, s.rerun = cfg.Rehydrate, map[string]bool{}
+	if cfg.Attempts != nil {
+		s.regenerate = func(ctx context.Context, n *NodeRun, output json.RawMessage) []expansion {
+			return memoGenerate(ctx, cfg, n, output)
+		}
+	}
 	if err := s.add(ctx, ctx, run.Doc.Nodes); err != nil {
 		res.Status, res.Err = "failed", err
 		return release
@@ -398,8 +403,9 @@ type scheduler struct {
 	addedBy map[string]string
 	// safety: rerun records the nodes a retry runs again, so a node waiting on its deps is looked up in the
 	// source run once; only the scheduler goroutine reads it.
-	rehydrate *Rehydration
-	rerun     map[string]bool
+	rehydrate  *Rehydration
+	rerun      map[string]bool
+	regenerate func(ctx context.Context, n *NodeRun, output json.RawMessage) []expansion
 }
 
 type finished struct {
@@ -448,12 +454,6 @@ func (s *scheduler) startReady(ctx context.Context, done chan<- finished, runnin
 			progressed = true
 			continue
 		}
-		if res, ok := s.rehydrated(ctx, n, byID); ok {
-			s.started[n.ID] = true
-			s.finish(ctx, n.ID, res)
-			progressed = true
-			continue
-		}
 		if reason, ok := s.run.onlySkips[n.ID]; ok {
 			s.terminal(ctx, n.ID, sparkwing.Skipped, reason)
 			progressed = true
@@ -469,6 +469,11 @@ func (s *scheduler) startReady(ctx context.Context, done chan<- finished, runnin
 			continue
 		}
 		progressed = true
+		if res, ok := s.rehydrated(ctx, n, byID); ok {
+			s.started[n.ID] = true
+			s.finish(ctx, n.ID, res)
+			continue
+		}
 		node := &NodeRun{Run: s.run, Plan: n, Generator: s.addedBy[n.ID]}
 		if parent := n.OnFailureOf; parent != "" {
 			pr := s.results[parent]

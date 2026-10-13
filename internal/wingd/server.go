@@ -1255,11 +1255,12 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	}
 	var leaseID admission.LeaseID
 	var held []string
+	var holders []admission.LeaseID
 	var err error
 	if req.ParentLeaseToken != "" {
 		leaseID, err = d.ledger.Reattach(req.ParentLeaseToken)
 	} else {
-		leaseID, held, err = parentHoldings(d.ledger.Snapshot(), req.ParentRunID, req.ParentNodeID)
+		leaseID, held, holders, err = parentHoldings(d.ledger.Snapshot(), req.ParentRunID, req.ParentNodeID)
 	}
 	if err != nil {
 		d.mu.Unlock()
@@ -1321,6 +1322,11 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "parent", Policy: wingwire.PolicyFail})
 		return
 	}
+	// safety: the groups handed down stay held by their ancestor leases until this child is released, so a run
+	// that ends before its child does not let another run take a group the child still runs under.
+	if err := d.ledger.Pin(req.RunID, holders); err != nil {
+		d.cfg.logf("child attach: pin ancestor leases for %s: %v", req.RunID, err)
+	}
 	lease, _ := d.ledger.LeaseByID(leaseID)
 	c.runID = req.RunID
 	c.journalRunID = req.RunID
@@ -1361,9 +1367,9 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 // safety: a child attaches to the lease that holds its parent node's cores, so it never queues for the cores
 // its waiting parent holds, and it is handed every group its parent node, run and each run above them hold, so
 // a group it shares with an ancestor never waits on that ancestor. A sibling node's groups are not handed down.
-func parentHoldings(snap admission.Snapshot, runID, nodeID string) (admission.LeaseID, []string, error) {
+func parentHoldings(snap admission.Snapshot, runID, nodeID string) (admission.LeaseID, []string, []admission.LeaseID, error) {
 	if runID == "" || nodeID == "" {
-		return "", nil, fmt.Errorf("a child attach names both its parent run and node, got run %q node %q", runID, nodeID)
+		return "", nil, nil, fmt.Errorf("a child attach names both its parent run and node, got run %q node %q", runID, nodeID)
 	}
 	byRequest := map[string]admission.LeaseState{}
 	memberOf := map[string]admission.LeaseState{}
@@ -1384,11 +1390,15 @@ func parentHoldings(snap admission.Snapshot, runID, nodeID string) (admission.Le
 	case hasNodeHost:
 		target = nodeHost
 	default:
-		return "", nil, fmt.Errorf("parent run %s node %s holds no admission lease to attach to; "+
+		return "", nil, nil, fmt.Errorf("parent run %s node %s holds no admission lease to attach to; "+
 			"the node may have finished, or the parent ran without the admission daemon", runID, nodeID)
 	}
 	var held []string
+	var holders []admission.LeaseID
 	hold := func(le admission.LeaseState) {
+		if len(le.Claims) > 0 && !slices.Contains(holders, le.ID) {
+			holders = append(holders, le.ID)
+		}
 		for _, c := range le.Claims {
 			held = append(held, c.Key)
 		}
@@ -1400,7 +1410,7 @@ func parentHoldings(snap admission.Snapshot, runID, nodeID string) (admission.Le
 		hold(memberOf[ancestor])
 		hold(byRequest[wingwire.PlanSemaphoresParticipant(ancestor)])
 	}
-	return target.ID, held, nil
+	return target.ID, held, holders, nil
 }
 
 func leaseSemaphores(snap admission.Snapshot, id admission.LeaseID) []string {

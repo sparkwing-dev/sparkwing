@@ -58,9 +58,20 @@ type hostedAdmitter struct {
 	// safety: set by the run lease, which is granted before any node asks, so node requests read them unlocked.
 	attachToken  string
 	attachedHost bool
+	// safety: the groups the attach was handed, which the daemon keeps held by the ancestors for this run's
+	// life; a node that queued on one would wait on the parent that waits on it.
+	inherited []string
 }
 
 func (h *hostedAdmitter) Acquire(ctx context.Context, req wingwire.AdmissionRequest, onQueued func(wingwire.Queued)) (nodehost.Lease, error) {
+	if req.OwnerRunID != "" && len(h.inherited) > 0 {
+		req.Semaphores = slices.DeleteFunc(slices.Clone(req.Semaphores), func(c wingwire.SemaphoreClaim) bool {
+			return slices.Contains(h.inherited, c.Name)
+		})
+		if len(req.Semaphores) == 0 && (req.SemaphoresOnly || h.attachedHost) {
+			return &heldLease{token: h.attachToken, done: make(chan struct{})}, nil
+		}
+	}
 	switch {
 	case h.la.ParentNodeID != "" && req.OwnerRunID == "":
 		return h.attach(ctx, req)
@@ -163,7 +174,7 @@ func (h *hostedAdmitter) attach(ctx context.Context, req wingwire.AdmissionReque
 		warnHostedClose("admission client", cl.Close())
 		return nil, fmt.Errorf("local admission: attach to parent run %s node %s: %w", h.la.ParentRunID, h.la.ParentNodeID, err)
 	}
-	h.attachToken, h.attachedHost = lease.Token, leaseCarriesHost(lease)
+	h.attachToken, h.attachedHost, h.inherited = lease.Token, leaseCarriesHost(lease), lease.Semaphores
 	var extra []wingwire.SemaphoreClaim
 	for _, c := range req.Semaphores {
 		if !slices.Contains(lease.Semaphores, c.Name) {

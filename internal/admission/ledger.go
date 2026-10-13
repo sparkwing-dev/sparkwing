@@ -91,6 +91,9 @@ type lease struct {
 	claims      []claim
 	members     map[string]struct{}
 	parents     map[string]string
+	// safety: pins are members of other leases this lease's claims are handed down to, so the claims outlive
+	// the lease's own members until every one of them is released.
+	pins map[string]struct{}
 }
 
 type semaphore struct {
@@ -433,27 +436,71 @@ func (l *Ledger) Release(id LeaseID, memberID string) ([]Event, error) {
 		}
 		departed = parent
 	}
-	if len(le.members) > 0 {
+	var events []Event
+	for _, other := range l.sortedLeaseIDs() {
+		pinned := l.leases[other]
+		if _, ok := pinned.pins[memberID]; !ok {
+			continue
+		}
+		delete(pinned.pins, memberID)
+		if other != id && len(pinned.members) == 0 && len(pinned.pins) == 0 {
+			events = append(events, l.free(pinned))
+		}
+	}
+	if len(le.members) == 0 && len(le.pins) == 0 {
+		events = append(events, l.free(le))
+	}
+	if len(events) == 0 {
 		l.mustHoldInvariants()
 		return nil, nil
 	}
+	events = append(events, l.promote()...)
+	l.pruneOverrides()
+	l.mustHoldInvariants()
+	return events, nil
+}
 
-	delete(l.leases, id)
+func (l *Ledger) free(le *lease) Event {
+	delete(l.leases, le.id)
 	delete(l.tokens, le.token)
 	l.usedMilliCores -= le.milliCores
 	l.usedMemory -= le.memory
 	for _, c := range le.claims {
-		l.dropHold(c.key, id)
+		l.dropHold(c.key, le.id)
 	}
 	if le.burstCores {
 		l.restoredBurstLimit = 0
 	}
 	ev := l.newEvent(EventReleased, le.requestID)
-	ev.Lease = id
-	events := append([]Event{ev}, l.promote()...)
-	l.pruneOverrides()
+	ev.Lease = le.id
+	return ev
+}
+
+// Pin keeps each of leases, and the claims it holds, alive until memberID is
+// released, though the lease's own members leave first. An attached child
+// pins the ancestor leases whose concurrency groups it was handed.
+func (l *Ledger) Pin(memberID string, leases []LeaseID) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	own, ok := l.memberOf[memberID]
+	if !ok {
+		return fmt.Errorf("%w: %q", ErrUnknownMember, memberID)
+	}
+	for _, id := range leases {
+		le, ok := l.leases[id]
+		if !ok {
+			return fmt.Errorf("%w: %s", ErrUnknownLease, id)
+		}
+		if id == own {
+			continue
+		}
+		if le.pins == nil {
+			le.pins = map[string]struct{}{}
+		}
+		le.pins[memberID] = struct{}{}
+	}
 	l.mustHoldInvariants()
-	return events, nil
+	return nil
 }
 
 func (l *Ledger) Reattach(token string) (LeaseID, error) {
