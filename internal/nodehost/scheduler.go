@@ -42,6 +42,8 @@ type Config struct {
 	Heartbeat time.Duration
 	// Admission admits each node before it runs; nil admits every node at once.
 	Admission *Admission
+	// Debug holds the run's debug pauses and bounce requests.
+	Debug Debug
 }
 
 // Result is how one node ended.
@@ -136,11 +138,13 @@ func (r *Run) Add(ctx context.Context, nodes ...nodeproto.PlanNode) error {
 // part. Each part adds its Layer to the scheduler's list in one line.
 type Layer func(cfg *Config, next Executor) Executor
 
-// safety: the order is the envelope's nesting, outermost first: approvals and recovery, debug pauses,
-// admission, skip_if, memo, artifacts, caches, retries and timeouts, attempt closures, steps, expansion.
+// safety: the order is the envelope's nesting, outermost first: debug pauses, approvals and recovery,
+// admission, bounce, skip_if, memo, artifacts, caches, retries and timeouts, attempt closures, steps, expansion.
 var layers = []Layer{
+	debugLayer,
 	approvalsLayer,
 	admissionLayer,
+	bounceLayer,
 	artifactsLayer,
 	cachesLayer,
 	retryLayer,
