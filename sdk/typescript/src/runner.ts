@@ -12,11 +12,12 @@ import {
   lookupPipeline,
   Plan,
   resolveArgs,
+  type Closure,
+  type Failure,
   type Generator,
   type GitInfo,
   type Job,
   type NodeContext,
-  type Predicate,
   type RunContext,
   type Trigger,
 } from "./plan.ts";
@@ -42,8 +43,6 @@ interface EvalResult {
   value: unknown;
   error?: string;
 }
-
-type Closure = { kind: "skip_if"; job: Job; fn: Predicate } | { kind: "generator"; gen: Generator };
 
 interface Planned {
   plan: Plan;
@@ -116,7 +115,7 @@ class Session {
         return this.#plan(req);
       case "run_node": {
         const job = this.#job(req);
-        if (!job.body) throw new ProtocolError("bad_request", `node ${JSON.stringify(job.id)} has steps; run each with run_step`);
+        if (!job.body) throw new ProtocolError("bad_request", `node ${JSON.stringify(job.id)} has no body to run`);
         const result = await this.#invoke(req, job, undefined, job.body);
         if (result.outcome === "success") this.#nodeOutputs.set(job.id, result.output ?? null);
         return result;
@@ -126,7 +125,8 @@ class Session {
         const stepId = str(req, "step");
         const step = job.steps.find((s) => s.id === stepId);
         if (!step) throw new ProtocolError("unknown_step", `node ${JSON.stringify(job.id)} has no step ${JSON.stringify(stepId)}`);
-        const result = await this.#invoke(req, job, step.id, step.body);
+        const body = this.#current().run.dryRun && step.dryRunBody ? step.dryRunBody : step.body;
+        const result = await this.#invoke(req, job, step.id, body);
         if (result.outcome === "success") {
           const outputs = this.#stepOutputs.get(job.id) ?? new Map<string, unknown>();
           outputs.set(step.id, result.output);
@@ -178,21 +178,14 @@ class Session {
     }
     const closures = new Map<string, Closure>();
     this.#planned = { plan, run: ctx, closures };
-    this.#register(plan.jobs);
+    this.#register(plan.allJobs());
     return doc;
   }
 
   #register(jobs: Job[]): void {
     const { closures } = this.#current();
     for (const job of jobs) {
-      job.skipIfIds().forEach((id, i) =>
-        closures.set(id, {
-          kind: "skip_if",
-          job,
-          fn: job.skipIfs[i] as Predicate,
-        }),
-      );
-      for (const gen of job.generators) closures.set(gen.id, { kind: "generator", gen });
+      for (const c of job.closures()) closures.set(c.id, c);
     }
   }
 
@@ -201,15 +194,10 @@ class Session {
     const closure = this.#current().closures.get(id);
     if (!closure) throw new ProtocolError("unknown_closure", `closure ${JSON.stringify(id)} is not in this process's plan`);
     if (closure.kind === "generator") return this.#expand(req, closure.gen);
-    const ctx = this.#context(req, closure.job, undefined);
+    const input = closure.kind === "after_run" ? afterRunError(req["input"]) : undefined;
+    const ctx = this.#context(req, closure.job, closure.step?.id);
     try {
-      const value = await closure.fn(ctx);
-      if (typeof value !== "boolean")
-        return {
-          value: null,
-          error: `skip_if closure ${id} returned ${typeof value}, not a boolean`,
-        };
-      return { value };
+      return { value: await callClosure(closure, ctx, input) };
     } catch (err) {
       return { value: null, error: messageOf(err) };
     } finally {
@@ -256,6 +244,8 @@ class Session {
       throw new ProtocolError("bad_request", "attempt must be an integer of at least 1");
     }
     const ctx = this.#context(req, job, step, attempt);
+    const failure = failureOf(req["failure"]);
+    if (failure) ctx.failure = failure;
     try {
       ctx.signal.throwIfAborted();
       const output = await body(ctx);
@@ -325,6 +315,46 @@ function runContext(v: unknown): Omit<RunContext, "pipeline" | "args" | "log"> {
   if (typeof run["trigger"] === "object" && run["trigger"] !== null) out.trigger = run["trigger"] as Trigger;
   if (typeof run["git"] === "object" && run["git"] !== null) out.git = run["git"] as GitInfo;
   return out;
+}
+
+// safety: a closure's own throw, or a value of the wrong type, is the closure
+// failing, which eval answers in a successful reply.
+async function callClosure(c: Exclude<Closure, { kind: "generator" }>, ctx: NodeContext, input: Error | undefined): Promise<unknown> {
+  switch (c.kind) {
+    case "skip_if": {
+      const v: unknown = await c.fn(ctx);
+      if (typeof v !== "boolean") throw new Error(`skip_if closure ${c.id} returned ${typeof v}, not a boolean`);
+      return v;
+    }
+    case "cache_key": {
+      const v: unknown = await c.fn(ctx);
+      if (v !== null && typeof v !== "string") throw new Error(`cache_key closure ${c.id} returned ${typeof v}, not a string or null`);
+      return v;
+    }
+    case "after_run":
+      await c.fn(ctx, input);
+      return null;
+    default:
+      await c.fn(ctx);
+      return null;
+  }
+}
+
+function afterRunError(v: unknown): Error | undefined {
+  const input = typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
+  if (input["outcome"] === "success") return undefined;
+  if (input["outcome"] !== "failed") throw new ProtocolError("bad_request", "after_run input needs an outcome of success or failed");
+  return new Error(typeof input["error"] === "string" ? input["error"] : "");
+}
+
+function failureOf(v: unknown): Failure | undefined {
+  if (typeof v !== "object" || v === null) return undefined;
+  const f = v as Record<string, unknown>;
+  return {
+    node: String(f["node"] ?? ""),
+    stage: f["stage"] === "verify" ? "verify" : "action",
+    message: String(f["message"] ?? ""),
+  };
 }
 
 function messageOf(err: unknown): string {

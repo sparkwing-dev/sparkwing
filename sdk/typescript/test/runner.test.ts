@@ -482,3 +482,34 @@ test("cancelling a step aborts its pending route request", { timeout: 10_000 }, 
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test("a dry run runs a step's dry-run body; an approval has no body; after_run needs an outcome; cache_key returns a string or null", async () => {
+  definePipeline({
+    name: "dsl",
+    plan(p) {
+      const j = p.job("j");
+      j.step("apply", () => "applied")
+        .dryRun(() => "planned")
+        .result();
+      p.approval("gate", { message: "ship?" });
+      p.job("memo", () => undefined)
+        .memoize((() => 7) as unknown as () => string)
+        .afterRun(() => undefined);
+    },
+  });
+  const dsl = { id: "p", op: "plan", pipeline: "dsl", args: {}, run: { ...run, dry_run: true } };
+  const out = await converse([
+    dsl,
+    { id: "s", op: "run_step", node: "j", step: "apply", attempt: 1 },
+    { id: "g", op: "run_node", node: "gate", attempt: 1 },
+    { id: "a", op: "eval", closure: "memo/after_run/0", input: { outcome: "maybe" } },
+    { id: "k", op: "eval", closure: "memo/cache_key/0" },
+  ]);
+  assert.deepEqual(out.reply("s")?.["result"], { outcome: "success", output: "planned" });
+  assert.equal((out.reply("g")?.["error"] as { code: string }).code, "bad_request");
+  assert.equal((out.reply("a")?.["error"] as { code: string }).code, "bad_request");
+  assert.deepEqual(out.reply("k")?.["result"], {
+    value: null,
+    error: "cache_key closure memo/cache_key/0 returned number, not a string or null",
+  });
+});

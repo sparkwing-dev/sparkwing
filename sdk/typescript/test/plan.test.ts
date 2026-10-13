@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { Plan, resolveArgs } from "../src/plan.ts";
+import { ConcurrencyGroup, dirCache, goModulesCache, Plan, resolveArgs } from "../src/plan.ts";
 
 test("the plan document carries deps, modifiers, steps and closure ids", () => {
   const plan = new Plan();
@@ -69,10 +69,10 @@ test("duplicate ids, bad ids, empty jobs and mixed body and steps are refused", 
 test("retry and timeout reject values the schema cannot carry", () => {
   const plan = new Plan();
   const j = plan.job("a", () => undefined);
-  assert.throws(() => j.retry(-1), /non-negative integer/);
+  assert.throws(() => j.retry(-1), /retry attempts must be an integer of at least 0/);
   assert.throws(() => j.retry(1, { backoffMs: 1.5 }), /backoff/);
-  assert.throws(() => j.timeout(0), /positive integer/);
-  assert.throws(() => j.timeout(2.5), /positive integer/);
+  assert.throws(() => j.timeout(0), /timeout in milliseconds must be an integer of at least 1/);
+  assert.throws(() => j.timeout(2.5), /at least 1/);
 });
 
 test("a job has at most one result step", () => {
@@ -118,4 +118,91 @@ test("args are checked against the declared flags and take their defaults", () =
   assert.match(String(resolveArgs(def, { env: "dev", count: "1.5" })), /not an integer/);
   assert.match(String(resolveArgs(def, { env: "dev", fast: "yes" })), /not true or false/);
   assert.match(String(resolveArgs(def, { env: "dev", ghost: "1" })), /no flag --ghost/);
+});
+
+test("the plan document carries caches, memo, approvals, recovery, concurrency, resources and step flags", () => {
+  const plan = new Plan();
+  const deploys = new ConcurrencyGroup("deploys", { capacity: 2, scope: "run", onLimit: "queue", queueTimeoutMs: 5000 });
+  plan.concurrency(deploys).concurrency(new ConcurrencyGroup("fleet")).resources({ cores: 2 });
+  const gate = plan.approval("gate", { message: "ship?", timeoutMs: 60_000, onTimeout: "deny" });
+  const build = plan
+    .job("build", () => undefined)
+    .needs(gate)
+    .cacheDir(goModulesCache(), dirCache("./web/node_modules/", "web/package-lock.json"))
+    .memoize(() => "k", { ttlMs: 100 * 86_400_000 })
+    .concurrency(deploys, 2)
+    .resources({ cores: 1.5, memoryGB: 0.5 })
+    .requires("linux", "")
+    .retry(2, { auto: true })
+    .env("CI", "1")
+    .onFailure("build-recover", () => undefined);
+  const checks = plan.job("test").needs(build).failurePolicy("collect-all");
+  checks
+    .step("unit", () => undefined)
+    .skipIf(() => false)
+    .continueOnError();
+  checks
+    .step("cleanup", () => undefined)
+    .finally()
+    .safeWithoutDryRun();
+
+  const doc = plan.toDoc("ship", "run-1");
+  assert.deepEqual(doc.plan_concurrency_groups, [
+    { key: "r:5:run-1deploys", cost: 1, capacity: 2, on_limit: "queue", queue_timeout_ms: 5000 },
+    { key: "g:fleet", cost: 1 },
+  ]);
+  assert.deepEqual(doc.plan_concurrency, doc.plan_concurrency_groups?.[0]);
+  assert.deepEqual(doc.plan_resources, { cores: 2 });
+  assert.deepEqual(
+    doc.nodes.map((n) => n.id),
+    ["gate", "build", "test", "build-recover"],
+  );
+  assert.deepEqual(doc.nodes[0], { id: "gate", deps: [], approval: { message: "ship?", timeout_ms: 60_000, on_timeout: "deny" } });
+  assert.deepEqual(doc.nodes[1], {
+    id: "build",
+    deps: ["gate"],
+    env: { CI: "1" },
+    modifiers: {
+      cache: true,
+      cache_ttl_ms: 35 * 86_400_000,
+      conc_group: "deploys",
+      conc_capacity: 2,
+      conc_cost: 2,
+      conc_scope: "run",
+      conc_on_limit: "queue",
+      conc_queue_timeout_ms: 5000,
+      res_cores: 1.5,
+      res_memory_bytes: 2 ** 29,
+      runs_on: ["linux"],
+      retry: 2,
+      retry_auto: true,
+      on_failure: "build-recover",
+    },
+    caches: [
+      { name: "go-modules", resolver: "gomod", key_files: ["go.sum"] },
+      { name: "node_modules", path: "./web/node_modules/", key_scope: "web/node_modules", key_files: ["web/package-lock.json"] },
+    ],
+    memo_key: { closure: "build/cache_key/0" },
+    closures: { cache_key: "build/cache_key/0" },
+  });
+  assert.deepEqual(doc.nodes[2]?.work, {
+    steps: [
+      { id: "unit", has_skip_if: true, continue_on_error: true, closures: { skip_if: ["test/step/unit/skip_if/0"] } },
+      { id: "cleanup", finally: true, safe_without_dry_run: true },
+    ],
+    failure_policy: "collect-all",
+  });
+  assert.deepEqual(doc.nodes[3], { id: "build-recover", deps: [], on_failure_of: "build" });
+});
+
+test("costs over capacity, plan-level box scope, bad resources and colliding recovery ids are refused", () => {
+  const plan = new Plan();
+  const j = plan.job("a", () => undefined);
+  assert.throws(() => j.concurrency(new ConcurrencyGroup("g"), 2), /exceeds group g capacity 1/);
+  assert.throws(() => plan.concurrency(new ConcurrencyGroup("g", { scope: "box" })), /box scope/);
+  assert.throws(() => j.resources({ cores: 0 }), /positive, finite/);
+  assert.throws(() => j.cacheDir(dirCache("d")), /at least one key file/);
+  plan.job("b", () => undefined);
+  j.onFailure("b", () => undefined);
+  assert.throws(() => plan.toDoc("p", "r"), /duplicate job b/);
 });
