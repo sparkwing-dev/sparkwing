@@ -16,7 +16,7 @@ func TestOrdinaryTestStepsReusePassingResults(t *testing.T) {
 	}
 	for name, run := range map[string]func(context.Context) error{
 		"gate": runTest,
-		"test": (&Test{}).run,
+		"test": (&Test{}).run(testGoCommand(currentHost())),
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := gateFixtureRepo(t)
