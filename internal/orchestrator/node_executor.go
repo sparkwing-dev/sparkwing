@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/artifacts"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/nodemetrics"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -865,7 +866,8 @@ func (r *NodeExecutor) publishArtifacts(ctx context.Context, node *sparkwing.Job
 	if workspace == "" {
 		return "", fmt.Errorf("no workspace directory to resolve outputs against")
 	}
-	return captureArtifacts(ctx, r.backends.Artifact, workspace, globs)
+	warn := func(msg string) { sparkwing.LoggerFromContext(ctx).Log("warn", msg) }
+	return artifacts.Capture(ctx, r.backends.Artifact, workspace, globs, warn)
 }
 
 func (r *NodeExecutor) stageArtifacts(ctx context.Context, runID string, node *sparkwing.JobNode) (int, error) {
@@ -877,7 +879,11 @@ func (r *NodeExecutor) stageArtifacts(ctx context.Context, runID string, node *s
 	if workspace == "" {
 		return 0, fmt.Errorf("no workspace directory to stage consumed artifacts into")
 	}
-	return stageConsumedArtifacts(ctx, r.backends.Artifact, r.backends.State, runID, workspace, edges)
+	var out []artifacts.Edge
+	for _, e := range edges {
+		out = append(out, artifacts.Edge{Producer: e.Producer, Into: e.Into})
+	}
+	return artifacts.Stage(ctx, r.backends.Artifact, r.backends.State, runID, workspace, out)
 }
 
 func nodeWorkspace() string {
