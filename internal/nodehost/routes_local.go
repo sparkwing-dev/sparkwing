@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // LocalOutputs answers the output routes from this machine's own runs store,
@@ -46,7 +47,7 @@ func (s *Server) serveLocalNodeOutput(w http.ResponseWriter, r *http.Request, g 
 	case row.Status != "done":
 		s.writeError(w, http.StatusConflict, "not_ready", "node "+quote(node)+" has not finished")
 		return
-	case row.Outcome != "success":
+	case row.Outcome != string(sparkwing.Success) && row.Outcome != string(sparkwing.Cached):
 		s.writeError(w, http.StatusNotFound, "no_output", "node "+quote(node)+" finished without succeeding")
 		return
 	}

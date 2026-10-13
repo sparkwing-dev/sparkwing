@@ -46,14 +46,15 @@ func localRuns() *localStore {
 		nodes: map[string]*store.Node{
 			"run-1/build":   node("build", "done", "success"),
 			"run-1/test":    node("test", "done", "success", "build"),
-			"run-1/deploy":  node("deploy", "running", "", "test", "lint", "flaky", "slow"),
+			"run-1/deploy":  node("deploy", "running", "", "test", "lint", "flaky", "slow", "memo"),
+			"run-1/memo":    node("memo", "done", "cached"),
 			"run-1/lint":    node("lint", "done", "success"),
 			"run-1/flaky":   node("flaky", "done", "failed"),
 			"run-1/slow":    node("slow", "running", ""),
 			"run-1/sibling": node("sibling", "done", "success"),
 			"run-0/build":   node("build", "done", "success"),
 		},
-		outputs: map[string]string{"run-1/build": `{"tag":"v1"}`, "run-0/build": `"old"`},
+		outputs: map[string]string{"run-1/build": `{"tag":"v1"}`, "run-1/memo": `"reused"`, "run-0/build": `"old"`},
 	}
 }
 
@@ -64,6 +65,7 @@ func TestLocalOutputsServeADependencysOutputWithoutAController(t *testing.T) {
 		output           any
 	}{
 		{name: "transitive dependency", path: outputPath("build"), status: http.StatusOK, output: map[string]any{"tag": "v1"}},
+		{name: "memo hit", path: outputPath("memo"), status: http.StatusOK, output: "reused"},
 		{name: "no output recorded", path: outputPath("lint"), status: http.StatusOK, output: nil},
 		{name: "not a dependency", path: outputPath("sibling"), status: http.StatusForbidden, code: "not_dependency"},
 		{name: "unknown", path: outputPath("nope"), status: http.StatusNotFound, code: "unknown_node"},
