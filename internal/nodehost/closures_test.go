@@ -45,6 +45,7 @@ func TestClosures(t *testing.T) {
 		Run:   nodeproto.RunContext{RunID: "run-hooks"},
 		State: openStore(t), Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
 		Attempts: attempts,
+		Debug:    Debug{PauseBefore: []string{"skipped"}, PauseTimeout: time.Millisecond},
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
@@ -71,6 +72,13 @@ func TestClosures(t *testing.T) {
 		}
 		if got := trace("skipped"); got != "" {
 			t.Errorf("the skipped node's body ran: %q", got)
+		}
+	})
+
+	t.Run("APauseBeforeComesBeforeSkipIf", func(t *testing.T) {
+		pauses, err := cfg.State.(*store.Store).ListDebugPauses(t.Context(), "run-hooks")
+		if err != nil || len(pauses) != 1 || pauses[0].NodeID != "skipped" || pauses[0].Reason != store.PauseReasonBefore {
+			t.Errorf("pauses %+v err %v, want the skipped node paused before", pauses, err)
 		}
 	})
 
