@@ -565,8 +565,8 @@ func TestProtocolTriggerSourceNamesEveryRecordedSource(t *testing.T) {
 }
 
 // safety: a trigger reclaimed after its runner stopped resumes the run its
-// rows record: a finished node keeps its result and is not run again, and an
-// unfinished one, its claim reaped, runs on the new host.
+// rows record: a finished node keeps its result and is not run again, and one
+// the controller's lease recovery failed as agent_lost runs on the new host.
 func TestTriggerHost_AReclaimedTriggerResumesItsRun(t *testing.T) {
 	hold, pids := heldNodePID(t)
 	h := newHostedTrigger(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "hold": hold})
@@ -590,8 +590,12 @@ func TestTriggerHost_AReclaimedTriggerResumesItsRun(t *testing.T) {
 	if _, err := h.st.DB().ExecContext(t.Context(), `UPDATE nodes SET lease_expires_at = 1 WHERE run_id = ? AND node_id = 'held'`, h.trig.ID); err != nil {
 		t.Fatal(err)
 	}
-	if nodes, err := h.st.ReapExpiredNodeClaims(t.Context()); err != nil || len(nodes) != 1 {
-		t.Fatalf("reaped node claims = %v, %v; want held's", nodes, err)
+	// safety: the controller's own lease recovery, which fails a lost holder's node as agent_lost.
+	if recovered, err := store.Maintenance.RecoverExpiredNodeClaims(h.st, t.Context()); err != nil || len(recovered) != 1 {
+		t.Fatalf("recovered node claims = %+v, %v; want held's", recovered, err)
+	}
+	if n := h.node(t, "held"); n.FailureReason != store.FailureAgentLost {
+		t.Fatalf("held after recovery = %s/%s (%s), want failed as agent_lost", n.Status, n.Outcome, n.FailureReason)
 	}
 	if triggers, err := store.Maintenance.ReapExpiredTriggers(h.st, t.Context()); err != nil || len(triggers) != 1 {
 		t.Fatalf("reaped triggers = %v, %v; want this run's", triggers, err)
@@ -636,15 +640,17 @@ func TestTriggerHost_MasksTheProxyCredentialsANodeReceives(t *testing.T) {
 	dir := t.TempDir()
 	envOut, echo := filepath.Join(dir, "env"), filepath.Join(dir, "echo")
 	values := map[string]string{
-		"GOPROXY":             "https://cache-reader:go-proxy-password@cache.invalid/proxy/golang|https://proxy.golang.org,direct",
-		"npm_config_registry": "https://cache-reader:npm-proxy-password@cache.invalid/proxy/npm",
-		"PIP_INDEX_URL":       "https://pip-proxy-token@cache.invalid/proxy/pypi/simple",
+		"GOPROXY":             "https://a:go-one-password@one.invalid/golang|https://b:go-two-password@two.invalid/golang,direct",
+		"npm_config_registry": "https://cache-reader:npm-prefix,npm-suffix@cache.invalid/proxy/npm",
+		"PIP_INDEX_URL":       "https://cache-reader:s%61fe-pip-password@cache.invalid/proxy/pypi/simple",
 	}
 	var echoed []string
 	for name, value := range values {
 		t.Setenv(name, value)
 		echoed = append(echoed, name+"="+value)
 	}
+	// safety: a node may log one GOPROXY member on its own, or a password decoded.
+	echoed = append(echoed, "https://a:go-one-password@one.invalid/golang", "safe-pip-password")
 	if err := os.WriteFile(echo, []byte(strings.Join(echoed, " ")), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -671,7 +677,7 @@ func TestTriggerHost_MasksTheProxyCredentialsANodeReceives(t *testing.T) {
 			t.Errorf("the node did not receive %s", name)
 		}
 	}
-	for _, secret := range []string{"go-proxy-password", "npm-proxy-password", "pip-proxy-token"} {
+	for _, secret := range []string{"go-one-password", "go-two-password", "npm-prefix,npm-suffix", "npm-suffix", "s%61fe-pip-password", "safe-pip-password"} {
 		if strings.Contains(string(logs), secret) {
 			t.Errorf("the build log shows %s", secret)
 		}

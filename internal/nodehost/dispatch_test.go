@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,7 +19,7 @@ func hostDispatched(t *testing.T, ctx context.Context, st *store.Store, doc node
 	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	cfg := Config{Dispatch: dispatch}
+	cfg := Config{Dispatch: dispatch, ClaimedRowPoll: 5 * time.Millisecond}
 	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest)}
 	res := RunResult{RunID: testRunID, Nodes: map[string]Result{}}
 	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg)}
@@ -143,9 +144,6 @@ func TestDispatchCancelledRunCancelsTheOutstandingNode(t *testing.T) {
 // host waits for that holder's result and takes it as the node's, rather than
 // fail the run with its own refused dispatch.
 func TestDispatchAdoptsTheResultOfTheHolderThatWonTheClaim(t *testing.T) {
-	prev := claimedRowPoll
-	claimedRowPoll = 5 * time.Millisecond
-	t.Cleanup(func() { claimedRowPoll = prev })
 	st := openStore(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
@@ -174,5 +172,53 @@ func TestDispatchAdoptsTheResultOfTheHolderThatWonTheClaim(t *testing.T) {
 	}
 	if row := nodeRow(t, st, "build"); row.Outcome != string(sparkwing.Success) || row.ClaimedBy != "pool:other" {
 		t.Fatalf("build row = %s/%s claimed by %q, want the holder's success", row.Status, row.Outcome, row.ClaimedBy)
+	}
+}
+
+// safety: a holder that died leaves a claim whose lease lapses, and without a
+// reaper nothing clears it, so the run host stops waiting once the lease is
+// gone rather than block the run forever.
+func TestDispatchStopsWaitingOnAHolderWhoseLeaseLapsed(t *testing.T) {
+	st := openStore(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "build"}}},
+		func(ctx context.Context, n *NodeRun) Result {
+			if _, err := st.ClaimNamedNode(ctx, store.ClaimIdentity{}, n.Run.ID, n.Plan.ID, "pool:dead", time.Millisecond, store.NamedClaimOptions{}); err != nil {
+				t.Errorf("claim: %v", err)
+			}
+			return Result{Outcome: sparkwing.Failed, Err: store.ErrLockHeld}
+		})
+	if ctx.Err() != nil || res.Status != "failed" {
+		t.Fatalf("run = %+v (ctx %v), want it failed without waiting out the test", res, ctx.Err())
+	}
+}
+
+// safety: a resumed run keeps an earlier host's result only for the node it
+// plans now; a node planned differently fails the run as plan drift.
+func TestResumeRefusesARowPlannedUnderAnotherSpec(t *testing.T) {
+	st := openStore(t)
+	ctx := t.Context()
+	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: testRunID, NodeID: "build", Status: "pending", SpecHash: "sha256:old"}); err != nil {
+		t.Fatal(err)
+	}
+	run := &Run{ID: testRunID, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest)}
+	s := &scheduler{run: run, results: map[string]Result{}, started: map[string]bool{}, resume: true}
+	err := s.add(ctx, ctx, []nodeproto.PlanNode{{ID: "build", SpecHash: "sha256:new"}})
+	var perr *nodeproto.Error
+	if !errors.As(err, &perr) || perr.Code != nodeproto.CodePlanDrift {
+		t.Fatalf("add = %v, want plan_drift", err)
+	}
+}
+
+// safety: a resumed node's claim is what keeps it from running twice, so a
+// host that dispatches nothing cannot resume.
+func TestResumeNeedsDispatch(t *testing.T) {
+	_, err := Execute(t.Context(), Config{Run: nodeproto.RunContext{RunID: testRunID}, Resume: true, State: openStore(t)})
+	if err == nil || !strings.Contains(err.Error(), "Resume needs Dispatch") {
+		t.Fatalf("Execute = %v, want Resume refused without Dispatch", err)
 	}
 }

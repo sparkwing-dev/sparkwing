@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -138,21 +139,34 @@ func podSessionEnv(masker *secrets.Masker) []string {
 	return env
 }
 
-// safety: GOPROXY lists several URLs split by commas and pipes, so each one's userinfo is masked.
+// safety: the raw value is scanned for every `://userinfo@`, with no list
+// parsing a comma in a password could break, and each userinfo, its password
+// and their decoded forms are masked, so a member logged on its own or a
+// decoded credential shows as neither.
 func maskProxyCredentials(masker *secrets.Masker, value string) {
-	for _, part := range strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == '|' }) {
-		u, err := url.Parse(strings.TrimSpace(part))
-		if err != nil || u.User == nil {
-			continue
+	matches := proxyUserinfo.FindAllStringSubmatch(value, -1)
+	if len(matches) == 0 {
+		return
+	}
+	masker.Register(value)
+	for _, m := range matches {
+		parts := []string{m[1]}
+		if _, password, ok := strings.Cut(m[1], ":"); ok {
+			parts = append(parts, password)
 		}
-		masker.Register(value)
-		if password, ok := u.User.Password(); ok && password != "" {
-			masker.Register(password)
-		} else {
-			masker.Register(u.User.Username())
+		for _, raw := range parts {
+			if raw == "" {
+				continue
+			}
+			masker.Register(raw)
+			if decoded, err := url.PathUnescape(raw); err == nil {
+				masker.Register(decoded)
+			}
 		}
 	}
 }
+
+var proxyUserinfo = regexp.MustCompile(`://([^/@\s]+)@`)
 
 // PipelineRequires is the placement labels the pipeline's entry in the
 // sparkwing.yaml found from dir upward requires; none when there is no such

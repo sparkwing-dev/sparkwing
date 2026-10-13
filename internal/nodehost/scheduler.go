@@ -60,8 +60,14 @@ type Config struct {
 	ParentRunID, RetryOf, RetrySource string
 	// Resume reuses the node rows an earlier host of this run left, as a
 	// trigger reclaimed after its runner stopped has: a finished node keeps
-	// its result and an unfinished one runs again.
+	// its result, and an unfinished one, or one whose holder was lost, runs
+	// again. A row planned under another spec_hash fails the run with
+	// plan_drift. It needs Dispatch, whose claims keep a node from running
+	// twice.
 	Resume bool
+	// ClaimedRowPoll is how often a dispatched node's row is read while
+	// another holder claims it; zero means 5 seconds.
+	ClaimedRowPoll time.Duration
 }
 
 // Result is how one node ended.
@@ -203,6 +209,9 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 	}
 	if cfg.Run.RunID == "" {
 		return RunResult{}, errors.New("nodehost: the run has no id")
+	}
+	if cfg.Resume && cfg.Dispatch == nil {
+		return RunResult{}, errors.New("nodehost: Resume needs Dispatch, whose claims keep a resumed node from running twice")
 	}
 	if cfg.Run.StartedAt.IsZero() {
 		cfg.Run.StartedAt = time.Now().UTC()
@@ -544,7 +553,7 @@ func (s *scheduler) add(ctx, writeCtx context.Context, nodes []nodeproto.PlanNod
 		return err
 	}
 	for i, n := range nodes {
-		reused, err := s.reuseRow(writeCtx, n.ID)
+		reused, err := s.reuseRow(writeCtx, n)
 		if err == nil && !reused {
 			err = s.run.State.CreateNode(writeCtx, pendingRow(s.run, n))
 		}
@@ -564,26 +573,44 @@ func (s *scheduler) add(ctx, writeCtx context.Context, nodes []nodeproto.PlanNod
 }
 
 // safety: a resumed run's finished node keeps the result its row records and
-// is never run or written again; an unfinished row is run again as it stands.
-func (s *scheduler) reuseRow(ctx context.Context, id string) (bool, error) {
+// is never run or written again; an unfinished row, or one the reaper failed
+// because its holder was lost, is run again. A row planned under another
+// spec_hash is refused, since a trigger must plan the same run every time.
+func (s *scheduler) reuseRow(ctx context.Context, n nodeproto.PlanNode) (bool, error) {
 	if !s.resume {
 		return false, nil
 	}
-	row, err := s.run.State.GetNode(ctx, s.run.ID, id)
+	row, err := s.run.State.GetNode(ctx, s.run.ID, n.ID)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		return false, nil
 	case err != nil:
 		return false, err
+	case row.SpecHash != n.SpecHash:
+		return false, &nodeproto.Error{Code: nodeproto.CodePlanDrift, Message: fmt.Sprintf(
+			"node %s was planned as %s by an earlier host of this run and as %s now; plan code must be deterministic for a run",
+			n.ID, row.SpecHash, n.SpecHash)}
 	}
-	if row.Status == "done" && row.Outcome != "" {
-		res := Result{Outcome: sparkwing.Outcome(row.Outcome), Reason: row.FailureReason, recorded: true}
-		if row.Error != "" {
-			res.Err = errors.New(row.Error)
+	if row.Status != "done" || row.Outcome == "" {
+		return true, nil
+	}
+	if row.FailureReason == store.FailureAgentLost {
+		if r, ok := s.run.State.(lostNodeResetter); ok && r.ResetNodeForAutoRetry(ctx, s.run.ID, n.ID) == nil {
+			return true, nil
 		}
-		s.started[id], s.results[id] = true, res
 	}
+	res := Result{Outcome: sparkwing.Outcome(row.Outcome), Reason: row.FailureReason, recorded: true}
+	if row.Error != "" {
+		res.Err = errors.New(row.Error)
+	}
+	s.started[n.ID], s.results[n.ID] = true, res
 	return true, nil
+}
+
+// safety: the store reopens a node whose holder was lost only for the run's own trigger holder, and only while no
+// agent-loss retry run took the run over, so the node never runs in both.
+type lostNodeResetter interface {
+	ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error
 }
 
 func pendingRow(run *Run, n nodeproto.PlanNode) store.Node {

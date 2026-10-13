@@ -1,6 +1,7 @@
 package nodehost
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"time"
@@ -17,9 +18,9 @@ import (
 var dispatchLayers = []Layer{debugLayer, skipIfLayer, approvalsLayer, memoLayer, admissionLayer}
 
 func dispatchChain(cfg *Config) Executor {
-	dispatch := cfg.Dispatch
+	dispatch, poll := cfg.Dispatch, cmp.Or(cfg.ClaimedRowPoll, defaultClaimedRowPoll)
 	exec := func(ctx context.Context, n *NodeRun) Result {
-		return adoptDispatchedRow(ctx, n, dispatch(ctx, n))
+		return adoptDispatchedRow(ctx, n, dispatch(ctx, n), poll)
 	}
 	for i := len(dispatchLayers) - 1; i >= 0; i-- {
 		exec = dispatchLayers[i](cfg, exec)
@@ -31,18 +32,19 @@ func dispatchChain(cfg *Config) Executor {
 // so the row is the result and finish leaves it alone. A row another holder
 // still claims, as one a stopped run host's dispatch left running is, is that
 // holder's to finish: the host waits for its result, and finishes the row
-// only once it is unclaimed, as the reaper leaves a claim whose lease lapsed.
-func adoptDispatchedRow(ctx context.Context, n *NodeRun, res Result) Result {
+// only once no live claim holds it, as when the holder died and its lease
+// lapsed.
+func adoptDispatchedRow(ctx context.Context, n *NodeRun, res Result, poll time.Duration) Result {
 	readCtx := context.WithoutCancel(ctx)
 	row, err := n.Run.State.GetNode(readCtx, n.Run.ID, n.Plan.ID)
-	if err == nil && row != nil && row.Claimed && !rowTerminal(row) {
-		row, err = awaitClaimedRow(ctx, n)
+	if err == nil && row != nil && liveClaim(row) && !rowTerminal(row) {
+		row, err = awaitClaimedRow(ctx, n, poll)
 	}
 	switch {
 	case err != nil || row == nil:
 		return res
 	case !rowTerminal(row):
-		res.recorded = row.Claimed
+		res.recorded = liveClaim(row)
 		return res
 	}
 	res.Outcome, res.Reason, res.recorded = sparkwing.Outcome(row.Outcome), row.FailureReason, true
@@ -55,11 +57,11 @@ func adoptDispatchedRow(ctx context.Context, n *NodeRun, res Result) Result {
 }
 
 // perf: a holder may run for hours, so its row is read every few seconds rather than at the admission poll.
-var claimedRowPoll = 5 * time.Second
+const defaultClaimedRowPoll = 5 * time.Second
 
 // safety: a cancelled run stops waiting and leaves the row to its holder.
-func awaitClaimedRow(ctx context.Context, n *NodeRun) (*store.Node, error) {
-	tick := time.NewTicker(claimedRowPoll)
+func awaitClaimedRow(ctx context.Context, n *NodeRun, poll time.Duration) (*store.Node, error) {
+	tick := time.NewTicker(poll)
 	defer tick.Stop()
 	for {
 		select {
@@ -68,7 +70,7 @@ func awaitClaimedRow(ctx context.Context, n *NodeRun) (*store.Node, error) {
 		case <-tick.C:
 		}
 		row, err := n.Run.State.GetNode(ctx, n.Run.ID, n.Plan.ID)
-		if err == nil && (rowTerminal(row) || !row.Claimed) {
+		if err == nil && (rowTerminal(row) || !liveClaim(row)) {
 			return row, nil
 		}
 		if err != nil && ctx.Err() == nil {
@@ -78,3 +80,8 @@ func awaitClaimedRow(ctx context.Context, n *NodeRun) (*store.Node, error) {
 }
 
 func rowTerminal(row *store.Node) bool { return row.Status == "done" && row.Outcome != "" }
+
+// safety: a claim whose lease lapsed holds nothing, so a holder that died without a reaper never blocks the run.
+func liveClaim(row *store.Node) bool {
+	return row.Claimed && (row.LeaseExpiresAt == nil || row.LeaseExpiresAt.After(time.Now()))
+}

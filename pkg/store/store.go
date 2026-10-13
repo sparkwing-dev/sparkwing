@@ -2726,6 +2726,10 @@ func (t *Tenant) markNodeReady(ctx context.Context, runID, nodeID string, policy
 	return tx.Commit()
 }
 
+// ResetNodeForAutoRetry returns a failed node to pending so it runs again.
+// A node whose holder was lost (agent_lost) resets only for its run's
+// trigger holder, resuming the run, and only while no agent-loss retry run
+// took the run over.
 func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error {
 	return s.defaultTenant().ResetNodeForAutoRetry(ctx, runID, nodeID)
 }
@@ -2740,7 +2744,8 @@ func (t *Tenant) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string
 	if _, nodeClaim := NodeClaimFenceFromContext(ctx); nodeClaim {
 		return ErrLockHeld
 	}
-	if _, triggerClaim := TriggerClaimFenceFromContext(ctx); triggerClaim {
+	_, triggerClaim := TriggerClaimFenceFromContext(ctx)
+	if triggerClaim {
 		if err := t.s.assertNodeMutationFenceTx(ctx, tx, t.team, runID, nodeID); err != nil {
 			return err
 		}
@@ -2758,7 +2763,21 @@ func (t *Tenant) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string
 	if status == nodeStatusPending && outcome == "" && !claimedBy.Valid {
 		return tx.Commit()
 	}
-	if status != nodeStatusDone || outcome != "failed" || failureReason == FailureAgentLost {
+	// safety: a node whose holder was lost stays failed when an agent-loss retry run took its run over;
+	// otherwise the run's own trigger holder, resuming the run, may run it again.
+	lostReset := ""
+	if failureReason == FailureAgentLost {
+		var retried int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_loss_retries WHERE team = ? AND source_run_id = ?`,
+			string(t.team), runID).Scan(&retried); err != nil {
+			return err
+		}
+		if !triggerClaim || retried > 0 {
+			return ErrLockHeld
+		}
+		lostReset = FailureAgentLost
+	}
+	if status != nodeStatusDone || outcome != "failed" {
 		return ErrLockHeld
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM node_steps WHERE team = ? AND run_id = ? AND node_id = ?`, string(t.team), runID, nodeID); err != nil {
@@ -2786,8 +2805,8 @@ func (t *Tenant) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string
        executor_location = '', execution_started_at = NULL, reservation_id = '', status_detail = '', last_heartbeat = NULL,
        credit_charged_through = 0,
        failure_reason = '', exit_code = NULL, annotations_json = '[]', summary = '', artifact_manifest = ''
- WHERE team = ? AND run_id = ? AND node_id = ? AND status = ? AND outcome = ? AND failure_reason != ?`,
-		nodeStatusPending, string(t.team), runID, nodeID, nodeStatusDone, "failed", FailureAgentLost)
+ WHERE team = ? AND run_id = ? AND node_id = ? AND status = ? AND outcome = ? AND (failure_reason != ? OR failure_reason = ?)`,
+		nodeStatusPending, string(t.team), runID, nodeID, nodeStatusDone, "failed", FailureAgentLost, lostReset)
 	if err != nil {
 		return err
 	}
