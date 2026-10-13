@@ -13,6 +13,9 @@ import (
 
 func (f dispatchRun) launch(t *testing.T, at time.Time) (*store.LaunchClaim, store.ClaimToken) {
 	t.Helper()
+	if clock := launchClock(t, f.s); clock.After(at) {
+		at = clock
+	}
 	claim, err := f.s.ClaimLaunch(context.Background(), launcherIdentity, launchRequest(), at)
 	if err != nil || claim == nil {
 		t.Fatalf("launch claim: %+v %v", claim, err)
@@ -260,7 +263,7 @@ func TestEnqueueChildRun_RoutesAChildByItsRepository(t *testing.T) {
 	}
 	req := launchRequest()
 	req.RunID, req.NodeID = "run-parent", "a"
-	retry, err := st.ClaimLaunch(ctx, launcherIdentity, req, time.Now())
+	retry, err := st.ClaimLaunch(ctx, launcherIdentity, req, launchClock(t, st))
 	if err != nil || retry == nil {
 		t.Fatalf("claim the retry: %+v %v", retry, err)
 	}
