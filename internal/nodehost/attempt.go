@@ -127,7 +127,10 @@ func drive(ctx context.Context, sess *Session, n *NodeRun) Result {
 	rc := run.Context
 	var raw json.RawMessage
 	err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: run.Pipeline, Args: args, Run: &rc}, &raw)
-	if err == nil {
+	switch {
+	case err == nil && n.Generator != "":
+		err = regenerate(ctx, sess, n)
+	case err == nil:
 		err = checkDrift(raw, n.Plan)
 	}
 	if err != nil {
@@ -149,7 +152,7 @@ func drive(ctx context.Context, sess *Session, n *NodeRun) Result {
 		}
 		return failed(errors.New(msg))
 	}
-	return Result{Outcome: sparkwing.Success, Output: rr.Output}
+	return Result{Outcome: sparkwing.Success, Output: rr.Output, expansions: generate(ctx, sess, n)}
 }
 
 // safety: the node runs only as the run accepted it, so a process that plans

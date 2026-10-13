@@ -13,7 +13,7 @@ import (
 
 var (
 	docFields  = jsonFields(reflect.TypeFor[PlanDoc]())
-	nodeFields = append(jsonFields(reflect.TypeFor[PlanNode]()), "tools", "needs_generated")
+	nodeFields = append(jsonFields(reflect.TypeFor[PlanNode]()), "tools")
 )
 
 func jsonFields(t reflect.Type) []string {
