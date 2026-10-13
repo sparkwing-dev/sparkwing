@@ -18,15 +18,16 @@ import (
 )
 
 type inputs struct {
-	EnvOut string `flag:"envout" desc:"File the node writes its environment to"`
-	Echo   string `flag:"echo" desc:"File whose content the node prints"`
-	Drift  string `flag:"drift" desc:"File counting plans; set, each plan differs"`
-	Trace  string `flag:"trace" desc:"File the node's before_run and after_run calls append to; set, the node fails and retries twice"`
-	Auto   bool   `flag:"auto" desc:"Retry the traced node with retry_auto"`
-	Group  bool   `flag:"group" desc:"Put the node in a concurrency group"`
-	Refuse bool   `flag:"refuse" desc:"The traced node's before_run refuses"`
-	Pass   string `flag:"pass" secret:"true" desc:"A secret the node prints"`
-	Memo   string `flag:"memo" desc:"File a memoized node appends to each time its body runs"`
+	EnvOut  string `flag:"envout" desc:"File the node writes its environment to"`
+	Echo    string `flag:"echo" desc:"File whose content the node prints"`
+	Drift   string `flag:"drift" desc:"File counting plans; set, each plan differs"`
+	Trace   string `flag:"trace" desc:"File the node's before_run and after_run calls append to; set, the node fails and retries twice"`
+	Auto    bool   `flag:"auto" desc:"Retry the traced node with retry_auto"`
+	Group   bool   `flag:"group" desc:"Put the node in a concurrency group"`
+	Refuse  bool   `flag:"refuse" desc:"The traced node's before_run refuses"`
+	Pass    string `flag:"pass" secret:"true" desc:"A secret the node prints"`
+	Memo    string `flag:"memo" desc:"File a memoized node appends to each time its body runs"`
+	Publish bool   `flag:"publish" desc:"The memoized node publishes an artifact"`
 }
 
 type pipeline struct{ sparkwing.Base }
@@ -68,7 +69,7 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 		}
 	}
 	if in.Memo != "" {
-		sparkwing.Job(plan, "memoized", func(context.Context) error {
+		memoized := sparkwing.Job(plan, "memoized", func(context.Context) error {
 			f, err := os.OpenFile(in.Memo, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 			if err != nil {
 				return err
@@ -76,6 +77,9 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 			_, err = fmt.Fprintln(f, "body")
 			return errors.Join(err, f.Close())
 		}).Memoize(func(context.Context) (sparkwing.CacheKey, error) { return "pod-memo-v1", nil })
+		if in.Publish {
+			memoized.Outputs("dist/*")
+		}
 	}
 	if in.Group {
 		build.Concurrency(sparkwing.NewConcurrencyGroup("pod-group", sparkwing.ConcurrencyLimit{Capacity: 1}))

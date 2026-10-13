@@ -375,10 +375,20 @@ func TestPodNodeLog_SealsIncompleteAfterALoss(t *testing.T) {
 }
 
 // A memoized node's second run copies the first's result through its claim
-// instead of running the body again.
+// instead of running the body again; one that publishes artifacts runs again,
+// since its claim cannot read the first run's manifest.
 func TestLaunchedNode_MemoHitsThroughTheClaim(t *testing.T) {
+	t.Run("Hit", func(t *testing.T) { podMemoRuns(t, false, sparkwing.Cached, "body\n") })
+	t.Run("ArtifactsRunAsAMiss", func(t *testing.T) { podMemoRuns(t, true, sparkwing.Success, "body\nbody\n") })
+}
+
+func podMemoRuns(t *testing.T, publish bool, want sparkwing.Outcome, bodies string) {
+	t.Helper()
 	marker := filepath.Join(t.TempDir(), "memo")
 	args := map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "memo": marker}
+	if publish {
+		args["publish"] = "true"
+	}
 	first := newLaunchedRun(t, args)
 	second := first.another(t, "run-pod-host-2", args)
 	for i, r := range []*launchedRun{first, second} {
@@ -389,8 +399,8 @@ func TestLaunchedNode_MemoHitsThroughTheClaim(t *testing.T) {
 			t.Fatalf("host memoized in run %d: %v", i, err)
 		}
 	}
-	if n := second.node(t, "memoized"); n.Status != "done" || n.Outcome != string(sparkwing.Cached) {
-		t.Fatalf("second run's memoized = %s/%s (%s), want done/cached", n.Status, n.Outcome, n.Error)
+	if n := second.node(t, "memoized"); n.Status != "done" || n.Outcome != string(want) {
+		t.Fatalf("second run's memoized = %s/%s (%s), want done/%s", n.Status, n.Outcome, n.Error, want)
 	}
-	wantTrace(t, marker, "body\n")
+	wantTrace(t, marker, bodies)
 }
