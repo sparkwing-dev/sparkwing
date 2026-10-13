@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -27,41 +26,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-var (
-	podFixtureOnce sync.Once
-	podFixturePath string
-	podFixtureErr  error
-)
-
+// perf: each test links its own copy into its temp directory, which the build cache keeps cheap, so no
+// binary outlives the test.
 func podFixture(t *testing.T) string {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("builds a pipeline binary; run without -short")
 	}
-	podFixtureOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "podnodefixture")
-		if err != nil {
-			podFixtureErr = err
-			return
-		}
-		podFixturePath = filepath.Join(dir, "podnodefixture")
-		out, err := exec.Command("go", "build", "-o", podFixturePath, "./testdata/podnodefixture").CombinedOutput()
-		if err != nil {
-			podFixtureErr = &buildError{err: err, out: string(out)}
-		}
-	})
-	if podFixtureErr != nil {
-		t.Fatalf("build the fixture: %v", podFixtureErr)
+	bin := filepath.Join(t.TempDir(), "podnodefixture")
+	if out, err := exec.Command("go", "build", "-o", bin, "./testdata/podnodefixture").CombinedOutput(); err != nil {
+		t.Fatalf("build the fixture: %v\n%s", err, out)
 	}
-	return podFixturePath
+	return bin
 }
-
-type buildError struct {
-	err error
-	out string
-}
-
-func (e *buildError) Error() string { return e.err.Error() + "\n" + e.out }
 
 type launchedRun struct {
 	st    *store.Store
