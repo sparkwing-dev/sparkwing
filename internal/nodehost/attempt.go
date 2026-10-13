@@ -77,6 +77,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun) 
 	}
 	bearer, revoke, err := a.Routes.Admit(Node{
 		RunID: run.ID, NodeID: id, Secrets: names, Resolver: a.Resolver, Masker: a.Masker, Claim: a.Claim,
+		Pause: n.Pause,
 	})
 	if err != nil {
 		return failed(fmt.Errorf("admit node %s: %w", id, err))

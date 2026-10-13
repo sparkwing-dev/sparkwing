@@ -150,3 +150,23 @@ func (noState) AppendStepAnnotation(context.Context, string, string, string, str
 func (noState) SetNodeSummary(context.Context, string, string, string) error { return nil }
 
 func (noState) SetStepSummary(context.Context, string, string, string, string) error { return nil }
+
+func TestTimeoutPausesNestUntilTheLastResume(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		waits := func(ctx context.Context, n *NodeRun) Result {
+			first, second := n.Pause(), n.Pause()
+			time.Sleep(5 * time.Second)
+			first()
+			n.Progress()
+			time.Sleep(5 * time.Second)
+			second()
+			second()
+			return hang(ctx, n)
+		}
+		res := timeoutLayer(nil, waits)(t.Context(), retryNode(nodeproto.PlanModifiers{NoProgressTimeoutMS: 2000}))
+		if res.Reason != store.FailureNoProgressTimeout || time.Since(start) != 12*time.Second {
+			t.Errorf("reason %q after %s, want no_progress_timeout 2s after the last resume at 10s", res.Reason, time.Since(start))
+		}
+	})
+}

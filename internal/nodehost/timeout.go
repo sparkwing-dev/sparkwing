@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -34,15 +35,17 @@ func timeoutLayer(_ *Config, next Executor) Executor {
 			defer t.Stop()
 		}
 		if idle > 0 {
-			t := time.AfterFunc(idle, func() { cancel(errNoProgress) })
-			defer t.Stop()
+			it := &idleTimer{d: idle}
+			it.t = time.AfterFunc(idle, func() { cancel(errNoProgress) })
+			defer it.t.Stop()
 			outer := n.Progress
 			attempt.Progress = func() {
-				t.Reset(idle)
+				it.progress()
 				if outer != nil {
 					outer()
 				}
 			}
+			attempt.Pause = it.pause
 		}
 		res := next(actx, &attempt)
 		if res.Outcome == sparkwing.Success {
@@ -64,6 +67,40 @@ func timeoutLayer(_ *Config, next Executor) Executor {
 			}
 		}
 		return res
+	}
+}
+
+// safety: concurrent waits nest, so the count stays held until the last one
+// resumes, and a line logged while held does not restart it early.
+type idleTimer struct {
+	d      time.Duration
+	t      *time.Timer
+	mu     sync.Mutex
+	paused int
+}
+
+func (it *idleTimer) progress() {
+	it.mu.Lock()
+	defer it.mu.Unlock()
+	if it.paused == 0 {
+		it.t.Reset(it.d)
+	}
+}
+
+func (it *idleTimer) pause() (resume func()) {
+	it.mu.Lock()
+	it.paused++
+	it.t.Stop()
+	it.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			it.mu.Lock()
+			defer it.mu.Unlock()
+			if it.paused--; it.paused == 0 {
+				it.t.Reset(it.d)
+			}
+		})
 	}
 }
 
