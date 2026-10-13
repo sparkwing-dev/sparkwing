@@ -67,7 +67,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun) 
 			run.Logger.Warn("nodehost: close node log", "run", run.ID, "node", id, "err", err)
 		}
 	}()
-	sink, err := NewLogSink(ctx, LogSinkConfig{RunID: run.ID, NodeID: id, Log: nlog, State: run.State, Masker: a.Masker})
+	sink, err := NewLogSink(ctx, LogSinkConfig{RunID: run.ID, NodeID: id, Log: nlog, State: run.State, Masker: a.Masker, Progress: n.Progress})
 	if err != nil {
 		return failed(err)
 	}

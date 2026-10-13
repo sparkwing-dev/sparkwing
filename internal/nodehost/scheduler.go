@@ -72,6 +72,9 @@ type NodeRun struct {
 	Failure *nodeproto.Failure
 	// Attempt is the 1-based attempt number; zero means 1.
 	Attempt int
+	// Progress, when set, is called for each log line or record the attempt
+	// stores; the no-progress timeout restarts its count on it.
+	Progress func()
 }
 
 // Run is the hosted run an executor works within.
@@ -123,6 +126,8 @@ type Layer func(cfg *Config, next Executor) Executor
 var layers = []Layer{
 	artifactsLayer,
 	cachesLayer,
+	retryLayer,
+	timeoutLayer,
 }
 
 // Execute plans the run in a short-lived SDK process, records the run and
