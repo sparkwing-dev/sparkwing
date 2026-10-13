@@ -110,7 +110,7 @@ export interface RetryOptions {
 }
 
 export interface SkipOptions {
-  /** How long the engine lets each skipIf of the node run; 30 seconds when absent. */
+  /** How long the engine lets each skipIf of the node run; 30 seconds when absent or 0. */
   budgetMs?: number;
 }
 
@@ -170,6 +170,23 @@ function resourceFields(what: string, h: ResourceHints): { cores?: number; memor
   }
   if (h.cores !== undefined) out.cores = h.cores;
   if (h.memoryGB !== undefined) out.memory_bytes = Math.round(h.memoryGB * 2 ** 30);
+  return out;
+}
+
+// safety: like the Go SDK, a later call overrides only the dimensions it
+// names, so a reservation another call set is never dropped silently.
+function mergeResources(
+  current: { cores?: number | undefined; memory_bytes?: number | undefined },
+  what: string,
+  hints: ResourceHints,
+): { cores?: number; memory_bytes?: number } | undefined {
+  const r = resourceFields(what, hints);
+  if (Object.keys(r).length === 0) return undefined;
+  const out: { cores?: number; memory_bytes?: number } = {};
+  const cores = r.cores ?? current.cores;
+  const memory = r.memory_bytes ?? current.memory_bytes;
+  if (cores !== undefined) out.cores = cores;
+  if (memory !== undefined) out.memory_bytes = memory;
   return out;
 }
 
@@ -249,15 +266,19 @@ export class Step {
     return this;
   }
 
-  /** Lets this step fail without failing the node. */
+  /**
+   * Keeps siblings running and lets steps that need this one start after it
+   * fails; the node still fails unless the step is also optional.
+   */
   continueOnError(): this {
     this.#flags.continue_on_error = true;
     return this;
   }
 
-  /** Lets this step be skipped without failing the node. */
+  /** Keeps this step's failure out of the node's outcome; implies continueOnError. */
   optional(): this {
     this.#flags.optional = true;
+    this.#flags.continue_on_error = true;
     return this;
   }
 
@@ -329,7 +350,6 @@ export class Generated {
 
 export class Job {
   readonly id: string;
-  readonly body: Body | undefined;
   readonly approval: ApprovalSpec | undefined;
   readonly steps: Step[] = [];
   readonly skipIfs: Predicate[] = [];
@@ -346,12 +366,18 @@ export class Job {
   #env: Record<string, string> | undefined;
   #caches: CacheSpec[] = [];
   #failurePolicy: "fail-fast" | "collect-all" | undefined;
+  #hasBody = false;
 
+  // safety: a body is the job's one step, run, as the Go SDK writes it, so the
+  // host applies step rules to it; a dry run skips it like any unmarked step.
   constructor(id: string, body?: Body, approval?: ApprovalSpec) {
     checkId("job", id);
     this.id = id;
-    this.body = body;
     this.approval = approval;
+    if (body) {
+      this.steps.push(new Step("run", body).result());
+      this.#hasBody = true;
+    }
   }
 
   /** Runs this job only after every named job succeeds. */
@@ -380,15 +406,15 @@ export class Job {
     return this;
   }
 
-  /** Bounds how long an attempt may write no log record. */
+  /** Bounds how long an attempt may write no log record; 0 removes the bound. */
   noProgressTimeout(ms: number): this {
-    this.#set({ no_progress_timeout_ms: checkInt(`job ${this.id}: no-progress timeout in milliseconds`, ms, 1) });
+    this.#set({ no_progress_timeout_ms: checkInt(`job ${this.id}: no-progress timeout in milliseconds`, ms, 0) });
     return this;
   }
 
   /** Adds a step; the engine runs each step with its own request, in dependency order. */
   step(id: string, body: Body): Step {
-    if (this.body || this.approval) throw new Error(`job ${this.id} has a body, so it cannot also have steps`);
+    if (this.#hasBody || this.approval) throw new Error(`job ${this.id} has a body, so it cannot also have steps`);
     if (this.steps.some((s) => s.id === id)) throw new Error(`job ${this.id}: duplicate step ${id}`);
     const s = new Step(id, body);
     this.steps.push(s);
@@ -405,7 +431,7 @@ export class Job {
   skipIf(fn: Predicate, opts: SkipOptions = {}): this {
     this.skipIfs.push(fn);
     if (opts.budgetMs !== undefined)
-      this.#set({ skip_if_budget_ms: checkInt(`job ${this.id}: skipIf budget in milliseconds`, opts.budgetMs, 1) });
+      this.#set({ skip_if_budget_ms: checkInt(`job ${this.id}: skipIf budget in milliseconds`, opts.budgetMs, 0) });
     return this;
   }
 
@@ -469,10 +495,14 @@ export class Job {
     return this;
   }
 
-  /** Declares the job's peak cores and memory, which admission reserves. */
+  /**
+   * Declares the job's peak cores and memory, which admission reserves; each
+   * call keeps the dimensions it omits, and no hints clear both.
+   */
   resources(hints: ResourceHints): this {
-    const r = resourceFields(`job ${this.id}`, hints);
-    this.#set({ res_cores: r.cores, res_memory_bytes: r.memory_bytes });
+    const current = { cores: this.#mods.res_cores, memory_bytes: this.#mods.res_memory_bytes };
+    const r = mergeResources(current, `job ${this.id}`, hints);
+    this.#set({ res_cores: r?.cores, res_memory_bytes: r?.memory_bytes });
     return this;
   }
 
@@ -488,15 +518,15 @@ export class Job {
     return this;
   }
 
-  /** Lets the job fail without failing the run. */
+  /** Lets the jobs that need this one start after it fails; the run still fails unless the job is also optional. */
   continueOnError(): this {
     this.#set({ continue_on_error: true });
     return this;
   }
 
-  /** Lets the job be skipped without failing the jobs that need it. */
+  /** Keeps this job's failure out of the run's outcome; implies continueOnError. */
   optional(): this {
-    this.#set({ optional: true });
+    this.#set({ optional: true, continue_on_error: true });
     return this;
   }
 
@@ -588,7 +618,7 @@ function collect(closures: Closure[]): Closures | undefined {
 }
 
 /** Each job followed, at the end, by the recovery jobs onFailure declared. */
-function withRecoveries(jobs: Job[]): Job[] {
+export function withRecoveries(jobs: Job[]): Job[] {
   return [...jobs, ...jobs.flatMap((j) => (j.recovery ? [j.recovery] : []))];
 }
 
@@ -623,10 +653,9 @@ export class Plan {
     return this;
   }
 
-  /** Declares the whole run's peak cores and memory. */
+  /** Declares the whole run's peak cores and memory; each call keeps the dimensions it omits, and no hints clear both. */
   resources(hints: ResourceHints): this {
-    const r = resourceFields("plan", hints);
-    this.#resources = Object.keys(r).length > 0 ? r : undefined;
+    this.#resources = mergeResources(this.#resources ?? {}, "plan", hints);
     return this;
   }
 
@@ -693,7 +722,7 @@ function checkJobs(jobs: Job[], all: Job[]): PlanNode[] {
     seen.add(j.id);
   }
   for (const j of jobs) {
-    if (!j.body && !j.approval && j.steps.length === 0) throw new Error(`job ${j.id} has neither a body nor steps`);
+    if (!j.approval && j.steps.length === 0) throw new Error(`job ${j.id} has neither a body nor steps`);
     if (j.steps.filter((s) => s.isResult).length > 1) throw new Error(`job ${j.id} has more than one result step`);
     assertAcyclic(
       `job ${j.id} steps`,

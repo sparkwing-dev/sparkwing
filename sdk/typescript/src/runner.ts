@@ -19,7 +19,9 @@ import {
   type Job,
   type NodeContext,
   type RunContext,
+  type Step,
   type Trigger,
+  withRecoveries,
 } from "./plan.ts";
 import { OPS, ProtocolError, readRequests, writeReply, type Request } from "./protocol.ts";
 import type { NodeRoutes } from "./routes.ts";
@@ -114,34 +116,21 @@ class Session {
       case "plan":
         return this.#plan(req);
       case "run_node": {
+        // hack: a body is the node's one step, so run_node runs it as the Go
+        // SDK runs a node's work; a node with several steps runs each with run_step.
         const job = this.#job(req);
-        if (!job.body) throw new ProtocolError("bad_request", `node ${JSON.stringify(job.id)} has no body to run`);
-        const result = await this.#invoke(req, job, undefined, job.body);
-        if (result.outcome === "success") this.#nodeOutputs.set(job.id, result.output ?? null);
-        return result;
+        const [only, ...more] = job.steps;
+        if (!only || more.length > 0) {
+          throw new ProtocolError("bad_request", `node ${JSON.stringify(job.id)} has no single body to run; run each step with run_step`);
+        }
+        return this.#runStep(req, job, only);
       }
       case "run_step": {
         const job = this.#job(req);
         const stepId = str(req, "step");
         const step = job.steps.find((s) => s.id === stepId);
         if (!step) throw new ProtocolError("unknown_step", `node ${JSON.stringify(job.id)} has no step ${JSON.stringify(stepId)}`);
-        const body = this.#current().run.dryRun && step.dryRunBody ? step.dryRunBody : step.body;
-        const result = await this.#invoke(req, job, step.id, body);
-        if (result.outcome === "success") {
-          const outputs = this.#stepOutputs.get(job.id) ?? new Map<string, unknown>();
-          outputs.set(step.id, result.output);
-          this.#stepOutputs.set(job.id, outputs);
-        }
-        // safety: only the result step's output is the node's output; the host
-        // records whatever a run_step reply carries.
-        if (!step.isResult) delete result.output;
-        if (result.outcome === "success" && (step.isResult || !job.steps.some((s) => s.isResult))) {
-          // safety: a node with no result step has no output, and its own
-          // generator reads that null here rather than asking the host for a
-          // node still running.
-          this.#nodeOutputs.set(job.id, result.output ?? null);
-        }
-        return result;
+        return this.#runStep(req, job, step);
       }
       case "cancel":
         this.#controller(`${str(req, "node")}\u0000${str(req, "step")}`).abort();
@@ -150,6 +139,26 @@ class Session {
         return this.#eval(req);
     }
     throw new ProtocolError("unknown_op", `unknown op ${JSON.stringify(req.op)}`);
+  }
+
+  async #runStep(req: Request, job: Job, step: Step): Promise<NodeResult> {
+    const body = this.#current().run.dryRun && step.dryRunBody ? step.dryRunBody : step.body;
+    const result = await this.#invoke(req, job, step.id, body);
+    if (result.outcome === "success") {
+      const outputs = this.#stepOutputs.get(job.id) ?? new Map<string, unknown>();
+      outputs.set(step.id, result.output);
+      this.#stepOutputs.set(job.id, outputs);
+    }
+    // safety: only the result step's output is the node's output; the host
+    // records whatever a run_step reply carries.
+    if (!step.isResult) delete result.output;
+    if (result.outcome === "success" && (step.isResult || !job.steps.some((s) => s.isResult))) {
+      // safety: a node with no result step has no output, and its own
+      // generator reads that null here rather than asking the host for a
+      // node still running.
+      this.#nodeOutputs.set(job.id, result.output ?? null);
+    }
+    return result;
   }
 
   async #plan(req: Request): Promise<unknown> {
@@ -217,7 +226,7 @@ class Session {
       const added = new Generated(gen.source);
       await gen.fn(added, output as never, ctx);
       const nodes = this.#current().plan.insert(added.jobs);
-      this.#register(added.jobs);
+      this.#register(withRecoveries(added.jobs));
       return { value: nodes };
     } catch (err) {
       return { value: null, error: messageOf(err) };
