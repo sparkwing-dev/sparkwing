@@ -62,9 +62,6 @@ func (r *pipelineRun) host(h hostedRun) error {
 	if flags.mode != "" {
 		extra["mode"] = flags.mode
 	}
-	if flags.verbose {
-		extra["verbose"] = true
-	}
 	if flags.only != "" {
 		extra["only"] = flags.only
 	}
@@ -86,6 +83,7 @@ func (r *pipelineRun) host(h hostedRun) error {
 		Priority:      h.priority,
 
 		AllowUnadmitted: flags.allowUnadmitted,
+		Verbose:         flags.verbose,
 	}
 	// safety: the host takes over interrupts as the pipeline binary did, so
 	// one Ctrl-C cancels the run once rather than killing this process.
@@ -93,7 +91,7 @@ func (r *pipelineRun) host(h hostedRun) error {
 	_, err := orchestrator.RunHostedCommand(context.WithoutCancel(r.ctx), opts, orchestrator.HostedEntry{
 		Program: program, Dir: repoRoot, Env: h.env, SecretArgs: secretArgs,
 		PipelineRevision: h.source, BinarySource: binarySource, Flags: extra,
-	}, h.logFormat, flags.verbose)
+	}, h.logFormat)
 	if err != nil {
 		return exitError(1, err)
 	}

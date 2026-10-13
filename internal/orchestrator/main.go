@@ -185,6 +185,7 @@ func Main() {
 		// safety: this binary serves `run-node` a few lines above, so it can
 		// re-enter itself for each node.
 		ProcessPerNode: true,
+		Verbose:        debugLogLevel(),
 	}
 	opts.Admission = pipelineAdmission(childAttachTokenFromProcessEnv(), wingwire.OriginLocal)
 	if projectCfg != nil {
