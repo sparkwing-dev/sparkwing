@@ -76,6 +76,13 @@ type NodeRun struct {
 	// Generator is the closure that added the node; empty for a node of the
 	// accepted plan.
 	Generator string
+	// Progress, when set, is called for each log line or record the attempt
+	// stores; the no-progress timeout restarts its count on it.
+	Progress func()
+	// Pause, when set, stops the no-progress count until the returned resume
+	// is called, which restarts it in full. A wait the node makes on the host,
+	// such as a child-run await, holds it.
+	Pause func() (resume func())
 }
 
 // Run is the hosted run an executor works within.
@@ -127,6 +134,8 @@ type Layer func(cfg *Config, next Executor) Executor
 var layers = []Layer{
 	artifactsLayer,
 	cachesLayer,
+	retryLayer,
+	timeoutLayer,
 }
 
 // Execute plans the run in a short-lived SDK process, records the run and

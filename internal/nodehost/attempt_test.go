@@ -119,7 +119,7 @@ func TestAttemptExecutor(t *testing.T) {
 					h.logs.open++
 					return memLog{logs: h.logs, node: node}, nil
 				},
-				Usage: func(n *NodeRun, u Usage) {
+				Usage: func(_ context.Context, n *NodeRun, u Usage) {
 					h.mu.Lock()
 					defer h.mu.Unlock()
 					h.usage[n.Plan.ID] = u

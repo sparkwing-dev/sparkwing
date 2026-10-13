@@ -39,7 +39,8 @@ type Attempts struct {
 	// last record, cleanup output included, is written.
 	OpenLog func(ctx context.Context, runID, nodeID string) (NodeLog, error)
 	// Usage receives each attempt's measured session usage; nil drops it.
-	Usage func(n *NodeRun, u Usage)
+	// [RecordUsage] builds the one that records it.
+	Usage func(ctx context.Context, n *NodeRun, u Usage)
 }
 
 // safety: every message the attempt returns is masked, since the scheduler
@@ -67,7 +68,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun) 
 			run.Logger.Warn("nodehost: close node log", "run", run.ID, "node", id, "err", err)
 		}
 	}()
-	sink, err := NewLogSink(ctx, LogSinkConfig{RunID: run.ID, NodeID: id, Log: nlog, State: run.State, Masker: a.Masker})
+	sink, err := NewLogSink(ctx, LogSinkConfig{RunID: run.ID, NodeID: id, Log: nlog, State: run.State, Masker: a.Masker, Progress: n.Progress})
 	if err != nil {
 		return failed(err)
 	}
@@ -77,6 +78,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun) 
 	}
 	bearer, revoke, err := a.Routes.Admit(Node{
 		RunID: run.ID, NodeID: id, Secrets: names, Resolver: a.Resolver, Masker: a.Masker, Claim: a.Claim,
+		Pause: n.Pause,
 	})
 	if err != nil {
 		return failed(fmt.Errorf("admit node %s: %w", id, err))
@@ -101,7 +103,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun) 
 			run.Logger.Warn("nodehost: sdk session", "run", run.ID, "node", id, "err", cerr)
 		}
 		if a.Usage != nil {
-			a.Usage(n, usage)
+			a.Usage(ctx, n, usage)
 		}
 	} else {
 		res = failed(err)
