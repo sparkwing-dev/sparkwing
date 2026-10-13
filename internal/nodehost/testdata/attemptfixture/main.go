@@ -105,7 +105,8 @@ func addMemo(plan *sparkwing.Plan, marker string) {
 			return "from " + os.Getenv("SPARKWING_RUN_ID"), nil
 		}
 	}
-	sparkwing.Job(plan, "memoized", &memoJob{body: body("memoized", false)}).Memoize(key("memo-v1", nil))
+	group := sparkwing.NewConcurrencyGroup("memo-group", sparkwing.ConcurrencyLimit{Capacity: 1, OnLimit: sparkwing.Queue})
+	sparkwing.Job(plan, "memoized", &memoJob{body: body("memoized", false)}).Memoize(key("memo-v1", nil)).Concurrency(group)
 	sparkwing.Job(plan, "memo-flaky", &memoJob{body: body("memo-flaky", true)}).Memoize(key("flaky-v1", nil))
 	sparkwing.Job(plan, "nocache", &memoJob{body: body("nocache", false)}).Memoize(key(sparkwing.NoCache, nil))
 	sparkwing.Job(plan, "emptykey", &memoJob{body: body("emptykey", false)}).Memoize(key("", nil))

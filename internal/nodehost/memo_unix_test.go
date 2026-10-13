@@ -10,7 +10,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -43,6 +45,8 @@ func TestMemo(t *testing.T) {
 			return st.GetNodeOutput(ctx, runID, nodeID)
 		},
 	}
+	daemon := newFakeDaemon()
+	groupSlots := &memoGroupSlots{storeSlots: storeSlots{st: st}}
 	host := func(runID string) RunResult {
 		t.Helper()
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
@@ -58,7 +62,8 @@ func TestMemo(t *testing.T) {
 					return memLog{logs: logs, node: run + "/" + node}, nil
 				},
 			},
-			Memo: memo,
+			Memo:      memo,
+			Admission: &Admission{Daemon: daemon, Slots: groupSlots},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -134,6 +139,23 @@ func TestMemo(t *testing.T) {
 		}
 	})
 
+	t.Run("AHitTakesNoAdmissionLeaseOrGroupSlot", func(t *testing.T) {
+		leases := map[string]int{}
+		daemon.mu.Lock()
+		for _, req := range daemon.reqs {
+			leases[req.DisplayRunID]++
+		}
+		daemon.mu.Unlock()
+		if leases["run-memo-1/memoized"] != 1 || leases["run-memo-2/memoized"] != 0 {
+			t.Errorf("memoized leases %v, want one in the first run and none for the hit", leases)
+		}
+		groupSlots.mu.Lock()
+		defer groupSlots.mu.Unlock()
+		if got := groupSlots.acquired; !slices.Equal(got, []string{"run-memo-1"}) {
+			t.Errorf("memo-group acquired by runs %v, want the first run only", got)
+		}
+	})
+
 	t.Run("AFailureRecordsNothing", func(t *testing.T) {
 		if first.Nodes["memo-flaky"].Outcome != sparkwing.Failed || second.Nodes["memo-flaky"].Outcome != sparkwing.Success {
 			t.Errorf("memo-flaky = %+v then %+v, want a failure, then a fresh success", first.Nodes["memo-flaky"], second.Nodes["memo-flaky"])
@@ -183,4 +205,19 @@ func TestMemo(t *testing.T) {
 			t.Errorf("summary deps = %v, want the generated nodes", r.Deps)
 		}
 	})
+}
+
+type memoGroupSlots struct {
+	storeSlots
+	mu       sync.Mutex
+	acquired []string
+}
+
+func (s *memoGroupSlots) AcquireSlot(ctx context.Context, req store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {
+	if strings.Contains(req.Key, "memo-group") {
+		s.mu.Lock()
+		s.acquired = append(s.acquired, req.RunID)
+		s.mu.Unlock()
+	}
+	return s.storeSlots.AcquireSlot(ctx, req)
 }

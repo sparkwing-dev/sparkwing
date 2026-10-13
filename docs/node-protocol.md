@@ -196,7 +196,7 @@ A closure is customer code that the host calls by id. The plan lists each node's
 | `after_run` | the last attempt's process, after the body and verify | `{outcome, error?}`: the node's final outcome and error | `null` | the host logs it and leaves the node's outcome unchanged |
 | `generator` | the source's attempt process, after its body succeeds, or an eval process when the source's result was copied by memo; again in each generated node's own processes | none | an array of node documents | the generated group fails, and nodes that need it are cancelled |
 
-The host bounds each node `skip_if` by the node's `modifiers.skip_if_budget_ms`, or by 30 seconds when that is absent. A `skip_if` that overruns its budget counts as `false`. Every other closure is bounded by the node's wall timeout.
+The host bounds each node `skip_if` by the node's `modifiers.skip_if_budget_ms`, or by 30 seconds when that is absent. A `skip_if` that overruns its budget counts as `false`. A `cache_key` closure has its own 30-second limit, and one that overruns it fails the node. Every other closure is bounded by the node's wall timeout.
 
 A failed reply to `eval` (for example `unknown_closure`) is never read as `false` or as a skipped check. The attempt fails.
 

@@ -154,16 +154,16 @@ func (r *Run) Add(ctx context.Context, nodes ...nodeproto.PlanNode) error {
 type Layer func(cfg *Config, next Executor) Executor
 
 // safety: the order is the envelope's nesting, outermost first: debug pauses, then skip_if, which the
-// dispatcher checks after a pause-before but before a gate waits, then approvals and recovery, admission,
-// bounce, memo, artifacts, caches, retries and timeouts, expansion. The attempt closures and steps run
-// inside the attempt executor, since they share the attempt's process.
+// dispatcher checks after a pause-before but before a gate waits, then approvals and recovery, memo, which
+// copies a hit before any admission lease or group slot is taken, admission, bounce, artifacts, caches,
+// retries and timeouts, expansion. The attempt closures and steps run inside the attempt executor.
 var layers = []Layer{
 	debugLayer,
 	skipIfLayer,
 	approvalsLayer,
+	memoLayer,
 	admissionLayer,
 	bounceLayer,
-	memoLayer,
 	artifactsLayer,
 	cachesLayer,
 	retryLayer,
