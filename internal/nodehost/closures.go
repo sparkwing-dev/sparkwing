@@ -35,7 +35,7 @@ func skipIfLayer(cfg *Config, next Executor) Executor {
 			budget = time.Duration(m.SkipIfBudgetMS) * time.Millisecond
 		}
 		reason := ""
-		res := cfg.Attempts.process(ctx, cfg.Session, n, func(ctx context.Context, sess *Session, log Sink) Result {
+		res := cfg.Attempts.process(ctx, cfg.Session, n, func(ctx context.Context, sess *Session, log *LogSink) Result {
 			if err := nodeReplan(ctx, sess, n); err != nil {
 				return failed(err)
 			}
@@ -164,7 +164,7 @@ func afterRunAfterTimeout(ctx context.Context, cfg *Config, n *NodeRun, res Resu
 	}
 	lctx, cancel := context.WithTimeout(ctx, afterRunTimeoutLimit)
 	defer cancel()
-	cfg.Attempts.process(lctx, cfg.Session, n, func(ctx context.Context, sess *Session, log Sink) Result {
+	cfg.Attempts.process(lctx, cfg.Session, n, func(ctx context.Context, sess *Session, log *LogSink) Result {
 		if err := nodeReplan(ctx, sess, n); err != nil {
 			closureNote(log, "error", fmt.Sprintf("AfterRun hooks after the timeout: %v", err))
 			return failed(err)

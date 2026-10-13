@@ -3122,9 +3122,11 @@ func snapshotWorkOf(work *sparkwing.Work, resultStep *sparkwing.WorkStep, closur
 			Finally:   s.IsFinally(),
 			Risks:     s.Risks(),
 
-			ContinueOnError: s.IsContinueOnError(),
-			Optional:        s.IsOptional(),
-			Closures:        closures[s.ID()],
+			ContinueOnError:   s.IsContinueOnError(),
+			Optional:          s.IsOptional(),
+			HasDryRun:         s.HasDryRun(),
+			SafeWithoutDryRun: s.IsSafeWithoutDryRun(),
+			Closures:          closures[s.ID()],
 		})
 	}
 	for _, g := range work.Groups() {

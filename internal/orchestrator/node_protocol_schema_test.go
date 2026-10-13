@@ -72,7 +72,6 @@ func (s protocolSchema) mustValidate(t *testing.T, def string, v any) {
 // check fails once a listed one is emitted, so the list cannot go stale.
 var notYetEmitted = map[string][]string{
 	"node":    {"tools"},
-	"step":    {"has_dry_run", "safe_without_dry_run"},
 	"memoKey": {"const", "env", "files"},
 }
 

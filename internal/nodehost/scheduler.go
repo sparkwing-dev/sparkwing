@@ -25,8 +25,11 @@ type Config struct {
 	Args map[string]string
 	// Run is the run context plan code reads. RunID is required; a zero
 	// StartedAt means now and an empty trigger source means manual.
-	Run   nodeproto.RunContext
-	State storage.StateStore
+	Run nodeproto.RunContext
+	// StartAt and StopAt bound the steps that run, as --sw-start-at and
+	// --sw-stop-at; each must name a step in the plan.
+	StartAt, StopAt string
+	State           storage.StateStore
 	// Artifacts holds the files nodes publish with outputs and stage with
 	// consumes; nil turns both off.
 	Artifacts storage.ArtifactStore
@@ -37,6 +40,8 @@ type Config struct {
 	Logger   *slog.Logger
 	// Heartbeat is the run heartbeat interval; zero means 30 seconds.
 	Heartbeat time.Duration
+	// Admission admits each node before it runs; nil admits every node at once.
+	Admission *Admission
 }
 
 // Result is how one node ended.
@@ -102,6 +107,8 @@ type Run struct {
 	Pipeline string
 	Args     map[string]string
 	Context  nodeproto.RunContext
+	StartAt  string
+	StopAt   string
 	State    storage.StateStore
 	Logger   *slog.Logger
 	adds     chan addRequest
@@ -136,11 +143,13 @@ func (r *Run) Add(ctx context.Context, nodes ...nodeproto.PlanNode) error {
 // part. Each part adds its Layer to the scheduler's list in one line.
 type Layer func(cfg *Config, next Executor) Executor
 
-// safety: the order is the envelope's nesting, outermost first: approvals and recovery, debug pauses,
-// admission, skip_if, memo, artifacts, caches, retries and timeouts, steps, expansion. The attempt
-// closures run inside the attempt executor, since they share the attempt's process.
+// safety: the order is the envelope's nesting, outermost first: skip_if, which the dispatcher checks before
+// a gate waits or a pause, then approvals and recovery, debug pauses, admission, memo, artifacts, caches,
+// retries and timeouts, steps, expansion. The attempt closures and steps run inside the attempt executor.
 var layers = []Layer{
 	skipIfLayer,
+	approvalsLayer,
+	admissionLayer,
 	artifactsLayer,
 	cachesLayer,
 	retryLayer,
@@ -199,6 +208,9 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 	doc, raw, err := planRun(ctx, sess, cfg.Pipeline, args, cfg.Run)
 	closeSession()
 	if err == nil {
+		err = validateStepRange(doc, cfg.StartAt, cfg.StopAt)
+	}
+	if err == nil {
 		err = cfg.State.UpdatePlanSnapshot(ctx, res.RunID, raw)
 	}
 	if err != nil {
@@ -211,7 +223,7 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 	}
 	run := &Run{
 		ID: res.RunID, Doc: doc, Pipeline: cfg.Pipeline, Args: args, Context: cfg.Run,
-		State: cfg.State, Logger: cfg.Logger, adds: make(chan addRequest),
+		StartAt: cfg.StartAt, StopAt: cfg.StopAt, State: cfg.State, Logger: cfg.Logger, adds: make(chan addRequest),
 	}
 	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg)}
 	if err := s.add(ctx, ctx, doc.Nodes); err != nil {

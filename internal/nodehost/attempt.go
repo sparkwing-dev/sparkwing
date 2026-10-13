@@ -46,13 +46,13 @@ type Attempts struct {
 
 func (a *Attempts) executor(cfg *Config) Executor {
 	return func(ctx context.Context, n *NodeRun) Result {
-		return a.process(ctx, cfg.Session, n, func(ctx context.Context, sess *Session, log Sink) Result {
-			return drive(ctx, sess, log, n)
+		return a.process(ctx, cfg.Session, n, func(ctx context.Context, sess *Session, sink *LogSink) Result {
+			return drive(ctx, sess, sink, n)
 		})
 	}
 }
 
-type nodeProcessBody func(ctx context.Context, sess *Session, log Sink) Result
+type nodeProcessBody func(ctx context.Context, sess *Session, sink *LogSink) Result
 
 // safety: every message the process returns is masked, since the scheduler
 // stores it in the node row, past the log sink's masking.
@@ -130,11 +130,11 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	return res
 }
 
-func drive(ctx context.Context, sess *Session, log Sink, n *NodeRun) Result {
+func drive(ctx context.Context, sess *Session, sink *LogSink, n *NodeRun) Result {
 	if err := nodeReplan(ctx, sess, n); err != nil {
 		return failed(err)
 	}
-	return withClosures(ctx, sess, log, n, func() Result { return attemptNodeBody(ctx, sess, n) })
+	return withClosures(ctx, sess, sink, n, func() Result { return attemptBody(ctx, sess, sink, n) })
 }
 
 func nodeReplan(ctx context.Context, sess *Session, n *NodeRun) error {
@@ -155,9 +155,13 @@ func nodeReplan(ctx context.Context, sess *Session, n *NodeRun) error {
 	return checkDrift(raw, n.Plan)
 }
 
-func attemptNodeBody(ctx context.Context, sess *Session, n *NodeRun) Result {
+func attemptBody(ctx context.Context, sess *Session, sink *LogSink, n *NodeRun) Result {
+	attempt := max(n.Attempt, 1)
+	if w := n.Plan.Work; w != nil && len(w.Steps) > 0 {
+		return driveSteps(ctx, sess, sink, n, attempt)
+	}
 	var rr nodeproto.RunResult
-	err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpRunNode, Node: n.Plan.ID, Attempt: max(n.Attempt, 1), Failure: n.Failure}, &rr)
+	err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpRunNode, Node: n.Plan.ID, Attempt: attempt, Failure: n.Failure}, &rr)
 	if err == nil {
 		err = rr.Validate()
 	}

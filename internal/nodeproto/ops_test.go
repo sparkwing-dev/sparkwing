@@ -25,6 +25,8 @@ func TestRequestValidate(t *testing.T) {
 		{Request{ID: "1", Op: OpRunStep, Node: "build", Step: "test", Attempt: 2}, ""},
 		{Request{ID: "1", Op: OpRunStep, Node: "build", Step: "test"}, CodeBadRequest},
 		{Request{ID: "1", Op: OpRunStep, Node: "build"}, CodeBadRequest},
+		{Request{ID: "1", Op: OpCancel, Node: "build", Step: "test"}, ""},
+		{Request{ID: "1", Op: OpCancel, Node: "build"}, CodeBadRequest},
 		{Request{ID: "1", Op: OpEval, Closure: "build/skip_if/0"}, ""},
 		{Request{ID: "1", Op: OpEval, Closure: "c", Input: json.RawMessage(`{"outcome":"failed"}`)}, ""},
 		{Request{ID: "1", Op: OpEval, Closure: "c", Input: json.RawMessage(`[1]`)}, CodeBadRequest},

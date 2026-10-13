@@ -74,6 +74,15 @@ func TestClosures(t *testing.T) {
 		}
 	})
 
+	t.Run("ASkippedApprovalGateNeverAsks", func(t *testing.T) {
+		if r := row("skipped-gate"); r.Outcome != string(sparkwing.Skipped) || r.StartedAt != nil {
+			t.Errorf("gate row outcome=%q started=%v, want skipped and never started", r.Outcome, r.StartedAt)
+		}
+		if appr, err := cfg.State.GetApproval(t.Context(), "run-hooks", "skipped-gate"); err == nil {
+			t.Errorf("the skipped gate created an approval: %+v", appr)
+		}
+	})
+
 	t.Run("ASkipIfThatFailsOrOverrunsDoesNotSkip", func(t *testing.T) {
 		if res.Nodes["kept"].Outcome != sparkwing.Success || trace("kept") != "body\n" {
 			t.Errorf("kept = %+v, trace %q, want its body run once", res.Nodes["kept"], trace("kept"))
@@ -120,7 +129,7 @@ func TestClosures(t *testing.T) {
 	})
 
 	t.Run("AfterRunRunsOnlyInTheLastOfThreeAttempts", func(t *testing.T) {
-		if got := trace("flaky"); got != "before\nbody\nbody\nbody\nafter:still broken\n" {
+		if got := trace("flaky"); got != "before\nbody\nbody\nbody\nafter:step \"run\": still broken\n" {
 			t.Errorf("flaky trace = %q, want before_run once, three bodies, then after_run once with the error", got)
 		}
 	})

@@ -130,6 +130,8 @@ func addHooks(plan *sparkwing.Plan, marker string) {
 	sparkwing.Job(plan, "slow", func(ctx context.Context) error { trace("slow", "body"); <-ctx.Done(); return ctx.Err() }).
 		AfterRun(after("slow")).
 		Timeout(500 * time.Millisecond)
+	sparkwing.JobApproval(plan, "skipped-gate", sparkwing.ApprovalConfig{Message: "ship it?"}).
+		SkipIf(func(context.Context) bool { return true })
 	source := sparkwing.Job(plan, "unverified-source", &targetsJob{list: "a"}).
 		Verify(func(context.Context) error { return errors.New("bad target list") })
 	sparkwing.JobFanOutDynamic(plan, "unverified-fanout", source, func(target string) (string, any) {
