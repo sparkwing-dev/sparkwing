@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -649,11 +650,38 @@ func (s *scheduler) nodeVerdict() (string, error) {
 	return "success", nil
 }
 
+// safety: a failed command's error embeds its whole output, which the node's
+// log already holds, and the controller refuses a finish body over 1 MiB, so
+// the row and end event carry a bounded error.
+const (
+	nodeErrTextMaxBytes  = 8 << 10
+	nodeErrTextHeadBytes = 512
+)
+
 func errText(err error) string {
 	if err == nil {
 		return ""
 	}
-	return err.Error()
+	return boundedNodeErrText(err.Error())
+}
+
+// safety: the first line names what failed and the tail is where a command's
+// output reports why, so both survive and the elision is stated.
+func boundedNodeErrText(text string) string {
+	if len(text) <= nodeErrTextMaxBytes {
+		return text
+	}
+	head, _, _ := strings.Cut(text, "\n")
+	if len(head) > nodeErrTextHeadBytes {
+		head = strings.ToValidUTF8(head[:nodeErrTextHeadBytes], "")
+	}
+	tail := text[len(text)-(nodeErrTextMaxBytes-nodeErrTextHeadBytes-128):]
+	if i := strings.IndexByte(tail, '\n'); i >= 0 && i < len(tail)-1 {
+		tail = tail[i+1:]
+	}
+	tail = strings.ToValidUTF8(tail, "")
+	elided := len(text) - len(head) - len(tail)
+	return fmt.Sprintf("%s\n… (%d bytes of this error elided)\n%s", head, elided, tail)
 }
 
 type discardSink struct{}

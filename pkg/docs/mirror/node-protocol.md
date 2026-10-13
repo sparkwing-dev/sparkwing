@@ -364,6 +364,7 @@ Content-Type: application/json
 |---|---|---|
 | One frame | 16 MiB, newline included | The attempt fails with `protocol_error`. |
 | A node's output | One reply frame, so 16 MiB as JSON less the reply's own bytes. Only the result step's output, or a `run_node` output, travels; other step outputs stay in the SDK process | The Go SDK answers a failed reply, and the node fails. |
+| A node's recorded `error` | 8 KiB: the first line, up to 512 bytes, and the tail | The host records the first line, a note of how many bytes it elided, and the tail. A failed command's full output stays in the node's log. |
 | A node `skip_if` | `modifiers.skip_if_budget_ms`, 30 seconds by default | The node runs. |
 | A `cache_key` closure | 30 seconds | The node fails. |
 | `after_run` after a timeout | 2 minutes, in its own eval process | The process is killed and the node's outcome stands. |
