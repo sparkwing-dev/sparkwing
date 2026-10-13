@@ -1,13 +1,20 @@
 package main
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
-	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/repos"
+	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 )
 
 type planPreviewDoc struct {
@@ -15,13 +22,7 @@ type planPreviewDoc struct {
 	ResolvedArgs map[string]string    `json:"resolved_args,omitempty"`
 	StartAt      string               `json:"start_at,omitempty"`
 	StopAt       string               `json:"stop_at,omitempty"`
-	LintWarnings []planPreviewLintDoc `json:"lint_warnings,omitempty"`
 	Nodes        []planPreviewNodeDoc `json:"nodes"`
-}
-
-type planPreviewLintDoc struct {
-	NodeID  string `json:"node_id,omitempty"`
-	Message string `json:"message"`
 }
 
 type planPreviewNodeDoc struct {
@@ -132,41 +133,255 @@ func runPipelinePlan(args []string) error {
 	if err != nil {
 		return err
 	}
-	jsonOut := format == "json"
-
-	pipelineArgs := []string{"run", parsed.pipeline, "--plan"}
-	pipelineArgs = append(pipelineArgs, parsed.passthrough...)
-	binary, err := os.Executable()
+	var doc planPreviewDoc
+	err = withPipelineBinary(parsed.pipeline, func(ctx context.Context, bin, dir string) error {
+		planned, err := planOverProtocol(ctx, bin, dir, parsed.pipeline, parsed.passthrough, "plan", true)
+		if err == nil {
+			doc, err = previewPlan(planned, parsed.startAt, parsed.stopAt)
+		}
+		return err
+	})
 	if err != nil {
-		binary = "sparkwing"
-	}
-
-	cmd := exec.Command(binary, pipelineArgs...)
-	cmd.Env = os.Environ()
-	if parsed.startAt != "" {
-		cmd.Env = append(cmd.Env, "SPARKWING_START_AT="+parsed.startAt)
-	}
-	if parsed.stopAt != "" {
-		cmd.Env = append(cmd.Env, "SPARKWING_STOP_AT="+parsed.stopAt)
-	}
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("plan: %w", err)
 	}
-	if jsonOut {
-		_, _ = os.Stdout.Write(stdout.Bytes())
-		return nil
-	}
-	var doc planPreviewDoc
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &doc); err != nil {
-		_, _ = os.Stdout.Write(stdout.Bytes())
-		return nil
+	if format == "json" {
+		return json.NewEncoder(os.Stdout).Encode(doc)
 	}
 	printPin(parsed.pipeline)
 	printPlanPreview(&doc)
 	return nil
+}
+
+// safety: a pipeline with a declared source plans from that revision, as a run
+// of it would execute.
+func withPipelineBinary(pipeline string, fn func(ctx context.Context, bin, dir string) error) error {
+	dir, err := findSparkwingDir()
+	if err != nil {
+		return err
+	}
+	if err := switchToolchain(dir); err != nil {
+		return err
+	}
+	source, err := orchestrator.ResolvePipelineSource(context.Background(), filepath.Dir(dir), pipeline, "")
+	if err != nil {
+		return err
+	}
+	bindDir := dir
+	if source != "" {
+		_, selected, cleanup, err := setupRefWorktree(dir, string(source))
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		dir = selected
+	}
+	run := newPipelineRun(dir, compileOptions{})
+	defer run.stop()
+	if err := run.materialize(os.Environ()); err != nil {
+		return run.finish(err)
+	}
+	bin := run.uncachedBinary
+	if bin == "" {
+		bin = run.lease.Path()
+	}
+	return run.finish(fn(run.ctx, bin, filepath.Dir(bindDir)))
+}
+
+type planned struct {
+	pipeline string
+	args     map[string]string
+	doc      nodeproto.PlanDoc
+	skipped  map[string]string
+}
+
+// safety: describe, plan and the evals share one process because the SDK
+// answers plan once per process and evaluates closures only of its own plan.
+func planOverProtocol(ctx context.Context, bin, dir, pipeline string, args []string, runID string, evalSkips bool) (planned, error) {
+	out := planned{pipeline: pipeline, skipped: map[string]string{}}
+	err := repos.Converse(ctx, bin, dir, func(s *repos.Session) error {
+		described, err := s.Describe()
+		if err != nil {
+			return err
+		}
+		schema, err := findPipelineSchema(described.Pipelines, pipeline)
+		if err != nil {
+			return err
+		}
+		if out.args, err = parsePipelineArgs(schema, args); err != nil {
+			return &nodeproto.Error{Code: nodeproto.CodeInvalidArgs, Message: err.Error()}
+		}
+		req := nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: pipeline, Args: out.args, Run: &nodeproto.RunContext{RunID: runID}}
+		if err := s.Call(req, &out.doc); err != nil {
+			return err
+		}
+		for _, n := range out.doc.Nodes {
+			if !evalSkips || n.Work == nil {
+				continue
+			}
+			for _, step := range n.Work.Steps {
+				if step.Closures == nil {
+					continue
+				}
+				for _, id := range step.Closures.SkipIf {
+					var res nodeproto.EvalResult
+					if err := s.Call(nodeproto.Request{Op: nodeproto.OpEval, Closure: id}, &res); err != nil {
+						return err
+					}
+					var match bool
+					if res.Error != nil {
+						out.skipped[id] = *res.Error
+					} else if err := json.Unmarshal(res.Value, &match); err != nil {
+						return fmt.Errorf("skip_if %s answered %s, not a boolean", id, res.Value)
+					} else if !match {
+						continue
+					} else {
+						out.skipped[id] = ""
+					}
+					break
+				}
+			}
+		}
+		return nil
+	})
+	return out, planError(pipeline, err)
+}
+
+type planFailure struct {
+	msg   string
+	cause *nodeproto.Error
+}
+
+func (e *planFailure) Error() string { return e.msg }
+func (e *planFailure) Unwrap() error { return e.cause }
+
+func planError(pipeline string, err error) error {
+	var perr *nodeproto.Error
+	switch {
+	case err == nil:
+		return nil
+	case !errors.As(err, &perr):
+		return fmt.Errorf("%s: %w", pipeline, err)
+	case perr.Code == nodeproto.CodeInvalidArgs:
+		return &planFailure{fmt.Sprintf("%s: invalid arguments: %s", pipeline, perr.Message), perr}
+	case perr.Code == nodeproto.CodePlanFailed:
+		return &planFailure{fmt.Sprintf("%s: the pipeline's Plan failed: %s", pipeline, perr.Message), perr}
+	}
+	return fmt.Errorf("%s: %w", pipeline, err)
+}
+
+func isInvalidArgs(err error) bool {
+	var perr *nodeproto.Error
+	return errors.As(err, &perr) && perr.Code == nodeproto.CodeInvalidArgs
+}
+
+func previewPlan(p planned, startAt, stopAt string) (planPreviewDoc, error) {
+	doc := planPreviewDoc{Pipeline: p.pipeline, ResolvedArgs: p.args, StartAt: startAt, StopAt: stopAt}
+	if err := checkStepRange(p.doc, startAt, stopAt); err != nil {
+		return doc, err
+	}
+	for _, n := range p.doc.Nodes {
+		pn := planPreviewNodeDoc{ID: n.ID, Deps: n.Deps, IsApproval: n.Approval != nil, OnFailureOf: n.OnFailureOf, Decision: "would_run"}
+		if n.Work != nil && n.Approval == nil {
+			pn.Work = &planPreviewWorkDoc{}
+			ranged := rangeSkips(n.Work.Steps, startAt, stopAt)
+			skipped := 0
+			for _, s := range n.Work.Steps {
+				it := planPreviewItemDoc{ID: s.ID, Needs: s.Needs, Decision: "would_run", Risks: s.Risks}
+				if reason, ok := ranged[s.ID]; ok {
+					it.Decision, it.SkipReason, it.SkipDetail = "would_skip", "range_skip", reason
+				} else if s.Closures != nil {
+					for _, id := range s.Closures.SkipIf {
+						if detail, ok := p.skipped[id]; ok {
+							it.Decision, it.SkipReason = "would_skip", "user_skipif"
+							if detail != "" {
+								it.SkipDetail = "predicate failed at plan time: " + detail
+							}
+							break
+						}
+					}
+				}
+				if it.Decision == "would_skip" {
+					skipped++
+				}
+				pn.Work.Steps = append(pn.Work.Steps, it)
+			}
+			if skipped > 0 && skipped == len(n.Work.Steps) {
+				pn.Decision, pn.SkipReason = "would_skip", "all_steps_skipped"
+			}
+		}
+		doc.Nodes = append(doc.Nodes, pn)
+	}
+	return doc, nil
+}
+
+func checkStepRange(doc nodeproto.PlanDoc, startAt, stopAt string) error {
+	known := map[string]bool{}
+	for _, n := range doc.Nodes {
+		if n.Work != nil {
+			for _, s := range n.Work.Steps {
+				known[s.ID] = true
+			}
+		}
+	}
+	for _, bound := range [][2]string{{"--sw-start-at", startAt}, {"--sw-stop-at", stopAt}} {
+		if bound[1] == "" || known[bound[1]] {
+			continue
+		}
+		ids := slices.Sorted(maps.Keys(known))
+		msg := fmt.Sprintf("%s %q references unknown step %q", bound[0], bound[1], bound[1])
+		if suggestion := sparkwingruntime.SuggestClosest(bound[1], ids); suggestion != "" {
+			msg += fmt.Sprintf("; did you mean %q?", suggestion)
+		}
+		return fmt.Errorf("%s (available steps: %s)", msg, strings.Join(ids, ", "))
+	}
+	return nil
+}
+
+func rangeSkips(steps []nodeproto.PlanStep, startAt, stopAt string) map[string]string {
+	parents := map[string][]string{}
+	children := map[string][]string{}
+	for _, s := range steps {
+		parents[s.ID] = s.Needs
+		for _, d := range s.Needs {
+			children[d] = append(children[d], s.ID)
+		}
+	}
+	_, hasStart := parents[startAt]
+	_, hasStop := parents[stopAt]
+	if !hasStart && !hasStop {
+		return nil
+	}
+	reason := "upstream of --start-at=" + startAt
+	switch {
+	case startAt != "" && stopAt != "":
+		reason = fmt.Sprintf("outside --start-at=%s --stop-at=%s range", startAt, stopAt)
+	case stopAt != "":
+		reason = "downstream of --stop-at=" + stopAt
+	}
+	skips := map[string]string{}
+	for _, s := range steps {
+		if (hasStart && !reaches(startAt, s.ID, children)) || (hasStop && !reaches(stopAt, s.ID, parents)) {
+			skips[s.ID] = reason
+		}
+	}
+	return skips
+}
+
+func reaches(from, to string, adj map[string][]string) bool {
+	seen := map[string]bool{}
+	stack := []string{from}
+	for len(stack) > 0 {
+		n := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if n == to {
+			return true
+		}
+		if !seen[n] {
+			seen[n] = true
+			stack = append(stack, adj[n]...)
+		}
+	}
+	return false
 }
 
 func printPlanPreview(doc *planPreviewDoc) {
@@ -179,18 +394,8 @@ func printPlanPreview(doc *planPreviewDoc) {
 	}
 	if len(doc.ResolvedArgs) > 0 {
 		fmt.Println("Args:")
-		for k, v := range doc.ResolvedArgs {
-			fmt.Printf("  %s=%s\n", k, v)
-		}
-	}
-	if len(doc.LintWarnings) > 0 {
-		fmt.Println("Lint warnings:")
-		for _, lw := range doc.LintWarnings {
-			if lw.NodeID != "" {
-				fmt.Printf("  [%s] %s\n", lw.NodeID, lw.Message)
-			} else {
-				fmt.Printf("  %s\n", lw.Message)
-			}
+		for _, k := range slices.Sorted(maps.Keys(doc.ResolvedArgs)) {
+			fmt.Printf("  %s=%s\n", k, doc.ResolvedArgs[k])
 		}
 	}
 	if len(doc.Nodes) == 0 {

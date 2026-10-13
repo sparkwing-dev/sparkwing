@@ -1390,10 +1390,11 @@ Skipping a state-loading step with --start-at leaves that state empty;
 downstream predicates are evaluated with the resulting state.
 
 --static prints the Plan DAG as the pipeline declares it -- nodes,
-dependencies, approval gates -- without resolving runtime skips. Missing
-required arguments are tolerated so the plan can be inspected before every
-input is supplied. --static --all constructs every declared pipeline with
-no extra arguments and exits non-zero if any plan fails validation
+dependencies, approval gates -- without resolving runtime skips. Arguments
+are checked against the pipeline's flags, and a missing required argument
+fails. --static --all constructs every declared pipeline with no extra
+arguments, reports the ones that need arguments as skipped, and exits
+non-zero if any other plan fails validation
 (mismatched typed references, inconsistent declared outputs, duplicate node
 IDs, and similar errors), which makes it a CI gate.`,
 	Flags: []FlagSpec{
