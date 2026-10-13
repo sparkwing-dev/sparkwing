@@ -68,28 +68,35 @@ func TestEveryTenantTableCarriesTheTeamColumn(t *testing.T) {
 	}
 	defer func() { _ = s.Close() }()
 
-	ctx := context.Background()
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback() }()
 	for _, table := range tenantTables {
-		have, err := tableColumns(ctx, tx, table)
-		if err != nil {
-			t.Fatalf("read columns of %s: %v", table, err)
-		}
-		if !have["team"] {
+		if !sqliteColumns(t, s, table)["team"] {
 			t.Errorf("tenant-owned table %s has no team column", table)
 		}
 	}
 	for _, table := range operatorTables {
-		have, err := tableColumns(ctx, tx, table)
-		if err != nil {
-			t.Fatalf("read columns of %s: %v", table, err)
-		}
-		if have["team"] {
+		if sqliteColumns(t, s, table)["team"] {
 			t.Errorf("operator-owned table %s carries a team column", table)
 		}
 	}
+}
+
+func sqliteColumns(t *testing.T, s *Store, table string) map[string]bool {
+	t.Helper()
+	rows, err := s.DB().Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		t.Fatalf("read columns of %s: %v", table, err)
+	}
+	defer func() { _ = rows.Close() }()
+	have := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		have[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return have
 }

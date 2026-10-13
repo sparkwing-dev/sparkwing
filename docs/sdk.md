@@ -514,14 +514,8 @@ structured "would do X" log line for an op without a native
 dry-run flag), read `sparkwing.IsDryRun(ctx)` directly -- the public
 way to detect dry-run from inside a step.
 
-`PreviewPlan` (the pipeline-binary helper behind
-`sparkwing pipeline plan`) renders one of three decisions per step
-under dry-run: `would_dry_run` (DryRunFn defined),
-`would_run` (SafeWithoutDryRun marker), or `would_skip` with
-`skip_reason: no_dry_run_defined` (neither contract). Runtime
-and preview always agree. `sparkwing pipeline plan` has no dry-run
-flag of its own; the preview reads the dry-run mode from the
-environment `sparkwing run --sw-dry-run` sets.
+`sparkwing pipeline plan` does not preview dry-run: it reports
+`would_run` or `would_skip` from SkipIf and the step range only.
 
 Declare `step.DryRun(fn)` on mutating steps; `--sw-dry-run` selects
 those callbacks (see *Flag namespace* below).

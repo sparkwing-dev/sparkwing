@@ -61,6 +61,9 @@ func startE2EDaemon(t *testing.T, home string, cores float64) *e2eDaemon {
 
 func startE2EDaemonConfig(t *testing.T, cfg wingd.Config) *e2eDaemon {
 	t.Helper()
+	if cfg.StoreSchemaVersion == 0 {
+		cfg.StoreSchemaVersion = store.ExpectedSchemaVersion()
+	}
 	d, err := wingd.New(cfg)
 	if err != nil {
 		t.Fatalf("new daemon: %v", err)

@@ -27,26 +27,6 @@ var ErrClaimNotRunner = errors.New("store: the claim token is not a runner's nod
 // token's only end is the claim's; a hard expiry would cut a long node short.
 var runnerClaimTokenExpiry = time.Unix(0, math.MaxInt64)
 
-const triggerClaimTokensTable = `CREATE TABLE IF NOT EXISTS trigger_claim_tokens (
-    digest      TEXT PRIMARY KEY,
-    prefix      TEXT NOT NULL,
-    team        TEXT NOT NULL,
-    trigger_id  TEXT NOT NULL,
-    claim_seq   INTEGER NOT NULL,
-    created_at  INTEGER NOT NULL,
-    UNIQUE (team, trigger_id, claim_seq),
-    FOREIGN KEY (trigger_id) REFERENCES triggers(id) ON DELETE CASCADE
-)`
-
-func applyTriggerClaimTokensMigration(ctx context.Context, tx *storeTx, postgres bool) error {
-	ddl := triggerClaimTokensTable
-	if postgres {
-		ddl = strings.ReplaceAll(ddl, "INTEGER", "BIGINT")
-	}
-	_, err := tx.ExecContext(ctx, ddl)
-	return err
-}
-
 // safety: only an authenticated claimant gets a token, because the token
 // acts as that claimant's credential confined to the claim.
 func mintRunnerNodeTokenTx(ctx context.Context, tx *storeTx, claimant ClaimIdentity, team Team, n *Node, now time.Time) error {

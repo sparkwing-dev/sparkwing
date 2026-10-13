@@ -89,30 +89,6 @@ type ClaimToken struct {
 	Attempt int64
 }
 
-const claimTokensTable = `CREATE TABLE IF NOT EXISTS claim_tokens (
-    digest           TEXT PRIMARY KEY,
-    prefix           TEXT NOT NULL,
-    team             TEXT NOT NULL,
-    run_id           TEXT NOT NULL,
-    node_id          TEXT NOT NULL,
-    claim_generation INTEGER NOT NULL,
-    kind             TEXT NOT NULL,
-    created_at       INTEGER NOT NULL,
-    expires_at       INTEGER NOT NULL,
-    result_digest    TEXT NOT NULL DEFAULT '',
-    UNIQUE (team, run_id, node_id, claim_generation),
-    FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
-)`
-
-func applyClaimTokensMigration(ctx context.Context, tx *storeTx, postgres bool) error {
-	ddl := claimTokensTable
-	if postgres {
-		ddl = strings.ReplaceAll(ddl, "INTEGER", "BIGINT")
-	}
-	_, err := tx.ExecContext(ctx, ddl)
-	return err
-}
-
 // safety: the raw token carries 256 random bits, so a plain digest is as
 // hard to invert as a slow hash and lets every request look the token up
 // by primary key instead of paying argon2 or trusting a cache.

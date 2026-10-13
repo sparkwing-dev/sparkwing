@@ -32,30 +32,28 @@ const daemonRestartTimeout = 20 * time.Second
 const daemonStopTimeout = 30 * time.Second
 
 type daemonReport struct {
-	Running             bool     `json:"running"`
-	Healthy             bool     `json:"healthy"`
-	Draining            bool     `json:"draining"`
-	Restarted           bool     `json:"restarted"`
-	Stopped             bool     `json:"stopped"`
-	BinaryVersion       string   `json:"binary_version,omitempty"`
-	RunningRevision     string   `json:"running_revision,omitempty"`
-	PreviousVersion     string   `json:"previous_version,omitempty"`
-	PreviousRevision    string   `json:"previous_revision,omitempty"`
-	Socket              string   `json:"socket"`
-	APISocket           string   `json:"api_socket"`
-	APIReady            *bool    `json:"api_ready,omitempty"`
-	APIError            string   `json:"api_error,omitempty"`
-	ArtifactStoreError  string   `json:"artifact_store_error,omitempty"`
-	InstalledVersion    string   `json:"installed_version,omitempty"`
-	DaemonSchemaVersion int      `json:"daemon_schema_version,omitempty"`
-	StoreSchemaVersion  int      `json:"store_schema_version,omitempty"`
-	StoreSchemaError    string   `json:"store_schema_error,omitempty"`
-	DaemonStoreReady    *bool    `json:"daemon_store_ready,omitempty"`
-	DaemonStoreError    string   `json:"daemon_store_error,omitempty"`
-	DaemonStoreSkew     bool     `json:"daemon_store_skew,omitempty"`
-	StorePath           string   `json:"store_path,omitempty"`
-	SchemaDiverged      bool     `json:"schema_diverged,omitempty"`
-	MissingRequirements []string `json:"missing_requirements,omitempty"`
+	Running             bool   `json:"running"`
+	Healthy             bool   `json:"healthy"`
+	Draining            bool   `json:"draining"`
+	Restarted           bool   `json:"restarted"`
+	Stopped             bool   `json:"stopped"`
+	BinaryVersion       string `json:"binary_version,omitempty"`
+	RunningRevision     string `json:"running_revision,omitempty"`
+	PreviousVersion     string `json:"previous_version,omitempty"`
+	PreviousRevision    string `json:"previous_revision,omitempty"`
+	Socket              string `json:"socket"`
+	APISocket           string `json:"api_socket"`
+	APIReady            *bool  `json:"api_ready,omitempty"`
+	APIError            string `json:"api_error,omitempty"`
+	ArtifactStoreError  string `json:"artifact_store_error,omitempty"`
+	InstalledVersion    string `json:"installed_version,omitempty"`
+	DaemonSchemaVersion int    `json:"daemon_schema_version,omitempty"`
+	StoreSchemaVersion  int    `json:"store_schema_version,omitempty"`
+	StoreSchemaError    string `json:"store_schema_error,omitempty"`
+	DaemonStoreReady    *bool  `json:"daemon_store_ready,omitempty"`
+	DaemonStoreError    string `json:"daemon_store_error,omitempty"`
+	StorePath           string `json:"store_path,omitempty"`
+	SchemaDiverged      bool   `json:"schema_diverged,omitempty"`
 }
 
 func runDaemon(args []string) error {
@@ -500,7 +498,7 @@ func inspectDaemon(ctx context.Context, home string) (daemonReport, error) {
 		InstalledVersion: installedVersion(),
 		StorePath:        storeDBPath(home),
 	}
-	version, storeRequirements, schemaErr := storeSchemaState(ctx, home)
+	version, schemaErr := storeSchemaState(ctx, home)
 	report.StoreSchemaVersion = version
 	if schemaErr != nil {
 		report.StoreSchemaError = schemaErr.Error()
@@ -523,9 +521,7 @@ func inspectDaemon(ctx context.Context, home string) (daemonReport, error) {
 	report.APIReady = info.APIReady
 	report.APIError = info.APIError
 	report.ArtifactStoreError = info.ArtifactStoreError
-	report.MissingRequirements = store.MissingRequirements(info.StoreRequirements, storeRequirements)
-	report.SchemaDiverged = daemonCannotReadStore(report, info.StoreRequirements)
-	report.DaemonStoreSkew = daemonStoreSkewed(report)
+	report.SchemaDiverged = report.DaemonSchemaVersion != 0 && report.StoreSchemaVersion > report.DaemonSchemaVersion
 	if report.SchemaDiverged || report.StoreSchemaError != "" || daemonStoreUnusable(report) || daemonAPIUnusable(report) {
 		report.Healthy = false
 	}
@@ -550,26 +546,6 @@ func daemonStoreUnusable(report daemonReport) bool {
 	return report.StoreSchemaVersion > 0 || report.StoreSchemaError != ""
 }
 
-// safety: a store the daemon is merely too old to open is age, and age moves a
-// run to the standalone store rather than failing it, so an operator reading
-// this must not be sent looking for a corrupt file.
-func daemonStoreSkewed(report daemonReport) bool {
-	return report.DaemonStoreError != "" && len(report.MissingRequirements) > 0
-}
-
-// safety: a store schema above the daemon's own no longer proves the daemon cannot
-// read it, so the version comparison holds only for a daemon too old to advertise
-// requirements.
-func daemonCannotReadStore(report daemonReport, daemonRequirements []string) bool {
-	if report.DaemonSchemaVersion == 0 {
-		return false
-	}
-	if daemonRequirements != nil {
-		return len(report.MissingRequirements) > 0
-	}
-	return report.StoreSchemaVersion > report.DaemonSchemaVersion
-}
-
 func storeDBPath(home string) string {
 	root, err := wingd.HomeDir(home)
 	if err != nil || root == "" {
@@ -581,35 +557,31 @@ func storeDBPath(home string) string {
 // safety: an absent store is 0 with no error, but a store that exists and
 // cannot be read must be an error. Folding the two together reported an
 // unreadable store as a healthy daemon.
-func storeSchemaState(ctx context.Context, home string) (int, []string, error) {
+func storeSchemaState(ctx context.Context, home string) (int, error) {
 	root, err := wingd.HomeDir(home)
 	if err != nil {
-		return 0, nil, fmt.Errorf("resolve the sparkwing home: %w", err)
+		return 0, fmt.Errorf("resolve the sparkwing home: %w", err)
 	}
 	if root == "" {
-		return 0, nil, errors.New("the sparkwing home did not resolve to a directory")
+		return 0, errors.New("the sparkwing home did not resolve to a directory")
 	}
 	db := paths.PathsAt(root).StateDB()
 	if _, err := os.Stat(db); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return 0, nil, nil
+			return 0, nil
 		}
-		return 0, nil, fmt.Errorf("stat the runs store: %w", err)
+		return 0, fmt.Errorf("stat the runs store: %w", err)
 	}
 	st, err := store.OpenReadOnly(db)
 	if err != nil {
-		return 0, nil, fmt.Errorf("open the runs store: %w", err)
+		return 0, fmt.Errorf("open the runs store: %w", err)
 	}
 	defer func() { _ = st.Close() }()
 	version, err := st.CurrentSchemaVersion(ctx)
 	if err != nil {
-		return 0, nil, fmt.Errorf("read the runs-store schema: %w", err)
+		return 0, fmt.Errorf("read the runs-store schema: %w", err)
 	}
-	requirements, err := st.Requirements(ctx)
-	if err != nil {
-		return 0, nil, fmt.Errorf("read the runs-store requirements: %w", err)
-	}
-	return version, requirements, nil
+	return version, nil
 }
 
 func runDaemonRestart(args []string) error {
@@ -740,8 +712,8 @@ func apiFault(report daemonReport) string {
 func schemaRemedy(report daemonReport) string {
 	if report.InstalledVersion != "" && report.InstalledVersion == report.BinaryVersion {
 		return fmt.Sprintf(
-			"the installed sparkwing is the same build (%s), so `sparkwing daemon restart` will not help; install a sparkwing that understands %s, or set %s to a binary that does and stop the daemon",
-			report.InstalledVersion, schemaShortfall(report), wingdclient.HostBinEnv)
+			"the installed sparkwing is the same build (%s), so `sparkwing daemon restart` will not help; install a sparkwing that understands schema %d, or set %s to a binary that does and stop the daemon",
+			report.InstalledVersion, report.StoreSchemaVersion, wingdclient.HostBinEnv)
 	}
 	return fmt.Sprintf("run `sparkwing daemon restart` to replace it with the installed %s", report.InstalledVersion)
 }
@@ -751,13 +723,6 @@ func storeRemedy(report daemonReport) string {
 		return "run `sparkwing doctor` to inspect this home's runs store"
 	}
 	return fmt.Sprintf("inspect %s, then run `sparkwing doctor`", report.StorePath)
-}
-
-func schemaShortfall(report daemonReport) string {
-	if len(report.MissingRequirements) > 0 {
-		return strings.Join(report.MissingRequirements, ", ")
-	}
-	return fmt.Sprintf("schema %d", report.StoreSchemaVersion)
 }
 
 func emitDaemonReport(report daemonReport, output string) error {
@@ -804,25 +769,14 @@ func emitDaemonReport(report daemonReport, output string) error {
 			fmt.Fprintf(os.Stdout, "runs store unreadable: %s\n", report.StoreSchemaError)
 		}
 		if daemonStoreUnusable(report) {
-			verb := "cannot use"
-			if report.DaemonStoreSkew {
-				verb = "is behind"
-			}
-			fmt.Fprintf(os.Stdout, "the daemon %s the runs store: %s\n", verb, report.DaemonStoreError)
+			fmt.Fprintf(os.Stdout, "the daemon cannot use the runs store: %s\n", report.DaemonStoreError)
 			if !report.SchemaDiverged {
 				fmt.Fprintln(os.Stdout, storeRemedy(report))
 			}
 		}
 		if report.SchemaDiverged {
-			if len(report.MissingRequirements) > 0 {
-				fmt.Fprintf(os.Stdout,
-					"runs-store mismatch: the store uses %s, which the daemon does not understand, so every run goes standalone\n",
-					strings.Join(report.MissingRequirements, ", "))
-			} else {
-				fmt.Fprintf(os.Stdout,
-					"runs-store schema mismatch: the daemon understands %d, the store is at %d, so every run goes standalone\n",
-					report.DaemonSchemaVersion, report.StoreSchemaVersion)
-			}
+			fmt.Fprintf(os.Stdout, "runs-store schema mismatch: the daemon understands %d, the store is at %d\n",
+				report.DaemonSchemaVersion, report.StoreSchemaVersion)
 			fmt.Fprintln(os.Stdout, schemaRemedy(report))
 		}
 		return nil

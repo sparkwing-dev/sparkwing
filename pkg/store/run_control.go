@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 )
 
@@ -18,46 +17,6 @@ const (
 	RunAdmissionPlanning = "planning"
 	RunAdmissionAdmitted = "admitted"
 )
-
-// safety: every v78 column is defaulted or nullable, so a binary predating it
-// keeps writing runs and nodes, and none of them reads as cancelled.
-var (
-	runControlRunCols = map[string]string{
-		"admission":           "TEXT NOT NULL DEFAULT ''",
-		"cancel_requested_at": "INTEGER",
-	}
-	runControlNodeCols = map[string]string{
-		"cancel_requested_at": "INTEGER",
-		"approval_json":       "BLOB",
-	}
-)
-
-const childInvocationsTable = `CREATE TABLE IF NOT EXISTS child_invocations (
-    team             TEXT NOT NULL,
-    parent_run_id    TEXT NOT NULL,
-    parent_node_id   TEXT NOT NULL,
-    claim_generation INTEGER NOT NULL,
-    ordinal          INTEGER NOT NULL,
-    request_digest   TEXT NOT NULL,
-    child_run_id     TEXT NOT NULL,
-    created_at       INTEGER NOT NULL,
-    PRIMARY KEY (team, parent_run_id, parent_node_id, claim_generation, ordinal),
-    FOREIGN KEY (parent_run_id) REFERENCES runs(id) ON DELETE CASCADE
-)`
-
-func applyRunControlMigration(ctx context.Context, tx *storeTx, postgres bool) error {
-	if err := addDispatchColumnsTx(ctx, tx, postgres, map[string]map[string]string{
-		"runs": runControlRunCols, "nodes": runControlNodeCols,
-	}); err != nil {
-		return err
-	}
-	ddl := childInvocationsTable
-	if postgres {
-		ddl = strings.ReplaceAll(ddl, "INTEGER", "BIGINT")
-	}
-	_, err := tx.ExecContext(ctx, ddl)
-	return err
-}
 
 const approvalControllerActor = "sparkwing"
 

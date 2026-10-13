@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type Paths struct {
@@ -115,24 +114,16 @@ func (p Paths) RefWorktreeDir(runID string) string {
 // [Paths.StateDB]; [Paths.StandaloneStores] enumerates them.
 func (p Paths) StandaloneDir() string { return filepath.Join(p.Root, "standalone") }
 
-// StandaloneStateDB is the store standalone runs share. Binaries at
-// neighboring schemas share it under the store's requirements rule: the
-// newest migrates it, an older one opens it while it knows every requirement
-// the file records.
+// StandaloneStateDB is the store standalone runs share.
 func (p Paths) StandaloneStateDB() string {
 	return filepath.Join(p.StandaloneDir(), "state.db")
 }
 
-// StandaloneSchemaDir is where a binary the shared standalone store refuses
-// keeps its own, one directory per store schema version.
+// StandaloneSchemaDir is where a build before the store baseline kept a
+// standalone store the shared one refused, one directory per schema version.
+// Nothing writes there now; [Paths.StandaloneStores] still lists what is left.
 func (p Paths) StandaloneSchemaDir(version int) string {
 	return filepath.Join(p.StandaloneDir(), fmt.Sprintf("schema-%d", version))
-}
-
-// StandaloneSchemaStateDB is [Paths.StandaloneSchemaDir] for this binary's own
-// expected schema.
-func (p Paths) StandaloneSchemaStateDB() string {
-	return filepath.Join(p.StandaloneSchemaDir(store.ExpectedSchemaVersion()), "state.db")
 }
 
 // EnsureStandaloneDir prepares [Paths.StandaloneDir] under the home's own mode.
@@ -141,15 +132,6 @@ func (p Paths) EnsureStandaloneDir() error {
 		return err
 	}
 	return fssecure.EnsureDir(p.StandaloneDir())
-}
-
-// EnsureStandaloneSchemaDir prepares the directory holding
-// [Paths.StandaloneSchemaStateDB].
-func (p Paths) EnsureStandaloneSchemaDir() error {
-	if err := p.EnsureStandaloneDir(); err != nil {
-		return err
-	}
-	return fssecure.EnsureDir(p.StandaloneSchemaDir(store.ExpectedSchemaVersion()))
 }
 
 // StandaloneStore is one runs store under [Paths.StandaloneDir]: the shared

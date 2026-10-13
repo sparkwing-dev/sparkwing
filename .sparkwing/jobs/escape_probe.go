@@ -36,9 +36,9 @@ type EscapeProbeArgs struct {
 }
 
 // EscapeProbe checks that a customer-code pod cannot reach the credentials and
-// services the containment design fences off. It probes at plan time and in a
-// work node, reports pass or fail per probe and never a value, and fails the
-// run if any probe reaches what it should not.
+// services the containment design fences off. It probes in a work node,
+// reports pass or fail per probe and never a value, and fails the run if any
+// probe reaches what it should not.
 type EscapeProbe struct {
 	sparkwing.Base
 	args EscapeProbeArgs
@@ -49,7 +49,7 @@ func (EscapeProbe) ShortHelp() string {
 }
 
 func (EscapeProbe) Help() string {
-	return "Runs a fixed set of probes in the plan and in a node pod: service-account and IRSA token files, " +
+	return "Runs a fixed set of probes in a node pod: service-account and IRSA token files, " +
 		"credential-named environment variables other than the pod's own claim token, Kubernetes API " +
 		"authorization at the Service VIP and each endpoint (SelfSubjectRulesReview, a dry-run Job mounting " +
 		"sparkwing-database, GET secrets), a controller admin route with the pod's own token, IMDSv2, the " +
@@ -62,7 +62,7 @@ func (EscapeProbe) Help() string {
 
 func (EscapeProbe) Examples() []sparkwing.Example {
 	return []sparkwing.Example{{
-		Comment: "Probe from a plan and a node pod",
+		Comment: "Probe from a node pod",
 		Command: "sparkwing run escape-probe --rds db.example:5432 --api-hosts 10.0.36.1,10.0.65.130 --other-run <earlier run>",
 	}}
 }
@@ -138,14 +138,23 @@ type prober struct {
 	siblingWait time.Duration
 }
 
+// hack: every connection a default prober opens goes through this one dialer,
+// so a test can see which code paths reach the network.
+var probeDial = (&net.Dialer{}).DialContext
+
 func defaultProber(args EscapeProbeArgs) prober {
 	return prober{
-		args:        args,
-		env:         os.Environ(),
-		readFile:    os.ReadFile,
-		dial:        net.DialTimeout,
+		args:     args,
+		env:      os.Environ(),
+		readFile: os.ReadFile,
+		dial: func(network, address string, timeout time.Duration) (net.Conn, error) {
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+			return probeDial(ctx, network, address)
+		},
 		siblingWait: 2 * time.Minute,
 		httpClient: &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{
+			DialContext: probeDial,
 			// #nosec G402 -- the probe asks whether the API answers at all; trusting its certificate would add nothing
 			TLSClientConfig: insecureTLS(),
 		}},
@@ -543,16 +552,15 @@ type escapeProbeNode struct {
 }
 
 func (j *escapeProbeNode) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	return sparkwing.Step(w, "probe", func(ctx context.Context) error {
-		p := defaultProber(j.args)
-		return reportProbes(ctx, "node", append(p.run(), p.outputProbes()...))
-	}), nil
+	return sparkwing.Step(w, "probe", j.probe), nil
 }
 
-func (p *EscapeProbe) Plan(ctx context.Context, plan *sparkwing.Plan, in EscapeProbeArgs, _ sparkwing.RunContext) error {
-	if err := reportProbes(ctx, "plan", defaultProber(in).run()); err != nil {
-		return err
-	}
+func (j *escapeProbeNode) probe(ctx context.Context) error {
+	p := defaultProber(j.args)
+	return reportProbes(ctx, "node", append(p.run(), p.outputProbes()...))
+}
+
+func (p *EscapeProbe) Plan(_ context.Context, plan *sparkwing.Plan, in EscapeProbeArgs, _ sparkwing.RunContext) error {
 	sparkwing.Job(plan, outputSibling, escapeProbeSibling{})
 	sparkwing.Job(plan, "probe-node", &escapeProbeNode{args: in})
 	return nil

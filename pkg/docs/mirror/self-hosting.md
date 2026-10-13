@@ -79,57 +79,6 @@ team's log storage, and the hourly storage pass lists the segments to
 correct the count and, for a team without credits past its log share,
 deletes its least recently written finished runs' logs.
 
-### Moving the logs service's logs to segments
-
-This release ships no logs service. Logs an earlier `sparkwing-logs` holds
-stay readable once `sparkwing-controller migrate-logs` converts them into
-the segments and manifests the controller reads. It reads the service's
-storage directly, its volume (`--root`) and its archive (`--archive-store`,
-if it kept one), so the service need not run; it writes to the controller's
-`--cache-blob-store`, or without one to the directory beside the
-controller's state database. It records each converted log in the
-controller's state database, so the controller prunes and deletes it with
-its run, and it refuses, naming the run, any run it cannot convert whole: one
-the database does not hold, whose metadata or files cannot be read, or
-whose log file name (`a__b.log`) fits no single node of the run. A run the
-volume holds only part of takes the rest from the archive. Upgrade in this
-order:
-
-1. Scale the logs service and the controller to zero, so the volume and
-   the state database stop changing, and keep the logs PVC.
-2. Run the new controller image once as a Job that mounts the logs PVC and
-   the controller's data volume, and uses the controller's service account
-   and `--credentials-dir`, with `--dry-run` first to see what it will
-   convert:
-
-   ```bash
-   sparkwing-controller migrate-logs --root /var/lib/sparkwing-logs \
-     --archive-store s3://my-logs-bucket/logs \
-     --cache-blob-store s3://my-cache-bucket/cache \
-     --credentials-dir /etc/sparkwing/credentials --dry-run
-   ```
-
-   then the same command without `--dry-run`. It prints the runs, attempts
-   and bytes it converted and those already converted, and exits non-zero
-   naming each run it could not convert. The dry run leaves the state
-   database unopened, so it checks no run against it; the real run opens
-   it, which upgrades its schema, so the old controller cannot start
-   against it afterward.
-3. Upgrade the charts, controller and runners to this release.
-4. Read a converted run through the controller (`sparkwing runs logs --run
-   <id> --profile <p>`) to confirm.
-5. Delete the logs PVC once every run you keep is converted.
-
-Each stored attempt becomes one attempt under `logs/r90/` or, for a team
-the service marked as without credits, `logs/r30/`. Its manifest says
-`complete` for a sealed stream with nothing missing, `incomplete` for one
-with missing lines, `cut_off` for a numbered stream that never sealed,
-and `incomplete` with reason `migrated without seal` for a log no writer
-numbered. A run that names no team goes under `--default-team`
-(`default`). An attempt already converted is skipped, so the command can be
-stopped and run again; a run converted after an interrupted pass picks up
-where it stopped.
-
 ### Overlapping controllers during an upgrade
 
 Two controllers on one PostgreSQL store can overlap while a deployment

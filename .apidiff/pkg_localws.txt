@@ -28,9 +28,3 @@ type VersionInfo struct {
 	PID      int
 	Instance string
 }
-
-# methods on un-declared receiver types (likely a bug)
-func (s *statusRecorder) Flush()
-func (s *statusRecorder) Unwrap() http.ResponseWriter
-func (s *statusRecorder) Write(b []byte) (int, error)
-func (s *statusRecorder) WriteHeader(code int)

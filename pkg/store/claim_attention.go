@@ -11,37 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
-// safety: zero takes [match.DefaultClaimWait], so a run an older binary wrote
-// waits exactly as long as any other.
-var claimAttentionRunCols = map[string]string{
-	"claim_wait_ns": "INTEGER NOT NULL DEFAULT 0",
-}
-
-var claimAttentionNodeCols = map[string]string{
-	"attention_reason": "TEXT NOT NULL DEFAULT ''",
-}
-
-// safety: NULL is an agent that has not claimed since the column landed, which
-// matches no selector until it does.
-var agentLabelTokenCols = map[string]string{
-	"advertised_labels_json": "BLOB",
-}
-
-func applyClaimAttentionMigration(ctx context.Context, tx *storeTx, postgres bool) error {
-	add := ensureColumnsSQLite
-	if postgres {
-		add = addColumnsTx
-	}
-	for table, cols := range map[string]map[string]string{
-		"runs": claimAttentionRunCols, "nodes": claimAttentionNodeCols, "tokens": agentLabelTokenCols,
-	} {
-		if err := add(ctx, tx, table, cols); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // safety: a claim hides the reason without writing the run row.
 const runAttentionColumn = `COALESCE((SELECT n.attention_reason FROM nodes n
  WHERE n.run_id = runs.id AND n.ready_at IS NOT NULL AND n.claimed_by IS NULL

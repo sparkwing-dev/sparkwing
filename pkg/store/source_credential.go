@@ -171,18 +171,6 @@ func (t *Tenant) SourceClaimant(ctx context.Context, tok ClaimToken) (ClaimIdent
 	return id, err
 }
 
-var sourceMintCols = map[string]string{"source_mints": "INTEGER NOT NULL DEFAULT 0"}
-
-// safety: 0 is an extra repository listed before its ID was recorded, which
-// no source credential is minted for until an owner saves the list again.
-var extraRepoIDCols = map[string]string{"extra_repo_id": "INTEGER NOT NULL DEFAULT 0"}
-
-func applySourceMintMigration(ctx context.Context, tx *storeTx, postgres bool) error {
-	return addDispatchColumnsTx(ctx, tx, postgres, map[string]map[string]string{
-		"claim_tokens": sourceMintCols, "github_app_extra_repos": extraRepoIDCols,
-	})
-}
-
 func validPlannedSource(p *plannedSource) error {
 	if p != nil && p.Depth != nil && *p.Depth < 0 {
 		return errors.New("the source depth must be 0 (all history) or more")

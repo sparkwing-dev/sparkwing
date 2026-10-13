@@ -137,22 +137,6 @@ func (s *Store) deriveCSRFToken(ctx context.Context, rawSession string) (string,
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
 }
 
-func rehashSessions(ctx context.Context, tx *storeTx) error {
-	// safety: pre-digest rows hold replayable session ids, so the migration drops them rather than converting them.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions`); err != nil {
-		return err
-	}
-	cols, err := tableColumns(ctx, tx, "sessions")
-	if err != nil {
-		return err
-	}
-	if !cols["csrf_token"] {
-		return nil
-	}
-	_, err = tx.ExecContext(ctx, `ALTER TABLE sessions DROP COLUMN csrf_token`)
-	return err
-}
-
 // CreateTokenSession opens a browser session for the holder of the token
 // whose prefix is tokenPrefix, acting as principal in team. It returns the raw
 // session id and its CSRF token. The row stores no scopes: every lookup reads

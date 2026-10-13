@@ -142,41 +142,6 @@ var ErrWaitlisted = errors.New("store: this account is on the sign-up waitlist")
 // credits.
 var ErrTeamFull = errors.New("store: this team holds as many members as a team without purchased credits may")
 
-const signUpGateTableSQLite = `
-CREATE TABLE IF NOT EXISTS signup_gate (
-    id                      INTEGER PRIMARY KEY CHECK (id = 1),
-    mode                    TEXT NOT NULL CHECK (mode IN ('open', 'waitlist')),
-    source                  TEXT NOT NULL DEFAULT '',
-    reason                  TEXT NOT NULL DEFAULT '',
-    set_by                  TEXT NOT NULL DEFAULT '',
-    updated_at              INTEGER NOT NULL,
-    hourly_limit            INTEGER NOT NULL,
-    daily_limit             INTEGER NOT NULL,
-    hourly_warn             INTEGER NOT NULL,
-    github_min_account_days INTEGER NOT NULL,
-    free_team_members       INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS signup_admissions (
-    account_id TEXT NOT NULL,
-    kind       TEXT NOT NULL CHECK (kind IN ('signup', 'invitation')),
-    at         INTEGER NOT NULL,
-    PRIMARY KEY (account_id, kind, at)
-);
-CREATE INDEX IF NOT EXISTS idx_signup_admissions_at ON signup_admissions(at);
-CREATE INDEX IF NOT EXISTS idx_accounts_created ON accounts(created_at);
-CREATE INDEX IF NOT EXISTS idx_accounts_waitlisted ON accounts(waitlisted_at) WHERE waitlisted_at <> 0;
-`
-
-var signUpGateTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(signUpGateTableSQLite)
-
-// safety: zero is "never waitlisted", so every account that exists when the
-// column arrives keeps its standing. The stamp is in nanoseconds because it
-// orders the list, and a burst puts many sign-ups in one second.
-var accountWaitlistCols = map[string]string{
-	"waitlisted_at":   "INTEGER NOT NULL DEFAULT 0",
-	"waitlist_reason": "TEXT NOT NULL DEFAULT ''",
-}
-
 // safety: the gate row is seeded here, so every sign-up's SELECT ... FOR UPDATE
 // locks a row that exists; two first sign-ups racing to create it would
 // otherwise both count past a limit.
@@ -189,30 +154,6 @@ func seedSignUpGateTx(ctx context.Context, tx *storeTx) error {
 		ON CONFLICT (id) DO NOTHING`,
 		d.HourlyLimit, d.DailyLimit, d.HourlyWarn, d.GitHubMinAccountDays, d.FreeTeamMembers)
 	return err
-}
-
-func applySignUpGateMigrationSQLite(ctx context.Context, tx *storeTx) error {
-	if err := ensureColumnsSQLite(ctx, tx, "accounts", accountWaitlistCols); err != nil {
-		return err
-	}
-	for _, stmt := range splitStatements(signUpGateTableSQLite) {
-		if _, err := tx.ExecContext(ctx, stmt); err != nil {
-			return err
-		}
-	}
-	return seedSignUpGateTx(ctx, tx)
-}
-
-func applySignUpGateMigrationPostgres(ctx context.Context, tx *storeTx) error {
-	if err := addColumnsTx(ctx, tx, "accounts", accountWaitlistCols); err != nil {
-		return err
-	}
-	for _, stmt := range splitStatements(signUpGateTablePostgres) {
-		if _, err := tx.ExecContext(ctx, stmt); err != nil {
-			return err
-		}
-	}
-	return seedSignUpGateTx(ctx, tx)
 }
 
 const signUpGateSelect = `SELECT mode, source, reason, set_by, updated_at,

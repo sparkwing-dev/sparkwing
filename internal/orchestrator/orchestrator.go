@@ -684,7 +684,6 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 		}
 		sa.reason = selection.standalone
 		sa.warning = standaloneWarning(selection, sparkwingModuleVersion())
-		sa.skew = selection.storeSkew
 		opts.State = st
 		opts.DefaultStateDB = sa.stateDB
 		opts.standalone = sa

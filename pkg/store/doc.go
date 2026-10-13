@@ -14,8 +14,8 @@
 // # Tenancy
 //
 // Every row that belongs to a team carries a team column; the tables
-// that belong to the deployment -- the schema version, the
-// requirements, the meta bag and the executor fleet -- do not. The
+// that belong to the deployment -- the schema version, the meta
+// bag and the executor fleet -- do not. The
 // classification is the tenantTables and operatorTables lists in
 // tenant.go, and a test fails on a table missing from both.
 //
@@ -23,7 +23,7 @@
 // caller uses: its methods take no team, every statement they issue
 // carries team = ?, and the *Store inside it is unexported so no other
 // package can widen it back. [Store.AsOperator] returns [*Operator],
-// the named unscoped handle for reaping, dispatch, migration and
+// the named unscoped handle for reaping, dispatch and
 // fleet-wide listing.
 //
 // The port is in progress. Every method already on Tenant still has a
@@ -33,20 +33,15 @@
 // moved. Until then the compiler does not refuse an unscoped call --
 // the doc comment on [Tenant] says what does, and how to port a family.
 //
-// # Migrations
+// # Schema
 //
-// A schema version's statements and its sparkwing_schema_version row
-// commit together, and the version that reaches the newest schema
-// carries the min-binary-version stamp in that same transaction.
-// SQLite wraps each version separately; Postgres wraps every pending
-// version in one advisory-locked transaction and then, after
-// releasing that lock, runs the run-annotation backfill row by row.
-// A version that fails partway leaves neither its statements nor its
-// version stamp, so the next open retries it against a clean schema.
-// Migration code therefore takes the transaction it is handed rather
-// than starting its own or reaching for the *Store query helpers: the
-// SQLite handle allows one open connection, so a stray *Store query
-// deadlocks against the migration's own transaction.
+// A fresh database gets the baseline in schema_sqlite.sql or
+// schema_postgres.sql, its sparkwing_schema_version row and its seed rows
+// in one transaction; Postgres takes an advisory lock first so two openers
+// cannot both create it. Open refuses a database that records any other
+// schema version and tells the operator to delete it: no older store is
+// upgraded. The two files describe one schema, and a test compares what
+// each builds.
 //
 // # Primary records
 //
