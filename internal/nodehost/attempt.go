@@ -111,7 +111,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	cfg := base
 	cfg.Sink = sink
 	cfg.Env = attemptEnv(base.Env, n.Plan.Env, run.ID, id, a.Routes.URL(), bearer)
-	cfg.Env = append(cfg.Env, hostEnv(n)...)
+	cfg.Env = append(append(cfg.Env, hostEnv(n)...), runnerEnv()...)
 	res := Result{}
 	sess, err := StartSession(ctx, cfg)
 	if err == nil {
@@ -288,6 +288,24 @@ func hostEnv(n *NodeRun) []string {
 	}
 	if n.Run.Context.DryRun {
 		env = append(env, "SPARKWING_DRY_RUN=1")
+	}
+	return env
+}
+
+// safety: a pod host's Job sets the runner variables on the host itself; a host
+// without them runs nodes on this machine, the local runner. A node process
+// reads them for sparkwing.Runner and its tools for the runner's identity.
+func runnerEnv() []string {
+	name, typ := os.Getenv("SPARKWING_RUNNER_NAME"), os.Getenv("SPARKWING_RUNNER_TYPE")
+	labels := os.Getenv("SPARKWING_RUNNER_LABELS")
+	if name == "" && typ == "" && labels == "" {
+		name, typ, labels = "local", "local", "local,os="+runtime.GOOS+",arch="+runtime.GOARCH
+	}
+	var env []string
+	for _, kv := range [][2]string{{"SPARKWING_RUNNER_NAME", name}, {"SPARKWING_RUNNER_TYPE", typ}, {"SPARKWING_RUNNER_LABELS", labels}} {
+		if kv[1] != "" {
+			env = append(env, kv[0]+"="+kv[1])
+		}
 	}
 	return env
 }
