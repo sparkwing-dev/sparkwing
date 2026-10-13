@@ -31,7 +31,7 @@ func TestWriteEventsViaBackend_PagesPastOnePage(t *testing.T) {
 		t.Fatalf("CreateRun: %v", err)
 	}
 	for range want {
-		if _, err := st.AppendEvent(ctx, runID, "n1", "cache_hit", nil); err != nil {
+		if err := st.AppendEvent(ctx, runID, "n1", "cache_hit", nil); err != nil {
 			t.Fatalf("AppendEvent: %v", err)
 		}
 	}
@@ -109,7 +109,7 @@ func TestJobLogsRemoteWithTokens_EventsOnlyEmitsStoreEvents(t *testing.T) {
 		t.Fatalf("CreateRun: %v", err)
 	}
 	for _, kind := range []string{"admission_wait", "concurrency_wait", "cache_hit"} {
-		if _, err := st.AppendEvent(ctx, runID, "n1", kind, nil); err != nil {
+		if err := st.AppendEvent(ctx, runID, "n1", kind, nil); err != nil {
 			t.Fatalf("AppendEvent %s: %v", kind, err)
 		}
 	}
@@ -179,11 +179,11 @@ func TestLatestComputeGuardRefusal_ReadsPastOnePage(t *testing.T) {
 		t.Fatalf("CreateRun: %v", err)
 	}
 	for range 600 {
-		if _, err := st.AppendEvent(ctx, runID, "n1", "cache_hit", nil); err != nil {
+		if err := st.AppendEvent(ctx, runID, "n1", "cache_hit", nil); err != nil {
 			t.Fatalf("AppendEvent: %v", err)
 		}
 	}
-	if _, err := st.AppendEvent(ctx, runID, "n1", store.EventKindComputeLimitBlocked,
+	if err := st.AppendEvent(ctx, runID, "n1", store.EventKindComputeLimitBlocked,
 		[]byte(`{"limit":"max_concurrent_runners","cap":2,"observed":2,"scope":"principal agent:cloud"}`)); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}

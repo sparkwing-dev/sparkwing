@@ -61,7 +61,9 @@ func (s *Server) handleRequestApproval(w http.ResponseWriter, r *http.Request) {
 		"message":    body.Message,
 		"timeout_ms": body.TimeoutMS,
 	})
-	_, _ = s.store.AppendEvent(r.Context(), runID, nodeID, "approval_requested", payload)
+	if err := s.store.AppendEvent(r.Context(), runID, nodeID, "approval_requested", payload); err != nil {
+		s.logger.Warn("append run event", "kind", "approval_requested", "run_id", runID, "node_id", nodeID, "err", err)
+	}
 	w.WriteHeader(http.StatusCreated)
 }
 
@@ -119,7 +121,9 @@ func (s *Server) handleResolveApproval(w http.ResponseWriter, r *http.Request) {
 		"approver":   got.Approver,
 		"comment":    got.Comment,
 	})
-	_, _ = s.store.AppendEvent(r.Context(), runID, nodeID, "approval_resolved", payload)
+	if err := s.store.AppendEvent(r.Context(), runID, nodeID, "approval_resolved", payload); err != nil {
+		s.logger.Warn("append run event", "kind", "approval_resolved", "run_id", runID, "node_id", nodeID, "err", err)
+	}
 	writeJSON(w, http.StatusOK, got)
 }
 

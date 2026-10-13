@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -202,7 +203,7 @@ func TestApprovalGateResolvesAsTheDispatcherDoes(t *testing.T) {
 			if !jsonEqual(out, tc.output) {
 				t.Errorf("gate output = %s, want %s", out, tc.output)
 			}
-			if gs.events[0] != "gate:approval_requested" {
+			if !slices.Contains(gs.events, "gate:approval_requested") {
 				t.Errorf("events = %v, want approval_requested", gs.events)
 			}
 			gl := logs["gate"]

@@ -80,6 +80,8 @@ type StateStore interface {
 	SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error
 	ListNodeSteps(ctx context.Context, runID string) ([]*store.NodeStep, error)
 
+	AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
+
 	AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample store.MetricSample) error
 
 	WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) error

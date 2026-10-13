@@ -168,7 +168,7 @@ func TestListJobs_ShowsLocalAdmissionWait(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if _, err := st.AppendEvent(ctx, "run-admission-list", "", "admission_wait", []byte(`{"position":1,"queue_length":3}`)); err != nil {
+	if err := st.AppendEvent(ctx, "run-admission-list", "", "admission_wait", []byte(`{"position":1,"queue_length":3}`)); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 
@@ -203,7 +203,7 @@ func TestListJobs_TracksInterleavedNodeAdmissionWaitsIndependently(t *testing.T)
 		{node: "node-b", kind: "admission_wait", payload: `{"position":12,"queue_length":12}`},
 		{node: "node-a", kind: "admission_granted"},
 	} {
-		if _, err := st.AppendEvent(ctx, "run-node-admission-list", event.node, event.kind, []byte(event.payload)); err != nil {
+		if err := st.AppendEvent(ctx, "run-node-admission-list", event.node, event.kind, []byte(event.payload)); err != nil {
 			t.Fatalf("AppendEvent %s %s: %v", event.node, event.kind, err)
 		}
 	}
@@ -243,7 +243,7 @@ func TestListJobs_PreservesPlanAdmissionAsRootWait(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if _, err := st.AppendEvent(ctx, runID, runID+"/plan", "admission_wait", []byte(`{"position":3,"queue_length":7}`)); err != nil {
+	if err := st.AppendEvent(ctx, runID, runID+"/plan", "admission_wait", []byte(`{"position":3,"queue_length":7}`)); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 
@@ -282,7 +282,7 @@ func TestListJobs_ClearsInterleavedNodeAdmissionTerminalsIndependently(t *testin
 		{node: "node-a", kind: "admission_cancelled"},
 		{node: "node-b", kind: "admission_queue_timeout"},
 	} {
-		if _, err := st.AppendEvent(ctx, runID, event.node, event.kind, []byte(event.payload)); err != nil {
+		if err := st.AppendEvent(ctx, runID, event.node, event.kind, []byte(event.payload)); err != nil {
 			t.Fatalf("AppendEvent %s %s: %v", event.node, event.kind, err)
 		}
 	}
@@ -318,7 +318,7 @@ func TestListJobs_StaleAdmissionTerminalPreservesNewerRequest(t *testing.T) {
 		{kind: "admission_wait", payload: `{"position":3,"queue_length":5,"request_id":"request-2"}`},
 		{kind: "admission_granted", payload: `{"request_id":"request-1"}`},
 	} {
-		if _, err := st.AppendEvent(ctx, runID, "node-a", event.kind, []byte(event.payload)); err != nil {
+		if err := st.AppendEvent(ctx, runID, "node-a", event.kind, []byte(event.payload)); err != nil {
 			t.Fatalf("AppendEvent %s: %v", event.kind, err)
 		}
 	}
@@ -347,10 +347,10 @@ func TestListJobs_ClearsLegacyAdmissionWaitOnLegacyTerminal(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if _, err := st.AppendEvent(ctx, runID, "", "admission_wait", []byte(`{"position":2,"queue_length":4,"request_id":"run-legacy-admission-terminal/node-host/Y29tcGlsZQ"}`)); err != nil {
+	if err := st.AppendEvent(ctx, runID, "", "admission_wait", []byte(`{"position":2,"queue_length":4,"request_id":"run-legacy-admission-terminal/node-host/Y29tcGlsZQ"}`)); err != nil {
 		t.Fatalf("AppendEvent wait: %v", err)
 	}
-	if _, err := st.AppendEvent(ctx, runID, "", "admission_granted", nil); err != nil {
+	if err := st.AppendEvent(ctx, runID, "", "admission_granted", nil); err != nil {
 		t.Fatalf("AppendEvent terminal: %v", err)
 	}
 
@@ -384,7 +384,7 @@ func TestListJobs_IgnoresStaleAdmissionWaitForFinishedRun(t *testing.T) {
 	if err := st.FinishRun(ctx, "run-stale-admission-list", "cancelled", "cancelled via test"); err != nil {
 		t.Fatalf("FinishRun: %v", err)
 	}
-	if _, err := st.AppendEvent(ctx, "run-stale-admission-list", "", "admission_wait", []byte(`{"position":1,"queue_length":3}`)); err != nil {
+	if err := st.AppendEvent(ctx, "run-stale-admission-list", "", "admission_wait", []byte(`{"position":1,"queue_length":3}`)); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 
@@ -621,7 +621,7 @@ func TestJobStatus_ShowsLocalAdmissionWait(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
-	if _, err := st.AppendEvent(ctx, "run-admission-wait", "", "admission_wait", []byte(`{"position":2,"queue_length":5}`)); err != nil {
+	if err := st.AppendEvent(ctx, "run-admission-wait", "", "admission_wait", []byte(`{"position":2,"queue_length":5}`)); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 
@@ -662,7 +662,7 @@ func TestJobStatus_IgnoresStaleAdmissionWaitForFinishedRun(t *testing.T) {
 	if err := st.FinishRun(ctx, "run-stale-admission-status", "cancelled", "cancelled via test"); err != nil {
 		t.Fatalf("FinishRun: %v", err)
 	}
-	if _, err := st.AppendEvent(ctx, "run-stale-admission-status", "", "admission_wait", []byte(`{"position":2,"queue_length":5}`)); err != nil {
+	if err := st.AppendEvent(ctx, "run-stale-admission-status", "", "admission_wait", []byte(`{"position":2,"queue_length":5}`)); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 
@@ -694,15 +694,15 @@ func TestListJobs_ReadsAdmissionTerminalEventPastFirstPage(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if _, err := st.AppendEvent(ctx, "run-admission-long-events", "", "admission_wait", []byte(`{"position":1,"queue_length":1}`)); err != nil {
+	if err := st.AppendEvent(ctx, "run-admission-long-events", "", "admission_wait", []byte(`{"position":1,"queue_length":1}`)); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	for i := 0; i < 500; i++ {
-		if _, err := st.AppendEvent(ctx, "run-admission-long-events", "node", "node_started", nil); err != nil {
+		if err := st.AppendEvent(ctx, "run-admission-long-events", "node", "node_started", nil); err != nil {
 			t.Fatalf("AppendEvent filler %d: %v", i, err)
 		}
 	}
-	if _, err := st.AppendEvent(ctx, "run-admission-long-events", "", "admission_granted", nil); err != nil {
+	if err := st.AppendEvent(ctx, "run-admission-long-events", "", "admission_granted", nil); err != nil {
 		t.Fatalf("AppendEvent granted: %v", err)
 	}
 
@@ -854,7 +854,7 @@ func TestJobStatus_ReportsTheComputeGuardThatRefusedWork(t *testing.T) {
 	if err := st.CreateNode(ctx, store.Node{RunID: "run-guarded", NodeID: "build", Status: "pending"}); err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
-	if _, err := st.AppendEvent(ctx, "run-guarded", "build", store.EventKindComputeLimitBlocked,
+	if err := st.AppendEvent(ctx, "run-guarded", "build", store.EventKindComputeLimitBlocked,
 		[]byte(`{"limit":"max_concurrent_runners","cap":4,"observed":4,"scope":"principal agent:cloud"}`)); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
@@ -896,7 +896,7 @@ func TestJobStatus_ShowsTheSecretPreflightRefusal(t *testing.T) {
 	}
 	detail := "pipeline \"deploy\" did not start: it declares 1 required secret this run cannot read.\n- DEPLOY_KEY is not set"
 	raw, _ := json.Marshal(map[string]string{"message": detail})
-	if _, err := st.AppendEvent(ctx, "run-secrets", store.PlanNodeID, store.EventKindSecretPreflightRefused, raw); err != nil {
+	if err := st.AppendEvent(ctx, "run-secrets", store.PlanNodeID, store.EventKindSecretPreflightRefused, raw); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	var status bytes.Buffer

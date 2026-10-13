@@ -446,7 +446,7 @@ VALUES (?, ?, ?, 1, ?, ?, ?, 'agent', 'desktop', ?, 'local', ?, ?, ?)`,
 	}
 	for _, kind := range []string{"executor_selected", "execution_attempt_started", "execution_attempt_finished"} {
 		payload := []byte(`{"claim_generation":"private-generation-value","attempt":1,"executor_name":"desktop"}`)
-		if _, err := f.store.AppendEvent(context.Background(), "run-1", "only", kind, payload); err != nil {
+		if err := f.store.AppendEvent(context.Background(), "run-1", "only", kind, payload); err != nil {
 			t.Fatal(err)
 		}
 	}

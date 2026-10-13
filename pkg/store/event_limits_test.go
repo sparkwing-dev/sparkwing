@@ -194,7 +194,7 @@ func TestUnchargedEventsCountTowardTheRunCaps(t *testing.T) {
 	if err := st.SetEventLimits(ctx, store.EventLimits{MaxBytesPerEvent: 1024, MaxBytesPerRun: 2048, MaxEventsPerRun: 10}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AppendEvent(ctx, "run-1", "", "k", bytes.Repeat([]byte("x"), 2000)); err != nil {
+	if err := st.AppendEvent(ctx, "run-1", "", "k", bytes.Repeat([]byte("x"), 2000)); err != nil {
 		t.Fatal(err)
 	}
 	_, err := st.AppendEventCharged(ctx, "agent:runner", "run-1", "", "k", bytes.Repeat([]byte("x"), 100))

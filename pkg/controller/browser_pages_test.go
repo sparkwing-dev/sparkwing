@@ -202,7 +202,7 @@ func TestDashboardStreamsOutliveTheListenersWriteTimeout(t *testing.T) {
 	appended := false
 	for scanner.Scan() {
 		if !appended && strings.HasPrefix(scanner.Text(), ": open") {
-			if _, err := st.AppendEvent(ctx, "r1", "", "late_event", []byte(`{}`)); err != nil {
+			if err := st.AppendEvent(ctx, "r1", "", "late_event", []byte(`{}`)); err != nil {
 				t.Fatal(err)
 			}
 			appended = true

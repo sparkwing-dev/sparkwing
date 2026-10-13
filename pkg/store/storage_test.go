@@ -26,12 +26,11 @@ func seedRunWithNode(t *testing.T, st *store.Store, runID, nodeID, status string
 
 func appendEventAt(t *testing.T, st *store.Store, runID, nodeID, kind string, at time.Time) {
 	t.Helper()
-	seq, err := st.AppendEvent(context.Background(), runID, nodeID, kind, nil)
-	if err != nil {
+	if err := st.AppendEvent(context.Background(), runID, nodeID, kind, nil); err != nil {
 		t.Fatalf("append event %s: %v", kind, err)
 	}
 	if _, err := st.DB().Exec(storetest.Rebind(st,
-		`UPDATE events SET ts = ? WHERE run_id = ? AND seq = ?`), at.UnixNano(), runID, seq); err != nil {
+		`UPDATE events SET ts = ? WHERE run_id = ? AND seq = (SELECT MAX(seq) FROM events WHERE run_id = ?)`), at.UnixNano(), runID, runID); err != nil {
 		t.Fatalf("backdate event %s: %v", kind, err)
 	}
 }
