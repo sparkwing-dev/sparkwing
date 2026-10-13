@@ -176,7 +176,7 @@ func (a *Admission) withHost(ctx context.Context, n *NodeRun, next Executor) Res
 	onQueued, waited := a.queuedReporter(ctx, n, nil)
 	lease, err := a.Daemon.Acquire(ctx, a.request(n, nil), onQueued)
 	if err != nil {
-		return admitFailed(ctx, fmt.Errorf("local admission: %w", err))
+		return admissionFailed(ctx, fmt.Errorf("local admission: %w", err))
 	}
 	if waited() {
 		a.activity(ctx, n, "")
@@ -224,7 +224,7 @@ func (a *Admission) underDaemon(ctx context.Context, n *NodeRun, g group, next E
 		case errors.Is(context.Cause(acquireCtx), errQueueTimeout) && ctx.Err() == nil:
 			return queueTimedOut(g)
 		case ctx.Err() != nil:
-			return admitFailed(ctx, ctx.Err())
+			return admissionFailed(ctx, ctx.Err())
 		case errors.As(err, &admErr) && admErr.Policy == wingwire.PolicySkip:
 			return Result{Outcome: sparkwing.SkippedConcurrent}
 		case errors.As(err, &admErr) && admErr.Policy == wingwire.PolicyFail:
@@ -305,7 +305,7 @@ func (a *Admission) release(n *NodeRun, lease Lease) {
 
 // safety: a node stopped by its run's cancel reports a plain failure, which
 // the scheduler records as cancelled.
-func admitFailed(ctx context.Context, err error) Result {
+func admissionFailed(ctx context.Context, err error) Result {
 	if ctx.Err() != nil {
 		err = ctx.Err()
 	}
@@ -340,7 +340,7 @@ func (a *Admission) underSlot(ctx context.Context, h slotHolder, g group, run fu
 		Capacity: g.capacity, Cost: g.cost, Policy: g.policy, CancelTimeout: g.cancelTO,
 	})
 	if err != nil {
-		return admitFailed(ctx, fmt.Errorf("concurrency acquire(%q): %w", g.key, err))
+		return admissionFailed(ctx, fmt.Errorf("concurrency acquire(%q): %w", g.key, err))
 	}
 	switch resp.Kind {
 	case store.AcquireGranted:
@@ -387,7 +387,7 @@ func (a *Admission) waitSlot(ctx context.Context, h slotHolder, g group, initial
 		select {
 		case <-ctx.Done():
 			cancelWaiter()
-			return admitFailed(ctx, ctx.Err())
+			return admissionFailed(ctx, ctx.Err())
 		case <-tick.C:
 		}
 		res, err := a.Slots.ResolveWaiter(ctx, g.key, h.runID, h.nodeID, "", "", "", false)

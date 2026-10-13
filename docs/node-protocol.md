@@ -54,15 +54,16 @@ The SDK does not need to know which kind of process it is. It answers whatever a
 
 For one node attempt the host sends requests in this order:
 
-1. `plan`, with the pipeline, args and run context the run accepted. The host hashes the node's entry in the reply and compares it with the accepted plan's `spec_hash`. On a mismatch, or if the node is missing, the attempt fails with `plan_drift`.
-2. For a node a generator added, `eval` of that generator, which rebuilds the node in this process. The host compares the node again.
+1. `plan`, with the pipeline, args and run context the run accepted. The host hashes the node's entry in the reply and compares it with the accepted plan's `spec_hash`. On a mismatch, or if a node of the accepted plan is missing, the attempt fails with `plan_drift`.
+2. For a node a generator added, `eval` of that generator in place of that comparison, which rebuilds the node in this process. The host compares the rebuilt node with the `spec_hash` it recorded when it added the node.
 3. On attempt 1 only, `eval` for each `before_run` closure in order.
 4. One `run_node` for a node without steps, or one `run_step` per step for a node with steps (see [Steps](#steps)).
 5. After a successful body, `eval` of the `verify` closure.
-6. On the last attempt, whether it succeeded or ran out of retries, `eval` for each `after_run` closure.
-7. Close the request pipe.
+6. After a successful body and `verify`, `eval` for each `generator` closure in order (see [Dynamic nodes](#dynamic-nodes)).
+7. On the last attempt, whether it succeeded or ran out of retries, `eval` for each `after_run` closure.
+8. Close the request pipe.
 
-The host evaluates `skip_if` and `cache_key` closures before the first attempt starts, so a skipped or memoized node never gets an attempt. It evaluates a `generator` after its source node succeeds. It may use a separate eval process on the run's host for these, or an attempt process, and the SDK answers the same way in both.
+The host evaluates `skip_if` and `cache_key` closures before the first attempt starts, so a skipped or memoized node never gets an attempt. It evaluates a `generator` in its source node's attempt process. It may use a separate eval process on the run's host for `skip_if` and `cache_key`, or an attempt process, and the SDK answers the same way in both.
 
 ## Framing
 
@@ -190,7 +191,7 @@ A closure is customer code that the host calls by id. The plan lists each node's
 | `before_run` | attempt process, attempt 1, before the body | none | `null` | the node fails without retrying |
 | `verify` | attempt process, after each successful body | none | `null` | the attempt fails with reason `verify`, and retry and `on_failure` apply |
 | `after_run` | the last attempt's process, after the body and verify | `{outcome, error?}`: the node's final outcome and error | `null` | the host logs it and leaves the node's outcome unchanged |
-| `generator` | eval process, after the source node succeeds; again in each generated node's own processes | none | an array of node documents | the generated group fails, and nodes that need it are cancelled |
+| `generator` | the source's attempt process, after its body succeeds; again in each generated node's own processes | none | an array of node documents | the generated group fails, and nodes that need it are cancelled |
 
 The host bounds each node `skip_if` by the node's `modifiers.skip_if_budget_ms`, or by 30 seconds when that is absent. A `skip_if` that overruns its budget counts as `false`. Every other closure is bounded by the node's wall timeout.
 
@@ -200,7 +201,7 @@ A failed reply to `eval` (for example `unknown_closure`) is never read as `false
 
 A generator closure adds nodes at run time. Its source node lists the closure under `closures.generator`. A node that waits for every generated node lists the closure id under `needs_generated`.
 
-1. After the source succeeds and its output is recorded, the host evaluates the generator in a process bound to the source node. The generator usually reads the source's output through `GET /node/v1/nodes/{node}/output`.
+1. After the source's body succeeds, the host evaluates the generator in the source's attempt process, where the SDK still holds the source's output. It records the source's outcome and output before it adds any node. In a generated node's own processes the generator reads that output through `GET /node/v1/nodes/{node}/output`.
 2. `value` is an array of node documents in the plan document's node shape. Each one lists the source in its `deps`.
 3. The host validates the new nodes against the plan (`plan_invalid`), records them with the run, and schedules them. A node with `needs_generated` becomes ready once every generated node has finished.
 4. Each generated node's eval and attempt processes evaluate the same generator again after `plan`, then run the node. The host compares the regenerated node's `spec_hash` as in step 1 of the attempt order. A generator must therefore return the same nodes for the same source output.
