@@ -111,6 +111,7 @@ unlock.
   The retry trigger was written with an empty `trigger_user` and only retry provenance in `trigger_env`, so a retried pull-request run planned as an anonymous push. It now copies the source trigger's user and the `GITHUB_EVENT_NAME` and `GITHUB_PR_*`/`GITHUB_BASE_*`/`GITHUB_HEAD_*` keys `PullRequestFromEnv` reads.
 
 ### Removed
+- **runner (Breaking):** The remote execution broker is removed, with `SPARKWING_EXECUTION_CAPABILITY_STDIN`, `SPARKWING_BROKERED_NODE_CLAIM` and `SPARKWING_BROKERED_ARTIFACTS`; a claimed node's pipeline process reaches its run only through the node host's `/node/v1` routes
 - **store (Breaking):** The runs-store schema restarts at one baseline, schema version 1; no store an earlier release wrote opens
   `Open` refuses a store at any other schema version and names the file to delete or the database to drop; nothing upgrades it. Removed with the upgrade path: the `sparkwing_requirements` table and the refusal of older binaries it drove, `store.SkewError`, `store.SetBinaryVersion`, the `min_binary_version` stamp, the copy under `backups/` before an upgrade, `sparkwing-controller migrate-logs` and `migrate-outputs`, the per-schema standalone store fallback, `store_requirements` in the daemon handshake, `missing_requirements` and `daemon_store_skew` in `sparkwing daemon status`, and the `schema` block of `sparkwing repos info`.
 - **controller (Breaking):** Operator powers answer only the operator console; the admin token no longer reaches them

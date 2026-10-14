@@ -620,9 +620,9 @@ token in the agent's `config.yaml` included; no Sparkwing setting stops a
 process from reading its own user's files.
 
 A runner compiles the pipeline code it fetches and runs it as the user who
-started the runner. The pipeline process reaches the controller through a
-loopback broker in the runner that admits only its own run's routes, so the
-runner token is not in its environment. That does not stop code running as the
+started the runner. The pipeline process reaches the controller only through
+the node routes the runner serves on loopback, bound to its own run and node,
+so the runner token is not in its environment. That does not stop code running as the
 same OS user: it reads what that user can read, including ssh keys, `~/.aws`,
 other tokens in the home directory, and the runner token in the agent's
 `config.yaml`. Any team member who can trigger a run
@@ -843,14 +843,13 @@ the `sparkwing-runner-bundle` README.
 
 Running a runner on a workstation authorizes repository pipeline code to run
 as the runner service's OS user. The runner starts every job body in a child
-process. The supervisor keeps the runner token and claim identity; the child
-receives a process-lifetime loopback capability limited to its claimed run
-and node. Execution start, finish, and logs also require the
-acknowledged attempt ordinal. That capability cannot claim or renew work,
-manage runners, or call administrative routes. The child inherits only the
-minimum runtime environment plus non-credential variables explicitly named by
-`run.submit_env_allow` in the agent machine's config.yaml, not the agent
-service's arbitrary cloud, cache, or service credentials.
+process. The node host keeps the runner token and claim identity, and records
+execution start, finish and logs itself; the child receives a process-lifetime
+bearer for the host's loopback node routes, limited to its claimed run and
+node. That bearer cannot claim or renew work, manage runners, or call
+administrative routes. The child inherits only the minimum runtime environment
+and the runner's dependency proxy settings, not the agent service's cloud,
+cache, or service credentials.
 
 This is credential isolation, not an OS sandbox. Pipeline code can still read
 files, use the network, and start processes with every permission the agent OS

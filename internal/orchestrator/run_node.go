@@ -1,12 +1,10 @@
 package orchestrator
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -22,7 +20,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwingcache"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -101,8 +98,8 @@ func RunNodeOnce(
 	}
 	otelutil.StampSpan(ctx, otelutil.SpanAttrs{Pipeline: run.Pipeline})
 
-	if cfg.claimed && !cfg.brokeredChild {
-		if shouldRunRemote(trigger, false) {
+	if cfg.claimed {
+		if shouldRunRemote(trigger) {
 			if controllerURL == "" {
 				return runner.Result{}, fmt.Errorf(
 					"run %s node %s dispatches to a remote runner, which cannot reach this machine's admission daemon socket; set SPARKWING_CONTROLLER_URL to a controller the runner can reach",
@@ -115,7 +112,7 @@ func RunNodeOnce(
 			runID, nodeID)
 	}
 	// safety: coordinated nodes use the same pipeline binary as their local dispatcher.
-	if !cfg.coordinated && shouldRunRemote(trigger, cfg.brokeredChild || cfg.claim != nil) {
+	if !cfg.coordinated && cfg.claim == nil && shouldRunRemote(trigger) {
 		if controllerURL == "" {
 			return runner.Result{}, fmt.Errorf(
 				"run %s node %s dispatches to a remote runner, which cannot reach this machine's admission daemon socket; set SPARKWING_CONTROLLER_URL to a controller the runner can reach",
@@ -134,8 +131,6 @@ func RunNodeOnce(
 		if err != nil {
 			return runner.Result{}, err
 		}
-	} else if cfg.brokeredChild && cfg.brokerArtifact {
-		art = sparkwingcache.New(controllerURL, token, httpClient)
 	} else {
 		art, err = resolveArtifactStoreFromEnv(ctx)
 		if err != nil {
@@ -288,7 +283,7 @@ func RunNodeOnce(
 		if err != nil {
 			return runner.Result{}, err
 		}
-		if !cfg.claimed && !cfg.brokeredChild {
+		if !cfg.claimed {
 			ctx = withLocalExecution(ctx)
 		}
 	}
@@ -383,31 +378,7 @@ func runNodeCLI(args []string) error {
 		token = LocalServeToken(*controllerURL)
 	}
 	var runOpts []RunNodeOption
-	brokeredChild := os.Getenv(remoteExecutionCapabilityInputEnv) == "1"
-	if brokeredChild {
-		capability, err := io.ReadAll(io.LimitReader(os.Stdin, 4097))
-		if err != nil {
-			return fmt.Errorf("read execution capability: %w", err)
-		}
-		token = string(bytes.TrimSpace(capability))
-		if len(token) < 32 || len(capability) > 4096 {
-			return errors.New("execution capability input is invalid")
-		}
-		runOpts = append(runOpts, brokeredExecutionChild(os.Getenv(remoteBrokeredArtifactEnv) == "1"))
-	}
-	// safety: RunNodeCommand reads the same claim variables for a Job's pod,
-	// where the process already is the isolated execution; here it supervises
-	// one, so a claim means handing the node to a child through the broker.
-	if os.Getenv(remoteBrokeredClaimEnv) == "1" {
-		holderID = "brokered-execution"
-		runOpts = append(runOpts, func(c *runNodeConfig) {
-			c.claimed = true
-			c.claimFence = store.NodeClaimFence{
-				HolderID: "brokered-execution", MembershipID: "brokered-membership",
-				ReservationID: "brokered-reservation", ClaimGeneration: 1,
-			}
-		})
-	} else if claimedHolder := os.Getenv("SPARKWING_NODE_CLAIM_HOLDER"); claimedHolder != "" {
+	if claimedHolder := os.Getenv("SPARKWING_NODE_CLAIM_HOLDER"); claimedHolder != "" {
 		holderID = claimedHolder
 		generation, err := strconv.ParseInt(os.Getenv("SPARKWING_NODE_CLAIM_GENERATION"), 10, 64)
 		if err != nil || generation < 1 {
@@ -434,11 +405,6 @@ func runNodeCLI(args []string) error {
 	ctx, abandon = context.WithCancel(ctx)
 	defer abandon()
 	defer WatchParentLiveness(abandon)()
-	if brokeredChild {
-		for name := range remoteExecutionPrivateEnv {
-			_ = os.Unsetenv(name)
-		}
-	}
 	ctx = withProcessNode(ctx, runID, nodeID)
 	res, err := RunNodeOnce(ctx, *controllerURL, *logsURL, runID, nodeID, holderID, token,
 		selectLocalRenderer(), slog.Default(), nil, runOpts...)

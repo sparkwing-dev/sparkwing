@@ -2,8 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net"
@@ -86,14 +84,6 @@ func startLoopbackController(
 		store:       st,
 		logger:      logger,
 	}, nil
-}
-
-func newLoopbackToken() (string, error) {
-	var raw [32]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return "", err
-	}
-	return "swl_" + hex.EncodeToString(raw[:]), nil
 }
 
 func serveLoopback(h http.Handler, runID string, logger *slog.Logger) (string, *http.Server, error) {

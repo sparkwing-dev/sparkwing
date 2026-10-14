@@ -102,9 +102,6 @@ Set by Sparkwing for pipeline code and node processes.
 
 | Variable | Why it stays |
 |---|---|
-| `SPARKWING_BROKERED_ARTIFACTS` | Set to `1` for a remote node's child process when its artifacts go through the parent's broker. |
-| `SPARKWING_BROKERED_NODE_CLAIM` | Set to `1` for a remote node's child process when the parent holds a node claim, so the child runs as that claim. |
-| `SPARKWING_EXECUTION_CAPABILITY_STDIN` | Set to `1` for a remote node's child process, which then reads its execution capability from stdin, keeping it off argv and out of the environment. |
 | `SPARKWING_CHILD_LEASE_TOKEN` | The admission daemon's lease for a child run, handed across exec. |
 | `SPARKWING_LEASE_TOKEN` | The admission daemon's lease for this run, handed across exec. |
 | `SPARKWING_DEBUG_PAUSE_BEFORE` | `sparkwing debug` sets it for the run it starts: pause before the named node. |

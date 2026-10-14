@@ -19,31 +19,30 @@ per-repository consent step.
 
 **The job body runs in a child process with its own credential.** Every node a
 runner claims executes this way. The runner token stays in the runner process,
-which claims and renews the node; the supervisor works on the node's claim
+which claims and renews the node; the node host works on the node's claim
 token, which reaches only that claim's run and node and dies with the claim,
-and the child sees neither: the supervisor starts a broker on `127.0.0.1`, mints a
-32-byte random capability that lives as long as that one node, and hands it to
-the child on stdin rather than through the environment or argv, where any
-process on the machine could read it. `internal/orchestrator` builds both the
-broker and the child (`remote_execution_broker.go`, `run_node_remote.go`).
+and the pipeline process sees neither. The host serves the node routes on
+`127.0.0.1`, mints a 32-byte random bearer bound to that one run and node, and
+revokes it when the node ends. The pipeline process talks to the host over
+the node protocol ([node-protocol.md](node-protocol.md)); the host masks the
+claim token in every line the node writes. See `hostPodNode` in
+`internal/orchestrator/pod_node_host.go` and `internal/nodehost`.
 
-**That capability reaches one node's routes.** The broker proxies the awarded
-run's and node's paths -- start, finish, steps, events, heartbeat, artifacts. It
-reads node metadata and outputs within that run for dependencies, and proxies
-concurrency acquire, observation, renewal, waiter resolution, waiter
-cancellation, and release
-for that node's holder. The controller resolves concurrency keys in the
-claim's team, so the same key in another team remains separate. The
-broker answers everything else with `403`, so the child cannot claim work, renew a
-claim, or call an administrative route. It also strips
-the claim headers the child sends and stamps the supervisor's own, so the child
-cannot execute against a claim it was not given. The allow-list is
-`allowController` in `internal/orchestrator/remote_execution_broker.go`, and it
-is the whole list.
+**That bearer reaches one node's routes.** The host serves only the `/node/v1`
+routes: the node's declared secrets, other nodes' outputs in its run, the
+latest run of a referenced pipeline, an OIDC token for its run, child runs it
+starts and awaits, and cleanups it registers. Every route authenticates the
+bearer before it does anything, a request without one gets `401`, and a
+request that names no node protocol version or another one gets `426`. The
+host forwards the routes that reach the controller with the claim token, so
+the controller's claim checks apply on top; the pipeline process never calls
+the controller itself and cannot claim work, renew a claim, or call an
+administrative route. The route table is `Start` in
+`internal/nodehost/routes.go`, and it is the whole list.
 
-**A secret resolves through the node's claim and its plan.** The broker passes
-a secret read only when the request names its own run, and forwards it with
-the node's claim token. The controller answers only a name the run's plan
+**A secret resolves through the node's claim and its plan.** The host answers
+a secret read only for a name the node's pipeline declares, and resolves it
+with the node's claim token. The controller answers only a name the run's plan
 declares, resolved against the run's pipeline plus the secrets an admin marked
 shared, and records the release as a `secret_released` event; an undeclared
 name is refused with `secret_undeclared`. The runner's own token is refused
@@ -55,8 +54,8 @@ that secret of its pipeline.
 
 **A source credential resolves through the claim, before the child starts.**
 The supervisor asks `POST /api/v1/runs/{id}/source-credential` with the node's
-claim token and fetches the run's source before it starts the child, and the
-broker does not proxy that route. The controller answers only a claim token of
+claim token and fetches the run's source before it starts the child, and no
+node route reaches it. The controller answers only a claim token of
 the run, a few times per claim and never once the attempt has started, and the
 GitHub App token it mints reads the repository the App's webhook recorded on
 the trigger, or a repository the run names by hand only when the team
@@ -65,19 +64,21 @@ installation by hand therefore gets no token for it. A team's stored git credent
 for the host goes only to a machine its owner opted in. See
 `handleRunSourceCredential` in `pkg/controller/claim_source.go`.
 
-**The child's environment is rebuilt rather than inherited.** It carries `PATH`,
-`HOME`, `TMPDIR`, the locale and TLS-bundle variables, and similar runtime
-names, plus whatever the operator lists in `run.submit_env_allow`. The
-agent token, cache grant, artifact store, and claim variables are removed by
-name, and any variable whose name or value reads as a credential is dropped even
-when the allow-list names it. See `remoteExecutionChildEnvironment` in
-`internal/orchestrator/run_node_remote.go` and `internal/envredact`.
+**The child's environment is rebuilt rather than inherited.** It carries only
+`PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_*`, `TZ` and `USER` (and on Windows
+`SystemRoot`, `ComSpec`, `PATHEXT`, `TEMP` and `TMP`), the dependency proxy
+settings the runner was given, with any credential in them masked, the node
+protocol's own handles, and the run facts the host sets (dry run, runner
+identity, admission lease). The agent token, cache grant, artifact store,
+claim variables and every other engine variable stay in the host. See
+`MinimalEnv` in `internal/nodehost/attempt.go` and `podSessionEnv` in
+`internal/orchestrator/pod_node_host.go`.
 
 **The process tree dies with the node.** The child leads its own process
 session. When the node finishes or is cancelled, the supervisor sends TERM, then
 KILL, and waits for the session to empty, retrying rather than releasing the
 machine's slot while members are alive
-(`internal/orchestrator/run_node_child_process_unix.go`, `internal/procgroup`).
+(`internal/nodehost/session_unix.go`, `internal/procgroup`).
 Windows starts the body suspended inside a kill-on-close Job Object and resumes
 it there, so nothing it spawns exists outside the job
 (`internal/procgroup/job_windows.go`). A node killed without
@@ -114,14 +115,15 @@ digest, a file count, and byte totals rather than names
 (`cmd/sparkwing/worktree_snapshot.go`). In the other direction, the sender's working tree lands on your disk under the runner's
 account.
 
-**A trigger consumer's child.** A pool started with `--also-claim-triggers`
-compiles the triggering branch and runs its binary, which plans and drives the
-whole run. It holds a capability for a loopback broker in the runner process
-rather than the runner's token, and the broker admits only its run's routes
-(`internal/orchestrator/trigger_broker.go`), but that is a run's worth of
-authority, wider than one node's, and the child-environment filtering above
-does not apply to it. A Kubernetes or warm trigger child creates Jobs, each
-carrying its node's claim token. `sparkwing cluster runners add` never sets
+**A trigger consumer's plan.** A pool started with `--also-claim-triggers`
+compiles the triggering branch and runs its binary to plan the run, which the
+runner then hosts. The plan and every closure run in processes with the
+minimal environment above and only their own node-route bearer, and they read
+the run's declared secrets through the trigger's claim, so the branch's plan
+code reaches a run's worth of secrets, wider than one node's
+(`HostTriggerRun` in `internal/orchestrator/trigger_host.go`). Each node runs
+under its own claim, in this runner or in a Kubernetes Job carrying its
+node's claim token. `sparkwing cluster runners add` never sets
 that flag, so a desktop added by the installer does not take that path.
 
 **The contribution cap.** A runner's `--contribution` value caps the headroom it
