@@ -154,8 +154,21 @@ func TestAStalledSinkDoesNotHoldPlanningOpen(t *testing.T) {
 // Every line describe's output held counts against the cap and in the notice,
 // empty ones and those the cap dropped included.
 func TestTheWithheldNoticeCountsEveryLine(t *testing.T) {
+	dir := t.TempDir()
+	entry := filepath.Join(dir, "describe-fails")
+	script := "#!/bin/sh\ni=0; while [ $i -lt 140000 ]; do echo; i=$((i+1)); done\nexit 3\n"
+	if err := os.WriteFile(entry, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	sink := &planSinkText{masker: secrets.NewMasker()}
-	describeFails(t, "i=0; while [ $i -lt 140000 ]; do echo; i=$((i+1)); done\nexit 3\n", "plan", sink)
+	// hack: the stalled-describe deadline can interrupt the output loop before all lines reach the sink.
+	_, err := PlanDocument(t.Context(), SessionConfig{
+		Entry: pipelineentry.Binary(entry), Dir: dir, Env: []string{"PATH=/usr/bin:/bin"}, Sink: sink,
+	}, PlanRequest{Pipeline: "demo", Run: nodeproto.RunContext{RunID: "describe-fails"}, Masker: secrets.NewMasker()})
+	var perr *nodeproto.Error
+	if !errors.As(err, &perr) || perr.Code != nodeproto.CodeSDKExited {
+		t.Fatalf("err = %v, want the process to exit after writing every line", err)
+	}
 	if got := sink.String(); !strings.Contains(got, "(140000 lines)") {
 		t.Fatalf("plan output = %q, want a notice counting all 140000 lines", got[max(0, len(got)-200):])
 	}
