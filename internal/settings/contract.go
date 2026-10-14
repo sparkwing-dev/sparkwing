@@ -5,6 +5,9 @@ package settings
 import (
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
@@ -37,7 +40,7 @@ func OperatorPrecedence() []Source {
 	return []Source{Flag, TeamDB, GlobalDB, LimitsProfile, Default}
 }
 
-// Origin keeps source, file and key when a value moves into the sealed run spec.
+// Origin keeps source, file, key and line when a value moves into the sealed run spec.
 type Origin struct {
 	Source Source `json:"source"`
 	File   string `json:"file,omitempty"`
@@ -83,44 +86,50 @@ type PauseSelection struct {
 // empty collections remain values. Origins is keyed by the keys in Table.
 // This is a settings projection, not an independently sealed run specification.
 type Values struct {
-	ConfigPath     *string
-	Home           *string
-	Profile        *string
-	Args           map[string]string
-	Guards         *projectconfig.Guards
-	Requires       []string
-	Prefers        []string
-	Workers        *int
-	Output         *string
-	AdmissionClass *string
-	Priority       *int
-	Admission      *userconfig.AdmissionConfig
-	Toolchain      *string
-	PauseTimeout   *time.Duration
-	BoxID          *string
-	Cache          *userconfig.CacheConfig
-	SecretsKey     *KeyInput
-	CatchUp        *time.Duration
-	Runner         *userconfig.RunnerConfig
-	OwnerExecution *time.Duration
-	JobTimeout     *time.Duration
-	ApprovalWait   *time.Duration
-	Retry          *int
-	MemoTTL        *time.Duration
-	ClaimWait      *time.Duration
-	Retention      *RetentionValues
-	IdlePoll       *time.Duration
-	Connection     *userconfig.Connection
-	RepoLocation   *string
-	Pause          *PauseSelection
-	Debug          *bool
-	Publish        *string
-	CacheFrom      *string
-	Resources      *Resources
-	SourceRef      *string
-	TokenTTL       *time.Duration
-	SubmitEnvAllow []string
-	Origins        map[string]Origin
+	ConfigPath        *string
+	Home              *string
+	Profile           *string
+	Args              map[string]string
+	Guards            *projectconfig.Guards
+	Requires          []string
+	Prefers           []string
+	Workers           *int
+	Output            *string
+	AdmissionClass    *string
+	Priority          *int
+	Admission         *userconfig.AdmissionConfig
+	Toolchain         *string
+	PauseTimeout      *time.Duration
+	BoxID             *string
+	Cache             *userconfig.CacheConfig
+	SecretsKey        *KeyInput
+	CatchUp           *time.Duration
+	RunnerPreferences *userconfig.RunnerConfig
+	RunnerSelection   *runspec.RunnerSelection
+	DryRun            *bool
+	NoMemo            *bool
+	AllowRisk         []string
+	OwnerExecution    *time.Duration
+	JobTimeout        *time.Duration
+	NoProgressTimeout *time.Duration
+	RetryBackoff      *time.Duration
+	ApprovalWait      *time.Duration
+	Retry             *int
+	MemoTTL           *time.Duration
+	ClaimWait         *time.Duration
+	Retention         *RetentionValues
+	IdlePoll          *time.Duration
+	Connection        *userconfig.Connection
+	RepoLocation      *string
+	Pause             *PauseSelection
+	Debug             *bool
+	Publish           *string
+	CacheFrom         *string
+	Resources         *Resources
+	Checkout          *nodeproto.SourceSpec
+	TokenTTL          *time.Duration
+	SubmitEnvAllow    []string
+	Origins           map[string]Origin
 }
 
 // KeyInput is consumed in the parent process; diagnostics may show only presence.
@@ -148,7 +157,7 @@ type OperatorValues struct {
 	MaxMemoryBytes            *int64
 	MaxPriority               *int
 	AllowedAdmissionClasses   []string
-	AllowedSources            []string
+	AllowedSources            []nodeproto.SourceSpec
 	MaxClaimWait              *time.Duration
 	MaxConcurrentRunners      *int
 	MaxGlobalRunners          *int
@@ -231,15 +240,129 @@ func (e *Error) Error() string { panic("unimplemented: c4-surface-config") }
 // ResolveRequest resolves only intake inputs; project and code fields remain
 // unset and their winning request overrides remain distinguishable from defaults.
 // The store owns sealing and write-once enforcement in runspec.Request.
-func ResolveRequest(in Inputs) (Values, error) { panic("unimplemented: c4-surface-config") }
+func ResolveRequest(in Inputs) (runspec.Options, error) { panic("unimplemented: c4-surface-config") }
 
-// ResolvePlan merges checkout and code values with the request, checks every
-// ceiling, and returns the final settings projection for AcceptPlan's transaction.
-// It cannot mutate the sealed request or silently clamp an author's value.
-func ResolvePlan(in Inputs) (Values, error) { panic("unimplemented: c4-surface-config") }
+// PlanInputs permits only captured request inputs and checkout-derived declarations.
+// Context supplies trusted execution facts, never machine or environment preferences.
+// Request and its ceilings are loaded from server-owned intake state; Declarations is the
+// submitted restricted checkout projection, never unrestricted Values or premerged winners.
+type PlanInputs struct {
+	Request      runspec.SealedRequest
+	Declarations runspec.CheckoutDeclarations
+	Plan         nodeproto.PlanDoc
+	Context      Context
+}
+
+// ResolvePlan returns every job winner keyed by declared job ID after C3 validation.
+// It reapplies request precedence and sealed ceilings without changing either seal.
+// C1 calls it and secret preflight inside AcceptPlan before writing any accepted state.
+// It validates Declarations and derives winners from separate pipeline/default layers plus
+// decoded plan declarations. It never accepts a planner-supplied resolved winner as authority.
+func ResolvePlan(in PlanInputs) (runspec.ExecutionSettings, error) {
+	panic("unimplemented: c4-surface-config")
+}
+
+// ExpansionInputs prevents generated jobs from consulting new host preferences.
+type ExpansionInputs struct {
+	Spec    runspec.Spec
+	Plan    nodeproto.PlanDoc
+	Context Context
+}
+
+// ResolveExpansion resolves generated declarations using Spec.Declarations, accepted run settings
+// and the server-owned sealed request/ceilings. It never rereads a checkout or host preferences.
+// C1 persists these winners alongside each declaration/hash.
+func ResolveExpansion(in ExpansionInputs) (map[string]runspec.JobExecutionSettings, error) {
+	panic("unimplemented: c4-surface-config")
+}
+
+// ProjectCheckoutDeclarations validates the project schema and captures the selected pipeline
+// and defaults without merging them. Raw file positions become file/key/line origins; no
+// startup or credential field can enter the result. Missing files yield the versioned empty layers.
+func ProjectCheckoutDeclarations(raw []byte, file, pipeline string) (runspec.CheckoutDeclarations, error) {
+	panic("unimplemented: c4-surface-config")
+}
+
+// ValidateCheckoutDeclarations checks the format, presence and field/source membership in Table.
+// Every nested Origin must agree with its structural layer and checkout-relative file. An origin
+// claiming flag, env, run, machine or operator authority is invalid. Explicit empty/zero survives.
+// Both acceptance and expansion call this before resolving any author-provided setting.
+func ValidateCheckoutDeclarations(declarations runspec.CheckoutDeclarations) error {
+	panic("unimplemented: c4-surface-config")
+}
+
+// ProjectRequest preserves presence and original origins when values enter C1.
+// It maps only request-owned fields; startup credentials and machine runner config stay local.
+// Pointers, nil collections and Origins preserve unset/empty/zero. Nested keys carry their own origins.
+// RequestProjection lists every run-owned Values field and its C1 destination.
+func ProjectRequest(values Values) (runspec.Options, error) {
+	panic("unimplemented: c4-surface-config")
+}
+
+// ProjectCeilings preserves operator origins and adds C4's fixed retry/memo bounds.
+// AllowedSources is a set of complete checkout policies; unset permits all, empty permits none.
+// Every tuple field must be present, including explicit false. Matching compares all fields.
+func ProjectCeilings(values OperatorValues) (runspec.Ceilings, error) {
+	panic("unimplemented: c4-surface-config")
+}
+
+// ProjectOrigin retains file, key and line and rejects unknown source values.
+// A sealed winner keeps its original origin; Run maps to LayerSealed only for raw run input.
+func ProjectOrigin(origin Origin) (runspec.SettingOrigin, error) {
+	panic("unimplemented: c4-surface-config")
+}
+
+// OriginLayers is the complete C4-to-C1 mapping; operator sources remain distinguishable.
+var OriginLayers = map[Source]runspec.Layer{
+	Flag: runspec.LayerFlag, Env: runspec.LayerEnv, Run: runspec.LayerSealed,
+	ProjectPipeline: runspec.LayerProjectPipeline, ProjectDefaults: runspec.LayerProjectDefaults,
+	Code: runspec.LayerCode, Machine: runspec.LayerMachine, Default: runspec.LayerDefault,
+	TeamDB: runspec.LayerOperatorTeam, GlobalDB: runspec.LayerOperatorGlobal,
+	LimitsProfile: runspec.LayerOperatorProfile,
+}
 
 // ControllerCeilings resolves each operator key with OperatorPrecedence. Shared
 // store quota reservations enforce deployment guards; replica guards only shed.
 func ControllerCeilings(in OperatorInputs) (OperatorValues, error) {
 	panic("unimplemented: c4-surface-config")
+}
+
+// ProjectionField names a complete request-field mapping without reimplementing precedence.
+type ProjectionField struct {
+	ValueField  string
+	OptionField string
+	OriginKey   string
+}
+
+// RequestProjection excludes startup inputs and separately resolved args/guards/schedules.
+// Nested resource, pause and checkout origins use the key plus their field name.
+var RequestProjection = []ProjectionField{
+	{"RunnerSelection", "Runner", "runner"},
+	{"Resources", "Resources", "resources"},
+	{"Priority", "Priority", "priority"},
+	{"AdmissionClass", "AdmissionClass", "admission_class"},
+	{"ClaimWait", "ClaimWait", "claim_wait"},
+	{"OwnerExecution", "OwnerExecutionTimeout", "owner_execution"},
+	{"Checkout", "Checkout", "source"},
+	{"Requires", "Requires", "requires"},
+	{"Prefers", "Prefers", "prefers"},
+	{"DryRun", "DryRun", "dry_run"},
+	{"NoMemo", "NoMemo", "no_memo"},
+	{"AllowRisk", "AllowRisk", "allow_risk"},
+	{"Workers", "Workers", "workers"},
+	{"Output", "Output", "output"},
+	{"Pause", "Pause", "debug.pause"},
+	{"PauseTimeout", "PauseTimeout", "debug.pause_timeout"},
+	{"Debug", "Debug", "debug"},
+	{"Publish", "Publish", "publish"},
+	{"CacheFrom", "CacheFrom", "cache_from"},
+	{"SubmitEnvAllow", "SubmitEnvAllow", "run.submit_env_allow"},
+	{"RepoLocation", "RepoLocation", "repo_location"},
+	{"Profile", "Profile", "profile"},
+	{"JobTimeout", "JobDefaults.Timeout", "job.timeout"},
+	{"NoProgressTimeout", "JobDefaults.NoProgressTimeout", "job.no_progress_timeout"},
+	{"ApprovalWait", "JobDefaults.ApprovalWait", "approval.wait"},
+	{"Retry", "JobDefaults.Retry", "job.retry"},
+	{"RetryBackoff", "JobDefaults.RetryBackoff", "job.retry_backoff"},
+	{"MemoTTL", "JobDefaults.MemoTTL", "job.memo_ttl"},
 }

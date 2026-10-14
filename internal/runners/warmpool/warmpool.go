@@ -145,7 +145,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 			}
 			// safety: a labeled node may fall back only when the fallback explicitly
 			// advertises every label. Most callers configure none.
-			if !match.Evaluate(match.Profile{Labels: r.fallbackLabels}, match.Demand{Selector: n.NeedsLabels}).OK() {
+			if !match.EvaluateOld(match.Profile{Labels: r.fallbackLabels}, match.Demand{Selector: n.NeedsLabels}).OK() {
 				now := time.Now()
 				if unmatchableSince.IsZero() {
 					unmatchableSince = now

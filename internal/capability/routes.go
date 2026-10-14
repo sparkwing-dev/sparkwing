@@ -3,6 +3,8 @@ package capability
 // Routes is the complete target authorization table, including external proofs.
 // The running controller is switched to it by the implementation phase.
 var Routes = []RoutePolicy{
+	route("GET", "/api/v1/runs/{run}/snapshot", OwnerRun, RetrySafe, claim(TriggerHost, BindRunOfTrigger, LiveSensitive)),
+	route("POST", "/api/v1/runs/{run}/jobs/{job}/reconcile", OwnerRun, RetryExactBody, claim(NodesClaim, BindRunOfTrigger, LiveSensitive)),
 	route("POST", "/api/v1/runs", OwnerTeam, RetryIdempotencyKey, intake(), claim(ChildrenStart, BindBodyNamesRun, LiveSensitive)),
 	route("GET", "/api/v1/runs", OwnerTeam, RetrySafe, member(RunsRead)),
 	route("GET", "/api/v1/runs/grep", OwnerTeam, RetrySafe, member(LogsRead)),
@@ -160,10 +162,10 @@ var Routes = []RoutePolicy{
 	route("POST", "/api/v1/launcher/claim", OwnerDeployment, RetryIdempotencyKey, launcher()),
 	route("POST", "/api/v1/launcher/sync", OwnerDeployment, RetrySafe, launcher()),
 	route("POST", "/api/v1/claims/exchange", OwnerRun, RetryNever, claim(ClaimExchange, BindRun, LiveSensitive)),
-	route("POST", "/api/v1/claims/{claim}/heartbeat", OwnerRun, RetrySafe, claim(NodeReport, BindOwnClaim, LiveReporting), claim(ExpansionSubmit, BindOwnClaim, LiveExpansion)),
-	route("POST", "/api/v1/claims/{claim}/logs", OwnerRun, RetryExactBody, claim(LogTail, BindOwnClaim, LiveLogTail)),
-	route("POST", "/api/v1/claims/{claim}/log-segments", OwnerRun, RetryExactBody, claim(LogTail, BindOwnClaim, LiveLogTail)),
-	route("POST", "/api/v1/claims/{claim}/log-manifest", OwnerRun, RetryExactBody, claim(LogTail, BindOwnClaim, LiveLogTail)),
+	route("POST", "/api/v1/claims/{claim}/heartbeat", OwnerRun, RetrySafe, claim(NodeReport, BindOwnClaim, LiveReporting), evalUnit()),
+	route("POST", "/api/v1/claims/{claim}/logs", OwnerRun, RetryExactBody, claim(LogTail, BindOwnClaim, LiveLogTail), evalUnit()),
+	route("POST", "/api/v1/claims/{claim}/log-segments", OwnerRun, RetryExactBody, claim(LogTail, BindOwnClaim, LiveLogTail), evalUnit()),
+	route("POST", "/api/v1/claims/{claim}/log-manifest", OwnerRun, RetryExactBody, claim(LogTail, BindOwnClaim, LiveLogTail), evalUnit()),
 	route("POST", "/api/v1/data/download", OwnerTeam, RetrySafe, claim(DataRead, BindData, LiveSensitive), claim(DataRead, BindData, LiveExpansion), repoReader()),
 	route("POST", "/api/v1/data/upload", OwnerTeam, RetryIdempotencyKey, claim(DataWrite, BindData, LiveSensitive), publisher()),
 	route("POST", "/api/v1/data/commit", OwnerTeam, RetryExactBody, claim(DataWrite, BindData, LiveSensitive), publisher()),
@@ -203,6 +205,7 @@ var Routes = []RoutePolicy{
 	route("POST", "/api/v1/operator/runners/{runner}/metered", OwnerDeployment, RetryIdempotencyKey, console()),
 	externalRoute("GET", "/api/v1/health", AuthPublic, OwnerNone, RetrySafe),
 	externalRoute("GET", "/api/v1/capabilities", AuthPublic, OwnerNone, RetrySafe),
+	externalRoute("POST", "/webhooks/stripe", AuthPaymentWebhook, OwnerTeam, RetryExactBody),
 	externalRoute("POST", "/webhooks/github-app", AuthGitHubWebhook, OwnerTeam, RetryExactBody),
 	externalRoute("POST", "/api/v1/runners/github/exchange", AuthGitHubActions, OwnerTeam, RetryIdempotencyKey),
 	externalRoute("GET", "/.well-known/openid-configuration", AuthPublic, OwnerNone, RetrySafe),
@@ -306,4 +309,9 @@ func publisher() AccessRule {
 
 func repoReader() AccessRule {
 	return AccessRule{CredentialRepoReader, []Grant{DataRead}, BindData, LiveCredential}
+}
+
+// safety: evalUnit confines expansion authority to the eval lease's own logs and heartbeat.
+func evalUnit() AccessRule {
+	return AccessRule{Credential: CredentialEval, Grants: []Grant{ExpansionSubmit}, Binding: BindOwnEval, Liveness: LiveExpansion}
 }

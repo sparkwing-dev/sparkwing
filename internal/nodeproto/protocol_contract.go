@@ -3,6 +3,8 @@ package nodeproto
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 // safety: Version is checked once in hello; documents and HTTP headers carry no protocol version.
@@ -91,31 +93,31 @@ type RunContext struct {
 
 // safety: JobFailure gives recovery code the source failure without inventing a second error envelope.
 type JobFailure struct {
-	Job   string          `json:"job"`
-	Stage string          `json:"stage"`
-	Error json.RawMessage `json:"error"`
+	Job   string        `json:"job"`
+	Stage string        `json:"stage"`
+	Error *apierr.Error `json:"error"`
 }
 
-// safety: Reply.Error carries apierr's inner JSON object without another wire schema.
+// safety: Reply.Error is decoded by apierr.DecodeInner, without a second envelope.
 // Exactly one of Result or Error is present; error codes have no registry in this package.
 type Reply struct {
 	ID     string          `json:"reply"`
 	OK     bool            `json:"ok"`
 	Result json.RawMessage `json:"result,omitempty"`
-	Error  json.RawMessage `json:"error,omitempty"`
+	Error  *apierr.Error   `json:"error,omitempty"`
 }
 
 // safety: RunResult separates body failure from an SDK failure to execute the request.
 type RunResult struct {
 	Outcome string          `json:"outcome"`
-	Error   json.RawMessage `json:"error,omitempty"`
+	Error   *apierr.Error   `json:"error,omitempty"`
 	Output  json.RawMessage `json:"output,omitempty"`
 }
 
 // safety: EvalResult can carry scalar closure values or generated jobs without changing framing.
 type EvalResult struct {
 	Value json.RawMessage `json:"value"`
-	Error json.RawMessage `json:"error,omitempty"`
+	Error *apierr.Error   `json:"error,omitempty"`
 }
 
 // safety: FrameLog has no job field because the host, not pipeline code, assigns log attribution.
@@ -134,14 +136,14 @@ type Frame struct {
 	Log   *FrameLog
 }
 
-// safety: ParseRequest ignores additive fields while enforcing each operation's required fields.
+// safety: ParseRequest ignores additive fields, checks operation fields and decodes failure.error with apierr.DecodeInner.
 func ParseRequest(line []byte) (Request, error) { panic("unimplemented: c3-protocol-sdk") }
 
-// safety: ParseFrame rejects ambiguous or malformed frames; unknown log events remain readable.
+// safety: ParseFrame rejects ambiguous frames and uses apierr.DecodeInner for reply errors; unknown log events remain readable.
 func ParseFrame(line []byte) (Frame, error) { panic("unimplemented: c3-protocol-sdk") }
 
 // safety: Validate refuses fields that contradict the selected operation before invoking pipeline code.
 func (r Request) Validate() error { panic("unimplemented: c3-protocol-sdk") }
 
-// safety: Decode uses C2 apierr codes for failed replies rather than matching error messages.
+// safety: Decode validates reply, RunResult and EvalResult errors with apierr.DecodeInner before returning typed results.
 func (r Reply) Decode(result any) error { panic("unimplemented: c3-protocol-sdk") }

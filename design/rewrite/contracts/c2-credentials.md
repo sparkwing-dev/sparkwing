@@ -20,10 +20,8 @@ protocol and host lifecycle. C4 owns limits, configuration and credential
 file delivery. No contract here defines a second blob model, state machine,
 environment builder or deadline helper.
 
-The route table has 232 explicit method/path rows, including eight node-host
-routes and the public and external-proof routes. It carries 28 grant names.
-The error registry has 39 codes. Those tables are complete target data,
-not examples. Their selected spellings are covered under open questions.
+The route table includes node-host, public and external-proof routes.
+`Routes`, `Grants` and `apierr.Codes` are the complete target inventories.
 
 ## Exported API
 
@@ -43,8 +41,9 @@ All capability names below are in `internal/capability`.
 | `Issued` | Return a generated secret once, after the transaction commits. |
 | `Grant` | Name one exact permission without wildcard implication. |
 | `IssuanceKind` | Select Delegate, Award or Exchange. |
-| `UnitKind` | Select trigger, plan, work, eval, here or bootstrap grant policy. |
-| `AwardPolicy`, `ParentRule` | Pin each unit's grants, legal bindings and revocation parent. |
+| `UnitKind` | Identify persisted trigger, plan, eval or node units. |
+| `AwardPurpose`, `DeliveryPurpose` | Separate fixed grant policy from direct or bootstrap delivery. |
+| `AwardPolicy`, `ParentRule` | Map grant purpose to operational unit, grants, bindings and revocation parent. |
 | `DelegateSpec` | Request a subset of existing authority. |
 | `AwardSpec` | Select a locked unit whose row supplies privileged authority. |
 | `ExchangeSpec` | Consume a bootstrap and recover its original unit policy. |
@@ -61,6 +60,8 @@ All capability names below are in `internal/capability`.
 | `RoutePolicy` | Attach all policy metadata to one method/path registration. |
 | `Target` | Carry decoded selectors and resolved resource ownership to binding checks. |
 | `Presentation` | Supply private bearer/session or verified peer authentication input. |
+| `AuthorityResolver.ResolveAuthority` | Resolve tagged capability/session authority and recheck ancestry and membership inside the store transaction. |
+| `AuthorityGeneration`, `AuthGenerations`, `AuthCacheEntry` | Bind cached credential facts to every ancestor and the awarded team's membership generation. |
 | `Authenticator.Authenticate` | Validate identity and ancestry using route-specific liveness. |
 | `LiveAccess`, `Authenticated` | Preserve which alternatives passed liveness for the matched route. |
 | `BindingChecker.CheckBinding` | Resolve relational authority in the store or sealed node-host plan. |
@@ -70,10 +71,15 @@ All capability names below are in `internal/capability`.
 | `ValidateRoutes` | Refuse duplicate, missing or extra registrations and incomplete policy rows. |
 | `BillingStart`, `BillingUnit` | Separate charging start from compute kind. |
 | `BillingProvenance` | Freeze payer, metering, executor class, reservation, start and unit at award. |
+| `UnitBilling`, `UnitBillingMappings` | Map trigger to host, node to job, plan to plan and eval to eval billing. |
 | `BillingRule` | Define unit minimums and nonbillable intervals. |
 | `BillableInterval` | Record actual compute under an award. |
 | `BillingSettlement` | Return billable seconds and unstarted-refund status for the ledger owner. |
 | `SettleBilling` | Calculate settlement from immutable provenance and persisted intervals. |
+| `PaymentMode`, `PaymentConfig` | Select test/live credentials for the same provider verifier and settlement code. |
+| `PaymentEventKind`, `PaymentEventPolicy`, `PaymentEventPolicies` | Enumerate automatic committed-checkout outcomes and their provider event types. |
+| `PaymentEvent`, `VerifiedPaymentEvent`, `VerifiedPaymentEvent.Event` | Carry authenticated payment facts to C1 without a caller-selected team. |
+| `PaymentPresentation`, `PaymentAuthenticator`, `NewPaymentAuthenticator` | Verify the exact webhook body, signature, timestamp, event type and configured mode. |
 | `DataUse`, `DataScope` | Distinguish executable claims, remote reads, local publication and expansion reads. |
 | `DataOperation`, `DataPolicy` | Pin the grant and edge checks for each data operation. |
 | `DataTarget` | Select a digest/upload and its uploader attempt without asserting authority. |
@@ -94,12 +100,15 @@ All capability names below are in `internal/capability`.
 | `apierr.Reason` | Name stable forbidden details instead of adding auth envelopes. |
 | `apierr.Error`, `(*Error).Error` | Carry safe code, message, hint and details through Go error paths. |
 | `apierr.Envelope` | Encode the shared outer `error` object. |
+| `apierr.DecodeInner` | Decode one inner error object, rejecting malformed or nested envelopes while preserving unknown additive codes. |
+| `nodeproto.ErrorUse`, `nodeproto.ErrorUses` | Describe consumers with typed `apierr.Code` and `apierr.Reason` without another code registry. |
 | `apierr.Status` | Select the registry's HTTP status. |
 | `apierr.WriteHTTP` | Write the error envelope and Retry-After without plain-text fallbacks. |
 | `apierr.WriteJSON` | Write one JSON error line for CLI stderr. |
 
 The exported data tables are `Grants`, `AwardPolicies`, `LivenessPolicies`,
-`Routes`, `BillingRules`, `DataPolicies` and `apierr.Codes`. Constants in
+`Routes`, `BootstrapGrants`, `BootstrapUnits`, `UnitBillingMappings`,
+`BillingRules`, `PaymentEventPolicies`, `DataPolicies` and `apierr.Codes`. Constants in
 their files define the closed vocabulary. Implementers consume these tables
 and generate references from them; they do not maintain copies in handlers,
 clients, SDKs or documentation generators.
@@ -128,9 +137,12 @@ clients, SDKs or documentation generators.
   the existing reservation and expiry, not a new ten-minute deadline.
   Sensitive access before the trigger is claimed is refused. Pool-restricted
   secrets remain refused on here machines.
-- Bootstrap keeps the original unit ID, binding, billing and
-  `BootstrapFor`. Its grants are only `source.read` and `claim.exchange`.
-  A plan bootstrap has a run binding; work and eval keep their unit bindings.
+- Operational kinds are only trigger, plan, eval and node. `PurposeWork`
+  selects the node grants. `PurposeHere` selects the trigger intake Award.
+  `DeliveryBootstrap` keeps the underlying `Unit`, `UnitID`, `Purpose`,
+  binding and billing. Its grants are only `source.read` and `claim.exchange`.
+  Only launcher authority may bootstrap a plan, eval or node unit. A plan
+  bootstrap has a run binding. Node and eval keep their unit bindings.
 - Exchange atomically revokes the bootstrap and issues the original unit's
   fixed grant set. The new parent is the bootstrap's parent. A concurrent or
   repeated exchange cannot produce another live credential. A lost exchange
@@ -156,7 +168,8 @@ All classes check parent revocation, expiry and membership. Result liveness
 admits live reporting and, after termination, only replay of a recorded result
 with identical actor, generation and digest. Log-tail liveness admits live
 uploads and, after termination, only the final attempt within the existing
-seal grace when no newer claim holds the job. Expansion liveness checks its
+`limits.LogSealGrace` measured from persisted attempt finish, with no newer
+attempt or claim generation. The store repeats this check before appending or sealing. Expansion liveness checks its
 owner/eval lease and controller ownership where applicable, the immutable
 source generation and uncancelled run. The transaction checks expected state
 for a first expansion and permits an identical accepted-body replay while
@@ -169,6 +182,7 @@ and deadline arithmetic remain C4's responsibility.
 | `CredentialMember` | An unbound member token/session, verified local peer or configured loopback anonymous principal with explicit local grants. A here award is excluded. |
 | `CredentialAccount` | A signed-in account session; token possession alone cannot consent for an owner. |
 | `CredentialClaim` | An awarded or narrowed unit capability with its applicable unit lease. |
+| `CredentialEval` | A directly delivered or exchanged eval-unit capability, including narrowed descendants, with a live own eval lease. Bootstrap and owner-delegated expansion authority do not match. |
 | `CredentialHere` | The here Award for this run, with the requester's live `runs.write`. |
 | `CredentialLauncher` | A service root with `claims.launch`, checked across teams only for claim selection. |
 | `CredentialDeployment` | An operational deployment-admin bearer; licensed self-hosters cannot use this path. |
@@ -200,6 +214,7 @@ and deadline arithmetic remain C4's responsibility.
 | `ownCleanup` | The cleanup belongs to this node-host process and attempt. |
 | `planOwner` | A plan claim or live trigger owner submits its run's plan. A work claim cannot. |
 | `ownClaim` | The path claim ID equals the awarded unit ID, including its generation and holder. |
+| `ownEval` | The path claim ID and resolved log subject name this eval unit, its run, holder and claim generation. UnitSourceNodeID and UnitSourceGeneration match the immutable expansion source. The source job is never a job-attempt log subject. |
 
 `BindingChecker` performs these relational checks using C1's store data or
 C3's sealed local plan. Handlers perform no authorization. Store mutations
@@ -213,11 +228,22 @@ runs may submit the plan through the publish-only alternative, then results,
 segments and finish. They acquire no executable owner claim. C1 applies the
 same plan and blob checks and records local provenance.
 
-Plan claims upload planning logs through `/claims/{claim}/logs`,
-`log-segments` and `log-manifest`, bound to their own unit. They do not need
-a job to exist before planning. C3's log sink and C1's unit records supply
-the run-log attribution. These routes require `log.tail`; the eval grant
-gap remains the second open question below.
+Owner, plan and eval logs use C1/C3's shared `blob.LogSubject` with the
+unit branch, distinct from job-attempt logs. The controller resolves that
+subject into `Target` unit fields because capability cannot import blob
+without cycling through runspec. Plan claims use `log.tail` on
+`/claims/{claim}/logs`, `log-segments` and `log-manifest`. Eval uses a separate
+`CredentialEval` alternative requiring `expansion.submit`, `ownEval` and
+`LiveExpansion` on those same routes and heartbeat. Eval keeps exactly
+`expansion.submit` and `data.read`. Neither a sibling eval nor a run owner's
+expansion delegate can use this log alternative. Log submission precedes
+lease-ending completion. A structured eval failure goes through the single
+`AcceptExpansion` transaction and `/jobs/{job}/expansion`, like success.
+
+Remote owners read `GET /runs/{run}/snapshot` and submit
+`POST /runs/{run}/jobs/{job}/reconcile`. Both use trigger-run bindings.
+The reconciliation source is a proposal. C1 checks the source read edge and
+persisted outcome in its transaction. The wire carries no actor or grants.
 
 Public and external-proof rows remain explicit. GitHub webhooks require HMAC
 and replay-key deduplication. Actions OIDC establishes push scope, not verified
@@ -225,6 +251,15 @@ default-branch trust. Browser-flow authentication includes the existing
 session, origin, CSRF, nonce and account-link rules. Signed object routes
 check the URL's exact key, method, expiry, size and digest as applicable.
 They do not accept a capability as a substitute for the signature.
+
+Authentication caches have a five-second maximum age, owned by
+`limits.AuthCacheTTL`. Every reuse reads C1's current `AuthGenerations` and
+requires equality for the full capability/session ancestry and the awarded
+team's membership generation. The ancestry includes cross-team launcher
+roots. Missing ancestors, changed generations or a failed generation read
+refuse cache reuse. Revocation and membership changes advance the affected
+generations in the same transaction. Expiry, route liveness and binding fences
+are rechecked on each request. TTL never substitutes for generation checks.
 
 ## Data and source release
 
@@ -267,7 +302,10 @@ residuals. This contract makes no process-isolation claim.
 ## Billing
 
 Award freezes payer team, metered status, executor class, reservation, billing
-start and unit. Launcher awards are metered; other awards copy the root's
+start and billing unit. `UnitBillingMappings` is the only operational-to-billing
+classification table. Here retains trigger-to-host billing and bootstrap
+exchange retains the underlying unit's classification. Launcher awards are
+metered. Other awards copy the root's
 operator-controlled setting. A claimant already executing starts at award.
 A pod reservation starts on the pod's first qualifying renewal/start.
 Exchange preserves provenance; settlement never looks at the current token.
@@ -276,10 +314,33 @@ Exclude customer-owned runner wait intervals, including a metered run host
 waiting for a customer pool. Plan and eval compute bill per second with no
 minimum. A plan-cache hit is free. Executing jobs keep their sixty-second
 minimum. An unstarted award refunds in full. Intervals must not overlap or
-charge the same compute as both host and job. The host minimum interpretation
-is listed below. C1 applies the calculated result to its durable ledger and
+charge the same compute as both host and job. C4 owns
+`limits.WorkBillingMinimum` and the separate
+`limits.HostBillingMinimum`. Host orchestration keeps its existing minimum
+after wait exclusion. Plan/eval stay separate, zero-minimum compute. C1 applies
+the calculated result to its durable ledger and
 keeps charges when operational runs are deleted. Stripe test/live selection
-is configuration, not a separate settlement model.
+uses `PaymentConfig.Mode`, `APIKeyFile` and `WebhookSecretFile`. The private
+files are loaded through C4's credential delivery boundary. Both modes use
+the same implementation, callback path, event inventory and C1 settlement.
+
+The sole automatic settlement callback is `POST /webhooks/stripe`, classified
+as `AuthPaymentWebhook`. The verifier authenticates the exact body and the
+`Stripe-Signature` header, checks the signature timestamp and configured mode,
+and normalizes only `PaymentEventPolicies`. A paid
+`checkout.session.completed` or `checkout.session.async_payment_succeeded`
+may settle credit. An unpaid completed session stays pending. Async payment
+failure and expiry close unpaid checkouts without granting credit. Unsupported
+authenticated events produce no settlement event.
+
+C1 consumes `VerifiedPaymentEvent`, looks up its provider session ID against a
+committed checkout, and derives the team and credit amount from that row.
+It checks mode, currency, amount and payment identity before one atomic ledger
+write. Event-ID deduplication and checkout/payment identity prevent repeated
+or distinct delivery events from crediting twice. Zero or unknown proof is
+refused. A browser return URL, metadata team, or arbitrary service bearer
+cannot settle credit. Human grants, refunds and freezes retain console-only
+routes. C1 retains these financial facts independently of run retention.
 
 ## Error object
 
@@ -291,6 +352,18 @@ before encoding. Identifier refusals name a field/path rather than echoing
 an identifier containing a secret. Error text uses C4's eight-KiB masked
 head/tail limit. C3 imports `apierr.Code` and `apierr.Error`; it must not add
 another codes registry. `unknown_job` replaces the customer-visible node name.
+All four protocol error fields use `*apierr.Error`. `ParseRequest`,
+`ParseFrame` and `Reply.Decode` use `apierr.DecodeInner(data []byte)` for the
+inner object. Malformed and double envelopes fail decoding. Unknown additive
+codes remain readable by older engines.
+
+`ErrorUses` carries typed codes and reasons. Undeclared secrets, missing
+dependency edges, undeclared references and unauthorized child repositories
+use `forbidden` with their respective reason. Missing resources use
+`not_found`. Unavailable secrets, upstreams and OIDC providers use
+`unavailable`. Unready output uses `conflict` with `not_ready`. Rate limiting
+uses `rate_limited`. A runtime child cycle is `bad_request` with `child_cycle`.
+None of these conditions introduces a second wire discriminator.
 
 ## Acceptance evidence
 
@@ -315,7 +388,9 @@ T1 should implement these behavioral scenarios against the running contracts:
 | Cache and publish | Manual refs cannot poison verified refs; default-only local reads remain read-only; publication remains local provenance and does not fail the local run. |
 | Source release | Same-team cloud or machine-owner opt-in only; repo allow-list and SSH confirmation apply; audit failure releases no secret. |
 | Operator split | Deployment tokens cannot trust, grant, freeze, refund or delete accounts, including by delegating or using a local peer. |
-| Billing | Immutable provenance, unstarted refund, plan/eval per-second compute, free plan-cache hits, customer wait exclusion and no double charge. |
+| Billing | Immutable operational-to-billing mapping through here/bootstrap, unstarted refund, plan/eval per-second compute, free plan-cache hits, customer wait exclusion and no double charge. |
+| Payment callback | Signed test/live events use one verifier, bind to the committed checkout, derive team and grant once across retries and distinct duplicate events. Invalid proof, wrong mode/amount/currency, unknown checkout and human console powers remain refused. |
+| Auth cache | Both TTL and fresh full-generation equality are required. Ancestor/session revocation, cross-team launcher revocation and membership loss invalidate reuse. |
 | Windows | SID-verified local subjects, private-file ACLs and equivalent refusal semantics. |
 
 The registered-route comparison must use actual rewritten router registrations,
@@ -327,35 +402,18 @@ exercise only available contract data and functions.
 
 1. **Root origins and sessions.** Section 5.1 names three issuance forms but
    does not define how the first operator, member/machine/service roots or
-   Actions exchange enter them. The schema describes a capability-only parent
-   FK while here awards may parent to a session. Chosen reading: keep one
+   Actions exchange enter them. Here awards may parent to a session, so C1 persists tagged ancestry rather
+   than a capability-only parent FK. Chosen reading: keep one
    `Store.Issue`, represent trusted provisioning as the root-only Delegate
    case (`ProvisionSpec`), and use `AuthorityRef` for capability/session
    ancestry. No new issuance kind or detached here root is added. C1 must
    match both ancestry forms and root provisioning checks. This needs lead
    ratification because literal parent-subset delegation has no parent here.
-2. **Eval operational access.** Section 3.6 gives eval exactly expansion.submit
-   and source-output read. Sections 2.4/2.6 require renewals and plan/eval logs.
-   Chosen reading: eval keeps the two grants, uses expansion.submit for its
-   own lease renewal and DataRead for the bound source, and gets source through
-   the pre-exchange bootstrap. The frozen text supplies no grant for eval log
-   uploads or a direct eval-failure report. The lead must assign those routes
-   without silently adding work authority. Work and plan bootstrap bindings
-   are already represented; eval's finished/failed reporting remains unresolved.
-3. **Billing service callbacks.** Section 9.5 says credits remain, while 9.3
-   reserves grants, freezes and refunds for console sessions. Existing
-   `/credits/grants`, reversals, freezes and card callbacks use a credits
-   service token. Chosen reading: human mutations use only `/operator/*`
-   console rows; automated payment settlement belongs to the billing/store
-   integration, not an arbitrary-grant bearer route. That integration's
-   webhook/service proof and callback inventory need confirmation before
-   billing implementation. No replacement grant-minting service scope is added.
-4. **Host billing minimum.** A59 explicitly distinguishes plan/eval and jobs
-   but does not assign a minimum to remaining host orchestration. Chosen
-   reading: preserve the existing sixty-second host minimum, remove all
-   customer-runner waits, and bill planning/eval under their zero-minimum
-   units. `BillingHost` and its row make that assumption visible for review.
-5. **Route spellings and fixed non-work grants.** The frozen document names
+2. **Host billing minimum.** A59 assigns explicit zero minima to plan/eval
+   compute and a minimum to job compute. The retained host interpretation
+   uses `limits.HostBillingMinimum` independently, excludes customer waits
+   and never bills planning/evaluation twice. The number remains C4-owned.
+3. **Route spellings and fixed non-work grants.** The frozen document names
    resources and one work grant table, not every final path or trigger/plan
    grant. Chosen spellings include `/runners/{jobs,runs}/claim`,
    `/claims/{claim}/heartbeat`, `/jobs/{job}/transition`,
@@ -369,13 +427,13 @@ exercise only available contract data and functions.
 
 | Other area | Types it must match |
 | --- | --- |
-| C1 data | `Capability`, `AuthorityRef`, `Binding`, `LeaseRef`, `IssueRequest`, `BillingProvenance`, `BillableInterval`, `BillingSettlement`, `DataScope`, `DataTarget`, `SourceReleaseAudit`; implement `BindingChecker` and `DataAccessChecker`, use the existing transaction wrapper in `Store.Issue`. |
+| C1 data | `Capability`, `AuthorityRef`, `AuthorityResolver`, `AuthGenerations`, `VerifiedPaymentEvent`, `UnitKind`, `AwardPurpose`, `DeliveryPurpose`, `Binding`, `LeaseRef`, `IssueRequest`, `BillingProvenance`, `BillableInterval`, `BillingSettlement`, `DataScope`, `DataTarget`, `SourceReleaseAudit`; implement `BindingChecker` and `DataAccessChecker`, use the existing transaction wrapper in `Store.Issue`. |
 | C3 protocol and SDK | `apierr.Code`, `apierr.Error`, `apierr.Envelope`, `Audience`, `Binding`, `DelegateSpec`, `Authenticated`, `Authorized`, `Routes`; node-host admission and hello use the same fence and grant rules. |
-| C4 surface and config | `Routes`, `Grant`, `CredentialRule`, `ProvisionSpec`, `DataSigner`, `ObjectToSign`, `BillingRules`; own the TTLs, billing minimum constants, local peer identity, private files and profile options. |
+| C4 surface and config | `Routes`, `Grant`, `CredentialRule`, `ProvisionSpec`, `DataSigner`, `ObjectToSign`, `BillingRules`, `PaymentConfig`; own the TTLs, billing minimum constants, local peer identity, private files and profile options. |
 | T1 acceptance | `Routes`, `AwardPolicies`, `LivenessPolicies`, `apierr.Codes`, `Store.Issue`, `Authenticator`, `Authorize`, `AuthorizeData`, `AuthorizeSourceRelease`; runtime tests wait for these stubs to be implemented. |
 
 C1's schema stores node identifiers internally while wire JSON uses job_id.
 Public node-host output paths likewise use `/node/v1/jobs/{job}/output`.
-There are no compatibility aliases, runtime migrations or edits outside C2.
+There are no compatibility aliases or runtime migrations.
 
 <!-- design:end -->

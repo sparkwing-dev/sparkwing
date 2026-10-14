@@ -50,6 +50,8 @@ const (
 	SDKError              Code = "sdk_error"
 	Cancelled             Code = "cancelled"
 	DeadlineExceeded      Code = "deadline_exceeded"
+	VersionRevoked        Code = "version_revoked"
+	VersionUnsupported    Code = "version_unsupported"
 )
 
 // Definition drives error reference documentation and HTTP status selection.
@@ -100,6 +102,8 @@ var Codes = []Definition{
 	{SDKError, 422, "An SDK or user function reported an unclassified failure."},
 	{Cancelled, 409, "The operation was cancelled."},
 	{DeadlineExceeded, 408, "The applicable execution, queue or approval deadline passed."},
+	{VersionRevoked, 422, "Signed policy revoked the pinned engine; details give version and reason, hint names sparkwing upgrade."},
+	{VersionUnsupported, 422, "An effective signed minimum refuses the engine or runner; details give the minimum, reason and update action."},
 }
 
 // Reason supplies stable forbidden details without reviving the old auth error envelopes.
@@ -124,6 +128,11 @@ const (
 	ReasonConsoleRequired        Reason = "console_required"
 	ReasonReauthRequired         Reason = "reauth_required"
 	ReasonSecretsKeyRequired     Reason = "secrets_key_required"
+	ReasonNotDependency          Reason = "not_dependency"
+	ReasonReferenceUndeclared    Reason = "reference_undeclared"
+	ReasonNotReady               Reason = "not_ready"
+	ReasonNoOutput               Reason = "no_output"
+	ReasonChildCycle             Reason = "child_cycle"
 )
 
 // Error contains only safe, masked text. Details must never include registered secret values.
@@ -141,6 +150,16 @@ func (e *Error) Error() string { return e.Message }
 // Envelope is the one outer error object. Protocol replies embed its Error beside reply and ok.
 type Envelope struct {
 	Error *Error `json:"error"`
+}
+
+// DecodeInner validates the one inner error object used by every transport.
+// It rejects null, duplicate keys, trailing JSON, missing or wrongly typed code/message,
+// invalid hint/details and an outer {error:...} envelope. Additive fields and unknown
+// nonempty codes remain readable by older engines; producers use Codes membership.
+// Protocol replies, body failures, eval failures and recovery inputs all use this
+// decoder before accepting an Error. HTTP/CLI readers unwrap Envelope exactly once.
+func DecodeInner(data []byte) (*Error, error) {
+	panic("unimplemented: c2-credentials")
 }
 
 // Status returns the registry status; an unregistered code is an internal failure.

@@ -5,12 +5,18 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-// IntakeRequest carries client input and the authenticated caller reference, never self-certified App facts.
+// IntakeRequest carries client input and server-derived tagged authority, re-resolved
+// by C2 in the intake transaction. CapabilityPrefix is only a claim fence and
+// cannot replace a session parent. Verified App facts come from the delivery ID.
 type IntakeRequest struct {
+	Authority          capability.AuthorityRef
 	Request            runspec.Request
+	IdempotencyKey     string
 	CapabilityPrefix   string
 	VerifiedDeliveryID string
 }
@@ -44,6 +50,8 @@ type AcceptedPlan struct {
 }
 
 // ExpansionSubmission uses owner or eval authority after the source job's claim has ended.
+// Exactly one of a nonempty Body or Failure is required. An empty successful
+// expansion is an explicit jobs array, never an omitted or null body.
 type ExpansionSubmission struct {
 	Source           NodeRef
 	SourceGeneration int64
@@ -54,7 +62,7 @@ type ExpansionSubmission struct {
 
 // ExpansionFailure resolves the barrier without inventing generated topology on a generator error.
 type ExpansionFailure struct {
-	Code        string
+	Code        apierr.Code
 	MaskedError string
 }
 
@@ -70,20 +78,34 @@ type AcceptedExpansion struct {
 
 // AdmitRun is the only intake for local, remote, retry, child and published runs.
 // It derives authority and allowed pools in the transaction; published runs receive no executable owner unit.
+// A nonempty idempotency key is scoped by server-derived team, principal and pipeline.
+// The canonical input digest (including retry lineage) and key commit on runs for
+// executable and published intake alike. Same key/body returns the original result;
+// a changed body conflicts. An empty key requests a distinct invocation.
 // Retry intake loads Lineage.RetryOf from this Tenant, carries its seals unchanged and records the new ID outside them.
 func (t *Tenant) AdmitRun(ctx context.Context, request IntakeRequest) (AdmissionResult, error) {
 	panic("unimplemented: c1-data")
 }
 
-// AcceptPlan validates the C3 plan, ceilings and declared secrets, then seals spec and inserts nodes atomically.
+// AcceptPlan validates C3 plan and restricted checkout declarations, then resolves
+// C4 settings from the stored first seal, ceilings, both checkout layers and code.
+// Seal.Declarations carries both layers; resolved proposals must match
+// the independently resolved winners. It commits Spec.Declarations with the second
+// seal so expansion and retry never reconstruct layers from winners or current YAML.
+// Declared secret preflight and node insertion share that same transaction.
 // Neither a request field nor an existing seal may change; a differing sealed hash returns spec_drift.
 // Published plans require live publisher authority and create importable jobs without awarding an executable claim.
 func (t *Tenant) AcceptPlan(ctx context.Context, request PlanAcceptance) (AcceptedPlan, error) {
 	panic("unimplemented: c1-data")
 }
 
-// AcceptExpansion checks live owner or eval authority, terminal source generation, cancellation and the barrier in tx.
-// A differing repeat is illegal_transition; failed sources resolve to none in their terminal transition instead.
+// AcceptExpansion is the single writer for successful and failed generator evaluation.
+// It checks Body XOR Failure, live owner/eval authority, terminal source generation,
+// cancellation and the barrier in tx. Success validates declarations, resolves C4
+// execution settings and persists both beside spec hashes before inserting jobs.
+// Structured failures persist their code and masked error. Both forms hash their
+// canonical submission and replay identically; a differing repeat is illegal_transition.
+// Failed source jobs resolve to none in their terminal transition instead.
 func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmission) (AcceptedExpansion, error) {
 	panic("unimplemented: c1-data")
 }

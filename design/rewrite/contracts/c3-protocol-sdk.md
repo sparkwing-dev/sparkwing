@@ -2,7 +2,7 @@
 
 This is the implementation contract for node protocol 2, both author SDKs,
 the fake host, and the shared host library. It follows the frozen architecture
-and decisions 87-100. Declarations compile, but bodies marked
+and decisions 87-104. Declarations compile, but bodies marked
 `panic("unimplemented: c3-protocol-sdk")` do not provide runtime behavior.
 The capability and layer tables contain the complete target data.
 
@@ -13,9 +13,11 @@ The capability and layer tables contain the complete target data.
 | Hello, operations, frames, describe, flat plan and shared validation | `internal/nodeproto/*_contract.go` |
 | Windows inherited-handle argv spelling | `internal/protofd/transport_contract.go` |
 | Run and node host roles, layer order, event-following reconciliation | `internal/nodehost/host_contract.go` |
-| Pure graph decisions and atomic reconciliation/expansion signatures | `pkg/store/scheduling_contract.go` |
+| Pure graph decisions and consistent snapshot projection | `pkg/store/scheduling_contract.go` |
 | Every unit's renewal loop | `internal/lease/keeper_contract.go` |
 | Checkout and entry acquisition | `internal/source/acquire_contract.go` |
+| Plan cache identity, eligibility and validated hits | `internal/nodehost/plan_cache_contract.go` |
+| Exact engines, verified releases and signed version policy | `internal/engine` |
 | Go declarations and services | `sparkwing/sdk_contract.go`, `sparkwing/inputs/memo_contract.go`, retained API inventory below |
 | Author test host | `sparkwing/sparkwingtest/host_contract.go` |
 | TypeScript author API | `sdk/typescript/index.d.ts` |
@@ -23,16 +25,18 @@ The capability and layer tables contain the complete target data.
 The detailed inventories are part of this contract:
 
 - [Protocol inventory, wire rules and validation](c3-protocol-notes.md).
+- [Shared controller API and engine compatibility](c3-controller-wire.md).
+- [Engine resolution, signed version policy and upgrades](c3-engine-version.md).
 - [Go SDK inventory, including retained and removed exports](c3-go-sdk-notes.md).
 - [TypeScript export and member inventory](c3-typescript-notes.md).
 
 C1 owns state transitions, schema, accepted spec storage and blob authority.
-C3's store file declares the scheduling and host integration surface. It adds
-no status writer and no second transition table. C1's Tenant interface must
-include these methods rather than declaring another expansion or reconciler.
+C1 owns `ReconcileNode` and `AcceptExpansion`. C3 hosts consume those exact
+signatures. Both run owners project `RunSnapshot.Scheduling()` and call
+`store.Decide`; the store remains the only state writer.
 C2 owns the canonical error object, code registry and credential authority.
-`nodeproto.ErrorUses()` is the complete list of protocol code dependencies,
-not another definition registry. C4 owns environment policy, settings,
+`nodeproto.ErrorUses()` inventories typed canonical codes and their reasons.
+`apierr.DecodeInner` validates every structured protocol error. C4 owns environment policy, settings,
 numeric limits and deadline calculations.
 
 Existing colliding identifiers have an `Old` suffix and existing callers use
@@ -56,7 +60,7 @@ are part of this contract.
 | `nodehost.LayerSide` | Distinguishes owner decisions from executor work. |
 | `nodehost.OwnerSide`, `nodehost.ExecutorSide` | Name the two layer owners. |
 | `nodehost.LayerSpec`, `nodehost.LayerTable` | Declare the complete outer-to-inner envelope and retry scope. |
-| `nodehost.Reconciler.Reconcile` | Follows a holder and repeats atomic reconciliation after terminal or requeue events. |
+| `nodehost.Reconciler.ReconcileNode` | Follows a holder and repeats atomic reconciliation after terminal or requeue events. |
 | `nodehost.ExpansionStore` | Gives owner/eval hosts the Tenant's expansion persistence boundary. |
 | `store.ScheduleNode` | Projects accepted graph and lifecycle facts into the pure decider. |
 | `store.ScheduleExpansion` | Preserves generator-to-source/member mapping, including empty expansions. |
@@ -66,19 +70,13 @@ are part of this contract.
 | `store.NodeDecision` | Carries one job action with its generation, outcome and reason. |
 | `store.ScheduleDecision` | Returns ordered graph actions and an optional final run verdict. |
 | `store.Decide` | Exposes the single pure `decide()` to run hosts. |
-| `store.ReconcileRef` | Identifies a run/node within the Tenant's team. |
-| `store.ReconcileActor` | Refers to owner capability and fence for transactional rechecks. |
-| `store.MaterializationSource` | Names persisted memo/retry result authority and its spec hash. |
-| `store.SourcePolicyC3` | Offers a reuse source without overriding a live holder. |
-| `store.ReconcileKindC3` | Names the complete atomic reconciliation result set. |
-| `store.KeepTerminalC3`, `WaitHolderC3`, `ExecuteC3`, `MaterializeC3` | Distinguish terminal reuse, event following, committed self-claim and committed result copy. |
-| `store.ReconcileResult` | Returns committed generation, attempt, event sequence and any materialization source. |
-| `store.Tenant.ReconcileNodeC3` | Chooses, self-claims or materializes in one transaction. |
-| `store.ExpansionSubmissionC3` | Names the source's immutable generation and generated job declarations. |
-| `store.ExpansionAuthority` | Refers to the live owner delegation or awarded eval capability. |
-| `store.ExpansionResult` | Returns exact accepted jobs, persisted spec hashes and replay status. |
-| `store.Tenant.AcceptExpansionC3` | Validates and inserts generated jobs while resolving the barrier atomically. |
-| `store.Tenant.FailExpansion` | Resolves a generator error under the same authority and fence. |
+| `store.RunSnapshot.Scheduling` | Projects accepted declarations and persisted state, including empty generator groups, into `ScheduleSnapshot`. |
+| `store.ReconcileRequest`, `store.SourcePolicy` | Carry typed resume, retry, memo or coalescing source authority. |
+| `store.ReconciledNode` | Returns the persisted node and any committed claim or authorized source. |
+| `store.Tenant.ReconcileNode` | Chooses, self-claims or materializes in one transaction. |
+| `store.ExpansionSubmission` | Carries source generation, server-derived actor and exactly one success body or structured failure. |
+| `store.AcceptedExpansion` | Returns persisted nodes, body hash, barrier state and replay status. |
+| `store.Tenant.AcceptExpansion` | Validates and inserts generated jobs or records structured failure in the same transaction. |
 
 ## Lease and source export inventory
 
@@ -96,6 +94,7 @@ are part of this contract.
 | `source.Credential` | Carries host-bound App, HTTPS or SSH material in memory. |
 | `source.Options` | Supplies host workspace and source access separately from sealed source data. |
 | `source.Entry` | Returns acquired checkout, exact commit, resolved default branch and SDK argv. |
+| `source.ForRequest`, `source.ForExecution` | Project intake acquisition inputs or the accepted execution checkout policy without rereading mutable settings. |
 | `source.Acquire` | Acquires source and builds or resolves the SDK entry through one placement-independent path. |
 | `source.Entry.Close` | Releases owned resources without removing the user's checkout. |
 
@@ -103,7 +102,9 @@ are part of this contract.
 
 1. The same lifecycle handles new and resumed runs. The request seal is immutable.
    First planning resolves checkout facts, invokes describe, merges settings and
-   submits the second spec half and plan together. No job runs before AcceptPlan.
+   submits the second spec half, restricted checkout declarations and plan together.
+   `Spec.Declarations` preserves both project layers for store-side resolution,
+   expansion and retry. No job runs before AcceptPlan.
    Resume uses accepted bytes and hashes. It does not reread mutable settings.
 2. The store owns every lifecycle event. Hosts request transitions and emit
    ordinary logs only. A refused output, memo-copy write or terminal transition
@@ -139,8 +140,8 @@ are part of this contract.
    Generated jobs replay their generator chain from recorded outputs for the same
    purpose. Replay cannot add, delete or change persisted topology. A mismatch
    fails as plan_drift before the body starts.
-9. AcceptExpansionC3 accepts all generator groups of a source in one body containing
-   jobs only. Each job names exactly one current source generator in its groups.
+9. AcceptExpansion accepts all generator groups of a source in one body containing
+   jobs only, or a structured failure with no body. Each job names exactly one current source generator in its groups.
    Enforce the 256-job limit per generator, not over the combined source body.
    Empty groups remain derivable
    from the accepted source's generate declarations. The transaction rechecks
@@ -161,10 +162,44 @@ are part of this contract.
     use is fenced by the runner repository allow-list. Team release requires the
     credential owner's cloud/opt-in and audit checks. Install tools get base env.
 12. Raw canonical spec/error JSON is a transport boundary, not another schema.
-    C1's spec decoder and C2's error decoder validate it. Source projections and
+    C1's spec decoder and `apierr.DecodeInner` validate it. Source projections and
     scheduling snapshots come from trusted host/store adapters. Capabilities,
     holders and generations supplied by an SDK or arbitrary HTTP body grant no
     authority. The store derives binding from authenticated capability records.
+
+## Planning cache
+
+C3 owns the default-enabled `nodehost.PlanCache`. `PlanCacheInputs` includes the
+team/repository scope, exact engine/SDK, entry and source-tree digests, project
+settings, merged args, environment, checkout policy, describe result, secret
+registry version, granted runner and complete SDK-visible run context.
+`PlanCacheIdentity` canonicalizes that input with explicit presence. A changed
+input changes the key. An input whose dependency set cannot be established
+bypasses the cache and plans normally.
+
+The complete run context includes run IDs and timestamps because the SDK can
+read them during planning. This conservative key permits reuse only when those
+inputs also match. Cross-run reuse needs an explicit SDK guarantee before any
+of those fields can be omitted. Key digests stay private, because hashes of
+secret-bearing inputs can reveal guesses.
+
+`PlanCache.Lookup`, `Put` and `Invalidate` own persistence. Entries hold raw
+validated declarations and their canonical hash, never another run's accepted
+seal or authority. Missing, corrupted, stale or unreadable entries are misses
+with a reason, followed by normal planning. There is no new cache-age cutoff.
+`ValidatePlanCacheHit` checks the key/digest and reruns `ValidatePlan` with the
+current capability table and secret matcher. It returns `ValidatedPlanHit`.
+
+Every hit still enters `AcceptPlan` with checkout-derived facts. The store
+reruns validation, settings resolution, operator ceilings, authority and secret
+preflight and commits seal point two. A hit bypasses SDK planning compute, so
+it has no planning charge. Cache writes happen only for validated initial
+plans; generator expansions remain under their own transactional barrier.
+`PlanningInput` supplies this dependency to every placement's planning path.
+
+Decision 104 supports TypeScript on Windows. Both SDKs use hello for the bearer
+and argv for Windows protocol handles; no preload or platform refusal remains
+in the target contract.
 
 ## Acceptance scenarios
 
@@ -196,43 +231,23 @@ The old generated reference is not proof of the target API.
 
 | Other area | C3 type and required agreement |
 |---|---|
-| C1 | `store.Tenant` must implement `ReconcileNodeC3`, `AcceptExpansionC3` and `FailExpansion` with these signatures. Reuse `ScheduleSnapshot`/`ScheduleExpansion` and `decide()` for controller settlement. |
+| C1 | `store.Tenant.ReconcileNode` and `AcceptExpansion` are the sole transactional APIs. Both owners use `RunSnapshot.Scheduling()` and `Decide`. |
 | C1 | `runspec.Request` serializes into `RunInput.SealedRequest`; the accepted spec serializes into `AcceptedRun.Spec`. Hashes are canonical C1 hashes. `source.Spec` is a derived projection, never a second stored spec. |
-| C1 | `ReconcileResult.Attempt` and `NodeInput.Attempt` are node-wide ordinals. `Generation` is the claim fence. Expansion source generation is immutable at terminal. |
-| C1 | `MaterializationSource` must pass blob existence, integrity and read-set authorization. C3 does not mint a receipt or expand a read set. |
-| C2 | `apierr.Error`/`apierr.Code` own the object and registry. `Reply.Error`, `JobFailure.Error`, `RunResult.Error` and `EvalResult.Error` carry its inner JSON object. All `ErrorUses()` strings must exist in that registry. |
-| C2 | `ProcessBinding.Routes` contains a nodehost-audience bearer. `ClaimAuthority`, `ReconcileActor` and `ExpansionAuthority` refer to authenticated capabilities, whose binding/liveness C2 and the store recheck. |
+| C1 | `ReconciledNode.Node.Attempt` and `NodeInput.Attempt` are node-wide ordinals. `Generation` is the claim fence. Expansion source generation is immutable at terminal. |
+| C1 | `MaterializeSource` must pass blob existence, integrity and read-set authorization. C3 does not mint a receipt or expand a read set. |
+| C2 | `apierr.Error`/`apierr.Code` own the object and registry. `Reply.Error`, `JobFailure.Error`, `RunResult.Error` and `EvalResult.Error` use `*apierr.Error`, validated by `DecodeInner`. Every typed `ErrorUses()` code belongs to that registry. |
+| C2 | `ProcessBinding.Routes` contains a nodehost-audience bearer. `ClaimAuthority` and `store.Actor` refer to authenticated capabilities, whose binding/liveness C2 and the store recheck. |
 | C2 | `source.Access` calls the live source-release policy. `lease.Keeper.Renew` errors expose canonical codes and Retry-After metadata. `Beat.WatchedNodes` encodes as watched_jobs to keep customer vocabulary. |
-| C4 | `ValidationContext.Policy` implements the one seal-time setting/ceiling resolver. `lease.Keeper.Interval` comes from `limits.Renew`; renewal configuration passes `limits.CheckRenewal`. |
+| C4 | `settings.ResolvePlan` returns sealed execution settings after `ValidatePlan`; both are mandatory inside acceptance. `lease.Keeper.Interval` comes from `limits.Renew`; renewal configuration passes `limits.CheckRenewal`. |
 | C4 | `EnvValue.Startup`, SDK `Startup()` and TypeScript `startup()` agree with `procenv`'s fixed startup names. Attempt and cleanup env agree, and credentials never enter Build output. |
 | C4 | `protofd.Arg` remains --sw-node-protocol; `protofd.HandlesArg` is --sw-protocol-handles followed by decimal request,frame on Windows. Both SDK transports parse that form and clear inheritance during initialization. Unix keeps fds 3 and 4. |
 | T1 | Conformance drives final `nodeproto.Request`, `PlanDoc`, `ValidatePlan`, `RunHost`, `NodeHost`, `sparkwingtest.Host` and TypeScript's root declarations. Old-suffixed symbols test scaffolding only. |
 
 ## Open questions for the lead
 
-- The brief assigns a codes registry to C3 and the one canonical registry to C2.
-  This contract stops at `ErrorUses()` and keeps C2 as sole registry owner, as §6.5
-  requires. Confirm this ownership when integrating the parallel areas.
-- C1 owns the target store API while C3 names decide, reconciliation and expansion.
-  This contract owns their declarations. C1 owns their transactions and state
-  writers. Include these methods in C1's interface instead of adding competing
-  types or another AcceptExpansionC3 implementation.
-- §6.8 refuses TypeScript on Windows, but decision 99 requires both at launch.
-  This contract chooses full Windows parity and records the conflict for the lead.
 - A28 removes approval hook methods while §3.2/A27 require approval-condition
   parity. Both SDKs retain SkipIf as a condition and omit executable before/after
   hooks. Confirm that reading before implementation.
-- Decision 90 cannot print an offending ID containing a secret while hiding that
-  secret. Diagnostics name its field path instead. The complete identifier and
-  matching value must not appear in error details, logs or receipts.
-- The architecture names source.Acquire but not its concrete input type. C3 uses
-  a source-only projection so it compiles independently of C1's new package.
-  C1 must supply this projection from sealed facts without re-resolving identity.
-
-- A source can declare several generators, but the schema stores one expansion
-  state per source. This contract accepts their combined body atomically, counts
-  the 256-job fan-out cap separately for each generator, and records each group
-  even when empty. Confirm that source-level settlement is the intended unit.
 
 ## Verification boundary
 

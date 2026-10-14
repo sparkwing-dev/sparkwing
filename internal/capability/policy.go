@@ -41,6 +41,7 @@ const (
 	BindOwnCleanup         BindingRule = "ownCleanup"
 	BindPlanOwner          BindingRule = "planOwner"
 	BindOwnClaim           BindingRule = "ownClaim"
+	BindOwnEval            BindingRule = "ownEval"
 )
 
 // Liveness is checked during authentication, before grant or target refusal.
@@ -71,7 +72,7 @@ type LivenessPolicy struct {
 
 // LivenessPolicies requires a current binding unless the named exception applies.
 // Result replay checks the recorded actor, generation and digest; log tail checks its grace
-// deadline, final attempt and absence of a newer claim. Neither exception reopens execution.
+// deadline (persisted attempt finish plus limits.LogSealGrace), final attempt and absence of a newer claim. Neither exception reopens execution.
 var LivenessPolicies = []LivenessPolicy{
 	{Class: LiveCredential},
 	{Class: LiveSensitive, RefuseCancel: true},
@@ -91,6 +92,7 @@ const (
 	CredentialMember      CredentialRule = "unbound_member_or_local"
 	CredentialAccount     CredentialRule = "account_session"
 	CredentialClaim       CredentialRule = "awarded_or_delegated_claim"
+	CredentialEval        CredentialRule = "eval_unit"
 	CredentialHere        CredentialRule = "here_award"
 	CredentialLauncher    CredentialRule = "launcher_service"
 	CredentialDeployment  CredentialRule = "deployment_admin"
@@ -114,12 +116,13 @@ type AccessRule struct {
 type Authentication string
 
 const (
-	AuthCapability    Authentication = "capability"
-	AuthPublic        Authentication = "public"
-	AuthGitHubWebhook Authentication = "github_webhook_hmac"
-	AuthGitHubActions Authentication = "github_actions_oidc"
-	AuthSignedObject  Authentication = "signed_object_url"
-	AuthBrowserFlow   Authentication = "browser_flow_csrf_nonce"
+	AuthCapability     Authentication = "capability"
+	AuthPublic         Authentication = "public"
+	AuthGitHubWebhook  Authentication = "github_webhook_hmac"
+	AuthPaymentWebhook Authentication = "payment_webhook_signature"
+	AuthGitHubActions  Authentication = "github_actions_oidc"
+	AuthSignedObject   Authentication = "signed_object_url"
+	AuthBrowserFlow    Authentication = "browser_flow_csrf_nonce"
 )
 
 // RetryPolicy is consumed by the shared HTTP client, so retries do not grow another route table.
@@ -146,22 +149,29 @@ type RoutePolicy struct {
 
 // Target contains server-resolved ownership plus decoded path/body selectors.
 // BodyRunID includes parent lineage on POST /runs; it cannot be authorized inside the handler.
+// Unit fields project the resolved blob.LogSubject at the controller boundary without an import cycle.
 type Target struct {
-	Team           string
-	ClaimID        string
-	RunID          string
-	NodeID         string
-	BodyRunID      string
-	Pipeline       string
-	ChildRunID     string
-	SlotRunID      string
-	SlotNodeID     string
-	SlotGeneration int64
-	TokenPrefix    string
-	AccountID      string
-	SecretName     string
-	CleanupID      string
-	Data           *DataTarget
+	Team                 string
+	ClaimID              string
+	Unit                 UnitKind
+	UnitID               string
+	UnitGeneration       int64
+	UnitHolder           string
+	UnitSourceNodeID     string
+	UnitSourceGeneration int64
+	RunID                string
+	NodeID               string
+	BodyRunID            string
+	Pipeline             string
+	ChildRunID           string
+	SlotRunID            string
+	SlotNodeID           string
+	SlotGeneration       int64
+	TokenPrefix          string
+	AccountID            string
+	SecretName           string
+	CleanupID            string
+	Data                 *DataTarget
 }
 
 // Presentation is private authentication input. Raw never belongs in process env or diagnostics.
@@ -171,8 +181,14 @@ type Presentation struct {
 	Peer  Subject
 }
 
+// AuthorityResolver resolves persisted capability or session authority inside the caller's transaction.
+// It rechecks revocation ancestry, membership and live grants before deriving a store actor.
+type AuthorityResolver interface {
+	ResolveAuthority(context.Context, AuthorityRef) (Principal, error)
+}
+
 // Authenticator rechecks ancestor and binding liveness using the matched route's classes.
-// Auth caches must use both a bounded TTL and the store's revocation generation.
+// Auth caches obey limits.AuthCacheTTL and compare the complete AuthGenerations on every reuse.
 type Authenticator interface {
 	Authenticate(context.Context, Presentation, RoutePolicy) (Authenticated, error)
 }

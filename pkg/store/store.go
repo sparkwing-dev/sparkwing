@@ -3095,7 +3095,7 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, p
 		}
 		for i := range batch {
 			n := &batch[i]
-			if !match.Evaluate(profile, match.Demand{Selector: n.needs}).OK() {
+			if !match.EvaluateOld(profile, match.Demand{Selector: n.needs}).OK() {
 				mismatched = append(mismatched, nodeKey{runID: n.runID, nodeID: n.nodeID})
 				continue
 			}
@@ -3121,7 +3121,7 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, p
 			// safety: the node stays queued for a runner whose list admits its
 			// repository and whose capacity holds it, so passing over it writes
 			// nothing.
-			if !match.Evaluate(profile, demand).OK() {
+			if !match.EvaluateOld(profile, demand).OK() {
 				continue
 			}
 			refused, err := warm.refuses(ctx, storeRowQuerier{s}, n.runID, n.nodeID)
@@ -4844,7 +4844,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 				}
 			}
 			repo := triggerRunRepository(&row.t, row.envJSON)
-			if filtered && !match.Evaluate(profile, match.Demand{Repo: &repo, Trigger: true}).OK() {
+			if filtered && !match.EvaluateOld(profile, match.Demand{Repo: &repo, Trigger: true}).OK() {
 				continue
 			}
 			t, argsJSON, envJSON, createdNS, found = row.t, row.argsJSON, row.envJSON, row.createdNS, true

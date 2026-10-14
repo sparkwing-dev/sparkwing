@@ -1,5 +1,7 @@
 # C4: surface and configuration contracts
 
+<!-- design:begin -->
+
 Status: target contracts for the frozen v4 architecture. Tables are populated;
 execution, parsing, resolution and lifecycle signatures panic until implemented.
 The current CLI and hosts are not wired to these contracts. An `Old` suffix marks
@@ -82,7 +84,7 @@ and projectconfig functions with `Old` names do not validate the target schemas.
   and code inputs and reapplies request overrides without rewriting the request.
   A host consuming accepted values never reads its own preferences again.
 - Nil means unset. Explicit zero, false, an empty list or an empty map keeps its
-  documented meaning. Invalid settings fail with source/file/key information;
+  documented meaning. Invalid settings fail with source/file/key/line information;
   they never warn-and-default. Defaults apply to pipelines with no YAML entry.
 - Args merge per key. Schedule host args override schedule args before request
   sealing. Pipeline requires replaces defaults, then job requirements add; run
@@ -92,6 +94,77 @@ and projectconfig functions with `Old` names do not validate the target schemas.
   `max_runs_per_hour` supplies the sole per-principal guard's DB override.
 - Retention keeps run and metric policies separate. Newest successful run/output
   pins survive retention; log classes still expire. Financial rows never cascade.
+
+### Settings across the seal points
+
+`ResolveRequest` returns `runspec.Options`. `ProjectRequest` defines the typed
+conversion from `Values`, and `RequestProjection` names every run-owned field.
+Pointers and nil collections retain absence. Explicit false, zero and empty
+collections stay present. Nested resources, pause controls and checkout fields
+retain separate origins. `OriginLayers` maps every C4 source to C1, including the
+three operator sources. File, key and line survive the conversion. A captured
+winner keeps its original origin when another host consumes the sealed request.
+
+`RunnerSelection` chooses any, name, label or here for one run.
+`RunnerPreferences` resolves the machine's runner configuration at startup.
+Dry-run, no-memo, risk permissions, pause controls, debug, workers, output and
+publication/cache profiles all have request fields. Startup credentials and
+machine runner settings stay outside the request projection.
+
+C1 runs `nodeproto.ValidatePlan`, `settings.ResolvePlan` and secret preflight in
+its acceptance transaction. Structural validation cannot accept a plan by itself.
+`PlanInputs` takes the server-owned sealed request, `runspec.CheckoutDeclarations`
+and the decoded `PlanDoc`. The declaration projection retains separate pipeline
+and defaults layers, explicit presence and source/file/key/line origins. Its
+`CheckoutLayer` contains author fields only. It cannot carry startup controls or
+credentials, substitute a new machine file/environment, or submit resolved winners
+as resolution inputs. Args retain per-key origins as well as empty-map presence.
+`GuardDeclarations` contains predicates before evaluation.
+
+`ProjectCheckoutDeclarations` validates the project schema and captures the two
+layers without merging them. `ValidateCheckoutDeclarations` checks the version,
+field/source membership in `Table`, and every nested origin. Layer identity comes
+from the enclosing Pipeline/Defaults field. An origin cannot claim flag, env,
+run, machine or operator precedence. Fields unsupported by that source are refused.
+Code-only resources, priority, claim wait, admission class and job defaults still
+come from `PlanDoc`; their availability in the restricted type grants no YAML
+source permission.
+
+C1 and the controller wire carry this same projection into `SealInput.Declarations`.
+`Spec.Declarations` retains it separately from `Resolved.Settings`, and its contents
+participate in the seal hash. Resumption and retry preserve those declaration
+layers unchanged. `ResolvePlan` returns
+`runspec.ExecutionSettings`, whose `Jobs` map contains exactly the declared job
+IDs. C1 persists it in `Resolved.Settings` at seal point two. Timeout, no-progress
+timeout, approval wait, retry/backoff, memo TTL, resources and placement winners
+retain their origins. Executors consume those winners.
+
+`ResolveExpansion` takes the accepted spec, including `Spec.Declarations` and
+the original sealed request/ceilings, plus generated declarations. It cannot
+re-read checkout files or host preferences. C1 uses
+it after the same structural validation and before secret preflight and commit.
+Each generated node stores its `JobExecutionSettings` beside its declarative
+`JobSpec` and spec hash. Initial and generated declarations stay unchanged for
+code-reconstruction drift checks. Expansions do not rewrite the run's seals.
+
+`Values.Checkout` and the checkout resolver use `nodeproto.SourceSpec` for full
+history, depth, tags, submodules and LFS. `Options.Checkout` seals the winning
+policy plus each field's origin. `runspec.Source` and project YAML's source string
+retain acquisition identity. They never stand in for checkout policy.
+`source.ForRequest` supplies the policy available for initial planning acquisition.
+`source.ForExecution` consumes the policy finalized at acceptance.
+
+`ProjectCeilings` preserves operator origins, allowed admission classes and allowed
+checkout policies, plus C4's fixed retry and memo bounds. The `AllowedSources`
+interpretation is a set of complete checkout-policy tuples. Every tuple field must
+be present, including explicit false. An absent field is invalid, not a wildcard.
+A resolved policy must equal one tuple. An unset set is unrestricted and an
+explicit empty set permits none. This constrains checkout behavior only, not
+repository/ref access. It adds no default restriction.
+
+Cores stay `float64` through both seals. Memory stays bytes. Platform unit
+conversion belongs at the executor platform boundary. Cloud scratch stays the
+fixed limit and has no author field.
 
 ### YAML schema
 
@@ -216,7 +289,10 @@ lands. There is no behavioral changelog claim in this contract-only change.
 
 | This contract | Other area/type | Required agreement |
 | --- | --- | --- |
-| settings.Values, ResolveRequest/ResolvePlan | C1 runspec.Request and accepted spec | Embed/convert settings projection with presence and Origin; store owns both immutable seals |
+| settings.ProjectCheckoutDeclarations/ValidateCheckoutDeclarations | C1 CheckoutDeclarations/Spec.Declarations; C3 wire PlanSubmission | Preserve separate author-only layers in transport and seal; re-resolve using server-owned intake overrides/ceilings |
+| settings.ProjectRequest/ProjectOrigin/ProjectCeilings | C1 runspec.Options/Ceilings | Preserve presence and every original source/file/key/line; store owns both immutable seals |
+| settings.ResolvePlan/ResolveExpansion | C1 Resolved.Settings/NodeRow.Execution; C3 NodeInput.Execution | Persist job-ID winners separately from declarations/hashes; execute winners and reconstruct code from declarations |
+| settings.Checkout | C3 SourceSpec; C1 Options.Checkout; source.ForExecution | Seal typed checkout policy at acceptance separately from acquisition identity |
 | procenv.Base/Runtime | C1 runspec env snapshot identity; C3 RunHost/NodeHost | Captured env identity survives retry/children; source facts and granted runner identity supplied explicitly |
 | procenv.Assignment/JobEnv | C3 plan env declaration and SDK Startup option | Preserve Startup marker; fixed interpreter names always startup; SDK applies Body after planning |
 | limits.Table/Child/JobDeadline | C1 AcceptPlan/TransitionNode; C2 capability issuance; C3 lease.Keeper/ValidatePlan | Same caps, refusal semantics and deadlines; store clock decides liveness |
@@ -227,6 +303,49 @@ lands. There is no behavioral changelog claim in this contract-only change.
 | launcher.BuildJob | C3 source.Acquire/NodeHost; C2 bootstrap grant tables | Source-only bootstrap, exact SHA, exchange before SDK, unit-specific fixed grants, same root ancestry |
 | wingd.LocalSubject/LocalRuntime | C2 local capability subject/policy; C1 store owner | Kernel UID/SID supplies local identity; same controller policies; sole state.db owner |
 | All acceptance rows above | T1 scenario catalog | Launch coverage includes Go/TS, Windows, here, Actions, remote cache and DinD |
+
+## Final log flush
+
+`limits.LogSealGrace` preserves the existing sixty-second final-attempt window.
+C2 and C1 derive its deadline from persisted attempt completion. An unsealed
+final stream may flush only for the recorded writer and fence, with live
+credential ancestry and no newer attempt or generation. This does not extend
+credential expiry or give eval units a job-attempt grace exception.
+
+## Authentication and billing bounds
+
+C2 selects a five-second auth-cache bound; C4 owns `limits.AuthCacheTTL`.
+Every reuse also requires a fresh, identical store generation vector for the
+credential, all ancestors and team membership. The TTL cannot authorize reuse
+on its own. Binding liveness and credential expiry remain per-request checks.
+
+`limits.WorkBillingMinimum` and `HostBillingMinimum` are the numerical owners
+for the separate job and host minimums. Both are sixty seconds. Plan and eval
+remain per-second with zero minimum; customer-runner waits are excluded.
+Test/live payment selection uses C2 `PaymentConfig` and private credential
+files with the same callback verification and C1 settlement transaction.
+
+## Version policy and upgrades
+
+`limits.ControllerCompatibilityMonths` owns the twelve-calendar-month controller
+HTTP API promise. `limits.VersionIndexRefresh` owns the five-minute signed-index
+refresh interval. The latter bounds routine refresh, not fallback lifetime.
+A previously verified policy remains usable during network or verification
+failure. Without one, first-use resolution fails as `unavailable` with retry
+guidance. A support-window end alone never prevents an old engine from running.
+
+`internal/engine` owns exact Go/TypeScript pin resolution, signed GitHub release
+verification and machine caching. Its version-index notices reach both run output
+and the dashboard. The signed minimum and individual revocations carry reasons
+and announcement/enforcement dates. See [the engine contract](c3-engine-version.md)
+for the JSON shape, trust rules and rollback checks.
+
+`sparkwing upgrade` bumps repository SDK pins and native lockfiles, then verifies
+with the matching engine before applying changes. `--version` selects an exact
+permitted release and `--dry-run` previews edits. `sparkwing update` retains the
+installed machine-software role. Runners prepare verified updates, drain existing
+claims while renewing them, preserve credentials/configuration and refresh their
+managed services and timers before restart. Schedules survive without reinstall.
 
 ## Open questions for the lead
 
@@ -257,9 +376,7 @@ lands. There is no behavioral changelog claim in this contract-only change.
 6. **Network evidence.** The design does not supply a destination list or freshness
    interval for enforcement probes. CloudBoundary requires evidence for the target
    node/namespace and current policy revision; no invented timeout is added.
-7. **Auth cache TTL.** The architecture requires a bounded cache plus store
-   generation checks without a numeric TTL. C2 must select its value and add it
-   to limits rather than inventing a second owner.
+
 
 ## Verification
 
@@ -318,64 +435,85 @@ family files and complete tables; temporary Old implementations are excluded.
 
 | Export | Purpose |
 | --- | --- |
-| [`Source`](../../../internal/settings/contract.go#L13) | Source preserves the origin needed to explain a refusal without leaking values. |
-| [`Precedence`](../../../internal/settings/contract.go#L31) | Precedence gives closer explicit sources priority; ceilings remain independent. |
-| [`OperatorPrecedence`](../../../internal/settings/contract.go#L36) | OperatorPrecedence keeps a named flag authoritative, including explicit zero. |
-| [`Origin`](../../../internal/settings/contract.go#L41) | Origin keeps source, file and key when a value moves into the sealed run spec. |
-| [`Phase`](../../../internal/settings/contract.go#L49) | Phase prevents project and code settings from being frozen before planning. |
-| [`Rule`](../../../internal/settings/contract.go#L59) | Rule is the precedence-document and conformance-test source for one setting. |
-| [`Resources`](../../../internal/settings/contract.go#L70) | Resources uses native units so hosts cannot disagree through unit conversion. |
-| [`PauseSelection`](../../../internal/settings/contract.go#L76) | PauseSelection is sealed request data instead of inherited debug env. |
-| [`Values`](../../../internal/settings/contract.go#L85) | Values retains presence until acceptance. |
-| [`KeyInput`](../../../internal/settings/contract.go#L128) | KeyInput is consumed in the parent process; diagnostics may show only presence. |
-| [`RetentionValues`](../../../internal/settings/contract.go#L136) | RetentionValues keeps metric and run retention separate from fixed blob/log rules. |
-| [`OperatorValues`](../../../internal/settings/contract.go#L143) | OperatorValues uses pointers because zero disables a documented guard; it never means missing. |
-| [`OperatorInputs`](../../../internal/settings/contract.go#L174) | OperatorInputs keeps deployment authority out of author preferences. |
-| [`Context`](../../../internal/settings/contract.go#L183) | Context carries facts used for defaults without reading process-global state. |
-| [`Inputs`](../../../internal/settings/contract.go#L205) | Inputs has a fixed field for each source, rather than caller-ordered layers. |
-| [`Error`](../../../internal/settings/contract.go#L219) | Error names invalid or conflicting input without echoing secrets. |
-| [`Error.Error`](../../../internal/settings/contract.go#L229) | Error supplies a stable message for the shared apierr translation boundary. |
-| [`ResolveRequest`](../../../internal/settings/contract.go#L234) | ResolveRequest resolves only intake inputs; project and code fields remain unset and their winning request overrides remain distinguishable from defaults. |
-| [`ResolvePlan`](../../../internal/settings/contract.go#L239) | ResolvePlan merges checkout and code values with the request, checks every ceiling, and returns the final settings projection for AcceptPlan's transaction. |
-| [`ControllerCeilings`](../../../internal/settings/contract.go#L243) | ControllerCeilings resolves each operator key with OperatorPrecedence. |
-| [`ConfigPath`](../../../internal/settings/resolvers.go#L10) | ConfigPath resolves config_path with its Table rule, preserving origin for refusal. |
-| [`Home`](../../../internal/settings/resolvers.go#L15) | Home resolves home with its Table rule, preserving origin for refusal. |
-| [`Profile`](../../../internal/settings/resolvers.go#L20) | Profile resolves profile with its Table rule, preserving origin for refusal. |
-| [`Args`](../../../internal/settings/resolvers.go#L25) | Args resolves args with its Table rule, preserving origin for refusal. |
-| [`Guards`](../../../internal/settings/resolvers.go#L30) | Guards resolves guards with its Table rule, preserving origin for refusal. |
-| [`Requires`](../../../internal/settings/resolvers.go#L35) | Requires resolves requires with its Table rule, preserving origin for refusal. |
-| [`Prefers`](../../../internal/settings/resolvers.go#L40) | Prefers resolves prefers with its Table rule, preserving origin for refusal. |
-| [`Workers`](../../../internal/settings/resolvers.go#L45) | Workers resolves workers with its Table rule, preserving origin for refusal. |
-| [`Output`](../../../internal/settings/resolvers.go#L50) | Output resolves output with its Table rule, preserving origin for refusal. |
-| [`AdmissionClass`](../../../internal/settings/resolvers.go#L55) | AdmissionClass resolves admission_class with its Table rule, preserving origin for refusal. |
-| [`Priority`](../../../internal/settings/resolvers.go#L60) | Priority resolves priority with its Table rule, preserving origin for refusal. |
-| [`AdmissionPolicy`](../../../internal/settings/resolvers.go#L65) | AdmissionPolicy resolves admission with its Table rule, preserving origin for refusal. |
-| [`Toolchain`](../../../internal/settings/resolvers.go#L70) | Toolchain resolves toolchain with its Table rule, preserving origin for refusal. |
-| [`PauseTimeout`](../../../internal/settings/resolvers.go#L75) | PauseTimeout resolves debug.pause_timeout with its Table rule, preserving origin for refusal. |
-| [`BoxID`](../../../internal/settings/resolvers.go#L80) | BoxID resolves machine.box_id with its Table rule, preserving origin for refusal. |
-| [`BinaryCache`](../../../internal/settings/resolvers.go#L85) | BinaryCache resolves cache with its Table rule, preserving origin for refusal. |
-| [`SecretsKey`](../../../internal/settings/resolvers.go#L90) | SecretsKey resolves secrets_key with its Table rule, preserving origin for refusal. |
-| [`CatchUp`](../../../internal/settings/resolvers.go#L95) | CatchUp resolves schedule.catch_up with its Table rule, preserving origin for refusal. |
-| [`Runner`](../../../internal/settings/resolvers.go#L100) | Runner resolves runner with its Table rule, preserving origin for refusal. |
-| [`OwnerExecution`](../../../internal/settings/resolvers.go#L105) | OwnerExecution resolves owner_execution with its Table rule, preserving origin for refusal. |
-| [`JobTimeout`](../../../internal/settings/resolvers.go#L110) | JobTimeout resolves job.timeout with its Table rule, preserving origin for refusal. |
-| [`ApprovalWait`](../../../internal/settings/resolvers.go#L115) | ApprovalWait resolves approval.wait with its Table rule, preserving origin for refusal. |
-| [`Retry`](../../../internal/settings/resolvers.go#L120) | Retry resolves job.retry with its Table rule, preserving origin for refusal. |
-| [`MemoTTL`](../../../internal/settings/resolvers.go#L125) | MemoTTL resolves job.memo_ttl with its Table rule, preserving origin for refusal. |
-| [`ClaimWait`](../../../internal/settings/resolvers.go#L130) | ClaimWait resolves claim_wait with its Table rule, preserving origin for refusal. |
-| [`Retention`](../../../internal/settings/resolvers.go#L135) | Retention resolves retention with its Table rule, preserving origin for refusal. |
-| [`IdlePoll`](../../../internal/settings/resolvers.go#L140) | IdlePoll resolves idle_poll with its Table rule, preserving origin for refusal. |
-| [`ControllerConnection`](../../../internal/settings/resolvers.go#L145) | ControllerConnection resolves connection with its Table rule, preserving origin for refusal. |
-| [`RepoLocation`](../../../internal/settings/resolvers.go#L150) | RepoLocation resolves repo_location with its Table rule, preserving origin for refusal. |
-| [`PauseTargets`](../../../internal/settings/resolvers.go#L155) | PauseTargets resolves debug.pause with its Table rule, preserving origin for refusal. |
-| [`Debug`](../../../internal/settings/resolvers.go#L160) | Debug resolves debug with its Table rule, preserving origin for refusal. |
-| [`Publish`](../../../internal/settings/resolvers.go#L165) | Publish resolves publish with its Table rule, preserving origin for refusal. |
-| [`CacheFrom`](../../../internal/settings/resolvers.go#L170) | CacheFrom resolves cache_from with its Table rule, preserving origin for refusal. |
-| [`ResourceLimits`](../../../internal/settings/resolvers.go#L175) | ResourceLimits resolves resources with its Table rule, preserving origin for refusal. |
-| [`SourceRef`](../../../internal/settings/resolvers.go#L180) | SourceRef resolves source with its Table rule, preserving origin for refusal. |
-| [`TokenTTL`](../../../internal/settings/resolvers.go#L185) | TokenTTL resolves token.ttl with its Table rule, preserving origin for refusal. |
-| [`SubmitEnvAllow`](../../../internal/settings/resolvers.go#L190) | SubmitEnvAllow resolves run.submit_env_allow with its Table rule, preserving origin for refusal. |
-| [`Table`](../../../internal/settings/table.go#L5) | Table is complete for surviving settings from the source inventory and the approved additions. |
+| [`Source`](../../../internal/settings/contract.go) | preserves the origin needed to explain a refusal without leaking values. |
+| [`Precedence`](../../../internal/settings/contract.go) | gives closer explicit sources priority; ceilings remain independent. |
+| [`OperatorPrecedence`](../../../internal/settings/contract.go) | keeps a named flag authoritative, including explicit zero. |
+| [`Origin`](../../../internal/settings/contract.go) | keeps source, file, key and line when a value moves into the sealed run spec. |
+| [`Phase`](../../../internal/settings/contract.go) | prevents project and code settings from being frozen before planning. |
+| [`Rule`](../../../internal/settings/contract.go) | is the precedence-document and conformance-test source for one setting. |
+| [`Resources`](../../../internal/settings/contract.go) | uses native units so hosts cannot disagree through unit conversion. |
+| [`PauseSelection`](../../../internal/settings/contract.go) | is sealed request data instead of inherited debug env. |
+| [`Values`](../../../internal/settings/contract.go) | retains presence until acceptance. |
+| [`KeyInput`](../../../internal/settings/contract.go) | is consumed in the parent process; diagnostics may show only presence. |
+| [`RetentionValues`](../../../internal/settings/contract.go) | keeps metric and run retention separate from fixed blob/log rules. |
+| [`OperatorValues`](../../../internal/settings/contract.go) | uses pointers because zero disables a documented guard; it never means missing. |
+| [`OperatorInputs`](../../../internal/settings/contract.go) | keeps deployment authority out of author preferences. |
+| [`Context`](../../../internal/settings/contract.go) | carries facts used for defaults without reading process-global state. |
+| [`Inputs`](../../../internal/settings/contract.go) | has a fixed field for each source, rather than caller-ordered layers. |
+| [`Error`](../../../internal/settings/contract.go) | names invalid or conflicting input without echoing secrets. |
+| [`ResolveRequest`](../../../internal/settings/contract.go) | resolves only intake inputs; project and code fields remain unset and their winning request overrides remain distinguishable from defaults. |
+| [`PlanInputs`](../../../internal/settings/contract.go) | permits only captured request inputs and checkout-derived declarations. |
+| [`ResolvePlan`](../../../internal/settings/contract.go) | returns every job winner keyed by declared job ID after C3 validation. |
+| [`ExpansionInputs`](../../../internal/settings/contract.go) | prevents generated jobs from consulting new host preferences. |
+| [`ResolveExpansion`](../../../internal/settings/contract.go) | resolves generated declarations against the accepted run settings and original ceilings. |
+| [`ProjectCheckoutDeclarations`](../../../internal/settings/contract.go) | Captures validated project pipeline/default layers with presence and file positions. |
+| [`ValidateCheckoutDeclarations`](../../../internal/settings/contract.go) | Rejects wrong format, unsupported field sources and forged origin layers. |
+| [`ProjectRequest`](../../../internal/settings/contract.go) | preserves presence and original origins when values enter C1. |
+| [`ProjectCeilings`](../../../internal/settings/contract.go) | preserves operator origins and adds C4's fixed retry/memo bounds. |
+| [`ProjectOrigin`](../../../internal/settings/contract.go) | retains file, key and line and rejects unknown source values. |
+| [`OriginLayers`](../../../internal/settings/contract.go) | is the complete C4-to-C1 mapping; operator sources remain distinguishable. |
+| [`ControllerCeilings`](../../../internal/settings/contract.go) | resolves each operator key with OperatorPrecedence. |
+| [`ProjectionField`](../../../internal/settings/contract.go) | names a complete request-field mapping without reimplementing precedence. |
+| [`RequestProjection`](../../../internal/settings/contract.go) | excludes startup inputs and separately resolved args/guards/schedules. |
+| [`ConfigPath`](../../../internal/settings/resolvers.go) | resolves config_path with its Table rule, preserving origin for refusal. |
+| [`Home`](../../../internal/settings/resolvers.go) | resolves home with its Table rule, preserving origin for refusal. |
+| [`Profile`](../../../internal/settings/resolvers.go) | resolves profile with its Table rule, preserving origin for refusal. |
+| [`Args`](../../../internal/settings/resolvers.go) | resolves args with its Table rule, preserving origin for refusal. |
+| [`Guards`](../../../internal/settings/resolvers.go) | resolves guards with its Table rule, preserving origin for refusal. |
+| [`Requires`](../../../internal/settings/resolvers.go) | resolves requires with its Table rule, preserving origin for refusal. |
+| [`Prefers`](../../../internal/settings/resolvers.go) | resolves prefers with its Table rule, preserving origin for refusal. |
+| [`Workers`](../../../internal/settings/resolvers.go) | resolves workers with its Table rule, preserving origin for refusal. |
+| [`Output`](../../../internal/settings/resolvers.go) | resolves output with its Table rule, preserving origin for refusal. |
+| [`AdmissionClass`](../../../internal/settings/resolvers.go) | resolves admission_class with its Table rule, preserving origin for refusal. |
+| [`Priority`](../../../internal/settings/resolvers.go) | resolves priority with its Table rule, preserving origin for refusal. |
+| [`AdmissionPolicy`](../../../internal/settings/resolvers.go) | resolves admission with its Table rule, preserving origin for refusal. |
+| [`Toolchain`](../../../internal/settings/resolvers.go) | resolves toolchain with its Table rule, preserving origin for refusal. |
+| [`PauseTimeout`](../../../internal/settings/resolvers.go) | resolves debug.pause_timeout with its Table rule, preserving origin for refusal. |
+| [`BoxID`](../../../internal/settings/resolvers.go) | resolves machine.box_id with its Table rule, preserving origin for refusal. |
+| [`BinaryCache`](../../../internal/settings/resolvers.go) | resolves cache with its Table rule, preserving origin for refusal. |
+| [`SecretsKey`](../../../internal/settings/resolvers.go) | resolves secrets_key with its Table rule, preserving origin for refusal. |
+| [`CatchUp`](../../../internal/settings/resolvers.go) | resolves schedule.catch_up with its Table rule, preserving origin for refusal. |
+| [`RunnerPreferences`](../../../internal/settings/resolvers.go) | resolves machine runner configuration independently of run selection. |
+| [`OwnerExecution`](../../../internal/settings/resolvers.go) | resolves owner_execution with its Table rule, preserving origin for refusal. |
+| [`JobTimeout`](../../../internal/settings/resolvers.go) | resolves job.timeout with its Table rule, preserving origin for refusal. |
+| [`ApprovalWait`](../../../internal/settings/resolvers.go) | resolves approval.wait with its Table rule, preserving origin for refusal. |
+| [`Retry`](../../../internal/settings/resolvers.go) | resolves job.retry with its Table rule, preserving origin for refusal. |
+| [`MemoTTL`](../../../internal/settings/resolvers.go) | resolves job.memo_ttl with its Table rule, preserving origin for refusal. |
+| [`ClaimWait`](../../../internal/settings/resolvers.go) | resolves claim_wait with its Table rule, preserving origin for refusal. |
+| [`Retention`](../../../internal/settings/resolvers.go) | resolves retention with its Table rule, preserving origin for refusal. |
+| [`IdlePoll`](../../../internal/settings/resolvers.go) | resolves idle_poll with its Table rule, preserving origin for refusal. |
+| [`ControllerConnection`](../../../internal/settings/resolvers.go) | resolves connection with its Table rule, preserving origin for refusal. |
+| [`RepoLocation`](../../../internal/settings/resolvers.go) | resolves repo_location with its Table rule, preserving origin for refusal. |
+| [`PauseTargets`](../../../internal/settings/resolvers.go) | resolves debug.pause with its Table rule, preserving origin for refusal. |
+| [`Debug`](../../../internal/settings/resolvers.go) | resolves debug with its Table rule, preserving origin for refusal. |
+| [`Publish`](../../../internal/settings/resolvers.go) | resolves publish with its Table rule, preserving origin for refusal. |
+| [`CacheFrom`](../../../internal/settings/resolvers.go) | resolves cache_from with its Table rule, preserving origin for refusal. |
+| [`ResourceLimits`](../../../internal/settings/resolvers.go) | resolves resources with its Table rule, preserving origin for refusal. |
+| [`Checkout`](../../../internal/settings/resolvers.go) | resolves the C3 checkout policy without changing acquisition identity or SHA. |
+| [`TokenTTL`](../../../internal/settings/resolvers.go) | resolves token.ttl with its Table rule, preserving origin for refusal. |
+| [`SubmitEnvAllow`](../../../internal/settings/resolvers.go) | resolves run.submit_env_allow with its Table rule, preserving origin for refusal. |
+| [`RunnerSelection`](../../../internal/settings/resolvers.go) | resolves the route requested for this run, including here. |
+| [`DryRun`](../../../internal/settings/resolvers.go) | resolves explicit false independently of an absent request flag. |
+| [`NoMemo`](../../../internal/settings/resolvers.go) | resolves result-reuse policy without changing dependency cache policy. |
+| [`AllowRisk`](../../../internal/settings/resolvers.go) | preserves an explicit empty risk list at intake. |
+| [`NoProgressTimeout`](../../../internal/settings/resolvers.go) | resolves a job's idle bound independently of execution timeout. |
+| [`RetryBackoff`](../../../internal/settings/resolvers.go) | resolves retry spacing without changing the retry count. |
+| [`Table`](../../../internal/settings/table.go) | is complete for surviving settings from the source inventory and the approved additions. |
+
+The restricted declaration types live in `internal/runspec` to avoid a settings
+import cycle. `CheckoutDeclarations` carries the version, file and two layers.
+`CheckoutLayer` holds author values with presence and origins. `GuardDeclarations`
+holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 
 ### internal/clisurface
 
@@ -530,3 +668,5 @@ This document is the new contract report. Existing files changed only for collid
 - `pkg/projectconfig/projectconfig.go`
 - `pkg/projectconfig/projectconfig_test.go`
 - `pkg/projectconfig/source.go`
+
+<!-- design:end -->

@@ -3,33 +3,37 @@ package store
 import (
 	"context"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
-// UnitKind separates billing and liveness for trigger ownership, planning, evaluation and job execution.
-type UnitKind string
+// UnitRef selects named work; nil UnitDemand.Target selects the ordered eligible queue.
+// Eval includes its immutable source generation. Trigger and plan need only RunID.
+type UnitRef struct {
+	Kind             capability.UnitKind
+	RunID            string
+	NodeID           string
+	SourceGeneration int64
+}
 
-// Unit kinds match awarded capabilities and billable interval records.
-const (
-	UnitTrigger UnitKind = "trigger"
-	UnitPlan    UnitKind = "plan"
-	UnitEval    UnitKind = "eval"
-	UnitNode    UnitKind = "node"
-)
-
-// UnitDemand carries self-asserted labels only; granted identity, reservations and team come from C2's capability.
+// UnitDemand carries observed capacity and labels. Identity, reservations and team
+// come from C2's capability; requirements and allowed pools come from persisted seals.
 type UnitDemand struct {
 	CapabilityPrefix string
-	Kinds            []UnitKind
+	Kinds            []capability.UnitKind
 	Labels           []string
-	RunnerName       string
-	Cores            int64
-	MemoryBytes      int64
+	Target           *UnitRef
+	OS               string
+	Arch             string
+	Capacity         match.Resources
+	Available        match.Resources
 }
 
 // UnitClaim records the store-derived team and award; source generation remains distinct from eval claim generation.
 type UnitClaim struct {
 	Team             Team
-	Kind             UnitKind
+	Kind             capability.UnitKind
 	RunID            string
 	NodeID           string
 	SourceGeneration int64
@@ -39,7 +43,10 @@ type UnitClaim struct {
 	Bearer []byte `json:"-"`
 }
 
-// ClaimUnit applies the shared matcher and C2 Award atomically; only launcher service scope can cross teams.
+// ClaimUnit resolves matching inputs and calls match.Evaluate and match.Fits before
+// C2 Award in the same transaction. Named and queued trigger, plan, eval and job
+// claims use the same path; only launcher service scope can cross teams.
+// ReconcileNode self-claims use the same matching inputs and reservation checks.
 func (s *Store) ClaimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, error) {
 	panic("unimplemented: c1-data")
 }
@@ -58,3 +65,10 @@ type OperatorStore interface {
 }
 
 var _ OperatorStore = (*Operator)(nil)
+
+// safety: named, queued and self claims derive authority from the same stored rows.
+// Profile reservations and identity come from the live capability; Demand comes
+// from the run seal and the selected unit's persisted execution settings.
+func matchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, unit UnitRef) (match.Profile, match.Demand, error) {
+	panic("unimplemented: c1-placement")
+}

@@ -101,7 +101,8 @@ type Capability struct {
 	Issuance      IssuanceKind       `json:"issuance"`
 	Unit          UnitKind           `json:"unit,omitempty"`
 	UnitID        string             `json:"unit_id,omitempty"`
-	BootstrapFor  UnitKind           `json:"bootstrap_for,omitempty"`
+	Purpose       AwardPurpose       `json:"purpose,omitempty"`
+	Delivery      DeliveryPurpose    `json:"delivery,omitempty"`
 	Parent        *AuthorityRef      `json:"parent,omitempty"`
 	ReservedPools []string           `json:"reserved_pools"`
 	Repositories  []string           `json:"repositories"`
@@ -127,10 +128,9 @@ const (
 // Principal is the common policy input for reference tokens, sessions and local peers.
 // Peer identity requires Unix peer credentials or a verified Windows SID.
 type Principal struct {
-	Capability     Capability
-	Class          CredentialClass
-	Authority      AuthorityRef
-	AuthGeneration int64
+	Capability Capability
+	Class      CredentialClass
+	Authority  AuthorityRef
 }
 
 // Issued returns the generated secret once; callers must keep Raw out of logs and process env.

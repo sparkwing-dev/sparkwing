@@ -269,7 +269,7 @@ The declaration file passes the installed TypeScript compiler with `--noEmit --s
 
 - A28 cuts approval hook methods, while §3.2/A27 name approval plus SkipIf as parity work. The chosen contract retains `Approval.skipIf` as a condition and cuts executable before/after hooks. Decision 99 requires the condition on every placement. Both SDKs and the protocol capability table use this reading.
 
-- Frozen §6.8 says Windows stays refused for TypeScript. Decision 99 explicitly includes both TypeScript and Windows at launch. This declaration includes the entire API on Windows and treats decision 99 as the launch target. Confirm that the implementation removes the prototype platform refusal.
+- Decision 104 supersedes the frozen §6.8 exclusion. The entire TypeScript API is supported on Windows. Protocol initialization uses hello for the bearer and argv for inherited handles, so no preload or prototype platform refusal remains in the target.
 - The frozen chapter names Go `MemoKey` alongside input resolvers but does not fix TypeScript signatures. This contract uses `memoKey(...parts)` for a value and `compose(...resolvers)` for lazy inputs, matching the Go SDK's split. This is an API spelling decision, not a new capability.
 - A29 explicitly names annotation end-line. The current Go API also has a column field. Both locations are retained here so neither existing diagnostic detail nor approved additions disappear.
 - The root package manifest still exports the prototype. The implementation must make the packaging cut above atomically with runtime replacement. Type declarations alone do not make `@sparkwing/sdk` executable.

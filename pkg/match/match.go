@@ -28,6 +28,7 @@ type Reason string
 
 // Reasons, in the order [Evaluate] and [Fits] check them.
 const (
+	ReasonReservation      Reason = "reservation"
 	ReasonRepo             Reason = "repo"
 	ReasonTrustedPlacement Reason = "trusted_placement"
 	ReasonSelector         Reason = "selector"
@@ -68,6 +69,9 @@ type Repository struct {
 
 // Profile is what one agent is and has.
 type Profile struct {
+	// ReservedPools comes only from authenticated granted reservations. A pool=
+	// entry in Labels never grants membership, even if the caller omitted filtering.
+	ReservedPools []string
 	// Name, Class and Location are granted by the credential or the enrolled
 	// row. Location is an enrolled executor's local or cloud placement.
 	Name, Class, Location string
@@ -85,7 +89,12 @@ type Profile struct {
 
 // Demand is what one piece of work asks of an agent.
 type Demand struct {
+	// Selector is the sealed, resolved requires list, including inherited run requirements.
 	Selector []string
+	// AllowedPools is the intake snapshot of team-admin access, never caller input.
+	AllowedPools []string
+	// Prefers is the resolved row preference list. Preferences never relax eligibility.
+	Prefers []string
 	// Repo is the run's repository, or nil when the caller did not resolve it
 	// because no filter could turn on it.
 	Repo *Repository
@@ -98,6 +107,8 @@ type Demand struct {
 // Verdict is the outcome of a check. The zero Verdict admits.
 type Verdict struct {
 	Reason Reason
+	// PreferenceScore counts satisfied preferences only for an eligible profile.
+	PreferenceScore int
 	// Term is the selector term that failed, when Reason is a selector reason.
 	Term string
 }
@@ -112,10 +123,10 @@ func (v Verdict) String() string {
 	return string(v.Reason)
 }
 
-// Evaluate reports whether p could ever run d: the repository filter, then the
+// EvaluateOld reports whether p could ever run d: the repository filter, then the
 // selector, then the request against capacity. It reads no availability, so a
 // busy agent is still eligible.
-func Evaluate(p Profile, d Demand) Verdict {
+func EvaluateOld(p Profile, d Demand) Verdict {
 	if p.Accept != nil && d.Repo != nil && !admitsRepo(p.Accept, *d.Repo, d.Trigger) {
 		return Verdict{Reason: ReasonRepo}
 	}

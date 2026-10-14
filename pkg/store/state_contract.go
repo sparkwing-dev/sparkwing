@@ -31,11 +31,21 @@ type RunRow struct {
 	StateActor        Actor
 }
 
-// RunSnapshot is a consistent store snapshot for C3's shared pure decide function.
+// AcceptedExpansionRow preserves the exact declaration bytes committed by expansion acceptance.
+// Membership is reconstructed from these declarations, never from live jobs alone.
+type AcceptedExpansionRow struct {
+	Source           NodeRef
+	SourceGeneration int64
+	Body             json.RawMessage
+	BodyHash         string
+}
+
+// RunSnapshot contains one consistent read, including accepted expansions in insertion order.
 type RunSnapshot struct {
-	Run      RunRow
-	Nodes    []NodeRow
-	StoreNow time.Time
+	Run        RunRow
+	Nodes      []NodeRow
+	Expansions []AcceptedExpansionRow
+	StoreNow   time.Time
 }
 
 // SourcePolicy keeps resume, retry, memo and coalescing authority distinct at reconciliation.
@@ -117,7 +127,9 @@ func (t *Tenant) ReadStateEvents(ctx context.Context, runID string, after int64,
 	panic("unimplemented: c1-data")
 }
 
-// ReconcileNode decides and self-claims atomically; WaitHolder callers follow events and reconcile again after requeue.
+// ReconcileNode decides and self-claims atomically; WaitHolder callers reconcile again after requeue.
+// Materialization reads outcome and authorized result edges from persisted source state,
+// never from a caller assertion. Source.Kind must match Policy; SourceNone forbids Source.
 func (t *Tenant) ReconcileNode(ctx context.Context, request ReconcileRequest) (ReconciledNode, error) {
 	panic("unimplemented: c1-data")
 }

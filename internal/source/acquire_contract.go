@@ -1,7 +1,13 @@
 // Package source acquires the checkout and entry shared by every host placement.
 package source
 
-import "context"
+import (
+	"context"
+
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+)
 
 // Spec is the source-acquisition projection of the sealed request or run spec.
 // Its identity and SHA come from intake, never from a later branch-head lookup.
@@ -13,11 +19,8 @@ type Spec struct {
 	DefaultBranch string
 	LocalCheckout string
 	PipelineDir   string
-	Depth         *int
-	FullHistory   bool
-	Tags          bool
-	Submodules    bool
-	LFS           bool
+	Checkout      runspec.CheckoutPolicy
+	Engine        *engine.Identity
 	// BundleDigest identifies an optional authorized source_bundle seed.
 	BundleDigest string
 }
@@ -45,12 +48,16 @@ type Credential struct {
 type Options struct {
 	Workspace string
 	Access    Access
+	Engines   *engine.Resolver
+	Target    releaseasset.Target
+	SDK       engine.SDKKind
 }
 
 // Entry is the acquired checkout and SDK command. Command excludes protocol argv.
 // Go uses its locally built or provenance-checked binary; TypeScript uses node
 // and the main file, without a bootstrap preload.
 type Entry struct {
+	Engine    engine.Resolved
 	Directory string
 	Command   []string
 	RepoKey   string
@@ -62,9 +69,26 @@ type Entry struct {
 // Acquire clones the sealed SHA exactly or uses the authorized local checkout.
 // A source bundle is only a seed: checkout still verifies the requested commit.
 // Entry installation receives only procenv.Install's base, never a capability.
+// After checkout, ReadPin and Engines.Resolve select the exact verified engine before SDK
+// build/install, describe or plan. That executable owns all SDK build/install and host execution.
+// A supplied sealed Engine uses Engines.Ensure and must agree with the checkout pin. The result's
+// executable hosts the SDK command on every placement, including TypeScript on Windows.
 func Acquire(ctx context.Context, spec Spec, options Options) (*Entry, error) {
 	panic("unimplemented: c3-protocol-sdk")
 }
 
 // Close releases acquisition-owned resources without removing a user's checkout.
 func (e *Entry) Close() error { panic("unimplemented: c3-protocol-sdk") }
+
+// ForRequest uses the captured intake checkout policy for planning acquisition.
+// Code and checkout-derived policy can resolve only at AcceptPlan.
+func ForRequest(request runspec.SealedRequest) (Spec, error) {
+	panic("unimplemented: c3-protocol-sdk")
+}
+
+// ForExecution uses the accepted checkout winner and immutable acquisition identity.
+// Executors never inspect raw PlanDoc.Source or a host's machine preferences.
+// The projection also carries the accepted portable engine identity.
+func ForExecution(spec runspec.Spec) (Spec, error) {
+	panic("unimplemented: c3-protocol-sdk")
+}

@@ -142,7 +142,7 @@ func cloudCanRun(runID, nodeID string, needsJSON []byte) bool {
 		Class: match.ClassCloud, Location: executorLocationCloud,
 		Labels: match.ToolLabels(match.CloudTools),
 	}
-	return match.Evaluate(profile, match.Demand{Selector: needs}).OK()
+	return match.EvaluateOld(profile, match.Demand{Selector: needs}).OK()
 }
 
 // safety: the scan pages past the candidates a claim refused, and a spent

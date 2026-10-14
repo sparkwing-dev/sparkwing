@@ -5,6 +5,10 @@ package runspec
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 // safety: Optional preserves an explicitly selected zero separately from absence.
@@ -181,14 +185,17 @@ const (
 	LayerCode            Layer = "pipeline_code"
 	LayerMachine         Layer = "machine"
 	LayerDefault         Layer = "default"
-	LayerOperator        Layer = "operator"
+	LayerOperatorTeam    Layer = "operator.team"
+	LayerOperatorGlobal  Layer = "operator.global"
+	LayerOperatorProfile Layer = "operator.profile"
 )
 
-// safety: SettingOrigin allows C4 errors to name source, file and key.
+// safety: SettingOrigin allows C4 errors to name source, file, key and line.
 type SettingOrigin struct {
 	Layer Layer  `json:"layer"`
 	File  string `json:"file"`
 	Key   string `json:"key"`
+	Line  int    `json:"line,omitempty"`
 }
 
 // safety: Setting retains presence and origin without resolving precedence in this package.
@@ -197,12 +204,76 @@ type Setting[T any] struct {
 	Origin SettingOrigin `json:"origin"`
 }
 
-// safety: Resources preserves explicit sizing through both seal points.
+// safety: Resources preserves C4 floating cores losslessly; platform conversion happens at dispatch.
+// Cloud scratch is fixed by limits and is never an author setting.
 type Resources struct {
-	CPU    Optional[int64] `json:"cpu_millis"`
-	Memory Optional[int64] `json:"memory_bytes"`
-	Disk   Optional[int64] `json:"disk_bytes"`
+	Cores       Setting[float64] `json:"cores"`
+	MemoryBytes Setting[int64]   `json:"memory_bytes"`
 }
+
+// PauseSelection keeps each pause control's presence and origin at intake.
+type PauseSelection struct {
+	Before    Setting[[]string] `json:"before"`
+	After     Setting[[]string] `json:"after"`
+	OnFailure Setting[bool]     `json:"on_failure"`
+}
+
+// CheckoutPolicy preserves the C3 policy and each field's winning origin.
+// Origins uses full_history, depth, tags, submodules and lfs; every present field has one.
+type CheckoutPolicy struct {
+	Policy  nodeproto.SourceSpec     `json:"policy"`
+	Origins map[string]SettingOrigin `json:"origins"`
+}
+
+// JobExecutionSettings is frozen independently of the declaration used for code reconstruction.
+// An unset timeout means no job-specific bound; owner deadlines remain independent.
+type JobExecutionSettings struct {
+	Timeout           Setting[time.Duration] `json:"timeout"`
+	NoProgressTimeout Setting[time.Duration] `json:"no_progress_timeout"`
+	ApprovalWait      Setting[time.Duration] `json:"approval_wait"`
+	Retry             Setting[int]           `json:"retry"`
+	RetryBackoff      Setting[time.Duration] `json:"retry_backoff"`
+	MemoTTL           Setting[time.Duration] `json:"memo_ttl"`
+	Resources         Setting[Resources]     `json:"resources"`
+	Requires          Setting[[]string]      `json:"requires"`
+	Prefers           Setting[[]string]      `json:"prefers"`
+}
+
+// GuardDeclarations contains author predicates before evaluation adds a verdict.
+type GuardDeclarations struct {
+	When   []string `json:"when"`
+	Unless []string `json:"unless"`
+}
+
+// CheckoutLayer contains only author settings, never startup controls or credentials.
+// C4's source table still decides which fields each layer may set. Unsupported fields
+// are refused rather than promoted to a higher-precedence source through their Origin.
+type CheckoutLayer struct {
+	Args           Setting[map[string]Setting[string]] `json:"args"`
+	Guards         Setting[GuardDeclarations]          `json:"guards"`
+	Requires       Setting[[]string]                   `json:"requires"`
+	Prefers        Setting[[]string]                   `json:"prefers"`
+	Profile        Setting[string]                     `json:"profile"`
+	Resources      Setting[Resources]                  `json:"resources"`
+	Priority       Setting[int]                        `json:"priority"`
+	ClaimWait      Setting[time.Duration]              `json:"claim_wait"`
+	AdmissionClass Setting[string]                     `json:"admission_class"`
+	Checkout       Setting[CheckoutPolicy]             `json:"checkout"`
+	JobDefaults    JobExecutionSettings                `json:"job_defaults"`
+}
+
+// CheckoutDeclarations preserves both checkout layers before any precedence merge.
+// Origins are diagnostic evidence, not source authority. Pipeline and Defaults assign
+// their source structurally. File is checkout-relative; absence keeps both layers unset.
+type CheckoutDeclarations struct {
+	Version  int           `json:"version"`
+	File     string        `json:"file"`
+	Pipeline CheckoutLayer `json:"pipeline"`
+	Defaults CheckoutLayer `json:"defaults"`
+}
+
+// CheckoutDeclarationsVersion identifies the restricted declaration format in both transports and seals.
+const CheckoutDeclarationsVersion = 1
 
 // RunnerSelection records the requested route without granting runner identity or pool access.
 // Kind is any, name, label or here; Value is present only for name and label.
@@ -229,22 +300,42 @@ type Options struct {
 	AdmissionClass        Setting[string]          `json:"admission_class"`
 	ClaimWait             Setting[time.Duration]   `json:"claim_wait"`
 	OwnerExecutionTimeout Setting[time.Duration]   `json:"owner_execution_timeout"`
-	Source                Setting[Source]          `json:"source"`
+	Checkout              Setting[CheckoutPolicy]  `json:"checkout"`
 	Requires              Setting[[]string]        `json:"requires"`
 	Prefers               Setting[[]string]        `json:"prefers"`
 	DryRun                Setting[bool]            `json:"dry_run"`
 	NoMemo                Setting[bool]            `json:"no_memo"`
 	AllowRisk             Setting[[]string]        `json:"allow_risk"`
+	Workers               Setting[int]             `json:"workers"`
+	Output                Setting[string]          `json:"output"`
+	Pause                 Setting[PauseSelection]  `json:"pause"`
+	PauseTimeout          Setting[time.Duration]   `json:"pause_timeout"`
+	Debug                 Setting[bool]            `json:"debug"`
+	Publish               Setting[string]          `json:"publish"`
+	CacheFrom             Setting[string]          `json:"cache_from"`
+	SubmitEnvAllow        Setting[[]string]        `json:"submit_env_allow"`
+	RepoLocation          Setting[string]          `json:"repo_location"`
+	Profile               Setting[string]          `json:"profile"`
+	JobDefaults           JobExecutionSettings     `json:"job_defaults"`
 }
 
 // safety: Ceilings snapshots operator bounds for C4 to enforce without silent clamping.
 type Ceilings struct {
-	Resources             Optional[Resources]     `json:"resources"`
-	Priority              Optional[int]           `json:"priority"`
-	OwnerExecutionTimeout Optional[time.Duration] `json:"owner_execution_timeout"`
-	ClaimWait             Optional[time.Duration] `json:"claim_wait"`
-	Retry                 Optional[int]           `json:"retry"`
-	MemoTTL               Optional[time.Duration] `json:"memo_ttl"`
+	Resources               Setting[Resources]              `json:"resources"`
+	Priority                Setting[int]                    `json:"priority"`
+	OwnerExecutionTimeout   Setting[time.Duration]          `json:"owner_execution_timeout"`
+	ClaimWait               Setting[time.Duration]          `json:"claim_wait"`
+	Retry                   Setting[int]                    `json:"retry"`
+	MemoTTL                 Setting[time.Duration]          `json:"memo_ttl"`
+	AllowedAdmissionClasses Setting[[]string]               `json:"allowed_admission_classes"`
+	AllowedSources          Setting[[]nodeproto.SourceSpec] `json:"allowed_sources"`
+}
+
+// ExecutionSettings contains one sealed winner set for each declared job ID.
+// Expansions store additional job settings on their node rows without changing this seal.
+type ExecutionSettings struct {
+	Options Options                         `json:"options"`
+	Jobs    map[string]JobExecutionSettings `json:"jobs"`
 }
 
 // safety: Request is submitted to the one intake transaction on every placement.
@@ -275,20 +366,20 @@ type IntakeFacts struct {
 	RunID        string
 	AdmittedAt   time.Time
 	AllowedPools []string
-	AuthorityRef string
+	AuthorityRef capability.AuthorityRef
 	Ceilings     Ceilings
 }
 
 // safety: SealedRequest is immutable at intake, even when later settings resolve from code.
 type SealedRequest struct {
-	Version      int       `json:"version"`
-	Request      Request   `json:"request"`
-	RunID        string    `json:"run_id"`
-	AdmittedAt   time.Time `json:"admitted_at"`
-	AllowedPools []string  `json:"allowed_pools"`
-	AuthorityRef string    `json:"authority_ref"`
-	Ceilings     Ceilings  `json:"ceilings"`
-	Hash         Hash      `json:"hash"`
+	Version      int                     `json:"version"`
+	Request      Request                 `json:"request"`
+	RunID        string                  `json:"run_id"`
+	AdmittedAt   time.Time               `json:"admitted_at"`
+	AllowedPools []string                `json:"allowed_pools"`
+	AuthorityRef capability.AuthorityRef `json:"authority_ref"`
+	Ceilings     Ceilings                `json:"ceilings"`
+	Hash         Hash                    `json:"hash"`
 }
 
 // safety: SealRequest canonicalizes immutable intake data after the intake owner authorizes it.
@@ -314,6 +405,8 @@ type Guards struct {
 // SecretArgs must be present (an empty, non-nil list means none) after describe.
 // Raw Args remain available for execution, retries and masking, never direct display.
 type Resolved struct {
+	// Engine pins the portable verified release identity; executors resolve their own platform asset.
+	Engine              engine.Identity     `json:"engine"`
 	Args                map[string]string   `json:"args"`
 	SecretArgs          []string            `json:"secret_args"`
 	SecretNames         []string            `json:"secret_names"`
@@ -321,30 +414,34 @@ type Resolved struct {
 	DefaultBranch       Optional[string]    `json:"default_branch"`
 	DefaultBranchSource DefaultBranchSource `json:"default_branch_source"`
 	Guards              Guards              `json:"guards"`
-	Options             Options             `json:"options"`
+	Settings            ExecutionSettings   `json:"settings"`
 	Env                 EnvSnapshot         `json:"env"`
 }
 
 // safety: Spec binds both seals and the accepted plan hash as the one host input.
 type Spec struct {
-	Version  int           `json:"version"`
-	Request  SealedRequest `json:"request"`
-	Resolved Resolved      `json:"resolved"`
-	PlanHash Hash          `json:"plan_hash"`
-	Hash     Hash          `json:"hash"`
-	SealedAt time.Time     `json:"sealed_at"`
+	Declarations CheckoutDeclarations `json:"declarations"`
+	Version      int                  `json:"version"`
+	Request      SealedRequest        `json:"request"`
+	Resolved     Resolved             `json:"resolved"`
+	PlanHash     Hash                 `json:"plan_hash"`
+	Hash         Hash                 `json:"hash"`
+	SealedAt     time.Time            `json:"sealed_at"`
 }
 
 // safety: SealInput accepts raw plan bytes already validated by C3's ValidatePlan.
 // The store performs that validation and C4 ceiling checks in its acceptance transaction.
+// Declarations is the exact author-only projection used to recompute Resolved, not submitted winners.
 type SealInput struct {
-	Request  SealedRequest
-	Resolved Resolved
-	Plan     json.RawMessage
-	Now      time.Time
+	Declarations CheckoutDeclarations
+	Request      SealedRequest
+	Resolved     Resolved
+	Plan         json.RawMessage
+	Now          time.Time
 }
 
-// safety: SealSpec binds the canonical spec and plan without owning plan validation.
+// safety: SealSpec binds declarations, resolved winners and the canonical plan without owning validation.
+// The declaration layers participate in the seal hash and survive retry unchanged.
 func SealSpec(SealInput) (Spec, error) { panic("unimplemented: c1-data") }
 
 // safety: CheckSeal permits an identical replay and refuses a different hash as spec_drift.

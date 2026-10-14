@@ -3,6 +3,9 @@ package settings
 import (
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
@@ -97,8 +100,8 @@ func CatchUp(in Inputs) (time.Duration, Origin, error) {
 	panic("unimplemented: c4-surface-config")
 }
 
-// Runner resolves runner with its Table rule, preserving origin for refusal.
-func Runner(in Inputs) (userconfig.RunnerConfig, Origin, error) {
+// RunnerPreferences resolves machine runner configuration independently of run selection.
+func RunnerPreferences(in Inputs) (userconfig.RunnerConfig, Origin, error) {
 	panic("unimplemented: c4-surface-config")
 }
 
@@ -177,8 +180,8 @@ func ResourceLimits(in Inputs) (Resources, Origin, error) {
 	panic("unimplemented: c4-surface-config")
 }
 
-// SourceRef resolves source with its Table rule, preserving origin for refusal.
-func SourceRef(in Inputs) (string, Origin, error) {
+// Checkout resolves the C3 checkout policy without changing acquisition identity or SHA.
+func Checkout(in Inputs) (nodeproto.SourceSpec, Origin, error) {
 	panic("unimplemented: c4-surface-config")
 }
 
@@ -189,5 +192,29 @@ func TokenTTL(in Inputs) (time.Duration, Origin, error) {
 
 // SubmitEnvAllow resolves run.submit_env_allow with its Table rule, preserving origin for refusal.
 func SubmitEnvAllow(in Inputs) ([]string, Origin, error) {
+	panic("unimplemented: c4-surface-config")
+}
+
+// RunnerSelection resolves the route requested for this run, including here.
+func RunnerSelection(in Inputs) (runspec.RunnerSelection, Origin, error) {
+	panic("unimplemented: c4-surface-config")
+}
+
+// DryRun resolves explicit false independently of an absent request flag.
+func DryRun(in Inputs) (bool, Origin, error) { panic("unimplemented: c4-surface-config") }
+
+// NoMemo resolves result-reuse policy without changing dependency cache policy.
+func NoMemo(in Inputs) (bool, Origin, error) { panic("unimplemented: c4-surface-config") }
+
+// AllowRisk preserves an explicit empty risk list at intake.
+func AllowRisk(in Inputs) ([]string, Origin, error) { panic("unimplemented: c4-surface-config") }
+
+// NoProgressTimeout resolves a job's idle bound independently of execution timeout.
+func NoProgressTimeout(in Inputs) (time.Duration, Origin, error) {
+	panic("unimplemented: c4-surface-config")
+}
+
+// RetryBackoff resolves retry spacing without changing the retry count.
+func RetryBackoff(in Inputs) (time.Duration, Origin, error) {
 	panic("unimplemented: c4-surface-config")
 }

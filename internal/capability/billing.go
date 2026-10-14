@@ -1,6 +1,10 @@
 package capability
 
-import "time"
+import (
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
+)
 
 // BillingStart prevents a launch reservation from charging before the pod exists.
 type BillingStart string
@@ -19,6 +23,20 @@ const (
 	BillingJob  BillingUnit = "job"
 	BillingHost BillingUnit = "host"
 )
+
+// UnitBilling ties operational persistence to its financial classification.
+type UnitBilling struct {
+	Operational UnitKind
+	Billing     BillingUnit
+}
+
+// UnitBillingMappings survives here issuance and bootstrap exchange unchanged.
+var UnitBillingMappings = []UnitBilling{
+	{UnitTrigger, BillingHost},
+	{UnitNode, BillingJob},
+	{UnitPlan, BillingPlan},
+	{UnitEval, BillingEval},
+}
 
 // BillingProvenance is immutable at Award and survives Exchange and claimant revocation.
 // PayerTeam comes from the awarded row, Metered from the root or launcher service authority.
@@ -45,8 +63,8 @@ type BillingRule struct {
 var BillingRules = []BillingRule{
 	{BillingPlan, 0, true, true, true},
 	{BillingEval, 0, true, true, false},
-	{BillingJob, 60, true, true, false},
-	{BillingHost, 60, true, true, false},
+	{BillingJob, int64(limits.WorkBillingMinimum / time.Second), true, true, false},
+	{BillingHost, int64(limits.HostBillingMinimum / time.Second), true, true, false},
 }
 
 // BillableInterval records actual compute under one award, excluding customer-owned runner waits.

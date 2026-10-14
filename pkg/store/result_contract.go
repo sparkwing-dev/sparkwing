@@ -47,9 +47,9 @@ type Segment struct {
 	ObjectKey string
 }
 
-// SegmentCommit pins attribution and completeness to the attempt, independent of its job outcome.
+// SegmentCommit fences attribution and completeness to a job attempt or owner unit.
 type SegmentCommit struct {
-	Attempt          runspec.AttemptIdentity
+	Subject          blob.LogSubject
 	Actor            Actor
 	Segments         []Segment
 	Final            bool
@@ -72,7 +72,16 @@ func (t *Tenant) WriteSummary(ctx context.Context, summary SummaryWrite) error {
 	panic("unimplemented: c1-data")
 }
 
-// RecordSegments checks contiguity and attribution; incomplete logs never change the job's result.
+// RecordSegments checks subject shape, actor binding, exact persisted generation and
+// contiguity. Eval checks its own lease and immutable source generation separately.
+// For an unsealed final job attempt, C2 LiveLogTail permits the recorded writer
+// until persisted attempt.finished_at + limits.LogSealGrace. The transaction checks
+// authority expiry/revocation/membership, exact holder/capability/attempt/generation,
+// and that no newer attempt or claim generation exists. This permits the first final
+// flush after result completion without reopening execution. After final sealing,
+// only the identical final commit replays. Owner units retain their own liveness
+// rules; eval does not inherit the job-attempt grace exception.
+// The run owns RetentionClass; incomplete logs never change the unit's result.
 func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error {
 	panic("unimplemented: c1-data")
 }
@@ -103,3 +112,18 @@ func (t *Tenant) LookupDepcache(ctx context.Context, request blob.DepcacheLookup
 }
 
 var _ blob.RecordStore = (*Tenant)(nil)
+
+// LogSegments is the persisted read model for one tagged subject, including an empty tail.
+type LogSegments struct {
+	Subject          blob.LogSubject
+	Segments         []Segment
+	Complete         bool
+	IncompleteReason string
+}
+
+// ReadLogSegments selects only the authorized subject's generation and byte range.
+// Controller reads reauthorize each request; terminal logs remain readable under
+// run-read authority after the writer's lease ends.
+func (t *Tenant) ReadLogSegments(ctx context.Context, actor Actor, request blob.LogReadRequest) (LogSegments, error) {
+	panic("unimplemented: c1-logs")
+}

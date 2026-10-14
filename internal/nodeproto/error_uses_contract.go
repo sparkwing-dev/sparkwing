@@ -1,49 +1,47 @@
 package nodeproto
 
-// safety: ErrorUse documents consumers of C2 codes; it defines neither error types nor HTTP status policy.
+import "github.com/sparkwing-dev/sparkwing/internal/apierr"
+
+// ErrorUse names a canonical error and its refusal detail at one protocol boundary.
 type ErrorUse struct {
-	Code    string
+	Code    apierr.Code
 	Surface string
+	Reason  apierr.Reason
 }
 
-// safety: ErrorUses is the complete SDK/host/node-route dependency inventory for C2's canonical registry.
-// These strings must resolve in apierr; this table must not become a parallel validation registry.
+// ErrorUses inventories consumers; apierr.Codes remains the sole code/status registry.
 func ErrorUses() []ErrorUse {
 	return []ErrorUse{
-		{"unknown_op", "sdk"},
-		{"unknown_pipeline", "sdk"},
-		{"unknown_job", "sdk,node_route"},
-		{"unknown_step", "sdk"},
-		{"unknown_closure", "sdk"},
-		{"no_plan", "sdk"},
-		{"bad_request", "sdk,node_route"},
-		{"invalid_args", "sdk"},
-		{"plan_failed", "sdk"},
-		{"plan_drift", "host"},
-		{"plan_invalid", "host"},
-		{"protocol_mismatch", "hello"},
-		{"protocol_error", "host"},
-		{"sdk_exited", "host"},
-		{"frames_closed", "host"},
-		{"sdk_error", "host"},
-		{"unauthenticated", "node_route"},
-		{"forbidden", "node_route"},
-		{"lock_held", "host,node_route"},
-		{"illegal_transition", "host,node_route"},
-		{"spec_drift", "host"},
-		{"secret_undeclared", "node_route"},
-		{"secret_not_found", "node_route"},
-		{"secret_unavailable", "node_route"},
-		{"not_ready", "node_route"},
-		{"no_output", "node_route"},
-		{"not_dependency", "node_route"},
-		{"no_run", "node_route"},
-		{"reference_undeclared", "node_route"},
-		{"upstream_unavailable", "node_route"},
-		{"too_many_requests", "node_route"},
-		{"cycle", "node_route"},
-		{"child_repo", "node_route"},
-		{"unknown_child", "node_route"},
-		{"oidc_unavailable", "node_route"},
+		{apierr.UnknownOp, "sdk", ""},
+		{apierr.UnknownPipeline, "sdk", ""},
+		{apierr.UnknownJob, "sdk,node_route", ""},
+		{apierr.UnknownStep, "sdk", ""},
+		{apierr.UnknownClosure, "sdk", ""},
+		{apierr.NoPlan, "sdk", ""},
+		{apierr.BadRequest, "sdk,node_route", ""},
+		{apierr.InvalidArgs, "sdk", ""},
+		{apierr.PlanFailed, "sdk", ""},
+		{apierr.PlanDrift, "host", ""},
+		{apierr.PlanInvalid, "host,declaration_cycle", ""},
+		{apierr.ProtocolMismatch, "hello", ""},
+		{apierr.ProtocolError, "host", ""},
+		{apierr.SDKExited, "host", ""},
+		{apierr.FramesClosed, "host", ""},
+		{apierr.SDKError, "sdk", ""},
+		{apierr.Unauthenticated, "node_route", ""},
+		{apierr.Forbidden, "node_route", apierr.ReasonMissingGrant},
+		{apierr.LockHeld, "host,node_route", ""},
+		{apierr.IllegalTransition, "host,node_route", ""},
+		{apierr.SpecDrift, "host", ""},
+		{apierr.Forbidden, "secret_undeclared", apierr.ReasonSecretUndeclared},
+		{apierr.NotFound, "secret_not_found,no_run,unknown_child", ""},
+		{apierr.Unavailable, "secret_unavailable,upstream_unavailable,oidc_unavailable", ""},
+		{apierr.Conflict, "output_not_ready", apierr.ReasonNotReady},
+		{apierr.NotFound, "no_output", apierr.ReasonNoOutput},
+		{apierr.Forbidden, "not_dependency", apierr.ReasonNotDependency},
+		{apierr.Forbidden, "reference_undeclared", apierr.ReasonReferenceUndeclared},
+		{apierr.RateLimited, "node_route", ""},
+		{apierr.BadRequest, "runtime_child_cycle", apierr.ReasonChildCycle},
+		{apierr.Forbidden, "child_repo", apierr.ReasonRepositoryUnauthorized},
 	}
 }

@@ -21,6 +21,11 @@ type Limit struct {
 // Table returns independent rows for every shared constant; documentation renders the typed values.
 func Table() []Limit {
 	return []Limit{
+		{Name: "LogSealGrace", Value: LogSealGrace, Class: Internal, Doc: "Final job-attempt flush window after its persisted finish time.", Refusal: "Requires the recorded writer, live credential ancestry, no newer claim, and an unsealed final stream."},
+		{Name: "ControllerCompatibilityMonths", Value: ControllerCompatibilityMonths, Class: Internal, Doc: "Controller HTTP API compatibility after publication, in calendar months.", Refusal: "Support-window end alone never refuses execution; signed security policy is separate."},
+		{Name: "VersionIndexRefresh", Value: VersionIndexRefresh, Class: Internal, Doc: "Refresh interval for signed version policy; last verified fallback has no maximum age.", Refusal: "Without any verified copy, failed fetch or verification returns unavailable with retry guidance."},
+		{Name: "AuthCacheTTL", Value: AuthCacheTTL, Class: Internal, Doc: "Maximum cached credential age, with fresh ancestry and membership generations on every reuse.", Refusal: "Reload on expiry or any generation change; unavailable generations refuse cache reuse."},
+		{Name: "HostBillingMinimum", Value: HostBillingMinimum, Class: Internal, Doc: "Minimum started host orchestration compute, excluding customer-runner waits and separate plan/eval compute.", Refusal: "Unstarted awards refund in full."},
 		{Name: "MaxInvitationsPerDay", Value: MaxInvitationsPerDay, Class: Author, Doc: "Invitations issued per team per day.", Refusal: "Refuse above the bound."},
 		{Name: "MaxOpenInvitations", Value: MaxOpenInvitations, Class: Author, Doc: "Outstanding invitations per team.", Refusal: "Refuse above the bound."},
 		{Name: "RunDeadline", Value: RunDeadline, Class: Operator, Doc: "Remote owner execution default; operator may raise or lower it; local owners have no deadline.", Refusal: "Refuse author timeouts above the selected ceiling at acceptance."},

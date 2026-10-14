@@ -612,7 +612,11 @@ func Registry() []Command {
 			{Name: "ttl", Argument: "DURATION"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing update", Rules: []string{"Re-render managed timers and restart an installed local-controller service through one upgrade hook. --dry-run performs neither action."}, Flags: []Flag{
+		{Path: "sparkwing upgrade", Rules: []string{"Bump the current repository's Go or TypeScript SDK pin to the signed latest permitted release, or --version. Resolve native lockfiles and verify compilation/type checking plus describe/plan with the exact verified engine before applying changes. Refuse revoked targets with their signed reason. --dry-run reports pin edits without changing files or installed services."}, Flags: []Flag{
+			{Name: "version", Argument: "TAG"},
+			{Name: "dry-run"},
+		}},
+		{Path: "sparkwing update", Rules: []string{"Update installed machine software using verified release assets. Re-render managed timers and restart an installed local-controller service through one upgrade hook, preserving schedules and configuration. Repository SDK pins use sparkwing upgrade. --dry-run performs neither action."}, Flags: []Flag{
 			{Name: "dry-run"},
 			{Name: "force"},
 			{Name: "override-hold"},

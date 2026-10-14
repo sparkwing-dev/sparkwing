@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -83,8 +84,11 @@ type OwnerLeaseRef struct {
 	Generation       int64
 }
 
-// Actor carries references to authenticated authority; C2 resolves the capability inside each write transaction.
+// Actor carries server-derived tagged authority; C2 resolves it through the current
+// transaction. CapabilityPrefix is a separate claim fence and never substitutes
+// for a session, console or peer authority reference.
 type Actor struct {
+	Authority        capability.AuthorityRef
 	Kind             ActorKind
 	CapabilityPrefix string
 	Holder           string
@@ -120,6 +124,7 @@ type NodeRow struct {
 	StateActor         Actor
 	Expansion          ExpansionState
 	ExpansionDigest    string
+	Execution          runspec.JobExecutionSettings
 	Spec               json.RawMessage
 	SpecHash           string
 }

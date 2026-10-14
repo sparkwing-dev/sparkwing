@@ -85,12 +85,12 @@ func TestPrivilegedRouteBoundaries(t *testing.T) {
 }
 
 func TestAwardVocabulary(t *testing.T) {
-	seen := map[capability.UnitKind]bool{}
+	seen := map[capability.AwardPurpose]bool{}
 	for _, policy := range capability.AwardPolicies {
-		if seen[policy.Unit] {
-			t.Errorf("duplicate unit %s", policy.Unit)
+		if seen[policy.Purpose] {
+			t.Errorf("duplicate purpose %s", policy.Purpose)
 		}
-		seen[policy.Unit] = true
+		seen[policy.Purpose] = true
 		grants := map[capability.Grant]bool{}
 		for _, grant := range append(slices.Clone(policy.Grants), policy.ClaimGrants...) {
 			if !slices.Contains(capability.Grants, grant) {
@@ -106,14 +106,26 @@ func TestAwardVocabulary(t *testing.T) {
 		if len(policy.Bindings) == 0 || len(policy.ClaimGrants) == 0 || policy.Parent == "" {
 			t.Errorf("incomplete policy for %s", policy.Unit)
 		}
-		if policy.Unit == capability.UnitBootstrap && (len(policy.Grants) != 2 || !grants[capability.SourceRead] || !grants[capability.ClaimExchange]) {
-			t.Fatal("bootstrap permits more than source and exchange")
+		if policy.Purpose == capability.PurposeEval && (!slices.Equal(policy.Grants, []capability.Grant{capability.ExpansionSubmit, capability.DataRead}) || policy.Unit != capability.UnitEval) {
+			t.Fatal("eval has authority outside expansion and source reads")
+		}
+		if policy.Purpose == capability.PurposeWork && policy.Unit != capability.UnitNode {
+			t.Fatal("work is not persisted as node")
+		}
+		if policy.Purpose == capability.PurposeHere && (policy.Unit != capability.UnitTrigger || policy.Parent != capability.ParentRequester) {
+			t.Fatal("here is not a requester-parented trigger award")
 		}
 	}
-	for _, unit := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitWork, capability.UnitEval, capability.UnitHere, capability.UnitBootstrap} {
-		if !seen[unit] {
-			t.Errorf("missing unit %s", unit)
+	for _, purpose := range []capability.AwardPurpose{capability.PurposeTrigger, capability.PurposePlan, capability.PurposeWork, capability.PurposeEval, capability.PurposeHere} {
+		if !seen[purpose] {
+			t.Errorf("missing purpose %s", purpose)
 		}
+	}
+	if !slices.Equal(capability.BootstrapGrants, []capability.Grant{capability.SourceRead, capability.ClaimExchange}) {
+		t.Fatal("bootstrap permits more than source and exchange")
+	}
+	if !slices.Equal(capability.BootstrapUnits, []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}) {
+		t.Fatal("bootstrap loses its operational unit")
 	}
 }
 
@@ -132,5 +144,47 @@ func TestReadOnlyDataOperations(t *testing.T) {
 		if !found {
 			t.Errorf("read operation %s is missing", operation)
 		}
+	}
+}
+
+func TestEvalLogsRequireOwnUnit(t *testing.T) {
+	for _, operation := range []string{"logs", "log-segments", "log-manifest", "heartbeat"} {
+		route, ok := capability.LookupRoute("POST", "/api/v1/claims/{claim}/"+operation)
+		if !ok {
+			t.Fatalf("missing eval operation %s", operation)
+		}
+		found := false
+		for _, access := range route.Access {
+			if !slices.Contains(access.Grants, capability.ExpansionSubmit) {
+				continue
+			}
+			found = true
+			if access.Credential != capability.CredentialEval || access.Binding != capability.BindOwnEval || access.Liveness != capability.LiveExpansion || len(access.Grants) != 1 {
+				t.Errorf("%s allows expansion grant outside own live eval: %+v", operation, access)
+			}
+		}
+		if !found {
+			t.Errorf("eval cannot use %s", operation)
+		}
+	}
+}
+
+func TestPaymentCallbackRequiresProviderProof(t *testing.T) {
+	route, ok := capability.LookupRoute("POST", "/webhooks/stripe")
+	if !ok || route.Authentication != capability.AuthPaymentWebhook || route.Owner != capability.OwnerTeam || route.Retry != capability.RetryExactBody || len(route.Access) != 0 {
+		t.Fatal("payment callback can bypass provider proof or checkout-derived tenancy")
+	}
+	seen := map[string]bool{}
+	for _, policy := range capability.PaymentEventPolicies {
+		if seen[policy.ProviderType] {
+			t.Errorf("duplicate provider event %s", policy.ProviderType)
+		}
+		seen[policy.ProviderType] = true
+		if policy.Kind == capability.PaymentCheckoutPaid && !policy.RequirePaid {
+			t.Fatal("unpaid session can grant credit")
+		}
+	}
+	if len(seen) != 4 {
+		t.Fatal("payment event inventory incomplete")
 	}
 }

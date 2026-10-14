@@ -37,6 +37,9 @@ CREATE TABLE runs (
     error TEXT NOT NULL DEFAULT '',
     request_json BLOB NOT NULL,
     request_hash TEXT NOT NULL,
+    idempotency_scope TEXT NOT NULL DEFAULT '',
+    idempotency_key TEXT NOT NULL DEFAULT '',
+    idempotency_digest TEXT NOT NULL DEFAULT '',
     request_sealed_at BIGINT NOT NULL,
     spec_json BLOB,
     spec_hash TEXT NOT NULL DEFAULT '',
@@ -77,6 +80,7 @@ CREATE TABLE runs (
     log_retention_days BIGINT NOT NULL CHECK(log_retention_days > 0),
     UNIQUE(team,id),
     UNIQUE(team,number),
+    CHECK((idempotency_key = '' AND idempotency_scope = '' AND idempotency_digest = '') OR (idempotency_key <> '' AND idempotency_scope <> '' AND idempotency_digest <> '')),
     CHECK((status IN ('success','failed','cancelled')) = (finished_at IS NOT NULL)),
     CHECK((sealed_at IS NULL AND spec_json IS NULL AND spec_hash = '' AND plan_json IS NULL AND plan_hash = '') OR (sealed_at IS NOT NULL AND spec_json IS NOT NULL AND spec_hash <> '' AND plan_json IS NOT NULL AND plan_hash <> ''))
 );
@@ -143,9 +147,10 @@ CREATE TABLE nodes (
     attempt BIGINT NOT NULL DEFAULT 0 CHECK(attempt >= 0),
     expansion TEXT NOT NULL DEFAULT '' CHECK(expansion IN ('','expected','accepted','failed','none')),
     spec_json BLOB NOT NULL,
+    execution_json BLOB NOT NULL,
     expansion_digest TEXT NOT NULL DEFAULT '',
     expansion_body BLOB,
-    expansion_error TEXT NOT NULL DEFAULT '',
+    expansion_failure BLOB,
     PRIMARY KEY (team, run_id, node_id),
     CHECK((status = 'done') = (outcome <> '')),
     CHECK((status = 'done') = (finished_at IS NOT NULL)),
@@ -192,8 +197,6 @@ CREATE TABLE triggers (
     prefers_labels BLOB NOT NULL,
     disruptions BIGINT NOT NULL DEFAULT 0 CHECK(disruptions BETWEEN 0 AND 3),
     cancel_requested_at BIGINT,
-    idempotency_scope TEXT NOT NULL,
-    idempotency_key TEXT NOT NULL DEFAULT '',
     webhook_delivery TEXT NOT NULL DEFAULT '',
     webhook_replay_key TEXT NOT NULL DEFAULT '',
     github_check_run_id BIGINT NOT NULL DEFAULT 0,
@@ -241,7 +244,9 @@ CREATE TABLE sessions (
     last_used_at BIGINT,
     team TEXT NOT NULL REFERENCES teams(name),
     account_id TEXT NOT NULL DEFAULT '',
-    capability_prefix TEXT NOT NULL DEFAULT ''
+    capability_prefix TEXT NOT NULL DEFAULT '',
+    revoked_at BIGINT,
+    auth_generation BIGINT NOT NULL DEFAULT 0 CHECK(auth_generation >= 0)
 );
 
 CREATE TABLE debug_pauses (
@@ -636,12 +641,35 @@ CREATE TABLE signup_admissions (
 CREATE TABLE credit_checkouts (
     id TEXT NOT NULL PRIMARY KEY,
     team TEXT NOT NULL REFERENCES teams(name),
-    session_id TEXT NOT NULL DEFAULT '',
-    amount_micro BIGINT NOT NULL,
+    session_id TEXT NOT NULL,
+    payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
+    payment_id TEXT NOT NULL DEFAULT '',
+    currency TEXT NOT NULL,
+    amount_minor BIGINT NOT NULL CHECK(amount_minor > 0),
+    amount_micro BIGINT NOT NULL CHECK(amount_micro > 0),
     opened_at BIGINT NOT NULL,
     expires_at BIGINT NOT NULL,
     paid_at BIGINT,
-    closed_at BIGINT
+    closed_at BIGINT,
+    grant_id TEXT UNIQUE REFERENCES credit_grants(id),
+    UNIQUE(team,id,payment_mode),
+    UNIQUE(payment_mode,session_id),
+    CHECK((paid_at IS NULL) = (grant_id IS NULL))
+);
+
+-- safety: provider-event deduplication and credit settlement survive operational run pruning.
+CREATE TABLE payment_events (
+    team TEXT NOT NULL REFERENCES teams(name),
+    payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
+    event_id TEXT NOT NULL,
+    checkout_id TEXT NOT NULL,
+    payment_id TEXT NOT NULL DEFAULT '',
+    event_kind TEXT NOT NULL CHECK(event_kind IN ('checkout_paid','checkout_expired','checkout_failed')),
+    event_digest TEXT NOT NULL,
+    grant_id TEXT REFERENCES credit_grants(id),
+    processed_at BIGINT NOT NULL,
+    PRIMARY KEY(payment_mode,event_id),
+    FOREIGN KEY(team,checkout_id,payment_mode) REFERENCES credit_checkouts(team,id,payment_mode)
 );
 
 CREATE TABLE credit_freezes (
@@ -899,41 +927,6 @@ CREATE TABLE github_app_automation (
     FOREIGN KEY (installation_id) REFERENCES github_app_installations(installation_id) ON DELETE CASCADE
 );
 
-CREATE TABLE node_logs (
-    team TEXT NOT NULL REFERENCES teams(name),
-    run_id TEXT NOT NULL,
-    node_id TEXT NOT NULL,
-    attempt BIGINT NOT NULL,
-    generation BIGINT NOT NULL,
-    prefix TEXT NOT NULL,
-    uploaded_through BIGINT NOT NULL DEFAULT 0,
-    stored_bytes BIGINT NOT NULL DEFAULT 0,
-    charged_bytes BIGINT NOT NULL DEFAULT 0,
-    sealed_at BIGINT,
-    created_at BIGINT NOT NULL,
-    updated_at BIGINT NOT NULL,
-    completeness TEXT NOT NULL DEFAULT 'open' CHECK(completeness IN ('open','complete','incomplete')),
-    incomplete_reason TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY(team,run_id,node_id,attempt),
-    FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE
-);
-
-CREATE TABLE node_log_segments (
-    team TEXT NOT NULL REFERENCES teams(name),
-    run_id TEXT NOT NULL,
-    node_id TEXT NOT NULL,
-    attempt BIGINT NOT NULL,
-    generation BIGINT NOT NULL,
-    n BIGINT NOT NULL,
-    stored_bytes BIGINT NOT NULL,
-    md5 TEXT NOT NULL,
-    sha256 TEXT NOT NULL,
-    start_offset BIGINT NOT NULL CHECK(start_offset >= 0),
-    end_offset BIGINT NOT NULL CHECK(end_offset >= start_offset),
-    PRIMARY KEY(team,run_id,node_id,attempt,n),
-    FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE
-);
-
 CREATE TABLE node_attempts (
     team TEXT NOT NULL REFERENCES teams(name),
     run_id TEXT NOT NULL,
@@ -954,6 +947,61 @@ CREATE TABLE node_attempts (
     FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE,
     FOREIGN KEY(team,run_id,node_id) REFERENCES nodes(team,run_id,node_id) ON DELETE CASCADE,
     CHECK((finished_at IS NOT NULL) = (outcome <> ''))
+);
+
+CREATE TABLE log_streams (
+    team TEXT NOT NULL REFERENCES teams(name),
+    run_id TEXT NOT NULL,
+    id TEXT NOT NULL,
+    subject_kind TEXT NOT NULL CHECK(subject_kind IN ('job_attempt','owner_unit')),
+    node_id TEXT,
+    attempt BIGINT CHECK(attempt > 0),
+    generation BIGINT NOT NULL CHECK(generation > 0),
+    unit_kind TEXT CHECK(unit_kind IN ('trigger','plan','eval')),
+    source_node_id TEXT,
+    source_generation BIGINT CHECK(source_generation > 0),
+    prefix TEXT NOT NULL,
+    retention_class TEXT NOT NULL,
+    uploaded_through BIGINT NOT NULL DEFAULT 0,
+    stored_bytes BIGINT NOT NULL DEFAULT 0,
+    charged_bytes BIGINT NOT NULL DEFAULT 0,
+    sealed_at BIGINT,
+    created_at BIGINT NOT NULL,
+    updated_at BIGINT NOT NULL,
+    completeness TEXT NOT NULL DEFAULT 'open' CHECK(completeness IN ('open','complete','incomplete')),
+    incomplete_reason TEXT NOT NULL DEFAULT '',
+    final_commit_digest TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY(team,run_id,id),
+    UNIQUE(team,run_id,id,generation),
+    FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE,
+    FOREIGN KEY(team,run_id,node_id,generation,attempt) REFERENCES node_attempts(team,run_id,node_id,generation,attempt) ON DELETE CASCADE,
+    CHECK(
+        (subject_kind = 'job_attempt' AND node_id IS NOT NULL AND attempt IS NOT NULL AND unit_kind IS NULL AND source_node_id IS NULL AND source_generation IS NULL)
+        OR (subject_kind = 'owner_unit' AND node_id IS NULL AND attempt IS NULL AND unit_kind IS NOT NULL AND (
+            (unit_kind IN ('trigger','plan') AND source_node_id IS NULL AND source_generation IS NULL)
+            OR (unit_kind = 'eval' AND source_node_id IS NOT NULL AND source_generation IS NOT NULL)
+        ))
+    )
+);
+
+CREATE UNIQUE INDEX log_job_subject ON log_streams(team,run_id,node_id,attempt) WHERE subject_kind = 'job_attempt';
+CREATE UNIQUE INDEX log_owner_subject ON log_streams(team,run_id,unit_kind,generation) WHERE unit_kind IN ('trigger','plan');
+CREATE UNIQUE INDEX log_eval_subject ON log_streams(team,run_id,source_node_id,source_generation,generation) WHERE unit_kind = 'eval';
+
+CREATE TABLE log_segments (
+    team TEXT NOT NULL REFERENCES teams(name),
+    run_id TEXT NOT NULL,
+    stream_id TEXT NOT NULL,
+    generation BIGINT NOT NULL CHECK(generation > 0),
+    n BIGINT NOT NULL CHECK(n >= 0),
+    stored_bytes BIGINT NOT NULL,
+    md5 TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    start_offset BIGINT NOT NULL CHECK(start_offset >= 0),
+    end_offset BIGINT NOT NULL CHECK(end_offset >= start_offset),
+    PRIMARY KEY(team,run_id,stream_id,n),
+    FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE,
+    FOREIGN KEY(team,run_id,stream_id,generation) REFERENCES log_streams(team,run_id,id,generation) ON DELETE CASCADE
 );
 
 CREATE TABLE run_effects (
@@ -1003,7 +1051,14 @@ CREATE TABLE capabilities (
     audience TEXT NOT NULL CHECK(audience IN ('controller','nodehost')),
     grants BLOB NOT NULL,
     issuance TEXT NOT NULL CHECK(issuance IN ('delegate','award','exchange')),
-    parent TEXT REFERENCES capabilities(prefix) ON DELETE CASCADE,
+    authority_version BIGINT NOT NULL CHECK(authority_version = 1),
+    authority_json BLOB NOT NULL,
+    parent_kind TEXT CHECK(parent_kind IN ('capability','session')),
+    parent_id TEXT,
+    award_purpose TEXT CHECK(award_purpose IN ('trigger','plan','work','eval','here')),
+    delivery_purpose TEXT CHECK(delivery_purpose IN ('direct','bootstrap')),
+    unit_id TEXT,
+    billing_unit TEXT CHECK(billing_unit IN ('host','job','plan','eval')),
     bind_kind TEXT NOT NULL CHECK(bind_kind IN ('none','trigger','node','push','run')),
     bind_run TEXT,
     bind_node TEXT,
@@ -1030,12 +1085,22 @@ CREATE TABLE capabilities (
     repo_scope BLOB,
     ref_scope TEXT NOT NULL DEFAULT '',
     push_sha TEXT NOT NULL DEFAULT '',
-    parent_generation BIGINT NOT NULL DEFAULT 0,
-    revocation_generation BIGINT NOT NULL DEFAULT 0,
+    revocation_generation BIGINT NOT NULL DEFAULT 0 CHECK(revocation_generation >= 0),
     UNIQUE(team,prefix),
+    CHECK((parent_kind IS NULL) = (parent_id IS NULL)),
+    CHECK((unit_kind IS NULL) = (unit_id IS NULL)),
+    CHECK(unit_id IS NULL OR unit_id <> ''),
+    CHECK(award_purpose IS NULL OR unit_kind IS NOT NULL),
+    CHECK(delivery_purpose IS NULL OR unit_kind IS NOT NULL),
+    CHECK(billing_unit IS NULL OR unit_kind IS NOT NULL),
+    CHECK(parent_id IS NULL OR parent_id <> ''),
+    CHECK(issuance = 'delegate' OR (parent_kind IS NOT NULL AND unit_id IS NOT NULL AND award_purpose IS NOT NULL AND delivery_purpose IS NOT NULL)),
+    CHECK(delivery_purpose IS NULL OR delivery_purpose <> 'bootstrap' OR unit_kind IN ('plan','eval','node')),
+    CHECK(award_purpose IS NULL OR (award_purpose = 'work' AND unit_kind = 'node') OR (award_purpose = 'here' AND unit_kind = 'trigger') OR (award_purpose IN ('trigger','plan','eval') AND award_purpose = unit_kind)),
+    CHECK(billing_unit IS NULL OR (unit_kind = 'trigger' AND billing_unit = 'host') OR (unit_kind = 'node' AND billing_unit = 'job') OR (unit_kind IN ('plan','eval') AND billing_unit = unit_kind)),
     CHECK(team IS NOT NULL OR (subject_kind IN ('service','operator') AND bind_kind = 'none')),
     CHECK(issuance = 'delegate' OR team IS NOT NULL),
-    CHECK(issuance = 'delegate' OR (payer_team IS NOT NULL AND executor_class IS NOT NULL AND reservation_id IS NOT NULL AND billing_start IS NOT NULL AND unit_kind IS NOT NULL)),
+    CHECK(issuance = 'delegate' OR (payer_team IS NOT NULL AND executor_class IS NOT NULL AND reservation_id IS NOT NULL AND billing_start IS NOT NULL AND unit_kind IS NOT NULL AND billing_unit IS NOT NULL)),
     FOREIGN KEY(team,bind_run) REFERENCES runs(team,id) ON DELETE CASCADE
 );
 
@@ -1178,7 +1243,7 @@ CREATE TABLE team_counters (
     team TEXT NOT NULL REFERENCES teams(name) PRIMARY KEY,
     concurrent_nodes BIGINT NOT NULL DEFAULT 0 CHECK(concurrent_nodes >= 0),
     registered_agents BIGINT NOT NULL DEFAULT 0 CHECK(registered_agents >= 0),
-    auth_generation BIGINT NOT NULL DEFAULT 0
+    auth_generation BIGINT NOT NULL DEFAULT 0 CHECK(auth_generation >= 0)
 );
 
 -- safety: one locked team/quota row serializes admission; summed usage rows never admit work.
@@ -1228,9 +1293,11 @@ CREATE TABLE billing_awards (
     executor_class TEXT NOT NULL,
     billing_start TEXT NOT NULL CHECK(billing_start IN ('at_award','at_start')),
     unit_kind TEXT NOT NULL CHECK(unit_kind IN ('trigger','plan','eval','node')),
+    billing_unit TEXT NOT NULL CHECK(billing_unit IN ('host','job','plan','eval')),
     awarded_at BIGINT NOT NULL,
     reserved_amount_micro BIGINT NOT NULL,
     settled_at BIGINT,
+    CHECK((unit_kind = 'trigger' AND billing_unit = 'host') OR (unit_kind = 'node' AND billing_unit = 'job') OR (unit_kind IN ('plan','eval') AND billing_unit = unit_kind)),
     PRIMARY KEY(team,reservation_id)
 );
 
@@ -1247,10 +1314,12 @@ CREATE TABLE billable_intervals (
     metered BIGINT NOT NULL CHECK(metered IN (0,1)),
     executor_class TEXT NOT NULL,
     unit_kind TEXT NOT NULL CHECK(unit_kind IN ('trigger','plan','eval','node')),
+    billing_unit TEXT NOT NULL CHECK(billing_unit IN ('host','job','plan','eval')),
     billing_start TEXT NOT NULL CHECK(billing_start IN ('at_award','at_start')),
     started_at BIGINT NOT NULL,
     finished_at BIGINT,
     charged_through BIGINT NOT NULL,
+    CHECK((unit_kind = 'trigger' AND billing_unit = 'host') OR (unit_kind = 'node' AND billing_unit = 'job') OR (unit_kind IN ('plan','eval') AND billing_unit = unit_kind)),
     FOREIGN KEY(team,reservation_id) REFERENCES billing_awards(team,reservation_id),
     CHECK(finished_at IS NULL OR finished_at >= started_at)
 );
@@ -1349,6 +1418,8 @@ CREATE INDEX idx_accounts_created ON accounts(created_at);
 
 CREATE INDEX idx_accounts_waitlisted ON accounts(waitlisted_at) WHERE waitlisted_at <> 0;
 
+CREATE UNIQUE INDEX idx_credit_checkout_payment ON credit_checkouts(payment_mode,payment_id) WHERE payment_id <> '';
+
 CREATE INDEX idx_credit_checkouts_team_expires ON credit_checkouts(team, expires_at);
 
 CREATE INDEX idx_credit_checkouts_session ON credit_checkouts(team,session_id);
@@ -1399,7 +1470,7 @@ CREATE INDEX idx_github_app_deliveries_received ON github_app_deliveries(receive
 
 CREATE INDEX idx_github_app_automation_installation ON github_app_automation(team,installation_id);
 
-CREATE INDEX idx_node_logs_unsealed ON node_logs(team,updated_at) WHERE sealed_at IS NULL;
+CREATE INDEX idx_log_streams_unsealed ON log_streams(team,updated_at) WHERE sealed_at IS NULL;
 
 CREATE INDEX idx_runs_repo_started ON runs(team,repo_key,started_at DESC);
 
@@ -1407,7 +1478,7 @@ CREATE INDEX idx_runs_repo_sha ON runs(team,repo_key,git_sha);
 
 CREATE UNIQUE INDEX idx_events_state_seq ON events(team,run_id,node_id,state_seq) WHERE state_seq > 0;
 
-CREATE INDEX idx_capabilities_parent ON capabilities(parent);
+CREATE INDEX idx_capabilities_parent ON capabilities(parent_kind,parent_id);
 
 CREATE INDEX idx_capabilities_team_expiry ON capabilities(team,expires_at);
 
@@ -1439,7 +1510,7 @@ CREATE INDEX idx_flow_nonces_expiry ON flow_nonces(expires_at);
 
 CREATE INDEX idx_eval_units_claimable ON eval_units(team,status) WHERE status = 'pending';
 
-CREATE UNIQUE INDEX idx_triggers_idempotency_key ON triggers(team,idempotency_scope,idempotency_key) WHERE idempotency_key <> '';
+CREATE UNIQUE INDEX idx_runs_idempotency_key ON runs(team,idempotency_scope,idempotency_key) WHERE idempotency_key <> '';
 
 CREATE INDEX idx_quota_reservations_due ON quota_reservations(team,expires_at) WHERE state = 'held';
 

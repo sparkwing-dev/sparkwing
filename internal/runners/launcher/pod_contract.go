@@ -7,6 +7,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
@@ -61,7 +62,9 @@ type CloudJobBinding struct {
 
 // safety: CloudJobAward carries only a single-use bootstrap, never the launcher's root credential.
 // Credentials are excluded from JSON and must not appear in diagnostics, argv or environment.
+// Engine is required for eval/work; a first plan resolves its pin after source acquisition.
 type CloudJobAward struct {
+	Engine    *engine.Identity
 	Binding   CloudJobBinding
 	Bootstrap []byte `json:"-"`
 	CPUCores  float64
@@ -118,6 +121,7 @@ func CloudPodInvariants() []CloudPodInvariant {
 		{"scratch", "all Job scratch, including Docker storage, shares the fixed 20 GiB aggregate budget"},
 		{"bootstrap", "per-Job Secret file supplies source.read and claim.exchange only; launcher RBAC permits create/delete, never get"},
 		{"source", "fetch-source init reads the bootstrap file and source.Acquire checks out the sealed SHA exactly"},
+		{"engine", "plan resolves the exact Go/TypeScript SDK pin after checkout; eval/work use the accepted engine identity; GitHub release verification and machine caching precede execution; runner image version never substitutes for the pin"},
 		{"exchange", "run-node exchanges once before SDK execution; revoke bootstrap atomically and keep the resulting unit capability in memory"},
 		{"ancestry", "exchange retains the claimant-root parent, server-derived team/binding and fixed grants for the unit kind"},
 		{"argv", "--controller, --run, --job, --generation, --source-dir, --module-cache and --bootstrap-file replace plumbing env"},

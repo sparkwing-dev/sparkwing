@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -24,10 +26,12 @@ type AcceptedRun struct {
 // Accepted is present on resume. A new run resolves and submits the second seal
 // and plan together before any scheduling or dispatch.
 type RunInput struct {
+	Engines       *engine.Resolver
+	PlanCache     PlanCache
 	RunID         string
 	SealedRequest json.RawMessage
 	RequestHash   string
-	Owner         store.ReconcileActor
+	Owner         store.Actor
 	Accepted      *AcceptedRun
 }
 
@@ -41,6 +45,8 @@ type RunCompletion struct {
 // RunHost owns acquire, resolve, plan, accept, decide, dispatch and expansion.
 // Local, triggered, runner, here and Actions hosts use this same lifecycle.
 // Controller ownership runs the same store decider with plan/eval executors.
+// Engines selects the pinned release after acquisition; its identity seals with the plan.
+// PlanCache is enabled by default and follows PlanningInput on every planning placement.
 type RunHost interface {
 	Run(context.Context, RunInput) (RunCompletion, error)
 }
@@ -66,8 +72,10 @@ type ClaimAuthority struct {
 // GrantedRunner and RouteBinding come from the award and delegated node bearer;
 // SDK processes receive them in hello, never through process environment.
 type NodeInput struct {
+	Engine        engine.Resolved
 	Accepted      AcceptedRun
 	NodeID        string
+	Execution     runspec.JobExecutionSettings
 	SpecHash      string
 	Generation    int64
 	Attempt       int64
@@ -81,6 +89,8 @@ type NodeInput struct {
 // NodeHost runs executor layers, replans for drift, executes attempts and reports
 // through TransitionNode. It never decides graph readiness or emits lifecycle
 // events. Application retries retain the same generation and claim.
+// Engine must match Accepted's sealed identity and Entry.Engine; executable policy is checked
+// on each start even when the machine cache already contains the engine.
 type NodeHost interface {
 	Execute(context.Context, NodeInput) error
 }
@@ -120,16 +130,17 @@ func LayerTable() []LayerSpec {
 }
 
 // Reconciler follows an existing holder until terminal or requeued, then calls
-// the store's atomic ReconcileNodeC3 again. A wait result is never a final result.
+// the store's atomic ReconcileNode again. A wait result is never a final result.
 type Reconciler interface {
-	Reconcile(context.Context, store.ReconcileRef, store.ReconcileActor, store.SourcePolicyC3) (store.ReconcileResult, error)
+	ReconcileNode(context.Context, store.ReconcileRequest) (store.ReconciledNode, error)
 }
 
 // ExpansionStore is the owner/eval host's persistence boundary. The Tenant
 // implementation is the sole writer of expansion state and generated jobs.
 type ExpansionStore interface {
-	AcceptExpansionC3(context.Context, store.ExpansionAuthority, store.ExpansionSubmissionC3) (store.ExpansionResult, error)
-	FailExpansion(context.Context, store.ExpansionAuthority, store.ExpansionSubmissionC3, string) error
+	AcceptExpansion(context.Context, store.ExpansionSubmission) (store.AcceptedExpansion, error)
 }
 
 var _ ExpansionStore = (*store.Tenant)(nil)
+
+var _ Reconciler = (*store.Tenant)(nil)

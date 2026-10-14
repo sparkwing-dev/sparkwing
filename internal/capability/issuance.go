@@ -54,28 +54,51 @@ const (
 	Exchange IssuanceKind = "exchange"
 )
 
-// UnitKind selects a fixed grant table, never grants supplied by a claimant.
+// UnitKind identifies persisted operational units independently of their grant and delivery purpose.
 type UnitKind string
 
 const (
-	UnitTrigger   UnitKind = "trigger"
-	UnitPlan      UnitKind = "plan"
-	UnitWork      UnitKind = "work"
-	UnitEval      UnitKind = "eval"
-	UnitHere      UnitKind = "here"
-	UnitBootstrap UnitKind = "bootstrap"
+	UnitTrigger UnitKind = "trigger"
+	UnitPlan    UnitKind = "plan"
+	UnitNode    UnitKind = "node"
+	UnitEval    UnitKind = "eval"
 )
 
-// AwardPolicy makes privileged grant expansion reviewable as data.
+// AwardPurpose selects a fixed grant table for an operational unit.
+type AwardPurpose string
+
+const (
+	PurposeTrigger AwardPurpose = "trigger"
+	PurposePlan    AwardPurpose = "plan"
+	PurposeWork    AwardPurpose = "work"
+	PurposeEval    AwardPurpose = "eval"
+	PurposeHere    AwardPurpose = "here"
+)
+
+// DeliveryPurpose distinguishes a directly usable award from a single-use pod bootstrap.
+type DeliveryPurpose string
+
+const (
+	DeliveryDirect    DeliveryPurpose = "direct"
+	DeliveryBootstrap DeliveryPurpose = "bootstrap"
+)
+
+// AwardPolicy binds each grant purpose to its persisted operational kind.
 // ClaimGrants is any-of; Bindings lists legal shapes derived from the awarded unit.
-// A bootstrap copies the binding of BootstrapFor, including a plan's run binding.
 type AwardPolicy struct {
+	Purpose     AwardPurpose
 	Unit        UnitKind
 	ClaimGrants []Grant
 	Grants      []Grant
 	Bindings    []BindingKind
 	Parent      ParentRule
 }
+
+// BootstrapGrants replaces the purpose's grants until Exchange consumes the bootstrap.
+var BootstrapGrants = []Grant{SourceRead, ClaimExchange}
+
+// BootstrapUnits confines pod delivery to units accepted by the launcher.
+var BootstrapUnits = []UnitKind{UnitPlan, UnitEval, UnitNode}
 
 // ParentRule controls revocation ancestry independently of grant inheritance.
 // ParentClaimantRoot stops at the nearest here Award, otherwise at the registered claimant root.
@@ -89,26 +112,25 @@ const (
 	ParentBootstrapParent ParentRule = "bootstrap_parent"
 )
 
-// AwardPolicies is exhaustive, including bootstrap and the here intake case.
+// AwardPolicies is exhaustive for execution grants, including the here trigger-Award case.
 // Eval receives only expansion submission and source-output read authority.
 var AwardPolicies = []AwardPolicy{
-	{UnitTrigger, []Grant{TriggersClaim, TriggerHost}, []Grant{
+	{PurposeTrigger, UnitTrigger, []Grant{TriggersClaim, TriggerHost}, []Grant{
 		TriggerHost, RunsRead, RunsState, NodesClaim, NodeReport, NodeResult, LogTail,
 		SecretsRelease, SourceRead, DataRead, DataWrite, OIDCMint, RefsRead, ChildrenStart, ExpansionSubmit,
 	}, []BindingKind{BindingTrigger}, ParentClaimantRoot},
-	{UnitWork, []Grant{NodesClaim, ClaimsLaunch}, []Grant{
+	{PurposeWork, UnitNode, []Grant{NodesClaim, ClaimsLaunch}, []Grant{
 		NodeReport, NodeResult, LogTail, SecretsRelease, SourceRead, DataRead, DataWrite,
 		OIDCMint, RefsRead, ChildrenStart,
 	}, []BindingKind{BindingNode}, ParentClaimantRoot},
-	{UnitPlan, []Grant{ClaimsLaunch}, []Grant{
+	{PurposePlan, UnitPlan, []Grant{ClaimsLaunch}, []Grant{
 		SourceRead, SecretsRelease, DataRead, DataWrite, NodeReport, NodeResult, LogTail,
 	}, []BindingKind{BindingRun}, ParentClaimantRoot},
-	{UnitEval, []Grant{ClaimsLaunch}, []Grant{ExpansionSubmit, DataRead}, []BindingKind{BindingNode}, ParentClaimantRoot},
-	{UnitHere, []Grant{RunsWrite}, []Grant{
+	{PurposeEval, UnitEval, []Grant{ClaimsLaunch}, []Grant{ExpansionSubmit, DataRead}, []BindingKind{BindingNode}, ParentClaimantRoot},
+	{PurposeHere, UnitTrigger, []Grant{RunsWrite}, []Grant{
 		TriggerHost, RunsRead, RunsState, NodesClaim, NodeReport, NodeResult, LogTail,
 		SecretsRelease, SourceRead, DataRead, DataWrite, OIDCMint, RefsRead, ChildrenStart, ExpansionSubmit,
 	}, []BindingKind{BindingTrigger}, ParentRequester},
-	{UnitBootstrap, []Grant{ClaimsLaunch}, []Grant{SourceRead, ClaimExchange}, []BindingKind{BindingRun, BindingNode}, ParentClaimantRoot},
 }
 
 // DelegateSpec can only narrow its parent's grants, repo/data scope, binding and lifetime.
@@ -124,13 +146,15 @@ type DelegateSpec struct {
 }
 
 // AwardSpec selects an already locked row; Issue derives team, fence, pools and billing from it.
-// Only claims.launch may select a row in another team. Here is selected by HereRunID.
+// Only claims.launch may select a row in another team. PurposeHere requires UnitTrigger and HereRunID.
+// DeliveryBootstrap requires launcher authority and preserves Unit, Purpose and billing through Exchange.
 type AwardSpec struct {
-	Claimant     AuthorityRef
-	Unit         UnitKind
-	UnitID       string
-	HereRunID    string
-	BootstrapFor UnitKind
+	Claimant  AuthorityRef
+	Unit      UnitKind
+	UnitID    string
+	HereRunID string
+	Purpose   AwardPurpose
+	Delivery  DeliveryPurpose
 }
 
 // ExchangeSpec consumes a bootstrap once and parents the result to the bootstrap's parent.

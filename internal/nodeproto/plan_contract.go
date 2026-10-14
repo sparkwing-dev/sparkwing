@@ -143,14 +143,8 @@ type PipelineReference struct {
 // safety: SecretMatcher avoids copying secret values into validation errors or persisted plans.
 type SecretMatcher interface{ ContainsSecret(identifier string) bool }
 
-// safety: PlanPolicy lets sealed-spec and ceiling owners validate without importing the store into the wire package.
-type PlanPolicy interface {
-	ValidateResolvedPlan(plan PlanDoc) error
-}
-
 // safety: ValidationContext supplies host facts without admitting those fields in SDK JSON.
 type ValidationContext struct {
-	Policy       PlanPolicy
 	Placement    Placement
 	Secrets      SecretMatcher
 	Expansion    bool
@@ -160,6 +154,8 @@ type ValidationContext struct {
 
 // safety: ValidatePlan is the only strict decoder for initial plans and generated expansions.
 // It rejects unknown/duplicate keys, invalid graphs and secret-bearing IDs before persistence.
+// C1 must next call settings.ResolvePlan and secret preflight inside the same acceptance
+// transaction. Structural validity alone never authorizes persistence or execution.
 // Errors implement C2 apierr's error contract; the full invariant list is in c3-protocol-sdk.md.
 func ValidatePlan(raw json.RawMessage, context ValidationContext) (PlanDoc, error) {
 	panic("unimplemented: c3-protocol-sdk")

@@ -5,7 +5,7 @@
 This document specifies the rewrite target. Functions marked `unimplemented`
 are signatures for the implementation swarm, not working runtime behavior.
 The authority is the frozen architecture v4, especially sections 3, 4, 7.5 and
-8, with decisions 87-100. Earlier design chapters supply evidence only where
+8, with decisions 87-104. Earlier design chapters supply evidence only where
 they agree with that target.
 
 ## Ownership and package boundaries
@@ -32,9 +32,9 @@ Internal Go and SQL identifiers use node; customer JSON uses job.
 - `internal/blob` owns byte integrity and reference-edge types. The controller
   supplies its signed data transport; `Tenant` supplies transactional records.
 - C2 owns capability issuance, route authentication, binding and API errors.
-  C3 owns `ValidatePlan`, host interfaces and the shared pure `decide()` in
-  `pkg/store`, consuming `RunSnapshot`. C1 transactions invoke that decision
-  before committing controller-owned changes. C3's host expansion interface
+  C3 owns `ValidatePlan` and host interfaces. C1 owns `RunSnapshot.Scheduling`
+  and the shared pure `Decide` in `pkg/store`. Run hosts and controller
+  settlement use that same projection and decision before transition writes. C3's host expansion interface
   calls `Tenant.AcceptExpansion`; it is not a second persistence owner.
 - C4 owns setting resolution and numeric limits. C1's retention table records
   the frozen policy, and implementations obtain timing and size values from
@@ -77,7 +77,10 @@ Internal Go and SQL identifiers use node; customer JSON uses job.
    sequence. Hosts never emit a second lifecycle event.
 9. Reconciliation decides and self-claims atomically. `WaitHolder` follows
    events until terminal or requeued, then reconciles again. Resume, retry,
-   memo and coalesced source policies keep distinct read authority.
+   memo and coalesced source policies keep distinct read authority. The only API
+   is `ReconcileNode(ReconcileRequest) (ReconciledNode, error)`. Materialization
+   reads the source outcome and result edges from persisted state. A request
+   cannot supply an outcome.
 10. Successful and memoized generator sources remain `expected` until expansion
     submission. Failed, skipped, cancelled or superseded sources resolve to
     `none` in the terminal transaction. Run cancellation resolves all expected
@@ -85,9 +88,15 @@ Internal Go and SQL identifiers use node; customer JSON uses job.
     prevent settlement and release of `needs_generated` dependents.
 11. Expansion uses a live owner delegation or separately leased eval award,
     never the ended source claim. It checks source generation, expected state,
-    cancellation and both applicable leases in the transaction. Same body
-    replays; a changed body fails. Persisted generated specs and hashes control
+    cancellation and both applicable leases in the transaction. Exactly one success
+    body or structured failure is required. An empty success contains an explicit
+    empty jobs array. Both forms persist a canonical hash and replay unchanged.
+    A changed body or failure conflicts. Persisted generated specs and hashes control
     topology. Generator replay reconstructs code only and must match those hashes.
+    `PlanAcceptance.Seal.Declarations` carries restricted pipeline/default inputs.
+    `settings.ResolvePlan` and `settings.ResolveExpansion` seal execution settings
+    separately in `NodeRow.Execution` and `nodes.execution_json`. Hosts execute
+    those winners and compare declarative hashes only for reconstruction.
 12. Owner loss preserves remote work in the same run. Controller-owned runs
     use `controller.owner` after plan acceptance. Local started orphans fail.
     Controller ownership lapse does not fail its runs; the next elected replica
@@ -100,6 +109,114 @@ Internal Go and SQL identifiers use node; customer JSON uses job.
 14. `LockOrder` fixes acquisition order and lexical order within a class.
     Implementers must review claim, cancellation and financial paths together
     before adding a lock; they must not silently acquire an earlier class late.
+
+## Scheduling, placement and log contracts
+
+`ReadSnapshot` reads the run, ordered nodes and accepted expansion bytes in one
+transaction. `RunSnapshot.Scheduling` uses the persisted plan and job specs for
+edges, `ClosureSpec.Generate` for generator identities, and accepted generated
+`JobSpec.Groups` for membership. It keeps an entry for an empty accepted group.
+States and outcomes come from persisted rows. Invalid declaration/state mixtures
+fail projection. Both owners pass this result to the same pure `Decide`.
+
+C1 owns placement input construction. `matchingInputsTx` derives `match.Profile`
+identity and `ReservedPools` from the live capability and its enrollment facts.
+It derives `match.Demand.Selector`, `Prefers` and `Request` from resolved execution
+settings and `AllowedPools` from intake. Every named, queued and self claim calls
+`match.Evaluate` with those inputs. `UnitDemand.Target` selects a named unit;
+absence selects the ordered eligible queue. Reservations require an explicitly
+required granted pool that intake allowed. A self-asserted `pool=` label grants
+nothing. Preferences rank only eligible work. `match.Fits` checks availability.
+The old runtime calls `EvaluateOld` until it is replaced by these contracts.
+
+`blob.LogSubject` is the shared identity for signing, commits, live pushes and
+reads. It contains either a positive job attempt identity or a trigger/plan/eval
+unit. Trigger and plan use the run and unit generation. Eval also names its
+source job and immutable source generation, separate from its own lease fence.
+`Validate` rejects mixed or missing variants. No synthetic jobs or zero attempts
+represent pre-job logs.
+
+`log_streams` persists that tagged identity, its generation, retention class and
+final commit digest. `log_segments` references the stream with the same generation.
+The writer rechecks its exact capability binding and persisted generation.
+An unsealed final job attempt may flush after its result commits until the
+persisted finish time plus `limits.LogSealGrace`. C1 rechecks the recorded writer,
+attempt, generation, current credential ancestry/expiry/membership and absence
+of a newer claim. After sealing, only an identical final commit may replay.
+Owner-unit liveness stays separate; eval gains no job-attempt grace exception.
+`LogTransport.SignSegments` derives object keys and retention from the authorized
+subject and run. `ReadLogSegments` and `LogTransport.ReadLog` reauthorize the same
+subject, proxy bytes through the controller, meter egress and apply the log
+exception to download caps. Persisted segments fill gaps or stalls in the ring.
+
+| Export | Purpose |
+|---|---|
+| `AcceptedExpansionRow` | Keeps accepted expansion bytes, source fence and body hash in a consistent snapshot. |
+| `RunSnapshot.Scheduling` | Projects declarations and persisted state into the scheduling graph. |
+| `ScheduleNode`, `ScheduleExpansion`, `ScheduleSnapshot` | Carry the accepted graph, including empty generator groups. |
+| `DecisionKind`, `NodeDecision`, `ScheduleDecision`, `Decide` | Define one pure graph decision consumed by both owners. |
+| `UnitRef`, `UnitDemand` | Select named or queued work with observed capacity and labels. |
+| `match.Profile`, `match.Demand`, `match.Evaluate` | Match granted reservations against sealed requirements and authorized pools. |
+| `blob.LogSubjectKind`, `blob.LogUnitKind` | Select attempt versus unit logs and the persisted owner-unit kind. |
+| `blob.LogSubject`, `blob.LogUnit`, `blob.LogSource`, `blob.LogSubject.Validate` | Carry and validate one fenced log identity. |
+| `blob.LogSigningRequest`, `blob.LogUploadURL`, `blob.LogUploadBatch` | Request and return bounded segment PUT slots for that identity. |
+| `blob.LogReadRequest`, `blob.LogTransport` | Sign uploads and proxy authenticated reads through the controller. |
+| `SegmentCommit`, `LogSegments`, `Tenant.ReadLogSegments` | Commit and read persisted segments under the same subject fence. |
+
+## Capability persistence, authority and payment settlement
+
+`Actor.Authority`, `IntakeRequest.Authority` and the sealed intake authority use
+C2's tagged `AuthorityRef`. A session remains a session through transaction
+rechecks. `CapabilityPrefix` remains a separate claim fence. `storeTx` implements
+C2's `AuthorityResolver`, so current ancestry, membership and grants are checked
+inside the write transaction.
+
+`CapabilityRecord` stores version 1 and the full C2 capability in `authority_json`.
+The bearer digest stays in its indexed column and no raw bearer is stored. The
+envelope preserves attempt, deadlines, reservation, Actions workflow identity,
+expansion lease, UnitID, delivery purpose, data scope and repository scopes.
+Indexed columns are exact projections, validated on load and written with the
+envelope. They cannot reconstruct authority from newer mutable rows. Tagged
+`parent_kind` and `parent_id` support capability and session ancestry. C2 validates
+the referenced store and parent liveness transactionally. Retention and revocation
+must preserve that ancestry check, including descendants of here sessions.
+
+`capability.UnitKind` owns operational values `trigger`, `plan`, `eval`, `node`.
+Grant purpose maps work to node and here to trigger. Bootstrap is a delivery
+purpose that retains the underlying plan/eval/node unit. The schema stores purpose,
+delivery and unit separately. `billing_unit` stores `host`, `plan`, `eval`, `job`
+with checks for trigger-to-host and node-to-job. Both ledger tables preserve the
+operational kind and financial classification after run or capability pruning.
+
+`Store.AuthGenerations` returns one consistent vector covering the leaf, every
+capability/session ancestor and the awarded team's membership generation. Launcher
+roots remain in that vector across team boundaries. Missing ancestors refuse cache
+reuse. C2 additionally checks the five-second `limits.AuthCacheTTL`, expiry and
+route liveness. `RevokeAuthority` advances the affected capability/session generation
+in its revocation transaction. `UpdateMembership` advances the team generation in
+its membership transaction. The internal advancement helper cannot commit separately.
+
+`Store.SettlePayment` accepts C2's opaque verified event and looks up the committed
+checkout by provider session ID and configured test/live mode. The checkout supplies
+the team and credit amount. Verified amount, currency and payment identity must
+match. An unset payment ID binds once from the signed event for that checkout.
+`payment_events` deduplicates mode/event ID and its canonical payload. The locked
+checkout records at most one credit grant, even when multiple paid event IDs arrive.
+Failures and expiry cannot undo paid credit. Financial rows have no run cascade.
+Human grants, refunds and freezes remain console-only operations.
+
+| Export | Purpose |
+|---|---|
+| `CapabilityRecord`, `CapabilityRecord.Validate` | Preserve and validate complete versioned authority alongside indexed projections. |
+| `Store.AuthGenerations` | Read the complete ancestor and membership cache fence. |
+| `Tenant.RevokeAuthority`, `Operator.RevokeAuthority` | Revoke authorized tenant or deployment authority and advance its generation atomically. |
+| `MembershipUpdate`, `Tenant.UpdateMembership` | Change or remove membership with the corresponding generation increment. |
+| `PaymentSettlement`, `Store.SettlePayment` | Deduplicate verified checkout events and commit their derived-team financial result. |
+
+`TestRewriteSchemaCapabilitiesPreserveAuthority` persists full capability envelopes
+and indexed projections, including session parents, here purpose and bootstrap
+delivery. It checks invalid parent, operational and financial classifications.
+The tests use JSON and the final SQLite schema because transaction methods are stubs.
 
 ## Completion, retention and accounting
 
@@ -228,9 +345,9 @@ already pass. Each should run on SQLite and PostgreSQL where a store is involved
 
 | C1 type or surface | Other area must match |
 |---|---|
-| `Actor`, `OwnerLeaseRef`, `UnitKind`, `UnitClaim.Bearer`, `AdmissionResult.HereBearer`, schema capabilities | C2 resolves references in the transaction, matches actor/fence and fixed award kinds trigger/plan/eval/node; here is a trigger Award case. Bearers return in memory once through C2's transport, never in persisted snapshots or generic JSON. |
+| `Actor`, `OwnerLeaseRef`, `capability.UnitKind`, `UnitClaim.Bearer`, `AdmissionResult.HereBearer`, schema capabilities | C2 resolves references in the transaction, matches actor/fence and fixed award kinds trigger/plan/eval/node; here is a trigger Award case. Bearers return in memory once through C2's transport, never in persisted snapshots or generic JSON. |
 | `ErrIllegalTransition`, blob errors | C2 maps holder_rights/stale_generation to lock_held; illegal_edge/terminal to illegal_transition; unreadable digest to forbidden with digest_not_readable. |
-| `PlanAcceptance`, `ExpansionSubmission`, `RunSnapshot` | C3 supplies one ValidatePlan and one pkg/store decide; plan JSON is raw transport until that validator runs, never a second decoder policy. |
+| `PlanAcceptance`, `ExpansionSubmission`, `RunSnapshot` | C3 validates plan declarations. C1 projects a consistent snapshot and shares Decide between both owners. |
 | `AcceptedExpansion`, `NodeRow.SpecHash`, `AttemptIdentity` | C3 preserves source vs eval generations, exact node-wide attempt ordinal and persisted generated topology. |
 | `runspec.Setting`, `RunnerSelection`, `Ceilings`, `SealInput` | C4 applies the frozen precedence and refuses over-ceiling settings at the correct seal; the store supplies time, not the requester. |
 | `RetentionRules`, `SegmentCommit` | C4 owns numeric limits and log class settings; C3 emits immutable attributed segments and terminal completeness. |
@@ -239,20 +356,27 @@ already pass. Each should run on SQLite and PostgreSQL where a store is involved
 | `StateStore`, `OperatorStore`, `blob.RecordStore` | C3 host seams consume these final interfaces; old implementation consumers are removed when ported, not adapted. |
 | C1-01 through C1-27 | T1 supplies executable cross-placement scenarios and aligns names with its independent catalog. |
 
-## Open questions for the lead
+## Intake replay
 
-1. The brief assigns C3 the host `decide()` and expansion interfaces while the
-   architecture locates the pure decision in `pkg/store`. C1 provides the
-   transactional API and snapshot; C3 supplies that one decision implementation
-   and a host call-through. No second scheduler or expansion writer is proposed.
-2. The frozen capability sketch gives every row a team, but deployment roots
-   authorize across teams. The schema classifies capabilities as operator-owned;
-   only unbound service/operator delegation can omit team. Awards and exchanges
-   require team. C2 must ratify this exact representation.
-3. Eval needs both immutable source generation and its own live lease fence,
-   although the frozen binding vocabulary names one generation. The schema uses
-   `bind_generation` for source and `eval_unit_generation` for eval. C2 and C3
-   must match the lookup and controller-owner fencing.
+`IntakeRequest.IdempotencyKey` survives `IntakeForStore` and retry intake.
+`AdmitRun` derives the principal/team/pipeline scope and canonical input digest
+and commits them on the run, including published runs with no trigger row.
+A matching key and payload returns the original result; changed input returns
+`conflict`. An absent key requests a separate invocation. Trigger queue rows
+hold no competing idempotency fields.
+
+## Interpretations and implementation obligations
+
+1. Scheduling and expansion ownership is settled: C1 owns `RunSnapshot.Scheduling`,
+   `Decide`, `ReconcileNode` and `AcceptExpansion`. C3 consumes those APIs through
+   the host interfaces. The controller's wire adapter combines a declaration
+   body or structured failure with C2-derived `Actor` authority.
+2. Capabilities are operator-owned with nullable team only for unbound service
+   and operator roots. Awards and exchanges require the derived team. Tagged
+   parents preserve session and cross-team launcher ancestry.
+3. Eval uses `Binding.Generation` for its immutable source fence and
+   `Binding.Expansion.Generation` for its own lease. The complete binding persists
+   in the versioned capability envelope, with indexed source and eval projections.
 4. The frozen state table omits publication despite requiring one-way published
    jobs. The added publication-only acceptance and materialization edge uses
    live run-bound publisher authority, local provenance and no executable claim.
@@ -266,14 +390,14 @@ already pass. Each should run on SQLite and PostgreSQL where a store is involved
    keys sort, list order and explicit presence remain stable. Typed namespace
    components must encode without collisions, including manual ref scope.
 7. Account audit may precede any team. `business_events` is operator-owned with
-   nullable team; tenant queries still filter it. Queue idempotency retains a
-   server-derived pipeline scope while triggers otherwise remain queue-only.
+   nullable team; tenant queries still filter it. Intake idempotency belongs to `runs`, scoped by the server-derived principal
+   and pipeline, so published runs receive the same replay guarantee.
 8. Newest-success pins use a restrictive run FK because a cascading pin would
    permit deletion to erase the retention exception. Explicit deletion must
    resolve the pin first. The general operational-cascade rule has this exception.
-9. Terminal replay is a store guarantee. C2 must reconcile route liveness for
-   replay with its rule that an ended claim normally authenticates as dead;
-   C1 does not weaken authentication or extend credential lifetime.
+9. Terminal replay uses C2 LiveResult with the persisted actor, generation and
+   digest. Its narrow exception still checks token expiry, ancestry and membership.
+   C1 rechecks the same identity transactionally; replay grants no sensitive reads.
 10. The lock order is a target derived from the existing ledger order with new
     capability, ownership, capacity and blob locks. Implementation must exercise
     competing awards, revocation, cancellation, quota and billing before it is
@@ -521,7 +645,6 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 
 | Export | Purpose |
 |---|---|
-| `UnitKind` | UnitKind separates billing and liveness for trigger ownership, planning, evaluation and job execution. |
 | `UnitDemand` | UnitDemand carries self-asserted labels only; granted identity, reservations and team come from C2's capability. |
 | `UnitClaim` | UnitClaim records the store-derived team and award; source generation remains distinct from eval claim generation. |
 | `Store.ClaimUnit` | ClaimUnit applies the shared matcher and C2 Award atomically; only launcher service scope can cross teams. |
@@ -587,7 +710,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `AnnotationWrite` | AnnotationWrite carries already masked text; the store rechecks the shared annotation byte limit without truncation. |
 | `SummaryWrite` | SummaryWrite carries masked job or step markdown under the writer's live binding. |
 | `Segment` | Segment describes one immutable log range; logs use their own signer and never a blob data download. |
-| `SegmentCommit` | SegmentCommit pins attribution and completeness to the attempt, independent of its job outcome. |
+| `SegmentCommit` | Fences immutable segments and completeness to a tagged job attempt or owner unit. |
 | `Tenant.RecordStep` | RecordStep refuses stale attempts instead of letting delayed reports replace a later attempt's steps. |
 | `Tenant.WriteAnnotation` | WriteAnnotation refuses an oversized masked annotation so the store cannot split UTF-8 or reveal a raw suffix. |
 | `Tenant.WriteSummary` | WriteSummary stores job or step markdown only after the claim binding is rechecked. |
@@ -612,7 +735,7 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | Export | Purpose |
 |---|---|
 | `RunRow` | RunRow is the immutable request/spec plus the mutable lifecycle read model used by hosts. |
-| `RunSnapshot` | RunSnapshot is a consistent store snapshot for C3's shared pure decide function. |
+| `RunSnapshot` | Reads persisted state and accepted expansion declarations for the shared scheduling projection. |
 | `SourcePolicy` | SourcePolicy keeps resume, retry, memo and coalescing authority distinct at reconciliation. |
 | `ReconcileKind` | ReconcileKind tells a host whether it may execute; only Execute carries a newly fenced claim. |
 | `ReconcileRequest` | ReconcileRequest names a possible source; the store checks it rather than trusting the host's cache hit. |
@@ -687,6 +810,6 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `AcceptedExpansion` | AcceptedExpansion reports persisted topology; deterministic code reconstruction must reproduce each SpecHash. |
 | `Tenant.AdmitRun` | AdmitRun is the only intake for local, remote, retry, child and published runs. It derives authority and allowed pools in the transaction; published runs receive no executable owner unit. Retry intake loads Lineage.RetryOf from this Tenant, carries its seals unchanged and records the new ID outside them. |
 | `Tenant.AcceptPlan` | AcceptPlan validates the C3 plan, ceilings and declared secrets, then seals spec and inserts nodes atomically. Neither a request field nor an existing seal may change; a differing sealed hash returns spec_drift. Published plans require live publisher authority and create importable jobs without awarding an executable claim. |
-| `Tenant.AcceptExpansion` | AcceptExpansion checks live owner or eval authority, terminal source generation, cancellation and the barrier in tx. A differing repeat is illegal_transition; failed sources resolve to none in their terminal transition instead. |
+| `Tenant.AcceptExpansion` | Atomically accepts exactly one success body or structured failure, rechecking authority and persisting its canonical hash. |
 
 <!-- design:end -->
