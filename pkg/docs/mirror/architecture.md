@@ -228,7 +228,7 @@ names:
 | `SPARKWING_RUN_ID` | The run the node belongs to |
 | `SPARKWING_NODE_ID` | The node the process runs |
 | `SPARKWING_NODE_URL` | The loopback base URL of the node's `/node/v1` routes |
-| `SPARKWING_NODE_TOKEN` | The bearer for those routes; the SDK removes it before any package's `init` runs |
+| `SPARKWING_NODE_TOKEN` | The bearer for those routes; the Go SDK removes it before the `init` of any package that imports the SDK, though a package that does not import it can initialize first and read it |
 | `SPARKWING_DRY_RUN` | `1` in a dry run |
 | `SPARKWING_LEASE_TOKEN` | The admission lease a `sparkwing run` started inside the node attaches to instead of queueing behind it |
 

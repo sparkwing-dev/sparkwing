@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/secretsource"
 )
@@ -31,6 +32,9 @@ type Node struct {
 	// except the output routes Local answers.
 	Claim *Claim
 	Local LocalOutputs
+	// Refs are the other pipelines' outputs the node's plan declares it
+	// reads; Local answers a latest-output read for these alone.
+	Refs []nodeproto.PlanPipelineRef
 	// Children starts and reads child runs through this machine's trigger
 	// queue when no controller holds the run; LeaseToken is the run's
 	// admission lease, which the child attaches to.

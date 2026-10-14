@@ -103,9 +103,7 @@ func (s *Server) servePipelineLatest(w http.ResponseWriter, r *http.Request, g *
 		s.writeError(w, http.StatusNotFound, "no_run", "no successful run of "+quote(pipeline)+" matches")
 		return
 	case status == http.StatusForbidden && code == "input_undeclared":
-		s.logger.Warn("audit", "event", "reference_undeclared", "run", g.RunID, "node", g.NodeID, "pipeline", pipeline)
-		s.writeError(w, http.StatusForbidden, "reference_undeclared",
-			"node "+quote(g.NodeID)+" does not declare a reference to "+quote(pipeline+"/"+node))
+		s.referenceUndeclared(w, g, pipeline, node)
 		return
 	case status != http.StatusOK:
 		s.upstreamFailed(w, g, "latest", status, nil)
@@ -115,4 +113,10 @@ func (s *Server) servePipelineLatest(w http.ResponseWriter, r *http.Request, g *
 		return
 	}
 	s.writeOutput(ctx, w, g, "latest", in.Output, map[string]any{"run_id": in.RunID})
+}
+
+func (s *Server) referenceUndeclared(w http.ResponseWriter, g *grant, pipeline, node string) {
+	s.logger.Warn("audit", "event", "reference_undeclared", "run", g.RunID, "node", g.NodeID, "pipeline", pipeline)
+	s.writeError(w, http.StatusForbidden, "reference_undeclared",
+		"node "+quote(g.NodeID)+" does not declare a reference to "+quote(pipeline+"/"+node))
 }
