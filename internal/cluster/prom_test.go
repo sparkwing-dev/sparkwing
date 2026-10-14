@@ -5,10 +5,13 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func TestObserveClaimOutcome(t *testing.T) {
@@ -116,27 +119,13 @@ func TestStartMetricsListener_EmptyAddrNoOps(t *testing.T) {
 	}
 }
 
+// safety: reading the registry through the listener's own handler leaves no gap
+// between picking a port and binding it for another test process to take.
 func gatherMetrics(t *testing.T) string {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	addr := ln.Addr().String()
-	ln.Close()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() { _ = StartMetricsListener(ctx, addr, nil) }()
-	waitForListener(t, addr, 2*time.Second)
-
-	resp, err := http.Get("http://" + addr + "/metrics")
-	if err != nil {
-		t.Fatalf("GET /metrics: %v", err)
-	}
-	defer resp.Body.Close()
-	b, _ := io.ReadAll(resp.Body)
-	return string(b)
+	rec := httptest.NewRecorder()
+	promhttp.HandlerFor(metricsRegistry, promhttp.HandlerOpts{}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	return rec.Body.String()
 }
 
 func waitForListener(t *testing.T, addr string, timeout time.Duration) {

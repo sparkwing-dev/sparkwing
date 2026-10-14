@@ -15,13 +15,10 @@ var tokenEnvNames = []string{"SPARKWING_AGENT_TOKEN"}
 
 func childEnv(ctx context.Context, base []string, cfg Config, req runner.Request) []string {
 	env := make([]string, 0, len(base)+16)
-	// safety: the dispatcher decides where this node's controller calls go, so
-	// an inherited socket is dropped whichever way it decided. A pipeline run
-	// from inside another run's node inherits that run's socket otherwise, and
-	// dials a daemon that has never heard of it. The parent's run-handle path is
-	// also process-local: a nested run would contend for the same output file.
-	// The dispatcher already applied --only to the parent plan, so carrying it
-	// into a node would filter any nested run against the parent's job names.
+	// safety: the dispatcher decides where this node's controller calls go, so an inherited socket, which would
+	// dial a daemon that never heard of a nested run, is dropped. The run-handle path is process-local, and --only
+	// already filtered the parent plan, so a nested run would contend for that file or filter against the parent's
+	// job names.
 	drop := []string{wingwire.APISocketEnv, "SPARKWING_RUN_HANDLE_FILE", "SPARKWING_ONLY", ParentLivenessFDEnv}
 	// safety: an inherited bearer is the outer run's, so it goes whether or not this run has one.
 	drop = append(drop, tokenEnvNames...)
