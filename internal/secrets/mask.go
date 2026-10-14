@@ -60,9 +60,10 @@ func encodedForms(value string) []string {
 		return nil
 	}
 	query := url.QueryEscape(value)
+	// safety: a JSON spelling differs from value only by a backslash escape, which ordinary text rarely holds,
+	// so it registers at any length; JSON masking sees no other spelling of a short secret.
+	jsonForms := []string{trimJSONString(string(jsonHTML)), trimJSONString(jsonPlain.String())}
 	candidates := []string{
-		trimJSONString(string(jsonHTML)),
-		trimJSONString(jsonPlain.String()),
 		query,
 		strings.ReplaceAll(query, "+", "%20"),
 		url.PathEscape(value),
@@ -75,6 +76,11 @@ func encodedForms(value string) []string {
 		candidates = append(candidates, std, strings.NewReplacer("+", "-", "/", "_").Replace(std))
 	}
 	var out []string
+	for _, c := range jsonForms {
+		if c != value && !slices.Contains(out, c) {
+			out = append(out, c)
+		}
+	}
 	for _, c := range candidates {
 		if len(c) >= minEncodedFormLen && c != value && !slices.Contains(out, c) {
 			out = append(out, c)

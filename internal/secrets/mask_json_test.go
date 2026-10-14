@@ -80,3 +80,12 @@ func TestMaskJSONConcurrentRegistrationKeepsRegisteredSecretHidden(t *testing.T)
 	})
 	wg.Wait()
 }
+
+// A short secret whose JSON spelling escapes a character is masked in JSON,
+// though its other encodings are too short to register.
+func TestMaskJSONMasksAShortEscapedSecret(t *testing.T) {
+	m := newTestMasker(`a"`)
+	if got := string(m.MaskJSON([]byte(`{"token":"a\""}`))); got != `{"token":"***"}` {
+		t.Fatalf("MaskJSON = %s", got)
+	}
+}
