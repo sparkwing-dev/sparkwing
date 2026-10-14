@@ -3,9 +3,10 @@
 <!-- design:begin -->
 
 This contract defines the evidence required to accept the rewrite. It is based on
-`ARCHITECTURE-v4-frozen.md` and decisions 87-100. Sections below refer to that
+`ARCHITECTURE-v4-frozen.md` and decisions 87-104. Sections below refer to that
 frozen architecture. Historical requirements in its sections 14-15 do not override
-the target or decisions 94, 97 and 98.
+the target. Decisions 102-103 replace its version policy, and decision 104 adds
+native TypeScript execution on Windows.
 
 T1 owns the acceptance harness boundary, synthetic fixtures, scenario catalog,
 execution matrix, parked-test port plan and skipped test skeletons. C1-C4 own
@@ -14,10 +15,12 @@ engine, authorization policy, plan validator, environment resolver or schema.
 
 The Go import path is `github.com/sparkwing-dev/sparkwing/internal/acceptance`.
 Scenario skeletons live in `tests/acceptance`. [The catalog](t1-scenarios.md) maps
-every case to its architecture sections. [The port plan](t1-port-plan.md) accounts
+every case to its architecture sections. [The port inventory](t1-port-inventory.md) accounts
 for the parked tests individually, including assertions that must be reversed.
 Its [credential-route appendix](t1-credential-routes.md) accounts for every old
-matrix route and separates known permission boundaries from unresolved rights.
+matrix route and pins the complete final route declarations and permission
+alternatives. [The invariant map](t1-invariants.md) binds required behavior to
+specific assertion excerpts and independently required execution dimensions.
 
 ## Delivery state
 
@@ -68,6 +71,7 @@ rejects any remaining required skip, unexecuted cell or cleanup failure.
 | `Scenarios` | Return the scenario catalog with independent behavioral oracles. |
 | `Applies` | Select declared placements and explicit OS/SDK/mode restrictions. Empty restrictions require all supported variants. |
 | `Selections` | Expand scenarios across their declared placements and all corresponding targets. |
+| `CredentialRouteExpectation` and `CredentialRoutes` | Pin final route audience, owner, authentication and each complete permission alternative independently of the product table. |
 
 Unknown fixture, scenario, target, principal, checkpoint or fault names are
 errors. `Run` verifies that its selection matches the provisioned harness.
@@ -102,9 +106,9 @@ written assertions determine whether that surface is correct.
 
 `Targets()` is the executable target inventory. Go runs natively on Linux,
 macOS and Windows for local, local-triggered, runner-hosted and here placements.
-TypeScript covers those paths on Linux and macOS. Launcher cells cover both SDKs
+TypeScript covers those paths on Linux, macOS and Windows. Launcher cells cover both SDKs
 on Linux with PostgreSQL/S3 and single-controller SQLite/filesystem signing.
-Actions cells cover Go on Linux and Windows and TypeScript on Linux. No Windows
+Actions cells cover both SDKs on Linux and Windows. No Windows
 result is inferred from cross-compilation or a Unix permission test.
 
 Each scenario executes on every target selected by its placements and any explicit
@@ -125,7 +129,7 @@ Stripe test-mode proof in a selected integration cell.
 
 ## Fixture contracts
 
-`Fixtures()` specifies the setup and oracle for all thirteen fixtures. The
+`Fixtures()` specifies each fixture's setup and oracle. The
 adapter materializes them under its owned root. The `repo` fixture has a default
 branch that advances after a verified webhook, two teams, same-team unrelated
 jobs and foreign repositories. These distinctions are needed because team and
@@ -171,7 +175,7 @@ when a scenario needs it, with a concrete acknowledgement and a documented owner
 | --- | --- |
 | `kill_owner`, `kill_executor`, `kill_controller` | Terminate the selected owned process and acknowledge its exit. |
 | `signal_interrupt`, `signal_terminate` | Exercise native graceful shutdown and child cleanup. |
-| `drop_renewal`, `reject_renewal`, `shed_renewal` | Model silence, 401/403/409 lease loss, or 429/503 Retry-After without treating a refusal as renewal success. |
+| `drop_renewal`, `reject_renewal`, `shed_renewal` | Model silence, 401/403 or 409 `lock_held` lease loss, other 409-code controls, or 429/503 Retry-After without treating a refusal as renewal success. |
 | `hold_report`, `release_report` | Cross a lease/generation or cancellation boundary while a report is in flight. |
 | `hold_effect_ack`, `release_effect_ack` | Let terminal desired state overtake a pending/running delivery. |
 | `fail_record_commit` | Fail the transaction before commit and prove no successful partial state/event/edge exists. |
@@ -218,8 +222,12 @@ cluster infrastructure as incidental cleanup.
 ## Cloud, security and billing evidence
 
 Every Cloud plan, eval and work Job must run as root with privileged DinD and
-20 GiB scratch on a team-dedicated node holding exactly one Job. Test admission
-and scheduling refusal when the node boundary is unavailable. Run Docker inside
+20 GiB aggregate scratch, including Docker storage, on a team-dedicated node
+holding exactly one Job. The host waits for Docker readiness. Pipeline containers
+have no launcher/controller service-account authority, host mounts or host
+namespaces. Teardown stops every container before releasing the node reservation.
+Test admission and scheduling refusal when node or network boundary evidence is
+unavailable. Run Docker inside
 the actual Job, test permitted and denied egress, inventory reachable DaemonSet
 ports and record the disposable escape-probe canary. A rendered Pod spec cannot
 prove network enforcement. Tests do not claim that the sidecar, Yama or bootstrap
@@ -250,20 +258,46 @@ the provider adapter's supplied configuration must not select different product
 code or schema. No live charge is part of this acceptance suite. Decision 100's
 later live-key switch remains a deployment configuration action.
 
+## Version-policy evidence
+
+Both SDK pins select the exact engine on every placement. The `versions` fixture
+records independent signed-release assets, platform identities and index contents.
+Nine-month-old and twelve-month-boundary engines exercise the controller API
+through the full lifecycle. Their node protocols match their SDKs by construction.
+Engine downloads come from GitHub Releases, pass `verify-release` trust roots and
+closed-asset verification before execution, and are cached per machine. This is
+separate from pipeline binaries, which local runs still build locally.
+
+The signed index from `sparkwing.dev` carries latest, minimum, revocations with
+reasons and support-window ends. Invalid or unavailable index responses cannot
+replace the last verified copy. The first-use case with no verified copy is
+tracked as `version-index-first-use` below. Its unresolved policy is not a pass.
+Support-window expiry alone does not revoke a release. Deprecation notices appear
+in run output and the dashboard before enforcement. Revocation reports the reason
+and `sparkwing upgrade`; that command bumps and verifies both SDK pins. Runner
+self-update verifies release bytes, and a stale runner cannot bypass its minimum.
+
 ## Activation and launch gate
 
 The nine skeleton groups are `TestLifecycle`, `TestRecovery`, `TestPlacement`,
 `TestCredentials`, `TestStorage`, `TestProtocol`, `TestEnvironment`, `TestSurface`
 and `TestBilling`. Each enumerates its catalog scenarios and target cells. The
 catalog conformance test rejects unknown fixtures/areas, duplicate IDs, empty
-steps/assertions and scenarios with no target. The documentation drift check
-compares documented IDs, references and applicability to the catalog.
-`TestPortDestinations` requires every acceptance destination in the port plan and
-every credential-route row to name a registered scenario. Activating a scenario
-requires its mapped port subcases as well as its primary assertions. The separate
-focused package proofs in the port plan also remain required for launch.
+steps/assertions and scenarios with no target. The invariant check binds each
+required decision to a specific assertion and tests its independently required
+placement, OS, SDK and mode cells against the 34-target baseline. Removing a
+Windows or TypeScript target or narrowing a scenario cannot leave that check green.
+The documentation drift check compares IDs, references and applicability.
+`TestPortDestinations` validates each source identity and the exact Go test
+function, signature and scenario group at its acceptance destination.
+`TestFinalCredentialRouteDeclarations` compares every final route and complete
+permission alternative against committed expectations. Actual router registration
+and handler authorization remain scenario proofs when C2 lands.
+Activating a scenario requires its mapped port subcases as well as its primary
+assertions. The separate focused package proofs in the inventory remain required
+for launch.
 
-As implementations land, port the focused tests in the port plan and activate
+As implementations land, port the focused tests in the port inventory and activate
 the affected scenario cells. Package proofs run early. Native process, cluster,
 Actions and Stripe proofs run in their declared lanes with explicit resources.
 The eventual product pipelines run through Sparkwing so resource admission can
@@ -287,11 +321,11 @@ fan-out or coordinated request limiting has shipped.
 
 ## Cross-area assumptions
 
-These names are expectations from the architecture, not imports from another
-session's work. Where the architecture leaves a Go name unspecified, the name
-below is a proposed integration name that the owning area must confirm. Adapters
-translate test observations only; they must not introduce product compatibility
-shims if another contract chooses a different final spelling.
+These names identify the owning contracts. Proposed integration names below do
+not specify a competing Go shape. Adapters use the reconciled type chosen by its
+owner and translate observations only. The catalog remains independent of those
+types while its product scenarios are skipped. The final-route declaration guard
+imports C2's existing policy table only as the subject under test.
 
 | Area | Expected type or API | Required agreement |
 | --- | --- | --- |
@@ -309,6 +343,20 @@ shims if another contract chooses a different final spelling.
 | C4 | `limits.Child`, `limits.Renew`, `limits.CheckRenewal`, `limits.Table` | Boundary tests use published values; local, queue, approval and owner deadlines remain distinct. |
 | C4 | Proposed command registry, `settings` per-setting resolvers, local-controller lifecycle interface and DinD Job-spec type | Tests enumerate the final grammar and lifecycle while independently asserting semantics from sections 2, 7 and 9. |
 
+Unsettled dependencies are named here rather than represented by new product
+types in T1. They must be resolved before the affected scenarios can activate.
+
+| Assumption ID | Owner and contract | Required agreement |
+| --- | --- | --- |
+| `engine-resolution` | C3/C4 version owner and exact engine result | One resolver handles both SDK pins and exposes version, platform, digest and executable identity. All placements consume its verified cache. T1 does not choose a package or result shape. |
+| `version-index-first-use` | Version owner's signed-index policy | Define the outcome when no verified index exists and fetching or verification fails. Last-verified fallback is required when a copy exists; that rule does not settle first use. |
+| `controller-api-window` | C3 shared controller HTTP wire contract | Supply independently retained release fixtures spanning twelve months from launch freeze, including lifecycle, claims, expansion and run detail. T1 does not invent wire bodies. |
+| `generator-membership` | C1 `AcceptExpansion` and C3 plan validator | Agree on per-generator membership, including empty groups, and one acceptance transaction. A source with 256+256 generated jobs is valid, while 257 in either group fails. |
+| `owner-blob-receipts` | C1 blob receipt and record authority | Represent pre-plan owner/unit uploads without synthetic job IDs. Those receipts do not authorize unrelated job outputs. |
+| `log-subject-and-grace` | C1 log identity and C2 liveness | Agree on owner/plan/eval versus job-attempt subjects and final-attempt log-seal grace. Grace does not override credential expiry, newer generations or membership loss. |
+| `final-route-registration` | C2 route policies and controller/node-host registration | Expose actual registered final routes to the runtime matrix and cover every complete alternative. The declaration check is not evidence that the legacy router already uses them. |
+| `route-rights-reconciliation` | C2 permissions, root authority and payment callbacks | Resolve the named assumptions in the credential appendix, including eval log authority and verified payment-event authentication. Change expected permissions only against that agreement, never by regenerating them from C2. |
+
 The fixture constructors need explicit test seams. C1 owns an injected store
 clock and transaction barriers for result/expansion/outbox commit races. C3 owns
 the injected `lease.Keeper` transport/clock and process readiness/exit signals.
@@ -321,34 +369,31 @@ change before activating the affected case. A polling sleep is not a substitute.
 
 ## Open questions for the lead
 
-1. Section 6.8 refuses TypeScript on Windows; decision 99 requires TypeScript and
-   Windows at launch. This contract reads them as Go on Windows plus TypeScript
-   on supported Unix systems, with an explicit Windows TypeScript refusal test.
-   Confirm that reading or record a decision adding native TypeScript Windows
-   support before changing the matrix.
-2. Decision 90 refuses registered secret values in identifiers without a minimum
+1. Decision 90 refuses registered secret values in identifiers without a minimum
    length, while a parked test accepts secret `42` in `node-42`. This contract
    refuses it. An error identifies the field and position rather than echoing the
    offending identifier, because echoing it would repeat the secret. Confirm the
    diagnostic convention and the absence of a short-value exemption.
-3. The here Award has `claim_by = intake + 10 min`, while recovery allows the
+2. The here Award has `claim_by = intake + 10 min`, while recovery allows the
    same runner to return until trigger expiry. This contract applies `claim_by`
    to initial acquisition and permits reclaim after that window while the parent,
    owner deadline and trigger expiry still allow it. C1 and C2 must agree on that
    distinction or the resume acceptance oracle needs a lead decision.
-4. The real-repository QA inventory and external resources are not supplied by
+3. The real-repository QA inventory and external resources are not supplied by
    the brief. The lead must provide them for launch evidence. Their absence
    blocks external QA, not these compilable contracts. No unknown repository,
    billing account or Kubernetes namespace is guessed.
-5. The proposed Go names above need cross-area reconciliation. T1 has not read
-   the other sessions' contracts. In particular, expansion authority needs an
+4. The integration names above need cross-area reconciliation. Expansion authority needs an
    eval-unit binding and `expansion.submit` even though the abbreviated capability
    summary does not enumerate them. Section 3.6 controls the expected behavior.
-6. Frozen v4 identifies inconsistent `/services` access but does not specify the
+5. Frozen v4 identifies inconsistent `/services` access but does not specify the
    final permission. The credential-route port appendix identifies that and
    other unspecified route rights. C2 supplies its proposed final route table;
    the lead must settle the flagged permissions independently before those
    matrix cells can execute. Copying C2's policy into the expected-answer table
    would make that table its own oracle. Unresolved cells block launch QA.
+6. The version owner must settle `version-index-first-use`. T1 covers the failure
+   inputs and preserves the absence of a verified copy, but cannot choose a new
+   execution restriction on the owner's behalf.
 
 <!-- design:end -->

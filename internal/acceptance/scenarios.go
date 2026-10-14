@@ -2,7 +2,7 @@ package acceptance
 
 // Scenarios returns the acceptance stimuli and independent oracles for the frozen rewrite.
 func Scenarios() []Scenario {
-	return []Scenario{
+	return append([]Scenario{
 		{
 			ID: "lifecycle-six-placements", Group: "lifecycle",
 			Sections: []string{"§3.1", "§3.2", "A6", "decision 99"}, Requires: []Area{C1, C2, C3, C4},
@@ -113,7 +113,7 @@ func Scenarios() []Scenario {
 			Sections: []string{"§2.4", "A5", "A9"}, Requires: []Area{C2, C3, C4},
 			Placements: []Placement{Local, LocalTriggered, RunnerHosted, Launcher, Here, GitHubActions}, Fixtures: []string{"clock", "processes", "identities"},
 			Steps:      []string{"Feed renewal responses for cancel_requested, 409 lock_held, 401, 403, and repeated 429/503 with Retry-After as isolated cases.", "Use a controlled clock to cross one full lease without any successful renewal; reject both run and job reattachment."},
-			Assertions: []string{"Each keeper terminates exactly once: CancelError for requested cancel, ErrLeaseLost for 409/401/403, ErrSilent after a lease without success.", "429/503 honor Retry-After without refreshing successful-renewal time; rejected run reattach cancels execution with the same cause as job reattach."},
+			Assertions: []string{"Each keeper terminates exactly once: CancelError for requested cancel, ErrLeaseLost for 409 lock_held/401/403, ErrSilent after a lease without success.", "429/503 honor Retry-After without refreshing successful-renewal time; rejected run reattach cancels execution with the same cause as job reattach."},
 		},
 		{
 			ID: "recovery-runner-signals", Group: "recovery",
@@ -253,8 +253,8 @@ func Scenarios() []Scenario {
 			ID: "credentials-matrix-authentication-status", Group: "credentials",
 			Sections: []string{"§5.1", "§5.7", "A68"}, Requires: []Area{C1, C2},
 			Placements: []Placement{RunnerHosted, Launcher, Here, GitHubActions}, Fixtures: []string{"catalog", "identities", "store", "clock"},
-			Steps:      []string{"Execute every independently ported credential-matrix route cell with live allowed, live denied, absent, unknown, expired, revoked and ended-claim credentials.", "Expire a previously authenticated claim at the store-write checkpoint and issue an unregistered-route fixture request."},
-			Assertions: []string{"Dead credentials return 401 unauthenticated; live grant or binding denials return 403 forbidden with details.reason; a transaction fence race returns 409.", "A route without policy fails closed with 500; no matrix verdict is inferred from the production policy table and no cell silently skips."},
+			Steps:      []string{"Enumerate the actual final controller and node-host router registrations through the final-route-registration assumption and compare them with CredentialRoutes, including every complete permission alternative.", "Execute each alternative using valid minimal request bodies with live allowed, live denied, absent, unknown, expired, revoked and ended-claim credentials; vary its grants, binding and liveness independently.", "Expire a previously authenticated claim at the store-write checkpoint and issue an unregistered-route fixture request."},
+			Assertions: []string{"Dead credentials return 401 unauthenticated; live grant or binding denials return 403 forbidden with details.reason; a transaction fence race returns 409.", "A route without policy fails closed with 500; no matrix verdict is inferred from the production policy table and no cell silently skips.", "Actual final registrations and independent expectations match in both directions, and every policy alternative reaches its handler only for its complete authorized tuple; a body-validation error cannot count as authorization evidence."},
 		},
 		{
 			ID: "credentials-matrix-trigger-and-parent", Group: "credentials",
@@ -389,7 +389,7 @@ func Scenarios() []Scenario {
 			Sections: []string{"§2.4", "§2.7", "§8.1", "A49", "A63", "A72"}, Requires: []Area{C1, C2, C3, C4},
 			Placements: []Placement{Local, LocalTriggered, RunnerHosted, Launcher, Here, GitHubActions}, Fixtures: []string{"repo", "blobs", "store", "clock", "processes"},
 			Steps:      []string{"Emit sequence-numbered plan, eval and attempt logs through the 10-second and 1-MiB cut boundaries; watch a self-claimed job.", "Remove/reset the live ring, create a missing range and stall it for one flush interval; finish with a final segment and separately kill a writer before flush."},
-			Assertions: []string{"Segments cut at 10 seconds or 1 MiB and shutdown; watched pushes approach one second without shortening the 30-second owner heartbeat.", "Tail reconstructs ordered bytes from persisted segments on missing ranges and stalls and stops at persisted completion; lost tail is incomplete with a reason and does not alter job outcome."},
+			Assertions: []string{"Segments cut at 10 seconds or 1 MiB and shutdown; watched pushes approach one second without shortening the 30-second owner heartbeat.", "Tail reconstructs ordered bytes from persisted segments on missing ranges and stalls and stops at persisted completion; lost tail is incomplete with a reason and does not alter job outcome.", "Plan and eval output appears in the run log on every placement, in the fixture's recorded order."},
 		},
 		{
 			ID: "storage-log-signing-retention-metering", Group: "storage",
@@ -423,12 +423,12 @@ func Scenarios() []Scenario {
 			ID: "protocol-hello-and-handles", Group: "protocol",
 			Sections: []string{"§6.1", "§6.2", "§5.6", "A10", "A69"}, Requires: []Area{C2, C3, C4},
 			Placements: []Placement{Local, LocalTriggered, RunnerHosted, Launcher, Here, GitHubActions}, Fixtures: []string{"sdk", "processes", "identities"},
-			Steps:      []string{"Start Go and supported TypeScript SDK processes, record protocol hello and exercise describe, plan, run_step, eval and cancel.", "On native Windows run the Go process with inherited protocol handles passed in argv; inspect child env and startup argv."},
+			Steps:      []string{"Start Go and supported TypeScript SDK processes, record protocol hello and exercise describe, plan, run_step, eval and cancel.", "On native Windows run both Go and TypeScript processes with inherited protocol handles passed in argv; inspect child env and startup argv."},
 			Assertions: []string{"Protocol 2 negotiates once; runner identity matches the awarded claim, describe/plan omit binding, and attempt binding carries the bearer over the pipe.", "No NODE_URL, NODE_TOKEN or PROTOCOL_HANDLES env transport survives; Windows argv handles function, TS starts as node main --sw-node-protocol without preload, and credentials stay out of argv."},
 		},
 		{
 			ID: "protocol-version-and-hard-cut", Group: "protocol",
-			Sections: []string{"§6.2", "§6.4", "A10", "A28", "A32", "decision 97"}, Requires: []Area{C3, C4},
+			Sections: []string{"§6.2", "§6.4", "A2", "A10", "A28", "A32", "decision 97"}, Requires: []Area{C3, C4},
 			Placements: []Placement{Local, RunnerHosted, Launcher, Here, GitHubActions}, Fixtures: []string{"sdk", "catalog", "processes"},
 			Steps:      []string{"Send a mismatched hello, a v1 unknown-op reply, an advertised optional feature and removed run_node or per-document protocol fields.", "Compile a pipeline using supported final SDK names, then compile separate probes for removed SDK entry points."},
 			Assertions: []string{"Mismatch returns protocol_mismatch or the documented rebuild .sparkwing guidance for v1; version is not negotiated through headers or HTTP 426.", "Final Job/Memo/Cache APIs compile; removed RetryAuto, WhenRunner, ToolSlot, BoxToolBudget, Admitted and approval-hook APIs have no compatibility aliases; post-launch compatibility policy is not simulated by a pre-launch adapter."},
@@ -478,12 +478,12 @@ func Scenarios() []Scenario {
 			Assertions: []string{"Pipeline engine linkage is limited to sparkwing, np and protofd responsibilities without store/controller/runner runtime dependencies.", "The fake host exposes observable protocol behavior and produces the expected fixture results; RuntimePlumbing and internal getters are not required public APIs."},
 		},
 		{
-			ID: "protocol-typescript-windows-refusal", Group: "protocol",
-			OS:       []string{"windows"},
-			Sections: []string{"§6.8", "A30", "A69", "decision 99"}, Requires: []Area{C3, C4},
-			Placements: []Placement{Local, LocalTriggered, Here}, Fixtures: []string{"desktop", "sdk", "processes"},
-			Steps:      []string{"On native Windows request execution of the TypeScript fixture, then execute the equivalent supported Go fixture."},
-			Assertions: []string{"TypeScript receives an explicit unsupported-platform refusal before code starts, matching frozen §6.8; it is not counted as successful TypeScript execution evidence.", "The Go fixture completes on native Windows; the decision-99 scope conflict remains a lead question rather than an implicit parity claim."},
+			ID: "protocol-typescript-windows-execution", Group: "protocol",
+			OS: []string{"windows"}, SDKs: []string{"typescript"},
+			Sections: []string{"§6.8", "A30", "A69", "decision 99", "decision 104"}, Requires: []Area{C3, C4},
+			Placements: []Placement{Local, LocalTriggered, RunnerHosted, Here, GitHubActions}, Fixtures: []string{"desktop", "sdk", "processes"},
+			Steps:      []string{"On native Windows execute the TypeScript fixture through protocol v2 hello with argv protocol handles and no preload; exercise secrets, artifacts, annotations and summary."},
+			Assertions: []string{"TypeScript completes on native Windows with the fixture's expected outputs and observable SDK parity; an unsupported-platform refusal fails this scenario.", "The hello carries the bearer over the pipe, protocol handles use argv and child tools cannot inherit them; credentials remain absent from environment and argv."},
 		},
 		{
 			ID: "environment-captured-local-base", Group: "environment",
@@ -525,7 +525,7 @@ func Scenarios() []Scenario {
 			ID: "environment-author-limit-boundaries", Group: "environment",
 			Sections: []string{"§7.6", "§6.3", "A39"}, Requires: []Area{C1, C3, C4},
 			Placements: []Placement{Local, LocalTriggered, RunnerHosted, Launcher, Here, GitHubActions}, Fixtures: []string{"sdk", "repo", "store", "clock"},
-			Steps:      []string{"Submit boundary and boundary-plus-one cases for Retry 10, memo TTL 30 days, cron catch-up 24 hours and fan-out 256 jobs.", "Attempt an output of 16 MiB and 16 MiB plus one byte; exercise fan-out validation in both initial plan and expansion."},
+			Steps:      []string{"Submit boundary and boundary-plus-one cases for Retry 10, memo TTL 30 days, cron catch-up 24 hours and fan-out 256 jobs.", "Attempt an output of 16 MiB and 16 MiB plus one byte; validate declared fan-out groups and their expansions independently; accept an initial plan with more than 256 jobs."},
 			Assertions: []string{"Accepted boundaries retain the requested values; excess values are refused at the relevant validation/write boundary instead of clamped.", "A rejected expansion inserts no partial jobs, oversized output never becomes readable, and local/remote verdicts agree for shared capabilities."},
 		},
 		{
@@ -600,7 +600,7 @@ func Scenarios() []Scenario {
 			Sections: []string{"§3.2", "§6.8", "§9.3", "decision 99", "decision 100"}, Requires: []Area{C1, C2, C3, C4},
 			Placements: []Placement{Local, LocalTriggered, RunnerHosted, Launcher, Here, GitHubActions}, Fixtures: []string{"repo", "sdk", "desktop", "github", "cluster", "catalog", "processes"},
 			Steps:      []string{"Execute the checked-in launch inventory of every authorized Korey repo and pipeline on its required topology, including desktop and moonborn agents, local/k8s controllers and both SDKs on supported platforms.", "Record repository revision, SDK/OS, placement, candidate digests, run IDs and artifact digests; repeat the inventory after bug fixes and sweep owned processes/resources."},
-			Assertions: []string{"Every required inventory cell has a completed green real-pipeline receipt; missing external resources, skeleton skips and mock-only results do not count as launch QA.", "Cleanup leaves no owned process, Job, Secret, temporary account or data resource; supported topology remains one controller replica and unsupported TS/Windows is reported explicitly."},
+			Assertions: []string{"Every required inventory cell has a completed green real-pipeline receipt; missing external resources, skeleton skips and mock-only results do not count as launch QA.", "Cleanup leaves no owned process, Job, Secret, temporary account or data resource; supported topology remains one controller replica and both SDKs execute on native Windows under decision 104."},
 		},
 		{
 			ID: "billing-award-provenance-immutable", Group: "billing",
@@ -758,5 +758,5 @@ func Scenarios() []Scenario {
 			Steps:      []string{"Offer the same fixture unit through named and queued trigger/job claim paths with authorized and unauthorized repository, granted name/class/pool, ordinary gpu label and sufficient/insufficient capacity combinations.", "Spoof reserved name=, class= and pool= keys as self-asserted labels, then change only the machine's metered billing flag and repeat the offers."},
 			Assertions: []string{"Named and queued claims enforce the same repository authority, granted identity, reservation and sizing decisions; no named path escapes the capacity or pool checks and rejected offers preserve queue order.", "Ordinary self-asserted labels such as gpu remain valid matching input, while name/class/pool derive only from their granting authority. A metered flag changes billing provenance but grants no labels, source, secrets or claim authority."},
 		},
-	}
+	}, boundaryScenarios()...)
 }

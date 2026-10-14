@@ -11,6 +11,7 @@ func Targets() []Target {
 		{"local-go-windows", Local, "go", "windows", "sqlite", "filesystem", Native, false},
 		{"local-ts-linux", Local, "typescript", "linux", "sqlite", "filesystem", Native, false},
 		{"local-ts-darwin", Local, "typescript", "darwin", "sqlite", "filesystem", Native, false},
+		{"local-ts-windows", Local, "typescript", "windows", "sqlite", "filesystem", Native, false},
 		{"standalone-go-linux", Local, "go", "linux", "sqlite", "filesystem", Native, true},
 		{"standalone-ts-linux", Local, "typescript", "linux", "sqlite", "filesystem", Native, true},
 		{"triggered-go-linux", LocalTriggered, "go", "linux", "sqlite", "filesystem", Native, false},
@@ -18,11 +19,13 @@ func Targets() []Target {
 		{"triggered-go-windows", LocalTriggered, "go", "windows", "sqlite", "filesystem", Native, false},
 		{"triggered-ts-linux", LocalTriggered, "typescript", "linux", "sqlite", "filesystem", Native, false},
 		{"triggered-ts-darwin", LocalTriggered, "typescript", "darwin", "sqlite", "filesystem", Native, false},
+		{"triggered-ts-windows", LocalTriggered, "typescript", "windows", "sqlite", "filesystem", Native, false},
 		{"runner-go-linux", RunnerHosted, "go", "linux", "postgres", "s3", Native, false},
 		{"runner-go-darwin", RunnerHosted, "go", "darwin", "postgres", "s3", Native, false},
 		{"runner-go-windows", RunnerHosted, "go", "windows", "postgres", "s3", Native, false},
 		{"runner-ts-linux", RunnerHosted, "typescript", "linux", "postgres", "s3", Native, false},
 		{"runner-ts-darwin", RunnerHosted, "typescript", "darwin", "postgres", "s3", Native, false},
+		{"runner-ts-windows", RunnerHosted, "typescript", "windows", "postgres", "s3", Native, false},
 		{"launcher-go-s3", Launcher, "go", "linux", "postgres", "s3", Cluster, false},
 		{"launcher-ts-s3", Launcher, "typescript", "linux", "postgres", "s3", Cluster, false},
 		{"launcher-go-filesystem", Launcher, "go", "linux", "sqlite", "filesystem", Cluster, false},
@@ -32,9 +35,11 @@ func Targets() []Target {
 		{"here-go-windows", Here, "go", "windows", "postgres", "s3", Native, false},
 		{"here-ts-linux", Here, "typescript", "linux", "postgres", "s3", Native, false},
 		{"here-ts-darwin", Here, "typescript", "darwin", "postgres", "s3", Native, false},
+		{"here-ts-windows", Here, "typescript", "windows", "postgres", "s3", Native, false},
 		{"actions-go-linux", GitHubActions, "go", "linux", "postgres", "s3", Hosted, false},
 		{"actions-go-windows", GitHubActions, "go", "windows", "postgres", "s3", Hosted, false},
 		{"actions-ts-linux", GitHubActions, "typescript", "linux", "postgres", "s3", Hosted, false},
+		{"actions-ts-windows", GitHubActions, "typescript", "windows", "postgres", "s3", Hosted, false},
 	}
 }
 

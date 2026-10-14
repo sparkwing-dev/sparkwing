@@ -173,20 +173,12 @@ func TestPortDestinations(t *testing.T) {
 	for _, scenario := range acceptance.Scenarios() {
 		scenarios[scenario.ID] = scenario
 	}
-	body, err := os.ReadFile("../../design/rewrite/contracts/t1-port-plan.md")
+	body, err := os.ReadFile("../../design/rewrite/contracts/t1-port-inventory.md")
 	if err != nil {
 		t.Fatal(err)
 	}
-	destination := regexp.MustCompile("`(lifecycle|recovery|placement|credentials|storage|protocol|environment|surface|billing)_test\\.go:(Test[A-Za-z]+)(?:/([a-z0-9-]+))?")
-	matches := destination.FindAllStringSubmatch(string(body), -1)
-	if len(matches) == 0 {
-		t.Fatal("port plan contains no acceptance destinations")
-	}
-	for _, match := range matches {
-		scenario, exists := scenarios[match[3]]
-		if !exists || scenario.Group != match[1] {
-			t.Errorf("port destination %q has no matching scenario", match[0])
-		}
+	if validatePortReferences(t, string(body)) == 0 {
+		t.Fatal("port inventory contains no destinations")
 	}
 
 	body, err = os.ReadFile("../../design/rewrite/contracts/t1-credential-routes.md")

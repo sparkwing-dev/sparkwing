@@ -8,6 +8,77 @@ The frozen architecture determines some removals, resource names and permission 
 
 C2 owns the production route policy. T1 owns independent expected results and cross-area assumptions. This appendix neither registers routes nor supplies a second runtime policy table. A proposed resource does not promise that an old operation suffix survives. Where the frozen text names only a resource, the row leaves the exact operation path with C2.
 
+## Final route permission coverage
+
+`internal/acceptance/credential_routes.go` contains committed literal expectations
+for all 232 declared final C2 method/path pairs, including the eight node-host
+routes and every public, browser and external-proof route. Each alternative pins
+its credential class, complete grant conjunction, binding and liveness together.
+Audience, resource owner and authentication proof are pinned per route. Empty
+grants are explicit, including account and discovery alternatives. No expected
+value is obtained from `capability.Routes`, its constants, or observed responses
+when the acceptance test runs.
+
+`TestFinalCredentialRouteDeclarations` compares the expected inventory with
+`capability.Routes`. Missing, extra and duplicate routes fail. Missing, extra and duplicate
+alternatives or grants fail, as do changed credential, binding, liveness,
+audience, owner or authentication proof. Alternative order has no meaning.
+Grant/liveness pairs are compared as complete tuples; independent grant and
+liveness unions would incorrectly let alternatives lend authority to each other.
+`TestFinalCredentialRouteCoverageRejectsDrift` demonstrates these failures on
+private copies, including grant swaps and liveness swaps that preserve each
+route's aggregate sets. Production tables are never mutated by these tests.
+
+These are declaration coverage tests. The rewritten router is not active and
+`Authorize` is a stub. Passing them proves neither runtime registration coverage
+nor authorization behavior. Activation requires a router-owned inventory of
+actual controller and node-host registrations, compared against these same
+literal keys and passed to `ValidateRoutes`. That inventory must come from the
+router, not from policy rows or expectations. The legacy 229-route matrix cannot
+satisfy this requirement. The behavioral credential matrix must exercise every
+complete alternative separately, including each alternative's positive case,
+missing grant, wrong binding, wrong audience and liveness refusal, and attempt
+to combine one alternative's grants with another's liveness. A passing
+policy-shape check cannot replace those HTTP/socket observations.
+
+### Authority and provisional choices
+
+The literals preserve the declared C2 surface for drift detection. Transcribing
+a declaration does not independently establish that its permission is correct.
+The rules below supply the independent security boundaries; exact role and path
+choices beyond those boundaries remain the named assumptions until reconciled.
+Changes must be reviewed against these sources and recorded expectations, never
+accepted by regenerating a golden file from C2 or a running controller.
+
+| Expected permission family | Independent authority | Remaining assumption |
+|---|---|---|
+| Awarded run/job reads, writes, results, heartbeat, source, OIDC, child, sizing and slot operations | Frozen §5.1/A68: exact grants, audience, tenancy and bound relationships; §3.3 transactional holder fences | Exact operation suffixes and trigger/plan grant mappings are C2's declared choices; `U-REPORT`, `U-PLAN`, `U-CLAIM-CONTROL`, `U-CONTROL` require reconciliation. |
+| Data reads and publication | Frozen §5.1/A66, §8.1; decisions 92–93 and 98: controller authority, read sets, repo-bound read-only cache and local-run publication | C1 supplies receipt/read-set facts. A route tuple alone cannot establish object authority. |
+| Expansion reads/submission | Frozen §3.6: expansion.submit and bound source-output read with owner/eval lease | Eval logging/failure routes remain unresolved in C2; their absence is not approval to omit the feature. |
+| Operator and deployment administration | Frozen §9.3 and §5.1: console-only trust, grants, freeze, refunds and account deletion; deployment operational scopes only | Exact operational permission spellings remain `U-DEPLOYMENT`; console query choices remain `U-OPERATOR-READ`. |
+| Member, account, token-owner, machine-owner and team administration | Frozen §5.5: account role in its team; §5.1: no claim privilege from a root | Exact member grants and root provisioning rights are not specified by the frozen text. The C2 choices pinned here remain the `U-*` role assumptions below. |
+| Public, browser, signed-object, GitHub webhook and Actions exchange | Frozen §§3.5, 5.1, 5.5, 8.1; decision 98: webhook-derived trust, exact signed-object scope and separate Actions proof | Browser endpoint paths and account-flow choices remain C2 assumptions. Billing payment proof/callback inventory is still unresolved and must add independent rows when settled. |
+| Node-host process operations | Frozen §§5.1, 5.5, 6.2–6.3: nodehost audience, process lifetime and declared operation bindings | C3 must expose actual node-host registrations; no controller credential or process-env bearer fallback is permitted. |
+
+Root assumption: the stable comparison seam is `capability.RoutePolicy` and its
+`AccessRule` tuple, not `ProvisionSpec`, `AuthorityRef`, the capability parent FK
+or the unresolved root issuer. T1 imports those route declarations only on the
+actual side of the test. C1/C2 must settle session ancestry and provisioning
+before runtime member/machine/service root cells can pass. Undoing this assumption
+requires updating the test adapter, not regenerating expected permissions.
+
+Decisions 101–103 replace the old N/N−1 version promise with fetched engines,
+a signed version index and a 12-month controller-API boundary. These expectations
+cover that controller boundary; they do not invent a controller engine-download
+route because decision 103 distributes engines through GitHub Releases. Changes
+to final controller registrations require explicit coverage changes. Decision 104
+also keeps the same permission contract for TypeScript on Windows.
+
+The unresolved rights and historical port inventory below remain evidence of
+work required. In particular, new payment callbacks and eval-only log/failure
+alternatives must fail this guard until T1 records independently reviewed
+expectations. An unchanged declaration baseline does not close those blockers.
+
 ## How to read each row
 
 - `keep` means the frozen resource preserves the shown surface. It does not settle an unresolved permission rule in the last column.
@@ -493,8 +564,8 @@ The exact source spelling is retained in the first column, including `/metrics`,
 
 ## Completion record
 
-The inventory has 229 unique source routes: 12 keep, 22 rename, 20 delete, 175 unresolved. Each route has one primary destination scenario and at least one independent rule or unresolved-right reference. No route name or permission was taken from another area's in-progress contract.
+The inventory has 229 unique source routes: 12 keep, 22 rename, 20 delete, 175 unresolved. Each route has one primary destination scenario and at least one independent rule or unresolved-right reference. This historical inventory records source routes independently of the final declaration baseline above.
 
-The complete source dimensions remain in [the port plan](t1-port-plan.md#credential-matrix-1e1666836). The appendix supplies the missing route dimension. It does not close the unresolved expected answers. Launch acceptance remains incomplete until the lead resolves the named rights and T1 encodes those answers independently of the production route table.
+The complete source dimensions remain in [the port inventory](t1-port-inventory.md). The appendix supplies the missing route dimension. It does not close the unresolved expected answers. Launch acceptance remains incomplete until the lead resolves the named rights and T1 encodes those answers independently of the production route table.
 
 <!-- design:end -->
