@@ -84,7 +84,7 @@ func (c *Client) GetChildRun(ctx context.Context, runID, childID string) (*store
 // controller picks the run. It returns the output's bytes, JSON null when
 // the node recorded none.
 func (c *Client) ClaimInput(ctx context.Context, runID, nodeID string, req store.ClaimInputRequest) (store.ClaimInput, []byte, error) {
-	in, err := c.claimInput(ctx, runID, nodeID, req)
+	in, err := c.ClaimInputSource(ctx, runID, nodeID, req)
 	if err != nil {
 		return in, nil, err
 	}
@@ -92,7 +92,9 @@ func (c *Client) ClaimInput(ctx context.Context, runID, nodeID string, req store
 	return in, data, err
 }
 
-func (c *Client) claimInput(ctx context.Context, runID, nodeID string, req store.ClaimInputRequest) (store.ClaimInput, error) {
+// ClaimInputSource resolves the input [Client.ClaimInput] reads, with a memo
+// source's artifact manifest, without reading the output's bytes.
+func (c *Client) ClaimInputSource(ctx context.Context, runID, nodeID string, req store.ClaimInputRequest) (store.ClaimInput, error) {
 	var out store.ClaimInput
 	body, err := json.Marshal(req)
 	if err != nil {

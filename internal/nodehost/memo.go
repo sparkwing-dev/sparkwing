@@ -23,6 +23,9 @@ type Memo struct {
 	// node runID/nodeID. A claimed node cannot read another run, so it names
 	// the entry with in and the controller picks the node.
 	Output func(ctx context.Context, in store.ClaimInputRequest, runID, nodeID string) ([]byte, error)
+	// ArtifactManifest reads the artifact manifest digest of the node Output
+	// names; nil reads it from that node's row, which a claimed node cannot.
+	ArtifactManifest func(ctx context.Context, in store.ClaimInputRequest, runID, nodeID string) (string, error)
 	// NoCache runs every memoized node without reading an earlier result, as
 	// --sw-no-cache does; a success still records its output.
 	NoCache bool
@@ -227,21 +230,14 @@ func (r *memoRun) wait(ctx context.Context, initial store.AcquireSlotResponse, b
 // fail their digest, runs as a miss rather than hand on a wrong value; the
 // rerun skips reading entries, so it cannot loop.
 func (r *memoRun) hit(ctx context.Context, srcRun, srcNode string, bypass bool) (Result, bool) {
-	n := r.n
-	if len(n.Plan.Outputs) > 0 {
-		// bug: a claim cannot read another run's node yet, so a claimed hit with artifacts runs as a miss.
-		if r.m.Claimed {
-			return r.run(ctx, true)
-		}
-		src, err := n.Run.State.GetNode(ctx, srcRun, srcNode)
-		switch {
-		case errors.Is(err, store.ErrNotFound) || (err == nil && (src == nil || src.ArtifactManifest == "")):
-			return r.run(ctx, true)
-		case err != nil:
-			return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("cache hit: read artifacts: %w", err)}, false
-		}
-	}
 	in := store.ClaimInputRequest{Kind: store.ClaimInputCached, Key: r.g.key, CacheKeyHash: r.g.memoHash}
+	manifest, err := r.sourceManifest(ctx, in, srcRun, srcNode)
+	switch {
+	case errors.Is(err, store.ErrNotFound) || (err == nil && manifest == "" && len(r.n.Plan.Outputs) > 0):
+		return r.run(ctx, true)
+	case err != nil:
+		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("cache hit: read artifacts: %w", err)}, false
+	}
 	output, err := r.m.Output(ctx, in, srcRun, srcNode)
 	switch {
 	case (errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrOutputCorrupt)) && !bypass:
@@ -249,7 +245,7 @@ func (r *memoRun) hit(ctx context.Context, srcRun, srcNode string, bypass bool) 
 	case err != nil:
 		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("cache hit: fetch output: %w", err)}, false
 	}
-	r.copied(ctx, srcRun, srcNode, sparkwing.Cached, "cache_hit", map[string]any{
+	r.copied(ctx, manifest, sparkwing.Cached, "cache_hit", map[string]any{
 		"key": r.g.key, "cache_key_hash": r.g.memoHash, "origin_run_id": srcRun, "origin_node_id": srcNode,
 	}, map[string]any{"cache_hit": true})
 	return Result{Outcome: sparkwing.Cached, Output: output}, true
@@ -268,22 +264,41 @@ func (r *memoRun) follow(ctx context.Context, leaderRun, leaderNode string) (Res
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("fetch leader output: %w", err)}, false
 	}
-	r.copied(ctx, leaderRun, leaderNode, sparkwing.Success, "coalesced", map[string]any{
+	manifest, err := r.sourceManifest(ctx, in, leaderRun, leaderNode)
+	if err != nil {
+		r.n.Run.Logger.Warn("nodehost: read the leader's artifact manifest", "node", r.n.Plan.ID, "err", err)
+	}
+	r.copied(ctx, manifest, sparkwing.Success, "coalesced", map[string]any{
 		"key": r.g.key, "leader_run_id": leaderRun, "leader_node_id": leaderNode, "leader_outcome": string(sparkwing.Success),
 	}, map[string]any{"coalesced_from": leaderRun + "/" + leaderNode})
 	return Result{Outcome: sparkwing.Success, Output: output}, true
 }
 
+// safety: a node that declares no outputs hands on no artifacts, so its source is not read.
+func (r *memoRun) sourceManifest(ctx context.Context, in store.ClaimInputRequest, srcRun, srcNode string) (string, error) {
+	switch {
+	case len(r.n.Plan.Outputs) == 0:
+		return "", nil
+	case r.m.ArtifactManifest != nil:
+		return r.m.ArtifactManifest(ctx, in, srcRun, srcNode)
+	}
+	src, err := r.n.Run.State.GetNode(ctx, srcRun, srcNode)
+	if err != nil || src == nil {
+		return "", err
+	}
+	return src.ArtifactManifest, nil
+}
+
 // safety: the event kinds, payloads and log attrs are the dispatcher's, which the dashboard's live stream reads.
-func (r *memoRun) copied(ctx context.Context, srcRun, srcNode string, outcome sparkwing.Outcome, kind string, event, attrs map[string]any) {
+func (r *memoRun) copied(ctx context.Context, manifest string, outcome sparkwing.Outcome, kind string, event, attrs map[string]any) {
 	run, id := r.n.Run, r.n.Plan.ID
 	wctx := context.WithoutCancel(ctx)
 	if err := run.State.StartNode(wctx, run.ID, id); err != nil {
 		run.Logger.Warn("nodehost: start copied node", "node", id, "err", err)
 	}
 	hostEventJSON(wctx, run, id, kind, event)
-	if src, err := run.State.GetNode(wctx, srcRun, srcNode); err == nil && src != nil && src.ArtifactManifest != "" {
-		if err := run.State.SetNodeArtifactManifest(wctx, run.ID, id, src.ArtifactManifest); err != nil {
+	if manifest != "" {
+		if err := run.State.SetNodeArtifactManifest(wctx, run.ID, id, manifest); err != nil {
 			run.Logger.Warn("nodehost: copy artifact manifest", "node", id, "err", err)
 		}
 	}
