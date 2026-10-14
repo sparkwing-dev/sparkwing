@@ -4,9 +4,9 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -29,8 +29,10 @@ type describeDoc struct {
 // another protocol or lacks the pipeline is refused without recording a run.
 // The value of every flag describe marks secret, and the default of every
 // secret flag of every pipeline described, is registered with masker, when
-// set, before the run's sink takes what describe printed.
-func describeArgs(ctx context.Context, s *Session, pipeline string, args map[string]string, masker *secrets.Masker) (map[string]string, error) {
+// set, as soon as describe answers; known reports that it did. Until then the
+// secrets are unknown, so a describe that fails returns its class without its
+// text.
+func describeArgs(ctx context.Context, s *Session, pipeline string, args map[string]string, masker *secrets.Masker) (merged map[string]string, known bool, err error) {
 	var doc describeDoc
 	// safety: no run row or node timeout exists yet, so without this bound a
 	// process that stops answering holds the run open forever.
@@ -38,13 +40,15 @@ func describeArgs(ctx context.Context, s *Session, pipeline string, args map[str
 	dctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	if err := ask(dctx, s, nodeproto.Request{Op: nodeproto.OpDescribe}, &doc); err != nil {
-		if ctx.Err() == nil && dctx.Err() != nil {
-			return nil, fmt.Errorf("describe: no reply within %s: %w", limit, err)
+		class := "error"
+		var perr *nodeproto.Error
+		switch {
+		case ctx.Err() == nil && dctx.Err() != nil:
+			class = fmt.Sprintf("no reply within %s", limit)
+		case errors.As(err, &perr) && perr.Code != "":
+			class = string(perr.Code)
 		}
-		return nil, err
-	}
-	if doc.Protocol != nodeproto.Version {
-		return nil, mismatch("describe", doc.Protocol)
+		return nil, false, maskedRunError{err: err, text: "describe failed: " + class + " (details withheld: secrets not yet known)"}
 	}
 	// safety: describe plans every pipeline the entry registers, and any of
 	// them may print its own secret defaults.
@@ -54,6 +58,9 @@ func describeArgs(ctx context.Context, s *Session, pipeline string, args map[str
 				masker.Register(a.Default)
 			}
 		}
+	}
+	if doc.Protocol != nodeproto.Version {
+		return nil, true, mismatch("describe", doc.Protocol)
 	}
 	for _, p := range doc.Pipelines {
 		if p.Name != pipeline {
@@ -73,97 +80,24 @@ func describeArgs(ctx context.Context, s *Session, pipeline string, args map[str
 				masker.Register(merged[a.Name])
 			}
 		}
-		return merged, nil
+		return merged, true, nil
 	}
-	return nil, &nodeproto.Error{Code: nodeproto.CodeUnknownPipeline, Message: fmt.Sprintf("the pipeline entry has no pipeline %q", pipeline)}
+	return nil, true, &nodeproto.Error{Code: nodeproto.CodeUnknownPipeline, Message: fmt.Sprintf("the pipeline entry has no pipeline %q", pipeline)}
 }
 
-// safety: describe runs plan code before the host knows which flags are
-// secret, so what the plan process prints is held until describe answers.
-// release hands it on, after describe's secrets are registered; discard drops
-// it, since a failed describe leaves them unknown.
-type describeGate struct {
-	sink Sink
-
-	mu      sync.Mutex
-	state   int
-	held    []func(Sink)
-	bytes   int
-	dropped int
-}
-
-const (
-	describeHolding = iota
-	describeOpen
-	describeDiscarding
-)
-
-func holdUntilDescribed(cfg *SessionConfig) *describeGate {
-	g := &describeGate{sink: cfg.Sink}
-	cfg.Sink = g
-	return g
-}
-
-func (g *describeGate) Text(level, line string) {
-	g.pass(len(line), func(s Sink) { s.Text(level, line) })
-}
-
-func (g *describeGate) Record(rec nodeproto.LogRecord) {
-	g.pass(len(rec.Msg)+len(rec.Attrs), func(s Sink) { s.Record(rec) })
-}
-
-// safety: delivery happens under the lock, so a line the plan process prints
-// after release never overtakes the held ones.
-func (g *describeGate) pass(size int, deliver func(Sink)) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	switch {
-	case g.state == describeOpen:
-		deliver(g.sink)
-	case g.state == describeDiscarding:
-		g.bytes += size
-	case g.bytes+size > sinkQueueBytes:
-		g.dropped++
-	default:
-		g.held = append(g.held, deliver)
-		g.bytes += size
+// safety: held output reaches the sink only once describe's secrets are
+// known, and err is masked here since the run row that masks later errors
+// does not exist yet.
+func releaseDescribed(s *Session, known bool, masker *secrets.Masker, err error) error {
+	if !known {
+		s.WithholdOutput("describe failed before secrets were known")
+		return err
 	}
-}
-
-// safety: the held output is delivered before release returns, so none of it
-// is still waiting when the session closes and cuts its sink off.
-func (g *describeGate) release() {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	for _, deliver := range g.held {
-		deliver(g.sink)
+	s.ReleaseOutput()
+	if err != nil && masker != nil {
+		err = maskedRunError{err: err, text: masker.Mask(err.Error())}
 	}
-	if g.dropped > 0 {
-		g.sink.Record(nodeproto.LogRecord{
-			TS: time.Now().UTC().Format(time.RFC3339Nano), Level: LevelWarn,
-			Msg: fmt.Sprintf("sparkwing: %d plan output lines dropped while describe ran", g.dropped),
-		})
-	}
-	g.held, g.state = nil, describeOpen
-}
-
-func (g *describeGate) discard() {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.held, g.state = nil, describeDiscarding
-}
-
-// safety: runs once the session has closed, so the notice counts every byte
-// discard withheld, including what arrived after describe failed.
-func (g *describeGate) finish() {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.state == describeDiscarding && g.bytes > 0 {
-		g.sink.Record(nodeproto.LogRecord{
-			TS: time.Now().UTC().Format(time.RFC3339Nano), Level: LevelWarn,
-			Msg: fmt.Sprintf("sparkwing: plan output withheld: describe failed before secrets were known (%d bytes)", g.bytes),
-		})
-	}
+	return err
 }
 
 func planRun(ctx context.Context, s *Session, pipeline string, args map[string]string, rc nodeproto.RunContext) (nodeproto.PlanDoc, []byte, error) {

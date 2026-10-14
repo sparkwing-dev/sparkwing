@@ -50,22 +50,18 @@ func PlanDocument(ctx context.Context, cfg SessionConfig, req PlanRequest) (Plan
 		cfg.Sink = discardSink{}
 	}
 	scfg := dryRunSession(cfg, req.Run.DryRun)
-	gate := holdUntilDescribed(&scfg)
-	defer gate.finish()
+	scfg.HoldOutput = true
 	sess, err := StartSession(ctx, scfg)
 	if err != nil {
 		return PlannedRun{}, err
 	}
 	var out PlannedRun
-	out.Args, err = describeArgs(ctx, sess, req.Pipeline, req.Args, req.Masker)
+	var known bool
+	out.Args, known, err = describeArgs(ctx, sess, req.Pipeline, req.Args, req.Masker)
 	if err == nil && req.CheckArgs != nil {
 		err = req.CheckArgs(out.Args)
 	}
-	if err != nil {
-		gate.discard()
-	} else {
-		gate.release()
-	}
+	err = releaseDescribed(sess, known, req.Masker, err)
 	if err == nil {
 		out.Doc, out.JSON, err = planRun(ctx, sess, req.Pipeline, out.Args, req.Run)
 	}

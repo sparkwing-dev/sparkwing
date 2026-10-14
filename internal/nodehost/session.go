@@ -74,6 +74,10 @@ type SessionConfig struct {
 	// DescribeTimeout bounds the run host's describe of this process. Zero
 	// means 30 seconds, the bound the CLI puts on its own describe.
 	DescribeTimeout time.Duration
+	// HoldOutput keeps what the process writes from the sink until
+	// [Session.ReleaseOutput] or [Session.WithholdOutput]. A session closed
+	// while still holding withholds it.
+	HoldOutput bool
 }
 
 type sessionProcess interface {
@@ -119,6 +123,11 @@ type Session struct {
 	usage     Usage
 	closeErr  error
 	lost      int
+
+	// safety: guarded by mu; set while output is held, and the reason once it
+	// is withheld, which Close reports with the count.
+	holding  bool
+	withheld string
 }
 
 // StartSession starts cfg.Entry as the leader of a new process session with
@@ -173,8 +182,10 @@ func StartSession(ctx context.Context, cfg SessionConfig) (*Session, error) {
 		frameEOF:  make(chan struct{}),
 		watchDone: make(chan struct{}),
 	}
+	s.holding = cfg.HoldOutput
 	for range 3 {
 		q := newSinkQueue()
+		q.held = cfg.HoldOutput
 		s.queues = append(s.queues, q)
 		go q.run(cfg.Sink)
 	}
@@ -282,6 +293,7 @@ func (s *Session) Close() (Usage, error) {
 			}
 			<-done
 		}
+		s.noteWithheld()
 		delivered := make(chan struct{})
 		go func() {
 			for _, q := range s.queues {
@@ -309,6 +321,72 @@ func (s *Session) Close() (Usage, error) {
 		s.closeErr = errors.Join(err, s.reapErr)
 	})
 	return s.usage, s.closeErr
+}
+
+// ReleaseOutput hands held output to the sink and waits, at most the
+// session's grace, for what was held to be delivered, so a session closed
+// right after still delivers it.
+func (s *Session) ReleaseOutput() {
+	s.mu.Lock()
+	holding := s.holding
+	s.holding = false
+	s.mu.Unlock()
+	if !holding {
+		return
+	}
+	marks := make([]chan struct{}, 0, len(s.queues))
+	for _, q := range s.queues {
+		marks = append(marks, q.release())
+	}
+	timer := time.NewTimer(s.cfg.Grace)
+	defer timer.Stop()
+	for _, m := range marks {
+		select {
+		case <-m:
+		case <-timer.C:
+			return
+		}
+	}
+}
+
+// WithholdOutput drops held and later output without the sink seeing it,
+// and has Close tell the sink how many lines it withheld and why.
+func (s *Session) WithholdOutput(reason string) {
+	s.mu.Lock()
+	holding := s.holding
+	s.holding = false
+	if holding {
+		s.withheld = reason
+	}
+	s.mu.Unlock()
+	if !holding {
+		return
+	}
+	for _, q := range s.queues {
+		q.withhold()
+	}
+}
+
+// safety: runs once the streams have ended, so the count is final; the notice
+// goes through a queue, which bounds its delivery by the grace as any line.
+func (s *Session) noteWithheld() {
+	s.WithholdOutput("the session closed before its output was released")
+	s.mu.Lock()
+	reason := s.withheld
+	s.mu.Unlock()
+	if reason == "" {
+		return
+	}
+	n := 0
+	for _, q := range s.queues {
+		n += q.withheldLines()
+	}
+	if n > 0 {
+		s.queues[0].notice(nodeproto.LogRecord{
+			TS: time.Now().UTC().Format(time.RFC3339Nano), Level: LevelWarn,
+			Msg: fmt.Sprintf("sparkwing: output withheld: %s (%d lines)", reason, n),
+		})
+	}
 }
 
 // Lost is how many output lines and records the sink missed: those dropped
@@ -464,6 +542,9 @@ type sinkItem struct {
 	level, text string
 	rec         *nodeproto.LogRecord
 	size        int
+	// safety: closed in place of a delivery, so a waiter knows every item
+	// queued before it has reached the sink.
+	mark chan struct{}
 }
 
 // safety: each stream's lines reach the sink through its own queue, so a pipe
@@ -477,6 +558,11 @@ type sinkQueue struct {
 	closed  bool
 	wake    chan struct{}
 	done    chan struct{}
+	// safety: held stops delivery until describe answers; withholding drops
+	// every line, counted in withheld, since a secret in it is unknown.
+	held        bool
+	withholding bool
+	withheld    int
 }
 
 func newSinkQueue() *sinkQueue {
@@ -487,6 +573,11 @@ func (q *sinkQueue) push(item sinkItem) {
 	// safety: a fixed overhead per line bounds a flood of empty lines too.
 	item.size += 64
 	q.mu.Lock()
+	if q.withholding {
+		q.withheld++
+		q.mu.Unlock()
+		return
+	}
 	if q.bytes > 0 && q.bytes+item.size > sinkQueueBytes {
 		q.dropped++
 		q.total++
@@ -494,6 +585,41 @@ func (q *sinkQueue) push(item sinkItem) {
 		q.items = append(q.items, item)
 		q.bytes += item.size
 	}
+	q.mu.Unlock()
+	q.signal()
+}
+
+func (q *sinkQueue) release() chan struct{} {
+	mark := make(chan struct{})
+	q.mu.Lock()
+	q.held = false
+	q.items = append(q.items, sinkItem{mark: mark})
+	q.mu.Unlock()
+	q.signal()
+	return mark
+}
+
+// safety: what the cap dropped while held is withheld too, not lost, so the
+// notice counts it and Lost does not.
+func (q *sinkQueue) withhold() {
+	q.mu.Lock()
+	q.withheld += len(q.items) + q.dropped
+	q.total -= q.dropped
+	q.items, q.bytes, q.dropped = nil, 0, 0
+	q.held, q.withholding = false, true
+	q.mu.Unlock()
+	q.signal()
+}
+
+func (q *sinkQueue) withheldLines() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.withheld
+}
+
+func (q *sinkQueue) notice(rec nodeproto.LogRecord) {
+	q.mu.Lock()
+	q.items = append(q.items, sinkItem{rec: &rec})
 	q.mu.Unlock()
 	q.signal()
 }
@@ -507,7 +633,12 @@ func (q *sinkQueue) lost(abandoned bool) int {
 		select {
 		case <-q.done:
 		default:
-			n += len(q.items) + 1
+			n++
+			for _, item := range q.items {
+				if item.mark == nil {
+					n++
+				}
+			}
 		}
 	}
 	return n
@@ -531,9 +662,12 @@ func (q *sinkQueue) run(sink Sink) {
 	defer close(q.done)
 	for {
 		q.mu.Lock()
-		if len(q.items) == 0 {
-			dropped, closed := q.dropped, q.closed
-			q.dropped = 0
+		if len(q.items) == 0 || q.held {
+			dropped, closed := q.dropped, q.closed && !q.held
+			if q.held {
+				dropped = 0
+			}
+			q.dropped -= dropped
 			q.mu.Unlock()
 			switch {
 			case dropped > 0:
@@ -554,9 +688,12 @@ func (q *sinkQueue) run(sink Sink) {
 		q.items = q.items[1:]
 		q.bytes -= item.size
 		q.mu.Unlock()
-		if item.rec != nil {
+		switch {
+		case item.mark != nil:
+			close(item.mark)
+		case item.rec != nil:
 			sink.Record(*item.rec)
-		} else {
+		default:
 			sink.Text(item.level, item.text)
 		}
 	}
