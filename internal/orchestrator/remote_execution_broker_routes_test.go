@@ -280,7 +280,7 @@ func TestBrokeredNodeReadsAnotherRunsOutputs(t *testing.T) {
 	}
 
 	executor := NewNodeExecutor(RemoteBackends(child, nil, nil, nil, time.Minute))
-	cached, err := executor.fetchCachedOutput(ctx, coordinationParameters{}, "run-0", "build")
+	cached, err := executor.backends.State.GetNodeOutput(ctx, "run-0", "build")
 	if err != nil || string(cached) != `{"image":"app:1"}` {
 		t.Fatalf("cache-hit output from the origin run = %s, %v", cached, err)
 	}

@@ -181,14 +181,6 @@ func (r *NodeExecutor) runNodeWithCache(ctx context.Context, req runner.Request)
 	}
 	hasMemo := cacheHash != ""
 	memoKey := memoKeyFor(cacheHash)
-	// safety: a claimed node memoizes under its own repository, pipeline and
-	// node, the only memo keys the controller lets its claim take.
-	if c, ok := r.backends.State.(*claimState); ok && hasMemo {
-		if memoKey, err = c.memoKey(ctx, cacheHash); err != nil {
-			r.markFailedIfUnfinished(ctx, req.RunID, node.ID(), err)
-			return runner.Result{Outcome: sparkwing.Failed, Err: err}, true
-		}
-	}
 
 	switch {
 	case hasMemo && group != nil:
@@ -340,7 +332,7 @@ func (r *NodeExecutor) applyCacheHit(ctx context.Context, req runner.Request, pa
 			return runner.Result{Outcome: sparkwing.Failed, Err: err}
 		}
 	}
-	output, err := r.fetchCachedOutput(ctx, parameters, originRun, originNode)
+	output, err := r.backends.State.GetNodeOutput(ctx, originRun, originNode)
 	if cacheOutputMiss(ctx, err) {
 		result, _ := r.runNodeWithCache(withNoCache(ctx), req)
 		return result
@@ -361,7 +353,6 @@ func (r *NodeExecutor) applyCacheHit(ctx context.Context, req runner.Request, pa
 	r.copyArtifactManifest(ctx, req.RunID, req.Node.ID(), originRun, originNode)
 	if err := r.finishCopied(ctx, req, string(sparkwing.Cached), store.FailureUnknown, output, copiedOutput{
 		runID: originRun, nodeID: originNode,
-		input: store.ClaimInputRequest{Kind: store.ClaimInputCached, Key: parameters.key, CacheKeyHash: parameters.cacheHash},
 	}); err != nil {
 		noteLostStateWrite(ctx, "finish node", req.RunID, err)
 	}
@@ -739,7 +730,7 @@ func followerOutcomeFromLeader(leaderOutcome string) sparkwing.Outcome {
 }
 
 func (r *NodeExecutor) inheritLeaderOutcome(ctx context.Context, req runner.Request, parameters coordinationParameters, leaderRunID, leaderNodeID, leaderOutcome, leaderFailureReason string) runner.Result {
-	output, err := r.fetchLeaderOutput(ctx, parameters, leaderRunID, leaderNodeID)
+	output, err := r.backends.State.GetNodeOutput(ctx, leaderRunID, leaderNodeID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		r.markFailed(ctx, req.RunID, req.Node.ID(), fmt.Errorf("fetch leader output: %w", err))
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
@@ -762,7 +753,6 @@ func (r *NodeExecutor) inheritLeaderOutcome(ctx context.Context, req runner.Requ
 	}
 	if err := r.finishCopied(ctx, req, string(outcome), reason, output, copiedOutput{
 		runID: leaderRunID, nodeID: leaderNodeID,
-		input: store.ClaimInputRequest{Kind: store.ClaimInputCoalesced, Key: parameters.key, CacheKeyHash: parameters.cacheHash},
 	}); err != nil {
 		noteLostStateWrite(ctx, "finish node", req.RunID, err)
 	}
@@ -793,27 +783,8 @@ func cacheOutputMiss(ctx context.Context, err error) bool {
 	return (errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrOutputCorrupt)) && !noCacheFromContext(ctx)
 }
 
-// safety: a claimed node reads another run only through the reference its
-// plan declares, so it names the cache entry and the controller picks the run.
-func (r *NodeExecutor) fetchCachedOutput(ctx context.Context, parameters coordinationParameters, originRun, originNode string) ([]byte, error) {
-	if c, ok := r.backends.State.(*claimState); ok {
-		return c.input(ctx, store.ClaimInputRequest{Kind: store.ClaimInputCached, Key: parameters.key, CacheKeyHash: parameters.cacheHash})
-	}
-	return r.backends.State.GetNodeOutput(ctx, originRun, originNode)
-}
-
-// safety: a claimed follower names only its own memoization; the controller
-// finds the leader from the follower's waiter row or the entry it wrote.
-func (r *NodeExecutor) fetchLeaderOutput(ctx context.Context, parameters coordinationParameters, leaderRun, leaderNode string) ([]byte, error) {
-	if c, ok := r.backends.State.(*claimState); ok {
-		return c.input(ctx, store.ClaimInputRequest{Kind: store.ClaimInputCoalesced, Key: parameters.key, CacheKeyHash: parameters.cacheHash})
-	}
-	return r.backends.State.GetNodeOutput(ctx, leaderRun, leaderNode)
-}
-
 type copiedOutput struct {
 	runID, nodeID string
-	input         store.ClaimInputRequest
 }
 
 // perf: a state that can name the origin's stored object records a ref to it
