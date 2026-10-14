@@ -67,17 +67,20 @@ for the host goes only to a machine its owner opted in. See
 **The child's environment is rebuilt rather than inherited.** It carries only
 `PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_*`, `TZ` and `USER` (and on Windows
 `SystemRoot`, `ComSpec`, `PATHEXT`, `TEMP` and `TMP`), the dependency proxy
-settings the runner was given, with any credential in them masked, the node
-protocol's own handles, and the run facts the host sets (dry run, runner
-identity, admission lease). The agent token, cache grant, artifact store,
-claim variables and every other engine variable stay in the host. See
-`MinimalEnv` in `internal/nodehost/attempt.go` and `podSessionEnv` in
+settings the runner was given, the variables the operator lists in
+`run.submit_env_allow` from the runner's own environment, the node protocol's
+own handles, and the run facts the host sets (dry run, runner identity,
+admission lease). The agent token, cache grant, artifact store, claim
+variables and every other engine variable stay in the host, and an
+allow-listed name that is an engine variable or reads as a credential is
+dropped. A dependency proxy URL is the exception: any credential in it reaches
+the node, and masking only keeps it out of the logs. See `MinimalEnv` in
+`internal/nodehost/attempt.go` and `podSessionEnv` and `operatorAllowedEnv` in
 `internal/orchestrator/pod_node_host.go`.
 
 **The process tree dies with the node.** The child leads its own process
 session. When the node finishes or is cancelled, the supervisor sends TERM, then
-KILL, and waits for the session to empty, retrying rather than releasing the
-machine's slot while members are alive
+KILL, and waits a bounded time for the session to empty
 (`internal/nodehost/session_unix.go`, `internal/procgroup`).
 Windows starts the body suspended inside a kill-on-close Job Object and resumes
 it there, so nothing it spawns exists outside the job
@@ -117,10 +120,11 @@ account.
 
 **A trigger consumer's plan.** A pool started with `--also-claim-triggers`
 compiles the triggering branch and runs its binary to plan the run, which the
-runner then hosts. The plan and every closure run in processes with the
-minimal environment above and only their own node-route bearer, and they read
-the run's declared secrets through the trigger's claim, so the branch's plan
-code reaches a run's worth of secrets, wider than one node's
+runner then hosts. The first plan runs with the minimal environment above and
+no node routes. The closures the host evaluates later run with their own
+node-route bearer and read the run's declared secrets through the trigger's
+claim, so the branch's code reaches a run's worth of secrets, wider than one
+node's
 (`HostTriggerRun` in `internal/orchestrator/trigger_host.go`). Each node runs
 under its own claim, in this runner or in a Kubernetes Job carrying its
 node's claim token. `sparkwing cluster runners add` never sets

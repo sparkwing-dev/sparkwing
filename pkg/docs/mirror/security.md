@@ -59,16 +59,16 @@ process-lifetime bearer for the host's loopback node routes, limited to its
 exact run and node, and the host records execution start, finish and logs
 itself. The child does not inherit arbitrary agent service credentials, and
 its bearer cannot claim or renew work, manage runners, or call administrative
-routes. A claimed trigger's pipeline binary, which plans the run, gets the
-same kind of bearer, and the runner hosts the run itself.
+routes. A claimed trigger's pipeline binary plans the run with no bearer and
+no node routes; the runner hosts the run itself, and only the closures it
+evaluates later and each node's body get a bearer.
 The host names the node's own run on every route it forwards, so a runner
 holding two runs never lets one read the other. Two lookups reach beyond it, both scoped
 to the team by the controller: a cross-pipeline `Ref` reads another
 pipeline's latest run and then only that run's node outputs, and a retry
 asks which child its source attempt spawned so it reuses that child. The latest-run lookup
-admits any pipeline in the team, not only a declared `Ref`; that is the trust
-the pipeline's own code already has, since it can reference any team
-pipeline's latest run. Every claim returns a claim token bound to the claim,
+answers only a pipeline and node the run's accepted plan declares as a
+reference. Every claim returns a claim token bound to the claim,
 and the work the claim runs uses it in place of the runner's token: a pooled
 node's supervisor, a Kubernetes Job the trigger's binary creates, and a Job
 controller dispatch (`sparkwing-runner launch`) creates. A Job spec therefore

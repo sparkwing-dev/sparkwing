@@ -747,10 +747,11 @@ A trigger claim token answers `GET /api/v1/secrets/{name}` and
 `POST /api/v1/runs/{id}/source-credential` alone, for the trigger's own run,
 and stops with the trigger claim. The source credential route answers a node
 or trigger claim token and no bearer, so the runner's token fetches no
-source credential (see [Git credentials](git-credentials.md)). The run host's
-plan and closure processes read the run's declared secrets under the trigger
-claim, which is why the trigger claim reads secrets. The runner hosts the trigger's run with its own
-token, which never reaches the pipeline's processes.
+source credential (see [Git credentials](git-credentials.md)). The closures the
+run host evaluates after the first plan read the run's declared secrets under
+the trigger claim, which is why the trigger claim reads secrets; the first plan
+gets no node routes. The runner hosts the trigger's run with its own token,
+which never reaches the pipeline's processes.
 
 `PUT /pipelines/{name}/profile/pin` is the one `runs.state` write that names a
 pipeline instead of a run, and a pin becomes a hard Kubernetes limit for every

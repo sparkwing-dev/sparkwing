@@ -15,6 +15,8 @@ import (
 	"sync/atomic"
 
 	"github.com/sparkwing-dev/sparkwing/internal/depcache"
+	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
+	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -85,8 +87,13 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 		return nodehost.Result{}, err
 	}
 	defer planSink.end()
+	sessionEnv := podSessionEnv(masker)
+	operatorEnv, err := operatorAllowedEnv(os.Environ(), sessionEnv, p.logger)
+	if err != nil {
+		return nodehost.Result{}, err
+	}
 	cfg := nodehost.Config{
-		Session:  nodehost.SessionConfig{Entry: p.binary, Dir: p.dir, Sink: planSink, Env: podSessionEnv(masker)},
+		Session:  nodehost.SessionConfig{Entry: p.binary, Dir: p.dir, Sink: planSink, Env: append(sessionEnv, operatorEnv...)},
 		Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run),
 		State: p.state, Artifacts: p.artifacts, Logger: p.logger,
 		Attempts: &nodehost.Attempts{
@@ -127,6 +134,42 @@ func podSessionEnv(masker *secrets.Masker) []string {
 		}
 	}
 	return env
+}
+
+// safety: the operator's run.submit_env_allow names and prefixes reach the node from this runner's own
+// environment, as AWS_PROFILE or DOCKER_HOST must for its tools; an engine variable, or a credential-shaped name
+// or value, never does whatever the list says, and a name base already sets keeps its one value.
+func operatorAllowedEnv(env, base []string, logger *slog.Logger) ([]string, error) {
+	names, prefixes, err := submissionEnvironmentAllowList()
+	if err != nil {
+		return nil, err
+	}
+	var out, dropped []string
+	for _, entry := range env {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || engineenv.Owned(key) || !operatorListed(key, names, prefixes) || slices.ContainsFunc(base, func(kv string) bool {
+			return strings.HasPrefix(kv, key+"=")
+		}) {
+			continue
+		}
+		if submissionEnvironmentCredentialName(key, value) || envredact.CredentialValue(value) || envredact.RedactValue(value) != value {
+			dropped = append(dropped, key)
+			continue
+		}
+		out = append(out, entry)
+	}
+	if len(dropped) > 0 && logger != nil {
+		logger.Warn("pod node: credential filter dropped allow-listed names",
+			"names", strings.Join(dropped, ","), "allow_key", submitEnvAllowKey)
+	}
+	return out, nil
+}
+
+func operatorListed(key string, names map[string]bool, prefixes []string) bool {
+	if names[key] {
+		return true
+	}
+	return slices.ContainsFunc(prefixes, func(prefix string) bool { return prefix != "" && strings.HasPrefix(key, prefix) })
 }
 
 // safety: the whole value and each ','/'|' member are masked whole. The userinfo (after any scheme://, up to the
