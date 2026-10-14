@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -85,12 +86,13 @@ func runBody(ctx context.Context, n *sparkwing.JobNode) (out any, err error) {
 // the old executor. A required secret the host does not hold is the error.
 func (s *server) nodeContext(ctx context.Context, planned *Planned, n *sparkwing.JobNode, step *sparkwing.WorkStep) (context.Context, error) {
 	ctx = sparkwingruntime.WithNode(sparkwingruntime.WithLogger(ctx, frameLogger{s}), n.ID())
+	ctx = sessionledger.WithCommandMask(ctx, s.masker.Mask)
 	if step != nil {
 		ctx = sparkwing.WithStep(ctx, step.ID())
 		ctx = sparkwingruntime.WithLogger(ctx, stepLogger{frameLogger{s}, step.ID()})
 	}
 	if c := s.cfg.Node; c != nil {
-		ctx = withNodeRoutes(ctx, c, planned)
+		ctx = withNodeRoutes(ctx, c, planned, s.masker)
 	} else {
 		ctx = sparkwingruntime.WithJSONResolver(ctx, func(id string) ([]byte, bool) { return localOutput(planned, id) })
 	}

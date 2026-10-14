@@ -29,6 +29,9 @@ type inputs struct {
 	FanOut  string `flag:"fanout" desc:"Comma-separated targets to fan out over; boom fails the generator, hang blocks it"`
 	Pass    string `flag:"pass" secret:"true" desc:"A secret input the build node prints"`
 	Memo    bool   `flag:"memo" desc:"Add memoized nodes, one of them a fan-out source"`
+	Exec    bool   `flag:"exec" desc:"Add a node whose command line, summary, annotation and error quote the secrets"`
+	Def     string `flag:"def" secret:"true" default:"def-fixture-secret" desc:"A secret input with a default every plan prints"`
+	Refuse  bool   `flag:"refuse" desc:"Fail the plan with an error that quotes the pass secret"`
 }
 
 type fixtureSecrets struct {
@@ -40,6 +43,10 @@ type pipeline struct{ sparkwing.Base }
 func (pipeline) Secrets() any { return &fixtureSecrets{} }
 
 func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ sparkwing.RunContext) error {
+	fmt.Println("plan sees def=" + in.Def)
+	if in.Refuse {
+		return fmt.Errorf("plan refused %s", in.Pass)
+	}
 	build := sparkwing.Job(plan, "build", &buildJob{in: in}).Env("FIXTURE_ENV", "from-plan").Env("SPARKWING_RUNNER_LABELS", "local,gpu")
 	if in.Counter != "" {
 		data, _ := os.ReadFile(in.Counter)
@@ -80,6 +87,25 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 				return err
 			}
 			return fmt.Errorf("deploy refused token %s", token)
+		})
+	}
+	if in.Exec {
+		sparkwing.Job(plan, "exec", func(ctx context.Context) error {
+			token, err := sparkwing.Secret(ctx, "DEPLOY_TOKEN")
+			if err != nil {
+				return err
+			}
+			sparkwing.Summary(ctx, "summary "+token)
+			sparkwing.Annotate(ctx, "note "+token)
+			// The command copies its own session ledger record, which exists
+			// only while it runs, into the marker directory.
+			script := `rec="$SPARKWING_HOME/sessions/$SPARKWING_RUN_ID/$SPARKWING_NODE_ID/$PPID-$$.json"; i=0; ` +
+				`while [ ! -f "$rec" ] && [ $i -lt 200 ]; do sleep 0.05; i=$((i+1)); done; ` +
+				`cp "$rec" "` + in.Marker + `/ledger.json"; echo exec ` + token + ` ` + in.Pass
+			if _, err := sparkwing.Exec(ctx, "sh", "-c", script).Dir(in.Marker).Run(); err != nil {
+				return err
+			}
+			return fmt.Errorf("exec ran with token %s", token)
 		})
 	}
 	if in.Hooks {

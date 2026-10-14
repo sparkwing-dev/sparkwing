@@ -29,6 +29,14 @@ type EventPayload struct {
 
 type commandMaskKey struct{}
 
+// WithCommandMask makes [MaskCommand] pass a step's command line through
+// mask, the run's secret masker, before a ledger record stores it. A sweep
+// later copies that line into an [EventKind] event, long after the masker is
+// gone.
+func WithCommandMask(ctx context.Context, mask func(string) string) context.Context {
+	return context.WithValue(ctx, commandMaskKey{}, mask)
+}
+
 // MaskCommand returns command with the context's secrets hidden, or
 // unchanged when the context carries no mask.
 func MaskCommand(ctx context.Context, command string) string {

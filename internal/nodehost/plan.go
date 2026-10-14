@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -26,8 +27,9 @@ type describeDoc struct {
 
 // safety: describe runs before the run row exists, so an entry that speaks
 // another protocol or lacks the pipeline is refused without recording a run.
-// The value of every flag describe marks secret is registered with masker,
-// when set, before any process of the run can print it.
+// The value of every flag describe marks secret, and the default of every
+// secret flag of every pipeline described, is registered with masker, when
+// set, before the run's sink takes what describe printed.
 func describeArgs(ctx context.Context, s *Session, pipeline string, args map[string]string, masker *secrets.Masker) (map[string]string, error) {
 	var doc describeDoc
 	// safety: no run row or node timeout exists yet, so without this bound a
@@ -43,6 +45,15 @@ func describeArgs(ctx context.Context, s *Session, pipeline string, args map[str
 	}
 	if doc.Protocol != nodeproto.Version {
 		return nil, mismatch("describe", doc.Protocol)
+	}
+	// safety: describe plans every pipeline the entry registers, and any of
+	// them may print its own secret defaults.
+	for _, p := range doc.Pipelines {
+		for _, a := range p.Args {
+			if a.Secret && masker != nil {
+				masker.Register(a.Default)
+			}
+		}
 	}
 	for _, p := range doc.Pipelines {
 		if p.Name != pipeline {
@@ -65,6 +76,94 @@ func describeArgs(ctx context.Context, s *Session, pipeline string, args map[str
 		return merged, nil
 	}
 	return nil, &nodeproto.Error{Code: nodeproto.CodeUnknownPipeline, Message: fmt.Sprintf("the pipeline entry has no pipeline %q", pipeline)}
+}
+
+// safety: describe runs plan code before the host knows which flags are
+// secret, so what the plan process prints is held until describe answers.
+// release hands it on, after describe's secrets are registered; discard drops
+// it, since a failed describe leaves them unknown.
+type describeGate struct {
+	sink Sink
+
+	mu      sync.Mutex
+	state   int
+	held    []func(Sink)
+	bytes   int
+	dropped int
+}
+
+const (
+	describeHolding = iota
+	describeOpen
+	describeDiscarding
+)
+
+func holdUntilDescribed(cfg *SessionConfig) *describeGate {
+	g := &describeGate{sink: cfg.Sink}
+	cfg.Sink = g
+	return g
+}
+
+func (g *describeGate) Text(level, line string) {
+	g.pass(len(line), func(s Sink) { s.Text(level, line) })
+}
+
+func (g *describeGate) Record(rec nodeproto.LogRecord) {
+	g.pass(len(rec.Msg)+len(rec.Attrs), func(s Sink) { s.Record(rec) })
+}
+
+// safety: delivery happens under the lock, so a line the plan process prints
+// after release never overtakes the held ones.
+func (g *describeGate) pass(size int, deliver func(Sink)) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	switch {
+	case g.state == describeOpen:
+		deliver(g.sink)
+	case g.state == describeDiscarding:
+		g.bytes += size
+	case g.bytes+size > sinkQueueBytes:
+		g.dropped++
+	default:
+		g.held = append(g.held, deliver)
+		g.bytes += size
+	}
+}
+
+// safety: the held output is delivered before release returns, so none of it
+// is still waiting when the session closes and cuts its sink off.
+func (g *describeGate) release() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, deliver := range g.held {
+		deliver(g.sink)
+	}
+	if g.dropped > 0 {
+		g.sink.Record(nodeproto.LogRecord{
+			TS: time.Now().UTC().Format(time.RFC3339Nano), Level: LevelWarn,
+			Msg: fmt.Sprintf("sparkwing: %d plan output lines dropped while describe ran", g.dropped),
+		})
+	}
+	g.held, g.state = nil, describeOpen
+}
+
+func (g *describeGate) discard() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.held, g.state = nil, describeDiscarding
+}
+
+// safety: runs once the session has closed, so the notice counts every byte
+// discard withheld, including what arrived after describe failed.
+func (g *describeGate) finish() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.state == describeDiscarding && g.bytes > 0 {
+		g.sink.Record(nodeproto.LogRecord{
+			TS: time.Now().UTC().Format(time.RFC3339Nano), Level: LevelWarn,
+			Msg: fmt.Sprintf("sparkwing: plan output withheld: describe failed before secrets were known (%d bytes)", g.bytes),
+		})
+	}
 }
 
 func planRun(ctx context.Context, s *Session, pipeline string, args map[string]string, rc nodeproto.RunContext) (nodeproto.PlanDoc, []byte, error) {

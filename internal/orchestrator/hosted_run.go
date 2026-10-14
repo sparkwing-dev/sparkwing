@@ -163,8 +163,12 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 	if err != nil {
 		return nil, err
 	}
+	planSink, err := newHostedPlanSink(ctx, runID, masker, delegate)
+	if err != nil {
+		return nil, err
+	}
 	cfg := nodehost.Config{
-		Session:  nodehost.SessionConfig{Entry: entry.Command, Dir: entry.Dir, Env: engineenv.Strip(entry.Env), Sink: hostedPlanSink{delegate}},
+		Session:  nodehost.SessionConfig{Entry: entry.Command, Dir: entry.Dir, Env: engineenv.Strip(entry.Env), Sink: planSink},
 		Pipeline: opts.Pipeline, Args: invokeArgs, CheckArgs: checkArgs, Run: hostedRunContext(opts, runID),
 		StartAt: opts.StartAt, StopAt: opts.StopAt, Only: opts.Only, Workers: opts.MaxParallel,
 		State: state, Artifacts: backends.Artifact, Attempts: attempts, Admission: admission,
@@ -192,6 +196,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 	}
 	execStart := time.Now()
 	out, err := nodehost.Execute(ctx, cfg)
+	planSink.Flush()
 	if err != nil {
 		return nil, err
 	}
@@ -264,15 +269,25 @@ func hostedBounces(state StateBackend) nodehost.Bounces {
 	return nil
 }
 
-// safety: plan code's logs have no node log to land in, so they go to the renderer.
-type hostedPlanSink struct{ delegate sparkwing.Logger }
-
-func (s hostedPlanSink) Text(level, line string) {
-	s.delegate.Emit(sparkwing.LogRecord{TS: time.Now(), Level: level, Msg: line})
+// safety: plan code's logs have no node log to land in, so they go to the
+// renderer through a node-host log sink, which masks a value even across the
+// session's split of a long line. Flush it once the run's sessions end.
+func newHostedPlanSink(ctx context.Context, runID string, masker *secrets.Masker, delegate sparkwing.Logger) (*nodehost.LogSink, error) {
+	return nodehost.NewLogSink(ctx, nodehost.LogSinkConfig{
+		RunID: runID, NodeID: store.PlanNodeID, Log: hostedPlanLog{delegate}, State: podPlanState{}, Masker: masker,
+	})
 }
 
-func (s hostedPlanSink) Record(rec nodeproto.LogRecord) {
-	s.delegate.Emit(sparkwing.LogRecord{TS: time.Now(), Level: rec.Level, Event: rec.Event, Msg: rec.Msg})
+// safety: plan output belongs to the run, not to a node the renderer would
+// look for, so the sink's plan node id is dropped.
+type hostedPlanLog struct{ delegate sparkwing.Logger }
+
+func (l hostedPlanLog) Emit(rec sparkwing.LogRecord) {
+	if l.delegate == nil {
+		return
+	}
+	rec.JobID = ""
+	l.delegate.Emit(rec)
 }
 
 // hack: the host has no event seam yet, so the run_plan, node_start and node_end records the dispatcher wrote

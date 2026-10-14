@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeclient"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/secretsource"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -14,11 +15,14 @@ import (
 
 // safety: every reach outside this process goes through the host's routes,
 // which add the controller credential; nothing here holds one.
-func withNodeRoutes(ctx context.Context, c *nodeclient.Client, planned *Planned) context.Context {
+func withNodeRoutes(ctx context.Context, c *nodeclient.Client, planned *Planned, masker *secrets.Masker) context.Context {
 	ctx = sparkwing.WithSecretResolver(ctx, sparkwing.SecretResolverFunc(func(ctx context.Context, name string) (string, bool, error) {
 		value, masked, err := c.Secret(ctx, name)
 		if nodeclient.HasCode(err, nodeclient.CodeSecretNotFound) {
 			return "", false, fmt.Errorf("%w%.0w", err, secretsource.ErrMissing)
+		}
+		if err == nil && masked {
+			masker.Register(value)
 		}
 		return value, masked, err
 	}))
@@ -45,6 +49,9 @@ func withNodeRoutes(ctx context.Context, c *nodeclient.Client, planned *Planned)
 		token, _, err := c.OIDCToken(ctx, audience)
 		if nodeclient.HasCode(err, nodeclient.CodeOIDCUnavailable) {
 			return "", fmt.Errorf("%w%.0w", err, sparkwing.ErrOIDCUnavailable)
+		}
+		if err == nil {
+			masker.Register(token)
 		}
 		return token, err
 	})

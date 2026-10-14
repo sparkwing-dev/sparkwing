@@ -5,10 +5,11 @@
 // concurrency group; when asked, a node that waits until it is stopped, and a
 // deploy node whose skip_if reads a secret, and a failing node whose recovery
 // records the failure it was handed; when asked, a source node whose output
-// generates one node per target and a summary that needs them all; when asked,
-// a ship node of three steps behind a prep node, beside a lint node. The
-// trigger's actor and pull request, when set, reach the build node's
-// environment as ACTOR.
+// generates one node per target and a summary that needs them all, a node
+// that records its job args, a node with a typed output, and memoized artifact
+// producers an aggregator stages; when asked, a ship node of three steps behind
+// a prep node, beside a lint node. The trigger's actor and pull request, when
+// set, reach the build node's environment as ACTOR.
 package main
 
 import (
@@ -42,6 +43,10 @@ type inputs struct {
 	FanFail string `flag:"fanfail" desc:"File whose presence fails the node generated for target fail"`
 	FanMemo bool   `flag:"fanmemo" desc:"Memoize the fan-out source"`
 	Region  bool   `flag:"region" desc:"The build node's env carries the AWS_REGION plan code reads"`
+	Scale   string `flag:"scaleout" desc:"File a scale node writes its job args and the zone input to"`
+	Zone    string `flag:"zone" desc:"An input the scale node records"`
+	Shards  string `flag:"shards" desc:"File an aggregator writes the artifacts of two memoized producers to"`
+	Typed   bool   `flag:"typed" desc:"Add a node that returns a typed output"`
 	Ranged  string `flag:"ranged" desc:"File a prep node, a lint node and a ship node of three steps append their names to"`
 	Stage   string `flag:"stage" default:"prod" desc:"A value only guards read"`
 }
@@ -72,6 +77,53 @@ func appendLine(path, line string) error {
 	}
 	_, err = fmt.Fprintln(f, line)
 	return errors.Join(err, f.Close())
+}
+
+type typedJob struct {
+	sparkwing.Base
+	sparkwing.Produces[string]
+}
+
+func (typedJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	return sparkwing.Step(w, "emit", func(context.Context) (string, error) { return "typed output", nil }), nil
+}
+
+type scaleArgs struct {
+	Replicas int `flag:"replicas" default:"1" desc:"Replica count the scale node records"`
+}
+
+type scaleJob struct {
+	sparkwing.Base
+	sparkwing.WithArgs[scaleArgs]
+	out, zone string
+}
+
+func (j *scaleJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	return sparkwing.Step(w, "apply", func(ctx context.Context) error {
+		return os.WriteFile(j.out, fmt.Appendf(nil, "replicas=%d zone=%s", j.Args(ctx).Replicas, j.zone), 0o600)
+	}), nil
+}
+
+// addShards adds two memoized producers that each publish one shard, and an
+// aggregator that stages both and writes them to out.
+func addShards(plan *sparkwing.Plan, out string) {
+	producer := func(id, rel, content string) *sparkwing.JobNode {
+		return sparkwing.Job(plan, id, func(context.Context) error {
+			if err := os.MkdirAll("shards", 0o700); err != nil {
+				return err
+			}
+			return os.WriteFile(rel, []byte(content), 0o600)
+		}).Outputs(rel).Memoize(func(context.Context) (sparkwing.CacheKey, error) { return sparkwing.Key(id, "v1"), nil })
+	}
+	one, two := producer("shard-1", "shards/1.txt", "one"), producer("shard-2", "shards/2.txt", "two")
+	sparkwing.Job(plan, "aggregate", func(context.Context) error {
+		a, errA := os.ReadFile("shards/1.txt")
+		b, errB := os.ReadFile("shards/2.txt")
+		if err := errors.Join(errA, errB); err != nil {
+			return err
+		}
+		return os.WriteFile(out, []byte(string(a)+"+"+string(b)), 0o600)
+	}).Consumes(one).Consumes(two)
 }
 
 type fixtureSecrets struct {
@@ -187,6 +239,15 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, rc spar
 	}
 	if in.Region {
 		build.Env("PLAN_REGION", os.Getenv("AWS_REGION"))
+	}
+	if in.Scale != "" {
+		sparkwing.Job(plan, "scale", &scaleJob{out: in.Scale, zone: in.Zone})
+	}
+	if in.Typed {
+		sparkwing.Job(plan, "typed", typedJob{})
+	}
+	if in.Shards != "" {
+		addShards(plan, in.Shards)
 	}
 	if in.Group {
 		build.Concurrency(sparkwing.NewConcurrencyGroup("pod-group", sparkwing.ConcurrencyLimit{Capacity: 1}))

@@ -63,6 +63,9 @@ func plan(ctx context.Context, s *server, req nodeproto.Request) (any, error) {
 	if err != nil {
 		return nil, &nodeproto.Error{Code: nodeproto.CodePlanFailed, Message: err.Error()}
 	}
+	for _, v := range reg.SecretValues(req.Args) {
+		s.masker.Register(v)
+	}
 	s.mu.Lock()
 	s.planned = &Planned{Registration: reg, Plan: built, Run: rc, Doc: doc}
 	s.mu.Unlock()

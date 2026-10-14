@@ -69,9 +69,32 @@ func (m *memLogs) text(node string) string {
 	return b.String()
 }
 
+// safety: masks each line when it arrives, as a real plan sink does, so a
+// value registered too late shows in the text.
+type planSinkText struct {
+	masker *secrets.Masker
+	mu     sync.Mutex
+	text   strings.Builder
+}
+
+func (p *planSinkText) Text(_, line string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.text.WriteString(p.masker.Mask(line) + "\n")
+}
+
+func (p *planSinkText) Record(rec nodeproto.LogRecord) { p.Text("", rec.Msg) }
+
+func (p *planSinkText) String() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.text.String()
+}
+
 type attemptHarness struct {
 	st     *store.Store
 	logs   *memLogs
+	plan   *planSinkText
 	marker string
 	usage  map[string]Usage
 	mu     sync.Mutex
@@ -101,20 +124,20 @@ func TestAttemptExecutor(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = srv.Close() })
-		h := &attemptHarness{st: openStore(t), logs: &memLogs{records: map[string][]sparkwing.LogRecord{}}, marker: t.TempDir(), usage: map[string]Usage{}}
+		h := &attemptHarness{st: openStore(t), logs: &memLogs{records: map[string][]sparkwing.LogRecord{}}, plan: &planSinkText{masker: secrets.NewMasker()}, marker: t.TempDir(), usage: map[string]Usage{}}
 		args["marker"] = h.marker
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 		defer cancel()
 		res, err := Execute(ctx, Config{
 			Session: SessionConfig{
 				Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second,
-				Env: env,
+				Env: env, Sink: h.plan,
 			},
 			Pipeline: "attempts", Args: args,
 			Run:   nodeproto.RunContext{RunID: runID},
 			State: h.st, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
 			Attempts: &Attempts{
-				Routes: srv, Resolver: fixtureResolver{}, Masker: secrets.NewMasker(),
+				Routes: srv, Resolver: fixtureResolver{}, Masker: h.plan.masker,
 				OpenLog: func(_ context.Context, _, node string) (NodeLog, error) {
 					h.logs.mu.Lock()
 					defer h.logs.mu.Unlock()
@@ -219,6 +242,70 @@ func TestAttemptExecutor(t *testing.T) {
 		row := h.row(t, "run-leak", "leak")
 		if !strings.Contains(row.Error, "deploy refused token") || strings.Contains(row.Error, fixtureToken) {
 			t.Errorf("leak row error = %q, want the message with the secret masked", row.Error)
+		}
+	})
+
+	t.Run("NoStoredRecordHoldsASecret", func(t *testing.T) {
+		const pass = "pass-fixture-secret"
+		env := append(engineenv.Minimal(), "SPARKWING_HOME="+t.TempDir())
+		h, res := host(t, "run-exec", map[string]string{"exec": "true", "pass": pass}, env)
+		if res.Status != "failed" {
+			t.Fatalf("status=%s err=%v, want failed", res.Status, res.Err)
+		}
+		ledger, err := os.ReadFile(filepath.Join(h.marker, "ledger.json"))
+		if err != nil || !strings.Contains(string(ledger), "sh -c") {
+			t.Fatalf("session ledger record = %q (err %v), want the step command's record", ledger, err)
+		}
+		row := h.row(t, "run-exec", "exec")
+		steps, err := h.st.ListNodeSteps(t.Context(), "run-exec")
+		if err != nil {
+			t.Fatal(err)
+		}
+		stored := map[string]string{
+			"session ledger": string(ledger),
+			"node log":       h.logs.text("exec"),
+			"node error":     row.Error,
+			"annotations":    strings.Join(row.Annotations, "\n"),
+			"summary":        row.Summary,
+		}
+		for _, s := range steps {
+			stored["step "+s.StepID] = s.Summary + "\n" + strings.Join(s.Annotations, "\n")
+		}
+		if !strings.Contains(stored["node log"], "exec ") || !strings.Contains(row.Error, "exec ran with token") {
+			t.Errorf("log %q and error %q lack the node's own text", stored["node log"], row.Error)
+		}
+		for where, text := range stored {
+			for _, secret := range []string{fixtureToken, pass} {
+				if strings.Contains(text, secret) {
+					t.Errorf("the %s holds secret %q unmasked:\n%s", where, secret, text)
+				}
+			}
+		}
+	})
+
+	t.Run("ThePlanProcessMasksSecretDefaultsAndItsError", func(t *testing.T) {
+		const pass = "pass-fixture-secret"
+		h, res := host(t, "run-refuse", map[string]string{"refuse": "true", "pass": pass}, nil)
+		if res.Status != "failed" || res.Err == nil {
+			t.Fatalf("status=%s err=%v, want failed", res.Status, res.Err)
+		}
+		run, err := h.st.GetRun(t.Context(), "run-refuse")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(run.Error, "plan refused") {
+			t.Errorf("run error = %q, want the plan's refusal", run.Error)
+		}
+		plan := h.plan.String()
+		if !strings.Contains(plan, "plan sees def=") {
+			t.Errorf("plan output lacks the plan's own text:\n%s", plan)
+		}
+		for where, text := range map[string]string{"run error": run.Error, "returned error": res.Err.Error(), "plan output": plan} {
+			for _, secret := range []string{pass, "def-fixture-secret"} {
+				if strings.Contains(text, secret) {
+					t.Errorf("the %s holds secret %q unmasked:\n%s", where, secret, text)
+				}
+			}
 		}
 	})
 

@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeclient"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/protofd"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -75,6 +76,10 @@ type Planned struct {
 type server struct {
 	cfg    Config
 	frames *nodeproto.Writer
+	// safety: holds every secret value this process was handed, so records
+	// written here rather than sent to the host, such as a step command's
+	// session ledger line, are masked as the host masks what it stores.
+	masker *secrets.Masker
 	// safety: set at end of input, after which the SDK writes nothing.
 	done atomic.Bool
 
@@ -109,7 +114,7 @@ var handlers = map[nodeproto.Op]handler{
 func Serve(ctx context.Context, in io.Reader, out io.Writer, cfg Config) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	s := &server{cfg: cfg, frames: nodeproto.NewWriter(out), steps: map[[2]string]context.CancelFunc{}}
+	s := &server{cfg: cfg, frames: nodeproto.NewWriter(out), masker: secrets.NewMasker(), steps: map[[2]string]context.CancelFunc{}}
 	r := nodeproto.NewReader(in)
 	for {
 		req, err := r.NextRequest()
