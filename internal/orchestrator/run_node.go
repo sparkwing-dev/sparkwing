@@ -66,7 +66,7 @@ func RunNodeOnce(
 			runID, nodeID)
 	}
 	start := time.Now()
-	res, err := runNodeRemote(ctx, trigger, run, controllerURL, cfg.gitcacheURL, cfg.gitcacheGrant,
+	res, err := hostRemoteNode(ctx, trigger, run, controllerURL, cfg.gitcacheURL, cfg.gitcacheGrant,
 		runID, nodeID, token, cfg.repoAllowlist, logger)
 	if err != nil {
 		return res, err
@@ -77,5 +77,8 @@ func RunNodeOnce(
 	otelutil.StampSpan(ctx, otelutil.SpanAttrs{Outcome: string(res.Outcome)})
 	return res, nil
 }
+
+// hack: a variable so tests stand a prebuilt pipeline in for the source fetch and build.
+var hostRemoteNode = runNodeRemote
 
 var MetricsHook func(pipeline, outcome string, d time.Duration)
