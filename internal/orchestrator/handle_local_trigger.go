@@ -70,6 +70,7 @@ func HostClaimedTrigger(ctx context.Context, triggerID, program string) error {
 	}
 
 	admission.ParentRunID, admission.ParentNodeID = trigger.ParentRunID, trigger.ParentNodeID
+	flags := triggerRunFlags(trigger.TriggerEnv)
 	opts := Options{
 		standalone:        childStandalone(backends, selection),
 		Pipeline:          trigger.Pipeline,
@@ -78,7 +79,11 @@ func HostClaimedTrigger(ctx context.Context, triggerID, program string) error {
 		Priority:          submittedTriggerPriority(trigger),
 		ParentRunID:       trigger.ParentRunID,
 		Admission:         admission,
-		DryRun:            trigger.TriggerEnv[envDryRun] == "1",
+		DryRun:            flags.dryRun,
+		NoCache:           flags.noCache,
+		StartAt:           flags.startAt,
+		StopAt:            flags.stopAt,
+		Only:              flags.only,
 		RetryOf:           trigger.RetryOf,
 		RetrySource:       trigger.RetrySource,
 		RetryRepoDir:      trigger.TriggerEnv[retryprovenance.RepoDirKey],

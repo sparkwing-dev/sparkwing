@@ -576,6 +576,58 @@ func TestTriggerHost_PlansWithTheTriggersActorAndPullRequest(t *testing.T) {
 	}
 }
 
+// safety: `sparkwing pipeline trigger` carries --sw-only, the step range and
+// --sw-dry-run in the trigger's environment, so the runner hosting the run
+// cuts the plan and each node host skips the steps the flags put out of range.
+func TestTriggerHost_HonorsTheTriggersRunFlags(t *testing.T) {
+	cases := []struct {
+		name    string
+		env     map[string]string
+		ran     []string
+		skipped []string
+	}{
+		{
+			name: "only", env: map[string]string{"SPARKWING_ONLY": "ship"},
+			ran: []string{"compile", "package", "prep", "upload"}, skipped: []string{"build", "lint"},
+		},
+		{
+			name: "step range", env: map[string]string{"SPARKWING_START_AT": "package", "SPARKWING_STOP_AT": "package"},
+			ran: []string{"lint", "package", "prep"},
+		},
+		{name: "dry run", env: map[string]string{"SPARKWING_DRY_RUN": "1"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			ranged := filepath.Join(dir, "ranged")
+			h := newHostedTriggerWith(t, map[string]string{"envout": filepath.Join(dir, "env"), "ranged": ranged},
+				func(trig *store.Trigger) { trig.TriggerEnv = c.env })
+			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+			defer cancel()
+			if err := h.host(t, ctx, nil, 0); err != nil {
+				t.Fatalf("host: %v", err)
+			}
+			if run := h.run(t); run.Status != "success" {
+				t.Fatalf("run = %s (%s), want success", run.Status, run.Error)
+			}
+			data, err := os.ReadFile(ranged)
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				t.Fatal(err)
+			}
+			ran := strings.Fields(string(data))
+			slices.Sort(ran)
+			if !slices.Equal(ran, c.ran) {
+				t.Fatalf("steps that ran = %v, want %v", ran, c.ran)
+			}
+			for _, id := range c.skipped {
+				if n := h.node(t, id); n.Outcome != string(sparkwing.Skipped) {
+					t.Errorf("%s = %s/%s, want skipped outside --sw-only", id, n.Status, n.Outcome)
+				}
+			}
+		})
+	}
+}
+
 // safety: a run's recorded source is whatever surface started it, and the node
 // protocol knows four, so a source it does not know plans as the one it means
 // rather than failing the plan.

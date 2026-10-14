@@ -4,7 +4,8 @@
 // with retries whose before_run and after_run calls are traced, and a node in a
 // concurrency group; when asked, a node that waits until it is stopped, and a
 // deploy node whose skip_if reads a secret, and a failing node whose recovery
-// records the failure it was handed. The trigger's actor and pull request, when
+// records the failure it was handed; when asked, a ship node of three steps
+// behind a prep node, beside a lint node. The trigger's actor and pull request, when
 // set, reach the build node's environment as ACTOR.
 package main
 
@@ -35,6 +36,35 @@ type inputs struct {
 	Guard   string `flag:"guard" desc:"File a deploy node writes unless its skip_if, which reads DEPLOY_GUARD, says skip"`
 	Recover string `flag:"recover" desc:"File a failing node's recovery writes the parent's error to"`
 	Region  bool   `flag:"region" desc:"The build node's env carries the AWS_REGION plan code reads"`
+	Ranged  string `flag:"ranged" desc:"File a prep node, a lint node and a ship node of three steps append their names to"`
+}
+
+// shipJob's steps run compile, package, upload in order, each appending its
+// name to the ranged file.
+type shipJob struct {
+	sparkwing.Base
+	out string
+}
+
+func (j *shipJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	var prev *sparkwing.WorkStep
+	for _, id := range []string{"compile", "package", "upload"} {
+		st := sparkwing.Step(w, id, func(context.Context) error { return appendLine(j.out, id) })
+		if prev != nil {
+			st.Needs(prev)
+		}
+		prev = st
+	}
+	return nil, nil
+}
+
+func appendLine(path, line string) error {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(f, line)
+	return errors.Join(err, f.Close())
 }
 
 type fixtureSecrets struct {
@@ -135,6 +165,11 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, rc spar
 				}
 				return os.WriteFile(in.Recover, []byte(f.Err.Error()), 0o600)
 			})
+	}
+	if in.Ranged != "" {
+		prep := sparkwing.Job(plan, "prep", func(context.Context) error { return appendLine(in.Ranged, "prep") })
+		sparkwing.Job(plan, "lint", func(context.Context) error { return appendLine(in.Ranged, "lint") })
+		sparkwing.Job(plan, "ship", &shipJob{out: in.Ranged}).Needs(prep)
 	}
 	if in.Region {
 		build.Env("PLAN_REGION", os.Getenv("AWS_REGION"))

@@ -125,7 +125,7 @@ func podRun(cfg *Config) *Run {
 	}
 	return &Run{
 		ID: cfg.Run.RunID, Pipeline: cfg.Pipeline, Args: cfg.Args, Context: cfg.Run,
-		State: cfg.State, Logger: cfg.Logger,
+		StartAt: cfg.StartAt, StopAt: cfg.StopAt, State: cfg.State, Logger: cfg.Logger,
 	}
 }
 

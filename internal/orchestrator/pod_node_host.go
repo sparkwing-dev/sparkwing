@@ -94,9 +94,11 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 		return nodehost.Result{}, err
 	}
 	defer planSink.end()
+	flags := recordedRunFlags(run.Invocation)
 	cfg := nodehost.Config{
 		Session:  nodehost.SessionConfig{Entry: p.entry, Dir: p.dir, Sink: planSink, Env: env},
 		Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run),
+		StartAt: flags.startAt, StopAt: flags.stopAt,
 		State: p.state, Artifacts: p.artifacts, Logger: p.logger,
 		Attempts: &nodehost.Attempts{
 			Routes: routes, Resolver: podSecrets{c: c, runID: p.runID}, Masker: masker, Claim: claim,
@@ -310,8 +312,9 @@ func PipelineRequires(dir, pipeline string) ([]string, error) {
 
 // safety: the planning claim and every node's pod plan from one context, so their spec hashes compare.
 func podRunContext(run *store.Run) nodeproto.RunContext {
+	flags := recordedRunFlags(run.Invocation)
 	rc := nodeproto.RunContext{
-		RunID: run.ID, StartedAt: run.StartedAt,
+		RunID: run.ID, StartedAt: run.StartedAt, DryRun: flags.dryRun, NoCache: flags.noCache,
 		Git:     &nodeproto.Git{SHA: run.GitSHA, Branch: run.GitBranch, Repo: run.DeclaredRepo, RepoURL: run.RepoURL},
 		Trigger: &nodeproto.Trigger{Source: protocolTriggerSource(run.TriggerSource), User: run.TriggerUser},
 	}

@@ -94,6 +94,7 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	if err != nil {
 		return err
 	}
+	flags := triggerRunFlags(trig.TriggerEnv)
 	rehydrate, err := hostedRehydration(ctx, c, Options{RetryOf: trig.RetryOf, RetrySource: trig.RetrySource, Full: trig.Full}, trig.ID)
 	if err != nil {
 		return err
@@ -101,7 +102,8 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	res, err := nodehost.Execute(ctx, nodehost.Config{
 		Session:  nodehost.SessionConfig{Entry: h.Entry, Dir: h.Dir, Sink: planSink, Env: env},
 		Pipeline: trig.Pipeline, Args: triggerHostArgs(ctx, c, trig, logger),
-		Run: rc, Requires: requires,
+		Run: rc, Requires: requires, Invocation: flags.invocation(),
+		StartAt: flags.startAt, StopAt: flags.stopAt, Only: flags.only,
 		ParentRunID: trig.ParentRunID, RetryOf: trig.RetryOf, RetrySource: trig.RetrySource,
 		State: retryPlanState{
 			stoppingHostState: stoppingHostState{Client: c, shuttingDown: shuttingDown},
@@ -109,7 +111,7 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 		},
 		Logger:    logger,
 		Admission: &nodehost.Admission{Slots: slots},
-		Memo: &nodehost.Memo{Slots: slots, Source: func(ctx context.Context, _ store.ClaimInputRequest, runID, nodeID string) (nodehost.MemoSource, error) {
+		Memo: &nodehost.Memo{Slots: slots, NoCache: flags.noCache, Source: func(ctx context.Context, _ store.ClaimInputRequest, runID, nodeID string) (nodehost.MemoSource, error) {
 			return nodehost.ReadMemoSource(ctx, c, runID, nodeID)
 		}},
 		// safety: the run host's eval processes read secrets through the trigger's claim, which the controller
@@ -188,11 +190,53 @@ func triggerRunContext(ctx context.Context, c *client.Client, trig *store.Trigge
 	planned := *row
 	planned.ID, planned.TriggerSource = trig.ID, trig.TriggerSource
 	planned.GitSHA, planned.GitBranch = trig.GitSHA, trig.GitBranch
+	planned.Invocation = triggerRunFlags(trig.TriggerEnv).invocation()
 	planned.DeclaredRepo, planned.RepoURL = cmp.Or(row.DeclaredRepo, trig.Repo), cmp.Or(row.RepoURL, trig.RepoURL)
 	if planned.StartedAt.IsZero() {
 		planned.StartedAt = time.Now().UTC()
 	}
 	return podRunContext(&planned), nil
+}
+
+// safety: `sparkwing pipeline trigger` carries these flags in trigger_env; the run host records them in the
+// run row's invocation, where every node host reads them back, so a node's step range and dry run match the
+// plan the run host accepted.
+type runFlags struct {
+	startAt, stopAt, only string
+	dryRun, noCache       bool
+}
+
+func triggerRunFlags(env map[string]string) runFlags {
+	return runFlags{
+		startAt: env["SPARKWING_START_AT"], stopAt: env["SPARKWING_STOP_AT"], only: env["SPARKWING_ONLY"],
+		dryRun: env[envDryRun] == "1", noCache: env["SPARKWING_NO_CACHE"] == "1",
+	}
+}
+
+func (f runFlags) invocation() map[string]any {
+	flags := map[string]any{}
+	for key, value := range map[string]string{"start_at": f.startAt, "stop_at": f.stopAt, "only": f.only} {
+		if value != "" {
+			flags[key] = value
+		}
+	}
+	if f.dryRun {
+		flags["dry_run"] = true
+	}
+	if f.noCache {
+		flags["no_cache"] = true
+	}
+	if len(flags) == 0 {
+		return nil
+	}
+	return map[string]any{"flags": flags}
+}
+
+func recordedRunFlags(invocation map[string]any) runFlags {
+	flags, _ := invocation["flags"].(map[string]any)
+	text := func(key string) string { v, _ := flags[key].(string); return v }
+	set := func(key string) bool { v, _ := flags[key].(bool); return v }
+	return runFlags{startAt: text("start_at"), stopAt: text("stop_at"), only: text("only"), dryRun: set("dry_run"), noCache: set("no_cache")}
 }
 
 const (
