@@ -1,6 +1,10 @@
 package orchestrator
 
 import (
+	"context"
+	"log/slog"
+
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -11,6 +15,16 @@ type runNodeConfig struct {
 	gitcacheURL   string
 	gitcacheGrant string
 	repoAllowlist *sourceurl.RepoAllowlist
+	hostRemote    remoteNodeHost
+}
+
+type remoteNodeHost func(ctx context.Context, trigger *store.Trigger, run *store.Run,
+	controllerURL, gitcacheURL, cacheGrant, runID, nodeID, token string,
+	allow *sourceurl.RepoAllowlist, logger *slog.Logger) (runner.Result, error)
+
+// hack: tests stand a prebuilt pipeline in for the source fetch and build through this option.
+func withRemoteNodeHost(host remoteNodeHost) RunNodeOption {
+	return func(c *runNodeConfig) { c.hostRemote = host }
 }
 
 type RunNodeOption func(*runNodeConfig)

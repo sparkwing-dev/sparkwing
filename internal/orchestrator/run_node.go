@@ -65,8 +65,12 @@ func RunNodeOnce(
 			"run %s node %s dispatches to a remote runner, which cannot reach this machine's admission daemon socket; set SPARKWING_CONTROLLER_URL to a controller the runner can reach",
 			runID, nodeID)
 	}
+	host := runNodeRemote
+	if cfg.hostRemote != nil {
+		host = cfg.hostRemote
+	}
 	start := time.Now()
-	res, err := runNodeRemote(ctx, trigger, run, controllerURL, cfg.gitcacheURL, cfg.gitcacheGrant,
+	res, err := host(ctx, trigger, run, controllerURL, cfg.gitcacheURL, cfg.gitcacheGrant,
 		runID, nodeID, token, cfg.repoAllowlist, logger)
 	if err != nil {
 		return res, err
