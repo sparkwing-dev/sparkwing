@@ -10,11 +10,13 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
@@ -74,8 +76,8 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	if err != nil {
 		return err
 	}
-	checkArgs := guardCheck(trig.Pipeline, guards, pipelines.GuardContext{
-		GitBranch: trig.GitBranch, GitDefaultBranch: checkoutDefaultBranch(ctx, trig.TriggerEnv[controller.EnvDefaultBranch], h.Dir),
+	checkArgs := guardCheck(trig.Pipeline, guards, pipelines.GuardContext{GitBranch: trig.GitBranch}, func() string {
+		return checkoutDefaultBranch(ctx, trig.TriggerEnv[controller.EnvDefaultBranch], h.Dir)
 	})
 	masker := secrets.NewMasker()
 	masker.Register(h.Token)
@@ -177,30 +179,45 @@ func checkoutRunArgs(dir, pipeline string, args map[string]string) (map[string]s
 }
 
 // safety: the host checks a run's guards once describe has filled in the SDK's defaults, against the arguments the
-// run plans with, so leaving out a flag whose default a guard rejects does not slip past it.
-func guardCheck(pipeline string, rules pipelines.Guards, at pipelines.GuardContext) func(map[string]string) error {
+// run plans with, so leaving out a flag whose default a guard rejects does not slip past it. defaultBranch is asked
+// only when a guard compares with the default branch, and a guard that does refuses the run when it is unknown,
+// because an unresolved default would let a reject guard pass.
+func guardCheck(pipeline string, rules pipelines.Guards, at pipelines.GuardContext, defaultBranch func() string) func(map[string]string) error {
 	if rules.IsEmpty() {
 		return nil
 	}
+	var needs string
+	for _, raw := range append(slices.Clone(rules.Reject), rules.Require...) {
+		if tok, err := pipelines.ParseGuardToken(raw); err == nil && tok.Kind == pipelines.KindGitBranchOnDef {
+			needs = raw
+		}
+	}
 	return func(args map[string]string) error {
+		if needs != "" && at.GitDefaultBranch == "" {
+			if at.GitDefaultBranch = defaultBranch(); at.GitDefaultBranch == "" {
+				return fmt.Errorf("pipeline %q: guard %q could not resolve the repository's default branch, so the run is refused", pipeline, needs)
+			}
+		}
 		at.Args = args
 		return rules.Evaluate(pipeline, at)
 	}
 }
 
+// hack: a variable so a test bounds the lookup below its real deadline.
+var defaultBranchLookupTimeout = 15 * time.Second
+
 // safety: a GitHub App trigger records the repository's default branch; any other run reads it from its checkout,
-// origin's HEAD as a local run does, and asks origin when the clone did not record it. Unknown, git:branch=default
-// never matches.
+// origin's HEAD as a local run does, and asks origin when the clone did not record it. The ask runs with a source
+// fetch's non-interactive environment and returns at its deadline even when a helper still holds git's output.
 func checkoutDefaultBranch(ctx context.Context, recorded, dir string) string {
 	if recorded != "" {
 		return recorded
 	}
 	git := func(args ...string) string {
-		ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, defaultBranchLookupTimeout)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, "git", args...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+		cmd.Dir, cmd.Env, cmd.WaitDelay = dir, bincache.NonInteractiveGitEnv(os.Environ()), time.Second
 		out, err := cmd.Output()
 		if err != nil {
 			return ""

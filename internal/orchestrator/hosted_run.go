@@ -68,7 +68,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 		if opts.Git != nil {
 			at.GitBranch, at.GitDefaultBranch = opts.Git.Branch, opts.Git.DefaultBranch
 		}
-		checkArgs = guardCheck(opts.Pipeline, opts.PipelineYAML.Guards, at)
+		checkArgs = guardCheck(opts.Pipeline, opts.PipelineYAML.Guards, at, func() string { return "" })
 	}
 	if opts.RunID == "" {
 		opts.RunID = newRunID()

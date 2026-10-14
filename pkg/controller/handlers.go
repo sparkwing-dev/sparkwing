@@ -1195,16 +1195,22 @@ func triggerRows(in triggerIntake) (store.Trigger, store.Run) {
 		RetryOf:       in.RetryOf,
 		CreatedAt:     in.At,
 		StartedAt:     in.At,
-		// safety: every host of the run, the planning claim's included, reads the trigger's run flags from here.
-		Invocation: runflags.FromTriggerEnv(in.Env).Invocation(),
-	}
-	if branch := in.Env[EnvDefaultBranch]; branch != "" {
-		if run.Invocation == nil {
-			run.Invocation = map[string]any{}
-		}
-		run.Invocation[runflags.DefaultBranchKey] = branch
+		Invocation:    triggerRunInvocation(in.Env),
 	}
 	return trig, run
+}
+
+// safety: every host of a triggered run, the planning claim's included, reads the trigger's run flags and the
+// default branch a GitHub App trigger recorded from the run row, so every intake that creates a run records them.
+func triggerRunInvocation(env map[string]string) map[string]any {
+	inv := runflags.FromTriggerEnv(env).Invocation()
+	if branch := env[EnvDefaultBranch]; branch != "" {
+		if inv == nil {
+			inv = map[string]any{}
+		}
+		inv[runflags.DefaultBranchKey] = branch
+	}
+	return inv
 }
 
 type heartbeatResp struct {

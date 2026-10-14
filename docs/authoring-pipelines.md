@@ -352,7 +352,8 @@ branch before a step starts. The literal name matches the head branch; it does
 not match a pull request's base branch. `git:branch=default` matches the
 repository's default branch: a GitHub App trigger records it, and any other
 run reads origin's HEAD from its checkout, asking origin when the clone did
-not record it. These guards do not implement path filters,
+not record it. A run whose default branch cannot be resolved is refused
+rather than judged without it. These guards do not implement path filters,
 custom pull-request actions, or pull-request base-branch matching;
 [Triggers](hooks.md) describes that boundary.
 

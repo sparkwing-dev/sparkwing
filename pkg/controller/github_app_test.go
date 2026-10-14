@@ -24,6 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth/googletest"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
+	"github.com/sparkwing-dev/sparkwing/internal/runflags"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -1513,5 +1514,33 @@ func TestGitHubAppEventOlderThanTheReplayWindowIsRefused(t *testing.T) {
 	recent := pushedAt(pushPayload(7, 701, "acme/widgets", strings.Repeat("4", 40)), time.Now().Add(-store.GitHubAppDeliveryRetention+time.Hour))
 	if _, out := f.deliver("push", recent, ""); out["status"] != "dispatched" {
 		t.Fatalf("control: a push inside the window = %v, want dispatched", out)
+	}
+}
+
+// safety: a GitHub App run's default branch reaches its run row, where a controller-dispatched run's planning claim
+// reads it for git:branch=default guards; its checkout has no origin HEAD and no credential to ask origin.
+func TestGitHubAppRunRecordsTheDefaultBranch(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	if code := f.subscribe(olga, "acme/widgets", "build", nil); code != http.StatusOK {
+		t.Fatalf("subscribe = %d", code)
+	}
+	payload := pushPayload(7, 701, "acme/widgets", headSHA)
+	payload["repository"].(map[string]any)["default_branch"] = "trunk"
+	if code, out := f.deliver("push", payload, ""); code != http.StatusAccepted || out["status"] != "dispatched" {
+		t.Fatalf("push = %d %v", code, out)
+	}
+	got := f.triggers(olga.team)
+	team, err := f.store.ForTeam(t.Context(), store.Team(olga.team))
+	if err != nil || len(got) != 1 {
+		t.Fatalf("triggers = %+v, %v", got, err)
+	}
+	run, err := team.GetRun(t.Context(), got[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if branch := run.Invocation[runflags.DefaultBranchKey]; branch != "trunk" {
+		t.Fatalf("run invocation = %v, want git_default_branch trunk", run.Invocation)
 	}
 }

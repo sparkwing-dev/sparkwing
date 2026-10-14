@@ -10,7 +10,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -179,5 +182,77 @@ func gitIn(t *testing.T, dir string, args ...string) {
 	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// safety: a default-branch guard that cannot learn the default branch refuses the run rather than letting a reject
+// guard pass or a require guard fail for the wrong reason.
+func TestTriggerHost_AnUnresolvedDefaultBranchRefusesItsGuard(t *testing.T) {
+	ranged := filepath.Join(t.TempDir(), "ranged")
+	h := newHostedTrigger(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "ranged": ranged})
+	yaml := "pipelines:\n  - name: podnode\n    entrypoint: Podnode\n    guards:\n      reject: [\"git:branch=default\"]\n"
+	if err := h.hostInCheckout(t, checkoutWithYAML(t, yaml)); err == nil || !strings.Contains(err.Error(), "could not resolve the repository's default branch") {
+		t.Fatalf("host = %v, want a refusal naming the unresolved default branch", err)
+	}
+	if _, err := os.Stat(ranged); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a node ran past the guard: %v", err)
+	}
+}
+
+// safety: asking origin for its default branch never prompts, never writes a git trace, and returns at its deadline
+// even when a helper git started still holds its output open.
+func TestCheckoutDefaultBranch_AsksOriginWithoutPromptsOrTraces(t *testing.T) {
+	bin, envOut, pidOut := t.TempDir(), filepath.Join(t.TempDir(), "env"), filepath.Join(t.TempDir(), "pid")
+	script := "#!/bin/sh\nif [ \"$1\" = ls-remote ]; then env > " + envOut + "; sleep 30 & echo $! > " + pidOut + "; sleep 30; fi\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GIT_TRACE", "/tmp/trace")
+	t.Setenv("GIT_TRACE_CURL", "1")
+	t.Setenv("GIT_ASKPASS", "/usr/bin/ksshaskpass")
+	t.Setenv("SSH_ASKPASS", "/usr/bin/ksshaskpass")
+	prev := defaultBranchLookupTimeout
+	defaultBranchLookupTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { defaultBranchLookupTimeout = prev })
+	if got := checkoutDefaultBranch(t.Context(), "", t.TempDir()); got != "" {
+		t.Fatalf("default branch = %q, want none", got)
+	}
+	// safety: the helper git left behind still holds the output, so the lookup returned at its deadline, not when the
+	// helper let go.
+	pidText, err := os.ReadFile(pidOut)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(pidText)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Kill(pid, 0); err != nil {
+		t.Fatalf("the lookup waited for the helper holding its output to exit: %v", err)
+	}
+	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(envOut)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := strings.Split(string(data), "\n")
+	for _, want := range []string{"GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=", "SSH_ASKPASS="} {
+		if !slices.Contains(env, want) {
+			t.Errorf("git env lacks %s", want)
+		}
+	}
+	for _, line := range env {
+		if strings.HasPrefix(line, "GIT_TRACE") {
+			t.Errorf("git env keeps %s", line)
+		}
+		if strings.HasPrefix(line, "GIT_SSH_COMMAND=") && !strings.Contains(line, "BatchMode=yes") {
+			t.Errorf("git env's ssh command can prompt: %s", line)
+		}
+	}
+	if !slices.ContainsFunc(env, func(l string) bool { return strings.HasPrefix(l, "GIT_SSH_COMMAND=") }) {
+		t.Error("git env sets no non-interactive ssh command")
 	}
 }

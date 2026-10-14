@@ -141,8 +141,8 @@ func planLaunchedRun(ctx context.Context, c *client.Client, src string, entry pi
 		return fail(err)
 	}
 	recorded, _ := run.Invocation[runflags.DefaultBranchKey].(string)
-	checkArgs := guardCheck(run.Pipeline, guards, pipelines.GuardContext{
-		GitBranch: run.GitBranch, GitDefaultBranch: checkoutDefaultBranch(ctx, recorded, src),
+	checkArgs := guardCheck(run.Pipeline, guards, pipelines.GuardContext{GitBranch: run.GitBranch}, func() string {
+		return checkoutDefaultBranch(ctx, recorded, src)
 	})
 	masker := secrets.NewMasker()
 	env, err := podProcessEnv(masker, slog.Default())

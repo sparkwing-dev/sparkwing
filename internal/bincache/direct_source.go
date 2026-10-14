@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -376,6 +377,20 @@ func directGitEnv(base []string) []string {
 		out = append(out, item)
 	}
 	return out
+}
+
+// NonInteractiveGitEnv is base for a git command that reaches a remote with
+// no one to answer it: the variables that redirect git or write its traces
+// are dropped, as for a source fetch, and no terminal, askpass helper or ssh
+// dialog may prompt.
+func NonInteractiveGitEnv(base []string) []string {
+	env := directGitEnv(base)
+	ssh := directSSHCommand(env, "")
+	env = slices.DeleteFunc(env, func(item string) bool {
+		name, _, _ := strings.Cut(item, "=")
+		return name == "GIT_ASKPASS" || name == "SSH_ASKPASS" || name == "GIT_SSH_COMMAND" || name == "GIT_TERMINAL_PROMPT"
+	})
+	return append(env, "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=", "SSH_ASKPASS=", "GIT_SSH_COMMAND="+ssh)
 }
 
 // safety: SSH must neither prompt nor lend the fetched host this process's agent or ports.

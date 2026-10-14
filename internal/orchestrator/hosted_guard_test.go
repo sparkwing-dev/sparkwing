@@ -36,11 +36,10 @@ func init() {
 	}
 }
 
-// safety: a local run's guard judges the arguments it plans with, describe's defaults included, as a triggered
-// run's does.
-func TestHostedRun_AGuardJudgesTheSDKsDefaults(t *testing.T) {
+func runGuardFixture(t *testing.T, guard string, git *sparkwing.Git) (marker string, err error) {
+	t.Helper()
 	dir := t.TempDir()
-	yaml := "pipelines:\n  - name: " + guardPipeline + "\n    entrypoint: GuardFixture\n    guards:\n      reject: [\"arg:stage=prod\"]\n"
+	yaml := "pipelines:\n  - name: " + guardPipeline + "\n    entrypoint: GuardFixture\n    guards:\n      reject: [\"" + guard + "\"]\n"
 	if err := os.MkdirAll(filepath.Join(dir, ".sparkwing"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -56,15 +55,33 @@ func TestHostedRun_AGuardJudgesTheSDKsDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	marker := filepath.Join(dir, "marker")
+	marker = filepath.Join(dir, "marker")
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	_, err = RunHosted(ctx, paths, Options{RunID: "guarded", Pipeline: guardPipeline, State: st, Delegate: &storedLog{}}, HostedEntry{
+	_, err = RunHosted(ctx, paths, Options{RunID: "guarded", Pipeline: guardPipeline, State: st, Delegate: &storedLog{}, Git: git}, HostedEntry{
 		Command: pipelineentry.Binary(os.Args[0]), Dir: dir,
 		Env: append(os.Environ(), nodeProtocolEntryEnv+"=1", "HOSTED_GUARD_MARKER="+marker, "GORACE=atexit_sleep_ms=0"),
 	})
+	return marker, err
+}
+
+// safety: a local run's guard judges the arguments it plans with, describe's defaults included, as a triggered
+// run's does.
+func TestHostedRun_AGuardJudgesTheSDKsDefaults(t *testing.T) {
+	marker, err := runGuardFixture(t, "arg:stage=prod", nil)
 	if err == nil || !strings.Contains(err.Error(), `rejected by guard "arg:stage=prod"`) {
 		t.Fatalf("run = %v, want the guard's refusal of the default stage", err)
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the body ran past the guard: %v", err)
+	}
+}
+
+// safety: a local run whose checkout names no default branch is refused by a default-branch guard, not let past it.
+func TestHostedRun_AnUnresolvedDefaultBranchRefusesItsGuard(t *testing.T) {
+	marker, err := runGuardFixture(t, "git:branch=default", &sparkwing.Git{Branch: "main"})
+	if err == nil || !strings.Contains(err.Error(), "could not resolve the repository's default branch") {
+		t.Fatalf("run = %v, want the unresolved default branch refused", err)
 	}
 	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the body ran past the guard: %v", err)

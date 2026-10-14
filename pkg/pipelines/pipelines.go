@@ -55,7 +55,8 @@ type Pipeline struct {
 	// `arg:<flag>=<value>`, `git:branch=<name>`, `git:branch=default`. A literal branch matches
 	// the checked-out head. The default token matches the repository's
 	// default branch: a GitHub App trigger records it, and any other run
-	// reads origin's HEAD from its checkout. `arg:` tokens read the
+	// reads origin's HEAD from its checkout; a run that cannot resolve it
+	// is refused. `arg:` tokens read the
 	// merged argument set the run executes with, so a value supplied by
 	// defaults.args, this entry's own args: block or a flag's SDK default
 	// is guarded exactly like one typed on the command line. See

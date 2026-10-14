@@ -1084,6 +1084,7 @@ func (s *Server) startGitHubAppRun(
 		ID: runID, Pipeline: pipeline, Status: "pending", TriggerSource: trigger.Source,
 		GitBranch: in.branch, GitSHA: in.sha, DeclaredRepo: repo.Slug(),
 		GithubOwner: repo.Owner, GithubRepo: repo.Name, CreatedAt: now, StartedAt: now,
+		Invocation: triggerRunInvocation(triggerEnv),
 	}
 	var err error
 	if plan.automation != nil {

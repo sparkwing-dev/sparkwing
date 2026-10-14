@@ -98,7 +98,8 @@ subscribed to the repository through the [GitHub App](github-app.md). To require
 add `guards: {require: [git:branch=main]}` with its literal name. For pull
 requests this compares the head branch, not the base branch.
 `git:branch=default` matches the repository's default branch, which a
-GitHub App trigger records and any other run reads from its checkout. Branch guards do not express path
+GitHub App trigger records and any other run reads from its checkout; a run
+that cannot resolve it is refused. Branch guards do not express path
 restrictions, custom pull-request actions, or pull-request base-branch
 matching. See [hooks](hooks.md) for the enforcement boundary and examples.
 
