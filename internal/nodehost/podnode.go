@@ -50,7 +50,7 @@ func PlanDocument(ctx context.Context, cfg SessionConfig, req PlanRequest) (Plan
 		cfg.Sink = discardSink{}
 	}
 	scfg := dryRunSession(cfg, req.Run.DryRun)
-	scfg.HoldOutput = true
+	scfg.HoldOutput, scfg.Masker = true, req.Masker
 	sess, err := StartSession(ctx, scfg)
 	if err != nil {
 		return PlannedRun{}, err

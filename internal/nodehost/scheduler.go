@@ -242,8 +242,12 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 	if cfg.Run.Trigger == nil {
 		cfg.Run.Trigger = &nodeproto.Trigger{Source: "manual"}
 	}
+	var masker *secrets.Masker
+	if cfg.Attempts != nil {
+		masker = cfg.Attempts.Masker
+	}
 	scfg := planSession(cfg)
-	scfg.HoldOutput = true
+	scfg.HoldOutput, scfg.Masker = true, masker
 	sess, err := StartSession(ctx, scfg)
 	if err != nil {
 		return RunResult{}, err
@@ -252,10 +256,6 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 		if _, err := sess.Close(); err != nil {
 			cfg.Logger.Warn("nodehost: plan process", "err", err)
 		}
-	}
-	var masker *secrets.Masker
-	if cfg.Attempts != nil {
-		masker = cfg.Attempts.Masker
 	}
 	args, known, err := describeArgs(ctx, sess, cfg.Pipeline, cfg.Args, masker)
 	if err == nil && cfg.CheckArgs != nil {

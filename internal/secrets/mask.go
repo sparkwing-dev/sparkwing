@@ -141,8 +141,9 @@ func embeddedBase64(value string, lead int) string {
 	return encoded[start:end]
 }
 
+// Mask replaces every registered value in s with ***. A nil Masker masks nothing.
 func (m *Masker) Mask(s string) string {
-	if s == "" {
+	if m == nil || s == "" {
 		return s
 	}
 	m.mu.RLock()
@@ -357,9 +358,60 @@ func (e maskedError) Unwrap() error { return e.err }
 // Values returns a copy of masking patterns: whole values, nonblank multiline
 // components, and their encoded forms.
 func (m *Masker) Values() []string {
+	if m == nil {
+		return nil
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	out := make([]string, len(m.values))
 	copy(out, m.values)
 	return out
+}
+
+// Stream masks one text stream that arrives as lines, and as pieces of a line
+// too long to hold whole, so a value split across pieces is still masked.
+// One goroutine owns a Stream.
+type Stream struct {
+	m    *Masker
+	held string
+}
+
+// Stream returns a stream masked with m's values; a nil m masks nothing.
+func (m *Masker) Stream() *Stream { return &Stream{m: m} }
+
+// Mask masks text and returns what can be shown now. Text ends a line when
+// lineEnd is set and is a piece of one otherwise; a piece keeps back the tail
+// that could start a value until the next text arrives.
+func (s *Stream) Mask(text string, lineEnd bool) string {
+	text, s.held = s.held+text, ""
+	if !lineEnd {
+		cut := s.safeCut(text)
+		text, s.held = text[:cut], text[cut:]
+	}
+	return s.m.Mask(text)
+}
+
+// safety: the held rest is shorter than the longest value, so the next piece
+// can complete a value it starts; a value straddling the cut moves the cut
+// past its end, which bounds both the hold and the scan.
+func (s *Stream) safeCut(text string) int {
+	values := s.m.Values()
+	longest := 0
+	for _, v := range values {
+		longest = max(longest, len(v))
+	}
+	cut := max(0, len(text)-max(0, longest-1))
+	for moved := true; moved; {
+		moved = false
+		for _, v := range values {
+			lo, hi := max(0, cut-len(v)+1), min(len(text), cut+len(v)-1)
+			if lo >= hi {
+				continue
+			}
+			if i := strings.Index(text[lo:hi], v); i >= 0 && lo+i < cut {
+				cut, moved = lo+i+len(v), true
+			}
+		}
+	}
+	return cut
 }

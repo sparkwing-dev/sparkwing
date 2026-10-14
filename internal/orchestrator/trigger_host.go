@@ -142,7 +142,6 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 		// run's own rows from an earlier host.
 		Rehydrate: rehydrate,
 	})
-	planSink.end()
 	if err != nil {
 		return err
 	}

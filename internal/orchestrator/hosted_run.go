@@ -196,7 +196,6 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 	}
 	execStart := time.Now()
 	out, err := nodehost.Execute(ctx, cfg)
-	planSink.Flush()
 	if err != nil {
 		return nil, err
 	}
@@ -270,11 +269,10 @@ func hostedBounces(state StateBackend) nodehost.Bounces {
 }
 
 // safety: plan code's logs have no node log to land in, so they go to the
-// renderer through a node-host log sink, which masks a value even across the
-// session's split of a long line. Flush it once the run's sessions end.
+// renderer through a node-host log sink, which masks its records as a node's.
 func newHostedPlanSink(ctx context.Context, runID string, masker *secrets.Masker, delegate sparkwing.Logger) (*nodehost.LogSink, error) {
 	return nodehost.NewLogSink(ctx, nodehost.LogSinkConfig{
-		RunID: runID, NodeID: store.PlanNodeID, Log: hostedPlanLog{delegate}, State: podPlanState{}, Masker: masker,
+		RunID: runID, NodeID: store.PlanNodeID, Log: hostedPlanLog{delegate}, Masker: masker,
 	})
 }
 

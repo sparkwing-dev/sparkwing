@@ -63,18 +63,17 @@ func TestSessionMasksASecretSplitAtTheLineLimit(t *testing.T) {
 	masker := secrets.NewMasker()
 	masker.Register(splitSecret)
 	log := &maskLog{}
-	sink, err := NewLogSink(t.Context(), LogSinkConfig{RunID: "r", NodeID: "n", Log: log, State: openStore(t), Masker: masker})
+	sink, err := NewLogSink(t.Context(), LogSinkConfig{RunID: "r", NodeID: "n", Log: log, Masker: masker})
 	if err != nil {
 		t.Fatal(err)
 	}
 	s, err := StartSession(t.Context(), SessionConfig{
-		Entry: splitLineEntry(t), Dir: t.TempDir(), Env: []string{"PATH=/usr/bin:/bin"}, Sink: sink, Grace: 2 * time.Second,
+		Entry: splitLineEntry(t), Dir: t.TempDir(), Env: []string{"PATH=/usr/bin:/bin"}, Sink: sink, Masker: masker, Grace: 2 * time.Second,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, _ = s.Close()
-	sink.Flush()
 	got := log.joined()
 	if strings.Contains(got, splitSecret[:10]) || !strings.Contains(got, "*** tail") {
 		t.Fatalf("log ends %q, want the split secret masked whole", got[max(0, len(got)-80):])
@@ -98,5 +97,73 @@ func TestHostNodeLogMasksMessageAndAttrs(t *testing.T) {
 	}
 	if log.records[0].Attrs["attempt"] == nil {
 		t.Fatalf("attrs without a secret lost: %+v", log.records[0].Attrs)
+	}
+}
+
+type queueSink struct {
+	mu      sync.Mutex
+	text    []string
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *queueSink) Text(_, line string) {
+	if s.entered != nil {
+		s.once.Do(func() {
+			close(s.entered)
+			<-s.release
+		})
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.text = append(s.text, line)
+}
+
+func (s *queueSink) Record(rec nodeproto.LogRecord) { s.Text("", rec.Msg) }
+
+func (s *queueSink) joined() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return strings.Join(s.text, "")
+}
+
+// A drop notice between the pieces of a split stderr line is a record, so it
+// never breaks the secret the pieces carry apart.
+func TestSinkQueueMasksASplitSecretAroundADropNotice(t *testing.T) {
+	masker := secrets.NewMasker()
+	masker.Register(splitSecret)
+	sink := &queueSink{}
+	q := newSinkQueue(LevelWarn, masker)
+	head := strings.Repeat("x", maxTextLine-4)
+	q.push(sinkItem{text: head + splitSecret[:4], piece: true})
+	q.notice(nodeproto.LogRecord{Msg: "sparkwing: 3 log lines dropped while the log sink was behind"})
+	q.push(sinkItem{text: splitSecret[4:] + " tail"})
+	q.close()
+	q.run(sink)
+	if got := strings.ReplaceAll(sink.joined(), "sparkwing: 3 log lines dropped while the log sink was behind", ""); got != head+"*** tail" {
+		t.Fatalf("stderr ends %q, want the split secret masked whole", got[max(0, len(got)-40):])
+	}
+}
+
+// A queue the session abandons while the head of a split secret is held
+// shows neither the held tail nor the rest of the line delivered after.
+func TestAnAbandonedSinkQueueShowsNoPieceOfAHeldSecret(t *testing.T) {
+	masker := secrets.NewMasker()
+	masker.Register(splitSecret)
+	sink := &queueSink{entered: make(chan struct{}), release: make(chan struct{})}
+	q := newSinkQueue(LevelInfo, masker)
+	go q.run(sink)
+	q.push(sinkItem{text: strings.Repeat("x", maxTextLine-10) + splitSecret[:10], piece: true})
+	<-sink.entered
+	q.push(sinkItem{text: splitSecret[10:] + " tail"})
+	q.close()
+	if lost := q.end(true); lost != 2 {
+		t.Errorf("abandoned queue lost %d items, want the one in delivery and the one queued", lost)
+	}
+	close(sink.release)
+	<-q.done
+	if got := sink.joined(); strings.Contains(got, splitSecret[:10]) || strings.Contains(got, splitSecret[10:]) {
+		t.Fatalf("an abandoned queue showed a piece of the secret: ...%q", got[max(0, len(got)-40):])
 	}
 }
