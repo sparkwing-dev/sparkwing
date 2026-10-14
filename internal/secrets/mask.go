@@ -202,6 +202,10 @@ func (s *Stream) Mask(text string, lineEnd bool) string {
 	return s.m.Mask(text)
 }
 
+// Drop forgets the held tail of a line whose rest was lost, so no later line
+// completes a value the tail starts.
+func (s *Stream) Drop() { s.held = "" }
+
 // safety: the held rest is shorter than the longest value, so the next piece
 // can complete a value it starts; a value straddling the cut moves the cut
 // past its end, which bounds both the hold and the scan.

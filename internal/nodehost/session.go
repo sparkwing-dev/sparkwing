@@ -519,6 +519,7 @@ func (s *Session) readText(f *os.File, q *sinkQueue) {
 	defer f.Close()
 	br := bufio.NewReaderSize(f, 64<<10)
 	var line []byte
+	piece := false
 	for {
 		chunk, err := br.ReadSlice('\n')
 		line = append(line, chunk...)
@@ -533,10 +534,15 @@ func (s *Session) readText(f *os.File, q *sinkQueue) {
 					end--
 				}
 			}
-			q.push(sinkItem{text: string(line[:end]), piece: errors.Is(err, bufio.ErrBufferFull), size: end})
+			piece = errors.Is(err, bufio.ErrBufferFull)
+			q.push(sinkItem{text: string(line[:end]), piece: piece, size: end})
 			line = line[:0]
 		}
 		if err != nil && !errors.Is(err, bufio.ErrBufferFull) {
+			// safety: a stream that ends right after a piece still ends its line, so the held tail is shown.
+			if piece {
+				q.push(sinkItem{})
+			}
 			return
 		}
 	}
@@ -547,8 +553,11 @@ type sinkItem struct {
 	// safety: set on a piece of a line longer than maxTextLine, so the stream
 	// knows the line goes on rather than guessing from the piece's length.
 	piece bool
-	rec   *nodeproto.LogRecord
-	size  int
+	// safety: set when the cap dropped what followed, so the stream drops a
+	// held tail the dropped text would have completed.
+	cut  bool
+	rec  *nodeproto.LogRecord
+	size int
 	// safety: closed in place of a delivery, so a waiter knows every item
 	// queued before it has reached the sink.
 	mark chan struct{}
@@ -593,6 +602,7 @@ func (q *sinkQueue) push(item sinkItem) {
 	if q.bytes > 0 && q.bytes+item.size > sinkQueueBytes {
 		q.dropped++
 		q.total++
+		q.items[len(q.items)-1].cut = true
 	} else {
 		q.items = append(q.items, item)
 		q.bytes += item.size
@@ -717,6 +727,9 @@ func (q *sinkQueue) run(sink Sink) {
 			if text := q.stream.Mask(item.text, !item.piece); text != "" || !item.piece {
 				sink.Text(q.level, text)
 			}
+		}
+		if item.cut {
+			q.stream.Drop()
 		}
 	}
 }

@@ -185,3 +185,55 @@ IFS= read -r line <&3
 		t.Fatalf("err = %v, want the plan failure masked", err)
 	}
 }
+
+// A line of exactly the session's line limit with no newline ends on a piece
+// and a clean EOF; its held tail still reaches the sink.
+func TestSessionDeliversAPieceEndingExactlyAtEOF(t *testing.T) {
+	masker := secrets.NewMasker()
+	masker.Register(splitSecret)
+	log := &maskLog{}
+	sink, err := NewLogSink(t.Context(), LogSinkConfig{RunID: "r", NodeID: "n", Log: log, Masker: masker})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := filepath.Join(t.TempDir(), "exact-line")
+	if err := os.WriteFile(entry, []byte("#!/bin/sh\nhead -c 1048576 /dev/zero | tr '\\000' x\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	s, err := StartSession(t.Context(), SessionConfig{
+		Entry: pipelineentry.Binary(entry), Dir: t.TempDir(), Env: []string{"PATH=/usr/bin:/bin"}, Sink: sink, Masker: masker, Grace: 2 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = s.Close()
+	n := 0
+	for _, r := range log.records {
+		n += len(r.Msg)
+	}
+	if n != maxTextLine {
+		t.Fatalf("delivered %d bytes of a %d-byte line", n, maxTextLine)
+	}
+}
+
+// When the queue drops the rest of a split line, the head of a secret the
+// delivered piece ended on is discarded, never joined to a later line.
+func TestSinkQueueDiscardsAHeldSecretHeadWhenTheRestIsDropped(t *testing.T) {
+	defer func(old int) { sinkQueueBytes = old }(sinkQueueBytes)
+	sinkQueueBytes = maxTextLine + 100
+	masker := secrets.NewMasker()
+	masker.Register(splitSecret)
+	sink := &queueSink{entered: make(chan struct{}), release: make(chan struct{})}
+	q := newSinkQueue(LevelInfo, masker)
+	q.push(sinkItem{text: strings.Repeat("x", maxTextLine-10) + splitSecret[:10], piece: true, size: maxTextLine})
+	q.push(sinkItem{text: splitSecret[10:] + " rest", size: 40})
+	go q.run(sink)
+	<-sink.entered
+	close(sink.release)
+	q.push(sinkItem{text: "next", size: 4})
+	q.close()
+	<-q.done
+	if got := sink.joined(); strings.Contains(got, splitSecret[:10]) || !strings.Contains(got, "next") {
+		t.Fatalf("output ends %q, want the held head discarded and the next line kept", got[max(0, len(got)-60):])
+	}
+}
