@@ -2,6 +2,8 @@ package nodehost
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -143,16 +145,20 @@ func (h maskHandler) attr(a slog.Attr) slog.Attr {
 	}
 	text := v.String()
 	if b, ok := v.Any().([]byte); ok {
-		text = string(b)
+		return slog.String(a.Key, h.m.Mask(string(b)))
+	}
+	if v.Kind() == slog.KindAny {
+		text = fmt.Sprintf("%+v", v.Any())
 	}
 	masked := h.m.Mask(text)
 	if masked != text {
 		return slog.String(a.Key, masked)
 	}
-	// safety: freeze format-dependent values so downstream encoders cannot bypass masking.
+	// safety: JSON can expose secrets absent from the text encoding.
 	switch v.Kind() {
 	case slog.KindAny, slog.KindDuration, slog.KindFloat64, slog.KindTime:
-		if v.Any() != nil {
+		encoded, err := json.Marshal(v.Any())
+		if err == nil && h.m.Mask(string(encoded)) != string(encoded) {
 			return slog.String(a.Key, masked)
 		}
 	}

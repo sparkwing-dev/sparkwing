@@ -2,8 +2,10 @@ package nodehost
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -96,6 +98,9 @@ func TestMaskLoggerMasksEncodedValues(t *testing.T) {
 		}{
 			{"bytes", []byte("private-token"), "private-token", "***"},
 			{"marshaler", maskingEncodedValue{}, "private-token", "healthy"},
+			{"text-field", struct {
+				PrivateToken string `json:"state"`
+			}{"healthy"}, "PrivateToken", "{***:healthy}"},
 			{"duration", time.Second, "1000000000", "1s"},
 			{"float", float64(1000000000), "1000000000", "1e+09"},
 			{"time", time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), "2026-01-02T03:04:05Z", "2026-01-02 03:04:05 +0000 UTC"},
@@ -112,8 +117,53 @@ func TestMaskLoggerMasksEncodedValues(t *testing.T) {
 				if !strings.Contains(got, tc.want) {
 					t.Errorf("lost safe value %q: %s", tc.want, got)
 				}
+				if format == "json" {
+					var record map[string]any
+					if err := json.Unmarshal([]byte(got), &record); err != nil {
+						t.Fatal(err)
+					}
+					if record["value"] != tc.want {
+						t.Errorf("masked value = %#v, want string %q", record["value"], tc.want)
+					}
+				}
 			})
 		}
+	}
+}
+
+type maskingJSONObject struct{}
+
+func (maskingJSONObject) MarshalJSON() ([]byte, error) {
+	return []byte(`{"state":"healthy"}`), nil
+}
+
+func TestMaskLoggerPreservesBenignJSONTypes(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value any
+		want  any
+	}{
+		{"marshaler", maskingJSONObject{}, map[string]any{"state": "healthy"}},
+		{"array", [2]string{"alpha", "beta"}, []any{"alpha", "beta"}},
+		{"float", 1.5, 1.5},
+		{"struct", struct{ State string }{"healthy"}, map[string]any{"State": "healthy"}},
+		{"logvaluer", maskingLogValue(func() slog.Value {
+			return slog.AnyValue(maskingJSONObject{})
+		}), map[string]any{"state": "healthy"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out strings.Builder
+			masker := secrets.NewMasker()
+			masker.Register("private-token")
+			maskLogger(slog.New(slog.NewJSONHandler(&out, nil)), masker).Info("status", "value", tc.value)
+			var record map[string]any
+			if err := json.Unmarshal([]byte(out.String()), &record); err != nil {
+				t.Fatal(err)
+			}
+			if got := record["value"]; !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("value = %#v, want %#v", got, tc.want)
+			}
+		})
 	}
 }
 
