@@ -38,7 +38,7 @@ func cronPinnedFixture(t *testing.T) (repoDir string, cache *localCompileCache, 
 func fakeTriggerHost(t *testing.T) {
 	t.Helper()
 	host := filepath.Join(t.TempDir(), "sparkwing")
-	script := "#!/bin/sh\n[ \"$1 $2 $4\" = \"" + TriggerHostVerb + " --program --sessions\" ] || exit 64\nexec \"$3\" \"$6\"\n"
+	script := "#!/bin/sh\n[ \"$1 $2\" = \"" + TriggerHostVerb + " --program\" ] || exit 64\nexec \"$3\" \"$4\"\n"
 	if err := os.WriteFile(host, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}

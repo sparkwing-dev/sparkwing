@@ -132,3 +132,49 @@ func TestReleasingTheRootEndsItsChild(t *testing.T) {
 		t.Fatal("the child kept running after the run whose group it was handed released it")
 	}
 }
+
+// safety: the winner's grant, on the group the root released, is what orders the root's release before the
+// child's return; the child was away when its ancestor ended, so only a durable record can reach it.
+func TestAChildAwayWhenItsAncestorEndsIsCancelledWhenItReturns(t *testing.T) {
+	home := shortHome(t)
+	cfg := wingd.Config{Home: home, GraceWindow: 5 * time.Second}
+	d := startDaemon(t, cfg)
+	group := wingwire.SemaphoreClaim{Name: "__box__:deploy", Capacity: 1, Cost: 1, Policy: wingwire.PolicyQueue}
+	root := mustAcquire(t, ensure(t, home, ""), wingwire.AdmissionRequest{RunID: "p", SemaphoresOnly: true, Semaphores: []wingwire.SemaphoreClaim{group}})
+	mustAcquire(t, ensure(t, home, ""), wingwire.AdmissionRequest{
+		RunID: wingwire.NodeHostParticipant("p", "call"), OwnerRunID: "p", OwnerLeaseToken: root.Token,
+		SubLease: true, Resources: wingwire.HostResources{Cores: 1},
+	})
+	child := mustAcquire(t, ensure(t, home, ""), wingwire.AdmissionRequest{RunID: "c", ParentRunID: "p", ParentNodeID: "call"})
+	d.stopAndWait(t)
+	startDaemon(t, cfg)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	back, err := ensure(t, home, "").Reattach(ctx, root.Token, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := back.Release(); err != nil {
+		t.Fatal(err)
+	}
+	winner, err := ensure(t, home, "").Acquire(ctx, wingwire.AdmissionRequest{RunID: "winner", SemaphoresOnly: true, Semaphores: []wingwire.SemaphoreClaim{group}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = winner.Release() }()
+
+	returned, err := ensure(t, home, "").Reattach(ctx, child.Token, "c")
+	if err != nil {
+		return
+	}
+	defer func() { _ = returned.Release() }()
+	select {
+	case got := <-watchCancel(returned):
+		if !strings.HasPrefix(got, "cancelled ") {
+			t.Fatalf("the returning child got %q, want a cancel", got)
+		}
+	case <-ctx.Done():
+		t.Fatal("the child reattached after its ancestor ended and was never cancelled")
+	}
+}

@@ -22,7 +22,7 @@ import (
 // the compiled pipeline. The claiming process starts this one in the
 // trigger's checkout with the run's environment, and it finishes the trigger
 // when the run ends.
-func HostClaimedTrigger(ctx context.Context, triggerID, program, sessionLog string) error {
+func HostClaimedTrigger(ctx context.Context, triggerID, program string) error {
 	logger := slog.Default()
 	paths, err := DefaultPaths()
 	if err != nil {
@@ -100,7 +100,7 @@ func HostClaimedTrigger(ctx context.Context, triggerID, program, sessionLog stri
 		return refuse(err, err)
 	}
 	entry := HostedEntry{
-		Program: program, Dir: dir, Env: os.Environ(), SessionLog: sessionLog,
+		Program: program, Dir: dir, Env: os.Environ(),
 		PipelineRevision: trigger.TriggerEnv[PipelineRevKey], BinarySource: "source",
 	}
 	if trigger.TriggerEnv[crons.PinnedBinaryEnvKey] != "" {

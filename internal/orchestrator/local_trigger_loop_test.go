@@ -671,7 +671,7 @@ func TestLocalSetupFailureChild(t *testing.T) {
 	SetTestStoreWedgeBudget(t, 0, errors.New("store wedge budget secret-should-not-be-shown"))
 	// safety: the variable names the fake host, which hosts no daemon, so the run takes the standalone store.
 	t.Setenv(wingdclient.HostBinEnv, "")
-	if err := HostClaimedTrigger(context.Background(), os.Getenv("SPARKWING_LOCAL_SETUP_TEST_RUN"), os.Getenv("SPARKWING_LOCAL_SETUP_TEST_PROGRAM"), ""); err != nil {
+	if err := HostClaimedTrigger(context.Background(), os.Getenv("SPARKWING_LOCAL_SETUP_TEST_RUN"), os.Getenv("SPARKWING_LOCAL_SETUP_TEST_PROGRAM")); err != nil {
 		t.Fatal(err)
 	}
 }

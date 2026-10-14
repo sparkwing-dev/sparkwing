@@ -313,6 +313,10 @@ func memoGenerate(ctx context.Context, cfg *Config, n *NodeRun, output json.RawM
 				return failed(err)
 			}
 			out = generate(ctx, sess, attempt)
+			// safety: a generator cut off by the timeout reports a failure, which the timeout layer names.
+			if err := ctx.Err(); err != nil {
+				return failed(err)
+			}
 			return Result{Outcome: sparkwing.Success}
 		})
 	})(ctx, &held)

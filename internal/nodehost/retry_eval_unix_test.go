@@ -63,6 +63,7 @@ func (f *retryFixture) run(ctx context.Context, id string, r *Rehydration, state
 	if err != nil {
 		f.t.Fatal(err)
 	}
+	//nolint:contextcheck // Close bounds its own shutdown.
 	defer func() { _ = srv.Close() }()
 	logs := &memLogs{records: map[string][]sparkwing.LogRecord{}}
 	cfg := Config{
@@ -133,11 +134,16 @@ func TestACopiedGeneratorsEvalKeepsTheNodesTimeout(t *testing.T) {
 	f.mode("hang")
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	f.run(ctx, "retry", &Rehydration{SourceRunID: "retry-source", Causes: retryCause}, f.st)
+	res := f.run(ctx, "retry", &Rehydration{SourceRunID: "retry-source", Causes: retryCause}, f.st)
 	if ctx.Err() != nil {
 		t.Fatal("the retry only ended with its context: a hung generator eval held the scheduler")
 	}
 	if wall := f.evalWall["targets"]; wall > 5*time.Second {
 		t.Fatalf("the copied generator's eval ran %s past its node's 400ms timeout", wall)
+	}
+	for _, e := range res.Nodes["targets"].expansions {
+		if e.err == nil || !strings.Contains(e.err.Error(), "timeout exceeded (400ms)") {
+			t.Errorf("the generator's error is %v, want the node's timeout named", e.err)
+		}
 	}
 }

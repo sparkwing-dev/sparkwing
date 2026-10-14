@@ -1504,6 +1504,7 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 		d.byRun[m] = c
 	}
 	lease, _ := d.ledger.LeaseByID(leaseID)
+	_, orphaned := d.cancelledRuns[reclaimed]
 	d.touchLocked()
 	d.recordJournal("reattach_accepted", c, map[string]any{"lease_id": leaseID, "member": reclaimed})
 	d.mu.Unlock()
@@ -1512,6 +1513,13 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 	}
 	d.cfg.logf("reattach: run %s reclaimed lease %s", reclaimed, leaseID)
 	_ = c.send(&wingwire.Grant{RunID: reclaimed, LeaseToken: lease.Token, Resources: c.resources})
+	// safety: a run cancelled while it was away, as an attached run is when an ancestor's lease ends during a
+	// daemon restart, is told so the moment it is back, rather than run on under groups nobody holds.
+	if orphaned {
+		if err := c.send(&wingwire.Cancel{RunID: reclaimed, Reason: orphanedReason}); err != nil {
+			go d.handleDisconnect(c)
+		}
+	}
 }
 
 // safety: a nested run's parent and child present the same lease token, so each
