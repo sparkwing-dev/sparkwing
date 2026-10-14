@@ -97,7 +97,7 @@ func TestClaimLaunch_MatchesSelectorsAgainstTheCloudImage(t *testing.T) {
 		`docker|"modifiers":{"runs_on":["tool:docker"]}`, `gpu|"modifiers":{"runs_on":["gpu"]}`, `bare`))
 	var got []string
 	for range 5 {
-		c, err := f.s.ClaimLaunch(ctx, launcherIdentity, launchRequest(), time.Now())
+		c, err := f.s.ClaimLaunch(ctx, launcherIdentity, launchRequest(), launchClock(t, f.s))
 		if err != nil {
 			t.Fatal(err)
 		}

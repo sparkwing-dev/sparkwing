@@ -23,6 +23,35 @@ func launchRequest() store.LaunchClaimRequest {
 	return store.LaunchClaimRequest{HolderID: "launcher:pod", Lease: time.Minute, Deadline: time.Hour}
 }
 
+// safety: covers a wall-clock step back and stays under any backoff a test holds a node for.
+const launchClockSlack = 250 * time.Millisecond
+
+// safety: a host clock sync steps the wall clock back past an earlier ready_at stamp (WSL2: ~40ms every
+// 30s), so a claim at a fresh time.Now() finds no ready node; claim at the latest ready_at just past now.
+func launchClock(t *testing.T, s *store.Store) time.Time {
+	t.Helper()
+	now := time.Now()
+	rows, err := s.DB().Query(`SELECT ready_at FROM nodes WHERE ready_at IS NOT NULL`)
+	if err != nil {
+		t.Fatalf("ready_at: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	clock := now
+	for rows.Next() {
+		var readyAt int64
+		if err := rows.Scan(&readyAt); err != nil {
+			t.Fatalf("ready_at: %v", err)
+		}
+		if ready := time.Unix(0, readyAt); ready.After(clock) && !ready.After(now.Add(launchClockSlack)) {
+			clock = ready
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("ready_at: %v", err)
+	}
+	return clock
+}
+
 func intake(t *testing.T, tenant *store.Tenant, runID, owner, name string) {
 	t.Helper()
 	now := time.Now()
@@ -65,7 +94,7 @@ func TestRepoDispatch_OnlyAnOptedInRepoSkipsTheTriggerPath(t *testing.T) {
 		store.NamedClaimOptions{}); !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("a runner named the plan node: err = %v, want ErrLockHeld", err)
 	}
-	claim, err := st.ClaimLaunch(ctx, launcherIdentity, launchRequest(), time.Now())
+	claim, err := st.ClaimLaunch(ctx, launcherIdentity, launchRequest(), launchClock(t, st))
 	if err != nil || claim == nil {
 		t.Fatalf("launch claim: %+v %v", claim, err)
 	}
@@ -201,7 +230,7 @@ func TestClaimLaunch_BillsEveryClaimAndPagesPastUnpaidTeams(t *testing.T) {
 	if _, err := paying.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent, "pay_launch", "admin"); err != nil {
 		t.Fatal(err)
 	}
-	claim, err := st.ClaimLaunch(ctx, launcher, launchRequest(), time.Now())
+	claim, err := st.ClaimLaunch(ctx, launcher, launchRequest(), launchClock(t, st))
 	if err != nil || claim == nil || claim.Team != "paying" {
 		t.Fatalf("launch claim = %+v %v, want the paying team's node behind the unpaid ones", claim, err)
 	}
@@ -258,7 +287,7 @@ func TestClaimLaunch_WaitsForTheRunRowLock(t *testing.T) {
 	if err := holder.Rollback(); err != nil {
 		t.Fatal(err)
 	}
-	if claim, err := f.s.ClaimLaunch(context.Background(), launcherIdentity, launchRequest(), time.Now()); err != nil || claim == nil {
+	if claim, err := f.s.ClaimLaunch(context.Background(), launcherIdentity, launchRequest(), launchClock(t, f.s)); err != nil || claim == nil {
 		t.Fatalf("after the holder released the run: %+v %v", claim, err)
 	}
 }
@@ -290,14 +319,14 @@ func TestClaimLaunch_BoundsEachPollAndResumesWhereItStopped(t *testing.T) {
 	if claim, err := st.ClaimLaunch(ctx, launcher, launchRequest(), time.Now()); err != nil || claim != nil {
 		t.Fatalf("the first poll read past its budget to %+v (%v)", claim, err)
 	}
-	claim, err := st.ClaimLaunch(ctx, launcher, launchRequest(), time.Now())
+	claim, err := st.ClaimLaunch(ctx, launcher, launchRequest(), launchClock(t, st))
 	if err != nil || claim == nil || claim.Team != "paying" {
 		t.Fatalf("the second poll = %+v %v, want the paying node it resumed to", claim, err)
 	}
 	intake(t, paying, "run-paying-2", "korey", "probe")
 	var second *store.LaunchClaim
 	for poll := 0; poll < 3 && second == nil; poll++ {
-		if second, err = st.ClaimLaunch(ctx, launcher, launchRequest(), time.Now()); err != nil {
+		if second, err = st.ClaimLaunch(ctx, launcher, launchRequest(), launchClock(t, st)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -334,12 +363,13 @@ func TestClaimLaunch_ConcurrentPollsNeverRollTheResumePointBack(t *testing.T) {
 	var wg sync.WaitGroup
 	start := make(chan struct{})
 	claims := make(chan *store.LaunchClaim, 4)
+	at := launchClock(t, st)
 	for range 4 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			<-start
-			c, err := st.ClaimLaunch(ctx, launcher, launchRequest(), time.Now())
+			c, err := st.ClaimLaunch(ctx, launcher, launchRequest(), at)
 			if err != nil {
 				t.Errorf("poll: %v", err)
 			}
