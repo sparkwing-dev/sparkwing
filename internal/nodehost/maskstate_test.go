@@ -3,6 +3,8 @@ package nodehost
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"reflect"
@@ -91,19 +93,20 @@ func (maskingEncodedValue) MarshalText() ([]byte, error) { return []byte("privat
 func TestMaskLoggerMasksEncodedValues(t *testing.T) {
 	for format, handler := range maskingLogHandlers {
 		for _, tc := range []struct {
-			name   string
-			value  any
-			secret string
-			want   string
+			name       string
+			value      any
+			secret     string
+			text, json string
 		}{
-			{"bytes", []byte("private-token"), "private-token", "***"},
-			{"marshaler", maskingEncodedValue{}, "private-token", "healthy"},
+			{"bytes", []byte("private-token"), "private-token", `value="\"***\""`, `"value":"\"***\""`},
+			{"marshaler", maskingEncodedValue{}, "private-token", `value="\"***\""`, `"value":"\"***\""`},
 			{"text-field", struct {
 				PrivateToken string `json:"state"`
-			}{"healthy"}, "PrivateToken", "{***:healthy}"},
-			{"duration", time.Second, "1000000000", "1s"},
-			{"float", float64(1000000000), "1000000000", "1e+09"},
-			{"time", time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), "2026-01-02T03:04:05Z", "2026-01-02 03:04:05 +0000 UTC"},
+			}{"healthy"}, "PrivateToken", `value="{\"state\":\"healthy\"}"`, `"value":"{\"state\":\"healthy\"}"`},
+			{"struct-secret", struct{ Token string }{"private-token"}, "private-token", `value="{\"Token\":\"***\"}"`, `"value":"{\"Token\":\"***\"}"`},
+			{"duration", time.Second, "private-token", "value=1s", `"value":1000000000`},
+			{"float", float64(1000000000), "private-token", "value=1e+09", `"value":1000000000`},
+			{"time", time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), "private-token", "value=2026-01-02T03:04:05.000Z", `"value":"2026-01-02T03:04:05Z"`},
 		} {
 			t.Run(format+"/"+tc.name, func(t *testing.T) {
 				var out strings.Builder
@@ -114,17 +117,12 @@ func TestMaskLoggerMasksEncodedValues(t *testing.T) {
 				if strings.Contains(got, tc.secret) || strings.Contains(got, base64.StdEncoding.EncodeToString([]byte(tc.secret))) {
 					t.Errorf("encoded secret leaked: %s", got)
 				}
-				if !strings.Contains(got, tc.want) {
-					t.Errorf("lost safe value %q: %s", tc.want, got)
-				}
+				want := tc.text
 				if format == "json" {
-					var record map[string]any
-					if err := json.Unmarshal([]byte(got), &record); err != nil {
-						t.Fatal(err)
-					}
-					if record["value"] != tc.want {
-						t.Errorf("masked value = %#v, want string %q", record["value"], tc.want)
-					}
+					want = tc.json
+				}
+				if !strings.Contains(got, want) {
+					t.Errorf("lost encoded value %q: %s", want, got)
 				}
 			})
 		}
@@ -137,19 +135,19 @@ func (maskingJSONObject) MarshalJSON() ([]byte, error) {
 	return []byte(`{"state":"healthy"}`), nil
 }
 
-func TestMaskLoggerPreservesBenignJSONTypes(t *testing.T) {
+func TestMaskLoggerPreservesBenignJSONContent(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		value any
 		want  any
 	}{
-		{"marshaler", maskingJSONObject{}, map[string]any{"state": "healthy"}},
-		{"array", [2]string{"alpha", "beta"}, []any{"alpha", "beta"}},
+		{"marshaler", maskingJSONObject{}, `{"state":"healthy"}`},
+		{"array", [2]string{"alpha", "beta"}, `["alpha","beta"]`},
 		{"float", 1.5, 1.5},
-		{"struct", struct{ State string }{"healthy"}, map[string]any{"State": "healthy"}},
+		{"struct", struct{ State string }{"healthy"}, `{"State":"healthy"}`},
 		{"logvaluer", maskingLogValue(func() slog.Value {
 			return slog.AnyValue(maskingJSONObject{})
-		}), map[string]any{"state": "healthy"}},
+		}), `{"state":"healthy"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out strings.Builder
@@ -174,12 +172,118 @@ func TestMaskLoggerPreservesBenignAttrs(t *testing.T) {
 			logger := maskLogger(slog.New(handler(&out)), secrets.NewMasker()).With(slog.Attr{})
 			logger.Info("status", slog.Attr{}, slog.Group("empty"),
 				slog.Int("count", 3), slog.Bool("ok", true), slog.Any("value", nil))
-			want := `msg=status count=3 ok=true value=<nil>`
+			want := `msg=status count=3 ok=true value=null`
 			if format == "json" {
-				want = `"msg":"status","count":3,"ok":true,"value":null}`
+				want = `"msg":"status","count":3,"ok":true,"value":"null"}`
 			}
 			if got := out.String(); !strings.Contains(got, want) {
 				t.Errorf("benign attributes changed: %s", got)
+			}
+		})
+	}
+}
+
+type maskingTextValue struct{ maskingJSONObject }
+
+func (maskingTextValue) String() string               { return "healthy" }
+func (maskingTextValue) MarshalText() ([]byte, error) { return []byte("private-token"), nil }
+
+type maskingError struct{}
+
+func (maskingError) Error() string              { return "private-token" }
+func (maskingError) Format(s fmt.State, _ rune) { _, _ = io.WriteString(s, "healthy") }
+
+type maskingErrorValue func() string
+
+func (f maskingErrorValue) Error() string { return f() }
+
+type maskingJSONFailure struct{ panic bool }
+
+func (maskingJSONFailure) String() string { return "healthy" }
+func (v maskingJSONFailure) MarshalJSON() ([]byte, error) {
+	if v.panic {
+		panic("private-token: unregistered-diagnostic")
+	}
+	return nil, errors.New("private-token: unregistered-diagnostic")
+}
+
+func TestMaskLoggerMasksHandlerEncodings(t *testing.T) {
+	panicValue := func() string { panic("private-token: unregistered-diagnostic") }
+	for format, handler := range maskingLogHandlers {
+		for _, tc := range []struct {
+			name       string
+			value      any
+			text, json string
+		}{
+			{"text-marshaler", maskingTextValue{}, `{\"state\":\"healthy\"}`, `{\"state\":\"healthy\"}`},
+			{"error", maskingError{}, "***", "***"},
+			{"json-error", maskingJSONFailure{}, "!masked: unrenderable", "!masked: unrenderable"},
+			{"json-panic", maskingJSONFailure{panic: true}, "!masked: unrenderable", "!masked: unrenderable"},
+			{"error-panic", maskingErrorValue(panicValue), "!masked: unrenderable", "!masked: unrenderable"},
+			{"string-panic", maskingStatefulString(panicValue), "!masked: unrenderable", "!masked: unrenderable"},
+		} {
+			t.Run(format+"/"+tc.name, func(t *testing.T) {
+				defer func() {
+					if p := recover(); p != nil {
+						t.Errorf("encoding panic escaped slog: %v", p)
+					}
+				}()
+				var out strings.Builder
+				masker := secrets.NewMasker()
+				masker.Register("private-token")
+				maskLogger(slog.New(handler(&out)), masker).Info("status", "value", tc.value, "after", "done")
+				got, want := out.String(), tc.text
+				if format == "json" {
+					want = tc.json
+					if !json.Valid([]byte(got)) {
+						t.Errorf("invalid JSON record: %s", got)
+					}
+				}
+				if strings.Contains(got, "private-token") || !strings.Contains(got, want) || !strings.Contains(got, "status") || !strings.Contains(got, "done") {
+					t.Errorf("record lost, encoding changed or secret leaked: %s", got)
+				}
+				if strings.Contains(got, "unregistered-diagnostic") {
+					t.Errorf("encoding diagnostic leaked: %s", got)
+				}
+			})
+		}
+	}
+}
+
+type maskingStatefulString func() string
+
+func (f maskingStatefulString) String() string { return f() }
+
+type maskingStatefulJSON func() string
+
+func (f maskingStatefulJSON) MarshalJSON() ([]byte, error) { return []byte(`"` + f() + `"`), nil }
+
+func TestMaskLoggerEncodesStatefulValuesOncePerRecord(t *testing.T) {
+	for format, handler := range maskingLogHandlers {
+		t.Run(format, func(t *testing.T) {
+			var out strings.Builder
+			masker := secrets.NewMasker()
+			masker.Register("private-token")
+			calls := 0
+			next := func() string {
+				calls++
+				if calls == 1 {
+					return "healthy"
+				}
+				return "private-token"
+			}
+			var value any = maskingStatefulString(next)
+			if format == "json" {
+				value = maskingStatefulJSON(next)
+			}
+			logger := maskLogger(slog.New(handler(&out)), masker)
+			logger.Info("first", "value", value)
+			logger.Info("second", "value", value)
+			if calls != 2 {
+				t.Errorf("encoding called %d times for two records, want 2", calls)
+			}
+			if got := out.String(); strings.Contains(got, "private-token") || !strings.Contains(got, "healthy") || !strings.Contains(got, "***") {
+				t.Errorf("stateful encoding lost or secret leaked: %s", got)
 			}
 		})
 	}

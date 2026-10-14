@@ -25,13 +25,9 @@ type describeDoc struct {
 	} `json:"pipelines"`
 }
 
-// safety: describe runs before the run row exists, so an entry that speaks
-// another protocol or lacks the pipeline is refused without recording a run.
-// The value of every flag describe marks secret, and the default of every
-// secret flag of every pipeline described, is registered with masker, when
-// set, as soon as describe answers; known reports that it did. Until then the
-// secrets are unknown, so a describe that fails returns its class without its
-// text.
+// safety: describe runs before the run row exists, so invalid entries leave no run.
+// Secret flag values and defaults must be registered before diagnostics can be logged.
+// Until describe succeeds, secrets are unknown and failures expose only their class.
 func describeArgs(ctx context.Context, s *Session, pipeline string, args map[string]string, masker *secrets.Masker) (merged map[string]string, known bool, err error) {
 	var doc describeDoc
 	// safety: no run row or node timeout exists yet, so without this bound a

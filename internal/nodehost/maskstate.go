@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -143,24 +144,38 @@ func (h maskHandler) attr(a slog.Attr) slog.Attr {
 		}
 		return slog.Group(a.Key, masked...)
 	}
-	text := v.String()
-	if b, ok := v.Any().([]byte); ok {
-		return slog.String(a.Key, h.m.Mask(string(b)))
-	}
-	if v.Kind() == slog.KindAny {
-		text = fmt.Sprintf("%+v", v.Any())
-	}
-	masked := h.m.Mask(text)
-	if masked != text {
-		return slog.String(a.Key, masked)
-	}
-	// safety: JSON can expose secrets absent from the text encoding.
 	switch v.Kind() {
-	case slog.KindAny, slog.KindDuration, slog.KindFloat64, slog.KindTime:
-		encoded, err := json.Marshal(v.Any())
-		if err == nil && h.m.Mask(string(encoded)) != string(encoded) {
-			return slog.String(a.Key, masked)
-		}
+	case slog.KindString:
+		return slog.String(a.Key, h.m.Mask(v.String()))
+	case slog.KindAny:
+		// safety: JSON text keeps structured content but loses object nesting, so downstream handlers
+		// cannot invoke the original value's encoders after masking.
+		return slog.String(a.Key, h.m.Mask(renderMaskValue(v.Any())))
 	}
 	return a
+}
+
+func renderMaskValue(value any) (text string) {
+	const unrenderable = "!masked: unrenderable"
+	defer func() {
+		if recover() != nil {
+			text = unrenderable
+		}
+	}()
+	if err, ok := value.(error); ok {
+		return err.Error()
+	}
+	encoded, err := json.Marshal(value)
+	if err == nil {
+		return string(encoded)
+	}
+	if _, unsupported := err.(*json.UnsupportedTypeError); !unsupported {
+		return unrenderable
+	}
+	text = fmt.Sprintf("%+v", value)
+	// safety: fmt recovers method panics itself and embeds their payload in its output.
+	if strings.Contains(text, "%!v(PANIC=") {
+		return unrenderable
+	}
+	return text
 }
