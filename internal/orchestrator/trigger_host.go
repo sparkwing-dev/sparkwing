@@ -21,6 +21,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runflags"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -65,6 +67,10 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	if err != nil {
 		return err
 	}
+	args, err := checkoutRunArgs(h.Dir, trig.Pipeline, triggerHostArgs(ctx, c, trig, logger), &pipelines.GuardContext{GitBranch: trig.GitBranch})
+	if err != nil {
+		return err
+	}
 	masker := secrets.NewMasker()
 	masker.Register(h.Token)
 	env, err := podProcessEnv(masker, logger)
@@ -101,7 +107,7 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	}
 	res, err := nodehost.Execute(ctx, nodehost.Config{
 		Session:  nodehost.SessionConfig{Entry: h.Entry, Dir: h.Dir, Sink: planSink, Env: env},
-		Pipeline: trig.Pipeline, Args: triggerHostArgs(ctx, c, trig, logger),
+		Pipeline: trig.Pipeline, Args: args,
 		Run: rc, Requires: requires, Invocation: flags.Invocation(),
 		StartAt: flags.StartAt, StopAt: flags.StopAt, Only: flags.Only,
 		ParentRunID: trig.ParentRunID, RetryOf: trig.RetryOf, RetrySource: trig.RetrySource,
@@ -142,6 +148,31 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 		logger.Warn("trigger host: finish the trigger", "run_id", trig.ID, "err", err)
 	}
 	return nil
+}
+
+// safety: the checkout's sparkwing.yaml fills the arguments a run left out, its pipeline entry's over the project
+// defaults, as a local run's do. Layering them again under a run row's arguments, which already hold them, changes
+// nothing, so every planner of a run calls this and their plans agree. A guard is checked where guards is given.
+func checkoutRunArgs(dir, pipeline string, args map[string]string, guards *pipelines.GuardContext) (map[string]string, error) {
+	_, cfg, err := projectconfig.Discover(dir)
+	if err != nil {
+		return nil, &projectConfigError{err: err}
+	}
+	if cfg == nil {
+		return args, nil
+	}
+	opts := Options{Pipeline: pipeline, Args: args, DefaultArgs: cfg.Defaults.Args}
+	opts.PipelineYAML = (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipeline)
+	merged := mergeInvokeArgs(opts)
+	if guards == nil {
+		return merged, nil
+	}
+	rules := cfg.Defaults.Guards
+	if p := opts.PipelineYAML; p != nil && !p.Guards.IsEmpty() {
+		rules = p.Guards
+	}
+	guards.Args = merged
+	return merged, rules.Evaluate(pipeline, *guards)
 }
 
 // safety: a retry plans with the arguments its original run recorded.

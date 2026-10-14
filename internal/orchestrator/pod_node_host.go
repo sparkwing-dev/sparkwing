@@ -96,9 +96,13 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 	}
 	defer planSink.end()
 	flags := runflags.FromInvocation(run.Invocation)
+	args, err := checkoutRunArgs(p.dir, run.Pipeline, run.Args, nil)
+	if err != nil {
+		return nodehost.Result{}, err
+	}
 	cfg := nodehost.Config{
 		Session:  nodehost.SessionConfig{Entry: p.entry, Dir: p.dir, Sink: planSink, Env: env},
-		Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run),
+		Pipeline: run.Pipeline, Args: args, Run: podRunContext(run),
 		StartAt: flags.StartAt, StopAt: flags.StopAt,
 		State: p.state, Artifacts: p.artifacts, Logger: p.logger,
 		Attempts: &nodehost.Attempts{

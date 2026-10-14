@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runflags"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -135,6 +136,10 @@ func planLaunchedRun(ctx context.Context, c *client.Client, src string, entry pi
 		return fail(err)
 	}
 	flags := runflags.FromInvocation(run.Invocation)
+	args, err := checkoutRunArgs(src, run.Pipeline, run.Args, &pipelines.GuardContext{GitBranch: run.GitBranch})
+	if err != nil {
+		return fail(err)
+	}
 	masker := secrets.NewMasker()
 	env, err := podProcessEnv(masker, slog.Default())
 	if err != nil {
@@ -146,7 +151,7 @@ func planLaunchedRun(ctx context.Context, c *client.Client, src string, entry pi
 	}
 	plan, err := nodehost.PlanDocument(ctx, nodehost.SessionConfig{Entry: entry, Dir: src, Sink: sink, Env: env},
 		nodehost.PlanRequest{
-			Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run), Requires: requires, Masker: masker,
+			Pipeline: run.Pipeline, Args: args, Run: podRunContext(run), Requires: requires, Masker: masker,
 			StartAt: flags.StartAt, StopAt: flags.StopAt, Only: flags.Only,
 		})
 	sink.end()
