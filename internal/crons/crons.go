@@ -181,7 +181,7 @@ func DeclaredSchedules(repoRoot string) ([]Declared, error) {
 	if _, err := os.Stat(path); err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	cfg, err := projectconfig.Load(path)
+	cfg, err := projectconfig.LoadOld(path)
 	if err != nil {
 		return nil, err
 	}

@@ -9,7 +9,7 @@ import (
 func TestLoad_APinMayNameAProfileTheProjectDoesNotDeclare(t *testing.T) {
 	path := writeYAML(t, t.TempDir(), projectconfig.Filename,
 		"pipelines:\n  - name: release\n    entrypoint: Release\n    profile: prod\n")
-	cfg, err := projectconfig.Load(path)
+	cfg, err := projectconfig.LoadOld(path)
 	if err != nil {
 		t.Fatalf("a pin naming a config.yaml profile must load: %v", err)
 	}

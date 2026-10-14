@@ -685,7 +685,7 @@ func (s *Server) reconcileGitHubAppCrons(r *http.Request, in store.GitHubAppInst
 	}
 	var entries []crons.Declared
 	if snapshot.Found {
-		cfg, err := projectconfig.Parse(snapshot.Content)
+		cfg, err := projectconfig.ParseOld(snapshot.Content)
 		if err != nil {
 			return http.StatusUnprocessableEntity, "", fmt.Errorf("read GitHub schedule config: %w", err)
 		}

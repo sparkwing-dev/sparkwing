@@ -59,12 +59,12 @@ func projectProfile(name string) (*profile.Profile, bool, error) {
 	return p, true, nil
 }
 
-func loadProjectConfig() (*projectconfig.Config, bool, error) {
+func loadProjectConfig() (*projectconfig.ConfigOld, bool, error) {
 	dir, err := findSparkwingDir()
 	if err != nil {
 		return nil, false, nil
 	}
-	cfg, err := projectconfig.Load(filepath.Join(dir, projectconfig.Filename))
+	cfg, err := projectconfig.LoadOld(filepath.Join(dir, projectconfig.Filename))
 	if err != nil {
 		return nil, false, err
 	}

@@ -100,10 +100,10 @@ func (c Config) scratchLimit() string {
 	return c.ScratchLimit
 }
 
-// BuildJob returns the Job that runs claim's node. Every field is fixed here
+// BuildJobOld returns the Job that runs claim's node. Every field is fixed here
 // or by cfg; the claim contributes its IDs, its token, its class only through
 // the ceilings, and its token's lifetime as the Job's deadline.
-func BuildJob(cfg Config, claim store.LaunchClaim) *batchv1.Job {
+func BuildJobOld(cfg Config, claim store.LaunchClaim) *batchv1.Job {
 	name := k8s.JobName(claim.RunID, claim.NodeID, int(claim.Generation))
 	team := k8s.TeamLabelValue(string(claim.Team))
 	labels := map[string]string{

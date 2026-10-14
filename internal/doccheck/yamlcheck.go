@@ -27,7 +27,7 @@ func checkYAMLConfigs(contentDir string) bool {
 			continue
 		}
 		configs++
-		var cfg projectconfig.Config
+		var cfg projectconfig.ConfigOld
 		dec := yaml.NewDecoder(strings.NewReader(b.body))
 		dec.KnownFields(true)
 		perr := dec.Decode(&cfg)

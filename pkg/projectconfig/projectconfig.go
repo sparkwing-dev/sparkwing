@@ -6,7 +6,7 @@
 //	pipelines: [ ... ]
 //	sparks: [ ... ]
 //
-// Each section reuses its existing types, and Load normalizes and
+// Each section reuses its existing types, and LoadOld normalizes and
 // validates them. A missing file returns (nil, nil).
 package projectconfig
 
@@ -74,12 +74,12 @@ func CheckLegacy(startDir string) error {
 	}
 }
 
-// Config is the parsed .sparkwing/sparkwing.yaml.
-type Config struct {
+// ConfigOld is the parsed .sparkwing/sparkwing.yaml.
+type ConfigOld struct {
 	// Defaults carries the per-pipeline fields each pipeline
 	// inherits unless it declares its own. See Defaults for the
 	// per-field merge semantics.
-	Defaults Defaults `yaml:"defaults,omitempty"`
+	Defaults DefaultsOld `yaml:"defaults,omitempty"`
 
 	// Profiles maps profile name to its surface bundle. The same
 	// shape as the profiles section of ~/.config/sparkwing/config.yaml;
@@ -94,7 +94,7 @@ type Config struct {
 // Defaults is the project-level block of per-pipeline defaults.
 // Resolution rules per field are documented inline; the general
 // principle is "replace, unless the field is independently keyed."
-type Defaults struct {
+type DefaultsOld struct {
 	// Args supplies per-arg default values for every pipeline. Each
 	// key is layered under pipeline.args (pipeline wins per-key),
 	// and the merged map overrides a field's `default` tag while an
@@ -111,12 +111,12 @@ type Defaults struct {
 	Requires []string `yaml:"requires,omitempty"`
 }
 
-// Load reads and parses .sparkwing/sparkwing.yaml at path. A missing
+// LoadOld reads and parses .sparkwing/sparkwing.yaml at path. A missing
 // file returns (nil, nil) so the caller can fall back to the legacy
 // per-file loaders. Unknown fields at any level fail the parse with the
 // file path in the message. Each section is normalized and validated to
 // match its per-file loader.
-func Load(path string) (*Config, error) {
+func LoadOld(path string) (*ConfigOld, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -124,21 +124,21 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	cfg, err := Parse(raw)
+	cfg, err := ParseOld(raw)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return cfg, nil
 }
 
-// Parse validates a project config read from a source other than a checkout.
-func Parse(raw []byte) (*Config, error) {
+// ParseOld validates a project config read from a source other than a checkout.
+func ParseOld(raw []byte) (*ConfigOld, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	dec.KnownFields(true)
-	var cfg Config
+	var cfg ConfigOld
 	if err := dec.Decode(&cfg); err != nil {
 		if errors.Is(err, io.EOF) {
-			return &Config{}, nil
+			return &ConfigOld{}, nil
 		}
 		return nil, fmt.Errorf("parse sparkwing.yaml: %w", err)
 	}
@@ -152,17 +152,17 @@ func Parse(raw []byte) (*Config, error) {
 	return &cfg, nil
 }
 
-// Discover walks up from startDir looking for
+// DiscoverOld walks up from startDir looking for
 // <dir>/.sparkwing/sparkwing.yaml, stopping at the filesystem root. It
-// returns the absolute path and loaded Config of the first match, or
+// returns the absolute path and loaded ConfigOld of the first match, or
 // ("", nil, nil) when nothing is found anywhere on the walk-up -- the
 // caller falls back to the legacy per-file discovery.
-func Discover(startDir string) (path string, cfg *Config, err error) {
+func DiscoverOld(startDir string) (path string, cfg *ConfigOld, err error) {
 	dir := startDir
 	for {
 		candidate := filepath.Join(dir, ".sparkwing", Filename)
 		if _, statErr := os.Stat(candidate); statErr == nil {
-			loaded, lerr := Load(candidate)
+			loaded, lerr := LoadOld(candidate)
 			if lerr != nil {
 				return candidate, nil, lerr
 			}
@@ -183,7 +183,7 @@ func Discover(startDir string) (path string, cfg *Config, err error) {
 // it returns is the sparkwing.yaml path (so filepath.Dir yields the
 // .sparkwing/ directory, same as before).
 func DiscoverPipelines(startDir string) (path string, cfg *pipelines.Config, err error) {
-	p, pc, err := Discover(startDir)
+	p, pc, err := DiscoverOld(startDir)
 	if err != nil {
 		return "", nil, err
 	}
@@ -201,7 +201,7 @@ func LoadSparksManifest(sparkwingDir string) (*sparks.Manifest, error) {
 	if sparkwingDir == "" {
 		return nil, errors.New("sparks: sparkwingDir must not be empty")
 	}
-	cfg, err := Load(filepath.Join(sparkwingDir, Filename))
+	cfg, err := LoadOld(filepath.Join(sparkwingDir, Filename))
 	if err != nil {
 		return nil, err
 	}
@@ -295,7 +295,7 @@ func writeDocument(path string, doc *yaml.Node) error {
 	return os.WriteFile(path, buf.Bytes(), 0o644)
 }
 
-func (c *Config) normalize() error {
+func (c *ConfigOld) normalize() error {
 	pcfg := pipelines.Config{Pipelines: c.Pipelines}
 	if err := pcfg.Validate(); err != nil {
 		return err

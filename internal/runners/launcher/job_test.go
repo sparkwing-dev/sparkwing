@@ -38,7 +38,7 @@ func TestBuildJob_OnlyTheClaimsIDsTokenAndClassVary(t *testing.T) {
 	a, b := testClaim(), testClaim()
 	b.Team, b.RunID, b.NodeID, b.Generation, b.Kind, b.Token = "bravo", "run-2", "deploy", 7, store.ClaimTokenPlan, "swc_two"
 	b.Class = store.CPUClass{Cores: 64, MemoryBytes: 1 << 40}
-	ja, jb := BuildJob(cfg, a), BuildJob(cfg, b)
+	ja, jb := BuildJobOld(cfg, a), BuildJobOld(cfg, b)
 	pa, pb := ja.Spec.Template.Spec, jb.Spec.Template.Spec
 	ca, cb := pa.Containers[0], pb.Containers[0]
 	ia, ib := pa.InitContainers[0], pb.InitContainers[0]
@@ -68,7 +68,7 @@ func TestBuildJob_OnlyTheClaimsIDsTokenAndClassVary(t *testing.T) {
 }
 
 func TestBuildJob_PinsIdentityVolumesAndPlacement(t *testing.T) {
-	job := BuildJob(testConfig(), testClaim())
+	job := BuildJobOld(testConfig(), testClaim())
 	pod := job.Spec.Template.Spec
 	c := pod.Containers[0]
 	if pod.ServiceAccountName != ServiceAccount || *pod.AutomountServiceAccountToken || *pod.EnableServiceLinks ||
@@ -137,7 +137,7 @@ func TestBuildJob_HandsTheCachesButNoCacheCredential(t *testing.T) {
 	cfg := testConfig()
 	env := func(cfg Config) map[string]string {
 		out := map[string]string{}
-		for _, e := range BuildJob(cfg, testClaim()).Spec.Template.Spec.Containers[0].Env {
+		for _, e := range BuildJobOld(cfg, testClaim()).Spec.Template.Spec.Containers[0].Env {
 			out[e.Name] = e.Value
 		}
 		return out
@@ -163,7 +163,7 @@ func TestBuildJob_HandsTheCachesButNoCacheCredential(t *testing.T) {
 // scratch volume the node's container reads, and the pod's disk is bounded
 // by that volume and an equal ephemeral-storage request and limit.
 func TestBuildJob_FetchesSourceInAFixedInitContainer(t *testing.T) {
-	pod := BuildJob(testConfig(), testClaim()).Spec.Template.Spec
+	pod := BuildJobOld(testConfig(), testClaim()).Spec.Template.Spec
 	if len(pod.InitContainers) != 1 {
 		t.Fatalf("init containers = %d, want 1", len(pod.InitContainers))
 	}
