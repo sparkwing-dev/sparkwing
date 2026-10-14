@@ -244,3 +244,25 @@ func TestHereRunner_CredentialExpires(t *testing.T) {
 		t.Fatalf("expired here-runner claim = %d, want 401", code)
 	}
 }
+
+// safety: a pipeline profile carries another pipeline's resource pins, so the
+// credential reads only its own run's pipeline, and only while it holds the claim.
+func TestHereRunner_ProfileReadsNeedItsOwnPipelineAndClaim(t *testing.T) {
+	f := newHereFixture(t)
+	out := f.here()
+	if code := f.do("GET", "/api/v1/pipelines/hotfix/profile", out.RunnerToken, nil, nil); code != http.StatusForbidden {
+		t.Fatalf("own pipeline's profile before the claim = %d, want 403", code)
+	}
+	if code := f.do("POST", "/api/v1/triggers/"+out.RunID+"/claim", out.RunnerToken, map[string]any{}, nil); code != http.StatusOK {
+		t.Fatalf("here-runner claim = %d, want 200", code)
+	}
+	if code := f.do("GET", "/api/v1/pipelines/release/profile", out.RunnerToken, nil, nil); code != http.StatusForbidden {
+		t.Fatalf("another pipeline's profile = %d, want 403", code)
+	}
+	if code := f.do("PUT", "/api/v1/pipelines/release/profile/pin", out.RunnerToken, map[string]any{}, nil); code != http.StatusForbidden {
+		t.Fatalf("pin another pipeline's profile = %d, want 403", code)
+	}
+	if code := f.do("GET", "/api/v1/pipelines/hotfix/profile", out.RunnerToken, nil, nil); code == http.StatusForbidden {
+		t.Fatalf("own pipeline's profile under the claim = %d, want it served", code)
+	}
+}
