@@ -222,6 +222,44 @@ func TestAttemptExecutor(t *testing.T) {
 		}
 	})
 
+	t.Run("NoStoredRecordHoldsASecret", func(t *testing.T) {
+		const pass = "pass-fixture-secret"
+		env := append(engineenv.Minimal(), "SPARKWING_HOME="+t.TempDir())
+		h, res := host(t, "run-exec", map[string]string{"exec": "true", "pass": pass}, env)
+		if res.Status != "failed" {
+			t.Fatalf("status=%s err=%v, want failed", res.Status, res.Err)
+		}
+		ledger, err := os.ReadFile(filepath.Join(h.marker, "ledger.json"))
+		if err != nil || !strings.Contains(string(ledger), "sh -c") {
+			t.Fatalf("session ledger record = %q (err %v), want the step command's record", ledger, err)
+		}
+		row := h.row(t, "run-exec", "exec")
+		steps, err := h.st.ListNodeSteps(t.Context(), "run-exec")
+		if err != nil {
+			t.Fatal(err)
+		}
+		stored := map[string]string{
+			"session ledger": string(ledger),
+			"node log":       h.logs.text("exec"),
+			"node error":     row.Error,
+			"annotations":    strings.Join(row.Annotations, "\n"),
+			"summary":        row.Summary,
+		}
+		for _, s := range steps {
+			stored["step "+s.StepID] = s.Summary + "\n" + strings.Join(s.Annotations, "\n")
+		}
+		if !strings.Contains(stored["node log"], "exec ") || !strings.Contains(row.Error, "exec ran with token") {
+			t.Errorf("log %q and error %q lack the node's own text", stored["node log"], row.Error)
+		}
+		for where, text := range stored {
+			for _, secret := range []string{fixtureToken, pass} {
+				if strings.Contains(text, secret) {
+					t.Errorf("the %s holds secret %q unmasked:\n%s", where, secret, text)
+				}
+			}
+		}
+	})
+
 	t.Run("APlanThatDriftsFailsTheNode", func(t *testing.T) {
 		h, res := host(t, "run-drift", map[string]string{"counter": filepath.Join(t.TempDir(), "count")}, nil)
 		if res.Status != "failed" {
