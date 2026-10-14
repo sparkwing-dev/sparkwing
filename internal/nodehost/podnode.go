@@ -228,12 +228,17 @@ func podGenerated(ctx context.Context, run *Run, nodeID, acceptedHash string) (n
 		return slices.ContainsFunc(run.Doc.Nodes, func(p nodeproto.PlanNode) bool { return p.ID == id })
 	}
 	chain := []string{row.Generated.Generator}
+	seen := map[string]bool{nodeID: true}
 	for source := row.Generated.Source; !inPlan(source); {
+		if seen[source] {
+			return nodeproto.PlanNode{}, nil, drift("node %s's recorded sources repeat %s", nodeID, source)
+		}
+		seen[source] = true
 		src, err := run.State.GetNode(ctx, run.ID, source)
 		switch {
 		case err != nil:
 			return nodeproto.PlanNode{}, nil, fmt.Errorf("read node %s's source %s: %w", nodeID, source, err)
-		case src.Generated == nil || len(chain) > maxGeneratorDepth:
+		case src.Generated == nil:
 			return nodeproto.PlanNode{}, nil, drift("node %s's source %s is neither in this process's plan nor generated", nodeID, source)
 		}
 		chain = append([]string{src.Generated.Generator}, chain...)
@@ -241,9 +246,6 @@ func podGenerated(ctx context.Context, run *Run, nodeID, acceptedHash string) (n
 	}
 	return spec, chain, nil
 }
-
-// safety: a chain of generated sources this deep is a cycle in the recorded rows, which no run can produce.
-const maxGeneratorDepth = 64
 
 func podChain(cfg *Config, layers []Layer) Executor {
 	inner := cfg.Attempts.executor(cfg)

@@ -226,6 +226,12 @@ func (f *expansionFrom) record(row *store.Node, n nodeproto.PlanNode, batch int)
 		return err
 	}
 	row.Generated = &store.GeneratedNode{Source: f.source, Generator: f.closure, Batch: batch, Spec: spec}
+	// safety: a generated recovery node loads its code with a generator that reads the source's output, which the
+	// controller grants only to the source's descendants, so its row descends from its parent as the parent does
+	// from the source; the scheduler still waits on the parent alone.
+	if p := n.OnFailureOf; p != "" && !slices.Contains(row.Deps, p) {
+		row.Deps = append(row.Deps, p)
+	}
 	return nil
 }
 
@@ -233,23 +239,27 @@ type nodeLister interface {
 	ListNodes(ctx context.Context, runID string) ([]*store.Node, error)
 }
 
+// safety: complete only when every node of the batch has its row, so a partial batch is never taken whole.
+type recordedBatch struct {
+	expansion
+	complete bool
+}
+
 // safety: the expansion's membership is the rows the run recorded, so a later host adds every node the run
-// accepted, finished or not, and never one a generator would return now. complete is false while any generator of
-// n has no batch, or only part of one, recorded: an empty batch records nothing, and a host that stopped mid-add
-// left part.
-func storedExpansions(ctx context.Context, st storage.StateStore, runID string, n nodeproto.PlanNode) (_ []expansion, complete bool, _ error) {
-	lister, ok := st.(nodeLister)
-	if !ok {
-		return nil, false, nil
+// accepted, finished or not, and never one a generator would return now. A generator with no batch recorded, as an
+// empty one records nothing, or only part of one, as a host stopped mid-add leaves it, is incomplete.
+func storedExpansions(ctx context.Context, st storage.StateStore, runID string, n nodeproto.PlanNode) ([]recordedBatch, error) {
+	out := make([]recordedBatch, 0, len(n.Closures.Generator))
+	var rows []*store.Node
+	if lister, ok := st.(nodeLister); ok {
+		var err error
+		if rows, err = lister.ListNodes(context.WithoutCancel(ctx), runID); err != nil {
+			return nil, fmt.Errorf("read the nodes %s generated: %w", n.ID, err)
+		}
 	}
-	rows, err := lister.ListNodes(context.WithoutCancel(ctx), runID)
-	if err != nil {
-		return nil, false, fmt.Errorf("read the nodes %s generated: %w", n.ID, err)
-	}
-	out := make([]expansion, 0, len(n.Closures.Generator))
 	for _, closure := range n.Closures.Generator {
-		e := expansion{closure: closure}
-		batch := 0
+		b := recordedBatch{expansion: expansion{closure: closure}}
+		size := 0
 		for _, row := range rows {
 			g := row.Generated
 			if g == nil || g.Source != n.ID || g.Generator != closure {
@@ -257,37 +267,71 @@ func storedExpansions(ctx context.Context, st storage.StateStore, runID string, 
 			}
 			var node nodeproto.PlanNode
 			if err := json.Unmarshal(g.Spec, &node); err != nil {
-				return nil, false, fmt.Errorf("read generated node %s: %w", row.NodeID, err)
+				return nil, fmt.Errorf("read generated node %s: %w", row.NodeID, err)
 			}
-			e.nodes, batch = append(e.nodes, node), g.Batch
+			b.nodes, size = append(b.nodes, node), g.Batch
 		}
-		if len(e.nodes) == 0 || len(e.nodes) != batch {
-			return nil, false, nil
-		}
-		out = append(out, e)
+		b.complete = len(b.nodes) > 0 && len(b.nodes) == size
+		out = append(out, b)
 	}
-	return out, true, nil
+	return out, nil
 }
 
-// safety: only a batch never fully recorded is generated, from the source's recorded output in an eval process.
-func (s *scheduler) recordedExpansions(ctx context.Context, runID string, n nodeproto.PlanNode, output func() (json.RawMessage, error)) []expansion {
-	stored, complete, err := storedExpansions(ctx, s.run.State, runID, n)
-	if err == nil && complete {
-		return stored
+func allRecorded(batches []recordedBatch) bool {
+	return !slices.ContainsFunc(batches, func(b recordedBatch) bool { return !b.complete })
+}
+
+// safety: each generator's batch stands on its own: a complete one is added as recorded, and only an incomplete
+// one is generated, once, from the source's recorded output in an eval process, keeping every node it recorded.
+func (s *scheduler) recordedExpansions(ctx context.Context, n nodeproto.PlanNode, batches []recordedBatch, output func() (json.RawMessage, error)) []expansion {
+	var regenerated []expansion
+	var genErr error
+	if !allRecorded(batches) {
+		var out json.RawMessage
+		switch {
+		case s.regenerate == nil:
+			genErr = fmt.Errorf("the nodes %s generated are not all recorded, and this host has no eval process to generate them", n.ID)
+		default:
+			if out, genErr = output(); genErr == nil {
+				regenerated = s.regenerate(ctx, &NodeRun{Run: s.run, Plan: n, Generators: s.generators(n.ID)}, out)
+			}
+		}
 	}
-	if err == nil && s.regenerate == nil {
-		err = fmt.Errorf("the nodes %s generated are not recorded, and this host has no eval process to generate them", n.ID)
+	result := make([]expansion, 0, len(batches))
+	for _, b := range batches {
+		if b.complete {
+			result = append(result, b.expansion)
+			continue
+		}
+		result = append(result, reconcileBatch(b, regenerated, genErr))
 	}
-	var out json.RawMessage
-	if err == nil {
-		out, err = output()
+	return result
+}
+
+// safety: a recorded node stays a member, so a regenerated batch that drops or changes one is plan drift, never a
+// smaller fan-out.
+func reconcileBatch(b recordedBatch, regenerated []expansion, genErr error) expansion {
+	e := expansion{closure: b.closure, err: genErr}
+	j := slices.IndexFunc(regenerated, func(r expansion) bool { return r.closure == b.closure })
+	switch {
+	case genErr != nil:
+		return e
+	case j < 0:
+		e.err = fmt.Errorf("generator %s did not run", b.closure)
+		return e
+	case regenerated[j].err != nil:
+		e.err = regenerated[j].err
+		return e
 	}
-	if err == nil {
-		return s.regenerate(ctx, &NodeRun{Run: s.run, Plan: n, Generators: s.generators(n.ID)}, out)
+	for _, rec := range b.nodes {
+		k := slices.IndexFunc(regenerated[j].nodes, func(got nodeproto.PlanNode) bool { return got.ID == rec.ID })
+		if k < 0 || regenerated[j].nodes[k].SpecHash != rec.SpecHash {
+			e.err = &nodeproto.Error{Code: nodeproto.CodePlanDrift, Message: fmt.Sprintf(
+				"generator %s no longer returns node %s as the run recorded it; a generator must return the same nodes for the same source output",
+				b.closure, rec.ID)}
+			return e
+		}
 	}
-	unrecorded := make([]expansion, 0, len(n.Closures.Generator))
-	for _, g := range n.Closures.Generator {
-		unrecorded = append(unrecorded, expansion{closure: g, err: err})
-	}
-	return unrecorded
+	e.nodes = regenerated[j].nodes
+	return e
 }

@@ -5,10 +5,13 @@ package nodehost
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -214,5 +217,224 @@ func TestAResumedRunGeneratesACachedSourcesUnrecordedNodes(t *testing.T) {
 	if status, err := s.verdict(t.Context()); status != "success" || *generated != 1 {
 		t.Fatalf("resumed run = %s (%v), generator runs %d; want success with the cached source's nodes generated once",
 			status, err, *generated)
+	}
+}
+
+func outputHost(t *testing.T, scenario string) (*Config, *store.Store) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("builds a protocol fixture")
+	}
+	bin := filepath.Join(t.TempDir(), "genoutputfixture")
+	if out, err := exec.Command("go", "build", "-o", bin, "./testdata/genoutputfixture").CombinedOutput(); err != nil {
+		t.Fatalf("build fixture: %v\n%s", err, out)
+	}
+	st := openStore(t)
+	routes, err := Start(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = routes.Close() })
+	logs := &memLogs{records: map[string][]sparkwing.LogRecord{}}
+	cfg := &Config{
+		Pipeline: "probe", Run: nodeproto.RunContext{RunID: "run-output"}, State: st, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
+		Session: SessionConfig{Entry: pipelineentry.Binary(bin), Env: []string{"GENFIXTURE_SCENARIO=" + scenario}, Grace: 20 * time.Millisecond},
+		Attempts: &Attempts{
+			Routes: routes, Local: st, Resolver: fixtureResolver{}, Masker: secrets.NewMasker(),
+			OpenLog: func(_ context.Context, _, id string) (NodeLog, error) { return memLog{logs: logs, node: id}, nil },
+		},
+	}
+	cfg.Dispatch = func(ctx context.Context, n *NodeRun) Result {
+		return HostDispatchedNode(ctx, *cfg, n.Plan.ID, n.Plan.SpecHash)
+	}
+	return cfg, st
+}
+
+// safety: a generated recovery node's row descends from its parent, so the
+// generator that loads its code may read the source's output, and it runs.
+func TestAGeneratedRecoveryReadsItsSourcesOutput(t *testing.T) {
+	cfg, st := outputHost(t, "recovery")
+	res, err := Execute(t.Context(), *cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, err := st.GetNode(t.Context(), cfg.Run.RunID, "recover")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := res.Nodes["recover"]; rec.Outcome != sparkwing.Success || !slices.Contains(row.Deps, "child") {
+		t.Fatalf("recover = %s (%v), row deps %v; want success under its parent", rec.Outcome, rec.Err, row.Deps)
+	}
+}
+
+func TestANestedGeneratorReadsItsSourcesOutput(t *testing.T) {
+	cfg, _ := outputHost(t, "nested")
+	res, err := Execute(t.Context(), *cfg)
+	if err != nil || res.Status != "success" || res.Nodes["grandchild"].Outcome != sparkwing.Success {
+		t.Fatalf("nested run = %s (%v), grandchild %s: %v", res.Status, res.Err, res.Nodes["grandchild"].Outcome, err)
+	}
+}
+
+// safety: a retry copies a complete recorded batch even when a sibling
+// generator recorded none, so the failed child it holds runs again rather
+// than vanishing when the first generator now returns nothing.
+func TestARetryKeepsACompleteBatchBesideAnEmptyOne(t *testing.T) {
+	cfg, st := outputHost(t, "multi")
+	first, err := Execute(t.Context(), *cfg)
+	if err != nil || first.Status != "failed" || first.Nodes["child"].Outcome != sparkwing.Failed {
+		t.Fatalf("source run = %s, child %s: %v", first.Status, first.Nodes["child"].Outcome, err)
+	}
+	cfg.Rehydrate = &Rehydration{SourceRunID: cfg.Run.RunID}
+	cfg.Run.RunID = "run-output-retry"
+	cfg.Session.Env = []string{"GENFIXTURE_SCENARIO=multi", "GENFIXTURE_PHASE=omitted"}
+	retry, err := Execute(t.Context(), *cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, rowErr := st.GetNode(t.Context(), cfg.Run.RunID, "child"); retry.Status == "success" || rowErr != nil {
+		t.Fatalf("retry = %s (%v), child row %v; want the recorded child kept and failing", retry.Status, retry.Err, rowErr)
+	}
+}
+
+func twoGeneratorDoc() nodeproto.PlanDoc {
+	doc := fanOutDoc()
+	doc.Nodes[0].Closures.Generator = append(doc.Nodes[0].Closures.Generator, secondGenerator)
+	doc.Nodes[1].NeedsGenerated = append(doc.Nodes[1].NeedsGenerated, secondGenerator)
+	return doc
+}
+
+const secondGenerator = "targets/generator/1"
+
+func resumeAfter(t *testing.T, doc nodeproto.PlanDoc, record func(*scheduler), regen []expansion) (*scheduler, *store.Store, *int) {
+	t.Helper()
+	st := openStore(t)
+	ctx := t.Context()
+	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest)}
+	first := &scheduler{run: run, results: map[string]Result{}, started: map[string]bool{}}
+	if err := first.add(ctx, ctx, doc.Nodes, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishNodeWithReason(ctx, testRunID, "targets", "success", "", []byte(`"targets"`), "", nil); err != nil {
+		t.Fatal(err)
+	}
+	record(first)
+	calls := 0
+	cfg := Config{Dispatch: remoteHost(st, sparkwing.Success, "", nil)}
+	s := &scheduler{
+		run: run, results: map[string]Result{}, started: map[string]bool{}, exec: chain(&cfg), resume: true,
+		regenerate: func(context.Context, *NodeRun, json.RawMessage) []expansion { calls++; return regen },
+	}
+	if err := s.add(ctx, ctx, doc.Nodes, nil); err != nil {
+		t.Fatal(err)
+	}
+	s.loop(ctx)
+	return s, st, &calls
+}
+
+var (
+	childA = nodeproto.PlanNode{ID: "test-a", Deps: deps("targets"), SpecHash: "sha256:a"}
+	childB = nodeproto.PlanNode{ID: "test-b", Deps: deps("targets"), SpecHash: "sha256:b"}
+)
+
+// safety: one generator's complete batch is kept as recorded while only its
+// sibling's, which recorded nothing, is generated, so a failed child stays.
+func TestAResumeKeepsACompleteBatchBesideAnEmptyOne(t *testing.T) {
+	s, _, calls := resumeAfter(t, twoGeneratorDoc(), func(first *scheduler) {
+		if err := first.addGenerated(t.Context(), "targets", expansion{closure: testGenerator, nodes: []nodeproto.PlanNode{childA}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := first.run.State.FinishNodeWithReason(t.Context(), testRunID, "test-a", "failed", "accepted test failed", nil, "", nil); err != nil {
+			t.Fatal(err)
+		}
+	}, []expansion{{closure: testGenerator}, {closure: secondGenerator}})
+	if status, err := s.verdict(t.Context()); status != "failed" || *calls != 1 || s.results["test-a"].Outcome != sparkwing.Failed {
+		t.Fatalf("resumed run = %s (%v), generator runs %d, test-a %s; want failed with test-a kept", status, err, *calls, s.results["test-a"].Outcome)
+	}
+}
+
+func partialBatch(t *testing.T) func(*scheduler) {
+	return func(first *scheduler) {
+		row := pendingRow(first.run, childA)
+		if err := (&expansionFrom{source: "targets", closure: testGenerator}).record(&row, childA, 2); err != nil {
+			t.Fatal(err)
+		}
+		if err := first.run.State.CreateNode(t.Context(), row); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// An interrupted batch is completed from the generator, keeping the row it
+// recorded.
+func TestAResumeCompletesAnInterruptedBatch(t *testing.T) {
+	s, st, calls := resumeAfter(t, fanOutDoc(), partialBatch(t), []expansion{{closure: testGenerator, nodes: []nodeproto.PlanNode{childA, childB}}})
+	status, err := s.verdict(t.Context())
+	rows, lerr := st.ListNodes(t.Context(), testRunID)
+	recorded := 0
+	for _, row := range rows {
+		if row.Generated != nil {
+			recorded++
+		}
+	}
+	if status != "success" || *calls != 1 || lerr != nil || recorded != 2 {
+		t.Fatalf("resumed run = %s (%v), generator runs %d, generated rows %d; want both recorded", status, err, *calls, recorded)
+	}
+}
+
+// safety: a regenerated batch that drops a node the run recorded is plan
+// drift, never a smaller fan-out.
+func TestARegeneratedBatchThatDropsARecordedNodeDrifts(t *testing.T) {
+	s, _, _ := resumeAfter(t, fanOutDoc(), partialBatch(t), []expansion{{closure: testGenerator, nodes: []nodeproto.PlanNode{childB}}})
+	status, _ := s.verdict(t.Context())
+	summary := s.results["summary"]
+	if status != "failed" || summary.Outcome != sparkwing.Cancelled || !strings.Contains(errText(summary.Err), "no longer returns node test-a") {
+		t.Fatalf("resumed run = %s, summary %s (%v); want summary cancelled for the drifted batch", status, summary.Outcome, summary.Err)
+	}
+}
+
+func generatedChain(t *testing.T, st *store.Store, depth int, cycle bool) (*Run, string, string) {
+	t.Helper()
+	ctx := t.Context()
+	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	run := &Run{ID: testRunID, Doc: nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "n0"}}}, State: st}
+	var last nodeproto.PlanNode
+	for i := 1; i <= depth; i++ {
+		source := fmt.Sprintf("n%d", i-1)
+		if cycle && i == 1 {
+			source = fmt.Sprintf("n%d", depth)
+		}
+		last = nodeproto.PlanNode{ID: fmt.Sprintf("n%d", i), Deps: deps(source), SpecHash: fmt.Sprintf("sha256:%d", i)}
+		row := pendingRow(run, last)
+		if err := (&expansionFrom{source: source, closure: source + "/generator/0"}).record(&row, last, 1); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.CreateNode(ctx, row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return run, last.ID, last.SpecHash
+}
+
+// A pod follows a long chain of generated sources back to the plan.
+func TestAPodFollowsALongGeneratorChain(t *testing.T) {
+	run, id, hash := generatedChain(t, openStore(t), 70, false)
+	_, chain, err := podGenerated(t.Context(), run, id, hash)
+	if err != nil || len(chain) != 70 || chain[0] != "n0/generator/0" {
+		t.Fatalf("chain of %d (%v), first %v: want 70 generators from n0's", len(chain), err, chain[:min(1, len(chain))])
+	}
+}
+
+// safety: recorded sources that loop back are refused rather than followed.
+func TestAPodRefusesACycleOfRecordedSources(t *testing.T) {
+	run, id, hash := generatedChain(t, openStore(t), 3, true)
+	_, _, err := podGenerated(t.Context(), run, id, hash)
+	var perr *nodeproto.Error
+	if !errors.As(err, &perr) || perr.Code != nodeproto.CodePlanDrift {
+		t.Fatalf("cyclic sources = %v, want plan_drift", err)
 	}
 }

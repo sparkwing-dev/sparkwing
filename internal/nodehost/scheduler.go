@@ -685,9 +685,16 @@ func (s *scheduler) reuseRow(ctx context.Context, n nodeproto.PlanNode, row *sto
 	}
 	s.started[id], s.results[id] = true, res
 	if generatesNodes(n, res.Outcome) {
-		res.expansions = s.recordedExpansions(ctx, s.run.ID, n, func() (json.RawMessage, error) {
-			return recordedOutput(ctx, s.run.State, s.run.ID, id)
-		})
+		batches, err := storedExpansions(ctx, s.run.State, s.run.ID, n)
+		if err != nil {
+			for _, g := range n.Closures.Generator {
+				res.expansions = append(res.expansions, expansion{closure: g, err: err})
+			}
+		} else {
+			res.expansions = s.recordedExpansions(ctx, n, batches, func() (json.RawMessage, error) {
+				return recordedOutput(ctx, s.run.State, s.run.ID, id)
+			})
+		}
 		s.results[id] = res
 		s.adopted = append(s.adopted, finished{id: id, res: res})
 	}

@@ -265,8 +265,9 @@ func (s *Store) declaredNode(ctx context.Context, team Team, runID, nodeID strin
 // plan; it carries no secrets of its own, so the pipeline's declared secrets still bound what it reads.
 func (s *Store) declaredGeneratedNode(ctx context.Context, team Team, runID, nodeID string) (declaredPlanNode, bool, error) {
 	var raw []byte
-	err := s.queryRow(ctx, `SELECT generated_json FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`,
-		string(team), runID, nodeID).Scan(&raw)
+	var specHash string
+	err := s.queryRow(ctx, `SELECT generated_json, spec_hash FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`,
+		string(team), runID, nodeID).Scan(&raw, &specHash)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && len(raw) == 0) {
 		return declaredPlanNode{}, false, nil
 	}
@@ -281,7 +282,14 @@ func (s *Store) declaredGeneratedNode(ctx context.Context, team Team, runID, nod
 	if err := json.Unmarshal(gen.Spec, &n); err != nil {
 		return declaredPlanNode{}, false, fmt.Errorf("read run %s node %s's generated spec: %w", runID, nodeID, err)
 	}
-	if n.ID != nodeID {
+	var stamp struct {
+		SpecHash string `json:"spec_hash"`
+	}
+	// safety: a spec that names another node or hashes otherwise than its row is not what the run accepted.
+	if err := json.Unmarshal(gen.Spec, &stamp); err != nil {
+		return declaredPlanNode{}, false, fmt.Errorf("read run %s node %s's generated spec: %w", runID, nodeID, err)
+	}
+	if n.ID != nodeID || stamp.SpecHash != specHash {
 		return declaredPlanNode{}, false, nil
 	}
 	return n, true, nil

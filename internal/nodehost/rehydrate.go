@@ -63,18 +63,14 @@ func (s *scheduler) rehydrated(ctx context.Context, n nodeproto.PlanNode, byID m
 		return s.runsAgain(n.ID)
 	}
 	generator := generatesNodes(n, sparkwing.Outcome(prior.Outcome))
-	var stored []expansion
+	var batches []recordedBatch
 	if generator {
-		var complete bool
 		var err error
-		if stored, complete, err = storedExpansions(ctx, s.run.State, r.SourceRunID, n); err != nil {
+		if batches, err = storedExpansions(ctx, s.run.State, r.SourceRunID, n); err != nil {
 			return Result{Outcome: sparkwing.Failed, Err: err}, true
 		}
-		if !complete && s.regenerate == nil {
+		if !allRecorded(batches) && s.regenerate == nil {
 			return s.runsAgain(n.ID)
-		}
-		if !complete {
-			stored = nil
 		}
 	}
 	output, ok, err := s.sourceOutput(ctx, prior)
@@ -92,13 +88,9 @@ func (s *scheduler) rehydrated(ctx context.Context, n nodeproto.PlanNode, byID m
 	if prior.Error != "" {
 		res.Err = errors.New(prior.Error)
 	}
-	// safety: the source run recorded its generator's nodes whole, which the copy adds as they were; only a
-	// batch it never fully recorded is generated from the copied output in an eval process, as a memo hit's is.
-	switch {
-	case generator && stored != nil:
-		res.expansions = stored
-	case generator:
-		res.expansions = s.regenerate(ctx, &NodeRun{Run: s.run, Plan: n, Generators: s.generators(n.ID)}, output)
+	// safety: the copy adds the generators' nodes the source run recorded, as they were.
+	if generator {
+		res.expansions = s.recordedExpansions(ctx, n, batches, func() (json.RawMessage, error) { return output, nil })
 	}
 	return res, true
 }
