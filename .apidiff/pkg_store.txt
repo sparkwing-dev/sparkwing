@@ -1411,6 +1411,8 @@ type Node struct {
 	ArtifactManifest string
 
 	ClaimToken string
+
+	SpecHash string
 }
 type NodeAttention struct {
 	Team          Team

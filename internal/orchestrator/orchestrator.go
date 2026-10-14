@@ -2215,7 +2215,7 @@ func (s *dispatchState) runOneNode(ctx context.Context, node *sparkwing.JobNode)
 		dispatched := false
 		res = s.runWithCap(ctx, node, func(slot *workerSlot) runner.Result {
 			dispatched = true
-			return activeRunner.RunNode(dispatchCtx, runner.Request{
+			return activeRunner.RunNode(dispatchCtx, withNodeShape(runner.Request{
 				RunID:               s.runID,
 				NodeID:              node.ID(),
 				Pipeline:            s.pipeline,
@@ -2224,7 +2224,7 @@ func (s *dispatchState) runOneNode(ctx context.Context, node *sparkwing.JobNode)
 				Delegate:            s.delegate,
 				ReleaseWorkerSlot:   slot.release,
 				ReacquireWorkerSlot: slot.reacquire,
-			})
+			}))
 		})
 		// safety: the reset left the node pending, so a retry cancelled before
 		// its runner was called records the cancel itself or the node stays pending.
@@ -2341,6 +2341,16 @@ func (s *dispatchState) doPause(ctx context.Context, nodeID, reason string) bool
 	_ = s.backends.State.SetNodeStatus(s.ctx, s.runID, nodeID, "pending")
 	noteEvent(s.ctx, s.backends.State, s.runID, nodeID, "node_resumed", nil)
 	return false
+}
+
+// safety: a remote runner sizes and bounds its Job from these fields alone,
+// so every request the dispatcher makes carries its node's timeout and pin.
+func withNodeShape(req runner.Request) runner.Request {
+	req.Timeout = req.Node.TimeoutDuration()
+	if pin := req.Node.ResourceHints(); pin != nil {
+		req.Cores, req.MemoryBytes = pin.Cores, pin.MemoryBytes
+	}
+	return req
 }
 
 func (s *dispatchState) applyResult(nodeID string, res runner.Result) {
@@ -2604,7 +2614,7 @@ func (s *dispatchState) invokeRecoveryRunner(ctx context.Context, node *sparkwin
 	ctx = sparkwing.WithFailure(ctx, parentFailure)
 	ctx = withAdmissionWaitParticipant(ctx, node.ID())
 	return s.runWithCap(ctx, node, func(slot *workerSlot) runner.Result {
-		return s.runner.RunNode(ctx, runner.Request{
+		return s.runner.RunNode(ctx, withNodeShape(runner.Request{
 			RunID:               s.runID,
 			NodeID:              node.ID(),
 			Pipeline:            s.pipeline,
@@ -2613,7 +2623,7 @@ func (s *dispatchState) invokeRecoveryRunner(ctx context.Context, node *sparkwin
 			Delegate:            s.delegate,
 			ReleaseWorkerSlot:   slot.release,
 			ReacquireWorkerSlot: slot.reacquire,
-		})
+		}))
 	})
 }
 

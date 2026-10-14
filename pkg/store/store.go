@@ -1612,6 +1612,10 @@ type Node struct {
 	// token the node's process authenticates with in place of the runner's
 	// own credential. It stops working when the claim ends.
 	ClaimToken string `json:"claim_token,omitempty"`
+	// SpecHash is the node's spec_hash in the plan its run host accepted. A
+	// remote host of the node runs it only when its own plan of the node
+	// hashes the same.
+	SpecHash string `json:"spec_hash,omitempty"`
 }
 
 // CreateNode inserts a node in the "pending" state.
@@ -1694,7 +1698,7 @@ INSERT INTO nodes (team, run_id, node_id, status, deps_json, needs_labels, prefe
 			       execution_policy_json, execution_policy_hash, execution_policy_version, execution_body_protocol,
 			       execution_supervisor_requirements_json, execution_supervisor_requirements_hash,
 			       execution_body_requirements_json, execution_body_requirements_hash,
-			       seq)
+			       spec_hash, seq)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_coordinator_id FROM runs WHERE team = ? AND id = ?), ''),
 		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_executor_kind FROM runs WHERE team = ? AND id = ?), ''),
@@ -1705,6 +1709,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 		?,
 		?,
 		?, ?, ?, ?, ?, ?, ?, ?,
+		?,
 		(SELECT COALESCE(MAX(seq), 0) + 1 FROM nodes WHERE team = ? AND run_id = ?))`,
 		string(team), n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON, prefersJSON,
 		n.RequestedCores, n.RequestedMemoryBytes, requestedSlots,
@@ -1719,6 +1724,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 		policyJSON, policyHash, policyVersion, bodyProtocol,
 		supervisorRequirementsJSON, supervisorRequirementsHash,
 		bodyRequirementsJSON, bodyRequirementsHash,
+		n.SpecHash,
 		string(team), n.RunID)
 	if err != nil {
 		return err
@@ -2106,7 +2112,7 @@ const nodeSelectColumns = `run_id, node_id, status, outcome, deps_json, error,
 	   execution_supervisor_requirements_json, execution_supervisor_requirements_hash,
 	   execution_body_requirements_json, execution_body_requirements_hash,
 	   avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until,
-	   placement_reason, placement_hold_from, credit_cpu_class,
+	   placement_reason, placement_hold_from, credit_cpu_class, spec_hash,
 	   (SELECT pipeline FROM runs WHERE runs.team = nodes.team AND runs.id = nodes.run_id)`
 
 func scanNodeRow(rs rowScanner, n *nodeRecord) error {
@@ -2136,7 +2142,7 @@ func scanNodeRow(rs rowScanner, n *nodeRecord) error {
 		&supervisorRequirementsJSON, &supervisorRequirementsHash,
 		&bodyRequirementsJSON, &bodyRequirementsHash,
 		&n.AvoidCoordinatorID, &n.AvoidExecutorKind, &n.AvoidExecutorID, &avoidUntilNS,
-		&n.PlacementReason, &holdFromNS, &n.CreditCPUClassCores, &pipeline)
+		&n.PlacementReason, &holdFromNS, &n.CreditCPUClassCores, &n.SpecHash, &pipeline)
 	if errors.Is(err, sql.ErrNoRows) {
 		return notFound("node", "")
 	}
@@ -2736,6 +2742,10 @@ func (t *Tenant) markNodeReady(ctx context.Context, runID, nodeID string, policy
 	return tx.Commit()
 }
 
+// ResetNodeForAutoRetry returns a failed node to pending so it runs again.
+// A node whose holder was lost (agent_lost) resets only for its run's
+// trigger holder, resuming the run, only while no agent-loss retry run took
+// the run over, and never once the run finished or a cancel was requested.
 func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error {
 	return s.defaultTenant().ResetNodeForAutoRetry(ctx, runID, nodeID)
 }
@@ -2750,7 +2760,8 @@ func (t *Tenant) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string
 	if _, nodeClaim := NodeClaimFenceFromContext(ctx); nodeClaim {
 		return ErrLockHeld
 	}
-	if _, triggerClaim := TriggerClaimFenceFromContext(ctx); triggerClaim {
+	_, triggerClaim := TriggerClaimFenceFromContext(ctx)
+	if triggerClaim {
 		if err := t.s.assertNodeMutationFenceTx(ctx, tx, t.team, runID, nodeID); err != nil {
 			return err
 		}
@@ -2768,7 +2779,29 @@ func (t *Tenant) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string
 	if status == nodeStatusPending && outcome == "" && !claimedBy.Valid {
 		return tx.Commit()
 	}
-	if status != nodeStatusDone || outcome != "failed" || failureReason == FailureAgentLost {
+	// safety: a node whose holder was lost stays failed when an agent-loss retry run took its run over;
+	// otherwise the run's own trigger holder, resuming the run, may run it again.
+	lostReset := ""
+	if failureReason == FailureAgentLost {
+		var retried int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_loss_retries WHERE team = ? AND source_run_id = ?`,
+			string(t.team), runID).Scan(&retried); err != nil {
+			return err
+		}
+		var runStatus string
+		var cancelRequested sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT r.status, t.cancel_requested_at FROM runs r
+  LEFT JOIN triggers t ON t.team = r.team AND t.id = r.id
+ WHERE r.team = ? AND r.id = ?`, string(t.team), runID).Scan(&runStatus, &cancelRequested); err != nil {
+			return err
+		}
+		// safety: a cancelled or finished run, or one with a cancel requested, never reopens a node.
+		if !triggerClaim || retried > 0 || isTerminalRunStatus(runStatus) || cancelRequested.Valid {
+			return ErrLockHeld
+		}
+		lostReset = FailureAgentLost
+	}
+	if status != nodeStatusDone || outcome != "failed" {
 		return ErrLockHeld
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM node_steps WHERE team = ? AND run_id = ? AND node_id = ?`, string(t.team), runID, nodeID); err != nil {
@@ -2796,8 +2829,8 @@ func (t *Tenant) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string
        executor_location = '', execution_started_at = NULL, reservation_id = '', status_detail = '', last_heartbeat = NULL,
        credit_charged_through = 0,
        failure_reason = '', exit_code = NULL, annotations_json = '[]', summary = '', artifact_manifest = ''
- WHERE team = ? AND run_id = ? AND node_id = ? AND status = ? AND outcome = ? AND failure_reason != ?`,
-		nodeStatusPending, string(t.team), runID, nodeID, nodeStatusDone, "failed", FailureAgentLost)
+ WHERE team = ? AND run_id = ? AND node_id = ? AND status = ? AND outcome = ? AND (failure_reason != ? OR failure_reason = ?)`,
+		nodeStatusPending, string(t.team), runID, nodeID, nodeStatusDone, "failed", FailureAgentLost, lostReset)
 	if err != nil {
 		return err
 	}

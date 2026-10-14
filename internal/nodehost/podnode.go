@@ -90,6 +90,9 @@ func hostRequires(doc nodeproto.PlanDoc, raw []byte, requires []string) (nodepro
 var (
 	podLayers     = []Layer{skipIfLayer, memoLayer, admissionLayer, artifactsLayer, cachesLayer, retryLayer, timeoutLayer}
 	podAutoLayers = []Layer{skipIfLayer, memoLayer, admissionLayer, artifactsLayer, cachesLayer, timeoutLayer}
+	// safety: a dispatched node's run host already ran its skip_if, memo and
+	// admission, so the pod runs the rest, retry_auto's attempts included.
+	podDispatchedLayers = []Layer{artifactsLayer, cachesLayer, retryLayer, timeoutLayer}
 )
 
 // HostNode runs node nodeID of cfg's run, as a pod that claimed it does, and
@@ -102,14 +105,31 @@ var (
 // [store.MaxNodeRetries] as the controller caps it; any other node runs its
 // plain retries in this process. cfg.Attempts is required.
 func HostNode(ctx context.Context, cfg Config, nodeID, acceptedHash string, attempt int) Result {
+	run := podRun(&cfg)
+	return podHost(ctx, &cfg, run, nodeID, podAttempt(ctx, &cfg, run, nodeID, acceptedHash, max(attempt, 1), false))
+}
+
+// HostDispatchedNode runs node nodeID of cfg's run for the run host that
+// dispatched it, which already ran the node's skip_if, memo and admission;
+// it records the node's start and result in cfg.State as [HostNode] does. The
+// node runs only when its spec_hash equals acceptedHash, and every retry, a
+// retry_auto node's included, runs in this process. cfg.Attempts is required.
+func HostDispatchedNode(ctx context.Context, cfg Config, nodeID, acceptedHash string) Result {
+	run := podRun(&cfg)
+	return podHost(ctx, &cfg, run, nodeID, podAttempt(ctx, &cfg, run, nodeID, acceptedHash, 1, true))
+}
+
+func podRun(cfg *Config) *Run {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
-	run := &Run{
+	return &Run{
 		ID: cfg.Run.RunID, Pipeline: cfg.Pipeline, Args: cfg.Args, Context: cfg.Run,
 		State: cfg.State, Logger: cfg.Logger,
 	}
-	res := podAttempt(ctx, &cfg, run, nodeID, acceptedHash, max(attempt, 1))
+}
+
+func podHost(ctx context.Context, cfg *Config, run *Run, nodeID string, res Result) Result {
 	if res.Outcome == sparkwing.Failed && ctx.Err() != nil {
 		res.Outcome = sparkwing.Cancelled
 	}
@@ -120,7 +140,7 @@ func HostNode(ctx context.Context, cfg Config, nodeID, acceptedHash string, atte
 	return podFinish(ctx, run, nodeID, res)
 }
 
-func podAttempt(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash string, attempt int) Result {
+func podAttempt(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash string, attempt int, dispatched bool) Result {
 	if cfg.Attempts == nil {
 		return failed(errors.New("nodehost: no attempt executor"))
 	}
@@ -146,7 +166,16 @@ func podAttempt(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash
 	}
 	n := &NodeRun{Run: run, Plan: doc.Nodes[i]}
 	layers := podLayers
-	if m := n.Plan.Modifiers; m != nil && m.RetryAuto {
+	if m := n.Plan.Modifiers; dispatched {
+		layers = podDispatchedLayers
+		if parent := n.Plan.OnFailureOf; parent != "" {
+			row, err := run.State.GetNode(ctx, run.ID, parent)
+			if err != nil {
+				return failed(fmt.Errorf("read how %s failed: %w", parent, err))
+			}
+			n.Failure = parentFailure(parent, row.FailureReason, row.Error)
+		}
+	} else if m != nil && m.RetryAuto {
 		// safety: the attempt report cannot tell the controller a failed before_run is final, so every
 		// dispatch runs before_run again and a refused hook never lets a later dispatch run the body.
 		layers, n.Attempt, n.BeforeRunEachAttempt = podAutoLayers, attempt, true

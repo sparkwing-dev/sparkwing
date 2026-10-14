@@ -10,8 +10,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"reflect"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,118 +19,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
-
-func TestTriggerRunnerArgsK8s(t *testing.T) {
-	got := triggerRunnerArgs(TriggerLoopOptions{
-		RunnerKind:    "k8s",
-		K8sNamespace:  "sparkwing",
-		K8sImage:      "example.com/sparkwing-runner:v1",
-		K8sRunnerSA:   "runner-job",
-		K8sPullSecret: "pull-secret",
-		K8sCtrlURL:    "http://controller:4343",
-		Kubeconfig:    "/tmp/kubeconfig",
-		ArtifactStore: "http://cache:4344",
-		K8sLabels: []string{
-			"cluster",
-		},
-		K8sNodeSelector: []string{
-			"sparkwing.io/node-pool=runner",
-		},
-		K8sTolerations: []string{
-			"sparkwing.io/node-pool=runner:NoSchedule",
-		},
-		DependencyProxy:    "http://cache:80",
-		K8sImagePullPolicy: "Always",
-		K8sCPUCeiling:      "8",
-		K8sMemoryCeiling:   "16Gi",
-		K8sJobDeadline:     90 * time.Minute,
-		K8sTeamNodes:       true,
-	})
-	want := []string{
-		"--runner", "k8s",
-		"--namespace", "sparkwing",
-		"--image", "example.com/sparkwing-runner:v1",
-		"--runner-sa", "runner-job",
-		"--image-pull-secret", "pull-secret",
-		"--runner-controller-url", "http://controller:4343",
-		"--kubeconfig", "/tmp/kubeconfig",
-		"--artifact-store", "http://cache:4344",
-		"--image-pull-policy", "Always",
-		"--k8s-cpu-ceiling", "8",
-		"--k8s-memory-ceiling", "16Gi",
-		"--k8s-job-deadline", "1h30m0s",
-		"--runner-team-nodes",
-		"--dependency-proxy", "http://cache:80",
-		"--runner-label", "cluster",
-		"--runner-node-selector", "sparkwing.io/node-pool=runner",
-		"--runner-toleration", "sparkwing.io/node-pool=runner:NoSchedule",
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("triggerRunnerArgs() = %#v, want %#v", got, want)
-	}
-}
-
-func TestTriggerRunnerArgsForwardsDependencyProxyOptOut(t *testing.T) {
-	got := triggerRunnerArgs(TriggerLoopOptions{
-		RunnerKind:   "k8s",
-		K8sNamespace: "sparkwing",
-		K8sImage:     "example.com/sparkwing-runner:v1",
-	})
-	idx := slices.Index(got, "--dependency-proxy")
-	if idx == -1 || idx+1 >= len(got) || got[idx+1] != "off" {
-		t.Fatalf("triggerRunnerArgs() = %#v, want --dependency-proxy off", got)
-	}
-	if slices.Contains(got, "--image-pull-policy") {
-		t.Fatalf("triggerRunnerArgs() = %#v, want no --image-pull-policy when unset", got)
-	}
-}
-
-func TestTriggerRunnerArgsWarm(t *testing.T) {
-	got := triggerRunnerArgs(TriggerLoopOptions{
-		RunnerKind:   "warm",
-		K8sNamespace: "sparkwing",
-		K8sImage:     "example.com/sparkwing-runner:v1",
-	})
-	want := []string{
-		"--runner", "warm",
-		"--namespace", "sparkwing",
-		"--image", "example.com/sparkwing-runner:v1",
-		"--dependency-proxy", "off",
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("triggerRunnerArgs() = %#v, want %#v", got, want)
-	}
-}
-
-func TestTriggerRunnerArgsDefaultInProcess(t *testing.T) {
-	if got := triggerRunnerArgs(TriggerLoopOptions{}); len(got) != 0 {
-		t.Fatalf("triggerRunnerArgs(default) = %#v, want empty", got)
-	}
-}
-
-func TestHandleTriggerArgsPutFlagsBeforeTriggerID(t *testing.T) {
-	got := handleTriggerArgs("trigger-1", TriggerLoopOptions{
-		ControllerURL: "http://controller:4343",
-		Token:         "token",
-		RunnerKind:    "k8s",
-		K8sNamespace:  "sparkwing",
-		K8sImage:      "example.com/sparkwing-runner:v1",
-	})
-	triggerIdx := slices.Index(got, "trigger-1")
-	runnerIdx := slices.Index(got, "--runner")
-	if triggerIdx == -1 || runnerIdx == -1 {
-		t.Fatalf("handleTriggerArgs() = %#v, want trigger id and --runner", got)
-	}
-	if runnerIdx > triggerIdx {
-		t.Fatalf("handleTriggerArgs() = %#v, want flags before trigger id", got)
-	}
-	if got[len(got)-1] != "trigger-1" {
-		t.Fatalf("handleTriggerArgs() last arg = %q, want trigger id", got[len(got)-1])
-	}
-	if slices.Contains(got, "--token") || slices.Contains(got, "token") {
-		t.Fatalf("handleTriggerArgs() = %#v, want the bearer off argv", got)
-	}
-}
 
 func TestRunTriggerLoopClaimsWhileHandlerInFlight(t *testing.T) {
 	firstInFlight := make(chan struct{})

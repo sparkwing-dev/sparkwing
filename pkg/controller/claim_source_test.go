@@ -39,7 +39,7 @@ ON CONFLICT DO NOTHING`, who.team, store.RepoKey(owner, name), string(store.Repo
 		store.LaunchClaimRequest{
 			HolderID: "launcher:" + runID, Lease: time.Minute, Deadline: time.Hour,
 			RunID: runID, NodeID: store.PlanNodeID,
-		}, time.Now())
+		}, controller.LaunchClaimClock(f.t, f.store, runID, store.PlanNodeID))
 	if err != nil || c == nil {
 		f.t.Fatalf("launch claim %s: %+v %v", runID, c, err)
 	}

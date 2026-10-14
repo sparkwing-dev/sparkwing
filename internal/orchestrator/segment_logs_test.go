@@ -180,38 +180,6 @@ func TestNodeLogStaysLocalOnAControllerWithoutSegments(t *testing.T) {
 	}
 }
 
-// A trigger's in-process nodes post their logs to the trigger broker,
-// which keeps one sink per node across every stream that writes it and
-// seals them all when the trigger's child exits.
-func TestTriggerBrokerKeepsEachNodeLogAsSegments(t *testing.T) {
-	ctrl, tok := newSegmentController(t)
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	broker, err := StartTriggerBroker(ctrl.url, tok, &store.Trigger{ID: "run-s", Pipeline: "demo"}, logger)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer broker.Close(t.Context())
-	for _, stream := range []string{"waiting", "running"} {
-		nodeLog, err := NewHTTPLogsWithToken(broker.URL(), nil, broker.Capability(), logger).OpenNodeLog(context.Background(), "run-s", "a", nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		nodeLog.Log("info", stream)
-		if err := nodeLog.Close(); err != nil {
-			t.Fatal(err)
-		}
-	}
-	broker.SealLogs(t.Context(), false)
-
-	l := ctrl.log(t)
-	if l.Manifest == nil || l.Manifest.Status != logseg.StatusComplete || l.Manifest.Lines != 2 {
-		t.Fatalf("manifest = %+v", l.Manifest)
-	}
-}
-
-// A sink pushes nothing live until a heartbeat reports the node watched;
-// then it pushes what the segments do not hold yet and each new line, and
-// it stops when the viewer leaves.
 func TestHeartbeatWatchReportsTurnTheLiveViewOnAndOff(t *testing.T) {
 	srv, pushes := newFakeSegmentController(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -284,45 +252,4 @@ func newFakeSegmentController(t *testing.T) (*httptest.Server, chan livePush) {
 	}))
 	t.Cleanup(srv.Close)
 	return srv, pushes
-}
-
-// A trigger's child sends the run heartbeat through the broker. The
-// broker asks which nodes a viewer watches, turns those nodes' live view
-// on, and answers the child the 204 an older SDK expects.
-func TestTriggerBrokerTurnsOnWatchedNodesFromTheRunHeartbeat(t *testing.T) {
-	srv, pushes := newFakeSegmentController(t)
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	broker, err := StartTriggerBroker(srv.URL, "runner-token", &store.Trigger{ID: "r", Pipeline: "demo"}, logger)
-	if err != nil {
-		t.Fatal(err)
-	}
-	post := func(path, body string) int {
-		req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, broker.URL()+path, strings.NewReader(body))
-		req.Header.Set("Authorization", "Bearer "+broker.Capability())
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_ = resp.Body.Close()
-		return resp.StatusCode
-	}
-	if code := post("/api/v1/logs/r/n", "before\n"); code != http.StatusNoContent {
-		t.Fatalf("append: %d", code)
-	}
-	if code := post("/api/v1/runs/r/heartbeat", ""); code != http.StatusNoContent {
-		t.Fatalf("the child's run heartbeat answered %d, want 204", code)
-	}
-	if code := post("/api/v1/logs/r/n", "after\n"); code != http.StatusNoContent {
-		t.Fatalf("append: %d", code)
-	}
-	broker.SealLogs(t.Context(), false)
-	broker.Close(t.Context())
-	close(pushes)
-	var got strings.Builder
-	for p := range pushes {
-		got.WriteString(p.body)
-	}
-	if got.String() != "before\nafter\n" {
-		t.Fatalf("live pushes = %q, want both lines once the heartbeat reported the node watched", got.String())
-	}
 }

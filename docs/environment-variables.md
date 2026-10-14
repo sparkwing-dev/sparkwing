@@ -30,7 +30,7 @@ the files in `--credentials-dir`, so no service configuration appears here.
 
 ## Runtime: the Jobs and children a runner starts
 
-Sparkwing sets these for a Job, a trigger's `handle-trigger` child or a node
+Sparkwing sets these for a Job or a node
 process; the runner itself reads its settings from flags. The `sparkwing` CLI
 also reads `SPARKWING_CONTROLLER_URL` as a fallback for its own `--controller`.
 
@@ -160,6 +160,9 @@ Set by Sparkwing for pipeline code and node processes.
 | `GOPATH` | Go toolchain |
 | `GOPRIVATE` | Go toolchain |
 | `GOPROXY` | Go toolchain |
+| `PIP_INDEX_URL` | pip; a runner's dependency proxy setting, which a node process receives |
+| `PIP_TRUSTED_HOST` | pip; a runner's dependency proxy setting, which a node process receives |
+| `npm_config_registry` | npm; a runner's dependency proxy setting, which a node process receives |
 | `GOWORK` | Go toolchain |
 | `PATH` | the operating system |
 | `SHELL` | the operating system |

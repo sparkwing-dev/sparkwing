@@ -16,14 +16,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestRemoteExecutionChildEnvironmentDropsSupervisorAuthority(t *testing.T) {
@@ -475,47 +473,6 @@ func TestCollectDispatchEnvDropsRemoteExecutionAuthority(t *testing.T) {
 		if strings.Contains(string(raw), name) || strings.Contains(string(raw), "sentinel-"+name) {
 			t.Fatalf("dispatch snapshot retained %s: %s", name, raw)
 		}
-	}
-}
-
-func TestClaimedRegisteredNodeRunsOnlyInIsolatedChild(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("SPARKWING_HOME", home)
-	st, err := teststore.Open(t.TempDir() + "/state.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	ctx := context.Background()
-	if err := st.CreateRun(ctx, store.Run{
-		ID: "run-isolated", Pipeline: "registered-helper-pipeline", Status: "running", StartedAt: time.Now(),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	server := httptest.NewServer(controller.New(st, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler())
-	defer server.Close()
-
-	previous := runNodeIsolatedFn
-	t.Cleanup(func() { runNodeIsolatedFn = previous })
-	called := false
-	runNodeIsolatedFn = func(_ context.Context, controllerURL, runID, nodeID, token, _ string, _ *slog.Logger) (runner.Result, error) {
-		called = true
-		if controllerURL != server.URL || runID != "run-isolated" || nodeID != "build" || token != "parent-token" {
-			t.Fatalf("isolated call = %q %q %q %q", controllerURL, runID, nodeID, token)
-		}
-		return runner.Result{Outcome: sparkwing.Success}, nil
-	}
-	node := &store.Node{
-		RunID: "run-isolated", NodeID: "build", ClaimedBy: "holder", ClaimGeneration: 1,
-		ClaimMembershipID: "membership", ReservationID: "reservation",
-	}
-	result, err := RunNodeOnce(ctx, server.URL, "", node.RunID, node.NodeID, node.ClaimedBy, "parent-token",
-		nil, slog.New(slog.NewTextHandler(io.Discard, nil)), nil, ClaimedNodeAttempt(node))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !called || result.Outcome != sparkwing.Success {
-		t.Fatalf("claimed registered node bypassed isolated child: called=%v result=%+v", called, result)
 	}
 }
 

@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
@@ -83,7 +85,7 @@ func TestTriggerClaimHeartbeat_Reaped(t *testing.T) {
 	defer cancel()
 
 	var killed atomic.Bool
-	killChild := func() { killed.Store(true) }
+	killChild := func(error) { killed.Store(true) }
 
 	outcome := triggerClaimHeartbeat(ctx, cli, "trig-x", killChild, discardSlog())
 
@@ -111,12 +113,17 @@ func TestTriggerClaimHeartbeat_StopsChildOnClaimSignal(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				killed := false
+				var cause error
 				httpClient := &http.Client{Transport: tc.respond}
 				got := triggerClaimHeartbeat(t.Context(), client.New("http://controller.test", httpClient),
-					"trig-x", func() { killed = true }, discardSlog())
-				if got != tc.want || !killed {
-					t.Fatalf("%s left child running: outcome=%v killed=%v", tc.name, got, killed)
+					"trig-x", func(c error) { cause = c }, discardSlog())
+				if got != tc.want || cause == nil {
+					t.Fatalf("%s left the run going: outcome=%v cause=%v", tc.name, got, cause)
+				}
+				// safety: only an operator's cancel may record the run as cancelled.
+				var cancel *nodehost.CancelError
+				if isCancel := errors.As(cause, &cancel); isCancel != (tc.want == triggerClaimCancelled) {
+					t.Fatalf("%s stopped the run with %v, a cancel: %v", tc.name, cause, isCancel)
 				}
 			})
 		})
@@ -136,7 +143,7 @@ func TestTriggerClaimHeartbeat_Silenced(t *testing.T) {
 	defer cancel()
 
 	var killed atomic.Bool
-	killChild := func() { killed.Store(true) }
+	killChild := func(error) { killed.Store(true) }
 
 	outcome := triggerClaimHeartbeat(ctx, cli, "trig-x", killChild, discardSlog())
 
@@ -170,7 +177,7 @@ func TestTriggerClaimHeartbeat_TransientRecovery(t *testing.T) {
 	defer cancel()
 
 	var killed atomic.Bool
-	killChild := func() { killed.Store(true) }
+	killChild := func(error) { killed.Store(true) }
 
 	outcome := triggerClaimHeartbeat(ctx, cli, "trig-x", killChild, discardSlog())
 

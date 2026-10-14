@@ -33,17 +33,30 @@ type backend interface {
 	store(ctx context.Context, key, dir string) (int64, error)
 }
 
-func selectBackend() backend {
+func selectBackend(ctx context.Context) backend {
 	if url := strings.TrimRight(os.Getenv("SPARKWING_CACHE_URL"), "/"); url != "" {
-		return &remoteBackend{baseURL: url, token: cacheToken()}
+		return &remoteBackend{baseURL: url, token: cacheToken(ctx)}
 	}
 	if url := strings.TrimRight(os.Getenv("SPARKWING_GITCACHE_URL"), "/"); url != "" {
-		return &remoteBackend{baseURL: url, token: cacheToken()}
+		return &remoteBackend{baseURL: url, token: cacheToken(ctx)}
 	}
 	return &localBackend{}
 }
 
-func cacheToken() string {
+type cacheGrantKey struct{}
+
+// WithCacheGrant makes the caches restored and saved under ctx authenticate
+// with grant, the grant of the node's own run, instead of the process's.
+func WithCacheGrant(ctx context.Context, grant string) context.Context {
+	return context.WithValue(ctx, cacheGrantKey{}, grant)
+}
+
+// safety: a host serving several runs at once names each node's grant on its
+// context, so one run's caches never authenticate with another run's grant.
+func cacheToken(ctx context.Context) string {
+	if grant, ok := ctx.Value(cacheGrantKey{}).(string); ok {
+		return grant
+	}
 	return authwire.CacheBearerFromEnv()
 }
 

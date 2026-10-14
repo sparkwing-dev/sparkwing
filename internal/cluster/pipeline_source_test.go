@@ -54,8 +54,15 @@ func main(){body,err:=os.ReadFile("subject");if err!=nil{panic(err)};if err:=os.
 	revision := strings.TrimSpace(string(out))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 	defer server.Close()
-	previous, previousRef := fetchSourceFn, fetchPipelineRefFn
-	t.Cleanup(func() { fetchSourceFn, fetchPipelineRefFn = previous, previousRef })
+	previous, previousRef, previousHost := fetchSourceFn, fetchPipelineRefFn, hostTriggerRunFn
+	t.Cleanup(func() { fetchSourceFn, fetchPipelineRefFn, hostTriggerRunFn = previous, previousRef, previousHost })
+	// safety: the fixture is a bare program, so the run host's stand-in starts it as the host starts each of
+	// its processes: the built binary, in the execution checkout.
+	hostTriggerRunFn = func(ctx context.Context, h orchestrator.TriggerHost) error {
+		cmd := exec.CommandContext(ctx, h.Binary)
+		cmd.Dir = h.Dir
+		return cmd.Run()
+	}
 	for _, source := range []string{"origin/main", "refs/heads/main", "refs/tags/main", revision} {
 		t.Run(source, func(t *testing.T) {
 			execution := t.TempDir()
@@ -69,8 +76,8 @@ func main(){body,err:=os.ReadFile("subject");if err!=nil{panic(err)};if err:=os.
 			if err := os.WriteFile(filepath.Join(execution, "subject"), []byte("branch"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			// safety: the trigger child inherits only allow-listed settings, so the
-			// fixture reports into its working directory rather than a path from the env.
+			// safety: pipeline processes get the minimal environment, so the fixture
+			// reports into its working directory rather than a path from the env.
 			output := filepath.Join(execution, "result")
 			calls := 0
 			fetchSourceFn = func(_ context.Context, _, _, _, _, _, _, _, _ string) (string, error) {

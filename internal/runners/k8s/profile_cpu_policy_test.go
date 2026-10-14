@@ -1,7 +1,6 @@
 package k8s
 
 import (
-	"context"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
@@ -14,7 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestResolveResources_PodLimitsUsePeakCPU(t *testing.T) {
@@ -43,9 +41,8 @@ func TestResolveResources_PodLimitsUsePeakCPU(t *testing.T) {
 			}
 			srv := httptest.NewServer(controller.New(st, nil).Handler())
 			t.Cleanup(srv.Close)
-			node := sparkwing.Job(sparkwing.NewPlan(), "build", func(context.Context) error { return nil })
 			r := &Runner{ctrl: client.New(srv.URL, nil), cfg: defaultsCfg}
-			res := r.resolveResources(ctx, runner.Request{Pipeline: "deploy", NodeID: "build", Node: node})
+			res := r.resolveResources(ctx, runner.Request{Pipeline: "deploy", NodeID: "build"})
 			if res.Source != store.CostSourceMeasured || res.Cores != 2 || res.MemoryBytes != 512<<20 {
 				t.Errorf("pod resolution = %+v; want measured 2 cores and 512 MiB", res)
 			}

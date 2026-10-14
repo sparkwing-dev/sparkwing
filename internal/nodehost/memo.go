@@ -158,14 +158,14 @@ func (r *memoRun) hold(ctx context.Context, holder string) Result {
 	n := r.n
 	return r.adm.holdSlot(ctx, r.adm.nodeHolder(ctx, n), r.g, holder, func(ctx context.Context) Result {
 		res := r.next(ctx, n)
-		if res.Outcome != sparkwing.Success {
+		if res.Outcome != sparkwing.Success || res.recorded {
 			return res
 		}
 		err := n.Run.State.FinishNodeWithReason(context.WithoutCancel(ctx), n.Run.ID, n.Plan.ID, string(res.Outcome), "", res.Output, res.Reason, nil)
 		if err != nil {
 			return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("record node result: %w", err)}
 		}
-		res.memoRecorded = true
+		res.recorded = true
 		return res
 	})
 }

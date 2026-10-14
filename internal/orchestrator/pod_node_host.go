@@ -1,20 +1,24 @@
 package orchestrator
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 
+	"github.com/sparkwing-dev/sparkwing/internal/depcache"
+
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	k8srunner "github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
@@ -30,10 +34,15 @@ type podNode struct {
 	// safety: the accepted plan's hash for the node, which the pod's own plan of it must match.
 	specHash string
 	// safety: the claim's 1-based attempt ordinal, which decides before_run and after_run under retry_auto.
-	attempt   int
-	state     storage.StateStore
-	artifacts storage.ArtifactStore
-	logger    *slog.Logger
+	attempt int
+	// safety: a node a run host dispatched already ran its skip_if, memo and admission there, and its accepted
+	// spec_hash is the one the run host recorded on its row.
+	dispatched bool
+	// safety: a dispatched node's caches use its own run's grant, since its host may serve other runs.
+	cacheGrant string
+	state      storage.StateStore
+	artifacts  storage.ArtifactStore
+	logger     *slog.Logger
 }
 
 // safety: the node's process gets the minimal environment and its own route
@@ -44,6 +53,14 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 	run, err := c.GetRunForExecution(ctx, p.runID)
 	if err != nil {
 		return nodehost.Result{}, fmt.Errorf("read run %s: %w", p.runID, err)
+	}
+	if p.dispatched {
+		row, err := c.GetNode(ctx, p.runID, p.nodeID)
+		if err != nil {
+			return nodehost.Result{}, fmt.Errorf("read node %s: %w", p.nodeID, err)
+		}
+		p.specHash = row.SpecHash
+		ctx = depcache.WithCacheGrant(ctx, p.cacheGrant)
 	}
 	masker := secrets.NewMasker()
 	masker.Register(p.token)
@@ -62,32 +79,97 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 		p.logger.Warn("pod node: the forwarded routes are off", "run_id", p.runID, "node_id", p.nodeID, "err", err)
 		claim = nil
 	}
-	slots := NewHTTPConcurrency(p.controllerURL, nil, p.token, store.DefaultConcurrencyLease)
 	nlog := &podNodeLog{sink: openNodeLogSink(ctx, c, p.runID, p.nodeID, p.logger), out: os.Stdout, logger: p.logger}
 	planSink, err := newPodPlanSink(ctx, p.runID, masker, os.Stderr)
 	if err != nil {
 		return nodehost.Result{}, err
 	}
 	defer planSink.end()
-	res := nodehost.HostNode(ctx, nodehost.Config{
-		Session:  nodehost.SessionConfig{Entry: p.binary, Dir: p.dir, Sink: planSink},
+	cfg := nodehost.Config{
+		Session:  nodehost.SessionConfig{Entry: p.binary, Dir: p.dir, Sink: planSink, Env: podSessionEnv(masker)},
 		Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run),
 		State: p.state, Artifacts: p.artifacts, Logger: p.logger,
-		// safety: the node's concurrency group and memo entry run through the claim, which the controller binds to
-		// this node; a memo hit's output is the one the controller picks for the claim's key.
-		Admission: &nodehost.Admission{Slots: slots},
-		Memo: &nodehost.Memo{Slots: slots, Claimed: true, Output: func(ctx context.Context, in store.ClaimInputRequest, _, _ string) ([]byte, error) {
-			_, data, err := c.ClaimInput(ctx, p.runID, p.nodeID, in)
-			return data, err
-		}},
 		Attempts: &nodehost.Attempts{
 			Routes: routes, Resolver: podSecrets{c: c, runID: p.runID}, Masker: masker, Claim: claim,
 			OpenLog: func(context.Context, string, string) (nodehost.NodeLog, error) { return nlog, nil },
 			Usage:   nodehost.RecordUsage(nil),
 		},
-	}, p.nodeID, p.specHash, p.attempt)
+	}
+	var res nodehost.Result
+	if p.dispatched {
+		res = nodehost.HostDispatchedNode(ctx, cfg, p.nodeID, p.specHash)
+	} else {
+		slots := NewHTTPConcurrency(p.controllerURL, nil, p.token, store.DefaultConcurrencyLease)
+		// safety: the node's concurrency group and memo entry run through the claim, which the controller binds to
+		// this node; a memo hit's output is the one the controller picks for the claim's key.
+		cfg.Admission = &nodehost.Admission{Slots: slots}
+		cfg.Memo = &nodehost.Memo{Slots: slots, Claimed: true, Output: func(ctx context.Context, in store.ClaimInputRequest, _, _ string) ([]byte, error) {
+			_, data, err := c.ClaimInput(ctx, p.runID, p.nodeID, in)
+			return data, err
+		}}
+		res = nodehost.HostNode(ctx, cfg, p.nodeID, p.specHash, p.attempt)
+	}
 	nlog.seal(ctx, ctx.Err() != nil || res.Outcome == sparkwing.Cancelled)
 	return res, nil
+}
+
+// safety: the minimal environment plus only the dependency proxy settings the
+// pod's Job or runner was given, so go, npm and pip in the node use the cache's
+// proxy and no other engine variable reaches pipeline code. A proxy URL can
+// carry a credential, so each one's password, and the whole value, is masked
+// before any process of the node runs.
+func podSessionEnv(masker *secrets.Masker) []string {
+	env := nodehost.MinimalEnv()
+	for _, name := range k8srunner.DependencyProxyEnvNames {
+		if v, ok := os.LookupEnv(name); ok {
+			env = append(env, name+"="+v)
+			maskProxyCredentials(masker, v)
+		}
+	}
+	return env
+}
+
+// safety: the whole value and each ','/'|' member are masked whole. The userinfo (after any scheme://, up to the
+// last '@') and its password, raw and percent-decoded, are taken from each member and from the unsplit value, so a
+// password holding a ',', '|' or '@' is masked whole. A value with no '@' carries no credential, and GOPROXY's direct
+// and off keywords stay readable.
+func maskProxyCredentials(masker *secrets.Masker, value string) {
+	if !strings.Contains(value, "@") {
+		return
+	}
+	masker.Register(value)
+	maskUserinfo(masker, value)
+	for _, member := range strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == '|' }) {
+		if member != "direct" && member != "off" {
+			masker.Register(member)
+		}
+		maskUserinfo(masker, member)
+	}
+}
+
+func maskUserinfo(masker *secrets.Masker, s string) {
+	_, rest, ok := strings.Cut(s, "://")
+	if !ok {
+		rest = s
+	}
+	at := strings.LastIndex(rest, "@")
+	if at < 0 {
+		return
+	}
+	userinfo := rest[:at]
+	parts := []string{userinfo}
+	if _, password, ok := strings.Cut(userinfo, ":"); ok {
+		parts = append(parts, password)
+	}
+	for _, raw := range parts {
+		if raw == "" {
+			continue
+		}
+		masker.Register(raw)
+		if decoded, err := url.PathUnescape(raw); err == nil {
+			masker.Register(decoded)
+		}
+	}
 }
 
 // PipelineRequires is the placement labels the pipeline's entry in the
@@ -118,7 +200,7 @@ func podRunContext(run *store.Run) nodeproto.RunContext {
 	rc := nodeproto.RunContext{
 		RunID: run.ID, StartedAt: run.StartedAt,
 		Git:     &nodeproto.Git{SHA: run.GitSHA, Branch: run.GitBranch, Repo: run.DeclaredRepo, RepoURL: run.RepoURL},
-		Trigger: &nodeproto.Trigger{Source: cmp.Or(run.TriggerSource, "manual"), User: run.TriggerUser},
+		Trigger: &nodeproto.Trigger{Source: protocolTriggerSource(run.TriggerSource), User: run.TriggerUser},
 	}
 	if pr := run.PullRequest; pr != nil {
 		rc.Trigger.PullRequest = &nodeproto.PullRequest{
@@ -126,6 +208,20 @@ func podRunContext(run *store.Run) nodeproto.RunContext {
 		}
 	}
 	return rc
+}
+
+// safety: the node protocol knows four sources, and a run's recorded source is
+// any of the surfaces that start runs (cli, api, retry, await-pipeline, a
+// working-tree snapshot), so each is named by the protocol source it means;
+// one the protocol does not know would fail the plan.
+func protocolTriggerSource(recorded string) string {
+	switch recorded {
+	case "schedule", "push", "webhook":
+		return recorded
+	case "github":
+		return "webhook"
+	}
+	return "manual"
 }
 
 // safety: one log for every process of the attempt, sealed once by
