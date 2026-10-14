@@ -562,7 +562,7 @@ func (s *scheduler) finish(ctx context.Context, id string, res Result) {
 	if errors.Is(err, store.ErrOutputNotStored) {
 		// safety: a refused output fails the node in its row too, so the row never stays running.
 		res = Result{Outcome: sparkwing.Failed, Err: err}
-		err = s.run.State.FinishNodeWithReason(writeCtx, s.run.ID, id, string(res.Outcome), err.Error(), nil, store.FailureUnknown, nil)
+		err = s.run.State.FinishNodeWithReason(writeCtx, s.run.ID, id, string(res.Outcome), recordedErrText(err), nil, store.FailureUnknown, nil)
 	}
 	if err != nil {
 		// safety: a result the store never took must not read as a success downstream.

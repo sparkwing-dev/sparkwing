@@ -413,6 +413,31 @@ func TestSchedulerARefusedOutputFailsTheNodeRow(t *testing.T) {
 	wantRow(t, st, "after", sparkwing.Cancelled, "upstream-failed")
 }
 
+// safety: an upload's refusal can quote megabytes of its failed request, and the finish that records it is
+// held to the controller's 1 MiB body cap.
+type refusingOutputLoudly struct{ *store.Store }
+
+func (r refusingOutputLoudly) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error {
+	if output != nil {
+		return fmt.Errorf("%w: %s", store.ErrOutputNotStored, strings.Repeat("upload failed\n", 200<<10))
+	}
+	return cappedFinish(r).FinishNodeWithReason(ctx, runID, nodeID, outcome, errMsg, output, reason, exitCode)
+}
+
+func TestSchedulerARefusedOutputWithAHugeReasonStillFailsTheNodeRow(t *testing.T) {
+	st := openStore(t)
+	fx := &fakeExec{bodies: map[string]Executor{"big": func(context.Context, *NodeRun) Result {
+		return Result{Outcome: sparkwing.Success, Output: []byte(`"huge"`)}
+	}}}
+	res := hostDoc(t, t.Context(), refusingOutputLoudly{st}, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "big"}}}, fx.run)
+	if res.Status != "failed" {
+		t.Errorf("status=%s err=%v, want failed", res.Status, res.Err)
+	}
+	if row := nodeRow(t, st, "big"); row.Outcome != string(sparkwing.Failed) || len(row.Error) > 1<<20 {
+		t.Fatalf("row outcome %q with a %d-byte error, want failed with the bounded reason", row.Outcome, len(row.Error))
+	}
+}
+
 // safety: stands in for the controller's node finish route, which refuses a
 // JSON body over 1 MiB.
 type cappedFinish struct{ *store.Store }

@@ -218,7 +218,7 @@ func podFinish(ctx context.Context, run *Run, id string, res Result) Result {
 	err := run.State.FinishNodeWithReason(writeCtx, run.ID, id, string(res.Outcome), recordedErrText(res.Err), res.Output, res.Reason, nil)
 	if errors.Is(err, store.ErrOutputNotStored) {
 		res = Result{Outcome: sparkwing.Failed, Err: err}
-		err = run.State.FinishNodeWithReason(writeCtx, run.ID, id, string(res.Outcome), err.Error(), nil, store.FailureUnknown, nil)
+		err = run.State.FinishNodeWithReason(writeCtx, run.ID, id, string(res.Outcome), recordedErrText(err), nil, store.FailureUnknown, nil)
 	}
 	if err != nil {
 		run.Logger.Error("nodehost: record node result", "node", id, "err", err)

@@ -289,8 +289,12 @@ func dispatchedHeld(t *testing.T, stop func(context.CancelCauseFunc)) *hostedTri
 	hold, pids := heldNodePID(t)
 	args := map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "hold": hold}
 	h := newHostedTrigger(t, args)
+	rc, err := triggerRunContext(t.Context(), client.NewWithToken(h.url, nil, h.token), h.trig)
+	if err != nil {
+		t.Fatal(err)
+	}
 	planned, err := nodehost.PlanDocument(t.Context(), nodehost.SessionConfig{Entry: h.bin, Dir: t.TempDir()}, nodehost.PlanRequest{
-		Pipeline: "podnode", Args: args, Run: triggerRunContext(t.Context(), client.NewWithToken(h.url, nil, h.token), h.trig),
+		Pipeline: "podnode", Args: args, Run: rc,
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -84,6 +84,10 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	}
 	hostLog := &triggerHostLog{out: os.Stderr}
 	shuttingDown := shuttingDownOn(ctx)
+	rc, err := triggerRunContext(ctx, c, trig)
+	if err != nil {
+		return err
+	}
 	rehydrate, err := hostedRehydration(ctx, c, Options{RetryOf: trig.RetryOf, RetrySource: trig.RetrySource, Full: trig.Full}, trig.ID)
 	if err != nil {
 		return err
@@ -91,7 +95,7 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	res, err := nodehost.Execute(ctx, nodehost.Config{
 		Session:  nodehost.SessionConfig{Entry: h.Binary, Dir: h.Dir, Sink: planSink},
 		Pipeline: trig.Pipeline, Args: triggerHostArgs(ctx, c, trig, logger),
-		Run: triggerRunContext(ctx, c, trig), Requires: requires,
+		Run: rc, Requires: requires,
 		ParentRunID: trig.ParentRunID, RetryOf: trig.RetryOf, RetrySource: trig.RetrySource,
 		State: retryPlanState{
 			stoppingHostState: stoppingHostState{Client: c, shuttingDown: shuttingDown},
@@ -149,10 +153,31 @@ func triggerHostArgs(ctx context.Context, c *client.Client, trig *store.Trigger,
 // safety: one derivation, [podRunContext], for the run host and every node host: the host applies it to the row it
 // is about to record, the controller's run read (start time, the trigger's actor and pull request) with the trigger's
 // git snapshot and source laid over it as the run row's upsert lays them, so each node host reads back that row.
-func triggerRunContext(ctx context.Context, c *client.Client, trig *store.Trigger) nodeproto.RunContext {
-	row, err := c.GetRunForExecution(ctx, trig.ID)
-	if err != nil || row == nil {
+//
+// safety: a run row the controller does not have yet is planned from the trigger alone, as every pod then reads
+// it; one it failed to answer for is retried and then refused, because planning without the row's pull request
+// would hash differently from the pods that read it, and every node would fail with plan_drift.
+func triggerRunContext(ctx context.Context, c *client.Client, trig *store.Trigger) (nodeproto.RunContext, error) {
+	var row *store.Run
+	var err error
+	for attempt := 1; ; attempt++ {
+		row, err = c.GetRunForExecution(ctx, trig.ID)
+		if err == nil || errors.Is(err, store.ErrNotFound) || attempt == runReadAttempts {
+			break
+		}
+		wait := time.NewTimer(time.Duration(attempt) * runReadBackoff)
+		select {
+		case <-ctx.Done():
+			wait.Stop()
+			return nodeproto.RunContext{}, fmt.Errorf("read run %s for its run context: %w", trig.ID, errors.Join(err, ctx.Err()))
+		case <-wait.C:
+		}
+	}
+	switch {
+	case errors.Is(err, store.ErrNotFound) || (err == nil && row == nil):
 		row = &store.Run{ID: trig.ID, TriggerUser: trig.TriggerUser}
+	case err != nil:
+		return nodeproto.RunContext{}, fmt.Errorf("read run %s for its run context: %w", trig.ID, err)
 	}
 	planned := *row
 	planned.ID, planned.TriggerSource = trig.ID, trig.TriggerSource
@@ -161,8 +186,13 @@ func triggerRunContext(ctx context.Context, c *client.Client, trig *store.Trigge
 	if planned.StartedAt.IsZero() {
 		planned.StartedAt = time.Now().UTC()
 	}
-	return podRunContext(&planned)
+	return podRunContext(&planned), nil
 }
+
+const (
+	runReadAttempts = 4
+	runReadBackoff  = 250 * time.Millisecond
+)
 
 // HeartbeatTrigger renews triggerID's claim every interval until stop is
 // called, and cancels the returned context when the claim ends: with a
