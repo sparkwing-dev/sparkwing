@@ -43,7 +43,6 @@ const DeadlineMargin = 30 * time.Second
 const (
 	jobUID              = 65534
 	jobTTLAfterFinished = 60
-	scratchVolume       = "scratch"
 	minimumClassCores   = 2
 	managedByLauncher   = "sparkwing-launcher"
 	jobAppName          = "sparkwing-job"
@@ -51,7 +50,6 @@ const (
 	fetchSourceVerb     = "fetch-source"
 	sourceDir           = "/tmp/src"
 	jobBearerEnv        = "SPARKWING_AGENT_TOKEN"
-	defaultScratchLimit = "20Gi"
 )
 
 var digestPinned = regexp.MustCompile(`^[a-z0-9][a-z0-9.:/_-]*@sha256:[0-9a-f]{64}$`)
@@ -97,7 +95,7 @@ func (c Config) Validate() error {
 
 func (c Config) scratchLimit() string {
 	if c.ScratchLimit == "" {
-		return defaultScratchLimit
+		return k8s.DefaultScratchLimit
 	}
 	return c.ScratchLimit
 }
@@ -147,6 +145,18 @@ func BuildJob(cfg Config, claim store.LaunchClaim) *batchv1.Job {
 	// the credential it carries whatever the launcher's clock says.
 	deadline := max(claim.LifetimeSecs-int64(DeadlineMargin/time.Second), 1)
 	backoff, ttl := int32(0), int32(jobTTLAfterFinished)
+	pod := k8s.HardenedPodSpec(scratch)
+	pod.ServiceAccountName = ServiceAccount
+	pod.NodeSelector = map[string]string{k8s.CPUBandKey: k8s.CPUBandSmall, k8s.TeamNodeLabel: team}
+	pod.Tolerations = []corev1.Toleration{{
+		Key: k8s.CPUBandKey, Operator: corev1.TolerationOpEqual,
+		Value: k8s.CPUBandSmall, Effect: corev1.TaintEffectNoSchedule,
+	}}
+	pod.Affinity = oneJobPerMachine()
+	pod.SecurityContext.RunAsUser = ptr(int64(jobUID))
+	pod.SecurityContext.RunAsGroup = ptr(int64(jobUID))
+	pod.InitContainers = []corev1.Container{jobContainer(cfg, claim, "source", fetchSourceVerb, fetchEnv)}
+	pod.Containers = []corev1.Container{jobContainer(cfg, claim, "node", runNodeVerb, env)}
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels, Annotations: map[string]string{
 			RunAnnotation: claim.RunID, NodeAnnotation: claim.NodeID, GenerationAnnotation: strconv.FormatInt(claim.Generation, 10),
@@ -162,42 +172,14 @@ func BuildJob(cfg Config, claim store.LaunchClaim) *batchv1.Job {
 					// node runs once per claim.
 					Annotations: map[string]string{k8s.KarpenterDoNotDisrupt: "true"},
 				},
-				Spec: corev1.PodSpec{
-					RestartPolicy:                corev1.RestartPolicyNever,
-					ServiceAccountName:           ServiceAccount,
-					AutomountServiceAccountToken: ptr(false),
-					// safety: service links would put every Service in the
-					// namespace into the pipeline's environment.
-					EnableServiceLinks: ptr(false),
-					NodeSelector: map[string]string{
-						k8s.CPUBandKey:    k8s.CPUBandSmall,
-						k8s.TeamNodeLabel: team,
-					},
-					Tolerations: []corev1.Toleration{{
-						Key: k8s.CPUBandKey, Operator: corev1.TolerationOpEqual,
-						Value: k8s.CPUBandSmall, Effect: corev1.TaintEffectNoSchedule,
-					}},
-					Affinity: oneJobPerMachine(),
-					SecurityContext: &corev1.PodSecurityContext{
-						RunAsNonRoot:   ptr(true),
-						RunAsUser:      ptr(int64(jobUID)),
-						RunAsGroup:     ptr(int64(jobUID)),
-						SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
-					},
-					InitContainers: []corev1.Container{jobContainer(cfg, claim, "source", fetchSourceVerb, fetchEnv)},
-					Containers:     []corev1.Container{jobContainer(cfg, claim, "node", runNodeVerb, env)},
-					Volumes: []corev1.Volume{{
-						Name:         scratchVolume,
-						VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: &scratch}},
-					}},
-				},
+				Spec: pod,
 			},
 		},
 	}
 }
 
 func jobContainer(cfg Config, claim store.LaunchClaim, name, verb string, env []corev1.EnvVar) corev1.Container {
-	return corev1.Container{
+	return k8s.HardenedContainer(corev1.Container{
 		Name:            name,
 		Image:           cfg.Image,
 		ImagePullPolicy: corev1.PullIfNotPresent,
@@ -205,15 +187,7 @@ func jobContainer(cfg Config, claim store.LaunchClaim, name, verb string, env []
 		Args:            []string{verb, claim.RunID, claim.NodeID},
 		Env:             env,
 		Resources:       classResources(cfg, claim.Class),
-		SecurityContext: &corev1.SecurityContext{
-			AllowPrivilegeEscalation: ptr(false),
-			ReadOnlyRootFilesystem:   ptr(true),
-			RunAsNonRoot:             ptr(true),
-			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
-			SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
-		},
-		VolumeMounts: []corev1.VolumeMount{{Name: scratchVolume, MountPath: "/tmp"}},
-	}
+	})
 }
 
 // safety: requests equal limits, so the pod is Guaranteed and no neighbour's

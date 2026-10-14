@@ -89,20 +89,26 @@ type NodeModifiers struct {
 	CacheTTLMS int64 `json:"cache_ttl_ms,omitempty"`
 	// Concurrency group (JobNode.Concurrency): the shared budget this
 	// node draws on, its cost, scope, at-limit policy, and timeouts.
-	ConcGroup           string `json:"conc_group,omitempty"`
-	ConcCapacity        int    `json:"conc_capacity,omitempty"`
-	ConcCost            int    `json:"conc_cost,omitempty"`
-	ConcScope           string `json:"conc_scope,omitempty"`
-	ConcOnLimit         string `json:"conc_on_limit,omitempty"`
-	ConcQueueTimeoutMS  int64  `json:"conc_queue_timeout_ms,omitempty"`
-	ConcCancelTimeoutMS int64  `json:"conc_cancel_timeout_ms,omitempty"`
-	Inline              bool   `json:"inline,omitempty"`
-	Optional            bool   `json:"optional,omitempty"`
-	ContinueOnError     bool   `json:"continue_on_error,omitempty"`
-	OnFailure           string `json:"on_failure,omitempty"`
-	HasBeforeRun        bool   `json:"has_before_run,omitempty"`
-	HasAfterRun         bool   `json:"has_after_run,omitempty"`
-	HasSkipIf           bool   `json:"has_skip_if,omitempty"`
+	ConcGroup           string   `json:"conc_group,omitempty"`
+	ConcCapacity        int      `json:"conc_capacity,omitempty"`
+	ConcCost            int      `json:"conc_cost,omitempty"`
+	ConcScope           string   `json:"conc_scope,omitempty"`
+	ConcOnLimit         string   `json:"conc_on_limit,omitempty"`
+	ConcQueueTimeoutMS  int64    `json:"conc_queue_timeout_ms,omitempty"`
+	ConcCancelTimeoutMS int64    `json:"conc_cancel_timeout_ms,omitempty"`
+	Prefers             []string `json:"prefers,omitempty"`
+	WhenRunner          []string `json:"when_runner,omitempty"`
+	ResCores            float64  `json:"res_cores,omitempty"`
+	ResMemoryBytes      int64    `json:"res_memory_bytes,omitempty"`
+	Inline              bool     `json:"inline,omitempty"`
+	Optional            bool     `json:"optional,omitempty"`
+	ContinueOnError     bool     `json:"continue_on_error,omitempty"`
+	OnFailure           string   `json:"on_failure,omitempty"`
+	HasBeforeRun        bool     `json:"has_before_run,omitempty"`
+	HasAfterRun         bool     `json:"has_after_run,omitempty"`
+	HasSkipIf           bool     `json:"has_skip_if,omitempty"`
+	HasVerify           bool     `json:"has_verify,omitempty"`
+	SkipIfBudgetMS      int64    `json:"skip_if_budget_ms,omitempty"`
 }
 
 // NodeWork is the inner-Work tree (Step declarations) the dashboard

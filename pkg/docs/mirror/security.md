@@ -77,9 +77,10 @@ and stops working when the claim ends; see
 [auth.md](auth.md#claim-tokens).
 
 **Hosted execution also depends on the cluster configuration.** The launcher
-keeps its service credential outside the Job. Its Job builder disables
-service-account token automounting, uses a non-root user and a runtime-default
-seccomp profile, and gives the Job scratch storage. These settings depend on
+keeps its service credential outside the Job. Its Job builder, like the
+Kubernetes runner's, disables service-account token automounting and service
+links, uses a non-root user and a runtime-default seccomp profile, and gives
+the Job scratch storage limited to 20Gi by default. These settings depend on
 appropriate Kubernetes RBAC, enforced network policies, protected controller
 and storage credentials, and controlled volume mounts. A multi-team license
 does not configure those protections or isolate pipeline code from a shared
