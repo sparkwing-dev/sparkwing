@@ -1,6 +1,9 @@
 package capability
 
 import (
+	"fmt"
+	"math"
+	"slices"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
@@ -85,5 +88,46 @@ type BillingSettlement struct {
 
 // SettleBilling applies the unit minimum once per reservation after excluding nonbillable time.
 func SettleBilling(provenance BillingProvenance, intervals []BillableInterval) (BillingSettlement, error) {
-	panic("unimplemented: c2-credentials")
+	result := BillingSettlement{ReservationID: provenance.ReservationID}
+	if provenance.PayerTeam == "" || provenance.ReservationID == "" || provenance.ExecutorClass == "" ||
+		(provenance.Start != BillingAtAward && provenance.Start != BillingAtStart) {
+		return result, fmt.Errorf("incomplete billing provenance")
+	}
+	var rule *BillingRule
+	for i := range BillingRules {
+		if BillingRules[i].Unit == provenance.Unit {
+			rule = &BillingRules[i]
+			break
+		}
+	}
+	if rule == nil {
+		return result, fmt.Errorf("unknown billing unit")
+	}
+	ordered := slices.Clone(intervals)
+	slices.SortFunc(ordered, func(a, b BillableInterval) int { return a.Start.Compare(b.Start) })
+	var total time.Duration
+	var previous time.Time
+	for _, interval := range ordered {
+		if interval.CapabilityPrefix == "" || interval.Unit != provenance.Unit || interval.Start.IsZero() || interval.End.IsZero() || interval.End.Before(interval.Start) {
+			return result, fmt.Errorf("invalid billing interval")
+		}
+		if interval.Start.Before(previous) {
+			return result, fmt.Errorf("overlapping billing intervals")
+		}
+		elapsed := interval.End.Sub(interval.Start)
+		if !interval.Start.Add(elapsed).Equal(interval.End) || elapsed > time.Duration(math.MaxInt64)-total {
+			return result, fmt.Errorf("billing interval overflow")
+		}
+		total += elapsed
+		previous = interval.End
+	}
+	result.RefundUnstarted = len(ordered) == 0
+	if !result.RefundUnstarted && provenance.Metered {
+		result.BillableSeconds = int64(total / time.Second)
+		if total%time.Second != 0 {
+			result.BillableSeconds++
+		}
+		result.BillableSeconds = max(result.BillableSeconds, rule.MinimumSeconds)
+	}
+	return result, nil
 }

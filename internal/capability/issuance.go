@@ -1,6 +1,11 @@
 package capability
 
-import "time"
+import (
+	"slices"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+)
 
 // Grant is an exact permission name; no wildcard or admin implication exists.
 type Grant string
@@ -205,5 +210,70 @@ type IssueRequest struct {
 
 // ValidateDelegation rejects any widening before persistence or in-memory nodehost admission.
 func ValidateDelegation(parent Principal, child DelegateSpec, now time.Time) error {
-	panic("unimplemented: c2-credentials")
+	p := parent.Capability
+	if p.RevokedAt != nil && !now.Before(*p.RevokedAt) || p.ExpiresAt != nil && !now.Before(*p.ExpiresAt) ||
+		p.Binding.Deadline != nil && !now.Before(*p.Binding.Deadline) {
+		return unauthenticated()
+	}
+	if child.Parent.ID == "" || child.Parent != parent.Authority {
+		return forbidden(apierr.ReasonBinding)
+	}
+	if child.Audience != Controller && child.Audience != NodeHost || p.Audience != Controller && p.Audience != child.Audience {
+		return forbidden(apierr.ReasonAudience)
+	}
+	if !subset(child.Grants, Grants) || !subset(child.Grants, p.Grants) {
+		return forbidden(apierr.ReasonMissingGrant)
+	}
+	if !subset(child.Repositories, p.Repositories) || !narrowData(p.Data, child.Data) {
+		return forbidden(apierr.ReasonRepositoryUnauthorized)
+	}
+	if !narrowBinding(p.Binding, child.Binding) || !boundedExpiry(child.ExpiresAt, p.ExpiresAt, now) ||
+		!boundedExpiry(child.ExpiresAt, p.Binding.Deadline, now) || !boundedExpiry(child.ExpiresAt, child.Binding.Deadline, now) {
+		return forbidden(apierr.ReasonBinding)
+	}
+	return nil
+}
+
+func boundedExpiry(child, parent *time.Time, now time.Time) bool {
+	return (child == nil || now.Before(*child)) && (parent == nil || child != nil && !child.After(*parent))
+}
+
+func narrowBinding(parent, child Binding) bool {
+	if !slices.Contains([]BindingKind{BindingNone, BindingRun, BindingNode, BindingTrigger, BindingPush}, child.Kind) {
+		return false
+	}
+	if parent.Kind != BindingNone && child.Kind != parent.Kind {
+		if parent.Kind != BindingRun || child.Kind != BindingNode {
+			return false
+		}
+	}
+	if parent.RunID != "" && child.RunID != parent.RunID || parent.NodeID != "" && child.NodeID != parent.NodeID ||
+		parent.Generation != 0 && child.Generation != parent.Generation || parent.Attempt != 0 && child.Attempt != parent.Attempt ||
+		parent.Holder != "" && child.Holder != parent.Holder || parent.Reservation != "" && child.Reservation != parent.Reservation {
+		return false
+	}
+	if parent.ClaimBy != nil && (child.ClaimBy == nil || child.ClaimBy.After(*parent.ClaimBy)) ||
+		parent.Deadline != nil && (child.Deadline == nil || child.Deadline.After(*parent.Deadline)) {
+		return false
+	}
+	if parent.Push != nil && (child.Push == nil || *child.Push != *parent.Push) {
+		return false
+	}
+	if parent.Expansion == nil && child.Expansion != nil || parent.Expansion != nil && (child.Expansion == nil || *child.Expansion != *parent.Expansion) {
+		return false
+	}
+	return true
+}
+
+func narrowData(parent, child *DataScope) bool {
+	if child == nil {
+		return true
+	}
+	if parent == nil || parent.Use != child.Use || parent.RepositoryKey == "" || child.RepositoryKey != parent.RepositoryKey {
+		return false
+	}
+	return (child.WriteRef == "" || child.WriteRef == parent.WriteRef) && subset(child.ReadRefs, parent.ReadRefs) &&
+		(!parent.VerifiedDefaultOnly || child.VerifiedDefaultOnly) &&
+		(parent.RunID == "" || child.RunID == parent.RunID) && (parent.NodeID == "" || child.NodeID == parent.NodeID) &&
+		(parent.Attempt == 0 || child.Attempt == parent.Attempt) && (parent.Generation == 0 || child.Generation == parent.Generation)
 }

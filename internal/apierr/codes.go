@@ -2,8 +2,15 @@
 package apierr
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"strconv"
+	"strings"
 )
 
 // Code is the sole wire error discriminator. Clients branch on it rather than status or message.
@@ -159,7 +166,85 @@ type Envelope struct {
 // Protocol replies, body failures, eval failures and recovery inputs all use this
 // decoder before accepting an Error. HTTP/CLI readers unwrap Envelope exactly once.
 func DecodeInner(data []byte) (*Error, error) {
-	panic("unimplemented: c2-credentials")
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	value, err := decodeValue(decoder)
+	if err != nil {
+		return nil, errors.New("invalid error JSON")
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		return nil, errors.New("trailing error JSON")
+	}
+	object, ok := value.(map[string]any)
+	if !ok {
+		return nil, errors.New("error must be an object")
+	}
+	if _, nested := object["error"]; nested {
+		return nil, errors.New("expected inner error, received envelope")
+	}
+	code, codeOK := object["code"].(string)
+	message, messageOK := object["message"].(string)
+	if !codeOK || strings.TrimSpace(code) == "" || !messageOK {
+		return nil, errors.New("error requires string code and message")
+	}
+	failure := &Error{Code: Code(code), Message: message}
+	if hint, exists := object["hint"]; exists {
+		if failure.Hint, ok = hint.(string); !ok {
+			return nil, errors.New("error hint must be a string")
+		}
+	}
+	if details, exists := object["details"]; exists {
+		if failure.Details, ok = details.(map[string]any); !ok {
+			return nil, errors.New("error details must be an object")
+		}
+	}
+	return failure, nil
+}
+
+func decodeValue(decoder *json.Decoder) (any, error) {
+	token, err := decoder.Token()
+	if err != nil {
+		return nil, err
+	}
+	delim, compound := token.(json.Delim)
+	if !compound {
+		return token, nil
+	}
+	if delim == '{' {
+		object := map[string]any{}
+		for decoder.More() {
+			key, err := decoder.Token()
+			if err != nil {
+				return nil, err
+			}
+			name, ok := key.(string)
+			if !ok {
+				return nil, errors.New("invalid object key")
+			}
+			if _, exists := object[name]; exists {
+				return nil, errors.New("duplicate object key")
+			}
+			object[name], err = decodeValue(decoder)
+			if err != nil {
+				return nil, err
+			}
+		}
+		_, err = decoder.Token()
+		return object, err
+	}
+	if delim == '[' {
+		var values []any
+		for decoder.More() {
+			value, err := decodeValue(decoder)
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+		}
+		_, err = decoder.Token()
+		return values, err
+	}
+	return nil, errors.New("unexpected JSON delimiter")
 }
 
 // Status returns the registry status; an unregistered code is an internal failure.
@@ -175,10 +260,64 @@ func Status(code Code) int {
 // WriteHTTP writes Envelope and derives status from Code, including retry_after_ms as Retry-After.
 // Encode failures are returned to the caller for logging; this writer never emits plain text.
 func WriteHTTP(w http.ResponseWriter, failure *Error) error {
-	panic("unimplemented: c2-credentials")
+	encoded, err := encode(failure)
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if delay := retryAfter(failure.Details["retry_after_ms"]); delay != "" {
+		w.Header().Set("Retry-After", delay)
+	}
+	w.WriteHeader(Status(failure.Code))
+	n, err := w.Write(encoded)
+	if err == nil && n != len(encoded) {
+		return io.ErrShortWrite
+	}
+	return err
 }
 
 // WriteJSON emits one newline-terminated Envelope for CLI stderr and other JSON streams.
 func WriteJSON(w io.Writer, failure *Error) error {
-	panic("unimplemented: c2-credentials")
+	encoded, err := encode(failure)
+	if err != nil {
+		return err
+	}
+	n, err := w.Write(encoded)
+	if err == nil && n != len(encoded) {
+		return io.ErrShortWrite
+	}
+	return err
+}
+
+func encode(failure *Error) ([]byte, error) {
+	if failure == nil {
+		return nil, errors.New("missing error")
+	}
+	registered := false
+	for _, definition := range Codes {
+		if definition.Code == failure.Code {
+			registered = true
+			break
+		}
+	}
+	if !registered {
+		return nil, errors.New("unregistered error code")
+	}
+	encoded, err := json.Marshal(Envelope{Error: failure})
+	if err != nil {
+		return nil, fmt.Errorf("encode error: %w", err)
+	}
+	return append(encoded, '\n'), nil
+}
+
+func retryAfter(value any) string {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	millis, err := strconv.ParseFloat(string(encoded), 64)
+	if err != nil || millis < 0 || math.IsNaN(millis) || math.IsInf(millis, 0) {
+		return ""
+	}
+	return strconv.FormatFloat(math.Ceil(millis/1000), 'f', 0, 64)
 }

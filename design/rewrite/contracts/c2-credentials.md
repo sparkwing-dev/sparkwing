@@ -4,8 +4,11 @@
 
 This contract covers frozen architecture sections 3.6, 5, 6.5, 8 and 9.5,
 including A58, A59, A66, A68, A72 and A73. The Go files declare the target
-interfaces. Runtime authorization, issuance, billing settlement and signing
-remain panic stubs. The existing controller has not switched to this table.
+interfaces. The policy evaluator, delegation validator, data/source checks,
+billing calculation, payment verifier and error codec are implemented.
+Filesystem and S3 object signers implement the signing boundary. Persistent
+issuance and authentication still need the store implementation. The existing
+controller has not switched to this table.
 
 ## Ownership
 
@@ -62,6 +65,7 @@ All capability names below are in `internal/capability`.
 | `Presentation` | Supply private bearer/session or verified peer authentication input. |
 | `AuthorityResolver.ResolveAuthority` | Resolve tagged capability/session authority and recheck ancestry and membership inside the store transaction. |
 | `AuthorityGeneration`, `AuthGenerations`, `AuthCacheEntry` | Bind cached credential facts to every ancestor and the awarded team's membership generation. |
+| `AuthCacheEntry.Reusable` | Require a fresh complete generation vector, an unexpired credential and age strictly below the shared cache TTL. |
 | `Authenticator.Authenticate` | Validate identity and ancestry using route-specific liveness. |
 | `LiveAccess`, `Authenticated` | Preserve which alternatives passed liveness for the matched route. |
 | `BindingChecker.CheckBinding` | Resolve relational authority in the store or sealed node-host plan. |
@@ -105,6 +109,8 @@ All capability names below are in `internal/capability`.
 | `apierr.Status` | Select the registry's HTTP status. |
 | `apierr.WriteHTTP` | Write the error envelope and Retry-After without plain-text fallbacks. |
 | `apierr.WriteJSON` | Write one JSON error line for CLI stderr. |
+| `controller.NewFilesystemDataSigner`, `FilesystemDataSigner.Sign`, `FilesystemDataSigner.Verify` | Sign and verify exact filesystem transfer constraints. The blob owner verifies uploaded bytes before recording a receipt. |
+| `controller.NewS3DataSigner`, `S3DataSigner.Sign` | Sign one configured bucket's GET or checksum/size-bound PUT without making a storage request. |
 
 The exported data tables are `Grants`, `AwardPolicies`, `LivenessPolicies`,
 `Routes`, `BootstrapGrants`, `BootstrapUnits`, `UnitBillingMappings`,
@@ -367,10 +373,38 @@ None of these conditions introduces a second wire discriminator.
 
 ## Acceptance evidence
 
-The local tests prove table registration consistency, removed-surface absence,
-console-only privileged rows, publish isolation, own-job input, owner-only
-plan submission, complete award vocabulary, error JSON shape and status split.
-They do not claim that the panic stubs implement authorization.
+The local tests prove policy-table consistency, console-only privileged rows,
+publish isolation, own-job input, owner-only plan submission, delegation
+narrowing, cache-generation comparison, source consent, billing arithmetic,
+payment proof, error encoding and signed-object constraints.
+
+`TestCredentialPolicyAlternatives` exercises 324 complete alternatives across
+209 capability-authenticated route declarations against T1's independent
+literals. It covers positive selection, missing grants, wrong audience, absent
+live evidence and propagated binding refusal. Console alternatives also refuse
+deployment bearers and local peers. Its binding checker is a fixture, so this
+test establishes no store relations, HTTP/socket behavior or actual router
+registration coverage. The cross-placement scenario skeletons remain skipped.
+
+`TestDataRefScope` covers the data authority boundary, with edge decisions
+supplied by a fixture. Manual-ref delegation cannot widen to the verified ref.
+The full old cache-ref and credential-matrix ports still require store and
+controller integration. None of those parked findings is declared closed by
+these boundary tests.
+
+The filesystem transfer URL signs method, key, size, SHA-256 and expiry with
+HMAC-SHA256. Its upload path contains an opaque encoding of the staging key.
+The blob owner retains the separate upload/receipt identity and commits only
+after checking the bytes. S3 uses the same constraints with SigV4. Data GETs
+are bounded by `limits.DataDownloadURLTTL`, and PUTs by
+`limits.DataUploadURLTTL`. Log authorization and proxying remain separate.
+
+The payment verifier reads owner-only files through `fssecure`, checks key mode,
+and verifies the exact body using Stripe's documented v1 HMAC and five-minute
+timestamp tolerance. Both test and live configurations use the same verifier.
+The tests use synthetic signed events and make no Stripe API requests.
+[Stripe's signature specification](https://docs.stripe.com/webhooks#verify-manually)
+defines the provider algorithm. Durable payment deduplication remains in C1.
 
 T1 should implement these behavioral scenarios against the running contracts:
 
@@ -422,6 +456,19 @@ exercise only available contract data and functions.
    was specified. Trigger and plan grant rows contain the permissions needed
    by their named lifecycle responsibilities. C3/C4 and the lead must match
    these rows before wiring clients. Adjust this table rather than adding aliases.
+4. **Store authentication entry points.** W1 must expose presentation lookup
+   and route-specific liveness reads. The only authority resolver on the
+   integration contract is a method of private `storeTx`, and both it and
+   `Store.AuthGenerations` are stubs. No `BindingChecker`, `DataAccessChecker`
+   or source-release audit transaction implementation is exposed. Controller
+   code must not bypass that ownership with its own SQL. Persistent root,
+   delegation, claim and exchange entry points must reach the one issuer.
+5. **Authentication request evidence.** `Authenticator.Authenticate` receives
+   `Presentation` and `RoutePolicy`, but no decoded target, result digest or
+   log subject. C1/C2 must agree how authentication obtains those facts for
+   exact terminal replay, log-tail and own-eval checks before the middleware
+   can replace the existing route stack. This piece is blocked at the contract
+   boundary. No alternative lookup store or compatibility adapter was added.
 
 ## Cross-area assumptions
 
