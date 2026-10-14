@@ -66,6 +66,12 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 	}
 	masker := secrets.NewMasker()
 	masker.Register(p.token)
+	// safety: ahead of the routes and the node log, so a bad allow list leaves nothing to close.
+	sessionEnv := podSessionEnv(masker)
+	operatorEnv, err := operatorAllowedEnv(os.Environ(), sessionEnv, masker, p.logger)
+	if err != nil {
+		return nodehost.Result{}, err
+	}
 	routes, err := nodehost.Start(p.logger)
 	if err != nil {
 		return nodehost.Result{}, err
@@ -87,11 +93,6 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 		return nodehost.Result{}, err
 	}
 	defer planSink.end()
-	sessionEnv := podSessionEnv(masker)
-	operatorEnv, err := operatorAllowedEnv(os.Environ(), sessionEnv, p.logger)
-	if err != nil {
-		return nodehost.Result{}, err
-	}
 	cfg := nodehost.Config{
 		Session:  nodehost.SessionConfig{Entry: p.binary, Dir: p.dir, Sink: planSink, Env: append(sessionEnv, operatorEnv...)},
 		Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run),
@@ -138,29 +139,35 @@ func podSessionEnv(masker *secrets.Masker) []string {
 
 // safety: the operator's run.submit_env_allow names and prefixes reach the node from this runner's own
 // environment, as AWS_PROFILE or DOCKER_HOST must for its tools; an engine variable, or a credential-shaped name
-// or value, never does whatever the list says, and a name base already sets keeps its one value.
-func operatorAllowedEnv(env, base []string, logger *slog.Logger) ([]string, error) {
+// or value, never does whatever the list says, and a name base already sets keeps its one value. A neutral name
+// can still hold a bare token, so every value that passes is masked in the node's logs.
+func operatorAllowedEnv(env, base []string, masker *secrets.Masker, logger *slog.Logger) ([]string, error) {
 	names, prefixes, err := submissionEnvironmentAllowList()
 	if err != nil {
 		return nil, err
 	}
-	var out, dropped []string
+	var out, engine, credential []string
 	for _, entry := range env {
 		key, value, ok := strings.Cut(entry, "=")
-		if !ok || engineenv.Owned(key) || !operatorListed(key, names, prefixes) || slices.ContainsFunc(base, func(kv string) bool {
+		if !ok || !operatorListed(key, names, prefixes) || slices.ContainsFunc(base, func(kv string) bool {
 			return strings.HasPrefix(kv, key+"=")
 		}) {
 			continue
 		}
-		if submissionEnvironmentCredentialName(key, value) || envredact.CredentialValue(value) || envredact.RedactValue(value) != value {
-			dropped = append(dropped, key)
-			continue
+		switch {
+		case engineenv.Owned(key):
+			engine = append(engine, key)
+		case submissionEnvironmentCredentialName(key, value) || envredact.CredentialValue(value) || envredact.RedactValue(value) != value:
+			credential = append(credential, key)
+		default:
+			masker.Register(value)
+			out = append(out, entry)
 		}
-		out = append(out, entry)
 	}
-	if len(dropped) > 0 && logger != nil {
-		logger.Warn("pod node: credential filter dropped allow-listed names",
-			"names", strings.Join(dropped, ","), "allow_key", submitEnvAllowKey)
+	if (len(engine) > 0 || len(credential) > 0) && logger != nil {
+		logger.Warn("pod node: dropped allow-listed names the node may not inherit",
+			"engine_names", strings.Join(engine, ","), "credential_names", strings.Join(credential, ","),
+			"allow_key", submitEnvAllowKey)
 	}
 	return out, nil
 }
