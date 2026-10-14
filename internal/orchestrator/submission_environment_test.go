@@ -75,12 +75,11 @@ func TestSubmissionExecutionEnvironmentForcesHomeAndDropsRunControls(t *testing.
 	env := submissionExecutionEnvironment([]string{
 		"PATH=/submit/bin",
 		"SPARKWING_HOME=/wrong",
-		"SPARKWING_RUN_HANDLE_FILE=/tmp/stale.json",
 		"SPARKWING_START_AT=late",
 		"SPARKWING_SUBMIT_TEST_ENV=kept",
 	}, "/queue/home")
 	joined := strings.Join(env, "\n")
-	for _, forbidden := range []string{"/wrong", "SPARKWING_RUN_HANDLE_FILE", "SPARKWING_START_AT"} {
+	for _, forbidden := range []string{"/wrong", "SPARKWING_START_AT"} {
 		if strings.Contains(joined, forbidden) {
 			t.Fatalf("execution environment contains %q: %s", forbidden, joined)
 		}

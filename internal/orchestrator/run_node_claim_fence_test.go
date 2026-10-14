@@ -87,7 +87,7 @@ func pinRunNodeEnvironment(t *testing.T) {
 // safety: both URLs travel as flags so the inherited SPARKWING_CONTROLLER_URL
 // and SPARKWING_LOGS_URL of the test process never reach the node.
 func runNodeArgs(controllerURL, runID, nodeID string) []string {
-	return []string{"--controller", controllerURL, "--logs", "", runID, nodeID}
+	return []string{"--controller", controllerURL, runID, nodeID}
 }
 
 // The warm fallback Job runs a node no agent claimed, so the pod is the only

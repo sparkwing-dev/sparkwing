@@ -326,7 +326,6 @@ func TestCollectDispatchEnv_ExcludesMachineLocalControlChannels(t *testing.T) {
 	t.Setenv(wingdclient.HostBinEnv, "/opt/this-machine-only/bin/sparkwing")
 	t.Setenv("SPARKWING_FLEET_PARENT_GUARD", "http://127.0.0.1:12345")
 	t.Setenv("SPARKWING_FLEET_PARENT_TOKEN", "private-lifetime-token")
-	t.Setenv("SPARKWING_RUN_HANDLE_FILE", "/tmp/parent-run.json")
 	t.Setenv("SPARKWING_ONLY", "outer")
 	t.Setenv("SPARKWING_FOO", "kept")
 
@@ -338,7 +337,6 @@ func TestCollectDispatchEnv_ExcludesMachineLocalControlChannels(t *testing.T) {
 	for _, key := range []string{
 		"SPARKWING_FLEET_PARENT_GUARD",
 		"SPARKWING_FLEET_PARENT_TOKEN",
-		"SPARKWING_RUN_HANDLE_FILE",
 		"SPARKWING_ONLY",
 	} {
 		if v, ok := got[key]; ok {

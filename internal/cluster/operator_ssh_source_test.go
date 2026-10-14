@@ -263,7 +263,7 @@ func TestDispatchedNodeFetchesAnSSHMirrorThroughItsOwnGrant(t *testing.T) {
 	t.Setenv("SPARKWING_NODE_CLAIM_LEASE_SECONDS", "600")
 
 	// safety: the toy pipeline speaks no node protocol, so the node host that started it fails its plan.
-	if err := orchestrator.RunNodeCommand([]string{"--controller", ctrlSrv.URL, "--logs", "", runID, nodeID}); err == nil ||
+	if err := orchestrator.RunNodeCommand([]string{"--controller", ctrlSrv.URL, runID, nodeID}); err == nil ||
 		!strings.Contains(err.Error(), "sdk_exited") {
 		t.Fatalf("run-node: %v, want the toy pipeline's plan to fail", err)
 	}
