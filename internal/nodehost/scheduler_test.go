@@ -61,7 +61,7 @@ func (f *fakeExec) ran(id string) bool {
 	return slices.Contains(f.calls, id)
 }
 
-func hostDoc(t *testing.T, ctx context.Context, st storage.StateStore, doc nodeproto.PlanDoc, exec Executor) RunResult {
+func hostDoc(t *testing.T, ctx context.Context, st storage.StateStoreOld, doc nodeproto.PlanDoc, exec Executor) RunResult {
 	t.Helper()
 	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
@@ -72,7 +72,7 @@ func hostDoc(t *testing.T, ctx context.Context, st storage.StateStore, doc nodep
 	return hostAccepted(t, ctx, st, doc, exec)
 }
 
-func hostAccepted(t *testing.T, ctx context.Context, st storage.StateStore, doc nodeproto.PlanDoc, exec Executor) RunResult {
+func hostAccepted(t *testing.T, ctx context.Context, st storage.StateStoreOld, doc nodeproto.PlanDoc, exec Executor) RunResult {
 	t.Helper()
 	cfg := Config{Execute: exec}
 	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest)}

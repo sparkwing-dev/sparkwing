@@ -84,7 +84,7 @@ type RunCoordination interface {
 }
 
 type StateBackend interface {
-	storage.StateStore
+	storage.StateStoreOld
 	RunCoordination
 
 	GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error)

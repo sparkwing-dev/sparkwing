@@ -58,7 +58,7 @@ func (f *retryFixture) mode(m string) {
 	}
 }
 
-func (f *retryFixture) run(ctx context.Context, id string, r *Rehydration, state storage.StateStore) RunResult {
+func (f *retryFixture) run(ctx context.Context, id string, r *Rehydration, state storage.StateStoreOld) RunResult {
 	f.t.Helper()
 	srv, err := Start(nil)
 	if err != nil {

@@ -18,7 +18,7 @@ import (
 )
 
 type gateStore struct {
-	storage.StateStore
+	storage.StateStoreOld
 	created     chan string
 	getApproval func(ctx context.Context, runID, nodeID string) (*store.Approval, error)
 
@@ -27,7 +27,7 @@ type gateStore struct {
 }
 
 func (g *gateStore) CreateApproval(ctx context.Context, a store.Approval) error {
-	err := g.StateStore.CreateApproval(ctx, a)
+	err := g.StateStoreOld.CreateApproval(ctx, a)
 	if err == nil {
 		g.created <- a.NodeID
 	}
@@ -38,7 +38,7 @@ func (g *gateStore) GetApproval(ctx context.Context, runID, nodeID string) (*sto
 	if g.getApproval != nil {
 		return g.getApproval(ctx, runID, nodeID)
 	}
-	return g.StateStore.GetApproval(ctx, runID, nodeID)
+	return g.StateStoreOld.GetApproval(ctx, runID, nodeID)
 }
 
 func (g *gateStore) AppendEvent(_ context.Context, _, nodeID, kind string, _ []byte) error {
@@ -163,7 +163,7 @@ func TestApprovalGateResolvesAsTheDispatcherDoes(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			st := openStore(t)
-			gs := &gateStore{StateStore: st, created: make(chan string, 1)}
+			gs := &gateStore{StateStoreOld: st, created: make(chan string, 1)}
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
 			resolved := make(chan error, 1)
@@ -253,7 +253,7 @@ func jsonText(v any) string {
 func TestApprovalGateCancelledWithTheRun(t *testing.T) {
 	fastApprovalPoll(t)
 	st := openStore(t)
-	gs := &gateStore{StateStore: st, created: make(chan string, 1)}
+	gs := &gateStore{StateStoreOld: st, created: make(chan string, 1)}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	go func() {
@@ -287,7 +287,7 @@ func TestApprovalGateTimeoutYieldsToALateHumanAnswer(t *testing.T) {
 	fastApprovalPoll(t)
 	st := openStore(t)
 	reads := 0
-	gs := &gateStore{StateStore: st, created: make(chan string, 1)}
+	gs := &gateStore{StateStoreOld: st, created: make(chan string, 1)}
 	gs.getApproval = func(ctx context.Context, runID, nodeID string) (*store.Approval, error) {
 		reads++
 		if reads == 1 {
@@ -314,7 +314,7 @@ func TestApprovalGateTimeoutYieldsToALateHumanAnswer(t *testing.T) {
 func TestApprovalGateFailsOnAStoreThatCannotRecover(t *testing.T) {
 	fastApprovalPoll(t)
 	st := openStore(t)
-	gs := &gateStore{StateStore: st, created: make(chan string, 1)}
+	gs := &gateStore{StateStoreOld: st, created: make(chan string, 1)}
 	gs.getApproval = func(context.Context, string, string) (*store.Approval, error) {
 		return nil, errors.New("database: locking protocol")
 	}

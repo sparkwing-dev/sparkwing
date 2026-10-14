@@ -6,7 +6,7 @@
 // # Interfaces
 //
 // [ArtifactStore] is a content-addressed blob store. [LogStore]
-// persists per-node log streams keyed by (runID, nodeID). [StateStore]
+// persists per-node log streams keyed by (runID, nodeID). [StateStoreOld]
 // is the run-record handle (runs, nodes, steps, annotations,
 // approvals, dispatches, debug pauses). The SQLite- and
 // Postgres-backed *store.Store and the controller HTTP client satisfy it.

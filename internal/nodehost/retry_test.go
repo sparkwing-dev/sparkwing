@@ -18,7 +18,7 @@ import (
 )
 
 type retryState struct {
-	storage.StateStore
+	storage.StateStoreOld
 	consumed int
 }
 

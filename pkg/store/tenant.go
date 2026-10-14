@@ -36,7 +36,7 @@ var ErrNoTeam = errors.New("store: team is required")
 // # The compiler does not protect you yet
 //
 // Every method ported to Tenant still exists, byte-identical, on
-// *Store, because pkg/storage.StateStore and internal/backend.Backend
+// *Store, because pkg/storage.StateStoreOld and internal/backend.Backend
 // name those methods and removing them one family at a time would break
 // satisfaction mid-port. Go interface satisfaction is structural, so
 // until that single atomic deletion lands a *Store substitutes for a

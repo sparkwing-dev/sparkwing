@@ -92,7 +92,7 @@ type Options struct {
 
 	ArtifactStore storage.ArtifactStore
 
-	State storage.StateStore
+	State storage.StateStoreOld
 
 	DefaultStateDB string
 

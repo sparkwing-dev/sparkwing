@@ -107,7 +107,7 @@ func (outputGone) GetNodeOutput(context.Context, string, string) ([]byte, error)
 	return nil, store.ErrNotFound
 }
 
-func scheduled(t *testing.T, st storage.StateStore, cfg Config, doc nodeproto.PlanDoc, regenerate func(context.Context, *NodeRun, json.RawMessage) []expansion) RunResult {
+func scheduled(t *testing.T, st storage.StateStoreOld, cfg Config, doc nodeproto.PlanDoc, regenerate func(context.Context, *NodeRun, json.RawMessage) []expansion) RunResult {
 	t.Helper()
 	ctx := t.Context()
 	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {

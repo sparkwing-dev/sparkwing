@@ -7,7 +7,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// StateStore is the run-record store: runs, nodes, steps, annotations,
+// StateStoreOld is the run-record store: runs, nodes, steps, annotations,
 // approvals, dispatches, debug pauses, and the schema migrations the
 // orchestrator depends on.
 //
@@ -19,7 +19,7 @@ import (
 // adapter logic on top of the store (output extraction, trigger
 // cycle detection) live on the orchestrator's runtime interface that
 // embeds this one, not here.
-type StateStore interface {
+type StateStoreOld interface {
 	// Lifecycle.
 	Close() error
 
@@ -82,4 +82,4 @@ type StateStore interface {
 	ListPendingApprovals(ctx context.Context) ([]*store.Approval, error)
 }
 
-var _ StateStore = (*store.Store)(nil)
+var _ StateStoreOld = (*store.Store)(nil)

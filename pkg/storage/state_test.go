@@ -8,5 +8,5 @@ import (
 )
 
 func TestStateStore_StoreSatisfiesInterface(t *testing.T) {
-	var _ storage.StateStore = (*store.Store)(nil)
+	var _ storage.StateStoreOld = (*store.Store)(nil)
 }

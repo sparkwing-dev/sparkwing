@@ -45,7 +45,7 @@ type podNode struct {
 	dispatched bool
 	// safety: a dispatched node's caches use its own run's grant, since its host may serve other runs.
 	cacheGrant string
-	state      storage.StateStore
+	state      storage.StateStoreOld
 	artifacts  storage.ArtifactStore
 	logger     *slog.Logger
 }

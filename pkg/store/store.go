@@ -1110,7 +1110,7 @@ func (f RunFilter) HasBeforeCursor() bool { return f.BeforeID != "" }
 //
 // Scope: this reads every team. A tenant caller wants [Tenant.ListRuns]
 // and a maintenance caller wants [Operator.ListRunsAcrossTeams]; this
-// twin exists because pkg/storage.StateStore still names it.
+// twin exists because pkg/storage.StateStoreOld still names it.
 func (s *Store) ListRuns(ctx context.Context, f RunFilter) (_ []*Run, err error) {
 	return s.listRuns(ctx, allTeams(), f)
 }
@@ -6280,11 +6280,8 @@ func scanTriggerCandidates(ctx context.Context, tx *storeTx, query string, args 
 	return out, rows.Err()
 }
 
-//go:embed schema_sqlite.sql
-var schemaSQLite string
-
-//go:embed schema_postgres.sql
-var schemaPostgres string
+//go:embed schema.sql
+var schemaNeutral string
 
 // safety: the baseline is the only schema; a store recording any other version is refused, never upgraded.
 const expectedSchemaVersion = 3
@@ -6382,9 +6379,13 @@ func (s *Store) createBaseline(ctx context.Context, remedy string) error {
 			"creates version %d and upgrades none); %s and start again", version, expectedSchemaVersion, remedy)
 	}
 	if s.dialect == DialectPostgres {
-		err = execStatements(ctx, tx, schemaPostgres)
+		var translated string
+		translated, err = TranslateSchema(schemaNeutral, s.dialect)
+		if err == nil {
+			err = execStatements(ctx, tx, translated)
+		}
 	} else {
-		_, err = tx.ExecContext(ctx, schemaSQLite)
+		_, err = tx.ExecContext(ctx, schemaNeutral)
 	}
 	if err != nil {
 		return fmt.Errorf("create baseline schema: %w", err)

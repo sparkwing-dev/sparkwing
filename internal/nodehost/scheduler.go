@@ -34,7 +34,7 @@ type Config struct {
 	// StartAt and StopAt bound the steps that run, as --sw-start-at and
 	// --sw-stop-at; each must name a step in the plan.
 	StartAt, StopAt string
-	State           storage.StateStore
+	State           storage.StateStoreOld
 	// Artifacts holds the files nodes publish with outputs and stage with
 	// consumes; nil turns both off.
 	Artifacts storage.ArtifactStore
@@ -165,7 +165,7 @@ type Run struct {
 	Context   nodeproto.RunContext
 	StartAt   string
 	StopAt    string
-	State     storage.StateStore
+	State     storage.StateStoreOld
 	Logger    *slog.Logger
 	adds      chan addRequest
 	onlySkips map[string]string
@@ -715,7 +715,7 @@ func (s *scheduler) reuseRow(ctx context.Context, n nodeproto.PlanNode, row *sto
 	}
 }
 
-func recordedOutput(ctx context.Context, st storage.StateStore, runID, id string) (json.RawMessage, error) {
+func recordedOutput(ctx context.Context, st storage.StateStoreOld, runID, id string) (json.RawMessage, error) {
 	outputs, ok := st.(sourceOutputs)
 	if !ok {
 		return nil, fmt.Errorf("read node %s output: the runs store cannot read it", id)

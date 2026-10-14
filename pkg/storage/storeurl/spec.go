@@ -35,7 +35,7 @@ func resolveControllerProfile(surface, controller string, lookup ProfileLookup) 
 	return url, token, nil
 }
 
-// OpenStateStoreFromSpec constructs a StateStore from a backends.Spec
+// OpenStateStoreFromSpec constructs a StateStoreOld from a backends.Spec
 // that has passed pkg/backends validation. The lookup
 // callback is consulted for type=controller specs; pass nil when no
 // controller-typed spec can appear.
@@ -44,7 +44,7 @@ func resolveControllerProfile(surface, controller string, lookup ProfileLookup) 
 // file. Callers that want the historical default (~/.sparkwing/state.db)
 // should pass that path explicitly so the factory has a single,
 // caller-provided source of truth.
-func OpenStateStoreFromSpec(ctx context.Context, spec backends.Spec, lookup ProfileLookup) (storage.StateStore, error) {
+func OpenStateStoreFromSpec(ctx context.Context, spec backends.Spec, lookup ProfileLookup) (storage.StateStoreOld, error) {
 	switch spec.Type {
 	case backends.TypeSQLite:
 		path, err := expandPath(spec.Path)

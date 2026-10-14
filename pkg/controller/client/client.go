@@ -73,7 +73,7 @@ func (c *Client) Token() string { return c.token }
 
 // Close releases resources held by the client. The HTTP transport
 // runs idle connections under its own GC; Close is a no-op kept on
-// the type so a Client satisfies the storage.StateStore lifecycle
+// the type so a Client satisfies the storage.StateStoreOld lifecycle
 // contract that *store.Store already does.
 func (c *Client) Close() error { return nil }
 

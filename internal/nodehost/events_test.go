@@ -23,7 +23,7 @@ import (
 )
 
 // safety: the controller serves the same store, so every check reads what each backend stored.
-func eventBackends(t *testing.T, body func(t *testing.T, st *store.Store, state storage.StateStore)) {
+func eventBackends(t *testing.T, body func(t *testing.T, st *store.Store, state storage.StateStoreOld)) {
 	t.Run("local", func(t *testing.T) {
 		st := openStore(t)
 		body(t, st, st)
@@ -40,7 +40,7 @@ func eventBackends(t *testing.T, body func(t *testing.T, st *store.Store, state 
 	})
 }
 
-func hostEvents(t *testing.T, ctx context.Context, state storage.StateStore, cfg Config, doc nodeproto.PlanDoc) RunResult {
+func hostEvents(t *testing.T, ctx context.Context, state storage.StateStoreOld, cfg Config, doc nodeproto.PlanDoc) RunResult {
 	t.Helper()
 	if err := state.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
@@ -111,12 +111,12 @@ func (l *eventLog) open(_ context.Context, _, node string) (NodeLog, error) {
 }
 
 type askingState struct {
-	storage.StateStore
+	storage.StateStoreOld
 	asked chan string
 }
 
 func (a askingState) CreateApproval(ctx context.Context, appr store.Approval) error {
-	err := a.StateStore.CreateApproval(ctx, appr)
+	err := a.StateStoreOld.CreateApproval(ctx, appr)
 	if err == nil {
 		a.asked <- appr.NodeID
 	}
@@ -125,7 +125,7 @@ func (a askingState) CreateApproval(ctx context.Context, appr store.Approval) er
 
 func TestHostedRunEmitsTheDispatchersEvents(t *testing.T) {
 	fastApprovalPoll(t)
-	eventBackends(t, func(t *testing.T, st *store.Store, state storage.StateStore) {
+	eventBackends(t, func(t *testing.T, st *store.Store, state storage.StateStoreOld) {
 		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 		defer cancel()
 		art, err := fsstore.NewArtifactStore(t.TempDir())
@@ -180,7 +180,7 @@ func TestHostedRunEmitsTheDispatchersEvents(t *testing.T) {
 			}
 			return Result{Outcome: sparkwing.Success}
 		}
-		asking := askingState{StateStore: state, asked: make(chan string, 1)}
+		asking := askingState{StateStoreOld: state, asked: make(chan string, 1)}
 		go func() {
 			if recv(t, ctx, asking.asked) == "" {
 				return
@@ -237,7 +237,7 @@ func TestHostedRunEmitsTheDispatchersEvents(t *testing.T) {
 }
 
 func TestHostedRunEmitsConcurrencyEvents(t *testing.T) {
-	eventBackends(t, func(t *testing.T, st *store.Store, state storage.StateStore) {
+	eventBackends(t, func(t *testing.T, st *store.Store, state storage.StateStoreOld) {
 		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 		defer cancel()
 		holdSlotOutside(t, st, "g:db")
@@ -274,7 +274,7 @@ func TestHostedRunEmitsConcurrencyEvents(t *testing.T) {
 }
 
 func TestHostedRunEmitsPlanConcurrencyRefusals(t *testing.T) {
-	eventBackends(t, func(t *testing.T, st *store.Store, state storage.StateStore) {
+	eventBackends(t, func(t *testing.T, st *store.Store, state storage.StateStoreOld) {
 		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 		defer cancel()
 		holdSlotOutside(t, st, "g:deploys")
