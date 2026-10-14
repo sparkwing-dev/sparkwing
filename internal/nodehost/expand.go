@@ -268,7 +268,7 @@ type recordedBatch struct {
 // safety: the expansion's membership is the rows the run recorded, so a later host adds every node the run
 // accepted, finished or not, and never one a generator would return now. A generator with no batch recorded, as an
 // empty one records nothing, or only part of one, as a host stopped mid-add leaves it, is incomplete.
-func storedExpansions(ctx context.Context, st storage.StateStore, runID string, n nodeproto.PlanNode) ([]recordedBatch, error) {
+func storedExpansions(ctx context.Context, st storage.StateStoreOld, runID string, n nodeproto.PlanNode) ([]recordedBatch, error) {
 	out := make([]recordedBatch, 0, len(n.Closures.Generator))
 	var rows []*store.Node
 	if lister, ok := st.(nodeLister); ok {

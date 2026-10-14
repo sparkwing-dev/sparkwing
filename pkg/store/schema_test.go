@@ -14,9 +14,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-// The two baseline files are written by hand, so this is what keeps them one
-// schema: every table, column, key, index and seed row a fresh SQLite store
-// has, a fresh Postgres store has too.
+// safety: neutral-schema translation must preserve every table, column, key,
+// index and seed row across SQLite and PostgreSQL.
 func TestBaselineSchemaIsTheSameOnBothDialects(t *testing.T) {
 	lite := storetest.OpenSQLite(t)
 	pg := storetest.OpenPostgres(t)

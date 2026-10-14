@@ -28,7 +28,7 @@
 //
 // The port is in progress. Every method already on Tenant still has a
 // byte-identical twin on *Store that writes [DefaultTeam], because
-// pkg/storage.StateStore and internal/backend.Backend name those
+// pkg/storage.StateStoreOld and internal/backend.Backend name those
 // methods; those twins are deleted in one change once every family has
 // moved. Until then the compiler does not refuse an unscoped call --
 // the doc comment on [Tenant] says what does, and how to port a family.
