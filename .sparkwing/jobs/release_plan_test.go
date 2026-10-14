@@ -23,6 +23,7 @@ var releaseRecipe = []string{
 	"prepare-changelog",
 	"push-tag",
 	"release-cut-checks",
+	"require-isolated-home",
 	"validate-version",
 }
 

@@ -32,7 +32,7 @@ func (Release) ShortHelp() string {
 }
 
 func (Release) Help() string {
-	return "Cuts a release from the commit in the working tree: resolves the version, checks it is ahead of the newest tag origin carries, renames the CHANGELOG.md [Unreleased] section to it, rolls docs/migrations/_unreleased.md to vX.Y.Z.md with a fresh placeholder behind it, adds the index row, repoints the section's (Breaking) links at the rolled guide, commits all of that as one change, then pushes the branch and an annotated vX.Y.Z tag. It refuses to tag when a (Breaking) entry has no section in the guide being rolled, because that prose is written by a person. It refuses nothing about where origin's branch tip is. The .github/workflows/release.yaml workflow takes over from the tag push and checks nothing: it resolves the tag to a commit, builds the binaries and images, signs and publishes them, and creates the GitHub release from the tag's changelog section, falling back to the annotated tag message and then to a pointer at CHANGELOG.md when that source carries no section. A failed build publishes nothing; the fix is a later patch tag. Before changing the changelog, the release cut checks published module-version freshness, Go directive policy, SDK pin coherence and changelog links alongside build, full lint and the short test suite, under one fixed ten-minute budget. Local replacement checkouts are not required to match origin/main. Rolled changelog and migration-guide checks run before the changelog commit, and every refusal precedes push-tag. The race, Postgres, chaos and browser suites are the heavier classes that `gate` and `pre-release` run on demand and in hosted CI. This pipeline never builds or publishes artifacts itself."
+	return "Cuts a release from the commit in the working tree: refuses to start unless SPARKWING_HOME names a directory other than ~/.sparkwing, resolves the version, checks it is ahead of the newest tag origin carries, renames the CHANGELOG.md [Unreleased] section to it, rolls docs/migrations/_unreleased.md to vX.Y.Z.md with a fresh placeholder behind it, adds the index row, repoints the section's (Breaking) links at the rolled guide, commits all of that as one change, then pushes the branch and an annotated vX.Y.Z tag. It refuses to tag when a (Breaking) entry has no section in the guide being rolled, because that prose is written by a person. It refuses nothing about where origin's branch tip is. The .github/workflows/release.yaml workflow takes over from the tag push and checks nothing: it resolves the tag to a commit, builds the binaries and images, signs and publishes them, and creates the GitHub release from the tag's changelog section, falling back to the annotated tag message and then to a pointer at CHANGELOG.md when that source carries no section. A failed build publishes nothing; the fix is a later patch tag. Before changing the changelog, the release cut checks published module-version freshness, Go directive policy, SDK pin coherence and changelog links alongside build, full lint and the short test suite, under one fixed ten-minute budget. Local replacement checkouts are not required to match origin/main. Rolled changelog and migration-guide checks run before the changelog commit, and every refusal precedes push-tag. The race, Postgres, chaos and browser suites are the heavier classes that `gate` and `pre-release` run on demand and in hosted CI. This pipeline never builds or publishes artifacts itself."
 }
 
 func (Release) Examples() []sparkwing.Example {
@@ -54,11 +54,14 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		return errors.New("release: no working directory; run this pipeline from a tree with a .sparkwing directory above it")
 	}
 
+	home := sparkwing.Job(plan, "require-isolated-home", &requireIsolatedHomeJob{}).Inline()
+
 	discover := sparkwing.Job(plan, "discover-version", &resolveVersionJob{
 		Explicit: r.args.Version,
 		Bump:     r.args.Bump,
 		RepoDir:  repoDir,
 	}).Inline()
+	discover.Needs(home)
 	versionRef := sparkwing.RefTo[string](discover)
 
 	validate := sparkwing.Job(plan, "validate-version", &validateVersionJob{
@@ -70,11 +73,13 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	clean := sparkwing.Job(plan, "check-clean-tree", &checkCleanTreeJob{
 		RepoDir: repoDir,
 	})
+	clean.Needs(home)
 
 	// safety: the class judges the tree the tag will carry, and it judges it
 	// before prepare-changelog commits, so no lint or suite reads a checkout
 	// that changes under it.
 	cutChecks := sparkwing.Job(plan, "release-cut-checks", &releaseCutChecksJob{})
+	cutChecks.Needs(home)
 
 	changelog := sparkwing.Job(plan, "prepare-changelog", &prepareChangelogJob{
 		RepoDir: repoDir,
