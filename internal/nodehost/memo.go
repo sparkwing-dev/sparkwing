@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/artifacts"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -19,19 +20,47 @@ import (
 type Memo struct {
 	// Slots is the coordination store that holds the memo entries.
 	Slots ConcurrencySlots
-	// Output reads the output a hit or a coalesced follower copies from the
-	// node runID/nodeID. A claimed node cannot read another run, so it names
+	// Source reads the output and artifact manifest a hit or a coalesced
+	// follower copies from the node runID/nodeID, in one read so both come
+	// from the same node. A claimed node cannot read another run, so it names
 	// the entry with in and the controller picks the node.
-	Output func(ctx context.Context, in store.ClaimInputRequest, runID, nodeID string) ([]byte, error)
-	// ArtifactManifest reads the artifact manifest digest of the node Output
-	// names; nil reads it from that node's row, which a claimed node cannot.
-	ArtifactManifest func(ctx context.Context, in store.ClaimInputRequest, runID, nodeID string) (string, error)
+	Source func(ctx context.Context, in store.ClaimInputRequest, runID, nodeID string) (MemoSource, error)
 	// NoCache runs every memoized node without reading an earlier result, as
 	// --sw-no-cache does; a success still records its output.
 	NoCache bool
 	// Claimed keys each entry under the run's repository, pipeline and node,
 	// the only memo keys the controller lets a claim take.
 	Claimed bool
+}
+
+// MemoSource is the finished node a hit or a coalesced follower copies.
+type MemoSource struct {
+	Output []byte
+	// ArtifactManifest is the node's artifact manifest digest, empty when it
+	// published none.
+	ArtifactManifest string
+}
+
+// MemoSourceReader reads a finished node's row and output.
+type MemoSourceReader interface {
+	GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error)
+	GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error)
+}
+
+// ReadMemoSource reads runID/nodeID's output and manifest from st. A finished
+// node's row and output never change, so the two reads name one source. An
+// output read's error is returned with the manifest.
+func ReadMemoSource(ctx context.Context, st MemoSourceReader, runID, nodeID string) (MemoSource, error) {
+	row, err := st.GetNode(ctx, runID, nodeID)
+	if err != nil {
+		return MemoSource{}, err
+	}
+	var src MemoSource
+	if row != nil {
+		src.ArtifactManifest = row.ArtifactManifest
+	}
+	src.Output, err = st.GetNodeOutput(ctx, runID, nodeID)
+	return src, err
 }
 
 // safety: matches the dispatcher's bound on a cache key resolver.
@@ -57,7 +86,7 @@ func memoLayer(cfg *Config, next Executor) Executor {
 			return res
 		case hash == "":
 			return next(ctx, n)
-		case m.Slots == nil || m.Output == nil:
+		case m.Slots == nil || m.Source == nil:
 			return Result{Outcome: sparkwing.Failed, Err: errors.New("memo: no coordination store")}
 		}
 		key, err := m.key(ctx, n, hash)
@@ -231,31 +260,30 @@ func (r *memoRun) wait(ctx context.Context, initial store.AcquireSlotResponse, b
 // rerun skips reading entries, so it cannot loop.
 func (r *memoRun) hit(ctx context.Context, srcRun, srcNode string, bypass bool) (Result, bool) {
 	in := store.ClaimInputRequest{Kind: store.ClaimInputCached, Key: r.g.key, CacheKeyHash: r.g.memoHash}
-	manifest, err := r.sourceManifest(ctx, in, srcRun, srcNode)
-	switch {
-	case errors.Is(err, store.ErrNotFound) || (err == nil && manifest == "" && len(r.n.Plan.Outputs) > 0):
-		return r.run(ctx, true)
-	case err != nil:
-		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("cache hit: read artifacts: %w", err)}, false
-	}
-	output, err := r.m.Output(ctx, in, srcRun, srcNode)
+	src, err := r.m.Source(ctx, in, srcRun, srcNode)
 	switch {
 	case (errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrOutputCorrupt)) && !bypass:
 		return r.run(ctx, true)
 	case err != nil:
 		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("cache hit: fetch output: %w", err)}, false
 	}
-	r.copied(ctx, manifest, sparkwing.Cached, "cache_hit", map[string]any{
+	switch ready, err := r.artifactsReady(ctx, src.ArtifactManifest); {
+	case err != nil:
+		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("cache hit: read artifacts: %w", err)}, false
+	case !ready:
+		return r.run(ctx, true)
+	}
+	r.copied(ctx, src.ArtifactManifest, sparkwing.Cached, "cache_hit", map[string]any{
 		"key": r.g.key, "cache_key_hash": r.g.memoHash, "origin_run_id": srcRun, "origin_node_id": srcNode,
 	}, map[string]any{"cache_hit": true})
-	return Result{Outcome: sparkwing.Cached, Output: output}, true
+	return Result{Outcome: sparkwing.Cached, Output: src.Output}, true
 }
 
 // safety: the store resolves a follower this way only once its leader
 // succeeded, so the follower succeeds with the leader's output.
 func (r *memoRun) follow(ctx context.Context, leaderRun, leaderNode string) (Result, bool) {
 	in := store.ClaimInputRequest{Kind: store.ClaimInputCoalesced, Key: r.g.key, CacheKeyHash: r.g.memoHash}
-	output, err := r.m.Output(ctx, in, leaderRun, leaderNode)
+	src, err := r.m.Source(ctx, in, leaderRun, leaderNode)
 	if errors.Is(err, store.ErrNotFound) && r.m.Claimed {
 		// safety: a claim finds no output once the entry expired after its leader released, so the node runs
 		// rather than succeed with nothing.
@@ -264,29 +292,31 @@ func (r *memoRun) follow(ctx context.Context, leaderRun, leaderNode string) (Res
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("fetch leader output: %w", err)}, false
 	}
-	manifest, err := r.sourceManifest(ctx, in, leaderRun, leaderNode)
-	if err != nil {
-		r.n.Run.Logger.Warn("nodehost: read the leader's artifact manifest", "node", r.n.Plan.ID, "err", err)
+	switch ready, err := r.artifactsReady(ctx, src.ArtifactManifest); {
+	case err != nil:
+		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("read leader artifacts: %w", err)}, false
+	case !ready:
+		return r.run(ctx, true)
 	}
-	r.copied(ctx, manifest, sparkwing.Success, "coalesced", map[string]any{
+	r.copied(ctx, src.ArtifactManifest, sparkwing.Success, "coalesced", map[string]any{
 		"key": r.g.key, "leader_run_id": leaderRun, "leader_node_id": leaderNode, "leader_outcome": string(sparkwing.Success),
 	}, map[string]any{"coalesced_from": leaderRun + "/" + leaderNode})
-	return Result{Outcome: sparkwing.Success, Output: output}, true
+	return Result{Outcome: sparkwing.Success, Output: src.Output}, true
 }
 
-// safety: a node that declares no outputs hands on no artifacts, so its source is not read.
-func (r *memoRun) sourceManifest(ctx context.Context, in store.ClaimInputRequest, srcRun, srcNode string) (string, error) {
+// safety: a node that declares outputs reuses a source only when its manifest and every blob it lists are
+// stored, since a consumer of a missing one fails where the producer could have run again. A host with no
+// artifact store publishes and stages nothing, so there is nothing to check.
+func (r *memoRun) artifactsReady(ctx context.Context, manifest string) (bool, error) {
 	switch {
 	case len(r.n.Plan.Outputs) == 0:
-		return "", nil
-	case r.m.ArtifactManifest != nil:
-		return r.m.ArtifactManifest(ctx, in, srcRun, srcNode)
+		return true, nil
+	case manifest == "":
+		return false, nil
+	case r.cfg.Artifacts == nil:
+		return true, nil
 	}
-	src, err := r.n.Run.State.GetNode(ctx, srcRun, srcNode)
-	if err != nil || src == nil {
-		return "", err
-	}
-	return src.ArtifactManifest, nil
+	return artifacts.Present(ctx, r.cfg.Artifacts, manifest)
 }
 
 // safety: the event kinds, payloads and log attrs are the dispatcher's, which the dashboard's live stream reads.

@@ -105,8 +105,9 @@ pair `.Memoize()` with `Outputs`.
 
 Local runs store artifacts in `cache/` under their resolved Sparkwing home,
 or in the store `SPARKWING_CACHE_URL` names. Staging checks blob and manifest
-digests and fails when cached bytes are missing or corrupt. Memo entries without
-a required artifact manifest are cache misses and rebuild the producer.
+digests and fails when cached bytes are missing or corrupt. A memo entry, or a
+coalesce leader, without a required artifact manifest, or whose manifest or
+any file it lists is gone from the store, is a miss and rebuilds the producer.
 
 Artifacts flow the same way wherever a node runs. In a local run each
 node process captures and stages against its working directory, which

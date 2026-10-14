@@ -26,7 +26,8 @@ unlock.
   It acts on the state database directly and commits the console's `team.frozen` and `team.unfrozen` business events with `sparkwing-controller admin` as the actor, and writes an `audit` line to stderr. See [Break-glass](docs/auth.md#break-glass).
 - **controller + web:** The operator console sets a trusted team's daily cap, card rung and Cloud node cap, and releases a payment dispute's hold
   `POST /api/v1/operator/teams/{team}/unfreeze` takes `hold` to release that one hold, a dispute's included, and `GET /api/v1/operator/teams/{team}` reports `daily_cap_cents`, `rung_cents` and `runner_cap` in `billing`.
-- **controller + client:** `POST /api/v1/runs/{id}/nodes/{nodeID}/claim/input` answers a memo source's `artifact_manifest`, and `Client.ClaimInputSource` resolves an input without reading its bytes, so a launcher Job's memo hit or coalesce follower takes its source's artifacts instead of running again
+- **controller:** `POST /api/v1/runs/{id}/nodes/{nodeID}/claim/input` answers a memo source's `artifact_manifest` with its output grant, so a launcher Job's memo hit or coalesce follower takes its source's output and artifacts from one read instead of running again
+  A memoized node that declares outputs runs as a miss, on every host, when its source's manifest or any file it lists is gone from the artifact store, and a coalesce follower does when its leader recorded no manifest
 - **store:** `SecretPreflightError` refuses a plan whose required secrets the run cannot read, and `EventKindSecretPreflightRefused` names the run event that holds its `Detail`
 
 - **controller + cli:** `GET /api/v1/runs/{id}/logs/{node}/stream` follows a node through every attempt of it in the run and resumes from `Last-Event-ID`

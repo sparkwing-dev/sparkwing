@@ -103,12 +103,9 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 		// safety: the node's concurrency group and memo entry run through the claim, which the controller binds to
 		// this node; a memo hit's output and artifact manifest are the ones the controller picks for the claim's key.
 		cfg.Admission = &nodehost.Admission{Slots: slots}
-		cfg.Memo = &nodehost.Memo{Slots: slots, Claimed: true, Output: func(ctx context.Context, in store.ClaimInputRequest, _, _ string) ([]byte, error) {
-			_, data, err := c.ClaimInput(ctx, p.runID, p.nodeID, in)
-			return data, err
-		}, ArtifactManifest: func(ctx context.Context, in store.ClaimInputRequest, _, _ string) (string, error) {
-			src, err := c.ClaimInputSource(ctx, p.runID, p.nodeID, in)
-			return src.ArtifactManifest, err
+		cfg.Memo = &nodehost.Memo{Slots: slots, Claimed: true, Source: func(ctx context.Context, in store.ClaimInputRequest, _, _ string) (nodehost.MemoSource, error) {
+			src, data, err := c.ClaimInput(ctx, p.runID, p.nodeID, in)
+			return nodehost.MemoSource{Output: data, ArtifactManifest: src.ArtifactManifest}, err
 		}}
 		res = nodehost.HostNode(ctx, cfg, p.nodeID, p.specHash, p.attempt)
 	}
