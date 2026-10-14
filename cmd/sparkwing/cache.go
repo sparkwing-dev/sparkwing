@@ -13,6 +13,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
@@ -329,6 +330,7 @@ type cacheExplainReport struct {
 	Dir     string             `json:"dir"`
 	Key     string             `json:"key"`
 	Cached  bool               `json:"cached"`
+	Reason  string             `json:"reason,omitempty"`
 	Parts   []cacheExplainPart `json:"parts"`
 	Related []cacheExplainPrev `json:"related_entries,omitempty"`
 }
@@ -360,9 +362,21 @@ func runCacheExplain(args []string) error {
 	if fs.NArg() > 0 {
 		return fmt.Errorf("cache explain: unexpected positional %q", fs.Arg(0))
 	}
-	dir, err := defaultSparkwingDir()
+	dir, err := findSparkwingDir()
 	if err != nil {
 		return fmt.Errorf("cache explain: %w", err)
+	}
+	ts, err := pipelineentry.IsTypeScript(dir)
+	if err != nil {
+		return fmt.Errorf("cache explain: %w", err)
+	}
+	if ts {
+		report := cacheExplainReport{Dir: dir, Reason: "a TypeScript pipeline runs from source with node, so nothing is compiled or cached"}
+		return writeCacheOutput(output, report, func() {
+			fmt.Println(color.Bold("CACHE KEY"))
+			fmt.Printf("  pipeline: %s\n", color.Cyan(dir))
+			fmt.Printf("  status:   %s\n", color.Dim("not cached -- "+report.Reason))
+		})
 	}
 
 	key, parts, err := bincache.ExplainCacheKey(dir)

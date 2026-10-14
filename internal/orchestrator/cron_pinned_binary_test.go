@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -28,7 +29,20 @@ func cronPinnedFixture(t *testing.T) (repoDir string, cache *localCompileCache, 
 	}
 	cache = &localCompileCache{}
 	t.Cleanup(func() { _ = cache.Close() })
+	fakeTriggerHost(t)
 	return repoDir, cache, slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// hack: a fake stands in for the sparkwing CLI that hosts a claimed trigger's run; it runs the program it is
+// handed in the trigger's checkout, with the trigger id, as the host's nodes run it there.
+func fakeTriggerHost(t *testing.T) {
+	t.Helper()
+	host := filepath.Join(t.TempDir(), "sparkwing")
+	script := "#!/bin/sh\n[ \"$1 $2\" = \"" + TriggerHostVerb + " --program\" ] || exit 64\nexec \"$3\" \"$4\"\n"
+	if err := os.WriteFile(host, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(wingdclient.HostBinEnv, host)
 }
 
 func TestDispatchLocalTrigger_RunsThePinnedBinaryInsteadOfCompiling(t *testing.T) {
@@ -58,7 +72,7 @@ func TestDispatchLocalTrigger_RunsThePinnedBinaryInsteadOfCompiling(t *testing.T
 		t.Fatalf("the pinned binary did not run: %v", err)
 	}
 	argv, pwd, _ := strings.Cut(strings.TrimSpace(string(raw)), "|")
-	if argv != "handle-trigger --local run-pinned" {
+	if argv != "run-pinned" {
 		t.Errorf("the pinned binary was given %q", argv)
 	}
 	if pwd != repoDir {

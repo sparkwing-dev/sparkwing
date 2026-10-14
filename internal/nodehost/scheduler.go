@@ -78,6 +78,9 @@ type Config struct {
 	// Workers caps how many non-inline nodes run an attempt at once; zero
 	// leaves them uncapped.
 	Workers int
+	// Rehydrate, when set, copies the results of a retried run's nodes
+	// instead of running them; nil runs every node.
+	Rehydrate *Rehydration
 }
 
 // Result is how one node ended.
@@ -144,9 +147,6 @@ type NodeRun struct {
 	BeforeRunEachAttempt bool
 	// safety: set only for a memoized node that did not run, whose generators read it through the output route.
 	memoOutput json.RawMessage
-	// safety: the lease admission granted this node, which a child run it starts attaches to;
-	// a child that queued for the cores its parent holds would wait for its own parent.
-	nodeLease string
 }
 
 // Run is the hosted run an executor works within.
@@ -167,9 +167,6 @@ type Run struct {
 	onlySkips map[string]string
 	// safety: set once, before any node starts, so node goroutines read it unlocked.
 	leaseToken string
-	// safety: set with leaseToken; a run lease that holds plan groups or host capacity, as an attached run's
-	// does, is what a child must attach to.
-	leaseHoldsGroups, leaseHoldsHost bool
 }
 
 type addRequest struct {
@@ -317,6 +314,12 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 func runPlanned(ctx context.Context, cfg *Config, run *Run, res *RunResult) (release func()) {
 	release = func() {}
 	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(cfg), resume: cfg.Resume}
+	s.rehydrate, s.rerun = cfg.Rehydrate, map[string]bool{}
+	if cfg.Attempts != nil {
+		s.regenerate = func(ctx context.Context, n *NodeRun, output json.RawMessage) []expansion {
+			return memoGenerate(ctx, cfg, n, output)
+		}
+	}
 	if err := s.add(ctx, ctx, run.Doc.Nodes); err != nil {
 		res.Status, res.Err = "failed", err
 		return release
@@ -426,6 +429,12 @@ type scheduler struct {
 	groups  map[string]*genGroup
 	addedBy map[string]string
 	resume  bool
+	// safety: rerun records the nodes a retry runs again, so a node waiting on its deps is looked up in the
+	// source run once; only the scheduler goroutine reads it.
+	rehydrate  *Rehydration
+	rerun      map[string]bool
+	adopted    []finished
+	regenerate func(ctx context.Context, n *NodeRun, output json.RawMessage) []expansion
 }
 
 type finished struct {
@@ -489,6 +498,11 @@ func (s *scheduler) startReady(ctx context.Context, done chan<- finished, runnin
 			continue
 		}
 		progressed = true
+		if res, ok := s.rehydrated(ctx, n, byID); ok {
+			s.started[n.ID] = true
+			s.finish(ctx, n.ID, res)
+			continue
+		}
 		node := &NodeRun{Run: s.run, Plan: n, Generator: s.addedBy[n.ID]}
 		if parent := n.OnFailureOf; parent != "" {
 			pr := s.results[parent]
@@ -549,7 +563,7 @@ func (s *scheduler) finish(ctx context.Context, id string, res Result) {
 	if errors.Is(err, store.ErrOutputNotStored) {
 		// safety: a refused output fails the node in its row too, so the row never stays running.
 		res = Result{Outcome: sparkwing.Failed, Err: err}
-		err = s.run.State.FinishNodeWithReason(writeCtx, s.run.ID, id, string(res.Outcome), err.Error(), nil, store.FailureUnknown, nil)
+		err = s.run.State.FinishNodeWithReason(writeCtx, s.run.ID, id, string(res.Outcome), recordedErrText(err), nil, store.FailureUnknown, nil)
 	}
 	if err != nil {
 		// safety: a result the store never took must not read as a success downstream.
@@ -590,7 +604,7 @@ func (s *scheduler) add(ctx, writeCtx context.Context, nodes []nodeproto.PlanNod
 	}
 	for i, n := range nodes {
 		if row, ok := existing[n.ID]; ok {
-			s.reuseRow(writeCtx, n.ID, row)
+			s.reuseRow(writeCtx, n, row)
 			continue
 		}
 		if err := s.run.State.CreateNode(writeCtx, pendingRow(s.run, n)); err != nil {
@@ -608,6 +622,12 @@ func (s *scheduler) add(ctx, writeCtx context.Context, nodes []nodeproto.PlanNod
 		}
 	}
 	s.nodes = append(s.nodes, nodes...)
+	// safety: an adopted generator's nodes are added only once it is among the run's nodes, which they need.
+	for len(s.adopted) > 0 {
+		next := s.adopted[0]
+		s.adopted = s.adopted[1:]
+		s.expand(ctx, next.id, next.res)
+	}
 	return nil
 }
 
@@ -639,7 +659,8 @@ func (s *scheduler) resumedRows(ctx context.Context, nodes []nodeproto.PlanNode)
 // safety: a resumed run's finished node keeps the result its row records and
 // is never run or written again; an unfinished row, or one the reaper failed
 // because its holder was lost, is run again.
-func (s *scheduler) reuseRow(ctx context.Context, id string, row *store.Node) {
+func (s *scheduler) reuseRow(ctx context.Context, n nodeproto.PlanNode, row *store.Node) {
+	id := n.ID
 	if row.Status != "done" || row.Outcome == "" {
 		return
 	}
@@ -653,6 +674,32 @@ func (s *scheduler) reuseRow(ctx context.Context, id string, row *store.Node) {
 		res.Err = errors.New(row.Error)
 	}
 	s.started[id], s.results[id] = true, res
+	// safety: an adopted generator's nodes are not recorded whole, so they are generated again from its
+	// recorded output, as a copied generator's are.
+	if res.Outcome == sparkwing.Success && n.Closures != nil && len(n.Closures.Generator) > 0 && s.regenerate != nil {
+		output, err := s.ownOutput(ctx, id)
+		if err != nil {
+			for _, g := range n.Closures.Generator {
+				res.expansions = append(res.expansions, expansion{closure: g, err: err})
+			}
+		} else {
+			res.expansions = s.regenerate(ctx, &NodeRun{Run: s.run, Plan: n, Generator: s.addedBy[id]}, output)
+		}
+		s.results[id] = res
+		s.adopted = append(s.adopted, finished{id: id, res: res})
+	}
+}
+
+func (s *scheduler) ownOutput(ctx context.Context, id string) (json.RawMessage, error) {
+	outputs, ok := s.run.State.(sourceOutputs)
+	if !ok {
+		return nil, fmt.Errorf("read node %s output: the runs store cannot read it", id)
+	}
+	out, err := outputs.GetNodeOutput(ctx, s.run.ID, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil
+	}
+	return out, err
 }
 
 // safety: the store reopens a node whose holder was lost only for the run's own trigger holder, and only while no

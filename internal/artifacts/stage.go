@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -74,6 +75,32 @@ func Stage(ctx context.Context, store storage.ArtifactStore, state ManifestReade
 	return staged, nil
 }
 
+// Present reports whether the manifest digest names and every blob it lists
+// are stored; a missing or corrupt manifest or a missing blob is false.
+func Present(ctx context.Context, store storage.ArtifactStore, digest string) (bool, error) {
+	manifest, err := fetchManifest(ctx, store, digest)
+	switch {
+	case errors.Is(err, storage.ErrNotFound) || errors.Is(err, errManifestCorrupt):
+		return false, nil
+	case err != nil:
+		return false, err
+	}
+	seen := map[string]bool{}
+	for _, entry := range manifest.Entries {
+		if seen[entry.Digest] {
+			continue
+		}
+		seen[entry.Digest] = true
+		ok, err := store.Has(ctx, BlobKey(entry.Digest))
+		if err != nil || !ok {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+var errManifestCorrupt = errors.New("artifact manifest digest mismatch")
+
 func fetchManifest(ctx context.Context, store storage.ArtifactStore, digest string) (artifactManifest, error) {
 	rc, err := store.Get(ctx, ManifestKey(digest))
 	if err != nil {
@@ -86,7 +113,7 @@ func fetchManifest(ctx context.Context, store storage.ArtifactStore, digest stri
 	}
 	sum := sha256.Sum256(b)
 	if hex.EncodeToString(sum[:]) != digest {
-		return artifactManifest{}, fmt.Errorf("artifact manifest digest mismatch")
+		return artifactManifest{}, errManifestCorrupt
 	}
 	var m artifactManifest
 	if err := json.Unmarshal(b, &m); err != nil {

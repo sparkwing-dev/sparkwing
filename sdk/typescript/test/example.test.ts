@@ -12,6 +12,7 @@ import { test } from "node:test";
 
 const fixture = (name: string) => fileURLToPath(new URL(name, import.meta.url));
 const example = fixture("../examples/hello/pipeline.ts");
+const bootstrap = new URL("../src/bootstrap.ts", import.meta.url).href;
 const forged = `{"reply":"1","ok":true,"result":{"forged":true}}`;
 const unix = process.platform === "win32" ? "the TypeScript SDK does not open Windows protocol handles yet" : false;
 
@@ -23,7 +24,8 @@ interface Session {
 }
 
 /**
- * Starts file the way a host does: exactly --sw-node-protocol, the request
+ * Starts file the way a host does: behind the SDK's bootstrap preload with
+ * exactly --sw-node-protocol, the request
  * pipe on descriptor 3, the frame pipe on 4 and stdin from the null device.
  * Each request goes out after the previous reply, then the request pipe
  * closes. Real FIFOs stand in for the host's pipes, since a Node.js "pipe"
@@ -36,7 +38,7 @@ async function session(file: string, requests: Array<Req>, env: Record<string, s
   execFileSync("mkfifo", [reqPath, framePath]);
   const base: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !k.startsWith("SPARKWING_")) base[k] = v;
-  const child = spawn("sh", ["-c", 'exec "$0" "$1" --sw-node-protocol 3<"$2" 4>"$3"', process.execPath, file, reqPath, framePath], {
+  const child = spawn("sh", ["-c", 'exec "$0" --import "$4" "$1" --sw-node-protocol 3<"$2" 4>"$3"', process.execPath, file, reqPath, framePath, bootstrap], {
     env: { ...base, SPARKWING_PROTOCOL_HANDLES: "3,4", ...env },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -84,20 +86,29 @@ async function session(file: string, requests: Array<Req>, env: Record<string, s
 const result = (s: Session, id: string) => s.frames.find((f) => f["reply"] === id)?.["result"];
 const run = { run_id: "r1" };
 
-test("a pipeline entry refuses any argument but --sw-node-protocol, and a process without the host's pipes", () => {
+test("a pipeline entry refuses any argument but --sw-node-protocol, a start without the bootstrap preload, and a process without the host's pipes", () => {
   for (const args of [["--describe"], []]) {
-    const r = spawnSyncNode(example, args);
+    const r = spawnSyncNode([example, ...args]);
     assert.equal(r.status, 2);
     assert.match(r.stderr, /usage: <pipeline file> --sw-node-protocol/);
   }
-  const bare = spawnSyncNode(example, ["--sw-node-protocol"]);
+  const unloaded = spawnSyncNode([example, "--sw-node-protocol"]);
+  assert.equal(unloaded.status, 2);
+  assert.match(unloaded.stderr, /not started with node --import @sparkwing\/sdk\/bootstrap/);
+  const bare = spawnSyncNode(["--import", bootstrap, example, "--sw-node-protocol"]);
   assert.equal(bare.status, 2);
   assert.match(bare.stderr, /descriptor 3/);
 });
 
-function spawnSyncNode(file: string, args: string[]): { status: number | null; stderr: string } {
+test("neither the bootstrap nor the SDK's index exports what the preload captured", async () => {
+  assert.deepEqual(Object.keys(await import(bootstrap)), []);
+  const sdk = await import("../src/index.ts");
+  for (const name of ["take", "record", "startup"]) assert.equal(name in sdk, false, name);
+});
+
+function spawnSyncNode(args: string[]): { status: number | null; stderr: string } {
   try {
-    execFileSync(process.execPath, [file, ...args], {
+    execFileSync(process.execPath, args, {
       stdio: ["ignore", "ignore", "pipe"],
       encoding: "utf8",
     });
@@ -172,7 +183,7 @@ test("one process per node attempt plans, runs its node through the routes and e
 });
 
 test(
-  "customer text stays on stdout and stderr, and a command a body starts holds neither pipe nor the bearer",
+  "customer text stays on stdout and stderr, and neither a command a body starts nor a module the entry imports before the SDK holds a pipe or the bearer",
   { skip: unix },
   async () => {
     const s = await session(

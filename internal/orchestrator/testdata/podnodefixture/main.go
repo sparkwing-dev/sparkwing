@@ -34,6 +34,7 @@ type inputs struct {
 	Hold    string `flag:"hold" desc:"File a held node writes its pid to before it waits to be stopped"`
 	Guard   string `flag:"guard" desc:"File a deploy node writes unless its skip_if, which reads DEPLOY_GUARD, says skip"`
 	Recover string `flag:"recover" desc:"File a failing node's recovery writes the parent's error to"`
+	Region  bool   `flag:"region" desc:"The build node's env carries the AWS_REGION plan code reads"`
 }
 
 type fixtureSecrets struct {
@@ -87,7 +88,13 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, rc spar
 				return err
 			}
 			_, err = fmt.Fprintln(f, "body")
-			return errors.Join(err, f.Close())
+			if err = errors.Join(err, f.Close()); err != nil || !in.Publish {
+				return err
+			}
+			if err := os.MkdirAll("dist", 0o700); err != nil {
+				return err
+			}
+			return os.WriteFile("dist/out.txt", []byte("artifact\n"), 0o600)
 		}).Memoize(func(context.Context) (sparkwing.CacheKey, error) { return "pod-memo-v1", nil })
 		if in.Publish {
 			memoized.Outputs("dist/*")
@@ -128,6 +135,9 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, rc spar
 				}
 				return os.WriteFile(in.Recover, []byte(f.Err.Error()), 0o600)
 			})
+	}
+	if in.Region {
+		build.Env("PLAN_REGION", os.Getenv("AWS_REGION"))
 	}
 	if in.Group {
 		build.Concurrency(sparkwing.NewConcurrencyGroup("pod-group", sparkwing.ConcurrencyLimit{Capacity: 1}))

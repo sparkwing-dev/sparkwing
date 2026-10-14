@@ -179,7 +179,14 @@ daemon. **The installed Sparkwing distribution owns daemon lifecycle.
 Pipeline clients declare required capabilities and use the running
 daemon; they never host, replace, or upgrade it.** A run's client spawns
 the binary named by `SPARKWING_WINGD_BIN` -- which `sparkwing run` sets
-to its own path -- else the `sparkwing` found on PATH.
+to its own path -- else the `sparkwing` found on PATH. A child run that a
+run or the resident consumer claims from the local queue is hosted by the
+`sparkwing` that claimed it, which starts the admission daemon first; the
+host itself never starts one. On Linux that host runs under a shepherd that
+inherits, as a child subreaper, every process the host leaves and kills
+them once the host exits, so a host killed mid-run leaves no node running.
+On other systems each node process still leads its own session, so a host
+killed before it ends them leaves them running.
 
 With neither present, a run says so once and proceeds without host
 arbitration -- fine for a host that runs one pipeline at a time.

@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+
 	_ "modernc.org/sqlite"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -313,7 +315,7 @@ func TestHostedSelection_ChildOfAForcedParentReadsTheParentsStore(t *testing.T) 
 	t.Setenv(StandaloneStateDBEnv, sa.stateDB)
 	t.Setenv(StandaloneReasonEnv, standaloneForced)
 
-	backends, sel, closeBackends, err := localTriggerBackends(ctx, paths)
+	backends, sel, closeBackends, err := localTriggerBackends(ctx, paths, pipelineAdmission("", wingwire.OriginLocal))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -560,7 +562,7 @@ func TestLocalTriggerBackends_HostChildRunsAndReplays(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
-	backends, _, release, err := localTriggerBackends(ctx, paths)
+	backends, _, release, err := localTriggerBackends(ctx, paths, pipelineAdmission("", wingwire.OriginLocal))
 	if err != nil {
 		t.Fatalf("localTriggerBackends: %v", err)
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -181,6 +182,7 @@ func TestDispatchLocalTrigger_RunAndAwaitCachedExecutableSurvivesCacheRemovalWhi
 
 	output := filepath.Join(repoDir, "child-runs")
 	t.Setenv("SPARKWING_CACHE_LEASE_TEST_OUTPUT", output)
+	fakeTriggerHost(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	cache := &localCompileCache{}
 	t.Cleanup(func() { _ = cache.Close() })
@@ -217,12 +219,10 @@ func TestDispatchLocalTrigger_RunAndAwaitCachedExecutableSurvivesCacheRemovalWhi
 	}
 }
 
-func TestExecLocalChild_MissingLeaseExplainsCacheProvenanceAndRecovery(t *testing.T) {
+func TestMissingProgramExplainsCacheProvenanceAndRecovery(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing-pipeline")
-	err := execLocalChild(context.Background(), missing, t.TempDir(), []string{"handle-trigger", "child"}, nil)
-	if err == nil {
-		t.Fatal("missing executable unexpectedly ran")
-	}
+	_, statErr := os.Stat(missing)
+	err := missingProgramError(missing, statErr)
 	for _, want := range []string{
 		"child executable lease",
 		"pipeline-cache provenance",
@@ -490,6 +490,7 @@ func TestPrepareTriggerRepo_RetrySnapshotsRecordedRevisionDespiteDirtySource(t *
 
 	outputPath := filepath.Join(t.TempDir(), "executed-behavior")
 	t.Setenv("SPARKWING_RETRY_TEST_OUTPUT", outputPath)
+	fakeTriggerHost(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	cache := &localCompileCache{}
 	t.Cleanup(func() {
@@ -668,7 +669,9 @@ func TestLocalSetupFailureChild(t *testing.T) {
 		t.Skip("child process fixture")
 	}
 	SetTestStoreWedgeBudget(t, 0, errors.New("store wedge budget secret-should-not-be-shown"))
-	if err := HandleClaimedTriggerLocal(context.Background(), os.Getenv("SPARKWING_LOCAL_SETUP_TEST_RUN")); err != nil {
+	// safety: the variable names the fake host, which hosts no daemon, so the run takes the standalone store.
+	t.Setenv(wingdclient.HostBinEnv, "")
+	if err := HostClaimedTrigger(context.Background(), os.Getenv("SPARKWING_LOCAL_SETUP_TEST_RUN"), os.Getenv("SPARKWING_LOCAL_SETUP_TEST_PROGRAM")); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -699,10 +702,19 @@ func TestLocalConsumerKeepsSafeSetupFailure(t *testing.T) {
 			if err := os.Mkdir(filepath.Join(repoDir, ".sparkwing"), 0o755); err != nil {
 				t.Fatal(err)
 			}
+			// safety: the pinned pipeline answers describe alone; the host fails its setup before any node runs.
 			pinned := filepath.Join(t.TempDir(), "child")
-			if err := os.WriteFile(pinned, []byte("#!/bin/sh\nexec \"$SPARKWING_LOCAL_SETUP_TEST_BINARY\" -test.run=^TestLocalSetupFailureChild$\n"), 0o700); err != nil {
+			describe := `{"reply":"1","ok":true,"result":{"protocol":"1","pipelines":[{"name":"orch-ok"}]}}`
+			if err := os.WriteFile(pinned, []byte("#!/bin/sh\nread -r _ <&3\necho '"+describe+"' >&4\n"), 0o700); err != nil {
 				t.Fatal(err)
 			}
+			t.Setenv("SPARKWING_LOCAL_SETUP_TEST_PROGRAM", pinned)
+			// safety: the fake hosts the trigger but no daemon, so the claimer's daemon start fails and the run is standalone.
+			host := filepath.Join(t.TempDir(), "sparkwing")
+			if err := os.WriteFile(host, []byte("#!/bin/sh\n[ \"$1\" = __host-trigger ] || exit 1\nexec \"$SPARKWING_LOCAL_SETUP_TEST_BINARY\" -test.run=^TestLocalSetupFailureChild$\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv(wingdclient.HostBinEnv, host)
 			ctx := context.Background()
 			const id = "local-setup-failure"
 			// safety: a local submission carries its captured environment, and the

@@ -19,6 +19,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -71,7 +72,7 @@ func newLaunchedRun(t *testing.T, args map[string]string) *launchedRun {
 	prevBinary := resolveLaunchedBinary
 	t.Cleanup(func() { resolveLaunchedBinary = prevBinary })
 	resolveLaunchedBinary = func(context.Context, string, string, string, string, string, string, *slog.Logger) (remoteBinary, error) {
-		return remoteBinary{path: bin}, nil
+		return remoteBinary{entry: pipelineentry.Binary(bin)}, nil
 	}
 	r.src = t.TempDir()
 	t.Setenv("SPARKWING_SOURCE_DIR", r.src)
@@ -270,7 +271,7 @@ func TestPodNode_WithoutAnAcceptedHashFailsClosed(t *testing.T) {
 	token := r.claim(t, "build")
 	state := &claimState{Client: client.NewWithToken(r.url, nil, token), runID: r.runID, nodeID: "build"}
 	res, err := hostPodNode(t.Context(), podNode{
-		binary: podFixture(t), dir: t.TempDir(), controllerURL: r.url, token: token, runID: r.runID, nodeID: "build",
+		entry: pipelineentry.Binary(podFixture(t)), dir: t.TempDir(), controllerURL: r.url, token: token, runID: r.runID, nodeID: "build",
 		state: state, logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {
@@ -329,7 +330,7 @@ func (r *launchedRun) recordRequests(t *testing.T) string {
 		t.Fatal(err)
 	}
 	resolveLaunchedBinary = func(context.Context, string, string, string, string, string, string, *slog.Logger) (remoteBinary, error) {
-		return remoteBinary{path: wrapper}, nil
+		return remoteBinary{entry: pipelineentry.Binary(wrapper)}, nil
 	}
 	return log
 }
@@ -436,15 +437,22 @@ func TestPodNodeLog_SealsIncompleteAfterALoss(t *testing.T) {
 }
 
 // A memoized node's second run copies the first's result through its claim
-// instead of running the body again; one that publishes artifacts runs again,
-// since its claim cannot read the first run's manifest.
+// instead of running the body again, and one that publishes artifacts takes
+// the first run's artifact manifest with it; a source that recorded no
+// manifest runs as a miss, since a hit would hand its consumers nothing.
 func TestLaunchedNode_MemoHitsThroughTheClaim(t *testing.T) {
-	t.Run("Hit", func(t *testing.T) { podMemoRuns(t, false, sparkwing.Cached, "body\n") })
-	t.Run("ArtifactsRunAsAMiss", func(t *testing.T) { podMemoRuns(t, true, sparkwing.Success, "body\nbody\n") })
+	t.Run("Hit", func(t *testing.T) { podMemoRuns(t, false, true, sparkwing.Cached, "body\n") })
+	t.Run("ArtifactsHit", func(t *testing.T) { podMemoRuns(t, true, true, sparkwing.Cached, "body\n") })
+	t.Run("NoManifestRunsAsAMiss", func(t *testing.T) { podMemoRuns(t, true, false, sparkwing.Success, "body\nbody\n") })
 }
 
-func podMemoRuns(t *testing.T, publish bool, want sparkwing.Outcome, bodies string) {
+func podMemoRuns(t *testing.T, publish, objects bool, want sparkwing.Outcome, bodies string) {
 	t.Helper()
+	if objects {
+		t.Setenv(ArtifactStoreEnvVar, "fs://"+t.TempDir())
+	} else {
+		t.Setenv(ArtifactStoreEnvVar, "")
+	}
 	marker := filepath.Join(t.TempDir(), "memo")
 	args := map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "memo": marker}
 	if publish {
@@ -454,16 +462,20 @@ func podMemoRuns(t *testing.T, publish bool, want sparkwing.Outcome, bodies stri
 	second := first.another(t, "run-pod-host-2", args)
 	for i, r := range []*launchedRun{first, second} {
 		if _, err := r.host(t, store.PlanNodeID); err != nil {
-			t.Fatalf("plan %d: %v", i, err)
+			t.Fatalf("plan run %d: %v", i, err)
 		}
 		if _, err := r.host(t, "memoized"); err != nil {
 			t.Fatalf("host memoized in run %d: %v", i, err)
 		}
 	}
-	if n := second.node(t, "memoized"); n.Status != "done" || n.Outcome != string(want) {
-		t.Fatalf("second run's memoized = %s/%s (%s), want done/%s", n.Status, n.Outcome, n.Error, want)
+	got := second.node(t, "memoized")
+	if got.Status != "done" || got.Outcome != string(want) {
+		t.Fatalf("second run's memoized = %s/%s (%s), want done/%s", got.Status, got.Outcome, got.Error, want)
 	}
 	wantTrace(t, marker, bodies)
+	if src := first.node(t, "memoized"); publish && objects && (src.ArtifactManifest == "" || got.ArtifactManifest != src.ArtifactManifest) {
+		t.Fatalf("second run's manifest = %q, want the first's %q", got.ArtifactManifest, src.ArtifactManifest)
+	}
 }
 
 // A secret that straddles the session's split of a long plan line is masked

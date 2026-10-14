@@ -3,16 +3,13 @@ package orchestrator
 import (
 	"errors"
 	"path/filepath"
-	"slices"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 func TestHostedChildrenQueueOnTheParentsLease(t *testing.T) {
@@ -30,8 +27,8 @@ func TestHostedChildrenQueueOnTheParentsLease(t *testing.T) {
 	}
 	masker := secrets.NewMasker()
 	masker.Register("hunter2")
-	kids := hostedChildren{state: localState{st: st}, masker: masker, leases: &sync.Map{}}
-	parent := nodehost.ChildParent{RunID: "parent", NodeID: "gate", LeaseToken: "lease-1"}
+	kids := hostedChildren{state: localState{st: st}, masker: masker}
+	parent := nodehost.ChildParent{RunID: "parent", NodeID: "gate"}
 
 	id, err := kids.StartChild(ctx, parent, nodehost.ChildRequest{Pipeline: "build", Args: map[string]string{"token": "hunter2"}})
 	if err != nil {
@@ -42,10 +39,7 @@ func TestHostedChildrenQueueOnTheParentsLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	if trig.ParentRunID != "parent" || trig.ParentNodeID != "gate" || len(trig.TriggerEnv) != 0 {
-		t.Errorf("trigger parent=%s/%s env=%v: the lease must stay out of the stored trigger", trig.ParentRunID, trig.ParentNodeID, trig.TriggerEnv)
-	}
-	if env := kids.childEnv(trig); !slices.Contains(env, wingwire.ChildLeaseTokenEnv+"=lease-1") {
-		t.Errorf("child env = %v: the child must attach to the parent's lease", env)
+		t.Errorf("trigger parent=%s/%s env=%v: the child attaches by its parent run and node alone", trig.ParentRunID, trig.ParentNodeID, trig.TriggerEnv)
 	}
 	events, err := st.ListEventsAfter(ctx, "parent", 0, 100)
 	if err != nil {

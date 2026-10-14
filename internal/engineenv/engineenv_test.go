@@ -122,12 +122,25 @@ func stringLiteral(n ast.Node) string {
 
 func TestStripRemovesEngineCredentials(t *testing.T) {
 	for _, key := range []string{
-		"SPARKWING_SECRETS_KEY", "SPARKWING_SECRETS_PREVIOUS_KEY", "SPARKWING_EXECUTION_CAPABILITY",
+		"SPARKWING_SECRETS_KEY", "SPARKWING_SECRETS_PREVIOUS_KEY", "SPARKWING_NODE_TOKEN",
 		"SPARKWING_FLEET_PARENT_TOKEN", "SPARKWING_SOURCE_TOKEN", "sparkwing_agent_token", "_SPARKWING_SUBMIT_PRIORITY",
 	} {
 		got := Strip([]string{key + "=synthetic", "SPARKWING_GATE_INDEX=staged", "SPARKWING_TEST_PG_URL=caller"})
 		if !slices.Equal(got, []string{"SPARKWING_GATE_INDEX=staged", "SPARKWING_TEST_PG_URL=caller"}) {
 			t.Errorf("%s: pipeline env = %v, want the engine's credential gone and the caller's settings kept", key, got)
 		}
+	}
+}
+
+func TestMinimalKeepsOnlyTheBaseAndNamedVariables(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "runner")
+	t.Setenv("NODE_OPTIONS", "--require=/tmp/x.js")
+	t.Setenv("npm_config_registry", "http://proxy")
+	got := strings.Join(Minimal("npm_config_registry"), "\n")
+	if strings.Contains(got, "GITHUB_TOKEN=") || strings.Contains(got, "NODE_OPTIONS=") {
+		t.Fatalf("Minimal kept a runner variable:\n%s", got)
+	}
+	if !strings.Contains(got, "npm_config_registry=http://proxy") {
+		t.Fatal("Minimal dropped a named variable")
 	}
 }

@@ -24,11 +24,6 @@ type hostedRun struct {
 
 func (r *pipelineRun) host(h hostedRun) error {
 	flags := h.flags
-	program := r.uncachedBinary
-	binarySource := "source"
-	if program == "" {
-		program, binarySource = r.lease.Path(), r.source
-	}
 	execDir := r.opts.ExecutionDir
 	if execDir == "" {
 		execDir = r.sparkwingDir
@@ -89,8 +84,8 @@ func (r *pipelineRun) host(h hostedRun) error {
 	// one Ctrl-C cancels the run once rather than killing this process.
 	r.stopSignals()
 	_, err := orchestrator.RunHostedCommand(context.WithoutCancel(r.ctx), opts, orchestrator.HostedEntry{
-		Program: program, Dir: repoRoot, Env: h.env, SecretArgs: secretArgs,
-		PipelineRevision: h.source, BinarySource: binarySource, Flags: extra,
+		Command: r.entry, Dir: repoRoot, Env: h.env, SecretArgs: secretArgs,
+		PipelineRevision: h.source, BinarySource: r.source, Flags: extra,
 	}, h.logFormat)
 	if err != nil {
 		return exitError(1, err)

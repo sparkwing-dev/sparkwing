@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -38,8 +39,7 @@ func TestHostedNestedRunAttachesToItsParentsLease(t *testing.T) {
 	t.Log("old dispatcher attached child immediately while parent holds full CPU capacity")
 
 	next := testWingdAdmission(home, nil)
-	next.ParentLeaseToken = parent.Token()
-	next.ParentRunID = "c3-parent"
+	next.ParentRunID, next.ParentNodeID = "c3-parent", "call"
 	hosted := &hostedAdmitter{la: next, pipeline: "child"}
 	childCtx, stop := context.WithTimeout(t.Context(), 500*time.Millisecond)
 	defer stop()
@@ -62,7 +62,7 @@ func TestHostedRunHandleWaitsForTheRunRow(t *testing.T) {
 	}
 	defer st.Close()
 	handle := filepath.Join(dir, "handle.json")
-	_, err = RunHosted(t.Context(), paths, Options{RunID: "c3-no-row", Pipeline: "fixture", State: st, Delegate: &storedLog{}, RunHandlePath: handle}, HostedEntry{Program: filepath.Join(dir, "missing-sdk"), Dir: dir, Env: []string{}})
+	_, err = RunHosted(t.Context(), paths, Options{RunID: "c3-no-row", Pipeline: "fixture", State: st, Delegate: &storedLog{}, RunHandlePath: handle}, HostedEntry{Command: pipelineentry.Binary(filepath.Join(dir, "missing-sdk")), Dir: dir, Env: []string{}})
 	if err == nil {
 		t.Fatal("expected SDK startup refusal")
 	}

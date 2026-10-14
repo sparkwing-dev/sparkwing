@@ -42,6 +42,10 @@ type LeaseState struct {
 	Claims      []ClaimState      `json:"claims,omitempty"`
 	Members     []string          `json:"members"`
 	Parents     map[string]string `json:"parents,omitempty"`
+	// Dependents are attached runs told to end when this lease does; see [Ledger.Depend].
+	Dependents []string `json:"dependents,omitempty"`
+	// Orphaned are this lease's members cancelled because a lease they depended on ended.
+	Orphaned []string `json:"orphaned,omitempty"`
 }
 
 type ClaimState struct {
@@ -131,6 +135,8 @@ func (l *Ledger) Snapshot() Snapshot {
 			Claims:      claimStates(le.claims),
 			Members:     members,
 			Parents:     cloneParents(le.parents),
+			Dependents:  sortedKeys(le.dependents),
+			Orphaned:    sortedKeys(le.orphaned),
 		})
 	}
 	keys := make([]string, 0, len(l.sems))
@@ -334,6 +340,18 @@ func (l *Ledger) restoreLease(ls LeaseState) error {
 		members:     make(map[string]struct{}, len(ls.Members)),
 		parents:     make(map[string]string, len(ls.Members)),
 	}
+	for _, m := range ls.Orphaned {
+		if le.orphaned == nil {
+			le.orphaned = map[string]struct{}{}
+		}
+		le.orphaned[m] = struct{}{}
+	}
+	for _, m := range ls.Dependents {
+		if le.dependents == nil {
+			le.dependents = map[string]struct{}{}
+		}
+		le.dependents[m] = struct{}{}
+	}
 	for _, m := range ls.Members {
 		if m == "" {
 			return fmt.Errorf("%w: lease %s has an empty member id", ErrInvalidSnapshot, ls.ID)
@@ -479,4 +497,16 @@ func restoreClaims(states []ClaimState) ([]claim, error) {
 		claims = append(claims, c)
 	}
 	return claims, nil
+}
+
+func sortedKeys(set map[string]struct{}) []string {
+	if len(set) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(set))
+	for k := range set {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

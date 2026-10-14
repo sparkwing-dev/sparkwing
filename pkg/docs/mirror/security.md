@@ -54,23 +54,21 @@ only repositories whose every committer may act as that user.
 **Pipeline authors run code on runners.** A pipeline is Go that the runner
 compiles and executes. Running a runner on a workstation authorizes that
 code to execute as the runner service's OS user. The runner keeps its token
-and claim identity in the supervisor; the job-body child gets a
-process-lifetime loopback capability limited to its exact run and node,
-including reserving and committing its own typed output upload,
-with execution start, finish, and logs additionally bound to its acknowledged
-attempt ordinal. The child does not inherit arbitrary agent service credentials,
-and its capability cannot claim or renew work, manage runners, or call
-administrative routes. A claimed trigger's pipeline binary, which plans the
-run, gets the same kind of loopback capability, limited to its own run and
-the child runs it spawns, whichever node runner the runner uses.
-The broker names the run on every route it forwards, so a runner holding two
-runs never lets one read the other. Two lookups reach beyond it, both scoped
+and claim identity in the node host; the job-body child gets a
+process-lifetime bearer for the host's loopback node routes, limited to its
+exact run and node, and the host records execution start, finish and logs
+itself. The child does not inherit arbitrary agent service credentials, and
+its bearer cannot claim or renew work, manage runners, or call administrative
+routes. A claimed trigger's pipeline binary plans the run with no bearer and
+no node routes; the runner hosts the run itself, and only the closures it
+evaluates later and each node's body get a bearer.
+The host names the node's own run on every route it forwards, so a runner
+holding two runs never lets one read the other. Two lookups reach beyond it, both scoped
 to the team by the controller: a cross-pipeline `Ref` reads another
 pipeline's latest run and then only that run's node outputs, and a retry
 asks which child its source attempt spawned so it reuses that child. The latest-run lookup
-admits any pipeline in the team, not only a declared `Ref`; that is the trust
-the pipeline's own code already has, since it can reference any team
-pipeline's latest run. Every claim returns a claim token bound to the claim,
+answers only a pipeline and node the run's accepted plan declares as a
+reference. Every claim returns a claim token bound to the claim,
 and the work the claim runs uses it in place of the runner's token: a pooled
 node's supervisor, a Kubernetes Job the trigger's binary creates, and a Job
 controller dispatch (`sparkwing-runner launch`) creates. A Job spec therefore
@@ -135,8 +133,8 @@ run in separate child processes, but consecutive nodes still share the same
 filesystem, network identity, and OS permissions. A pipeline that writes a
 credential to disk can leave it where the next repository reads it.
 `sparkwing-runner runner --also-claim-triggers --trigger-runner k8s` gives nodes
-separate Job pods, while its planning process still has the run-wide broker
-authority described above.
+separate Job pods, while its plan code still reads the run's declared
+secrets through the trigger's claim.
 
 **`runs.read` applies within the caller's team.** `GET /api/v1/runs`
 combines the caller's filters with the authenticated team. A team reader can

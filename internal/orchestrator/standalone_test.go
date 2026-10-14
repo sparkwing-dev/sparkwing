@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -289,7 +291,7 @@ func TestLocalTriggerBackends_OpensTheStoreTheParentNamed(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
-	backends, _, release, err := localTriggerBackends(ctx, paths)
+	backends, _, release, err := localTriggerBackends(ctx, paths, pipelineAdmission("", wingwire.OriginLocal))
 	if err != nil {
 		t.Fatalf("localTriggerBackends: %v", err)
 	}
@@ -328,7 +330,7 @@ func TestLocalTriggerBackends_DefaultsToTheSharedStore(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
-	backends, _, release, err := localTriggerBackends(ctx, paths)
+	backends, _, release, err := localTriggerBackends(ctx, paths, pipelineAdmission("", wingwire.OriginLocal))
 	if err != nil {
 		t.Fatalf("localTriggerBackends: %v", err)
 	}

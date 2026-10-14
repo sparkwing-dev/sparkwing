@@ -16,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -654,7 +655,7 @@ func (g riskGate) check(execDir, pinnedBinary string) error {
 	declared := g.Declared
 	switch {
 	case pinnedBinary != "":
-		doc, err := describeBinary(context.Background(), sparkwingDir, pinnedBinary)
+		doc, err := describeEntry(context.Background(), sparkwingDir, pipelineentry.Binary(pinnedBinary))
 		if err != nil {
 			return fmt.Errorf("%s: read what %s pins: %w", g.Surface, g.Pipeline, err)
 		}

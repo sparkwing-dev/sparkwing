@@ -12,9 +12,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/directdata"
-	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -22,15 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-const (
-	remoteExecutionCapabilityInputEnv = "SPARKWING_EXECUTION_CAPABILITY_STDIN"
-	remoteBrokeredArtifactEnv         = "SPARKWING_BROKERED_ARTIFACTS"
-)
-
-func shouldRunRemote(trigger *store.Trigger, brokeredChild bool) bool {
-	if brokeredChild {
-		return false
-	}
+func shouldRunRemote(trigger *store.Trigger) bool {
 	if trigger == nil {
 		return false
 	}
@@ -131,13 +123,13 @@ func runNodeRemote(
 	}
 	defer binary.release()
 	logger.Info("runNodeRemote: binary ready",
-		"run_id", runID, "node_id", nodeID, "bin", binary.path)
+		"run_id", runID, "node_id", nodeID, "entry", binary.entry)
 	art, err := supervisorArtifactStore(ctx, controllerURL, runID, binaryCacheURL, cacheGrant)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("open the artifact store: %w", err)
 	}
 	return hostDispatchedNode(ctx, podNode{
-		binary: binary.path, dir: filepath.Dir(sparkwingDir), controllerURL: controllerURL, token: token,
+		entry: binary.entry, dir: filepath.Dir(sparkwingDir), controllerURL: controllerURL, token: token,
 		runID: runID, nodeID: nodeID, cacheGrant: cacheGrant, artifacts: art, logger: logger,
 	})
 }
@@ -233,53 +225,6 @@ func adoptNodeBaseline(ctx context.Context, trigger *store.Trigger, checkoutDir,
 	}
 }
 
-func remoteExecutionChildEnvironment(env []string) ([]string, error) {
-	names, prefixes, err := submissionEnvironmentAllowList()
-	if err != nil {
-		return nil, fmt.Errorf("remote execution environment allowlist: %w", err)
-	}
-	out := make([]string, 0, len(env))
-	for _, item := range env {
-		name, value, ok := strings.Cut(item, "=")
-		if !ok || remoteExecutionPrivateEnv[name] {
-			continue
-		}
-		if !remoteExecutionRuntimeEnv[name] && !submissionEnvironmentAllowed(name, names, prefixes) {
-			continue
-		}
-		if envredact.CredentialName(name) || envredact.CredentialValue(value) || envredact.RedactValue(value) != value {
-			continue
-		}
-		out = append(out, item)
-	}
-	return out, nil
-}
-
-var remoteExecutionRuntimeEnv = map[string]bool{
-	"PATH": true, "HOME": true, "TMPDIR": true, "TMP": true, "TEMP": true,
-	"LANG": true, "LC_ALL": true, "SYSTEMROOT": true, "COMSPEC": true,
-	"PATHEXT": true, "USERPROFILE": true, "SSL_CERT_FILE": true, "SSL_CERT_DIR": true,
-}
-
-var remoteExecutionPrivateEnv = map[string]bool{
-	"SPARKWING_AGENT_TOKEN":              true,
-	"SPARKWING_CONTROLLER_URL":           true,
-	"SPARKWING_LOGS_URL":                 true,
-	"SPARKWING_RUN_HANDLE_FILE":          true,
-	"SPARKWING_ONLY":                     true,
-	ArtifactStoreEnvVar:                  true,
-	authwire.CacheGrantEnv:               true,
-	remoteExecutionCapabilityEnv:         true,
-	remoteExecutionCapabilityInputEnv:    true,
-	remoteBrokeredArtifactEnv:            true,
-	remoteBrokeredClaimEnv:               true,
-	"SPARKWING_NODE_CLAIM_HOLDER":        true,
-	"SPARKWING_NODE_CLAIM_LEASE_SECONDS": true,
-	"SPARKWING_NODE_CLAIM_GENERATION":    true,
-	"SPARKWING_NODE_CLAIM_MEMBERSHIP":    true,
-	"SPARKWING_NODE_CLAIM_RESERVATION":   true,
-}
-
 // ErrRepoNotAllowed marks a run whose repository this machine's owner did not
 // allow it to build.
 var ErrRepoNotAllowed = errors.New("repository not allowed on this machine")
@@ -346,7 +291,7 @@ func triggerGitHubRepository(trigger *store.Trigger) string {
 }
 
 type remoteBinary struct {
-	path  string
+	entry pipelineentry.Command
 	lease *bincache.Lease
 }
 
@@ -357,13 +302,21 @@ func (b remoteBinary) release() {
 }
 
 func resolveRemoteBinary(ctx context.Context, sparkwingDir, controllerURL, controllerToken, runID, gcURL, token string, logger *slog.Logger) (remoteBinary, error) {
+	ts, err := pipelineentry.IsTypeScript(sparkwingDir)
+	if err != nil {
+		return remoteBinary{}, err
+	}
+	if ts {
+		cmd, err := PrepareTypeScriptOnRunner(ctx, sparkwingDir)
+		return remoteBinary{entry: cmd}, err
+	}
 	key, err := bincache.PipelineCacheKey(sparkwingDir)
 	if err != nil {
 		tmp := filepath.Join(sparkwingDir, ".sparkwing-runner-bin")
 		if cerr := bincache.CompilePipeline(ctx, sparkwingDir, tmp); cerr != nil {
 			return remoteBinary{}, cerr
 		}
-		return remoteBinary{path: tmp}, nil
+		return remoteBinary{entry: pipelineentry.Binary(tmp)}, nil
 	}
 	entry, err := bincache.PipelineEntry(key)
 	if err != nil {
@@ -389,5 +342,5 @@ func resolveRemoteBinary(ctx context.Context, sparkwingDir, controllerURL, contr
 			logger.Warn("runNodeRemote: bin cache upload failed", "err", err, "hash", key)
 		}
 	}
-	return remoteBinary{path: lease.Path(), lease: lease}, nil
+	return remoteBinary{entry: pipelineentry.Binary(lease.Path()), lease: lease}, nil
 }

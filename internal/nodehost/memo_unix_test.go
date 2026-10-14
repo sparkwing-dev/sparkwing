@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -41,8 +42,8 @@ func TestMemo(t *testing.T) {
 	logs := &memLogs{records: map[string][]sparkwing.LogRecord{}}
 	memo := &Memo{
 		Slots: storeSlots{st: st},
-		Output: func(ctx context.Context, _ store.ClaimInputRequest, runID, nodeID string) ([]byte, error) {
-			return st.GetNodeOutput(ctx, runID, nodeID)
+		Source: func(ctx context.Context, _ store.ClaimInputRequest, runID, nodeID string) (MemoSource, error) {
+			return ReadMemoSource(ctx, st, runID, nodeID)
 		},
 	}
 	daemon := newFakeDaemon()
@@ -52,7 +53,7 @@ func TestMemo(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 		defer cancel()
 		res, err := Execute(ctx, Config{
-			Session:  SessionConfig{Entry: bin, Dir: t.TempDir(), Grace: 2 * time.Second},
+			Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second},
 			Pipeline: "attempts", Args: map[string]string{"memo": "true", "marker": marker},
 			Run:   nodeproto.RunContext{RunID: runID},
 			State: st, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,

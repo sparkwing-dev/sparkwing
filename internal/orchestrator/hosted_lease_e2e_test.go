@@ -4,6 +4,7 @@ package orchestrator_test
 
 import (
 	"context"
+	"encoding/base64"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +21,7 @@ const leaseFixtureJobs = `package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,6 +33,9 @@ import (
 func main() { runner.Main() }
 
 func mark(name string) error {
+	if os.Getenv("SPARKWING_SECRETS_KEY") != "" {
+		return errors.New("the engine's secrets key reached a node process")
+	}
 	return os.WriteFile(filepath.Join(os.Getenv("C3_MARKER"), name), nil, 0o600)
 }
 
@@ -116,6 +121,34 @@ func (Middle) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs
 	return nil
 }
 
+// safety: the chain's middle run holds no group and its node no lease of its own, so the grandchild finds the
+// grandparent's group only by walking the chain.
+type Chain struct{ sparkwing.Base }
+
+func (Chain) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	plan.Concurrency(shared())
+	sparkwing.Job(plan, "call", await("plain-middle")).Resources(sparkwing.Cores(1))
+	return nil
+}
+
+type PlainMiddle struct{ sparkwing.Base }
+
+type relayWork struct {
+	sparkwing.Base
+	sparkwing.Produces[string]
+}
+
+func (relayWork) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	return sparkwing.Step(w, "work", func(ctx context.Context) (string, error) {
+		return sparkwing.RunAndAwait[string, sparkwing.NoInputs](ctx, "grouped-leaf", "work")
+	}), nil
+}
+
+func (PlainMiddle) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	sparkwing.Job(plan, "work", relayWork{})
+	return nil
+}
+
 type DryParent struct{ sparkwing.Base }
 
 type dryCall struct{ sparkwing.Base }
@@ -138,6 +171,8 @@ func init() {
 	sparkwing.Register("deep", func() sparkwing.Pipeline[sparkwing.NoInputs] { return Deep{} })
 	sparkwing.Register("middle", func() sparkwing.Pipeline[sparkwing.NoInputs] { return Middle{} })
 	sparkwing.Register("dry-parent", func() sparkwing.Pipeline[sparkwing.NoInputs] { return DryParent{} })
+	sparkwing.Register("chain", func() sparkwing.Pipeline[sparkwing.NoInputs] { return Chain{} })
+	sparkwing.Register("plain-middle", func() sparkwing.Pipeline[sparkwing.NoInputs] { return PlainMiddle{} })
 }
 `
 
@@ -162,7 +197,7 @@ func leaseFixture(t *testing.T) (repo, cli string) {
 		writeMod(t, filepath.Join(dir, "main.go"), leaseFixtureJobs)
 		var yaml strings.Builder
 		yaml.WriteString("pipelines:\n")
-		for _, p := range []string{"leaf", "grouped-leaf", "pinned", "node-owned", "grouped", "deep", "middle", "dry-parent"} {
+		for _, p := range []string{"leaf", "grouped-leaf", "pinned", "node-owned", "grouped", "deep", "middle", "dry-parent", "chain", "plain-middle"} {
 			yaml.WriteString("  - name: " + p + "\n    entrypoint: E" + strings.ReplaceAll(p, "-", "") + "\n")
 		}
 		writeMod(t, filepath.Join(dir, "sparkwing.yaml"), yaml.String())
@@ -200,7 +235,11 @@ func runLeaseCase(t *testing.T, pipeline string, args ...string) map[string]bool
 	cmd.Dir = repo
 	cmd.Env = append(os.Environ(), "HOME="+home, "SPARKWING_HOME="+home, "SPARKWING_CONFIG="+filepath.Join(home, "config.yaml"),
 		"SPARKWING_WINGD_BIN="+cli, "C3_MARKER="+marker, "C3_CLI="+cli, "SPARKWING_DRY_RUN=", "SPARKWING_LOG_FORMAT=json",
+		// safety: every node marks only when the engine's credential stays out of it, including a claimed child's.
+		"SPARKWING_SECRETS_KEY="+base64.StdEncoding.EncodeToString(make([]byte, 32)),
 		"GOCACHE="+goEnv(t, "GOCACHE"), "GOMODCACHE="+goEnv(t, "GOMODCACHE"), "GOWORK=off", "GOTOOLCHAIN=local")
+	// safety: a child that outlives a killed run holds its output open, so the wait is bounded past the kill.
+	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("sparkwing run %s: %v (ctx %v)\n%s", pipeline, err, ctx.Err(), out)
@@ -222,7 +261,7 @@ func runLeaseCase(t *testing.T, pipeline string, args ...string) map[string]bool
 func TestHostedChildrenAttachToWhatTheirParentHolds(t *testing.T) {
 	for _, pipeline := range []string{
 		// safety: deep's middle run holds a node semaphore lease without cores; its run's attached lease has them.
-		"pinned", "node-owned", "grouped", "deep",
+		"pinned", "node-owned", "grouped", "deep", "chain",
 	} {
 		t.Run(pipeline, func(t *testing.T) {
 			if got := runLeaseCase(t, pipeline); !got["leaf.real"] {

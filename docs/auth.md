@@ -706,9 +706,8 @@ claimed work authenticates with it instead of the credential that claimed.
 return a node claim token, and `POST /api/v1/triggers/claim` and
 `POST /api/v1/triggers/{id}/claim` a trigger claim token. The runner keeps its
 own token for claiming, heartbeating and its own calls; a pooled node's
-supervisor, the brokered child behind it and a Kubernetes Job run on the
-node's claim token, and the Job spec carries nothing else that
-authenticates.
+node host and a Kubernetes Job run on the node's claim token, and the Job spec
+carries nothing else that authenticates.
 
 A node claim token acts as the runner that made the claim, confined to that
 claim:
@@ -748,13 +747,11 @@ A trigger claim token answers `GET /api/v1/secrets/{name}` and
 `POST /api/v1/runs/{id}/source-credential` alone, for the trigger's own run,
 and stops with the trigger claim. The source credential route answers a node
 or trigger claim token and no bearer, so the runner's token fetches no
-source credential (see [Git credentials](git-credentials.md)). A trigger child that runs
-a node in its own process does so under the trigger claim, which is why the
-trigger claim reads secrets. Every other route a trigger child calls goes
-through the runner's loopback trigger broker, which admits only its run's
-routes and forwards them with the runner's token. On an open controller,
-which mints no claim token, the broker forwards the secret read with no
-bearer, as the controller answers it directly.
+source credential (see [Git credentials](git-credentials.md)). The closures the
+run host evaluates after the first plan read the run's declared secrets under
+the trigger claim, which is why the trigger claim reads secrets; the first plan
+gets no node routes. The runner hosts the trigger's run with its own token,
+which never reaches the pipeline's processes.
 
 `PUT /pipelines/{name}/profile/pin` is the one `runs.state` write that names a
 pipeline instead of a run, and a pin becomes a hard Kubernetes limit for every

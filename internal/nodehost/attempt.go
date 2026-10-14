@@ -17,7 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/protofd"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/secretsource"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -100,8 +99,8 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 		names = append(names, s.Name)
 	}
 	bearer, revoke, err := a.Routes.Admit(Node{
-		RunID: run.ID, NodeID: id, Secrets: names, Resolver: a.Resolver, Masker: a.Masker, Claim: a.Claim, Local: a.Local,
-		Children: a.Children, LeaseToken: childLease(n), Pause: n.Pause, Hold: n.Hold, Output: n.memoOutput,
+		RunID: run.ID, NodeID: id, Secrets: names, Resolver: a.Resolver, Masker: a.Masker, Claim: a.Claim, Local: a.Local, Refs: n.Plan.PipelineRefs,
+		Children: a.Children, Pause: n.Pause, Hold: n.Hold, Output: n.memoOutput,
 	})
 	if err != nil {
 		return failed(fmt.Errorf("admit node %s: %w", id, err))
@@ -111,7 +110,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	cfg := base
 	cfg.Sink = sink
 	cfg.Env = attemptEnv(base.Env, n.Plan.Env, run.ID, id, a.Routes.URL(), bearer)
-	cfg.Env = append(append(withoutRunnerEnv(cfg.Env), hostEnv(n)...), runnerEnv()...)
+	cfg.Env = append(append(withoutRunnerEnv(cfg.Env), dryRunEnv(n)...), runnerEnv()...)
 	res := Result{}
 	sess, err := StartSession(ctx, cfg)
 	if err == nil {
@@ -137,12 +136,12 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	}
 	sink.Flush()
 	revoke()
-	out := &lineWriter{sink: sink}
+	out := &LineWriter{Sink: sink, Level: LevelInfo}
 	// safety: a cancelled node's cleanups still run, each bounded by CleanupTimeout.
 	if err := a.Routes.RunCleanups(context.WithoutCancel(ctx), bearer, CleanupScope{Dir: cfg.Dir, Env: cfg.Env, Log: out}); err != nil {
 		run.Logger.Warn("nodehost: node cleanups", "run", run.ID, "node", id, "err", err)
 	}
-	out.flush()
+	out.Flush()
 	sink.Flush()
 	return res
 }
@@ -243,53 +242,12 @@ func failed(err error) Result {
 	return Result{Outcome: sparkwing.Failed, Err: err, Reason: reason}
 }
 
-// safety: the one list of engine variables a process inherits when its caller passes no environment.
-var minimalEnv = []string{
-	"PATH", "HOME", "TMPDIR", "LANG", "LC_*", "TZ", "USER",
-	"SystemRoot", "ComSpec", "PATHEXT", "TEMP", "TMP",
-}
-
-// MinimalEnv is the engine's environment cut to the variables a process
-// needs to run at all: PATH, HOME, TMPDIR, LANG, LC_*, TZ and USER, and on
-// Windows SystemRoot, ComSpec, PATHEXT, TEMP and TMP.
-func MinimalEnv() []string {
-	env := []string{}
-	for _, kv := range os.Environ() {
-		k, _, _ := strings.Cut(kv, "=")
-		if slices.ContainsFunc(minimalEnv, func(name string) bool {
-			prefix, wild := strings.CutSuffix(name, "*")
-			if runtime.GOOS == "windows" {
-				k, name, prefix = strings.ToUpper(k), strings.ToUpper(name), strings.ToUpper(prefix)
-			}
-			return k == name || (wild && strings.HasPrefix(k, prefix))
-		}) {
-			env = append(env, kv)
-		}
-	}
-	return env
-}
-
-// safety: the dispatcher's rule for what a child attaches to: the run's lease when it holds the host or the
-// plan's groups, which a node lease lacks, else the node's own lease, which holds the cores the node runs on.
-func childLease(n *NodeRun) string {
-	r := n.Run
-	if hostAdmitted(r.Doc) || r.leaseHoldsGroups || r.leaseHoldsHost {
-		return r.leaseToken
-	}
-	return cmp.Or(n.nodeLease, r.leaseToken)
-}
-
-// safety: a sparkwing run the node starts attaches to the lease the node holds instead of queueing behind it,
-// and sparks-core echoes mutating commands instead of running them only when it sees SPARKWING_DRY_RUN.
-func hostEnv(n *NodeRun) []string {
-	var env []string
-	if lease := childLease(n); lease != "" {
-		env = append(env, wingwire.LeaseTokenEnv+"="+lease)
-	}
+// safety: sparks-core echoes mutating commands instead of running them only when it sees SPARKWING_DRY_RUN.
+func dryRunEnv(n *NodeRun) []string {
 	if n.Run.Context.DryRun {
-		env = append(env, "SPARKWING_DRY_RUN=1")
+		return []string{"SPARKWING_DRY_RUN=1"}
 	}
-	return env
+	return nil
 }
 
 // safety: a pod host's Job sets the runner variables on the host itself; a host
@@ -326,7 +284,7 @@ func dryRunSession(s SessionConfig, dryRun bool) SessionConfig {
 	if dryRun {
 		base := s.Env
 		if base == nil {
-			base = MinimalEnv()
+			base = engineenv.Minimal()
 		}
 		s.Env = append(slices.Clone(base), "SPARKWING_DRY_RUN=1")
 	}
@@ -336,7 +294,7 @@ func dryRunSession(s SessionConfig, dryRun bool) SessionConfig {
 // safety: the node's contract variables are set last so neither the engine nor the node's env overrides them.
 func attemptEnv(base []string, nodeEnv map[string]string, runID, nodeID, url, bearer string) []string {
 	if base == nil {
-		base = MinimalEnv()
+		base = engineenv.Minimal()
 	}
 	env := make([]string, 0, len(base)+len(nodeEnv)+4)
 	env = append(env, engineenv.Strip(base)...)
@@ -356,31 +314,36 @@ func attemptEnv(base []string, nodeEnv map[string]string, runID, nodeID, url, be
 	)
 }
 
-// safety: unlocked, because RunCleanups writes from one goroutine at a time.
-type lineWriter struct {
-	sink *LogSink
-	buf  []byte
+// LineWriter hands what is written to it to Sink as text lines at Level; a
+// line that grows past the session's line limit goes in pieces, whose split
+// values a [LogSink] still masks whole. Call Flush once writing ends. It is
+// unlocked, so one goroutine writes at a time.
+type LineWriter struct {
+	Sink  *LogSink
+	Level string
+	buf   []byte
 }
 
-func (w *lineWriter) Write(p []byte) (int, error) {
+func (w *LineWriter) Write(p []byte) (int, error) {
 	w.buf = append(w.buf, p...)
 	for {
 		i := bytes.IndexByte(w.buf, '\n')
 		if i < 0 {
 			break
 		}
-		w.sink.Text(LevelInfo, strings.TrimSuffix(string(w.buf[:i]), "\r"))
+		w.Sink.Text(w.Level, strings.TrimSuffix(string(w.buf[:i]), "\r"))
 		w.buf = w.buf[i+1:]
 	}
 	if len(w.buf) >= maxTextLine {
-		w.flush()
+		w.Flush()
 	}
 	return len(p), nil
 }
 
-func (w *lineWriter) flush() {
+// Flush hands any unterminated rest to the sink.
+func (w *LineWriter) Flush() {
 	if len(w.buf) > 0 {
-		w.sink.Text(LevelInfo, string(w.buf))
+		w.Sink.Text(w.Level, string(w.buf))
 		w.buf = nil
 	}
 }

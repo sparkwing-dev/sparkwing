@@ -30,6 +30,9 @@ type LocalAdmission struct {
 
 	ParentLeaseToken string
 	ParentRunID      string
+	// ParentNodeID, with ParentRunID, attaches a hosted run to what that node
+	// of its parent run holds.
+	ParentNodeID string
 
 	Origin wingwire.Origin
 

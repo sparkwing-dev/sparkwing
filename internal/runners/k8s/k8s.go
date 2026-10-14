@@ -1143,6 +1143,14 @@ func pullPolicyOrDefault(p corev1.PullPolicy) corev1.PullPolicy {
 // a pod's node host hands its pipeline processes.
 var DependencyProxyEnvNames = []string{"GOPROXY", "npm_config_registry", "PIP_INDEX_URL", "PIP_TRUSTED_HOST"}
 
+// NetworkEnvNames are the runner's own proxy and CA settings, which a pod's
+// node host also hands its pipeline processes and dependency installs, since
+// a runner behind a corporate proxy or a private CA reaches nothing without them.
+var NetworkEnvNames = []string{
+	"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
+	"NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE",
+}
+
 // DependencyProxyEnv points a pod's go, npm and pip at the cache's public
 // dependency proxy at base; an unusable base gives nothing.
 func DependencyProxyEnv(base string) []corev1.EnvVar {

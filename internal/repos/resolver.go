@@ -8,19 +8,32 @@ import (
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 var ErrNotFound = errors.New("repos: no registered repo provides that pipeline")
 
-// DescribeRepo builds the pipeline binary a repository declares and returns
-// the schemas that build emits: each pipeline's name, arguments, and the risk
-// labels its steps declare. A caller that needs only the names, and one that
-// has to weigh what a pipeline declares, read the same build.
+// DescribeRepo builds the pipeline binary a repository declares, or installs
+// its TypeScript pipeline's dependencies, and returns the schemas the entry
+// emits: each pipeline's name, arguments, and the risk labels its steps
+// declare. A caller that needs only the names, and one that has to weigh what
+// a pipeline declares, read the same entry.
 func DescribeRepo(absPath string) ([]sparkwing.DescribePipeline, error) {
 	sparkwingDir := filepath.Join(absPath, ".sparkwing")
 	if _, err := os.Stat(sparkwingDir); err != nil {
 		return nil, fmt.Errorf("no .sparkwing/ at %s: %w", sparkwingDir, err)
+	}
+	ts, err := pipelineentry.IsTypeScript(sparkwingDir)
+	if err != nil {
+		return nil, err
+	}
+	if ts {
+		entry, err := pipelineentry.Prepare(context.Background(), sparkwingDir, os.Environ(), os.Stderr)
+		if err != nil {
+			return nil, err
+		}
+		return describePipelines(entry, absPath)
 	}
 	hash, err := bincache.PipelineCacheKey(sparkwingDir)
 	if err != nil {
@@ -37,7 +50,7 @@ func DescribeRepo(absPath string) ([]sparkwing.DescribePipeline, error) {
 		return nil, fmt.Errorf("compile %s: %w", sparkwingDir, err)
 	}
 	defer func() { _ = lease.Release() }()
-	return describePipelines(lease.Path(), absPath)
+	return describePipelines(pipelineentry.Binary(lease.Path()), absPath)
 }
 
 func PipelineNamesForRepo(absPath string) ([]string, error) {
@@ -53,6 +66,18 @@ func pipelineNamesIfBuilt(absPath string) (names []string, ok bool) {
 	if _, err := os.Stat(sparkwingDir); err != nil {
 		return nil, false
 	}
+	ts, err := pipelineentry.IsTypeScript(sparkwingDir)
+	if err != nil {
+		return nil, false
+	}
+	if ts {
+		entry, err := pipelineentry.TypeScript(sparkwingDir)
+		if err != nil {
+			return nil, false
+		}
+		got, err := describePipelines(entry, absPath)
+		return pipelineNames(got), err == nil
+	}
 	hash, err := bincache.PipelineCacheKey(sparkwingDir)
 	if err != nil {
 		return nil, false
@@ -66,7 +91,7 @@ func pipelineNamesIfBuilt(absPath string) (names []string, ok bool) {
 		return nil, false
 	}
 	defer func() { _ = lease.Release() }()
-	got, err := describePipelines(lease.Path(), absPath)
+	got, err := describePipelines(pipelineentry.Binary(lease.Path()), absPath)
 	if err != nil {
 		return nil, false
 	}
@@ -77,10 +102,10 @@ func PipelineNamesIfBuilt(absPath string) (names []string, ok bool) {
 	return pipelineNamesIfBuilt(absPath)
 }
 
-func describePipelines(binPath, workDir string) ([]sparkwing.DescribePipeline, error) {
-	doc, err := Describe(context.Background(), binPath, workDir)
+func describePipelines(entry pipelineentry.Command, workDir string) ([]sparkwing.DescribePipeline, error) {
+	doc, err := Describe(context.Background(), entry, workDir)
 	if err != nil {
-		return nil, fmt.Errorf("describe %s: %w", binPath, err)
+		return nil, fmt.Errorf("describe %s: %w", entry[len(entry)-1], err)
 	}
 	return doc.Pipelines, nil
 }

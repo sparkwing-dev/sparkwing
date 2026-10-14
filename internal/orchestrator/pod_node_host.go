@@ -15,6 +15,9 @@ import (
 	"sync/atomic"
 
 	"github.com/sparkwing-dev/sparkwing/internal/depcache"
+	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
+	"github.com/sparkwing-dev/sparkwing/internal/envredact"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -29,7 +32,8 @@ import (
 )
 
 type podNode struct {
-	binary, dir                         string
+	entry                               pipelineentry.Command
+	dir                                 string
 	controllerURL, token, runID, nodeID string
 	// safety: the accepted plan's hash for the node, which the pod's own plan of it must match.
 	specHash string
@@ -64,6 +68,11 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 	}
 	masker := secrets.NewMasker()
 	masker.Register(p.token)
+	// safety: ahead of the routes and the node log, so a bad allow list leaves nothing to close.
+	env, err := podProcessEnv(masker, p.logger)
+	if err != nil {
+		return nodehost.Result{}, err
+	}
 	routes, err := nodehost.Start(p.logger)
 	if err != nil {
 		return nodehost.Result{}, err
@@ -86,7 +95,7 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 	}
 	defer planSink.end()
 	cfg := nodehost.Config{
-		Session:  nodehost.SessionConfig{Entry: p.binary, Dir: p.dir, Sink: planSink, Env: podSessionEnv(masker)},
+		Session:  nodehost.SessionConfig{Entry: p.entry, Dir: p.dir, Sink: planSink, Env: env},
 		Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run),
 		State: p.state, Artifacts: p.artifacts, Logger: p.logger,
 		Attempts: &nodehost.Attempts{
@@ -101,11 +110,11 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 	} else {
 		slots := NewHTTPConcurrency(p.controllerURL, nil, p.token, store.DefaultConcurrencyLease)
 		// safety: the node's concurrency group and memo entry run through the claim, which the controller binds to
-		// this node; a memo hit's output is the one the controller picks for the claim's key.
+		// this node; a memo hit's output and artifact manifest are the ones the controller picks for the claim's key.
 		cfg.Admission = &nodehost.Admission{Slots: slots}
-		cfg.Memo = &nodehost.Memo{Slots: slots, Claimed: true, Output: func(ctx context.Context, in store.ClaimInputRequest, _, _ string) ([]byte, error) {
-			_, data, err := c.ClaimInput(ctx, p.runID, p.nodeID, in)
-			return data, err
+		cfg.Memo = &nodehost.Memo{Slots: slots, Claimed: true, Source: func(ctx context.Context, in store.ClaimInputRequest, _, _ string) (nodehost.MemoSource, error) {
+			src, data, err := c.ClaimInput(ctx, p.runID, p.nodeID, in)
+			return nodehost.MemoSource{Output: data, ArtifactManifest: src.ArtifactManifest}, err
 		}}
 		res = nodehost.HostNode(ctx, cfg, p.nodeID, p.specHash, p.attempt)
 	}
@@ -113,20 +122,124 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 	return res, nil
 }
 
-// safety: the minimal environment plus only the dependency proxy settings the
-// pod's Job or runner was given, so go, npm and pip in the node use the cache's
-// proxy and no other engine variable reaches pipeline code. A proxy URL can
-// carry a credential, so each one's password, and the whole value, is masked
-// before any process of the node runs.
+// safety: a proxy URL can carry a credential, so each one's password, and the
+// whole value, is masked before any process of the node runs.
 func podSessionEnv(masker *secrets.Masker) []string {
-	env := nodehost.MinimalEnv()
-	for _, name := range k8srunner.DependencyProxyEnvNames {
+	for _, name := range podEnvNames() {
 		if v, ok := os.LookupEnv(name); ok {
-			env = append(env, name+"="+v)
 			maskProxyCredentials(masker, v)
 		}
 	}
-	return env
+	return PodBaseEnv()
+}
+
+// safety: every pipeline process a runner starts, its plan, closure evals, nodes and dependency installs, gets
+// PodBaseEnv plus the operator's allow-listed names from this one function, with what needs masking registered;
+// a value plan code reads that differed between planning and the node would fail the node with plan_drift.
+func podProcessEnv(masker *secrets.Masker, logger *slog.Logger) ([]string, error) {
+	base := podSessionEnv(masker)
+	operator, err := operatorAllowedEnv(os.Environ(), base, masker, logger)
+	if err != nil {
+		return nil, err
+	}
+	return append(base, operator...), nil
+}
+
+// PodBaseEnv is what a runner gives every process of a pipeline it hosts, its
+// dependency installs included: the minimal environment plus the dependency
+// proxy settings the pod's Job or runner was given, so go, npm and pip use the
+// cache's proxy and no runner credential reaches pipeline code or its hooks.
+func PodBaseEnv() []string {
+	return engineenv.Minimal(podEnvNames()...)
+}
+
+// PrepareTypeScriptOnRunner installs and returns sparkwingDir's TypeScript
+// entry on a runner: npm runs with the environment a node process gets,
+// [PodBaseEnv] plus the operator's allow-listed names, and its output reaches
+// stderr only after the credentials and long values that environment carries
+// are masked.
+func PrepareTypeScriptOnRunner(ctx context.Context, sparkwingDir string) (pipelineentry.Command, error) {
+	return prepareTypeScriptOnRunner(ctx, sparkwingDir, os.Stderr)
+}
+
+func prepareTypeScriptOnRunner(ctx context.Context, sparkwingDir string, dst io.Writer) (pipelineentry.Command, error) {
+	masker := secrets.NewMasker()
+	// safety: the allow list is operator-trusted config a private registry or a tool's install may need.
+	env, err := podProcessEnv(masker, slog.Default())
+	if err != nil {
+		return nil, err
+	}
+	out, finish, err := maskedInstallOutput(ctx, masker, dst)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
+	return pipelineentry.Prepare(ctx, sparkwingDir, env, out)
+}
+
+// safety: npm's output goes through the node-host log sink, which holds back
+// the tail of a long line's piece so a credential split across pieces is
+// masked whole; finish runs once npm has exited, so the held tail is complete.
+func maskedInstallOutput(ctx context.Context, masker *secrets.Masker, dst io.Writer) (io.Writer, func(), error) {
+	sink, err := newPodPlanSink(ctx, "pipeline-install", masker, dst)
+	if err != nil {
+		return nil, nil, err
+	}
+	w := &nodehost.LineWriter{Sink: sink.LogSink, Level: nodehost.LevelWarn}
+	return w, func() {
+		w.Flush()
+		sink.Flush()
+	}, nil
+}
+
+func podEnvNames() []string {
+	return slices.Concat(k8srunner.DependencyProxyEnvNames, k8srunner.NetworkEnvNames)
+}
+
+// safety: the operator's run.submit_env_allow names and prefixes reach the node from this runner's environment, as
+// AWS_PROFILE or DOCKER_HOST must; an engine variable or a credential-shaped name or value never does, and a name
+// base sets keeps its value. A neutral name can still hold a bare token, so a value long enough to be one is masked;
+// shorter config such as a region stays readable, since masking it would cut it out of every line that names it.
+func operatorAllowedEnv(env, base []string, masker *secrets.Masker, logger *slog.Logger) ([]string, error) {
+	names, prefixes, err := submissionEnvironmentAllowList()
+	if err != nil {
+		return nil, err
+	}
+	var out, engine, credential []string
+	for _, entry := range env {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || !operatorListed(key, names, prefixes) || slices.ContainsFunc(base, func(kv string) bool {
+			return strings.HasPrefix(kv, key+"=")
+		}) {
+			continue
+		}
+		switch {
+		case engineenv.Owned(key):
+			engine = append(engine, key)
+		case submissionEnvironmentCredentialName(key, value) || envredact.CredentialValue(value) || envredact.RedactValue(value) != value:
+			credential = append(credential, key)
+		default:
+			if len(value) >= operatorEnvMaskMinLen {
+				masker.Register(value)
+			}
+			out = append(out, entry)
+		}
+	}
+	if (len(engine) > 0 || len(credential) > 0) && logger != nil {
+		logger.Warn("pod node: dropped allow-listed names the node may not inherit",
+			"engine_names", strings.Join(engine, ","), "credential_names", strings.Join(credential, ","),
+			"allow_key", submitEnvAllowKey)
+	}
+	return out, nil
+}
+
+const operatorEnvMaskMinLen = 12
+
+func operatorListed(key string, names map[string]bool, prefixes []string) bool {
+	if names[key] {
+		return true
+	}
+	return slices.ContainsFunc(prefixes, func(prefix string) bool { return prefix != "" && strings.HasPrefix(key, prefix) })
 }
 
 // safety: the whole value and each ','/'|' member are masked whole. The userinfo (after any scheme://, up to the
