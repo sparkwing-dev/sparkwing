@@ -83,8 +83,6 @@ func TestTriggerHost_BindsAJobsArgsFromTheRun(t *testing.T) {
 // The checkout's sparkwing.yaml supplies arguments a trigger left out, the
 // pipeline's entry over the project defaults, and the trigger's own beat both.
 func TestTriggerHost_LayersTheCheckoutsYAMLArgsUnderTheTriggers(t *testing.T) {
-	// bug: HostTriggerRun plans with the trigger's args alone; the checkout's YAML args and guards never apply.
-	t.Skip("bug: a trigger-hosted run ignores the checkout's sparkwing.yaml args")
 	yaml := "defaults:\n  args:\n    zone: eu-west\n    replicas: \"2\"\npipelines:\n  - name: podnode\n    entrypoint: Podnode\n    args:\n      replicas: \"3\"\n"
 	out := filepath.Join(t.TempDir(), "scale")
 	h := newHostedTrigger(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "scaleout": out})

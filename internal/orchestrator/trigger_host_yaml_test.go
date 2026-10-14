@@ -63,22 +63,6 @@ func TestTriggerHost_TheCheckoutsYAMLFillsTheTriggersArgs(t *testing.T) {
 	}
 }
 
-func TestTriggerHost_TheTriggersArgsBeatTheCheckouts(t *testing.T) {
-	dir := t.TempDir()
-	mine, entry := filepath.Join(dir, "mine"), filepath.Join(dir, "entry")
-	yaml := "pipelines:\n  - name: podnode\n    entrypoint: Podnode\n    args:\n      ranged: " + entry + "\n"
-	h := newHostedTrigger(t, map[string]string{"envout": filepath.Join(dir, "env"), "ranged": mine})
-	if err := h.hostInCheckout(t, checkoutWithYAML(t, yaml)); err != nil {
-		t.Fatalf("host: %v", err)
-	}
-	if _, err := os.Stat(mine); err != nil {
-		t.Fatalf("the trigger's ranged file was not written: %v", err)
-	}
-	if _, err := os.Stat(entry); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("the checkout's argument beat the trigger's: %v", err)
-	}
-}
-
 // safety: a guard in the checkout's sparkwing.yaml refuses a triggered run before it plans, as it refuses a local one.
 func TestTriggerHost_TheCheckoutsGuardRefusesTheRun(t *testing.T) {
 	dir := t.TempDir()
