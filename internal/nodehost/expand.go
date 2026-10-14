@@ -16,6 +16,8 @@ type expansion struct {
 	closure string
 	nodes   []nodeproto.PlanNode
 	err     error
+	// safety: set when err is a recorded batch the generator no longer reproduces; nodes are what it recorded.
+	drifted bool
 }
 
 type genGroup struct {
@@ -111,6 +113,9 @@ func (s *scheduler) expand(ctx context.Context, source string, res Result) {
 			err = fmt.Errorf("expansion source %q did not succeed (outcome=%s)", source, res.Outcome)
 		case j < 0:
 			err = fmt.Errorf("generator %s did not run", id)
+		case res.expansions[j].drifted:
+			err = res.expansions[j].err
+			s.endDrifted(ctx, source, res.expansions[j])
 		case res.expansions[j].err != nil:
 			err = res.expansions[j].err
 		default:
@@ -120,6 +125,21 @@ func (s *scheduler) expand(ctx context.Context, source string, res Result) {
 		g.done, g.err = true, err
 		if err != nil {
 			s.run.Logger.Error("nodehost: expansion failed", "run", s.run.ID, "source", source, "generator", id, "err", err)
+		}
+	}
+}
+
+// safety: a recorded batch the generator no longer reproduces fails the run whatever waits on it, and each node it
+// recorded keeps a row, ended as cancelled, so none stays pending or disappears from a retry.
+func (s *scheduler) endDrifted(ctx context.Context, source string, e expansion) {
+	s.drifts = append(s.drifts, e.err)
+	if err := s.add(ctx, context.WithoutCancel(ctx), e.nodes, &expansionFrom{source: source, closure: e.closure}); err != nil {
+		s.drifts = append(s.drifts, err)
+		return
+	}
+	for _, n := range e.nodes {
+		if !s.started[n.ID] {
+			s.terminal(ctx, n.ID, sparkwing.Cancelled, "expansion failed: "+e.err.Error())
 		}
 	}
 }
@@ -286,14 +306,25 @@ func allRecorded(batches []recordedBatch) bool {
 func (s *scheduler) recordedExpansions(ctx context.Context, n nodeproto.PlanNode, batches []recordedBatch, output func() (json.RawMessage, error)) []expansion {
 	var regenerated []expansion
 	var genErr error
-	if !allRecorded(batches) {
+	var incomplete []string
+	for _, b := range batches {
+		if !b.complete {
+			incomplete = append(incomplete, b.closure)
+		}
+	}
+	if len(incomplete) > 0 {
 		var out json.RawMessage
 		switch {
 		case s.regenerate == nil:
 			genErr = fmt.Errorf("the nodes %s generated are not all recorded, and this host has no eval process to generate them", n.ID)
 		default:
 			if out, genErr = output(); genErr == nil {
-				regenerated = s.regenerate(ctx, &NodeRun{Run: s.run, Plan: n, Generators: s.generators(n.ID)}, out)
+				// perf: a complete sibling's generator is not run again, so it can neither cost an eval nor abort one.
+				only := n
+				closures := *n.Closures
+				closures.Generator = incomplete
+				only.Closures = &closures
+				regenerated = s.regenerate(ctx, &NodeRun{Run: s.run, Plan: only, Generators: s.generators(n.ID)}, out)
 			}
 		}
 	}
@@ -311,6 +342,14 @@ func (s *scheduler) recordedExpansions(ctx context.Context, n nodeproto.PlanNode
 // safety: a recorded node stays a member, so a regenerated batch that drops or changes one is plan drift, never a
 // smaller fan-out.
 func reconcileBatch(b recordedBatch, regenerated []expansion, genErr error) expansion {
+	e := reconcileRecorded(b, regenerated, genErr)
+	if e.err != nil && len(b.nodes) > 0 {
+		e.nodes, e.drifted = b.nodes, true
+	}
+	return e
+}
+
+func reconcileRecorded(b recordedBatch, regenerated []expansion, genErr error) expansion {
 	e := expansion{closure: b.closure, err: genErr}
 	j := slices.IndexFunc(regenerated, func(r expansion) bool { return r.closure == b.closure })
 	switch {

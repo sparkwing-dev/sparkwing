@@ -438,6 +438,7 @@ type scheduler struct {
 	rerun      map[string]bool
 	adopted    []finished
 	regenerate func(ctx context.Context, n *NodeRun, output json.RawMessage) []expansion
+	drifts     []error
 }
 
 type finished struct {
@@ -775,6 +776,9 @@ func (s *scheduler) verdict(ctx context.Context) (string, error) {
 }
 
 func (s *scheduler) nodeVerdict() (string, error) {
+	if len(s.drifts) > 0 {
+		return "failed", fmt.Errorf("generated nodes drifted from what the run recorded: %w", errors.Join(s.drifts...))
+	}
 	var failed, cancelled, superseded []string
 	for _, n := range s.nodes {
 		oc := s.results[n.ID].Outcome

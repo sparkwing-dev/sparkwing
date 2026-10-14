@@ -438,3 +438,104 @@ func TestAPodRefusesACycleOfRecordedSources(t *testing.T) {
 		t.Fatalf("cyclic sources = %v, want plan_drift", err)
 	}
 }
+
+func onlySource() nodeproto.PlanDoc {
+	doc := fanOutDoc()
+	doc.Nodes = doc.Nodes[:1]
+	return doc
+}
+
+// safety: a recorded batch the generator no longer reproduces fails the run
+// even with no node waiting on the generator, and its recorded node stays
+// visible with a terminal row rather than pending or gone.
+func TestADriftedBatchWithoutAWaiterFailsTheRun(t *testing.T) {
+	changedA := childA
+	changedA.SpecHash = "sha256:changed"
+	for name, regen := range map[string][]nodeproto.PlanNode{"dropped": {childB}, "changed": {changedA, childB}} {
+		t.Run(name, func(t *testing.T) {
+			s, st, _ := resumeAfter(t, onlySource(), partialBatch(t), []expansion{{closure: testGenerator, nodes: regen}})
+			status, err := s.verdict(t.Context())
+			row := nodeRow(t, st, "test-a")
+			if status != "failed" || !strings.Contains(errText(err), "plan_drift") || row.Status != "done" {
+				t.Fatalf("resumed run = %s (%v), test-a %s/%s; want failed for drift with test-a ended", status, err, row.Status, row.Outcome)
+			}
+		})
+	}
+}
+
+// safety: a retry whose copied source's recorded batch no longer regenerates
+// fails, and the recorded node still gets its row in the retry.
+func TestARetryOfADriftedBatchWithoutAWaiterFails(t *testing.T) {
+	st := openStore(t)
+	ctx := t.Context()
+	doc := onlySource()
+	if err := st.CreateRun(ctx, store.Run{ID: sourceRunID, Pipeline: "p", Status: "failed"}); err != nil {
+		t.Fatal(err)
+	}
+	src := &scheduler{run: &Run{ID: sourceRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler)}, results: map[string]Result{}, started: map[string]bool{}}
+	if err := src.add(ctx, ctx, doc.Nodes, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishNodeWithReason(ctx, sourceRunID, "targets", "success", "", []byte(`"targets"`), "", nil); err != nil {
+		t.Fatal(err)
+	}
+	partialBatch(t)(src)
+	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{Dispatch: remoteHost(st, sparkwing.Success, "", nil)}
+	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest)}
+	s := &scheduler{
+		run: run, results: map[string]Result{}, started: map[string]bool{}, exec: chain(&cfg),
+		rehydrate: &Rehydration{SourceRunID: sourceRunID}, rerun: map[string]bool{},
+		regenerate: func(context.Context, *NodeRun, json.RawMessage) []expansion {
+			return []expansion{{closure: testGenerator, nodes: []nodeproto.PlanNode{childB}}}
+		},
+	}
+	if err := s.add(ctx, ctx, doc.Nodes, nil); err != nil {
+		t.Fatal(err)
+	}
+	s.loop(ctx)
+	status, err := s.verdict(ctx)
+	if _, rowErr := st.GetNode(ctx, testRunID, "test-a"); status != "failed" || rowErr != nil {
+		t.Fatalf("retry = %s (%v), test-a row %v; want failed with the recorded node kept", status, err, rowErr)
+	}
+}
+
+// perf: recovering an incomplete batch evaluates only its own generator, so a
+// complete sibling's generator neither runs again nor can abort the recovery.
+func TestRecoveringABatchEvaluatesOnlyItsGenerator(t *testing.T) {
+	var asked []string
+	st := openStore(t)
+	ctx := t.Context()
+	doc := twoGeneratorDoc()
+	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest)}
+	first := &scheduler{run: run, results: map[string]Result{}, started: map[string]bool{}}
+	if err := first.add(ctx, ctx, doc.Nodes, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishNodeWithReason(ctx, testRunID, "targets", "success", "", []byte(`"targets"`), "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.addGenerated(ctx, "targets", expansion{closure: testGenerator, nodes: []nodeproto.PlanNode{childA}}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{Dispatch: remoteHost(st, sparkwing.Success, "", nil)}
+	s := &scheduler{
+		run: run, results: map[string]Result{}, started: map[string]bool{}, exec: chain(&cfg), resume: true,
+		regenerate: func(_ context.Context, n *NodeRun, _ json.RawMessage) []expansion {
+			asked = append(asked, n.Plan.Closures.Generator...)
+			return []expansion{{closure: secondGenerator}}
+		},
+	}
+	if err := s.add(ctx, ctx, doc.Nodes, nil); err != nil {
+		t.Fatal(err)
+	}
+	s.loop(ctx)
+	if status, err := s.verdict(ctx); status != "success" || !slices.Equal(asked, []string{secondGenerator}) {
+		t.Fatalf("resumed run = %s (%v), generators evaluated %v; want success evaluating only %s", status, err, asked, secondGenerator)
+	}
+}
