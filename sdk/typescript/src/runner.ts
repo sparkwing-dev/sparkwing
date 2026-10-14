@@ -23,7 +23,7 @@ import {
   type Trigger,
   withRecoveries,
 } from "./plan.ts";
-import { OPS, ProtocolError, readRequests, writeReply, type Request } from "./protocol.ts";
+import { MAX_OUTPUT_BYTES, OPS, ProtocolError, readRequests, writeReply, type Request } from "./protocol.ts";
 import type { NodeRoutes } from "./routes.ts";
 
 export interface ServeOptions {
@@ -258,7 +258,12 @@ class Session {
     try {
       ctx.signal.throwIfAborted();
       const output = await body(ctx);
-      return output === undefined ? { outcome: "success" } : { outcome: "success", output };
+      if (output === undefined) return { outcome: "success" };
+      const size = jsonSize(output);
+      if (size > MAX_OUTPUT_BYTES) {
+        return { outcome: "failed", error: `step output is ${size} bytes as JSON, over the ${MAX_OUTPUT_BYTES >> 20} MiB limit` };
+      }
+      return { outcome: "success", output };
     } catch (err) {
       return { outcome: "failed", error: messageOf(err) };
     } finally {
@@ -383,4 +388,14 @@ function stringMap(v: unknown, key: string): Record<string, string> {
     if (typeof s !== "string") throw new ProtocolError("bad_request", `${key}.${k} must be a string`);
   }
   return v as Record<string, string>;
+}
+
+// safety: a value with no JSON form never leaves this process, so only what
+// can be measured is held to the output limit.
+function jsonSize(value: unknown): number {
+  try {
+    return Buffer.byteLength(JSON.stringify(value) ?? "");
+  } catch {
+    return 0;
+  }
 }

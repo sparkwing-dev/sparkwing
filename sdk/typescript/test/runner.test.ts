@@ -316,16 +316,23 @@ test("a request line without an id ends the loop, since no reply can answer it",
   await assert.rejects(c.done, /request is not JSON/);
 });
 
-test("a reply larger than one frame becomes a failed reply", async () => {
+test("an output over 16 MiB of JSON fails its node, and one of exactly 16 MiB travels", async () => {
   definePipeline({
     name: "huge",
-    plan: (p) => void p.job("big", () => "x".repeat(16 << 20)),
+    plan(p) {
+      p.job("over", () => "x".repeat((16 << 20) - 1));
+      p.job("exact", () => "x".repeat((16 << 20) - 2));
+    },
   });
   const out = await converse([
     { id: "p", op: "plan", pipeline: "huge", args: {}, run },
-    { id: "n", op: "run_node", node: "big", attempt: 1 },
+    { id: "over", op: "run_node", node: "over", attempt: 1 },
+    { id: "exact", op: "run_node", node: "exact", attempt: 1 },
   ]);
-  assert.match((out.reply("n")?.["error"] as { message: string }).message, /frame limit/);
+  const over = out.reply("over")?.["result"] as { outcome: string; error: string };
+  assert.equal(over.outcome, "failed");
+  assert.match(over.error, /16 MiB limit/);
+  assert.equal((out.reply("exact")?.["result"] as { outcome: string }).outcome, "success");
 });
 
 function definePlatforms(): void {

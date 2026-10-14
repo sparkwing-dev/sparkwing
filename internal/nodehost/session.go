@@ -69,6 +69,9 @@ type SessionConfig struct {
 	// closes, and between SIGTERM and SIGKILL. Zero means
 	// procgroup.DefaultTerminationGrace.
 	Grace time.Duration
+	// DescribeTimeout bounds the run host's describe of this process. Zero
+	// means 30 seconds, the bound the CLI puts on its own describe.
+	DescribeTimeout time.Duration
 }
 
 type sessionProcess interface {

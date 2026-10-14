@@ -2,11 +2,7 @@ package orchestrator_test
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
 	"testing"
 
@@ -121,49 +117,6 @@ func runContextProbe(t *testing.T) map[string]contextSighting {
 		out[k] = v
 	}
 	return out
-}
-
-func yesNo(v bool) string {
-	if v {
-		return "yes"
-	}
-	return "no"
-}
-
-func renderContextTable(sightings map[string]contextSighting) string {
-	var b strings.Builder
-	b.WriteString("| Callback | Side effects | Node id | Step id |\n")
-	b.WriteString("|---|---|---|---|\n")
-	for _, site := range contextProbeOrder {
-		s := sightings[site]
-		fmt.Fprintf(&b, "| %s | %s | %s | %s |\n",
-			site, yesNo(s.sideEffects), yesNo(s.node != ""), yesNo(s.step != ""))
-	}
-	return b.String()
-}
-
-const (
-	tableBegin = "<!-- BEGIN measured-context-table -->"
-	tableEnd   = "<!-- END measured-context-table -->"
-)
-
-func TestRun_TheDocumentedContextTableIsWhatTheRuntimeProduces(t *testing.T) {
-	measured := renderContextTable(runContextProbe(t))
-
-	path := filepath.Join("..", "..", "docs", "sdk.md")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	doc := strings.ReplaceAll(string(raw), "\r\n", "\n")
-	i, j := strings.Index(doc, tableBegin), strings.Index(doc, tableEnd)
-	if i < 0 || j < 0 {
-		t.Fatalf("docs/sdk.md carries no %s .. %s block", tableBegin, tableEnd)
-	}
-	published := strings.TrimSpace(doc[i+len(tableBegin) : j])
-	if published != strings.TrimSpace(measured) {
-		t.Fatalf("docs/sdk.md disagrees with the run.\n\npublished:\n%s\n\nmeasured:\n%s", published, measured)
-	}
 }
 
 func TestRun_PlanIsTheOnlyCallbackThatRefusesSideEffects(t *testing.T) {

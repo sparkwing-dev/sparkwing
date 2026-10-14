@@ -21,7 +21,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwingcache"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -75,13 +74,7 @@ func RunNodeOnce(
 		return runner.Result{}, fmt.Errorf("ensure root: %w", err)
 	}
 	var logsBackend LogBackend
-	if cfg.claim != nil && logsURL == "" {
-		fsLogs, err := fs.NewLogStore(paths.Root)
-		if err != nil {
-			return runner.Result{}, fmt.Errorf("pod log store: %w", err)
-		}
-		logsBackend = NewLogStoreBackend(fsLogs, logger)
-	} else if logsURL != "" {
+	if logsURL != "" {
 		logsBackend = NewHTTPLogsWithToken(logsURL, httpClient, token, logger)
 	} else {
 		logsBackend = localLogs{paths: paths}
@@ -91,13 +84,9 @@ func RunNodeOnce(
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("get run %s: %w", runID, err)
 	}
-	// safety: a claimed pod runs the pipeline it built itself, so it never
-	// needs the trigger's source, and its claim token cannot read the trigger.
-	var trigger *store.Trigger
-	if cfg.claim == nil {
-		if trigger, err = stateClient.GetTrigger(ctx, runID); err != nil && !errors.Is(err, store.ErrNotFound) {
-			return runner.Result{}, fmt.Errorf("get trigger %s: %w", runID, err)
-		}
+	trigger, err := stateClient.GetTrigger(ctx, runID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return runner.Result{}, fmt.Errorf("get trigger %s: %w", runID, err)
 	}
 	otelutil.StampSpan(ctx, otelutil.SpanAttrs{Pipeline: run.Pipeline})
 
@@ -115,7 +104,7 @@ func RunNodeOnce(
 			runID, nodeID)
 	}
 	// safety: coordinated nodes use the same pipeline binary as their local dispatcher.
-	if !cfg.coordinated && shouldRunRemote(trigger, cfg.brokeredChild || cfg.claim != nil) {
+	if !cfg.coordinated && shouldRunRemote(trigger, cfg.brokeredChild) {
 		if controllerURL == "" {
 			return runner.Result{}, fmt.Errorf(
 				"run %s node %s dispatches to a remote runner, which cannot reach this machine's admission daemon socket; set SPARKWING_CONTROLLER_URL to a controller the runner can reach",
@@ -143,9 +132,6 @@ func RunNodeOnce(
 		}
 	}
 	backends := RemoteBackends(stateClient, logsBackend, art, stateHTTP, store.DefaultConcurrencyLease)
-	if cfg.claim != nil {
-		backends.State = cfg.claim
-	}
 
 	reg, ok := sparkwing.Lookup(run.Pipeline)
 	if !ok {
@@ -214,9 +200,6 @@ func RunNodeOnce(
 			logger.Warn("pipeline_ref audit event append failed",
 				"run_id", runID, "node", node, "err", err)
 		})
-	if cfg.claim != nil {
-		pipelineRefs = cfg.claim.pipelineRefResolver()
-	}
 	ctx = sparkwingruntime.WithPipelineResolver(ctx, pipelineRefs)
 
 	childDiagnostics := podChildAwaitDiagnostics{logger: logger}
@@ -259,13 +242,6 @@ func RunNodeOnce(
 	}
 	if node == nil {
 		return runner.Result{}, errors.Join(fmt.Errorf("node %q not found in plan for %s (static nodes + all ExpandFrom generators exhausted)", nodeID, run.Pipeline), generatorErr)
-	}
-	if cfg.claim != nil {
-		hash, err := claimNodeSpecHash(plan, rc, reg, nodeID)
-		if err != nil || hash != cfg.claim.specHash {
-			return runner.Result{}, errors.Join(fmt.Errorf(
-				"plan-drift: node %q planned differently than the run's accepted plan", nodeID), err)
-		}
 	}
 
 	if admission != nil {
@@ -376,9 +352,6 @@ func runNodeCLI(args []string) error {
 
 	holderID := fmt.Sprintf("pod:%s:%s", runID, nodeID)
 	token := agentToken
-	if isClaimToken(token) && apiSocket == "" {
-		return runClaimedNode(ctx, *controllerURL, *logsURL, runID, nodeID, token)
-	}
 	if token == "" {
 		token = LocalServeToken(*controllerURL)
 	}

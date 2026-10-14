@@ -3,10 +3,12 @@ package nodehost_test
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -95,7 +97,10 @@ func TestLocalOutputsServeADependencysOutputWithoutAController(t *testing.T) {
 func TestLocalPipelineLatestReadsTheNewestSuccessfulRun(t *testing.T) {
 	s, _ := start(t)
 	st := localRuns()
-	bearer := admit(t, s, nodehost.Node{RunID: "run-1", NodeID: "deploy", Resolver: &fakeResolver{}, Masker: secrets.NewMasker(), Local: st})
+	bearer := admit(t, s, nodehost.Node{
+		RunID: "run-1", NodeID: "deploy", Resolver: &fakeResolver{}, Masker: secrets.NewMasker(), Local: st,
+		Refs: []nodeproto.PlanPipelineRef{{Pipeline: "other", Node: "build"}},
+	})
 	if got := ask(t, s, http.MethodGet, "/node/v1/pipelines/other/latest?node=build", bearer, ""); got.status != http.StatusNotFound || got.body["code"] != "no_run" {
 		t.Fatalf("status %d body %v", got.status, got.body)
 	}
@@ -103,6 +108,28 @@ func TestLocalPipelineLatestReadsTheNewestSuccessfulRun(t *testing.T) {
 	got := ask(t, s, http.MethodGet, "/node/v1/pipelines/other/latest?node=build", bearer, "")
 	if got.status != http.StatusOK || got.body["run_id"] != "run-0" || got.body["output"] != "old" {
 		t.Fatalf("status %d body %v", got.status, got.body)
+	}
+}
+
+func TestLocalPipelineLatestRefusesAnUndeclaredReference(t *testing.T) {
+	s, logs := start(t)
+	st := localRuns()
+	st.latest = &store.Run{ID: "run-0"}
+	bearer := admit(t, s, nodehost.Node{
+		RunID: "run-1", NodeID: "deploy", Resolver: &fakeResolver{}, Masker: secrets.NewMasker(), Local: st,
+		Refs: []nodeproto.PlanPipelineRef{{Pipeline: "other", Node: "test"}, {Pipeline: "another", Node: "build"}},
+	})
+	for _, path := range []string{"/node/v1/pipelines/other/latest?node=build", "/node/v1/pipelines/third/latest?node=build"} {
+		got := ask(t, s, http.MethodGet, path, bearer, "")
+		if got.status != http.StatusForbidden || got.body["code"] != "reference_undeclared" {
+			t.Fatalf("%s: status %d body %v", path, got.status, got.body)
+		}
+		if _, ok := got.body["output"]; ok {
+			t.Fatalf("%s: refusal carries an output: %v", path, got.body)
+		}
+	}
+	if !strings.Contains(logs.String(), "reference_undeclared") {
+		t.Fatalf("no audit record of the refusal:\n%s", logs.String())
 	}
 }
 
