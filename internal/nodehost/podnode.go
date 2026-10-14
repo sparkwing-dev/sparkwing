@@ -29,6 +29,9 @@ type PlanRequest struct {
 	// StartAt and StopAt must name steps of the plan, and Only cuts every
 	// node it does not keep from the plan, for a run no host schedules.
 	StartAt, StopAt, Only string
+	// CheckArgs, when set, refuses the plan given the arguments it plans
+	// with, describe's defaults filled in.
+	CheckArgs func(map[string]string) error
 }
 
 // PlannedRun is a plan [PlanDocument] accepted: the document with the host's
@@ -52,6 +55,9 @@ func PlanDocument(ctx context.Context, cfg SessionConfig, req PlanRequest) (Plan
 	}
 	var out PlannedRun
 	out.Args, err = describeArgs(ctx, sess, req.Pipeline, req.Args, req.Masker)
+	if err == nil && req.CheckArgs != nil {
+		err = req.CheckArgs(out.Args)
+	}
 	if err == nil {
 		out.Doc, out.JSON, err = planRun(ctx, sess, req.Pipeline, out.Args, req.Run)
 	}

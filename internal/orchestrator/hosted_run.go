@@ -62,14 +62,13 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 	}
 	defer func() { err = errors.Join(err, closeBackends()) }()
 	invokeArgs := mergeInvokeArgs(opts)
+	var checkArgs func(map[string]string) error
 	if opts.PipelineYAML != nil {
-		guards := pipelines.GuardContext{Args: invokeArgs, ProfileIsLocal: backends.LocalCoordination}
+		at := pipelines.GuardContext{ProfileIsLocal: backends.LocalCoordination}
 		if opts.Git != nil {
-			guards.GitBranch, guards.GitDefaultBranch = opts.Git.Branch, opts.Git.DefaultBranch
+			at.GitBranch, at.GitDefaultBranch = opts.Git.Branch, opts.Git.DefaultBranch
 		}
-		if err := opts.PipelineYAML.Guards.Evaluate(opts.Pipeline, guards); err != nil {
-			return nil, err
-		}
+		checkArgs = guardCheck(opts.Pipeline, opts.PipelineYAML.Guards, at)
 	}
 	if opts.RunID == "" {
 		opts.RunID = newRunID()
@@ -166,7 +165,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 	}
 	cfg := nodehost.Config{
 		Session:  nodehost.SessionConfig{Entry: entry.Command, Dir: entry.Dir, Env: engineenv.Strip(entry.Env), Sink: hostedPlanSink{delegate}},
-		Pipeline: opts.Pipeline, Args: invokeArgs, Run: hostedRunContext(opts, runID),
+		Pipeline: opts.Pipeline, Args: invokeArgs, CheckArgs: checkArgs, Run: hostedRunContext(opts, runID),
 		StartAt: opts.StartAt, StopAt: opts.StopAt, Only: opts.Only, Workers: opts.MaxParallel,
 		State: state, Artifacts: backends.Artifact, Attempts: attempts, Admission: admission,
 		Debug: nodehost.Debug{

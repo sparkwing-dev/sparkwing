@@ -53,11 +53,13 @@ type Pipeline struct {
 	// matches; Require fires when not every token matches. Token
 	// vocabulary: `profile:local`, `profile:controller`,
 	// `arg:<flag>=<value>`, `git:branch=<name>`, `git:branch=default`. A literal branch matches
-	// the checked-out head. The default token matches only when the
-	// dispatch supplies default-branch metadata. `arg:` tokens read the
+	// the checked-out head. The default token matches the repository's
+	// default branch: a GitHub App trigger records it, and any other run
+	// reads origin's HEAD from its checkout. `arg:` tokens read the
 	// merged argument set the run executes with, so a value supplied by
-	// defaults.args or this entry's own args: block is guarded exactly
-	// like one typed on the command line. See pkg/pipelines/guards.go.
+	// defaults.args, this entry's own args: block or a flag's SDK default
+	// is guarded exactly like one typed on the command line. See
+	// pkg/pipelines/guards.go.
 	Guards Guards `yaml:"guards,omitempty"`
 
 	// Args supplies per-arg default values. Higher priority than a

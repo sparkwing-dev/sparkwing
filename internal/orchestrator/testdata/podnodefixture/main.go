@@ -43,6 +43,7 @@ type inputs struct {
 	FanMemo bool   `flag:"fanmemo" desc:"Memoize the fan-out source"`
 	Region  bool   `flag:"region" desc:"The build node's env carries the AWS_REGION plan code reads"`
 	Ranged  string `flag:"ranged" desc:"File a prep node, a lint node and a ship node of three steps append their names to"`
+	Stage   string `flag:"stage" default:"prod" desc:"A value only guards read"`
 }
 
 // shipJob's steps run compile, package, upload in order, each appending its

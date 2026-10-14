@@ -97,8 +97,8 @@ read your `sparkwing.yaml`, so it dispatches the pipelines a team
 subscribed to the repository through the [GitHub App](github-app.md). To require a checked-out branch before any step runs,
 add `guards: {require: [git:branch=main]}` with its literal name. For pull
 requests this compares the head branch, not the base branch.
-`git:branch=default` requires default-branch metadata that trigger claims
-do not always supply. Branch guards do not express path
+`git:branch=default` matches the repository's default branch, which a
+GitHub App trigger records and any other run reads from its checkout. Branch guards do not express path
 restrictions, custom pull-request actions, or pull-request base-branch
 matching. See [hooks](hooks.md) for the enforcement boundary and examples.
 

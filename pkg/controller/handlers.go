@@ -1198,6 +1198,12 @@ func triggerRows(in triggerIntake) (store.Trigger, store.Run) {
 		// safety: every host of the run, the planning claim's included, reads the trigger's run flags from here.
 		Invocation: runflags.FromTriggerEnv(in.Env).Invocation(),
 	}
+	if branch := in.Env[EnvDefaultBranch]; branch != "" {
+		if run.Invocation == nil {
+			run.Invocation = map[string]any{}
+		}
+		run.Invocation[runflags.DefaultBranchKey] = branch
+	}
 	return trig, run
 }
 

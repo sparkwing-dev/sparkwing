@@ -9,6 +9,8 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/internal/runflags"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -67,10 +70,13 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	if err != nil {
 		return err
 	}
-	args, err := checkoutRunArgs(h.Dir, trig.Pipeline, triggerHostArgs(ctx, c, trig, logger), &pipelines.GuardContext{GitBranch: trig.GitBranch})
+	args, guards, err := checkoutRunArgs(h.Dir, trig.Pipeline, triggerHostArgs(ctx, c, trig, logger))
 	if err != nil {
 		return err
 	}
+	checkArgs := guardCheck(trig.Pipeline, guards, pipelines.GuardContext{
+		GitBranch: trig.GitBranch, GitDefaultBranch: checkoutDefaultBranch(ctx, trig.TriggerEnv[controller.EnvDefaultBranch], h.Dir),
+	})
 	masker := secrets.NewMasker()
 	masker.Register(h.Token)
 	env, err := podProcessEnv(masker, logger)
@@ -107,7 +113,7 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	}
 	res, err := nodehost.Execute(ctx, nodehost.Config{
 		Session:  nodehost.SessionConfig{Entry: h.Entry, Dir: h.Dir, Sink: planSink, Env: env},
-		Pipeline: trig.Pipeline, Args: args,
+		Pipeline: trig.Pipeline, Args: args, CheckArgs: checkArgs,
 		Run: rc, Requires: requires, Invocation: flags.Invocation(),
 		StartAt: flags.StartAt, StopAt: flags.StopAt, Only: flags.Only,
 		ParentRunID: trig.ParentRunID, RetryOf: trig.RetryOf, RetrySource: trig.RetrySource,
@@ -152,27 +158,65 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 
 // safety: the checkout's sparkwing.yaml fills the arguments a run left out, its pipeline entry's over the project
 // defaults, as a local run's do. Layering them again under a run row's arguments, which already hold them, changes
-// nothing, so every planner of a run calls this and their plans agree. A guard is checked where guards is given.
-func checkoutRunArgs(dir, pipeline string, args map[string]string, guards *pipelines.GuardContext) (map[string]string, error) {
+// nothing, so every planner of a run calls this and their plans agree.
+func checkoutRunArgs(dir, pipeline string, args map[string]string) (map[string]string, pipelines.Guards, error) {
 	_, cfg, err := projectconfig.Discover(dir)
 	if err != nil {
-		return nil, &projectConfigError{err: err}
+		return nil, pipelines.Guards{}, &projectConfigError{err: err}
 	}
 	if cfg == nil {
-		return args, nil
+		return args, pipelines.Guards{}, nil
 	}
 	opts := Options{Pipeline: pipeline, Args: args, DefaultArgs: cfg.Defaults.Args}
 	opts.PipelineYAML = (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipeline)
-	merged := mergeInvokeArgs(opts)
-	if guards == nil {
-		return merged, nil
-	}
 	rules := cfg.Defaults.Guards
 	if p := opts.PipelineYAML; p != nil && !p.Guards.IsEmpty() {
 		rules = p.Guards
 	}
-	guards.Args = merged
-	return merged, rules.Evaluate(pipeline, *guards)
+	return mergeInvokeArgs(opts), rules, nil
+}
+
+// safety: the host checks a run's guards once describe has filled in the SDK's defaults, against the arguments the
+// run plans with, so leaving out a flag whose default a guard rejects does not slip past it.
+func guardCheck(pipeline string, rules pipelines.Guards, at pipelines.GuardContext) func(map[string]string) error {
+	if rules.IsEmpty() {
+		return nil
+	}
+	return func(args map[string]string) error {
+		at.Args = args
+		return rules.Evaluate(pipeline, at)
+	}
+}
+
+// safety: a GitHub App trigger records the repository's default branch; any other run reads it from its checkout,
+// origin's HEAD as a local run does, and asks origin when the clone did not record it. Unknown, git:branch=default
+// never matches.
+func checkoutDefaultBranch(ctx context.Context, recorded, dir string) string {
+	if recorded != "" {
+		return recorded
+	}
+	git := func(args ...string) string {
+		ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+		out, err := cmd.Output()
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
+	}
+	if name := git("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); name != "" {
+		return strings.TrimPrefix(name, "origin/")
+	}
+	for _, line := range strings.Split(git("ls-remote", "--symref", "origin", "HEAD"), "\n") {
+		if ref, ok := strings.CutPrefix(line, "ref: refs/heads/"); ok {
+			name, _, _ := strings.Cut(ref, "\t")
+			return name
+		}
+	}
+	return ""
 }
 
 // safety: a retry plans with the arguments its original run recorded.

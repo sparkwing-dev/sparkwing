@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -131,5 +132,68 @@ func TestLaunchedNode_LayersTheCheckoutsYAMLArgsAndGuards(t *testing.T) {
 	refused.bin = r.bin
 	if _, err := refused.host(t, store.PlanNodeID); err == nil || !strings.Contains(err.Error(), "rejected by guard") {
 		t.Fatalf("plan = %v, want the guard's refusal", err)
+	}
+}
+
+// safety: a guard judges the arguments the run plans with, so leaving out a flag whose SDK default the guard rejects
+// does not slip past it, on the runner host and on the launcher's planning claim alike.
+func TestTriggerHost_AGuardJudgesTheSDKsDefaults(t *testing.T) {
+	dir := t.TempDir()
+	ranged := filepath.Join(dir, "ranged")
+	yaml := "pipelines:\n  - name: podnode\n    entrypoint: Podnode\n    guards:\n      reject: [\"arg:stage=prod\"]\n"
+	h := newHostedTrigger(t, map[string]string{"envout": filepath.Join(dir, "env"), "ranged": ranged})
+	if err := h.hostInCheckout(t, checkoutWithYAML(t, yaml)); err == nil || !strings.Contains(err.Error(), `rejected by guard "arg:stage=prod"`) {
+		t.Fatalf("host = %v, want the guard's refusal of the default stage", err)
+	}
+	if _, err := os.Stat(ranged); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a node ran past the guard: %v", err)
+	}
+}
+
+func TestLaunchedNode_AGuardJudgesTheSDKsDefaults(t *testing.T) {
+	t.Setenv("GORACE", "atexit_sleep_ms=0")
+	r := newLaunchedRun(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env")})
+	yaml := "pipelines:\n  - name: podnode\n    entrypoint: Podnode\n    guards:\n      reject: [\"arg:stage=prod\"]\n"
+	if err := os.MkdirAll(filepath.Join(r.src, ".sparkwing"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(r.src, ".sparkwing", "sparkwing.yaml"), []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.host(t, store.PlanNodeID); err == nil || !strings.Contains(err.Error(), "rejected by guard") {
+		t.Fatalf("plan = %v, want the guard's refusal of the default stage", err)
+	}
+}
+
+// safety: git:branch=default compares the triggered branch with the repository's default branch, which a GitHub
+// App trigger records and any other trigger's checkout names as origin's HEAD.
+func TestTriggerHost_ADefaultBranchGuardKnowsTheDefaultBranch(t *testing.T) {
+	yaml := "pipelines:\n  - name: podnode\n    entrypoint: Podnode\n    guards:\n      reject: [\"git:branch=default\"]\n"
+	t.Run("recorded by the webhook", func(t *testing.T) {
+		h := newHostedTriggerWith(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env")}, func(trig *store.Trigger) {
+			trig.TriggerEnv = map[string]string{"GITHUB_DEFAULT_BRANCH": "main"}
+		})
+		if err := h.hostInCheckout(t, checkoutWithYAML(t, yaml)); err == nil || !strings.Contains(err.Error(), "rejected by guard") {
+			t.Fatalf("host = %v, want the default-branch guard to refuse main", err)
+		}
+	})
+	t.Run("named by the checkout", func(t *testing.T) {
+		h := newHostedTrigger(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env")})
+		checkout := checkoutWithYAML(t, yaml)
+		gitIn(t, checkout, "init", "-q", "-b", "main")
+		gitIn(t, checkout, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+		if err := h.hostInCheckout(t, checkout); err == nil || !strings.Contains(err.Error(), "rejected by guard") {
+			t.Fatalf("host = %v, want the default-branch guard to refuse main", err)
+		}
+	})
+}
+
+func gitIn(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 }

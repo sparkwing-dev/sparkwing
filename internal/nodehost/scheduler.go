@@ -52,6 +52,9 @@ type Config struct {
 	// Invocation is the run row's invocation record, which the read paths
 	// redact secret arguments by.
 	Invocation map[string]any
+	// CheckArgs, when set, refuses the run before its row is recorded, given
+	// the arguments the run plans with, describe's defaults filled in.
+	CheckArgs func(map[string]string) error
 	// Memo reuses memoized nodes' earlier results; nil runs every node.
 	Memo *Memo
 	// Dispatch, when set, runs each admitted node elsewhere, whole: the
@@ -253,6 +256,9 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 		masker = cfg.Attempts.Masker
 	}
 	args, err := describeArgs(ctx, sess, cfg.Pipeline, cfg.Args, masker)
+	if err == nil && cfg.CheckArgs != nil {
+		err = cfg.CheckArgs(args)
+	}
 	if err == nil {
 		err = cfg.State.CreateRun(ctx, runRow(cfg, args))
 	}

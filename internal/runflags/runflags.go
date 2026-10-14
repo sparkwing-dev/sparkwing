@@ -63,3 +63,8 @@ func FromInvocation(invocation map[string]any) Flags {
 		DryRun: set("dry_run"), NoCache: set("no_cache"),
 	}
 }
+
+// DefaultBranchKey is the run row invocation key that holds the repository's
+// default branch a GitHub App trigger recorded, which git:branch=default
+// guards compare the run's branch with.
+const DefaultBranchKey = "git_default_branch"

@@ -136,10 +136,14 @@ func planLaunchedRun(ctx context.Context, c *client.Client, src string, entry pi
 		return fail(err)
 	}
 	flags := runflags.FromInvocation(run.Invocation)
-	args, err := checkoutRunArgs(src, run.Pipeline, run.Args, &pipelines.GuardContext{GitBranch: run.GitBranch})
+	args, guards, err := checkoutRunArgs(src, run.Pipeline, run.Args)
 	if err != nil {
 		return fail(err)
 	}
+	recorded, _ := run.Invocation[runflags.DefaultBranchKey].(string)
+	checkArgs := guardCheck(run.Pipeline, guards, pipelines.GuardContext{
+		GitBranch: run.GitBranch, GitDefaultBranch: checkoutDefaultBranch(ctx, recorded, src),
+	})
 	masker := secrets.NewMasker()
 	env, err := podProcessEnv(masker, slog.Default())
 	if err != nil {
@@ -152,7 +156,7 @@ func planLaunchedRun(ctx context.Context, c *client.Client, src string, entry pi
 	plan, err := nodehost.PlanDocument(ctx, nodehost.SessionConfig{Entry: entry, Dir: src, Sink: sink, Env: env},
 		nodehost.PlanRequest{
 			Pipeline: run.Pipeline, Args: args, Run: podRunContext(run), Requires: requires, Masker: masker,
-			StartAt: flags.StartAt, StopAt: flags.StopAt, Only: flags.Only,
+			StartAt: flags.StartAt, StopAt: flags.StopAt, Only: flags.Only, CheckArgs: checkArgs,
 		})
 	sink.end()
 	if err != nil {
