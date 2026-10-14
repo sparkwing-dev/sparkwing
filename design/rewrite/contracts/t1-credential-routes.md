@@ -11,7 +11,7 @@ C2 owns the production route policy. T1 owns independent expected results and cr
 ## Final route permission coverage
 
 `internal/acceptance/credential_routes.go` contains committed literal expectations
-for all 232 declared final C2 method/path pairs, including the eight node-host
+for all 235 declared final C2 method/path pairs, including the eight node-host
 routes and every public, browser and external-proof route. Each alternative pins
 its credential class, complete grant conjunction, binding and liveness together.
 Audience, resource owner and authentication proof are pinned per route. Empty
@@ -54,11 +54,41 @@ accepted by regenerating a golden file from C2 or a running controller.
 |---|---|---|
 | Awarded run/job reads, writes, results, heartbeat, source, OIDC, child, sizing and slot operations | Frozen §5.1/A68: exact grants, audience, tenancy and bound relationships; §3.3 transactional holder fences | Exact operation suffixes and trigger/plan grant mappings are C2's declared choices; `U-REPORT`, `U-PLAN`, `U-CLAIM-CONTROL`, `U-CONTROL` require reconciliation. |
 | Data reads and publication | Frozen §5.1/A66, §8.1; decisions 92–93 and 98: controller authority, read sets, repo-bound read-only cache and local-run publication | C1 supplies receipt/read-set facts. A route tuple alone cannot establish object authority. |
-| Expansion reads/submission | Frozen §3.6: expansion.submit and bound source-output read with owner/eval lease | Eval logging/failure routes remain unresolved in C2; their absence is not approval to omit the feature. |
+| Expansion reads/submission and eval heartbeat/logs | Frozen §3.6 and C2's route and liveness invariants: expansion.submit and bound source-output read with owner/eval lease; eval reporting requires its own eval lease | Eval failures use AcceptExpansion. Runtime lease and source-generation checks remain required. |
 | Operator and deployment administration | Frozen §9.3 and §5.1: console-only trust, grants, freeze, refunds and account deletion; deployment operational scopes only | Exact operational permission spellings remain `U-DEPLOYMENT`; console query choices remain `U-OPERATOR-READ`. |
 | Member, account, token-owner, machine-owner and team administration | Frozen §5.5: account role in its team; §5.1: no claim privilege from a root | Exact member grants and root provisioning rights are not specified by the frozen text. The C2 choices pinned here remain the `U-*` role assumptions below. |
-| Public, browser, signed-object, GitHub webhook and Actions exchange | Frozen §§3.5, 5.1, 5.5, 8.1; decision 98: webhook-derived trust, exact signed-object scope and separate Actions proof | Browser endpoint paths and account-flow choices remain C2 assumptions. Billing payment proof/callback inventory is still unresolved and must add independent rows when settled. |
+| Public, browser, signed-object, GitHub webhook, Actions exchange and payment webhook | Frozen §§3.5, 5.1, 5.5, 8.1; decision 98; C2's billing contract: webhook-derived trust, exact signed-object scope, separate Actions proof and signed Stripe settlement | Browser endpoint paths and account-flow choices remain C2 assumptions. Payment proof and settlement still require runtime evidence. |
 | Node-host process operations | Frozen §§5.1, 5.5, 6.2–6.3: nodehost audience, process lifetime and declared operation bindings | C3 must expose actual node-host registrations; no controller credential or process-env bearer fallback is permitted. |
+
+### Reconciled C2 permissions
+
+C2's [route and liveness invariants](c2-credentials.md#route-and-liveness-invariants)
+and [billing contract](c2-credentials.md#billing) settle these expectations.
+The literals transcribe those documented responsibilities against frozen
+§§3.3, 3.6 and 5.1. They are written independently of the code table.
+
+| Route | Expected permission | Reason |
+|---|---|---|
+| `GET /api/v1/runs/{run}/snapshot` | Controller audience, run owner, capability proof; awarded/delegated claim with `trigger.host`, `runOfTrigger`, sensitive liveness. | The remote run owner reads the state used for reconciliation under its live trigger authority. |
+| `POST /api/v1/runs/{run}/jobs/{job}/reconcile` | Controller audience, run owner, capability proof; awarded/delegated claim with `nodes.claim`, `runOfTrigger`, sensitive liveness. | Reconciliation may self-claim a job in the owner's run. C1 checks holder rights, the proposed source's read edge and persisted outcome in the transaction. |
+| `POST /webhooks/stripe` | Controller audience, team owner, `payment_webhook_signature` proof; no capability alternative. | Automatic settlement requires the signed body and Stripe-Signature header, timestamp and configured mode. The committed checkout determines the team and credit amount. A bearer or browser return cannot settle credit. |
+
+The four controller routes `POST /api/v1/claims/{claim}/heartbeat`,
+`POST /api/v1/claims/{claim}/logs`,
+`POST /api/v1/claims/{claim}/log-segments` and
+`POST /api/v1/claims/{claim}/log-manifest` each admit the complete alternative
+`eval_unit|expansion.submit|ownEval|expansion`, with run ownership and capability
+proof. The heartbeat also keeps its claim `node.report`/`ownClaim`/reporting
+alternative. Each log route keeps its claim `log.tail`/`ownClaim`/logTail
+alternative.
+
+Eval authority carries exactly `expansion.submit` and `data.read`, so reporting
+uses the expansion grant under its own live eval lease. `ownEval` binds the path
+claim and unit log subject to the eval's run, holder and generation, and checks
+the immutable source job and source generation. A sibling eval, bootstrap or
+owner-delegated expansion capability cannot satisfy this alternative. Logs
+must arrive before lease-ending completion. Structured eval failure uses
+`/jobs/{job}/expansion` and the same AcceptExpansion transaction as success.
 
 Root assumption: the stable comparison seam is `capability.RoutePolicy` and its
 `AccessRule` tuple, not `ProvisionSpec`, `AuthorityRef`, the capability parent FK
@@ -74,10 +104,10 @@ route because decision 103 distributes engines through GitHub Releases. Changes
 to final controller registrations require explicit coverage changes. Decision 104
 also keeps the same permission contract for TypeScript on Windows.
 
-The unresolved rights and historical port inventory below remain evidence of
-work required. In particular, new payment callbacks and eval-only log/failure
-alternatives must fail this guard until T1 records independently reviewed
-expectations. An unchanged declaration baseline does not close those blockers.
+The remaining unresolved rights and historical port inventory below still
+require reconciliation. The expectations above settle the payment callback
+and eval heartbeat/log declarations. Runtime authorization and settlement
+remain acceptance obligations beyond this declaration guard.
 
 ## How to read each row
 
@@ -141,7 +171,7 @@ Each `U-*` entry blocks completion of its affected matrix cells. C2 must state t
 | `U-QUEUE` | Grants for slot actions, queue reads and administrative force-release. Bound slot operations have no admin bypass. Any distinct override authority needs an independent contract. |
 | `U-OPERATOR-READ` | Console team/waitlist reads and waitlist-approval permissions. Console write-power boundaries do not specify every query role. |
 | `U-DEPLOYMENT` | Exact operational grants and role distinctions for limits, signup policy, object-store breaker controls, quota/allowance and storage settings. The allowed categories are fixed, not their full route matrix. |
-| `U-BILLING` | Customer versus service permissions for checkout closure, cards, payment submission/status, warnings, credit settings/history and settlement operations. Refund/grant/freeze console boundaries remain mandatory. Stripe test keys do not remove authorization requirements. |
+| `U-BILLING` | Customer versus service permissions for checkout closure, cards, payment submission/status, warnings and credit settings/history. Automatic settlement requires the signed Stripe proof above. Refund/grant/freeze console boundaries remain mandatory. Stripe test keys do not remove authorization requirements. |
 | `U-TOKEN` | Independent member/machine/service credential CRUD, list, rotate and metering-administration rights. Delegate/Award/Exchange semantics do not grant root-management permission. |
 | `U-GIT-ADMIN` | Roles for storing/deleting git credentials, confirming them, inspecting release audits and recording owner machine opt-in. Execution release constraints remain fixed. |
 | `U-SECRET-ADMIN` | Roles for secret list/get/set/delete/rotate and variable views, distinct from declared execution release. |

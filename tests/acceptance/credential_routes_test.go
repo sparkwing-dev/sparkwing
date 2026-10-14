@@ -65,47 +65,62 @@ func compareCredentialRoutes(expected []acceptance.CredentialRouteExpectation, a
 }
 
 func TestFinalCredentialRouteCoverageRejectsDrift(t *testing.T) {
+	intakeIndex := slices.IndexFunc(capability.Routes, func(route capability.RoutePolicy) bool {
+		return route.Method == "POST" && route.Path == "/api/v1/runs"
+	})
+	if intakeIndex < 0 {
+		t.Fatal("missing run intake route")
+	}
 	tests := map[string]func([]capability.RoutePolicy) []capability.RoutePolicy{
 		"missing route": func(r []capability.RoutePolicy) []capability.RoutePolicy { return r[1:] },
 		"extra route": func(r []capability.RoutePolicy) []capability.RoutePolicy {
-			extra := r[0]
+			extra := r[intakeIndex]
 			extra.Path = "/unexpected"
 			return append(r, extra)
 		},
-		"duplicate route":     func(r []capability.RoutePolicy) []capability.RoutePolicy { return append(r, r[0]) },
-		"missing alternative": func(r []capability.RoutePolicy) []capability.RoutePolicy { r[0].Access = r[0].Access[1:]; return r },
-		"extra alternative": func(r []capability.RoutePolicy) []capability.RoutePolicy {
-			r[0].Access = append(r[0].Access, r[0].Access[0])
+		"duplicate route": func(r []capability.RoutePolicy) []capability.RoutePolicy { return append(r, r[intakeIndex]) },
+		"missing alternative": func(r []capability.RoutePolicy) []capability.RoutePolicy {
+			r[intakeIndex].Access = r[intakeIndex].Access[1:]
 			return r
 		},
-		"missing grant": func(r []capability.RoutePolicy) []capability.RoutePolicy { r[0].Access[0].Grants = nil; return r },
+		"extra alternative": func(r []capability.RoutePolicy) []capability.RoutePolicy {
+			r[intakeIndex].Access = append(r[intakeIndex].Access, r[intakeIndex].Access[0])
+			return r
+		},
+		"missing grant": func(r []capability.RoutePolicy) []capability.RoutePolicy {
+			r[intakeIndex].Access[0].Grants = nil
+			return r
+		},
 		"extra grant": func(r []capability.RoutePolicy) []capability.RoutePolicy {
-			r[0].Access[0].Grants = append(r[0].Access[0].Grants, capability.TeamAdmin)
+			r[intakeIndex].Access[0].Grants = append(r[intakeIndex].Access[0].Grants, capability.TeamAdmin)
 			return r
 		},
 		"grant pairing": func(r []capability.RoutePolicy) []capability.RoutePolicy {
-			r[0].Access[0].Grants, r[0].Access[1].Grants = r[0].Access[1].Grants, r[0].Access[0].Grants
+			r[intakeIndex].Access[0].Grants, r[intakeIndex].Access[1].Grants = r[intakeIndex].Access[1].Grants, r[intakeIndex].Access[0].Grants
 			return r
 		},
 		"liveness pairing": func(r []capability.RoutePolicy) []capability.RoutePolicy {
-			r[0].Access[0].Liveness, r[0].Access[1].Liveness = r[0].Access[1].Liveness, r[0].Access[0].Liveness
+			r[intakeIndex].Access[0].Liveness, r[intakeIndex].Access[1].Liveness = r[intakeIndex].Access[1].Liveness, r[intakeIndex].Access[0].Liveness
 			return r
 		},
 		"binding": func(r []capability.RoutePolicy) []capability.RoutePolicy {
-			r[0].Access[1].Binding = capability.BindNone
+			r[intakeIndex].Access[1].Binding = capability.BindNone
 			return r
 		},
 		"credential": func(r []capability.RoutePolicy) []capability.RoutePolicy {
-			r[0].Access[1].Credential = capability.CredentialAny
+			r[intakeIndex].Access[1].Credential = capability.CredentialAny
 			return r
 		},
 		"audience": func(r []capability.RoutePolicy) []capability.RoutePolicy {
-			r[0].Audience = capability.NodeHost
+			r[intakeIndex].Audience = capability.NodeHost
 			return r
 		},
-		"owner": func(r []capability.RoutePolicy) []capability.RoutePolicy { r[0].Owner = capability.OwnerNone; return r },
+		"owner": func(r []capability.RoutePolicy) []capability.RoutePolicy {
+			r[intakeIndex].Owner = capability.OwnerNone
+			return r
+		},
 		"authentication": func(r []capability.RoutePolicy) []capability.RoutePolicy {
-			r[0].Authentication = capability.AuthPublic
+			r[intakeIndex].Authentication = capability.AuthPublic
 			return r
 		},
 	}

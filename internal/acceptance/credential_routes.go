@@ -13,6 +13,8 @@ type CredentialRouteExpectation struct {
 // A fresh slice lets sensitivity tests change their copy without changing the oracle.
 func CredentialRoutes() []CredentialRouteExpectation {
 	return []CredentialRouteExpectation{
+		{"GET", "/api/v1/runs/{run}/snapshot", "controller", "run", "capability", []string{"awarded_or_delegated_claim|trigger.host|runOfTrigger|sensitive"}},
+		{"POST", "/api/v1/runs/{run}/jobs/{job}/reconcile", "controller", "run", "capability", []string{"awarded_or_delegated_claim|nodes.claim|runOfTrigger|sensitive"}},
 		{"POST", "/api/v1/runs", "controller", "team", "capability", []string{"unbound_member_or_local|runs.write|bodyNamesRun|credential", "awarded_or_delegated_claim|children.start|bodyNamesRun|sensitive"}},
 		{"GET", "/api/v1/runs", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|none|credential"}},
 		{"GET", "/api/v1/runs/grep", "controller", "team", "capability", []string{"unbound_member_or_local|logs.read|none|credential"}},
@@ -170,10 +172,10 @@ func CredentialRoutes() []CredentialRouteExpectation {
 		{"POST", "/api/v1/launcher/claim", "controller", "deployment", "capability", []string{"launcher_service|claims.launch|claimSelection|credential"}},
 		{"POST", "/api/v1/launcher/sync", "controller", "deployment", "capability", []string{"launcher_service|claims.launch|claimSelection|credential"}},
 		{"POST", "/api/v1/claims/exchange", "controller", "run", "capability", []string{"awarded_or_delegated_claim|claim.exchange|run|sensitive"}},
-		{"POST", "/api/v1/claims/{claim}/heartbeat", "controller", "run", "capability", []string{"awarded_or_delegated_claim|node.report|ownClaim|reporting", "awarded_or_delegated_claim|expansion.submit|ownClaim|expansion"}},
-		{"POST", "/api/v1/claims/{claim}/logs", "controller", "run", "capability", []string{"awarded_or_delegated_claim|log.tail|ownClaim|logTail"}},
-		{"POST", "/api/v1/claims/{claim}/log-segments", "controller", "run", "capability", []string{"awarded_or_delegated_claim|log.tail|ownClaim|logTail"}},
-		{"POST", "/api/v1/claims/{claim}/log-manifest", "controller", "run", "capability", []string{"awarded_or_delegated_claim|log.tail|ownClaim|logTail"}},
+		{"POST", "/api/v1/claims/{claim}/heartbeat", "controller", "run", "capability", []string{"awarded_or_delegated_claim|node.report|ownClaim|reporting", "eval_unit|expansion.submit|ownEval|expansion"}},
+		{"POST", "/api/v1/claims/{claim}/logs", "controller", "run", "capability", []string{"awarded_or_delegated_claim|log.tail|ownClaim|logTail", "eval_unit|expansion.submit|ownEval|expansion"}},
+		{"POST", "/api/v1/claims/{claim}/log-segments", "controller", "run", "capability", []string{"awarded_or_delegated_claim|log.tail|ownClaim|logTail", "eval_unit|expansion.submit|ownEval|expansion"}},
+		{"POST", "/api/v1/claims/{claim}/log-manifest", "controller", "run", "capability", []string{"awarded_or_delegated_claim|log.tail|ownClaim|logTail", "eval_unit|expansion.submit|ownEval|expansion"}},
 		{"POST", "/api/v1/data/download", "controller", "team", "capability", []string{"awarded_or_delegated_claim|data.read|data|sensitive", "awarded_or_delegated_claim|data.read|data|expansion", "repo_cache_reader|data.read|data|credential"}},
 		{"POST", "/api/v1/data/upload", "controller", "team", "capability", []string{"awarded_or_delegated_claim|data.write|data|sensitive", "local_run_publisher|data.write|data|credential"}},
 		{"POST", "/api/v1/data/commit", "controller", "team", "capability", []string{"awarded_or_delegated_claim|data.write|data|sensitive", "local_run_publisher|data.write|data|credential"}},
@@ -213,6 +215,7 @@ func CredentialRoutes() []CredentialRouteExpectation {
 		{"POST", "/api/v1/operator/runners/{runner}/metered", "controller", "deployment", "capability", []string{"operator_console_session|operator.console|none|credential"}},
 		{"GET", "/api/v1/health", "controller", "none", "public", nil},
 		{"GET", "/api/v1/capabilities", "controller", "none", "public", nil},
+		{"POST", "/webhooks/stripe", "controller", "team", "payment_webhook_signature", nil},
 		{"POST", "/webhooks/github-app", "controller", "team", "github_webhook_hmac", nil},
 		{"POST", "/api/v1/runners/github/exchange", "controller", "team", "github_actions_oidc", nil},
 		{"GET", "/.well-known/openid-configuration", "controller", "none", "public", nil},
