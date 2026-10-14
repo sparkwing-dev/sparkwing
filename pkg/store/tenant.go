@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 )
 
 // Team is a tenant key. It is a defined type rather than a bare string
@@ -332,15 +331,21 @@ var operatorTables = []string{
 	"teams",
 }
 
-// safety: the column's default names a team, so it is registered here too,
-// because a migrated single-tenant install listing no team would read as an
-// install whose rows belong to nobody.
+// safety: a local install starts with an explicit registered team and its authority generation.
 func recordDefaultTeamTx(ctx context.Context, tx *storeTx) error {
-	now := time.Now().UnixNano()
+	return registerTeamTx(ctx, tx, DefaultTeam)
+}
+
+func registerTeamTx(ctx context.Context, tx *storeTx, team Team) error {
+	now := tx.now().UnixNano()
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO teams (name, created_at, updated_at) VALUES (?, ?, ?)
 		 ON CONFLICT (name) DO NOTHING`,
-		string(DefaultTeam), now, now)
+		string(team), now, now)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO team_counters(team) VALUES (?) ON CONFLICT(team) DO NOTHING`, team)
 	return err
 }
 
@@ -352,12 +357,7 @@ func (o *Operator) CreateTeam(ctx context.Context, team Team) error {
 	if team == "" {
 		return ErrNoTeam
 	}
-	now := time.Now().UnixNano()
-	_, err := o.s.exec(ctx,
-		`INSERT INTO teams (name, created_at, updated_at) VALUES (?, ?, ?)
-		 ON CONFLICT (name) DO NOTHING`,
-		string(team), now, now)
-	return err
+	return o.s.inTx(ctx, func(tx *storeTx) error { return registerTeamTx(ctx, tx, team) })
 }
 
 // ListTeams returns every registered team, name order.

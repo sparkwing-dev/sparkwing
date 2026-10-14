@@ -211,15 +211,19 @@ CREATE TABLE triggers (
 CREATE TABLE node_steps (
     run_id TEXT NOT NULL,
     node_id TEXT NOT NULL,
+    attempt BIGINT NOT NULL CHECK(attempt > 0),
+    generation BIGINT NOT NULL CHECK(generation > 0),
     step_id TEXT NOT NULL,
     status TEXT NOT NULL CHECK(status IN ('running','passed','failed','cancelled','skipped')),
+    error TEXT NOT NULL DEFAULT '',
     started_at BIGINT,
     finished_at BIGINT,
     annotations_json BLOB,
     summary TEXT NOT NULL DEFAULT '',
     team TEXT NOT NULL REFERENCES teams(name),
-    PRIMARY KEY (team, run_id, node_id, step_id),
-    FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE
+    PRIMARY KEY (team, run_id, node_id, attempt, step_id),
+    FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE,
+    FOREIGN KEY(team,run_id,node_id,generation,attempt) REFERENCES node_attempts(team,run_id,node_id,generation,attempt) ON DELETE CASCADE
 );
 
 CREATE TABLE node_metrics (
@@ -269,7 +273,7 @@ CREATE TABLE approvals (
     requested_at BIGINT NOT NULL,
     message TEXT NOT NULL DEFAULT '',
     timeout_ms BIGINT NOT NULL DEFAULT 0,
-    on_timeout TEXT NOT NULL DEFAULT 'fail' CHECK(on_timeout IN ('fail','approve')),
+    on_timeout TEXT NOT NULL DEFAULT 'fail' CHECK(on_timeout IN ('fail','deny','approve')),
     approver TEXT NOT NULL DEFAULT '',
     resolved_at BIGINT,
     resolution TEXT NOT NULL DEFAULT '' CHECK(resolution IN ('','approved','denied','timed_out')),
@@ -995,7 +999,7 @@ CREATE TABLE log_segments (
     generation BIGINT NOT NULL CHECK(generation > 0),
     n BIGINT NOT NULL CHECK(n >= 0),
     stored_bytes BIGINT NOT NULL,
-    md5 TEXT NOT NULL,
+    object_key TEXT NOT NULL,
     sha256 TEXT NOT NULL,
     start_offset BIGINT NOT NULL CHECK(start_offset >= 0),
     end_offset BIGINT NOT NULL CHECK(end_offset >= start_offset),

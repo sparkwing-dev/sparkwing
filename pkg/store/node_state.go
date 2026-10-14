@@ -2,8 +2,18 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"reflect"
+	"slices"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -308,22 +318,467 @@ type ErrIllegalTransition struct {
 }
 
 // Error supplies a stable reason without exposing a capability or result payload.
-func (e *ErrIllegalTransition) Error() string { panic("unimplemented: c1-data") }
+func (e *ErrIllegalTransition) Error() string {
+	return fmt.Sprintf("illegal job transition %s -> %s by %s: %s", e.From, e.To, e.Actor, e.Reason)
+}
 
 // TransitionNode changes state, attempts, events, expansion barriers, holder release and settlement atomically.
 func (t *Tenant) TransitionNode(ctx context.Context, change NodeTransition) (Applied, error) {
-	panic("unimplemented: c1-data")
+	var out Applied
+	err := t.s.inTx(ctx, func(tx *storeTx) error {
+		var err error
+		out, err = transitionNodeTx(ctx, tx, t.team, change, tx.now())
+		return err
+	})
+	return out, err
 }
 
 // safety: an expired claim is still claimed or running until the reaper commits an edge; readers cannot release it.
-func nodeState(row NodeRow) (NodeState, error) { panic("unimplemented: c1-data") }
+func nodeState(row NodeRow) (NodeState, error) {
+	switch row.Status {
+	case StatusDone:
+		if !slices.Contains([]NodeState{NodeSuccess, NodeFailed, NodeCancelled, NodeSkipped, NodeSuperseded, NodeMemoized}, row.Outcome) || row.ClaimedBy != "" || row.LeaseExpiresAt != nil || row.CapabilityPrefix != "" || row.FinishedAt == nil {
+			return "", errors.New("invalid terminal job state")
+		}
+		return row.Outcome, nil
+	case StatusRunning:
+		if row.ClaimedBy == "" || row.LeaseExpiresAt == nil || row.CapabilityPrefix == "" || row.Generation <= 0 || row.Attempt <= 0 {
+			return "", errors.New("running job has no claim or attempt")
+		}
+		return NodeRunning, nil
+	case StatusApprovalPending:
+		if row.ClaimedBy != "" || row.Outcome != "" {
+			return "", errors.New("invalid approval state")
+		}
+		return NodeApprovalPending, nil
+	case StatusPending:
+		if row.Outcome != "" || row.FinishedAt != nil {
+			return "", errors.New("invalid pending job")
+		}
+		if row.ClaimedBy != "" {
+			if row.LeaseExpiresAt == nil || row.CapabilityPrefix == "" || row.Generation <= 0 {
+				return "", errors.New("incomplete job claim")
+			}
+			return NodeClaimed, nil
+		}
+		if row.LeaseExpiresAt != nil || row.CapabilityPrefix != "" {
+			return "", errors.New("orphan job claim fields")
+		}
+		if row.ReadyAt != nil {
+			return NodeReady, nil
+		}
+		return NodePending, nil
+	default:
+		return "", errors.New("unknown job status")
+	}
+}
 
 // safety: holder rights and replay digest are rechecked under locks using the store clock before any status write.
-func transitionNodeTx(ctx context.Context, tx *storeTx, team Team, change NodeTransition, now time.Time) (Applied, error) {
-	panic("unimplemented: c1-data")
+func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change NodeTransition, now time.Time) (Applied, error) {
+	if err := prepareStateActorTx(ctx, tx, team, change.Ref.RunID, change.Actor, now); err != nil {
+		return Applied{}, err
+	}
+	if err := lockStateRunTx(ctx, tx, team, change.Ref.RunID); err != nil {
+		return Applied{}, err
+	}
+	now = tx.now()
+	row, err := readNodeTx(ctx, tx, team, change.Ref)
+	if err != nil {
+		return Applied{}, err
+	}
+	from, err := nodeState(row)
+	if err != nil {
+		return Applied{}, err
+	}
+	digest, err := stateHash(change)
+	if err != nil {
+		return Applied{}, err
+	}
+	if change.Actor.Kind == ActorReaper {
+		if err := checkReaperTx(ctx, tx, change.Actor, now); err != nil {
+			return Applied{}, err
+		}
+	}
+	if row.StateDigest == digest && reflect.DeepEqual(row.StateActor, change.Actor) {
+		return Applied{Replayed: true, CancelRequested: row.CancelRequestedAt != nil && row.Status != StatusDone, StateSeq: row.StateSeq, Generation: row.Generation, Attempt: row.Attempt}, nil
+	}
+	refusal := func(reason IllegalTransitionReason) (Applied, error) {
+		return Applied{}, &ErrIllegalTransition{From: string(from), To: string(change.To), Actor: change.Actor.Kind, Reason: reason}
+	}
+	if row.Status == StatusDone {
+		return refusal(ReasonTerminal)
+	}
+	var edge *NodeEdge
+	for _, candidate := range NodeTransitions() {
+		if candidate.Cause == change.Cause && slices.Contains(candidate.From, from) && slices.Contains(candidate.To, change.To) && slices.Contains(candidate.Actors, change.Actor.Kind) {
+			e := candidate
+			edge = &e
+			break
+		}
+	}
+	if edge == nil {
+		return refusal(ReasonIllegalEdge)
+	}
+	if err := guardNodeEdgeTx(ctx, tx, team, row, change, *edge, now); err != nil {
+		return Applied{}, err
+	}
+	if err := applyNodeEdgeTx(ctx, tx, team, &row, change, *edge, now); err != nil {
+		return Applied{}, err
+	}
+	row.StateSeq++
+	row.StateDigest = digest
+	row.StateActor = change.Actor
+	if err := writeNodeStateTx(ctx, tx, team, row); err != nil {
+		return Applied{}, err
+	}
+	if result := change.Extra.Result; result != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE nodes SET error=?,failure_reason=?,exit_code=? WHERE team=? AND run_id=? AND node_id=?`, result.MaskedError, result.Reason, result.ExitCode, team, row.Ref.RunID, row.Ref.NodeID); err != nil {
+			return Applied{}, err
+		}
+	}
+	kind := ""
+	for _, event := range NodeEvents() {
+		if event.To == change.To && event.RequestOnly == edge.RequestOnly && (event.Cause == "" || event.Cause == change.Cause) {
+			kind = event.Kind
+			break
+		}
+	}
+	if kind == "" {
+		return Applied{}, errors.New("job transition has no event")
+	}
+	if err := appendStateEventTx(ctx, tx, team, change.Ref, kind, row.StateSeq, change.Extra.Result, now); err != nil {
+		return Applied{}, err
+	}
+	return Applied{CancelRequested: edge.RequestOnly, StateSeq: row.StateSeq, Generation: row.Generation, Attempt: row.Attempt}, nil
 }
 
 // safety: plan and expansion insertion share state_seq=0 and reject a conflicting spec hash.
 func insertNodeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow) error {
-	panic("unimplemented: c1-data")
+	if row.Ref.RunID == "" || row.Ref.NodeID == "" || row.Status != StatusPending || row.StateSeq != 0 || row.ClaimedBy != "" || row.Generation != 0 || row.SpecHash == "" {
+		return errors.New("invalid initial job")
+	}
+	execution, err := json.Marshal(row.Execution)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,spec_hash,execution_json,expansion,seq) VALUES (?,?,?,'pending',?,?,?,?,(SELECT COALESCE(MAX(seq),-1)+1 FROM nodes WHERE team=? AND run_id=?))`, team, row.Ref.RunID, row.Ref.NodeID, []byte(row.Spec), row.SpecHash, execution, row.Expansion, team, row.Ref.RunID)
+	return err
+}
+
+func stateHash(value any) (string, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, change NodeTransition, edge NodeEdge, now time.Time) error {
+	if change.Extra.Result != nil {
+		if !slices.Contains([]NodeState{NodeSuccess, NodeFailed, NodeCancelled, NodeSkipped, NodeSuperseded, NodeMemoized}, change.Extra.Result.Outcome) {
+			return errors.New("result requires terminal outcome")
+		}
+		if change.Extra.Result.Outcome != change.To && change.Cause != CauseRetry {
+			return errors.New("result does not match transition")
+		}
+		if int64(len(change.Extra.Result.MaskedError)) > limits.ErrorBytes {
+			return errors.New("job error exceeds limit")
+		}
+		if change.Extra.Result.OutputRecord != nil || change.Extra.Result.ManifestRecord != nil {
+			return errors.New("result record attachment requires transactional blob authorization")
+		}
+	}
+	if change.Extra.Materialize != nil && change.Cause != CauseMaterialize {
+		return errors.New("unexpected materialization")
+	}
+	if change.Extra.Approval != nil && change.Cause != CauseApprovalResolve && change.Cause != CauseApprovalTimeout {
+		return errors.New("unexpected approval")
+	}
+	if change.Extra.Claim != nil && change.Cause != CauseAward {
+		return errors.New("unexpected claim")
+	}
+	if change.Extra.Attempt != nil && change.Cause != CauseStart {
+		return errors.New("unexpected attempt")
+	}
+	if change.Extra.RetryAt != nil && change.Cause != CauseRetry {
+		return errors.New("unexpected retry time")
+	}
+	for _, guard := range edge.Guards {
+		switch guard {
+		case GuardOwner:
+			if err := checkOwnerTx(ctx, tx, team, change.Actor, row.Ref.RunID, now); err != nil {
+				return err
+			}
+		case GuardUnclaimed:
+			if row.ClaimedBy != "" {
+				return holderRefusal()
+			}
+		case GuardHolder:
+			if err := checkHolderTx(ctx, tx, team, row, change.Actor, now); err != nil {
+				return err
+			}
+		case GuardCancel:
+			if err := checkCancelActorTx(ctx, tx, team, change.Actor, row.Ref.RunID, now); err != nil {
+				return err
+			}
+		case GuardExpired, GuardDisruptions, GuardCancelLapse, GuardDisruptionCap:
+			if row.LeaseExpiresAt == nil || row.LeaseExpiresAt.After(now) {
+				return holderRefusal()
+			}
+			cancel := row.CancelRequestedAt != nil
+			run, err := readRunTx(ctx, tx, team, row.Ref.RunID)
+			if err != nil {
+				return err
+			}
+			cancel = cancel || run.CancelRequestedAt != nil
+			if (guard == GuardCancelLapse) != cancel {
+				return holderRefusal()
+			}
+			if guard == GuardDisruptions && row.Disruptions+1 >= limits.MaxDisruptions {
+				return errors.New("job disruption limit reached")
+			}
+			if guard == GuardDisruptionCap && row.Disruptions+1 < limits.MaxDisruptions {
+				return errors.New("job disruption limit not reached")
+			}
+		case GuardRetry:
+			if change.Extra.Result == nil || change.Extra.Result.Outcome != NodeFailed || row.ApplicationRetries >= row.Execution.Retry.Value || row.CancelRequestedAt != nil {
+				return errors.New("job retry budget exhausted or invalid retry")
+			}
+		case GuardAward:
+			award := change.Extra.Claim
+			if award == nil || award.Holder == "" || award.CapabilityPrefix == "" || award.Generation != row.Generation+1 || !award.LeaseExpiresAt.After(now) {
+				return holderRefusal()
+			}
+			cap, err := loadCapabilityTx(ctx, tx, award.CapabilityPrefix)
+			if err != nil {
+				return err
+			}
+			if change.Actor.CapabilityPrefix != award.CapabilityPrefix || change.Actor.Holder != award.Holder || change.Actor.Generation != award.Generation {
+				return holderRefusal()
+			}
+			if cap.Team != string(team) || cap.Binding.RunID != row.Ref.RunID || cap.Binding.NodeID != row.Ref.NodeID || cap.Binding.Generation != award.Generation || cap.Binding.Holder != award.Holder {
+				return holderRefusal()
+			}
+		case GuardQueueDeadline:
+			run, err := readRunTx(ctx, tx, team, row.Ref.RunID)
+			if err != nil {
+				return err
+			}
+			wait := run.Request.Request.Options.ClaimWait
+			if !wait.Set || wait.Value <= 0 || row.ReadyAt == nil || row.ReadyAt.Add(wait.Value).After(now) {
+				return errors.New("queue deadline not reached")
+			}
+		case GuardApproval, GuardApprovalTimeout:
+			return checkApprovalEdgeTx(ctx, tx, team, row, change, now)
+		case GuardMaterialize:
+			return errors.New("materialization requires transactional source read authority")
+		case GuardPublication:
+			principal, err := tx.ResolveAuthority(ctx, change.Actor.Authority)
+			if err != nil {
+				return err
+			}
+			run, err := readRunTx(ctx, tx, team, row.Ref.RunID)
+			if err != nil {
+				return err
+			}
+			if run.Request.Request.Mode != runspec.IntakeMode("publish") || principal.Capability.Team != string(team) || principal.Capability.Binding.RunID != row.Ref.RunID || !slices.Contains(principal.Capability.Grants, capability.Grant("runs.publish")) {
+				return holderRefusal()
+			}
+		default:
+			return errors.New("unsupported transition guard")
+		}
+	}
+	return nil
+}
+
+func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *NodeRow, change NodeTransition, edge NodeEdge, now time.Time) error {
+	if edge.RequestOnly {
+		if row.CancelRequestedAt == nil {
+			row.CancelRequestedAt = &now
+		}
+		return nil
+	}
+	if row.Status == StatusRunning && (change.To != NodeRunning || change.Cause == CauseRetry) {
+		outcome, reason := change.To, ""
+		if change.Extra.Result != nil {
+			outcome, reason = change.Extra.Result.Outcome, change.Extra.Result.Reason
+		}
+		if change.Cause == CauseLeaseLapse {
+			outcome, reason = NodeFailed, FailureAgentLost
+			if change.To == NodeCancelled {
+				outcome, reason = NodeCancelled, "cancelled"
+			}
+		}
+		result, err := tx.ExecContext(ctx, `UPDATE node_attempts SET finished_at=?,outcome=?,failure_reason=? WHERE team=? AND run_id=? AND node_id=? AND attempt=? AND generation=? AND finished_at IS NULL`, now.UnixNano(), outcome, reason, team, row.Ref.RunID, row.Ref.NodeID, row.Attempt, row.Generation)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return errors.New("attempt closure did not match live attempt")
+		}
+	}
+	switch change.To {
+	case NodeReady:
+		row.ReadyAt = &now
+	case NodeClaimed:
+		award := change.Extra.Claim
+		row.ClaimedBy = award.Holder
+		row.CapabilityPrefix = award.CapabilityPrefix
+		row.Generation = award.Generation
+		row.LeaseExpiresAt = &award.LeaseExpiresAt
+	case NodeRunning:
+		row.Status = StatusRunning
+		row.Attempt++
+		row.StartedAt = &now
+		kind, name, location := "runner", row.ClaimedBy, "unknown"
+		if a := change.Extra.Attempt; a != nil {
+			if a.Identity.Team != string(team) || a.Identity.RunID != row.Ref.RunID || a.Identity.NodeID != row.Ref.NodeID || a.Identity.Attempt != row.Attempt || a.Identity.Generation != row.Generation {
+				return errors.New("attempt identity does not match claim")
+			}
+			kind, name, location = a.ExecutorKind, a.ExecutorName, a.ExecutorLocation
+		}
+		_, err := tx.ExecContext(ctx, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, team, row.Ref.RunID, row.Ref.NodeID, row.Attempt, row.Generation, row.ClaimedBy, row.CapabilityPrefix, kind, name, location, now.UnixNano())
+		if err != nil {
+			return err
+		}
+	case NodeApprovalPending:
+		var job nodeproto.JobSpec
+		if err := json.Unmarshal(row.Spec, &job); err != nil {
+			return err
+		}
+		if job.Approval == nil {
+			return errors.New("job has no approval declaration")
+		}
+		timeout := row.Execution.ApprovalWait.Value.Milliseconds()
+		policy := job.Approval.OnTimeout
+		if policy == "" {
+			policy = "fail"
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO approvals(team,run_id,node_id,requested_at,message,timeout_ms,on_timeout) VALUES (?,?,?,?,?,?,?)`, team, row.Ref.RunID, row.Ref.NodeID, now.UnixNano(), job.Approval.Message, timeout, policy); err != nil {
+			return err
+		}
+		row.Status = StatusApprovalPending
+	case NodePending:
+		if row.Status == StatusRunning && change.Cause == CauseLeaseLapse {
+			row.Disruptions++
+		}
+		row.Status = StatusPending
+		row.StartedAt = nil
+		clearNodeClaim(row)
+	default:
+		if change.Cause == CauseLeaseLapse && row.Status == StatusRunning && change.To == NodeFailed {
+			row.Disruptions++
+		}
+		row.Status = StatusDone
+		row.Outcome = change.To
+		row.FinishedAt = &now
+		clearNodeClaim(row)
+		if row.Expansion == ExpansionExpected && change.To != NodeSuccess && change.To != NodeMemoized {
+			row.Expansion = ExpansionNone
+		}
+		if err := releaseCapacityTx(ctx, tx, team, row.Ref.RunID, row.Ref.NodeID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func clearNodeClaim(row *NodeRow) {
+	row.ClaimedBy = ""
+	row.CapabilityPrefix = ""
+	row.LeaseExpiresAt = nil
+	row.ReadyAt = nil
+}
+
+func writeNodeStateTx(ctx context.Context, tx *storeTx, team Team, row NodeRow) error {
+	actor, err := json.Marshal(row.StateActor)
+	if err != nil {
+		return err
+	}
+	var holder any
+	if row.ClaimedBy != "" {
+		holder = row.ClaimedBy
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE nodes SET status=?,outcome=?,claimed_by=?,capability_prefix=?,generation=?,attempt=?,disruptions=?,ready_at=?,lease_expires_at=?,started_at=?,finished_at=?,cancel_requested_at=?,state_seq=?,state_digest=?,state_actor=?,expansion=? WHERE team=? AND run_id=? AND node_id=? AND state_seq=?`, row.Status, row.Outcome, holder, row.CapabilityPrefix, row.Generation, row.Attempt, row.Disruptions, timeNS(row.ReadyAt), timeNS(row.LeaseExpiresAt), timeNS(row.StartedAt), timeNS(row.FinishedAt), timeNS(row.CancelRequestedAt), row.StateSeq, row.StateDigest, actor, row.Expansion, team, row.Ref.RunID, row.Ref.NodeID, row.StateSeq-1)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return errors.New("job state changed during transition")
+	}
+	return nil
+}
+
+func timeNS(value *time.Time) any {
+	if value == nil {
+		return nil
+	}
+	return value.UnixNano()
+}
+
+func appendStateEventTx(ctx context.Context, tx *storeTx, team Team, ref NodeRef, kind string, stateSeq int64, payload any, now time.Time) error {
+	seq, err := appendEventTx(ctx, tx, team, ref.RunID, ref.NodeID, kind, payload, now)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE events SET state_seq=? WHERE team=? AND run_id=? AND seq=?`, stateSeq, team, ref.RunID, seq)
+	return err
+}
+
+func checkApprovalEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRow, change NodeTransition, now time.Time) error {
+	var requested, timeout int64
+	var policy string
+	var resolved sql.NullInt64
+	err := tx.QueryRowContext(ctx, `SELECT requested_at,timeout_ms,on_timeout,resolved_at FROM approvals WHERE team=? AND run_id=? AND node_id=?`+tx.forUpdate(), team, row.Ref.RunID, row.Ref.NodeID).Scan(&requested, &timeout, &policy, &resolved)
+	if err != nil {
+		return err
+	}
+	if resolved.Valid {
+		return errors.New("approval already resolved")
+	}
+	resolution := ""
+	if change.Cause == CauseApprovalTimeout {
+		if timeout <= 0 || time.Unix(0, requested).Add(time.Duration(timeout)*time.Millisecond).After(now) {
+			return errors.New("approval deadline not reached")
+		}
+		if change.Actor.Kind != ActorReaper {
+			if err := checkOwnerTx(ctx, tx, team, change.Actor, row.Ref.RunID, now); err != nil {
+				return err
+			}
+		}
+		if (policy == "approve") != (change.To == NodeSuccess) {
+			return errors.New("approval timeout verdict mismatch")
+		}
+		resolution = "timed_out"
+	} else {
+		principal, err := tx.ResolveAuthority(ctx, change.Actor.Authority)
+		if err != nil {
+			return err
+		}
+		if principal.Capability.Team != string(team) || !slices.Contains(principal.Capability.Grants, capability.Grant("approvals.write")) {
+			return holderRefusal()
+		}
+		if change.Extra.Approval == nil {
+			return errors.New("approval decision missing")
+		}
+		resolution = change.Extra.Approval.Decision
+		if (resolution != "approved" && resolution != "denied") || (resolution == "approved") != (change.To == NodeSuccess) {
+			return errors.New("approval decision mismatch")
+		}
+	}
+	comment := ""
+	if change.Extra.Approval != nil {
+		comment = change.Extra.Approval.Comment
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE approvals SET resolved_at=?,resolution=?,approver=?,comment=? WHERE team=? AND run_id=? AND node_id=? AND resolved_at IS NULL`, now.UnixNano(), resolution, change.Actor.Authority.ID, comment, team, row.Ref.RunID, row.Ref.NodeID)
+	return err
 }

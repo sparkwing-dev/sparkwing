@@ -98,6 +98,7 @@ const (
 // underlying database is SQLite or Postgres depending on which
 // constructor opened it; dialect-aware methods branch on s.dialect.
 type Store struct {
+	clock          func() time.Time
 	db             *sql.DB
 	dialect        Dialect
 	cleanup        func() error
@@ -3860,12 +3861,8 @@ func appendEventTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID, k
 	if err != nil {
 		return 0, err
 	}
-	if err := lockEventSequenceTx(ctx, tx, team, runID); err != nil {
-		return 0, err
-	}
 	var seq int64
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(seq), 0) + 1 FROM events WHERE team = ? AND run_id = ?`, string(team), runID).Scan(&seq); err != nil {
+	if err := tx.QueryRowContext(ctx, `UPDATE runs SET event_bytes=event_bytes+?,event_count=event_count+1 WHERE team=? AND id=? RETURNING event_count`, eventBytes(kind, raw), team, runID).Scan(&seq); err != nil {
 		return 0, err
 	}
 	_, err = tx.ExecContext(ctx, `
@@ -3874,9 +3871,6 @@ VALUES (?,?,?,?,?,?,?)`, string(team), runID, seq, nodeID, kind, at.UnixNano(), 
 	if err != nil {
 		return 0, err
 	}
-	_, err = tx.ExecContext(ctx,
-		`UPDATE runs SET event_bytes = event_bytes + ?, event_count = event_count + 1 WHERE team = ? AND id = ?`,
-		eventBytes(kind, raw), string(team), runID)
 	return seq, err
 }
 

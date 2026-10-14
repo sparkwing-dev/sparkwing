@@ -2,11 +2,14 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"slices"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -107,7 +110,134 @@ func (t *Tenant) AcceptPlan(ctx context.Context, request PlanAcceptance) (Accept
 // canonical submission and replay identically; a differing repeat is illegal_transition.
 // Failed source jobs resolve to none in their terminal transition instead.
 func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmission) (AcceptedExpansion, error) {
-	panic("unimplemented: c1-data")
+	var result AcceptedExpansion
+	if (len(request.Body) == 0) == (request.Failure == nil) {
+		return result, authorityError(apierr.BadRequest, "expansion requires exactly one body or failure")
+	}
+	if request.Failure != nil && (request.Failure.MaskedError == "" || len(request.Failure.MaskedError) > int(limits.ErrorBytes) || !slices.ContainsFunc(apierr.Codes, func(code apierr.Definition) bool { return code.Code == request.Failure.Code })) {
+		return result, authorityError(apierr.BadRequest, "invalid expansion failure")
+	}
+	if request.Failure == nil {
+		panic("unimplemented: c1-data")
+	}
+	err := t.s.inTx(ctx, func(tx *storeTx) error {
+		now := tx.now()
+		if err := expansionAuthorityTx(ctx, tx, t.team, request, now); err != nil {
+			return err
+		}
+		if err := lockStateRunTx(ctx, tx, t.team, request.Source.RunID); err != nil {
+			return err
+		}
+		snapshot, err := readSnapshotTx(ctx, tx, t.team, request.Source.RunID)
+		if err != nil {
+			return err
+		}
+		if snapshot.Run.Spec == nil || snapshot.Run.CancelRequestedAt != nil || snapshot.Run.State != RunRunning && snapshot.Run.State != RunPending {
+			return authorityError(apierr.IllegalTransition, "expansion run is no longer executable")
+		}
+		if _, err := snapshot.Scheduling(); err != nil {
+			return err
+		}
+		source, err := readNodeTx(ctx, tx, t.team, request.Source)
+		if err != nil {
+			return err
+		}
+		if source.Status != StatusDone || !scheduleSucceeded(string(source.Outcome)) || source.Generation != request.SourceGeneration {
+			return holderRefusal()
+		}
+		result = AcceptedExpansion{Source: request.Source, SourceGeneration: request.SourceGeneration}
+		result.State = ExpansionFailed
+		failure, err := json.Marshal(request.Failure)
+		if err != nil {
+			return err
+		}
+		result.BodyHash, err = stateHash(request.Failure)
+		if err != nil {
+			return err
+		}
+		if source.Expansion == result.State && source.ExpansionDigest == result.BodyHash {
+			result.Replayed = true
+			return nil
+		}
+		if source.Expansion != ExpansionExpected {
+			return authorityError(apierr.IllegalTransition, "expansion differs from its accepted submission")
+		}
+		write, err := tx.ExecContext(ctx, `UPDATE nodes SET expansion=?,expansion_digest=?,expansion_body=?,expansion_failure=? WHERE team=? AND run_id=? AND node_id=? AND generation=? AND expansion='expected'`, result.State, result.BodyHash, nil, failure, t.team, request.Source.RunID, request.Source.NodeID, request.SourceGeneration)
+		if err != nil {
+			return err
+		}
+		if count, err := write.RowsAffected(); err != nil {
+			return err
+		} else if count != 1 {
+			return holderRefusal()
+		}
+		return settleControllerTx(ctx, tx, t.team, request.Source.RunID, now)
+	})
+	return result, err
+}
+
+func expansionAuthorityTx(ctx context.Context, tx *storeTx, team Team, request ExpansionSubmission, now time.Time) error {
+	preliminary, err := authorityChainTx(ctx, tx, request.Actor.Authority, false)
+	if err != nil {
+		return err
+	}
+	lease := preliminary[0].principal.Capability.Binding.Expansion
+	if lease == nil {
+		return holderRefusal()
+	}
+	var controllerGeneration int64
+	if lease.Kind == capability.UnitEval {
+		var until int64
+		if err := tx.QueryRowContext(ctx, `SELECT generation,until FROM leases WHERE name='controller.owner'`+tx.forUpdate()).Scan(&controllerGeneration, &until); err != nil {
+			return err
+		}
+		if until <= now.UnixNano() {
+			return holderRefusal()
+		}
+	}
+	chain, err := authorityChainTx(ctx, tx, request.Actor.Authority, true)
+	if err != nil {
+		return err
+	}
+	c := chain[0].principal.Capability
+	if c.Team != string(team) || c.Prefix != request.Actor.CapabilityPrefix || c.Audience != capability.Controller || !slices.Contains(c.Grants, capability.ExpansionSubmit) || c.Binding.Kind != capability.BindingNode || c.Binding.RunID != request.Source.RunID || c.Binding.NodeID != request.Source.NodeID || c.Binding.Generation != request.SourceGeneration {
+		return holderRefusal()
+	}
+	lease = c.Binding.Expansion
+	if lease == nil {
+		return holderRefusal()
+	}
+	var holder, prefix, status string
+	var generation, ownerGeneration int64
+	var until, cancelled sql.NullInt64
+	switch lease.Kind {
+	case capability.UnitTrigger:
+		if lease.ID != request.Source.RunID {
+			return holderRefusal()
+		}
+		err = tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,generation,lease_expires_at,cancel_requested_at FROM triggers WHERE team=? AND id=? AND unit_kind='trigger'`+tx.forUpdate(), team, lease.ID).Scan(&status, &holder, &prefix, &generation, &until, &cancelled)
+		if err == nil && !slices.ContainsFunc(chain, func(node authorityNode) bool { return node.principal.Capability.Prefix == prefix }) {
+			return holderRefusal()
+		}
+	case capability.UnitEval:
+		unit, decodeErr := decodeAwardUnit(lease.Kind, lease.ID)
+		if decodeErr != nil || unit.RunID != request.Source.RunID || unit.NodeID != request.Source.NodeID || unit.SourceGeneration != request.SourceGeneration {
+			return holderRefusal()
+		}
+		err = tx.QueryRowContext(ctx, `SELECT status,COALESCE(claimed_by,''),capability_prefix,generation,lease_expires_at,owner_generation FROM eval_units WHERE team=? AND run_id=? AND source_node_id=? AND source_generation=?`+tx.forUpdate(), team, request.Source.RunID, request.Source.NodeID, request.SourceGeneration).Scan(&status, &holder, &prefix, &generation, &until, &ownerGeneration)
+		if err == nil && (prefix != c.Prefix || ownerGeneration != controllerGeneration) {
+			return holderRefusal()
+		}
+	default:
+		return holderRefusal()
+	}
+	if err != nil {
+		return err
+	}
+	if status != "claimed" && status != "running" || holder != lease.Holder || generation != lease.Generation || !until.Valid || until.Int64 <= now.UnixNano() || cancelled.Valid {
+		return holderRefusal()
+	}
+	return nil
 }
 
 // safety: intake and both seals own every write-once request/spec projection so retry cannot replace trusted facts.
