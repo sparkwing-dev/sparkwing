@@ -160,13 +160,15 @@ type Run struct {
 	Doc nodeproto.PlanDoc
 	// Pipeline, Args and Context are the accepted plan's request; every
 	// later process of the run plans with the same.
-	Pipeline  string
-	Args      map[string]string
-	Context   nodeproto.RunContext
-	StartAt   string
-	StopAt    string
-	State     storage.StateStore
-	Logger    *slog.Logger
+	Pipeline string
+	Args     map[string]string
+	Context  nodeproto.RunContext
+	StartAt  string
+	StopAt   string
+	State    storage.StateStore
+	Logger   *slog.Logger
+	// Masker is the run's; a node's result is masked with it where it is recorded.
+	Masker    *secrets.Masker
 	adds      chan addRequest
 	onlySkips map[string]string
 	// safety: set once, before any node starts, so node goroutines read it unlocked.
@@ -313,12 +315,7 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 		res.Status = runStatus(res.Err)
 		return res, nil
 	}
-	run := &Run{
-		ID: res.RunID, Doc: doc, Pipeline: cfg.Pipeline, Args: args, Context: cfg.Run,
-		StartAt: cfg.StartAt, StopAt: cfg.StopAt, State: cfg.State, Logger: cfg.Logger, adds: make(chan addRequest),
-		onlySkips: skips,
-	}
-	releaseLease = runPlanned(ctx, &cfg, run, &res)
+	releaseLease = runPlanned(ctx, &cfg, newRun(&cfg, doc, args, skips), &res)
 	return res, nil
 }
 
@@ -360,6 +357,18 @@ func runPlanned(ctx context.Context, cfg *Config, run *Run, res *RunResult) (rel
 	res.Order = s.order
 	res.Status, res.Err = end.status, end.err
 	return release
+}
+
+func newRun(cfg *Config, doc nodeproto.PlanDoc, args, skips map[string]string) *Run {
+	run := &Run{
+		ID: cfg.Run.RunID, Doc: doc, Pipeline: cfg.Pipeline, Args: args, Context: cfg.Run,
+		StartAt: cfg.StartAt, StopAt: cfg.StopAt, State: cfg.State, Logger: cfg.Logger, adds: make(chan addRequest),
+		onlySkips: skips,
+	}
+	if cfg.Attempts != nil {
+		run.Masker = cfg.Attempts.Masker
+	}
+	return run
 }
 
 func runRow(cfg Config, args map[string]string) store.Run {
@@ -571,6 +580,7 @@ func (s *scheduler) finish(ctx context.Context, id string, res Result) {
 	case res.Outcome == sparkwing.Failed && errors.Is(ctx.Err(), context.Canceled):
 		res.Outcome, res.Err = sparkwing.Cancelled, errors.New("cancelled: run failing")
 	}
+	res = maskResult(s.run.Masker, res)
 	writeCtx := context.WithoutCancel(ctx)
 	var err error
 	if !res.recorded {
@@ -835,6 +845,15 @@ type maskedRunError struct {
 
 func (e maskedRunError) Error() string { return e.text }
 func (e maskedRunError) Unwrap() error { return e.err }
+
+// safety: layers outside the attempt, such as admission, artifacts, caches and drift, fail with text no attempt
+// masked, so a node's result is masked where it is recorded, before its row text is bounded.
+func maskResult(m *secrets.Masker, res Result) Result {
+	if res.Err != nil {
+		res.Err = errors.New(m.Mask(res.Err.Error()))
+	}
+	return res
+}
 
 func maskErr(m *secrets.Masker, err error) error {
 	if err == nil || m == nil {

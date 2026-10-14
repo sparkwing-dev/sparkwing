@@ -146,17 +146,14 @@ func podRun(cfg *Config) *Run {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
-	return &Run{
-		ID: cfg.Run.RunID, Pipeline: cfg.Pipeline, Args: cfg.Args, Context: cfg.Run,
-		StartAt: cfg.StartAt, StopAt: cfg.StopAt, State: cfg.State, Logger: cfg.Logger,
-	}
+	return newRun(cfg, nodeproto.PlanDoc{}, cfg.Args, nil)
 }
 
 func podHost(ctx context.Context, cfg *Config, run *Run, nodeID string, res Result) Result {
 	if res.Outcome == sparkwing.Failed && ctx.Err() != nil {
 		res.Outcome = sparkwing.Cancelled
 	}
-	return podFinish(ctx, run, nodeID, res)
+	return podFinish(ctx, run, nodeID, maskResult(run.Masker, res))
 }
 
 func podAttempt(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash string, attempt int, dispatched bool) Result {

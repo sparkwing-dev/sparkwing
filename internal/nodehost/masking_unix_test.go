@@ -5,6 +5,7 @@ package nodehost
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -236,4 +238,67 @@ func TestSinkQueueDiscardsAHeldSecretHeadWhenTheRestIsDropped(t *testing.T) {
 	if got := sink.joined(); strings.Contains(got, splitSecret[:10]) || !strings.Contains(got, "next") {
 		t.Fatalf("output ends %q, want the held head discarded and the next line kept", got[max(0, len(got)-60):])
 	}
+}
+
+// safety: the secret sits where the bound cuts the headline, so a bound taken
+// before masking would keep a fragment the masker no longer recognizes.
+func outerLayerFailure() error {
+	return errors.New(strings.Repeat("h", nodeErrTextHeadBytes-10) + splitSecret + " slot full\n" + strings.Repeat("y", 2*nodeErrTextMaxBytes))
+}
+
+func checkMaskedNodeFailure(t *testing.T, st *store.Store, res Result) {
+	t.Helper()
+	node, err := st.GetNode(t.Context(), "r", "n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := st.ListEventsAfter(t.Context(), "r", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payloads strings.Builder
+	for _, e := range events {
+		payloads.Write(e.Payload)
+	}
+	if !strings.Contains(payloads.String(), "***") {
+		t.Fatalf("no masked node_failed event recorded in %d events", len(events))
+	}
+	for what, text := range map[string]string{"row": node.Error, "events": payloads.String(), "result": res.Err.Error()} {
+		if strings.Contains(text, splitSecret[:10]) {
+			t.Errorf("%s holds a piece of the secret", what)
+		}
+	}
+}
+
+func failedNodeStore(t *testing.T) *store.Store {
+	t.Helper()
+	st := openStore(t)
+	if err := st.CreateRun(t.Context(), store.Run{ID: "r", Pipeline: "p", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(t.Context(), store.Node{RunID: "r", NodeID: "n", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	return st
+}
+
+// A failure from a layer outside the attempt, such as admission refusing a
+// concurrency key that holds a secret, is masked, then bounded, wherever a
+// node's result is recorded.
+func TestOuterLayerNodeFailuresAreMaskedThenBounded(t *testing.T) {
+	masker := secrets.NewMasker()
+	masker.Register(splitSecret)
+	t.Run("pod host", func(t *testing.T) {
+		st := failedNodeStore(t)
+		cfg := Config{State: st, Attempts: &Attempts{Masker: masker}, Run: nodeproto.RunContext{RunID: "r"}, Logger: slog.New(slog.DiscardHandler)}
+		run := podRun(&cfg)
+		checkMaskedNodeFailure(t, st, podHost(t.Context(), &cfg, run, "n", Result{Outcome: sparkwing.Failed, Err: outerLayerFailure()}))
+	})
+	t.Run("scheduler", func(t *testing.T) {
+		st := failedNodeStore(t)
+		cfg := Config{State: st, Attempts: &Attempts{Masker: masker}, Run: nodeproto.RunContext{RunID: "r"}, Logger: slog.New(slog.DiscardHandler)}
+		s := &scheduler{run: newRun(&cfg, nodeproto.PlanDoc{}, nil, nil), results: map[string]Result{}}
+		s.finish(t.Context(), "n", Result{Outcome: sparkwing.Failed, Err: outerLayerFailure()})
+		checkMaskedNodeFailure(t, st, s.results["n"])
+	})
 }
