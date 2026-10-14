@@ -18,10 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// SpecHashEnv hands a controller-dispatched node's pipeline process the spec
-// hash its run's accepted plan holds for the node.
-const SpecHashEnv = "SPARKWING_NODE_SPEC_HASH"
-
 func isClaimToken(token string) bool {
 	return strings.HasPrefix(token, store.ClaimTokenPrefix+"_")
 }
@@ -31,8 +27,8 @@ func isClaimToken(token string) bool {
 // started and read through the run's own claim.
 type claimState struct {
 	*client.Client
-	runID, nodeID, specHash string
-	calls                   atomic.Int64
+	runID, nodeID string
+	calls         atomic.Int64
 
 	mu       sync.Mutex
 	finished bool
@@ -68,15 +64,6 @@ func (s *claimState) FinishNodeWithReason(ctx context.Context, runID, nodeID, ou
 	return nil
 }
 
-func (s *claimState) FinishNodeCopyingOutput(_ context.Context, _, _, outcome, reason string, src copiedOutput) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.finished = true
-	input := src.input
-	s.report = store.AttemptReport{Outcome: outcome, FailureReason: reason, OutputFrom: &input}
-	return nil
-}
-
 func (s *claimState) AppendEvent(context.Context, string, string, string, []byte) error { return nil }
 
 func (s *claimState) EnqueueTrigger(ctx context.Context, pipeline string, args map[string]string,
@@ -109,33 +96,6 @@ func (s *claimState) GetNodeOutput(ctx context.Context, runID, nodeID string) ([
 	return s.GetChildNodeOutput(ctx, s.runID, runID, nodeID)
 }
 
-func (s *claimState) memoKey(ctx context.Context, hash string) (string, error) {
-	run, err := s.Client.GetRun(ctx, s.runID)
-	if err != nil {
-		return "", fmt.Errorf("read the run to name its memo key: %w", err)
-	}
-	return store.ClaimMemoKey(store.ClaimRepoSlug(run.GithubOwner, run.GithubRepo), run.Pipeline, s.nodeID, hash), nil
-}
-
-func (s *claimState) input(ctx context.Context, req store.ClaimInputRequest) ([]byte, error) {
-	_, data, err := s.ClaimInput(ctx, s.runID, s.nodeID, req)
-	return data, err
-}
-
-// safety: a claim reads another pipeline's newest successful run only through
-// the reference the node's plan declares, and the controller picks the run.
-func (s *claimState) pipelineRefResolver() sparkwing.PipelineResolverFunc {
-	return func(ctx context.Context, pipeline, nodeID string, maxAge time.Duration) (*sparkwing.ResolvedPipelineRef, error) {
-		in, data, err := s.ClaimInput(ctx, s.runID, s.nodeID, store.ClaimInputRequest{
-			Kind: store.ClaimInputLastRun, Pipeline: pipeline, Node: nodeID, MaxAgeMS: maxAge.Milliseconds(),
-		})
-		if err != nil {
-			return nil, fmt.Errorf("no matching run for pipeline %q (maxAge=%s): %w", pipeline, maxAge, absentIfNotFound(err))
-		}
-		return &sparkwing.ResolvedPipelineRef{RunID: in.RunID, Data: data}, nil
-	}
-}
-
 func (s *claimState) attempt(res runner.Result, runErr error) store.AttemptReport {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -152,24 +112,6 @@ func (s *claimState) attempt(res runner.Result, runErr error) store.AttemptRepor
 		}
 	}
 	return report
-}
-
-// safety: the launcher Job's trusted process already recorded the execution
-// start and renews the claim, so this process only runs the node and reports.
-func runClaimedNode(ctx context.Context, controllerURL, logsURL, runID, nodeID, token string) error {
-	c := client.NewWithToken(controllerURL, nil, token)
-	state := &claimState{Client: c, runID: runID, nodeID: nodeID, specHash: os.Getenv(SpecHashEnv)}
-	go renewCacheGrant(ctx, controllerURL, token, runID)
-	res, err := RunNodeOnce(ctx, controllerURL, logsURL, runID, nodeID, "claim:"+runID+"/"+nodeID, token,
-		selectLocalRenderer(), slog.Default(), nil, func(cfg *runNodeConfig) { cfg.claim = state })
-	report := state.attempt(res, err)
-	if rerr := c.ReportAttempt(context.WithoutCancel(ctx), runID, nodeID, report); rerr != nil {
-		return fmt.Errorf("report the attempt: %w", rerr)
-	}
-	if report.Outcome == string(sparkwing.Failed) {
-		return fmt.Errorf("node %s/%s failed: %s", runID, nodeID, report.Error)
-	}
-	return nil
 }
 
 // perf: a grant lives five minutes; renewing at two keeps one miss from

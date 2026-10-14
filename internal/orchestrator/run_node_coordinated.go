@@ -27,7 +27,6 @@ type runNodeConfig struct {
 	gitcacheGrant string
 	apiSocket     string
 	repoAllowlist *sourceurl.RepoAllowlist
-	claim         *claimState
 }
 
 type RunNodeOption func(*runNodeConfig)
