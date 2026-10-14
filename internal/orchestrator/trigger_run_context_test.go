@@ -28,6 +28,9 @@ func runReadServer(t *testing.T, fail int32, status int) (*client.Client, *atomi
 }
 
 func TestATriggerHostPlansFromTheRunRowAfterATransientReadFailure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: waits through 250ms of the run read's real backoff")
+	}
 	c, _ := runReadServer(t, 1, http.StatusInternalServerError)
 	rc, err := triggerRunContext(t.Context(), c, &store.Trigger{ID: "run-1", TriggerSource: "github"})
 	if err != nil {

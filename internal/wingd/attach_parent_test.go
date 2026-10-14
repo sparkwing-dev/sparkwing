@@ -178,3 +178,31 @@ func TestAChildAwayWhenItsAncestorEndsIsCancelledWhenItReturns(t *testing.T) {
 		t.Fatal("the child reattached after its ancestor ended and was never cancelled")
 	}
 }
+
+func TestAnOrphanedRunCannotAttachANewChild(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	group := wingwire.SemaphoreClaim{Name: "__box__:deploy", Capacity: 1, Cost: 1, Policy: wingwire.PolicyQueue}
+	root := mustAcquire(t, ensure(t, home, ""), wingwire.AdmissionRequest{RunID: "root", SemaphoresOnly: true, Semaphores: []wingwire.SemaphoreClaim{group}})
+	mustAcquire(t, ensure(t, home, ""), wingwire.AdmissionRequest{
+		RunID: wingwire.NodeHostParticipant("root", "call"), OwnerRunID: "root", OwnerLeaseToken: root.Token,
+		SubLease: true, Resources: wingwire.HostResources{Cores: 1},
+	})
+	mustAcquire(t, ensure(t, home, ""), wingwire.AdmissionRequest{RunID: "middle", ParentRunID: "root", ParentNodeID: "call"})
+	if err := root.Release(); err != nil {
+		t.Fatal(err)
+	}
+	// safety: the winner's grant orders the root's release, and so the middle's orphan mark, before the leaf asks.
+	winner, err := ensure(t, home, "").Acquire(ctx, wingwire.AdmissionRequest{RunID: "winner", SemaphoresOnly: true, Semaphores: []wingwire.SemaphoreClaim{group}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = winner.Release() }()
+	leaf, err := ensure(t, home, "").Acquire(ctx, wingwire.AdmissionRequest{RunID: "leaf", ParentRunID: "middle", ParentNodeID: "inner"}, nil)
+	if err == nil {
+		_ = leaf.Release()
+		t.Fatalf("the orphaned middle run attached a new child holding %v, outside the group its ended root held", leaf.Semaphores)
+	}
+}

@@ -832,7 +832,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 		return
 	}
 	d.mu.Lock()
-	_, cancelled := d.cancelledRuns[req.RunID]
+	cancelled := d.runCancelledLocked(req.RunID)
 	d.mu.Unlock()
 	if !cancelled && d.cfg.Runs != nil {
 		var err error
@@ -858,7 +858,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	jevBypass := d.jevReservationBypass(req, requested)
 
 	d.mu.Lock()
-	if _, cancelled := d.cancelledRuns[req.RunID]; cancelled {
+	if d.runCancelledLocked(req.RunID) {
 		d.mu.Unlock()
 		d.recordJournal("rejected", &conn{runID: req.RunID}, map[string]any{"reason": "run cancelled"})
 		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "cancelled", Policy: wingwire.PolicyFail})
@@ -1232,6 +1232,14 @@ func (d *Daemon) forceReleaseSuperseded(leases []admission.LeaseID) {
 	}
 }
 
+// safety: an orphaned run's mark lives on its own lease, not among the tombstones, so every guard checks both.
+func (d *Daemon) runCancelledLocked(runID string) bool {
+	if _, cancelled := d.cancelledRuns[runID]; cancelled {
+		return true
+	}
+	return d.ledger.Orphaned(runID)
+}
+
 func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	d.recordJournal("child_attach_request", &conn{runID: req.RunID}, map[string]any{"requested_parent": req.ParentRunID})
 	d.mu.Lock()
@@ -1241,7 +1249,7 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "cancelled", Policy: wingwire.PolicyFail})
 		return
 	}
-	if _, cancelled := d.cancelledRuns[req.RunID]; cancelled {
+	if d.runCancelledLocked(req.RunID) {
 		d.mu.Unlock()
 		d.recordJournal("rejected", &conn{runID: req.RunID}, map[string]any{"reason": "child cancelled"})
 		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "cancelled", Policy: wingwire.PolicyFail})
@@ -1299,7 +1307,7 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 				}
 				break
 			}
-			if _, cancelled := d.cancelledRuns[ancestor]; cancelled {
+			if d.runCancelledLocked(ancestor) {
 				blocked = true
 				if blockedAncestor == "" {
 					blockedAncestor, blockedReason = ancestor, "parent cancelled"
