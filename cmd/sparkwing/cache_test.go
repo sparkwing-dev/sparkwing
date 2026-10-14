@@ -38,6 +38,33 @@ func TestCacheExplainJSONEmitsReport(t *testing.T) {
 	}
 }
 
+func TestCacheExplainSaysATypeScriptPipelineIsNotCached(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	root := t.TempDir()
+	dir := filepath.Join(root, ".sparkwing")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"main":"pipeline.ts","dependencies":{"@sparkwing/sdk":"0.1.0"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sparkwing.yaml"), []byte("pipelines:\n  - name: ts\n    entrypoint: ts\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = runCacheExplain([]string{"-o", "json"})
+	})
+	if runErr != nil {
+		t.Fatalf("cache explain: %v", runErr)
+	}
+	payload := decodeCachePayload(t, out)
+	if payload["dir"] != dir || payload["cached"] != false || payload["reason"] == nil {
+		t.Fatalf("explain payload = %#v", payload)
+	}
+}
+
 func TestCacheExplainJSONReportsParseFailureBeforeOutputFlag(t *testing.T) {
 	var runErr error
 	out := captureStdout(t, func() {

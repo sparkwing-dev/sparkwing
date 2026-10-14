@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -71,5 +72,32 @@ func TestRunnerInstallOutputMasksTheProxyCredentials(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "proxy-pass") {
 		t.Fatalf("install output carried the proxy password:\n%s", out.String())
+	}
+}
+
+func TestInstallOutputMasksACredentialSplitAtTheLineLimit(t *testing.T) {
+	const limit = 1 << 20
+	secret := "proxy-pass-0123456789"
+	masker := secrets.NewMasker()
+	masker.Register(secret)
+	var dst bytes.Buffer
+	out, finish, err := maskedInstallOutput(t.Context(), masker, &dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := strings.Repeat("a", limit-5) + secret + "\n" + "next " + secret + "\n"
+	// safety: the first write ends at the line limit, inside the credential, and the second ends three bytes later.
+	for _, chunk := range []string{line[:limit], line[limit : limit+3], line[limit+3:]} {
+		if _, err := io.WriteString(out, chunk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	finish()
+	// safety: each piece is printed on its own line, so the check joins them back before looking for the value.
+	if joined := strings.ReplaceAll(dst.String(), "\n", ""); strings.Contains(joined, secret) || strings.Contains(joined, "proxy-pass") {
+		t.Fatal("a credential split at the line limit reached the output unmasked")
+	}
+	if !strings.Contains(dst.String(), "next ") {
+		t.Fatal("the line after the long one was lost")
 	}
 }

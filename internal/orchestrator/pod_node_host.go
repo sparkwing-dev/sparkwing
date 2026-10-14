@@ -1,7 +1,6 @@
 package orchestrator
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -144,45 +143,30 @@ func PrepareTypeScriptOnRunner(ctx context.Context, sparkwingDir string) (pipeli
 }
 
 func prepareTypeScriptOnRunner(ctx context.Context, sparkwingDir string, dst io.Writer) (pipelineentry.Command, error) {
-	out := &maskedLines{masker: secrets.NewMasker(), dst: dst}
-	env := podSessionEnv(out.masker)
-	defer out.flush()
+	masker := secrets.NewMasker()
+	env := podSessionEnv(masker)
+	out, finish, err := maskedInstallOutput(ctx, masker, dst)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	return pipelineentry.Prepare(ctx, sparkwingDir, env, out)
 }
 
-// safety: a line is masked whole, so a credential split across writes is
-// still caught; a line past maxMaskedLine is masked and passed on in pieces.
-type maskedLines struct {
-	masker *secrets.Masker
-	dst    io.Writer
-	buf    []byte
-}
-
-func (w *maskedLines) Write(p []byte) (int, error) {
-	w.buf = append(w.buf, p...)
-	for {
-		i := bytes.IndexByte(w.buf, '\n')
-		if i < 0 && len(w.buf) < maxMaskedLine {
-			return len(p), nil
-		}
-		if i < 0 {
-			i = len(w.buf) - 1
-		}
-		if _, err := io.WriteString(w.dst, w.masker.Mask(string(w.buf[:i+1]))); err != nil {
-			return len(p), err
-		}
-		w.buf = w.buf[i+1:]
+// safety: npm's output goes through the node-host log sink, which holds back
+// the tail of a long line's piece so a credential split across pieces is
+// masked whole; finish runs once npm has exited, so the held tail is complete.
+func maskedInstallOutput(ctx context.Context, masker *secrets.Masker, dst io.Writer) (io.Writer, func(), error) {
+	sink, err := newPodPlanSink(ctx, "pipeline-install", masker, dst)
+	if err != nil {
+		return nil, nil, err
 	}
+	w := &nodehost.LineWriter{Sink: sink.LogSink, Level: nodehost.LevelWarn}
+	return w, func() {
+		w.Flush()
+		sink.Flush()
+	}, nil
 }
-
-func (w *maskedLines) flush() {
-	if len(w.buf) > 0 {
-		_, _ = io.WriteString(w.dst, w.masker.Mask(string(w.buf))+"\n") //nolint:errcheck // stderr has no one to report to
-		w.buf = nil
-	}
-}
-
-const maxMaskedLine = 1 << 20
 
 func podEnvNames() []string {
 	return slices.Concat(k8srunner.DependencyProxyEnvNames, k8srunner.NetworkEnvNames)

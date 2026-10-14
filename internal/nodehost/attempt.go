@@ -137,12 +137,12 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	}
 	sink.Flush()
 	revoke()
-	out := &lineWriter{sink: sink}
+	out := &LineWriter{Sink: sink, Level: LevelInfo}
 	// safety: a cancelled node's cleanups still run, each bounded by CleanupTimeout.
 	if err := a.Routes.RunCleanups(context.WithoutCancel(ctx), bearer, CleanupScope{Dir: cfg.Dir, Env: cfg.Env, Log: out}); err != nil {
 		run.Logger.Warn("nodehost: node cleanups", "run", run.ID, "node", id, "err", err)
 	}
-	out.flush()
+	out.Flush()
 	sink.Flush()
 	return res
 }
@@ -330,31 +330,36 @@ func attemptEnv(base []string, nodeEnv map[string]string, runID, nodeID, url, be
 	)
 }
 
-// safety: unlocked, because RunCleanups writes from one goroutine at a time.
-type lineWriter struct {
-	sink *LogSink
-	buf  []byte
+// LineWriter hands what is written to it to Sink as text lines at Level; a
+// line that grows past the session's line limit goes in pieces, whose split
+// values a [LogSink] still masks whole. Call Flush once writing ends. It is
+// unlocked, so one goroutine writes at a time.
+type LineWriter struct {
+	Sink  *LogSink
+	Level string
+	buf   []byte
 }
 
-func (w *lineWriter) Write(p []byte) (int, error) {
+func (w *LineWriter) Write(p []byte) (int, error) {
 	w.buf = append(w.buf, p...)
 	for {
 		i := bytes.IndexByte(w.buf, '\n')
 		if i < 0 {
 			break
 		}
-		w.sink.Text(LevelInfo, strings.TrimSuffix(string(w.buf[:i]), "\r"))
+		w.Sink.Text(w.Level, strings.TrimSuffix(string(w.buf[:i]), "\r"))
 		w.buf = w.buf[i+1:]
 	}
 	if len(w.buf) >= maxTextLine {
-		w.flush()
+		w.Flush()
 	}
 	return len(p), nil
 }
 
-func (w *lineWriter) flush() {
+// Flush hands any unterminated rest to the sink.
+func (w *LineWriter) Flush() {
 	if len(w.buf) > 0 {
-		w.sink.Text(LevelInfo, string(w.buf))
+		w.Sink.Text(w.Level, string(w.buf))
 		w.buf = nil
 	}
 }
