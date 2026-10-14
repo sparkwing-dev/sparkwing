@@ -18,7 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwingcache"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -185,10 +184,6 @@ func supervisorArtifactStore(ctx context.Context, controllerURL, runID, cacheURL
 	if os.Getenv(ArtifactStoreEnvVar) != "" {
 		return resolveArtifactStoreFromEnv(ctx)
 	}
-	var legacy storage.ArtifactStore
-	if cacheURL != "" && cacheGrant != "" {
-		legacy = sparkwingcache.New(cacheURL, cacheGrant, nil)
-	}
 	if controllerURL != "" && cacheGrant != "" && runID != "" {
 		d := directdata.New(controllerURL, cacheGrant, runID, nil)
 		available, err := d.Available(ctx)
@@ -196,11 +191,8 @@ func supervisorArtifactStore(ctx context.Context, controllerURL, runID, cacheURL
 			return nil, err
 		}
 		if available {
-			return directArtifactStore{client: d, legacy: legacy}, nil
+			return directArtifactStore{client: d}, nil
 		}
-	}
-	if legacy != nil {
-		return legacy, nil
 	}
 	return resolveArtifactStoreFromEnv(ctx)
 }

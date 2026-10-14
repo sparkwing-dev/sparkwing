@@ -2,10 +2,6 @@
 {{- $runnerImage := include "sparkwing-runner-bundle.image" (dict "img" .Values.runner.image "root" .) -}}
 {{- $goCache := .Values.runner.goCache.persistence.enabled -}}
 {{- $agentToken := and .Values.controller.tokenSecret.name .Values.controller.tokenSecret.key -}}
-{{- $gitcache := .Values.runner.gitcacheUrl -}}
-{{- if .Values.cache.enabled -}}
-{{- $gitcache = printf "http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.cache.fullname" .) .Release.Namespace -}}
-{{- end -}}
 {{- $goCacheMounts := list (dict "name" "go-cache" "mountPath" "/tmp/sparkwing/gocache" "subPath" "gocache") (dict "name" "go-cache" "mountPath" "/tmp/sparkwing/gomodcache" "subPath" "gomodcache") -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -93,12 +89,6 @@ spec:
             {{- if $controllerURL }}
             - {{ printf "--controller=%s" $controllerURL | quote }}
             {{- end }}
-            {{- with $gitcache }}
-            - {{ printf "--gitcache=%s" . | quote }}
-            {{- end }}
-            {{- if and .Values.cache.enabled (not .Values.cache.dependencyProxy.enabled) }}
-            - --dependency-proxy=off
-            {{- end }}
             {{- if $agentToken }}
             - --credentials-dir=/etc/sparkwing/credentials
             {{- end }}
@@ -123,9 +113,6 @@ spec:
             - {{ printf "--trigger-runner-image-pull-policy=%s" .Values.runner.image.pullPolicy | quote }}
             {{- range .Values.runner.triggerRunner.labels }}
             - {{ printf "--trigger-runner-label=%s" . | quote }}
-            {{- end }}
-            {{- if .Values.cache.enabled }}
-            - {{ printf "--trigger-artifact-store=http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.cache.fullname" .) .Release.Namespace | quote }}
             {{- end }}
             {{- end }}
             {{- end }}
@@ -161,18 +148,10 @@ spec:
               value: /tmp/sparkwing/gocache
             - name: GOMODCACHE
               value: /tmp/sparkwing/gomodcache
-            {{- with $gitcache }}
-            {{- /* The SDK's clone and dependency-cache helpers in each node read it. */}}
-            - name: SPARKWING_GITCACHE_URL
-              value: {{ . | quote }}
-            {{- end }}
             - name: POD_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
-            {{- with (include "sparkwing-runner-bundle.runnerDependencyProxyEnv" .) }}
-            {{- . | nindent 12 }}
-            {{- end }}
             {{- with .Values.runner.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

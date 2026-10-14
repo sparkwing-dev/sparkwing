@@ -12,7 +12,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/tarsafe"
 )
 
-func writeArchive(w io.Writer, dir string) error {
+// WriteArchive streams a dependency directory as a gzip-compressed tar archive.
+func WriteArchive(w io.Writer, dir string) error {
 	gz := gzip.NewWriter(w)
 	tw := tar.NewWriter(gz)
 
@@ -84,7 +85,8 @@ func extractArchive(r io.Reader, dir string) error {
 	return tarsafe.ExtractInRoot(tar.NewReader(gz), dir, tarsafe.Policy{AllowSymlinks: true})
 }
 
-func extractArchiveStaged(r io.Reader, dir string) error {
+// ExtractArchiveStaged publishes the directory only after successful extraction.
+func ExtractArchiveStaged(r io.Reader, dir string) error {
 	return tarsafe.ExtractIntoDirStaged(dir, ".depcache-restore-*", func(stage string) error {
 		return extractArchive(r, stage)
 	})

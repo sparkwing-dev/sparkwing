@@ -5,10 +5,6 @@
 //
 //	fs:///abs/path           pkg/storage/fs (filesystem)
 //	s3://bucket/prefix       pkg/storage/s3 (any S3-compatible store)
-//	http(s)://host           pkg/storage/sparkwingcache
-//
-// An http(s) store authenticates with the run's $SPARKWING_CACHE_GRANT, the
-// bearer the cache requires on its routes.
 //
 // S3 credentials + region come from the standard AWS credential
 // chain. AWS_ENDPOINT_URL_S3 points it at R2, MinIO and the like.
@@ -25,12 +21,10 @@ import (
 
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwingcache"
 )
 
 // OpenArtifactStore parses raw and returns the matching backend.
@@ -57,8 +51,6 @@ func OpenArtifactStore(ctx context.Context, raw string) (storage.ArtifactStore, 
 			return nil, err
 		}
 		return s3store.NewArtifactStore(bucket, prefix, client), nil
-	case "http", "https":
-		return sparkwingcache.New(raw, authwire.CacheBearerFromEnv(), nil), nil
 	default:
 		return nil, fmt.Errorf("storeurl: unsupported scheme %q in %q", scheme, raw)
 	}

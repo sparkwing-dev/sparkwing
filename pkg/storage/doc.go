@@ -18,12 +18,8 @@
 //
 //   - [fs] -- filesystem (laptop / local dev)
 //   - [s3] -- any S3-compatible object store (artifacts only)
-//   - [sparkwingcache] -- the sparkwing-cache HTTP service (distributed)
 //
-// Default backend per execution mode:
-//
-//	local         filesystem            filesystem
-//	distributed   sparkwing-cache HTTP  controller segments ([logseg])
+// Distributed byte clients use internal/blob through the controller signed data path.
 //
 // # Opening backends
 //

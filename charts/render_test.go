@@ -40,7 +40,6 @@ func tokenSecretDefaults(chart string) []string {
 	}
 	return append(controller,
 		prefix+"controller.tokenSecret.name=sparkwing-token",
-		prefix+"cache.grantKeySecret.name=sparkwing-cache-grant-key",
 	)
 }
 
@@ -908,7 +907,6 @@ func TestRunnerWarmTriggerRunnerUsesRemoteCapacityBeforeKubernetes(t *testing.T)
 		"--trigger-runner-image=registry.example/sparkwing-runner:remote",
 		"--trigger-runner-sa=remote-fallback",
 		"--trigger-runner-image-pull-policy=Always",
-		"--trigger-artifact-store=http://sparkwing-sparkwing-runner-bundle-cache.capacity.svc.cluster.local",
 		"--trigger-runner-label=cluster",
 		"--trigger-runner-label=kubernetes",
 	}
@@ -1226,129 +1224,6 @@ func TestControllerDatabaseURLIsACredentialFile(t *testing.T) {
 	}
 }
 
-func renderCache(t *testing.T, sets ...string) string {
-	t.Helper()
-	return helmRender(t, "./sparkwing-runner-bundle", "templates/cache-deployment.yaml", "sparkwing", sets...)
-}
-
-func TestCachePinsAWritableHome(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	if got := runnerEnv(t, renderCache(t))["HOME"]; got != "/tmp" {
-		t.Fatalf("cache HOME = %q, want /tmp so the SSH key stages on the scratch volume", got)
-	}
-}
-
-func TestRunnerPackageManagersUseTheBundledDependencyProxy(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	env := runnerEnv(t, renderRunner(t))
-	const host = "sparkwing-sparkwing-runner-bundle-cache.default.svc.cluster.local"
-	for key, want := range map[string]string{
-		"GOPROXY":             "http://" + host + "/proxy/golang|https://proxy.golang.org,direct",
-		"npm_config_registry": "http://" + host + "/proxy/npm",
-		"PIP_INDEX_URL":       "http://" + host + "/proxy/pypi/simple/",
-		"PIP_TRUSTED_HOST":    host,
-	} {
-		if got := env[key]; got != want {
-			t.Errorf("%s = %q, want %q", key, got, want)
-		}
-	}
-}
-
-func TestCachePublicURLMatchesTheProxyURLRunnersDial(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
-	}
-	const want = "http://sparkwing-sparkwing-runner-bundle-cache.default.svc.cluster.local"
-	if got, _ := flagValue(runnerContainer(t, renderCache(t)).Args, "--public-url"); got != want {
-		t.Errorf("--public-url = %q, want %q", got, want)
-	}
-	if got := runnerEnv(t, renderRunner(t))["npm_config_registry"]; got != want+"/proxy/npm" {
-		t.Errorf("npm_config_registry = %q, want the same base the cache rewrites against", got)
-	}
-}
-
-func TestCachePublicURLOverrideWins(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	args := runnerContainer(t, renderCache(t, "cache.publicUrl=https://cache.example.com")).Args
-	if got, _ := flagValue(args, "--public-url"); got != "https://cache.example.com" {
-		t.Errorf("--public-url = %q, want the explicit override", got)
-	}
-}
-
-func TestCachePublicURLIsUnsetWhenClientsDialMoreThanOneAddress(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.0s of real work; the fast class runs under -short")
-	}
-	for _, serviceType := range []string{"LoadBalancer", "NodePort"} {
-		args := runnerContainer(t, renderCache(t, "cache.service.type="+serviceType, "cache.dependencyProxy.enabled=false")).Args
-		if got, ok := flagValue(args, "--public-url"); ok {
-			t.Errorf("%s Service set --public-url %q, want it unset so the proxy rewrites per request", serviceType, got)
-		}
-	}
-
-	args := runnerContainer(t, renderCache(t,
-		"cache.service.type=LoadBalancer", "cache.dependencyProxy.enabled=false",
-		"cache.publicUrl=http://cache.example.com")).Args
-	if got, _ := flagValue(args, "--public-url"); got != "http://cache.example.com" {
-		t.Errorf("--public-url = %q, want the explicit override", got)
-	}
-}
-
-func TestRunnerExtraEnvOverridesADependencyProxyDefault(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	env := runnerEnv(t, renderRunner(t,
-		"runner.extraEnv[0].name=GOPROXY",
-		"runner.extraEnv[0].value=https://goproxy.internal"))
-	if got := env["GOPROXY"]; got != "https://goproxy.internal" {
-		t.Errorf("GOPROXY = %q, want the extraEnv override", got)
-	}
-	if env["npm_config_registry"] == "" {
-		t.Error("overriding GOPROXY should not drop the other proxy defaults")
-	}
-}
-
-func TestRunnerDependencyProxyOptOut(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
-	}
-	rendered := renderRunner(t, "cache.dependencyProxy.enabled=false")
-	env := runnerEnv(t, rendered)
-	for _, key := range []string{"GOPROXY", "npm_config_registry", "PIP_INDEX_URL", "PIP_TRUSTED_HOST"} {
-		if _, ok := env[key]; ok {
-			t.Errorf("%s set with cache.dependencyProxy.enabled=false", key)
-		}
-	}
-	if args := runnerContainer(t, rendered).Args; !containsArg(args, "--dependency-proxy=off") {
-		t.Errorf("runner args = %v, want --dependency-proxy=off", args)
-	}
-}
-
-func TestRunnerHasNoDependencyProxyWhenNoCacheIsDeployed(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	rendered := renderRunner(t, "cache.enabled=false", "runner.alsoClaimTriggers=false")
-	env := runnerEnv(t, rendered)
-	for _, key := range []string{"GOPROXY", "npm_config_registry", "PIP_INDEX_URL", "PIP_TRUSTED_HOST"} {
-		if _, ok := env[key]; ok {
-			t.Errorf("%s set with cache.enabled=false", key)
-		}
-	}
-	for _, arg := range runnerContainer(t, rendered).Args {
-		if strings.HasPrefix(arg, "--dependency-proxy") {
-			t.Errorf("runner args carry %q with no cache deployed", arg)
-		}
-	}
-}
-
 // A runner with no gitcache claims triggers and fetches each run's source
 // directly with the credential the controller releases, so the chart renders
 // trigger claiming without one.
@@ -1356,7 +1231,7 @@ func TestTriggerClaimingRendersWithoutAGitcache(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	rendered := renderRunner(t, "cache.enabled=false")
+	rendered := renderRunner(t)
 	args := runnerContainer(t, rendered).Args
 	if !containsArg(args, "--also-claim-triggers") {
 		t.Errorf("runner args = %v, want trigger claiming", args)
@@ -1365,35 +1240,6 @@ func TestTriggerClaimingRendersWithoutAGitcache(t *testing.T) {
 		if strings.HasPrefix(arg, "--gitcache") || strings.HasPrefix(arg, "--allow-repo") {
 			t.Errorf("runner args carry %q; a direct runner fetches only with what the controller releases", arg)
 		}
-	}
-}
-
-func TestTriggerClaimingAcceptsAnExternalGitcache(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	rendered := renderRunner(t, "cache.enabled=false", "runner.gitcacheUrl=https://gitcache.example.com")
-	if args := runnerContainer(t, rendered).Args; !containsArg(args, "--gitcache=https://gitcache.example.com") {
-		t.Errorf("runner args = %v, want --gitcache naming the external gitcache", args)
-	}
-	if got := runnerEnv(t, rendered)["SPARKWING_GITCACHE_URL"]; got != "https://gitcache.example.com" {
-		t.Errorf("SPARKWING_GITCACHE_URL = %q, want the same gitcache for the nodes' SDK helpers", got)
-	}
-	if args := runnerContainer(t, rendered).Args; !containsArg(args, "--also-claim-triggers") {
-		t.Errorf("runner args = %v, want trigger claiming preserved", args)
-	}
-}
-
-func TestFullChartCarriesTheDependencyProxyWiring(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	env := runnerEnv(t, helmRender(t, "./sparkwing-full",
-		"charts/sparkwing-runner-bundle/templates/runner-deployment.yaml", "sparkwing"))
-	const host = "sparkwing-sparkwing-runner-bundle-cache.default.svc.cluster.local"
-	if got := env["GOPROXY"]; got != "http://"+host+"/proxy/golang|https://proxy.golang.org,direct" {
-		t.Errorf("GOPROXY = %q; the vendored sub-chart may be stale. "+
-			"Fix: helm dep up ./charts/sparkwing-full", got)
 	}
 }
 
@@ -1478,17 +1324,7 @@ func TestConfiguredSecretRefsAreRequired(t *testing.T) {
 	if strings.Contains(runner, "optional: true") {
 		t.Fatalf("configured runner token Secret is optional:\n%s", runner)
 	}
-	cache := renderCache(t,
-		"controller.tokenSecret.name=sparkwing-token",
-		"cache.sshKeySecret.name=sparkwing-ssh")
-	if strings.Contains(cache, "optional: true") {
-		t.Fatalf("configured cache Secret is optional:\n%s", cache)
-	}
-	for _, name := range []string{"sparkwing-cache-grant-key", "sparkwing-ssh"} {
-		if !strings.Contains(cache, "name: \""+name+"\"") && !strings.Contains(cache, "secretName: \""+name+"\"") {
-			t.Errorf("cache did not render required Secret %q:\n%s", name, cache)
-		}
-	}
+
 }
 
 func TestConfiguredSecretNamesRequireKeys(t *testing.T) {
@@ -1515,12 +1351,6 @@ func TestConfiguredSecretNamesRequireKeys(t *testing.T) {
 				"sparkwing-runner-bundle.controller.tokenSecret.key=",
 			},
 			want: "controller.tokenSecret.key is required",
-		},
-		{
-			name:  "cache grant key",
-			chart: "./sparkwing-runner-bundle",
-			sets:  []string{"cache.grantKeySecret.key="},
-			want:  "cache.grantKeySecret.key is required",
 		},
 		{
 			name:  "controller encryption",
@@ -1557,30 +1387,6 @@ func TestRemovedGitHubWebhookValuesFailTheRender(t *testing.T) {
 	helmTemplate(t, "sparkwing", "controller.githubWebhookSecret.name=", "controller.githubStatusToken.name=")
 }
 
-func TestFullChartServiceURLsFollowNestedBundleNaming(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.2s of real work; the fast class runs under -short")
-	}
-	tests := []struct {
-		name     string
-		set      string
-		fullname string
-	}{
-		{name: "name override", set: "sparkwing-runner-bundle.nameOverride=data", fullname: "sparkwing-data"},
-		{name: "fullname override", set: "sparkwing-runner-bundle.fullnameOverride=data-plane", fullname: "data-plane"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			cacheURL := "http://" + test.fullname + "-cache.default.svc.cluster.local"
-			resources := renderedResources(t, helmTemplate(t, "sparkwing", test.set))
-			controller := resourceContainer(t, componentResource(t, resources, "Deployment", "controller"))
-			if got, _ := hasFlag(controller.Args, "--cache-url="); got != "--cache-url="+cacheURL {
-				t.Errorf("controller cache flag = %q, want nested bundle Service %q", got, cacheURL)
-			}
-		})
-	}
-}
-
 func TestMaximumLengthReleaseKeepsComponentNamesAndServiceURLsDistinct(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
@@ -1593,26 +1399,18 @@ func TestMaximumLengthReleaseKeepsComponentNamesAndServiceURLsDistinct(t *testin
 	assertValidUniqueResourceNames(t, resources)
 
 	controllerService := componentResource(t, resources, "Service", "controller").Metadata.Name
-	cacheService := componentResource(t, resources, "Service", "cache").Metadata.Name
-	if controllerService == cacheService {
-		t.Fatalf("component Service names collide: controller=%q cache=%q", controllerService, cacheService)
-	}
 
 	serviceURL := func(name string) string {
 		return "http://" + name + "." + namespace + ".svc.cluster.local"
 	}
 	controllerURL := serviceURL(controllerService)
-	cacheURL := serviceURL(cacheService)
 	runnerArgs := resourceContainer(t, componentResource(t, resources, "Deployment", "runner")).Args
-	for _, want := range []string{"--controller=" + controllerURL, "--gitcache=" + cacheURL} {
+	for _, want := range []string{"--controller=" + controllerURL} {
 		if !containsArg(runnerArgs, want) {
 			t.Errorf("runner args = %v, want %q", runnerArgs, want)
 		}
 	}
-	controller := resourceContainer(t, componentResource(t, resources, "Deployment", "controller"))
-	if got, _ := hasFlag(controller.Args, "--cache-url="); got != "--cache-url="+cacheURL {
-		t.Errorf("controller cache flag = %q, want cache Service URL %q", got, cacheURL)
-	}
+
 }
 
 func TestMaximumLengthOverridesKeepComponentNamesDistinct(t *testing.T) {
@@ -1656,31 +1454,14 @@ func TestMaximumLengthOverridesKeepComponentNamesDistinct(t *testing.T) {
 					deployments[component] = resource.Metadata.Name
 				}
 			}
-			if len(deployments) < 2 {
-				t.Fatalf("component Deployments = %v, want multiple distinct names", deployments)
+			want := 1
+			if strings.Contains(test.chart, "sparkwing-full") {
+				want = 2
+			}
+			if len(deployments) != want {
+				t.Fatalf("component Deployments = %v, want %d", deployments, want)
 			}
 		})
-	}
-}
-
-func TestParentURLsMatchMaximumLengthBundleOverrides(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	const namespace = "sparkwing-system"
-	override := strings.Repeat("d", 63)
-	rendered := helmRenderAll(t, "./sparkwing-full", "sparkwing", namespace,
-		"sparkwing-runner-bundle.fullnameOverride="+override)
-	resources := renderedResources(t, rendered)
-	assertValidUniqueResourceNames(t, resources)
-	cacheService := componentResource(t, resources, "Service", "cache").Metadata.Name
-	if !strings.HasSuffix(cacheService, "-cache") {
-		t.Fatalf("bundle cache Service name %q does not preserve its suffix", cacheService)
-	}
-	cacheURL := "http://" + cacheService + "." + namespace + ".svc.cluster.local"
-	controller := resourceContainer(t, componentResource(t, resources, "Deployment", "controller"))
-	if got, _ := hasFlag(controller.Args, "--cache-url="); got != "--cache-url="+cacheURL {
-		t.Errorf("controller cache flag = %q, want cache Service URL %q", got, cacheURL)
 	}
 }
 
@@ -1765,7 +1546,7 @@ func TestRunnerBundleMountsNoServiceAccountTokens(t *testing.T) {
 	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "default",
 		"controller.url=http://controller"))
 	accounts := map[string]string{}
-	for _, component := range []string{"runner", "cache"} {
+	for _, component := range []string{"runner"} {
 		deployment := componentResource(t, resources, "Deployment", component)
 		pod := deployment.Spec.Template.Spec
 		if pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken {
@@ -1838,32 +1619,6 @@ func TestRunnerBundleCanRemountTheRunnerToken(t *testing.T) {
 		t.Fatalf("runner automountServiceAccountToken = %v, want true; the k8s trigger runner cannot load its in-cluster config without a token",
 			pod.AutomountServiceAccountToken)
 	}
-	for _, component := range []string{"cache"} {
-		other := componentResource(t, resources, "Deployment", component).Spec.Template.Spec
-		if other.AutomountServiceAccountToken == nil || *other.AutomountServiceAccountToken {
-			t.Errorf("%s pod automounts a ServiceAccount token when only the runner opts in", component)
-		}
-	}
-}
-
-func TestRunnerBundleRefusesSilentServiceAccountSharing(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
-	}
-	out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing",
-		"controller.url=http://controller", "serviceAccount.create=false", "serviceAccount.name=my-existing-sa")
-	if !strings.Contains(out, "shareAcrossComponents") {
-		t.Fatalf("render failure does not name the acknowledgement value:\n%s", out)
-	}
-	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "default",
-		"controller.url=http://controller", "serviceAccount.create=false", "serviceAccount.name=my-existing-sa",
-		"serviceAccount.shareAcrossComponents=true"))
-	for _, component := range []string{"runner", "cache"} {
-		pod := componentResource(t, resources, "Deployment", component).Spec.Template.Spec
-		if pod.ServiceAccountName != "my-existing-sa" {
-			t.Errorf("%s serviceAccountName = %q, want the operator's pre-created account", component, pod.ServiceAccountName)
-		}
-	}
 }
 
 func TestFullChartVendorsTheTightenedRunnerRBAC(t *testing.T) {
@@ -1889,8 +1644,6 @@ func TestFullChartVendorsTheTightenedRunnerRBAC(t *testing.T) {
 	}
 }
 
-// The runner runs team code, so it holds no cache operator token; it asks the
-// controller for a per-run grant instead.
 func TestRunnerCarriesNoCacheToken(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
@@ -1907,304 +1660,12 @@ func TestRunnerCarriesNoCacheToken(t *testing.T) {
 	}
 }
 
-func TestCacheWithoutAGrantKeySecretFailsAtRender(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing", "cache.grantKeySecret.name=")
-	for _, want := range []string{"cache.grantKeySecret.name", "cache.allowUnauthenticated=true"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("render error does not name %q:\n%s", want, out)
-		}
-	}
-}
-
-func TestCacheAllowUnauthenticatedRendersTheOptIn(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
-	}
-	rendered := renderCache(t, "controller.tokenSecret.name=",
-		"cache.allowUnauthenticated=true")
-	if args := runnerContainer(t, rendered).Args; !containsArg(args, "--allow-unauthenticated") {
-		t.Errorf("cache args = %v, want --allow-unauthenticated", args)
-	}
-	if args := runnerContainer(t, renderCache(t)).Args; containsArg(args, "--allow-unauthenticated") {
-		t.Errorf("cache args = %v, want no unauthenticated opt-in by default", args)
-	}
-}
-
-type renderedNetworkPolicy struct {
-	Kind string `yaml:"kind"`
-	Spec struct {
-		PodSelector struct {
-			MatchLabels map[string]string `yaml:"matchLabels"`
-		} `yaml:"podSelector"`
-		PolicyTypes []string `yaml:"policyTypes"`
-		Ingress     []struct {
-			From []struct {
-				PodSelector struct {
-					MatchLabels map[string]string `yaml:"matchLabels"`
-				} `yaml:"podSelector"`
-			} `yaml:"from"`
-			Ports []struct {
-				Protocol string `yaml:"protocol"`
-				Port     int    `yaml:"port"`
-			} `yaml:"ports"`
-		} `yaml:"ingress"`
-	} `yaml:"spec"`
-}
-
-func renderCacheNetworkPolicy(t *testing.T, sets ...string) renderedNetworkPolicy {
-	t.Helper()
-	rendered := helmRender(t, "./sparkwing-runner-bundle",
-		"templates/cache-networkpolicy.yaml", "sparkwing", sets...)
-	var doc renderedNetworkPolicy
-	decoder := yaml.NewDecoder(strings.NewReader(rendered))
-	for {
-		var candidate renderedNetworkPolicy
-		if err := decoder.Decode(&candidate); err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			t.Fatalf("decode NetworkPolicy: %v\n%s", err, rendered)
-		}
-		if candidate.Kind == "NetworkPolicy" {
-			doc = candidate
-		}
-	}
-	if doc.Kind != "NetworkPolicy" {
-		t.Fatalf("no NetworkPolicy rendered:\n%s", rendered)
-	}
-	return doc
-}
-
-func TestCacheNetworkPolicyAdmitsEveryCacheClient(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	policy := renderCacheNetworkPolicy(t)
-
-	if !reflect.DeepEqual(policy.Spec.PolicyTypes, []string{"Ingress"}) {
-		t.Errorf("policyTypes = %v, want [Ingress]", policy.Spec.PolicyTypes)
-	}
-	if got := policy.Spec.PodSelector.MatchLabels["app.kubernetes.io/component"]; got != "cache" {
-		t.Errorf("policy selects component %q, want cache", got)
-	}
-	if len(policy.Spec.Ingress) != 1 {
-		t.Fatalf("ingress rules = %d, want one default-deny rule listing every peer", len(policy.Spec.Ingress))
-	}
-	rule := policy.Spec.Ingress[0]
-	want := []map[string]string{
-		{
-			"app.kubernetes.io/name":      "sparkwing-runner-bundle",
-			"app.kubernetes.io/instance":  "sparkwing",
-			"app.kubernetes.io/component": "runner",
-		},
-		{
-			"app.kubernetes.io/instance":  "sparkwing",
-			"app.kubernetes.io/component": "controller",
-		},
-		{
-			"app.kubernetes.io/name": "sparkwing-runner",
-		},
-	}
-	if len(rule.From) != len(want) {
-		t.Fatalf("ingress peers = %d, want the runner, controller, and k8s runner Job pods", len(rule.From))
-	}
-	for i, peer := range want {
-		if got := rule.From[i].PodSelector.MatchLabels; !reflect.DeepEqual(got, peer) {
-			t.Errorf("ingress peer %d = %v, want %v", i, got, peer)
-		}
-	}
-	if len(rule.Ports) != 1 || rule.Ports[0].Port != 8090 || rule.Ports[0].Protocol != "TCP" {
-		t.Errorf("ingress ports = %+v, want TCP 8090", rule.Ports)
-	}
-}
-
-func TestCacheNetworkPolicyTakesAnExplicitControllerSelector(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	policy := renderCacheNetworkPolicy(t, `networkPolicy.controllerPodSelector.app\.kubernetes\.io/name=my-controller`)
-	want := map[string]string{"app.kubernetes.io/name": "my-controller"}
-	if got := policy.Spec.Ingress[0].From[1].PodSelector.MatchLabels; !reflect.DeepEqual(got, want) {
-		t.Errorf("controller peer = %v, want %v", got, want)
-	}
-}
-
-func TestCacheNetworkPolicyAppendsExtraIngressForAnOffClusterCaller(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	rendered := helmRender(t, "./sparkwing-runner-bundle", "templates/cache-networkpolicy.yaml", "sparkwing",
-		"controller.tokenSecret.name=tok",
-		"networkPolicy.extraIngress[0].from[0].ipBlock.cidr=10.42.0.0/16",
-		"networkPolicy.extraIngress[0].ports[0].protocol=TCP",
-		"networkPolicy.extraIngress[0].ports[0].port=8090")
-	if !strings.Contains(rendered, "10.42.0.0/16") {
-		t.Errorf("extraIngress rule missing from the rendered policy:\n%s", rendered)
-	}
-}
-
-func TestFullChartCacheNetworkPolicyAdmitsTheControllerPod(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	rendered := helmRenderAll(t, "./sparkwing-full", "sparkwing", "default",
-		"sparkwing-runner-bundle.controller.tokenSecret.name=tok")
-	if !strings.Contains(rendered, "kind: NetworkPolicy") {
-		t.Fatal("the flagship chart rendered no cache NetworkPolicy; the vendored sub-chart may be stale")
-	}
-	controller := componentResource(t, renderedResources(t, rendered), "Deployment", "controller")
-	var policy renderedNetworkPolicy
-	decoder := yaml.NewDecoder(strings.NewReader(rendered))
-	for {
-		var candidate renderedNetworkPolicy
-		if err := decoder.Decode(&candidate); err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			t.Fatalf("decode NetworkPolicy: %v", err)
-		}
-		if candidate.Kind == "NetworkPolicy" {
-			policy = candidate
-		}
-	}
-	if policy.Kind != "NetworkPolicy" {
-		t.Fatal("no NetworkPolicy decoded from the flagship render")
-	}
-	for _, peer := range policy.Spec.Ingress[0].From {
-		if selectorMatches(peer.PodSelector.MatchLabels, controller.Spec.Template.Metadata.Labels) {
-			return
-		}
-	}
-	t.Errorf("no ingress peer selects the controller pod labels %v", controller.Spec.Template.Metadata.Labels)
-}
-
-func selectorMatches(selector, labels map[string]string) bool {
-	if len(selector) == 0 {
-		return false
-	}
-	for key, value := range selector {
-		if labels[key] != value {
-			return false
-		}
-	}
-	return true
-}
-
-func TestCacheNetworkPolicyIsOptOut(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
-	}
-	rendered := helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "default", "networkPolicy.enabled=false")
-	if strings.Contains(rendered, "kind: NetworkPolicy") {
-		t.Error("networkPolicy.enabled=false still rendered a NetworkPolicy")
-	}
-	if !strings.Contains(helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "default"), "kind: NetworkPolicy") {
-		t.Error("the default install rendered no cache NetworkPolicy")
-	}
-}
-
-func TestPublishedCacheWithoutAGrantKeyFailsAtRender(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.8s of real work; the fast class runs under -short")
-	}
-	for _, serviceType := range []string{"LoadBalancer", "NodePort"} {
-		out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing",
-			"cache.service.type="+serviceType, "cache.allowUnauthenticated=true")
-		for _, want := range []string{"cache.service.type=" + serviceType, "ClusterIP", "cache.grantKeySecret.name"} {
-			if !strings.Contains(out, want) {
-				t.Errorf("%s render error does not name %q:\n%s", serviceType, want, out)
-			}
-		}
-	}
-	rendered := helmRender(t, "./sparkwing-runner-bundle", "templates/cache-service.yaml", "sparkwing",
-		"cache.service.type=LoadBalancer", "cache.dependencyProxy.enabled=false")
-	if !strings.Contains(rendered, "type: LoadBalancer") {
-		t.Errorf("a cache verifying grants refused a LoadBalancer Service:\n%s", rendered)
-	}
-}
-
-// The registry proxy takes no credential, so a cache published outside the
-// cluster must not serve it: a LoadBalancer or NodePort Service renders only
-// with the proxy off, and the cache is then told to serve none.
-func TestAPublishedCacheServesNoRegistryProxy(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.0s of real work; the fast class runs under -short")
-	}
-	for _, serviceType := range []string{"LoadBalancer", "NodePort"} {
-		out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing", "cache.service.type="+serviceType)
-		for _, want := range []string{"cache.service.type=" + serviceType, "cache.dependencyProxy.enabled=false"} {
-			if !strings.Contains(out, want) {
-				t.Errorf("%s with the proxy on: render error does not name %q:\n%s", serviceType, want, out)
-			}
-		}
-	}
-	published := renderCache(t, "cache.service.type=LoadBalancer", "cache.dependencyProxy.enabled=false")
-	if !strings.Contains(published, "- --disable-proxy") {
-		t.Errorf("a published cache with the proxy off does not pass --disable-proxy:\n%s", published)
-	}
-	if internal := renderCache(t); strings.Contains(internal, "--disable-proxy") {
-		t.Errorf("the default in-cluster cache disabled its proxy:\n%s", internal)
-	}
-}
-
-// The cache's static operator token is removed, so the controller carries
-// only the grant key it signs its own cache calls with.
 func TestControllerCarriesNoCacheToken(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
 	if ref := credentialRef(t, renderControllerYAML(t), "cache-token"); ref != nil {
 		t.Fatalf("controller still projects a cache-token credential: %+v", ref)
-	}
-}
-
-// The cache's static operator token was removed, so a leftover value fails
-// the render in both charts and names the migration, while the empty name an
-// upgrade's reused values carry still renders.
-func TestRemovedCacheTokenSecretFailsTheRender(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.9s of real work; the fast class runs under -short")
-	}
-	for chart, set := range map[string]string{
-		"./sparkwing-runner-bundle": "cache.tokenSecret.name=sparkwing-cache-token",
-		"./sparkwing-full":          "sparkwing-runner-bundle.cache.tokenSecret.name=sparkwing-cache-token",
-	} {
-		out := helmRenderError(t, chart, "sparkwing", set)
-		for _, want := range []string{"cache.tokenSecret was removed", "The cache's static operator token is removed"} {
-			if !strings.Contains(out, want) {
-				t.Errorf("%s render error lacks %q:\n%s", chart, want, out)
-			}
-		}
-	}
-	helmTemplate(t, "sparkwing", "sparkwing-runner-bundle.cache.tokenSecret.name=", "sparkwing-runner-bundle.cache.tokenSecret.key=token")
-}
-
-func TestControllerCarriesTheCacheURLBesideTheGrantKey(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	rendered := renderControllerYAML(t, "sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token")
-	tokenRef := credentialRef(t, rendered, "cache-grant-key")
-	const want = "--cache-url=http://sparkwing-sparkwing-runner-bundle-cache.default.svc.cluster.local"
-	if args := runnerContainer(t, rendered).Args; !containsArg(args, want) {
-		t.Errorf("controller args = %v, want %s", args, want)
-	}
-	if tokenRef == nil {
-		t.Error("controller projects no cache-grant-key credential")
-	}
-}
-
-func TestControllerCacheURLOverrideWins(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	controller := renderController(t, "sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token",
-		"controller.cache.url=http://cache.elsewhere:8090")
-	if !containsArg(controller.Args, "--cache-url=http://cache.elsewhere:8090") {
-		t.Errorf("controller args = %v, want the explicit --cache-url override", controller.Args)
 	}
 }
 
@@ -2247,7 +1708,6 @@ func TestChartsDefaultToARestrictedRuntime(t *testing.T) {
 	}{
 		{name: "controller", chart: "./sparkwing-full", template: "templates/controller-deployment.yaml"},
 		{name: "runner", chart: "./sparkwing-runner-bundle", template: "templates/runner-deployment.yaml"},
-		{name: "cache", chart: "./sparkwing-runner-bundle", template: "templates/cache-deployment.yaml"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			rendered := helmRender(t, test.chart, test.template, "sparkwing")
@@ -2895,47 +2355,6 @@ func equalsArgValue(args []string, flag string) string {
 		}
 	}
 	return argValue(args, flag)
-}
-
-func TestCacheStoreCeilingFlagsComeFromValues(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
-	}
-	rendered := helmRender(t, "./sparkwing-runner-bundle", "templates/cache-deployment.yaml", "sparkwing")
-	if args := runnerContainer(t, rendered).Args; containsArg(args, "--max-store-bytes") {
-		t.Errorf("cache args = %v, want no ceiling flag while the operator sets none", args)
-	}
-
-	args := runnerContainer(t, helmRender(t, "./sparkwing-runner-bundle", "templates/cache-deployment.yaml", "sparkwing",
-		"cache.limits.maxCacheArchiveBytes=104857600",
-		"cache.limits.maxStoreBytes=536870912000",
-		"cache.limits.maxStoreObjects=2000000",
-		"cache.limits.storeReconcile=2h")).Args
-	for flag, want := range map[string]string{
-		"--max-cache-archive-bytes": "104857600",
-		"--max-store-bytes":         "536870912000",
-		"--max-store-objects":       "2000000",
-		"--store-reconcile":         "2h",
-	} {
-		if got := argValue(args, flag); got != want {
-			t.Errorf("%s = %q, want %q (args %v)", flag, got, want, args)
-		}
-	}
-	if containsArg(args, "--warn-store-bytes") {
-		t.Errorf("cache args = %v, want no flag for a bound the operator left empty", args)
-	}
-}
-
-func TestCacheUnauthenticatedFlagSurvivesTheLimitsBlock(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	args := runnerContainer(t, helmRender(t, "./sparkwing-runner-bundle", "templates/cache-deployment.yaml", "sparkwing",
-		"cache.allowUnauthenticated=true",
-		"cache.limits.maxStoreBytes=1024")).Args
-	if !containsArg(args, "--allow-unauthenticated") {
-		t.Errorf("cache args = %v, want --allow-unauthenticated alongside the size bounds", args)
-	}
 }
 
 // The runner's own default listens on loopback only, so the chart names the

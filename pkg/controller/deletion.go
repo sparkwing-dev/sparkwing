@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -344,9 +342,6 @@ func (s *Server) purgeTeam(ctx context.Context, team store.Team, now time.Time) 
 	if err := s.holdDeletion(ctx, team, now); err != nil {
 		return err
 	}
-	if err := s.purgeTeamCache(ctx, team); err != nil {
-		return err
-	}
 	if err := s.holdDeletion(ctx, team, now); err != nil {
 		return err
 	}
@@ -361,9 +356,6 @@ func (s *Server) recheckTeam(ctx context.Context, team store.Team, now time.Time
 		return err
 	}
 	if err := s.holdDeletion(ctx, team, now); err != nil {
-		return err
-	}
-	if err := s.purgeTeamCache(ctx, team); err != nil {
 		return err
 	}
 	if err := s.holdDeletion(ctx, team, now); err != nil {
@@ -402,44 +394,6 @@ func (s *Server) teamLogClasses(ctx context.Context, objs logObjectStore, team s
 		}
 	}
 	return classes, nil
-}
-
-func deleteRemote(ctx context.Context, target, bearer string) error {
-	// #nosec G704 -- the origin is operator configuration; the id is an escaped segment
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, target, nil)
-	if err != nil {
-		return err
-	}
-	if bearer != "" {
-		req.Header.Set("Authorization", "Bearer "+bearer)
-	}
-	// #nosec G704 -- the request keeps the operator-configured origin
-	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode/100 != 2 {
-		body, rerr := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return errors.Join(fmt.Errorf("%d %s", resp.StatusCode, strings.TrimSpace(string(body))), rerr)
-	}
-	return nil
-}
-
-func (s *Server) purgeTeamCache(ctx context.Context, team store.Team) error {
-	ts := s.teamStorage
-	if ts.CacheURL == "" {
-		return nil
-	}
-	target := strings.TrimRight(ts.CacheURL, "/") + "/admin/teams/" + url.PathEscape(string(team))
-	bearer, err := s.cacheOperatorBearer(time.Now())
-	if err != nil {
-		return fmt.Errorf("sign the cache deletion: %w", err)
-	}
-	if err := deleteRemote(ctx, target, bearer); err != nil {
-		return fmt.Errorf("delete cache tree: %w", err)
-	}
-	return nil
 }
 
 // safety: An unsettled checkout or dispute hold blocks account deletion until money is resolved.

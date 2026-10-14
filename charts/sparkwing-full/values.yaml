@@ -154,15 +154,6 @@ controller:
     # larger bucket.
     measurePages: ""
 
-  cache:
-    # Which sparkwing-cache the controller's gitcache proxy forwards
-    # to, so off-cluster callers can clone and seed through
-    # /api/v1/gitcache/. Empty = auto-generate to point at the bundled
-    # sparkwing-runner-bundle's cache Service; if that sub-chart or its
-    # cache is disabled, the controller runs without a cache URL and
-    # the proxy routes answer 404.
-    url: ""
-
   # A Secret whose keys are credential file names the controller reads
   # from --credentials-dir: license, oidc-key, oidc-key.published,
   # github-client-secret, google-client-secret, github-app-key,

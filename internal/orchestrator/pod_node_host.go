@@ -14,7 +14,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/sparkwing-dev/sparkwing/internal/depcache"
 	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
@@ -65,7 +64,6 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 			return nodehost.Result{}, fmt.Errorf("read node %s: %w", p.nodeID, err)
 		}
 		p.specHash = row.SpecHash
-		ctx = depcache.WithCacheGrant(ctx, p.cacheGrant)
 	}
 	masker := secrets.NewMasker()
 	masker.Register(p.token)

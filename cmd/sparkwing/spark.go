@@ -13,7 +13,6 @@ import (
 	flag "github.com/spf13/pflag"
 	"golang.org/x/mod/modfile"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
@@ -634,15 +633,6 @@ func runSparksWarmup(args []string) error {
 		fmt.Fprintf(os.Stdout, "binary already cached: %s\n", lease.Path())
 	}
 
-	if gcURL := bincache.CacheURL(); gcURL != "" {
-		if err := bincache.UploadBinary(ctx, gcURL, authwire.CacheBearerFromEnv(), key, lease.Path()); err != nil {
-			fmt.Fprintf(os.Stderr, "warn: gitcache upload failed: %v\n", err)
-		} else {
-			fmt.Fprintf(os.Stdout, "uploaded to %s/bin/%s\n", gcURL, key)
-		}
-	} else {
-		fmt.Fprintln(os.Stdout, "SPARKWING_GITCACHE_URL not set; skipping upload")
-	}
 	return nil
 }
 

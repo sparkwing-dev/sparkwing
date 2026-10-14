@@ -1,31 +1,6 @@
 {{- if and .Values.controller.tokenSecret.name (not .Values.controller.tokenSecret.key) -}}
 {{- fail "sparkwing-runner-bundle: controller.tokenSecret.key is required when controller.tokenSecret.name is set" -}}
 {{- end -}}
-{{- if (get (.Values.cache.tokenSecret | default dict) "name") -}}
-{{- fail "sparkwing-runner-bundle: cache.tokenSecret was removed with the cache's static operator token; the cache accepts only grants signed with cache.grantKeySecret, and the controller signs its own. Unset it, delete the Secret, and follow the migration guide section \"The cache's static operator token is removed\"" -}}
-{{- end -}}
-{{- if and .Values.cache.grantKeySecret.name (not .Values.cache.grantKeySecret.key) -}}
-{{- fail "sparkwing-runner-bundle: cache.grantKeySecret.key is required when cache.grantKeySecret.name is set" -}}
-{{- end -}}
-{{- if and .Values.cache.enabled (not .Values.cache.grantKeySecret.name) (not .Values.cache.allowUnauthenticated) -}}
-{{- fail "sparkwing-runner-bundle: cache.enabled=true requires cache.grantKeySecret.name, the Secret holding the key the cache verifies grants with (mounted as cache-grant-key under --credentials-dir) and the controller signs them with. Set cache.allowUnauthenticated=true to serve the cache to anyone who can reach it instead" -}}
-{{- end -}}
-{{- if and .Values.cache.enabled (ne .Values.cache.service.type "ClusterIP") (or .Values.cache.allowUnauthenticated (not .Values.cache.grantKeySecret.name)) -}}
-{{- fail (printf "sparkwing-runner-bundle: cache.service.type=%s publishes the cache outside the cluster with no bearer on its routes. Set cache.service.type=ClusterIP, or set cache.grantKeySecret.name and leave cache.allowUnauthenticated=false" .Values.cache.service.type) -}}
-{{- end -}}
-{{- if and .Values.cache.enabled (ne .Values.cache.service.type "ClusterIP") .Values.cache.dependencyProxy.enabled -}}
-{{- fail (printf "sparkwing-runner-bundle: cache.service.type=%s publishes the cache outside the cluster, and its registry proxy takes no credential. Set cache.dependencyProxy.enabled=false to serve no proxy, or keep cache.service.type=ClusterIP" .Values.cache.service.type) -}}
-{{- end -}}
-{{- $cacheSecrets := list
-      (dict "value" "controller.tokenSecret" "ref" .Values.controller.tokenSecret)
-      (dict "value" "cache.grantKeySecret" "ref" .Values.cache.grantKeySecret) -}}
-{{- range $i, $a := $cacheSecrets -}}
-{{- range $j, $b := $cacheSecrets -}}
-{{- if and (lt $i $j) $a.ref.name (eq $a.ref.name $b.ref.name) (eq (toString $a.ref.key) (toString $b.ref.key)) -}}
-{{- fail (printf "sparkwing-runner-bundle: %s and %s both read Secret %s key %s. Each must name a different Secret key: pipeline code can read the runner's token, and the grant key signs access to any team's tree" $a.value $b.value $a.ref.name (toString $a.ref.key)) -}}
-{{- end -}}
-{{- end -}}
-{{- end -}}
 {{- if .Values.logs -}}
 {{- fail "sparkwing-runner-bundle: logs was removed with the sparkwing-logs Deployment; runners upload node logs to the controller now. Unset logs and follow the migration guide section \"The logs service is removed\"" -}}
 {{- end -}}
@@ -37,9 +12,6 @@
 {{- end -}}
 {{- if and .Values.runner.alsoClaimTriggers (ne .Values.runner.triggerRunner.kind "inprocess") (not .Values.runner.automountServiceAccountToken) -}}
 {{- fail "sparkwing-runner-bundle: runner.triggerRunner.kind k8s or warm requires runner.automountServiceAccountToken=true so the trigger worker can create and inspect fallback Jobs" -}}
-{{- end -}}
-{{- if and (not .Values.serviceAccount.create) (not .Values.serviceAccount.shareAcrossComponents) -}}
-{{- fail "sparkwing-runner-bundle: serviceAccount.create=false puts the runner and cache pods on one ServiceAccount; set serviceAccount.shareAcrossComponents=true to accept that, or leave create=true for one account per component" -}}
 {{- end -}}
 {{- if and .Values.resourceQuota.enabled (not .Values.limitRange.enabled) -}}
 {{- fail "sparkwing-runner-bundle: resourceQuota.enabled=true requires limitRange.enabled=true, whose default and defaultRequest give a pod that declares no resources something for the quota to count. Without it the API server rejects every such pod in the namespace" -}}

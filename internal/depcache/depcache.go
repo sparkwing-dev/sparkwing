@@ -179,17 +179,17 @@ func (st *Run) restore(ctx context.Context, workdir string) {
 	defer unlock()
 
 	b := selectBackend(ctx)
-	hit, err := b.exists(ctx, key)
+	hit, err := b.Exists(ctx, key)
 	if err != nil {
 		slog.Warn("depcache: backend probe failed; running uncached",
-			"node", st.node, "cache", st.spec.Name, "backend", b.label(), "err", err)
+			"node", st.node, "cache", st.spec.Name, "backend", b.Label(), "err", err)
 		st.disabled = true
 		return
 	}
 	if !hit {
 		st.missed = true
 		slog.Info("depcache: miss; will save after success",
-			"node", st.node, "cache", st.spec.Name, "key", key, "backend", b.label())
+			"node", st.node, "cache", st.spec.Name, "key", key, "backend", b.Label())
 		return
 	}
 
@@ -200,7 +200,7 @@ func (st *Run) restore(ctx context.Context, workdir string) {
 	}
 
 	start := time.Now()
-	size, err := b.fetch(ctx, key, dir)
+	size, err := b.Fetch(ctx, key, dir)
 	if err != nil {
 		slog.Warn("depcache: restore failed; running uncached",
 			"node", st.node, "cache", st.spec.Name, "key", key, "err", err)
@@ -208,7 +208,7 @@ func (st *Run) restore(ctx context.Context, workdir string) {
 	}
 	slog.Info(fmt.Sprintf("depcache: restored %s (%s) in %s",
 		st.spec.Name, tarsafe.HumanBytes(size), time.Since(start).Round(100*time.Millisecond)),
-		"node", st.node, "key", key, "backend", b.label())
+		"node", st.node, "key", key, "backend", b.Label())
 }
 
 // Save archives the directory after a successful run whose restore missed
@@ -233,7 +233,7 @@ func (st *Run) Save(ctx context.Context, runErr error) {
 
 	b := selectBackend(ctx)
 	start := time.Now()
-	size, err := b.store(ctx, st.key, st.dir)
+	size, err := b.Store(ctx, st.key, st.dir)
 	if err != nil {
 		slog.Warn("depcache: save failed; next run will re-download",
 			"node", st.node, "cache", st.spec.Name, "key", st.key, "err", err)
@@ -241,7 +241,7 @@ func (st *Run) Save(ctx context.Context, runErr error) {
 	}
 	slog.Info(fmt.Sprintf("depcache: saved %s (%s) in %s",
 		st.spec.Name, tarsafe.HumanBytes(size), time.Since(start).Round(100*time.Millisecond)),
-		"node", st.node, "key", st.key, "backend", b.label())
+		"node", st.node, "key", st.key, "backend", b.Label())
 }
 
 func deriveKey(name, scope, lockPath string) (string, error) {

@@ -53,7 +53,7 @@ var ErrPreconditionFailed = errors.New("storage: conditional write precondition 
 // caller-defined opaque strings. Implementations must tolerate
 // concurrent Put on the same key (last write wins) without data
 // corruption. Open via [storeurl.OpenArtifactStore]; implementations
-// live in the [fs], [s3], and [sparkwingcache] subpackages.
+// live in the [fs] and [s3] subpackages.
 type ArtifactStore interface {
 	// Get returns a reader for the blob at key. The caller closes it.
 	// Returns ErrNotFound if the key has never been written.

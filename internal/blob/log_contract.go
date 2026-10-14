@@ -2,6 +2,7 @@ package blob
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"time"
 
@@ -53,7 +54,30 @@ type LogSubject struct {
 
 // Validate rejects malformed tagged subjects before authority or object-key lookup.
 func (subject LogSubject) Validate() error {
-	panic("unimplemented: c1-logs")
+	if subject.Team == "" || subject.RunID == "" {
+		return fmt.Errorf("log subject requires team and run")
+	}
+	switch subject.Kind {
+	case LogJobAttempt:
+		if subject.Unit == nil && subject.Attempt != nil && validAttempt(*subject.Attempt) && subject.Attempt.Team == subject.Team && subject.Attempt.RunID == subject.RunID {
+			return nil
+		}
+	case LogOwnerUnit:
+		if subject.Attempt != nil || subject.Unit == nil || subject.Unit.Generation <= 0 {
+			break
+		}
+		switch subject.Unit.Kind {
+		case LogTrigger, LogPlan:
+			if subject.Unit.Source == nil {
+				return nil
+			}
+		case LogEval:
+			if s := subject.Unit.Source; s != nil && s.NodeID != "" && s.Generation > 0 {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("invalid log subject identity")
 }
 
 // LogSigningRequest requests immutable segment slots under one authenticated subject.

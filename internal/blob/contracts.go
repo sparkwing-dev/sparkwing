@@ -158,6 +158,8 @@ type Authority struct {
 	Attempt       runspec.Optional[runspec.AttemptIdentity]
 	Repo          runspec.RepoKey
 	Ref           RefFacts
+	// Upload binds owner and publication writes, which have no job attempt.
+	Upload runspec.Optional[UploadIdentity]
 }
 
 // safety: EdgeRequest checks authority independently from integrity and existence.
@@ -173,7 +175,7 @@ type EdgeRequest struct {
 // Own-upload job edges require the exact Attempt, including generation. Owner and non-job
 // publication receipts authorize only binary/source_bundle, never another job's outputs.
 // Imported publication output edges require the matching imported attempt in a publish run.
-func AuthorizeEdge(EdgeRequest) error { panic("unimplemented: c1-data") }
+func AuthorizeEdge(request EdgeRequest) error { return authorizeEdge(request) }
 
 // safety: CommitRecordRequest leaves provenance to server derivation and checks every member.
 type CommitRecordRequest struct {
@@ -289,10 +291,10 @@ type HTTPClient interface {
 }
 
 // safety: NewSignedStore verifies transferred bytes and never falls back to cache-service routes.
-func NewSignedStore(SignedStoreOptions) Store { panic("unimplemented: c1-data") }
+func NewSignedStore(options SignedStoreOptions) Store { return newSignedStore(options) }
 
 // safety: ObjectKey produces teams/<team>/cas/<sha256> after validating both components.
-func ObjectKey(team string, digest Digest) (string, error) { panic("unimplemented: c1-data") }
+func ObjectKey(team string, digest Digest) (string, error) { return objectKey(team, digest) }
 
 // safety: MemoKey cannot share an unclaimed result across pipelines.
 type MemoKey struct {
@@ -304,7 +306,7 @@ type MemoKey struct {
 }
 
 // safety: MemoNamespace reserves manual:<ref> for submitter-vouched writes.
-func MemoNamespace(MemoKey) (string, error) { panic("unimplemented: c1-data") }
+func MemoNamespace(key MemoKey) (string, error) { return memoNamespace(key) }
 
 // safety: MemoLookup uses the authority's server-derived scope and verified default fallback.
 type MemoLookup struct {
@@ -403,13 +405,14 @@ type BinaryExecution struct {
 }
 
 // safety: CheckBinaryExecution permits local provenance only with trust_local_builds.
-func CheckBinaryExecution(BinaryExecution) error { panic("unimplemented: c1-data") }
+func CheckBinaryExecution(execution BinaryExecution) error { return checkBinaryExecution(execution) }
 
 // safety: RemoteCacheOptions uses the user's existing repo-bound read authority.
 type RemoteCacheOptions struct {
 	Profile      string
 	AuthorityRef string
 	Repo         runspec.RepoKey
+	Records      RecordStore
 }
 
 // safety: RemoteCache exposes reads only, with no binary fetch or shared-cache write method.
@@ -421,7 +424,9 @@ type RemoteCache interface {
 }
 
 // safety: OpenRemoteCache is opt-in by profile and never borrows a runner credential.
-func OpenRemoteCache(RemoteCacheOptions, Store) (RemoteCache, error) { panic("unimplemented: c1-data") }
+func OpenRemoteCache(options RemoteCacheOptions, store Store) (RemoteCache, error) {
+	return openRemoteCache(options, store)
+}
 
 // safety: PublishPolicy labels published results local and never creates an owner claim.
 // Publication failure is reported separately from the completed local run's outcome.
@@ -451,6 +456,8 @@ type RecordLookup struct {
 	Authority Authority
 	Key       RecordKey
 	Budget    Budget
+	// VerifiedDefaultOnly resolves the ref from sealed default-branch evidence.
+	VerifiedDefaultOnly bool
 }
 
 // safety: RecordLookupResult distinguishes a cache miss from a record with required missing bytes.
@@ -483,16 +490,16 @@ type WriteScopeIntent struct {
 
 // safety: ResolveWriteKey derives repository and vouched/manual ref scope from live authority.
 // It rejects client-selected real-ref writes without server-verified facts.
-func ResolveWriteKey(Authority, WriteScopeIntent) (RecordKey, error) {
-	panic("unimplemented: c1-data")
+func ResolveWriteKey(authority Authority, intent WriteScopeIntent) (RecordKey, error) {
+	return resolveWriteKey(authority, intent)
 }
 
 // safety: RecordNamespace encodes typed components without delimiter collisions.
 // Memo namespaces preserve memo/<repo_key>/<ref_scope>/<pipeline>/<job>/<hash> semantics.
-func RecordNamespace(RecordKey) (string, error) { panic("unimplemented: c1-data") }
+func RecordNamespace(key RecordKey) (string, error) { return recordNamespace(key) }
 
 // safety: DepcacheNamespace shares the memo write-ref rule while preserving the cache name and key.
-func DepcacheNamespace(DepcacheKey) (string, error) { panic("unimplemented: c1-data") }
+func DepcacheNamespace(key DepcacheKey) (string, error) { return depcacheNamespace(key) }
 
 // safety: UploadIdentityKind covers executable jobs, preplan owners and non-executable publication.
 type UploadIdentityKind string
@@ -557,6 +564,6 @@ var UploadRules = []UploadRule{
 // safety: AuthorizeUpload checks the C2-resolved identity and target kind in the write transaction.
 // It requires a live owner fence or publication authority, verifies imported job identity,
 // and rejects identity/principal/capability mismatches with the authenticated authority.
-func AuthorizeUpload(Authority, UploadIdentity, Kind) error {
-	panic("unimplemented: c1-data")
+func AuthorizeUpload(authority Authority, identity UploadIdentity, kind Kind) error {
+	return authorizeUpload(authority, identity, kind)
 }

@@ -9,7 +9,6 @@ import (
 
 var publicBinaries = []string{
 	"sparkwing",
-	"sparkwing-cache",
 	"sparkwing-controller",
 	"sparkwing-runner",
 }

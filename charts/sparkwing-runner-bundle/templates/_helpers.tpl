@@ -100,19 +100,6 @@ explicit name is provided, fall back to the fullname.
 {{- end }}
 
 {{/*
-Cache ServiceAccount name. The cache server never calls the
-Kubernetes API, so it gets its own unbound ServiceAccount instead of
-sharing the runner's Role.
-*/}}
-{{- define "sparkwing-runner-bundle.cacheServiceAccountName" -}}
-{{- if .Values.serviceAccount.create }}
-{{- include "sparkwing-runner-bundle.cache.fullname" . }}
-{{- else }}
-{{- default "default" .Values.serviceAccount.name }}
-{{- end }}
-{{- end }}
-
-{{/*
 Per-component fully qualified resource names (Deployments,
 Services, PVCs). Component suffix keeps the workloads
 distinct under one release.
@@ -132,10 +119,6 @@ component names do, so a long release still yields a valid DNS label.
 {{- else -}}
 {{- include "sparkwing-runner-bundle.componentFullname" (dict "root" . "component" "runner-gocache") -}}
 {{- end }}
-{{- end }}
-
-{{- define "sparkwing-runner-bundle.cache.fullname" -}}
-{{- include "sparkwing-runner-bundle.componentFullname" (dict "root" . "component" "cache") }}
 {{- end }}
 
 {{/*
@@ -173,24 +156,6 @@ URL always wins, including for parent installs with naming overrides.
 {{- end }}
 
 {{/*
-Public base URL clients use to reach the cache. The cache rewrites the
-upstream URLs inside npm packuments and PyPI simple pages against it,
-so it is correct only when every client dials the same address. A
-ClusterIP Service is that case, so it is the default. Any other Service
-type means clients reach the cache at more than one address, so this
-stays empty and the cache rewrites each response from its own request
-Host instead. Set it explicitly when an Ingress or a load balancer is
-the one address every client uses.
-*/}}
-{{- define "sparkwing-runner-bundle.cachePublicURL" -}}
-{{- if .Values.cache.publicUrl -}}
-{{- .Values.cache.publicUrl -}}
-{{- else if eq .Values.cache.service.type "ClusterIP" -}}
-{{- printf "http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.cache.fullname" .) .Release.Namespace -}}
-{{- end -}}
-{{- end }}
-
-{{/*
 Render runner --label flags. Each entry in .Values.runner.labels
 becomes a separate --label=<value> arg. Done in a helper so the
 deployment template stays readable.
@@ -198,51 +163,5 @@ deployment template stays readable.
 {{- define "sparkwing-runner-bundle.runnerLabelArgs" -}}
 {{- range .Values.runner.labels }}
 - {{ printf "--label=%s" . | quote }}
-{{- end }}
-{{- end }}
-
-{{/*
-Dependency-proxy env for the runner container: point go / npm / pip at
-the cache pod's pull-through registry proxy so a build's dependency
-fetch is served in-cluster instead of egressing on every run.
-
-Constraints encoded in the values:
-  - GOPROXY separates proxy from upstream with "|" so ANY proxy error
-    falls through to proxy.golang.org; "," only falls through on 404 and
-    410, which would fail every build while the cache pod rolls.
-  - "direct" stays last so GOPRIVATE modules keep resolving through the
-    ~/.netrc that runner-entrypoint.sh seeds from $GITHUB_TOKEN.
-  - pip ignores a plain-HTTP index unless its host is also named in
-    PIP_TRUSTED_HOST, and then fails outright rather than falling back
-    to PyPI.
-  - the proxy rewrites the file URLs inside /proxy/pypi/simple/ onto
-    /proxy/pythonhosted, so the download half needs no separate env.
-
-A name already present in runner.extraEnv is skipped rather than
-emitted twice: K8s rejects duplicate env names outright, so "user value
-wins" has to be decided here, not by list order.
-*/}}
-{{- define "sparkwing-runner-bundle.runnerDependencyProxyEnv" -}}
-{{- if and .Values.cache.enabled .Values.cache.dependencyProxy.enabled -}}
-{{- $host := printf "%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.cache.fullname" .) .Release.Namespace -}}
-{{- $base := printf "http://%s" $host -}}
-{{- $taken := dict -}}
-{{- range .Values.runner.extraEnv }}
-{{- $_ := set $taken (.name | toString) true }}
-{{- end }}
-{{- $defaults := list
-  (dict "name" "GOPROXY" "value" (printf "%s/proxy/golang|https://proxy.golang.org,direct" $base))
-  (dict "name" "npm_config_registry" "value" (printf "%s/proxy/npm" $base))
-  (dict "name" "PIP_INDEX_URL" "value" (printf "%s/proxy/pypi/simple/" $base))
-  (dict "name" "PIP_TRUSTED_HOST" "value" $host) -}}
-{{- $out := list -}}
-{{- range $defaults }}
-{{- if not (hasKey $taken .name) }}
-{{- $out = append $out . }}
-{{- end }}
-{{- end }}
-{{- if $out }}
-{{- toYaml $out }}
-{{- end }}
 {{- end }}
 {{- end }}
