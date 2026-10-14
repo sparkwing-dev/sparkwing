@@ -234,6 +234,7 @@ CREATE TABLE triggers (
     credit_paid_seconds bigint NOT NULL DEFAULT 0,
     credit_paid_amount_micro bigint NOT NULL DEFAULT 0,
     credit_reservation_id text NOT NULL DEFAULT ''::text,
+    runner_pin text NOT NULL DEFAULT ''::text,
     CONSTRAINT triggers_pkey PRIMARY KEY (id)
 );
 

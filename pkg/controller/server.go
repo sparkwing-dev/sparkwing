@@ -785,7 +785,7 @@ func (s *Server) DaemonHandler() http.Handler {
 func (s *Server) handler(finishRun http.HandlerFunc) http.Handler {
 	s.requireAuthForTeams()
 	mux, router := s.routers(finishRun)
-	router.Handle("/", s.authenticated(mux, s.githubRunnerFence(s.tokenBudgeted(s.teamBoundary(mux, unsupportedRouteFallback(mux))))))
+	router.Handle("/", s.authenticated(mux, s.githubRunnerFence(s.hereRunnerFence(s.tokenBudgeted(s.teamBoundary(mux, unsupportedRouteFallback(mux)))))))
 	h := withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
 		withRequestLog(router, s.logger, muxRouteLabeler(router, mux), func(r *http.Request) string {
 			return ratelimit.ClientIP(r)

@@ -170,6 +170,28 @@ func TestTriggerHost_HostsTheRunWithEachNodeUnderItsOwnClaim(t *testing.T) {
 	}
 }
 
+// safety: planning and the node's own plan read the same operator allow-listed
+// variables, so plan code that reads one plans the same in both and the node
+// runs instead of failing with plan_drift.
+func TestTriggerHost_PlanCodeSeesTheOperatorAllowListAsTheNodeDoes(t *testing.T) {
+	writeMachineSettings(t, "run:\n  submit_env_allow: [AWS_REGION]\n")
+	t.Setenv("AWS_REGION", "us-west-2")
+	envOut := filepath.Join(t.TempDir(), "env")
+	h := newHostedTrigger(t, map[string]string{"envout": envOut, "region": "true"})
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+	if err := h.host(t, ctx, nil, 0); err != nil {
+		t.Fatalf("host: %v", err)
+	}
+	if n := h.node(t, "build"); n.Outcome != string(sparkwing.Success) {
+		t.Fatalf("build = %s (%s, %s), want success", n.Outcome, n.FailureReason, n.Error)
+	}
+	env, err := os.ReadFile(envOut)
+	if err != nil || !strings.Contains(string(env), "PLAN_REGION=us-west-2") {
+		t.Fatalf("the node's environment = %s (%v), want the planned PLAN_REGION=us-west-2", env, err)
+	}
+}
+
 // safety: a node is checked against the plan the run host accepted, so a
 // pipeline whose plan differs between its processes fails the node with
 // plan_drift before the node's body runs.

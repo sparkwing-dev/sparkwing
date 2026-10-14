@@ -1180,7 +1180,18 @@ each path and whether it is tracked. Untrack it with
 Requires --profile naming a profile with controller: set; there is no
 default. A pipeline whose sparkwing.yaml entry names profile: P is pinned
 to P: trigger refuses any other --profile, and 'sparkwing run' refuses it
-locally.`,
+locally.
+
+--runner here is the hotfix break-glass: the controller pins the run to a
+one-shot runner credential that can claim only that run, once, within
+10 minutes, and expires after six hours, the hosted-run limit. This process builds the checkout's pipeline,
+hosts the run on this machine, follows it, and exits on its outcome.
+Secrets reach the run as they reach any runner: declared in the plan,
+released per claim, audited and masked. --reason is required and is
+recorded with the caller on the run. The checkout must have no
+uncommitted tracked changes, because the run records HEAD. An interrupt
+cancels the run; a second one stops hosting it. See the hotfix runbook
+('sparkwing docs read --topic hotfix-runner').`,
 	PosArgs: []PosArg{
 		{Name: "<pipeline>", Desc: "Pipeline name registered on the controller", Required: true},
 	},
@@ -1189,14 +1200,17 @@ locally.`,
 		{Name: "detach", Desc: "Return once the trigger is registered (print the run id); don't follow", Group: "System"},
 		{Name: "working-tree", Desc: "Run tracked changes and untracked non-ignored files from an immutable remote snapshot", Group: "Source"},
 		{Name: "allow-secret-file", Argument: "PATH", Desc: "Send this secret-shaped working-tree file anyway; PATH is repository-relative (repeatable)", Group: "Source"},
+		{Name: "runner", Argument: "here", Desc: "Host the run on this machine under a one-shot credential bound to it (hotfix break-glass)", Group: "Placement"},
+		{Name: "reason", Argument: "TEXT", Desc: "Why --runner here is needed; recorded on the run and in the audit log", Group: "Placement"},
 	},
-	GroupOrder:  []string{"Source", "System", "Other"},
+	GroupOrder:  []string{"Source", "Placement", "System", "Other"},
 	UsageSuffix: "[-- pipeline-flags...]",
 	Examples: []Example{
 		{"Submit and follow", "sparkwing pipeline trigger fictional-release --profile prod --version v1.2.3"},
 		{"Fire-and-forget; print run id and exit", "sparkwing pipeline trigger fictional-release --profile prod --detach"},
 		{"Run the current dirty tree remotely", "sparkwing pipeline trigger test --profile gaming --working-tree"},
 		{"Send a secret-shaped file the snapshot refuses", "sparkwing pipeline trigger test --profile gaming --working-tree --allow-secret-file config/local.env"},
+		{"Hotfix: run the release on this machine with its controller secrets", `sparkwing pipeline trigger fictional-release --profile prod --runner here --reason "INC-42 fleet down"`},
 	},
 }
 

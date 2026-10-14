@@ -759,11 +759,15 @@ type triggerReq struct {
 	ParentRunID  string            `json:"parent_run_id,omitempty"`
 	ParentNodeID string            `json:"parent_node_id,omitempty"`
 	RetryOf      string            `json:"retry_of,omitempty"`
+	Runner       string            `json:"runner,omitempty"`
+	Reason       string            `json:"reason,omitempty"`
 }
 
 type triggerResp struct {
-	RunID  string `json:"run_id"`
-	Status string `json:"status"`
+	RunID                string `json:"run_id"`
+	Status               string `json:"status"`
+	RunnerToken          string `json:"runner_token,omitempty"`
+	RunnerTokenExpiresAt int64  `json:"runner_token_expires_at,omitempty"`
 }
 
 // safety: every other trigger_env key a run reads is controller-written, so an inbound copy forges it.
@@ -910,6 +914,11 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeTriggerParent(w, r, body.ParentRunID, body.ParentNodeID) {
 		return
 	}
+	here, err := s.hereRunnerRequest(r, body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	tenant, ok := s.requestTenant(w, r)
 	if !ok {
 		return
@@ -939,6 +948,10 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if sourceKey != "" {
 		writeError(w, http.StatusBadRequest, errors.New("source bundles require a working-tree trigger"))
+		return
+	}
+	if here != nil && sourceKey != "" {
+		writeError(w, http.StatusBadRequest, errors.New("a runner here run builds the caller's checkout, so it takes no source bundle"))
 		return
 	}
 	if body.RetryOf != "" {
@@ -1050,7 +1063,14 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.admitTrigger(triggerCtx, tenant, intake); err != nil {
+	var hereToken *store.Token
+	var rawHereToken string
+	if here != nil {
+		rawHereToken, hereToken, err = s.admitHereTrigger(triggerCtx, tenant, intake, *here)
+	} else {
+		err = s.admitTrigger(triggerCtx, tenant, intake)
+	}
+	if err != nil {
 		release()
 		if errors.Is(err, store.ErrSourceAlreadyBound) {
 			writeError(w, http.StatusConflict, err)
@@ -1063,10 +1083,12 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusAccepted, triggerResp{
-		RunID:  runID,
-		Status: "dispatched",
-	})
+	resp := triggerResp{RunID: runID, Status: "dispatched"}
+	if hereToken != nil {
+		noteHereRunnerAudit(r.Context(), hereToken, here.Reason)
+		resp.RunnerToken, resp.RunnerTokenExpiresAt = rawHereToken, hereToken.ExpiresAt.Unix()
+	}
+	writeJSON(w, http.StatusAccepted, resp)
 }
 
 // safety: the digest is reserved before the run is created, so two simultaneous
@@ -1114,6 +1136,28 @@ type triggerIntake struct {
 func (s *Server) admitTrigger(ctx context.Context, t *store.Tenant, in triggerIntake) error {
 	// safety: the trigger and the run it names are written together, so a guard
 	// that refuses the run leaves no trigger behind for a worker to claim.
+	trig, run := triggerRows(in)
+	var err error
+	if in.SourceKey != "" {
+		err = t.CreateSourceTriggerWithRun(ctx, trig, run, in.SourceKey, in.User, in.SourceToken)
+	} else {
+		err = t.CreateTriggerWithRun(ctx, trig, run)
+	}
+	if err != nil {
+		if errors.Is(err, store.ErrDuplicateIdempotencyKey) || errors.Is(err, store.ErrComputeLimit) {
+			return err
+		}
+		if errors.Is(err, store.ErrSourceAlreadyBound) {
+			return err
+		}
+		return fmt.Errorf("persist the trigger and its run: %w", err)
+	}
+
+	s.recordQueueActivity(in.At)
+	return nil
+}
+
+func triggerRows(in triggerIntake) (store.Trigger, store.Run) {
 	trig := store.Trigger{
 		ID:             in.RunID,
 		Pipeline:       in.Pipeline,
@@ -1151,24 +1195,7 @@ func (s *Server) admitTrigger(ctx context.Context, t *store.Tenant, in triggerIn
 		CreatedAt:     in.At,
 		StartedAt:     in.At,
 	}
-	var err error
-	if in.SourceKey != "" {
-		err = t.CreateSourceTriggerWithRun(ctx, trig, run, in.SourceKey, in.User, in.SourceToken)
-	} else {
-		err = t.CreateTriggerWithRun(ctx, trig, run)
-	}
-	if err != nil {
-		if errors.Is(err, store.ErrDuplicateIdempotencyKey) || errors.Is(err, store.ErrComputeLimit) {
-			return err
-		}
-		if errors.Is(err, store.ErrSourceAlreadyBound) {
-			return err
-		}
-		return fmt.Errorf("persist the trigger and its run: %w", err)
-	}
-
-	s.recordQueueActivity(in.At)
-	return nil
+	return trig, run
 }
 
 type heartbeatResp struct {

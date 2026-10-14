@@ -649,6 +649,10 @@ type TriggerRequest struct {
 	// RetryOf marks this trigger as a retry of the named run; used by
 	// skip-passed rehydration to seed outputs from the prior run.
 	RetryOf string `json:"retry_of,omitempty"`
+	// Runner "here" pins the run to a one-shot runner the caller starts;
+	// Reason is required with it and recorded on the run.
+	Runner string `json:"runner,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // TriggerMeta mirrors the controller's trigger block. Kept separate
@@ -675,6 +679,10 @@ type GitMeta struct {
 type TriggerResponse struct {
 	RunID  string `json:"run_id"`
 	Status string `json:"status"`
+	// RunnerToken is the one-shot runner credential a runner "here"
+	// trigger returns, valid until RunnerTokenExpiresAt (Unix seconds).
+	RunnerToken          string `json:"runner_token,omitempty"`
+	RunnerTokenExpiresAt int64  `json:"runner_token_expires_at,omitempty"`
 }
 
 // CreateTrigger posts a new trigger and returns the assigned run id.

@@ -39,6 +39,7 @@ type inputs struct {
 	FanLog  string `flag:"fanlog" desc:"File each fan-out node's body appends its id to"`
 	FanFail string `flag:"fanfail" desc:"File whose presence fails the node generated for target fail"`
 	FanMemo bool   `flag:"fanmemo" desc:"Memoize the fan-out source"`
+	Region  bool   `flag:"region" desc:"The build node's env carries the AWS_REGION plan code reads"`
 }
 
 type fixtureSecrets struct {
@@ -146,6 +147,9 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, rc spar
 				}
 				return os.WriteFile(in.Recover, []byte(f.Err.Error()), 0o600)
 			})
+	}
+	if in.Region {
+		build.Env("PLAN_REGION", os.Getenv("AWS_REGION"))
 	}
 	if in.Group {
 		build.Concurrency(sparkwing.NewConcurrencyGroup("pod-group", sparkwing.ConcurrencyLimit{Capacity: 1}))

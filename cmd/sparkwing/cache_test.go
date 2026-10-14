@@ -49,9 +49,6 @@ func TestCacheExplainSaysATypeScriptPipelineIsNotCached(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"main":"pipeline.ts","dependencies":{"@sparkwing/sdk":"0.1.0"}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "sparkwing.yaml"), []byte("pipelines:\n  - name: ts\n    entrypoint: ts\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	var runErr error
 	out := captureStdout(t, func() {
 		runErr = runCacheExplain([]string{"-o", "json"})

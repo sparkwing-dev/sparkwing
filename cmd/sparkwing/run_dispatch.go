@@ -73,6 +73,8 @@ type runFlags struct {
 
 	allowSecretFiles []string
 
+	hereReason string
+
 	index string
 
 	runHandleFile string
@@ -596,6 +598,9 @@ func createRemoteTrigger(runProfile *profile.Profile, pipelineName, source strin
 			GithubOwner: owner,
 			GithubRepo:  githubRepository,
 		},
+	}
+	if flags.hereReason != "" {
+		request.Runner, request.Reason = "here", flags.hereReason
 	}
 
 	if snapshot != nil {

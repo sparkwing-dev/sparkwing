@@ -66,6 +66,10 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	}
 	masker := secrets.NewMasker()
 	masker.Register(h.Token)
+	env, err := podProcessEnv(masker, logger)
+	if err != nil {
+		return err
+	}
 	routes, err := nodehost.Start(logger)
 	if err != nil {
 		return err
@@ -95,7 +99,7 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 		return err
 	}
 	res, err := nodehost.Execute(ctx, nodehost.Config{
-		Session:  nodehost.SessionConfig{Entry: h.Entry, Dir: h.Dir, Sink: planSink, Env: podSessionEnv(masker)},
+		Session:  nodehost.SessionConfig{Entry: h.Entry, Dir: h.Dir, Sink: planSink, Env: env},
 		Pipeline: trig.Pipeline, Args: triggerHostArgs(ctx, c, trig, logger),
 		Run: rc, Requires: requires,
 		ParentRunID: trig.ParentRunID, RetryOf: trig.RetryOf, RetrySource: trig.RetrySource,

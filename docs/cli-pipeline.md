@@ -815,6 +815,17 @@ default. A pipeline whose sparkwing.yaml entry names profile: P is pinned
 to P: trigger refuses any other --profile, and 'sparkwing run' refuses it
 locally.
 
+--runner here is the hotfix break-glass: the controller pins the run to a
+one-shot runner credential that can claim only that run, once, within
+10 minutes, and expires after six hours, the hosted-run limit. This process builds the checkout's pipeline,
+hosts the run on this machine, follows it, and exits on its outcome.
+Secrets reach the run as they reach any runner: declared in the plan,
+released per claim, audited and masked. --reason is required and is
+recorded with the caller on the run. The checkout must have no
+uncommitted tracked changes, because the run records HEAD. An interrupt
+cancels the run; a second one stops hosting it. See the hotfix runbook
+('sparkwing docs read --topic hotfix-runner').
+
 ### Arguments
 
 - `<pipeline>` (required) -- Pipeline name registered on the controller
@@ -827,6 +838,8 @@ locally.
 | `--detach` | Return once the trigger is registered (print the run id); don't follow |
 | `--working-tree` | Run tracked changes and untracked non-ignored files from an immutable remote snapshot |
 | `--allow-secret-file PATH` | Send this secret-shaped working-tree file anyway; PATH is repository-relative (repeatable) |
+| `--runner here` | Host the run on this machine under a one-shot credential bound to it (hotfix break-glass) |
+| `--reason TEXT` | Why --runner here is needed; recorded on the run and in the audit log |
 
 ### Examples
 
@@ -842,4 +855,7 @@ sparkwing pipeline trigger test --profile gaming --working-tree
 
 # Send a secret-shaped file the snapshot refuses
 sparkwing pipeline trigger test --profile gaming --working-tree --allow-secret-file config/local.env
+
+# Hotfix: run the release on this machine with its controller secrets
+sparkwing pipeline trigger fictional-release --profile prod --runner here --reason "INC-42 fleet down"
 ```
