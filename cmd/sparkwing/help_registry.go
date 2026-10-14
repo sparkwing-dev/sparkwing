@@ -3297,7 +3297,7 @@ var cmdAnnotations = Command{
 	Path:     "sparkwing runs annotations",
 	Synopsis: "Read or append persistent node + step annotations",
 	Description: `Annotations are short summary strings that pipelines (via
-sparkwing.Annotate) and agents append to a node or step during a
+sparkwing.AnnotateOld) and agents append to a node or step during a
 run. They show up on the dashboard alongside outcome. This verb
 lets an agent read every annotation on a run or contribute one
 without going through the SDK.`,

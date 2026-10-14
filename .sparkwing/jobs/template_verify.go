@@ -133,13 +133,13 @@ func (j *buildVerifyCLIJob) run(ctx context.Context) (verifyEnv, error) {
 	}
 	core := discoverSparksCore(root)
 	if len(core) > 0 {
-		sparkwing.Annotate(ctx, fmt.Sprintf("built CLI; sparks-core checkout with %d modules", len(core)))
+		sparkwing.AnnotateOld(ctx, fmt.Sprintf("built CLI; sparks-core checkout with %d modules", len(core)))
 	} else {
-		sparkwing.Annotate(ctx, "built CLI; no local sparks-core checkout (using published modules)")
+		sparkwing.AnnotateOld(ctx, "built CLI; no local sparks-core checkout (using published modules)")
 	}
 	proof := resolveProofEnv(ctx, root, core, j.Exhaustive)
 	if proof.Reusable {
-		sparkwing.Annotate(ctx, "proof inputs digested; templates whose inputs are unchanged reuse a recorded proof")
+		sparkwing.AnnotateOld(ctx, "proof inputs digested; templates whose inputs are unchanged reuse a recorded proof")
 	} else {
 		sparkwing.Info(ctx, "verifying every template: %s", proof.Reason)
 	}
@@ -228,7 +228,7 @@ type templateVerifyGate struct {
 func (j *templateVerifyGate) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return sparkwing.Step(w, "run", func(ctx context.Context) (TemplateVerifySummary, error) {
 		s := TemplateVerifySummary{Total: len(verifyTemplates)}
-		sparkwing.Annotate(ctx, fmt.Sprintf("verified %d templates", s.Total))
+		sparkwing.AnnotateOld(ctx, fmt.Sprintf("verified %d templates", s.Total))
 		return s, nil
 	}), nil
 }
@@ -238,7 +238,7 @@ func verifyTemplateFn(m templates.Manifest, envRef sparkwing.Ref[verifyEnv]) fun
 		env := envRef.Get(ctx)
 		digest, dir, reuse := reusableProof(ctx, env.Proof, m)
 		if reuse {
-			sparkwing.Annotate(ctx, fmt.Sprintf("%s: reused a recorded proof; every input digest matched", m.Name))
+			sparkwing.AnnotateOld(ctx, fmt.Sprintf("%s: reused a recorded proof; every input digest matched", m.Name))
 			return nil
 		}
 		outcome, err := verifyTemplate(ctx, m, env)
@@ -331,12 +331,12 @@ func verifyTemplate(ctx context.Context, m templates.Manifest, env verifyEnv) (t
 
 	switch m.Tier() {
 	case templates.VerifyCompileOnly:
-		sparkwing.Annotate(ctx, fmt.Sprintf("%s: compiled + linted + explained (compile-only)", m.Name))
+		sparkwing.AnnotateOld(ctx, fmt.Sprintf("%s: compiled + linted + explained (compile-only)", m.Name))
 		return out, nil
 	case templates.VerifyRunnable, templates.VerifyDryRunnable:
 		if ready, missing := runToolchainReady(ctx, m); !ready {
 			sparkwing.Info(ctx, "%s: run SKIPPED -- %s not available on host; keeping gate green (compiled + linted + explained only)", m.Name, missing)
-			sparkwing.Annotate(ctx, fmt.Sprintf("%s: compiled + linted + explained; run skipped (%s unavailable)", m.Name, missing))
+			sparkwing.AnnotateOld(ctx, fmt.Sprintf("%s: compiled + linted + explained; run skipped (%s unavailable)", m.Name, missing))
 			out.Skipped, out.SkipReason = true, missing
 			return out, nil
 		}
@@ -361,7 +361,7 @@ func verifyTemplate(ctx context.Context, m templates.Manifest, env verifyEnv) (t
 		if _, err := runCmd.Run(); err != nil {
 			return out, fmt.Errorf("%s: run: %w", m.Name, err)
 		}
-		sparkwing.Annotate(ctx, fmt.Sprintf("%s: compiled + linted + explained + %s", m.Name, mode))
+		sparkwing.AnnotateOld(ctx, fmt.Sprintf("%s: compiled + linted + explained + %s", m.Name, mode))
 		out.RanRunStep = true
 		return out, nil
 	default:

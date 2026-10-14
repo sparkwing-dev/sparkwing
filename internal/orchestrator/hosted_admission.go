@@ -19,7 +19,7 @@ import (
 )
 
 // safety: a daemon unreachable for a reason a local run degrades on leaves the run unadmitted, as in the dispatcher.
-func hostedAdmission(ctx context.Context, opts *Options, backends Backends, plan func() *nodeproto.PlanDoc) (*nodehost.Admission, error) {
+func hostedAdmission(ctx context.Context, opts *Options, backends Backends, plan func() *nodeproto.PlanDocOld) (*nodehost.Admission, error) {
 	a := &nodehost.Admission{Slots: backends.Concurrency}
 	trigger := opts.Trigger.Source
 	if trigger == "" {
@@ -54,7 +54,7 @@ type hostedAdmitter struct {
 	la       *LocalAdmission
 	backends Backends
 	pipeline string
-	plan     func() *nodeproto.PlanDoc
+	plan     func() *nodeproto.PlanDocOld
 	// safety: set by the run lease, which is granted before any node asks, so node requests read them unlocked.
 	attachToken  string
 	attachedHost bool

@@ -19,7 +19,7 @@ type PlanRequest struct {
 	Pipeline string
 	// Args are the run's flag values; describe's defaults fill in the rest.
 	Args map[string]string
-	Run  nodeproto.RunContext
+	Run  nodeproto.RunContextOld
 	// Requires are the placement labels the host reads from the pipeline's
 	// YAML; they join the plan's own.
 	Requires []string
@@ -38,7 +38,7 @@ type PlanRequest struct {
 // spec_hash on every node, its JSON, and the flag values it was planned with,
 // which every later process of the run must plan with too.
 type PlannedRun struct {
-	Doc  nodeproto.PlanDoc
+	Doc  nodeproto.PlanDocOld
 	JSON []byte
 	Args map[string]string
 }
@@ -89,7 +89,7 @@ func PlanDocument(ctx context.Context, cfg SessionConfig, req PlanRequest) (Plan
 
 // safety: placement labels from the pipeline's YAML are the host's, so plan
 // code can add labels but never drop them.
-func hostRequires(doc nodeproto.PlanDoc, raw []byte, requires []string) (nodeproto.PlanDoc, []byte, error) {
+func hostRequires(doc nodeproto.PlanDocOld, raw []byte, requires []string) (nodeproto.PlanDocOld, []byte, error) {
 	if len(requires) == 0 {
 		return doc, raw, nil
 	}

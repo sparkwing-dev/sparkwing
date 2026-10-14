@@ -40,16 +40,16 @@ func init() {
 
 func TestStepOutputLimitHoldsForEveryStep(t *testing.T) {
 	s := serve(t, nil)
-	if r := s.call(nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: outputLimitPipeline, Args: map[string]string{}, Run: &nodeproto.RunContext{RunID: "limit"}}); !r.OK {
+	if r := s.call(nodeproto.RequestOld{Op: nodeproto.OpPlanOld, Pipeline: outputLimitPipeline, Args: map[string]string{}, Run: &nodeproto.RunContextOld{RunID: "limit"}}); !r.OK {
 		t.Fatal(r.Error)
 	}
-	step := func(id string) nodeproto.RunResult {
+	step := func(id string) nodeproto.RunResultOld {
 		t.Helper()
-		r := s.call(nodeproto.Request{Op: nodeproto.OpRunStep, Node: "big", Step: id, Attempt: 1})
+		r := s.call(nodeproto.RequestOld{Op: nodeproto.OpRunStepOld, Node: "big", Step: id, Attempt: 1})
 		if !r.OK {
 			t.Fatalf("step %s: failed reply %+v", id, r.Error)
 		}
-		var rr nodeproto.RunResult
+		var rr nodeproto.RunResultOld
 		if err := r.Decode(&rr); err != nil {
 			t.Fatal(err)
 		}
@@ -65,7 +65,7 @@ func TestStepOutputLimitHoldsForEveryStep(t *testing.T) {
 	if err := rr.Validate(); err != nil {
 		t.Fatalf("the host refuses an output at the limit: %v", err)
 	}
-	if err := (nodeproto.RunResult{Outcome: nodeproto.OutcomeSuccess, Output: []byte(`"` + overOutput + `"`)}).Validate(); err == nil {
+	if err := (nodeproto.RunResultOld{Outcome: nodeproto.OutcomeSuccess, Output: []byte(`"` + overOutput + `"`)}).Validate(); err == nil {
 		t.Fatal("the host accepts an output over the limit")
 	}
 }

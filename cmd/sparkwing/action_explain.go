@@ -95,7 +95,7 @@ func runPipelineExplain(args []string) error {
 	if err != nil {
 		return err
 	}
-	var snap nodeproto.PlanDoc
+	var snap nodeproto.PlanDocOld
 	err = withPipelineEntry(pipeline, func(ctx context.Context, entry pipelineentry.Command, dir string) error {
 		planned, err := planOverProtocol(ctx, entry, dir, pipeline, passthrough, "explain")
 		snap = planned.doc
@@ -197,7 +197,7 @@ func printAllExplainTable(results []allExplainResult, failed int) {
 	}
 }
 
-func printPlanSnapshot(snap *nodeproto.PlanDoc) {
+func printPlanSnapshot(snap *nodeproto.PlanDocOld) {
 	if snap.Pipeline != "" {
 		fmt.Printf("Plan: %s\n", snap.Pipeline)
 	}

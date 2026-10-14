@@ -8,10 +8,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 )
 
-// PlanDoc is the plan document: one run's nodes, their edges and each node's
+// PlanDocOld is the plan document: one run's nodes, their edges and each node's
 // execution envelope, as $defs/plan in docs/schemas/describe.schema.json
 // declares it.
-type PlanDoc struct {
+type PlanDocOld struct {
 	// Protocol is the node protocol version the document was written for, the
 	// value the Sparkwing-Node-Protocol header carries.
 	Protocol       string     `json:"protocol,omitempty"`

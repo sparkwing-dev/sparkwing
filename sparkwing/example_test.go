@@ -86,7 +86,7 @@ func ExampleExec() {
 func ExampleJobApproval() {
 	plan := sw.NewPlan()
 	b := sw.Job(plan, "build", &demoBuild{})
-	gate := sw.JobApproval(plan, "promote-to-prod", sw.ApprovalConfig{
+	gate := sw.JobApproval(plan, "promote-to-prod", sw.ApprovalConfigOld{
 		Message:  "Promote build to production?",
 		Timeout:  2 * time.Hour,
 		OnExpiry: sw.ApprovalDeny,

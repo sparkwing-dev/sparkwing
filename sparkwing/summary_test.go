@@ -73,7 +73,7 @@ func TestSummary_CarriesStepFromContext(t *testing.T) {
 func TestAnnotationsRequireNodeContext(t *testing.T) {
 	rec := &recordingEmitter{}
 	ctx := sparkwingruntime.WithLogger(context.Background(), rec)
-	sparkwing.Annotate(ctx, "annotation")
+	sparkwing.AnnotateOld(ctx, "annotation")
 	sparkwing.Summary(ctx, "summary")
 	if len(rec.records) != 0 {
 		t.Fatalf("node-less context emitted %d persistent records", len(rec.records))

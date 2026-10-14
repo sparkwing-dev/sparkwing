@@ -76,9 +76,9 @@ func (stepsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return nil, nil
 }
 
-func (s *entrySession) replies(n int) (map[string]nodeproto.Reply, []map[string]any) {
+func (s *entrySession) replies(n int) (map[string]nodeproto.ReplyOld, []map[string]any) {
 	s.t.Helper()
-	got := map[string]nodeproto.Reply{}
+	got := map[string]nodeproto.ReplyOld{}
 	var logs []map[string]any
 	for len(got) < n {
 		reply, more := s.next()
@@ -88,10 +88,10 @@ func (s *entrySession) replies(n int) (map[string]nodeproto.Reply, []map[string]
 	return got, logs
 }
 
-func (s *entrySession) step(node, step string, failure *nodeproto.Failure) (nodeproto.RunResult, nodeproto.Reply, []map[string]any) {
+func (s *entrySession) step(node, step string, failure *nodeproto.Failure) (nodeproto.RunResultOld, nodeproto.ReplyOld, []map[string]any) {
 	s.t.Helper()
-	reply, logs := s.call(nodeproto.Request{Op: nodeproto.OpRunStep, Node: node, Step: step, Attempt: 1, Failure: failure})
-	var res nodeproto.RunResult
+	reply, logs := s.call(nodeproto.RequestOld{Op: nodeproto.OpRunStepOld, Node: node, Step: step, Attempt: 1, Failure: failure})
+	var res nodeproto.RunResultOld
 	if reply.OK {
 		if err := reply.Decode(&res); err != nil {
 			s.t.Fatal(err)
@@ -127,11 +127,11 @@ func TestNodeProtocolEntryRunsSteps(t *testing.T) {
 	_, reply, _ = s.step("steps", "nope", nil)
 	wantCode(t, reply, nodeproto.CodeUnknownStep)
 
-	left := s.send(nodeproto.Request{Op: nodeproto.OpRunStep, Node: "steps", Step: "left", Attempt: 1})
-	right := s.send(nodeproto.Request{Op: nodeproto.OpRunStep, Node: "steps", Step: "right", Attempt: 1})
+	left := s.send(nodeproto.RequestOld{Op: nodeproto.OpRunStepOld, Node: "steps", Step: "left", Attempt: 1})
+	right := s.send(nodeproto.RequestOld{Op: nodeproto.OpRunStepOld, Node: "steps", Step: "right", Attempt: 1})
 	got, logs := s.replies(2)
 	for _, id := range []string{left, right} {
-		var res nodeproto.RunResult
+		var res nodeproto.RunResultOld
 		if err := got[id].Decode(&res); err != nil || res.Outcome != nodeproto.OutcomeSuccess {
 			t.Errorf("parallel step reply %s = %+v (%v), want success", id, res, err)
 		}
@@ -185,12 +185,12 @@ func TestNodeProtocolEntryExpandsGenerators(t *testing.T) {
 	if reply, _ := s.call(planRequestFor(stepPipeline, map[string]string{})); !reply.OK {
 		t.Fatalf("plan = %+v", reply)
 	}
-	reply, _ := s.call(nodeproto.Request{Op: nodeproto.OpRunNode, Node: "targets", Attempt: 1})
+	reply, _ := s.call(nodeproto.RequestOld{Op: nodeproto.OpRunNodeOld, Node: "targets", Attempt: 1})
 	if res := runResult(t, reply); res.Outcome != nodeproto.OutcomeSuccess {
 		t.Fatalf("targets = %+v", res)
 	}
 
-	reply, _ = s.call(nodeproto.Request{Op: nodeproto.OpEval, Closure: "targets/generator/0"})
+	reply, _ = s.call(nodeproto.RequestOld{Op: nodeproto.OpEvalOld, Closure: "targets/generator/0"})
 	value, errMsg := evalResult(t, reply)
 	var nodes []any
 	if err := json.Unmarshal([]byte(value), &nodes); err != nil || errMsg != nil || len(nodes) != 2 {
@@ -204,7 +204,7 @@ func TestNodeProtocolEntryExpandsGenerators(t *testing.T) {
 	if res.Outcome != nodeproto.OutcomeSuccess || !hasLog(logs, "test-darwin", "testing darwin") {
 		t.Errorf("generated step = %+v with logs %v, want it to run in the process that generated it", res, logs)
 	}
-	reply, _ = s.call(nodeproto.Request{Op: nodeproto.OpEval, Closure: "targets/generator/0"})
+	reply, _ = s.call(nodeproto.RequestOld{Op: nodeproto.OpEvalOld, Closure: "targets/generator/0"})
 	wantCode(t, reply, nodeproto.CodeBadRequest)
 	s.end()
 }

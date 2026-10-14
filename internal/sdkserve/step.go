@@ -8,7 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func runStep(ctx context.Context, s *server, req nodeproto.Request) (any, error) {
+func runStep(ctx context.Context, s *server, req nodeproto.RequestOld) (any, error) {
 	planned := s.plan()
 	node := planned.Plan.Job(req.Node)
 	if node == nil {
@@ -36,8 +36,8 @@ func runStep(ctx context.Context, s *server, req nodeproto.Request) (any, error)
 // safety: registered by the read loop before the run_step is dispatched, and
 // a cancel that arrives first leaves a nil entry, so the step starts cancelled
 // whichever request the SDK reads first.
-func (s *server) track(ctx context.Context, req nodeproto.Request) (context.Context, func()) {
-	if req.Op != nodeproto.OpRunStep {
+func (s *server) track(ctx context.Context, req nodeproto.RequestOld) (context.Context, func()) {
+	if req.Op != nodeproto.OpRunStepOld {
 		return ctx, func() {}
 	}
 	ctx, cancel := context.WithCancel(ctx)
@@ -56,7 +56,7 @@ func (s *server) track(ctx context.Context, req nodeproto.Request) (context.Cont
 	}
 }
 
-func cancelStep(_ context.Context, s *server, req nodeproto.Request) (any, error) {
+func cancelStep(_ context.Context, s *server, req nodeproto.RequestOld) (any, error) {
 	key := [2]string{req.Node, req.Step}
 	s.mu.Lock()
 	defer s.mu.Unlock()

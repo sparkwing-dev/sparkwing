@@ -61,7 +61,7 @@ func (f *fakeExec) ran(id string) bool {
 	return slices.Contains(f.calls, id)
 }
 
-func hostDoc(t *testing.T, ctx context.Context, st storage.StateStore, doc nodeproto.PlanDoc, exec Executor) RunResult {
+func hostDoc(t *testing.T, ctx context.Context, st storage.StateStore, doc nodeproto.PlanDocOld, exec Executor) RunResult {
 	t.Helper()
 	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
@@ -72,7 +72,7 @@ func hostDoc(t *testing.T, ctx context.Context, st storage.StateStore, doc nodep
 	return hostAccepted(t, ctx, st, doc, exec)
 }
 
-func hostAccepted(t *testing.T, ctx context.Context, st storage.StateStore, doc nodeproto.PlanDoc, exec Executor) RunResult {
+func hostAccepted(t *testing.T, ctx context.Context, st storage.StateStore, doc nodeproto.PlanDocOld, exec Executor) RunResult {
 	t.Helper()
 	cfg := Config{Execute: exec}
 	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest)}
@@ -123,7 +123,7 @@ func TestSchedulerRunsADiamondInOrderAndInParallel(t *testing.T) {
 		}
 	}
 	fx := &fakeExec{bodies: map[string]Executor{"b": meet(bIn, cIn), "c": meet(cIn, bIn)}}
-	doc := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{
+	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
 		{ID: "d", Deps: deps("b", "c")},
 		{ID: "b", Deps: deps("a")},
 		{ID: "c", Deps: deps("a")},
@@ -152,7 +152,7 @@ func TestSchedulerPropagatesFailureAsTheDispatcherDoes(t *testing.T) {
 		return Result{Outcome: sparkwing.Failed, Err: errors.New("broke"), Reason: store.FailureVerify}
 	}
 	fx := &fakeExec{bodies: map[string]Executor{"build": fail, "lint": fail, "flaky": fail, "maybe": fail}}
-	doc := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{
+	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
 		{ID: "build", Modifiers: &nodeproto.PlanModifiers{OnFailure: "build-recover"}},
 		{ID: "test", Deps: deps("build")},
 		{ID: "deploy", Deps: deps("test")},
@@ -195,7 +195,7 @@ func TestSchedulerOptionalFailureLeavesTheRunGreen(t *testing.T) {
 	fx := &fakeExec{bodies: map[string]Executor{"maybe": func(context.Context, *NodeRun) Result {
 		return Result{Outcome: sparkwing.Failed, Err: errors.New("broke")}
 	}}}
-	doc := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{
+	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
 		{ID: "maybe", Modifiers: &nodeproto.PlanModifiers{Optional: true}},
 		{ID: "after", OptionalDeps: deps("absent")},
 	}}
@@ -215,7 +215,7 @@ func TestSchedulerCancelMidRunFinishesEveryRow(t *testing.T) {
 		<-ctx.Done()
 		return Result{Outcome: sparkwing.Failed, Err: ctx.Err()}
 	}}}
-	doc := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{
+	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
 		{ID: "slow"},
 		{ID: "next", Deps: deps("slow")},
 		{ID: "later", Deps: deps("next")},
@@ -239,7 +239,7 @@ func TestSchedulerAStalledPlanFailsItsPendingNodes(t *testing.T) {
 		t.Fatal(err)
 	}
 	fx := &fakeExec{}
-	doc := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "a", Deps: deps("b")}, {ID: "b", Deps: deps("a")}}}
+	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "a", Deps: deps("b")}, {ID: "b", Deps: deps("a")}}}
 	cfg := Config{Execute: fx.run}
 	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler)}
 	s := &scheduler{run: run, results: map[string]Result{}, started: map[string]bool{}, exec: chain(&cfg), nodes: doc.Nodes}
@@ -258,7 +258,7 @@ func TestSchedulerAStalledPlanFailsItsPendingNodes(t *testing.T) {
 
 func TestSchedulerWithoutAnExecutorFailsTheNode(t *testing.T) {
 	st := openStore(t)
-	res := hostDoc(t, t.Context(), st, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "a"}}}, nil)
+	res := hostDoc(t, t.Context(), st, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "a"}}}, nil)
 	if res.Status != "failed" {
 		t.Errorf("status = %s, want failed", res.Status)
 	}
@@ -274,7 +274,7 @@ func TestSchedulerAddsNodesWhileTheRunGoes(t *testing.T) {
 			n.Run.Add(ctx, nodeproto.PlanNode{ID: "targets"}))
 		return Result{Outcome: sparkwing.Success}
 	}}}
-	res := hostDoc(t, t.Context(), st, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "targets"}}}, fx.run)
+	res := hostDoc(t, t.Context(), st, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "targets"}}}, fx.run)
 	if res.Status != "success" || !slices.Equal(res.Order[:1], []string{"targets"}) || len(res.Order) != 3 {
 		t.Fatalf("status=%s order=%v, want targets then its two generated nodes", res.Status, res.Order)
 	}
@@ -298,7 +298,7 @@ func TestSchedulerWritesPendingRowsFromThePlan(t *testing.T) {
 		}
 		return Result{Outcome: sparkwing.Success}
 	}}}
-	doc := nodeproto.PlanDoc{Requires: []string{"linux"}, Nodes: []nodeproto.PlanNode{
+	doc := nodeproto.PlanDocOld{Requires: []string{"linux"}, Nodes: []nodeproto.PlanNode{
 		{ID: "base"},
 		{ID: "gpu", Deps: deps("base"), OptionalDeps: deps("extra"), Modifiers: &nodeproto.PlanModifiers{
 			RunsOn: []string{"gpu", "linux"}, WhenRunner: []string{"big"}, Prefers: []string{"fast"},
@@ -365,7 +365,7 @@ func TestSchedulerDeadlineFailsTheRun(t *testing.T) {
 		<-ctx.Done()
 		return Result{Outcome: sparkwing.Failed, Err: ctx.Err()}
 	}}}
-	doc := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "slow"}, {ID: "next", Deps: deps("slow")}}}
+	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "slow"}, {ID: "next", Deps: deps("slow")}}}
 
 	res := hostDoc(t, ctx, st, doc, fx.run)
 	want := "nodes failed: [slow]; 1 more cancelled with the run"
@@ -384,7 +384,7 @@ func TestSchedulerPlainCancelFailsTheRun(t *testing.T) {
 		cancel()
 		return Result{Outcome: sparkwing.Success}
 	}}}
-	res := hostDoc(t, ctx, st, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "a"}}}, fx.run)
+	res := hostDoc(t, ctx, st, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "a"}}}, fx.run)
 	if res.Status != "failed" || !errors.Is(res.Err, context.Canceled) {
 		t.Errorf("status=%s err=%v, want failed with the cancel", res.Status, res.Err)
 	}
@@ -404,7 +404,7 @@ func TestSchedulerARefusedOutputFailsTheNodeRow(t *testing.T) {
 	fx := &fakeExec{bodies: map[string]Executor{"big": func(context.Context, *NodeRun) Result {
 		return Result{Outcome: sparkwing.Success, Output: []byte(`"huge"`)}
 	}}}
-	doc := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "big"}, {ID: "after", Deps: deps("big")}}}
+	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "big"}, {ID: "after", Deps: deps("big")}}}
 	res := hostDoc(t, t.Context(), refusingOutput{st}, doc, fx.run)
 	if res.Status != "failed" {
 		t.Errorf("status=%s err=%v, want failed", res.Status, res.Err)
@@ -429,7 +429,7 @@ func TestSchedulerARefusedOutputWithAHugeReasonStillFailsTheNodeRow(t *testing.T
 	fx := &fakeExec{bodies: map[string]Executor{"big": func(context.Context, *NodeRun) Result {
 		return Result{Outcome: sparkwing.Success, Output: []byte(`"huge"`)}
 	}}}
-	res := hostDoc(t, t.Context(), refusingOutputLoudly{st}, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "big"}}}, fx.run)
+	res := hostDoc(t, t.Context(), refusingOutputLoudly{st}, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "big"}}}, fx.run)
 	if res.Status != "failed" {
 		t.Errorf("status=%s err=%v, want failed", res.Status, res.Err)
 	}
@@ -457,7 +457,7 @@ func TestSchedulerRecordsAFailedCommandWithHugeOutput(t *testing.T) {
 	fx := &fakeExec{bodies: map[string]Executor{"test": func(context.Context, *NodeRun) Result {
 		return Result{Outcome: sparkwing.Failed, Err: errors.New(huge)}
 	}}}
-	res := hostDoc(t, t.Context(), cappedFinish{st}, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "test"}}}, fx.run)
+	res := hostDoc(t, t.Context(), cappedFinish{st}, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "test"}}}, fx.run)
 	if res.Status != "failed" {
 		t.Errorf("status=%s err=%v, want failed", res.Status, res.Err)
 	}
@@ -543,7 +543,7 @@ func TestSchedulerAddHonoursTheCallersDeadline(t *testing.T) {
 	}}}
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	res := hostDoc(t, ctx, stallingCreate{st}, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "gen"}}}, fx.run)
+	res := hostDoc(t, ctx, stallingCreate{st}, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "gen"}}}, fx.run)
 	if !errors.Is(addErr, context.DeadlineExceeded) {
 		t.Errorf("add err = %v, want the caller's deadline", addErr)
 	}

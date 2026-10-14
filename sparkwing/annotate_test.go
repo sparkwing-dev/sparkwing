@@ -22,7 +22,7 @@ func TestAnnotate_EmitsStructuredRecord(t *testing.T) {
 			rec := &recordingEmitter{}
 			ctx := sparkwingruntime.WithLogger(context.Background(), rec)
 			ctx = sparkwingruntime.WithNode(ctx, "ingest")
-			sparkwing.Annotate(ctx, tc.msg)
+			sparkwing.AnnotateOld(ctx, tc.msg)
 
 			if len(rec.records) != 1 {
 				t.Fatalf("got %d records, want 1", len(rec.records))
@@ -48,16 +48,16 @@ func TestAnnotate_EmitsStructuredRecord(t *testing.T) {
 }
 
 func TestAnnotate_NoLogger_NoPanic(t *testing.T) {
-	sparkwing.Annotate(context.Background(), "should be a no-op")
+	sparkwing.AnnotateOld(context.Background(), "should be a no-op")
 }
 
 func TestAnnotate_MultipleCallsAccumulate(t *testing.T) {
 	rec := &recordingEmitter{}
 	ctx := sparkwingruntime.WithLogger(context.Background(), rec)
 	ctx = sparkwingruntime.WithNode(ctx, "n")
-	sparkwing.Annotate(ctx, "first")
-	sparkwing.Annotate(ctx, "second")
-	sparkwing.Annotate(ctx, "third")
+	sparkwing.AnnotateOld(ctx, "first")
+	sparkwing.AnnotateOld(ctx, "second")
+	sparkwing.AnnotateOld(ctx, "third")
 
 	if len(rec.records) != 3 {
 		t.Fatalf("got %d records, want 3", len(rec.records))

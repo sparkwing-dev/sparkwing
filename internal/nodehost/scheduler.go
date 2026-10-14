@@ -27,7 +27,7 @@ type Config struct {
 	Args map[string]string
 	// Run is the run context plan code reads. RunID is required; a zero
 	// StartedAt means now and an empty trigger source means manual.
-	Run nodeproto.RunContext
+	Run nodeproto.RunContextOld
 	// Requires are the placement labels the host reads from the pipeline's
 	// YAML; they join the plan's own.
 	Requires []string
@@ -157,12 +157,12 @@ type NodeRun struct {
 type Run struct {
 	ID string
 	// Doc is the accepted plan. Nodes added with [Run.Add] are not in it.
-	Doc nodeproto.PlanDoc
+	Doc nodeproto.PlanDocOld
 	// Pipeline, Args and Context are the accepted plan's request; every
 	// later process of the run plans with the same.
 	Pipeline  string
 	Args      map[string]string
-	Context   nodeproto.RunContext
+	Context   nodeproto.RunContextOld
 	StartAt   string
 	StopAt    string
 	State     storage.StateStore

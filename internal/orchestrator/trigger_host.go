@@ -257,7 +257,7 @@ func triggerHostArgs(ctx context.Context, c *client.Client, trig *store.Trigger,
 // safety: a run row the controller does not have yet is planned from the trigger alone, its run flags included,
 // as every pod then reads it; one it failed to answer for is retried and then refused, because planning without the row's pull request
 // would hash differently from the pods that read it, and every node would fail with plan_drift.
-func triggerRunContext(ctx context.Context, c *client.Client, trig *store.Trigger) (nodeproto.RunContext, runflags.Flags, error) {
+func triggerRunContext(ctx context.Context, c *client.Client, trig *store.Trigger) (nodeproto.RunContextOld, runflags.Flags, error) {
 	var row *store.Run
 	var err error
 	for attempt := 1; ; attempt++ {
@@ -269,7 +269,7 @@ func triggerRunContext(ctx context.Context, c *client.Client, trig *store.Trigge
 		select {
 		case <-ctx.Done():
 			wait.Stop()
-			return nodeproto.RunContext{}, runflags.Flags{}, fmt.Errorf("read run %s for its run context: %w", trig.ID, errors.Join(err, ctx.Err()))
+			return nodeproto.RunContextOld{}, runflags.Flags{}, fmt.Errorf("read run %s for its run context: %w", trig.ID, errors.Join(err, ctx.Err()))
 		case <-wait.C:
 		}
 	}
@@ -277,7 +277,7 @@ func triggerRunContext(ctx context.Context, c *client.Client, trig *store.Trigge
 	case errors.Is(err, store.ErrNotFound) || (err == nil && row == nil):
 		row = &store.Run{ID: trig.ID, TriggerUser: trig.TriggerUser, Invocation: runflags.FromTriggerEnv(trig.TriggerEnv).Invocation()}
 	case err != nil:
-		return nodeproto.RunContext{}, runflags.Flags{}, fmt.Errorf("read run %s for its run context: %w", trig.ID, err)
+		return nodeproto.RunContextOld{}, runflags.Flags{}, fmt.Errorf("read run %s for its run context: %w", trig.ID, err)
 	}
 	planned := *row
 	planned.ID, planned.TriggerSource = trig.ID, trig.TriggerSource

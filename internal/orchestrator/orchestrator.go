@@ -431,8 +431,8 @@ type planSnapshotMeta struct {
 	PipelineRequires []string
 }
 
-func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnapshotMeta) (nodeproto.PlanDoc, error) {
-	snap := nodeproto.PlanDoc{
+func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnapshotMeta) (nodeproto.PlanDocOld, error) {
+	snap := nodeproto.PlanDocOld{
 		Protocol:       authwire.NodeProtocolVersion,
 		AdmissionClass: string(p.AdmissionClassValue()),
 		Pipeline:       rc.Pipeline,
@@ -481,7 +481,7 @@ func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnap
 			Dynamic:      p.IsDynamicNode(n.ID()),
 			PipelineRefs: snapshotPipelineRefs(n.PipelineRefs()),
 		}
-		if cfg := n.ApprovalConfig(); cfg != nil {
+		if cfg := n.ApprovalConfigOld(); cfg != nil {
 			sn.Approval = &nodeproto.PlanApproval{
 				Message:   cfg.Message,
 				TimeoutMS: cfg.Timeout.Milliseconds(),

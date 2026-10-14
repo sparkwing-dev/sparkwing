@@ -9,30 +9,30 @@ import (
 
 func TestRequestValidate(t *testing.T) {
 	cases := []struct {
-		req  Request
+		req  RequestOld
 		code ErrorCode
 	}{
-		{Request{ID: "1", Op: OpDescribe}, ""},
-		{Request{ID: "1", Op: OpPlan, Pipeline: "ci", Args: map[string]string{}, Run: &RunContext{RunID: "r"}}, ""},
-		{Request{ID: "1", Op: OpPlan, Pipeline: "ci", Run: &RunContext{RunID: "r"}}, CodeBadRequest},
-		{Request{ID: "1", Op: OpPlan, Pipeline: "ci", Args: map[string]string{}}, CodeBadRequest},
-		{Request{ID: "1", Op: OpPlan, Pipeline: "ci", Args: map[string]string{}, Run: &RunContext{RunID: "r", Trigger: &Trigger{Source: "cron"}}}, CodeBadRequest},
-		{Request{ID: "1", Op: OpRunNode, Node: "build", Attempt: 1}, ""},
-		{Request{ID: "1", Op: OpRunNode, Node: "build", Step: "test", Attempt: 1}, CodeBadRequest},
-		{Request{ID: "1", Op: OpRunNode, Node: "build"}, CodeBadRequest},
-		{Request{ID: "1", Op: OpRunNode, Node: "fix", Attempt: 1, Failure: &Failure{Node: "build", Stage: "verify"}}, ""},
-		{Request{ID: "1", Op: OpRunNode, Node: "fix", Attempt: 1, Failure: &Failure{Node: "build", Stage: "body"}}, CodeBadRequest},
-		{Request{ID: "1", Op: OpRunStep, Node: "build", Step: "test", Attempt: 2}, ""},
-		{Request{ID: "1", Op: OpRunStep, Node: "build", Step: "test"}, CodeBadRequest},
-		{Request{ID: "1", Op: OpRunStep, Node: "build"}, CodeBadRequest},
-		{Request{ID: "1", Op: OpCancel, Node: "build", Step: "test"}, ""},
-		{Request{ID: "1", Op: OpCancel, Node: "build"}, CodeBadRequest},
-		{Request{ID: "1", Op: OpEval, Closure: "build/skip_if/0"}, ""},
-		{Request{ID: "1", Op: OpEval, Closure: "c", Input: json.RawMessage(`{"outcome":"failed"}`)}, ""},
-		{Request{ID: "1", Op: OpEval, Closure: "c", Input: json.RawMessage(`[1]`)}, CodeBadRequest},
-		{Request{ID: "1", Op: OpEval}, CodeBadRequest},
-		{Request{Op: OpDescribe}, CodeBadRequest},
-		{Request{ID: "1", Op: "nope"}, CodeUnknownOp},
+		{RequestOld{ID: "1", Op: OpDescribeOld}, ""},
+		{RequestOld{ID: "1", Op: OpPlanOld, Pipeline: "ci", Args: map[string]string{}, Run: &RunContextOld{RunID: "r"}}, ""},
+		{RequestOld{ID: "1", Op: OpPlanOld, Pipeline: "ci", Run: &RunContextOld{RunID: "r"}}, CodeBadRequest},
+		{RequestOld{ID: "1", Op: OpPlanOld, Pipeline: "ci", Args: map[string]string{}}, CodeBadRequest},
+		{RequestOld{ID: "1", Op: OpPlanOld, Pipeline: "ci", Args: map[string]string{}, Run: &RunContextOld{RunID: "r", Trigger: &Trigger{Source: "cron"}}}, CodeBadRequest},
+		{RequestOld{ID: "1", Op: OpRunNodeOld, Node: "build", Attempt: 1}, ""},
+		{RequestOld{ID: "1", Op: OpRunNodeOld, Node: "build", Step: "test", Attempt: 1}, CodeBadRequest},
+		{RequestOld{ID: "1", Op: OpRunNodeOld, Node: "build"}, CodeBadRequest},
+		{RequestOld{ID: "1", Op: OpRunNodeOld, Node: "fix", Attempt: 1, Failure: &Failure{Node: "build", Stage: "verify"}}, ""},
+		{RequestOld{ID: "1", Op: OpRunNodeOld, Node: "fix", Attempt: 1, Failure: &Failure{Node: "build", Stage: "body"}}, CodeBadRequest},
+		{RequestOld{ID: "1", Op: OpRunStepOld, Node: "build", Step: "test", Attempt: 2}, ""},
+		{RequestOld{ID: "1", Op: OpRunStepOld, Node: "build", Step: "test"}, CodeBadRequest},
+		{RequestOld{ID: "1", Op: OpRunStepOld, Node: "build"}, CodeBadRequest},
+		{RequestOld{ID: "1", Op: OpCancelOld, Node: "build", Step: "test"}, ""},
+		{RequestOld{ID: "1", Op: OpCancelOld, Node: "build"}, CodeBadRequest},
+		{RequestOld{ID: "1", Op: OpEvalOld, Closure: "build/skip_if/0"}, ""},
+		{RequestOld{ID: "1", Op: OpEvalOld, Closure: "c", Input: json.RawMessage(`{"outcome":"failed"}`)}, ""},
+		{RequestOld{ID: "1", Op: OpEvalOld, Closure: "c", Input: json.RawMessage(`[1]`)}, CodeBadRequest},
+		{RequestOld{ID: "1", Op: OpEvalOld}, CodeBadRequest},
+		{RequestOld{Op: OpDescribeOld}, CodeBadRequest},
+		{RequestOld{ID: "1", Op: "nope"}, CodeUnknownOp},
 	}
 	for _, c := range cases {
 		err := c.req.Validate()
@@ -56,7 +56,7 @@ func FuzzParseRequest(f *testing.F) {
 		f.Add([]byte(s))
 	}
 	f.Fuzz(func(t *testing.T, line []byte) {
-		req, err := ParseRequest(line)
+		req, err := ParseRequestOld(line)
 		if err != nil {
 			var perr *Error
 			if !errors.Is(err, ErrMalformed) && !errors.As(err, &perr) {
@@ -68,7 +68,7 @@ func FuzzParseRequest(f *testing.F) {
 		if err != nil {
 			t.Fatalf("re-encode %+v: %v", req, err)
 		}
-		again, err := ParseRequest(enc)
+		again, err := ParseRequestOld(enc)
 		if err != nil {
 			t.Fatalf("re-encoded %s fails: %v", enc, err)
 		}

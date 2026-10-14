@@ -39,7 +39,7 @@ func describeArgs(ctx context.Context, s *Session, pipeline string, args map[str
 	limit := cmp.Or(s.cfg.DescribeTimeout, 30*time.Second)
 	dctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
-	if err := ask(dctx, s, nodeproto.Request{Op: nodeproto.OpDescribe}, &doc); err != nil {
+	if err := ask(dctx, s, nodeproto.RequestOld{Op: nodeproto.OpDescribeOld}, &doc); err != nil {
 		class := "error"
 		var perr *nodeproto.Error
 		switch {
@@ -59,7 +59,7 @@ func describeArgs(ctx context.Context, s *Session, pipeline string, args map[str
 			}
 		}
 	}
-	if doc.Protocol != nodeproto.Version {
+	if doc.Protocol != nodeproto.VersionOld {
 		return nil, true, mismatch("describe", doc.Protocol)
 	}
 	for _, p := range doc.Pipelines {
@@ -100,10 +100,10 @@ func releaseDescribed(s *Session, known bool, masker *secrets.Masker, err error)
 	return err
 }
 
-func planRun(ctx context.Context, s *Session, pipeline string, args map[string]string, rc nodeproto.RunContext) (nodeproto.PlanDoc, []byte, error) {
+func planRun(ctx context.Context, s *Session, pipeline string, args map[string]string, rc nodeproto.RunContextOld) (nodeproto.PlanDocOld, []byte, error) {
 	var raw json.RawMessage
-	var doc nodeproto.PlanDoc
-	err := ask(ctx, s, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: pipeline, Args: args, Run: &rc}, &raw)
+	var doc nodeproto.PlanDocOld
+	err := ask(ctx, s, nodeproto.RequestOld{Op: nodeproto.OpPlanOld, Pipeline: pipeline, Args: args, Run: &rc}, &raw)
 	if err == nil {
 		raw, err = nodeproto.StampSpecHashes(raw)
 	}
@@ -113,13 +113,13 @@ func planRun(ctx context.Context, s *Session, pipeline string, args map[string]s
 	switch {
 	case err != nil:
 		return doc, nil, err
-	case doc.Protocol != nodeproto.Version:
+	case doc.Protocol != nodeproto.VersionOld:
 		return doc, nil, mismatch("plan", doc.Protocol)
 	}
 	return doc, raw, validateNodes(doc.Nodes)
 }
 
-func ask(ctx context.Context, s *Session, req nodeproto.Request, result any) error {
+func ask(ctx context.Context, s *Session, req nodeproto.RequestOld, result any) error {
 	reply, err := s.Call(ctx, req)
 	if err != nil {
 		return err
@@ -129,7 +129,7 @@ func ask(ctx context.Context, s *Session, req nodeproto.Request, result any) err
 
 func mismatch(doc, got string) error {
 	return &nodeproto.Error{Code: nodeproto.CodeProtocolMismatch, Message: fmt.Sprintf(
-		"the %s document speaks node protocol %q and this engine %q; rebuild .sparkwing against a matching SDK", doc, got, nodeproto.Version)}
+		"the %s document speaks node protocol %q and this engine %q; rebuild .sparkwing against a matching SDK", doc, got, nodeproto.VersionOld)}
 }
 
 func invalid(format string, args ...any) error {

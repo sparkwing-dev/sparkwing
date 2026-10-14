@@ -187,7 +187,7 @@ func withPipelineEntry(pipeline string, fn func(ctx context.Context, entry pipel
 type planned struct {
 	pipeline string
 	args     map[string]string
-	doc      nodeproto.PlanDoc
+	doc      nodeproto.PlanDocOld
 }
 
 // safety: inspection never evaluates a closure. A skip_if predicate is customer code with side effects the
@@ -206,7 +206,7 @@ func planOverProtocol(ctx context.Context, entry pipelineentry.Command, dir, pip
 		if out.args, err = parsePipelineArgs(schema, args); err != nil {
 			return &nodeproto.Error{Code: nodeproto.CodeInvalidArgs, Message: err.Error()}
 		}
-		req := nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: pipeline, Args: out.args, Run: &nodeproto.RunContext{RunID: runID}}
+		req := nodeproto.RequestOld{Op: nodeproto.OpPlanOld, Pipeline: pipeline, Args: out.args, Run: &nodeproto.RunContextOld{RunID: runID}}
 		return s.Call(req, &out.doc)
 	})
 	return out, planError(pipeline, err)
@@ -272,7 +272,7 @@ func previewPlan(p planned, startAt, stopAt string) (planPreviewDoc, error) {
 	return doc, nil
 }
 
-func checkStepRange(doc nodeproto.PlanDoc, startAt, stopAt string) error {
+func checkStepRange(doc nodeproto.PlanDocOld, startAt, stopAt string) error {
 	known := map[string]bool{}
 	for _, n := range doc.Nodes {
 		if n.Work != nil {

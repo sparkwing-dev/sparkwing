@@ -38,9 +38,9 @@ func (e *Error) Error() string {
 	return string(e.Code) + ": " + e.Message
 }
 
-// Reply answers the request whose id it carries. OK is true with Result, or
+// ReplyOld answers the request whose id it carries. OK is true with Result, or
 // false with Error.
-type Reply struct {
+type ReplyOld struct {
 	ID     string          `json:"reply"`
 	OK     bool            `json:"ok"`
 	Result json.RawMessage `json:"result,omitempty"`
@@ -49,7 +49,7 @@ type Reply struct {
 
 // Decode unmarshals a successful reply's result into v and runs v's Validate
 // method when it has one. A failed reply returns its [*Error].
-func (r Reply) Decode(v any) error {
+func (r ReplyOld) Decode(v any) error {
 	if !r.OK {
 		if r.Error == nil {
 			return fmt.Errorf("%w: reply %s failed without an error", ErrMalformed, r.ID)
@@ -86,36 +86,36 @@ const (
 	KindLog
 )
 
-// Frame is one line of the frame pipe; the field named by Kind is set.
-type Frame struct {
+// FrameOld is one line of the frame pipe; the field named by Kind is set.
+type FrameOld struct {
 	Kind  Kind
-	Reply Reply
+	Reply ReplyOld
 	Log   LogRecord
 }
 
-// ParseFrame decodes one frame-pipe line, without its newline. A JSON object
+// ParseFrameOld decodes one frame-pipe line, without its newline. A JSON object
 // with a "reply" key is a reply; any other line must be a log record, a JSON
 // object with a string "ts" whose other known fields have the schema's types.
 // Everything else fails with [ErrMalformed], because only the SDK writes to
 // the frame pipe. Keys match exactly, and unknown keys are ignored so a later
 // SDK may add optional fields.
-func ParseFrame(line []byte) (Frame, error) {
+func ParseFrameOld(line []byte) (FrameOld, error) {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(line, &obj); err != nil || obj == nil {
-		return Frame{}, fmt.Errorf("%w: frame is not a JSON object", ErrMalformed)
+		return FrameOld{}, fmt.Errorf("%w: frame is not a JSON object", ErrMalformed)
 	}
 	if _, ok := obj["reply"]; ok {
 		r, err := replyFrom(obj)
 		if err != nil {
-			return Frame{}, fmt.Errorf("%w: %w", ErrMalformed, err)
+			return FrameOld{}, fmt.Errorf("%w: %w", ErrMalformed, err)
 		}
-		return Frame{Kind: KindReply, Reply: r}, nil
+		return FrameOld{Kind: KindReply, Reply: r}, nil
 	}
 	rec, err := logFrom(obj)
 	if err != nil {
-		return Frame{}, fmt.Errorf("%w: %w", ErrMalformed, err)
+		return FrameOld{}, fmt.Errorf("%w: %w", ErrMalformed, err)
 	}
-	return Frame{Kind: KindLog, Log: rec}, nil
+	return FrameOld{Kind: KindLog, Log: rec}, nil
 }
 
 func isNull(raw json.RawMessage) bool {
@@ -135,8 +135,8 @@ func stringField(obj map[string]json.RawMessage, key string, dst *string) bool {
 	return json.Unmarshal(raw, dst) == nil
 }
 
-func replyFrom(obj map[string]json.RawMessage) (Reply, error) {
-	var r Reply
+func replyFrom(obj map[string]json.RawMessage) (ReplyOld, error) {
+	var r ReplyOld
 	if json.Unmarshal(obj["reply"], &r.ID) != nil || r.ID == "" {
 		return r, errors.New(`reply id is not a non-empty string`)
 	}
@@ -243,23 +243,23 @@ func (r *Reader) ReadLine() ([]byte, error) {
 	}
 }
 
-// Next reads and parses the next frame-pipe line with [ParseFrame].
+// Next reads and parses the next frame-pipe line with [ParseFrameOld].
 // [ErrMalformed] leaves the reader at the following line.
-func (r *Reader) Next() (Frame, error) {
+func (r *Reader) Next() (FrameOld, error) {
 	line, err := r.ReadLine()
 	if err != nil {
-		return Frame{}, err
+		return FrameOld{}, err
 	}
-	return ParseFrame(line)
+	return ParseFrameOld(line)
 }
 
-// NextRequest reads and parses the next request-pipe line with [ParseRequest].
-func (r *Reader) NextRequest() (Request, error) {
+// NextRequest reads and parses the next request-pipe line with [ParseRequestOld].
+func (r *Reader) NextRequest() (RequestOld, error) {
 	line, err := r.ReadLine()
 	if err != nil {
-		return Request{}, err
+		return RequestOld{}, err
 	}
-	return ParseRequest(line)
+	return ParseRequestOld(line)
 }
 
 // Writer writes one JSON value per line. It is safe for concurrent use, so the
@@ -301,16 +301,16 @@ func (w *Writer) Send(v any) error {
 type Tracker struct {
 	mu       sync.Mutex
 	last     uint64
-	pending  map[string]Op
+	pending  map[string]OpOld
 	answered map[string]bool
 }
 
 // Start returns a fresh id for a request of op and records it as pending.
-func (t *Tracker) Start(op Op) string {
+func (t *Tracker) Start(op OpOld) string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.pending == nil {
-		t.pending, t.answered = map[string]Op{}, map[string]bool{}
+		t.pending, t.answered = map[string]OpOld{}, map[string]bool{}
 	}
 	t.last++
 	id := strconv.FormatUint(t.last, 10)
@@ -321,7 +321,7 @@ func (t *Tracker) Start(op Op) string {
 // Resolve marks the request r answers as done and returns its op, so the
 // caller knows which result type to decode. A reply to an id never started
 // fails with [ErrUnknownReply] and a second reply with [ErrDuplicateReply].
-func (t *Tracker) Resolve(r Reply) (Op, error) {
+func (t *Tracker) Resolve(r ReplyOld) (OpOld, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	op, ok := t.pending[r.ID]
@@ -338,10 +338,10 @@ func (t *Tracker) Resolve(r Reply) (Op, error) {
 
 // Pending returns the requests still waiting for a reply, by id, so a host
 // whose process exited can fail each one.
-func (t *Tracker) Pending() map[string]Op {
+func (t *Tracker) Pending() map[string]OpOld {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	out := make(map[string]Op, len(t.pending))
+	out := make(map[string]OpOld, len(t.pending))
 	for id, op := range t.pending {
 		out[id] = op
 	}

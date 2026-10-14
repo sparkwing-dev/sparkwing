@@ -38,7 +38,7 @@ type genHandoffBuild struct {
 func (j *genHandoffBuild) Work(w *sw.Work) (*sw.WorkStep, error) {
 	return sw.Step(w, "compile", func(ctx context.Context) (handoffImage, error) {
 		out := handoffImage{Tag: "app:sha-abc1234", Digest: "sha256:0fa1c0ffee"}
-		sw.Annotate(ctx, "built "+out.Tag)
+		sw.AnnotateOld(ctx, "built "+out.Tag)
 		return out, nil
 	}), nil
 }

@@ -27,7 +27,7 @@ func TestParseFrame(t *testing.T) {
 		{`{"ts":"x","msg":7}`, 0, true},
 		{`{"ts":"x","attrs":[1]}`, 0, true},
 		{`{"TS":"x"}`, 0, true},
-		{`{"Reply":"1","ok":true}`, 0, true},
+		{`{"ReplyOld":"1","ok":true}`, 0, true},
 		{`{"id":"1","op":"describe"}`, 0, true},
 		{`{"reply":"1","ok":true,"result":{}} trailing`, 0, true},
 		{`{"reply":"","ok":true}`, 0, true},
@@ -43,7 +43,7 @@ func TestParseFrame(t *testing.T) {
 		{`{"reply":"1","ok":true,"result":[1]}`, 0, true},
 	}
 	for _, c := range cases {
-		f, err := ParseFrame([]byte(c.line))
+		f, err := ParseFrameOld([]byte(c.line))
 		if c.bad {
 			if !errors.Is(err, ErrMalformed) {
 				t.Errorf("%s: err = %v, want ErrMalformed", c.line, err)
@@ -57,45 +57,45 @@ func TestParseFrame(t *testing.T) {
 }
 
 func TestReplyDecode(t *testing.T) {
-	f, err := ParseFrame([]byte(`{"reply":"1","ok":true,"result":{"outcome":"failed","error":"exit 1"}}`))
+	f, err := ParseFrameOld([]byte(`{"reply":"1","ok":true,"result":{"outcome":"failed","error":"exit 1"}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var res RunResult
+	var res RunResultOld
 	if err := f.Reply.Decode(&res); err != nil || res.Outcome != OutcomeFailed || res.Error != "exit 1" {
 		t.Fatalf("decode = %+v, %v", res, err)
 	}
-	f, _ = ParseFrame([]byte(`{"reply":"1","ok":true,"result":{"outcome":"maybe"}}`))
+	f, _ = ParseFrameOld([]byte(`{"reply":"1","ok":true,"result":{"outcome":"maybe"}}`))
 	if err := f.Reply.Decode(&res); !errors.Is(err, ErrMalformed) {
 		t.Fatalf("unknown outcome err = %v", err)
 	}
-	f, _ = ParseFrame([]byte(`{"reply":"1","ok":false,"error":{"code":"plan_drift","message":"hash differs"}}`))
+	f, _ = ParseFrameOld([]byte(`{"reply":"1","ok":false,"error":{"code":"plan_drift","message":"hash differs"}}`))
 	var perr *Error
 	if err := f.Reply.Decode(&res); !errors.As(err, &perr) || perr.Code != CodePlanDrift {
 		t.Fatalf("failed reply err = %v", err)
 	}
-	f, _ = ParseFrame([]byte(`{"reply":"1","ok":true,"result":{"outcome":"skipped"}}`))
+	f, _ = ParseFrameOld([]byte(`{"reply":"1","ok":true,"result":{"outcome":"skipped"}}`))
 	if err := f.Reply.Decode(&res); !errors.Is(err, ErrMalformed) {
 		t.Fatalf("skipped is not a body outcome, err = %v", err)
 	}
-	f, _ = ParseFrame([]byte(`{"reply":"1","ok":true,"result":{"value":null,"error":"503 from /ready"}}`))
-	var ev EvalResult
+	f, _ = ParseFrameOld([]byte(`{"reply":"1","ok":true,"result":{"value":null,"error":"503 from /ready"}}`))
+	var ev EvalResultOld
 	if err := f.Reply.Decode(&ev); err != nil || ev.Error == nil || *ev.Error != "503 from /ready" || string(ev.Value) != "null" {
 		t.Fatalf("eval decode = %+v, %v", ev, err)
 	}
 }
 
 func TestEvalEmptyErrorStillFails(t *testing.T) {
-	f, err := ParseFrame([]byte(`{"reply":"1","ok":true,"result":{"value":null,"error":""}}`))
+	f, err := ParseFrameOld([]byte(`{"reply":"1","ok":true,"result":{"value":null,"error":""}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var ev EvalResult
+	var ev EvalResultOld
 	if err := f.Reply.Decode(&ev); err != nil || ev.Error == nil {
 		t.Fatalf("empty error lost: %+v, %v", ev, err)
 	}
 	empty := ""
-	enc, err := json.Marshal(EvalResult{Error: &empty})
+	enc, err := json.Marshal(EvalResultOld{Error: &empty})
 	if err != nil || string(enc) != `{"value":null,"error":""}` {
 		t.Fatalf("encode = %s, %v", enc, err)
 	}
@@ -148,7 +148,7 @@ func TestReaderFailsLongLineWithoutNewline(t *testing.T) {
 
 func TestReaderNextRequest(t *testing.T) {
 	r := NewReader(strings.NewReader(`{"id":"1","op":"describe"}` + "\n" + `{"id":"2","op":"teleport"}` + "\nnot json\n"))
-	if req, err := r.NextRequest(); err != nil || req.Op != OpDescribe {
+	if req, err := r.NextRequest(); err != nil || req.Op != OpDescribeOld {
 		t.Fatalf("describe: %+v %v", req, err)
 	}
 	req, err := r.NextRequest()
@@ -177,7 +177,7 @@ func TestWriterRefusesOversizeAndKeepsLinesWhole(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_ = w.Send(Reply{ID: strings.Repeat("i", i+1), OK: true, Result: json.RawMessage(`{}`)})
+			_ = w.Send(ReplyOld{ID: strings.Repeat("i", i+1), OK: true, Result: json.RawMessage(`{}`)})
 		}()
 	}
 	wg.Wait()
@@ -191,20 +191,20 @@ func TestWriterRefusesOversizeAndKeepsLinesWhole(t *testing.T) {
 
 func TestTracker(t *testing.T) {
 	var tr Tracker
-	a, b := tr.Start(OpPlan), tr.Start(OpEval)
+	a, b := tr.Start(OpPlanOld), tr.Start(OpEvalOld)
 	if a == b {
 		t.Fatalf("ids repeat: %s", a)
 	}
-	if op, err := tr.Resolve(Reply{ID: b}); err != nil || op != OpEval {
+	if op, err := tr.Resolve(ReplyOld{ID: b}); err != nil || op != OpEvalOld {
 		t.Fatalf("resolve b: %s %v", op, err)
 	}
-	if _, err := tr.Resolve(Reply{ID: b}); !errors.Is(err, ErrDuplicateReply) {
+	if _, err := tr.Resolve(ReplyOld{ID: b}); !errors.Is(err, ErrDuplicateReply) {
 		t.Fatalf("second reply: %v", err)
 	}
-	if _, err := tr.Resolve(Reply{ID: "99"}); !errors.Is(err, ErrUnknownReply) {
+	if _, err := tr.Resolve(ReplyOld{ID: "99"}); !errors.Is(err, ErrUnknownReply) {
 		t.Fatalf("unknown reply: %v", err)
 	}
-	if p := tr.Pending(); len(p) != 1 || p[a] != OpPlan {
+	if p := tr.Pending(); len(p) != 1 || p[a] != OpPlanOld {
 		t.Fatalf("pending %v", p)
 	}
 }
@@ -213,14 +213,14 @@ func TestTrackerParallelSteps(t *testing.T) {
 	var tr Tracker
 	ids := make([]string, 20)
 	for i := range ids {
-		ids[i] = tr.Start(OpRunStep)
+		ids[i] = tr.Start(OpRunStepOld)
 	}
 	var wg sync.WaitGroup
 	for i := len(ids) - 1; i >= 0; i-- {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if op, err := tr.Resolve(Reply{ID: ids[i]}); err != nil || op != OpRunStep {
+			if op, err := tr.Resolve(ReplyOld{ID: ids[i]}); err != nil || op != OpRunStepOld {
 				t.Errorf("resolve %s: %s %v", ids[i], op, err)
 			}
 		}()
@@ -242,7 +242,7 @@ func FuzzParseFrame(f *testing.F) {
 		f.Add([]byte(s))
 	}
 	f.Fuzz(func(t *testing.T, line []byte) {
-		fr, err := ParseFrame(line)
+		fr, err := ParseFrameOld(line)
 		if err != nil {
 			if !errors.Is(err, ErrMalformed) {
 				t.Fatalf("error outside ErrMalformed: %v", err)
@@ -262,7 +262,7 @@ func FuzzParseFrame(f *testing.F) {
 		if err != nil {
 			t.Fatalf("re-encode %+v: %v", v, err)
 		}
-		again, err := ParseFrame(enc)
+		again, err := ParseFrameOld(enc)
 		if err != nil || again.Kind != fr.Kind {
 			t.Fatalf("re-encoded %s parsed as kind %d, %v", enc, again.Kind, err)
 		}

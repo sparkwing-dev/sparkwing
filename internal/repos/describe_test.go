@@ -41,8 +41,8 @@ printf '{"reply":"1","ok":true,"result":{"protocol":"1","sdk":{"language":"go","
 	if err != nil {
 		t.Fatal(err)
 	}
-	req, err := nodeproto.ParseRequest([]byte(strings.TrimSpace(string(raw))))
-	if err != nil || req.Op != nodeproto.OpDescribe {
+	req, err := nodeproto.ParseRequestOld([]byte(strings.TrimSpace(string(raw))))
+	if err != nil || req.Op != nodeproto.OpDescribeOld {
 		t.Fatalf("request = %+v, %v", req, err)
 	}
 }

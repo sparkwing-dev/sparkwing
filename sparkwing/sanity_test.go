@@ -266,7 +266,7 @@ func (r *recordingEmitter) Emit(rec sparkwing.LogRecord) {
 }
 
 func TestRefPanicsWithoutResolver(t *testing.T) {
-	r := sparkwing.Ref[buildOut]{NodeID: "build"}
+	r := sparkwing.Ref[buildOut]{JobID: "build"}
 	defer func() {
 		if recover() == nil {
 			t.Fatal("Ref.Get without resolver should panic")
@@ -287,7 +287,7 @@ func TestRefResolves(t *testing.T) {
 		}
 		return nil, false
 	})
-	r := sparkwing.Ref[buildOut]{NodeID: "build"}
+	r := sparkwing.Ref[buildOut]{JobID: "build"}
 	got := r.Get(ctx)
 	if got != expected {
 		t.Fatalf("Ref.Get = %+v, want %+v", got, expected)

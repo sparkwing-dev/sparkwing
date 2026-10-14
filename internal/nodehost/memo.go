@@ -119,8 +119,8 @@ func memoHash(ctx context.Context, cfg *Config, n *NodeRun) (string, Result) {
 		}
 		kctx, cancel := context.WithTimeout(ctx, memoKeyBudget)
 		defer cancel()
-		var er nodeproto.EvalResult
-		if err := ask(kctx, sess, nodeproto.Request{Op: nodeproto.OpEval, Closure: id}, &er); err != nil {
+		var er nodeproto.EvalResultOld
+		if err := ask(kctx, sess, nodeproto.RequestOld{Op: nodeproto.OpEvalOld, Closure: id}, &er); err != nil {
 			return keyFailed(err)
 		}
 		if er.Error != nil {

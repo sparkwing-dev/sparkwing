@@ -47,7 +47,7 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 	if in.Refuse {
 		return fmt.Errorf("plan refused %s", in.Pass)
 	}
-	build := sparkwing.Job(plan, "build", &buildJob{in: in}).Env("FIXTURE_ENV", "from-plan").Env("SPARKWING_RUNNER_LABELS", "local,gpu")
+	build := sparkwing.Job(plan, "build", &buildJob{in: in}).EnvOld("FIXTURE_ENV", "from-plan").EnvOld("SPARKWING_RUNNER_LABELS", "local,gpu")
 	if in.Counter != "" {
 		data, _ := os.ReadFile(in.Counter)
 		n, _ := strconv.Atoi(string(data))
@@ -55,7 +55,7 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 		if err := os.WriteFile(in.Counter, []byte(strconv.Itoa(n)), 0o600); err != nil {
 			return err
 		}
-		build.Env("PLAN_SEQ", strconv.Itoa(n))
+		build.EnvOld("PLAN_SEQ", strconv.Itoa(n))
 	}
 	if in.Crash {
 		sparkwing.Job(plan, "crash", func(ctx context.Context) error {
@@ -96,7 +96,7 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 				return err
 			}
 			sparkwing.Summary(ctx, "summary "+token)
-			sparkwing.Annotate(ctx, "note "+token)
+			sparkwing.AnnotateOld(ctx, "note "+token)
 			// The command copies its own session ledger record, which exists
 			// only while it runs, into the marker directory.
 			script := `rec="$SPARKWING_HOME/sessions/$SPARKWING_RUN_ID/$SPARKWING_NODE_ID/$PPID-$$.json"; i=0; ` +
@@ -207,7 +207,7 @@ func addHooks(plan *sparkwing.Plan, marker string) {
 	sparkwing.Job(plan, "slow", func(ctx context.Context) error { trace("slow", "body"); <-ctx.Done(); return ctx.Err() }).
 		AfterRun(after("slow")).
 		Timeout(500 * time.Millisecond)
-	sparkwing.JobApproval(plan, "skipped-gate", sparkwing.ApprovalConfig{Message: "ship it?"}).
+	sparkwing.JobApproval(plan, "skipped-gate", sparkwing.ApprovalConfigOld{Message: "ship it?"}).
 		SkipIf(func(context.Context) bool { return true })
 	source := sparkwing.Job(plan, "unverified-source", &targetsJob{list: "a"}).
 		Verify(func(context.Context) error { return errors.New("bad target list") })

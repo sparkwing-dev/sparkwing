@@ -92,7 +92,7 @@ func TestReleasePreparationRefusesMissingNotesBeforeCommit(t *testing.T) {
 			before := gitRun(t, repo, "rev-parse", "HEAD")
 			ctx := context.WithValue(t.Context(), sparkwing.RuntimePlumbing.Keys.JSONRefResolver,
 				func(id string) ([]byte, bool) { return []byte(`"v0.2.0"`), id == "version" })
-			job := prepareChangelogJob{RepoDir: repo, Version: sparkwing.Ref[string]{NodeID: "version"}}
+			job := prepareChangelogJob{RepoDir: repo, Version: sparkwing.Ref[string]{JobID: "version"}}
 			err := job.run(ctx)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("release preparation refusal = %v, want %q", err, tc.want)

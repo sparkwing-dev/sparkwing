@@ -36,7 +36,7 @@ func TestAStalledDescribeEndsTheRunBeforeItIsRecorded(t *testing.T) {
 			Entry: pipelineentry.Binary(entry), Dir: dir, Env: []string{"PATH=/usr/bin:/bin"},
 			Grace: 50 * time.Millisecond, DescribeTimeout: 200 * time.Millisecond,
 		},
-		Pipeline: "demo", Run: nodeproto.RunContext{RunID: "stalled-describe"},
+		Pipeline: "demo", Run: nodeproto.RunContextOld{RunID: "stalled-describe"},
 		State: st, Logger: slog.New(slog.DiscardHandler),
 	})
 	if err == nil || !strings.Contains(err.Error(), "describe failed: no reply within 200ms") {
@@ -79,11 +79,11 @@ func describeFails(t *testing.T, script, via string, sink Sink) error {
 	var err error
 	if via == "execute" {
 		_, err = Execute(ctx, Config{
-			Session: cfg, Pipeline: "demo", Run: nodeproto.RunContext{RunID: "describe-fails"},
+			Session: cfg, Pipeline: "demo", Run: nodeproto.RunContextOld{RunID: "describe-fails"},
 			State: openStore(t), Logger: slog.New(slog.DiscardHandler), Attempts: &Attempts{Masker: secrets.NewMasker()},
 		})
 	} else {
-		_, err = PlanDocument(ctx, cfg, PlanRequest{Pipeline: "demo", Run: nodeproto.RunContext{RunID: "describe-fails"}, Masker: secrets.NewMasker()})
+		_, err = PlanDocument(ctx, cfg, PlanRequest{Pipeline: "demo", Run: nodeproto.RunContextOld{RunID: "describe-fails"}, Masker: secrets.NewMasker()})
 	}
 	if err == nil {
 		t.Fatal("describe succeeded")

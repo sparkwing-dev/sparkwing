@@ -133,7 +133,7 @@ func driveSteps(ctx context.Context, sess *Session, sink *LogSink, n *NodeRun, a
 				defer cancels.Done()
 				// safety: a cancel that fails leaves the step to finish on its
 				// own, and a broken session fails the step's own reply too.
-				if _, err := sess.Call(ctx, nodeproto.Request{Op: nodeproto.OpCancel, Node: n.Plan.ID, Step: id}); err != nil {
+				if _, err := sess.Call(ctx, nodeproto.RequestOld{Op: nodeproto.OpCancelOld, Node: n.Plan.ID, Step: id}); err != nil {
 					n.Run.Logger.Warn("nodehost: cancel step", "run", n.Run.ID, "node", n.Plan.ID, "step", id, "err", err)
 				}
 			}()
@@ -240,9 +240,9 @@ func (r *stepRun) run(ctx context.Context, st nodeproto.PlanStep) stepDone {
 	d.started = true
 	start := time.Now()
 	r.record("info", sparkwing.EventStepStart, st.ID, map[string]any{"step": st.ID})
-	var rr nodeproto.RunResult
-	err = ask(ctx, r.sess, nodeproto.Request{
-		Op: nodeproto.OpRunStep, Node: r.n.Plan.ID, Step: st.ID, Attempt: r.attempt, Failure: r.n.Failure,
+	var rr nodeproto.RunResultOld
+	err = ask(ctx, r.sess, nodeproto.RequestOld{
+		Op: nodeproto.OpRunStepOld, Node: r.n.Plan.ID, Step: st.ID, Attempt: r.attempt, Failure: r.n.Failure,
 	}, &rr)
 	if err == nil {
 		err = rr.Validate()
@@ -266,8 +266,8 @@ func (r *stepRun) skipIf(ctx context.Context, st nodeproto.PlanStep) (bool, erro
 		return false, nil
 	}
 	for _, id := range st.Closures.SkipIf {
-		var res nodeproto.EvalResult
-		if err := ask(ctx, r.sess, nodeproto.Request{Op: nodeproto.OpEval, Closure: id}, &res); err != nil {
+		var res nodeproto.EvalResultOld
+		if err := ask(ctx, r.sess, nodeproto.RequestOld{Op: nodeproto.OpEvalOld, Closure: id}, &res); err != nil {
 			return false, err
 		}
 		if res.Error != nil {

@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	docFields  = jsonFields(reflect.TypeFor[PlanDoc]())
+	docFields  = jsonFields(reflect.TypeFor[PlanDocOld]())
 	nodeFields = append(jsonFields(reflect.TypeFor[PlanNode]()), "tools")
 )
 

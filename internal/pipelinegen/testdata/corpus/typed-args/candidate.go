@@ -41,7 +41,7 @@ func genArgsRender(in GenTypedArgsInput) func(ctx context.Context) error {
 
 func genArgsApply(in GenTypedArgsInput) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
-		sw.Annotate(ctx, "applied to "+in.Environment)
+		sw.AnnotateOld(ctx, "applied to "+in.Environment)
 		return nil
 	}
 }

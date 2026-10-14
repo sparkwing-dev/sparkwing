@@ -24,19 +24,19 @@ type SDKInfo struct {
 	Version  string `json:"version"`
 }
 
-func describe(_ context.Context, s *server, _ nodeproto.Request) (any, error) {
+func describe(_ context.Context, s *server, _ nodeproto.RequestOld) (any, error) {
 	pipelines, err := sparkwingruntime.DescribeAll() //nolint:contextcheck // describe plans each pipeline with empty args, which no request cancels
 	if err != nil {
 		return nil, err
 	}
-	doc := DescribeDoc{Protocol: nodeproto.Version, Pipelines: pipelines}
+	doc := DescribeDoc{Protocol: nodeproto.VersionOld, Pipelines: pipelines}
 	if s.cfg.SDKVersion != "" {
 		doc.SDK = &SDKInfo{Language: "go", Version: s.cfg.SDKVersion}
 	}
 	return doc, nil
 }
 
-func plan(ctx context.Context, s *server, req nodeproto.Request) (any, error) {
+func plan(ctx context.Context, s *server, req nodeproto.RequestOld) (any, error) {
 	s.mu.Lock()
 	seen := s.planSeen
 	s.planSeen = true
@@ -72,12 +72,12 @@ func plan(ctx context.Context, s *server, req nodeproto.Request) (any, error) {
 	return doc, nil
 }
 
-func runContext(pipeline string, run *nodeproto.RunContext) sparkwing.RunContext {
+func runContext(pipeline string, run *nodeproto.RunContextOld) sparkwing.RunContext {
 	rc := sparkwing.RunContext{
 		RunID:     run.RunID,
 		Pipeline:  pipeline,
 		StartedAt: run.StartedAt,
-		NoCache:   run.NoCache,
+		NoMemo:    run.NoCache,
 		DryRun:    run.DryRun,
 	}
 	workDir := sparkwing.CurrentRuntime().WorkDir

@@ -139,7 +139,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 
 	resolver := secrets.NewCached(localSecretsFor(ctx, paths, backends, runID, opts.Pipeline), masker)
 	opts.localSecrets = true
-	state.preflight = func(ctx context.Context, doc nodeproto.PlanDoc) error {
+	state.preflight = func(ctx context.Context, doc nodeproto.PlanDocOld) error {
 		return hostedSecretPreflight(ctx, resolver, doc, opts)
 	}
 	children := hostedChildren{
@@ -248,8 +248,8 @@ func applyHostedProjectConfig(opts *Options, dir string) error {
 	return RefusePinnedLocalRun(opts.PipelineYAML)
 }
 
-func hostedRunContext(opts Options, runID string) nodeproto.RunContext {
-	rc := nodeproto.RunContext{
+func hostedRunContext(opts Options, runID string) nodeproto.RunContextOld {
+	rc := nodeproto.RunContextOld{
 		RunID: runID, NoCache: opts.NoCache, DryRun: opts.DryRun,
 		Trigger: &nodeproto.Trigger{Source: protocolTriggerSource(opts.Trigger.Source), User: opts.Trigger.User},
 	}
@@ -298,7 +298,7 @@ type hostedRunState struct {
 	delegate sparkwing.Logger
 	diskRoot string
 
-	preflight func(context.Context, nodeproto.PlanDoc) error
+	preflight func(context.Context, nodeproto.PlanDocOld) error
 	// safety: the handle is published only once its run row exists, so it never names a run the store lacks.
 	publishHandle func() error
 	// safety: the run row records the surface that started the run, such as a child's await-pipeline, which
@@ -308,7 +308,7 @@ type hostedRunState struct {
 	retryPlanHash string
 
 	mu     sync.Mutex
-	doc    *nodeproto.PlanDoc
+	doc    *nodeproto.PlanDocOld
 	starts map[string]time.Time
 }
 
@@ -339,7 +339,7 @@ func (s *hostedRunState) UpdatePlanSnapshot(ctx context.Context, runID string, s
 	if err := s.StateBackend.UpdatePlanSnapshot(ctx, runID, snapshot); err != nil {
 		return err
 	}
-	var doc nodeproto.PlanDoc
+	var doc nodeproto.PlanDocOld
 	if json.Unmarshal(snapshot, &doc) == nil {
 		s.mu.Lock()
 		s.doc = &doc
@@ -354,7 +354,7 @@ func (s *hostedRunState) UpdatePlanSnapshot(ctx context.Context, runID string, s
 
 // safety: a run missing a required secret stops before any node starts, naming each one with its fix, as the
 // dispatcher's preflight did; the snapshot write is the first point the host knows the declared secrets.
-func hostedSecretPreflight(ctx context.Context, r *secrets.Cached, doc nodeproto.PlanDoc, opts Options) error {
+func hostedSecretPreflight(ctx context.Context, r *secrets.Cached, doc nodeproto.PlanDocOld, opts Options) error {
 	missing := &sparkwingruntime.MissingSecretsError{Pipeline: opts.Pipeline}
 	for _, sec := range doc.Secrets {
 		if sec.Optional {
@@ -372,7 +372,7 @@ func hostedSecretPreflight(ctx context.Context, r *secrets.Cached, doc nodeproto
 	return secretPreflightError(missing, opts)
 }
 
-func (s *hostedRunState) planDoc() *nodeproto.PlanDoc {
+func (s *hostedRunState) planDoc() *nodeproto.PlanDocOld {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.doc
@@ -466,7 +466,7 @@ func warnHostedClose(what string, err error) {
 	}
 }
 
-func emitHostedPlan(delegate sparkwing.Logger, doc nodeproto.PlanDoc) {
+func emitHostedPlan(delegate sparkwing.Logger, doc nodeproto.PlanDocOld) {
 	rows := make([]any, 0, len(doc.Nodes))
 	for _, n := range doc.Nodes {
 		row := map[string]any{"id": n.ID, "deps": n.Deps}
@@ -523,7 +523,7 @@ func emitHostedRunEnd(ctx context.Context, delegate sparkwing.Logger, state Stat
 }
 
 // safety: like capacityFingerprint, it covers the edges and concurrency memberships, which change what a run costs.
-func hostedCapacityFingerprint(doc *nodeproto.PlanDoc) string {
+func hostedCapacityFingerprint(doc *nodeproto.PlanDocOld) string {
 	edges := make([]planEdge, 0, len(doc.Nodes))
 	var conc []any
 	for _, n := range doc.Nodes {

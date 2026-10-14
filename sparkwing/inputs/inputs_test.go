@@ -13,8 +13,8 @@ func TestEnvDeterministicOrder(t *testing.T) {
 	t.Setenv("SAMPLE_FIRST_VALUE", "1")
 	t.Setenv("SAMPLE_SECOND_VALUE", "2")
 
-	first := resolvedKey(t, Env("SAMPLE_FIRST_VALUE", "SAMPLE_SECOND_VALUE"))
-	second := resolvedKey(t, Env("SAMPLE_SECOND_VALUE", "SAMPLE_FIRST_VALUE"))
+	first := resolvedKey(t, EnvOld("SAMPLE_FIRST_VALUE", "SAMPLE_SECOND_VALUE"))
+	second := resolvedKey(t, EnvOld("SAMPLE_SECOND_VALUE", "SAMPLE_FIRST_VALUE"))
 	if first != second || first == "" {
 		t.Fatalf("Env order should not affect hash: a=%q b=%q", first, second)
 	}
@@ -27,8 +27,8 @@ func TestEnvUnsetVsEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	present := resolvedKey(t, Env("SAMPLE_PRESENT_VALUE"))
-	absent := resolvedKey(t, Env("SAMPLE_ABSENT_VALUE"))
+	present := resolvedKey(t, EnvOld("SAMPLE_PRESENT_VALUE"))
+	absent := resolvedKey(t, EnvOld("SAMPLE_ABSENT_VALUE"))
 	if present == absent {
 		t.Fatalf("set-but-empty and unset must hash differently: both=%q", present)
 	}
@@ -36,19 +36,19 @@ func TestEnvUnsetVsEmpty(t *testing.T) {
 
 func TestEnvValueChangesHash(t *testing.T) {
 	t.Setenv("SAMPLE_INPUT_VALUE", "one")
-	first := resolvedKey(t, Env("SAMPLE_INPUT_VALUE"))
+	first := resolvedKey(t, EnvOld("SAMPLE_INPUT_VALUE"))
 	t.Setenv("SAMPLE_INPUT_VALUE", "two")
-	second := resolvedKey(t, Env("SAMPLE_INPUT_VALUE"))
+	second := resolvedKey(t, EnvOld("SAMPLE_INPUT_VALUE"))
 	if first == second {
 		t.Fatalf("changing var value should change hash: a=%q b=%q", first, second)
 	}
 }
 
 func TestConst(t *testing.T) {
-	if resolvedKey(t, Const("v1")) != "v1" {
+	if resolvedKey(t, ConstOld("v1")) != "v1" {
 		t.Fatal("Const should return its supplied key")
 	}
-	if resolvedKey(t, Const("v1")) == resolvedKey(t, Const("v2")) {
+	if resolvedKey(t, ConstOld("v1")) == resolvedKey(t, ConstOld("v2")) {
 		t.Fatal("different Const values should differ")
 	}
 }
@@ -56,7 +56,7 @@ func TestConst(t *testing.T) {
 func TestComposeShortCircuitsOnEmpty(t *testing.T) {
 	empty := sparkwing.CacheKeyFn(func(context.Context) (sparkwing.CacheKey, error) { return "", nil })
 	value := sparkwing.CacheKeyFn(func(context.Context) (sparkwing.CacheKey, error) { return "x", nil })
-	key, err := Compose(value, empty)(t.Context())
+	key, err := ComposeOld(value, empty)(t.Context())
 	if key != "" || err == nil || !strings.Contains(err.Error(), "empty key") {
 		t.Fatalf("empty input = (%q, %v)", key, err)
 	}
@@ -185,17 +185,17 @@ func TestDirPrefixIsBoundaryAware(t *testing.T) {
 }
 
 func TestSignatureIsCacheKeyFn(t *testing.T) {
-	_ = RepoFiles()
-	_ = RepoFiles(Ignore("*.md"))
-	_ = Files("src/**")
-	_ = Env("HOME")
-	_ = Const("v1")
-	_ = Compose(Const("a"), Const("b"))
+	_ = RepoFilesOld()
+	_ = RepoFilesOld(Ignore("*.md"))
+	_ = FilesOld("src/**")
+	_ = EnvOld("HOME")
+	_ = ConstOld("v1")
+	_ = ComposeOld(ConstOld("a"), ConstOld("b"))
 }
 
 func TestComposeIncorporatesAllParts(t *testing.T) {
-	first := resolvedKey(t, Compose(Const("x"), Const("y")))
-	second := resolvedKey(t, Compose(Const("x"), Const("z")))
+	first := resolvedKey(t, ComposeOld(ConstOld("x"), ConstOld("y")))
+	second := resolvedKey(t, ComposeOld(ConstOld("x"), ConstOld("z")))
 	if first == second {
 		t.Fatal("changing one Const should change Compose output")
 	}

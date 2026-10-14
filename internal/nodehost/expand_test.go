@@ -14,8 +14,8 @@ import (
 
 const testGenerator = "targets/generator/0"
 
-func fanOutDoc() nodeproto.PlanDoc {
-	return nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{
+func fanOutDoc() nodeproto.PlanDocOld {
+	return nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
 		{ID: "targets", Closures: &nodeproto.PlanClosures{Generator: []string{testGenerator}}},
 		{ID: "summary", Deps: deps("lint"), NeedsGenerated: []string{testGenerator}},
 		{ID: "lint"},

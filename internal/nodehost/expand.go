@@ -45,8 +45,8 @@ func generate(ctx context.Context, sess *Session, n *NodeRun) []expansion {
 // safety: the host stamps each spec_hash itself, as it does the plan's, so a
 // generator never picks the hash its node is later checked against.
 func evalGenerator(ctx context.Context, sess *Session, closure string) ([]nodeproto.PlanNode, error) {
-	var res nodeproto.EvalResult
-	if err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpEval, Closure: closure}, &res); err != nil {
+	var res nodeproto.EvalResultOld
+	if err := ask(ctx, sess, nodeproto.RequestOld{Op: nodeproto.OpEvalOld, Closure: closure}, &res); err != nil {
 		return nil, err
 	}
 	if res.Error != nil {

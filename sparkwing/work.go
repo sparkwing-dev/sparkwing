@@ -45,11 +45,11 @@ type ParallelFailurePolicy string
 const (
 	// FailFast cancels ordinary in-flight siblings after the first decisive
 	// failure. It is the default and preserves the historical Work behavior.
-	FailFast ParallelFailurePolicy = "fail-fast"
+	FailFast ParallelFailurePolicy = "fail_fast"
 	// CollectAll lets every independent or already-ready item finish so one run
 	// can report the full failure set. It does not satisfy a failed prerequisite;
 	// downstream Needs still require success or an explicit ContinueOnError.
-	CollectAll ParallelFailurePolicy = "collect-all"
+	CollectAll ParallelFailurePolicy = "collect_all"
 )
 
 // NewWork returns an empty Work.

@@ -73,7 +73,7 @@ func fastApprovalPoll(t *testing.T) {
 	t.Cleanup(func() { approvalPoll = prev })
 }
 
-func hostGates(t *testing.T, ctx context.Context, gs *gateStore, doc nodeproto.PlanDoc, fx *fakeExec) (RunResult, map[string]*gateLog) {
+func hostGates(t *testing.T, ctx context.Context, gs *gateStore, doc nodeproto.PlanDocOld, fx *fakeExec) (RunResult, map[string]*gateLog) {
 	t.Helper()
 	if err := gs.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
@@ -102,8 +102,8 @@ func hostGates(t *testing.T, ctx context.Context, gs *gateStore, doc nodeproto.P
 	return res, logs
 }
 
-func gateDoc(gate nodeproto.PlanApproval) nodeproto.PlanDoc {
-	return nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{
+func gateDoc(gate nodeproto.PlanApproval) nodeproto.PlanDocOld {
+	return nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
 		{ID: "build"},
 		{ID: "gate", Deps: deps("build"), Approval: &gate, Modifiers: &nodeproto.PlanModifiers{OnFailure: "rollback"}},
 		{ID: "deploy", Deps: deps("gate")},

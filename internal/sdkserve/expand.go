@@ -17,18 +17,18 @@ import (
 // that panics, or returns nodes the plan cannot take, is the closure's error.
 // A failed reply means the closure is not a generator of this plan, or the
 // node documents could not be built.
-func Expand(ctx context.Context, cfg Config, planned *Planned, closure string) (nodeproto.EvalResult, error) {
+func Expand(ctx context.Context, cfg Config, planned *Planned, closure string) (nodeproto.EvalResultOld, error) {
 	c, ok := sparkwingruntime.LookupClosure(planned.Plan, closure)
 	if !ok || c.Kind != sparkwingruntime.ClosureGenerator {
-		return nodeproto.EvalResult{}, &nodeproto.Error{Code: nodeproto.CodeUnknownClosure, Message: fmt.Sprintf("no generator %q in this process's plan", closure)}
+		return nodeproto.EvalResultOld{}, &nodeproto.Error{Code: nodeproto.CodeUnknownClosure, Message: fmt.Sprintf("no generator %q in this process's plan", closure)}
 	}
 	exp, ok := expansion(planned.Plan, c.Node, closure)
 	if !ok {
-		return nodeproto.EvalResult{}, fmt.Errorf("generator %q has no expansion", closure)
+		return nodeproto.EvalResultOld{}, fmt.Errorf("generator %q has no expansion", closure)
 	}
 	select {
 	case <-exp.Group.Ready():
-		return nodeproto.EvalResult{}, &nodeproto.Error{Code: nodeproto.CodeBadRequest, Message: fmt.Sprintf("generator %q already ran in this process", closure)}
+		return nodeproto.EvalResultOld{}, &nodeproto.Error{Code: nodeproto.CodeBadRequest, Message: fmt.Sprintf("generator %q already ran in this process", closure)}
 	default:
 	}
 	children, err := generate(ctx, exp)
@@ -43,7 +43,7 @@ func Expand(ctx context.Context, cfg Config, planned *Planned, closure string) (
 
 	doc, err := cfg.PlanDoc(planned.Plan, planned.Run, planned.Registration)
 	if err != nil {
-		return nodeproto.EvalResult{}, fmt.Errorf("plan document after %s: %w", closure, err)
+		return nodeproto.EvalResultOld{}, fmt.Errorf("plan document after %s: %w", closure, err)
 	}
 	byID := make(map[string]nodeproto.PlanNode, len(doc.Nodes))
 	for _, n := range doc.Nodes {
@@ -58,16 +58,16 @@ func Expand(ctx context.Context, cfg Config, planned *Planned, closure string) (
 		for _, id := range ids {
 			n, ok := byID[id]
 			if !ok {
-				return nodeproto.EvalResult{}, fmt.Errorf("generated node %s is missing from the plan document", id)
+				return nodeproto.EvalResultOld{}, fmt.Errorf("generated node %s is missing from the plan document", id)
 			}
 			nodes = append(nodes, n)
 		}
 	}
 	value, err := json.Marshal(nodes)
 	if err != nil {
-		return nodeproto.EvalResult{}, err
+		return nodeproto.EvalResultOld{}, err
 	}
-	return nodeproto.EvalResult{Value: value}, nil
+	return nodeproto.EvalResultOld{Value: value}, nil
 }
 
 // safety: generator ids number a node's expansions in plan order, the walk

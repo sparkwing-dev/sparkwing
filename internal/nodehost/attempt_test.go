@@ -134,7 +134,7 @@ func TestAttemptExecutor(t *testing.T) {
 				Env: env, Sink: h.plan,
 			},
 			Pipeline: "attempts", Args: args,
-			Run:   nodeproto.RunContext{RunID: runID},
+			Run:   nodeproto.RunContextOld{RunID: runID},
 			State: h.st, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
 			Attempts: &Attempts{
 				Routes: srv, Resolver: fixtureResolver{}, Masker: h.plan.masker,
@@ -213,7 +213,7 @@ func TestAttemptExecutor(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var snap nodeproto.PlanDoc
+		var snap nodeproto.PlanDocOld
 		if err := json.Unmarshal(run.PlanSnapshot, &snap); err != nil || len(snap.Nodes) != 1 || !strings.HasPrefix(snap.Nodes[0].SpecHash, "sha256:") {
 			t.Errorf("plan snapshot = %s (err %v), want each node stamped with its spec_hash", run.PlanSnapshot, err)
 		}
@@ -360,7 +360,7 @@ func TestAProtocolBreakAfterTheReplyFailsTheNode(t *testing.T) {
 		Env: append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0"),
 	}}
 	run := &Run{
-		ID: "run-garble", Pipeline: "p", Context: nodeproto.RunContext{RunID: "run-garble"},
+		ID: "run-garble", Pipeline: "p", Context: nodeproto.RunContextOld{RunID: "run-garble"},
 		State: openStore(t), Logger: slog.New(slog.DiscardHandler),
 	}
 	res := a.executor(cfg)(t.Context(), &NodeRun{Run: run, Plan: nodeproto.PlanNode{ID: "reply-then-garbage", SpecHash: hash}})

@@ -234,7 +234,7 @@ func newEnvelopeRig(t *testing.T, daemon bool) *envelopeRig {
 		r.daemon = &watchedAdmitter{
 			Admitter: &hostedAdmitter{
 				la: testWingdAdmission(home, nil), backends: LocalBackends(paths, st, nil), pipeline: "envelope",
-				plan: func() *nodeproto.PlanDoc { return nil },
+				plan: func() *nodeproto.PlanDocOld { return nil },
 			},
 			queued: make(chan string, 64), refused: make(chan string, 64),
 		}
@@ -259,7 +259,7 @@ func (r *envelopeRig) start(runID, pipeline string, args map[string]string, twea
 			Entry: pipelineentry.Binary(os.Args[0]), Dir: r.t.TempDir(), Grace: 2 * time.Second,
 			Env: append(engineenv.Strip(os.Environ()), nodeProtocolEntryEnv+"=1", "GORACE=atexit_sleep_ms=0"),
 		},
-		Pipeline: pipeline, Args: args, Run: nodeproto.RunContext{RunID: runID},
+		Pipeline: pipeline, Args: args, Run: nodeproto.RunContextOld{RunID: runID},
 		State: r.st, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
 		Attempts: &nodehost.Attempts{
 			Routes: r.routes, Resolver: noEnvelopeSecrets{}, Masker: secrets.NewMasker(),

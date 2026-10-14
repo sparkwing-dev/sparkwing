@@ -92,19 +92,19 @@ func init() {
 func measureContexts(t *testing.T) string {
 	t.Helper()
 	s := serve(t, nil)
-	if r := s.call(nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: contextProbePipeline, Args: map[string]string{}, Run: &nodeproto.RunContext{RunID: "probe-run"}}); !r.OK {
+	if r := s.call(nodeproto.RequestOld{Op: nodeproto.OpPlanOld, Pipeline: contextProbePipeline, Args: map[string]string{}, Run: &nodeproto.RunContextOld{RunID: "probe-run"}}); !r.OK {
 		t.Fatal(r.Error)
 	}
 	eval := func(kind string, input json.RawMessage) {
 		t.Helper()
-		if r := s.call(nodeproto.Request{Op: nodeproto.OpEval, Closure: "probe/" + kind + "/0", Input: input}); !r.OK {
+		if r := s.call(nodeproto.RequestOld{Op: nodeproto.OpEvalOld, Closure: "probe/" + kind + "/0", Input: input}); !r.OK {
 			t.Fatalf("%s: %+v", kind, r.Error)
 		}
 	}
 	eval("skip_if", nil)
 	eval("cache_key", nil)
 	eval("before_run", nil)
-	if res := s.run(nodeproto.OpRunStep, "probe", "run"); res.Outcome != nodeproto.OutcomeSuccess {
+	if res := s.run(nodeproto.OpRunStepOld, "probe", "run"); res.Outcome != nodeproto.OutcomeSuccess {
 		t.Fatalf("body: %+v", res)
 	}
 	eval("verify", nil)

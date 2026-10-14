@@ -40,7 +40,7 @@ func eventBackends(t *testing.T, body func(t *testing.T, st *store.Store, state 
 	})
 }
 
-func hostEvents(t *testing.T, ctx context.Context, state storage.StateStore, cfg Config, doc nodeproto.PlanDoc) RunResult {
+func hostEvents(t *testing.T, ctx context.Context, state storage.StateStore, cfg Config, doc nodeproto.PlanDocOld) RunResult {
 	t.Helper()
 	if err := state.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
@@ -137,7 +137,7 @@ func TestHostedRunEmitsTheDispatchersEvents(t *testing.T) {
 		retry := func(auto bool) *nodeproto.PlanModifiers {
 			return &nodeproto.PlanModifiers{Retry: 1, RetryAuto: auto}
 		}
-		doc := nodeproto.PlanDoc{Pipeline: "p", Nodes: []nodeproto.PlanNode{
+		doc := nodeproto.PlanDocOld{Pipeline: "p", Nodes: []nodeproto.PlanNode{
 			{ID: "ok"},
 			{ID: "boom"},
 			{ID: "after-boom", Deps: deps("boom")},
@@ -251,7 +251,7 @@ func TestHostedRunEmitsConcurrencyEvents(t *testing.T) {
 		res := hostEvents(t, ctx, state, Config{
 			Execute:   func(context.Context, *NodeRun) Result { return Result{Outcome: sparkwing.Success} },
 			Admission: &Admission{Slots: slots},
-		}, nodeproto.PlanDoc{Nodes: grouped("global", "queue", 1, 0, "b")})
+		}, nodeproto.PlanDocOld{Nodes: grouped("global", "queue", 1, 0, "b")})
 		if res.Nodes["b"].Outcome != sparkwing.Success {
 			t.Fatalf("b %+v, want success once promoted", res.Nodes["b"])
 		}

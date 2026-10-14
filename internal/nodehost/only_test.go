@@ -14,7 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func hostWith(t *testing.T, ctx context.Context, st *store.Store, cfg Config, doc nodeproto.PlanDoc) RunResult {
+func hostWith(t *testing.T, ctx context.Context, st *store.Store, cfg Config, doc nodeproto.PlanDocOld) RunResult {
 	t.Helper()
 	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
@@ -34,7 +34,7 @@ func TestOnlyRunsTheMatchedNodesAndWhatTheyNeed(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	fx := &fakeExec{}
-	doc := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{
+	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
 		{ID: "setup"},
 		{ID: "build-linux", Deps: deps("setup")},
 		{ID: "build-mac", Deps: deps("setup")},
@@ -59,7 +59,7 @@ func TestOnlyRunsTheMatchedNodesAndWhatTheyNeed(t *testing.T) {
 }
 
 func TestOnlyRefusesWhatTheDispatcherRefused(t *testing.T) {
-	doc := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "build"}, {ID: "test"}}}
+	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "build"}, {ID: "test"}}}
 	for _, tc := range []struct{ only, start, want string }{
 		{"deploy", "", `--only="deploy" matched no jobs (declared: [build test])`},
 		{"[", "", `--only="["`},
@@ -105,7 +105,7 @@ func TestWorkersCapsTheNodesRunningAtOnce(t *testing.T) {
 		mu.Unlock()
 		return Result{Outcome: sparkwing.Success}
 	}
-	doc := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{
+	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
 		{ID: "a"},
 		{ID: "b"},
 		{ID: "c"},
@@ -124,7 +124,7 @@ func TestWorkersCapsTheNodesRunningAtOnce(t *testing.T) {
 }
 
 func TestDryRunEnvHandsTheSwitchToTheNode(t *testing.T) {
-	if got := dryRunEnv(&NodeRun{Run: &Run{Context: nodeproto.RunContext{DryRun: true}}}); !slices.Equal(got, []string{"SPARKWING_DRY_RUN=1"}) {
+	if got := dryRunEnv(&NodeRun{Run: &Run{Context: nodeproto.RunContextOld{DryRun: true}}}); !slices.Equal(got, []string{"SPARKWING_DRY_RUN=1"}) {
 		t.Errorf("env = %v, want the dry-run switch", got)
 	}
 	if got := dryRunEnv(&NodeRun{Run: &Run{}}); got != nil {

@@ -40,16 +40,16 @@ func TestRunNodeFillsPipelineSecrets(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		values map[string]nodeclienttest.Secret
-		want   nodeproto.RunResult
+		want   nodeproto.RunResultOld
 	}{
 		{
 			name:   "required held, optional unset",
 			values: map[string]nodeclienttest.Secret{"DEPLOY_TOKEN": {Value: "hunter2", Masked: true}},
-			want:   nodeproto.RunResult{Outcome: nodeproto.OutcomeSuccess},
+			want:   nodeproto.RunResultOld{Outcome: nodeproto.OutcomeSuccess},
 		},
 		{
 			name: "required unset",
-			want: nodeproto.RunResult{Outcome: nodeproto.OutcomeFailed, Error: `node "deploy" did not start: ` +
+			want: nodeproto.RunResultOld{Outcome: nodeproto.OutcomeFailed, Error: `node "deploy" did not start: ` +
 				`this run cannot read 1 required secret it declares: DEPLOY_TOKEN. ` +
 				"If the run can do without a secret, declare it optional: tag its field in Secrets() `sw:\"NAME,optional\"`."},
 		},
@@ -61,11 +61,11 @@ func TestRunNodeFillsPipelineSecrets(t *testing.T) {
 			}
 			h := nodeclienttest.Start(t, "deploy", tc.values, declared...)
 			s := serve(t, h.Client)
-			plan := nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: secretsPipeline, Args: map[string]string{}, Run: &nodeproto.RunContext{RunID: nodeclienttest.RunID}}
+			plan := nodeproto.RequestOld{Op: nodeproto.OpPlanOld, Pipeline: secretsPipeline, Args: map[string]string{}, Run: &nodeproto.RunContextOld{RunID: nodeclienttest.RunID}}
 			if reply := s.call(plan); !reply.OK {
 				t.Fatalf("plan = %+v", reply.Error)
 			}
-			if got := s.run(nodeproto.OpRunNode, "deploy", ""); got.Outcome != tc.want.Outcome || got.Error != tc.want.Error {
+			if got := s.run(nodeproto.OpRunNodeOld, "deploy", ""); got.Outcome != tc.want.Outcome || got.Error != tc.want.Error {
 				t.Errorf("run_node = %+v, want %+v", got, tc.want)
 			}
 		})

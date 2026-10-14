@@ -134,7 +134,7 @@ func TestHostedRunRecordsHandleReproducerAndRequires(t *testing.T) {
 			t.Errorf("reproducer %q omits %s", line, flag)
 		}
 	}
-	var doc nodeproto.PlanDoc
+	var doc nodeproto.PlanDocOld
 	if err := json.Unmarshal(row.PlanSnapshot, &doc); err != nil {
 		t.Fatal(err)
 	}

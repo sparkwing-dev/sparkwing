@@ -34,7 +34,7 @@ func Ignore(patterns ...string) RepoFilesOption {
 }
 
 // RepoFiles hashes every tracked file. Ignore excludes matching tracked paths.
-func RepoFiles(options ...RepoFilesOption) sparkwing.CacheKeyFn {
+func RepoFilesOld(options ...RepoFilesOption) sparkwing.CacheKeyFn {
 	config := repoFilesConfig{}
 	for _, option := range options {
 		option(&config)
@@ -55,7 +55,7 @@ func RepoFiles(options ...RepoFilesOption) sparkwing.CacheKeyFn {
 
 // Files hashes tracked files matching the supplied patterns.
 // Patterns follow the same rules as Ignore.
-func Files(globs ...string) sparkwing.CacheKeyFn {
+func FilesOld(globs ...string) sparkwing.CacheKeyFn {
 	matcher, patternError := buildIncludeMatcher(globs)
 	return func(ctx context.Context) (sparkwing.CacheKey, error) {
 		if patternError != nil {
@@ -72,7 +72,7 @@ func Files(globs ...string) sparkwing.CacheKeyFn {
 // Tree hashes every regular file under root and skips symlinks.
 // Relative roots resolve against the repository root.
 // A missing or non-directory root returns an error.
-func Tree(root string) sparkwing.CacheKeyFn {
+func TreeOld(root string) sparkwing.CacheKeyFn {
 	return func(ctx context.Context) (sparkwing.CacheKey, error) {
 		absolute, err := resolveTreeRoot(ctx, root)
 		if err != nil {
@@ -88,7 +88,7 @@ func Tree(root string) sparkwing.CacheKeyFn {
 
 // Env hashes the named environment variables in sorted name order.
 // Unset variables hash differently from empty variables.
-func Env(names ...string) sparkwing.CacheKeyFn {
+func EnvOld(names ...string) sparkwing.CacheKeyFn {
 	sorted := append([]string(nil), names...)
 	sort.Strings(sorted)
 	return func(_ context.Context) (sparkwing.CacheKey, error) {
@@ -109,14 +109,14 @@ func Env(names ...string) sparkwing.CacheKeyFn {
 }
 
 // Const returns the supplied key.
-func Const(s string) sparkwing.CacheKeyFn {
+func ConstOld(s string) sparkwing.CacheKeyFn {
 	return func(_ context.Context) (sparkwing.CacheKey, error) { return sparkwing.CacheKey(s), nil }
 }
 
 // Compose combines keys with sparkwing.Key.
 // An input error or empty key returns an error.
 // NoCache stops evaluation and bypasses memoization.
-func Compose(resolvers ...sparkwing.CacheKeyFn) sparkwing.CacheKeyFn {
+func ComposeOld(resolvers ...sparkwing.CacheKeyFn) sparkwing.CacheKeyFn {
 	return func(ctx context.Context) (sparkwing.CacheKey, error) {
 		parts := make([]any, 0, len(resolvers))
 		for index, resolve := range resolvers {

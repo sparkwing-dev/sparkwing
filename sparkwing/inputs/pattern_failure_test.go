@@ -19,7 +19,7 @@ func TestMalformedPatternsFailWithoutTrackedFiles(t *testing.T) {
 	}
 	withWorkDir(t, repository, func() {
 		for _, pattern := range []string{"[", "[a-]"} {
-			for _, resolve := range []sparkwing.CacheKeyFn{Files(pattern), RepoFiles(Ignore(pattern)), Files("*", pattern), RepoFiles(Ignore("*", pattern))} {
+			for _, resolve := range []sparkwing.CacheKeyFn{FilesOld(pattern), RepoFilesOld(Ignore(pattern)), FilesOld("*", pattern), RepoFilesOld(Ignore("*", pattern))} {
 				key, err := resolve(t.Context())
 				if key != "" || !errors.Is(err, filepath.ErrBadPattern) || !strings.Contains(err.Error(), "pattern") {
 					t.Errorf("pattern %q = (%q, %v)", pattern, key, err)
@@ -32,7 +32,7 @@ func TestMalformedPatternsFailWithoutTrackedFiles(t *testing.T) {
 func TestMalformedLaterPatternFailsBeforeMatching(t *testing.T) {
 	repository := createTestRepository(t, map[string]string{"sample.txt": "sample"})
 	withWorkDir(t, repository, func() {
-		for _, resolve := range []sparkwing.CacheKeyFn{Files("*", "["), RepoFiles(Ignore("*", "["))} {
+		for _, resolve := range []sparkwing.CacheKeyFn{FilesOld("*", "["), RepoFilesOld(Ignore("*", "["))} {
 			key, err := resolve(t.Context())
 			if key != "" || !errors.Is(err, filepath.ErrBadPattern) {
 				t.Errorf("later malformed pattern = (%q, %v)", key, err)

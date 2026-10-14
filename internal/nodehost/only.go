@@ -12,7 +12,7 @@ import (
 
 // safety: --sw-only keeps the matched nodes and what they depend on; OnFailure recovery nodes and nodes a
 // generator adds later are never cut, as in the dispatcher.
-func onlySkips(doc nodeproto.PlanDoc, pattern, start, stop string) (map[string]string, error) {
+func onlySkips(doc nodeproto.PlanDocOld, pattern, start, stop string) (map[string]string, error) {
 	if pattern == "" {
 		return nil, nil
 	}
@@ -79,7 +79,7 @@ func workersLayer(cfg *Config, next Executor) Executor {
 
 // safety: a controller-dispatched run has no host to record skips, so --sw-only cuts the nodes from the plan the
 // controller accepts; a recovery node goes with its cut parent, since nothing it recovers can run.
-func cutOutsideOnly(doc nodeproto.PlanDoc, raw []byte, pattern string) (nodeproto.PlanDoc, []byte, error) {
+func cutOutsideOnly(doc nodeproto.PlanDocOld, raw []byte, pattern string) (nodeproto.PlanDocOld, []byte, error) {
 	skips, err := onlySkips(doc, pattern, "", "")
 	if err != nil || len(skips) == 0 {
 		return doc, raw, err

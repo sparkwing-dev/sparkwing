@@ -42,7 +42,7 @@ func genFixtureStart(ctx context.Context) error {
 }
 
 func genFixtureReady(ctx context.Context) error {
-	sw.Annotate(ctx, "database accepting connections")
+	sw.AnnotateOld(ctx, "database accepting connections")
 	return nil
 }
 

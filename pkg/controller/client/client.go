@@ -417,7 +417,7 @@ func (c *Client) TouchRunHeartbeat(ctx context.Context, runID string) error {
 }
 
 // AppendNodeAnnotation POSTs a single persistent summary string to
-// append to the node's annotations list. Driven by sparkwing.Annotate.
+// append to the node's annotations list. Driven by sparkwing.AnnotateOld.
 func (c *Client) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {
 	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/annotations",
 		url.PathEscape(runID), url.PathEscape(nodeID))

@@ -15,7 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func hostPlanned(t *testing.T, ctx context.Context, st *store.Store, runID string, doc nodeproto.PlanDoc, adm *Admission, exec Executor) (RunResult, func()) {
+func hostPlanned(t *testing.T, ctx context.Context, st *store.Store, runID string, doc nodeproto.PlanDocOld, adm *Admission, exec Executor) (RunResult, func()) {
 	t.Helper()
 	if err := st.CreateRun(ctx, store.Run{ID: runID, Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
@@ -46,8 +46,8 @@ func (d *fakeDaemon) lease(runID string) *fakeLease {
 	return d.leases[runID]
 }
 
-func planGrouped(key, onLimit string, nodes ...string) nodeproto.PlanDoc {
-	doc := nodeproto.PlanDoc{Pipeline: "p", PlanConcs: []nodeproto.PlanConc{{Key: key, Capacity: 1, OnLimit: onLimit}}}
+func planGrouped(key, onLimit string, nodes ...string) nodeproto.PlanDocOld {
+	doc := nodeproto.PlanDocOld{Pipeline: "p", PlanConcs: []nodeproto.PlanConc{{Key: key, Capacity: 1, OnLimit: onLimit}}}
 	for _, id := range nodes {
 		doc.Nodes = append(doc.Nodes, nodeproto.PlanNode{ID: id})
 	}
@@ -257,7 +257,7 @@ func TestRunLeaseIsTheNodeLeasesOwner(t *testing.T) {
 	defer cancel()
 	d := newFakeDaemon()
 	front := 7
-	doc := nodeproto.PlanDoc{
+	doc := nodeproto.PlanDocOld{
 		Pipeline: "p", AdmissionClass: "critical", Nodes: []nodeproto.PlanNode{{ID: "a"}},
 		PlanConcs: []nodeproto.PlanConc{{Key: boxKey, Capacity: 2, Cost: 1, OnLimit: "queue", QueueTimeoutMS: 5000}},
 	}
@@ -286,7 +286,7 @@ func TestRunLeaseChargesThePlanResources(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	d := newFakeDaemon()
-	doc := nodeproto.PlanDoc{Pipeline: "p", Resources: &nodeproto.PlanResources{Cores: 4, MemoryBytes: 1 << 30}, Nodes: []nodeproto.PlanNode{{ID: "a"}}}
+	doc := nodeproto.PlanDocOld{Pipeline: "p", Resources: &nodeproto.PlanResources{Cores: 4, MemoryBytes: 1 << 30}, Nodes: []nodeproto.PlanNode{{ID: "a"}}}
 	_, release := hostPlanned(t, ctx, st, testRunID, doc, &Admission{Daemon: d}, func(context.Context, *NodeRun) Result { return Result{Outcome: sparkwing.Success} })
 	release()
 	reqs := d.requests()
