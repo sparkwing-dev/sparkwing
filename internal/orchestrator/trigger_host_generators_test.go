@@ -61,6 +61,9 @@ func TestTriggerHost_DispatchesAGeneratorsNodesAndTheirConsumer(t *testing.T) {
 			t.Fatalf("%s = %s/%s (%s) hash %q claimed by %q, want a success under its own node claim", id, n.Status, n.Outcome, n.Error, n.SpecHash, n.ClaimedBy)
 		}
 	}
+	if g := h.node(t, "test-a").Generated; g == nil || g.Source != "targets" || g.Batch != 2 || len(g.Spec) == 0 {
+		t.Fatalf("test-a generated record = %+v, want its spec recorded from targets' batch of 2", g)
+	}
 	if deps := h.node(t, "summary").Deps; !slices.Contains(deps, "test-a") || !slices.Contains(deps, "test-b") {
 		t.Fatalf("summary deps = %v, want the generated nodes", deps)
 	}

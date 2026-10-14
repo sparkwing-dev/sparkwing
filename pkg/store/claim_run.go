@@ -258,7 +258,33 @@ func (s *Store) declaredNode(ctx context.Context, team Team, runID, nodeID strin
 			return n, true, nil
 		}
 	}
-	return declaredPlanNode{}, false, nil
+	return s.declaredGeneratedNode(ctx, team, runID, nodeID)
+}
+
+// safety: a generated node's spec is the run host's record of what its generator returned, admitted beside the
+// plan; it carries no secrets of its own, so the pipeline's declared secrets still bound what it reads.
+func (s *Store) declaredGeneratedNode(ctx context.Context, team Team, runID, nodeID string) (declaredPlanNode, bool, error) {
+	var raw []byte
+	err := s.queryRow(ctx, `SELECT generated_json FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`,
+		string(team), runID, nodeID).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && len(raw) == 0) {
+		return declaredPlanNode{}, false, nil
+	}
+	if err != nil {
+		return declaredPlanNode{}, false, err
+	}
+	var gen GeneratedNode
+	var n declaredPlanNode
+	if err := json.Unmarshal(raw, &gen); err != nil {
+		return declaredPlanNode{}, false, fmt.Errorf("read run %s node %s's generated spec: %w", runID, nodeID, err)
+	}
+	if err := json.Unmarshal(gen.Spec, &n); err != nil {
+		return declaredPlanNode{}, false, fmt.Errorf("read run %s node %s's generated spec: %w", runID, nodeID, err)
+	}
+	if n.ID != nodeID {
+		return declaredPlanNode{}, false, nil
+	}
+	return n, true, nil
 }
 
 // PlanPipelineRef is one other pipeline's node a plan node declares it reads

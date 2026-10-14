@@ -141,6 +141,7 @@ CREATE TABLE nodes (
     approval_json bytea,
     attention_reason text NOT NULL DEFAULT ''::text,
     timeout_ms bigint NOT NULL DEFAULT 0,
+    generated_json bytea,
     CONSTRAINT nodes_pkey PRIMARY KEY (run_id, node_id),
     CONSTRAINT nodes_run_id_fkey FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
 );

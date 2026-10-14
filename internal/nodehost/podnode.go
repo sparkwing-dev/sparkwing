@@ -167,7 +167,7 @@ func podAttempt(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash
 	case !dispatched:
 		return drift("node %s is not in this process's plan; plan code must be deterministic for a run", nodeID)
 	default:
-		if n.Plan, n.Generator, err = podGenerated(ctx, cfg, run, nodeID, acceptedHash); err != nil {
+		if n.Plan, n.Generators, err = podGenerated(ctx, run, nodeID, acceptedHash); err != nil {
 			return failed(err)
 		}
 	}
@@ -206,54 +206,44 @@ func podAttempt(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash
 	return res
 }
 
-// safety: a generated node is in no process's plan, so this host builds it with the generators of the sources its
-// row needs, reading their recorded outputs as the node's attempt will, and runs it only as the run host added it.
-func podGenerated(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash string) (nodeproto.PlanNode, string, error) {
-	notPlanned := &nodeproto.Error{Code: nodeproto.CodePlanDrift, Message: fmt.Sprintf(
-		"node %s is neither in this process's plan nor returned by a generator of the nodes it needs; plan code and generators must be deterministic for a run", nodeID)}
+// safety: a generated node is in no process's plan, so this host runs the spec the run host recorded on its row
+// when its generator returned it, as the run accepted it, with the generators that load its code in the attempt:
+// each source's that added the next node, back to a node of the plan.
+func podGenerated(ctx context.Context, run *Run, nodeID, acceptedHash string) (nodeproto.PlanNode, []string, error) {
+	drift := func(format string, args ...any) error {
+		return &nodeproto.Error{Code: nodeproto.CodePlanDrift, Message: fmt.Sprintf(format, args...)}
+	}
 	row, err := run.State.GetNode(ctx, run.ID, nodeID)
 	if err != nil {
-		return nodeproto.PlanNode{}, "", fmt.Errorf("read node %s: %w", nodeID, err)
+		return nodeproto.PlanNode{}, nil, fmt.Errorf("read node %s: %w", nodeID, err)
 	}
-	var closures []string
-	for _, src := range run.Doc.Nodes {
-		if src.Closures != nil && slices.Contains(row.Deps, src.ID) {
-			closures = append(closures, src.Closures.Generator...)
+	if row.Generated == nil {
+		return nodeproto.PlanNode{}, nil, drift("node %s is not in this process's plan; plan code must be deterministic for a run", nodeID)
+	}
+	var spec nodeproto.PlanNode
+	if err := json.Unmarshal(row.Generated.Spec, &spec); err != nil || spec.ID != nodeID || spec.SpecHash != acceptedHash {
+		return nodeproto.PlanNode{}, nil, drift("node %s's recorded spec is not the one its run accepted (%v)", nodeID, err)
+	}
+	inPlan := func(id string) bool {
+		return slices.ContainsFunc(run.Doc.Nodes, func(p nodeproto.PlanNode) bool { return p.ID == id })
+	}
+	chain := []string{row.Generated.Generator}
+	for source := row.Generated.Source; !inPlan(source); {
+		src, err := run.State.GetNode(ctx, run.ID, source)
+		switch {
+		case err != nil:
+			return nodeproto.PlanNode{}, nil, fmt.Errorf("read node %s's source %s: %w", nodeID, source, err)
+		case src.Generated == nil || len(chain) > maxGeneratorDepth:
+			return nodeproto.PlanNode{}, nil, drift("node %s's source %s is neither in this process's plan nor generated", nodeID, source)
 		}
+		chain = append([]string{src.Generated.Generator}, chain...)
+		source = src.Generated.Source
 	}
-	if len(closures) == 0 {
-		return nodeproto.PlanNode{}, "", notPlanned
-	}
-	var found nodeproto.PlanNode
-	var generator string
-	probe := &NodeRun{Run: run, Plan: nodeproto.PlanNode{ID: nodeID, SpecHash: acceptedHash}}
-	res := cfg.Attempts.process(ctx, cfg.Session, probe, func(ctx context.Context, sess *Session, _ *LogSink) Result {
-		if _, err := askPlan(ctx, sess, run); err != nil {
-			return failed(err)
-		}
-		for _, id := range closures {
-			nodes, err := evalGenerator(ctx, sess, id)
-			if err != nil {
-				return failed(err)
-			}
-			if j := slices.IndexFunc(nodes, func(got nodeproto.PlanNode) bool { return got.ID == nodeID }); j >= 0 {
-				found, generator = nodes[j], id
-				break
-			}
-		}
-		return Result{Outcome: sparkwing.Success}
-	})
-	switch {
-	case res.Outcome != sparkwing.Success:
-		return nodeproto.PlanNode{}, "", fmt.Errorf("generate node %s: %w", nodeID, res.Err)
-	case generator == "":
-		return nodeproto.PlanNode{}, "", notPlanned
-	case found.SpecHash != acceptedHash:
-		return nodeproto.PlanNode{}, "", &nodeproto.Error{Code: nodeproto.CodePlanDrift, Message: fmt.Sprintf(
-			"generator %s builds node %s differently than when the run added it; a generator must return the same nodes for the same source output", generator, nodeID)}
-	}
-	return found, generator, nil
+	return spec, chain, nil
 }
+
+// safety: a chain of generated sources this deep is a cycle in the recorded rows, which no run can produce.
+const maxGeneratorDepth = 64
 
 func podChain(cfg *Config, layers []Layer) Executor {
 	inner := cfg.Attempts.executor(cfg)

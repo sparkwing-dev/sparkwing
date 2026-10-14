@@ -7,6 +7,9 @@ import (
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type expansion struct {
@@ -67,25 +70,30 @@ func evalGenerator(ctx context.Context, sess *Session, closure string) ([]nodepr
 	return nodes, nil
 }
 
-// safety: a generated node is in no process's plan until its generator runs
-// there, so its attempt rebuilds it and compares it with what the run accepted.
+// safety: a generated node's code is in no process until its generators run
+// there, each source's before the next, so its attempt runs the chain and
+// compares the node the last returns with what the run accepted.
 func regenerate(ctx context.Context, sess *Session, n *NodeRun) error {
-	nodes, err := evalGenerator(ctx, sess, n.Generator)
-	if err != nil {
-		return err
+	var nodes []nodeproto.PlanNode
+	for _, closure := range n.Generators {
+		var err error
+		if nodes, err = evalGenerator(ctx, sess, closure); err != nil {
+			return err
+		}
 	}
+	last := n.Generators[len(n.Generators)-1]
 	for _, got := range nodes {
 		if got.ID != n.Plan.ID {
 			continue
 		}
 		if got.SpecHash != n.Plan.SpecHash {
 			return &nodeproto.Error{Code: nodeproto.CodePlanDrift, Message: fmt.Sprintf(
-				"generator %s builds node %s differently than when the run added it; a generator must return the same nodes for the same source output", n.Generator, n.Plan.ID)}
+				"generator %s builds node %s differently than when the run added it; a generator must return the same nodes for the same source output", last, n.Plan.ID)}
 		}
 		return nil
 	}
 	return &nodeproto.Error{Code: nodeproto.CodePlanDrift, Message: fmt.Sprintf(
-		"generator %s no longer returns node %s; a generator must return the same nodes for the same source output", n.Generator, n.Plan.ID)}
+		"generator %s no longer returns node %s; a generator must return the same nodes for the same source output", last, n.Plan.ID)}
 }
 
 // safety: every generator of a finished source settles here, whatever its
@@ -128,16 +136,16 @@ func (s *scheduler) addGenerated(ctx context.Context, source string, e expansion
 			return invalid("generator %s returned node %s, which does not need its source %s", e.closure, n.ID, source)
 		}
 	}
-	if err := s.add(ctx, context.WithoutCancel(ctx), e.nodes); err != nil {
+	if err := s.add(ctx, context.WithoutCancel(ctx), e.nodes, &expansionFrom{source: source, closure: e.closure}); err != nil {
 		return err
 	}
 	if s.addedBy == nil {
-		s.addedBy = map[string]string{}
+		s.addedBy, s.sourceOf = map[string]string{}, map[string]string{}
 	}
 	g := s.group(e.closure)
 	children := 0
 	for _, n := range e.nodes {
-		s.addedBy[n.ID] = e.closure
+		s.addedBy[n.ID], s.sourceOf[n.ID] = e.closure, source
 		if n.OnFailureOf == "" {
 			g.members = append(g.members, n.ID)
 			children++
@@ -191,4 +199,95 @@ func (s *scheduler) generatedWaits(n nodeproto.PlanNode, waits []string) (_ []st
 		}
 	}
 	return waits, ready, nil
+}
+
+func (s *scheduler) generators(id string) []string {
+	var chain []string
+	for closure := s.addedBy[id]; closure != ""; closure = s.addedBy[id] {
+		chain = append([]string{closure}, chain...)
+		id = s.sourceOf[id]
+	}
+	return chain
+}
+
+// safety: a memo hit's copy, outcome cached, adds its generators' nodes as its leader did.
+func generatesNodes(n nodeproto.PlanNode, outcome sparkwing.Outcome) bool {
+	return n.Closures != nil && len(n.Closures.Generator) > 0 && (outcome == sparkwing.Success || outcome == sparkwing.Cached)
+}
+
+type expansionFrom struct{ source, closure string }
+
+func (f *expansionFrom) record(row *store.Node, n nodeproto.PlanNode, batch int) error {
+	if f == nil {
+		return nil
+	}
+	spec, err := json.Marshal(n)
+	if err != nil {
+		return err
+	}
+	row.Generated = &store.GeneratedNode{Source: f.source, Generator: f.closure, Batch: batch, Spec: spec}
+	return nil
+}
+
+type nodeLister interface {
+	ListNodes(ctx context.Context, runID string) ([]*store.Node, error)
+}
+
+// safety: the expansion's membership is the rows the run recorded, so a later host adds every node the run
+// accepted, finished or not, and never one a generator would return now. complete is false while any generator of
+// n has no batch, or only part of one, recorded: an empty batch records nothing, and a host that stopped mid-add
+// left part.
+func storedExpansions(ctx context.Context, st storage.StateStore, runID string, n nodeproto.PlanNode) (_ []expansion, complete bool, _ error) {
+	lister, ok := st.(nodeLister)
+	if !ok {
+		return nil, false, nil
+	}
+	rows, err := lister.ListNodes(context.WithoutCancel(ctx), runID)
+	if err != nil {
+		return nil, false, fmt.Errorf("read the nodes %s generated: %w", n.ID, err)
+	}
+	out := make([]expansion, 0, len(n.Closures.Generator))
+	for _, closure := range n.Closures.Generator {
+		e := expansion{closure: closure}
+		batch := 0
+		for _, row := range rows {
+			g := row.Generated
+			if g == nil || g.Source != n.ID || g.Generator != closure {
+				continue
+			}
+			var node nodeproto.PlanNode
+			if err := json.Unmarshal(g.Spec, &node); err != nil {
+				return nil, false, fmt.Errorf("read generated node %s: %w", row.NodeID, err)
+			}
+			e.nodes, batch = append(e.nodes, node), g.Batch
+		}
+		if len(e.nodes) == 0 || len(e.nodes) != batch {
+			return nil, false, nil
+		}
+		out = append(out, e)
+	}
+	return out, true, nil
+}
+
+// safety: only a batch never fully recorded is generated, from the source's recorded output in an eval process.
+func (s *scheduler) recordedExpansions(ctx context.Context, runID string, n nodeproto.PlanNode, output func() (json.RawMessage, error)) []expansion {
+	stored, complete, err := storedExpansions(ctx, s.run.State, runID, n)
+	if err == nil && complete {
+		return stored
+	}
+	if err == nil && s.regenerate == nil {
+		err = fmt.Errorf("the nodes %s generated are not recorded, and this host has no eval process to generate them", n.ID)
+	}
+	var out json.RawMessage
+	if err == nil {
+		out, err = output()
+	}
+	if err == nil {
+		return s.regenerate(ctx, &NodeRun{Run: s.run, Plan: n, Generators: s.generators(n.ID)}, out)
+	}
+	unrecorded := make([]expansion, 0, len(n.Closures.Generator))
+	for _, g := range n.Closures.Generator {
+		unrecorded = append(unrecorded, expansion{closure: g, err: err})
+	}
+	return unrecorded
 }

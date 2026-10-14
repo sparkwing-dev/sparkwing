@@ -154,18 +154,7 @@ func drive(ctx context.Context, sess *Session, sink *LogSink, n *NodeRun) Result
 }
 
 func nodeReplan(ctx context.Context, sess *Session, n *NodeRun) error {
-	raw, err := askPlan(ctx, sess, n.Run)
-	switch {
-	case err != nil:
-		return err
-	case n.Generator != "":
-		return regenerate(ctx, sess, n)
-	}
-	return checkDrift(raw, n.Plan)
-}
-
-// safety: a process evaluates closures only once it planned with the run's accepted request.
-func askPlan(ctx context.Context, sess *Session, run *Run) (json.RawMessage, error) {
+	run := n.Run
 	args := run.Args
 	if args == nil {
 		args = map[string]string{}
@@ -173,7 +162,13 @@ func askPlan(ctx context.Context, sess *Session, run *Run) (json.RawMessage, err
 	rc := run.Context
 	var raw json.RawMessage
 	err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: run.Pipeline, Args: args, Run: &rc}, &raw)
-	return raw, err
+	switch {
+	case err != nil:
+		return err
+	case len(n.Generators) > 0:
+		return regenerate(ctx, sess, n)
+	}
+	return checkDrift(raw, n.Plan)
 }
 
 func attemptBody(ctx context.Context, sess *Session, sink *LogSink, n *NodeRun) Result {
