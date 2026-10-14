@@ -581,23 +581,7 @@ func (s *scheduler) finish(ctx context.Context, id string, res Result) {
 	case res.Outcome == sparkwing.Failed && errors.Is(ctx.Err(), context.Canceled):
 		res.Outcome, res.Err = sparkwing.Cancelled, errors.New("cancelled: run failing")
 	}
-	res = maskResult(s.run.Masker, res)
-	writeCtx := context.WithoutCancel(ctx)
-	var err error
-	if !res.recorded {
-		err = s.run.State.FinishNodeWithReason(writeCtx, s.run.ID, id, string(res.Outcome), recordedErrText(res.Err), res.Output, res.Reason, nil)
-	}
-	if errors.Is(err, store.ErrOutputNotStored) {
-		// safety: a refused output fails the node in its row too, so the row never stays running.
-		res = Result{Outcome: sparkwing.Failed, Err: err}
-		err = s.run.State.FinishNodeWithReason(writeCtx, s.run.ID, id, string(res.Outcome), recordedErrText(err), nil, store.FailureUnknown, nil)
-	}
-	if err != nil {
-		// safety: a result the store never took must not read as a success downstream.
-		s.run.Logger.Error("nodehost: record node result", "node", id, "err", err)
-		res.Outcome, res.Err = sparkwing.Failed, errors.Join(res.Err, fmt.Errorf("record node result: %w", err))
-	}
-	nodeEndEvent(writeCtx, s.run, id, res)
+	res = recordResult(ctx, s.run, id, res)
 	s.results[id] = res
 	s.expand(ctx, id, res)
 }
@@ -847,12 +831,28 @@ type maskedRunError struct {
 func (e maskedRunError) Error() string { return e.text }
 func (e maskedRunError) Unwrap() error { return e.err }
 
-// safety: layers outside the attempt, such as admission, artifacts, caches and drift, fail with text no attempt
-// masked, so a node's result is masked where it is recorded, before its row text is bounded.
-func maskResult(m *secrets.Masker, res Result) Result {
-	if res.Err != nil {
-		res.Err = errors.New(m.Mask(res.Err.Error()))
+// safety: the one writer of a node's result, for the scheduler and a pod host. A refused output fails the node in
+// its row too, so the row never stays running, and a result the store never took never reads as a success. Layers
+// outside the attempt, and the store itself, fail with text no attempt masked, so the result is masked after its
+// last change and every text it records is masked before it is bounded.
+func recordResult(ctx context.Context, run *Run, id string, res Result) Result {
+	writeCtx := context.WithoutCancel(ctx)
+	var err error
+	if !res.recorded {
+		err = run.State.FinishNodeWithReason(writeCtx, run.ID, id, string(res.Outcome), recordedErrText(run.Masker, res.Err), res.Output, res.Reason, nil)
 	}
+	if errors.Is(err, store.ErrOutputNotStored) {
+		res = Result{Outcome: sparkwing.Failed, Err: err}
+		err = run.State.FinishNodeWithReason(writeCtx, run.ID, id, string(res.Outcome), recordedErrText(run.Masker, err), nil, store.FailureUnknown, nil)
+	}
+	if err != nil {
+		run.Logger.Error("nodehost: record node result", "node", id, "err", err)
+		res.Outcome, res.Err = sparkwing.Failed, errors.Join(res.Err, fmt.Errorf("record node result: %w", err))
+	}
+	if res.Err != nil {
+		res.Err = errors.New(run.Masker.Mask(res.Err.Error()))
+	}
+	nodeEndEvent(writeCtx, run, id, res)
 	return res
 }
 
@@ -873,13 +873,13 @@ func errText(err error) string {
 // safety: only the node's row and end event are shortened; a cut taken before
 // masking could split a secret the masker no longer recognizes, so hook and
 // recovery inputs keep the whole error.
-func recordedErrText(err error) string {
-	return boundedNodeErrText(errText(err))
+func recordedErrText(m *secrets.Masker, err error) string {
+	return boundedNodeErrText(m.Mask(errText(err)))
 }
 
 // RecordedErrText is err as a node's row records it, bounded as every node
 // finish bounds it.
-func RecordedErrText(err error) string { return recordedErrText(err) }
+func RecordedErrText(err error) string { return recordedErrText(nil, err) }
 
 // safety: the first line names what failed and the tail is where a command's
 // output reports why, so both survive and the elision is stated.

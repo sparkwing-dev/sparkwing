@@ -156,7 +156,7 @@ func podHost(ctx context.Context, cfg *Config, run *Run, nodeID string, res Resu
 	if res.Outcome == sparkwing.Failed && ctx.Err() != nil {
 		res.Outcome = sparkwing.Cancelled
 	}
-	return podFinish(ctx, run, nodeID, maskResult(run.Masker, res))
+	return recordResult(ctx, run, nodeID, res)
 }
 
 func podAttempt(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash string, attempt int, dispatched bool) Result {
@@ -282,21 +282,4 @@ func podChain(cfg *Config, layers []Layer) Executor {
 		exec = layers[i](cfg, exec)
 	}
 	return exec
-}
-
-// safety: as the scheduler's finish, a refused output fails the node and a
-// result the store never took never reads as a success.
-func podFinish(ctx context.Context, run *Run, id string, res Result) Result {
-	writeCtx := context.WithoutCancel(ctx)
-	err := run.State.FinishNodeWithReason(writeCtx, run.ID, id, string(res.Outcome), recordedErrText(res.Err), res.Output, res.Reason, nil)
-	if errors.Is(err, store.ErrOutputNotStored) {
-		res = Result{Outcome: sparkwing.Failed, Err: err}
-		err = run.State.FinishNodeWithReason(writeCtx, run.ID, id, string(res.Outcome), recordedErrText(err), nil, store.FailureUnknown, nil)
-	}
-	if err != nil {
-		run.Logger.Error("nodehost: record node result", "node", id, "err", err)
-		res.Outcome, res.Err = sparkwing.Failed, errors.Join(res.Err, fmt.Errorf("record node result: %w", err))
-	}
-	nodeEndEvent(writeCtx, run, id, res)
-	return res
 }
