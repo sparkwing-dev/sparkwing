@@ -37,7 +37,7 @@ func TestAResumedRetryRegeneratesTheGeneratorItAdopts(t *testing.T) {
 			return []expansion{{closure: testGenerator, nodes: []nodeproto.PlanNode{{ID: "test-a", Deps: deps(n.Plan.ID)}}}}
 		},
 	}
-	if err := s.add(ctx, ctx, doc.Nodes); err != nil {
+	if err := s.add(ctx, ctx, doc.Nodes, nil); err != nil {
 		t.Fatal(err)
 	}
 	s.loop(ctx)
@@ -86,7 +86,7 @@ func TestARetryNeverCopiesOverARowItsRunAlreadyHolds(t *testing.T) {
 				run: run, results: map[string]Result{}, started: map[string]bool{}, exec: chain(&cfg), resume: true,
 				rehydrate: &Rehydration{SourceRunID: sourceRunID}, rerun: map[string]bool{},
 			}
-			if err := s.add(ctx, ctx, []nodeproto.PlanNode{{ID: "a"}}); err != nil {
+			if err := s.add(ctx, ctx, []nodeproto.PlanNode{{ID: "a"}}, nil); err != nil {
 				t.Fatal(err)
 			}
 			s.loop(ctx)

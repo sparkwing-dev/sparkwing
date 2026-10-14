@@ -75,7 +75,7 @@ func hostDebug(t *testing.T, ctx context.Context, ds *debugStore, doc nodeproto.
 	run := &Run{ID: testRunID, Doc: doc, State: ds, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest)}
 	res := RunResult{RunID: testRunID, Nodes: map[string]Result{}}
 	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg)}
-	if err := s.add(ctx, ctx, doc.Nodes); err != nil {
+	if err := s.add(ctx, ctx, doc.Nodes, nil); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 	s.loop(ctx)

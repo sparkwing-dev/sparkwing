@@ -129,13 +129,26 @@ func TestARetryWhoseGeneratorOutputIsGoneRunsItAndItsNodes(t *testing.T) {
 	}
 }
 
+// safety: a source run that never fully recorded its generator's nodes, as a host stopped mid-add leaves it.
+type sourceBatchUnrecorded struct{ *store.Store }
+
+func (s sourceBatchUnrecorded) ListNodes(ctx context.Context, runID string) ([]*store.Node, error) {
+	rows, err := s.Store.ListNodes(ctx, runID)
+	if runID == "retry-source" {
+		for _, row := range rows {
+			row.Generated = nil
+		}
+	}
+	return rows, err
+}
+
 func TestACopiedGeneratorsEvalKeepsTheNodesTimeout(t *testing.T) {
 	f := newRetryFixture(t)
 	f.source()
 	f.mode("hang")
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	res := f.run(ctx, "retry", &Rehydration{SourceRunID: "retry-source", Causes: retryCause}, f.st)
+	res := f.run(ctx, "retry", &Rehydration{SourceRunID: "retry-source", Causes: retryCause}, sourceBatchUnrecorded{f.st})
 	if ctx.Err() != nil {
 		t.Fatal("the retry only ended with its context: a hung generator eval held the scheduler")
 	}
@@ -149,13 +162,18 @@ func TestACopiedGeneratorsEvalKeepsTheNodesTimeout(t *testing.T) {
 	}
 }
 
-func TestARetryRunsAGeneratedNodeWhoseSpecChanged(t *testing.T) {
+// safety: the source run's recorded nodes are the retry's, so a good check whose generator now builds it
+// differently is still copied, and a check that runs again under a changed generator fails with plan_drift.
+func TestARetryKeepsTheGeneratedNodesItsSourceRecorded(t *testing.T) {
 	f := newRetryFixture(t)
 	f.source()
 	f.mode("changed")
 	res := f.run(t.Context(), "retry", &Rehydration{SourceRunID: "retry-source", Causes: retryCause}, f.st)
-	if res.Status == "success" || f.bodies("good") != 2 {
-		t.Fatalf("retry %s good=%d: the good check's spec changed, so it runs again rather than copying its old success",
-			res.Status, f.bodies("good"))
+	if f.bodies("good") != 1 || f.evalWall["targets"] != 0 {
+		t.Fatalf("good=%d, targets eval %s: the copied generator's recorded nodes are added without generating them",
+			f.bodies("good"), f.evalWall["targets"])
+	}
+	if bad := res.Nodes["test-bad"]; res.Status != "failed" || bad.Err == nil || !strings.Contains(bad.Err.Error(), "differently") {
+		t.Fatalf("retry %s test-bad %v, want test-bad failed for plan drift", res.Status, bad.Err)
 	}
 }

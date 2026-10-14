@@ -119,7 +119,7 @@ func scheduled(t *testing.T, st storage.StateStore, cfg Config, doc nodeproto.Pl
 		run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg),
 		rehydrate: cfg.Rehydrate, rerun: map[string]bool{}, regenerate: regenerate,
 	}
-	if err := s.add(ctx, ctx, doc.Nodes); err != nil {
+	if err := s.add(ctx, ctx, doc.Nodes, nil); err != nil {
 		t.Fatal(err)
 	}
 	s.loop(ctx)

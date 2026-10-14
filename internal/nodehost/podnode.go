@@ -156,18 +156,31 @@ func podAttempt(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash
 	drift := func(format string, args ...any) Result {
 		return failed(&nodeproto.Error{Code: nodeproto.CodePlanDrift, Message: fmt.Sprintf(format, args...)})
 	}
+	n := &NodeRun{Run: run}
 	switch {
 	case acceptedHash == "":
 		return drift("the dispatcher handed node %s no accepted spec_hash", nodeID)
-	case i < 0:
-		return drift("node %s is not in this process's plan; plan code must be deterministic for a run", nodeID)
-	case doc.Nodes[i].SpecHash != acceptedHash:
+	case i >= 0 && doc.Nodes[i].SpecHash != acceptedHash:
 		return drift("node %s plans differently than when the run was accepted; plan code must be deterministic for a run", nodeID)
+	case i >= 0:
+		n.Plan = doc.Nodes[i]
+	case !dispatched:
+		return drift("node %s is not in this process's plan; plan code must be deterministic for a run", nodeID)
+	default:
+		if n.Plan, n.Generators, err = podGenerated(ctx, run, nodeID, acceptedHash); err != nil {
+			return failed(err)
+		}
 	}
-	n := &NodeRun{Run: run, Plan: doc.Nodes[i]}
 	layers := podLayers
 	if m := n.Plan.Modifiers; dispatched {
 		layers = podDispatchedLayers
+		// safety: the run host generates a dispatched source's nodes from the output this host records, since only
+		// it can add them to the run, so the generators do not run here as well.
+		if c := n.Plan.Closures; c != nil && len(c.Generator) > 0 {
+			stripped := *c
+			stripped.Generator = nil
+			n.Plan.Closures = &stripped
+		}
 		if parent := n.Plan.OnFailureOf; parent != "" {
 			row, err := run.State.GetNode(ctx, run.ID, parent)
 			if err != nil {
@@ -186,11 +199,52 @@ func podAttempt(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash
 		}
 	}
 	res := podChain(cfg, layers)(ctx, n)
-	if len(res.expansions) > 0 && res.Outcome == sparkwing.Success {
+	if !dispatched && len(res.expansions) > 0 && res.Outcome == sparkwing.Success {
 		// safety: a pod cannot add nodes to its run, and dropping them would read as an empty fan-out.
 		return failed(fmt.Errorf("node %s generates nodes, which a pod cannot host yet", nodeID))
 	}
 	return res
+}
+
+// safety: a generated node is in no process's plan, so this host runs the spec the run host recorded on its row
+// when its generator returned it, as the run accepted it, with the generators that load its code in the attempt:
+// each source's that added the next node, back to a node of the plan.
+func podGenerated(ctx context.Context, run *Run, nodeID, acceptedHash string) (nodeproto.PlanNode, []string, error) {
+	drift := func(format string, args ...any) error {
+		return &nodeproto.Error{Code: nodeproto.CodePlanDrift, Message: fmt.Sprintf(format, args...)}
+	}
+	row, err := run.State.GetNode(ctx, run.ID, nodeID)
+	if err != nil {
+		return nodeproto.PlanNode{}, nil, fmt.Errorf("read node %s: %w", nodeID, err)
+	}
+	if row.Generated == nil {
+		return nodeproto.PlanNode{}, nil, drift("node %s is not in this process's plan; plan code must be deterministic for a run", nodeID)
+	}
+	var spec nodeproto.PlanNode
+	if err := json.Unmarshal(row.Generated.Spec, &spec); err != nil || spec.ID != nodeID || spec.SpecHash != acceptedHash {
+		return nodeproto.PlanNode{}, nil, drift("node %s's recorded spec is not the one its run accepted (%v)", nodeID, err)
+	}
+	inPlan := func(id string) bool {
+		return slices.ContainsFunc(run.Doc.Nodes, func(p nodeproto.PlanNode) bool { return p.ID == id })
+	}
+	chain := []string{row.Generated.Generator}
+	seen := map[string]bool{nodeID: true}
+	for source := row.Generated.Source; !inPlan(source); {
+		if seen[source] {
+			return nodeproto.PlanNode{}, nil, drift("node %s's recorded sources repeat %s", nodeID, source)
+		}
+		seen[source] = true
+		src, err := run.State.GetNode(ctx, run.ID, source)
+		switch {
+		case err != nil:
+			return nodeproto.PlanNode{}, nil, fmt.Errorf("read node %s's source %s: %w", nodeID, source, err)
+		case src.Generated == nil:
+			return nodeproto.PlanNode{}, nil, drift("node %s's source %s is neither in this process's plan nor generated", nodeID, source)
+		}
+		chain = append([]string{src.Generated.Generator}, chain...)
+		source = src.Generated.Source
+	}
+	return spec, chain, nil
 }
 
 func podChain(cfg *Config, layers []Layer) Executor {
