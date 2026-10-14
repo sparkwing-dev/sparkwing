@@ -260,7 +260,7 @@ Two fields belong to the host and an SDK leaves them out:
 
 ## Environment contract
 
-The host's caller names the base environment of every SDK process, and the host adds nothing from its own:
+The host's caller names the base environment of every SDK process, and the host adds nothing from its own except the runner variables below:
 
 - A local `sparkwing run` passes the user's environment.
 - A launcher Job passes `PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_*`, `TZ` and `USER` from the pod, plus `SystemRoot`, `ComSpec`, `PATHEXT`, `TEMP` and `TMP` on Windows.
@@ -273,10 +273,9 @@ From that base the host removes the `SPARKWING_*` variables the engine owns: cre
 | `SPARKWING_NODE_ID` | eval and attempt processes | The node the process is bound to. |
 | `SPARKWING_NODE_URL` | eval and attempt processes | Base URL of the node routes, such as `http://127.0.0.1:41873`. A route's URL is this value followed by its `/node/v1/` path. |
 | `SPARKWING_NODE_TOKEN` | eval and attempt processes | Bearer for the node routes. It is valid until the process exits. |
-| `SPARKWING_RUNNER_NAME` | eval and attempt processes | The runner that hosts the node. |
-| `SPARKWING_RUNNER_TYPE` | eval and attempt processes | `local` or `kubernetes`; unset for a runner that does not classify itself. |
-| `SPARKWING_RUNNER_LABELS` | eval and attempt processes | The runner's labels, comma-separated. |
-| `TRACEPARENT` | every process | The W3C trace context of the run, or of the node for a node-bound process. |
+| `SPARKWING_RUNNER_NAME` | eval and attempt processes | The runner that hosts the node: `local` for a local run, the launcher's name in a launcher Job. |
+| `SPARKWING_RUNNER_TYPE` | eval and attempt processes | `local` or `kubernetes`. |
+| `SPARKWING_RUNNER_LABELS` | eval and attempt processes | The runner's labels, comma-separated: `local,os=<GOOS>,arch=<GOARCH>` for a local run; unset in a launcher Job, which advertises none. |
 | `SPARKWING_PROTOCOL_HANDLES` | every process, Windows only | The request and frame pipe handles, as `<request>,<frame>` in decimal. |
 
 The SDK removes `SPARKWING_NODE_TOKEN` from the environment of every command it starts, so a step's tools never hold the bearer. A command started during package initialization can still hold it; see [Framing](#framing).
@@ -287,8 +286,7 @@ The host also sets variables that other tools already define, and the SDK needs 
 
 - the node's `env` from the plan;
 - `PATH`, with the node's `tools` in front;
-- the dependency-proxy variables `GOPROXY`, `npm_config_registry`, `PIP_INDEX_URL` and `PIP_TRUSTED_HOST`;
-- `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>` and `GIT_CONFIG_VALUE_<n>`, which point `git` at the source mirror.
+- the dependency-proxy variables `GOPROXY`, `npm_config_registry`, `PIP_INDEX_URL` and `PIP_TRUSTED_HOST`.
 
 Run options are host state and never reach the SDK as variables. `start_at`, `stop_at`, `only`, `no_cache`, `profile`, `mode` and `workers` change what the host schedules. The two that plan code observes, `dry_run` and `no_cache`, travel in the `plan` request's run context.
 
@@ -364,13 +362,15 @@ Content-Type: application/json
 |---|---|---|
 | One frame | 17 MiB, newline included | The attempt fails with `protocol_error`. |
 | A step's output | 16 MiB as JSON, for every step. Only the result step's output, or a `run_node` output, travels; other step outputs stay in the SDK process | The SDK fails the step, and the host fails a node whose reply carries a larger output. |
+| A node's recorded `error` | 8 KiB: the first line, up to 512 bytes, and the tail | The host records the first line, a note of how many bytes it elided, and the tail. A failed command's full output stays in the node's log. |
+| A node or step summary or annotation | 128 KiB each as stored | The host stores its start and a note of how many bytes it elided. |
 | A node `skip_if` | `modifiers.skip_if_budget_ms`, 30 seconds by default | The node runs. |
 | A `cache_key` closure | 30 seconds | The node fails. |
 | `after_run` after a timeout | 2 minutes, in its own eval process | The process is killed and the node's outcome stands. |
 | One cleanup | 2 minutes | The host ends it and every process it started. |
 | Cleanups per node | 16, each with at most 64 arguments, a 256-byte `description` and a 16 KiB request body | 400 `bad_request` |
 | Open route requests | 4 besides awaits, plus 64 awaits | 429 `too_many_requests` |
-| Retries of a 429 by the Go SDK | 2 minutes in all for one call | The call returns the 429. |
+| Retries of a 429 by the Go SDK | 2 minutes in all from the call's first 429 | The call returns the 429. |
 | A child run's request body | 64 KiB | 400 `bad_request` |
 | One `await` | `wait_ms` up to 60000, 30000 by default | 400 `bad_request` |
 | A `describe` from the CLI | 30 seconds | The CLI kills the process and every process it started. |

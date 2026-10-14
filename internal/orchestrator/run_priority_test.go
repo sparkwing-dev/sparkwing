@@ -201,3 +201,13 @@ func TestBuildReproducer_RendersPriorityAsItsFlag(t *testing.T) {
 		t.Errorf("reproducer = %q, want no priority-source flag", got)
 	}
 }
+
+func TestBuildRunInvocation_RecordsVerbose(t *testing.T) {
+	inv := buildRunInvocation(Options{Pipeline: "probe", Verbose: true}, "run-1", "", nil)
+	if flags, _ := inv["flags"].(map[string]any); flags["verbose"] != true {
+		t.Errorf("flags = %v, want verbose recorded", inv["flags"])
+	}
+	if got, want := inv["reproducer"], "sparkwing run probe --sw-verbose"; got != want {
+		t.Errorf("reproducer = %q, want %q", got, want)
+	}
+}

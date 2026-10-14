@@ -8,9 +8,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
@@ -84,8 +86,15 @@ func (r *pipelineRun) materialize(env []string) error {
 	return nil
 }
 
-func (r *pipelineRun) exec(args, env []string) error {
-	env = withWingdHost(dropProfileEnv(env))
+// safety: the binary runs authored init code, so it starts from the inherited
+// environment without what the engine owns, and runtime adds back only what
+// this verb reads, as KEY=VALUE.
+func (r *pipelineRun) exec(args, env []string, runtime ...string) error {
+	env = withWingdHost(engineenv.Strip(env))
+	for _, kv := range runtime {
+		k, v, _ := strings.Cut(kv, "=")
+		env = setEnv(env, k, v)
+	}
 	if r.uncachedBinary != "" {
 		r.stopSignals()
 		execDir := r.opts.ExecutionDir

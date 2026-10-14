@@ -509,9 +509,9 @@ func hostedCapacityFingerprint(doc *nodeproto.PlanDoc) string {
 }
 
 // RunHostedCommand runs one `sparkwing run` through [RunHosted] and renders it
-// as the pipeline binary did, with logFormat and verbose choosing the
+// as the pipeline binary did, with logFormat and opts.Verbose choosing the
 // renderer. The error says why the run did not succeed.
-func RunHostedCommand(ctx context.Context, opts Options, entry HostedEntry, logFormat string, verbose bool) (*Result, error) {
+func RunHostedCommand(ctx context.Context, opts Options, entry HostedEntry, logFormat string) (*Result, error) {
 	paths, err := DefaultPaths()
 	if err != nil {
 		return nil, fmt.Errorf("resolve paths: %w", err)
@@ -519,7 +519,7 @@ func RunHostedCommand(ctx context.Context, opts Options, entry HostedEntry, logF
 	// safety: the host's own diagnostics, such as retries and cache misses,
 	// went to the pipeline binary's stderr at info; here they would print raw
 	// between the renderer's records, so only warnings show unless verbose.
-	if !verbose {
+	if !opts.Verbose {
 		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
 	}
 	if opts.MaxParallel == 0 {
@@ -530,7 +530,7 @@ func RunHostedCommand(ctx context.Context, opts Options, entry HostedEntry, logF
 	if opts.MaxParallel == 0 {
 		opts.MaxParallel = runtime.NumCPU()
 	}
-	delegate := runRenderer(logFormat, verbose)
+	delegate := runRenderer(logFormat, opts.Verbose)
 	opts.Delegate = delegate
 	opts.AdmissionClass = admissionClassFromEnv()
 	opts.Admission = pipelineAdmission(childAttachTokenFromProcessEnv(), wingwire.OriginLocal)

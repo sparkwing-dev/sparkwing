@@ -113,10 +113,10 @@ what `NodeFromContext` and `StepFromContext` answer. A `JobNode.SkipIf` predicat
 A test renders that table from the requests a run's host sends and fails if
 this page and the SDK disagree.
 
-The table describes a run. `sparkwing pipeline plan` evaluates each step's skip
-predicate in the pipeline process, as a run does, to report which steps a run
-would skip, so a predicate's side effects happen there too.
-`sparkwing pipeline plan --static` evaluates no predicate.
+The table describes a run. `sparkwing pipeline plan` still runs the
+pipeline's `Plan`, as describe does, but no step action and no skip
+predicate: it reports a step with a SkipIf as `may_skip`, decided at run
+time.
 
 ## Exec and Bash - running a shell command in a step
 
@@ -530,7 +530,8 @@ dry-run flag), read `sparkwing.IsDryRun(ctx)` directly -- the public
 way to detect dry-run from inside a step.
 
 `sparkwing pipeline plan` does not preview dry-run: it reports
-`would_run` or `would_skip` from SkipIf and the step range only.
+`would_run`, `would_skip` from the step range, or `may_skip` for a step
+with a SkipIf, which only a run evaluates.
 
 Declare `step.DryRun(fn)` on mutating steps; `--sw-dry-run` selects
 those callbacks (see *Flag namespace* below).

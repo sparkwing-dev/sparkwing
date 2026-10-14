@@ -53,9 +53,9 @@ type EnvVarDoc struct {
 	Default     string `json:"default,omitempty"`
 }
 
-// DescribePipeline is one pipeline's CLI-facing schema. Emitted as
-// JSON by `<pipeline-binary> --describe`; consumed by the sparkwing CLI
-// for flag parsing, tab completion, and per-pipeline help output.
+// DescribePipeline is one pipeline's CLI-facing schema. The pipeline
+// binary answers it to the node protocol's describe request; the sparkwing
+// CLI reads it for flag parsing, tab completion, and per-pipeline help.
 type DescribePipeline struct {
 	Name     string        `json:"name"`
 	Short    string        `json:"short,omitempty"`
@@ -79,7 +79,7 @@ type DescribePipeline struct {
 	// RisksBySteps is the per-step breakdown so a renderer or agent
 	// can show "this is the step that will refuse" in the error path.
 	// Only populated for pipelines whose Plan() builds successfully
-	// without args during --describe; pipelines with required Inputs
+	// without args during describe; pipelines with required Inputs
 	// degrade to the union field above.
 	RisksBySteps []DescribeStepRisks `json:"risks_by_step,omitempty"`
 }

@@ -640,9 +640,10 @@ Nothing converts an old pin.
   for at most 2 minutes, the SDK retries a `429` from a node route for at
   most 2 minutes, and `after_run` after a timeout runs for at most 2
   minutes. See [node protocol limits](../node-protocol.md#limits).
-- **Inspection:** `sparkwing pipeline plan` evaluates each step's
-  `skip_if` in the pipeline process, as a run does, and no longer reports
-  lint warnings or `--sw-dry-run` decisions. An unknown pipeline flag
+- **Inspection:** `sparkwing pipeline plan` evaluates no `skip_if`; a
+  step with one reports `may_skip` (`user_skipif`) instead of
+  `would_skip`, and plan no longer reports lint warnings or
+  `--sw-dry-run` decisions. An unknown pipeline flag
   fails as invalid arguments instead of being dropped.
 - **Plan document:** dependency caches are listed under `caches` instead
   of `dir_caches`, including in `sparkwing pipeline plan --static -o json`.

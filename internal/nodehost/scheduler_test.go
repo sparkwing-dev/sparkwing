@@ -11,8 +11,10 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -409,6 +411,90 @@ func TestSchedulerARefusedOutputFailsTheNodeRow(t *testing.T) {
 	}
 	wantRow(t, st, "big", sparkwing.Failed, "the node's output was not stored")
 	wantRow(t, st, "after", sparkwing.Cancelled, "upstream-failed")
+}
+
+// safety: stands in for the controller's node finish route, which refuses a
+// JSON body over 1 MiB.
+type cappedFinish struct{ *store.Store }
+
+func (c cappedFinish) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error {
+	if len(errMsg) > 1<<20 {
+		return errors.New("controller 400: http: request body too large")
+	}
+	return c.Store.FinishNodeWithReason(ctx, runID, nodeID, outcome, errMsg, output, reason, exitCode)
+}
+
+func TestSchedulerRecordsAFailedCommandWithHugeOutput(t *testing.T) {
+	st := openStore(t)
+	huge := "command failed (exit 1): go test ./...\n" +
+		strings.Repeat("=== RUN   TestSomething\n--- PASS: TestSomething (0.00s)\n", 64<<10) +
+		"--- FAIL: TestBroken (0.01s)\nFAIL\tgithub.com/acme/broken\t0.2s\n"
+	fx := &fakeExec{bodies: map[string]Executor{"test": func(context.Context, *NodeRun) Result {
+		return Result{Outcome: sparkwing.Failed, Err: errors.New(huge)}
+	}}}
+	res := hostDoc(t, t.Context(), cappedFinish{st}, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "test"}}}, fx.run)
+	if res.Status != "failed" {
+		t.Errorf("status=%s err=%v, want failed", res.Status, res.Err)
+	}
+	row := nodeRow(t, st, "test")
+	if row.Status != "done" || row.Outcome != string(sparkwing.Failed) {
+		t.Fatalf("node row status=%q outcome=%q, want done/failed", row.Status, row.Outcome)
+	}
+	if len(row.Error) > nodeErrTextMaxBytes {
+		t.Errorf("recorded error is %d bytes, want at most %d", len(row.Error), nodeErrTextMaxBytes)
+	}
+	for _, want := range []string{"command failed (exit 1): go test ./...\n", "bytes of this error elided", "FAIL\tgithub.com/acme/broken\t0.2s\n"} {
+		if !strings.Contains(row.Error, want) {
+			t.Errorf("recorded error lacks %q:\n%s", want, row.Error)
+		}
+	}
+}
+
+type recordingLog struct{ records []sparkwing.LogRecord }
+
+func (l *recordingLog) Emit(rec sparkwing.LogRecord) { l.records = append(l.records, rec) }
+
+// A cut taken before masking would leave a fragment of a secret the masker no
+// longer recognizes, so after_run's input keeps the whole error, and a bounded
+// recorded error is cut only from text already masked.
+func TestNodeErrorBoundingNeverSplitsASecret(t *testing.T) {
+	secret := "private-token-ABCDEFGHIJKLMN"
+	for name, tc := range map[string]struct{ raw, fragment string }{
+		"head": {strings.Repeat("H", 500) + secret + "\n" + strings.Repeat("filler\n", 1800), "private-toke"},
+		"tail": {"failed\n" + strings.Repeat("X", 2600) + secret + strings.Repeat("Y", 7540), "HIJKLMN"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			masker := secrets.NewMasker()
+			masker.Register(secret)
+			arg := afterRunArgOf(Result{Outcome: sparkwing.Failed, Err: errors.New(tc.raw)})
+			if arg.Error != tc.raw {
+				t.Errorf("after_run input is %d bytes, want the whole %d-byte error", len(arg.Error), len(tc.raw))
+			}
+			log := &recordingLog{}
+			sink, err := NewLogSink(t.Context(), LogSinkConfig{RunID: "run", NodeID: "node", State: noState{}, Log: log, Masker: masker})
+			if err != nil {
+				t.Fatal(err)
+			}
+			sink.Record(nodeproto.LogRecord{Level: "error", Msg: arg.Error})
+			if len(log.records) != 1 || strings.Contains(log.records[0].Msg, tc.fragment) {
+				t.Errorf("a hook logging its error leaked %q: %+v", tc.fragment, log.records)
+			}
+			recorded := recordedErrText(errors.New(masker.Mask(tc.raw)))
+			if strings.Contains(recorded, tc.fragment) || len(recorded) > nodeErrTextMaxBytes {
+				t.Errorf("recorded error is %d bytes and leaks %q: %q", len(recorded), tc.fragment, recorded)
+			}
+		})
+	}
+}
+
+func TestBoundedNodeErrTextKeepsUTF8AndShortText(t *testing.T) {
+	if got := boundedNodeErrText("short"); got != "short" {
+		t.Errorf("short text = %q, want it unchanged", got)
+	}
+	got := boundedNodeErrText(strings.Repeat("é", nodeErrTextMaxBytes))
+	if !utf8.ValidString(got) || len(got) > nodeErrTextMaxBytes {
+		t.Errorf("bounded text is %d bytes, valid UTF-8 %v", len(got), utf8.ValidString(got))
+	}
 }
 
 type stallingCreate struct{ *store.Store }

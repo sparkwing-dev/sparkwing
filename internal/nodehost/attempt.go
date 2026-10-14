@@ -111,7 +111,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	cfg := base
 	cfg.Sink = sink
 	cfg.Env = attemptEnv(base.Env, n.Plan.Env, run.ID, id, a.Routes.URL(), bearer)
-	cfg.Env = append(cfg.Env, hostEnv(n)...)
+	cfg.Env = append(append(withoutRunnerEnv(cfg.Env), hostEnv(n)...), runnerEnv()...)
 	res := Result{}
 	sess, err := StartSession(ctx, cfg)
 	if err == nil {
@@ -290,6 +290,32 @@ func hostEnv(n *NodeRun) []string {
 		env = append(env, "SPARKWING_DRY_RUN=1")
 	}
 	return env
+}
+
+// safety: a pod host's Job sets the runner variables on the host itself; a host
+// without them runs nodes on this machine, the local runner. A node process
+// reads them for sparkwing.Runner and its tools for the runner's identity.
+func runnerEnv() []string {
+	name, typ := os.Getenv("SPARKWING_RUNNER_NAME"), os.Getenv("SPARKWING_RUNNER_TYPE")
+	labels := os.Getenv("SPARKWING_RUNNER_LABELS")
+	if name == "" && typ == "" && labels == "" {
+		name, typ, labels = "local", "local", "local,os="+runtime.GOOS+",arch="+runtime.GOARCH
+	}
+	var env []string
+	for _, kv := range [][2]string{{"SPARKWING_RUNNER_NAME", name}, {"SPARKWING_RUNNER_TYPE", typ}, {"SPARKWING_RUNNER_LABELS", labels}} {
+		if kv[1] != "" {
+			env = append(env, kv[0]+"="+kv[1])
+		}
+	}
+	return env
+}
+
+// safety: a runner variable the host leaves unset must not survive from the caller's or the plan's env, or a
+// node in a launcher Job could report the labels a pipeline wrote, such as local.
+func withoutRunnerEnv(env []string) []string {
+	return slices.DeleteFunc(env, func(kv string) bool {
+		return strings.HasPrefix(strings.ToUpper(kv), "SPARKWING_RUNNER_")
+	})
 }
 
 // safety: the plan process sees the dry-run switch its node processes see, so plan code that reads it plans

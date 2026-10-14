@@ -250,3 +250,35 @@ func TestPipelineCacheKey_PipelineDirTreatsAllFilesAsInputs(t *testing.T) {
 		t.Fatal("pipelines.yaml change should bust cache")
 	}
 }
+
+func TestPipelineExec_InheritsNothingTheEngineOwns(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fixture pipeline is a shell script")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "pipeline")
+	// safety: the run removes the uncached binary's directory once the child exits.
+	observed := filepath.Join(t.TempDir(), "observed")
+	writeFile(t, bin, `#!/bin/sh
+printf '%s|%s|%s|%s' "$SPARKWING_SECRETS_KEY" "$SPARKWING_AGENT_TOKEN" "$SPARKWING_NO_CACHE" "$SPARKWING_LOG_FORMAT" > "$OBSERVED"
+`)
+	if err := os.Chmod(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run := newPipelineRun(dir, compileOptions{ExecutionDir: dir})
+	run.uncachedBinary = bin
+	env := []string{
+		"PATH=/usr/bin:/bin", "OBSERVED=" + observed,
+		"SPARKWING_SECRETS_KEY=outer-key", "SPARKWING_AGENT_TOKEN=outer-agent", "SPARKWING_LOG_FORMAT=pretty",
+	}
+	if err := run.exec([]string{"demo", "--plan"}, env, binaryVerbEnv(runFlags{noCache: true}, "json")...); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(observed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(raw), "||1|json"; got != want {
+		t.Fatalf("pipeline saw %q, want %q: no inherited engine value, and the verb's own settings", got, want)
+	}
+}
