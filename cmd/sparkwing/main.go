@@ -248,7 +248,7 @@ func dispatchRun(args []string) error {
 		return run.finish(err)
 	}
 	if !runInvokesAdmission(passthrough) {
-		return run.finish(run.exec(append([]string{pipelineName}, passthrough...), binaryVerbEnv(env, flags, logFormat)))
+		return run.finish(run.exec(append([]string{pipelineName}, passthrough...), env, binaryVerbEnv(flags, logFormat)...))
 	}
 	schema, err := run.describedPipeline(pipelineName)
 	var pipelineArgs map[string]string
@@ -274,8 +274,8 @@ func dispatchRun(args []string) error {
 }
 
 // hack: config and --explain still run inside the pipeline binary and read these from the environment.
-func binaryVerbEnv(env []string, flags runFlags, logFormat string) []string {
-	env = setEnv(env, "SPARKWING_LOG_FORMAT", logFormat)
+func binaryVerbEnv(flags runFlags, logFormat string) []string {
+	env := []string{"SPARKWING_LOG_FORMAT=" + logFormat}
 	if flags.dryRun {
 		env = append(env, "SPARKWING_DRY_RUN=1")
 	}

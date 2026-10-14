@@ -92,15 +92,23 @@ func TestClosures(t *testing.T) {
 		}
 	})
 
-	t.Run("ASkipIfThatFailsOrOverrunsDoesNotSkip", func(t *testing.T) {
+	t.Run("ASkipIfThatOverrunsDoesNotSkip", func(t *testing.T) {
 		if res.Nodes["kept"].Outcome != sparkwing.Success || trace("kept") != "body\n" {
 			t.Errorf("kept = %+v, trace %q, want its body run once", res.Nodes["kept"], trace("kept"))
 		}
-		log := logs.text("kept")
-		for _, want := range []string{"SkipIf predicate 0 failed", "SkipIf predicate 1 exceeded 300ms budget"} {
-			if !strings.Contains(log, want) {
-				t.Errorf("kept log lacks %q:\n%s", want, log)
-			}
+		if log := logs.text("kept"); !strings.Contains(log, "SkipIf predicate 0 exceeded 300ms budget") {
+			t.Errorf("kept log lacks the overrun:\n%s", log)
+		}
+	})
+
+	// safety: a guard that could not answer, as one whose secret would not resolve, must not let a deploy run.
+	t.Run("ASkipIfThatFailsFailsTheNodeWithoutItsBody", func(t *testing.T) {
+		r := row("guarded")
+		if r.Outcome != string(sparkwing.Failed) || !strings.Contains(r.Error, "SkipIf predicate 0 failed") || r.StartedAt != nil {
+			t.Errorf("guarded row outcome=%q error=%q started=%v, want failed by its predicate and never started", r.Outcome, r.Error, r.StartedAt)
+		}
+		if got := trace("guarded"); got != "" {
+			t.Errorf("the guarded node's body ran: %q", got)
 		}
 	})
 

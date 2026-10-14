@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 )
 
 func writeFile(t *testing.T, path, body string) {
@@ -136,7 +138,7 @@ func TestInstallHooksGetOnlyTheInstallEnvironment(t *testing.T) {
 		`{"name":"hooked","version":"1.0.0","scripts":{"postinstall":"env > hook-env"}}`)
 	writeFile(t, filepath.Join(dir, "package-lock.json"),
 		`{"name":"hooked","version":"1.0.0","lockfileVersion":3,"requires":true,"packages":{"":{"name":"hooked","version":"1.0.0","hasInstallScript":true}}}`)
-	if err := InstallTypeScript(t.Context(), dir, InstallEnv()); err != nil {
+	if err := InstallTypeScript(t.Context(), dir, engineenv.Minimal("npm_config_registry")); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(out)

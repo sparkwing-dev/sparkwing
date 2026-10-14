@@ -733,7 +733,10 @@ func executePooledNode(
 		hbInterval = 200 * time.Millisecond
 	}
 
-	execCtx, cancel := context.WithCancel(ctx)
+	// safety: the heartbeat stops the node with a cause of its own, so the node host records it, while a
+	// runner shutting down stops it with none and leaves it to its claim's lease.
+	execCtx, stopNode := context.WithCancelCause(ctx)
+	cancel := func() { stopNode(errPooledNodeStopped) }
 	defer cancel()
 	heartbeatCtx := store.WithNodeClaimFence(execCtx, store.NodeClaimFence{
 		HolderID: holderID, MembershipID: n.ClaimMembershipID,
@@ -772,15 +775,6 @@ func executePooledNode(
 		failPooledNodeSetup(ctx, ctrl, n, holderID, err, source, logger)
 		return
 	}
-	if ctx.Err() == nil && errors.Is(res.Err, context.Canceled) {
-		finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(heartbeatCtx), poolSetupFinishTimeout)
-		finishErr := ctrl.FinishNodeWithReason(finishCtx, n.RunID, n.NodeID, string(sparkwing.Cancelled),
-			"runner stopped the cancelled node's processes", nil, store.FailureUnknown, nil)
-		finishCancel()
-		if finishErr != nil {
-			logger.Warn(source+" could not finish the cancelled node", "run_id", n.RunID, "node_id", n.NodeID, "err", finishErr)
-		}
-	}
 	logger.Info(source+" finished node",
 		"run_id", n.RunID, "node_id", n.NodeID, "outcome", res.Outcome)
 }
@@ -796,6 +790,8 @@ func nodeCacheURL(gitcacheURL, controllerURL, announced, grant string) string {
 }
 
 var runPooledNodeOnce = orchestrator.RunNodeOnce
+
+var errPooledNodeStopped = errors.New("the runner stopped the node: its claim ended")
 
 const poolSetupFinishTimeout = 10 * time.Second
 

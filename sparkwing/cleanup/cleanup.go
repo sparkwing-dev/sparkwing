@@ -39,14 +39,14 @@ type Spec struct {
 	Description string
 }
 
-// Register records a cleanup tied to this node's liveness and returns the
-// release to call once the library has cleaned up itself. If the node dies
-// before release runs, a later sweep runs Spec.Argv. Outside a pipeline node
-// -- no run and node in the environment -- there is nothing to reap for, so
+// Register records a cleanup that runs if the registering process exits
+// before the library calls the release it returns. In a process the engine
+// runs over the node protocol, the engine holds the cleanup and runs
+// Spec.Argv once that process exits, unless it was released. A tool a step
+// starts carries the node's run and node ids but not its bearer, so it
+// records the cleanup for a later sweep to run. Outside a pipeline node --
+// no run and node in the environment -- there is nothing to reap for, so
 // Register is a no-op returning a no-op release.
-//
-// In a process the engine runs over the node protocol, the engine holds the
-// cleanup and runs Spec.Argv once the process exits, unless it was released.
 func Register(ctx context.Context, spec Spec) (release func(), err error) {
 	if c, bound := nodeclient.Bound(); bound {
 		return registerWithHost(ctx, c, spec)

@@ -97,7 +97,7 @@ func runPipelineExplain(args []string) error {
 	}
 	var snap nodeproto.PlanDoc
 	err = withPipelineEntry(pipeline, func(ctx context.Context, entry pipelineentry.Command, dir string) error {
-		planned, err := planOverProtocol(ctx, entry, dir, pipeline, passthrough, "explain", false)
+		planned, err := planOverProtocol(ctx, entry, dir, pipeline, passthrough, "explain")
 		snap = planned.doc
 		return err
 	})
@@ -135,7 +135,7 @@ func runPipelineExplainAll(format string) error {
 	for _, p := range catalog {
 		row := allExplainResult{Pipeline: p.Name}
 		err := withPipelineEntry(p.Name, func(ctx context.Context, entry pipelineentry.Command, dir string) error {
-			planned, err := planOverProtocol(ctx, entry, dir, p.Name, nil, "explain", false)
+			planned, err := planOverProtocol(ctx, entry, dir, p.Name, nil, "explain")
 			row.Nodes = len(planned.doc.Nodes)
 			return err
 		})

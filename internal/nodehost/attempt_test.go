@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -137,7 +138,13 @@ func TestAttemptExecutor(t *testing.T) {
 	}
 
 	t.Run("RunsANodeEndToEnd", func(t *testing.T) {
-		env := append(os.Environ(), "SPARKWING_AGENT_TOKEN=engine", "SPARKWING_GATE_INDEX=/repo/.git/gate-index",
+		// safety: a launcher Job's host names its runner but no labels, so neither the caller's nor the plan's may stand in.
+		t.Setenv("SPARKWING_RUNNER_NAME", "pool-a")
+		t.Setenv("SPARKWING_RUNNER_TYPE", "kubernetes")
+		t.Setenv("SPARKWING_RUNNER_LABELS", "")
+		// safety: the caller's environment as a hosted run passes it, so a test run inside a node does not hand the
+		// plan process that node's SPARKWING_NODE_URL without its bearer.
+		env := append(engineenv.Strip(os.Environ()), "SPARKWING_RUNNER_LABELS=local,caller", "SPARKWING_AGENT_TOKEN=engine", "SPARKWING_GATE_INDEX=/repo/.git/gate-index",
 			"SPARKWING_TEST_PG_URL=postgres://caller", "AWS_SECRET_ACCESS_KEY=caller-aws")
 		h, res := host(t, "run-attempt", map[string]string{}, env)
 		if res.Status != "success" {
@@ -151,9 +158,12 @@ func TestAttemptExecutor(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var out struct{ Env, Run, Leak, Gate, PG, AWS string }
+		var out struct{ Env, Run, Leak, Gate, PG, AWS, Labels string }
 		if err := json.Unmarshal(raw, &out); err != nil || out.Env != "from-plan" || out.Run != "run-attempt" || out.Leak != "" || out.AWS != "caller-aws" {
 			t.Errorf("build output = %s (err %v), want the node env, run id and caller's env and no engine SPARKWING_ variable", raw, err)
+		}
+		if out.Labels != "" {
+			t.Errorf("the node saw SPARKWING_RUNNER_LABELS=%q on a host that advertises none", out.Labels)
 		}
 		if out.PG != "postgres://caller" {
 			t.Errorf("the node saw SPARKWING_TEST_PG_URL=%q; a caller's own SPARKWING_* setting must reach pipeline code", out.PG)

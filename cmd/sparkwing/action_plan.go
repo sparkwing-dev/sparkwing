@@ -136,7 +136,7 @@ func runPipelinePlan(args []string) error {
 	}
 	var doc planPreviewDoc
 	err = withPipelineEntry(parsed.pipeline, func(ctx context.Context, entry pipelineentry.Command, dir string) error {
-		planned, err := planOverProtocol(ctx, entry, dir, parsed.pipeline, parsed.passthrough, "plan", true)
+		planned, err := planOverProtocol(ctx, entry, dir, parsed.pipeline, parsed.passthrough, "plan")
 		if err == nil {
 			doc, err = previewPlan(planned, parsed.startAt, parsed.stopAt)
 		}
@@ -188,13 +188,12 @@ type planned struct {
 	pipeline string
 	args     map[string]string
 	doc      nodeproto.PlanDoc
-	skipped  map[string]string
 }
 
-// safety: describe, plan and the evals share one process because the SDK
-// answers plan once per process and evaluates closures only of its own plan.
-func planOverProtocol(ctx context.Context, entry pipelineentry.Command, dir, pipeline string, args []string, runID string, evalSkips bool) (planned, error) {
-	out := planned{pipeline: pipeline, skipped: map[string]string{}}
+// safety: inspection never evaluates a closure. A skip_if predicate is customer code with side effects the
+// protocol cannot seal, so plan reports it as decided at run time instead.
+func planOverProtocol(ctx context.Context, entry pipelineentry.Command, dir, pipeline string, args []string, runID string) (planned, error) {
+	out := planned{pipeline: pipeline}
 	err := repos.Converse(ctx, entry, dir, func(s *repos.Session) error {
 		described, err := s.Describe()
 		if err != nil {
@@ -208,37 +207,7 @@ func planOverProtocol(ctx context.Context, entry pipelineentry.Command, dir, pip
 			return &nodeproto.Error{Code: nodeproto.CodeInvalidArgs, Message: err.Error()}
 		}
 		req := nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: pipeline, Args: out.args, Run: &nodeproto.RunContext{RunID: runID}}
-		if err := s.Call(req, &out.doc); err != nil {
-			return err
-		}
-		for _, n := range out.doc.Nodes {
-			if !evalSkips || n.Work == nil {
-				continue
-			}
-			for _, step := range n.Work.Steps {
-				if step.Closures == nil {
-					continue
-				}
-				for _, id := range step.Closures.SkipIf {
-					var res nodeproto.EvalResult
-					if err := s.Call(nodeproto.Request{Op: nodeproto.OpEval, Closure: id}, &res); err != nil {
-						return err
-					}
-					var match bool
-					if res.Error != nil {
-						out.skipped[id] = *res.Error
-					} else if err := json.Unmarshal(res.Value, &match); err != nil {
-						return fmt.Errorf("skip_if %s answered %s, not a boolean", id, res.Value)
-					} else if !match {
-						continue
-					} else {
-						out.skipped[id] = ""
-					}
-					break
-				}
-			}
-		}
-		return nil
+		return s.Call(req, &out.doc)
 	})
 	return out, planError(pipeline, err)
 }
@@ -286,16 +255,8 @@ func previewPlan(p planned, startAt, stopAt string) (planPreviewDoc, error) {
 				it := planPreviewItemDoc{ID: s.ID, Needs: s.Needs, Decision: "would_run", Risks: s.Risks}
 				if reason, ok := ranged[s.ID]; ok {
 					it.Decision, it.SkipReason, it.SkipDetail = "would_skip", "range_skip", reason
-				} else if s.Closures != nil {
-					for _, id := range s.Closures.SkipIf {
-						if detail, ok := p.skipped[id]; ok {
-							it.Decision, it.SkipReason = "would_skip", "user_skipif"
-							if detail != "" {
-								it.SkipDetail = "predicate failed at plan time: " + detail
-							}
-							break
-						}
-					}
+				} else if s.Closures != nil && len(s.Closures.SkipIf) > 0 {
+					it.Decision, it.SkipReason, it.SkipDetail = "may_skip", "user_skipif", "SkipIf is evaluated at run time"
 				}
 				if it.Decision == "would_skip" {
 					skipped++

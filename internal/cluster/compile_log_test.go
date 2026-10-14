@@ -16,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -126,7 +127,7 @@ func TestLogBinaryReadyCarriesTheCompileMeasurement(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(&buf, nil))
 
 	logBinaryReady(logger, "run-42", triggerBinary{
-		path:  "/tmp/pipeline",
+		entry: pipelineentry.Binary("/tmp/pipeline"),
 		cache: binaryCacheCompiled,
 		build: 187 * time.Second,
 	})

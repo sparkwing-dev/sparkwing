@@ -51,6 +51,9 @@ type launchedRun struct {
 	runID string
 	src   string
 	bin   string
+	// safety: the trigger's actor and environment, which the controller's run read derives the run context from.
+	user       string
+	triggerEnv map[string]string
 }
 
 func newLaunchedRun(t *testing.T, args map[string]string) *launchedRun {
@@ -92,6 +95,7 @@ ON CONFLICT DO NOTHING`, string(store.DefaultTeam), store.RepoKey("acme", "widge
 	if err := tn.CreateTriggerWithRun(ctx, store.Trigger{
 		ID: r.runID, Pipeline: "podnode", GithubOwner: "acme", GithubRepo: "widgets", Repo: "acme/widgets",
 		GithubRepoID: 701, GitBranch: "main", GitSHA: strings.Repeat("a", 40), CreatedAt: now,
+		TriggerUser: r.user, TriggerEnv: r.triggerEnv,
 	}, store.Run{
 		ID: r.runID, Pipeline: "podnode", Status: "pending", Args: args, GithubOwner: "acme", GithubRepo: "widgets",
 		DeclaredRepo: "acme/widgets", CreatedAt: now, StartedAt: now,
@@ -205,6 +209,33 @@ func TestLaunchedNode_PlansHostsAndReports(t *testing.T) {
 	}
 	if strings.Contains(string(logs), "pod-secret-value-123") || !strings.Contains(string(logs), "pass ***") {
 		t.Errorf("the node's log = %s, want its secret input masked", logs)
+	}
+}
+
+// A launched run plans with its trigger's actor and pull request, which the
+// launcher's claims cannot read from the trigger, and each node's own plan
+// sees the same ones, so the node runs rather than failing for plan drift.
+func TestLaunchedNode_PlansWithTheTriggersActorAndPullRequest(t *testing.T) {
+	t.Setenv("GORACE", "atexit_sleep_ms=0")
+	base := newLaunchedRun(t, nil)
+	r := &launchedRun{
+		st: base.st, url: base.url, runID: "run-pull-request", src: base.src, user: "octocat",
+		triggerEnv: map[string]string{sparkwing.EnvGitHubEventName: sparkwing.EventPullRequest, sparkwing.EnvPRNumber: "42"},
+	}
+	envOut := filepath.Join(t.TempDir(), "env")
+	r.create(t, map[string]string{"envout": envOut})
+	if _, err := r.host(t, store.PlanNodeID); err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if _, err := r.host(t, "build"); err != nil {
+		t.Fatalf("host build: %v", err)
+	}
+	env, err := os.ReadFile(envOut)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(env), "ACTOR=octocat#42") {
+		t.Fatalf("the node's environment lacks the trigger's actor and pull request:\n%s", env)
 	}
 }
 

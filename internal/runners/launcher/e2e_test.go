@@ -377,12 +377,11 @@ func TestE2E_AControllerDispatchedRunPlansRunsAndAwaitsAChild(t *testing.T) {
 	if !strings.Contains(string(durable), "token=***") || strings.Contains(string(durable), "tok-e2e-value") || segments.Manifest == nil {
 		t.Errorf("check's durable log = %q (manifest %+v), want its masked token line, sealed", durable, segments.Manifest)
 	}
+	// safety: a node's log is its sealed segments, which the check above reads; the container's own output
+	// carries the host's lines, and neither may hold the secret's value.
 	for job, out := range podLogs {
 		if strings.Contains(out.String(), "tok-e2e-value") {
 			t.Errorf("%s logged the secret's value", job)
-		}
-		if strings.Contains(job, "check") && !strings.Contains(out.String(), "token=***") {
-			t.Errorf("check's log has no masked token line:\n%s", out)
 		}
 	}
 	if n := len(started); n != 5 {

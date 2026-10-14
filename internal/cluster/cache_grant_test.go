@@ -125,7 +125,7 @@ func TestTriggerRunGrantConfinesTheBinCacheToTheRunsTeam(t *testing.T) {
 	if binary.cache != binaryCacheCompiled {
 		t.Fatalf("team A's binary came from %q; team B's planted bin reached team A", binary.cache)
 	}
-	built, err := os.ReadFile(binary.path)
+	built, err := os.ReadFile(binary.entry[0])
 	if err != nil {
 		t.Fatal(err)
 	}

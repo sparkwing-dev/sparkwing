@@ -66,8 +66,9 @@ func skipIfLayer(cfg *Config, next Executor) Executor {
 	}
 }
 
-// safety: a closure that errors or overruns counts as don't-skip, as in the
-// in-process dispatcher; only a failed reply or a broken session fails the node.
+// safety: a closure that errors, as one whose secrets would not resolve does,
+// fails the node rather than run what its guard may have meant to skip; one
+// that overruns its budget counts as don't-skip, as SkipBudget documents.
 func skipIfEval(ctx context.Context, sess *Session, log Sink, id string, i int, budget time.Duration) (bool, error) {
 	bctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
@@ -80,8 +81,9 @@ func skipIfEval(ctx context.Context, sess *Session, log Sink, id string, i int, 
 	case err != nil:
 		return false, err
 	case er.Error != nil:
-		closureNote(log, "error", fmt.Sprintf("SkipIf predicate %d failed: %s (defaulting to don't-skip)", i, *er.Error))
-		return false, nil
+		err := fmt.Errorf("SkipIf predicate %d failed: %s", i, *er.Error)
+		closureNote(log, "error", err.Error()+" (the node does not run)")
+		return false, err
 	}
 	var skip bool
 	if err := json.Unmarshal(er.Value, &skip); err != nil {

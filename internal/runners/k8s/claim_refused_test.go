@@ -221,8 +221,6 @@ func TestRunNode_ShedPastTheClaimWaitFailsTheNodeAsAQueueTimeout(t *testing.T) {
 }
 
 func TestClaimRetryBound_IsTheClaimWaitCappedByTheTimeout(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	timed := sparkwing.Job(plan, "timed", func(context.Context) error { return nil }).Timeout(10 * time.Minute)
 	for _, tc := range []struct {
 		name string
 		req  runner.Request
@@ -230,7 +228,7 @@ func TestClaimRetryBound_IsTheClaimWaitCappedByTheTimeout(t *testing.T) {
 	}{
 		{"default", runner.Request{}, 24 * time.Hour},
 		{"declared claim wait", runner.Request{ClaimWait: time.Hour}, time.Hour},
-		{"timeout shorter than the wait", runner.Request{ClaimWait: time.Hour, Node: timed}, 10 * time.Minute},
+		{"timeout shorter than the wait", runner.Request{ClaimWait: time.Hour, Timeout: 10 * time.Minute}, 10 * time.Minute},
 	} {
 		if got := claimRetryBound(tc.req); got != tc.want {
 			t.Errorf("%s: bound = %s, want %s", tc.name, got, tc.want)

@@ -49,9 +49,9 @@ func newDispatchRouteFixture(t *testing.T) dispatchRouteFixture {
 func (f dispatchRouteFixture) claim(t *testing.T, nodeID string, kind store.ClaimTokenKind) string {
 	t.Helper()
 	ctx := context.Background()
-	now := time.Now()
 	c, err := f.st.ClaimLaunch(ctx, store.ClaimIdentity{Principal: "launcher", TokenPrefix: "swr_launch"},
-		store.LaunchClaimRequest{HolderID: "holder-" + nodeID, Lease: time.Minute, Deadline: time.Hour, RunID: "run-d", NodeID: nodeID}, now)
+		store.LaunchClaimRequest{HolderID: "holder-" + nodeID, Lease: time.Minute, Deadline: time.Hour, RunID: "run-d", NodeID: nodeID},
+		LaunchClaimClock(t, f.st, "run-d", nodeID))
 	if err != nil || c == nil || c.Kind != kind {
 		t.Fatalf("claim %s as %s: %+v %v", nodeID, kind, c, err)
 	}

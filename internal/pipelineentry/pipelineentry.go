@@ -142,14 +142,6 @@ func TypeScript(sparkwingDir string) (Command, error) {
 	return Node(node, bootstrap, entry), nil
 }
 
-// InstallEnv is the environment a runner installs a TypeScript pipeline's
-// dependencies with: [engineenv.Minimal] plus the package proxy and CA
-// variables npm reads, so install hooks never see the runner's credentials.
-func InstallEnv() []string {
-	return engineenv.Minimal("npm_config_registry", "npm_config_cache", "NODE_EXTRA_CA_CERTS",
-		"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy")
-}
-
 // InstallTypeScript runs npm ci in sparkwingDir with env, less the engine's
 // own variables, writing npm's output to stderr.
 func InstallTypeScript(ctx context.Context, sparkwingDir string, env []string) error {

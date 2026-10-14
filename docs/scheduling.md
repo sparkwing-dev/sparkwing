@@ -203,8 +203,9 @@ no warm runner advertises these labels; start a runner with
 ```
 
 `sparkwing cluster worker` is a laptop-side loop that claims triggers
-from a profile's controller and dispatches each one to `handle-trigger`,
-a child process that compiles and runs the pipeline. It works at the
+from a profile's controller and hosts each run itself: it builds the
+pipeline from the checkout it runs in, plans the run, and runs each node in
+a process of its own under a claim it takes for that node. It works at the
 trigger layer, unlike the cluster runner (`sparkwing-runner runner`),
 which claims nodes.
 

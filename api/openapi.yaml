@@ -7455,6 +7455,23 @@ components:
           type: string
           description: >-
             Why a ready node of the run waits with no agent able to claim it. It names the missing selector terms, or the eligible agent that is offline and when it was last seen. Absent when no node waits that way, and cleared when an agent claims the node.
+        trigger_user:
+          type: string
+          description: >-
+            The actor of the run's trigger. Only the single-run read (`GET /api/v1/runs/{id}`) carries it; lists omit it.
+        pull_request:
+          type: object
+          description: >-
+            The pull request the run's trigger fired for, from the single-run read only. Absent for a run no pull request started.
+          x-sparkwing-go-type: pkg/store.RunPullRequest
+          required: [number]
+          properties:
+            number: {type: integer}
+            action: {type: string}
+            base_ref: {type: string}
+            base_sha: {type: string}
+            head_ref: {type: string}
+            head_sha: {type: string}
     Node:
       x-sparkwing-go-partial: pkg/store.Node
       type: object

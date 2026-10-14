@@ -193,3 +193,22 @@ func TestRetryLeavesTheRowRunningThroughItsBackoff(t *testing.T) {
 		t.Errorf("writes %v, want the one start and a cancelled finish", st.writes)
 	}
 }
+
+// safety: a dispatched node's retries and backoff run on its one host, so
+// the host's wall-clock bound covers the last attempt's whole timeout.
+func TestAttemptsBudgetCoversEveryAttemptAndBackoff(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		m    *nodeproto.PlanModifiers
+		want time.Duration
+	}{
+		{"no timeout", &nodeproto.PlanModifiers{Retry: 3}, 0},
+		{"one attempt", &nodeproto.PlanModifiers{TimeoutMS: 5 * 60_000}, 5 * time.Minute},
+		{"retry_auto with backoff", &nodeproto.PlanModifiers{TimeoutMS: 5 * 60_000, Retry: 1, RetryAuto: true, RetryBackoffMS: 6 * 60_000}, 16 * time.Minute},
+		{"doubling backoff", &nodeproto.PlanModifiers{TimeoutMS: 60_000, Retry: 2, RetryBackoffMS: 1_000}, 3*time.Minute + 3*time.Second},
+	} {
+		if got := AttemptsBudget(nodeproto.PlanNode{ID: "n", Modifiers: tc.m}); got != tc.want {
+			t.Errorf("%s: budget = %s, want %s", tc.name, got, tc.want)
+		}
+	}
+}

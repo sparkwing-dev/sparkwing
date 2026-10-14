@@ -421,7 +421,7 @@ type DescribePipeline struct {
     // RisksBySteps is the per-step breakdown so a renderer or agent
     // can show "this is the step that will refuse" in the error path.
     // Only populated for pipelines whose Plan() builds successfully
-    // without args during --describe; pipelines with required Inputs
+    // without args during describe; pipelines with required Inputs
     // degrade to the union field above.
     RisksBySteps []DescribeStepRisks `json:"risks_by_step,omitempty"`
 }
@@ -644,6 +644,19 @@ type HelpProvider interface {
 }
 ```
 
+
+### type InputError
+
+InputError is what a Registration's Invoke returns when args fail the declared flags of the pipeline or of a job's WithArgs: a missing required flag, a value of the wrong type or outside its enum, or a flag nothing declares.
+
+```
+type InputError struct {
+    Err error
+}
+```
+
+- `func (e *InputError) Error() string`
+- `func (e *InputError) Unwrap() error`
 
 ### type InputField
 
@@ -1808,6 +1821,7 @@ var RuntimePlumbing = struct {
         JobGroupFinalize:   (*JobGroup).finalize,
         WorkStepFn:         func(s *WorkStep) func(ctx context.Context) (any, error) { return s.fn },
         WorkStepMarkDone:   (*WorkStep).markDone,
+        WorkRunStep:        runStep,
         NodeDirCaches:      dirCacheSpecs,
     },
 }

@@ -2,7 +2,7 @@
 
 The node protocol is the contract between the engine, which hosts a run, and an SDK process, which holds a pipeline's code. Any language can implement the SDK side. The Go SDK in `sparkwing/` is one implementation and the TypeScript SDK in `sdk/typescript` is another. `design/engine-hosted-execution.md` in the source repository explains why the engine is split this way.
 
-Status: specification. Until a release note says the engine hosts runs this way, the engine and the Go SDK still run pipelines inside the pipeline binary, and this page is the contract both are moving to.
+Status: `sparkwing run` hosts its run this way, and a launcher Job hosts its node this way. A trigger runner's runs, the Kubernetes Jobs it dispatches, a detached run and the child runs a local node starts still run in the pipeline binary's own dispatcher. The TypeScript SDK is a prototype that no command starts.
 
 The conformance suite in `internal/nodeproto/conformance` in the source repository checks an SDK against this page. `testdata/fixture.json` there describes a fixture pipeline that each SDK implements and the replies the suite expects from it.
 
@@ -39,7 +39,7 @@ sequenceDiagram
 The host starts the SDK process from the repository root, the directory that holds `.sparkwing/`, with `--sw-node-protocol` as the last argument of the entry's command:
 
 - **Go.** A `.sparkwing/` Go module is compiled, and the entry is the binary, so the command is `<binary> --sw-node-protocol`.
-- **TypeScript.** A `.sparkwing/package.json` that depends on `@sparkwing/sdk` is a TypeScript pipeline. Its `main` field names the entry file. The command is `node --import <bootstrap> <main> --sw-node-protocol`, where `<bootstrap>` is the file URL of the installed SDK's `./bootstrap` export. Node.js evaluates that preload before any module of the entry, so it removes `SPARKWING_NODE_TOKEN` and `SPARKWING_PROTOCOL_HANDLES` before entry code or a module the entry imports can copy them. The SDK refuses to serve a process that was not started with that preload, and keeps what the preload captured in a module the package does not export. The host runs `npm ci` in `.sparkwing/` first when `node_modules` lacks the SDK, and needs Node.js 22.18 or later on `PATH`. A runner runs it with the minimal environment a node process gets plus the package proxy variables (`npm_config_registry`, `npm_config_cache`, `NODE_EXTRA_CA_CERTS` and the `HTTP_PROXY` family), so install hooks never see the runner's credentials.
+- **TypeScript.** A `.sparkwing/package.json` that depends on `@sparkwing/sdk` is a TypeScript pipeline. Its `main` field names the entry file. The command is `node --import <bootstrap> <main> --sw-node-protocol`, where `<bootstrap>` is the file URL of the installed SDK's `./bootstrap` export. Node.js evaluates that preload before any module of the entry, so it removes `SPARKWING_NODE_TOKEN` and `SPARKWING_PROTOCOL_HANDLES` before entry code or a module the entry imports can copy them. The SDK refuses to serve a process that was not started with that preload, and keeps what the preload captured in a module the package does not export. The host runs `npm ci` in `.sparkwing/` first when `node_modules` lacks the SDK, and needs Node.js 22.18 or later on `PATH`. A runner, whether a launcher Job, a dispatched Job or a warm runner, runs it with the environment its node processes get, the minimal set plus the dependency proxy settings, so install hooks never see the runner's credentials.
 
 The preload keeps the bearer from the tools a step starts, not from the repository's own code. Pipeline code, which includes the `node_modules` its lockfile installs, is trusted with its node's bearer and drives the node routes with it; it can also choose the installed SDK and `NODE_OPTIONS`. What it must never receive is the runner's own credentials.
 
@@ -203,7 +203,7 @@ A closure is customer code that the host calls by id. The plan lists each node's
 | `after_run` | the last attempt's process, after the body and verify | `{outcome, error?}`: the node's final outcome and error | `null` | the host logs it and leaves the node's outcome unchanged |
 | `generator` | the source's attempt process, after its body succeeds, or an eval process when the source's result was copied by memo; again in each generated node's own processes | none | an array of node documents | the generated group fails, and nodes that need it are cancelled |
 
-The host bounds each node `skip_if` by the node's `modifiers.skip_if_budget_ms`, or by 30 seconds when that is absent. A `skip_if` that overruns its budget counts as `false`. A `cache_key` closure has its own 30-second limit, and one that overruns it fails the node. Every other closure is bounded by the node's wall timeout.
+The host bounds each node `skip_if` by the node's `modifiers.skip_if_budget_ms`, or by 30 seconds when that is absent. A `skip_if` that overruns its budget counts as `false`. A `cache_key` closure has its own 30-second limit, and one that overruns it fails the node. Every other closure is bounded by the node's wall timeout, except `after_run` after an attempt that timed out: the host evaluates it in an eval process of its own, bounded to 2 minutes.
 
 A failed reply to `eval` (for example `unknown_closure`) is never read as `false` or as a skipped check. The attempt fails.
 
@@ -267,7 +267,12 @@ Two fields belong to the host and an SDK leaves them out:
 
 ## Environment contract
 
-The host builds a node-bound process's environment from scratch. It removes every `SPARKWING_*` variable it inherited, then sets the following. Values are strings.
+The host's caller names the base environment of every SDK process, and the host adds nothing from its own except the runner variables below:
+
+- A local `sparkwing run` passes the user's environment.
+- A launcher Job passes `PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_*`, `TZ` and `USER` from the pod, plus `SystemRoot`, `ComSpec`, `PATHEXT`, `TEMP` and `TMP` on Windows.
+
+From that base the host removes the `SPARKWING_*` variables the engine owns: credentials such as `SPARKWING_AGENT_TOKEN` and `SPARKWING_SECRETS_KEY`, run options such as `SPARKWING_START_AT`, and plumbing such as `SPARKWING_API_SOCKET`. Every other `SPARKWING_*` variable the user set, such as a sparks setting or a cache URL, reaches the process. The host then sets the following. Values are strings.
 
 | Variable | Set for | Meaning |
 |---|---|---|
@@ -275,10 +280,9 @@ The host builds a node-bound process's environment from scratch. It removes ever
 | `SPARKWING_NODE_ID` | eval and attempt processes | The node the process is bound to. |
 | `SPARKWING_NODE_URL` | eval and attempt processes | Base URL of the node routes, such as `http://127.0.0.1:41873`. A route's URL is this value followed by its `/node/v1/` path. |
 | `SPARKWING_NODE_TOKEN` | eval and attempt processes | Bearer for the node routes. It is valid until the process exits. |
-| `SPARKWING_RUNNER_NAME` | eval and attempt processes | The runner that hosts the node. |
-| `SPARKWING_RUNNER_TYPE` | eval and attempt processes | `local` or `kubernetes`; unset for a runner that does not classify itself. |
-| `SPARKWING_RUNNER_LABELS` | eval and attempt processes | The runner's labels, comma-separated. |
-| `TRACEPARENT` | every process | The W3C trace context of the run, or of the node for a node-bound process. |
+| `SPARKWING_RUNNER_NAME` | eval and attempt processes | The runner that hosts the node: `local` for a local run, the launcher's name in a launcher Job. |
+| `SPARKWING_RUNNER_TYPE` | eval and attempt processes | `local` or `kubernetes`. |
+| `SPARKWING_RUNNER_LABELS` | eval and attempt processes | The runner's labels, comma-separated: `local,os=<GOOS>,arch=<GOARCH>` for a local run; unset in a launcher Job, which advertises none. |
 | `SPARKWING_PROTOCOL_HANDLES` | every process, Windows only | The request and frame pipe handles, as `<request>,<frame>` in decimal. |
 
 The SDK removes `SPARKWING_NODE_TOKEN` from the environment of every command it starts, so a step's tools never hold the bearer.
@@ -286,12 +290,13 @@ The SDK removes `SPARKWING_NODE_TOKEN` from the environment of every command it 
 - The TypeScript SDK removes it in the bootstrap preload, before any entry code runs.
 - The Go SDK removes it while packages initialize, before the `init` of any package that imports the SDK. A package that does not import the SDK can initialize first and read it, as with the protocol pipes.
 
+In a dry run the host adds `SPARKWING_DRY_RUN=1` to every process, the plan process included, so plan code and the commands a node starts see the same switch.
+
 The host also sets variables that other tools already define, and the SDK needs to do nothing with them:
 
 - the node's `env` from the plan;
 - `PATH`, with the node's `tools` in front;
-- the dependency-proxy variables `GOPROXY`, `npm_config_registry`, `PIP_INDEX_URL` and `PIP_TRUSTED_HOST`;
-- `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>` and `GIT_CONFIG_VALUE_<n>`, which point `git` at the source mirror.
+- the dependency-proxy variables `GOPROXY`, `npm_config_registry`, `PIP_INDEX_URL` and `PIP_TRUSTED_HOST`.
 
 Run options are host state and never reach the SDK as variables. `start_at`, `stop_at`, `only`, `no_cache`, `profile`, `mode` and `workers` change what the host schedules. The two that plan code observes, `dry_run` and `no_cache`, travel in the `plan` request's run context.
 
@@ -335,7 +340,7 @@ Notes on the routes:
 
   A request past either limit gets 429 `too_many_requests` at once, and is never queued. Every open `await` of one child run shares one poll of the controller a second.
 
-- **Cleanups.** A cleanup is for a resource outside the process session, such as a container or a cloud object, which killing the session would leave behind. `argv` must be idempotent. The host runs it once, after the process exits for any reason, in the repository root with the node's environment, and bounds it in time.
+- **Cleanups.** A cleanup is for a resource outside the process session, such as a container or a cloud object, which killing the session would leave behind. `argv` must be idempotent. The host runs it once, after the process exits for any reason, newest first, in the repository root with the node's environment, and ends it with every process it started after 2 minutes. A node holds at most 16 cleanups, each with at most 64 arguments; a seventeenth answers 400 `bad_request`.
 - **Child runs.** A child run that waits in plan admission does not count against the parent node's wall timeout while an `await` request for it is open. The SDK enforces its own wait limit, such as `RunAndAwait`'s `WithFreshTimeout`, by not calling `await` again.
 - **Pipeline references.** `latest` reads another pipeline's newest successful run, as `RefToLastRun` does.
 
@@ -360,6 +365,25 @@ Content-Type: application/json
 
 {"error":"node protocol \"0\" unsupported","code":"protocol_mismatch","supported":["1"]}
 ```
+
+## Limits
+
+| What | Bound | Past the bound |
+|---|---|---|
+| One frame | 16 MiB, newline included | The attempt fails with `protocol_error`. |
+| A node's output | One reply frame, so 16 MiB as JSON less the reply's own bytes. Only the result step's output, or a `run_node` output, travels; other step outputs stay in the SDK process | The Go SDK answers a failed reply, and the node fails. |
+| A node's recorded `error` | 8 KiB: the first line, up to 512 bytes, and the tail | The host records the first line, a note of how many bytes it elided, and the tail. A failed command's full output stays in the node's log. |
+| A node or step summary or annotation | 128 KiB each as stored | The host stores its start and a note of how many bytes it elided. |
+| A node `skip_if` | `modifiers.skip_if_budget_ms`, 30 seconds by default | The node runs. |
+| A `cache_key` closure | 30 seconds | The node fails. |
+| `after_run` after a timeout | 2 minutes, in its own eval process | The process is killed and the node's outcome stands. |
+| One cleanup | 2 minutes | The host ends it and every process it started. |
+| Cleanups per node | 16, each with at most 64 arguments | 400 `bad_request` |
+| Open route requests | 4 besides awaits, plus 64 awaits | 429 `too_many_requests` |
+| Retries of a 429 by the Go SDK | 2 minutes in all for one call | The call returns the 429. |
+| A child run's request body | 64 KiB | 400 `bad_request` |
+| One `await` | `wait_ms` up to 60000, 30000 by default | 400 `bad_request` |
+| A `describe` from the CLI | 30 seconds | The CLI kills the process and every process it started. |
 
 ## Log records
 
