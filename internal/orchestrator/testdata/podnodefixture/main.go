@@ -4,9 +4,11 @@
 // with retries whose before_run and after_run calls are traced, and a node in a
 // concurrency group; when asked, a node that waits until it is stopped, and a
 // deploy node whose skip_if reads a secret, and a failing node whose recovery
-// records the failure it was handed; when asked, a ship node of three steps
-// behind a prep node, beside a lint node. The trigger's actor and pull request, when
-// set, reach the build node's environment as ACTOR.
+// records the failure it was handed; when asked, a source node whose output
+// generates one node per target and a summary that needs them all; when asked,
+// a ship node of three steps behind a prep node, beside a lint node. The
+// trigger's actor and pull request, when set, reach the build node's
+// environment as ACTOR.
 package main
 
 import (
@@ -35,6 +37,10 @@ type inputs struct {
 	Hold    string `flag:"hold" desc:"File a held node writes its pid to before it waits to be stopped"`
 	Guard   string `flag:"guard" desc:"File a deploy node writes unless its skip_if, which reads DEPLOY_GUARD, says skip"`
 	Recover string `flag:"recover" desc:"File a failing node's recovery writes the parent's error to"`
+	FanOut  string `flag:"fanout" desc:"Comma-separated targets a source node lists, each generating a node a summary needs"`
+	FanLog  string `flag:"fanlog" desc:"File each fan-out node's body appends its id to"`
+	FanFail string `flag:"fanfail" desc:"File whose presence fails the node generated for target fail"`
+	FanMemo bool   `flag:"fanmemo" desc:"Memoize the fan-out source"`
 	Region  bool   `flag:"region" desc:"The build node's env carries the AWS_REGION plan code reads"`
 	Ranged  string `flag:"ranged" desc:"File a prep node, a lint node and a ship node of three steps append their names to"`
 }
@@ -130,14 +136,21 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, rc spar
 			memoized.Outputs("dist/*")
 		}
 	}
+	var summary *sparkwing.JobNode
+	if in.FanOut != "" {
+		summary = fanOut(plan, in)
+	}
 	if in.Hold != "" {
-		sparkwing.Job(plan, "held", func(ctx context.Context) error {
+		held := sparkwing.Job(plan, "held", func(ctx context.Context) error {
 			if err := os.WriteFile(in.Hold, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
 				return err
 			}
 			<-ctx.Done()
 			return ctx.Err()
 		}).Needs(build)
+		if summary != nil {
+			held.Needs(summary)
+		}
 	}
 	if in.Guard != "" {
 		sparkwing.Job(plan, "deploy", func(context.Context) error {
@@ -187,6 +200,44 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, rc spar
 		build.Env("PLAN_SEQ", strconv.Itoa(n))
 	}
 	return nil
+}
+
+func fanOut(plan *sparkwing.Plan, in inputs) *sparkwing.JobNode {
+	logBody := func(id string) {
+		f, err := os.OpenFile(in.FanLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err == nil {
+			_, _ = fmt.Fprintln(f, id)
+			_ = f.Close()
+		}
+	}
+	source := sparkwing.Job(plan, "targets", &targetsJob{list: in.FanOut, log: logBody})
+	if in.FanMemo {
+		source.Memoize(func(context.Context) (sparkwing.CacheKey, error) { return "pod-fanout-v1", nil })
+	}
+	tests := sparkwing.JobFanOutDynamic(plan, "tests", source, func(target string) (string, any) {
+		id := "test-" + target
+		return id, func(context.Context) error {
+			logBody(id)
+			if _, err := os.Stat(in.FanFail); target == "fail" && err == nil {
+				return errors.New("target fail is broken")
+			}
+			return nil
+		}
+	})
+	return sparkwing.Job(plan, "summary", func(context.Context) error { logBody("summary"); return nil }).Needs(tests)
+}
+
+type targetsJob struct {
+	sparkwing.Produces[[]string]
+	list string
+	log  func(string)
+}
+
+func (j *targetsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	return sparkwing.Step(w, "list", func(context.Context) ([]string, error) {
+		j.log("targets")
+		return strings.Split(j.list, ","), nil
+	}), nil
 }
 
 func main() {

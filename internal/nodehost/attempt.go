@@ -165,7 +165,7 @@ func nodeReplan(ctx context.Context, sess *Session, n *NodeRun) error {
 	switch {
 	case err != nil:
 		return err
-	case n.Generator != "":
+	case len(n.Generators) > 0:
 		return regenerate(ctx, sess, n)
 	}
 	return checkDrift(raw, n.Plan)

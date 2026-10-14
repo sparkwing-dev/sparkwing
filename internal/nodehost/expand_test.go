@@ -47,11 +47,11 @@ func TestExpansionFansOutAndHoldsItsWaiter(t *testing.T) {
 		if i := slices.Index(res.Order, c.ID); i < 0 || i > last {
 			t.Errorf("order %v: %s did not run before summary", res.Order, c.ID)
 		}
-		if got := fx.seen[c.ID].Generator; got != testGenerator {
+		if got := fx.seen[c.ID].Generators; !slices.Equal(got, []string{testGenerator}) {
 			t.Errorf("%s ran with generator %q, want %q", c.ID, got, testGenerator)
 		}
 	}
-	if got := fx.seen["summary"].Generator; got != "" {
+	if got := fx.seen["summary"].Generators; len(got) != 0 {
 		t.Errorf("summary ran with generator %q, want none", got)
 	}
 	row := nodeRow(t, st, "summary")

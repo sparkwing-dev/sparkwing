@@ -62,7 +62,7 @@ The SDK does not need to know which kind of process it is. It answers whatever a
 For one node attempt the host sends requests in this order:
 
 1. `plan`, with the pipeline, args and run context the run accepted. The host hashes the node's entry in the reply and compares it with the accepted plan's `spec_hash`. On a mismatch, or if a node of the accepted plan is missing, the attempt fails with `plan_drift`.
-2. For a node a generator added, `eval` of that generator in place of that comparison, which rebuilds the node in this process. The host compares the rebuilt node with the `spec_hash` it recorded when it added the node.
+2. For a node a generator added, `eval` of the generators that led to it in place of that comparison, which rebuilds the node in this process. The host compares the rebuilt node with the `spec_hash` it recorded when it added the node.
 3. On attempt 1 only, `eval` for each `before_run` closure in order.
 4. One `run_node` for a node without steps, or one `run_step` per step for a node with steps (see [Steps](#steps)).
 5. After a successful body, `eval` of the `verify` closure.
@@ -201,7 +201,7 @@ A closure is customer code that the host calls by id. The plan lists each node's
 | `before_run` | attempt process, attempt 1, before the body | none | `null` | the node fails without retrying |
 | `verify` | attempt process, after each successful body | none | `null` | the attempt fails with reason `verify`, and retry and `on_failure` apply |
 | `after_run` | the last attempt's process, after the body and verify | `{outcome, error?}`: the node's final outcome and error | `null` | the host logs it and leaves the node's outcome unchanged |
-| `generator` | the source's attempt process, after its body succeeds, or an eval process when the source's result was copied by memo; again in each generated node's own processes | none | an array of node documents | the generated group fails, and nodes that need it are cancelled |
+| `generator` | once per run: the source's attempt process, after its body succeeds, or an eval process on the run host when memo copied the source's result or the source ran on another host; again in each generated node's own processes, to load the node's code | none | an array of node documents | the generated group fails, and nodes that need it are cancelled |
 
 The host bounds each node `skip_if` by the node's `modifiers.skip_if_budget_ms`, or by 30 seconds when that is absent. A `skip_if` that overruns its budget counts as `false`. A `cache_key` closure has its own 30-second limit, and one that overruns it fails the node. Every other closure is bounded by the node's wall timeout, except `after_run` after an attempt that timed out: the host evaluates it in an eval process of its own, bounded to 2 minutes.
 
@@ -212,10 +212,11 @@ A failed reply to `eval` (for example `unknown_closure`) is never read as `false
 A generator closure adds nodes at run time. Its source node lists the closure under `closures.generator`. A node that waits for every generated node lists the closure id under `needs_generated`.
 
 1. After the source's body succeeds, the host evaluates the generator in the source's attempt process, where the SDK still holds the source's output. It records the source's outcome and output before it adds any node. In a generated node's own processes the generator reads that output through `GET /node/v1/nodes/{node}/output`.
-   - A memoized source whose result the host copied from an earlier run gets no attempt. The host evaluates its generators in an eval process instead, where `GET /node/v1/nodes/{node}/output` for the source itself answers the copied output.
-2. `value` is an array of node documents in the plan document's node shape. Each one lists the source in its `deps`.
-3. The host validates the new nodes against the plan (`plan_invalid`), records them with the run, and schedules them. A node with `needs_generated` becomes ready once every generated node has finished.
-4. Each generated node's eval and attempt processes evaluate the same generator again after `plan`, then run the node. The host compares the regenerated node's `spec_hash` as in step 1 of the attempt order. A generator must therefore return the same nodes for the same source output.
+   - A memoized source whose result the host copied from an earlier run gets no attempt, and a source a runner-hosted run dispatched ran on another host. The run host evaluates their generators in an eval process instead, where `GET /node/v1/nodes/{node}/output` for the source itself answers the recorded output.
+2. `value` is an array of node documents in the plan document's node shape. Each one lists the source in its `deps`, or is the `on_failure_of` node of one that does.
+3. The host validates the new nodes against the plan (`plan_invalid`), records each one's row with its whole document, its source and generator, and schedules them. A node with `needs_generated` becomes ready once every generated node has finished. A recorded node's `pipeline_refs` are declared for its claims as a planned node's are; it reads only the secrets the pipeline declares.
+4. The recorded documents are the run's generated nodes from then on: another host of a node runs the document its row holds, a resumed run keeps every recorded node, finished or not, and a retry copies its source run's. Each generator's batch stands alone: a complete one is kept as recorded, and only one the run never fully recorded is generated again, alone, keeping every node it did record; a batch that cannot be generated again, or whose regeneration drops or changes a recorded node, fails the run with `plan_drift`, cancels its waiters and ends each node it recorded as cancelled. A generated `on_failure` node's row lists its parent among its `deps`, so its processes may read the source's output.
+5. Each generated node's eval and attempt processes evaluate the generators that led to it after `plan`, its source's first when the source was itself generated, to load the node's code, then run the node. The host compares the rebuilt node's `spec_hash` as in step 1 of the attempt order and fails it with `plan_drift` when they differ. A generator must therefore return the same nodes for the same source output.
 
 ```text
 -> {"id":"2","op":"eval","closure":"targets/generator/0"}

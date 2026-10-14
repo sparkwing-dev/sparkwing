@@ -20,12 +20,31 @@ var dispatchLayers = []Layer{debugLayer, skipIfLayer, approvalsLayer, memoLayer,
 func dispatchChain(cfg *Config) Executor {
 	dispatch, poll := cfg.Dispatch, cmp.Or(cfg.ClaimedRowPoll, defaultClaimedRowPoll)
 	exec := func(ctx context.Context, n *NodeRun) Result {
-		return adoptDispatchedRow(ctx, n, dispatch(ctx, n), poll)
+		return dispatchedGenerators(ctx, cfg, n, adoptDispatchedRow(ctx, n, dispatch(ctx, n), poll))
 	}
 	for i := len(dispatchLayers) - 1; i >= 0; i-- {
 		exec = dispatchLayers[i](cfg, exec)
 	}
 	return exec
+}
+
+// safety: a node's host cannot add nodes to the run, so the run host runs a
+// succeeded source's generators in an eval process from the output its host
+// recorded, as it does a copied source's.
+func dispatchedGenerators(ctx context.Context, cfg *Config, n *NodeRun, res Result) Result {
+	c := n.Plan.Closures
+	if res.Outcome != sparkwing.Success || c == nil || len(c.Generator) == 0 || cfg.Attempts == nil {
+		return res
+	}
+	output, err := recordedOutput(context.WithoutCancel(ctx), n.Run.State, n.Run.ID, n.Plan.ID)
+	if err != nil {
+		for _, id := range c.Generator {
+			res.expansions = append(res.expansions, expansion{closure: id, err: err})
+		}
+		return res
+	}
+	res.expansions = memoGenerate(ctx, cfg, n, output)
+	return res
 }
 
 // safety: the remote host wrote the node's terminal row under its own claim, so

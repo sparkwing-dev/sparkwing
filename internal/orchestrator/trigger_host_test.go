@@ -78,24 +78,31 @@ func newHostedTriggerWith(t *testing.T, args map[string]string, shape func(*stor
 	srv := httptest.NewServer(controller.New(st, quiet).EnableAuthFromStore().WithSecretsCipher(cipher).Handler())
 	t.Cleanup(srv.Close)
 	h.url = srv.URL
+	h.claimTrigger(t, "run-hosted", args, shape)
+	return h
+}
+
+func (h *hostedTrigger) claimTrigger(t *testing.T, id string, args map[string]string, shape func(*store.Trigger)) {
+	t.Helper()
 	ctx, now := store.WithoutCreditMetering(t.Context()), time.Now()
 	trig := store.Trigger{
-		ID: "run-hosted", Pipeline: "podnode", Args: args, Repo: "acme/widgets",
+		ID: id, Pipeline: "podnode", Args: args, Repo: "acme/widgets",
 		GitBranch: "main", GitSHA: strings.Repeat("b", 40), CreatedAt: now,
 	}
 	shape(&trig)
-	if err := st.CreateTriggerWithRun(ctx, trig, store.Run{
-		ID: "run-hosted", Pipeline: "podnode", Status: "pending", Args: args, CreatedAt: now, StartedAt: now,
+	run := store.Run{
+		ID: id, Pipeline: "podnode", Status: "pending", Args: args, CreatedAt: now, StartedAt: now, RetryOf: trig.RetryOf,
 		// safety: as the controller's trigger intake records the trigger's run flags on the run row.
 		Invocation: runflags.FromTriggerEnv(trig.TriggerEnv).Invocation(),
-	}); err != nil {
+	}
+	if err := h.st.CreateTriggerWithRun(ctx, trig, run); err != nil {
 		t.Fatal(err)
 	}
-	h.trig, err = client.NewWithToken(h.url, nil, h.token).ClaimTriggerFor(t.Context(), nil, nil)
-	if err != nil || h.trig == nil {
-		t.Fatalf("claim the trigger: %+v %v", h.trig, err)
+	claimed, err := client.NewWithToken(h.url, nil, h.token).ClaimTriggerFor(t.Context(), nil, nil)
+	if err != nil || claimed == nil || claimed.ID != id {
+		t.Fatalf("claim the trigger: %+v %v", claimed, err)
 	}
-	return h
+	h.trig = claimed
 }
 
 func (h *hostedTrigger) host(t *testing.T, ctx context.Context, r runner.Runner, heartbeat time.Duration) error {
