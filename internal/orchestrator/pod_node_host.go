@@ -119,7 +119,7 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 // safety: a proxy URL can carry a credential, so each one's password, and the
 // whole value, is masked before any process of the node runs.
 func podSessionEnv(masker *secrets.Masker) []string {
-	for _, name := range k8srunner.DependencyProxyEnvNames {
+	for _, name := range podEnvNames() {
 		if v, ok := os.LookupEnv(name); ok {
 			maskProxyCredentials(masker, v)
 		}
@@ -132,7 +132,11 @@ func podSessionEnv(masker *secrets.Masker) []string {
 // proxy settings the pod's Job or runner was given, so go, npm and pip use the
 // cache's proxy and no runner credential reaches pipeline code or its hooks.
 func PodBaseEnv() []string {
-	return engineenv.Minimal(k8srunner.DependencyProxyEnvNames...)
+	return engineenv.Minimal(podEnvNames()...)
+}
+
+func podEnvNames() []string {
+	return slices.Concat(k8srunner.DependencyProxyEnvNames, k8srunner.NetworkEnvNames)
 }
 
 // safety: the whole value and each ','/'|' member are masked whole. The userinfo (after any scheme://, up to the
