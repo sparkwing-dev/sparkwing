@@ -709,8 +709,9 @@ func TestLocalConsumerKeepsSafeSetupFailure(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Setenv("SPARKWING_LOCAL_SETUP_TEST_PROGRAM", pinned)
+			// safety: the fake hosts the trigger but no daemon, so the claimer's daemon start fails and the run is standalone.
 			host := filepath.Join(t.TempDir(), "sparkwing")
-			if err := os.WriteFile(host, []byte("#!/bin/sh\nexec \"$SPARKWING_LOCAL_SETUP_TEST_BINARY\" -test.run=^TestLocalSetupFailureChild$\n"), 0o700); err != nil {
+			if err := os.WriteFile(host, []byte("#!/bin/sh\n[ \"$1\" = __host-trigger ] || exit 1\nexec \"$SPARKWING_LOCAL_SETUP_TEST_BINARY\" -test.run=^TestLocalSetupFailureChild$\n"), 0o700); err != nil {
 				t.Fatal(err)
 			}
 			t.Setenv(wingdclient.HostBinEnv, host)
