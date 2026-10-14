@@ -129,7 +129,7 @@ func TestRunnerInstallGetsTheOperatorAllowListMasked(t *testing.T) {
 	_, _ = prepareTypeScriptOnRunner(t.Context(), dir, &out)
 	got := out.String()
 	switch {
-	case !strings.Contains(got, "note=") || !strings.Contains(got, "region=us-west-2"):
+	case !strings.Contains(got, "note=*** ") || !strings.Contains(got, "region=us-west-2"):
 		t.Fatalf("the install lost an allow-listed name:\n%s", got)
 	case strings.Contains(got, "long-operator-value-0123"):
 		t.Fatalf("a long allow-listed value reached the install output unmasked:\n%s", got)

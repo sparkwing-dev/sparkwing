@@ -134,11 +134,15 @@ func planLaunchedRun(ctx context.Context, c *client.Client, src string, entry pi
 		return fail(err)
 	}
 	masker := secrets.NewMasker()
+	env, err := podProcessEnv(masker, slog.Default())
+	if err != nil {
+		return fail(err)
+	}
 	sink, err := newPodPlanSink(ctx, runID, masker, os.Stderr)
 	if err != nil {
 		return fail(err)
 	}
-	plan, err := nodehost.PlanDocument(ctx, nodehost.SessionConfig{Entry: entry, Dir: src, Sink: sink, Env: podSessionEnv(masker)},
+	plan, err := nodehost.PlanDocument(ctx, nodehost.SessionConfig{Entry: entry, Dir: src, Sink: sink, Env: env},
 		nodehost.PlanRequest{Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run), Requires: requires, Masker: masker})
 	sink.end()
 	if err != nil {
