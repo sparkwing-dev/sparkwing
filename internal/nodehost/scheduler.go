@@ -243,8 +243,7 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 		cfg.Run.Trigger = &nodeproto.Trigger{Source: "manual"}
 	}
 	scfg := planSession(cfg)
-	gate := holdUntilDescribed(&scfg)
-	defer gate.finish()
+	scfg.HoldOutput = true
 	sess, err := StartSession(ctx, scfg)
 	if err != nil {
 		return RunResult{}, err
@@ -258,15 +257,11 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 	if cfg.Attempts != nil {
 		masker = cfg.Attempts.Masker
 	}
-	args, err := describeArgs(ctx, sess, cfg.Pipeline, cfg.Args, masker)
+	args, known, err := describeArgs(ctx, sess, cfg.Pipeline, cfg.Args, masker)
 	if err == nil && cfg.CheckArgs != nil {
 		err = cfg.CheckArgs(args)
 	}
-	if err != nil {
-		gate.discard()
-	} else {
-		gate.release()
-	}
+	err = releaseDescribed(sess, known, masker, err)
 	if err == nil {
 		err = cfg.State.CreateRun(ctx, runRow(cfg, args))
 	}
