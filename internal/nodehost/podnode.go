@@ -61,7 +61,7 @@ func PlanDocument(ctx context.Context, cfg SessionConfig, req PlanRequest) (Plan
 	if err == nil && req.CheckArgs != nil {
 		err = req.CheckArgs(out.Args)
 	}
-	err = releaseDescribed(sess, known, req.Masker, err)
+	err = releaseDescribed(sess, known, err)
 	if err == nil {
 		out.Doc, out.JSON, err = planRun(ctx, sess, req.Pipeline, out.Args, req.Run)
 	}
@@ -82,9 +82,9 @@ func PlanDocument(ctx context.Context, cfg SessionConfig, req PlanRequest) (Plan
 	var perr *nodeproto.Error
 	if err == nil && errors.As(cerr, &perr) {
 		// safety: a process that broke the protocol after its reply cannot vouch for that plan.
-		return PlannedRun{}, cerr
+		return PlannedRun{}, maskErr(req.Masker, cerr)
 	}
-	return out, err
+	return out, maskErr(req.Masker, err)
 }
 
 // safety: placement labels from the pipeline's YAML are the host's, so plan
@@ -155,10 +155,6 @@ func podRun(cfg *Config) *Run {
 func podHost(ctx context.Context, cfg *Config, run *Run, nodeID string, res Result) Result {
 	if res.Outcome == sparkwing.Failed && ctx.Err() != nil {
 		res.Outcome = sparkwing.Cancelled
-	}
-	if res.Err != nil && cfg.Attempts != nil {
-		// safety: a plan failure quotes the SDK, so it is masked like an attempt's.
-		res.Err = errors.New(cfg.Attempts.Masker.Mask(res.Err.Error()))
 	}
 	return podFinish(ctx, run, nodeID, res)
 }

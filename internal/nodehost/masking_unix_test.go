@@ -167,3 +167,21 @@ func TestAnAbandonedSinkQueueShowsNoPieceOfAHeldSecret(t *testing.T) {
 		t.Fatalf("an abandoned queue showed a piece of the secret: ...%q", got[max(0, len(got)-40):])
 	}
 }
+
+// A plan the SDK refuses quoting a secret default comes back from planning
+// masked, so every caller records and prints it masked without masking again.
+func TestPlanningErrorsComeBackMasked(t *testing.T) {
+	const secret = "plan-secret-4242"
+	script := `IFS= read -r line <&3
+id=$(printf '%s' "$line" | sed 's/.*"id":"\([^"]*\)".*/\1/')
+printf '{"reply":"%s","ok":true,"result":{"protocol":"1","pipelines":[{"name":"demo","args":[{"name":"tok","secret":true,"default":"` + secret + `"}]}]}}\n' "$id" >&4
+IFS= read -r line <&3
+id=$(printf '%s' "$line" | sed 's/.*"id":"\([^"]*\)".*/\1/')
+printf '{"reply":"%s","ok":false,"error":{"code":"plan_failed","message":"plan panicked: ` + secret + `"}}\n' "$id" >&4
+IFS= read -r line <&3
+`
+	err := describeFails(t, script, "plan", discardSink{})
+	if strings.Contains(err.Error(), secret) || !strings.Contains(err.Error(), "plan panicked: ***") {
+		t.Fatalf("err = %v, want the plan failure masked", err)
+	}
+}

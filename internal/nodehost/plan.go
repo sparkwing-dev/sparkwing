@@ -85,18 +85,13 @@ func describeArgs(ctx context.Context, s *Session, pipeline string, args map[str
 	return nil, true, &nodeproto.Error{Code: nodeproto.CodeUnknownPipeline, Message: fmt.Sprintf("the pipeline entry has no pipeline %q", pipeline)}
 }
 
-// safety: held output reaches the sink only once describe's secrets are
-// known, and err is masked here since the run row that masks later errors
-// does not exist yet.
-func releaseDescribed(s *Session, known bool, masker *secrets.Masker, err error) error {
+// safety: held output reaches the sink only once describe's secrets are known.
+func releaseDescribed(s *Session, known bool, err error) error {
 	if !known {
 		s.WithholdOutput("describe failed before secrets were known")
 		return err
 	}
 	s.ReleaseOutput()
-	if err != nil && masker != nil {
-		err = maskedRunError{err: err, text: masker.Mask(err.Error())}
-	}
 	return err
 }
 

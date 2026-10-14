@@ -261,13 +261,13 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 	if err == nil && cfg.CheckArgs != nil {
 		err = cfg.CheckArgs(args)
 	}
-	err = releaseDescribed(sess, known, masker, err)
+	err = releaseDescribed(sess, known, err)
 	if err == nil {
 		err = cfg.State.CreateRun(ctx, runRow(cfg, args))
 	}
 	if err != nil {
 		closeSession()
-		return RunResult{}, err
+		return RunResult{}, maskErr(masker, err)
 	}
 
 	res = RunResult{RunID: cfg.Run.RunID, Nodes: map[string]Result{}}
@@ -282,9 +282,7 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 	defer func() {
 		// safety: plan code's error can quote a secret flag, and the run row and
 		// every caller that prints the error outlive the masker.
-		if res.Err != nil && masker != nil {
-			res.Err = maskedRunError{err: res.Err, text: masker.Mask(res.Err.Error())}
-		}
+		res.Err = maskErr(masker, res.Err)
 		if ferr := cfg.State.FinishRun(finishCtx, res.RunID, res.Status, errText(res.Err)); ferr != nil {
 			res.Status, res.Err = "failed", errors.Join(res.Err, fmt.Errorf("persist run state: %w", ferr))
 		}
@@ -837,6 +835,13 @@ type maskedRunError struct {
 
 func (e maskedRunError) Error() string { return e.text }
 func (e maskedRunError) Unwrap() error { return e.err }
+
+func maskErr(m *secrets.Masker, err error) error {
+	if err == nil || m == nil {
+		return err
+	}
+	return maskedRunError{err: err, text: m.Mask(err.Error())}
+}
 
 func errText(err error) string {
 	if err == nil {

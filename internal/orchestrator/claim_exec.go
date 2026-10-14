@@ -159,7 +159,7 @@ func planLaunchedRun(ctx context.Context, c *client.Client, src string, entry pi
 			StartAt: flags.StartAt, StopAt: flags.StopAt, Only: flags.Only, CheckArgs: checkArgs,
 		})
 	if err != nil {
-		return fail(fmt.Errorf("the pipeline could not plan the run: %s", masker.Mask(err.Error())))
+		return fail(fmt.Errorf("the pipeline could not plan the run: %w", err))
 	}
 	if err := c.SubmitPlan(ctx, runID, plan.JSON); err != nil {
 		return fail(fmt.Errorf("submit the plan: %w", err))
