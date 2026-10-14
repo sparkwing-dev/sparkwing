@@ -764,7 +764,7 @@ func executePooledNode(
 	}
 	gitcacheURL = nodeCacheURL(gitcacheURL, controllerURL, announced, grant)
 	res, err := runPooledNodeOnce(execCtx, controllerURL, n.RunID, n.NodeID, holderID, claimToken,
-		&stdoutLogger{}, logger, admission, orchestrator.WithGitcache(gitcacheURL, grant), orchestrator.WithRepoAllowlist(allow),
+		logger, orchestrator.WithGitcache(gitcacheURL, grant), orchestrator.WithRepoAllowlist(allow),
 		orchestrator.ClaimedNodeAttempt(n))
 	cancel()
 	hbWG.Wait()

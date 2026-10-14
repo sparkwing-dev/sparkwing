@@ -2,46 +2,16 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
-
-type heartbeatCounter struct {
-	StateBackend
-	nodeBeats, runBeats atomic.Int64
-	err                 error
-}
-
-func (h *heartbeatCounter) TouchNodeHeartbeat(context.Context, string, string) error {
-	h.nodeBeats.Add(1)
-	return h.err
-}
-
-func (h *heartbeatCounter) TouchRunHeartbeat(context.Context, string) error {
-	h.runBeats.Add(1)
-	return h.err
-}
-
-func TestHeartbeatLoops_KeepBeatingThroughOtherFailures(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		h := &heartbeatCounter{err: errors.New("controller 500: boom")}
-		ctx, cancel := context.WithTimeout(t.Context(), 5500*time.Millisecond)
-		defer cancel()
-		runNodeHeartbeatLoop(ctx, time.Second, h, "run-1", "build", time.Hour)
-		if got := h.nodeBeats.Load(); got != 6 {
-			t.Fatalf("beat %d times in 5.5s through a 500, want 6", got)
-		}
-	})
-}
 
 func TestFollowLogsRemote_StopsAtOnceOnADeadToken(t *testing.T) {
 	const runID = "run-dead-token"

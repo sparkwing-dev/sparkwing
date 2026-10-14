@@ -9,12 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 const wingdTestWait = 30 * time.Second
@@ -175,141 +173,6 @@ func awaitWaiter(t *testing.T, home, runID string) {
 
 func queueRowMatchesRun(runID, participantID, want string) bool {
 	return runID == want || participantID == want
-}
-
-func TestWingd_NodeGroupDoesNotHoldSemaphoreWhileWaitingForHostAdmission(t *testing.T) {
-	home := wingdTestHome(t)
-	startWingd(t, home, 1)
-	backends, st, _ := openWingdBackends(t, home)
-	la := testWingdAdmission(home, nil)
-
-	holderClient, err := wingdclient.EnsureDaemon(context.Background(), wingdclient.Options{Home: home, Version: "test"})
-	if err != nil {
-		t.Fatalf("dial daemon: %v", err)
-	}
-	defer holderClient.Close()
-	holder, err := holderClient.Acquire(context.Background(), wingwire.AdmissionRequest{
-		RunID:     "host-holder",
-		Resources: wingwire.HostResources{Cores: 1},
-	}, nil)
-	if err != nil {
-		t.Fatalf("acquire host holder: %v", err)
-	}
-	defer func() { _ = holder.Release() }()
-
-	plan := sparkwing.NewPlan()
-	group := sparkwing.NewConcurrencyGroup("wingd-e2e-node-host-first", sparkwing.ConcurrencyLimit{
-		Capacity: 1,
-		Scope:    sparkwing.ScopeBox,
-		OnLimit:  sparkwing.Queue,
-	})
-	node := sparkwing.Job(plan, "locked", func(context.Context) error { return nil }).
-		Resources(sparkwing.Cores(1)).
-		Concurrency(group)
-	if err := st.CreateRun(t.Context(), store.Run{ID: "node-waiter", Pipeline: "wingd-e2e-host-first", Status: "running", StartedAt: time.Now()}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreateNode(t.Context(), store.Node{RunID: "node-waiter", NodeID: node.ID(), Status: "pending"}); err != nil {
-		t.Fatal(err)
-	}
-	r := NewNodeExecutor(backends)
-	ctx := withLocalAdmission(context.Background(), la, "test-run", "", "", false, 0, runCharge{})
-
-	result := make(chan runner.Result, 1)
-	go func() {
-		result <- r.runNodeUnderDaemonSem(ctx, runner.Request{
-			RunID:    "node-waiter",
-			NodeID:   node.ID(),
-			Pipeline: "wingd-e2e-host-first",
-			Node:     node,
-		}, la, group)
-	}()
-
-	awaitWaiter(t, home, nodeHostRunID("node-waiter", "locked"))
-	qs := queryWingd(t, home)
-	for _, h := range qs.Holders {
-		if h.RunID == nodeSemaphoreRunID("node-waiter", "locked") ||
-			h.ParticipantID == nodeSemaphoreRunID("node-waiter", "locked") {
-			t.Fatalf("node semaphore held before host admission; queue state: %+v", qs)
-		}
-	}
-
-	if err := holder.Release(); err != nil {
-		t.Fatalf("release host holder: %v", err)
-	}
-	select {
-	case res := <-result:
-		if res.Outcome != sparkwing.Success {
-			t.Fatalf("node result = %+v, want success", res)
-		}
-	case <-time.After(wingdTestWait):
-		t.Fatal("node did not finish after host capacity freed")
-	}
-}
-
-func TestWingd_NodeHostAdmissionAndNodeSemaphoreUseDistinctParticipants(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	cases := []struct {
-		name          string
-		runID         string
-		hostNodeID    string
-		semNodeID     string
-		semName       string
-		collisionNote string
-	}{
-		{
-			name:          "same-node",
-			runID:         "run-same-node",
-			hostNodeID:    "shard-1",
-			semNodeID:     "shard-1",
-			semName:       "node-shard-lock",
-			collisionNote: "same node host and semaphore participants",
-		},
-		{
-			name:          "namespace-like-node",
-			runID:         "run-namespace-node",
-			hostNodeID:    "node-semaphore/shard-1",
-			semNodeID:     "shard-1",
-			semName:       "node-namespace-lock",
-			collisionNote: "node id and semaphore namespace participants",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			home := wingdTestHome(t)
-			startWingd(t, home, 8)
-			backends, _, _ := openWingdBackends(t, home)
-			la := testWingdAdmission(home, nil)
-
-			ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
-			defer cancel()
-
-			hostLease, err := la.admitNode(ctx, backends, "runner-mode", tc.runID, tc.hostNodeID, nil, 0)
-			if err != nil {
-				t.Fatalf("admit node host resources: %v", err)
-			}
-			defer hostLease.release()
-
-			claim := wingwire.SemaphoreClaim{
-				Name:     tc.semName,
-				Capacity: 1,
-				Cost:     1,
-				Policy:   wingwire.PolicyQueue,
-			}
-			semLease, err := la.acquireNodeSlot(ctx, tc.runID, tc.semNodeID, claim, 0, nil)
-			if err != nil {
-				t.Fatalf("acquire node semaphore after host admission: %v", err)
-			}
-			defer func() { _ = semLease.Release() }()
-
-			if hostLease.leases[0].RunID == semLease.RunID {
-				t.Fatalf("%s collided at %q", tc.collisionNote, semLease.RunID)
-			}
-		})
-	}
 }
 
 func TestWingd_DaemonFirstCancelSurvivesImmediateClientExit(t *testing.T) {

@@ -18,7 +18,7 @@ const generatedDirectories = new Set([
 ]);
 const environmentNames = new Set([
   "NODE_ENV", "NODE_OPTIONS", "NODE_PATH", "SPARKWING_API_URL",
-  "SPARKWING_CONTROLLER_URL", "SPARKWING_LOGS_URL", "TZ", "LANG", "LC_ALL",
+  "SPARKWING_CONTROLLER_URL", "TZ", "LANG", "LC_ALL",
 ]);
 
 // safety: pnpm varies the key order of nested config objects between runs, so a

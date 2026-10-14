@@ -19,17 +19,3 @@ func TestRefusePinnedLocalRun(t *testing.T) {
 		t.Fatalf("a pinned pipeline ran locally or the refusal named no trigger command: %v", err)
 	}
 }
-
-// A leftover key the strict decoder rejects must not hide a pin from a cron,
-// detached run or local child trigger.
-func TestRefusePinnedCheckoutRun_FailsWhenTheConfigCannotBeRead(t *testing.T) {
-	checkoutAt(t, "defaults:\n  profile: prod\npipelines:\n  - name: release\n    entrypoint: Release\n    profile: prod\n")
-	err := refusePinnedCheckoutRun(nil)
-	if err == nil || !strings.Contains(err.Error(), "profile pin") {
-		t.Fatalf("refusePinnedCheckoutRun with an unreadable config = %v, want a refusal", err)
-	}
-	checkoutAt(t, "pipelines:\n  - name: release\n    entrypoint: Release\n")
-	if err := refusePinnedCheckoutRun(nil); err != nil {
-		t.Fatalf("a readable config with no pin was refused: %v", err)
-	}
-}

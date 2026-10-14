@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/repos"
 
 	flag "github.com/spf13/pflag"
 
@@ -221,7 +223,7 @@ func runPipelineDescribe(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineDescribe.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
 	pipelineName := fs.String("name", "", "pipeline name to describe")
-	secretsOnly := fs.Bool("secrets", false, "print the declared secrets with provenance")
+	secretsOnly := fs.Bool("secrets", false, "print the declared secrets, required or optional")
 	if err := parseAndCheck(cmdPipelineDescribe, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -241,6 +243,9 @@ func runPipelineDescribe(args []string) error {
 		return err
 	}
 	name := *pipelineName
+	if *secretsOnly {
+		return describePipelineSecrets(name, format)
+	}
 	pipelines, err := gatherPipelinesCatalog(true)
 	if err != nil {
 		return err
@@ -263,9 +268,6 @@ func runPipelineDescribe(args []string) error {
 		}
 		return fmt.Errorf("no pipeline named %q (run `sparkwing pipeline list --all` to see every entry)", name)
 	}
-	if *secretsOnly {
-		return printPipelineSecrets(found, format)
-	}
 	switch format {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
@@ -279,21 +281,39 @@ func runPipelineDescribe(args []string) error {
 	}
 }
 
-func printPipelineSecrets(p *Pipeline, format string) error {
-	if format == "json" {
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"pipeline": p.Name, "secrets": p.Secrets})
+// safety: the catalog's describe cache can be cold or older than the source,
+// so secrets come from the current build's own describe or the command fails.
+func describePipelineSecrets(name, format string) error {
+	var secrets pipelines.SecretsField
+	err := withPipelineEntry(name, func(ctx context.Context, entry pipelineentry.Command, dir string) error {
+		doc, err := repos.Describe(ctx, entry, dir)
+		if err != nil {
+			return err
+		}
+		schema, err := findPipelineSchema(doc.Pipelines, name)
+		secrets = schema.Secrets
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("describe --secrets: %w", err)
 	}
-	fmt.Println(p.Name + " secrets")
+	if secrets == nil {
+		secrets = pipelines.SecretsField{}
+	}
+	if format == "json" {
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"pipeline": name, "secrets": secrets})
+	}
+	fmt.Println(name + " secrets")
 	fmt.Println()
-	if len(p.Secrets) == 0 {
+	if len(secrets) == 0 {
 		fmt.Println("  (none declared)")
 		return nil
 	}
 	width := 4
-	for _, s := range p.Secrets {
+	for _, s := range secrets {
 		width = max(width, len(s.Name))
 	}
-	for _, s := range p.Secrets {
+	for _, s := range secrets {
 		req := "optional"
 		if s.IsRequired() {
 			req = "required"

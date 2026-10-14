@@ -11,12 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-const (
-	childAwaitMaxPollInterval      = 500 * time.Millisecond
-	childAwaitMinPollInterval      = 25 * time.Millisecond
-	childAdmissionInspectorTimeout = 100 * time.Millisecond
-)
-
 type childPlanAdmissionStatus int
 
 const (
@@ -169,26 +163,4 @@ func planAdmissionHolderTimes(state *store.ConcurrencyState, runID string) (time
 		}
 	}
 	return time.Time{}, time.Time{}, false, false
-}
-
-func childAwaitPollInterval(ctx context.Context, timeoutPausedForAdmission bool) time.Duration {
-	if timeoutPausedForAdmission {
-		return childAwaitMinPollInterval
-	}
-	deadline, ok := ctx.Deadline()
-	if !ok {
-		return childAwaitMaxPollInterval
-	}
-	remaining := time.Until(deadline)
-	if remaining <= childAwaitMinPollInterval {
-		return childAwaitMinPollInterval
-	}
-	interval := remaining / 2
-	if interval < childAwaitMinPollInterval {
-		return childAwaitMinPollInterval
-	}
-	if interval > childAwaitMaxPollInterval {
-		return childAwaitMaxPollInterval
-	}
-	return interval
 }

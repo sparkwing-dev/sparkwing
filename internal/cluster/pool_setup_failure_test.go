@@ -54,7 +54,7 @@ func TestPooledNodeSetupFailureFinishesTheNodeWithTheError(t *testing.T) {
 	saved := runPooledNodeOnce
 	t.Cleanup(func() { runPooledNodeOnce = saved })
 	runPooledNodeOnce = func(context.Context, string, string, string, string, string,
-		sparkwing.Logger, *slog.Logger, *orchestrator.LocalAdmission, ...orchestrator.RunNodeOption,
+		*slog.Logger, ...orchestrator.RunNodeOption,
 	) (runner.Result, error) {
 		return runner.Result{}, errors.New("compile pipeline: exit status 1")
 	}

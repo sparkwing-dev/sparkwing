@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -24,7 +23,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
-	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -153,12 +151,6 @@ func signalName(sig os.Signal) string {
 	}
 }
 
-type runDaemonCanceledError struct {
-	reason string
-}
-
-func (e *runDaemonCanceledError) Error() string { return e.reason }
-
 // safety: closeAll releases what was opened in reverse order, as the defers it replaces did.
 func localRunBackends(ctx context.Context, paths Paths, opts *Options) (_ Backends, closeAll func() error, err error) {
 	var closers []func() error
@@ -230,14 +222,6 @@ func localRunBackends(ctx context.Context, paths Paths, opts *Options) (_ Backen
 	return LocalBackends(paths, st, opts.ArtifactStore), closeAll, nil
 }
 
-func maskerForInvokeArgs(reg *sparkwing.Registration, invokeArgs map[string]string) *secrets.Masker {
-	masker := secrets.NewMasker()
-	for _, v := range reg.SecretValues(invokeArgs) {
-		masker.Register(v)
-	}
-	return masker
-}
-
 func mergeInvokeArgs(opts Options) map[string]string {
 	var pipelineArgs map[string]string
 	if opts.PipelineYAML != nil {
@@ -253,27 +237,6 @@ func mergeInvokeArgs(opts Options) map[string]string {
 	return merged
 }
 
-func loadCheckoutProjectConfig() (*projectconfig.Config, string, error) {
-	root := sparkwing.CurrentRuntime().WorkDir
-	if root == "" {
-		return nil, "", nil
-	}
-	path := filepath.Join(root, ".sparkwing", projectconfig.Filename)
-	cfg, err := projectconfig.Load(path)
-	return cfg, path, err
-}
-
-// safety: a config that does not parse hides the run's defaults, guards and
-// runner requirements, so the run fails naming the error rather than planning
-// with the caller's arguments alone.
-func checkoutProjectConfig() (*projectconfig.Config, error) {
-	cfg, _, err := loadCheckoutProjectConfig()
-	if err != nil {
-		return nil, &projectConfigError{err: err}
-	}
-	return cfg, nil
-}
-
 // safety: a parse error describes the author's own config, so a failed run
 // records it in full rather than the generic setup-failure text.
 type projectConfigError struct{ err error }
@@ -281,18 +244,6 @@ type projectConfigError struct{ err error }
 func (e *projectConfigError) Error() string { return "project config: " + e.err.Error() }
 
 func (e *projectConfigError) Unwrap() error { return e.err }
-
-func checkoutInvokeArgs(pipeline string, stored map[string]string) (map[string]string, error) {
-	cfg, err := checkoutProjectConfig()
-	if err != nil || cfg == nil {
-		return stored, err
-	}
-	return mergeInvokeArgs(Options{
-		Args:         stored,
-		DefaultArgs:  cfg.Defaults.Args,
-		PipelineYAML: (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipeline),
-	}), nil
-}
 
 func buildRunInvocation(opts Options, runID, logDir string, secretArgs []string) map[string]any {
 	inv := map[string]any{
@@ -460,146 +411,7 @@ type planEdge struct {
 	Deps []string `json:"deps"`
 }
 
-func planEdges(nodes []*sparkwing.JobNode) []planEdge {
-	edges := make([]planEdge, 0, len(nodes))
-	for _, n := range nodes {
-		deps := append([]string(nil), n.DepIDs()...)
-		sort.Strings(deps)
-		edges = append(edges, planEdge{ID: n.ID(), Deps: deps})
-	}
-	sort.Slice(edges, func(i, j int) bool { return edges[i].ID < edges[j].ID })
-	return edges
-}
-
-func capacityFingerprint(plan *sparkwing.Plan) string {
-	nodes := plan.Nodes()
-	type membership struct {
-		Node     string `json:"node,omitempty"`
-		Group    string `json:"group"`
-		Capacity int    `json:"capacity"`
-		Scope    string `json:"scope"`
-		Policy   string `json:"policy"`
-		Cost     int    `json:"cost"`
-	}
-	doc := struct {
-		Edges       []planEdge   `json:"edges"`
-		Concurrency []membership `json:"concurrency,omitempty"`
-	}{Edges: planEdges(nodes)}
-	appendGroup := func(node string, g *sparkwing.ConcurrencyGroup, cost int) {
-		limit := g.Limit()
-		scope := limit.Scope
-		if scope == "" {
-			scope = sparkwing.ScopeGlobal
-		}
-		policy := limit.OnLimit
-		if policy == "" {
-			policy = sparkwing.Queue
-		}
-		doc.Concurrency = append(doc.Concurrency, membership{
-			Node:     node,
-			Group:    g.Name(),
-			Capacity: limit.Capacity,
-			Scope:    string(scope),
-			Policy:   string(policy),
-			Cost:     cost,
-		})
-	}
-	for _, pc := range plan.PlanConcurrency() {
-		if pc.Group != nil {
-			appendGroup("", pc.Group, pc.Cost)
-		}
-	}
-	for _, n := range nodes {
-		if g := n.ConcurrencyGroupRef(); g != nil {
-			appendGroup(n.ID(), g, n.ConcurrencyCost())
-		}
-	}
-	sort.Slice(doc.Concurrency, func(i, j int) bool {
-		a, b := doc.Concurrency[i], doc.Concurrency[j]
-		if a.Node != b.Node {
-			return a.Node < b.Node
-		}
-		return a.Group < b.Group
-	})
-	return hashCanonicalJSON(doc)
-}
-
-func childAwaitBounded(ctx context.Context, requestTimeout time.Duration) bool {
-	_, contextBounded := ctx.Deadline()
-	return requestTimeout > 0 || nodeTimeoutDurationFromContext(ctx) > 0 || contextBounded
-}
-
 var defaultPauseTimeout = 30 * time.Minute
-
-func resolveCacheKey(ctx context.Context, resolver sparkwing.CacheKeyFn, nodeID string) (sparkwing.CacheKey, error) {
-	if err := ctx.Err(); err != nil {
-		return "", fmt.Errorf("resolve cache key for %s: %w", nodeID, err)
-	}
-	resolverContext, cancel := context.WithTimeout(ctx, defaultPredicateTimeout)
-	defer cancel()
-	type cacheKeyResolution struct {
-		key sparkwing.CacheKey
-		err error
-	}
-	done := make(chan cacheKeyResolution, 1)
-	go func() {
-		var resolved cacheKeyResolution
-		defer func() {
-			if recovered := recover(); recovered != nil {
-				resolved = cacheKeyResolution{err: fmt.Errorf("resolver panic: %v", recovered)}
-			}
-			done <- resolved
-		}()
-		resolved.key, resolved.err = resolver(resolverContext)
-	}()
-	select {
-	case resolved := <-done:
-		if err := resolverContext.Err(); err != nil {
-			return "", fmt.Errorf("resolve cache key for %s: %w", nodeID, err)
-		}
-		if resolved.err != nil {
-			return "", fmt.Errorf("resolve cache key for %s: %w", nodeID, resolved.err)
-		}
-		if resolved.key == "" {
-			return "", fmt.Errorf("resolve cache key for %s: empty key", nodeID)
-		}
-		return resolved.key, nil
-	case <-resolverContext.Done():
-		return "", fmt.Errorf("resolve cache key for %s: %w", nodeID, resolverContext.Err())
-	}
-}
-
-func callBeforeRun(ctx context.Context, hook sparkwing.BeforeRunFn) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("panic: %v", r)
-		}
-	}()
-	return hook(ctx)
-}
-
-func callAfterRun(ctx context.Context, hook sparkwing.AfterRunFn, runErr error, index int, nodeLog NodeLog) {
-	defer func() {
-		if r := recover(); r != nil {
-			nodeLog.Log("error", fmt.Sprintf("AfterRun hook %d panicked: %v", index, r))
-		}
-	}()
-	hook(ctx, runErr)
-}
-
-func scaledBackoff(initial time.Duration, attempt int) time.Duration {
-	if initial <= 0 || attempt <= 0 {
-		return 0
-	}
-	out := initial
-	for i := 1; i < attempt; i++ {
-		out *= 2
-		if out > 5*time.Minute {
-			return 5 * time.Minute
-		}
-	}
-	return out
-}
 
 func canceledByRun(err error) bool {
 	if err == nil {
@@ -611,61 +423,6 @@ func canceledByRun(err error) bool {
 	// safety: a ctx-cancelled child is SIGKILLed; its ExitError carries
 	// no wrapped context error, only the "signal: killed" text.
 	return strings.Contains(err.Error(), "signal: killed")
-}
-
-const defaultPredicateTimeout = 30 * time.Second
-
-func evalSkipPredicates(ctx context.Context, node *sparkwing.JobNode) (string, bool) {
-	preds := node.SkipPredicates()
-	if len(preds) == 0 {
-		return "", false
-	}
-	budget := node.SkipIfBudget()
-	if budget == 0 {
-		budget = defaultPredicateTimeout
-	}
-	logger := sparkwing.LoggerFromContext(ctx)
-	for i, pred := range preds {
-		if len(preds) > 1 {
-			logger.Log("info",
-				fmt.Sprintf("evaluating SkipIf predicate %d/%d (budget %s)", i+1, len(preds), budget))
-		} else {
-			logger.Log("info", fmt.Sprintf("evaluating SkipIf predicate (budget %s)", budget))
-		}
-		if skipped, reason := runOnePredicate(ctx, pred, i, budget); skipped {
-			return reason, true
-		}
-	}
-	return "", false
-}
-
-func runOnePredicate(ctx context.Context, pred sparkwing.SkipPredicate, index int, budget time.Duration) (bool, string) {
-	pctx, cancel := context.WithTimeout(ctx, budget)
-	defer cancel()
-
-	done := make(chan bool, 1)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				sparkwing.LoggerFromContext(ctx).Log("error",
-					fmt.Sprintf("SkipIf predicate %d panicked: %v (defaulting to don't-skip)", index, r))
-				done <- false
-			}
-		}()
-		done <- pred(pctx)
-	}()
-
-	select {
-	case result := <-done:
-		if result {
-			return true, fmt.Sprintf("SkipIf predicate %d returned true", index)
-		}
-		return false, ""
-	case <-pctx.Done():
-		sparkwing.LoggerFromContext(ctx).Log("error",
-			fmt.Sprintf("SkipIf predicate %d exceeded %s budget (defaulting to don't-skip); raise via SkipIf(fn, sparkwing.SkipBudget(d))", index, budget))
-		return false, ""
-	}
 }
 
 func snapshotPipelineRefs(refs []sparkwing.RefTarget) []nodeproto.PlanPipelineRef {
@@ -785,19 +542,6 @@ func snapshotConsumeEdges(edges []sparkwing.ConsumeEdge) []nodeproto.PlanConsume
 		out[i] = nodeproto.PlanConsume{Producer: edge.Producer, Into: edge.Into}
 	}
 	return out
-}
-
-func planPriorityFromSnapshot(raw []byte) int {
-	if len(raw) == 0 {
-		return 0
-	}
-	var snap struct {
-		Priority int `json:"priority,omitempty"`
-	}
-	if err := json.Unmarshal(raw, &snap); err != nil {
-		return 0
-	}
-	return snap.Priority
 }
 
 func nodeModifiersSnapshot(n *sparkwing.JobNode) *nodeproto.PlanModifiers {

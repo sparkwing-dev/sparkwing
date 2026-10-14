@@ -2,13 +2,11 @@ package orchestrator_test
 
 import (
 	"context"
-	"sync"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestLocalBackends_ThreadsArtifact(t *testing.T) {
@@ -37,27 +35,4 @@ type noListArtifact struct {
 
 func (n *noListArtifact) List(_ context.Context, _ string) ([]string, error) {
 	return nil, storage.ErrListNotSupported
-}
-
-type captureLogger struct {
-	mu      sync.Mutex
-	records []sparkwing.LogRecord
-}
-
-func (c *captureLogger) Log(level, msg string) {
-	c.Emit(sparkwing.LogRecord{Level: level, Msg: msg})
-}
-
-func (c *captureLogger) Emit(rec sparkwing.LogRecord) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.records = append(c.records, rec)
-}
-
-func (c *captureLogger) Snapshot() []sparkwing.LogRecord {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	out := make([]sparkwing.LogRecord, len(c.records))
-	copy(out, c.records)
-	return out
 }

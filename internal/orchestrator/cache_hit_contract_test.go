@@ -1,9 +1,0 @@
-package orchestrator
-
-import (
-	"context"
-
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
-)
-
-var _ func(*NodeExecutor, context.Context, runner.Request, coordinationParameters, string, string) runner.Result = (*NodeExecutor).applyCacheHit

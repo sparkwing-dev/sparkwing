@@ -84,8 +84,8 @@ func pinRunNodeEnvironment(t *testing.T) {
 	}
 }
 
-// safety: both URLs travel as flags so the inherited SPARKWING_CONTROLLER_URL
-// and SPARKWING_LOGS_URL of the test process never reach the node.
+// safety: the URL travels as a flag so the test process's inherited
+// SPARKWING_CONTROLLER_URL never reaches the node.
 func runNodeArgs(controllerURL, runID, nodeID string) []string {
 	return []string{"--controller", controllerURL, runID, nodeID}
 }
@@ -224,4 +224,13 @@ func TestRunNodeCommand_RunsUnfencedWithoutADispatchedClaim(t *testing.T) {
 	if n.Status != "done" || n.Outcome != string(sparkwing.Success) {
 		t.Fatalf("node = status %q outcome %q, want success", n.Status, n.Outcome)
 	}
+}
+
+func isolateCheckout(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	prev := sparkwing.CurrentRuntime().WorkDir
+	sparkwing.SetWorkDir(root)
+	t.Cleanup(func() { sparkwing.SetWorkDir(prev) })
+	return root
 }

@@ -33,12 +33,3 @@ func refusePinnedIn(sparkwingDir, pipeline string) error {
 	}
 	return RefusePinnedLocalRun((&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipeline))
 }
-
-// safety: a config that cannot be read hides the pin, so the run fails rather
-// than executing a pipeline that may be pinned to a controller.
-func refusePinnedCheckoutRun(entry *pipelines.Pipeline) error {
-	if _, path, err := loadCheckoutProjectConfig(); err != nil {
-		return fmt.Errorf("read %s to check the pipeline's profile pin: %w", path, err)
-	}
-	return RefusePinnedLocalRun(entry)
-}

@@ -113,7 +113,7 @@ func RunNodeCommand(args []string) error {
 
 	ctx = withProcessNode(ctx, runID, nodeID)
 	res, err := RunNodeOnce(ctx, *controllerURL, runID, nodeID,
-		holderID, token, NewJSONRenderer(), slog.Default(), nil, runOpts...)
+		holderID, token, slog.Default(), runOpts...)
 	// safety: a step that swallows its cancellation must still leave the pod
 	// failing, so the Job ends rather than being retried as a success.
 	if cause := context.Cause(ctx); errors.Is(cause, errClaimAbandoned) {

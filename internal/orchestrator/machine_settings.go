@@ -15,10 +15,6 @@ type machineSettings struct {
 	BoxID string `yaml:"box_id"`
 }
 
-type logsSettings struct {
-	DropPolicy string `yaml:"drop_policy"`
-}
-
 type debugSettings struct {
 	PauseTimeout string `yaml:"pause_timeout"`
 }
@@ -71,17 +67,6 @@ func boxHostID() string {
 		return h
 	}
 	return "localhost"
-}
-
-// safety: an unreadable setting keeps the strict default, so a lost log line
-// still fails the node rather than passing it silently.
-func logsDropIsFatal() bool {
-	var s logsSettings
-	if _, _, err := userconfig.ReadDefault(userconfig.Logs, &s); err != nil {
-		slog.Warn("log drop policy unreadable; dropped lines fail the node", "err", err)
-		return true
-	}
-	return strings.TrimSpace(s.DropPolicy) != logsDropPolicyWarn
 }
 
 func pauseTimeout() time.Duration {

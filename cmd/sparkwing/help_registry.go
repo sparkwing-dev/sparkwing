@@ -1222,11 +1222,12 @@ frontmatter-declared positional args and flags. Always resolves
 hidden entries -- if you're asking for a name explicitly, the
 hidden flag shouldn't surprise you.
 
---secrets compiles the pipeline and prints each declared secret, its
-source binding, and its resolution status instead of the metadata.`,
+--secrets compiles the pipeline, describes it fresh, and prints each
+secret its Secrets struct declares, required or optional, instead of the
+metadata. It never resolves a secret's value.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Pipeline name to describe", Required: true, Group: "Target"},
-		{Name: "secrets", Desc: "Print the pipeline's declared secrets with provenance instead of its metadata", Group: "Target"},
+		{Name: "secrets", Desc: "Print the pipeline's declared secrets, required or optional, instead of its metadata", Group: "Target"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
 	GroupOrder: []string{"Target", "Output", "Other"},

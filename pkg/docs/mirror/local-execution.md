@@ -110,9 +110,8 @@ sends its run, node, event, and concurrency calls to the admission daemon
 over the daemon's `api.sock`, and starts each node as a
 `--sw-node-protocol` process of the pipeline binary that reaches the run
 only through the CLI's loopback node routes (see [node
-protocol](node-protocol.md)). The child runs a node starts, and any node
-replayed from them, run in the pipeline binary's own dispatcher and reach
-the daemon over the same socket. No process in a hosted run holds the file
+protocol](node-protocol.md)). A child run a node starts is hosted the same
+way, by the `sparkwing` that claims it from the local queue. No process in a hosted run holds the file
 open, so the store's schema is out of a pipeline binary's contract. The CLI verbs that read the file -- `sparkwing
 runs`, `sparkwing doctor`, the dashboard -- are the
 installed build or a peer of it and still open it directly.

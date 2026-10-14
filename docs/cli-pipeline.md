@@ -69,15 +69,16 @@ frontmatter-declared positional args and flags. Always resolves
 hidden entries -- if you're asking for a name explicitly, the
 hidden flag shouldn't surprise you.
 
---secrets compiles the pipeline and prints each declared secret, its
-source binding, and its resolution status instead of the metadata.
+--secrets compiles the pipeline, describes it fresh, and prints each
+secret its Secrets struct declares, required or optional, instead of the
+metadata. It never resolves a secret's value.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
 | `--name NAME` | Pipeline name to describe (required) |
-| `--secrets` | Print the pipeline's declared secrets with provenance instead of its metadata |
+| `--secrets` | Print the pipeline's declared secrets, required or optional, instead of its metadata |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 
 ### Examples

@@ -111,7 +111,7 @@ func TestAnOffClusterAgentUsesTheAnnouncedCacheWithItsGrant(t *testing.T) {
 		t.Skip("git unavailable")
 	}
 	for _, name := range []string{
-		"SPARKWING_CONTROLLER_URL", "SPARKWING_LOGS_URL", "SPARKWING_CACHE_URL", "SPARKWING_GITCACHE_URL",
+		"SPARKWING_CONTROLLER_URL", "SPARKWING_CACHE_URL", "SPARKWING_GITCACHE_URL",
 		authwire.CacheGrantEnv,
 	} {
 		t.Setenv(name, "")

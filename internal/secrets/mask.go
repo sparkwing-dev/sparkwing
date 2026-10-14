@@ -2,7 +2,6 @@ package secrets
 
 import (
 	"bytes"
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -12,35 +11,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
-
-type maskerCtxKey struct{}
-
-// WithMasker attaches m to ctx for the run's logs, and for the step command
-// lines the session ledger records, which cannot import this package.
-func WithMasker(ctx context.Context, m *Masker) context.Context {
-	var mask func(string) string
-	if m != nil {
-		mask = m.Mask
-	}
-	return sessionledger.WithCommandMask(context.WithValue(ctx, maskerCtxKey{}, m), mask)
-}
-
-func MaskerFromContext(ctx context.Context) *Masker {
-	if m, ok := ctx.Value(maskerCtxKey{}).(*Masker); ok {
-		return m
-	}
-	return nil
-}
-
-func MaskCtx(ctx context.Context, s string) string {
-	if m := MaskerFromContext(ctx); m != nil {
-		return m.Mask(s)
-	}
-	return s
-}
 
 type WrappedLogger struct {
 	inner  sparkwing.Logger
