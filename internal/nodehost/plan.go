@@ -1,10 +1,12 @@
 package nodehost
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -28,7 +30,15 @@ type describeDoc struct {
 // when set, before any process of the run can print it.
 func describeArgs(ctx context.Context, s *Session, pipeline string, args map[string]string, masker *secrets.Masker) (map[string]string, error) {
 	var doc describeDoc
-	if err := ask(ctx, s, nodeproto.Request{Op: nodeproto.OpDescribe}, &doc); err != nil {
+	// safety: no run row or node timeout exists yet, so without this bound a
+	// process that stops answering holds the run open forever.
+	limit := cmp.Or(s.cfg.DescribeTimeout, 30*time.Second)
+	dctx, cancel := context.WithTimeout(ctx, limit)
+	defer cancel()
+	if err := ask(dctx, s, nodeproto.Request{Op: nodeproto.OpDescribe}, &doc); err != nil {
+		if ctx.Err() == nil && dctx.Err() != nil {
+			return nil, fmt.Errorf("describe: no reply within %s: %w", limit, err)
+		}
 		return nil, err
 	}
 	if doc.Protocol != nodeproto.Version {

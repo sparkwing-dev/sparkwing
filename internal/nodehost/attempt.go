@@ -100,7 +100,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 		names = append(names, s.Name)
 	}
 	bearer, revoke, err := a.Routes.Admit(Node{
-		RunID: run.ID, NodeID: id, Secrets: names, Resolver: a.Resolver, Masker: a.Masker, Claim: a.Claim, Local: a.Local,
+		RunID: run.ID, NodeID: id, Secrets: names, Resolver: a.Resolver, Masker: a.Masker, Claim: a.Claim, Local: a.Local, Refs: n.Plan.PipelineRefs,
 		Children: a.Children, LeaseToken: childLease(n), Pause: n.Pause, Hold: n.Hold, Output: n.memoOutput,
 	})
 	if err != nil {

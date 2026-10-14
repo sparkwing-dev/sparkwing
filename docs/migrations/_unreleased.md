@@ -636,7 +636,7 @@ Nothing converts an old pin.
   you set; the engine strips its own credentials and plumbing, such as
   `SPARKWING_SECRETS_KEY`, `SPARKWING_AGENT_TOKEN` and
   `SPARKWING_API_SOCKET`.
-- **Limits:** a node's output is at most 16 MiB as JSON, a cleanup runs
+- **Limits:** a step's output is at most 16 MiB as JSON, a cleanup runs
   for at most 2 minutes, the SDK retries a `429` from a node route for at
   most 2 minutes, and `after_run` after a timeout runs for at most 2
   minutes. See [node protocol limits](../node-protocol.md#limits).

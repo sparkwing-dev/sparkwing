@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -54,7 +56,13 @@ func (s *Server) serveLocalNodeOutput(w http.ResponseWriter, r *http.Request, g 
 	s.writeLocalOutput(ctx, w, g, "output", g.RunID, node, map[string]any{})
 }
 
+// safety: as the controller does for a claim, a node reads another
+// pipeline's output only through a reference its plan declares.
 func (s *Server) serveLocalPipelineLatest(w http.ResponseWriter, r *http.Request, g *grant, pipeline, node string, maxAge time.Duration) {
+	if !slices.Contains(g.Refs, nodeproto.PlanPipelineRef{Pipeline: pipeline, Node: node}) {
+		s.referenceUndeclared(w, g, pipeline, node)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), upstreamTimeout)
 	defer cancel()
 	run, err := g.Local.GetLatestRun(ctx, pipeline, []string{"success"}, maxAge)
