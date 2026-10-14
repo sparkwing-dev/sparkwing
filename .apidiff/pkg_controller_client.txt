@@ -483,10 +483,16 @@ type TriggerRequest struct {
 	ParentNodeID string
 
 	RetryOf string
+
+	Runner string
+	Reason string
 }
 type TriggerResponse struct {
 	RunID  string
 	Status string
+
+	RunnerToken          string
+	RunnerTokenExpiresAt int64
 }
 func UnavailableBackoff(err error, floor time.Duration) (time.Duration, bool)
 type UnavailableError struct {

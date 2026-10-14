@@ -4142,6 +4142,10 @@ type Trigger struct {
 	// return it so the runner that executes the run can place its work
 	// on nodes no other team's work shares.
 	Team Team `json:"team,omitempty"`
+	// RunnerPin is the prefix of the one-shot credential a
+	// `--runner here` trigger is pinned to, empty for every other trigger.
+	// A pinned trigger is claimable only by that credential, once.
+	RunnerPin string `json:"-"`
 }
 
 // DefaultLeaseDuration is the claim lease TTL. Wide enough to survive
@@ -4259,12 +4263,12 @@ func createTriggerTx(ctx context.Context, tx *storeTx, team Team, t Trigger) err
 INSERT INTO triggers (team, id, pipeline, args_json, trigger_source, trigger_user,
                       trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
 		              repo, repo_url, github_owner, github_repo, github_repo_id, repo_inherited, retry_of, retry_source, parent_node_id, "full",
-		              idempotency_key, webhook_delivery, webhook_replay_key)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		              idempotency_key, webhook_delivery, webhook_replay_key, runner_pin)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(team), t.ID, t.Pipeline, argsJSON, t.TriggerSource, t.TriggerUser,
 		envJSON, t.GitBranch, t.GitSHA, status, t.CreatedAt.UnixNano(), parent,
 		t.Repo, t.RepoURL, t.GithubOwner, t.GithubRepo, t.GithubRepoID, repoInheritedInt, t.RetryOf, t.RetrySource, t.ParentNodeID, fullInt,
-		t.IdempotencyKey, t.WebhookDelivery, t.WebhookReplayKey,
+		t.IdempotencyKey, t.WebhookDelivery, t.WebhookReplayKey, t.RunnerPin,
 	)
 	if err != nil && isUniqueViolation(err) {
 		if t.WebhookReplayKey != "" && strings.Contains(err.Error(), triggerWebhookReplayKeyColumn) {
@@ -4739,7 +4743,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
        idempotency_key, claim_seq, webhook_delivery, team, webhook_replay_key
   FROM triggers
  WHERE status = ? AND available_at <= ? AND cancel_requested_at IS NULL
-   AND credit_reserved_at = 0
+   AND credit_reserved_at = 0 AND runner_pin = ''
    AND NOT EXISTS (
        SELECT 1 FROM agent_loss_retries alr
        JOIN runs source_run ON source_run.id = alr.source_run_id
@@ -5502,15 +5506,19 @@ func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant
 	// safety: the claimant replaces whatever a previous holder left, unbound
 	// included; a pending row has no live claim, so keeping the old principal
 	// would let it prove ownership of a claim it does not hold.
+	// safety: a pinned trigger answers only its own credential, only for its
+	// first claim and only inside the claim window, so a lapsed here-runner or a
+	// credential left unused cannot take the run later.
 	args := []any{
 		triggerStatusClaimed, now.UnixNano(), expires.UnixNano(),
 		claimant.Principal, claimant.TokenPrefix,
-		id, triggerStatusPending,
+		id, triggerStatusPending, claimant.TokenPrefix, now.Add(-HereRunnerClaimWindow).UnixNano(),
 	}
 	res, err := tx.ExecContext(ctx,
 		`UPDATE triggers SET status = ?, claimed_at = ?, lease_expires_at = ?, claim_seq = claim_seq + 1,
 		        claim_principal = ?, claim_token_prefix = ?
-		  WHERE id = ? AND status = ? AND available_at <= ? AND cancel_requested_at IS NULL
+		  WHERE id = ? AND status = ? AND (runner_pin = '' OR (runner_pin = ? AND claim_seq = 0 AND created_at >= ?))
+		    AND available_at <= ? AND cancel_requested_at IS NULL
 		    AND credit_reserved_at = 0
 		    AND NOT EXISTS (
 		        SELECT 1 FROM agent_loss_retries alr
@@ -6250,7 +6258,7 @@ var schemaSQLite string
 var schemaPostgres string
 
 // safety: the baseline is the only schema; a store recording any other version is refused, never upgraded.
-const expectedSchemaVersion = 1
+const expectedSchemaVersion = 2
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,

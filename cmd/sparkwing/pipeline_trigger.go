@@ -19,6 +19,8 @@ type triggerFlags struct {
 	workingTree      bool
 	wantHelp         bool
 	allowSecretFiles []string
+	runner           string
+	reason           string
 	passthrough      []string
 }
 
@@ -79,10 +81,29 @@ func parseTriggerFlags(args []string) (triggerFlags, error) {
 		case strings.HasPrefix(a, "--allow-secret-file="):
 			flags.allowSecretFiles = append(flags.allowSecretFiles, strings.TrimPrefix(a, "--allow-secret-file="))
 			i++
+		case a == "--runner" || a == "--reason":
+			if i+1 >= len(rest) {
+				return triggerFlags{}, fmt.Errorf("%s needs a value", a)
+			}
+			if a == "--runner" {
+				flags.runner = rest[i+1]
+			} else {
+				flags.reason = rest[i+1]
+			}
+			i += 2
+		case strings.HasPrefix(a, "--runner="):
+			flags.runner = strings.TrimPrefix(a, "--runner=")
+			i++
+		case strings.HasPrefix(a, "--reason="):
+			flags.reason = strings.TrimPrefix(a, "--reason=")
+			i++
 		default:
 			flags.passthrough = append(flags.passthrough, a)
 			i++
 		}
+	}
+	if err := checkHereFlags(flags); err != nil {
+		return triggerFlags{}, err
 	}
 	return flags, nil
 }
@@ -116,9 +137,18 @@ func runPipelineTrigger(args []string) error {
 	if flags.workingTree {
 		source = triggerSource("pipeline-working-tree")
 	}
-	resp, err := createRemoteTrigger(prof, flags.pipeline, source, runFlags{allowSecretFiles: flags.allowSecretFiles}, flags.passthrough, flags.workingTree)
+	if flags.runner == hereRunnerFlag {
+		if err := refuseUncommittedCheckout(); err != nil {
+			return err
+		}
+	}
+	resp, err := createRemoteTrigger(prof, flags.pipeline, source,
+		runFlags{allowSecretFiles: flags.allowSecretFiles, hereReason: flags.reason}, flags.passthrough, flags.workingTree)
 	if err != nil {
 		return err
+	}
+	if flags.runner == hereRunnerFlag {
+		return hostAndFollowHere(prof, flags.pipeline, resp)
 	}
 
 	if flags.detach {

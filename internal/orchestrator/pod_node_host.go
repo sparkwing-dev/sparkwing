@@ -69,8 +69,7 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 	masker := secrets.NewMasker()
 	masker.Register(p.token)
 	// safety: ahead of the routes and the node log, so a bad allow list leaves nothing to close.
-	sessionEnv := podSessionEnv(masker)
-	operatorEnv, err := operatorAllowedEnv(os.Environ(), sessionEnv, masker, p.logger)
+	env, err := podProcessEnv(masker, p.logger)
 	if err != nil {
 		return nodehost.Result{}, err
 	}
@@ -96,7 +95,7 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 	}
 	defer planSink.end()
 	cfg := nodehost.Config{
-		Session:  nodehost.SessionConfig{Entry: p.entry, Dir: p.dir, Sink: planSink, Env: append(sessionEnv, operatorEnv...)},
+		Session:  nodehost.SessionConfig{Entry: p.entry, Dir: p.dir, Sink: planSink, Env: env},
 		Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run),
 		State: p.state, Artifacts: p.artifacts, Logger: p.logger,
 		Attempts: &nodehost.Attempts{
@@ -134,6 +133,18 @@ func podSessionEnv(masker *secrets.Masker) []string {
 	return PodBaseEnv()
 }
 
+// safety: every pipeline process a runner starts, its plan, closure evals, nodes and dependency installs, gets
+// PodBaseEnv plus the operator's allow-listed names from this one function, with what needs masking registered;
+// a value plan code reads that differed between planning and the node would fail the node with plan_drift.
+func podProcessEnv(masker *secrets.Masker, logger *slog.Logger) ([]string, error) {
+	base := podSessionEnv(masker)
+	operator, err := operatorAllowedEnv(os.Environ(), base, masker, logger)
+	if err != nil {
+		return nil, err
+	}
+	return append(base, operator...), nil
+}
+
 // PodBaseEnv is what a runner gives every process of a pipeline it hosts, its
 // dependency installs included: the minimal environment plus the dependency
 // proxy settings the pod's Job or runner was given, so go, npm and pip use the
@@ -153,13 +164,11 @@ func PrepareTypeScriptOnRunner(ctx context.Context, sparkwingDir string) (pipeli
 
 func prepareTypeScriptOnRunner(ctx context.Context, sparkwingDir string, dst io.Writer) (pipelineentry.Command, error) {
 	masker := secrets.NewMasker()
-	base := podSessionEnv(masker)
 	// safety: the allow list is operator-trusted config a private registry or a tool's install may need.
-	operator, err := operatorAllowedEnv(os.Environ(), base, masker, slog.Default())
+	env, err := podProcessEnv(masker, slog.Default())
 	if err != nil {
 		return nil, err
 	}
-	env := append(base, operator...)
 	out, finish, err := maskedInstallOutput(ctx, masker, dst)
 	if err != nil {
 		return nil, err

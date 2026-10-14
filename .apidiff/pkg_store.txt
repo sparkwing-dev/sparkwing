@@ -1108,6 +1108,18 @@ type GitHubRunnerScope struct {
 	Push GitHubRunnerPush
 }
 func GitHubRunnerScopeFrom(ctx context.Context) (GitHubRunnerScope, bool)
+type HereRunner struct {
+	Reason string
+
+	By string
+
+	CreatedBy string
+	Scopes    []string
+	TTL       time.Duration
+}
+const HereRunnerClaimWindow = 10 * time.Minute
+const HereRunnerPrincipalPrefix = "here:"
+func HereRunnerRunID(principal string) (runID string, isHere bool)
 type Identity struct {
 	Provider string
 	Subject  string
@@ -2658,6 +2670,7 @@ func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error)
 func (t *Tenant) CreateApproval(ctx context.Context, a Approval) error
 func (t *Tenant) CreateDebugPause(ctx context.Context, p DebugPause) error
 func (t *Tenant) CreateGitHubAutomationTriggerWithRun(ctx context.Context, trig Trigger, run Run, grant GitHubAppAutomation) error
+func (t *Tenant) CreateHereTriggerWithRun(ctx context.Context, trig Trigger, r Run, here HereRunner, now time.Time) (string, *Token, error)
 func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, role Role, now time.Time) (Invitation, error)
 func (t *Tenant) CreateMachineToken(
 	ctx context.Context, name string, scopes []string, createdBy string, now time.Time,
@@ -2957,6 +2970,8 @@ type Trigger struct {
 	WebhookReplayKey string
 
 	Team Team
+
+	RunnerPin string
 }
 func (t Trigger) IsFinished() bool
 type TriggerClaimFence struct {

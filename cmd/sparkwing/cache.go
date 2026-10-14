@@ -362,7 +362,7 @@ func runCacheExplain(args []string) error {
 	if fs.NArg() > 0 {
 		return fmt.Errorf("cache explain: unexpected positional %q", fs.Arg(0))
 	}
-	dir, err := defaultSparkwingDir()
+	dir, err := findSparkwingDir()
 	if err != nil {
 		return fmt.Errorf("cache explain: %w", err)
 	}
