@@ -201,6 +201,25 @@ func (s *LogSink) emit(rec sparkwing.LogRecord) {
 
 func (s *LogSink) host(rec sparkwing.LogRecord) { s.emit(maskRecord(s.cfg.Masker, rec)) }
 
+// MaskingLogger returns a logger that masks each record with m as a node's
+// records are masked, then hands it to inner. A run's renderer and envelope
+// log sit behind one, as a backstop under each source's own masking.
+func MaskingLogger(inner sparkwing.Logger, m *secrets.Masker) sparkwing.Logger {
+	if inner == nil {
+		return nil
+	}
+	return maskingLogger{inner: inner, m: m}
+}
+
+type maskingLogger struct {
+	inner sparkwing.Logger
+	m     *secrets.Masker
+}
+
+func (l maskingLogger) Log(level, msg string) { l.inner.Log(level, l.m.Mask(msg)) }
+
+func (l maskingLogger) Emit(rec sparkwing.LogRecord) { l.inner.Emit(maskRecord(l.m, rec)) }
+
 func (s *LogSink) emitText(rec sparkwing.LogRecord) {
 	tw, ok := s.cfg.Log.(TextWriter)
 	if !ok {

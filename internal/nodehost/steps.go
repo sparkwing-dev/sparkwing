@@ -206,7 +206,7 @@ func driveSteps(ctx context.Context, sess *Session, sink *LogSink, n *NodeRun, a
 		if !lastAt.IsZero() {
 			latency = lastAt.Sub(failFastAt)
 		}
-		r.sink.emit(sparkwing.LogRecord{Level: "info", Event: sparkwing.EventWorkFailFast, Msg: fatalStep, Attrs: map[string]any{
+		r.sink.host(sparkwing.LogRecord{Level: "info", Event: sparkwing.EventWorkFailFast, Msg: fatalStep, Attrs: map[string]any{
 			"trigger_step":            fatalStep,
 			"cancelled_siblings":      len(cancelledSteps),
 			"cancelled_steps":         cancelledSteps,

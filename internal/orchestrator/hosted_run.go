@@ -89,6 +89,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 
 	// safety: nodehost registers the secret-flagged args with this masker while it plans, before any node runs.
 	masker := secrets.NewMasker()
+	opts.Delegate = nodehost.MaskingLogger(opts.Delegate, masker)
 	routes, err := nodehost.Start(slog.Default())
 	if err != nil {
 		return nil, err
