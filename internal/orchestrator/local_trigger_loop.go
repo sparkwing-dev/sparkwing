@@ -257,7 +257,7 @@ func dispatchLocalTrigger(ctx context.Context, trig *store.Trigger,
 	if err != nil {
 		return err
 	}
-	closeAdmission, err := prepareLocalDispatchAdmission(ctx, env)
+	closeAdmission, err := prepareLocalDispatchAdmission(ctx, env, logger)
 	if err != nil {
 		return fmt.Errorf("prepare local dispatch admission: %w", err)
 	}

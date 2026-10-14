@@ -433,6 +433,7 @@ type scheduler struct {
 	// source run once; only the scheduler goroutine reads it.
 	rehydrate  *Rehydration
 	rerun      map[string]bool
+	adopted    []finished
 	regenerate func(ctx context.Context, n *NodeRun, output json.RawMessage) []expansion
 }
 
@@ -603,7 +604,7 @@ func (s *scheduler) add(ctx, writeCtx context.Context, nodes []nodeproto.PlanNod
 	}
 	for i, n := range nodes {
 		if row, ok := existing[n.ID]; ok {
-			s.reuseRow(writeCtx, n.ID, row)
+			s.reuseRow(writeCtx, n, row)
 			continue
 		}
 		if err := s.run.State.CreateNode(writeCtx, pendingRow(s.run, n)); err != nil {
@@ -621,6 +622,12 @@ func (s *scheduler) add(ctx, writeCtx context.Context, nodes []nodeproto.PlanNod
 		}
 	}
 	s.nodes = append(s.nodes, nodes...)
+	// safety: an adopted generator's nodes are added only once it is among the run's nodes, which they need.
+	for len(s.adopted) > 0 {
+		next := s.adopted[0]
+		s.adopted = s.adopted[1:]
+		s.expand(ctx, next.id, next.res)
+	}
 	return nil
 }
 
@@ -652,7 +659,8 @@ func (s *scheduler) resumedRows(ctx context.Context, nodes []nodeproto.PlanNode)
 // safety: a resumed run's finished node keeps the result its row records and
 // is never run or written again; an unfinished row, or one the reaper failed
 // because its holder was lost, is run again.
-func (s *scheduler) reuseRow(ctx context.Context, id string, row *store.Node) {
+func (s *scheduler) reuseRow(ctx context.Context, n nodeproto.PlanNode, row *store.Node) {
+	id := n.ID
 	if row.Status != "done" || row.Outcome == "" {
 		return
 	}
@@ -666,6 +674,32 @@ func (s *scheduler) reuseRow(ctx context.Context, id string, row *store.Node) {
 		res.Err = errors.New(row.Error)
 	}
 	s.started[id], s.results[id] = true, res
+	// safety: an adopted generator's nodes are not recorded whole, so they are generated again from its
+	// recorded output, as a copied generator's are.
+	if res.Outcome == sparkwing.Success && n.Closures != nil && len(n.Closures.Generator) > 0 && s.regenerate != nil {
+		output, err := s.ownOutput(ctx, id)
+		if err != nil {
+			for _, g := range n.Closures.Generator {
+				res.expansions = append(res.expansions, expansion{closure: g, err: err})
+			}
+		} else {
+			res.expansions = s.regenerate(ctx, &NodeRun{Run: s.run, Plan: n, Generator: s.addedBy[id]}, output)
+		}
+		s.results[id] = res
+		s.adopted = append(s.adopted, finished{id: id, res: res})
+	}
+}
+
+func (s *scheduler) ownOutput(ctx context.Context, id string) (json.RawMessage, error) {
+	outputs, ok := s.run.State.(sourceOutputs)
+	if !ok {
+		return nil, fmt.Errorf("read node %s output: the runs store cannot read it", id)
+	}
+	out, err := outputs.GetNodeOutput(ctx, s.run.ID, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil
+	}
+	return out, err
 }
 
 // safety: the store reopens a node whose holder was lost only for the run's own trigger holder, and only while no

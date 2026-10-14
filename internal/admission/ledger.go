@@ -94,6 +94,9 @@ type lease struct {
 	// safety: dependents are runs attached below this lease that were handed its claims, so when the lease
 	// ends or is evicted they are told to end too, rather than keep running under claims nobody holds.
 	dependents map[string]struct{}
+	// safety: members whose ancestor's lease ended or was evicted, kept with the member's own lease, so a member
+	// away during a daemon restart learns it was cancelled when it reattaches, for as long as it holds a lease.
+	orphaned map[string]struct{}
 }
 
 type semaphore struct {
@@ -436,6 +439,7 @@ func (l *Ledger) Release(id LeaseID, memberID string) ([]Event, error) {
 		}
 		departed = parent
 	}
+	delete(le.orphaned, memberID)
 	for _, other := range l.leases {
 		delete(other.dependents, memberID)
 	}
@@ -469,11 +473,30 @@ func (l *Ledger) free(le *lease) []Event {
 func (l *Ledger) orphan(le *lease) []Event {
 	var events []Event
 	for _, dep := range sortedKeys(le.dependents) {
+		if own, ok := l.leases[l.memberOf[dep]]; ok {
+			if own.orphaned == nil {
+				own.orphaned = map[string]struct{}{}
+			}
+			own.orphaned[dep] = struct{}{}
+		}
 		ev := l.newEvent(EventOrphaned, dep)
 		ev.Lease = le.id
 		events = append(events, ev)
 	}
 	return events
+}
+
+// Orphaned reports whether memberID, an attached run, was cancelled because a
+// lease it depended on ended or was evicted; see [Ledger.Depend].
+func (l *Ledger) Orphaned(memberID string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	le, ok := l.leases[l.memberOf[memberID]]
+	if !ok {
+		return false
+	}
+	_, orphaned := le.orphaned[memberID]
+	return orphaned
 }
 
 // Depend records memberID, an attached run, as a dependent of each of leases:

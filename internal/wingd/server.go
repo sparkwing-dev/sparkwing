@@ -1504,7 +1504,7 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 		d.byRun[m] = c
 	}
 	lease, _ := d.ledger.LeaseByID(leaseID)
-	_, orphaned := d.cancelledRuns[reclaimed]
+	orphaned := d.ledger.Orphaned(reclaimed)
 	d.touchLocked()
 	d.recordJournal("reattach_accepted", c, map[string]any{"lease_id": leaseID, "member": reclaimed})
 	d.mu.Unlock()

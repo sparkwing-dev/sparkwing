@@ -6,19 +6,16 @@ import (
 	"bytes"
 	"errors"
 	"log/slog"
-	"net"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"slices"
+	"runtime"
 	"strconv"
 	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
-
-	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
 // ShepherdTrigger runs the trigger host, argv, as this process's only child
@@ -32,25 +29,53 @@ func ShepherdTrigger(argv []string) (bool, error) {
 	if err := unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0); err != nil {
 		return false, nil
 	}
-	// safety: the claimer signals this whole session to cancel, which reaches the host directly; the host,
-	// not this process, decides how its run ends. The signals are caught rather than ignored, because an
-	// ignored signal stays ignored across exec and the host would never see the cancel.
+	// safety: the host leads a session of its own, so nothing it starts shares this process's group or
+	// session, and dies with this process, which the claimer kills when a cancel outlasts its grace. Death
+	// signals follow the starting thread, so the thread stays locked until the host is waited for.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Pdeathsig: syscall.SIGKILL}
+	// safety: the claimer cancels by signaling this process's session, which the host is no longer in, so
+	// the signal is passed on; caught, not ignored, because an ignored signal stays ignored across exec.
 	caught := make(chan os.Signal, 1)
 	signal.Notify(caught, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(caught)
-	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	err := cmd.Run()
-	reapOrphans()
+	if err := cmd.Start(); err != nil {
+		return true, err
+	}
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case sig := <-caught:
+				if err := cmd.Process.Signal(sig); err != nil && !errors.Is(err, os.ErrProcessDone) {
+					slog.Default().Warn("pass a cancel on to the trigger host", "err", err)
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+	err := cmd.Wait()
+	close(done)
+	reapDescendants()
 	return true, err
 }
 
 // safety: bounded, because a descendant that ignores SIGKILL in uninterruptible sleep cannot be waited out.
 const orphanReapBudget = 10 * time.Second
 
-func reapOrphans() {
+// safety: each descendant is signaled through its own group, or alone when that group or its session is
+// this process's, so the shepherd never signals itself while anything is left to reap.
+func reapDescendants() {
+	self := os.Getpid()
+	ownGroup, ownSession := unix.Getpgrp(), self
+	if sid, err := unix.Getsid(0); err == nil {
+		ownSession = sid
+	}
 	deadline := time.Now().Add(orphanReapBudget)
-	daemon := daemonSession()
 	for {
 		for {
 			pid, err := unix.Wait4(-1, nil, unix.WNOHANG, nil)
@@ -58,75 +83,36 @@ func reapOrphans() {
 				break
 			}
 		}
-		orphans := slices.DeleteFunc(childrenOf(os.Getpid()), func(p procEntry) bool { return daemon > 0 && p.session == daemon })
-		if len(orphans) == 0 || time.Now().After(deadline) {
+		left := descendantsOf(self)
+		if len(left) == 0 || time.Now().After(deadline) {
 			return
 		}
-		for _, p := range orphans {
-			// safety: a session leader takes its whole session with it, as a node process's cleanup would.
-			if p.session == p.pid {
-				killSessionMembers(p.session)
+		for _, p := range left {
+			if p.group != ownGroup && p.group != self && p.session != ownSession {
+				kill(-p.group)
 			}
-			kill(-p.group)
 			kill(p.pid)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 }
 
-// safety: the host may start this home's admission daemon, which is meant to outlive it, so the daemon's
-// session, found from whoever owns the admission socket, is spared; it is the only process left running.
-func daemonSession() int {
-	paths, err := DefaultPaths()
-	if err != nil {
-		return 0
-	}
-	sock, err := wingd.SocketPath(paths.Root)
-	if err != nil {
-		return 0
-	}
-	conn, err := net.DialTimeout("unix", sock, time.Second)
-	if err != nil {
-		return 0
-	}
-	defer func() {
-		if err := conn.Close(); err != nil {
-			slog.Default().Debug("close the admission socket probe", "err", err)
-		}
-	}()
-	raw, err := conn.(*net.UnixConn).SyscallConn()
-	if err != nil {
-		return 0
-	}
-	var cred *unix.Ucred
-	if cerr := raw.Control(func(fd uintptr) { cred, err = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED) }); cerr != nil || err != nil || cred == nil {
-		return 0
-	}
-	sid, err := unix.Getsid(int(cred.Pid))
-	if err != nil {
-		return 0
-	}
-	return sid
-}
-
 type procEntry struct{ pid, ppid, group, session int }
 
-func childrenOf(parent int) []procEntry {
+func descendantsOf(root int) []procEntry {
+	table := procTable()
+	byParent := map[int][]procEntry{}
+	for _, p := range table {
+		byParent[p.ppid] = append(byParent[p.ppid], p)
+	}
 	var out []procEntry
-	for _, p := range procTable() {
-		if p.ppid == parent {
-			out = append(out, p)
+	for queue := []int{root}; len(queue) > 0; queue = queue[1:] {
+		for _, child := range byParent[queue[0]] {
+			out = append(out, child)
+			queue = append(queue, child.pid)
 		}
 	}
 	return out
-}
-
-func killSessionMembers(session int) {
-	for _, p := range procTable() {
-		if p.session == session {
-			kill(-p.group)
-		}
-	}
 }
 
 // safety: a process already gone is what the sweep wants; anything else is logged, and the next pass retries.

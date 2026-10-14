@@ -38,6 +38,14 @@ func (s *scheduler) rehydrated(ctx context.Context, n nodeproto.PlanNode, byID m
 	if r == nil || s.rerun[n.ID] || (strict && s.reruns(n.ID, byID, map[string]bool{})) {
 		return Result{}, false
 	}
+	// safety: a resumed run's row an earlier host of this run started, or another holder still claims, is that
+	// holder's; it is never overwritten with a copy, and dispatch waits on it as for any resumed row.
+	if s.resume {
+		own, err := s.run.State.GetNode(ctx, s.run.ID, n.ID)
+		if err == nil && (own.Status != "pending" || own.ClaimedBy != "") {
+			return s.runsAgain(n.ID)
+		}
+	}
 	prior, err := s.run.State.GetNode(ctx, r.SourceRunID, n.ID)
 	switch {
 	case !strict && (errors.Is(err, store.ErrNotFound) || (err == nil && prior.Outcome != string(sparkwing.Success))):

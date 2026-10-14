@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -35,7 +36,11 @@ func HostClaimedTrigger(ctx context.Context, triggerID, program string) error {
 	if err != nil {
 		return err
 	}
-	backends, selection, releaseBackends, err := localTriggerBackends(ctx, paths)
+	// safety: the claiming process started the admission daemon; this host never starts one, which would be
+	// its own descendant and reaped with it, so a daemon gone by now leaves the run to the standalone path.
+	admission := pipelineAdmission("", wingwire.OriginLocal)
+	admission.Spawn = wingdclient.NoHostSpawn
+	backends, selection, releaseBackends, err := localTriggerBackends(ctx, paths, admission)
 	if err != nil {
 		return err
 	}
@@ -63,7 +68,6 @@ func HostClaimedTrigger(ctx context.Context, triggerID, program string) error {
 		return nil
 	}
 
-	admission := pipelineAdmission("", wingwire.OriginLocal)
 	admission.ParentRunID, admission.ParentNodeID = trigger.ParentRunID, trigger.ParentNodeID
 	opts := Options{
 		standalone:        childStandalone(backends, selection),
@@ -140,11 +144,8 @@ func (quietRunLog) Emit(sparkwing.LogRecord) {}
 // safety: a child run picks its backend the way its parent did, so a hosted
 // run dispatches children that open nothing either and an unhosted one hands
 // its child the very store its trigger row lives in.
-func localTriggerBackends(ctx context.Context, paths Paths) (Backends, hostedSelection, func(), error) {
-	opts := Options{
-		DefaultStateDB: paths.StateDB(),
-		Admission:      pipelineAdmission("", wingwire.OriginLocal),
-	}
+func localTriggerBackends(ctx context.Context, paths Paths, admission *LocalAdmission) (Backends, hostedSelection, func(), error) {
+	opts := Options{DefaultStateDB: paths.StateDB(), Admission: admission}
 	hosted, selection, release, err := hostedBackendsForRun(ctx, paths, &opts)
 	if err != nil {
 		return Backends{}, hostedSelection{}, func() {}, err

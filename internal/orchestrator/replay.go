@@ -9,6 +9,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
@@ -35,7 +37,7 @@ func runReplayNodeCLI(args []string) error {
 		return fmt.Errorf("ensure root: %w", err)
 	}
 	ctx := context.Background()
-	backends, _, releaseBackends, err := localTriggerBackends(ctx, paths)
+	backends, _, releaseBackends, err := localTriggerBackends(ctx, paths, pipelineAdmission("", wingwire.OriginLocal))
 	if err != nil {
 		return err
 	}

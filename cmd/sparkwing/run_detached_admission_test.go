@@ -11,7 +11,7 @@ import (
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
 
-func TestDetachedChildOwnsDaemonStartup(t *testing.T) {
+func TestADetachedRunHasItsClaimerStartTheDaemon(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds and executes an SDK pipeline")
 	}
@@ -41,7 +41,7 @@ func TestDetachedChildOwnsDaemonStartup(t *testing.T) {
 						t.Fatalf("unavailable host was not reported: %v: %s", err, body)
 					}
 				} else if _, err := wingdclient.Query(t.Context(), wingdclient.Options{Home: e.home}); err != nil {
-					t.Fatalf("child did not start its daemon: %v", err)
+					t.Fatalf("the claiming consumer did not start the daemon before hosting the run: %v", err)
 				}
 				if run.Status != "success" {
 					t.Fatalf("child startup result = %s: %s", run.Status, run.Error)

@@ -39,6 +39,9 @@ func TestATriggerHostPlansFromTheRunRowAfterATransientReadFailure(t *testing.T) 
 }
 
 func TestATriggerHostRefusesToPlanWithoutItsRunRow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: waits through 1.5s of the run read's real backoff")
+	}
 	c, reads := runReadServer(t, runReadAttempts, http.StatusInternalServerError)
 	if _, err := triggerRunContext(t.Context(), c, &store.Trigger{ID: "run-1"}); err == nil {
 		t.Fatal("planned from a partial run context; the pods would hash a different plan")

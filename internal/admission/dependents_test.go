@@ -85,3 +85,29 @@ func TestAChildThatLeavesFirstIsNotOrphaned(t *testing.T) {
 		t.Fatalf("orphaned %v after the child had already ended", got)
 	}
 }
+
+func TestAnOrphanedChildIsMarkedOnItsOwnLeaseUntilItLeaves(t *testing.T) {
+	l, run, _ := attachedChild(t, PolicyFail)
+	if _, err := l.Release(run, "parent"); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := Restore(l.Snapshot(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !restored.Orphaned("child") {
+		t.Fatal("the child's cancellation did not survive a restore")
+	}
+	var node LeaseID
+	for _, le := range restored.Snapshot().Leases {
+		if le.RequestID == "parent/node" {
+			node = le.ID
+		}
+	}
+	if _, err := restored.Release(node, "child"); err != nil {
+		t.Fatal(err)
+	}
+	if restored.Orphaned("child") {
+		t.Fatal("the mark outlived the child's membership")
+	}
+}

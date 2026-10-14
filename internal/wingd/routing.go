@@ -117,9 +117,8 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 		case admission.EventReprioritized:
 			queueChanged = true
 		case admission.EventOrphaned:
-			// safety: recorded with the daemon's other cancellations, which persist with the ledger, so a run that
-			// is not connected when its ancestor ends is cancelled when it reattaches.
-			d.recordCancelledRunLocked(ev.RequestID)
+			// safety: the ledger marks the run orphaned on its own lease, persisted with it, so a run not connected
+			// when its ancestor ends is cancelled when it reattaches.
 			d.recordJournal("orphaned", &conn{runID: ev.RequestID}, map[string]any{"lease_id": ev.Lease})
 			if c := d.byRun[ev.RequestID]; c != nil {
 				out = append(out, delivery{c, &wingwire.Cancel{RunID: ev.RequestID, Reason: orphanedReason}})
