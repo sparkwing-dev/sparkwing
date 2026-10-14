@@ -3,6 +3,8 @@
 package engineenv
 
 import (
+	"os"
+	"runtime"
 	"slices"
 	"strings"
 )
@@ -35,6 +37,35 @@ func Owned(key string) bool {
 		}
 		return key == name
 	})
+}
+
+// safety: the one list of engine variables a process inherits when its caller passes no environment, so a runner's
+// own credentials, and options such as NODE_OPTIONS, never reach pipeline code or the installs it runs.
+var minimal = []string{
+	"PATH", "HOME", "TMPDIR", "LANG", "LC_*", "TZ", "USER",
+	"SystemRoot", "ComSpec", "PATHEXT", "TEMP", "TMP",
+}
+
+// Minimal is the engine's environment cut to the variables a process needs
+// to run at all: PATH, HOME, TMPDIR, LANG, LC_*, TZ and USER, and on Windows
+// SystemRoot, ComSpec, PATHEXT, TEMP and TMP, plus the extra names, where a
+// trailing * matches a prefix.
+func Minimal(extra ...string) []string {
+	keep := append(slices.Clone(minimal), extra...)
+	env := []string{}
+	for _, kv := range os.Environ() {
+		k, _, _ := strings.Cut(kv, "=")
+		if slices.ContainsFunc(keep, func(name string) bool {
+			prefix, wild := strings.CutSuffix(name, "*")
+			if runtime.GOOS == "windows" {
+				k, name, prefix = strings.ToUpper(k), strings.ToUpper(name), strings.ToUpper(prefix)
+			}
+			return k == name || (wild && strings.HasPrefix(k, prefix))
+		}) {
+			env = append(env, kv)
+		}
+	}
+	return env
 }
 
 // Strip returns env without the variables the engine owns.

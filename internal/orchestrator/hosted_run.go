@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -32,9 +33,9 @@ import (
 // HostedEntry is the pipeline program a hosted run starts each SDK process
 // from, and what the CLI knows about the invocation that the run records.
 type HostedEntry struct {
-	// Program is run as "<Program> --sw-node-protocol" in Dir, the repository
+	// Command is run with --sw-node-protocol appended in Dir, the repository
 	// root, with Env, the user's environment.
-	Program string
+	Command pipelineentry.Command
 	Dir     string
 	Env     []string
 	// SecretArgs names the pipeline's secret flags, whose values are masked
@@ -47,7 +48,7 @@ type HostedEntry struct {
 }
 
 // RunHosted runs opts.Pipeline on this machine through the engine host: every
-// node runs in its own SDK process of entry.Program, and this process owns
+// node runs in its own SDK process of entry.Command, and this process owns
 // the DAG, the store writes and the envelope.
 func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry) (res *Result, err error) {
 	// safety: a sparkwing run started inside a dry-run node is a dry run too, as the dispatcher read it.
@@ -164,7 +165,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 		return nil, err
 	}
 	cfg := nodehost.Config{
-		Session:  nodehost.SessionConfig{Entry: entry.Program, Dir: entry.Dir, Env: engineenv.Strip(entry.Env), Sink: hostedPlanSink{delegate}},
+		Session:  nodehost.SessionConfig{Entry: entry.Command, Dir: entry.Dir, Env: engineenv.Strip(entry.Env), Sink: hostedPlanSink{delegate}},
 		Pipeline: opts.Pipeline, Args: invokeArgs, Run: hostedRunContext(opts, runID),
 		StartAt: opts.StartAt, StopAt: opts.StopAt, Only: opts.Only, Workers: opts.MaxParallel,
 		State: state, Artifacts: backends.Artifact, Attempts: attempts, Admission: admission,

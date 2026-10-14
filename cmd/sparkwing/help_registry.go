@@ -906,7 +906,10 @@ Edits to excluded files leave the cache key unchanged.
 
 When other cached entries came from the same checkout, each is listed
 with the inputs that differ from the current key. That is the direct
-answer to why a rebuild happened.`,
+answer to why a rebuild happened.
+
+A TypeScript pipeline runs from source with node, so it has no key: the
+report says it is not cached and why.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},

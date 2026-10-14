@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 )
 
 func fakeSDK(t *testing.T, body string) (bin, requests string) {
@@ -29,7 +30,7 @@ func fakeSDK(t *testing.T, body string) (bin, requests string) {
 func TestDescribeReadsTheReplyPastLogRecords(t *testing.T) {
 	bin, requests := fakeSDK(t, `printf '{"ts":"2026-10-12T00:00:00Z","msg":"planning"}\n' >&4
 printf '{"reply":"1","ok":true,"result":{"protocol":"1","sdk":{"language":"go","version":"v1.2.3"},"pipelines":[{"name":"demo","args":[{"name":"env","go_name":"Env","type":"string","required":true}]}]}}\n' >&4`)
-	doc, err := Describe(context.Background(), bin, t.TempDir())
+	doc, err := Describe(context.Background(), pipelineentry.Binary(bin), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +49,7 @@ printf '{"reply":"1","ok":true,"result":{"protocol":"1","sdk":{"language":"go","
 
 func TestDescribeRefusesAnotherProtocolVersion(t *testing.T) {
 	bin, _ := fakeSDK(t, `printf '{"reply":"1","ok":true,"result":{"protocol":"0","sdk":{"language":"go","version":"v0.1.0"},"pipelines":[]}}\n' >&4`)
-	_, err := Describe(context.Background(), bin, t.TempDir())
+	_, err := Describe(context.Background(), pipelineentry.Binary(bin), t.TempDir())
 	if err == nil || !strings.Contains(err.Error(), `node protocol "0"`) || !strings.Contains(err.Error(), "go SDK v0.1.0") {
 		t.Fatalf("err = %v, want a protocol refusal naming the SDK", err)
 	}
@@ -56,7 +57,7 @@ func TestDescribeRefusesAnotherProtocolVersion(t *testing.T) {
 
 func TestDescribeReturnsAFailedReply(t *testing.T) {
 	bin, _ := fakeSDK(t, `printf '{"reply":"1","ok":false,"error":{"code":"plan_failed","message":"boom"}}\n' >&4`)
-	_, err := Describe(context.Background(), bin, t.TempDir())
+	_, err := Describe(context.Background(), pipelineentry.Binary(bin), t.TempDir())
 	var perr *nodeproto.Error
 	if !errors.As(err, &perr) || perr.Code != nodeproto.CodePlanFailed {
 		t.Fatalf("err = %v, want the reply's plan_failed error", err)
@@ -65,7 +66,7 @@ func TestDescribeReturnsAFailedReply(t *testing.T) {
 
 func TestDescribeReportsAnExitWithoutAReply(t *testing.T) {
 	bin, _ := fakeSDK(t, `echo "registry init failed" >&2; exit 3`)
-	_, err := Describe(context.Background(), bin, t.TempDir())
+	_, err := Describe(context.Background(), pipelineentry.Binary(bin), t.TempDir())
 	if err == nil || !strings.Contains(err.Error(), "exited without answering describe") || !strings.Contains(err.Error(), "registry init failed") {
 		t.Fatalf("err = %v, want the exit and its stderr", err)
 	}
@@ -81,7 +82,7 @@ func TestDescribeFailsAProtocolViolationAtOnce(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			bin, _ := fakeSDK(t, body)
-			_, err := Describe(context.Background(), bin, t.TempDir())
+			_, err := Describe(context.Background(), pipelineentry.Binary(bin), t.TempDir())
 			var perr *nodeproto.Error
 			if !errors.As(err, &perr) || perr.Code != nodeproto.CodeProtocolError {
 				t.Fatalf("err = %v, want protocol_error", err)
@@ -94,14 +95,14 @@ func TestDescribeStopsAtTheDeadline(t *testing.T) {
 	bin, _ := fakeSDK(t, `exec sleep 30`)
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
-	if _, err := Describe(ctx, bin, t.TempDir()); !errors.Is(err, context.DeadlineExceeded) {
+	if _, err := Describe(ctx, pipelineentry.Binary(bin), t.TempDir()); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err = %v, want the deadline", err)
 	}
 }
 
 func TestResolverDescribesOverTheProtocol(t *testing.T) {
 	bin, _ := fakeSDK(t, `printf '{"reply":"1","ok":true,"result":{"protocol":"1","pipelines":[{"name":"build"},{"name":""},{"name":"deploy"}]}}\n' >&4`)
-	schemas, err := describePipelines(bin, t.TempDir())
+	schemas, err := describePipelines(pipelineentry.Binary(bin), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +110,7 @@ func TestResolverDescribesOverTheProtocol(t *testing.T) {
 		t.Fatalf("names = %s", got)
 	}
 	bad, _ := fakeSDK(t, `exit 1`)
-	if _, err := describePipelines(bad, t.TempDir()); err == nil || !strings.Contains(err.Error(), bad) {
+	if _, err := describePipelines(pipelineentry.Binary(bad), t.TempDir()); err == nil || !strings.Contains(err.Error(), bad) {
 		t.Fatalf("err = %v, want it to name the binary", err)
 	}
 }

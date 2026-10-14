@@ -36,7 +36,14 @@ sequenceDiagram
 
 ## Processes
 
-The host starts the SDK process with exactly one argument, `--sw-node-protocol`, from the repository root, the directory that holds `.sparkwing/`. A process either is bound to one node or is not bound to any:
+The host starts the SDK process from the repository root, the directory that holds `.sparkwing/`, with `--sw-node-protocol` as the last argument of the entry's command:
+
+- **Go.** A `.sparkwing/` Go module is compiled, and the entry is the binary, so the command is `<binary> --sw-node-protocol`.
+- **TypeScript.** A `.sparkwing/package.json` that depends on `@sparkwing/sdk` is a TypeScript pipeline. Its `main` field names the entry file. The command is `node --import <bootstrap> <main> --sw-node-protocol`, where `<bootstrap>` is the file URL of the installed SDK's `./bootstrap` export. Node.js evaluates that preload before any module of the entry, so it removes `SPARKWING_NODE_TOKEN` and `SPARKWING_PROTOCOL_HANDLES` before entry code or a module the entry imports can copy them. The SDK refuses to serve a process that was not started with that preload, and keeps what the preload captured in a module the package does not export. The host runs `npm ci` in `.sparkwing/` first when `node_modules` lacks the SDK, and needs Node.js 22.18 or later on `PATH`. A runner, whether a launcher Job, a dispatched Job or a warm runner, runs it with the environment its node processes get, the minimal set plus the dependency proxy and the runner's proxy and CA settings, so install hooks never see the runner's credentials.
+
+The preload keeps the bearer from the tools a step starts, not from the repository's own code. Pipeline code, which includes the `node_modules` its lockfile installs, is trusted with its node's bearer and drives the node routes with it; it can also choose the installed SDK and `NODE_OPTIONS`. What it must never receive is the runner's own credentials.
+
+A process either is bound to one node or is not bound to any:
 
 | Process | Bound to | Requests it receives | Environment |
 |---|---|---|---|
@@ -280,13 +287,17 @@ From that base the host removes the `SPARKWING_*` variables the engine owns: cre
 
 The SDK removes `SPARKWING_NODE_TOKEN` from the environment of every command it starts, so a step's tools never hold the bearer. A command started during package initialization can still hold it; see [Framing](#framing).
 
+- The TypeScript SDK removes it in the bootstrap preload, before any entry code runs.
+- The Go SDK removes it while packages initialize, before the `init` of any package that imports the SDK. A package that does not import the SDK can initialize first and read it, as with the protocol pipes.
+
 In a dry run the host adds `SPARKWING_DRY_RUN=1` to every process, the plan process included, so plan code and the commands a node starts see the same switch.
 
 The host also sets variables that other tools already define, and the SDK needs to do nothing with them:
 
 - the node's `env` from the plan;
 - `PATH`, with the node's `tools` in front;
-- the dependency-proxy variables `GOPROXY`, `npm_config_registry`, `PIP_INDEX_URL` and `PIP_TRUSTED_HOST`.
+- the dependency-proxy variables `GOPROXY`, `npm_config_registry`, `PIP_INDEX_URL` and `PIP_TRUSTED_HOST`;
+- the runner's proxy and CA settings `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` (and their lowercase forms), `NODE_EXTRA_CA_CERTS` and `SSL_CERT_FILE`. A proxy URL's credentials are masked in the node's logs.
 
 Run options are host state and never reach the SDK as variables. `start_at`, `stop_at`, `only`, `no_cache`, `profile`, `mode` and `workers` change what the host schedules. The two that plan code observes, `dry_run` and `no_cache`, travel in the `plan` request's run context.
 

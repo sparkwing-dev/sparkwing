@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -24,7 +25,7 @@ func TestSessionCountsLinesItsStuckSinkNeverGot(t *testing.T) {
 	sink := &blockingSink{release: make(chan struct{})}
 	t.Cleanup(func() { close(sink.release) })
 	s, err := StartSession(context.Background(), SessionConfig{
-		Entry: os.Args[0],
+		Entry: pipelineentry.Binary(os.Args[0]),
 		Env:   append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0"),
 		Sink:  sink,
 		Grace: 100 * time.Millisecond,
@@ -75,7 +76,7 @@ func TestExecuteMasksSecretInputs(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 	res, err := Execute(ctx, Config{
-		Session:  SessionConfig{Entry: bin, Dir: t.TempDir(), Grace: 2 * time.Second},
+		Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second},
 		Pipeline: "attempts", Args: map[string]string{"marker": t.TempDir(), "pass": "input-secret-4242"},
 		Run:   nodeproto.RunContext{RunID: "run-secret-input"},
 		State: openStore(t), Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,

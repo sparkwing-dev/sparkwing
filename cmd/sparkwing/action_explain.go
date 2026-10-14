@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 )
 
 type pipelineExplainArgs struct {
@@ -95,8 +96,8 @@ func runPipelineExplain(args []string) error {
 		return err
 	}
 	var snap nodeproto.PlanDoc
-	err = withPipelineBinary(pipeline, func(ctx context.Context, bin, dir string) error {
-		planned, err := planOverProtocol(ctx, bin, dir, pipeline, passthrough, "explain")
+	err = withPipelineEntry(pipeline, func(ctx context.Context, entry pipelineentry.Command, dir string) error {
+		planned, err := planOverProtocol(ctx, entry, dir, pipeline, passthrough, "explain")
 		snap = planned.doc
 		return err
 	})
@@ -133,8 +134,8 @@ func runPipelineExplainAll(format string) error {
 	failed := 0
 	for _, p := range catalog {
 		row := allExplainResult{Pipeline: p.Name}
-		err := withPipelineBinary(p.Name, func(ctx context.Context, bin, dir string) error {
-			planned, err := planOverProtocol(ctx, bin, dir, p.Name, nil, "explain")
+		err := withPipelineEntry(p.Name, func(ctx context.Context, entry pipelineentry.Command, dir string) error {
+			planned, err := planOverProtocol(ctx, entry, dir, p.Name, nil, "explain")
 			row.Nodes = len(planned.doc.Nodes)
 			return err
 		})

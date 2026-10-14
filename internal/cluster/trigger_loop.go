@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -339,7 +340,7 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 	logBinaryReady(logger, trigger.ID, binary)
 	defer binary.release()
 
-	hostErr := hostTriggerRun(childCtx, binary.path, executionDir, trigger, opts, logger)
+	hostErr := hostTriggerRun(childCtx, binary.entry, executionDir, trigger, opts, logger)
 	return awaitHeartbeat(), hostErr
 }
 
@@ -350,17 +351,17 @@ var hostTriggerRunFn = orchestrator.HostTriggerRun
 // restarts; six hours is GitHub Actions' default job timeout.
 const triggerRunLimit = 6 * time.Hour
 
-func hostTriggerRun(ctx context.Context, binPath, workDir string, trigger *store.Trigger, opts TriggerLoopOptions, logger *slog.Logger) error {
+func hostTriggerRun(ctx context.Context, entry pipelineentry.Command, workDir string, trigger *store.Trigger, opts TriggerLoopOptions, logger *slog.Logger) error {
 	var nodeRunner runner.Runner
 	if opts.nodeRunner != nil {
 		nodeRunner = opts.nodeRunner(orchestrator.Backends{}, trigger)
 	}
 	ctx, cancel := context.WithTimeout(ctx, triggerRunLimit)
 	defer cancel()
-	logger.Info("trigger loop: hosting the run", "trigger_id", trigger.ID, "bin", binPath, "dir", workDir)
+	logger.Info("trigger loop: hosting the run", "trigger_id", trigger.ID, "entry", entry, "dir", workDir)
 	return hostTriggerRunFn(ctx, orchestrator.TriggerHost{
 		ControllerURL: opts.ControllerURL, Token: opts.Token, Trigger: trigger,
-		Binary: binPath, Dir: workDir, Runner: nodeRunner, Logger: logger,
+		Entry: entry, Dir: workDir, Runner: nodeRunner, Logger: logger,
 	})
 }
 
@@ -507,7 +508,7 @@ func fetchPipelineSourceWithRetryFn(ctx context.Context, fetch func() (string, e
 }
 
 type triggerBinary struct {
-	path  string
+	entry pipelineentry.Command
 	lease *bincache.Lease
 
 	cache string
@@ -521,6 +522,8 @@ const (
 	binaryCacheRemote = "remote"
 
 	binaryCacheCompiled = "compiled"
+
+	binaryCacheNone = "none"
 )
 
 func binaryCacheOutcome(fetched, compiled bool) string {
@@ -537,7 +540,7 @@ func binaryCacheOutcome(fetched, compiled bool) string {
 func logBinaryReady(logger *slog.Logger, runID string, binary triggerBinary) {
 	logger.Info("trigger loop: binary ready",
 		"run_id", runID,
-		"bin", binary.path,
+		"entry", binary.entry,
 		"binary_cache", binary.cache,
 		"build_ms", binary.build.Milliseconds())
 }
@@ -550,13 +553,21 @@ func (b triggerBinary) release() {
 
 func triggerBuildOrFetchBinary(ctx context.Context, sparkwingDir string, opts TriggerLoopOptions, cacheGrant, runID string, logger *slog.Logger) (triggerBinary, error) {
 	start := time.Now()
+	ts, err := pipelineentry.IsTypeScript(sparkwingDir)
+	if err != nil {
+		return triggerBinary{}, err
+	}
+	if ts {
+		entry, err := orchestrator.PrepareTypeScriptOnRunner(ctx, sparkwingDir)
+		return triggerBinary{entry: entry, cache: binaryCacheNone, build: time.Since(start)}, err
+	}
 	key, err := bincache.PipelineCacheKey(sparkwingDir)
 	if err != nil {
 		tmp := filepath.Join(sparkwingDir, ".sparkwing-trigger-loop-bin")
 		if cerr := bincache.CompilePipeline(ctx, sparkwingDir, tmp); cerr != nil {
 			return triggerBinary{}, cerr
 		}
-		return triggerBinary{path: tmp, cache: binaryCacheCompiled, build: time.Since(start)}, nil
+		return triggerBinary{entry: pipelineentry.Binary(tmp), cache: binaryCacheCompiled, build: time.Since(start)}, nil
 	}
 	entry, err := bincache.PipelineEntry(key)
 	if err != nil {
@@ -589,7 +600,7 @@ func triggerBuildOrFetchBinary(ctx context.Context, sparkwingDir string, opts Tr
 		}
 	}
 	return triggerBinary{
-		path:  lease.Path(),
+		entry: pipelineentry.Binary(lease.Path()),
 		lease: lease,
 		cache: binaryCacheOutcome(fetched, compiled),
 		build: time.Since(start),

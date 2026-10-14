@@ -19,6 +19,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -71,7 +72,7 @@ func newLaunchedRun(t *testing.T, args map[string]string) *launchedRun {
 	prevBinary := resolveLaunchedBinary
 	t.Cleanup(func() { resolveLaunchedBinary = prevBinary })
 	resolveLaunchedBinary = func(context.Context, string, string, string, string, string, string, *slog.Logger) (remoteBinary, error) {
-		return remoteBinary{path: bin}, nil
+		return remoteBinary{entry: pipelineentry.Binary(bin)}, nil
 	}
 	r.src = t.TempDir()
 	t.Setenv("SPARKWING_SOURCE_DIR", r.src)
@@ -270,7 +271,7 @@ func TestPodNode_WithoutAnAcceptedHashFailsClosed(t *testing.T) {
 	token := r.claim(t, "build")
 	state := &claimState{Client: client.NewWithToken(r.url, nil, token), runID: r.runID, nodeID: "build"}
 	res, err := hostPodNode(t.Context(), podNode{
-		binary: podFixture(t), dir: t.TempDir(), controllerURL: r.url, token: token, runID: r.runID, nodeID: "build",
+		entry: pipelineentry.Binary(podFixture(t)), dir: t.TempDir(), controllerURL: r.url, token: token, runID: r.runID, nodeID: "build",
 		state: state, logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {
@@ -329,7 +330,7 @@ func (r *launchedRun) recordRequests(t *testing.T) string {
 		t.Fatal(err)
 	}
 	resolveLaunchedBinary = func(context.Context, string, string, string, string, string, string, *slog.Logger) (remoteBinary, error) {
-		return remoteBinary{path: wrapper}, nil
+		return remoteBinary{entry: pipelineentry.Binary(wrapper)}, nil
 	}
 	return log
 }

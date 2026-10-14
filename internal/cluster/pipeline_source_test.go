@@ -59,7 +59,7 @@ func main(){body,err:=os.ReadFile("subject");if err!=nil{panic(err)};if err:=os.
 	// safety: the fixture is a bare program, so the run host's stand-in starts it as the host starts each of
 	// its processes: the built binary, in the execution checkout.
 	hostTriggerRunFn = func(ctx context.Context, h orchestrator.TriggerHost) error {
-		cmd := exec.CommandContext(ctx, h.Binary)
+		cmd := exec.CommandContext(ctx, h.Entry[0])
 		cmd.Dir = h.Dir
 		return cmd.Run()
 	}

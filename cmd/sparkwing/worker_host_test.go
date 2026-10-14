@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -47,8 +48,8 @@ func newWorkerController(t *testing.T) *workerController {
 
 func hostWithBuild(ctx context.Context, ctrl *workerController, trig *store.Trigger, heartbeat time.Duration, build func(ctx context.Context) error) error {
 	return hostTriggerWith(ctx, client.New(ctrl.URL, nil), trig, ctrl.URL, "token", heartbeat,
-		func(ctx context.Context) (string, string, func(), error) {
-			return "pipeline", "dir", func() {}, build(ctx)
+		func(ctx context.Context) (pipelineentry.Command, string, func(), error) {
+			return pipelineentry.Binary("pipeline"), "dir", func() {}, build(ctx)
 		},
 		func(context.Context, orchestrator.TriggerHost) error { return nil })
 }

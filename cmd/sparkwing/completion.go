@@ -10,6 +10,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -198,7 +199,7 @@ func walkUpForSparkwing(start string) (string, bool) {
 	for {
 		candidate := strings.TrimRight(dir, "/") + "/.sparkwing"
 		if fi, err := os.Stat(candidate); err == nil && fi.IsDir() {
-			if _, err := os.Stat(candidate + "/main.go"); err == nil {
+			if ok, err := pipelineentry.IsPipelineDir(candidate); err == nil && ok {
 				return candidate, true
 			}
 		}

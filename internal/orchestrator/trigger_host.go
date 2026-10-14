@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -30,9 +31,10 @@ type TriggerHost struct {
 	// receives the token.
 	ControllerURL, Token string
 	Trigger              *store.Trigger
-	// Binary is the pipeline's built entry, and Dir the repository root it
-	// runs in.
-	Binary, Dir string
+	// Entry starts the pipeline's SDK processes, and Dir is the repository
+	// root they run in.
+	Entry pipelineentry.Command
+	Dir   string
 	// Runner dispatches each node, as a Kubernetes Job or to a warm runner.
 	// Nil hosts each node in this process under a claim of its own.
 	Runner runner.Runner
@@ -80,7 +82,7 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	slots := NewHTTPConcurrency(h.ControllerURL, nil, h.Token, store.DefaultConcurrencyLease)
 	dispatch := h.Runner
 	if dispatch == nil {
-		dispatch = &claimedNodeHost{controllerURL: h.ControllerURL, binary: h.Binary, dir: h.Dir, ctrl: c, logger: logger}
+		dispatch = &claimedNodeHost{controllerURL: h.ControllerURL, entry: h.Entry, dir: h.Dir, ctrl: c, logger: logger}
 	}
 	hostLog := &triggerHostLog{out: os.Stderr}
 	shuttingDown := shuttingDownOn(ctx)
@@ -93,7 +95,7 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 		return err
 	}
 	res, err := nodehost.Execute(ctx, nodehost.Config{
-		Session:  nodehost.SessionConfig{Entry: h.Binary, Dir: h.Dir, Sink: planSink},
+		Session:  nodehost.SessionConfig{Entry: h.Entry, Dir: h.Dir, Sink: planSink, Env: podSessionEnv(masker)},
 		Pipeline: trig.Pipeline, Args: triggerHostArgs(ctx, c, trig, logger),
 		Run: rc, Requires: requires,
 		ParentRunID: trig.ParentRunID, RetryOf: trig.RetryOf, RetrySource: trig.RetrySource,
@@ -241,9 +243,10 @@ func dispatchThrough(r runner.Runner, pipeline string) nodehost.Executor {
 // Kubernetes Job's pod does, so its rows, logs and routes are fenced to that
 // claim and a second host of the same node is refused by the controller.
 type claimedNodeHost struct {
-	controllerURL, binary, dir string
-	ctrl                       *client.Client
-	logger                     *slog.Logger
+	controllerURL, dir string
+	entry              pipelineentry.Command
+	ctrl               *client.Client
+	logger             *slog.Logger
 }
 
 const claimedNodeHolder = "trigger-host:"
@@ -278,7 +281,7 @@ func (h *claimedNodeHost) RunNode(ctx context.Context, req runner.Request) runne
 	if err == nil {
 		var res runner.Result
 		if res, err = hostDispatchedNode(ctx, podNode{
-			binary: h.binary, dir: h.dir, controllerURL: h.controllerURL, token: n.ClaimToken,
+			entry: h.entry, dir: h.dir, controllerURL: h.controllerURL, token: n.ClaimToken,
 			runID: req.RunID, nodeID: req.NodeID, cacheGrant: grant, artifacts: art, logger: h.logger,
 		}); err == nil {
 			return res

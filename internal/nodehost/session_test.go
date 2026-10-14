@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"github.com/sparkwing-dev/sparkwing/internal/testleak"
 )
@@ -198,7 +199,7 @@ func startFake(t *testing.T, ctx context.Context, sink *recorder) *Session {
 	t.Helper()
 	before := openPipes(t)
 	s, err := StartSession(ctx, SessionConfig{
-		Entry: os.Args[0],
+		Entry: pipelineentry.Binary(os.Args[0]),
 		// bug: the race runtime otherwise sleeps a second at exit, past the grace.
 		Env:   append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0"),
 		Sink:  sink,
@@ -449,7 +450,7 @@ func TestSessionBlockedSinkNeitherStallsRepliesNorClose(t *testing.T) {
 	t.Cleanup(func() { close(sink.release) })
 	before := openPipes(t)
 	s, err := StartSession(context.Background(), SessionConfig{
-		Entry: os.Args[0],
+		Entry: pipelineentry.Binary(os.Args[0]),
 		Env:   append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0"),
 		Sink:  sink,
 		Grace: 100 * time.Millisecond,

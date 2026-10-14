@@ -2,10 +2,10 @@
 // process. The host resolves secrets and registers them with its masker
 // before it answers, so the SDK never masks anything itself.
 
+import { NODE_TOKEN_ENV, NODE_URL_ENV } from "./startup.ts";
 import { PROTOCOL_VERSION } from "./describe.ts";
 
-export const NODE_URL_ENV = "SPARKWING_NODE_URL";
-export const NODE_TOKEN_ENV = "SPARKWING_NODE_TOKEN";
+export { NODE_TOKEN_ENV, NODE_URL_ENV };
 
 export interface NodeRouteConfig {
   baseUrl: string;

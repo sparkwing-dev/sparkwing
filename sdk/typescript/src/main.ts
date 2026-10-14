@@ -1,26 +1,13 @@
 import { fstatSync } from "node:fs";
 import { Socket } from "node:net";
-import { NodeRoutes, NODE_TOKEN_ENV, NODE_URL_ENV, routeConfigFromEnv } from "./routes.ts";
+import { PROTOCOL_ARG, take } from "./startup.ts";
+import { NodeRoutes, routeConfigFromEnv } from "./routes.ts";
 import { serve } from "./runner.ts";
 
-/** The one argument the engine starts an SDK process with. */
-export const PROTOCOL_ARG = "--sw-node-protocol";
+export { PROTOCOL_ARG };
 
-const HANDLES_ENV = "SPARKWING_PROTOCOL_HANDLES";
 const REQUEST_FD = 3;
 const FRAME_FD = 4;
-
-// safety: read and removed while the SDK's modules evaluate, which an ES module
-// graph finishes before the body of the entry that imports the SDK, so neither
-// a command pipeline code starts nor a copy of process.env it takes at module
-// level holds the bearer or a handle list naming handles it lacks.
-const startupEnv: Record<string, string | undefined> = {};
-if (process.argv.length === 3 && process.argv[2] === PROTOCOL_ARG) {
-  startupEnv[NODE_URL_ENV] = process.env[NODE_URL_ENV];
-  startupEnv[NODE_TOKEN_ENV] = process.env[NODE_TOKEN_ENV];
-  delete process.env[NODE_TOKEN_ENV];
-  delete process.env[HANDLES_ENV];
-}
 
 // A pipe is written asynchronously, so process.exit before the queue empties
 // drops whatever was written last. An empty write's callback fires after
@@ -65,7 +52,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     if (process.platform === "win32") {
       throw new Error("the TypeScript SDK does not yet open the Windows protocol handles");
     }
-    const cfg = routeConfigFromEnv(startupEnv);
+    const boot = take();
+    if (!boot.preloaded) {
+      throw new Error(`the entry was not started with node --import @sparkwing/sdk/bootstrap; only a sparkwing host starts ${PROTOCOL_ARG}`);
+    }
+    const cfg = routeConfigFromEnv(boot.env);
     if (cfg) routes = new NodeRoutes(cfg);
     input = new Socket({
       fd: protocolPipe(REQUEST_FD),

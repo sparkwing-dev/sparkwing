@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -29,8 +30,9 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 }
 
 // safety: the dispatcher has to weigh what a pipeline declares before it
-// starts, and only the compiled binary declares it, so building the binary and
-// exec'ing it are two steps a caller sequences within one interrupt lifetime.
+// starts, and only the pipeline's entry declares it, so materializing the
+// entry and running it are two steps a caller sequences within one interrupt
+// lifetime.
 type pipelineRun struct {
 	ctx            context.Context
 	stopSignals    func()
@@ -41,6 +43,8 @@ type pipelineRun struct {
 	lease          *bincache.Lease
 	source         string
 	uncachedBinary string
+	entry          pipelineentry.Command
+	typescript     bool
 }
 
 func newPipelineRun(sparkwingDir string, opts compileOptions) *pipelineRun {
@@ -56,6 +60,13 @@ func newPipelineRun(sparkwingDir string, opts compileOptions) *pipelineRun {
 }
 
 func (r *pipelineRun) materialize(env []string) error {
+	ts, err := pipelineentry.IsTypeScript(r.sparkwingDir)
+	if err != nil {
+		return err
+	}
+	if ts {
+		return r.materializeTypeScript(env)
+	}
 	r.ctx = gotoolchain.WithSession(r.ctx, env, nil)
 	if err := resolveSparks(r.ctx, r.sparkwingDir, r.opts); err != nil {
 		return err
@@ -74,7 +85,8 @@ func (r *pipelineRun) materialize(env []string) error {
 		if err := bincache.CompileUncachedPipeline(r.ctx, r.sparkwingDir, r.uncachedBinary); err != nil {
 			return err
 		}
-		ensureDescribeCache(r.ctx, r.sparkwingDir, key, r.uncachedBinary)
+		r.entry, r.source = pipelineentry.Binary(r.uncachedBinary), "source"
+		ensureDescribeCache(r.ctx, r.sparkwingDir, key, r.entry)
 		return nil
 	}
 
@@ -82,7 +94,16 @@ func (r *pipelineRun) materialize(env []string) error {
 	if err != nil {
 		return err
 	}
-	r.lease, r.source = lease, source
+	r.lease, r.source, r.entry = lease, source, pipelineentry.Binary(lease.Path())
+	return nil
+}
+
+func (r *pipelineRun) materializeTypeScript(env []string) error {
+	entry, err := pipelineentry.Prepare(r.ctx, r.sparkwingDir, env, os.Stderr)
+	if err != nil {
+		return err
+	}
+	r.entry, r.source, r.typescript = entry, "typescript", true
 	return nil
 }
 
@@ -90,6 +111,9 @@ func (r *pipelineRun) materialize(env []string) error {
 // environment without what the engine owns, and runtime adds back only what
 // this verb reads, as KEY=VALUE.
 func (r *pipelineRun) exec(args, env []string, runtime ...string) error {
+	if r.typescript {
+		return fmt.Errorf("%s runs only inside a Go pipeline binary; a TypeScript pipeline answers the node protocol alone", args[0])
+	}
 	env = withWingdHost(engineenv.Strip(env))
 	for _, kv := range runtime {
 		k, v, _ := strings.Cut(kv, "=")
@@ -200,15 +224,15 @@ func pipelineBinary(
 		}
 	}
 	lease.RecordUse(sparkwingDir, keyParts)
-	ensureDescribeCache(ctx, sparkwingDir, key, lease.Path())
+	ensureDescribeCache(ctx, sparkwingDir, key, pipelineentry.Binary(lease.Path()))
 	return lease, source, nil
 }
 
-func ensureDescribeCache(ctx context.Context, sparkwingDir, key, binPath string) {
+func ensureDescribeCache(ctx context.Context, sparkwingDir, key string, entry pipelineentry.Command) {
 	if readDescribeFile(describeCachePath(key)) != nil {
 		return
 	}
-	if err := writeDescribeCache(ctx, sparkwingDir, binPath); err != nil {
+	if err := writeDescribeCache(ctx, sparkwingDir, entry); err != nil {
 		slog.Default().Debug("describe cache write failed", "err", err, "hash", key)
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/protofd"
 )
 
@@ -77,11 +78,12 @@ func TestTypeScriptSDKConforms(t *testing.T) {
 	if err != nil {
 		t.Skip("node is not on PATH")
 	}
-	fixture, err := filepath.Abs(filepath.Join("..", "..", "..", "sdk", "typescript", "test", "fixtures", "conformance.ts"))
+	sdk, err := filepath.Abs(filepath.Join("..", "..", "..", "sdk", "typescript"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	runSuite(t, "ts", []string{node, fixture})
+	// safety: the suite starts the fixture exactly as a host starts a TypeScript entry, behind the bootstrap preload.
+	runSuite(t, "ts", pipelineentry.Node(node, filepath.Join(sdk, "src", "bootstrap.ts"), filepath.Join(sdk, "test", "fixtures", "conformance.ts")))
 }
 
 // safety: sessions run in file order because same_plan_as compares a plan

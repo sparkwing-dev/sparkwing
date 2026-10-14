@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
@@ -907,13 +908,17 @@ func findSparkwingDirFrom(start string) (string, error) {
 	for {
 		candidate := filepath.Join(dir, ".sparkwing")
 		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			if _, err := os.Stat(filepath.Join(candidate, "main.go")); err == nil {
+			ok, err := pipelineentry.IsPipelineDir(candidate)
+			if err != nil {
+				return "", err
+			}
+			if ok {
 				return candidate, nil
 			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", fmt.Errorf("no .sparkwing/main.go found from %s up", abs)
+			return "", fmt.Errorf("no .sparkwing/main.go or TypeScript .sparkwing/package.json found from %s up", abs)
 		}
 		dir = parent
 	}

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -118,7 +119,7 @@ func TestHostDrivesSteps(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 		defer cancel()
 		cfg := Config{
-			Session:  SessionConfig{Entry: bin, Dir: t.TempDir(), Grace: 2 * time.Second},
+			Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second},
 			Pipeline: "steps", Args: map[string]string{"set": set},
 			Run:   nodeproto.RunContext{RunID: runID},
 			State: h.st, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,

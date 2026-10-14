@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/directdata"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -122,13 +123,13 @@ func runNodeRemote(
 	}
 	defer binary.release()
 	logger.Info("runNodeRemote: binary ready",
-		"run_id", runID, "node_id", nodeID, "bin", binary.path)
+		"run_id", runID, "node_id", nodeID, "entry", binary.entry)
 	art, err := supervisorArtifactStore(ctx, controllerURL, runID, binaryCacheURL, cacheGrant)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("open the artifact store: %w", err)
 	}
 	return hostDispatchedNode(ctx, podNode{
-		binary: binary.path, dir: filepath.Dir(sparkwingDir), controllerURL: controllerURL, token: token,
+		entry: binary.entry, dir: filepath.Dir(sparkwingDir), controllerURL: controllerURL, token: token,
 		runID: runID, nodeID: nodeID, cacheGrant: cacheGrant, artifacts: art, logger: logger,
 	})
 }
@@ -290,7 +291,7 @@ func triggerGitHubRepository(trigger *store.Trigger) string {
 }
 
 type remoteBinary struct {
-	path  string
+	entry pipelineentry.Command
 	lease *bincache.Lease
 }
 
@@ -301,13 +302,21 @@ func (b remoteBinary) release() {
 }
 
 func resolveRemoteBinary(ctx context.Context, sparkwingDir, controllerURL, controllerToken, runID, gcURL, token string, logger *slog.Logger) (remoteBinary, error) {
+	ts, err := pipelineentry.IsTypeScript(sparkwingDir)
+	if err != nil {
+		return remoteBinary{}, err
+	}
+	if ts {
+		cmd, err := PrepareTypeScriptOnRunner(ctx, sparkwingDir)
+		return remoteBinary{entry: cmd}, err
+	}
 	key, err := bincache.PipelineCacheKey(sparkwingDir)
 	if err != nil {
 		tmp := filepath.Join(sparkwingDir, ".sparkwing-runner-bin")
 		if cerr := bincache.CompilePipeline(ctx, sparkwingDir, tmp); cerr != nil {
 			return remoteBinary{}, cerr
 		}
-		return remoteBinary{path: tmp}, nil
+		return remoteBinary{entry: pipelineentry.Binary(tmp)}, nil
 	}
 	entry, err := bincache.PipelineEntry(key)
 	if err != nil {
@@ -333,5 +342,5 @@ func resolveRemoteBinary(ctx context.Context, sparkwingDir, controllerURL, contr
 			logger.Warn("runNodeRemote: bin cache upload failed", "err", err, "hash", key)
 		}
 	}
-	return remoteBinary{path: lease.Path(), lease: lease}, nil
+	return remoteBinary{entry: pipelineentry.Binary(lease.Path()), lease: lease}, nil
 }

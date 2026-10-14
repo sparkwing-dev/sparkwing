@@ -15,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -79,7 +80,7 @@ func runLaunchedNode(ctx context.Context, controllerURL, runID, nodeID, token st
 	}
 	defer binary.release()
 	if nodeID == store.PlanNodeID {
-		return planLaunchedRun(ctx, c, src, binary.path, runID, fail)
+		return planLaunchedRun(ctx, c, src, binary.entry, runID, fail)
 	}
 	// safety: the grant feeds this process's cache and artifact clients; the node's process never sees it.
 	if grant != "" {
@@ -98,7 +99,7 @@ func runLaunchedNode(ctx context.Context, controllerURL, runID, nodeID, token st
 	}
 	state := &claimState{Client: c, runID: runID, nodeID: nodeID}
 	res, err := hostPodNode(ctx, podNode{
-		binary: binary.path, dir: src, controllerURL: controllerURL, token: token, runID: runID, nodeID: nodeID,
+		entry: binary.entry, dir: src, controllerURL: controllerURL, token: token, runID: runID, nodeID: nodeID,
 		specHash: specHash, attempt: row.AttemptsConsumed + 1, state: state, artifacts: art, logger: logger,
 	})
 	if err != nil {
@@ -123,7 +124,7 @@ var resolveLaunchedBinary = resolveRemoteBinary
 // safety: the plan is the team's code, so it runs in the pipeline's own
 // process with the minimal environment, and only the host's stamped and
 // validated plan document reaches the controller.
-func planLaunchedRun(ctx context.Context, c *client.Client, src, binary, runID string, fail func(error) error) error {
+func planLaunchedRun(ctx context.Context, c *client.Client, src string, entry pipelineentry.Command, runID string, fail func(error) error) error {
 	run, err := c.GetRunForExecution(ctx, runID)
 	if err != nil {
 		return fail(fmt.Errorf("read run %s: %w", runID, err))
@@ -137,7 +138,7 @@ func planLaunchedRun(ctx context.Context, c *client.Client, src, binary, runID s
 	if err != nil {
 		return fail(err)
 	}
-	plan, err := nodehost.PlanDocument(ctx, nodehost.SessionConfig{Entry: binary, Dir: src, Sink: sink},
+	plan, err := nodehost.PlanDocument(ctx, nodehost.SessionConfig{Entry: entry, Dir: src, Sink: sink, Env: podSessionEnv(masker)},
 		nodehost.PlanRequest{Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run), Requires: requires, Masker: masker})
 	sink.end()
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
@@ -98,13 +99,14 @@ func HostClaimedTrigger(ctx context.Context, triggerID, program string) error {
 	if local, ok := backends.State.(localState); ok {
 		opts.State = local.st
 	}
-	doc, err := repos.Describe(ctx, program, dir)
+	command := pipelineentry.Binary(program)
+	doc, err := repos.Describe(ctx, command, dir)
 	if err != nil {
 		err = fmt.Errorf("describe %s: %w", program, err)
 		return refuse(err, err)
 	}
 	entry := HostedEntry{
-		Program: program, Dir: dir, Env: os.Environ(),
+		Command: command, Dir: dir, Env: os.Environ(),
 		PipelineRevision: trigger.TriggerEnv[PipelineRevKey], BinarySource: "source",
 	}
 	if trigger.TriggerEnv[crons.PinnedBinaryEnvKey] != "" {

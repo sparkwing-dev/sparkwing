@@ -28,10 +28,10 @@ func dispatchChain(cfg *Config) Executor {
 	return exec
 }
 
-// safety: the remote host wrote the node's terminal row under its own claim, so the row is the result and
-// finish leaves it alone. A row another holder still claims, as one a stopped run host's dispatch left running
-// is, is that holder's to finish: the host waits for its result, and finishes the row only once no live claim
-// holds it, as when the holder died and its lease lapsed.
+// safety: the remote host wrote the node's terminal row under its own claim, so
+// finish leaves it alone. A row another holder still claims, as a stopped run
+// host's dispatch leaves one, is that holder's: the host waits for its result
+// and finishes the row only once no live claim holds it, its lease lapsed.
 func adoptDispatchedRow(ctx context.Context, n *NodeRun, res Result, poll time.Duration) Result {
 	readCtx := context.WithoutCancel(ctx)
 	row, err := n.Run.State.GetNode(readCtx, n.Run.ID, n.Plan.ID)

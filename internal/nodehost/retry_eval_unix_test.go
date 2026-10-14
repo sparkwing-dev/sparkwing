@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -67,7 +68,7 @@ func (f *retryFixture) run(ctx context.Context, id string, r *Rehydration, state
 	defer func() { _ = srv.Close() }()
 	logs := &memLogs{records: map[string][]sparkwing.LogRecord{}}
 	cfg := Config{
-		Session:  SessionConfig{Entry: f.bin, Dir: f.dir, Grace: time.Second, Env: append(engineenv.Strip(os.Environ()), "GORACE=atexit_sleep_ms=0")},
+		Session:  SessionConfig{Entry: pipelineentry.Binary(f.bin), Dir: f.dir, Grace: time.Second, Env: append(engineenv.Strip(os.Environ()), "GORACE=atexit_sleep_ms=0")},
 		Pipeline: "probe", Args: map[string]string{"mode-file": filepath.Join(f.dir, "mode"), "trace-dir": f.dir},
 		State: state, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour, Rehydrate: r,
 		Attempts: &Attempts{

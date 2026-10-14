@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 )
 
 func TestDescribeDeadlineKillsTheWholeProcessTree(t *testing.T) {
@@ -18,7 +20,7 @@ func TestDescribeDeadlineKillsTheWholeProcessTree(t *testing.T) {
 	bin, _ := fakeSDK(t, "sleep 300 & echo $! > "+pidFile+"\nexec sleep 300")
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
-	if _, err := Describe(ctx, bin, t.TempDir()); !errors.Is(err, context.DeadlineExceeded) {
+	if _, err := Describe(ctx, pipelineentry.Binary(bin), t.TempDir()); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err = %v, want the deadline", err)
 	}
 	raw, err := os.ReadFile(pidFile)

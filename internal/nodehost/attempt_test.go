@@ -17,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/secretsource"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -106,7 +107,7 @@ func TestAttemptExecutor(t *testing.T) {
 		defer cancel()
 		res, err := Execute(ctx, Config{
 			Session: SessionConfig{
-				Entry: bin, Dir: t.TempDir(), Grace: 2 * time.Second,
+				Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second,
 				Env: env,
 			},
 			Pipeline: "attempts", Args: args,
@@ -267,7 +268,7 @@ func TestAProtocolBreakAfterTheReplyFailsTheNode(t *testing.T) {
 		OpenLog: func(_ context.Context, _, node string) (NodeLog, error) { return memLog{logs: logs, node: node}, nil },
 	}
 	cfg := &Config{Session: SessionConfig{
-		Entry: os.Args[0], Grace: 500 * time.Millisecond,
+		Entry: pipelineentry.Binary(os.Args[0]), Grace: 500 * time.Millisecond,
 		// bug: the race runtime otherwise sleeps a second at exit, past the grace.
 		Env: append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0"),
 	}}

@@ -4,3 +4,5 @@
 # the image lacks one.
 git
 go
+node
+npm

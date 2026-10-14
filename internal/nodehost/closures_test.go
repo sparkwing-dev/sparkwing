@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -40,7 +41,7 @@ func TestClosures(t *testing.T) {
 		OpenLog: func(_ context.Context, _, node string) (NodeLog, error) { return memLog{logs: logs, node: node}, nil },
 	}
 	cfg := Config{
-		Session:  SessionConfig{Entry: bin, Dir: t.TempDir(), Grace: 2 * time.Second},
+		Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second},
 		Pipeline: "attempts", Args: args,
 		Run:   nodeproto.RunContext{RunID: "run-hooks"},
 		State: openStore(t), Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,

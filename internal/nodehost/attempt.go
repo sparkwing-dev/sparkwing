@@ -136,12 +136,12 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	}
 	sink.Flush()
 	revoke()
-	out := &lineWriter{sink: sink}
+	out := &LineWriter{Sink: sink, Level: LevelInfo}
 	// safety: a cancelled node's cleanups still run, each bounded by CleanupTimeout.
 	if err := a.Routes.RunCleanups(context.WithoutCancel(ctx), bearer, CleanupScope{Dir: cfg.Dir, Env: cfg.Env, Log: out}); err != nil {
 		run.Logger.Warn("nodehost: node cleanups", "run", run.ID, "node", id, "err", err)
 	}
-	out.flush()
+	out.Flush()
 	sink.Flush()
 	return res
 }
@@ -242,32 +242,6 @@ func failed(err error) Result {
 	return Result{Outcome: sparkwing.Failed, Err: err, Reason: reason}
 }
 
-// safety: the one list of engine variables a process inherits when its caller passes no environment.
-var minimalEnv = []string{
-	"PATH", "HOME", "TMPDIR", "LANG", "LC_*", "TZ", "USER",
-	"SystemRoot", "ComSpec", "PATHEXT", "TEMP", "TMP",
-}
-
-// MinimalEnv is the engine's environment cut to the variables a process
-// needs to run at all: PATH, HOME, TMPDIR, LANG, LC_*, TZ and USER, and on
-// Windows SystemRoot, ComSpec, PATHEXT, TEMP and TMP.
-func MinimalEnv() []string {
-	env := []string{}
-	for _, kv := range os.Environ() {
-		k, _, _ := strings.Cut(kv, "=")
-		if slices.ContainsFunc(minimalEnv, func(name string) bool {
-			prefix, wild := strings.CutSuffix(name, "*")
-			if runtime.GOOS == "windows" {
-				k, name, prefix = strings.ToUpper(k), strings.ToUpper(name), strings.ToUpper(prefix)
-			}
-			return k == name || (wild && strings.HasPrefix(k, prefix))
-		}) {
-			env = append(env, kv)
-		}
-	}
-	return env
-}
-
 // safety: sparks-core echoes mutating commands instead of running them only when it sees SPARKWING_DRY_RUN.
 func dryRunEnv(n *NodeRun) []string {
 	if n.Run.Context.DryRun {
@@ -310,7 +284,7 @@ func dryRunSession(s SessionConfig, dryRun bool) SessionConfig {
 	if dryRun {
 		base := s.Env
 		if base == nil {
-			base = MinimalEnv()
+			base = engineenv.Minimal()
 		}
 		s.Env = append(slices.Clone(base), "SPARKWING_DRY_RUN=1")
 	}
@@ -320,7 +294,7 @@ func dryRunSession(s SessionConfig, dryRun bool) SessionConfig {
 // safety: the node's contract variables are set last so neither the engine nor the node's env overrides them.
 func attemptEnv(base []string, nodeEnv map[string]string, runID, nodeID, url, bearer string) []string {
 	if base == nil {
-		base = MinimalEnv()
+		base = engineenv.Minimal()
 	}
 	env := make([]string, 0, len(base)+len(nodeEnv)+4)
 	env = append(env, engineenv.Strip(base)...)
@@ -340,31 +314,36 @@ func attemptEnv(base []string, nodeEnv map[string]string, runID, nodeID, url, be
 	)
 }
 
-// safety: unlocked, because RunCleanups writes from one goroutine at a time.
-type lineWriter struct {
-	sink *LogSink
-	buf  []byte
+// LineWriter hands what is written to it to Sink as text lines at Level; a
+// line that grows past the session's line limit goes in pieces, whose split
+// values a [LogSink] still masks whole. Call Flush once writing ends. It is
+// unlocked, so one goroutine writes at a time.
+type LineWriter struct {
+	Sink  *LogSink
+	Level string
+	buf   []byte
 }
 
-func (w *lineWriter) Write(p []byte) (int, error) {
+func (w *LineWriter) Write(p []byte) (int, error) {
 	w.buf = append(w.buf, p...)
 	for {
 		i := bytes.IndexByte(w.buf, '\n')
 		if i < 0 {
 			break
 		}
-		w.sink.Text(LevelInfo, strings.TrimSuffix(string(w.buf[:i]), "\r"))
+		w.Sink.Text(w.Level, strings.TrimSuffix(string(w.buf[:i]), "\r"))
 		w.buf = w.buf[i+1:]
 	}
 	if len(w.buf) >= maxTextLine {
-		w.flush()
+		w.Flush()
 	}
 	return len(p), nil
 }
 
-func (w *lineWriter) flush() {
+// Flush hands any unterminated rest to the sink.
+func (w *LineWriter) Flush() {
 	if len(w.buf) > 0 {
-		w.sink.Text(LevelInfo, string(w.buf))
+		w.Sink.Text(w.Level, string(w.buf))
 		w.buf = nil
 	}
 }

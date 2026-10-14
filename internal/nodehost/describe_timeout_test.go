@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -31,7 +32,7 @@ func TestAStalledDescribeEndsTheRunBeforeItIsRecorded(t *testing.T) {
 	defer cancel()
 	_, err := Execute(ctx, Config{
 		Session: SessionConfig{
-			Entry: entry, Dir: dir, Env: []string{"PATH=/usr/bin:/bin"},
+			Entry: pipelineentry.Binary(entry), Dir: dir, Env: []string{"PATH=/usr/bin:/bin"},
 			Grace: 50 * time.Millisecond, DescribeTimeout: 200 * time.Millisecond,
 		},
 		Pipeline: "demo", Run: nodeproto.RunContext{RunID: "stalled-describe"},

@@ -74,8 +74,8 @@ docker CLI plugin.
 A node names the tools it needs with `NeedsTools`, or with a `tool:<name>`
 term in `Requires` or `requires:`. The matcher never hands such a node to an
 agent that lacks the tool, on any claim route. Sparkwing Cloud runners have
-the tools `build/runner-tools` declares for the runner image, currently git
-and go, whatever tools their claims send; the image build fails when the image
+the tools `build/runner-tools` declares for the runner image, currently git,
+go, node and npm, whatever tools their claims send; the image build fails when the image
 lacks one it declares.
 
 ```go

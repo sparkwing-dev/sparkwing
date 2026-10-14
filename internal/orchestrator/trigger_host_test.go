@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -101,7 +102,7 @@ func (h *hostedTrigger) host(t *testing.T, ctx context.Context, r runner.Runner,
 		defer stop()
 	}
 	return HostTriggerRun(ctx, TriggerHost{
-		ControllerURL: h.url, Token: h.token, Trigger: h.trig, Binary: h.bin, Dir: t.TempDir(),
+		ControllerURL: h.url, Token: h.token, Trigger: h.trig, Entry: pipelineentry.Binary(h.bin), Dir: t.TempDir(),
 		Runner: r, Logger: quiet,
 	})
 }
@@ -198,7 +199,7 @@ func TestClaimedNodeHost_RefusesANodeAnotherHostHolds(t *testing.T) {
 	if _, err := c.ClaimNodeByID(ctx, h.trig.ID, "build", "k8s-job:elsewhere", time.Minute, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	host := &claimedNodeHost{controllerURL: h.url, binary: h.bin, dir: t.TempDir(), ctrl: c, logger: slog.New(slog.DiscardHandler)}
+	host := &claimedNodeHost{controllerURL: h.url, entry: pipelineentry.Binary(h.bin), dir: t.TempDir(), ctrl: c, logger: slog.New(slog.DiscardHandler)}
 	res := host.RunNode(t.Context(), runner.Request{RunID: h.trig.ID, NodeID: "build", Pipeline: "podnode"})
 	if res.Outcome != sparkwing.Failed || !errors.Is(res.Err, store.ErrLockHeld) {
 		t.Fatalf("second host = %+v, want refused as held", res)
@@ -293,7 +294,7 @@ func dispatchedHeld(t *testing.T, stop func(context.CancelCauseFunc)) *hostedTri
 	if err != nil {
 		t.Fatal(err)
 	}
-	planned, err := nodehost.PlanDocument(t.Context(), nodehost.SessionConfig{Entry: h.bin, Dir: t.TempDir()}, nodehost.PlanRequest{
+	planned, err := nodehost.PlanDocument(t.Context(), nodehost.SessionConfig{Entry: pipelineentry.Binary(h.bin), Dir: t.TempDir()}, nodehost.PlanRequest{
 		Pipeline: "podnode", Args: args, Run: rc,
 	})
 	if err != nil {
@@ -325,7 +326,7 @@ func dispatchedHeld(t *testing.T, stop func(context.CancelCauseFunc)) *hostedTri
 	done := make(chan error, 1)
 	go func() {
 		_, err := hostDispatchedNode(hostCtx, podNode{
-			binary: h.bin, dir: t.TempDir(), controllerURL: h.url, token: n.ClaimToken,
+			entry: pipelineentry.Binary(h.bin), dir: t.TempDir(), controllerURL: h.url, token: n.ClaimToken,
 			runID: h.trig.ID, nodeID: "held", logger: slog.New(slog.DiscardHandler),
 		})
 		done <- err
@@ -436,7 +437,7 @@ func TestTriggerHost_TakesTheResultOfTheHolderThatWonTheClaim(t *testing.T) {
 			t.Errorf("claim: %v", err)
 			return runner.Result{Outcome: sparkwing.Failed, Err: err}
 		}
-		host := &claimedNodeHost{controllerURL: h.url, binary: h.bin, dir: t.TempDir(), ctrl: c, logger: slog.New(slog.DiscardHandler)}
+		host := &claimedNodeHost{controllerURL: h.url, entry: pipelineentry.Binary(h.bin), dir: t.TempDir(), ctrl: c, logger: slog.New(slog.DiscardHandler)}
 		res := host.RunNode(ctx, req)
 		fenced := store.WithNodeClaimFence(context.WithoutCancel(ctx), store.NodeClaimFence{
 			HolderID: won.ClaimedBy, MembershipID: won.ClaimMembershipID, ReservationID: won.ReservationID, ClaimGeneration: won.ClaimGeneration,

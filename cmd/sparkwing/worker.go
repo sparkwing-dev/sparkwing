@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/tokenpark"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -117,15 +118,14 @@ func claimTriggers(ctx context.Context, profileName string, poll, heartbeat time
 	}
 }
 
-// safety: plan code and every node run in their own process with the minimal environment, so the profile's
-// token stays in this process, which hosts the run from the pipeline this checkout builds.
-// safety: the claim is renewed from before the build, so a cold build outlasting its lease keeps it; a worker
-// shutting down leaves the trigger to that lease, and a run that never started fails here, or ends cancelled.
+// safety: plan code and every node run in their own processes with the minimal environment, so the profile's
+// token stays here. The claim is renewed from before the build, so a cold build outlasting its lease keeps it; a
+// worker shutting down leaves the trigger to that lease, and a run that never started fails here, or is cancelled.
 func hostTrigger(ctx context.Context, cli *client.Client, trigger *store.Trigger, controllerURL, token string, heartbeat time.Duration) error {
 	return hostTriggerWith(ctx, cli, trigger, controllerURL, token, heartbeat, buildCheckoutPipeline, orchestrator.HostTriggerRun)
 }
 
-type checkoutBuild func(ctx context.Context) (binary, dir string, release func(), err error)
+type checkoutBuild func(ctx context.Context) (entry pipelineentry.Command, dir string, release func(), err error)
 
 func hostTriggerWith(ctx context.Context, cli *client.Client, trigger *store.Trigger, controllerURL, token string,
 	heartbeat time.Duration, build checkoutBuild, host func(context.Context, orchestrator.TriggerHost) error,
@@ -153,20 +153,28 @@ func hostTriggerWith(ctx context.Context, cli *client.Client, trigger *store.Tri
 	return err
 }
 
-func buildCheckoutPipeline(ctx context.Context) (binary, dir string, release func(), err error) {
+func buildCheckoutPipeline(ctx context.Context) (entry pipelineentry.Command, dir string, release func(), err error) {
 	sparkwingDir, err := findSparkwingDir()
 	if err != nil {
-		return "", "", nil, err
+		return nil, "", nil, err
+	}
+	ts, err := pipelineentry.IsTypeScript(sparkwingDir)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	if ts {
+		entry, err := orchestrator.PrepareTypeScriptOnRunner(ctx, sparkwingDir)
+		return entry, filepath.Dir(sparkwingDir), func() {}, err
 	}
 	key, keyParts, err := bincache.ExplainCacheKey(sparkwingDir)
 	if err != nil {
-		return "", "", nil, fmt.Errorf("read .sparkwing/: %w", err)
+		return nil, "", nil, fmt.Errorf("read .sparkwing/: %w", err)
 	}
 	lease, _, err := pipelineBinary(ctx, sparkwingDir, key, keyParts, os.Environ())
 	if err != nil {
-		return "", "", nil, fmt.Errorf("build the pipeline: %w", err)
+		return nil, "", nil, fmt.Errorf("build the pipeline: %w", err)
 	}
-	return lease.Path(), filepath.Dir(sparkwingDir), func() {
+	return pipelineentry.Binary(lease.Path()), filepath.Dir(sparkwingDir), func() {
 		if err := lease.Release(); err != nil {
 			slog.Default().Debug("pipeline binary lease release failed", "err", err)
 		}
@@ -176,13 +184,13 @@ func buildCheckoutPipeline(ctx context.Context) (binary, dir string, release fun
 func hostTriggerFromCheckout(ctx context.Context, trigger *store.Trigger, controllerURL, token string,
 	build checkoutBuild, host func(context.Context, orchestrator.TriggerHost) error,
 ) error {
-	binary, dir, release, err := build(ctx)
+	entry, dir, release, err := build(ctx)
 	if err != nil {
 		return err
 	}
 	defer release()
 	return host(ctx, orchestrator.TriggerHost{
-		ControllerURL: controllerURL, Token: token, Trigger: trigger, Binary: binary, Dir: dir,
+		ControllerURL: controllerURL, Token: token, Trigger: trigger, Entry: entry, Dir: dir,
 	})
 }
 

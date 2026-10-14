@@ -131,3 +131,16 @@ func TestStripRemovesEngineCredentials(t *testing.T) {
 		}
 	}
 }
+
+func TestMinimalKeepsOnlyTheBaseAndNamedVariables(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "runner")
+	t.Setenv("NODE_OPTIONS", "--require=/tmp/x.js")
+	t.Setenv("npm_config_registry", "http://proxy")
+	got := strings.Join(Minimal("npm_config_registry"), "\n")
+	if strings.Contains(got, "GITHUB_TOKEN=") || strings.Contains(got, "NODE_OPTIONS=") {
+		t.Fatalf("Minimal kept a runner variable:\n%s", got)
+	}
+	if !strings.Contains(got, "npm_config_registry=http://proxy") {
+		t.Fatal("Minimal dropped a named variable")
+	}
+}
