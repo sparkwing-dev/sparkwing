@@ -62,9 +62,16 @@ func (s *scheduler) rehydrated(ctx context.Context, n nodeproto.PlanNode, byID m
 	if prior.SpecHash != n.SpecHash {
 		return s.runsAgain(n.ID)
 	}
-	generator := n.Closures != nil && len(n.Closures.Generator) > 0 && prior.Outcome == string(sparkwing.Success)
-	if generator && s.regenerate == nil {
-		return s.runsAgain(n.ID)
+	generator := generatesNodes(n, sparkwing.Outcome(prior.Outcome))
+	var batches []recordedBatch
+	if generator {
+		var err error
+		if batches, err = storedExpansions(ctx, s.run.State, r.SourceRunID, n); err != nil {
+			return Result{Outcome: sparkwing.Failed, Err: err}, true
+		}
+		if !allRecorded(batches) && s.regenerate == nil {
+			return s.runsAgain(n.ID)
+		}
 	}
 	output, ok, err := s.sourceOutput(ctx, prior)
 	switch {
@@ -81,10 +88,9 @@ func (s *scheduler) rehydrated(ctx context.Context, n nodeproto.PlanNode, byID m
 	if prior.Error != "" {
 		res.Err = errors.New(prior.Error)
 	}
-	// safety: a generator's nodes are not recorded whole, so they are generated again from the copied output in
-	// an eval process, as a memo hit's are.
+	// safety: the copy adds the generators' nodes the source run recorded, as they were.
 	if generator {
-		res.expansions = s.regenerate(ctx, &NodeRun{Run: s.run, Plan: n, Generator: s.addedBy[n.ID]}, output)
+		res.expansions = s.recordedExpansions(ctx, n, batches, func() (json.RawMessage, error) { return output, nil })
 	}
 	return res, true
 }

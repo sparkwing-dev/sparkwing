@@ -1004,6 +1004,14 @@ var FreeTierQuota = StorageQuota{
 }
 const FreezeCauseDecline = "decline"
 const FreezeCauseWarning = "early_fraud_warning"
+type GeneratedNode struct {
+	Source    string
+	Generator string
+
+	Batch int
+
+	Spec json.RawMessage
+}
 type GitCredential struct {
 	ID       string
 	Team     Team
@@ -1426,6 +1434,8 @@ type Node struct {
 	ClaimToken string
 
 	SpecHash string
+
+	Generated *GeneratedNode
 }
 type NodeAttention struct {
 	Team          Team

@@ -127,9 +127,10 @@ type NodeRun struct {
 	// one that ended with res; nil means none follows. The attempt runs its
 	// after_run closures only when none does.
 	Retried func(res Result) bool
-	// Generator is the closure that added the node; empty for a node of the
-	// accepted plan.
-	Generator string
+	// Generators are the closures that added the node, outermost first: the
+	// one that added it last, after any that added its source. Empty for a
+	// node of the accepted plan.
+	Generators []string
 	// Progress, when set, is called for each log line or record the attempt
 	// stores; the no-progress timeout restarts its count on it.
 	Progress func()
@@ -328,7 +329,7 @@ func runPlanned(ctx context.Context, cfg *Config, run *Run, res *RunResult) (rel
 			return memoGenerate(ctx, cfg, n, output)
 		}
 	}
-	if err := s.add(ctx, ctx, run.Doc.Nodes); err != nil {
+	if err := s.add(ctx, ctx, run.Doc.Nodes, nil); err != nil {
 		res.Status, res.Err = "failed", err
 		return release
 	}
@@ -436,13 +437,16 @@ type scheduler struct {
 	order   []string
 	groups  map[string]*genGroup
 	addedBy map[string]string
-	resume  bool
+	// safety: the node whose generator added each generated node, so a node's generator chain reaches the plan.
+	sourceOf map[string]string
+	resume   bool
 	// safety: rerun records the nodes a retry runs again, so a node waiting on its deps is looked up in the
 	// source run once; only the scheduler goroutine reads it.
 	rehydrate  *Rehydration
 	rerun      map[string]bool
 	adopted    []finished
 	regenerate func(ctx context.Context, n *NodeRun, output json.RawMessage) []expansion
+	drifts     []error
 }
 
 type finished struct {
@@ -472,7 +476,7 @@ func (s *scheduler) loop(ctx context.Context) {
 			running--
 			s.finish(ctx, f.id, f.res)
 		case req := <-s.run.adds:
-			req.reply <- s.add(ctx, req.ctx, req.nodes)
+			req.reply <- s.add(ctx, req.ctx, req.nodes, nil)
 		}
 	}
 }
@@ -511,7 +515,7 @@ func (s *scheduler) startReady(ctx context.Context, done chan<- finished, runnin
 			s.finish(ctx, n.ID, res)
 			continue
 		}
-		node := &NodeRun{Run: s.run, Plan: n, Generator: s.addedBy[n.ID]}
+		node := &NodeRun{Run: s.run, Plan: n, Generators: s.generators(n.ID)}
 		if parent := n.OnFailureOf; parent != "" {
 			pr := s.results[parent]
 			if pr.Outcome != sparkwing.Failed {
@@ -602,7 +606,9 @@ func (s *scheduler) terminal(ctx context.Context, id string, outcome sparkwing.O
 	s.finish(ctx, id, Result{Outcome: outcome, Err: errors.New(reason)})
 }
 
-func (s *scheduler) add(ctx, writeCtx context.Context, nodes []nodeproto.PlanNode) error {
+// safety: from, when set, names the source and generator that returned nodes, and each row records it with the
+// node's whole spec, so no later host of the run generates the node again.
+func (s *scheduler) add(ctx, writeCtx context.Context, nodes []nodeproto.PlanNode, from *expansionFrom) error {
 	if err := validateNodes(append(slices.Clone(s.nodes), nodes...)); err != nil {
 		return err
 	}
@@ -615,7 +621,12 @@ func (s *scheduler) add(ctx, writeCtx context.Context, nodes []nodeproto.PlanNod
 			s.reuseRow(writeCtx, n, row)
 			continue
 		}
-		if err := s.run.State.CreateNode(writeCtx, pendingRow(s.run, n)); err != nil {
+		row := pendingRow(s.run, n)
+		err := from.record(&row, n, len(nodes))
+		if err == nil {
+			err = s.run.State.CreateNode(writeCtx, row)
+		}
+		if err != nil {
 			err = fmt.Errorf("create node %s: %w", n.ID, err)
 			s.nodes = append(s.nodes, nodes[:i]...)
 			// safety: only rows this host created are failed; a reused row is its holder's or its run's record.
@@ -682,28 +693,28 @@ func (s *scheduler) reuseRow(ctx context.Context, n nodeproto.PlanNode, row *sto
 		res.Err = errors.New(row.Error)
 	}
 	s.started[id], s.results[id] = true, res
-	// safety: an adopted generator's nodes are not recorded whole, so they are generated again from its
-	// recorded output, as a copied generator's are.
-	if res.Outcome == sparkwing.Success && n.Closures != nil && len(n.Closures.Generator) > 0 && s.regenerate != nil {
-		output, err := s.ownOutput(ctx, id)
+	if generatesNodes(n, res.Outcome) {
+		batches, err := storedExpansions(ctx, s.run.State, s.run.ID, n)
 		if err != nil {
 			for _, g := range n.Closures.Generator {
 				res.expansions = append(res.expansions, expansion{closure: g, err: err})
 			}
 		} else {
-			res.expansions = s.regenerate(ctx, &NodeRun{Run: s.run, Plan: n, Generator: s.addedBy[id]}, output)
+			res.expansions = s.recordedExpansions(ctx, n, batches, func() (json.RawMessage, error) {
+				return recordedOutput(ctx, s.run.State, s.run.ID, id)
+			})
 		}
 		s.results[id] = res
 		s.adopted = append(s.adopted, finished{id: id, res: res})
 	}
 }
 
-func (s *scheduler) ownOutput(ctx context.Context, id string) (json.RawMessage, error) {
-	outputs, ok := s.run.State.(sourceOutputs)
+func recordedOutput(ctx context.Context, st storage.StateStore, runID, id string) (json.RawMessage, error) {
+	outputs, ok := st.(sourceOutputs)
 	if !ok {
 		return nil, fmt.Errorf("read node %s output: the runs store cannot read it", id)
 	}
-	out, err := outputs.GetNodeOutput(ctx, s.run.ID, id)
+	out, err := outputs.GetNodeOutput(ctx, runID, id)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, nil
 	}
@@ -773,6 +784,9 @@ func (s *scheduler) verdict(ctx context.Context) (string, error) {
 }
 
 func (s *scheduler) nodeVerdict() (string, error) {
+	if len(s.drifts) > 0 {
+		return "failed", fmt.Errorf("generated nodes drifted from what the run recorded: %w", errors.Join(s.drifts...))
+	}
 	var failed, cancelled, superseded []string
 	for _, n := range s.nodes {
 		oc := s.results[n.ID].Outcome

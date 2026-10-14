@@ -23,7 +23,7 @@ func hostDispatched(t *testing.T, ctx context.Context, st *store.Store, doc node
 	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest)}
 	res := RunResult{RunID: testRunID, Nodes: map[string]Result{}}
 	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg)}
-	if err := s.add(ctx, ctx, doc.Nodes); err != nil {
+	if err := s.add(ctx, ctx, doc.Nodes, nil); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 	s.loop(ctx)
@@ -222,7 +222,7 @@ func TestResumeRefusesARowPlannedUnderAnotherSpec(t *testing.T) {
 	s := &scheduler{run: run, results: map[string]Result{}, started: map[string]bool{}, resume: true}
 	err := s.add(ctx, ctx, []nodeproto.PlanNode{
 		{ID: "held", SpecHash: "sha256:held"}, {ID: "lost", SpecHash: "sha256:lost"}, {ID: "build", SpecHash: "sha256:new"},
-	})
+	}, nil)
 	var perr *nodeproto.Error
 	if !errors.As(err, &perr) || perr.Code != nodeproto.CodePlanDrift {
 		t.Fatalf("add = %v, want plan_drift", err)

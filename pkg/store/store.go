@@ -1616,6 +1616,23 @@ type Node struct {
 	// remote host of the node runs it only when its own plan of the node
 	// hashes the same.
 	SpecHash string `json:"spec_hash,omitempty"`
+	// Generated is set on a node a generator added to its run: where it came
+	// from and its whole spec, which every later host of the node reads
+	// instead of generating it again.
+	Generated *GeneratedNode `json:"generated,omitempty"`
+}
+
+// GeneratedNode is how a generator added a node to its run.
+type GeneratedNode struct {
+	// Source is the node whose generator added this one, and Generator that
+	// generator's closure id.
+	Source    string `json:"source"`
+	Generator string `json:"generator"`
+	// Batch is how many nodes that generator added together, so a reader
+	// that finds fewer rows knows the batch was not fully recorded.
+	Batch int `json:"batch"`
+	// Spec is the node's plan document, spec_hash included.
+	Spec json.RawMessage `json:"spec"`
 }
 
 // CreateNode inserts a node in the "pending" state.
@@ -1663,6 +1680,12 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 		requestedSlots = n.RequestedSlots
 	}
 	depsJSON, _ := json.Marshal(n.Deps)
+	var generatedJSON []byte
+	if n.Generated != nil {
+		if generatedJSON, err = json.Marshal(n.Generated); err != nil {
+			return fmt.Errorf("node %s generated spec: %w", n.NodeID, err)
+		}
+	}
 	var labelsJSON []byte
 	if len(n.NeedsLabels) > 0 {
 		labelsJSON, _ = json.Marshal(n.NeedsLabels)
@@ -1698,7 +1721,7 @@ INSERT INTO nodes (team, run_id, node_id, status, deps_json, needs_labels, prefe
 			       execution_policy_json, execution_policy_hash, execution_policy_version, execution_body_protocol,
 			       execution_supervisor_requirements_json, execution_supervisor_requirements_hash,
 			       execution_body_requirements_json, execution_body_requirements_hash,
-			       spec_hash, seq)
+			       spec_hash, generated_json, seq)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_coordinator_id FROM runs WHERE team = ? AND id = ?), ''),
 		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_executor_kind FROM runs WHERE team = ? AND id = ?), ''),
@@ -1709,7 +1732,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 		?,
 		?,
 		?, ?, ?, ?, ?, ?, ?, ?,
-		?,
+		?, ?,
 		(SELECT COALESCE(MAX(seq), 0) + 1 FROM nodes WHERE team = ? AND run_id = ?))`,
 		string(team), n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON, prefersJSON,
 		n.RequestedCores, n.RequestedMemoryBytes, requestedSlots,
@@ -1724,7 +1747,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 		policyJSON, policyHash, policyVersion, bodyProtocol,
 		supervisorRequirementsJSON, supervisorRequirementsHash,
 		bodyRequirementsJSON, bodyRequirementsHash,
-		n.SpecHash,
+		n.SpecHash, generatedJSON,
 		string(team), n.RunID)
 	if err != nil {
 		return err
@@ -2112,14 +2135,14 @@ const nodeSelectColumns = `run_id, node_id, status, outcome, deps_json, error,
 	   execution_supervisor_requirements_json, execution_supervisor_requirements_hash,
 	   execution_body_requirements_json, execution_body_requirements_hash,
 	   avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until,
-	   placement_reason, placement_hold_from, credit_cpu_class, spec_hash,
+	   placement_reason, placement_hold_from, credit_cpu_class, spec_hash, generated_json,
 	   (SELECT pipeline FROM runs WHERE runs.team = nodes.team AND runs.id = nodes.run_id)`
 
 func scanNodeRow(rs rowScanner, n *nodeRecord) error {
 	var depsJSON, labelsJSON, prefersJSON, annotationsJSON []byte
 	var outputKey, outputSHA sql.NullString
 	var outputSize sql.NullInt64
-	var policyJSON, supervisorRequirementsJSON, bodyRequirementsJSON []byte
+	var policyJSON, supervisorRequirementsJSON, bodyRequirementsJSON, generatedJSON []byte
 	var policyHash, supervisorRequirementsHash, bodyRequirementsHash, pipeline string
 	var policyVersion, bodyProtocol int
 	var startedNS, finishedNS, readyNS, leaseNS, offerStartedNS, heartbeatNS, executionStartedNS, avoidUntilNS sql.NullInt64
@@ -2142,7 +2165,7 @@ func scanNodeRow(rs rowScanner, n *nodeRecord) error {
 		&supervisorRequirementsJSON, &supervisorRequirementsHash,
 		&bodyRequirementsJSON, &bodyRequirementsHash,
 		&n.AvoidCoordinatorID, &n.AvoidExecutorKind, &n.AvoidExecutorID, &avoidUntilNS,
-		&n.PlacementReason, &holdFromNS, &n.CreditCPUClassCores, &n.SpecHash, &pipeline)
+		&n.PlacementReason, &holdFromNS, &n.CreditCPUClassCores, &n.SpecHash, &generatedJSON, &pipeline)
 	if errors.Is(err, sql.ErrNoRows) {
 		return notFound("node", "")
 	}
@@ -2150,6 +2173,12 @@ func scanNodeRow(rs rowScanner, n *nodeRecord) error {
 		return err
 	}
 	_ = json.Unmarshal(depsJSON, &n.Deps)
+	if len(generatedJSON) > 0 {
+		n.Generated = &GeneratedNode{}
+		if err := json.Unmarshal(generatedJSON, n.Generated); err != nil {
+			return fmt.Errorf("node %s generated spec: %w", n.NodeID, err)
+		}
+	}
 	if outputKey.Valid {
 		n.OutputRef = &OutputRef{Key: outputKey.String, Size: outputSize.Int64, SHA256: outputSHA.String}
 	}
@@ -6258,7 +6287,7 @@ var schemaSQLite string
 var schemaPostgres string
 
 // safety: the baseline is the only schema; a store recording any other version is refused, never upgraded.
-const expectedSchemaVersion = 2
+const expectedSchemaVersion = 3
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,
