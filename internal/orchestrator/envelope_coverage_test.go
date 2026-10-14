@@ -422,17 +422,31 @@ func TestEnvelope_BoxScopeSerializesAcrossRuns(t *testing.T) {
 	}
 }
 
-// A run-scoped group bounds each run apart: two runs' nodes in the same
-// group's name hold their own slots at once.
+// A run-scoped group bounds each run apart: the second node of one run waits
+// on its own run's group while the other run's node holds a slot of the
+// group's name at the same time.
 func TestEnvelope_RunScopeIsolatesRuns(t *testing.T) {
 	r := newEnvelopeRig(t, true)
-	a := r.start("run-1", "envelope-a", r.args("run"), nil)
-	b := r.start("run-2", "envelope-a", r.args("run"), nil)
-	first, second := r.gate.next(t), r.gate.next(t)
-	first.release("ok")
-	second.release("ok")
-	wantRun(t, <-a, "success")
-	wantRun(t, <-b, "success")
+	pair := r.start("run-1", "envelope-a", r.args("run-pair"), nil)
+	single := r.start("run-2", "envelope-a", r.args("run"), nil)
+	held := map[string]*gateArrival{}
+	for len(held) < 2 {
+		a := r.gate.next(t)
+		run, _, _ := strings.Cut(a.who, "/")
+		if held[run] != nil {
+			t.Fatalf("%s ran while %s held its run's group", a.who, held[run].who)
+		}
+		held[run] = a
+	}
+	if who := recv(t, r.gate.deadline, r.daemon.queued, "run-1's second node queued on its run's group"); !strings.HasPrefix(who, "run-1/") {
+		t.Fatalf("%s queued, want run-1's second node", who)
+	}
+	r.gate.none(t)
+	held["run-2"].release("ok")
+	held["run-1"].release("ok")
+	r.gate.next(t).release("ok")
+	wantRun(t, <-pair, "success")
+	wantRun(t, <-single, "success")
 }
 
 // A node's cost counts against the group's capacity across runs: three

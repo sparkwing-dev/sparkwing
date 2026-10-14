@@ -80,8 +80,12 @@ func (envelopeFixture) Plan(_ context.Context, plan *sparkwing.Plan, in envelope
 		gated("follow").Memoize(key)
 	case "box":
 		gated("work").Concurrency(group("box-grp", sparkwing.ScopeBox, 1, sparkwing.Queue))
-	case "run":
-		gated("work").Concurrency(group("run-grp", sparkwing.ScopeRun, 1, sparkwing.Queue))
+	case "run", "run-pair":
+		g := group("run-grp", sparkwing.ScopeRun, 1, sparkwing.Queue)
+		gated("work").Concurrency(g)
+		if in.Shape == "run-pair" {
+			gated("second").Concurrency(g)
+		}
 	case "cost-a":
 		g := group("cost-grp", sparkwing.ScopeBox, 8, sparkwing.Queue)
 		gated("a").Concurrency(g, 4)

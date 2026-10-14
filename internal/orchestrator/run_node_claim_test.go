@@ -80,10 +80,10 @@ func newClaimedCommand(t *testing.T, args map[string]string, nodeID string) *cla
 	return c
 }
 
-// safety: only the source fetch and build are stood in for, with the
-// prebuilt pipeline; the command's claim, renewal and RunNodeOnce's source
-// check all run as a dispatcher's Job runs them.
-func (c *claimedCommand) run(t *testing.T) error {
+// safety: only the source fetch and build are stood in for, with the prebuilt pipeline; the command's claim,
+// renewal and RunNodeOnce's source check all run as a dispatcher's Job runs them. The environment is set before
+// start, on the test's goroutine.
+func (c *claimedCommand) start(t *testing.T, ctx context.Context) <-chan error {
 	t.Helper()
 	for _, name := range []string{
 		"SPARKWING_CONTROLLER_URL", "SPARKWING_RUN_ID", "SPARKWING_NODE_ID", authwire.CacheGrantEnv,
@@ -97,24 +97,31 @@ func (c *claimedCommand) run(t *testing.T) error {
 	t.Setenv("SPARKWING_NODE_CLAIM_MEMBERSHIP", c.claimed.ClaimMembershipID)
 	t.Setenv("SPARKWING_NODE_CLAIM_RESERVATION", c.claimed.ReservationID)
 	t.Setenv("SPARKWING_NODE_CLAIM_LEASE_SECONDS", "600")
-	prev := hostRemoteNode
-	t.Cleanup(func() { hostRemoteNode = prev })
-	hostRemoteNode = func(ctx context.Context, _ *store.Trigger, _ *store.Run, controllerURL, _, cacheGrant, runID, nodeID, token string,
+	dir := t.TempDir()
+	host := withRemoteNodeHost(func(ctx context.Context, _ *store.Trigger, _ *store.Run, controllerURL, _, cacheGrant, runID, nodeID, token string,
 		_ *sourceurl.RepoAllowlist, logger *slog.Logger,
 	) (runner.Result, error) {
 		return hostDispatchedNode(ctx, podNode{
-			entry: pipelineentry.Binary(c.h.bin), dir: t.TempDir(), controllerURL: controllerURL, token: token,
+			entry: pipelineentry.Binary(c.h.bin), dir: dir, controllerURL: controllerURL, token: token,
 			runID: runID, nodeID: nodeID, cacheGrant: cacheGrant, logger: logger,
 		})
-	}
-	return RunNodeCommand([]string{"--controller", c.url, c.h.trig.ID, c.nodeID})
+	})
+	ctx, cancel := context.WithCancel(ctx)
+	done, result := make(chan struct{}), make(chan error, 1)
+	// safety: a test that gives up still stops the command and waits for it, so no renewal outlives the test.
+	t.Cleanup(func() { cancel(); <-done })
+	go func() {
+		defer close(done)
+		result <- runNodeCommand(ctx, []string{"--controller", c.url, c.h.trig.ID, c.nodeID}, host)
+	}()
+	return result
 }
 
 // A dispatched node's every write reaches the controller under the claim the
 // dispatcher took for it, so a write from a holder that lost the claim is
 // refused rather than taken as the node's.
 func TestRunNodeCommand_SendsTheDispatchedClaimFence(t *testing.T) {
-	c := newClaimedCommand(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env")}, "build")
+	c := newClaimedCommand(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "typed": "true"}, "typed")
 	var mu sync.Mutex
 	seen, plain := map[string]string{}, []string{}
 	c.wrap = func(w http.ResponseWriter, r *http.Request, next http.Handler) {
@@ -129,11 +136,11 @@ func TestRunNodeCommand_SendsTheDispatchedClaimFence(t *testing.T) {
 		}
 		next.ServeHTTP(w, r)
 	}
-	if err := c.run(t); err != nil {
+	if err := <-c.start(t, t.Context()); err != nil {
 		t.Fatalf("run-node: %v", err)
 	}
-	if n := c.h.node(t, "build"); n.Status != "done" || n.Outcome != string(sparkwing.Success) {
-		t.Fatalf("build = %s/%s (%s), want done/success", n.Status, n.Outcome, n.Error)
+	if n := c.h.node(t, "typed"); n.Status != "done" || n.Outcome != string(sparkwing.Success) {
+		t.Fatalf("typed = %s/%s (%s), want done/success", n.Status, n.Outcome, n.Error)
 	}
 	mu.Lock()
 	defer mu.Unlock()
@@ -146,6 +153,11 @@ func TestRunNodeCommand_SendsTheDispatchedClaimFence(t *testing.T) {
 			t.Errorf("%s carried fence %q, want %q", path, got, want)
 		}
 	}
+	for _, route := range []string{"start", "output-upload", "output-commit", "finish"} {
+		if _, ok := seen["/api/v1/runs/"+c.h.trig.ID+"/nodes/typed/"+route]; !ok {
+			t.Errorf("the node made no fenced %s write; fenced %v", route, seen)
+		}
+	}
 }
 
 // The controller refuses a renewal when the team's credits run out, the claim
@@ -154,14 +166,27 @@ func TestRunNodeCommand_SendsTheDispatchedClaimFence(t *testing.T) {
 func TestRunNodeCommand_StopsWhenTheClaimRenewalIsRefused(t *testing.T) {
 	hold, pids := heldNodePID(t)
 	c := newClaimedCommand(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "hold": hold}, "held")
-	started := make(chan int, 1)
+	// safety: unbuffered, so the refusal is answered only after the test has taken the start, and the command
+	// cannot end first.
+	started, ended := make(chan int), make(chan struct{})
+	// safety: registered after the controller's Close, so it runs first and frees a handler still holding a renewal.
+	t.Cleanup(func() { close(ended) })
 	c.wrap = func(w http.ResponseWriter, r *http.Request, next http.Handler) {
 		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/nodes/held/heartbeat") {
 			// safety: the refusal waits for the node's body, so it stops a running node, not one yet to start.
+			var pid int
 			select {
-			case pid := <-pids:
-				started <- pid
+			case pid = <-pids:
 			case <-r.Context().Done():
+				return
+			case <-ended:
+				return
+			}
+			select {
+			case started <- pid:
+			case <-r.Context().Done():
+				return
+			case <-ended:
 				return
 			}
 			http.Error(w, `{"error":"insufficient credits"}`, http.StatusConflict)
@@ -171,8 +196,7 @@ func TestRunNodeCommand_StopsWhenTheClaimRenewalIsRefused(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
-	done := make(chan error, 1)
-	go func() { done <- c.run(t) }()
+	done := c.start(t, ctx)
 	var pid int
 	select {
 	case pid = <-started:

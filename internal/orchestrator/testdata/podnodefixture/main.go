@@ -4,9 +4,10 @@
 // with retries whose before_run and after_run calls are traced, and a node in a
 // concurrency group; when asked, a node that waits until it is stopped, and a
 // deploy node whose skip_if reads a secret, and a failing node whose recovery
-// records the failure it was handed, a node that records its job args, and
-// memoized artifact producers an aggregator stages. The trigger's actor and
-// pull request, when set, reach the build node's environment as ACTOR.
+// records the failure it was handed, a node that records its job args, a
+// node with a typed output, and memoized artifact producers an aggregator
+// stages. The trigger's actor and pull request, when set, reach the build
+// node's environment as ACTOR.
 package main
 
 import (
@@ -39,6 +40,16 @@ type inputs struct {
 	Scale   string `flag:"scaleout" desc:"File a scale node writes its job args and the zone input to"`
 	Zone    string `flag:"zone" desc:"An input the scale node records"`
 	Shards  string `flag:"shards" desc:"File an aggregator writes the artifacts of two memoized producers to"`
+	Typed   bool   `flag:"typed" desc:"Add a node that returns a typed output"`
+}
+
+type typedJob struct {
+	sparkwing.Base
+	sparkwing.Produces[string]
+}
+
+func (typedJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	return sparkwing.Step(w, "emit", func(context.Context) (string, error) { return "typed output", nil }), nil
 }
 
 type scaleArgs struct {
@@ -183,6 +194,9 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, rc spar
 	}
 	if in.Scale != "" {
 		sparkwing.Job(plan, "scale", &scaleJob{out: in.Scale, zone: in.Zone})
+	}
+	if in.Typed {
+		sparkwing.Job(plan, "typed", typedJob{})
 	}
 	if in.Shards != "" {
 		addShards(plan, in.Shards)

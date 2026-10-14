@@ -34,6 +34,10 @@ import (
 // exits. Without them the node runs unfenced, which is what an unclaimed local
 // invocation wants.
 func RunNodeCommand(args []string) error {
+	return runNodeCommand(context.Background(), args)
+}
+
+func runNodeCommand(parent context.Context, args []string, opts ...RunNodeOption) error {
 	fs := flag.NewFlagSet("run-node", flag.ExitOnError)
 	controllerURL := fs.String("controller", os.Getenv("SPARKWING_CONTROLLER_URL"), "controller base URL")
 	if err := fs.Parse(args); err != nil {
@@ -55,7 +59,7 @@ func RunNodeCommand(args []string) error {
 
 	// safety: leave SIGTERM unhandled; bounce, cancellation, and pod termination
 	// rely on the supervisor rather than the killed node to record the outcome.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(parent, os.Interrupt)
 	defer stop()
 	ctx, abandon := context.WithCancelCause(ctx)
 	defer abandon(nil)
@@ -73,7 +77,7 @@ func RunNodeCommand(args []string) error {
 	if token == "" {
 		token = LocalServeToken(*controllerURL)
 	}
-	var runOpts []RunNodeOption
+	runOpts := opts
 
 	holderID := fmt.Sprintf("pod:%s:%s", runID, nodeID)
 	if fence.HolderID != "" {
