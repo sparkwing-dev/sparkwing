@@ -220,7 +220,7 @@ CREATE TABLE triggers (
     webhook_delivery      TEXT NOT NULL DEFAULT '',
     webhook_replay_key    TEXT NOT NULL DEFAULT '',
     available_at          INTEGER NOT NULL DEFAULT 0
-, "parent_run_id" TEXT, "retry_source" TEXT NOT NULL DEFAULT '', "full" INTEGER NOT NULL DEFAULT 0, "team" TEXT NOT NULL DEFAULT 'default', "credit_reserved_at" INTEGER NOT NULL DEFAULT 0, "github_repo_id" BIGINT NOT NULL DEFAULT 0, "github_check_run_id" INTEGER NOT NULL DEFAULT 0, "credit_paid_seconds" INTEGER NOT NULL DEFAULT 0, "credit_paid_amount_micro" INTEGER NOT NULL DEFAULT 0, "credit_reservation_id" TEXT NOT NULL DEFAULT '');
+, "parent_run_id" TEXT, "retry_source" TEXT NOT NULL DEFAULT '', "full" INTEGER NOT NULL DEFAULT 0, "team" TEXT NOT NULL DEFAULT 'default', "credit_reserved_at" INTEGER NOT NULL DEFAULT 0, "github_repo_id" BIGINT NOT NULL DEFAULT 0, "github_check_run_id" INTEGER NOT NULL DEFAULT 0, "credit_paid_seconds" INTEGER NOT NULL DEFAULT 0, "credit_paid_amount_micro" INTEGER NOT NULL DEFAULT 0, "credit_reservation_id" TEXT NOT NULL DEFAULT '', "runner_pin" TEXT NOT NULL DEFAULT '');
 
 CREATE TABLE node_steps (
     run_id      TEXT NOT NULL,

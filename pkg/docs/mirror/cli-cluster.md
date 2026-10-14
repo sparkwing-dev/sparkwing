@@ -650,7 +650,9 @@ sparkwing cluster triggers list --profile prod --pipeline fictional-build --limi
 Claim triggers from a profile's controller and run them in-process
 
 Polls the trigger queue at the selected profile's
-controller and executes each claimed trigger in-process on this host.
+controller and hosts each claimed trigger's run on this host, building the
+pipeline from the checkout the worker runs in. Each node runs here in its own
+process under a claim of its own.
 For k8s or warm execution, run sparkwing-runner runner --also-claim-triggers
 --trigger-runner k8s|warm, which carries the image and service-account flags.
 

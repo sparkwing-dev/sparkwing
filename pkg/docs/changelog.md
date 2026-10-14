@@ -21,6 +21,8 @@ unlock.
 ## [Unreleased]
 
 ### Added
+- **cli + controller:** `sparkwing pipeline trigger --runner here --reason TEXT` hosts a hotfix run on the caller's machine under a one-shot runner credential bound to that run
+  `POST /api/v1/triggers` takes `runner: here` and a one-line `reason`, mints a runner credential with the trigger, pins the trigger to it and returns it once as `runner_token` with `runner_token_expires_at` (one hour). Only that credential may claim the pinned trigger, once; its requests are fenced to the run's own routes; secrets reach the run through its claims as on any runner. The audit line and a `runner_here` run event record the caller, the credential prefix and the reason. See [Hotfix runner](docs/hotfix-runner.md).
 - **sdk:** `sparkwing.InputError` is the error a `Registration`'s `Invoke` returns when args fail the declared flags of the pipeline or of a job's `WithArgs`; find it with `errors.As`
 - **controller:** `sparkwing-controller admin freeze|unfreeze --team T --reason R [--hold ID]` holds or releases a team from inside the controller pod when console sign-in is down
   It acts on the state database directly and commits the console's `team.frozen` and `team.unfrozen` business events with `sparkwing-controller admin` as the actor, and writes an `audit` line to stderr. See [Break-glass](docs/auth.md#break-glass).
@@ -43,6 +45,7 @@ unlock.
   Each distinct number is a retention class under `<cache prefix>/logs/r<days>/` with its own bucket lifecycle rule.
 
 ### Changed
+- **store (Breaking):** Schema version 2 adds `triggers.runner_pin`; a store recording version 1 is refused like any other version and must be deleted
 - **runner:** a run the trigger runner hosts is bounded at six hours, GitHub Actions' default job timeout, instead of the 30 minutes its handler process had
 - **sdk/typescript:** the prototype TypeScript SDK speaks the final node protocol: `--sw-node-protocol` is its only entry, with `describe` a request and requests and frames on descriptors 3 and 4 while stdout and stderr stay the pipeline's; failed replies carry `error.code`; requests run concurrently, `cancel` aborts a step and end of input silences the process; only a result step's `run_step` carries output; `generate` adds a generator closure and `needsGenerated` waits on it; the node routes are read from `SPARKWING_NODE_URL` and `SPARKWING_NODE_TOKEN`, which is removed before pipeline code runs. The `gate` pipeline runs its typecheck and tests, and hosted gates run Node.js 22
 - **engine (Breaking):** The engine hosts runs and runs pipeline code in processes of the pipeline binary that speak the node protocol; rebuild `.sparkwing` against this release's SDK

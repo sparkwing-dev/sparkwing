@@ -1297,6 +1297,14 @@ paths:
                 properties:
                   run_id: {type: string}
                   status: {type: string, enum: [dispatched]}
+                  runner_token:
+                    type: string
+                    description: >-
+                      Returned once for `runner: here`. A runner credential that claims only this run's pinned trigger, once, reaches only this run's routes, and expires at `runner_token_expires_at`.
+                  runner_token_expires_at:
+                    type: integer
+                    format: int64
+                    description: Unix seconds at which `runner_token` expires.
         "400": {$ref: "#/components/responses/BadRequest"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "409": {description: Parent claim is stale or no longer live.}
@@ -2202,6 +2210,8 @@ paths:
                 properties:
                   run_id: {type: string}
                   status: {type: string}
+                  runner_token: {type: string, description: Never set for a child run.}
+                  runner_token_expires_at: {type: integer, format: int64, description: Never set for a child run.}
         "400": {$ref: "#/components/responses/BadRequest"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "409": {description: "A cycle, or the same call with other inputs."}
@@ -7768,6 +7778,15 @@ components:
         parent_run_id: {type: string}
         parent_node_id: {type: string}
         retry_of: {type: string}
+        runner:
+          type: string
+          enum: [here]
+          description: >-
+            `here` pins the run to a one-shot runner credential the response returns, for a hotfix run hosted on the caller's machine. It takes no `parent_run_id`, `retry_of` or source bundle.
+        reason:
+          type: string
+          maxLength: 200
+          description: Required with `runner`; one line recorded on the run's `runner_here` event and in the audit log.
     Approval:
       x-sparkwing-go-type: pkg/store.Approval
       type: object
