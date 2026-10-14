@@ -56,19 +56,15 @@ type RepoRule struct {
 	MachineLocal bool
 }
 
-// safety: RepoRules enumerates every canonical identity form.
+// RepoRules enumerates every canonical identity form.
 var RepoRules = []RepoRule{
 	{"github", "gh:", "lower", "numeric_id", false},
 	{"git", "git:", "lower", "preserve_except_provider_table", false},
 	{"filesystem", "local:", "", "sha256_clean_absolute_path", true},
 }
 
-// safety: CaseInsensitiveProviders is the complete approved path-folding set.
+// CaseInsensitiveProviders is the complete approved path-folding set.
 var CaseInsensitiveProviders = []string{"gitlab.com", "bitbucket.org"}
-
-// safety: CanonicalRepository strips URL credentials and trailing .git, preserves ports,
-// and hashes cleaned absolute filesystem paths. Resolving a GitHub ID grants no access.
-func CanonicalRepository(RepoInput) (Repository, error) { panic("unimplemented: c1-data") }
 
 // safety: RepoUse separates machine-local storage from controller authorization scopes.
 type RepoUse string
@@ -78,9 +74,6 @@ const (
 	RepoAccessRule     RepoUse = "access_rule"
 	RepoControllerMemo RepoUse = "controller_memo"
 )
-
-// safety: ValidateRepoUse refuses local keys in controller access rules and memo writes.
-func ValidateRepoUse(RepoKey, RepoUse) error { panic("unimplemented: c1-data") }
 
 // safety: IntakeMode prevents published history from obtaining executable owner claims.
 type IntakeMode string
@@ -122,10 +115,12 @@ type Actor struct {
 // safety: PullRequest keeps base and head facts so intake can refuse forks before award.
 type PullRequest struct {
 	Number   int64   `json:"number"`
+	Action   string  `json:"action"`
 	BaseRepo RepoKey `json:"base_repo"`
 	HeadRepo RepoKey `json:"head_repo"`
 	BaseRef  string  `json:"base_ref"`
 	HeadRef  string  `json:"head_ref"`
+	BaseSHA  string  `json:"base_sha"`
 	HeadSHA  string  `json:"head_sha"`
 	Fork     bool    `json:"fork"`
 }
@@ -382,9 +377,6 @@ type SealedRequest struct {
 	Hash         Hash                    `json:"hash"`
 }
 
-// safety: SealRequest canonicalizes immutable intake data after the intake owner authorizes it.
-func SealRequest(Request, IntakeFacts) (SealedRequest, error) { panic("unimplemented: c1-data") }
-
 // safety: DefaultBranchSource limits discovery to App facts or the acquired origin HEAD.
 type DefaultBranchSource string
 
@@ -440,13 +432,6 @@ type SealInput struct {
 	Now          time.Time
 }
 
-// safety: SealSpec binds declarations, resolved winners and the canonical plan without owning validation.
-// The declaration layers participate in the seal hash and survive retry unchanged.
-func SealSpec(SealInput) (Spec, error) { panic("unimplemented: c1-data") }
-
-// safety: CheckSeal permits an identical replay and refuses a different hash as spec_drift.
-func CheckSeal(existing, proposed Spec) (replayed bool, err error) { panic("unimplemented: c1-data") }
-
 // safety: Projections supplies write-once indexed fields derived only from the sealed spec.
 type Projections struct {
 	RepoKey       RepoKey
@@ -461,9 +446,6 @@ type Projections struct {
 	SpecHash      Hash
 	PlanHash      Hash
 }
-
-// safety: Project prevents independently writable copies of sealed run inputs.
-func Project(Spec) Projections { panic("unimplemented: c1-data") }
 
 // safety: RetryInput carries sealed state unchanged and records the new requester as lineage.
 type RetryInput struct {
@@ -482,9 +464,6 @@ type RetrySnapshot struct {
 	Lineage Lineage
 }
 
-// safety: CarryRetry does not consult branch head or reconstruct inputs from current settings.
-func CarryRetry(RetryInput) (RetrySnapshot, error) { panic("unimplemented: c1-data") }
-
 // safety: Context provides trusted execution inputs on every placement.
 // It may contain secret argument values and must not be rendered or logged.
 type Context struct {
@@ -497,26 +476,7 @@ type Context struct {
 	DryRun      bool
 }
 
-// safety: RunContext refuses unsealed input through the Spec-only method boundary.
-func (Spec) RunContext() Context { panic("unimplemented: c1-data") }
-
-// safety: GuardContext retains trusted default-branch provenance for fail-closed guards.
-func (Spec) GuardContext() Context { panic("unimplemented: c1-data") }
-
-// safety: Reproducer excludes secret argument values and all credentials.
-func (Spec) Reproducer() []string { panic("unimplemented: c1-data") }
-
-// safety: CanonicalHash excludes the hash field itself and nonsemantic seal timestamps.
-// Sorted object keys, stable list ordering and explicit Optional presence prevent hash drift.
-func CanonicalHash(value any) (Hash, error) { panic("unimplemented: c1-data") }
-
-// safety: EnvironmentDigest returns only sorted names and a digest of their captured values.
-// Callers retain values in private host storage and never persist them in the spec.
-func EnvironmentDigest(values map[string]string) (EnvSnapshot, error) {
-	panic("unimplemented: c1-data")
-}
-
-// safety: RedactedArgValue matches the masker so displays never expose secret argument values.
+// RedactedArgValue matches the masker so displays never expose secret argument values.
 const RedactedArgValue = "***"
 
 // safety: Display is a separate safe projection, because serializing Spec exposes execution inputs.
@@ -533,11 +493,3 @@ type Display struct {
 	EnvNames      []string              `json:"env_names"`
 	Reproducer    []string              `json:"reproducer"`
 }
-
-// safety: DisplayRequest redacts all requested values until trusted describe supplies classification.
-// A malformed classification fails closed. This copy never changes inputs retained for execution.
-func DisplayRequest(SealedRequest) Display { panic("unimplemented: c1-data") }
-
-// safety: DisplaySpec applies resolved secret classification to both requested and resolved args.
-// Every dashboard, event, public API and CLI renderer uses this projection, never raw Spec JSON.
-func DisplaySpec(Spec) Display { panic("unimplemented: c1-data") }
