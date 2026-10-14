@@ -36,7 +36,7 @@ func sourceRun(t *testing.T, st *store.Store, outcomes map[string]string) {
 	}
 }
 
-func rehydratedRun(t *testing.T, st *store.Store, r *Rehydration, doc nodeproto.PlanDoc) (*fakeExec, RunResult) {
+func rehydratedRun(t *testing.T, st *store.Store, r *Rehydration, doc nodeproto.PlanDocOld) (*fakeExec, RunResult) {
 	t.Helper()
 	f := &fakeExec{}
 	return f, hostWith(t, t.Context(), st, Config{Execute: f.run, Rehydrate: r}, doc)
@@ -61,7 +61,7 @@ func skippedFromRetry(t *testing.T, st *store.Store) []string {
 func TestARetryCopiesWhatItsSourceRunAlreadySucceededAt(t *testing.T) {
 	st := openStore(t)
 	sourceRun(t, st, map[string]string{"a": "success", "b": "failed", "c": "success"})
-	doc := nodeproto.PlanDoc{Pipeline: "p", Nodes: []nodeproto.PlanNode{{ID: "a"}, {ID: "b"}, {ID: "c", Deps: []string{"a"}}}}
+	doc := nodeproto.PlanDocOld{Pipeline: "p", Nodes: []nodeproto.PlanNode{{ID: "a"}, {ID: "b"}, {ID: "c", Deps: []string{"a"}}}}
 	f, res := rehydratedRun(t, st, &Rehydration{SourceRunID: sourceRunID}, doc)
 	if res.Status != "success" || !slices.Equal(f.calls, []string{"b"}) {
 		t.Fatalf("status %s ran %v, want success running only b, which failed in the source run", res.Status, f.calls)
@@ -78,7 +78,7 @@ func TestARetryCopiesWhatItsSourceRunAlreadySucceededAt(t *testing.T) {
 func TestAnAutomaticRetryRunsOnlyItsCausesAndWhatTheyReach(t *testing.T) {
 	st := openStore(t)
 	sourceRun(t, st, map[string]string{"a": "success", "b": "failed", "c": "cancelled", "d": "failed", "rescue": "skipped"})
-	doc := nodeproto.PlanDoc{Pipeline: "p", Nodes: []nodeproto.PlanNode{
+	doc := nodeproto.PlanDocOld{Pipeline: "p", Nodes: []nodeproto.PlanNode{
 		{ID: "a"},
 		{ID: "b"},
 		{ID: "c", Deps: []string{"b"}},
@@ -107,7 +107,7 @@ func (outputGone) GetNodeOutput(context.Context, string, string) ([]byte, error)
 	return nil, store.ErrNotFound
 }
 
-func scheduled(t *testing.T, st storage.StateStoreOld, cfg Config, doc nodeproto.PlanDoc, regenerate func(context.Context, *NodeRun, json.RawMessage) []expansion) RunResult {
+func scheduled(t *testing.T, st storage.StateStoreOld, cfg Config, doc nodeproto.PlanDocOld, regenerate func(context.Context, *NodeRun, json.RawMessage) []expansion) RunResult {
 	t.Helper()
 	ctx := t.Context()
 	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
@@ -132,7 +132,7 @@ func TestARetryRunsANodeWhoseRecordedOutputIsGone(t *testing.T) {
 	sourceRun(t, st, map[string]string{"a": "success"})
 	f := &fakeExec{}
 	res := scheduled(t, outputGone{st}, Config{Execute: f.run, Rehydrate: &Rehydration{SourceRunID: sourceRunID}},
-		nodeproto.PlanDoc{Pipeline: "p", Nodes: []nodeproto.PlanNode{{ID: "a"}}}, nil)
+		nodeproto.PlanDocOld{Pipeline: "p", Nodes: []nodeproto.PlanNode{{ID: "a"}}}, nil)
 	if res.Status != "success" || !f.ran("a") {
 		t.Fatalf("status %s ran %v: a node whose output is gone must run again, not copy a success with no output", res.Status, f.calls)
 	}

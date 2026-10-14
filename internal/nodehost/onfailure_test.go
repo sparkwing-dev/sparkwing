@@ -33,7 +33,7 @@ func TestRecoveryWaitsOnItsParentAlone(t *testing.T) {
 			return Result{Outcome: sparkwing.Success}
 		},
 	}}
-	doc := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{
+	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
 		{ID: "slow"},
 		{ID: "deploy"},
 		{ID: "rollback", OnFailureOf: "deploy", Deps: deps("slow")},
@@ -55,7 +55,7 @@ func TestRecoverySkipsAParentCancelledUpstream(t *testing.T) {
 	fx := &fakeExec{bodies: map[string]Executor{"build": func(context.Context, *NodeRun) Result {
 		return Result{Outcome: sparkwing.Failed, Err: errors.New("broke")}
 	}}}
-	doc := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{
+	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
 		{ID: "build"},
 		{ID: "deploy", Deps: deps("build")},
 		{ID: "rollback", OnFailureOf: "deploy"},
@@ -75,7 +75,7 @@ func TestAFailedRecoveryLeavesTheRunToItsParent(t *testing.T) {
 		return Result{Outcome: sparkwing.Failed, Err: errors.New("broke")}
 	}
 	fx := &fakeExec{bodies: map[string]Executor{"notify": broke, "notify-recover": broke}}
-	doc := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{
+	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
 		{ID: "notify", Modifiers: &nodeproto.PlanModifiers{Optional: true, OnFailure: "notify-recover"}},
 		{ID: "notify-recover", OnFailureOf: "notify"},
 	}}

@@ -31,7 +31,7 @@ type Plan struct {
 
 	claimWait time.Duration
 
-	checkout *Checkout
+	checkout *CheckoutOld
 
 	admissionClass AdmissionClass
 
@@ -148,7 +148,7 @@ func newNode(caller, id string, job Workable) *JobNode {
 		case "", ApprovalFail, ApprovalDeny, ApprovalApprove:
 		default:
 			panic(fmt.Sprintf(
-				"sparkwing: %s(%q): ApprovalConfig.OnExpiry = %q is not one of "+
+				"sparkwing: %s(%q): ApprovalConfigOld.OnExpiry = %q is not one of "+
 					"sparkwing.ApprovalFail / ApprovalDeny / ApprovalApprove",
 				caller, id, app.cfg.OnExpiry,
 			))
@@ -352,14 +352,14 @@ type JobNode struct {
 
 	needsGroups []*JobGroup
 
-	approval *ApprovalConfig
+	approval *ApprovalConfigOld
 
 	outputGlobs []string
 	consumes    []consumeEdge
 }
 
-// ApprovalConfig configures a manual approval gate.
-type ApprovalConfig struct {
+// ApprovalConfigOld configures a manual approval gate.
+type ApprovalConfigOld struct {
 	// Message is the operator-facing prompt shown in the dashboard /
 	// CLI. Empty falls back to a generic "Approve <node>?" in the UI.
 	Message string
@@ -373,7 +373,7 @@ type ApprovalConfig struct {
 
 type approvalJob struct {
 	Base
-	cfg ApprovalConfig
+	cfg ApprovalConfigOld
 }
 
 // Work satisfies the Workable interface but never executes; approval
@@ -392,11 +392,11 @@ const (
 
 func (n *JobNode) IsApproval() bool { return n.approval != nil }
 
-// ApprovalConfig returns the per-node approval configuration, or nil
+// ApprovalConfigOld returns the per-node approval configuration, or nil
 // for non-approval nodes. Used by the orchestrator to route gate
 // nodes through the approval waiter; pipeline authors don't usually
 // call this.
-func (n *JobNode) ApprovalConfig() *ApprovalConfig { return n.approval }
+func (n *JobNode) ApprovalConfigOld() *ApprovalConfigOld { return n.approval }
 
 // ApprovalGate exposes the modifiers supported by manual approval gates.
 type ApprovalGate struct {
@@ -406,7 +406,7 @@ type ApprovalGate struct {
 // JobApproval registers a gate that waits for a human decision.
 // Denial fails the gate; expiration follows cfg.OnExpiry.
 // Panics if the plan is nil, id is empty or registered, or cfg.OnExpiry is invalid.
-func JobApproval(p *Plan, id string, cfg ApprovalConfig) *ApprovalGate {
+func JobApproval(p *Plan, id string, cfg ApprovalConfigOld) *ApprovalGate {
 	if p == nil {
 		panic("sparkwing: JobApproval: plan must be non-nil")
 	}
@@ -588,7 +588,7 @@ func (n *JobNode) DepIDs() []string {
 }
 
 // Env sets a per-node environment variable. Overrides any inherited value.
-func (n *JobNode) Env(key, value string) *JobNode {
+func (n *JobNode) EnvOld(key, value string) *JobNode {
 	if n.env == nil {
 		n.env = map[string]string{}
 	}

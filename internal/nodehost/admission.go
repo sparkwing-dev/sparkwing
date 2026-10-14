@@ -132,7 +132,7 @@ func (a *Admission) boxID() string {
 
 // safety: a run whose own lease carries the plan's resources already holds
 // the host, so its nodes take no host lease of their own, as in the dispatcher.
-func hostAdmitted(doc nodeproto.PlanDoc) bool {
+func hostAdmitted(doc nodeproto.PlanDocOld) bool {
 	return doc.Resources != nil && (doc.Resources.Cores > 0 || doc.Resources.MemoryBytes > 0)
 }
 
@@ -160,14 +160,14 @@ func (a *Admission) request(n *NodeRun, claim *wingwire.SemaphoreClaim) wingwire
 	return req
 }
 
-func (a *Admission) priority(doc nodeproto.PlanDoc) int {
+func (a *Admission) priority(doc nodeproto.PlanDocOld) int {
 	if a.Priority != nil {
 		return *a.Priority
 	}
 	return doc.Priority
 }
 
-func (a *Admission) class(doc nodeproto.PlanDoc) string {
+func (a *Admission) class(doc nodeproto.PlanDocOld) string {
 	return cmp.Or(doc.AdmissionClass, a.Class, string(sparkwing.AdmissionNormal))
 }
 

@@ -22,7 +22,7 @@ func (GenCachedSuite) Examples() []sw.Example {
 
 func (GenCachedSuite) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
 	sw.Job(plan, "test", genCachedTest).
-		Memoize(inputs.Files("**/*.go"), sw.TTL(24*time.Hour))
+		Memoize(inputs.FilesOld("**/*.go"), sw.TTL(24*time.Hour))
 	return nil
 }
 

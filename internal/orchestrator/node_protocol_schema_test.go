@@ -120,7 +120,7 @@ func TestDescribeSchemaDeclaresEveryEmittedField(t *testing.T) {
 		"arg":            reflect.TypeFor[sparkwing.DescribeArg](),
 		"envVar":         reflect.TypeFor[sparkwing.EnvVarDoc](),
 		"stepRisks":      reflect.TypeFor[sparkwing.DescribeStepRisks](),
-		"plan":           reflect.TypeFor[nodeproto.PlanDoc](),
+		"plan":           reflect.TypeFor[nodeproto.PlanDocOld](),
 		"source":         reflect.TypeFor[nodeproto.PlanSource](),
 		"secret":         reflect.TypeFor[pipelines.SecretEntry](),
 		"concurrencyKey": reflect.TypeFor[nodeproto.PlanConc](),
@@ -160,7 +160,7 @@ func TestLogRecordsMatchTheSchema(t *testing.T) {
 	ctx := sparkwingruntime.WithLogger(context.Background(), logger)
 	ctx = sparkwingruntime.WithNode(ctx, "lint")
 	sparkwing.Info(ctx, "hello %s", "world")
-	sparkwing.Annotate(ctx, "unused variable")
+	sparkwing.AnnotateOld(ctx, "unused variable")
 	sparkwing.Summary(ctx, "## done")
 	if len(logger.records) != 3 {
 		t.Fatalf("captured %d records, want 3", len(logger.records))

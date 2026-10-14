@@ -21,7 +21,7 @@ func (GenApproval) Examples() []sw.Example {
 
 func (GenApproval) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
 	build := sw.Job(plan, "build", &genApprovalJob{name: "build"})
-	gate := sw.JobApproval(plan, "approve-deploy", sw.ApprovalConfig{
+	gate := sw.JobApproval(plan, "approve-deploy", sw.ApprovalConfigOld{
 		Message:  "Promote build to prod?",
 		Timeout:  20 * time.Second,
 		OnExpiry: sw.ApprovalApprove,

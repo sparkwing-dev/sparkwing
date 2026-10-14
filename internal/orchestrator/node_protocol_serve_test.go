@@ -117,7 +117,7 @@ type entrySession struct {
 	frames *nodeproto.Reader
 	stdout bytes.Buffer
 	nextID int
-	ops    map[string]nodeproto.Op
+	ops    map[string]nodeproto.OpOld
 	proto  protocolSchema
 	doc    protocolSchema
 	record protocolSchema
@@ -134,7 +134,7 @@ func startEntry(t *testing.T) *entrySession {
 		t.Fatal(err)
 	}
 	s := &entrySession{
-		t: t, req: reqW, frames: nodeproto.NewReader(frR), ops: map[string]nodeproto.Op{},
+		t: t, req: reqW, frames: nodeproto.NewReader(frR), ops: map[string]nodeproto.OpOld{},
 		proto:  loadProtocolSchema(t, "node-protocol.schema.json"),
 		doc:    loadProtocolSchema(t, "describe.schema.json"),
 		record: loadProtocolSchema(t, "log-record.schema.json"),
@@ -170,7 +170,7 @@ func startEntry(t *testing.T) *entrySession {
 
 // safety: returns the log records that arrived before the reply, so a test
 // can see plan code's logging went to the frame pipe.
-func (s *entrySession) call(req nodeproto.Request) (nodeproto.Reply, []map[string]any) {
+func (s *entrySession) call(req nodeproto.RequestOld) (nodeproto.ReplyOld, []map[string]any) {
 	s.t.Helper()
 	id := s.send(req)
 	reply, logs := s.next()
@@ -204,19 +204,19 @@ func jsonValue(t *testing.T, raw []byte) any {
 	return v
 }
 
-func wantCode(t *testing.T, r nodeproto.Reply, code nodeproto.ErrorCode) {
+func wantCode(t *testing.T, r nodeproto.ReplyOld, code nodeproto.ErrorCode) {
 	t.Helper()
 	if r.OK || r.Error == nil || r.Error.Code != code {
 		t.Errorf("reply %+v, want a failure with code %s", r, code)
 	}
 }
 
-func planRequest(args map[string]string) nodeproto.Request {
+func planRequest(args map[string]string) nodeproto.RequestOld {
 	return planRequestFor(servePipeline, args)
 }
 
-func planRequestFor(pipeline string, args map[string]string) nodeproto.Request {
-	return nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: pipeline, Args: args, Run: &nodeproto.RunContext{
+func planRequestFor(pipeline string, args map[string]string) nodeproto.RequestOld {
+	return nodeproto.RequestOld{Op: nodeproto.OpPlanOld, Pipeline: pipeline, Args: args, Run: &nodeproto.RunContextOld{
 		RunID: "run-1", Trigger: &nodeproto.Trigger{Source: "push"},
 		Git: &nodeproto.Git{SHA: "4f2c1e0", Branch: "main", Repo: "acme/app"},
 	}}
@@ -225,19 +225,19 @@ func planRequestFor(pipeline string, args map[string]string) nodeproto.Request {
 func TestNodeProtocolEntryServesDescribeAndPlan(t *testing.T) {
 	s := startEntry(t)
 
-	reply, _ := s.call(nodeproto.Request{Op: nodeproto.OpDescribe})
+	reply, _ := s.call(nodeproto.RequestOld{Op: nodeproto.OpDescribeOld})
 	var described sdkserve.DescribeDoc
 	if err := reply.Decode(&described); err != nil {
 		t.Fatal(err)
 	}
-	if described.Protocol != nodeproto.Version || !slices.ContainsFunc(described.Pipelines, func(p sparkwing.DescribePipeline) bool {
+	if described.Protocol != nodeproto.VersionOld || !slices.ContainsFunc(described.Pipelines, func(p sparkwing.DescribePipeline) bool {
 		return p.Name == servePipeline
 	}) {
-		t.Errorf("describe = %+v, want protocol %s listing %s", described, nodeproto.Version, servePipeline)
+		t.Errorf("describe = %+v, want protocol %s listing %s", described, nodeproto.VersionOld, servePipeline)
 	}
 
 	reply, logs := s.call(planRequest(map[string]string{"env": "prod"}))
-	var doc nodeproto.PlanDoc
+	var doc nodeproto.PlanDocOld
 	if err := reply.Decode(&doc); err != nil {
 		t.Fatal(err)
 	}
@@ -264,10 +264,10 @@ func TestNodeProtocolEntryServesDescribeAndPlan(t *testing.T) {
 
 func TestNodeProtocolEntryRefusesBadPlans(t *testing.T) {
 	for name, tc := range map[string]struct {
-		req  nodeproto.Request
+		req  nodeproto.RequestOld
 		want nodeproto.ErrorCode
 	}{
-		"unknown pipeline": {nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: "nope", Args: map[string]string{}, Run: &nodeproto.RunContext{RunID: "r"}}, nodeproto.CodeUnknownPipeline},
+		"unknown pipeline": {nodeproto.RequestOld{Op: nodeproto.OpPlanOld, Pipeline: "nope", Args: map[string]string{}, Run: &nodeproto.RunContextOld{RunID: "r"}}, nodeproto.CodeUnknownPipeline},
 		"missing flag":     {planRequest(map[string]string{}), nodeproto.CodeInvalidArgs},
 		"bad int":          {planRequest(map[string]string{"env": "prod", "count": "many"}), nodeproto.CodeInvalidArgs},
 		"bad job flag":     {planRequest(map[string]string{"env": "prod", "replicas": "many"}), nodeproto.CodeInvalidArgs},
@@ -289,7 +289,7 @@ func TestNodeProtocolEntrySurvivesAPanickingPlan(t *testing.T) {
 	if reply.Error != nil && !strings.Contains(reply.Error.Message, "plan blew up") {
 		t.Errorf("panic reply %q does not carry the panic", reply.Error.Message)
 	}
-	if reply, _ := s.call(nodeproto.Request{Op: nodeproto.OpDescribe}); !reply.OK {
+	if reply, _ := s.call(nodeproto.RequestOld{Op: nodeproto.OpDescribeOld}); !reply.OK {
 		t.Errorf("describe after the panic = %+v, want an answer from the same process", reply)
 	}
 	s.end()

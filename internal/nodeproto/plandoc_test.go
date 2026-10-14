@@ -6,7 +6,7 @@ import (
 )
 
 func TestPlanDocWireKeys(t *testing.T) {
-	raw, err := json.Marshal(PlanDoc{Protocol: "1", Pipeline: "demo", RunID: "run-1", Nodes: []PlanNode{}})
+	raw, err := json.Marshal(PlanDocOld{Protocol: "1", Pipeline: "demo", RunID: "run-1", Nodes: []PlanNode{}})
 	if err != nil {
 		t.Fatal(err)
 	}

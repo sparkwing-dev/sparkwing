@@ -87,7 +87,7 @@ func readDescribeFile(path string) []sparkwing.DescribePipeline {
 		return nil
 	}
 	var doc sdkserve.DescribeDoc
-	if err := json.Unmarshal(raw, &doc); err != nil || doc.Protocol != nodeproto.Version || doc.Pipelines == nil {
+	if err := json.Unmarshal(raw, &doc); err != nil || doc.Protocol != nodeproto.VersionOld || doc.Pipelines == nil {
 		return nil
 	}
 	return doc.Pipelines

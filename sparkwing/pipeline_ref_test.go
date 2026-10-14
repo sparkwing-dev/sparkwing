@@ -98,7 +98,7 @@ func TestRefToLastRun_NoOptions(t *testing.T) {
 	if ref.MaxAge != 0 {
 		t.Fatalf("MaxAge: %v", ref.MaxAge)
 	}
-	if ref.Pipeline != "build" || ref.NodeID != "artifact" {
+	if ref.Pipeline != "build" || ref.JobID != "artifact" {
 		t.Fatalf("fields: %+v", ref)
 	}
 }
@@ -112,7 +112,7 @@ func TestCollectRefs_DiscoversFilledRefFields(t *testing.T) {
 	}
 	job := &JobNode{
 		Build: RefToLastRun[buildOut]("build", "artifact", MaxAge(1*time.Hour)),
-		InRun: Ref[buildOut]{NodeID: "sibling"},
+		InRun: Ref[buildOut]{JobID: "sibling"},
 	}
 	got := collectRefs(job)
 	want := []RefTarget{{Pipeline: "build", NodeID: "artifact"}, {NodeID: "sibling"}}

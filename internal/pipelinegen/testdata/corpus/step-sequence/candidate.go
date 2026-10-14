@@ -28,7 +28,7 @@ type genStepSequenceJob struct{ sw.Base }
 func (j *genStepSequenceJob) Work(w *sw.Work) (*sw.WorkStep, error) {
 	compile := sw.Step(w, "compile", func(ctx context.Context) (string, error) {
 		version := "v1.4.2"
-		sw.Annotate(ctx, "compiled "+version)
+		sw.AnnotateOld(ctx, "compiled "+version)
 		return version, nil
 	})
 

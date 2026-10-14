@@ -8,7 +8,7 @@ import (
 
 // safety: leaves out requires and spec_hash, which the node protocol gives to
 // the host.
-func planDocument(plan *sparkwing.Plan, rc sparkwing.RunContext, reg *sparkwing.Registration) (nodeproto.PlanDoc, error) {
+func planDocument(plan *sparkwing.Plan, rc sparkwing.RunContext, reg *sparkwing.Registration) (nodeproto.PlanDocOld, error) {
 	snap, err := buildPlanSnapshot(plan, rc, planSnapshotMeta{Secrets: sparkwingruntime.ReflectSecretsField(reg)})
 	if err != nil {
 		return snap, err

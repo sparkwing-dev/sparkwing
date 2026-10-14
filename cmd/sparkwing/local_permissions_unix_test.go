@@ -21,7 +21,7 @@ func TestDirectHomeWritersCreatePrivatePaths(t *testing.T) {
 	}
 
 	t.Setenv("SPARKWING_HOME", home)
-	if err := storeDescribe(t.TempDir(), "schema", sdkserve.DescribeDoc{Protocol: nodeproto.Version}); err != nil {
+	if err := storeDescribe(t.TempDir(), "schema", sdkserve.DescribeDoc{Protocol: nodeproto.VersionOld}); err != nil {
 		t.Fatal(err)
 	}
 	describe := describeCachePath("schema")

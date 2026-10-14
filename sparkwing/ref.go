@@ -40,10 +40,10 @@ import (
 //	    return deploy(ctx, b, m)
 //	}
 type Ref[T any] struct {
-	// NodeID identifies the producing node. For in-run refs this is
+	// JobID identifies the producing job. For in-run refs this is
 	// a sibling node id; for cross-pipeline refs this is a node id
 	// inside Pipeline.
-	NodeID string
+	JobID string
 
 	// Pipeline names the upstream pipeline when the ref is
 	// cross-pipeline. Empty means in-run.
@@ -56,7 +56,7 @@ type Ref[T any] struct {
 }
 
 // Job returns the upstream node id this reference points at.
-func (r Ref[T]) Job() string { return r.NodeID }
+func (r Ref[T]) Job() string { return r.JobID }
 
 // Get resolves the reference to a typed T value. Behavior depends
 // on the routing:
@@ -164,9 +164,9 @@ func absentInRun(nodeID string) error {
 
 func (r Ref[T]) describe() string {
 	if r.Pipeline != "" {
-		return fmt.Sprintf("%s/%s", r.Pipeline, r.NodeID)
+		return fmt.Sprintf("%s/%s", r.Pipeline, r.JobID)
 	}
-	return r.NodeID
+	return r.JobID
 }
 
 // resolve reads the referenced output. present is true only when a
@@ -185,15 +185,15 @@ func (r Ref[T]) getInRun(ctx context.Context) (T, bool, error) {
 	if jsonResolve == nil {
 		return out, false, fmt.Errorf("sparkwing: Ref[%T].Get called without a resolver in context", out)
 	}
-	data, err := jsonResolve(ctx, r.NodeID)
+	data, err := jsonResolve(ctx, r.JobID)
 	if err != nil {
 		return out, false, fmt.Errorf("sparkwing: Ref[%T].Get: %w", out, err)
 	}
 	if err := json.Unmarshal(data, &out); err != nil {
 		var zero T
-		return zero, false, fmt.Errorf("sparkwing: Ref[%T].Get: unmarshal node %q output: %w", zero, r.NodeID, err)
+		return zero, false, fmt.Errorf("sparkwing: Ref[%T].Get: unmarshal node %q output: %w", zero, r.JobID, err)
 	}
-	Debug(ctx, "Ref.Get(%s): %d bytes", r.NodeID, len(data))
+	Debug(ctx, "Ref.Get(%s): %d bytes", r.JobID, len(data))
 	return out, true, nil
 }
 
@@ -202,12 +202,12 @@ func (r Ref[T]) getCrossPipeline(ctx context.Context) (T, bool, error) {
 	resolver := pipelineResolverFromContext(ctx)
 	if resolver == nil {
 		return out, false, fmt.Errorf("sparkwing: Ref[%T].Get called without a pipeline resolver in context (pipeline=%q node=%q)",
-			out, r.Pipeline, r.NodeID)
+			out, r.Pipeline, r.JobID)
 	}
-	resolved, err := resolver.resolve(ctx, r.Pipeline, r.NodeID, r.MaxAge)
+	resolved, err := resolver.resolve(ctx, r.Pipeline, r.JobID, r.MaxAge)
 	if err != nil {
 		return out, false, fmt.Errorf("sparkwing: Ref[%T].Get failed (pipeline=%q node=%q): %w",
-			out, r.Pipeline, r.NodeID, err)
+			out, r.Pipeline, r.JobID, err)
 	}
 	if len(resolved.Data) == 0 || string(resolved.Data) == "null" {
 		return out, false, nil
@@ -215,7 +215,7 @@ func (r Ref[T]) getCrossPipeline(ctx context.Context) (T, bool, error) {
 	if err := json.Unmarshal(resolved.Data, &out); err != nil {
 		var zero T
 		return zero, false, fmt.Errorf("sparkwing: Ref[%T].Get: unmarshal %s/%s output from run %s: %w",
-			zero, r.Pipeline, r.NodeID, resolved.RunID, err)
+			zero, r.Pipeline, r.JobID, resolved.RunID, err)
 	}
 	return out, true, nil
 }
@@ -252,7 +252,7 @@ func RefTo[T any](n *JobNode) Ref[T] {
 			zero, n.id, got, want,
 		))
 	}
-	return Ref[T]{NodeID: n.id}
+	return Ref[T]{JobID: n.id}
 }
 
 // RefOption tunes a cross-pipeline ref constructor (RefToLastRun).
@@ -303,7 +303,7 @@ func RefToLastRun[T any](pipeline, nodeID string, opts ...RefOption) Ref[T] {
 		opt(&o)
 	}
 	return Ref[T]{
-		NodeID:   nodeID,
+		JobID:    nodeID,
 		Pipeline: pipeline,
 		MaxAge:   o.maxAge,
 	}
@@ -340,7 +340,7 @@ func (n *JobNode) PipelineRefs() []RefTarget {
 	return out
 }
 
-func (r Ref[T]) target() RefTarget { return RefTarget{Pipeline: r.Pipeline, NodeID: r.NodeID} }
+func (r Ref[T]) target() RefTarget { return RefTarget{Pipeline: r.Pipeline, NodeID: r.JobID} }
 
 type refField interface{ target() RefTarget }
 

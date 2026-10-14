@@ -189,7 +189,7 @@ func TestRetryLeavesTheRowRunningBetweenAttempts(t *testing.T) {
 		during = row
 		return Result{Outcome: sparkwing.Success}
 	}
-	doc := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "flaky", Modifiers: retry}}}
+	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "flaky", Modifiers: retry}}}
 	if res := hostDoc(t, t.Context(), st, doc, body); res.Status != "success" {
 		t.Fatalf("status %s err %v, want success", res.Status, res.Err)
 	}
@@ -211,7 +211,7 @@ func TestRetryLeavesTheRowRunningThroughItsBackoff(t *testing.T) {
 		close(failed)
 		return Result{Outcome: sparkwing.Failed, Err: errors.New("flake")}
 	}
-	doc := nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "flaky", Modifiers: &nodeproto.PlanModifiers{Retry: 1, RetryBackoffMS: int64(time.Hour / time.Millisecond)}}}}
+	doc := nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "flaky", Modifiers: &nodeproto.PlanModifiers{Retry: 1, RetryBackoffMS: int64(time.Hour / time.Millisecond)}}}}
 	done := make(chan RunResult)
 	go func() { done <- hostDoc(t, ctx, st, doc, body) }()
 	<-failed

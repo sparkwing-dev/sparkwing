@@ -17,7 +17,7 @@ import (
 // hack: a Go node's body is its Work, so run_node runs every step in this
 // process and answers with the result step's output, as the in-process
 // executor does.
-func runNode(ctx context.Context, s *server, req nodeproto.Request) (any, error) {
+func runNode(ctx context.Context, s *server, req nodeproto.RequestOld) (any, error) {
 	planned := s.plan()
 	n := planned.Plan.Job(req.Node)
 	if n == nil {
@@ -45,18 +45,18 @@ func withFailure(ctx context.Context, f *nodeproto.Failure) context.Context {
 }
 
 // safety: a body's error is still a successful reply, since the body ran.
-func bodyResult(out any, err error) nodeproto.RunResult {
+func bodyResult(out any, err error) nodeproto.RunResultOld {
 	if err == nil && out != nil {
 		var raw []byte
 		if raw, err = json.Marshal(out); err == nil {
-			return nodeproto.RunResult{Outcome: nodeproto.OutcomeSuccess, Output: raw}
+			return nodeproto.RunResultOld{Outcome: nodeproto.OutcomeSuccess, Output: raw}
 		}
 		err = fmt.Errorf("node output: %w", err)
 	}
 	if err != nil {
-		return nodeproto.RunResult{Outcome: nodeproto.OutcomeFailed, Error: err.Error()}
+		return nodeproto.RunResultOld{Outcome: nodeproto.OutcomeFailed, Error: err.Error()}
 	}
-	return nodeproto.RunResult{Outcome: nodeproto.OutcomeSuccess}
+	return nodeproto.RunResultOld{Outcome: nodeproto.OutcomeSuccess}
 }
 
 // safety: a panic in a node body is the body failing, not the SDK, so it

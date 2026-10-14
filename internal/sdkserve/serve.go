@@ -31,7 +31,7 @@ type Config struct {
 	SDKVersion string
 	// PlanDoc turns a built plan into the plan document the plan request
 	// answers with.
-	PlanDoc func(*sparkwing.Plan, sparkwing.RunContext, *sparkwing.Registration) (nodeproto.PlanDoc, error)
+	PlanDoc func(*sparkwing.Plan, sparkwing.RunContext, *sparkwing.Registration) (nodeproto.PlanDocOld, error)
 	// Node reaches the host's /node/v1 routes; nil leaves secrets, other
 	// nodes' outputs, OIDC and child runs unreachable. Main sets it from what
 	// protofd read at initialization.
@@ -70,7 +70,7 @@ type Planned struct {
 	Registration *sparkwing.Registration
 	Plan         *sparkwing.Plan
 	Run          sparkwing.RunContext
-	Doc          nodeproto.PlanDoc
+	Doc          nodeproto.PlanDocOld
 }
 
 type server struct {
@@ -93,18 +93,18 @@ type server struct {
 
 type handler struct {
 	needsPlan bool
-	run       func(ctx context.Context, s *server, req nodeproto.Request) (any, error)
+	run       func(ctx context.Context, s *server, req nodeproto.RequestOld) (any, error)
 }
 
 // safety: an op absent from this table answers unknown_op, so a stub needs no
 // entry.
-var handlers = map[nodeproto.Op]handler{
-	nodeproto.OpDescribe: {run: describe},
-	nodeproto.OpPlan:     {run: plan},
-	nodeproto.OpRunNode:  {needsPlan: true, run: runNode},
-	nodeproto.OpRunStep:  {needsPlan: true, run: runStep},
-	nodeproto.OpEval:     {needsPlan: true, run: eval},
-	nodeproto.OpCancel:   {run: cancelStep},
+var handlers = map[nodeproto.OpOld]handler{
+	nodeproto.OpDescribeOld: {run: describe},
+	nodeproto.OpPlanOld:     {run: plan},
+	nodeproto.OpRunNodeOld:  {needsPlan: true, run: runNode},
+	nodeproto.OpRunStepOld:  {needsPlan: true, run: runStep},
+	nodeproto.OpEvalOld:     {needsPlan: true, run: eval},
+	nodeproto.OpCancelOld:   {run: cancelStep},
 }
 
 // Serve answers each request read from in with a reply on out until in ends.
@@ -136,7 +136,7 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, cfg Config) error {
 	}
 }
 
-func (s *server) dispatch(ctx context.Context, req nodeproto.Request) {
+func (s *server) dispatch(ctx context.Context, req nodeproto.RequestOld) {
 	h, ok := handlers[req.Op]
 	switch {
 	case !ok:
@@ -151,11 +151,11 @@ func (s *server) dispatch(ctx context.Context, req nodeproto.Request) {
 
 // safety: a panic in pipeline code fails its request and leaves the process
 // serving, so the host reads a reply rather than sdk_exited.
-func run(ctx context.Context, s *server, h handler, req nodeproto.Request) (result any, err error) {
+func run(ctx context.Context, s *server, h handler, req nodeproto.RequestOld) (result any, err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			perr := &nodeproto.Error{Message: fmt.Sprintf("%s panicked: %v", req.Op, p)}
-			if req.Op == nodeproto.OpPlan {
+			if req.Op == nodeproto.OpPlanOld {
 				perr.Code = nodeproto.CodePlanFailed
 			}
 			result, err = nil, perr
@@ -176,7 +176,7 @@ func (s *server) reply(id string, result any, err error) {
 	if err == nil {
 		var raw []byte
 		if raw, err = json.Marshal(result); err == nil {
-			if err = s.send(nodeproto.Reply{ID: id, OK: true, Result: raw}); err == nil {
+			if err = s.send(nodeproto.ReplyOld{ID: id, OK: true, Result: raw}); err == nil {
 				return
 			}
 		}
@@ -185,7 +185,7 @@ func (s *server) reply(id string, result any, err error) {
 	if !errors.As(err, &perr) {
 		perr = &nodeproto.Error{Message: err.Error()}
 	}
-	if err := s.send(nodeproto.Reply{ID: id, Error: perr}); err != nil {
+	if err := s.send(nodeproto.ReplyOld{ID: id, Error: perr}); err != nil {
 		// safety: the host waits on every reply, so a frame pipe that takes
 		// none ends the process; the read loop sits in a pipe read no cancel
 		// reaches.

@@ -16,7 +16,7 @@ type afterRunInput struct {
 	Error   string            `json:"error,omitempty"`
 }
 
-func eval(ctx context.Context, s *server, req nodeproto.Request) (any, error) {
+func eval(ctx context.Context, s *server, req nodeproto.RequestOld) (any, error) {
 	planned := s.plan()
 	c, ok := sparkwingruntime.LookupClosure(planned.Plan, req.Closure)
 	if !ok {
@@ -40,7 +40,7 @@ func eval(ctx context.Context, s *server, req nodeproto.Request) (any, error) {
 		}
 	}
 	value, err := callClosure(ctx, c, nodeErr)
-	var res nodeproto.EvalResult
+	var res nodeproto.EvalResultOld
 	if err != nil {
 		msg := err.Error()
 		res.Error = &msg
@@ -52,9 +52,9 @@ func eval(ctx context.Context, s *server, req nodeproto.Request) (any, error) {
 	return res, nil
 }
 
-func closureFailed(err error) nodeproto.EvalResult {
+func closureFailed(err error) nodeproto.EvalResultOld {
 	msg := err.Error()
-	return nodeproto.EvalResult{Value: json.RawMessage("null"), Error: &msg}
+	return nodeproto.EvalResultOld{Value: json.RawMessage("null"), Error: &msg}
 }
 
 // safety: a panic in a closure is the closure failing, so it answers error

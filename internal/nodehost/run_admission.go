@@ -85,7 +85,7 @@ func runHolder(run *Run) slotHolder {
 
 // safety: each list is in key order, so two runs never take one another's
 // groups in opposite orders.
-func (a *Admission) planGroups(doc nodeproto.PlanDoc) (claims []wingwire.SemaphoreClaim, inStore []group) {
+func (a *Admission) planGroups(doc nodeproto.PlanDocOld) (claims []wingwire.SemaphoreClaim, inStore []group) {
 	pcs := doc.PlanConcs
 	if doc.PlanConc != nil {
 		pcs = append([]nodeproto.PlanConc{*doc.PlanConc}, pcs...)

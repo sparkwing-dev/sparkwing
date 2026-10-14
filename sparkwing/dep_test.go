@@ -10,7 +10,7 @@ import (
 func TestDep_MixedTypesCompose(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	a := sparkwing.Job(plan, "a", &buildJob{})
-	gate := sparkwing.JobApproval(plan, "review", sparkwing.ApprovalConfig{
+	gate := sparkwing.JobApproval(plan, "review", sparkwing.ApprovalConfigOld{
 		OnExpiry: sparkwing.ApprovalDeny,
 	})
 	group := sparkwing.GroupJobs(plan, "shards", a)

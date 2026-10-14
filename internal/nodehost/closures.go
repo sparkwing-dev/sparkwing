@@ -72,8 +72,8 @@ func skipIfLayer(cfg *Config, next Executor) Executor {
 func skipIfEval(ctx context.Context, sess *Session, log Sink, id string, i int, budget time.Duration) (bool, error) {
 	bctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
-	var er nodeproto.EvalResult
-	err := ask(bctx, sess, nodeproto.Request{Op: nodeproto.OpEval, Closure: id}, &er)
+	var er nodeproto.EvalResultOld
+	err := ask(bctx, sess, nodeproto.RequestOld{Op: nodeproto.OpEvalOld, Closure: id}, &er)
 	switch {
 	case err != nil && ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded):
 		closureNote(log, "error", fmt.Sprintf("SkipIf predicate %d exceeded %s budget (defaulting to don't-skip); raise via SkipIf(fn, sparkwing.SkipBudget(d))", i, budget))
@@ -189,8 +189,8 @@ func afterRunArgOf(res Result) afterRunArg {
 
 // safety: msg is the closure's own error and err a failed reply or broken session, which callers treat differently.
 func closureEval(ctx context.Context, sess *Session, id string, input json.RawMessage) (msg *string, err error) {
-	var er nodeproto.EvalResult
-	if err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpEval, Closure: id, Input: input}, &er); err != nil {
+	var er nodeproto.EvalResultOld
+	if err := ask(ctx, sess, nodeproto.RequestOld{Op: nodeproto.OpEvalOld, Closure: id, Input: input}, &er); err != nil {
 		return nil, err
 	}
 	return er.Error, nil

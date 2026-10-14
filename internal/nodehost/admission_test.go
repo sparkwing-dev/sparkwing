@@ -23,7 +23,7 @@ func init() {
 
 const testBox = "box-1"
 
-func runAdmitted(t *testing.T, ctx context.Context, st *store.Store, doc nodeproto.PlanDoc, adm *Admission, exec Executor) RunResult {
+func runAdmitted(t *testing.T, ctx context.Context, st *store.Store, doc nodeproto.PlanDocOld, adm *Admission, exec Executor) RunResult {
 	t.Helper()
 	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
@@ -289,7 +289,7 @@ func TestAdmissionLeasesHostAroundEachNode(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	d := newFakeDaemon()
-	doc := nodeproto.PlanDoc{Pipeline: "p", Priority: 5, Nodes: []nodeproto.PlanNode{
+	doc := nodeproto.PlanDocOld{Pipeline: "p", Priority: 5, Nodes: []nodeproto.PlanNode{
 		{ID: "ok", Modifiers: &nodeproto.PlanModifiers{ResCores: 2, ResMemoryBytes: 1 << 30}},
 		{ID: "bad"},
 	}}
@@ -329,7 +329,7 @@ func TestAdmissionPriorityAndClassPrecedence(t *testing.T) {
 	defer cancel()
 	d := newFakeDaemon()
 	front := 9
-	doc := nodeproto.PlanDoc{Priority: 5, AdmissionClass: "critical", Nodes: []nodeproto.PlanNode{{ID: "a"}}}
+	doc := nodeproto.PlanDocOld{Priority: 5, AdmissionClass: "critical", Nodes: []nodeproto.PlanNode{{ID: "a"}}}
 	runAdmitted(t, ctx, st, doc, &Admission{Daemon: d, Priority: &front, Class: "batch"}, nil)
 	reqs := d.requests()
 	if len(reqs) != 1 || reqs[0].Priority != 9 || reqs[0].Class != "critical" {
@@ -346,7 +346,7 @@ func TestAdmissionRunHoldingTheHostTakesOnlySemaphores(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	d := newFakeDaemon()
-	doc := nodeproto.PlanDoc{Resources: &nodeproto.PlanResources{Cores: 4}, Nodes: append(grouped("run", "", 1, 0, "g"), nodeproto.PlanNode{ID: "plain"})}
+	doc := nodeproto.PlanDocOld{Resources: &nodeproto.PlanResources{Cores: 4}, Nodes: append(grouped("run", "", 1, 0, "g"), nodeproto.PlanNode{ID: "plain"})}
 	res := runAdmitted(t, ctx, st, doc, &Admission{Daemon: d}, nil)
 	if res.Status != "failed" || res.Nodes["plain"].Outcome != sparkwing.Failed {
 		t.Fatalf("result %+v", res)
@@ -363,7 +363,7 @@ func TestAdmissionDaemonGroupBoundsParallelNodes(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	d, g := newFakeDaemon(), newGauge()
-	doc := nodeproto.PlanDoc{Nodes: grouped("box", "queue", 2, 0, "a", "b", "c", "d")}
+	doc := nodeproto.PlanDocOld{Nodes: grouped("box", "queue", 2, 0, "a", "b", "c", "d")}
 	done := make(chan RunResult, 1)
 	go func() { done <- runAdmitted(t, ctx, st, doc, &Admission{Daemon: d}, g.exec) }()
 	recv(t, ctx, g.entered)
@@ -391,7 +391,7 @@ func TestAdmissionStoreGroupBoundsParallelNodes(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	slots, g := storeSlots{st: st, queued: make(chan string, 64)}, newGauge()
-	doc := nodeproto.PlanDoc{Nodes: grouped("", "queue", 2, 0, "a", "b", "c", "d")}
+	doc := nodeproto.PlanDocOld{Nodes: grouped("", "queue", 2, 0, "a", "b", "c", "d")}
 	done := make(chan RunResult, 1)
 	go func() { done <- runAdmitted(t, ctx, st, doc, &Admission{Slots: slots}, g.exec) }()
 	recv(t, ctx, g.entered)
@@ -434,7 +434,7 @@ func TestAdmissionCancelWhileQueuedInStore(t *testing.T) {
 	runCtx, cancelRun := context.WithCancel(ctx)
 	go func() { recv(t, ctx, slots.queued); cancelRun() }()
 	ran := false
-	res := runAdmitted(t, runCtx, st, nodeproto.PlanDoc{Nodes: grouped("global", "queue", 1, 0, "b")}, &Admission{Slots: slots},
+	res := runAdmitted(t, runCtx, st, nodeproto.PlanDocOld{Nodes: grouped("global", "queue", 1, 0, "b")}, &Admission{Slots: slots},
 		func(context.Context, *NodeRun) Result { ran = true; return Result{Outcome: sparkwing.Success} })
 	if ran || res.Nodes["b"].Outcome != sparkwing.Cancelled {
 		t.Fatalf("ran=%v result %+v, want cancelled before running", ran, res.Nodes["b"])
@@ -461,7 +461,7 @@ func TestAdmissionStoreQueueTimeoutAndLimitPolicies(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
 			holdSlotOutside(t, st, "g:db")
-			res := runAdmitted(t, ctx, st, nodeproto.PlanDoc{Nodes: grouped("", c.onLimit, 1, 30, "b")}, &Admission{Slots: storeSlots{st: st}},
+			res := runAdmitted(t, ctx, st, nodeproto.PlanDocOld{Nodes: grouped("", c.onLimit, 1, 30, "b")}, &Admission{Slots: storeSlots{st: st}},
 				func(context.Context, *NodeRun) Result {
 					return Result{Outcome: sparkwing.Failed, Err: errors.New("ran past a full group")}
 				})
@@ -500,7 +500,7 @@ func TestAdmissionDaemonQueueCancelTimeoutAndPolicies(t *testing.T) {
 			if c.cancel {
 				go func() { recv(t, ctx, d.queued); cancelRun() }()
 			}
-			res := runAdmitted(t, runCtx, st, nodeproto.PlanDoc{Nodes: grouped("box", c.onLimit, 1, c.timeoutMS, "b")}, &Admission{Daemon: d},
+			res := runAdmitted(t, runCtx, st, nodeproto.PlanDocOld{Nodes: grouped("box", c.onLimit, 1, c.timeoutMS, "b")}, &Admission{Daemon: d},
 				func(context.Context, *NodeRun) Result {
 					return Result{Outcome: sparkwing.Failed, Err: errors.New("ran past a full group")}
 				})
@@ -522,7 +522,7 @@ func TestAdmissionCancelWhileWaitingForHost(t *testing.T) {
 	d.hostGate = make(chan struct{})
 	runCtx, cancelRun := context.WithCancel(ctx)
 	go func() { recv(t, ctx, d.queued); cancelRun() }()
-	res := runAdmitted(t, runCtx, st, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "a"}}}, &Admission{Daemon: d},
+	res := runAdmitted(t, runCtx, st, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "a"}}}, &Admission{Daemon: d},
 		func(context.Context, *NodeRun) Result { return Result{Outcome: sparkwing.Success} })
 	if got := res.Nodes["a"]; got.Outcome != sparkwing.Cancelled {
 		t.Fatalf("result %+v, want cancelled", got)
@@ -553,7 +553,7 @@ func TestAdmissionHostLeaseIsWatchedWhileTheNodeRuns(t *testing.T) {
 		}
 		return Result{Outcome: sparkwing.Success}
 	}
-	res := runAdmitted(t, ctx, st, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "a"}}}, &Admission{Daemon: d}, exec)
+	res := runAdmitted(t, ctx, st, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "a"}}}, &Admission{Daemon: d}, exec)
 	if got := res.Nodes["a"]; got.Outcome != sparkwing.Success {
 		t.Fatalf("result %+v", got)
 	}
@@ -595,7 +595,7 @@ func TestAdmissionLeaseEndings(t *testing.T) {
 			if c.grouped {
 				nodes = grouped("box", "cancel_others", 1, 0, "a")
 			}
-			res := runAdmitted(t, ctx, st, nodeproto.PlanDoc{Nodes: nodes}, &Admission{Daemon: d}, g.exec)
+			res := runAdmitted(t, ctx, st, nodeproto.PlanDocOld{Nodes: nodes}, &Admission{Daemon: d}, g.exec)
 			if got := res.Nodes["a"]; got.Outcome != c.want || !strings.Contains(errText(got.Err), c.errHas) {
 				t.Fatalf("result %+v, want %s with %q", got, c.want, c.errHas)
 			}
@@ -661,7 +661,7 @@ func TestAdmissionStoreOutageToleranceMatchesTheDispatcher(t *testing.T) {
 					t.Error(err)
 				}
 			}()
-			res := runAdmitted(t, ctx, st, nodeproto.PlanDoc{Nodes: grouped("", "queue", 1, 0, "b")}, &Admission{Slots: slots},
+			res := runAdmitted(t, ctx, st, nodeproto.PlanDocOld{Nodes: grouped("", "queue", 1, 0, "b")}, &Admission{Slots: slots},
 				func(context.Context, *NodeRun) Result { return Result{Outcome: sparkwing.Success} })
 			if got := res.Nodes["b"]; got.Outcome != c.want {
 				t.Fatalf("result %+v, want %s", got, c.want)
@@ -675,7 +675,7 @@ func TestAdmissionGroupWithoutAStoreFails(t *testing.T) {
 	st := openStore(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	res := runAdmitted(t, ctx, st, nodeproto.PlanDoc{Nodes: grouped("global", "", 1, 0, "a")}, &Admission{Daemon: newFakeDaemon()}, nil)
+	res := runAdmitted(t, ctx, st, nodeproto.PlanDocOld{Nodes: grouped("global", "", 1, 0, "a")}, &Admission{Daemon: newFakeDaemon()}, nil)
 	if got := res.Nodes["a"]; got.Outcome != sparkwing.Failed || !strings.Contains(errText(got.Err), "no coordination store") {
 		t.Fatalf("result %+v", got)
 	}

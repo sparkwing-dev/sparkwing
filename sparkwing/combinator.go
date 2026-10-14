@@ -253,9 +253,9 @@ func (g *JobGroup) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobGroup {
 }
 
 // Env sets a per-node environment variable on every member.
-func (g *JobGroup) Env(key, value string) *JobGroup {
+func (g *JobGroup) EnvOld(key, value string) *JobGroup {
 	for _, m := range g.Members() {
-		m.Env(key, value)
+		m.EnvOld(key, value)
 	}
 	return g
 }

@@ -6,19 +6,19 @@ import (
 	"time"
 )
 
-// Op names a request the host sends.
-type Op string
+// OpOld names a request the host sends.
+type OpOld string
 
 // The requests an SDK process answers.
 const (
-	OpDescribe Op = "describe"
-	OpPlan     Op = "plan"
-	OpRunNode  Op = "run_node"
-	OpRunStep  Op = "run_step"
-	OpEval     Op = "eval"
-	// OpCancel cancels the run_step in flight for a node and step; that
+	OpDescribeOld OpOld = "describe"
+	OpPlanOld     OpOld = "plan"
+	OpRunNodeOld  OpOld = "run_node"
+	OpRunStepOld  OpOld = "run_step"
+	OpEvalOld     OpOld = "eval"
+	// OpCancelOld cancels the run_step in flight for a node and step; that
 	// run_step still gets its own reply.
-	OpCancel Op = "cancel"
+	OpCancelOld OpOld = "cancel"
 )
 
 // ErrorCode classifies why an SDK could not do what a request asked, or why
@@ -51,17 +51,17 @@ const (
 	CodeSDKError         ErrorCode = "sdk_error"
 )
 
-// Request is one line the host writes to the SDK process's request pipe. Which
-// fields are set depends on Op; [Request.Validate] checks them.
-type Request struct {
+// RequestOld is one line the host writes to the SDK process's request pipe. Which
+// fields are set depends on OpOld; [RequestOld.Validate] checks them.
+type RequestOld struct {
 	ID string `json:"id"`
-	Op Op     `json:"op"`
+	Op OpOld  `json:"op"`
 
 	// Pipeline, Args and Run are the plan request's inputs. Args is sent
 	// even when empty, so a plan request sets it to a non-nil map.
 	Pipeline string            `json:"pipeline,omitempty"`
 	Args     map[string]string `json:"args,omitzero"`
-	Run      *RunContext       `json:"run,omitempty"`
+	Run      *RunContextOld    `json:"run,omitempty"`
 
 	// Node names the node for run_node, run_step and cancel.
 	Node string `json:"node,omitempty"`
@@ -79,9 +79,9 @@ type Request struct {
 	Input   json.RawMessage `json:"input,omitempty"`
 }
 
-// RunContext is what plan code reads about its run. The host sends it with
+// RunContextOld is what plan code reads about its run. The host sends it with
 // the plan request so the SDK never reads the run from a controller.
-type RunContext struct {
+type RunContextOld struct {
 	RunID     string    `json:"run_id"`
 	Git       *Git      `json:"git,omitempty"`
 	Trigger   *Trigger  `json:"trigger,omitempty"`
@@ -128,7 +128,7 @@ type Failure struct {
 // Validate reports whether r carries the fields its op needs. The error is an
 // [*Error] whose code an SDK can send back as is: unknown_op for an op this
 // build does not answer, bad_request for anything else.
-func (r Request) Validate() error {
+func (r RequestOld) Validate() error {
 	bad := func(format string, args ...any) error {
 		return &Error{Code: CodeBadRequest, Message: fmt.Sprintf(format, args...)}
 	}
@@ -136,8 +136,8 @@ func (r Request) Validate() error {
 		return bad("request has no id")
 	}
 	switch r.Op {
-	case OpDescribe:
-	case OpPlan:
+	case OpDescribeOld:
+	case OpPlanOld:
 		if r.Pipeline == "" || r.Args == nil {
 			return bad("plan needs a pipeline and args")
 		}
@@ -147,8 +147,8 @@ func (r Request) Validate() error {
 		if t := r.Run.Trigger; t != nil && !oneOf(t.Source, "manual", "push", "schedule", "webhook") {
 			return bad("unknown trigger source %q", t.Source)
 		}
-	case OpRunNode, OpRunStep:
-		if r.Node == "" || (r.Op == OpRunStep) != (r.Step != "") {
+	case OpRunNodeOld, OpRunStepOld:
+		if r.Node == "" || (r.Op == OpRunStepOld) != (r.Step != "") {
 			return bad("%s names no node or step", r.Op)
 		}
 		if r.Attempt < 1 {
@@ -157,11 +157,11 @@ func (r Request) Validate() error {
 		if f := r.Failure; f != nil && (f.Node == "" || !oneOf(f.Stage, "action", "verify")) {
 			return bad("failure needs a node and a stage of action or verify")
 		}
-	case OpCancel:
+	case OpCancelOld:
 		if r.Node == "" || r.Step == "" {
 			return bad("cancel names no node or step")
 		}
-	case OpEval:
+	case OpEvalOld:
 		if r.Closure == "" {
 			return bad("eval names no closure")
 		}
@@ -183,13 +183,13 @@ func oneOf(v string, allowed ...string) bool {
 	return false
 }
 
-// ParseRequest decodes one request-pipe line. A line that is not a JSON object fails
-// with [ErrMalformed]; a request that decodes but fails [Request.Validate] is
+// ParseRequestOld decodes one request-pipe line. A line that is not a JSON object fails
+// with [ErrMalformed]; a request that decodes but fails [RequestOld.Validate] is
 // returned with that error, so the SDK can still answer its id.
-func ParseRequest(line []byte) (Request, error) {
-	var r Request
+func ParseRequestOld(line []byte) (RequestOld, error) {
+	var r RequestOld
 	if err := json.Unmarshal(line, &r); err != nil {
-		return Request{}, fmt.Errorf("%w: request: %w", ErrMalformed, err)
+		return RequestOld{}, fmt.Errorf("%w: request: %w", ErrMalformed, err)
 	}
 	return r, r.Validate()
 }
@@ -203,19 +203,19 @@ const (
 	OutcomeFailed  Outcome = "failed"
 )
 
-// RunResult is the result of a successful run_node or run_step reply. A body
+// RunResultOld is the result of a successful run_node or run_step reply. A body
 // that returns an error is still a successful reply, with outcome failed and
 // Error set; a failed reply means the SDK could not run the body at all.
 // Output is the body's JSON output; of a node's steps only the result step
 // carries it.
-type RunResult struct {
+type RunResultOld struct {
 	Outcome Outcome         `json:"outcome"`
 	Error   string          `json:"error,omitempty"`
 	Output  json.RawMessage `json:"output,omitempty"`
 }
 
 // Validate checks the outcome and that the output fits in [MaxOutputBytes].
-func (r RunResult) Validate() error {
+func (r RunResultOld) Validate() error {
 	if r.Outcome != OutcomeSuccess && r.Outcome != OutcomeFailed {
 		return fmt.Errorf("%w: unknown outcome %q", ErrMalformed, r.Outcome)
 	}
@@ -231,13 +231,13 @@ func CheckOutputSize(n int) error {
 	return nil
 }
 
-// EvalResult is the result of a successful eval reply. Value's type depends
+// EvalResultOld is the result of a successful eval reply. Value's type depends
 // on the closure's kind: a boolean for skip_if, a string or null for
 // cache_key, null for before_run, verify and after_run, and an array of node
 // documents for a generator. Error is non-nil when the closure returned an
 // error or threw, which is still a successful reply; it is a pointer so an
 // error with an empty message still reads as a failure.
-type EvalResult struct {
+type EvalResultOld struct {
 	Value json.RawMessage `json:"value"`
 	Error *string         `json:"error,omitempty"`
 }

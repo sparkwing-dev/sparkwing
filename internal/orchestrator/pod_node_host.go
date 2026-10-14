@@ -316,9 +316,9 @@ func PipelineRequires(dir, pipeline string) ([]string, error) {
 }
 
 // safety: the planning claim and every node's pod plan from one context, so their spec hashes compare.
-func podRunContext(run *store.Run) nodeproto.RunContext {
+func podRunContext(run *store.Run) nodeproto.RunContextOld {
 	flags := runflags.FromInvocation(run.Invocation)
-	rc := nodeproto.RunContext{
+	rc := nodeproto.RunContextOld{
 		RunID: run.ID, StartedAt: run.StartedAt, DryRun: flags.DryRun, NoCache: flags.NoCache,
 		Git:     &nodeproto.Git{SHA: run.GitSHA, Branch: run.GitBranch, Repo: run.DeclaredRepo, RepoURL: run.RepoURL},
 		Trigger: &nodeproto.Trigger{Source: protocolTriggerSource(run.TriggerSource), User: run.TriggerUser},

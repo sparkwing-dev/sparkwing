@@ -147,7 +147,7 @@ func (p *StorePostgres) run(ctx context.Context) error {
 					continue
 				}
 				server = candidate
-				sparkwing.Annotate(ctx, fmt.Sprintf("embedded postgres ready on :%d", layout.Port))
+				sparkwing.AnnotateOld(ctx, fmt.Sprintf("embedded postgres ready on :%d", layout.Port))
 				return layout.DSN, nil
 			}
 			return "", lastErr

@@ -26,11 +26,11 @@ type RunContext struct {
 
 	StartedAt time.Time
 
-	// NoCache reports that this run was asked to ignore cached per-node
+	// NoMemo reports that this run was asked to ignore cached per-node
 	// results; cache writes still happen. Plan code reads the signal here
 	// because the orchestrator installs it on the context only after the
 	// plan is built.
-	NoCache bool
+	NoMemo bool
 
 	// DryRun reports that this run was asked to describe its work rather
 	// than apply it. A step body reads the same answer from [IsDryRun];
@@ -115,7 +115,7 @@ func PullRequestFromEnv(env map[string]string) *PullRequest {
 type LogRecord struct {
 	TS    time.Time      `json:"ts"`
 	Level string         `json:"level,omitempty"` // "info" | "warn" | "error"
-	JobID string         `json:"node,omitempty"`  // the wire tag stays "node" for log-format compatibility
+	JobID string         `json:"job,omitempty"`
 	Step  string         `json:"step,omitempty"`  // active step ID
 	Event string         `json:"event,omitempty"` // "" for a plain message; otherwise one of the Event* constants
 	Msg   string         `json:"msg,omitempty"`
@@ -246,7 +246,7 @@ func Error(ctx context.Context, format string, args ...any) {
 	emitLevel(ctx, "error", format, args...)
 }
 
-// Annotate records a persistent, human-readable summary string on the
+// AnnotateOld records a persistent, human-readable summary string on the
 // currently-executing Job. Unlike Info, which writes to the run log,
 // annotations are stored on the Job row itself and surface on the
 // dashboard alongside the node's status -- a place for the step to
@@ -255,9 +255,9 @@ func Error(ctx context.Context, format string, args ...any) {
 //
 // Multiple calls within a node accumulate; the orchestrator appends
 // each message to the node's annotations list in call order. Outside
-// a node context (no logger installed, or no node ID in ctx) Annotate
+// a node context (no logger installed, or no node ID in ctx) AnnotateOld
 // is a no-op, matching the Info/Warn/Error convention.
-func Annotate(ctx context.Context, msg string) {
+func AnnotateOld(ctx context.Context, msg string) {
 	if NodeFromContext(ctx) == "" {
 		return
 	}
@@ -272,12 +272,12 @@ func Annotate(ctx context.Context, msg string) {
 }
 
 // EventNodeAnnotation is the LogRecord.Event value emitted by
-// Annotate. Persistence layers observing the log stream should
+// AnnotateOld. Persistence layers observing the log stream should
 // dispatch on this constant rather than the raw string.
 const EventNodeAnnotation = "node_annotation"
 
 // Summary records a persistent markdown run summary on the
-// currently-executing Job or Step. Unlike Annotate, which appends a
+// currently-executing Job or Step. Unlike AnnotateOld, which appends a
 // short scannable line, Summary stores a larger overwrite-on-write
 // markdown blob.
 //

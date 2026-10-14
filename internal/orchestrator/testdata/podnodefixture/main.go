@@ -221,7 +221,7 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, rc spar
 		if pr != nil {
 			actor += "#" + strconv.Itoa(pr.Number)
 		}
-		build.Env("ACTOR", actor)
+		build.EnvOld("ACTOR", actor)
 	}
 	if in.Recover != "" {
 		sparkwing.Job(plan, "broken", func(context.Context) error { return errors.New("broken on purpose") }).
@@ -238,7 +238,7 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, rc spar
 		sparkwing.Job(plan, "ship", &shipJob{out: in.Ranged}).Needs(prep)
 	}
 	if in.Region {
-		build.Env("PLAN_REGION", os.Getenv("AWS_REGION"))
+		build.EnvOld("PLAN_REGION", os.Getenv("AWS_REGION"))
 	}
 	if in.Scale != "" {
 		sparkwing.Job(plan, "scale", &scaleJob{out: in.Scale, zone: in.Zone})
@@ -259,7 +259,7 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, rc spar
 		if err := os.WriteFile(in.Drift, []byte(strconv.Itoa(n)), 0o600); err != nil {
 			return err
 		}
-		build.Env("PLAN_SEQ", strconv.Itoa(n))
+		build.EnvOld("PLAN_SEQ", strconv.Itoa(n))
 	}
 	return nil
 }

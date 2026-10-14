@@ -127,7 +127,7 @@ func fixturesReady(ctx context.Context) error {
 	if out, err := mb.CombinedOutput(); err != nil && !strings.Contains(string(out), "BucketAlreadyOwnedByYou") {
 		sparkwing.Info(ctx, "mb s3://%s: %s", itBucket, strings.TrimSpace(string(out)))
 	}
-	sparkwing.Annotate(ctx, "postgres + minio ready; bucket "+itBucket+" present")
+	sparkwing.AnnotateOld(ctx, "postgres + minio ready; bucket "+itBucket+" present")
 	return nil
 }
 
@@ -163,7 +163,7 @@ func runIntegrationSuite(ctx context.Context) error {
 		return fmt.Errorf("postgres-gated tests skipped against a live postgres:\n%s",
 			strings.Join(skipped, "\n"))
 	}
-	sparkwing.Annotate(ctx, "integration suite passed against postgres + minio")
+	sparkwing.AnnotateOld(ctx, "integration suite passed against postgres + minio")
 	return nil
 }
 

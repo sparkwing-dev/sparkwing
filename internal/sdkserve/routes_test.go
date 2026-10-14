@@ -128,8 +128,8 @@ func serve(t *testing.T, c *nodeclient.Client) *session {
 	outR, outW := io.Pipe()
 	cfg := sdkserve.Config{
 		Node: c,
-		PlanDoc: func(*sparkwing.Plan, sparkwing.RunContext, *sparkwing.Registration) (nodeproto.PlanDoc, error) {
-			return nodeproto.PlanDoc{}, nil
+		PlanDoc: func(*sparkwing.Plan, sparkwing.RunContext, *sparkwing.Registration) (nodeproto.PlanDocOld, error) {
+			return nodeproto.PlanDocOld{}, nil
 		},
 	}
 	done := make(chan error, 1)
@@ -144,7 +144,7 @@ func serve(t *testing.T, c *nodeclient.Client) *session {
 	return &session{t: t, in: inW, frames: nodeproto.NewReader(outR)}
 }
 
-func (s *session) call(req nodeproto.Request) nodeproto.Reply {
+func (s *session) call(req nodeproto.RequestOld) nodeproto.ReplyOld {
 	s.t.Helper()
 	s.next++
 	req.ID = fmt.Sprint(s.next)
@@ -166,10 +166,10 @@ func (s *session) call(req nodeproto.Request) nodeproto.Reply {
 	}
 }
 
-func (s *session) run(op nodeproto.Op, node, step string) nodeproto.RunResult {
+func (s *session) run(op nodeproto.OpOld, node, step string) nodeproto.RunResultOld {
 	s.t.Helper()
-	var res nodeproto.RunResult
-	if err := s.call(nodeproto.Request{Op: op, Node: node, Step: step, Attempt: 1}).Decode(&res); err != nil {
+	var res nodeproto.RunResultOld
+	if err := s.call(nodeproto.RequestOld{Op: op, Node: node, Step: step, Attempt: 1}).Decode(&res); err != nil {
 		s.t.Fatalf("%s %s/%s: %v", op, node, step, err)
 	}
 	return res
@@ -194,22 +194,22 @@ func TestStepsReachTheHostThroughTheNodeRoutes(t *testing.T) {
 	nodeclient.Bind(h.Client)
 
 	s := serve(t, h.Client)
-	plan := nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: routesPipeline, Args: map[string]string{}, Run: &nodeproto.RunContext{RunID: nodeclienttest.RunID}}
+	plan := nodeproto.RequestOld{Op: nodeproto.OpPlanOld, Pipeline: routesPipeline, Args: map[string]string{}, Run: &nodeproto.RunContextOld{RunID: nodeclienttest.RunID}}
 	if reply := s.call(plan); !reply.OK {
 		t.Fatalf("plan = %+v", reply.Error)
 	}
 	for _, step := range []string{"secret", "pending", "last", "await", "oidc", "cleanup"} {
-		if res := s.run(nodeproto.OpRunStep, "deploy", step); res.Outcome != nodeproto.OutcomeSuccess {
+		if res := s.run(nodeproto.OpRunStepOld, "deploy", step); res.Outcome != nodeproto.OutcomeSuccess {
 			t.Errorf("step %s = %+v", step, res)
 		}
 	}
-	if res := s.run(nodeproto.OpRunStep, "deploy", "refs"); string(res.Output) != `"remote"` {
+	if res := s.run(nodeproto.OpRunStepOld, "deploy", "refs"); string(res.Output) != `"remote"` {
 		t.Errorf("before build ran here, refs = %+v, want the host's output", res)
 	}
-	if res := s.run(nodeproto.OpRunNode, "build", ""); res.Outcome != nodeproto.OutcomeSuccess {
+	if res := s.run(nodeproto.OpRunNodeOld, "build", ""); res.Outcome != nodeproto.OutcomeSuccess {
 		t.Fatalf("build = %+v", res)
 	}
-	if res := s.run(nodeproto.OpRunStep, "deploy", "refs"); string(res.Output) != `"local"` {
+	if res := s.run(nodeproto.OpRunStepOld, "deploy", "refs"); string(res.Output) != `"local"` {
 		t.Errorf("after build ran here, refs = %+v, want this process's output", res)
 	}
 
@@ -230,15 +230,15 @@ func TestFreshTimeoutBoundsRunAndAwait(t *testing.T) {
 	h.Handle("POST /api/v1/runs/run-1/children", nodeclienttest.Answer(http.StatusAccepted, map[string]string{"run_id": "child-1"}))
 	h.Handle("GET /api/v1/runs/run-1/children/child-1", nodeclienttest.Answer(http.StatusOK, map[string]string{"status": "running"}))
 	s := serve(t, h.Client)
-	plan := nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: routesPipeline, Args: map[string]string{}, Run: &nodeproto.RunContext{RunID: nodeclienttest.RunID}}
+	plan := nodeproto.RequestOld{Op: nodeproto.OpPlanOld, Pipeline: routesPipeline, Args: map[string]string{}, Run: &nodeproto.RunContextOld{RunID: nodeclienttest.RunID}}
 	if reply := s.call(plan); !reply.OK {
 		t.Fatalf("plan = %+v", reply.Error)
 	}
-	if res := s.run(nodeproto.OpRunStep, "deploy", "bounded"); res.Outcome != nodeproto.OutcomeSuccess {
+	if res := s.run(nodeproto.OpRunStepOld, "deploy", "bounded"); res.Outcome != nodeproto.OutcomeSuccess {
 		t.Errorf("a child that never finishes: %+v", res)
 	}
 	h.FillForwardSlots(t)
-	if res := s.run(nodeproto.OpRunStep, "deploy", "bounded"); res.Outcome != nodeproto.OutcomeSuccess {
+	if res := s.run(nodeproto.OpRunStepOld, "deploy", "bounded"); res.Outcome != nodeproto.OutcomeSuccess {
 		t.Errorf("a start refused with 429 throughout: %+v", res)
 	}
 }

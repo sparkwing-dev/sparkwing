@@ -80,7 +80,7 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 			return "publish-" + target, publishFn(target, buildRef)
 		}).Needs(build)
 
-	approveDeploy := sparkwing.JobApproval(plan, "approve-deploy", sparkwing.ApprovalConfig{
+	approveDeploy := sparkwing.JobApproval(plan, "approve-deploy", sparkwing.ApprovalConfigOld{
 		Message:  "Promote example:sha-abc1234 to prod?",
 		Timeout:  20 * time.Second,
 		OnExpiry: sparkwing.ApprovalApprove,
@@ -102,7 +102,7 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 			return os.Getenv("NO_NOTIFY") == "1"
 		}).
 		AfterRun(func(ctx context.Context, err error) {
-			sparkwing.Annotate(ctx, "notify dispatched")
+			sparkwing.AnnotateOld(ctx, "notify dispatched")
 		})
 
 	return nil
@@ -117,7 +117,7 @@ func configureFn(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	sparkwing.Annotate(ctx, "loaded 14 config keys from .sparkwing/")
+	sparkwing.AnnotateOld(ctx, "loaded 14 config keys from .sparkwing/")
 	return nil
 }
 
@@ -130,7 +130,7 @@ func checkFn(name string) func(ctx context.Context) error {
 		}); err != nil {
 			return err
 		}
-		sparkwing.Annotate(ctx, fmt.Sprintf("%s: clean", name))
+		sparkwing.AnnotateOld(ctx, fmt.Sprintf("%s: clean", name))
 		return nil
 	}
 }
@@ -150,7 +150,7 @@ func publishFn(target string, buildRef sparkwing.Ref[BuildOut]) func(ctx context
 		if err := chatter(ctx, 1800, lines); err != nil {
 			return err
 		}
-		sparkwing.Annotate(ctx, fmt.Sprintf("%s: pushed %s", target, out.Tag))
+		sparkwing.AnnotateOld(ctx, fmt.Sprintf("%s: pushed %s", target, out.Tag))
 		return nil
 	}
 }
@@ -162,7 +162,7 @@ func notifyFn(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	sparkwing.Annotate(ctx, "Slack #releases · 1 message sent")
+	sparkwing.AnnotateOld(ctx, "Slack #releases · 1 message sent")
 	return nil
 }
 
@@ -213,7 +213,7 @@ func canaryShard(label string, items, durMS int, fail string) func(ctx context.C
 			}
 		}
 		sparkwing.Error(ctx, "%s: aborting batch -- too many failures", label)
-		sparkwing.Annotate(ctx, fmt.Sprintf("%s: %d items processed before failure", label, items))
+		sparkwing.AnnotateOld(ctx, fmt.Sprintf("%s: %d items processed before failure", label, items))
 		return fmt.Errorf("%s: %s", label, fail)
 	}
 }
@@ -228,7 +228,7 @@ func weatherCheckFn(ctx context.Context) error {
 		return fmt.Errorf("weather-report: %w", err)
 	}
 	sparkwing.Info(ctx, "weather-report returned: %s, %d°F", out.Forecast, out.TempF)
-	sparkwing.Annotate(ctx, fmt.Sprintf("weather: %s · %d°F (from weather-report pipeline)", out.Forecast, out.TempF))
+	sparkwing.AnnotateOld(ctx, fmt.Sprintf("weather: %s · %d°F (from weather-report pipeline)", out.Forecast, out.TempF))
 	return nil
 }
 
@@ -241,7 +241,7 @@ func offshootFn(id string, lines int) func(ctx context.Context) error {
 		if err := chatter(ctx, 600, msgs); err != nil {
 			return err
 		}
-		sparkwing.Annotate(ctx, fmt.Sprintf("%s: ok", id))
+		sparkwing.AnnotateOld(ctx, fmt.Sprintf("%s: ok", id))
 		return nil
 	}
 }
@@ -257,7 +257,7 @@ func smokeTestFn(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	sparkwing.Annotate(ctx, "smoke-test: 3/3 probes passed")
+	sparkwing.AnnotateOld(ctx, "smoke-test: 3/3 probes passed")
 	sparkwing.Summary(ctx, `## Smoke test
 
 - [x] `+"`GET /healthz`"+` → 200 OK (uptime 4s)
@@ -277,7 +277,7 @@ func metricsCheckFn(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	sparkwing.Annotate(ctx, "metrics-check: p95=42ms · err=0% · within SLO")
+	sparkwing.AnnotateOld(ctx, "metrics-check: p95=42ms · err=0% · within SLO")
 	sparkwing.Summary(ctx, `## Metrics check
 
 | signal | value | threshold | status |
@@ -360,7 +360,7 @@ func (j *ExampleBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 			return BuildOut{}, err
 		}
 		out := BuildOut{Tag: "example:sha-abc1234", SizeMB: 14}
-		sparkwing.Annotate(ctx, fmt.Sprintf("compiled %s (%d MiB)", out.Tag, out.SizeMB))
+		sparkwing.AnnotateOld(ctx, fmt.Sprintf("compiled %s (%d MiB)", out.Tag, out.SizeMB))
 		return out, nil
 	}).Needs(ci)
 
@@ -374,7 +374,7 @@ func (j *ExampleBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 			return err
 		}
 		stripped := out.SizeMB - 5
-		sparkwing.Annotate(ctx, fmt.Sprintf("stripped %s: %d -> %d MiB", out.Tag, out.SizeMB, stripped))
+		sparkwing.AnnotateOld(ctx, fmt.Sprintf("stripped %s: %d -> %d MiB", out.Tag, out.SizeMB, stripped))
 		return nil
 	}).Needs(compile)
 
@@ -389,7 +389,7 @@ func (j *ExampleBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 			return BuildOut{}, err
 		}
 		out.Digest = "sha256:0fa1c0ffee..."
-		sparkwing.Annotate(ctx, fmt.Sprintf("packaged %s · %s", out.Tag, out.Digest))
+		sparkwing.AnnotateOld(ctx, fmt.Sprintf("packaged %s · %s", out.Tag, out.Digest))
 		sparkwing.Summary(ctx, fmt.Sprintf(`## Build artifact
 
 **Image** `+"`%s`"+`
@@ -439,7 +439,7 @@ func (j *ExampleDeploy) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 		if err := chatter(ctx, 3000, lines); err != nil {
 			return err
 		}
-		sparkwing.Annotate(ctx, "applied 6 manifests (Deployment, Service, ConfigMap, ...)")
+		sparkwing.AnnotateOld(ctx, "applied 6 manifests (Deployment, Service, ConfigMap, ...)")
 		return nil
 	}).Needs(render)
 
@@ -465,7 +465,7 @@ func (j *ExampleDeploy) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 		if err := chatter(ctx, 5000, lines); err != nil {
 			return err
 		}
-		sparkwing.Annotate(ctx, "rolled out 3/3 replicas to kind-local")
+		sparkwing.AnnotateOld(ctx, "rolled out 3/3 replicas to kind-local")
 		sparkwing.Summary(ctx, fmt.Sprintf(`## Rollout complete
 
 **Image** `+"`%s`"+`
@@ -492,7 +492,7 @@ func chattyStep(w *sparkwing.Work, id string, totalMs int, summary string, lines
 		if err := chatter(ctx, totalMs, lines); err != nil {
 			return err
 		}
-		sparkwing.Annotate(ctx, summary)
+		sparkwing.AnnotateOld(ctx, summary)
 		return nil
 	})
 }

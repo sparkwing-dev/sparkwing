@@ -13,7 +13,7 @@ import (
 func TestPlanDocument_CarriesTheCheckout(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	sparkwing.Job(plan, "a", func(context.Context) error { return nil })
-	plan.Checkout(sparkwing.Checkout{Depth: 3, LFS: true})
+	plan.CheckoutOld(sparkwing.CheckoutOld{Depth: 3, LFS: true})
 	doc, err := planDocument(plan, sparkwing.RunContext{RunID: "run-1", Pipeline: "demo"}, nil)
 	if err != nil {
 		t.Fatal(err)

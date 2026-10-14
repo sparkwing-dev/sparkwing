@@ -91,7 +91,7 @@ func (E2E) Secrets() any { return &E2ESecrets{} }
 
 func (p *E2E) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
 	fmt.Println("plan-time stdout must not reach the plan document")
-	plan.Checkout(sparkwing.Checkout{Depth: 5, Tags: true})
+	plan.CheckoutOld(sparkwing.CheckoutOld{Depth: 5, Tags: true})
 	b := sparkwing.Job(plan, "build", &Build{}).Concurrency(sparkwing.NewConcurrencyGroup("e2e-build", sparkwing.ConcurrencyLimit{Capacity: 1}))
 	sparkwing.Job(plan, "check", &Check{Build: sparkwing.RefTo[Out](b)}).Needs(b)
 	return nil

@@ -2,18 +2,18 @@
 // engine's node host and an SDK process started with --sw-node-protocol
 // (docs/node-protocol.md).
 //
-// The host writes one [Request] per line to the request pipe. The SDK writes
-// one frame per line to the frame pipe: a [Reply] to a request or a
-// [LogRecord]; [ParseFrame] decodes it. Pipeline code's stdout and stderr are
+// The host writes one [RequestOld] per line to the request pipe. The SDK writes
+// one frame per line to the frame pipe: a [ReplyOld] to a request or a
+// [LogRecord]; [ParseFrameOld] decodes it. Pipeline code's stdout and stderr are
 // separate streams the host captures as text, so nothing pipeline code prints
 // can pass for a frame. A [Tracker] matches replies to the requests the host
 // sent, and a [Writer] serializes concurrent writers so lines never
 // interleave.
 package nodeproto
 
-// Version is the node protocol version this build speaks. Host and SDK match
+// VersionOld is the node protocol version this build speaks. Host and SDK match
 // it exactly; a mismatch is refused rather than negotiated.
-const Version = "1"
+const VersionOld = "1"
 
 // MaxOutputBytes is the largest step output value, as JSON, that an SDK may
 // produce and the host records. It bounds every step's output, not only the

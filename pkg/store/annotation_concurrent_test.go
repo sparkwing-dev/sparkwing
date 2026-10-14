@@ -142,7 +142,7 @@ func TestPostgresAppendStepAnnotationKeepsEveryEntry(t *testing.T) {
 // exact interleaving the placeholder upsert has to survive: another writer has
 // inserted the step row and not yet committed. ON CONFLICT DO NOTHING does not
 // wait for that writer, so the read that used to follow it saw no row and the
-// call returned ErrNotFound -- which every caller of sparkwing.Annotate
+// call returned ErrNotFound -- which every caller of sparkwing.AnnotateOld
 // discards, losing the message. The append must block until the insert commits
 // and then land.
 func TestPostgresAppendStepAnnotationWaitsForAnUncommittedStepInsert(t *testing.T) {

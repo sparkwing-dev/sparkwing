@@ -14,7 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func hostDispatched(t *testing.T, ctx context.Context, st *store.Store, doc nodeproto.PlanDoc, dispatch Executor) RunResult {
+func hostDispatched(t *testing.T, ctx context.Context, st *store.Store, doc nodeproto.PlanDocOld, dispatch Executor) RunResult {
 	t.Helper()
 	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
@@ -52,7 +52,7 @@ func TestDispatchAdoptsTheRowTheRemoteHostWrote(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	var downstream atomic.Bool
-	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{
+	res := hostDispatched(t, ctx, st, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
 		{ID: "build"}, {ID: "test", Deps: deps("build")},
 	}}, func(ctx context.Context, n *NodeRun) Result {
 		if n.Plan.ID == "test" {
@@ -75,7 +75,7 @@ func TestDispatchFinishesARowTheRemoteHostNeverWrote(t *testing.T) {
 	st := openStore(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "build"}}},
+	res := hostDispatched(t, ctx, st, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "build"}}},
 		func(context.Context, *NodeRun) Result {
 			return Result{Outcome: sparkwing.Failed, Err: errors.New("claim refused: credits exhausted")}
 		})
@@ -92,7 +92,7 @@ func TestDispatchSendsANodeOnceWhateverItsRetries(t *testing.T) {
 	st := openStore(t)
 	var calls atomic.Int32
 	ctx := t.Context()
-	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{
+	res := hostDispatched(t, ctx, st, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{
 		ID: "flaky", Modifiers: &nodeproto.PlanModifiers{Retry: 3, RetryAuto: true, TimeoutMS: 1},
 	}}}, func(ctx context.Context, n *NodeRun) Result {
 		calls.Add(1)
@@ -123,7 +123,7 @@ func TestDispatchCancelledRunCancelsTheOutstandingNode(t *testing.T) {
 		<-out
 		cancel(&CancelError{Reason: "cancelled by operator"})
 	}()
-	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{
+	res := hostDispatched(t, ctx, st, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
 		{ID: "build"}, {ID: "test", Deps: deps("build")},
 	}}, func(ctx context.Context, n *NodeRun) Result {
 		if n.Plan.ID == "test" {
@@ -148,7 +148,7 @@ func TestDispatchAdoptsTheResultOfTheHolderThatWonTheClaim(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	finished := make(chan error, 1)
-	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "build"}}},
+	res := hostDispatched(t, ctx, st, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "build"}}},
 		func(ctx context.Context, n *NodeRun) Result {
 			won, err := st.ClaimNamedNode(ctx, store.ClaimIdentity{}, n.Run.ID, n.Plan.ID, "pool:other", time.Minute, store.NamedClaimOptions{})
 			if err != nil {
@@ -182,7 +182,7 @@ func TestDispatchStopsWaitingOnAHolderWhoseLeaseLapsed(t *testing.T) {
 	st := openStore(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "build"}}},
+	res := hostDispatched(t, ctx, st, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "build"}}},
 		func(ctx context.Context, n *NodeRun) Result {
 			if _, err := st.ClaimNamedNode(ctx, store.ClaimIdentity{}, n.Run.ID, n.Plan.ID, "pool:dead", time.Millisecond, store.NamedClaimOptions{}); err != nil {
 				t.Errorf("claim: %v", err)
@@ -238,7 +238,7 @@ func TestResumeRefusesARowPlannedUnderAnotherSpec(t *testing.T) {
 // safety: a resumed node's claim is what keeps it from running twice, so a
 // host that dispatches nothing cannot resume.
 func TestResumeNeedsDispatch(t *testing.T) {
-	_, err := Execute(t.Context(), Config{Run: nodeproto.RunContext{RunID: testRunID}, Resume: true, State: openStore(t)})
+	_, err := Execute(t.Context(), Config{Run: nodeproto.RunContextOld{RunID: testRunID}, Resume: true, State: openStore(t)})
 	if err == nil || !strings.Contains(err.Error(), "Resume needs Dispatch") {
 		t.Fatalf("Execute = %v, want Resume refused without Dispatch", err)
 	}

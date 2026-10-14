@@ -161,7 +161,7 @@ func nodeReplan(ctx context.Context, sess *Session, n *NodeRun) error {
 	}
 	rc := run.Context
 	var raw json.RawMessage
-	err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: run.Pipeline, Args: args, Run: &rc}, &raw)
+	err := ask(ctx, sess, nodeproto.RequestOld{Op: nodeproto.OpPlanOld, Pipeline: run.Pipeline, Args: args, Run: &rc}, &raw)
 	switch {
 	case err != nil:
 		return err
@@ -176,8 +176,8 @@ func attemptBody(ctx context.Context, sess *Session, sink *LogSink, n *NodeRun) 
 	if w := n.Plan.Work; w != nil && len(w.Steps) > 0 {
 		return driveSteps(ctx, sess, sink, n, attempt)
 	}
-	var rr nodeproto.RunResult
-	err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpRunNode, Node: n.Plan.ID, Attempt: attempt, Failure: n.Failure}, &rr)
+	var rr nodeproto.RunResultOld
+	err := ask(ctx, sess, nodeproto.RequestOld{Op: nodeproto.OpRunNodeOld, Node: n.Plan.ID, Attempt: attempt, Failure: n.Failure}, &rr)
 	if err == nil {
 		err = rr.Validate()
 	}
@@ -211,7 +211,7 @@ func checkDrift(raw json.RawMessage, accepted nodeproto.PlanNode) error {
 	if err := json.Unmarshal(stamped, &doc); err != nil {
 		return fmt.Errorf("%w: plan document: %w", nodeproto.ErrMalformed, err)
 	}
-	if doc.Protocol != nodeproto.Version {
+	if doc.Protocol != nodeproto.VersionOld {
 		return mismatch("plan", doc.Protocol)
 	}
 	drift := func(format string, args ...any) error {

@@ -121,7 +121,7 @@ func TestHostDrivesSteps(t *testing.T) {
 		cfg := Config{
 			Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second},
 			Pipeline: "steps", Args: map[string]string{"set": set},
-			Run:   nodeproto.RunContext{RunID: runID},
+			Run:   nodeproto.RunContextOld{RunID: runID},
 			State: h.st, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
 			Attempts: &Attempts{
 				Routes: srv, Resolver: fixtureResolver{}, Masker: secrets.NewMasker(),

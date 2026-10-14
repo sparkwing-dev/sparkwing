@@ -81,7 +81,7 @@ func TestRefTryGet_InRunIncompleteNodeReturnsFalse(t *testing.T) {
 	resolve := func(string) ([]byte, bool) { return nil, false }
 	ctx := context.WithValue(context.Background(), keyJSONRefResolver, resolve)
 
-	if _, ok := (Ref[buildOut]{NodeID: "build"}).TryGet(ctx); ok {
+	if _, ok := (Ref[buildOut]{JobID: "build"}).TryGet(ctx); ok {
 		t.Fatal("expected ok=false for a node that has not completed")
 	}
 }
@@ -90,7 +90,7 @@ func TestRefTryGet_InRunReturnsValue(t *testing.T) {
 	resolve := func(string) ([]byte, bool) { return []byte(`{"digest":"d","tag":"t"}`), true }
 	ctx := context.WithValue(context.Background(), keyJSONRefResolver, resolve)
 
-	got, ok := Ref[buildOut]{NodeID: "build"}.TryGet(ctx)
+	got, ok := Ref[buildOut]{JobID: "build"}.TryGet(ctx)
 	if !ok {
 		t.Fatal("expected ok=true")
 	}
@@ -106,7 +106,7 @@ func TestRefTryGet_InRunWithoutResolverPanics(t *testing.T) {
 			t.Fatalf("unexpected panic value: %q", msg)
 		}
 	}()
-	Ref[buildOut]{NodeID: "build"}.TryGet(context.Background())
+	Ref[buildOut]{JobID: "build"}.TryGet(context.Background())
 	t.Fatal("expected a panic")
 }
 
@@ -121,7 +121,7 @@ func TestRefGet_InRunIncompleteNodePanicsWithString(t *testing.T) {
 	resolve := func(string) ([]byte, bool) { return nil, false }
 	ctx := context.WithValue(context.Background(), keyJSONRefResolver, resolve)
 
-	Ref[buildOut]{NodeID: "build"}.Get(ctx)
+	Ref[buildOut]{JobID: "build"}.Get(ctx)
 	t.Fatal("expected a panic")
 }
 

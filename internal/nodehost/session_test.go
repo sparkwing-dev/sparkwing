@@ -64,18 +64,18 @@ func fakeSDK() {
 	}
 	ok := func(id string, result any) {
 		raw, _ := json.Marshal(result)
-		_ = w.Send(nodeproto.Reply{ID: id, OK: true, Result: raw})
+		_ = w.Send(nodeproto.ReplyOld{ID: id, OK: true, Result: raw})
 	}
 	log = func(step, msg string) {
 		_ = w.Send(nodeproto.LogRecord{TS: "2026-01-02T03:04:05Z", Node: "forged", Step: step, Msg: msg})
 	}
-	handle := func(req nodeproto.Request) {
+	handle := func(req nodeproto.RequestOld) {
 		switch {
-		case req.Op == nodeproto.OpDescribe:
+		case req.Op == nodeproto.OpDescribeOld:
 			ok(req.ID, map[string]any{"protocol": "1", "pipelines": []any{}})
-		case req.Op == nodeproto.OpEval && barrier(req.Closure, ""):
+		case req.Op == nodeproto.OpEvalOld && barrier(req.Closure, ""):
 			ok(req.ID, map[string]any{"value": req.Closure})
-		case req.Op == nodeproto.OpRunStep && barrier(req.Step, req.Step):
+		case req.Op == nodeproto.OpRunStepOld && barrier(req.Step, req.Step):
 			log(req.Step, "in "+req.Step)
 			ok(req.ID, map[string]any{"outcome": "success"})
 		case req.Node == "echo":
@@ -87,7 +87,7 @@ func fakeSDK() {
 			ok(req.ID, map[string]any{"outcome": "success"})
 		case req.Node == "exit":
 			os.Exit(3)
-		case req.Op == nodeproto.OpPlan:
+		case req.Op == nodeproto.OpPlanOld:
 			node := map[string]any{"id": "reply-then-garbage", "deps": []any{}}
 			ok(req.ID, map[string]any{"protocol": "1", "pipeline": req.Pipeline, "run_id": req.Run.RunID, "nodes": []any{node}})
 		case req.Node == "garbage":
@@ -224,8 +224,8 @@ func callCtx(t *testing.T) context.Context {
 	return ctx
 }
 
-func runNode(node string) nodeproto.Request {
-	return nodeproto.Request{Op: nodeproto.OpRunNode, Node: node, Attempt: 1}
+func runNode(node string) nodeproto.RequestOld {
+	return nodeproto.RequestOld{Op: nodeproto.OpRunNodeOld, Node: node, Attempt: 1}
 }
 
 func hostCode(err error) nodeproto.ErrorCode {
@@ -241,7 +241,7 @@ func TestSessionRequestReply(t *testing.T) {
 	s := startFake(t, context.Background(), sink)
 	ctx := callCtx(t)
 
-	reply, err := s.Call(ctx, nodeproto.Request{Op: nodeproto.OpDescribe})
+	reply, err := s.Call(ctx, nodeproto.RequestOld{Op: nodeproto.OpDescribeOld})
 	if err != nil || !reply.OK || reply.ID != "1" {
 		t.Fatalf("describe = %+v, %v", reply, err)
 	}
@@ -249,7 +249,7 @@ func TestSessionRequestReply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run_node: %v", err)
 	}
-	var result nodeproto.RunResult
+	var result nodeproto.RunResultOld
 	if err := reply.Decode(&result); err != nil || string(result.Output) != `{"node":"echo"}` {
 		t.Fatalf("run_node result = %+v, %v", result, err)
 	}
@@ -276,7 +276,7 @@ func TestSessionConcurrentEvalsAndSteps(t *testing.T) {
 
 	var wg sync.WaitGroup
 	errs := make(chan error, 6)
-	send := func(req nodeproto.Request) {
+	send := func(req nodeproto.RequestOld) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -288,20 +288,20 @@ func TestSessionConcurrentEvalsAndSteps(t *testing.T) {
 		}()
 	}
 	for range 3 {
-		send(nodeproto.Request{Op: nodeproto.OpEval, Closure: "barrier/3"})
+		send(nodeproto.RequestOld{Op: nodeproto.OpEvalOld, Closure: "barrier/3"})
 	}
 	for range 2 {
-		send(nodeproto.Request{Op: nodeproto.OpRunStep, Node: "n", Step: "barrier/3", Attempt: 1})
+		send(nodeproto.RequestOld{Op: nodeproto.OpRunStepOld, Node: "n", Step: "barrier/3", Attempt: 1})
 	}
 	// safety: the steps' barrier needs a third step, so they stay in flight
 	// while the forbidden overlaps are tried.
 	waitArrivals(t, sink, "barrier/3", 2)
-	for _, req := range []nodeproto.Request{runNode("echo"), {Op: nodeproto.OpDescribe}} {
+	for _, req := range []nodeproto.RequestOld{runNode("echo"), {Op: nodeproto.OpDescribeOld}} {
 		if _, err := s.Call(ctx, req); !errors.Is(err, ErrBusy) {
 			t.Errorf("%s during run_step = %v, want ErrBusy", req.Op, err)
 		}
 	}
-	send(nodeproto.Request{Op: nodeproto.OpRunStep, Node: "n", Step: "barrier/3", Attempt: 1})
+	send(nodeproto.RequestOld{Op: nodeproto.OpRunStepOld, Node: "n", Step: "barrier/3", Attempt: 1})
 	wg.Wait()
 	close(errs)
 	for err := range errs {
@@ -339,7 +339,7 @@ func TestSessionStdoutCannotForgeReply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run_node: %v", err)
 	}
-	var result nodeproto.RunResult
+	var result nodeproto.RunResultOld
 	if err := reply.Decode(&result); err != nil || result.Outcome != nodeproto.OutcomeSuccess {
 		t.Fatalf("result = %+v, %v; the stdout reply must not count", result, err)
 	}
@@ -376,7 +376,7 @@ func TestSessionEndsWithHostCode(t *testing.T) {
 			if hostCode(err) != tc.code || !strings.Contains(err.Error(), tc.msg) {
 				t.Fatalf("call = %v, want %s mentioning %q", err, tc.code, tc.msg)
 			}
-			if _, err := s.Call(callCtx(t), nodeproto.Request{Op: nodeproto.OpDescribe}); hostCode(err) != tc.code {
+			if _, err := s.Call(callCtx(t), nodeproto.RequestOld{Op: nodeproto.OpDescribeOld}); hostCode(err) != tc.code {
 				t.Errorf("later call = %v, want the same %s", err, tc.code)
 			}
 			if _, err := s.Close(); hostCode(err) != tc.code {
@@ -503,7 +503,7 @@ func TestSessionStuckWriteHonorsDeadlines(t *testing.T) {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 			defer cancel()
-			if _, err := s.Call(ctx, nodeproto.Request{Op: nodeproto.OpEval, Closure: "c", Input: big}); err == nil {
+			if _, err := s.Call(ctx, nodeproto.RequestOld{Op: nodeproto.OpEvalOld, Closure: "c", Input: big}); err == nil {
 				t.Error("a call whose write never finished succeeded")
 			}
 		}()

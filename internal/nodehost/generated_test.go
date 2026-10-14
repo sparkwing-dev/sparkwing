@@ -57,7 +57,7 @@ func genPod(t *testing.T, mode string) (Config, *store.Store, string) {
 	logs := &memLogs{records: map[string][]sparkwing.LogRecord{}}
 	cfg := Config{
 		Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Env: []string{"GENFIXTURE_MODE=" + mode, "GENFIXTURE_TRACE=" + trace}, Grace: 20 * time.Millisecond},
-		Pipeline: "probe", Run: nodeproto.RunContext{RunID: "run-probe"}, State: st, Logger: slog.New(slog.DiscardHandler),
+		Pipeline: "probe", Run: nodeproto.RunContextOld{RunID: "run-probe"}, State: st, Logger: slog.New(slog.DiscardHandler),
 		Attempts: &Attempts{
 			Routes: routes, Local: st, Resolver: fixtureResolver{}, Masker: secrets.NewMasker(),
 			OpenLog: func(_ context.Context, _, node string) (NodeLog, error) { return memLog{logs: logs, node: node}, nil },
@@ -67,7 +67,7 @@ func genPod(t *testing.T, mode string) (Config, *store.Store, string) {
 		t.Fatal(err)
 	}
 	source := stampedNode(t, `{"id":"targets","deps":[],"closures":{"generator":["targets/generator/0"]},"modifiers":{"timeout_ms":20}}`)
-	run := &Run{ID: "run-probe", Doc: nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{source}}, State: st, Logger: cfg.Logger}
+	run := &Run{ID: "run-probe", Doc: nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{source}}, State: st, Logger: cfg.Logger}
 	s := &scheduler{run: run, results: map[string]Result{}, started: map[string]bool{}}
 	if err := s.add(t.Context(), t.Context(), []nodeproto.PlanNode{source}, nil); err != nil {
 		t.Fatal(err)
@@ -237,7 +237,7 @@ func outputHost(t *testing.T, scenario string) (*Config, *store.Store) {
 	t.Cleanup(func() { _ = routes.Close() })
 	logs := &memLogs{records: map[string][]sparkwing.LogRecord{}}
 	cfg := &Config{
-		Pipeline: "probe", Run: nodeproto.RunContext{RunID: "run-output"}, State: st, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
+		Pipeline: "probe", Run: nodeproto.RunContextOld{RunID: "run-output"}, State: st, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
 		Session: SessionConfig{Entry: pipelineentry.Binary(bin), Env: []string{"GENFIXTURE_SCENARIO=" + scenario}, Grace: 20 * time.Millisecond},
 		Attempts: &Attempts{
 			Routes: routes, Local: st, Resolver: fixtureResolver{}, Masker: secrets.NewMasker(),
@@ -296,7 +296,7 @@ func TestARetryKeepsACompleteBatchBesideAnEmptyOne(t *testing.T) {
 	}
 }
 
-func twoGeneratorDoc() nodeproto.PlanDoc {
+func twoGeneratorDoc() nodeproto.PlanDocOld {
 	doc := fanOutDoc()
 	doc.Nodes[0].Closures.Generator = append(doc.Nodes[0].Closures.Generator, secondGenerator)
 	doc.Nodes[1].NeedsGenerated = append(doc.Nodes[1].NeedsGenerated, secondGenerator)
@@ -305,7 +305,7 @@ func twoGeneratorDoc() nodeproto.PlanDoc {
 
 const secondGenerator = "targets/generator/1"
 
-func resumeAfter(t *testing.T, doc nodeproto.PlanDoc, record func(*scheduler), regen []expansion) (*scheduler, *store.Store, *int) {
+func resumeAfter(t *testing.T, doc nodeproto.PlanDocOld, record func(*scheduler), regen []expansion) (*scheduler, *store.Store, *int) {
 	t.Helper()
 	st := openStore(t)
 	ctx := t.Context()
@@ -401,7 +401,7 @@ func generatedChain(t *testing.T, st *store.Store, depth int, cycle bool) (*Run,
 	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	run := &Run{ID: testRunID, Doc: nodeproto.PlanDoc{Nodes: []nodeproto.PlanNode{{ID: "n0"}}}, State: st}
+	run := &Run{ID: testRunID, Doc: nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{ID: "n0"}}}, State: st}
 	var last nodeproto.PlanNode
 	for i := 1; i <= depth; i++ {
 		source := fmt.Sprintf("n%d", i-1)
@@ -439,7 +439,7 @@ func TestAPodRefusesACycleOfRecordedSources(t *testing.T) {
 	}
 }
 
-func onlySource() nodeproto.PlanDoc {
+func onlySource() nodeproto.PlanDocOld {
 	doc := fanOutDoc()
 	doc.Nodes = doc.Nodes[:1]
 	return doc

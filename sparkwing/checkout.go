@@ -1,9 +1,9 @@
 package sparkwing
 
-// Checkout is what a run's nodes ask of the source checkout a Sparkwing
+// CheckoutOld is what a run's nodes ask of the source checkout a Sparkwing
 // Cloud Job prepares before any pipeline code runs. The zero value is the
 // default: one commit, no tags, no submodules, and LFS files left as pointers.
-type Checkout struct {
+type CheckoutOld struct {
 	// Depth is how many commits of history to fetch; zero fetches one.
 	Depth int
 	// FullHistory fetches every commit and overrides Depth.
@@ -17,20 +17,20 @@ type Checkout struct {
 	LFS bool
 }
 
-// Checkout sets the source checkout every node of a controller-dispatched
+// CheckoutOld sets the source checkout every node of a controller-dispatched
 // Cloud run gets. It has no effect on a local run, which uses the working
 // tree as it is.
 //
-//	plan.Checkout(sparkwing.Checkout{Depth: 50, Tags: true})
-func (p *Plan) Checkout(c Checkout) *Plan {
+//	plan.CheckoutOld(sparkwing.CheckoutOld{Depth: 50, Tags: true})
+func (p *Plan) CheckoutOld(c CheckoutOld) *Plan {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.checkout = &c
 	return p
 }
 
-// CheckoutValue returns what Checkout set, or nil for the default.
-func (p *Plan) CheckoutValue() *Checkout {
+// CheckoutValue returns what CheckoutOld set, or nil for the default.
+func (p *Plan) CheckoutValue() *CheckoutOld {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.checkout == nil {

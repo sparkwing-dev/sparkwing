@@ -687,7 +687,7 @@ type Run struct {
 	// created before the column landed.
 	Invocation map[string]any `json:"invocation,omitempty"`
 	// Annotation rollup surfaced to list views. Updated server-side on
-	// each sparkwing.Annotate call; the dashboard renders these
+	// each sparkwing.AnnotateOld call; the dashboard renders these
 	// without needing a per-row aggregate query.
 	AnnotationCount int      `json:"annotation_count,omitempty"`
 	TopAnnotation   string   `json:"top_annotation,omitempty"`
@@ -1566,7 +1566,7 @@ type Node struct {
 	ExitCode *int `json:"exit_code,omitempty"`
 
 	// Annotations is the accumulated list of summary strings emitted
-	// by sparkwing.Annotate during the node's execution. Each call
+	// by sparkwing.AnnotateOld during the node's execution. Each call
 	// appends one entry; order preserved. Surfaced to the dashboard
 	// alongside the node's status.
 	Annotations []string `json:"annotations,omitempty"`

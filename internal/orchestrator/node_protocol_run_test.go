@@ -115,7 +115,7 @@ func init() {
 	}
 }
 
-func (s *entrySession) send(req nodeproto.Request) string {
+func (s *entrySession) send(req nodeproto.RequestOld) string {
 	s.t.Helper()
 	s.nextID++
 	req.ID = fmt.Sprint(s.nextID)
@@ -131,7 +131,7 @@ func (s *entrySession) send(req nodeproto.Request) string {
 	return req.ID
 }
 
-func (s *entrySession) next() (nodeproto.Reply, []map[string]any) {
+func (s *entrySession) next() (nodeproto.ReplyOld, []map[string]any) {
 	s.t.Helper()
 	var logs []map[string]any
 	for {
@@ -139,7 +139,7 @@ func (s *entrySession) next() (nodeproto.Reply, []map[string]any) {
 		if err != nil {
 			s.t.Fatalf("frame pipe: %v; stdout: %s", err, s.stdout.String())
 		}
-		frame, err := nodeproto.ParseFrame(raw)
+		frame, err := nodeproto.ParseFrameOld(raw)
 		if err != nil {
 			s.t.Fatalf("frame %s: %v", raw, err)
 		}
@@ -152,11 +152,11 @@ func (s *entrySession) next() (nodeproto.Reply, []map[string]any) {
 		s.proto.mustValidate(s.t, "reply", v)
 		if frame.Reply.OK {
 			switch op := s.ops[frame.Reply.ID]; op {
-			case nodeproto.OpDescribe, nodeproto.OpPlan:
-				s.doc.mustValidate(s.t, map[nodeproto.Op]string{nodeproto.OpPlan: "plan"}[op], jsonValue(s.t, frame.Reply.Result))
-			case nodeproto.OpRunNode, nodeproto.OpRunStep:
+			case nodeproto.OpDescribeOld, nodeproto.OpPlanOld:
+				s.doc.mustValidate(s.t, map[nodeproto.OpOld]string{nodeproto.OpPlanOld: "plan"}[op], jsonValue(s.t, frame.Reply.Result))
+			case nodeproto.OpRunNodeOld, nodeproto.OpRunStepOld:
 				s.proto.mustValidate(s.t, "runResult", jsonValue(s.t, frame.Reply.Result))
-			case nodeproto.OpEval:
+			case nodeproto.OpEvalOld:
 				s.proto.mustValidate(s.t, "evalResult", jsonValue(s.t, frame.Reply.Result))
 			default:
 				s.t.Fatalf("reply %s answers no request", frame.Reply.ID)
@@ -175,18 +175,18 @@ func startRunEntry(t *testing.T) *entrySession {
 	return s
 }
 
-func runResult(t *testing.T, r nodeproto.Reply) nodeproto.RunResult {
+func runResult(t *testing.T, r nodeproto.ReplyOld) nodeproto.RunResultOld {
 	t.Helper()
-	var res nodeproto.RunResult
+	var res nodeproto.RunResultOld
 	if err := r.Decode(&res); err != nil {
 		t.Fatalf("reply %+v: %v", r, err)
 	}
 	return res
 }
 
-func evalResult(t *testing.T, r nodeproto.Reply) (string, *string) {
+func evalResult(t *testing.T, r nodeproto.ReplyOld) (string, *string) {
 	t.Helper()
-	var res nodeproto.EvalResult
+	var res nodeproto.EvalResultOld
 	if err := r.Decode(&res); err != nil {
 		t.Fatalf("reply %+v: %v", r, err)
 	}
@@ -195,13 +195,13 @@ func evalResult(t *testing.T, r nodeproto.Reply) (string, *string) {
 
 func TestNodeProtocolEntryRunsNodes(t *testing.T) {
 	s := startEntry(t)
-	reply, _ := s.call(nodeproto.Request{Op: nodeproto.OpRunNode, Node: "release", Attempt: 1})
+	reply, _ := s.call(nodeproto.RequestOld{Op: nodeproto.OpRunNodeOld, Node: "release", Attempt: 1})
 	wantCode(t, reply, nodeproto.CodeNoPlan)
 	if reply, _ := s.call(planRequestFor(runPipeline, map[string]string{})); !reply.OK {
 		t.Fatalf("plan = %+v", reply.Error)
 	}
 
-	reply, logs := s.call(nodeproto.Request{Op: nodeproto.OpRunNode, Node: "release", Attempt: 1})
+	reply, logs := s.call(nodeproto.RequestOld{Op: nodeproto.OpRunNodeOld, Node: "release", Attempt: 1})
 	if res := runResult(t, reply); res.Outcome != nodeproto.OutcomeSuccess || string(res.Output) != `{"release":42}` {
 		t.Errorf("release = %+v, want success with its output", res)
 	}
@@ -213,26 +213,26 @@ func TestNodeProtocolEntryRunsNodes(t *testing.T) {
 		"fails":  "exit status 3",
 		"panics": "body blew up",
 	} {
-		reply, _ := s.call(nodeproto.Request{Op: nodeproto.OpRunNode, Node: node, Attempt: 1})
+		reply, _ := s.call(nodeproto.RequestOld{Op: nodeproto.OpRunNodeOld, Node: node, Attempt: 1})
 		if res := runResult(t, reply); res.Outcome != nodeproto.OutcomeFailed || !strings.Contains(res.Error, want) || res.Output != nil {
 			t.Errorf("%s = %+v, want outcome failed carrying %q", node, res, want)
 		}
 	}
 
-	reply, _ = s.call(nodeproto.Request{
-		Op: nodeproto.OpRunNode, Node: "recover", Attempt: 1,
+	reply, _ = s.call(nodeproto.RequestOld{
+		Op: nodeproto.OpRunNodeOld, Node: "recover", Attempt: 1,
 		Failure: &nodeproto.Failure{Node: "deploy", Stage: "verify", Message: "health check: 503"},
 	})
 	if res := runResult(t, reply); !strings.HasSuffix(res.Error, "recovering from verify failure: health check: 503") {
 		t.Errorf("recover = %+v, want the body to see the verify failure", res)
 	}
 
-	reply, _ = s.call(nodeproto.Request{Op: nodeproto.OpRunNode, Node: "inputs", Attempt: 1})
+	reply, _ = s.call(nodeproto.RequestOld{Op: nodeproto.OpRunNodeOld, Node: "inputs", Attempt: 1})
 	if res := runResult(t, reply); res.Outcome != nodeproto.OutcomeSuccess || string(res.Output) != `"staging"` {
 		t.Errorf("inputs = %+v, want the body to read the planned target", res)
 	}
 
-	reply, _ = s.call(nodeproto.Request{Op: nodeproto.OpRunNode, Node: "nope", Attempt: 1})
+	reply, _ = s.call(nodeproto.RequestOld{Op: nodeproto.OpRunNodeOld, Node: "nope", Attempt: 1})
 	wantCode(t, reply, nodeproto.CodeUnknownNode)
 	s.end()
 }
@@ -258,7 +258,7 @@ func TestNodeProtocolEntryEvaluatesClosures(t *testing.T) {
 		{closure: "emptykey/cache_key/0", value: `""`},
 		{closure: "inputs/skip_if/0", value: "true"},
 	} {
-		reply, logs := s.call(nodeproto.Request{Op: nodeproto.OpEval, Closure: tc.closure, Input: tc.input})
+		reply, logs := s.call(nodeproto.RequestOld{Op: nodeproto.OpEvalOld, Closure: tc.closure, Input: tc.input})
 		value, errMsg := evalResult(t, reply)
 		if value != tc.value || (errMsg == nil) != (tc.err == nil) || (errMsg != nil && *errMsg != *tc.err) {
 			t.Errorf("%s = value %s error %v, want value %s error %v", tc.closure, value, deref(errMsg), tc.value, deref(tc.err))
@@ -274,25 +274,25 @@ func TestNodeProtocolEntryEvaluatesClosures(t *testing.T) {
 			}
 		}
 	}
-	if reply, _ := s.call(nodeproto.Request{Op: nodeproto.OpEval, Closure: "gated/before_run/0"}); !strings.Contains(string(reply.Result), `"error":""`) {
+	if reply, _ := s.call(nodeproto.RequestOld{Op: nodeproto.OpEvalOld, Closure: "gated/before_run/0"}); !strings.Contains(string(reply.Result), `"error":""`) {
 		t.Errorf("empty error reply = %s, want an error field holding the empty string", reply.Result)
 	}
 
-	reply, _ := s.call(nodeproto.Request{Op: nodeproto.OpEval, Closure: "gated/after_run/0"})
+	reply, _ := s.call(nodeproto.RequestOld{Op: nodeproto.OpEvalOld, Closure: "gated/after_run/0"})
 	wantCode(t, reply, nodeproto.CodeBadRequest)
-	reply, _ = s.call(nodeproto.Request{Op: nodeproto.OpEval, Closure: "gated/skip_if/9"})
+	reply, _ = s.call(nodeproto.RequestOld{Op: nodeproto.OpEvalOld, Closure: "gated/skip_if/9"})
 	wantCode(t, reply, nodeproto.CodeUnknownClosure)
 	s.end()
 }
 
 func TestNodeProtocolEntryEvaluatesWhileANodeRuns(t *testing.T) {
 	s := startRunEntry(t)
-	run := s.send(nodeproto.Request{Op: nodeproto.OpRunNode, Node: "gated", Attempt: 1})
-	eval := s.send(nodeproto.Request{Op: nodeproto.OpEval, Closure: "gated/skip_if/0"})
+	run := s.send(nodeproto.RequestOld{Op: nodeproto.OpRunNodeOld, Node: "gated", Attempt: 1})
+	eval := s.send(nodeproto.RequestOld{Op: nodeproto.OpEvalOld, Closure: "gated/skip_if/0"})
 
 	// safety: the closure releases the body, so the two replies race; the
 	// node's success is what shows the eval ran while the body was running.
-	replies := map[string]nodeproto.Reply{}
+	replies := map[string]nodeproto.ReplyOld{}
 	for range 2 {
 		r, _ := s.next()
 		replies[r.ID] = r

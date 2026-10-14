@@ -87,9 +87,9 @@ type sessionProcess interface {
 }
 
 type call struct {
-	op    nodeproto.Op
+	op    nodeproto.OpOld
 	step  string
-	reply chan nodeproto.Reply
+	reply chan nodeproto.ReplyOld
 }
 
 // Session is one SDK process speaking the node protocol: requests go out on
@@ -203,24 +203,24 @@ func StartSession(ctx context.Context, cfg SessionConfig) (*Session, error) {
 // Cancelling ctx once the request is written stops only the wait: the request
 // stays in flight. Cancelling it while the write is blocked fails the session
 // with protocol_error, since the request pipe may hold half a request.
-func (s *Session) Call(ctx context.Context, req nodeproto.Request) (nodeproto.Reply, error) {
+func (s *Session) Call(ctx context.Context, req nodeproto.RequestOld) (nodeproto.ReplyOld, error) {
 	req.ID = "0"
 	if err := req.Validate(); err != nil {
-		return nodeproto.Reply{}, err
+		return nodeproto.ReplyOld{}, err
 	}
 	s.mu.Lock()
 	if s.err != nil {
 		s.mu.Unlock()
-		return nodeproto.Reply{}, s.err
+		return nodeproto.ReplyOld{}, s.err
 	}
 	for _, other := range s.inflight {
 		if conflicts(req.Op, other.op) {
 			s.mu.Unlock()
-			return nodeproto.Reply{}, fmt.Errorf("%w: %s during %s", ErrBusy, req.Op, other.op)
+			return nodeproto.ReplyOld{}, fmt.Errorf("%w: %s during %s", ErrBusy, req.Op, other.op)
 		}
 	}
 	req.ID = s.tracker.Start(req.Op)
-	c := call{op: req.Op, step: req.Step, reply: make(chan nodeproto.Reply, 1)}
+	c := call{op: req.Op, step: req.Step, reply: make(chan nodeproto.ReplyOld, 1)}
 	s.inflight[req.ID] = c
 	s.mu.Unlock()
 
@@ -237,7 +237,7 @@ func (s *Session) Call(ctx context.Context, req nodeproto.Request) (nodeproto.Re
 	case <-s.failed:
 	case <-ctx.Done():
 		s.fail(hostError(nodeproto.CodeProtocolError, "request %s (%s) not written before its deadline", req.ID, req.Op))
-		return nodeproto.Reply{}, ctx.Err()
+		return nodeproto.ReplyOld{}, ctx.Err()
 	}
 	select {
 	case r := <-c.reply:
@@ -249,10 +249,10 @@ func (s *Session) Call(ctx context.Context, req nodeproto.Request) (nodeproto.Re
 		case r := <-c.reply:
 			return r, nil
 		default:
-			return nodeproto.Reply{}, s.failure()
+			return nodeproto.ReplyOld{}, s.failure()
 		}
 	case <-ctx.Done():
-		return nodeproto.Reply{}, ctx.Err()
+		return nodeproto.ReplyOld{}, ctx.Err()
 	}
 }
 
@@ -265,11 +265,11 @@ func (s *Session) writeFailed(err error) {
 	s.fail(hostError(nodeproto.CodeProtocolError, "write sdk request: %v", err))
 }
 
-func conflicts(op, other nodeproto.Op) bool {
-	alone := func(o nodeproto.Op) bool { return o == nodeproto.OpDescribe || o == nodeproto.OpPlan }
-	body := func(o nodeproto.Op) bool { return o == nodeproto.OpRunNode || o == nodeproto.OpRunStep }
+func conflicts(op, other nodeproto.OpOld) bool {
+	alone := func(o nodeproto.OpOld) bool { return o == nodeproto.OpDescribeOld || o == nodeproto.OpPlanOld }
+	body := func(o nodeproto.OpOld) bool { return o == nodeproto.OpRunNodeOld || o == nodeproto.OpRunStepOld }
 	return alone(op) || alone(other) ||
-		(body(op) && body(other) && (op == nodeproto.OpRunNode || other == nodeproto.OpRunNode))
+		(body(op) && body(other) && (op == nodeproto.OpRunNodeOld || other == nodeproto.OpRunNodeOld))
 }
 
 // Close closes the request pipe, which asks the process to exit, gives it the
@@ -502,7 +502,7 @@ func (s *Session) attribute(rec nodeproto.LogRecord) nodeproto.LogRecord {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, c := range s.inflight {
-		if c.op == nodeproto.OpRunStep && c.step == rec.Step {
+		if c.op == nodeproto.OpRunStepOld && c.step == rec.Step {
 			return rec
 		}
 	}

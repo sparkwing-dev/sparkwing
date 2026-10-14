@@ -55,7 +55,7 @@ func TestMemo(t *testing.T) {
 		res, err := Execute(ctx, Config{
 			Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second},
 			Pipeline: "attempts", Args: map[string]string{"memo": "true", "marker": marker},
-			Run:   nodeproto.RunContext{RunID: runID},
+			Run:   nodeproto.RunContextOld{RunID: runID},
 			State: st, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
 			Attempts: &Attempts{
 				Routes: srv, Resolver: fixtureResolver{}, Masker: secrets.NewMasker(), Claim: claim,

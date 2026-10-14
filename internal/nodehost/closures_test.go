@@ -43,7 +43,7 @@ func TestClosures(t *testing.T) {
 	cfg := Config{
 		Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second},
 		Pipeline: "attempts", Args: args,
-		Run:   nodeproto.RunContext{RunID: "run-hooks"},
+		Run:   nodeproto.RunContextOld{RunID: "run-hooks"},
 		State: openStore(t), Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
 		Attempts: attempts,
 		Debug:    Debug{PauseBefore: []string{"skipped"}, PauseTimeout: time.Millisecond},
@@ -166,7 +166,7 @@ func TestClosures(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var doc nodeproto.PlanDoc
+		var doc nodeproto.PlanDocOld
 		if err := json.Unmarshal(run.PlanSnapshot, &doc); err != nil {
 			t.Fatal(err)
 		}

@@ -212,7 +212,7 @@ func (p *proc) send(st step, run map[string]any) string {
 		req["closure"] = p.closureID(ref)
 	}
 	op, _ := req["op"].(string)
-	req["id"] = p.tracker.Start(nodeproto.Op(op))
+	req["id"] = p.tracker.Start(nodeproto.OpOld(op))
 	line, err := json.Marshal(req)
 	if err != nil {
 		p.t.Fatal(err)
@@ -239,7 +239,7 @@ func (p *proc) await(ids []string) (map[string]map[string]any, []map[string]any)
 		if err != nil {
 			p.t.Fatalf("frame pipe ended waiting for replies to %v: %v; stderr:\n%s", ids, err, p.stderr.String())
 		}
-		frame, err := nodeproto.ParseFrame(line)
+		frame, err := nodeproto.ParseFrameOld(line)
 		if err != nil {
 			p.t.Fatalf("protocol_error: %v: %s", err, line)
 		}
@@ -269,15 +269,15 @@ func (p *proc) await(ids []string) (map[string]map[string]any, []map[string]any)
 	return replies, logs
 }
 
-func (p *proc) validateResult(op nodeproto.Op, result map[string]any) {
+func (p *proc) validateResult(op nodeproto.OpOld, result map[string]any) {
 	switch op {
-	case nodeproto.OpDescribe:
+	case nodeproto.OpDescribeOld:
 		p.validate(p.sc.doc, "", result, "describe result")
-	case nodeproto.OpPlan:
+	case nodeproto.OpPlanOld:
 		p.validate(p.sc.doc, "plan", result, "plan result")
-	case nodeproto.OpRunNode, nodeproto.OpRunStep:
+	case nodeproto.OpRunNodeOld, nodeproto.OpRunStepOld:
 		p.validate(p.sc.proto, "runResult", result, string(op)+" result")
-	case nodeproto.OpEval:
+	case nodeproto.OpEvalOld:
 		p.validate(p.sc.proto, "evalResult", result, "eval result")
 		if nodes, ok := result["value"].([]any); ok {
 			for _, n := range nodes {

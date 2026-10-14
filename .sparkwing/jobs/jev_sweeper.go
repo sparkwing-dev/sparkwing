@@ -130,7 +130,7 @@ func (p *JevSweeper) run(ctx context.Context, in JevSweeperArgs) error {
 			}
 			sparkwing.Info(ctx, "jev-sweeper dry run; %s follows:\n%s", item.Name, body)
 		}
-		sparkwing.Annotate(ctx, fmt.Sprintf("jev-sweeper: dry run prepared %d request(s)", len(work)))
+		sparkwing.AnnotateOld(ctx, fmt.Sprintf("jev-sweeper: dry run prepared %d request(s)", len(work)))
 		return nil
 	}
 	var key string
@@ -178,7 +178,7 @@ func (p *JevSweeper) run(ctx context.Context, in JevSweeperArgs) error {
 			sparkwing.Info(ctx, "jev-sweeper %s: %s and %s: duplicate responsibility %.2f; structure %s (confidence %.2f)", level, finding.Changed, finding.Candidate, finding.SameResponsibility, finding.Structure, finding.Confidence)
 		}
 	}
-	sparkwing.Annotate(ctx, fmt.Sprintf("jev-sweeper: %d advisory finding(s) across %d judgment(s); %d/%d request(s) cached", reported, judged, cachedRequests, len(work)))
+	sparkwing.AnnotateOld(ctx, fmt.Sprintf("jev-sweeper: %d advisory finding(s) across %d judgment(s); %d/%d request(s) cached", reported, judged, cachedRequests, len(work)))
 	return nil
 }
 

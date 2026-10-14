@@ -11,7 +11,7 @@ import (
 
 // safety: a bound naming no step anywhere in the plan is a typo, and running
 // the whole pipeline in its place could deploy what the author meant to skip.
-func validateStepRange(doc nodeproto.PlanDoc, start, stop string) error {
+func validateStepRange(doc nodeproto.PlanDocOld, start, stop string) error {
 	if start == "" && stop == "" {
 		return nil
 	}

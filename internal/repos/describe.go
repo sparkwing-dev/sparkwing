@@ -32,7 +32,7 @@ type Session struct {
 // Call sends req with the next request id and decodes the reply's result into
 // result. A failed reply returns its [*nodeproto.Error]; the process stays up
 // for the next request.
-func (s *Session) Call(req nodeproto.Request, result any) error {
+func (s *Session) Call(req nodeproto.RequestOld, result any) error {
 	if s.broken != nil {
 		return s.broken
 	}
@@ -50,16 +50,16 @@ func (s *Session) Call(req nodeproto.Request, result any) error {
 // version.
 func (s *Session) Describe() (sdkserve.DescribeDoc, error) {
 	var doc sdkserve.DescribeDoc
-	if err := s.Call(nodeproto.Request{Op: nodeproto.OpDescribe}, &doc); err != nil {
+	if err := s.Call(nodeproto.RequestOld{Op: nodeproto.OpDescribeOld}, &doc); err != nil {
 		return doc, err
 	}
-	if doc.Protocol != nodeproto.Version {
+	if doc.Protocol != nodeproto.VersionOld {
 		sdk := "unknown SDK"
 		if doc.SDK != nil {
 			sdk = doc.SDK.Language + " SDK " + doc.SDK.Version
 		}
 		return doc, fmt.Errorf("pipeline entry speaks node protocol %q (%s); this engine speaks %q; rebuild .sparkwing against a matching SDK",
-			doc.Protocol, sdk, nodeproto.Version)
+			doc.Protocol, sdk, nodeproto.VersionOld)
 	}
 	return doc, nil
 }
@@ -138,22 +138,22 @@ func Converse(ctx context.Context, entry pipelineentry.Command, dir string, talk
 	return talkErr
 }
 
-func exchange(requests *nodeproto.Writer, r *nodeproto.Reader, req nodeproto.Request) (nodeproto.Reply, error) {
+func exchange(requests *nodeproto.Writer, r *nodeproto.Reader, req nodeproto.RequestOld) (nodeproto.ReplyOld, error) {
 	if err := requests.Send(req); err != nil {
-		return nodeproto.Reply{}, err
+		return nodeproto.ReplyOld{}, err
 	}
 	for {
 		f, err := r.Next()
 		switch {
 		case errors.Is(err, io.EOF):
-			return nodeproto.Reply{}, fmt.Errorf("pipeline entry exited without answering %s; rebuild .sparkwing against a matching SDK", req.Op)
+			return nodeproto.ReplyOld{}, fmt.Errorf("pipeline entry exited without answering %s; rebuild .sparkwing against a matching SDK", req.Op)
 		case err != nil:
-			return nodeproto.Reply{}, &nodeproto.Error{Code: nodeproto.CodeProtocolError, Message: err.Error()}
+			return nodeproto.ReplyOld{}, &nodeproto.Error{Code: nodeproto.CodeProtocolError, Message: err.Error()}
 		case f.Kind != nodeproto.KindReply:
 			continue
 		case f.Reply.ID != req.ID:
 			msg := fmt.Sprintf("%v: %s", nodeproto.ErrUnknownReply, f.Reply.ID)
-			return nodeproto.Reply{}, &nodeproto.Error{Code: nodeproto.CodeProtocolError, Message: msg}
+			return nodeproto.ReplyOld{}, &nodeproto.Error{Code: nodeproto.CodeProtocolError, Message: msg}
 		}
 		return f.Reply, nil
 	}
