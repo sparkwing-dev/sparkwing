@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -110,5 +111,40 @@ func TestSweepDropsAFailingCommandAfterOneAttempt(t *testing.T) {
 	// best-effort: the record is dropped after the single attempt, not retried forever
 	if left, _ := l.List(); len(left) != 0 {
 		t.Fatalf("a best-effort command was kept for retry: %+v", left)
+	}
+}
+
+type eventRecorder struct{ payloads []string }
+
+func (r *eventRecorder) AppendEvent(_ context.Context, _, _, _ string, payload []byte) error {
+	r.payloads = append(r.payloads, string(payload))
+	return nil
+}
+
+// A failed cleanup's argv and output can quote a secret no sweeping process
+// can mask, so the reaped event names only the program and its exit.
+func TestAFailedCleanupEventQuotesNeitherArgvNorOutput(t *testing.T) {
+	const secret = "hunter2-cleanup-secret"
+	l := Open(filepath.Join(t.TempDir(), "sessions"))
+	if _, err := l.Record(Record{
+		Run: "run-dead", Node: "build", OwnerPID: 999999, OwnerBirth: "gone",
+		Handle:  Handle{Kind: "command", ID: "x", Argv: []string{"sh", "-c", "echo " + secret + "; exit 3", secret}},
+		Command: "sh",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := l.Sweep(context.Background(), SweepOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 || out[0].Verdict != VerdictFailed {
+		t.Fatalf("outcomes = %+v, want one failed cleanup", out)
+	}
+	rec := &eventRecorder{}
+	if errs := RecordOutcomes(context.Background(), rec, "test", out); len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	if len(rec.payloads) != 1 || !strings.Contains(rec.payloads[0], "exit status 3") || strings.Contains(rec.payloads[0], secret) {
+		t.Fatalf("reaped events = %q, want the exit without the secret", rec.payloads)
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeclient"
@@ -35,7 +36,7 @@ type Spec struct {
 	// retry. Empty Argv makes Register a no-op.
 	Argv []string
 	// Description names the resource for the reaped event and for
-	// `sparkwing doctor`; defaults to the command when empty.
+	// `sparkwing doctor`; defaults to the command's program name when empty.
 	Description string
 }
 
@@ -64,9 +65,11 @@ func Register(ctx context.Context, spec Spec) (release func(), err error) {
 	if err != nil {
 		return func() {}, err
 	}
+	// safety: a tool a step starts holds no masker, so an unnamed cleanup is
+	// recorded by its program, never by arguments that can quote a secret.
 	desc := spec.Description
 	if desc == "" {
-		desc = argvString(spec.Argv)
+		desc = filepath.Base(spec.Argv[0])
 	}
 	var idb [8]byte
 	_, _ = rand.Read(idb[:])
@@ -76,7 +79,7 @@ func Register(ctx context.Context, spec Spec) (release func(), err error) {
 		OwnerPID:   os.Getpid(),
 		OwnerBirth: birth,
 		Handle:     sessionledger.Handle{Kind: "command", ID: hex.EncodeToString(idb[:]), Argv: spec.Argv},
-		Command:    desc,
+		Command:    sessionledger.MaskCommand(ctx, desc),
 	})
 	if err != nil {
 		return func() {}, err
@@ -100,15 +103,4 @@ func registerWithHost(ctx context.Context, c *nodeclient.Client, spec Spec) (fun
 		defer cancel()
 		_ = c.ReleaseCleanup(rctx, id) //nolint:errcheck // a failed release only reruns an idempotent argv
 	}, nil
-}
-
-func argvString(argv []string) string {
-	out := ""
-	for i, a := range argv {
-		if i > 0 {
-			out += " "
-		}
-		out += a
-	}
-	return out
 }

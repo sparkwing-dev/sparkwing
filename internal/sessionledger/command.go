@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
-	"strings"
+	"path/filepath"
 )
 
 // runCleanupCommand runs a library-registered cleanup argv once, directly
@@ -14,13 +14,16 @@ import (
 // drops the record whatever the exit, because it runs in a sweeping process
 // (a later run, the daemon, or doctor) whose environment may differ from the
 // step's, and retrying a command it cannot judge would only accumulate noise.
+//
+// safety: the error names only the program, since a sweep copies it into a
+// stray_session_reaped event and the arguments and output can quote a secret
+// no sweeping process can mask.
 func runCleanupCommand(ctx context.Context, argv []string) error {
 	if len(argv) == 0 {
 		return errors.New("sessionledger: command handle carries no argv")
 	}
-	out, err := exec.CommandContext(ctx, argv[0], argv[1:]...).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("cleanup %s: %w: %s", strings.Join(argv, " "), err, strings.TrimSpace(string(out)))
+	if err := exec.CommandContext(ctx, argv[0], argv[1:]...).Run(); err != nil {
+		return fmt.Errorf("cleanup %s: %w", filepath.Base(argv[0]), err)
 	}
 	return nil
 }

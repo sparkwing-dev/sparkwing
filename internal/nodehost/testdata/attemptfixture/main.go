@@ -30,6 +30,8 @@ type inputs struct {
 	Pass    string `flag:"pass" secret:"true" desc:"A secret input the build node prints"`
 	Memo    bool   `flag:"memo" desc:"Add memoized nodes, one of them a fan-out source"`
 	Exec    bool   `flag:"exec" desc:"Add a node whose command line, summary, annotation and error quote the secrets"`
+	Def     string `flag:"def" secret:"true" default:"def-fixture-secret" desc:"A secret input with a default every plan prints"`
+	Refuse  bool   `flag:"refuse" desc:"Fail the plan with an error that quotes the pass secret"`
 }
 
 type fixtureSecrets struct {
@@ -41,6 +43,10 @@ type pipeline struct{ sparkwing.Base }
 func (pipeline) Secrets() any { return &fixtureSecrets{} }
 
 func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ sparkwing.RunContext) error {
+	fmt.Println("plan sees def=" + in.Def)
+	if in.Refuse {
+		return fmt.Errorf("plan refused %s", in.Pass)
+	}
 	build := sparkwing.Job(plan, "build", &buildJob{in: in}).Env("FIXTURE_ENV", "from-plan").Env("SPARKWING_RUNNER_LABELS", "local,gpu")
 	if in.Counter != "" {
 		data, _ := os.ReadFile(in.Counter)

@@ -1,7 +1,6 @@
 package sdkserve
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -66,11 +65,6 @@ func plan(ctx context.Context, s *server, req nodeproto.Request) (any, error) {
 	}
 	for _, v := range reg.SecretValues(req.Args) {
 		s.masker.Register(v)
-	}
-	for _, a := range built.JobArgs() {
-		if a.Secret {
-			s.masker.Register(cmp.Or(req.Args[a.Name], a.Default))
-		}
 	}
 	s.mu.Lock()
 	s.planned = &Planned{Registration: reg, Plan: built, Run: rc, Doc: doc}

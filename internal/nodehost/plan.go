@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -26,8 +27,9 @@ type describeDoc struct {
 
 // safety: describe runs before the run row exists, so an entry that speaks
 // another protocol or lacks the pipeline is refused without recording a run.
-// The value of every flag describe marks secret is registered with masker,
-// when set, before any process of the run can print it.
+// The value of every flag describe marks secret, and the default of every
+// secret flag of every pipeline described, is registered with masker, when
+// set, before the run's sink takes what describe printed.
 func describeArgs(ctx context.Context, s *Session, pipeline string, args map[string]string, masker *secrets.Masker) (map[string]string, error) {
 	var doc describeDoc
 	// safety: no run row or node timeout exists yet, so without this bound a
@@ -43,6 +45,15 @@ func describeArgs(ctx context.Context, s *Session, pipeline string, args map[str
 	}
 	if doc.Protocol != nodeproto.Version {
 		return nil, mismatch("describe", doc.Protocol)
+	}
+	// safety: describe plans every pipeline the entry registers, and any of
+	// them may print its own secret defaults.
+	for _, p := range doc.Pipelines {
+		for _, a := range p.Args {
+			if a.Secret && masker != nil {
+				masker.Register(a.Default)
+			}
+		}
 	}
 	for _, p := range doc.Pipelines {
 		if p.Name != pipeline {
@@ -65,6 +76,33 @@ func describeArgs(ctx context.Context, s *Session, pipeline string, args map[str
 		return merged, nil
 	}
 	return nil, &nodeproto.Error{Code: nodeproto.CodeUnknownPipeline, Message: fmt.Sprintf("the pipeline entry has no pipeline %q", pipeline)}
+}
+
+// safety: describe runs plan code before the host knows which flags are
+// secret, so what the plan process prints waits in the session's queues until
+// describe's secrets are registered.
+type describeGate struct {
+	Sink
+	open chan struct{}
+	once sync.Once
+}
+
+// safety: the returned func must run once describe answers or fails and
+// before the session closes, whose queues otherwise wait on the gate.
+func holdUntilDescribed(cfg SessionConfig) (SessionConfig, func()) {
+	g := &describeGate{Sink: cfg.Sink, open: make(chan struct{})}
+	cfg.Sink = g
+	return cfg, func() { g.once.Do(func() { close(g.open) }) }
+}
+
+func (g *describeGate) Text(level, line string) {
+	<-g.open
+	g.Sink.Text(level, line)
+}
+
+func (g *describeGate) Record(rec nodeproto.LogRecord) {
+	<-g.open
+	g.Sink.Record(rec)
 }
 
 func planRun(ctx context.Context, s *Session, pipeline string, args map[string]string, rc nodeproto.RunContext) (nodeproto.PlanDoc, []byte, error) {

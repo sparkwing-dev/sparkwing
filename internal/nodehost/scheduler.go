@@ -238,7 +238,9 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 	if cfg.Run.Trigger == nil {
 		cfg.Run.Trigger = &nodeproto.Trigger{Source: "manual"}
 	}
-	sess, err := StartSession(ctx, planSession(cfg))
+	scfg, described := holdUntilDescribed(planSession(cfg))
+	defer described()
+	sess, err := StartSession(ctx, scfg)
 	if err != nil {
 		return RunResult{}, err
 	}
@@ -252,6 +254,7 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 		masker = cfg.Attempts.Masker
 	}
 	args, err := describeArgs(ctx, sess, cfg.Pipeline, cfg.Args, masker)
+	described()
 	if err == nil {
 		err = cfg.State.CreateRun(ctx, runRow(cfg, args))
 	}
@@ -270,6 +273,11 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 	// safety: registered before the heartbeat's defer so the heartbeat has
 	// stopped before the run row goes terminal.
 	defer func() {
+		// safety: plan code's error can quote a secret flag, and the run row and
+		// every caller that prints the error outlive the masker.
+		if res.Err != nil && masker != nil {
+			res.Err = maskedRunError{err: res.Err, text: masker.Mask(res.Err.Error())}
+		}
 		if ferr := cfg.State.FinishRun(finishCtx, res.RunID, res.Status, errText(res.Err)); ferr != nil {
 			res.Status, res.Err = "failed", errors.Join(res.Err, fmt.Errorf("persist run state: %w", ferr))
 		}
@@ -800,6 +808,15 @@ const (
 	nodeErrTextMaxBytes  = 8 << 10
 	nodeErrTextHeadBytes = 512
 )
+
+// safety: only the text is masked, so errors.Is and As still reach the cause.
+type maskedRunError struct {
+	err  error
+	text string
+}
+
+func (e maskedRunError) Error() string { return e.text }
+func (e maskedRunError) Unwrap() error { return e.err }
 
 func errText(err error) string {
 	if err == nil {
