@@ -677,7 +677,7 @@ func (s *scheduler) reuseRow(ctx context.Context, n nodeproto.PlanNode, row *sto
 	// safety: an adopted generator's nodes are not recorded whole, so they are generated again from its
 	// recorded output, as a copied generator's are.
 	if res.Outcome == sparkwing.Success && n.Closures != nil && len(n.Closures.Generator) > 0 && s.regenerate != nil {
-		output, err := s.ownOutput(ctx, id)
+		output, err := recordedOutput(ctx, s.run.State, s.run.ID, id)
 		if err != nil {
 			for _, g := range n.Closures.Generator {
 				res.expansions = append(res.expansions, expansion{closure: g, err: err})
@@ -690,12 +690,12 @@ func (s *scheduler) reuseRow(ctx context.Context, n nodeproto.PlanNode, row *sto
 	}
 }
 
-func (s *scheduler) ownOutput(ctx context.Context, id string) (json.RawMessage, error) {
-	outputs, ok := s.run.State.(sourceOutputs)
+func recordedOutput(ctx context.Context, st storage.StateStore, runID, id string) (json.RawMessage, error) {
+	outputs, ok := st.(sourceOutputs)
 	if !ok {
 		return nil, fmt.Errorf("read node %s output: the runs store cannot read it", id)
 	}
-	out, err := outputs.GetNodeOutput(ctx, s.run.ID, id)
+	out, err := outputs.GetNodeOutput(ctx, runID, id)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, nil
 	}

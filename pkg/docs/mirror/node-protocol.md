@@ -201,7 +201,7 @@ A closure is customer code that the host calls by id. The plan lists each node's
 | `before_run` | attempt process, attempt 1, before the body | none | `null` | the node fails without retrying |
 | `verify` | attempt process, after each successful body | none | `null` | the attempt fails with reason `verify`, and retry and `on_failure` apply |
 | `after_run` | the last attempt's process, after the body and verify | `{outcome, error?}`: the node's final outcome and error | `null` | the host logs it and leaves the node's outcome unchanged |
-| `generator` | the source's attempt process, after its body succeeds, or an eval process when the source's result was copied by memo; again in each generated node's own processes | none | an array of node documents | the generated group fails, and nodes that need it are cancelled |
+| `generator` | the source's attempt process, after its body succeeds, or an eval process on the run host when the source's result was copied by memo or a retry or the source ran on another host; again in each generated node's own processes, and on another host in an eval process that builds the node first | none | an array of node documents | the generated group fails, and nodes that need it are cancelled |
 
 The host bounds each node `skip_if` by the node's `modifiers.skip_if_budget_ms`, or by 30 seconds when that is absent. A `skip_if` that overruns its budget counts as `false`. A `cache_key` closure has its own 30-second limit, and one that overruns it fails the node. Every other closure is bounded by the node's wall timeout, except `after_run` after an attempt that timed out: the host evaluates it in an eval process of its own, bounded to 2 minutes.
 

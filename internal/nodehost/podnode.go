@@ -156,18 +156,31 @@ func podAttempt(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash
 	drift := func(format string, args ...any) Result {
 		return failed(&nodeproto.Error{Code: nodeproto.CodePlanDrift, Message: fmt.Sprintf(format, args...)})
 	}
+	n := &NodeRun{Run: run}
 	switch {
 	case acceptedHash == "":
 		return drift("the dispatcher handed node %s no accepted spec_hash", nodeID)
-	case i < 0:
-		return drift("node %s is not in this process's plan; plan code must be deterministic for a run", nodeID)
-	case doc.Nodes[i].SpecHash != acceptedHash:
+	case i >= 0 && doc.Nodes[i].SpecHash != acceptedHash:
 		return drift("node %s plans differently than when the run was accepted; plan code must be deterministic for a run", nodeID)
+	case i >= 0:
+		n.Plan = doc.Nodes[i]
+	case !dispatched:
+		return drift("node %s is not in this process's plan; plan code must be deterministic for a run", nodeID)
+	default:
+		if n.Plan, n.Generator, err = podGenerated(ctx, cfg, run, nodeID, acceptedHash); err != nil {
+			return failed(err)
+		}
 	}
-	n := &NodeRun{Run: run, Plan: doc.Nodes[i]}
 	layers := podLayers
 	if m := n.Plan.Modifiers; dispatched {
 		layers = podDispatchedLayers
+		// safety: the run host generates a dispatched source's nodes from the output this host records, since only
+		// it can add them to the run, so the generators do not run here as well.
+		if c := n.Plan.Closures; c != nil && len(c.Generator) > 0 {
+			stripped := *c
+			stripped.Generator = nil
+			n.Plan.Closures = &stripped
+		}
 		if parent := n.Plan.OnFailureOf; parent != "" {
 			row, err := run.State.GetNode(ctx, run.ID, parent)
 			if err != nil {
@@ -186,11 +199,60 @@ func podAttempt(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash
 		}
 	}
 	res := podChain(cfg, layers)(ctx, n)
-	if len(res.expansions) > 0 && res.Outcome == sparkwing.Success {
+	if !dispatched && len(res.expansions) > 0 && res.Outcome == sparkwing.Success {
 		// safety: a pod cannot add nodes to its run, and dropping them would read as an empty fan-out.
 		return failed(fmt.Errorf("node %s generates nodes, which a pod cannot host yet", nodeID))
 	}
 	return res
+}
+
+// safety: a generated node is in no process's plan, so this host builds it with the generators of the sources its
+// row needs, reading their recorded outputs as the node's attempt will, and runs it only as the run host added it.
+func podGenerated(ctx context.Context, cfg *Config, run *Run, nodeID, acceptedHash string) (nodeproto.PlanNode, string, error) {
+	notPlanned := &nodeproto.Error{Code: nodeproto.CodePlanDrift, Message: fmt.Sprintf(
+		"node %s is neither in this process's plan nor returned by a generator of the nodes it needs; plan code and generators must be deterministic for a run", nodeID)}
+	row, err := run.State.GetNode(ctx, run.ID, nodeID)
+	if err != nil {
+		return nodeproto.PlanNode{}, "", fmt.Errorf("read node %s: %w", nodeID, err)
+	}
+	var closures []string
+	for _, src := range run.Doc.Nodes {
+		if src.Closures != nil && slices.Contains(row.Deps, src.ID) {
+			closures = append(closures, src.Closures.Generator...)
+		}
+	}
+	if len(closures) == 0 {
+		return nodeproto.PlanNode{}, "", notPlanned
+	}
+	var found nodeproto.PlanNode
+	var generator string
+	probe := &NodeRun{Run: run, Plan: nodeproto.PlanNode{ID: nodeID, SpecHash: acceptedHash}}
+	res := cfg.Attempts.process(ctx, cfg.Session, probe, func(ctx context.Context, sess *Session, _ *LogSink) Result {
+		if _, err := askPlan(ctx, sess, run); err != nil {
+			return failed(err)
+		}
+		for _, id := range closures {
+			nodes, err := evalGenerator(ctx, sess, id)
+			if err != nil {
+				return failed(err)
+			}
+			if j := slices.IndexFunc(nodes, func(got nodeproto.PlanNode) bool { return got.ID == nodeID }); j >= 0 {
+				found, generator = nodes[j], id
+				break
+			}
+		}
+		return Result{Outcome: sparkwing.Success}
+	})
+	switch {
+	case res.Outcome != sparkwing.Success:
+		return nodeproto.PlanNode{}, "", fmt.Errorf("generate node %s: %w", nodeID, res.Err)
+	case generator == "":
+		return nodeproto.PlanNode{}, "", notPlanned
+	case found.SpecHash != acceptedHash:
+		return nodeproto.PlanNode{}, "", &nodeproto.Error{Code: nodeproto.CodePlanDrift, Message: fmt.Sprintf(
+			"generator %s builds node %s differently than when the run added it; a generator must return the same nodes for the same source output", generator, nodeID)}
+	}
+	return found, generator, nil
 }
 
 func podChain(cfg *Config, layers []Layer) Executor {
