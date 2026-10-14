@@ -156,25 +156,12 @@ The describe schema matches `sparkwing.DescribePipeline` plus
 
 ## Headless hosts
 
-A runner host does not need the `sparkwing` CLI. Ship it the compiled
-pipeline binary (a plain `go build` of your `.sparkwing/` module),
-invoke pipelines by name, and inspect local state through the binary's
-own `ops` verbs:
+The compiled pipeline binary answers only `--sw-node-protocol`: it never
+runs, plans or inspects a pipeline by itself. A host that runs pipelines
+needs the `sparkwing` CLI (`sparkwing run`, `sparkwing queue`,
+`sparkwing doctor`) or `sparkwing-runner`.
 
-```bash
-./pipelines <name>
-./pipelines ops queue
-./pipelines ops doctor
-./pipelines ops stats
-./pipelines ops stats-reset
-./pipelines ops version
-```
-
-The `ops` verbs share the CLI's output conventions -- `-o pretty|json|plain`,
-the same JSON shapes as `sparkwing queue` / `sparkwing doctor` -- so a
-script written against the CLI works unchanged against the binary. Use these commands to inspect a host and repair abandoned state.
-
-One thing a bare pipeline binary does not do is host the admission
+Neither the pipeline binary nor a run hosts the admission
 daemon. **The installed Sparkwing distribution owns daemon lifecycle.
 Pipeline clients declare required capabilities and use the running
 daemon; they never host, replace, or upgrade it.** A run's client spawns

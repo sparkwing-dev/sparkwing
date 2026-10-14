@@ -1,17 +1,12 @@
 package orchestrator
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func TestBuildRunInvocation_LogPathFromLocalLogBackend(t *testing.T) {
@@ -77,84 +72,10 @@ func TestLocalRunLogDir_RelativeHomeRecordsAbsolutePath(t *testing.T) {
 	}
 }
 
-func TestLogPath_FilesystemLogsStoreIsRecorded(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "logroot")
-	store, err := fs.NewLogStore(root)
-	if err != nil {
-		t.Fatalf("NewLogStore: %v", err)
-	}
-	got := localRunLogDir(NewLogStoreBackend(store, nil), "run-1")
-	if got == "" {
-		t.Fatal("filesystem log store reported no log_path")
-	}
-	if !filepath.IsAbs(got) {
-		t.Errorf("log_path = %q, want an absolute path", got)
-	}
-	info, err := os.Stat(got)
-	if err != nil || !info.IsDir() {
-		t.Fatalf("recorded log_path %q is not an existing directory (err=%v)", got, err)
-	}
-}
-
-func TestLogPath_FilesystemLogsStoreMatchesWhereItWrites(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "logroot")
-	store, err := fs.NewLogStore(root)
-	if err != nil {
-		t.Fatalf("NewLogStore: %v", err)
-	}
-	const runID, nodeID = "run-1", "build"
-	if err := store.Append(context.Background(), runID, nodeID, []byte(`{"msg":"hello"}`+"\n")); err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-
-	dir := localRunLogDir(NewLogStoreBackend(store, nil), runID)
-	if dir == "" {
-		t.Fatal("filesystem log store reported no log_path")
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("read recorded log_path: %v", err)
-	}
-	found := false
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), nodeID+".") {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("node log is not under the recorded log_path %q; entries=%v", dir, entries)
-	}
-}
-
-func TestLogPath_FilesystemLogsStoreRejectsUnsafeRunID(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "logroot")
-	store, err := fs.NewLogStore(root)
-	if err != nil {
-		t.Fatalf("NewLogStore: %v", err)
-	}
-	for _, bad := range []string{"", "..", "../escape", "a/b"} {
-		if dir := localRunLogDir(NewLogStoreBackend(store, nil), bad); dir != "" {
-			t.Errorf("run id %q: localRunLogDir = %q, want empty", bad, dir)
-		}
-	}
-}
-
 func TestBuildRunInvocation_NoLogPathWithoutLocalLogs(t *testing.T) {
 	inv := buildRunInvocation(Options{Pipeline: "demo"}, "run-1", "", nil)
 	if v, ok := inv["log_path"]; ok {
 		t.Errorf("log_path must be omitted when the run writes no local logs; got %v", v)
-	}
-}
-
-func TestLocalRunLogDir_NonLocalBackendsReportNothing(t *testing.T) {
-	for name, b := range map[string]LogBackend{
-		"log store": NewLogStoreBackend(storage.LogStore(nil), nil),
-		"http logs": NewHTTPLogsWithToken("https://controller.example.dev", nil, "tok", nil),
-		"nil":       nil,
-	} {
-		if dir := localRunLogDir(b, "run-1"); dir != "" {
-			t.Errorf("%s backend: localRunLogDir = %q, want empty", name, dir)
-		}
 	}
 }
 
@@ -174,56 +95,5 @@ func TestLocalRunLogDir_UnwritableRootReportsNothing(t *testing.T) {
 	}
 	if dir := localRunLogDir(localLogs{paths: Paths{Root: root}}, "run-1"); dir != "" {
 		t.Errorf("localRunLogDir = %q, want empty when the dir cannot be created", dir)
-	}
-}
-
-func TestRun_PlanFailureRecordsLogPathThatExists(t *testing.T) {
-	ctx := context.Background()
-	p := Paths{Root: t.TempDir()}
-	if err := p.EnsureRoot(); err != nil {
-		t.Fatalf("ensure root: %v", err)
-	}
-	st, err := store.Open(p.StateDB())
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer func() { _ = st.Close() }()
-
-	res, err := Run(ctx, LocalBackends(p, st, nil), Options{
-		Pipeline: "orch-ok",
-		StartAt:  "no-such-step",
-	})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if res.Status != "failed" {
-		t.Fatalf("run status = %q, want failed (fixture must fail at plan time)", res.Status)
-	}
-
-	run, err := st.GetRun(ctx, res.RunID)
-	if err != nil {
-		t.Fatalf("get run: %v", err)
-	}
-	got, _ := run.Invocation["log_path"].(string)
-	if got == "" {
-		t.Fatalf("no log_path recorded for a local-backend run: %#v", run.Invocation)
-	}
-	info, err := os.Stat(got)
-	if err != nil {
-		t.Fatalf("recorded log_path %q does not exist: %v", got, err)
-	}
-	if !info.IsDir() {
-		t.Fatalf("recorded log_path %q is not a directory", got)
-	}
-	if want := p.RunDir(res.RunID); got != want {
-		t.Errorf("log_path = %q, want %q", got, want)
-	}
-
-	entries, err := os.ReadDir(got)
-	if err != nil {
-		t.Fatalf("read run dir: %v", err)
-	}
-	if len(entries) != 0 {
-		t.Errorf("expected an empty run dir after a plan failure, got %v", entries)
 	}
 }

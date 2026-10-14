@@ -139,64 +139,6 @@ func TestRunForExecution_FallsBackForLocalBackends(t *testing.T) {
 	}
 }
 
-func TestSecretArgs_RemoteReplaySideloadRoundTripsPlaintext(t *testing.T) {
-	remote, c := execControllerWithSecretRun(t, "run-1")
-	ctx := context.Background()
-
-	if err := remote.CreateNode(ctx, store.Node{
-		RunID: "run-1", NodeID: "ship", Status: "done", Outcome: "success",
-	}); err != nil {
-		t.Fatalf("CreateNode: %v", err)
-	}
-	if err := remote.WriteNodeDispatch(ctx, store.NodeDispatch{
-		RunID: "run-1", NodeID: "ship", Seq: 0,
-		InputEnvelope: []byte(`{"version":1,"type_name":"Ship"}`),
-	}); err != nil {
-		t.Fatalf("WriteNodeDispatch: %v", err)
-	}
-
-	local, err := teststore.Open(filepath.Join(t.TempDir(), "local.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = local.Close() }()
-
-	if err := SideloadRemoteForReplay(ctx, local, c, "run-1", "ship"); err != nil {
-		t.Fatalf("SideloadRemoteForReplay: %v", err)
-	}
-
-	got, err := local.GetRun(ctx, "run-1")
-	if err != nil {
-		t.Fatalf("GetRun after sideload: %v", err)
-	}
-	if got.Args["token"] != execSecretValue {
-		t.Fatalf("sideloaded args[token] = %q, want plaintext -- replay would execute with that literal",
-			got.Args["token"])
-	}
-
-	if names := got.SecretArgNames(); len(names) != 1 || names[0] != "token" {
-		t.Fatalf("sideloaded classification = %v, want [token]", names)
-	}
-	if got.RedactedForDisplay().Args["token"] != store.RedactedArgValue {
-		t.Error("sideloaded run does not redact for display")
-	}
-
-	replayID, err := MintReplayRun(ctx, local, "run-1", "ship")
-	if err != nil {
-		t.Fatalf("MintReplayRun: %v", err)
-	}
-	replay, err := local.GetRun(ctx, replayID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if replay.Args["token"] != execSecretValue {
-		t.Errorf("replay args[token] = %q, want plaintext", replay.Args["token"])
-	}
-	if replay.RedactedForDisplay().Args["token"] != store.RedactedArgValue {
-		t.Error("replay run does not redact for display")
-	}
-}
-
 func TestSecretArgs_ExecutionFetchOnAnUnauthenticatedController(t *testing.T) {
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "controller.db"))
 	if err != nil {

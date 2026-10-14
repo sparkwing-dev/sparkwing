@@ -1,7 +1,6 @@
 package orchestrator
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -88,48 +87,6 @@ func (c segmentController) nodeLog(t *testing.T, runID, nodeID string) *logseg.L
 	return l
 }
 
-// A launched node's pipeline child posts its log to the launcher process
-// over loopback with its claim token, as it would to a logs service; the
-// launcher seals the log once the child exits.
-func TestLaunchedNodeLogReachesTheControllerAsSegments(t *testing.T) {
-	ctrl, tok := newSegmentController(t)
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	sink := openNodeLogSink(t.Context(), client.NewWithToken(ctrl.url, nil, tok), "run-s", "a", logger)
-	if sink == nil {
-		t.Fatal("the controller issued no segment URLs")
-	}
-	url, stop, err := serveLoopbackLogs(sink, tok, logger)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer stop(t.Context())
-
-	stranger, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, url+"/api/v1/logs/run-s/a", strings.NewReader("x\n"))
-	stranger.Header.Set("Authorization", "Bearer swc_someone_else")
-	if resp, err := http.DefaultClient.Do(stranger); err != nil || resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("a request without the node's token: %v %v", resp, err)
-	} else {
-		_ = resp.Body.Close()
-	}
-
-	nodeLog, err := NewHTTPLogsWithToken(url, nil, tok, logger).OpenNodeLog(context.Background(), "run-s", "a", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, msg := range []string{"one", "two", "three"} {
-		nodeLog.Log("info", msg)
-	}
-	if err := nodeLog.Close(); err != nil {
-		t.Fatal(err)
-	}
-	sink.close(t.Context(), false)
-
-	l := ctrl.log(t)
-	if l.Manifest == nil || l.Manifest.Status != logseg.StatusComplete || l.Manifest.Lines != 3 || l.Broken != 0 {
-		t.Fatalf("manifest = %+v", l.Manifest)
-	}
-}
-
 func TestNodeLogStaysLocalOnAControllerWithoutSegments(t *testing.T) {
 	old := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -151,11 +108,8 @@ func TestHeartbeatWatchReportsTurnTheLiveViewOnAndOff(t *testing.T) {
 		t.Fatal("no sink")
 	}
 	appendLine := func(line string) {
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/logs/r/n", strings.NewReader(line))
-		rec := httptest.NewRecorder()
-		sink.ServeHTTP(rec, req)
-		if rec.Code != http.StatusNoContent {
-			t.Fatalf("append %q: %d", line, rec.Code)
+		if err := sink.sink.Append([]byte(line), "", 0, 0); err != nil {
+			t.Fatalf("append %q: %v", line, err)
 		}
 	}
 	appendLine("one\n")

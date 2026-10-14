@@ -12,10 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// PriorityEnv carries `sparkwing run --sw-priority` to the pipeline program:
-// an integer, or `front` / `back` for the queue-relative forms.
-const PriorityEnv = "SPARKWING_PRIORITY"
-
 const priorityQueueQueryTimeout = 5 * time.Second
 
 // priorityRequest is one run's answer to --sw-priority, ready to override
@@ -40,7 +36,7 @@ func resolveRunPriority(ctx context.Context, raw string, admission *LocalAdmissi
 	}
 	if mode != wingwire.PriorityFront && mode != wingwire.PriorityBack {
 		return priorityRequest{}, false, fmt.Errorf(
-			"%s=%q: expected an integer, %q, or %q", PriorityEnv, raw, wingwire.PriorityFront, wingwire.PriorityBack)
+			"--sw-priority %q: expected an integer, %q, or %q", raw, wingwire.PriorityFront, wingwire.PriorityBack)
 	}
 	waiters, err := currentQueueWaiters(ctx, admission)
 	if err != nil {

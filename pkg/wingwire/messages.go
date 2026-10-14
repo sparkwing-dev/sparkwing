@@ -187,9 +187,8 @@ type AdmissionRequest struct {
 	// charges its conservative default unless SemaphoresOnly is set.
 	Resources  HostResources    `json:"resources"`
 	Semaphores []SemaphoreClaim `json:"semaphores,omitempty"`
-	// ParentLeaseToken attaches this run to a live parent lease (see
-	// [LeaseTokenEnv]) so nested runs are not double-charged. Empty for
-	// top-level runs.
+	// ParentLeaseToken attaches this run to a live parent lease so nested
+	// runs are not double-charged. Empty for top-level runs.
 	ParentLeaseToken string `json:"parent_lease_token,omitempty"`
 	// ParentRunID identifies the member that spawned this run. The daemon
 	// checks lease membership and uses a live ancestor if this member exited.
@@ -250,9 +249,7 @@ type AdmissionRequest struct {
 // Grant is the daemon's admission of a request. The lease lives as
 // long as the client's connection; LeaseToken additionally lets the
 // holder [Reattach] within the grace window after a daemon restart or
-// takeover. Child runs inherit it via [LeaseTokenEnv], or inherit a
-// separate child-attach token via [ChildLeaseTokenEnv] when the current
-// execution lease differs from the run-scope lease.
+// takeover.
 type Grant struct {
 	RunID      string `json:"run_id"`
 	LeaseToken string `json:"lease_token"`

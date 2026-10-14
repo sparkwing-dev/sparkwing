@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestHostedChildOfAPinnedRunInheritsItsCores(t *testing.T) {
@@ -26,18 +25,6 @@ func TestHostedChildOfAPinnedRunInheritsItsCores(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer node.Release()
-	old := testWingdAdmission(home, nil)
-	old.ParentLeaseToken = parent.Token()
-	old.ParentRunID = "pinned-parent"
-	previous, _, err := old.attachChildRun(ctx, Backends{}, "old-child", "child", sparkwing.NewPlan(), func(error) {})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !previous.hostAdmitted {
-		t.Fatal("old child lacked parent host share")
-	}
-	previous.release()
-	t.Log("old dispatcher child inherited pinned parent's occupied core")
 	next := testWingdAdmission(home, nil)
 	next.ParentRunID, next.ParentNodeID = "pinned-parent", "parent"
 	hosted := &hostedAdmitter{la: next, pipeline: "child"}
@@ -62,9 +49,7 @@ func TestHostedChildOfAGroupedRunInheritsItsGroup(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 	h := &hostedAdmitter{la: testWingdAdmission(home, nil), pipeline: "parent"}
-	group := sparkwing.NewConcurrencyGroup("shared-parent-child", sparkwing.ConcurrencyLimit{Capacity: 1, Scope: sparkwing.ScopeBox, OnLimit: sparkwing.Queue})
-	plan := sparkwing.NewPlan().Concurrency(group)
-	claims := planSemaphoreClaims(plan, "group-parent")
+	claims := []wingwire.SemaphoreClaim{{Name: "__box__:shared-parent-child", Capacity: 1, Cost: 1, Policy: wingwire.PolicyQueue}}
 	parent, err := h.Acquire(ctx, wingwire.AdmissionRequest{RunID: "group-parent", Pipeline: "parent", SemaphoresOnly: true, Semaphores: claims}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -75,15 +60,6 @@ func TestHostedChildOfAGroupedRunInheritsItsGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer node.Release()
-	old := testWingdAdmission(home, nil)
-	old.ParentLeaseToken = parent.Token()
-	old.ParentRunID = "group-parent"
-	previous, _, err := old.attachChildRun(ctx, Backends{}, "old-group-child", "child", plan, func(error) {})
-	if err != nil {
-		t.Fatal(err)
-	}
-	previous.release()
-	t.Log("old child attaches and inherits shared plan semaphore without reacquisition")
 	next := testWingdAdmission(home, nil)
 	next.ParentRunID, next.ParentNodeID = "group-parent", "parent"
 	hosted := &hostedAdmitter{la: next, pipeline: "child"}

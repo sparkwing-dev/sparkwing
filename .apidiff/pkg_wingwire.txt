@@ -1,6 +1,5 @@
 # pkg/wingwire
 
-const APISocketEnv = "SPARKWING_API_SOCKET"
 type AdmissionRequest struct {
 	RunID string
 
@@ -89,7 +88,6 @@ type CapacityChange struct {
 
 	AtMS int64
 }
-const ChildLeaseTokenEnv = "SPARKWING_CHILD_LEASE_TOKEN"
 type ContainerLimit struct {
 	Cores float64
 
@@ -269,7 +267,6 @@ type JevAdmissionStats struct {
 	Admits    uint64
 	Fallbacks uint64
 }
-const LeaseTokenEnv = "SPARKWING_LEASE_TOKEN"
 type LivenessAck struct {
 	Nonce uint64
 }

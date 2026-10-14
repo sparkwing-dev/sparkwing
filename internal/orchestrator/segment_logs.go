@@ -2,11 +2,8 @@ package orchestrator
 
 import (
 	"context"
-	"crypto/subtle"
 	"errors"
 	"log/slog"
-	"net"
-	"net/http"
 	"slices"
 	"strings"
 	"sync"
@@ -16,12 +13,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 )
 
-// safety: the sink runs in the engine-side process, so a pipeline binary built against any SDK keeps posting
-// the append protocol it already speaks, over loopback, and never learns about segments.
+// safety: a slow controller cannot hold the runner past a stopped node's final log seal.
+const nodeLogSealTimeout = 10 * time.Second
+
+// safety: the sink runs in the engine-side process, so the pipeline process
+// never holds the segment upload URLs.
 type nodeLogSink struct {
 	runID, nodeID string
 	sink          *logseg.Sink
-	handler       http.Handler
 	live          *livePusher
 	logger        *slog.Logger
 
@@ -65,7 +64,6 @@ func openNodeLogSinkLive(ctx context.Context, ctrl *client.Client, runID, nodeID
 		return nil, false
 	}
 	n.sink = sink
-	n.handler = logseg.AppendHandler(sink, runID, nodeID)
 	if live {
 		up.OnWatched(sink.SetWatched)
 		watchedSinks.Store(watchKey(runID, nodeID), n)
@@ -73,12 +71,10 @@ func openNodeLogSinkLive(ctx context.Context, ctrl *client.Client, runID, nodeID
 	return n, false
 }
 
-func (n *nodeLogSink) ServeHTTP(w http.ResponseWriter, r *http.Request) { n.handler.ServeHTTP(w, r) }
-
 func (n *nodeLogSink) close(ctx context.Context, stopped bool) {
 	n.closeOnce.Do(func() {
 		watchedSinks.CompareAndDelete(watchKey(n.runID, n.nodeID), n)
-		sealCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), httpNodeLogFinishTimeout)
+		sealCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), nodeLogSealTimeout)
 		defer cancel()
 		m, err := n.sink.Close(sealCtx, logseg.End{Stopped: stopped})
 		n.live.close()
@@ -94,40 +90,6 @@ func (n *nodeLogSink) close(ctx context.Context, stopped bool) {
 				"status", m.Status, "reason", m.Reason, "lines", m.Lines, "dropped", m.DroppedLines)
 		}
 	})
-}
-
-// safety: only the child's own credential is accepted, so another process on the host cannot write the node's log.
-func serveLoopbackLogs(sink *nodeLogSink, bearer string, logger *slog.Logger) (string, func(context.Context), error) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return "", nil, err
-	}
-	srv := &http.Server{
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-			if len(got) != len(bearer) || subtle.ConstantTimeCompare([]byte(got), []byte(bearer)) != 1 {
-				http.Error(w, "the node's own credential is required", http.StatusUnauthorized)
-				return
-			}
-			sink.ServeHTTP(w, r)
-		}),
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-	}
-	go func() {
-		if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Warn("loopback log listener stopped", "err", err)
-		}
-	}()
-	stop := func(ctx context.Context) {
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-		defer cancel()
-		if err := srv.Shutdown(ctx); err != nil {
-			logger.Warn("stop the loopback log listener", "err", err)
-		}
-	}
-	return "http://" + listener.Addr().String(), stop, nil
 }
 
 // perf: pushes go out every livePushEvery, or sooner at livePushBytes; past livePushHold the oldest bytes drop,

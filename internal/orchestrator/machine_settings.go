@@ -112,18 +112,3 @@ func submitEnvAllowSetting() ([]string, string, error) {
 	}
 	return s.SubmitEnvAllow, path, nil
 }
-
-// safety: zero keeps the plan's own default and a negative value waits
-// forever, the two meanings Options.DispatchWaitTimeout gives them.
-func dispatchWaitSetting() (time.Duration, error) {
-	var s runSettings
-	path, _, err := userconfig.ReadDefault(userconfig.Run, &s)
-	if err != nil {
-		return 0, err
-	}
-	d, err := parseDispatchWaitTimeout(strings.TrimSpace(s.DispatchWait))
-	if err != nil {
-		return 0, fmt.Errorf("%s %s: %w", path, dispatchWaitKey, err)
-	}
-	return d, nil
-}

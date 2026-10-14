@@ -65,9 +65,8 @@ func (l *WrappedLogger) Emit(rec sparkwing.LogRecord) {
 }
 
 type Masker struct {
-	mu         sync.RWMutex
-	values     []string
-	registered []string
+	mu     sync.RWMutex
+	values []string
 }
 
 func NewMasker() *Masker { return &Masker{} }
@@ -78,12 +77,6 @@ func (m *Masker) Register(value string) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	// safety: values also holds encodings, and a value equal to an earlier
-	// one's encoding still needs its own encodings derived by the launcher.
-	if !slices.Contains(m.registered, value) {
-		m.registered = append(m.registered, value)
-		shareRegistered(value)
-	}
 	values := []string{value}
 	if strings.Contains(value, "\n") {
 		for _, line := range strings.Split(value, "\n") {

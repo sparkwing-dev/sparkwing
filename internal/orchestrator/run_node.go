@@ -3,30 +3,23 @@ package orchestrator
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
-	"os/signal"
-	"strconv"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
-	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func RunNodeOnce(
 	ctx context.Context,
-	controllerURL, logsURL, runID, nodeID, holderID, token string,
+	controllerURL, runID, nodeID, holderID, token string,
 	delegate sparkwing.Logger,
 	logger *slog.Logger,
 	admission *LocalAdmission,
@@ -57,11 +50,8 @@ func RunNodeOnce(
 	defer span.End()
 	otelutil.StampSpan(ctx, otelutil.SpanAttrs{RunID: runID, NodeID: nodeID})
 
-	transports := nodeTransportsFor(cfg, controllerURL, token)
-	defer transports.close()
-	httpClient := transports.plain
-	stateHTTP := transports.state
-	stateClient := client.NewWithToken(transports.stateURL, stateHTTP, transports.stateToken)
+	stateHTTP := &http.Client{Timeout: 60 * time.Second}
+	stateClient := client.NewWithToken(controllerURL, stateHTTP, token)
 
 	paths, err := DefaultPaths()
 	if err != nil {
@@ -70,12 +60,7 @@ func RunNodeOnce(
 	if err := paths.EnsureRoot(); err != nil {
 		return runner.Result{}, fmt.Errorf("ensure root: %w", err)
 	}
-	var logsBackend LogBackend
-	if logsURL != "" {
-		logsBackend = NewHTTPLogsWithToken(logsURL, httpClient, token, logger)
-	} else {
-		logsBackend = localLogs{paths: paths}
-	}
+	logsBackend := localLogs{paths: paths}
 
 	run, err := stateClient.GetRunForExecution(ctx, runID)
 	if err != nil {
@@ -100,8 +85,7 @@ func RunNodeOnce(
 		return runner.Result{}, fmt.Errorf("run %s names no repository or working-tree source, so there is no pipeline for node %s to build",
 			runID, nodeID)
 	}
-	// safety: coordinated nodes use the same pipeline binary as their local dispatcher.
-	if !cfg.coordinated && shouldRunRemote(trigger) {
+	if shouldRunRemote(trigger) {
 		if controllerURL == "" {
 			return runner.Result{}, fmt.Errorf(
 				"run %s node %s dispatches to a remote runner, which cannot reach this machine's admission daemon socket; set SPARKWING_CONTROLLER_URL to a controller the runner can reach",
@@ -111,20 +95,9 @@ func RunNodeOnce(
 			runID, nodeID, token, cfg.repoAllowlist, logger)
 	}
 
-	var art storage.ArtifactStore
-	var localSecrets secrets.Source
-	if cfg.coordinated {
-		// safety: rebuild local surfaces; a laptop run's secrets and artifact
-		// store do not belong to the pod's controller-backed profile.
-		localSecrets, art, err = coordinatedChildSurfaces(ctx, runID, run.Pipeline)
-		if err != nil {
-			return runner.Result{}, err
-		}
-	} else {
-		art, err = resolveArtifactStoreFromEnv(ctx)
-		if err != nil {
-			return runner.Result{}, fmt.Errorf("artifact store: %w", err)
-		}
+	art, err := resolveArtifactStoreFromEnv(ctx)
+	if err != nil {
+		return runner.Result{}, fmt.Errorf("artifact store: %w", err)
 	}
 	backends := RemoteBackends(stateClient, logsBackend, art, stateHTTP, store.DefaultConcurrencyLease)
 
@@ -159,12 +132,8 @@ func RunNodeOnce(
 		return data, true
 	})
 
-	source := localSecrets
-	if source == nil {
-		source = controllerSecretSource(ctx, stateClient, runID)
-	}
 	ctx = sparkwing.WithSecretResolver(ctx,
-		secrets.NewCached(source, masker).AsResolver())
+		secrets.NewCached(controllerSecretSource(ctx, stateClient, runID), masker).AsResolver())
 
 	ctx = secrets.WithMasker(ctx, masker)
 	ctx = sparkwingruntime.WithOIDCTokenSource(ctx, func(ctx context.Context, audience string) (string, error) {
@@ -254,16 +223,6 @@ func RunNodeOnce(
 		}
 	}
 
-	if cfg.coordinated {
-		ctx, err = installStepControlsFromEnv(ctx, plan)
-		if err != nil {
-			return runner.Result{}, err
-		}
-		if !cfg.claimed {
-			ctx = withLocalExecution(ctx)
-		}
-	}
-
 	r := NewNodeExecutor(backends)
 	req := runner.Request{
 		RunID:    runID,
@@ -277,12 +236,7 @@ func RunNodeOnce(
 		Delegate: delegate,
 	}
 	start := time.Now()
-	var res runner.Result
-	if cfg.coordinated {
-		res = r.executeCoordinated(ctx, req)
-	} else {
-		res = r.RunNode(ctx, req)
-	}
+	res := r.RunNode(ctx, req)
 	if MetricsHook != nil {
 		MetricsHook(run.Pipeline, string(res.Outcome), time.Since(start))
 	}
@@ -303,105 +257,6 @@ func runContextFor(run *store.Run) sparkwing.RunContext {
 	}
 }
 
-func runNodeCLI(args []string) error {
-	defer secrets.StopSharingRegistered()
-	fs := flag.NewFlagSet("run-node", flag.ExitOnError)
-	controllerURL := fs.String("controller", os.Getenv("SPARKWING_CONTROLLER_URL"),
-		"controller base URL (env: SPARKWING_CONTROLLER_URL)")
-	logsURL := fs.String("logs", os.Getenv("SPARKWING_LOGS_URL"),
-		"node log endpoint of the engine process that started this one (env: SPARKWING_LOGS_URL); the engine sets it")
-	timeout := fs.Duration("timeout", 0,
-		"max wall-clock duration for the node (0 = none; job-level modifiers still apply)")
-	coordinated := fs.Bool("coordinated", false,
-		"a local dispatcher owns this node's cache, concurrency, and SkipIf decisions; execute the body only")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	runID := fs.Arg(0)
-	if runID == "" {
-		runID = os.Getenv("SPARKWING_RUN_ID")
-	}
-	nodeID := fs.Arg(1)
-	if nodeID == "" {
-		nodeID = os.Getenv("SPARKWING_NODE_ID")
-	}
-	apiSocket := os.Getenv(wingwire.APISocketEnv)
-	if (*controllerURL == "" && apiSocket == "") || runID == "" || nodeID == "" {
-		fs.Usage()
-		return errors.New("--controller (or " + wingwire.APISocketEnv + ") + <runID> + <nodeID> are required (or SPARKWING_CONTROLLER_URL + SPARKWING_RUN_ID + SPARKWING_NODE_ID env)")
-	}
-
-	// safety: the supervisor records a killed node's outcome, not the node, so
-	// SIGTERM keeping its default action is intended. The forwarder reaps only the
-	// step sessions, which the SDK isolates, so no group kill aimed at the node
-	// reaches them.
-	procgroup.ForwardTerminationToOwned()
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-	if *timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, *timeout)
-		defer cancel()
-	}
-
-	holderID := fmt.Sprintf("pod:%s:%s", runID, nodeID)
-	token := agentToken
-	if token == "" {
-		token = LocalServeToken(*controllerURL)
-	}
-	var runOpts []RunNodeOption
-	if claimedHolder := os.Getenv("SPARKWING_NODE_CLAIM_HOLDER"); claimedHolder != "" {
-		holderID = claimedHolder
-		generation, err := strconv.ParseInt(os.Getenv("SPARKWING_NODE_CLAIM_GENERATION"), 10, 64)
-		if err != nil || generation < 1 {
-			return errors.New("SPARKWING_NODE_CLAIM_GENERATION must name the awarded claim generation")
-		}
-		runOpts = append(runOpts, func(c *runNodeConfig) {
-			c.claimed = true
-			c.claimFence = store.NodeClaimFence{
-				ClaimGeneration: generation,
-				MembershipID:    os.Getenv("SPARKWING_NODE_CLAIM_MEMBERSHIP"),
-				ReservationID:   os.Getenv("SPARKWING_NODE_CLAIM_RESERVATION"),
-			}
-		})
-	}
-	if apiSocket != "" {
-		runOpts = append(runOpts, OverAPISocket(apiSocket))
-		token = ""
-	}
-	if *coordinated {
-		holderID = fmt.Sprintf("node:%s:%s", runID, nodeID)
-		runOpts = append(runOpts, Coordinated())
-	}
-	var abandon context.CancelFunc
-	ctx, abandon = context.WithCancel(ctx)
-	defer abandon()
-	defer WatchParentLiveness(abandon)()
-	ctx = withProcessNode(ctx, runID, nodeID)
-	res, err := RunNodeOnce(ctx, *controllerURL, *logsURL, runID, nodeID, holderID, token,
-		selectLocalRenderer(), slog.Default(), nil, runOpts...)
-	if err != nil {
-		return err
-	}
-	if *coordinated {
-		return coordinatedExitStatus(runID, nodeID, res)
-	}
-	if res.Err != nil {
-		fmt.Fprintf(os.Stderr, "node %s/%s failed: %v\n", runID, nodeID, res.Err)
-		return res.Err
-	}
-	fmt.Fprintf(os.Stderr, "node %s/%s outcome=%s\n", runID, nodeID, res.Outcome)
-	return nil
-}
-
-func coordinatedExitStatus(runID, nodeID string, res runner.Result) error {
-	if res.Err == nil {
-		return nil
-	}
-	return fmt.Errorf("node %s/%s failed; its terminal row carries the reason", runID, nodeID)
-}
-
 func invokeGeneratorForPod(ctx context.Context, exp sparkwing.Expansion) (out []*sparkwing.JobNode, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -410,35 +265,4 @@ func invokeGeneratorForPod(ctx context.Context, exp sparkwing.Expansion) (out []
 		}
 	}()
 	return exp.Gen(ctx), nil
-}
-
-type nodeTransports struct {
-	stateURL   string
-	stateToken string
-	state      *http.Client
-	plain      *http.Client
-	close      func()
-}
-
-// safety: handing the logs backend the socket transport would dial api.sock
-// for every record whatever host the logs URL names, and the daemon serves no
-// log route, so the records would 404 and be dropped.
-func nodeTransportsFor(cfg runNodeConfig, controllerURL, token string) nodeTransports {
-	plain := &http.Client{Timeout: 60 * time.Second}
-	out := nodeTransports{
-		stateURL:   controllerURL,
-		stateToken: token,
-		state:      plain,
-		plain:      plain,
-		close:      func() {},
-	}
-	if cfg.apiSocket == "" {
-		return out
-	}
-	socket := NewAPISocketClient(cfg.apiSocket)
-	out.state = socket
-	out.stateURL = HostedAPIBaseURL
-	out.stateToken = ""
-	out.close = socket.CloseIdleConnections
-	return out
 }

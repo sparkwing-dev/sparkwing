@@ -1,22 +1,11 @@
 package orchestrator
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 )
-
-func writeInnerProfiles(t *testing.T, body string) {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := fssecure.WriteFile(path, []byte(body)); err != nil {
-		t.Fatalf("write profiles: %v", err)
-	}
-	t.Setenv("SPARKWING_CONFIG", path)
-}
 
 func TestRefusePinnedLocalRun(t *testing.T) {
 	if err := RefusePinnedLocalRun(nil); err != nil {
@@ -42,17 +31,5 @@ func TestRefusePinnedCheckoutRun_FailsWhenTheConfigCannotBeRead(t *testing.T) {
 	checkoutAt(t, "pipelines:\n  - name: release\n    entrypoint: Release\n")
 	if err := refusePinnedCheckoutRun(nil); err != nil {
 		t.Fatalf("a readable config with no pin was refused: %v", err)
-	}
-}
-
-func TestRefuseProfileHandoff_FailsARunAnOlderCLIPointedAtAProfile(t *testing.T) {
-	t.Setenv(ProfileEnv, "")
-	if err := refuseProfileHandoff(); err != nil {
-		t.Fatalf("no handoff: %v", err)
-	}
-	t.Setenv(ProfileEnv, "shared")
-	err := refuseProfileHandoff()
-	if err == nil || !strings.Contains(err.Error(), "sparkwing pipeline trigger <pipeline> --profile shared") {
-		t.Fatalf("handoff = %v, want a refusal naming the trigger command", err)
 	}
 }

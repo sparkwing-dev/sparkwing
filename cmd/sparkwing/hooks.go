@@ -24,7 +24,6 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -668,7 +667,7 @@ func pipelineProofCommand(repoRoot, pipeline string) (*exec.Cmd, error) {
 	}
 	cmd := exec.Command(self, args...)
 	cmd.Dir = repoRoot
-	cmd.Env = append(dropProfileEnv(os.Environ()), "SPARKWING_LOG_FORMAT=quiet")
+	cmd.Env = append(os.Environ(), "SPARKWING_LOG_FORMAT=quiet")
 	return cmd, nil
 }
 
@@ -1117,8 +1116,6 @@ func renderHookScript(hookName string, pipes []string, chainGlobal bool) string 
 	if len(pipes) > 0 {
 		b.WriteString("(\n")
 		b.WriteString(gitenv.ShellUnbind())
-
-		b.WriteString("unset " + orchestrator.ProfileEnv + " " + orchestrator.SecretsProfileEnv + "\n")
 		for _, p := range pipes {
 			// safety: pipeline names come from repo config, so quote before they reach sh.
 			fmt.Fprintf(&b, "sparkwing run %s%s%s\n", shellSingleQuote(p), stdin, tolerate)

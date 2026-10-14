@@ -2,15 +2,12 @@ package orchestrator
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -124,54 +121,6 @@ func TestCompactRunBoundsEscapedFieldsAndConcurrentProgress(t *testing.T) {
 	}
 	if r.Err() != nil {
 		t.Fatal(r.Err())
-	}
-}
-
-func TestRunRendererSelectionKeepsDetailedTransport(t *testing.T) {
-	t.Setenv("SPARKWING_LOG_FORMAT", "json")
-	t.Setenv("SPARKWING_LOG_LEVEL", "")
-	if _, ok := selectRunRenderer().(*compactRunRenderer); !ok {
-		t.Fatal("JSON run did not select compact display")
-	}
-	if _, ok := selectLocalRenderer().(*JSONRenderer); !ok {
-		t.Fatal("node transport lost its complete renderer")
-	}
-	t.Setenv("SPARKWING_LOG_LEVEL", "debug")
-	if _, ok := selectRunRenderer().(*JSONRenderer); !ok {
-		t.Fatal("verbose run lost its full stream")
-	}
-	for _, format := range []string{"pretty", "quiet"} {
-		t.Setenv("SPARKWING_LOG_FORMAT", format)
-		if _, ok := selectRunRenderer().(*compactRunRenderer); ok {
-			t.Fatalf("%s selected JSON", format)
-		}
-	}
-}
-
-func TestCompactRunReportsAdmissionFailure(t *testing.T) {
-	registerAdmitFailPipeline()
-	home := wingdTestHome(t)
-	backends, _, _ := openWingdBackends(t, home)
-	var out bytes.Buffer
-	display := newCompactRunRenderer(&out)
-	admission := &LocalAdmission{Home: home, Version: "test", Out: io.Discard, Spawn: func(string, string) error { return errors.New("no daemon for test") }, DialTimeout: 100 * time.Millisecond, Backoff: 10 * time.Millisecond}
-	result, err := Run(context.Background(), backends, Options{Pipeline: "admit-fail-e2e", RunID: "compact-admission", Delegate: display, Admission: admission})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Status != "failed" {
-		t.Fatalf("status: %s", result.Status)
-	}
-	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	var finish sparkwing.LogRecord
-	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &finish); err != nil {
-		t.Fatal(err)
-	}
-	if finish.Event != "run_finish" || finish.Attrs["status"] != "failed" || finish.Attrs["error"] == "" {
-		t.Fatalf("admission failure lost: %v", finish)
-	}
-	if len(lines) > 27 {
-		t.Fatalf("%d lines", len(lines))
 	}
 }
 

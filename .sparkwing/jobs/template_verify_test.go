@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	templates "github.com/sparkwing-dev/sparks-core/templates"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	sparkwing "github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -119,15 +118,6 @@ func TestCleanupTemplateScratch_RemovesOnlyVerifierDirectories(t *testing.T) {
 	for _, dir := range retained {
 		if _, err := os.Stat(dir); err != nil {
 			t.Errorf("unrelated temp data %s was removed: %v", filepath.Base(dir), err)
-		}
-	}
-}
-
-func TestTemplateRunLeaseTokens_AreClearedAtIsolatedDaemonBoundary(t *testing.T) {
-	env := templateRunAdmissionEnv(t.TempDir())
-	for _, name := range []string{wingwire.LeaseTokenEnv, wingwire.ChildLeaseTokenEnv} {
-		if got := env[name]; got != "" {
-			t.Fatalf("%s = %q, want empty", name, got)
 		}
 	}
 }

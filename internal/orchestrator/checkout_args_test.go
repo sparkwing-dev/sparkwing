@@ -121,77 +121,11 @@ func TestCheckoutInvokeArgs_AncestorConfigIsNotMerged(t *testing.T) {
 	}
 }
 
-func TestCheckoutInvokeArgs_MalformedConfigFailsNamingTheFile(t *testing.T) {
-	checkoutAt(t, "defaults:\n  args:\n   - this is not a map\n\tand this is a tab\n")
-
-	if _, err := checkoutInvokeArgs("deploy", map[string]string{"region": "us-east"}); err == nil ||
-		!strings.Contains(err.Error(), "sparkwing.yaml") {
-		t.Fatalf("checkoutInvokeArgs = %v, want the parse error naming sparkwing.yaml", err)
-	}
-	opts := Options{Pipeline: "deploy"}
-	if err := applyCheckoutProjectConfig(&opts); err == nil || !strings.Contains(err.Error(), "sparkwing.yaml") {
-		t.Fatalf("applyCheckoutProjectConfig = %v, want the parse error naming sparkwing.yaml", err)
-	}
-}
-
 // A key a release removed makes the checkout's config unreadable, and the run
 // fails on it instead of planning without the project's defaults and guards.
 func TestCheckoutConfig_ARemovedKeyFailsTheRun(t *testing.T) {
 	checkoutAt(t, "profiles:\n  prod:\n    mirror_local: false\npipelines:\n  - name: deploy\n    entrypoint: Deploy\n")
 	if _, err := checkoutInvokeArgs("deploy", nil); err == nil || !strings.Contains(err.Error(), "field mirror_local not found") {
 		t.Fatalf("checkoutInvokeArgs = %v, want the unknown-field error", err)
-	}
-}
-
-func TestApplyCheckoutProjectConfig_FillsArgsAndGuards(t *testing.T) {
-	checkoutAt(t, `defaults:
-  args:
-    region: eu-west
-  guards:
-    reject:
-      - profile:controller
-pipelines:
-  - name: deploy
-    entrypoint: Deploy
-    args:
-      tier: premium
-`)
-	opts := Options{Pipeline: "deploy"}
-	if err := applyCheckoutProjectConfig(&opts); err != nil {
-		t.Fatal(err)
-	}
-
-	if opts.DefaultArgs["region"] != "eu-west" {
-		t.Errorf("DefaultArgs = %v, want the defaults.args block", opts.DefaultArgs)
-	}
-	if opts.PipelineYAML == nil {
-		t.Fatal("PipelineYAML is nil; Run() would skip guards entirely")
-	}
-	if opts.PipelineYAML.Args["tier"] != "premium" {
-		t.Errorf("PipelineYAML.Args = %v, want the entry's args block", opts.PipelineYAML.Args)
-	}
-
-	if len(opts.PipelineYAML.Guards.Reject) != 1 {
-		t.Errorf("Guards = %+v, want the defaults.guards fallback applied", opts.PipelineYAML.Guards)
-	}
-}
-
-func TestApplyCheckoutProjectConfig_DoesNotOverrideCaller(t *testing.T) {
-	checkoutAt(t, `defaults:
-  args:
-    region: eu-west
-pipelines:
-  - name: deploy
-    entrypoint: Deploy
-`)
-	opts := Options{
-		Pipeline:    "deploy",
-		DefaultArgs: map[string]string{"region": "caller-supplied"},
-	}
-	if err := applyCheckoutProjectConfig(&opts); err != nil {
-		t.Fatal(err)
-	}
-	if opts.DefaultArgs["region"] != "caller-supplied" {
-		t.Errorf("DefaultArgs = %v, want the caller's own", opts.DefaultArgs)
 	}
 }

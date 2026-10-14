@@ -1167,8 +1167,7 @@ admission and every node it later dispatches queue at the same place,
 and the run record carries both the number and where it came from.
 `sparkwing run --sw-detached --sw-priority` carries the request on the
 trigger and resolves it when the consumer launches the run, so `front`
-means ahead of the queue the run joins. The flag reaches the
-pipeline program as `SPARKWING_PRIORITY`.
+means ahead of the queue the run joins.
 
 Priority is a whole-run order, separate from `Concurrency()`: a group's
 members still take turns oldest-first inside the group.

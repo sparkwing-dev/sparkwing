@@ -170,8 +170,6 @@ func (j stepJob) close() {
 	}
 }
 
-func ownCommandGroup(*exec.Cmd) func() { return func() {} }
-
 // recordStepSession writes the ledger record a sweep outside this process
 // needs to end the job if this process dies first. Kill-on-close already
 // ends the job when this process's handle goes away, so the record mostly

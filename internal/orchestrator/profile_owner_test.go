@@ -84,3 +84,12 @@ func TestRunProfileHasOneRecorder(t *testing.T) {
 		})
 	}
 }
+
+func newInternalPaths(t *testing.T) Paths {
+	t.Helper()
+	p := PathsAt(t.TempDir())
+	if err := p.EnsureRoot(); err != nil {
+		t.Fatalf("ensure root: %v", err)
+	}
+	return p
+}

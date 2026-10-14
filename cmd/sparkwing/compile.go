@@ -6,28 +6,16 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
-	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
-
-func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions) error {
-	run := newPipelineRun(sparkwingDir, opts)
-	defer run.stop()
-	if err := run.materialize(env); err != nil {
-		return run.finish(err)
-	}
-	return run.finish(run.exec(args, env))
-}
 
 // safety: the dispatcher has to weigh what a pipeline declares before it
 // starts, and only the pipeline's entry declares it, so materializing the
@@ -105,45 +93,6 @@ func (r *pipelineRun) materializeTypeScript(env []string) error {
 	}
 	r.entry, r.source, r.typescript = entry, "typescript", true
 	return nil
-}
-
-// safety: the binary runs authored init code, so it starts from the inherited
-// environment without what the engine owns, and runtime adds back only what
-// this verb reads, as KEY=VALUE.
-func (r *pipelineRun) exec(args, env []string, runtime ...string) error {
-	if r.typescript {
-		return fmt.Errorf("%s runs only inside a Go pipeline binary; a TypeScript pipeline answers the node protocol alone", args[0])
-	}
-	env = withWingdHost(engineenv.Strip(env))
-	for _, kv := range runtime {
-		k, v, _ := strings.Cut(kv, "=")
-		env = setEnv(env, k, v)
-	}
-	if r.uncachedBinary != "" {
-		r.stopSignals()
-		execDir := r.opts.ExecutionDir
-		if execDir == "" {
-			execDir = r.sparkwingDir
-		}
-		return runExec(r.uncachedBinary, args, execDir, env, func() {
-			r.stop()
-			if r.opts.AfterChild != nil {
-				r.opts.AfterChild()
-			}
-		})
-	}
-
-	execDir := r.opts.ExecutionDir
-	if execDir == "" {
-		execDir = r.sparkwingDir
-	}
-	if err := r.ctx.Err(); err != nil {
-		return err
-	}
-	// safety: the pipeline binary drives the terminal from here, so the CLI
-	// must stop catching signals it can no longer act on for that program.
-	r.stopSignals()
-	return r.lease.ExecReplace(args, execDir, env, r.opts.AfterChild)
 }
 
 func (r *pipelineRun) stop() {
@@ -249,28 +198,6 @@ func announceCompile() {
 		msg = "==> recompiling .sparkwing/ binary (source changed since last run)"
 	}
 	fmt.Fprintln(os.Stderr, color.Dim(msg))
-}
-
-func runExec(bin string, args []string, dir string, env []string, afterChild func()) error {
-	// #nosec G702 -- the pipeline binary this command just built, run as argv without a shell
-	cmd := exec.Command(bin, args...)
-	cmd.Dir = dir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	cmd.Env = env
-	err := cmd.Run()
-	if afterChild != nil {
-		afterChild()
-	}
-	if err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
-			os.Exit(ee.ExitCode()) //nolint:forbidigo // foreground wrapper preserves the pipeline's exit status
-		}
-		return err
-	}
-	return nil
 }
 
 type compileOptions struct {

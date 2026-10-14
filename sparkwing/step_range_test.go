@@ -5,7 +5,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -16,7 +15,7 @@ func TestStepRange_LinearDAG_StartAt(t *testing.T) {
 	b := sparkwing.Step(w, "b", func(ctx context.Context) error { ranB.Store(true); return nil }).Needs(a)
 	sparkwing.Step(w, "c", func(ctx context.Context) error { ranC.Store(true); return nil }).Needs(b)
 
-	ctx := sparkwingruntime.WithStepRange(context.Background(), "b", "")
+	ctx := withStepRange(context.Background(), "b", "")
 	if _, err := sparkwing.RunWork(ctx, w); err != nil {
 		t.Fatalf("RunWork: %v", err)
 	}
@@ -38,7 +37,7 @@ func TestStepRange_LinearDAG_StopAt(t *testing.T) {
 	b := sparkwing.Step(w, "b", func(ctx context.Context) error { ranB.Store(true); return nil }).Needs(a)
 	sparkwing.Step(w, "c", func(ctx context.Context) error { ranC.Store(true); return nil }).Needs(b)
 
-	ctx := sparkwingruntime.WithStepRange(context.Background(), "", "b")
+	ctx := withStepRange(context.Background(), "", "b")
 	if _, err := sparkwing.RunWork(ctx, w); err != nil {
 		t.Fatalf("RunWork: %v", err)
 	}
@@ -57,7 +56,7 @@ func TestStepRange_LinearDAG_StartEqualsStop(t *testing.T) {
 	b := sparkwing.Step(w, "b", func(ctx context.Context) error { ranB.Store(true); return nil }).Needs(a)
 	sparkwing.Step(w, "c", func(ctx context.Context) error { ranC.Store(true); return nil }).Needs(b)
 
-	ctx := sparkwingruntime.WithStepRange(context.Background(), "b", "b")
+	ctx := withStepRange(context.Background(), "b", "b")
 	if _, err := sparkwing.RunWork(ctx, w); err != nil {
 		t.Fatalf("RunWork: %v", err)
 	}
@@ -78,7 +77,7 @@ func TestStepRange_BranchingDAG_StartAtSkipsAllUpstream(t *testing.T) {
 	merge := sparkwing.Step(w, "merge", func(ctx context.Context) error { ranMerge.Store(true); return nil }).Needs(left, right)
 	sparkwing.Step(w, "end", func(ctx context.Context) error { ranEnd.Store(true); return nil }).Needs(merge)
 
-	ctx := sparkwingruntime.WithStepRange(context.Background(), "end", "")
+	ctx := withStepRange(context.Background(), "end", "")
 	if _, err := sparkwing.RunWork(ctx, w); err != nil {
 		t.Fatalf("RunWork: %v", err)
 	}
@@ -100,7 +99,7 @@ func TestStepRange_UserSkipIfStillApplies(t *testing.T) {
 		Needs(a).
 		SkipIf(func(context.Context) bool { return true })
 
-	ctx := sparkwingruntime.WithStepRange(context.Background(), "a", "b")
+	ctx := withStepRange(context.Background(), "a", "b")
 	if _, err := sparkwing.RunWork(ctx, w); err != nil {
 		t.Fatalf("RunWork: %v", err)
 	}
@@ -131,7 +130,7 @@ func TestStepRange_BoundInUnrelatedWorkIsNoOp(t *testing.T) {
 	w := sparkwing.NewWork()
 	sparkwing.Step(w, "local-step", func(ctx context.Context) error { ran.Store(true); return nil })
 
-	ctx := sparkwingruntime.WithStepRange(context.Background(), "step-from-some-other-work", "")
+	ctx := withStepRange(context.Background(), "step-from-some-other-work", "")
 	if _, err := sparkwing.RunWork(ctx, w); err != nil {
 		t.Fatalf("RunWork: %v", err)
 	}
@@ -165,4 +164,8 @@ func TestTopologicalStepOrder_Stable(t *testing.T) {
 	if pos("b") >= pos("c") {
 		t.Errorf("b must precede c: %v", got)
 	}
+}
+
+func withStepRange(ctx context.Context, startAt, stopAt string) context.Context {
+	return context.WithValue(ctx, sparkwing.RuntimePlumbing.Keys.StepRange, [2]string{startAt, stopAt})
 }

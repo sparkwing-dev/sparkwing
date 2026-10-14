@@ -102,30 +102,6 @@ type NodeLog interface {
 	Close() error
 }
 
-type autoRetryNodeResetter interface {
-	ResetNodeForAutoRetry(context.Context, string, string) error
-}
-
-type retryNodeLister interface {
-	ListNodes(context.Context, string) ([]*store.Node, error)
-}
-
-func listRetryNodes(ctx context.Context, state StateBackend, runID string) ([]*store.Node, error) {
-	lister, ok := state.(retryNodeLister)
-	if !ok {
-		return nil, errors.New("state backend does not support strict retry node listing")
-	}
-	return lister.ListNodes(ctx, runID)
-}
-
-func resetNodeForAutoRetry(ctx context.Context, state StateBackend, runID, nodeID string) error {
-	resetter, ok := state.(autoRetryNodeResetter)
-	if !ok {
-		return errors.New("state backend does not support whole-node retry reset")
-	}
-	return resetter.ResetNodeForAutoRetry(ctx, runID, nodeID)
-}
-
 // safety: the close is the write that hands over a node's last lines and
 // ends its live stream, so it has to land before the node's status goes
 // terminal; a reader that acts on the status would otherwise see a short log.
@@ -197,8 +173,6 @@ func localRunLogDir(b LogBackend, runID string) string {
 		return EnsureRunLogDir(l.paths, runID)
 	case *localLogs:
 		return EnsureRunLogDir(l.paths, runID)
-	case *HTTPLogs:
-		return absExistingDir(l.localRunDir(runID))
 	}
 	return ""
 }

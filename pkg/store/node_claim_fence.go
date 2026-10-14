@@ -37,9 +37,8 @@ type NodeClaimFence struct {
 }
 
 type (
-	nodeClaimFenceKey          struct{}
-	executionAttemptOrdinalKey struct{}
-	triggerClaimFenceKey       struct{}
+	nodeClaimFenceKey    struct{}
+	triggerClaimFenceKey struct{}
 )
 
 type TriggerClaimFence struct {
@@ -54,15 +53,6 @@ func WithNodeClaimFence(ctx context.Context, fence NodeClaimFence) context.Conte
 func NodeClaimFenceFromContext(ctx context.Context) (NodeClaimFence, bool) {
 	fence, ok := ctx.Value(nodeClaimFenceKey{}).(NodeClaimFence)
 	return fence, ok
-}
-
-func WithExecutionAttemptOrdinal(ctx context.Context, ordinal int) context.Context {
-	return context.WithValue(ctx, executionAttemptOrdinalKey{}, ordinal)
-}
-
-func ExecutionAttemptOrdinalFromContext(ctx context.Context) (int, bool) {
-	ordinal, ok := ctx.Value(executionAttemptOrdinalKey{}).(int)
-	return ordinal, ok
 }
 
 func WithTriggerClaimFence(ctx context.Context, fence TriggerClaimFence) context.Context {

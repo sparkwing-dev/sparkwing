@@ -36,6 +36,8 @@ type Pipeline struct {
 	Risks []string `json:"risks,omitempty"`
 
 	RisksBySteps []sparkwing.DescribeStepRisks `json:"risks_by_step,omitempty"`
+
+	Secrets pipelines.SecretsField `json:"secrets,omitempty"`
 }
 
 type PipelineIndex struct {
@@ -239,13 +241,6 @@ func runPipelineDescribe(args []string) error {
 		return err
 	}
 	name := *pipelineName
-	if *secretsOnly {
-		// safety: only the pipeline binary can resolve secret bindings, so it answers this.
-		if format != "json" {
-			format = "pretty"
-		}
-		return dispatchRun([]string{name, "config", "-o", format})
-	}
 	pipelines, err := gatherPipelinesCatalog(true)
 	if err != nil {
 		return err
@@ -268,6 +263,9 @@ func runPipelineDescribe(args []string) error {
 		}
 		return fmt.Errorf("no pipeline named %q (run `sparkwing pipeline list --all` to see every entry)", name)
 	}
+	if *secretsOnly {
+		return printPipelineSecrets(found, format)
+	}
 	switch format {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
@@ -279,6 +277,30 @@ func runPipelineDescribe(args []string) error {
 		printPipelineDetail(found)
 		return nil
 	}
+}
+
+func printPipelineSecrets(p *Pipeline, format string) error {
+	if format == "json" {
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"pipeline": p.Name, "secrets": p.Secrets})
+	}
+	fmt.Println(p.Name + " secrets")
+	fmt.Println()
+	if len(p.Secrets) == 0 {
+		fmt.Println("  (none declared)")
+		return nil
+	}
+	width := 4
+	for _, s := range p.Secrets {
+		width = max(width, len(s.Name))
+	}
+	for _, s := range p.Secrets {
+		req := "optional"
+		if s.IsRequired() {
+			req = "required"
+		}
+		fmt.Printf("  %-*s  %s\n", width, s.Name, req)
+	}
+	return nil
 }
 
 func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
@@ -319,6 +341,7 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 				a.EnvVars = dp.EnvVars
 				a.Risks = dp.Risks
 				a.RisksBySteps = dp.RisksBySteps
+				a.Secrets = dp.Secrets
 			}
 			seen[p.Name] = struct{}{}
 			out = append(out, a)

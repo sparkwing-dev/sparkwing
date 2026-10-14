@@ -2,14 +2,16 @@ package web_test
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
-	"sync"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
@@ -18,47 +20,39 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-var registerOnce sync.Map
-
-func register(name string, factory func() sparkwing.Pipeline[sparkwing.NoInputs]) {
-	if _, loaded := registerOnce.LoadOrStore(name, struct{}{}); loaded {
-		return
+func seedRun(t *testing.T, paths orchestrator.Paths, runID, nodeID, msg string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := paths.EnsureRunDir(runID); err != nil {
+		t.Fatal(err)
 	}
-	sparkwing.Register[sparkwing.NoInputs](name, factory)
-}
-
-type webOK struct{ sparkwing.Base }
-
-func (webOK) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, rc.Pipeline, func(ctx context.Context) error {
-		sparkwing.Info(ctx, "web hello")
-		return nil
-	})
-	return nil
-}
-
-type webDAG struct{ sparkwing.Base }
-
-func (webDAG) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	a := sparkwing.Job(plan, "a", func(ctx context.Context) error { return nil })
-	sparkwing.Job(plan, "b", func(ctx context.Context) error { return nil }).Needs(a)
-	return nil
-}
-
-type webANSI struct{ sparkwing.Base }
-
-func (webANSI) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "web-ansi", func(ctx context.Context) error {
-		sparkwing.Info(ctx, "\x1b[31mansi-hello\x1b[0m")
-		return nil
-	})
-	return nil
-}
-
-func init() {
-	register("web-ok", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &webOK{} })
-	register("web-dag", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &webDAG{} })
-	register("web-ansi", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &webANSI{} })
+	st, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.CreateRun(ctx, store.Run{ID: runID, Pipeline: nodeID, Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.StartNode(ctx, runID, nodeID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishNode(ctx, runID, nodeID, "success", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishRun(ctx, runID, "success", ""); err != nil {
+		t.Fatal(err)
+	}
+	line, err := json.Marshal(sparkwing.LogRecord{TS: time.Now(), Level: "info", JobID: nodeID, Msg: msg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.NodeLog(runID, nodeID), append(line, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // safety: the real bundle is gitignored, so a checkout that has not built the
@@ -95,20 +89,17 @@ func TestAPI_Logs(t *testing.T) {
 	root := t.TempDir()
 	paths := orchestrator.PathsAt(root)
 
-	res, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{Pipeline: "web-ok"})
-	if err != nil {
-		t.Fatalf("orchestrator.Run: %v", err)
-	}
+	seedRun(t, paths, "run-web-ok", "web-ok", "web hello")
 
 	base, stop := startServer(t, paths)
 	defer stop()
 
-	logs := mustGetText(t, base+"/api/v1/runs/"+res.RunID+"/logs/web-ok")
+	logs := mustGetText(t, base+"/api/v1/runs/run-web-ok/logs/web-ok")
 	if !strings.Contains(logs, "web hello") {
 		t.Fatalf("node logs missing 'web hello': %q", logs)
 	}
 
-	all := mustGetText(t, base+"/api/v1/runs/"+res.RunID+"/logs")
+	all := mustGetText(t, base+"/api/v1/runs/run-web-ok/logs")
 	if !strings.Contains(all, "=== web-ok (success) ===") {
 		t.Fatalf("whole-run logs missing banner: %q", all)
 	}
@@ -144,15 +135,12 @@ func TestAPI_LogsAcceptNegotiation(t *testing.T) {
 	root := t.TempDir()
 	paths := orchestrator.PathsAt(root)
 
-	res, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{Pipeline: "web-ansi"})
-	if err != nil {
-		t.Fatalf("orchestrator.Run: %v", err)
-	}
+	seedRun(t, paths, "run-web-ansi", "web-ansi", "\x1b[31mansi-hello\x1b[0m")
 
 	base, stop := startServer(t, paths)
 	defer stop()
 
-	url := base + "/api/v1/runs/" + res.RunID + "/logs/web-ansi"
+	url := base + "/api/v1/runs/run-web-ansi/logs/web-ansi"
 
 	defaultBody := mustGetText(t, url)
 	if strings.Contains(defaultBody, `"msg":`) || strings.Contains(defaultBody, `"event":`) {

@@ -1,82 +1,7 @@
 package sparkwingruntime
 
-import (
-	"fmt"
-	"sort"
-	"strings"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
-)
-
-func ValidateStepRange(p *sparkwing.Plan, startAt, stopAt string) error {
-	if p == nil || (startAt == "" && stopAt == "") {
-		return nil
-	}
-	known := planStepIDs(p)
-	if startAt != "" {
-		if _, ok := known[startAt]; !ok {
-			return fmt.Errorf("%s", unknownRefMessage(
-				fmt.Sprintf("--sw-start-at %q", startAt),
-				"step",
-				startAt,
-				known,
-			))
-		}
-	}
-	if stopAt != "" {
-		if _, ok := known[stopAt]; !ok {
-			return fmt.Errorf("%s", unknownRefMessage(
-				fmt.Sprintf("--sw-stop-at %q", stopAt),
-				"step",
-				stopAt,
-				known,
-			))
-		}
-	}
-	return nil
-}
-
 func SuggestClosest(target string, candidates []string) string {
 	return closestMatch(target, candidates)
-}
-
-func planStepIDs(p *sparkwing.Plan) map[string]struct{} {
-	out := make(map[string]struct{})
-	for _, n := range p.Nodes() {
-		w := n.Work()
-		if w == nil {
-			continue
-		}
-		for k := range workKnownIDs(w) {
-			out[k] = struct{}{}
-		}
-	}
-	return out
-}
-
-func workKnownIDs(w *sparkwing.Work) map[string]struct{} {
-	out := make(map[string]struct{})
-	for _, s := range w.Steps() {
-		out[s.ID()] = struct{}{}
-	}
-	return out
-}
-
-func unknownRefMessage(site, kind, missing string, known map[string]struct{}) string {
-	available := sortedKeys(known)
-	suggestion := closestMatch(missing, available)
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "sparkwing: %s references unknown %s %q", site, kind, missing)
-	if suggestion != "" {
-		fmt.Fprintf(&b, "; did you mean %q?", suggestion)
-	}
-	if len(available) == 0 {
-		fmt.Fprintf(&b, " (no %ss registered)", kind)
-	} else {
-		fmt.Fprintf(&b, " (available %ss: %s)", kind, strings.Join(available, ", "))
-	}
-	return b.String()
 }
 
 func closestMatch(want string, candidates []string) string {
@@ -150,13 +75,4 @@ func longerLen(a, b string) int {
 		return len(a)
 	}
 	return len(b)
-}
-
-func sortedKeys(m map[string]struct{}) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }

@@ -16,7 +16,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -566,20 +565,16 @@ func checkDocsMirror(ctx context.Context) error {
 // safety: a node hands each child the run's own bindings, so a suite that
 // reads one reaches the machine's admission daemon, the operator's controller
 // or cache, or a credential of the run's, and reds only inside a gate.
-// internal/runners/local/env.go and the node host's attempt environment are the injectors these names track.
+// The node host's attempt environment is the injector these names track.
 var productTestUnset = []string{
-	wingwire.LeaseTokenEnv,
-	wingwire.ChildLeaseTokenEnv,
-	wingwire.APISocketEnv,
 	"GIT_INDEX_FILE",
 	"SPARKWING_AGENT_TOKEN",
 	"SPARKWING_CACHE_URL",
 	"SPARKWING_CONTROLLER_URL",
 	"SPARKWING_DRY_RUN",
-	"SPARKWING_LOGS_URL",
 	"SPARKWING_NODE_ID",
+	"SPARKWING_NODE_TOKEN",
 	"SPARKWING_NODE_URL",
-	"SPARKWING_PARENT_LIVENESS_FD",
 	"SPARKWING_RUN_ID",
 }
 
@@ -587,12 +582,9 @@ var productTestUnset = []string{
 // service and carries no credential. A name absent from both this map and the
 // list above fails the contract test rather than reaching a suite unread.
 var productTestKept = map[string]string{
-	"SPARKWING_LOG_FORMAT":    "picks a renderer",
 	"SPARKWING_RUNNER_NAME":   "reports which runner executed the node",
 	"SPARKWING_RUNNER_TYPE":   "reports which runner executed the node",
 	"SPARKWING_RUNNER_LABELS": "reports what the local runner advertises",
-	"SPARKWING_START_AT":      "is consumed before the node's Work body starts",
-	"SPARKWING_STOP_AT":       "is consumed before the node's Work body starts",
 }
 
 // safety: a fresh home also hides the dev.env the local dashboard writes, which

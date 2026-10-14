@@ -17,7 +17,6 @@ import (
 	"time"
 
 	templates "github.com/sparkwing-dev/sparks-core/templates"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -372,9 +371,7 @@ func verifyTemplate(ctx context.Context, m templates.Manifest, env verifyEnv) (t
 
 func templateRunAdmissionEnv(stateHome string) map[string]string {
 	return map[string]string{
-		"SPARKWING_HOME":            stateHome,
-		wingwire.LeaseTokenEnv:      "",
-		wingwire.ChildLeaseTokenEnv: "",
+		"SPARKWING_HOME": stateHome,
 	}
 }
 

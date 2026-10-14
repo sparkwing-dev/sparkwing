@@ -341,24 +341,6 @@ func (c childAwaitConfig) warn(ctx context.Context, message string, err error, a
 	}
 }
 
-type localChildAwaitDiagnostics struct{}
-
-func (localChildAwaitDiagnostics) info(ctx context.Context, message string, attrs ...any) {
-	sparkwing.LoggerFromContext(ctx).Emit(childAwaitLogRecord(ctx, "info", message, childAwaitAttrs(attrs)))
-}
-
-func (localChildAwaitDiagnostics) warn(ctx context.Context, message string, err error, attrs ...any) {
-	fields := childAwaitAttrs(attrs)
-	fields["error"] = err.Error()
-	sparkwing.LoggerFromContext(ctx).Emit(childAwaitLogRecord(ctx, "warn", message, fields))
-}
-
-func (localChildAwaitDiagnostics) appendEvent(
-	ctx context.Context, state StateBackend, runID, nodeID, kind string, payload []byte,
-) {
-	noteEvent(ctx, state, runID, nodeID, kind, payload)
-}
-
 type podChildAwaitDiagnostics struct {
 	logger *slog.Logger
 }
@@ -378,38 +360,6 @@ func (d podChildAwaitDiagnostics) appendEvent(
 		d.logger.WarnContext(ctx, "child run audit event append failed",
 			"write", kind, "run_id", runID, "node", nodeID, "err", err)
 	}
-}
-
-func childAwaitAttrs(attrs []any) map[string]any {
-	fields := make(map[string]any, len(attrs)/2)
-	for i := 0; i+1 < len(attrs); i += 2 {
-		key, ok := attrs[i].(string)
-		if ok {
-			fields[key] = attrs[i+1]
-		}
-	}
-	return fields
-}
-
-func childAwaitLogRecord(ctx context.Context, level, message string, attrs map[string]any) sparkwing.LogRecord {
-	return sparkwing.LogRecord{
-		TS:    time.Now(),
-		Level: level,
-		JobID: sparkwing.NodeFromContext(ctx),
-		Step:  sparkwing.StepFromContext(ctx),
-		Msg:   message,
-		Attrs: attrs,
-	}
-}
-
-type wedgeChildAwaitPoll struct {
-	guard *storeWedgeGuard
-}
-
-func (p *wedgeChildAwaitPoll) success() { p.guard.success() }
-
-func (p *wedgeChildAwaitPoll) failure(_ context.Context, childRunID, _ string, err error, _ bool) error {
-	return p.guard.fail(fmt.Sprintf("waiting for child run %s", childRunID), err)
 }
 
 type retryChildAwaitPoll struct {

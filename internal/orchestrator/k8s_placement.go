@@ -7,15 +7,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-type stringSliceFlag []string
-
-func (s *stringSliceFlag) String() string { return strings.Join(*s, ",") }
-
-func (s *stringSliceFlag) Set(v string) error {
-	*s = append(*s, v)
-	return nil
-}
-
 func parseK8sNodeSelector(values []string) (map[string]string, error) {
 	if len(values) == 0 {
 		return nil, nil

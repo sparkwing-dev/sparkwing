@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -41,18 +40,4 @@ func (cl *Client) readResetStats() (terminal, transient error) {
 		return fmt.Errorf("wingd/client: expected stats_reset_ack, got %T", msg), nil
 	}
 	return nil, nil
-}
-
-func ResetStats(ctx context.Context, opts Options) error {
-	noSpawn := opts
-	noSpawn.Spawn = func(string, string) error { return ErrNoDaemon }
-	cl, err := EnsureDaemon(ctx, noSpawn)
-	if err != nil {
-		if errors.Is(err, ErrNoDaemon) {
-			return ErrNoDaemon
-		}
-		return err
-	}
-	defer cl.Close()
-	return cl.ResetStats(ctx)
 }

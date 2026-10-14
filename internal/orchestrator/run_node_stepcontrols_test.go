@@ -85,7 +85,7 @@ func TestRunNodeOnce_IgnoresAmbientStepControlsOffTheCoordinatedPath(t *testing.
 	stepControlsApplied.n = 0
 	stepControlsApplied.mu.Unlock()
 
-	res, err := orchestrator.RunNodeOnce(ctx, srv.URL, "", runID, nodeID,
+	res, err := orchestrator.RunNodeOnce(ctx, srv.URL, runID, nodeID,
 		"pod:"+runID+":"+nodeID, "", &captureLogger{}, quiet, nil)
 	if err != nil {
 		t.Fatalf("RunNodeOnce: %v (an ambient SPARKWING_START_AT reached the pod path)", err)

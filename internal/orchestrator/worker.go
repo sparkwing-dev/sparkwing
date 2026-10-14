@@ -3,13 +3,11 @@ package orchestrator
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
-	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -29,109 +27,6 @@ type WorkerOptions struct {
 	RunnerFactory func(backends Backends, trigger *store.Trigger) runner.Runner
 
 	Token string
-}
-
-func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Backends, stateClient *client.Client, trigger *store.Trigger) {
-	logger := opts.Logger
-	if logger == nil {
-		logger = slog.Default()
-	}
-	finishTrigger := true
-	defer func() {
-		if !finishTrigger {
-			return
-		}
-		if ferr := stateClient.FinishTrigger(ctx, trigger.ID); ferr != nil {
-			logger.Warn("finish trigger failed",
-				"trigger_id", trigger.ID, "err", ferr)
-		}
-	}()
-
-	runCtx, cancelRun := context.WithCancel(ctx)
-	cancelled := &atomic.Bool{}
-	// safety: the runner's trigger loop heartbeats the claim it holds, so a child
-	// that also beat it doubled every heartbeat; only a parent that does not asks.
-	if opts.HeartbeatInterval > 0 {
-		go runHeartbeat(runCtx, stateClient, trigger.ID,
-			opts.HeartbeatInterval, cancelRun, cancelled, logger)
-	}
-
-	var r runner.Runner
-	if opts.RunnerFactory != nil {
-		r = opts.RunnerFactory(backends, trigger)
-	}
-	args := resolveTriggerArgs(runCtx, backends.State, trigger, logger)
-	runOpts := Options{
-		SecretSource:      controllerSecretSource(runCtx, stateClient, trigger.ID),
-		Pipeline:          trigger.Pipeline,
-		RunID:             trigger.ID,
-		Args:              args,
-		ParentRunID:       trigger.ParentRunID,
-		Full:              trigger.Full,
-		RetryOf:           trigger.RetryOf,
-		RetrySource:       trigger.RetrySource,
-		RetryRepoDir:      trigger.TriggerEnv[retryprovenance.RepoDirKey],
-		RetryRepoIdentity: trigger.TriggerEnv[retryprovenance.RepoIdentityKey],
-		RetryRevision:     trigger.TriggerEnv[retryprovenance.RevisionKey],
-		RetryPlanHash:     trigger.TriggerEnv[retryprovenance.PlanHashKey],
-		Trigger: sparkwing.TriggerInfo{
-			Source:      trigger.TriggerSource,
-			User:        trigger.TriggerUser,
-			PullRequest: sparkwing.PullRequestFromEnv(trigger.TriggerEnv),
-		},
-		Git: sparkwing.NewGit(sparkwing.CurrentRuntime().WorkDir,
-			trigger.GitSHA, trigger.GitBranch, "", trigger.Repo, trigger.RepoURL),
-		Delegate: opts.Delegate,
-		Runner:   r,
-	}
-
-	err := applyCheckoutProjectConfig(&runOpts)
-	var res *Result
-	if err == nil {
-		res, err = Run(runCtx, backends, runOpts)
-	}
-	cancelRun()
-	if err != nil {
-		if ferr := recordClaimedTriggerSetupFailure(ctx, backends.State, trigger, err); ferr != nil {
-			finishTrigger = false
-			logger.Error("record failed trigger run",
-				"run_id", trigger.ID, "err", ferr)
-		}
-		logger.Warn(
-			"run failed setup",
-			"run_id", trigger.ID,
-			"err", err,
-		)
-		return
-	}
-
-	finalStatus := res.Status
-	if cancelled.Load() {
-		finalStatus = "cancelled"
-		if err := stateClient.FinishRun(ctx, res.RunID, "cancelled", "cancelled by operator"); err != nil {
-			noteLostStateWrite(ctx, "finish run", res.RunID, err)
-		}
-
-		nodes, nerr := stateClient.ListNodes(ctx, res.RunID)
-		if nerr == nil {
-			for _, n := range nodes {
-				if n.Status == "done" {
-					continue
-				}
-				if err := stateClient.FinishNode(ctx, res.RunID, n.NodeID,
-					string(sparkwing.Cancelled), "cancelled by operator", nil); err != nil {
-					noteLostStateWrite(ctx, "finish node", res.RunID, err)
-				}
-			}
-		}
-	}
-
-	logger.Info(
-		"run finished",
-		"run_id", res.RunID,
-		"pipeline", trigger.Pipeline,
-		"status", finalStatus,
-	)
 }
 
 const pipelineSetupFailed = "pipeline setup failed before dispatch; retry the run, check Fleet or local agent status, and give this run ID to an operator if it repeats"
@@ -179,57 +74,6 @@ func ConfirmTerminalRunAfterWriteError(ctx context.Context, state interface {
 	run, err := state.GetRun(checkCtx, runID)
 	return err == nil && run != nil &&
 		(run.Status == "success" || run.Status == "failed" || run.Status == "cancelled")
-}
-
-func HandleClaimedTrigger(ctx context.Context, opts WorkerOptions, triggerID string) error {
-	if opts.ControllerURL == "" {
-		return errors.New("WorkerOptions.ControllerURL is required")
-	}
-	if opts.Logger == nil {
-		opts.Logger = slog.Default()
-	}
-	paths, err := DefaultPaths()
-	if err != nil {
-		return fmt.Errorf("resolve paths: %w", err)
-	}
-	if err := paths.EnsureRoot(); err != nil {
-		return fmt.Errorf("ensure sparkwing root: %w", err)
-	}
-
-	dummyStore, err := store.Open(paths.StateDB())
-	if err != nil {
-		return fmt.Errorf("open local store: %w", err)
-	}
-	defer func() { _ = dummyStore.Close() }()
-	local := LocalBackends(paths, dummyStore, nil)
-
-	stateClient := client.NewWithToken(opts.ControllerURL, nil, opts.Token)
-
-	logsBackend := local.Logs
-	if opts.LogsURL != "" {
-		logsBackend = NewHTTPLogsWithToken(opts.LogsURL, nil, opts.Token, opts.Logger)
-	} else if seg, err := controllerSegmentLogs(ctx, stateClient, opts.Logger); err != nil {
-		opts.Logger.Warn("node logs stay on this machine", "err", err)
-	} else {
-		defer seg.Close(ctx)
-		stateClient.WithWatchObserver(NoteWatch)
-		logsBackend = NewLogStoreBackend(seg, opts.Logger)
-	}
-	backends := RemoteBackends(stateClient, logsBackend, nil, nil, store.DefaultConcurrencyLease)
-
-	trigger, err := stateClient.GetTrigger(ctx, triggerID)
-	if err != nil {
-		return fmt.Errorf("get trigger %s: %w", triggerID, err)
-	}
-	ctx = DispatchContext(ctx, trigger)
-	opts.Logger.Info(
-		"handling claimed trigger",
-		"run_id", trigger.ID,
-		"pipeline", trigger.Pipeline,
-		"source", trigger.TriggerSource,
-	)
-	ExecuteClaimedTrigger(ctx, opts, backends, stateClient, trigger)
-	return nil
 }
 
 func runHeartbeat(ctx context.Context, c *client.Client, triggerID string,

@@ -151,7 +151,8 @@ func dispatchRun(args []string) error {
 	if err != nil {
 		return err
 	}
-	if runInvokesAdmission(passthrough) {
+	helpRequested := slices.Contains(passthrough, "-h") || slices.Contains(passthrough, "--help")
+	if !helpRequested {
 		entry, err := pinnedPipelineAt(dir, flags.ref, pipelineName)
 		if err != nil {
 			return fmt.Errorf("run: %w", err)
@@ -200,7 +201,7 @@ func dispatchRun(args []string) error {
 		executionDir = ""
 	}
 
-	env := removeEnv(removeEnv(os.Environ(), "SPARKWING_PIPELINE_REV"), "SPARKWING_RUN_HANDLE_FILE")
+	env := os.Environ()
 	logFormat := os.Getenv("SPARKWING_LOG_FORMAT")
 	if logFormat == "" {
 		logFormat = logFormatJSON
@@ -239,16 +240,12 @@ func dispatchRun(args []string) error {
 	if err := run.materialize(env); err != nil {
 		return run.finish(err)
 	}
-	inspectsConfig := len(passthrough) > 0 && passthrough[0] == "config"
-	if !inspectsConfig && (slices.Contains(passthrough, "-h") || slices.Contains(passthrough, "--help")) {
+	if helpRequested {
 		schema, err := run.describedPipeline(pipelineName)
 		if err == nil {
 			printPipelineHelp(os.Stdout, schema)
 		}
 		return run.finish(err)
-	}
-	if !runInvokesAdmission(passthrough) {
-		return run.finish(run.exec(append([]string{pipelineName}, passthrough...), env, binaryVerbEnv(flags, logFormat)...))
 	}
 	schema, err := run.describedPipeline(pipelineName)
 	var pipelineArgs map[string]string
@@ -263,7 +260,7 @@ func dispatchRun(args []string) error {
 		return run.finish(err)
 	}
 
-	if runNeedsDaemon(flags, passthrough) {
+	if !flags.dryRun {
 		ensureRunDaemonFn()
 	}
 	sweepStraySessionsBeforeRun()
@@ -271,25 +268,6 @@ func dispatchRun(args []string) error {
 		schema: schema, args: pipelineArgs, flags: flags, env: env, source: string(source),
 		priority: priority, logFormat: logFormat, runHandle: runHandle,
 	}))
-}
-
-// hack: config and --explain still run inside the pipeline binary and read these from the environment.
-func binaryVerbEnv(flags runFlags, logFormat string) []string {
-	env := []string{"SPARKWING_LOG_FORMAT=" + logFormat}
-	if flags.dryRun {
-		env = append(env, "SPARKWING_DRY_RUN=1")
-	}
-	if flags.noCache {
-		env = append(env, "SPARKWING_NO_CACHE=1")
-	}
-	return env
-}
-
-// safety: a pipeline binary built against an older SDK selects a profile from
-// ProfileEnv and a secrets source from SecretsProfileEnv, so an inherited value
-// would point it at a remote the invocation never named.
-func dropProfileEnv(env []string) []string {
-	return removeEnv(removeEnv(env, orchestrator.ProfileEnv), orchestrator.SecretsProfileEnv)
 }
 
 func pinnedPipeline(sparkwingDir, pipelineName string) (*pipelines.Pipeline, error) {
@@ -349,17 +327,6 @@ func printPin(pipelineName string) {
 	if pin, err := pinnedProfileHere(pipelineName); err == nil && pin != "" {
 		fmt.Printf("Pinned: profile %s; run it with `sparkwing pipeline trigger %s --profile %s`\n", pin, pipelineName, pin)
 	}
-}
-
-func removeEnv(env []string, key string) []string {
-	prefix := key + "="
-	out := env[:0]
-	for _, entry := range env {
-		if !strings.HasPrefix(entry, prefix) {
-			out = append(out, entry)
-		}
-	}
-	return out
 }
 
 func runSparkwing(args []string) error {
@@ -433,8 +400,6 @@ func runSparkwing(args []string) error {
 	case "debug":
 		return runDebug(args[1:])
 
-	case "handle-trigger":
-		return dispatchRun(args)
 	case "wingd":
 		return runWingd(args[1:])
 	case "__dashboard-supervise":

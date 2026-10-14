@@ -1,6 +1,5 @@
 # pkg/storage/logseg
 
-func AppendHandler(sink *Sink, runID, nodeID string) http.Handler
 func Assess(m *Manifest, node NodeProgress, now time.Time) Completeness
 type Attempt struct {
 	Prefix     string
@@ -46,9 +45,6 @@ func (l *Log) LossLine() []byte
 func (l *Log) Read(ctx context.Context, objs Objects, opts storage.ReadOpts) ([]byte, error)
 func (l *Log) Segment(ctx context.Context, objs Objects, seg Segment) ([]byte, error)
 func (l *Log) Verify(ctx context.Context, objs Objects) error
-const LogSeqEndHeader = "X-Sparkwing-Log-Seq-End"
-const LogSeqHeader = "X-Sparkwing-Log-Seq"
-const LogStreamHeader = "X-Sparkwing-Log-Stream"
 type Manifest struct {
 	Version      int
 	Run          string
@@ -71,7 +67,6 @@ func (m Manifest) Marshal() ([]byte, error)
 func ManifestKey(prefix string) string
 const ManifestName = "manifest.json"
 const ManifestVersion = 1
-const MaxAppendBytes = 4 << 20
 const MaxNodeBytes int64 = 64 << 20
 func NewSink(ctx context.Context, up Uploader, opts Options) (*Sink, error)
 const NoTeam = "_"
@@ -153,9 +148,4 @@ type Uploader interface {
 	PutSegment(ctx context.Context, seg Segment, body []byte) error
 
 	PutManifest(ctx context.Context, m Manifest) error
-}
-type WriterSeal struct {
-	Stream   string
-	FinalSeq int64
-	Dropped  int64
 }

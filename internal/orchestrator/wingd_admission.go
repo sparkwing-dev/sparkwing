@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"runtime"
 	"runtime/debug"
@@ -126,25 +125,6 @@ func (la *LocalAdmission) out() io.Writer {
 	return os.Stdout
 }
 
-func (la *LocalAdmission) contentionAttribution(ctx context.Context, runID string) string {
-	qs, err := wingdclient.Query(ctx, la.clientOptions())
-	if err != nil {
-		return ""
-	}
-	for _, h := range qs.Holders {
-		if h.RunID != runID || !h.Contended {
-			continue
-		}
-		sat := int(h.SaturatedShare*100 + 0.5)
-		if h.ExpectedDurationMS > 0 {
-			return fmt.Sprintf("took %s vs p50 %s; host saturated %d%% of the run",
-				fmtAdmissionDur(h.ElapsedMS), fmtAdmissionDur(h.ExpectedDurationMS), sat)
-		}
-		return h.ContentionReason
-	}
-	return ""
-}
-
 func fmtAdmissionDur(ms int64) string {
 	return (time.Duration(ms) * time.Millisecond).Round(time.Second).String()
 }
@@ -156,8 +136,6 @@ type runLease struct {
 	childToken   string
 	hostAdmitted bool
 	leases       []*wingdclient.Lease
-
-	driftWarning string
 
 	charge runCharge
 }
@@ -177,112 +155,6 @@ const (
 	admitProceed admitOutcome = ""
 	admitSkipped admitOutcome = "skip"
 )
-
-func (la *LocalAdmission) admitRun(
-	ctx context.Context,
-	backends Backends,
-	pipeline string,
-	runID string,
-	plan *sparkwing.Plan,
-	workers int,
-	onEvicted func(error),
-) (*runLease, admitOutcome, error) {
-	if la.ParentLeaseToken != "" {
-		return la.attachChildRun(ctx, backends, runID, pipeline, plan, onEvicted)
-	}
-	var res capacity.Resolution
-	var prof *store.PipelineProfile
-	var drift *capacity.Drift
-	var overCap string
-	hostPinned := planHasResourcePin(plan)
-	if hostPinned {
-		res, prof, drift, overCap = la.resolveHostCost(ctx, backends, pipeline, plan)
-	}
-	class := effectiveAdmissionClass(plan, la.AdmissionClass)
-	la.AdmissionClass = class
-	req := wingwire.AdmissionRequest{
-		RunID:              runID,
-		Pipeline:           pipeline,
-		Repo:               currentRepoShortName(),
-		PID:                os.Getpid(),
-		Resources:          wingwire.HostResources{Cores: res.Cores, MemoryBytes: res.MemoryBytes},
-		Semaphores:         planSemaphoreClaims(plan, runID),
-		SemaphoresOnly:     !hostPinned,
-		CostSource:         wingwire.CostSource(res.Source),
-		ExpectedDurationMS: res.ExpectedDuration.Milliseconds(),
-		Origin:             la.Origin,
-		Priority:           plan.PriorityValue(),
-		Class:              string(class),
-	}
-	if prof != nil {
-		req.ExpectedP99MS = prof.P99Duration.Milliseconds()
-		req.SampleCount = prof.SampleCount
-	}
-	warning := hostChargeWarning(drift, overCap)
-	if warning != "" {
-		req.DriftWarning = warning
-		fmt.Fprintln(la.out(), warning)
-	}
-	if note := measuringNarration(res, prof); note != "" {
-		fmt.Fprintln(la.out(), note)
-	}
-	submitted := time.Now()
-	lease, outcome, err := la.acquireBlocking(ctx, backends, runID, req)
-	if err != nil || outcome != admitProceed {
-		return nil, outcome, err
-	}
-	if backends.LocalCoordination && pipeline != "" {
-		_ = backends.State.RecordWaitObservation(ctx, currentProfileKey(pipeline), time.Since(submitted))
-	}
-	rl := &runLease{token: lease.Token, hostAdmitted: hostPinned, leases: []*wingdclient.Lease{lease}}
-	if hostPinned || len(req.Semaphores) > 0 {
-		rl.childToken = lease.Token
-	}
-	rl.driftWarning = warning
-	rl.charge = runCharge{Cores: res.Cores, MemoryBytes: res.MemoryBytes}
-	if lease.SoleRunUnderLoad {
-		fmt.Fprintf(la.out(),
-			"admitted as sole run; host under external load %.1f cores - additional runs will queue\n",
-			lease.ExternalCores)
-	}
-	go lease.WatchControl(evictionHandler(runID, onEvicted), cancelHandler(onEvicted))
-	return rl, admitProceed, nil
-}
-
-func planHasResourcePin(plan *sparkwing.Plan) bool {
-	if plan == nil {
-		return false
-	}
-	h := plan.ResourceHints()
-	return h != nil && (h.Cores > 0 || h.MemoryBytes > 0)
-}
-
-func measuringNarration(res capacity.Resolution, prof *store.PipelineProfile) string {
-	switch res.Source {
-	case store.CostSourceMeasuring:
-		return fmt.Sprintf("re-measuring at %.1f cores (prior charge); runs under contention only raise the floor, clean runs finalize the price",
-			res.Cores)
-	case store.CostSourceFloor:
-		n := 0
-		if prof != nil {
-			n = prof.ContendedCount
-		}
-		return fmt.Sprintf("measuring at %.1f cores from the demand floor of %d contended run(s); a clean run finalizes the price",
-			res.Cores, n)
-	default:
-		return ""
-	}
-}
-
-func hostChargeWarning(drift *capacity.Drift, overCapacity string) string {
-	if overCapacity != "" {
-		return overCapacity
-	}
-	if drift != nil {
-		return drift.Message
-	}
-	return ""
-}
 
 func (la *LocalAdmission) admitNode(
 	ctx context.Context,
@@ -379,67 +251,6 @@ func nodePin(node *sparkwing.JobNode) *capacity.Pin {
 		return &capacity.Pin{Cores: h.Cores, MemoryBytes: h.MemoryBytes}
 	}
 	return nil
-}
-
-func (la *LocalAdmission) attachChildRun(
-	ctx context.Context,
-	backends Backends,
-	runID string,
-	pipeline string,
-	plan *sparkwing.Plan,
-	onEvicted func(error),
-) (*runLease, admitOutcome, error) {
-	cl, err := la.ensureDaemon(ctx)
-	if err != nil {
-		return nil, admitProceed, fmt.Errorf("local admission: %w", err)
-	}
-	// safety: server grants or rejects a ParentLeaseToken immediately; child attach is never queued, so nil is safe.
-	lease, err := cl.Acquire(ctx, wingwire.AdmissionRequest{
-		RunID:            runID,
-		Pipeline:         pipeline,
-		Repo:             currentRepoShortName(),
-		PID:              os.Getpid(),
-		ParentLeaseToken: la.ParentLeaseToken,
-		ParentRunID:      la.ParentRunID,
-		Origin:           la.Origin,
-	}, nil)
-	if err != nil {
-		cl.Close()
-		return nil, admitProceed, fmt.Errorf("local admission: attach to parent lease: %w", err)
-	}
-	rl := &runLease{token: lease.Token, hostAdmitted: leaseCarriesHost(lease), leases: []*wingdclient.Lease{lease}}
-	go lease.WatchControl(evictionHandler(runID, onEvicted), cancelHandler(onEvicted))
-
-	inherited := make(map[string]bool, len(lease.Semaphores))
-	for _, name := range lease.Semaphores {
-		inherited[name] = true
-	}
-	var extra []wingwire.SemaphoreClaim
-	for _, claim := range planSemaphoreClaims(plan, runID) {
-		if !inherited[claim.Name] {
-			extra = append(extra, claim)
-		}
-	}
-	if len(extra) == 0 {
-		return rl, admitProceed, nil
-	}
-	extraLease, outcome, err := la.acquireBlocking(ctx, backends, runID, wingwire.AdmissionRequest{
-		RunID:           runID + localPlanSemsID,
-		OwnerRunID:      runID,
-		OwnerLeaseToken: lease.Token,
-		DisplayRunID:    runID,
-		SemaphoresOnly:  true,
-		Semaphores:      extra,
-		SubLease:        true,
-		Priority:        plan.PriorityValue(),
-	})
-	if err != nil || outcome != admitProceed {
-		rl.release()
-		return nil, outcome, err
-	}
-	rl.leases = append(rl.leases, extraLease)
-	go extraLease.Watch(evictionHandler(runID, onEvicted))
-	return rl, admitProceed, nil
 }
 
 func leaseCarriesHost(lease *wingdclient.Lease) bool {
@@ -918,33 +729,6 @@ func requestClaimsKey(claims []wingwire.SemaphoreClaim, key string) bool {
 	return false
 }
 
-func evictionHandler(runID string, onEvicted func(error)) func(wingwire.Evicted) {
-	return func(ev wingwire.Evicted) {
-		if onEvicted == nil {
-			return
-		}
-		onEvicted(&planAdmissionEvictedError{
-			groupName:    ev.Key,
-			policy:       string(ev.Policy),
-			supersededBy: ev.SupersededBy,
-			runID:        runID,
-		})
-	}
-}
-
-func cancelHandler(onEvicted func(error)) func(wingwire.Cancel) {
-	return func(c wingwire.Cancel) {
-		if onEvicted == nil {
-			return
-		}
-		reason := c.Reason
-		if reason == "" {
-			reason = "cancelled via the admission daemon"
-		}
-		onEvicted(&runDaemonCanceledError{reason: reason})
-	}
-}
-
 func tightestQueueTimeout(claims []wingwire.SemaphoreClaim) (string, time.Duration) {
 	var key string
 	var timeout time.Duration
@@ -958,65 +742,6 @@ func tightestQueueTimeout(claims []wingwire.SemaphoreClaim) (string, time.Durati
 		}
 	}
 	return key, timeout
-}
-
-func (la *LocalAdmission) resolveHostCost(ctx context.Context, backends Backends, pipeline string, plan *sparkwing.Plan) (capacity.Resolution, *store.PipelineProfile, *capacity.Drift, string) {
-	pin := planPin(plan)
-	key := currentProfileKey(pipeline)
-	var profile *store.PipelineProfile
-	if backends.LocalCoordination && pipeline != "" {
-		if p, err := backends.State.GetPipelineProfile(ctx, key, ""); err == nil {
-			profile = p
-		}
-	}
-	res := capacity.Resolve(pin, profile, runtime.NumCPU(), capacityFingerprint(plan))
-	res, overCap := la.applyHostCeiling(ctx, res, key)
-	return res, profile, capacity.CheckDrift(pin, profile), overCap
-}
-
-func planPin(plan *sparkwing.Plan) *capacity.Pin {
-	if rh := plan.ResourceHints(); rh != nil && (rh.Cores > 0 || rh.MemoryBytes > 0) {
-		return &capacity.Pin{Cores: rh.Cores, MemoryBytes: rh.MemoryBytes}
-	}
-	var cores float64
-	var mem int64
-	for _, n := range plan.Nodes() {
-		if h := n.ResourceHints(); h != nil {
-			cores = math.Max(cores, h.Cores)
-			mem = max(mem, h.MemoryBytes)
-		}
-	}
-	if cores > 0 || mem > 0 {
-		return &capacity.Pin{Cores: cores, MemoryBytes: mem}
-	}
-	return nil
-}
-
-func planSemaphoreClaims(plan *sparkwing.Plan, runID string) []wingwire.SemaphoreClaim {
-	var claims []wingwire.SemaphoreClaim
-	seen := map[string]bool{}
-	for _, membership := range plan.PlanConcurrency() {
-		group := membership.Group
-		if group == nil || !groupUsesLocalDaemon(group) {
-			continue
-		}
-		key := scopedGroupKey(group, runID)
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		limit := group.Limit()
-		claims = append(claims, wingwire.SemaphoreClaim{
-			Name:            key,
-			Cost:            membership.Cost,
-			Capacity:        limit.Capacity,
-			Policy:          wingwire.Policy(limit.OnLimit),
-			QueueTimeoutMS:  limit.QueueTimeout.Milliseconds(),
-			CancelTimeoutMS: limit.CancelTimeout.Milliseconds(),
-		})
-	}
-	sort.Slice(claims, func(i, j int) bool { return claims[i].Name < claims[j].Name })
-	return claims
 }
 
 func groupUsesLocalDaemon(group *sparkwing.ConcurrencyGroup) bool {
@@ -1064,13 +789,6 @@ func withLocalAdmission(
 		hostAdmitted: hostAdmitted,
 		priority:     priority,
 	})
-	if leaseToken != "" {
-		env := map[string]string{wingwire.LeaseTokenEnv: leaseToken, "SPARKWING_RUN_ID": runID}
-		if childToken != "" {
-			env[wingwire.ChildLeaseTokenEnv] = childToken
-		}
-		ctx = sparkwing.WithCommandEnv(ctx, env)
-	}
 	return ctx
 }
 
@@ -1086,14 +804,6 @@ func localAdmissionFromContext(ctx context.Context) (*LocalAdmission, string, bo
 		return nil, "", false
 	}
 	return state.la, state.token, state.hostAdmitted
-}
-
-func leaseTokensFromContext(ctx context.Context) (string, string) {
-	state, ok := ctx.Value(localAdmissionCtxKey{}).(localAdmissionState)
-	if !ok {
-		return "", ""
-	}
-	return state.token, state.childToken
 }
 
 func localAdmissionChildTokenFromContext(ctx context.Context) string {
@@ -1118,43 +828,6 @@ func localAdmissionPriorityFromContext(ctx context.Context) int {
 		return 0
 	}
 	return state.priority
-}
-
-func leaseTriggerEnv(ctx context.Context) map[string]string {
-	state, ok := ctx.Value(localAdmissionCtxKey{}).(localAdmissionState)
-	if !ok || state.childToken == "" {
-		return nil
-	}
-	token := state.childToken
-	if token == "" {
-		return nil
-	}
-	return map[string]string{wingwire.LeaseTokenEnv: token}
-}
-
-func parentRunIDFromContext(ctx context.Context) string {
-	state, ok := ctx.Value(localAdmissionCtxKey{}).(localAdmissionState)
-	if ok && state.token != "" {
-		return state.runID
-	}
-	return os.Getenv("SPARKWING_RUN_ID")
-}
-
-func childAttachTokenFromEnv(env map[string]string) string {
-	if env == nil {
-		return ""
-	}
-	if token := env[wingwire.ChildLeaseTokenEnv]; token != "" {
-		return token
-	}
-	return env[wingwire.LeaseTokenEnv]
-}
-
-func childAttachTokenFromProcessEnv() string {
-	if token := os.Getenv(wingwire.ChildLeaseTokenEnv); token != "" {
-		return token
-	}
-	return os.Getenv(wingwire.LeaseTokenEnv)
 }
 
 func (la *LocalAdmission) acquireNodeSlot(

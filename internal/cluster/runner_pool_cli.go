@@ -404,7 +404,7 @@ func runRunnerCLI(args []string, version string) error {
 	maxClaims := fs.Int("max-claims-before-restart", 25,
 		"exit the loop after N successful claims so kubelet restarts the container (0 = unlimited; FOLLOWUPS #12)")
 	alsoClaimTriggers := fs.Bool("also-claim-triggers", false,
-		"run the trigger-loop (claim triggers, clone repo, compile, exec handle-trigger) as a goroutine alongside the node-claim loop. Lets one warm-runner pool handle both trigger and node layers.")
+		"run the trigger-loop (claim triggers, clone repo, compile, host the run) as a goroutine alongside the node-claim loop. Lets one warm-runner pool handle both trigger and node layers.")
 	claimNodes := fs.Bool("claim-nodes", true,
 		"claim and execute controller node work in this runner process")
 	gitcacheURL := fs.String("gitcache", "",
@@ -763,7 +763,7 @@ func executePooledNode(
 		announced = services.CachePod
 	}
 	gitcacheURL = nodeCacheURL(gitcacheURL, controllerURL, announced, grant)
-	res, err := runPooledNodeOnce(execCtx, controllerURL, "", n.RunID, n.NodeID, holderID, claimToken,
+	res, err := runPooledNodeOnce(execCtx, controllerURL, n.RunID, n.NodeID, holderID, claimToken,
 		&stdoutLogger{}, logger, admission, orchestrator.WithGitcache(gitcacheURL, grant), orchestrator.WithRepoAllowlist(allow),
 		orchestrator.ClaimedNodeAttempt(n))
 	cancel()

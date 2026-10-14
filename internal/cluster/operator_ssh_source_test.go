@@ -20,7 +20,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 // The operator's runners build its private repositories, which the cache
@@ -204,7 +203,7 @@ func TestDispatchedNodeFetchesAnSSHMirrorThroughItsOwnGrant(t *testing.T) {
 		t.Skip("git unavailable")
 	}
 	for _, name := range []string{
-		wingwire.APISocketEnv, "SPARKWING_CONTROLLER_URL", "SPARKWING_LOGS_URL",
+		"SPARKWING_CONTROLLER_URL",
 		"SPARKWING_RUN_ID", "SPARKWING_NODE_ID", "SPARKWING_CACHE_URL",
 		authwire.CacheGrantEnv,
 	} {

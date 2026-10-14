@@ -208,8 +208,3 @@ func TestNodeProtocolEntryExpandsGenerators(t *testing.T) {
 	wantCode(t, reply, nodeproto.CodeBadRequest)
 	s.end()
 }
-
-func hasCode(err error, code nodeproto.ErrorCode) bool {
-	var perr *nodeproto.Error
-	return errors.As(err, &perr) && perr.Code == code
-}

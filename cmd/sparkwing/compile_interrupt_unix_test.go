@@ -24,9 +24,9 @@ echo $$ > "$SPARKWING_TEST_GO_PID"
 wait
 `
 
-func TestCompileAndExecStopsTheToolchainOnTermination(t *testing.T) {
+func TestMaterializeStopsTheToolchainOnTermination(t *testing.T) {
 	if os.Getenv("SPARKWING_TEST_COMPILE_INTERRUPT_CHILD") == "1" {
-		_ = compileAndExec(os.Getenv("SPARKWING_TEST_FLEET_COMPILE_DIR"), nil,
+		_ = materializeOnly(os.Getenv("SPARKWING_TEST_FLEET_COMPILE_DIR"),
 			append(os.Environ(), "GOWORK=off"), compileOptions{NoUpdate: true})
 		os.Exit(0)
 	}
@@ -56,8 +56,8 @@ func TestCompileAndExecStopsTheToolchainOnTermination(t *testing.T) {
 	goPIDFile := filepath.Join(scratch, "go.pid")
 	grandchildPIDFile := filepath.Join(scratch, "grandchild.pid")
 
-	child := exec.Command(os.Args[0], "-test.run=^TestCompileAndExecStopsTheToolchainOnTermination$")
-	// safety: two ambient settings route compileAndExec away from the
+	child := exec.Command(os.Args[0], "-test.run=^TestMaterializeStopsTheToolchainOnTermination$")
+	// safety: two ambient settings route materialize away from the
 	// compile this test drives, so they are cleared rather than inherited.
 	child.Env = append(scrubbed(os.Environ(),
 		"SPARKWING_FLEET", "SPARKWING_GITCACHE_URL"),

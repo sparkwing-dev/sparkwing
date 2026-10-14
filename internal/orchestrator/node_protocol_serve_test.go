@@ -294,3 +294,12 @@ func TestNodeProtocolEntrySurvivesAPanickingPlan(t *testing.T) {
 	}
 	s.end()
 }
+
+type protocolStepsJob struct{}
+
+func (protocolStepsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	build := sparkwing.Step(w, "build", func(context.Context) error { return nil }).
+		SkipIf(func(context.Context) bool { return false })
+	sparkwing.Step(w, "test", func(context.Context) error { return nil }).Needs(build).Optional()
+	return nil, nil
+}

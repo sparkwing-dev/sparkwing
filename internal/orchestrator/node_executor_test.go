@@ -185,63 +185,6 @@ func TestClaimedNodeAcknowledgesAtExecutionBoundary(t *testing.T) {
 	}
 }
 
-func TestTriggerOwnedNodeConsumesCarriedExecutionOrdinal(t *testing.T) {
-	paths := PathsAt(t.TempDir())
-	if err := paths.EnsureRoot(); err != nil {
-		t.Fatal(err)
-	}
-	st, err := teststore.Open(paths.StateDB())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-	ctx := context.Background()
-	identity := store.ClaimIdentity{Principal: "runner", TokenPrefix: "swr_runner"}
-	if err := st.CreateTrigger(ctx, store.Trigger{
-		ID: "run-trigger-body", Pipeline: "test", Status: "pending", CreatedAt: time.Now(),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	trigger, err := st.ClaimNextTriggerFor(ctx, identity, time.Minute, nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx = store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{
-		Claimant: identity, ClaimGeneration: trigger.ClaimSeq,
-	})
-	ctx = store.WithExecutionAttemptOrdinal(ctx, 1)
-	if err := st.CreateRun(ctx, store.Run{ID: trigger.ID, Pipeline: "test", Status: "running", StartedAt: time.Now()}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreateNode(ctx, store.Node{RunID: trigger.ID, NodeID: "build", Status: "pending"}); err != nil {
-		t.Fatal(err)
-	}
-	plan := sparkwing.NewPlan()
-	invocations := 0
-	node := sparkwing.Job(plan, "build", func(context.Context) error {
-		invocations++
-		stored, getErr := st.GetNode(context.Background(), trigger.ID, "build")
-		if getErr != nil {
-			t.Fatal(getErr)
-		}
-		if stored.AttemptsConsumed != 1 {
-			t.Fatalf("body observed attempts_consumed=%d, want 1", stored.AttemptsConsumed)
-		}
-		return nil
-	})
-	if _, err := NewNodeExecutor(LocalBackends(paths, st, nil)).executeNodeInProcess(ctx, trigger.ID, node, nil); err != nil {
-		t.Fatal(err)
-	}
-	stored, err := st.GetNode(context.Background(), trigger.ID, "build")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if invocations != 1 || stored.AttemptsConsumed != 1 || len(stored.ExecutionAttempts) != 1 ||
-		stored.ExecutionAttempts[0].Outcome != "success" {
-		t.Fatalf("invocations=%d node=%+v", invocations, stored)
-	}
-}
-
 func TestTriggerOwnedNodeDoesNotRunWithoutExecutionRecorder(t *testing.T) {
 	paths := PathsAt(t.TempDir())
 	if err := paths.EnsureRoot(); err != nil {

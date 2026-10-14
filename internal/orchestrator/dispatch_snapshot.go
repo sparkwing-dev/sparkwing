@@ -220,8 +220,6 @@ var envDenyExact = map[string]bool{
 	StandaloneReasonEnv:                  true,
 	"SPARKWING_AGENT_TOKEN":              true,
 	"SPARKWING_CONTROLLER_URL":           true,
-	"SPARKWING_LOGS_URL":                 true,
-	"SPARKWING_RUN_HANDLE_FILE":          true,
 	"SPARKWING_ONLY":                     true,
 	"SPARKWING_NODE_CLAIM_HOLDER":        true,
 	"SPARKWING_NODE_CLAIM_LEASE_SECONDS": true,

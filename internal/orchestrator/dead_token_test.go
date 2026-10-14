@@ -31,17 +31,6 @@ func (h *heartbeatCounter) TouchRunHeartbeat(context.Context, string) error {
 	return h.err
 }
 
-func TestHeartbeatLoops_StopOnADeadToken(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		h := &heartbeatCounter{err: &client.TokenDeadError{State: "revoked"}}
-		runNodeHeartbeatLoop(t.Context(), time.Second, h, "run-1", "build", time.Hour)
-		runRunHeartbeatLoop(t.Context(), time.Second, h, "run-1", time.Hour)
-		if n, r := h.nodeBeats.Load(), h.runBeats.Load(); n != 2 || r != 2 {
-			t.Fatalf("beat node %d and run %d times on a dead token, want 2 each (the first beat and one tick)", n, r)
-		}
-	})
-}
-
 func TestHeartbeatLoops_KeepBeatingThroughOtherFailures(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		h := &heartbeatCounter{err: errors.New("controller 500: boom")}

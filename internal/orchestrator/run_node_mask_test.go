@@ -185,7 +185,7 @@ func TestRunNodeOnce_NoProgressTimeoutPausesForChildAndResumesAfterward(t *testi
 		childFinished <- nil
 	}()
 
-	res, err := orchestrator.RunNodeOnce(ctx, srv.URL, "", runID, nodeID,
+	res, err := orchestrator.RunNodeOnce(ctx, srv.URL, runID, nodeID,
 		claimed.ClaimedBy, raw, &captureLogger{}, quiet, nil, orchestrator.ClaimedNodeFence(fence))
 	if err != nil {
 		t.Fatalf("RunNodeOnce: %v", err)
@@ -257,7 +257,7 @@ func TestRunNodeOnce_MasksSecretsInNodeLog(t *testing.T) {
 	}
 
 	cap := &captureLogger{}
-	res, err := orchestrator.RunNodeOnce(ctx, srv.URL, "", runID, nodeID,
+	res, err := orchestrator.RunNodeOnce(ctx, srv.URL, runID, nodeID,
 		"pod:"+runID+":"+nodeID, "", cap, quiet, nil)
 	if err != nil {
 		t.Fatalf("RunNodeOnce: %v", err)

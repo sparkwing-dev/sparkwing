@@ -63,9 +63,3 @@ func TestCapacityFingerprint_IncludesPlanLevelGroups(t *testing.T) {
 		t.Error("plan-level concurrency gate does not change the fingerprint")
 	}
 }
-
-func TestPlanTopologyHash_UnchangedByConcurrency(t *testing.T) {
-	if a, b := planTopologyHash(fingerprintPlan(4).Nodes()), planTopologyHash(fingerprintPlan(1).Nodes()); a != b {
-		t.Errorf("topology hash moved with concurrency declarations: %q vs %q", a, b)
-	}
-}

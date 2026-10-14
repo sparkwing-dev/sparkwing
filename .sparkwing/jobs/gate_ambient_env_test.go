@@ -2,37 +2,12 @@ package jobs
 
 import (
 	"context"
-	"net"
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
-
-func listeningUnixSocket(t *testing.T) string {
-	t.Helper()
-	// hack: Darwin limits Unix socket paths to 104 bytes; /tmp leaves room for race-test nesting.
-	socketRoot := os.TempDir()
-	if runtime.GOOS != "windows" {
-		socketRoot = "/tmp"
-	}
-	dir, err := os.MkdirTemp(socketRoot, "swg")
-	if err != nil {
-		t.Fatalf("create socket directory: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	path := filepath.Join(dir, "api.sock")
-	ln, err := net.Listen("unix", path)
-	if err != nil {
-		t.Fatalf("listen on %s: %v", path, err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
-	return path
-}
 
 func TestTheTestStepKeepsLiveServicesAwayFromTheSuitesItRuns(t *testing.T) {
 	if testing.Short() {
@@ -50,9 +25,7 @@ func TestTheTestStepKeepsLiveServicesAwayFromTheSuitesItRuns(t *testing.T) {
 		t.Fatalf("write dev.env: %v", err)
 	}
 	t.Setenv(productTestHomeVar, home)
-	t.Setenv(wingwire.APISocketEnv, listeningUnixSocket(t))
 	t.Setenv("SPARKWING_CONTROLLER_URL", "http://127.0.0.1:4344")
-	t.Setenv("SPARKWING_LOGS_URL", "http://127.0.0.1:4345")
 	t.Setenv("SPARKWING_CACHE_URL", "http://127.0.0.1:8090")
 	t.Setenv("SPARKWING_AGENT_TOKEN", "an inherited bearer")
 
@@ -65,20 +38,17 @@ func TestTheTestStepKeepsLiveServicesAwayFromTheSuitesItRuns(t *testing.T) {
 }
 
 // safety: the names the node injector reaches through a constant the pipeline
-// module cannot resolve. The wingwire values compile in; the runner's own is
-// pinned against its declaration below.
+// module cannot import; each is pinned against its declaration below.
 var nodeEnvConstants = map[string]string{
-	"wingwire.APISocketEnv":       wingwire.APISocketEnv,
-	"wingwire.LeaseTokenEnv":      wingwire.LeaseTokenEnv,
-	"wingwire.ChildLeaseTokenEnv": wingwire.ChildLeaseTokenEnv,
-	"ParentLivenessFDEnv":         "SPARKWING_PARENT_LIVENESS_FD",
+	"protofd.NodeURLEnv":   "SPARKWING_NODE_URL",
+	"protofd.NodeTokenEnv": "SPARKWING_NODE_TOKEN",
 }
 
-// safety: names in the removal list never reach children, so only setter
-// calls define the injector output this contract must cover.
-var envConstantReference = regexp.MustCompile(`\bset\(\s*((?:wingwire\.)?[A-Z][A-Za-z0-9]*Env)\b`)
+// safety: a name the injector strips or reads never reaches a child, so only
+// the KEY=value entries it appends define the output this contract covers.
+var envConstantReference = regexp.MustCompile(`\b(protofd\.[A-Z][A-Za-z0-9]*Env)\+"="`)
 
-var envNameLiteral = regexp.MustCompile(`\bset\(\s*"(SPARKWING_[A-Z0-9_]+)"`)
+var envNameLiteral = regexp.MustCompile(`"(SPARKWING_[A-Z0-9_]+)=|\{"(SPARKWING_[A-Z0-9_]+)",`)
 
 func readProductSource(t *testing.T, parts ...string) string {
 	t.Helper()
@@ -95,15 +65,18 @@ func readProductSource(t *testing.T, parts ...string) string {
 }
 
 func TestEveryVariableTheNodeInjectorSetsIsScrubbedPinnedOrRecorded(t *testing.T) {
-	if want := `ParentLivenessFDEnv = "` + nodeEnvConstants["ParentLivenessFDEnv"] + `"`; !strings.Contains(
-		readProductSource(t, "internal", "runners", "local", "local.go"), want) {
-		t.Fatalf("the local runner no longer declares %s", want)
+	declarations := readProductSource(t, "internal", "protofd", "protofd.go")
+	for reference, name := range nodeEnvConstants {
+		constant := strings.TrimPrefix(reference, "protofd.")
+		if !regexp.MustCompile(`\b` + constant + `\s*=\s*"` + name + `"`).MatchString(declarations) {
+			t.Fatalf("protofd no longer declares %s = %q", constant, name)
+		}
 	}
 
-	injector := readProductSource(t, "internal", "runners", "local", "env.go")
+	injector := readProductSource(t, "internal", "nodehost", "attempt.go")
 	injected := map[string]bool{}
 	for _, m := range envNameLiteral.FindAllStringSubmatch(injector, -1) {
-		injected[m[1]] = true
+		injected[m[1]+m[2]] = true
 	}
 	for _, match := range envConstantReference.FindAllStringSubmatch(injector, -1) {
 		reference := match[1]
@@ -147,24 +120,14 @@ func TestEveryVariableTheNodeInjectorSetsIsScrubbedPinnedOrRecorded(t *testing.T
 const ambientServiceProbe = `package internal
 
 import (
-	"net"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
 func TestNoLiveServiceIsWithinReach(t *testing.T) {
-	if socket := os.Getenv("SPARKWING_API_SOCKET"); socket != "" {
-		reach := "an unreachable path"
-		if conn, err := net.Dial("unix", socket); err == nil {
-			_ = conn.Close()
-			reach = "a listening daemon"
-		}
-		t.Fatalf("SPARKWING_API_SOCKET=%s reached the suite and names %s", socket, reach)
-	}
 	for _, name := range []string{
 		"SPARKWING_CONTROLLER_URL",
-		"SPARKWING_LOGS_URL",
 		"SPARKWING_CACHE_URL",
 		"SPARKWING_AGENT_TOKEN",
 		"SPARKWING_RUN_ID",

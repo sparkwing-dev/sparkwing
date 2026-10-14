@@ -54,9 +54,3 @@ func (loss *sampleLoss) record(err error, marker bool) {
 	}
 	loss.mark = loss.mark || marker
 }
-
-func recordSampleLoss(ctx context.Context, err error) {
-	if loss, ok := ctx.Value(sampleLossKey{}).(*sampleLoss); ok {
-		loss.record(err, true)
-	}
-}

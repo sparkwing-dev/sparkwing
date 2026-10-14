@@ -132,3 +132,28 @@ func metricExecutionFixture(t *testing.T) (*store.Store, Backends) {
 	}
 	return st, LocalBackends(paths, st, nil)
 }
+
+const windowsLacksCommandSampler = "Windows has no per-command resource sampler and no true command"
+
+type rejectCommandMetric struct {
+	localState
+	commands int
+	reject   bool
+}
+
+func (s *rejectCommandMetric) AddNodeMetricSample(ctx context.Context, run, node string, sample store.MetricSample) error {
+	if sample.Kind == store.MetricCommand {
+		s.commands++
+		if s.reject && s.commands == 1 {
+			return errors.New("command sample rejected")
+		}
+	}
+	return s.localState.AddNodeMetricSample(ctx, run, node, sample)
+}
+
+func (s *rejectCommandMetric) StartNode(ctx context.Context, run, node string) error {
+	if err := s.localState.StartNode(ctx, run, node); err != nil {
+		return err
+	}
+	return s.localState.AddNodeUsage(ctx, run, node, store.NodeUsage{CPUTime: time.Second, MaxRSSBytes: 256 << 20, Wall: 2 * time.Second})
+}

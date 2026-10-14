@@ -2,35 +2,11 @@ package orchestrator
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
-
-// ProfileEnv and SecretsProfileEnv name the variables a pipeline binary built
-// against an older SDK reads to select a profile and a secrets source. Nothing
-// here reads them; the CLI and the run consumer drop them before starting a
-// pipeline process, so an exported value cannot point an older binary at a
-// remote store.
-const (
-	ProfileEnv        = "SPARKWING_PROFILE"
-	SecretsProfileEnv = "SPARKWING_SECRETS_PROFILE"
-)
-
-// safety: only a CLI from before the removal of run --profile sets ProfileEnv,
-// and it means "record this run to that profile's backends". Running locally
-// instead would record somewhere the caller did not ask for, so the run fails.
-func refuseProfileHandoff() error {
-	name := os.Getenv(ProfileEnv)
-	if name == "" {
-		return nil
-	}
-	return fmt.Errorf("%s=%s asks this run to record to a profile, which this pipeline's SDK no longer does; "+
-		"upgrade the sparkwing CLI, or run on the profile's controller with sparkwing pipeline trigger <pipeline> --profile %s",
-		ProfileEnv, name, name)
-}
 
 // RefusePinnedLocalRun returns an error when the pipeline's sparkwing.yaml
 // entry pins it to a profile: a pinned pipeline runs only on that profile's
@@ -44,8 +20,8 @@ func RefusePinnedLocalRun(p *pipelines.Pipeline) error {
 }
 
 // safety: the dispatcher checks the execution checkout's pin before it starts
-// the pipeline binary, because a binary built against an older SDK skips the
-// check in handle-trigger. A config that cannot be read refuses the run.
+// the pipeline, because the pipeline process never checks it. A config that
+// cannot be read refuses the run.
 func refusePinnedIn(sparkwingDir, pipeline string) error {
 	path := filepath.Join(sparkwingDir, projectconfig.Filename)
 	cfg, err := projectconfig.Load(path)

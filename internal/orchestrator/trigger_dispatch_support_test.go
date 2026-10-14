@@ -29,27 +29,6 @@ func (s *progressCheckingTriggerState) EnqueueTrigger(
 	return "", errors.New("stop after observing trigger enqueue")
 }
 
-func TestRunAndAwaitPausesProgressTimeoutBeforeLocalTriggerEnqueue(t *testing.T) {
-	state := &progressCheckingTriggerState{}
-	dispatch := &dispatchState{backends: Backends{State: state}, runID: "parent"}
-	ctx, _, cancel := newProgressTimeoutContext(context.Background(), time.Hour)
-	defer cancel()
-
-	_, err := dispatch.pipelineAwaiter().Await(ctx, sparkwing.AwaitRequest{Pipeline: "child"})
-	if err == nil {
-		t.Fatal("RunAndAwait passed despite the trigger enqueue failure")
-	}
-	if !state.paused {
-		t.Fatal("progress timeout was not paused during local trigger enqueue")
-	}
-	if state.expired {
-		t.Fatal("progress timeout fired during local trigger enqueue")
-	}
-	if !ExpireProgressTimeoutForTest(ctx) {
-		t.Fatal("progress timeout did not resume after trigger enqueue returned")
-	}
-}
-
 func TestChildAwaitOwnerPausesBeforePreparingTriggerEnvironment(t *testing.T) {
 	state := &progressCheckingTriggerState{}
 	ctx, _, cancel := newProgressTimeoutContext(context.Background(), time.Hour)
@@ -162,45 +141,5 @@ func TestPodChildAwaitPollLogsFirstFailureWithIdentity(t *testing.T) {
 		if !strings.Contains(got, field) {
 			t.Errorf("poll warning missing %s\n%s", field, got)
 		}
-	}
-}
-
-type childAwaitRecordLogger struct {
-	records []sparkwing.LogRecord
-}
-
-func (l *childAwaitRecordLogger) Log(level, message string) {
-	l.Emit(sparkwing.LogRecord{Level: level, Msg: message})
-}
-
-func (l *childAwaitRecordLogger) Emit(record sparkwing.LogRecord) {
-	l.records = append(l.records, record)
-}
-
-func TestLocalChildAwaitDiagnosticsRetainsExecutionEnvelope(t *testing.T) {
-	log := &childAwaitRecordLogger{}
-	ctx := sparkwingruntime.WithLogger(t.Context(), log)
-	ctx = sparkwingruntime.WithNode(ctx, "parent-node")
-	ctx = sparkwing.WithStep(ctx, "deploy")
-	diagnostics := localChildAwaitDiagnostics{}
-
-	diagnostics.info(ctx, "child run admitted", "child_run_id", "child")
-	diagnostics.warn(ctx, "child poll failed", errors.New("store unavailable"),
-		"child_run_id", "child", "pipeline", "release")
-
-	if len(log.records) != 2 {
-		t.Fatalf("records = %d, want info and warning", len(log.records))
-	}
-	for _, record := range log.records {
-		if record.TS.IsZero() || record.JobID != "parent-node" || record.Step != "deploy" {
-			t.Errorf("record envelope = %+v, want timestamp and parent-node/deploy", record)
-		}
-		if record.Attrs["child_run_id"] != "child" {
-			t.Errorf("record attrs = %v, want child identity", record.Attrs)
-		}
-	}
-	warning := log.records[1]
-	if warning.Level != "warn" || warning.Attrs["pipeline"] != "release" || warning.Attrs["error"] != "store unavailable" {
-		t.Fatalf("warning = %+v, want structured pipeline and error", warning)
 	}
 }

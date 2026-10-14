@@ -343,16 +343,6 @@ func TestRenderQueuePretty_ShowsCapacityChangeAndRunners(t *testing.T) {
 	}
 }
 
-func TestRenderStats_EmptyWindow(t *testing.T) {
-	var buf bytes.Buffer
-	if err := opsview.RenderStats(&buf, wingwire.QueueState{}, "pretty"); err != nil {
-		t.Fatalf("render stats: %v", err)
-	}
-	if !strings.Contains(buf.String(), "no admission activity recorded") {
-		t.Fatalf("empty stats view: %q", buf.String())
-	}
-}
-
 func TestRenderQueuePretty_ExplainsSoftCoreAllowance(t *testing.T) {
 	qs := wingwire.QueueState{
 		Resources: []wingwire.ResourceState{

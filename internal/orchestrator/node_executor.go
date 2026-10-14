@@ -37,13 +37,6 @@ type executionStartAcknowledger interface {
 
 type localExecutionKey struct{}
 
-// safety: a node the local orchestrator runs itself -- in the dispatcher, or
-// in the child process it spawns -- has no claim to attribute its execution
-// attempt to, so the process that decided to run it here says so instead.
-func withLocalExecution(ctx context.Context) context.Context {
-	return context.WithValue(ctx, localExecutionKey{}, true)
-}
-
 func localExecutionMarked(ctx context.Context) bool {
 	marked, _ := ctx.Value(localExecutionKey{}).(bool)
 	return marked
@@ -70,30 +63,7 @@ func NewNodeExecutor(backends Backends) *NodeExecutor {
 	return &NodeExecutor{backends: backends, labels: defaultLocalLabels()}
 }
 
-func (r *NodeExecutor) AdvertisedLabels() []string {
-	out := make([]string, len(r.labels))
-	copy(out, r.labels)
-	return out
-}
-
-func (r *NodeExecutor) SetLabels(labels []string) {
-	if len(labels) == 0 {
-		r.labels = nil
-		return
-	}
-	r.labels = make([]string, 0, len(labels))
-	for _, l := range labels {
-		if l == "" {
-			continue
-		}
-		r.labels = append(r.labels, l)
-	}
-}
-
-var (
-	_ runner.Runner          = (*NodeExecutor)(nil)
-	_ runner.LabelAdvertiser = (*NodeExecutor)(nil)
-)
+var _ runner.Runner = (*NodeExecutor)(nil)
 
 func runJobBody(ctx context.Context, node *sparkwing.JobNode) (any, error) {
 	w := node.Work()
@@ -235,11 +205,6 @@ func (r *NodeExecutor) executeNodeWithAdmission(ctx context.Context, req runner.
 	}
 	nodeCtx := withLocalAdmission(ctx, la, req.RunID, lease.token, childToken, lease.hostAdmitted, priority, lease.charge)
 	return r.executeNode(nodeCtx, req.RunID, req.Node, req.Delegate)
-}
-
-func (r *NodeExecutor) WithSpawner(spawner runner.Runner) *NodeExecutor {
-	r.spawn = spawner
-	return r
 }
 
 func (r *NodeExecutor) executeNode(ctx context.Context, runID string, node *sparkwing.JobNode, delegate sparkwing.Logger) (any, error) {
@@ -519,9 +484,6 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 	total := attempts + 1
 	for attempt := range total {
 		ordinal := consumed + attempt + 1
-		if carried, ok := store.ExecutionAttemptOrdinalFromContext(nodeCtx); ok {
-			ordinal = carried + attempt
-		}
 		if attempt > 0 {
 			wait := scaledBackoff(backoff, attempt)
 			msg := fmt.Sprintf("retry attempt %d/%d", ordinal, invocationBudget)

@@ -18,7 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -60,16 +59,12 @@ func (f *fenceRecorder) record(r *http.Request) {
 	f.plain = append(f.plain, r.URL.Path)
 }
 
-// safety: an ambient SPARKWING_API_SOCKET routes the run lookup to the
-// machine's admission daemon rather than the fixture's controller, and a suite
-// running inside a sparkwing node inherits one, so every variable the
-// resolution reads is pinned.
+// safety: a suite running inside a sparkwing node inherits the run's own
+// bindings, so every variable the resolution reads is pinned.
 func pinRunNodeEnvironment(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{
-		wingwire.APISocketEnv,
 		"SPARKWING_CONTROLLER_URL",
-		"SPARKWING_LOGS_URL",
 		"SPARKWING_RUN_ID",
 		"SPARKWING_NODE_ID",
 		"SPARKWING_AGENT_TOKEN",

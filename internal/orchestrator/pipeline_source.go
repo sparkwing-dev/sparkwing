@@ -36,16 +36,3 @@ func ResolvePipelineSource(ctx context.Context, repoDir, pipeline, explicit stri
 	}
 	return revision, nil
 }
-
-func PipelineSourceEnvironment(env []string, revision string) []string {
-	out := make([]string, 0, len(env)+1)
-	for _, entry := range env {
-		if !strings.HasPrefix(entry, "SPARKWING_PIPELINE_REV=") {
-			out = append(out, entry)
-		}
-	}
-	if revision != "" {
-		out = append(out, "SPARKWING_PIPELINE_REV="+revision)
-	}
-	return out
-}

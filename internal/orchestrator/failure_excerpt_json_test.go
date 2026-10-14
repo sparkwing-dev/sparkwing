@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http/httptest"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -59,61 +58,6 @@ func (shortFailPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.N
 func init() {
 	register("excerpt-plain-fail", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &plainFailPipe{} })
 	register("excerpt-short-fail", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &shortFailPipe{} })
-}
-
-func runsErrorsJSON(t *testing.T, p orchestrator.Paths, runID string) []map[string]any {
-	t.Helper()
-	var buf bytes.Buffer
-	if err := orchestrator.JobErrors(context.Background(), p, runID, true, &buf); err != nil {
-		t.Fatalf("JobErrors: %v", err)
-	}
-	return decodeNDJSON[map[string]any](t, buf.String())
-}
-
-func TestJobErrorsJSON_PlainErrorHasNoExcerpt(t *testing.T) {
-	p := newPathsWithStore(t)
-	res, err := orchestrator.RunLocal(context.Background(), p,
-		orchestrator.Options{Pipeline: "excerpt-plain-fail"})
-	if err != nil {
-		t.Fatalf("RunLocal: %v", err)
-	}
-	if res.Status != "failed" {
-		t.Fatalf("status = %q, want failed", res.Status)
-	}
-
-	rows := runsErrorsJSON(t, p, res.RunID)
-	if len(rows) != 1 {
-		t.Fatalf("want one failed node, got %d", len(rows))
-	}
-	if !strings.Contains(rows[0]["error"].(string), `no such cluster "prod-2"`) {
-		t.Fatalf("error text lost: %#v", rows[0]["error"])
-	}
-	if _, present := rows[0]["log_excerpt"]; present {
-		t.Fatalf("plain error must not carry log_excerpt: %#v", rows[0])
-	}
-	if _, present := rows[0]["log_excerpt_truncated"]; present {
-		t.Fatalf("plain error must not carry log_excerpt_truncated: %#v", rows[0])
-	}
-}
-
-func TestJobErrorsJSON_ShortOutputNotTruncated(t *testing.T) {
-	p := newPathsWithStore(t)
-	res, err := orchestrator.RunLocal(context.Background(), p,
-		orchestrator.Options{Pipeline: "excerpt-short-fail"})
-	if err != nil {
-		t.Fatalf("RunLocal: %v", err)
-	}
-
-	rows := runsErrorsJSON(t, p, res.RunID)
-	if len(rows) != 1 {
-		t.Fatalf("want one failed node, got %d", len(rows))
-	}
-	if got := rows[0]["log_excerpt"]; got != "vet: pkg/a.go:3:2: undefined: Foo" {
-		t.Fatalf("log_excerpt = %#v", got)
-	}
-	if got, present := rows[0]["log_excerpt_truncated"]; !present || got != false {
-		t.Fatalf("log_excerpt_truncated = %#v (present=%v), want false", got, present)
-	}
 }
 
 func TestJobsRemoteJSON_CarriesFailureExcerpt(t *testing.T) {

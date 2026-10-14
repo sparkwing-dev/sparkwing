@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -13,10 +14,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 // RunNodeCommand executes a single claimed node from the command line and
@@ -35,11 +34,8 @@ import (
 // exits. Without them the node runs unfenced, which is what an unclaimed local
 // invocation wants.
 func RunNodeCommand(args []string) error {
-	secrets.ShareRegisteredFromEnv()
-	defer secrets.StopSharingRegistered()
 	fs := flag.NewFlagSet("run-node", flag.ExitOnError)
 	controllerURL := fs.String("controller", os.Getenv("SPARKWING_CONTROLLER_URL"), "controller base URL")
-	logsURL := fs.String("logs", os.Getenv("SPARKWING_LOGS_URL"), "node log endpoint of the engine process that started this one")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -52,10 +48,9 @@ func RunNodeCommand(args []string) error {
 	if nodeID == "" {
 		nodeID = os.Getenv("SPARKWING_NODE_ID")
 	}
-	apiSocket := os.Getenv(wingwire.APISocketEnv)
-	if (*controllerURL == "" && apiSocket == "") || runID == "" || nodeID == "" {
+	if *controllerURL == "" || runID == "" || nodeID == "" {
 		fs.Usage()
-		return errors.New("--controller (or " + wingwire.APISocketEnv + ") + <runID> + <nodeID> are required")
+		return errors.New("--controller + <runID> + <nodeID> are required")
 	}
 
 	// safety: leave SIGTERM unhandled; bounce, cancellation, and pod termination
@@ -72,27 +67,18 @@ func RunNodeCommand(args []string) error {
 	}
 	// safety: a dispatcher's Job names the claim it took, and its claim token
 	// acts under that claim's fence; only a launcher's Job names none.
-	if isClaimToken(token) && apiSocket == "" && fence.HolderID == "" {
+	if isClaimToken(token) && fence.HolderID == "" {
 		return runLaunchedNode(ctx, *controllerURL, runID, nodeID, token, slog.Default())
 	}
 	if token == "" {
 		token = LocalServeToken(*controllerURL)
 	}
 	var runOpts []RunNodeOption
-	if apiSocket != "" {
-		runOpts = append(runOpts, OverAPISocket(apiSocket))
-		token = ""
-	}
 
 	holderID := fmt.Sprintf("pod:%s:%s", runID, nodeID)
 	if fence.HolderID != "" {
 		holderID = fence.HolderID
 		runOpts = append(runOpts, ClaimedNodeFence(fence))
-		// safety: the renewal has to reach the controller the node's writes
-		// reach, which over the daemon's unix socket is neither the URL nor the
-		// bearer token this process was given.
-		transports := nodeTransportsFor(runNodeConfig{apiSocket: apiSocket}, *controllerURL, token)
-		defer transports.close()
 		var wg sync.WaitGroup
 		hbCtx, stopHeartbeat := context.WithCancel(ctx)
 		// safety: nothing releases the claim, so the pod stops renewing it and
@@ -101,21 +87,19 @@ func RunNodeCommand(args []string) error {
 			stopHeartbeat()
 			wg.Wait()
 		}()
-		if transports.stateURL != "" {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				heartbeatDispatchedClaim(hbCtx,
-					client.NewWithToken(transports.stateURL, transports.state, transports.stateToken).WithWatchObserver(NoteWatch),
-					runID, nodeID, fence, lease, abandon, slog.Default())
-			}()
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			heartbeatDispatchedClaim(hbCtx,
+				client.NewWithToken(*controllerURL, &http.Client{Timeout: 60 * time.Second}, token).WithWatchObserver(NoteWatch),
+				runID, nodeID, fence, lease, abandon, slog.Default())
+		}()
 	}
 
 	// safety: the pod runs the team's code, so its dispatcher hands it no cache
 	// credential; it asks for its own run's grant, which the source fetch, the
 	// binary cache, the artifact store and the node's steps all read from here.
-	if apiSocket == "" && os.Getenv(authwire.CacheGrantEnv) == "" {
+	if os.Getenv(authwire.CacheGrantEnv) == "" {
 		grantCtx := ctx
 		if fence.HolderID != "" {
 			grantCtx = store.WithNodeClaimFence(ctx, fence)
@@ -128,7 +112,7 @@ func RunNodeCommand(args []string) error {
 	}
 
 	ctx = withProcessNode(ctx, runID, nodeID)
-	res, err := RunNodeOnce(ctx, *controllerURL, *logsURL, runID, nodeID,
+	res, err := RunNodeOnce(ctx, *controllerURL, runID, nodeID,
 		holderID, token, NewJSONRenderer(), slog.Default(), nil, runOpts...)
 	// safety: a step that swallows its cancellation must still leave the pod
 	// failing, so the Job ends rather than being retried as a success.

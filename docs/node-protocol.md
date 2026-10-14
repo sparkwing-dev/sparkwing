@@ -272,7 +272,7 @@ The host's caller names the base environment of every SDK process, and the host 
 - A local `sparkwing run` passes the user's environment.
 - A launcher Job passes `PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_*`, `TZ` and `USER` from the pod, plus `SystemRoot`, `ComSpec`, `PATHEXT`, `TEMP` and `TMP` on Windows.
 
-From that base the host removes the `SPARKWING_*` variables the engine owns: credentials such as `SPARKWING_AGENT_TOKEN` and `SPARKWING_SECRETS_KEY`, run options such as `SPARKWING_START_AT`, and plumbing such as `SPARKWING_API_SOCKET`. Every other `SPARKWING_*` variable the user set, such as a sparks setting or a cache URL, reaches the process. The host then sets the following. Values are strings.
+From that base the host removes the `SPARKWING_*` variables the engine owns: credentials such as `SPARKWING_AGENT_TOKEN` and `SPARKWING_SECRETS_KEY`, run options such as `SPARKWING_START_AT`, and plumbing such as `SPARKWING_STATE_DB`. Every other `SPARKWING_*` variable the user set, such as a sparks setting or a cache URL, reaches the process. The host then sets the following. Values are strings.
 
 | Variable | Set for | Meaning |
 |---|---|---|

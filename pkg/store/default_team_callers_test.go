@@ -20,7 +20,6 @@ const (
 	defaultTeamConsumer = "the local trigger consumer claims through ClaimNextTrigger, whose unbound claimant reaches only the default team's queue, so every trigger it settles is the default team's"
 	defaultTeamWorktree = "ref worktrees and submission environments exist only for triggers the local consumer claimed, which are the default team's"
 	defaultTeamStores   = "finds and reads runs in the laptop's own state databases, where every run is the default team's"
-	defaultTeamReplay   = "replays a run into the laptop's state database, which records it in the default team"
 	defaultTeamView     = "a local run view over the laptop's state database, where every run is the default team's"
 	defaultTeamBackend  = "the store backend serves one install's runs in the default team, as its ListRuns already does; a multi-team deployment serves its dashboard through the controller backend"
 	defaultTeamSecrets  = "local secrets live in the laptop's state database under the default team"
@@ -121,7 +120,6 @@ var defaultTeamCallers = map[string]string{
 	"internal/orchestrator.JobErrors":                                  defaultTeamView,
 	"internal/orchestrator.JobLogs":                                    defaultTeamView,
 	"internal/orchestrator.JobStatus":                                  defaultTeamView,
-	"internal/orchestrator.MintReplayRun":                              defaultTeamReplay,
 	"internal/orchestrator.OpenStoreForRun":                            defaultTeamStores,
 	"internal/orchestrator.OpenStoreForRunWrite":                       defaultTeamStores,
 	"internal/orchestrator.ReconcileSubmissionEnvironments":            defaultTeamWorktree,
@@ -138,9 +136,6 @@ var defaultTeamCallers = map[string]string{
 	"internal/orchestrator.runningNodeDetail":                          defaultTeamView,
 	"internal/orchestrator.scanLocalRuns":                              defaultTeamView,
 	"internal/orchestrator.settleClaimedTriggerDispatch":               defaultTeamConsumer,
-	"internal/orchestrator.sideloadDispatch":                           defaultTeamReplay,
-	"internal/orchestrator.sideloadNode":                               defaultTeamReplay,
-	"internal/orchestrator.sideloadRun":                                defaultTeamReplay,
 	"internal/orchestrator.writeLogsTreeLocal":                         defaultTeamView,
 	"internal/orchestrator.writeRunDetailJSON":                         defaultTeamView,
 	"pkg/localws.cronRunStatus":                                        defaultTeamCrons,

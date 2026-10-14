@@ -215,7 +215,6 @@ func dispatchLocalTrigger(ctx context.Context, trig *store.Trigger,
 	if env == nil {
 		env = os.Environ()
 	}
-	env = PipelineSourceEnvironment(env, trig.TriggerEnv[PipelineRevKey])
 
 	sparkwingDir, err := submittedPipelineDir(trig, filepath.Join(pipelineRepo, ".sparkwing"))
 	if err != nil {
@@ -299,13 +298,11 @@ func submissionExecutionEnvironment(captured []string, home string) []string {
 		captured = os.Environ()
 	}
 	blocked := map[string]struct{}{
-		wingdclient.HostBinEnv:      {},
-		"SPARKWING_RUN_HANDLE_FILE": {},
-		"SPARKWING_START_AT":        {}, "SPARKWING_STOP_AT": {}, "SPARKWING_ONLY": {},
+		wingdclient.HostBinEnv: {},
+		"SPARKWING_START_AT":   {}, "SPARKWING_STOP_AT": {}, "SPARKWING_ONLY": {},
 		"SPARKWING_NO_CACHE": {}, "SPARKWING_DRY_RUN": {},
-		"SPARKWING_ALLOW": {}, "SPARKWING_REF": {}, ProfileEnv: {}, SecretsProfileEnv: {},
+		"SPARKWING_ALLOW": {}, "SPARKWING_REF": {},
 		"SPARKWING_MODE": {}, "SPARKWING_WORKERS": {},
-		PriorityEnv:                    {},
 		AdmissionClassEnv:              {},
 		"SPARKWING_DEBUG_PAUSE_BEFORE": {}, "SPARKWING_DEBUG_PAUSE_AFTER": {},
 		"SPARKWING_DEBUG_PAUSE_ON_FAILURE": {},

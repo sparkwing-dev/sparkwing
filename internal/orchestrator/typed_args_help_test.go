@@ -56,57 +56,6 @@ func writeTypedHelpProject(t *testing.T, pipelineName, entrypoint string) {
 	t.Cleanup(func() { _ = os.Chdir(prev) })
 }
 
-func TestBindProjectPipelines_ResolvesTypedArgsPipelineForHelp(t *testing.T) {
-	entrypoint := typedHelpTestName("TypedHelpEntry")
-	pipelineName := typedHelpTestName("typed-help-fuzz-")
-	sparkwing.RegisterEntrypoint[typedHelpArgs](entrypoint, func() sparkwing.Pipeline[typedHelpArgs] {
-		return typedHelpPipe{}
-	})
-
-	if _, ok := sparkwing.Lookup(pipelineName); ok {
-		t.Fatalf("precondition: %q already bound before test staged its config", pipelineName)
-	}
-	if err := printPipelineHelp(pipelineName); err == nil {
-		t.Fatal("printPipelineHelp should fail with unknown pipeline before the YAML bind")
-	}
-
-	writeTypedHelpProject(t, pipelineName, entrypoint)
-
-	cfg, err := bindProjectPipelines()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg == nil {
-		t.Fatal("bindProjectPipelines returned nil config for a valid project")
-	}
-
-	reg, ok := sparkwing.Lookup(pipelineName)
-	if !ok {
-		t.Fatalf("Lookup(%q) failed after bindProjectPipelines", pipelineName)
-	}
-	if reg.Name != pipelineName {
-		t.Errorf("reg.Name = %q, want %q", reg.Name, pipelineName)
-	}
-
-	dp, ok, err := sparkwingruntime.DescribePipelineByName(pipelineName)
-	if err != nil {
-		t.Fatalf("DescribePipelineByName: %v", err)
-	}
-	if !ok {
-		t.Fatalf("DescribePipelineByName(%q) not found after bind", pipelineName)
-	}
-	if dp.Short != "fuzz the model with random seeds" {
-		t.Errorf("Short = %q, want the ShortHelp text", dp.Short)
-	}
-	if !hasArg(dp.Args, "seeds") {
-		t.Errorf("Args = %+v, want a --seeds flag", dp.Args)
-	}
-
-	if err := printPipelineHelp(pipelineName); err != nil {
-		t.Errorf("printPipelineHelp after bind: %v", err)
-	}
-}
-
 func TestDescribeAll_IncludesTypedArgsPipelineAfterBind(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
@@ -134,13 +83,4 @@ func TestDescribeAll_IncludesTypedArgsPipelineAfterBind(t *testing.T) {
 		}
 	}
 	t.Errorf("DescribeAll did not include YAML-bound typed-Args pipeline %q", pipelineName)
-}
-
-func hasArg(args []sparkwing.DescribeArg, name string) bool {
-	for _, a := range args {
-		if a.Name == name {
-			return true
-		}
-	}
-	return false
 }

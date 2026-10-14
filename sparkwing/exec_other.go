@@ -22,8 +22,6 @@ func startStepCommand(cmd *exec.Cmd, _ string) (stepJob, error) { return stepJob
 
 func (stepJob) close() {}
 
-func ownCommandGroup(*exec.Cmd) func() { return func() {} }
-
 func recordStepSession(context.Context, *exec.Cmd, string, stepJob) func() { return func() {} }
 
 func commandResourceUsage(cmd *exec.Cmd) (time.Duration, int64, bool) {

@@ -39,7 +39,8 @@
         "env_vars": { "type": "array", "items": { "$ref": "#/$defs/envVar" } },
         "extra": { "type": "boolean", "description": "The pipeline accepts flags it does not declare." },
         "risks": { "type": "array", "items": { "type": "string" } },
-        "risks_by_step": { "type": "array", "items": { "$ref": "#/$defs/stepRisks" } }
+        "risks_by_step": { "type": "array", "items": { "$ref": "#/$defs/stepRisks" } },
+        "secrets": { "type": "array", "items": { "$ref": "#/$defs/secret" } }
       },
       "required": ["name", "args"],
       "additionalProperties": false

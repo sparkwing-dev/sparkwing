@@ -10,8 +10,8 @@ import (
 
 func TestMain(m *testing.M) {
 	status := m.Run()
-	if err := cleanupProcessPerNodeFixture(); err != nil {
-		fmt.Fprintf(os.Stderr, "remove process-per-node fixture: %v\n", err)
+	if err := cleanupE2EFixture(); err != nil {
+		fmt.Fprintf(os.Stderr, "remove e2e fixture: %v\n", err)
 		status = 1
 	}
 	if err := testleak.Check(); err != nil {
@@ -19,4 +19,13 @@ func TestMain(m *testing.M) {
 		status = 1
 	}
 	os.Exit(status)
+}
+
+var e2eFixtureRoot string
+
+func cleanupE2EFixture() error {
+	if e2eFixtureRoot == "" {
+		return nil
+	}
+	return os.RemoveAll(e2eFixtureRoot)
 }

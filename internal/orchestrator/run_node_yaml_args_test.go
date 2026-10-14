@@ -113,7 +113,7 @@ pipelines:
 		t.Fatalf("create node: %v", err)
 	}
 
-	res, err := orchestrator.RunNodeOnce(ctx, srv.URL, "", runID, nodeID,
+	res, err := orchestrator.RunNodeOnce(ctx, srv.URL, runID, nodeID,
 		"pod:"+runID+":"+nodeID, "", &captureLogger{}, quiet, nil)
 	if err != nil {
 		t.Fatalf("RunNodeOnce: %v", err)
@@ -185,7 +185,7 @@ pipelines:
 		t.Fatalf("create node: %v", err)
 	}
 
-	res, err := orchestrator.RunNodeOnce(ctx, srv.URL, "", runID, nodeID,
+	res, err := orchestrator.RunNodeOnce(ctx, srv.URL, runID, nodeID,
 		"pod:"+runID+":"+nodeID, "", &captureLogger{}, quiet, nil)
 	if err != nil {
 		t.Fatalf("RunNodeOnce: %v", err)

@@ -1,5 +1,7 @@
 package sparkwing
 
+import "github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+
 // HelpProvider is optionally implemented by pipelines to contribute
 // a short description to `sparkwing run <name> --help`. One or two sentences
 // explaining what the pipeline does and when to use it.
@@ -82,6 +84,8 @@ type DescribePipeline struct {
 	// without args during describe; pipelines with required Inputs
 	// degrade to the union field above.
 	RisksBySteps []DescribeStepRisks `json:"risks_by_step,omitempty"`
+	// Secrets are the secrets the pipeline's typed Secrets struct declares.
+	Secrets pipelines.SecretsField `json:"secrets,omitempty"`
 }
 
 // DescribeStepRisks is one row of the per-step risk-label list.

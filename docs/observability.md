@@ -127,16 +127,11 @@ Logs are not part of this payload; fetch them separately with
 
 ## Log completeness
 
-A node's log can lose lines between the pipeline binary and the store: an
-append that fails past its retries, a runner killed mid-stream, and
-similar. The process that supervises the pipeline binary serves the
-binary's log appends on 127.0.0.1 (`SPARKWING_LOGS_URL`), so a binary
-built against any SDK logs unchanged. The binary numbers every line it
-writes, batches up to 256 consecutive lines, targets 64 KiB per append,
-keeps an oversized single line intact, starts an idle-tail append after
-100 ms, and flushes the final batch before sealing. A failed batch counts
-every line in it as dropped. A binary that does not number its lines is
-numbered by the runner, which seals the log for it.
+A node's log can lose lines between the node process and the store: a
+write that fails past its retries, a runner killed mid-stream, and
+similar. The node host receives the node's log records over the node
+protocol, numbers every line before it stores it, counts a line it cannot
+store as dropped, and seals the log when the node process exits.
 
 ### Node logs kept as segments
 

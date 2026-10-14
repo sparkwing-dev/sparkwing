@@ -30,9 +30,10 @@ func DescribePipelineByName(name string) (sparkwing.DescribePipeline, bool, erro
 		return sparkwing.DescribePipeline{}, false, nil
 	}
 	dp := sparkwing.DescribePipeline{
-		Name:  reg.Name,
-		Args:  []sparkwing.DescribeArg{},
-		Extra: reg.Schema.Extra,
+		Name:    reg.Name,
+		Args:    []sparkwing.DescribeArg{},
+		Extra:   reg.Schema.Extra,
+		Secrets: ReflectSecretsField(reg),
 	}
 	if inst := reg.Instance(); inst != nil {
 		if s, ok := inst.(sparkwing.ShortHelpProvider); ok {

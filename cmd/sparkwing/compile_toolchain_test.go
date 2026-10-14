@@ -42,12 +42,12 @@ exit 1
 	}
 }
 
-func TestPipelineToolchainOverrideDoesNotReachRuntime(t *testing.T) {
-	// safety: the cached path replaces its process with the pipeline, so the
-	// launch runs in a child and the parent reads what the pipeline recorded.
+func TestPipelineToolchainOverrideStaysInTheBuild(t *testing.T) {
+	// safety: the pin is process state, so the build runs in a child that
+	// checks its own GOTOOLCHAIN afterwards.
 	if dir := os.Getenv("SPARKWING_TEST_TOOLCHAIN_CHILD_DIR"); dir != "" {
 		uncached := os.Getenv("SPARKWING_TEST_TOOLCHAIN_UNCACHED") == "true"
-		if err := compileAndExec(dir, nil, os.Environ(), compileOptions{NoUpdate: true, NoBincache: uncached}); err != nil {
+		if err := materializeOnly(dir, os.Environ(), compileOptions{NoUpdate: true, NoBincache: uncached}); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -75,7 +75,6 @@ func TestPipelineToolchainOverrideDoesNotReachRuntime(t *testing.T) {
 			writeFile(t, filepath.Join(dir, "main.go"), "package main\nfunc main() {}\n")
 			probeLog := filepath.Join(root, "probes")
 			buildLog := filepath.Join(root, "build")
-			runtimeLog := filepath.Join(root, "runtime")
 			script := `#!/bin/sh
 if [ "$1" = env ]; then
  printf 'probe\n' >> "$PROBE_LOG"
@@ -89,7 +88,6 @@ while [ $# -gt 0 ]; do
   cat > "$1" <<'PIPELINE'
 #!/bin/sh
 if [ "$1" = --sw-node-protocol ]; then read -r _ <&3; printf '{"reply":"1","ok":true,"result":{"protocol":"1","pipelines":[]}}\n' >&4; exit 0; fi
-printf '%s\n' "$GOTOOLCHAIN" > "$RUNTIME_LOG"
 PIPELINE
   chmod +x "$1"
   exit 0
@@ -106,15 +104,14 @@ exit 1
 			t.Setenv("GOTOOLCHAIN", "go1.26.6")
 			t.Setenv("PROBE_LOG", probeLog)
 			t.Setenv("BUILD_LOG", buildLog)
-			t.Setenv("RUNTIME_LOG", runtimeLog)
 			t.Setenv("SPARKWING_GITCACHE_URL", "")
-			child := exec.Command(os.Args[0], "-test.run=^TestPipelineToolchainOverrideDoesNotReachRuntime$")
+			child := exec.Command(os.Args[0], "-test.run=^TestPipelineToolchainOverrideStaysInTheBuild$")
 			child.Env = append(os.Environ(), "SPARKWING_TEST_TOOLCHAIN_CHILD_DIR="+dir,
 				fmt.Sprintf("SPARKWING_TEST_TOOLCHAIN_UNCACHED=%t", uncached))
 			if out, err := child.CombinedOutput(); err != nil {
 				t.Fatalf("launch: %v: %s", err, out)
 			}
-			for path, want := range map[string]string{buildLog: "go1.26.8", runtimeLog: "go1.26.6", probeLog: "probe"} {
+			for path, want := range map[string]string{buildLog: "go1.26.8", probeLog: "probe"} {
 				data, err := os.ReadFile(path)
 				if err != nil {
 					t.Fatal(err)

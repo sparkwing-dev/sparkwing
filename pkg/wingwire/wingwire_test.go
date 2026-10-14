@@ -194,15 +194,6 @@ func TestEncode_RejectsNilMessage(t *testing.T) {
 	}
 }
 
-func TestLeaseTokenEnv_IsStable(t *testing.T) {
-	if LeaseTokenEnv != "SPARKWING_LEASE_TOKEN" {
-		t.Fatalf("LeaseTokenEnv = %q", LeaseTokenEnv)
-	}
-	if ChildLeaseTokenEnv != "SPARKWING_CHILD_LEASE_TOKEN" {
-		t.Fatalf("ChildLeaseTokenEnv = %q", ChildLeaseTokenEnv)
-	}
-}
-
 func TestDecode_RejectsAFrameWithNoType(t *testing.T) {
 	for _, line := range []string{`{}`, `{"payload":{}}`, `{"type":"","payload":{}}`} {
 		_, err := Decode([]byte(line))
