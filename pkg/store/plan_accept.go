@@ -104,6 +104,7 @@ type submittedModifiers struct {
 	HasAfterRun         bool     `json:"has_after_run"`
 	HasSkipIf           bool     `json:"has_skip_if"`
 	HasVerify           bool     `json:"has_verify"`
+	SkipIfBudgetMS      int64    `json:"skip_if_budget_ms"`
 }
 
 type plannedNode struct {

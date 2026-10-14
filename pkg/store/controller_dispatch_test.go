@@ -295,6 +295,13 @@ func TestAcceptPlan_MergesRequiresAndKeepsTheAcceptedPlan(t *testing.T) {
 	}
 }
 
+// The pod evaluates SkipIf against its own plan, so the store only has to
+// accept the budget the SDK emits.
+func TestAcceptPlan_AcceptsSkipIfBudget(t *testing.T) {
+	f := newDispatchRun(t, "run-skip-budget")
+	f.mustAccept(t, planOf(`a|"modifiers":{"has_skip_if":true,"skip_if_budget_ms":300}`))
+}
+
 func TestAcceptPlan_ClampsResourcesAndRetries(t *testing.T) {
 	f := newDispatchRun(t, "run-clamp")
 	f.mustAccept(t, planOf(
