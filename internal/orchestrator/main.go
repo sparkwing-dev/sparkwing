@@ -28,12 +28,12 @@ func Main() {
 	os.Exit(2)
 }
 
-func bindProjectPipelines() (*projectconfig.Config, error) {
+func bindProjectPipelines() (*projectconfig.ConfigOld, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, fmt.Errorf("find the project config: %w", err)
 	}
-	_, cfg, err := projectconfig.Discover(cwd)
+	_, cfg, err := projectconfig.DiscoverOld(cwd)
 	if err != nil {
 		return nil, err
 	}

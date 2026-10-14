@@ -297,7 +297,7 @@ func maskUserinfo(masker *secrets.Masker, s string) {
 // file or entry. The host joins them to the plan, which plan code cannot
 // drop them from.
 func PipelineRequires(dir, pipeline string) ([]string, error) {
-	path, cfg, err := projectconfig.Discover(dir)
+	path, cfg, err := projectconfig.DiscoverOld(dir)
 	if err != nil {
 		return nil, fmt.Errorf("read the pipeline's placement: %w", err)
 	}

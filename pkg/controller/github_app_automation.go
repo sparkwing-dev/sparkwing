@@ -61,7 +61,7 @@ func validateAutomationPatterns(patterns []string) error {
 }
 
 func automationDeclarations(content []byte) ([]githubAppAutomationPipeline, string, error) {
-	cfg, err := projectconfig.Parse(content)
+	cfg, err := projectconfig.ParseOld(content)
 	if err != nil {
 		return nil, "invalid", err
 	}

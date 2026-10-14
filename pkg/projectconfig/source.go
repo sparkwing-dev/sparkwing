@@ -6,7 +6,7 @@ import (
 )
 
 func PipelineSource(repoDir, name string) (string, error) {
-	cfg, err := Load(filepath.Join(repoDir, ".sparkwing", Filename))
+	cfg, err := LoadOld(filepath.Join(repoDir, ".sparkwing", Filename))
 	if err != nil || cfg == nil {
 		return "", err
 	}

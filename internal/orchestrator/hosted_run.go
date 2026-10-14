@@ -231,7 +231,7 @@ func hostedInterruptCancel(parent context.Context) (context.Context, func()) {
 // its own working directory, so a --sw-ref or declared-source run gets that
 // checkout's defaults and guards rather than the caller's.
 func applyHostedProjectConfig(opts *Options, dir string) error {
-	_, cfg, err := projectconfig.Discover(dir)
+	_, cfg, err := projectconfig.DiscoverOld(dir)
 	if err != nil {
 		return &projectConfigError{err: err}
 	}

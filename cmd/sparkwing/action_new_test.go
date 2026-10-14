@@ -83,7 +83,7 @@ func TestShapesNamedForAnEventCarryItsTrigger(t *testing.T) {
 			if err := appendPipelinesYAML(dir, "sample", "Sample", false, "    on:\n"+tc.trigger); err != nil {
 				t.Fatal(err)
 			}
-			cfg, err := projectconfig.Load(path)
+			cfg, err := projectconfig.LoadOld(path)
 			if err != nil {
 				t.Fatalf("scaffolded config does not parse: %v", err)
 			}
@@ -107,7 +107,7 @@ func TestShapesWithoutAnEventStayManual(t *testing.T) {
 	if err := appendPipelinesYAML(dir, "sample", "Sample", false, ""); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := projectconfig.Load(path)
+	cfg, err := projectconfig.LoadOld(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestEveryTriggerBlockParses(t *testing.T) {
 			if err := appendPipelinesYAML(dir, "sample", "Sample", false, body); err != nil {
 				t.Fatal(err)
 			}
-			cfg, err := projectconfig.Load(path)
+			cfg, err := projectconfig.LoadOld(path)
 			if err != nil {
 				t.Fatalf("--on %s emits yaml the parser rejects: %v", event, err)
 			}
@@ -332,7 +332,7 @@ func TestMultiTriggerYAMLParses(t *testing.T) {
 	if err := appendPipelinesYAML(dir, "sample", "Sample", false, block); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := projectconfig.Load(path)
+	cfg, err := projectconfig.LoadOld(path)
 	if err != nil {
 		t.Fatalf("multi-trigger entry does not parse: %v\n%s", err, block)
 	}
@@ -358,7 +358,7 @@ func TestAppendPipelinesYAML_PreservesOtherSections(t *testing.T) {
 			if err := appendPipelinesYAML(dir, "sample", "Sample", true, "    on:\n      pre_commit: {}\n"); err != nil {
 				t.Fatal(err)
 			}
-			cfg, err := projectconfig.Load(path)
+			cfg, err := projectconfig.LoadOld(path)
 			if err != nil {
 				t.Fatalf("scaffolded config does not parse: %v", err)
 			}

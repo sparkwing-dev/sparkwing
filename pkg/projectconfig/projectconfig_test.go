@@ -54,7 +54,7 @@ func TestLoad_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := writeYAML(t, dir, projectconfig.Filename, mergedFixture)
 
-	cfg, err := projectconfig.Load(path)
+	cfg, err := projectconfig.LoadOld(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestLoad_RoundTrip(t *testing.T) {
 		t.Fatalf("Marshal: %v", err)
 	}
 	path2 := writeYAML(t, t.TempDir(), projectconfig.Filename, string(out))
-	cfg2, err := projectconfig.Load(path2)
+	cfg2, err := projectconfig.LoadOld(path2)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestLoad_RoundTrip(t *testing.T) {
 }
 
 func TestLoad_MissingFileReturnsNil(t *testing.T) {
-	cfg, err := projectconfig.Load(filepath.Join(t.TempDir(), "sparkwing.yaml"))
+	cfg, err := projectconfig.LoadOld(filepath.Join(t.TempDir(), "sparkwing.yaml"))
 	if err != nil {
 		t.Fatalf("missing file should not error: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestLoad_MissingFileReturnsNil(t *testing.T) {
 func TestLoad_UnknownTopLevelFieldFails(t *testing.T) {
 	dir := t.TempDir()
 	path := writeYAML(t, dir, projectconfig.Filename, "pipelnes:\n  - name: a\n    entrypoint: A\n")
-	_, err := projectconfig.Load(path)
+	_, err := projectconfig.LoadOld(path)
 	if err == nil {
 		t.Fatal("expected error on unknown top-level field")
 	}
@@ -125,7 +125,7 @@ func TestLoad_PipelinesMatchesParse(t *testing.T) {
 		t.Fatalf("pipelines.Parse: %v", err)
 	}
 	path := writeYAML(t, t.TempDir(), projectconfig.Filename, bare)
-	cfg, err := projectconfig.Load(path)
+	cfg, err := projectconfig.LoadOld(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestLoad_SparksSection(t *testing.T) {
 		{Name: "my-sparks", Source: "github.com/example/my-sparks", Version: "latest"},
 	}
 	path := writeYAML(t, t.TempDir(), projectconfig.Filename, "sparks:\n"+bareList)
-	cfg, err := projectconfig.Load(path)
+	cfg, err := projectconfig.LoadOld(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestDiscover_WalksUp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	path, cfg, err := projectconfig.Discover(deep)
+	path, cfg, err := projectconfig.DiscoverOld(deep)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestDiscover_WalksUp(t *testing.T) {
 }
 
 func TestDiscover_NotFoundReturnsNilNilNil(t *testing.T) {
-	path, cfg, err := projectconfig.Discover(t.TempDir())
+	path, cfg, err := projectconfig.DiscoverOld(t.TempDir())
 	if err != nil {
 		t.Fatalf("not-found should not error: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestWriteSparksSectionPreservesCommentOnlyFile(t *testing.T) {
 	if !strings.Contains(string(body), "# keep this note") || !strings.Contains(string(body), "# and this note") {
 		t.Fatalf("lost comments: %s", body)
 	}
-	if _, err := projectconfig.Load(path); err != nil {
+	if _, err := projectconfig.LoadOld(path); err != nil {
 		t.Fatalf("result is invalid config: %v", err)
 	}
 }
@@ -232,7 +232,7 @@ func TestWriteSparksSectionPreservesCommentOnlyFile(t *testing.T) {
 func TestLoad_DefaultsGuardsStayStrict(t *testing.T) {
 	dir := t.TempDir()
 	path := writeYAML(t, dir, "sparkwing.yaml", "defaults:\n  guards:\n    rejct: [profile:local]\n")
-	_, err := projectconfig.Load(path)
+	_, err := projectconfig.LoadOld(path)
 	if err == nil || !strings.Contains(err.Error(), `guards: unknown field "rejct"`) {
 		t.Fatalf("expected defaults.guards to reject an unknown key; got %v", err)
 	}
@@ -240,7 +240,7 @@ func TestLoad_DefaultsGuardsStayStrict(t *testing.T) {
 
 func TestLoad_RefusesADefaultProfile(t *testing.T) {
 	path := writeYAML(t, t.TempDir(), projectconfig.Filename, "defaults:\n  profile: cloud\n")
-	_, err := projectconfig.Load(path)
+	_, err := projectconfig.LoadOld(path)
 	if err == nil || !strings.Contains(err.Error(), "field profile not found") {
 		t.Fatalf("a project default profile must fail the load, since only --profile selects one; got %v", err)
 	}
@@ -255,14 +255,14 @@ func TestLoad_AProjectProfileErrorNamesTheSupportedStates(t *testing.T) {
 		"no state":     "",
 	} {
 		path := writeYAML(t, t.TempDir(), projectconfig.Filename, "profiles:\n  shared:\n"+surfaces+state)
-		_, err := projectconfig.Load(path)
+		_, err := projectconfig.LoadOld(path)
 		if err == nil || !strings.Contains(err.Error(), "sqlite") || !strings.Contains(err.Error(), "controller") ||
 			!strings.Contains(err.Error(), "remove the profile") {
 			t.Errorf("%s: Load = %v, want the supported states and removing the profile named", name, err)
 		}
 	}
 	ok := writeYAML(t, t.TempDir(), projectconfig.Filename, "profiles:\n  shared:\n"+surfaces+"    state: { type: sqlite }\n")
-	if _, err := projectconfig.Load(ok); err != nil {
+	if _, err := projectconfig.LoadOld(ok); err != nil {
 		t.Fatalf("a sqlite project profile: %v", err)
 	}
 }
@@ -271,7 +271,7 @@ func TestLoad_RefusesTheRemovedLogsAndCacheSurfaces(t *testing.T) {
 	for _, key := range []string{"logs", "cache"} {
 		path := writeYAML(t, t.TempDir(), projectconfig.Filename,
 			"profiles:\n  shared:\n    secrets: { type: none }\n    state: { type: sqlite }\n    "+key+": { type: filesystem, path: /tmp/x }\n")
-		if _, err := projectconfig.Load(path); err == nil || !strings.Contains(err.Error(), "field "+key+" not found") {
+		if _, err := projectconfig.LoadOld(path); err == nil || !strings.Contains(err.Error(), "field "+key+" not found") {
 			t.Errorf("Load = %v, want %s refused as an unknown field", err, key)
 		}
 	}

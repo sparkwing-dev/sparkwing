@@ -121,7 +121,7 @@ func (l *Launcher) LaunchOne(ctx context.Context) (bool, error) {
 		return true, fmt.Errorf("claim %s/%s lives %ds, under the %s floor; no Job created",
 			claim.RunID, claim.NodeID, claim.LifetimeSecs, store.MinLaunchLifetime)
 	}
-	job := BuildJob(l.Config, *claim)
+	job := BuildJobOld(l.Config, *claim)
 	_, err = l.Kube.BatchV1().Jobs(l.Config.Namespace).Create(ctx, job, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
 		err = nil

@@ -1,0 +1,532 @@
+# C4: surface and configuration contracts
+
+Status: target contracts for the frozen v4 architecture. Tables are populated;
+execution, parsing, resolution and lifecycle signatures panic until implemented.
+The current CLI and hosts are not wired to these contracts. An `Old` suffix marks
+only a colliding implementation kept compilable for the implementation phase.
+
+## Ownership
+
+C4 owns process environment construction, shared limits and deadline arithmetic,
+configuration precedence, both YAML file shapes, command grammar, local controller
+lifecycle and the common Cloud Job builder. The store owns sealing and authority;
+C4 returns values to its transactions. The SDK owns declarations and applies body
+env after planning; C4 decides which env belongs at process startup.
+
+| Concern | Authoritative source |
+| --- | --- |
+| Env classes, names and process policies | `internal/procenv` |
+| Typed bounds and deadline helpers | `internal/limits` |
+| Precedence, per-setting signatures and source table | `internal/settings` |
+| Project YAML schema | `pkg/projectconfig.Config` |
+| Machine YAML schema | `internal/userconfig.Config` |
+| Commands, flags, parsing constraints, exit/output rules | `internal/clisurface` |
+| On-demand local controller and managed units | `internal/wingd.LocalLifecycle` |
+| Cloud plan/eval/work Job construction | `internal/runners/launcher.BuildJob` |
+
+These packages use the final import root `github.com/sparkwing-dev/sparkwing`.
+The schemas are the tagged Go types plus their validation contracts. They are not
+an additional copy of the accepted run spec. Existing userconfig section loaders
+and projectconfig functions with `Old` names do not validate the target schemas.
+
+## Invariants
+
+### Process environment
+
+- Every process boundary goes through `procenv.Build` and its kind/class policy.
+  Engine-owned names cannot be supplied by a pipeline. Unknown user-owned
+  `SPARKWING_*` names remain valid, subject to credential filtering.
+- Local runs use their captured snapshot, children inherit that snapshot, and
+  schedules capture at install. A daemon's ambient env never replaces it. Private
+  snapshots use `fssecure`; the run spec carries names, digest and snapshot identity.
+- Remote input is the registry's minimal/network/CA base plus `run.submit_env_allow`.
+  Credential-class and credential-shaped names are dropped even when explicitly
+  allowed. `envredact.CredentialName` remains the shared shape classifier; procenv
+  owns the decision to exclude it. Values at least 12 characters long are masked
+  before child execution. Proxy credentials must be registered with the masker.
+- No capability, bootstrap, controller credential or protocol handle travels in
+  env. Protocol v2 carries the node bearer in hello and Windows handles in argv.
+  Removed names remain deny entries only; they are never compatibility inputs.
+- `SplitJobEnv` puts marked assignments and NODE_OPTIONS/GODEBUG/GOMAXPROCS into
+  startup env. Plan has no job startup env. Attempt/eval receives startup env
+  before spawn; a replan changed by it fails as `plan_drift`. The SDK applies all
+  other job assignments after planning. Tools and cleanups inherit that body env.
+- Runtime identity comes from the claim. Public names use JOB, not NODE. Ratified
+  source fields and CI=true are included; unknown source facts stay absent.
+
+### Limits and settings
+
+- `limits.Table()` is the shared number source. Durations use `time.Duration`,
+  byte sizes `int64`, counts `int`. Runtime timing and size values are not mutable
+  package variables. Single-use internal constants may remain with their owner.
+- Remote owner execution defaults to six hours, adjustable up or down by the
+  operator. Local runs have no execution deadline. Queue wait defaults to 24 hours
+  and queued jobs also end at a finite owner deadline. Approval zero remains
+  indefinite for local and controller-owned runs; a remote host's execution
+  deadline bounds its waits. There is no total wall-time cap.
+- `Child` reserves a named margin inside the actual remaining parent budget.
+  `Renew(ttl)` is ttl/3; `CheckRenewal` requires two renewals strictly before expiry.
+  `JobDeadline` adds JobSlack to the attempt deadline and caps at owner expiry.
+  Credential issuance also caps at parent capability expiry. Store time alone
+  judges lease liveness.
+- Retry >10, memo TTL >30 days, output >16 MiB and catch-up >24 hours fail rather
+  than clamp. Fan-out is at most 256 generated jobs. An OOM is ordinary job failure.
+  Errors are masked then bounded to 8 KiB head/tail; annotation/summary is 128 KiB.
+  Store rechecks refuse oversize data rather than cutting raw structured bytes.
+- The source order is flag, equivalent env, sealed run, pipeline YAML, YAML
+  defaults, pipeline code, machine file, shipped default. Each setting accepts
+  only the sources in `settings.Table`. Operator precedence is named flag, team DB,
+  global DB, limits profile, default. Operator results are ceilings, never author
+  preferences. A refusal names both nonsecret values and origins.
+- Intake resolves request/machine/env inputs once. Acceptance resolves checkout
+  and code inputs and reapplies request overrides without rewriting the request.
+  A host consuming accepted values never reads its own preferences again.
+- Nil means unset. Explicit zero, false, an empty list or an empty map keeps its
+  documented meaning. Invalid settings fail with source/file/key information;
+  they never warn-and-default. Defaults apply to pipelines with no YAML entry.
+- Args merge per key. Schedule host args override schedule args before request
+  sealing. Pipeline requires replaces defaults, then job requirements add; run
+  requirements and allowed pools remain inherited. Guards replace as one block.
+- Request-rate/ring/stream/download overload guards are per replica. Run-rate and
+  usage quotas are deployment-wide store facts with shared atomic reservations.
+  `max_runs_per_hour` supplies the sole per-principal guard's DB override.
+- Retention keeps run and metric policies separate. Newest successful run/output
+  pins survive retention; log classes still expire. Financial rows never cascade.
+
+### YAML schema
+
+Both decoders reject unknown and duplicate keys, explicit null, extra documents
+and malformed values. Empty collections are explicit. Errors never echo tokens.
+
+Project sections are `defaults`, `pipelines`, `sparks`. Defaults contain args,
+guards, requires and prefers. Pipeline entries also retain name, entrypoint,
+description, hidden, source, profile and on. Guards use when/unless with
+`where:local|controller`, `arg:key=value`, `git:branch=name|default`. An unresolved
+default branch fails closed. Project-level profiles and `on.webhook` are unknown
+keys, including a profile name also present in the machine file.
+
+Events cover push branches/paths, pull_request actions/branches, schedule entries,
+and empty pre_commit/pre_push/post_commit hooks. Schedule where is local or
+controller, timezone defaults UTC (`local` means host zone), overlap is skip or
+queue (default skip), catch-up defaults one hour and must be between two minutes
+and 24 hours. One unnamed schedule is `default`; multiple schedules require
+unique names matching the existing schedule-name grammar. The install profile
+selects the controller separately from `where`.
+
+Machine sections are profiles, repos, admission, runner, cache, machine, debug and
+run. Profiles contain only controller URL and optional token in an owner-only
+file. The runner uses credentials_dir, repos and keep_free; agent, gitcache,
+allow_repos, local_reserve and its unused profile are unknown keys. A runner's
+pool authority cannot come from machine labels. Max concurrent defaults to one;
+lease, poll and heartbeat explicit zero fail. `accept_working_tree` requires a
+repository allow-list. Spawn policy retains the existing return-to-queue mode.
+
+Admission retains classic/off/auto/jev/custom, budget, custom class weights,
+backfill delay, aging, interactive burst and the existing Jev predictor fields.
+The rewrite changes lifecycle ownership, not admission behavior. Repo settings
+retain registered paths, fallback_paths, auto_register and include_worktrees.
+Cache max_bytes/max_entries zero disables the individual local cache bound.
+Machine box_id falls back to hostname only when unset; unreadable config fails.
+Debug pause_timeout is a positive duration. Run holds submit_env_allow and the
+read-only cache_from profile default. Logs/drop_policy, run.dispatch_wait and
+profile backend/rerun_image settings are unknown keys.
+
+### CLI
+
+`clisurface.Registry()` lists the whole target grammar for sparkwing,
+sparkwing-runner and sparkwing-controller, including hidden process entrypoints.
+GlobalFlags and CommonRules apply to every row. Unknown engine flags fail;
+pipeline arguments start after `--`. Only run and pipeline trigger take a
+pipeline positional. Output selection is validated before side effects; lists
+are NDJSON and diagnostics use the C2 error object on stderr.
+
+- `run` is local. `--publish P` uploads the record/results/logs with local
+  provenance under trust_local_builds; publication failure cannot fail the run.
+  `--sw-cache-from P` or run.cache_from reads only authorized verified-default-
+  branch memo/artifacts/depcache, never writes, and never fetches pipeline binaries.
+- `pipeline trigger --resume RUN` reattaches that here run with its sealed spec;
+  it neither creates another run nor grants other run authority.
+- `--sw-workers` remains a positive local flag; detached execution refuses it.
+  SPARKWING_WORKERS is removed. Pause selection is request data from --sw-pause-*.
+- Schedules is a hard cut; managed units call hidden `__tick`. No crons alias,
+  cluster worker, debug rerun, runs bounce/consumer or separate cache service exists.
+- Operator CLI verbs use only deployment-admin operational scopes. Console-only
+  trust/grants/freezes/refunds/account deletion stay console-only. In-pod admin is
+  the break-glass surface. C2 owns authorization, not this grammar table.
+
+### Local controller and Cloud Jobs
+
+The local runtime is the same controller code in local mode and the sole
+state.db owner. It owns admission, queue/consumer, reaper and dashboard. Local
+runs still execute in the CLI; standalone in-process CI has exclusive store
+ownership. Started local orphans fail instead of being requeued.
+
+Runs, queued triggers, held leases and dashboard connections independently hold
+the controller alive. Health probes and installed schedules do not. `--stay`
+pins it until stopped. Linux/macOS install a login service with restart on
+failure and no socket activation. Update re-renders all managed units and
+restarts an installed controller. Doctor reports skew, incompatible stores and
+removed timer verbs. Windows supports stay and daemon schedules; install is
+refused. Kernel UID or client SID establishes local identity; absent evidence
+refuses access. Private files use fssecure on every supported OS.
+
+Every plan/eval/work Cloud Job runs root with privileged DinD, including jobs
+from run-host dispatch. Before a runnable object exists, CloudBoundary must
+reserve exactly one Job on a team-dedicated node and establish enforced default-
+deny egress, allowed destinations, DaemonSet-port inventory and the escape probe.
+The builder cannot silently fall back to a shared node. DinD is not credential
+isolation. Scratch is fixed at 20 GiB. Bootstrap is an owner-only Secret file,
+source init uses it, and run-node exchanges it once for an in-memory capability.
+No launcher root credential is passed to a Job. Teardown releases the node only
+after all containers stop, and deletes the bootstrap Secret on every path.
+
+## Acceptance obligations
+
+These are target acceptance scenarios for T1 and implementers, not claims that
+stubbed functions have been exercised. The four executable contract-data suites
+check registry integrity, grammar, typed bounds, precedence order and seal phases.
+
+| Scenario | Required proof | Frozen source |
+| --- | --- | --- |
+| C4-env-placements | Consistent construction within local-snapshot or remote-allow-list policy; claim-derived runtime identity on every placement; install gets base only | §7.1-7.4 |
+| C4-env-credential | No inherited engine-owned or credential-shaped names, even unknown allow-listed names; composed runtime names present; >=12-character remote values masked | §1.7, §7.1 |
+| C4-env-phases | Body env cannot alter replan; marked/fixed startup env reaches attempt only and drift fails; cleanup inherits body env | §7.1, A35 |
+| C4-settings-sources | Each Table row exercises every allowed source pair, explicit zero/empty, invalid source/file/key, and request/code conflict | §7.5 |
+| C4-settings-seals | No checkout reads at intake; request override survives accept; resumed host ignores local preferences | §3.1, §7.5 |
+| C4-config-strict | Both schemas reject removed/unknown/duplicate/null keys, extra docs and ambiguous profiles; defaults apply without entry | §7.5, §9.4 |
+| C4-deadlines | Remote operator can raise/lower six-hour default; local unbounded; queue bounded by owner; approvals zero indefinite where allowed | §7.6 |
+| C4-limits | Boundaries ±1 for retry/memo/output/annotation/catch-up/fan-out; UTF-8 mask-before-bound; failed store recheck | §7.6 |
+| C4-renewal | Two renewals fit lease; expired parent/margin fails; Job and claim cannot outlive owner or capability parent | §2.4, §5.1, §7.6 |
+| C4-cli | Every command parses kind flags, output and unknown args; root profile before trigger works; removed surfaces fail | §9.2-9.3 |
+| C4-here-resume | First claim obeys ten-minute claim_by; later reclaim succeeds after that window while run/credential is live; wrong run, dead parent or expired run fails through C2 | §3.4, §5.1, §9.3 |
+| C4-publish-cache | No remote access by default; cache only authorized trusted reads; binary local; publish nonfatal and locally provenanced | §3.1, §8.5 |
+| C4-idle | Each activity hold prevents exit, health probe does not; stay pins; CLI-hosted local and standalone ownership | §2.1 |
+| C4-managed-units | Linux/macOS login/restart; update rewrites __tick + restarts controller; doctor detects drift; uninstall removes service | §2.1, §9.3 |
+| C4-windows | SID refusal/verification and owner DACL; stay/daemon schedules work, login-service install refuses | §5.6 |
+| C4-cloud-pod | All unit kinds root/DinD; no shared-node launch; enforcement probe failure refuses; 20Gi scratch/deadline/Secret teardown | §2.6, §5.4-5.5 |
+| C4-cloud-exchange | Bootstrap source-only then one exchange, immutable row-derived binding, root ancestry; no env/argv credential | §5.1, §5.4 |
+| C4-recovery | Application retry keeps Job/claim; OOM ordinary failure; local orphan fails | §3.3-3.4, §7.6 |
+
+Implementation must generate the env, limits, precedence and command references
+from these tables and make their existing drift checks consume that source.
+Target contract docs remain separate from live product help until runtime wiring
+lands. There is no behavioral changelog claim in this contract-only change.
+
+## Cross-area assumptions
+
+| This contract | Other area/type | Required agreement |
+| --- | --- | --- |
+| settings.Values, ResolveRequest/ResolvePlan | C1 runspec.Request and accepted spec | Embed/convert settings projection with presence and Origin; store owns both immutable seals |
+| procenv.Base/Runtime | C1 runspec env snapshot identity; C3 RunHost/NodeHost | Captured env identity survives retry/children; source facts and granted runner identity supplied explicitly |
+| procenv.Assignment/JobEnv | C3 plan env declaration and SDK Startup option | Preserve Startup marker; fixed interpreter names always startup; SDK applies Body after planning |
+| limits.Table/Child/JobDeadline | C1 AcceptPlan/TransitionNode; C2 capability issuance; C3 lease.Keeper/ValidatePlan | Same caps, refusal semantics and deadlines; store clock decides liveness |
+| settings.Error; clisurface.Errors | C2 apierr error object | Translate once to shared codes/details; no independent envelope |
+| clisurface.Registry | C2 route policies and capability grants | CLI metadata never grants authority; here resume and operator split use corresponding route bindings |
+| userconfig.Connection/RunnerConfig | C2 credential release and root capability | Files supply credentials; repo strings/labels do not create authority; pool grants are server facts |
+| launcher.CloudJobBinding/CloudJobAward | C1 awarded row/attempt identity; C2 Award/Exchange | These are builder input projections, not alternate credential models; generation/attempt and eval source fence match |
+| launcher.BuildJob | C3 source.Acquire/NodeHost; C2 bootstrap grant tables | Source-only bootstrap, exact SHA, exchange before SDK, unit-specific fixed grants, same root ancestry |
+| wingd.LocalSubject/LocalRuntime | C2 local capability subject/policy; C1 store owner | Kernel UID/SID supplies local identity; same controller policies; sole state.db owner |
+| All acceptance rows above | T1 scenario catalog | Launch coverage includes Go/TS, Windows, here, Actions, remote cache and DinD |
+
+## Open questions for the lead
+
+1. **Startup wording.** §7.1 says startup env is "refused in the plan process too"
+   but also says it reaches attempt replan and not the first plan. The latter
+   precise rule and A35 govern: attempt-only startup env, declaration reads
+   undefined and drift refused. C3 must match this reading.
+2. **Local external credentials.** Local base is described as captured env minus
+   engine-owned names, which could retain user GITHUB_TOKEN/AWS credentials;
+   §1.7 and §7.1 also forbid credentials in Build output. This contract follows
+   the literal exclusion, including tool-owned credentials, and records the
+   discrepancy before implementation. Credential-bearing network proxy URLs
+   remain passed and masked as the existing network-base contract requires;
+   confirm that this is the intended exception to the env credential wording.
+3. **Runner allow-list spelling.** §2.5/§9.1 explicitly choose --repos while §9.2
+   generally requires singular repeatables. The registry keeps --repos as that
+   explicit exception. Entity selection still uses --repo.
+4. **Underspecified spellings.** Machine remote-cache default is run.cache_from;
+   runner file credentials use runner.credentials_dir. Bulk actions use
+   --all-repos/--all-jobs/--all-pipelines/--all-entries so --all retains its single
+   hidden-entry meaning; docs uses --full. Resume may omit the pipeline positional
+   and always uses the sealed spec. Explicit --sw-output beats -o, then env, then
+   terminal detection. These fill gaps without retaining aliases; ratify before
+   implementing parsers.
+5. **Scratch accounting.** The fixed 20Gi budget is interpreted as aggregate Job
+   scratch including DinD storage, not 20Gi per container. Kubernetes enforcement
+   must make that true without requiring pipeline opt-in.
+6. **Network evidence.** The design does not supply a destination list or freshness
+   interval for enforcement probes. CloudBoundary requires evidence for the target
+   node/namespace and current policy revision; no invented timeout is added.
+7. **Auth cache TTL.** The architecture requires a bounded cache plus store
+   generation checks without a numeric TTL. C2 must select its value and add it
+   to limits rather than inventing a second owner.
+
+## Verification
+
+- Full repository `GOWORK=off GOFLAGS=-buildvcs=false go build ./...`: passed.
+- `go vet` on every new or changed package: passed.
+- Registry tests for procenv, limits, clisurface and settings: passed.
+- Independent fresh Astra source review: findings corrected (worker flag,
+  settings source scope, egress scope and unknown credential-shaped names).
+- No Sparkwing binary runs, live state access, git writes, commits or external
+  file writes. Runtime acceptance remains implementation work; stub signatures
+  are not execution evidence.
+
+## Exported contract API
+
+Each row names a target type, function or registry. Constants live in the typed
+family files and complete tables; temporary Old implementations are excluded.
+
+### internal/procenv
+
+| Export | Purpose |
+| --- | --- |
+| [`Class`](../../../internal/procenv/contracts.go#L7) | Class distinguishes variable authority from the process allowed to consume it. |
+| [`Kind`](../../../internal/procenv/contracts.go#L20) | Kind identifies the process boundary at which Build applies policy. |
+| [`Var`](../../../internal/procenv/contracts.go#L42) | Var is a registry row; Prefix matches a family, and engine ownership forbids inheritance. |
+| [`Policy`](../../../internal/procenv/contracts.go#L53) | Policy declares every class's delivery rule for a process kind; credentials use files or memory only. |
+| [`Policies`](../../../internal/procenv/contracts.go#L59) | Policies returns the complete process policy, including service and subprocess boundaries. |
+| [`Base`](../../../internal/procenv/contracts.go#L80) | Base makes inherited input explicit; local children reuse Captured, never the daemon's ambient environment. |
+| [`RunnerInfo`](../../../internal/procenv/contracts.go#L89) | RunnerInfo carries the claim's granted identity rather than the host process's ambient identity. |
+| [`Runtime`](../../../internal/procenv/contracts.go#L95) | Runtime supplies sealed values and an attempt's already-built environment for tools and cleanups. |
+| [`Assignment`](../../../internal/procenv/contracts.go#L106) | Assignment preserves the author's startup marker until host and SDK split job environment delivery. |
+| [`JobEnv`](../../../internal/procenv/contracts.go#L112) | JobEnv separates pre-start interpreter settings from values applied by the SDK after planning. |
+| [`SplitJobEnv`](../../../internal/procenv/contracts.go#L117) | SplitJobEnv validates names and rejects engine-owned or credential transport names. |
+| [`Build`](../../../internal/procenv/contracts.go#L125) | Build excludes credential-class values from both local snapshots and remote inputs under Policies. |
+| [`Lookup`](../../../internal/procenv/contracts.go#L128) | Lookup uses exact rows before prefixes, case-insensitively on Windows; unknown names remain user-owned. |
+| [`Validate`](../../../internal/procenv/contracts.go#L131) | Validate refuses invalid names and engine-owned assignments without exposing secret values in its errors. |
+| [`Registry`](../../../internal/procenv/registry.go#L5) | Registry is the single classification table for environment generation and reference documentation. |
+
+### internal/limits
+
+| Export | Purpose |
+| --- | --- |
+| [`ErrNoTime`](../../../internal/limits/deadline.go#L11) | ErrNoTime means the parent's remaining budget cannot leave the requested settlement margin. |
+| [`Child`](../../../internal/limits/deadline.go#L17) | Child derives a deadline, leaving margin before parent; a zero parent means unbounded. |
+| [`ChildContext`](../../../internal/limits/deadline.go#L22) | ChildContext applies Child to ctx.Deadline, retaining cancellation when the result is unbounded. |
+| [`Renew`](../../../internal/limits/deadline.go#L27) | Renew returns ttl/3; callers validate positive TTLs before constructing a lease keeper. |
+| [`CheckRenewal`](../../../internal/limits/deadline.go#L30) | CheckRenewal refuses nonpositive values or a cadence that cannot renew twice strictly before expiry. |
+| [`JobDeadline`](../../../internal/limits/deadline.go#L35) | JobDeadline adds JobSlack to attemptDeadline and caps the result at ownerDeadline. |
+| [`Error`](../../../internal/limits/deadline.go#L40) | Error bounds already-masked UTF-8 error text with a head and tail within ErrorBytes. |
+| [`Record`](../../../internal/limits/deadline.go#L43) | Record bounds already-masked UTF-8 summary or annotation text within AnnotationBytes with an elision note. |
+| [`Failure`](../../../internal/limits/deadline.go#L46) | Failure refuses an oversized already-masked failure record rather than producing malformed structured bytes. |
+| [`Class`](../../../internal/limits/table.go#L4) | Class distinguishes author refusals, operator ceilings and internal coordination budgets. |
+| [`Limit`](../../../internal/limits/table.go#L14) | Limit carries a typed value (duration, int64 bytes, or int count) with its documented enforcement. |
+| [`Table`](../../../internal/limits/table.go#L22) | Table returns independent rows for every shared constant; documentation renders the typed values. |
+
+### internal/settings
+
+| Export | Purpose |
+| --- | --- |
+| [`Source`](../../../internal/settings/contract.go#L13) | Source preserves the origin needed to explain a refusal without leaking values. |
+| [`Precedence`](../../../internal/settings/contract.go#L31) | Precedence gives closer explicit sources priority; ceilings remain independent. |
+| [`OperatorPrecedence`](../../../internal/settings/contract.go#L36) | OperatorPrecedence keeps a named flag authoritative, including explicit zero. |
+| [`Origin`](../../../internal/settings/contract.go#L41) | Origin keeps source, file and key when a value moves into the sealed run spec. |
+| [`Phase`](../../../internal/settings/contract.go#L49) | Phase prevents project and code settings from being frozen before planning. |
+| [`Rule`](../../../internal/settings/contract.go#L59) | Rule is the precedence-document and conformance-test source for one setting. |
+| [`Resources`](../../../internal/settings/contract.go#L70) | Resources uses native units so hosts cannot disagree through unit conversion. |
+| [`PauseSelection`](../../../internal/settings/contract.go#L76) | PauseSelection is sealed request data instead of inherited debug env. |
+| [`Values`](../../../internal/settings/contract.go#L85) | Values retains presence until acceptance. |
+| [`KeyInput`](../../../internal/settings/contract.go#L128) | KeyInput is consumed in the parent process; diagnostics may show only presence. |
+| [`RetentionValues`](../../../internal/settings/contract.go#L136) | RetentionValues keeps metric and run retention separate from fixed blob/log rules. |
+| [`OperatorValues`](../../../internal/settings/contract.go#L143) | OperatorValues uses pointers because zero disables a documented guard; it never means missing. |
+| [`OperatorInputs`](../../../internal/settings/contract.go#L174) | OperatorInputs keeps deployment authority out of author preferences. |
+| [`Context`](../../../internal/settings/contract.go#L183) | Context carries facts used for defaults without reading process-global state. |
+| [`Inputs`](../../../internal/settings/contract.go#L205) | Inputs has a fixed field for each source, rather than caller-ordered layers. |
+| [`Error`](../../../internal/settings/contract.go#L219) | Error names invalid or conflicting input without echoing secrets. |
+| [`Error.Error`](../../../internal/settings/contract.go#L229) | Error supplies a stable message for the shared apierr translation boundary. |
+| [`ResolveRequest`](../../../internal/settings/contract.go#L234) | ResolveRequest resolves only intake inputs; project and code fields remain unset and their winning request overrides remain distinguishable from defaults. |
+| [`ResolvePlan`](../../../internal/settings/contract.go#L239) | ResolvePlan merges checkout and code values with the request, checks every ceiling, and returns the final settings projection for AcceptPlan's transaction. |
+| [`ControllerCeilings`](../../../internal/settings/contract.go#L243) | ControllerCeilings resolves each operator key with OperatorPrecedence. |
+| [`ConfigPath`](../../../internal/settings/resolvers.go#L10) | ConfigPath resolves config_path with its Table rule, preserving origin for refusal. |
+| [`Home`](../../../internal/settings/resolvers.go#L15) | Home resolves home with its Table rule, preserving origin for refusal. |
+| [`Profile`](../../../internal/settings/resolvers.go#L20) | Profile resolves profile with its Table rule, preserving origin for refusal. |
+| [`Args`](../../../internal/settings/resolvers.go#L25) | Args resolves args with its Table rule, preserving origin for refusal. |
+| [`Guards`](../../../internal/settings/resolvers.go#L30) | Guards resolves guards with its Table rule, preserving origin for refusal. |
+| [`Requires`](../../../internal/settings/resolvers.go#L35) | Requires resolves requires with its Table rule, preserving origin for refusal. |
+| [`Prefers`](../../../internal/settings/resolvers.go#L40) | Prefers resolves prefers with its Table rule, preserving origin for refusal. |
+| [`Workers`](../../../internal/settings/resolvers.go#L45) | Workers resolves workers with its Table rule, preserving origin for refusal. |
+| [`Output`](../../../internal/settings/resolvers.go#L50) | Output resolves output with its Table rule, preserving origin for refusal. |
+| [`AdmissionClass`](../../../internal/settings/resolvers.go#L55) | AdmissionClass resolves admission_class with its Table rule, preserving origin for refusal. |
+| [`Priority`](../../../internal/settings/resolvers.go#L60) | Priority resolves priority with its Table rule, preserving origin for refusal. |
+| [`AdmissionPolicy`](../../../internal/settings/resolvers.go#L65) | AdmissionPolicy resolves admission with its Table rule, preserving origin for refusal. |
+| [`Toolchain`](../../../internal/settings/resolvers.go#L70) | Toolchain resolves toolchain with its Table rule, preserving origin for refusal. |
+| [`PauseTimeout`](../../../internal/settings/resolvers.go#L75) | PauseTimeout resolves debug.pause_timeout with its Table rule, preserving origin for refusal. |
+| [`BoxID`](../../../internal/settings/resolvers.go#L80) | BoxID resolves machine.box_id with its Table rule, preserving origin for refusal. |
+| [`BinaryCache`](../../../internal/settings/resolvers.go#L85) | BinaryCache resolves cache with its Table rule, preserving origin for refusal. |
+| [`SecretsKey`](../../../internal/settings/resolvers.go#L90) | SecretsKey resolves secrets_key with its Table rule, preserving origin for refusal. |
+| [`CatchUp`](../../../internal/settings/resolvers.go#L95) | CatchUp resolves schedule.catch_up with its Table rule, preserving origin for refusal. |
+| [`Runner`](../../../internal/settings/resolvers.go#L100) | Runner resolves runner with its Table rule, preserving origin for refusal. |
+| [`OwnerExecution`](../../../internal/settings/resolvers.go#L105) | OwnerExecution resolves owner_execution with its Table rule, preserving origin for refusal. |
+| [`JobTimeout`](../../../internal/settings/resolvers.go#L110) | JobTimeout resolves job.timeout with its Table rule, preserving origin for refusal. |
+| [`ApprovalWait`](../../../internal/settings/resolvers.go#L115) | ApprovalWait resolves approval.wait with its Table rule, preserving origin for refusal. |
+| [`Retry`](../../../internal/settings/resolvers.go#L120) | Retry resolves job.retry with its Table rule, preserving origin for refusal. |
+| [`MemoTTL`](../../../internal/settings/resolvers.go#L125) | MemoTTL resolves job.memo_ttl with its Table rule, preserving origin for refusal. |
+| [`ClaimWait`](../../../internal/settings/resolvers.go#L130) | ClaimWait resolves claim_wait with its Table rule, preserving origin for refusal. |
+| [`Retention`](../../../internal/settings/resolvers.go#L135) | Retention resolves retention with its Table rule, preserving origin for refusal. |
+| [`IdlePoll`](../../../internal/settings/resolvers.go#L140) | IdlePoll resolves idle_poll with its Table rule, preserving origin for refusal. |
+| [`ControllerConnection`](../../../internal/settings/resolvers.go#L145) | ControllerConnection resolves connection with its Table rule, preserving origin for refusal. |
+| [`RepoLocation`](../../../internal/settings/resolvers.go#L150) | RepoLocation resolves repo_location with its Table rule, preserving origin for refusal. |
+| [`PauseTargets`](../../../internal/settings/resolvers.go#L155) | PauseTargets resolves debug.pause with its Table rule, preserving origin for refusal. |
+| [`Debug`](../../../internal/settings/resolvers.go#L160) | Debug resolves debug with its Table rule, preserving origin for refusal. |
+| [`Publish`](../../../internal/settings/resolvers.go#L165) | Publish resolves publish with its Table rule, preserving origin for refusal. |
+| [`CacheFrom`](../../../internal/settings/resolvers.go#L170) | CacheFrom resolves cache_from with its Table rule, preserving origin for refusal. |
+| [`ResourceLimits`](../../../internal/settings/resolvers.go#L175) | ResourceLimits resolves resources with its Table rule, preserving origin for refusal. |
+| [`SourceRef`](../../../internal/settings/resolvers.go#L180) | SourceRef resolves source with its Table rule, preserving origin for refusal. |
+| [`TokenTTL`](../../../internal/settings/resolvers.go#L185) | TokenTTL resolves token.ttl with its Table rule, preserving origin for refusal. |
+| [`SubmitEnvAllow`](../../../internal/settings/resolvers.go#L190) | SubmitEnvAllow resolves run.submit_env_allow with its Table rule, preserving origin for refusal. |
+| [`Table`](../../../internal/settings/table.go#L5) | Table is complete for surviving settings from the source inventory and the approved additions. |
+
+### internal/clisurface
+
+| Export | Purpose |
+| --- | --- |
+| [`Authority`](../../../internal/clisurface/contract.go#L10) | Authority separates team credentials from deployment and in-pod powers. |
+| [`Flag`](../../../internal/clisurface/contract.go#L22) | Flag is parser and help metadata; Argument empty means a boolean switch. |
+| [`Command`](../../../internal/clisurface/contract.go#L41) | Command separates parser metadata from handlers; Flags adds to GlobalFlags. |
+| [`GlobalFlags`](../../../internal/clisurface/contract.go#L56) | GlobalFlags is inherited everywhere; profile selection is command-local, but an accepted --profile may appear before the verb. |
+| [`ExitCode`](../../../internal/clisurface/contract.go#L66) | ExitCode keeps usage failures distinguishable from incomplete observations. |
+| [`ErrorFormat`](../../../internal/clisurface/contract.go#L78) | ErrorFormat delegates JSON encoding and codes to internal/apierr; the CLI must not create another error envelope or leak pipeline secrets in hints. |
+| [`Errors`](../../../internal/clisurface/contract.go#L86) | Errors keeps diagnostics on stderr even when stdout contains records. |
+| [`CommonRules`](../../../internal/clisurface/contract.go#L96) | CommonRules fixes shared meanings so a new command cannot reinterpret a flag. |
+| [`Validate`](../../../internal/clisurface/contract.go#L117) | Validate catches grammar drift before a parser or help generator consumes it. |
+| [`Registry`](../../../internal/clisurface/registry.go#L4) | the final tree is independent of runtime dispatch so help and parsers share one contract. |
+
+### pkg/projectconfig
+
+| Export | Purpose |
+| --- | --- |
+| [`Config`](../../../pkg/projectconfig/contract.go#L5) | Config excludes connection credentials because a checkout cannot choose where a user's secrets are sent. |
+| [`Defaults`](../../../pkg/projectconfig/contract.go#L12) | Defaults applies even when a pipeline has no entry in the project file. |
+| [`Pipeline`](../../../pkg/projectconfig/contract.go#L20) | Pipeline keeps author declarations separate from the host's sealed run spec. |
+| [`Guards`](../../../pkg/projectconfig/contract.go#L36) | Guards replaces the complete lower-priority block, including when empty. |
+| [`Events`](../../../pkg/projectconfig/contract.go#L42) | Events contains only events with an intake implementation. |
+| [`PushEvent`](../../../pkg/projectconfig/contract.go#L52) | PushEvent filters an authenticated push; it cannot establish repository trust. |
+| [`PullRequestEvent`](../../../pkg/projectconfig/contract.go#L58) | PullRequestEvent filters intake without changing the fork-PR refusal. |
+| [`Schedule`](../../../pkg/projectconfig/contract.go#L65) | Schedule identifies a durable schedule separately from any run it starts. |
+| [`Hook`](../../../pkg/projectconfig/contract.go#L76) | Hook requires an empty mapping so misspelled hook settings cannot be ignored. |
+| [`Spark`](../../../pkg/projectconfig/contract.go#L79) | Spark pins a library independently of the controller connection. |
+| [`Parse`](../../../pkg/projectconfig/contract.go#L88) | Parse refuses unknown keys, duplicate keys, null values, multiple documents, malformed enums and duplicate pipeline or schedule names. |
+| [`Load`](../../../pkg/projectconfig/contract.go#L91) | Load preserves absence as nil; invalid or unreadable files fail with their path. |
+| [`Discover`](../../../pkg/projectconfig/contract.go#L95) | Discover searches from a checkout for its project file without reading machine connections or resolving run settings before the checkout has been acquired. |
+| [`Validate`](../../../pkg/projectconfig/contract.go#L101) | Validate is shared by file parsing and server-side seal-point validation. |
+
+### internal/userconfig
+
+| Export | Purpose |
+| --- | --- |
+| [`Config`](../../../internal/userconfig/contract.go#L6) | Config owns the complete machine file so every reader rejects unknown keys. |
+| [`Profile`](../../../internal/userconfig/contract.go#L18) | Profile is only a named controller connection; storage uses that controller. |
+| [`Connection`](../../../internal/userconfig/contract.go#L24) | Connection keeps the user's credential in an owner-only file, never env. |
+| [`ReposConfig`](../../../internal/userconfig/contract.go#L30) | ReposConfig is the only fallback source for resolving a local child checkout. |
+| [`RepoPath`](../../../internal/userconfig/contract.go#L38) | RepoPath cannot grant controller authority merely by naming a checkout. |
+| [`AdmissionConfig`](../../../internal/userconfig/contract.go#L43) | AdmissionConfig preserves machine admission independently of placement. |
+| [`AdmissionCustom`](../../../internal/userconfig/contract.go#L51) | AdmissionCustom records explicit zero separately from the policy defaults. |
+| [`AdmissionBurst`](../../../internal/userconfig/contract.go#L59) | AdmissionBurst retains the existing admission policy's measured burst bound. |
+| [`AdmissionJev`](../../../internal/userconfig/contract.go#L66) | AdmissionJev names the existing admission predictor and its failure bounds. |
+| [`RunnerConfig`](../../../internal/userconfig/contract.go#L77) | RunnerConfig supplies machine claim preferences; pools and billing facts come from its root capability. |
+| [`CacheConfig`](../../../internal/userconfig/contract.go#L95) | CacheConfig bounds only the local binary cache; explicit zero disables a bound. |
+| [`MachineConfig`](../../../internal/userconfig/contract.go#L101) | MachineConfig preserves an explicit box identity when the hostname changes. |
+| [`DebugConfig`](../../../internal/userconfig/contract.go#L106) | DebugConfig bounds pauses without putting debug controls into child env. |
+| [`RunConfig`](../../../internal/userconfig/contract.go#L112) | RunConfig grants no authority: allowed env still passes procenv filtering, and cache reads still require the user's repo-bound data.read capability. |
+| [`Decode`](../../../internal/userconfig/contract.go#L120) | Decode validates the whole file with file/key/line errors before a section is used. |
+| [`ReadConfig`](../../../internal/userconfig/contract.go#L126) | ReadConfig verifies the owner-only regular file with fssecure on Unix and Windows, then calls Decode; no migration or legacy fallback runs. |
+| [`ValidateConfig`](../../../internal/userconfig/contract.go#L130) | ValidateConfig applies the same key, enum and explicit-zero checks to callers that already have typed data. |
+
+### internal/wingd
+
+| Export | Purpose |
+| --- | --- |
+| [`KeepAliveReason`](../../../internal/wingd/lifecycle_contract.go#L9) | KeepAliveReason separates the four activity holds from the explicit --stay policy. |
+| [`KeepAliveReasons`](../../../internal/wingd/lifecycle_contract.go#L19) | KeepAliveReasons is exhaustive; health probes alone must not prevent idle exit. |
+| [`LocalActivity`](../../../internal/wingd/lifecycle_contract.go#L24) | LocalActivity counts live state, not historical runs or configured schedules. |
+| [`MayExitIdle`](../../../internal/wingd/lifecycle_contract.go#L31) | MayExitIdle requires every activity count to be zero and --stay to be false. |
+| [`LocalPlatformPolicy`](../../../internal/wingd/lifecycle_contract.go#L36) | LocalPlatformPolicy keeps Windows SID authentication and daemon schedules explicit. |
+| [`LocalPlatformPolicies`](../../../internal/wingd/lifecycle_contract.go#L46) | LocalPlatformPolicies is the complete supported-platform table; unknown platforms fail closed. |
+| [`LocalPeerIdentity`](../../../internal/wingd/lifecycle_contract.go#L56) | LocalPeerIdentity comes from the transport's kernel credentials, never request input. |
+| [`LocalSubject`](../../../internal/wingd/lifecycle_contract.go#L63) | LocalSubject checks the peer against the controller's OS account before minting local authority. |
+| [`LocalStartOptions`](../../../internal/wingd/lifecycle_contract.go#L69) | LocalStartOptions carries spawn plumbing in arguments rather than environment variables. |
+| [`LocalRuntime`](../../../internal/wingd/lifecycle_contract.go#L78) | LocalRuntime uses the same pkg/controller implementation, route policy and state owner. |
+| [`LocalStatus`](../../../internal/wingd/lifecycle_contract.go#L83) | LocalStatus exposes version skew and activity without opening a second writing store handle. |
+| [`ManagedUnitKind`](../../../internal/wingd/lifecycle_contract.go#L91) | ManagedUnitKind gives schedules and the controller one upgrade path. |
+| [`ManagedUnitPolicy`](../../../internal/wingd/lifecycle_contract.go#L99) | ManagedUnitPolicy records stable argv so command renames cannot strand installed timers. |
+| [`ManagedUnitPolicies`](../../../internal/wingd/lifecycle_contract.go#L108) | ManagedUnitPolicies covers every Sparkwing-managed unit, with no socket activation. |
+| [`ManagedUnit`](../../../internal/wingd/lifecycle_contract.go#L116) | ManagedUnit records rendered argv for doctor to detect removed verbs as well as stale versions. |
+| [`ManagedUnitManager`](../../../internal/wingd/lifecycle_contract.go#L127) | ManagedUnitManager is shared by update, dashboard installation and schedule installation. |
+| [`LocalDoctorFinding`](../../../internal/wingd/lifecycle_contract.go#L135) | LocalDoctorFinding makes incompatible stores, version skew and removed unit verbs actionable. |
+| [`LocalLifecycle`](../../../internal/wingd/lifecycle_contract.go#L142) | LocalLifecycle starts on demand and shares the runtime used by explicit dashboard commands. |
+| [`NewLocalLifecycle`](../../../internal/wingd/lifecycle_contract.go#L151) | NewLocalLifecycle keeps service management outside controller request handling. |
+
+### internal/runners/launcher
+
+| Export | Purpose |
+| --- | --- |
+| [`CloudUnitKind`](../../../internal/runners/launcher/pod_contract.go#L14) | CloudUnitKind selects host work without weakening the common Cloud isolation contract. |
+| [`CloudUnitPolicy`](../../../internal/runners/launcher/pod_contract.go#L23) | CloudUnitPolicy makes Docker and bootstrap delivery mandatory even for planning and evaluation. |
+| [`CloudUnitPolicies`](../../../internal/runners/launcher/pod_contract.go#L34) | CloudUnitPolicies covers every Cloud Job; callers cannot opt out of root or DinD. |
+| [`CloudJobConfig`](../../../internal/runners/launcher/pod_contract.go#L44) | CloudJobConfig accepts operator-owned images and ceilings, never pipeline-supplied pod fragments. |
+| [`CloudJobBinding`](../../../internal/runners/launcher/pod_contract.go#L52) | CloudJobBinding is derived from an awarded row, not the launcher's requested team or fence. |
+| [`CloudJobAward`](../../../internal/runners/launcher/pod_contract.go#L64) | CloudJobAward carries only a single-use bootstrap, never the launcher's root credential. |
+| [`CloudNodeReservation`](../../../internal/runners/launcher/pod_contract.go#L73) | CloudNodeReservation is an exclusive placement fact held until the Job and DinD have stopped. |
+| [`CloudNetworkEvidence`](../../../internal/runners/launcher/pod_contract.go#L79) | CloudNetworkEvidence comes from enforcement probes, not the presence of NetworkPolicy YAML. |
+| [`CloudBoundary`](../../../internal/runners/launcher/pod_contract.go#L90) | CloudBoundary reserves one Job per team-dedicated node and verifies enforced network isolation. |
+| [`CloudJobResources`](../../../internal/runners/launcher/pod_contract.go#L97) | CloudJobResources couples Secret cleanup and node ownership with the Job it authorizes. |
+| [`CloudPodInvariant`](../../../internal/runners/launcher/pod_contract.go#L107) | CloudPodInvariant names an acceptance obligation for every builder output. |
+| [`CloudPodInvariants`](../../../internal/runners/launcher/pod_contract.go#L112) | CloudPodInvariants is the complete common pod contract, including external execution gates. |
+| [`BuildJob`](../../../internal/runners/launcher/pod_contract.go#L138) | BuildJob is the sole builder for plan, eval and work, including run-host-dispatched work. |
+
+## File inventory
+
+New contract and test files:
+
+- `internal/clisurface/contract.go`
+- `internal/clisurface/contract_test.go`
+- `internal/clisurface/registry.go`
+- `internal/limits/billing.go`
+- `internal/limits/claim.go`
+- `internal/limits/cron.go`
+- `internal/limits/deadline.go`
+- `internal/limits/identity.go`
+- `internal/limits/node.go`
+- `internal/limits/operator.go`
+- `internal/limits/run.go`
+- `internal/limits/storage.go`
+- `internal/limits/table.go`
+- `internal/limits/table_test.go`
+- `internal/limits/wire.go`
+- `internal/procenv/contracts.go`
+- `internal/procenv/contracts_test.go`
+- `internal/procenv/registry.go`
+- `internal/runners/launcher/pod_contract.go`
+- `internal/settings/contract.go`
+- `internal/settings/contract_test.go`
+- `internal/settings/resolvers.go`
+- `internal/settings/table.go`
+- `internal/userconfig/contract.go`
+- `internal/wingd/lifecycle_contract.go`
+- `pkg/projectconfig/contract.go`
+
+This document is the new contract report. Existing files changed only for colliding
+`Config`, `Load`, `Parse`, `Discover` and `BuildJob` identifiers and their callers:
+
+- `cmd/sparkwing/action_new_test.go`
+- `cmd/sparkwing/hooks.go`
+- `cmd/sparkwing/main.go`
+- `cmd/sparkwing/profile_flag.go`
+- `internal/crons/crons.go`
+- `internal/doccheck/yamlcheck.go`
+- `internal/orchestrator/hosted_run.go`
+- `internal/orchestrator/main.go`
+- `internal/orchestrator/pod_node_host.go`
+- `internal/orchestrator/profile_run.go`
+- `internal/orchestrator/trigger_host.go`
+- `internal/runners/launcher/job.go`
+- `internal/runners/launcher/job_test.go`
+- `internal/runners/launcher/launcher.go`
+- `pkg/controller/github_app_automation.go`
+- `pkg/controller/github_app_webhook.go`
+- `pkg/localws/pipelines.go`
+- `pkg/projectconfig/pin_test.go`
+- `pkg/projectconfig/projectconfig.go`
+- `pkg/projectconfig/projectconfig_test.go`
+- `pkg/projectconfig/source.go`

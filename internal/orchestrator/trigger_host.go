@@ -162,7 +162,7 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 // defaults, as a local run's do. Layering them again under a run row's arguments, which already hold them, changes
 // nothing, so every planner of a run calls this and their plans agree.
 func checkoutRunArgs(dir, pipeline string, args map[string]string) (map[string]string, pipelines.Guards, error) {
-	_, cfg, err := projectconfig.Discover(dir)
+	_, cfg, err := projectconfig.DiscoverOld(dir)
 	if err != nil {
 		return nil, pipelines.Guards{}, &projectConfigError{err: err}
 	}

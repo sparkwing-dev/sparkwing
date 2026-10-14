@@ -271,7 +271,7 @@ func dispatchRun(args []string) error {
 }
 
 func pinnedPipeline(sparkwingDir, pipelineName string) (*pipelines.Pipeline, error) {
-	cfg, err := projectconfig.Load(filepath.Join(sparkwingDir, projectconfig.Filename))
+	cfg, err := projectconfig.LoadOld(filepath.Join(sparkwingDir, projectconfig.Filename))
 	if err != nil || cfg == nil {
 		return nil, err
 	}
@@ -303,7 +303,7 @@ func pinnedPipelineAt(sparkwingDir, ref, pipelineName string) (*pipelines.Pipeli
 	if err != nil {
 		return nil, fmt.Errorf("--sw-ref %s: read %s: %w", ref, path, err)
 	}
-	cfg, err := projectconfig.Parse(raw)
+	cfg, err := projectconfig.ParseOld(raw)
 	if err != nil {
 		return nil, fmt.Errorf("--sw-ref %s: %s: %w", ref, path, err)
 	}

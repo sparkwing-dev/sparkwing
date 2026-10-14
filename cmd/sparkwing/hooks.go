@@ -158,7 +158,7 @@ type installOptions struct {
 }
 
 func declaredHooks(sparkwingDir string) (map[string][]string, error) {
-	cfg, err := projectconfig.Load(filepath.Join(sparkwingDir, projectconfig.Filename))
+	cfg, err := projectconfig.LoadOld(filepath.Join(sparkwingDir, projectconfig.Filename))
 	if err != nil {
 		return nil, err
 	}

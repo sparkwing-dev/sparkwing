@@ -41,7 +41,7 @@ func aggregatedPipelinesHandler() http.HandlerFunc {
 		}
 		for _, e := range cfg.Repos {
 			ymlPath := filepath.Join(e.Path, ".sparkwing", projectconfig.Filename)
-			loaded, lerr := projectconfig.Load(ymlPath)
+			loaded, lerr := projectconfig.LoadOld(ymlPath)
 			if lerr != nil || loaded == nil {
 				continue
 			}
