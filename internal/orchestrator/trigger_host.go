@@ -86,7 +86,7 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	hostLog := &triggerHostLog{out: os.Stderr}
 	shuttingDown := shuttingDownOn(ctx)
 	res, err := nodehost.Execute(ctx, nodehost.Config{
-		Session:  nodehost.SessionConfig{Entry: h.Entry, Dir: h.Dir, Sink: planSink},
+		Session:  nodehost.SessionConfig{Entry: h.Entry, Dir: h.Dir, Sink: planSink, Env: podSessionEnv(masker)},
 		Pipeline: trig.Pipeline, Args: triggerHostArgs(ctx, c, trig, logger),
 		Run: triggerRunContext(ctx, c, trig), Requires: requires,
 		ParentRunID: trig.ParentRunID, RetryOf: trig.RetryOf, RetrySource: trig.RetrySource,

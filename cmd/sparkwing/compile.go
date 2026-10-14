@@ -99,14 +99,11 @@ func (r *pipelineRun) materialize(env []string) error {
 }
 
 func (r *pipelineRun) materializeTypeScript(env []string) error {
-	entry, err := pipelineentry.Prepare(r.ctx, r.sparkwingDir, env)
+	entry, err := pipelineentry.Prepare(r.ctx, r.sparkwingDir, env, os.Stderr)
 	if err != nil {
 		return err
 	}
 	r.entry, r.source, r.typescript = entry, "typescript", true
-	if key, err := bincache.PipelineCacheKey(r.sparkwingDir); err == nil {
-		ensureDescribeCache(r.ctx, r.sparkwingDir, key, r.entry)
-	}
 	return nil
 }
 

@@ -29,7 +29,7 @@ func DescribeRepo(absPath string) ([]sparkwing.DescribePipeline, error) {
 		return nil, err
 	}
 	if ts {
-		entry, err := pipelineentry.Prepare(context.Background(), sparkwingDir, os.Environ())
+		entry, err := pipelineentry.Prepare(context.Background(), sparkwingDir, os.Environ(), os.Stderr)
 		if err != nil {
 			return nil, err
 		}

@@ -558,7 +558,7 @@ func triggerBuildOrFetchBinary(ctx context.Context, sparkwingDir string, opts Tr
 		return triggerBinary{}, err
 	}
 	if ts {
-		entry, err := pipelineentry.Prepare(ctx, sparkwingDir, orchestrator.PodBaseEnv())
+		entry, err := orchestrator.PrepareTypeScriptOnRunner(ctx, sparkwingDir)
 		return triggerBinary{entry: entry, cache: binaryCacheNone, build: time.Since(start)}, err
 	}
 	key, err := bincache.PipelineCacheKey(sparkwingDir)

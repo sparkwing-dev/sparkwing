@@ -163,7 +163,7 @@ func buildCheckoutPipeline(ctx context.Context) (entry pipelineentry.Command, di
 		return nil, "", nil, err
 	}
 	if ts {
-		entry, err := pipelineentry.Prepare(ctx, sparkwingDir, orchestrator.PodBaseEnv())
+		entry, err := orchestrator.PrepareTypeScriptOnRunner(ctx, sparkwingDir)
 		return entry, filepath.Dir(sparkwingDir), func() {}, err
 	}
 	key, keyParts, err := bincache.ExplainCacheKey(sparkwingDir)

@@ -19,7 +19,7 @@ func (r *pipelineRun) describedPipeline(pipelineName string) (sparkwing.Describe
 	bindDir := r.opts.ExecutionDir
 	if bindDir == "" {
 		bindDir = r.sparkwingDir
-		if key, err := bincache.PipelineCacheKey(r.sparkwingDir); err == nil {
+		if key, err := bincache.PipelineCacheKey(r.sparkwingDir); err == nil && !r.typescript {
 			schemas = readDescribeFile(describeCachePath(key))
 		}
 	}

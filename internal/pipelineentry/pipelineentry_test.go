@@ -2,6 +2,7 @@ package pipelineentry
 
 import (
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -138,7 +139,7 @@ func TestInstallHooksGetOnlyTheInstallEnvironment(t *testing.T) {
 		`{"name":"hooked","version":"1.0.0","scripts":{"postinstall":"env > hook-env"}}`)
 	writeFile(t, filepath.Join(dir, "package-lock.json"),
 		`{"name":"hooked","version":"1.0.0","lockfileVersion":3,"requires":true,"packages":{"":{"name":"hooked","version":"1.0.0","hasInstallScript":true}}}`)
-	if err := InstallTypeScript(t.Context(), dir, engineenv.Minimal("npm_config_registry")); err != nil {
+	if err := InstallTypeScript(t.Context(), dir, engineenv.Minimal("npm_config_registry"), io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(out)
@@ -165,5 +166,13 @@ func TestIsPipelineDirFindsGoAndTypeScript(t *testing.T) {
 		if got, err := IsPipelineDir(dir); err != nil || got != want {
 			t.Errorf("IsPipelineDir(%s) = %v, %v; want %v", dir, got, err, want)
 		}
+	}
+}
+
+func TestManifestsMayStartWithAByteOrderMark(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "package.json"), "\xef\xbb\xbf"+`{"dependencies":{"@sparkwing/sdk":"0.1.0"}}`)
+	if ts, err := IsTypeScript(dir); err != nil || !ts {
+		t.Fatalf("IsTypeScript = %v, %v", ts, err)
 	}
 }

@@ -1,6 +1,11 @@
 package orchestrator
 
 import (
+	"bytes"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -35,5 +40,36 @@ func TestPodEnvCarriesProxyAndCASettingsButNoRunnerCredential(t *testing.T) {
 	}
 	if got := strings.Join(PodBaseEnv(), "\n"); got != env {
 		t.Fatalf("installs and node processes got different environments:\n%s\n--\n%s", got, env)
+	}
+}
+
+func TestRunnerInstallOutputMasksTheProxyCredentials(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the hook prints with sh")
+	}
+	if _, err := exec.LookPath("npm"); err != nil {
+		t.Skip("npm is not on PATH")
+	}
+	t.Setenv("HTTPS_PROXY", "http://user:proxy-pass@proxy.corp:3128")
+	dir := t.TempDir()
+	for name, body := range map[string]string{
+		"package.json": `{"name":"hooked","version":"1.0.0","main":"pipeline.ts",` +
+			`"scripts":{"postinstall":"echo proxy=$HTTPS_PROXY"}}`,
+		"package-lock.json": `{"name":"hooked","version":"1.0.0","lockfileVersion":3,"requires":true,` +
+			`"packages":{"":{"name":"hooked","version":"1.0.0","hasInstallScript":true}}}`,
+		"pipeline.ts": "",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var out bytes.Buffer
+	// safety: nothing installs the SDK, so the entry stays unresolved; only the install's output matters here.
+	_, _ = prepareTypeScriptOnRunner(t.Context(), dir, &out)
+	if !strings.Contains(out.String(), "proxy=") {
+		t.Fatalf("the hook did not run:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "proxy-pass") {
+		t.Fatalf("install output carried the proxy password:\n%s", out.String())
 	}
 }

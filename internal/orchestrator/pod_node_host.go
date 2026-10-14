@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -134,6 +135,54 @@ func podSessionEnv(masker *secrets.Masker) []string {
 func PodBaseEnv() []string {
 	return engineenv.Minimal(podEnvNames()...)
 }
+
+// PrepareTypeScriptOnRunner installs and returns sparkwingDir's TypeScript
+// entry on a runner: npm runs with [PodBaseEnv], and its output reaches
+// stderr only after the proxy credentials that environment carries are masked.
+func PrepareTypeScriptOnRunner(ctx context.Context, sparkwingDir string) (pipelineentry.Command, error) {
+	return prepareTypeScriptOnRunner(ctx, sparkwingDir, os.Stderr)
+}
+
+func prepareTypeScriptOnRunner(ctx context.Context, sparkwingDir string, dst io.Writer) (pipelineentry.Command, error) {
+	out := &maskedLines{masker: secrets.NewMasker(), dst: dst}
+	env := podSessionEnv(out.masker)
+	defer out.flush()
+	return pipelineentry.Prepare(ctx, sparkwingDir, env, out)
+}
+
+// safety: a line is masked whole, so a credential split across writes is
+// still caught; a line past maxMaskedLine is masked and passed on in pieces.
+type maskedLines struct {
+	masker *secrets.Masker
+	dst    io.Writer
+	buf    []byte
+}
+
+func (w *maskedLines) Write(p []byte) (int, error) {
+	w.buf = append(w.buf, p...)
+	for {
+		i := bytes.IndexByte(w.buf, '\n')
+		if i < 0 && len(w.buf) < maxMaskedLine {
+			return len(p), nil
+		}
+		if i < 0 {
+			i = len(w.buf) - 1
+		}
+		if _, err := io.WriteString(w.dst, w.masker.Mask(string(w.buf[:i+1]))); err != nil {
+			return len(p), err
+		}
+		w.buf = w.buf[i+1:]
+	}
+}
+
+func (w *maskedLines) flush() {
+	if len(w.buf) > 0 {
+		_, _ = io.WriteString(w.dst, w.masker.Mask(string(w.buf))+"\n") //nolint:errcheck // stderr has no one to report to
+		w.buf = nil
+	}
+}
+
+const maxMaskedLine = 1 << 20
 
 func podEnvNames() []string {
 	return slices.Concat(k8srunner.DependencyProxyEnvNames, k8srunner.NetworkEnvNames)

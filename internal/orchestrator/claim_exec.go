@@ -138,7 +138,7 @@ func planLaunchedRun(ctx context.Context, c *client.Client, src string, entry pi
 	if err != nil {
 		return fail(err)
 	}
-	plan, err := nodehost.PlanDocument(ctx, nodehost.SessionConfig{Entry: entry, Dir: src, Sink: sink},
+	plan, err := nodehost.PlanDocument(ctx, nodehost.SessionConfig{Entry: entry, Dir: src, Sink: sink, Env: podSessionEnv(masker)},
 		nodehost.PlanRequest{Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run), Requires: requires, Masker: masker})
 	sink.end()
 	if err != nil {

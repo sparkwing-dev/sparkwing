@@ -363,7 +363,7 @@ func resolveRemoteBinary(ctx context.Context, sparkwingDir, controllerURL, contr
 		return remoteBinary{}, err
 	}
 	if ts {
-		cmd, err := pipelineentry.Prepare(ctx, sparkwingDir, PodBaseEnv())
+		cmd, err := PrepareTypeScriptOnRunner(ctx, sparkwingDir)
 		return remoteBinary{entry: cmd}, err
 	}
 	key, err := bincache.PipelineCacheKey(sparkwingDir)

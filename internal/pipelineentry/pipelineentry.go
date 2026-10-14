@@ -5,10 +5,12 @@
 package pipelineentry
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/url"
 	"os"
@@ -60,7 +62,7 @@ func readPackage(path string, into any) error {
 	if err != nil {
 		return err
 	}
-	if err := json.Unmarshal(raw, into); err != nil {
+	if err := json.Unmarshal(bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")), into); err != nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}
 	return nil
@@ -143,8 +145,8 @@ func TypeScript(sparkwingDir string) (Command, error) {
 }
 
 // InstallTypeScript runs npm ci in sparkwingDir with env, less the engine's
-// own variables, writing npm's output to stderr.
-func InstallTypeScript(ctx context.Context, sparkwingDir string, env []string) error {
+// own variables, writing npm's output to out.
+func InstallTypeScript(ctx context.Context, sparkwingDir string, env []string, out io.Writer) error {
 	npm, err := exec.LookPath("npm")
 	if err != nil {
 		return fmt.Errorf("install the TypeScript pipeline's dependencies: %w", err)
@@ -152,7 +154,7 @@ func InstallTypeScript(ctx context.Context, sparkwingDir string, env []string) e
 	// #nosec G204 -- npm from PATH with fixed arguments.
 	cmd := exec.CommandContext(ctx, npm, "ci", "--no-audit", "--no-fund")
 	cmd.Dir, cmd.Env = sparkwingDir, engineenv.Strip(env)
-	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
+	cmd.Stdout, cmd.Stderr = out, out
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("npm ci in %s: %w", sparkwingDir, err)
 	}
@@ -160,13 +162,14 @@ func InstallTypeScript(ctx context.Context, sparkwingDir string, env []string) e
 }
 
 // Prepare returns the command for sparkwingDir's TypeScript pipeline,
-// installing its dependencies first when node_modules lacks the SDK.
-func Prepare(ctx context.Context, sparkwingDir string, env []string) (Command, error) {
+// installing its dependencies first when node_modules lacks the SDK, with
+// npm's output going to out.
+func Prepare(ctx context.Context, sparkwingDir string, env []string, out io.Writer) (Command, error) {
 	cmd, err := TypeScript(sparkwingDir)
 	if !errors.Is(err, ErrNotInstalled) {
 		return cmd, err
 	}
-	if err := InstallTypeScript(ctx, sparkwingDir, env); err != nil {
+	if err := InstallTypeScript(ctx, sparkwingDir, env, out); err != nil {
 		return nil, err
 	}
 	return TypeScript(sparkwingDir)

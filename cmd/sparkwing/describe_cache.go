@@ -35,6 +35,20 @@ func byRepoDescribePath(sparkwingDir string) string {
 }
 
 func readDescribeCache(ctx context.Context, sparkwingDir string) ([]sparkwing.DescribePipeline, error) {
+	ts, err := pipelineentry.IsTypeScript(sparkwingDir)
+	if err != nil {
+		return nil, err
+	}
+	// safety: a TypeScript entry can import any file in the repository, so no
+	// key over .sparkwing alone stays fresh; it is described every time.
+	if ts {
+		entry, err := pipelineentry.TypeScript(sparkwingDir)
+		if err != nil {
+			return nil, err
+		}
+		doc, err := describeEntry(ctx, sparkwingDir, entry)
+		return doc.Pipelines, err
+	}
 	key, err := bincache.PipelineCacheKey(sparkwingDir)
 	if err != nil {
 		return readDescribeFile(byRepoDescribePath(sparkwingDir)), nil
@@ -51,17 +65,9 @@ func readDescribeCache(ctx context.Context, sparkwingDir string) ([]sparkwing.De
 	return readDescribeFile(byRepoDescribePath(sparkwingDir)), nil
 }
 
-// perf: a listing reads only an entry already built or installed, never
-// compiling or running npm; release frees it once it has answered.
+// perf: a listing reads only a binary already built, never compiling;
+// release frees it once it has answered.
 func builtEntry(ctx context.Context, sparkwingDir, key string) (pipelineentry.Command, func(), bool) {
-	ts, err := pipelineentry.IsTypeScript(sparkwingDir)
-	if err != nil {
-		return nil, nil, false
-	}
-	if ts {
-		entry, err := pipelineentry.TypeScript(sparkwingDir)
-		return entry, func() {}, err == nil
-	}
 	cached, err := bincache.PipelineEntry(key)
 	if err != nil {
 		return nil, nil, false
