@@ -16,10 +16,10 @@ import (
 // once, reaches only that run's routes, and expires; its secrets reach the run
 // only through the claims it takes, exactly as on any other runner.
 
-// safety: the credential outlives the run only as far as this bound, and a run
-// that outlives it loses its claims, so a hotfix run finishes inside an hour,
-// matching a GitHub Actions runner credential.
-const hereRunnerCredentialTTL = time.Hour
+// safety: the credential must claim its run within store.HereRunnerClaimWindow;
+// once claimed, the run's trigger and node claims live as long as the
+// credential, which matches the six hours a runner gives a hosted run.
+const hereRunnerCredentialTTL = 6 * time.Hour
 
 // safety: the reason lands on the run's event stream and the audit record, so it is one bounded line.
 const maxHereReason = 200

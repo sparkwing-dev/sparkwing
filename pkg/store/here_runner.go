@@ -12,6 +12,10 @@ import (
 // [Tenant.CreateHereTriggerWithRun] mints one.
 const HereRunnerPrincipalPrefix = "here:"
 
+// HereRunnerClaimWindow is how long after its trigger is written a here-runner
+// credential may claim it. Past it the pinned trigger is claimable by no one.
+const HereRunnerClaimWindow = 10 * time.Minute
+
 // HereRunner describes the one-shot runner a trigger is pinned to.
 type HereRunner struct {
 	// Reason is the caller's recorded justification, kept on the run's

@@ -1118,6 +1118,7 @@ type HereRunner struct {
 	Scopes    []string
 	TTL       time.Duration
 }
+const HereRunnerClaimWindow = 10 * time.Minute
 const HereRunnerPrincipalPrefix = "here:"
 func HereRunnerRunID(principal string) (runID string, isHere bool)
 type Identity struct {

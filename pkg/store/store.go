@@ -5506,17 +5506,18 @@ func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant
 	// safety: the claimant replaces whatever a previous holder left, unbound
 	// included; a pending row has no live claim, so keeping the old principal
 	// would let it prove ownership of a claim it does not hold.
-	// safety: a pinned trigger answers only its own credential, and only for
-	// its first claim, so a lapsed here-runner cannot take the run again.
+	// safety: a pinned trigger answers only its own credential, only for its
+	// first claim and only inside the claim window, so a lapsed here-runner or a
+	// credential left unused cannot take the run later.
 	args := []any{
 		triggerStatusClaimed, now.UnixNano(), expires.UnixNano(),
 		claimant.Principal, claimant.TokenPrefix,
-		id, triggerStatusPending, claimant.TokenPrefix,
+		id, triggerStatusPending, claimant.TokenPrefix, now.Add(-HereRunnerClaimWindow).UnixNano(),
 	}
 	res, err := tx.ExecContext(ctx,
 		`UPDATE triggers SET status = ?, claimed_at = ?, lease_expires_at = ?, claim_seq = claim_seq + 1,
 		        claim_principal = ?, claim_token_prefix = ?
-		  WHERE id = ? AND status = ? AND (runner_pin = '' OR (runner_pin = ? AND claim_seq = 0))
+		  WHERE id = ? AND status = ? AND (runner_pin = '' OR (runner_pin = ? AND claim_seq = 0 AND created_at >= ?))
 		    AND available_at <= ? AND cancel_requested_at IS NULL
 		    AND credit_reserved_at = 0
 		    AND NOT EXISTS (

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -42,10 +43,15 @@ func newHereFixture(t *testing.T) *hereFixture {
 	f.editor = mint("dev@example.com", store.TokenKindUser, store.ScopesForRole(store.RoleEditor))
 	f.reader = mint("viewer@example.com", store.TokenKindUser, store.ScopesForRole(store.RoleReader))
 	f.fleet = mint("fleet", store.TokenKindRunner, store.MachineTokenScopes())
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
-	t.Cleanup(srv.Close)
-	f.url = srv.URL
+	f.restart()
 	return f
+}
+
+// safety: a fresh controller has an empty credential cache, so a changed expiry is read from the store.
+func (f *hereFixture) restart() {
+	srv := httptest.NewServer(controller.New(f.st, nil).EnableAuthFromStore().Handler())
+	f.t.Cleanup(srv.Close)
+	f.url = srv.URL
 }
 
 func (f *hereFixture) do(method, path, token string, body, out any) int {
@@ -108,7 +114,7 @@ func (f *hereFixture) here() hereTriggerResp {
 }
 
 // safety: the minted credential carries the runner's scopes only, names the
-// run it is bound to, and expires within the hour.
+// run it is bound to, and expires with the hosted-run limit.
 func TestHereRunner_TriggerMintsARunBoundExpiringCredential(t *testing.T) {
 	f := newHereFixture(t)
 	out := f.here()
@@ -124,9 +130,9 @@ func TestHereRunner_TriggerMintsARunBoundExpiringCredential(t *testing.T) {
 			t.Fatalf("credential scopes = %v, want the machine scopes only", tok.Scopes)
 		}
 	}
-	if tok.ExpiresAt == nil || tok.ExpiresAt.Sub(tok.CreatedAt) > time.Hour || tok.ExpiresAt.Sub(tok.CreatedAt) < time.Hour-time.Second ||
+	if tok.ExpiresAt == nil || tok.ExpiresAt.Sub(tok.CreatedAt) > 6*time.Hour || tok.ExpiresAt.Sub(tok.CreatedAt) < 6*time.Hour-time.Second ||
 		tok.ExpiresAt.Unix() != out.RunnerTokenExpiresAt {
-		t.Fatalf("credential expires %v (response %d), want within the hour", tok.ExpiresAt, out.RunnerTokenExpiresAt)
+		t.Fatalf("credential expires %v (response %d), want six hours after the mint", tok.ExpiresAt, out.RunnerTokenExpiresAt)
 	}
 	events, err := f.st.ListEventsAfter(t.Context(), out.RunID, 0, 0)
 	if err != nil {
@@ -264,5 +270,36 @@ func TestHereRunner_ProfileReadsNeedItsOwnPipelineAndClaim(t *testing.T) {
 	}
 	if code := f.do("GET", "/api/v1/pipelines/hotfix/profile", out.RunnerToken, nil, nil); code == http.StatusForbidden {
 		t.Fatalf("own pipeline's profile under the claim = %d, want it served", code)
+	}
+}
+
+// safety: once claimed, the run lives under the hosted-run limit, so a run
+// minted and claimed 90 minutes ago still renews its claim and reads its run.
+func TestHereRunner_AClaimedRunOutlivesTheFirstHour(t *testing.T) {
+	f := newHereFixture(t)
+	out := f.here()
+	var claimed store.Trigger
+	if code := f.do("POST", "/api/v1/triggers/"+out.RunID+"/claim", out.RunnerToken, map[string]any{}, &claimed); code != http.StatusOK {
+		t.Fatalf("here-runner claim = %d, want 200", code)
+	}
+	// safety: the clock moves 90 minutes by shifting the mint's own times back, so the stored lifetime decides.
+	minted := time.Now().Add(-90 * time.Minute)
+	shift := int64((90 * time.Minute).Seconds())
+	if _, err := f.st.DB().ExecContext(context.Background(), `UPDATE tokens SET created_at = created_at - ?, expires_at = expires_at - ? WHERE prefix = ?`,
+		shift, shift, out.RunnerToken[:store.PrefixLen]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.st.DB().ExecContext(context.Background(), `UPDATE triggers SET created_at = ? WHERE id = ?`,
+		minted.UnixNano(), out.RunID); err != nil {
+		t.Fatal(err)
+	}
+	f.restart()
+	beat := client.NewWithToken(f.url, nil, out.RunnerToken)
+	fenced := store.WithTriggerClaimFence(t.Context(), store.TriggerClaimFence{ClaimGeneration: claimed.ClaimSeq})
+	if _, err := beat.HeartbeatTrigger(fenced, out.RunID); err != nil {
+		t.Fatalf("heartbeat 90 minutes after the mint: %v", err)
+	}
+	if code := f.do("GET", "/api/v1/runs/"+out.RunID, out.RunnerToken, nil, nil); code != http.StatusOK {
+		t.Fatalf("run read 90 minutes after the mint = %d, want 200", code)
 	}
 }

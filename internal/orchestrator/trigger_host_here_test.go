@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -73,7 +74,7 @@ func TestTriggerHost_AHereRunnerHostsItsPinnedRunUnderItsOwnCredential(t *testin
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 	if err := HostTriggerRun(ctx, TriggerHost{
-		ControllerURL: srv.URL, Token: resp.RunnerToken, Trigger: trig, Binary: bin, Dir: t.TempDir(), Logger: quiet,
+		ControllerURL: srv.URL, Token: resp.RunnerToken, Trigger: trig, Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Logger: quiet,
 	}); err != nil {
 		t.Fatalf("host: %v", err)
 	}

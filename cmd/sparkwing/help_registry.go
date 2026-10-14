@@ -1183,8 +1183,8 @@ to P: trigger refuses any other --profile, and 'sparkwing run' refuses it
 locally.
 
 --runner here is the hotfix break-glass: the controller pins the run to a
-one-shot runner credential that can claim only that run, once, and
-expires within an hour. This process builds the checkout's pipeline,
+one-shot runner credential that can claim only that run, once, within
+10 minutes, and expires after six hours, the hosted-run limit. This process builds the checkout's pipeline,
 hosts the run on this machine, follows it, and exits on its outcome.
 Secrets reach the run as they reach any runner: declared in the plan,
 released per claim, audited and masked. --reason is required and is
