@@ -84,32 +84,55 @@ func maskLogger(l *slog.Logger, m *secrets.Masker) *slog.Logger {
 
 type maskHandler struct {
 	slog.Handler
-	m *secrets.Masker
+	m        *secrets.Masker
+	bindings []maskBinding
+}
+
+type maskBinding struct {
+	group string
+	attrs []slog.Attr
 }
 
 func (h maskHandler) Handle(ctx context.Context, r slog.Record) error {
+	inner := h.Handler
+	// safety: secrets may be registered after With, so binding cannot cache masked values.
+	for _, binding := range h.bindings {
+		if binding.group != "" {
+			inner = inner.WithGroup(binding.group)
+			continue
+		}
+		masked := make([]slog.Attr, len(binding.attrs))
+		for i, a := range binding.attrs {
+			masked[i] = h.attr(a)
+		}
+		inner = inner.WithAttrs(masked)
+	}
 	out := slog.NewRecord(r.Time, r.Level, h.m.Mask(r.Message), r.PC)
 	r.Attrs(func(a slog.Attr) bool {
 		out.AddAttrs(h.attr(a))
 		return true
 	})
-	return h.Handler.Handle(ctx, out)
+	return inner.Handle(ctx, out)
 }
 
 func (h maskHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	masked := make([]slog.Attr, len(attrs))
-	for i, a := range attrs {
-		masked[i] = h.attr(a)
-	}
-	return maskHandler{Handler: h.Handler.WithAttrs(masked), m: h.m}
+	h.bindings = append(h.bindings[:len(h.bindings):len(h.bindings)], maskBinding{attrs: attrs})
+	return h
 }
 
 func (h maskHandler) WithGroup(name string) slog.Handler {
-	return maskHandler{Handler: h.Handler.WithGroup(name), m: h.m}
+	if name != "" {
+		h.bindings = append(h.bindings[:len(h.bindings):len(h.bindings)], maskBinding{group: name})
+	}
+	return h
 }
 
 func (h maskHandler) attr(a slog.Attr) slog.Attr {
 	v := a.Value.Resolve()
+	a.Value = v
+	if a.Equal(slog.Attr{}) {
+		return a
+	}
 	if v.Kind() == slog.KindGroup {
 		group := v.Group()
 		masked := make([]any, len(group))
@@ -118,8 +141,20 @@ func (h maskHandler) attr(a slog.Attr) slog.Attr {
 		}
 		return slog.Group(a.Key, masked...)
 	}
-	if text := v.String(); h.m.Mask(text) != text {
-		return slog.String(a.Key, h.m.Mask(text))
+	text := v.String()
+	if b, ok := v.Any().([]byte); ok {
+		text = string(b)
+	}
+	masked := h.m.Mask(text)
+	if masked != text {
+		return slog.String(a.Key, masked)
+	}
+	// safety: freeze format-dependent values so downstream encoders cannot bypass masking.
+	switch v.Kind() {
+	case slog.KindAny, slog.KindDuration, slog.KindFloat64, slog.KindTime:
+		if v.Any() != nil {
+			return slog.String(a.Key, masked)
+		}
 	}
 	return a
 }
