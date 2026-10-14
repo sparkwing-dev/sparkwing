@@ -1,7 +1,6 @@
 package nodehost
 
 import (
-	"cmp"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -679,22 +678,5 @@ func TestAdmissionGroupWithoutAStoreFails(t *testing.T) {
 	res := runAdmitted(t, ctx, st, nodeproto.PlanDoc{Nodes: grouped("global", "", 1, 0, "a")}, &Admission{Daemon: newFakeDaemon()}, nil)
 	if got := res.Nodes["a"]; got.Outcome != sparkwing.Failed || !strings.Contains(errText(got.Err), "no coordination store") {
 		t.Fatalf("result %+v", got)
-	}
-}
-
-func TestAdmissionHandsTheNodeItsOwnLeaseForChildren(t *testing.T) {
-	st := openStore(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
-	var seen string
-	exec := func(_ context.Context, n *NodeRun) Result {
-		seen = cmp.Or(n.nodeLease, n.Run.leaseToken)
-		return Result{Outcome: sparkwing.Success}
-	}
-	doc := nodeproto.PlanDoc{Pipeline: "p", Nodes: []nodeproto.PlanNode{{ID: "build"}}}
-	runAdmitted(t, ctx, st, doc, &Admission{Daemon: newFakeDaemon()}, exec)
-	encoded := base64.RawURLEncoding.EncodeToString([]byte("build"))
-	if want := "lease-" + testRunID + "/node-host/" + encoded; seen != want {
-		t.Errorf("a child the node starts attaches to %q, want the node's own lease %q: the run lease holds no cores", seen, want)
 	}
 }

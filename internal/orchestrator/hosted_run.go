@@ -1,6 +1,8 @@
 package orchestrator
 
 import (
+	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -95,7 +97,11 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 	}
 	//nolint:contextcheck // Close bounds its own shutdown; the run's context may already be cancelled here.
 	defer func() { warnHostedClose("node routes", routes.Close()) }()
-	state := &hostedRunState{StateBackend: backends.State, logs: backends.Logs, delegate: delegate, diskRoot: backends.DiskRoot, starts: map[string]time.Time{}}
+	state := &hostedRunState{
+		StateBackend: backends.State, logs: backends.Logs, delegate: delegate, diskRoot: backends.DiskRoot, starts: map[string]time.Time{},
+		lineage:       store.Run{ParentRunID: opts.ParentRunID, RetryOf: opts.RetryOf, RetrySource: opts.RetrySource, TriggerSource: opts.Trigger.Source},
+		retryPlanHash: opts.RetryPlanHash,
+	}
 	admission, err := hostedAdmission(ctx, &opts, backends, state.planDoc)
 	if err != nil {
 		return nil, err
@@ -138,8 +144,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 		return hostedSecretPreflight(ctx, resolver, doc, opts)
 	}
 	children := hostedChildren{
-		state: backends.State, concurrency: backends.Concurrency, admission: opts.Admission, masker: masker,
-		dryRun: opts.DryRun, leases: &sync.Map{},
+		state: backends.State, concurrency: backends.Concurrency, admission: opts.Admission, masker: masker, dryRun: opts.DryRun,
 	}
 	attempts := &nodehost.Attempts{
 		Routes: routes, Masker: masker, Resolver: resolver,
@@ -176,8 +181,11 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 			},
 		},
 	}
+	if cfg.Rehydrate, err = hostedRehydration(ctx, backends.State, opts, runID); err != nil {
+		return nil, err
+	}
 	if backends.LocalCoordination {
-		stopTriggers, err := hostedTriggerLoop(ctx, backends.State, runID, entry.Dir, opts.standalone, children.childEnv)
+		stopTriggers, err := hostedTriggerLoop(ctx, backends.State, runID, entry.Dir, opts.standalone)
 		if err != nil {
 			return nil, err
 		}
@@ -239,10 +247,7 @@ func applyHostedProjectConfig(opts *Options, dir string) error {
 func hostedRunContext(opts Options, runID string) nodeproto.RunContext {
 	rc := nodeproto.RunContext{
 		RunID: runID, NoCache: opts.NoCache, DryRun: opts.DryRun,
-		Trigger: &nodeproto.Trigger{Source: opts.Trigger.Source, User: opts.Trigger.User},
-	}
-	if rc.Trigger.Source == "" {
-		rc.Trigger.Source = "manual"
+		Trigger: &nodeproto.Trigger{Source: protocolTriggerSource(opts.Trigger.Source), User: opts.Trigger.User},
 	}
 	if g := opts.Git; g != nil {
 		rc.Git = &nodeproto.Git{SHA: g.SHA, Branch: g.Branch, DefaultBranch: g.DefaultBranch, Repo: g.Repo, RepoURL: g.RepoURL}
@@ -282,6 +287,11 @@ type hostedRunState struct {
 	preflight func(context.Context, nodeproto.PlanDoc) error
 	// safety: the handle is published only once its run row exists, so it never names a run the store lacks.
 	publishHandle func() error
+	// safety: the run row records the surface that started the run, such as a child's await-pipeline, which
+	// the node protocol's run context names only by the protocol source it means.
+	lineage store.Run
+	// safety: a retry copies its source run's results only when it planned the same plan.
+	retryPlanHash string
 
 	mu     sync.Mutex
 	doc    *nodeproto.PlanDoc
@@ -289,6 +299,8 @@ type hostedRunState struct {
 }
 
 func (s *hostedRunState) CreateRun(ctx context.Context, r store.Run) error {
+	r.ParentRunID, r.RetryOf, r.RetrySource = s.lineage.ParentRunID, s.lineage.RetryOf, s.lineage.RetrySource
+	r.TriggerSource = cmp.Or(s.lineage.TriggerSource, r.TriggerSource)
 	if err := s.StateBackend.CreateRun(ctx, r); err != nil {
 		return err
 	}
@@ -307,6 +319,9 @@ func (s *hostedRunState) CreateRun(ctx context.Context, r store.Run) error {
 }
 
 func (s *hostedRunState) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {
+	if err := retryPlanMatches(snapshot, runID, s.lineage.RetryOf, s.retryPlanHash); err != nil {
+		return err
+	}
 	if err := s.StateBackend.UpdatePlanSnapshot(ctx, runID, snapshot); err != nil {
 		return err
 	}
@@ -534,7 +549,12 @@ func RunHostedCommand(ctx context.Context, opts Options, entry HostedEntry, logF
 	delegate := runRenderer(logFormat, opts.Verbose)
 	opts.Delegate = delegate
 	opts.AdmissionClass = admissionClassFromEnv()
-	opts.Admission = pipelineAdmission(childAttachTokenFromProcessEnv(), wingwire.OriginLocal)
+	opts.Admission = pipelineAdmission("", wingwire.OriginLocal)
+	// safety: a sparkwing run started from a node's step attaches to what that node holds, which the node's
+	// environment names, so it never queues behind the node waiting on it.
+	if run, node := os.Getenv("SPARKWING_RUN_ID"), os.Getenv("SPARKWING_NODE_ID"); run != "" && node != "" {
+		opts.Admission.ParentRunID, opts.Admission.ParentNodeID = run, node
+	}
 	res, err := RunHosted(ctx, paths, opts, entry)
 	if renderer, ok := delegate.(*compactRunRenderer); ok {
 		renderer.finishResult(res, err)
@@ -559,27 +579,11 @@ type hostedChildren struct {
 	admission   *LocalAdmission
 	masker      *secrets.Masker
 	dryRun      bool
-	// safety: a child's lease stays in this process, which drains the child's trigger, because a token in
-	// trigger_env would be readable by every triggers.read principal, and the daemon API drops it. Keyed by
-	// the parent node, so it is stored before the enqueue the trigger loop can claim at once.
-	leases *sync.Map
 }
 
-func childLeaseKey(runID, nodeID string) string { return runID + "\x00" + nodeID }
-
-func (h hostedChildren) childEnv(t *store.Trigger) []string {
-	if token, ok := h.leases.Load(childLeaseKey(t.ParentRunID, t.ParentNodeID)); ok {
-		return []string{wingwire.ChildLeaseTokenEnv + "=" + token.(string)}
-	}
-	return nil
-}
-
-// safety: the child carries the parent run's lease, so the admission daemon attaches it to the parent's
-// rather than queueing it behind the run that waits on it.
+// safety: the trigger records the parent run and node, which whichever process hosts the child attaches to
+// through the admission daemon, so the child never queues behind the node waiting on it.
 func (h hostedChildren) StartChild(ctx context.Context, parent nodehost.ChildParent, req nodehost.ChildRequest) (string, error) {
-	if parent.LeaseToken != "" {
-		h.leases.Store(childLeaseKey(parent.RunID, parent.NodeID), parent.LeaseToken)
-	}
 	var env map[string]string
 	// safety: a child of a dry run is a dry run, recorded on its trigger so it holds however it is dispatched.
 	if h.dryRun {
@@ -610,7 +614,7 @@ func (h hostedChildren) GetRun(ctx context.Context, runID string) (*store.Run, e
 
 // safety: a node's child runs queue on this machine's trigger queue, and this run drains its own children
 // there as the dispatcher did; stop waits for the loop's last store write, which races the store's close.
-func hostedTriggerLoop(ctx context.Context, state StateBackend, runID, repoDir string, standalone *standaloneRun, childEnv func(*store.Trigger) []string) (stop func(), err error) {
+func hostedTriggerLoop(ctx context.Context, state StateBackend, runID, repoDir string, standalone *standaloneRun) (stop func(), err error) {
 	budget, err := storeWedgeBudget()
 	if err != nil {
 		return nil, err
@@ -619,7 +623,6 @@ func hostedTriggerLoop(ctx context.Context, state StateBackend, runID, repoDir s
 	if standalone != nil {
 		child = childStoreEnv{path: standalone.stateDB, reason: standalone.reason}
 	}
-	child.extra = childEnv
 	loopCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
@@ -647,4 +650,38 @@ func (l hostedNodeLog) EmitText(rec sparkwing.LogRecord) {
 		rec.Level = nodehost.LevelWarn
 	}
 	l.delegate.Emit(rec)
+}
+
+// safety: a retry copies the nodes its source run already finished instead of running them, as the dispatcher
+// did, and an automatic retry with causes copies every node but those and what they reach.
+func hostedRehydration(ctx context.Context, state StateBackend, opts Options, runID string) (*nodehost.Rehydration, error) {
+	if opts.RetryOf == "" || opts.Full {
+		return nil, nil
+	}
+	r := &nodehost.Rehydration{SourceRunID: opts.RetryOf}
+	if opts.RetrySource != store.RetrySourceAuto {
+		return r, nil
+	}
+	row, err := state.GetRun(ctx, runID)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+	case err != nil:
+		return nil, fmt.Errorf("read retry run %s: %w", runID, err)
+	default:
+		r.Causes = row.RetryCauseNodeIDs
+	}
+	return r, nil
+}
+
+// safety: a retry copies its source run's results only when it planned the same plan; the plan names its own
+// run, so the retry's is compared under the source run's id, as the source's hash was taken.
+func retryPlanMatches(snapshot []byte, runID, retryOf, hash string) error {
+	if hash == "" {
+		return nil
+	}
+	source := bytes.Replace(snapshot, []byte(`"run_id":"`+runID+`"`), []byte(`"run_id":"`+retryOf+`"`), 1)
+	if got := hashBytes(source); got != hash {
+		return fmt.Errorf("retry provenance drift: source plan %s, checkout plan %s", hash, got)
+	}
+	return nil
 }

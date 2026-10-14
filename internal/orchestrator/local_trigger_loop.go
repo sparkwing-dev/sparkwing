@@ -16,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
@@ -29,23 +30,6 @@ var gitObjectRE = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
 type childStoreEnv struct {
 	path   string
 	reason string
-	// safety: extra adds variables for one trigger's child, such as the lease it attaches to.
-	extra func(*store.Trigger) []string
-}
-
-func (c childStoreEnv) forTrigger(t *store.Trigger) []string {
-	env := c.apply(nil)
-	if c.extra == nil {
-		return env
-	}
-	more := c.extra(t)
-	if len(more) == 0 {
-		return env
-	}
-	if env == nil {
-		env = os.Environ()
-	}
-	return append(env, more...)
 }
 
 // safety: an empty path is the pre-design default on purpose: the dashboard's
@@ -114,7 +98,7 @@ func runLocalTriggerLoop(ctx context.Context, state StateBackend, runID, parentR
 		wg.Add(1)
 		go func(t *store.Trigger) {
 			defer wg.Done()
-			if err := dispatchLocalTrigger(ctx, t, parentRepoDir, cache, logger, childStore.forTrigger(t)); err != nil {
+			if err := dispatchLocalTrigger(ctx, t, parentRepoDir, cache, logger, childStore.apply(nil)); err != nil {
 				recordLocalTriggerFailure(ctx, state, t, err, logger)
 			}
 		}(trig)
@@ -266,13 +250,48 @@ func dispatchLocalTrigger(ctx context.Context, trig *store.Trigger,
 		"pinned", pinned,
 	)
 
-	args := []string{"handle-trigger", "--local", trig.ID}
-	closeAdmission, err := prepareLocalDispatchAdmission(ctx, env)
+	if _, err := os.Stat(binPath); err != nil {
+		return missingProgramError(binPath, err)
+	}
+	host, err := triggerHostBinary()
+	if err != nil {
+		return err
+	}
+	closeAdmission, err := prepareLocalDispatchAdmission(ctx, env, logger)
 	if err != nil {
 		return fmt.Errorf("prepare local dispatch admission: %w", err)
 	}
 	defer closeAdmission()
-	return execLocalChild(ctx, binPath, repoDir, args, env)
+	return execLocalChild(ctx, host, repoDir, []string{TriggerHostVerb, "--program", binPath, trig.ID}, env)
+}
+
+// TriggerHostVerb is the hidden sparkwing verb that hosts one claimed local
+// trigger's run: `sparkwing __host-trigger --program <pipeline> <trigger-id>`.
+const TriggerHostVerb = "__host-trigger"
+
+// safety: the process that claimed the trigger is the sparkwing CLI, so the run is hosted by that same build,
+// which keeps the engine values its host needs; every pipeline process the host starts gets the stripped
+// environment. A test binary is not a CLI, so a test names one in $SPARKWING_WINGD_BIN.
+func triggerHostBinary() (string, error) {
+	if paths.UnderTest() {
+		if bin := os.Getenv(wingdclient.HostBinEnv); bin != "" {
+			return bin, nil
+		}
+	}
+	bin, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("resolve the sparkwing binary that hosts child runs: %w", err)
+	}
+	return bin, nil
+}
+
+func missingProgramError(binPath string, err error) error {
+	return fmt.Errorf(
+		"child executable lease %q is unavailable (local pipeline-cache provenance). "+
+			"Re-run the parent pipeline to recreate its executable lease; if the shared cache is corrupt, "+
+			"run `sparkwing pipeline sparks warmup --clear-cache`: %w",
+		binPath, err,
+	)
 }
 
 func submissionExecutionEnvironment(captured []string, home string) []string {
@@ -320,16 +339,6 @@ func execLocalChild(ctx context.Context, binPath, repoDir string, args, env []st
 	}
 	outcome, startErr := runAssistedChildProcess(ctx, cmd, nil)
 	if err := errors.Join(startErr, outcome.waitErr, outcome.cancelCause); err != nil {
-		if errors.Is(err, os.ErrNotExist) || errors.Is(err, exec.ErrNotFound) {
-			if _, statErr := os.Stat(binPath); os.IsNotExist(statErr) {
-				return fmt.Errorf(
-					"child executable lease %q is unavailable (local pipeline-cache provenance). "+
-						"Re-run the parent pipeline to recreate its executable lease; if the shared cache is corrupt, "+
-						"run `sparkwing pipeline sparks warmup --clear-cache`: %w",
-					binPath, err,
-				)
-			}
-		}
 		if reason := tail.lastLines(childStderrTailLines); reason != "" {
 			return fmt.Errorf("child exec: %w: %s", err, reason)
 		}

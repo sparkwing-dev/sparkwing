@@ -194,6 +194,12 @@ type AdmissionRequest struct {
 	// ParentRunID identifies the member that spawned this run. The daemon
 	// checks lease membership and uses a live ancestor if this member exited.
 	ParentRunID string `json:"parent_run_id,omitempty"`
+	// ParentNodeID, with ParentRunID and no ParentLeaseToken, attaches this
+	// run to what that run's node holds: the node's cores, or the run's lease
+	// when the node holds none, and every concurrency group held by the node,
+	// the run and each run above it. The [Grant] lists those groups. The
+	// daemon refuses the request when the parent holds no lease.
+	ParentNodeID string `json:"parent_node_id,omitempty"`
 	// SemaphoresOnly marks a request that draws no host budget even when
 	// Resources is zero: the daemon must not substitute its conservative
 	// default charge. Used for run-level semaphore claims and short-lived

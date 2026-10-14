@@ -13,10 +13,10 @@ import (
 // parent run's ancestors.
 var ErrChildCycle = errors.New("the pipeline is already among this run's ancestors")
 
-// ChildParent is the run and node a child run is started from, with the run's
-// admission lease the child attaches to; LeaseToken is empty without one.
+// ChildParent is the run and node a child run is started from. The child's
+// admission attaches to what that node holds.
 type ChildParent struct {
-	RunID, NodeID, LeaseToken string
+	RunID, NodeID string
 }
 
 // LocalChildren starts and reads the child runs of a run that no controller
@@ -34,7 +34,7 @@ const localAwaitPoll = 250 * time.Millisecond
 func (s *Server) serveLocalStartChild(w http.ResponseWriter, r *http.Request, g *grant, req ChildRequest) {
 	ctx, cancel := context.WithTimeout(r.Context(), upstreamTimeout)
 	defer cancel()
-	id, err := g.Children.StartChild(ctx, ChildParent{RunID: g.RunID, NodeID: g.NodeID, LeaseToken: g.LeaseToken}, req)
+	id, err := g.Children.StartChild(ctx, ChildParent{RunID: g.RunID, NodeID: g.NodeID}, req)
 	switch {
 	case errors.Is(err, ErrChildCycle):
 		s.writeError(w, http.StatusConflict, "cycle", "pipeline "+quote(req.Pipeline)+" is already among this run's ancestors")

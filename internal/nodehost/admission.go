@@ -3,7 +3,6 @@ package nodehost
 import (
 	"cmp"
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -58,12 +57,6 @@ type Lease interface {
 	Token() string
 	Release() error
 	Watch(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel)) error
-}
-
-// HostHolder is a [Lease] that reports whether it holds host capacity, as a
-// run attached to its parent's lease does without pinning any of its own.
-type HostHolder interface {
-	HoldsHost() bool
 }
 
 // ConcurrencySlots is the coordination store's slot surface, the part of the
@@ -146,7 +139,7 @@ func hostAdmitted(doc nodeproto.PlanDoc) bool {
 // safety: ids match the dispatcher's, so the queue view and the daemon's
 // owner checks read a hosted node's lease the same way.
 func (a *Admission) request(n *NodeRun, claim *wingwire.SemaphoreClaim) wingwire.AdmissionRequest {
-	doc, id := n.Run.Doc, base64.RawURLEncoding.EncodeToString([]byte(n.Plan.ID))
+	doc := n.Run.Doc
 	req := wingwire.AdmissionRequest{
 		OwnerRunID: n.Run.ID, OwnerLeaseToken: n.Run.leaseToken,
 		DisplayRunID: n.Run.ID + "/" + n.Plan.ID, Pipeline: doc.Pipeline,
@@ -156,10 +149,10 @@ func (a *Admission) request(n *NodeRun, claim *wingwire.SemaphoreClaim) wingwire
 		req.Semaphores = []wingwire.SemaphoreClaim{*claim}
 	}
 	if hostAdmitted(doc) {
-		req.RunID, req.SemaphoresOnly = n.Run.ID+"/node-semaphore/"+id, true
+		req.RunID, req.SemaphoresOnly = wingwire.NodeSemaphoreParticipant(n.Run.ID, n.Plan.ID), true
 		return req
 	}
-	req.RunID = n.Run.ID + "/node-host/" + id
+	req.RunID = wingwire.NodeHostParticipant(n.Run.ID, n.Plan.ID)
 	req.Class = a.class(doc)
 	if m := n.Plan.Modifiers; m != nil {
 		req.Resources = wingwire.HostResources{Cores: m.ResCores, MemoryBytes: m.ResMemoryBytes}
@@ -287,9 +280,7 @@ func (a *Admission) runLeased(ctx context.Context, n *NodeRun, lease Lease, next
 			n.Run.Logger.Warn("nodehost: admission lease watch ended; the node continues unwatched", "node", n.Plan.ID, "err", err)
 		}
 	}()
-	held := *n
-	held.nodeLease = lease.Token()
-	res := next(execCtx, &held)
+	res := next(execCtx, n)
 	a.release(n, lease)
 	<-watching
 	if r := ended.Load(); r != nil {

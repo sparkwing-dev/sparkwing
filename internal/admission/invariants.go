@@ -100,6 +100,16 @@ func (l *Ledger) leaseInvariants() error {
 		if len(le.members) == 0 {
 			return fmt.Errorf("lease %s is alive with no members", id)
 		}
+		for m := range le.orphaned {
+			if _, member := le.members[m]; !member {
+				return fmt.Errorf("lease %s marks %q orphaned, which is not its member", id, m)
+			}
+		}
+		for m := range le.dependents {
+			if _, live := l.memberOf[m]; !live {
+				return fmt.Errorf("lease %s has dependent %q, which holds no lease", id, m)
+			}
+		}
 		if le.seq == 0 || le.seq > l.leaseSeq {
 			return fmt.Errorf("lease %s seq %d outside counter %d", id, le.seq, l.leaseSeq)
 		}

@@ -17,7 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/protofd"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/secretsource"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -101,7 +100,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	}
 	bearer, revoke, err := a.Routes.Admit(Node{
 		RunID: run.ID, NodeID: id, Secrets: names, Resolver: a.Resolver, Masker: a.Masker, Claim: a.Claim, Local: a.Local, Refs: n.Plan.PipelineRefs,
-		Children: a.Children, LeaseToken: childLease(n), Pause: n.Pause, Hold: n.Hold, Output: n.memoOutput,
+		Children: a.Children, Pause: n.Pause, Hold: n.Hold, Output: n.memoOutput,
 	})
 	if err != nil {
 		return failed(fmt.Errorf("admit node %s: %w", id, err))
@@ -111,7 +110,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	cfg := base
 	cfg.Sink = sink
 	cfg.Env = attemptEnv(base.Env, n.Plan.Env, run.ID, id, a.Routes.URL(), bearer)
-	cfg.Env = append(append(withoutRunnerEnv(cfg.Env), hostEnv(n)...), runnerEnv()...)
+	cfg.Env = append(append(withoutRunnerEnv(cfg.Env), dryRunEnv(n)...), runnerEnv()...)
 	res := Result{}
 	sess, err := StartSession(ctx, cfg)
 	if err == nil {
@@ -243,27 +242,12 @@ func failed(err error) Result {
 	return Result{Outcome: sparkwing.Failed, Err: err, Reason: reason}
 }
 
-// safety: the dispatcher's rule for what a child attaches to: the run's lease when it holds the host or the
-// plan's groups, which a node lease lacks, else the node's own lease, which holds the cores the node runs on.
-func childLease(n *NodeRun) string {
-	r := n.Run
-	if hostAdmitted(r.Doc) || r.leaseHoldsGroups || r.leaseHoldsHost {
-		return r.leaseToken
-	}
-	return cmp.Or(n.nodeLease, r.leaseToken)
-}
-
-// safety: a sparkwing run the node starts attaches to the lease the node holds instead of queueing behind it,
-// and sparks-core echoes mutating commands instead of running them only when it sees SPARKWING_DRY_RUN.
-func hostEnv(n *NodeRun) []string {
-	var env []string
-	if lease := childLease(n); lease != "" {
-		env = append(env, wingwire.LeaseTokenEnv+"="+lease)
-	}
+// safety: sparks-core echoes mutating commands instead of running them only when it sees SPARKWING_DRY_RUN.
+func dryRunEnv(n *NodeRun) []string {
 	if n.Run.Context.DryRun {
-		env = append(env, "SPARKWING_DRY_RUN=1")
+		return []string{"SPARKWING_DRY_RUN=1"}
 	}
-	return env
+	return nil
 }
 
 // safety: a pod host's Job sets the runner variables on the host itself; a host

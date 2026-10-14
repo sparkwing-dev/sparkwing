@@ -134,12 +134,14 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 	)
 }
 
+const pipelineSetupFailed = "pipeline setup failed before dispatch; retry the run, check Fleet or local agent status, and give this run ID to an operator if it repeats"
+
 func recordClaimedTriggerSetupFailure(ctx context.Context, state StateBackend, trigger *store.Trigger, cause error) error {
 	reason := cause.Error()
 	_, defined := sparkwing.Lookup(trigger.Pipeline)
 	var configErr *projectConfigError
 	if defined && !errors.As(cause, &configErr) {
-		reason = "pipeline setup failed before dispatch; retry the run, check Fleet or local agent status, and give this run ID to an operator if it repeats"
+		reason = pipelineSetupFailed
 	}
 	run, err := state.GetRun(ctx, trigger.ID)
 	if errors.Is(err, store.ErrNotFound) {

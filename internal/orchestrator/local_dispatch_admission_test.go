@@ -1,5 +1,3 @@
-//go:build windows
-
 package orchestrator
 
 import (
@@ -15,10 +13,10 @@ func TestLocalDispatchAdmissionUsesChildHome(t *testing.T) {
 	home := wingdTestHome(t)
 	startWingd(t, home, 2)
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	t.Setenv(wingdclient.HostBinEnv, filepath.Join(t.TempDir(), "missing.exe"))
+	t.Setenv(wingdclient.HostBinEnv, filepath.Join(t.TempDir(), "missing"))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	closeAdmission, err := prepareLocalDispatchAdmission(ctx, []string{"sparkwing_home=" + home})
+	closeAdmission, err := prepareLocalDispatchAdmission(ctx, []string{"sparkwing_home=" + home}, quietLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,10 +27,10 @@ func TestLocalDispatchAdmissionUsesChildHome(t *testing.T) {
 }
 
 func TestLocalDispatchAdmissionLeavesUnusableHostToStandaloneChild(t *testing.T) {
-	t.Setenv(wingdclient.HostBinEnv, filepath.Join(t.TempDir(), "missing.exe"))
+	t.Setenv(wingdclient.HostBinEnv, filepath.Join(t.TempDir(), "missing"))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	closeAdmission, err := prepareLocalDispatchAdmission(ctx, []string{"SPARKWING_HOME=" + wingdTestHome(t)})
+	closeAdmission, err := prepareLocalDispatchAdmission(ctx, []string{"SPARKWING_HOME=" + wingdTestHome(t)}, quietLogger())
 	if err != nil || closeAdmission == nil {
 		t.Fatalf("prepare admission = %v, %v; want the child left to run standalone", closeAdmission != nil, err)
 	}
@@ -41,7 +39,7 @@ func TestLocalDispatchAdmissionLeavesUnusableHostToStandaloneChild(t *testing.T)
 
 func TestLocalDispatchAdmissionPreservesNoHostFallback(t *testing.T) {
 	t.Setenv(wingdclient.HostBinEnv, "")
-	closeAdmission, err := prepareLocalDispatchAdmission(context.Background(), nil)
+	closeAdmission, err := prepareLocalDispatchAdmission(context.Background(), nil, quietLogger())
 	if err != nil || closeAdmission == nil {
 		t.Fatalf("no-host fallback = %v, %v", closeAdmission != nil, err)
 	}

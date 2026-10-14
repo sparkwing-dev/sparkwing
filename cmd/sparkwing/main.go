@@ -441,6 +441,8 @@ func runSparkwing(args []string) error {
 		return runDashboardSupervise(args[1:])
 	case consumerSpawnVerb:
 		return runRunsConsumeDetached(args[1:])
+	case "__host-trigger":
+		return runTriggerHost(args[1:])
 	case "__complete":
 		return runInternalComplete(args[1:])
 	case "help", "-h", "--help":

@@ -164,6 +164,9 @@ func TestAdmissionChecksDurableTerminalStateAfterTombstoneEviction(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if d.ledger, err = admission.New(admission.Config{TotalCores: 4}); err != nil {
+		t.Fatal(err)
+	}
 	server, peer := net.Pipe()
 	defer peer.Close()
 	c := newConn(d, server)

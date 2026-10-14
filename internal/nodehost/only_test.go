@@ -123,12 +123,11 @@ func TestWorkersCapsTheNodesRunningAtOnce(t *testing.T) {
 	}
 }
 
-func TestHostEnvHandsTheNodeLeaseAndDryRunToTheNode(t *testing.T) {
-	run := &Run{leaseToken: "run-lease", Context: nodeproto.RunContext{DryRun: true}}
-	if got := hostEnv(&NodeRun{Run: run, nodeLease: "node-lease"}); !slices.Equal(got, []string{"SPARKWING_LEASE_TOKEN=node-lease", "SPARKWING_DRY_RUN=1"}) {
-		t.Errorf("env = %v, want the node's own lease, which a child attaches to, and the dry-run switch", got)
+func TestDryRunEnvHandsTheSwitchToTheNode(t *testing.T) {
+	if got := dryRunEnv(&NodeRun{Run: &Run{Context: nodeproto.RunContext{DryRun: true}}}); !slices.Equal(got, []string{"SPARKWING_DRY_RUN=1"}) {
+		t.Errorf("env = %v, want the dry-run switch", got)
 	}
-	if got := hostEnv(&NodeRun{Run: &Run{leaseToken: "run-lease"}}); !slices.Equal(got, []string{"SPARKWING_LEASE_TOKEN=run-lease"}) {
-		t.Errorf("env = %v, want the run lease when the node holds none", got)
+	if got := dryRunEnv(&NodeRun{Run: &Run{}}); got != nil {
+		t.Errorf("env = %v, want nothing for a real run", got)
 	}
 }

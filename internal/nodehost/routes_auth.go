@@ -36,10 +36,8 @@ type Node struct {
 	// reads; Local answers a latest-output read for these alone.
 	Refs []nodeproto.PlanPipelineRef
 	// Children starts and reads child runs through this machine's trigger
-	// queue when no controller holds the run; LeaseToken is the run's
-	// admission lease, which the child attaches to.
-	Children   LocalChildren
-	LeaseToken string
+	// queue when no controller holds the run.
+	Children LocalChildren
 	// Pause, when set, holds the node's no-progress timeout while a route
 	// waits on its behalf; see [NodeRun.Pause].
 	Pause func() (resume func())

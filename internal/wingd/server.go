@@ -815,7 +815,7 @@ func (d *Daemon) terminalCheckReason(err error) string {
 
 func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	data := map[string]any{"resources": req.Resources, "class": req.Class, "priority": req.Priority}
-	if req.ParentLeaseToken != "" {
+	if req.ParentLeaseToken != "" || req.ParentNodeID != "" {
 		data["child_attach"] = true
 	}
 	if len(req.Semaphores) > 0 {
@@ -832,7 +832,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 		return
 	}
 	d.mu.Lock()
-	_, cancelled := d.cancelledRuns[req.RunID]
+	cancelled := d.runCancelledLocked(req.RunID)
 	d.mu.Unlock()
 	if !cancelled && d.cfg.Runs != nil {
 		var err error
@@ -849,7 +849,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "cancelled", Policy: wingwire.PolicyFail})
 		return
 	}
-	if req.ParentLeaseToken != "" {
+	if req.ParentLeaseToken != "" || req.ParentNodeID != "" {
 		d.handleChildAttach(c, req)
 		return
 	}
@@ -858,7 +858,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	jevBypass := d.jevReservationBypass(req, requested)
 
 	d.mu.Lock()
-	if _, cancelled := d.cancelledRuns[req.RunID]; cancelled {
+	if d.runCancelledLocked(req.RunID) {
 		d.mu.Unlock()
 		d.recordJournal("rejected", &conn{runID: req.RunID}, map[string]any{"reason": "run cancelled"})
 		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "cancelled", Policy: wingwire.PolicyFail})
@@ -1232,6 +1232,14 @@ func (d *Daemon) forceReleaseSuperseded(leases []admission.LeaseID) {
 	}
 }
 
+// safety: an orphaned run's mark lives on its own lease, not among the tombstones, so every guard checks both.
+func (d *Daemon) runCancelledLocked(runID string) bool {
+	if _, cancelled := d.cancelledRuns[runID]; cancelled {
+		return true
+	}
+	return d.ledger.Orphaned(runID)
+}
+
 func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	d.recordJournal("child_attach_request", &conn{runID: req.RunID}, map[string]any{"requested_parent": req.ParentRunID})
 	d.mu.Lock()
@@ -1241,7 +1249,7 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "cancelled", Policy: wingwire.PolicyFail})
 		return
 	}
-	if _, cancelled := d.cancelledRuns[req.RunID]; cancelled {
+	if d.runCancelledLocked(req.RunID) {
 		d.mu.Unlock()
 		d.recordJournal("rejected", &conn{runID: req.RunID}, map[string]any{"reason": "child cancelled"})
 		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "cancelled", Policy: wingwire.PolicyFail})
@@ -1253,11 +1261,25 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "draining", Policy: wingwire.Policy("draining")})
 		return
 	}
-	leaseID, err := d.ledger.Reattach(req.ParentLeaseToken)
+	var leaseID admission.LeaseID
+	var held []string
+	var holders []admission.LeaseID
+	var err error
+	if req.ParentLeaseToken != "" {
+		leaseID, err = d.ledger.Reattach(req.ParentLeaseToken)
+	} else {
+		leaseID, held, holders, err = parentHoldings(d.ledger.Snapshot(), req.ParentRunID, req.ParentNodeID)
+	}
 	if err != nil {
 		d.mu.Unlock()
-		d.recordJournal("rejected", &conn{runID: req.RunID}, map[string]any{"reason": "parent lease missing", "requested_parent": req.ParentRunID})
-		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "parent", Policy: wingwire.PolicyFail})
+		d.recordJournal("rejected", &conn{runID: req.RunID}, map[string]any{"reason": "parent lease missing", "requested_parent": req.ParentRunID, "requested_parent_node": req.ParentNodeID})
+		reason := ""
+		if req.ParentNodeID != "" {
+			reason = err.Error()
+		}
+		if err := c.send(&wingwire.Evicted{RunID: req.RunID, Key: "parent", Policy: wingwire.PolicyFail, Reason: reason}); err != nil {
+			c.close()
+		}
 		return
 	}
 	parentRunID := req.ParentRunID
@@ -1285,7 +1307,7 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 				}
 				break
 			}
-			if _, cancelled := d.cancelledRuns[ancestor]; cancelled {
+			if d.runCancelledLocked(ancestor) {
 				blocked = true
 				if blockedAncestor == "" {
 					blockedAncestor, blockedReason = ancestor, "parent cancelled"
@@ -1307,6 +1329,11 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 		d.recordJournal("rejected", &conn{runID: req.RunID}, map[string]any{"reason": "parent attach failed", "error": err.Error()})
 		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "parent", Policy: wingwire.PolicyFail})
 		return
+	}
+	// safety: the child runs inside what its ancestors hold, so when any lease it joined or was handed groups
+	// from ends or is evicted, the child is told to end too, before another run takes a group it runs under.
+	if err := d.ledger.Depend(req.RunID, append(holders, leaseID)); err != nil {
+		d.cfg.logf("child attach: record %s's ancestors: %v", req.RunID, err)
 	}
 	lease, _ := d.ledger.LeaseByID(leaseID)
 	c.runID = req.RunID
@@ -1335,12 +1362,65 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	if err := d.persistState(); err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
+	held = append(held, leaseSemaphores(snap, leaseID)...)
+	slices.Sort(held)
 	_ = c.send(&wingwire.Grant{
 		RunID:      req.RunID,
 		LeaseToken: lease.Token,
 		Resources:  c.resources,
-		Semaphores: leaseSemaphores(snap, leaseID),
+		Semaphores: slices.Compact(held),
 	})
+}
+
+// safety: a child attaches to the lease that holds its parent node's cores, so it never queues for the cores
+// its waiting parent holds, and it is handed every group its parent node and run hold and every group its parent
+// was itself handed, so a group it shares with any ancestor never waits on it. A sibling node's groups are not.
+func parentHoldings(snap admission.Snapshot, runID, nodeID string) (admission.LeaseID, []string, []admission.LeaseID, error) {
+	if runID == "" || nodeID == "" {
+		return "", nil, nil, fmt.Errorf("a child attach names both its parent run and node, got run %q node %q", runID, nodeID)
+	}
+	byRequest := map[string]admission.LeaseState{}
+	memberOf := map[string]admission.LeaseState{}
+	for _, le := range snap.Leases {
+		byRequest[le.RequestID] = le
+		for _, m := range le.Members {
+			memberOf[m] = le
+		}
+	}
+	nodeHost, hasNodeHost := byRequest[wingwire.NodeHostParticipant(runID, nodeID)]
+	runLease, hasRun := memberOf[runID]
+	var target admission.LeaseState
+	switch {
+	case hasNodeHost && (nodeHost.MilliCores > 0 || nodeHost.MemoryBytes > 0):
+		target = nodeHost
+	case hasRun:
+		target = runLease
+	case hasNodeHost:
+		target = nodeHost
+	default:
+		return "", nil, nil, fmt.Errorf("parent run %s node %s holds no admission lease to attach to; "+
+			"the node may have finished, or the parent ran without the admission daemon", runID, nodeID)
+	}
+	var held []string
+	var holders []admission.LeaseID
+	hold := func(le admission.LeaseState) {
+		if len(le.Claims) > 0 && !slices.Contains(holders, le.ID) {
+			holders = append(holders, le.ID)
+		}
+		for _, c := range le.Claims {
+			held = append(held, c.Key)
+		}
+	}
+	hold(nodeHost)
+	hold(byRequest[wingwire.NodeSemaphoreParticipant(runID, nodeID)])
+	hold(memberOf[runID])
+	hold(byRequest[wingwire.PlanSemaphoresParticipant(runID)])
+	for _, le := range snap.Leases {
+		if slices.Contains(le.Dependents, runID) {
+			hold(le)
+		}
+	}
+	return target.ID, held, holders, nil
 }
 
 func leaseSemaphores(snap admission.Snapshot, id admission.LeaseID) []string {
@@ -1432,6 +1512,7 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 		d.byRun[m] = c
 	}
 	lease, _ := d.ledger.LeaseByID(leaseID)
+	orphaned := d.ledger.Orphaned(reclaimed)
 	d.touchLocked()
 	d.recordJournal("reattach_accepted", c, map[string]any{"lease_id": leaseID, "member": reclaimed})
 	d.mu.Unlock()
@@ -1440,6 +1521,13 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 	}
 	d.cfg.logf("reattach: run %s reclaimed lease %s", reclaimed, leaseID)
 	_ = c.send(&wingwire.Grant{RunID: reclaimed, LeaseToken: lease.Token, Resources: c.resources})
+	// safety: a run cancelled while it was away, as an attached run is when an ancestor's lease ends during a
+	// daemon restart, is told so the moment it is back, rather than run on under groups nobody holds.
+	if orphaned {
+		if err := c.send(&wingwire.Cancel{RunID: reclaimed, Reason: orphanedReason}); err != nil {
+			go d.handleDisconnect(c)
+		}
+	}
 }
 
 // safety: a nested run's parent and child present the same lease token, so each

@@ -1,22 +1,31 @@
 package orchestrator
 
 import (
-	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"runtime"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func HandleClaimedTriggerLocal(ctx context.Context, triggerID string) error {
+// HostClaimedTrigger runs the local trigger triggerID, which another process
+// claimed, on the engine host: each node runs in its own process of program,
+// the compiled pipeline. The claiming process starts this one in the
+// trigger's checkout with the run's environment, and it finishes the trigger
+// when the run ends.
+func HostClaimedTrigger(ctx context.Context, triggerID, program string) error {
 	logger := slog.Default()
-
 	paths, err := DefaultPaths()
 	if err != nil {
 		return fmt.Errorf("resolve paths: %w", err)
@@ -24,8 +33,15 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID string) error {
 	if err := paths.EnsureRoot(); err != nil {
 		return fmt.Errorf("ensure sparkwing root: %w", err)
 	}
-
-	backends, selection, releaseBackends, err := localTriggerBackends(ctx, paths)
+	dir, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	// safety: the claiming process started the admission daemon; this host never starts one, which would be
+	// its own descendant and reaped with it, so a daemon gone by now leaves the run to the standalone path.
+	admission := pipelineAdmission("", wingwire.OriginLocal)
+	admission.Spawn = wingdclient.NoHostSpawn
+	backends, selection, releaseBackends, err := localTriggerBackends(ctx, paths, admission)
 	if err != nil {
 		return err
 	}
@@ -35,35 +51,33 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID string) error {
 	if err != nil {
 		return fmt.Errorf("get trigger %s: %w", triggerID, err)
 	}
-	logger.Info(
-		"handling claimed trigger (local)",
-		"run_id", trigger.ID,
-		"pipeline", trigger.Pipeline,
-		"parent_run_id", trigger.ParentRunID,
-	)
-
 	finishTrigger := true
 	defer func() {
 		if !finishTrigger {
 			return
 		}
-		if ferr := backends.State.FinishTrigger(ctx, trigger.ID); ferr != nil {
-			logger.Warn("finish trigger (local) failed",
-				"trigger_id", trigger.ID, "err", ferr)
+		if ferr := backends.State.FinishTrigger(context.WithoutCancel(ctx), trigger.ID); ferr != nil {
+			logger.Warn("finish trigger (local) failed", "trigger_id", trigger.ID, "err", ferr)
 		}
 	}()
+	refuse := func(cause, recorded error) error {
+		logger.Error("run failed setup", "run_id", trigger.ID, "err", cause)
+		if ferr := recordClaimedTriggerSetupFailure(context.WithoutCancel(ctx), backends.State, trigger, recorded); ferr != nil {
+			finishTrigger = false
+			logger.Error("record failed trigger run (local)", "run_id", trigger.ID, "err", ferr)
+		}
+		return nil
+	}
 
-	attachToken := cmp.Or(childAttachTokenFromEnv(trigger.TriggerEnv), childAttachTokenFromProcessEnv())
-	warnUnattachedChild(logger, trigger, attachToken, backends.LocalCoordination)
-	args := resolveTriggerArgs(ctx, backends.State, trigger, logger)
+	admission.ParentRunID, admission.ParentNodeID = trigger.ParentRunID, trigger.ParentNodeID
 	opts := Options{
 		standalone:        childStandalone(backends, selection),
 		Pipeline:          trigger.Pipeline,
 		RunID:             trigger.ID,
-		Args:              args,
+		Args:              resolveTriggerArgs(ctx, backends.State, trigger, logger),
 		Priority:          submittedTriggerPriority(trigger),
 		ParentRunID:       trigger.ParentRunID,
-		Admission:         pipelineAdmission(attachToken, wingwire.OriginLocal),
+		Admission:         admission,
 		DryRun:            trigger.TriggerEnv[envDryRun] == "1",
 		RetryOf:           trigger.RetryOf,
 		RetrySource:       trigger.RetrySource,
@@ -72,66 +86,68 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID string) error {
 		RetryRevision:     trigger.TriggerEnv[retryprovenance.RevisionKey],
 		RetryPlanHash:     trigger.TriggerEnv[retryprovenance.PlanHashKey],
 		Full:              trigger.Full,
+		MaxParallel:       runtime.NumCPU(),
+		Delegate:          quietRunLog{},
 		Trigger: sparkwing.TriggerInfo{
 			Source:      trigger.TriggerSource,
 			User:        trigger.TriggerUser,
 			PullRequest: sparkwing.PullRequestFromEnv(trigger.TriggerEnv),
 		},
-		Git: sparkwing.NewGit(
-			sparkwing.CurrentRuntime().WorkDir,
-			trigger.GitSHA, trigger.GitBranch, "", trigger.Repo, trigger.RepoURL,
-		),
+		Git: sparkwing.NewGit(dir, trigger.GitSHA, trigger.GitBranch, "", trigger.Repo, trigger.RepoURL),
 	}
-
-	pinErr := applyCheckoutProjectConfig(&opts)
-	if pinErr == nil {
-		pinErr = refusePinnedCheckoutRun(opts.PipelineYAML)
+	// safety: the run keeps the store this process read its trigger from, which is a standalone parent's own.
+	if local, ok := backends.State.(localState); ok {
+		opts.State = local.st
 	}
-	if pinErr != nil {
-		if ferr := recordClaimedTriggerSetupFailure(ctx, backends.State, trigger, pinErr); ferr != nil {
-			finishTrigger = false
-			logger.Error("record failed trigger run (local)", "run_id", trigger.ID, "err", ferr)
-		}
-		logger.Error("run refused", "run_id", trigger.ID, "err", pinErr)
-		return nil
-	}
-	execution, err := setupLocalExecution(ctx, paths, &opts, backends, nodeWorkspace(), logger)
+	command := pipelineentry.Binary(program)
+	doc, err := repos.Describe(ctx, command, dir)
 	if err != nil {
-		return err
+		err = fmt.Errorf("describe %s: %w", program, err)
+		return refuse(err, err)
 	}
-	defer execution.cleanup()
-	execution.runner.SetLeaseTokenSource(leaseTokensFromContext)
-	opts.Runner = NewNodeExecutor(backends).WithSpawner(execution.runner)
-	res, err := Run(ctx, backends, opts)
-	if err != nil {
-		if ferr := recordClaimedTriggerSetupFailure(ctx, backends.State, trigger, err); ferr != nil {
-			finishTrigger = false
-			logger.Error("record failed trigger run (local)", "run_id", trigger.ID, "err", ferr)
+	entry := HostedEntry{
+		Command: command, Dir: dir, Env: os.Environ(),
+		PipelineRevision: trigger.TriggerEnv[PipelineRevKey], BinarySource: "source",
+	}
+	if trigger.TriggerEnv[crons.PinnedBinaryEnvKey] != "" {
+		entry.BinarySource = "pinned"
+	}
+	for _, p := range doc.Pipelines {
+		if p.Name != trigger.Pipeline {
+			continue
 		}
-		logger.Error(
-			"run failed setup",
-			"run_id", trigger.ID,
-			"err", err,
-		)
-		return nil
+		for _, a := range p.Args {
+			if a.Secret {
+				entry.SecretArgs = append(entry.SecretArgs, a.Name)
+			}
+		}
 	}
-	logger.Info(
-		"run finished (local)",
-		"run_id", res.RunID,
-		"pipeline", trigger.Pipeline,
-		"status", res.Status,
-	)
+	res, err := RunHosted(ctx, paths, opts, entry)
+	if err != nil {
+		// safety: past describe the pipeline is known, so a setup error is the engine's own and its text, which
+		// may carry a store's or a secret source's detail, stays in this process's log; a config error is the user's.
+		recorded := errors.New(pipelineSetupFailed)
+		if configErr := (*projectConfigError)(nil); errors.As(err, &configErr) {
+			recorded = err
+		}
+		return refuse(err, recorded)
+	}
+	logger.Info("run finished (local)", "run_id", res.RunID, "pipeline", trigger.Pipeline, "status", res.Status)
 	return nil
 }
+
+// safety: a hosted trigger run renders nothing, as the child the dispatcher started did: its output would land
+// between the parent run's records, and the run's own logs and envelope keep every record.
+type quietRunLog struct{}
+
+func (quietRunLog) Log(string, string)       {}
+func (quietRunLog) Emit(sparkwing.LogRecord) {}
 
 // safety: a child run picks its backend the way its parent did, so a hosted
 // run dispatches children that open nothing either and an unhosted one hands
 // its child the very store its trigger row lives in.
-func localTriggerBackends(ctx context.Context, paths Paths) (Backends, hostedSelection, func(), error) {
-	opts := Options{
-		DefaultStateDB: paths.StateDB(),
-		Admission:      pipelineAdmission(childAttachTokenFromProcessEnv(), wingwire.OriginLocal),
-	}
+func localTriggerBackends(ctx context.Context, paths Paths, admission *LocalAdmission) (Backends, hostedSelection, func(), error) {
+	opts := Options{DefaultStateDB: paths.StateDB(), Admission: admission}
 	hosted, selection, release, err := hostedBackendsForRun(ctx, paths, &opts)
 	if err != nil {
 		return Backends{}, hostedSelection{}, func() {}, err
@@ -182,15 +198,4 @@ func openLocalTriggerStore(paths Paths) (*store.Store, error) {
 		return nil, fmt.Errorf("open local store %s: %w", path, err)
 	}
 	return st, nil
-}
-
-// bug: an awaited child claimed outside its parent's trigger loop, such as by the resident consumer, has no
-// lease to attach to and queues on its own, possibly behind the parent waiting on it; it is said, not hidden.
-func warnUnattachedChild(logger *slog.Logger, trigger *store.Trigger, attachToken string, coordinated bool) {
-	awaited := trigger.ParentRunID != "" && strings.HasPrefix(trigger.TriggerSource, "await-pipeline")
-	if attachToken != "" || !awaited || !coordinated {
-		return
-	}
-	logger.Warn("awaited child run has no parent lease to attach to; it is admitted on its own and may "+
-		"queue behind the parent run waiting on it", "run_id", trigger.ID, "parent_run_id", trigger.ParentRunID)
 }

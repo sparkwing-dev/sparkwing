@@ -116,6 +116,13 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 			}
 		case admission.EventReprioritized:
 			queueChanged = true
+		case admission.EventOrphaned:
+			// safety: the ledger marks the run orphaned on its own lease, persisted with it, so a run not connected
+			// when its ancestor ends is cancelled when it reattaches.
+			d.recordJournal("orphaned", &conn{runID: ev.RequestID}, map[string]any{"lease_id": ev.Lease})
+			if c := d.byRun[ev.RequestID]; c != nil {
+				out = append(out, delivery{c, &wingwire.Cancel{RunID: ev.RequestID, Reason: orphanedReason}})
+			}
 		case admission.EventReleased:
 			d.recordJournal("release", &conn{runID: ev.RequestID}, map[string]any{"lease_id": ev.Lease})
 			queueChanged = true
@@ -333,3 +340,5 @@ func (d *Daemon) soleRunUnderLoadLocked(c *conn) bool {
 	return c.finalizable && d.headroomInit &&
 		c.resources.Cores > 0 && c.resources.Cores > d.appliedCores
 }
+
+const orphanedReason = "an ancestor run's admission lease ended or was evicted, so this run no longer holds what it was attached under"

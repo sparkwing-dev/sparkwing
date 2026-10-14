@@ -11,13 +11,9 @@ import (
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
 
-func TestDetachedChildOwnsDaemonStartup(t *testing.T) {
+func TestADetachedRunHasItsClaimerStartTheDaemon(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds and executes an SDK pipeline")
-	}
-	root, err := moduleRoot()
-	if err != nil {
-		t.Fatal(err)
 	}
 	for _, unavailable := range []bool{false, true} {
 		t.Run(fmt.Sprintf("unavailable=%t", unavailable), func(t *testing.T) {
@@ -27,22 +23,7 @@ func TestDetachedChildOwnsDaemonStartup(t *testing.T) {
 				host = filepath.Join(t.TempDir(), "missing-host")
 			}
 			e.extraEnv = []string{"SPARKWING_WINGD_BIN=" + host}
-			for _, name := range []string{"go.mod", "go.sum"} {
-				body, err := os.ReadFile(filepath.Join(root, name))
-				if err != nil {
-					t.Fatal(err)
-				}
-				if name == "go.mod" {
-					body = []byte(strings.Replace(string(body), "module github.com/sparkwing-dev/sparkwing", "module admissionfixture", 1) +
-						fmt.Sprintf("\nrequire github.com/sparkwing-dev/sparkwing v0.0.0\nreplace github.com/sparkwing-dev/sparkwing => %q\n", root))
-				}
-				if err := os.WriteFile(filepath.Join(e.repoDir, ".sparkwing", name), body, 0o600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if err := os.WriteFile(filepath.Join(e.repoDir, ".sparkwing", "main.go"), []byte(admissionFixtureSource), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			e.useHostedFixture(t, admissionFixtureSource)
 			for attempt := 0; attempt < 2; attempt++ {
 				ack := e.submit()
 				st := e.store()
@@ -60,7 +41,7 @@ func TestDetachedChildOwnsDaemonStartup(t *testing.T) {
 						t.Fatalf("unavailable host was not reported: %v: %s", err, body)
 					}
 				} else if _, err := wingdclient.Query(t.Context(), wingdclient.Options{Home: e.home}); err != nil {
-					t.Fatalf("child did not start its daemon: %v", err)
+					t.Fatalf("the claiming consumer did not start the daemon before hosting the run: %v", err)
 				}
 				if run.Status != "success" {
 					t.Fatalf("child startup result = %s: %s", run.Status, run.Error)

@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -89,12 +90,24 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	}
 	hostLog := &triggerHostLog{out: os.Stderr}
 	shuttingDown := shuttingDownOn(ctx)
+	rc, err := triggerRunContext(ctx, c, trig)
+	if err != nil {
+		return err
+	}
+	rehydrate, err := hostedRehydration(ctx, c, Options{RetryOf: trig.RetryOf, RetrySource: trig.RetrySource, Full: trig.Full}, trig.ID)
+	if err != nil {
+		return err
+	}
 	res, err := nodehost.Execute(ctx, nodehost.Config{
 		Session:  nodehost.SessionConfig{Entry: h.Entry, Dir: h.Dir, Sink: planSink, Env: env},
 		Pipeline: trig.Pipeline, Args: triggerHostArgs(ctx, c, trig, logger),
-		Run: triggerRunContext(ctx, c, trig), Requires: requires,
+		Run: rc, Requires: requires,
 		ParentRunID: trig.ParentRunID, RetryOf: trig.RetryOf, RetrySource: trig.RetrySource,
-		State: stoppingHostState{Client: c, shuttingDown: shuttingDown}, Logger: logger,
+		State: retryPlanState{
+			stoppingHostState: stoppingHostState{Client: c, shuttingDown: shuttingDown},
+			retryOf:           trig.RetryOf, planHash: trig.TriggerEnv[retryprovenance.PlanHashKey],
+		},
+		Logger:    logger,
 		Admission: &nodehost.Admission{Slots: slots},
 		Memo: &nodehost.Memo{Slots: slots, Source: func(ctx context.Context, _ store.ClaimInputRequest, runID, nodeID string) (nodehost.MemoSource, error) {
 			return nodehost.ReadMemoSource(ctx, c, runID, nodeID)
@@ -109,6 +122,9 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 		Dispatch: dispatchThrough(dispatch, trig.Pipeline),
 		// safety: a reclaimed trigger finds the rows its stopped host left, which the run keeps.
 		Resume: true,
+		// safety: a retry copies what its source run already finished; it is apart from Resume, which keeps this
+		// run's own rows from an earlier host.
+		Rehydrate: rehydrate,
 	})
 	planSink.end()
 	if err != nil {
@@ -143,10 +159,31 @@ func triggerHostArgs(ctx context.Context, c *client.Client, trig *store.Trigger,
 // safety: one derivation, [podRunContext], for the run host and every node host: the host applies it to the row it
 // is about to record, the controller's run read (start time, the trigger's actor and pull request) with the trigger's
 // git snapshot and source laid over it as the run row's upsert lays them, so each node host reads back that row.
-func triggerRunContext(ctx context.Context, c *client.Client, trig *store.Trigger) nodeproto.RunContext {
-	row, err := c.GetRunForExecution(ctx, trig.ID)
-	if err != nil || row == nil {
+//
+// safety: a run row the controller does not have yet is planned from the trigger alone, as every pod then reads
+// it; one it failed to answer for is retried and then refused, because planning without the row's pull request
+// would hash differently from the pods that read it, and every node would fail with plan_drift.
+func triggerRunContext(ctx context.Context, c *client.Client, trig *store.Trigger) (nodeproto.RunContext, error) {
+	var row *store.Run
+	var err error
+	for attempt := 1; ; attempt++ {
+		row, err = c.GetRunForExecution(ctx, trig.ID)
+		if err == nil || errors.Is(err, store.ErrNotFound) || attempt == runReadAttempts {
+			break
+		}
+		wait := time.NewTimer(time.Duration(attempt) * runReadBackoff)
+		select {
+		case <-ctx.Done():
+			wait.Stop()
+			return nodeproto.RunContext{}, fmt.Errorf("read run %s for its run context: %w", trig.ID, errors.Join(err, ctx.Err()))
+		case <-wait.C:
+		}
+	}
+	switch {
+	case errors.Is(err, store.ErrNotFound) || (err == nil && row == nil):
 		row = &store.Run{ID: trig.ID, TriggerUser: trig.TriggerUser}
+	case err != nil:
+		return nodeproto.RunContext{}, fmt.Errorf("read run %s for its run context: %w", trig.ID, err)
 	}
 	planned := *row
 	planned.ID, planned.TriggerSource = trig.ID, trig.TriggerSource
@@ -155,8 +192,13 @@ func triggerRunContext(ctx context.Context, c *client.Client, trig *store.Trigge
 	if planned.StartedAt.IsZero() {
 		planned.StartedAt = time.Now().UTC()
 	}
-	return podRunContext(&planned)
+	return podRunContext(&planned), nil
 }
+
+const (
+	runReadAttempts = 4
+	runReadBackoff  = 250 * time.Millisecond
+)
 
 // HeartbeatTrigger renews triggerID's claim every interval until stop is
 // called, and cancels the returned context when the claim ends: with a
@@ -277,3 +319,16 @@ func (l *triggerHostLog) Emit(rec sparkwing.LogRecord) {
 }
 
 func (l *triggerHostLog) Close() error { return nil }
+
+// safety: a retry copies its source run's results only when it planned the source's plan.
+type retryPlanState struct {
+	stoppingHostState
+	retryOf, planHash string
+}
+
+func (s retryPlanState) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {
+	if err := retryPlanMatches(snapshot, runID, s.retryOf, s.planHash); err != nil {
+		return err
+	}
+	return s.stoppingHostState.UpdatePlanSnapshot(ctx, runID, snapshot)
+}
