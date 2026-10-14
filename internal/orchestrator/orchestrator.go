@@ -60,6 +60,10 @@ type Options struct {
 	// the admission daemon even when one answers.
 	AllowUnadmitted bool
 
+	// Verbose is the debug rendering the run uses, from --sw-verbose or a direct
+	// run's SPARKWING_LOG_LEVEL=debug, recorded so the reproducer keeps it.
+	Verbose bool
+
 	RetryOf string
 
 	RetrySource string
@@ -1125,6 +1129,9 @@ func buildRunFlags(opts Options) map[string]any {
 	}
 	if opts.MaxParallel > 0 {
 		flags["max_parallel"] = opts.MaxParallel
+	}
+	if opts.Verbose {
+		flags["verbose"] = true
 	}
 	if opts.prioritySet {
 		flags["priority"] = opts.priority.value

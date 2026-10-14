@@ -601,7 +601,7 @@ func cronsRealLauncher(t *testing.T) (cronLauncher, *store.Store) {
 }
 
 // safety: the launcher weighs what the checkout declares before it queues a
-// run, so a launch test needs a checkout that answers --describe. The stub the
+// run, so a launch test needs a checkout that answers describe. The stub the
 // detached-submit tests use does, and declares no risk.
 func cronsBuildableRepo(t *testing.T) string {
 	t.Helper()

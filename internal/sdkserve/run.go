@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -99,6 +100,9 @@ func (s *server) nodeContext(ctx context.Context, planned *Planned, n *sparkwing
 	if planned.Run.DryRun {
 		ctx = sparkwingruntime.WithDryRun(ctx)
 	}
+	if r := hostRunner(); r != nil {
+		ctx = sparkwingruntime.WithRunner(ctx, r)
+	}
 	sec, err := sparkwingruntime.ResolvePipelineSecrets(ctx, planned.Registration, nil)
 	if missing := (*sparkwingruntime.MissingSecretsError)(nil); errors.As(err, &missing) {
 		return nil, missingSecrets(n, missing)
@@ -110,6 +114,21 @@ func (s *server) nodeContext(ctx context.Context, planned *Planned, n *sparkwing
 		ctx = sparkwingruntime.WithPipelineSecrets(ctx, sec)
 	}
 	return ctx, nil
+}
+
+// safety: the host names the runner in the node's environment, so a body's
+// sparkwing.Runner reports the runner the node is on. Nil when no host set it.
+func hostRunner() *sparkwing.RunnerInfo {
+	name, typ := os.Getenv("SPARKWING_RUNNER_NAME"), os.Getenv("SPARKWING_RUNNER_TYPE")
+	labels := os.Getenv("SPARKWING_RUNNER_LABELS")
+	if name == "" && typ == "" && labels == "" {
+		return nil
+	}
+	r := &sparkwing.RunnerInfo{Name: name, Type: typ}
+	if labels != "" {
+		r.Labels = sparkwingruntime.NormalizeLabels(strings.Split(labels, ","))
+	}
+	return r
 }
 
 // safety: worded as the host's secret preflight words a run that cannot

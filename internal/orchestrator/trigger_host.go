@@ -244,7 +244,7 @@ func (h *claimedNodeHost) RunNode(ctx context.Context, req runner.Request) runne
 	}
 	// safety: only this claim may write the node now, so a host that never started finishes the row under it.
 	if ferr := client.NewWithToken(h.controllerURL, nil, n.ClaimToken).FinishNodeWithReason(context.WithoutCancel(ctx),
-		req.RunID, req.NodeID, string(sparkwing.Failed), err.Error(), nil, store.FailureUnknown, nil); ferr != nil {
+		req.RunID, req.NodeID, string(sparkwing.Failed), nodehost.RecordedErrText(err), nil, store.FailureUnknown, nil); ferr != nil {
 		h.logger.Warn("trigger host: finish a node whose host never started", "run_id", req.RunID, "node_id", req.NodeID, "err", ferr)
 	}
 	return runner.Result{Outcome: sparkwing.Failed, Err: err}

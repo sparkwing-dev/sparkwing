@@ -44,6 +44,13 @@ func listed(list []string, key string) bool {
 
 var envName = regexp.MustCompile(`^(_?SPARKWING_[A-Z0-9_]*)`)
 
+// safety: Owned ignores case because Windows does, so a name read through the environment in any case is the
+// variable. Only such calls are matched without case: lowercase sparkwing_ literals elsewhere are metric and table
+// names, never variables.
+var envCallName = regexp.MustCompile(`(?i)^(_?SPARKWING_[A-Z0-9_]*)`)
+
+var envCalls = map[string]bool{"Getenv": true, "LookupEnv": true, "Setenv": true, "Unsetenv": true}
+
 func TestEveryEngineEnvNameIsClassified(t *testing.T) {
 	root := filepath.Join("..", "..")
 	seen := map[string]string{}
@@ -64,14 +71,15 @@ func TestEveryEngineEnvNameIsClassified(t *testing.T) {
 			}
 			// safety: every string literal, quoted or raw, so a name spelled with backticks cannot slip past.
 			ast.Inspect(file, func(n ast.Node) bool {
-				lit, ok := n.(*ast.BasicLit)
-				if !ok || lit.Kind != token.STRING {
-					return true
-				}
-				if v, err := strconv.Unquote(lit.Value); err == nil {
-					if m := envName.FindStringSubmatch(v); m != nil {
-						seen[m[1]] = path
+				if call, ok := n.(*ast.CallExpr); ok {
+					if sel, ok := call.Fun.(*ast.SelectorExpr); ok && envCalls[sel.Sel.Name] && len(call.Args) > 0 {
+						if m := envCallName.FindStringSubmatch(stringLiteral(call.Args[0])); m != nil {
+							seen[strings.ToUpper(m[1])] = path
+						}
 					}
+				}
+				if m := envName.FindStringSubmatch(stringLiteral(n)); m != nil {
+					seen[m[1]] = path
 				}
 				return true
 			})
@@ -101,6 +109,15 @@ func TestEveryEngineEnvNameIsClassified(t *testing.T) {
 				"pipeline code; classify it", name, where)
 		}
 	}
+}
+
+func stringLiteral(n ast.Node) string {
+	lit, ok := n.(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		return ""
+	}
+	v, _ := strconv.Unquote(lit.Value)
+	return v
 }
 
 func TestStripRemovesEngineCredentials(t *testing.T) {
