@@ -90,8 +90,6 @@ func runNodeArgs(controllerURL, runID, nodeID string) []string {
 	return []string{"--controller", controllerURL, runID, nodeID}
 }
 
-// The warm fallback Job runs a node no agent claimed, so the pod is the only
-// holder of that claim and every state write it makes has to prove it.
 func TestRunNodeCommand_SendsTheDispatchedClaimFence(t *testing.T) {
 	registerDispatchedClaimPipe()
 	isolateCheckout(t)
@@ -181,8 +179,6 @@ func TestRunNodeCommand_SendsTheDispatchedClaimFence(t *testing.T) {
 	}
 }
 
-// A pod the dispatcher handed no claim keeps running unfenced, which is the
-// local invocation and the older controller that cannot award one.
 func TestRunNodeCommand_RunsUnfencedWithoutADispatchedClaim(t *testing.T) {
 	registerDispatchedClaimPipe()
 	isolateCheckout(t)

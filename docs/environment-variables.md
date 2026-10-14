@@ -98,7 +98,6 @@ Set by Sparkwing for pipeline code and node processes.
 | `SPARKWING_DEBUG_PAUSE_BEFORE` | `sparkwing debug` sets it for the run it starts: pause before the named node. |
 | `SPARKWING_DEBUG_PAUSE_AFTER` | `sparkwing debug` sets it for the run it starts: pause after the named node. |
 | `SPARKWING_DEBUG_PAUSE_ON_FAILURE` | `sparkwing debug` sets it for the run it starts: pause when a node fails. |
-| `SPARKWING_NO_CACHE` | The in-process dispatcher reads it; `sparkwing run` hosts the run itself and passes `--sw-no-cache` as run state, never as this variable. |
 | `SPARKWING_PROTOCOL_HANDLES` | Windows only: the host sets it for a process it starts with `--sw-node-protocol`, naming the inherited request and frame pipe handles as `<request>,<frame>`. The SDK removes it at startup. Never set it by hand. See [node-protocol](node-protocol.md). |
 | `SPARKWING_NODE_URL` | The host sets it for a process it starts with `--sw-node-protocol`: the loopback base URL of the node's `/node/v1` routes. The SDK refuses any URL other than `http://127.0.0.1`, `http://[::1]` or `http://localhost` with a port. Never set it by hand. See [node-protocol](node-protocol.md). |
 | `SPARKWING_NODE_TOKEN` | The host sets it for a process it starts with `--sw-node-protocol`: the bearer for the node's `/node/v1` routes, valid until the process exits. The SDK removes it at startup, before any package's `init` can start a command, so no command inherits it. Never set it by hand. See [node-protocol](node-protocol.md). |
@@ -125,7 +124,6 @@ Set by Sparkwing for pipeline code and node processes.
 | `GITHUB_REPOSITORY` | GitHub Actions |
 | `GITHUB_RUN_ID` | GitHub Actions |
 | `KUBECONFIG` | Kubernetes client configuration |
-| `POD_NAME` | Kubernetes downward API |
 | `POD_NAMESPACE` | Kubernetes downward API |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OpenTelemetry; see [observability](observability.md) |
 | `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` | OpenTelemetry |
