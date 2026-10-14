@@ -104,41 +104,42 @@ func (s *LogSink) Record(rec nodeproto.LogRecord) {
 		out.Event = rec.Event
 	}
 	if len(rec.Attrs) > 0 {
-		out.Attrs = s.maskAttrs(rec.Attrs)
+		out.Attrs = attrsOf(s.cfg.Masker.MaskJSON(rec.Attrs))
 	}
 	if err := s.persist(out); err != nil {
-		s.emit(sparkwing.LogRecord{
+		s.host(sparkwing.LogRecord{
 			Level: "warn", Event: "state_write_failed", Step: out.Step,
-			Msg:   out.Event + " state write failed",
-			Attrs: map[string]any{"error": s.cfg.Masker.Mask(err.Error())},
+			Msg: out.Event + " state write failed", Attrs: map[string]any{"error": err.Error()},
 		})
 	}
 	s.emit(out)
 }
 
-// safety: masking the canonical JSON text as a whole reaches keys and numbers
-// too; text the masking left unparseable is stored as one masked string.
-func (s *LogSink) maskAttrs(raw json.RawMessage) map[string]any {
-	text := string(raw)
-	var v any
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	if dec.Decode(&v) == nil {
-		var buf bytes.Buffer
-		enc := json.NewEncoder(&buf)
-		enc.SetEscapeHTML(false)
-		if enc.Encode(v) == nil {
-			text = strings.TrimSuffix(buf.String(), "\n")
-		}
-	}
-	masked := s.cfg.Masker.Mask(text)
+// safety: masked attrs that are not an object are stored as one string, so a
+// record's attrs are always a map.
+func attrsOf(masked []byte) map[string]any {
 	var out map[string]any
-	dec = json.NewDecoder(strings.NewReader(masked))
+	dec := json.NewDecoder(bytes.NewReader(masked))
 	dec.UseNumber()
 	if dec.Decode(&out) != nil || dec.More() {
-		return map[string]any{"masked_attrs": masked}
+		return map[string]any{"masked_attrs": string(masked)}
 	}
 	return out
+}
+
+// safety: a record the host writes is masked as an SDK record is, its attrs
+// through their JSON; attrs with no secret keep their Go values.
+func maskRecord(m *secrets.Masker, rec sparkwing.LogRecord) sparkwing.LogRecord {
+	rec.Msg = m.Mask(rec.Msg)
+	if len(rec.Attrs) == 0 {
+		return rec
+	}
+	if raw, err := json.Marshal(rec.Attrs); err != nil {
+		rec.Attrs = map[string]any{"masked_attrs": m.Mask(fmt.Sprint(rec.Attrs))}
+	} else if masked := m.MaskJSON(raw); !bytes.Equal(masked, raw) {
+		rec.Attrs = attrsOf(masked)
+	}
+	return rec
 }
 
 func (s *LogSink) persist(rec sparkwing.LogRecord) error {
@@ -197,6 +198,8 @@ func (s *LogSink) emit(rec sparkwing.LogRecord) {
 		s.cfg.Progress()
 	}
 }
+
+func (s *LogSink) host(rec sparkwing.LogRecord) { s.emit(maskRecord(s.cfg.Masker, rec)) }
 
 func (s *LogSink) emitText(rec sparkwing.LogRecord) {
 	tw, ok := s.cfg.Log.(TextWriter)

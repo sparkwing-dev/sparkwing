@@ -47,9 +47,7 @@ func hostNodeLog(ctx context.Context, cfg *Config, n *NodeRun, rec sparkwing.Log
 	if rec.TS.IsZero() {
 		rec.TS = time.Now()
 	}
-	rec.Msg = a.Masker.Mask(rec.Msg)
-	rec.Attrs = a.Masker.MaskAttrs(rec.Attrs)
-	nlog.Emit(rec)
+	nlog.Emit(maskRecord(a.Masker, rec))
 	if err := nlog.Close(); err != nil {
 		run.Logger.Warn("nodehost: close node log", "run", run.ID, "node", id, "err", err)
 	}

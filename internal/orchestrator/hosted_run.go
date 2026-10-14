@@ -609,7 +609,7 @@ func (h hostedChildren) StartChild(ctx context.Context, parent nodehost.ChildPar
 		return "", err
 	}
 	if payload, err := json.Marshal(map[string]any{"child_run_id": id, "pipeline": req.Pipeline, "args": req.Args}); err == nil {
-		noteEvent(ctx, h.state, parent.RunID, parent.NodeID, "child_run_start", maskEventPayload(h.masker, payload))
+		noteEvent(ctx, h.state, parent.RunID, parent.NodeID, "child_run_start", h.masker.MaskJSON(payload))
 	}
 	return id, nil
 }
