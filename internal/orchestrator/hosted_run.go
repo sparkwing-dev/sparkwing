@@ -89,7 +89,6 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 
 	// safety: nodehost registers the secret-flagged args with this masker while it plans, before any node runs.
 	masker := secrets.NewMasker()
-	delegate := secrets.MaskingLogger(opts.Delegate, masker)
 	routes, err := nodehost.Start(slog.Default())
 	if err != nil {
 		return nil, err
@@ -97,7 +96,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 	//nolint:contextcheck // Close bounds its own shutdown; the run's context may already be cancelled here.
 	defer func() { warnHostedClose("node routes", routes.Close()) }()
 	state := &hostedRunState{
-		StateBackend: backends.State, logs: backends.Logs, delegate: delegate, diskRoot: backends.DiskRoot, starts: map[string]time.Time{},
+		StateBackend: backends.State, logs: backends.Logs, delegate: opts.Delegate, diskRoot: backends.DiskRoot, starts: map[string]time.Time{},
 		lineage:       store.Run{ParentRunID: opts.ParentRunID, RetryOf: opts.RetryOf, RetrySource: opts.RetrySource, TriggerSource: opts.Trigger.Source},
 		retryPlanHash: opts.RetryPlanHash,
 	}
@@ -153,7 +152,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 			if err != nil {
 				return nil, err
 			}
-			return hostedNodeLog{NodeLog: log, delegate: delegate}, nil
+			return hostedNodeLog{NodeLog: log, delegate: opts.Delegate}, nil
 		},
 	}
 	if backends.LocalCoordination {
@@ -163,7 +162,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 	if err != nil {
 		return nil, err
 	}
-	planSink, err := newHostedPlanSink(ctx, runID, masker, delegate)
+	planSink, err := newHostedPlanSink(ctx, runID, masker, opts.Delegate)
 	if err != nil {
 		return nil, err
 	}

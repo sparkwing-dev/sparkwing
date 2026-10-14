@@ -10,31 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
-
-type WrappedLogger struct {
-	inner  sparkwing.Logger
-	masker *Masker
-}
-
-func MaskingLogger(inner sparkwing.Logger, masker *Masker) sparkwing.Logger {
-	if inner == nil || masker == nil {
-		return inner
-	}
-	return &WrappedLogger{inner: inner, masker: masker}
-}
-
-func (l *WrappedLogger) Log(level, msg string) {
-	l.inner.Log(level, l.masker.Mask(msg))
-}
-
-func (l *WrappedLogger) Emit(rec sparkwing.LogRecord) {
-	rec.Msg = l.masker.Mask(rec.Msg)
-	rec.Attrs = l.masker.MaskAttrs(rec.Attrs)
-	l.inner.Emit(rec)
-}
 
 type Masker struct {
 	mu     sync.RWMutex

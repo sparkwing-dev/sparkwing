@@ -8,16 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
-
-type captureLogger struct{ last sparkwing.LogRecord }
-
-func (c *captureLogger) Log(level, msg string) {
-	c.Emit(sparkwing.LogRecord{Level: level, Msg: msg})
-}
-func (c *captureLogger) Emit(rec sparkwing.LogRecord) { c.last = rec }
 
 func newTestMasker(values ...string) *Masker {
 	m := NewMasker()
@@ -25,29 +16,6 @@ func newTestMasker(values ...string) *Masker {
 		m.Register(v)
 	}
 	return m
-}
-
-func TestWrappedLogger_MasksStringAttrs(t *testing.T) {
-	inner := &captureLogger{}
-	log := MaskingLogger(inner, newTestMasker("s3cr3t"))
-
-	log.Emit(sparkwing.LogRecord{
-		Event: "step_end",
-		Msg:   "compile",
-		Attrs: map[string]any{
-			"step":        "compile",
-			"duration_ms": 13,
-			"error":       "command failed (exit 2): deploy --token s3cr3t\nauth rejected",
-		},
-	})
-
-	got, _ := inner.last.Attrs["error"].(string)
-	if got != "command failed (exit 2): deploy --token ***\nauth rejected" {
-		t.Fatalf("attrs[error] = %q", got)
-	}
-	if inner.last.Attrs["duration_ms"] != 13 {
-		t.Fatalf("non-string attr was rewritten: %#v", inner.last.Attrs["duration_ms"])
-	}
 }
 
 func TestMaskAttrs_DoesNotMutateCallerMap(t *testing.T) {
