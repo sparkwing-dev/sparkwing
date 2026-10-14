@@ -38,7 +38,10 @@ func TestOperatorAllowedEnvPassesListedNamesButNeverEngineOrCredentialNames(t *t
 		t.Fatalf("node env = %#v, want %#v", got, want)
 	}
 	if line := masker.Mask("note ghp_0123456789abcdefghijklmnopqrstuvwxyz"); strings.Contains(line, "ghp_") {
-		t.Fatalf("a passed-through value reached the log unmasked: %q", line)
+		t.Fatalf("a long passed-through value reached the log unmasked: %q", line)
+	}
+	if line := masker.Mask("decision: deploy to us-east-1"); line != "decision: deploy to us-east-1" {
+		t.Fatalf("short config was masked: %q", line)
 	}
 	for _, name := range []string{"SPARKWING_AGENT_TOKEN", "SPARKWING_NODE_CLAIM_HOLDER", "GITHUB_PAT"} {
 		if !strings.Contains(logged.String(), name) {

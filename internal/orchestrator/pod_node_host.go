@@ -140,7 +140,8 @@ func podSessionEnv(masker *secrets.Masker) []string {
 // safety: the operator's run.submit_env_allow names and prefixes reach the node from this runner's own
 // environment, as AWS_PROFILE or DOCKER_HOST must for its tools; an engine variable, or a credential-shaped name
 // or value, never does whatever the list says, and a name base already sets keeps its one value. A neutral name
-// can still hold a bare token, so every value that passes is masked in the node's logs.
+// can still hold a bare token, so a value long enough to be one is masked in the node's logs; shorter config such
+// as a region stays readable, since masking it would cut it out of every line that names it.
 func operatorAllowedEnv(env, base []string, masker *secrets.Masker, logger *slog.Logger) ([]string, error) {
 	names, prefixes, err := submissionEnvironmentAllowList()
 	if err != nil {
@@ -160,7 +161,9 @@ func operatorAllowedEnv(env, base []string, masker *secrets.Masker, logger *slog
 		case submissionEnvironmentCredentialName(key, value) || envredact.CredentialValue(value) || envredact.RedactValue(value) != value:
 			credential = append(credential, key)
 		default:
-			masker.Register(value)
+			if len(value) >= operatorEnvMaskMinLen {
+				masker.Register(value)
+			}
 			out = append(out, entry)
 		}
 	}
@@ -171,6 +174,8 @@ func operatorAllowedEnv(env, base []string, masker *secrets.Masker, logger *slog
 	}
 	return out, nil
 }
+
+const operatorEnvMaskMinLen = 12
 
 func operatorListed(key string, names map[string]bool, prefixes []string) bool {
 	if names[key] {

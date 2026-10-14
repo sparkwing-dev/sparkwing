@@ -73,7 +73,8 @@ own handles, and the run facts the host sets (dry run, runner identity,
 admission lease). The agent token, cache grant, artifact store, claim
 variables and every other engine variable stay in the host, and an
 allow-listed name that is an engine variable or reads as a credential is
-dropped; every allow-listed value that passes is masked in the node's logs. A dependency proxy URL is the exception: any credential in it reaches
+dropped; an allow-listed value of 12 characters or more is masked in the node's
+logs. A dependency proxy URL is the exception: any credential in it reaches
 the node, and masking only keeps it out of the logs. See `MinimalEnv` in
 `internal/nodehost/attempt.go` and `podSessionEnv` and `operatorAllowedEnv` in
 `internal/orchestrator/pod_node_host.go`.

@@ -849,8 +849,8 @@ bearer for the host's loopback node routes, limited to its claimed run and
 node. That bearer cannot claim or renew work, manage runners, or call
 administrative routes. The child inherits only the minimum runtime environment,
 the runner's dependency proxy settings, and non-credential variables named by
-`run.submit_env_allow` in the agent machine's config.yaml, whose values are
-masked in the node's logs, not the agent service's cloud, cache, or service
+`run.submit_env_allow` in the agent machine's config.yaml, whose values of 12
+characters or more are masked in the node's logs, not the agent service's cloud, cache, or service
 credentials. A credential inside a
 dependency proxy URL is the exception: it reaches pipeline code, and masking
 only keeps it out of the logs.
