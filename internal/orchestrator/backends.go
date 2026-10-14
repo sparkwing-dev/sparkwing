@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -102,55 +101,6 @@ type NodeLog interface {
 	Close() error
 }
 
-type autoRetryNodeResetter interface {
-	ResetNodeForAutoRetry(context.Context, string, string) error
-}
-
-type retryNodeLister interface {
-	ListNodes(context.Context, string) ([]*store.Node, error)
-}
-
-func listRetryNodes(ctx context.Context, state StateBackend, runID string) ([]*store.Node, error) {
-	lister, ok := state.(retryNodeLister)
-	if !ok {
-		return nil, errors.New("state backend does not support strict retry node listing")
-	}
-	return lister.ListNodes(ctx, runID)
-}
-
-func resetNodeForAutoRetry(ctx context.Context, state StateBackend, runID, nodeID string) error {
-	resetter, ok := state.(autoRetryNodeResetter)
-	if !ok {
-		return errors.New("state backend does not support whole-node retry reset")
-	}
-	return resetter.ResetNodeForAutoRetry(ctx, runID, nodeID)
-}
-
-// safety: the close is the write that hands over a node's last lines and
-// ends its live stream, so it has to land before the node's status goes
-// terminal; a reader that acts on the status would otherwise see a short log.
-func handOverNodeLog(ctx context.Context, log NodeLog) {
-	if err := log.Close(); err != nil {
-		sparkwing.Debug(ctx, "close node log: %v", err)
-	}
-}
-
-func bindNodeLogExecutionAttempt(log NodeLog, ordinal int) error {
-	binder, ok := log.(interface{ BindExecutionAttempt(int) error })
-	if !ok {
-		return nil
-	}
-	return binder.BindExecutionAttempt(ordinal)
-}
-
-func flushNodeLogExecutionAttempt(log NodeLog) error {
-	flusher, ok := log.(interface{ FlushExecutionAttempt() error })
-	if !ok {
-		return nil
-	}
-	return flusher.FlushExecutionAttempt()
-}
-
 type ConcurrencyBackend interface {
 	AcquireSlot(ctx context.Context, req store.AcquireSlotRequest) (store.AcquireSlotResponse, error)
 	State(ctx context.Context, key string) (*store.ConcurrencyState, error)
@@ -177,28 +127,12 @@ func LocalBackends(paths Paths, st *store.Store, art storage.ArtifactStore) Back
 
 var _ StateBackend = (*client.Client)(nil)
 
-func RemoteBackends(c *client.Client, logs LogBackend, art storage.ArtifactStore, httpClient *http.Client, lease time.Duration) Backends {
-	if httpClient == nil {
-		httpClient = defaultHTTPClient()
-	}
-	return Backends{
-		State:       c,
-		Logs:        logs,
-		Concurrency: NewHTTPConcurrency(c.BaseURL(), httpClient, c.Token(), lease),
-		Artifact:    art,
-	}
-}
-
-func defaultHTTPClient() *http.Client { return nil }
-
 func localRunLogDir(b LogBackend, runID string) string {
 	switch l := b.(type) {
 	case localLogs:
 		return EnsureRunLogDir(l.paths, runID)
 	case *localLogs:
 		return EnsureRunLogDir(l.paths, runID)
-	case *HTTPLogs:
-		return absExistingDir(l.localRunDir(runID))
 	}
 	return ""
 }

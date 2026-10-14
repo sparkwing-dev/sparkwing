@@ -6,73 +6,7 @@ import (
 	"testing"
 
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
-
-func semaphoreClaims(names ...string) []wingwire.SemaphoreClaim {
-	var claims []wingwire.SemaphoreClaim
-	for _, name := range names {
-		claims = append(claims, wingwire.SemaphoreClaim{Name: name, Capacity: 1, Cost: 1})
-	}
-	return claims
-}
-
-func TestAdmissionFailureReportsSlotFullOnlyForAClaimedGroup(t *testing.T) {
-	err := admissionFailure(semaphoreClaims("deploy-lock"),
-		&wingdclient.AdmissionError{Policy: wingwire.PolicyFail, Key: "deploy-lock"})
-	if !strings.Contains(err.Error(), "slot full under OnLimit:Fail") {
-		t.Fatalf("claimed group failure = %q, want the slot-full diagnosis", err)
-	}
-}
-
-func TestAdmissionFailureNeverCallsAnUnclaimedKeyExhaustedCapacity(t *testing.T) {
-	const storeSkew = "daemon v0.38.2 could not read the runs store: " +
-		"sparkwing: database is at schema version 26; this binary expects 17"
-
-	for _, tc := range []struct {
-		name   string
-		err    *wingdclient.AdmissionError
-		expect []string
-	}{
-		{
-			name:   "schema skew",
-			err:    &wingdclient.AdmissionError{Policy: wingwire.PolicyFail, Key: "terminal-check", Reason: storeSkew},
-			expect: []string{storeSkew, "sparkwing daemon status"},
-		},
-		{
-			name:   "terminal check without a reason",
-			err:    &wingdclient.AdmissionError{Policy: wingwire.PolicyFail, Key: "terminal-check"},
-			expect: []string{`"terminal-check"`, "sparkwing daemon status"},
-		},
-		{
-			name:   "cancelled run",
-			err:    &wingdclient.AdmissionError{Policy: wingwire.PolicyFail, Key: "cancelled"},
-			expect: []string{`"cancelled"`},
-		},
-		{
-			name:   "a key this client never claimed",
-			err:    &wingdclient.AdmissionError{Policy: wingwire.PolicyFail, Key: "some-future-daemon-key"},
-			expect: []string{`"some-future-daemon-key"`},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			err := admissionFailure(semaphoreClaims("deploy-lock"), tc.err)
-			got := err.Error()
-			if strings.Contains(got, "slot full") || strings.Contains(got, "sparkwing queue") {
-				t.Fatalf("failure = %q, want no exhausted-capacity diagnosis", got)
-			}
-			var wrapped *wingdclient.AdmissionError
-			if !errors.As(err, &wrapped) || wrapped != tc.err {
-				t.Fatalf("failure %q lost the wrapped admission error", got)
-			}
-			for _, want := range tc.expect {
-				if !strings.Contains(got, want) {
-					t.Fatalf("failure = %q, want it to contain %q", got, want)
-				}
-			}
-		})
-	}
-}
 
 func TestDaemonStoreSchemaSkewRefusesADaemonBehindTheStore(t *testing.T) {
 	err := daemonStoreSchemaSkew("v0.38.2", "v0.39.0", 17, 26)
@@ -86,17 +20,6 @@ func TestDaemonStoreSchemaSkewRefusesADaemonBehindTheStore(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "upgrade that binary to one that understands schema 26") {
 		t.Fatalf("skew error = %q, want the restart offered only after the upgrade that changes the binary", err)
-	}
-}
-
-func TestReasonlessDaemonKeysKeepTheirPreviousShape(t *testing.T) {
-	for _, key := range []string{"duplicate", "parent", "reattach", "invalid"} {
-		admErr := &wingdclient.AdmissionError{Policy: wingwire.PolicyFail, Key: key}
-		got := admissionFailure(semaphoreClaims("deploy-lock"), admErr).Error()
-		want := "local admission: " + admErr.Error()
-		if got != want {
-			t.Fatalf("%s failure = %q, want %q", key, got, want)
-		}
 	}
 }
 
@@ -137,31 +60,6 @@ func TestDaemonUpgradeRemedyWithoutAResolvableHostBinary(t *testing.T) {
 	}
 }
 
-func TestNodeAdmissionFailureSeparatesTheClaimFromTheDaemonsOwnKeys(t *testing.T) {
-	claim := wingwire.SemaphoreClaim{Name: "deploy-lock", Capacity: 1, Cost: 1}
-
-	full := nodeAdmissionFailure(claim, &wingdclient.AdmissionError{Policy: wingwire.PolicyFail, Key: "deploy-lock"})
-	if full.Error() != `concurrency key "deploy-lock" slot full under OnLimit:Fail` {
-		t.Fatalf("claimed key failure = %q", full)
-	}
-
-	const storeSkew = "daemon v0.38.2 could not read the runs store: database is at schema version 26; this binary expects 17"
-	admErr := &wingdclient.AdmissionError{Policy: wingwire.PolicyFail, Key: "terminal-check", Reason: storeSkew}
-	got := nodeAdmissionFailure(claim, admErr)
-	if strings.Contains(got.Error(), "slot full") {
-		t.Fatalf("node failure = %q, want no exhausted-capacity diagnosis", got)
-	}
-	for _, want := range []string{storeSkew, "sparkwing daemon status"} {
-		if !strings.Contains(got.Error(), want) {
-			t.Fatalf("node failure = %q, want it to contain %q", got, want)
-		}
-	}
-	var wrapped *wingdclient.AdmissionError
-	if !errors.As(got, &wrapped) || wrapped != admErr {
-		t.Fatalf("node failure %q lost the wrapped admission error", got)
-	}
-}
-
 func TestStoreSchemaSkewNamesTheDaemonHostAndTheUpgrade(t *testing.T) {
 	t.Setenv(wingdclient.HostBinEnv, "/opt/sparkwing/bin/sparkwing")
 	err := daemonStoreSchemaSkew("v0.38.2", "v0.39.0", 17, 26)
@@ -178,16 +76,5 @@ func TestStoreSchemaSkewNamesTheDaemonHostAndTheUpgrade(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "home of its own") || strings.Contains(err.Error(), "isolated-home") {
 		t.Errorf("skew error = %q, want no isolated-home remedy", err)
-	}
-}
-
-func TestTerminalCheckRefusalNamesTheUpgrade(t *testing.T) {
-	t.Setenv(wingdclient.HostBinEnv, "/opt/sparkwing/bin/sparkwing")
-	err := admissionFailure(semaphoreClaims("deploy-lock"),
-		&wingdclient.AdmissionError{Policy: wingwire.PolicyFail, Key: terminalCheckKey})
-	for _, want := range []string{"sparkwing daemon status", "then `sparkwing daemon restart`"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("terminal-check refusal = %q, want it to contain %q", err, want)
-		}
 	}
 }

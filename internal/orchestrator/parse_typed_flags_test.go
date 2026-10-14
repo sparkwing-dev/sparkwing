@@ -2,8 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"reflect"
-	"sort"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -42,29 +40,6 @@ func init() {
 	})
 }
 
-func TestParseTypedFlags_NoDefaultInjection(t *testing.T) {
-	out, err := parseTypedFlags("ptf-demo", []string{"--repo", "r"})
-	if err != nil {
-		t.Fatalf("expected success, got %v", err)
-	}
-	if out["repo"] != "r" {
-		t.Errorf("repo=%q", out["repo"])
-	}
-	if _, ok := out["target"]; ok {
-		t.Errorf("parse must not inject the --target default, got %q", out["target"])
-	}
-}
-
-func TestParseTypedFlags_MissingRequiredDeferred(t *testing.T) {
-	out, err := parseTypedFlags("ptf-demo", []string{"--target", "prod"})
-	if err != nil {
-		t.Fatalf("parse-only must not reject a missing required flag, got %v", err)
-	}
-	if _, ok := out["repo"]; ok {
-		t.Errorf("repo should be absent from parse output, got %q", out["repo"])
-	}
-}
-
 func TestInvoke_RequiredSatisfiedByMergedArgs(t *testing.T) {
 	reg, _ := sparkwing.Lookup("ptf-demo")
 	if _, err := reg.Invoke(context.Background(), map[string]string{"repo": "r"}, sparkwing.RunContext{Pipeline: "ptf-demo"}); err != nil {
@@ -72,150 +47,5 @@ func TestInvoke_RequiredSatisfiedByMergedArgs(t *testing.T) {
 	}
 	if _, err := reg.Invoke(context.Background(), map[string]string{}, sparkwing.RunContext{Pipeline: "ptf-demo"}); err == nil {
 		t.Fatal("missing required repo should still fail at Invoke")
-	}
-}
-
-func TestParseTypedFlags_EnumViolation(t *testing.T) {
-	_, err := parseTypedFlags("ptf-demo", []string{"--repo", "r", "--target", "banana"})
-	if err == nil || !contains(err.Error(), "must be one of") {
-		t.Fatalf("expected enum violation, got %v", err)
-	}
-}
-
-func TestParseTypedFlags_LongFormBool(t *testing.T) {
-	out, err := parseTypedFlags("ptf-demo", []string{"--repo", "r", "--loud"})
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if out["loud"] != "true" {
-		t.Errorf("loud=%q, want true", out["loud"])
-	}
-}
-
-func TestParseTypedFlags_ShortAlias(t *testing.T) {
-	out, err := parseTypedFlags("ptf-demo", []string{"--repo", "r", "-l"})
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if out["loud"] != "true" {
-		t.Errorf("short -l should set loud=true, got %q", out["loud"])
-	}
-}
-
-func TestParseTypedFlags_BagForwardsUnknown(t *testing.T) {
-	out, err := parseTypedFlags("ptf-demo", []string{
-		"--repo", "r",
-		"--custom", "abc",
-		"--another", "foo",
-	})
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if out["custom"] != "abc" || out["another"] != "foo" {
-		keys := make([]string, 0, len(out))
-		for k := range out {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		t.Fatalf("bag entries lost: out=%v keys=%v", out, keys)
-	}
-}
-
-func TestParseTypedFlags_UnknownFlagWithoutBagErrors(t *testing.T) {
-	_, err := parseTypedFlags("ptf-plain", []string{"--bogus", "1"})
-	if err == nil || !contains(err.Error(), "unknown flag") {
-		t.Fatalf("expected unknown-flag error, got %v", err)
-	}
-}
-
-func TestParseTypedFlags_BoolWithEqualSign(t *testing.T) {
-	out, err := parseTypedFlags("ptf-demo", []string{"--repo", "r", "--loud=false"})
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if out["loud"] != "false" {
-		t.Errorf("--loud=false should set loud to false, got %q", out["loud"])
-	}
-}
-
-func TestParseTypedFlags_RoundTripsThroughInvoke(t *testing.T) {
-	out, err := parseTypedFlags("ptf-demo", []string{
-		"--repo", "myrepo",
-		"--target", "prod",
-		"-l",
-		"--token", "sup3r-secret",
-		"--custom-key", "custom-val",
-	})
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	reg, _ := sparkwing.Lookup("ptf-demo")
-	plan, err := reg.Invoke(context.Background(), out, sparkwing.RunContext{Pipeline: "ptf-demo"})
-	if err != nil {
-		t.Fatalf("invoke: %v", err)
-	}
-	if plan == nil {
-		t.Fatal("plan nil")
-	}
-}
-
-func contains(s, sub string) bool {
-	return reflect.ValueOf(s).String() != "" && (s == sub || (len(s) >= len(sub) && (indexOf(s, sub) >= 0)))
-}
-
-func indexOf(s, sub string) int {
-	if sub == "" {
-		return 0
-	}
-	if len(sub) > len(s) {
-		return -1
-	}
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
-}
-
-type ptfSliceInputs struct {
-	Envs []string `flag:"envs" enum:"dev,prod" default:"dev"`
-}
-
-type ptfRegionArgs struct {
-	Regions []string `flag:"regions" enum:"east,west" default:"east"`
-}
-
-type ptfRegionJob struct {
-	sparkwing.Base
-	sparkwing.WithArgs[ptfRegionArgs]
-}
-
-func (j *ptfRegionJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	return sparkwing.Step(w, "run", func(context.Context) error { return nil }), nil
-}
-
-type ptfSlicePipe struct{}
-
-func (ptfSlicePipe) Plan(_ context.Context, plan *sparkwing.Plan, _ ptfSliceInputs, _ sparkwing.RunContext) error {
-	sparkwing.Job(plan, "deploy", &ptfRegionJob{})
-	return nil
-}
-
-func TestParseTypedFlags_SliceEnumChecksEachElement(t *testing.T) {
-	sparkwing.Register[ptfSliceInputs]("ptf-slice-enum", func() sparkwing.Pipeline[ptfSliceInputs] {
-		return ptfSlicePipe{}
-	})
-	out, err := parseTypedFlags("ptf-slice-enum", []string{"--envs", "dev,prod", "--regions", "east,west"})
-	if err != nil {
-		t.Fatalf("valid elements rejected: %v", err)
-	}
-	if out["envs"] != "dev,prod" || out["regions"] != "east,west" {
-		t.Errorf("parsed = %v", out)
-	}
-	for _, args := range [][]string{{"--envs", "dev,qa"}, {"--regions", "east,north"}} {
-		if _, err := parseTypedFlags("ptf-slice-enum", args); err == nil || !contains(err.Error(), "must be one of") {
-			t.Errorf("%v: err = %v, want an enum violation", args, err)
-		}
 	}
 }

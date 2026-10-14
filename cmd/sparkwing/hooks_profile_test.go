@@ -6,14 +6,8 @@ import (
 	"testing"
 )
 
-func TestRenderHookScript_ScrubsTheAmbientProfile(t *testing.T) {
+func TestRenderHookScript_RunsThePipelinePlainly(t *testing.T) {
 	script := renderHookScript("pre-commit", []string{"gate"}, false)
-	if !strings.Contains(script, "unset SPARKWING_PROFILE") {
-		t.Errorf("hook should scrub the ambient profile:\n%s", script)
-	}
-	if !strings.Contains(script, "SPARKWING_SECRETS_PROFILE") {
-		t.Errorf("hook should scrub the independent secrets profile:\n%s", script)
-	}
 	if !strings.Contains(script, "sparkwing run 'gate'\n") {
 		t.Errorf("an unpinned hook should run the pipeline plainly:\n%s", script)
 	}
@@ -83,8 +77,6 @@ func TestRenderHookScript_ForwarderCarriesNoProfile(t *testing.T) {
 
 func TestRunPipelineForProof_RunsThePipelinePlainly(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	t.Setenv("SPARKWING_PROFILE", "ambient-profile")
-	t.Setenv("SPARKWING_SECRETS_PROFILE", "ambient-secrets")
 	repo := t.TempDir()
 	cmd, err := pipelineProofCommand(repo, "gate")
 	if err != nil {
@@ -102,10 +94,5 @@ func TestRunPipelineForProof_RunsThePipelinePlainly(t *testing.T) {
 	}
 	if cmd.Dir != repo {
 		t.Errorf("proof directory = %q, want %q", cmd.Dir, repo)
-	}
-	for _, value := range cmd.Env {
-		if strings.HasPrefix(value, "SPARKWING_PROFILE=") || strings.HasPrefix(value, "SPARKWING_SECRETS_PROFILE=") {
-			t.Errorf("proof inherited %q", value)
-		}
 	}
 }

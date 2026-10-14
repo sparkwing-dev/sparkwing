@@ -17,7 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -312,28 +311,6 @@ func TestLogSinkWritesTheLocalRunDirectoryLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkStored(t, readLines(t, bytes.NewReader(raw)))
-}
-
-type fakeLogStore struct {
-	storage.LogStore
-	mu   sync.Mutex
-	data bytes.Buffer
-}
-
-func (s *fakeLogStore) Append(_ context.Context, runID, nodeID string, data []byte) error {
-	if runID != "run-1" || nodeID != "build" {
-		return errors.New("wrong log " + runID + "/" + nodeID)
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.data.Write(data)
-	return nil
-}
-
-func TestLogSinkWritesTheControllerLogStore(t *testing.T) {
-	store := &fakeLogStore{}
-	writeThrough(t, orchestrator.NewLogStoreBackend(store, nil))
-	checkStored(t, readLines(t, &store.data))
 }
 
 type textLog struct {

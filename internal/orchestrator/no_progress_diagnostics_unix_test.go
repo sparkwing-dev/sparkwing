@@ -3,16 +3,12 @@
 package orchestrator_test
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -33,44 +29,6 @@ func (noProgressDiagnosticPipeline) Plan(_ context.Context, plan *sparkwing.Plan
 		// safety: the window must outlast a cold child start, or SIGQUIT lands before the Go runtime can dump
 	}).NoProgressTimeout(2 * time.Second)
 	return nil
-}
-
-func TestNoProgressTimeout_DumpIsAvailableThroughJobLogs(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 2.1s of real work; the fast class runs under -short")
-	}
-	p := newPathsWithStore(t)
-	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "mod-no-progress-diagnostic"})
-	if err != nil {
-		t.Fatalf("RunLocal: %v", err)
-	}
-	if res.Status != "failed" {
-		t.Fatalf("status = %q, want failed", res.Status)
-	}
-
-	st, err := store.Open(p.StateDB())
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	nodes, err := st.ListNodes(context.Background(), res.RunID)
-	_ = st.Close()
-	if err != nil {
-		t.Fatalf("list nodes: %v", err)
-	}
-	if len(nodes) != 1 || nodes[0].FailureReason != store.FailureNoProgressTimeout {
-		t.Fatalf("nodes = %+v, want a no-progress timeout", nodes)
-	}
-
-	var logs bytes.Buffer
-	if err := orchestrator.JobLogs(context.Background(), p, res.RunID, orchestrator.LogsOpts{Node: "silent"}, &logs); err != nil {
-		t.Fatalf("JobLogs: %v", err)
-	}
-	got := logs.String()
-	for _, want := range []string{"SIGQUIT: quit", "goroutine", "TestNoProgressDiagnosticHelper"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("client-visible node log omitted %q", want)
-		}
-	}
 }
 
 func TestNoProgressDiagnosticHelper(t *testing.T) {

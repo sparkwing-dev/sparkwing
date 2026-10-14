@@ -18,32 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-type syncWriter struct {
-	mu  sync.Mutex
-	buf strings.Builder
-}
-
-func (w *syncWriter) Write(p []byte) (int, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.buf.Write(p)
-}
-
-func (w *syncWriter) String() string {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.buf.String()
-}
-
-func captureStandaloneWarnings(t *testing.T) *syncWriter {
-	t.Helper()
-	out := &syncWriter{}
-	previous := standaloneWarningOut
-	standaloneWarningOut = out
-	t.Cleanup(func() { standaloneWarningOut = previous })
-	return out
-}
-
 const standaloneNoDaemonBlock = `sparkwing: no admission daemon is running and no sparkwing is installed to host one, so this run is standalone. It cannot see other runs on this machine and they cannot see it, so together they may oversubscribe it. Everything else works.
 
   to host one
@@ -136,70 +110,6 @@ func TestStandaloneReasonFor_ClassifiesEachBranch(t *testing.T) {
 		if got := standaloneReasonFor(tc.err); got != tc.want {
 			t.Errorf("standaloneReasonFor(%v) = %q, want %q", tc.err, got, tc.want)
 		}
-	}
-}
-
-func standaloneRunLocal(t *testing.T, pipeline string) (*Result, Paths, *storeOpenLog, *syncWriter) {
-	t.Helper()
-	registerHostTestPipelines()
-	home := wingdTestHome(t)
-	t.Setenv("SPARKWING_HOME", home)
-	paths := PathsAt(home)
-	opens := countStoreOpens(t)
-	warnings := captureStandaloneWarnings(t)
-
-	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
-	defer cancel()
-	res, err := RunLocal(ctx, paths, Options{
-		Pipeline:  pipeline,
-		Admission: unhostedAdmission(home, &syncWriter{}),
-	})
-	if err != nil {
-		t.Fatalf("RunLocal: %v", err)
-	}
-	return res, paths, opens, warnings
-}
-
-func TestRunLocal_StandaloneStoreIsTheOnlyOneOpened(t *testing.T) {
-	res, paths, opens, warnings := standaloneRunLocal(t, "host-implicit")
-	if res.Status != "success" {
-		t.Fatalf("status = %q (%v), want success", res.Status, res.Error)
-	}
-	if got := opens.opened(paths.StateDB()); got != 0 {
-		t.Fatalf("the run opened this machine's shared store %d times, want 0", got)
-	}
-	if got := opens.opened(paths.StandaloneStateDB()); got != 1 {
-		t.Fatalf("the run opened %s %d times, want 1", paths.StandaloneStateDB(), got)
-	}
-	if _, err := os.Stat(paths.StateDB()); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("stat %s = %v, want the shared store never created", paths.StateDB(), err)
-	}
-	if got := warnings.String(); got != standaloneNoDaemonBlock {
-		t.Fatalf("stderr block:\ngot  %q\nwant %q", got, standaloneNoDaemonBlock)
-	}
-
-	st, err := store.Open(paths.StandaloneStateDB())
-	if err != nil {
-		t.Fatalf("open standalone store: %v", err)
-	}
-	defer func() { _ = st.Close() }()
-	run, err := st.GetRun(context.Background(), res.RunID)
-	if err != nil {
-		t.Fatalf("read the standalone run row: %v", err)
-	}
-	on, reason := runStandalone(run)
-	if !on || reason != standaloneNoDaemon {
-		t.Fatalf("start record standalone=%v reason=%q, want true and %q", on, reason, standaloneNoDaemon)
-	}
-}
-
-func TestRunLocal_StandaloneRunsAResourcesPin(t *testing.T) {
-	res, _, _, warnings := standaloneRunLocal(t, "host-plan-resources")
-	if res.Status != "success" {
-		t.Fatalf("a .Resources() pin on an empty box = %q (%v), want success", res.Status, res.Error)
-	}
-	if got := warnings.String(); got != standaloneNoDaemonBlock {
-		t.Fatalf("stderr block:\ngot  %q\nwant %q", got, standaloneNoDaemonBlock)
 	}
 }
 
@@ -425,7 +335,6 @@ func TestSubmissionEnvironment_DeniesTheChildStoreVariables(t *testing.T) {
 	captured := []string{
 		StandaloneStateDBEnv + "=/tmp/stale/state.db",
 		StandaloneReasonEnv + "=" + standaloneNoDaemon,
-		"SPARKWING_PROFILE=prod",
 		"PATH=/submit/bin",
 	}
 	got := submissionExecutionEnvironment(captured, "/home")
@@ -436,9 +345,6 @@ func TestSubmissionEnvironment_DeniesTheChildStoreVariables(t *testing.T) {
 	}
 	if !slices.Contains(got, "PATH=/submit/bin") {
 		t.Fatalf("the filter dropped an entry it should keep: %v", got)
-	}
-	if slices.Contains(got, "SPARKWING_PROFILE=prod") {
-		t.Fatalf("a profile exported in the submitting shell reached the child: %v", got)
 	}
 	for _, name := range []string{StandaloneStateDBEnv, StandaloneReasonEnv} {
 		if envAllowed(name) {
@@ -553,45 +459,5 @@ func TestStandaloneRun_DiscardsOnlyWhatItCreatedAndOnlyOnARefusal(t *testing.T) 
 				t.Fatalf("stat = %v, want the store kept", statErr)
 			}
 		})
-	}
-}
-
-// safety: a run that fails while shaping its plan still wrote its row to the
-// standalone store, so it says where that row went. Only a refusal, which
-// never started, stays quiet.
-func TestRunLocal_ASetupFailureKeepsItsRowAndSaysItWasStandalone(t *testing.T) {
-	registerHostTestPipelines()
-	home := noDaemonHome(t)
-	paths := PathsAt(home)
-	warnings := captureStandaloneWarnings(t)
-
-	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
-	defer cancel()
-	res, err := RunLocal(ctx, paths, Options{
-		Pipeline:  "host-implicit",
-		Only:      "no-such-node",
-		Admission: unhostedAdmission(home, &syncWriter{}),
-	})
-	if err != nil {
-		t.Fatalf("RunLocal: %v", err)
-	}
-	if res.Status != "failed" {
-		t.Fatalf("status = %q, want failed on an unknown --sw-only selector", res.Status)
-	}
-	if got := warnings.String(); got != standaloneNoDaemonBlock {
-		t.Fatalf("stderr block:\ngot  %q\nwant %q", got, standaloneNoDaemonBlock)
-	}
-
-	st, err := store.Open(paths.StandaloneStateDB())
-	if err != nil {
-		t.Fatalf("open the standalone store the failed run wrote to: %v", err)
-	}
-	defer func() { _ = st.Close() }()
-	run, err := st.GetRun(context.Background(), res.RunID)
-	if err != nil {
-		t.Fatalf("the setup failure deleted the store holding its own run row: %v", err)
-	}
-	if on, reason := runStandalone(run); !on || reason != standaloneNoDaemon {
-		t.Fatalf("start record standalone=%v reason=%q", on, reason)
 	}
 }

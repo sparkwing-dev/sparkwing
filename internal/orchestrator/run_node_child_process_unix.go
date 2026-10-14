@@ -14,8 +14,6 @@ import (
 
 const assistedChildTerminationGrace = time.Second
 
-const assistedChildOwnershipBoundary = "process_session"
-
 type unixAssistedChildProcess struct {
 	group *procgroup.Group
 }

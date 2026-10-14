@@ -110,9 +110,8 @@ sends its run, node, event, and concurrency calls to the admission daemon
 over the daemon's `api.sock`, and starts each node as a
 `--sw-node-protocol` process of the pipeline binary that reaches the run
 only through the CLI's loopback node routes (see [node
-protocol](node-protocol.md)). The child runs a node starts, and any node
-replayed from them, run in the pipeline binary's own dispatcher and reach
-the daemon over the same socket. No process in a hosted run holds the file
+protocol](node-protocol.md)). A child run a node starts is hosted the same
+way, by the `sparkwing` that claims it from the local queue. No process in a hosted run holds the file
 open, so the store's schema is out of a pipeline binary's contract. The CLI verbs that read the file -- `sparkwing
 runs`, `sparkwing doctor`, the dashboard -- are the
 installed build or a peer of it and still open it directly.
@@ -213,8 +212,8 @@ source may be missing or unbuildable.
 Retries preserve the selected pipeline commit and recreate its compile worktree.
 They execute in a snapshot of the original execution revision, following the
 same checkout rules as other retries.
-The pipeline process receives the selected commit as `SPARKWING_PIPELINE_REV`;
-Sparkwing also records it as `pipeline_revision` in the run invocation.
+Sparkwing records the selected commit as `pipeline_revision` in the run
+invocation.
 
 #### Making a retry safe
 
@@ -282,10 +281,7 @@ Detaching is local-only. To hand a run to a cluster, use
 handle after the run row is durable and before planning or node execution.
 The handle carries `schema_version`, `run_id`, `pipeline`, `log_path`, and
 `status`. Sparkwing exits before executing work when publication fails.
-
-The outer CLI passes the path to the pipeline process through
-`SPARKWING_RUN_HANDLE_FILE`; callers should use the flag. The file is mode
-`0600` and replaces its destination atomically.
+The file is mode `0600` and replaces its destination atomically.
 
 #### A detached run uses an allow-listed submission environment
 
@@ -1285,7 +1281,7 @@ no store it could read, so a run in a skipped store is not reported
 simply missing.
 
 `sparkwing runs bounce`, `runs annotations add`, `runs approvals approve`,
-`runs approvals deny`, `debug rerun`, and `debug replay` write to the
+`runs approvals deny`, and `debug rerun` write to the
 store that holds the run, so they act on a standalone run in its own
 store.
 

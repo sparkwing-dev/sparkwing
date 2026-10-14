@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -145,122 +144,6 @@ func TestDescribeSchemaDeclaresEveryEmittedField(t *testing.T) {
 func TestLogRecordSchemaDeclaresEveryEmittedField(t *testing.T) {
 	s := loadProtocolSchema(t, "log-record.schema.json")
 	s.requireFieldsDeclared(t, "", reflect.TypeFor[sparkwing.LogRecord]())
-}
-
-type protocolFixtureInputs struct {
-	Env   string `flag:"env" required:"true" desc:"Target environment"`
-	Count int    `flag:"count" default:"3" desc:"Replicas"`
-}
-
-type protocolFixturePipeline struct{ sparkwing.Base }
-
-func (protocolFixturePipeline) ShortHelp() string { return "Deploy the fixture" }
-
-func (protocolFixturePipeline) Examples() []sparkwing.Example {
-	return []sparkwing.Example{{Comment: "deploy", Command: "sparkwing run fixture --env prod"}}
-}
-
-func (protocolFixturePipeline) EnvVars() []sparkwing.EnvVarDoc {
-	return []sparkwing.EnvVarDoc{{Name: "REGION", Description: "cloud region", Default: "us-west-2"}}
-}
-
-func (protocolFixturePipeline) Plan(_ context.Context, plan *sparkwing.Plan, _ protocolFixtureInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, rc.Pipeline, func(ctx context.Context) error { return nil })
-	return nil
-}
-
-type protocolStepsJob struct{}
-
-func (protocolStepsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	build := sparkwing.Step(w, "build", func(context.Context) error { return nil }).
-		SkipIf(func(context.Context) bool { return false })
-	sparkwing.Step(w, "test", func(context.Context) error { return nil }).Needs(build).Optional()
-	return nil, nil
-}
-
-func TestDescribeAndPlanOutputMatchTheSchema(t *testing.T) {
-	s := loadProtocolSchema(t, "describe.schema.json")
-
-	const name = "node-protocol-describe-fixture"
-	if _, ok := sparkwing.Lookup(name); !ok {
-		sparkwing.Register[protocolFixtureInputs](name, func() sparkwing.Pipeline[protocolFixtureInputs] {
-			return protocolFixturePipeline{}
-		})
-	}
-	described, err := sparkwingruntime.DescribeAll()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.ContainsFunc(described, func(dp sparkwing.DescribePipeline) bool { return dp.Name == name }) {
-		t.Fatalf("describe output lacks %s", name)
-	}
-	for _, dp := range described {
-		s.mustValidate(t, "pipeline", dp)
-	}
-
-	plan := sparkwing.NewPlan()
-	group := sparkwing.NewConcurrencyGroup("db", sparkwing.ConcurrencyLimit{
-		Capacity: 2, Scope: sparkwing.ScopeBox, OnLimit: sparkwing.Queue, QueueTimeout: time.Minute,
-	})
-	build := sparkwing.Job(plan, "build", protocolStepsJob{}).
-		Retry(3, sparkwing.RetryBackoff(time.Second), sparkwing.RetryAuto()).
-		Timeout(10*time.Minute).
-		NoProgressTimeout(time.Minute).
-		Requires("linux").
-		Prefers("fast").
-		Concurrency(group, 1).
-		Resources(sparkwing.Cores(2), sparkwing.MemoryGB(1)).
-		Env("MODE", "ci").
-		Outputs("dist/**").
-		CacheDir(sparkwing.GoModules()).
-		BeforeRun(func(context.Context) error { return nil }).
-		AfterRun(func(context.Context, error) {}).
-		Verify(func(context.Context) error { return nil }).
-		SkipIf(func(context.Context) bool { return false }).
-		Memoize(func(context.Context) (sparkwing.CacheKey, error) { return sparkwing.Key("build"), nil }, sparkwing.TTL(time.Hour))
-	sparkwing.Job(plan, "deploy", func(context.Context) error { return nil }).
-		Needs(build).
-		Consumes(build).
-		Optional().
-		ContinueOnError().
-		OnFailure("rollback", func(context.Context) error { return nil })
-	sparkwing.JobApproval(plan, "approve", sparkwing.ApprovalConfig{Message: "ship it?", Timeout: time.Hour}).Needs(build)
-	plan.Concurrency(sparkwing.NewConcurrencyGroup("deploys", sparkwing.ConcurrencyLimit{
-		Capacity: 3, OnLimit: sparkwing.CancelOthers, CancelTimeout: time.Minute,
-	}), 2)
-
-	raw, err := marshalPlanSnapshot(plan, sparkwing.RunContext{Pipeline: "demo", RunID: "run-1"},
-		planSnapshotMeta{Secrets: pipelines.SecretsField{{Name: "TOKEN", Required: true}}, PipelineRequires: []string{"linux"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var doc any
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		t.Fatal(err)
-	}
-	if errs := s.validate(s.def(t, "plan"), doc, "plan"); len(errs) > 0 {
-		t.Errorf("plan --json output does not match docs/schemas/describe.schema.json: %s", strings.Join(errs, "; "))
-	}
-
-	empty, err := marshalPlanSnapshot(sparkwing.NewPlan(), sparkwing.RunContext{Pipeline: "demo", RunID: "run-2"}, planSnapshotMeta{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var emptyDoc map[string]any
-	if err := json.Unmarshal(empty, &emptyDoc); err != nil {
-		t.Fatal(err)
-	}
-	if nodes, ok := emptyDoc["nodes"].([]any); !ok || len(nodes) != 0 {
-		t.Errorf("an empty plan writes nodes as %v, want []", emptyDoc["nodes"])
-	}
-	if errs := s.validate(s.def(t, "plan"), emptyDoc, "plan"); len(errs) > 0 {
-		t.Errorf("an empty plan does not match the schema: %s", strings.Join(errs, "; "))
-	}
-
-	bad := map[string]any{"pipeline": "demo", "run_id": "r", "nodes": []any{map[string]any{"id": "n", "deps": nil, "retries": 2}}}
-	if errs := s.validate(s.def(t, "plan"), bad, "plan"); len(errs) == 0 {
-		t.Error("the plan schema accepted an undeclared node field; additionalProperties is not enforced")
-	}
 }
 
 type capturingLogger struct{ records []sparkwing.LogRecord }

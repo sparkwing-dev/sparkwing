@@ -22,7 +22,6 @@ const (
 	procgroupReadyEnv = "SPARKWING_PROCGROUP_READY"
 	procgroupReadyFD  = "SPARKWING_PROCGROUP_READY_FD"
 	procgroupTermSeen = "SPARKWING_PROCGROUP_TERM_SEEN"
-	procgroupOwnedPID = "SPARKWING_PROCGROUP_OWNED_PID"
 )
 
 func TestInfoTerminatedClassifiesKernelStates(t *testing.T) {
@@ -73,13 +72,6 @@ func TestGroupHelperProcess(t *testing.T) {
 	case "session-parked":
 		IgnoreTermination()
 		holdHelperProcess("")
-	case "owner":
-		ForwardTerminationToOwned()
-		if err := startOwnedSessionDescendant(os.Getenv(procgroupOwnedPID)); err != nil {
-			_, _ = fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
-		}
-		holdHelperProcess(os.Getenv(procgroupReadyEnv))
 	case "session-cooperative":
 		term := make(chan os.Signal, 1)
 		release := make(chan os.Signal, 1)

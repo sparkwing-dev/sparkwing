@@ -2,46 +2,13 @@ package cluster
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
-
-type stdoutLogger struct {
-	mu sync.Mutex
-}
-
-func (s *stdoutLogger) Log(level, msg string) {
-	s.Emit(sparkwing.LogRecord{Level: level, Msg: msg})
-}
-
-func (s *stdoutLogger) Emit(rec sparkwing.LogRecord) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := os.Stdout
-	if rec.Level == "error" {
-		out = os.Stderr
-	}
-	prefix := ""
-	if rec.JobID != "" {
-		prefix = rec.JobID + " │ "
-	}
-	switch rec.Event {
-	case "node_start":
-		fmt.Fprintf(out, "▶ %s\n", rec.JobID)
-	case "node_end":
-		outcome, _ := rec.Attrs["outcome"].(string)
-		fmt.Fprintf(out, "◀ %s %s\n", rec.JobID, outcome)
-	default:
-		fmt.Fprintln(out, prefix+rec.Msg)
-	}
-}
 
 type multiFlag []string
 

@@ -141,6 +141,8 @@ type DescribePipeline struct {
 	Risks []string
 
 	RisksBySteps []DescribeStepRisks
+
+	Secrets pipelines.SecretsField
 }
 type DescribeStepRisks struct {
 	NodeID string

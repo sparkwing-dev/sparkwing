@@ -20,7 +20,7 @@ var allCommands = []*Command{
 	&cmdDocs, &cmdDocsList, &cmdDocsRead, &cmdDocsSearch, &cmdDocsMigrations,
 	&cmdCache, &cmdCacheInfo, &cmdCachePrune, &cmdCacheExplain,
 	&cmdDebug, &cmdDebugRun, &cmdDebugRelease, &cmdDebugAttach,
-	&cmdDebugRerun, &cmdDebugReplay, &cmdDebugEnv,
+	&cmdDebugRerun, &cmdDebugEnv,
 	&cmdPipeline, &cmdPipelineList, &cmdPipelineDescribe,
 	&cmdPipelineNew, &cmdExamples, &cmdPipelineLint, &cmdPipelinePlan,
 	&cmdPipelineTrigger,
@@ -48,7 +48,7 @@ var allCommands = []*Command{
 	&cmdCrons, &cmdCronsInstall, &cmdCronsUninstall, &cmdCronsList,
 	&cmdCronsShow, &cmdCronsSet, &cmdCronsRun, &cmdCronsTick,
 	&cmdWingd, &cmdWingdRun, &cmdWingdSupervise, &cmdDashboardSupervise, &cmdRunsConsume,
-	&cmdHandleTrigger, &cmdTriggerHost, &cmdComplete,
+	&cmdTriggerHost, &cmdComplete,
 }
 
 type CommandIndexJSON struct {

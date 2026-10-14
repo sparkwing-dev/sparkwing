@@ -635,7 +635,7 @@ Nothing converts an old pin.
   sets `SPARKWING_DRY_RUN`. A node sees every other `SPARKWING_*` variable
   you set; the engine strips its own credentials and plumbing, such as
   `SPARKWING_SECRETS_KEY`, `SPARKWING_AGENT_TOKEN` and
-  `SPARKWING_API_SOCKET`.
+  `SPARKWING_NODE_TOKEN`.
 - **Limits:** a step's output is at most 16 MiB as JSON, a cleanup runs
   for at most 2 minutes, the SDK retries a `429` from a node route for at
   most 2 minutes, and `after_run` after a timeout runs for at most 2
@@ -647,3 +647,25 @@ Nothing converts an old pin.
   fails as invalid arguments instead of being dropped.
 - **Plan document:** dependency caches are listed under `caches` instead
   of `dir_caches`, including in `sparkwing pipeline plan --static -o json`.
+
+## The pipeline binary answers only the node protocol
+
+The compiled pipeline binary no longer runs, plans or inspects a pipeline by
+itself; it answers `--sw-node-protocol` and exits 2 on anything else. A
+script that called the binary directly moves to the CLI:
+
+| Before | After |
+|---|---|
+| `<binary> <pipeline> [flags]` | `sparkwing run <pipeline> [flags]` |
+| `<binary> <pipeline> --plan`, `sparkwing run <pipeline> --plan` | `sparkwing pipeline plan --name <pipeline>` |
+| `<binary> <pipeline> --explain`, `sparkwing run <pipeline> --explain` | `sparkwing pipeline plan --static --name <pipeline>` |
+| `<binary> <pipeline> config`, `sparkwing run <pipeline> config` | `sparkwing pipeline describe --name <pipeline> --secrets` |
+| `<binary> ops queue`, `ops doctor`, `ops version` | `sparkwing queue`, `sparkwing doctor`, `sparkwing version` |
+| `<binary> ops stats`, `ops stats-reset` | none |
+| `<binary> replay-node`, `sparkwing debug replay` | none; a hosted run records no dispatch snapshot |
+| `<binary> handle-trigger`, `run-node`, `sparkwing handle-trigger` | none; the CLI and `sparkwing-runner` host runs |
+
+`pipeline describe --secrets -o json` prints `{"pipeline": ..., "secrets":
+[{"name": ..., "required": true}]}` (or `"optional": true`), read from
+describe, instead of the per-field Go names and resolution notes the binary
+printed.

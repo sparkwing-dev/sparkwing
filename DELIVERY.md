@@ -385,12 +385,10 @@ file. Other syntax and workflow checks remain active.
   origin/main when nothing is staged, so a new offender fails from the first
   run while the tests written before the rule keep passing until they are
   edited. `GOWORK=off go run ./internal/sleepcheck .` judges every test file in
-  the tree, which is how to size the remaining purge. Korey approved four
-  external-boundary exceptions: two real HTTP claim-refusal bounds in
-  `internal/orchestrator/run_node_claim_refused_test.go`, and the process-exit
-  bound and paced status poll in `pkg/controller/direct_source_e2e_test.go`.
-  The former prevent a test from hanging if a pod ignores a refused claim;
-  the latter bound cleanup of an external runner and avoid a busy HTTP loop.
+  the tree, which is how to size the remaining purge. Korey approved two
+  external-boundary exceptions: the process-exit bound and paced status poll
+  in `pkg/controller/direct_source_e2e_test.go`, which bound cleanup of an
+  external runner and avoid a busy HTTP loop.
   Each `time.After` has a `// sleepcheck:external-boundary` reason immediately
   above its select receive arm. The checker allows only the listed path,
   function, duration, select arm and exact marker, and fails if an exception

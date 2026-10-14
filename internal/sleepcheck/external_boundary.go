@@ -27,16 +27,6 @@ type sourcePosition struct {
 
 var approvedExternalBoundaries = []externalBoundary{
 	{
-		file: "internal/orchestrator/run_node_claim_refused_test.go", function: "TestRunNodeCommand_StopsWhenTheClaimRenewalIsRefused",
-		duration: "4 * store.DispatchedHeartbeatInterval",
-		marker:   "// sleepcheck:external-boundary real HTTP claim renewal must arrive before pod cleanup",
-	},
-	{
-		file: "internal/orchestrator/run_node_claim_refused_test.go", function: "TestRunNodeCommand_StopsWhenTheClaimRenewalIsRefused",
-		duration: "2 * store.DispatchedHeartbeatInterval",
-		marker:   "// sleepcheck:external-boundary refusal must stop the real pod before cleanup",
-	},
-	{
 		file: "pkg/controller/direct_source_e2e_test.go", function: "startRunner",
 		duration: "10 * time.Second",
 		marker:   "// sleepcheck:external-boundary external runner gets ten seconds to exit before kill",

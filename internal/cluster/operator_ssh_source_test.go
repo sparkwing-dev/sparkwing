@@ -20,7 +20,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 // The operator's runners build its private repositories, which the cache
@@ -204,7 +203,7 @@ func TestDispatchedNodeFetchesAnSSHMirrorThroughItsOwnGrant(t *testing.T) {
 		t.Skip("git unavailable")
 	}
 	for _, name := range []string{
-		wingwire.APISocketEnv, "SPARKWING_CONTROLLER_URL", "SPARKWING_LOGS_URL",
+		"SPARKWING_CONTROLLER_URL",
 		"SPARKWING_RUN_ID", "SPARKWING_NODE_ID", "SPARKWING_CACHE_URL",
 		authwire.CacheGrantEnv,
 	} {
@@ -264,7 +263,7 @@ func TestDispatchedNodeFetchesAnSSHMirrorThroughItsOwnGrant(t *testing.T) {
 	t.Setenv("SPARKWING_NODE_CLAIM_LEASE_SECONDS", "600")
 
 	// safety: the toy pipeline speaks no node protocol, so the node host that started it fails its plan.
-	if err := orchestrator.RunNodeCommand([]string{"--controller", ctrlSrv.URL, "--logs", "", runID, nodeID}); err == nil ||
+	if err := orchestrator.RunNodeCommand([]string{"--controller", ctrlSrv.URL, runID, nodeID}); err == nil ||
 		!strings.Contains(err.Error(), "sdk_exited") {
 		t.Fatalf("run-node: %v, want the toy pipeline's plan to fail", err)
 	}

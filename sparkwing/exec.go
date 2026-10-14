@@ -424,10 +424,6 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 	// safety: the child owns the write ends now; dropping the parent's copies
 	// is what lets the readers ever see EOF.
 	closeFiles(outW, errW)
-	// safety: the child sits in its own session, out of reach of whatever
-	// kills this process's group; owning it is what lets a SIGTERM or a lost
-	// dispatcher reap it.
-	disown := ownCommandGroup(cmd)
 	unrecord := recordStepSession(ctx, cmd, display, job)
 
 	var outBuf, errBuf strings.Builder
@@ -442,7 +438,6 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 	}()
 
 	waitErr := cmd.Wait()
-	disown()
 	unrecord()
 	job.close()
 	wall := time.Since(startedAt)

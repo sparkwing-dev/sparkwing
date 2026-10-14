@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/repos"
 
 	flag "github.com/spf13/pflag"
 
@@ -36,6 +38,8 @@ type Pipeline struct {
 	Risks []string `json:"risks,omitempty"`
 
 	RisksBySteps []sparkwing.DescribeStepRisks `json:"risks_by_step,omitempty"`
+
+	Secrets pipelines.SecretsField `json:"secrets,omitempty"`
 }
 
 type PipelineIndex struct {
@@ -219,7 +223,7 @@ func runPipelineDescribe(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineDescribe.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "pretty", "output format: pretty | json | plain")
 	pipelineName := fs.String("name", "", "pipeline name to describe")
-	secretsOnly := fs.Bool("secrets", false, "print the declared secrets with provenance")
+	secretsOnly := fs.Bool("secrets", false, "print the declared secrets, required or optional")
 	if err := parseAndCheck(cmdPipelineDescribe, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -240,11 +244,7 @@ func runPipelineDescribe(args []string) error {
 	}
 	name := *pipelineName
 	if *secretsOnly {
-		// safety: only the pipeline binary can resolve secret bindings, so it answers this.
-		if format != "json" {
-			format = "pretty"
-		}
-		return dispatchRun([]string{name, "config", "-o", format})
+		return describePipelineSecrets(name, format)
 	}
 	pipelines, err := gatherPipelinesCatalog(true)
 	if err != nil {
@@ -279,6 +279,48 @@ func runPipelineDescribe(args []string) error {
 		printPipelineDetail(found)
 		return nil
 	}
+}
+
+// safety: the catalog's describe cache can be cold or older than the source,
+// so secrets come from the current build's own describe or the command fails.
+func describePipelineSecrets(name, format string) error {
+	var secrets pipelines.SecretsField
+	err := withPipelineEntry(name, func(ctx context.Context, entry pipelineentry.Command, dir string) error {
+		doc, err := repos.Describe(ctx, entry, dir)
+		if err != nil {
+			return err
+		}
+		schema, err := findPipelineSchema(doc.Pipelines, name)
+		secrets = schema.Secrets
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("describe --secrets: %w", err)
+	}
+	if secrets == nil {
+		secrets = pipelines.SecretsField{}
+	}
+	if format == "json" {
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"pipeline": name, "secrets": secrets})
+	}
+	fmt.Println(name + " secrets")
+	fmt.Println()
+	if len(secrets) == 0 {
+		fmt.Println("  (none declared)")
+		return nil
+	}
+	width := 4
+	for _, s := range secrets {
+		width = max(width, len(s.Name))
+	}
+	for _, s := range secrets {
+		req := "optional"
+		if s.IsRequired() {
+			req = "required"
+		}
+		fmt.Printf("  %-*s  %s\n", width, s.Name, req)
+	}
+	return nil
 }
 
 func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
@@ -319,6 +361,7 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 				a.EnvVars = dp.EnvVars
 				a.Risks = dp.Risks
 				a.RisksBySteps = dp.RisksBySteps
+				a.Secrets = dp.Secrets
 			}
 			seen[p.Name] = struct{}{}
 			out = append(out, a)

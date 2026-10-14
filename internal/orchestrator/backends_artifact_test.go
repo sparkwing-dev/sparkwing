@@ -1,9 +1,11 @@
 package orchestrator_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -25,4 +27,12 @@ func TestLocalBackends_ThreadsArtifact(t *testing.T) {
 	if b := orchestrator.LocalBackends(p, st, nil); b.Artifact != nil {
 		t.Errorf("Artifact = %v, want nil", b.Artifact)
 	}
+}
+
+type noListArtifact struct {
+	storage.ArtifactStore
+}
+
+func (n *noListArtifact) List(_ context.Context, _ string) ([]string, error) {
+	return nil, storage.ErrListNotSupported
 }

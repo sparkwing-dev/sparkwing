@@ -2,8 +2,6 @@ package bincache
 
 import (
 	"context"
-	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -128,15 +126,5 @@ func TestConfiguredLimits_RefuseGarbage(t *testing.T) {
 		if _, err := ConfiguredLimits(); err == nil || !strings.Contains(err.Error(), path) {
 			t.Fatalf("%q: error = %v, want one naming %s", body, err, path)
 		}
-	}
-}
-
-func TestExecReplace_MissingBinaryReportsNotExist(t *testing.T) {
-	err := ExecReplace(filepath.Join(t.TempDir(), "absent"), nil, "", os.Environ(), nil)
-	if err == nil {
-		t.Fatal("exec of a missing binary should fail rather than replace the process")
-	}
-	if !errors.Is(err, fs.ErrNotExist) {
-		t.Fatalf("compileAndExec keys its rebuild retry on fs.ErrNotExist, got %#v", err)
 	}
 }

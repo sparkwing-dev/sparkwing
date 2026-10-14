@@ -925,7 +925,7 @@ var cmdDebug = Command{
 	Synopsis: "Interactive debugging for pipeline runs",
 	Description: `Pause nodes at selected execution points, inspect them, open a shell,
 or resume execution. Pause settings apply to the launched run.`,
-	SubcommandOrder: []string{"run", "release", "attach", "env", "rerun", "replay"},
+	SubcommandOrder: []string{"run", "release", "attach", "env", "rerun"},
 	Examples: []Example{
 		{"Pause before the tests node", "sparkwing debug run build --pause-before tests"},
 		{"Resume a paused node", "sparkwing debug release --run run-fictional --node tests"},
@@ -1033,39 +1033,6 @@ Secrets resolve when accessed, and the selected runner image applies.
 		{"Rerun locally", "sparkwing debug rerun --run run-fictional --node tests"},
 		{"Rerun a specific attempt", "sparkwing debug rerun --run run-fictional --node tests --seq 1"},
 		{"Rerun in prod", "sparkwing debug rerun --run run-fictional --node tests --profile prod --image ghcr.io/me/runner:v1"},
-	},
-}
-
-var cmdDebugReplay = Command{
-	Path:              "sparkwing debug replay",
-	ReachesController: true,
-	Synopsis:          "Re-execute a single node headlessly using its dispatch snapshot",
-	Description: `Mints a new run row linked to the original via replay_of_run_id /
-replay_of_node_id, creates a single nodes row for the target, and
-exec's the pipeline binary to execute that one node. The
-node's input struct is reconstituted from the stored dispatch
-snapshot; upstream Refs resolve against the original
-run's outputs without re-executing them.
-
-Replay is "what would this node do now, with the same arguments and
-environment?":
-secrets re-resolve fresh through sparkwing.Secret, BeforeRun hooks
-re-fire, and any code drift in the registered job struct (renamed
-type, removed field) returns an error.
-
-With --profile PROF, the original run + target node + dep outputs +
-dispatch snapshot are first fetched from the named controller via
-HTTP and side-loaded into the local store. Replay execution itself
-always runs locally because the user's sparkwing binary owns the
-registered pipeline factories.`,
-	Flags: []FlagSpec{
-		{Name: "run", Argument: "ID", Desc: "Run ID holding the original node", Required: true, Group: "Target"},
-		{Name: "node", Argument: "NAME", Desc: "Node ID to re-execute", Required: true, Group: "Target"},
-		{Name: "profile", Argument: "PROF", Desc: "Sideload from this profile's controller before replaying locally", Group: "System"},
-	},
-	Examples: []Example{
-		{"Replay a node locally", "sparkwing debug replay --run run-fictional --node deploy"},
-		{"Replay a prod run on your laptop", "sparkwing debug replay --profile prod --run run-fictional --node deploy"},
 	},
 }
 
@@ -1255,11 +1222,12 @@ frontmatter-declared positional args and flags. Always resolves
 hidden entries -- if you're asking for a name explicitly, the
 hidden flag shouldn't surprise you.
 
---secrets compiles the pipeline and prints each declared secret, its
-source binding, and its resolution status instead of the metadata.`,
+--secrets compiles the pipeline, describes it fresh, and prints each
+secret its Secrets struct declares, required or optional, instead of the
+metadata. It never resolves a secret's value.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Pipeline name to describe", Required: true, Group: "Target"},
-		{Name: "secrets", Desc: "Print the pipeline's declared secrets with provenance instead of its metadata", Group: "Target"},
+		{Name: "secrets", Desc: "Print the pipeline's declared secrets, required or optional, instead of its metadata", Group: "Target"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
 	GroupOrder: []string{"Target", "Output", "Other"},
@@ -2133,7 +2101,7 @@ With --follow, polls until the run reaches a terminal status. Pass
 A local read looks the id up in this home's own store first and then
 in each standalone store, and reports which one held it. The verbs
 that write to a run -- bounce, annotations add, approvals approve
-and deny, debug rerun, debug replay -- write in whichever store held
+and deny, debug rerun -- write in whichever store held
 it. Cancel and retry cannot act on a standalone run at all, because
 no daemon arbitrates one, and say so instead of reporting it
 missing.
@@ -3893,12 +3861,6 @@ var cmdRunsConsume = Command{
 var cmdTriggerHost = Command{
 	Path:     "sparkwing __host-trigger",
 	Synopsis: "Host one claimed local trigger's run (spawned by the trigger loop)",
-	Hidden:   true,
-}
-
-var cmdHandleTrigger = Command{
-	Path:     "sparkwing handle-trigger",
-	Synopsis: "Run one claimed trigger (spawned by cluster worker)",
 	Hidden:   true,
 }
 

@@ -186,10 +186,10 @@ func leaseFixture(t *testing.T) (repo, cli string) {
 	if testing.Short() {
 		t.Skip("slow: builds the CLI and a pipeline module and runs nested runs against a real daemon")
 	}
-	cli = wingdHostBin(t)
+	fixtureRoot, cli := e2eFixture(t)
 	leaseFixtureOnce.Do(func() {
 		// safety: under the shared fixture root, which TestMain removes.
-		root := filepath.Join(sharedProcessPerNodeFixture(t).onDisk, "c3-lease")
+		root := filepath.Join(fixtureRoot, "c3-lease")
 		leaseFixtureRepo = root
 		dir := filepath.Join(root, ".sparkwing")
 		writeMod(t, filepath.Join(dir, "go.mod"), "module leasefixture\n\ngo 1.26.0\n\n"+

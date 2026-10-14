@@ -15,10 +15,6 @@ type machineSettings struct {
 	BoxID string `yaml:"box_id"`
 }
 
-type logsSettings struct {
-	DropPolicy string `yaml:"drop_policy"`
-}
-
 type debugSettings struct {
 	PauseTimeout string `yaml:"pause_timeout"`
 }
@@ -73,17 +69,6 @@ func boxHostID() string {
 	return "localhost"
 }
 
-// safety: an unreadable setting keeps the strict default, so a lost log line
-// still fails the node rather than passing it silently.
-func logsDropIsFatal() bool {
-	var s logsSettings
-	if _, _, err := userconfig.ReadDefault(userconfig.Logs, &s); err != nil {
-		slog.Warn("log drop policy unreadable; dropped lines fail the node", "err", err)
-		return true
-	}
-	return strings.TrimSpace(s.DropPolicy) != logsDropPolicyWarn
-}
-
 func pauseTimeout() time.Duration {
 	var s debugSettings
 	path, _, err := userconfig.ReadDefault(userconfig.Debug, &s)
@@ -111,19 +96,4 @@ func submitEnvAllowSetting() ([]string, string, error) {
 		return nil, path, err
 	}
 	return s.SubmitEnvAllow, path, nil
-}
-
-// safety: zero keeps the plan's own default and a negative value waits
-// forever, the two meanings Options.DispatchWaitTimeout gives them.
-func dispatchWaitSetting() (time.Duration, error) {
-	var s runSettings
-	path, _, err := userconfig.ReadDefault(userconfig.Run, &s)
-	if err != nil {
-		return 0, err
-	}
-	d, err := parseDispatchWaitTimeout(strings.TrimSpace(s.DispatchWait))
-	if err != nil {
-		return 0, fmt.Errorf("%s %s: %w", path, dispatchWaitKey, err)
-	}
-	return d, nil
 }

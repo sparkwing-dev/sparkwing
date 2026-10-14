@@ -413,8 +413,8 @@ func TestDispatchedNode_WithoutASourceIsRefused(t *testing.T) {
 	srv := httptest.NewServer(controller.New(st, slog.New(slog.DiscardHandler)).Handler())
 	t.Cleanup(srv.Close)
 	node := &store.Node{RunID: "run-sourceless", NodeID: "build", ClaimedBy: "holder", ClaimGeneration: 1}
-	_, err = RunNodeOnce(t.Context(), srv.URL, "", node.RunID, node.NodeID, node.ClaimedBy, "runner-token",
-		nil, slog.New(slog.DiscardHandler), nil, ClaimedNodeAttempt(node))
+	_, err = RunNodeOnce(t.Context(), srv.URL, node.RunID, node.NodeID, node.ClaimedBy, "runner-token",
+		slog.New(slog.DiscardHandler), ClaimedNodeAttempt(node))
 	if err == nil || !strings.Contains(err.Error(), "no repository or working-tree source") {
 		t.Fatalf("RunNodeOnce = %v, want the sourceless node refused", err)
 	}

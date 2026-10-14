@@ -36,13 +36,3 @@ func inferredAdmissionClass(explicit sparkwing.AdmissionClass, triggerSource str
 		return sparkwing.AdmissionNormal
 	}
 }
-
-func effectiveAdmissionClass(plan *sparkwing.Plan, inferred sparkwing.AdmissionClass) sparkwing.AdmissionClass {
-	if class := plan.AdmissionClassValue(); class != "" {
-		return class
-	}
-	if inferred != "" {
-		return inferred
-	}
-	return sparkwing.AdmissionNormal
-}

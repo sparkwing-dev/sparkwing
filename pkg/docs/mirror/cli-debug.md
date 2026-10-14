@@ -18,7 +18,6 @@ or resume execution. Pause settings apply to the launched run.
 - `attach` -- kubectl exec into a paused node's pod (cluster mode)
 - `env` -- Print a paused node's environment and working directory + claim holder
 - `rerun` -- Reproduce a node's dispatch frame in an interactive shell
-- `replay` -- Re-execute a single node headlessly using its dispatch snapshot
 
 ### Examples
 
@@ -103,47 +102,6 @@ sparkwing debug release --run run-fictional --node tests
 
 # Release in prod
 sparkwing debug release --run run-fictional --node tests --profile prod
-```
-
-## `sparkwing debug replay`
-
-Re-execute a single node headlessly using its dispatch snapshot
-
-Mints a new run row linked to the original via replay_of_run_id /
-replay_of_node_id, creates a single nodes row for the target, and
-exec's the pipeline binary to execute that one node. The
-node's input struct is reconstituted from the stored dispatch
-snapshot; upstream Refs resolve against the original
-run's outputs without re-executing them.
-
-Replay is "what would this node do now, with the same arguments and
-environment?":
-secrets re-resolve fresh through sparkwing.Secret, BeforeRun hooks
-re-fire, and any code drift in the registered job struct (renamed
-type, removed field) returns an error.
-
-With --profile PROF, the original run + target node + dep outputs +
-dispatch snapshot are first fetched from the named controller via
-HTTP and side-loaded into the local store. Replay execution itself
-always runs locally because the user's sparkwing binary owns the
-registered pipeline factories.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--run ID` | Run ID holding the original node (required) |
-| `--node NAME` | Node ID to re-execute (required) |
-| `--profile PROF` | Sideload from this profile's controller before replaying locally |
-
-### Examples
-
-```sh
-# Replay a node locally
-sparkwing debug replay --run run-fictional --node deploy
-
-# Replay a prod run on your laptop
-sparkwing debug replay --profile prod --run run-fictional --node deploy
 ```
 
 ## `sparkwing debug rerun`

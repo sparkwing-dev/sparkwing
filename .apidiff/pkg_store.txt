@@ -946,7 +946,6 @@ type ExecutionAttemptFinish struct {
 
 	ExecutorKind string
 }
-func ExecutionAttemptOrdinalFromContext(ctx context.Context) (int, bool)
 type ExecutionStart struct {
 	HolderID        string
 	MembershipID    string
@@ -3133,7 +3132,6 @@ type WarnedCardPayment struct {
 func WithClaimPlacement(ctx context.Context, placement ClaimPlacement) context.Context
 func WithClaimProfile(ctx context.Context, profile match.Profile) context.Context
 func WithCreatingPrincipal(ctx context.Context, principal string) context.Context
-func WithExecutionAttemptOrdinal(ctx context.Context, ordinal int) context.Context
 func WithGitHubRunnerScope(ctx context.Context, scope GitHubRunnerScope) context.Context
 func WithNodeClaimFence(ctx context.Context, fence NodeClaimFence) context.Context
 func WithQueueRunners(ctx context.Context, live []RunnerPresence) context.Context

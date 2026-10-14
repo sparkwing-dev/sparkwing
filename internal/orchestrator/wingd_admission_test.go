@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestReportQueuedUsesCanonicalNodeID(t *testing.T) {
@@ -82,4 +84,27 @@ func TestLeaseCarriesHost(t *testing.T) {
 			}
 		})
 	}
+}
+
+type admitFailSink struct {
+	mu      sync.Mutex
+	records []sparkwing.LogRecord
+}
+
+func (s *admitFailSink) Log(level, msg string) {
+	s.Emit(sparkwing.LogRecord{Level: level, Msg: msg})
+}
+
+func (s *admitFailSink) Emit(rec sparkwing.LogRecord) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.records = append(s.records, rec)
+}
+
+func (s *admitFailSink) snapshot() []sparkwing.LogRecord {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]sparkwing.LogRecord, len(s.records))
+	copy(out, s.records)
+	return out
 }

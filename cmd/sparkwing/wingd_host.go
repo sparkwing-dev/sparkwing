@@ -36,23 +36,6 @@ func withWingdHost(env []string) []string {
 	return setEnv(env, wingdclient.HostBinEnv, self)
 }
 
-func runNeedsDaemon(wf runFlags, passthrough []string) bool {
-	return !wf.dryRun && runInvokesAdmission(passthrough)
-}
-
-func runInvokesAdmission(passthrough []string) bool {
-	if len(passthrough) > 0 && passthrough[0] == "config" {
-		return false
-	}
-	for _, arg := range passthrough {
-		switch arg {
-		case "--explain", "--plan", "-h", "--help":
-			return false
-		}
-	}
-	return true
-}
-
 var ensureRunDaemonFn = ensureRunDaemon
 
 func ensureRunDaemon() {

@@ -230,51 +230,26 @@ names:
 | `SPARKWING_NODE_URL` | The loopback base URL of the node's `/node/v1` routes |
 | `SPARKWING_NODE_TOKEN` | The bearer for those routes; the Go SDK removes it before the `init` of any package that imports the SDK, though a package that does not import it can initialize first and read it |
 | `SPARKWING_DRY_RUN` | `1` in a dry run |
-| `SPARKWING_LEASE_TOKEN` | The admission lease a `sparkwing run` started inside the node attaches to instead of queueing behind it |
+| `SPARKWING_RUNNER_NAME` | `local`, or the runner a pod host's Job names -- the runner name `Runtime().Runner` reports |
+| `SPARKWING_RUNNER_TYPE` | `local`, or the pod host's runner type -- the runner type `Runtime().Runner` reports |
+| `SPARKWING_RUNNER_LABELS` | The labels the runner advertises, comma-separated; what `WhenRunner` matches against |
 
 A node reaches its run's state only through those routes, never through
 the daemon's socket or the runs store.
 
-A child run a local node starts, a detached run and a run the trigger
-runner executes still run in the pipeline binary's own dispatcher. Each of
-those node processes gets `SPARKWING_RUN_ID`, `SPARKWING_NODE_ID` and the
-variables below. A run whose state lives behind the admission daemon also
-gets `SPARKWING_API_SOCKET` and no `SPARKWING_AGENT_TOKEN`: the node sends
-its state and concurrency calls down that unix socket and the daemon takes
-its peer uid as the principal. `SPARKWING_CONTROLLER_URL` is set either
-way, but on that path it is a placeholder host the socket transport
-ignores, so a step that dials it reaches nothing. A run that opens the
-store itself points that variable at a loopback controller the dispatcher
-mounts for the run and passes that controller's token. Sparkwing sets all
-of them; they are not knobs.
-
-| Variable | Purpose |
-|----------|---------|
-| `SPARKWING_API_SOCKET` | The admission daemon's controller API socket, when the run reaches its state through the daemon |
-| `SPARKWING_PARENT_LIVENESS_FD` | Descriptor the node reads to notice its dispatcher died, so an abandoned node stops rather than running on against a run nobody owns |
-| `SPARKWING_RUNNER_NAME` | `local` -- the runner name `Runtime().Runner` reports |
-| `SPARKWING_RUNNER_TYPE` | `local` -- the runner type `Runtime().Runner` reports |
-| `SPARKWING_RUNNER_LABELS` | The labels the local runner advertises, comma-separated; what `WhenRunner` matches against |
-
-`SPARKWING_PARENT_LIVENESS_FD` in particular should never be set by
-hand: it is the node's authority to read and close that descriptor, and
-naming one sparkwing did not open points the node at another
-subsystem's file.
-
 ### Service URLs and dev.env
 
-The run-node path reads `SPARKWING_CONTROLLER_URL`,
-`SPARKWING_LOGS_URL` and `SPARKWING_CACHE_URL` from their own environment
-and nowhere else; the runner that starts them sets those names. The local
+`sparkwing-runner run-node` reads `SPARKWING_CONTROLLER_URL` and
+`SPARKWING_CACHE_URL` from its own environment and nowhere else; the
+runner that starts it sets those names. The local
 dashboard writes its address to `$SPARKWING_HOME/dev.env`, and only a CLI
 verb looking for that dashboard reads it.
 
 A suite running inside a node inherits the operator's home, so before
 every step that starts a product suite the repository gate pins
 `SPARKWING_HOME` to a directory of its own, which holds no `dev.env`, and
-clears the bindings the node injects: the admission socket, the
-controller, logs and cache URLs, the agent and lease tokens, the run and
-node ids, and the parent liveness descriptor.
+clears the bindings the node injects: the controller and cache URLs, the
+agent token, the node route and its token, and the run and node ids.
 
 ### Controller API endpoints
 

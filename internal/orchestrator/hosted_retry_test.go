@@ -4,7 +4,6 @@ import (
 	"context"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -17,7 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestHostedRetryPolicy_ClassifiesEveryWriteTheRunMakes(t *testing.T) {
@@ -251,44 +249,6 @@ func TestHostedRetry_GivesUpNamingTheDaemon(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "api.sock") {
 		t.Fatalf("err = %v, want it to name the socket it could not reach", err)
-	}
-}
-
-func TestNodeTransports_LogsLeaveTheAPISocketAlone(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
-	}
-	var socketHits, tcpHits atomic.Int32
-	sock := serveStubAPI(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		socketHits.Add(1)
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	logs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		tcpHits.Add(1)
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer logs.Close()
-
-	transports := nodeTransportsFor(runNodeConfig{apiSocket: sock}, "http://127.0.0.1:1", "svc_tok")
-	defer transports.close()
-	if transports.stateURL != HostedAPIBaseURL || transports.stateToken != "" {
-		t.Fatalf("state target = %q token %q, want the socket and no bearer",
-			transports.stateURL, transports.stateToken)
-	}
-
-	backend := NewHTTPLogsWithToken(logs.URL, transports.plain, "svc_tok", nil)
-	nodeLog, err := backend.OpenNodeLog(context.Background(), "r1", "n1", nil)
-	if err != nil {
-		t.Fatalf("OpenNodeLog: %v", err)
-	}
-	nodeLog.Emit(sparkwing.LogRecord{TS: time.Now(), Level: "info", Msg: "hello"})
-	_ = nodeLog.Close()
-
-	if tcpHits.Load() == 0 {
-		t.Fatal("no log record reached the logs service")
-	}
-	if got := socketHits.Load(); got != 0 {
-		t.Fatalf("%d log record(s) went down the API socket", got)
 	}
 }
 

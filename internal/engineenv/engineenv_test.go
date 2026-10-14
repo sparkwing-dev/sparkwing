@@ -96,7 +96,7 @@ func TestEveryEngineEnvNameIsClassified(t *testing.T) {
 	for _, m := range regexp.MustCompile("`(SPARKWING_[A-Z0-9_]+)`").FindAllStringSubmatch(string(doc), -1) {
 		seen[m[1]] = "docs/environment-variables.md"
 	}
-	if len(seen) < 100 {
+	if len(seen) < 90 {
 		t.Fatalf("found only %d SPARKWING_ names; the scan is not reading engine code", len(seen))
 	}
 	for name, where := range seen {

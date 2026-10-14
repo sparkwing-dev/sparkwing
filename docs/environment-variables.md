@@ -38,7 +38,6 @@ also reads `SPARKWING_CONTROLLER_URL` as a fallback for its own `--controller`.
 |---|---|
 | `SPARKWING_AGENT_TOKEN` | [architecture](architecture.md), [auth](auth.md), [local-execution](local-execution.md), [threat-model](threat-model.md) |
 | `SPARKWING_CONTROLLER_URL` | [architecture](architecture.md), [auth](auth.md), [security](security.md), [self-hosting](self-hosting.md) |
-| `SPARKWING_LOGS_URL` | [architecture](architecture.md) |
 | `SPARKWING_CACHE_URL` | [architecture](architecture.md), [caching](caching.md) |
 | `SPARKWING_GITCACHE_URL` | [caching](caching.md), [gitcache](gitcache.md), [self-hosting](self-hosting.md) |
 
@@ -79,14 +78,9 @@ Set by Sparkwing for pipeline code and node processes.
 | `SPARKWING_RUNNER_NAME` | [architecture](architecture.md) |
 | `SPARKWING_RUNNER_TYPE` | [architecture](architecture.md) |
 | `SPARKWING_RUNNER_LABELS` | [architecture](architecture.md) |
-| `SPARKWING_API_SOCKET` | [architecture](architecture.md) |
-| `SPARKWING_PARENT_LIVENESS_FD` | [architecture](architecture.md) |
-| `SPARKWING_PRIORITY` | [sdk](sdk.md) |
 | `SPARKWING_DRY_RUN` | [sparks-core](sparks-core.md) |
 | `SPARKWING_CACHE_GRANT` | [gitcache](gitcache.md) |
 | `SPARKWING_SOURCE_DIR` | [git-credentials](git-credentials.md) |
-| `SPARKWING_PIPELINE_REV` | [local-execution](local-execution.md) |
-| `SPARKWING_RUN_HANDLE_FILE` | [local-execution](local-execution.md) |
 | `SPARKWING_STANDALONE_REASON` | [local-execution](local-execution.md) |
 | `SPARKWING_STATE_DB` | [local-execution](local-execution.md) |
 | `SPARKWING_NODE_CLAIM_GENERATION` | [local-execution](local-execution.md) |
@@ -96,26 +90,17 @@ Set by Sparkwing for pipeline code and node processes.
 | `SPARKWING_NODE_CLAIM_RESERVATION` | [local-execution](local-execution.md) |
 | `SPARKWING_TOOLCHAIN_ACTIVE` | [versioning](versioning.md) |
 | `SPARKWING_GATE_INDEX` | [hooks](hooks.md) |
-| `SPARKWING_START_AT` | [security](security.md) |
 
 ## Plumbing
 
 | Variable | Why it stays |
 |---|---|
-| `SPARKWING_CHILD_LEASE_TOKEN` | The admission daemon's lease for a child run, handed across exec. |
-| `SPARKWING_LEASE_TOKEN` | The admission daemon's lease for this run, handed across exec. |
 | `SPARKWING_DEBUG_PAUSE_BEFORE` | `sparkwing debug` sets it for the run it starts: pause before the named node. |
 | `SPARKWING_DEBUG_PAUSE_AFTER` | `sparkwing debug` sets it for the run it starts: pause after the named node. |
 | `SPARKWING_DEBUG_PAUSE_ON_FAILURE` | `sparkwing debug` sets it for the run it starts: pause when a node fails. |
-| `SPARKWING_LOG_LEVEL` | The in-process dispatcher reads it; `sparkwing run` hosts the run itself and passes `--sw-verbose` (`-v`) as run state, never as this variable. |
-| `SPARKWING_MASK_VALUES_FD` | The inherited pipe the pipeline binary writes registered secret values to, so the launcher masks them in the child's stdout and stderr. |
-| `SPARKWING_NO_CACHE` | The in-process dispatcher reads it; `sparkwing run` hosts the run itself and passes `--sw-no-cache` as run state, never as this variable. |
-| `SPARKWING_ONLY` | The in-process dispatcher reads it; `sparkwing run` hosts the run itself and passes `--sw-only` as run state, never as this variable. |
 | `SPARKWING_PROTOCOL_HANDLES` | Windows only: the host sets it for a process it starts with `--sw-node-protocol`, naming the inherited request and frame pipe handles as `<request>,<frame>`. The SDK removes it at startup. Never set it by hand. See [node-protocol](node-protocol.md). |
 | `SPARKWING_NODE_URL` | The host sets it for a process it starts with `--sw-node-protocol`: the loopback base URL of the node's `/node/v1` routes. The SDK refuses any URL other than `http://127.0.0.1`, `http://[::1]` or `http://localhost` with a port. Never set it by hand. See [node-protocol](node-protocol.md). |
 | `SPARKWING_NODE_TOKEN` | The host sets it for a process it starts with `--sw-node-protocol`: the bearer for the node's `/node/v1` routes, valid until the process exits. The SDK removes it at startup, before any package's `init` can start a command, so no command inherits it. Never set it by hand. See [node-protocol](node-protocol.md). |
-| `SPARKWING_PROFILE` | Set only by a CLI from before `sparkwing run --profile` was removed. A pipeline binary that finds it refuses the run, naming `sparkwing pipeline trigger`, rather than recording locally; `sparkwing run` drops an inherited value, so exporting it selects nothing. |
-| `SPARKWING_STOP_AT` | The in-process dispatcher reads it; `sparkwing run` hosts the run itself and passes `--sw-stop-at` as run state, never as this variable. |
 | `SPARKWING_WORKERS` | Caps how many nodes a run executes at once, as `--sw-workers` does; `sparkwing run` reads it from its own environment when the flag is absent. |
 
 ## Test
@@ -139,7 +124,6 @@ Set by Sparkwing for pipeline code and node processes.
 | `GITHUB_REPOSITORY` | GitHub Actions |
 | `GITHUB_RUN_ID` | GitHub Actions |
 | `KUBECONFIG` | Kubernetes client configuration |
-| `POD_NAME` | Kubernetes downward API |
 | `POD_NAMESPACE` | Kubernetes downward API |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OpenTelemetry; see [observability](observability.md) |
 | `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` | OpenTelemetry |
