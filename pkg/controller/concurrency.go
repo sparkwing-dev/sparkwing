@@ -578,9 +578,8 @@ func (s *Server) checkClaimAcquire(r *http.Request, tok store.ClaimToken, key st
 	if err := s.store.CheckClaimSlot(r.Context(), tok, key, body.Policy, body.Max, body.Cost); err != nil {
 		return err
 	}
-	// safety: joining a holder takes its slot at no cost, and only a runner's
-	// remote broker joins one; a claimed node never does, and its own earlier
-	// holder already carries its holder ID.
+	// safety: joining a holder takes its slot at no cost; a claimed node never
+	// joins one, and its own earlier holder already carries its holder ID.
 	if body.InheritedHolderID != "" {
 		return errors.New("a claim does not join another holder")
 	}

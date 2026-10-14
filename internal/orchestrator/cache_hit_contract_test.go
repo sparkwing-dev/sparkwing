@@ -7,5 +7,3 @@ import (
 )
 
 var _ func(*NodeExecutor, context.Context, runner.Request, coordinationParameters, string, string) runner.Result = (*NodeExecutor).applyCacheHit
-
-var _ func(*NodeExecutor, context.Context, coordinationParameters, string, string) ([]byte, error) = (*NodeExecutor).fetchCachedOutput

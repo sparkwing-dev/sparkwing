@@ -263,6 +263,8 @@ type ClaimInput struct {
 	FinishedAt *time.Time
 
 	Output OutputReadGrant
+
+	ArtifactManifest string
 }
 const ClaimInputCached ClaimInputKind = "cached"
 const ClaimInputCoalesced ClaimInputKind = "coalesced"

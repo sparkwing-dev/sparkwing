@@ -15,9 +15,14 @@ package nodeproto
 // it exactly; a mismatch is refused rather than negotiated.
 const Version = "1"
 
+// MaxOutputBytes is the largest step output value, as JSON, that an SDK may
+// produce and the host records. It bounds every step's output, not only the
+// one that travels as the node's output.
+const MaxOutputBytes = 16 << 20
+
 // MaxLineBytes is the longest line, newline included, that a [Reader]
 // accepts and a [Writer] sends. A reply carries a whole describe document,
-// plan document or node output, so the bound is generous; it exists so a
-// process that never writes a newline cannot grow the host's memory without
-// limit.
-const MaxLineBytes = 16 << 20
+// plan document or node output; the bound leaves room for a reply's own
+// fields around an output of [MaxOutputBytes], and exists so a process that
+// never writes a newline cannot grow the host's memory without limit.
+const MaxLineBytes = MaxOutputBytes + 1<<20

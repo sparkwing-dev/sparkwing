@@ -108,8 +108,8 @@ func TestClaimedMemoFollowerWithNoOutputRunsTheNode(t *testing.T) {
 	}
 	m := &Memo{
 		Slots: storeSlots{st: st}, Claimed: true,
-		Output: func(context.Context, store.ClaimInputRequest, string, string) ([]byte, error) {
-			return nil, store.ErrNotFound
+		Source: func(context.Context, store.ClaimInputRequest, string, string) (MemoSource, error) {
+			return MemoSource{}, store.ErrNotFound
 		},
 	}
 	run := &Run{ID: "run-follower", State: st, Logger: slog.New(slog.DiscardHandler)}

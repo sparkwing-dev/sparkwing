@@ -96,7 +96,7 @@ func runLaunchedNode(ctx context.Context, controllerURL, runID, nodeID, token st
 	if err != nil {
 		return fail(fmt.Errorf("read the node's attempts: %w", err))
 	}
-	state := &claimState{Client: c, runID: runID, nodeID: nodeID, specHash: specHash}
+	state := &claimState{Client: c, runID: runID, nodeID: nodeID}
 	res, err := hostPodNode(ctx, podNode{
 		binary: binary.path, dir: src, controllerURL: controllerURL, token: token, runID: runID, nodeID: nodeID,
 		specHash: specHash, attempt: row.AttemptsConsumed + 1, state: state, artifacts: art, logger: logger,

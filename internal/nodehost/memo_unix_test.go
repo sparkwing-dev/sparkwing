@@ -41,8 +41,8 @@ func TestMemo(t *testing.T) {
 	logs := &memLogs{records: map[string][]sparkwing.LogRecord{}}
 	memo := &Memo{
 		Slots: storeSlots{st: st},
-		Output: func(ctx context.Context, _ store.ClaimInputRequest, runID, nodeID string) ([]byte, error) {
-			return st.GetNodeOutput(ctx, runID, nodeID)
+		Source: func(ctx context.Context, _ store.ClaimInputRequest, runID, nodeID string) (MemoSource, error) {
+			return ReadMemoSource(ctx, st, runID, nodeID)
 		},
 	}
 	daemon := newFakeDaemon()

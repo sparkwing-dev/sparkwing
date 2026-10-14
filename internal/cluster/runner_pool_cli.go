@@ -129,8 +129,8 @@ func RunPoolLoop(ctx context.Context, cfg PoolLoopConfig, logger *slog.Logger) e
 
 	held := newHeldResources()
 	ctrl.WithClaimResources(held.report)
-	// safety: a node's WhenRunner and Runtime().Runner read this, and the node's process is a
-	// brokered child that sees none of this runner's own configuration.
+	// safety: a node's WhenRunner and Runtime().Runner read this, and the node's process runs under
+	// the node host with none of this runner's own configuration.
 	identity := &sparkwing.RunnerInfo{
 		Name: cfg.HolderPrefix, Type: os.Getenv("SPARKWING_RUNNER_TYPE"), Labels: slices.Clone(cfg.Labels),
 	}

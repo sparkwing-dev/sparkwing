@@ -175,8 +175,8 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 		Invocation: invocation, Requires: requires,
 		Memo: &nodehost.Memo{
 			Slots: backends.Concurrency, NoCache: opts.NoCache,
-			Output: func(ctx context.Context, _ store.ClaimInputRequest, runID, nodeID string) ([]byte, error) {
-				return backends.State.GetNodeOutput(ctx, runID, nodeID)
+			Source: func(ctx context.Context, _ store.ClaimInputRequest, runID, nodeID string) (nodehost.MemoSource, error) {
+				return nodehost.ReadMemoSource(ctx, backends.State, runID, nodeID)
 			},
 		},
 	}

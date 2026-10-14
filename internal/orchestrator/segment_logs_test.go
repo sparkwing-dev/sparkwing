@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -127,42 +126,6 @@ func TestLaunchedNodeLogReachesTheControllerAsSegments(t *testing.T) {
 
 	l := ctrl.log(t)
 	if l.Manifest == nil || l.Manifest.Status != logseg.StatusComplete || l.Manifest.Lines != 3 || l.Broken != 0 {
-		t.Fatalf("manifest = %+v", l.Manifest)
-	}
-}
-
-// A brokered child's log goes through the broker into the sink, and a
-// child that never started leaves its log reading as cut off.
-func TestBrokeredChildLogIsSealedByTheBroker(t *testing.T) {
-	ctrl, tok := newSegmentController(t)
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	broker, err := startRemoteExecutionBroker(ctrl.url, tok, "run-s", "a", store.NodeClaimFence{}, nil, logger)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer broker.Close()
-	broker.logSink = openNodeLogSink(t.Context(), client.NewWithToken(ctrl.url, nil, tok), "run-s", "a", logger)
-	if broker.logSink == nil {
-		t.Fatal("the controller issued no segment URLs")
-	}
-	req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, broker.URL()+"/api/v1/logs/run-s/a", strings.NewReader("hello\n"))
-	req.Header.Set("Authorization", "Bearer "+broker.capability)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil || resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("append through the broker: %v %v", resp, err)
-	}
-	_ = resp.Body.Close()
-	other, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, broker.URL()+"/api/v1/logs/run-s/b", strings.NewReader("x\n"))
-	other.Header.Set("Authorization", "Bearer "+broker.capability)
-	if resp, err := http.DefaultClient.Do(other); err != nil || resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("append to another node through the broker: %v %v", resp, err)
-	} else {
-		_ = resp.Body.Close()
-	}
-	broker.sealChildLogs(t.Context(), assistedChildOutcome{}, errors.New("exec format error"), logger)
-
-	l := ctrl.log(t)
-	if l.Manifest == nil || l.Manifest.Status != logseg.StatusCutOff || l.Manifest.Lines != 1 {
 		t.Fatalf("manifest = %+v", l.Manifest)
 	}
 }
