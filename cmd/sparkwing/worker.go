@@ -4,16 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
-	"os/exec"
 	"os/signal"
-	"slices"
-	"strings"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/tokenpark"
@@ -25,21 +26,17 @@ func runWorker(args []string) error {
 	fs := flag.NewFlagSet(cmdWorker.Path, flag.ContinueOnError)
 	on := addProfileFlag(fs)
 	poll := fs.Duration("poll", time.Second, "claim poll interval when the queue is empty")
-	heartbeat := fs.Duration("heartbeat", 5*time.Second, "heartbeat cadence passed to handle-trigger")
+	heartbeat := fs.Duration("heartbeat", 5*time.Second, "trigger claim heartbeat cadence")
 	if err := parseAndCheck(cmdWorker, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	self, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("locate own binary: %w", err)
-	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	for {
-		err := claimTriggers(ctx, self, *on, *poll, *heartbeat)
+		err := claimTriggers(ctx, *on, *poll, *heartbeat)
 		if !errors.Is(err, errProfileChanged) {
 			return err
 		}
@@ -51,7 +48,7 @@ var errProfileChanged = errors.New("the profile's config changed while its token
 // safety: the change watch starts before the profile is read, so a rewrite
 // racing the read costs one extra reload rather than an hour parked on the
 // old token.
-func claimTriggers(ctx context.Context, self, profileName string, poll, heartbeat time.Duration) error {
+func claimTriggers(ctx context.Context, profileName string, poll, heartbeat time.Duration) error {
 	var changed func() bool
 	if path, err := profile.DefaultPath(); err == nil {
 		changed = tokenpark.FileChanged(path)
@@ -114,34 +111,79 @@ func claimTriggers(ctx context.Context, self, profileName string, poll, heartbea
 			continue
 		}
 		fmt.Fprintf(os.Stderr, "worker: claimed %s (pipeline=%s)\n", trigger.ID, trigger.Pipeline)
-		if err := dispatchTrigger(ctx, self, trigger, prof.ControllerURL(), token, heartbeat); err != nil {
-			fmt.Fprintf(os.Stderr, "worker: handle-trigger %s: %v\n", trigger.ID, err)
+		if err := hostTrigger(ctx, cli, trigger, prof.ControllerURL(), token, heartbeat); err != nil {
+			fmt.Fprintf(os.Stderr, "worker: trigger %s: %v\n", trigger.ID, err)
 		}
 	}
 }
 
-// safety: handle-trigger runs the team's pipeline code, so it reaches the
-// controller through a broker that admits only its run's routes, and the
-// profile's token stays in this process.
-func dispatchTrigger(ctx context.Context, self string, trigger *store.Trigger, controllerURL, token string, heartbeat time.Duration) error {
-	broker, err := orchestrator.StartTriggerBroker(controllerURL, token, trigger, nil)
+// safety: plan code and every node run in their own process with the minimal environment, so the profile's
+// token stays in this process, which hosts the run from the pipeline this checkout builds.
+// safety: the claim is renewed from before the build, so a cold build outlasting its lease keeps it; a worker
+// shutting down leaves the trigger to that lease, and a run that never started fails here, or ends cancelled.
+func hostTrigger(ctx context.Context, cli *client.Client, trigger *store.Trigger, controllerURL, token string, heartbeat time.Duration) error {
+	return hostTriggerWith(ctx, cli, trigger, controllerURL, token, heartbeat, buildCheckoutPipeline, orchestrator.HostTriggerRun)
+}
+
+type checkoutBuild func(ctx context.Context) (binary, dir string, release func(), err error)
+
+func hostTriggerWith(ctx context.Context, cli *client.Client, trigger *store.Trigger, controllerURL, token string,
+	heartbeat time.Duration, build checkoutBuild, host func(context.Context, orchestrator.TriggerHost) error,
+) error {
+	runCtx, stop := orchestrator.HeartbeatTrigger(orchestrator.DispatchContext(ctx, trigger), cli, trigger.ID, heartbeat, slog.Default())
+	defer stop()
+	err := hostTriggerFromCheckout(runCtx, trigger, controllerURL, token, build, host)
+	cause := context.Cause(runCtx)
+	if err == nil || errors.Is(cause, context.Canceled) {
+		return err
+	}
+	status := "failed"
+	if cancel := (*nodehost.CancelError)(nil); errors.As(cause, &cancel) {
+		status = "cancelled"
+	}
+	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(runCtx), 5*time.Second)
+	defer cancel()
+	if ferr := cli.FinishRun(finishCtx, trigger.ID, status, err.Error()); ferr != nil &&
+		!orchestrator.ConfirmTerminalRunAfterWriteError(finishCtx, cli, trigger.ID) {
+		return errors.Join(err, fmt.Errorf("finish the run: %w", ferr))
+	}
+	if ferr := cli.FinishTrigger(finishCtx, trigger.ID); ferr != nil {
+		return errors.Join(err, fmt.Errorf("finish the trigger: %w", ferr))
+	}
+	return err
+}
+
+func buildCheckoutPipeline(ctx context.Context) (binary, dir string, release func(), err error) {
+	sparkwingDir, err := findSparkwingDir()
 	if err != nil {
-		return fmt.Errorf("start trigger broker: %w", err)
+		return "", "", nil, err
 	}
-	defer broker.Close(ctx)
-	args := append([]string{"handle-trigger"}, orchestrator.HandleTriggerArgs(trigger.ID, broker.URL(), heartbeat)...)
-	cmd := exec.CommandContext(ctx, self, args...)
-	// safety: the child reads the capability from SPARKWING_AGENT_TOKEN; argv is world-readable in /proc.
-	// safety: the child keeps its node logs through the controller; an inherited engine log endpoint would
-	// send them to whatever process last served one.
-	cmd.Env = slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "SPARKWING_LOGS_URL=") })
-	cmd.Env = append(cmd.Env, "SPARKWING_AGENT_TOKEN="+broker.Capability())
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil && ctx.Err() == nil {
-		return fmt.Errorf("exited: %w", err)
+	key, keyParts, err := bincache.ExplainCacheKey(sparkwingDir)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("read .sparkwing/: %w", err)
 	}
-	return nil
+	lease, _, err := pipelineBinary(ctx, sparkwingDir, key, keyParts, os.Environ())
+	if err != nil {
+		return "", "", nil, fmt.Errorf("build the pipeline: %w", err)
+	}
+	return lease.Path(), filepath.Dir(sparkwingDir), func() {
+		if err := lease.Release(); err != nil {
+			slog.Default().Debug("pipeline binary lease release failed", "err", err)
+		}
+	}, nil
+}
+
+func hostTriggerFromCheckout(ctx context.Context, trigger *store.Trigger, controllerURL, token string,
+	build checkoutBuild, host func(context.Context, orchestrator.TriggerHost) error,
+) error {
+	binary, dir, release, err := build(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return host(ctx, orchestrator.TriggerHost{
+		ControllerURL: controllerURL, Token: token, Trigger: trigger, Binary: binary, Dir: dir,
+	})
 }
 
 func sleepOrCancel(ctx context.Context, d time.Duration) {

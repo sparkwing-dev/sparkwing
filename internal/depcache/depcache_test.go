@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 )
 
 func TestDeriveDepCacheKeyStableAndSafe(t *testing.T) {
@@ -378,7 +380,7 @@ func TestLocalDepCacheMissSaveHitCycle(t *testing.T) {
 	t.Setenv("SPARKWING_CACHE_URL", "")
 	t.Setenv("SPARKWING_GITCACHE_URL", "")
 
-	backend := selectBackend()
+	backend := selectBackend(context.Background())
 	if _, ok := backend.(*localBackend); !ok {
 		t.Fatalf("expected local backend, got %T", backend)
 	}
@@ -474,7 +476,7 @@ func TestRemoteDepCacheMissSaveHitCycle(t *testing.T) {
 	t.Setenv("SPARKWING_GITCACHE_URL", "")
 	t.Setenv("SPARKWING_CACHE_GRANT", "sekrit")
 
-	backend := selectBackend()
+	backend := selectBackend(context.Background())
 	if _, ok := backend.(*remoteBackend); !ok {
 		t.Fatalf("expected remote backend, got %T", backend)
 	}
@@ -575,7 +577,7 @@ func TestDirCacheRunNeverSavesOnFailure(t *testing.T) {
 
 	st.Save(context.Background(), fmt.Errorf("node exploded"))
 
-	backend := selectBackend()
+	backend := selectBackend(context.Background())
 	hit, err := backend.exists(context.Background(), st.key)
 	if err != nil {
 		t.Fatal(err)
@@ -696,4 +698,25 @@ func dirPerm(t *testing.T, path string) fs.FileMode {
 		t.Fatalf("stat %s: %v", path, err)
 	}
 	return fi.Mode().Perm()
+}
+
+// safety: a host serving several runs names each node's grant on its
+// context, so a node's caches authenticate with its own run's grant, never
+// the one in the process environment.
+func TestRemoteCacheUsesTheNodesGrantOverTheProcesss(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	t.Setenv("SPARKWING_CACHE_URL", srv.URL)
+	t.Setenv(authwire.CacheGrantEnv, "process-grant")
+	ctx := WithCacheGrant(context.Background(), "node-grant")
+	if _, err := selectBackend(ctx).exists(ctx, "k"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "node-grant") {
+		t.Fatalf("the cache saw Authorization %q, want the node's grant", got)
+	}
 }

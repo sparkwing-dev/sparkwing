@@ -56,6 +56,14 @@ type Options struct {
 
 	Admission *LocalAdmission
 
+	// AllowUnadmitted is `sparkwing run --sw-allow-unadmitted`: run without
+	// the admission daemon even when one answers.
+	AllowUnadmitted bool
+
+	// Verbose is the debug rendering the run uses, from --sw-verbose or a direct
+	// run's SPARKWING_LOG_LEVEL=debug, recorded so the reproducer keeps it.
+	Verbose bool
+
 	RetryOf string
 
 	RetrySource string
@@ -1042,9 +1050,6 @@ func buildRunInvocation(opts Options, runID, logDir string, secretArgs []string)
 	if revision := os.Getenv("SPARKWING_PIPELINE_REV"); revision != "" {
 		inv["pipeline_revision"] = revision
 	}
-	if src := os.Getenv("SPARKWING_BINARY_SOURCE"); src != "" {
-		inv["binary_source"] = src
-	}
 	if wd := sparkwing.WorkDir(); wd != "" {
 		inv["cwd"] = wd
 	} else if cwd, err := os.Getwd(); err == nil && cwd != "" {
@@ -1125,24 +1130,12 @@ func buildRunFlags(opts Options) map[string]any {
 	if opts.MaxParallel > 0 {
 		flags["max_parallel"] = opts.MaxParallel
 	}
-	if v := os.Getenv("SPARKWING_ALLOW"); v != "" {
-		flags["allow"] = v
-	}
-	if v := os.Getenv("SPARKWING_REF"); v != "" {
-		flags["ref"] = v
-	}
-	if os.Getenv("SPARKWING_NO_UPDATE") == "1" {
-		flags["no_update"] = true
-	}
-	if v := os.Getenv("SPARKWING_MODE"); v != "" {
-		flags["mode"] = v
+	if opts.Verbose {
+		flags["verbose"] = true
 	}
 	if opts.prioritySet {
 		flags["priority"] = opts.priority.value
 		flags["priority_source"] = opts.priority.source
-	}
-	if os.Getenv("SPARKWING_LOG_LEVEL") == "debug" {
-		flags["verbose"] = true
 	}
 	return flags
 }
@@ -2222,7 +2215,7 @@ func (s *dispatchState) runOneNode(ctx context.Context, node *sparkwing.JobNode)
 		dispatched := false
 		res = s.runWithCap(ctx, node, func(slot *workerSlot) runner.Result {
 			dispatched = true
-			return activeRunner.RunNode(dispatchCtx, runner.Request{
+			return activeRunner.RunNode(dispatchCtx, withNodeShape(runner.Request{
 				RunID:               s.runID,
 				NodeID:              node.ID(),
 				Pipeline:            s.pipeline,
@@ -2231,7 +2224,7 @@ func (s *dispatchState) runOneNode(ctx context.Context, node *sparkwing.JobNode)
 				Delegate:            s.delegate,
 				ReleaseWorkerSlot:   slot.release,
 				ReacquireWorkerSlot: slot.reacquire,
-			})
+			}))
 		})
 		// safety: the reset left the node pending, so a retry cancelled before
 		// its runner was called records the cancel itself or the node stays pending.
@@ -2348,6 +2341,16 @@ func (s *dispatchState) doPause(ctx context.Context, nodeID, reason string) bool
 	_ = s.backends.State.SetNodeStatus(s.ctx, s.runID, nodeID, "pending")
 	noteEvent(s.ctx, s.backends.State, s.runID, nodeID, "node_resumed", nil)
 	return false
+}
+
+// safety: a remote runner sizes and bounds its Job from these fields alone,
+// so every request the dispatcher makes carries its node's timeout and pin.
+func withNodeShape(req runner.Request) runner.Request {
+	req.Timeout = req.Node.TimeoutDuration()
+	if pin := req.Node.ResourceHints(); pin != nil {
+		req.Cores, req.MemoryBytes = pin.Cores, pin.MemoryBytes
+	}
+	return req
 }
 
 func (s *dispatchState) applyResult(nodeID string, res runner.Result) {
@@ -2611,7 +2614,7 @@ func (s *dispatchState) invokeRecoveryRunner(ctx context.Context, node *sparkwin
 	ctx = sparkwing.WithFailure(ctx, parentFailure)
 	ctx = withAdmissionWaitParticipant(ctx, node.ID())
 	return s.runWithCap(ctx, node, func(slot *workerSlot) runner.Result {
-		return s.runner.RunNode(ctx, runner.Request{
+		return s.runner.RunNode(ctx, withNodeShape(runner.Request{
 			RunID:               s.runID,
 			NodeID:              node.ID(),
 			Pipeline:            s.pipeline,
@@ -2620,7 +2623,7 @@ func (s *dispatchState) invokeRecoveryRunner(ctx context.Context, node *sparkwin
 			Delegate:            s.delegate,
 			ReleaseWorkerSlot:   slot.release,
 			ReacquireWorkerSlot: slot.reacquire,
-		})
+		}))
 	})
 }
 

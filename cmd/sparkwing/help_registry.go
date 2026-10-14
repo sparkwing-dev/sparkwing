@@ -1378,16 +1378,15 @@ var cmdPipelinePlan = Command{
 	Path:     "sparkwing pipeline plan",
 	Synopsis: "Render the runtime-resolved DAG without dispatching any jobs",
 	Description: `Compiles the pipeline and evaluates its plan under the supplied arguments.
-Each step reports would_run or would_skip with its reason. Step actions are
-not executed.
+Each step reports would_run, would_skip or may_skip with its reason. Step
+actions and SkipIf predicates are not executed.
 
 Skip reasons:
-  user_skipif  the SkipIf predicate matches
-  range_skip   the step falls outside --start-at and --stop-at
+  user_skipif  the step has a SkipIf predicate, which only a run evaluates
+               (may_skip)
+  range_skip   the step falls outside --start-at and --stop-at (would_skip)
 
 Dynamic fan-out counts remain unresolved when they require execution.
-Skipping a state-loading step with --start-at leaves that state empty;
-downstream predicates are evaluated with the resulting state.
 
 --static prints the Plan DAG as the pipeline declares it -- nodes,
 dependencies, approval gates -- without resolving runtime skips. Arguments
@@ -1419,8 +1418,10 @@ IDs, and similar errors), which makes it a CI gate.`,
 var cmdRun = Command{
 	Path:     "sparkwing run",
 	Synopsis: "Invoke a pipeline",
-	Description: `Compiles the nearest .sparkwing/ binary and exec's it
-with the named pipeline. A run executes on this machine against its local
+	Description: `Compiles the nearest .sparkwing/ binary and hosts a run of the
+named pipeline. The engine asks the binary for the plan over the node
+protocol, then starts it once per job; retries, timeouts, caching, admission
+and logs stay in the engine. A run executes on this machine against its local
 store and secrets. A pipeline whose sparkwing.yaml entry names a profile: is
 pinned to that controller, and run refuses it. run takes no --profile; it
 refuses one with the 'sparkwing pipeline trigger' command that runs the
@@ -1652,7 +1653,9 @@ var cmdWorker = Command{
 	ReachesController: true,
 	Synopsis:          "Claim triggers from a profile's controller and run them in-process",
 	Description: `Polls the trigger queue at the selected profile's
-controller and executes each claimed trigger in-process on this host.
+controller and hosts each claimed trigger's run on this host, building the
+pipeline from the checkout the worker runs in. Each node runs here in its own
+process under a claim of its own.
 For k8s or warm execution, run sparkwing-runner runner --also-claim-triggers
 --trigger-runner k8s|warm, which carries the image and service-account flags.
 

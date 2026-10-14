@@ -1,11 +1,9 @@
 package sparkwingruntime
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
 )
 
 type PlanPreview struct {
@@ -82,11 +80,9 @@ func PreviewPlan(plan *sparkwing.Plan, pipeline string, resolvedArgs map[string]
 		})
 	}
 
-	planCtx := planguard.With(context.Background())
-
 	seen := make(map[string]bool)
 	for _, n := range plan.Nodes() {
-		out.Nodes = append(out.Nodes, previewNode(planCtx, n, "", opts))
+		out.Nodes = append(out.Nodes, previewNode(n, "", opts))
 		seen[n.ID()] = true
 	}
 	for _, n := range plan.Nodes() {
@@ -98,13 +94,13 @@ func PreviewPlan(plan *sparkwing.Plan, pipeline string, resolvedArgs map[string]
 		if seen[recID] {
 			continue
 		}
-		out.Nodes = append(out.Nodes, previewNode(planCtx, rec, n.ID(), opts))
+		out.Nodes = append(out.Nodes, previewNode(rec, n.ID(), opts))
 		seen[recID] = true
 	}
 	return out, nil
 }
 
-func previewNode(ctx context.Context, n *sparkwing.JobNode, onFailureOf string, opts PreviewOptions) PreviewNode {
+func previewNode(n *sparkwing.JobNode, onFailureOf string, opts PreviewOptions) PreviewNode {
 	pn := PreviewNode{
 		ID:          n.ID(),
 		Deps:        append([]string(nil), n.DepIDs()...),
@@ -120,7 +116,7 @@ func previewNode(ctx context.Context, n *sparkwing.JobNode, onFailureOf string, 
 	if w == nil {
 		return pn
 	}
-	pw := previewWork(ctx, w, opts)
+	pw := previewWork(w, opts)
 	pn.Work = pw
 
 	allSkipped := true
@@ -138,12 +134,12 @@ func previewNode(ctx context.Context, n *sparkwing.JobNode, onFailureOf string, 
 	return pn
 }
 
-func previewWork(ctx context.Context, w *sparkwing.Work, opts PreviewOptions) *PreviewWork {
+func previewWork(w *sparkwing.Work, opts PreviewOptions) *PreviewWork {
 	rangeSkips := w.PreviewSkipForRange(opts.StartAt, opts.StopAt)
 
 	pw := &PreviewWork{}
 	for _, s := range w.Steps() {
-		item := previewItem(ctx, s.ID(), s.DepIDs(), rangeSkips, s.SkipPredicates())
+		item := previewItem(s.ID(), s.DepIDs(), rangeSkips, s.SkipPredicates())
 		if risks := s.Risks(); len(risks) > 0 {
 			item.Risks = risks
 		}
@@ -162,7 +158,7 @@ func previewWork(ctx context.Context, w *sparkwing.Work, opts PreviewOptions) *P
 	return pw
 }
 
-func previewItem(ctx context.Context, id string, needs []string, rangeSkips map[string]string, predicates []sparkwing.SkipPredicate) PreviewItem {
+func previewItem(id string, needs []string, rangeSkips map[string]string, predicates []sparkwing.SkipPredicate) PreviewItem {
 	item := PreviewItem{
 		ID:       id,
 		Needs:    append([]string(nil), needs...),
@@ -174,31 +170,13 @@ func previewItem(ctx context.Context, id string, needs []string, rangeSkips map[
 		item.SkipDetail = reason
 		return item
 	}
+	// safety: a predicate is the author's code with side effects, so a preview reports it undecided rather than
+	// running it.
 	for _, p := range predicates {
-		if p == nil {
-			continue
-		}
-		match, panicMsg := safeEvalPredicate(ctx, p)
-		if panicMsg != "" {
-			item.Decision = "would_skip"
-			item.SkipReason = "user_skipif"
-			item.SkipDetail = "predicate panicked at plan time: " + panicMsg
-			return item
-		}
-		if match {
-			item.Decision = "would_skip"
-			item.SkipReason = "user_skipif"
+		if p != nil {
+			item.Decision, item.SkipReason, item.SkipDetail = "may_skip", "user_skipif", "SkipIf is evaluated at run time"
 			return item
 		}
 	}
 	return item
-}
-
-func safeEvalPredicate(ctx context.Context, p sparkwing.SkipPredicate) (match bool, panicMsg string) {
-	defer func() {
-		if r := recover(); r != nil {
-			panicMsg = fmt.Sprintf("%v", r)
-		}
-	}()
-	return p(ctx), ""
 }

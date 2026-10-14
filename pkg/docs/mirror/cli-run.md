@@ -8,8 +8,10 @@ Every `sparkwing run` command, flag, and argument, generated from the CLI's own 
 
 Invoke a pipeline
 
-Compiles the nearest .sparkwing/ binary and exec's it
-with the named pipeline. A run executes on this machine against its local
+Compiles the nearest .sparkwing/ binary and hosts a run of the
+named pipeline. The engine asks the binary for the plan over the node
+protocol, then starts it once per job; retries, timeouts, caching, admission
+and logs stay in the engine. A run executes on this machine against its local
 store and secrets. A pipeline whose sparkwing.yaml entry names a profile: is
 pinned to that controller, and run refuses it. run takes no --profile; it
 refuses one with the 'sparkwing pipeline trigger' command that runs the

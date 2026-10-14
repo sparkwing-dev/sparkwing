@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -30,7 +31,7 @@ func (f *appFixture) launchNode(runID, nodeID string) string {
 	c, err := f.store.ClaimLaunch(store.WithoutCreditMetering(context.Background()),
 		store.ClaimIdentity{Principal: "launcher", TokenPrefix: "swr_launch"},
 		store.LaunchClaimRequest{HolderID: "launcher:" + runID, Lease: time.Minute, Deadline: time.Hour, RunID: runID, NodeID: nodeID},
-		time.Now())
+		controller.LaunchClaimClock(f.t, f.store, runID, nodeID))
 	if err != nil || c == nil {
 		f.t.Fatalf("launch claim %s/%s: %+v %v", runID, nodeID, c, err)
 	}

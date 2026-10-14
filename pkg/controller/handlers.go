@@ -391,6 +391,10 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	if err := fillRunTrigger(r.Context(), tenant, run); err != nil {
+		s.writeInternalError(w, r, "run trigger", err)
+		return
+	}
 	if includeHas(r.URL.Query().Get("include"), "nodes") {
 		nodes, err := tenant.ListNodes(r.Context(), runID)
 		if err != nil {
@@ -430,6 +434,26 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, runForResponse(r, run, s.secretValuesAllowed))
+}
+
+// safety: a launcher's claims cannot read the trigger, so the run read carries
+// the trigger's actor and pull request that planning and every node's plan
+// need; a run with no trigger has neither.
+func fillRunTrigger(ctx context.Context, tenant *store.Tenant, run *store.Run) error {
+	trig, err := tenant.GetTrigger(ctx, run.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	run.TriggerUser = trig.TriggerUser
+	if pr := sparkwing.PullRequestFromEnv(trig.TriggerEnv); pr != nil {
+		run.PullRequest = &store.RunPullRequest{
+			Number: pr.Number, Action: pr.Action, BaseRef: pr.BaseRef, BaseSHA: pr.BaseSHA, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA,
+		}
+	}
+	return nil
 }
 
 func includeHas(csv, target string) bool {

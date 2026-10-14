@@ -49,6 +49,11 @@ func (s *scheduler) rehydrated(ctx context.Context, n nodeproto.PlanNode, byID m
 	case prior.Outcome == "":
 		return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("source node %s is not terminal", n.ID)}, true
 	}
+	// safety: a node planned differently in the source, as a generator may regenerate it, ran other work, so
+	// its result is not this node's to copy.
+	if prior.SpecHash != n.SpecHash {
+		return s.runsAgain(n.ID)
+	}
 	generator := n.Closures != nil && len(n.Closures.Generator) > 0 && prior.Outcome == string(sparkwing.Success)
 	if generator && s.regenerate == nil {
 		return s.runsAgain(n.ID)
@@ -64,7 +69,7 @@ func (s *scheduler) rehydrated(ctx context.Context, n nodeproto.PlanNode, byID m
 	if err := s.copyRetried(ctx, prior, output); err != nil {
 		return Result{Outcome: sparkwing.Failed, Err: err}, true
 	}
-	res := Result{Outcome: sparkwing.Outcome(prior.Outcome), Reason: prior.FailureReason, Output: output, memoRecorded: true}
+	res := Result{Outcome: sparkwing.Outcome(prior.Outcome), Reason: prior.FailureReason, Output: output, recorded: true}
 	if prior.Error != "" {
 		res.Err = errors.New(prior.Error)
 	}

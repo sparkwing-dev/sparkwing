@@ -53,7 +53,7 @@ func readRequests(t *testing.T, path string) string {
 
 func TestPlanRendersThePlanDocument(t *testing.T) {
 	bin, requests := fakePlanSDK(t, fixtureDescribe, fixturePlan, fixtureEval)
-	planned, err := planOverProtocol(context.Background(), bin, t.TempDir(), "demo", []string{"--env", "prod", "--fast"}, "plan", true)
+	planned, err := planOverProtocol(context.Background(), bin, t.TempDir(), "demo", []string{"--env", "prod", "--fast"}, "plan")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,8 @@ Args:
   env=prod
   fast=true
   Node "build" [would_run]
-    Step "lint" [would_skip (user_skipif)]
+    Step "lint" [may_skip (user_skipif)]
+      reason: SkipIf is evaluated at run time
     Step "compile" [would_run]
       needs: lint
     Step "test" [would_run]
@@ -83,7 +84,6 @@ Args:
 	for _, sent := range []string{
 		`{"id":"1","op":"describe"}`,
 		`{"id":"2","op":"plan","pipeline":"demo","args":{"env":"prod","fast":"true"},"run":{"run_id":"plan"}}`,
-		`{"id":"3","op":"eval","closure":"build/step/lint/skip_if/0"}`,
 	} {
 		if !strings.Contains(reqs, sent) {
 			t.Fatalf("requests:\n%s\nlack %s", reqs, sent)
@@ -91,9 +91,31 @@ Args:
 	}
 }
 
+// safety: a skip_if predicate is customer code, so inspection must never send the eval that runs it.
+func TestPlanNeverEvaluatesSkipIf(t *testing.T) {
+	bin, requests := fakePlanSDK(t, fixtureDescribe, fixturePlan, fixtureEval)
+	planned, err := planOverProtocol(context.Background(), bin, t.TempDir(), "demo", []string{"--env", "prod"}, "plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := previewPlan(planned, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reqs := readRequests(t, requests); strings.Contains(reqs, `"op":"eval"`) {
+		t.Fatalf("plan evaluated a closure:\n%s", reqs)
+	}
+	if lint := doc.Nodes[0].Work.Steps[0]; lint.Decision != "may_skip" || lint.SkipReason != "user_skipif" {
+		t.Fatalf("lint = %+v, want may_skip from an unevaluated SkipIf", lint)
+	}
+	if doc.Nodes[0].Decision != "would_run" {
+		t.Fatalf("build = %+v, want would_run", doc.Nodes[0])
+	}
+}
+
 func TestPlanRangeSkipsStepsOutsideTheBounds(t *testing.T) {
 	bin, _ := fakePlanSDK(t, fixtureDescribe, fixturePlan, `"ok":true,"result":{"value":false}}`)
-	planned, err := planOverProtocol(context.Background(), bin, t.TempDir(), "demo", []string{"--env", "prod"}, "plan", true)
+	planned, err := planOverProtocol(context.Background(), bin, t.TempDir(), "demo", []string{"--env", "prod"}, "plan")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +134,7 @@ func TestPlanRangeSkipsStepsOutsideTheBounds(t *testing.T) {
 
 func TestExplainRendersThePlanDocument(t *testing.T) {
 	bin, requests := fakePlanSDK(t, fixtureDescribe, fixturePlan, fixtureEval)
-	planned, err := planOverProtocol(context.Background(), bin, t.TempDir(), "demo", []string{"--env=prod"}, "explain", false)
+	planned, err := planOverProtocol(context.Background(), bin, t.TempDir(), "demo", []string{"--env=prod"}, "explain")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +186,7 @@ func TestPlanErrorsNameTheirCause(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			bin, _ := fakePlanSDK(t, fixtureDescribe, tc.plan, fixtureEval)
-			_, err := planOverProtocol(context.Background(), bin, t.TempDir(), "demo", tc.args, "plan", true)
+			_, err := planOverProtocol(context.Background(), bin, t.TempDir(), "demo", tc.args, "plan")
 			if err == nil || !strings.HasPrefix(err.Error(), tc.want) || isInvalidArgs(err) != tc.invalid {
 				t.Fatalf("err = %v (invalid_args %v), want %q", err, isInvalidArgs(err), tc.want)
 			}
@@ -179,7 +201,7 @@ func TestPlanStopsAtTheDeadline(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
-	if _, err := planOverProtocol(ctx, bin, t.TempDir(), "demo", nil, "plan", true); !errors.Is(err, context.DeadlineExceeded) {
+	if _, err := planOverProtocol(ctx, bin, t.TempDir(), "demo", nil, "plan"); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err = %v, want the deadline", err)
 	}
 }

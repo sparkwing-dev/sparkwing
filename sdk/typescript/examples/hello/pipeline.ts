@@ -1,6 +1,6 @@
 // A two-job pipeline: build publishes a digest, publish reads it through the
-// engine's output route. Run `node pipeline.ts --describe` to see what the
-// engine reads first.
+// engine's output route. The engine starts it as
+// `node pipeline.ts --sw-node-protocol` and sends describe first.
 
 import { definePipeline, main } from "../../src/index.ts";
 

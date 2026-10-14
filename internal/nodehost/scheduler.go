@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -53,6 +54,24 @@ type Config struct {
 	Invocation map[string]any
 	// Memo reuses memoized nodes' earlier results; nil runs every node.
 	Memo *Memo
+	// Dispatch, when set, runs each admitted node elsewhere, whole: the
+	// remote host runs its artifacts, caches, retries, timeouts and attempts
+	// and records its start and result. Debug pauses, skip_if, approvals,
+	// memo and admission stay in this host, with Attempts for their eval
+	// processes and logs. Nil runs every node in this process.
+	Dispatch Executor
+	// ParentRunID, RetryOf and RetrySource are the run row's lineage.
+	ParentRunID, RetryOf, RetrySource string
+	// Resume reuses the node rows an earlier host of this run left, as a
+	// trigger reclaimed after its runner stopped has: a finished node keeps
+	// its result, and an unfinished one, or one whose holder was lost, runs
+	// again. A row planned under another spec_hash fails the run with
+	// plan_drift. It needs Dispatch, whose claims keep a node from running
+	// twice.
+	Resume bool
+	// ClaimedRowPoll is how often a dispatched node's row is read while
+	// another holder claims it; zero means 5 seconds.
+	ClaimedRowPoll time.Duration
 	// Only, as --sw-only, runs only the plan's nodes whose ID matches the
 	// glob and the nodes they depend on, skipping the rest.
 	Only string
@@ -75,8 +94,9 @@ type Result struct {
 	// failed before_run does: a later attempt would run the body without it.
 	Final      bool
 	expansions []expansion
-	// safety: the memo layer writes the row before its release records the entry, so finish must not write it again.
-	memoRecorded bool
+	// safety: the memo layer writes the row before its release records the entry, and a dispatched node's
+	// remote host writes its own, so finish must not write it again.
+	recorded bool
 }
 
 // RunResult is how a hosted run ended. Status is success, failed or
@@ -209,6 +229,9 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 	if cfg.Run.RunID == "" {
 		return RunResult{}, errors.New("nodehost: the run has no id")
 	}
+	if cfg.Resume && cfg.Dispatch == nil {
+		return RunResult{}, errors.New("nodehost: Resume needs Dispatch, whose claims keep a resumed node from running twice")
+	}
 	if cfg.Run.StartedAt.IsZero() {
 		cfg.Run.StartedAt = time.Now().UTC()
 	}
@@ -290,7 +313,7 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 // run row is terminal.
 func runPlanned(ctx context.Context, cfg *Config, run *Run, res *RunResult) (release func()) {
 	release = func() {}
-	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(cfg)}
+	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(cfg), resume: cfg.Resume}
 	s.rehydrate, s.rerun = cfg.Rehydrate, map[string]bool{}
 	if cfg.Attempts != nil {
 		s.regenerate = func(ctx context.Context, n *NodeRun, output json.RawMessage) []expansion {
@@ -331,6 +354,7 @@ func runRow(cfg Config, args map[string]string) store.Run {
 	row := store.Run{
 		ID: rc.RunID, Pipeline: cfg.Pipeline, Status: "running", Args: args,
 		TriggerSource: rc.Trigger.Source, StartedAt: rc.StartedAt, Invocation: cfg.Invocation,
+		ParentRunID: cfg.ParentRunID, RetryOf: cfg.RetryOf, RetrySource: cfg.RetrySource,
 	}
 	if g := rc.Git; g != nil {
 		row.GitBranch, row.GitSHA, row.DeclaredRepo, row.RepoURL = g.Branch, g.SHA, g.Repo, g.RepoURL
@@ -365,6 +389,9 @@ func heartbeat(ctx context.Context, cfg Config, runID string) (stop func()) {
 }
 
 func chain(cfg *Config) Executor {
+	if cfg.Dispatch != nil {
+		return dispatchChain(cfg)
+	}
 	exec := cfg.Execute
 	if exec == nil && cfg.Attempts != nil {
 		exec = cfg.Attempts.executor(cfg)
@@ -401,6 +428,7 @@ type scheduler struct {
 	order   []string
 	groups  map[string]*genGroup
 	addedBy map[string]string
+	resume  bool
 	// safety: rerun records the nodes a retry runs again, so a node waiting on its deps is looked up in the
 	// source run once; only the scheduler goroutine reads it.
 	rehydrate  *Rehydration
@@ -481,11 +509,7 @@ func (s *scheduler) startReady(ctx context.Context, done chan<- finished, runnin
 				s.terminal(ctx, n.ID, sparkwing.Skipped, fmt.Sprintf("parent %q did not fail (outcome=%s)", parent, pr.Outcome))
 				continue
 			}
-			stage := "action"
-			if pr.Reason == store.FailureVerify {
-				stage = "verify"
-			}
-			node.Failure = &nodeproto.Failure{Node: parent, Stage: stage, Message: errText(pr.Err)}
+			node.Failure = parentFailure(parent, pr.Reason, errText(pr.Err))
 		} else if s.upstreamFailed(waits, byID) {
 			s.terminal(ctx, n.ID, sparkwing.Cancelled, "upstream-failed")
 			continue
@@ -496,6 +520,16 @@ func (s *scheduler) startReady(ctx context.Context, done chan<- finished, runnin
 		go func() { done <- finished{id: n.ID, res: s.exec(ctx, node)} }()
 	}
 	return progressed
+}
+
+// safety: one rule for the run host and a dispatched recovery node's host,
+// which reads its parent's reason and error from the row this host recorded.
+func parentFailure(parent, reason, message string) *nodeproto.Failure {
+	stage := "action"
+	if reason == store.FailureVerify {
+		stage = "verify"
+	}
+	return &nodeproto.Failure{Node: parent, Stage: stage, Message: message}
 }
 
 // safety: a continue_on_error upstream's failure does not hold back its
@@ -522,8 +556,8 @@ func (s *scheduler) finish(ctx context.Context, id string, res Result) {
 	}
 	writeCtx := context.WithoutCancel(ctx)
 	var err error
-	if !res.memoRecorded {
-		err = s.run.State.FinishNodeWithReason(writeCtx, s.run.ID, id, string(res.Outcome), errText(res.Err), res.Output, res.Reason, nil)
+	if !res.recorded {
+		err = s.run.State.FinishNodeWithReason(writeCtx, s.run.ID, id, string(res.Outcome), recordedErrText(res.Err), res.Output, res.Reason, nil)
 	}
 	if errors.Is(err, store.ErrOutputNotStored) {
 		// safety: a refused output fails the node in its row too, so the row never stays running.
@@ -563,12 +597,25 @@ func (s *scheduler) add(ctx, writeCtx context.Context, nodes []nodeproto.PlanNod
 	if err := validateNodes(append(slices.Clone(s.nodes), nodes...)); err != nil {
 		return err
 	}
+	existing, err := s.resumedRows(writeCtx, nodes)
+	if err != nil {
+		return err
+	}
 	for i, n := range nodes {
+		if row, ok := existing[n.ID]; ok {
+			s.reuseRow(writeCtx, n.ID, row)
+			continue
+		}
 		if err := s.run.State.CreateNode(writeCtx, pendingRow(s.run, n)); err != nil {
 			err = fmt.Errorf("create node %s: %w", n.ID, err)
 			s.nodes = append(s.nodes, nodes[:i]...)
-			for _, created := range nodes[:i] {
-				s.terminal(ctx, created.ID, sparkwing.Failed, err.Error())
+			// safety: only rows this host created are failed; a reused row is its holder's or its run's record.
+			for _, prior := range nodes[:i] {
+				if _, reused := existing[prior.ID]; !reused {
+					s.terminal(ctx, prior.ID, sparkwing.Failed, err.Error())
+				} else {
+					s.started[prior.ID] = true
+				}
 			}
 			return err
 		}
@@ -577,9 +624,59 @@ func (s *scheduler) add(ctx, writeCtx context.Context, nodes []nodeproto.PlanNod
 	return nil
 }
 
+// safety: a resumed run reads every row an earlier host left before it
+// writes any, so a node planned under another spec_hash refuses the whole
+// resume with plan_drift and no row, a live holder's included, is touched.
+func (s *scheduler) resumedRows(ctx context.Context, nodes []nodeproto.PlanNode) (map[string]*store.Node, error) {
+	if !s.resume {
+		return nil, nil
+	}
+	rows := map[string]*store.Node{}
+	for _, n := range nodes {
+		row, err := s.run.State.GetNode(ctx, s.run.ID, n.ID)
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			continue
+		case err != nil:
+			return nil, fmt.Errorf("read node %s: %w", n.ID, err)
+		case row.SpecHash != n.SpecHash:
+			return nil, &nodeproto.Error{Code: nodeproto.CodePlanDrift, Message: fmt.Sprintf(
+				"node %s was planned as %s by an earlier host of this run and as %s now; plan code must be deterministic for a run",
+				n.ID, row.SpecHash, n.SpecHash)}
+		}
+		rows[n.ID] = row
+	}
+	return rows, nil
+}
+
+// safety: a resumed run's finished node keeps the result its row records and
+// is never run or written again; an unfinished row, or one the reaper failed
+// because its holder was lost, is run again.
+func (s *scheduler) reuseRow(ctx context.Context, id string, row *store.Node) {
+	if row.Status != "done" || row.Outcome == "" {
+		return
+	}
+	if row.FailureReason == store.FailureAgentLost {
+		if r, ok := s.run.State.(lostNodeResetter); ok && r.ResetNodeForAutoRetry(ctx, s.run.ID, id) == nil {
+			return
+		}
+	}
+	res := Result{Outcome: sparkwing.Outcome(row.Outcome), Reason: row.FailureReason, recorded: true}
+	if row.Error != "" {
+		res.Err = errors.New(row.Error)
+	}
+	s.started[id], s.results[id] = true, res
+}
+
+// safety: the store reopens a node whose holder was lost only for the run's own trigger holder, and only while no
+// agent-loss retry run took the run over, so the node never runs in both.
+type lostNodeResetter interface {
+	ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error
+}
+
 func pendingRow(run *Run, n nodeproto.PlanNode) store.Node {
 	row := store.Node{
-		RunID: run.ID, NodeID: n.ID, Status: "pending", RequestedSlots: 1,
+		RunID: run.ID, NodeID: n.ID, Status: "pending", RequestedSlots: 1, SpecHash: n.SpecHash,
 		Deps: append(slices.Clone(n.Deps), n.OptionalDeps...),
 	}
 	var runsOn, whenRunner []string
@@ -662,11 +759,49 @@ func (s *scheduler) nodeVerdict() (string, error) {
 	return "success", nil
 }
 
+// safety: a failed command's error embeds its whole output, which the node's
+// log already holds, and the controller refuses a finish body over 1 MiB, so
+// the row and end event carry a bounded error.
+const (
+	nodeErrTextMaxBytes  = 8 << 10
+	nodeErrTextHeadBytes = 512
+)
+
 func errText(err error) string {
 	if err == nil {
 		return ""
 	}
 	return err.Error()
+}
+
+// safety: only the node's row and end event are shortened; a cut taken before
+// masking could split a secret the masker no longer recognizes, so hook and
+// recovery inputs keep the whole error.
+func recordedErrText(err error) string {
+	return boundedNodeErrText(errText(err))
+}
+
+// RecordedErrText is err as a node's row records it, bounded as every node
+// finish bounds it.
+func RecordedErrText(err error) string { return recordedErrText(err) }
+
+// safety: the first line names what failed and the tail is where a command's
+// output reports why, so both survive and the elision is stated.
+func boundedNodeErrText(text string) string {
+	if len(text) <= nodeErrTextMaxBytes {
+		return text
+	}
+	head, _, _ := strings.Cut(text, "\n")
+	if len(head) > nodeErrTextHeadBytes {
+		head = strings.ToValidUTF8(head[:nodeErrTextHeadBytes], "")
+	}
+	tail := text[len(text)-(nodeErrTextMaxBytes-nodeErrTextHeadBytes-128):]
+	if i := strings.IndexByte(tail, '\n'); i >= 0 && i < len(tail)-1 {
+		tail = tail[i+1:]
+	}
+	tail = strings.ToValidUTF8(tail, "")
+	elided := len(text) - len(head) - len(tail)
+	return fmt.Sprintf("%s\n… (%d bytes of this error elided)\n%s", head, elided, tail)
 }
 
 type discardSink struct{}

@@ -243,7 +243,7 @@ func TestHostedSelection_FallsBackWhenTheSocketIsGone(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
-	sel, err := selectHostedAPI(ctx, testWingdAdmission(home, nil))
+	sel, err := selectHostedAPI(ctx, testWingdAdmission(home, nil), false)
 	if err != nil {
 		t.Fatalf("selectHostedAPI: %v", err)
 	}
@@ -261,10 +261,9 @@ func TestHostedSelection_FallsBackWhenTheSocketIsGone(t *testing.T) {
 func TestHostedSelection_ForcedWhileADaemonAnswers(t *testing.T) {
 	home := wingdTestHome(t)
 	startAPIDaemon(t, home, nil)
-	t.Setenv(AllowUnadmittedEnv, "1")
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
-	sel, err := selectHostedAPI(ctx, testWingdAdmission(home, nil))
+	sel, err := selectHostedAPI(ctx, testWingdAdmission(home, nil), true)
 	if err != nil {
 		t.Fatalf("selectHostedAPI: %v", err)
 	}
@@ -278,15 +277,74 @@ func TestHostedSelection_ForcedWhileADaemonAnswers(t *testing.T) {
 
 func TestHostedSelection_ForcedStillSaysNoDaemonWhenThereIsNone(t *testing.T) {
 	home := wingdTestHome(t)
-	t.Setenv(AllowUnadmittedEnv, "1")
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
-	sel, err := selectHostedAPI(ctx, unhostedAdmission(home, io.Discard))
+	sel, err := selectHostedAPI(ctx, unhostedAdmission(home, io.Discard), true)
 	if err != nil {
 		t.Fatalf("selectHostedAPI: %v", err)
 	}
 	if sel.standalone != standaloneNoDaemon {
 		t.Fatalf("reason = %q, want %q on a box with no daemon", sel.standalone, standaloneNoDaemon)
+	}
+}
+
+func TestHostedSelection_ChildOfAForcedParentReadsTheParentsStore(t *testing.T) {
+	home := wingdTestHome(t)
+	t.Setenv("SPARKWING_HOME", home)
+	_, runs := startAPIDaemon(t, home, nil)
+	ctx := context.Background()
+	if _, _, err := runs.Create(ctx); err != nil {
+		t.Fatal(err)
+	}
+	paths := PathsAt(home)
+	st, sa, release, err := openStandaloneStore(paths, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	defer func() { _ = st.Close() }()
+	if err := st.CreateRun(ctx, store.Run{ID: "parent", Pipeline: "parent", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	id, err := (localState{st: st}).EnqueueTrigger(ctx, "child", nil, "parent", "job", "", "await-pipeline", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(StandaloneStateDBEnv, sa.stateDB)
+	t.Setenv(StandaloneReasonEnv, standaloneForced)
+
+	backends, sel, closeBackends, err := localTriggerBackends(ctx, paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeBackends()
+	if backends.APISocket != "" || sel.standalone != standaloneForced {
+		t.Fatalf("socket = %q, reason = %q; want the child forced standalone like its parent", backends.APISocket, sel.standalone)
+	}
+	if _, err := backends.State.GetTrigger(ctx, id); err != nil {
+		t.Fatalf("child could not read its trigger from the parent's store: %v", err)
+	}
+}
+
+func TestHostedSelection_AForcedReasonWithoutAParentStoreIsIgnored(t *testing.T) {
+	home := wingdTestHome(t)
+	t.Setenv("SPARKWING_HOME", home)
+	_, runs := startAPIDaemon(t, home, nil)
+	ctx := context.Background()
+	if _, _, err := runs.Create(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(StandaloneStateDBEnv, "")
+	t.Setenv(StandaloneReasonEnv, standaloneForced)
+	paths := PathsAt(home)
+	opts := Options{DefaultStateDB: paths.StateDB(), Admission: testWingdAdmission(home, nil)}
+	backends, sel, release, err := hostedBackendsForRun(ctx, paths, &opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if backends.APISocket == "" || sel.standalone != "" {
+		t.Fatalf("socket = %q, reason = %q; want the daemon, since no parent named a standalone store", backends.APISocket, sel.standalone)
 	}
 }
 
@@ -580,7 +638,6 @@ func TestHostedRun_ARefusedRunLeavesNoBlockAndNoStore(t *testing.T) {
 	registerHostedPipelines(t)
 	home := wingdTestHome(t)
 	t.Setenv("SPARKWING_HOME", home)
-	t.Setenv(AllowUnadmittedEnv, "")
 	paths := PathsAt(home)
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatalf("ensure root: %v", err)

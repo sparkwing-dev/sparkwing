@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"flag"
@@ -9,7 +10,9 @@ import (
 	"os/signal"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/warmpool"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func runHandleTriggerCLI(args []string) error {
@@ -72,89 +75,72 @@ func runHandleTriggerCLI(args []string) error {
 		Token:             *token,
 		HeartbeatInterval: *heartbeat,
 	}
-	switch *runnerKind {
-	case "", "inprocess":
-	case "k8s":
-		nodeSelector, err := parseK8sNodeSelector(k8sNodeSelector)
-		if err != nil {
-			return err
-		}
-		tolerations, err := parseK8sTolerations(k8sTolerations)
-		if err != nil {
-			return err
-		}
-		factory, err := BuildK8sRunnerFactory(K8sRunnerFactoryConfig{
-			Kubeconfig:                 *kubeconfig,
-			Namespace:                  *k8sNamespace,
-			Image:                      *k8sImage,
-			ServiceAccount:             *k8sSA,
-			ImagePullSecret:            *k8sPullSecret,
-			ControllerURL:              firstNonEmpty(*k8sCtrlURL, *controllerURL),
-			DispatcherURL:              *controllerURL,
-			ArtifactStoreURL:           *artifactStoreURL,
-			GitcacheURL:                os.Getenv("SPARKWING_GITCACHE_URL"),
-			AgentToken:                 *token,
-			Labels:                     k8sLabels,
-			NodeSelector:               nodeSelector,
-			Tolerations:                tolerations,
-			TeamNodes:                  *k8sTeamNodes,
-			DependencyProxyURL:         *dependencyProxy,
-			DependencyProxyFallbackURL: os.Getenv("SPARKWING_GITCACHE_URL"),
-			ImagePullPolicy:            *imagePullPolicy,
-			CPUCeiling:                 *k8sCPUCeiling,
-			MemoryCeiling:              *k8sMemoryCeiling,
-			JobDeadline:                *k8sJobDeadline,
-		})
-		if err != nil {
-			return fmt.Errorf("k8s runner: %w", err)
-		}
-		opts.RunnerFactory = factory
-	case "warm":
-		fallbackFactory := opts.RunnerFactory
-		if *k8sImage != "" {
-			nodeSelector, err := parseK8sNodeSelector(k8sNodeSelector)
-			if err != nil {
-				return err
-			}
-			tolerations, err := parseK8sTolerations(k8sTolerations)
-			if err != nil {
-				return err
-			}
-			factory, err := BuildK8sRunnerFactory(K8sRunnerFactoryConfig{
-				Kubeconfig:                 *kubeconfig,
-				Namespace:                  *k8sNamespace,
-				Image:                      *k8sImage,
-				ServiceAccount:             *k8sSA,
-				ImagePullSecret:            *k8sPullSecret,
-				ControllerURL:              firstNonEmpty(*k8sCtrlURL, *controllerURL),
-				DispatcherURL:              *controllerURL,
-				ArtifactStoreURL:           *artifactStoreURL,
-				GitcacheURL:                os.Getenv("SPARKWING_GITCACHE_URL"),
-				AgentToken:                 *token,
-				Labels:                     k8sLabels,
-				NodeSelector:               nodeSelector,
-				Tolerations:                tolerations,
-				TeamNodes:                  *k8sTeamNodes,
-				DependencyProxyURL:         *dependencyProxy,
-				DependencyProxyFallbackURL: os.Getenv("SPARKWING_GITCACHE_URL"),
-				ImagePullPolicy:            *imagePullPolicy,
-				CPUCeiling:                 *k8sCPUCeiling,
-				MemoryCeiling:              *k8sMemoryCeiling,
-				JobDeadline:                *k8sJobDeadline,
-			})
-			if err != nil {
-				return fmt.Errorf("warm runner (fallback k8s): %w", err)
-			}
-			fallbackFactory = factory
-		}
-		opts.RunnerFactory = BuildWarmRunnerFactory(*controllerURL, *token, warmpool.Config{}, fallbackFactory)
-	default:
-		return fmt.Errorf("--runner %q: expected inprocess, k8s, or warm", *runnerKind)
+	factory, err := BuildTriggerRunnerFactory(*runnerKind, K8sRunnerFactoryConfig{
+		Kubeconfig:                 *kubeconfig,
+		Namespace:                  *k8sNamespace,
+		Image:                      *k8sImage,
+		ServiceAccount:             *k8sSA,
+		ImagePullSecret:            *k8sPullSecret,
+		ControllerURL:              firstNonEmpty(*k8sCtrlURL, *controllerURL),
+		DispatcherURL:              *controllerURL,
+		ArtifactStoreURL:           *artifactStoreURL,
+		GitcacheURL:                os.Getenv("SPARKWING_GITCACHE_URL"),
+		AgentToken:                 *token,
+		Labels:                     k8sLabels,
+		TeamNodes:                  *k8sTeamNodes,
+		DependencyProxyURL:         *dependencyProxy,
+		DependencyProxyFallbackURL: os.Getenv("SPARKWING_GITCACHE_URL"),
+		ImagePullPolicy:            *imagePullPolicy,
+		CPUCeiling:                 *k8sCPUCeiling,
+		MemoryCeiling:              *k8sMemoryCeiling,
+		JobDeadline:                *k8sJobDeadline,
+	}, k8sNodeSelector, k8sTolerations)
+	if err != nil {
+		return err
 	}
+	opts.RunnerFactory = factory
 	if err := HandleClaimedTrigger(ctx, opts, triggerID); err != nil {
 		return fmt.Errorf("handle %s: %w", triggerID, err)
 	}
 	return nil
+}
+
+// BuildTriggerRunnerFactory is the node runner kind names for each trigger:
+// nil for inprocess, Kubernetes Jobs for k8s, and warm runners for warm,
+// which fall back to Jobs when cfg names an image. nodeSelector and
+// tolerations are the operator's key=value and key[=value]:Effect strings.
+func BuildTriggerRunnerFactory(kind string, cfg K8sRunnerFactoryConfig, nodeSelector, tolerations []string,
+) (func(Backends, *store.Trigger) runner.Runner, error) {
+	k8s := func() (func(Backends, *store.Trigger) runner.Runner, error) {
+		var err error
+		if cfg.NodeSelector, err = parseK8sNodeSelector(nodeSelector); err != nil {
+			return nil, err
+		}
+		if cfg.Tolerations, err = parseK8sTolerations(tolerations); err != nil {
+			return nil, err
+		}
+		return BuildK8sRunnerFactory(cfg)
+	}
+	switch kind {
+	case "", "inprocess":
+		return nil, nil
+	case "k8s":
+		factory, err := k8s()
+		if err != nil {
+			return nil, fmt.Errorf("k8s runner: %w", err)
+		}
+		return factory, nil
+	case "warm":
+		var fallback func(Backends, *store.Trigger) runner.Runner
+		if cfg.Image != "" {
+			var err error
+			if fallback, err = k8s(); err != nil {
+				return nil, fmt.Errorf("warm runner (fallback k8s): %w", err)
+			}
+		}
+		return BuildWarmRunnerFactory(cmp.Or(cfg.DispatcherURL, cfg.ControllerURL), cfg.AgentToken, warmpool.Config{}, fallback), nil
+	}
+	return nil, fmt.Errorf("--runner %q: expected inprocess, k8s, or warm", kind)
 }
 
 func firstNonEmpty(vals ...string) string {

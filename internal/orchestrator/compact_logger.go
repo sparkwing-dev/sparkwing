@@ -166,8 +166,10 @@ func (r *compactRunRenderer) Err() error {
 }
 
 func selectRunRenderer() sparkwing.Logger {
-	return runRenderer(os.Getenv("SPARKWING_LOG_FORMAT"), os.Getenv("SPARKWING_LOG_LEVEL") == "debug")
+	return runRenderer(os.Getenv("SPARKWING_LOG_FORMAT"), debugLogLevel())
 }
+
+func debugLogLevel() bool { return os.Getenv("SPARKWING_LOG_LEVEL") == "debug" }
 
 func runRenderer(format string, verbose bool) sparkwing.Logger {
 	format = strings.ToLower(format)

@@ -318,13 +318,8 @@ func (s *hostedRunState) CreateRun(ctx context.Context, r store.Run) error {
 }
 
 func (s *hostedRunState) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {
-	if s.retryPlanHash != "" {
-		// safety: the plan names its own run, so the retry's is compared under the source run's id, as the
-		// source's hash was taken.
-		source := bytes.Replace(snapshot, []byte(`"run_id":"`+runID+`"`), []byte(`"run_id":"`+s.lineage.RetryOf+`"`), 1)
-		if got := hashBytes(source); got != s.retryPlanHash {
-			return fmt.Errorf("retry provenance drift: source plan %s, checkout plan %s", s.retryPlanHash, got)
-		}
+	if err := retryPlanMatches(snapshot, runID, s.lineage.RetryOf, s.retryPlanHash); err != nil {
+		return err
 	}
 	if err := s.StateBackend.UpdatePlanSnapshot(ctx, runID, snapshot); err != nil {
 		return err
@@ -529,9 +524,9 @@ func hostedCapacityFingerprint(doc *nodeproto.PlanDoc) string {
 }
 
 // RunHostedCommand runs one `sparkwing run` through [RunHosted] and renders it
-// as the pipeline binary did, with logFormat and verbose choosing the
+// as the pipeline binary did, with logFormat and opts.Verbose choosing the
 // renderer. The error says why the run did not succeed.
-func RunHostedCommand(ctx context.Context, opts Options, entry HostedEntry, logFormat string, verbose bool) (*Result, error) {
+func RunHostedCommand(ctx context.Context, opts Options, entry HostedEntry, logFormat string) (*Result, error) {
 	paths, err := DefaultPaths()
 	if err != nil {
 		return nil, fmt.Errorf("resolve paths: %w", err)
@@ -539,7 +534,7 @@ func RunHostedCommand(ctx context.Context, opts Options, entry HostedEntry, logF
 	// safety: the host's own diagnostics, such as retries and cache misses,
 	// went to the pipeline binary's stderr at info; here they would print raw
 	// between the renderer's records, so only warnings show unless verbose.
-	if !verbose {
+	if !opts.Verbose {
 		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
 	}
 	if opts.MaxParallel == 0 {
@@ -550,7 +545,7 @@ func RunHostedCommand(ctx context.Context, opts Options, entry HostedEntry, logF
 	if opts.MaxParallel == 0 {
 		opts.MaxParallel = runtime.NumCPU()
 	}
-	delegate := runRenderer(logFormat, verbose)
+	delegate := runRenderer(logFormat, opts.Verbose)
 	opts.Delegate = delegate
 	opts.AdmissionClass = admissionClassFromEnv()
 	opts.Admission = pipelineAdmission("", wingwire.OriginLocal)
@@ -675,4 +670,17 @@ func hostedRehydration(ctx context.Context, state StateBackend, opts Options, ru
 		r.Causes = row.RetryCauseNodeIDs
 	}
 	return r, nil
+}
+
+// safety: a retry copies its source run's results only when it planned the same plan; the plan names its own
+// run, so the retry's is compared under the source run's id, as the source's hash was taken.
+func retryPlanMatches(snapshot []byte, runID, retryOf, hash string) error {
+	if hash == "" {
+		return nil
+	}
+	source := bytes.Replace(snapshot, []byte(`"run_id":"`+runID+`"`), []byte(`"run_id":"`+retryOf+`"`), 1)
+	if got := hashBytes(source); got != hash {
+		return fmt.Errorf("retry provenance drift: source plan %s, checkout plan %s", hash, got)
+	}
+	return nil
 }

@@ -55,7 +55,6 @@ func TestRunDetachedStartsConsumerWithoutPreWarmingDaemon(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(home, "config.yaml"))
-	t.Setenv("SPARKWING_NO_UPDATE", "1")
 
 	repoDir := detachedDaemonRepo(t)
 

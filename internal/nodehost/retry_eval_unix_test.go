@@ -147,3 +147,14 @@ func TestACopiedGeneratorsEvalKeepsTheNodesTimeout(t *testing.T) {
 		}
 	}
 }
+
+func TestARetryRunsAGeneratedNodeWhoseSpecChanged(t *testing.T) {
+	f := newRetryFixture(t)
+	f.source()
+	f.mode("changed")
+	res := f.run(t.Context(), "retry", &Rehydration{SourceRunID: "retry-source", Causes: retryCause}, f.st)
+	if res.Status == "success" || f.bodies("good") != 2 {
+		t.Fatalf("retry %s good=%d: the good check's spec changed, so it runs again rather than copying its old success",
+			res.Status, f.bodies("good"))
+	}
+}

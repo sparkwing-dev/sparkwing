@@ -303,8 +303,18 @@ func TestOperatorConsole_ListsTheWaitlistNewestFirstAndApprovesByID(t *testing.T
 	f, operator, owner := operatorFixture(t)
 	f.setSignUp(map[string]any{"mode": "waitlist", "reason": "until launch"})
 	ids := map[string]string{}
-	for _, name := range []string{"ann", "bob", "cat"} {
+	for i, name := range []string{"ann", "bob", "cat"} {
 		ids[name] = f.signIn(person("w-"+name, name+"@example.com", name)).User.ID
+		// safety: a host clock sync can step the wall clock back between two
+		// sign-ups, so the order this test reads is pinned rather than taken
+		// from the stamps the sign-ups wrote.
+		res, err := f.store.DB().Exec(`UPDATE accounts SET waitlisted_at = ? WHERE id = ?`, int64(i+1), ids[name])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			t.Fatalf("pin %s's waitlist order: %d rows", name, n)
+		}
 	}
 
 	var page operatorWaitlist
