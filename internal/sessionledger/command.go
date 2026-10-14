@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os/exec"
 	"path/filepath"
 )
@@ -16,14 +17,22 @@ import (
 // step's, and retrying a command it cannot judge would only accumulate noise.
 //
 // safety: the error names only the program, since a sweep copies it into a
-// stray_session_reaped event and the arguments and output can quote a secret
-// no sweeping process can mask.
+// stray_session_reaped event and its path, arguments and output can quote a
+// secret no sweeping process can mask.
 func runCleanupCommand(ctx context.Context, argv []string) error {
 	if len(argv) == 0 {
 		return errors.New("sessionledger: command handle carries no argv")
 	}
-	if err := exec.CommandContext(ctx, argv[0], argv[1:]...).Run(); err != nil {
-		return fmt.Errorf("cleanup %s: %w", filepath.Base(argv[0]), err)
+	err := exec.CommandContext(ctx, argv[0], argv[1:]...).Run()
+	var pathErr *fs.PathError
+	var execErr *exec.Error
+	switch {
+	case err == nil:
+		return nil
+	case errors.As(err, &execErr):
+		err = execErr.Err
+	case errors.As(err, &pathErr):
+		err = pathErr.Err
 	}
-	return nil
+	return fmt.Errorf("cleanup %s: %w", filepath.Base(argv[0]), err)
 }
