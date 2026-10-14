@@ -800,8 +800,6 @@ func JobName(runID, nodeID string, attempt int) string {
 	return truncate(name, 63)
 }
 
-const scratchVolumeName = "scratch"
-
 const (
 	podCPULimitFactor = 2.0
 
@@ -900,7 +898,7 @@ func (r *Runner) buildJob(
 	env = append(env, DependencyProxyEnv(r.cfg.DependencyProxyURL)...)
 	env = append(env, claimFenceEnv(fence)...)
 
-	container := corev1.Container{
+	container := HardenedContainer(corev1.Container{
 		Name:            "runner",
 		Image:           r.cfg.Image,
 		ImagePullPolicy: pullPolicyOrDefault(r.cfg.ImagePullPolicy),
@@ -908,17 +906,7 @@ func (r *Runner) buildJob(
 		Args:            []string{"run-node", req.RunID, req.NodeID},
 		Env:             env,
 		Resources:       podResources(res, r.cfg),
-		SecurityContext: &corev1.SecurityContext{
-			AllowPrivilegeEscalation: boolPtr(false),
-			RunAsNonRoot:             boolPtr(true),
-			ReadOnlyRootFilesystem:   boolPtr(true),
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-			},
-		},
-		// safety: the read-only root leaves no writable path, and HOME, the caches, and SPARKWING_HOME all live here.
-		VolumeMounts: []corev1.VolumeMount{{Name: scratchVolumeName, MountPath: "/tmp"}},
-	}
+	})
 
 	team := TeamLabelValue(r.cfg.Team)
 	band := cpuBand(class.Cores)
@@ -946,26 +934,12 @@ func (r *Runner) buildJob(
 		// otherwise, and a band Job is a pipeline node with no retry.
 		podAnnotations = map[string]string{KarpenterDoNotDisrupt: "true"}
 	}
-	podSpec := corev1.PodSpec{
-		RestartPolicy:      corev1.RestartPolicyNever,
-		ServiceAccountName: r.cfg.ServiceAccountName,
-		// safety: pipeline code runs here, so the pod gets no API token
-		AutomountServiceAccountToken: boolPtr(false),
-		NodeSelector:                 selector,
-		Tolerations:                  bandTolerations(r.cfg.Tolerations, placed),
-		Affinity:                     affinity,
-		Containers:                   []corev1.Container{container},
-		Volumes: []corev1.Volume{{
-			Name:         scratchVolumeName,
-			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
-		}},
-		SecurityContext: &corev1.PodSecurityContext{
-			RunAsNonRoot: boolPtr(true),
-			SeccompProfile: &corev1.SeccompProfile{
-				Type: corev1.SeccompProfileTypeRuntimeDefault,
-			},
-		},
-	}
+	podSpec := HardenedPodSpec(resource.MustParse(DefaultScratchLimit))
+	podSpec.ServiceAccountName = r.cfg.ServiceAccountName
+	podSpec.NodeSelector = selector
+	podSpec.Tolerations = bandTolerations(r.cfg.Tolerations, placed)
+	podSpec.Affinity = affinity
+	podSpec.Containers = []corev1.Container{container}
 	if r.cfg.ImagePullSecret != "" {
 		podSpec.ImagePullSecrets = []corev1.LocalObjectReference{
 			{Name: r.cfg.ImagePullSecret},

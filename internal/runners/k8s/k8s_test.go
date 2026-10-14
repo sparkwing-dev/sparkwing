@@ -314,6 +314,26 @@ func TestBuildJob_UsesRestrictedPodSecurityContext(t *testing.T) {
 	}
 }
 
+// The launcher's Job and this runner's Job both run pipeline code, so they
+// share one hardened pod spec.
+func TestBuildJob_SharesTheLauncherHardening(t *testing.T) {
+	r := &Runner{cfg: Config{Image: "img"}}
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
+		capacity.Resolution{Source: store.CostSourceDefault}, store.CPUClass{}, store.NodeClaimFence{}, "")
+	pod := job.Spec.Template.Spec
+	if pod.EnableServiceLinks == nil || *pod.EnableServiceLinks {
+		t.Fatal("service links put every Service in the namespace into the pipeline's environment")
+	}
+	if len(pod.Volumes) != 1 || pod.Volumes[0].EmptyDir == nil || pod.Volumes[0].EmptyDir.SizeLimit == nil ||
+		pod.Volumes[0].EmptyDir.SizeLimit.Cmp(resource.MustParse(DefaultScratchLimit)) != 0 {
+		t.Fatalf("scratch volume = %#v, want an emptyDir limited to %s", pod.Volumes, DefaultScratchLimit)
+	}
+	sc := pod.Containers[0].SecurityContext
+	if sc == nil || sc.SeccompProfile == nil || sc.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
+		t.Fatalf("container security context = %#v, want a RuntimeDefault seccomp profile", sc)
+	}
+}
+
 func TestBuildJob_MountsScratchOverEveryWritablePath(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img"}}
 	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"},
