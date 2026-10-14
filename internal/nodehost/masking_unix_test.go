@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -259,10 +260,12 @@ func checkMaskedNodeFailure(t *testing.T, st *store.Store, res Result) {
 	}
 	var payloads strings.Builder
 	for _, e := range events {
-		payloads.Write(e.Payload)
+		if e.Kind == "node_failed" {
+			payloads.Write(e.Payload)
+		}
 	}
-	if !strings.Contains(payloads.String(), "***") {
-		t.Fatalf("no masked node_failed event recorded in %d events", len(events))
+	if payloads.Len() == 0 {
+		t.Fatalf("no node_failed event among %d events", len(events))
 	}
 	for what, text := range map[string]string{"row": node.Error, "events": payloads.String(), "result": res.Err.Error()} {
 		if strings.Contains(text, splitSecret[:10]) {
@@ -385,5 +388,82 @@ func TestTheRunsStoreMasksEveryTextItIsGiven(t *testing.T) {
 		if strings.Contains(w, splitSecret) || !strings.Contains(w, "***") {
 			t.Errorf("store got %q", w)
 		}
+	}
+}
+
+// safety: refuses the first output write with an error quoting the secret
+// where the bound cuts the headline, as a storage failure can.
+type refusingOutputStore struct {
+	storage.StateStore
+	refused bool
+}
+
+func (s *refusingOutputStore) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error {
+	if !s.refused && output != nil {
+		s.refused = true
+		lead := strings.Repeat("h", nodeErrTextHeadBytes-10-len(store.ErrOutputNotStored.Error()+": "))
+		return fmt.Errorf("%w: %s", store.ErrOutputNotStored, lead+splitSecret+"\n"+strings.Repeat("y", 2*nodeErrTextMaxBytes))
+	}
+	return s.StateStore.FinishNodeWithReason(ctx, runID, nodeID, outcome, errMsg, output, reason, exitCode)
+}
+
+// An output the store refuses replaces a masked result with the store's
+// error, which is masked before it is bounded and returned.
+func TestARefusedOutputsErrorIsMaskedThenBounded(t *testing.T) {
+	masker := secrets.NewMasker()
+	masker.Register(splitSecret)
+	ok := Result{Outcome: sparkwing.Success, Output: []byte(`{"v":1}`)}
+	t.Run("pod host", func(t *testing.T) {
+		st := failedNodeStore(t)
+		cfg := Config{State: &refusingOutputStore{StateStore: st}, Attempts: &Attempts{Masker: masker}, Run: nodeproto.RunContext{RunID: "r"}, Logger: slog.New(slog.DiscardHandler)}
+		run := podRun(&cfg)
+		checkMaskedNodeFailure(t, st, podHost(t.Context(), &cfg, run, "n", ok))
+	})
+	t.Run("scheduler", func(t *testing.T) {
+		st := failedNodeStore(t)
+		cfg := Config{State: maskState(&refusingOutputStore{StateStore: st}, masker), Attempts: &Attempts{Masker: masker}, Run: nodeproto.RunContext{RunID: "r"}, Logger: slog.New(slog.DiscardHandler)}
+		s := &scheduler{run: newRun(&cfg, nodeproto.PlanDoc{}, nil, nil), results: map[string]Result{}}
+		s.finish(t.Context(), "n", ok)
+		checkMaskedNodeFailure(t, st, s.results["n"])
+	})
+}
+
+// A run's host diagnostics, such as a generator's error or a queued
+// concurrency key, are masked in the message and in every attribute.
+func TestARunsLoggerMasksItsDiagnostics(t *testing.T) {
+	masker := secrets.NewMasker()
+	masker.Register(splitSecret)
+	var out strings.Builder
+	cfg := Config{State: openStore(t), Attempts: &Attempts{Masker: masker}, Run: nodeproto.RunContext{RunID: "r"}}
+	cfg.Logger = slog.New(slog.NewTextHandler(&out, nil))
+	logger := podRun(&cfg).Logger.With("key", "k-"+splitSecret)
+	logger.Error("generator "+splitSecret, "err", errors.New("boom "+splitSecret), slog.Group("g", "keys", []string{splitSecret}))
+	if got := out.String(); strings.Contains(got, splitSecret) || strings.Count(got, "***") < 4 {
+		t.Fatalf("logged %s", got)
+	}
+}
+
+// A CRLF split across the session's piece boundary ends its line as one,
+// with no carriage return left in the text.
+func TestSessionNormalizesACRLFSplitAtTheLineLimit(t *testing.T) {
+	log := &maskLog{}
+	sink, err := NewLogSink(t.Context(), LogSinkConfig{RunID: "r", NodeID: "n", Log: log, Masker: secrets.NewMasker()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := filepath.Join(t.TempDir(), "crlf-line")
+	if err := os.WriteFile(entry, []byte("#!/bin/sh\nhead -c 1048575 /dev/zero | tr '\\000' x\nprintf '\\r\\nnext\\n'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	s, err := StartSession(t.Context(), SessionConfig{
+		Entry: pipelineentry.Binary(entry), Dir: t.TempDir(), Env: []string{"PATH=/usr/bin:/bin"}, Sink: sink, Grace: 2 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = s.Close()
+	got := log.joined()
+	if strings.Contains(got, "\r") || !strings.Contains(got, "next") {
+		t.Fatalf("a CRLF split at the limit left a carriage return or lost the next line")
 	}
 }

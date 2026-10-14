@@ -535,8 +535,16 @@ func (s *Session) readText(f *os.File, q *sinkQueue) {
 				}
 			}
 			piece = errors.Is(err, bufio.ErrBufferFull)
+			// safety: a piece's trailing CR waits for the next piece, so a CRLF split at the limit still ends one line.
+			cr := piece && line[end-1] == '\r'
+			if cr {
+				end--
+			}
 			q.push(sinkItem{text: string(line[:end]), piece: piece, size: end})
 			line = line[:0]
+			if cr {
+				line = append(line, '\r')
+			}
 		}
 		if err != nil && !errors.Is(err, bufio.ErrBufferFull) {
 			// safety: a stream that ends right after a piece still ends its line, so the held tail is shown.
