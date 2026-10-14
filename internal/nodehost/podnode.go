@@ -146,6 +146,9 @@ func podRun(cfg *Config) *Run {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
+	if cfg.Attempts != nil {
+		cfg.State = maskState(cfg.State, cfg.Attempts.Masker)
+	}
 	return newRun(cfg, nodeproto.PlanDoc{}, cfg.Args, nil)
 }
 

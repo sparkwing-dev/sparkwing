@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -301,4 +302,88 @@ func TestOuterLayerNodeFailuresAreMaskedThenBounded(t *testing.T) {
 		s.finish(t.Context(), "n", Result{Outcome: sparkwing.Failed, Err: outerLayerFailure()})
 		checkMaskedNodeFailure(t, st, s.results["n"])
 	})
+}
+
+type textStore struct {
+	storage.StateStore
+	mu     sync.Mutex
+	writes []string
+}
+
+func (s *textStore) note(parts ...string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.writes = append(s.writes, strings.Join(parts, " "))
+	return nil
+}
+
+func (s *textStore) FinishRun(_ context.Context, _, _, errMsg string) error {
+	return s.note(errMsg)
+}
+
+func (s *textStore) FinishNode(_ context.Context, _, _, _, errMsg string, _ []byte) error {
+	return s.note(errMsg)
+}
+
+func (s *textStore) FinishNodeWithReason(_ context.Context, _, _, _, errMsg string, _ []byte, _ string, _ *int) error {
+	return s.note(errMsg)
+}
+
+func (s *textStore) UpdateNodeActivity(_ context.Context, _, _, detail string) error {
+	return s.note(detail)
+}
+
+func (s *textStore) AppendNodeAnnotation(_ context.Context, _, _, msg string) error {
+	return s.note(msg)
+}
+
+func (s *textStore) SetNodeSummary(_ context.Context, _, _, md string) error {
+	return s.note(md)
+}
+
+func (s *textStore) AppendStepAnnotation(_ context.Context, _, _, _, msg string) error {
+	return s.note(msg)
+}
+
+func (s *textStore) SetStepSummary(_ context.Context, _, _, _, md string) error {
+	return s.note(md)
+}
+
+func (s *textStore) AppendEvent(_ context.Context, _, _, _ string, payload []byte) error {
+	return s.note(string(payload))
+}
+
+func (s *textStore) CreateApproval(_ context.Context, a store.Approval) error {
+	return s.note(a.Message)
+}
+
+// Every text a run writes to its store is masked on the way in, whichever
+// source forgot to: an approval's message and its approval_requested event,
+// annotations, summaries, activity and error text.
+func TestTheRunsStoreMasksEveryTextItIsGiven(t *testing.T) {
+	masker := secrets.NewMasker()
+	masker.Register(splitSecret)
+	inner := &textStore{}
+	cfg := Config{State: inner, Attempts: &Attempts{Masker: masker}, Run: nodeproto.RunContext{RunID: "r"}}
+	st := podRun(&cfg).State
+	ctx, s := t.Context(), "x "+splitSecret
+	_ = st.FinishRun(ctx, "r", "failed", s)
+	_ = st.FinishNode(ctx, "r", "n", "failed", s, nil)
+	_ = st.FinishNodeWithReason(ctx, "r", "n", "failed", s, nil, "", nil)
+	_ = st.UpdateNodeActivity(ctx, "r", "n", s)
+	_ = st.AppendNodeAnnotation(ctx, "r", "n", s)
+	_ = st.SetNodeSummary(ctx, "r", "n", s)
+	_ = st.AppendStepAnnotation(ctx, "r", "n", "s", s)
+	_ = st.SetStepSummary(ctx, "r", "n", "s", s)
+	_ = st.AppendEvent(ctx, "r", "n", "approval_requested", []byte(`{"message":"`+s+`"}`))
+	_ = st.AppendEvent(ctx, "r", "n", "node_failed", []byte(s))
+	_ = st.CreateApproval(ctx, store.Approval{RunID: "r", NodeID: "n", Message: s})
+	if len(inner.writes) != 11 {
+		t.Fatalf("%d writes reached the store, want 11", len(inner.writes))
+	}
+	for _, w := range inner.writes {
+		if strings.Contains(w, splitSecret) || !strings.Contains(w, "***") {
+			t.Errorf("store got %q", w)
+		}
+	}
 }

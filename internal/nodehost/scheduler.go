@@ -248,6 +248,7 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 	if cfg.Attempts != nil {
 		masker = cfg.Attempts.Masker
 	}
+	cfg.State = maskState(cfg.State, masker)
 	scfg := planSession(cfg)
 	scfg.HoldOutput, scfg.Masker = true, masker
 	sess, err := StartSession(ctx, scfg)
@@ -698,7 +699,7 @@ func (s *scheduler) reuseRow(ctx context.Context, n nodeproto.PlanNode, row *sto
 		return
 	}
 	if row.FailureReason == store.FailureAgentLost {
-		if r, ok := s.run.State.(lostNodeResetter); ok && r.ResetNodeForAutoRetry(ctx, s.run.ID, id) == nil {
+		if r, ok := baseState(s.run.State).(lostNodeResetter); ok && r.ResetNodeForAutoRetry(ctx, s.run.ID, id) == nil {
 			return
 		}
 	}
@@ -724,7 +725,7 @@ func (s *scheduler) reuseRow(ctx context.Context, n nodeproto.PlanNode, row *sto
 }
 
 func recordedOutput(ctx context.Context, st storage.StateStore, runID, id string) (json.RawMessage, error) {
-	outputs, ok := st.(sourceOutputs)
+	outputs, ok := baseState(st).(sourceOutputs)
 	if !ok {
 		return nil, fmt.Errorf("read node %s output: the runs store cannot read it", id)
 	}
