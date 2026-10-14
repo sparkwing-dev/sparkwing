@@ -2,6 +2,7 @@ package nodehost
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -70,4 +71,55 @@ func (s maskedState) AppendEvent(ctx context.Context, runID, nodeID, kind string
 func (s maskedState) CreateApproval(ctx context.Context, a store.Approval) error {
 	a.Message = s.m.Mask(a.Message)
 	return s.StateStore.CreateApproval(ctx, a)
+}
+
+// safety: host diagnostics quote pipeline text, such as a generator's error or
+// a concurrency key, so a run's logger masks its message and every attribute.
+func maskLogger(l *slog.Logger, m *secrets.Masker) *slog.Logger {
+	if _, done := l.Handler().(maskHandler); done || m == nil {
+		return l
+	}
+	return slog.New(maskHandler{Handler: l.Handler(), m: m})
+}
+
+type maskHandler struct {
+	slog.Handler
+	m *secrets.Masker
+}
+
+func (h maskHandler) Handle(ctx context.Context, r slog.Record) error {
+	out := slog.NewRecord(r.Time, r.Level, h.m.Mask(r.Message), r.PC)
+	r.Attrs(func(a slog.Attr) bool {
+		out.AddAttrs(h.attr(a))
+		return true
+	})
+	return h.Handler.Handle(ctx, out)
+}
+
+func (h maskHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	masked := make([]slog.Attr, len(attrs))
+	for i, a := range attrs {
+		masked[i] = h.attr(a)
+	}
+	return maskHandler{Handler: h.Handler.WithAttrs(masked), m: h.m}
+}
+
+func (h maskHandler) WithGroup(name string) slog.Handler {
+	return maskHandler{Handler: h.Handler.WithGroup(name), m: h.m}
+}
+
+func (h maskHandler) attr(a slog.Attr) slog.Attr {
+	v := a.Value.Resolve()
+	if v.Kind() == slog.KindGroup {
+		group := v.Group()
+		masked := make([]any, len(group))
+		for i, g := range group {
+			masked[i] = h.attr(g)
+		}
+		return slog.Group(a.Key, masked...)
+	}
+	if text := v.String(); h.m.Mask(text) != text {
+		return slog.String(a.Key, h.m.Mask(text))
+	}
+	return a
 }

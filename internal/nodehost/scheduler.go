@@ -248,7 +248,7 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 	if cfg.Attempts != nil {
 		masker = cfg.Attempts.Masker
 	}
-	cfg.State = maskState(cfg.State, masker)
+	cfg.State, cfg.Logger = maskState(cfg.State, masker), maskLogger(cfg.Logger, masker)
 	scfg := planSession(cfg)
 	scfg.HoldOutput, scfg.Masker = true, masker
 	sess, err := StartSession(ctx, scfg)
