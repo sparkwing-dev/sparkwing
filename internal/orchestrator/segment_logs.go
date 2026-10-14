@@ -7,16 +7,13 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/url"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // safety: the sink runs in the engine-side process, so a pipeline binary built against any SDK keeps posting
@@ -81,7 +78,7 @@ func (n *nodeLogSink) ServeHTTP(w http.ResponseWriter, r *http.Request) { n.hand
 func (n *nodeLogSink) close(ctx context.Context, stopped bool) {
 	n.closeOnce.Do(func() {
 		watchedSinks.CompareAndDelete(watchKey(n.runID, n.nodeID), n)
-		sealCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), childLogSealBudget)
+		sealCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), httpNodeLogFinishTimeout)
 		defer cancel()
 		m, err := n.sink.Close(sealCtx, logseg.End{Stopped: stopped})
 		n.live.close()
@@ -240,85 +237,6 @@ func (p *livePusher) close() {
 	}
 	p.mu.Unlock()
 	<-p.done
-}
-
-// safety: a node keeps one sink across every stream that writes it until the broker closes them all, because a
-// node writes several streams in turn and a second sink would number its segments over the first's.
-type nodeLogSinks struct {
-	ctrl   *client.Client
-	runID  string
-	logger *slog.Logger
-
-	mu          sync.Mutex
-	nodes       map[string]*nodeLogSink
-	unavailable bool
-}
-
-func newNodeLogSinks(ctrl *client.Client, runID string, logger *slog.Logger) *nodeLogSinks {
-	return &nodeLogSinks{ctrl: ctrl, runID: runID, logger: logger, nodes: map[string]*nodeLogSink{}}
-}
-
-func (s *nodeLogSinks) forRequest(ctx context.Context, r *http.Request) *nodeLogSink {
-	nodeID, ok := appendNode(r, s.runID)
-	if !ok {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.unavailable || s.nodes == nil {
-		return nil
-	}
-	if n := s.nodes[nodeID]; n != nil {
-		return n
-	}
-	n, unavailable := openNodeLogSinkLive(requestFence(ctx, r), s.ctrl, s.runID, nodeID, true, s.logger)
-	s.unavailable = unavailable
-	if n != nil {
-		s.nodes[nodeID] = n
-	}
-	return n
-}
-
-func (s *nodeLogSinks) closeAll(ctx context.Context, stopped bool) {
-	s.mu.Lock()
-	nodes := s.nodes
-	s.nodes = nil
-	s.mu.Unlock()
-	for _, n := range nodes {
-		n.close(ctx, stopped)
-	}
-}
-
-func appendNode(r *http.Request, runID string) (string, bool) {
-	if r.Method != http.MethodPost {
-		return "", false
-	}
-	rest, ok := strings.CutPrefix(r.URL.EscapedPath(), "/api/v1/logs/"+url.PathEscape(runID)+"/")
-	if !ok {
-		return "", false
-	}
-	rest = strings.TrimSuffix(rest, "/seal")
-	nodeID, err := url.PathUnescape(rest)
-	if err != nil || nodeID == "" || strings.Contains(rest, "/") {
-		return "", false
-	}
-	return nodeID, true
-}
-
-// safety: the sink's uploads repeat the fence the writer's own append
-// carried, so the controller refuses them once that claim is gone.
-func requestFence(ctx context.Context, r *http.Request) context.Context {
-	ctx = context.WithoutCancel(ctx)
-	if gen, err := strconv.ParseInt(r.Header.Get(store.TriggerGenerationHeader), 10, 64); err == nil && gen > 0 {
-		ctx = store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: gen})
-	}
-	if gen, err := strconv.ParseInt(r.Header.Get(store.ClaimGenerationHeader), 10, 64); err == nil && gen > 0 {
-		ctx = store.WithNodeClaimFence(ctx, store.NodeClaimFence{
-			HolderID: r.Header.Get(store.ClaimHolderHeader), MembershipID: r.Header.Get(store.ClaimMembershipHeader),
-			ReservationID: r.Header.Get(store.ClaimReservationHeader), ClaimGeneration: gen,
-		})
-	}
-	return ctx
 }
 
 // EngineNodeLog writes the engine's own lines into one node of a run,

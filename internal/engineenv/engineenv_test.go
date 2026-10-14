@@ -122,7 +122,7 @@ func stringLiteral(n ast.Node) string {
 
 func TestStripRemovesEngineCredentials(t *testing.T) {
 	for _, key := range []string{
-		"SPARKWING_SECRETS_KEY", "SPARKWING_SECRETS_PREVIOUS_KEY", "SPARKWING_EXECUTION_CAPABILITY",
+		"SPARKWING_SECRETS_KEY", "SPARKWING_SECRETS_PREVIOUS_KEY", "SPARKWING_NODE_TOKEN",
 		"SPARKWING_FLEET_PARENT_TOKEN", "SPARKWING_SOURCE_TOKEN", "sparkwing_agent_token", "_SPARKWING_SUBMIT_PRIORITY",
 	} {
 		got := Strip([]string{key + "=synthetic", "SPARKWING_GATE_INDEX=staged", "SPARKWING_TEST_PG_URL=caller"})

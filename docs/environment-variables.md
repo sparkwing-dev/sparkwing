@@ -102,9 +102,6 @@ Set by Sparkwing for pipeline code and node processes.
 
 | Variable | Why it stays |
 |---|---|
-| `SPARKWING_BROKERED_ARTIFACTS` | Set to `1` for a remote node's child process when its artifacts go through the parent's broker. |
-| `SPARKWING_BROKERED_NODE_CLAIM` | Set to `1` for a remote node's child process when the parent holds a node claim, so the child runs as that claim. |
-| `SPARKWING_EXECUTION_CAPABILITY_STDIN` | Set to `1` for a remote node's child process, which then reads its execution capability from stdin, keeping it off argv and out of the environment. |
 | `SPARKWING_CHILD_LEASE_TOKEN` | The admission daemon's lease for a child run, handed across exec. |
 | `SPARKWING_LEASE_TOKEN` | The admission daemon's lease for this run, handed across exec. |
 | `SPARKWING_DEBUG_PAUSE_BEFORE` | `sparkwing debug` sets it for the run it starts: pause before the named node. |
@@ -119,7 +116,6 @@ Set by Sparkwing for pipeline code and node processes.
 | `SPARKWING_NODE_TOKEN` | The host sets it for a process it starts with `--sw-node-protocol`: the bearer for the node's `/node/v1` routes, valid until the process exits. The SDK removes it at startup, before any package's `init` can start a command, so no command inherits it. Never set it by hand. See [node-protocol](node-protocol.md). |
 | `SPARKWING_PROFILE` | Set only by a CLI from before `sparkwing run --profile` was removed. A pipeline binary that finds it refuses the run, naming `sparkwing pipeline trigger`, rather than recording locally; `sparkwing run` drops an inherited value, so exporting it selects nothing. |
 | `SPARKWING_STOP_AT` | The in-process dispatcher reads it; `sparkwing run` hosts the run itself and passes `--sw-stop-at` as run state, never as this variable. |
-| `SPARKWING_NODE_SPEC_HASH` | Fences a claimed node to the plan it was claimed under, across the exec into the node process. |
 | `SPARKWING_WORKERS` | Caps how many nodes a run executes at once, as `--sw-workers` does; `sparkwing run` reads it from its own environment when the flag is absent. |
 
 ## Test

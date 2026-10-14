@@ -63,13 +63,14 @@ when `node_modules` lacks the SDK, and then starts
 on descriptor 3 and the frame pipe on descriptor 4, and sends one JSON request
 per line. stdout and stderr stay with pipeline code; the engine never parses
 them. The engine starts one process per node attempt and sends `plan` before
-`run_node`:
+the body. A job's body is its result step, named `run`, so the engine runs it
+with `run_step`:
 
 ```text
 -> {"id":"1","op":"plan","pipeline":"hello","args":{},"run":{"run_id":"r1"}}
 <- {"reply":"1","ok":true,"result":{"protocol":"1","pipeline":"hello","run_id":"r1","nodes":[...]}}
--> {"id":"2","op":"run_node","node":"build","attempt":1}
-<- {"ts":"...","level":"info","node":"build","msg":"building"}
+-> {"id":"2","op":"run_step","node":"build","step":"run","attempt":1}
+<- {"ts":"...","level":"info","node":"build","step":"run","msg":"building"}
 <- {"reply":"2","ok":true,"result":{"outcome":"success","output":{"digest":"sha-hello"}}}
 ```
 

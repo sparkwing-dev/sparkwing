@@ -92,8 +92,8 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 		ParentRunID: trig.ParentRunID, RetryOf: trig.RetryOf, RetrySource: trig.RetrySource,
 		State: stoppingHostState{Client: c, shuttingDown: shuttingDown}, Logger: logger,
 		Admission: &nodehost.Admission{Slots: slots},
-		Memo: &nodehost.Memo{Slots: slots, Output: func(ctx context.Context, _ store.ClaimInputRequest, runID, nodeID string) ([]byte, error) {
-			return c.GetNodeOutput(ctx, runID, nodeID)
+		Memo: &nodehost.Memo{Slots: slots, Source: func(ctx context.Context, _ store.ClaimInputRequest, runID, nodeID string) (nodehost.MemoSource, error) {
+			return nodehost.ReadMemoSource(ctx, c, runID, nodeID)
 		}},
 		// safety: the run host's eval processes read secrets through the trigger's claim, which the controller
 		// releases them to, but get no forwarded routes, since only a node's claim backs them; their lines go to

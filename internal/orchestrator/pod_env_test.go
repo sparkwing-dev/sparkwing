@@ -101,3 +101,39 @@ func TestInstallOutputMasksACredentialSplitAtTheLineLimit(t *testing.T) {
 		t.Fatal("the line after the long one was lost")
 	}
 }
+
+func TestRunnerInstallGetsTheOperatorAllowListMasked(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the hook prints with sh")
+	}
+	if _, err := exec.LookPath("npm"); err != nil {
+		t.Skip("npm is not on PATH")
+	}
+	writeMachineSettings(t, "run:\n  submit_env_allow: [REGISTRY_NOTE, AWS_REGION]\n")
+	t.Setenv("REGISTRY_NOTE", "long-operator-value-0123")
+	t.Setenv("AWS_REGION", "us-west-2")
+	t.Setenv("GITHUB_TOKEN", "runner-github")
+	dir := t.TempDir()
+	for name, body := range map[string]string{
+		"package.json": `{"name":"hooked","version":"1.0.0","main":"pipeline.ts",` +
+			`"scripts":{"postinstall":"echo note=$REGISTRY_NOTE region=$AWS_REGION gh=$GITHUB_TOKEN"}}`,
+		"package-lock.json": `{"name":"hooked","version":"1.0.0","lockfileVersion":3,"requires":true,` +
+			`"packages":{"":{"name":"hooked","version":"1.0.0","hasInstallScript":true}}}`,
+		"pipeline.ts": "",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var out bytes.Buffer
+	_, _ = prepareTypeScriptOnRunner(t.Context(), dir, &out)
+	got := out.String()
+	switch {
+	case !strings.Contains(got, "note=") || !strings.Contains(got, "region=us-west-2"):
+		t.Fatalf("the install lost an allow-listed name:\n%s", got)
+	case strings.Contains(got, "long-operator-value-0123"):
+		t.Fatalf("a long allow-listed value reached the install output unmasked:\n%s", got)
+	case strings.Contains(got, "runner-github"):
+		t.Fatalf("an unlisted runner credential reached the install:\n%s", got)
+	}
+}

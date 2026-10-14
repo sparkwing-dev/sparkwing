@@ -16,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/depcache"
 	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
+	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
@@ -67,6 +68,12 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 	}
 	masker := secrets.NewMasker()
 	masker.Register(p.token)
+	// safety: ahead of the routes and the node log, so a bad allow list leaves nothing to close.
+	sessionEnv := podSessionEnv(masker)
+	operatorEnv, err := operatorAllowedEnv(os.Environ(), sessionEnv, masker, p.logger)
+	if err != nil {
+		return nodehost.Result{}, err
+	}
 	routes, err := nodehost.Start(p.logger)
 	if err != nil {
 		return nodehost.Result{}, err
@@ -89,7 +96,7 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 	}
 	defer planSink.end()
 	cfg := nodehost.Config{
-		Session:  nodehost.SessionConfig{Entry: p.entry, Dir: p.dir, Sink: planSink, Env: podSessionEnv(masker)},
+		Session:  nodehost.SessionConfig{Entry: p.entry, Dir: p.dir, Sink: planSink, Env: append(sessionEnv, operatorEnv...)},
 		Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run),
 		State: p.state, Artifacts: p.artifacts, Logger: p.logger,
 		Attempts: &nodehost.Attempts{
@@ -104,11 +111,11 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 	} else {
 		slots := NewHTTPConcurrency(p.controllerURL, nil, p.token, store.DefaultConcurrencyLease)
 		// safety: the node's concurrency group and memo entry run through the claim, which the controller binds to
-		// this node; a memo hit's output is the one the controller picks for the claim's key.
+		// this node; a memo hit's output and artifact manifest are the ones the controller picks for the claim's key.
 		cfg.Admission = &nodehost.Admission{Slots: slots}
-		cfg.Memo = &nodehost.Memo{Slots: slots, Claimed: true, Output: func(ctx context.Context, in store.ClaimInputRequest, _, _ string) ([]byte, error) {
-			_, data, err := c.ClaimInput(ctx, p.runID, p.nodeID, in)
-			return data, err
+		cfg.Memo = &nodehost.Memo{Slots: slots, Claimed: true, Source: func(ctx context.Context, in store.ClaimInputRequest, _, _ string) (nodehost.MemoSource, error) {
+			src, data, err := c.ClaimInput(ctx, p.runID, p.nodeID, in)
+			return nodehost.MemoSource{Output: data, ArtifactManifest: src.ArtifactManifest}, err
 		}}
 		res = nodehost.HostNode(ctx, cfg, p.nodeID, p.specHash, p.attempt)
 	}
@@ -136,15 +143,23 @@ func PodBaseEnv() []string {
 }
 
 // PrepareTypeScriptOnRunner installs and returns sparkwingDir's TypeScript
-// entry on a runner: npm runs with [PodBaseEnv], and its output reaches
-// stderr only after the proxy credentials that environment carries are masked.
+// entry on a runner: npm runs with the environment a node process gets,
+// [PodBaseEnv] plus the operator's allow-listed names, and its output reaches
+// stderr only after the credentials and long values that environment carries
+// are masked.
 func PrepareTypeScriptOnRunner(ctx context.Context, sparkwingDir string) (pipelineentry.Command, error) {
 	return prepareTypeScriptOnRunner(ctx, sparkwingDir, os.Stderr)
 }
 
 func prepareTypeScriptOnRunner(ctx context.Context, sparkwingDir string, dst io.Writer) (pipelineentry.Command, error) {
 	masker := secrets.NewMasker()
-	env := podSessionEnv(masker)
+	base := podSessionEnv(masker)
+	// safety: the allow list is operator-trusted config a private registry or a tool's install may need.
+	operator, err := operatorAllowedEnv(os.Environ(), base, masker, slog.Default())
+	if err != nil {
+		return nil, err
+	}
+	env := append(base, operator...)
 	out, finish, err := maskedInstallOutput(ctx, masker, dst)
 	if err != nil {
 		return nil, err
@@ -170,6 +185,52 @@ func maskedInstallOutput(ctx context.Context, masker *secrets.Masker, dst io.Wri
 
 func podEnvNames() []string {
 	return slices.Concat(k8srunner.DependencyProxyEnvNames, k8srunner.NetworkEnvNames)
+}
+
+// safety: the operator's run.submit_env_allow names and prefixes reach the node from this runner's environment, as
+// AWS_PROFILE or DOCKER_HOST must; an engine variable or a credential-shaped name or value never does, and a name
+// base sets keeps its value. A neutral name can still hold a bare token, so a value long enough to be one is masked;
+// shorter config such as a region stays readable, since masking it would cut it out of every line that names it.
+func operatorAllowedEnv(env, base []string, masker *secrets.Masker, logger *slog.Logger) ([]string, error) {
+	names, prefixes, err := submissionEnvironmentAllowList()
+	if err != nil {
+		return nil, err
+	}
+	var out, engine, credential []string
+	for _, entry := range env {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || !operatorListed(key, names, prefixes) || slices.ContainsFunc(base, func(kv string) bool {
+			return strings.HasPrefix(kv, key+"=")
+		}) {
+			continue
+		}
+		switch {
+		case engineenv.Owned(key):
+			engine = append(engine, key)
+		case submissionEnvironmentCredentialName(key, value) || envredact.CredentialValue(value) || envredact.RedactValue(value) != value:
+			credential = append(credential, key)
+		default:
+			if len(value) >= operatorEnvMaskMinLen {
+				masker.Register(value)
+			}
+			out = append(out, entry)
+		}
+	}
+	if (len(engine) > 0 || len(credential) > 0) && logger != nil {
+		logger.Warn("pod node: dropped allow-listed names the node may not inherit",
+			"engine_names", strings.Join(engine, ","), "credential_names", strings.Join(credential, ","),
+			"allow_key", submitEnvAllowKey)
+	}
+	return out, nil
+}
+
+const operatorEnvMaskMinLen = 12
+
+func operatorListed(key string, names map[string]bool, prefixes []string) bool {
+	if names[key] {
+		return true
+	}
+	return slices.ContainsFunc(prefixes, func(prefix string) bool { return prefix != "" && strings.HasPrefix(key, prefix) })
 }
 
 // safety: the whole value and each ','/'|' member are masked whole. The userinfo (after any scheme://, up to the

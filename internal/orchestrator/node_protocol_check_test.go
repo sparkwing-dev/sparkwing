@@ -2,8 +2,6 @@ package orchestrator
 
 import (
 	"bytes"
-	"context"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -11,40 +9,23 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func TestBrokerLogsOneLineForANodeSpeakingAnotherProtocol(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer upstream.Close()
+func TestLoopbackLogsOneLineForANodeSpeakingAnotherProtocol(t *testing.T) {
 	var logged bytes.Buffer
-	broker, err := startRemoteExecutionBroker(upstream.URL, "parent-token", "run-1", "node-a", store.NodeClaimFence{}, nil,
-		slog.New(slog.NewTextHandler(&logged, nil)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer broker.Close()
+	h := (&nodeProtocolCheck{logger: slog.New(slog.NewTextHandler(&logged, nil))}).wrap(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 
 	get := func(version string) {
 		t.Helper()
-		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, broker.URL()+"/api/v1/runs/run-1", nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		req.Header.Set("Authorization", "Bearer "+broker.capability)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/runs/run-1", nil)
 		if version != "" {
 			req.Header.Set(authwire.NodeProtocolHeader, version)
 		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, _ = io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusNoContent {
-			t.Fatalf("version %q: status %d, want the request served", version, resp.StatusCode)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("version %q: status %d, want the request served", version, rec.Code)
 		}
 	}
 	get(authwire.NodeProtocolVersion)

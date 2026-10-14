@@ -87,7 +87,13 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, rc spar
 				return err
 			}
 			_, err = fmt.Fprintln(f, "body")
-			return errors.Join(err, f.Close())
+			if err = errors.Join(err, f.Close()); err != nil || !in.Publish {
+				return err
+			}
+			if err := os.MkdirAll("dist", 0o700); err != nil {
+				return err
+			}
+			return os.WriteFile("dist/out.txt", []byte("artifact\n"), 0o600)
 		}).Memoize(func(context.Context) (sparkwing.CacheKey, error) { return "pod-memo-v1", nil })
 		if in.Publish {
 			memoized.Outputs("dist/*")

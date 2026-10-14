@@ -452,21 +452,24 @@ func TestClaimRun_ConcurrencySlotsFollowTheAcceptedPlan(t *testing.T) {
 // A work claim reads another run's output only through a reference its plan
 // declares, and the controller picks the run: a memoized result through its
 // cache entry, the leader its own coalesce waiter names, and the newest
-// successful run of a declared pipeline reference. A memoized result reaches
-// it only under its own node's key and only from its own repository, pipeline
-// and node; an undeclared reference, another node's waiter or key, and a read
-// naming another run are refused or find nothing, and a refusal is audited.
+// successful run of a declared pipeline reference. A memoized result, with its
+// artifact manifest, reaches it only under its own node's key and only from
+// its own team, repository, pipeline and node; an undeclared reference,
+// another node's waiter or key, another team's run of the same node, and a
+// read naming another run are refused or find nothing, a refusal hands on no
+// manifest, and a refusal is audited.
 func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
 	ctx := context.Background()
 	f := newAppFixture(t)
-	olga := f.ghUser(501, "olga")
+	olga, ivan := f.ghUser(501, "olga"), f.ghUser(502, "ivan")
 	f.connect(olga, 501, 7, acmeAdmin)
+	planner := olga
 	accept := func(runID string, nodes ...map[string]any) {
 		t.Helper()
 		for _, n := range nodes {
 			n["deps"], n["spec_hash"] = []string{}, specA
 		}
-		plan := "Bearer " + f.launchedRun(olga, runID, "acme", "widgets")
+		plan := "Bearer " + f.launchedRun(planner, runID, "acme", "widgets")
 		if code := f.call("POST", "/api/v1/runs/"+runID+"/plan", plan, map[string]any{"nodes": nodes}, nil); code != http.StatusOK {
 			t.Fatalf("accept %s's plan = %d", runID, code)
 		}
@@ -481,7 +484,7 @@ func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
 			t.Fatalf("upload %s/%s's output: %v", runID, nodeID, err)
 		}
 		if code := f.call("POST", "/api/v1/runs/"+runID+"/nodes/"+nodeID+"/attempt", "Bearer "+raw,
-			map[string]any{"outcome": "success", "output": ref}, nil); code != http.StatusOK {
+			map[string]any{"outcome": "success", "output": ref, "artifact_manifest": "manifest-" + runID}, nil); code != http.StatusOK {
 			t.Fatalf("finish %s/%s = %d", runID, nodeID, code)
 		}
 	}
@@ -492,6 +495,9 @@ func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
 	finished("run-pipeline", "m", memo, `{"from":"another pipeline"}`)
 	finished("run-repo", "m", memo, `{"from":"another repository"}`)
 	finished("run-last", "build", nil, `{"from":"last"}`)
+	planner = ivan
+	finished("run-foreign", "m", memo, `{"from":"another team"}`)
+	planner = olga
 	for _, q := range []string{
 		`UPDATE runs SET pipeline = 'deploy' WHERE id = 'run-pipeline'`,
 		`UPDATE triggers SET github_repo_id = 702 WHERE id = 'run-repo'`,
@@ -530,6 +536,8 @@ func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
 	cache(olga.team, ns("m", "h5"), "h5", "run-node", "x")
 	cache(olga.team, ns("m", "h6"), "h6", "run-pipeline", "m")
 	cache(olga.team, ns("m", "h7"), "h7", "run-repo", "m")
+	cache(olga.team, ns("m", "h8"), "h8", "run-foreign", "m")
+	cache(ivan.team, ns("m", "h10"), "h10", "run-foreign", "m")
 	tokens, raws := map[string]string{}, map[string]string{}
 	for _, n := range []string{"m", "c", "r"} {
 		raws[n] = f.launchNode("run-in", n)
@@ -546,18 +554,19 @@ func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
 	}
 	lastRun := store.ClaimInputRequest{Kind: store.ClaimInputLastRun, Pipeline: "build", Node: "build"}
 	for _, c := range []struct {
-		node        string
-		req         store.ClaimInputRequest
-		run, output string
+		node                  string
+		req                   store.ClaimInputRequest
+		run, output, manifest string
 	}{
-		{"m", memoIn(store.ClaimInputCached, "m", "h1"), "run-origin", `{"from":"cache"}`},
-		{"c", memoIn(store.ClaimInputCoalesced, "c", "h2"), "run-leader", `{"from":"leader"}`},
-		{"c", memoIn(store.ClaimInputCoalesced, "c", "h1"), "run-leader", `{"from":"leader"}`},
-		{"r", lastRun, "run-last", `{"from":"last"}`},
+		{"m", memoIn(store.ClaimInputCached, "m", "h1"), "run-origin", `{"from":"cache"}`, "manifest-run-origin"},
+		{"c", memoIn(store.ClaimInputCoalesced, "c", "h2"), "run-leader", `{"from":"leader"}`, "manifest-run-leader"},
+		{"c", memoIn(store.ClaimInputCoalesced, "c", "h1"), "run-leader", `{"from":"leader"}`, "manifest-run-leader"},
+		{"r", lastRun, "run-last", `{"from":"last"}`, ""},
 	} {
 		in, data, err := client.NewWithToken(f.url, nil, raws[c.node]).ClaimInput(ctx, "run-in", c.node, c.req)
-		if err != nil || in.RunID != c.run || string(data) != c.output {
-			t.Errorf("node %s's %s input %s = %v %s %s, want %s %s", c.node, c.req.Kind, c.req.Key, err, in.RunID, data, c.run, c.output)
+		if err != nil || in.RunID != c.run || string(data) != c.output || in.ArtifactManifest != c.manifest {
+			t.Errorf("node %s's %s input %s = %v %s %s %q, want %s %s %q", c.node, c.req.Kind, c.req.Key, err, in.RunID, data,
+				in.ArtifactManifest, c.run, c.output, c.manifest)
 		}
 	}
 	bare, otherRef := memoIn(store.ClaimInputCached, "m", "h1"), lastRun
@@ -580,9 +589,11 @@ func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
 		"another node's coalesce waiter":                       {"c", memoIn(store.ClaimInputCoalesced, "c", "h3"), http.StatusNotFound},
 		"a key with no waiter and no cache entry":              {"m", memoIn(store.ClaimInputCoalesced, "m", "h9"), http.StatusNotFound},
 		"another team's cache entry":                           {"m", memoIn(store.ClaimInputCached, "m", "h4"), http.StatusNotFound},
+		"another team's run of the node under its key":         {"m", memoIn(store.ClaimInputCached, "m", "h8"), http.StatusForbidden},
+		"another team's entry for the same node and hash":      {"m", memoIn(store.ClaimInputCached, "m", "h10"), http.StatusNotFound},
 	} {
-		if code, in := input(c.node, c.req); code != c.want {
-			t.Errorf("%s = %d from %s, want %d", what, code, in.RunID, c.want)
+		if code, in := input(c.node, c.req); code != c.want || in.ArtifactManifest != "" {
+			t.Errorf("%s = %d from %s with manifest %q, want %d and none", what, code, in.RunID, in.ArtifactManifest, c.want)
 		}
 	}
 	team, err := f.store.ForTeam(ctx, store.Team(olga.team))

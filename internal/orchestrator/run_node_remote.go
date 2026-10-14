@@ -12,7 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/directdata"
-	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
@@ -23,15 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-const (
-	remoteExecutionCapabilityInputEnv = "SPARKWING_EXECUTION_CAPABILITY_STDIN"
-	remoteBrokeredArtifactEnv         = "SPARKWING_BROKERED_ARTIFACTS"
-)
-
-func shouldRunRemote(trigger *store.Trigger, brokeredChild bool) bool {
-	if brokeredChild {
-		return false
-	}
+func shouldRunRemote(trigger *store.Trigger) bool {
 	if trigger == nil {
 		return false
 	}
@@ -232,53 +223,6 @@ func adoptNodeBaseline(ctx context.Context, trigger *store.Trigger, checkoutDir,
 		logger.Warn("runNodeRemote: baseline unavailable; a step that diffs against it judges this checkout against nothing",
 			"run_id", runID, "node_id", nodeID, "ref", baseline.Ref, "sha", baseline.SHA, "err", err)
 	}
-}
-
-func remoteExecutionChildEnvironment(env []string) ([]string, error) {
-	names, prefixes, err := submissionEnvironmentAllowList()
-	if err != nil {
-		return nil, fmt.Errorf("remote execution environment allowlist: %w", err)
-	}
-	out := make([]string, 0, len(env))
-	for _, item := range env {
-		name, value, ok := strings.Cut(item, "=")
-		if !ok || remoteExecutionPrivateEnv[name] {
-			continue
-		}
-		if !remoteExecutionRuntimeEnv[name] && !submissionEnvironmentAllowed(name, names, prefixes) {
-			continue
-		}
-		if envredact.CredentialName(name) || envredact.CredentialValue(value) || envredact.RedactValue(value) != value {
-			continue
-		}
-		out = append(out, item)
-	}
-	return out, nil
-}
-
-var remoteExecutionRuntimeEnv = map[string]bool{
-	"PATH": true, "HOME": true, "TMPDIR": true, "TMP": true, "TEMP": true,
-	"LANG": true, "LC_ALL": true, "SYSTEMROOT": true, "COMSPEC": true,
-	"PATHEXT": true, "USERPROFILE": true, "SSL_CERT_FILE": true, "SSL_CERT_DIR": true,
-}
-
-var remoteExecutionPrivateEnv = map[string]bool{
-	"SPARKWING_AGENT_TOKEN":              true,
-	"SPARKWING_CONTROLLER_URL":           true,
-	"SPARKWING_LOGS_URL":                 true,
-	"SPARKWING_RUN_HANDLE_FILE":          true,
-	"SPARKWING_ONLY":                     true,
-	ArtifactStoreEnvVar:                  true,
-	authwire.CacheGrantEnv:               true,
-	remoteExecutionCapabilityEnv:         true,
-	remoteExecutionCapabilityInputEnv:    true,
-	remoteBrokeredArtifactEnv:            true,
-	remoteBrokeredClaimEnv:               true,
-	"SPARKWING_NODE_CLAIM_HOLDER":        true,
-	"SPARKWING_NODE_CLAIM_LEASE_SECONDS": true,
-	"SPARKWING_NODE_CLAIM_GENERATION":    true,
-	"SPARKWING_NODE_CLAIM_MEMBERSHIP":    true,
-	"SPARKWING_NODE_CLAIM_RESERVATION":   true,
 }
 
 // ErrRepoNotAllowed marks a run whose repository this machine's owner did not

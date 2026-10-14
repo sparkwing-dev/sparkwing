@@ -301,6 +301,9 @@ type ClaimInput struct {
 	// Output grants a read of the node's output; an empty URL means it
 	// recorded none.
 	Output OutputReadGrant `json:"output"`
+	// ArtifactManifest is a memoized source's artifact manifest digest, which
+	// a hit or coalesce follower records as its own; empty for last_run.
+	ArtifactManifest string `json:"artifact_manifest,omitempty"`
 }
 
 // ErrInputUndeclared refuses a claim an input its node's accepted plan does
@@ -375,10 +378,10 @@ func (s *Store) ResolveClaimInput(ctx context.Context, tok ClaimToken, req Claim
 		}
 	}
 	in := ClaimInput{RunID: runID, NodeID: nodeID}
-	var status, outcome string
+	var status, outcome, manifest string
 	var finished sql.NullInt64
-	err = s.queryRow(ctx, `SELECT status, outcome, finished_at FROM nodes
- WHERE team = ? AND run_id = ? AND node_id = ?`, string(tok.Team), runID, nodeID).Scan(&status, &outcome, &finished)
+	err = s.queryRow(ctx, `SELECT status, outcome, finished_at, artifact_manifest FROM nodes
+ WHERE team = ? AND run_id = ? AND node_id = ?`, string(tok.Team), runID, nodeID).Scan(&status, &outcome, &finished, &manifest)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ClaimInput{}, notFound("node", runID+"/"+nodeID)
 	}
@@ -391,6 +394,11 @@ func (s *Store) ResolveClaimInput(ctx context.Context, tok ClaimToken, req Claim
 	if finished.Valid && finished.Int64 > 0 {
 		t := time.Unix(0, finished.Int64)
 		in.FinishedAt = &t
+	}
+	// safety: only a memoized source, already bound to this claim's team, repository, pipeline and node, hands
+	// on its manifest; a pipeline reference reads another pipeline's run, whose artifacts the node never declared.
+	if req.Kind != ClaimInputLastRun {
+		in.ArtifactManifest = manifest
 	}
 	return in, nil
 }

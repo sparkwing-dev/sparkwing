@@ -23,8 +23,11 @@ export type ErrorCode =
   | "invalid_args"
   | "plan_failed";
 
-/** Every frame, newline included, fits in 16 MiB. */
-export const MAX_FRAME_BYTES = 16 << 20;
+/** The largest step output value, as JSON, the host records: 16 MiB. */
+export const MAX_OUTPUT_BYTES = 16 << 20;
+
+/** Every frame, newline included, fits in 17 MiB: an output of MAX_OUTPUT_BYTES and its reply's own fields. */
+export const MAX_FRAME_BYTES = MAX_OUTPUT_BYTES + (1 << 20);
 
 export interface Request {
   id: string;

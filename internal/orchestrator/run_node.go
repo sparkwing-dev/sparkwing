@@ -1,12 +1,10 @@
 package orchestrator
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -21,8 +19,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwingcache"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -75,13 +71,7 @@ func RunNodeOnce(
 		return runner.Result{}, fmt.Errorf("ensure root: %w", err)
 	}
 	var logsBackend LogBackend
-	if cfg.claim != nil && logsURL == "" {
-		fsLogs, err := fs.NewLogStore(paths.Root)
-		if err != nil {
-			return runner.Result{}, fmt.Errorf("pod log store: %w", err)
-		}
-		logsBackend = NewLogStoreBackend(fsLogs, logger)
-	} else if logsURL != "" {
+	if logsURL != "" {
 		logsBackend = NewHTTPLogsWithToken(logsURL, httpClient, token, logger)
 	} else {
 		logsBackend = localLogs{paths: paths}
@@ -91,18 +81,14 @@ func RunNodeOnce(
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("get run %s: %w", runID, err)
 	}
-	// safety: a claimed pod runs the pipeline it built itself, so it never
-	// needs the trigger's source, and its claim token cannot read the trigger.
-	var trigger *store.Trigger
-	if cfg.claim == nil {
-		if trigger, err = stateClient.GetTrigger(ctx, runID); err != nil && !errors.Is(err, store.ErrNotFound) {
-			return runner.Result{}, fmt.Errorf("get trigger %s: %w", runID, err)
-		}
+	trigger, err := stateClient.GetTrigger(ctx, runID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return runner.Result{}, fmt.Errorf("get trigger %s: %w", runID, err)
 	}
 	otelutil.StampSpan(ctx, otelutil.SpanAttrs{Pipeline: run.Pipeline})
 
-	if cfg.claimed && !cfg.brokeredChild {
-		if shouldRunRemote(trigger, false) {
+	if cfg.claimed {
+		if shouldRunRemote(trigger) {
 			if controllerURL == "" {
 				return runner.Result{}, fmt.Errorf(
 					"run %s node %s dispatches to a remote runner, which cannot reach this machine's admission daemon socket; set SPARKWING_CONTROLLER_URL to a controller the runner can reach",
@@ -115,7 +101,7 @@ func RunNodeOnce(
 			runID, nodeID)
 	}
 	// safety: coordinated nodes use the same pipeline binary as their local dispatcher.
-	if !cfg.coordinated && shouldRunRemote(trigger, cfg.brokeredChild || cfg.claim != nil) {
+	if !cfg.coordinated && shouldRunRemote(trigger) {
 		if controllerURL == "" {
 			return runner.Result{}, fmt.Errorf(
 				"run %s node %s dispatches to a remote runner, which cannot reach this machine's admission daemon socket; set SPARKWING_CONTROLLER_URL to a controller the runner can reach",
@@ -134,8 +120,6 @@ func RunNodeOnce(
 		if err != nil {
 			return runner.Result{}, err
 		}
-	} else if cfg.brokeredChild && cfg.brokerArtifact {
-		art = sparkwingcache.New(controllerURL, token, httpClient)
 	} else {
 		art, err = resolveArtifactStoreFromEnv(ctx)
 		if err != nil {
@@ -143,9 +127,6 @@ func RunNodeOnce(
 		}
 	}
 	backends := RemoteBackends(stateClient, logsBackend, art, stateHTTP, store.DefaultConcurrencyLease)
-	if cfg.claim != nil {
-		backends.State = cfg.claim
-	}
 
 	reg, ok := sparkwing.Lookup(run.Pipeline)
 	if !ok {
@@ -214,9 +195,6 @@ func RunNodeOnce(
 			logger.Warn("pipeline_ref audit event append failed",
 				"run_id", runID, "node", node, "err", err)
 		})
-	if cfg.claim != nil {
-		pipelineRefs = cfg.claim.pipelineRefResolver()
-	}
 	ctx = sparkwingruntime.WithPipelineResolver(ctx, pipelineRefs)
 
 	childDiagnostics := podChildAwaitDiagnostics{logger: logger}
@@ -260,13 +238,6 @@ func RunNodeOnce(
 	if node == nil {
 		return runner.Result{}, errors.Join(fmt.Errorf("node %q not found in plan for %s (static nodes + all ExpandFrom generators exhausted)", nodeID, run.Pipeline), generatorErr)
 	}
-	if cfg.claim != nil {
-		hash, err := claimNodeSpecHash(plan, rc, reg, nodeID)
-		if err != nil || hash != cfg.claim.specHash {
-			return runner.Result{}, errors.Join(fmt.Errorf(
-				"plan-drift: node %q planned differently than the run's accepted plan", nodeID), err)
-		}
-	}
 
 	if admission != nil {
 		ctx = withLocalAdmissionPlan(ctx, plan)
@@ -288,7 +259,7 @@ func RunNodeOnce(
 		if err != nil {
 			return runner.Result{}, err
 		}
-		if !cfg.claimed && !cfg.brokeredChild {
+		if !cfg.claimed {
 			ctx = withLocalExecution(ctx)
 		}
 	}
@@ -376,38 +347,11 @@ func runNodeCLI(args []string) error {
 
 	holderID := fmt.Sprintf("pod:%s:%s", runID, nodeID)
 	token := agentToken
-	if isClaimToken(token) && apiSocket == "" {
-		return runClaimedNode(ctx, *controllerURL, *logsURL, runID, nodeID, token)
-	}
 	if token == "" {
 		token = LocalServeToken(*controllerURL)
 	}
 	var runOpts []RunNodeOption
-	brokeredChild := os.Getenv(remoteExecutionCapabilityInputEnv) == "1"
-	if brokeredChild {
-		capability, err := io.ReadAll(io.LimitReader(os.Stdin, 4097))
-		if err != nil {
-			return fmt.Errorf("read execution capability: %w", err)
-		}
-		token = string(bytes.TrimSpace(capability))
-		if len(token) < 32 || len(capability) > 4096 {
-			return errors.New("execution capability input is invalid")
-		}
-		runOpts = append(runOpts, brokeredExecutionChild(os.Getenv(remoteBrokeredArtifactEnv) == "1"))
-	}
-	// safety: RunNodeCommand reads the same claim variables for a Job's pod,
-	// where the process already is the isolated execution; here it supervises
-	// one, so a claim means handing the node to a child through the broker.
-	if os.Getenv(remoteBrokeredClaimEnv) == "1" {
-		holderID = "brokered-execution"
-		runOpts = append(runOpts, func(c *runNodeConfig) {
-			c.claimed = true
-			c.claimFence = store.NodeClaimFence{
-				HolderID: "brokered-execution", MembershipID: "brokered-membership",
-				ReservationID: "brokered-reservation", ClaimGeneration: 1,
-			}
-		})
-	} else if claimedHolder := os.Getenv("SPARKWING_NODE_CLAIM_HOLDER"); claimedHolder != "" {
+	if claimedHolder := os.Getenv("SPARKWING_NODE_CLAIM_HOLDER"); claimedHolder != "" {
 		holderID = claimedHolder
 		generation, err := strconv.ParseInt(os.Getenv("SPARKWING_NODE_CLAIM_GENERATION"), 10, 64)
 		if err != nil || generation < 1 {
@@ -434,11 +378,6 @@ func runNodeCLI(args []string) error {
 	ctx, abandon = context.WithCancel(ctx)
 	defer abandon()
 	defer WatchParentLiveness(abandon)()
-	if brokeredChild {
-		for name := range remoteExecutionPrivateEnv {
-			_ = os.Unsetenv(name)
-		}
-	}
 	ctx = withProcessNode(ctx, runID, nodeID)
 	res, err := RunNodeOnce(ctx, *controllerURL, *logsURL, runID, nodeID, holderID, token,
 		selectLocalRenderer(), slog.Default(), nil, runOpts...)
