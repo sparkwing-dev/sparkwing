@@ -69,5 +69,10 @@ func Fixtures() []Fixture {
 			Setup:  "Independent inventories of target command paths, flag grammar, route resources, error envelopes, allowed SDK symbols, env names and configuration keys from frozen architecture sections 5-9.",
 			Oracle: "Exercise the CLI/API/SDK parsers and compare declared behavior to the independent inventory. Removed aliases, commands, fields, credentials and cache service surfaces are refused rather than silently accepted.",
 		},
+		{
+			ID:     "versions",
+			Setup:  "Independent signed release/index fixtures with exact Go and TypeScript pins, versions nine and twelve months old, older unrevoked versions, platform assets, closed-asset manifests, trusted and untrusted signing roots, revocations and minimum versions. Private machine caches start cold or contain a known verified copy; retain historical controller API transcripts from the launch freeze.",
+			Oracle: "A fixture release ledger fixes version/platform/digest, signature verdict, support-window end, warning and revocation times, request counts and process execution. GitHub Releases and sparkwing.dev transports are intercepted independently; product resolution tables never generate expected pins or policy outcomes.",
+		},
 	}
 }
