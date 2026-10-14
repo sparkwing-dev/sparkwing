@@ -3,6 +3,7 @@ package source
 
 import (
 	"context"
+	"errors"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
@@ -51,6 +52,9 @@ type Options struct {
 	Engines   *engine.Resolver
 	Target    releaseasset.Target
 	SDK       engine.SDKKind
+	// GitEnvironment is a host-built procenv base, never implicit ambient input.
+	// The source authority may add its owner's SSH_AUTH_SOCK after authorization.
+	GitEnvironment []string
 }
 
 // Entry is the acquired checkout and SDK command. Command excludes protocol argv.
@@ -63,7 +67,8 @@ type Entry struct {
 	RepoKey   string
 	SHA       string
 	// DefaultBranch is resolved from origin HEAD only when the sealed request lacks it.
-	DefaultBranch string
+	DefaultBranch  string
+	ownedDirectory string
 }
 
 // Acquire clones the sealed SHA exactly or uses the authorized local checkout.
@@ -74,21 +79,24 @@ type Entry struct {
 // A supplied sealed Engine uses Engines.Ensure and must agree with the checkout pin. The result's
 // executable hosts the SDK command on every placement, including TypeScript on Windows.
 func Acquire(ctx context.Context, spec Spec, options Options) (*Entry, error) {
-	panic("unimplemented: c3-protocol-sdk")
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return nil, errors.New("source acquisition requires the matched engine's SDK entry-install contract")
 }
 
 // Close releases acquisition-owned resources without removing a user's checkout.
-func (e *Entry) Close() error { panic("unimplemented: c3-protocol-sdk") }
+func (e *Entry) Close() error { return e.close() }
 
 // ForRequest uses the captured intake checkout policy for planning acquisition.
 // Code and checkout-derived policy can resolve only at AcceptPlan.
 func ForRequest(request runspec.SealedRequest) (Spec, error) {
-	panic("unimplemented: c3-protocol-sdk")
+	return requestSource(request)
 }
 
 // ForExecution uses the accepted checkout winner and immutable acquisition identity.
 // Executors never inspect raw PlanDoc.Source or a host's machine preferences.
 // The projection also carries the accepted portable engine identity.
 func ForExecution(spec runspec.Spec) (Spec, error) {
-	panic("unimplemented: c3-protocol-sdk")
+	return executionSource(spec)
 }

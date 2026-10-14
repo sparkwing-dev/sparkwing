@@ -16,6 +16,12 @@ func pendingScenarios(t *testing.T, group string) {
 		}
 		count++
 		t.Run(scenario.ID, func(t *testing.T) {
+			switch scenario.ID {
+			case "recovery-keeper-causes-and-backoff":
+				t.Run("hermetic-library", acceptance.CheckKeeperCauses)
+			case "recovery-keeper-conflict-and-stop-join":
+				t.Run("hermetic-library", acceptance.CheckKeeperConflictAndStop)
+			}
 			var areas []string
 			for _, area := range scenario.Requires {
 				areas = append(areas, string(area))
