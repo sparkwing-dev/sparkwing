@@ -21,6 +21,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runflags"
 	k8srunner "github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -94,11 +95,11 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 		return nodehost.Result{}, err
 	}
 	defer planSink.end()
-	flags := recordedRunFlags(run.Invocation)
+	flags := runflags.FromInvocation(run.Invocation)
 	cfg := nodehost.Config{
 		Session:  nodehost.SessionConfig{Entry: p.entry, Dir: p.dir, Sink: planSink, Env: env},
 		Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run),
-		StartAt: flags.startAt, StopAt: flags.stopAt,
+		StartAt: flags.StartAt, StopAt: flags.StopAt,
 		State: p.state, Artifacts: p.artifacts, Logger: p.logger,
 		Attempts: &nodehost.Attempts{
 			Routes: routes, Resolver: podSecrets{c: c, runID: p.runID}, Masker: masker, Claim: claim,
@@ -114,7 +115,7 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 		// safety: the node's concurrency group and memo entry run through the claim, which the controller binds to
 		// this node; a memo hit's output and artifact manifest are the ones the controller picks for the claim's key.
 		cfg.Admission = &nodehost.Admission{Slots: slots}
-		cfg.Memo = &nodehost.Memo{Slots: slots, Claimed: true, Source: func(ctx context.Context, in store.ClaimInputRequest, _, _ string) (nodehost.MemoSource, error) {
+		cfg.Memo = &nodehost.Memo{Slots: slots, Claimed: true, NoCache: flags.NoCache, Source: func(ctx context.Context, in store.ClaimInputRequest, _, _ string) (nodehost.MemoSource, error) {
 			src, data, err := c.ClaimInput(ctx, p.runID, p.nodeID, in)
 			return nodehost.MemoSource{Output: data, ArtifactManifest: src.ArtifactManifest}, err
 		}}
@@ -312,9 +313,9 @@ func PipelineRequires(dir, pipeline string) ([]string, error) {
 
 // safety: the planning claim and every node's pod plan from one context, so their spec hashes compare.
 func podRunContext(run *store.Run) nodeproto.RunContext {
-	flags := recordedRunFlags(run.Invocation)
+	flags := runflags.FromInvocation(run.Invocation)
 	rc := nodeproto.RunContext{
-		RunID: run.ID, StartedAt: run.StartedAt, DryRun: flags.dryRun, NoCache: flags.noCache,
+		RunID: run.ID, StartedAt: run.StartedAt, DryRun: flags.DryRun, NoCache: flags.NoCache,
 		Git:     &nodeproto.Git{SHA: run.GitSHA, Branch: run.GitBranch, Repo: run.DeclaredRepo, RepoURL: run.RepoURL},
 		Trigger: &nodeproto.Trigger{Source: protocolTriggerSource(run.TriggerSource), User: run.TriggerUser},
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
+	"github.com/sparkwing-dev/sparkwing/internal/runflags"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -90,11 +91,10 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	}
 	hostLog := &triggerHostLog{out: os.Stderr}
 	shuttingDown := shuttingDownOn(ctx)
-	rc, err := triggerRunContext(ctx, c, trig)
+	rc, flags, err := triggerRunContext(ctx, c, trig)
 	if err != nil {
 		return err
 	}
-	flags := triggerRunFlags(trig.TriggerEnv)
 	rehydrate, err := hostedRehydration(ctx, c, Options{RetryOf: trig.RetryOf, RetrySource: trig.RetrySource, Full: trig.Full}, trig.ID)
 	if err != nil {
 		return err
@@ -102,8 +102,8 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 	res, err := nodehost.Execute(ctx, nodehost.Config{
 		Session:  nodehost.SessionConfig{Entry: h.Entry, Dir: h.Dir, Sink: planSink, Env: env},
 		Pipeline: trig.Pipeline, Args: triggerHostArgs(ctx, c, trig, logger),
-		Run: rc, Requires: requires, Invocation: flags.invocation(),
-		StartAt: flags.startAt, StopAt: flags.stopAt, Only: flags.only,
+		Run: rc, Requires: requires, Invocation: flags.Invocation(),
+		StartAt: flags.StartAt, StopAt: flags.StopAt, Only: flags.Only,
 		ParentRunID: trig.ParentRunID, RetryOf: trig.RetryOf, RetrySource: trig.RetrySource,
 		State: retryPlanState{
 			stoppingHostState: stoppingHostState{Client: c, shuttingDown: shuttingDown},
@@ -111,7 +111,7 @@ func HostTriggerRun(ctx context.Context, h TriggerHost) error {
 		},
 		Logger:    logger,
 		Admission: &nodehost.Admission{Slots: slots},
-		Memo: &nodehost.Memo{Slots: slots, NoCache: flags.noCache, Source: func(ctx context.Context, _ store.ClaimInputRequest, runID, nodeID string) (nodehost.MemoSource, error) {
+		Memo: &nodehost.Memo{Slots: slots, NoCache: flags.NoCache, Source: func(ctx context.Context, _ store.ClaimInputRequest, runID, nodeID string) (nodehost.MemoSource, error) {
 			return nodehost.ReadMemoSource(ctx, c, runID, nodeID)
 		}},
 		// safety: the run host's eval processes read secrets through the trigger's claim, which the controller
@@ -162,10 +162,10 @@ func triggerHostArgs(ctx context.Context, c *client.Client, trig *store.Trigger,
 // is about to record, the controller's run read (start time, the trigger's actor and pull request) with the trigger's
 // git snapshot and source laid over it as the run row's upsert lays them, so each node host reads back that row.
 //
-// safety: a run row the controller does not have yet is planned from the trigger alone, as every pod then reads
-// it; one it failed to answer for is retried and then refused, because planning without the row's pull request
+// safety: a run row the controller does not have yet is planned from the trigger alone, its run flags included,
+// as every pod then reads it; one it failed to answer for is retried and then refused, because planning without the row's pull request
 // would hash differently from the pods that read it, and every node would fail with plan_drift.
-func triggerRunContext(ctx context.Context, c *client.Client, trig *store.Trigger) (nodeproto.RunContext, error) {
+func triggerRunContext(ctx context.Context, c *client.Client, trig *store.Trigger) (nodeproto.RunContext, runflags.Flags, error) {
 	var row *store.Run
 	var err error
 	for attempt := 1; ; attempt++ {
@@ -177,66 +177,24 @@ func triggerRunContext(ctx context.Context, c *client.Client, trig *store.Trigge
 		select {
 		case <-ctx.Done():
 			wait.Stop()
-			return nodeproto.RunContext{}, fmt.Errorf("read run %s for its run context: %w", trig.ID, errors.Join(err, ctx.Err()))
+			return nodeproto.RunContext{}, runflags.Flags{}, fmt.Errorf("read run %s for its run context: %w", trig.ID, errors.Join(err, ctx.Err()))
 		case <-wait.C:
 		}
 	}
 	switch {
 	case errors.Is(err, store.ErrNotFound) || (err == nil && row == nil):
-		row = &store.Run{ID: trig.ID, TriggerUser: trig.TriggerUser}
+		row = &store.Run{ID: trig.ID, TriggerUser: trig.TriggerUser, Invocation: runflags.FromTriggerEnv(trig.TriggerEnv).Invocation()}
 	case err != nil:
-		return nodeproto.RunContext{}, fmt.Errorf("read run %s for its run context: %w", trig.ID, err)
+		return nodeproto.RunContext{}, runflags.Flags{}, fmt.Errorf("read run %s for its run context: %w", trig.ID, err)
 	}
 	planned := *row
 	planned.ID, planned.TriggerSource = trig.ID, trig.TriggerSource
 	planned.GitSHA, planned.GitBranch = trig.GitSHA, trig.GitBranch
-	planned.Invocation = triggerRunFlags(trig.TriggerEnv).invocation()
 	planned.DeclaredRepo, planned.RepoURL = cmp.Or(row.DeclaredRepo, trig.Repo), cmp.Or(row.RepoURL, trig.RepoURL)
 	if planned.StartedAt.IsZero() {
 		planned.StartedAt = time.Now().UTC()
 	}
-	return podRunContext(&planned), nil
-}
-
-// safety: `sparkwing pipeline trigger` carries these flags in trigger_env; the run host records them in the
-// run row's invocation, where every node host reads them back, so a node's step range and dry run match the
-// plan the run host accepted.
-type runFlags struct {
-	startAt, stopAt, only string
-	dryRun, noCache       bool
-}
-
-func triggerRunFlags(env map[string]string) runFlags {
-	return runFlags{
-		startAt: env["SPARKWING_START_AT"], stopAt: env["SPARKWING_STOP_AT"], only: env["SPARKWING_ONLY"],
-		dryRun: env[envDryRun] == "1", noCache: env["SPARKWING_NO_CACHE"] == "1",
-	}
-}
-
-func (f runFlags) invocation() map[string]any {
-	flags := map[string]any{}
-	for key, value := range map[string]string{"start_at": f.startAt, "stop_at": f.stopAt, "only": f.only} {
-		if value != "" {
-			flags[key] = value
-		}
-	}
-	if f.dryRun {
-		flags["dry_run"] = true
-	}
-	if f.noCache {
-		flags["no_cache"] = true
-	}
-	if len(flags) == 0 {
-		return nil
-	}
-	return map[string]any{"flags": flags}
-}
-
-func recordedRunFlags(invocation map[string]any) runFlags {
-	flags, _ := invocation["flags"].(map[string]any)
-	text := func(key string) string { v, _ := flags[key].(string); return v }
-	set := func(key string) bool { v, _ := flags[key].(bool); return v }
-	return runFlags{startAt: text("start_at"), stopAt: text("stop_at"), only: text("only"), dryRun: set("dry_run"), noCache: set("no_cache")}
+	return podRunContext(&planned), runflags.FromInvocation(planned.Invocation), nil
 }
 
 const (

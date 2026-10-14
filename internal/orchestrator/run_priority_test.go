@@ -95,3 +95,14 @@ func TestBuildRunInvocation_RecordsVerbose(t *testing.T) {
 		t.Errorf("reproducer = %q, want %q", got, want)
 	}
 }
+
+// safety: a local trigger run passes --sw-only and --sw-no-cache to execution, so its run row and reproducer record them.
+func TestBuildRunInvocation_RecordsOnlyAndNoCache(t *testing.T) {
+	inv := buildRunInvocation(Options{Pipeline: "probe", Only: "ship", NoCache: true}, "run-1", "", nil)
+	if flags, _ := inv["flags"].(map[string]any); flags["only"] != "ship" || flags["no_cache"] != true {
+		t.Errorf("flags = %v, want only and no_cache recorded", inv["flags"])
+	}
+	if got, want := inv["reproducer"], "sparkwing run probe --sw-no-cache --sw-only=ship"; got != want {
+		t.Errorf("reproducer = %q, want %q", got, want)
+	}
+}

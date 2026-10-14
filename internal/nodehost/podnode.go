@@ -26,6 +26,9 @@ type PlanRequest struct {
 	// Masker, when set, has the value of every flag describe marks secret
 	// registered before plan code runs.
 	Masker *secrets.Masker
+	// StartAt and StopAt must name steps of the plan, and Only cuts every
+	// node it does not keep from the plan, for a run no host schedules.
+	StartAt, StopAt, Only string
 }
 
 // PlannedRun is a plan [PlanDocument] accepted: the document with the host's
@@ -54,6 +57,16 @@ func PlanDocument(ctx context.Context, cfg SessionConfig, req PlanRequest) (Plan
 	}
 	if err == nil {
 		out.Doc, out.JSON, err = hostRequires(out.Doc, out.JSON, req.Requires)
+	}
+	if err == nil {
+		err = validateStepRange(out.Doc, req.StartAt, req.StopAt)
+	}
+	if err == nil && req.Only != "" {
+		if req.StartAt != "" || req.StopAt != "" {
+			err = fmt.Errorf("--only is mutually exclusive with --start-at / --stop-at")
+		} else {
+			out.Doc, out.JSON, err = cutOutsideOnly(out.Doc, out.JSON, req.Only)
+		}
 	}
 	_, cerr := sess.Close()
 	var perr *nodeproto.Error

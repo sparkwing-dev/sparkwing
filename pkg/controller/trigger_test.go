@@ -15,6 +15,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
+	"github.com/sparkwing-dev/sparkwing/internal/runflags"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -724,5 +725,40 @@ func TestTrigger_RefusesATriggerThatNamesTwoRepositories(t *testing.T) {
 				t.Fatalf("status = %d, want %d (body: %s)", resp.StatusCode, tc.want, body)
 			}
 		})
+	}
+}
+
+// safety: the run row is where every host of a triggered run reads its run flags, the planning claim's included.
+func TestTriggerRecordsTheRunFlagsOnTheRunRow(t *testing.T) {
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	defer srv.Close()
+	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
+		"pipeline": "demo",
+		"trigger": map[string]any{"source": "manual", "env": map[string]string{
+			"SPARKWING_ONLY": "ship", "SPARKWING_DRY_RUN": "1", "SPARKWING_NO_CACHE": "1",
+		}},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d want 202 (body: %s)", resp.StatusCode, body)
+	}
+	var body struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	run, err := st.GetRun(context.Background(), body.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := runflags.FromInvocation(run.Invocation), (runflags.Flags{Only: "ship", DryRun: true, NoCache: true}); got != want {
+		t.Fatalf("run row's flags = %+v, want %+v", got, want)
 	}
 }

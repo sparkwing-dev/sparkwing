@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
+	"github.com/sparkwing-dev/sparkwing/internal/runflags"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
@@ -325,15 +326,7 @@ func buildRunFlags(opts Options) map[string]any {
 	if opts.Full {
 		flags["full"] = true
 	}
-	if opts.DryRun {
-		flags["dry_run"] = true
-	}
-	if opts.StartAt != "" {
-		flags["start_at"] = opts.StartAt
-	}
-	if opts.StopAt != "" {
-		flags["stop_at"] = opts.StopAt
-	}
+	runflags.Flags{StartAt: opts.StartAt, StopAt: opts.StopAt, Only: opts.Only, DryRun: opts.DryRun, NoCache: opts.NoCache}.Record(flags)
 	if opts.MaxParallel > 0 {
 		flags["max_parallel"] = opts.MaxParallel
 	}

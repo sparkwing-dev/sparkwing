@@ -23,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/runflags"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -1194,6 +1195,8 @@ func triggerRows(in triggerIntake) (store.Trigger, store.Run) {
 		RetryOf:       in.RetryOf,
 		CreatedAt:     in.At,
 		StartedAt:     in.At,
+		// safety: every host of the run, the planning claim's included, reads the trigger's run flags from here.
+		Invocation: runflags.FromTriggerEnv(in.Env).Invocation(),
 	}
 	return trig, run
 }

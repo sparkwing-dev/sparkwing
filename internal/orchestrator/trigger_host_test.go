@@ -21,6 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/runflags"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -83,7 +84,11 @@ func newHostedTriggerWith(t *testing.T, args map[string]string, shape func(*stor
 		GitBranch: "main", GitSHA: strings.Repeat("b", 40), CreatedAt: now,
 	}
 	shape(&trig)
-	if err := st.CreateTriggerWithRun(ctx, trig, store.Run{ID: "run-hosted", Pipeline: "podnode", Status: "pending", Args: args, CreatedAt: now, StartedAt: now}); err != nil {
+	if err := st.CreateTriggerWithRun(ctx, trig, store.Run{
+		ID: "run-hosted", Pipeline: "podnode", Status: "pending", Args: args, CreatedAt: now, StartedAt: now,
+		// safety: as the controller's trigger intake records the trigger's run flags on the run row.
+		Invocation: runflags.FromTriggerEnv(trig.TriggerEnv).Invocation(),
+	}); err != nil {
 		t.Fatal(err)
 	}
 	h.trig, err = client.NewWithToken(h.url, nil, h.token).ClaimTriggerFor(t.Context(), nil, nil)
@@ -312,7 +317,7 @@ func dispatchedHeld(t *testing.T, stop func(context.CancelCauseFunc)) *hostedTri
 	hold, pids := heldNodePID(t)
 	args := map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "hold": hold}
 	h := newHostedTrigger(t, args)
-	rc, err := triggerRunContext(t.Context(), client.NewWithToken(h.url, nil, h.token), h.trig)
+	rc, _, err := triggerRunContext(t.Context(), client.NewWithToken(h.url, nil, h.token), h.trig)
 	if err != nil {
 		t.Fatal(err)
 	}

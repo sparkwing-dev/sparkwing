@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/runflags"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -133,6 +134,7 @@ func planLaunchedRun(ctx context.Context, c *client.Client, src string, entry pi
 	if err != nil {
 		return fail(err)
 	}
+	flags := runflags.FromInvocation(run.Invocation)
 	masker := secrets.NewMasker()
 	env, err := podProcessEnv(masker, slog.Default())
 	if err != nil {
@@ -143,7 +145,10 @@ func planLaunchedRun(ctx context.Context, c *client.Client, src string, entry pi
 		return fail(err)
 	}
 	plan, err := nodehost.PlanDocument(ctx, nodehost.SessionConfig{Entry: entry, Dir: src, Sink: sink, Env: env},
-		nodehost.PlanRequest{Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run), Requires: requires, Masker: masker})
+		nodehost.PlanRequest{
+			Pipeline: run.Pipeline, Args: run.Args, Run: podRunContext(run), Requires: requires, Masker: masker,
+			StartAt: flags.StartAt, StopAt: flags.StopAt, Only: flags.Only,
+		})
 	sink.end()
 	if err != nil {
 		return fail(fmt.Errorf("the pipeline could not plan the run: %s", masker.Mask(err.Error())))

@@ -4,6 +4,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -20,6 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/runflags"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -99,6 +101,8 @@ ON CONFLICT DO NOTHING`, string(store.DefaultTeam), store.RepoKey("acme", "widge
 	}, store.Run{
 		ID: r.runID, Pipeline: "podnode", Status: "pending", Args: args, GithubOwner: "acme", GithubRepo: "widgets",
 		DeclaredRepo: "acme/widgets", CreatedAt: now, StartedAt: now,
+		// safety: as the controller's trigger intake records the trigger's run flags on the run row.
+		Invocation: runflags.FromTriggerEnv(r.triggerEnv).Invocation(),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -476,6 +480,88 @@ func podMemoRuns(t *testing.T, publish, objects bool, want sparkwing.Outcome, bo
 	if src := first.node(t, "memoized"); publish && objects && (src.ArtifactManifest == "" || got.ArtifactManifest != src.ArtifactManifest) {
 		t.Fatalf("second run's manifest = %q, want the first's %q", got.ArtifactManifest, src.ArtifactManifest)
 	}
+}
+
+// safety: a controller-dispatched run reads `sparkwing pipeline trigger`'s run flags from its run row: the
+// planning claim cuts the plan to --sw-only and each node's Job skips the steps outside the range or dry run.
+func TestLaunchedNode_HonorsTheTriggersRunFlags(t *testing.T) {
+	cases := []struct {
+		name  string
+		env   map[string]string
+		nodes []string
+		ran   []string
+	}{
+		{
+			name: "only", env: map[string]string{runflags.EnvOnly: "ship"}, nodes: []string{"prep", "ship"},
+			ran: []string{"compile", "package", "prep", "upload"},
+		},
+		{
+			name: "step range", env: map[string]string{runflags.EnvStartAt: "package", runflags.EnvStopAt: "package"},
+			nodes: []string{"build", "lint", "prep", "ship"}, ran: []string{"lint", "package", "prep"},
+		},
+		{name: "dry run", env: map[string]string{runflags.EnvDryRun: "1"}, nodes: []string{"build", "lint", "prep", "ship"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("GORACE", "atexit_sleep_ms=0")
+			base := newLaunchedRun(t, nil)
+			r := &launchedRun{st: base.st, url: base.url, runID: "run-flags", src: base.src, triggerEnv: c.env}
+			ranged := filepath.Join(t.TempDir(), "ranged")
+			r.create(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "ranged": ranged})
+			if _, err := r.host(t, store.PlanNodeID); err != nil {
+				t.Fatalf("plan: %v", err)
+			}
+			var planned []string
+			for _, id := range []string{"build", "lint", "prep", "ship"} {
+				if _, err := r.st.GetNode(t.Context(), r.runID, id); err == nil {
+					planned = append(planned, id)
+				}
+			}
+			if !slices.Equal(planned, c.nodes) {
+				t.Fatalf("planned nodes = %v, want %v", planned, c.nodes)
+			}
+			for _, id := range planned {
+				if _, err := r.host(t, id); err != nil {
+					t.Fatalf("host %s: %v", id, err)
+				}
+			}
+			data, err := os.ReadFile(ranged)
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				t.Fatal(err)
+			}
+			ran := strings.Fields(string(data))
+			slices.Sort(ran)
+			if !slices.Equal(ran, c.ran) {
+				t.Fatalf("steps that ran = %v, want %v", ran, c.ran)
+			}
+		})
+	}
+}
+
+// safety: --sw-no-cache reaches the memo of a node a claim hosts, so the node runs its body over a stored result.
+func TestLaunchedNode_NoCacheMissesTheMemo(t *testing.T) {
+	t.Setenv("GORACE", "atexit_sleep_ms=0")
+	t.Setenv(ArtifactStoreEnvVar, "")
+	marker := filepath.Join(t.TempDir(), "memo")
+	args := map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "memo": marker}
+	first := newLaunchedRun(t, args)
+	second := &launchedRun{
+		st: first.st, url: first.url, runID: "run-no-cache", src: first.src,
+		triggerEnv: map[string]string{runflags.EnvNoCache: "1"},
+	}
+	second.create(t, args)
+	for i, r := range []*launchedRun{first, second} {
+		if _, err := r.host(t, store.PlanNodeID); err != nil {
+			t.Fatalf("plan run %d: %v", i, err)
+		}
+		if _, err := r.host(t, "memoized"); err != nil {
+			t.Fatalf("host memoized in run %d: %v", i, err)
+		}
+	}
+	if got := second.node(t, "memoized"); got.Outcome != string(sparkwing.Success) {
+		t.Fatalf("no-cache run's memoized = %s/%s (%s), want a fresh success", got.Status, got.Outcome, got.Error)
+	}
+	wantTrace(t, marker, "body\nbody\n")
 }
 
 // A secret that straddles the session's split of a long plan line is masked

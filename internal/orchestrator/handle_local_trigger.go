@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
+	"github.com/sparkwing-dev/sparkwing/internal/runflags"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -70,7 +71,7 @@ func HostClaimedTrigger(ctx context.Context, triggerID, program string) error {
 	}
 
 	admission.ParentRunID, admission.ParentNodeID = trigger.ParentRunID, trigger.ParentNodeID
-	flags := triggerRunFlags(trigger.TriggerEnv)
+	flags := runflags.FromTriggerEnv(trigger.TriggerEnv)
 	opts := Options{
 		standalone:        childStandalone(backends, selection),
 		Pipeline:          trigger.Pipeline,
@@ -79,11 +80,11 @@ func HostClaimedTrigger(ctx context.Context, triggerID, program string) error {
 		Priority:          submittedTriggerPriority(trigger),
 		ParentRunID:       trigger.ParentRunID,
 		Admission:         admission,
-		DryRun:            flags.dryRun,
-		NoCache:           flags.noCache,
-		StartAt:           flags.startAt,
-		StopAt:            flags.stopAt,
-		Only:              flags.only,
+		DryRun:            flags.DryRun,
+		NoCache:           flags.NoCache,
+		StartAt:           flags.StartAt,
+		StopAt:            flags.StopAt,
+		Only:              flags.Only,
 		RetryOf:           trigger.RetryOf,
 		RetrySource:       trigger.RetrySource,
 		RetryRepoDir:      trigger.TriggerEnv[retryprovenance.RepoDirKey],
