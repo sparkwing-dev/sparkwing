@@ -101,7 +101,7 @@ func (h maskHandler) Handle(ctx context.Context, r slog.Record) error {
 	// safety: secrets may be registered after With, so binding cannot cache masked values.
 	for _, binding := range h.bindings {
 		if binding.group != "" {
-			inner = inner.WithGroup(binding.group)
+			inner = inner.WithGroup(h.m.Mask(binding.group))
 			continue
 		}
 		masked := make([]slog.Attr, len(binding.attrs))
@@ -136,6 +136,7 @@ func (h maskHandler) attr(a slog.Attr) slog.Attr {
 	if a.Equal(slog.Attr{}) {
 		return a
 	}
+	a.Key = h.m.Mask(a.Key)
 	if v.Kind() == slog.KindGroup {
 		group := v.Group()
 		masked := make([]any, len(group))
@@ -150,7 +151,12 @@ func (h maskHandler) attr(a slog.Attr) slog.Attr {
 	case slog.KindAny:
 		// safety: JSON text keeps structured content but loses object nesting, so downstream handlers
 		// cannot invoke the original value's encoders after masking.
-		return slog.String(a.Key, h.m.Mask(renderMaskValue(v.Any())))
+		return slog.String(a.Key, string(h.m.MaskJSON([]byte(renderMaskValue(v.Any())))))
+	default:
+		text := renderMaskValue(v.Any())
+		if masked := h.m.Mask(text); masked != text {
+			return slog.String(a.Key, masked)
+		}
 	}
 	return a
 }

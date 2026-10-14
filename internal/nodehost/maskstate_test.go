@@ -100,6 +100,7 @@ func TestMaskLoggerMasksEncodedValues(t *testing.T) {
 		}{
 			{"bytes", []byte("private-token"), "private-token", `value="\"***\""`, `"value":"\"***\""`},
 			{"marshaler", maskingEncodedValue{}, "private-token", `value="\"***\""`, `"value":"\"***\""`},
+			{"escaped-json", json.RawMessage(`"\u0070rivate-token"`), "private-token", `value="\"***\""`, `"value":"\"***\""`},
 			{"text-field", struct {
 				PrivateToken string `json:"state"`
 			}{"healthy"}, "PrivateToken", `value="{\"state\":\"healthy\"}"`, `"value":"{\"state\":\"healthy\"}"`},
@@ -126,6 +127,73 @@ func TestMaskLoggerMasksEncodedValues(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestMaskLoggerMasksScalars(t *testing.T) {
+	for format, handler := range maskingLogHandlers {
+		for _, tc := range []struct {
+			attr   slog.Attr
+			secret string
+		}{
+			{slog.Int("int", 1234567), "1234567"},
+			{slog.Uint64("uint", 1234567), "1234567"},
+			{slog.Float64("float", 1234567), "1234567"},
+			{slog.Duration("duration", time.Duration(1234567)), "1234567"},
+			{slog.Time("time", time.Date(2026, 1, 2, 3, 4, 5, 123456700, time.UTC)), "1234567"},
+			{slog.Bool("bool", true), "true"},
+		} {
+			t.Run(format+"/"+tc.attr.Key, func(t *testing.T) {
+				var out strings.Builder
+				masker := secrets.NewMasker()
+				masker.Register(tc.secret)
+				maskLogger(slog.New(handler(&out)), masker).Info("status", tc.attr)
+				if got := out.String(); strings.Contains(got, tc.secret) || !strings.Contains(got, "***") {
+					t.Errorf("scalar secret leaked or was not masked: %s", got)
+				}
+			})
+		}
+	}
+}
+
+func TestMaskLoggerMasksAttributeKeys(t *testing.T) {
+	for format, handler := range maskingLogHandlers {
+		t.Run(format, func(t *testing.T) {
+			var out strings.Builder
+			masker := secrets.NewMasker()
+			logger := maskLogger(slog.New(handler(&out)), masker).With("private-token-bound", "bound")
+			masker.Register("private-token")
+			logger.Info("status", "private-token-record", "record",
+				slog.Group("private-token-group", "private-token-nested", "nested"))
+			got := out.String()
+			if strings.Contains(got, "private-token") {
+				t.Errorf("attribute key leaked: %s", got)
+			}
+			for _, key := range []string{"***-bound", "***-record", "***-group", "***-nested"} {
+				if !strings.Contains(got, key) {
+					t.Errorf("masked key %q missing: %s", key, got)
+				}
+			}
+		})
+	}
+}
+
+func TestMaskLoggerMasksGroupNamesWhenHandled(t *testing.T) {
+	for format, handler := range maskingLogHandlers {
+		t.Run(format, func(t *testing.T) {
+			var out strings.Builder
+			masker := secrets.NewMasker()
+			logger := maskLogger(slog.New(handler(&out)), masker).WithGroup("private-token").With("state", "healthy")
+			masker.Register("private-token")
+			logger.Info("status")
+			want := `***.state=healthy`
+			if format == "json" {
+				want = `"***":{"state":"healthy"}`
+			}
+			if got := out.String(); strings.Contains(got, "private-token") || !strings.Contains(got, want) {
+				t.Errorf("group name leaked or lost attributes: %s", got)
+			}
+		})
 	}
 }
 
