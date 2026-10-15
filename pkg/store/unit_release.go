@@ -63,7 +63,7 @@ func (s *Store) releaseUnit(ctx context.Context, claim UnitClaim, prefix string)
 				return holderRefusal()
 			}
 			actor := Actor{Kind: ActorHolder, Authority: ref, CapabilityPrefix: prefix, Holder: claim.Award.Holder, Generation: generation}
-			_, err = transitionNodeTx(ctx, tx, claim.Team, NodeTransition{Ref: node.Ref, To: NodePending, Cause: CauseRelease, Actor: actor}, now)
+			_, err = transitionNodeTx(ctx, tx, claim.Team, NodeTransition{Ref: node.Ref, To: NodePending, Cause: CauseRelease, Actor: actor, SourceAttempt: &node.Attempt}, now)
 			return err
 		}
 		if err := lockStateRunTx(ctx, tx, claim.Team, claim.RunID); err != nil {

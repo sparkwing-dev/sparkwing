@@ -1,63 +1,15 @@
 # Cross-area handoffs
 
-## W8 composition continuation
-
-`runners.NewManagedRunner` and `launcher.NewLauncher` compose the shared wire
-client with the unified loop or launcher. `Hosting.HTTP` and `BootstrapHost.HTTP`
-retain the caller's HTTP/api.sock transport for awarded and exchanged clients.
-Launcher construction always selects `EngineOptions.Launcher`.
-
-W8 now constructs trigger/here RunInput seals from the award before callbacks
-run. The SQLite/controller lifecycle component checks those inputs through
-RunHost and persisted completion. Generated cases cover new runs, resume,
-prepared replacements and mutation after capture. This completes W8's awarded
-run/seal projection; W3's run/plan/eval runner-identity fields and shared host
-constructors remain open.
-
-`runners.NodePreparation.Prepare` fills accepted executor input, acquires the
-accepted source and retains partial cleanup until the keeper joins. Its default
-uses W3's `ForExecution`/`Acquire`; components inject that boundary while it is a
-stub. Bound host services must still supply the job hash, delegated node routes,
-storage and generator replay. No shared host constructor is inferred.
-
-W8's local `LocalController` composition interface now returns `HTTP() LocalHTTP`
-instead of implementing ServeAPI/ServeDashboard. The runtime owns both HTTP
-servers, request cancellation and joined drain. W2's local adapter supplies the
-shared handlers and reads verified API identity with
-`wingd.LocalPeer(request.Context())`. This changes W8's composition interface,
-not the frozen LocalRuntime operations. The sole implemented backend was the
-W8 fixture; all its callers are migrated. Store/queue/maintenance construction
-and shared policy handlers remain W1/W2 integration.
-
-W8's node-input constructor now captures the accepted spec/plan seals and job
-settings alongside engine, runner and claim identity before renewal or preparation.
-Every preparation path uses that projection. Nested settings are copied, and
-missing or inconsistent seals fail before renewal. NodePreparation's duplicate
-accepted-input projection is removed. The SQLite lifecycle component constructs
-NewManagedRunner with a verified signed version policy before real claim/start/
-finish persistence. Source/keeper/host and controller-client bodies remain fake
-boundaries. See [the node composition report](../W8-NODE-INPUT-COMPOSITION.md).
-
-W8's runtime now owns dashboard HTTP connection holds through close, including
-keep-alive and hijacked connections. Controller activity reports cover holds
-outside those connections. Status sums both owners, and closing the last
-dashboard connection restarts the existing idle interval. The real serving loop
-passes controlled-clock and race regressions with in-memory connections. See
-[the continuation report](../W8-DASHBOARD-ACTIVITY.md). This advances A1-40
-without supplying native or final store/controller composition evidence.
-
-The local HTTP serving scope now cancels its request contexts on listener
-failure as well as caller cancellation. Hijacked handlers finish before the
-runtime closes its store and releases the home election. In-memory HTTP and
-runtime regressions cover that exit and preserve the listener error. The shared
-controller/store factory remains an integration point. See
-[the HTTP exit report](../W8-HTTP-EXIT.md).
-
-The approved cancellation code is unchanged and both original regressions pass.
-New preparation and HTTP properties exercise fake foreign contracts and in-memory
-connections. Native cells remain blocked. See [the W8 audit](../W8-AMENDMENTS-1.md).
-
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
+
+W1's offer-round cut is complete. The finalizer, timer, idle-registry path,
+warm-dispatch caller, factory and HTTP/client endpoint are removed. Legacy
+readiness writers remain until host migration, but open no offer rounds. Shared
+matching now accepts scoped Actions claims and checks every push ancestor during
+matching and award issuance. The SQLite ordered-matching cell and adversarial
+claim properties pass. W2/W8 still own production Actions evidence, enrollment
+and runner wiring. Old offer columns remain until legacy claim/credit retirement.
+See `../w1-session15-progress.md` for the caller list and evidence.
 
 ## From W4 review fixes (2026-10-15)
 
@@ -65,30 +17,6 @@ Each worker acts on every entry naming its area. Entries come from area reviews 
 **DESIGN: W3 production service router (finding 2).** Invariant: the SDK and negotiated production service router implement one route/error contract. Replace the header/426 gate, `/nodes` routes, legacy errors and missing service handlers together. Test SDK calls against the actual registered node-host router for secrets, output, mask, annotation, summary, OIDC and children. Removing the version gate alone is insufficient.
 
 **DESIGN: W3/W8/W9 execution identity construction (finding 3).** Invariant: every launched process receives the verified selected engine and server-granted runner identity. Carry both through one execution-input constructor used by worker, claimed execution and pod paths. Test real constructors through hello; forged ambient values must never select identity. Amendment A1-19 already assigns this work.
-
-W8 node-award slice done: Hosting captures the server runner, engine and claim fence before preparation and constructs NodeInput with the matching acquired engine. Claimed jobs and exchanged Cloud work use that constructor. Component and fuzz tests cover forged prepared/ambient identities, source mismatches and copied runner labels. The full handoff remains open: W3 must declare run/plan/eval identity inputs and the shared process constructor, then exercise actual hello. RunInput has no granted runner field, and the retained node-host runtime still reads ambient runner variables.
-
-**W8 to W9: Cloud private award transport.** BuildJob now mounts `award.json`
-beside the unchanged `bootstrap` file in its immutable Secret. The metadata
-carries the complete CloudJobAward without bootstrap bytes. Compose fetch-source
-with `launcher.ReadBootstrapAward(bootstrapFile)` and run-node with
-`launcher.BootstrapHost.RunFile(ctx, bootstrapFile)`. Builder-to-file-to-exchange
-components pass for plan/eval/work. The builder now emits only declared arguments,
-and its eval/work commands pass the shared parser. The registry still requires
-a job for plan units. Allow that owner-unit case without a synthetic job ID.
-Source acquisition, shared host construction and real HTTP remain integration
-work. No new flag or environment variable selects the metadata file.
-
-**W8 to W9: launcher grammar contract.** `RunLaunchCLI` requires the
-digest-pinned Docker image from `CloudJobConfig`, but the shared launch registry
-has no `--docker-image`. Passing valid runtime arguments to `runnerflags.Parse`
-fails with `unknown flag: --docker-image`. The registry also declares
-`--deadline`, while the runtime rejects it and `CloudJobConfig` has no corresponding
-field. Declare the image argument and resolve the deadline's meaning and plumbing
-before switching this entrypoint to the shared parser. Temporary overlay probes
-reproduce both failures. W8 now implements the registry's existing `--poll` flag,
-with controlled-clock acceptance coverage. The plan-without-job request above
-remains open. This entry requests contract changes and does not amend the grammar.
 
 **DESIGN: W3 eval consumption (finding 4).** Invariant: a closure failure cannot become a successful value. Centralize host eval decoding so it checks the canonical error before exposing a typed value. Reproduce throwing step guards, generators and memo keys returning `{value:null,error:...}`; assert failed work, no body execution, no accepted expansion and no NoMemo success. Shape-only tests do not prove this invariant.
 
@@ -131,20 +59,44 @@ and `settleExpiredClaimTx` helper can retire after this cut is merged.
 
 **DESIGN approved (lead, pending Korey's ratification): SDK planning diagnostic sanitization, W5 and W4.** Invariant: no declared secret argument value (default or supplied, pipeline or job scope) appears in any error the SDK returns from describe, argument resolution or planning: not in message, hint, details or detail keys, in any encoding. Each SDK collects the nonempty declared secret values once at its discovery/planning boundary and passes every outgoing canonical error through one sanitizer, which keeps codes and field paths. That replaces the describe-only replacement. Host masking still owns execution output and dynamic service values. Both SDKs carry a property test over thrown values, canonical errors, overlapping values, encodings and both argument scopes. W5 implements it in TypeScript; W4 implements the same in the Go SDK. No cross-area contract change.
 
-**Contract change needed, W1/W9/W3: attempt identity on job transitions.**
+**W1 done, W9/W3 contract change needed: attempt identity on job transitions.**
 Invariant: an execution report affects only the attempt it names, and replay of
-that report cannot consume another attempt. C1 `NodeTransition` and C3
-`JobTransitionRequest` carry claim generation but no source attempt ordinal.
-Two successive identical retry failures therefore hash identically. A direct
-store probe with retry budget two starts attempt four, then the next failure
-returns `Replayed:true, Attempt:4` instead of starting five. A delayed report
-also lacks an attempt fence after retry under the same claim. Carry the source
-attempt through the request and adapter, check it in the committing transaction,
-and include it in replay identity. Start, unstarted refusal and reaper semantics
-must remain explicit. W1 has not changed the foreign wire shape. The reproducer
-and command are in `../w1-session12-progress.md`.
+that report cannot consume another attempt. C1 `NodeTransition.SourceAttempt`
+now requires an explicit nonnegative ordinal on holder start, retry, report and
+unstarted release. It participates in the digest and must match the locked row
+unless the complete transition replays. Other causes and actors omit it.
+Initial start uses zero, resumed start uses the retained ordinal, and unstarted
+refusal/release consumes none. The generated store property and strengthened
+SQLite retry cell prove repeated identical failures and delayed-report refusal.
+W9 must add the ordinal to `JobTransitionRequest` and its adapter. W3 must send
+the captured source ordinal and consume `Applied.Attempt`. W1 has not changed
+the foreign wire shape. Its omission now fails loudly, so the two controller
+execution-path tests remain blocked on that amendment. W1b must also supply the
+existing attempt in its `blobResultFixture` transition. See
+`../w1-session16-progress.md` for evidence and the exact pending callers.
 
 **DESIGN: W9 Windows release packaging for the TypeScript SDK (from W5 review finding 6).** Invariant: every published TypeScript SDK package contains working protocol bridges for win32-x64 and win32-arm64. The release workflow builds both `native/win32-*/protocol.node` artifacts on native Windows runners, runs TestNativeProtocol and TestNativeConformance on each, stamps the SDK version, and makes publication depend on package assembly. W5's proposal is in `sdk/typescript/IMPLEMENTATION.md`.
+
+W1's concurrency-maintenance cut is complete. `Operator.MaintainConcurrency`
+requires the elected `controller.reaper` fence and commits holder cleanup, waiter
+cleanup and promotion atomically. The raw Store method, `Maintenance` registry,
+six unfenced operations and obsolete concurrency-memo sweep are removed. Controller
+startup and periodic work use the leased pass. The local daemon acquires its own
+reaper fence. The SQLite `recovery-concurrency-no-revival/store-sqlite` cell proves
+promotion, reopening and returning-owner queue order. See
+`../w1-session14-progress.md` for caller migrations and evidence. W1b's record
+retention remains separate and unchanged. The independent doctor repair,
+PurgeDeadLocalConcurrency and CountDeadLocalConcurrency are also removed. Terminal
+capacity is cleaned in every scope by the same elected pass.
+
+**Contract gap confirmed, W8/W9 launcher synchronization (A1-38).**
+`LauncherObservation` carries UnitID, JobName and NodeUID, but not claim generation.
+Store UnitID is stable across re-awards: plan/trigger use RunID, and work/eval
+encode UnitRef without claim generation. NodeUID identifies a Kubernetes node,
+not the Job instance. A sync adapter cannot distinguish a former award's Job from
+its replacement using these fields. W8/W9 must supply the immutable award fence
+and Kubernetes instance correlation before W1 can implement safe cleanup.
+`EngineController.SyncLauncher` remains a stub. No foreign wire type was changed.
 
 **DESIGN approved (lead): W1b record mutation authorization.** Invariant: no record, manifest or memo copy persists unless the writer, ancestor and holder authority is current at the moment of the write. Record publication has one transaction-local mutation owner used by both CommitRecord and CopyMemo: prepare namespaces and verified members first (any I/O happens here), then take the existing blob locks, recheck current authority against the store clock inside the same transaction, and persist the complete destination batch through that owner. That final recheck is the linearization boundary; nothing writes after it without passing it. Preserve immutable replay, all-or-nothing output and manifest copies, and caller-owned rollback. Remove the scattered per-path checks this replaces. TestBlobRecordsMutationCannotOutliveAuthority must go green with its full generated-case run.
 
@@ -154,45 +106,83 @@ and command are in `../w1-session12-progress.md`.
 
 **DESIGN approved (lead): W8 pending-claim outcomes.** Invariant: a committed award is always owned, and every independent stop reason (policy refusal, cancellation, idle, claim deadline, version) stays observable to the caller. The pending claim returns the award and the stop reason as independent results. Run adopts any returned award first, then applies the stop reason, joins the held hosts, and returns that reason; the joining defer never replaces a stop reason with success. Existing owners of cancellation, idle, claim-deadline and version checks stay as they are. `TestLoopPendingAwardPreservesPolicyDenial` must go green, plus a property test over interleavings of award delivery and each stop reason.
 
-W8 pending-claim outcome representation is implemented. The original regression,
-managed-update error preservation, here component and outcome property pass.
+W1's schedule handle cut is complete. Thirteen implicit-default-team Store
+methods are removed. Local constructors select DefaultTeam. Controller requests
+use their authenticated Tenant, and deployment ticks select each enumerated team.
+Tick metadata belongs to Operator and settings. Arming writes the canonical
+repository key, and non-run history stores a nullable run reference. The SQLite
+surface-schedules-and-managed-timers/store-sqlite cell passes through rollback
+and reopening. W9/W6 still own old cron YAML fixtures and timer/HTTP integration.
+Unverified GitHub push callers must supply resolved repository identity before
+arming. W1 has not changed foreign contracts or W1b implementation files.
+
 **DESIGN approved (lead): W8 cancellation classification (third finding in the pending-claim mechanism).** Invariant: classifying a stop reason never panics and never confuses a caller's cancellation cause with a denial. Recognise cancellation only with `errors.Is(err, context.Canceled)` / `errors.Is(err, context.DeadlineExceeded)` (ctx.Err's comparable sentinels); never compare against `context.Cause(ctx)` with `==`. Run's joining defer returns the caller's arbitrary cause unchanged. Test nested wraps and joins, independent denials, and comparable and non-comparable custom causes, including a property test. Three bugs in one mechanism means it is too clever: while fixing this, cut the pending-claim stop logic to the smallest form that satisfies the approved outcome representation, and report the line count before and after.
 
-W8 completed the approved pending-claim cancellation classification. One policy
-helper traverses wraps and joins, tests only context cancellation/deadline
-sentinels at leaves, and preserves independent denials. The original
-arbitrary-cause regression and expanded property pass with committed awards,
-caller cancellation/deadlines and comparable/non-comparable custom causes.
-The policy/claim stop path shrinks from 84 to 75 lines, the pending wait from
-44 to 40, and loop.go from 408 to 401 including a capacity-wait correction that
-returns to the existing stop checks. This completes the interruption redesign
-under the lead's cancellation-classification approval. W3's shared run/plan/eval
-identity construction remains open. See
-../W8-AMENDMENTS-1.md for verification and remaining real-integration points.
+W1's A1-27 lifecycle join now uses W1b's billing helpers for issuance, starts,
+renewal, release, plan/expansion acceptance, finish and reaping. Pricing comes
+from sealed resources. Reservations keep the existing minute window, while C2
+applies each unit's final minimum. Queued matching passes over unfunded work and
+award issuance repeats its deadline check after accounting. Cloud job renewal
+can start billing without creating an execution attempt. The SQLite
+`billing-start-award-versus-start/store-sqlite` proof covers the real award,
+exchange and start transactions through reopening. W2 still owns the production
+calculator. W3 must report current owner compute with Executing, including false
+during customer-runner waits. W1b still owns spend-exhaustion/grace policy and
+legacy credit retirement. W1b implementation files are unchanged. The legacy
+store API cuts and the previously recorded foreign contract gaps remain open.
 
-**W8 to W9: local HTTP transport implemented.**
-`wingd/client.NewAPIClient(socket)` and `APIBaseURL` supply the private HTTP
-transport for `EngineOptions.HTTP` and `URL`. It uses `DialSocket` on every
-platform, has no proxy or application retry, and returns redirects unchanged.
-The exported orchestrator socket client, URL constant and duplicate dialer are
-removed; secret CLI, host coordination, health probes and retry tests use the
-shared owner. Legacy orchestration retains its own retry wrapper until W3's
-host cutover. Socket-free HTTP and generated destination tests pass. W9's
-`NewEngineClient` and `NewDataClient` still need their implementations.
+W1's legacy plan-acceptance cut is complete. `Store.AcceptPlan`, its separate
+validator and inserter, `Client.SubmitPlan`, the controller's old claim-token
+acceptance branch and the old launched planner are removed. `Tenant.AcceptPlan`
+retains required-secret diagnostics under the current owner and store clock.
+The SQLite `lifecycle-request-and-plan-seals/store-sqlite` cell passes through
+second-insert rollback, replay, drift and reopening. Shared strict-validator,
+identifier secrecy, child intake and stale result-record ports pass.
 
-W8 launcher reconciliation now sends every live persisted Job in one sync call
-and validates the complete unordered decision set before retiring any live Job.
-The two-Job wire-adapter acceptance component passes. The controller-side
-`EngineController.SyncLauncher` remains a stub owned by W2; launcher components
-test that contract with a fake rather than invoking the stub.
-
-W8's Kubernetes restart component now constructs `NewLauncher`, retains its
-HTTP transport and launcher credential, and routes sync through
-`ControllerControl` before real reservation cleanup. Plan/eval/work cases use
-canonical operational-unit bindings. `BuildJob` and private award decoding now
-reject job-bearing plans, mismatched eval sources and work expansion sources.
-The generated binding property checks refusal before reservation. W2's
-`SyncLauncher` and W9's HTTP client remain fake boundaries in this component.
-See [the composition report](../W8-LAUNCHER-COMPOSITION.md) for verification.
-
+The lead's caller-migration exception is used for `node_output_test.go` and one
+`SourceAttempt` addition in W1b's `blob_result_records_test.go`. W1b persistence
+and accounting implementations are unchanged. `CreatePlanNode` still has four
+legacy controller/log fixture callers. StateStoreOld, raw lifecycle, readiness,
+claim/trigger writers and old controller fixtures still need retirement. W2's
+calculator and cancellation-reason shape, W9/W3 source-attempt transport and
+W8/W9 launcher correlation remain foreign integration points. See
+`../w1-session19-progress.md` for the cut, ports and verification.
 **Lead decision for W3: "the W4 expansion-concurrency mismatch question" is settled by c3-protocol-notes.md line 66.** A generated job's concurrency membership must match the existing plan or job definition of that group on capacity, scope and on_limit; cost may differ; a mismatch refuses the expansion with `plan_invalid` naming the field path. The host supplies existing definitions through `ExistingConcurrency`. W3 implements this in the strict raw-bytes expansion validation (handoff "W3 expansion acceptance"). If a W4 membership test accepts a mismatch on capacity, scope or on_limit, W3 corrects that test as a minimal shared-file edit and lists it. No further lead input is needed.
+
+W1's raw unstarted-requeue cut is complete. `Store.RequeueUnstartedClaim` and
+its Tenant twin are removed with every Go caller. Expired owners use the leased
+`ReapUnits` pass. Generated tests cover repeated award generations, stale
+release/renewal/finish, terminal absorption and settlement with future-dated
+ledger rows. The SQLite unstarted-lapse cell now also covers real owner intake,
+repeated requeue/reclaim, stale plan refusal and reopening. The lead's caller
+exception is used only for legacy credit-test retirement. W1b implementation
+files are unchanged. StateStoreOld, raw lifecycle/readiness and the remaining
+legacy claim/trigger writers still need retirement. See
+`../w1-session20-progress.md` for ports, shared files and evidence.
+
+W1's run-row heartbeat cut is complete. `TouchRunHeartbeat` on Store, Tenant
+and Client, `TouchNodeHeartbeat` on the same handles, `Run.LastHeartbeatAt`,
+the independent scheduler and Kubernetes dispatcher timestamp loops, their legacy
+HTTP handlers and Doctor's heartbeat-age finalizer are removed. The generated
+owner-liveness property proves owner renewal, expiry at the exact boundary,
+remote-job isolation and failed-renewal atomicity. All eight SQLite recovery
+cells pass. The unstarted-owner proof also checks persisted renewal. W2's final
+owner-heartbeat policy route remains declared and needs its production binding
+to `EngineController.Renew`. Production watched-job delivery remains with that
+integration. W1b implementation files are unchanged. The remaining legacy API
+cuts and previously recorded foreign gaps remain open. See
+`../w1-session21-progress.md` for ports, shared caller files and verification.
+
+W1's raw node-status and readiness-withdrawal cut is complete. `SetNodeStatus`
+and `RevokeNodeReady` are removed from Store, Tenant and Client with their HTTP
+handlers and retry entries. Debug pauses use activity detail. Queue withdrawal
+uses `TransitionNode` with `CauseRevoke`. A generated property preserves holders,
+state and events under refused writes. The SQLite
+`lifecycle-transition-replay-and-fencing/store-sqlite` cell passes through
+withdrawal, reopening, stale-start refusal and terminal replay. The retry-policy
+fixture also drops its stale run-heartbeat assertion. W3's debug fixture fails
+before a pause because CreateRun still writes the removed args_json column.
+W4/W9's SDK symbol-doc drift remains separate. StateStoreOld, CreatePlanNode,
+raw readiness publication and other legacy lifecycle/claim/trigger APIs remain
+open, along with the earlier foreign contract gaps. W1b implementation files
+are unchanged. See `../w1-session22-progress.md` for evidence and shared files.

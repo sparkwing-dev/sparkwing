@@ -27,7 +27,7 @@ func TestWingdRunOpensControllerUnderElection(t *testing.T) {
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
 	want := errors.New("controller unavailable")
 	called := false
-	err := runWingdRunWith([]string{"--home", home, "--version", "test"}, func(ctx context.Context, got string) (wingd.LocalController, error) {
+	err := runWingdRunWith([]string{"--home", home, "--version", "test", "--stay"}, func(ctx context.Context, got string) (wingd.LocalController, error) {
 		called = true
 		if got != home || ctx.Err() != nil {
 			t.Fatalf("factory home = %q, context = %v", got, ctx.Err())

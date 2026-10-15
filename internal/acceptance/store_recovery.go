@@ -19,12 +19,14 @@ import (
 
 // StoreRecoveryBoundaryScenarios lists SQLite persistence proofs, separate from native execution cells.
 func StoreRecoveryBoundaryScenarios() []string {
-	return []string{"recovery-cancel-beats-loss", "recovery-reconciler-waits-and-reclaims", "recovery-unstarted-lapse", "recovery-started-lapse-cap", "recovery-concurrency-continuous-adoption", "recovery-application-retry-ordinal", "recovery-local-orphans"}
+	return []string{"recovery-cancel-beats-loss", "recovery-reconciler-waits-and-reclaims", "recovery-unstarted-lapse", "recovery-started-lapse-cap", "recovery-concurrency-continuous-adoption", "recovery-concurrency-no-revival", "recovery-application-retry-ordinal", "recovery-local-orphans"}
 }
 
 // CheckStoreRecoveryBoundary exercises the final transitions, reaper and reconciler against SQLite.
 func CheckStoreRecoveryBoundary(ctx context.Context, root, id string) error {
 	switch id {
+	case "recovery-concurrency-no-revival":
+		return checkRecoveryCapacityMaintenance(ctx, root)
 	case "recovery-local-orphans":
 		return checkRecoveryLocalOrphans(ctx, root)
 	case "recovery-application-retry-ordinal":
@@ -117,7 +119,7 @@ VALUES (?,'run','job','pending',?,?,'runner','holder',2,?,?)`, []any{store.Defau
 		return f, err
 	}
 	if started {
-		if _, err := f.tenant.TransitionNode(ctx, store.NodeTransition{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Actor: f.holder, To: store.NodeRunning, Cause: store.CauseStart}); err != nil {
+		if _, err := f.tenant.TransitionNode(ctx, store.NodeTransition{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Actor: f.holder, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: recoverySourceAttempt(0)}); err != nil {
 			return f, err
 		}
 	}
@@ -145,13 +147,20 @@ func seedRecoveryCapability(ctx context.Context, s *store.Store, c capability.Ca
 	if err != nil {
 		return err
 	}
-	_, err = s.DB().ExecContext(ctx, `INSERT INTO capabilities(prefix,digest,team,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,bind_run,bind_node,bind_holder,bind_generation,reserved_pools,created_at,created_by,expires_at,repo_scope,metered)
-VALUES (?,?,?,'machine',?,'controller',?,'delegate',1,?,?,NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),NULLIF(?,0),?,?,'fixture',?,?,?)`, c.Prefix, hex.EncodeToString(c.Digest[:]), c.Team, c.Subject.ID, grants, body, c.Binding.Kind, c.Binding.RunID, c.Binding.NodeID, c.Binding.Holder, c.Binding.Generation, pools, c.IssuedAt.UnixNano(), c.ExpiresAt.UnixNano(), repositories, c.RootMetered)
+	repo, ref, sha := "", "", ""
+	if c.Data != nil {
+		repo, ref = c.Data.RepositoryKey, c.Data.WriteRef
+	}
+	if c.Binding.Push != nil {
+		repo, ref, sha = c.Binding.Push.RepositoryKey, c.Binding.Push.Ref, c.Binding.Push.SHA
+	}
+	_, err = s.DB().ExecContext(ctx, `INSERT INTO capabilities(prefix,digest,team,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,bind_run,bind_node,bind_holder,bind_generation,reserved_pools,created_at,created_by,expires_at,repo_scope,metered,repo_key,ref_scope,push_sha)
+VALUES (?,?,NULLIF(?,''),?,?,'controller',?,'delegate',1,?,?,NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),NULLIF(?,0),?,?,'fixture',?,?,?,?,?,?)`, c.Prefix, hex.EncodeToString(c.Digest[:]), c.Team, c.Subject.Kind, c.Subject.ID, grants, body, c.Binding.Kind, c.Binding.RunID, c.Binding.NodeID, c.Binding.Holder, c.Binding.Generation, pools, c.IssuedAt.UnixNano(), c.ExpiresAt.UnixNano(), repositories, c.RootMetered, repo, ref, sha)
 	return err
 }
 
 func (f storeRecoveryFixture) expireHolder(ctx context.Context) error {
-	_, err := f.s.DB().ExecContext(ctx, `UPDATE nodes SET lease_expires_at=1 WHERE team=? AND run_id='run' AND node_id='job'`, store.DefaultTeam)
+	_, err := f.s.DB().ExecContext(ctx, `UPDATE nodes SET lease_expires_at=? WHERE team=? AND run_id='run' AND node_id='job'`, time.Now().UnixNano(), store.DefaultTeam)
 	return err
 }
 
@@ -175,7 +184,11 @@ func (f storeRecoveryFixture) refuseLateReports(ctx context.Context) error {
 		return err
 	}
 	for _, actor := range []store.Actor{f.owner, f.holder} {
-		if _, err := f.tenant.TransitionNode(ctx, store.NodeTransition{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Actor: actor, To: store.NodeSuccess, Cause: store.CauseReport}); err == nil {
+		change := store.NodeTransition{Ref: before.Ref, Actor: actor, To: store.NodeSuccess, Cause: store.CauseReport}
+		if actor.Kind == store.ActorHolder {
+			change.SourceAttempt = recoverySourceAttempt(before.Attempt)
+		}
+		if _, err := f.tenant.TransitionNode(ctx, change); err == nil {
 			return errors.New("late holder or adopting host overwrote the job")
 		}
 	}

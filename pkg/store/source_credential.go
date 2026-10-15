@@ -171,13 +171,6 @@ func (t *Tenant) SourceClaimant(ctx context.Context, tok ClaimToken) (ClaimIdent
 	return id, err
 }
 
-func validPlannedSource(p *plannedSource) error {
-	if p != nil && p.Depth != nil && *p.Depth < 0 {
-		return errors.New("the source depth must be 0 (all history) or more")
-	}
-	return nil
-}
-
 // SourceCredential is the one credential a claim fetches its run's source
 // with, and the commit and checkout the run asks for. Kind "github_app" is a
 // GitHub App token in Token that reads exactly Repositories; "https" and

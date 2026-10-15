@@ -193,7 +193,7 @@ func TestRunsAnnotate_UnreadableStandaloneStoreIsNamed(t *testing.T) {
 	paths := standaloneHome(t)
 	aged := filepath.Join(paths.StandaloneSchemaDir(20), "state.db")
 	writeRun(t, aged, "run-old")
-	dropRunsColumn(t, aged, "last_heartbeat_at")
+	dropRunsColumn(t, aged, "request_hash")
 
 	stderr := captureStderr(t, func() {
 		err := addLocalAnnotation(context.Background(), paths, "run-old", "n1", "", "nope")

@@ -38,6 +38,7 @@ func runWingdRunWith(args []string, open func(context.Context, string) (wingd.Lo
 	fs := flag.NewFlagSet("wingd run", flag.ContinueOnError)
 	home := fs.String("home", "", "sparkwing home (default: $SPARKWING_HOME or ~/.sparkwing)")
 	version := fs.String("version", "", "binary version to advertise (default: this build)")
+	stay := fs.Bool("stay", false, "keep the local controller running until stopped")
 	headroom := fs.Float64("headroom", 0, "reserved host capacity fraction (0..1); 0 uses the default margin")
 	budget := fs.String("budget", "", "machine budget cap (default: admission.budget in config.yaml); e.g. 6, 50%, 6,8gb, 50%,enforce")
 	if err := fs.Parse(args); err != nil {
@@ -84,5 +85,5 @@ func runWingdRunWith(args []string, open func(context.Context, string) (wingd.Lo
 		return err
 	}
 	logger.Printf("admission mode %s (%s)", admissionPolicy.Mode, admissionSource)
-	return runtime.Run(ctx, wingd.LocalStartOptions{Home: *home, Version: v})
+	return runtime.Run(ctx, wingd.LocalStartOptions{Home: *home, Version: v, Stay: *stay})
 }

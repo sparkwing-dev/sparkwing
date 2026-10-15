@@ -24,7 +24,7 @@ var ErrAttemptInvalid = errors.New("store: attempt report refused")
 type AttemptReport struct {
 	// Outcome is the node outcome the attempt reached, one of the SDK's
 	// terminal outcomes. A planning claim reports only failed or cancelled;
-	// its success is [Store.AcceptPlan].
+	// success requires sealed plan acceptance.
 	Outcome       string `json:"outcome"`
 	Error         string `json:"error,omitempty"`
 	FailureReason string `json:"failure_reason,omitempty"`

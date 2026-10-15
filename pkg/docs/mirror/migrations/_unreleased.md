@@ -1,5 +1,76 @@
 # Migrating to the next release
 
+## Node state writes use transitions
+
+`SetNodeStatus` and `RevokeNodeReady` on Store, Tenant and Client are removed.
+The per-node `status` and `revoke-ready` HTTP endpoints are removed with them.
+Use `Tenant.TransitionNode` for lifecycle changes. Queue withdrawal supplies
+`To: NodePending`, `Cause: CauseRevoke` and the current run owner's authority.
+Only ready, unclaimed jobs can be withdrawn. A competing claim or stale owner
+returns an error without changing state or events. An identical committed
+transition replays.
+
+Debug pauses write `paused` to activity detail and clear it on resume.
+They preserve the job's lifecycle status, start timestamp and claim.
+
+## Owner leases replace run heartbeats
+
+`TouchRunHeartbeat` and `TouchNodeHeartbeat` on Store, Tenant and Client, plus
+`Run.LastHeartbeatAt`, are removed. Hosts use `Store.RenewUnit` or
+`Tenant.RenewOwner` with their current owner authority. Owner renewal also
+renews self-claimed jobs. A remotely renewed job
+cannot extend the owner's lease.
+
+Doctor no longer finalizes runs from heartbeat age or reports `orphaned_runs`.
+The controller's elected `ReapUnits` pass recovers expired owners under the
+store clock. Started local orphans fail in place. Unstarted owners requeue.
+The legacy run-heartbeat and node-touch HTTP handlers are removed. The old
+Kubernetes dispatcher no longer sends advisory heartbeat writes for its pods.
+The pod's own claim renewal supplies its liveness timestamp.
+
+## Plan acceptance uses tenant seals
+
+`Store.AcceptPlan`, its legacy plan validator and `Client.SubmitPlan` are removed.
+Use `Tenant.AcceptPlan` with `PlanAcceptance`, including the admitted request,
+checkout declarations, resolved settings and the v2 `jobs` document. The store
+reruns the shared validator and settings resolver before committing both the
+second seal and jobs. Identical submissions replay. Changed sealed input returns
+`spec_drift`. The controller's legacy claim-token plan-acceptance branch and the
+old launched planner are removed.
+
+Missing required secrets return canonical `plan_invalid`. The detailed refusal
+is saved once for run status, after the failed acceptance rolls back, under the
+current owner fence and store clock. No seal or job is committed by that refusal.
+
+## Unit claims reserve compute credit
+
+Metered `Store.ClaimUnit` awards commit a refundable compute reservation with
+the claim. The award retains its CPU class, rate and payer after settings change
+or bootstrap exchange. Unfunded queued work leaves funded matches eligible.
+The shared billing calculator is required for renewal and final settlement.
+
+## Offer-round fallback is removed
+
+The warm dispatcher, its factory and the `finalize-ready` endpoint are removed.
+`Store.FinalizeClaimRound`, `ClaimRoundResult`, `WithQueueRunners` and
+`Client.FinalizeNodeReady` are removed with them. Use `Store.ClaimUnit` for queued
+or named claims and `Tenant.ReconcileNode` for owner execution decisions.
+Eligible work can be claimed immediately. Soft preferences rank eligible work.
+A mismatch leaves the ready row and its queue position unchanged.
+
+## Concurrency maintenance requires the operator fence
+
+`Store.MaintainConcurrency` and the `store.Maintenance` registry are removed.
+Acquire `controller.reaper` through `Operator.AcquireSingletonLease` and pass that
+fence to `Operator.MaintainConcurrency(ctx, lease, options)`. The pass commits
+holder cleanup, waiter cleanup and promotion together. An error returns no
+committed counts. The old concurrency-cache sweep and count APIs are removed.
+Memo-record retention uses `Operator.MaintainRetention` under its maintenance
+lease. `Store.PurgeDeadLocalConcurrency` and `Store.CountDeadLocalConcurrency`
+are removed. The elected pass cleans terminal capacity in every scope. Doctor's
+`dead_concurrency_holders` and `dead_concurrency_waiters` fields are removed with
+its independent repair path.
+
 ## Unit recovery requires the elected reaper lease
 
 `Store.ReapExpiredNodeClaims`, `Maintenance.RecoverExpiredNodeClaims`,
@@ -8,6 +79,11 @@
 and a batch limit to `Store.ReapUnits`. Results identify the team, run and unit.
 Lease loss requeues unfinished remote work within the same run. Started local
 owners fail in place. Unstarted owners consume no execution attempt or disruption.
+`Store.RequeueUnstartedClaim` and `Tenant.RequeueUnstartedClaim` are removed.
+Expired owner awards use the same leased pass. An unstarted owner requeues
+without a disruption, and a replacement award advances its generation.
+The former holder cannot renew, finish or accept a plan for the replacement.
+
 ## Build trust uses tenant handles
 
 `Store.TrustLocalBuilds` and `Store.SetTrustLocalBuilds` are removed. Obtain a
@@ -372,9 +448,8 @@ To upgrade:
    `OfferExecutorClaim` and `HeartbeatExecutor`, and calls `ClaimNode` where
    it called `ClaimNodeAs`. Code embedding `pkg/store` renames
    `Tenant.ListLegacyAgentClaims` to `ListAgentClaims`, `LegacyAgentClaim` to
-   `AgentClaim`, `FinalizeExecutorClaimRound` to `FinalizeClaimRound` and
-   `ExecutorClaimRoundResult` to `ClaimRoundResult`, and drops the executor,
-   offer and scheduling-summary methods.
+   `AgentClaim`, and drops the executor, offer and scheduling-summary methods.
+   Claim-round finalization is removed entirely.
 
 **Edge cases:**
 

@@ -42,7 +42,7 @@ func TestReconcileWaitsForHolderUntilReaperCommits(t *testing.T) {
 func TestReconcileKeepsTerminalWithoutSourceOrNewEvent(t *testing.T) {
 	tenant, _, actor := reconcileFixture(t)
 	holder := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claim"}, CapabilityPrefix: "claim", Holder: "runner", Generation: 2}
-	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{"run", "job"}, Actor: holder, To: NodeSuccess, Cause: CauseReport}); err != nil {
+	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{"run", "job"}, Actor: holder, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(3)}); err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {

@@ -224,7 +224,7 @@ func outputHost(t *testing.T, scenario string) (*Config, *store.Store) {
 	t.Cleanup(func() { _ = routes.Close() })
 	logs := &memLogs{records: map[string][]sparkwing.LogRecord{}}
 	cfg := &Config{
-		Pipeline: "probe", Run: nodeproto.RunContext{RunID: "run-output"}, State: st, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
+		Pipeline: "probe", Run: nodeproto.RunContext{RunID: "run-output"}, State: st, Logger: slog.New(slog.DiscardHandler),
 		Session: SessionConfig{Entry: pipelineentry.Binary(bin), Env: []string{"GENFIXTURE_SCENARIO=" + scenario}, Grace: 20 * time.Millisecond, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}},
 		Attempts: &Attempts{
 			Routes: routes, Local: st, Resolver: fixtureResolver{}, Masker: secrets.NewMasker(),

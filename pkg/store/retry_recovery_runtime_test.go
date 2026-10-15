@@ -46,7 +46,7 @@ func TestReapedClaimCannotReportAfterReclaim(t *testing.T) {
 	if err != nil || row.Generation != 2 || row.Attempt != 3 || row.Disruptions != 1 {
 		t.Fatalf("requeued row = %+v, %v", row, err)
 	}
-	oldReport := NodeTransition{Ref: ref, To: NodeSuccess, Actor: oldHolder, Cause: CauseReport, Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeSuccess}}}
+	oldReport := NodeTransition{Ref: ref, To: NodeSuccess, Actor: oldHolder, Cause: CauseReport, SourceAttempt: sourceAttempt(3), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeSuccess}}}
 	if _, err := tenant.TransitionNode(t.Context(), oldReport); err == nil {
 		t.Fatal("reaped holder reported into pending work")
 	}
@@ -62,6 +62,7 @@ func TestReapedClaimCannotReportAfterReclaim(t *testing.T) {
 	if _, err := tenant.TransitionNode(t.Context(), oldReport); err == nil {
 		t.Fatal("reaped holder reported into a later generation")
 	}
+	oldReport.SourceAttempt = sourceAttempt(4)
 	oldReport.Actor = Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Prefix}, CapabilityPrefix: claim.Prefix, Holder: "next-runner", Generation: 3}
 	if _, err := tenant.TransitionNode(t.Context(), oldReport); err != nil {
 		t.Fatal(err)

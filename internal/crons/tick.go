@@ -71,19 +71,38 @@ func (s *Service) Tick(ctx context.Context, dryRun bool) (TickReport, error) {
 	now := s.now()
 	report := TickReport{At: now}
 
-	if !dryRun {
-		refresh, rerr := s.Refresh(ctx)
-		if rerr != nil {
-			report.Errors = append(report.Errors, rerr.Error())
-		}
-		report.Errors = append(report.Errors, refresh.Errors...)
-	}
-
 	stored, err := s.tickSchedules(ctx)
 	if err != nil {
 		return report, err
 	}
 	scoped := map[store.Team]*Service{}
+	if !dryRun {
+		refresh := func(svc *Service) {
+			refreshed, err := svc.Refresh(ctx)
+			if err != nil {
+				report.Errors = append(report.Errors, err.Error())
+			}
+			report.Errors = append(report.Errors, refreshed.Errors...)
+		}
+		if s.Schedules != nil {
+			refresh(s)
+		} else {
+			for _, sched := range stored {
+				if _, ok := scoped[sched.Team]; ok {
+					continue
+				}
+				svc, err := s.forTeam(ctx, sched.Team, scoped)
+				if err != nil {
+					return report, err
+				}
+				refresh(svc)
+			}
+		}
+		stored, err = s.tickSchedules(ctx)
+		if err != nil {
+			return report, err
+		}
+	}
 	for _, sched := range stored {
 		svc, serr := s.forTeam(ctx, sched.Team, scoped)
 		if serr != nil {
@@ -97,7 +116,7 @@ func (s *Service) Tick(ctx context.Context, dryRun bool) (TickReport, error) {
 		return report, nil
 	}
 	tick := store.CronTick{At: now, Host: s.Host, Version: s.Version, Error: summarize(report.Errors)}
-	if err := s.Store.RecordCronTick(ctx, tick); err != nil {
+	if err := s.Store.AsOperator().RecordCronTick(ctx, tick); err != nil {
 		return report, err
 	}
 	return report, nil
@@ -170,7 +189,7 @@ func (s *Service) tickOne(ctx context.Context, sched store.CronSchedule, now tim
 	decision := cronspec.Decide(eval.schedule, eval.loc, sched.CursorAt, now, eval.catchUp)
 	if decision.Due.IsZero() {
 		if !dryRun {
-			if err := s.schedules().SetCronScheduleNextDue(ctx, sched.ID, eval.nextAfter(now), now); err != nil {
+			if err := s.Schedules.SetCronScheduleNextDue(ctx, sched.ID, eval.nextAfter(now), now); err != nil {
 				report.Errors = append(report.Errors, fmt.Sprintf("%s: %v", DisplayName(sched), err))
 			}
 		}
@@ -222,7 +241,7 @@ func (s *Service) recordUnevaluable(
 		return
 	}
 	fire := &store.CronFire{DueAt: now, DecidedAt: now, Outcome: store.CronOutcomeFailed, Detail: detail}
-	if err := s.schedules().ResolveCronDue(ctx, sched.ID, sched.CursorAt, sched.NextDueAt, fire, now); err != nil {
+	if err := s.Schedules.ResolveCronDue(ctx, sched.ID, sched.CursorAt, sched.NextDueAt, fire, now); err != nil {
 		report.Errors = append(report.Errors, fmt.Sprintf("%s: %v", DisplayName(sched), err))
 	}
 }
@@ -236,9 +255,9 @@ func (s *Service) advanceIdleCursor(ctx context.Context, sched store.CronSchedul
 	decision := cronspec.Decide(eval.schedule, eval.loc, sched.CursorAt, now, eval.catchUp)
 	var err error
 	if decision.Due.IsZero() {
-		err = s.schedules().SetCronScheduleNextDue(ctx, sched.ID, next, now)
+		err = s.Schedules.SetCronScheduleNextDue(ctx, sched.ID, next, now)
 	} else {
-		err = s.schedules().ResolveCronDue(ctx, sched.ID, decision.Due, next, nil, now)
+		err = s.Schedules.ResolveCronDue(ctx, sched.ID, decision.Due, next, nil, now)
 	}
 	if err != nil {
 		report.Errors = append(report.Errors, fmt.Sprintf("%s: %v", DisplayName(sched), err))
@@ -269,7 +288,7 @@ func (s *Service) recordMissed(ctx context.Context, sched store.CronSchedule, ev
 	}
 	fire := &store.CronFire{DueAt: last, DecidedAt: now, Outcome: store.CronOutcomeMissed, Detail: detail}
 	next := eval.nextAfter(last)
-	if err := s.schedules().ResolveCronDue(ctx, sched.ID, last, next, fire, now); err != nil {
+	if err := s.Schedules.ResolveCronDue(ctx, sched.ID, last, next, fire, now); err != nil {
 		report.Errors = append(report.Errors, fmt.Sprintf("%s: %v", DisplayName(sched), err))
 	}
 }
@@ -334,7 +353,7 @@ func (s *Service) resolveDue(ctx context.Context, sched store.CronSchedule, eval
 	fire := &store.CronFire{
 		DueAt: due, DecidedAt: now, Outcome: outcome, RunID: runID, Detail: detail, Args: eval.args,
 	}
-	if err := s.schedules().ResolveCronDue(ctx, sched.ID, due, eval.nextAfter(due), fire, now); err != nil {
+	if err := s.Schedules.ResolveCronDue(ctx, sched.ID, due, eval.nextAfter(due), fire, now); err != nil {
 		report.Errors = append(report.Errors, fmt.Sprintf("%s: %v", DisplayName(sched), err))
 	}
 }

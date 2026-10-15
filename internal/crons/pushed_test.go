@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -20,7 +22,7 @@ func pushedService(t *testing.T) *crons.Service {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	return &crons.Service{Store: st, ArmedBy: "operator@laptop"}
+	return &crons.Service{Store: st, Schedules: teststore.ForTeam(t, st, store.DefaultTeam), ArmedBy: "operator@laptop"}
 }
 
 func declaredEntry(pipeline, name, cron string) crons.Declared {
@@ -126,7 +128,7 @@ func TestArmPushed_AppIdentityKeepsStateAcrossRepositoryRename(t *testing.T) {
 		t.Fatal(err)
 	}
 	cursor := time.Now().Add(time.Hour)
-	if err := svc.Store.ResolveCronDue(ctx, id, cursor, nil, &store.CronFire{
+	if err := teststore.ForTeam(t, svc.Store, store.DefaultTeam).ResolveCronDue(ctx, id, cursor, nil, &store.CronFire{
 		ID: "crf_rename", Outcome: store.CronOutcomeFired, RunID: "run-before-rename", DecidedAt: cursor,
 	}, cursor); err != nil {
 		t.Fatal(err)
@@ -324,7 +326,7 @@ func TestControllerHealth_ReportsTheLoopAndTheStoredTick(t *testing.T) {
 	}
 
 	at := time.Now().Add(-10 * time.Minute)
-	if err := svc.Store.RecordCronTick(ctx, store.CronTick{At: at, Host: "controller-1"}); err != nil {
+	if err := svc.Store.AsOperator().RecordCronTick(ctx, store.CronTick{At: at, Host: "controller-1"}); err != nil {
 		t.Fatalf("RecordCronTick: %v", err)
 	}
 	health, err = svc.ControllerHealth(ctx)

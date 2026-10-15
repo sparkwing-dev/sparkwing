@@ -143,28 +143,6 @@ func (t *Tenant) FinishRunsIfActive(ctx context.Context, runIDs []string, status
 	return tx.Commit()
 }
 
-// TouchRunHeartbeat stamps last_heartbeat_at=now on one of t's runs. A
-// run of another team reads as [ErrNotFound].
-func (t *Tenant) TouchRunHeartbeat(ctx context.Context, runID string) error {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	if err := assertRunBelongsToTeamTx(ctx, tx, t.team, runID); err != nil {
-		return err
-	}
-	if err := t.s.assertRunHeartbeatFenceTx(ctx, tx, t.team, runID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE runs SET last_heartbeat_at = ? WHERE team = ? AND id = ?`,
-		time.Now().UnixNano(), string(t.team), runID); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 // safety: every tenant mutator runs this first, because a scoped UPDATE
 // matching nothing cannot be told from one that matched and changed
 // nothing, and a caller told "no error" for another team's id reads and

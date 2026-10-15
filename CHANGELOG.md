@@ -76,7 +76,12 @@ unlock.
 - **sdk:** describe lists each pipeline's declared secrets as `secrets`, which `sparkwing pipeline describe --secrets` prints
 
 ### Changed
-- **store:** [(Breaking)](docs/migrations/_unreleased.md#unit-recovery-requires-the-elected-reaper-lease) removed the unfenced node and trigger reapers. `Store.ReapUnits` requires the current `controller.reaper` lease and returns tagged unit recovery results. Remote lease loss recovers within the same run. A started local owner fails in place.
+
+- **store + controller:** [(Breaking)](docs/migrations/_unreleased.md#plan-acceptance-uses-tenant-seals) removed `Store.AcceptPlan`, its legacy validator and `Client.SubmitPlan`. Use `Tenant.AcceptPlan` with both seals and a v2 plan. Required-secret refusals return `plan_invalid` and retain one fenced diagnostic for run status.
+- **store:** Unit claims reserve compute credit atomically, keep the awarded price through exchange, and pass over unfunded queued work. See [migration guide](docs/migrations/_unreleased.md#unit-claims-reserve-compute-credit).
+- **store + controller:** [(Breaking)](docs/migrations/_unreleased.md#offer-round-fallback-is-removed) removed offer-round finalization, the `finalize-ready` endpoint and the warm dispatcher. Claims use the shared matcher. Soft preferences rank work without a fallback timer, and mismatches preserve queue position.
+- **store:** [(Breaking)](docs/migrations/_unreleased.md#concurrency-maintenance-requires-the-operator-fence) concurrency maintenance moves to `Operator.MaintainConcurrency` under the elected reaper lease. Holder cleanup, waiter cleanup and promotion commit together. The unfenced maintenance registry and obsolete concurrency-cache sweeps are removed.
+- **store:** [(Breaking)](docs/migrations/_unreleased.md#unit-recovery-requires-the-elected-reaper-lease) removed the unfenced node and trigger reapers and `RequeueUnstartedClaim`. `Store.ReapUnits` requires the current `controller.reaper` lease and returns tagged unit recovery results. Remote lease loss recovers within the same run. A started local owner fails in place.
 - **store (Breaking):** Remove the unused `Store.CreditRateTableSet` getter. Read rate-table presence through `CreditSettings.RateTableSet` with the prices from the same snapshot. See [migration guide](docs/migrations/_unreleased.md#rate-table-presence-uses-the-settings-snapshot).
 - **store (Breaking):** Move `TrustLocalBuilds` and `SetTrustLocalBuilds` from Store to Tenant. Build-trust policy stays scoped to the selected team. See [migration guide](docs/migrations/_unreleased.md#build-trust-uses-tenant-handles).
 - **store:** Deployment billing totals use immutable awards and intervals to exclude refundable reservations without advancing billing checkpoints. Operational run retention cannot change the totals, and storage time stays outside compute seconds.
@@ -201,6 +206,8 @@ unlock.
   The retry trigger was written with an empty `trigger_user` and only retry provenance in `trigger_env`, so a retried pull-request run planned as an anonymous push. It now copies the source trigger's user and the `GITHUB_EVENT_NAME` and `GITHUB_PR_*`/`GITHUB_BASE_*`/`GITHUB_HEAD_*` keys `PullRequestFromEnv` reads.
 
 ### Removed
+- **store + controller (Breaking):** Removed `SetNodeStatus`, `RevokeNodeReady` and their legacy HTTP handlers. Debug pauses use activity detail. Queue withdrawal uses the owner-fenced node transition. See [migration guide](docs/migrations/_unreleased.md#node-state-writes-use-transitions).
+- **store + controller + doctor (Breaking):** Removed `TouchRunHeartbeat`, `TouchNodeHeartbeat`, `Run.LastHeartbeatAt`, the independent timestamp heartbeat loops and their legacy HTTP handlers. Run liveness follows the owner lease. Doctor no longer finalizes runs from heartbeat age or reports `orphaned_runs`. The elected unit reaper owns expired-owner recovery.
 - **store + controller (Breaking):** Removed `Store.ExpiredOutputRuns`, `Store.ReleaseRunOutputs`, `Store.ForgetRunOutputs`, `ExpiredOutputRun` and the store's duplicate `OutputRetention` constant. The controller no longer runs the old output-key sweep. Leased record expiry and blob reachability GC own output lifetime and preserve live copies after their source run expires.
 - **store + controller + cli (Breaking):** Remove dispatch snapshots and `sparkwing debug rerun`
   The store no longer exposes `NodeDispatch`, `WriteNodeDispatch`, `GetNodeDispatch` or `ListNodeDispatches`. The controller no longer serves the node `/dispatch` and `/dispatches` routes.

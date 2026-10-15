@@ -2231,20 +2231,13 @@ func txReapTerminalConcurrencyHolders(ctx context.Context, tx *storeTx, team Tea
 	return stale, nil
 }
 
-func (s *Store) reapStaleConcurrencyHolders(ctx context.Context) ([]ConcurrencyHolder, error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	// safety: clock read after BEGIN; see AcquireConcurrencySlot.
+func reapStaleConcurrencyHoldersTx(ctx context.Context, tx *storeTx, team Team, key string) ([]ConcurrencyHolder, error) {
 	now := tx.now().UnixNano()
 
 	rows, err := tx.QueryContext(
 		ctx,
 		`SELECT `+holderColumns+`
-		   FROM concurrency_holders WHERE lease_expires_at <= ?`+s.forUpdateSkipLocked(), now,
+		   FROM concurrency_holders WHERE team=? AND key=? AND (lease_expires_at <= ? OR EXISTS (SELECT 1 FROM runs r WHERE r.team=concurrency_holders.team AND r.id=concurrency_holders.run_id AND r.finished_at IS NOT NULL))`+tx.forUpdate(), team, key, now,
 	)
 	if err != nil {
 		return nil, err
@@ -2253,26 +2246,17 @@ func (s *Store) reapStaleConcurrencyHolders(ctx context.Context) ([]ConcurrencyH
 	for rows.Next() {
 		h, err := scanHolder(rows)
 		if err != nil {
-			_ = rows.Close()
-			return nil, err
+			return nil, errors.Join(err, rows.Close())
 		}
 		stale = append(stale, h)
 	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, err
 	}
 	for _, h := range stale {
 		if err := txDeleteHolder(ctx, tx, h.team, h.Key, h.HolderID); err != nil {
 			return nil, err
 		}
-	}
-	keys := make([]concurrencyKey, 0, len(stale))
-	for _, h := range stale {
-		keys = append(keys, concurrencyKey{h.team, h.Key})
-	}
-	if err := txCommitChecked(ctx, tx, now, keys...); err != nil {
-		return nil, err
 	}
 	return stale, nil
 }
@@ -2323,101 +2307,34 @@ func (t *Tenant) ForceReleaseSupersededHolders(ctx context.Context, key string) 
 	return out, nil
 }
 
-func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Duration) ([]ConcurrencyWaiter, error) {
-	if maxAge <= 0 {
-		return nil, nil
-	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
+func reapStaleConcurrencyWaitersTx(ctx context.Context, tx *storeTx, team Team, key string, maxAge time.Duration) ([]ConcurrencyWaiter, error) {
 	now := tx.now()
-	nowNS := now.UnixNano()
-	cutoff := now.Add(-maxAge).UnixNano()
-
-	orphanRows, err := tx.QueryContext(
-		ctx,
-		`SELECT `+prefixColumns(waiterColumns, "w.")+`
-		   FROM concurrency_waiters w
-		  WHERE w.policy = ?
-		    AND w.leader_run_id <> ''
-		    AND NOT EXISTS (
-		      SELECT 1 FROM concurrency_holders h
-		       WHERE h.team = w.team
-		         AND h.key = w.key
-		         AND h.run_id = w.leader_run_id
-		         AND h.node_id = w.leader_node_id
-		         AND `+holderLiveSQL("h.")+`
-		    )
-		    AND NOT EXISTS (
-		      SELECT 1 FROM runs r
-		       WHERE r.team = w.team AND r.id = w.run_id AND `+capacityRunLiveSQL+`
-		    )`+s.forUpdateSkipLocked(),
-		OnLimitCoalesce, nowNS, nowNS, nowNS, nowNS,
-	)
+	ns := now.UnixNano()
+	rows, err := tx.QueryContext(ctx, `SELECT `+prefixColumns(waiterColumns, "w.")+`
+FROM concurrency_waiters w WHERE w.team=? AND w.key=? AND (w.lease_expires_at<=?
+OR (w.arrived_at<? AND NOT EXISTS (
+ SELECT 1 FROM runs r WHERE r.team=w.team AND r.id=w.run_id AND `+capacityRunLiveSQL+`))
+OR EXISTS (SELECT 1 FROM runs r WHERE r.team=w.team AND r.id=w.run_id AND r.finished_at IS NOT NULL)
+OR (w.node_id<>'' AND NOT EXISTS (SELECT 1 FROM nodes n WHERE n.team=w.team AND n.run_id=w.run_id AND n.node_id=w.node_id AND n.status<>'done')))`,
+		team, key, ns, now.Add(-maxAge).UnixNano(), ns, ns, ns)
 	if err != nil {
 		return nil, err
 	}
 	var dropped []ConcurrencyWaiter
-	for orphanRows.Next() {
-		w, err := scanWaiter(orphanRows)
+	for rows.Next() {
+		w, err := scanWaiter(rows)
 		if err != nil {
-			_ = orphanRows.Close()
-			return nil, err
+			return nil, errors.Join(err, rows.Close())
 		}
 		dropped = append(dropped, w)
 	}
-	_ = orphanRows.Close()
-	if err := orphanRows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, err
 	}
-
-	ageRows, err := tx.QueryContext(
-		ctx,
-		`SELECT `+prefixColumns(waiterColumns, "w.")+`
-		   FROM concurrency_waiters w
-		  WHERE w.arrived_at < ?
-		    AND NOT EXISTS (
-		      SELECT 1 FROM runs r
-		       WHERE r.team = w.team AND r.id = w.run_id AND `+capacityRunLiveSQL+`
-		    )`+s.forUpdateSkipLocked(),
-		cutoff, nowNS, nowNS, nowNS,
-	)
-	if err != nil {
-		return nil, err
-	}
-	already := make(map[string]bool, len(dropped))
-	for _, d := range dropped {
-		already[string(d.team)+"|"+d.Key+"|"+d.RunID+"|"+d.NodeID] = true
-	}
-	for ageRows.Next() {
-		w, err := scanWaiter(ageRows)
-		if err != nil {
-			_ = ageRows.Close()
-			return nil, err
-		}
-		if !already[string(w.team)+"|"+w.Key+"|"+w.RunID+"|"+w.NodeID] {
-			dropped = append(dropped, w)
-		}
-	}
-	_ = ageRows.Close()
-	if err := ageRows.Err(); err != nil {
-		return nil, err
-	}
-
 	for _, w := range dropped {
 		if _, err := txDeleteWaiter(ctx, tx, w.team, w.Key, w.RunID, w.NodeID); err != nil {
 			return nil, err
 		}
-	}
-	keys := make([]concurrencyKey, 0, len(dropped))
-	for _, w := range dropped {
-		keys = append(keys, concurrencyKey{w.team, w.Key})
-	}
-	if err := txCommitChecked(ctx, tx, nowNS, keys...); err != nil {
-		return nil, err
 	}
 	return dropped, nil
 }
@@ -2428,101 +2345,6 @@ func prefixColumns(cols, alias string) string {
 		parts[i] = alias + strings.TrimSpace(p)
 	}
 	return strings.Join(parts, ", ")
-}
-
-func (s *Store) reconcileConcurrencyKeys(ctx context.Context, lease time.Duration) (int, error) {
-	if lease <= 0 {
-		lease = DefaultConcurrencyLease
-	}
-	rows, err := s.query(
-		ctx,
-		`SELECT DISTINCT team, key FROM concurrency_waiters
-		  WHERE policy IN (?, ?)`,
-		OnLimitQueue, OnLimitCancelOthers,
-	)
-	if err != nil {
-		return 0, err
-	}
-	var keys []concurrencyKey
-	for rows.Next() {
-		var k concurrencyKey
-		if err := rows.Scan(&k.team, &k.key); err != nil {
-			_ = rows.Close()
-			return 0, err
-		}
-		keys = append(keys, k)
-	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-
-	total := 0
-	for _, k := range keys {
-		promoted, err := (&Tenant{s: s, team: k.team}).PromoteNextWaiters(ctx, k.key, lease)
-		if err != nil {
-			return total, fmt.Errorf("reconcile key %q: %w", k.key, err)
-		}
-		total += len(promoted)
-	}
-	return total, nil
-}
-
-func (s *Store) sweepExpiredConcurrencyCache(ctx context.Context) (int64, error) {
-	res, err := s.exec(ctx,
-		`DELETE FROM concurrency_cache WHERE expires_at <= ?`, s.now().UnixNano())
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
-}
-
-func (s *Store) sweepOrphanedConcurrencyCache(ctx context.Context) (int64, error) {
-	res, err := s.exec(ctx,
-		`DELETE FROM concurrency_cache
-		  WHERE origin_run_id <> ''
-		    AND origin_run_id NOT IN (SELECT id FROM runs)`)
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
-}
-
-func (s *Store) sweepLRUConcurrencyCache(ctx context.Context, keepCount int) (int64, error) {
-	if keepCount <= 0 {
-		return 0, nil
-	}
-	var count int
-	if err := s.queryRow(
-		ctx,
-		`SELECT COUNT(*) FROM concurrency_cache`,
-	).Scan(&count); err != nil {
-		return 0, err
-	}
-	if count <= keepCount {
-		return 0, nil
-	}
-	evict := count - keepCount
-	// hack: composite PK in IN-subselect avoids rowid/ctid dialect branching.
-	res, err := s.exec(
-		ctx,
-		`DELETE FROM concurrency_cache
-		  WHERE (team, key, cache_key_hash) IN (
-		    SELECT team, key, cache_key_hash FROM concurrency_cache
-		    ORDER BY last_hit_at ASC LIMIT ?
-		  )`, evict,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
-}
-
-// CountConcurrencyCache is exposed for ops dashboards.
-func (o *Operator) CountConcurrencyCache(ctx context.Context) (int, error) {
-	var n int
-	err := o.s.queryRow(ctx, `SELECT COUNT(*) FROM concurrency_cache`).Scan(&n)
-	return n, err
 }
 
 const holderColumns = `key, holder_id, run_id, node_id, claimed_at, queue_arrived_at, lease_expires_at, superseded, cost, declared_capacity, team`

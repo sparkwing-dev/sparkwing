@@ -19,6 +19,26 @@ run-store adapter, local queue consumer and leased maintenance. `Reconcile`
 finishes orphan recovery and supplies the initial activity before any listener
 starts. A losing election opens no store and returns `ErrNotElected`.
 
+`localcontroller.Config.Open` supplies that factory's store ownership and
+maintenance. It opens `<home>/state.db`, selects `DefaultTeam`, and gives the
+shared service binder that store, tenant and `EngineController`. The binder
+returns the shared policy handlers, queue and state projection. It must return
+cleanup for partially constructed services even when binding fails. Cleanup
+closes those services before the store. An incomplete binding fails startup.
+
+Before readiness, this composition acquires the store's `controller.reaper`
+lease, runs unit recovery and concurrency maintenance, then asks the state
+projection to reconcile local activity. It renews the same fence after that
+projection returns. Expiry or replacement during reconciliation refuses startup.
+The elected home process uses the stable `wingd` maintenance holder because its
+workers join before the election is released. Periodic maintenance renews the
+fence and uses the same store operations. It is not an activity hold.
+
+Queue execution, activity observation and maintenance share cancellation.
+Failure of one stops and joins all three. Store close refuses while those
+workers are running. The runtime continues to own HTTP shutdown and closes the
+composition only after its handlers and admission finalizers join.
+
 Readiness waits for reconciliation, admission startup and the API serving loop.
 When `DashboardAddress` is set, it also waits for the dashboard serving loop.
 An empty address serves only `api.sock`. `AwaitReady` waits for an active start
@@ -76,6 +96,14 @@ the current schema.
 <!-- design:begin -->
 
 ## Integration requirements
+
+`localcontroller.Config.Bind` still needs the production shared services.
+Its `State` interface supplies admission's run-store operations, the owned
+secrets read, startup reconciliation and live activity observation. The binder
+also supplies the authenticated API and dashboard handlers and the shared queue.
+The SQLite composition tests substitute these foreign boundaries. They prove
+store ownership and leased maintenance, but do not establish working policy
+routes, a production activity projection or an executable local queue.
 
 The controller composition supplies `LocalController` from the shared
 `pkg/controller` implementation. Its `Run` method reports all four activity
