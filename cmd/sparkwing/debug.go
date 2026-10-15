@@ -34,8 +34,6 @@ func runDebug(args []string) error {
 		return runDebugAttach(args[1:])
 	case "env":
 		return runDebugEnv(args[1:])
-	case "rerun":
-		return runDebugRerun(args[1:])
 	default:
 		PrintHelp(cmdDebug, os.Stderr)
 		return fmt.Errorf("debug: unknown subcommand %q", args[0])

@@ -64,7 +64,7 @@ func TestOpenArtifactStoreCapsTheSDKRetryer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	if err := store.Put(context.Background(), "key", strings.NewReader("payload")); err == nil {
+	if err := store.PutIfAbsent(context.Background(), "key", strings.NewReader("payload")); err == nil {
 		t.Fatal("a put against a bucket that answers 500 returned no error")
 	}
 	if got := hits.Load(); got != int64(s3store.SDKMaxAttempts) {
@@ -89,11 +89,11 @@ func TestTrippedBudgetSurfacesAReadableStoreError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	if err := store.Put(ctx, "first", strings.NewReader("payload")); err != nil {
+	if err := store.PutIfAbsent(ctx, "first", strings.NewReader("payload")); err != nil {
 		t.Fatalf("the put inside the budget failed: %v", err)
 	}
 
-	err = store.Put(ctx, "second", strings.NewReader("payload"))
+	err = store.PutIfAbsent(ctx, "second", strings.NewReader("payload"))
 	if err == nil {
 		t.Fatal("the put past the budget succeeded")
 	}
@@ -101,7 +101,7 @@ func TestTrippedBudgetSurfacesAReadableStoreError(t *testing.T) {
 		t.Fatalf("the store error no longer matches ErrBudgetExceeded: %v", err)
 	}
 	for _, want := range []string{
-		"s3 put second",
+		"s3 put-if-absent second",
 		"object-store put budget exceeded",
 		"belongs to this process alone",
 		"--object-store-budget put:minute",

@@ -2,63 +2,65 @@
 
 <!-- design:begin -->
 
-W7 remains incomplete. The final byte, artifact, memo, depcache, binary, source
-and tagged-log components are implemented. Legacy output/log retirement and
-native integration remain open. Earlier sessions are committed on this branch.
-This session does not repeat their implementation or claim native receipts.
+W7 remains incomplete. Earlier sessions implemented the signed byte backends,
+artifacts, memo, depcache, binary/source transfers and tagged-log components.
+This continuation removes another raw storage API and resolves the integration
+merge's file contents. Legacy output/log retirement and native integration remain.
 
 ## This continuation
 
-Removed the retired mutable-object API from `pkg/storage`: `ETag`,
-`ConditionalWriter`, `Conditional`, `GetWithETag`, `PutIfMatch` and
-`ConditionalWritesSupported`. Removed their implementations, endpoint probes,
-probe state and old conformance suite. No production caller used those operations.
-The remaining log writer needs create-only writes. `PutIfAbsent` now returns
-only an error, and the controller's conflict mapper accepts that error directly.
-There is no forwarding API or compatibility alias.
+Resolved both conflicted files. `api/openapi.yaml` drops the retired orphan
+reconciliation and run gitcache routes. `pkg/controller/doc.go` drops the retired
+reconcile-hook reference without adding another laptop wiring claim. The amended
+contracts remain intact. No Git write ran, so the index still lists these files
+as unmerged. The lead must stage their resolved contents.
 
-Removed **774 lines** of legacy storage source and tests, including the complete
-283-line `pkg/storage/conformance/conditional.go`. The tracked storage diff is
-118 added lines and 774 removed lines. These are gross diff counts, not a claim
-that every removed line was executable code. The old raw artifact/log backends
-still exist for their remaining consumers.
+Removed `ArtifactStore.Put` and `Has`, their filesystem/S3 implementations, and
+the unused `HeadObject`/`DeleteObjects` requirements from the raw S3 API. Raw
+writers now use the existing error-only `PutIfAbsent`. No aliases remain.
+The `pkg/storage` diff removes **194 lines** and adds 88, including fixture and
+conformance changes. These are gross counts against the integration index.
+The raw log/measurement backend still exists for its surviving consumers.
 
-The create-only invariant is: independently opened handles cannot both create
-one key or replace the winner's bytes. A generated filesystem property races
-both handles with 32 input pairs. The blocked-lock cancellation test now uses
-`testing/synctest`, with no wall-clock wait. S3 tests check the exact create-only
-request and propagation of precondition and transport failures against a fake API.
+The invariant is: once a signed log key contains bytes, later requests cannot
+replace them. The remaining filesystem log route creates the key once, verifies
+an existing object's exact bytes and successful close for a retry, and returns
+409 for a replacement. A generated controller property checks 32 payload pairs
+with separately valid signed requests. An overlay that deletes before writing
+fails on the first generated pair. The overlay never changed repository source.
 
-The remote-cache invariant is: a lookup grants bytes only after record scope,
-verified-default evidence and all referenced bytes pass validation. A generated
-acceptance property uses 128 repeatable identities over real filesystem objects
-and signed HTTP transfers. Record lookup and authorized download selection use
-explicit fakes. It covers memo and depcache, twelve altered record variants,
-corrupt/missing output and corrupt manifest/member bytes. It verifies that a
-rejected lookup grants no artifact access even after damaged bytes are restored.
-A separate simulated-clock acceptance check proves an exhausted memo-copy budget
-returns a miss.
+The raw conformance suite now checks refusal of replacement rather than mutable
+last-writer behavior. Fixtures use create-only writes and reads instead of the
+removed APIs. The corruption fixture damages its real file directly. The S3
+fake uses an in-process HTTP client, so the complete S3 package suite runs without
+opening a socket. Its endpoint tests still exercise the AWS endpoint resolver.
 
-Three negative-control overlays bypassed the default-branch evidence check,
-remote byte verification and filesystem create-only refusal. Each failed its
-corresponding property on the first generated input. The overlays never changed
-repository source and are removed with scratch.
+## Amendment audit
+
+| Row | W7 implementation and remaining integration |
+| --- | --- |
+| A1-29 | Remote memo/depcache clients request `VerifiedDefaultOnly`, validate returned scope/evidence and retain authorized member metadata. W1 must supply live lookup/read edges. |
+| A1-30 | `RemoteCacheOptions.Records` supplies logical record lookups. Remote access remains opt-in, verified-default-only and read-only, with no binary fetch. Component properties pass. |
+| A1-31 | W7 upload/edge helpers compare exact tagged uploader identity and owner/publication fences. W2 derives `Authority.Upload`; W1 rechecks it transactionally. Both remain integration points. |
+| A1-33 | Filesystem/S3 implement `ObjectBackend` signing, verified immutable publication and deletion. Existing final bytes verify too. Physical commits grant no receipt or record. Backend suites pass with fakes at the service boundary. |
+
+Consumer rows A1-24/32/34/35/36/37/43/50/53 retain the declared interfaces. Their
+store, authorization, host, SDK, CLI and native-driver work remains with those
+owners. W7 tests use contract fakes for those boundaries. This continuation
+changes no final contract in another area and requests no product decision.
 
 ## Acceptance and ports
 
-`TestStorage` has **9 passing W7 storage component checks, 424 skipped native
-cells and 0 failures**. W6's repository-identity component passes separately.
+`TestStorage` reports **9 passing W7 storage component checks, 424 skipped native
+cells and 0 failures**. No native cell was unskipped. The passing components cover
+CAS integrity, reference-edge laundering, memo/depcache scope, binary provenance,
+log segments, remote-cache opt-in, memo failures, owner receipts/stream checks and
+bounded large presence queries.
 
-The new passing component is
-`storage-local-remote-cache-opt-in/storage-components`. The existing
-`storage-memo-materialization-failures/storage-components` now includes `budget`.
-The eight earlier component scenarios continue to pass. No native target was
-unskipped because their transport, transaction and placement drivers are stubs.
-
-New complete T1 inventory ports: **0**. The budget assertion adds the acceptance
-component portion of `TestPresentIsBoundedAndAnswersAMissPastItsBudget` beside
-the existing `internal/blob/TestHasManyBudget` unit proof. Its native acceptance
-mapping remains open. It does not prove controller read-set construction.
+New complete T1 inventory ports: **0**. Earlier ports remain in the existing
+component tests. The new property closes the raw signed-log replacement path,
+but does not establish controller authorization, store transactions or native
+placement coverage.
 
 ## Verification
 
@@ -68,61 +70,65 @@ Go commands use `GOWORK=off GOFLAGS=-buildvcs=false GOMAXPROCS=4`, `-p 4`,
 
 Passed:
 
-- Whole-repository `go build -p 4 ./...`.
+- Whole-repository `go build -p 4 ./...` and compile-only `go test -p 4 ./... -run '^$'`.
 - `go vet -p 4 ./pkg/storage/... ./internal/blob/... ./internal/artifacts
   ./internal/depcache ./pkg/controller/... ./tests/acceptance ./internal/acceptance`.
-- Full tests for `pkg/storage`, `pkg/storage/fs`, `pkg/storage/logseg`,
-  `internal/blob/...`, `internal/artifacts`, `internal/depcache`,
-  `tests/acceptance` and `internal/acceptance` (the last has no tests).
-- `go test -p 4 ./pkg/storage/s3 -run '^TestPutIfAbsent$' -count=1`.
-- Three negative controls fail at their intended assertions.
-- Formatting, `git diff --check`, commentcheck against HEAD and scoped sleepcheck.
-- `bin/sync-docs.sh --check` confirms the existing embedded docs remain in sync.
+- Full tests for `pkg/storage`, `pkg/storage/fs`, `pkg/storage/s3`,
+  `pkg/storage/logseg`, `internal/blob/...`, `internal/artifacts`,
+  `internal/depcache`, `tests/acceptance` and `internal/acceptance`.
+- The generated controller property, focused bucket-usage tests, non-socket
+  storeurl tests and API route/spec tests.
+- The replacement-write negative control fails at its intended assertion.
+- Formatting, scoped sleepcheck, `git diff --check`, storage API snapshots and
+  embedded-doc sync.
 
-The required `go run ./internal/commentcheck -base main .` still fails on the
-existing `internal/controllerwire/contracts.go:47` HereBearer comment. That file
-is unchanged. The session diff passes commentcheck.
+`go run ./internal/commentcheck -base main .` reports only three comments outside
+this W7 diff: `internal/controllerwire/contracts.go:47`,
+`pkg/store/state_materialize.go:15` and `pkg/store/state_result_records.go:9`.
+The HEAD-scoped run reports the two merged W1 comments. No W7 comment is flagged.
 
-Full legacy S3/controller socket suites were not run because their fixtures
-open network listeners, which this sandbox refuses. The changed S3 request uses
-a socket-free API fake. Real S3, native placements and the full gates remain for
-the lead. No Sparkwing binary, service, pipeline, Git write or release ran.
+The full legacy controller and storeurl socket suites, real S3/Postgres, native
+placements and pipelines remain for the lead. No Sparkwing executable, service,
+pipeline, Git write or release ran. Scratch is deleted at the end.
 
 ## Remaining implementation and real integration
 
-1. W1: upload reservation/commit/abort, existence and exact receipts, read sets,
+1. W1: `Tenant` record and upload lifecycle methods remain panic stubs in
+   `blob_records.go` and `upload_contract.go`. Implement exact receipts/read sets,
    atomic memo copies, unique-byte quotas, newest-success pins and reachability GC.
 2. W2: `DataController.DataAuthority`, `BindData` and `client.NewDataClient`
-   remain panic stubs. Bind authenticated data/records, tagged-log signing and
-   upload verification, writer fencing, commits, proxy reads and egress accounting.
-3. W3/W8: refresh `StorageBinding` and log bindings for each attempt/generation.
-   Attach output records, artifacts, memo, depcache, binary and source clients.
-   Carry trigger/plan/eval log subjects through the runtime.
-4. W4/W9: SDK Cache/lint and CLI remote-cache/publication consumers. Regenerate
-   final SDK/API snapshots and launch documentation with the completed rewrite.
+   remain panic stubs. Bind authenticated data/records, tagged-log signing,
+   uncertain-upload verification, writer fencing, commits, proxy reads and metering.
+3. W3/W8: refresh `StorageBinding` and log bindings per attempt/generation, attach
+   output records and artifact/cache/source clients, and carry trigger/plan/eval
+   log subjects through execution. The declared storage binding remains unused by
+   the old runtime.
+4. W4/W9: finish SDK Cache/lint and CLI cache/publication consumers. Preserve the
+   engine release contracts and regenerate their final surface references.
 5. W7: retire `pkg/controller/node_output.go`, `output_objects_s3.go`,
    `output_download_s3.go`, `log_segments.go`, `client/output.go`,
-   `client/logsegments.go`, `internal/orchestrator/segment_logs.go` and their
-   legacy tests as their live consumers move to the declared contracts. Raw
-   `pkg/storage` artifact/log consumers remain part of that cut.
-6. T1/lead: native HTTP/api.sock, SQLite/Postgres, filesystem/S3, OS/placement and
-   real-repository QA. `internal/acceptance.New` and `Run` remain panic stubs.
+   `client/logsegments.go`, `internal/orchestrator/segment_logs.go`, their legacy
+   tests and the remaining raw artifact/log backends as those consumers bind to
+   the final contracts. Removing these now also requires the listed host and
+   authorization integrations, rather than a replacement compatibility path.
+6. T1/lead: implement `internal/acceptance.New`/`Run` and supply native
+   HTTP/api.sock, SQLite/Postgres, filesystem/S3, OS/placement and real-repository QA.
 
 ## Shared files touched
 
-- `pkg/controller/log_segments.go`: one-line caller migration to error-only writes.
-- `VERSIONING.md`: remove the deleted conformance API from the current suite table.
-- `tests/acceptance/storage_boundaries_test.go`: register remote-cache proof and
-  add the memo budget component.
-- `tests/acceptance/storage_remote_test.go`: new generated component proof.
-- `internal/blob/README.md` and this handoff: describe the measured boundaries.
+- `api/openapi.yaml` and `pkg/controller/doc.go`: merge content resolution.
+- `pkg/controller/log_segments.go` and its existing/internal property tests:
+  create-only caller and corruption-fixture migration.
+- `pkg/controller/bucket_ceiling_internal_test.go` and `deletion_review_test.go`:
+  minimal removed-API caller migrations.
+- Five `.apidiff/pkg_storage*.txt` snapshots, `VERSIONING.md`, `CHANGELOG.md`,
+  the migration page and generated embedded copies: describe the removed APIs.
+- `internal/blob/README.md` and this handoff: measured component and integration boundaries.
 
-Other changes are confined to the retired `pkg/storage` byte APIs and tests.
-No final contract change in another area or product question is requested.
-No new runtime interface, setting, limit, environment variable or adapter was added.
-The remaining friction is the unimplemented authenticated/native wiring and the
-unrelated commentcheck violation. Components continue through the existing
-contract interfaces with fakes. Scratch is deleted at the end.
+Other edits are in `pkg/storage`. No other package's contract changed. Friction
+is the unimplemented native/authenticated wiring, the three out-of-area comment
+violations and the merge index awaiting the lead. No new setting, limit,
+environment variable, production interface or compatibility wrapper was added.
 
 <!-- design:end -->
 

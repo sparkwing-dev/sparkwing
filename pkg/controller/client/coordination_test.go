@@ -236,50 +236,6 @@ func TestClientNodeUsageAndMetricsRoundTrip(t *testing.T) {
 	}
 }
 
-func TestClientReconcileOrphansClosesADeadRun(t *testing.T) {
-	f := newCoordinationFixture(t)
-	st := f.store
-	ctx := context.Background()
-
-	if err := st.CreateRun(ctx, store.Run{
-		ID: "stale", Pipeline: "demo", Status: "running",
-		StartedAt: time.Now().Add(-time.Hour),
-	}); err != nil {
-		t.Fatalf("create stale run: %v", err)
-	}
-	if _, err := st.DB().ExecContext(ctx, `UPDATE runs SET last_heartbeat_at = NULL WHERE id = ?`, "stale"); err != nil {
-		t.Fatalf("clear heartbeat: %v", err)
-	}
-	n, err := f.admin.ReconcileOrphanedLocalRuns(ctx, time.Minute)
-	if err != nil {
-		t.Fatalf("ReconcileOrphanedLocalRuns: %v", err)
-	}
-	if n != 1 {
-		t.Fatalf("reconciled = %d, want 1", n)
-	}
-	run, err := st.GetRun(ctx, "stale")
-	if err != nil {
-		t.Fatalf("get stale run: %v", err)
-	}
-	if run.Status == "running" {
-		t.Error("stale run is still running after a reconcile")
-	}
-}
-
-func TestClientReconcileOrphansRefusesANonPositiveThreshold(t *testing.T) {
-	f := newCoordinationFixture(t)
-	if _, err := f.admin.ReconcileOrphanedLocalRuns(context.Background(), 0); err == nil {
-		t.Error("a zero threshold was accepted; it means every running run is orphaned")
-	}
-}
-
-func TestClientReconcileOrphansIsAdminOnly(t *testing.T) {
-	f := newCoordinationFixture(t)
-	if _, err := f.runner.ReconcileOrphanedLocalRuns(context.Background(), time.Minute); err == nil {
-		t.Error("a runner token swept the machine's orphaned runs, want 403")
-	}
-}
-
 func TestClientMetricKindsRoundTrip(t *testing.T) {
 	f := newCoordinationFixture(t)
 	for i, kind := range []store.MetricKind{store.MetricInterval, store.MetricCommand, store.MetricUnknown} {

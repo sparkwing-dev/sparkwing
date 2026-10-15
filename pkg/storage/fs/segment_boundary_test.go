@@ -80,12 +80,6 @@ func TestArtifactStore_RejectsPathEscapingKeys(t *testing.T) {
 			if _, err := as.Get(ctx, tc.key); err == nil {
 				t.Error("Get succeeded")
 			}
-			if err := as.Put(ctx, tc.key, bytes.NewReader([]byte("owned"))); err == nil {
-				t.Error("Put succeeded")
-			}
-			if _, err := as.Has(ctx, tc.key); err == nil {
-				t.Error("Has succeeded")
-			}
 			if err := as.Delete(ctx, tc.key); err == nil {
 				t.Error("Delete succeeded")
 			}
@@ -119,7 +113,7 @@ func TestArtifactStore_AcceptsRealKeys(t *testing.T) {
 	ctx := context.Background()
 
 	for _, key := range []string{"a", "ab", "abcd1234", "runs/r1/state.ndjson", "bin/some-key"} {
-		if err := as.Put(ctx, key, bytes.NewReader([]byte(key))); err != nil {
+		if err := as.PutIfAbsent(ctx, key, bytes.NewReader([]byte(key))); err != nil {
 			t.Fatalf("Put %q: %v", key, err)
 		}
 		rc, err := as.Get(ctx, key)

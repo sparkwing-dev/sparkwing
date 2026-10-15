@@ -126,7 +126,6 @@ func maintainRunStore(ctx context.Context, runs *HeldRunStore, ready <-chan stru
 	case <-ctx.Done():
 		return
 	}
-	reconciled := false
 	fault := ""
 	pass := func(force bool) {
 		passCtx, cancel := context.WithTimeout(ctx, runStoreReapTimeout)
@@ -140,16 +139,6 @@ func maintainRunStore(ctx context.Context, runs *HeldRunStore, ready <-chan stru
 			return
 		}
 		fault = ""
-		if !reconciled {
-			reconciled = true
-			if n, err := ReconcileOrphanedLocalRuns(passCtx, st, 0); err != nil {
-				if ctx.Err() == nil {
-					logf("reconcile orphaned local runs: %v", err)
-				}
-			} else if n > 0 {
-				logf("reconciled %d orphaned local run(s)", n)
-			}
-		}
 		res, err := st.MaintainConcurrency(passCtx, store.ConcurrencyMaintenanceOptions{})
 		if err != nil && ctx.Err() == nil {
 			logf("concurrency maintenance: %v", err)

@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -22,15 +24,31 @@ import (
 
 const testBucket = "sparkwing-test"
 
-func fakeS3(t *testing.T) (*awss3.Client, func()) {
+type s3HandlerClient struct{ http.Handler }
+
+func (c s3HandlerClient) Do(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	if r.ContentLength >= 0 {
+		r.Header.Set("Content-Length", strconv.FormatInt(r.ContentLength, 10))
+	}
+	if r.Body == nil {
+		r.Body = http.NoBody
+	}
+	w := httptest.NewRecorder()
+	c.ServeHTTP(w, r)
+	_ = r.Body.Close()
+	return w.Result(), nil
+}
+
+func fakeS3(t *testing.T) *awss3.Client {
 	t.Helper()
 	backend := s3mem.New()
 	faker := gofakes3.New(backend)
-	srv := httptest.NewServer(faker.Server())
 
 	client := awss3.New(awss3.Options{
 		Region:             "us-east-1",
-		BaseEndpoint:       aws.String(srv.URL),
+		BaseEndpoint:       aws.String("http://bucket.invalid"),
+		HTTPClient:         s3HandlerClient{faker.Server()},
 		UsePathStyle:       true,
 		Credentials:        credentials.NewStaticCredentialsProvider("test", "test", ""),
 		EndpointResolverV2: awss3.NewDefaultEndpointResolverV2(),
@@ -41,18 +59,17 @@ func fakeS3(t *testing.T) (*awss3.Client, func()) {
 	}); err != nil {
 		t.Fatalf("create bucket: %v", err)
 	}
-	return client, srv.Close
+	return client
 }
 
 func TestArtifactStore_RoundTrip(t *testing.T) {
 	t.Parallel()
-	client, closer := fakeS3(t)
-	defer closer()
+	client := fakeS3(t)
 
 	s := NewArtifactStore(testBucket, "cache", client)
 	ctx := context.Background()
 
-	if err := s.Put(ctx, "abcd1234", bytes.NewReader([]byte("hello"))); err != nil {
+	if err := s.PutIfAbsent(ctx, "abcd1234", bytes.NewReader([]byte("hello"))); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
 
@@ -66,15 +83,6 @@ func TestArtifactStore_RoundTrip(t *testing.T) {
 		t.Fatalf("Get = %q", got)
 	}
 
-	has, err := s.Has(ctx, "abcd1234")
-	if err != nil || !has {
-		t.Fatalf("Has = (%v, %v)", has, err)
-	}
-	has, _ = s.Has(ctx, "missing")
-	if has {
-		t.Fatalf("Has(missing) = true")
-	}
-
 	if _, err := s.Get(ctx, "missing"); !errors.Is(err, storage.ErrNotFound) {
 		t.Fatalf("Get(missing) err = %v, want ErrNotFound", err)
 	}
@@ -82,24 +90,23 @@ func TestArtifactStore_RoundTrip(t *testing.T) {
 	if err := s.Delete(ctx, "abcd1234"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-	if has, _ := s.Has(ctx, "abcd1234"); has {
-		t.Fatalf("Has after Delete = true")
+	if _, err := s.Get(ctx, "abcd1234"); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("Get after Delete = %v", err)
 	}
 }
 
 func TestArtifactStore_PrefixIsolation(t *testing.T) {
 	t.Parallel()
-	client, closer := fakeS3(t)
-	defer closer()
+	client := fakeS3(t)
 
 	a := NewArtifactStore(testBucket, "cache", client)
 	b := NewArtifactStore(testBucket, "other", client)
 	ctx := context.Background()
 
-	if err := a.Put(ctx, "k", bytes.NewReader([]byte("A"))); err != nil {
+	if err := a.PutIfAbsent(ctx, "k", bytes.NewReader([]byte("A"))); err != nil {
 		t.Fatalf("Put a: %v", err)
 	}
-	if err := b.Put(ctx, "k", bytes.NewReader([]byte("B"))); err != nil {
+	if err := b.PutIfAbsent(ctx, "k", bytes.NewReader([]byte("B"))); err != nil {
 		t.Fatalf("Put b: %v", err)
 	}
 	rc, _ := a.Get(ctx, "k")
@@ -115,15 +122,14 @@ func TestArtifactStore_PrefixIsolation(t *testing.T) {
 
 func TestArtifactStore_List(t *testing.T) {
 	t.Parallel()
-	client, closer := fakeS3(t)
-	defer closer()
+	client := fakeS3(t)
 
 	s := NewArtifactStore(testBucket, "cache", client)
 	ctx := context.Background()
 
 	put := func(key string) {
 		t.Helper()
-		if err := s.Put(ctx, key, bytes.NewReader([]byte("x"))); err != nil {
+		if err := s.PutIfAbsent(ctx, key, bytes.NewReader([]byte("x"))); err != nil {
 			t.Fatalf("Put %s: %v", key, err)
 		}
 	}
@@ -149,7 +155,7 @@ func TestArtifactStore_List(t *testing.T) {
 	}
 
 	other := NewArtifactStore(testBucket, "other", client)
-	if err := other.Put(ctx, "runs/xyz/state.ndjson", bytes.NewReader([]byte("x"))); err != nil {
+	if err := other.PutIfAbsent(ctx, "runs/xyz/state.ndjson", bytes.NewReader([]byte("x"))); err != nil {
 		t.Fatalf("Put other: %v", err)
 	}
 	got, _ = s.List(ctx, "runs/")
@@ -162,8 +168,7 @@ func TestArtifactStore_List(t *testing.T) {
 
 func TestArtifactStore_UsageTotalsStoredBytesAndObjects(t *testing.T) {
 	t.Parallel()
-	client, closer := fakeS3(t)
-	defer closer()
+	client := fakeS3(t)
 
 	s := NewArtifactStore(testBucket, "cache", client)
 	ctx := context.Background()
@@ -177,7 +182,7 @@ func TestArtifactStore_UsageTotalsStoredBytesAndObjects(t *testing.T) {
 	}
 
 	for key, body := range map[string]string{"a": "hello", "b": "worldly"} {
-		if err := s.Put(ctx, key, strings.NewReader(body)); err != nil {
+		if err := s.PutIfAbsent(ctx, key, strings.NewReader(body)); err != nil {
 			t.Fatalf("Put %s: %v", key, err)
 		}
 	}
@@ -199,16 +204,15 @@ func TestArtifactStore_UsageTotalsStoredBytesAndObjects(t *testing.T) {
 
 func TestArtifactStore_UsageIgnoresAnotherPrefix(t *testing.T) {
 	t.Parallel()
-	client, closer := fakeS3(t)
-	defer closer()
+	client := fakeS3(t)
 
 	ctx := context.Background()
 	mine := NewArtifactStore(testBucket, "mine", client)
 	theirs := NewArtifactStore(testBucket, "theirs", client)
-	if err := mine.Put(ctx, "k", strings.NewReader("1234")); err != nil {
+	if err := mine.PutIfAbsent(ctx, "k", strings.NewReader("1234")); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-	if err := theirs.Put(ctx, "k", strings.NewReader("123456789")); err != nil {
+	if err := theirs.PutIfAbsent(ctx, "k", strings.NewReader("123456789")); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
 
@@ -265,11 +269,10 @@ func TestArtifactStore_UsageStopsAtItsPageCapAndSaysSo(t *testing.T) {
 
 func TestArtifactStore_UsageStopsOnACancelledContext(t *testing.T) {
 	t.Parallel()
-	client, closer := fakeS3(t)
-	defer closer()
+	client := fakeS3(t)
 
 	s := NewArtifactStore(testBucket, "cache", client)
-	if err := s.Put(context.Background(), "a", strings.NewReader("x")); err != nil {
+	if err := s.PutIfAbsent(context.Background(), "a", strings.NewReader("x")); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
 

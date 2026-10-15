@@ -646,3 +646,13 @@ contracts. Their authenticated controller and remote-client adapters still need
 integration. There is no compatibility endpoint or cache-service fallback.
 Existing output and job-log handlers keep their separate transfer setup until
 their own cutover.
+
+## Raw storage writes are create-only
+
+`pkg/storage.ArtifactStore` exposes `PutIfAbsent` for immutable raw objects.
+It returns `ErrPreconditionFailed` when the key already exists. Plug-in
+implementations must provide that method and remove `Put` and `Has`. The shared
+conformance suite checks that a second write cannot replace the first payload.
+
+Use an authorized blob presence query for distributed data. A digest or a raw
+object existence check does not establish read access or an upload receipt.

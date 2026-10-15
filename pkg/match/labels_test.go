@@ -99,5 +99,5 @@ func TestMatchLabels_MixedAndOr(t *testing.T) {
 
 // safety: the dispatcher's own check, over labels it trusts as they stand.
 func matchLabels(needed, have []string) bool {
-	return match.EvaluateOld(match.Profile{Labels: have}, match.Demand{Selector: needed}).OK()
+	return match.Evaluate(match.Profile{Labels: have}, match.Demand{Selector: needed}).OK()
 }

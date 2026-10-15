@@ -10,8 +10,7 @@ import (
 )
 
 func TestConformance_ArtifactStore(t *testing.T) {
-	client, closer := fakeS3(t)
-	defer closer()
+	client := fakeS3(t)
 
 	var counter uint64
 	conformance.TestArtifactStore(t, func() storage.ArtifactStore {

@@ -20,7 +20,7 @@ func TestArtifactStore_RoundTrip(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	if err := s.Put(ctx, "abcd1234", bytes.NewReader([]byte("hello"))); err != nil {
+	if err := s.PutIfAbsent(ctx, "abcd1234", bytes.NewReader([]byte("hello"))); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
 
@@ -34,15 +34,6 @@ func TestArtifactStore_RoundTrip(t *testing.T) {
 		t.Fatalf("Get = %q, want hello", got)
 	}
 
-	has, err := s.Has(ctx, "abcd1234")
-	if err != nil || !has {
-		t.Fatalf("Has = (%v, %v), want (true, nil)", has, err)
-	}
-	has, _ = s.Has(ctx, "missing")
-	if has {
-		t.Fatalf("Has(missing) = true")
-	}
-
 	if _, err := s.Get(ctx, "missing"); !errors.Is(err, storage.ErrNotFound) {
 		t.Fatalf("Get(missing) err = %v, want ErrNotFound", err)
 	}
@@ -50,8 +41,8 @@ func TestArtifactStore_RoundTrip(t *testing.T) {
 	if err := s.Delete(ctx, "abcd1234"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-	if has, _ := s.Has(ctx, "abcd1234"); has {
-		t.Fatalf("Has after Delete = true")
+	if _, err := s.Get(ctx, "abcd1234"); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("Get after Delete = %v", err)
 	}
 	if err := s.Delete(ctx, "abcd1234"); err != nil {
 		t.Fatalf("Delete idempotent: %v", err)
@@ -66,7 +57,7 @@ func TestArtifactStore_AtomicPut(t *testing.T) {
 
 	for i := range 5 {
 		key := "abc" + string(rune('A'+i))
-		if err := s.Put(ctx, key, bytes.NewReader([]byte("payload"))); err != nil {
+		if err := s.PutIfAbsent(ctx, key, bytes.NewReader([]byte("payload"))); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 	}
@@ -91,7 +82,7 @@ func TestArtifactStore_List(t *testing.T) {
 
 	put := func(key string) {
 		t.Helper()
-		if err := s.Put(ctx, key, bytes.NewReader([]byte("x"))); err != nil {
+		if err := s.PutIfAbsent(ctx, key, bytes.NewReader([]byte("x"))); err != nil {
 			t.Fatalf("Put %s: %v", key, err)
 		}
 	}
@@ -145,7 +136,7 @@ func TestArtifactStore_UsageTotalsStoredBytesAndObjects(t *testing.T) {
 	}
 
 	for key, body := range map[string]string{"runs/abc/state.ndjson": "12345", "bin/some-key": "abc"} {
-		if err := s.Put(ctx, key, strings.NewReader(body)); err != nil {
+		if err := s.PutIfAbsent(ctx, key, strings.NewReader(body)); err != nil {
 			t.Fatalf("Put %s: %v", key, err)
 		}
 	}

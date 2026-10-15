@@ -39,8 +39,8 @@ func TestPutIfAbsentGivesUpOnTheDeadlineWhileTheLockIsHeld(t *testing.T) {
 			t.Fatalf("blocked create = %v", err)
 		}
 	})
-	if has, err := blocked.Has(t.Context(), "k"); err != nil || has {
-		t.Fatalf("cancelled create published an object: %t, %v", has, err)
+	if _, err := blocked.Get(t.Context(), "k"); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("cancelled create published an object: %v", err)
 	}
 }
 

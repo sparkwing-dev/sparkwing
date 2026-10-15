@@ -211,3 +211,9 @@ Local host construction does not open an artifact backend from
 `SPARKWING_CACHE_URL` or create an unused raw artifact cache. The final host
 contract takes live byte and record clients through `nodehost.StorageBinding`.
 Runtime bindings still need integration.
+
+The remaining raw `pkg/storage.ArtifactStore` exposes create-only writes for
+legacy log storage. It has no mutable `Put` or unscoped `Has` operation. The
+filesystem log route accepts an exact retry after reading and closing the
+existing bytes, and refuses any replacement. Signed-data clients keep their
+separate authenticated presence API.

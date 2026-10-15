@@ -407,20 +407,12 @@ lines. Adding grep, line ranges, or event-only selection still scans the input
 before selecting the tail, so matches earlier in the log remain discoverable.
 Tree merging and follow behavior are unchanged.
 
-### Bouncing a wedged job
+### Job interruption and cleanup
 
-Every job in a local run is its own process, which means one job can be
-restarted without touching the run around it. `sparkwing runs bounce
---run <id> --node <job>` stops that job's process -- SIGTERM, then
-SIGKILL after the grace period -- and runs the job again in place. The
-job never reaches a terminal state, so nothing downstream sees a
-failure and no other job is disturbed; the run finishes normally on the
-attempt that survives. Stopping the job stops the commands its steps
-started too: each runs in its own session, and the job kills those
-sessions before the signal ends it, and again if its dispatcher dies
-under it. The same holds when a run's CLI is interrupted or the run is
-cancelled, so an interrupted `go build` or `go test` does not keep
-compiling on its own.
+Each job in a local run has its own process. Cancelling the run stops its
+jobs and the command sessions their steps started. The job kills those sessions
+before the signal ends it, and again if its dispatcher dies under it, so an
+interrupted `go build` or `go test` does not keep compiling on its own.
 
 A node that dies without running any code -- SIGKILL, the OOM killer, a
 crash -- cannot clean up after itself, so the node also leaves a record
@@ -442,10 +434,8 @@ An interrupted job is stopped, not unwound. The commands its steps started do
 end, because the job kills their sessions as described above, but nothing
 inside the step's own Go code runs: the signal does not arrive there as a
 cancelled context, so a `defer` does not fire and neither does a `select` on
-`ctx.Done()`. That is what `runs bounce` rests on -- the supervisor records the
-outcome, and the killed job writes no terminal row of its own. Teardown
-therefore belongs in the ledger rather than in a `defer`: start a resource as a
-step command so its session is reaped, or register a cleanup command for
+`ctx.Done()`. Teardown therefore belongs in the ledger rather than in a
+`defer`: start a resource as a step command so its session is reaped, or register a cleanup command for
 anything that lives outside that tree.
 
 Resources a step starts *outside* its process tree -- a container, a Kind
@@ -458,24 +448,6 @@ kind; the library owns the cleanup. `docker.Run` uses this to register `docker
 rm -f`, so a one-shot container does not outlive a node killed mid-run. A
 resource a step means to keep must not be registered, the same discipline as a
 `setsid` process leaving its session.
-
-Reach for it when a job is wedged or misbehaving and cancelling the
-whole run would cost more than it saves -- a fifty-minute pipeline
-whose deploy step is stuck on a connection that will never answer.
-
-The verb records the request and returns. The runner supervising the
-job picks it up within a few seconds, so the stop is prompt rather than
-instant, and a job that finishes in the meantime is left alone.
-Bouncing again is allowed: one request is one restart, and a job that
-wedges repeatedly is bounced repeatedly.
-
-The job re-runs from its **first step**, not from where it stopped.
-Steps that already ran run again, so a job with side effects needs the
-same idempotency a restarted Kubernetes pod already demands. The node
-keeps the admission lease its run holds -- the work was priced once,
-and restarting it is not a new charge -- and what the killed attempt
-cost the machine is added to the job's recorded CPU and occupancy,
-because the box paid for it.
 
 ### Remote execution
 
@@ -1268,8 +1240,8 @@ A verb that writes prints the same notes when the id it was given is in
 no store it could read, so a run in a skipped store is not reported
 simply missing.
 
-`sparkwing runs bounce`, `runs annotations add`, `runs approvals approve`,
-`runs approvals deny`, and `debug rerun` write to the
+`runs annotations add`, `runs approvals approve`,
+and `runs approvals deny` write to the
 store that holds the run, so they act on a standalone run in its own
 store.
 

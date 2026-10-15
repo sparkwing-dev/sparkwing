@@ -602,7 +602,26 @@ func (s *Server) handleLogSegmentPut(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("the segment must be the %d bytes whose MD5 the URL signed", size))
 		return
 	}
-	if err := o.objs.Put(r.Context(), key, bytes.NewReader(body)); err != nil {
+	err = o.objs.PutIfAbsent(r.Context(), key, bytes.NewReader(body))
+	if errors.Is(err, storage.ErrPreconditionFailed) {
+		stored, readErr := o.objs.Get(r.Context(), key)
+		if readErr != nil {
+			s.writeInternalError(w, r, "read existing log segment", readErr)
+			return
+		}
+		existing, readErr := io.ReadAll(io.LimitReader(stored, size+1))
+		readErr = errors.Join(readErr, stored.Close(), r.Context().Err())
+		if readErr != nil {
+			s.writeInternalError(w, r, "verify existing log segment", readErr)
+			return
+		}
+		if !bytes.Equal(existing, body) {
+			writeError(w, http.StatusConflict, blob.ErrIntegrity)
+			return
+		}
+		err = nil
+	}
+	if err != nil {
 		s.writeInternalError(w, r, "store a log segment", err)
 		return
 	}

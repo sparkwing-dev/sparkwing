@@ -7,7 +7,6 @@
 // not by a build flag.
 //
 //   - Cluster mode wires [Server.WithCostRate].
-//   - Laptop mode wires [Server.WithReconcileHook].
 //   - The handler set is otherwise identical so the dashboard
 //     frontend and CLI binary speak the same wire protocol against
 //     either side.

@@ -16,10 +16,6 @@ type Profile struct {
 
 	Secrets *backends.Spec `yaml:"secrets,omitempty"`
 	State   *backends.Spec `yaml:"state,omitempty"`
-
-	// RerunImage is the runner image `sparkwing debug rerun` starts its
-	// debug pod from on this profile's cluster.
-	RerunImage string `yaml:"rerun_image,omitempty"`
 }
 
 type ControllerSpec struct {

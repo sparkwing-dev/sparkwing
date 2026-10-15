@@ -91,12 +91,18 @@ func (s *ArtifactStore) PutIfAbsent(ctx context.Context, key string, r io.Reader
 		return err
 	}
 	defer releaseKey(lock)
-	has, err := s.Has(ctx, key)
+	root, rel, err := s.openRoot(key)
 	if err != nil {
 		return err
 	}
-	if has {
+	defer func() { _ = root.Close() }()
+	if _, err := root.Stat(rel); err == nil {
 		return storage.ErrPreconditionFailed
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
-	return s.Put(ctx, key, r)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return writeThroughRoot(root, rel, r)
 }

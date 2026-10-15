@@ -95,18 +95,6 @@ func (s *ArtifactStore) Get(_ context.Context, key string) (io.ReadCloser, error
 	return f, nil
 }
 
-func (s *ArtifactStore) Put(_ context.Context, key string, r io.Reader) error {
-	if err := os.MkdirAll(s.Root, 0o755); err != nil {
-		return err
-	}
-	root, rel, err := s.openRoot(key)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = root.Close() }()
-	return writeThroughRoot(root, rel, r)
-}
-
 func writeThroughRoot(root *os.Root, rel string, r io.Reader) error {
 	dir := filepath.Dir(rel)
 	if err := root.MkdirAll(dir, 0o755); err != nil {
@@ -147,24 +135,6 @@ func createTemp(root *os.Root, dir string) (*os.File, string, error) {
 	return nil, "", errors.New("fs: no free temp file name")
 }
 
-func (s *ArtifactStore) Has(_ context.Context, key string) (bool, error) {
-	root, rel, err := s.openRoot(key)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return false, nil
-		}
-		return false, err
-	}
-	defer func() { _ = root.Close() }()
-	if _, err := root.Stat(rel); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
-}
-
 func (s *ArtifactStore) Delete(_ context.Context, key string) error {
 	root, rel, err := s.openRoot(key)
 	if err != nil {
@@ -182,7 +152,7 @@ func (s *ArtifactStore) Delete(_ context.Context, key string) error {
 
 // List walks Root and returns every blob whose logical key starts
 // with prefix. The on-disk shard segment is stripped so callers see
-// the same keyspace they Put under.
+// the same stored keyspace.
 func (s *ArtifactStore) List(_ context.Context, prefix string) ([]string, error) {
 	var out []string
 	err := filepath.WalkDir(s.Root, func(path string, d os.DirEntry, walkErr error) error {

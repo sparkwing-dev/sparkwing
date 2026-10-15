@@ -164,6 +164,10 @@ factory that returns a fresh implementation per subtest. Operations
 the implementation opts out of (`storage.ErrNotSupported`,
 `storage.ErrListNotSupported`) are skipped, not failed.
 
+`ArtifactStore` provides create-only `PutIfAbsent` writes. An existing key
+returns `ErrPreconditionFailed`. The mutable `Put` and unscoped `Has` APIs
+are removed. Distributed presence queries use the authorized blob read set.
+
 The conformance contract counts as part of the public API: changes
 to what an implementation must support to pass are breaking, and
 follow the same removal procedure as Go-level API changes.

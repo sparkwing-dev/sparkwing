@@ -28,9 +28,7 @@ import (
 type API interface {
 	GetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.Options)) (*s3.GetObjectOutput, error)
 	PutObject(ctx context.Context, params *s3.PutObjectInput, optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error)
-	HeadObject(ctx context.Context, params *s3.HeadObjectInput, optFns ...func(*s3.Options)) (*s3.HeadObjectOutput, error)
 	DeleteObject(ctx context.Context, params *s3.DeleteObjectInput, optFns ...func(*s3.Options)) (*s3.DeleteObjectOutput, error)
-	DeleteObjects(ctx context.Context, params *s3.DeleteObjectsInput, optFns ...func(*s3.Options)) (*s3.DeleteObjectsOutput, error)
 	ListObjectsV2(ctx context.Context, params *s3.ListObjectsV2Input, optFns ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
 }
 
@@ -81,32 +79,6 @@ func (s *ArtifactStore) Get(ctx context.Context, key string) (io.ReadCloser, err
 	return out.Body, nil
 }
 
-func (s *ArtifactStore) Put(ctx context.Context, key string, r io.Reader) error {
-	_, err := s.Client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket: aws.String(s.Bucket),
-		Key:    aws.String(s.artifactKey(key)),
-		Body:   r,
-	})
-	if err != nil {
-		return fmt.Errorf("s3 put %s: %w", key, err)
-	}
-	return nil
-}
-
-func (s *ArtifactStore) Has(ctx context.Context, key string) (bool, error) {
-	_, err := s.Client.HeadObject(ctx, &s3.HeadObjectInput{
-		Bucket: aws.String(s.Bucket),
-		Key:    aws.String(s.artifactKey(key)),
-	})
-	if err == nil {
-		return true, nil
-	}
-	if isNotFound(err) {
-		return false, nil
-	}
-	return false, fmt.Errorf("s3 head %s: %w", key, err)
-}
-
 func (s *ArtifactStore) Delete(ctx context.Context, key string) error {
 	_, err := s.Client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(s.Bucket),
@@ -119,7 +91,7 @@ func (s *ArtifactStore) Delete(ctx context.Context, key string) error {
 }
 
 // List returns every key under prefix, with the configured Prefix
-// stripped so callers see the same keyspace they Put under.
+// stripped so callers see the stored keyspace.
 func (s *ArtifactStore) List(ctx context.Context, prefix string) ([]string, error) {
 	full := s.artifactKey(prefix)
 	var token *string

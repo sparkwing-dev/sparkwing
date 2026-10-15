@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -792,7 +793,15 @@ func TestALostSegmentReadsAndReportsAsIncomplete(t *testing.T) {
 			return err
 		},
 		"replaced": func(ctx context.Context, objs fsLogObjects, key string) error {
-			return objs.objs.Put(ctx, key, strings.NewReader("not the segment the manifest names"))
+			r, err := objs.objs.Get(ctx, key)
+			if err != nil {
+				return err
+			}
+			path := r.(*os.File).Name()
+			if err := r.Close(); err != nil {
+				return err
+			}
+			return os.WriteFile(path, []byte("not the segment the manifest names"), 0o600)
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

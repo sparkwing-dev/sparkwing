@@ -20,7 +20,7 @@ func TestRoundTrip_FS_KeyConventions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open writer: %v", err)
 	}
-	if err := writer.Put(ctx, "abcd1234", bytes.NewReader([]byte("payload"))); err != nil {
+	if err := writer.PutIfAbsent(ctx, "abcd1234", bytes.NewReader([]byte("payload"))); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
 
@@ -58,7 +58,7 @@ func TestRealBucket_S3(t *testing.T) {
 	key := "rt-" + randID(t)
 	t.Cleanup(func() { _ = art.Delete(context.Background(), key) })
 
-	if err := art.Put(ctx, key, bytes.NewReader([]byte("hello-real-bucket"))); err != nil {
+	if err := art.PutIfAbsent(ctx, key, bytes.NewReader([]byte("hello-real-bucket"))); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
 	rc, err := art.Get(ctx, key)

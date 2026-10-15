@@ -126,13 +126,11 @@ func TestNodeClaimOwnership_StrangerTokenCannotWriteAnotherRunnersNode(t *testin
 		{"touch", "/api/v1/runs/run-1/nodes/only/touch", ""},
 		{"artifact-manifest", "/api/v1/runs/run-1/nodes/only/artifact-manifest", `{"digest":"sha256:abc"}`},
 		{"metrics", "/api/v1/runs/run-1/nodes/only/metrics", `{"cpu_nanos":1}`},
-		{"dispatch", "/api/v1/runs/run-1/nodes/only/dispatch", `{"seq":0}`},
 		{"steps/start", "/api/v1/runs/run-1/nodes/only/steps/start", `{"step_id":"s1","name":"s1"}`},
 		{"steps/finish", "/api/v1/runs/run-1/nodes/only/steps/finish", `{"step_id":"s1","outcome":"success"}`},
 		{"steps/skip", "/api/v1/runs/run-1/nodes/only/steps/skip", `{"step_id":"s1"}`},
 		{"steps/annotations", "/api/v1/runs/run-1/nodes/only/steps/annotations", `{"step_id":"s1","message":"hi"}`},
 		{"steps/summary", "/api/v1/runs/run-1/nodes/only/steps/summary", `{"step_id":"s1","markdown":"hi"}`},
-		{"bounce/consume", "/api/v1/runs/run-1/nodes/only/bounce/consume", `{"seq":1,"outcome":"bounced"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := f.post(t, f.stranger, tc.path, tc.body); got != http.StatusForbidden {
@@ -371,7 +369,6 @@ func TestNodeClaimOwnership_CrossRunReadsAndHeartbeatNeedAClaim(t *testing.T) {
 	for _, path := range []string{
 		"/api/v1/runs/run-2/nodes/victim",
 		"/api/v1/runs/run-2/nodes/victim/output",
-		"/api/v1/runs/run-2/nodes/victim/bounce",
 	} {
 		code, body := f.get(t, f.owner, path)
 		if code != http.StatusForbidden {
@@ -398,10 +395,10 @@ func TestNodeReadResponsesHideClaimHolderAndReservations(t *testing.T) {
 	now := time.Now().UnixNano()
 	if _, err := f.store.DB().Exec(`UPDATE nodes SET reservation_id = ?, claim_reservation_id = ?,
 coordinator_id = ?, claim_membership_id = ?, executor_kind = 'agent', executor_id = ?,
-executor_location = 'local', required_coordinator_id = ?, claim_worker_id = ?,
+executor_location = 'local', claim_worker_id = ?,
 claim_executor_kind = 'agent', attempts_consumed = 1, execution_started_at = ?
 WHERE run_id = ? AND node_id = ?`, "execution-reservation", "offer-reservation",
-		"coordinator-secret", "membership-secret", "desktop", "coordinator-secret", "desktop",
+		"coordinator-secret", "membership-secret", "desktop", "desktop",
 		now, "run-1", "only"); err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +426,7 @@ VALUES (?, ?, ?, 1, ?, ?, ?, 'agent', 'desktop', ?, 'local', ?, ?, ?)`,
 				t.Errorf("GET %s exposed %q", path, secret)
 			}
 		}
-		for _, internal := range []string{"claimed_by", "claim_worker_id", "claim_generation", "claim_membership_id", "coordinator_id", "executor_id", "required_coordinator_id", "reservation_id", "holder_id", "membership_id", "token_prefix"} {
+		for _, internal := range []string{"claimed_by", "claim_worker_id", "claim_generation", "claim_membership_id", "coordinator_id", "executor_id", "reservation_id", "holder_id", "membership_id", "token_prefix"} {
 			if strings.Contains(body, `"`+internal+`"`) {
 				t.Errorf("GET %s exposed internal field %q: %s", path, internal, body)
 			}

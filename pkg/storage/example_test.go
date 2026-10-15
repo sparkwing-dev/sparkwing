@@ -28,7 +28,7 @@ func ExampleOpenArtifactStore() {
 		return
 	}
 
-	if err := store.Put(ctx, "build/abc123/manifest.json", strings.NewReader(`{"image":"app:dev"}`)); err != nil {
+	if err := store.PutIfAbsent(ctx, "build/abc123/manifest.json", strings.NewReader(`{"image":"app:dev"}`)); err != nil {
 		fmt.Println("put:", err)
 		return
 	}

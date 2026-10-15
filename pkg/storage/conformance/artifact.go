@@ -32,39 +32,15 @@ func TestArtifactStore(t *testing.T, factory func() storage.ArtifactStore) {
 		}
 	})
 
-	t.Run("PutOverwriteLastWins", func(t *testing.T) {
+	t.Run("PutIfAbsentRefusesExistingKey", func(t *testing.T) {
 		s := factory()
-		ctx := context.Background()
+		ctx := t.Context()
 		mustPut(t, s, ctx, "k", []byte("first"))
-		mustPut(t, s, ctx, "k", []byte("second"))
-		got := mustGet(t, s, ctx, "k")
-		if string(got) != "second" {
-			t.Fatalf("overwrite returned %q, want %q", got, "second")
+		if err := s.PutIfAbsent(ctx, "k", strings.NewReader("second")); !errors.Is(err, storage.ErrPreconditionFailed) {
+			t.Fatalf("replacement = %v", err)
 		}
-	})
-
-	t.Run("HasAfterPut", func(t *testing.T) {
-		s := factory()
-		ctx := context.Background()
-		mustPut(t, s, ctx, "k", []byte("v"))
-		has, err := s.Has(ctx, "k")
-		if err != nil {
-			t.Fatalf("Has: %v", err)
-		}
-		if !has {
-			t.Fatalf("Has returned false after Put")
-		}
-	})
-
-	t.Run("HasMissingReturnsFalseNoError", func(t *testing.T) {
-		s := factory()
-		ctx := context.Background()
-		has, err := s.Has(ctx, "never-written")
-		if err != nil {
-			t.Fatalf("Has on missing key returned error: %v", err)
-		}
-		if has {
-			t.Fatalf("Has returned true for missing key")
+		if got := mustGet(t, s, ctx, "k"); string(got) != "first" {
+			t.Fatalf("replacement changed stored bytes: %q", got)
 		}
 	})
 
@@ -86,10 +62,6 @@ func TestArtifactStore(t *testing.T, factory func() storage.ArtifactStore) {
 		mustPut(t, s, ctx, "k", []byte("v"))
 		if err := s.Delete(ctx, "k"); err != nil {
 			t.Fatalf("Delete: %v", err)
-		}
-		has, _ := s.Has(ctx, "k")
-		if has {
-			t.Fatalf("Has returned true after Delete")
 		}
 		_, err := s.Get(ctx, "k")
 		if !errors.Is(err, storage.ErrNotFound) {
@@ -164,7 +136,7 @@ func TestArtifactStore(t *testing.T, factory func() storage.ArtifactStore) {
 
 func mustPut(t *testing.T, s storage.ArtifactStore, ctx context.Context, key string, body []byte) {
 	t.Helper()
-	if err := s.Put(ctx, key, bytes.NewReader(body)); err != nil {
+	if err := s.PutIfAbsent(ctx, key, bytes.NewReader(body)); err != nil {
 		t.Fatalf("Put(%q): %v", key, err)
 	}
 }

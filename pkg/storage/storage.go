@@ -45,22 +45,14 @@ func LogCursor(ctx context.Context) string {
 // ErrPreconditionFailed reports an object that already exists.
 var ErrPreconditionFailed = errors.New("storage: conditional write precondition failed")
 
-// ArtifactStore is a content-addressed blob store. Keys are
-// caller-defined opaque strings. Implementations must tolerate
-// concurrent Put on the same key (last write wins) without data
-// corruption. Open via [storeurl.OpenArtifactStore]; implementations
-// live in the [fs] and [s3] subpackages.
+// ArtifactStore reads and creates immutable raw objects for log storage and measurement.
 type ArtifactStore interface {
 	// Get returns a reader for the blob at key. The caller closes it.
 	// Returns ErrNotFound if the key has never been written.
 	Get(ctx context.Context, key string) (io.ReadCloser, error)
 
-	// Put stores the bytes from r under key. r is read to EOF.
-	Put(ctx context.Context, key string, r io.Reader) error
-
-	// Has reports whether a blob exists at key without transferring
-	// its contents.
-	Has(ctx context.Context, key string) (bool, error)
+	// PutIfAbsent refuses an existing key with ErrPreconditionFailed.
+	PutIfAbsent(ctx context.Context, key string, r io.Reader) error
 
 	// Delete removes the blob at key. Idempotent: missing keys are
 	// not an error.

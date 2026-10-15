@@ -5,10 +5,10 @@
 //
 // # Interfaces
 //
-// [ArtifactStore] is a content-addressed blob store. [LogStore]
+// [ArtifactStore] reads and creates immutable raw objects. [LogStore]
 // persists per-node log streams keyed by (runID, nodeID). [StateStoreOld]
 // is the run-record handle (runs, nodes, steps, annotations,
-// approvals, dispatches, debug pauses). The SQLite- and
+// approvals, debug pauses). The SQLite- and
 // Postgres-backed *store.Store and the controller HTTP client satisfy it.
 //
 // # Implementations
@@ -33,7 +33,7 @@
 //
 // Implement [ArtifactStore] and / or [LogStore], honoring the
 // contracts documented on each interface (notably: idempotent
-// Delete, ErrNotFound on missing Get, concurrent Put tolerated).
+// Delete, ErrNotFound on missing Get, and create-only PutIfAbsent).
 // External consumers can supply their own implementations without
 // patching this module; the interfaces are the only stability promise.
 package storage

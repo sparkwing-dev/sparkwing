@@ -964,7 +964,7 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 		sha := ""
 		for _, plan := range planned {
 			existing, err := tenant.FindTriggerByWebhookReplay(ctx,
-				githubAppReplayKey(tenant.Team(), plan.pipeline, body), delivery+"/"+plan.pipeline)
+				githubAppReplayKey(tenant.Team(), plan.pipeline, body))
 			if err == nil && existing != nil && existing.GitSHA != "" {
 				sha = existing.GitSHA
 				break
@@ -992,7 +992,7 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 		// safety: a run this delivery already started answers without spending,
 		// so a redelivery after a partial shed pays only for what was shed.
 		if existing, err := tenant.FindTriggerByWebhookReplay(ctx,
-			githubAppReplayKey(tenant.Team(), plan.pipeline, body), delivery+"/"+plan.pipeline); err == nil && existing != nil {
+			githubAppReplayKey(tenant.Team(), plan.pipeline, body)); err == nil && existing != nil {
 			resp.Runs = append(resp.Runs, githubAppRun{Pipeline: plan.pipeline, RunID: existing.ID, Status: "duplicate"})
 			continue
 		}
@@ -1054,7 +1054,7 @@ func (s *Server) writeGitHubAppDuplicate(w http.ResponseWriter, r *http.Request,
 	for _, plan := range planned {
 		run := githubAppRun{Pipeline: plan.pipeline, Status: "duplicate"}
 		existing, err := tenant.FindTriggerByWebhookReplay(r.Context(),
-			githubAppReplayKey(tenant.Team(), plan.pipeline, body), delivery+"/"+plan.pipeline)
+			githubAppReplayKey(tenant.Team(), plan.pipeline, body))
 		if err == nil && existing != nil {
 			run.RunID = existing.ID
 		}
@@ -1100,7 +1100,7 @@ func (s *Server) startGitHubAppRun(
 	}
 	if errors.Is(err, store.ErrDuplicateWebhookDelivery) {
 		run := githubAppRun{Pipeline: pipeline, Status: "duplicate"}
-		if existing, ferr := tenant.FindTriggerByWebhookReplay(ctx, replayKey, delivery+"/"+pipeline); ferr == nil && existing != nil {
+		if existing, ferr := tenant.FindTriggerByWebhookReplay(ctx, replayKey); ferr == nil && existing != nil {
 			run.RunID = existing.ID
 		}
 		return run, nil

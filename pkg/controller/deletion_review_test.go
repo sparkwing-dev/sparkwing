@@ -2,11 +2,13 @@ package controller_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -30,12 +32,12 @@ func TestTeamDeletionDeletesLogsAgainAfterUploadURLsLapse(t *testing.T) {
 	start := time.Now()
 	f.srv.ProcessTeamDeletions(ctx, start.Add(5*time.Minute))
 	key := logseg.SegmentKey("logs/"+logseg.ClassStandard+"/teams/acme/runs/run-1/a/a1-g1/", 1)
-	if err := objs.Put(ctx, key, strings.NewReader("written through a URL issued before the purge")); err != nil {
+	if err := objs.PutIfAbsent(ctx, key, strings.NewReader("written through a URL issued before the purge")); err != nil {
 		t.Fatal(err)
 	}
 	f.srv.ProcessTeamDeletions(ctx, start.Add(8*time.Hour))
-	if ok, err := objs.Has(ctx, key); err != nil || ok {
-		t.Fatalf("a log written after the purge survives the recheck: %v, %v", ok, err)
+	if _, err := objs.Get(ctx, key); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("a log written after the purge survives the recheck: %v", err)
 	}
 }
 
