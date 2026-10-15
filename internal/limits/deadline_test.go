@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 	"unicode/utf8"
 )
@@ -55,17 +56,20 @@ func TestChildContextPreservesCancellation(t *testing.T) {
 	if !errors.Is(child.Err(), context.Canceled) {
 		t.Fatal(child.Err())
 	}
-	bounded, stop := context.WithDeadline(context.Background(), time.Now().Add(time.Hour))
-	defer stop()
-	child, done, err = ChildContext(bounded, time.Minute, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer done()
-	end, ok := child.Deadline()
-	if !ok || time.Until(end) > time.Minute {
-		t.Fatal("missing child bound")
-	}
+	synctest.Test(t, func(t *testing.T) {
+		now := time.Now()
+		bounded, stop := context.WithDeadline(context.Background(), now.Add(time.Hour))
+		defer stop()
+		child, done, err := ChildContext(bounded, time.Minute, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer done()
+		end, ok := child.Deadline()
+		if !ok || !end.Equal(now.Add(time.Minute)) {
+			t.Fatal("missing child bound")
+		}
+	})
 	_, _, err = ChildContext(context.Background(), 0, -1)
 	if err == nil {
 		t.Fatal("negative margin accepted")
