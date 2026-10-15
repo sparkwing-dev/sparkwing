@@ -53,6 +53,7 @@ func TestProtocol(t *testing.T) {
 							}
 						})
 						t.Run("public-fake-host", testGoSDKFakeHost)
+						t.Run("fake-host-run-snapshot", testGoSDKFakeHostRunSnapshot)
 						t.Run("entrypoint-alias", testGoSDKEntrypointAlias)
 						t.Run("output-failures", testGoSDKOutputFailures)
 						t.Run("interface-outputs", testGoSDKInterfaceOutputs)

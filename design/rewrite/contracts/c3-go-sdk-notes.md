@@ -51,6 +51,8 @@ The author SDK owns declarations, typed input and output access, protocol servin
 
 `Host.Plan` takes the registered SDK entrypoint as its name argument. A nonempty `Options.Run.Pipeline` supplies the invoked project alias to author code. When unset, the entrypoint is also the invoked name.
 
+`sparkwingtest.New` snapshots option values, including Git and pull-request metadata. Reusing and changing an options value for another fixture cannot change an existing fixture's plans. Injected service callbacks remain test-owned dependencies.
+
 ## Public symbol inventory
 
 Each row names one exported type or function. Retain means its declared signature is part of the target. New means its declaration is in a contract file. Delete means engine plumbing or a removed author feature. Types retain their author-facing fields except the field cuts stated above. Constructors and fluent methods retain their existing invalid-input behavior unless a host-owned validation rule above supersedes it.

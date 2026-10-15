@@ -256,6 +256,14 @@ func maskAttrs(v any, mask func(string) string) {
 }
 
 func newHost(opts Options) Host {
+	if opts.Run.Git != nil {
+		git := *opts.Run.Git
+		opts.Run.Git = &git
+	}
+	if opts.Run.Trigger.PullRequest != nil {
+		pr := *opts.Run.Trigger.PullRequest
+		opts.Run.Trigger.PullRequest = &pr
+	}
 	opts.Secrets = maps.Clone(opts.Secrets)
 	outputs := make(map[string]json.RawMessage, len(opts.Outputs))
 	for k, v := range opts.Outputs {

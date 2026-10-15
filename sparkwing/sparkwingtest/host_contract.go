@@ -37,5 +37,6 @@ type Host interface {
 	Close() error
 }
 
-// safety: New isolates fixtures so concurrent tests cannot share secrets, outputs or protocol state.
+// New snapshots option values so later caller edits cannot change an existing fixture.
+// Service callbacks remain callable dependencies owned by the test.
 func New(opts Options) Host { return newHost(opts) }
