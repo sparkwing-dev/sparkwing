@@ -128,8 +128,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"a token prefix is unique across teams",
 	"(*Store).PrincipalHoldsTriggerClaim": "matches the trigger's live claim against the exact claimant credential, and a " +
 		"token prefix is unique across teams",
-	"(*Store).PrincipalHoldsProfileClaim": "matches a live claim of the exact claimant credential on the pipeline's runs " +
-		"or triggers; a token prefix is unique across teams and a claim only reaches its own team's work",
 	"(*Store).ClaimedRunFor": "asks which team a run the exact claimant credential holds live work in belongs to, so an " +
 		"answer scoped to the asker is no answer; a token prefix is unique across teams",
 	"lockRunRow": "the expired-claim reaper and the trigger lease beat lock a run row by the global id their own read " +
@@ -168,8 +166,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"the answer is that credential's own",
 	"tokenMeteredTx": "reads whether the claiming credential pays credits by its prefix, which is unique across teams, so " +
 		"the answer is that credential's own",
-	"(*Store).SeedToken": "a provisioned credential is seeded once by its prefix, which is unique across " +
-		"every team's tokens",
 	"(*Store).CreateTokenIfNoneExist": "the bootstrap mints the deployment operator's first token only while no live token " +
 		"exists in any team, because an install with any credential already has an operator path",
 }

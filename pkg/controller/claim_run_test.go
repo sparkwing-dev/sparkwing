@@ -28,14 +28,7 @@ func (f *appFixture) secretArg(runID string) {
 
 func (f *appFixture) launchNode(runID, nodeID string) string {
 	f.t.Helper()
-	c, err := f.store.ClaimLaunch(store.WithoutCreditMetering(context.Background()),
-		store.ClaimIdentity{Principal: "launcher", TokenPrefix: "swr_launch"},
-		store.LaunchClaimRequest{HolderID: "launcher:" + runID, Lease: time.Minute, Deadline: time.Hour, RunID: runID, NodeID: nodeID},
-		controller.LaunchClaimClock(f.t, f.store, runID, nodeID))
-	if err != nil || c == nil {
-		f.t.Fatalf("launch claim %s/%s: %+v %v", runID, nodeID, c, err)
-	}
-	return c.Token
+	return controller.LauncherFixtureClaim(f.t, f.store, runID, nodeID)
 }
 
 // A pod's claim token reads its own run, beats its own claim, and starts its

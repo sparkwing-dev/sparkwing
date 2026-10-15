@@ -113,8 +113,6 @@ type Store struct {
 	csrfKeyMu        sync.Mutex
 	csrfKey          []byte
 	csrfCipher       SessionKeyCipher
-	launchResumeMu   sync.Mutex
-	launchResume     *launchCursor
 	outputDir        string
 	githubCheckMu    sync.Mutex
 }
@@ -3017,43 +3015,6 @@ func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID string, claima
 		return false, err
 	}
 	return held > 0, nil
-}
-
-// PrincipalHoldsProfileClaim reports whether claimant may write the
-// capacity profile stored under key. The proof is a live claim on a node
-// of a run of that pipeline, or on that run's trigger. The repository
-// half of the key is not part of the proof, because a run's repository
-// is a string its submitter typed and two callers may type the same one.
-// An unbound claimant holds nothing.
-func (s *Store) PrincipalHoldsProfileClaim(ctx context.Context, key string, claimant ClaimIdentity, now time.Time) (bool, error) {
-	if !claimant.bound() {
-		return false, nil
-	}
-	_, pipeline := SplitProfileKey(key)
-	if pipeline == "" {
-		return false, nil
-	}
-	// safety: the trigger arm stands on its own, because a claimed trigger
-	// prices its pipeline's admission wait before its run row exists.
-	for _, query := range []string{
-		`SELECT COUNT(*) FROM triggers
-		  WHERE pipeline = ? AND claim_principal = ? AND claim_token_prefix = ?
-		    AND ` + triggerClaimLiveSQL(""),
-		`SELECT COUNT(*) FROM nodes
-		  WHERE run_id IN (SELECT id FROM runs WHERE pipeline = ?)
-		    AND claim_principal = ? AND claim_token_prefix = ?
-		    AND ` + nodeClaimLiveSQL(""),
-	} {
-		var held int
-		if err := s.queryRow(ctx, query,
-			pipeline, claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&held); err != nil {
-			return false, err
-		}
-		if held > 0 {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // Event is one audit/wire record for a run; Seq is per-run monotonic.

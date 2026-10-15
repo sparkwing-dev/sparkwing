@@ -1036,3 +1036,25 @@ restart, atomic rollback and serialized table-update checks through that owner.
 `TestStoreDataUnmeteredSettlementNeedsNoCalculator` closes the shared settlement
 helper's dependency on a calculator for unmetered work. No native cell is newly
 marked complete by these caller migrations.
+
+## W1 launcher-only claim retirement
+
+`Store.ClaimLaunch`, its request/result types and in-process scan cursor are
+removed. The final queue has one transactional owner for runner and launcher
+awards. The deleted tests have these dispositions.
+
+| Retired test | Retained evidence |
+| --- | --- |
+| `TestClaimLaunch_BillsEveryClaimAndPagesPastUnpaidTeams` | `TestMeteredUnitQueuePassesOverUnaffordableWork` and `TestLauncherQueueReachesFundedWorkBehindLargeUnpaidQueue` retain funded selection, reservations and refusal of unfunded teams. Metering follows the authenticated root, independently of launcher placement. |
+| `TestClaimLaunch_BoundsEachPollAndResumesWhereItStopped` | Replaced by `TestLauncherQueueReachesFundedWorkBehindLargeUnpaidQueue`, which reaches two funded jobs behind 257 unpaid jobs without local cursor state. The old implementation's per-poll scan budget is retired. |
+| `TestClaimLaunch_ConcurrentPollsNeverRollTheResumePointBack` | Replaced by `TestLauncherConcurrentQueueClaimsEachAwardOnce`. Four concurrent polls reach every funded job once behind 65 unpaid jobs. No per-process resume point remains. Existing claim-fence properties retain stale-generation refusal. |
+| `TestClaimLaunch_ReservesAtTheClaimAndBillsFromTheFirstRenewal` | `TestMeteredPlanRenewalExcludesSchedulingWait` retains reservation at award and computation from first renewal. Plan billing has zero minimum under C2. `TestMeteredUnitCloudRenewalStartsComputeWithoutAnAttempt` retains the separate job minimum. |
+| `TestRepoDispatch_OnlyAnOptedInRepoSkipsTheTriggerPath` | Retired with mutable repository dispatch opt-in. `TestClaimUnitOwnerKindsAndEvalFences` and the intake/plan acceptance cells retain distinct owner kinds from sealed dispatch. |
+| `TestRepoDispatch_ARetryOfAnOptedInRunIsControllerDispatched` | Mutable opt-in is retired. `TestAdmissionRetryCarriesSealsAndKeepsRetrierSeparate` retains the source seals, including dispatch. |
+
+Controller fixture callers now provision a service root, call `ClaimUnit` and
+exchange its bootstrap. `TestLauncherFixtureUsesCurrentUnitAward` exercises
+plan and job awards through those real store methods. The bootstrap-origin
+verifier and initial run rows are fixtures. Legacy controller HTTP scenarios
+still need their final wire migration. The SQLite placement, billing and
+lifecycle cells retain the final store evidence.

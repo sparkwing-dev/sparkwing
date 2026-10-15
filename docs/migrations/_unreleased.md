@@ -1602,3 +1602,25 @@ patterns, pools, active names and the existing machine limit before commit.
 An active name returns `conflict`. The runner limit returns `quota_exceeded`.
 Bootstrap and Actions provisioning still require their trusted origin verifier.
 Console-origin persistence remains a separate integration.
+
+## Launcher claims use the shared unit queue
+
+Replace `Store.ClaimLaunch` with `Store.ClaimUnit`. A named plan selects
+`UnitRef{Kind: capability.UnitPlan, RunID: runID}` without a job ID. A named
+job selects `capability.UnitNode` and its job ID. Queue requests supply the
+requested kinds. A deployment service capability carrying `claims.launch`
+provides the launcher identity. Capacity and labels remain observations.
+
+`Client.ClaimLaunch`, `LaunchClaim`, `LaunchClaimRequest`, `MinLaunchLifetime`
+and `LaunchDeadlineSlack` are removed. HTTP consumers call `Claim` on the controller returned by
+`client.NewEngineClient` with `EngineOptions.Launcher`. Awards carry the persisted expiry and bootstrap
+presentation. Exchange the bootstrap before using its execution authority.
+The shared queue passes over unaffordable work without an in-process cursor.
+
+`Tenant.SetRepoDispatch` is removed. Dispatch belongs to the admitted request.
+The unused `Store.SeedToken`, `ErrSeededTokenRevoked`,
+`Store.CheckClaimSensitive`, `Store.PrincipalHoldsProfileClaim`,
+`Tenant.SpendSourceCredential`, `Tenant.SourceClaimant` and
+`Tenant.GitCredentialMachines` APIs are removed too. Use the capability issuer,
+current binding checks and `Tenant.ReleaseSourceCredential` for their retained
+responsibilities.

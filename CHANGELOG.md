@@ -21,6 +21,8 @@ unlock.
 ## [Unreleased]
 
 ### Changed
+- **store (Breaking):** Launcher awards use the shared unit queue
+  Removed `Store.ClaimLaunch`, its launcher-only scan and cursor, `Client.ClaimLaunch` and unused token/source authority helpers. Direct consumers use `ClaimUnit`. HTTP consumers use `client.NewEngineClient` with launcher options. See [migration guide](docs/migrations/_unreleased.md#launcher-claims-use-the-shared-unit-queue).
 - **store (Breaking):** GitHub runner enrollment commits with current administration authority
   The default tenant registry stores canonical repository identity and atomically revokes Actions ancestry on removal. Issuance checks live enrollment and existing caps. Raw add/remove binding writers are removed. See [migration guide](docs/migrations/_unreleased.md#github-runner-enrollment-uses-current-administration-authority).
 - **store (Breaking):** Credential mutations and secret reads recheck current authority in their committing transactions

@@ -34,15 +34,7 @@ ON CONFLICT DO NOTHING`, who.team, store.RepoKey(owner, name), string(store.Repo
 	}); err != nil {
 		f.t.Fatal(err)
 	}
-	c, err := f.store.ClaimLaunch(ctx, store.ClaimIdentity{Principal: "launcher", TokenPrefix: "swr_launch"},
-		store.LaunchClaimRequest{
-			HolderID: "launcher:" + runID, Lease: time.Minute, Deadline: time.Hour,
-			RunID: runID, NodeID: store.PlanNodeID,
-		}, controller.LaunchClaimClock(f.t, f.store, runID, store.PlanNodeID))
-	if err != nil || c == nil {
-		f.t.Fatalf("launch claim %s: %+v %v", runID, c, err)
-	}
-	return c.Token
+	return controller.LauncherFixtureClaim(f.t, f.store, runID, store.PlanNodeID)
 }
 
 // The init container's one ask gets an App token that reads exactly the run's

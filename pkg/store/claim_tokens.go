@@ -196,14 +196,6 @@ func (s *Store) AuthorizeClaimToken(ctx context.Context, raw string, class Claim
 
 var errClaimTokenUnknown = fmt.Errorf("%w: no such token", ErrClaimTokenInvalid)
 
-// CheckClaimSensitive applies [ClaimSensitive] to the claim tok names, for a
-// use that outlasts the request that authorized it: a fetch that ran for
-// minutes, or a signed grant presented later.
-func (s *Store) CheckClaimSensitive(ctx context.Context, tok ClaimToken, now time.Time) (ClaimToken, error) {
-	return s.authorizeClaim(ctx, `c.team = ? AND c.run_id = ? AND c.node_id = ? AND c.claim_generation = ?`,
-		[]any{string(tok.Team), tok.RunID, tok.NodeID, tok.Generation}, ClaimSensitive, now)
-}
-
 func (s *Store) authorizeClaim(ctx context.Context, where string, args []any, class ClaimRouteClass, now time.Time) (ClaimToken, error) {
 	var (
 		tok            ClaimToken

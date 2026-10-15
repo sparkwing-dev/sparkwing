@@ -88,6 +88,13 @@ plan together. Retry retains the original request, source authority, SHA and
 accepted seals, with the retrier recorded separately. It never rewrites the
 original seal's identity to match the new run ID.
 
+Direct store consumers use `Store.ClaimUnit` for launcher and runner awards.
+`Store.ClaimLaunch`, `LaunchClaim`, `LaunchClaimRequest`, `MinLaunchLifetime`
+and `LaunchDeadlineSlack` are removed. HTTP consumers call `Claim` on the controller returned by
+`client.NewEngineClient` with `EngineOptions.Launcher`. `Client.ClaimLaunch` is removed.
+The granted service root supplies identity and metering. Claims persist their
+fences, billing reservations and bootstrap credentials in one transaction.
+
 Private claim and reconciliation responses carry execution settings, fences,
 accepted inputs and fresh capabilities. Public `RunDetail` and `JobDetail` carry
 safe display projections. Status clients never substitute a raw execution seal

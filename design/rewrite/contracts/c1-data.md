@@ -2,6 +2,22 @@
 
 <!-- design:begin -->
 
+## Shared launcher claim queue
+
+`Store.ClaimLaunch`, `LaunchClaim`, `LaunchClaimRequest`, the launcher-only
+scan/cursor and `Client.ClaimLaunch` are removed. Launcher awards use
+`Store.ClaimUnit` and the common ordered matcher. Unit kinds, enrollment,
+current authority and billing remain transaction facts. Bootstrap exchange
+preserves the award fence.
+
+The unused `Tenant.SetRepoDispatch`, `Store.SeedToken`,
+`ErrSeededTokenRevoked`, `Store.CheckClaimSensitive`,
+`Store.PrincipalHoldsProfileClaim`, `Tenant.SpendSourceCredential`,
+`Tenant.SourceClaimant` and `Tenant.GitCredentialMachines` are removed.
+The capability issuer, binding transactions, sealed intake and source release
+own their retained responsibilities. Seeded startup bootstrap still needs C2's
+provisioning declaration. This cut adds no alternate bootstrap issuer.
+
 ## Launcher award snapshots
 
 `Store.ReadLauncherAwards` rechecks launcher ancestry and reads current awards,

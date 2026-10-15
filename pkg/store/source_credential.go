@@ -51,27 +51,6 @@ type SourceSpend struct {
 	Spec SourceSpec
 }
 
-// SpendSourceCredential records the issue of a GitHub App token to tok's
-// claim as a release of rel.CredentialID on rel.Host to rel.Runner. It
-// refuses a claim of another team, one that is not live or is cancelled, and,
-// for a claim with a node of its own, one that spent [MaxSourceMints] or whose
-// attempt has started. A work claim gets the checkout its run's plan asks for.
-func (t *Tenant) SpendSourceCredential(ctx context.Context, tok ClaimToken, rel GitCredentialRelease, now time.Time) (_ SourceSpend, err error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return SourceSpend{}, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	out, err := t.spendSourceClaimTx(ctx, tx, tok, now)
-	if err != nil {
-		return SourceSpend{}, err
-	}
-	if err := t.insertSourceReleaseTx(ctx, tx, tok, rel, now); err != nil {
-		return SourceSpend{}, err
-	}
-	return out, tx.Commit()
-}
-
 func (t *Tenant) insertSourceReleaseTx(ctx context.Context, tx *storeTx, tok ClaimToken, rel GitCredentialRelease, now time.Time) error {
 	id, err := newIdentityID()
 	if err != nil {
@@ -142,33 +121,6 @@ func spendNodeSourceMintTx(ctx context.Context, tx *storeTx, tok ClaimToken) err
 		return errors.Join(err, ErrSourceCredentialSpent)
 	}
 	return nil
-}
-
-// SourceClaimant names the machine credential behind a runner's node or
-// trigger claim, read at the claim's own generation; a launcher's plan or
-// work claim has none and gets the zero identity. ErrClaimNotLive when the
-// claim moved to another generation.
-func (t *Tenant) SourceClaimant(ctx context.Context, tok ClaimToken) (ClaimIdentity, error) {
-	var id ClaimIdentity
-	var err error
-	switch {
-	case tok.Team != t.team:
-		return ClaimIdentity{}, ErrClaimNotLive
-	case tok.Kind == ClaimTokenNode:
-		err = t.s.queryRow(ctx, `SELECT COALESCE(claim_principal, ''), COALESCE(claim_token_prefix, '') FROM nodes
- WHERE team = ? AND run_id = ? AND node_id = ? AND claim_generation = ?`,
-			string(t.team), tok.RunID, tok.NodeID, tok.Generation).Scan(&id.Principal, &id.TokenPrefix)
-	case tok.Kind == ClaimTokenTrigger:
-		err = t.s.queryRow(ctx, `SELECT COALESCE(claim_principal, ''), COALESCE(claim_token_prefix, '') FROM triggers
- WHERE team = ? AND id = ? AND claim_seq = ?`,
-			string(t.team), tok.RunID, tok.Generation).Scan(&id.Principal, &id.TokenPrefix)
-	default:
-		return ClaimIdentity{}, nil
-	}
-	if errors.Is(err, sql.ErrNoRows) || (err == nil && !id.bound()) {
-		return ClaimIdentity{}, ErrClaimNotLive
-	}
-	return id, err
 }
 
 // SourceCredential is the one credential a claim fetches its run's source

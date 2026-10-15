@@ -230,13 +230,7 @@ func (t *Tenant) DeleteGitCredential(ctx context.Context, host string) error {
 	return nil
 }
 
-// ReleaseGitCredential reads the team's confirmed credential for rel.Host and
-// records its release to rel.Runner, in one transaction, so a credential is
-// never handed out without its audit row and a deleted one is never
-// released. The same transaction admits the release under tok's claim as
-// [Tenant.SpendSourceCredential] does, so a claim that lapses or moves after
-// the caller's own check releases nothing. ErrNotFound when the team holds no
-// confirmed credential for the host.
+// ReleaseGitCredential commits source use and its credential audit together.
 func (t *Tenant) ReleaseGitCredential(ctx context.Context, tok ClaimToken, rel GitCredentialRelease, now time.Time) (_ GitCredential, _ SourceSpend, err error) {
 	tx, err := t.s.beginTx(ctx)
 	if err != nil {
@@ -313,25 +307,6 @@ func (t *Tenant) SetGitCredentialMachine(ctx context.Context, prefix string, ena
 		INSERT INTO git_credential_machines (team, token_prefix, enabled_by, enabled_at) VALUES (?, ?, ?, ?)
 		ON CONFLICT (team, token_prefix) DO NOTHING`, string(t.team), prefix, by, now.UTC().UnixNano())
 	return err
-}
-
-// GitCredentialMachines lists the team's machine token prefixes opted in to
-// receiving its git credentials.
-func (t *Tenant) GitCredentialMachines(ctx context.Context) (_ map[string]bool, err error) {
-	rows, err := t.s.query(ctx, `SELECT token_prefix FROM git_credential_machines WHERE team = ?`, string(t.team))
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	out := map[string]bool{}
-	for rows.Next() {
-		var prefix string
-		if err := rows.Scan(&prefix); err != nil {
-			return nil, err
-		}
-		out[prefix] = true
-	}
-	return out, rows.Err()
 }
 
 // GitCredentialMachine reports whether the team's owner opted the runner
