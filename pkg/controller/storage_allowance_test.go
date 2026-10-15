@@ -2,7 +2,6 @@ package controller_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -22,7 +21,7 @@ func licenseStorageMetering(t *testing.T, f storageFixture) {
 }
 
 func TestUnlicensedStorageWriteIgnoresCreditRate(t *testing.T) {
-	f := newStorageFixture(t, store.StorageQuota{Principal: "acme", MaxBytesPerRun: 1 << 20})
+	f := newStorageFixture(t, store.StorageQuota{Team: store.DefaultTeam, MaxBytesPerRun: 1 << 20})
 	rate := int64(store.CloudStorageRateMicroPerGBDay)
 	if _, err := f.store.SetCreditSettings(context.Background(), store.CreditSettingsUpdate{
 		StorageRateMicroPerGBDay: &rate,
@@ -35,7 +34,7 @@ func TestUnlicensedStorageWriteIgnoresCreditRate(t *testing.T) {
 }
 
 func TestUnlicensedStorageMaintenanceWritesNoCharges(t *testing.T) {
-	f := newStorageFixture(t, store.StorageQuota{Principal: "acme", MaxBytesPerRun: 1 << 40})
+	f := newStorageFixture(t, store.StorageQuota{Team: store.DefaultTeam, MaxBytesPerRun: 1 << 40})
 	ctx := context.Background()
 	rate, free := int64(store.CloudStorageRateMicroPerGBDay), int64(0)
 	if _, err := f.store.SetCreditSettings(ctx, store.CreditSettingsUpdate{
@@ -51,57 +50,6 @@ func TestUnlicensedStorageMaintenanceWritesNoCharges(t *testing.T) {
 	}
 }
 
-func TestStorageAllowanceRouteReadsAndSetsOnTheAdminToken(t *testing.T) {
-	f := newStorageFixture(t, store.StorageQuota{Principal: "acme", MaxBytesPerRun: 1 << 20})
-
-	code, body := f.request(t, http.MethodPut, storageAllowancePath, f.admin,
-		`{"storage_allowance_bytes":53687091200}`, false)
-	if code != http.StatusOK {
-		t.Fatalf("setting the allowance = %d %s, want 200", code, body)
-	}
-	var quota struct {
-		Principal             string `json:"principal"`
-		MaxBytesPerRun        int64  `json:"max_bytes_per_run"`
-		StorageAllowanceBytes int64  `json:"storage_allowance_bytes"`
-	}
-	if err := json.Unmarshal([]byte(body), &quota); err != nil {
-		t.Fatalf("decode %q: %v", body, err)
-	}
-	if quota.Principal != "acme" || quota.StorageAllowanceBytes != 53_687_091_200 {
-		t.Fatalf("quota = %+v, want acme keeping fifty gibibytes", quota)
-	}
-	if quota.MaxBytesPerRun != 1<<20 {
-		t.Fatalf("quota = %+v, want the per-run limit left alone", quota)
-	}
-
-	code, body = f.request(t, http.MethodGet, "/api/v1/storage", f.admin, "", false)
-	if code != http.StatusOK {
-		t.Fatalf("storage show = %d %s, want 200", code, body)
-	}
-	if !strings.Contains(body, `"storage_allowance_bytes":53687091200`) {
-		t.Fatalf("storage show %q does not report the allowance", body)
-	}
-	if !strings.Contains(body, `"retained_bytes"`) {
-		t.Fatalf("storage show %q does not report the retained bytes", body)
-	}
-
-	// safety: the quota route is not a second writer of the allowance, so a
-	// quota rewrite keeps what the team asked to keep.
-	if code, body := f.request(t, http.MethodPut, "/api/v1/storage/quotas/acme", f.admin,
-		`{"tier":"paid"}`, false); code != http.StatusOK {
-		t.Fatalf("quota rewrite = %d %s, want 200", code, body)
-	}
-	stored, err := f.store.StorageQuotaFor(context.Background(), "acme")
-	if err != nil {
-		t.Fatalf("quota: %v", err)
-	}
-	if stored.AllowanceBytes != 53_687_091_200 {
-		t.Fatalf("quota = %+v, want the allowance kept through a quota rewrite", stored)
-	}
-}
-
-// safety: this fixture's store is the SQLite one the controller tests open, so
-// the placeholder needs no dialect rewrite.
 func seedRetainedRuns(t *testing.T, st *store.Store, principal string, runs int, bytes int64) {
 	t.Helper()
 	ctx := context.Background()
@@ -125,28 +73,8 @@ func seedRetainedRuns(t *testing.T, st *store.Store, principal string, runs int,
 	}
 }
 
-func TestStorageAllowanceRouteRefusesANonAdminTokenAndABadValue(t *testing.T) {
-	f := newStorageFixture(t, store.StorageQuota{Principal: "acme", MaxBytesPerRun: 1 << 20})
-
-	if code, body := f.request(t, http.MethodPut, storageAllowancePath, f.team,
-		`{"storage_allowance_bytes":1}`, false); code != http.StatusForbidden {
-		t.Fatalf("a runner token setting an allowance = %d %s, want 403", code, body)
-	}
-	if code, body := f.request(t, http.MethodPut, storageAllowancePath, f.admin,
-		`{"storage_allowance_bytes":-1}`, false); code != http.StatusBadRequest {
-		t.Fatalf("a negative allowance = %d %s, want 400", code, body)
-	}
-	quota, err := f.store.StorageQuotaFor(context.Background(), "acme")
-	if err != nil {
-		t.Fatalf("quota: %v", err)
-	}
-	if quota.AllowanceBytes != 0 {
-		t.Fatalf("quota = %+v, want the refusals to have moved nothing", quota)
-	}
-}
-
 func TestAnEmptyBalanceRefusesAChargedWriteWithPaymentRequired(t *testing.T) {
-	f := newStorageFixture(t, store.StorageQuota{Principal: "acme", MaxBytesPerRun: 1 << 20})
+	f := newStorageFixture(t, store.StorageQuota{Team: store.DefaultTeam, MaxBytesPerRun: 1 << 20})
 	licenseStorageMetering(t, f)
 	ctx := context.Background()
 	rate := int64(store.CloudStorageRateMicroPerGBDay)

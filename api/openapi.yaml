@@ -4169,10 +4169,10 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/StorageState"}
 
-  /api/v1/storage/quotas/{principal}:
+  /api/v1/storage/quotas/{team}:
     parameters:
       - in: path
-        name: principal
+        name: team
         required: true
         schema: {type: string}
     put:
@@ -4180,18 +4180,13 @@ paths:
       tags: [storage]
       summary: Set one team's storage allowance.
       description: |
-        `principal` is the token principal the quota is filed under, 1 to 128
-        characters of letters, digits, or `-_.:@`; anything else is refused.
+        `team` names a registered team. An unknown team returns 404.
         Naming a `tier` and leaving every limit zero takes that tier's
         limits, so a team moves between tiers without restating three
         numbers. A limit of zero is unbounded, so a quota may cap bytes
         without capping objects. This route does not take the retained-storage
         allowance and never changes it; its own route writes that. The answer
         is the stored quota.
-
-        Run events are charged their payload bytes and a published artifact
-        manifest is charged one object, each inside the transaction that
-        writes it, so a refused write is never stored and never billed.
       requestBody:
         required: true
         content:
@@ -4205,10 +4200,10 @@ paths:
               schema: {$ref: "#/components/schemas/StorageQuota"}
         "400": {$ref: "#/components/responses/BadRequest"}
 
-  /api/v1/storage/quotas/{principal}/allowance:
+  /api/v1/storage/quotas/{team}/allowance:
     parameters:
       - in: path
-        name: principal
+        name: team
         required: true
         schema: {type: string}
     put:
@@ -4216,11 +4211,10 @@ paths:
       tags: [storage]
       summary: Set how many retained bytes one team keeps.
       description: |
-        The allowance is how many retained bytes the team asked to keep. The
-        hourly storage pass expires its oldest finished runs above the
-        allowance, so the allowance is both what the team keeps and the most
-        it pays for, and zero keeps everything. The other quota limits are
-        left where they stand. The answer is the stored quota.
+        The allowance caps the retained byte count priced by storage billing.
+        Zero leaves it uncapped. Other quota limits are preserved, including
+        default-tier limits when this creates the team's first quota row.
+        The answer is the stored quota.
       requestBody:
         required: true
         content:
@@ -4243,9 +4237,10 @@ paths:
         Writes every field, so a caller reads `GET /api/v1/storage` first,
         changes what it means to change, and writes the result back. A
         retention window is a whole number of days and zero is unbounded; an
-        hourly timer removes the events and per-node metric samples of
-        finished runs once they pass their window, in bounded batches, and
-        leaves a run that is still going untouched however old its rows.
+        leased hourly pass removes expired runs and their operational children
+        in bounded batches while preserving each pipeline's newest success.
+        Metrics have their own window. Financial evidence and recorded usage
+        survive run retention.
 
         `database_alarm_bytes` of zero raises no alarm. Passing it logs a
         warning and sets `database.alarm` on `GET /api/v1/health`, which
@@ -7804,7 +7799,7 @@ components:
       type: object
       description: Controller-wide storage policy. Zero is unbounded everywhere.
       properties:
-        event_retention_days: {type: integer, format: int64, description: Days a finished run's events are kept; 0 keeps them forever.}
+        run_retention_days: {type: integer, format: int64, description: Days a finished run and operational children are kept; 0 disables run expiration.}
         node_metric_retention_days: {type: integer, format: int64, description: Days a finished run's metric samples are kept; 0 keeps them forever.}
         database_alarm_bytes: {type: integer, format: int64, description: Size past which the controller warns; 0 raises no alarm.}
         default_tier: {type: string, description: free or paid; empty leaves a team without a quota row unlimited.}
@@ -7813,12 +7808,12 @@ components:
       type: object
       description: One team's storage allowance. A zero limit is unbounded.
       properties:
-        principal: {type: string, description: The token principal this quota is filed under.}
+        team: {type: string, description: The registered team this quota belongs to.}
         tier: {type: string, description: free or paid; supplies the limits when they are all zero.}
         max_bytes_per_run: {type: integer, format: int64}
         max_bytes_per_month: {type: integer, format: int64}
         max_objects_per_run: {type: integer, format: int64}
-        storage_allowance_bytes: {type: integer, format: int64, description: "Retained bytes the team asked to keep and the most it is billed for; the sweep expires its oldest finished runs above this, and 0 keeps everything. Written only by the allowance route."}
+        storage_allowance_bytes: {type: integer, format: int64, description: "Retained-byte billing ceiling; 0 is uncapped. Written independently of write limits by the allowance route."}
     SetStorageQuota:
       x-sparkwing-go-type: pkg/controller.setStorageQuotaJSON
       type: object
@@ -7842,13 +7837,13 @@ components:
         month: {type: string, description: Calendar month as YYYY-MM in UTC.}
         month_bytes: {type: integer, format: int64}
         month_objects: {type: integer, format: int64}
-        retained_bytes: {type: integer, format: int64, description: "What the team still has stored, which is what the storage charge and the allowance sweep both measure."}
+        retained_bytes: {type: integer, format: int64, description: "Unique committed blob and persisted log bytes counted by storage billing."}
     StorageTeamUsage:
       x-sparkwing-go-type: pkg/controller.storageTeamJSON
       type: object
       description: One row of the month's heaviest teams.
       properties:
-        principal: {type: string}
+        team: {type: string}
         bytes: {type: integer, format: int64}
         objects: {type: integer, format: int64}
     DatabaseSize:

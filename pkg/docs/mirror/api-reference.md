@@ -189,8 +189,8 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/signups` | `admin` |
 | `PUT` | `/api/v1/signups` | `admin` |
 | `GET` | `/api/v1/storage` | `runs.read` |
-| `PUT` | `/api/v1/storage/quotas/{principal}` | `admin` |
-| `PUT` | `/api/v1/storage/quotas/{principal}/allowance` | `admin` |
+| `PUT` | `/api/v1/storage/quotas/{team}` | `admin` |
+| `PUT` | `/api/v1/storage/quotas/{team}/allowance` | `admin` |
 | `PUT` | `/api/v1/storage/settings` | `admin` |
 | `DELETE` | `/api/v1/team` | `team.admin` |
 | `PATCH` | `/api/v1/team` | `team.admin` |

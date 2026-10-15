@@ -2,10 +2,7 @@ package store
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
-	"math"
 	"math/big"
 	"time"
 )
@@ -39,23 +36,12 @@ const (
 	metaKeyStorageFreeAllowanceBytes = "storage_free_allowance_bytes"
 )
 
-// safety: one pass expires a bounded number of runs so a first sweep on a team
-// far above its allowance does not hold the write lock over its whole history.
-const storageAllowanceSweepMaxRuns = 500
-
 // StorageChargeSweep is what one storage-charge pass billed.
 type StorageChargeSweep struct {
 	// Charges holds one row per team billed, in the order they were billed.
 	Charges []CreditCharge
 	// ChargedMicro is what the pass took out of the ledger.
 	ChargedMicro int64
-}
-
-// StorageAllowanceSweep is what one allowance pass expired.
-type StorageAllowanceSweep struct {
-	Runs   int64
-	Bytes  int64
-	Events int64
 }
 
 // StorageRateMicroPerGBDay returns what one gibibyte kept for one day costs in
@@ -87,60 +73,6 @@ func validStorageFreeAllowance(bytes int64) error {
 			ErrInvalidCreditSetting, bytes)
 	}
 	return nil
-}
-
-// StorageRetainedBytes reports what a team still has stored: the bytes of
-// every run whose rows the controller still holds. Retention and the allowance
-// sweep both take bytes out of it, which is what makes it a measure of what is
-// kept rather than of what was written.
-func (s *Store) StorageRetainedBytes(ctx context.Context, principal string) (int64, error) {
-	var bytes sql.NullInt64
-	err := s.queryRow(ctx,
-		`SELECT SUM(bytes) FROM storage_run_usage WHERE principal = ?`, principal).Scan(&bytes)
-	if err != nil {
-		return 0, err
-	}
-	return bytes.Int64, nil
-}
-
-// safety: the sweep measures one team's bytes under one principal, because
-// two teams may both label a token `ci` and expiring on their combined total
-// would take runs off the team that stayed inside the ceiling.
-func (s *Store) retainedBytesFor(ctx context.Context, h storageHolder) (int64, error) {
-	var bytes sql.NullInt64
-	err := s.queryRow(ctx, `
-SELECT SUM(u.bytes)
-  FROM storage_run_usage u JOIN runs r ON r.id = u.run_id
- WHERE r.team = ? AND u.principal = ?`, string(h.team), h.principal).Scan(&bytes)
-	if err != nil {
-		return 0, err
-	}
-	return bytes.Int64, nil
-}
-
-// SetStorageAllowance records how many retained bytes a team asked to keep and
-// answers the quota it is held to afterwards. Zero keeps everything. The
-// allowance is the ceiling the sweep expires oldest-first down to, so raising
-// it keeps more and costs more, and lowering it expires the oldest runs on the
-// next pass.
-func (s *Store) SetStorageAllowance(ctx context.Context, principal string, bytes int64) (StorageQuota, error) {
-	if !ValidStoragePrincipal(principal) {
-		return StorageQuota{}, fmt.Errorf("storage: %q is not a usable principal name", principal)
-	}
-	if bytes < 0 {
-		return StorageQuota{}, errors.New("storage: the allowance must not be negative")
-	}
-	if _, err := s.exec(ctx, `
-INSERT INTO storage_quotas (principal, tier, max_bytes_per_run,
-        max_bytes_per_month, max_objects_per_run, storage_allowance_bytes, updated_at)
-VALUES (?, '', 0, 0, 0, ?, ?)
-ON CONFLICT (principal) DO UPDATE SET
-        storage_allowance_bytes = excluded.storage_allowance_bytes,
-        updated_at = excluded.updated_at`,
-		principal, bytes, time.Now().UnixNano()); err != nil {
-		return StorageQuota{}, err
-	}
-	return s.StorageQuotaFor(ctx, principal)
 }
 
 // safety: the balance and the write that grows the team's bytes share one
@@ -182,39 +114,6 @@ func storageChargeMicro(excessBytes, rateMicroPerGBDay, seconds int64) (int64, e
 	return num.Int64(), nil
 }
 
-// safety: a pass bills and keeps a watermark for this pair rather than for a
-// principal alone, because two teams may both label a token `ci` and one
-// watermark for the pair would bill one of them and skip the other.
-type storageHolder struct {
-	team      Team
-	principal string
-}
-
-// safety: the holders worth billing are the ones holding bytes, not the ones
-// holding a quota row; a team with retained bytes and no quota row would
-// otherwise store without ever paying for it. The team comes off the run the
-// bytes belong to, because that is the row the tenant key is written on.
-func (s *Store) retainingPrincipals(ctx context.Context) (_ []storageHolder, err error) {
-	rows, err := s.query(ctx, `
-SELECT r.team, u.principal
-  FROM storage_run_usage u JOIN runs r ON r.id = u.run_id
- GROUP BY r.team, u.principal
- ORDER BY r.team ASC, u.principal ASC`)
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	var out []storageHolder
-	for rows.Next() {
-		var h storageHolder
-		if err := rows.Scan(&h.team, &h.principal); err != nil {
-			return nil, err
-		}
-		out = append(out, h)
-	}
-	return out, rows.Err()
-}
-
 type storageCharge struct {
 	Team        Team
 	Principal   string
@@ -251,187 +150,4 @@ func insertStorageChargeTx(ctx context.Context, tx *storeTx, c storageCharge) (*
 		Seconds: c.Seconds, AmountMicro: c.AmountMicro, StorageBytes: c.Bytes,
 		ChargedAt: time.Unix(0, c.NowNS).UTC(),
 	}, nil
-}
-
-// SweepStorageAllowance expires the oldest finished runs of every team holding
-// more than it asked to keep, until what it keeps is back inside its allowance.
-// A team with no allowance keeps everything.
-//
-// A spent balance lowers the ceiling to the free allowance, and that drain
-// takes only runs whose retention window has already elapsed, so non-payment
-// never removes anything the window still covers. An installation with no
-// retention window releases nothing, so nothing drains there.
-func (s *Store) SweepStorageAllowance(ctx context.Context, now time.Time) (StorageAllowanceSweep, error) {
-	var out StorageAllowanceSweep
-	holders, err := s.retainingPrincipals(ctx)
-	if err != nil {
-		return out, err
-	}
-	drain, cutoff, err := s.storageDrainTarget(ctx, now)
-	if err != nil {
-		return out, err
-	}
-	for _, h := range holders {
-		if err := ctx.Err(); err != nil {
-			return out, err
-		}
-		quota, err := s.StorageQuotaFor(ctx, h.principal)
-		if err != nil {
-			return out, err
-		}
-		if quota.AllowanceBytes > 0 {
-			if err := s.expireAboveCeiling(ctx, h, quota.AllowanceBytes, time.Time{}, &out); err != nil {
-				return out, fmt.Errorf("storage: expire above the allowance of team %s: %w", h.team, err)
-			}
-		}
-		if !drain {
-			continue
-		}
-		// safety: the drain is non-payment, so it is judged against the
-		// balance of the team holding the bytes; a funded neighbor must not
-		// keep an unfunded team's cache alive, and an unfunded neighbor must
-		// not drain a funded team's.
-		balance, err := s.creditBalanceMicro(ctx, h.team)
-		if err != nil {
-			return out, err
-		}
-		if balance > 0 {
-			continue
-		}
-		if err := s.expireAboveCeiling(ctx, h, cutoff.free, cutoff.before, &out); err != nil {
-			return out, fmt.Errorf("storage: drain team %s to the free allowance: %w", h.team, err)
-		}
-	}
-	return out, nil
-}
-
-type storageDrain struct {
-	free   int64
-	before time.Time
-}
-
-// safety: the drain reaches below the ceiling the customer chose, so it runs
-// only where storage is priced at all and only over runs the retention window
-// has already released. Whether a given team cannot pay the rent is read per
-// team by the caller, because one team's balance says nothing about another's.
-func (s *Store) storageDrainTarget(ctx context.Context, now time.Time) (bool, storageDrain, error) {
-	rate, err := s.StorageRateMicroPerGBDay(ctx)
-	if err != nil || rate <= 0 {
-		return false, storageDrain{}, err
-	}
-	settings, err := s.StorageSettings(ctx)
-	if err != nil || settings.EventRetentionDays <= 0 {
-		return false, storageDrain{}, err
-	}
-	free, err := s.StorageFreeAllowanceBytes(ctx)
-	if err != nil {
-		return false, storageDrain{}, err
-	}
-	return true, storageDrain{free: free, before: retentionCutoff(now, settings.EventRetentionDays)}, nil
-}
-
-// safety: the caller decides whether a ceiling binds at all, because zero means
-// opposite things on the two passes: a team named no allowance, or a spent
-// balance leaves nothing free.
-func (s *Store) expireAboveCeiling(
-	ctx context.Context, h storageHolder, ceiling int64, before time.Time, out *StorageAllowanceSweep,
-) error {
-	retained, err := s.retainedBytesFor(ctx, h)
-	if err != nil || retained <= ceiling {
-		return err
-	}
-	runs, err := s.oldestRetainedRuns(ctx, h, before)
-	if err != nil {
-		return err
-	}
-	for _, run := range runs {
-		if retained <= ceiling {
-			return nil
-		}
-		events, err := s.expireRunStorage(ctx, h.principal, run.id)
-		if err != nil {
-			return err
-		}
-		retained -= run.bytes
-		out.Runs++
-		out.Bytes += run.bytes
-		out.Events += events
-	}
-	return nil
-}
-
-type retainedRun struct {
-	id    string
-	bytes int64
-}
-
-// safety: a run still writing its own history keeps every byte of it, and a
-// zero cutoff means the customer's own ceiling rather than the drain, so the
-// age bound applies only when one was given. The bound is measured from when
-// a run finished, so a long run is not drained the moment it ends.
-func (s *Store) oldestRetainedRuns(
-	ctx context.Context, h storageHolder, before time.Time,
-) (_ []retainedRun, err error) {
-	query := `
-SELECT u.run_id, u.bytes
-  FROM storage_run_usage u JOIN runs r ON r.id = u.run_id
- WHERE r.team = ? AND u.principal = ? AND r.` + runTerminalIn + `
-   AND r.finished_at IS NOT NULL AND r.finished_at < ?
- ORDER BY r.finished_at ASC, u.run_id ASC
- LIMIT ?`
-	bound := int64(math.MaxInt64)
-	if !before.IsZero() {
-		bound = before.UnixNano()
-	}
-	rows, err := s.query(ctx, query, string(h.team), h.principal, bound, storageAllowanceSweepMaxRuns)
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	var out []retainedRun
-	for rows.Next() {
-		var run retainedRun
-		if err := rows.Scan(&run.id, &run.bytes); err != nil {
-			return nil, err
-		}
-		out = append(out, run)
-	}
-	return out, rows.Err()
-}
-
-// safety: the usage row and the rows whose bytes it counted go together, so
-// what a team is billed for is always what the controller still holds.
-func (s *Store) expireRunStorage(ctx context.Context, principal, runID string) (_ int64, err error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	res, err := tx.ExecContext(ctx, `DELETE FROM events WHERE run_id = ?`, runID)
-	if err != nil {
-		return 0, err
-	}
-	events, err := res.RowsAffected()
-	if err != nil {
-		return 0, err
-	}
-	team, err := creditTeamForRunTx(ctx, tx, runID)
-	if err != nil {
-		return 0, err
-	}
-	var held sql.NullInt64
-	if err := tx.QueryRowContext(ctx,
-		`SELECT bytes FROM storage_run_usage WHERE principal = ? AND run_id = ?`,
-		principal, runID).Scan(&held); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return 0, err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM storage_run_usage WHERE principal = ? AND run_id = ?`,
-		principal, runID); err != nil {
-		return 0, err
-	}
-	if err := addFreeEventBytesTx(ctx, tx, team, -held.Int64); err != nil {
-		return 0, err
-	}
-	return events, tx.Commit()
 }

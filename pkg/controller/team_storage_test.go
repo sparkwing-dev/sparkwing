@@ -2,116 +2,85 @@ package controller_test
 
 import (
 	"context"
-	"log/slog"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-type storagePassFixture struct {
-	st   *store.Store
-	srv  *controller.Server
-	logs *syncBuffer
-}
-
-// safety: acme holds one run that finished past a thirty-day window and one
-// inside it, and one invitation spent long ago, so a pass has something to
-// release and something to keep.
-func newStoragePass(t *testing.T, multiTeam bool) storagePassFixture {
+func storageRetentionServer(t *testing.T, multiTeam bool) (*store.Store, *controller.Server) {
 	t.Helper()
-	ctx := context.Background()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	s, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
-	if err := st.AsOperator().CreateTeam(ctx, "acme"); err != nil {
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	old := time.Now().Add(-120 * 24 * time.Hour).UnixNano()
+	if _, err := s.DB().Exec(`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES (?,'old',1,'fixture','failed',?,'fixture',1,'gh:1','host','execute',?,'fixture',?,?,'r30',30)`, store.DefaultTeam, []byte(`{}`), []byte(`[]`), old, old); err != nil {
 		t.Fatal(err)
 	}
-	acme, err := st.ForTeam(ctx, "acme")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, run := range []struct {
-		id  string
-		age time.Duration
-	}{{"r-old", 31 * 24 * time.Hour}, {"r-new", time.Hour}} {
-		if err := acme.CreateRun(ctx, store.Run{ID: run.id, Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := st.AppendEventCharged(ctx, "team:acme", run.id, "", "k", []byte("x")); err != nil {
-			t.Fatalf("append to %s: %v", run.id, err)
-		}
-		if _, err := st.DB().ExecContext(ctx,
-			`INSERT INTO storage_run_usage (principal, run_id, bytes, objects, updated_at) VALUES ('team:acme', ?, 10, 1, 0)
-			 ON CONFLICT (principal, run_id) DO NOTHING`, run.id); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := st.DB().ExecContext(ctx, `UPDATE runs SET status = 'success', finished_at = ? WHERE id = ?`,
-			time.Now().Add(-run.age).UnixNano(), run.id); err != nil {
-			t.Fatal(err)
-		}
-	}
-	spent := time.Now().Add(-60 * 24 * time.Hour).Unix()
-	if _, err := st.DB().ExecContext(ctx, `INSERT INTO invitations
-		(id, team, email, role, invited_by, created_at, expires_at) VALUES ('inv-old', 'acme', 'a@example.com', 'reader', 'owner', ?, ?)`,
-		spent, spent); err != nil {
-		t.Fatal(err)
-	}
-	logs := &syncBuffer{}
-	srv := controller.New(st, slog.New(slog.NewTextHandler(logs, nil)))
+	srv := controller.New(s, nil)
 	if multiTeam {
 		raw, pub := multiTeamLicense(t)
-		srv = srv.WithLicense(license.Resolve(raw, pub, time.Now(), nil))
+		srv.WithLicense(license.Resolve(raw, pub, time.Now(), nil))
 	}
-	return storagePassFixture{st: st, srv: srv, logs: logs}
+	return s, srv
 }
 
 func TestAMultiTeamStoragePassSeedsRetentionAndReleasesOldRuns(t *testing.T) {
-	f := newStoragePass(t, true)
-	ctx := context.Background()
+	s, srv := storageRetentionServer(t, true)
 	for range 2 {
-		f.srv.MaintainStorage(ctx)
+		srv.MaintainStorage(t.Context())
 	}
-	settings, err := f.st.StorageSettings(ctx)
-	if err != nil || settings.EventRetentionDays != controller.CloudRetentionDays {
-		t.Fatalf("retention = %+v, %v; want the cloud default seeded", settings, err)
+	settings, err := s.AsOperator().StorageSettings(t.Context())
+	if err != nil || settings.RunRetentionDays != 90 || settings.NodeMetricRetentionDays != 0 {
+		t.Fatalf("cloud policy=%+v: %v", settings, err)
 	}
-	var invitations int
-	if err := f.st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM invitations`).Scan(&invitations); err != nil || invitations != 0 {
-		t.Fatalf("invitations = %d, %v; want the spent one pruned", invitations, err)
-	}
-	logs := f.logs.String()
-	for _, want := range []string{
-		`msg="released storage past retention" team=acme runs=1`,
-		`msg="pruned spent identity rows" invitations=1`,
-	} {
-		if !strings.Contains(logs, want) {
-			t.Errorf("the pass logged no %q:\n%s", want, logs)
-		}
-	}
-	if n := strings.Count(logs, "released storage past retention"); n != 1 {
-		t.Errorf("two passes released storage %d times, want once", n)
+	var count int
+	if err := s.DB().QueryRow("SELECT COUNT(*) FROM runs").Scan(&count); err != nil || count != 0 {
+		t.Fatalf("expired runs=%d: %v", count, err)
 	}
 }
 
-// Negative control: a single-team controller seeds no cloud retention, so the
-// same old run keeps its bytes.
 func TestASingleTeamControllerKeepsItsOperatorsRetention(t *testing.T) {
-	f := newStoragePass(t, false)
-	ctx := context.Background()
-	f.srv.MaintainStorage(ctx)
-	settings, err := f.st.StorageSettings(ctx)
-	if err != nil || settings.EventRetentionDays != 0 {
-		t.Fatalf("retention = %+v, %v; want nothing seeded", settings, err)
+	s, srv := storageRetentionServer(t, false)
+	srv.MaintainStorage(t.Context())
+	settings, err := s.AsOperator().StorageSettings(t.Context())
+	if err != nil || settings.RunRetentionDays != 0 {
+		t.Fatalf("self-hosted policy=%+v: %v", settings, err)
 	}
-	if strings.Contains(f.logs.String(), "released storage past retention") {
-		t.Fatalf("a single-team pass released storage:\n%s", f.logs.String())
+	var count int
+	if err := s.DB().QueryRow("SELECT COUNT(*) FROM runs").Scan(&count); err != nil || count != 1 {
+		t.Fatalf("retained runs=%d: %v", count, err)
+	}
+}
+
+func TestStorageRetentionPassRequiresMaintenanceFence(t *testing.T) {
+	s, srv := storageRetentionServer(t, false)
+	if err := s.AsOperator().SetStorageSettings(t.Context(), store.StorageSettings{RunRetentionDays: 1}); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := s.AsOperator().AcquireSingletonLease(context.Background(), "maintenance", "other", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.MaintainStorage(t.Context())
+	var count int
+	if err := s.DB().QueryRow("SELECT COUNT(*) FROM runs").Scan(&count); err != nil || count != 1 {
+		t.Fatalf("foreign fence deleted run=%d: %v", count, err)
+	}
+	if _, err := s.DB().Exec("UPDATE leases SET until=0 WHERE name=? AND generation=?", lease.Name, lease.Generation); err != nil {
+		t.Fatal(err)
+	}
+	srv.MaintainStorage(t.Context())
+	if err := s.DB().QueryRow("SELECT COUNT(*) FROM runs").Scan(&count); err != nil || count != 0 {
+		t.Fatalf("new fence retained expired run=%d: %v", count, err)
 	}
 }

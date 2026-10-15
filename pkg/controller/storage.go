@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -77,7 +76,7 @@ func (s *Server) runStorageMaintenance(ctx context.Context, interval time.Durati
 
 func (s *Server) maintainStorage(ctx context.Context) {
 	s.seedCloudRetention(ctx)
-	settings, err := s.store.StorageSettings(ctx)
+	settings, err := s.store.AsOperator().StorageSettings(ctx)
 	if err != nil {
 		s.logger.Error("storage settings read failed", "err", err)
 		return
@@ -86,21 +85,9 @@ func (s *Server) maintainStorage(ctx context.Context) {
 	if _, err := s.store.PruneStorageCommitReceipts(ctx, now); err != nil {
 		s.logger.Error("prune storage commit receipts failed", "err", err)
 	}
-	if settings.RetentionOn() {
-		swept, serr := s.store.SweepRetention(ctx, now)
-		switch {
-		case serr != nil:
-			s.logger.Error("retention sweep failed", "err", serr)
-		case swept.Events > 0 || swept.NodeMetrics > 0:
-			s.logger.Info("compacted retained rows",
-				"events", swept.Events, "node_metrics", swept.NodeMetrics,
-				"event_retention_days", settings.EventRetentionDays,
-				"node_metric_retention_days", settings.NodeMetricRetentionDays)
-		}
-	}
+	s.maintainRetainedData(ctx)
 	s.maintainTeamStorage(ctx, now)
-	s.billRetainedStorage(ctx)
-	size, err := s.store.DatabaseSize(ctx)
+	size, err := s.store.AsOperator().DatabaseSize(ctx)
 	if err != nil {
 		s.logger.Error("database size probe failed", "err", err)
 		return
@@ -114,17 +101,25 @@ func (s *Server) maintainStorage(ctx context.Context) {
 	s.reportLargestTeams(ctx, settings)
 }
 
-func (s *Server) billRetainedStorage(ctx context.Context) {
-	if !s.Metering() {
-		return
-	}
+func (s *Server) maintainRetainedData(ctx context.Context) {
 	operator := s.store.AsOperator()
 	lease, err := operator.AcquireSingletonLease(ctx, "maintenance", s.measureHolder(), StorageMaintenanceInterval)
 	if errors.Is(err, store.ErrLockHeld) {
 		return
 	}
 	if err != nil {
-		s.logger.Error("storage billing lease failed", "err", err)
+		s.logger.Error("storage maintenance lease failed", "err", err)
+		return
+	}
+	retained, err := operator.MaintainRetention(ctx, store.RetentionRequest{Lease: lease, Limit: 5000})
+	if err != nil {
+		s.logger.Error("storage retention failed", "err", err)
+		return
+	}
+	if retained.Runs > 0 || retained.Metrics > 0 || retained.Records > 0 {
+		s.logger.Info("expired retained data", "runs", retained.Runs, "metrics", retained.Metrics, "records", retained.Records)
+	}
+	if !s.Metering() {
 		return
 	}
 	billed, err := operator.ChargeRetainedStorage(ctx, lease)
@@ -141,7 +136,7 @@ func (s *Server) billRetainedStorage(ctx context.Context) {
 
 func (s *Server) reportLargestTeams(ctx context.Context, settings store.StorageSettings) {
 	if settings.DefaultTier == "" {
-		quotas, err := s.store.ListStorageQuotas(ctx)
+		quotas, err := s.store.AsOperator().ListStorageQuotas(ctx)
 		if err != nil {
 			s.logger.Error("storage quota list failed", "err", err)
 			return
@@ -151,14 +146,14 @@ func (s *Server) reportLargestTeams(ctx context.Context, settings store.StorageS
 		}
 	}
 	month := store.StorageMonth(time.Now().UTC())
-	top, err := s.store.TopStorageTeams(ctx, month, storageReportTeams)
+	top, err := s.store.AsOperator().TopStorageTeams(ctx, month, storageReportTeams)
 	if err != nil {
 		s.logger.Error("largest-teams report failed", "err", err)
 		return
 	}
 	for _, team := range top {
 		s.logger.Info("storage by team",
-			"month", month, "principal", team.Principal,
+			"month", month, "team", team.Team,
 			"bytes", team.Bytes, "objects", team.Objects)
 	}
 }
@@ -197,12 +192,12 @@ func chargedPrincipal(r *http.Request) string {
 }
 
 type storageQuotaJSON struct {
-	Principal             string `json:"principal"`
-	Tier                  string `json:"tier,omitempty"`
-	MaxBytesPerRun        int64  `json:"max_bytes_per_run"`
-	MaxBytesPerMonth      int64  `json:"max_bytes_per_month"`
-	MaxObjectsPerRun      int64  `json:"max_objects_per_run"`
-	StorageAllowanceBytes int64  `json:"storage_allowance_bytes"`
+	Team                  store.Team `json:"team"`
+	Tier                  string     `json:"tier,omitempty"`
+	MaxBytesPerRun        int64      `json:"max_bytes_per_run"`
+	MaxBytesPerMonth      int64      `json:"max_bytes_per_month"`
+	MaxObjectsPerRun      int64      `json:"max_objects_per_run"`
+	StorageAllowanceBytes int64      `json:"storage_allowance_bytes"`
 }
 
 type storageAllowanceJSON struct {
@@ -223,19 +218,18 @@ type storageUsageJSON struct {
 	Month        string `json:"month"`
 	MonthBytes   int64  `json:"month_bytes"`
 	MonthObjects int64  `json:"month_objects"`
-	// safety: retained bytes are what the storage charge and the allowance
-	// sweep measure, which the month total is not: it outlives its runs.
+	// safety: historical usage survives deletion, so retained bytes come from committed inventory.
 	RetainedBytes int64 `json:"retained_bytes"`
 }
 
 type storageTeamJSON struct {
-	Principal string `json:"principal"`
-	Bytes     int64  `json:"bytes"`
-	Objects   int64  `json:"objects"`
+	Team    store.Team `json:"team"`
+	Bytes   int64      `json:"bytes"`
+	Objects int64      `json:"objects"`
 }
 
 type storageSettingsJSON struct {
-	EventRetentionDays      int64  `json:"event_retention_days"`
+	RunRetentionDays        int64  `json:"run_retention_days"`
 	NodeMetricRetentionDays int64  `json:"node_metric_retention_days"`
 	DatabaseAlarmBytes      int64  `json:"database_alarm_bytes"`
 	DefaultTier             string `json:"default_tier,omitempty"`
@@ -254,28 +248,31 @@ type storageStateJSON struct {
 
 func (s *Server) handleStorageShow(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	settings, err := s.store.StorageSettings(ctx)
+	settings, err := s.store.AsOperator().StorageSettings(ctx)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	name := chargedPrincipal(r)
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	admin := false
 	if p, ok := PrincipalFromContext(ctx); ok && p != nil {
 		admin = p.HasScope(ScopeAdmin)
 	}
-	quota, err := s.store.StorageQuotaFor(ctx, name)
+	quota, err := tenant.StorageQuota(ctx)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	month := store.StorageMonth(time.Now().UTC())
-	usage, err := s.store.StorageUsageFor(ctx, name, "", month)
+	usage, err := tenant.StorageUsageFor(ctx, "", month)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	retained, err := s.store.StorageRetainedBytes(ctx, name)
+	retained, err := tenant.StorageRetainedBytes(ctx)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -307,20 +304,20 @@ func (s *Server) handleStorageShow(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) appendAdminStorage(ctx context.Context, out *storageStateJSON, month string) error {
-	quotas, err := s.store.ListStorageQuotas(ctx)
+	quotas, err := s.store.AsOperator().ListStorageQuotas(ctx)
 	if err != nil {
 		return err
 	}
 	for _, q := range quotas {
 		out.Quotas = append(out.Quotas, storageQuotaToJSON(q))
 	}
-	teams, err := s.store.TopStorageTeams(ctx, month, storageReportTeams)
+	teams, err := s.store.AsOperator().TopStorageTeams(ctx, month, storageReportTeams)
 	if err != nil {
 		return err
 	}
 	for _, team := range teams {
 		out.Teams = append(out.Teams, storageTeamJSON{
-			Principal: team.Principal, Bytes: team.Bytes, Objects: team.Objects,
+			Team: team.Team, Bytes: team.Bytes, Objects: team.Objects,
 		})
 	}
 	return nil
@@ -333,17 +330,17 @@ func (s *Server) handleSetStorageSettings(w http.ResponseWriter, r *http.Request
 		return
 	}
 	settings := store.StorageSettings{
-		EventRetentionDays:      body.EventRetentionDays,
+		RunRetentionDays:        body.RunRetentionDays,
 		NodeMetricRetentionDays: body.NodeMetricRetentionDays,
 		DatabaseAlarmBytes:      body.DatabaseAlarmBytes,
 		DefaultTier:             body.DefaultTier,
 	}
-	if err := s.store.SetStorageSettings(r.Context(), settings); err != nil {
+	if err := s.store.AsOperator().SetStorageSettings(r.Context(), settings); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	s.logger.Info("storage settings updated",
-		"event_retention_days", settings.EventRetentionDays,
+		"run_retention_days", settings.RunRetentionDays,
 		"node_metric_retention_days", settings.NodeMetricRetentionDays,
 		"database_alarm_bytes", settings.DatabaseAlarmBytes,
 		"default_tier", settings.DefaultTier)
@@ -351,10 +348,8 @@ func (s *Server) handleSetStorageSettings(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleSetStorageQuota(w http.ResponseWriter, r *http.Request) {
-	principal := r.PathValue("principal")
-	if !store.ValidStoragePrincipal(principal) {
-		writeError(w, http.StatusBadRequest, fmt.Errorf(
-			"principal must be 1 to %d characters", store.StoragePrincipalMaxLen))
+	tenant, ok := s.namedTenant(w, r, r.PathValue("team"))
+	if !ok {
 		return
 	}
 	var body setStorageQuotaJSON
@@ -363,22 +358,21 @@ func (s *Server) handleSetStorageQuota(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	quota := store.StorageQuota{
-		Principal:        principal,
 		Tier:             body.Tier,
 		MaxBytesPerRun:   body.MaxBytesPerRun,
 		MaxBytesPerMonth: body.MaxBytesPerMonth,
 		MaxObjectsPerRun: body.MaxObjectsPerRun,
 	}
-	if err := s.store.SetStorageQuota(r.Context(), quota); err != nil {
+	if err := tenant.SetStorageQuota(r.Context(), quota); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	stored, err := s.store.StorageQuotaFor(r.Context(), principal)
+	stored, err := tenant.StorageQuota(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	s.logger.Info("storage quota updated", "principal", principal, "tier", stored.Tier,
+	s.logger.Info("storage quota updated", "team", tenant.Team(), "tier", stored.Tier,
 		"max_bytes_per_run", stored.MaxBytesPerRun, "max_bytes_per_month", stored.MaxBytesPerMonth,
 		"max_objects_per_run", stored.MaxObjectsPerRun,
 		"storage_allowance_bytes", stored.AllowanceBytes)
@@ -387,7 +381,7 @@ func (s *Server) handleSetStorageQuota(w http.ResponseWriter, r *http.Request) {
 
 func storageSettingsToJSON(in store.StorageSettings) storageSettingsJSON {
 	return storageSettingsJSON{
-		EventRetentionDays:      in.EventRetentionDays,
+		RunRetentionDays:        in.RunRetentionDays,
 		NodeMetricRetentionDays: in.NodeMetricRetentionDays,
 		DatabaseAlarmBytes:      in.DatabaseAlarmBytes,
 		DefaultTier:             in.DefaultTier,
@@ -396,7 +390,7 @@ func storageSettingsToJSON(in store.StorageSettings) storageSettingsJSON {
 
 func storageQuotaToJSON(in store.StorageQuota) storageQuotaJSON {
 	return storageQuotaJSON{
-		Principal:             in.Principal,
+		Team:                  in.Team,
 		Tier:                  in.Tier,
 		MaxBytesPerRun:        in.MaxBytesPerRun,
 		MaxBytesPerMonth:      in.MaxBytesPerMonth,
@@ -405,14 +399,10 @@ func storageQuotaToJSON(in store.StorageQuota) storageQuotaJSON {
 	}
 }
 
-// safety: the allowance is the ceiling the sweep expires oldest-first down to,
-// so it is written on its own rather than through the quota route, which
-// replaces every limit the body leaves out.
+// safety: independent writes keep quota replacements from discarding the retained allowance.
 func (s *Server) handleSetStorageAllowance(w http.ResponseWriter, r *http.Request) {
-	principal := r.PathValue("principal")
-	if !store.ValidStoragePrincipal(principal) {
-		writeError(w, http.StatusBadRequest, fmt.Errorf(
-			"principal must be 1 to %d characters", store.StoragePrincipalMaxLen))
+	tenant, ok := s.namedTenant(w, r, r.PathValue("team"))
+	if !ok {
 		return
 	}
 	var body storageAllowanceJSON
@@ -420,12 +410,12 @@ func (s *Server) handleSetStorageAllowance(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	stored, err := s.store.SetStorageAllowance(r.Context(), principal, body.StorageAllowanceBytes)
+	stored, err := tenant.SetStorageAllowance(r.Context(), body.StorageAllowanceBytes)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	s.logger.Info("storage allowance updated",
-		"principal", principal, "storage_allowance_bytes", stored.AllowanceBytes)
+		"team", tenant.Team(), "storage_allowance_bytes", stored.AllowanceBytes)
 	writeJSON(w, http.StatusOK, storageQuotaToJSON(stored))
 }

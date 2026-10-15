@@ -243,10 +243,10 @@ var tenantRoutes = map[string]tenantResource{
 	"GET /api/v1/signups": resNone,
 	"PUT /api/v1/signups": resNone,
 
-	"GET /api/v1/storage":                              resNone,
-	"PUT /api/v1/storage/quotas/{principal}":           resStorageQuota,
-	"PUT /api/v1/storage/quotas/{principal}/allowance": resStorageQuota,
-	"PUT /api/v1/storage/settings":                     resNone,
+	"GET /api/v1/storage":                         resNone,
+	"PUT /api/v1/storage/quotas/{team}":           resStorageQuota,
+	"PUT /api/v1/storage/quotas/{team}/allowance": resStorageQuota,
+	"PUT /api/v1/storage/settings":                resNone,
 
 	"DELETE /api/v1/team": resNone,
 	"PATCH /api/v1/team":  resNone,

@@ -1051,8 +1051,8 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 
 	mux.Handle("GET /api/v1/storage", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleStorageShow)))
 	mux.Handle("PUT /api/v1/storage/settings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageSettings)))
-	mux.Handle("PUT /api/v1/storage/quotas/{principal}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageQuota)))
-	mux.Handle("PUT /api/v1/storage/quotas/{principal}/allowance", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageAllowance)))
+	mux.Handle("PUT /api/v1/storage/quotas/{team}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageQuota)))
+	mux.Handle("PUT /api/v1/storage/quotas/{team}/allowance", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageAllowance)))
 
 	mux.Handle("GET /api/v1/team/billing", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleTeamBilling)))
 	mux.Handle("POST /api/v1/team/billing/checkout", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingCheckout)))

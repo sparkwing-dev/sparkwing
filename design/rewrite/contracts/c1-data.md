@@ -359,6 +359,32 @@ retention and reopening. It does not exercise provider verification or native
 placements. The controller's billing caller uses this operator method. W1's
 maintenance coordinator owns the shared retention, quota and GC ordering.
 
+### Storage policy and reports
+
+`Tenant.SetStorageQuota`, `StorageQuota`, `SetStorageAllowance`,
+`StorageUsageFor` and `StorageRetainedBytes` replace raw principal-selected
+storage methods. Quota, usage and ranking rows carry `Team`. Write limits and
+retained allowances have independent writers. Allowance creation preserves the
+effective default tier. Usage reports sum replica rows and reject corrupt or
+overflowing totals. Retained-byte reports share the billing inventory.
+
+`Operator.StorageSettings`, `SetStorageSettings`, `SeedRunRetention`,
+`DatabaseSize`, `ListStorageQuotas` and `TopStorageTeams` own deployment policy
+and reports. Run and metric windows use `operator.run_retention_days` and
+`operator.node_metric_retention_days`. Alarm and default-tier keys retain their
+existing names in the final settings table. Policy writes commit as one batch.
+Malformed, sealed, negative and overflowing values fail loudly.
+
+The controller's storage pass calls leased retention and billing with the same
+maintenance fence. Cloud seeds 90-day run retention only when absent. Metric
+retention stays independent. The old event-only and principal allowance sweeps
+are removed. Allowance-driven eviction, physical GC and full elected-worker
+coordination remain integration obligations.
+
+The local C1 correction removes the raw methods and principal quota types.
+Controller callers use team quota paths and `run_retention_days`. No C2, C3 or
+C4 contract declaration changes here.
+
 ## Input and blob invariants
 
 Environment snapshots persist names and a digest, not values. Raw argument

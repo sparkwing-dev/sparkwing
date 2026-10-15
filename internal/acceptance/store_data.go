@@ -80,8 +80,24 @@ func CheckStoreDataBoundary(ctx context.Context, root, id string) (err error) {
 			return fmt.Errorf("durable replica sum=%d, want 18", total)
 		}
 	}
-	if _, err := db.ExecContext(ctx, "INSERT INTO storage_quotas(team,max_bytes_per_month,updated_at) VALUES (?,100,1)", store.DefaultTeam); err != nil {
+	for _, tenant := range tenants {
+		usage, err := tenant.StorageUsageFor(ctx, "", "fixture-period")
+		if err != nil {
+			return err
+		}
+		if usage.Team != store.DefaultTeam || usage.MonthBytes != 18 || usage.MonthObjects != 18 {
+			return fmt.Errorf("public replica report=%+v, want the durable sum 18", usage)
+		}
+	}
+	if err := tenants[0].SetStorageQuota(ctx, store.StorageQuota{MaxBytesPerMonth: 100}); err != nil {
 		return err
+	}
+	quota, err := tenants[1].SetStorageAllowance(ctx, 50)
+	if err != nil {
+		return err
+	}
+	if quota.MaxBytesPerMonth != 100 || quota.AllowanceBytes != 50 {
+		return fmt.Errorf("shared quota configuration=%+v", quota)
 	}
 	if _, err := db.ExecContext(ctx, "INSERT INTO quota_admission(team,quota,period,used,updated_at) VALUES (?,'storage',?,90,1)", store.DefaultTeam, time.Now().UTC().Format("2006-01")); err != nil {
 		return err

@@ -1,164 +1,199 @@
 # W1b handoff
 
-W1b remains incomplete. This continuation starts at `ca771a7a9` and ports
-retained-storage billing to the final schema. Earlier upload, blob, log,
-metered-accounting and payment implementations remain in place. W1 admission,
-claim, transition, reaper, schema and SQL-guard files were not edited. The only
-shared store edit removes obsolete watermark cleanup from `deletion.go`.
-No Git writes or Sparkwing binaries were run.
+W1b remains incomplete. This continuation starts at `5438be851` and replaces
+principal-selected storage policy and reporting with final-schema tenant and
+operator APIs. Earlier metered accounting, payments, uploads, records, GC and
+log persistence remain in place. W1's admission, claim, state, reaper, schema,
+quota-admission and SQL-guard implementation files were not edited.
 
 ## Implemented
 
-- `Operator.ChargeRetainedStorage(ctx, maintenanceLease)` replaces the raw
-  Store method. It reads unique committed `blobs` and persisted
-  `log_streams.stored_bytes`. Replica usage totals and reference counts cannot
-  multiply retained bytes. The free allowance applies once to the combined
-  inventory, after the team's optional retained ceiling. Teams without quota
-  rows are billed. Charges carry the team and no run or runner price fields.
-- Both existing `team_storage.storage_charged_through` rows share the same
-  watermark. The maintenance fence, credit lock, watermark update, ledger
-  debit and spend counters commit together per team. The fence is checked
-  again before commit. Separate database clients cannot bill one interval
-  twice. The initial sample establishes billing time. Fractional seconds
-  remain for the next pass. Empty samples and creation times bound idle gaps.
-  A disabled price clears existing watermarks so resumed billing starts fresh.
-- Corrupt settings, negative allowances, inconsistent watermarks and invalid
-  or overflowing inventory return errors. Failed ledger writes roll back the
-  watermark. A backward clock produces no charge until it catches up.
-- The controller's existing billing caller acquires the maintenance lease and
-  invokes the operator method. It logs teams rather than token principals.
-  Its call to the obsolete principal allowance sweep is removed. W1's final
-  maintenance coordinator still needs to unify retention, allowances and GC.
-- The new SQLite acceptance cell takes a real storage debit, checks its amount
-  and the expected balance, then runs leased retention and reopens the store.
-  The old run, stream and segments disappear. Every field of all financial
-  rows, including provider evidence, awards and intervals, remains unchanged.
+- `storage_quota.go` owns tenant quota configuration, retained allowances,
+  historical usage and retained-byte reports. Quota, usage and ranking values
+  carry `Team`. Tenant methods accept no principal selector. A mismatched team
+  in a quota input is refused. Operator methods own cross-team lists/rankings.
+- Quota and allowance upserts preserve each other's fields. Creating an
+  allowance without a quota preserves the effective default tier. Concurrent
+  independent database clients preserve both writes. Explicit unlimited rows
+  override a deployment default. Negative/corrupt quotas and invalid tiers
+  fail loudly.
+- Usage reports sum replica rows. Run totals span periods; month totals select
+  their period. Missing counters report zero. Overflow and negative individual
+  counters return errors, including negative values hidden by a positive sum.
+  Rankings sum before ordering and limiting, with team as the tie breaker.
+- Retained-byte reports share the billing inventory: unique committed blobs
+  plus persisted log bytes. Historical usage and reference multiplicity cannot
+  inflate the retained report. Different teams account for their own copy.
+- `storage_policy.go` owns operator policy in the final JSON settings table.
+  Reads use one transaction; replacement writes are atomic. Corrupt, sealed,
+  negative and overflowing settings are refused. Run/metric keys are the
+  existing final `operator.run_retention_days` and
+  `operator.node_metric_retention_days`. Alarm/default-tier keys retain their
+  names. No schema, environment variable or service was added.
+- Cloud seeds a 90-day run window only when absent. Explicit zero survives
+  restarts. Metric retention keeps its independent policy. The controller
+  invokes `MaintainRetention` and storage billing under the same maintenance
+  fence. A foreign live fence prevents deletion. This uses W1's existing
+  retention transaction without editing it.
+- Controller quota paths name a registered team. Unknown teams return 404.
+  Storage reports use the authenticated request's team, ignoring a query's
+  team selector. Operator reports include aggregate rankings. JSON quota and
+  ranking rows use `team`; settings use `run_retention_days`. These are hard
+  cuts. Route scopes remain unchanged pending C2's final operator routing.
+- The SQLite `storage-replica-safe-accounting/store-data-sqlite` acceptance
+  proof now reads the public aggregate report after reopening and configures
+  the shared quota/allowance through the new tenant APIs.
 
-The patch removes **213 legacy billing implementation lines**, **413 legacy
-store-test lines** and **119 legacy controller-test lines**. New owned files
-replace billing and port its assertions. These are gross removals, not a net
-code reduction claim. No table, column, setting key, environment variable,
-service, compatibility API or price limit was added.
+## Deleted and ported
+
+Removed **811 Go lines from the legacy store implementation** and **1,032
+legacy test lines** across store/controller files. These are gross diff
+removals, including replaced declarations, not a net reduction claim.
+`storage_retention.go` and its old tests are deleted. The raw Store quota,
+allowance, reporting, settings, size and event-only retention APIs are gone,
+as are principal validation, old sweep results and principal allowance helpers.
+The new implementation files total 312 lines.
+
+Assertions ported to the new tests include default-tier fallback, explicit
+unlimited policy, independent quota/allowance updates, preserved defaults on
+allowance creation, invalid input, stored policy round trips, explicit zero,
+finish-time retention, operator/tenant report separation and team identity
+independent of principal labels. The old run-usage cascade expectation is
+reversed: final financial usage survives retention, as checked by the existing
+billing acceptance proof. New tests add independent clients/reopening, atomic
+settings rollback, sealed/corrupt policy, overflow, replica sums and unique
+log/blob inventory.
+
+No additional complete row of the archived T1 port inventory is claimed closed.
+The old event/principal allowance sweeps are obsolete. Their oldest-first and
+nonpayment eviction policy still needs a final record/pin-aware implementation.
+The surviving legacy charged-event/manifest fixtures were changed only enough
+to compile against the removed APIs; they still need final lifecycle/authority
+migration. Their passing runtime behavior is not claimed.
 
 ## Verification
 
-All Go checks used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4`,
-`-p 4`, and private cache/temp directories under `/tmp/sw-astra-W1b/`.
+All Go commands used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4`,
+`-p 4`, and `GOCACHE`, `GOTMPDIR` and `TMPDIR` under `/tmp/sw-astra-W1b/`.
+The scratch directory is deleted at handoff. No Sparkwing binary or git write
+was run, and no service was started.
 
-- Final `go build -p 4 ./...` passed for the whole repository.
+- Whole-repository `go build -p 4 ./...` passed.
 - `go vet -p 4` passed for `pkg/store/...`, `pkg/controller/...`,
   `internal/acceptance/...` and `tests/acceptance/...`.
-- Store regression selection: **95 top-level tests / 185 with subtests**,
-  no failures or skips. Selection:
+- Store regression: **104 top-level tests / 199 including subtests** passed,
+  without skips. Selection:
   `^(TestStoreData|TestLogPersistence|TestResult|TestBlob|TestPayment|TestReversePaymentTakesBack|TestCreditSettings|TestSetCreditSettings|TestUnsetRateTable|TestSetRateTable|TestAStoredRateTable|TestATableWithoutAFourCore)`.
-- Final race selection: **43 top-level tests / 83 with subtests**, no failures
-  or skips. Selection:
-  `^(TestStoreDataRetainedStorage|TestStoreDataMetered|TestPayment)`.
-- Acceptance packages passed: **20 top-level tests / 195 passes**, with
-  **2,995 existing target skips**. Passing SQLite product cells:
-  `billing-ledger-survives-retention/store-data-sqlite` (new) and
-  `storage-replica-safe-accounting/store-data-sqlite` (existing).
-  Native, PostgreSQL, provider and physical-backend cells remain pending.
-- `go run ./internal/commentcheck -base HEAD <repo>` passed across nine Go
-  files. `sync-docs.sh --check` and `git diff --check` passed.
-- Generated snapshots in scratch confirm the new method signature. Existing
-  snapshot drift remains in eight packages: controller, controller/client,
-  projectconfig, match, store, storage/storeurl, sparkwing and storage. Only
-  the owned method removal/addition was applied to the committed snapshot.
-- The tenant SQL guard still fails with **14 existing findings** in authority,
-  payment and retention code. The new billing file has no finding and adds no
-  exemption. W1 owns that guard. Full legacy suites and pipeline gates were
-  not run. Independent review remains with the lead.
+- Controller regression: **6 tests** passed. Selection:
+  `^(TestStoreDataStorage|TestAMultiTeamStoragePassSeedsRetentionAndReleasesOldRuns$|TestASingleTeamControllerKeepsItsOperatorsRetention$|TestStorageRetentionPassRequiresMaintenanceFence$)`.
+  Tests use real SQLite stores and HTTP recorders. The route tests supply
+  authenticated principal facts; they do not prove C2 authentication.
+- Race selection: **63 top-level tests / 124 including subtests** passed,
+  without skips, over store/controller. Selection:
+  `^(TestStoreData|TestPayment|TestAMultiTeamStoragePassSeedsRetentionAndReleasesOldRuns$|TestASingleTeamControllerKeepsItsOperatorsRetention$|TestStorageRetentionPassRequiresMaintenanceFence$)`.
+- Full acceptance packages passed: **20 top-level tests / 195 passes**, with
+  **2,995 existing target skips**. SQLite product cells remain
+  `storage-replica-safe-accounting/store-data-sqlite` (extended) and
+  `billing-ledger-survives-retention/store-data-sqlite`. Native placements,
+  PostgreSQL, provider verification and physical backends remain pending.
+- `go run ./internal/commentcheck -base HEAD <repo>` passed across 18 Go files.
+  API-spec validation passed. Generated API-reference output matches the
+  source. Embedded-doc sync and `git diff --check` passed.
+- API snapshots were generated in scratch. Only the owned store API changes
+  and Cloud retention constant were applied. Existing broader drift remains
+  in eight packages: controller, controller/client, projectconfig, match,
+  store, storage/storeurl, sparkwing and storage.
+- SQL guard fails with **28 findings**: 14 unscoped statements and 14 stale
+  allowlist entries. Two statements are the moved operator quota/ranking
+  scans. The other statements concern existing authority, payment and
+  retention owners. Twelve stale entries arose from this cut, alongside the
+  two inherited payment entries. W1 owns that guard; it was not edited.
+- An earlier, overly broad controller selection also ran
+  `TestASingleTeamControllerCountsNoShare`, which failed while inserting a
+  token into the removed `tokens` table. The exact owned selection above
+  passed. Full legacy suites and pipeline gates were not run. Independent
+  review and gates remain with the lead.
 
-Tests first reproduced the absent operator API. The extended clock-regression
-case caught rejection of a creation time ahead of a regressed clock. Its
-correction passed the final regression and race runs.
-
-## Assertions ported
-
-`retained_storage_billing_test.go` ports daily and partial-day pricing,
-fractional truncation, no charge on the first pass, allowance/free-byte caps,
-no-quota charging, periodic charges before release, interval replay, idle-gap
-clamping, stable inventory while fresh bytes arrive, disabled-price behavior
-and monthly balance reconciliation. It adds real tagged-log commits, shared
-log/blob free allowance, tenant isolation, independent clients, reopening,
-ledger rollback, lease fencing, clock regression and corruption/overflow tests.
-The acceptance proof ports financial preservation through real leased retention.
-Old principal allowance/retention tests remain with their unported APIs.
+Tests first reproduced the absent tenant APIs. Subsequent failures found an
+incomplete fixture import migration and an overbroad test selection. Both are
+accounted for above; no gate failure is claimed as a passing check.
 
 ## Remaining work and integration
 
-1. W1 must wire `recordBillingAwardTx` into issuance using server-derived
-   metering, resources and pricing. `authority_issue.go` still writes unmetered
-   awards directly. Start intervals at execution, exclude customer-runner
-   waits, charge renewals and settle releases, terminal transitions and reaping
-   at their persisted end or lapse. The primitives and fake-calculator tests
-   are implemented. Reconciliation still needs atomic memo materialization.
-2. W1 must finish final-settings callers. `computeLimitsSQL` still selects
-   `sparkwing_meta`; `SetFreeTeamSlots` still uses the legacy settings writer.
-   `upsertCreditSettingSQL` and `parseCreditSetting` remain until those callers
-   move. W1 must merge its parallel admission/claim/retention implementation.
-3. W2 must implement `capability.SettleBilling`, payment signature verification
-   and `VerifiedPaymentEvent.Event`, configure payment mode and wire verified
-   settlement. Those functions remain stubs in this worktree. Existing store
-   tests use contract fakes. The new retention proof seeds provider evidence
-   directly and makes no claim about Stripe authentication.
-4. Remaining W1b cuts include claim-time credit APIs in `credits.go`, legacy
-   paid-grant paths, `node_logs.go`, principal quota/report APIs and legacy
-   allowance/retention helpers. Their live consumers must be migrated or cut
-   without touching W1's transition/claim implementation. The raw Store
-   retained-billing API and its metadata watermarks are now gone.
-5. W7 must connect upload reserve/lookup/verified commit/abort to physical
-   integrity checks and trusted `ReplicaID`, and supply manifest reads and
-   blob deletion. `blob.AuthorizeEdge`, `RecordNamespace`, `MemoNamespace`
-   and `DepcacheNamespace` remain stubs and are tested through contract fakes.
-   Confirm the cloud-builder provenance mapping.
-6. W1's elected maintenance coordinator must order final retention, allowance
-   policy, both blob GC phases and storage billing under the same lease. The
-   migrated controller billing call is concrete, but the surrounding legacy
-   maintenance/settings/report path is not a final-schema integration proof.
-   Storage billing still samples retained bytes per pass; it is not an exact
-   historical byte-time integral for objects removed between samples.
-7. W2/W7 log signing must use `LogSegmentObjectKey` and sealed retention
-   classes. Exact proxy egress, lifecycle-rule checks, physical expiration and
-   live-ring segment fallback remain external obligations.
+1. W1 must wire immutable billing awards into issuance with server-derived
+   metering/resources/pricing, open/close billable intervals at execution and
+   waiting boundaries, charge renewals, and settle terminal/release/reaper
+   transactions at persisted finish/lapse. `authority_issue.go` still writes
+   unmetered awards directly here. Reconciliation still needs atomic memo
+   materialization. The existing accounting and blob interfaces/tests remain.
+2. W1's quota admission must consume the effective tenant policy. Its
+   `quotaPolicyTx` still requires an explicit storage quota row, while the
+   report can resolve a deployment default. Final upload admission also needs
+   the configured per-run byte/object policy. Do not add default-row caching
+   that would freeze future deployment policy changes.
+3. W2 must implement billing calculation, payment verification/opaque event
+   exposure, payment configuration and final operator route authorization.
+   Store tests use the existing contract fakes. W1/W2/W9 must settle test/live
+   identity for retained cards, attempts, warnings, freezes and refund work.
+   Their persisted inputs still lack a mode discriminator.
+4. W1b still needs legacy cuts in claim-time credits, paid grants, node logs,
+   old event/manifest charges, raw storage counters and legacy uploads.
+   `chargeStorageTx` still contains principal-column writes and its callers
+   need replacement. This patch only moves its quota lookup to the owning
+   team's policy. `computeLimitsSQL`/free-slot settings remain W1 integration.
+5. W7 must wire upload reserve/lookup/verified commit/abort to physical integrity
+   checks and trusted ReplicaID, manifest reads and blob deletion. Shared blob
+   edge/namespace functions remain stubs and are tested through contract
+   fakes. Confirm the cloud-builder provenance mapping.
+6. Final maintenance must integrate allowance/nonpayment eviction, both blob
+   GC phases and the remaining task ordering. Retention plus billing share a
+   fence now, but `PruneStorageCommitReceipts`, `PruneSpentIdentity` and the
+   separate legacy storage pass remain outside that final coordinator.
+7. W2/W7 log transport must use tagged subjects, canonical object keys and the
+   sealed retention class. Proxy egress, lifecycle rules, physical expiry and
+   live-ring fallback remain external obligations.
 
-## Contract changes needed and questions
+## Contract corrections and guard handoff
 
-The new operator billing method is a local C1 contract correction, recorded in
-`c1-data.md` and the store API snapshot. No foreign contract was changed.
-Inherited questions remain:
+The tenant/operator storage APIs, `Team` fields and run-retention policy are
+local C1 contract corrections, recorded in `c1-data.md` and snapshots. No foreign
+contract declaration was edited. C2/W9 still own the final operator route tree.
 
-- W1/W2/W9 must coordinate test/live identity for retained cards, attempts,
-  warnings, freezes and refund work. Those tables/API inputs lack a mode
-  discriminator, so provider IDs can collide after a configuration switch.
-- W1 must update its SQL guard's legitimate cross-team authority/payment and
-  retention exemptions. Remove stale `(*Store).PaidGrantTeam` and
-  `(*Store).RecordPaymentWarning` entries, add their scoped lookup owners as
-  appropriate, and review `(*Store).settlePaymentFacts`. The new billing scan
-  correlates each inventory lookup to a known team and requires no exception.
+W1 should review/allow the cross-team operator methods
+`(*Operator).ListStorageQuotas` and `(*Operator).TopStorageTeams`. Remove these
+stale SQL exemptions from the guard:
+
+`(*Store).ListStorageQuotas`, `(*Store).TopStorageTeams`,
+`(*Store).StorageUsageFor`, `(*Store).StorageRetainedBytes`,
+`(*Store).SetStorageQuota`, `(*Store).SetStorageAllowance`,
+`(*Store).storageQuotaRow`, `storageQuotaForTx`, `(*Store).sweepTable`,
+`(*Store).retainingPrincipals`, `(*Store).expireRunStorage`,
+`(*Store).expiredRetainedRuns`.
+
+The inherited `(*Store).PaidGrantTeam` and `(*Store).RecordPaymentWarning`
+entries also need replacement/removal. `tenant.go` retains an obsolete comment
+about raw StorageQuotaFor; leave its W1-owned orientation consistent when merging.
 
 ## Shared files touched
 
-- `pkg/controller/storage.go`: migrate the removed billing caller and remove
-  its obsolete principal sweep call.
-- `pkg/controller/storage_allowance_test.go`: remove two superseded billing
-  tests and their view helper; retain unrelated route and licensing assertions.
-- `pkg/store/deletion.go`: remove the deleted watermark-prefix cleanup. Final
-  team-storage rows already carry the billing watermarks and tenant ownership.
-- `internal/acceptance/store_billing.go` and `tests/acceptance/billing_test.go`:
-  execute the new SQLite retention proof.
-- `design/rewrite/contracts/c1-data.md`, `.apidiff/pkg_store.txt`,
-  `CHANGELOG.md` and generated `pkg/docs/changelog.md`: align the contract,
-  method snapshot and user-facing note.
+- Controller callers: `pkg/controller/storage.go`, `team_storage.go`,
+  `server.go`, `tenant_routes.go`. Route parameter names change to `{team}`.
+- Controller tests: `storage_test.go`, `storage_allowance_test.go`,
+  `team_storage_test.go`, plus the new `storage_data_test.go`.
+- `pkg/store/free_tier_test.go`: migrate the removed settings/expiration calls
+  to operator settings and leased retention. Its legacy fixture is not ported.
+- `internal/acceptance/store_data.go`: extend the SQLite boundary proof.
+- Contract/snapshots: `design/rewrite/contracts/c1-data.md`,
+  `.apidiff/pkg_store.txt`, `.apidiff/pkg_controller.txt`.
+- Product docs: `docs/self-hosting.md`, `auth.md`, `limits.md`,
+  `api-reference.md`, `api/openapi.yaml`, `CHANGELOG.md`, and their generated
+  `pkg/docs` mirrors/changelog.
 
-Other changes are owned storage-credit implementation/tests and this handoff.
-Mechanisms added: none beyond implementing the existing maintenance fence and
-watermark columns. The local raw Store API was replaced, without a shim.
-Friction: foreign contract stubs, legacy consumers and fixtures, existing SQL
-scope findings and broader snapshot drift. `commentcheck` was absent from PATH;
-its repository entry point ran successfully. No local Git identity or
-core.worktree override was found. All checks exited, no services were started,
-and the scratch directory was deleted.
+Other changes are owned storage implementation/tests and this handoff.
+Mechanisms added: none beyond the contracted tenant/operator policy and reports,
+using the existing settings, counters and maintenance lease. No new customer limit was
+introduced. The Cloud window and independent metrics follow the frozen policy.
+Friction remains in foreign stubs, legacy fixtures/consumers, SQL-guard ownership
+and broader snapshot drift. No local Git identity/core.worktree override was found.
 
 STATUS: CONTINUE

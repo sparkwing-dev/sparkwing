@@ -57,7 +57,7 @@ type Cipher interface {
 }
 const ClaimCacheGrantTTL = 5 * time.Minute
 const ClaimPollInterval = 500 * time.Millisecond
-const CloudRetentionDays = 30
+const CloudRetentionDays = 90
 func CompliantClaimPollsPerMinute() int
 const ComputeLimitRefusedCode = "compute_limit"
 const ComputeLimitRetryAfterSeconds = 5
