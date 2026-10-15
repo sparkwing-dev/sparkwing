@@ -24,9 +24,12 @@ var reviewedUnscopedSQL = map[string]string{
 	"claimUnitTx":                         "the matcher checks claimant team or deployment launcher authority before the claim reads the target run's team by global id",
 	"readMatchingInputsTx":                "reads the run's team by global id, then refuses a foreign claimant unless it holds deployment launcher authority",
 	"loadAwardRowTx":                      "awards derive team from the globally identified unit and check it against the authenticated claimant before issuing authority",
-	"(*Store).settlePaymentFacts":         "a verified provider event identifies a committed checkout by payment mode and session id; the stored checkout supplies the team",
 	"(*Operator).maintainRetention":       "the elected deployment maintenance pass expires sessions across teams while preserving live capability ancestry",
 	"deleteRetentionMetricsTx":            "the elected deployment maintenance pass selects expired metrics across teams and deletes each exact team/run/job/time identity",
+	"paidGrantForPaymentTx":               "provider payment identity is resolved before the payer is known; the configured mode and persisted checkout select the grant",
+	"paymentWarningTeamTx":                "a provider warning names a payment identity; its persisted grant or card attempt supplies the team",
+	"(*Store).settlePaymentFacts":         "a verified event resolves its committed checkout by configured mode and provider session, then rejects payment identities already used by any other checkout",
+
 	"(*Store).DueCardCharges": "the payment worker expires every team's stale pay-now attempts in one pass " +
 		"under the ledger lock",
 	"startDueAttemptsTx": "the payment worker starts the due attempts of every team's open charges; " +
@@ -36,18 +39,13 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).FailCardAttempt":     "a decline names its attempt by global id; the team is read from that row",
 	"(*Store).DropCardAttempt":     "an attempt that never reached Stripe is closed by its global id",
 	"(*Store).RecordAttemptIntent": "the worker binds a payment to the attempt it names by global id",
-	"(*Store).RecordPaymentWarning": "a warning names only its payment, so the team is what the payment's " +
-		"grant or attempt row says",
-	"(*Store).DueCardRefunds": "the payment worker lists every team's queued refunds in one pass",
+	"(*Store).DueCardRefunds":      "the payment worker lists every team's queued refunds in one pass",
 	"(*Store).ReportCardRefund": "Stripe names a refund by its payment and refund ids alone; the team is what " +
 		"the queued row says",
 	"globalRunnerRefusal":                 "the global concurrent runner cap counts live claims from every team",
 	"globalRunsPerHourRefusal":            "the global hourly cap counts runs from every team",
 	"(*Store).NodeClaimFenceNodeForRun":   "the run ID is global, and the query matches its exact claimant and generation",
-	"(*Store).PruneExpiredUploads":        "the hourly storage pass releases expired pending uploads for every team",
 	"(*Store).PruneStorageCommitReceipts": "the hourly storage pass drops receipt rows past the retry window for every team",
-	"(*Store).PruneExpiredCacheObjects": "the controller's leased hourly storage pass deletes expired cache rows " +
-		"for every team after a successful bucket listing; scoping this delete to one team would leave another team's old rows visible",
 	"(*Store).expiredReservationRows": "the sweep finds which teams hold expired reservations; each release " +
 		"then runs under that team's own row lock",
 	"(*Store).StorageMarks":          "the storage pass reconciles every team's count of one store from one bucket listing",
@@ -63,8 +61,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).NodeOutputKey": "the run ID is global, and the key only names an attempt the upload's own check binds",
 	"(*Store).RecordLocalOutput": "a laptop store records an output its own process wrote for a node it holds; " +
 		"the run ID is global and the row takes that node's team",
-	"(*Store).PaidGrantTeam": "asks which team a payment id was granted to, so a refund that names only " +
-		"the payment reverses it in that team; a payment id is unique across teams",
 	"(*Store).claimScope": "asks which team a claim credential belongs to, so an answer scoped to " +
 		"the asker is no answer; it is the read every other claim predicate is built from",
 	"(*Store).readClaimCandidates": "the team predicate comes from claimTeamWhere at run time; " +
@@ -130,8 +126,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"so the installation's binding is how either finds the team it belongs to",
 	"(*Operator).usageRuns": "counts every team's runs per week for the operator's usage metrics, " +
 		"which report totals across teams and name none",
-	"(*Store).expiredRetainedRuns": "the retention window is the deployment's, so the sweep finds every team's " +
-		"expired runs and releases each against the team read off its own row",
 	"(*Store).PruneSpentIdentity": "deletes every team's invitations, tokens and runner credentials that stopped " +
 		"admitting anyone, because a sweep that pruned one team would leave the rest to grow",
 	"(*Store).FreeSlots": "the free tier is bounded by how many teams hold a slot, so it counts every team's",
@@ -150,13 +144,7 @@ var reviewedUnscopedSQL = map[string]string{
 
 	"(*Store).PruneEgressUsage": "drops every team's egress months past the window, which is a deployment-wide retention",
 	"(*Store).ExpireSessions":   "the identity prune deletes every team's expired sessions",
-	"(*Store).sweepTable": "the retention sweep deletes every team's events and node metrics past the window that the " +
-		"run's own retention allows",
-	"(*Store).expireRunStorage": "the storage retention pass frees one expired run's events and usage, named by the global " +
-		"run id and principal its own scan selected",
-	"(*Store).retainingPrincipals": "the storage pass lists every team's retaining principals with their teams and charges " +
-		"each against that team",
-	"txLiveRunningRunIDs": "the concurrency reapers ask which of the runs they found in any team are still live",
+	"txLiveRunningRunIDs":       "the concurrency reapers ask which of the runs they found in any team are still live",
 	"ownedTeamsTx": "lists the teams one account belongs to as owner, with each team's own owner and member counts, so the " +
 		"account deletion can tell sole ownership from shared",
 	"(*Store).ExpiredOutputRuns": "the output retention sweep finds every team's expired or deleted runs holding outputs, " +
@@ -204,9 +192,9 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).CountPendingNodes":      "an operational gauge of the deployment's ready nodes across every team",
 	"(*Store).CreditLedgerTotals": "the credit sampler reports the deployment's ledger totals, which sum every team's " +
 		"grants, charges and reservations and name none",
-	"(*Store).ListStorageQuotas": "the operator's storage report lists every team's quota, each keyed by its team " +
+	"(*Operator).ListStorageQuotas": "the operator's storage report lists every team's quota, each keyed by its team " +
 		"principal",
-	"(*Store).TopStorageTeams": "the operator's storage report ranks every team's monthly bytes, each keyed by its team " +
+	"(*Operator).TopStorageTeams": "the operator's storage report ranks every team's monthly bytes, each keyed by its team " +
 		"principal",
 	"(*Store).ListEgressUsage": "the controller restores the deployment's egress meter, which counts every principal, " +
 		"before it serves",
@@ -235,24 +223,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).chargeStorageTx": "storage usage rows are keyed by the charged principal, team:<slug> for every team but the " +
 		"default, so the principal names the team; no writer sets their team column yet, and scoping these reads before " +
 		"a backfill would read every quota as unlimited",
-	"(*Store).storageQuotaRow": "storage quotas are keyed by the charged principal, team:<slug> for every team but the " +
-		"default, so the principal names the team; no writer sets their team column yet, and scoping these reads before " +
-		"a backfill would read every quota as unlimited",
-	"storageQuotaForTx": "storage quotas are keyed by the charged principal, team:<slug> for every team but the default, " +
-		"so the principal names the team; no writer sets their team column yet, and scoping these reads before a " +
-		"backfill would read every quota as unlimited",
-	"(*Store).StorageUsageFor": "storage usage rows are keyed by the charged principal, team:<slug> for every team but the " +
-		"default, so the principal names the team; no writer sets their team column yet, and scoping these reads before " +
-		"a backfill would read every quota as unlimited",
-	"(*Store).StorageRetainedBytes": "storage usage rows are keyed by the charged principal, team:<slug> for every team " +
-		"but the default, so the principal names the team; no writer sets their team column yet, and scoping these " +
-		"reads before a backfill would read every quota as unlimited",
-	"(*Store).SetStorageQuota": "the operator sets a quota by principal; storage quotas are keyed by the charged " +
-		"principal, team:<slug> for every team but the default, so the principal names the team; no writer sets their " +
-		"team column yet, and scoping these reads before a backfill would read every quota as unlimited",
-	"(*Store).SetStorageAllowance": "the operator sets an allowance by principal; storage quotas are keyed by the charged " +
-		"principal, team:<slug> for every team but the default, so the principal names the team; no writer sets their " +
-		"team column yet, and scoping these reads before a backfill would read every quota as unlimited",
 }
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a

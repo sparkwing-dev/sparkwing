@@ -5,19 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log/slog"
-	"strconv"
-	"strings"
 	"time"
-)
-
-// safety: zero means unbounded for every one of these, so a controller that
-// set none keeps exactly what it kept before they existed.
-const (
-	metaKeyEventRetentionDays      = "retention_event_days"
-	metaKeyNodeMetricRetentionDays = "retention_node_metric_days"
-	metaKeyDatabaseAlarmBytes      = "storage_alarm_database_bytes"
-	metaKeyDefaultStorageTier      = "storage_default_tier"
 )
 
 // Storage tiers a team's quota can be drawn from.
@@ -51,15 +39,6 @@ var PaidTierQuota = StorageQuota{
 	MaxObjectsPerRun: 100_000,
 }
 
-// RetentionSweepBatch is how many rows one delete statement removes before
-// the sweep issues the next, so a first sweep on a long-unbounded database
-// does not hold one transaction over millions of rows.
-const RetentionSweepBatch = 5000
-
-// safety: a sweep that never converges must end anyway, so the loop is
-// bounded and the next pass finishes what this one left.
-const retentionSweepMaxBatches = 200
-
 // ErrStorageQuota is returned when a write would take a team past one of its
 // storage limits. The enforcing call returns a [StorageQuotaError], which
 // wraps it and names the limit, so a caller matches the condition with
@@ -92,39 +71,31 @@ func (e *StorageQuotaError) Error() string {
 // knowing this type.
 func (e *StorageQuotaError) Unwrap() error { return ErrStorageQuota }
 
-// StorageSettings is the controller-wide half of storage policy: the
-// retention windows the compaction sweep applies, the size that raises an
-// alarm, and the tier a team without a quota row of its own inherits.
+// StorageSettings configures leased retention, database alarms and the default team quota.
 type StorageSettings struct {
-	EventRetentionDays      int64
+	RunRetentionDays        int64
 	NodeMetricRetentionDays int64
 	DatabaseAlarmBytes      int64
 
-	// DefaultTier names the tier a principal with no quota row is held to.
-	// Empty leaves every such principal unlimited, which is what an install
-	// that never enabled quotas reads.
+	// DefaultTier applies only to teams without an explicit quota row.
 	DefaultTier string
 }
 
-// RetentionOn reports whether any retention window is set, which is what says
-// the compaction sweep has work to do.
+// RetentionOn reports whether run or metric expiration is enabled.
 func (s StorageSettings) RetentionOn() bool {
-	return s.EventRetentionDays > 0 || s.NodeMetricRetentionDays > 0
+	return s.RunRetentionDays > 0 || s.NodeMetricRetentionDays > 0
 }
 
 // StorageQuota is one team's allowance. A zero limit is unbounded, so a quota
 // may cap bytes without capping objects.
 type StorageQuota struct {
-	Principal        string
+	Team             Team
 	Tier             string
 	MaxBytesPerRun   int64
 	MaxBytesPerMonth int64
 	MaxObjectsPerRun int64
-	// AllowanceBytes is how many retained bytes the customer asked to keep.
-	// It is the ceiling the allowance sweep expires oldest-first down to and
-	// the most a team is billed for, and zero keeps everything. Only
-	// [Store.SetStorageAllowance] writes it; [Store.SetStorageQuota] leaves it
-	// where it stands.
+	// AllowanceBytes caps the retained bytes priced by storage billing. Zero is uncapped.
+	// [Tenant.SetStorageAllowance] writes it independently of the write limits.
 	AllowanceBytes int64
 }
 
@@ -136,7 +107,7 @@ func (q StorageQuota) Unlimited() bool {
 // StorageUsage is what one team has stored: the totals for one run, and the
 // maintained totals for one calendar month.
 type StorageUsage struct {
-	Principal    string
+	Team         Team
 	RunID        string
 	Month        string
 	RunBytes     int64
@@ -148,19 +119,10 @@ type StorageUsage struct {
 // StorageTeamUsage is one row of the largest-teams report: what a team stored
 // over a month.
 type StorageTeamUsage struct {
-	Principal string
-	Month     string
-	Bytes     int64
-	Objects   int64
-}
-
-// RetentionSweep reports what one compaction pass removed and the cutoffs it
-// removed against.
-type RetentionSweep struct {
-	Events           int64
-	NodeMetrics      int64
-	EventCutoff      time.Time
-	NodeMetricCutoff time.Time
+	Team    Team
+	Month   string
+	Bytes   int64
+	Objects int64
 }
 
 // TableSize is one table's total size on disk, indexes and toast included.
@@ -178,175 +140,15 @@ type DatabaseSize struct {
 	SampledAt  time.Time   `json:"sampled_at"`
 }
 
-// StorageSettings returns the retention windows, alarm threshold and default
-// tier this controller runs with.
-func (s *Store) StorageSettings(ctx context.Context) (StorageSettings, error) {
-	out := StorageSettings{}
-	for _, field := range []struct {
-		key string
-		dst *int64
-	}{
-		{metaKeyEventRetentionDays, &out.EventRetentionDays},
-		{metaKeyNodeMetricRetentionDays, &out.NodeMetricRetentionDays},
-		{metaKeyDatabaseAlarmBytes, &out.DatabaseAlarmBytes},
-	} {
-		v, err := s.storageSetting(ctx, field.key)
-		if err != nil {
-			return StorageSettings{}, err
-		}
-		*field.dst = v
-	}
-	tier, err := s.storageText(ctx, metaKeyDefaultStorageTier)
-	if err != nil {
-		return StorageSettings{}, err
-	}
-	out.DefaultTier = tier
-	return out, nil
-}
-
-// SetStorageSettings writes every field, so a caller reads the current
-// settings, changes what it means to change, and writes them back.
-func (s *Store) SetStorageSettings(ctx context.Context, in StorageSettings) error {
-	if in.DefaultTier != "" {
-		if _, ok := TierQuota(in.DefaultTier); !ok {
-			return fmt.Errorf("storage: unknown tier %q", in.DefaultTier)
-		}
-	}
-	for _, field := range []struct {
-		key   string
-		value int64
-	}{
-		{metaKeyEventRetentionDays, in.EventRetentionDays},
-		{metaKeyNodeMetricRetentionDays, in.NodeMetricRetentionDays},
-		{metaKeyDatabaseAlarmBytes, in.DatabaseAlarmBytes},
-	} {
-		if field.value < 0 {
-			return fmt.Errorf("storage: %s must not be negative", field.key)
-		}
-		if err := s.setStorageMeta(ctx, field.key, strconv.FormatInt(field.value, 10)); err != nil {
-			return err
-		}
-	}
-	return s.setStorageMeta(ctx, metaKeyDefaultStorageTier, in.DefaultTier)
-}
-
-func (s *Store) storageSetting(ctx context.Context, key string) (int64, error) {
-	raw, err := s.storageText(ctx, key)
-	if err != nil || raw == "" {
-		return 0, err
-	}
-	v, perr := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
-	if perr != nil {
-		// safety: an unparsable settings row must not break a read, so the
-		// unbounded default stands and the stored value is named in the log.
-		slog.Warn("storage: a stored setting is not an integer; treating it as unbounded",
-			"key", key, "value", raw, "err", perr)
-		return 0, nil
-	}
-	return v, nil
-}
-
-func (s *Store) storageText(ctx context.Context, key string) (string, error) {
-	var raw string
-	err := s.queryRow(ctx, `SELECT value FROM sparkwing_meta WHERE key = ?`, key).Scan(&raw)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(raw), nil
-}
-
-func (s *Store) setStorageMeta(ctx context.Context, key, value string) error {
-	_, err := s.exec(ctx,
-		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
-		 ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-		key, value, time.Now().UnixNano())
-	return err
-}
-
-// SweepRetention removes the events and per-node metric samples of finished
-// runs once they are older than their retention window, in bounded batches,
-// and reports how many rows each removal took. A window of zero removes
-// nothing, and a run still pending or running keeps every row it has written
-// however old, because its own history is what it is still writing.
-func (s *Store) SweepRetention(ctx context.Context, now time.Time) (RetentionSweep, error) {
-	settings, err := s.StorageSettings(ctx)
-	if err != nil {
-		return RetentionSweep{}, err
-	}
-	out := RetentionSweep{}
-	if settings.EventRetentionDays > 0 {
-		out.EventCutoff = retentionCutoff(now, settings.EventRetentionDays)
-		n, derr := s.sweepTable(ctx, "events", out.EventCutoff)
-		if derr != nil {
-			return RetentionSweep{}, fmt.Errorf("storage: sweep events: %w", derr)
-		}
-		out.Events = n
-	}
-	if settings.NodeMetricRetentionDays > 0 {
-		out.NodeMetricCutoff = retentionCutoff(now, settings.NodeMetricRetentionDays)
-		n, derr := s.sweepTable(ctx, "node_metrics", out.NodeMetricCutoff)
-		if derr != nil {
-			return RetentionSweep{}, fmt.Errorf("storage: sweep node metrics: %w", derr)
-		}
-		out.NodeMetrics = n
-	}
-	return out, nil
-}
-
-func retentionCutoff(now time.Time, days int64) time.Time {
-	return now.Add(-time.Duration(days) * 24 * time.Hour)
-}
-
-// safety: one statement per batch keeps the write lock short, and the loop
-// stops on a short batch, a cancelled context, or the batch ceiling.
-func (s *Store) sweepTable(ctx context.Context, table string, cutoff time.Time) (int64, error) {
-	query := fmt.Sprintf(`DELETE FROM %s WHERE %s IN (
-        SELECT t.%s FROM %s t JOIN runs r ON r.id = t.run_id
-         WHERE t.ts < ? AND r.%s
-         LIMIT ?)`,
-		table, s.rowIdentifier(), s.rowIdentifier(), table, runTerminalIn)
-	var total int64
-	for range retentionSweepMaxBatches {
-		if err := ctx.Err(); err != nil {
-			return total, err
-		}
-		res, err := s.exec(ctx, query, cutoff.UnixNano(), RetentionSweepBatch)
-		if err != nil {
-			return total, err
-		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return total, err
-		}
-		total += n
-		if n < RetentionSweepBatch {
-			return total, nil
-		}
-	}
-	return total, nil
-}
-
-// safety: SQLite names a row's implicit key rowid and Postgres names it ctid;
-// a batched delete needs one of them to bound the statement.
-func (s *Store) rowIdentifier() string {
-	if s.dialect == DialectPostgres {
-		return "ctid"
-	}
-	return "rowid"
-}
-
 // DatabaseSize samples how much room the metadata database occupies. SQLite
 // answers with the pages it holds less the pages on its free list, so a sweep
 // shrinks the sample even though the file keeps its size until an operator
 // runs VACUUM; Postgres answers per relation and the total is their sum.
-func (s *Store) DatabaseSize(ctx context.Context) (DatabaseSize, error) {
-	if s.dialect == DialectPostgres {
-		return s.postgresDatabaseSize(ctx)
+func (o *Operator) DatabaseSize(ctx context.Context) (DatabaseSize, error) {
+	if o.s.dialect == DialectPostgres {
+		return o.s.postgresDatabaseSize(ctx)
 	}
-	return s.sqliteDatabaseSize(ctx)
+	return o.s.sqliteDatabaseSize(ctx)
 }
 
 func (s *Store) sqliteDatabaseSize(ctx context.Context) (DatabaseSize, error) {
@@ -409,143 +211,10 @@ func TierQuota(tier string) (StorageQuota, bool) {
 	}
 }
 
-// StoragePrincipalMaxLen is the longest principal a quota row may be filed
-// under. It is a storage bound, not a naming rule.
-const StoragePrincipalMaxLen = 256
-
-// ValidStoragePrincipal reports whether a name may key a quota row. A token
-// principal is a free-form label, so this refuses only what cannot be a
-// principal at all: nothing and something longer than any token carries.
-// Narrowing it further would leave an existing team unable to hold a quota
-// while a default tier still bound it.
-func ValidStoragePrincipal(name string) bool {
-	return name != "" && len(name) <= StoragePrincipalMaxLen
-}
-
-// SetStorageQuota writes one team's allowance. A quota naming a known tier and
-// leaving every limit zero takes that tier's limits, so an operator moves a
-// team between tiers without restating three numbers.
-func (s *Store) SetStorageQuota(ctx context.Context, q StorageQuota) error {
-	if !ValidStoragePrincipal(q.Principal) {
-		return fmt.Errorf("storage: %q is not a usable principal name", q.Principal)
-	}
-	if q.Tier != "" {
-		tier, ok := TierQuota(q.Tier)
-		if !ok {
-			return fmt.Errorf("storage: unknown tier %q", q.Tier)
-		}
-		if q.Unlimited() {
-			tier.Principal = q.Principal
-			q = tier
-		}
-	}
-	for _, v := range []int64{q.MaxBytesPerRun, q.MaxBytesPerMonth, q.MaxObjectsPerRun} {
-		if v < 0 {
-			return errors.New("storage: quota limits must not be negative")
-		}
-	}
-	// safety: the allowance has one writer, SetStorageAllowance, so a quota
-	// rewrite that says nothing about it cannot silently drop what a team
-	// asked to keep.
-	_, err := s.exec(ctx, `
-INSERT INTO storage_quotas (principal, tier, max_bytes_per_run,
-        max_bytes_per_month, max_objects_per_run, updated_at)
-VALUES (?, ?, ?, ?, ?, ?)
-ON CONFLICT (principal) DO UPDATE SET
-        tier = excluded.tier,
-        max_bytes_per_run = excluded.max_bytes_per_run,
-        max_bytes_per_month = excluded.max_bytes_per_month,
-        max_objects_per_run = excluded.max_objects_per_run,
-        updated_at = excluded.updated_at`,
-		q.Principal, q.Tier, q.MaxBytesPerRun,
-		q.MaxBytesPerMonth, q.MaxObjectsPerRun, time.Now().UnixNano())
-	return err
-}
-
-// StorageQuotaFor returns the allowance a principal is held to: its own row
-// when it has one, the default tier's limits when the controller set one, and
-// an unlimited quota otherwise.
-func (s *Store) StorageQuotaFor(ctx context.Context, principal string) (StorageQuota, error) {
-	q, found, err := s.storageQuotaRow(ctx, principal)
-	if err != nil || found {
-		return q, err
-	}
-	tier, err := s.storageText(ctx, metaKeyDefaultStorageTier)
-	if err != nil {
-		return StorageQuota{}, err
-	}
-	if def, ok := TierQuota(tier); ok {
-		def.Principal = principal
-		return def, nil
-	}
-	return StorageQuota{Principal: principal}, nil
-}
-
-func (s *Store) storageQuotaRow(ctx context.Context, principal string) (StorageQuota, bool, error) {
-	q := StorageQuota{Principal: principal}
-	err := s.queryRow(ctx, `
-SELECT tier, max_bytes_per_run, max_bytes_per_month, max_objects_per_run, storage_allowance_bytes
-  FROM storage_quotas WHERE principal = ?`, principal).
-		Scan(&q.Tier, &q.MaxBytesPerRun, &q.MaxBytesPerMonth, &q.MaxObjectsPerRun, &q.AllowanceBytes)
-	if errors.Is(err, sql.ErrNoRows) {
-		return StorageQuota{Principal: principal}, false, nil
-	}
-	if err != nil {
-		return StorageQuota{}, false, err
-	}
-	return q, true, nil
-}
-
-// ListStorageQuotas returns every team with a quota row, by principal.
-func (s *Store) ListStorageQuotas(ctx context.Context) (_ []StorageQuota, err error) {
-	rows, err := s.query(ctx, `
-SELECT principal, tier, max_bytes_per_run, max_bytes_per_month, max_objects_per_run,
-        storage_allowance_bytes
-  FROM storage_quotas ORDER BY principal ASC`)
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	out := []StorageQuota{}
-	for rows.Next() {
-		var q StorageQuota
-		if err := rows.Scan(&q.Principal, &q.Tier,
-			&q.MaxBytesPerRun, &q.MaxBytesPerMonth, &q.MaxObjectsPerRun, &q.AllowanceBytes); err != nil {
-			return nil, err
-		}
-		out = append(out, q)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // StorageMonth is the calendar month a charge is counted against. A charge
 // belongs to the month it is written in, never to the month its run started,
 // so a long-lived run does not spend one month's budget forever.
 func StorageMonth(t time.Time) string { return t.UTC().Format("2006-01") }
-
-// StorageUsageFor reports what a team has stored against one run and over one
-// calendar month. An empty run id reports the month alone.
-func (s *Store) StorageUsageFor(ctx context.Context, principal, runID, month string) (StorageUsage, error) {
-	out := StorageUsage{Principal: principal, RunID: runID, Month: month}
-	if runID != "" {
-		err := s.queryRow(ctx,
-			`SELECT bytes, objects FROM storage_run_usage WHERE principal = ? AND run_id = ?`,
-			principal, runID).Scan(&out.RunBytes, &out.RunObjects)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return StorageUsage{}, err
-		}
-	}
-	err := s.queryRow(ctx,
-		`SELECT bytes, objects FROM storage_month_usage WHERE principal = ? AND month = ?`,
-		principal, month).Scan(&out.MonthBytes, &out.MonthObjects)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return StorageUsage{}, err
-	}
-	return out, nil
-}
 
 // safety: the charge and the durable write it pays for share one transaction,
 // so a write that fails rolls the charge back with it and a retry pays once.
@@ -555,16 +224,15 @@ func (s *Store) chargeStorageTx(
 	if principal == "" || runID == "" || (bytes <= 0 && objects <= 0) {
 		return nil
 	}
+	team, err := creditTeamForRunTx(ctx, tx, runID)
+	if err != nil {
+		return err
+	}
 	var rate int64
-	var team Team
 	var free bool
 	if !creditMeteringDisabled(ctx) {
 		var err error
 		rate, err = creditSettingTx(ctx, tx, metaKeyStorageRateMicroPerGBDay, 0)
-		if err != nil {
-			return err
-		}
-		team, err = creditTeamForRunTx(ctx, tx, runID)
 		if err != nil {
 			return err
 		}
@@ -580,7 +248,7 @@ func (s *Store) chargeStorageTx(
 			return err
 		}
 	}
-	quota, err := storageQuotaForTx(ctx, tx, principal)
+	quota, err := storageQuotaForTeamTx(ctx, tx, team)
 	if err != nil {
 		return err
 	}
@@ -635,47 +303,22 @@ ON CONFLICT (principal, month) DO UPDATE SET
 	return addFreeEventBytesTx(ctx, tx, team, bytes)
 }
 
-func storageQuotaForTx(ctx context.Context, tx *storeTx, principal string) (StorageQuota, error) {
-	q := StorageQuota{Principal: principal}
-	err := tx.QueryRowContext(ctx, `
-SELECT tier, max_bytes_per_run, max_bytes_per_month, max_objects_per_run, storage_allowance_bytes
-  FROM storage_quotas WHERE principal = ?`, principal).
-		Scan(&q.Tier, &q.MaxBytesPerRun, &q.MaxBytesPerMonth, &q.MaxObjectsPerRun, &q.AllowanceBytes)
-	if err == nil {
-		return q, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return StorageQuota{}, err
-	}
-	var tier string
-	err = tx.QueryRowContext(ctx,
-		`SELECT value FROM sparkwing_meta WHERE key = ?`, metaKeyDefaultStorageTier).Scan(&tier)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return StorageQuota{}, err
-	}
-	if def, ok := TierQuota(strings.TrimSpace(tier)); ok {
-		def.Principal = principal
-		return def, nil
-	}
-	return StorageQuota{Principal: principal}, nil
-}
-
 func quotaRefusal(quota StorageQuota, runBytes, runObjects, monthBytes, bytes, objects int64) error {
 	if quota.MaxBytesPerRun > 0 && runBytes+bytes > quota.MaxBytesPerRun {
 		return &StorageQuotaError{
-			Principal: quota.Principal, Limit: StorageLimitBytesPerRun, Unit: "bytes",
+			Principal: string(quota.Team), Limit: StorageLimitBytesPerRun, Unit: "bytes",
 			Used: runBytes, Allowed: quota.MaxBytesPerRun, Requested: bytes,
 		}
 	}
 	if quota.MaxBytesPerMonth > 0 && monthBytes+bytes > quota.MaxBytesPerMonth {
 		return &StorageQuotaError{
-			Principal: quota.Principal, Limit: StorageLimitBytesPerMonth, Unit: "bytes",
+			Principal: string(quota.Team), Limit: StorageLimitBytesPerMonth, Unit: "bytes",
 			Used: monthBytes, Allowed: quota.MaxBytesPerMonth, Requested: bytes,
 		}
 	}
 	if quota.MaxObjectsPerRun > 0 && runObjects+objects > quota.MaxObjectsPerRun {
 		return &StorageQuotaError{
-			Principal: quota.Principal, Limit: StorageLimitObjectsPerRun, Unit: "objects",
+			Principal: string(quota.Team), Limit: StorageLimitObjectsPerRun, Unit: "objects",
 			Used: runObjects, Allowed: quota.MaxObjectsPerRun, Requested: objects,
 		}
 	}
@@ -732,78 +375,4 @@ func (s *Store) AppendEventCharged(
 		return 0, err
 	}
 	return seq, nil
-}
-
-// SetNodeArtifactManifestCharged records a node's artifact manifest and
-// charges one object against principal's quota in the same transaction, so a
-// run cannot publish more manifests than its team is allowed. An empty
-// principal charges nothing.
-func (s *Store) SetNodeArtifactManifestCharged(
-	ctx context.Context, principal, runID, nodeID, manifestDigest string,
-) (err error) {
-	return s.defaultTenant().SetNodeArtifactManifestCharged(ctx, principal, runID, nodeID, manifestDigest)
-}
-
-// SetNodeArtifactManifestCharged is [Store.SetNodeArtifactManifestCharged] confined to t's team.
-func (t *Tenant) SetNodeArtifactManifestCharged(
-	ctx context.Context, principal, runID, nodeID, manifestDigest string,
-) (err error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	if err := t.s.assertNodeMutationFenceTx(ctx, tx, t.team, runID, nodeID); err != nil {
-		return err
-	}
-	res, err := tx.ExecContext(ctx,
-		`UPDATE nodes SET artifact_manifest = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
-		manifestDigest, string(t.team), runID, nodeID)
-	if err != nil {
-		return err
-	}
-	if err := fencedRows(res, hasClaimFence(ctx)); err != nil {
-		return err
-	}
-	// safety: the object is charged only once the node is proven to be this
-	// team's, so a foreign or missing node rolls back without spending quota.
-	if n, err := res.RowsAffected(); err != nil {
-		return err
-	} else if n != 1 {
-		return notFound("node", runID+"/"+nodeID)
-	}
-	if err := t.s.chargeStorageTx(ctx, tx, principal, runID, 0, 1, time.Now().UTC()); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-// TopStorageTeams reports the teams that stored the most over a month,
-// largest first, which is the report an operator reads to find the teams
-// worth talking to.
-func (s *Store) TopStorageTeams(ctx context.Context, month string, limit int) (_ []StorageTeamUsage, err error) {
-	if limit <= 0 {
-		limit = 10
-	}
-	rows, err := s.query(ctx, `
-SELECT principal, bytes, objects
-  FROM storage_month_usage WHERE month = ?
- ORDER BY bytes DESC, principal ASC
- LIMIT ?`, month, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	out := []StorageTeamUsage{}
-	for rows.Next() {
-		u := StorageTeamUsage{Month: month}
-		if err := rows.Scan(&u.Principal, &u.Bytes, &u.Objects); err != nil {
-			return nil, err
-		}
-		out = append(out, u)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
 }

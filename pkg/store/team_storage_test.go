@@ -557,27 +557,6 @@ func TestReconcileKeepsWritesCommittedWhileListing(t *testing.T) {
 	}
 }
 
-func TestEgressTotalsKeepTheLargerValue(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	got, err := st.RecordEgressTotals(ctx, store.EgressTotals{Service: "cache", Day: "2026-09-23", DayBytes: 50, Month: "2026-09", MonthBytes: 500})
-	if err != nil || got.DayBytes != 50 || got.MonthBytes != 500 {
-		t.Fatalf("first record = %+v, %v", got, err)
-	}
-	got, err = st.RecordEgressTotals(ctx, store.EgressTotals{Service: "cache", Day: "2026-09-23", DayBytes: 10, Month: "2026-09", MonthBytes: 0})
-	if err != nil || got.DayBytes != 50 || got.MonthBytes != 500 {
-		t.Fatalf("a restarted process reporting less = %+v, %v; want the stored totals", got, err)
-	}
-	got, err = st.RecordEgressTotals(ctx, store.EgressTotals{Service: "cache", Day: "2026-09-24", Month: "2026-09"})
-	if err != nil || got.DayBytes != 0 || got.MonthBytes != 500 {
-		t.Fatalf("the next day = %+v, %v; want a fresh day in the same month", got, err)
-	}
-	other, err := st.RecordEgressTotals(ctx, store.EgressTotals{Service: "other", Day: "2026-09-23", Month: "2026-09"})
-	if err != nil || other.DayBytes != 0 {
-		t.Fatalf("another service = %+v, %v; want its own totals", other, err)
-	}
-}
-
 // A writer settling one block while it takes the next pays one round trip:
 // the commit and the next reservation share a transaction, and the commit
 // lands even when the next block does not fit.

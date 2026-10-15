@@ -227,8 +227,6 @@ type createGrantReq struct {
 	Reference   string `json:"reference,omitempty"`
 	// safety: The checkout service names the team its checkout session was for.
 	Team string `json:"team,omitempty"`
-	// safety: Settling a checkout releases that session's hold on the team balance cap.
-	Checkout string `json:"checkout,omitempty"`
 }
 
 func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request) {
@@ -377,7 +375,7 @@ func (s *Server) handleCreditsGrant(w http.ResponseWriter, r *http.Request) {
 	who := principalName(r)
 	res, err := tenant.RecordCreditGrant(r.Context(), store.CreditGrantRequest{
 		Kind: req.Kind, AmountMicro: req.AmountMicro,
-		Reference: req.Reference, CreatedBy: who, Checkout: req.Checkout,
+		Reference: req.Reference, CreatedBy: who,
 	})
 	if errors.Is(err, store.ErrCreditGrantConflict) {
 		writeError(w, http.StatusConflict, err)

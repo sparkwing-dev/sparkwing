@@ -837,7 +837,7 @@ func (s *Store) SettleCardPayment(ctx context.Context, p CardPayment, now time.T
 // safety: a payment already granted, queued for refund or refused over a
 // warning has been settled; its redelivery changes nothing.
 func cardPaymentSeenTx(ctx context.Context, tx *storeTx, team Team, paymentIntent string) (bool, error) {
-	grant, found, err := creditGrantByReferenceTx(ctx, tx, "", CreditGrantPaid, paymentIntent)
+	grant, found, err := paidGrantForPaymentTx(ctx, tx, paymentIntent)
 	if err == nil && found && grant.Team != team {
 		return false, ErrCreditGrantConflict
 	}
@@ -1023,20 +1023,17 @@ func (s *Store) RecordPaymentWarning(ctx context.Context, w PaymentWarning, now 
 	if !w.Actionable {
 		return "", tx.Commit()
 	}
-	var team string
-	err = tx.QueryRowContext(ctx, `SELECT team FROM credit_grants WHERE kind = ? AND reference = ?
-	  UNION SELECT team FROM card_attempts WHERE payment_intent = ? LIMIT 1`,
-		CreditGrantPaid, w.PaymentIntent, w.PaymentIntent).Scan(&team)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", tx.Commit()
-	}
+	team, err := paymentWarningTeamTx(ctx, tx, w.PaymentIntent)
 	if err != nil {
 		return "", err
 	}
-	if err := holdForWarningTx(ctx, tx, Team(team), w.WarningID, w.PaymentIntent, now); err != nil {
+	if team == "" {
+		return "", tx.Commit()
+	}
+	if err := holdForWarningTx(ctx, tx, team, w.WarningID, w.PaymentIntent, now); err != nil {
 		return "", err
 	}
-	return Team(team), tx.Commit()
+	return team, tx.Commit()
 }
 
 // ErrPaymentWarned refuses granting a payment that drew an early fraud
