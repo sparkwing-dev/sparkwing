@@ -24,7 +24,7 @@ func TestSecrets_PipelineScopeResolution(t *testing.T) {
 		{"DEPLOY_KEY", "web-key", "deploy-web"},
 		{"DEPLOY_KEY", "api-key", "deploy-api"},
 	} {
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateOrReplaceSecret(store.Secret{
+		if err := teststore.SeedSecret(st, store.DefaultTeam, store.Secret{
 			Name: s.name, Value: s.value, Principal: "alice", Pipeline: s.pipeline, Masked: true,
 		}, now); err != nil {
 			t.Fatalf("CreateOrReplaceSecret %s/%s: %v", s.name, s.pipeline, err)
@@ -61,45 +61,11 @@ func TestSecrets_PipelineScopeResolution(t *testing.T) {
 		})
 	}
 
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).DeleteSecret("DEPLOY_KEY", "deploy-web"); err != nil {
+	if _, err := st.DB().ExecContext(t.Context(), `DELETE FROM secrets WHERE team=? AND name=? AND pipeline=?`, store.DefaultTeam, "DEPLOY_KEY", "deploy-web"); err != nil {
 		t.Fatalf("DeleteSecret scoped: %v", err)
 	}
 	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretForPipeline("DEPLOY_KEY", "deploy-api"); err != nil {
 		t.Errorf("deleting one pipeline's row removed a sibling's: %v", err)
-	}
-}
-
-func TestSecrets_UnscopedRowAnswersARunOnlyWhenShared(t *testing.T) {
-	st, err := storetest.New(t).TryOpen()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-
-	now := time.Now().UTC()
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateOrReplaceSecret(store.Secret{
-		Name: "LEGACY", Value: "legacy", Principal: "alice", Masked: true,
-	}, now); err != nil {
-		t.Fatal(err)
-	}
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateOrReplaceSecret(store.Secret{
-		Name: "NPM_TOKEN", Value: "npm", Principal: "alice", Masked: true, Shared: true,
-	}, now); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretForRun("LEGACY", "deploy-web"); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("GetSecretForRun(LEGACY) err = %v, want ErrNotFound for an unshared unscoped row", err)
-	}
-	if sec, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretForPipeline("LEGACY", "deploy-web"); err != nil || sec.Value != "legacy" {
-		t.Errorf("GetSecretForPipeline(LEGACY) = (%v, %v), want the row for an admin reader", sec, err)
-	}
-	sec, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretForRun("NPM_TOKEN", "deploy-web")
-	if err != nil {
-		t.Fatalf("GetSecretForRun(NPM_TOKEN): %v", err)
-	}
-	if sec.Value != "npm" || !sec.Shared {
-		t.Errorf("GetSecretForRun(NPM_TOKEN) = %+v, want the shared row", sec)
 	}
 }
 

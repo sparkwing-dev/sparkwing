@@ -11,6 +11,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
+func seedSecret(t *testing.T, tenant *Tenant, row Secret, at time.Time) error {
+	t.Helper()
+	_, err := tenant.s.db.ExecContext(t.Context(), `INSERT INTO secrets(team,name,value,principal,pipeline,masked,shared,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)`, tenant.team, row.Name, row.Value, row.Principal, row.Pipeline, boolInt(row.Masked), boolInt(row.Shared), at.UnixNano(), at.UnixNano())
+	return err
+}
+
 func credentialMaintenanceFixture(t *testing.T) (*Tenant, capability.Authorized) {
 	t.Helper()
 	s := authorityStore(t)
@@ -28,7 +34,7 @@ func TestCredentialRotationPreservesTenantAndRowMetadataProperty(t *testing.T) {
 		tn := &Tenant{s: tenant.s, team: team}
 		for i := range 24 {
 			sec := Secret{Name: fmt.Sprintf("secret_%d", i), Pipeline: []string{"", "deploy"}[random.IntN(2)], Value: fmt.Sprintf("old/%x", random.Uint64()), Principal: "author", Masked: random.IntN(2) == 0, Shared: random.IntN(2) == 0}
-			if err := tn.CreateOrReplaceSecret(sec, now); err != nil {
+			if err := seedSecret(t, tn, sec, now); err != nil {
 				t.Fatal(err)
 			}
 			row, err := tn.GetSecretRow(sec.Name, sec.Pipeline)
@@ -84,7 +90,7 @@ func TestCredentialRotationRollsBackBothTables(t *testing.T) {
 			now := time.Unix(1700000000, 123456789).UTC()
 			tenant.s.clock = func() time.Time { return now }
 			for _, name := range []string{"first", "second"} {
-				if err := tenant.CreateOrReplaceSecret(Secret{Name: name, Value: "old"}, now); err != nil {
+				if err := seedSecret(t, tenant, Secret{Name: name, Value: "old"}, now); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -117,7 +123,7 @@ func TestCredentialRotationRollsBackBothTables(t *testing.T) {
 				t.Fatalf("failed rotation: %d,%d,%v", n, m, err)
 			}
 			for _, name := range []string{"first", "second"} {
-				got, err := tenant.GetSecret(name)
+				got, err := tenant.GetSecretRow(name, "")
 				if err != nil || got.Value != "old" {
 					t.Fatalf("secret partially rotated: %+v,%v", got, err)
 				}

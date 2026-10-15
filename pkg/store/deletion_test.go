@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func countWhere(t *testing.T, st *store.Store, table, where string) int {
@@ -30,7 +31,7 @@ func seedTeam(t *testing.T, st *store.Store, tn *store.Tenant, ownerID, runID st
 		store.Run{ID: runID, Pipeline: "build", Status: "pending", StartedAt: now}); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
-	if err := tn.CreateOrReplaceSecret(store.Secret{Name: "API_KEY", Value: "v-" + runID}, now); err != nil {
+	if err := teststore.SeedSecret(st, tn.Team(), store.Secret{Name: "API_KEY", Value: "v-" + runID}, now); err != nil {
 		t.Fatalf("seed secret: %v", err)
 	}
 	if _, err := tn.CreateInvitation(ctx, ownerID, "guest-"+runID+"@example.com", store.RoleReader, now); err != nil {
@@ -131,11 +132,6 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 	if err != nil || len(pending) != 1 || pending[0].Team != "acme" {
 		t.Fatalf("pending = %+v, %v", pending, err)
 	}
-	ids, err := st.AsOperator().TeamRunIDs(ctx, "acme")
-	if err != nil || len(ids) != 1 || ids[0] != "run-acme" {
-		t.Fatalf("TeamRunIDs = %v, %v", ids, err)
-	}
-
 	purge(t, st, "acme", now)
 	for _, table := range store.AllTenantTablesForTest() {
 		if n := countWhere(t, st, table, "team = 'acme'"); n != 0 {

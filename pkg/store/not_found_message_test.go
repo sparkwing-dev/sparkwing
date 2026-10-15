@@ -21,9 +21,9 @@ func TestAMissingLookupNamesWhatItLookedFor(t *testing.T) {
 	}{
 		"GetRun":     {func() error { _, err := s.GetRun(ctx, "run-absent"); return err }, []string{"run", "run-absent"}},
 		"GetTrigger": {func() error { _, err := s.GetTrigger(ctx, "trig-absent"); return err }, []string{"trigger", "trig-absent"}},
-		"GetSecretForRun": {
+		"GetSecretRow": {
 			func() error {
-				_, err := teststore.ForTeam(t, s, store.DefaultTeam).GetSecretForRun("secret-absent", "")
+				_, err := teststore.ForTeam(t, s, store.DefaultTeam).GetSecretRow("secret-absent", "")
 				return err
 			},
 			[]string{"secret", "secret-absent"},

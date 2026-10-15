@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 const specA = "sha256:" + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -121,7 +122,7 @@ func TestClaimRun_PlanRefusedWhenARequiredSecretIsMissing(t *testing.T) {
 	}
 	for _, sec := range []store.Secret{{Name: "TEAM_ONLY", Value: "v"}, {Name: "ELSEWHERE", Value: "v", Pipeline: "release"}} {
 		sec.Masked = true
-		if err := tn.CreateOrReplaceSecret(sealedSecret(t, store.Team(olga.team), sec), time.Now()); err != nil {
+		if err := teststore.SeedSecret(f.store, tn.Team(), sealedSecret(t, store.Team(olga.team), sec), time.Now()); err != nil {
 			t.Fatal(err)
 		}
 	}

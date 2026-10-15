@@ -20,10 +20,6 @@ const ClaimTokenPrefix = "swc"
 // controller's answer to a log-claim validation.
 const ClaimTeamHeader = "X-Sparkwing-Claim-Team"
 
-// MaxClaimTokenLifetime bounds a claim token's hard expiry, which is the
-// deadline of the Job that carries it.
-const MaxClaimTokenLifetime = 6 * time.Hour
-
 // ClaimTokenKind names what a claim token's claim runs.
 type ClaimTokenKind string
 
@@ -95,40 +91,6 @@ type ClaimToken struct {
 func claimTokenDigest(raw string) string {
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
-}
-
-// MintClaimToken issues the token for the live claim team holds on
-// runID/nodeID at generation, valid until expiresAt at the latest. The raw
-// token is returned once; only its digest is stored. It refuses a claim
-// that is not live at that generation, and a second token for one claim.
-func (s *Store) MintClaimToken(ctx context.Context, team Team, runID, nodeID string, generation int64,
-	kind ClaimTokenKind, expiresAt, now time.Time,
-) (string, error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer rollbackOrLog(tx)
-	raw, err := mintClaimTokenTx(ctx, tx, team, runID, nodeID, generation, kind, expiresAt, now)
-	if err != nil {
-		return "", err
-	}
-	if err := tx.Commit(); err != nil {
-		return "", err
-	}
-	return raw, nil
-}
-
-func mintClaimTokenTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string, generation int64,
-	kind ClaimTokenKind, expiresAt, now time.Time,
-) (string, error) {
-	if kind != ClaimTokenPlan && kind != ClaimTokenWork {
-		return "", fmt.Errorf("claim token kind %q is neither %q nor %q", kind, ClaimTokenPlan, ClaimTokenWork)
-	}
-	if !expiresAt.After(now) || expiresAt.Sub(now) > MaxClaimTokenLifetime {
-		return "", fmt.Errorf("claim token expiry must fall within %s of now", MaxClaimTokenLifetime)
-	}
-	return insertClaimTokenTx(ctx, tx, team, runID, nodeID, generation, kind, expiresAt, now)
 }
 
 func insertClaimTokenTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string, generation int64,

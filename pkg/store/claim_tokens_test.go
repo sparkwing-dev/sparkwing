@@ -2,6 +2,8 @@ package store_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"testing"
 	"time"
@@ -22,8 +24,6 @@ type claimedFixture struct {
 func claimForToken(t *testing.T, runID string) claimedFixture {
 	t.Helper()
 	s := storetest.Open(t)
-	// safety: an unbound claim stands in for the launcher's, which mints its own token; a
-	// bound one is a runner's, which the award already gave a token.
 	identity := store.ClaimIdentity{}
 	readyNode(t, s, runID, "build")
 	node, err := s.ClaimNextReadyNode(context.Background(), identity, "holder-1", time.Minute, nil)
@@ -35,8 +35,9 @@ func claimForToken(t *testing.T, runID string) claimedFixture {
 
 func (f claimedFixture) mint(t *testing.T, now time.Time) string {
 	t.Helper()
-	raw, err := f.s.MintClaimToken(context.Background(), store.DefaultTeam, f.node.RunID, f.node.NodeID,
-		f.node.ClaimGeneration, store.ClaimTokenWork, now.Add(time.Hour), now)
+	raw := "swc_legacy-work-fixture-presentation"
+	digest := sha256.Sum256([]byte(raw))
+	_, err := f.s.DB().ExecContext(t.Context(), storetest.Rebind(f.s, `INSERT INTO claim_tokens(digest,prefix,team,run_id,node_id,claim_generation,kind,created_at,expires_at) VALUES (?,?,?,?,?,?,?,?,?)`), hex.EncodeToString(digest[:]), raw[:store.PrefixLen], store.DefaultTeam, f.node.RunID, f.node.NodeID, f.node.ClaimGeneration, store.ClaimTokenWork, now.UnixNano(), now.Add(time.Hour).UnixNano())
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
@@ -62,33 +63,6 @@ func TestClaimToken_LiveClaimAuthorizesEveryClassBoundToItsClaim(t *testing.T) {
 			tok.Generation != f.node.ClaimGeneration || tok.Kind != store.ClaimTokenWork || tok.Ended {
 			t.Fatalf("class %d resolved %+v", class, tok)
 		}
-	}
-}
-
-func TestClaimToken_MintRefusesAClaimItDoesNotName(t *testing.T) {
-	f := claimForToken(t, "run-mint")
-	ctx := context.Background()
-	now := time.Now()
-	cases := map[string]struct {
-		team       store.Team
-		generation int64
-		expires    time.Time
-	}{
-		"later generation": {store.DefaultTeam, f.node.ClaimGeneration + 1, now.Add(time.Hour)},
-		"other team":       {"other", f.node.ClaimGeneration, now.Add(time.Hour)},
-		"past expiry":      {store.DefaultTeam, f.node.ClaimGeneration, now},
-		"beyond 6h":        {store.DefaultTeam, f.node.ClaimGeneration, now.Add(7 * time.Hour)},
-	}
-	for name, c := range cases {
-		if _, err := f.s.MintClaimToken(ctx, c.team, "run-mint", "build", c.generation,
-			store.ClaimTokenWork, c.expires, now); err == nil {
-			t.Errorf("%s: minted", name)
-		}
-	}
-	f.mint(t, now)
-	if _, err := f.s.MintClaimToken(ctx, store.DefaultTeam, "run-mint", "build", f.node.ClaimGeneration,
-		store.ClaimTokenWork, now.Add(time.Hour), now); !errors.Is(err, store.ErrLockHeld) {
-		t.Fatalf("second token for one claim: err = %v, want ErrLockHeld", err)
 	}
 }
 

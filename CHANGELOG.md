@@ -32,6 +32,8 @@ unlock.
   The seven default-team secret methods on `Store` and four unused legacy fence readers are removed. Local readers select `DefaultTeam`. See [migration guide](docs/migrations/_unreleased.md#secret-store-calls-select-a-tenant).
 ### Changed
 
+- **store (Breaking):** Remove raw secret writers and launcher token issuance
+  Secret writes use `WriteSecret` and `RemoveSecret` with current administration authority. Claim secret reads use `ReadSecret`, and awards use `Store.Issue`. Removed the old secret writers, two redundant readers, `MintClaimToken` and its lifetime constant. See [migration guide](docs/migrations/_unreleased.md#raw-secret-writers-and-launcher-token-issuance-removed).
 - **store (Breaking):** Cancellation uses the fenced run transition
   Removed `RequestCancel` and `CancelPendingTrigger` on Store and Tenant, the separate controller cancellation writer, and unused `FilterRuns`. Use `Tenant.TransitionRun` with `RunCancel`. The unit reaper completes cancelled unclaimed work. SQL run filtering remains. See [migration guide](docs/migrations/_unreleased.md#raw-cancellation-and-unused-readers-removed).
 - **store (Breaking):** Claim lifecycle and git-credential writes use current authority

@@ -66,11 +66,24 @@ current team administration in the committing transaction.
 ## Secret store calls select a tenant
 
 The default-team secret methods on `Store` are removed. Select the registered
-tenant with `store.ForTeam(ctx, team)` before calling `CreateOrReplaceSecret`,
-`GetSecret`, `GetSecretRow`, `GetSecretForPipeline`, `GetSecretForRun`,
-`ListSecrets` or `DeleteSecret`. Local readers select `store.DefaultTeam`.
-Controller writes continue to use `WriteSecret` and `RemoveSecret` under current
-administration authority.
+tenant with `store.ForTeam(ctx, team)` before calling `GetSecretRow`,
+`GetSecretForPipeline` or `ListSecrets`. Local readers select `store.DefaultTeam`.
+Writes use `WriteSecret` and `RemoveSecret` under current administration authority.
+
+## Raw secret writers and launcher token issuance removed
+
+`Tenant.CreateOrReplaceSecret` and `DeleteSecret` are removed. Use `WriteSecret`
+and `RemoveSecret` with current tenant administration authority. The transaction
+selects the actor and time. Existing secret count and size limits still apply.
+`Tenant.GetSecret` and `GetSecretForRun` are removed too. Metadata readers use
+`GetSecretRow(name, pipeline)`. Claim releases use `ReadSecret`, which checks the
+bound run, declarations, shared fallback, pool restrictions and release audit.
+
+`Store.MintClaimToken` and `MaxClaimTokenLifetime` are removed. Awards use
+`Store.Issue` within their claim transaction. Launcher delivery uses the one-use
+bootstrap exchange under the current award fence.
+The unused `Operator.TeamRunIDs` report is removed too. It has no production
+caller.
 
 The unused `Store.NodeClaimFenceNodeForRun`, `NodeExecutionAttemptIsLive`,
 `TriggerExecutionAttemptIsLive` and `TriggerExecutionAttemptBelongsToLiveClaim`

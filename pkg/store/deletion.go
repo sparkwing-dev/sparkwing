@@ -422,26 +422,6 @@ func (o *Operator) deleteTenantRows(ctx context.Context, team Team) error {
 	return nil
 }
 
-// TeamRunIDs lists the ids of every run a team holds, so the caller can
-// remove what object storage keeps under each run before [Operator.PurgeTeam]
-// removes the rows that name them.
-func (o *Operator) TeamRunIDs(ctx context.Context, team Team) (_ []string, err error) {
-	rows, err := o.s.query(ctx, `SELECT id FROM runs WHERE team = ? ORDER BY id`, string(NormalizeTeam(team)))
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
-}
-
 // PurgeTeam removes every row a team owns in every tenant-owned table, then
 // its registry row, and marks its deletion done with a recheck due at
 // now+recheckAfter. holder must hold the deletion's lease; see

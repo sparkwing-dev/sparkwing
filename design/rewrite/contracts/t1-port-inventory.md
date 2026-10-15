@@ -1332,3 +1332,18 @@ retired deployment usage report required by frozen architecture section 9.3.
 The unused child-trigger reader's foreign-team assertion is removed with that
 reader. Existing child-intake authorization and ancestry properties remain.
 No native acceptance cell is newly activated.
+The raw secret CRUD and size/count tests move to the current mutation suite.
+`TestCredentialMutationsUseCurrentActorAndStoreClock` retains replacement,
+actor, timestamp and missing-delete checks. The serialized-cap test retains
+replacement at the cap. `TestCredentialMutationsSecretLimitsPreserveExistingValues`
+checks oversized replacement rollback, the existing default-team exemption,
+count and sorted listing. `TestCredentialMutationsDeletionPreservesOtherScopesProperty`
+generates tenant and pipeline isolation checks. The unscoped-run fallback test
+moves to `TestSecretReadClaimScopePrecedenceProperty` through current claim
+authority. The old raw launcher mint refusal test is retired with its API.
+Current award fences remain covered by
+`TestAuthorityAwardRefusesForeignStaleAndUnreservedMeteredClaims`,
+`TestClaimUnitRejectsForeignAndMissingRequirements` and the generated award
+renewal properties. The old six-hour launcher token maximum is removed with
+the legacy issuer. Legacy token transport tests seed presentation rows and
+still require their final-schema fixture migration.

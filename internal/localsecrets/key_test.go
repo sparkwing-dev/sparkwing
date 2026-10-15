@@ -56,7 +56,7 @@ func sealRow(t *testing.T, c controller.Cipher, st *store.Store, name, value str
 		t.Fatalf("seal %s: %v", name, err)
 	}
 	row.Value = sealed
-	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateOrReplaceSecret(row, time.Now()); err != nil {
+	if err := teststore.SeedSecret(st, store.DefaultTeam, row, time.Now()); err != nil {
 		t.Fatalf("store %s: %v", name, err)
 	}
 }

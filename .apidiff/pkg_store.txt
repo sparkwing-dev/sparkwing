@@ -1400,7 +1400,6 @@ type MaterializedResultSource struct {
 	StateSeq int64
 }
 const MaxAnnotationBytes = 64 << 10
-const MaxClaimTokenLifetime = 6 * time.Hour
 const MaxCreatedTeams = 3
 const MaxCreditGrantMicro = 1_000_000_000_000_000
 const MaxCreditMaxChargeSeconds = 86_400
@@ -1777,7 +1776,6 @@ func (o *Operator) SetOperatorCreditSettings(
 func (o *Operator) SetStorageSettings(ctx context.Context, in StorageSettings) error
 func (o *Operator) StorageSettings(ctx context.Context) (StorageSettings, error)
 func (o *Operator) Team() Team
-func (o *Operator) TeamRunIDs(ctx context.Context, team Team) (_ []string, err error)
 func (o *Operator) TopStorageTeams(ctx context.Context, month string, limit int) (_ []StorageTeamUsage, err error)
 func (o *Operator) TriggerTeam(ctx context.Context, triggerID string) (Team, error)
 func (o *Operator) UnbindGitHubAppInstallation(ctx context.Context, installation int64) (Team, error)
@@ -2847,9 +2845,6 @@ func (s *Store) MarkCardRefundMade(
 ) error
 func (s *Store) MarkNodeLogSealed(ctx context.Context, l NodeLog, storedBytes int64, now time.Time) error
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error
-func (s *Store) MintClaimToken(ctx context.Context, team Team, runID, nodeID string, generation int64,
-	kind ClaimTokenKind, expiresAt, now time.Time,
-) (string, error)
 func (s *Store) NewestWaitlisted(ctx context.Context, limit, offset int) ([]WaitlistedAccount, error)
 func (s *Store) NodeClaimFenceIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, now time.Time) (bool, error)
 func (s *Store) NodeClaimOrigin(ctx context.Context, runID, nodeID string) (principal, holder, runner string, metered bool, err error)
@@ -3032,7 +3027,6 @@ func (t *Tenant) CreateDebugPause(ctx context.Context, p DebugPause) error
 func (t *Tenant) CreateGitHubAutomationTriggerWithRun(ctx context.Context, trig Trigger, run Run, grant GitHubAppAutomation) error
 func (t *Tenant) CreateHereTriggerWithRun(ctx context.Context, trig Trigger, r Run, here HereRunner, now time.Time) (string, *Token, error)
 func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, role Role, now time.Time) (Invitation, error)
-func (t *Tenant) CreateOrReplaceSecret(sec Secret, now time.Time) error
 func (t *Tenant) CreateRun(ctx context.Context, r Run) error
 func (t *Tenant) CreateSourceTriggerWithRun(ctx context.Context, trig Trigger, r Run, key, principal, tokenPrefix string) error
 func (t *Tenant) CreateToken(
@@ -3053,7 +3047,6 @@ func (t *Tenant) DeleteGitHubAppAutomation(ctx context.Context, repository int64
 func (t *Tenant) DeleteGitHubAppTrigger(ctx context.Context, repositoryID int64, pipeline string) error
 func (t *Tenant) DeleteInvitation(ctx context.Context, id string, now time.Time) error
 func (t *Tenant) DeleteRun(ctx context.Context, runID string) error
-func (t *Tenant) DeleteSecret(name, pipeline string) error
 func (t *Tenant) DropCreditCheckout(ctx context.Context, id string) (err error)
 func (t *Tenant) EgressUsage(ctx context.Context, period string) (EgressUsage, error)
 func (t *Tenant) FailNodeForUnpricedClass(
@@ -3080,9 +3073,7 @@ func (t *Tenant) GetNode(ctx context.Context, runID, nodeID string) (*Node, erro
 func (t *Tenant) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*PipelineProfile, error)
 func (t *Tenant) GetRun(ctx context.Context, runID string) (*Run, error)
 func (t *Tenant) GetRunAncestorPipelines(ctx context.Context, runID string) ([]string, error)
-func (t *Tenant) GetSecret(name string) (*Secret, error)
 func (t *Tenant) GetSecretForPipeline(name, pipeline string) (*Secret, error)
-func (t *Tenant) GetSecretForRun(name, pipeline string) (*Secret, error)
 func (t *Tenant) GetSecretRow(name, pipeline string) (*Secret, error)
 func (t *Tenant) GetTrigger(ctx context.Context, id string) (*Trigger, error)
 func (t *Tenant) GitCredentialForHost(ctx context.Context, host string) (GitCredential, error)

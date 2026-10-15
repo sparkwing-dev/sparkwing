@@ -4,3 +4,4 @@ func ForTeam(t testing.TB, s *store.Store, team store.Team) *store.Tenant
 func MaintainConcurrency(ctx context.Context, s *store.Store, opts store.ConcurrencyMaintenanceOptions) (store.ConcurrencyMaintenanceResult, error)
 func Open(path string) (*store.Store, error)
 func ReapUnits(ctx context.Context, s *store.Store) ([]store.ReapedUnit, error)
+func SeedSecret(s *store.Store, team store.Team, row store.Secret, at time.Time) error

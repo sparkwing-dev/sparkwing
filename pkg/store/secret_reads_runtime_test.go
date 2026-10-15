@@ -15,7 +15,7 @@ import (
 func secretReadStoreFixture(t *testing.T) (*Tenant, capability.Authorized) {
 	t.Helper()
 	tenant, req, now := planFixture(t, runspec.DispatchHost)
-	if err := tenant.CreateOrReplaceSecret(Secret{Name: "KEY", Value: "sealed", Pipeline: "p", Masked: true}, *now); err != nil {
+	if err := seedSecret(t, tenant, Secret{Name: "KEY", Value: "sealed", Pipeline: "p", Masked: true}, *now); err != nil {
 		t.Fatal(err)
 	}
 	req.Seal.Resolved.SecretNames = []string{"KEY"}
@@ -37,6 +37,40 @@ func secretReadStoreFixture(t *testing.T) (*Tenant, capability.Authorized) {
 		t.Fatal(err)
 	}
 	return tenant, capability.Authorized{Principal: p, Binding: c.Binding, Target: capability.Target{Team: "a", SecretName: "KEY"}, Access: capability.AccessRule{Credential: capability.CredentialClaim, Grants: []capability.Grant{capability.SecretsRelease}, Binding: capability.BindDeclaredSecret, Liveness: capability.LiveSensitive}}
+}
+
+func TestSecretReadClaimScopePrecedenceProperty(t *testing.T) {
+	tenant, a := secretReadStoreFixture(t)
+	random := rand.New(rand.NewPCG(902, 781))
+	for range 48 {
+		shared, scoped := random.IntN(2) == 0, random.IntN(2) == 0
+		value := fmt.Sprintf("value/%x", random.Uint64())
+		rewriteSchemaExec(t, tenant.s.db, `DELETE FROM secrets`)
+		for _, row := range []Secret{{Name: "KEY", Value: "team/" + value, Shared: shared, Masked: true}, {Name: "KEY", Pipeline: "other", Value: "foreign-pipeline", Masked: true}} {
+			if err := seedSecret(t, tenant, row, tenant.s.now()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if scoped {
+			if err := seedSecret(t, tenant, Secret{Name: "KEY", Pipeline: "p", Value: "pipeline/" + value, Masked: true}, tenant.s.now()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		row, err := tenant.ReadSecret(t.Context(), a)
+		if !shared && !scoped {
+			if err == nil || row != nil {
+				t.Fatalf("unshared fallback released: %+v, %v", row, err)
+			}
+			continue
+		}
+		want := "team/" + value
+		if scoped {
+			want = "pipeline/" + value
+		}
+		if err != nil || row == nil || row.Value != want {
+			t.Fatalf("shared=%v scoped=%v: %+v, %v", shared, scoped, row, err)
+		}
+	}
 }
 
 func TestSecretReadCommitsBoundReleaseAndNeverDetachesAnImplicitRun(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func deleteAndPurge(t *testing.T, st *store.Store, team store.Team, now time.Time) {
@@ -283,7 +284,7 @@ func TestAccountDeletionRelabelsEveryRowThatNamedTheAccount(t *testing.T) {
 		store.Run{ID: "run-l", Pipeline: "build", Status: "pending", StartedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if err := shared.CreateOrReplaceSecret(store.Secret{Name: "K", Value: "v", Principal: "leaver@example.com"}, now); err != nil {
+	if err := teststore.SeedSecret(st, shared.Team(), store.Secret{Name: "K", Value: "v", Principal: "leaver@example.com"}, now); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := shared.CreateTokenWith(ctx, "deploy-bot", store.TokenKindService, []string{"runs.read"}, 0, now,

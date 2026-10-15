@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"time"
 )
 
@@ -41,76 +40,11 @@ const (
 // or [MaxSecretValueBytes].
 var ErrSecretLimit = errors.New("store: secret limit reached")
 
-// CreateOrReplaceSecret upserts sec into t's team; created_at is
-// preserved. Pipeline scopes the secret to one pipeline, and Shared
-// opens an unscoped row to every run.
-//
-// The team is in the conflict target because it leads the primary key,
-// so a name another team already used names a different row rather than
-// that team's. A signed-up team is refused with [ErrSecretLimit] past
-// [MaxSecretsPerTeam] new rows or a value over [MaxSecretValueBytes];
-// replacing a row it already holds is not a new row.
-func (t *Tenant) CreateOrReplaceSecret(sec Secret, now time.Time) error {
-	if sec.Name == "" {
-		return errors.New("secrets: name required")
-	}
-	ts := now.UTC().UnixNano()
-	if holdsFreeAllowance(t.team) {
-		return t.createOrReplaceBoundedSecret(sec, ts)
-	}
-	_, err := t.s.execNoCtx(`
-        INSERT INTO secrets (team, name, value, principal, masked, pipeline, shared, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(team, name, pipeline) DO UPDATE SET
-            value = excluded.value,
-            principal = excluded.principal,
-            masked = excluded.masked,
-            shared = excluded.shared,
-            updated_at = excluded.updated_at
-    `, string(t.team), sec.Name, sec.Value, sec.Principal, boolInt(sec.Masked), sec.Pipeline, boolInt(sec.Shared), ts, ts)
-	return err
-}
-
-// safety: the count and the insert are one statement, so a refused write
-// stores nothing; concurrent creates can pass the cap by at most the writes
-// in flight together, which the request budget bounds.
-func (t *Tenant) createOrReplaceBoundedSecret(sec Secret, ts int64) error {
-	if len(sec.Value) > MaxSecretValueBytes {
-		return fmt.Errorf("%w: a secret value may be at most %d bytes as stored and this one is %d",
-			ErrSecretLimit, MaxSecretValueBytes, len(sec.Value))
-	}
-	res, err := t.s.execNoCtx(`
-        INSERT INTO secrets (team, name, value, principal, masked, pipeline, shared, created_at, updated_at)
-        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
-         WHERE (SELECT COUNT(*) FROM secrets WHERE team = ?) < ?
-            OR EXISTS (SELECT 1 FROM secrets WHERE team = ? AND name = ? AND pipeline = ?)
-        ON CONFLICT(team, name, pipeline) DO UPDATE SET
-            value = excluded.value,
-            principal = excluded.principal,
-            masked = excluded.masked,
-            shared = excluded.shared,
-            updated_at = excluded.updated_at
-    `, string(t.team), sec.Name, sec.Value, sec.Principal, boolInt(sec.Masked), sec.Pipeline, boolInt(sec.Shared), ts, ts,
-		string(t.team), MaxSecretsPerTeam, string(t.team), sec.Name, sec.Pipeline)
-	if err != nil {
-		return err
-	}
-	if n, err := res.RowsAffected(); err == nil && n == 0 {
-		return fmt.Errorf("%w: team %s holds %d secrets, the most a team may", ErrSecretLimit, t.team, MaxSecretsPerTeam)
-	}
-	return nil
-}
-
 func boolInt(b bool) int {
 	if b {
 		return 1
 	}
 	return 0
-}
-
-// GetSecret returns t's unscoped row including Value.
-func (t *Tenant) GetSecret(name string) (*Secret, error) {
-	return t.readSecret(name, "")
 }
 
 // GetSecretRow returns t's row stored under exactly this name and
@@ -135,28 +69,6 @@ func (t *Tenant) GetSecretForPipeline(name, pipeline string) (*Secret, error) {
 		}
 	}
 	return t.readSecret(name, "")
-}
-
-// GetSecretForRun returns t's row that pipeline owns, falling back to
-// t's unscoped row only when that row is shared.
-func (t *Tenant) GetSecretForRun(name, pipeline string) (*Secret, error) {
-	if name == "" {
-		return nil, errors.New("secrets: name required")
-	}
-	if pipeline != "" {
-		sec, err := t.readSecret(name, pipeline)
-		if err == nil || !errors.Is(err, ErrNotFound) {
-			return sec, err
-		}
-	}
-	sec, err := t.readSecret(name, "")
-	if err != nil {
-		return nil, err
-	}
-	if !sec.Shared {
-		return nil, notFound("secret", name)
-	}
-	return sec, nil
 }
 
 func (t *Tenant) readSecret(name, pipeline string) (*Secret, error) {
@@ -196,22 +108,6 @@ func (t *Tenant) ListSecrets() ([]Secret, error) {
 	}
 	defer func() { _ = rows.Close() }()
 	return scanSecretRows(rows)
-}
-
-// DeleteSecret removes t's row owned by pipeline ("" for the unscoped
-// row); ErrNotFound when missing.
-func (t *Tenant) DeleteSecret(name, pipeline string) error {
-	res, err := t.s.execNoCtx(
-		`DELETE FROM secrets WHERE team = ? AND name = ? AND pipeline = ?`,
-		string(t.team), name, pipeline)
-	if err != nil {
-		return err
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return notFound("secret", name)
-	}
-	return nil
 }
 
 // ClaimedRun names the team and pipeline of a run a claimant holds live

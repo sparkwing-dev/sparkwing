@@ -23,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func credentialMutationStore(t *testing.T) (*store.Store, *secrets.Cipher) {
@@ -50,6 +51,7 @@ func credentialMutationStore(t *testing.T) (*store.Store, *secrets.Cipher) {
 
 type credentialMutationFake struct {
 	*store.Tenant
+	store     *store.Store
 	err       error
 	calls     int
 	actor     capability.Authorized
@@ -66,14 +68,15 @@ func (f *credentialMutationFake) WriteSecret(_ context.Context, a capability.Aut
 	if err := f.record(a); err != nil {
 		return err
 	}
-	return f.Tenant.CreateOrReplaceSecret(row, time.Now())
+	return teststore.SeedSecret(f.store, f.Team(), row, time.Now())
 }
 
-func (f *credentialMutationFake) RemoveSecret(_ context.Context, a capability.Authorized, name, pipeline string) error {
+func (f *credentialMutationFake) RemoveSecret(ctx context.Context, a capability.Authorized, name, pipeline string) error {
 	if err := f.record(a); err != nil {
 		return err
 	}
-	return f.Tenant.DeleteSecret(name, pipeline)
+	a.Principal.Authority = f.authority
+	return f.Tenant.RemoveSecret(ctx, a, name, pipeline)
 }
 
 func (f *credentialMutationFake) WriteGitCredential(ctx context.Context, a capability.Authorized, row store.GitCredential) (store.GitCredential, error) {
@@ -109,7 +112,7 @@ func mutationServerConfig(t testing.TB, s *store.Store, cipher controller.Cipher
 				return nil, err
 			}
 			a := credentialSeedAuthority(t, s, team)
-			return &credentialMutationFake{Tenant: tenant, authority: a.Principal.Authority}, nil
+			return &credentialMutationFake{Tenant: tenant, store: s, authority: a.Principal.Authority}, nil
 		})
 	}
 	return server
@@ -134,7 +137,7 @@ func TestCredentialMutationsHTTPSelectAuthenticatedTenant(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := foreign.CreateOrReplaceSecret(store.Secret{Name: "KEY", Pipeline: pipeline, Value: "foreign-value"}, time.Now()); err != nil {
+		if err := teststore.SeedSecret(s, foreign.Team(), store.Secret{Name: "KEY", Pipeline: pipeline, Value: "foreign-value"}, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 		body, err := json.Marshal(map[string]any{"name": "KEY", "value": value, "pipeline": pipeline, "masked": masked, "shared": shared})
@@ -161,7 +164,7 @@ func TestCredentialMutationsHTTPSelectAuthenticatedTenant(t *testing.T) {
 		if err != nil || other.Value != "foreign-value" {
 			return false
 		}
-		return foreign.DeleteSecret("KEY", pipeline) == nil
+		return foreign.RemoveSecret(t.Context(), credentialSeedAuthority(t, s, "foreign"), "KEY", pipeline) == nil
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
 		t.Fatal(err)
@@ -403,7 +406,7 @@ func TestCredentialMutationsHTTPValidatesBodiesBeforeTransactions(t *testing.T) 
 	for _, name := range []string{"", "new..name", "KEY' OR 1=1 --"} {
 		b := authorityMember()
 		if name != "" {
-			if err := tenant.CreateOrReplaceSecret(store.Secret{Name: name, Value: "unchanged"}, time.Now()); err != nil {
+			if err := teststore.SeedSecret(s, tenant.Team(), store.Secret{Name: name, Value: "unchanged"}, time.Now()); err != nil {
 				t.Fatal(err)
 			}
 		}

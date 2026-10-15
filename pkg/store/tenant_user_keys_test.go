@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestSecretNameIsUniquePerTeam(t *testing.T) {
@@ -17,12 +18,12 @@ func TestSecretNameIsUniquePerTeam(t *testing.T) {
 	now := time.Now()
 
 	for _, pipeline := range []string{"", "ci"} {
-		if err := alpha.CreateOrReplaceSecret(store.Secret{
+		if err := teststore.SeedSecret(st, alpha.Team(), store.Secret{
 			Name: "DEPLOY_KEY", Value: "alpha-" + pipeline, Pipeline: pipeline, Shared: true,
 		}, now); err != nil {
 			t.Fatalf("alpha DEPLOY_KEY on pipeline %q: %v", pipeline, err)
 		}
-		if err := beta.CreateOrReplaceSecret(store.Secret{
+		if err := teststore.SeedSecret(st, beta.Team(), store.Secret{
 			Name: "DEPLOY_KEY", Value: "beta-" + pipeline, Pipeline: pipeline, Shared: true,
 		}, now); err != nil {
 			t.Fatalf("beta DEPLOY_KEY on pipeline %q: %v", pipeline, err)
@@ -33,9 +34,9 @@ func TestSecretNameIsUniquePerTeam(t *testing.T) {
 		tn   *store.Tenant
 		want string
 	}{{alpha, "alpha-ci"}, {beta, "beta-ci"}} {
-		got, err := c.tn.GetSecretForRun("DEPLOY_KEY", "ci")
+		got, err := c.tn.GetSecretForPipeline("DEPLOY_KEY", "ci")
 		if err != nil {
-			t.Fatalf("%s GetSecretForRun: %v", c.tn.Team(), err)
+			t.Fatalf("%s GetSecretForPipeline: %v", c.tn.Team(), err)
 		}
 		if got.Value != c.want {
 			t.Errorf("%s reads DEPLOY_KEY = %q, want %q", c.tn.Team(), got.Value, c.want)
@@ -52,7 +53,7 @@ func TestSecretNameIsUniquePerTeam(t *testing.T) {
 		}
 	}
 
-	if err := alpha.DeleteSecret("DEPLOY_KEY", "ci"); err != nil {
+	if _, err := st.DB().ExecContext(t.Context(), `DELETE FROM secrets WHERE team=? AND name=? AND pipeline=?`, alpha.Team(), "DEPLOY_KEY", "ci"); err != nil {
 		t.Fatalf("alpha DeleteSecret: %v", err)
 	}
 	if _, err := alpha.GetSecretRow("DEPLOY_KEY", "ci"); !errors.Is(err, store.ErrNotFound) {

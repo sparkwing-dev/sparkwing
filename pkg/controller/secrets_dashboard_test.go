@@ -130,7 +130,7 @@ func TestSecrets_ListOpensAVariablesEnvelope(t *testing.T) {
 			t.Fatalf("POST %v = %d", row["name"], resp.StatusCode)
 		}
 	}
-	row, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecret("REGION")
+	row, err := teststore.ForTeam(t, st, store.DefaultTeam).GetSecretRow("REGION", "")
 	if err != nil {
 		t.Fatal(err)
 	}

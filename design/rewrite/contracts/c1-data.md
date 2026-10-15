@@ -1,5 +1,20 @@
 # C1 data contract
 
+## Raw secret and launcher issuance cuts
+
+`Tenant.CreateOrReplaceSecret`, `DeleteSecret`, `GetSecret` and
+`GetSecretForRun` are removed. Mutations use the current administration
+transactions `WriteSecret` and `RemoveSecret`. Claim reads use `ReadSecret`.
+Metadata fixtures select an exact `GetSecretRow` scope. The store clock,
+actor, count limit, size limit and default-team exemption remain unchanged.
+
+`Store.MintClaimToken`, its private launcher issuer and `MaxClaimTokenLifetime`
+are removed. The only production claim-token mint left is the legacy runner
+path pending its caller cutover. Current awards use `Store.Issue`. Legacy
+transport tests seed presentation state without a production launcher issuer.
+The unused `Operator.TeamRunIDs` report is removed with its legacy per-run
+object-purge contract. Tenant purge keeps its scoped inventory checks.
+
 <!-- design:begin -->
 
 ## Raw cancellation and unused readers removed

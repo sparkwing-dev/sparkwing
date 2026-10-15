@@ -58,7 +58,7 @@ func TestCredentialTransactionsHTTPUseDefaultStoreAdapters(t *testing.T) {
 	}
 	call("POST", "/api/v1/secrets", `{"name":"DENIED","value":"private-value"}`, 403)
 	call("POST", "/api/v1/team/git-credentials", `{"host":"git.example.test","kind":"https","token":"private-key"}`, 403)
-	if _, err := tenant.GetSecret("DENIED"); err == nil {
+	if _, err := tenant.GetSecretRow("DENIED", ""); err == nil {
 		t.Fatal("demoted member stored secret")
 	}
 	if _, err := tenant.GitCredentialForHost(t.Context(), "git.example.test"); err == nil {

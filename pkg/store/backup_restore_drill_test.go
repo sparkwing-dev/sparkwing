@@ -98,7 +98,7 @@ func populateInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) {
 		if err != nil {
 			t.Fatalf("seal %s: %v", name, err)
 		}
-		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateOrReplaceSecret(store.Secret{
+		if err := teststore.SeedSecret(st, store.DefaultTeam, store.Secret{
 			Name:      name,
 			Value:     sealed,
 			Principal: "operator",

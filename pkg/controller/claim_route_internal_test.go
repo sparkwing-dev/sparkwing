@@ -63,7 +63,9 @@ func newClaimRouteFixture(t *testing.T) claimRouteFixture {
 		if err != nil || node == nil || node.NodeID != nodeID {
 			t.Fatalf("claim %s: %v %v", nodeID, node, err)
 		}
-		raw, err := st.MintClaimToken(ctx, store.DefaultTeam, "run-a", nodeID, node.ClaimGeneration, kind, now.Add(time.Hour), now)
+		raw := "swc_" + nodeID + "_legacy-route-fixture-presentation"
+		digest := sha256.Sum256([]byte(raw))
+		_, err = st.DB().ExecContext(t.Context(), `INSERT INTO claim_tokens(digest,prefix,team,run_id,node_id,claim_generation,kind,created_at,expires_at) VALUES (?,?,?,?,?,?,?,?,?)`, hex.EncodeToString(digest[:]), raw[:store.PrefixLen], store.DefaultTeam, "run-a", nodeID, node.ClaimGeneration, kind, now.UnixNano(), now.Add(time.Hour).UnixNano())
 		if err != nil {
 			t.Fatal(err)
 		}

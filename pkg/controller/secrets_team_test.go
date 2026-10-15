@@ -33,18 +33,17 @@ func TestRunnerReadsTheClaimedRunsTeamSecrets(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	for _, row := range []struct {
-		write       func(store.Secret, time.Time) error
 		team        store.Team
 		name, value string
 		pipeline    string
 		shared      bool
 	}{
-		{teststore.ForTeam(t, st, store.DefaultTeam).CreateOrReplaceSecret, store.DefaultTeam, "API_KEY", "default-team-value", "deploy", false},
-		{acme.CreateOrReplaceSecret, "acme", "API_KEY", "acme-value", "deploy", false},
-		{teststore.ForTeam(t, st, store.DefaultTeam).CreateOrReplaceSecret, store.DefaultTeam, "NPM_TOKEN", "default-npm", "", true},
-		{acme.CreateOrReplaceSecret, "acme", "NPM_TOKEN", "acme-npm", "", true},
+		{store.DefaultTeam, "API_KEY", "default-team-value", "deploy", false},
+		{"acme", "API_KEY", "acme-value", "deploy", false},
+		{store.DefaultTeam, "NPM_TOKEN", "default-npm", "", true},
+		{"acme", "NPM_TOKEN", "acme-npm", "", true},
 	} {
-		if err := row.write(sealedSecret(t, row.team, store.Secret{
+		if err := teststore.SeedSecret(st, row.team, sealedSecret(t, row.team, store.Secret{
 			Name: row.name, Value: row.value, Principal: "root", Pipeline: row.pipeline,
 			Masked: true, Shared: row.shared,
 		}), now); err != nil {

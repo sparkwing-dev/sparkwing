@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -25,11 +26,13 @@ func TestCredentialMutationsUseCurrentActorAndStoreClock(t *testing.T) {
 	}
 	now = now.Add(time.Second)
 	sec.Value = "replacement"
-	if err := tenant.WriteSecret(t.Context(), a, sec); err != nil {
+	replacement := a
+	replacement.Principal.Authority = authorityMember(t, tenant.s, "replacement-author", RoleOwner).Authority
+	if err := tenant.WriteSecret(t.Context(), replacement, sec); err != nil {
 		t.Fatal(err)
 	}
 	second, err := tenant.GetSecretRow(sec.Name, sec.Pipeline)
-	if err != nil || second.Value != "replacement" || !second.CreatedAt.Equal(first.CreatedAt) || !second.UpdatedAt.Equal(now) {
+	if err != nil || second.Value != "replacement" || second.Principal != "replacement-author" || !second.CreatedAt.Equal(first.CreatedAt) || !second.UpdatedAt.Equal(now) {
 		t.Fatalf("replacement: %+v %v", second, err)
 	}
 	c, err := tenant.WriteGitCredential(t.Context(), a, GitCredential{Host: "git.test", Kind: GitCredentialSSH, Secret: "sealed", Fingerprint: "SHA256:key"})
@@ -181,5 +184,93 @@ func TestCredentialMutationsSerializeExistingSecretLimit(t *testing.T) {
 	}
 	if err := tenant.WriteSecret(t.Context(), a, Secret{Name: "KEY_0", Value: "replacement"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCredentialMutationsSecretLimitsPreserveExistingValues(t *testing.T) {
+	for _, team := range []Team{"a", DefaultTeam} {
+		t.Run(string(team), func(t *testing.T) {
+			tenant, a := credentialMaintenanceFixture(t)
+			if team == DefaultTeam {
+				rewriteSchemaExec(t, tenant.s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES (?,1,1)`, team)
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE memberships SET team=? WHERE account_id='owner'`, team)
+				rewriteSchemaExec(t, tenant.s.db, `UPDATE sessions SET team=? WHERE hash='owner'`, team)
+				tenant.team, a.Target.Team = team, string(team)
+			}
+			for i := range MaxSecretsPerTeam {
+				if err := tenant.WriteSecret(t.Context(), a, Secret{Name: fmt.Sprintf("KEY_%d", i), Value: "original"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, row := range []Secret{{Name: "EXTRA", Value: "extra"}, {Name: "KEY_0", Value: strings.Repeat("x", MaxSecretValueBytes+1)}} {
+				err := tenant.WriteSecret(t.Context(), a, row)
+				if team == DefaultTeam && err != nil || team != DefaultTeam && !errors.Is(err, ErrSecretLimit) {
+					t.Fatalf("secret %s: %v", row.Name, err)
+				}
+			}
+			row, err := tenant.GetSecretRow("KEY_0", "")
+			if err != nil || team != DefaultTeam && row.Value != "original" || team == DefaultTeam && len(row.Value) != MaxSecretValueBytes+1 {
+				t.Fatalf("size refusal: %+v, %v", row, err)
+			}
+			if err := tenant.WriteSecret(t.Context(), a, Secret{Name: "KEY_0", Value: "replacement"}); err != nil {
+				t.Fatal(err)
+			}
+			rows, err := tenant.ListSecrets()
+			want := MaxSecretsPerTeam
+			if team == DefaultTeam {
+				want++
+			}
+			if err != nil || len(rows) != want {
+				t.Fatalf("secret count: %d, %v", len(rows), err)
+			}
+			for i := 1; i < len(rows); i++ {
+				if rows[i-1].Name >= rows[i].Name {
+					t.Fatal("secret list is not ordered by name")
+				}
+			}
+		})
+	}
+}
+
+func TestCredentialMutationsDeletionPreservesOtherScopesProperty(t *testing.T) {
+	tenant, a := credentialMaintenanceFixture(t)
+	foreignActor := authorityMember(t, tenant.s, "foreign", RoleOwner)
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE memberships SET team='b' WHERE account_id='foreign'`)
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE sessions SET team='b' WHERE hash='foreign'`)
+	foreign := &Tenant{s: tenant.s, team: "b"}
+	b := a
+	b.Principal.Authority, b.Target.Team = foreignActor.Authority, "b"
+	random := rand.New(rand.NewPCG(107, 315))
+	for range 32 {
+		name := fmt.Sprintf("KEY_%x", random.Uint64())
+		pipeline := fmt.Sprintf("pipeline/%x'", random.Uint64())
+		for _, scope := range []struct {
+			tenant *Tenant
+			a      capability.Authorized
+		}{{tenant, a}, {foreign, b}} {
+			for _, p := range []string{"", pipeline} {
+				if err := scope.tenant.WriteSecret(t.Context(), scope.a, Secret{Name: name, Pipeline: p, Value: string(scope.tenant.team) + p}); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		if err := tenant.RemoveSecret(t.Context(), a, name, pipeline); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tenant.GetSecretRow(name, pipeline); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("deleted secret: %v", err)
+		}
+		if err := tenant.RemoveSecret(t.Context(), a, name, pipeline); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("repeated deletion: %v", err)
+		}
+		for _, want := range []struct {
+			tenant   *Tenant
+			pipeline string
+		}{{tenant, ""}, {foreign, ""}, {foreign, pipeline}} {
+			row, err := want.tenant.GetSecretRow(name, want.pipeline)
+			if err != nil || row.Value != string(want.tenant.team)+want.pipeline {
+				t.Fatalf("another scope changed: %+v, %v", row, err)
+			}
+		}
 	}
 }

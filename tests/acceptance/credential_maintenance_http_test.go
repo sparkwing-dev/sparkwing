@@ -21,6 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type credentialMaintenance struct {
@@ -485,7 +486,7 @@ func TestCredentialMaintenanceHTTPMissingAdaptersNeverUseLegacyStore(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := tenant.CreateOrReplaceSecret(store.Secret{Name: "UNCHANGED", Value: "original-envelope", Masked: true}, time.Now()); err != nil {
+		if err := teststore.SeedSecret(s, tenant.Team(), store.Secret{Name: "UNCHANGED", Value: "original-envelope", Masked: true}, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -502,7 +503,7 @@ func TestCredentialMaintenanceHTTPMissingAdaptersNeverUseLegacyStore(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
-		row, err := tenant.GetSecret("UNCHANGED")
+		row, err := tenant.GetSecretRow("UNCHANGED", "")
 		if err != nil || row.Value != "original-envelope" {
 			t.Fatalf("legacy fallback changed %s: %+v %v", team, row, err)
 		}
@@ -527,7 +528,7 @@ func TestCredentialMaintenanceHTTPUsesStoreTransactions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tenant.CreateOrReplaceSecret(row, time.Now()); err != nil {
+	if err := teststore.SeedSecret(f.store, tenant.Team(), row, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	gitValue, err := cipher.SealBound("team", "git-credential:git.example.test", "git-credential", false, true, "private key")
