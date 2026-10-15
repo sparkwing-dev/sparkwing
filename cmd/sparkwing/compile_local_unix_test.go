@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 )
 
@@ -23,6 +22,7 @@ func TestLocalPipelineBinaryBuildsOnceWithoutRemoteTransfers(t *testing.T) {
 	t.Setenv("BUILD_LOG", buildLog)
 	bin := filepath.Join(root, "go")
 	script := `#!/bin/sh
+if [ "$1" = mod ]; then exit 0; fi
 if [ "$1" = env ]; then printf 'auto\ngo1.26.9\noff\n'; exit 0; fi
 while [ $# -gt 0 ]; do
   if [ "$1" = -o ]; then
@@ -47,13 +47,9 @@ exit 1
 		return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader("missing"))}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = previous })
-	key, parts, err := bincache.ExplainCacheKey(dir, os.Environ())
-	if err != nil {
-		t.Fatal(err)
-	}
 	ctx := gotoolchain.WithSession(t.Context(), os.Environ(), nil)
 	for _, wantSource := range []string{"compiled", "cached"} {
-		lease, source, err := pipelineBinary(ctx, dir, key, parts, os.Environ(), os.Stderr)
+		lease, source, err := pipelineBinary(ctx, dir, os.Environ(), os.Stderr)
 		if err != nil {
 			t.Fatal(err)
 		}

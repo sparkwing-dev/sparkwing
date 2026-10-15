@@ -10,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -127,7 +128,14 @@ func (s *EngineController) claimedUnit(ctx context.Context, claim store.UnitClai
 	}
 	unit := engineReconciledClaim(principal.Capability, store.ReconciledNode{Node: node, Claim: &claim.Award, Bearer: claim.Bearer}, run)
 	unit.RunID, unit.JobID, unit.SourceGeneration = claim.RunID, claim.NodeID, claim.SourceGeneration
-	if claim.Kind != capability.UnitNode {
+	switch claim.Kind {
+	case capability.UnitPlan, capability.UnitEval:
+		resources := run.Request.Request.Options.Resources
+		if run.Spec != nil {
+			resources = run.Spec.Resolved.Settings.Options.Resources
+		}
+		unit.Execution = &runspec.JobExecutionSettings{Resources: resources}
+	case capability.UnitTrigger:
 		unit.Execution = nil
 	}
 	if parent := principal.Capability.Parent; parent != nil {

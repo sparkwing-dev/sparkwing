@@ -12,7 +12,6 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/cluster"
@@ -66,7 +65,7 @@ func TestLauncherPollingW8Components(t *testing.T) {
 					want = time.Second
 				}
 				err = cluster.RunLaunchCLI(ctx, args, func(_ context.Context, cfg launcher.CloudJobConfig, _ string) (*launcher.Launcher, error) {
-					return &launcher.Launcher{Config: cfg, Kube: fake.NewClientset(), Control: control, Boundary: &cloudBoundaryFake{}, Poll: time.Hour}, nil
+					return &launcher.Launcher{Config: cfg, Kube: cloudKubeW8(), Control: control, Boundary: &cloudBoundaryFake{}, Poll: time.Hour}, nil
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -109,8 +108,23 @@ func TestLauncherControllerW8Components(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resources.Job.UID, other.Job.UID = "first-job-uid", "second-job-uid"
-	kube := fake.NewClientset(resources.Job, resources.BootstrapSecret, other.Job, other.BootstrapSecret)
+	kube := cloudKubeW8()
+	publishing := &cloudControlW8{award: &award}
+	publisher := &launcher.Launcher{Kube: kube, Control: publishing, Boundary: boundary, Config: config}
+	for _, next := range []*launcher.CloudJobAward{&award, &second} {
+		publishing.award = next
+		if claimed, err := publisher.LaunchOne(t.Context()); err != nil || !claimed {
+			t.Fatalf("publish restart fixture: claimed=%t err=%v", claimed, err)
+		}
+	}
+	resources.Job, err = kube.BatchV1().Jobs(config.Namespace).Get(t.Context(), resources.Job.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other.Job, err = kube.BatchV1().Jobs(config.Namespace).Get(t.Context(), other.Job.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	demand := controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}, AvailableCores: 4, AvailableMemoryBytes: 8 << 30}
 	remove := false
 	transportErr := error(nil)

@@ -95,10 +95,10 @@ func cloudBinding(unit controllerwire.ClaimedUnit, delivery capability.DeliveryP
 		return CloudJobBinding{}, err
 	}
 	fence := unit.Binding
-	if unit.Delivery != delivery || unit.UnitID == "" || fence.Generation <= 0 || fence.Attempt < 0 || unit.ParentCapabilityExpiry == nil || unit.ParentCapabilityExpiry.IsZero() {
+	if unit.Delivery != delivery || unit.UnitID == "" || fence.Generation <= 0 || fence.Attempt < 0 {
 		return CloudJobBinding{}, errors.New("controller returned an invalid Cloud award binding")
 	}
-	binding := CloudJobBinding{UnitID: unit.UnitID, Team: unit.Request.Request.Team, RunID: unit.RunID, NodeID: unit.JobID, Holder: fence.Holder, Generation: fence.Generation, Attempt: fence.Attempt, OwnerDeadline: deadlineValue(unit.OwnerDeadline), AttemptDeadline: deadlineValue(unit.AttemptDeadline), ParentCapabilityExpiry: *unit.ParentCapabilityExpiry}
+	binding := CloudJobBinding{UnitID: unit.UnitID, Team: unit.Request.Request.Team, RunID: unit.RunID, NodeID: unit.JobID, Holder: fence.Holder, Generation: fence.Generation, Attempt: fence.Attempt, OwnerDeadline: deadlineValue(unit.OwnerDeadline), AttemptDeadline: deadlineValue(unit.AttemptDeadline), ParentCapabilityExpiry: deadlineValue(unit.ParentCapabilityExpiry)}
 	switch unit.Unit {
 	case capability.UnitPlan:
 		if unit.Purpose != capability.PurposePlan || fence.Kind != capability.BindingRun || unit.JobID != "" || fence.NodeID != "" || unit.SourceGeneration != 0 {

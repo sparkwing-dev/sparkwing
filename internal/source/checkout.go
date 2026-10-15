@@ -208,12 +208,19 @@ func pipelineDirectory(checkout, relative string) (string, error) {
 
 // Close releases acquisition-owned resources and preserves user checkouts.
 func (e *Entry) Close() error {
-	if e == nil || e.ownedDirectory == "" {
+	if e == nil {
 		return nil
 	}
-	if err := os.RemoveAll(e.ownedDirectory); err != nil {
-		return err
+	var err error
+	if e.releaseSDK != nil {
+		err = e.releaseSDK()
+		e.releaseSDK = nil
 	}
-	e.ownedDirectory = ""
-	return nil
+	if e.ownedDirectory != "" {
+		if removeErr := os.RemoveAll(e.ownedDirectory); removeErr != nil {
+			return errors.Join(err, removeErr)
+		}
+		e.ownedDirectory = ""
+	}
+	return err
 }

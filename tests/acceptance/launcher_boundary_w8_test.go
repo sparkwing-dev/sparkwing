@@ -31,7 +31,7 @@ func TestLauncherRefusesAdmittedNodeChangeW8Components(t *testing.T) {
 	for _, kind := range []launcher.CloudUnitKind{launcher.CloudPlan, launcher.CloudEval, launcher.CloudWork} {
 		t.Run(string(kind), func(t *testing.T) {
 			_, cfg, award := cloudFixture(kind)
-			kube := fake.NewClientset()
+			kube := cloudKubeW8()
 			kube.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
 				action.(ktesting.CreateAction).GetObject().(*batchv1.Job).Spec.Template.Spec.NodeName = "unreserved"
 				return false, nil, nil
@@ -71,11 +71,7 @@ func TestLauncherKubernetesBoundaryW8Components(t *testing.T) {
 			_, cfg, award := cloudFixture(kind)
 			control := &cloudControlW8{award: &award}
 			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "dedicated", UID: "node-uid", Labels: map[string]string{launcher.TeamNodeLabel: launcher.TeamNodeValue("team")}}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
-			kube := fake.NewClientset(node)
-			kube.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
-				action.(ktesting.CreateAction).GetObject().(*batchv1.Job).UID = "job-uid"
-				return false, nil, nil
-			})
+			kube := cloudKubeW8(node)
 			// safety: retain deleting Jobs so the fake API exercises reconstruction while DinD drains.
 			kube.PrependReactor("delete", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
 				name := action.(ktesting.DeleteAction).GetName()

@@ -95,6 +95,9 @@ func (l *Launcher) LaunchOne(ctx context.Context) (bool, error) {
 	if err := l.validate(); err != nil {
 		return false, err
 	}
+	if err := l.verifyAdmissionExemption(ctx); err != nil {
+		return false, err
+	}
 	award, err := l.Control.Claim(ctx)
 	if err != nil || award == nil {
 		return false, err
@@ -123,18 +126,20 @@ func (l *Launcher) LaunchOne(ctx context.Context) (bool, error) {
 	}
 	r.BootstrapSecret.OwnerReferences = []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: created.Name, UID: created.UID, Controller: ptr(true), BlockOwnerDeletion: ptr(true)}}
 	secret, err := l.Kube.CoreV1().Secrets(l.Config.Namespace).Create(ctx, r.BootstrapSecret, metav1.CreateOptions{})
-	if err == nil {
-		err = validateAdmittedBootstrap(r.BootstrapSecret, secret)
-	}
 	if err != nil {
-		if secret != nil && secret.Namespace == l.Config.Namespace && secret.Name != "" && secret.Name != r.BootstrapSecret.Name {
-			retained, retainErr := l.retainBootstrap(ctx, created, secret)
-			if retainErr != nil {
-				return true, errors.Join(err, retainErr, l.deleteBootstrap(ctx, bootstrapReference{Name: secret.Name, UID: secret.UID}))
-			}
-			created = retained
-		}
 		return true, errors.Join(err, l.teardown(ctx, created, r.Reservation))
+	}
+	validationErr := validateAdmittedBootstrap(r.BootstrapSecret, secret)
+	if secret == nil || secret.Namespace != l.Config.Namespace || secret.Name == "" || secret.UID == "" {
+		return true, errors.Join(errors.New("Kubernetes returned no owned bootstrap instance"), validationErr, l.teardown(ctx, created, r.Reservation))
+	}
+	retained, err := l.retainBootstrap(ctx, created, secret)
+	if err != nil {
+		return true, errors.Join(err, validationErr, l.deleteBootstrap(ctx, bootstrapReference{Name: secret.Name, UID: secret.UID}))
+	}
+	created = retained
+	if validationErr != nil {
+		return true, errors.Join(validationErr, l.teardown(ctx, created, r.Reservation))
 	}
 	// safety: reservation probes and publication may outlive the award's execution authority.
 	retirements, err := l.retirements(ctx, []CloudJobObservation{{Binding: award.Binding, JobNamespace: created.Namespace, JobName: created.Name, JobUID: string(created.UID), NodeUID: r.Reservation.NodeUID}})
@@ -160,7 +165,7 @@ func (l *Launcher) LaunchOne(ctx context.Context) (bool, error) {
 }
 
 func (l *Launcher) retainBootstrap(ctx context.Context, job *batchv1.Job, secret *corev1.Secret) (*batchv1.Job, error) {
-	// safety: a renamed, unowned bootstrap must remain discoverable when deletion fails or the launcher restarts.
+	// safety: persist the returned Secret UID before activation so restart cleanup cannot select a replacement.
 	reference, err := json.Marshal(bootstrapReference{Name: secret.Name, UID: secret.UID, JobUID: job.UID})
 	if err != nil {
 		return nil, err

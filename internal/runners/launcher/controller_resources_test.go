@@ -1,0 +1,175 @@
+package launcher
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+)
+
+func TestCloudAwardResourcesFromControllerThroughLauncher(t *testing.T) {
+	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
+		t.Run(string(kind), func(t *testing.T) {
+			e, tenant := cloudResourceStore(t)
+			run, err := tenant.ReadRun(t.Context(), "run")
+			if err != nil {
+				t.Fatal(err)
+			}
+			resources := func(cores float64, memory int64) runspec.Setting[runspec.Resources] {
+				return runspec.Setting[runspec.Resources]{Optional: runspec.Optional[runspec.Resources]{Set: true, Value: runspec.Resources{
+					Cores:       runspec.Setting[float64]{Optional: runspec.Optional[float64]{Set: true, Value: cores}},
+					MemoryBytes: runspec.Setting[int64]{Optional: runspec.Optional[int64]{Set: true, Value: memory}},
+				}}}
+			}
+			run.Request.Request.Dispatch = runspec.DispatchController
+			run.Request.Request.Git.SHA = strings.Repeat("a", 40)
+			run.Request.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://github.com/team/repo", PipelineDir: ".sparkwing"}
+			run.Request.Request.Options.Resources = resources(0.25, 256<<20)
+			request, err := json.Marshal(run.Request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cloudResourceSQL(t, e.Store, `UPDATE runs SET dispatch='controller',request_json=?`, request)
+			cloudResourceSQL(t, e.Store, `UPDATE triggers SET unit_kind='plan'`)
+			wantCPU, wantMemory := 0.25, int64(256<<20)
+			if kind != capability.UnitPlan {
+				sealed := runspec.Spec{Request: run.Request, Resolved: runspec.Resolved{Engine: engine.Identity{Version: "v1.2.3", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}, ManifestDigest: strings.Repeat("b", 64)}, Settings: runspec.ExecutionSettings{Options: runspec.Options{Resources: resources(0.5, 512<<20)}}, Guards: runspec.Guards{Passed: true}}}
+				spec, err := json.Marshal(sealed)
+				if err != nil {
+					t.Fatal(err)
+				}
+				execution, err := json.Marshal(runspec.JobExecutionSettings{Resources: resources(0.75, 768<<20)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				cloudResourceSQL(t, e.Store, `UPDATE runs SET sealed_at=1,spec_json=?,spec_hash='spec',plan_json=?,plan_hash='plan'`, spec, []byte(`{"jobs":[{"id":"job"}]}`))
+				cloudResourceSQL(t, e.Store, `UPDATE triggers SET claimed_by='owner',lease_expires_at=?,generation=1`, time.Now().Add(time.Hour).UnixNano())
+				cloudResourceSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), execution)
+				wantCPU, wantMemory = 0.75, 768<<20
+				if kind == capability.UnitEval {
+					wantCPU, wantMemory = 0.5, 512<<20
+					cloudResourceSQL(t, e.Store, `UPDATE nodes SET status='done',outcome='success',finished_at=1,generation=7,expansion='expected'`)
+					cloudResourceSQL(t, e.Store, `INSERT INTO leases(name,holder,until,generation) VALUES ('controller.owner','controller',?,3)`, time.Now().Add(time.Hour).UnixNano())
+					cloudResourceSQL(t, e.Store, `INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status,owner_generation) VALUES ('a','run','job',7,'pending',3)`)
+				}
+			}
+			raw := cloudResourceRoot(t, e)
+			e.Store.SetClaimProfileResolver(cloudResourceProfile(func(context.Context, capability.Principal) (match.Profile, match.Resources, error) {
+				return match.Profile{Capacity: match.Resources{Cores: 1, MemoryBytes: 1 << 30}}, match.Resources{Cores: 1, MemoryBytes: 1 << 30}, nil
+			}))
+			e.RunnerPolicy = cloudResourcePolicy(func(context.Context, string) error { return nil })
+			handler := controller.New(e.Store, nil).WithEngineController(e).Handler()
+			transport := &http.Client{Transport: cloudResourceTransport(func(r *http.Request) (*http.Response, error) {
+				w := httptest.NewRecorder()
+				handler.ServeHTTP(w, r)
+				return w.Result(), nil
+			})}
+			wire, err := client.NewEngineClient(client.EngineOptions{URL: "https://controller.example", Launcher: true, Bearer: func(context.Context) (string, error) { return raw, nil }, HTTP: transport})
+			if err != nil {
+				t.Fatal(err)
+			}
+			control, err := NewControllerControl(wire, controllerwire.ClaimRequest{RunnerVersion: "v1", Kinds: []capability.UnitKind{kind}, AvailableCores: 1, AvailableMemoryBytes: 1 << 30})
+			if err != nil {
+				t.Fatal(err)
+			}
+			award, err := control.Claim(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if award == nil || award.CPUCores != wantCPU || award.Memory != wantMemory {
+				t.Fatalf("award=%+v; want %g CPU and %d bytes", award, wantCPU, wantMemory)
+			}
+			bootstrap, err := client.NewEngineClient(client.EngineOptions{URL: "https://controller.example", HTTP: transport, Bearer: func(context.Context) (string, error) { return string(award.Bootstrap), nil }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			exchanged, err := bootstrap.Exchange(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if exchanged.Claim.Execution == nil || exchanged.Claim.Execution.Resources.Value.Cores.Value != wantCPU || exchanged.Claim.Execution.Resources.Value.MemoryBytes.Value != wantMemory {
+				t.Fatalf("exchange changed execution resources: %+v", exchanged.Claim.Execution)
+			}
+		})
+	}
+}
+
+type cloudResourceTransport func(*http.Request) (*http.Response, error)
+
+func (f cloudResourceTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+type cloudResourceProfile func(context.Context, capability.Principal) (match.Profile, match.Resources, error)
+
+func (f cloudResourceProfile) ResolveClaimProfile(ctx context.Context, p capability.Principal) (match.Profile, match.Resources, error) {
+	return f(ctx, p)
+}
+
+type cloudResourcePolicy func(context.Context, string) error
+
+func (f cloudResourcePolicy) CheckRunner(ctx context.Context, v string) error { return f(ctx, v) }
+func cloudResourceSQL(t *testing.T, s *store.Store, q string, args ...any) {
+	t.Helper()
+	if _, err := s.DB().ExecContext(t.Context(), q, args...); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func cloudResourceStore(t *testing.T) (*controller.EngineController, *store.Tenant) {
+	t.Helper()
+	s, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	cloudResourceSQL(t, s, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
+	request, err := json.Marshal(runspec.SealedRequest{Version: 1, RunID: "run", Hash: "request", Request: runspec.Request{Version: 1, Team: "a", Pipeline: "ci", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchController, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cloudResourceSQL(t, s, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('a','run',1,'ci','running',?,'request',1,'gh:1','controller','execute',?,'account',?,'r30',30)`, request, []byte(`[]`), time.Now().UnixNano())
+	cloudResourceSQL(t, s, `INSERT INTO triggers(team,id,unit_kind,available_at,created_at,expires_at,needs_labels,prefers_labels) VALUES ('a','run','plan',1,1,?,?,?)`, time.Now().Add(time.Hour).UnixNano(), []byte(`[]`), []byte(`[]`))
+	tenant, err := s.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &controller.EngineController{Store: s}, tenant
+}
+
+func cloudResourceRoot(t *testing.T, e *controller.EngineController) string {
+	t.Helper()
+	secret := sha256.Sum256([]byte("launcher"))
+	raw := "swk_" + base64.RawURLEncoding.EncodeToString(secret[:])
+	digest := sha256.Sum256([]byte(raw))
+	c := capability.Capability{Prefix: "launcher", Subject: capability.Subject{Kind: capability.SubjectService, ID: "launcher"}, Audience: capability.Controller, Grants: []capability.Grant{capability.ClaimsLaunch}, Binding: capability.Binding{Kind: capability.BindingNone}, Issuance: capability.Delegate, ReservedPools: []string{}, Repositories: []string{}, IssuedAt: time.Unix(0, 1).UTC()}
+	envelope, err := json.Marshal(store.CapabilityRecord{Version: 1, Value: c})
+	if err != nil {
+		t.Fatal(err)
+	}
+	grants, err := json.Marshal(c.Grants)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cloudResourceSQL(t, e.Store, `INSERT INTO capabilities(digest,prefix,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,reserved_pools,repo_scope,created_at,created_by) VALUES (?,'launcher','service','launcher','controller',?,'delegate',1,?,'none',?,?,1,'launcher')`, hex.EncodeToString(digest[:]), grants, envelope, []byte(`[]`), []byte(`[]`))
+	return raw
+}

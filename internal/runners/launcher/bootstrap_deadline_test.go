@@ -32,9 +32,9 @@ func FuzzBootstrapRespectsAwardDeadline(f *testing.F) {
 		award.Binding.OwnerDeadline, award.Binding.AttemptDeadline, award.Binding.ParentCapabilityExpiry = bound(owner), bound(attempt), bound(parent)
 		unit.OwnerDeadline, unit.AttemptDeadline, unit.ParentCapabilityExpiry = &award.Binding.OwnerDeadline, &award.Binding.AttemptDeadline, &award.Binding.ParentCapabilityExpiry
 		want, invalid := limits.JobDeadline(now, bound(owner), bound(attempt))
-		if parent <= 0 {
+		if parent < 0 || (parent == 0 && want.IsZero()) {
 			invalid = limits.ErrNoTime
-		} else if want.IsZero() || bound(parent).Before(want) {
+		} else if parent != 0 && (want.IsZero() || bound(parent).Before(want)) {
 			want = bound(parent)
 		}
 		callerEnd := now.Add(15 * time.Second)

@@ -97,12 +97,7 @@ type Config struct {
 	// store-backed behavior off: no terminal check, no finalize.
 	Runs RunStore
 
-	// ServeAPI serves the controller HTTP API on ln until ctx ends, and
-	// returns once in-flight requests have drained. The daemon binds ln
-	// after it wins the election and closes it before a successor is
-	// spawned, so only the election holder ever serves the API; every
-	// connection ln yields has passed the peer-uid check and satisfies
-	// [APIConn]. Nil leaves api.sock unbound.
+	// ServeAPI serves the elected controller over connections with verified UID or SID identity.
 	ServeAPI func(ctx context.Context, ln net.Listener)
 
 	// StoreSchemaVersion is the runs-store schema version this daemon's
