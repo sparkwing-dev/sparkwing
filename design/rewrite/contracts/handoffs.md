@@ -619,3 +619,7 @@ W9 is parked: local run, local-controller startup and local schedules all stop a
 
 - **W1, top priority: Cloud awards go unmetered (billing defect found by W1b).** When the launcher root's metered flag is false, Cloud awards become unmetered. Invariant: every Cloud award is metered and charged regardless of how the launcher's root credential was minted; metering follows the placement, not the presenting credential. Reproduce through a real claim transaction, fix it at the single place metering is decided, and add a property test over credential origin and placement.
 - **Materialization is closed** (W1b: `TestMaterializedResultCopiesBytesThroughControllerAndHost` drives a memo through controller wire and host to exact bytes). W1b is parked. **W7 is relaunched** for its legacy S3 output and log cut.
+
+## Lead decision 16:20: ordered placement preference (Korey approved)
+
+**W1:** build the local-first placement input to the shared matcher (14:40 item f) as an **ordered preference list with per-step hold times**, not a single local-first flag. Today's local-first hold, liveness and default preference are the two-entry case (`here` or the preferred runner, then everyone else), and the existing controller flags configure that case. This keeps the post-launch burst-to-cloud feature (`/home/bombuntu/code/ink-labs/wing/architecture-2026-10-14/burst-to-cloud.md`) a matter of configuration. Use the store clock for holds, and add a property test over preference order, hold expiry and claimant liveness.
