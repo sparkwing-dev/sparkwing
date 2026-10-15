@@ -129,14 +129,14 @@ class Session {
       ...(trigger.user === undefined ? {} : { user: String(trigger.user) }),
       ...(pr
         ? {
-            pullRequest: {
+            pullRequest: Object.freeze({
               number: Number(pr.number),
               ...(pr.action === undefined ? {} : { action: String(pr.action) }),
               ...(pr.base_ref === undefined ? {} : { baseRef: String(pr.base_ref) }),
               ...(pr.base_sha === undefined ? {} : { baseSHA: String(pr.base_sha) }),
               ...(pr.head_ref === undefined ? {} : { headRef: String(pr.head_ref) }),
               ...(pr.head_sha === undefined ? {} : { headSHA: String(pr.head_sha) }),
-            },
+            }),
           }
         : {}),
     };
@@ -148,7 +148,7 @@ class Session {
       noMemo: raw.no_memo === true,
       ...(raw.started_at === undefined ? {} : { startedAt: String(raw.started_at) }),
       runner: this.#runner!,
-      trigger: triggerInfo,
+      trigger: Object.freeze(triggerInfo),
       git: new Git(this.#root(), {
         repo: String(git.repo ?? ""),
         branch: String(git.branch ?? ""),

@@ -4,6 +4,37 @@ Snapshot: 2026-10-14. W5 remains incomplete at the native Windows and integrated
 host acceptance boundaries. The source implementation and local SDK proofs are
 ready for integration. The lead owns commits, pipelines and native verification.
 
+## Continuation: sealed trigger facts
+
+Pipeline code could change `run.trigger` and its nested pull-request facts.
+Those changes reached subsequent bodies and retry attempts because the SDK
+froze only the outer run context. The SDK now freezes both nested objects.
+The regression sends manual and pull-request invocations through the protocol,
+attempts mutation during planning and execution, and checks both attempts' output.
+Both cases failed before the fix and passed afterward. The README documents
+the read-only facts. No API, contract, dependency or mechanism changed.
+
+All 109 TypeScript tests passed with `node --test
+--experimental-test-isolation=none 'test/**/*.test.ts'` from `sdk/typescript`.
+Strict typechecking and Prettier passed. Repository-wide `go build -p 4 ./...`,
+focused `go vet -p 4 ./sdk/typescript/test/nativehost ./internal/acceptance
+./tests/acceptance`, and `go test -p 4 ./internal/acceptance ./tests/acceptance`
+passed. The acceptance run includes compiled ESM through Linux native pipes.
+The existing SDK children of `protocol-sdk-secrets-mask-annotations` and
+`protocol-job-closures-and-skip` include the regression. No placement or Windows
+cell was enabled, and no additional T1 inventory test was ported.
+
+No shared file changed. No additional legacy code was deleted. The prior
+2,896-line deletion remains. The W3 route definitions, W4 job-only cancellation
+and concurrency-presence agreements below remain open. Both Windows bridge
+artifacts are still absent and no Windows compiler was found on PATH. Native
+Windows execution, W3/W4 host/validator integration, W1/W2/W7 authorization and
+persistence, real DinD and placement lanes remain unverified.
+
+Go checks used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4`, and
+`GOCACHE`, `GOTMPDIR` and `TMPDIR` under `/tmp/sw-astra-W5`. No Sparkwing binary
+or Git write ran. The temporary directory was removed after verification.
+
 ## Continuation: portable acceptance fixtures
 
 The Docker, Git and memo tests now use the platform temp directory instead of

@@ -5,7 +5,7 @@ import { noMemo } from "../src/helpers/memo.ts";
 import { SDKError } from "../src/errors.ts";
 import { Host, hello } from "./helpers.ts";
 import type { HostServices } from "../src/routes.ts";
-import type { Context } from "../index.d.ts";
+import type { Context, Trigger } from "../index.d.ts";
 
 const binding = { run_id: "r1", job_id: "build", routes: { url: "http://127.0.0.1:12345", bearer: "hello-only-bearer" } };
 const planRequest = {
@@ -80,6 +80,55 @@ test("hello facts remain sealed, plans stay flat, body env starts only after pla
     await host.close();
   }
   assert.equal(process.env["W5_BODY"], undefined);
+});
+
+test("trigger facts survive author mutations during planning and retry attempts", async (t) => {
+  const cases = [
+    { name: "manual", wire: undefined, expected: { source: "manual" } },
+    {
+      name: "pull request",
+      wire: { source: "pull_request", user: "author", pull_request: { number: 7, base_sha: "base", head_sha: "head" } },
+      expected: { source: "pull_request", user: "author", pullRequest: { number: 7, baseSHA: "base", headSHA: "head" } },
+    },
+  ];
+  function overwrite(trigger: Trigger): void {
+    Reflect.set(trigger, "source", "changed");
+    Reflect.set(trigger, "user", "changed");
+    if (trigger.pullRequest) {
+      Reflect.set(trigger.pullRequest, "number", 99);
+      Reflect.set(trigger.pullRequest, "headSHA", "changed");
+    }
+    Reflect.set(trigger, "pullRequest", { number: 100 });
+  }
+  for (const { name, wire, expected } of cases) {
+    await t.test(name, async () => {
+      resetPipelines();
+      definePipeline({
+        name: "fixture",
+        plan(plan, run) {
+          overwrite(run.trigger);
+          plan.job("build", (ctx) => {
+            const trigger = structuredClone(ctx.run.trigger);
+            overwrite(ctx.run.trigger);
+            return trigger;
+          });
+        },
+      });
+      const host = await setup();
+      try {
+        const planned = await host.send({ ...planRequest, run: { ...planRequest.run, ...(wire ? { trigger: wire } : {}) } });
+        assert.equal(planned.ok, true, JSON.stringify(planned));
+        const step = planned.result.jobs[0].steps[0].id;
+        for (const attempt of [1, 2]) {
+          const result = await host.send({ id: `attempt-${attempt}`, op: "run_step", job: "build", step, attempt });
+          assert.equal(result.result.outcome, "success", JSON.stringify(result));
+          assert.deepEqual(result.result.output, expected);
+        }
+      } finally {
+        await host.close();
+      }
+    });
+  }
 });
 
 test("outputs are per attempt, all step outputs are returned, bad JSON fails loudly", async () => {

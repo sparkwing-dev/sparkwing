@@ -43,6 +43,8 @@ refuse calls during planning. Generated jobs reconstruct from recorded source
 output. The host validates the reconstructed declarations against accepted state.
 
 Step output reads stay within the current attempt, including retry hooks.
+Run facts stay read-only across planning and retries, including trigger details
+and nested pull-request facts.
 Cancellation reaches bodies and every closure kind. A callback that finishes
 after cancellation still reports a failed invocation.
 Service scopes also reject after cancellation when their callback returns normally.
