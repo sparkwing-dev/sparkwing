@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **storage (Breaking):** Direct source fetches keep Git objects in each run's
+  checkout. Removed persistent Git mirrors, shared worktrees and mirror eviction.
+  See [migration steps](docs/migrations/_unreleased.md#direct-source-fetches-own-their-git-objects).
 - **storage (Breaking):** Local binary-cache status and pruning use only the
   current entry layout. Removed old-layout discovery, quarantine and retirement,
   and the `legacy_entries` and `legacy_bytes` fields from `cache info -o json`.

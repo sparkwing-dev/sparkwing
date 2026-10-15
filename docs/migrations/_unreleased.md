@@ -1,5 +1,16 @@
 # Migrating to the next release
 
+## Direct source fetches own their Git objects
+
+- **Before:** direct fetches reused a bare mirror per remote and checked out
+  linked worktrees. Runner cleanup swept idle mirrors.
+- **After:** each checkout fetches from upstream and owns its Git objects.
+  Fetches need upstream access even for a commit an earlier run fetched.
+  Failed fetches remove their checkout. Existing destinations remain untouched.
+- **Upgrade steps:** stop older runners and their active runs before removing
+  unused `source-direct` directories under the Sparkwing home. The new runner
+  leaves these directories untouched.
+
 ## Local binary caches use one layout
 
 - **Before:** cache status counted binaries in older directories, and pruning

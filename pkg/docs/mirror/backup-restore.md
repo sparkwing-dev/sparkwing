@@ -32,8 +32,7 @@ does not bring back:
 - Node log segments, which the controller keeps in its cache bucket or
   output directory (see [self-hosting](self-hosting.md#node-log-retention)).
 - Node artifacts and caches, which the object store owns.
-- The runner's local Git mirrors. These rebuild
-  themselves from their upstreams.
+- Run checkouts. Each fetches its Git objects from upstream.
 
 Back those up on their own schedule, or accept losing them; the
 controller serves run and node records without them.

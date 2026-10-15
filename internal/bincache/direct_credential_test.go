@@ -196,7 +196,7 @@ func TestReleasedCredentialFetchReadsNoAmbientCredential(t *testing.T) {
 	wrong := DirectCredential{Kind: CredentialHTTPS, Host: host, Username: "x-access-token", Secret: "glpat-wrong"}
 	opts := httpOnly
 	opts.cred = wrong
-	err := directCheckout(context.Background(), t.TempDir(), remote, "main", "", filepath.Join(t.TempDir(), "run"), opts)
+	err := directCheckout(context.Background(), remote, "main", "", filepath.Join(t.TempDir(), "run"), opts)
 	if err == nil || seen.Load() != 0 {
 		t.Fatalf("a wrong released token fetched through the machine's helper: err=%v, authorized=%d", err, seen.Load())
 	}
@@ -204,14 +204,14 @@ func TestReleasedCredentialFetchReadsNoAmbientCredential(t *testing.T) {
 		t.Fatalf("the failed fetch's error carries the token: %v", err)
 	}
 
-	if err := directCheckout(context.Background(), t.TempDir(), remote, "main", "",
+	if err := directCheckout(context.Background(), remote, "main", "",
 		filepath.Join(t.TempDir(), "run"), httpOnly); err != nil || seen.Load() == 0 {
 		t.Fatalf("control: the machine's own helper fetch = %v, authorized=%d", err, seen.Load())
 	}
 
 	seen.Store(0)
 	opts.cred = DirectCredential{Kind: CredentialHTTPS, Host: host, Username: "x-access-token", Secret: good}
-	if err := directCheckout(context.Background(), t.TempDir(), remote, "main", "",
+	if err := directCheckout(context.Background(), remote, "main", "",
 		filepath.Join(t.TempDir(), "run"), opts); err != nil || seen.Load() == 0 {
 		t.Fatalf("the right released token = %v, authorized=%d", err, seen.Load())
 	}
@@ -285,7 +285,7 @@ func TestSSHCredentialFetchPinsTheKeyAndRemovesIt(t *testing.T) {
 	cred := DirectCredential{Kind: CredentialSSH, Host: "git.example.invalid", Secret: key, KnownHosts: testKnownHosts}
 	opts := directOptions{protocols: "ssh", cred: cred}
 	dest := filepath.Join(t.TempDir(), "run")
-	if err := directCheckout(context.Background(), t.TempDir(), "ssh://git@git.example.invalid/widgets.git",
+	if err := directCheckout(context.Background(), "ssh://git@git.example.invalid/widgets.git",
 		"main", tip, dest, opts); err != nil {
 		t.Fatalf("ssh fetch with the deploy key: %v", err)
 	}
@@ -342,7 +342,7 @@ func TestSSHCredentialLeakIsRedactedFromTheError(t *testing.T) {
 	_, tip := makeBareRepoWithSparkwing(t, repos, "widgets", "main")
 	record := sshRecorder(t, repos, true)
 	cred := DirectCredential{Kind: CredentialSSH, Host: "git.example.invalid", Secret: key, KnownHosts: testKnownHosts}
-	err := directCheckout(context.Background(), t.TempDir(), "ssh://git@git.example.invalid/widgets.git",
+	err := directCheckout(context.Background(), "ssh://git@git.example.invalid/widgets.git",
 		"main", tip, filepath.Join(t.TempDir(), "run"), directOptions{protocols: "ssh", cred: cred})
 	if err == nil {
 		t.Fatal("the failing ssh stand-in served a fetch")

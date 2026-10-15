@@ -129,49 +129,10 @@ func directTestRemote(t *testing.T) (remote, oldSHA, tipSHA string) {
 	return srv.URL + "/git/widgets.git", oldSHA, tipSHA
 }
 
-func TestDirectCheckoutFetchesTheExactCommitAndReusesTheMirror(t *testing.T) {
-	remote, oldSHA, tipSHA := directTestRemote(t)
-	root := t.TempDir()
-	ctx := context.Background()
-
-	first := filepath.Join(t.TempDir(), "run-1")
-	if err := directCheckout(ctx, root, remote, "main", oldSHA, first, httpOnly); err != nil {
-		t.Fatalf("directCheckout old: %v", err)
-	}
-	if got := readMarker(t, first); got != "v1" {
-		t.Fatalf("checkout at %s reads marker %q, want v1", oldSHA, got)
-	}
-	if head := gitOut(t, first, "rev-parse", "HEAD"); head != oldSHA {
-		t.Fatalf("HEAD = %s, want %s", head, oldSHA)
-	}
-
-	second := filepath.Join(t.TempDir(), "run-2")
-	if err := directCheckout(ctx, root, remote, "main", tipSHA, second, httpOnly); err != nil {
-		t.Fatalf("directCheckout tip: %v", err)
-	}
-	if got := readMarker(t, second); got != "v2" {
-		t.Fatalf("checkout at %s reads marker %q, want v2", tipSHA, got)
-	}
-
-	mirrors, _ := filepath.Glob(filepath.Join(root, "*.git"))
-	if len(mirrors) != 1 {
-		t.Fatalf("mirrors = %v, want one shared by both runs", mirrors)
-	}
-
-	// safety: a removed run directory must not block the next checkout of the same commit.
-	if err := os.RemoveAll(first); err != nil {
-		t.Fatal(err)
-	}
-	third := filepath.Join(t.TempDir(), "run-3")
-	if err := directCheckout(ctx, root, remote, "main", oldSHA, third, httpOnly); err != nil {
-		t.Fatalf("directCheckout after a run directory was removed: %v", err)
-	}
-}
-
 func TestDirectCheckoutTakesTheBranchTipWithoutACommit(t *testing.T) {
 	remote, _, tipSHA := directTestRemote(t)
 	dest := filepath.Join(t.TempDir(), "run")
-	if err := directCheckout(context.Background(), t.TempDir(), remote, "main", "", dest, httpOnly); err != nil {
+	if err := directCheckout(context.Background(), remote, "main", "", dest, httpOnly); err != nil {
 		t.Fatalf("directCheckout: %v", err)
 	}
 	if head := gitOut(t, dest, "rev-parse", "HEAD"); head != tipSHA {
@@ -199,7 +160,7 @@ func TestDirectCheckoutFetchesTheDeclaredRef(t *testing.T) {
 			checkout := filepath.Join(t.TempDir(), "run")
 			opts := directOptions{protocols: "file"}
 			opts.sourceRef = tc.ref
-			if err := directCheckout(t.Context(), t.TempDir(), remote, "", "", checkout, opts); err != nil {
+			if err := directCheckout(t.Context(), remote, "", "", checkout, opts); err != nil {
 				t.Fatal(err)
 			}
 			if got := gitOut(t, checkout, "rev-parse", "HEAD"); got != tc.want {
@@ -213,7 +174,7 @@ func TestDirectCheckoutRefusesUnsafeDeclaredRef(t *testing.T) {
 	for _, ref := range []string{"-oProxyCommand=bad", "refs/heads/../evil", "refs/tags/a b", "HEAD~1"} {
 		opts := httpOnly
 		opts.sourceRef = ref
-		if err := directCheckout(t.Context(), t.TempDir(), "http://example.test/repo.git", "", "", filepath.Join(t.TempDir(), "run"), opts); err == nil {
+		if err := directCheckout(t.Context(), "http://example.test/repo.git", "", "", filepath.Join(t.TempDir(), "run"), opts); err == nil {
 			t.Fatalf("accepted source ref %q", ref)
 		}
 	}
@@ -222,7 +183,7 @@ func TestDirectCheckoutRefusesUnsafeDeclaredRef(t *testing.T) {
 func TestDirectCheckoutRefusesATransportOutsideTheAllowList(t *testing.T) {
 	remote, oldSHA, _ := directTestRemote(t)
 	dest := filepath.Join(t.TempDir(), "run")
-	err := directCheckout(context.Background(), t.TempDir(), remote, "main", oldSHA, dest, directOptions{protocols: directProtocols})
+	err := directCheckout(context.Background(), remote, "main", oldSHA, dest, directOptions{protocols: directProtocols})
 	if err == nil {
 		t.Fatal("an http remote was fetched although only https and ssh are allowed")
 	}
@@ -233,7 +194,7 @@ func TestDirectCheckoutRefusesATransportOutsideTheAllowList(t *testing.T) {
 
 func TestDirectCheckoutRefusesACommitTheRemoteDoesNotHave(t *testing.T) {
 	remote, _, _ := directTestRemote(t)
-	err := directCheckout(context.Background(), t.TempDir(), remote, "main", testSHA1,
+	err := directCheckout(context.Background(), remote, "main", testSHA1,
 		filepath.Join(t.TempDir(), "run"), httpOnly)
 	if err == nil || !strings.Contains(err.Error(), "is the commit pushed?") {
 		t.Fatalf("err = %v, want a fetch failure that asks whether the commit was pushed", err)
@@ -324,7 +285,7 @@ func TestDirectCheckoutRunsNoFilterDriverTheTreeNames(t *testing.T) {
 			t.Setenv("GIT_CONFIG_GLOBAL", global)
 
 			dest := filepath.Join(t.TempDir(), "run")
-			err := directCheckout(context.Background(), t.TempDir(), remote, "main", sha, dest, httpOnly)
+			err := directCheckout(context.Background(), remote, "main", sha, dest, httpOnly)
 			if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
 				t.Fatalf("the checkout ran the %s filter from the ambient config", driver)
 			}
@@ -371,7 +332,7 @@ func TestDirectCheckoutHardensTheUsersSSHCommand(t *testing.T) {
 				t.Setenv("GIT_SSH", program)
 				wantUserArgs = false
 			}
-			err := directCheckout(context.Background(), t.TempDir(), "ssh://git@example.invalid/o/r.git",
+			err := directCheckout(context.Background(), "ssh://git@example.invalid/o/r.git",
 				"main", testSHA1, filepath.Join(t.TempDir(), "run"), directOptions{protocols: "ssh"})
 			if err == nil {
 				t.Fatal("the fake ssh cannot serve a fetch")
@@ -425,7 +386,7 @@ func TestDirectCheckoutDoesNotFollowARedirect(t *testing.T) {
 	t.Cleanup(redirect.Close)
 
 	dest := filepath.Join(t.TempDir(), "run")
-	err := directCheckout(context.Background(), t.TempDir(), redirect.URL+"/moved", "main", oldSHA, dest, httpOnly)
+	err := directCheckout(context.Background(), redirect.URL+"/moved", "main", oldSHA, dest, httpOnly)
 	if err == nil {
 		t.Fatal("the fetch followed a redirect to another server")
 	}
@@ -446,38 +407,6 @@ func TestFetchPipelineSourceDirectRefusesAHostThatResolvesInward(t *testing.T) {
 	}
 }
 
-func TestDirectMirrorPathSharesOneMirrorAcrossSpellings(t *testing.T) {
-	root := t.TempDir()
-	for _, group := range [][]string{
-		{"https://github.com/o/r.git", "https://GitHub.COM/o/r", "https://github.com/o/r/", "https://github.com/o/r.git/"},
-		{"git@github.com:o/r.git", "git@GITHUB.com:o/r", "git@github.com:o/r/"},
-		{"ssh://git@github.com/o/r.git", "ssh://git@GitHub.com/o/r"},
-	} {
-		want := directMirrorPath(root, group[0])
-		for _, remote := range group[1:] {
-			if got := directMirrorPath(root, remote); got != want {
-				t.Errorf("directMirrorPath(%q) = %s, want the mirror of %q", remote, got, group[0])
-			}
-		}
-	}
-	distinct := []string{
-		"https://github.com/o/r.git",
-		"https://github.com/o/R.git",
-		"https://github.com/o/r2.git",
-		"git@github.com:o/r.git",
-		"deploy@github.com:o/r.git",
-		"ssh://git@github.com:2222/o/r.git",
-	}
-	seen := map[string]string{}
-	for _, remote := range distinct {
-		path := directMirrorPath(root, remote)
-		if other, ok := seen[path]; ok {
-			t.Errorf("%q and %q share mirror %s", remote, other, path)
-		}
-		seen[path] = remote
-	}
-}
-
 func TestDirectCheckoutGivesUpOnAFetchThatHangs(t *testing.T) {
 	release := make(chan struct{})
 	hang := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -491,7 +420,7 @@ func TestDirectCheckoutGivesUpOnAFetchThatHangs(t *testing.T) {
 
 	opts := httpOnly
 	opts.fetchTimeout = 300 * time.Millisecond
-	err := directCheckout(context.Background(), t.TempDir(), hang.URL+"/o/r.git", "main", testSHA1,
+	err := directCheckout(context.Background(), hang.URL+"/o/r.git", "main", testSHA1,
 		filepath.Join(t.TempDir(), "run"), opts)
 	if err == nil || !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("err = %v, want a fetch timeout", err)
@@ -500,115 +429,6 @@ func TestDirectCheckoutGivesUpOnAFetchThatHangs(t *testing.T) {
 
 func sparkwingTree(t *testing.T) func(string) {
 	return func(work string) { writeTestFile(t, filepath.Join(work, ".sparkwing", "marker"), "v1") }
-}
-
-func checkoutAndRelease(t *testing.T, root, remote, sha string, opts directOptions) {
-	t.Helper()
-	dest := filepath.Join(t.TempDir(), "run")
-	if err := directCheckout(context.Background(), root, remote, "main", sha, dest, opts); err != nil {
-		t.Fatalf("directCheckout %s: %v", remote, err)
-	}
-	if err := os.RemoveAll(dest); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func setLastUse(t *testing.T, mirror string, age time.Duration) {
-	t.Helper()
-	when := time.Now().Add(-age)
-	if err := os.Chtimes(mirror, when, when); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func mirrorExists(root, remote string) bool {
-	_, err := os.Stat(filepath.Join(directMirrorPath(root, remote), "HEAD"))
-	return err == nil
-}
-
-func TestDirectCheckoutEvictsTheLeastRecentlyUsedMirror(t *testing.T) {
-	root := t.TempDir()
-	opts := httpOnly
-	opts.maxMirrors = 2
-	a, shaA := directTestRepo(t, sparkwingTree(t))
-	b, shaB := directTestRepo(t, sparkwingTree(t))
-	c, shaC := directTestRepo(t, sparkwingTree(t))
-	checkoutAndRelease(t, root, a, shaA, opts)
-	checkoutAndRelease(t, root, b, shaB, opts)
-	setLastUse(t, directMirrorPath(root, a), 2*time.Hour)
-	setLastUse(t, directMirrorPath(root, b), time.Hour)
-
-	checkoutAndRelease(t, root, c, shaC, opts)
-	if mirrorExists(root, a) || !mirrorExists(root, b) || !mirrorExists(root, c) {
-		t.Fatalf("mirrors a=%v b=%v c=%v, want the oldest (a) evicted",
-			mirrorExists(root, a), mirrorExists(root, b), mirrorExists(root, c))
-	}
-}
-
-func TestDirectCheckoutNeverEvictsAMirrorInUse(t *testing.T) {
-	root := t.TempDir()
-	opts := httpOnly
-	opts.maxMirrors = 1
-	live, shaLive := directTestRepo(t, sparkwingTree(t))
-	locked, shaLocked := directTestRepo(t, sparkwingTree(t))
-	next, shaNext := directTestRepo(t, sparkwingTree(t))
-
-	if err := directCheckout(context.Background(), root, live, "main", shaLive,
-		filepath.Join(t.TempDir(), "run"), opts); err != nil {
-		t.Fatal(err)
-	}
-	checkoutAndRelease(t, root, locked, shaLocked, opts)
-	lock, err := os.OpenFile(directMirrorPath(root, locked)+".lock", os.O_RDWR, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = lock.Close() })
-	if _, err := cacheLock(lock, cacheLockShared); err != nil {
-		t.Fatal(err)
-	}
-
-	checkoutAndRelease(t, root, next, shaNext, opts)
-	if !mirrorExists(root, live) || !mirrorExists(root, locked) {
-		t.Fatalf("mirrors live=%v locked=%v, want both kept though over the cap",
-			mirrorExists(root, live), mirrorExists(root, locked))
-	}
-}
-
-func TestDirectCheckoutRemovesAMirrorOverTheSizeCap(t *testing.T) {
-	root := t.TempDir()
-	opts := httpOnly
-	opts.maxMirrorBytes = 1
-	remote, sha := directTestRepo(t, sparkwingTree(t))
-	dest := filepath.Join(t.TempDir(), "run")
-	err := directCheckout(context.Background(), root, remote, "main", sha, dest, opts)
-	if err == nil || !strings.Contains(err.Error(), "over the") {
-		t.Fatalf("err = %v, want a size-cap refusal", err)
-	}
-	if mirrorExists(root, remote) {
-		t.Fatal("the oversized mirror was kept")
-	}
-	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
-		t.Fatal("an oversized fetch still produced a checkout")
-	}
-}
-
-func TestDirectCheckoutEvictsOlderMirrorsPastTheTotalSize(t *testing.T) {
-	root := t.TempDir()
-	a, shaA := directTestRepo(t, sparkwingTree(t))
-	b, shaB := directTestRepo(t, sparkwingTree(t))
-	checkoutAndRelease(t, root, a, shaA, httpOnly)
-	setLastUse(t, directMirrorPath(root, a), time.Hour)
-	size, err := directDirSize(directMirrorPath(root, a))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	opts := httpOnly
-	opts.maxMirrorBytes = size * 3 / 2
-	checkoutAndRelease(t, root, b, shaB, opts)
-	if mirrorExists(root, a) || !mirrorExists(root, b) {
-		t.Fatalf("mirrors a=%v b=%v, want a evicted to fit b under the total", mirrorExists(root, a), mirrorExists(root, b))
-	}
 }
 
 func TestDirectSparkwingDirRefusesASymlinkedSparkwing(t *testing.T) {
@@ -627,7 +447,7 @@ func TestDirectSparkwingDirRefusesASymlinkedSparkwing(t *testing.T) {
 				}
 			})
 			dest := filepath.Join(t.TempDir(), "run")
-			if err := directCheckout(context.Background(), t.TempDir(), remote, "main", sha, dest, httpOnly); err != nil {
+			if err := directCheckout(context.Background(), remote, "main", sha, dest, httpOnly); err != nil {
 				t.Fatal(err)
 			}
 			if dir, err := directSparkwingDir(dest); err == nil {
@@ -641,7 +461,7 @@ func TestDirectSparkwingDirAcceptsACheckoutReachedThroughASymlink(t *testing.T) 
 	remote, sha := directTestRepo(t, sparkwingTree(t))
 	real := t.TempDir()
 	dest := filepath.Join(real, "run")
-	if err := directCheckout(context.Background(), t.TempDir(), remote, "main", sha, dest, httpOnly); err != nil {
+	if err := directCheckout(context.Background(), remote, "main", sha, dest, httpOnly); err != nil {
 		t.Fatal(err)
 	}
 	link := filepath.Join(t.TempDir(), "link")
@@ -661,49 +481,10 @@ func TestDirectSparkwingDirAcceptsACheckoutReachedThroughASymlink(t *testing.T) 
 // returns the checkout's .sparkwing directory. With a credential the fetch
 // presents only that credential and reads none of this machine's git config,
 // ssh agent or keys; the zero credential fetches with this process's own git
-// config and credentials, which only an owner-fenced runner may do. Fetched
-// objects stay in a mirror under the Sparkwing home keyed by the remote, so a
-// later run of the same repository fetches only what it lacks. An empty sha
-// takes the tip of branch.
+// config and credentials, which only an owner-fenced runner may do. Each
+// checkout owns its fetched objects. An empty sha takes the tip of branch.
 func FetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDir string, cred DirectCredential) (string, error) {
 	opts := defaultDirectOptions()
 	opts.cred = cred
 	return fetchPipelineSourceDirect(ctx, repoURL, branch, sha, workDir, opts)
-}
-
-func TestSweepDirectMirrorsKeepsHeldAndCheckedOutMirrors(t *testing.T) {
-	root := t.TempDir()
-	opts := httpOnly
-	stale := time.Now().Add(-30 * 24 * time.Hour)
-	idle, shaIdle := directTestRepo(t, sparkwingTree(t))
-	held, shaHeld := directTestRepo(t, sparkwingTree(t))
-	inUse, shaInUse := directTestRepo(t, sparkwingTree(t))
-	checkoutAndRelease(t, root, idle, shaIdle, opts)
-	checkoutAndRelease(t, root, held, shaHeld, opts)
-	if err := directCheckout(context.Background(), root, inUse, "main", shaInUse,
-		filepath.Join(t.TempDir(), "run"), opts); err != nil {
-		t.Fatal(err)
-	}
-	for _, remote := range []string{idle, held, inUse} {
-		if err := os.Chtimes(directMirrorPath(root, remote), stale, stale); err != nil {
-			t.Fatal(err)
-		}
-	}
-	lock, err := os.OpenFile(directMirrorPath(root, held)+".lock", os.O_RDWR, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = lock.Close() })
-	if _, err := cacheLock(lock, cacheLockShared); err != nil {
-		t.Fatal(err)
-	}
-
-	removed, freed := SweepDirectMirrors(context.Background(), root, time.Now().Add(-7*24*time.Hour))
-	if removed != 1 || freed <= 0 || mirrorExists(root, idle) {
-		t.Fatalf("sweep removed %d (%d bytes), idle mirror kept=%v; want only the idle one gone",
-			removed, freed, mirrorExists(root, idle))
-	}
-	if !mirrorExists(root, held) || !mirrorExists(root, inUse) {
-		t.Fatalf("mirrors held=%v inUse=%v, want both kept", mirrorExists(root, held), mirrorExists(root, inUse))
-	}
 }

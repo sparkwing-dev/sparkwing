@@ -605,7 +605,6 @@ func runRunnerCLI(args []string, version string) error {
 		} else {
 			logger.Info(
 				"gc: warm sweep complete",
-				"git_dirs", stats.GitDirsRemoved,
 				"tmp_entries", stats.TmpEntriesRemoved,
 				"run_dirs", stats.RunDirsRemoved,
 				"bytes_freed", stats.BytesFreed,

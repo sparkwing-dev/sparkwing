@@ -665,9 +665,8 @@ Job that the run's trigger runner created builds that runner's repository and
 carries no list of its own. A cloud pod holds no git credential, so it fetches
 only with the one the controller releases, fitting the remote to it: a GitHub
 App token or an HTTPS token fetches the https form of an ssh remote, and an SSH
-deploy key the ssh form of an https remote. The
-runner keeps one bare mirror per remote under `$SPARKWING_HOME/source-direct`
-and checks out each run in its own worktree. It refuses any remote that is not
+deploy key the ssh form of an https remote. Each run fetches into its own
+repository and keeps its Git objects inside that checkout. The runner refuses any remote that is not
 https or ssh, a remote that carries a credential, and a commit that is not a
 full hex object id. A normal `sparkwing pipeline trigger` therefore needs a commit already pushed.
 `--working-tree` uploads its exact source bundle to S3 before admission and
@@ -686,9 +685,8 @@ loopback, private, link-local, CGNAT, NAT64 or other special-purpose address,
 and it refuses cluster names such as `kubernetes` and `*.svc`. git resolves
 the name again when it connects, so a name whose answer changes in between
 (DNS rebinding) is only narrowed, not stopped. A fetch gives up after ten
-minutes. The runner keeps at most 20 mirrors and 10 GiB of them, evicting the
-least recently used, and deletes a mirror that alone exceeds the size cap
-after its fetch, failing the run. A `.sparkwing` that is a symlink, or that
+minutes. Fetched Git data is limited to 10 GiB per checkout. A failed fetch
+removes its checkout. A `.sparkwing` that is a symlink, or that
 resolves outside the checkout, is refused.
 
 ### An agent that fetches source itself

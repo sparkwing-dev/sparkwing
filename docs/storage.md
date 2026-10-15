@@ -45,6 +45,11 @@ in the operator's `run.submit_env_allow`. Network proxy and CA settings remain
 available to pipeline processes. Sparkwing provides no Git mirror service
 or package proxy.
 
+Direct source fetches create a separate repository per checkout, with its own
+Git objects and no persistent mirror. Failed fetches remove their checkout.
+Existing directories are refused and preserved. The runner's cleanup covers
+temporary files and finished runs.
+
 Local pipeline binaries stay in the local binary cache. It stores entries under
 `cache/pipelines/v1/entries` in the Sparkwing home. Cache status and pruning
 operate on that layout. Older layouts

@@ -149,22 +149,16 @@ func TestAdoptWorkspaceBaselineBeforePipelineWasAdded(t *testing.T) {
 	emptyTree := gitOut(t, bare, "mktree")
 	baseSHA := workspaceSnapshotCommit(t, bare, emptyTree, "README.md", "baseline\n")
 	snapshotSHA := workspaceSnapshotCommit(t, bare, baseSHA, ".sparkwing/pipeline.go", "package main\n")
-	remote := "https://example.com/team/repository.git"
-	mirrorRoot := filepath.Join(home, "source-direct")
-	if err := os.MkdirAll(mirrorRoot, 0o700); err != nil {
+	checkout := filepath.Join(t.TempDir(), "snapshot")
+	if out, err := exec.Command("git", "clone", "--quiet", "--branch", "workspace", bare, checkout).CombinedOutput(); err != nil {
+		t.Fatalf("clone: %v: %s", err, out)
+	}
+	baselineDir := filepath.Join(t.TempDir(), "baseline")
+	if err := directCheckout(t.Context(), bare, "", baseSHA, baselineDir, directOptions{protocols: "file"}); err != nil {
 		t.Fatal(err)
 	}
-	checkout := filepath.Join(t.TempDir(), "snapshot")
-	for _, args := range [][]string{
-		{"clone", "--bare", "--quiet", bare, directMirrorPath(mirrorRoot, remote)},
-		{"clone", "--quiet", "--branch", "workspace", bare, checkout},
-	} {
-		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
-			t.Fatalf("clone: %v: %s", err, out)
-		}
-	}
 	baseline := WorkspaceBaseline{Ref: "origin/main", SHA: baseSHA}
-	if err := AdoptWorkspaceBaseline(t.Context(), RunSource{RepoURL: remote, OwnerCredentials: true}, checkout, snapshotSHA, baseline, nil); err != nil {
+	if err := adoptBaselineFromCheckout(t.Context(), checkout, baselineDir, snapshotSHA, baseline); err != nil {
 		t.Fatal(err)
 	}
 	if got := gitOut(t, checkout, "merge-base", "origin/main", "HEAD"); got != baseSHA {
