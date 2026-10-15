@@ -2,23 +2,25 @@ package bincache
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 )
 
-func TestDirectSourceBundleImportsExactSnapshotWithoutOrigin(t *testing.T) {
+func TestSourceBundleImportsExactSnapshotWithoutOrigin(t *testing.T) {
 	checkSourceBundleImport(t, "")
 }
 
-func TestDirectSourceBundleRefusesSymlinkedSparkwing(t *testing.T) {
+func TestSourceBundleRefusesSymlinkedSparkwing(t *testing.T) {
 	for _, target := range []string{"external", "relative-external", "internal"} {
 		t.Run(target, func(t *testing.T) { checkSourceBundleImport(t, target) })
 	}
@@ -80,31 +82,9 @@ func checkSourceBundleImport(t *testing.T, linkTarget string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	digest := sha256.Sum256(contents)
-	key := "sources/" + hex.EncodeToString(digest[:]) + "/" + strings.Repeat("1", 32)
-	var endpoint string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/v1/data/download":
-			if r.Header.Get("Authorization") != "Bearer grant" {
-				http.Error(w, "no grant", http.StatusForbidden)
-				return
-			}
-			var request map[string]string
-			if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request["kind"] != "source" || request["key"] != key {
-				http.Error(w, "wrong source", http.StatusForbidden)
-				return
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"url": endpoint + "/bundle", "sha256": hex.EncodeToString(digest[:]), "size": len(contents)})
-		case "/bundle":
-			_, _ = w.Write(contents)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer srv.Close()
-	endpoint = srv.URL
-	got, err := FetchSourceBundleDirect(t.Context(), srv.URL, "grant", "run-source", key, sha, "", t.TempDir())
+	data, transport := sourceBundleFixture(contents)
+	workDir := t.TempDir()
+	got, err := FetchSourceBundle(t.Context(), data, transport.want, sha, "", workDir)
 	if linkTarget != "" {
 		if err == nil {
 			t.Fatalf("imported symlinked source directory %s", got)
@@ -112,6 +92,7 @@ func checkSourceBundleImport(t *testing.T, linkTarget string) {
 		if !strings.Contains(err.Error(), "no .sparkwing directory") {
 			t.Fatalf("symlink import error = %v, want source directory refusal", err)
 		}
+		assertEmptyDirectory(t, workDir)
 		return
 	}
 	if err != nil {
@@ -121,7 +102,186 @@ func checkSourceBundleImport(t *testing.T, linkTarget string) {
 	if err != nil || !bytes.Equal(file, []byte("from bundle\n")) {
 		t.Fatalf("imported source = %q, %v", file, err)
 	}
-	if _, err := FetchSourceBundleDirect(t.Context(), srv.URL, "grant", "run-source", key, strings.Repeat("a", 40), "", t.TempDir()); err == nil {
+	if err := os.WriteFile(filepath.Join(got, "source.txt"), []byte("existing checkout"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := FetchSourceBundle(t.Context(), data, transport.want, sha, "", workDir); err == nil {
+		t.Fatal("replaced an existing checkout")
+	}
+	file, err = os.ReadFile(filepath.Join(got, "source.txt"))
+	if err != nil || string(file) != "existing checkout" {
+		t.Fatalf("existing checkout = %q, %v", file, err)
+	}
+	entries, err := os.ReadDir(workDir)
+	if err != nil || len(entries) != 1 || entries[0].Name() != "checkout" {
+		t.Fatalf("staging remains: %v, %v", entries, err)
+	}
+	failedDir := t.TempDir()
+	if _, err := FetchSourceBundle(t.Context(), data, transport.want, strings.Repeat("a", 40), "", failedDir); err == nil {
 		t.Fatal("wrong snapshot commit imported")
+	}
+	assertEmptyDirectory(t, failedDir)
+}
+
+func sourceBundleFixture(body []byte) (*SourceData, *binaryBytes) {
+	binary, records, transport := binaryFixture()
+	sum := sha256.Sum256(body)
+	transport.body, transport.want, transport.size = body, blob.Digest(hex.EncodeToString(sum[:])), int64(len(body))
+	return &SourceData{Bytes: binary.Bytes, Records: records, Authority: binary.Authority, Identity: binary.Identity, Budget: binary.Budget}, transport
+}
+
+func assertEmptyDirectory(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("files remain: %v, %v", entries, err)
+	}
+}
+
+func TestSourceBundleRefusesUnverifiedBytesBeforeGit(t *testing.T) {
+	closeFailure := errors.New("close failed")
+	for _, tc := range []struct {
+		name   string
+		change func(*SourceData, *binaryBytes)
+		want   error
+	}{
+		{"corrupt", func(_ *SourceData, b *binaryBytes) { b.body = []byte("BUNDLE") }, blob.ErrIntegrity},
+		{"short", func(_ *SourceData, b *binaryBytes) { b.body = []byte("bun") }, blob.ErrIntegrity},
+		{"long", func(_ *SourceData, b *binaryBytes) { b.body = []byte("bundle!") }, blob.ErrIntegrity},
+		{"unverified", func(d *SourceData, _ *binaryBytes) {
+			d.Bytes = binaryStreamStore{reader: &binaryStream{Reader: bytes.NewBufferString("bundle")}}
+		}, blob.ErrIntegrity},
+		{"failed close", func(d *SourceData, _ *binaryBytes) {
+			d.Bytes = binaryStreamStore{reader: &binaryStream{Reader: bytes.NewBufferString("bundle"), verified: true, closeErr: closeFailure}}
+		}, closeFailure},
+		{"missing", func(d *SourceData, _ *binaryBytes) { d.Bytes = binaryStreamStore{err: blob.ErrNotFound} }, blob.ErrNotFound},
+		{"unreadable", func(d *SourceData, _ *binaryBytes) { d.Bytes = binaryStreamStore{err: blob.ErrDigestNotReadable} }, blob.ErrDigestNotReadable},
+		{"budget", func(d *SourceData, _ *binaryBytes) { d.Budget.Deadline = time.Unix(1, 0) }, blob.ErrBudget},
+		{"no budget", func(d *SourceData, _ *binaryBytes) { d.Budget = blob.Budget{} }, blob.ErrBudget},
+		{"transfer deadline", func(d *SourceData, _ *binaryBytes) { d.Bytes = binaryStreamStore{err: context.DeadlineExceeded} }, blob.ErrBudget},
+		{"stream deadline", func(d *SourceData, _ *binaryBytes) {
+			d.Bytes = binaryStreamStore{reader: &binaryStream{Reader: sourceReadError{context.DeadlineExceeded}}}
+		}, blob.ErrBudget},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data, transport := sourceBundleFixture([]byte("bundle"))
+			tc.change(data, transport)
+			dir := t.TempDir()
+			_, err := FetchSourceBundle(t.Context(), data, transport.want, strings.Repeat("a", 40), "", dir)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("fetch = %v, want %v", err, tc.want)
+			}
+			assertEmptyDirectory(t, dir)
+		})
+	}
+}
+
+type sourceReadError struct{ err error }
+
+func (r sourceReadError) Read([]byte) (int, error) { return 0, r.err }
+
+func TestSourceBundleCancelledBeforeDownload(t *testing.T) {
+	data, transport := sourceBundleFixture([]byte("bundle"))
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	dir := t.TempDir()
+	_, err := FetchSourceBundle(ctx, data, transport.want, strings.Repeat("a", 40), "", dir)
+	if !errors.Is(err, context.Canceled) || transport.gets != 0 {
+		t.Fatalf("fetch = %v, gets = %d", err, transport.gets)
+	}
+	assertEmptyDirectory(t, dir)
+}
+
+func TestSourceBundleUploadCommitsExactReceipt(t *testing.T) {
+	data, transport := sourceBundleFixture(nil)
+	records := &binaryRecords{}
+	data.Records = records
+	path := filepath.Join(t.TempDir(), "snapshot.bundle")
+	if err := os.WriteFile(path, []byte("bundle"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sha := strings.Repeat("a", 40)
+	record, err := UploadSourceBundle(t.Context(), data, sha, path)
+	if err != nil || len(records.commits) != 1 {
+		t.Fatalf("upload = %v, commits = %v", err, records.commits)
+	}
+	q := records.commits[0]
+	if q.Key.Kind != blob.KindSourceBundle || q.Key.Name != sha || q.Key.Team != data.Identity.Team || q.Key.Scope.Repo != data.Authority.Repo || q.Key.Scope.Ref != data.Authority.Ref.Scope || q.Source != data.Identity || q.Authority != data.Authority || record.Digest != q.Digest || string(transport.body) != "bundle" {
+		t.Fatalf("wrong source record: %+v", q)
+	}
+	transport.putErr = blob.ErrIntegrity
+	if _, err := UploadSourceBundle(t.Context(), data, sha, path); !errors.Is(err, blob.ErrIntegrity) || len(records.commits) != 1 {
+		t.Fatalf("failed upload = %v, commits = %v", err, records.commits)
+	}
+}
+
+type sourceRecordResponse struct {
+	blob.RecordStore
+	change func(*blob.Record)
+}
+
+func (r sourceRecordResponse) CommitRecord(ctx context.Context, q blob.CommitRecordRequest) (blob.Record, error) {
+	record, err := r.RecordStore.CommitRecord(ctx, q)
+	r.change(&record)
+	return record, err
+}
+
+type sourceReceiptResponse struct {
+	blob.Store
+	receipt blob.Receipt
+}
+
+func (r sourceReceiptResponse) Put(context.Context, blob.PutRequest) (blob.Receipt, error) {
+	return r.receipt, nil
+}
+
+func TestSourceBundleUploadRefusesMismatchedResponses(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		change  func(*SourceData)
+		commits int
+	}{
+		{"receipt digest", func(d *SourceData) {
+			d.Bytes = sourceReceiptResponse{receipt: blob.Receipt{Identity: d.Identity, Digest: "other"}}
+		}, 0},
+		{"receipt owner", func(d *SourceData) {
+			sum := sha256.Sum256([]byte("bundle"))
+			i := d.Identity
+			i.RunID = "other"
+			d.Bytes = sourceReceiptResponse{receipt: blob.Receipt{Identity: i, Digest: blob.Digest(hex.EncodeToString(sum[:]))}}
+		}, 0},
+		{"record digest", func(d *SourceData) {
+			d.Records = sourceRecordResponse{d.Records, func(r *blob.Record) { r.Digest = "other" }}
+		}, 1},
+		{"record scope", func(d *SourceData) {
+			d.Records = sourceRecordResponse{d.Records, func(r *blob.Record) { r.Key.Scope.Repo = "gh:456" }}
+		}, 1},
+		{"record owner", func(d *SourceData) {
+			d.Records = sourceRecordResponse{d.Records, func(r *blob.Record) { r.Source.RunID = "other" }}
+		}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data, _ := sourceBundleFixture(nil)
+			records := &binaryRecords{}
+			data.Records = records
+			tc.change(data)
+			path := filepath.Join(t.TempDir(), "bundle")
+			if err := os.WriteFile(path, []byte("bundle"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := UploadSourceBundle(t.Context(), data, strings.Repeat("a", 40), path)
+			if !errors.Is(err, blob.ErrIntegrity) || len(records.commits) != tc.commits {
+				t.Fatalf("upload = %v, commits = %d", err, len(records.commits))
+			}
+		})
+	}
+}
+
+func TestSourceBundleUploadRejectsAnotherOwner(t *testing.T) {
+	data, transport := sourceBundleFixture(nil)
+	data.Identity.Unit.Value.Generation++
+	_, err := UploadSourceBundle(t.Context(), data, strings.Repeat("a", 40), "must-not-be-opened")
+	if !errors.Is(err, blob.ErrDigestNotReadable) || transport.upload.Identity.Kind != "" {
+		t.Fatalf("upload = %v, byte request = %+v", err, transport.upload)
 	}
 }

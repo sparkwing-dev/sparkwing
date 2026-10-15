@@ -3,82 +3,99 @@ package bincache
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
-	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/directdata"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
 // SeedRef names the one ref a working-tree snapshot bundle carries.
 func SeedRef(sha string) string { return "refs/sparkwing-seed/" + sha }
 
-var sourceBundleKeyRE = regexp.MustCompile(`^sources/[0-9a-f]{64}/[0-9a-f]{32}$`)
+// SourceData binds a source bundle to the host's live data authority. Reads use
+// the digest sealed in the run spec; writes retain the exact uploader receipt.
+type SourceData struct {
+	Bytes     blob.Store
+	Records   blob.RecordStore
+	Authority blob.Authority
+	Identity  blob.UploadIdentity
+	Budget    blob.Budget
+}
 
-// FetchSourceBundleDirect imports a claim-authorized snapshot without a Git
-// remote. Its bundle is verified before git sees it, and git uses no ambient
-// global config or credentials while opening the local file.
-func FetchSourceBundleDirect(ctx context.Context, controllerURL, grant, runID, key, sha, repoURL, workDir string) (path string, err error) {
-	if !sourceBundleKeyRE.MatchString(key) || !directCommitRE.MatchString(sha) || grant == "" {
-		return "", errors.New("invalid source bundle claim")
+// UploadSourceBundle stores a snapshot as a source_bundle record after verified
+// upload. The caller seals the returned digest, rather than an object-store key.
+func UploadSourceBundle(ctx context.Context, data *SourceData, sha, src string) (blob.Record, error) {
+	if data == nil || data.Bytes == nil || data.Records == nil {
+		return blob.Record{}, errors.New("source bundle storage binding is required")
 	}
-	transport := &http.Client{Timeout: 15 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	d := directdata.New(controllerURL, grant, runID, transport)
-	rc, meta, err := d.Download(ctx, "source", key)
-	if err != nil {
+	if !directCommitRE.MatchString(sha) {
+		return blob.Record{}, errors.New("source bundle requires a full snapshot commit")
+	}
+	return uploadFileRecord(ctx, data.Bytes, data.Records, data.Authority, data.Identity, blob.KindSourceBundle, sha, src)
+}
+
+// FetchSourceBundle imports an authorized working-tree snapshot without a Git
+// remote. It consumes the sealed digest to verified EOF before git sees bytes,
+// then publishes the exact snapshot's checkout. Failure removes staging.
+func FetchSourceBundle(ctx context.Context, data *SourceData, digest blob.Digest, sha, repoURL, workDir string) (path string, err error) {
+	defer func() {
+		if errors.Is(err, context.DeadlineExceeded) {
+			err = errors.Join(blob.ErrBudget, err)
+		}
+	}()
+	if data == nil || data.Bytes == nil {
+		return "", errors.New("source bundle storage binding is required")
+	}
+	if !directCommitRE.MatchString(sha) {
+		return "", errors.New("source bundle requires a full snapshot commit")
+	}
+	if data.Budget.Deadline.IsZero() {
+		return "", blob.ErrBudget
+	}
+	ctx, cancel := context.WithDeadline(ctx, data.Budget.Deadline)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
 		return "", err
-	}
-	defer rc.Close()
-	if meta.Size < 0 || meta.Size > 500<<20 || meta.SHA256 != strings.Split(key, "/")[1] {
-		return "", errors.New("source bundle metadata does not match the requested object")
 	}
 	if err := os.MkdirAll(workDir, 0o700); err != nil {
 		return "", err
 	}
-	f, err := os.CreateTemp(workDir, "source-*.bundle")
+	staging, err := os.MkdirTemp(workDir, ".source-*")
 	if err != nil {
 		return "", err
 	}
 	defer func() {
-		if removeErr := os.Remove(f.Name()); removeErr != nil {
+		if removeErr := os.RemoveAll(staging); removeErr != nil {
 			err = errors.Join(err, removeErr)
 		}
 	}()
-	h := sha256.New()
-	n, copyErr := io.Copy(io.MultiWriter(f, h), io.LimitReader(rc, meta.Size+1))
-	closeErr := f.Close()
-	if copyErr != nil {
-		return "", copyErr
+	reader, err := data.Bytes.Get(ctx, blob.GetRequest{Authority: data.Authority, Digest: digest})
+	if err != nil {
+		return "", err
 	}
-	if closeErr != nil {
-		return "", closeErr
+	bundle, err := receiveFile(ctx, staging, reader)
+	if err != nil {
+		return "", err
 	}
-	if n != meta.Size || hex.EncodeToString(h.Sum(nil)) != meta.SHA256 {
-		return "", errors.New("source bundle size or SHA256 mismatch")
-	}
-	checkout := filepath.Join(workDir, "checkout")
+	checkout := filepath.Join(staging, "checkout")
 	git := func(args ...string) error {
 		cmd := exec.CommandContext(ctx, "git", args...)
-		cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0")
+		cmd.Env = directLocalGitEnv(directGitEnv(os.Environ()))
+		killGroupOnCancel(cmd)
 		if out, err := gitCommandCombinedOutput(cmd); err != nil {
-			return fmt.Errorf("git source import: %w: %s", err, strings.TrimSpace(string(out)))
+			return fmt.Errorf("git source import: %w: %s", errors.Join(err, ctx.Err()), strings.TrimSpace(string(out)))
 		}
 		return nil
 	}
-	if err := git("init", "--quiet", checkout); err != nil {
+	if err := git("-c", "init.templateDir=", "init", "--quiet", checkout); err != nil {
 		return "", err
 	}
-	if err := git("-C", checkout, "fetch", "--quiet", "--no-tags", "--", f.Name(), SeedRef(sha)); err != nil {
+	if err := git("-C", checkout, "fetch", "--quiet", "--no-tags", "--", bundle, SeedRef(sha)); err != nil {
 		return "", err
 	}
 	if err := git("-C", checkout, "-c", "core.autocrlf=false", "-c", "core.hooksPath=/dev/null", "checkout", "--detach", "--quiet", sha); err != nil {
@@ -103,13 +120,26 @@ func FetchSourceBundleDirect(ctx context.Context, controllerURL, grant, runID, k
 			return "", err
 		}
 	}
-	return directSparkwingDir(checkout)
+	if _, err := directSparkwingDir(checkout); err != nil {
+		return "", err
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	destination := filepath.Join(workDir, "checkout")
+	if err := os.Rename(checkout, destination); err != nil {
+		return "", err
+	}
+	return directSparkwingDir(destination)
 }
 
 func isWorkspaceSnapshotCommit(ctx context.Context, repoDir, sha string) (bool, error) {
-	out, err := exec.CommandContext(ctx, "git", "-C", repoDir, "cat-file", "commit", sha).Output()
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "cat-file", "commit", sha)
+	cmd.Env = directLocalGitEnv(directGitEnv(os.Environ()))
+	killGroupOnCancel(cmd)
+	out, err := gitCommandOutput(cmd)
 	if err != nil {
-		return false, fmt.Errorf("inspect workspace commit: %w", err)
+		return false, fmt.Errorf("inspect workspace commit: %w", errors.Join(err, ctx.Err()))
 	}
 	header, message, ok := bytes.Cut(out, []byte("\n\n"))
 	if !ok {
@@ -129,9 +159,12 @@ func isWorkspaceSnapshotCommit(ctx context.Context, repoDir, sha string) (bool, 
 }
 
 func restoreRawCheckout(ctx context.Context, repoDir, sha string) error {
-	out, err := exec.CommandContext(ctx, "git", "-C", repoDir, "ls-tree", "-rz", "--full-tree", sha).Output()
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "ls-tree", "-rz", "--full-tree", sha)
+	cmd.Env = directLocalGitEnv(directGitEnv(os.Environ()))
+	killGroupOnCancel(cmd)
+	out, err := gitCommandOutput(cmd)
 	if err != nil {
-		return fmt.Errorf("inspect workspace tree: %w", err)
+		return fmt.Errorf("inspect workspace tree: %w", errors.Join(err, ctx.Err()))
 	}
 	for _, raw := range bytes.Split(out, []byte{0}) {
 		if len(raw) == 0 {
@@ -146,9 +179,12 @@ func restoreRawCheckout(ctx context.Context, repoDir, sha string) error {
 		if rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return fmt.Errorf("inspect workspace tree: unsafe path %q", name)
 		}
-		blob, blobErr := exec.CommandContext(ctx, "git", "-C", repoDir, "cat-file", "blob", string(fields[2])).Output()
+		cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "cat-file", "blob", string(fields[2]))
+		cmd.Env = directLocalGitEnv(directGitEnv(os.Environ()))
+		killGroupOnCancel(cmd)
+		blob, blobErr := gitCommandOutput(cmd)
 		if blobErr != nil {
-			return fmt.Errorf("read workspace blob %q: %w", name, blobErr)
+			return fmt.Errorf("read workspace blob %q: %w", name, errors.Join(blobErr, ctx.Err()))
 		}
 		path := filepath.Join(repoDir, rel)
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {

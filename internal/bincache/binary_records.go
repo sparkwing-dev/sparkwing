@@ -2,10 +2,7 @@ package bincache
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
-	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 
@@ -71,44 +68,25 @@ func DownloadBinary(ctx context.Context, data *BinaryData, hash, dest string) (e
 }
 
 func installBinary(ctx context.Context, dest string, reader blob.VerifiedReader) (err error) {
-	if reader == nil {
-		return blob.ErrIntegrity
-	}
-	closed := false
-	defer func() {
-		if !closed {
+	if err := mkdirCache(filepath.Dir(dest)); err != nil {
+		if reader != nil {
 			err = errors.Join(err, reader.Close())
 		}
-	}()
-	if err := mkdirCache(filepath.Dir(dest)); err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(filepath.Dir(dest), ".fetch-*")
+	path, err := receiveFile(ctx, filepath.Dir(dest), reader)
 	if err != nil {
 		return err
 	}
 	defer func() {
-		if removeErr := os.Remove(f.Name()); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+		if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
 			err = errors.Join(err, removeErr)
 		}
 	}()
-	_, readErr := io.Copy(f, reader)
-	closeErr := f.Close()
-	readerErr := reader.Close()
-	closed = true
-	if err := errors.Join(readErr, closeErr, readerErr); err != nil {
+	if err := os.Chmod(path, 0o755); err != nil {
 		return err
 	}
-	if !reader.Verified() {
-		return blob.ErrIntegrity
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := os.Chmod(f.Name(), 0o755); err != nil {
-		return err
-	}
-	return os.Rename(f.Name(), dest)
+	return os.Rename(path, dest)
 }
 
 // UploadBinary commits a binary record only after its exact uploader has a
@@ -120,36 +98,6 @@ func UploadBinary(ctx context.Context, data *BinaryData, hash, src string) error
 	if hash == "" {
 		return errors.New("binary build key is required")
 	}
-	if err := blob.AuthorizeUpload(data.Authority, data.Identity, blob.KindBinary); err != nil {
-		return err
-	}
-	key, err := blob.ResolveWriteKey(data.Authority, blob.WriteScopeIntent{Kind: blob.KindBinary, Name: hash})
-	if err != nil {
-		return err
-	}
-	f, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-	sum := sha256.New()
-	n, err := io.Copy(sum, f)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return err
-	}
-	digest := blob.Digest(fmt.Sprintf("%x", sum.Sum(nil)))
-	if _, err := data.Bytes.Put(ctx, blob.PutRequest{Identity: data.Identity, Authority: data.Authority, Digest: digest, Size: n, Body: f}); err != nil {
-		return err
-	}
-	record, err := data.Records.CommitRecord(ctx, blob.CommitRecordRequest{Source: data.Identity, Authority: data.Authority, Key: key, Digest: digest})
-	if err != nil {
-		return err
-	}
-	if record.Key != key || record.Digest != digest || record.Source != data.Identity {
-		return blob.ErrIntegrity
-	}
-	return nil
+	_, err := uploadFileRecord(ctx, data.Bytes, data.Records, data.Authority, data.Identity, blob.KindBinary, hash, src)
+	return err
 }

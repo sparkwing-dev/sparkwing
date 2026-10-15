@@ -1,8 +1,10 @@
 # Storage rewrite contract
 
 This page describes the target storage contract. The byte backends and
-artifact and binary clients implement it. Controller, tenant-store and host integration
-are still in progress.
+artifact, binary and source-bundle clients implement it. Controller,
+tenant-store and host integration are still in progress. Working-tree
+triggers require an authorized storage binding and fail before upload or
+submission while that binding is absent.
 
 <!-- design:begin -->
 

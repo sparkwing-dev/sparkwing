@@ -1,158 +1,178 @@
 # W7 storage handoff
 
-W7 remains incomplete. This session replaces the binary data client with a
-consumer of the frozen blob interfaces and removes unused cache-grant
-process-environment transport. Earlier byte backends, artifact capture/staging,
-memo materialization, dependency-cache backend and cache-service deletions remain
-in place. No other area's frozen contract was changed.
+W7 remains incomplete. This session replaces the source-bundle client and
+deletes the legacy byte client and cache-grant request code. Earlier blob
+backends, artifacts, memo, depcache, binary client and cache-service deletions
+remain in place. Frozen contracts were not changed.
 
-## Implemented in this session
+## Implemented
 
-- `bincache.BinaryData` binds `blob.Store`, `blob.RecordStore`, authority,
-  uploader identity, team build-trust policy and an explicit read budget.
-  It is a local W7 binding, not a new wire protocol or credential.
-- Binary downloads look up the exact team/repo/ref/build record and check
-  `CheckBinaryExecution` before fetching its committed digest. Local provenance
-  requires `trust_local_builds`. Wrong team, repository, ref or build key fails
-  before reading bytes. EOF verification and stream close precede executable
-  publication. Failure preserves an existing destination and removes staging.
-- Binary uploads obtain a verified receipt for their owner/job identity before
-  committing the record. `ResolveWriteKey` derives the namespace. The record
-  store assigns provenance, and a mismatched commit response fails integrity.
-- Download deadlines from lookup, transfer and stream consumption all retain
-  `context.DeadlineExceeded` and classify as `blob.ErrBudget`. Cancellation stays
-  cancellation. An expired budget performs no lookup.
-- Migrated the binary consumers in the legacy trigger and node hosts to the
-  new type. Their production call sites pass no remote binding and compile into
-  the machine's binary cache. **Shared binary transfers are not integrated.**
-  The source docs and changelog state this behavior.
-- Removed cache-grant environment injection from launched/dispatched nodes,
-  the renewal goroutine, and `CacheBearerFromEnv`/`CacheGrantEnv`. Ordinary Git
-  source paths no longer request a cache grant. Working-tree bundle fetches still
-  request one in memory through the remaining old source transport.
+- `bincache.SourceData` binds `blob.Store`, `RecordStore`, authority, uploader
+  identity and a caller-supplied read budget in memory.
+- `UploadSourceBundle` obtains the exact uploader receipt before committing a
+  `source_bundle` record. The server-derived key uses the snapshot commit as
+  its logical name. Receipt and returned record identity/digest mismatches
+  fail integrity. A wrong owner generation fails before opening the file.
+- `FetchSourceBundle` reads the sealed digest through the host's authority.
+  It consumes verified EOF and closes the reader before Git opens the bundle.
+  It checks the snapshot commit, restores raw tree bytes, refuses a symlinked
+  pipeline directory and publishes the checkout after validation. Failure
+  removes staging and preserves an existing checkout.
+- Git uses the existing isolated environment and process cleanup helpers.
+  Cancellation retains `context.Canceled`. Deadline errors retain
+  `context.DeadlineExceeded` and classify as `blob.ErrBudget`, including during
+  Git execution. No hardcoded source timeout or byte cap was added.
+- Binary and source clients share file receive/upload helpers. Both require
+  EOF verification and successful close before publishing downloads.
+- The CLI source adapter and both old host callers use the new API. Their
+  production calls pass no storage binding. **Working-tree triggers fail
+  before upload or submission. Their execution is not integrated.** Ordinary
+  Git acquisition and local binary builds retain their existing paths.
 
 ## Deleted
 
-Two complete files, **216 lines**, are deleted:
+Five whole files, **495 lines**, are deleted:
 
-- `internal/bincache/direct_data.go`: 47 lines.
-- `internal/bincache/direct_data_test.go`: 169 lines.
+| File | Lines |
+| --- | ---: |
+| `internal/bincache/grant.go` | 79 |
+| `internal/bincache/grant_test.go` | 103 |
+| `internal/directdata/client.go` | 215 |
+| `internal/directdata/client_test.go` | 74 |
+| `internal/orchestrator/cache_grant.go` | 24 |
 
-Retained files also lose the duplicate binary installer and `ErrDigest`, grant
-renewal/environment code, its obsolete bearer test and two cache-grant binary
-fixtures. Binary integrity, cancellation and publication-cleanup assertions were
-moved to `binary_records_test.go`. The signed-transfer test in `internal/blob`
-still verifies that object uploads receive no controller bearer.
+Retained files also lose `FetchSourceBundleDirect`, the source object-key parser,
+duplicated verification, pretrigger capability negotiation/upload, and the CLI
+HTTP fixture that required uploading before admission. No Go consumer remains
+for those deleted clients. Controller-side grants and old data handlers remain.
 
 ## Acceptance and test ports
 
-**Native storage acceptance: 0 activated; 424 target cells remain skipped.**
-`acceptance.New`/`Run` remain stubs. This session does not count fakes as native
-SQLite/Postgres, filesystem/S3, Windows or placement evidence.
+**Native storage acceptance: 0 activated. All 424 target cells remain skipped.**
+`acceptance.New` and `Run` remain stubs. Component fakes do not count as native
+store, controller, S3, Windows or placement evidence.
 
-New component coverage exercises the binary parts of
-`storage-binary-provenance`, `storage-cas-integrity` and
-`storage-owner-receipts-and-stream-verification`. The byte implementation is the
-real `blob.NewSignedStore`; the signer/transfer and record transaction are fakes.
-It covers Cloud/local provenance, team opt-in, exact record scope, owner-unit
-uploads, corrupt/short/long bytes, unverified EOF, failed close, missing records,
-failed upload, cancellation, budgets and failed executable publication.
+Ported the two old source-import tests to the real signed blob client with fake
+signer/transfer contracts and real Git/files:
 
-The T1 port `TestDataDownloadClaimUsesCloudProvenance` is **not fully closed**.
-Its native execution/source cases and controller authority checks remain open.
-No additional full T1 port is claimed complete. The legacy binary-client tests
-listed above are replaced by component tests on the new contract.
+- `TestDirectSourceBundleImportsExactSnapshotWithoutOrigin` becomes
+  `TestSourceBundleImportsExactSnapshotWithoutOrigin`, adding wrong-snapshot
+  refusal, staging cleanup and preservation of an existing checkout.
+- `TestDirectSourceBundleRefusesSymlinkedSparkwing` becomes
+  `TestSourceBundleRefusesSymlinkedSparkwing`, retaining external, relative
+  external and internal symlink cases.
+
+New tests cover corrupt/short/long/unverified/missing/unreadable bytes, failed
+close, budgets, cancellation, exact upload identity, receipt/record substitution,
+wrong owner generation and failed uploads. The signal-driven Git cancellation
+regression failed before the fix and passes afterward. Tests use no sleeps.
+
+The existing `blob.TestSignedTransferHTTP` retains signed-transfer isolation
+coverage from the deleted direct client. Capability-negotiation tests assert an
+obsolete protocol and are removed. The CLI preadmission-upload success assertion
+conflicts with the uploader contract and is removed. Its failure-before-admission
+assertion remains.
+
+No additional full T1 port is claimed closed. In particular,
+`TestDataDownloadClaimUsesCloudProvenance` still needs native execution,
+source authority and controller provenance coverage.
 
 ## Verification
 
 All Go commands used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, caches/temp files
-under `/tmp/sw-astra-W7`, and `-p 2`.
+under `/tmp/sw-astra-W7`, and `go test -p 2`.
 
-Passed:
+Passed on the final code:
 
-- Whole-repository `go build -p 2 ./...`, including after the final correction.
-- Vet on `internal/bincache`, `internal/authwire`, `internal/orchestrator` and
-  `internal/cluster`. Bincache vet was repeated after the correction.
-- Full `internal/blob/...`, `internal/artifacts` and `internal/authwire` tests.
-- `internal/bincache -run '^TestBinary'` and the trigger's local-build check.
-- Acceptance catalog/documentation, invariant coverage and port-inventory checks.
-- Embedded documentation sync check and `git diff --check`.
+- Whole-repository `go build -p 2 ./...`.
+- `go vet -p 2 ./internal/bincache ./internal/cluster ./internal/orchestrator ./cmd/sparkwing`.
+- `go test -p 2 ./internal/bincache -run '^Test(SourceBundle|Binary)' -count=1`.
+- Full `go test -p 2 ./internal/blob/... ./internal/artifacts`.
+- Test compilation for `cmd/sparkwing`, `internal/cluster` and
+  `internal/orchestrator` with `-run '^$'`.
+- Acceptance catalog, port inventory and invariant checks with
+  `go test -p 2 ./tests/acceptance -run 'Test(Catalog|Port|Invariant)' -count=1`.
+- Changed-line commentcheck/sleepcheck, embedded docs sync and `git diff --check`.
 
-An initial broader selection reached the existing
-`TestRequestCacheGrantAuthenticatesAsTheRunner` and failed because `httptest`
-cannot open a socket in this sandbox. Full bincache, controller and host suites
-are not claimed. The isolated new binary tests pass without sockets.
+A fresh Astra reviewer used an immutable snapshot and test overlays. It found
+that Git cancellation lost the context error, reproduced it, and verified the
+fix. The final focused overlay passed with no remaining blockers or should-fix
+findings. Its process sweep found no leaked Git or test processes. Windows
+cleanup behavior was inspected, not executed.
 
-A fresh Astra reviewer inspected an immutable snapshot. It found inconsistent
-classification of in-flight deadline errors. The new lookup/download/stream
-regressions failed against that snapshot through a test overlay, and all three
-pass after the fix. No blocking provenance or integrity finding remained.
+An initial build caught one unused import after deleting the CLI uploader. It
+was removed and the repository build passed. Full CLI/controller/host suites
+were not run because their HTTP fixtures require sockets blocked by this
+sandbox. No native acceptance or Sparkwing pipeline was run.
 
 ## Contract changes needed in other areas
 
-**W1's upload lifecycle transaction seam remains undeclared.** `RecordStore`
-operates on already verified receipts. `ReserveQuota`/`SettleQuota` alone do not
-provide a transaction that binds an immutable upload ticket, reauthorizes its
-uploader, publishes the live blob and exact receipt, and settles unique-byte
-quota together. W1 must declare that lifecycle, including ticket lookup/replay
-and expiry release. W7 cannot replace it with process-memory tickets or separate
-receipt/quota writes without violating the frozen contract. No W1 API was added.
+1. **W1: atomic upload lifecycle.** Record methods consume verified receipts.
+   Quota reservation/settlement alone does not define the durable immutable
+   ticket transaction that reauthorizes its uploader, publishes the live blob
+   and exact receipt, and settles unique-byte quota together. Ticket
+   lookup/replay, expiry release and interrupted-commit recovery need that seam.
+   W7 added no process-memory tickets or separate receipt/quota commits.
+2. **W1/W2/W9: ordinary working-tree submission authority.** Final
+   `CreateRunRequest` seals `Source.BundleDigest`, but normal
+   `CreateRunResponse` returns no source-upload authority. It exposes only the
+   optional here bearer. `/data/upload` admits a live claim or run-bound
+   publisher, and non-job upload identity still requires a run. The old CLI
+   uploaded before admission under a profile credential. Define the authorized
+   submission/upload handoff and when queued execution may observe the sealed
+   source. W7 has not invented pre-run upload identity or widened route grants.
 
-The other areas' existing stubbed interfaces were kept intact. No new product
-question or approval is pending.
+No frozen signature, permission table or schema was changed to answer these.
 
-## Real integration and remaining W7 work
+## Remaining real integrations and W7 work
 
-- **W1:** implement records/read sets, memo-copy transactions, authoritative blob
-  existence, unique-byte accounting, retention/tombstones and the upload
-  lifecycle above. Team deletion still needs authoritative CAS/log cleanup.
-- **W2/W7:** implement capability byte/record HTTP transport and final controller
-  data handlers against that lifecycle. Authorize and reserve before signing,
-  reauthorize before commit, and bind the existing filesystem/S3 object backend.
-  C2's authorization and error-codec functions remain stubs in this worktree.
-- **W7:** migrate working-tree source publication/fetch and remove `directdata`,
-  source grants, old controller storage handlers and service-token accounting.
-  Log/publication integration remains open. The old source and controller paths
-  are not compatibility implementations of the new contracts.
-- **W3/W8:** supply live per-attempt artifact/memo/depcache bindings and binary
-  storage bindings. Before enabling remote binary reuse, ensure a machine cache
-  hit cannot bypass changed team/provenance policy or cross team boundaries.
-  Existing machine cache hits precede remote record checks. Production calls in
-  this session remain unbound and build locally. Complete memoized lifecycle,
-  generator replay and retry materialization under the store contract.
-- **W4:** finish `.Cache` and migrate the repository lint declaration.
-- **T1/lead:** implement the native driver and execute all native storage cells.
-  No native controller, S3, Postgres, Kubernetes or Windows run was attempted.
+- **W1:** records/read sets, memo-copy transactions, blob existence, unique-byte
+  accounting, retention/tombstones, upload lifecycle and team CAS/log cleanup.
+- **W2/W7:** capability byte/record HTTP binding and final controller handlers.
+  Authorize/reserve before signing and reauthorize/settle at commit against
+  filesystem/S3. Delete old handlers, grant signing, service-token accounting
+  and their replaced tests/docs.
+- **W3/W8:** bind per-attempt artifacts, memo, depcache, binaries and source
+  acquisition. Source uses live authority and `Source.BundleDigest`; the legacy
+  environment object's key is not the final projection. Before remote binary
+  reuse, ensure machine-cache hits cannot bypass team/provenance policy.
+  Complete memoized/retry/generator materialization.
+- **W9:** connect working-tree submission to the authorized upload handoff.
+- **W7:** migrate segmented log upload/read/publication through tagged subjects.
+  Existing sink/client/controller integration remains legacy. W1/C2 own writer
+  fences, final-job tail grace, retention classes and exact egress accounting.
+- **W4:** finish `.Cache` and migrate the lint declaration.
+- **T1/lead:** implement native drivers and execute every storage matrix cell.
 
 ## Assumptions and mechanisms
 
-The new `BinaryData` value groups existing contracts because the old
-`directdata.Client` cannot prove record scope or provenance. No environment
-variable, flag, service, policy limit, compatibility shim or authority store was
-added. Removing the binding and its new consumers would undo this local API
-change. The reviewer found no unnecessary new abstraction.
+`SourceData` is a local binding of frozen interfaces because the removed
+`directdata.Client` cannot establish exact receipt/record ownership. Shared
+file helpers avoid a second EOF/close publication path. No credential, wire
+protocol, environment variable, service, compatibility shim or policy limit
+was added. The reviewer found no mechanism to simplify.
 
 ## Shared files touched
 
-Outside W7's binary/blob implementation:
+Outside W7's bincache/blob/directdata code:
 
-- `internal/authwire/cachegrant.go`, `cachegrant_test.go`.
-- `internal/cluster/direct_source_credential_test.go`,
-  `trigger_binary_auth_test.go`, `trigger_loop.go`, `trigger_typescript_test.go`.
-- `internal/orchestrator/cache_grant.go`, `claim_exec.go`, `claim_node.go`,
-  `pod_node_host_test.go`, `run_node_claim_test.go`, `run_node_remote.go`,
-  `run_node_verb.go`.
-- `CHANGELOG.md`, `docs/storage.md`, and their generated embedded copies
+- `cmd/sparkwing/run_dispatch.go`, `pipeline_trigger_test.go`.
+- `internal/cluster/trigger_loop.go`.
+- `internal/orchestrator/run_node_remote.go`, `cache_grant.go` (deleted).
+- `CHANGELOG.md`, `docs/storage.md`, and generated
   `pkg/docs/changelog.md`, `pkg/docs/mirror/storage.md`.
+- This handoff file.
 
 ## Friction and cleanup
 
-The sandbox blocks sockets, so the lead retains pipelines and native gates.
-Standards discovery rejected the review snapshot because it has no `.git`;
-read-only discovery against the real worktree succeeded. Initial bootstrap ran
-`sparkwing info --for-agent` before the no-binary swarm instruction was loaded.
-No candidate, daemon or pipeline was run, and no git write was made. Git still
-uses Korey Gambill and shared `core.worktree` is unset. The scratch directory
-`/tmp/sw-astra-W7` is removed at handoff.
+Socket restrictions exclude native HTTP/service tests. The reviewer's separate
+cold Go cache added several minutes. Initial bootstrap ran
+`sparkwing info --for-agent` before loading the swarm's no-binary instruction.
+No other Sparkwing binary, candidate, daemon or pipeline was run.
+
+No repository Git state was written. Git still resolves Korey Gambill and has
+no `core.worktree` override. Writes stayed inside the worktree and
+`/tmp/sw-astra-W7`. Scratch, including review snapshots/caches, is removed at
+handoff.
 
 STATUS: CONTINUE

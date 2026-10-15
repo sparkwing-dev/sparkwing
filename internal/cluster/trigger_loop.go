@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
@@ -263,9 +264,8 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 	var fetchErr error
 	switch {
 	case workspaceSource:
-		grant := orchestrator.RequestRunCacheGrant(ctx, opts.ControllerURL, opts.Token, trigger.ID, logger)
-		sparkwingDir, fetchErr = bincache.FetchSourceBundleDirect(ctx, opts.ControllerURL, grant,
-			trigger.ID, trigger.TriggerEnv[bincache.SourceBundleObjectEnvKey], sha, repoURL, workDir)
+		sparkwingDir, fetchErr = bincache.FetchSourceBundle(ctx, nil,
+			blob.Digest(trigger.TriggerEnv[bincache.SourceBundleObjectEnvKey]), sha, repoURL, workDir)
 	default:
 		sparkwingDir, fetchErr = fetchSourceFn(ctx, bincache.RunSource{
 			ControllerURL: opts.ControllerURL, ClaimToken: trigger.ClaimToken, RunID: trigger.ID,

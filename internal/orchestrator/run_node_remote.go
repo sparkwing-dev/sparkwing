@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
@@ -74,9 +75,8 @@ func runNodeRemote(
 	var err error
 	switch {
 	case workspaceSource:
-		cacheGrant := RequestRunCacheGrant(ctx, controllerURL, token, runID, logger)
-		sparkwingDir, err = bincache.FetchSourceBundleDirect(ctx, controllerURL, cacheGrant, runID,
-			trigger.TriggerEnv[bincache.SourceBundleObjectEnvKey], trigger.GitSHA, repoURL, workDir)
+		sparkwingDir, err = bincache.FetchSourceBundle(ctx, nil,
+			blob.Digest(trigger.TriggerEnv[bincache.SourceBundleObjectEnvKey]), trigger.GitSHA, repoURL, workDir)
 	default:
 		sparkwingDir, err = bincache.FetchRunSourceDirect(ctx, bincache.RunSource{
 			ControllerURL: controllerURL, ClaimToken: token, RunID: runID,

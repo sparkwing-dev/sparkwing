@@ -93,8 +93,18 @@ the exact owner/job receipt before committing its binary record. The record
 store assigns provenance. The binding keeps the host's authority in memory.
 
 Remote runtime bindings remain pending. The old hosts compile into their
-machine's binary cache without a remote storage binding. They no longer use
-the legacy binary data client or mint and renew a cache grant in the process
-environment. Working-tree bundle fetches still use the legacy source transport
-with an in-memory grant. That source transport and the old controller handlers
-remain part of the storage cut.
+machine's binary cache without a remote storage binding.
+
+`bincache.SourceData` uploads source-bundle records with the exact uploader
+receipt and imports a working-tree snapshot by its sealed blob digest.
+It consumes the verified stream and closes it before Git opens the bundle.
+Import verifies the declared snapshot commit and refuses a symlinked pipeline
+directory. The checkout is published only after those checks pass. Failed
+transfers or imports remove staging and preserve an existing checkout.
+
+The CLI and old hosts have no source storage binding. Working-tree triggers
+fail before upload or submission. Intake must supply live upload authority
+before the CLI can commit and seal the source digest. Hosts must pass their
+live data authority and sealed digest. The cache-grant request client and
+legacy source byte transport are deleted. Old controller storage handlers
+still need replacement against the store's upload transaction.
