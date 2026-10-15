@@ -48,9 +48,11 @@ shared peer authentication and credential delegation. Its enrollment resolver
 accepts only that authenticated local account in `DefaultTeam`, and supplies
 the machine's CPU count, OS and architecture. Ambient runner names and tokens
 cannot select the account. Cleanup revokes the delegated queue credential.
-Store peer authentication remains unimplemented, so production queue startup
-cannot yet sustain a running controller. The constructor test does not claim
-that evidence.
+The store authenticates the verified peer for default-team reads. That peer has
+no persisted authority reference for delegation, so production queue startup
+cannot sustain a running controller. The socket-free `rewrite_integration`
+claimant probe reproduces the missing authority. Constructor success does not
+establish queue readiness.
 
 `NativeServices` binds the owned tenant to W3's host configuration, source,
 captured environments, lease keeper, state following and process router. Owner
@@ -64,7 +66,7 @@ before closing process authority. Repeated close calls return the same cleanup
 error. Logs are masked before private
 JSONL writes. `StoreBinding.Refresh` reauthenticates the captured award through
 the shared C2 policy, including unit liveness, before each authority refresh.
-Owner policies, claim-spanning authentication, authorized byte/record
+Owner policies, authorized byte/record
 clients, controller log projection and ephemeral-process binding validation
 remain integration points. Foreground CLI hosting also needs the shared host's
 remote state adapter. These gaps prevent a completed native local run.
@@ -205,8 +207,9 @@ execution joins.
 `TestNativeStoreOwnerW8/local_controller` exercises `Config.Open`, leased
 reconciliation, the shared queue, native host, persisted completion and joined
 shutdown. It substitutes state/HTTP, enrollment, version policy and source
-services. The local node-adoption properties use C2 snapshot and relation fakes, including
-claim-spanning authentication.
+services. The local node-adoption properties use C2 snapshot and relation fakes
+with the shared authenticator. The persisted node-start and host-refresh tests
+verify that an attempt-zero award survives the transition to its current attempt.
 The delegation test uses the shared `NativeProcesses` and `ProcessAuthorities`.
 These tests do not establish persisted peer authentication, remote native state,
 owner policy composition, byte/record bindings or native process execution.

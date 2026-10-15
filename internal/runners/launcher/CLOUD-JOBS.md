@@ -197,11 +197,12 @@ and generator replay. `NodeHost` owns policy checks at each process start.
 
 <!-- design:begin -->
 
-The shared HTTP client is implemented. The persisted cleanup reader, deployment
-network probes and node cleanup still need native bindings. `TestStoreLauncherW8` constructs
-the embedded launcher against SQLite and shared C2/controller issuance, then
-publishes and activates a Job and retires it after synchronization. The cleanup
-reader and Kubernetes API are fixtures. `FuzzStoreLauncherAuthorityW8` checks
+`TestStoreLauncherW8` constructs the launcher against the typed HTTP client,
+controller handlers, SQLite issuance and persisted cleanup reader. It publishes
+and activates a Job, exchanges its bootstrap, retains the Job through a running
+attempt, and retires it after committed completion. Kubernetes and the Cloud
+boundary remain fixtures. Deployment network probes and node cleanup still need
+native bindings. `FuzzStoreLauncherAuthorityW8` checks
 changed, narrowed and revoked credentials, route selection and provider failure
 across claims and synchronization. Refusals leave work unclaimed. Other
 components retain their fake controller boundaries. Deployed egress, node

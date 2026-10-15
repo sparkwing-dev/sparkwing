@@ -29,7 +29,7 @@ func localClaimsFixture(t testing.TB) (*nodeClaims, *nativeAuthentication, store
 	}}
 	state := &nativeAuthentication{snapshot: capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: p, MembershipValid: true}}, Binding: capability.BindingState{Current: p.Capability.Binding, LeaseExpiresAt: now.Add(time.Minute)}}}
 	lost := false
-	claims := &nodeClaims{auth: spanningClaimAuthenticator{state}, bindings: state, masker: secrets.NewMasker(), current: func(ctx context.Context) (capability.Principal, error) {
+	claims := &nodeClaims{auth: capability.NewAuthenticator(state), bindings: state, masker: secrets.NewMasker(), current: func(ctx context.Context) (capability.Principal, error) {
 		if lost {
 			return capability.Principal{}, errors.New("owner lost")
 		}
@@ -54,7 +54,7 @@ func TestLocalOwnerAdoptsIndependentNodeClaim(t *testing.T) {
 	for attempt := int64(1); attempt <= 3; attempt++ {
 		state.snapshot.Binding.Current.Attempt = attempt
 		p, err := claims.principal(t.Context(), "job", 2, attempt)
-		if err != nil || p.Authority.ID != "node" || p.Capability.Binding.Attempt != 0 {
+		if err != nil || p.Authority.ID != "node" || p.Capability.Binding.Attempt != attempt {
 			t.Fatalf("attempt %d lost its independent award: %+v: %v", attempt, p, err)
 		}
 	}
@@ -260,25 +260,4 @@ func TestLocalNodeClaimsConcurrentAdoptionAndBinding(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-}
-
-type spanningClaimAuthenticator struct{ state *nativeAuthentication }
-
-func (a spanningClaimAuthenticator) Authenticate(ctx context.Context, presentation capability.Presentation, route capability.RoutePolicy) (capability.Authenticated, error) {
-	authenticated, err := capability.NewAuthenticator(spanningClaimReader{a.state}).Authenticate(ctx, presentation, route)
-	if err == nil {
-		authenticated.Principal.Capability.Binding.Attempt = a.state.snapshot.Authorities[0].Principal.Capability.Binding.Attempt
-	}
-	return authenticated, err
-}
-
-type spanningClaimReader struct{ *nativeAuthentication }
-
-func (r spanningClaimReader) ReadAuthentication(ctx context.Context, lookup capability.CredentialLookup, evidence capability.RequestEvidence) (capability.AuthenticationSnapshot, error) {
-	snapshot, err := r.nativeAuthentication.ReadAuthentication(ctx, lookup, evidence)
-	if err == nil && snapshot.Authorities[0].Principal.Capability.Binding.Attempt == 0 {
-		snapshot.Authorities = append([]capability.AuthorityState(nil), snapshot.Authorities...)
-		snapshot.Authorities[0].Principal.Capability.Binding.Attempt = snapshot.Binding.Current.Attempt
-	}
-	return snapshot, err
 }

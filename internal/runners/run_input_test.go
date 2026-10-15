@@ -250,3 +250,36 @@ func FuzzNativePrincipalBindingFence(f *testing.F) {
 		}
 	})
 }
+
+func FuzzNativePrincipalKeepsClaimAcrossAttempts(f *testing.F) {
+	for field := uint8(0); field < 9; field++ {
+		f.Add(uint32(1), field)
+	}
+	f.Fuzz(func(t *testing.T, ordinal uint32, field uint8) {
+		unit, p, _ := hostingStateFor(t, capability.UnitNode)
+		unit.Binding.Attempt = 0
+		p.Capability.Binding = unit.Binding
+		p.Capability.Binding.Attempt = int64(ordinal) + 1
+		switch field % 9 {
+		case 1:
+			p.Capability.Binding.Generation++
+		case 2:
+			p.Capability.Binding.Holder += "-foreign"
+		case 3:
+			p.Capability.Binding.RunID += "-foreign"
+		case 4:
+			p.Capability.Binding.NodeID += "-foreign"
+		case 5:
+			p.Capability.Prefix += "-foreign"
+		case 6:
+			p.Capability.UnitID += "-foreign"
+		case 7:
+			unit.Binding.Attempt = p.Capability.Binding.Attempt + 1
+		case 8:
+			p.Capability.Binding.Attempt = -1
+		}
+		if principalMatches(unit, p) != (field%9 == 0) {
+			t.Fatal("claim refresh confused an execution attempt with its immutable award fence")
+		}
+	})
+}

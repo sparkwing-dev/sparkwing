@@ -56,45 +56,9 @@ func TestStoreLauncherW8(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reads := 0
-	remove := false
-	server.Launcher = storeLauncherSyncW8(func(ctx context.Context, ref capability.AuthorityRef, observed []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error) {
-		reads++
-		if ref.ID != root.Capability.Prefix || len(observed) != 1 || observed[0].NodeUID != "uid" || observed[0].Job.UID != "job-uid" {
-			t.Fatal("launcher lost its authenticated root or persisted Job")
-		}
-		if remove {
-			return controllerwire.LauncherSyncResponse{Remove: []controllerwire.LauncherJobRef{observed[0].Job}}, nil
-		}
-		tenant, err := server.Store.ForTeam(ctx, store.DefaultTeam)
-		if err != nil {
-			return controllerwire.LauncherSyncResponse{}, err
-		}
-		row, err := tenant.ReadRun(ctx, "run")
-		if err != nil {
-			return controllerwire.LauncherSyncResponse{}, err
-		}
-		node, err := tenant.ReadNode(ctx, store.NodeRef{RunID: "run", NodeID: "job"})
-		if err != nil {
-			return controllerwire.LauncherSyncResponse{}, err
-		}
-		principal, err := server.Store.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: node.CapabilityPrefix})
-		if err != nil {
-			return controllerwire.LauncherSyncResponse{}, err
-		}
-		want := capability.LeaseRef{Kind: capability.UnitNode, ID: principal.Capability.UnitID, Holder: node.ClaimedBy, Generation: node.Generation}
-		if observed[0].Award != want {
-			t.Fatal("launcher changed its persisted award fence")
-		}
-		return controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{{
-			Unit: capability.UnitNode, UnitID: principal.Capability.UnitID, RunID: "run", JobID: "job", Purpose: capability.PurposeWork,
-			Delivery: capability.DeliveryBootstrap, Binding: principal.Capability.Binding, Request: row.Request,
-			OwnerDeadline: principal.Capability.Binding.Deadline, ParentCapabilityExpiry: root.Capability.ExpiresAt, Capability: "reader-must-not-return-this",
-		}}}, nil
-	})
 	claimed, err := runtime.LaunchOne(t.Context())
-	if err != nil || !claimed || reads != 1 {
-		t.Fatalf("store launcher: claimed=%t reads=%d error=%v", claimed, reads, err)
+	if err != nil || !claimed {
+		t.Fatalf("store launcher: claimed=%t error=%v", claimed, err)
 	}
 	jobs, err := kube.BatchV1().Jobs(cfg.Namespace).List(t.Context(), metav1.ListOptions{})
 	if err != nil || len(jobs.Items) != 1 || jobs.Items[0].Spec.Suspend == nil || *jobs.Items[0].Spec.Suspend {
@@ -108,11 +72,33 @@ func TestStoreLauncherW8(t *testing.T) {
 	if err != nil || bootstrap.Binding.Holder == "" || string(bootstrap.Bootstrap) == root.Raw || bootstrap.Source.SHA != strings.Repeat("a", 40) {
 		t.Fatalf("bootstrap lost its store award: %v", err)
 	}
-	remove = true
-	if err := runtime.Sync(t.Context()); err != nil || boundary.released != 1 || reads != 2 {
-		t.Fatalf("store-backed cleanup: releases=%d reads=%d error=%v", boundary.released, reads, err)
+	bootstrapClient, err := cloudStoreClientW8(t, server)(client.EngineOptions{URL: cfg.ControllerURL, Bearer: func(context.Context) (string, error) { return string(bootstrap.Bootstrap), nil }})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Join(paths, ",") != "/api/v1/launcher/claim,/api/v1/launcher/sync,/api/v1/launcher/sync" {
+	exchanged, err := bootstrapClient.Exchange(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	unit := exchanged.Claim
+	work, err := cloudStoreClientW8(t, server)(client.EngineOptions{URL: cfg.ControllerURL, Bearer: func(context.Context) (string, error) { return unit.Capability, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := work.TransitionJob(t.Context(), unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "running", Cause: "start", SourceAttempt: &unit.Binding.Attempt})
+	if err != nil || started.Attempt != 1 {
+		t.Fatalf("Cloud start: %+v: %v", started, err)
+	}
+	if err := runtime.Sync(t.Context()); err != nil || boundary.released != 0 {
+		t.Fatalf("live exchanged claim lost its Job: releases=%d: %v", boundary.released, err)
+	}
+	if _, err := work.TransitionJob(t.Context(), unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "success", Cause: "report", SourceAttempt: &started.Attempt, Result: &controllerwire.JobResult{Outcome: "success"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.Sync(t.Context()); err != nil || boundary.released != 1 {
+		t.Fatalf("store-backed cleanup: releases=%d error=%v", boundary.released, err)
+	}
+	if strings.Join(paths, ",") != "/api/v1/launcher/claim,/api/v1/launcher/sync,/api/v1/launcher/sync,/api/v1/launcher/sync" {
 		t.Fatalf("launcher did not use the shared claim/sync routes: %v", paths)
 	}
 }

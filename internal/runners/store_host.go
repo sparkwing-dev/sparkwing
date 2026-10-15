@@ -157,6 +157,9 @@ func (h StoreHosting) authenticate(ctx context.Context, unit controllerwire.Clai
 func principalMatches(unit controllerwire.ClaimedUnit, principal capability.Principal) bool {
 	c := principal.Capability
 	binding := c.Binding
+	if unit.Unit == capability.UnitNode && unit.Binding.Kind == capability.BindingNode && unit.Binding.Expansion == nil && unit.Binding.Attempt == 0 && binding.Attempt > 0 {
+		binding.Attempt = 0
+	}
 	if binding.ClaimBy != nil && unit.Binding.ClaimBy != nil && binding.ClaimBy.Equal(*unit.Binding.ClaimBy) {
 		binding.ClaimBy = unit.Binding.ClaimBy
 	}

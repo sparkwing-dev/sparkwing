@@ -61,6 +61,10 @@ owner lease. Only original awards and exchanged capabilities enter hosting.
 Narrowed reporting delegations cannot construct hosts. Jobs use
 `nodehost.NewNodeInput` with the persisted row. The granted
 runner and request bytes are captured before any service callback runs.
+An attempt-zero node award keeps the same claim identity when authentication
+projects its current execution attempt. Fixed attempts and every other claim
+field must still match. The persisted start/refresh acceptance test exercises
+this through `StoreHosting` and C2's real authenticator.
 
 The service binder returns `NativeServices`. It supplies source, engine, process,
 policy, logging and storage adapters for `nodehost.NewNativeHost`. Embedded hosting
