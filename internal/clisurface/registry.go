@@ -762,7 +762,7 @@ func Registry() []Command {
 		{Path: "sparkwing-runner fetch-source", Hidden: true, Rules: []string{"Use the bootstrap file only for authorized source acquisition; clone the sealed SHA exactly."}, Flags: []Flag{
 			{Name: "controller", Argument: "URL", Required: true},
 			{Name: "run", Argument: "RUN", Required: true},
-			{Name: "job", Argument: "JOB", Required: true},
+			{Name: "job", Argument: "JOB"},
 			{Name: "generation", Argument: "N", Required: true},
 			{Name: "bootstrap-file", Argument: "PATH", Required: true},
 			{Name: "source-dir", Argument: "PATH", Required: true},
@@ -781,7 +781,7 @@ func Registry() []Command {
 		{Path: "sparkwing-runner run-node", Hidden: true, Rules: []string{"Read the bootstrap file once, exchange it and keep the capability in memory; no bearer in argv or env."}, Flags: []Flag{
 			{Name: "controller", Argument: "URL", Required: true},
 			{Name: "run", Argument: "RUN", Required: true},
-			{Name: "job", Argument: "JOB", Required: true},
+			{Name: "job", Argument: "JOB"},
 			{Name: "generation", Argument: "N", Required: true},
 			{Name: "bootstrap-file", Argument: "PATH", Required: true},
 			{Name: "source-dir", Argument: "PATH", Required: true},

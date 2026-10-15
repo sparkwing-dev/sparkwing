@@ -21,8 +21,20 @@ func Main() {
 	MainWithVersion("")
 }
 
+// Runtime supplies the shared service bindings used by every runner command.
+type Runtime struct {
+	Runner    RunnerCLI
+	Launcher  LauncherFactory
+	Bootstrap BootstrapRuntime
+}
+
 // MainWithVersion runs the runner CLI with its linker-stamped release version.
 func MainWithVersion(version string) {
+	MainWithRuntime(version, Runtime{})
+}
+
+// MainWithRuntime runs the executable with its capability, source and native host bindings.
+func MainWithRuntime(version string, runtime Runtime) {
 	if len(os.Args) < 2 {
 		usage(os.Stderr)
 		os.Exit(2)
@@ -32,11 +44,11 @@ func MainWithVersion(version string) {
 	defer stop()
 	switch os.Args[1] {
 	case "start", "warm":
-		err = (RunnerCLI{}).Run(ctx, os.Args[1], os.Args[2:], version)
+		err = runtime.Runner.Run(ctx, os.Args[1], os.Args[2:], version)
 	case "run-node", "fetch-source":
-		err = RunBootstrapCLI(ctx, os.Args[1], os.Args[2:], nil)
+		err = runtime.Bootstrap.Run(ctx, os.Args[1], os.Args[2:])
 	case "launch":
-		err = runLaunchCLI(os.Args[2:])
+		err = RunLaunchCLI(ctx, os.Args[2:], runtime.Launcher)
 	case "version":
 		err = runRunnerVersion(os.Stdout, os.Args[2:], version)
 	case "-h", "--help", "help":

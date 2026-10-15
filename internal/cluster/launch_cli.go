@@ -5,9 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -84,10 +81,4 @@ func RunLaunchCLI(ctx context.Context, args []string, factory LauncherFactory) e
 		runner.Poll = poll
 	}
 	return runner.Run(ctx)
-}
-
-func runLaunchCLI(args []string) error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	return RunLaunchCLI(ctx, args, nil)
 }

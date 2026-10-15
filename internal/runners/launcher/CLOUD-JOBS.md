@@ -97,8 +97,27 @@ exchanging it. The existing Kubernetes JSON decoder supplies strict decoding
 because it checks nested duplicates without another parser implementation.
 Unit kind, attempt, eval-source fence and engine now travel in that file. The
 builder emits only the declared bootstrap arguments. Eval and work commands
-pass the real shared parser. Plans still need the shared grammar to allow an
-owner unit without a job ID.
+pass the real shared parser. Plan commands omit `--job`. Eval and work name
+their job, checked against the private award before service construction.
+
+`cluster.BootstrapRuntime` reads the private award once and compares its run,
+job and generation with argv before constructing services. It sends fetch-source
+to `SourceInit` and run-node to `BootstrapHost`. A partial host binding closes
+on failure, and normal cleanup follows exchange and host execution. The runtime
+sets the exchange URL from the parsed controller argument. `MainWithRuntime`
+supplies one set of runner, launcher and bootstrap bindings to the executable.
+All commands share the process's SIGINT/SIGTERM context.
+
+`SourceInit` captures source and deadline fields before binding live source
+access. It uses `source.PrepareCheckout` because bootstrap authority permits
+checkout before exchange, while SDK execution belongs to the resulting work
+claim. Remote repository identity and the exact SHA are required. Eval/work
+source must retain the accepted engine. Checkout uses a private staging directory
+beside the destination. Publication moves only its matching checkout into the
+requested source directory. Existing destinations are refused. Temporary Git
+credentials and staging directories are removed before return. Source-access
+cleanup and cancellation causes remain errors. The initializer never exchanges
+the bootstrap or installs an SDK.
 
 `NewControllerControl` binds the launcher's claim and sync operations to the
 shared controller wire interface. Its client must use `EngineOptions.Launcher`.
@@ -165,9 +184,13 @@ also need real images, an explicit Kubernetes context and bootstrap/host
 composition from the owning areas.
 
 The private files carry the original CloudJobAward and its source input to the
-containers. The builder's eval/work arguments pass the shared CLI parser. The
-parser still requires a job for plan units, which have no job ID. Production
-entrypoints still need source acquisition and shared host construction bound to
-the HTTP client. Component exchange tests do not establish a working pod entrypoint.
+containers. All three builder argument shapes pass the shared CLI parser.
+The default executable still needs the source-access, native host, runner and
+launcher bindings supplied to `MainWithRuntime`. Source acquisition tests use
+real Git with local fixture remotes and a fake credential release. DNS and
+remote authorization are outside that proof. The native host must consume and
+revalidate the initialized checkout, acquire its selected engine and install
+its SDK after exchange. Plan/eval host composition remains open. Component
+exchange tests do not establish a working pod entrypoint.
 
 <!-- design:end -->
