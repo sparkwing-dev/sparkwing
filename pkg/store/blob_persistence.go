@@ -110,8 +110,12 @@ func resolveBlobAuthorityTx(ctx context.Context, tx *storeTx, team Team, input b
 	}
 	var request []byte
 	var repo string
-	if err := tx.QueryRowContext(ctx, "SELECT request_json,repo_key,pipeline,intake_mode FROM runs WHERE team=? AND id=?", team, c.Binding.RunID).Scan(&request, &repo, &a.pipeline, &a.mode); err != nil {
+	var cancelled, finished sql.NullInt64
+	if err := tx.QueryRowContext(ctx, "SELECT request_json,repo_key,pipeline,intake_mode,cancel_requested_at,finished_at FROM runs WHERE team=? AND id=?", team, c.Binding.RunID).Scan(&request, &repo, &a.pipeline, &a.mode, &cancelled, &finished); err != nil {
 		return a, err
+	}
+	if c.Data.Use != capability.DataPublish && (cancelled.Valid || finished.Valid) {
+		return a, holderRefusal()
 	}
 	if repo != string(a.authority.Repo) {
 		return a, authorityError(apierr.Forbidden, "data scope differs from sealed repository")
@@ -161,6 +165,9 @@ func resolveBlobAuthorityTx(ctx context.Context, tx *storeTx, team Team, input b
 		row, err := readNodeTx(ctx, tx, team, NodeRef{c.Binding.RunID, c.Binding.NodeID})
 		if err != nil {
 			return a, err
+		}
+		if row.CancelRequestedAt != nil {
+			return a, holderRefusal()
 		}
 		if err := checkHolderTx(ctx, tx, team, row, actor, tx.now()); err != nil {
 			return a, err

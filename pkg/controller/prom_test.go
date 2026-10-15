@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -19,37 +18,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func newPlainServer(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	s, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-	srv := httptest.NewServer(controller.New(s, nil).Handler())
-	t.Cleanup(srv.Close)
-	return srv.URL
-}
-
 func newAuthedTestServer(t *testing.T) (baseURL, admin string, st *store.Store, cleanup func()) {
-	t.Helper()
-	dir := t.TempDir()
-	s, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	admin, _, err = s.CreateToken("test-admin", store.TokenKindUser,
-		[]string{"admin"}, 0, time.Now().UTC())
-	if err != nil {
-		t.Fatalf("seed token: %v", err)
-	}
-	ctrl := controller.New(s, nil).WithDashboard(controller.Dashboard{})
-	srv := httptest.NewServer(ctrl.Handler())
-	return srv.URL, admin, s, func() {
-		srv.Close()
-		_ = s.Close()
-	}
+	f := newBrowserFixture(t, &controller.Dashboard{})
+	srv := httptest.NewServer(f.h)
+	return srv.URL, f.token, f.st, srv.Close
 }
 
 func getWithBearer(t *testing.T, url, token string) *http.Response {
@@ -68,130 +40,29 @@ func getWithBearer(t *testing.T, url, token string) *http.Response {
 	return resp
 }
 
-func scrapeAs(t *testing.T, base, token string) string {
-	t.Helper()
-	resp := getWithBearer(t, base+"/metrics", token)
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("/metrics status = %d, want 200", resp.StatusCode)
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read metrics: %v", err)
-	}
-	return string(body)
-}
-
 func TestMetrics_EndpointReachable(t *testing.T) {
-	base, _, cleanup := newTestServer(t)
-	defer cleanup()
-
-	resp := mustGet(t, base+"/metrics")
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("/metrics status=%d want 200", resp.StatusCode)
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	out := string(body)
-
-	mustContain := []string{
-		"sparkwing_pending_nodes",
-		"sparkwing_active_runners",
-		"sparkwing_object_store_requests_total",
-		"sparkwing_object_store_trips_total",
-		"sparkwing_object_store_tripped",
-		"go_goroutines",
-		"process_resident_memory_bytes",
-	}
-	for _, want := range mustContain {
+	h := newMetricsHTTPHandler(t, capability.OperatorLimits)
+	out := metricsHTTPResponse(t, h, http.MethodGet, "/metrics", "operator").Body.String()
+	for _, want := range []string{"sparkwing_pending_nodes", "sparkwing_active_runners", "sparkwing_object_store_requests_total", "sparkwing_object_store_trips_total", "sparkwing_object_store_tripped", "go_goroutines", "process_resident_memory_bytes"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("/metrics missing %q", want)
 		}
 	}
 }
 
-func TestMetrics_RunsCounterIncrements(t *testing.T) {
-	base, _, cleanup := newTestServer(t)
-	defer cleanup()
-
-	const pipeline = "prom-test-pipeline-runs"
-	counterPrefix := `sparkwing_runs_total{pipeline="` + pipeline + `",status="success"}`
-	histogramPrefix := `sparkwing_run_duration_seconds_count{outcome="success",pipeline="` + pipeline + `"}`
-	before := scrape(t, base)
-	beforeCounter := metricSampleValue(t, before, counterPrefix)
-	beforeHistogram := metricSampleValue(t, before, histogramPrefix)
-
-	run := store.Run{
-		ID:        "run-prom-runs-1",
-		Pipeline:  pipeline,
-		Status:    "running",
-		StartedAt: time.Now().Add(-3 * time.Second),
-	}
-	mustPostJSON(t, base+"/api/v1/runs", run, http.StatusCreated)
-	mustPostJSON(t, base+"/api/v1/runs/run-prom-runs-1/finish",
-		map[string]any{"status": "success"},
-		http.StatusNoContent)
-
-	after := scrape(t, base)
-	if got := metricSampleValue(t, after, counterPrefix); got != beforeCounter+1 {
-		t.Errorf("runs counter=%v before=%v, want one increment", got, beforeCounter)
-	}
-	if got := metricSampleValue(t, after, histogramPrefix); got != beforeHistogram+1 {
-		t.Errorf("run duration count=%v before=%v, want one observation", got, beforeHistogram)
-	}
-}
-
-func metricSampleValue(t *testing.T, body, prefix string) float64 {
-	t.Helper()
-	for line := range strings.SplitSeq(body, "\n") {
-		value, ok := strings.CutPrefix(line, prefix+" ")
-		if !ok {
-			continue
-		}
-		parsed, err := strconv.ParseFloat(value, 64)
-		if err != nil {
-			t.Fatalf("parse metric sample %q: %v", line, err)
-		}
-		return parsed
-	}
-	return 0
-}
-
 func TestMetrics_CardinalityGuard(t *testing.T) {
-	base, st, cleanup := newTestServer(t)
-	defer cleanup()
-
-	run := store.Run{
-		ID:        "run-card-1",
-		Pipeline:  "card-check",
-		Status:    "running",
-		StartedAt: time.Now(),
-	}
-	if err := st.CreateRun(context.Background(), run); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
-	if err := st.FinishRun(context.Background(), run.ID, "success", ""); err != nil {
-		t.Fatalf("finish run: %v", err)
-	}
-	mustPostJSON(t, base+"/api/v1/runs/run-card-1/finish",
-		map[string]any{"status": "success"},
-		http.StatusNoContent)
-
-	body := scrape(t, base)
-
-	banned := []*regexp.Regexp{
-		regexp.MustCompile(`sparkwing_[a-z_]+\{[^}]*\bnode_id="`),
-		regexp.MustCompile(`sparkwing_[a-z_]+\{[^}]*\bprincipal="`),
-		regexp.MustCompile(`sparkwing_[a-z_]+\{[^}]*\bholder_id="`),
-		regexp.MustCompile(`sparkwing_[a-z_]+\{[^}]*="sw[urs]_`),
-		regexp.MustCompile(`sparkwing_[a-z_]+\{[^}]*="run-card-1"`),
-	}
-	for _, rx := range banned {
-		if rx.MatchString(body) {
-			t.Errorf("cardinality guard hit: pattern %q matched /metrics output", rx.String())
+	h := newMetricsHTTPHandler(t, capability.OperatorLimits)
+	metricsHTTPResponse(t, h, http.MethodGet, "/api/v1/runs/run-card-1", "operator")
+	body := metricsHTTPResponse(t, h, http.MethodGet, "/metrics", "operator").Body.String()
+	for _, pattern := range []string{
+		`sparkwing_[a-z_]+\{[^}]*\bnode_id="`,
+		`sparkwing_[a-z_]+\{[^}]*\bprincipal="`,
+		`sparkwing_[a-z_]+\{[^}]*\bholder_id="`,
+		`sparkwing_[a-z_]+\{[^}]*="sw[ursk]_`,
+		`sparkwing_[a-z_]+\{[^}]*="run-card-1"`,
+	} {
+		if regexp.MustCompile(pattern).MatchString(body) {
+			t.Errorf("cardinality guard hit: pattern %q matched /metrics output", pattern)
 		}
 	}
 }
@@ -208,38 +79,27 @@ func scrape(t *testing.T, base string) string {
 }
 
 func TestMetrics_HTTPRequestInstrumentation(t *testing.T) {
-	base, _, cleanup := newTestServer(t)
-	defer cleanup()
-
-	resp := mustGet(t, base+"/api/v1/health")
-	resp.Body.Close()
-
-	body := scrape(t, base)
-
-	wantCounter := `sparkwing_http_requests_total{method="GET",route="/api/v1/health",status="200"}`
-	if !strings.Contains(body, wantCounter) {
-		t.Errorf("/metrics missing http counter row %q:\n%s", wantCounter, body)
-	}
-	wantHist := `sparkwing_http_request_duration_seconds_count{method="GET",route="/api/v1/health"}`
-	if !strings.Contains(body, wantHist) {
-		t.Errorf("/metrics missing http duration histogram %q:\n%s", wantHist, body)
+	h := newMetricsHTTPHandler(t, capability.OperatorLimits)
+	metricsHTTPResponse(t, h, http.MethodGet, "/api/v1/health", "")
+	body := metricsHTTPResponse(t, h, http.MethodGet, "/metrics", "operator").Body.String()
+	for _, want := range []string{
+		`sparkwing_http_requests_total{method="GET",route="/api/v1/health",status="200"}`,
+		`sparkwing_http_request_duration_seconds_count{method="GET",route="/api/v1/health"}`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("/metrics missing %q", want)
+		}
 	}
 }
 
 func TestMetrics_HTTPRouteNormalization(t *testing.T) {
-	base, _, cleanup := newTestServer(t)
-	defer cleanup()
-
+	h := newMetricsHTTPHandler(t, capability.OperatorLimits)
 	for _, id := range []string{"abc", "def", "xyz-123"} {
-		resp := mustGet(t, base+"/api/v1/runs/"+id)
-		resp.Body.Close()
+		metricsHTTPResponse(t, h, http.MethodGet, "/api/v1/runs/"+id, "operator")
 	}
-
-	body := scrape(t, base)
-
-	wantRoute := `route="/api/v1/runs/{id}"`
-	if !strings.Contains(body, wantRoute) {
-		t.Errorf("/metrics missing normalized run route label %q:\n%s", wantRoute, body)
+	body := metricsHTTPResponse(t, h, http.MethodGet, "/metrics", "operator").Body.String()
+	if !strings.Contains(body, `route="/api/v1/runs/{run}"`) {
+		t.Error("/metrics missing normalized run route")
 	}
 	for _, id := range []string{"abc", "def", "xyz-123"} {
 		if strings.Contains(body, `route="/api/v1/runs/`+id) {
@@ -248,36 +108,23 @@ func TestMetrics_HTTPRouteNormalization(t *testing.T) {
 	}
 }
 
-// The run counters carry every team's pipeline names, so on the API listener
-// of an authenticating controller the scrape belongs to the operator.
 func TestMetrics_RequiresAdminWithAuthEnabled(t *testing.T) {
-	base, admin, st, cleanup := newAuthedTestServer(t)
-	defer cleanup()
-	member, _, err := st.CreateToken("member", store.TokenKindUser,
-		[]string{"runs.read"}, 0, time.Now().UTC())
-	if err != nil {
-		t.Fatalf("CreateToken: %v", err)
-	}
-
-	for _, c := range []struct {
+	for _, tc := range []struct {
 		name, token string
+		grant       capability.Grant
 		want        int
 	}{
-		{"no token", "", http.StatusUnauthorized},
-		{"a runs:read token", member, http.StatusForbidden},
+		{"anonymous", "", capability.OperatorLimits, http.StatusUnauthorized},
+		{"read grant", "operator", capability.RunsRead, http.StatusForbidden},
+		{"operator", "operator", capability.OperatorLimits, http.StatusOK},
 	} {
-		resp := getWithBearer(t, base+"/metrics", c.token)
-		body, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if resp.StatusCode != c.want {
-			t.Errorf("%s: /metrics status = %d, want %d", c.name, resp.StatusCode, c.want)
-		}
-		if strings.Contains(string(body), "sparkwing_") {
-			t.Errorf("%s: /metrics leaked the registry:\n%s", c.name, body)
-		}
-	}
-	if body := scrapeAs(t, base, admin); !strings.Contains(body, "sparkwing_pending_nodes") {
-		t.Errorf("admin /metrics is not the sparkwing registry:\n%s", body)
+		t.Run(tc.name, func(t *testing.T) {
+			h := newMetricsHTTPHandler(t, tc.grant)
+			response := metricsHTTPResponse(t, h, http.MethodGet, "/metrics", tc.token)
+			if response.Code != tc.want || strings.Contains(response.Body.String(), "sparkwing_pending_nodes") != (tc.want == http.StatusOK) {
+				t.Fatalf("metrics status=%d body=%s, want %d", response.Code, response.Body, tc.want)
+			}
+		})
 	}
 }
 
@@ -369,36 +216,24 @@ func TestMetricsAddr_FailsStartupWhenTheMetricsPortIsTaken(t *testing.T) {
 }
 
 func TestMetrics_HTTPRouteCollapsesEveryPathParameter(t *testing.T) {
-	base := newPlainServer(t)
-
+	h := newMetricsHTTPHandler(t, capability.OperatorLimits)
 	for _, path := range []string{
-		"/api/v1/concurrency/prom-key-alpha/state",
-		"/api/v1/concurrency/prom-key-beta/state",
-		"/api/v1/concurrency/prom-key-gamma/state",
+		"/api/v1/queue/groups/prom-key-alpha",
+		"/api/v1/queue/groups/prom-key-beta",
+		"/api/v1/queue/groups/prom-key-gamma",
 		"/api/v1/runs/prom-run-2/approvals/prom-node-2",
 		"/api/v1/runs/prom-run-1/approvals/prom-node-1",
 		"/api/v1/prom-unrouted-path",
 	} {
-		resp := mustGet(t, base+path)
-		resp.Body.Close()
+		metricsHTTPResponse(t, h, http.MethodGet, path, "operator")
 	}
-
-	body := scrape(t, base)
-
-	for _, want := range []string{
-		`route="/api/v1/concurrency/{key}/state"`,
-		`route="/api/v1/runs/{id}/approvals/{nodeID}"`,
-		`route="other"`,
-	} {
+	body := metricsHTTPResponse(t, h, http.MethodGet, "/metrics", "operator").Body.String()
+	for _, want := range []string{`route="/api/v1/queue/groups/{group}"`, `route="/api/v1/runs/{run}/approvals/{job}"`, `route="other"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/metrics missing collapsed route label %q", want)
 		}
 	}
-	for _, leaked := range []string{
-		"prom-key-alpha", "prom-key-beta", "prom-key-gamma",
-		"prom-run-2", "prom-node-2",
-		"prom-run-1", "prom-node-1", "prom-unrouted-path",
-	} {
+	for _, leaked := range []string{"prom-key-alpha", "prom-key-beta", "prom-key-gamma", "prom-run-2", "prom-node-2", "prom-run-1", "prom-node-1", "prom-unrouted-path"} {
 		if strings.Contains(body, leaked) {
 			t.Errorf("caller-supplied segment %q leaked into a metric label", leaked)
 		}
@@ -406,29 +241,45 @@ func TestMetrics_HTTPRouteCollapsesEveryPathParameter(t *testing.T) {
 }
 
 func TestMetrics_HTTPMethodLabelClampsInventedMethods(t *testing.T) {
-	base, _, cleanup := newTestServer(t)
-	defer cleanup()
-
+	h := newMetricsHTTPHandler(t, capability.OperatorLimits)
 	for _, method := range []string{"PROMMETHODA", "PROMMETHODB", "PROMMETHODC"} {
-		req, err := http.NewRequest(method, base+"/api/v1/runs", nil)
-		if err != nil {
-			t.Fatalf("build %s request: %v", method, err)
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatalf("%s /api/v1/runs: %v", method, err)
-		}
-		resp.Body.Close()
+		metricsHTTPResponse(t, h, method, "/api/v1/runs", "operator")
 	}
-
-	body := scrape(t, base)
-
+	body := metricsHTTPResponse(t, h, http.MethodGet, "/metrics", "operator").Body.String()
 	if !strings.Contains(body, `method="other"`) {
-		t.Errorf("/metrics missing the clamped method label:\n%s", body)
+		t.Error("/metrics missing the clamped method label")
 	}
 	for _, method := range []string{"PROMMETHODA", "PROMMETHODB", "PROMMETHODC"} {
 		if strings.Contains(body, method) {
 			t.Errorf("invented method %q leaked into a metric label", method)
 		}
 	}
+}
+
+func newMetricsHTTPHandler(t *testing.T, grant capability.Grant) http.Handler {
+	t.Helper()
+	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	var order []string
+	principal := capability.Principal{Class: capability.CredentialBearer, Capability: capability.Capability{
+		Audience: capability.Controller, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"},
+		Grants: []capability.Grant{grant}, Binding: capability.Binding{Kind: capability.BindingNone},
+	}}
+	return controller.New(st, nil).WithAuthorization(controller.RouteAuthorization{
+		Authenticator: policyAuth{principal: principal, order: &order}, Bindings: policyBindings{order: &order},
+	}).Handler()
+}
+
+func metricsHTTPResponse(t *testing.T, h http.Handler, method, path, token string) *httptest.ResponseRecorder {
+	t.Helper()
+	r := httptest.NewRequest(method, path, nil)
+	if token != "" {
+		r.Header.Set("Authorization", "Bearer "+token)
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	return w
 }

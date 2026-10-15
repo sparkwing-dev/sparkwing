@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -27,9 +28,18 @@ func (t *Tenant) CheckDataAccess(ctx context.Context, authorized capability.Auth
 
 func (tx *storeTx) CheckDataAccess(ctx context.Context, authorized capability.Authorized, target capability.DataTarget) error {
 	c := authorized.Principal.Capability
-	if c.Prefix == "" || c.Team == "" {
+	ref := authorized.Principal.Authority
+	if ref.Kind != capability.AuthorityCapability || ref.ID == "" || c.Prefix != ref.ID || c.Team == "" {
 		return authorityError(apierr.Forbidden, "data route requires tenant capability authority")
 	}
+	p, err := tx.ResolveAuthority(ctx, ref)
+	if err != nil {
+		return err
+	}
+	if p.Capability.Team != c.Team {
+		return bindingRefusal()
+	}
+	c = p.Capability
 	team := Team(c.Team)
 	input := blob.Authority{CapabilityRef: c.Prefix}
 	if target.RunID != "" && target.NodeID != "" && target.Attempt > 0 && target.Generation > 0 {
@@ -39,6 +49,19 @@ func (tx *storeTx) CheckDataAccess(ctx context.Context, authorized capability.Au
 	case capability.DataUpload, capability.DataCommit, capability.DataRecord:
 		return checkBlobDataWriteTx(ctx, tx, team, input, target)
 	case capability.DataDownload, capability.DataHasMany, capability.DataLookup:
+		if target.Operation == capability.DataLookup && target.Digest == "" && target.RecordName != "" && slices.Contains(blob.Kinds, blob.Kind(target.RecordKind)) {
+			resolved, err := resolveBlobAuthorityTx(ctx, tx, team, input, capability.DataRead)
+			if err != nil {
+				return err
+			}
+			if resolved.capability.Data.Use == capability.DataRemoteCache && (target.RecordKind == string(blob.KindBinary) || target.RecordKind == string(blob.KindSourceBundle)) {
+				return blob.ErrDigestNotReadable
+			}
+			if target.RecordScope != "" && resolved.capability.Data.Use != capability.DataRemoteCache && !slices.Contains(resolved.capability.Data.ReadRefs, target.RecordScope) {
+				return blob.ErrDigestNotReadable
+			}
+			return nil
+		}
 		presence, err := readableBlobsTx(ctx, tx, team, blob.HasManyRequest{Authority: input, Digests: []blob.Digest{blob.Digest(target.Digest)}})
 		if err != nil {
 			return err
@@ -63,6 +86,9 @@ func checkBlobDataWriteTx(ctx context.Context, tx *storeTx, team Team, input blo
 	}
 	if target.RecordKind != "" && !blobKindAllowed(source, blob.Kind(target.RecordKind)) {
 		return blob.ErrDigestNotReadable
+	}
+	if target.Operation == capability.DataRecord && target.Digest == "" && target.RecordKind == string(blob.KindMemo) && target.RecordName != "" {
+		return requireBlobMemoTx(ctx, tx, resolved)
 	}
 	if !validBlobDigest(blob.Digest(target.Digest)) {
 		return authorityError(apierr.BadRequest, "invalid blob digest")

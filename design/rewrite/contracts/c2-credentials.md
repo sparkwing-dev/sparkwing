@@ -66,20 +66,19 @@ operator.tokens, operator.limits and operator.object_store. It forwards no
 caller clock and never calls the legacy token table. Empty input is a no-op.
 Missing BootstrapAdminIssuer returns policy_missing before any issuance.
 
-W1 must implement that interface as one gated Store.Issue transaction. Lock
-the deployment bootstrap gate, refuse a second admin credential, and store
-only the seeded presentation's digest under its indexed prefix. An existing
-seed is a no-op while live and must never be revived after revocation.
-Race and restart checks belong to that transaction. A configured seed refuses
-startup until this adapter exists. W2's tests use a fake transaction and do
-not claim durable once-only bootstrap evidence.
+Store implements the interface as one gated Store.Issue transaction. It locks
+the deployment bootstrap gate and commits the settings marker with the seeded
+root. Only the presentation digest and indexed prefix persist. Reusing a seed
+is a no-op, including after revocation. Native SQLite issuance, readiness and
+revocation properties exercise this adapter. Restart and concurrent native
+topology evidence remain with the acceptance driver.
 
 EnableAuthFromStore always installs credential verification. It no longer
 consults ListTokens or opens legacy private routes when that read is empty or
 fails. The remaining legacy credential verifier still needs its final route
 cut. The controller's --require-auth readiness check consumes
 HasDeploymentAdministrator(ctx) (bool, error), refusing a missing reader.
-W1 must implement that read under its store clock with complete live ancestry.
+Store implements that read under its store clock with complete live ancestry.
 A deployment administrator is an unbound controller operator/service capability
 in the deployment scope with operator.tokens. The public health handler pings the opened
 database rather than calling the legacy run-list query. License-before,
@@ -90,8 +89,9 @@ Server.HTTP and EngineController.SyncLauncher were already implemented before
 this continuation. Their in-process tests pass. Local HTTP supplies shared
 API/dashboard handlers and consumes Wingd's verified peer context. Sync passes
 the authenticated authority and cloned observations to LauncherSyncReader,
-then strips bearer material from a copied response. W1 still must supply
-ReadLauncherSync and the local authority snapshot and mutation transactions.
+then strips bearer material from a copied response. Operator.ReadLauncherSync now supplies the native snapshot. Verified peer reads
+use the default-tenant local snapshot. Authority-bearing local mutations remain
+C1 integration work.
 No native launcher or peer matrix cell is inferred from those component tests.
 
 ### Legacy execution credential cut
@@ -195,9 +195,10 @@ or a credential class. Explicit headers and session cookies take precedence
 and never fall back to the peer. The shared AuthenticationReader receives the
 verified subject through CredentialLookup.Peer. Its snapshot and relational
 checker derive authority. The api.sock caller now supplies its kernel-verified
-uid through this interface. C1 does not yet implement that peer snapshot or
-transactional local authority. Component tests use the existing interfaces and
-fakes. Native Windows still refuses api.sock without SID verification.
+uid through this interface. Store now returns its default-tenant peer snapshot
+and checks native BindNone relations. Transactional local mutation authority
+remains separate. The shared local HTTP test covers the default store adapter
+and injected component adapter. Native Windows still refuses api.sock without SID verification.
 
 Real SQLite login and console HTTP tests cover successful sessions, narrowed
 grants, revocation, failed browser proofs, private errors, safe redirects,
@@ -2254,10 +2255,9 @@ renewing and removes a session that has exceeded it or has a future creation
 time. Default console-session proof and the verified peer transport adapter are implemented above.
 Roleless OAuth, C1 peer authority and remaining legacy session consumers stay open.
 
-`BindingState.CancelReason` is a local C2 snapshot addition. W1 must populate
-it from the committed cancellation intent, with an existing job-specific
-request taking precedence over its run's request. W2 does not query SQL to
-fill it. Job cancellation now passes Outcome=cancelled and the requested
+`BindingState.CancelReason` reads committed cancellation intent in the native
+store snapshot, with an existing job-specific request taking precedence over
+its run's request. The controller consumes that snapshot without a SQL query. Job cancellation now passes Outcome=cancelled and the requested
 reason in the existing TransitionExtra.Result. C1's request-only edge copies
 only the first cancellation intent and leaves the held row and attempt result
 intact. That contract is exercised against real SQLite and generated reasons.
@@ -2889,7 +2889,84 @@ tagged authority. `ValidateAuthority` returns the shortest expiry, revocation
 grace deadline or binding deadline in the complete live ancestry as the leaf's
 effective expiry. Omitted delegation expiry inherits that ceiling.
 
-W1 must use the same origin predicate in `checkMemberProvision` and
-`SetSourceMachineConsent` after resolving authority inside the committing
-transaction. The controller checks do not replace those store gates. The
-native bypass reproduction is preserved in `W2-review-reproductions.patch`.
+The store uses the same origin predicate in `checkMemberProvision` and
+`SetSourceMachineConsent` after resolving authority inside each committing
+transaction. The native committing-origin property covers detached-root
+issuance and both consent directions for generated capability-derived sessions.
+
+
+## Canonical dashboard source and pause resume
+
+Dashboard triggers send `source.location.remote_url`, the `.sparkwing` pipeline
+directory and the selected source ref. The controller derives repository identity
+from that acquisition location before invoking `AdmitRun`. GitHub identity comes
+from the selected team's live App installation and its current repository API
+response. A display name or persisted runner-enrollment slug cannot supply a
+numeric identity because repositories can move or names can be reused. Missing
+GitHub resolution returns `unavailable`. A supplied key that differs from the
+resolved identity returns `forbidden`. Other providers use C4's canonical remote
+identity. Credential-bearing remotes are refused. This lookup attaches no App
+provenance and grants no pool or source authority.
+
+The first-seal policy remains `IntakePolicy.ResolveIntake`. Its C1/C4 composition
+must supply resolved options, operator ceilings, verified source location,
+repository authority and checkout SHA. The controller source test uses a fake C1
+transaction behind that existing interface. GitHub metadata transport is also
+fake, while installation ownership is stored in SQLite.
+
+`POST /api/v1/runs/{run}/jobs/{job}/resume` requires one JSON object with no actor
+fields. `DebugPauseResumer` declares `Team()` and
+`ResumeAuthorizedDebugPause(context.Context, capability.Authorized) error`.
+`Tenant` implements it. The committing transaction reloads current ancestry and
+membership, repeats native route authorization, locks the run and verifies the
+job. It closes open pauses with the current subject and store clock, clears only
+`status_detail=paused` and appends one `debug.resumed` event. It preserves job
+status, attempt, generation and claim authority. A repeated resume writes no
+second event. Missing jobs return `not_found`. Foreign or changed authority
+cannot close a pause. The legacy release HTTP route and its anonymous fallback
+have no handler.
+
+`TestResumeDebugPauseCurrentAuthorityProperty` generates changed membership and
+foreign selectors against the concrete transaction. The HTTP port verifies
+principal attribution, repeat delivery, missing jobs, strict body decoding and
+revoked credentials. `TestIntakeSourceNumericIdentityProperty` varies display
+text and a forged numeric key through the real router and source resolver.
+Existing `CreateAuthorizedDebugPause` and `ResolveAuthorizedApproval` contracts
+still need their C1 committing adapters and public diagnostic masking.
+
+
+## Native bootstrap, data and controller attempt snapshots
+
+Store.EnsureBootstrapCapability sends the configured bootstrap seed through
+Store.Issue in a locked transaction. The settings marker commits with the root
+and survives revocation. Only the fixed bootstrap subject and administration
+grants accept a seed. Store.HasDeploymentAdministrator resolves complete live
+ancestry. A future rotation deadline stays live until that deadline in both
+authentication and native reads.
+
+WithDataObjects supplies concrete store authority, access, metadata and download
+charging adapters. Tenant.ResolveDataAuthority derives sealed repository and
+exact uploader identity. ChargeDataDownload rechecks the read edge and object
+size in the charging transaction. Cancellation closes sensitive blob access
+without ending holder result rights. Logical-record selection checks live scope
+before selecting a digest. Its record transaction checks the selected record
+and every reference edge. Caller presentation fields do not select another
+persisted authority.
+
+A controller work capability with attempt zero covers its holder generation.
+Authentication projects its current attempt and claim data scope from the same
+committed BindingState.Current after checking run, job, generation and holder.
+Node-host credentials and controller delegates with a nonzero attempt retain
+exact attempt fencing. The projection copies the scope and never changes the
+persisted capability. Native HTTP claim, start and incremental log commits
+exercise this boundary.
+
+ReadAuthentication projects separate cancellation intent from the committed run
+and job rows. Job intent takes precedence, including an empty job reason. It
+does not substitute terminal result reasons.
+
+The native launcher snapshot checks the exact observed award against current
+unit ownership and launcher ancestry. It returns immutable execution inputs
+without bearers, or the exact supplied Kubernetes instance for cleanup. Sync
+preserves holder result rights. The legacy SyncLaunchJobs implementation is
+deleted. W8 owns real Kubernetes correlation and teardown evidence.

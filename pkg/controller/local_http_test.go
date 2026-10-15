@@ -42,17 +42,24 @@ func (l *localControllerListener) Close() error { l.once.Do(func() { close(l.don
 func (*localControllerListener) Addr() net.Addr { return &net.UnixAddr{Name: "api.sock", Net: "unix"} }
 
 func TestLocalControllerHTTPUsesSharedPolicy(t *testing.T) {
+	t.Run("injected", func(t *testing.T) { testLocalControllerHTTP(t, false) })
+	t.Run("native", func(t *testing.T) { testLocalControllerHTTP(t, true) })
+}
+
+func testLocalControllerHTTP(t *testing.T, native bool) {
 	s := New(newStoreForAuth(t), nil)
 	b := &peerBoundary{}
-	s.WithAuthorization(RouteAuthorization{
-		Authenticator: capability.NewAuthenticator(b), Bindings: b,
-		Identify: func(r *http.Request) (capability.Presentation, error) {
-			if len(r.CookiesNamed("__Host-sw_session")) > 0 {
-				return capability.Presentation{}, sessionUnavailable()
-			}
-			return s.identifyPeer(r)
-		},
-	})
+	if !native {
+		s.WithAuthorization(RouteAuthorization{
+			Authenticator: capability.NewAuthenticator(b), Bindings: b,
+			Identify: func(r *http.Request) (capability.Presentation, error) {
+				if len(r.CookiesNamed("__Host-sw_session")) > 0 {
+					return capability.Presentation{}, sessionUnavailable()
+				}
+				return s.identifyPeer(r)
+			},
+		})
+	}
 	services := s.HTTP()
 	s.HTTP()
 	uid := uint32(1234)

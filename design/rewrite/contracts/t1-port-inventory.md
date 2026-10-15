@@ -1561,3 +1561,33 @@ pkg/controller/credential_route_expectations_test.go. The internal/acceptance
 copy remains absent. The catalog, port destinations and route declaration,
 ordering and drift checks pass. No scenario catalog, Harness or boundary registry
 entry is added.
+
+
+## Debug-pause resume port
+
+| Legacy test | Final coverage |
+|---|---|
+| `TestReleaseDebugPause_RecordsAuthPrincipal` | `TestResumeDebugPauseCommitsPrincipalAndReplays` exercises the final route through the concrete tenant transaction. It checks subject attribution, store time, unchanged job lifecycle and one event across repeat delivery. |
+| `TestReleaseDebugPause_AuthOverridesBody` | `TestResumeDebugPauseRejectsForgedActorsAndDeadCredentials` refuses body actor fields because only current credential authority may select the releasing subject. |
+| `TestReleaseDebugPause_Unauthenticated` | The same HTTP port verifies revoked credentials. `TestResumeDebugPauseCurrentAuthorityProperty` generates membership loss, role changes and foreign selectors before commit. |
+| `TestReleaseDebugPause_AuthDisabledFallback` | Deleted because the final credential policy has no anonymous release fallback. The retired release path returns 404. |
+
+
+### W2 native origin and launcher continuation
+
+The legacy TestLaunchBilling_ReleaseRefundsAndTheFirstBeatBills and
+SyncLaunchJobs are deleted. Native release coverage remains in
+TestMeteredUnitUnstartedCloudReleaseRefundsReservation,
+TestReleaseUnitReturnsUnstartedWorkWithoutAttempt and
+TestReleaseUnitRefusesForgedStartedAndCancelledClaims. Launcher sync now has
+TestEngineLauncherSyncNativeFenceProperty for live, replacement and exchanged
+awards without bearer delivery.
+
+TestCommittingAccountOriginProperty covers both store entrypoints formerly
+reachable by capability-derived sessions. TestBootstrapSeedStoreOnceProperty
+uses the real seeded issuing transaction. Native peer transport runs through
+the default SQLite authentication snapshot in TestLocalControllerHTTPUsesSharedPolicy.
+TestAuthenticationCancellationIntentPrecedenceProperty covers separate job/run
+intent. TestControllerClaimProjectsOnlyItsCurrentAttemptProperty keeps controller
+holder generations and process attempt fences distinct. No native topology
+matrix cell is inferred from these component and in-process HTTP checks.

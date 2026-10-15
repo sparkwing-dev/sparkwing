@@ -41,6 +41,7 @@ func (a *authenticator) Authenticate(ctx context.Context, presentation Presentat
 	if !matchesLookup(principal, lookup) {
 		return Authenticated{}, unauthenticated()
 	}
+	principal = currentControllerAttempt(principal, snapshot.Binding)
 	auth := Authenticated{Principal: principal, Method: route.Method, Pattern: route.Path}
 	for i, access := range route.Access {
 		if live, ok := liveAccess(principal, snapshot.Binding, evidence, access.Liveness, snapshot.Now); ok {
@@ -52,6 +53,22 @@ func (a *authenticator) Authenticate(ctx context.Context, presentation Presentat
 		return Authenticated{}, unauthenticated()
 	}
 	return auth, nil
+}
+
+func currentControllerAttempt(p Principal, state BindingState) Principal {
+	c, b := p.Capability, p.Capability.Binding
+	current := state.Current
+	if c.Audience != Controller || c.Unit != UnitNode || b.Kind != BindingNode || b.Expansion != nil || b.Attempt != 0 || current.Attempt <= 0 ||
+		b.RunID != current.RunID || b.NodeID != current.NodeID || b.Generation != current.Generation || b.Holder != current.Holder {
+		return p
+	}
+	p.Capability.Binding.Attempt = current.Attempt
+	if c.Data != nil && c.Data.Use == DataClaim && c.Data.Attempt == 0 {
+		scope := *c.Data
+		scope.Attempt = current.Attempt
+		p.Capability.Data = &scope
+	}
+	return p
 }
 
 // ValidateAuthority checks complete ancestry and current membership. The store's

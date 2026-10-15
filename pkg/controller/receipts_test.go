@@ -2,63 +2,62 @@ package controller_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestReceiptEndpoint_RoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
+	f := newBrowserFixture(t, nil)
+	st := f.st
+	st.SetIntakePolicy(receiptPolicy{})
+	tenant, err := st.ForTeam(t.Context(), store.DefaultTeam)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = st.Close() }()
-	ctx := context.Background()
-
+	digest := sha256.Sum256([]byte(f.sessID))
+	admitted, err := tenant.AdmitRun(t.Context(), store.IntakeRequest{
+		Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])},
+		Request: runspec.Request{
+			Version: 1, Team: string(store.DefaultTeam), Pipeline: "deploy", Mode: runspec.IntakeExecute,
+			Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, SHA: strings.Repeat("a", 40)},
+			RequestedArgs: map[string]string{"env": "prod"}, SecretArgs: runspec.Optional[[]string]{Set: true, Value: []string{}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	start := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Hour)
-	if err := st.CreateRun(ctx, store.Run{
-		ID: "run-recpt-1", Pipeline: "deploy", Status: "running",
-		StartedAt:    start,
-		Args:         map[string]string{"env": "prod"},
-		PlanSnapshot: []byte(`{"nodes":["build","deploy"]}`),
-		GitSHA:       "abc1234",
-	}); err != nil {
-		t.Fatal(err)
+	mustExec(t, st, `UPDATE runs SET status='success', started_at=?, finished_at=? WHERE id=?`, start.UnixNano(), end.UnixNano(), admitted.RunID)
+	for _, job := range []struct {
+		id         string
+		start, end time.Time
+		spec       string
+	}{
+		{"build", start, start.Add(time.Hour), `{"id":"build"}`},
+		{"deploy", start.Add(time.Hour), end, `{"id":"deploy","deps":["build"]}`},
+	} {
+		mustExec(t, st, `INSERT INTO nodes(team,run_id,node_id,status,outcome,started_at,finished_at,spec_json,execution_json) VALUES ('default',?,?,'done','success',?,?,?,?)`,
+			admitted.RunID, job.id, job.start.UnixNano(), job.end.UnixNano(), []byte(job.spec), []byte(`{}`))
 	}
-	_, _ = st.DB().ExecContext(ctx,
-		`UPDATE runs SET status = 'success', finished_at = ? WHERE id = ?`,
-		end.UnixNano(), "run-recpt-1")
 
-	if err := st.CreateNode(ctx, store.Node{
-		RunID: "run-recpt-1", NodeID: "build", Status: "pending",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreateNode(ctx, store.Node{
-		RunID: "run-recpt-1", NodeID: "deploy", Status: "pending", Deps: []string{"build"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	mustExec(t, st, "UPDATE nodes SET status='done', outcome='success', started_at=?, finished_at=?, output_json=? WHERE node_id=?",
-		start.UnixNano(), start.Add(1*time.Hour).UnixNano(), []byte(`{"img":"x"}`), "build")
-	mustExec(t, st, "UPDATE nodes SET status='done', outcome='success', started_at=?, finished_at=?, output_json=? WHERE node_id=?",
-		start.Add(1*time.Hour).UnixNano(), end.UnixNano(), []byte(`{"ok":true}`), "deploy")
-
-	handler := controller.New(st, nil).
+	handler := f.srv.
 		WithCostRate(0.05, "controller config (cost_per_runner_hour=$0.05)").
 		Handler()
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/runs/run-recpt-1/receipt", nil))
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/runs/"+admitted.RunID+"/receipt", nil)
+	request.Header.Set("Authorization", "Bearer "+f.token)
+	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("receipt: %d %s", response.Code, response.Body)
 	}
@@ -98,14 +97,10 @@ func TestReceiptEndpoint_RoundTrip(t *testing.T) {
 }
 
 func TestReceiptEndpoint_NotFound(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-	response := httptest.NewRecorder()
-	controller.New(st, nil).Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/runs/missing/receipt", nil))
+	f := newBrowserFixture(t, nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/runs/missing/receipt", nil)
+	request.Header.Set("Authorization", "Bearer "+f.token)
+	response := f.serve(request)
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("want 404, got %d: %s", response.Code, response.Body)
 	}
@@ -116,4 +111,10 @@ func mustExec(t *testing.T, st *store.Store, q string, args ...any) {
 	if _, err := st.DB().ExecContext(context.Background(), q, args...); err != nil {
 		t.Fatalf("exec %q: %v", q, err)
 	}
+}
+
+type receiptPolicy struct{}
+
+func (receiptPolicy) ResolveIntake(_ context.Context, _ capability.AuthorityResolver, request store.IntakeRequest) (store.IntakePolicyFacts, error) {
+	return store.IntakePolicyFacts{Options: &request.Request.Options, LogRetentionClass: "r30", LogRetentionDays: 30}, nil
 }

@@ -181,7 +181,7 @@ func TestBlobRecordsReadSetEnforcesCacheFallbackProvenance(t *testing.T) {
 				if err != nil || (len(presence.Present) == 1) != test.allowed {
 					t.Errorf("cache presence=%+v, allowed=%v: %v", presence, test.allowed, err)
 				}
-				principal := capability.Principal{Capability: capability.Capability{Prefix: intent.Authority.CapabilityRef, Team: "a"}}
+				principal := dataAccessAuthority(t, s, intent.Authority.CapabilityRef).Principal
 				for _, operation := range []capability.DataOperation{capability.DataDownload, capability.DataRecord} {
 					err := records.tenant.CheckDataAccess(t.Context(), capability.Authorized{Principal: principal}, capability.DataTarget{Operation: operation, Digest: string(intent.Digest)})
 					if test.allowed && err != nil || !test.allowed && !errors.Is(err, blob.ErrDigestNotReadable) {

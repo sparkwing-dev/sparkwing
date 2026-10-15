@@ -12,10 +12,17 @@ import (
 )
 
 func provisionCapabilityTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec) (capability.Capability, error) {
+	if err := capability.ValidateProvisionSeed(spec); err != nil {
+		return capability.Capability{}, err
+	}
 	if err := checkProvisionOriginTx(ctx, tx, spec, false); err != nil {
 		return capability.Capability{}, err
 	}
-	if spec.Kind != capability.ProvisionMember {
+	if spec.Seed != "" {
+		if err := consumeBootstrapGateTx(ctx, tx, spec); err != nil {
+			return capability.Capability{}, err
+		}
+	} else if spec.Kind != capability.ProvisionMember {
 		if tx.store.provisions == nil {
 			return capability.Capability{}, authorityError(apierr.Unavailable, "root origin verification is not configured")
 		}
@@ -114,7 +121,7 @@ func checkProvisionOriginTx(ctx context.Context, tx *storeTx, spec capability.Pr
 
 func checkMemberProvision(spec capability.ProvisionSpec, p capability.Principal) error {
 	c := p.Capability
-	if spec.Authority == nil || p.Class != capability.CredentialSession || c.Subject != spec.Subject || spec.Subject.Kind != capability.SubjectAccount || spec.Team != c.Team || spec.Metered || len(spec.ReservedPools) != 0 || spec.Binding != (capability.Binding{Kind: capability.BindingNone}) || spec.Data != nil || len(spec.Repositories) != 0 || spec.RegistrationID != "" {
+	if spec.Authority == nil || !p.DirectAccountSession() || c.Subject != spec.Subject || spec.Team != c.Team || spec.Metered || len(spec.ReservedPools) != 0 || spec.Binding != (capability.Binding{Kind: capability.BindingNone}) || spec.Data != nil || len(spec.Repositories) != 0 || spec.RegistrationID != "" {
 		return authorityError(apierr.Forbidden, "member provisioning exceeds session authority")
 	}
 	for _, grant := range spec.Grants {
