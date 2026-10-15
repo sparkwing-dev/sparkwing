@@ -83,10 +83,16 @@ pipeline, child-generation, own-unit, declared dependency/recovery, source and
 secret relations. C2 still owns route grants and liveness classes. Named claim
 checks share the matching-input reader without taking write locks. The awarding
 transaction evaluates observed labels and available resources through the matcher.
-Data selectors use C2's `DataAccessChecker` on that transaction, supplied by the
-blob owner. Missing transactional data support returns unavailable. Concurrency
-binding also returns unavailable until C2's resolved target can name the declared
-key. Node-host process cleanup remains the host's binding check.
+Data selectors call the transaction's `DataAccessChecker`, supplied by the blob
+owner. Receipt and read-edge changes in that transaction govern its verdict.
+Concurrency binding returns unavailable until C2's resolved target can name the
+declared key. Node-host process cleanup remains the host's binding check.
+
+Snapshot transactions omit row locks because PostgreSQL refuses them in a
+read-only transaction. Authorization and owner snapshots use the same repeatable
+snapshot for ancestry and resource relations. Write transactions retain ancestry,
+run and resource locks through commit. The public binding check grants no right
+to skip the committing transaction's authority and fence checks.
 
 `Tenant.ReadOwnerSnapshot` reads the current owner authority, lease and scheduling
 state in one snapshot. A replaced, expired or revoked owner receives no snapshot.
@@ -657,6 +663,8 @@ Usage rows are additive per team, period and replica. Reporting sums rows.
 Admission takes a shared team/quota lock and records each reservation durably;
 settlement is idempotent by reservation ID. Log reads meter egress exactly and
 are exempt from download quota. Deferred plan counters add no enforcement here.
+The unused service-wide `egress_day` table is removed. Tenant egress remains in
+`egress_usage` with period and replica identity.
 
 `Operator.ChargeRetainedStorage(ctx, maintenanceLease)` bills unique `blobs`
 and committed `log_streams.stored_bytes`. Historical replica usage and reference
@@ -900,8 +908,8 @@ hold no competing idempotency fields.
 
 ## Schema inventory
 
-The final baseline contains 83 tables and 97 explicit indexes. `SchemaTables`
-classifies 65 tenant and 18 operator tables. It retains accounts, identity,
+The final baseline contains 83 tables and 101 explicit indexes. `SchemaTables`
+classifies 66 tenant and 17 operator tables. It retains accounts, identity,
 GitHub App/Actions, schedules, sizing, admission, approvals, logs, metrics,
 credits, cards, git credential opt-ins/audits and build trust. Obsolete token,
 output, memo, agent-loss, dispatch, bounce and duplicate-plan tables are removed.

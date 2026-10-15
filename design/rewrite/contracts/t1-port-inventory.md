@@ -8,6 +8,16 @@ The primary inventory has 74 changed or added functions: 6 lifecycle, 6 state-ma
 
 ## Source snapshots
 
+The SQLite store proofs
+`recovery_test.go:TestRecovery/recovery-cancel-beats-loss/store-sqlite` and
+`recovery_test.go:TestRecovery/recovery-reconciler-waits-and-reclaims/store-sqlite` port
+`TestNodeRules_TheReaperEndsACancelledRunsLostNodeAsCancelled` and both orders of
+`TestNodeRules_AnAdoptedRowIsNotFinishedTwice` from `node-state-machine`.
+They check the final store transactions, persisted attempts and events, reopening,
+and racing reconciliations.
+Enrollment is a contract fake. Native owner processes and HTTP remain required
+by the existing placement cells.
+
 | Branch label | Exact revision | Comparison |
 |---|---|---|
 | `node-lifecycle` | `136fbf58144d9bd6c300b0ecc08a9925b468c95e` | This commit's additions |
@@ -233,4 +243,3 @@ The source reports describe residual failures that their committed tests do not 
 - Final positive permission tests use valid requests. Expected grants come from independent architecture cases, not from the policy table's own output.
 - Race cases coordinate at a real transaction or request-body boundary. A sleep that merely hopes to produce an ordering is insufficient evidence.
 - Run package tests for local invariants and acceptance scenarios for cross-process behavior. The parked test counts are inventory counts, not launch coverage claims.
-
