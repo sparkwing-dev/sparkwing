@@ -57,7 +57,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
-	sess, err := s.store.LookupSessionAndRenew(r.Context(), raw, now, sessionTTL, s.sessionMaxLifetime)
+	sess, err := s.store.LookupSessionAndRenew(r.Context(), raw, sessionTTL, s.sessionMaxLifetime)
 	if err != nil {
 		// safety: a backend fault answered 401 would read as expiry and clear the dashboard's session cookies.
 		if errors.Is(err, store.ErrSessionBackend) {
@@ -90,7 +90,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		resp.Scopes, resp.Role, resp.UserID = ScopesForRole(role), string(role), sess.AccountID
+		resp.Role, resp.UserID = string(role), sess.AccountID
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

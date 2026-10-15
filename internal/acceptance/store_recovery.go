@@ -192,7 +192,7 @@ func checkRecoveryCancellation(ctx context.Context, root string) (err error) {
 	}
 	defer func() { err = errors.Join(err, f.s.Close()) }()
 	actor := store.Actor{Kind: store.ActorReaper, Owner: store.OwnerLeaseRef{Kind: store.OwnerController, Name: f.lease.Name, Holder: f.lease.Holder, Generation: f.lease.Generation}}
-	request := store.RunTransition{RunID: "run", Actor: actor, To: store.RunCancelled, Cause: store.RunCancel}
+	request := store.RunTransition{RunID: "run", Actor: actor, To: store.RunCancelled, Cause: store.RunCancel, Reason: "user_cancelled"}
 	for range 2 {
 		if _, err := f.tenant.TransitionRun(ctx, request); err != nil {
 			return err
@@ -202,7 +202,7 @@ func checkRecoveryCancellation(ctx context.Context, root string) (err error) {
 	if err != nil {
 		return err
 	}
-	if row.Status != store.StatusRunning || row.ClaimedBy != "runner" || row.CancelRequestedAt == nil || row.FinishedAt != nil {
+	if row.Status != store.StatusRunning || row.ClaimedBy != "runner" || row.CancelRequestedAt == nil || row.FinishedAt != nil || row.CancelReason != "user_cancelled" {
 		return fmt.Errorf("cancellation stole a live holder: %+v", row)
 	}
 	if err := f.expireHolder(ctx); err != nil {
@@ -227,6 +227,13 @@ func checkRecoveryCancellation(ctx context.Context, root string) (err error) {
 	}
 	if err := f.reopen(ctx, filepath.Join(root, "cancel.db")); err != nil {
 		return err
+	}
+	row, err = f.tenant.ReadNode(ctx, store.NodeRef{RunID: "run", NodeID: "job"})
+	if err != nil {
+		return err
+	}
+	if row.CancelReason != "user_cancelled" {
+		return errors.New("reopening lost cancellation intent")
 	}
 	if err := f.refuseLateReports(ctx); err != nil {
 		return err

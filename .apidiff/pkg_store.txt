@@ -1794,6 +1794,7 @@ type NodeRow struct {
 	StartedAt             *time.Time
 	FinishedAt            *time.Time
 	CancelRequestedAt     *time.Time
+	CancelReason          string
 	StateSeq              int64
 	StateDigest           string
 	StateActor            Actor
@@ -2304,6 +2305,7 @@ type RunRow struct {
 	Owner             *OwnerLeaseRef
 	CreatedAt         time.Time
 	CancelRequestedAt *time.Time
+	CancelReason      string
 	StartedAt         *time.Time
 	FinishedAt        *time.Time
 	StateSeq          int64
@@ -2548,21 +2550,22 @@ type SegmentCommit struct {
 	RetentionClass   string
 }
 type Session struct {
-	ID        string
-	Principal string
-	Scopes    []string
-
-	Team Team
-
-	AccountID string
-
-	TokenPrefix string
-	CSRFToken   string
-	CreatedAt   time.Time
-	ExpiresAt   time.Time
-	LastUsedAt  *time.Time
+	ID               string
+	Principal        string
+	Scopes           []string
+	Team             Team
+	AccountID        string
+	CapabilityPrefix string
+	CSRFToken        string
+	CreatedAt        time.Time
+	ExpiresAt        time.Time
+	LastUsedAt       *time.Time
 }
 const SessionIDLen = 32
+type SessionKeyCipher interface {
+	SealBound(team, name, scope string, shared, masked bool, plain string) (string, error)
+	OpenBound(team, name, scope string, shared, masked bool, envelope string) (string, error)
+}
 func SetArgon2MemoryBudget(budget int64) int
 func SetTestBusyTimeout(t interface{ Cleanup(func()) }, ms int)
 type SignInProfile struct {
@@ -2900,14 +2903,11 @@ func (s *Store) CountNodesByQueueState(ctx context.Context) (map[string]int, err
 func (s *Store) CountPendingNodes(ctx context.Context) (int, error)
 func (s *Store) CountPendingTriggers(ctx context.Context) (int, error)
 func (s *Store) CountRuns(ctx context.Context, f RunFilter) (int, error)
-func (s *Store) CreateAccountSession(
-	ctx context.Context, acct Account, team Team, ttl time.Duration, now time.Time,
-) (rawSession, csrfToken string, sess *Session, err error)
+func (s *Store) CreateAccountSession(ctx context.Context, acct Account, team Team, ttl time.Duration) (string, string, *Session, error)
 func (s *Store) CreateApproval(ctx context.Context, a Approval) error
+func (s *Store) CreateCapabilitySession(ctx context.Context, prefix string, ttl time.Duration) (string, *Session, error)
 func (s *Store) CreateDebugPause(ctx context.Context, p DebugPause) error
-func (s *Store) CreateIdentityAccountSession(
-	ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration, now time.Time,
-) (rawSession, csrfToken string, sess *Session, err error)
+func (s *Store) CreateIdentityAccountSession(ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration) (string, string, *Session, error)
 func (s *Store) CreateNode(ctx context.Context, n Node) error
 func (s *Store) CreateOrReplaceSecret(sec Secret, now time.Time) error
 func (s *Store) CreatePlanNode(ctx context.Context, team Team, runID string, now time.Time) (err error)
@@ -2916,7 +2916,6 @@ func (s *Store) CreateRun(ctx context.Context, r Run) error
 func (s *Store) CreateTeam(ctx context.Context, accountID string, slug Team, displayName string, now time.Time) (TeamInfo, error)
 func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error)
 func (s *Store) CreateTokenIfNoneExist(raw, principal, kind string, scopes []string, now time.Time) (bool, error)
-func (s *Store) CreateTokenSession(ctx context.Context, tokenPrefix, principal string, team Team, ttl time.Duration, now time.Time) (rawSession string, sess *Session, err error)
 func (s *Store) CreateTokenWith(
 	ctx context.Context, principal, kind string, scopes []string, ttl time.Duration, now time.Time, opts TokenOptions,
 ) (string, *Token, error)
@@ -3027,8 +3026,8 @@ func (s *Store) ListTokens(kind string, includeRevoked bool) ([]Token, error)
 func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, error)
 func (s *Store) ListWaitingNodes(ctx context.Context, readyBefore time.Time, after [2]string, limit int) ([]WaitingNode, error)
 func (s *Store) LookupCapability(ctx context.Context, digest [32]byte) (capability.Principal, error)
-func (s *Store) LookupSession(ctx context.Context, rawSession string, now time.Time) (*Session, error)
-func (s *Store) LookupSessionAndRenew(ctx context.Context, rawSession string, now time.Time, ttl, maxLifetime time.Duration) (*Session, error)
+func (s *Store) LookupSession(ctx context.Context, rawSession string) (*Session, error)
+func (s *Store) LookupSessionAndRenew(ctx context.Context, rawSession string, ttl, maxLifetime time.Duration) (*Session, error)
 func (s *Store) LookupToken(raw string, now time.Time) (*Token, error)
 func (s *Store) LookupTokenByPrefix(prefix string) (*Token, error)
 func (s *Store) MaintainConcurrency(ctx context.Context, opts ConcurrencyMaintenanceOptions) (ConcurrencyMaintenanceResult, error)
@@ -3151,6 +3150,7 @@ func (s *Store) SetOperatorCreditSettings(
 func (s *Store) SetOutputDir(dir string)
 func (s *Store) SetPlanSecretOpener(opener PlanSecretOpener)
 func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error
+func (s *Store) SetSessionKeyCipher(cipher SessionKeyCipher)
 func (s *Store) SetSignUpLimits(ctx context.Context, limits SignUpLimits) (SignUpGate, error)
 func (s *Store) SetSignUpMode(ctx context.Context, mode SignUpMode, reason, setBy string, now time.Time) (SignUpGate, error)
 func (s *Store) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error

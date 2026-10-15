@@ -29,3 +29,13 @@ W3 also owns finding 1's retained test port. `go test -p 4 -gcflags=-e ./interna
 **W1 scope clarification (lead).** When W1 removes a legacy store API (Store.AcceptPlan and its validator, StateStoreOld, old claim and trigger writers, offer rounds, old maintenance APIs), W1 migrates or deletes every remaining caller, including callers in W1b-owned test fixtures such as the output and log fixtures reached through dispatchRun. Keep each caller change minimal and list the files in your report. This overrides the "do not edit W1b's files" line for caller migration only. W1b does not reintroduce removed APIs.
 
 **W1: separate cancellation intent for W2.** W2's cancellation-reason persistence test fails because the store has no cancellation-intent field separate from the terminal reason. Add it to the store's authentication/cancellation snapshot (amendment A1-21), and finish the session digest and CSRF persistence W2 reads. W2 consumes it through the contract interface.
+
+W1 continuation status: cancellation reasons now persist independently on runs and
+jobs and reach job, owner and eval renewal. Session digest lookup, nanosecond
+writes, current membership, capability-parent ceilings and sealed CSRF-key
+persistence are implemented. `CreateTokenSession` is removed. Session creation and
+lookup no longer accept caller clocks. See `../w1-session11-progress.md` for caller
+migrations and evidence. W2 still needs to extend C2 `BindingState` with the
+cancellation reason before W1 can project it through `ReadAuthentication`. W1 has
+not changed that foreign contract. OAuth/browser middleware and roleless-session
+representation remain integration points.

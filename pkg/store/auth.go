@@ -10,30 +10,24 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-// Session is one row in the sessions table. ID holds the raw session id the
-// caller presented; the table keys rows by its digest.
+// Session carries presentation and current authority after a committed lookup.
 type Session struct {
-	ID        string
-	Principal string
-	Scopes    []string
-	// Team is the team the session acts for: the token's team for a token
-	// session; an account session's moves when the account switches.
-	Team Team
-	// AccountID is set on a session opened by an identity-provider sign-in.
-	// Its scopes are not stored: they come from the account's membership in
-	// Team on every request.
-	AccountID string
-	// TokenPrefix names the operator token a token session was opened with.
-	// Its scopes and team are read from that token's row on every lookup.
-	TokenPrefix string
-	CSRFToken   string
-	CreatedAt   time.Time
-	ExpiresAt   time.Time
-	LastUsedAt  *time.Time
+	ID               string
+	Principal        string
+	Scopes           []string
+	Team             Team
+	AccountID        string
+	CapabilityPrefix string
+	CSRFToken        string
+	CreatedAt        time.Time
+	ExpiresAt        time.Time
+	LastUsedAt       *time.Time
 }
 
 // SessionIDLen is the raw byte length before base64.
@@ -51,82 +45,6 @@ func sessionDigest(rawSession string) string {
 // so a browser keeps cookies a working backend would still resolve.
 var ErrSessionBackend = errors.New("sessions: backend unavailable")
 
-func (s *Store) csrfSigningKey(ctx context.Context) ([]byte, error) {
-	s.csrfKeyMu.Lock()
-	defer s.csrfKeyMu.Unlock()
-	if len(s.csrfKey) > 0 {
-		return s.csrfKey, nil
-	}
-	stored, found, err := s.storedCSRFKey(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if !found {
-		if stored, err = s.mintCSRFKey(ctx); err != nil {
-			return nil, err
-		}
-	}
-	key, err := hex.DecodeString(stored)
-	if err != nil || len(key) == 0 {
-		return nil, errors.New("sessions: malformed csrf key")
-	}
-	s.csrfKey = key
-	return key, nil
-}
-
-// safety: reading before writing keeps a read-only store, and every process past the first, off the write path.
-func (s *Store) storedCSRFKey(ctx context.Context) (string, bool, error) {
-	var stored string
-	err := s.queryRow(ctx,
-		`SELECT value FROM sparkwing_meta WHERE key = ?`, metaKeySessionCSRFKey,
-	).Scan(&stored)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		return "", false, nil
-	case err != nil:
-		return "", false, fmt.Errorf("sessions: read csrf key: %w", err)
-	}
-	return stored, true, nil
-}
-
-func (s *Store) mintCSRFKey(ctx context.Context) (string, error) {
-	minted := make([]byte, sha256.Size)
-	if _, err := rand.Read(minted); err != nil {
-		return "", err
-	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return "", fmt.Errorf("sessions: begin csrf key: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	// safety: DO NOTHING keeps a concurrent minter's key, so every process derives the same token for a session.
-	res, err := tx.Exec(
-		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
-		 ON CONFLICT (key) DO NOTHING`,
-		metaKeySessionCSRFKey, hex.EncodeToString(minted), time.Now().UnixNano(),
-	)
-	if err != nil {
-		return "", fmt.Errorf("sessions: persist csrf key: %w", err)
-	}
-	if n, _ := res.RowsAffected(); n > 0 {
-		// safety: a fresh key cannot sign the tokens live sessions carry, so key and sessions rotate as one.
-		if _, err := tx.Exec(`DELETE FROM sessions`); err != nil {
-			return "", fmt.Errorf("sessions: rotate on new csrf key: %w", err)
-		}
-	}
-	var stored string
-	if err := tx.QueryRow(
-		`SELECT value FROM sparkwing_meta WHERE key = ?`, metaKeySessionCSRFKey,
-	).Scan(&stored); err != nil {
-		return "", fmt.Errorf("sessions: read csrf key: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return "", fmt.Errorf("sessions: commit csrf key: %w", err)
-	}
-	return stored, nil
-}
-
 func (s *Store) deriveCSRFToken(ctx context.Context, rawSession string) (string, error) {
 	key, err := s.csrfSigningKey(ctx)
 	if err != nil {
@@ -137,43 +55,50 @@ func (s *Store) deriveCSRFToken(ctx context.Context, rawSession string) (string,
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
 }
 
-// CreateTokenSession opens a browser session for the holder of the token
-// whose prefix is tokenPrefix, acting as principal in team. It returns the raw
-// session id and its CSRF token. The row stores no scopes: every lookup reads
-// them from the token's row, so revoking or expiring the token ends the
-// session as well.
-func (s *Store) CreateTokenSession(ctx context.Context, tokenPrefix, principal string, team Team, ttl time.Duration, now time.Time) (rawSession string, sess *Session, err error) {
-	if tokenPrefix == "" || principal == "" {
-		return "", nil, errors.New("sessions: token prefix and principal required")
+// CreateCapabilitySession opens a session with an account capability as its revocation parent.
+func (s *Store) CreateCapabilitySession(ctx context.Context, prefix string, ttl time.Duration) (string, *Session, error) {
+	if prefix == "" || ttl <= 0 {
+		return "", nil, fmt.Errorf("%w: capability and positive ttl required", ErrInvalidInput)
 	}
-	if ttl <= 0 {
-		return "", nil, errors.New("sessions: ttl must be positive")
-	}
-	rawSession, err = newSessionID()
+	raw, err := newSessionID()
 	if err != nil {
 		return "", nil, err
 	}
-	csrfToken, err := s.deriveCSRFToken(ctx, rawSession)
+	csrf, err := s.deriveCSRFToken(ctx, raw)
 	if err != nil {
 		return "", nil, err
 	}
-	expires := now.Add(ttl).UTC()
-	// safety: an empty scopes column leaves a binary that predates token sessions holding no scope for this row.
-	if _, err = s.exec(ctx, `
-        INSERT INTO sessions (hash, team, principal, scopes, token_prefix, created_at, expires_at)
-        VALUES (?, ?, ?, '', ?, ?, ?)
-    `, sessionDigest(rawSession), string(NormalizeTeam(team)), principal, tokenPrefix, now.UTC().Unix(), expires.Unix()); err != nil {
-		return "", nil, fmt.Errorf("sessions: insert: %w", err)
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return "", nil, err
 	}
-	return rawSession, &Session{
-		ID:          rawSession,
-		Principal:   principal,
-		Team:        NormalizeTeam(team),
-		TokenPrefix: tokenPrefix,
-		CSRFToken:   csrfToken,
-		CreatedAt:   now.UTC(),
-		ExpiresAt:   expires,
-	}, nil
+	defer rollbackOrLog(tx)
+	p, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
+	if err != nil {
+		return "", nil, err
+	}
+	c := p.Capability
+	if c.Subject.Kind != capability.SubjectAccount || c.Team == "" || c.Audience != capability.Controller || c.Binding.Kind != capability.BindingNone || c.Unit != "" {
+		return "", nil, authorityError(apierr.Forbidden, "session requires an unbound account capability")
+	}
+	var email string
+	if err := tx.QueryRowContext(ctx, `SELECT email FROM accounts WHERE id=?`, c.Subject.ID).Scan(&email); err != nil {
+		return "", nil, err
+	}
+	now := tx.now()
+	expires := now.Add(ttl)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(hash,team,principal,scopes,account_id,capability_prefix,created_at,expires_at)
+ VALUES (?,?,?,'',?,?,?,?)`, sessionDigest(raw), c.Team, email, c.Subject.ID, prefix, now.UnixNano(), expires.UnixNano()); err != nil {
+		return "", nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return "", nil, err
+	}
+	session := &Session{ID: raw, Principal: email, Team: Team(c.Team), AccountID: c.Subject.ID, CapabilityPrefix: prefix, CSRFToken: csrf, CreatedAt: now, ExpiresAt: expires}
+	for _, grant := range c.Grants {
+		session.Scopes = append(session.Scopes, string(grant))
+	}
+	return raw, session, nil
 }
 
 func newSessionID() (string, error) {
@@ -185,120 +110,82 @@ func newSessionID() (string, error) {
 }
 
 // LookupSession resolves a raw session id; bumps last_used_at on hit.
-func (s *Store) LookupSession(ctx context.Context, rawSession string, now time.Time) (*Session, error) {
-	return s.lookupSession(ctx, rawSession, now, 0, 0)
+func (s *Store) LookupSession(ctx context.Context, rawSession string) (*Session, error) {
+	return s.lookupSession(ctx, rawSession, 0, 0)
 }
 
 // LookupSessionAndRenew resolves a live session and extends its expiry from
 // this use. A row past maxLifetime is returned without renewal for its caller
 // to revoke.
-func (s *Store) LookupSessionAndRenew(ctx context.Context, rawSession string, now time.Time, ttl, maxLifetime time.Duration) (*Session, error) {
+func (s *Store) LookupSessionAndRenew(ctx context.Context, rawSession string, ttl, maxLifetime time.Duration) (*Session, error) {
 	if ttl <= 0 {
 		return nil, errors.New("sessions: ttl must be positive")
 	}
-	return s.lookupSession(ctx, rawSession, now, ttl, maxLifetime)
+	return s.lookupSession(ctx, rawSession, ttl, maxLifetime)
 }
 
-func (s *Store) lookupSession(ctx context.Context, rawSession string, now time.Time, ttl, maxLifetime time.Duration) (*Session, error) {
+func (s *Store) lookupSession(ctx context.Context, rawSession string, ttl, maxLifetime time.Duration) (*Session, error) {
 	if rawSession == "" {
 		return nil, errors.New("empty session")
 	}
-	digest := sessionDigest(rawSession)
-	// safety: minting a key drops every session it cannot sign for, so resolve the key before reading the row.
 	csrfToken, err := s.deriveCSRFToken(ctx, rawSession)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrSessionBackend, err)
 	}
-	row := s.queryRow(ctx, `
-        SELECT s.principal, s.team, s.account_id, s.token_prefix,
-               s.created_at, s.expires_at, s.last_used_at,
-               t.prefix, t.team, t.scopes, t.expires_at, t.revoked_at
-          FROM sessions s
-          LEFT JOIN tokens t ON s.token_prefix <> '' AND t.prefix = s.token_prefix
-         WHERE s.hash = ?
-    `, digest)
-
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrSessionBackend, err)
+	}
+	defer rollbackOrLog(tx)
+	digest := sessionDigest(rawSession)
 	var sess Session
-	var team string
-	var lastUsed, tokExpires, tokRevoked sql.NullInt64
-	var tokPrefix, tokTeam, tokScopes sql.NullString
 	var created, expires int64
-	if err := row.Scan(
-		&sess.Principal, &team, &sess.AccountID, &sess.TokenPrefix,
-		&created, &expires, &lastUsed,
-		&tokPrefix, &tokTeam, &tokScopes, &tokExpires, &tokRevoked,
-	); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, errors.New("unknown session")
-		}
-		return nil, fmt.Errorf("%w: read session: %w", ErrSessionBackend, err)
+	var lastUsed sql.NullInt64
+	err = tx.QueryRowContext(ctx, `SELECT principal,team,account_id,capability_prefix,created_at,expires_at,last_used_at
+ FROM sessions WHERE hash=?`+tx.forUpdate(), digest).Scan(&sess.Principal, &sess.Team, &sess.AccountID, &sess.CapabilityPrefix, &created, &expires, &lastUsed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, errors.New("unknown session")
 	}
-	sess.ID = rawSession
-	sess.Team = Team(team)
-	if sess.AccountID == "" {
-		// safety: a session that names neither an account nor a live token carries no authority, so it fails
-		// rather than falling back to the scopes column a binary predating token sessions wrote.
-		if !tokPrefix.Valid {
-			return nil, errors.New("unknown session")
-		}
-		if err := TokenEnded(nullableUnix(tokRevoked), nullableUnix(tokExpires), now); err != nil {
-			return nil, fmt.Errorf("session token: %w", err)
-		}
-		sess.Scopes = splitScopes(tokScopes.String)
-		sess.Team = Team(tokTeam.String)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrSessionBackend, err)
 	}
-	sess.CreatedAt = time.Unix(created, 0).UTC()
-	sess.ExpiresAt = time.Unix(expires, 0).UTC()
-	if lastUsed.Valid {
-		ts := time.Unix(lastUsed.Int64, 0).UTC()
-		sess.LastUsedAt = &ts
+	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthoritySession, ID: digest}, true)
+	if err != nil {
+		return nil, err
 	}
-	if !now.Before(sess.ExpiresAt) {
-		return nil, errors.New("session expired")
+	now := tx.now()
+	sess.ID, sess.CSRFToken = rawSession, csrfToken
+	sess.CreatedAt, sess.ExpiresAt = time.Unix(0, created).UTC(), time.Unix(0, expires).UTC()
+	for _, grant := range chain[0].principal.Capability.Grants {
+		sess.Scopes = append(sess.Scopes, string(grant))
 	}
-	sess.CSRFToken = csrfToken
-	if ttl > 0 {
-		if sess.CreatedAt.After(now) || maxLifetime > 0 && !now.Before(sess.CreatedAt.Add(maxLifetime)) {
-			return &sess, nil
-		}
+	last := stateTime(lastUsed)
+	if last == nil || last.Before(now) {
+		last = &now
+	}
+	sess.LastUsedAt = last
+	if ttl > 0 && !sess.CreatedAt.After(now) && (maxLifetime <= 0 || now.Before(sess.CreatedAt.Add(maxLifetime))) {
 		renewed := now.Add(ttl)
-		if maxLifetime > 0 {
-			limit := sess.CreatedAt.Add(maxLifetime)
-			if renewed.After(limit) {
-				renewed = limit
-			}
+		if maxLifetime > 0 && renewed.After(sess.CreatedAt.Add(maxLifetime)) {
+			renewed = sess.CreatedAt.Add(maxLifetime)
 		}
-		result, err := s.exec(ctx, `UPDATE sessions
-			SET last_used_at = CASE WHEN last_used_at > ? THEN last_used_at ELSE ? END,
-				expires_at = CASE
-				WHEN expires_at > ? THEN expires_at
-				ELSE ? END
-			WHERE hash = ? AND expires_at > ?`,
-			now.UTC().Unix(), now.UTC().Unix(), renewed.Unix(), renewed.Unix(), digest, now.UTC().Unix())
-		if err != nil {
-			return nil, fmt.Errorf("%w: renew session: %w", ErrSessionBackend, err)
-		}
-		rows, err := result.RowsAffected()
-		if err != nil {
-			return nil, fmt.Errorf("%w: renew session rows: %w", ErrSessionBackend, err)
-		}
-		if rows == 0 {
-			return nil, errors.New("unknown session")
-		}
-		if sess.ExpiresAt.Before(renewed) {
+		if renewed.After(sess.ExpiresAt) {
 			sess.ExpiresAt = renewed
 		}
-	} else {
-		if _, err := s.exec(ctx,
-			`UPDATE sessions SET last_used_at = ? WHERE hash = ?`,
-			now.UTC().Unix(), digest,
-		); err != nil {
-			slog.Warn("sessions: recording a session's last use failed", "err", err)
-		}
 	}
-	if ttl == 0 || sess.LastUsedAt == nil || sess.LastUsedAt.Before(now) {
-		ts := now.UTC()
-		sess.LastUsedAt = &ts
+	result, err := tx.ExecContext(ctx, `UPDATE sessions SET last_used_at=?,expires_at=? WHERE hash=? AND revoked_at IS NULL AND expires_at>?`, last.UnixNano(), sess.ExpiresAt.UnixNano(), digest, now.UnixNano())
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrSessionBackend, err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if n != 1 {
+		return nil, errors.New("session has ended")
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrSessionBackend, err)
 	}
 	return &sess, nil
 }
@@ -313,13 +200,12 @@ func (s *Store) DeleteSession(rawSession string) error {
 func (s *Store) ExpireSessions(now time.Time) (int64, error) {
 	res, err := s.execNoCtx(
 		`DELETE FROM sessions WHERE expires_at <= ?`,
-		now.UTC().Unix(),
+		now.UTC().UnixNano(),
 	)
 	if err != nil {
 		return 0, err
 	}
-	n, _ := res.RowsAffected()
-	return n, nil
+	return res.RowsAffected()
 }
 
 func nullableUnix(v sql.NullInt64) *time.Time {

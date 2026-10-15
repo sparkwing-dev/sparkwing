@@ -193,7 +193,7 @@ The final three comparisons include all changes since the recorded merge base. E
 | `service-credits` | Replace with the final billing/service authority. It must not grant unrelated operator-console powers. |
 | `service-launch` | Keep a launcher service root that can Award across teams through the fixed table. |
 | `service-storage` | Drop `storage.count`. There is no cache service or cache audience. |
-| `session` | Keep account-session role checks through the same route policy. |
+| `session` | Store/component evidence: `TestSessionMembershipChangesApplyWithoutCachedGrantsProperty`, `TestSessionRoutePreservesCapabilityScopeProperty` and `TestCredentials/credentials-session-digest-csrf/store-sqlite` check current roles, capability ceilings, digest lookup and sealed CSRF persistence. Native route-matrix evidence remains required. |
 | `member` | Keep team-member grants. A member does not gain work-claim grants directly. |
 | `machine` | Keep machine root claim scopes. Secret/source/data/OIDC access requires a live award. |
 | `machine+trigger` | Replace caller-supplied trigger fence with the awarded trigger capability. A root plus forged headers gains nothing. |

@@ -290,6 +290,13 @@ self-update verifies release bytes, and a stale runner cannot bypass its minimum
 
 ## Activation and launch gate
 
+`TestCredentials/credentials-session-digest-csrf/store-sqlite` exercises account
+session creation, digest lookup, sealed CSRF-key persistence, reopening, demotion
+and revocation against a real SQLite file. It is store-boundary evidence. Native
+browser, OAuth and production C2 route-matrix cells remain blocked. The existing
+`recovery-cancel-beats-loss/store-sqlite` proof also checks that the first reason
+survives cooperative draining, reaping and reopening.
+
 `TestRecovery` also runs two SQLite persistence cells through
 `CheckStoreRecoveryBoundary`: cancellation after holder loss and reconciliation
 before and after reaping. They check late-report refusal, one self-award under

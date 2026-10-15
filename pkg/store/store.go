@@ -111,6 +111,7 @@ type Store struct {
 	cleanup          func() error
 	csrfKeyMu        sync.Mutex
 	csrfKey          []byte
+	csrfCipher       SessionKeyCipher
 	launchResumeMu   sync.Mutex
 	launchResume     *launchCursor
 	outputDir        string

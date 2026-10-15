@@ -895,54 +895,28 @@ func (s *Store) SetActiveTeam(ctx context.Context, accountID string, team Team, 
 	return err
 }
 
-// CreateAccountSession opens a browser session for an account in team. The
-// session stores no scopes: they come from the account's membership on every
-// request, so a demoted account loses them on its next request rather than
-// at session expiry. An empty team is the session of an account that belongs
-// to no team yet, such as one on the waitlist; it authorizes no team route.
-func (s *Store) CreateAccountSession(
-	ctx context.Context, acct Account, team Team, ttl time.Duration, now time.Time,
-) (rawSession, csrfToken string, sess *Session, err error) {
-	if acct.ID == "" {
-		return "", "", nil, errors.New("sessions: account required")
-	}
-	if ttl <= 0 {
-		return "", "", nil, errors.New("sessions: ttl must be positive")
-	}
-	rawSession, err = newSessionID()
-	if err != nil {
-		return "", "", nil, err
-	}
-	if csrfToken, err = s.deriveCSRFToken(ctx, rawSession); err != nil {
-		return "", "", nil, err
-	}
-	expires := now.Add(ttl).UTC()
-	if _, err := s.exec(ctx, `
-		INSERT INTO sessions (hash, team, principal, scopes, account_id, created_at, expires_at)
-		VALUES (?, ?, ?, '', ?, ?, ?)`,
-		sessionDigest(rawSession), string(team), acct.Email, acct.ID, now.UTC().Unix(), expires.Unix()); err != nil {
-		return "", "", nil, fmt.Errorf("sessions: insert: %w", err)
-	}
-	return rawSession, csrfToken, &Session{
-		ID: rawSession, Principal: acct.Email, Team: team, AccountID: acct.ID,
-		CSRFToken: csrfToken, CreatedAt: now.UTC(), ExpiresAt: expires,
-	}, nil
+// CreateAccountSession opens a session for a current team member.
+func (s *Store) CreateAccountSession(ctx context.Context, acct Account, team Team, ttl time.Duration) (string, string, *Session, error) {
+	return s.createAccountSession(ctx, acct, team, "", "", ttl)
 }
 
-// CreateIdentityAccountSession opens a session only while the named provider
-// identity still belongs to acct. It serializes with unlink's session
-// revocation on the account row.
-func (s *Store) CreateIdentityAccountSession(
-	ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration, now time.Time,
-) (rawSession, csrfToken string, sess *Session, err error) {
-	if acct.ID == "" || provider == "" || subject == "" || ttl <= 0 {
-		return "", "", nil, fmt.Errorf("%w: account, provider, subject, and positive ttl required", ErrInvalidInput)
+// CreateIdentityAccountSession opens a session while the provider identity remains linked.
+func (s *Store) CreateIdentityAccountSession(ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration) (string, string, *Session, error) {
+	if provider == "" || subject == "" {
+		return "", "", nil, fmt.Errorf("%w: provider and subject required", ErrInvalidInput)
 	}
-	rawSession, err = newSessionID()
+	return s.createAccountSession(ctx, acct, team, provider, subject, ttl)
+}
+
+func (s *Store) createAccountSession(ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration) (string, string, *Session, error) {
+	if acct.ID == "" || ttl <= 0 {
+		return "", "", nil, fmt.Errorf("%w: account and positive ttl required", ErrInvalidInput)
+	}
+	raw, err := newSessionID()
 	if err != nil {
 		return "", "", nil, err
 	}
-	csrfToken, err = s.deriveCSRFToken(ctx, rawSession)
+	csrf, err := s.deriveCSRFToken(ctx, raw)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -954,28 +928,40 @@ func (s *Store) CreateIdentityAccountSession(
 	if err := lockAccountTx(ctx, tx, acct.ID); err != nil {
 		return "", "", nil, err
 	}
-	var linked string
-	err = tx.QueryRowContext(ctx, `SELECT account_id FROM identities WHERE provider = ? AND subject = ? AND account_id = ?`,
-		provider, subject, acct.ID).Scan(&linked)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", "", nil, ErrIdentityUnlinked
+	if provider != "" {
+		var linked string
+		err := tx.QueryRowContext(ctx, `SELECT account_id FROM identities WHERE provider=? AND subject=? AND account_id=?`, provider, subject, acct.ID).Scan(&linked)
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", "", nil, ErrIdentityUnlinked
+		}
+		if err != nil {
+			return "", "", nil, err
+		}
 	}
-	if err != nil {
+	var role Role
+	if err := tx.QueryRowContext(ctx, `SELECT role FROM memberships WHERE team=? AND account_id=?`+tx.forShare(), team, acct.ID).Scan(&role); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			err = ErrNotMember
+		}
 		return "", "", nil, err
 	}
-	expires := now.Add(ttl).UTC()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (hash, team, principal, scopes, account_id, created_at, expires_at)
-		VALUES (?, ?, ?, '', ?, ?, ?)`, sessionDigest(rawSession), string(team), acct.Email, acct.ID,
-		now.UTC().Unix(), expires.Unix()); err != nil {
-		return "", "", nil, fmt.Errorf("sessions: insert: %w", err)
+	if !role.Valid() {
+		return "", "", nil, ErrNotMember
+	}
+	var email string
+	if err := tx.QueryRowContext(ctx, `SELECT email FROM accounts WHERE id=?`, acct.ID).Scan(&email); err != nil {
+		return "", "", nil, err
+	}
+	now := tx.now()
+	expires := now.Add(ttl)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(hash,team,principal,scopes,account_id,created_at,expires_at)
+ VALUES (?,?,?,'',?,?,?)`, sessionDigest(raw), team, email, acct.ID, now.UnixNano(), expires.UnixNano()); err != nil {
+		return "", "", nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return "", "", nil, err
 	}
-	return rawSession, csrfToken, &Session{
-		ID: rawSession, Principal: acct.Email, Team: team, AccountID: acct.ID,
-		CSRFToken: csrfToken, CreatedAt: now.UTC(), ExpiresAt: expires,
-	}, nil
+	return raw, csrf, &Session{ID: raw, Principal: email, Team: team, AccountID: acct.ID, Scopes: ScopesForRole(role), CSRFToken: csrf, CreatedAt: now, ExpiresAt: expires}, nil
 }
 
 // SwitchSessionTeam moves an account's session from one team to another. It
@@ -983,12 +969,16 @@ func (s *Store) CreateIdentityAccountSession(
 // concurrent switch is reported rather than moved twice.
 func (s *Store) SwitchSessionTeam(ctx context.Context, rawSession, accountID string, from, to Team) error {
 	res, err := s.exec(ctx,
-		`UPDATE sessions SET team = ? WHERE hash = ? AND account_id = ? AND team = ?`,
-		string(to), sessionDigest(rawSession), accountID, string(from))
+		`UPDATE sessions SET team = ? WHERE hash = ? AND account_id = ? AND team = ?
+ AND capability_prefix='' AND revoked_at IS NULL AND expires_at>?
+ AND EXISTS (SELECT 1 FROM memberships WHERE team=? AND account_id=?)`,
+		string(to), sessionDigest(rawSession), accountID, string(from), s.now().UnixNano(), to, accountID)
 	if err != nil {
 		return err
 	}
-	if n, err := res.RowsAffected(); err != nil || n != 1 {
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n != 1 {
 		return ErrNotFound
 	}
 	return nil

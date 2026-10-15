@@ -46,7 +46,7 @@ func newBrowserFixture(t *testing.T, d *controller.Dashboard) *browserFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessID, sess, err := st.CreateTokenSession(context.Background(), alice.Prefix, alice.Principal, alice.Team, time.Hour, now)
+	sessID, sess, err := st.CreateCapabilitySession(context.Background(), alice.Prefix, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

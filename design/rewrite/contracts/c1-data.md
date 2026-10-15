@@ -66,6 +66,46 @@ These declarations leave transaction implementation with W1.
   none. Application retry advances under the same generation. Start/retry return
   the authoritative ordinal in Applied. Owner/eval logs always use unit subjects.
 
+Cancellation intent persists in `runs.cancel_reason` and `nodes.cancel_reason`,
+separately from terminal result fields. The first request owns that intent.
+`RunRow.CancelReason` and `NodeRow.CancelReason` retain it after draining and
+reopening. Renewal carries it in `LeaseBeat.CancelReason` for job, owner and eval
+units. A request-only edge never writes a holder's error, failure reason or exit
+code. Run cancellation passes its reason to affected jobs without replacing an
+earlier job request. C2's authentication snapshot still needs a reason field to
+transport the same intent through `AuthenticationReader`.
+
+Session creation and lookup use the store clock and Unix nanoseconds. The session
+row holds a SHA-256 digest. Every authentication reads current membership and
+complete capability ancestry. Account sessions follow current role grants.
+Capability-backed sessions also retain their parent's team, account and grant
+ceiling. The controller preserves those verified grants instead of replacing them
+with the full role. The removed `triggers.read` permission is absent from the role
+map because C2's final grant registry excludes it.
+
+`SessionKeyCipher` and `Store.SetSessionKeyCipher` configure row-bound encryption
+for `settings.session_csrf_key`. The row must be sealed and open under that cipher.
+A missing key is minted once, atomically invalidating sessions signed by no
+available key. Replicas open the same committed envelope. Wrong keys, malformed
+envelopes and missing cipher configuration refuse session operations. The
+controller's existing `WithSecretsCipher` installs its bound cipher on the store.
+No new key file, environment variable or encryption implementation is introduced.
+
+`CreateCapabilitySession(ctx, prefix, ttl)` replaces `CreateTokenSession`.
+It derives identity from an unbound account capability and retains that capability
+as its revocation parent. `Session.CapabilityPrefix` replaces `TokenPrefix`.
+`CreateAccountSession`, `CreateIdentityAccountSession`, `LookupSession` and
+`LookupSessionAndRenew` no longer accept caller clocks. Their callers select
+session identity and duration. The store supplies timestamps, digest persistence,
+current grants and the committing transaction.
+
+The SQLite session proof `credentials-session-digest-csrf/store-sqlite` checks
+creation, digest authentication, encrypted key storage, identical CSRF after store
+reopening, membership demotion and session revocation. It does not exercise OAuth,
+a native browser, production C2 middleware or a network listener. The controller
+component property separately exercises the registered session handler with
+sixteen generated grant subsets and a fake origin verifier.
+
 `IntakePolicyFacts.SourceLocation` is the server-verified acquisition location for
 the selected repository. Intake replaces the proposed location with that fact.
 A nonempty proposed location without this fact is refused before either run or
