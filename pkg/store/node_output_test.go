@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -103,26 +102,6 @@ func TestFinishNode_HoldsALocalRunToItsOutputLimit(t *testing.T) {
 	err := s.FinishNode(ctx, "run-full", "last", "success", "", []byte(`1`))
 	if !errors.Is(err, store.ErrOutputLimit) || !errors.Is(err, store.ErrOutputNotStored) {
 		t.Fatalf("a byte past the run's 1 GiB: err = %v, want the run limit", err)
-	}
-}
-
-func TestWriteOutputFileDurably_KeepsAMatchingFileAndReplacesAnother(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "out")
-	if err := os.WriteFile(path, []byte(`"same"`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	before, _ := os.Stat(path)
-	if err := store.WriteOutputFileDurably(path, []byte(`"same"`)); err != nil {
-		t.Fatal(err)
-	}
-	if after, _ := os.Stat(path); !os.SameFile(before, after) {
-		t.Fatal("a file that already matched was replaced instead of synced in place")
-	}
-	if err := store.WriteOutputFileDurably(path, []byte(`"other"`)); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := os.ReadFile(path); string(got) != `"other"` {
-		t.Fatalf("a mismatched file = %s, want it replaced", got)
 	}
 }
 

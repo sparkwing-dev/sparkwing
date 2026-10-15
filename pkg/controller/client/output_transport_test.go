@@ -126,8 +126,59 @@ func TestSignedOutputTransportRequiresControllerSchemeAndPort(t *testing.T) {
 	transport := &http.Transport{}
 	c := NewWithToken("http://sparkwing-api", &http.Client{Transport: transport}, "api-token")
 	for _, target := range []string{"https://sparkwing-api/blob", "http://sparkwing-api:81/blob"} {
-		if c.blobClient(target).Transport == transport {
+		if c.blobTransport(target) == transport {
 			t.Fatalf("foreign origin %s received controller transport", target)
 		}
 	}
+}
+
+func FuzzOutputTransferKeepsControllerCredentialsPrivate(f *testing.F) {
+	f.Add([]byte("output"), uint32(1))
+	f.Fuzz(func(t *testing.T, output []byte, generation uint32) {
+		if len(output) == 0 || int64(len(output)) > limits.NodeOutputBytes {
+			return
+		}
+		sum := sha256.Sum256(output)
+		token := hex.EncodeToString(sum[:])
+		var uploads, commits int
+		transport := dataTransport(func(r *http.Request) (*http.Response, error) {
+			body := ""
+			switch r.URL.Path {
+			case "/api/v1/runs/run/nodes/node/output-upload":
+				if r.Header.Get("Authorization") != "Bearer "+token {
+					t.Fatal("upload reservation lost controller authority")
+				}
+				body = `{"url":"/blob","upload_id":"upload","key":"output"}`
+			case "/blob":
+				uploads++
+				for _, header := range []string{"Authorization", store.ClaimHolderHeader, store.ClaimMembershipHeader, store.ClaimReservationHeader, store.ClaimGenerationHeader} {
+					if r.Header.Get(header) != "" {
+						t.Fatalf("signed transfer carried %s", header)
+					}
+				}
+				got, err := io.ReadAll(r.Body)
+				if err != nil || !bytes.Equal(got, output) || r.ContentLength != int64(len(output)) {
+					t.Fatalf("signed upload changed bytes: %v", err)
+				}
+			case "/api/v1/runs/run/nodes/node/output-commit":
+				commits++
+				if r.Header.Get("Authorization") != "Bearer "+token {
+					t.Fatal("commit lost controller authority")
+				}
+			default:
+				t.Fatalf("unexpected output path %s", r.URL.Path)
+			}
+			status := http.StatusOK
+			if r.URL.Path != "/api/v1/runs/run/nodes/node/output-upload" {
+				status = http.StatusNoContent
+			}
+			return &http.Response{StatusCode: status, Body: io.NopCloser(bytes.NewBufferString(body)), Header: make(http.Header), Request: r}, nil
+		})
+		c := NewWithToken("https://controller.test", &http.Client{Transport: transport}, token)
+		ctx := store.WithNodeClaimFence(t.Context(), store.NodeClaimFence{HolderID: token, MembershipID: token, ReservationID: token, ClaimGeneration: int64(generation) + 1})
+		ref, err := c.UploadNodeOutput(ctx, "run", "node", output)
+		if err != nil || ref == nil || ref.SHA256 != token || uploads != 1 || commits != 1 {
+			t.Fatalf("upload result=%+v, uploads=%d, commits=%d, err=%v", ref, uploads, commits, err)
+		}
+	})
 }

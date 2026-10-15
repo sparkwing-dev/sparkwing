@@ -1,74 +1,79 @@
-# W1b continuation audit
+# W1b output cleanup
 
-Base: c45420a8b. This session changes this report only. No implementation,
-legacy deletion or test port is claimed. Net production Go delta: 0 lines.
-The combined store delta remains +3,350 against main, 7,600 above the -4,250
-budget, using the lead's exclusions. The overage remains unjustified.
+Base: ca4b80846. Net production Go delta this session: -135 lines
+(29 added, 164 deleted), including -125 in pkg/store. The combined store
+production delta against main is +3,225, or 7,475 above the -4,250 budget.
+The overage remains unjustified. Legacy store-data retirement is incomplete.
 
-The requested cuts still cross missing foreign contracts on this checkout:
+Deleted the legacy WriteOutputFileDurably API, syncIfMatches, both platform
+sync/rename implementations and their two durability tests. The local writer
+uses a fresh attempt key and ordinary file writes because recoverable output
+may be lost on a crash. Reads retain bounded size and digest verification.
+No alias or replacement durability abstraction was added.
 
-- Output: NodeRow and state_read.go expose neither OutputRecord nor
-  ManifestRecord. schema.sql has no persisted result selectors. NodeResult
-  accepts those keys, and AttachResultRecords validates them, but the terminal
-  read model cannot return the selection. W1 must persist/project the committed
-  selectors, including materialized results without an execution attempt.
-  W2/W3/W9 must carry those keys to authorized readers. Raw output consumers
-  still include Client.FinishNodeWithReason, the nodehost scheduler/memo/retry
-  paths, localState.GetNodeOutput and the controller's node/child output reads.
-  Replacing those reads with a digest or a newest-record guess would discard
-  the committed selection. Deleting these callers also requires replacing
-  W3's active legacy host flow, beyond a minimal store caller migration.
-- Payments (07:40 item 2): C2 PaymentEvent still has only checkout paid,
-  expired and failed kinds. It has no verified card-setup, refund, warning or
-  dispute facts. payment_events still requires a checkout foreign key and
-  restricts event_kind to those three outcomes. W2 owns the expanded verified
-  facts and provider correlation. W1 owns the receipt/schema join. W1b's eight
-  transaction-local mutation owners and rollback/property proofs already exist.
-  No unverified event entry point or foreign event fields were added.
-- Spend/grace: accountUnitBillingTx still returns only error. Node, owner and
-  eval renewals construct LeaseBeat before accounting. billing_awards has no
-  per-award exhaustion anchor. W1 must supply the durable fence and a renewal
-  result whose policy cancellation can commit with charges. A node-only legacy
-  anchor cannot fence trigger, plan and eval awards. The existing immutable
-  issuance/start/checkpoint/final/reap accounting join is present here.
-- Logs: tagged persistence and SubjectUploader already replaced the old upload
-  client. No production code constructs podNode.logs. W2 supplies the declared
-  authenticated LogTransport and SegmentRecorder, and W3 supplies the persisted
-  logseg.Data subject. Fakes already exercise the declared binding. This session
-  did not invent another transport or subject resolver.
-- Harness seeding (09:40 item 1): the seven store-data files already live in
-  pkg/store as tests. internal/storetest supplies opening/rebinding, while
-  teststore.SeedPresence supplies imported terminal attempts with SQL. The
-  current CausePublish transition has no legal publication edge, and
-  TransitionExtra.Attempt is start-only. W1 must provide terminal import seeding
-  before those fixtures can exercise the publication API instead of inserting
-  imported rows. Moving the same INSERTs into another helper would not prove
-  the missing import path.
+The legacy controller output client's PUT/GET now uses W7's existing
+blob.TransferClient. Deleted its duplicate request/response handling and old
+node-protocol transfer header. Controller transport selection still compares
+scheme and full host/port. Signed requests carry no controller credential or
+claim fence. Transfer close errors fail before upload commit or read success.
+The old output upload/read/report APIs remain until the result-selection join.
 
-Remaining W1b integration work after those joins: retire raw output and legacy
-claim-credit helpers with their callers, dispatch expanded verified events in
-SettlePayment, complete the fixture conversion, and consume the committed
-spend/grace result. ReadBlob already rechecks persisted authority and edges.
-Its controller callback composition with ChargeDownload, source-before-run
-binding, and physical allowance eviction remain open. The two authorized
-output catalog removals are already present. No W1 file was edited.
+Invariants checked: a read returns bytes only when they equal the committed
+size and SHA-256; signed output transfers receive no controller bearer or
+claim headers. FuzzOutputReadRequiresExactBytes passed 4,587 generated cases.
+FuzzOutputTransferKeepsControllerCredentialsPrivate passed 5,424 cases.
+The deleted sync tests asserted a stronger crash guarantee than the frozen
+recoverable-data contract. No additional historical acceptance port is claimed.
 
-Fresh evidence:
+Verification:
 
 - Whole-repository go build -p 4 ./... passes.
-- go vet -p 4 ./pkg/store passes.
-- All seven preserved store-data acceptance tests pass in 1.839s:
-  TestStoreCASIntegrity, TestStorePresenceReadSet, TestStoreLargePresenceBudget,
-  TestStoreCacheScope, TestStoreReferenceEdges, TestStoreReachabilityRetention
-  and TestStoreBillingRetention. These were already green before this session.
+- go vet -p 4 ./pkg/store ./pkg/controller/client passes.
+- Seven preserved store-data acceptance tests pass: TestStoreCASIntegrity,
+  TestStorePresenceReadSet, TestStoreLargePresenceBudget, TestStoreCacheScope,
+  TestStoreReferenceEdges, TestStoreReachabilityRetention and
+  TestStoreBillingRetention. These cells were green before this session.
+- Focused output read/transport tests and both fuzz seed suites pass.
+- The broader TestStoreData/TestBlob/TestLogPersistence/TestPayment selection
+  passes in 68.304s, including the complete record-mutation authority property.
+- W7 internal/blob output tests pass in 0.407s.
 - commentcheck -base main is clean across 2,125 files.
-- Checks use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
-  GOCACHE=/tmp/sw-gocache and temporary directories under /tmp/sw-astra-W1b.
-  No pipelines, native placement, provider webhook or PostgreSQL proof ran.
+- The existing socket output-upload integration cannot run: sandbox sockets
+  are refused. The same-origin credential property uses a fake RoundTripper.
+- TestFinishNode_KeepsLocalOutputBytesBesideTheStore fails before output work:
+  legacy CreateRun inserts the removed runs.args_json column. That W1 lifecycle
+  dependency was not changed. No native or provider-HTTP proof is claimed.
 
-Shared files touched: none. No git writes or Sparkwing binaries ran. No new
-mechanism, policy, schema or public API was added. The source-level contract
-checks above are the reason for stopping this session. Worker scratch is
-removed and /tmp/sw-gocache is retained.
+Contract changes needed in other areas:
+
+- W1: persist/project committed output and manifest selectors, including
+  materialized results without an attempt. NodeRow still has neither selector.
+  W2/W3/W9 must carry them to authorized readers before raw output APIs can go.
+- W2: PaymentEvent still declares only checkout paid/expired/failed. Supply
+  verified card-setup, refund, warning and dispute facts and correlation.
+  W1 must extend payment_events beyond its checkout foreign key and three-kind
+  constraint. W1b's transaction-local mutation owners already exist.
+- W1: provide the per-award exhaustion anchor and committed renewal result
+  for spend/grace. accountUnitBillingTx returns only error; node, owner and
+  eval renewals construct LeaseBeat before accounting. Existing legacy node
+  anchors cannot fence all billing units.
+- W1: provide imported terminal-attempt seeding for the fixture conversion.
+  Correction to the prior report: CausePublish has a legal pending-to-terminal
+  edge. TransitionExtra.Attempt is still start-only, so that edge cannot seed
+  imported attempt identity. Seven store-data tests are already relocated,
+  but teststore.SeedPresence still inserts the imported rows directly.
+- W2/W3: supply the authenticated LogTransport/SegmentRecorder and persisted
+  logseg.Data subject to the actual host. Tagged persistence and SubjectUploader
+  exist, but production podNode.logs still has no constructor assignment.
+
+Other open integration: physical allowance eviction, source-before-run data
+binding and ReadBlob/ChargeDownload composition. The two authorized output
+catalog removals remain present. No new pricing or restriction was added.
+
+Shared files touched: pkg/controller/client/output.go and
+pkg/controller/client/output_transport_test.go. No W1 file or lead-owned
+handoff/amendment was edited. No git writes or Sparkwing binaries were run
+after the required orientation. Worker scratch is removed at completion;
+/tmp/sw-gocache is retained.
 
 STATUS: CONTINUE

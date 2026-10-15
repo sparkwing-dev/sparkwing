@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -34,24 +35,16 @@ func (c *Client) UploadNodeOutput(ctx context.Context, runID, nodeID string, dat
 		map[string]any{"size": ref.Size, "sha256": ref.SHA256}, http.StatusOK, &grant); err != nil {
 		return nil, fmt.Errorf("reserve output upload: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.blobURL(grant.URL), bytes.NewReader(data))
-	if err != nil {
-		return nil, err
-	}
-	for k, v := range grant.Headers {
-		if !strings.EqualFold(k, "Content-Length") && !strings.EqualFold(k, "Host") {
-			req.Header.Set(k, v)
-		}
-	}
-	req.ContentLength = ref.Size
-	req.Header.Set(authwire.NodeProtocolHeader, authwire.NodeProtocolVersion)
-	resp, err := c.blobClient(grant.URL).Do(req)
+	ctx, cancel := context.WithTimeout(ctx, outputTransferTimeout)
+	defer cancel()
+	body, err := (blob.TransferClient{Transport: c.blobTransport(grant.URL)}).Transfer(ctx, blob.SignedTransfer{
+		URL: c.blobURL(grant.URL), Headers: grant.Headers, Size: ref.Size, Digest: blob.Digest(ref.SHA256),
+	}, bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("upload output: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode/100 != 2 {
-		return nil, fmt.Errorf("upload output: %w", readHTTPError(resp))
+	if err := body.Close(); err != nil {
+		return nil, err
 	}
 	if err := c.post(ctx, claimNodePath(runID, nodeID, "output-commit"),
 		map[string]string{"upload_id": grant.UploadID}, http.StatusNoContent, nil); err != nil {
@@ -94,28 +87,26 @@ func (c *Client) fetchOutput(ctx context.Context, grant store.OutputReadGrant) (
 	if grant.URL == "" {
 		return []byte("null"), nil
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.blobURL(grant.URL), nil)
-	if err != nil {
-		return nil, err
+	if grant.Size < 0 || grant.Size > limits.NodeOutputBytes {
+		return nil, store.ErrOutputCorrupt
 	}
-	req.Header.Set(authwire.NodeProtocolHeader, authwire.NodeProtocolVersion)
-	resp, err := c.blobClient(grant.URL).Do(req)
+	ctx, cancel := context.WithTimeout(ctx, outputTransferTimeout)
+	defer cancel()
+	body, err := (blob.TransferClient{Transport: c.blobTransport(grant.URL)}).Transfer(ctx, blob.SignedTransfer{
+		URL: c.blobURL(grant.URL), Size: grant.Size, Digest: blob.Digest(grant.SHA256),
+	}, nil)
+	if errors.Is(err, blob.ErrNotFound) {
+		return nil, store.ErrNotFound
+	}
 	if err != nil {
 		return nil, fmt.Errorf("download output: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, store.ErrNotFound
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download output: %w", readHTTPError(resp))
-	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, limits.NodeOutputBytes+1))
-	if err != nil {
+	data, err := io.ReadAll(io.LimitReader(body, limits.NodeOutputBytes+1))
+	if err := errors.Join(err, body.Close()); err != nil {
 		return nil, fmt.Errorf("download output: %w", err)
 	}
 	sum := sha256.Sum256(data)
-	if int64(len(data)) > limits.NodeOutputBytes || int64(len(data)) != grant.Size || hex.EncodeToString(sum[:]) != grant.SHA256 {
+	if int64(len(data)) != grant.Size || hex.EncodeToString(sum[:]) != grant.SHA256 {
 		return nil, fmt.Errorf("download output: %w", store.ErrOutputCorrupt)
 	}
 	return data, nil
@@ -130,12 +121,11 @@ func (c *Client) blobURL(u string) string {
 
 // safety: a signed URL carries its own authority, so the bearer never
 // travels with it, and a URL off this controller never sees its transport.
-func (c *Client) blobClient(u string) *http.Client {
+func (c *Client) blobTransport(u string) http.RoundTripper {
 	base, baseErr := url.Parse(c.baseURL)
 	target, targetErr := url.Parse(c.blobURL(u))
 	if baseErr != nil || targetErr != nil || !strings.EqualFold(base.Scheme, target.Scheme) || !strings.EqualFold(base.Host, target.Host) {
-		return &http.Client{Timeout: outputTransferTimeout, Transport: otelutil.WrapTransport(nil)}
+		return otelutil.WrapTransport(nil)
 	}
-	transport := c.http.Transport
-	return &http.Client{Timeout: outputTransferTimeout, Transport: transport}
+	return c.http.Transport
 }

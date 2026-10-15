@@ -271,7 +271,10 @@ func (s *Store) writeLocalOutput(ctx context.Context, runID, nodeID string, data
 	sum := sha256.Sum256(data)
 	ref := &OutputRef{Key: key, Size: int64(len(data)), SHA256: hex.EncodeToString(sum[:])}
 	path := OutputPath(s.outputDir, key)
-	if err := WriteOutputFileDurably(path, data); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return nil, err
 	}
 	if err := s.RecordLocalOutput(ctx, runID, nodeID, *ref, time.Now()); err != nil {
@@ -352,62 +355,4 @@ type OutputReadGrant struct {
 	Expires time.Time `json:"expires,omitzero"`
 	// SourceRunID names the run the output was read from.
 	SourceRunID string `json:"source_run_id,omitempty"`
-}
-
-// WriteOutputFileDurably leaves exactly data at path: an existing file that
-// already matches is synced and kept, and anything else is replaced through a
-// synced temporary file, so a crash leaves either the old file or the whole
-// new one.
-func WriteOutputFileDurably(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	if matched, err := syncIfMatches(path, data); err != nil {
-		return err
-	} else if matched {
-		return syncDir(dir)
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, ".output-*")
-	if err != nil {
-		return err
-	}
-	_, err = tmp.Write(data)
-	if err == nil {
-		err = tmp.Sync()
-	}
-	if closeErr := tmp.Close(); err == nil {
-		err = closeErr
-	}
-	if err == nil {
-		err = renameOutputFile(tmp.Name(), path)
-	}
-	if err != nil {
-		return errors.Join(err, os.Remove(tmp.Name()))
-	}
-	return syncDir(dir)
-}
-
-// safety: a file found from an earlier run may still sit only in the page
-// cache, so it is synced before anything records it done, and its digest is
-// read back from the synced file.
-func syncIfMatches(path string, data []byte) (bool, error) {
-	f, err := openOutputForSync(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = f.Close() }()
-	if err := f.Sync(); err != nil {
-		return false, err
-	}
-	h := sha256.New()
-	n, err := io.Copy(h, f)
-	if err != nil {
-		return false, err
-	}
-	want := sha256.Sum256(data)
-	return n == int64(len(data)) && string(h.Sum(nil)) == string(want[:]), nil
 }
