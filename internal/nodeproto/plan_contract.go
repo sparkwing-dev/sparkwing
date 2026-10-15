@@ -145,11 +145,12 @@ type SecretMatcher interface{ ContainsSecret(identifier string) bool }
 
 // safety: ValidationContext supplies host facts without admitting those fields in SDK JSON.
 type ValidationContext struct {
-	Placement    Placement
-	Secrets      SecretMatcher
-	Expansion    bool
-	ExistingJobs []JobSpec
-	SourceJob    string
+	Placement           Placement
+	Secrets             SecretMatcher
+	Expansion           bool
+	ExistingJobs        []JobSpec
+	ExistingConcurrency []ConcurrencySpec
+	SourceJob           string
 }
 
 // safety: ValidatePlan is the only strict decoder for initial plans and generated expansions.

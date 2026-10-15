@@ -27,6 +27,10 @@ type host struct {
 }
 
 func (h *host) Context(ctx context.Context) context.Context {
+	return h.context(ctx, "")
+}
+
+func (h *host) context(ctx context.Context, job string) context.Context {
 	ctx, cancel := context.WithCancel(ctx)
 	if h.ctx.Err() != nil {
 		cancel()
@@ -35,8 +39,15 @@ func (h *host) Context(ctx context.Context) context.Context {
 	context.AfterFunc(ctx, func() { stop() })
 	rc := h.runContext(h.opts.Run.Pipeline)
 	r := h.opts.Runner
-	return sdkserve.DefaultOperations.Context(ctx, rc, nodeproto.RunnerIdentity{Name: r.Name, Type: r.Type, Labels: r.Labels}, h)
+	return sdkserve.DefaultOperations.Context(ctx, rc, nodeproto.RunnerIdentity{Name: r.Name, Type: r.Type, Labels: r.Labels}, boundServices{h, job})
 }
+
+type boundServices struct {
+	*host
+	job string
+}
+
+func (s boundServices) Emit(frame nodeproto.FrameLog) { s.host.emit(frame, s.job) }
 func (h *host) Plan(ctx context.Context, name string, args map[string]string) (nodeproto.PlanDoc, error) {
 	ctx = h.Context(ctx)
 	if err := ctx.Err(); err != nil {
@@ -52,8 +63,9 @@ func (h *host) Plan(ctx context.Context, name string, args map[string]string) (n
 	}
 	return nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: h})
 }
+
 func (h *host) RunStep(ctx context.Context, p *sparkwing.Plan, job, step string) (json.RawMessage, error) {
-	ctx = h.Context(ctx)
+	ctx = h.context(ctx, job)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -66,6 +78,7 @@ func (h *host) RunStep(ctx context.Context, p *sparkwing.Plan, job, step string)
 	}
 	return result.Output, nil
 }
+
 func (h *host) Eval(ctx context.Context, p *sparkwing.Plan, job, closure string, input json.RawMessage) (json.RawMessage, error) {
 	ctx = h.Context(ctx)
 	if err := ctx.Err(); err != nil {
@@ -80,6 +93,7 @@ func (h *host) Eval(ctx context.Context, p *sparkwing.Plan, job, closure string,
 	}
 	return result.Value, nil
 }
+
 func (h *host) Records() []sparkwing.LogRecord {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -88,6 +102,7 @@ func (h *host) Records() []sparkwing.LogRecord {
 	_ = json.Unmarshal(raw, &records)
 	return records
 }
+
 func (h *host) Masks() []string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -109,6 +124,7 @@ func (h *host) Secret(ctx context.Context, name string) (string, bool, error) {
 	}
 	return v.Value, v.Masked, nil
 }
+
 func (h *host) Output(ctx context.Context, job string) (json.RawMessage, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -119,19 +135,31 @@ func (h *host) Output(ctx context.Context, job string) (json.RawMessage, error) 
 	}
 	return append(json.RawMessage(nil), raw...), nil
 }
+
 func (h *host) Latest(ctx context.Context, p, j string, _ time.Duration) (json.RawMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if h.opts.Latest == nil {
 		return nil, sparkwing.ErrRefAbsent
 	}
 	return h.opts.Latest(ctx, p, j)
 }
+
 func (h *host) RunPipeline(ctx context.Context, r sdkserve.ChildRequest) (json.RawMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if h.opts.RunPipeline == nil {
 		return nil, errors.New("fake host has no child pipeline handler")
 	}
 	return h.opts.RunPipeline(ctx, r.Pipeline, r.Args)
 }
+
 func (h *host) OIDC(ctx context.Context, a string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if h.opts.OIDCToken == nil {
 		return "", sparkwing.ErrOIDCUnavailable
 	}
@@ -167,6 +195,7 @@ func (h *host) Mask(ctx context.Context, value string) error {
 	h.masks = append(h.masks, value)
 	return nil
 }
+
 func (h *host) ContainsSecret(id string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -177,7 +206,8 @@ func (h *host) ContainsSecret(id string) bool {
 	}
 	return false
 }
-func (h *host) Emit(frame nodeproto.FrameLog) {
+
+func (h *host) emit(frame nodeproto.FrameLog, job string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	mask := func(s string) string {
@@ -201,8 +231,9 @@ func (h *host) Emit(frame nodeproto.FrameLog) {
 	if frame.Event == "summary" {
 		attrs["markdown"] = message
 	}
-	h.records = append(h.records, sparkwing.LogRecord{TS: ts, Level: frame.Level, Step: frame.Step, Event: frame.Event, Msg: message, Attrs: attrs})
+	h.records = append(h.records, sparkwing.LogRecord{TS: ts, JobID: job, Level: frame.Level, Step: frame.Step, Event: frame.Event, Msg: message, Attrs: attrs})
 }
+
 func maskAttrs(v any, mask func(string) string) {
 	switch value := v.(type) {
 	case map[string]any:
@@ -223,6 +254,7 @@ func maskAttrs(v any, mask func(string) string) {
 		}
 	}
 }
+
 func newHost(opts Options) Host {
 	opts.Secrets = maps.Clone(opts.Secrets)
 	outputs := make(map[string]json.RawMessage, len(opts.Outputs))

@@ -33,6 +33,14 @@ func TestProtocol(t *testing.T) {
 					continue
 				}
 				t.Run(target.ID, func(t *testing.T) {
+					if scenario.ID == "protocol-version-and-hard-cut" && target.ID == "local-go-"+runtime.GOOS {
+						testGoSDKVersionAndHardCut(t)
+						return
+					}
+					if scenario.ID == "protocol-hello-and-handles" && target.ID == "local-go-"+runtime.GOOS {
+						testGoSDKHelloAndHandles(t)
+						return
+					}
 					if scenario.ID == "protocol-mask-acknowledgement" && target.ID == "local-go-"+runtime.GOOS {
 						t.Run("sdk-service-contract", testGoSDKMaskAcknowledgement)
 						t.Skip("real-host registration requires the missing C2 acknowledged Mask route contract")

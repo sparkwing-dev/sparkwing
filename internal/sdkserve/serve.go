@@ -103,9 +103,17 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, cfg Config) error {
 			continue
 		}
 		switch req.Op {
-		case nodeproto.OpDescribe, nodeproto.OpPlan:
-			s.workers.Wait()
-			s.execute(ctx, req)
+		case nodeproto.OpDescribe:
+			run := s.run
+			s.workers.Add(1)
+			go func() {
+				defer s.workers.Done()
+				result, err := s.execute(ctx, req, run)
+				s.reply(req.ID, result, err)
+			}()
+		case nodeproto.OpPlan:
+			result, err := s.execute(ctx, req, s.run)
+			s.reply(req.ID, result, err)
 		case nodeproto.OpCancel:
 			key := [2]string{req.Job, req.Step}
 			s.mu.Lock()
@@ -115,39 +123,7 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, cfg Config) error {
 			s.mu.Unlock()
 			s.reply(req.ID, struct{}{}, nil)
 		default:
-			if (req.Op == nodeproto.OpRunStep || req.Op == nodeproto.OpEval) && s.planned != nil && s.hello.Binding != nil {
-				if req.Op == nodeproto.OpEval {
-					req.Job = s.hello.Binding.JobID
-				}
-				if prepare, ok := s.cfg.Operations.(interface {
-					Prepare(any, nodeproto.Request) error
-				}); ok {
-					if err := prepare.Prepare(s.planned, req); err != nil {
-						s.reply(req.ID, nil, err)
-						continue
-					}
-				}
-			}
-			rctx, stop := context.WithCancel(ctx)
-			key := [2]string{req.Job, req.Step}
-			if req.Op == nodeproto.OpRunStep {
-				s.mu.Lock()
-				if _, ok := s.steps[key]; ok {
-					s.mu.Unlock()
-					stop()
-					s.reply(req.ID, nil, protocolError("step already running"))
-					continue
-				}
-				s.steps[key] = stop
-				s.mu.Unlock()
-			}
-			s.workers.Add(1)
-			go func() {
-				defer s.workers.Done()
-				defer stop()
-				defer func() { s.mu.Lock(); delete(s.steps, key); s.mu.Unlock() }()
-				s.execute(rctx, req)
-			}()
+			s.start(ctx, req)
 		}
 	}
 	if ctx.Err() != nil {
@@ -161,9 +137,59 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, cfg Config) error {
 	return readErr
 }
 
+func (s *server) start(ctx context.Context, req nodeproto.Request) {
+	if s.planned == nil {
+		s.reply(req.ID, nil, &apierr.Error{Code: apierr.NoPlan, Message: "plan is required before execution"})
+		return
+	}
+	if s.hello.Binding == nil || (req.Op == nodeproto.OpRunStep && s.hello.Binding.JobID != req.Job) {
+		s.reply(req.ID, nil, protocolError("request does not match the process job binding"))
+		return
+	}
+	if req.Op == nodeproto.OpEval {
+		req.Job = s.hello.Binding.JobID
+	}
+	key := [2]string{req.Job, req.Step}
+	if req.Op == nodeproto.OpRunStep {
+		s.mu.Lock()
+		_, running := s.steps[key]
+		s.mu.Unlock()
+		if running {
+			s.reply(req.ID, nil, protocolError("step already running"))
+			return
+		}
+	}
+	if prepare, ok := s.cfg.Operations.(interface {
+		Prepare(any, nodeproto.Request) error
+	}); ok {
+		if err := prepare.Prepare(s.planned, req); err != nil {
+			s.reply(req.ID, nil, err)
+			return
+		}
+	}
+	ctx, stop := context.WithCancel(ctx)
+	if req.Op == nodeproto.OpRunStep {
+		s.mu.Lock()
+		s.steps[key] = stop
+		s.mu.Unlock()
+	}
+	s.workers.Add(1)
+	run := s.run
+	go func() {
+		defer s.workers.Done()
+		defer stop()
+		result, err := s.execute(ctx, req, run)
+		s.mu.Lock()
+		delete(s.steps, key)
+		s.mu.Unlock()
+		s.reply(req.ID, result, err)
+	}()
+}
+
 func protocolError(message string) error {
 	return &apierr.Error{Code: apierr.ProtocolError, Message: message}
 }
+
 func (s *server) negotiate(req nodeproto.Request) {
 	if s.hello != nil {
 		s.reply(req.ID, nil, protocolError("hello is allowed once"))
@@ -177,16 +203,12 @@ func (s *server) negotiate(req nodeproto.Request) {
 	s.reply(req.ID, nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: s.cfg.SDKVersion}, Features: []string{}}, nil)
 }
 
-func (s *server) execute(ctx context.Context, req nodeproto.Request) {
-	var result any
-	var err error
+func (s *server) execute(ctx context.Context, req nodeproto.Request, rc nodeproto.RunContext) (result any, err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			err = &apierr.Error{Code: apierr.SDKError, Message: fmt.Sprint(p)}
 		}
-		s.reply(req.ID, result, err)
 	}()
-	rc := s.run
 	if req.Run != nil {
 		rc = *req.Run
 	}
@@ -201,20 +223,12 @@ func (s *server) execute(ctx context.Context, req nodeproto.Request) {
 	case nodeproto.OpPlan:
 		if s.planSeen {
 			err = protocolError("plan is allowed once")
-			return
+			return result, err
 		}
 		s.planSeen = true
 		s.run = rc
 		s.planned, result, err = s.cfg.Operations.Plan(ctx, req.Pipeline, req.Args, rc)
 	case nodeproto.OpRunStep, nodeproto.OpEval:
-		if s.planned == nil {
-			err = &apierr.Error{Code: apierr.NoPlan, Message: "plan is required before execution"}
-			return
-		}
-		if s.hello.Binding == nil || (req.Op == nodeproto.OpRunStep && s.hello.Binding.JobID != req.Job) {
-			err = protocolError("request does not match the process job binding")
-			return
-		}
 		if req.Op == nodeproto.OpRunStep {
 			result, err = s.cfg.Operations.RunStep(ctx, s.planned, req)
 		} else {
@@ -223,7 +237,9 @@ func (s *server) execute(ctx context.Context, req nodeproto.Request) {
 	default:
 		err = &apierr.Error{Code: apierr.UnknownOp, Message: "unsupported operation"}
 	}
+	return result, err
 }
+
 func (s *server) reply(id string, result any, err error) {
 	r := nodeproto.Reply{ID: id, OK: err == nil}
 	if err == nil {

@@ -7,12 +7,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/protofd"
 	"github.com/sparkwing-dev/sparkwing/tests/acceptance/testdata/protocolgo"
 )
 
@@ -57,28 +55,19 @@ type GoSDKProcessResult struct {
 
 // RunGoSDKProcessFixture executes the same pipeline used by the public fake-host comparison.
 func RunGoSDKProcessFixture(ctx context.Context, routeOrigin string, jobs ...string) (GoSDKProcessResult, error) {
-	dir, err := os.MkdirTemp("", "sparkwing-go-process-*")
+	bin, cleanup, err := BuildGoSDKFixture(ctx)
 	if err != nil {
 		return GoSDKProcessResult{}, err
 	}
-	defer os.RemoveAll(dir)
-	bin := filepath.Join(dir, "pipeline")
-	if runtime.GOOS == "windows" {
-		bin += ".exe"
-	}
-	build := exec.CommandContext(ctx, "go", "build", "-p", "4", "-o", bin, goSDKModule+"/tests/acceptance/testdata/protocolgo/cmd")
-	build.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-buildvcs=false")
-	if output, err := build.CombinedOutput(); err != nil {
-		return GoSDKProcessResult{}, fmt.Errorf("compile protocol fixture: %w: %s", err, strings.TrimSpace(string(output)))
-	}
+	defer cleanup()
 	result := GoSDKProcessResult{Steps: make(map[string]nodeproto.RunResult)}
-	plan, _, err := runGoSDKSession(ctx, bin, dir, "", routeOrigin)
+	plan, _, err := runGoSDKSession(ctx, bin, "", routeOrigin)
 	if err != nil {
 		return result, err
 	}
 	result.Plan = plan
 	for _, job := range jobs {
-		planned, step, err := runGoSDKSession(ctx, bin, dir, job, routeOrigin)
+		planned, step, err := runGoSDKSession(ctx, bin, job, routeOrigin)
 		if err != nil {
 			return result, fmt.Errorf("%s session: %w", job, err)
 		}
@@ -96,48 +85,13 @@ func equalPlanDoc(a, b nodeproto.PlanDoc) bool {
 	return bytes.Equal(left, right)
 }
 
-func runGoSDKSession(ctx context.Context, bin, dir, job, routeOrigin string) (nodeproto.PlanDoc, nodeproto.RunResult, error) {
-	requestR, requestW, err := os.Pipe()
+func runGoSDKSession(ctx context.Context, bin, job, routeOrigin string) (nodeproto.PlanDoc, nodeproto.RunResult, error) {
+	process, err := StartGoSDKProcess(ctx, bin)
 	if err != nil {
 		return nodeproto.PlanDoc{}, nodeproto.RunResult{}, err
 	}
-	frameR, frameW, err := os.Pipe()
-	if err != nil {
-		_ = requestR.Close()
-		_ = requestW.Close()
-		return nodeproto.PlanDoc{}, nodeproto.RunResult{}, err
-	}
-	defer requestW.Close()
-	defer frameR.Close()
-	command := exec.CommandContext(ctx, bin, protofd.Arg)
-	command.Dir = dir
-	for _, item := range os.Environ() {
-		if !strings.HasPrefix(item, "SPARKWING_") {
-			command.Env = append(command.Env, item)
-		}
-	}
-	if err := goSDKCommandPipes(command, requestR, frameW); err != nil {
-		_ = requestR.Close()
-		_ = frameW.Close()
-		return nodeproto.PlanDoc{}, nodeproto.RunResult{}, err
-	}
-	var stdout, stderr bytes.Buffer
-	command.Stdout, command.Stderr = &stdout, &stderr
-	if err := command.Start(); err != nil {
-		_ = requestR.Close()
-		_ = frameW.Close()
-		return nodeproto.PlanDoc{}, nodeproto.RunResult{}, err
-	}
-	_ = requestR.Close()
-	_ = frameW.Close()
-	waited := false
-	defer func() {
-		if !waited {
-			_ = command.Process.Kill()
-			_ = command.Wait()
-		}
-	}()
-	reader := nodeproto.NewReader(frameR)
+	defer process.Close()
+	requestW, reader := process.request, process.frames
 	hello := nodeproto.Request{
 		ID: "hello", Op: nodeproto.OpHello, Protocol: nodeproto.Version,
 		Engine: &nodeproto.EngineIdentity{Version: "fixture"},
@@ -203,16 +157,11 @@ func runGoSDKSession(ctx context.Context, bin, dir, job, routeOrigin string) (no
 			return plan, step, fmt.Errorf("%s has an invalid body result", job)
 		}
 	}
-	if err := requestW.Close(); err != nil {
+	if err := process.Finish(); err != nil {
 		return plan, step, err
 	}
-	err = command.Wait()
-	waited = true
-	if err != nil {
-		return plan, step, fmt.Errorf("SDK process: %w: %s", err, stderr.String())
-	}
-	if stdout.Len() != 0 {
-		return plan, step, fmt.Errorf("SDK process wrote stdout: %s", stdout.String())
+	if process.Stdout() != "" {
+		return plan, step, fmt.Errorf("SDK process wrote stdout: %s", process.Stdout())
 	}
 	return plan, step, nil
 }

@@ -2,7 +2,7 @@
 
 The author SDK owns declarations, typed input and output access, protocol serving, and calls to host services. The host owns YAML, placement, concurrency keys, authorization, secret preflight, debug filtering, risk enforcement, state transitions, and storage. `sparkwingtest` owns isolated fake-host fixtures. `RuntimePlumbing`, including every exported context key and function field in `runtime_bridge.go`, is deleted from the target public surface.
 
-`*_contract.go` declares the changed surface. Its bodies panic until implementation. Existing declarations marked Retain below supply unchanged signatures, not a claim that their old implementation satisfies the target behavior. Old and Delete entries are excluded from the target API. This inventory is the boundary while old runtime code still compiles. There are no forwarding aliases.
+`*_contract.go` declares the changed surface. Retain entries keep their author-facing signatures. Delete entries are excluded from the public API, including forwarding aliases.
 
 ## Invariants
 
@@ -19,7 +19,7 @@ The author SDK owns declarations, typed input and output access, protocol servin
 - Retry attempts stay under one claim. `RetryAuto` and the old `RetryConfig.Auto` field are outside the target. `RetryConfig` retains Attempts and Backoff only. The host refuses values above its ceiling rather than clamping.
 - Final outcome constants are `Success`, `Failed`, `Cancelled`, `Skipped`, `Superseded`, `Memoized`, with values `success`, `failed`, `cancelled`, `skipped`, `superseded`, `memoized`. `Satisfied`, `Cached`, `SkippedConcurrent` and `Paused` are excluded. Reasons carry concurrency skips. `Outcome.Terminal` must reject unknown values. Step failure policy wire values are `fail_fast` and `collect_all`, and concurrency cancellation is `cancel_others`.
 - Secrets are declared once in describe through `SecretsProvider.Secrets`, resolved lazily with `Secret` or `PipelineSecrets`. Plain values use `Variable` and `MustVariable`. Registered secret values cannot occur in job, step, group or approval IDs. The shared protocol validator enforces that rule before storing IDs.
-- `sparkwingtest.Host.Context` installs only the fixture's runner, inputs, secret classification and service answers. `Plan`, `RunStep` and `Eval` exercise SDK operations without controller/store imports. Records and masks are snapshots. `Close` cancels outstanding fake requests and releases resources. Fixtures share no mutable global state.
+- `sparkwingtest.Host.Context` installs only the fixture's runner, inputs, secret classification and service answers. `Plan`, `RunStep` and `Eval` exercise SDK operations without controller/store imports. RunStep records carry the host-bound job. Plan and eval records go to run logs without a job. Records and masks are snapshots. Cancelled service calls never invoke fixture callbacks. `Close` cancels outstanding fake requests and releases resources. Fixtures share no mutable global state.
 
 ## Acceptance evidence required
 

@@ -15,8 +15,8 @@ type RunContext struct {
 	// (e.g. "lint", "build-test-deploy").
 	Pipeline string
 
-	// Git is the run's view of the cloned working tree. Same instance
-	// as `Runtime().Git`. Live methods (IsDirty, FilesetHash, …) shell
+	// Git is the run's view of the cloned working tree.
+	// Live methods (IsDirty, FilesetHash, …) shell
 	// out fresh each call; data fields (SHA, Branch, Repo, RepoURL)
 	// are the trigger-time snapshot.
 	Git *Git

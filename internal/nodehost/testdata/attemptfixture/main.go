@@ -98,7 +98,7 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 			sparkwing.AnnotateOld(ctx, "note "+token)
 			// The command copies its own session ledger record, which exists
 			// only while it runs, into the marker directory.
-			script := `rec="$SPARKWING_HOME/sessions/$SPARKWING_RUN_ID/$SPARKWING_NODE_ID/$PPID-$$.json"; i=0; ` +
+			script := `rec="$SPARKWING_HOME/sessions/$SPARKWING_RUN_ID/$SPARKWING_JOB_ID/$PPID-$$.json"; i=0; ` +
 				`while [ ! -f "$rec" ] && [ $i -lt 200 ]; do sleep 0.05; i=$((i+1)); done; ` +
 				`cp "$rec" "` + in.Marker + `/ledger.json"; echo exec ` + token + ` ` + in.Pass
 			if _, err := sparkwing.Exec(ctx, "sh", "-c", script).Dir(in.Marker).Run(); err != nil {

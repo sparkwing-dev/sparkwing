@@ -234,7 +234,7 @@ func TestFakeHostCleanupDoesNotUseAmbientLedger(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
 	t.Setenv("SPARKWING_RUN_ID", "ambient-run")
-	t.Setenv("SPARKWING_NODE_ID", "ambient-job")
+	t.Setenv("SPARKWING_JOB_ID", "ambient-job")
 	host := sparkwingtest.New(sparkwingtest.Options{})
 	t.Cleanup(func() { _ = host.Close() })
 	release, err := cleanup.Register(host.Context(t.Context()), cleanup.Spec{Argv: []string{"fixture-cleanup"}})

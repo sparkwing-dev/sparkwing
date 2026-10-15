@@ -83,8 +83,8 @@ type runnerCtxKey struct{}
 
 // Runner returns the RunnerInfo the orchestrator installed for the
 // current job. Returns nil when no orchestrator has installed one
-// (inside Plan(), in unit tests that haven't called WithRunner,
-// in code paths that don't carry the dispatch context).
+// in code paths that don't carry the dispatch context. Tests can
+// supply a granted runner through sparkwingtest.Options.
 //
 // Adapters branching on the result should treat nil and an
 // unconfigured runner the same way the local default does -- the

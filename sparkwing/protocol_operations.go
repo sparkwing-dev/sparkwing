@@ -33,6 +33,7 @@ func sdkVersion() string {
 	}
 	return "development"
 }
+
 func (sdkOperations) Context(ctx context.Context, rc nodeproto.RunContext, runner nodeproto.RunnerIdentity, s sdkserve.Services) context.Context {
 	ctx = sdkserve.WithServices(ctx, s)
 	ctx = context.WithValue(ctx, keyLogger, protocolLogger{s: s})
@@ -66,6 +67,7 @@ func (sdkOperations) Context(ctx context.Context, rc nodeproto.RunContext, runne
 	}))
 	return ctx
 }
+
 func (sdkOperations) Plan(ctx context.Context, name string, args map[string]string, run nodeproto.RunContext) (built any, document nodeproto.PlanDoc, failure error) {
 	defer func() {
 		if recover() != nil {
@@ -112,6 +114,7 @@ func (sdkOperations) Plan(ctx context.Context, name string, args map[string]stri
 	}
 	return p, doc, nil
 }
+
 func (sdkOperations) RunStep(ctx context.Context, built any, req nodeproto.Request) (result nodeproto.RunResult, err error) {
 	p, ok := built.(*Plan)
 	if !ok {
@@ -159,6 +162,7 @@ func (sdkOperations) RunStep(ctx context.Context, built any, req nodeproto.Reque
 	result.Outcome = "success"
 	return result, nil
 }
+
 func executionContext(ctx context.Context, p *Plan, n *JobNode, req nodeproto.Request) (context.Context, error) {
 	ctx = context.WithValue(ctx, keyNode, n.id)
 	ctx = context.WithValue(ctx, keyInputs, p.inputs)
@@ -182,6 +186,7 @@ func executionContext(ctx context.Context, p *Plan, n *JobNode, req nodeproto.Re
 	}
 	return ctx, nil
 }
+
 func (sdkOperations) Eval(ctx context.Context, built any, req nodeproto.Request) (result nodeproto.EvalResult, err error) {
 	p, ok := built.(*Plan)
 	if !ok {
@@ -215,6 +220,7 @@ func (sdkOperations) Eval(ctx context.Context, built any, req nodeproto.Request)
 	result.Value, err = json.Marshal(value)
 	return result, err
 }
+
 func evaluate(ctx context.Context, p *Plan, n *JobNode, id string, input json.RawMessage) (any, error) {
 	for i, f := range n.skipIf {
 		if id == closureID(n.id, "skip", i) {
@@ -307,7 +313,11 @@ func evaluate(ctx context.Context, p *Plan, n *JobNode, id string, input json.Ra
 		if err != nil {
 			return nil, err
 		}
-		if _, err = nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: declarationSecrets(ctx, p.secretInputs), Expansion: true, ExistingJobs: planDocument(p).Jobs, SourceJob: n.id}); err != nil {
+		existing := planDocument(p)
+		if _, err = nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{
+			Placement: nodeproto.PlacementLocal, Secrets: declarationSecrets(ctx, p.secretInputs),
+			Expansion: true, ExistingJobs: existing.Jobs, ExistingConcurrency: existing.Concurrency, SourceJob: n.id,
+		}); err != nil {
 			return nil, err
 		}
 		p.mu.Lock()
@@ -325,6 +335,7 @@ func evaluate(ctx context.Context, p *Plan, n *JobNode, id string, input json.Ra
 	}
 	return nil, sdkError(apierr.UnknownClosure, "closure is not declared")
 }
+
 func sdkError(code apierr.Code, message string) *apierr.Error {
 	return &apierr.Error{Code: code, Message: message}
 }
@@ -371,6 +382,7 @@ func closureJob(p *Plan, id string) *JobNode {
 	}
 	return nil
 }
+
 func hasClosure(c nodeproto.ClosureSpec, id string) bool {
 	if id == "" {
 		return false
@@ -434,6 +446,7 @@ type combinedSecrets struct {
 func (s combinedSecrets) ContainsSecret(id string) bool {
 	return s.values.ContainsSecret(id) || (s.host != nil && s.host.ContainsSecret(id))
 }
+
 func declarationSecrets(ctx context.Context, values []string) nodeproto.SecretMatcher {
 	host, _ := sdkserve.ServicesFrom(ctx).(nodeproto.SecretMatcher)
 	return combinedSecrets{values: values, host: host}

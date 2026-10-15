@@ -18,7 +18,7 @@ import (
 //
 // Remote-handoff primitive: RunAndAwait always submits the new run
 // as a trigger through the controller, which dispatches it to a
-// runner that fetches source via gitcache and executes the pipeline
+// runner that acquires the sealed source and executes the pipeline
 // in a separate process. That makes it the right tool for
 // cross-process work (different repo, different fleet, different
 // schedule) and the wrong tool for in-process composition. When

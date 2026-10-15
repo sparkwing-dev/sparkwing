@@ -38,6 +38,8 @@ func (Pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in Inputs, _ spark
 	sparkwing.Job(plan, "failure", func(context.Context) error {
 		return errors.New("fixture failure")
 	})
+	sparkwing.Job(plan, "probe", probe{wait: in.Name == "cancel"}).
+		SkipIf(func(context.Context) bool { return false })
 	return nil
 }
 

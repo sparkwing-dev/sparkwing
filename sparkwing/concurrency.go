@@ -135,6 +135,18 @@ func (g *ConcurrencyGroup) Name() string { return g.name }
 // Limit returns the group's declared budget.
 func (g *ConcurrencyGroup) Limit() ConcurrencyLimit { return g.limit }
 
+// String includes the group's capacity and effective scope and saturation policy.
+func (g *ConcurrencyGroup) String() string {
+	scope, onLimit := g.limit.Scope, g.limit.OnLimit
+	if scope == "" {
+		scope = ScopeGlobal
+	}
+	if onLimit == "" {
+		onLimit = Queue
+	}
+	return fmt.Sprintf("%s(capacity %d, scope %s, on-limit %s)", g.name, g.limit.Capacity, scope, onLimit)
+}
+
 // Concurrency enrolls the node in concurrency group g with the given
 // admission cost (default 1). The node competes with the group's other
 // members for g's budget; how it behaves at the limit follows g's

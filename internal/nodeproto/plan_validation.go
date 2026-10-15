@@ -67,8 +67,15 @@ func validatePlan(raw json.RawMessage, context ValidationContext) (PlanDoc, erro
 			return PlanDoc{}, planInvalid("plan", "unknown placement")
 		}
 	}
+	if err := v.validateConcurrency(context.ExistingConcurrency, "existing_concurrency"); err != nil {
+		return PlanDoc{}, err
+	}
 	for i, job := range context.ExistingJobs {
-		if err := v.registerJob(job, fmt.Sprintf("existing_jobs[%d]", i)); err != nil {
+		path := fmt.Sprintf("existing_jobs[%d]", i)
+		if err := v.registerJob(job, path); err != nil {
+			return PlanDoc{}, err
+		}
+		if err := v.validateConcurrency(job.Concurrency, path+".concurrency"); err != nil {
 			return PlanDoc{}, err
 		}
 	}
@@ -158,8 +165,12 @@ func (v *planValidator) registerClosures(c ClosureSpec, path, jobID string) erro
 		kind string
 		ids  []string
 	}{
-		{"skip_if", c.SkipIf}, {"before_run", c.BeforeRun}, {"verify", []string{c.Verify}},
-		{"after_run", c.AfterRun}, {"memo_key", []string{c.MemoKey}}, {"generate", c.Generate},
+		{"skip_if", c.SkipIf},
+		{"before_run", c.BeforeRun},
+		{"verify", []string{c.Verify}},
+		{"after_run", c.AfterRun},
+		{"memo_key", []string{c.MemoKey}},
+		{"generate", c.Generate},
 	} {
 		kind, ids := entry.kind, entry.ids
 		for i, id := range ids {

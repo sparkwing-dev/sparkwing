@@ -53,7 +53,7 @@ func Register(ctx context.Context, spec Spec) (release func(), err error) {
 		return registerWithHost(ctx, c, spec)
 	}
 	run := os.Getenv("SPARKWING_RUN_ID")
-	node := os.Getenv("SPARKWING_NODE_ID")
+	node := os.Getenv("SPARKWING_JOB_ID")
 	if run == "" || node == "" || len(spec.Argv) == 0 {
 		return func() {}, nil
 	}

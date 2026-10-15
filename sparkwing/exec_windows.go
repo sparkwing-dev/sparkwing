@@ -179,7 +179,7 @@ func recordStepSession(ctx context.Context, cmd *exec.Cmd, display string, job s
 	run := os.Getenv("SPARKWING_RUN_ID")
 	node := nodeFromContext(ctx)
 	if node == "" {
-		node = os.Getenv("SPARKWING_NODE_ID")
+		node = os.Getenv("SPARKWING_JOB_ID")
 	}
 	if run == "" || node == "" || job.job == nil || cmd.Process == nil {
 		return func() {}
