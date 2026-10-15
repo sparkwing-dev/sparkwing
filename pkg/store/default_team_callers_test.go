@@ -82,7 +82,6 @@ var defaultTeamCallers = map[string]string{
 	"internal/orchestrator.ReconcileSubmissionEnvironments":            defaultTeamWorktree,
 	"internal/orchestrator.RunSummaryLocal":                            defaultTeamView,
 	"internal/orchestrator.RunTimeline":                                defaultTeamView,
-	"internal/orchestrator.cancelClaimedTriggerIfRequested":            defaultTeamConsumer,
 	"internal/orchestrator.cleanupRefWorktree":                         defaultTeamWorktree,
 	"internal/orchestrator.finishCancelledClaimedTrigger":              defaultTeamConsumer,
 	"internal/orchestrator.finishClaimedTriggerFailure":                defaultTeamConsumer,

@@ -201,52 +201,6 @@ func (p *livePusher) close() {
 	<-p.done
 }
 
-// EngineNodeLog writes the engine's own lines into one node of a run,
-// such as a trigger's compile output, as segments when the controller
-// keeps them and nowhere otherwise. Close seals it.
-type EngineNodeLog struct {
-	controllerURL, token, runID, nodeID string
-	logger                              *slog.Logger
-
-	mu     sync.Mutex
-	opened bool
-	sink   *nodeLogSink
-}
-
-// NewEngineNodeLog returns a log for nodeID of runID that opens on the
-// first Append, under the claim fence that Append's context carries.
-func NewEngineNodeLog(controllerURL, token, runID, nodeID string, logger *slog.Logger) *EngineNodeLog {
-	return &EngineNodeLog{controllerURL: controllerURL, token: token, runID: runID, nodeID: nodeID, logger: logger}
-}
-
-// Append writes data, one or more lines, to the node's log. It outlives
-// ctx's cancellation, so a line about a failure still lands.
-func (l *EngineNodeLog) Append(ctx context.Context, data []byte) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if !l.opened {
-		l.opened = true
-		if l.controllerURL != "" {
-			l.sink, _ = openNodeLogSinkLive(context.WithoutCancel(ctx), client.NewWithToken(l.controllerURL, nil, l.token),
-				l.runID, l.nodeID, false, l.logger)
-		}
-	}
-	if l.sink == nil {
-		return nil
-	}
-	return l.sink.sink.Append(data, "", 0, 0)
-}
-
-// Close seals the log when it went to segments.
-func (l *EngineNodeLog) Close(ctx context.Context) {
-	l.mu.Lock()
-	sink := l.sink
-	l.mu.Unlock()
-	if sink != nil {
-		sink.close(ctx, false)
-	}
-}
-
 // safety: one process hosts every sink of the nodes it supervises, so a
 // heartbeat reply any of its clients receives can reach the right sink.
 var watchedSinks sync.Map

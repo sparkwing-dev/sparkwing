@@ -386,8 +386,16 @@ func TestConsumer_CancelRequestedBeforeClaimNeverDispatches(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !cancelClaimedTriggerIfRequested(ctx, st, claimed, home, time.Minute, quietLogger()) {
-		t.Fatal("a cancel-requested claim was not recognized before dispatch")
+	dispatched := false
+	previous := dispatchLocalTriggerFn
+	dispatchLocalTriggerFn = func(context.Context, *store.Trigger, string, *localCompileCache, *slog.Logger, []string) error {
+		dispatched = true
+		return nil
+	}
+	t.Cleanup(func() { dispatchLocalTriggerFn = previous })
+	runClaimedTrigger(ctx, st, claimed, nil, quietLogger(), home, time.Minute)
+	if dispatched {
+		t.Fatal("a cancelled trigger reached dispatch")
 	}
 	run, err := st.GetRun(ctx, "run-cancelme")
 	if err != nil {
@@ -402,20 +410,6 @@ func TestConsumer_CancelRequestedBeforeClaimNeverDispatches(t *testing.T) {
 	}
 	if trig.Status != "done" {
 		t.Fatalf("trigger status = %q, want done", trig.Status)
-	}
-}
-
-func TestConsumer_NoCancelRequestedDispatchesNormally(t *testing.T) {
-	home := t.TempDir()
-	st := consumerTestStore(t, home)
-	ctx := context.Background()
-	seedSubmission(t, st, "run-normal", "runs-fine", "")
-	claimed, err := st.ClaimNextTrigger(ctx, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cancelClaimedTriggerIfRequested(ctx, st, claimed, home, time.Minute, quietLogger()) {
-		t.Fatal("an uncancelled claim was treated as cancelled")
 	}
 }
 
@@ -540,119 +534,6 @@ func TestDashboardConsumer_RetakesTheQueueAfterTheResidentIdlesOut(t *testing.T)
 		trig, err := st.GetTrigger(context.Background(), "run-stranded")
 		return err == nil && trig.Status != "pending"
 	})
-}
-
-type transientHeartbeatStore struct {
-	calls    int
-	seq      int64
-	terminal error
-}
-
-func (s *transientHeartbeatStore) HeartbeatTrigger(context.Context, string, time.Duration) (bool, error) {
-	s.calls++
-	if s.terminal != nil {
-		return false, s.terminal
-	}
-	if s.calls == 1 {
-		return false, errors.New("database is locked")
-	}
-	return false, nil
-}
-
-func TestHeartbeat_StopsDispatchOnClaimRefusal(t *testing.T) {
-	for _, refusal := range []error{store.ErrLockHeld, store.ErrInsufficientCredits} {
-		st := &transientHeartbeatStore{terminal: refusal}
-		cancelRequested, keepGoing := heartbeatOnce(context.Background(), st, "run-stopped", 1,
-			time.Minute, time.Second, quietLogger())
-		if !cancelRequested || keepGoing || st.calls != 1 {
-			t.Fatalf("%v left dispatch running: cancel=%v keepGoing=%v calls=%d",
-				refusal, cancelRequested, keepGoing, st.calls)
-		}
-	}
-}
-
-func (s *transientHeartbeatStore) TriggerClaimGeneration(context.Context, string) (int64, error) {
-	return s.seq, nil
-}
-
-func TestHeartbeat_SurvivesATransientStoreError(t *testing.T) {
-	home := t.TempDir()
-	st := consumerTestStore(t, home)
-	ctx := context.Background()
-	seedSubmission(t, st, "run-hb", "deploy", "")
-	claimed, err := st.ClaimNextTrigger(ctx, 30*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	transient := &transientHeartbeatStore{seq: claimed.ClaimSeq}
-	if _, keepGoing := heartbeatOnce(ctx, transient, "run-hb", claimed.ClaimSeq, 30*time.Second, time.Second, quietLogger()); !keepGoing {
-		t.Fatal("heartbeat gave up on a healthy claim")
-	}
-	if transient.calls != 2 {
-		t.Fatalf("heartbeat attempts = %d, want 2 after one transient failure", transient.calls)
-	}
-
-	if err := st.FinishTrigger(ctx, "run-hb"); err != nil {
-		t.Fatal(err)
-	}
-	if _, keepGoing := heartbeatOnce(ctx, st, "run-hb", claimed.ClaimSeq, 30*time.Second, 50*time.Millisecond, quietLogger()); keepGoing {
-		t.Fatal("heartbeat kept defending a claim that no longer exists")
-	}
-}
-
-type cancelRequestingHeartbeatStore struct{ seq int64 }
-
-func (s *cancelRequestingHeartbeatStore) HeartbeatTrigger(context.Context, string, time.Duration) (bool, error) {
-	return true, nil
-}
-
-func (s *cancelRequestingHeartbeatStore) TriggerClaimGeneration(context.Context, string) (int64, error) {
-	return s.seq, nil
-}
-
-func TestHeartbeat_SurfacesAnOperatorCancelRequest(t *testing.T) {
-	st := consumerTestStore(t, t.TempDir())
-	ctx := context.Background()
-	seedSubmission(t, st, "run-cancel-midflight", "deploy", "")
-	claimed, err := st.ClaimNextTrigger(ctx, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if cancelRequested, keepGoing := heartbeatOnce(ctx, st, claimed.ID, claimed.ClaimSeq,
-		time.Minute, 50*time.Millisecond, quietLogger()); cancelRequested || !keepGoing {
-		t.Fatalf("uncancelled claim reported cancel=%v keepGoing=%v", cancelRequested, keepGoing)
-	}
-
-	if err := st.RequestCancel(ctx, claimed.ID); err != nil {
-		t.Fatal(err)
-	}
-	cancelRequested, keepGoing := heartbeatOnce(ctx, st, claimed.ID, claimed.ClaimSeq,
-		time.Minute, 50*time.Millisecond, quietLogger())
-	if !cancelRequested {
-		t.Fatal("the heartbeat swallowed a cancel request that arrived after dispatch began")
-	}
-	if !keepGoing {
-		t.Fatal("a cancel request ended the heartbeat before the caller could act on it")
-	}
-}
-
-func TestHeartbeat_OperatorCancelStopsTheDispatch(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	dispatchCtx, stopHeartbeat := context.WithCancel(context.Background())
-	defer stopHeartbeat()
-
-	go heartbeatClaimedTrigger(dispatchCtx, &cancelRequestingHeartbeatStore{seq: 1},
-		"run-cancel-midflight", 1, 600*time.Millisecond, quietLogger(), stopHeartbeat)
-
-	select {
-	case <-dispatchCtx.Done():
-	case <-time.After(10 * time.Second):
-		t.Fatal("a cancel request the claim heartbeat saw never reached the dispatch context")
-	}
 }
 
 func claimedRunWithNodes(t *testing.T, st *store.Store, id string) *store.Trigger {

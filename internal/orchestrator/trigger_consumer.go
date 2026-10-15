@@ -11,10 +11,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -366,16 +368,17 @@ var dispatchLocalTriggerFn = dispatchLocalTrigger
 
 func runClaimedTrigger(
 	ctx context.Context, st *store.Store, trig *store.Trigger,
-	cache *localCompileCache, logger *slog.Logger, home string, lease time.Duration,
+	cache *localCompileCache, logger *slog.Logger, home string, duration time.Duration,
 ) {
+	ctx = DispatchContext(ctx, trig)
 	book := context.WithoutCancel(ctx)
 	p := Paths{Root: home}
 	if withinRefWorktrees(p, submittedWorktreeDir(trig)) {
 		hold, ok, herr := HoldRefWorktree(p, trig.ID)
 		if herr != nil || !ok {
-			finishClaimedTriggerFailure(book, st, trig, logger,
-				fmt.Errorf("another process holds this run's worktree, so dispatching would "+
-					"execute a tree something else may reclaim: %w", errors.Join(herr, store.ErrLockHeld)))
+			failure := fmt.Errorf("another process holds this run's worktree, so dispatching would "+
+				"execute a tree something else may reclaim: %w", errors.Join(herr, store.ErrLockHeld))
+			finishClaimedTriggerFailure(book, st, trig, logger, failure)
 			return
 		}
 		defer func() {
@@ -385,30 +388,39 @@ func runClaimedTrigger(
 		}()
 	}
 	defer cleanupRefWorktree(book, st, p, trig, logger)
-	if cancelClaimedTriggerIfRequested(book, st, trig, home, lease, logger) {
+	dispatchCtx, stop, err := keepClaimedTrigger(ctx, st, trig, duration)
+	if err != nil {
+		var cancelled *lease.CancelError
+		if errors.As(err, &cancelled) {
+			if discardErr := DiscardSubmissionEnvironment(home, trig.ID); discardErr != nil {
+				logger.Warn("discard submission environment", "trigger_id", trig.ID, "err", discardErr)
+			}
+			finishCancelledClaimedTrigger(book, st, trig, logger)
+		} else {
+			logger.Warn("confirm trigger lease before dispatch", "trigger_id", trig.ID, "err", err)
+		}
 		return
 	}
-
-	dispatchCtx, stopHeartbeat := context.WithCancel(ctx)
-	dispatchCtx = DispatchContext(dispatchCtx, trig)
-	defer stopHeartbeat()
-	cancelled := &atomic.Bool{}
-	go heartbeatClaimedTrigger(dispatchCtx, st, trig.ID, trig.ClaimSeq, lease, logger, func() {
-		if cancelled.CompareAndSwap(false, true) {
-			logger.Info("operator cancel requested; cancelling the dispatched run",
-				"trigger_id", trig.ID)
-			stopHeartbeat()
+	defer func() {
+		defer stop()
+		cause := context.Cause(dispatchCtx)
+		if errors.Is(cause, lease.ErrLeaseLost) || errors.Is(cause, lease.ErrSilent) {
+			logger.Warn("trigger lease ended before dispatch settled", "trigger_id", trig.ID, "err", cause)
+			return
 		}
-	})
-
+		var cancelled *lease.CancelError
+		settleClaimedTriggerDispatch(book, st, trig, err, errors.As(cause, &cancelled), ctx.Err() != nil, logger)
+	}()
 	env, envErr := consumeSubmissionEnvironment(home, trig, logger)
 	if envErr != nil {
-		finishClaimedTriggerFailure(book, st, trig, logger, envErr)
+		err = envErr
 		return
 	}
 	env = submissionExecutionEnvironment(env, home)
-	err := dispatchLocalTriggerFn(dispatchCtx, trig, "", cache, logger, env)
-	settleClaimedTriggerDispatch(book, st, trig, err, cancelled.Load(), ctx.Err() != nil, logger)
+	if err = dispatchCtx.Err(); err != nil {
+		return
+	}
+	err = dispatchLocalTriggerFn(dispatchCtx, trig, "", cache, logger, env)
 }
 
 func submittedWorktreeDir(trig *store.Trigger) string {
@@ -536,102 +548,36 @@ func finishClaimedTriggerFailure(ctx context.Context, st *store.Store, trig *sto
 	}
 }
 
-func cancelClaimedTriggerIfRequested(
-	ctx context.Context, st *store.Store, trig *store.Trigger,
-	home string, lease time.Duration, logger *slog.Logger,
-) bool {
-	cancelled, err := st.HeartbeatTrigger(ctx, trig.ID, lease)
-	if err != nil || !cancelled {
-		return false
-	}
-	logger.Info("local trigger cancelled before dispatch", "trigger_id", trig.ID)
-	if err := DiscardSubmissionEnvironment(home, trig.ID); err != nil {
-		logger.Warn("discard submission environment", "trigger_id", trig.ID, "err", err)
-	}
-	// safety: the dispatched child may already have created this row, and the
-	// terminal write below is the one that has to land.
-	_ = st.CreateRun(ctx, store.Run{
-		ID:        trig.ID,
-		Pipeline:  trig.Pipeline,
-		Status:    "pending",
-		StartedAt: time.Now(),
-	})
-	if err := st.FinishRun(ctx, trig.ID, "cancelled", "cancelled before dispatch"); err != nil {
-		noteLostStateWrite(ctx, "finish run", trig.ID, err)
-	}
-	_ = st.FinishTrigger(ctx, trig.ID)
-	return true
-}
-
-const heartbeatRetryFraction = 3
-
-func heartbeatClaimedTrigger(
-	ctx context.Context, st triggerHeartbeatStore, id string, seq int64,
-	lease time.Duration, logger *slog.Logger, onCancelRequested func(),
-) {
-	interval := lease / heartbeatRetryFraction
-	if interval < 200*time.Millisecond {
-		interval = 200 * time.Millisecond
-	}
-	t := time.NewTicker(interval)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		}
-		cancelRequested, keepGoing := heartbeatOnce(ctx, st, id, seq, lease, interval, logger)
-		if cancelRequested {
-			if onCancelRequested != nil {
-				onCancelRequested()
-			}
-			return
-		}
-		if !keepGoing {
-			return
-		}
-	}
-}
-
 type triggerHeartbeatStore interface {
 	HeartbeatTrigger(context.Context, string, time.Duration) (bool, error)
 }
 
-func heartbeatOnce(
-	ctx context.Context, st triggerHeartbeatStore, id string, seq int64,
-	lease, budget time.Duration, logger *slog.Logger,
-) (cancelRequested, keepGoing bool) {
-	deadline := time.Now().Add(budget)
-	backoff := 50 * time.Millisecond
-	claimCtx := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: seq})
-	for {
-		cancel, err := st.HeartbeatTrigger(claimCtx, id, lease)
-		if err == nil {
-			return cancel, true
-		}
-		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrLockHeld) ||
-			errors.Is(err, store.ErrInsufficientCredits) {
-			return true, false
-		}
-		if ctx.Err() != nil {
-			return false, false
-		}
-		if !time.Now().Before(deadline) {
-			logger.Warn("local trigger heartbeat failing; the claim may lapse",
-				"trigger_id", id, "err", err)
-
-			return false, true
-		}
-		select {
-		case <-ctx.Done():
-			return false, false
-		case <-time.After(backoff):
-		}
-		if backoff < time.Second {
-			backoff *= 2
-		}
+func keepClaimedTrigger(ctx context.Context, st triggerHeartbeatStore, trig *store.Trigger, duration time.Duration) (context.Context, func(), error) {
+	ctx = DispatchContext(ctx, trig)
+	if err := context.Cause(ctx); err != nil {
+		return nil, nil, err
 	}
+	if err := limits.CheckRenewal(duration/3, duration); err != nil {
+		return nil, nil, err
+	}
+	keeper := lease.Keeper{Interval: duration / 3, Lease: duration, Renew: func(ctx context.Context) (lease.Beat, error) {
+		cancelled, err := st.HeartbeatTrigger(ctx, trig.ID, duration)
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrLockHeld) || errors.Is(err, store.ErrInsufficientCredits) {
+			err = &apierr.Error{Code: apierr.LockHeld, Message: "trigger claim ended"}
+		}
+		return lease.Beat{CancelRequested: cancelled}, err
+	}}
+	bounded, cancel := context.WithTimeout(ctx, min(duration, limits.HeartbeatTimeout))
+	beat, err := keeper.Renew(bounded)
+	cancel()
+	if err == nil && beat.CancelRequested {
+		err = &lease.CancelError{Reason: "cancel_requested"}
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	unit, stop := keeper.Run(ctx)
+	return unit, stop, nil
 }
 
 type inFlightSet struct {

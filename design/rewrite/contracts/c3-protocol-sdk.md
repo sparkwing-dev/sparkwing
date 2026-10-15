@@ -1,5 +1,10 @@
 # C3 protocol and SDK contract
 
+[The consumer lease cut](../w3-consumer-lease-cut-progress.md) removes the local
+consumer's heartbeat loop and unused runner-host helpers. The consumer now uses
+the shared keeper. Native placement migration and legacy scheduler deletion
+remain open.
+
 [The process transport cut](../w3-process-transport-cut-progress.md) removes
 Session and StartSession. Retained planners and attempts use ProtocolSession.
 The legacy scheduler, services and native placement cutovers remain open.
