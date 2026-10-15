@@ -1,5 +1,16 @@
 # Migrating to the next release
 
+## Memo copies use transactional blob records
+
+`AttemptReport.OutputFrom`, its `output_from` payload and
+`Store.FinishNodeCopyingOutput` are removed. Use `blob.RecordStore.CopyMemo`
+for authorized output and manifest materialization. The host memo layer
+already calls it. Requests carrying `output_from` now fail strict decoding.
+No alias or conversion of stored output pointers is provided.
+
+The unused `backend.StoreBackend.GetNodeOutput` and
+`backend.ClientBackend.GetNodeOutput` methods are also removed.
+
 ## Filesystem object writes use signed transfers
 
 `fs.ArtifactStore`, `fs.NewArtifactStore` and the sharded filesystem object

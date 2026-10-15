@@ -56,6 +56,11 @@ writes cannot overwrite verified branch entries. Memo reads its own scope
 before a verified default-branch fallback. Dependency caches try their own
 ref, the pull-request base, then the verified default branch.
 
+Memo materialization uses `RecordStore.CopyMemo` to authorize and copy output
+and manifest records in one transaction. The old `output_from` attempt payload
+and `Store.FinishNodeCopyingOutput` are removed. Neither can attach an output
+through the retired `node_outputs` copy path.
+
 Dependency-cache keys use the declaration, platform and the first present
 lockfile inside the workspace. The SDK's `DirCache.Key` and host share that
 calculation. Moving the checkout preserves its keys. An escaping path or symlink

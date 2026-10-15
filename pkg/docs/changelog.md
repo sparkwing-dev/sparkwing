@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+- **storage (Breaking):** Removed `AttemptReport.OutputFrom`, the `output_from`
+  attempt payload, `Store.FinishNodeCopyingOutput` and the unused backend
+  output-read methods. Memo materialization uses transactional blob records.
+  See [migration steps](docs/migrations/_unreleased.md#memo-copies-use-transactional-blob-records).
+
 - **storage (Breaking):** Configuring the controller's data backend also installs
   transactional result verification against its physical manifests. Corrupt
   manifests refuse completion without changing the job. Removed unused

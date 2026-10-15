@@ -52,6 +52,8 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/crons/{id}/pause` | `runs.control` |
 | `POST` | `/api/v1/crons/{id}/resume` | `runs.control` |
 | `POST` | `/api/v1/crons/{id}/run` | `runs.control` |
+| `GET` | `/api/v1/data/objects/{key...}` | `public` |
+| `PUT` | `/api/v1/data/uploads/{upload}` | `public` |
 | `DELETE` | `/api/v1/github-app/installations/{installation_id}` | `admin` |
 | `GET` | `/api/v1/health` | `public` |
 | `POST` | `/api/v1/invitations/{id}/accept` | `authenticated` |
@@ -75,8 +77,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/operator/teams/{team}/unfreeze` | `operator` |
 | `GET` | `/api/v1/operator/waitlist` | `operator` |
 | `POST` | `/api/v1/operator/waitlist/approve` | `operator` |
-| `GET` | `/api/v1/outputs/objects/{key...}` | `public` |
-| `PUT` | `/api/v1/outputs/uploads/{id}` | `public` |
 | `GET` | `/api/v1/pipelines` | `runs.read` |
 | `GET` | `/api/v1/pipelines/{name}/latest` | `runs.read` |
 | `GET` | `/api/v1/pipelines/{name}/profile` | `nodes.claim` |

@@ -20,7 +20,3 @@ func ScopeLabelFromKey(key string) string {
 		return "global"
 	}
 }
-
-type copiedOutput struct {
-	runID, nodeID string
-}

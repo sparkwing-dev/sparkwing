@@ -2,6 +2,49 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
+## From W7 output-copy retirement and reconciliation probe
+
+**Completed W7 hard cut.** Removed AttemptReport.OutputFrom, the output_from
+attempt payload, Store.FinishNodeCopyingOutput, sourceOutputRefTx, copySource
+and their copy branches. Removed localState.FinishNodeCopyingOutput and its
+copiedOutput type, plus the unused StoreBackend/ClientBackend.GetNodeOutput
+methods. The host memo layer already calls blob.RecordStore.CopyMemo. Its
+existing real-store replay, rollback, edge and collection tests pass.
+
+Removed the obsolete output-copy assertions from the old claim/input test.
+The tenant-call guard removes the retired copy wrapper's exemption and seventeen
+stale profile/concurrency exemptions reported by its execution. Source docs,
+the store API snapshot and OpenAPI agree with the cut. The API generator also
+exposed stale filesystem output endpoints. Those descriptions are removed and
+the registered signed filesystem data transfers are documented.
+
+**W1 transactional materialization is still unbound.** Invariant: authorized
+record copies and the terminal state commit together. The private
+Store.materializations field has assignments only in materialize_runtime_test.go.
+An overlay removing only materializationFixture's test-copier assignment makes
+TestReconcileMaterializesPersistedOutcomeOnce fail for manual_retry, memo and
+coalesced with `transactional materialization records are not configured`.
+These are seeded store fixtures, not native authenticated runs. No overlay or
+failing test remains in the working tree.
+
+Implement the existing CopyMaterializedRecords transaction seam in pkg/store.
+W7 cannot install a private store transaction implementation from the byte
+backend. Calling the public CopyMemo before ReconcileNode would break atomicity.
+No foreign contract declaration was changed for this probe.
+
+**W1/W3 materialized artifact identity needs a contract.** ReadNode supplies an
+executed producer's attempt and generation. It does not supply its committed
+result-record keys. TestReconcileRetryCanReuseMaterializedResult explicitly
+preserves attempt zero for materialized jobs. W3 must not synthesize a positive
+attempt to build a manifest key. Settle how the state/result reader exposes
+that persisted identity before replacing artifacts.go's legacy key assembly.
+This source finding has not been exercised through a native artifact stage.
+
+Existing TestStorage passes with 81 passing events, no failures and 424 skips.
+No acceptance cell was added or unskipped. W2 data bindings, the segment-commit
+wire operation, W1b expired-staging cleanup and W3/W8 host construction remain
+the other recorded integration points.
+
 ## From W7 controller result verification and unused API retirement
 
 **Completed W7 runtime wiring.** `Server.WithDataObjects` now calls

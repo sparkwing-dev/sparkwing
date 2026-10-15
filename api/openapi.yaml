@@ -5605,9 +5605,6 @@ paths:
                 error: {type: string}
                 failure_reason: {type: string}
                 output: {$ref: "#/components/schemas/OutputRef"}
-                output_from:
-                  type: object
-                  description: In place of `output`, the declared input a cache hit or coalesce follower took from another run, in the `claim/input` request shape; the node's ref then names that input's stored object.
                 failure: {description: The failure record an OnFailure recovery node receives.}
                 artifact_manifest: {type: string}
       responses:
@@ -5959,52 +5956,6 @@ paths:
         "409": {description: "The run records no commit for a launcher's claim, an extra repository is no longer covered, or the team's ssh credential awaits its host key's confirmation."}
         "429": {description: This claim asked more than ten times in a minute; Retry-After says when to ask again.}
         "502": {description: GitHub could not be reached to find the repository's installation or mint its token.}
-
-  /api/v1/outputs/objects/{key}:
-    parameters:
-      - in: path
-        name: key
-        required: true
-        schema: {type: string}
-    get:
-      x-sparkwing-scope: public
-      summary: Read one output object through a URL this controller signed.
-      description: |
-        Served by a controller that keeps outputs on its own disk. The
-        `team`, `exp` and `sig` query parameters come from an output grant;
-        the URL is good for one minute and carries no bearer.
-      responses:
-        "200":
-          description: The output bytes.
-          content:
-            application/octet-stream:
-              schema: {type: string, format: binary}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-
-  /api/v1/outputs/uploads/{id}:
-    parameters:
-      - in: path
-        name: id
-        required: true
-        schema: {type: string}
-    put:
-      x-sparkwing-scope: public
-      summary: Upload one output's bytes through a URL this controller signed.
-      description: |
-        Served by a controller that keeps outputs on its own disk. The body
-        must be exactly the size and SHA-256 the upload reserved; anything
-        else is refused and not kept.
-      requestBody:
-        required: true
-        content:
-          application/octet-stream:
-            schema: {type: string, format: binary}
-      responses:
-        "200": {description: "Stored, awaiting commit."}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "409": {description: The upload is unknown or already committed.}
-        "422": {description: The bytes do not match the reservation.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/output-commit:
     parameters:
@@ -6393,6 +6344,62 @@ paths:
         "413": {description: The manifest is larger than 4 MiB.}
         "422": {description: The manifest lists a segment the controller did not sign for that size and digest.}
         "503": {description: The controller has nowhere to keep log segments.}
+
+  /api/v1/data/objects/{key}:
+    parameters:
+      - in: path
+        name: key
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: public
+      summary: Download one immutable object through a signed filesystem URL.
+      description: |
+        Filesystem controllers serve this route. The signed token binds the
+        GET method, exact tenant CAS key, size, digest and expiry. Download
+        URLs last at most sixty seconds. The reader verifies size and SHA-256
+        at EOF. The URL carries no controller bearer.
+      parameters:
+        - {in: query, name: token, required: true, schema: {type: string}}
+        - {in: query, name: signature, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: The object bytes.
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        "403": {description: "The signature, method, path or expiry is invalid."}
+        "404": {description: The object is unavailable or this controller has no filesystem backend.}
+        "409": {description: The stored object is not a regular file of the signed size.}
+
+  /api/v1/data/uploads/{upload}:
+    parameters:
+      - in: path
+        name: upload
+        required: true
+        schema: {type: string}
+    put:
+      x-sparkwing-scope: public
+      summary: Stage an upload through a signed filesystem URL.
+      description: |
+        The signed token binds the PUT method, exact tenant staging key, size,
+        digest and expiry. The controller verifies the complete body before
+        publishing the staged file. A matching repeated PUT succeeds. This
+        transfer alone creates no blob row, receipt or readable record.
+      parameters:
+        - {in: query, name: token, required: true, schema: {type: string}}
+        - {in: query, name: signature, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: {type: string, format: binary}
+      responses:
+        "201": {description: The staged bytes match the signed size and SHA-256.}
+        "400": {description: The body or existing staged bytes fail integrity verification.}
+        "403": {description: "The signature, method, path or expiry is invalid."}
+        "404": {description: This controller has no filesystem backend.}
+        "500": {description: The filesystem could not store or verify the staged object.}
 
 components:
   securitySchemes:

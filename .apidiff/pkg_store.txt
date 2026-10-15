@@ -168,8 +168,6 @@ type AttemptReport struct {
 
 	Output *OutputRef
 
-	OutputFrom *ClaimInputRequest
-
 	Failure          json.RawMessage
 	ArtifactManifest string
 }
@@ -2931,7 +2929,6 @@ func (s *Store) FinalizeNodeCredits(ctx context.Context, runID, nodeID, tokenPre
 func (s *Store) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 func (s *Store) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error)
 func (s *Store) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error
-func (s *Store) FinishNodeCopyingOutput(ctx context.Context, runID, nodeID, outcome, reason, srcRun, srcNode string) error
 func (s *Store) FinishNodeExecutionAttempt(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, finish ExecutionAttemptFinish) error
 func (s *Store) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error
 func (s *Store) FinishNodeWithOutputRef(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef, reason string, exitCode *int) error

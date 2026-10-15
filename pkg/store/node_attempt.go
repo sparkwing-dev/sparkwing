@@ -30,16 +30,9 @@ type AttemptReport struct {
 	FailureReason string `json:"failure_reason,omitempty"`
 	// Output names the node's committed output object, which its dependents read.
 	Output *OutputRef `json:"output,omitempty"`
-	// OutputFrom names, in place of Output, the input a cache hit or a
-	// coalesce follower took from another run; the node's ref then names
-	// that input's object rather than a copy of its bytes.
-	OutputFrom *ClaimInputRequest `json:"output_from,omitempty"`
 	// Failure is the failure record an OnFailure recovery node receives.
 	Failure          json.RawMessage `json:"failure,omitempty"`
 	ArtifactManifest string          `json:"artifact_manifest,omitempty"`
-
-	// safety: set only from the store's own resolution of OutputFrom.
-	copyRun, copyNode string
 }
 
 func attemptRefused(format string, args ...any) error {
@@ -81,18 +74,6 @@ func (s *Store) ReportAttempt(ctx context.Context, commit ClaimResultCommit, rep
 	tok := commit.Token()
 	if err := report.validate(tok.Kind); err != nil {
 		return false, err
-	}
-	if report.OutputFrom != nil {
-		if report.Output != nil {
-			return false, attemptRefused("a report names its output or where it came from, not both")
-		}
-		// safety: the store picks the source exactly as claim/input does, so a
-		// report can copy only an output its node could read.
-		in, err := s.ResolveClaimInput(ctx, tok, *report.OutputFrom, now)
-		if err != nil {
-			return false, attemptRefused("output_from: %v", err)
-		}
-		report.copyRun, report.copyNode = in.RunID, in.NodeID
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -196,11 +177,6 @@ func (s *Store) commitAttemptBilledTx(ctx context.Context, tx *storeTx, tok Clai
 	var output *OutputRef
 	if !retry {
 		output = report.Output
-		if report.copyRun != "" {
-			if output, err = sourceOutputRefTx(ctx, tx, tok.Team, report.copyRun, report.copyNode); err != nil {
-				return err
-			}
-		}
 	}
 	if err := writeNodeOutputTx(ctx, tx, tok.Team, tok.RunID, tok.NodeID, ordinal, output); err != nil {
 		return err

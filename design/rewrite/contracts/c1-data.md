@@ -12,6 +12,18 @@ reservation/settlement, record commit and terminal transitions. Corrupt physical
 manifest bytes refuse completion. Restoring them allows completion and exact
 replay. Authenticated data binding remains C2's separate contract.
 
+The legacy `AttemptReport.OutputFrom`, `Store.FinishNodeCopyingOutput` and
+their `node_outputs` copy branches are removed. Host memo materialization
+uses the existing transactional `blob.RecordStore.CopyMemo` contract. The
+unused backend output-read forwarding methods are removed too.
+
+`RecordStore.CopyMemo` is implemented, but the state machine's private
+`CopyMaterializedRecords` seam remains assigned only by tests. Removing that
+fixture assignment makes manual-retry, memo and coalesced reconciliation fail
+with `transactional materialization records are not configured`. W1 must bind
+the copier inside its state transaction. Calling the public copy method before
+reconciliation would commit the records separately from the terminal state.
+
 ## Amendment 1: authority and execution seams
 
 [Amendments 1](amendments-1.md) records the worker requests and assignments.
