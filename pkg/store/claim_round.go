@@ -43,7 +43,7 @@ type claimRoundEvent struct {
 }
 
 func claimRoundSummaryTx(ctx context.Context, tx *storeTx, runID, nodeID string) (claimRoundSummary, error) {
-	n := &nodeRecord{}
+	n := &Node{}
 	if err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
   FROM nodes WHERE run_id = ? AND node_id = ?`, runID, nodeID), n); err != nil {
 		return claimRoundSummary{}, err

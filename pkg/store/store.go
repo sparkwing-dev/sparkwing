@@ -1657,17 +1657,11 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 	if len(n.PrefersLabels) > 0 {
 		prefersJSON, _ = json.Marshal(n.PrefersLabels)
 	}
-	var policyJSON, supervisorRequirementsJSON, bodyRequirementsJSON []byte
-	var policyHash, supervisorRequirementsHash, bodyRequirementsHash string
-	var policyVersion, bodyProtocol int
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO nodes (team, run_id, node_id, status, deps_json, needs_labels, prefers_labels,
                    requested_cores, requested_memory_bytes, requested_slots,
 			       avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until,
 			       attempts_consumed, retry_root_run_id, required_coordinator_id, required_executor_location,
-			       execution_policy_json, execution_policy_hash, execution_policy_version, execution_body_protocol,
-			       execution_supervisor_requirements_json, execution_supervisor_requirements_hash,
-			       execution_body_requirements_json, execution_body_requirements_hash,
 			       spec_hash, generated_json, seq)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 		?,
@@ -1678,7 +1672,6 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 		?,
 		?,
 		?,
-		?, ?, ?, ?, ?, ?, ?, ?,
 		?, ?,
 		(SELECT COALESCE(MAX(seq), 0) + 1 FROM nodes WHERE team = ? AND run_id = ?))`,
 		string(team), n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON, prefersJSON,
@@ -1691,9 +1684,6 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 		n.RunID,
 		n.RequiredCoordinatorID,
 		n.RequiredExecutorLocation,
-		policyJSON, policyHash, policyVersion, bodyProtocol,
-		supervisorRequirementsJSON, supervisorRequirementsHash,
-		bodyRequirementsJSON, bodyRequirementsHash,
 		n.SpecHash, generatedJSON,
 		string(team), n.RunID)
 	if err != nil {
@@ -1782,7 +1772,7 @@ func (t *Tenant) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps 
 	depsJSON, _ := json.Marshal(deps)
 	res, fenced, err := t.execNodeMutation(ctx, runID, nodeID,
 		`UPDATE nodes SET deps_json = ?
-		  WHERE team = ? AND run_id = ? AND node_id = ? AND ready_at IS NULL AND `+nodeExecutionUnsealed,
+		  WHERE team = ? AND run_id = ? AND node_id = ? AND ready_at IS NULL`,
 		depsJSON, string(t.team), runID, nodeID)
 	if err != nil {
 		return err
@@ -1790,7 +1780,7 @@ func (t *Tenant) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps 
 	if affected, err := res.RowsAffected(); err != nil {
 		return err
 	} else if affected != 1 {
-		return errExecutionPolicyConflict
+		return ErrLockHeld
 	}
 	return fencedRows(res, fenced)
 }
@@ -2020,11 +2010,11 @@ func (t *Tenant) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
 	defer func() { _ = rows.Close() }()
 	var out []*Node
 	for rows.Next() {
-		record := &nodeRecord{}
+		record := &Node{}
 		if err := scanNodeRow(rows, record); err != nil {
 			return nil, err
 		}
-		out = append(out, &record.Node)
+		out = append(out, record)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -2052,7 +2042,7 @@ func (t *Tenant) GetNode(ctx context.Context, runID, nodeID string) (*Node, erro
 	row := t.s.queryRow(ctx, `SELECT `+nodeSelectColumns+`
   FROM nodes
  WHERE team = ? AND run_id = ? AND node_id = ?`, string(t.team), runID, nodeID)
-	record := &nodeRecord{}
+	record := &Node{}
 	if err := scanNodeRow(row, record); err != nil {
 		return nil, err
 	}
@@ -2061,7 +2051,7 @@ func (t *Tenant) GetNode(ctx context.Context, runID, nodeID string) (*Node, erro
 		return nil, err
 	}
 	record.ExecutionAttempts = attempts
-	return &record.Node, nil
+	return record, nil
 }
 
 const nodeSelectColumns = `run_id, node_id, status, outcome, deps_json, error,
@@ -2078,20 +2068,14 @@ const nodeSelectColumns = `run_id, node_id, status, outcome, deps_json, error,
 	   coordinator_id, claim_generation, claim_membership_id,
 	   executor_kind, executor_id, executor_location, execution_started_at, reservation_id,
 	   attempts_consumed, retry_root_run_id, required_coordinator_id, required_executor_location,
-	   execution_policy_json, execution_policy_hash, execution_policy_version, execution_body_protocol,
-	   execution_supervisor_requirements_json, execution_supervisor_requirements_hash,
-	   execution_body_requirements_json, execution_body_requirements_hash,
 	   avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until,
-	   placement_reason, placement_hold_from, credit_cpu_class, spec_hash, generated_json,
-	   (SELECT pipeline FROM runs WHERE runs.team = nodes.team AND runs.id = nodes.run_id)`
+	   placement_reason, placement_hold_from, credit_cpu_class, spec_hash, generated_json`
 
-func scanNodeRow(rs rowScanner, n *nodeRecord) error {
+func scanNodeRow(rs rowScanner, n *Node) error {
 	var depsJSON, labelsJSON, prefersJSON, annotationsJSON []byte
 	var outputKey, outputSHA sql.NullString
 	var outputSize sql.NullInt64
-	var policyJSON, supervisorRequirementsJSON, bodyRequirementsJSON, generatedJSON []byte
-	var policyHash, supervisorRequirementsHash, bodyRequirementsHash, pipeline string
-	var policyVersion, bodyProtocol int
+	var generatedJSON []byte
 	var startedNS, finishedNS, readyNS, leaseNS, offerStartedNS, heartbeatNS, executionStartedNS, avoidUntilNS sql.NullInt64
 	var holdFromNS sql.NullInt64
 	var claimedBy sql.NullString
@@ -2108,11 +2092,8 @@ func scanNodeRow(rs rowScanner, n *nodeRecord) error {
 		&n.CoordinatorID, &n.ClaimGeneration, &n.ClaimMembershipID,
 		&n.ExecutorKind, &n.ExecutorID, &n.ExecutorLocation, &executionStartedNS, &n.ReservationID,
 		&n.AttemptsConsumed, &n.RetryRootRunID, &n.RequiredCoordinatorID, &n.RequiredExecutorLocation,
-		&policyJSON, &policyHash, &policyVersion, &bodyProtocol,
-		&supervisorRequirementsJSON, &supervisorRequirementsHash,
-		&bodyRequirementsJSON, &bodyRequirementsHash,
 		&n.AvoidCoordinatorID, &n.AvoidExecutorKind, &n.AvoidExecutorID, &avoidUntilNS,
-		&n.PlacementReason, &holdFromNS, &n.CreditCPUClassCores, &n.SpecHash, &generatedJSON, &pipeline)
+		&n.PlacementReason, &holdFromNS, &n.CreditCPUClassCores, &n.SpecHash, &generatedJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return notFound("node", "")
 	}
@@ -2134,13 +2115,6 @@ func scanNodeRow(rs rowScanner, n *nodeRecord) error {
 	}
 	if len(prefersJSON) > 0 {
 		_ = json.Unmarshal(prefersJSON, &n.PrefersLabels)
-	}
-	if err := restoreNodeExecutionPolicySeal(n, policyJSON, policyHash, policyVersion, bodyProtocol,
-		supervisorRequirementsJSON, supervisorRequirementsHash, bodyRequirementsJSON, bodyRequirementsHash); err != nil {
-		return err
-	}
-	if err := validateNodeExecutionPolicy(n, pipeline); err != nil {
-		return err
 	}
 	n.CreditCPUClassMemoryBytes = CPUClassMemoryBytes(n.CreditCPUClassCores)
 	if startedNS.Valid {
@@ -2568,85 +2542,17 @@ func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
 
 // MarkNodeReady is [Store.MarkNodeReady] confined to t's team.
 func (t *Tenant) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
-	return t.markNodeReady(ctx, runID, nodeID, nil)
-}
-
-func (s *Store) markNodeReadyWithExecutionPolicy(ctx context.Context, runID, nodeID string, policy nodeExecutionPolicy) error {
-	t, err := s.runTenant(ctx, runID)
-	if err != nil {
-		return err
-	}
-	return t.markNodeReady(ctx, runID, nodeID, &policy)
-}
-
-func (t *Tenant) markNodeReady(ctx context.Context, runID, nodeID string, policy *nodeExecutionPolicy) error {
 	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	node := &nodeRecord{}
+	node := &Node{}
 	if err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
   FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(), string(t.team), runID, nodeID), node); err != nil {
 		return err
 	}
-	var pipeline string
-	if err := tx.QueryRowContext(ctx, `SELECT pipeline FROM runs WHERE team = ? AND id = ?`, string(t.team), runID).Scan(&pipeline); errors.Is(err, sql.ErrNoRows) {
-		return notFound("node", runID+"/"+nodeID)
-	} else if err != nil {
-		return err
-	}
 	opened := node.OfferStartedAt != nil
-	if policy == nil {
-		if err := validateNodeExecutionPolicy(node, pipeline); err != nil {
-			return err
-		}
-		if nodeHasExecutionPolicy(node) {
-			return errExecutionPolicyConflict
-		}
-	} else {
-		candidate := *node
-		copyNodeExecutionPolicy(&candidate, node)
-		if err := setNodeExecutionPolicy(&candidate, *policy); err != nil {
-			return err
-		}
-		if err := validateNodeExecutionPolicy(&candidate, pipeline); err != nil {
-			return err
-		}
-		if err := validateNodeExecutionPolicy(node, pipeline); err != nil {
-			return err
-		}
-		if nodeHasExecutionPolicy(node) {
-			if !nodeExecutionPoliciesEqual(node, &candidate) {
-				return errExecutionPolicyConflict
-			}
-		} else {
-			if opened {
-				return errExecutionPolicyConflict
-			}
-			persisted, persistErr := nodeExecutionPolicyPersistence(&candidate)
-			if persistErr != nil {
-				return persistErr
-			}
-			result, err := tx.ExecContext(ctx, `UPDATE nodes
-			   SET execution_policy_json = ?, execution_policy_hash = ?, execution_policy_version = ?, execution_body_protocol = ?,
-       execution_supervisor_requirements_json = ?, execution_supervisor_requirements_hash = ?,
-       execution_body_requirements_json = ?, execution_body_requirements_hash = ?
-			 WHERE team = ? AND run_id = ? AND node_id = ? AND offer_started_at IS NULL
-			   AND `+nodeExecutionUnsealed,
-				persisted.PolicyJSON, persisted.PolicyHash, persisted.PolicyVersion, persisted.BodyProtocol,
-				persisted.SupervisorRequirementsJSON, persisted.SupervisorRequirementsHash,
-				persisted.BodyRequirementsJSON, persisted.BodyRequirementsHash, string(t.team), runID, nodeID)
-			if err != nil {
-				return err
-			}
-			if changed, err := result.RowsAffected(); err != nil {
-				return err
-			} else if changed != 1 {
-				return errExecutionPolicyConflict
-			}
-		}
-	}
 	var summary claimRoundSummary
 	if !opened {
 		summary, err = claimRoundSummaryTx(ctx, tx, runID, nodeID)
@@ -3005,7 +2911,7 @@ func (s *Store) readClaimCandidates(
 	WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+`
 	AND `+nodeRunActiveSQL("nodes.")+`
 	AND required_coordinator_id = '' AND required_executor_location = ''
-	AND `+nodeExecutionUnsealed+` AND `+nodeTriggerDispatched+`
+	AND `+nodeTriggerDispatched+`
    AND NOT (avoid_until IS NOT NULL AND avoid_until > ?
             AND avoid_coordinator_id = ? AND avoid_executor_kind = ? AND avoid_executor_id = ?)`+teamClause+classClause+scopeClause+keyset+`
  ORDER BY ready_at ASC, run_id ASC, node_id ASC
@@ -3143,8 +3049,7 @@ func (s *Store) awardScannedNodeTx(ctx context.Context, tx *storeTx, candidate c
 		        placement_reason = ?, claim_generation = claim_generation + 1
 		  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL`+readyClause+`
 		    AND `+nodeNotDone+nodeRunNotCancelled+` AND `+nodeRunActiveSQL("nodes.")+`
-		    AND required_coordinator_id = '' AND required_executor_location = ''
-		    AND `+nodeExecutionUnsealed+teamClause,
+		    AND required_coordinator_id = '' AND required_executor_location = ''`+teamClause,
 		awardArgs...,
 	)
 	if err != nil {
@@ -3172,12 +3077,12 @@ func (s *Store) awardScannedNodeTx(ctx context.Context, tx *storeTx, candidate c
 			return nil, err
 		}
 	}
-	n := &nodeRecord{}
+	n := &Node{}
 	if err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
  FROM nodes WHERE run_id = ? AND node_id = ?`, candidate.runID, candidate.nodeID), n); err != nil {
 		return nil, err
 	}
-	return &n.Node, nil
+	return n, nil
 }
 
 // UpdateNodeActivity sets status_detail and bumps last_heartbeat.
@@ -5565,15 +5470,6 @@ func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error) {
 	}
 	return v, nil
 }
-
-const nodeExecutionUnsealed = `COALESCE(execution_policy_hash, '') = ''
-   AND COALESCE(LENGTH(execution_policy_json), 0) = 0
-   AND COALESCE(execution_policy_version, 0) = 0
-   AND COALESCE(execution_body_protocol, 0) = 0
-   AND COALESCE(LENGTH(execution_supervisor_requirements_json), 0) = 0
-   AND COALESCE(execution_supervisor_requirements_hash, '') = ''
-   AND COALESCE(LENGTH(execution_body_requirements_json), 0) = 0
-   AND COALESCE(execution_body_requirements_hash, '') = ''`
 
 // TriggerIdempotencyIndexName is the unique index enforcing at most one
 // trigger per (pipeline, idempotency key).

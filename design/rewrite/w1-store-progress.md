@@ -1,79 +1,81 @@
 # W1 store handoff
 
-Continues 5912f1cfb. These changes are uncommitted. No Git write or Sparkwing
-executable was run. W1b's accounting, billing, blob and log files are untouched.
-The lead owns committing, independent review and delivery pipelines.
-Earlier session details remain in the branch history and rewrite logs.
+Continues e4ca5877f. The current changes are uncommitted. The lead owns
+committing, independent review and delivery pipelines. W1b's accounting,
+billing, blob and log files are untouched. No Git write or Sparkwing executable
+was run.
 
-## Implemented
+## Removed implementation
 
-Verified App redelivery now returns the original admission for that verified
-delivery and pipeline, including without a client idempotency key. Lookup and
-insertion use the existing team admission lock. Replay reads the persisted
-request and run number. It consumes no new number and rechecks live authority.
-Client-key and delivery-key replays share the existing result projection.
+Deleted the store's unused assisted execution-policy writer and its policy
+carrier, seal aliases, restoration and validation helpers. The only writer
+had test callers. Its eight SQL columns are already absent from the final
+schema. Legacy node insertion, reads and claims no longer reference those
+columns. No schema change was needed.
 
-The regression first failed on the signed replay-key uniqueness constraint.
-After the replay lookup was implemented, its second-pipeline assertion exposed
-the separate raw-delivery uniqueness constraint. Both behaviors now pass,
-including four concurrent redeliveries of an existing admission.
+Removed the nodeRecord wrapper. The remaining legacy readers scan Node
+directly. The legacy UpdateNodeDeps refusal now uses the existing ErrLockHeld
+when the dependency write cannot affect its unready node. The dead
+triggerRequeuedSQL helper is also deleted.
 
-Client-key replay also rechecks authority after input hashing. The new test
-advances the injected store clock to the credential's expiry during
-hashing. It returned the prior run before the fix and now returns
-unauthenticated. Ordinary admission and verified-delivery replay already
-performed a later check.
+The production Go diff deletes 193 lines and adds 16, reducing production by
+177 lines. Test Go deletes 454 lines and adds 129. Those counts exclude this
+handoff. Deleted files are execution_policy.go (66 lines) and
+execution_policy_store_internal_test.go (314 lines).
 
-ReleaseUnit's existing cancellation refusal is covered for unstarted trigger,
-plan and eval work. The test cancels through TransitionRun, checks ReleaseUnit
-returns lock_held, and observes no extra state event. The suspected missing
-check was disproved: loadAwardRowTx already rejects a cancelled run, so no
-production release change was needed.
+Final acceptance already owns the second seal and accepted job settings.
+TestAcceptedPlanAndSnapshotReturnIndependentValues ports the old SQL
+immutable-copy check to AcceptPlan, ReadSnapshot and the final schema. It
+mutates returned arguments, settings and plan/job bytes, then checks the
+persisted request, spec and declarations are unchanged. Existing seal-refusal
+and replay tests cover atomic refusal and differing seals. The obsolete
+assisted-body tuple and its tampering tests were deleted with that model.
 
-## C1 contract repair and deletions
+No new interface, setting, flag, table, environment variable, runtime service,
+retry mechanism or compatibility API was added. No exported API changed.
 
-Removed idx_triggers_webhook_delivery from the final schema because a single
-verified delivery can start several pipelines. The existing unique
-(team, webhook_replay_key) index remains the replay fence. The provider's
-unsigned delivery header remains audit data. No migration or intermediate
-schema version was added.
+## Matcher test ports
 
-Removed TriggerWebhookDeliveryIndexName, its private column constant and the
-legacy raw-header collision branch. FindTriggerByWebhookReplay now accepts
-only the signed replay key. Its unsigned-header fallback is deleted. All four
-controller callers were migrated by removing that argument. No alias or
-forwarding API was added.
+Six tests from t1-port-inventory.md's agent_match_test.go rows have final-store
+package proofs. Their old bodies and compatibility comments are deleted.
+Native acceptance destinations remain unchanged and unexecuted.
 
-Updated C1's intake invariant, source API comments, the two affected API
-snapshot entries, and the changelog. The documentation mirror was generated
-with bin/sync-docs.sh. No other area's contract was changed.
+| Archived test | Final package proof |
+| --- | --- |
+| TestQueueClaimNeverTakesANodeLargerThanTheRunnersCapacity | TestClaimUnitNamedAndQueuedUseCapacityAndIdentity checks two-core refusal, busy refusal and an eight-core award. |
+| TestQueueClaimBindsNameToTheTokenPrincipal | TestClaimUnitGrantedProfileKeys checks forged name labels and a correctly named capability. |
+| TestNamedClaimAppliesTheClaimantsProfile | TestClaimUnitRepositoryEnrollmentAndMeteringDoNotGrantPlacement checks repository refusal and permitted enrollment. TestClaimUnitGrantedProfileKeys checks required labels. |
+| TestNamedClaimOfAMeteredAgentObeysItsAcceptList | The repository test refuses both metered and unmetered roots before any billing award. |
+| TestCloudPlacementMatchesThePreChangeBehavior | TestClaimUnitGrantedProfileKeys replaces the old location/metering exception with class=cloud from a granted launcher. A metered machine asserting that label is refused. |
+| TestNamedClaimFromADispatcherThatSendsNoLabels | The profile-key test refuses a missing gpu requirement and awards when it is present. Old-dispatcher compatibility framing is deleted. |
 
-The Go diff deletes 58 production lines and 2 test lines, and adds 44 production
-lines and 109 test lines. Production Go is 14 lines smaller. The schema loses
-two lines. These counts exclude documentation, snapshots and this handoff.
-The obsolete unsigned-header uniqueness case was removed from the mixed legacy
-trigger-team test. No archived test was newly ported in this session.
+The new profile and repository cases run through both named and queued
+ClaimUnit. Rejections leave billing_awards empty. These are real SQLite
+transactions with persisted capability envelopes and a fake enrollment
+resolver. They do not establish enrollment transport or metered settlement.
 
-No new public interface, setting, flag, table, environment variable, runtime
-service or retry mechanism was added. The private admission result helper
-shares the existing replay conversion between the two admission identities.
+The two legacy machine-name uniqueness/rotation tests and seedMatchNode helper
+remain in agent_match_test.go. The helper still serves claim_attention_test.go.
+Machine provisioning still refuses unavailable registration authority in
+provisionCapabilityTx. This session did not invent registration or rotation
+contracts to replace those tests.
 
 ## Verification
 
-Go commands use GOWORK=off GOFLAGS=-buildvcs=false,
-GOCACHE=/tmp/sw-astra-W1/cache and GOTMPDIR/TMPDIR=/tmp/sw-astra-W1/tmp.
-Test parallelism is at most -p 4. The scratch directory is deleted at handoff.
+All Go commands used GOWORK=off GOFLAGS=-buildvcs=false,
+GOCACHE=/tmp/sw-astra-W1/cache, GOTMPDIR=/tmp/sw-astra-W1/tmp and
+TMPDIR=/tmp/sw-astra-W1/tmp. Test parallelism was at most -p 4.
+The scratch directory is deleted before the final report.
 
 - Whole-repository go build -p 4 ./... passes.
 - go vet -p 4 ./pkg/store ./pkg/controller passes.
-- The W1 selection passes 174 top-level tests and 505 cases including subtests,
-  with no skips or failures. The final run took 10.455 seconds.
-- All TestEngine controller adapter tests pass. This also compiles the changed
-  legacy webhook caller and the controller's test package.
-- Acceptance catalog, port inventory/destinations, final credential-route
-  declarations and invariant coverage checks pass. They execute no runtime cell.
-- Documentation mirror and git diff --check pass.
-- No repository-local user.name, user.email or core.worktree override exists.
+- W1 selection: 176 top-level tests and 515 cases pass, including subtests,
+  with no skips or failures. The run took 10.887 seconds.
+- All TestEngine controller adapter tests pass.
+- Acceptance catalog, documentation, port destinations, port inventory and
+  invariant-coverage guard tests pass. They execute no runtime acceptance cell.
+- git diff --check passes. Git has no local user.name, user.email or
+  core.worktree override.
 
 To reproduce the W1 selection, extract top-level Test names from these files
 under pkg/store, join them into an anchored -run expression, then run
@@ -92,69 +94,58 @@ under pkg/store, join them into an anchored -run expression, then run
     approval_reaper_runtime_test.go owner_reclaim_runtime_test.go
     node_reaper_dialect_test.go
 
-The tests use real SQLite transactions, capability persistence, admission and
-state APIs. W4/W6 plan validation, sealing, hashing and settings services remain
-contract fakes. The verified App delivery policy is a fake. These checks do not
-prove webhook HMAC validation, HTTP middleware, native hosts, billing settlement
-or blob persistence. Concurrent redelivery here targets an existing admission;
-it is not a PostgreSQL first-insert race proof.
-
-The full legacy suite, PostgreSQL, race checks, lint, pipelines and independent
-review remain lead checks. SPARKWING_TEST_PG_URL is unset. Full API snapshots
-have pre-existing rewrite drift. Only this change's entries were adjusted.
+The build and scoped vet cover production changes. Package tests cover final
+state and authority invariants. The full legacy suite, PostgreSQL, races,
+lint, pipelines and independent review remain lead checks. The previous
+session reproduced a legacy admission failure on removed sparkwing_meta.
+This session did not rerun or claim a pass for that legacy suite.
+SPARKWING_TEST_PG_URL is unset. The source documentation and public API shape
+are unchanged, so no changelog, mirror or API snapshot edit was needed.
 
 ## Remaining W1 work and other-area contracts
 
-No native acceptance cell was activated. internal/acceptance.New and Run still
-panic. T1 requires a driver and assertions before removing a skeleton skip.
-Final package proofs pass for admission, acceptance, claims, reconciliation,
-recovery and the state machine. W1 remains incomplete until the remaining
-legacy callers disappear and native acceptance runs.
+W1 remains incomplete. No native acceptance cell was activated.
+internal/acceptance.New and Run still panic. T1 requires a process driver and
+independent assertions before a skeleton skip can be removed. The brief also
+prohibits this worker from running Sparkwing binaries.
 
 Unchanged contract gaps:
 
 - W9 ReuseSource cannot carry MaterializeSource.Result by job/state sequence.
 - W9 ScheduleSnapshot cannot carry the sealed GuardRefusal.
-- W2 Authorized/IntakeForStore cannot carry the verified App delivery identity.
-  The new store redelivery proof uses the existing IntakePolicy contract.
-- EngineController.Claim lacks trusted enrollment-capacity and signed
-  runner-policy dependencies in its adapter contract. ClaimProfileResolver
-  and engine.Resolver.Index/EvaluateRunner are the owning contracts. Body
-  labels or reported availability cannot substitute for those dependencies.
+- W2 Authorized/IntakeForStore cannot carry verified App delivery identity.
+  Store tests use the IntakePolicy contract for that proof.
+- EngineController.Claim still needs trusted enrollment-capacity and signed
+  runner-policy dependencies. ClaimProfileResolver and engine.Resolver's
+  Index/EvaluateRunner are the owning interfaces. Body labels and reported
+  availability cannot supply that authority.
 
-Real integration remains for W4/W6 plan validation and seals; W2/W3/W8/W9
-routes, hosts, runners and keepers; and the controller loops calling ReapUnits,
-ReconcileControllerRuns and completion delivery under their singleton leases.
-W1b must join metered reservation/settlement to award, renewal, result and owner
-completion, and implement transactional materializationRecords and
-nodeResultRecords. Those interfaces remain the boundary for W1 tests.
+Real integration remains for W4/W6 plan validation, settings and seals;
+W2/W3/W8/W9 routes, hosts, runners and keepers; and controller loops invoking
+ReapUnits, ReconcileControllerRuns and completion delivery under their singleton
+leases. W1b must join metered reservation and settlement to award, renewal,
+result and owner completion, and implement materializationRecords and
+nodeResultRecords within their calling transactions. Those remain contract
+interfaces tested with fakes here.
 
-StateStoreOld and old plan/claim/trigger APIs still have legacy callers.
-W1b billing tests retain sweep/requeue callers. RunReaperLeased remains in
-W1b's storage-lease file. No W1b caller or implementation was changed.
+Legacy StateStoreOld, plan/claim/trigger writers, offer rounds, coordinator
+pins and avoid-window recovery still have old runtime callers. Offer-round
+removal reaches internal/runners/warmpool's active fallback path, so this
+session did not replace it with another temporary implementation. W1b's old
+billing tests still use sweep/requeue, and RunReaperLeased remains in its
+storage-lease file. Those files were left untouched.
 
-## Shared files touched
+No new cross-area contract change was made or requested. The list above
+carries forward unresolved integration contracts from the previous session.
 
-- pkg/controller/github_app_webhook.go: four caller argument removals.
-- .apidiff/pkg_store.txt: removed constant and changed lookup signature only.
-- CHANGELOG.md and its generated pkg/docs/changelog.md mirror.
-- design/rewrite/contracts/c1-data.md: the local schema/admission correction.
-- This handoff.
+## Files and friction
 
-All remaining source and test edits are in pkg/store. The schema change only
-removes the admission index; W1b's schema definitions are unchanged.
+All production and test edits are in pkg/store. The only shared file changed
+is this handoff. No caller outside the package required migration because the
+removed writer and helpers had no production consumers.
 
-## Friction
-
-The first cancellation test fixture contained a running job without a complete
-claim. It was corrected to an already terminal job before exercising the public
-cancellation API. The corrected test passed without a production change.
-
-A broad -run '^TestAdmission' also selected the pre-existing legacy
-TestAdmission_PlanningUntilThePlanIsAccepted, which fails on the removed
-sparkwing_meta table. The final W1 selector names the final-contract tests
-explicitly. The legacy test was not retried or reported as a pass.
-
-The redelivery and authority-expiry failures described above were reproduced
-before their fixes. No socket-dependent test, provider call, candidate runtime,
-Git write or Sparkwing pipeline was attempted.
+The first focused test compile was started before a source deletion and then
+failed because execution_policy.go disappeared from its file list. A fresh
+run passed after the edit completed. No product assertion failed in that run.
+Subsequent final-contract tests passed. No socket-dependent test, provider
+call, candidate runtime or Sparkwing pipeline was attempted.

@@ -132,24 +132,93 @@ func (f claimProfileFake) ResolveClaimProfile(context.Context, capability.Princi
 }
 
 func TestClaimUnitRepositoryEnrollmentAndMeteringDoNotGrantPlacement(t *testing.T) {
-	for _, metered := range []bool{false, true} {
-		t.Run(map[bool]string{false: "unmetered", true: "metered"}[metered], func(t *testing.T) {
-			s, demand := unitClaimFixture(t)
-			root := authorityRoot("enrolled", "a")
-			root.RootMetered = metered
-			authorityPersist(t, s, root)
-			demand.CapabilityPrefix = root.Prefix
-			accept, err := match.ParseAccept([]string{"github.com/other/*"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Accept: accept}})
-			_, err = s.ClaimUnit(t.Context(), demand)
-			var denied *apierr.Error
-			if !errors.As(err, &denied) || denied.Code != apierr.Forbidden {
-				t.Fatalf("repository denial=%v", err)
-			}
-		})
+	for _, queued := range []bool{false, true} {
+		for _, metered := range []bool{false, true} {
+			t.Run(map[bool]string{false: "named", true: "queue"}[queued]+"/"+map[bool]string{false: "unmetered", true: "metered"}[metered], func(t *testing.T) {
+				s, demand := unitClaimFixture(t)
+				if queued {
+					demand.Target = nil
+					demand.Kinds = []capability.UnitKind{capability.UnitNode}
+				}
+				root := authorityRoot("enrolled", "a")
+				root.RootMetered = metered
+				authorityPersist(t, s, root)
+				demand.CapabilityPrefix = root.Prefix
+				accept, err := match.ParseAccept([]string{"github.com/other/*"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Accept: accept}})
+				_, err = s.ClaimUnit(t.Context(), demand)
+				var denied *apierr.Error
+				if queued && !errors.Is(err, ErrNotFound) || !queued && (!errors.As(err, &denied) || denied.Code != apierr.Forbidden) {
+					t.Fatalf("repository denial=%v", err)
+				}
+				rewriteSchemaCount(t, s.db, "billing_awards", 0)
+				if metered {
+					return
+				}
+				accept, err = match.ParseAccept([]string{"github.com/acme/*"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				s.SetClaimProfileResolver(claimProfileFake{profile: match.Profile{Accept: accept}})
+				claim, err := s.ClaimUnit(t.Context(), demand)
+				if err != nil || claim.NodeID != "job" || claim.Award.Holder != root.Subject.ID {
+					t.Fatalf("authorized repository claim=%+v, %v", claim, err)
+				}
+			})
+		}
+	}
+}
+
+func TestClaimUnitGrantedProfileKeys(t *testing.T) {
+	for _, queued := range []bool{false, true} {
+		for _, requirement := range []string{"name=runner", "class=cloud", "gpu"} {
+			t.Run(map[bool]string{false: "named", true: "queue"}[queued]+"/"+requirement, func(t *testing.T) {
+				s, demand := unitClaimFixture(t)
+				if queued {
+					demand.Target = nil
+					demand.Kinds = []capability.UnitKind{capability.UnitNode}
+				}
+				execution, err := json.Marshal(runspec.JobExecutionSettings{Requires: runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{requirement}}}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				rewriteSchemaExec(t, s.db, `UPDATE nodes SET execution_json=?`, execution)
+				impostor := authorityRoot("impostor", "a")
+				impostor.Subject.ID = "other"
+				impostor.Grants = []capability.Grant{capability.NodesClaim}
+				impostor.RootMetered = true
+				authorityPersist(t, s, impostor)
+				demand.CapabilityPrefix = impostor.Prefix
+				if requirement != "gpu" {
+					demand.Labels = []string{requirement}
+				}
+				_, err = s.ClaimUnit(t.Context(), demand)
+				var denied *apierr.Error
+				if queued && !errors.Is(err, ErrNotFound) || !queued && (!errors.As(err, &denied) || denied.Code != apierr.Forbidden) {
+					t.Fatalf("unmet requirement=%v", err)
+				}
+				rewriteSchemaCount(t, s.db, "billing_awards", 0)
+				demand.CapabilityPrefix = "runner"
+				demand.Labels = nil
+				if requirement == "gpu" {
+					demand.Labels = []string{"gpu"}
+				}
+				if requirement == "class=cloud" {
+					launcher := authorityRoot("launcher", "")
+					launcher.Subject.Kind = capability.SubjectService
+					launcher.Grants = []capability.Grant{capability.ClaimsLaunch}
+					authorityPersist(t, s, launcher)
+					demand.CapabilityPrefix = launcher.Prefix
+				}
+				claim, err := s.ClaimUnit(t.Context(), demand)
+				if err != nil || claim.NodeID != "job" || claim.Award.Holder != demand.CapabilityPrefix {
+					t.Fatalf("matching identity claim=%+v, %v", claim, err)
+				}
+			})
+		}
 	}
 }
 

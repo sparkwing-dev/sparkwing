@@ -311,6 +311,48 @@ func TestPlanSealPersistsReplayAndExecutionSettings(t *testing.T) {
 	rewriteSchemaCount(t, tenant.s.db, "nodes", 1)
 }
 
+func TestAcceptedPlanAndSnapshotReturnIndependentValues(t *testing.T) {
+	tenant, request, _ := planFixture(t, runspec.DispatchHost)
+	request.Seal.Plan = []byte(`{"jobs":[{"id":"job","requires":["linux"]}]}`)
+	request.Seal.Resolved.Settings.Jobs["job"] = runspec.JobExecutionSettings{Requires: runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"linux"}}}}
+	accepted, err := tenant.AcceptPlan(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantHash := accepted.Spec.Hash
+	accepted.Spec.Resolved.Args["message"] = "changed"
+	accepted.Spec.Resolved.Settings.Jobs["job"].Requires.Value[0] = "changed"
+	accepted.Plan[0] = '!'
+	snapshot, err := tenant.ReadSnapshot(t.Context(), request.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot.Run.Request.Request.RequestedArgs["message"] = "changed"
+	snapshot.Run.Spec.Resolved.Args["message"] = "changed"
+	snapshot.Run.Plan[0] = '!'
+	snapshot.Nodes[0].Spec[0] = '!'
+	snapshot.Nodes[0].Execution.Requires.Value[0] = "changed"
+
+	again, err := tenant.ReadSnapshot(t.Context(), request.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Run.Request.Request.RequestedArgs["message"] != "hello" || again.Run.Spec.Resolved.Args["message"] != "hello" || again.Run.Spec.Hash != wantHash || !reflect.DeepEqual(again.Nodes[0].Execution.Requires.Value, []string{"linux"}) {
+		t.Fatalf("returned values changed persisted inputs: %+v", again)
+	}
+	var plan nodeproto.PlanDoc
+	var job nodeproto.JobSpec
+	if err := json.Unmarshal(again.Run.Plan, &plan); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(again.Nodes[0].Spec, &job); err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Jobs) != 1 || plan.Jobs[0].ID != "job" || job.ID != "job" || !reflect.DeepEqual(job.Requires, []string{"linux"}) {
+		t.Fatalf("returned values changed persisted declarations: plan=%+v job=%+v", plan, job)
+	}
+}
+
 func TestPlanSealRefusalRollsBackBothSealAndJobs(t *testing.T) {
 	for _, problem := range []string{"request", "argument", "environment", "unclassified", "resolver", "settings_drift", "missing_job_settings", "duplicate_job", "invalid_graph", "missing_secret", "secret_identifier", "expired", "revoked_parent", "cancelled", "validator_lapses_owner"} {
 		t.Run(problem, func(t *testing.T) {
