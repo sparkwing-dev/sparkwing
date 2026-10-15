@@ -134,9 +134,6 @@ func TestHostedRunEmitsTheDispatchersEvents(t *testing.T) {
 		}
 		workspace := t.TempDir()
 		logs := &eventLog{records: map[string][]sparkwing.LogRecord{}}
-		retry := func(auto bool) *nodeproto.PlanModifiers {
-			return &nodeproto.PlanModifiers{Retry: 1, RetryAuto: auto}
-		}
 		doc := nodeproto.PlanDocOld{Pipeline: "p", Nodes: []nodeproto.PlanNode{
 			{ID: "ok"},
 			{ID: "boom"},
@@ -144,8 +141,7 @@ func TestHostedRunEmitsTheDispatchersEvents(t *testing.T) {
 			{ID: "skipper"},
 			{ID: "concurrent"},
 			{ID: "superseded"},
-			{ID: "flaky", Modifiers: retry(false)},
-			{ID: "auto", Modifiers: retry(true)},
+			{ID: "flaky", Modifiers: &nodeproto.PlanModifiers{Retry: 1}},
 			{ID: "produce", Outputs: []string{"out.txt"}},
 			{ID: "consume", Deps: deps("produce"), Consumes: []nodeproto.PlanConsume{{Producer: "produce", Into: "in"}}},
 			{ID: "gate", Approval: &nodeproto.PlanApproval{Message: "ship it?"}},
@@ -167,7 +163,7 @@ func TestHostedRunEmitsTheDispatchersEvents(t *testing.T) {
 				return Result{Outcome: sparkwing.SkippedConcurrent}
 			case "superseded":
 				return Result{Outcome: sparkwing.Superseded, Err: errors.New("lost the slot")}
-			case "flaky", "auto":
+			case "flaky":
 				if call == 1 {
 					return Result{Outcome: sparkwing.Failed, Err: errors.New("first try")}
 				}
@@ -204,9 +200,6 @@ func TestHostedRunEmitsTheDispatchersEvents(t *testing.T) {
 				t.Errorf("%s: %d node_started events, want 1", id, got)
 			}
 		}
-		if got := countEvents(events, "auto", "node_started"); got != 2 {
-			t.Errorf("auto: %d node_started events, want one per retry_auto dispatch", got)
-		}
 		if got := countEvents(events, "after-boom", "node_started"); got != 0 {
 			t.Errorf("after-boom: %d node_started events, want none for a node that never ran", got)
 		}
@@ -217,7 +210,6 @@ func TestHostedRunEmitsTheDispatchersEvents(t *testing.T) {
 		wantEvent(t, events, "concurrent", "node_skipped_concurrent", "")
 		wantEvent(t, events, "superseded", "node_superseded", `"lost the slot"`)
 		wantEvent(t, events, "flaky", "attempt_retry", `"attempt 2/2"`)
-		wantEvent(t, events, "auto", "node_auto_retry", `"dispatch 2/2"`)
 		wantEvent(t, events, "produce", "artifacts_published", `{"manifest_digest":"`+nodeRow(t, st, "produce").ArtifactManifest+`"}`)
 		wantEvent(t, events, "consume", "artifacts_staged", `{"files":1}`)
 		wantEvent(t, events, "gate", "approval_requested", `{"message":"ship it?","timeout_ms":0}`)
@@ -229,9 +221,6 @@ func TestHostedRunEmitsTheDispatchersEvents(t *testing.T) {
 			return r.Event == "retry" && r.Msg == "retry attempt 2/2" && r.Attrs["attempt"] == 2 && r.Attrs["total"] == 2
 		}) {
 			t.Errorf("flaky log %+v, want the retry record", logs.records["flaky"])
-		}
-		if !slices.ContainsFunc(logs.records["auto"], func(r sparkwing.LogRecord) bool { return r.Msg == "auto-retry dispatch 2/2" }) {
-			t.Errorf("auto log %+v, want the auto-retry line", logs.records["auto"])
 		}
 	})
 }

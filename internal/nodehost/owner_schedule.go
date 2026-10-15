@@ -278,14 +278,30 @@ func (h *OwnerHost) wait(ctx context.Context, snapshot store.RunSnapshot, comple
 	select {
 	case err := <-done:
 		cancel()
-		return nil, err
+		return nil, errors.Join(err, context.Cause(ctx))
 	case result := <-completed:
 		cancel()
-		<-done
-		return &result, nil
+		return &result, waitFailure(<-done)
 	case <-ctx.Done():
 		cancel()
-		<-done
-		return nil, context.Cause(ctx)
+		return nil, errors.Join(context.Cause(ctx), waitFailure(<-done))
 	}
+}
+
+func waitFailure(err error) error {
+	if err == nil || err == context.Canceled {
+		return nil
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		var failures []error
+		for _, cause := range joined.Unwrap() {
+			failures = append(failures, waitFailure(cause))
+		}
+		return errors.Join(failures...)
+	}
+	// safety: the requested stop may wrap cancellation together with an independent subscription failure.
+	if cause := errors.Unwrap(err); cause != nil && waitFailure(cause) == nil {
+		return nil
+	}
+	return err
 }

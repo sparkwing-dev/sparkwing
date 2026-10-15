@@ -73,6 +73,7 @@ are part of this contract.
 | `nodehost.OwnerSide`, `nodehost.ExecutorSide` | Name the two layer owners. |
 | `nodehost.LayerSpec`, `nodehost.LayerTable` | Declare the complete outer-to-inner envelope and retry scope. |
 | `nodehost.Reconciler.ReconcileNode` | Follows a holder and repeats atomic reconciliation after terminal or requeue events. |
+| `nodehost.StateFollower`, `StateReader`, `StateSubscription` | Share persisted catch-up and joined subscriptions between owner graph waits and node reconciliation. |
 | `nodehost.ExpansionStore` | Gives owner/eval hosts the Tenant's expansion persistence boundary. |
 | `store.ScheduleNode` | Projects accepted graph and lifecycle facts into the pure decider. |
 | `store.ScheduleExpansion` | Preserves generator-to-source/member mapping, including empty expansions. |
@@ -417,6 +418,29 @@ cannot infer those facts from public job details or declaration bytes.
 Recovery execution also needs a store reader for the source's persisted failure
 stage and masked structured error. `ExecutorDependencies.ReadFailure` is the
 host adapter for that reader. It must not synthesize a failure from a status string.
+
+`StateFollower.Wait` and `WaitNode` supply the shared state follower for
+`OwnerHost.Wait` and `WaitNodeChange`. Each wait arms its run subscription before
+reading persistence because a holder can finish between reconciliation and
+subscription. A notification prompts another read. A committed state sequence,
+initial acceptance, added job or expansion resolution ends the wait. An expired lease and a
+changed store clock grant no execution authority. Reordering rows is not progress.
+Regressed sequences, missing jobs and replaced accepted expansions fail loudly.
+Every exit cancels and joins the subscription, including failed setup. Owner waits
+retain subscription failures when another job completes or the owner is cancelled.
+
+The placement supplies `StateFollower.Subscribe`. It must deliver wake-ups for
+commits from other processes and return only after the subscription is armed.
+Its Close function joins subscription work after cancellation. The shared follower
+owns catch-up and progress checks. It adds no polling interval or lease inference.
+The recovery acceptance cell uses the follower with fake persistence and
+subscriptions. Native controller and local-controller subscriptions remain open.
+
+The legacy envelope's retry-auto dispatch branch, duplicate start-event condition
+and dedicated tests are removed. Application retries keep their existing budget
+and backoff. The common executor's fenced retry acceptance remains the target
+proof. The legacy scheduler, dispatched-pod executor and run-host entry points
+still need their lifecycle cut.
 
 Decision 104 supports TypeScript on Windows. Both SDKs use hello for the bearer
 and argv for Windows protocol handles; no preload or platform refusal remains

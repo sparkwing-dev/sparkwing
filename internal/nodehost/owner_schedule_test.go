@@ -160,3 +160,43 @@ func TestOwnerHostBindingCannotReplaceSelfClaim(t *testing.T) {
 		t.Fatalf("trace=%v", f.trace)
 	}
 }
+
+func TestOwnerHostWaitRetainsFollowerCleanupFailure(t *testing.T) {
+	for _, completed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "cancelled", true: "job completed"}[completed], func(t *testing.T) {
+			_, h, _ := newOwnerFixture(t, true)
+			cleanup := errors.New("subscription did not join")
+			h.Wait = func(ctx context.Context, _ store.RunSnapshot) error {
+				<-ctx.Done()
+				return errors.Join(ctx.Err(), cleanup)
+			}
+			ctx, cancel := context.WithCancelCause(t.Context())
+			defer cancel(nil)
+			result := make(chan ownerExecution, 1)
+			cause := errors.New("owner revoked")
+			if completed {
+				result <- ownerExecution{nodeID: "build"}
+			} else {
+				cancel(cause)
+			}
+			_, err := h.wait(ctx, store.RunSnapshot{}, result)
+			if !errors.Is(err, cleanup) || !completed && !errors.Is(err, cause) {
+				t.Fatalf("wait discarded cleanup or cancellation cause: %v", err)
+			}
+		})
+	}
+}
+
+func TestOwnerHostWaitIgnoresOnlyItsRequestedCancellation(t *testing.T) {
+	_, h, _ := newOwnerFixture(t, true)
+	h.Wait = func(ctx context.Context, _ store.RunSnapshot) error {
+		<-ctx.Done()
+		return errors.Join(ctx.Err())
+	}
+	done := make(chan ownerExecution, 1)
+	done <- ownerExecution{nodeID: "build"}
+	result, err := h.wait(t.Context(), store.RunSnapshot{}, done)
+	if err != nil || result == nil || result.nodeID != "build" {
+		t.Fatalf("wait = %+v, %v", result, err)
+	}
+}

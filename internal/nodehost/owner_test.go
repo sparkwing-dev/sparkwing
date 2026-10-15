@@ -50,6 +50,17 @@ func (f *ownerFixture) ReadSnapshot(context.Context, string) (store.RunSnapshot,
 	return s, nil
 }
 
+func (f *ownerFixture) ReadNode(_ context.Context, ref store.NodeRef) (store.NodeRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, row := range f.snapshot.Nodes {
+		if row.Ref == ref {
+			return row, nil
+		}
+	}
+	return store.NodeRow{}, store.ErrNotFound
+}
+
 func (f *ownerFixture) AcceptPlan(_ context.Context, input store.PlanAcceptance) (store.AcceptedPlan, error) {
 	f.record("accept")
 	f.accepted = input
@@ -146,15 +157,11 @@ func newOwnerFixture(t *testing.T, resumed bool) (*ownerFixture, OwnerHost, RunI
 			return result, nil
 		},
 		Decide: func(store.ScheduleSnapshot) store.ScheduleDecision { return store.ScheduleDecision{Outcome: "success"} },
-		Wait: func(ctx context.Context, _ store.RunSnapshot) error {
-			select {
-			case <-ctx.Done():
-				return context.Cause(ctx)
-			case <-f.changed:
-				return nil
-			}
-		},
 	}
+	follower := StateFollower{Store: f, Subscribe: func(context.Context, string) (StateSubscription, error) {
+		return StateSubscription{Changed: f.changed, Close: func() error { return nil }}, nil
+	}}
+	h.Wait, h.WaitNode = follower.Wait, follower.WaitNode
 	if resumed {
 		spec := runspec.Spec{Request: f.snapshot.Run.Request, Hash: "spec", PlanHash: runspec.Hash(strings.Repeat("a", 64))}
 		f.snapshot.Run.Spec, f.snapshot.Run.PlanHash, f.snapshot.Run.Plan = &spec, strings.Repeat("a", 64), json.RawMessage(`{"jobs":[]}`)

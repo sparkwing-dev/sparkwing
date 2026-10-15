@@ -95,7 +95,7 @@ func TestDispatchSendsANodeOnceWhateverItsRetries(t *testing.T) {
 	var calls atomic.Int32
 	ctx := t.Context()
 	res := hostDispatched(t, ctx, st, nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{{
-		ID: "flaky", Modifiers: &nodeproto.PlanModifiers{Retry: 3, RetryAuto: true, TimeoutMS: 1},
+		ID: "flaky", Modifiers: &nodeproto.PlanModifiers{Retry: 3, TimeoutMS: 1},
 	}}}, func(ctx context.Context, n *NodeRun) Result {
 		calls.Add(1)
 		// safety: the remote host owns the node's timeout, so the run host's context carries no deadline of its own.

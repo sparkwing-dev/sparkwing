@@ -413,8 +413,7 @@ func chain(cfg *Config) Executor {
 		if err := n.Run.State.StartNode(ctx, n.Run.ID, n.Plan.ID); err != nil {
 			return Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("start node %s: %w", n.Plan.ID, err)}
 		}
-		// safety: the dispatcher starts a node once per dispatch, and only retry_auto re-dispatches.
-		if m := n.Plan.Modifiers; n.Attempt <= 1 || (m != nil && m.RetryAuto) {
+		if n.Attempt <= 1 {
 			hostEvent(ctx, n.Run, n.Plan.ID, "node_started", nil)
 		}
 		return inner(ctx, n)

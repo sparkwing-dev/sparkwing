@@ -44,7 +44,7 @@ func TestRetryStartsPastTheAttemptsTheNodeAlreadySpent(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &failUntil{}
-			n := retryNode(nodeproto.PlanModifiers{Retry: 2, RetryAuto: true})
+			n := retryNode(nodeproto.PlanModifiers{Retry: 2})
 			n.Run.State = retryState{consumed: tc.consumed}
 			res := retryLayer(nil, f.run)(t.Context(), n)
 			if fmt.Sprint(f.attempts) != fmt.Sprint(tc.want) || res.Outcome != sparkwing.Failed {
@@ -84,7 +84,6 @@ func TestRetryRunsTheBudgetAndKeepsTheLastFailure(t *testing.T) {
 		{"no retry", nodeproto.PlanModifiers{}, 0, []int{1}, sparkwing.Failed},
 		{"every attempt fails", nodeproto.PlanModifiers{Retry: 2}, 0, []int{1, 2, 3}, sparkwing.Failed},
 		{"second attempt passes", nodeproto.PlanModifiers{Retry: 3}, 2, []int{1, 2}, sparkwing.Success},
-		{"retry_auto shares the budget", nodeproto.PlanModifiers{Retry: 1, RetryAuto: true}, 0, []int{1, 2}, sparkwing.Failed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &failUntil{ok: tc.ok}
@@ -236,7 +235,7 @@ func TestAttemptsBudgetCoversEveryAttemptAndBackoff(t *testing.T) {
 	}{
 		{"no timeout", &nodeproto.PlanModifiers{Retry: 3}, 0},
 		{"one attempt", &nodeproto.PlanModifiers{TimeoutMS: 5 * 60_000}, 5 * time.Minute},
-		{"retry_auto with backoff", &nodeproto.PlanModifiers{TimeoutMS: 5 * 60_000, Retry: 1, RetryAuto: true, RetryBackoffMS: 6 * 60_000}, 16 * time.Minute},
+		{"retry with backoff", &nodeproto.PlanModifiers{TimeoutMS: 5 * 60_000, Retry: 1, RetryBackoffMS: 6 * 60_000}, 16 * time.Minute},
 		{"doubling backoff", &nodeproto.PlanModifiers{TimeoutMS: 60_000, Retry: 2, RetryBackoffMS: 1_000}, 3*time.Minute + 3*time.Second},
 	} {
 		if got := AttemptsBudget(nodeproto.PlanNode{ID: "n", Modifiers: tc.m}); got != tc.want {

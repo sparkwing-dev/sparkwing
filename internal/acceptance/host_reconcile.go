@@ -45,19 +45,22 @@ func CheckHostReconciliation(t *testing.T) {
 				{Kind: store.WaitHolder, Node: store.NodeRow{Ref: ref, Status: store.StatusRunning, Generation: 2, Attempt: 5, StateSeq: 7}}, end,
 			}}
 			request := store.ReconcileRequest{Ref: ref, Actor: store.Actor{Kind: store.ActorRunHost, Holder: "owner"}, Policy: store.SourceResume}
-			waits := 0
-			got, err := nodehost.FollowReconciliation(t.Context(), f, request, func(_ context.Context, gotRef store.NodeRef, after int64) error {
+			waits, joins := 0, 0
+			reader := reconciliationReader{node: end.Node}
+			follower := nodehost.StateFollower{Store: reader, Subscribe: func(_ context.Context, runID string) (nodehost.StateSubscription, error) {
 				waits++
-				if gotRef != ref || after != 7 {
-					t.Errorf("followed %v after %d", gotRef, after)
+				if runID != ref.RunID {
+					t.Errorf("followed run %q", runID)
 				}
-				return nil
-			})
+				// safety: persistence already advanced before subscription; no notification will arrive for this commit.
+				return nodehost.StateSubscription{Changed: make(chan struct{}), Close: func() error { joins++; return nil }}, nil
+			}}
+			got, err := nodehost.FollowReconciliation(t.Context(), f, request, follower.WaitNode)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if waits != 1 || len(f.requests) != 2 || got.Kind != end.Kind || got.Node.Attempt != 5 || got.Node.Generation != end.Node.Generation {
-				t.Fatalf("result=%+v waits=%d calls=%d", got, waits, len(f.requests))
+			if waits != 1 || joins != 1 || len(f.requests) != 2 || got.Kind != end.Kind || got.Node.Attempt != 5 || got.Node.Generation != end.Node.Generation {
+				t.Fatalf("result=%+v waits=%d joins=%d calls=%d", got, waits, joins, len(f.requests))
 			}
 			for _, seen := range f.requests {
 				if seen != request {
@@ -73,4 +76,17 @@ func CheckHostReconciliation(t *testing.T) {
 			t.Fatal("accepted execution without its committed claim")
 		}
 	})
+}
+
+type reconciliationReader struct{ node store.NodeRow }
+
+func (r reconciliationReader) ReadNode(_ context.Context, ref store.NodeRef) (store.NodeRow, error) {
+	if r.node.Ref != ref {
+		return store.NodeRow{}, errors.New("unexpected followed node")
+	}
+	return r.node, nil
+}
+
+func (reconciliationReader) ReadSnapshot(context.Context, string) (store.RunSnapshot, error) {
+	return store.RunSnapshot{}, errors.New("node follower read a graph")
 }

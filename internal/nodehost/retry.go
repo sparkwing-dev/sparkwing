@@ -12,10 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// safety: retry_auto shares the budget and backoff, because every attempt
-// already runs in a fresh SDK process, which is the whole-node re-dispatch
-// retry_auto asks for. The node row stays running until the last attempt
-// ends, since only the scheduler finishes it.
 func retryLayer(cfg *Config, next Executor) Executor {
 	return func(ctx context.Context, n *NodeRun) Result {
 		m := n.Plan.Modifiers
@@ -64,18 +60,10 @@ func retryLayer(cfg *Config, next Executor) Executor {
 	}
 }
 
-// safety: the lines and events are the dispatcher's: a plain retry notes its
-// attempt in the node log and records attempt_retry once the backoff ends, and
-// retry_auto records node_auto_retry before it, as a re-dispatch does.
 func retryAnnounce(ctx context.Context, cfg *Config, n *NodeRun, ordinal, budget int, wait time.Duration) bool {
 	after := ""
 	if wait > 0 {
 		after = " after " + wait.String()
-	}
-	if n.Plan.Modifiers.RetryAuto {
-		hostNodeLog(ctx, cfg, n, sparkwing.LogRecord{Level: "info", Msg: fmt.Sprintf("auto-retry dispatch %d/%d%s", ordinal, budget, after)})
-		hostEvent(ctx, n.Run, n.Plan.ID, "node_auto_retry", fmt.Appendf(nil, "dispatch %d/%d", ordinal, budget))
-		return waitFor(ctx, wait)
 	}
 	hostNodeLog(ctx, cfg, n, sparkwing.LogRecord{
 		Level: "info", Event: "retry", Msg: fmt.Sprintf("retry attempt %d/%d%s", ordinal, budget, after),

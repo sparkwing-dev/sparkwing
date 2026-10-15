@@ -126,6 +126,21 @@ retry-auto, bounce and workers rows are removed from that proof.
 through `OwnerHost.Run`. Native placement and the risk/cleanup acceptance cell
 remain separate requirements.
 
+The legacy retry-auto dispatch event and duplicate start-event conditions are
+removed from the scheduler and pod envelope. Its dedicated fixture and test rows
+are deleted. Application retry budget and backoff tests remain. The target
+`CheckExecutorEnvelope/retries` case checks one generation, advancing attempt
+ordinals and fresh process bindings without redispatch.
+
+`CheckHostReconciliation` uses `StateFollower.WaitNode` for terminal and requeued
+holders. Both cases advance persistence before subscription, send no notification
+for that earlier commit and require a joined subscription before reconciliation
+returns. `TestStateFollower*` also covers later notifications, spurious wake-ups,
+run/job/empty-expansion changes, sequence regression and cancellation.
+`TestOwnerHostWaitRetainsFollowerCleanupFailure` closes the case where a completed
+job or cancelled owner discarded an independently failed subscription join.
+Native controller event subscriptions remain an integration requirement.
+
 `CheckClaimedNodeLifecycle` adds five contract-fake cases under
 `recovery-keeper-causes-and-backoff/hermetic-claimed-node`: successful startup,
 startup rejection, requested cancellation, silence and lease loss during work.
