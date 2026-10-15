@@ -1184,8 +1184,8 @@ bound to its first team and payment after release. Replay cannot restore a hold.
 Console HTTP and break-glass callers retain their authenticated tenant selection.
 
 The raw `paid` grant path and `POST /api/v1/credits/grants` are removed.
-`Tenant.GrantCredits` and `Tenant.RecordCreditGrant`
-refuse caller-selected paid credit before opening a ledger transaction.
+`Tenant.GrantCredits` is removed. `Tenant.RecordCreditGrant` owns grant requests
+and refuses caller-selected paid credit before opening a ledger transaction.
 The existing free grant and payment-linked reversal paths remain. Checkout
 settlement checks actionable fraud warnings in the same transaction as the
 grant and event receipt. A refusal leaves the checkout and ledger unchanged.
@@ -1362,12 +1362,23 @@ also removed. Callers select a Tenant explicitly before grants, charge history
 or idempotent events. The tenant methods keep their existing behavior.
 
 `Tenant.CreditState` and `Tenant.ListCreditGrants` own these reads. Their raw
-Store twins are removed. Burn windows use the store clock.
+Store twins are removed. Burn windows use the store clock. A credit-state read
+uses one snapshot for grants, charges, storage spend, burn, exhaustion and prices.
+The read-only SQLite property commits a concurrent ledger and price update
+between the aggregate and burn reads. The first report retains its original
+snapshot, and the next report sees the complete update.
 Balances use `Tenant.CreditBalanceMicro`. Its raw Store twin is removed.
 `Tenant.RecordCreditGrant` owns grant requests. Its raw Store twin is removed.
 The proof does not exercise provider verification or native placements.
 The controller's billing caller uses this operator method. W1's
 maintenance coordinator owns the shared retention, quota and GC ordering.
+
+The `billing-start-award-versus-start/store-sqlite` proof now lives in
+`pkg/store/store_unit_billing_boundary_test.go` as
+`TestStoreBillingStartAwardVersusStart`. It uses the store's existing metered
+claim fixtures and reopens SQLite after execution starts. The ordinary-package
+`internal/acceptance/store_unit_billing.go` harness and its acceptance wrapper
+are removed. No native placement proof is implied.
 
 ### Storage policy and reports
 

@@ -257,10 +257,10 @@ func TestMeteredTokenClaimsOnlyItsOwnTeam(t *testing.T) {
 
 	// safety: both teams can pay, so a claim across the boundary is refused
 	// for being across it and never for an empty balance.
-	if _, err := tenant(t, st, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent, "pay_home", "admin"); err != nil {
+	if _, err := tenant(t, st, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 100 * store.MicroCreditsPerCent, Reference: "pay_home", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("GrantCredits: %v", err)
 	}
-	if _, err := acme.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent, "pay_acme", "admin"); err != nil {
+	if _, err := acme.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 100 * store.MicroCreditsPerCent, Reference: "pay_acme", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("GrantCredits(acme): %v", err)
 	}
 	if err := st.CreateRun(ctx, store.Run{

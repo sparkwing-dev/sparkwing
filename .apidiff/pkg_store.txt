@@ -3125,9 +3125,6 @@ func (t *Tenant) GitHubCommitTriggers(ctx context.Context, repo GitHubRepo, sha 
 func (t *Tenant) GitHubRunnerBinding(ctx context.Context, repositoryID int64) (GitHubRunnerBinding, error)
 func (t *Tenant) GitHubRunnerBindings(ctx context.Context) (_ []GitHubRunnerBinding, err error)
 func (t *Tenant) GitHubRunnerCredentialPush(ctx context.Context, prefix string) (GitHubRunnerPush, error)
-func (t *Tenant) GrantCredits(
-	ctx context.Context, kind string, amountMicro int64, reference, createdBy string,
-) (*CreditGrant, error)
 func (t *Tenant) HeartbeatConcurrencySlot(ctx context.Context, key, holderID string, lease time.Duration) (expires time.Time, superseded bool, err error)
 func (t *Tenant) HeartbeatTrigger(ctx context.Context, id string, lease time.Duration) (cancelled bool, err error)
 func (t *Tenant) HoldByOperator(ctx context.Context, actor, reason string, now time.Time) (string, error)

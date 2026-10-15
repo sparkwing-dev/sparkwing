@@ -53,8 +53,7 @@ func readyNodePinned(t *testing.T, s *store.Store, runID, nodeID string, cores f
 
 func fundLedger(t *testing.T, s *store.Store, credits int64) {
 	t.Helper()
-	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(context.Background(), store.CreditGrantFree,
-		credits*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).RecordCreditGrant(context.Background(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: credits * store.MicroCreditsPerCent, Reference: "pay_1", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 }

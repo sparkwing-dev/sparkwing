@@ -64,7 +64,7 @@ func TestANewTeamStopsAtItsDailyCap(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := storetest.Open(t)
 			claimant, _ := fundedMeteredNode(t, s, "run-cap")
-			if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(context.Background(), store.CreditGrantPaid, dollarsMicro(30), "pay_more", "admin"); err != nil {
+			if _, err := tenant(t, s, store.DefaultTeam).RecordCreditGrant(context.Background(), store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: dollarsMicro(30), Reference: "pay_more", CreatedBy: "admin"}); err != nil {
 				t.Fatal(err)
 			}
 			spentOn(t, s, "default", tc.day, store.NewDailyCapCents)
@@ -411,7 +411,7 @@ func TestADeclineHoldsATeamWithPrepaidBalanceAtNew(t *testing.T) {
 	if _, _, err := s.AsOperator().FailCardAttempt(ctx, w.AttemptID, "pi_declined", "card_declined", now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := acme.GrantCredits(ctx, store.CreditGrantFree, 400*store.MicroCreditsPerCredit*1000, "promo", "admin"); err != nil {
+	if _, err := acme.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 400 * store.MicroCreditsPerCredit * 1000, Reference: "promo", CreatedBy: "admin"}); err != nil {
 		t.Fatal(err)
 	}
 	if b, err := acme.BillingStanding(ctx, now); err != nil || b.Trusted {
@@ -566,7 +566,7 @@ func TestBillingWritersShareOneLockOrder(t *testing.T) {
 			    VALUES ('acme', ?, 1) ON CONFLICT (team, day) DO UPDATE SET amount_micro = team_spend_days.amount_micro + 1`),
 				now.UnixNano()/int64(24*time.Hour))
 			note(err)
-			_, err = acme.GrantCredits(ctx, store.CreditGrantFree, store.MicroCreditsPerCredit, fmt.Sprintf("promo_%d", i), "admin")
+			_, err = acme.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: store.MicroCreditsPerCredit, Reference: fmt.Sprintf("promo_%d", i), CreatedBy: "admin"})
 			note(err)
 		},
 	}
@@ -663,7 +663,7 @@ func TestTheTeamRunnerCapDefaultsAndIsRaisedPerTeam(t *testing.T) {
 	now := time.Now()
 	acme := teamHandle(t, s, "acme")
 	claimant := meteredTeamClaimant(t, acme, "agent:cloud")
-	if _, err := acme.GrantCredits(ctx, store.CreditGrantPaid, 1000*store.MicroCreditsPerCredit, "pay_acme", "admin"); err != nil {
+	if _, err := acme.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCredit, Reference: "pay_acme", CreatedBy: "admin"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.DB().Exec(storetest.Rebind(s, `UPDATE teams SET billing_runner_cap = 0 WHERE name = 'acme'`)); err != nil {

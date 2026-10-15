@@ -92,8 +92,7 @@ func TestAnEmptyBalanceRefusesAChargedWriteWithPaymentRequired(t *testing.T) {
 		t.Fatalf("the refusal reads %q and does not say why", body)
 	}
 
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		100*store.MicroCreditsPerCent, "pay_1", "operator"); err != nil {
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 100 * store.MicroCreditsPerCent, Reference: "pay_1", CreatedBy: "operator"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if code, body := f.request(t, http.MethodPost, storageEventPath, f.team,

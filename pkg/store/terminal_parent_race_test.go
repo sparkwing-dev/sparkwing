@@ -18,7 +18,7 @@ func TestPostgresNodeAwardRefusesParentFinishedAfterCandidateRead(t *testing.T) 
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				claimant := meteredClaimant(t, s, "cloud")
-				if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent, "funds", "admin"); err != nil {
+				if _, err := tenant(t, s, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 100 * store.MicroCreditsPerCent, Reference: "funds", CreatedBy: "admin"}); err != nil {
 					t.Fatal(err)
 				}
 				readyNode(t, s, "racing", "ready")

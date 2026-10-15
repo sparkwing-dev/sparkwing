@@ -28,8 +28,7 @@ func startRun(tenant *store.Tenant, id string) error {
 
 func fund(t *testing.T, tenant *store.Tenant) {
 	t.Helper()
-	if _, err := tenant.GrantCredits(context.Background(), store.CreditGrantPaid, store.MicroCreditsPerCredit,
-		"pay-"+string(tenant.Team()), "admin"); err != nil {
+	if _, err := tenant.RecordCreditGrant(context.Background(), store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: store.MicroCreditsPerCredit, Reference: "pay-" + string(tenant.Team()), CreatedBy: "admin"}); err != nil {
 		t.Fatalf("fund %s: %v", tenant.Team(), err)
 	}
 }

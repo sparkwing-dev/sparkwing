@@ -387,8 +387,7 @@ func TestConcurrentRunnerGuardRefusesTheSecondClaimForOnePrincipal(t *testing.T)
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	readyNode(t, s, "run-a", "build")
 	readyNode(t, s, "run-b", "build")
-	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_1", "admin"); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCredit, Reference: "pay_1", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	setLimit(t, s, store.ComputeLimitConcurrentRunners, 1)
@@ -422,8 +421,7 @@ func TestConcurrentRunnerGuardCountsSharedPrincipalWithinOneTeam(t *testing.T) {
 		team *store.Tenant
 		id   string
 	}{{acme, "acme-1"}, {globex, "globex-1"}, {globex, "globex-2"}} {
-		if _, err := tc.team.GrantCredits(ctx, store.CreditGrantPaid,
-			1000*store.MicroCreditsPerCredit, "pay_"+tc.id, "admin"); err != nil {
+		if _, err := tc.team.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCredit, Reference: "pay_" + tc.id, CreatedBy: "admin"}); err != nil {
 			t.Fatalf("fund %s: %v", tc.id, err)
 		}
 		readyTeamNode(t, s, tc.team, tc.id, "build")
@@ -453,8 +451,7 @@ func TestGlobalRunnerGuardCountsEveryPrincipal(t *testing.T) {
 	second := meteredClaimant(t, s, "agent:cloud-b")
 	readyNode(t, s, "run-a", "build")
 	readyNode(t, s, "run-b", "build")
-	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_1", "admin"); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCredit, Reference: "pay_1", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	setLimit(t, s, store.ComputeLimitGlobalRunners, 1)
@@ -505,8 +502,7 @@ func TestWallClockGuardRefusesAClaimOnAnOldRun(t *testing.T) {
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	readyNode(t, s, "run-long", "build")
-	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_1", "admin"); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCredit, Reference: "pay_1", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	setLimit(t, s, store.ComputeLimitRunSeconds, 60)
@@ -541,8 +537,7 @@ func TestWallClockGuardReportsAFailedRead(t *testing.T) {
 	if err := s.MarkNodeReady(context.Background(), "run-long", "build"); err != nil {
 		t.Fatalf("mark ready: %v", err)
 	}
-	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(context.Background(), store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_1", "admin"); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).RecordCreditGrant(context.Background(), store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCredit, Reference: "pay_1", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if _, err := s.ClaimNextReadyNode(cancelled, claimant, "pod-1", time.Minute, nil); err == nil {
@@ -555,8 +550,7 @@ func TestCancelNodeForComputeLimitFailsTheNodeAndReleasesTheClaim(t *testing.T) 
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	readyNode(t, s, "run-cut", "build")
-	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_1", "admin"); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCredit, Reference: "pay_1", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if _, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil); err != nil {
@@ -653,8 +647,7 @@ func TestConcurrentClaimsNeverPassTheRunnerGuard(t *testing.T) {
 	for i := range 6 {
 		readyNode(t, s, fmt.Sprintf("run-%d", i), "build")
 	}
-	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		10_000*store.MicroCreditsPerCredit, "pay_1", "admin"); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 10_000 * store.MicroCreditsPerCredit, Reference: "pay_1", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	setLimit(t, s, store.ComputeLimitConcurrentRunners, 2)
@@ -869,8 +862,7 @@ func TestConcurrentRunnerGuardCountsEveryTokenOfATeam(t *testing.T) {
 	acme := teamHandle(t, s, "acme")
 	first := meteredTeamClaimant(t, acme, "agent:one")
 	second := meteredTeamClaimant(t, acme, "agent:two")
-	if _, err := acme.GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_acme", "admin"); err != nil {
+	if _, err := acme.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCredit, Reference: "pay_acme", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("fund acme: %v", err)
 	}
 	readyTeamNode(t, s, acme, "acme-1", "build")

@@ -177,7 +177,7 @@ func TestClaimLaunch_BillsEveryClaimAndPagesPastUnpaidTeams(t *testing.T) {
 		t.Fatalf("a team with no credits got a launch claim: %+v %v", claim, err)
 	}
 	intake(t, paying, "run-paying", "korey", "probe")
-	if _, err := paying.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent, "pay_launch", "admin"); err != nil {
+	if _, err := paying.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 100 * store.MicroCreditsPerCent, Reference: "pay_launch", CreatedBy: "admin"}); err != nil {
 		t.Fatal(err)
 	}
 	claim, err := st.ClaimLaunch(ctx, launcher, launchRequest(), launchClock(t, st))
@@ -211,7 +211,7 @@ func TestClaimLaunch_BoundsEachPollAndResumesWhereItStopped(t *testing.T) {
 		intake(t, unpaid, fmt.Sprintf("run-unpaid-%02d", i), "korey", "probe")
 	}
 	intake(t, paying, "run-paying", "korey", "probe")
-	if _, err := paying.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent, "pay_launch", "admin"); err != nil {
+	if _, err := paying.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 100 * store.MicroCreditsPerCent, Reference: "pay_launch", CreatedBy: "admin"}); err != nil {
 		t.Fatal(err)
 	}
 	if claim, err := st.ClaimLaunch(ctx, launcher, launchRequest(), time.Now()); err != nil || claim != nil {
@@ -255,7 +255,7 @@ func TestClaimLaunch_ConcurrentPollsNeverRollTheResumePointBack(t *testing.T) {
 		intake(t, unpaid, fmt.Sprintf("run-unpaid-%03d", i), "korey", "probe")
 	}
 	intake(t, paying, "run-paying", "korey", "probe")
-	if _, err := paying.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent, "pay_launch", "admin"); err != nil {
+	if _, err := paying.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 100 * store.MicroCreditsPerCent, Reference: "pay_launch", CreatedBy: "admin"}); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup

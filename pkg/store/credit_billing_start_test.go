@@ -28,7 +28,7 @@ func fundedMeteredNode(t *testing.T, s *store.Store, runID string) (store.ClaimI
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	readyNode(t, s, runID, "build")
 	granted := int64(100 * store.MicroCreditsPerCent)
-	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(context.Background(), store.CreditGrantPaid, granted, "pay_"+runID, "admin"); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).RecordCreditGrant(context.Background(), store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: granted, Reference: "pay_" + runID, CreatedBy: "admin"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	return claimant, granted

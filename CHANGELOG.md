@@ -21,6 +21,7 @@ unlock.
 ## [Unreleased]
 
 ### Changed
+- **store (Breaking):** Remove `Tenant.GrantCredits`. Use `Tenant.RecordCreditGrant` with a typed request. Tenant credit reports now read balances, burn, storage charges and prices from one database snapshot. See [migration guide](docs/migrations/_unreleased.md#paid-credit-requires-verified-checkout-settlement).
 - **billing:** Fraud-warning replays retain their original payment and card. Conflicting payer evidence fails without recording a warning or freezing a team. Released warning holds remain released after restart and replay.
 - **store + controller (Breaking):** Remove legacy node-log upload, signing and seal APIs, their HTTP writers and the segment upload client. Tagged log bindings, commits and leased maintenance own uploads, persistence and abandoned-stream sealing. Physical manifest readers and object-side abandoned seals are removed. Completeness uses the selected attempt’s persisted finish time and the store clock. See [migration guide](docs/migrations/_unreleased.md#log-writes-use-tagged-subjects).
 - **store:** `Tenant.ReadBlob` returns committed blob metadata only after checking live tenant authority and read edges. Tombstoned digests return no metadata.

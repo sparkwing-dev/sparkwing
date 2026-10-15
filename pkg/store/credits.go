@@ -272,28 +272,6 @@ func (req CreditGrantRequest) validate() error {
 	return nil
 }
 
-// GrantCredits writes a free grant or payment-linked reversal for this tenant.
-func (t *Tenant) GrantCredits(
-	ctx context.Context, kind string, amountMicro int64, reference, createdBy string,
-) (*CreditGrant, error) {
-	return grantCredits(ctx, t.RecordCreditGrant, kind, amountMicro, reference, createdBy)
-}
-
-func grantCredits(
-	ctx context.Context,
-	record func(context.Context, CreditGrantRequest) (CreditGrantResult, error),
-	kind string, amountMicro int64, reference, createdBy string,
-) (*CreditGrant, error) {
-	res, err := record(ctx, CreditGrantRequest{
-		Kind: kind, AmountMicro: amountMicro, Reference: reference, CreatedBy: createdBy,
-	})
-	if err != nil {
-		return nil, err
-	}
-	grant := res.Grant
-	return &grant, nil
-}
-
 // RecordCreditGrant writes a free grant or payment-linked reversal and reports whether it was created.
 func (t *Tenant) RecordCreditGrant(
 	ctx context.Context, req CreditGrantRequest,
@@ -465,20 +443,6 @@ func creditGrantByReferenceTx(
 	return g, true, nil
 }
 
-// CreditBalanceMicro returns t's grants minus t's charges, in micro-credits.
-func (t *Tenant) CreditBalanceMicro(ctx context.Context) (int64, error) {
-	return t.s.creditBalanceMicro(ctx, t.team)
-}
-
-func (s *Store) creditBalanceMicro(ctx context.Context, team Team) (int64, error) {
-	var granted, charged sql.NullInt64
-	if err := s.queryRow(ctx, creditBalanceSQL,
-		string(team), string(team)).Scan(&granted, &charged); err != nil {
-		return 0, err
-	}
-	return granted.Int64 - charged.Int64, nil
-}
-
 const creditBalanceSQL = `SELECT (SELECT SUM(amount_micro) FROM credit_grants WHERE team = ?),
         (SELECT SUM(amount_micro) FROM credit_charges WHERE team = ?)`
 
@@ -489,7 +453,7 @@ const creditGrantSplitSQL = `SELECT
         (SELECT -SUM(amount_micro) FROM credit_grants WHERE team = ? AND kind = ?),
         (SELECT SUM(amount_micro) FROM credit_charges WHERE team = ?)`
 
-func creditBalanceTx(ctx context.Context, tx *storeTx, team Team) (int64, error) {
+func creditBalanceTx(ctx context.Context, tx rowQuerier, team Team) (int64, error) {
 	var granted, charged sql.NullInt64
 	if err := tx.QueryRowContext(ctx, creditBalanceSQL,
 		string(team), string(team)).Scan(&granted, &charged); err != nil {
@@ -522,62 +486,6 @@ func lockCreditLedgerTx(ctx context.Context, tx *storeTx) error {
 	}
 	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, "sparkwing/credit-ledger")
 	return err
-}
-
-// CreditState reports t's ledger together with the rate, the grace period, and the credits t burned over window.
-func (t *Tenant) CreditState(ctx context.Context, window time.Duration) (CreditState, error) {
-	return t.s.creditState(ctx, t.team, window)
-}
-
-func (s *Store) creditState(ctx context.Context, team Team, window time.Duration) (CreditState, error) {
-	out := CreditState{BurnWindow: window}
-	var granted, reversed, charged sql.NullInt64
-	if err := s.queryRow(ctx, creditGrantSplitSQL,
-		string(team), CreditGrantReversal, string(team), CreditGrantReversal,
-		string(team)).Scan(&granted, &reversed, &charged); err != nil {
-		return out, err
-	}
-	out.GrantedMicro = granted.Int64
-	out.ReversedMicro = reversed.Int64
-	out.ChargedMicro = charged.Int64
-	out.BalanceMicro = granted.Int64 - reversed.Int64 - charged.Int64
-
-	var storageCharged sql.NullInt64
-	if err := s.queryRow(ctx,
-		`SELECT SUM(amount_micro) FROM credit_charges WHERE team = ? AND kind = ?`,
-		string(team), CreditChargeStorage).Scan(&storageCharged); err != nil {
-		return out, err
-	}
-	out.StorageChargedMicro = storageCharged.Int64
-
-	if window > 0 {
-		var burn sql.NullInt64
-		if err := s.queryRow(ctx,
-			`SELECT SUM(amount_micro) FROM credit_charges WHERE team = ? AND charged_at >= ?`,
-			string(team), s.now().Add(-window).UnixNano()).Scan(&burn); err != nil {
-			return out, err
-		}
-		out.BurnMicro = burn.Int64
-	}
-
-	settings, err := s.AsOperator().CreditSettings(ctx)
-	if err != nil {
-		return out, err
-	}
-	out.RateMicroPerSecond = settings.RateMicroPerSecond
-	out.RateTable = settings.RateTable
-	out.RateTableSet = settings.RateTableSet
-	out.WarmCPUClassCores = settings.WarmCPUClassCores
-	out.GraceSeconds = settings.GraceSeconds
-	out.MaxChargeSeconds = settings.MaxChargeSeconds
-	out.StorageRateMicroPerGBDay = settings.StorageRateMicroPerGBDay
-	out.StorageFreeAllowanceBytes = settings.StorageFreeAllowanceBytes
-	exhausted, err := s.creditExhaustedAt(ctx, team)
-	if err != nil {
-		return out, err
-	}
-	out.ExhaustedAt = exhausted
-	return out, nil
 }
 
 // CreditLedgerTotals is the ledger summed the way a meter reads it: what was granted, split by whether the operator paid for it, and what the charge rows did with it.
@@ -853,28 +761,7 @@ func parseCreditSetting(raw string, fallback int64) int64 {
 	return v
 }
 
-const upsertCreditSettingSQL = `
-        INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
-        ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
-
 func formatCreditSetting(v int64) string { return strconv.FormatInt(v, 10) }
-
-func (s *Store) creditExhaustedAt(ctx context.Context, team Team) (*time.Time, error) {
-	var ns int64
-	err := s.queryRow(ctx,
-		`SELECT credit_exhausted_at FROM teams WHERE name = ?`, string(team)).Scan(&ns)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	if ns == 0 {
-		return nil, nil
-	}
-	at := time.Unix(0, ns).UTC()
-	return &at, nil
-}
 
 // safety: the first stamp is the one that stands, because the marker records
 // when this team's balance first read empty and every later heartbeat would

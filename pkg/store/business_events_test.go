@@ -41,7 +41,7 @@ func assertBusinessEventsRecordLifecycle(t *testing.T, st *store.Store) {
 	if _, err := st.AsOperator().TestOnlyReversePayment(ctx, "pi_1", "re_1", "operator", 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tn.GrantCredits(ctx, store.CreditGrantFree, store.MicroCreditsPerCredit, "promo", "operator"); err != nil {
+	if _, err := tn.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: store.MicroCreditsPerCredit, Reference: "promo", CreatedBy: "operator"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := teststore.ForTeam(t, st, team).TestOnlyHoldForDispute(ctx, "dp_1", "pi_1", "card holder says fraud", now); err != nil {

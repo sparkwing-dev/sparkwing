@@ -194,8 +194,7 @@ func TestComputeLimits_RefusesExplicitNullWithoutChangingGuards(t *testing.T) {
 func TestComputeLimits_ClaimRefusedByTheRunnerGuard(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCredit, Reference: "pay_1", CreatedBy: "root"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	setComputeLimit(t, f, store.ComputeLimitConcurrentRunners, 1)
@@ -257,8 +256,7 @@ func TestComputeLimits_HeartbeatCancelsANodePastTheWallClockGuard(t *testing.T) 
 	}
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCredit, Reference: "pay_1", CreatedBy: "root"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	c := client.NewWithToken(f.url, nil, f.runner)
@@ -367,8 +365,7 @@ func TestComputeLimits_RefusalStaysInsideTheRefusedPrincipal(t *testing.T) {
 	}
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCredit, Reference: "pay_1", CreatedBy: "root"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	setComputeLimit(t, f, store.ComputeLimitConcurrentRunners, 1)
@@ -398,8 +395,7 @@ func TestComputeLimits_GlobalRunnerGuardRefusesAnUnownedClaim(t *testing.T) {
 	}
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCredit, Reference: "pay_1", CreatedBy: "root"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	setComputeLimit(t, f, store.ComputeLimitGlobalRunners, 1)

@@ -467,7 +467,7 @@ func TestSamplersFillTheOperationalSeries(t *testing.T) {
 	engine, billingTenant := engineRuntimeStore(t)
 	st := engine.Store
 	engineSQL(t, st, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','run','node-a','pending',?,?)`, []byte(`{"id":"node-a"}`), []byte(`{}`))
-	if _, err := billingTenant.GrantCredits(ctx, store.CreditGrantFree, 4_000_000, "trial", "admin"); err != nil {
+	if _, err := billingTenant.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 4_000_000, Reference: "trial", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 
@@ -573,7 +573,7 @@ func TestSettleFinishedNodeClearsTheWindowForAnUnmeteredFinisher(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := billingTenant.GrantCredits(ctx, store.CreditGrantPaid, 20_000_000, "invoice", "admin"); err != nil {
+	if _, err := billingTenant.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 20_000_000, Reference: "invoice", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	_, tok, err := st.CreateTokenWith(ctx, "pool", store.TokenKindRunner,

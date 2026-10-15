@@ -1,112 +1,95 @@
-# W1b raw payment API cut and metering regression
+# W1b credit snapshot and billing harness continuation
 
-Base: 65419c914. Net production Go delta: **-99 lines** (3 added, 102
-deleted), entirely in pkg/store. Combined store delta against main: +3,113.
-The -4,250 budget is still exceeded by **7,363 lines**. The overage remains
-unjustified, and legacy output and claim-credit paths remain. This area is
-incomplete.
+Base: 5f80623f3. Net production Go delta in pkg/store: **-55 lines**
+(59 added, 114 deleted). The relocated acceptance harness removes another
+**107 ordinary-package Go lines**, excluded from the lead's area-budget count.
+Combined store delta against main is **+3,058**, which is **7,308 lines over**
+the -4,250 budget. The remaining overage is not justified. This area is incomplete.
 
-Removed six public raw payment callback/lookup APIs with no production callers:
-Tenant.SaveCard, Tenant.HoldForDispute, Operator.PaymentTeam,
-Operator.ReversePayment, Operator.RecordPaymentWarning and
-Operator.ReportCardRefund. Their transaction-local mutation owners remain for
-verified-event settlement. Existing regression tests call those owners through
-payment_fixture_test.go. These trusted-fixture tests do not establish provider
-verification. Console hold/release APIs and the actual card collection worker
-remain. No provider fact is accepted through a replacement public callback.
+`Tenant.CreditState` reads grants, charges, storage spend, burn, exhaustion and
+prices in one existing snapshot transaction. The old separate Store read owner,
+its exhausted-at reader and its separate balance-query owner are deleted.
+`CreditBalanceMicro` uses the existing row-query balance owner. No schema,
+price, restriction, environment variable, interface or configuration is added.
 
-Removed Store.SetTokenMetered. Legacy credential fixtures seed their old marker
-through test SQL. TokenMetered delegates to the existing transaction query
-through storeRowQuerier, removing the duplicated read. The SQL scope registry
-follows the private payment owners and removes entries for deleted methods and
-the forwarding read. The registry's four tests pass.
+Invariant: one tenant credit report describes one committed financial snapshot.
+The generated regression uses a real read-only SQLite connection and commits a
+ledger/price update between the aggregate and burn reads. Against the previous
+implementation it returns old charges with the new burn and rate and fails.
+The new reader retains the original snapshot. The next report sees the complete
+update. Sixteen generated amounts pass without sleeps or timing races.
 
-Ported TestTokenMeteredMarkerIsOperatorSet from the deleted tokens setter to
-TestMeteredRootPolicyCannotRewriteAwardProperty. Its 32 cases vary root metering,
-runner versus launcher execution and elapsed compute. Invariant: awards derive
-metering from persisted root authority, launchers always pay, and later root
-changes cannot change an award's committed charges or replay.
+Removed `Tenant.GrantCredits`, its generic callback helper and an unused legacy
+settings-upsert SQL constant. The operator console already used the retained
+`Tenant.RecordCreditGrant`. All 30 test-file callers now pass typed requests to
+that method. Their ignored return values preserve fixture behavior. Legacy tests
+that ask for unverified paid credit still fail that request as before. The paid
+credit fuzz property now exercises the one retained request owner.
 
-**W1 implementation defect, red regression retained:** eight cases fail when
-a launcher root has RootMetered=false. ClaimUnit succeeds and persists a Cloud
-award with Metered=false. authority_issue.go's award constructor copies only
-parent.Capability.RootMetered into BillingProvenance. queuedUnitTx also gates
-financial eligibility only on the root marker. A59 requires launcher awards to
-be metered regardless of that flag. The other 24 cases pass, including runner
-marker changes after award and immutable financial replay. This is an issuance
-policy fix for W1, not a change to the C1/C2 contract. No W1 implementation file
-was edited. Run:
-
-GOWORK=off GOFLAGS=-buildvcs=false GOCACHE=/tmp/sw-gocache go test -p 4
-./pkg/store -run '^TestMeteredRootPolicyCannotRewriteAwardProperty$' -count=1
+Moved the billing-start-award-versus-start/store-sqlite proof out of
+`internal/acceptance/store_unit_billing.go` into the plain store test
+`TestStoreBillingStartAwardVersusStart`. Removed its acceptance-wrapper call.
+The test uses existing meteredUnitFixture and blobAccountingDiskStore seeding,
+with no new SQL INSERT fixture. It verifies runner versus cloud start, bootstrap
+exchange provenance, immutable reservation pricing and execution after reopening.
+The package-internal test uses these existing store fixtures because importing
+pkg/store/internal/storetest there would create an import cycle through store.
 
 Verification:
 
 - Whole-repository go build -p 4 ./... passes with GOWORK=off and VCS stamping off.
-- Scoped go vet -p 4 passes for pkg/store, pkg/controller and
-  cmd/sparkwing-controller. All tests in those packages compile.
-- The focused store suite passes in 82.848s: TestPayment*, FuzzPayment* seeds,
-  TestStoreData*, TestMeteredUnit*, TestLogPersistence*, TestBlob*, FuzzBlob*
-  seeds, TestResultRecords* and TestTenantSQLScope_*.
-- Seven existing store acceptance cells pass: CAS integrity, presence/read set,
-  large presence budget, cache scope, reference edges, reachability/retention
-  and billing/retention. No new native acceptance cell is claimed.
-- TestAdminFreezesAndReleasesWithTheConsolesRecords passes. The changed legacy
-  controller deletion/git-credential fixtures fail before reaching their
-  migrated calls because their setup still writes the removed tokens table.
-  The legacy operator-console fixture also attempts a socket, which this
-  sandbox refuses. Their runtime paths remain integration evidence for the lead.
-- commentcheck -base main is clean across 2,132 files. git diff --check is clean.
-  Embedded changelog/migration guards pass. The store API snapshot is regenerated,
-  including three earlier removals absent from the previous snapshot.
-- The full new root-policy property is red on the eight launcher cases above.
-  No whole-repository test run, Sparkwing pipeline or native PostgreSQL run was made.
+- Scoped go vet -p 4 passes for pkg/store, pkg/controller and tests/acceptance.
+  Tests in those three packages compile after caller migration.
+- The focused W1b suite passes in 87.182s: TestStoreData*, TestStoreBilling*,
+  TestMeteredUnit*, TestPayment*, FuzzPayment* seeds, TestBlob*, FuzzBlob* seeds,
+  TestLogPersistence*, TestResultRecords* and TestTenantSQLScope_*.
+- All eight local store boundary proofs pass: CAS, presence, large presence,
+  cache scope, reference edges, reachability, billing retention and the relocated
+  billing-start proof. No native placement proof is claimed.
+- The existing launcher-root policy property remains red in the same eight
+  RootMetered=false cloud cases. The other 24 cases pass. No test was skipped.
+- commentcheck -base main is clean across 2,134 files. API snapshot regenerated.
+  git diff --check and the embedded changelog/migration checks pass.
+- No whole-repository test run, native PostgreSQL run, Sparkwing binary or
+  pipeline was run. The lead still owns those checks and independent review.
 
-Local contract changes: c1-data.md records the seven removed public methods.
-The verified-event signature and all foreign contracts remain unchanged.
-The new property ports the legacy marker finding but is not a passing acceptance
-proof until W1 fixes launcher issuance. No test was skipped to hide it.
+Contract changes needed and real integrations still open:
 
-Remaining cross-area work:
+- W2/C2 must declare verified card setup, refund, warning and dispute events,
+  including persisted setup/payment correlation. PaymentEvent and payment_events
+  still carry checkout-only facts. SettlePayment cannot dispatch undeclared
+  provider payloads. The existing private mutation owners remain ready.
+- W1 owns the launcher issuance regression: Cloud awards must be metered even
+  when the root marker is false. Its issuance and eligibility files are untouched.
+- W1/C1 needs a persisted per-award exhaustion anchor and renewal cancellation
+  outcome for job, plan, eval and owner awards. Current accountUnitBillingTx
+  returns only error and renewal constructs LeaseBeat before accounting.
+  Node-only legacy exhaustion cannot implement the final award policy.
+- W1 needs committed result selectors in NodeRow/nodeReadColumns before exact
+  CopyMaterializedRecords selection can replace legacy outputs. W2/W3/W9 carry
+  the selected records to readers. StateStoreOld output, claim-input, scheduler,
+  rehydrate and child-read integrations remain. Legacy claim-credit retirement
+  remains open and is not counted as done by the convenience-API removal.
+- W1's imported-terminal-attempt seeding remains open. The earlier relocated
+  storage proofs still use the existing SeedPresence fixture.
+- W2/W3 still own authenticated log transport/recorder and native host Data
+  binding. Physical allowance eviction, source-before-run binding and the
+  ReadBlob/ChargeDownload composition remain production joins.
 
-- W2/W1: PaymentEvent still carries only checkout paid/expired/failed facts.
-  payment_events still requires a checkout FK and permits only those kinds.
-  The approved card-setup/refund/warning/dispute settlement needs W2's verified
-  event payload and persisted receipt/setup correlation. Private mutation owners
-  are tested here. No raw proof or caller-selected payer substitutes for C2.
-- W1: per-award exhaustion anchoring and committed renewal cancellation are
-  absent. accountUnitBillingTx returns only error, and renewals construct
-  LeaseBeat before accounting. The legacy node exhaustion anchor cannot cover
-  plan, eval and owner awards. Spend/grace and old claim-credit retirement remain.
-- W1: this checkout lacks committed output/manifest selectors on NodeRow and
-  nodeReadColumns. CopyMaterializedRecords cannot resolve a committed source
-  selection. W2/W3/W9 must carry the selected result to authorized readers.
-  The old output client still calls removed upload routes through the legacy
-  StateStoreOld finish path. Its scheduler, rehydrate, claim-input and child-read
-  callers need the declared record/result cutover. No new compatibility path
-  was added here.
-- W1: imported terminal-attempt seeding remains absent. The seven relocated
-  cells retain teststore.SeedPresence's fixture. Harness moves and the two old
-  output catalog removals were already complete and were not repeated.
-- W2/W3: native host logseg.Data binding, authenticated log transport/recorder,
-  physical allowance eviction, source-before-run binding and the
-  ReadBlob/ChargeDownload composition remain production joins. NewDataClient
-  already exists and is not reported as a stub.
+Shared files: internal/acceptance/store_unit_billing.go (deleted),
+tests/acceptance/billing_test.go (removed its moved proof), c1-data.md, CHANGELOG.md,
+docs/migrations/_unreleased.md, their embedded mirrors and .apidiff/pkg_store.txt.
+The six controller fixture migrations are compute_limits_test.go, credits_test.go,
+node_claim_named_test.go, prom_internal_test.go, refund_authority_test.go and
+storage_allowance_test.go. Other store test edits only migrate the removed grant
+caller, except credit_reads_runtime_test.go and payment_authority_test.go.
+W1 implementation files and lead-owned handoffs/amendments are unchanged.
 
-Shared files touched: cmd/sparkwing-controller/admin_test.go and controller
-operator_test.go, deletion_review_test.go and git_credentials_team_test.go contain
-only fixture migrations. W1's tenant_sql_scope_guard_test.go contains registry
-key migrations. claim_team_boundary_test.go contains one legacy marker fixture
-migration. Other store test edits migrate calls to removed methods. Shared docs
-are c1-data.md, CHANGELOG.md and docs/migrations/_unreleased.md with their embedded
-mirrors. .apidiff/pkg_store.txt reflects the removed runtime APIs. Lead-owned
-handoffs.md and amendments files are unchanged.
-
-Friction: the launcher billing regression crosses the explicit W1 ownership
-boundary. The remaining verified-event payload is not declared by C2. Legacy
-controller fixtures still use the removed credential schema, and socket tests
-are unavailable in this sandbox. No new production mechanism, schema, setting,
-price or customer restriction was added. No Git writes occurred. Worker scratch
-is deleted at completion, and /tmp/sw-gocache is retained.
+Friction: the remaining schema and issuance joins cross the explicit W1 ownership
+boundary. C2 has not declared the approved non-checkout provider payload. The
+read-only snapshot test also avoids the regular SQLite connection's immediate
+write lock so a real concurrent commit can occur inside the read transaction.
+No Git writes occurred. Worker scratch is deleted at completion. The shared
+/tmp/sw-gocache is retained.
 
 STATUS: CONTINUE

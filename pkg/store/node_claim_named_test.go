@@ -104,7 +104,7 @@ func TestClaimNamedNodeReservesCreditsForAMeteredToken(t *testing.T) {
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	seedClaimedNode(t, s, "run-billed", "build")
-	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 100 * store.MicroCreditsPerCent, Reference: "pay_1", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 

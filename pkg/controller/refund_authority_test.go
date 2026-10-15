@@ -23,7 +23,7 @@ func TestRefundReportingRejectsTeamOwnerAndRunner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.GrantCredits(ctx, store.CreditGrantPaid, 500*store.MicroCreditsPerCent, "pi_private_refund", "test"); err != nil {
+	if _, err := tenant.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 500 * store.MicroCreditsPerCent, Reference: "pi_private_refund", CreatedBy: "test"}); err != nil {
 		t.Fatal(err)
 	}
 	balance, err := tenant.CreditBalanceMicro(ctx)

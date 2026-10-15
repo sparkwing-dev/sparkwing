@@ -141,8 +141,9 @@ use their existing lease-holder identity and require no new configuration.
 
 ## Paid credit requires verified checkout settlement
 
-`POST /api/v1/credits/grants` is removed. `Tenant.GrantCredits` and
-`Tenant.RecordCreditGrant` refuse `paid` grants.
+`POST /api/v1/credits/grants` and `Tenant.GrantCredits` are removed.
+Use `Tenant.RecordCreditGrant` with a `CreditGrantRequest` for free grants and
+payment-linked reversals. It refuses caller-selected `paid` grants.
 Free operator grants and payment-linked reversals keep their existing paths.
 
 Checkout integrations must supply C2's verified provider event to
