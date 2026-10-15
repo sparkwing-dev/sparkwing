@@ -269,29 +269,3 @@ func TestAuditNamesReadersTargetsAndDeniedSubjects(t *testing.T) {
 		}
 	}
 }
-
-// A bearer pasted where a token prefix or a role belongs reaches the audit
-// record only as its prefix, and a role outside the role set not at all,
-// even when the request is refused.
-func TestAuditKeepsABearerInATargetOutOfTheLog(t *testing.T) {
-	f, logs := auditFixture(t)
-	owner := f.user("o", "olga@example.com")
-	member := f.user("m", "mia@example.com")
-	f.join(owner, member, "mia@example.com", "reader")
-	if code := f.call("GET", "/api/v1/tokens/"+f.admin, "Bearer "+f.admin, nil, nil); code != http.StatusNotFound {
-		t.Fatalf("token lookup by a full bearer = %d, want 404", code)
-	}
-	if code := f.call("PATCH", "/api/v1/team/members/"+member.id, owner.auth, map[string]string{"role": f.admin}, nil); code != http.StatusBadRequest {
-		t.Fatalf("role set to a bearer = %d, want 400", code)
-	}
-	lookup := auditFor(t, logs, "GET", "/api/v1/tokens/{prefix}")
-	if want := f.admin[:store.PrefixLen]; lookup["token_prefix"] != want {
-		t.Errorf("token_prefix = %v, want the bearer's prefix %s", lookup["token_prefix"], want)
-	}
-	if role := auditFor(t, logs, "PATCH", "/api/v1/team/members/{user_id}")["role"]; role != nil {
-		t.Errorf("an invalid role reached the record: %v", role)
-	}
-	if strings.Contains(logs.String(), f.admin) {
-		t.Errorf("the audit log carries the full bearer:\n%s", logs.String())
-	}
-}

@@ -76,6 +76,59 @@ startup/body/dry-run assertions to procenv. The debug wait now reports an early
 host failure. It adds no acceptance cell. Store-backed legacy runtime ports and
 native placements remain open.
 
+W2 route-cut ports: TestCredits_SetMeteredRouteMarksAnExistingToken moves to
+TestRunnerMeteringHTTPConsoleProperty and TestRunnerMeteringHTTPRefusals.
+The old admin-bearer expectation is reversed to console-only authority.
+The marker reaches a fake authority-bearing transaction. Real root metering
+and immutable-award provenance remain W1 integration obligations.
+TestGitHubRunnerBindingsAreOwnerOnlyAndUnbindingRevokes moves to
+TestGitHubRunnerAdminHTTPAuthorityProperty, TestGitHubRunnerAdminHTTPRefusals,
+TestGitHubRunnerAdminHTTPInputAndMethods and
+TestGitHubRunnerAdminHTTPEmptyStoreAndMissingWriter. These prove final HTTP
+policy, tenant selection, public responses and missing-writer refusal.
+Atomic revocation of real Actions roots remains pending with W1.
+
+TestPaymentHTTPServiceRoutesRemoved replaces the old credits.grant route
+allowlist, anonymous-service-route and service-seeding assertions with removal
+of the entire credential path. TestPaymentHTTPAuthenticationBoundary and
+TestPaymentHTTPRefusals retain signed checkout and private-error checks.
+The deleted credit_reversals_test.go and six removed card_billing_test.go
+transport tests still require their final provider-event ports. Existing
+pkg/store tests retain partial reversal, dispute/payment identity, saved-card
+ordering, warned-card repayment, duplicate-payment refund and failed-refund
+retry requirements. None is counted as a completed provider-HTTP port here.
+The surviving owner-budget regression stays in card_billing_test.go. Source
+functions remain available in the parent revision. No native matrix cell is
+completed by these component tests.
+
+W2 OAuth ports: TestOAuthCallbackRefusesAFlowThisBrowserDidNotStart moves to
+TestOAuthHTTPProofProperty, TestOAuthHTTPPKCEProperty,
+TestOAuthHTTPSessionAndReplay and TestOAuthHTTPDeclineAndSafeNext in
+tests/acceptance/oauth_http_test.go. They retain missing flow, wrong state,
+wrong provider, replay and consent refusal and add ambiguous selectors,
+credential privacy and real session authentication. TestOAuthStartRefusesAnUnknownProvider
+moves to TestOAuthHTTPMethodsAndUnknownProvider. TestOAuthSignInAuditNamesTheAccount
+moves to TestOAuthHTTPSessionAndReplay. The 97-line old browser_oauth_test.go
+is deleted. The provider transport is fake. SQLite identity/session creation,
+PKCE client requests and the registered controller boundary are real. These
+three ports establish component behavior and complete no native matrix cell.
+
+W2 root provisioning ports: `TestMintingAMachineTokenRequiresValidRepositories`
+is replaced by `TestRootProvisioningHTTPInput` and the scope property. It
+retains host/path and shell-input refusals and adds server-derived origin,
+CSRF, dead-authority and transaction checks. The old test is deleted.
+`TestMintedMachineCommandCarriesTheRepositoryAllowlist`,
+`TestTheConnectCommandSplitsAfterItsTokenSetup`,
+`TestRunnerConnectArgsNamesTheControllerAndRepos`,
+`TestRunnerConnectArgsRunsTheLoopsTheScopesAllow`,
+`TestRunnerTokenSetupReplacesAnOpenTokenFileWithAPrivateOne` and
+`TestTheConnectCommandStopsWhenItCannotReplaceTheTokenFile` move to the
+`runnerConnectCommand` suite in web/src/lib/teams.test.ts, where the final
+command is produced. Shell tests execute that command with a fake runner and
+assert repository arguments, a private replacement file, no bearer in runner
+argv, and no launch after setup failure. All seven old regressions are deleted.
+This proves component behavior, not a native credential-matrix cell.
+
 This repository-owned inventory records every parked source function and its required port. Acceptance destinations name existing skeletons; package destinations name required focused proofs to implement with their owning area. A scenario is complete only when every mapped case is implemented. Product skeletons remain skipped until their required areas exist; a wrong result must fail once activated.
 
 Branch labels below retain the descriptive suffix of each source branch. Tracker prefixes are omitted because repository files cannot contain tracker identifiers. The full Git revision identifies the exact branch snapshot independently of ref movement. Resolve source files with `git show <revision>:<file>`; removed predecessors are present before the branch comparison range. This inventory requires no personal filesystem path or live branch ref.
@@ -166,6 +219,18 @@ semaphore-only checks at the resolved W3 seam. Native assembly and automatic
 persisted generator reconstruction use existing process/replay components.
 No acceptance cell is added or activated by this continuation. The remaining
 legacy scheduler/store fixtures still fail against the removed schema.
+
+`TestCapabilityManagementHTTPRotation` replaces the legacy controller tests
+`TestRotateToken_GraceCapRejected` and `TestRotateToken_GraceAtCapAccepted`.
+It checks the existing seven-day ceiling, default and zero grace, null and
+overflow refusal, and propagation of the authorized actor and absolute expiry
+through both member and deployment routes. `TestCapabilityManagementHTTPAuditProperty`
+replaces `TestAuditKeepsABearerInATargetOutOfTheLog`. Generated bearers pasted
+into token selectors or invalid roles never reach logs. Token targets retain
+only their public 16-character prefix. The three old tests and their obsolete
+rotation fixture are deleted. These are fake-backed HTTP proofs. They do not
+prove the committing rotation, grace, source-consent transfer or native route
+matrix and add no archived source-function identity to the inventory.
 
 The unfenced node/trigger reapers and their dispatcher-expiry helpers are removed.
 `pkg/controller/reaper_test.go:TestReaperRecoversExpiredOwnerAndKeepsLiveOwner`
@@ -594,7 +659,7 @@ adapter projection proof alongside the planning and source tests above.
 | `service-credits` | Replace with the final billing/service authority. It must not grant unrelated operator-console powers. |
 | `service-launch` | Keep a launcher service root that can Award across teams through the fixed table. |
 | `service-storage` | Drop `storage.count`. There is no cache service or cache audience. |
-| `session` | Store/component evidence: `TestSessionMembershipChangesApplyWithoutCachedGrantsProperty`, `TestSessionRoutePreservesCapabilityScopeProperty` and `TestCredentials/credentials-session-digest-csrf/store-sqlite` check current roles, capability ceilings, digest lookup and sealed CSRF persistence. Native route-matrix evidence remains required. |
+| `session` | Store/component evidence: `TestSessionMembershipChangesApplyWithoutCachedGrantsProperty`, `TestSessionRoutePreservesCapabilityScopeProperty` and `TestCredentials/credentials-session-digest-csrf/store-sqlite` check current roles, capability ceilings, digest lookup and sealed CSRF persistence. `TestSessionFlowHTTPProofProperty`, `TestSessionFlowHTTPRenewalCeilingProperty` and `TestSessionFlowHTTPParentRevocationEndsRenewalAndLogout` exercise real SQLite session proof, CSRF, absolute lifetime and parent revocation through the controller handler. `TestSessionPolicyHTTPTransports`, `ProofProperty`, `LifetimeProperty` and `Refusals` cover Session-header/cookie policy requests against SQLite. `TestBrowserLogoutHTTPUsesNamedProof`, `ProofProperty` and `Refusals` port `TestBrowserLogoutNeedsTheSessionsTokenAndEndsIt`, add canonical refusal/audit checks, and prove failed proof cannot renew or delete. `TestSessionFlowHTTPLifetimeCases` ports the four legacy SessionRoute lifetime tests to nanosecond storage and a real hashed account session. `TestSessionFlowHTTPRenewsWithNamedProof` replaces the raw-ID/CSRF resolution test. `TestSessionFlowHTTPLogoutUsesVerifiedSession` replaces the body-selected hashed-row logout test. The replaced tests are deleted. Bootstrap login tests remain with the login cutover. Native route-matrix evidence remains required. |
 | `member` | Keep team-member grants. A member does not gain work-claim grants directly. |
 | `machine` | Keep machine root claim scopes. Secret/source/data/OIDC access requires a live award. |
 | `machine+trigger` | Replace caller-supplied trigger fence with the awarded trigger capability. A root plus forged headers gains nothing. |

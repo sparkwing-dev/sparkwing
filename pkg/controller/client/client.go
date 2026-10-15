@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -281,8 +282,9 @@ func (c *Client) GetRunReceipt(ctx context.Context, runID string) ([]byte, error
 	}
 }
 
+// ListNodes returns safe job status rows. Execution declarations and claim identities use the private execution wire.
 func (c *Client) ListNodes(ctx context.Context, runID string) ([]*store.Node, error) {
-	u := fmt.Sprintf("%s/api/v1/runs/%s/nodes", c.baseURL, url.PathEscape(runID))
+	u := fmt.Sprintf("%s/api/v1/runs/%s/jobs", c.baseURL, url.PathEscape(runID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
@@ -293,15 +295,13 @@ func (c *Client) ListNodes(ctx context.Context, runID string) ([]*store.Node, er
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, readHTTPError(resp)
+		return nil, readCapabilityHTTPError(resp)
 	}
-	var body struct {
-		Nodes []*store.Node `json:"nodes"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	var jobs []*store.Node
+	if err := json.NewDecoder(resp.Body).Decode(&jobs); err != nil {
 		return nil, err
 	}
-	return body.Nodes, nil
+	return jobs, nil
 }
 
 func (c *Client) FinishRun(ctx context.Context, runID, status, errMsg string) error {
@@ -377,7 +377,7 @@ func (c *Client) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail s
 // AppendNodeAnnotation POSTs a single persistent summary string to
 // append to the node's annotations list. Driven by sparkwing.AnnotateOld.
 func (c *Client) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {
-	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/annotations",
+	path := fmt.Sprintf("/api/v1/runs/%s/jobs/%s/annotations",
 		url.PathEscape(runID), url.PathEscape(nodeID))
 	return c.post(ctx, path,
 		map[string]string{"message": msg},
@@ -388,7 +388,7 @@ func (c *Client) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg st
 // Driven by sparkwing.Summary() emitted outside any step body. The
 // server overwrites the previous value.
 func (c *Client) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error {
-	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/summary",
+	path := fmt.Sprintf("/api/v1/runs/%s/jobs/%s/summary",
 		url.PathEscape(runID), url.PathEscape(nodeID))
 	return c.post(ctx, path,
 		map[string]string{"markdown": md},
@@ -398,7 +398,7 @@ func (c *Client) SetNodeSummary(ctx context.Context, runID, nodeID, md string) e
 // StartNodeStep POSTs the running transition for one step. Body
 // carries the step id; the server stamps started_at server-side.
 func (c *Client) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
-	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/steps/start",
+	path := fmt.Sprintf("/api/v1/runs/%s/jobs/%s/steps/start",
 		url.PathEscape(runID), url.PathEscape(nodeID))
 	return c.post(ctx, path,
 		map[string]string{"step_id": stepID},
@@ -408,7 +408,7 @@ func (c *Client) StartNodeStep(ctx context.Context, runID, nodeID, stepID string
 // FinishNodeStep POSTs the terminal status (passed | failed | cancelled) and
 // finished_at stamp for one step.
 func (c *Client) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error {
-	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/steps/finish",
+	path := fmt.Sprintf("/api/v1/runs/%s/jobs/%s/steps/finish",
 		url.PathEscape(runID), url.PathEscape(nodeID))
 	return c.post(ctx, path,
 		map[string]string{"step_id": stepID, "status": status},
@@ -419,7 +419,7 @@ func (c *Client) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, stat
 // guard fired, dry-run with no body, etc.). Server inserts a single
 // terminal row with started_at == finished_at.
 func (c *Client) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
-	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/steps/skip",
+	path := fmt.Sprintf("/api/v1/runs/%s/jobs/%s/steps/skip",
 		url.PathEscape(runID), url.PathEscape(nodeID))
 	return c.post(ctx, path,
 		map[string]string{"step_id": stepID},
@@ -430,7 +430,7 @@ func (c *Client) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string)
 // step's annotations list. Mirrors AppendNodeAnnotation but scoped
 // to a single step inside a node's inner Work DAG.
 func (c *Client) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error {
-	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/steps/annotations",
+	path := fmt.Sprintf("/api/v1/runs/%s/jobs/%s/steps/annotations",
 		url.PathEscape(runID), url.PathEscape(nodeID))
 	return c.post(ctx, path,
 		map[string]string{"step_id": stepID, "message": msg},
@@ -441,7 +441,7 @@ func (c *Client) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID
 // Driven by sparkwing.Summary() emitted inside a step body. The
 // server overwrites the previous value.
 func (c *Client) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error {
-	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/steps/summary",
+	path := fmt.Sprintf("/api/v1/runs/%s/jobs/%s/steps/summary",
 		url.PathEscape(runID), url.PathEscape(nodeID))
 	return c.post(ctx, path,
 		map[string]string{"step_id": stepID, "markdown": md},
@@ -501,9 +501,9 @@ func (c *Client) AddNodeMetricSample(ctx context.Context, runID, nodeID string, 
 // nodeID is empty. Returns (nil, nil) when nothing has been measured yet,
 // so the caller falls back to its pin or a conservative default.
 func (c *Client) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*store.PipelineProfile, error) {
-	u := fmt.Sprintf("%s/api/v1/pipelines/%s/profile", c.baseURL, url.PathEscape(pipeline))
+	u := fmt.Sprintf("%s/api/v1/pipelines/%s/sizing", c.baseURL, url.PathEscape(pipeline))
 	if nodeID != "" {
-		u += "?node=" + url.QueryEscape(nodeID)
+		u += "?job=" + url.QueryEscape(nodeID)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -522,9 +522,14 @@ func (c *Client) GetPipelineProfile(ctx context.Context, pipeline, nodeID string
 		}
 		return &prof, nil
 	case http.StatusNotFound:
-		return nil, classifyNotFound(resp)
+		err := readCapabilityHTTPError(resp)
+		var failure *apierr.Error
+		if !errors.As(err, &failure) || failure.Code != apierr.NotFound {
+			return nil, err
+		}
+		return nil, nil
 	default:
-		return nil, readHTTPError(resp)
+		return nil, readCapabilityHTTPError(resp)
 	}
 }
 
@@ -532,9 +537,9 @@ func (c *Client) GetPipelineProfile(ctx context.Context, pipeline, nodeID string
 // applied for a (pipeline, node), so the controller can judge it against
 // measured peaks and surface drift. nodeID empty targets the rollup.
 func (c *Client) SetPipelinePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error {
-	u := fmt.Sprintf("%s/api/v1/pipelines/%s/profile/pin", c.baseURL, url.PathEscape(pipeline))
+	u := fmt.Sprintf("%s/api/v1/pipelines/%s/sizing/pin", c.baseURL, url.PathEscape(pipeline))
 	if nodeID != "" {
-		u += "?node=" + url.QueryEscape(nodeID)
+		u += "?job=" + url.QueryEscape(nodeID)
 	}
 	buf, _ := json.Marshal(map[string]any{"cores": cores, "memory_bytes": memoryBytes})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, bytes.NewReader(buf))
@@ -542,7 +547,6 @@ func (c *Client) SetPipelinePin(ctx context.Context, pipeline, nodeID string, co
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	setNodeClaimFenceHeaders(req, ctx)
 	resp, err := c.do(req)
 	if err != nil {
 		return err
@@ -1014,9 +1018,9 @@ func (c *Client) GetLatestRun(ctx context.Context, pipeline string, statuses []s
 	}
 }
 
-// GetNode fetches one node.
+// GetNode fetches safe job status. Private execution fields require an awarded execution request.
 func (c *Client) GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error) {
-	u := fmt.Sprintf("%s/api/v1/runs/%s/nodes/%s",
+	u := fmt.Sprintf("%s/api/v1/runs/%s/jobs/%s",
 		c.baseURL, url.PathEscape(runID), url.PathEscape(nodeID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -1034,10 +1038,8 @@ func (c *Client) GetNode(ctx context.Context, runID, nodeID string) (*store.Node
 			return nil, err
 		}
 		return &n, nil
-	case http.StatusNotFound:
-		return nil, notFound(resp)
 	default:
-		return nil, readHTTPError(resp)
+		return nil, readCapabilityHTTPError(resp)
 	}
 }
 
@@ -1380,17 +1382,6 @@ func (c *Client) ListDebugPauses(ctx context.Context, runID string) ([]*store.De
 	return out, nil
 }
 
-// SetNodeArtifactManifest records the content-addressed digest of the
-// node's published-artifact manifest. The server overwrites any prior
-// value.
-func (c *Client) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error {
-	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/artifact-manifest",
-		url.PathEscape(runID), url.PathEscape(nodeID))
-	return c.post(ctx, path,
-		map[string]string{"manifest_digest": manifestDigest},
-		http.StatusNoContent, nil)
-}
-
 // CreateApproval requests a human decision on a gated node. The
 // controller inserts an approvals row and flips the node's status to
 // approval_pending atomically.
@@ -1702,7 +1693,28 @@ func controllerLacksRoute(route string) error {
 }
 
 func readHTTPError(resp *http.Response) error {
-	err := classifyHTTPError(resp)
+	return withRetryAdvice(resp, classifyHTTPError(resp))
+}
+
+func readCapabilityHTTPError(resp *http.Response) error {
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return withRetryAdvice(resp, err)
+	}
+	var envelope struct {
+		Error json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return withRetryAdvice(resp, errors.New("invalid controller error response"))
+	}
+	failure, err := apierr.DecodeInner(envelope.Error)
+	if err != nil {
+		return withRetryAdvice(resp, err)
+	}
+	return withRetryAdvice(resp, failure)
+}
+
+func withRetryAdvice(resp *http.Response, err error) error {
 	if resp.StatusCode == http.StatusTooManyRequests {
 		if wait, ok := parseRetryAfter(resp); ok {
 			return &RateLimitedError{RetryAfter: wait, Err: err}

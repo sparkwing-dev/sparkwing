@@ -307,7 +307,7 @@ func (r *memoRun) copied(ctx context.Context, manifest string, outcome sparkwing
 	}
 	hostEventJSON(wctx, run, id, kind, event)
 	if manifest != "" {
-		if err := run.State.SetNodeArtifactManifest(wctx, run.ID, id, manifest); err != nil {
+		if err := recordArtifactManifest(wctx, run.State, run.ID, id, manifest); err != nil {
 			run.Logger.Warn("nodehost: copy artifact manifest", "node", id, "err", err)
 		}
 	}

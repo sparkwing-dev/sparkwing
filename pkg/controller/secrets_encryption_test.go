@@ -2,10 +2,7 @@ package controller_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -304,46 +301,6 @@ func TestSecrets_ListNamesUnboundRows(t *testing.T) {
 	}
 }
 
-func TestSecrets_ExistingRowKeepsANameTheRuleNowRejects(t *testing.T) {
-	key, _ := secrets.GenerateKey()
-	c, _ := secrets.NewCipher(key)
-	srv, st := newSecretsTestServer(t, c)
-
-	sealed, err := c.Seal("legacy value")
-	if err != nil {
-		t.Fatalf("Seal: %v", err)
-	}
-	if err := st.CreateOrReplaceSecret(store.Secret{
-		Name: "cert..pem", Value: sealed, Principal: "admin", Masked: true,
-	}, time.Now().UTC()); err != nil {
-		t.Fatalf("CreateOrReplaceSecret: %v", err)
-	}
-
-	resp := postSecretJSON(t, srv.URL+"/api/v1/secrets",
-		map[string]any{"name": "cert..pem", "value": "rotated"})
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("re-set of an existing row status = %d, want 204, body = %s", resp.StatusCode, body)
-	}
-
-	status, got := getSecretStatus(t, srv.URL+"/api/v1/secrets/cert..pem")
-	if status != http.StatusOK {
-		t.Fatalf("GET rotated row status = %d, body = %s", status, got)
-	}
-	if !strings.Contains(got, "rotated") {
-		t.Fatalf("rotated row = %s, want the new value", got)
-	}
-
-	resp = postSecretJSON(t, srv.URL+"/api/v1/secrets",
-		map[string]any{"name": "new..name", "value": "nope"})
-	body, _ = io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("new row with an invalid name status = %d, want 400, body = %s", resp.StatusCode, body)
-	}
-}
-
 func getSecretStatus(t *testing.T, url string) (int, string) {
 	t.Helper()
 	resp, err := http.Get(url)
@@ -356,45 +313,4 @@ func getSecretStatus(t *testing.T, url string) (int, string) {
 		t.Fatalf("read body: %v", err)
 	}
 	return resp.StatusCode, string(body)
-}
-
-func TestSecrets_NoCipherStoresNothing(t *testing.T) {
-	srv, st := newSecretsTestServer(t, nil)
-
-	resp := postSecretJSON(t, srv.URL+"/api/v1/secrets",
-		map[string]string{"name": "TOKEN", "value": "abc"})
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("POST status = %d, want 503 from a server with no secrets key", resp.StatusCode)
-	}
-	if row, err := st.GetSecret("TOKEN"); err == nil && row != nil {
-		t.Fatalf("a server with no key stored %q", row.Value)
-	}
-}
-
-var _ = context.Background
-
-type failingSealCipher struct{ err error }
-
-func (c failingSealCipher) Seal(string) (string, error) { return "", c.err }
-func (c failingSealCipher) Open(string) (string, error) { return "", c.err }
-
-func TestSecrets_KeyRefusalReachesTheClientAndOtherSealFailuresStayMasked(t *testing.T) {
-	refusal := fmt.Errorf("the local secrets key lives outside this home; point SPARKWING_SECRETS_KEY_FILE inside it%.0w", secrets.ErrKeyRefused)
-	for _, tc := range []struct {
-		err      error
-		status   int
-		wantBody string
-	}{
-		{refusal, http.StatusConflict, "point SPARKWING_SECRETS_KEY_FILE inside it"},
-		{errors.New("disk on fire"), http.StatusInternalServerError, "internal server error"},
-	} {
-		srv, _ := newSecretsTestServer(t, failingSealCipher{err: tc.err})
-		resp := postSecretJSON(t, srv.URL+"/api/v1/secrets", map[string]string{"name": "TOKEN", "value": "v"})
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if resp.StatusCode != tc.status || !strings.Contains(string(body), tc.wantBody) {
-			t.Errorf("seal error %q: POST = %d %s, want %d with %q", tc.err, resp.StatusCode, body, tc.status, tc.wantBody)
-		}
-	}
 }

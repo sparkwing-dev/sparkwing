@@ -348,7 +348,7 @@ export interface ControllerQueueState {
 }
 
 export async function getControllerQueueState(): Promise<ControllerQueueState | null> {
-  const res = await authFetch(`${API_URL}/api/v1/queue/state`, { cache: "no-store" }).catch(() => null);
+  const res = await authFetch(`${API_URL}/api/v1/queue`, { cache: "no-store" }).catch(() => null);
   return res?.ok ? res.json() : null;
 }
 

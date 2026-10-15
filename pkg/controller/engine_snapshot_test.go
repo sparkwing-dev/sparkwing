@@ -1,9 +1,11 @@
 package controller
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"testing"
+	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -71,5 +73,20 @@ func TestEngineSnapshotRefusesCorruptionAndUnrepresentableGuard(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestEngineSnapshotRefusesEveryReplacementOwnerFence(t *testing.T) {
+	server, _ := engineRuntimeStore(t)
+	owner := engineRuntimeClaim(t, server, capability.UnitTrigger)
+	engineSQL(t, server.Store, `UPDATE runs SET plan_json=?,plan_hash='plan',sealed_at=1,spec_json=?,spec_hash='spec'`, []byte(`{"jobs":[]}`), []byte(`{}`))
+	property := func(value []byte, generation uint16) bool {
+		holder := "replacement-" + base64.RawURLEncoding.EncodeToString(value)
+		engineSQL(t, server.Store, `UPDATE triggers SET claimed_by=?,generation=? WHERE id='run'`, holder, int64(generation)+owner.Binding.Generation+1)
+		snapshot, err := server.Snapshot(t.Context(), owner)
+		return err != nil && snapshot.RunID == "" && len(snapshot.Jobs) == 0
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -38,17 +39,23 @@ func newLoginLimiter() *loginLimiter {
 
 func (l *loginLimiter) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		now := time.Now()
-		if !l.clients.Allow(l.client(r), now) {
-			writeRetryAfter(w, loginClientWindow, "too many login attempts from this client")
-			return
-		}
-		if !l.global.Allow(loginGlobalKey, now) {
-			writeRetryAfter(w, loginGlobalWindow, "too many login attempts")
+		if err := l.admit(r); err != nil {
+			writePolicyError(w, err)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (l *loginLimiter) admit(r *http.Request) error {
+	now := time.Now()
+	if !l.clients.Allow(l.client(r), now) {
+		return &apierr.Error{Code: apierr.RateLimited, Message: "too many login attempts from this client", Details: map[string]any{"retry_after_ms": loginClientWindow.Milliseconds()}}
+	}
+	if !l.global.Allow(loginGlobalKey, now) {
+		return &apierr.Error{Code: apierr.RateLimited, Message: "too many login attempts", Details: map[string]any{"retry_after_ms": loginGlobalWindow.Milliseconds()}}
+	}
+	return nil
 }
 
 func (l *loginLimiter) client(r *http.Request) string {

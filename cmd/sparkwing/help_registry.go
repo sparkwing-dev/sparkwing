@@ -1823,21 +1823,20 @@ save it before leaving this command.`,
 var cmdTokensCreate = Command{
 	Path:              "sparkwing cluster tokens create",
 	ReachesController: true,
-	Synopsis:          "Mint a new API token",
-	Description: `Creates a token of the given --type scoped to --principal.
-Comma-separated --scope lists which API surfaces the token may
-call. The raw token is printed to stdout exactly once; after
+	Synopsis:          "Provision a deployment service token",
+	Description: `Creates a service root named by --principal.
+Comma-separated --scope selects operator.limits, operator.object_store,
+operator.tokens or claims.launch. The raw token is printed to stdout exactly once; after
 this command exits it cannot be recovered.`,
 	Flags: []FlagSpec{
-		{Name: "type", Argument: "KIND", Desc: "Token type: user | runner | service", Required: true, Group: "Input"},
 		{Name: "principal", Argument: "NAME", Desc: "Name identifying the token holder", Required: true, Group: "Input"},
 		{Name: "scope", Argument: "CSV", Desc: "Comma-separated scopes; use sparkwing docs read --topic auth for the supported set", Group: "Input"},
 		{Name: "ttl", Argument: "DURATION", Desc: "Token lifetime (30d, 720h, and similar durations). 0 = never expires", Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
 	Examples: []Example{
-		{"Mint a service token with write scopes", "sparkwing cluster tokens create --type service --principal deploy-bot --scope runs.read,runs.write --profile prod"},
-		{"Mint a user token that expires in 30 days", "sparkwing cluster tokens create --type user --principal fictional-user --scope admin --ttl 720h --profile prod"},
+		{"Mint a launcher service token", "sparkwing cluster tokens create --principal launcher --scope claims.launch --profile prod"},
+		{"Mint an operational service token that expires in 30 days", "sparkwing cluster tokens create --principal operations --scope operator.limits --ttl 720h --profile prod"},
 	},
 }
 
@@ -2898,7 +2897,7 @@ class has tripped, and whether it is refusing requests now, followed by
 the bucket ceiling: what the bucket holds, the ceilings it is held to,
 and whether object writes are frozen. Changes nothing.
 
-Hits GET /api/v1/object-store/breaker on the selected profile's
+Hits GET /api/v1/operator/object-store/breaker on the selected profile's
 controller, which needs an admin-scoped token.`,
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Profile selecting the controller", Required: true, Group: "System"},
@@ -2925,7 +2924,7 @@ Reach for this after fixing what caused the trip. A budget that keeps
 tripping wants a larger limit or a caller that stops retrying, not a
 repeated reset.
 
-Hits POST /api/v1/object-store/reset-breaker on the selected
+Hits POST /api/v1/operator/object-store/reset-breaker on the selected
 profile's controller, which needs an admin-scoped token.`,
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Profile selecting the controller", Required: true, Group: "System"},

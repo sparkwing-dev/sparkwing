@@ -25,6 +25,14 @@ func (sessionOriginFake) AuthorizeProvision(context.Context, capability.Authorit
 	return nil
 }
 
+func accountSessionTestLicense(t *testing.T) *license.License {
+	t.Helper()
+	pub, priv := licensetest.NewKey(t)
+	now := time.Now()
+	terms := licensetest.Terms{Features: []string{license.FeatureMultiTeam}, IssuedTo: "test", IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour)}
+	return license.Resolve(licensetest.Sign(t, priv, terms), pub, now, nil)
+}
+
 func TestSessionRoutePreservesCapabilityScopeProperty(t *testing.T) {
 	engine, _ := engineRuntimeStore(t)
 	s := engine.Store
@@ -34,10 +42,7 @@ func TestSessionRoutePreservesCapabilityScopeProperty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pub, priv := licensetest.NewKey(t)
-	now := time.Now()
-	terms := licensetest.Terms{Features: []string{license.FeatureMultiTeam}, IssuedTo: "test", IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour)}
-	server := New(s, nil).WithSecretsCipher(cipher).WithLicense(license.Resolve(licensetest.Sign(t, priv, terms), pub, now, nil))
+	server := New(s, nil).WithSecretsCipher(cipher).WithLicense(accountSessionTestLicense(t))
 	memberRaw, _, _, err := s.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)

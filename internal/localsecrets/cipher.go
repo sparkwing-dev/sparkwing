@@ -17,10 +17,7 @@ type Cipher struct {
 	st   *store.Store
 }
 
-var (
-	_ controller.BoundCipher  = (*Cipher)(nil)
-	_ controller.LegacyCipher = (*Cipher)(nil)
-)
+var _ controller.BoundCipher = (*Cipher)(nil)
 
 func (c *Cipher) Seal(plain string) (string, error) {
 	inner, err := c.ring.ensure(context.Background(), c.st)

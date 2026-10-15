@@ -25,9 +25,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// safety: the scope set docs/auth.md gives a runner; a wider one hands a workstation reads no claim loop needs.
-var runnerTokenScopes = []string{"nodes.claim", "triggers.claim", "runs.state"}
-
 // safety: the agent loop lives in this binary, not in `sparkwing`, so the service runs a second executable.
 const runnerBinaryName = "sparkwing-runner"
 
@@ -113,7 +110,7 @@ func runRunnersAdd(args []string) error {
 	}
 
 	principal := "agent:" + *name
-	minted, err := mintRunnerToken(prof.ControllerURL(), prof.ControllerToken(), principal)
+	minted, err := mintRunnerToken(prof.ControllerURL(), prof.ControllerToken(), *name, *allowRepos)
 	if err != nil {
 		return err
 	}
@@ -203,33 +200,24 @@ type mintedToken struct {
 	Prefix string
 }
 
-func mintRunnerToken(controller, adminToken, principal string) (mintedToken, error) {
-	return mintToken(controller, adminToken, client.CreateTokenRequest{
-		Kind: "runner", Principal: principal, Scopes: runnerTokenScopes,
-	})
+func mintRunnerToken(controller, adminToken, name string, repos []string) (mintedToken, error) {
+	out, err := client.NewWithToken(controller, nil, adminToken).EnrollRunner(context.Background(), client.EnrollRunnerRequest{Name: name, Repos: repos})
+	return mintedCredential(out, err)
 }
 
 func mintToken(controller, adminToken string, req client.CreateTokenRequest) (mintedToken, error) {
 	out, err := client.NewWithToken(controller, nil, adminToken).CreateToken(context.Background(), req)
+	return mintedCredential(out, err)
+}
+
+func mintedCredential(out *client.CreatedToken, err error) (mintedToken, error) {
 	if err != nil {
 		return mintedToken{}, err
 	}
-	if out.Token == "" {
+	if out == nil || out.Capability == "" || out.Prefix == "" {
 		return mintedToken{}, errors.New("the controller returned no token")
 	}
-	var meta struct {
-		Prefix string `json:"prefix"`
-	}
-	if err := json.Unmarshal(out.Metadata, &meta); err != nil {
-		return mintedToken{}, fmt.Errorf("decode minted token: %w", err)
-	}
-	minted := mintedToken{Raw: out.Token, Prefix: meta.Prefix}
-	if minted.Prefix == "" {
-		if minted.Prefix, err = tokenPrefix(out.Token); err != nil {
-			return mintedToken{}, err
-		}
-	}
-	return minted, nil
+	return mintedToken{Raw: out.Capability, Prefix: out.Prefix}, nil
 }
 
 func tokenPrefix(raw string) (string, error) {
@@ -248,10 +236,10 @@ func requireRunnerToken(controller, adminToken, prefix, configPath string) error
 	if err := json.Unmarshal(resp, &found); err != nil {
 		return fmt.Errorf("decode the token %s: %w", prefix, err)
 	}
-	if store.ActingKind(found.Kind, found.Principal) != store.TokenKindRunner {
+	if found.Subject.Kind != "machine" {
 		return fmt.Errorf("%s names the token %s, which is a %s token held by %q, not a runner token; "+
 			"revoke it with `sparkwing cluster tokens revoke` if that is what you meant",
-			configPath, prefix, found.Kind, found.Principal)
+			configPath, prefix, found.Subject.Kind, found.Subject.ID)
 	}
 	return nil
 }

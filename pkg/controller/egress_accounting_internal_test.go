@@ -22,7 +22,7 @@ func TestControllerEgressUsesAuthenticatedTenantAndReplica(t *testing.T) {
 	second := New(engine.Store, nil)
 	for _, server := range []*Server{first, second} {
 		for _, class := range []egress.Class{egress.ClassArtifact, egress.ClassLog, egress.ClassLogStream} {
-			r := storeDataRequest(http.MethodGet, "/data?team=b&replica=forged", "", Principal{Name: "shared", Team: "a", Scopes: []string{ScopeAdmin}})
+			r := storeDataRequest(t, server, http.MethodGet, "/data?team=b&replica=forged", "", Principal{Name: "shared", Team: "a", Scopes: []string{ScopeAdmin}})
 			response := httptest.NewRecorder()
 			server.meterOn(class, egress.SlotNone, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = w.Write([]byte("bytes"))
@@ -74,7 +74,7 @@ func TestControllerEgressCountsDeliveredBytesAndResumesAlarm(t *testing.T) {
 		{http.MethodHead, http.StatusOK},
 		{http.MethodGet, http.StatusForbidden},
 	} {
-		r := storeDataRequest(tc.method, "/logs", "", Principal{Name: "account", Team: "a", Scopes: []string{ScopeAdmin}})
+		r := storeDataRequest(t, s, tc.method, "/logs", "", Principal{Name: "account", Team: "a", Scopes: []string{ScopeAdmin}})
 		ctx, cancel := context.WithCancel(r.Context())
 		r = r.WithContext(ctx)
 		s.meteredStream(egress.ClassLogStream, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -103,7 +103,7 @@ func TestControllerEgressFailuresAreLoud(t *testing.T) {
 	if _, err := engine.Store.DB().Exec("CREATE TRIGGER refuse_egress BEFORE INSERT ON egress_usage BEGIN SELECT RAISE(ABORT,'storage unavailable'); END"); err != nil {
 		t.Fatal(err)
 	}
-	r := storeDataRequest(http.MethodGet, "/logs", "", Principal{Name: "account", Team: "a", Scopes: []string{ScopeAdmin}})
+	r := storeDataRequest(t, s, http.MethodGet, "/logs", "", Principal{Name: "account", Team: "a", Scopes: []string{ScopeAdmin}})
 	s.metered(egress.ClassLog, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("sent"))
 	})).ServeHTTP(httptest.NewRecorder(), r)

@@ -95,7 +95,7 @@ func runQueueProfile(cmd Command, profileName, format string) error {
 }
 
 func fetchControllerQueueState(ctx context.Context, baseURL, token string) (wingwire.QueueState, error) {
-	u := strings.TrimRight(baseURL, "/") + "/api/v1/queue/state"
+	u := strings.TrimRight(baseURL, "/") + "/api/v1/queue"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return wingwire.QueueState{}, err

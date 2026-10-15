@@ -99,24 +99,31 @@ paths:
 
   /api/v1/runs:
     post:
-      x-sparkwing-scope: runs.state
+      x-sparkwing-scope: runs.write or children.start
       tags: [runs]
-      summary: Create a run row directly.
-      description: |
-        Insert a [Run][1] in the caller-supplied state. Idempotent
-        upgrade of `pending` rows pre-allocated by trigger intake.
-        [1]: #/components/schemas/Run
+      summary: Admit a sealed run request.
+      description: The store derives authority, actor, source provenance, reservations and the run number. An idempotency key replays the committed intake.
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: "#/components/schemas/Run"
+            schema: {$ref: "#/components/schemas/EngineCreateRunRequest"}
       responses:
-        "201": {description: Created. Empty body.}
+        "201":
+          description: Run admitted. The here bearer is returned once.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineCreateRunResponse"}
+        "200":
+          description: Committed result, including replay.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineCreateRunResponse"}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
+        "409": {description: The state or authority changed before the transaction committed.}
     get:
       x-sparkwing-scope: runs.read
       tags: [runs]
@@ -252,48 +259,31 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/runs/{id}:
-    parameters: [{$ref: "#/components/parameters/RunID"}]
+  /api/v1/runs/{run}:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
     get:
-      x-sparkwing-scope: claim or runs.read or nodes.claim or triggers.claim
+      x-sparkwing-scope: runs.read or source.read or trigger.host
       tags: [runs]
-      summary: Fetch a single run, optionally with its nodes.
+      summary: Read display-safe run status, attempts and log subjects.
       description: |
-        With `?include=nodes` returns `{run, nodes}` and decorates each
-        node with plan-snapshot context (step rows, approvals,
-        spawned children). Without include, returns the raw `Run`.
-
-        Values of arguments the pipeline declared `secret:"true"` are
-        replaced with `***` by default. `?include=secret_values`
-        returns them in full, and is honored for an `admin` token and
-        for a `nodes.claim` token holding an unexpired claim on one of
-        the run's nodes -- a cluster executor fetches the arguments it
-        runs with from this endpoint. A controller running with
-        authentication disabled honors it for every caller. Any other
-        caller gets the redacted view whether or not it asks. Comma-separate to
-        combine, e.g. `?include=nodes,secret_values`.
-      parameters:
-        - in: query
-          name: include
-          description: >-
-            Comma-separated. `nodes` wraps the response as `{run, nodes}`; `secret_values` returns unredacted argument values to executor-scoped callers.
-          schema: {type: string, enum: [nodes, secret_values, "nodes,secret_values"]}
+        Returns the shared RunDetail projection from one committed status read.
+        Inputs use DisplayRequest before planning and DisplaySpec after acceptance.
+        Secret argument values are redacted. Missing or invalid classification
+        redacts every argument value. Execution seals, declarations and claim
+        identities are omitted. The include query does not change this projection.
+        Embedded controllers must supply complete status facts before serving it.
       responses:
         "200":
-          description: Run, or `{run, nodes}` when `include=nodes`.
+          description: Display-safe status with explicit job, attempt, log and notice arrays.
           content:
             application/json:
-              schema:
-                oneOf:
-                  - $ref: "#/components/schemas/Run"
-                  - type: object
-                    x-sparkwing-go-type: none
-                    required: [run, nodes]
-                    properties:
-                      run: {$ref: "#/components/schemas/Run"}
-                      nodes:
-                        type: array
-                        items: {$ref: "#/components/schemas/Node"}
+              schema: {$ref: "#/components/schemas/EngineRunDetail"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
     delete:
@@ -305,78 +295,117 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/runs/{id}/finish:
-    parameters: [{$ref: "#/components/parameters/RunID"}]
+  /api/v1/runs/{run}/finish:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
     post:
-      x-sparkwing-scope: runs.state
+      x-sparkwing-scope: runs.state or data.write
       tags: [runs]
-      summary: Mark a run terminal.
+      summary: Commit a terminal run and end its owner unit.
+      description: A live trigger owner finishes through one transaction. A run-bound local publisher uses the publication edge without an executable claim.
       requestBody:
         required: true
         content:
           application/json:
             schema: {$ref: "#/components/schemas/FinishRunRequest"}
       responses:
-        "204": {description: Run finished.}
+        "200":
+          description: Committed result, including replay.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineApplied"}
         "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
+        "409": {description: The state or authority changed before the transaction committed.}
 
-  /api/v1/runs/{id}/plan:
-    parameters: [{$ref: "#/components/parameters/RunID"}]
+  /api/v1/runs/{run}/plan:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
     post:
-      x-sparkwing-scope: runs.state
+      x-sparkwing-scope: node.result or data.write
       tags: [runs]
-      summary: Upload the run's plan-snapshot blob.
-      description: |
-        The body is opaque bytes that replace the stored snapshot. Content-Type
-        is ignored. Plan validation and acceptance use Tenant.AcceptPlan.
+      summary: Accept the checkout declarations and plan together.
+      description: A live planner, trigger owner or run-bound publisher submits the second seal. The store preserves the first seal, owns validation and rechecks authority. An ended claim may only replay its recorded exact body.
       requestBody:
         required: true
         content:
-          application/octet-stream:
-            schema: {type: string, format: binary}
-      responses:
-        "204": {description: Plan stored.}
-        "500": {$ref: "#/components/responses/InternalError"}
-
-  /api/v1/runs/{id}/cancel:
-    parameters: [{$ref: "#/components/parameters/RunID"}]
-    post:
-      x-sparkwing-scope: runs.control
-      tags: [runs]
-      summary: Request cancellation. The orchestrator surfaces this via heartbeat.
-      description: Takes no request body; the handler reads none.
-      responses:
-        "204": {description: Cancellation requested.}
-        "404": {$ref: "#/components/responses/NotFound"}
-
-  /api/v1/runs/{id}/retry:
-    parameters: [{$ref: "#/components/parameters/RunID"}]
-    post:
-      x-sparkwing-scope: runs.control
-      tags: [runs]
-      summary: Re-run a failed run. `?full=1` re-runs every node; default skips passed.
-      parameters:
-        - in: query
-          name: full
-          schema: {type: string, enum: ["1", "true"]}
-          description: When set, re-runs every node regardless of prior outcome.
+          application/json:
+            schema: {$ref: "#/components/schemas/EnginePlanSubmission"}
       responses:
         "200":
-          description: New run created.
+          description: Committed result, including replay.
           content:
             application/json:
-              schema:
-                x-sparkwing-go-type: none
-                type: object
-                required: [run_id]
-                properties:
-                  run_id: {type: string}
-                  status: {type: string}
-                  trigger_source: {type: string}
-                  started_at: {type: string, format: date-time}
-        "404": {$ref: "#/components/responses/NotFound"}
+              schema: {$ref: "#/components/schemas/EnginePlanAccepted"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
+        "409": {description: The state or authority changed before the transaction committed.}
+
+  /api/v1/runs/{run}/cancel:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: runs.control
+      tags: [runs]
+      summary: Request cooperative cancellation.
+      description: The authenticated member requests cancellation. Live holders drain under reporting authority. Expected expansions are resolved in the transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngineCancelRequest"}
+      responses:
+        "200":
+          description: Committed result, including replay.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineApplied"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+        "409": {description: The state or authority changed before the transaction committed.}
+
+  /api/v1/runs/{run}/retry:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: runs.control
+      tags: [runs]
+      summary: Admit a retry with the source seals unchanged.
+      description: The store loads the source seals and records the current requester as retrier lineage. The idempotency key applies to the new intake.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngineRetryRequest"}
+      responses:
+        "200":
+          description: Committed result, including replay.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineCreateRunResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+        "409": {description: The state or authority changed before the transaction committed.}
 
   /api/v1/runs/{id}/attempts:
     parameters: [{$ref: "#/components/parameters/RunID"}]
@@ -447,24 +476,6 @@ paths:
 
   /api/v1/runs/{id}/nodes:
     parameters: [{$ref: "#/components/parameters/RunID"}]
-    get:
-      x-sparkwing-scope: runs.read or nodes.claim or triggers.claim
-      tags: [nodes]
-      summary: List nodes for a run, insertion order.
-      responses:
-        "200":
-          description: Nodes wrapped under `nodes`.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: none
-                type: object
-                required: [nodes]
-                properties:
-                  nodes:
-                    type: array
-                    items: {$ref: "#/components/schemas/Node"}
-        "500": {$ref: "#/components/responses/InternalError"}
     post:
       x-sparkwing-scope: runs.state
       tags: [nodes]
@@ -479,22 +490,6 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "409": {description: "The run already finished, or the claim naming it no longer holds it."}
         "500": {$ref: "#/components/responses/InternalError"}
-
-  /api/v1/runs/{id}/nodes/{nodeID}:
-    parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
-    get:
-      x-sparkwing-scope: claim or nodes.claim
-      tags: [nodes]
-      summary: Fetch one node.
-      responses:
-        "200":
-          description: Node.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/Node"}
-        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/runs/{id}/nodes/{nodeID}/start:
     parameters:
@@ -598,49 +593,79 @@ paths:
       responses:
         "204": {description: Updated.}
 
-  /api/v1/runs/{id}/nodes/{nodeID}/annotations:
+  /api/v1/runs/{run}/jobs/{job}/annotations:
     parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
     post:
-      x-sparkwing-scope: claim or nodes.claim
-      tags: [nodes]
-      summary: Append one annotation string to the node.
+      x-sparkwing-scope: node.report or node.report or data.write
+      tags: [jobs]
+      summary: Append one annotation string to the job.
+      description: Requires a live job claim, trigger owner, or local publisher. The controller derives authority and fences. Cancellation allows reporting. Ended claims cannot report. The transaction rechecks holder rights.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/controller.Server.handleAppendNodeAnnotation.body
+              x-sparkwing-go-type: pkg/controller.annotationRequest
               type: object
               required: [message]
               properties:
+                step_id: {type: string, description: "Omit on the job annotation route."}
                 message: {type: string}
+                level: {type: string}
+                file: {type: string}
+                line: {type: integer}
       responses:
         "204": {description: Appended.}
-        "413": {description: "The annotation exceeds 64 KiB, or the run's annotations would exceed 4 MiB JSON-encoded."}
+        "413": {description: "The annotation exceeds 128 KiB, or the run's annotations would exceed 4 MiB JSON-encoded."}
         "429": {description: The run already holds 1000 annotations.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or reporting attempt changed.}
+        "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/runs/{id}/nodes/{nodeID}/summary:
+  /api/v1/runs/{run}/jobs/{job}/summary:
     parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
     post:
-      x-sparkwing-scope: claim or nodes.claim
-      tags: [nodes]
-      summary: Overwrite the node-scoped run summary markdown.
+      x-sparkwing-scope: node.report or node.report or data.write
+      tags: [jobs]
+      summary: Overwrite the job-scoped run summary markdown.
+      description: Requires a live job claim, trigger owner, or local publisher. The controller derives authority and fences. Cancellation allows reporting. Ended claims cannot report. The transaction rechecks holder rights.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/controller.Server.handleSetNodeSummary.body
+              x-sparkwing-go-type: pkg/controller.EngineController.handleSummary.body
               type: object
               required: [markdown]
               properties:
+                step_id: {type: string, description: "Omit on the job summary route."}
                 markdown: {type: string}
       responses:
         "204": {description: Stored.}
+        "413": {description: "The masked summary exceeds 128 KiB."}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or reporting attempt changed.}
+        "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/nodes/{nodeID}/metrics:
     parameters:
@@ -749,6 +774,34 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "409": {description: Caller is not the current claim holder.}
 
+  /api/v1/runs/{run}/heartbeat:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: trigger.host
+      tags: [runs]
+      summary: Renew the authorized run owner lease.
+      description: The store renews the owner and its self-claimed jobs and concurrency holders atomically, then returns cancellation and watched jobs.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngineRenewalRequest"}
+      responses:
+        "200":
+          description: Committed result, including replay.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineRenewalResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+        "409": {description: The state or authority changed before the transaction committed.}
+
   /api/v1/runs/{id}/nodes/{nodeID}/release:
     parameters:
       - {$ref: "#/components/parameters/RunID"}
@@ -827,110 +880,169 @@ paths:
                     type: array
                     items: {$ref: "#/components/schemas/DebugPause"}
 
-  /api/v1/runs/{id}/nodes/{nodeID}/steps/start:
+  /api/v1/runs/{run}/jobs/{job}/steps/start:
     parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
     post:
-      x-sparkwing-scope: claim or nodes.claim
-      tags: [node-steps]
-      summary: Mark a step within a node as running.
+      x-sparkwing-scope: node.report or node.report or data.write
+      tags: [job-steps]
+      summary: Mark a step within a job as running.
+      description: Requires a live job claim, trigger owner, or local publisher. The controller derives authority and fences. Cancellation allows reporting. Ended claims cannot report. The transaction rechecks holder rights.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/controller.Server.handleStartNodeStep.body
+              x-sparkwing-go-type: pkg/controller.stepStartRequest
               type: object
               required: [step_id]
               properties:
                 step_id: {type: string}
       responses:
         "204": {description: Started.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or reporting attempt changed.}
+        "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/runs/{id}/nodes/{nodeID}/steps/finish:
+  /api/v1/runs/{run}/jobs/{job}/steps/finish:
     parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
     post:
-      x-sparkwing-scope: claim or nodes.claim
-      tags: [node-steps]
-      summary: Transition a step to passed / failed.
+      x-sparkwing-scope: node.report or node.report or data.write
+      tags: [job-steps]
+      summary: Transition a step to passed, failed, or cancelled.
+      description: Requires a live job claim, trigger owner, or local publisher. The controller derives authority and fences. Cancellation allows reporting. Ended claims cannot report. The transaction rechecks holder rights.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/controller.Server.handleFinishNodeStep.body
+              x-sparkwing-go-type: pkg/controller.stepFinishRequest
               type: object
               required: [step_id, status]
               properties:
                 step_id: {type: string}
                 status:
                   type: string
-                  enum: [passed, failed]
+                  enum: [passed, failed, cancelled]
+                error: {$ref: "#/components/schemas/PolicyError/properties/error"}
       responses:
         "204": {description: Finished.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or reporting attempt changed.}
+        "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/runs/{id}/nodes/{nodeID}/steps/skip:
+  /api/v1/runs/{run}/jobs/{job}/steps/skip:
     parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
     post:
-      x-sparkwing-scope: claim or nodes.claim
-      tags: [node-steps]
+      x-sparkwing-scope: node.report or node.report or data.write
+      tags: [job-steps]
       summary: Record a step as skipped (SkipIf hit).
+      description: Requires a live job claim, trigger owner, or local publisher. The controller derives authority and fences. Cancellation allows reporting. Ended claims cannot report. The transaction rechecks holder rights.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/controller.Server.handleSkipNodeStep.body
+              x-sparkwing-go-type: pkg/controller.stepStartRequest
               type: object
               required: [step_id]
               properties:
                 step_id: {type: string}
       responses:
         "204": {description: Recorded.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or reporting attempt changed.}
+        "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/runs/{id}/nodes/{nodeID}/steps/annotations:
+  /api/v1/runs/{run}/jobs/{job}/steps/annotations:
     parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
     post:
-      x-sparkwing-scope: claim or nodes.claim
-      tags: [node-steps]
+      x-sparkwing-scope: node.report or node.report or data.write
+      tags: [job-steps]
       summary: Append one annotation to a step.
+      description: Requires a live job claim, trigger owner, or local publisher. The controller derives authority and fences. Cancellation allows reporting. Ended claims cannot report. The transaction rechecks holder rights.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/controller.Server.handleAppendStepAnnotation.body
+              x-sparkwing-go-type: pkg/controller.annotationRequest
               type: object
               required: [step_id, message]
               properties:
                 step_id: {type: string}
                 message: {type: string}
+                level: {type: string}
+                file: {type: string}
+                line: {type: integer}
       responses:
         "204": {description: Appended.}
-        "413": {description: "The annotation exceeds 64 KiB, or the run's annotations would exceed 4 MiB JSON-encoded."}
+        "413": {description: "The annotation exceeds 128 KiB, or the run's annotations would exceed 4 MiB JSON-encoded."}
         "429": {description: The run already holds 1000 annotations.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or reporting attempt changed.}
+        "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/runs/{id}/nodes/{nodeID}/steps/summary:
+  /api/v1/runs/{run}/jobs/{job}/steps/summary:
     parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
     post:
-      x-sparkwing-scope: claim or nodes.claim
-      tags: [node-steps]
+      x-sparkwing-scope: node.report or node.report or data.write
+      tags: [job-steps]
       summary: Overwrite the step-scoped run-summary markdown.
+      description: Requires a live job claim, trigger owner, or local publisher. The controller derives authority and fences. Cancellation allows reporting. Ended claims cannot report. The transaction rechecks holder rights.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/controller.Server.handleSetStepSummary.body
+              x-sparkwing-go-type: pkg/controller.EngineController.handleSummary.body
               type: object
               required: [step_id, markdown]
               properties:
@@ -938,6 +1050,12 @@ paths:
                 markdown: {type: string}
       responses:
         "204": {description: Stored.}
+        "413": {description: "The masked summary exceeds 128 KiB."}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or reporting attempt changed.}
+        "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/steps:
     parameters: [{$ref: "#/components/parameters/RunID"}]
@@ -1096,47 +1214,6 @@ paths:
                   triggers:
                     type: array
                     items: {$ref: "#/components/schemas/Trigger"}
-
-  /api/v1/triggers/claim:
-    post:
-      x-sparkwing-scope: triggers.claim
-      tags: [triggers]
-      summary: Atomically claim the oldest pending trigger.
-      description: |
-        Empty body claims any pending trigger. 204 when the queue is
-        empty.
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.claimTriggerReq
-              type: object
-              properties:
-                pipelines:
-                  type: array
-                  items: {type: string}
-                trigger_sources:
-                  type: array
-                  items: {type: string}
-                node_runner:
-                  type: string
-                  enum: [inprocess, k8s, warm]
-                  description: How the claimant runs the trigger's nodes; empty means inprocess. A metered credential claiming for inprocess nodes is refused with 403.
-                allow_repos:
-                  type: array
-                  items: {type: string}
-                  description: >-
-                    Repositories this runner's owner allows it to build, as host/path patterns where '*' matches within one path segment. A list that is present, even empty, confines the claim to runs from matching repositories; an absent list claims as before.
-                platform: {$ref: "#/components/schemas/ClaimPlatform"}
-                resources: {$ref: "#/components/schemas/ClaimResources"}
-      responses:
-        "200":
-          description: Claimed trigger.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/Trigger"}
-        "204": {description: Queue empty.}
 
   /api/v1/triggers/{id}:
     parameters: [{$ref: "#/components/parameters/TriggerID"}]
@@ -1573,15 +1650,16 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/queue/state:
+  /api/v1/queue:
     get:
       x-sparkwing-scope: runs.read
       tags: [concurrency]
       summary: Snapshot every concurrency key, holder, waiter, and runner.
       description: |
-        One deployment-wide view for the queue dashboard: per-key capacity
-        and cost held, the live holders, the waiting nodes with their
-        positions, and the headroom each runner last reported.
+        The authorized team's concurrency groups, holders, waiting jobs and
+        advertised runner headroom. The team comes from the committed
+        member or verified local credential. Errors use
+        the common envelope. The former /queue/state path is removed.
       responses:
         "200":
           description: The queue snapshot.
@@ -1638,107 +1716,37 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/nodes/claim:
-    post:
-      x-sparkwing-scope: nodes.claim
-      tags: [nodes]
-      summary: Claim the oldest ready, unclaimed node matching labels.
-      description: |
-        The claim binds to the claiming token -- its prefix segment and
-        principal name -- as well as to `holder_id`. The per-node write
-        routes and the execution view then admit that token alone while
-        the lease is unexpired; another runner token gets `403` with
-        `"error": "claim_required"`, even one carrying the same principal
-        name. `lease_secs` is clamped to the server cap of 10 minutes.
-        A node sealed under an execution policy is never claimed here.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.claimNodeReq
-              type: object
-              required: [holder_id]
-              properties:
-                holder_id: {type: string}
-                lease_secs: {type: integer}
-                labels:
-                  type: array
-                  items: {type: string}
-                headroom:
-                  allOf: [{$ref: "#/components/schemas/AgentHeadroom"}]
-                  nullable: true
-                  description: >-
-                    The runner's free capacity at claim time, which the agents view reports back. Omit it when the runner engages no local admission daemon.
-                capacity:
-                  allOf: [{$ref: "#/components/schemas/ClaimCapacity"}]
-                  nullable: true
-                  description: >-
-                    The runner's own slot ceiling and in-flight claim count, which local-first placement reads to tell a saturated runner from an idle one. Omit it to advertise no ceiling, which counts as having room.
-                allow_repos:
-                  type: array
-                  items: {type: string}
-                  description: >-
-                    Repositories this runner's owner allows it to build, as host/path patterns where '*' matches within one path segment. A list that is present, even empty, confines the claim to runs from matching repositories; an absent list claims as before.
-                platform: {$ref: "#/components/schemas/ClaimPlatform"}
-                resources: {$ref: "#/components/schemas/ClaimResources"}
-      responses:
-        "200":
-          description: Claimed node.
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - {$ref: "#/components/schemas/Node"}
-                  - x-sparkwing-go-partial: pkg/store.Node
-                    type: object
-                    description: >-
-                      Exact claim fence returned only to the authenticated runner that won this claim.
-                    properties:
-                      claimed_by: {type: string}
-                      claim_generation: {type: integer, format: int64}
-                      claim_membership_id: {type: string}
-                      reservation_id: {type: string}
-                      claim_token:
-                        type: string
-                        description: >-
-                          The claim's token, returned once. The node's process authenticates with it in place of the claiming credential; it reaches only the claim's run, writes only to this node, and stops working when the claim ends.
-        "204": {description: Nothing to claim.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "402":
-          description: >-
-            The claiming token is metered and the credit balance or a spend limit does not cover a minute of its time. The node stays ready and the waiting run records why.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/CreditsRefused"}
-
   /api/v1/tokens:
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.read
       tags: [tokens]
-      summary: Mint a new bearer token.
+      summary: Issue a member root or a narrowed controller capability.
+      description: A signed-in session provisions its own member root. A bearer delegates with its revocation ancestry retained. Team, subject and issuance authority come from authentication. Recheck grants, membership and expiry in the issuance transaction. The bearer is returned once. Clients must not automatically retry issuance.
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: "#/components/schemas/CreateTokenRequest"}
+            schema: {$ref: "#/components/schemas/CredentialRequest"}
       responses:
         "201":
-          description: New token (raw value is included **once** in this response).
+          description: Committed credential with its one-time bearer.
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/CreateTokenResponse"}
-        "400":
-          description: >-
-            Invalid request: missing principal or kind, or a scope the controller does not honor (the message names the offending scope and the valid set).
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/Error"}
-        "403": {description: "The request names the checkout service's scope, which only the controller's `credits-token` credential provisions."}
+              schema: {$ref: "#/components/schemas/CredentialResponse"}
+        "400": {description: "Invalid grant array, expiry or request shape."}
+        "401": {description: "Missing, revoked or expired authority or membership."}
+        "403": {description: "Missing route grant, invalid CSRF or issuance exceeding current authority."}
     get:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.read
       tags: [tokens]
-      summary: List all tokens (no raw values).
+      summary: List owned capability metadata in the active team.
+      parameters:
+        - in: query
+          name: kind
+          schema: {type: string, enum: [account, machine, service, operator]}
+        - in: query
+          name: include_revoked
+          schema: {type: string, enum: ["0", "1"]}
       responses:
         "200":
           description: Tokens.
@@ -1751,192 +1759,60 @@ paths:
                 properties:
                   tokens:
                     type: array
-                    items: {$ref: "#/components/schemas/Token"}
+                    items: {$ref: "#/components/schemas/CapabilityMetadata"}
 
-  /api/v1/tokens/{prefix}:
+  /api/v1/tokens/{token}:
     parameters:
       - in: path
-        name: prefix
+        name: token
         required: true
-        schema: {type: string, description: The 12-char prefix returned at mint.}
+        schema: {type: string, description: The capability prefix returned at mint.}
     get:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.read
       tags: [tokens]
-      summary: Lookup a token by prefix.
+      summary: Read owned capability metadata by prefix.
       responses:
         "200":
           description: Token (no raw value).
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/Token"}
+              schema: {$ref: "#/components/schemas/CapabilityMetadata"}
         "404": {$ref: "#/components/responses/NotFound"}
     delete:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.read
       tags: [tokens]
-      summary: Revoke a token by prefix.
+      summary: Revoke a team capability by prefix.
+      description: The binding policy checks ownership in the active team. The transaction rechecks authority and advances the revocation generation before returning.
       responses:
         "204": {description: Revoked.}
 
-  /api/v1/tokens/{prefix}/rotate:
+  /api/v1/tokens/{token}/rotate:
     parameters:
       - in: path
-        name: prefix
+        name: token
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.read
       tags: [tokens]
-      summary: Mint a replacement; mark the prior token revoked + replaced_by.
-      responses:
-        "200":
-          description: New token.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/CreateTokenResponse"}
-        "403": {description: "The token is the checkout service's; replace the controller's `credits-token` credential instead."}
-
-  /api/v1/accounts/{account}:
-    delete:
-      x-sparkwing-scope: admin
-      tags: [teams]
-      summary: Delete an account on the operator's word.
-      description: >-
-        Carries out a deletion request that reached the operator by other means. The path names the account by id or by email; an address held by more than one account, none verified, answers 409 and needs the id. The deletion is the one `DELETE /api/v1/me` performs, including its 409 for a last owner of a team with other members.
-      parameters:
-        - {name: account, in: path, required: true, schema: {type: string}}
-      responses:
-        "200":
-          description: Deleted.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.deletedAccountJSON
-                type: object
-                required: [account_id, deleted_teams]
-                properties:
-                  account_id: {type: string}
-                  deleted_teams:
-                    type: array
-                    items: {type: string}
-                    description: Teams the account was the only member of, now queued for deletion.
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409":
-          description: The account is the last owner of teams that have other members, or a team being deleted has a credit checkout in progress (wait for it to expire or complete), is on hold over a disputed payment (contact support), or owes for usage on its card or has a card charge in progress (pay it first).
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.lastOwnerRefusalJSON
-                type: object
-                required: [error, teams]
-                properties:
-                  error: {type: string}
-                  teams:
-                    type: array
-                    items: {$ref: "#/components/schemas/TeamRef"}
-
-  /api/v1/teams/{team}:
-    delete:
-      x-sparkwing-scope: admin
-      tags: [teams]
-      summary: Delete a team on the operator's word.
-      description: The deletion `DELETE /api/v1/team` performs, without its owner and only-team checks. The default team cannot be deleted.
-      parameters:
-        - {name: team, in: path, required: true, schema: {type: string}}
-      responses:
-        "202":
-          description: Deletion queued; the team is closed.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/TeamDeletion"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {description: "The team has a credit checkout in progress (wait for it to expire or complete), is on hold over a disputed payment (contact support), or owes for usage on its card or has a card charge in progress (pay it first)."}
-
-  /api/v1/teams/{team}/repos/{owner}/{name}/dispatch:
-    parameters:
-      - {name: team, in: path, required: true, schema: {type: string}}
-      - {name: owner, in: path, required: true, schema: {type: string}, description: GitHub owner of the repository.}
-      - {name: name, in: path, required: true, schema: {type: string}, description: GitHub name of the repository.}
-    put:
-      x-sparkwing-scope: admin
-      tags: [teams]
-      summary: Choose the path a repository's new runs take.
-      description: >-
-        `trigger` is every repository's default path, where a runner claims the run's trigger, and setting it moves a repository back from controller dispatch. `controller` starts each new run with a planning node that the launcher runs in a Job it builds, and a child such a run starts takes the same path. Runs already started keep their path.
+      summary: Replace an owned capability with a bounded grace window.
+      description: Preserves original authority and registration in one transaction. The response returns the replacement bearer once. Clients must never replay a lost response. Browser mutations require session-bound CSRF proof.
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.repoDispatchReq
-              type: object
-              required: [dispatch]
-              properties:
-                dispatch: {type: string, enum: [trigger, controller]}
+            schema: {$ref: "#/components/schemas/CapabilityRotationRequest"}
       responses:
         "200":
-          description: The repository's dispatch path.
+          description: Committed replacement with its one-time bearer.
           content:
             application/json:
-              schema:
-                x-sparkwing-go-type: none
-                type: object
-                properties:
-                  team: {type: string}
-                  repo: {type: string, description: "owner/name, lowercased."}
-                  dispatch: {type: string}
+              schema: {$ref: "#/components/schemas/RotateTokenResponse"}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
-        "409": {description: Controller dispatch cannot run a pipeline yet.}
-
-  /api/v1/launcher/sync:
-    post:
-      x-sparkwing-scope: ScopeClaimsLaunch
-      tags: [nodes]
-      summary: Reconcile a launcher's Jobs with their claims.
-      description: >-
-        The launcher names the claim each of its Jobs was built for and hears `delete` for a claim that ended or whose run is being cancelled, and `keep` otherwise. A job with `release` set hands back a claim whose pod never renewed it: the node returns to the queue with no attempt spent and its reservation refunded, and is claimable again 5 minutes later, showing `waiting for Cloud capacity` with a `capacity_wait` event.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.launcherSyncReq
-              type: object
-              required: [jobs]
-              properties:
-                jobs:
-                  type: array
-                  maxItems: 1000
-                  items: {$ref: "#/components/schemas/LaunchJob"}
-      responses:
-        "200":
-          description: What to do with each Job.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.launcherSyncResp
-                type: object
-                properties:
-                  jobs:
-                    type: array
-                    items:
-                      x-sparkwing-go-type: pkg/store.LaunchJobResult
-                      type: object
-                      properties:
-                        run_id: {type: string}
-                        node_id: {type: string}
-                        generation: {type: integer, format: int64}
-                        state: {type: string, enum: [keep, delete]}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/children:
     parameters: [{$ref: "#/components/parameters/RunID"}]
@@ -2016,77 +1892,26 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {description: The node has not finished.}
 
-  /api/v1/launcher/claim:
-    post:
-      x-sparkwing-scope: ScopeClaimsLaunch
-      tags: [nodes]
-      summary: Claim a ready node of a controller-dispatched run for a launcher Job.
-      description: >-
-        Claims a ready node of any team's controller-dispatched run whose runner selector the Cloud runner image satisfies (its declared tools, the cloud class and location), reserves its credits, and mints the claim token the node's Job carries, in one transaction. Each call reads a bounded number of candidates in ready order, passing over nodes whose team cannot pay, and a call that finds none resumes the next call where it stopped, wrapping at the end of the queue; so the node claimed is not always the oldest ready one. The token lives `lifetime_secs` from the claim: `deadline_secs`, or less when the node declares a shorter timeout.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.launchClaimReq
-              type: object
-              required: [holder_id, deadline_secs]
-              properties:
-                holder_id: {type: string}
-                lease_secs: {type: integer}
-                deadline_secs: {type: integer, description: From 90 to 21600.}
-      responses:
-        "200":
-          description: The claim and its token.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/store.LaunchClaim
-                type: object
-                properties:
-                  team: {type: string}
-                  run_id: {type: string}
-                  node_id: {type: string}
-                  generation: {type: integer, format: int64}
-                  kind: {type: string, enum: [plan, work]}
-                  dispatch: {type: string, enum: [controller]}
-                  class:
-                    x-sparkwing-go-type: pkg/store.CPUClass
-                    type: object
-                    properties:
-                      cores: {type: integer, format: int64}
-                      memory_bytes: {type: integer, format: int64}
-                  token: {type: string}
-                  lifetime_secs: {type: integer, format: int64, description: "How long the token lives from the claim; the Job's deadline derives from this, not from a clock."}
-        "204": {description: No node is ready.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-
   /api/v1/auth/logout:
     post:
-      x-sparkwing-scope: public
+      x-sparkwing-scope: browser_flow_csrf_nonce
       tags: [auth]
-      summary: Delete a session.
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.logoutReq
-              type: object
-              required: [session_id]
-              properties:
-                session_id: {type: string}
+      summary: End the verified session.
+      description: Takes no body. Present a session cookie or Session authorization header, its session-bound CSRF header and cookie, and a matching Origin or Referer. Clears the browser session cookies after deletion.
+      security:
+        - sessionAuth: []
       responses:
         "204": {description: Logged out.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "503": {description: Session storage or its encryption key is unavailable.}
 
   /api/v1/auth/session:
     get:
-      x-sparkwing-scope: public
+      x-sparkwing-scope: browser_flow_csrf_nonce
       tags: [auth]
-      summary: "Resolve a session id (sent via `Authorization: Session <id>`) to the principal."
+      summary: Resolve and renew a live account session.
+      description: Present a session cookie or Session authorization header. Renewal keeps current membership and parent capability ceilings and cannot extend the absolute session lifetime. Duplicate presentations and HEAD are refused.
       security:
         - sessionAuth: []
       responses:
@@ -2108,7 +1933,7 @@ paths:
                   expires_at: {type: integer, format: int64, description: Unix seconds.}
                   team:
                     type: string
-                    description: Team the session acts for. `default` for a password session.
+                    description: Team the session acts for.
                   role:
                     type: string
                     enum: [owner, editor, reader]
@@ -2121,36 +1946,33 @@ paths:
     get:
       x-sparkwing-scope: authenticated
       tags: [auth]
-      summary: Resolve the bearer token to the principal.
+      summary: Read the committed credential subject and grants.
       responses:
         "200":
           description: Principal info.
           content:
             application/json:
               schema:
-                x-sparkwing-go-type: pkg/controller.whoamiResp
+                x-sparkwing-go-type: pkg/controller.whoamiJSON
                 type: object
                 properties:
                   principal: {type: string}
                   scopes:
                     type: array
                     items: {type: string}
-                  kind: {type: string}
+                  kind: {type: string, enum: [account, machine, service, operator, local, anonymous]}
                   token_prefix:
                     type: string
-                    description: Prefix of the bearer token that answered, absent for a session or anonymous principal.
+                    description: Capability prefix. Absent for a session or verified local peer.
                   team:
                     type: string
-                    description: Team the request acts for, from the token or the session. Absent for an anonymous principal.
-                  role:
-                    type: string
-                    enum: [owner, editor, reader]
-                    description: The signed-in user's role in `team`. Absent for a token or a password session.
+                    description: Active team from the committed credential. Absent for deployment authority without a team.
         "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
 
   /api/v1/secrets:
     post:
-      x-sparkwing-scope: admin or team.admin
+      x-sparkwing-scope: team.admin
       tags: [secrets]
       summary: Create or replace a secret.
       requestBody:
@@ -2205,23 +2027,22 @@ paths:
         required: true
         schema: {type: string}
     get:
-      x-sparkwing-scope: claim or secrets.read or team.admin
+      x-sparkwing-scope: secrets.read or team.admin or secrets.release
       tags: [secrets]
       summary: Read one secret (value included).
       description: |
-        A bearer reads by name only as the operator or a team's owner; any
-        other bearer, a runner's token included, gets `403` with error
-        `claim_required`. A masked row's value goes
-        only to the operator's bearer token and to a claim that declares
-        it; a dashboard session or a team owner's token gets `403` with
-        error `write_only`, and may still read an unmasked variable.
-        A claim token (a controller-dispatched work node's, a runner's node
-        claim or a runner's trigger claim) reads with `?run=` set to its own
-        run, and only a secret its run's plan declares (`403
-        secret_undeclared` otherwise); each read is recorded as a
-        `secret_released` event on the run, naming the node for a node's
-        claim. A planning claim reads none.
-        Every secrets response carries `Cache-Control: no-store`.
+        Authorized members and verified local peers read unmasked config within
+        their authenticated team. Masked member reads are forbidden. A live
+        declaring claim reads only a name its sealed
+        run declares, under the run's pipeline/shared scope and reserved pools.
+        The store commits each claim release audit with its authority check.
+        Machine and deployment roots gain no read access.
+        Query selectors and headers cannot select a different tenant. Duplicate
+        selectors and malformed queries fail after authentication.
+        Embedded controllers supply an authority-bearing SecretReader. Missing
+        adapters return policy_missing. Bound encryption is required. Invalid
+        envelopes fail without values or cipher diagnostics.
+        Every secrets response carries Cache-Control: no-store.
       responses:
         "200":
           description: Secret.
@@ -2231,7 +2052,7 @@ paths:
         "403": {description: The caller may not read this value.}
         "404": {$ref: "#/components/responses/NotFound"}
     delete:
-      x-sparkwing-scope: admin or team.admin
+      x-sparkwing-scope: team.admin
       tags: [secrets]
       summary: Delete a secret.
       responses:
@@ -2341,20 +2162,20 @@ paths:
               schema: {$ref: "#/components/schemas/Run"}
         "404": {$ref: "#/components/responses/NotFound"}
 
-  /api/v1/pipelines/{name}/profile:
+  /api/v1/pipelines/{name}/sizing:
     parameters: [{$ref: "#/components/parameters/PipelineName"}]
     get:
-      x-sparkwing-scope: nodes.claim
+      x-sparkwing-scope: runs.read or source.read
       tags: [pipelines]
       summary: Read a pipeline's measured resource profile.
       description: |
         Returns the cores and memory sparkwing measured for past runs, plus
-        any operator pin. `?node=` narrows it to one node; omitting it
+        any operator pin. `?job=` narrows it to one job; omitting it
         answers the pipeline-wide profile. A runner reads this to size the
         work it is about to admit.
       parameters:
         - in: query
-          name: node
+          name: job
           schema: {type: string}
       responses:
         "200":
@@ -2365,22 +2186,23 @@ paths:
                 type: object
                 additionalProperties: true
         "401": {$ref: "#/components/responses/Unauthorized"}
-        "404": {description: No profile recorded for this pipeline or node.}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: No profile recorded for this pipeline or job.}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/pipelines/{name}/profile/pin:
+  /api/v1/pipelines/{name}/sizing/pin:
     parameters: [{$ref: "#/components/parameters/PipelineName"}]
     put:
-      x-sparkwing-scope: runs.state
+      x-sparkwing-scope: node.report
       tags: [pipelines]
       summary: Pin or clear a pipeline's resource profile.
       description: |
         A pin overrides what sparkwing measured. A body whose `cores` and
-        `memory_bytes` are both zero or negative clears the pin instead of
+        `memory_bytes` are both zero clears the pin instead of
         setting one.
       parameters:
         - in: query
-          name: node
+          name: job
           schema: {type: string}
       requestBody:
         required: true
@@ -2396,6 +2218,7 @@ paths:
         "204": {description: Pin written or cleared. Empty body.}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/gitcache/git/register:
@@ -2472,8 +2295,8 @@ paths:
       tags: [health]
       summary: Announce the data download, cache, and dashboard URLs a client should use.
       description: |
-        Any valid bearer satisfies this route, and every client that reads
-        it already holds one. A field is absent when the controller was
+        Discovery requires live identity in an active team. Bootstrap and eval
+        credentials are refused. A field is absent when the controller was
         started without the matching configuration; `data_download_url` is
         absent when the controller cannot sign downloads on the request's path;
         a public-ingress request needs CloudFront signing configured. A co-located laptop
@@ -2496,6 +2319,7 @@ paths:
                   multi_team: {type: boolean}
                   direct_data: {type: boolean, description: Direct S3 uploads and committed-object reads are available.}
         "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
         "404": {description: This controller announces no services.}
 
   /api/v1/health:
@@ -2616,10 +2440,10 @@ paths:
         "502": {description: The cache is unreachable or answered badly.}
         "503": {description: No cache is configured on this controller.}
 
-  /api/v1/pipelines/{name}/profile/contention:
+  /api/v1/pipelines/{name}/sizing/contention:
     parameters: [{$ref: "#/components/parameters/PipelineName"}]
     post:
-      x-sparkwing-scope: runs.state
+      x-sparkwing-scope: node.report
       tags: [pipelines]
       summary: Count one contended run against a pipeline.
       description: |
@@ -2632,10 +2456,10 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/pipelines/{name}/profile/observations:
+  /api/v1/pipelines/{name}/sizing/observations:
     parameters: [{$ref: "#/components/parameters/PipelineName"}]
     post:
-      x-sparkwing-scope: runs.state
+      x-sparkwing-scope: node.report
       tags: [pipelines]
       summary: Fold one run's measurement into a pipeline's profile.
       description: |
@@ -2646,7 +2470,7 @@ paths:
         A `partial` observation may only raise resource dimensions or the floor.
       parameters:
         - in: query
-          name: node
+          name: job
           schema: {type: string}
       requestBody:
         required: true
@@ -2673,10 +2497,10 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/pipelines/{name}/profile/waits:
+  /api/v1/pipelines/{name}/sizing/waits:
     parameters: [{$ref: "#/components/parameters/PipelineName"}]
     post:
-      x-sparkwing-scope: runs.state
+      x-sparkwing-scope: node.report
       tags: [pipelines]
       summary: Record how long a run queued for admission.
       description: |
@@ -2729,41 +2553,6 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-
-  /api/v1/triggers/{id}/claim:
-    parameters: [{$ref: "#/components/parameters/TriggerID"}]
-    post:
-      x-sparkwing-scope: triggers.claim
-      tags: [triggers]
-      summary: Claim one named trigger.
-      description: |
-        Takes the lease on a trigger the caller already chose, unlike
-        `/api/v1/triggers/claim` which picks the next queued one. The
-        caller is recorded as the claimant, so the claim proves ownership of
-        the run the trigger creates. 404 means the trigger is gone or another
-        consumer holds it, so the caller moves on to its next candidate.
-      requestBody:
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.claimSpecificTriggerReq
-              type: object
-              properties:
-                lease_nanos: {type: integer, format: int64}
-                node_runner:
-                  type: string
-                  enum: [inprocess, k8s, warm]
-                  description: How the claimant runs the trigger's nodes; empty means inprocess. A metered credential claiming for inprocess nodes is refused with 403.
-      responses:
-        "200":
-          description: The claimed trigger.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/Trigger"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/nodes/{nodeID}/claim/input:
@@ -3230,20 +3019,18 @@ paths:
 
   /api/v1/secrets/rotate:
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: team.admin
       tags: [secrets]
-      summary: Re-encrypt every stored secret under the controller's current key.
+      summary: Rotate the authenticated team's secrets and git credentials.
       description: |
-        Opens each stored value with the keys the controller holds -- the
-        current one, then the previous one when one is configured -- and
-        writes it back sealed and bound under the current key, in one
-        transaction. A value the controller was holding as plaintext comes
-        out encrypted. A value that opens under neither key keeps the bytes
-        it had and is named in `skipped`, so one unreadable row costs the
-        others nothing. The previous key can be dropped once a rotation
-        answers with `skipped` empty.
-
-        Answers `400` when no key is configured.
+        Requires live member or verified local authority. Session
+        mutations require CSRF. Takes no body. The tenant transaction rechecks
+        authority and rewrites only this team's value columns in both credential
+        tables together. An unreadable secret keeps its bytes and is listed in
+        skipped. Plaintext and unbound envelopes stay unreadable. An unreadable
+        git credential, a sealing failure or lost authority rolls back both
+        tables. Cipher diagnostics remain private. Requires the tenant rotation
+        adapter and bound encryption. Every response returns no-store.
       responses:
         "200":
           description: Rotation complete.
@@ -3259,7 +3046,7 @@ paths:
                     description: Secret rows rewritten under the current key.
                   git_credentials:
                     type: integer
-                    description: Team git credentials resealed under the current key. One that opens under no configured key fails the rotation with 500.
+                    description: Team git credentials resealed under the current key. One that opens under no configured key rolls back both tables with an internal error.
                   skipped:
                     type: array
                     description: Rows left as they were because they opened under no configured key.
@@ -3273,10 +3060,14 @@ paths:
                           type: string
                           description: Owning pipeline; absent on the unscoped row.
         "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {description: Rotation failed or the tenant transaction adapter is unavailable.}
+        "503": {description: Bound secret encryption is unavailable.}
 
-  /api/v1/object-store/breaker:
+  /api/v1/operator/object-store/breaker:
     get:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: operator.object_store or operator
       tags: [cluster]
       summary: Read the controller's object-store request budget.
       description: |
@@ -3293,9 +3084,9 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/object-store/reset-breaker:
+  /api/v1/operator/object-store/reset-breaker:
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: operator.object_store or operator
       tags: [cluster]
       summary: Clear a tripped object-store request budget.
       description: |
@@ -3332,319 +3123,6 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/CreditState"}
-
-  /api/v1/credits/reversals:
-    post:
-      x-sparkwing-scope: credits.grant
-      tags: [credits]
-      summary: Take back what a payment still has on the ledger, or part of it.
-      description: |
-        Writes one `reversal` of what the paid grant carrying `payment_id`
-        still has, less what earlier reversals of it took back, in the team
-        the payment funded. A positive `amount_micro` smaller than that takes
-        back only that much, as a partial refund does. The balance may go below zero, which stops the
-        team's new metered claims. `reference` names the reversal, such as
-        the refund id for a refund or the dispute id for a lost chargeback;
-        a repeat under it answers 200 with the reversal already written, and
-        a payment already taken back whole answers 200 with no `grant`. The
-        controller never moves money: an operator issues a refund in the
-        Stripe dashboard, and the checkout service reverses it here.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.reversePaymentReq
-              type: object
-              required: [payment_id, reference]
-              properties:
-                payment_id: {type: string, description: The payment id the paid grant carries as its reference.}
-                reference: {type: string, description: This reversal's own reference.}
-                amount_micro: {type: integer, format: int64, minimum: 0, description: "How much to take back; zero or absent takes back all that remains."}
-      responses:
-        "200":
-          description: The reversal this reference already wrote, or nothing left to take back.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/PaymentReversal"}
-        "201":
-          description: The reversal written.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/PaymentReversal"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {description: No paid grant carries the payment id.}
-        "409": {description: "The reference already names a reversal of another payment, or a dispute held for another payment (`dispute_conflict`)."}
-
-  /api/v1/credits/freezes:
-    post:
-      x-sparkwing-scope: credits.grant
-      tags: [credits]
-      summary: Hold the team a disputed payment funded.
-      description: |
-        A hold is one per dispute, and a team is held while any of its holds
-        stands: its metered claims are refused with 402 and
-        `"code": "credits_frozen"`, so no new cloud work starts, while work
-        already running finishes. A hold names the team by `payment_id`, a
-        payment it made, and names the `dispute_id`. A dispute is bound to
-        the payment and team its first hold named: holding it again for
-        them, released or not, writes nothing, and holding it for another
-        payment is refused with 409. The checkout service holds and never
-        releases; the operator releases a dispute's hold through
-        `POST /api/v1/operator/teams/{team}/unfreeze`.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.creditFreezeReq
-              type: object
-              required: [payment_id, dispute_id]
-              properties:
-                payment_id: {type: string}
-                dispute_id: {type: string, description: The dispute the hold is for.}
-                reason: {type: string}
-      responses:
-        "200":
-          description: The team's holds as they now stand.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.creditFreezeJSON
-                type: object
-                required: [team, frozen, disputes]
-                properties:
-                  team: {type: string}
-                  frozen: {type: boolean}
-                  disputes: {type: array, items: {type: string}, description: The disputes still holding the team.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {description: "No paid grant carries the payment id, or the team is not registered."}
-        "409": {description: "The dispute is already held for another payment or team (`dispute_conflict`)."}
-
-  /api/v1/credits/units:
-    get:
-      x-sparkwing-scope: credits.grant
-      tags: [credits]
-      summary: Read the units the ledger prices in.
-      description: >-
-        The checkout service reads these before its first grant and refuses to grant when a cent is not the micro-credits it computes with. It saves no card, reports no card payment, records no fraud warning and reverses no refund unless `capabilities` names `card-billing-v1`.
-      responses:
-        "200":
-          description: The ledger's units.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.creditUnitsJSON
-                type: object
-                required: [micro_per_credit, credits_per_dollar, micro_per_cent, capabilities]
-                properties:
-                  micro_per_credit: {type: integer, format: int64}
-                  credits_per_dollar: {type: integer, format: int64}
-                  micro_per_cent: {type: integer, format: int64}
-                  capabilities: {type: array, items: {type: string}, description: "The contracts this controller serves; `card-billing-v1` covers partial reversals, saved cards, card payments and payment warnings, `paid-grant-lookup-v1` the payment lookup, and `card-setup-order-v1` the saved card's `completed_at`."}
-        "403": {$ref: "#/components/responses/Forbidden"}
-
-  /api/v1/credits/payments/{reference}:
-    parameters:
-      - in: path
-        name: reference
-        required: true
-        schema: {type: string}
-        description: The payment id a paid grant carries as its reference.
-    get:
-      x-sparkwing-scope: credits.grant
-      tags: [credits]
-      summary: Read the team a payment was granted to.
-      description: >-
-        The checkout service asks this before it refunds a payment from a refused card, so a payment the ledger already settled keeps its grant when the grant's reply or the service's own receipt was lost. It writes nothing. Controllers that serve it name `paid-grant-lookup-v1` in the units' `capabilities`. A 404 carrying `unknown_payment` means no paid grant carries the reference; any other 404 means the controller does not serve this route, and the checkout service then refunds nothing and asks Stripe to retry.
-      responses:
-        "200":
-          description: The team holding the paid grant.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.paidGrantJSON
-                type: object
-                required: [team]
-                properties:
-                  team: {type: string}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {description: "No paid grant carries the reference (`unknown_payment`)."}
-
-  /api/v1/credits/cards:
-    post:
-      x-sparkwing-scope: credits.grant
-      tags: [credits]
-      summary: Record the card an owner put on file through Stripe.
-      description: |
-        The checkout service reports the card saved on the setup page the
-        controller opened for `team`. It replaces any card on file, records a
-        `card.added` business event, and makes a charge that failed on the old
-        card due again at once. While the team is trusted, its usage is billed
-        to this card. With `completed_at`, a setup that completed before a
-        card on file that was also saved with `completed_at` is refused with
-        409 `stale_card_setup` and changes nothing; a repeat of the same
-        completion time is saved again. A card saved without it never makes a
-        later save stale.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.savedCardReq
-              type: object
-              required: [team, customer, payment_method, fingerprint]
-              properties:
-                team: {type: string, description: The team the setup page was opened for.}
-                customer: {type: string, description: The Stripe customer id.}
-                payment_method: {type: string, description: The Stripe payment method id.}
-                fingerprint: {type: string, description: "The card's fingerprint, which the spend limits and fraud warnings follow across teams."}
-                brand: {type: string}
-                last4: {type: string}
-                completed_at: {type: integer, format: int64, description: "Unix seconds the owner completed the setup, from Stripe's signed event; orders saves. Sent only to a controller naming `card-setup-order-v1`, since an older one refuses the field."}
-      responses:
-        "204": {description: Card saved.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {description: The team is not registered.}
-        "409": {description: "The setup completed before the card on file (`stale_card_setup`)."}
-
-  /api/v1/credits/card-payments:
-    post:
-      x-sparkwing-scope: credits.grant
-      tags: [credits]
-      summary: Report the outcome of an attempt to pay a card charge.
-      description: |
-        The checkout service's webhook and the pay-now Checkout report here,
-        and the controller's payment worker settles its own calls the same
-        way. `succeeded` settles the payment: the live attempt of the open
-        charge paying exactly the charge's amount pays it off, grants the
-        amount and lifts the hold a decline placed. Any other payment, a
-        second one or the wrong amount, is granted and queued for a refund. A
-        payment that drew an actionable early fraud warning, or was made by a
-        card that did, grants nothing and holds the team, except that a
-        pay-now payment of exactly the open charge by a card warned only on
-        another payment repays what the team owes at settlement, since any
-        card may repay usage already consumed, closes the charge even when
-        nothing is left to repay, and keeps the rest unapplied rather than as
-        credit, so a refund of that rest reverses nothing; it also holds the
-        team, and the controller logs
-        `alert=card_payment_warned` for either outcome. A repeat of a
-        settled payment changes nothing. A payment reference already credited
-        to another team is refused, including one recorded as a prepaid grant.
-        `failed` records a declined attempt: the charge stays open and is
-        retried after 1, 3 and 7 days, the team is held until it is paid, and
-        its owners are mailed on the first failure. `processing` and
-        `created` change nothing.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.cardPaymentReq
-              type: object
-              required: [status]
-              properties:
-                team: {type: string, description: "The charge's team; checked against the attempt when given."}
-                charge_id: {type: string, description: "Required with `succeeded`."}
-                attempt_id: {type: string, description: "The attempt the payment was made under; required with `succeeded` and `failed`."}
-                payment_intent: {type: string, description: "The Stripe payment intent; required with `succeeded`."}
-                amount_cents: {type: integer, format: int64, description: "What was paid; required and positive with `succeeded`."}
-                status: {type: string, enum: [succeeded, failed, processing, created]}
-                decline_code: {type: string, description: "Why a `failed` attempt was declined."}
-                fingerprint: {type: string, description: "The card that paid, which a pay-now Checkout may take from another card than the one on file."}
-      responses:
-        "204": {description: Recorded.}
-        "400": {description: "The status is unknown, a required field is missing, or the attempt is not for this charge and team."}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {description: No attempt carries the attempt id.}
-        "409": {description: The payment reference was already credited to another team.}
-
-  /api/v1/credits/warnings:
-    post:
-      x-sparkwing-scope: credits.grant
-      tags: [credits]
-      summary: Record an early fraud warning on a payment.
-      description: |
-        The warning is stored whether or not the ledger has seen its payment
-        yet, and a repeat of `warning_id` writes nothing new. An `actionable`
-        warning holds the team the payment funded, when the ledger knows it,
-        and the warned payment, or a later payment by the same card, is never
-        granted: its refund returns the money. A pay-now payment by that card
-        still repays the open debt it was opened for. A warning that is not
-        actionable is stored and stops nothing.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.paymentWarningReq
-              type: object
-              required: [warning_id, payment_intent]
-              properties:
-                warning_id: {type: string, description: The Stripe early fraud warning id.}
-                payment_intent: {type: string, description: The payment the warning is on.}
-                fingerprint: {type: string, description: The card that made the payment.}
-                actionable: {type: boolean, description: "Stripe's word that the payment can still be refunded to head off a dispute."}
-                reason: {type: string, description: Accepted and not recorded.}
-      responses:
-        "200":
-          description: The team the warning holds.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.paymentWarningJSON
-                type: object
-                required: [team, held]
-                properties:
-                  team: {type: string, description: "Empty when the ledger does not know the payment yet or the warning is not actionable."}
-                  held: {type: boolean}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-
-  /api/v1/credits/card-refunds:
-    post:
-      x-sparkwing-scope: credits.grant
-      tags: [credits]
-      summary: Report the status of a refund the controller queued.
-      description: |
-        The controller refunds a card payment that paid no open charge,
-        under a queue key of the payment intent and the attempt number,
-        `<payment intent>-<attempt>`. The checkout service reports each
-        refund's status here as Stripe announces it. Only the queue's current
-        key moves it, even when the report arrives before the controller
-        recorded the refund: `succeeded` finishes the refund, and `failed` or
-        `canceled` makes it due again after 1, 6 and then every 24 hours under
-        the next key. Any other status, or a key the queue does not hold,
-        answers `queued: false`.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.cardRefundReq
-              type: object
-              required: [payment_intent, refund_id, queue, status]
-              properties:
-                payment_intent: {type: string}
-                refund_id: {type: string, description: The Stripe refund id.}
-                queue: {type: string, description: "The queue key the refund was made under."}
-                status: {type: string, description: "Stripe's refund status, such as `succeeded`, `failed`, `canceled` or `pending`."}
-      responses:
-        "200":
-          description: Whether the report moved the queue.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.cardRefundJSON
-                type: object
-                required: [queued]
-                properties:
-                  queued: {type: boolean}
-        "400": {description: "The payment intent, refund id, queue key or status is missing."}
-        "403": {$ref: "#/components/responses/Forbidden"}
 
   /api/v1/credits/history:
     get:
@@ -3690,71 +3168,6 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/CreditSettings"}
-    put:
-      x-sparkwing-scope: admin
-      tags: [credits]
-      summary: Set the rate, the grace period, or the charge cap.
-      description: |
-        Sets each setting the body names, in one transaction, and answers the
-        full set as `GET` does. An omitted field leaves that setting as it was,
-        so changing one value is a one-field body. A body that names nothing is
-        refused with `400`, as is a rate outside one micro-credit to ten million
-        credits ($10,000) per second, a negative grace period, and a charge cap outside
-        the band whose floor is one second past the longest node heartbeat
-        cadence and whose ceiling is one day. The bounds keep the reservation a
-        claim takes and a capped charge inside a signed 64-bit integer, and the
-        floor keeps a cap from truncating every tick that arrives a little
-        late. A refused body writes none of its fields. `grace_seconds` at zero
-        cancels a metered node at the first heartbeat past the reservation its
-        claim paid for, which bounds the unpaid overrun to one heartbeat
-        interval per node. Charges already written keep the rate they were
-        charged at.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/SetCreditSettings"}
-      responses:
-        "200":
-          description: The settings after the change.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/CreditSettings"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-
-  /api/v1/tokens/{prefix}/metered:
-    parameters:
-      - in: path
-        name: prefix
-        required: true
-        schema: {type: string}
-    post:
-      x-sparkwing-scope: admin
-      tags: [tokens]
-      summary: Mark an existing token as one whose node claims cost credits.
-      description: |
-        Metering is an operator decision recorded against the token, which
-        is how a warm pool already running starts costing credits without a
-        new credential. A runner's self-asserted labels never make its work
-        billable.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.setTokenMeteredReq
-              type: object
-              required: [metered]
-              properties:
-                metered: {type: boolean}
-      responses:
-        "200":
-          description: The token after the change.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/Token"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/storage:
     get:
@@ -3782,14 +3195,14 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/StorageState"}
 
-  /api/v1/storage/quotas/{team}:
+  /api/v1/operator/object-store/quotas/{team}:
     parameters:
       - in: path
         name: team
         required: true
         schema: {type: string}
     put:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: operator.object_store or operator
       tags: [storage]
       summary: Set one team's storage allowance.
       description: |
@@ -3813,14 +3226,14 @@ paths:
               schema: {$ref: "#/components/schemas/StorageQuota"}
         "400": {$ref: "#/components/responses/BadRequest"}
 
-  /api/v1/storage/quotas/{team}/allowance:
+  /api/v1/operator/object-store/quotas/{team}/allowance:
     parameters:
       - in: path
         name: team
         required: true
         schema: {type: string}
     put:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: operator.object_store or operator
       tags: [storage]
       summary: Set how many retained bytes one team keeps.
       description: |
@@ -3841,13 +3254,13 @@ paths:
               schema: {$ref: "#/components/schemas/StorageQuota"}
         "400": {$ref: "#/components/responses/BadRequest"}
 
-  /api/v1/storage/settings:
+  /api/v1/operator/object-store/settings:
     put:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: operator.object_store or operator
       tags: [storage]
       summary: Set the retention windows, the alarm size, and the default tier.
       description: |
-        Writes every field, so a caller reads `GET /api/v1/storage` first,
+        Writes every field, so a caller reads `GET /api/v1/operator/object-store` first,
         changes what it means to change, and writes the result back. A
         retention window is a whole number of days and zero is unbounded; an
         leased hourly pass removes expired runs and their operational children
@@ -3873,41 +3286,9 @@ paths:
               schema: {$ref: "#/components/schemas/StorageSettings"}
         "400": {$ref: "#/components/responses/BadRequest"}
 
-  /api/v1/admin/usage-metrics:
+  /api/v1/operator/limits:
     get:
-      x-sparkwing-scope: admin
-      tags: [cluster]
-      summary: Read the deployment's weekly usage for its operator.
-      description: |
-        Counts, per Monday-to-Monday UTC week, the teams with at least one
-        run started, those runs split into cloud and connected-machine runs,
-        how many runs each active team started, and the accounts and teams
-        created. For teams created in the window it reports the time from
-        the team's creation to the finish of its first successful run. Every
-        figure comes from the controller's own tables and names no team,
-        account or source. The default team never counts.
-      parameters:
-        - in: query
-          name: weeks
-          schema: {type: integer, minimum: 1, maximum: 104, default: 12}
-          description: Whole weeks to report, ending with the week in progress.
-        - in: query
-          name: exclude_team
-          schema: {type: array, items: {type: string}}
-          style: form
-          explode: true
-          description: More teams to leave out, such as the operator's own test teams.
-      responses:
-        "200":
-          description: The weekly usage.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/UsageMetrics"}
-        "400": {description: weeks is outside 1 to 104.}
-
-  /api/v1/compute-limits:
-    get:
-      x-sparkwing-scope: runs.read
+      x-sparkwing-scope: operator.limits or operator
       tags: [credits]
       summary: Read every compute guard and the cloud runners in use.
       description: |
@@ -3930,7 +3311,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/ComputeLimits"}
     put:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: operator.limits or operator
       tags: [credits]
       summary: Set one or more compute guards.
       description: |
@@ -4192,14 +3573,7 @@ paths:
           content:
             application/json:
               schema:
-                x-sparkwing-go-type: pkg/controller.lastOwnerRefusalJSON
-                type: object
-                required: [error, teams]
-                properties:
-                  error: {type: string}
-                  teams:
-                    type: array
-                    items: {$ref: "#/components/schemas/TeamRef"}
+                $ref: "#/components/schemas/PolicyError"
 
   /api/v1/me/team-deletions:
     get:
@@ -4418,7 +3792,7 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
 
-  /api/v1/team/members/{user_id}:
+  /api/v1/team/members/{account}:
     patch:
       x-sparkwing-scope: team.admin
       tags: [teams]
@@ -4426,13 +3800,13 @@ paths:
       description: >-
         Nobody grants a role above their own or re-roles someone who outranks them, and the last owner cannot be demoted. A user who is not a member of the active team answers 404.
       parameters:
-        - {name: user_id, in: path, required: true, schema: {type: string}}
+        - {name: account, in: path, required: true, schema: {type: string}}
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/controller.setRoleReq
+              x-sparkwing-go-type: pkg/controller.membershipRequest
               type: object
               required: [role]
               properties:
@@ -4443,19 +3817,21 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: The team must retain at least one owner.}
     delete:
       x-sparkwing-scope: runs.read
       tags: [teams]
-      summary: Remove a member, or leave the team when `user_id` is the caller.
+      summary: Remove a member, or leave the team when `account` is the caller.
       description: >-
         Removing another member needs the owner role. The last owner cannot leave. The removed user's sessions lose every scope in the team on their next request.
       parameters:
-        - {name: user_id, in: path, required: true, schema: {type: string}}
+        - {name: account, in: path, required: true, schema: {type: string}}
       responses:
         "204": {description: Removed.}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: The team must retain at least one owner.}
 
   /api/v1/team/invitations:
     get:
@@ -4529,112 +3905,53 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
 
-  /api/v1/team/tokens:
-    get:
-      x-sparkwing-scope: runs.read
-      tags: [teams]
-      summary: List the team tokens the caller may manage in the active team.
-      description: >-
-        Any member lists the live tokens they minted, of either family, CLI and runner tokens minted before the team token included. An editor or owner also lists every live machine token of the team, whoever minted it. Nobody lists another member's member tokens.
-      responses:
-        "200":
-          description: Team tokens, oldest first.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  x-sparkwing-go-type: pkg/controller.teamTokenJSON
-                  type: object
-                  required: [prefix, name, family, scopes, created_by, created_at, expires_at, last_used_at, git_credentials]
-                  properties:
-                    prefix: {type: string}
-                    name: {type: string, description: "The machine's agent name; empty for a member token."}
-                    family: {type: string, enum: [member, machine]}
-                    scopes: {type: array, items: {type: string}}
-                    created_by: {type: string, description: User id of the minter.}
-                    created_at: {type: integer, format: int64, description: Unix seconds.}
-                    expires_at: {type: integer, format: int64, nullable: true, description: "Unix seconds; a member token lapses 90 days after minting, a machine token 90 days after its last use."}
-                    last_used_at: {type: integer, format: int64, nullable: true, description: Unix seconds.}
-                    git_credentials: {type: boolean, description: "A team owner opted this machine in to receiving the team's git credentials."}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
+  /api/v1/runners:
     post:
-      x-sparkwing-scope: runs.read
-      tags: [teams]
-      summary: Mint a team token in the active team.
-      description: >-
-        Needs a signed-in session; a bearer token cannot mint one. The scopes pick the family, and must all come from one of two disjoint sets; an empty list, an unknown scope or a mix answers 400. A member token carries a subset of the scopes the caller's role grants, without team administration, acts as the caller, lapses after 90 days and goes when the member leaves or is demoted to reader; a scope above the caller's role answers 403, and a member holds at most 10. docs/auth.md lists both scope sets. A machine token carries a subset of the runner scopes that claims nodes or triggers, needs the editor role, a name and repos, authenticates as agent:<name> and lapses 90 days after its last use; a team holds at most 100 runner and machine tokens and one live token per agent name. The plaintext is returned once: with the `sparkwing cloud connect` and `sparkwing pipeline trigger` commands for a member token, or with a `sparkwing-runner` command that connects the machine for a machine token.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.teamTokenReq
-              type: object
-              required: [scopes]
-              properties:
-                scopes: {type: array, items: {type: string}}
-                name: {type: string, description: "A machine token's agent name: 1 to 63 letters, digits, '-', '_' or '.'. Absent for a member token."}
-                repos:
-                  type: array
-                  items: {type: string}
-                  description: >-
-                    A machine token's repositories, as host/path patterns such as github.com/acme/*. They go into the returned command as --allow-repo flags, since the allowlist belongs to the machine's owner. At most 32. Absent for a member token.
-      responses:
-        "201":
-          description: Minted.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.teamTokenResp
-                type: object
-                required: [token, prefix, family, scopes, expires_at]
-                properties:
-                  token: {type: string}
-                  prefix: {type: string}
-                  family: {type: string, enum: [member, machine]}
-                  name: {type: string, description: The machine token's agent name.}
-                  scopes: {type: array, items: {type: string}}
-                  expires_at: {type: integer, format: int64, description: Unix seconds.}
-                  profile: {type: string, description: "A member token's profile name, which is the team slug."}
-                  setup: {type: string, description: A member token's command that reads the token from a no-echo prompt and writes the profile.}
-                  run: {type: string, description: "A member token's command that starts a run from a pushed checkout, with a pipeline placeholder."}
-                  command: {type: string, description: A machine token's command that stores the token and starts sparkwing-runner.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "409": {description: "The member or team holds as many tokens of this family as it may, or another live machine token carries the name."}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-
-  /api/v1/team/tokens/{prefix}:
-    delete:
-      x-sparkwing-scope: runs.read
-      tags: [teams]
-      summary: Revoke one team token.
-      description: >-
-        The minter revokes their own token of either family, and an owner revokes any machine token of the team. A token the caller cannot list answers 404; a machine token an editor lists but did not mint answers 403.
-      parameters:
-        - {name: prefix, in: path, required: true, schema: {type: string}}
-      responses:
-        "204": {description: Revoked.}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-
-  /api/v1/team/tokens/{prefix}/git-credentials:
-    put:
       x-sparkwing-scope: team.admin
       tags: [teams]
-      summary: Opt one of the team's machines in to, or out of, receiving the team's git credentials.
-      description: An owner. A cloud runner receives the team's git credentials without this; any other machine or runner token of the team receives them only once opted in. Answers 404 for a prefix that is no unrevoked machine or runner token of the team.
-      parameters:
-        - {name: prefix, in: path, required: true, schema: {type: string}}
+      summary: Enroll a team machine through the sole capability issuer.
+      description: Team administration and enrollment policy are rechecked in the issuance transaction. The request selects a name, repository patterns, authorized pools and optional narrower claim grants or expiry. Team, subject, registration and metering come from authenticated origin facts. The response returns its bearer once. Clients must not automatically retry enrollment.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/controller.runnerGitCredentialsReq
+              x-sparkwing-go-type: pkg/controller.runnerEnrollmentRequest
+              type: object
+              required: [name, repos]
+              additionalProperties: false
+              properties:
+                name: {type: string}
+                repos: {type: array, items: {type: string}, minItems: 1, maxItems: 32}
+                reserved_pools: {type: array, items: {type: string}}
+                grants: {type: array, items: {type: string, enum: [nodes.claim, triggers.claim]}, minItems: 1, uniqueItems: true}
+                expires_at: {type: string, format: date-time}
+      responses:
+        "201":
+          description: Committed root with its one-time bearer.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CredentialResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: Enrollment identity or limit conflict.}
+        "503": {description: Root origin verification is unavailable.}
+
+  /api/v1/tokens/{token}/git-credentials:
+    put:
+      x-sparkwing-scope: authenticated
+      tags: [teams]
+      summary: Set the machine owner's consent to release stored git credentials.
+      description: Requires the current account session of the machine's owner. The store rechecks account membership and machine ownership in the consent transaction.
+      parameters:
+        - {name: token, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.Server.handleSourceConsent.request
               type: object
               required: [enabled]
               properties:
@@ -4645,7 +3962,7 @@ paths:
           content:
             application/json:
               schema:
-                x-sparkwing-go-type: pkg/controller.runnerGitCredentialsReq
+                x-sparkwing-go-type: none
                 type: object
                 required: [enabled]
                 properties:
@@ -4758,7 +4075,7 @@ paths:
       x-sparkwing-scope: team.admin
       tags: [teams]
       summary: List the most recent releases of the team's git credentials.
-      description: An owner. Each release to a runner writes one row, newest first, at most 200.
+      description: Requires live member or verified local authority. Returns the authenticated team's committed release metadata, newest first, at most 200. Requires the tenant audit projection. Every response returns no-store.
       responses:
         "200":
           description: Recent releases.
@@ -4774,66 +4091,111 @@ paths:
                     items:
                       x-sparkwing-go-type: pkg/controller.GitCredentialReleaseJSON
                       type: object
-                      required: [host, run_id, runner, token_prefix, released_at]
+                      required: [host, repository, run_id, job_id, generation, runner, capability_prefix, released_at]
                       properties:
                         host: {type: string}
+                        repository: {type: string}
                         run_id: {type: string}
+                        job_id: {type: string}
+                        generation: {type: integer, format: int64}
                         runner: {type: string, description: "The runner principal the credential went to."}
-                        token_prefix: {type: string}
+                        capability_prefix: {type: string}
                         released_at: {type: integer, format: int64, description: Unix seconds.}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
 
   /api/v1/runners/github/exchange:
     post:
-      x-sparkwing-scope: public
+      x-sparkwing-scope: github_actions_oidc
       summary: Registered route awaiting a description.
       description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
       responses:
         default: {description: Undescribed.}
 
-  /api/v1/team/github-runners:
+  /api/v1/runners/github:
     get:
       x-sparkwing-scope: runs.read
-      summary: Registered route awaiting a description.
-      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      summary: List the authenticated team's GitHub runner permissions.
       responses:
-        default: {description: Undescribed.}
+        "200":
+          description: Repository permissions and the team's workflow.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GitHubRunnerBindings"}
     post:
       x-sparkwing-scope: team.admin
-      summary: Registered route awaiting a description.
-      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      summary: Enroll a repository for the authenticated team.
+      description: Resolves repository IDs through the configured GitHub App. Without an App, both numeric IDs are required. Session requests require session-bound CSRF. The committing registry rechecks authority and enrollment limits.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.githubBindingReq
+              type: object
+              required: [repository]
+              additionalProperties: false
+              properties:
+                repository: {type: string}
+                repository_id: {type: integer, format: int64}
+                repository_owner_id: {type: integer, format: int64}
       responses:
-        default: {description: Undescribed.}
+        "201":
+          description: The committed permission and workflow.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GitHubRunnerBindings"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The repository is already enrolled.}
 
-  /api/v1/team/github-runners/{repository_id}:
+  /api/v1/runners/github/{repository}:
     parameters:
       - in: path
-        name: repository_id
+        name: repository
         required: true
-        schema: {type: string}
+        schema: {type: string, pattern: '^[1-9][0-9]*$'}
     delete:
       x-sparkwing-scope: team.admin
-      summary: Registered route awaiting a description.
-      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      summary: Revoke the repository's enrollment and derived roots atomically.
       responses:
-        default: {description: Undescribed.}
+        "204": {description: Enrollment revoked.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
 
-  /api/v1/github-app/installations/{installation_id}:
+  /api/v1/operator/runners/{runner}/metered:
     parameters:
       - in: path
-        name: installation_id
+        name: runner
         required: true
         schema: {type: string}
-    delete:
-      x-sparkwing-scope: admin
-      tags: [teams]
-      summary: Unbind a GitHub App installation from whichever team holds it.
-      description: >-
-        The operator's route for moving an installation: once it is unbound, an owner of the new team connects it. Drops that team's subscriptions to the installation. Does not uninstall the App from GitHub. Answers 404 when no team holds the installation, and 404 when the controller has no GitHub App.
+    post:
+      x-sparkwing-scope: operator
+      summary: Change an enrolled runner's metering for future awards.
+      description: Requires a licensed controller and an operator-console session with CSRF. The runner selector is the enrolled root's public capability prefix. The transaction preserves billing provenance on existing awards.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.Server.handleSetRunnerMetered.request
+              type: object
+              required: [metered]
+              additionalProperties: false
+              properties:
+                metered: {type: boolean}
       responses:
-        "204": {description: Unbound.}
-        "401": {$ref: "#/components/responses/Unauthorized"}
+        "200":
+          description: Committed metering selection.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: none
+                type: object
+                properties:
+                  runner: {type: string}
+                  metered: {type: boolean}
+        "400": {$ref: "#/components/responses/BadRequest"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
 
@@ -5038,6 +4400,35 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "502": {description: GitHub could not be reached to find the installations.}
 
+  /webhooks/stripe:
+    post:
+      x-sparkwing-scope: public
+      tags: [webhooks]
+      summary: Receive a signed Stripe checkout event.
+      description: >-
+        Verifies the exact body, signature timestamp and configured test/live mode. Paid checkout events reach the settlement store as verified provider facts. The committed checkout supplies team and credit value. Pending and unsupported authenticated events are acknowledged without settlement. Bearer tokens and browser return parameters cannot substitute for a Stripe signature. Failures use the shared error object with code, message and optional details.
+      security: []
+      parameters:
+        - name: Stripe-Signature
+          in: header
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, x-sparkwing-go-type: none}
+      responses:
+        "204": {description: Settlement committed or the authenticated event needs no settlement.}
+        "400": {description: Invalid event.}
+        "401": {description: Missing or invalid Stripe signature.}
+        "403": {description: Event mode differs from configured mode.}
+        "404": {description: No committed checkout matches the verified event.}
+        "409": {description: Verified payment conflicts with its committed checkout.}
+        "413": {description: The event exceeds the JSON body limit.}
+        "500": {description: Settlement failed.}
+        "503": {description: Payment settlement is not configured or unavailable.}
+
   /webhooks/github-app:
     post:
       x-sparkwing-scope: public
@@ -5166,9 +4557,9 @@ paths:
         "422": {description: A run value cannot appear in the subject.}
         "429": {description: The claim spent its token budget for this run; see Retry-After.}
 
-  /api/v1/signups:
+  /api/v1/operator/signups:
     get:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: operator.limits or operator
       tags: [users]
       summary: Read the sign-up gate and the sign-up counts alerting keys on.
       description: >-
@@ -5217,7 +4608,7 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
     put:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: operator.limits or operator
       tags: [users]
       summary: Set the sign-up gate's mode, its limits, or both.
       description: >-
@@ -5522,9 +4913,10 @@ paths:
 
   /api/v1/data/capabilities:
     get:
-      x-sparkwing-scope: public
+      x-sparkwing-scope: authenticated
       tags: [artifacts]
       summary: Report whether direct uploads and committed-object downloads are available.
+      description: Discovery requires live identity in an active team. Bootstrap and eval credentials are refused.
       responses:
         "200":
           description: Direct data capabilities.
@@ -5537,71 +4929,146 @@ paths:
                   upload: {type: boolean}
                   download: {type: boolean}
                   source: {type: boolean}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
         "404": {description: Direct uploads are unavailable.}
 
   /api/v1/data/upload:
     post:
-      x-sparkwing-scope: public
+      x-sparkwing-scope: data.write or data.write
       tags: [artifacts]
-      summary: Reserve storage and sign a checksum-bound S3 PUT.
-      description: A binary or artifact requires a cache grant minted for an exact live claim. A source bundle requires a user bearer authorized to start runs before a run exists, and an empty run_id. A raw runner token cannot sign.
+      summary: Reserve quota and sign one checksum-bound PUT.
+      description: Live data authority supplies the team, uploader, run and attempt. The request cannot select an object key or provenance. A signing failure releases the reservation.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/controller.directUploadRequest
+              x-sparkwing-go-type: pkg/controller.dataUploadRequest
               type: object
-              required: [kind, key, size, sha256, run_id]
+              required: [digest, size]
               properties:
-                kind: {type: string, enum: [binary, artifact, source]}
-                key: {type: string}
-                size: {type: integer, format: int64, minimum: 1}
-                sha256: {type: string}
-                run_id: {type: string}
+                digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+                size: {type: integer, format: int64, minimum: 0}
       responses:
         "200":
-          description: Pending-object PUT and required signed headers.
+          description: One pending-object PUT and its required signed headers.
           content:
             application/json:
               schema:
-                x-sparkwing-go-type: pkg/controller.DirectUploadResponse
+                x-sparkwing-go-type: pkg/controller.dataUploadResponse
                 type: object
-                required: [upload_id, url, headers, expires_at]
+                required: [upload_id, url, headers, expires_at, sha256, size]
                 properties:
                   upload_id: {type: string}
                   url: {type: string, format: uri}
-                  headers: {type: object, additionalProperties: {type: string}}
+                  headers: {type: object, nullable: true, additionalProperties: {type: string}}
                   expires_at: {type: string, format: date-time}
+                  sha256: {type: string}
+                  size: {type: integer, format: int64, minimum: 0}
         "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "409": {description: The immutable object already exists.}
-        "413": {description: The upload exceeds its size or storage allowance.}
-        "429": {description: The team already holds 100 uncommitted uploads.}
+        "429": {description: The atomic storage quota reservation was refused.}
 
   /api/v1/data/commit:
     post:
-      x-sparkwing-scope: public
+      x-sparkwing-scope: data.write or data.write
       tags: [artifacts]
-      summary: Verify the pending S3 object and publish it under an immutable key.
-      description: Requires the same live claim-bound cache grant, or for a pretrigger source bundle the same user bearer, used to reserve the upload.
+      summary: Verify physical bytes and commit an uploader receipt.
+      description: Rechecks the authenticated uploader and the immutable reservation before verifying bytes. Existence and receipt settlement recheck authority in one store transaction.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/controller.directCommitRequest
+              x-sparkwing-go-type: pkg/controller.dataCommitRequest
               type: object
-              required: [upload_id, run_id]
+              required: [upload_id]
               properties:
                 upload_id: {type: string}
-                run_id: {type: string}
       responses:
-        "204": {description: The committed object is visible to authorized readers.}
+        "200":
+          description: The settled digest and receipt timestamp.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.dataReceiptResponse
+                type: object
+                required: [digest, created_at]
+                properties:
+                  digest: {type: string}
+                  created_at: {type: string, format: date-time}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
-        "409": {description: The pending object is absent or its final key holds other content.}
-        "422": {description: The pending object's size or checksum differs from the reservation.}
+        "409": {description: The upload lost its holder or generation fence.}
+        "422": {description: The object's size or checksum differs from the reservation.}
+
+  /api/v1/data/records:
+    get:
+      x-sparkwing-scope: data.read or data.read or data.read
+      tags: [artifacts]
+      summary: Read an authorized logical record and its members.
+      parameters:
+        - {in: query, name: kind, required: true, schema: {type: string, enum: [output, manifest, memo, depcache, binary, source_bundle]}}
+        - {in: query, name: name, required: true, schema: {type: string}}
+        - {in: query, name: ref, schema: {type: string}}
+        - {in: query, name: pipeline, schema: {type: string}}
+        - {in: query, name: job, schema: {type: string}}
+        - {in: query, name: key, schema: {type: string}}
+        - {in: query, name: deadline, schema: {type: string, format: date-time}}
+        - {in: query, name: verified_default_only, schema: {type: boolean}}
+      responses:
+        "200":
+          description: A miss or public metadata with independently authorized members.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.dataRecordLookupResponse
+                type: object
+                required: [found, members]
+                properties:
+                  found: {type: boolean}
+                  record: {$ref: "#/components/schemas/DataRecord"}
+                  members: {type: array, items: {$ref: "#/components/schemas/DataMember"}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      x-sparkwing-scope: data.write or data.write
+      tags: [artifacts]
+      summary: Commit a logical reference after checking every digest edge.
+      description: The controller derives the team, repository, write ref, uploader and member manifest identity. Same-run receipts never grant unrelated jobs authority.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.dataRecordRequest
+              type: object
+              required: [kind, name, digest]
+              properties:
+                kind: {type: string, enum: [output, manifest, memo, depcache, binary, source_bundle]}
+                pipeline: {type: string}
+                job: {type: string}
+                key: {type: string}
+                name: {type: string}
+                digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+                manifest_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+                members: {type: array, items: {$ref: "#/components/schemas/DataMember"}}
+                expires_at: {type: string, format: date-time}
+      responses:
+        "200":
+          description: Committed public record metadata.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DataRecord"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The record conflicts with an immutable prior value or lost its fence.}
 
   /api/v1/team/build-trust:
     get:
@@ -5639,11 +5106,10 @@ paths:
 
   /api/v1/data/download:
     post:
-      x-sparkwing-scope: public
+      x-sparkwing-scope: data.read or data.read or data.read
       tags: [artifacts]
-      summary: Sign a short-lived URL for one team object.
-      description: >-
-        A cache grant signs binary, artifact and bound source downloads only while its exact issuing claim and claimant token remain active. A source key must belong to the grant's run. The object key is resolved under the credential's team. `binary` keys name `bin/<input-hash>` for committed builds or `bins/<hash>` for legacy cache data. The response includes the stored SHA-256 when present, size, and a URL that expires after 60 seconds. Ingress requests use a CloudFront signed URL; direct in-cluster requests use an S3 presigned URL. The controller charges the object size against the team's daily download cap before returning the URL.
+      summary: Sign a short-lived URL for one readable blob.
+      description: The controller resolves live capability authority, checks the digest's read edge and live metadata, and charges the object's stored size before signing one immutable object for 60 seconds. Cache grants and object-key selectors are refused.
       requestBody:
         required: true
         content:
@@ -5651,35 +5117,69 @@ paths:
             schema:
               x-sparkwing-go-type: pkg/controller.dataDownloadRequest
               type: object
-              required: [kind, key]
+              required: [digest]
               properties:
-                kind: {type: string, enum: [binary, artifact, source]}
-                key: {type: string, description: Team-relative object key.}
+                digest: {type: string, pattern: '^[a-f0-9]{64}$'}
       responses:
         "200":
-          description: The signed URL and the object metadata.
+          description: The signed URL, its required headers and verified object metadata.
           content:
             application/json:
               schema:
                 x-sparkwing-go-type: pkg/controller.DataDownloadResponse
                 type: object
-                required: [url, sha256, size, expires]
+                required: [url, headers, sha256, size, expires]
                 properties:
                   url: {type: string, format: uri}
-                  sha256: {type: string, description: Stored object digest; binary downloads always include a valid SHA-256 digest.}
-                  size: {type: integer, format: int64}
+                  headers: {type: object, nullable: true, additionalProperties: {type: string}}
+                  sha256: {type: string}
+                  size: {type: integer, format: int64, minimum: 0}
                   expires: {type: string, format: date-time}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
+        "404": {description: The authorized blob is absent or tombstoned.}
         "429":
-          description: The team's daily download cap was reached; `Retry-After` gives the delay before retrying.
+          description: The team's daily download cap was reached.
           headers:
             Retry-After:
               schema: {type: integer}
               description: Seconds until the cap resets.
-        "503": {description: No signer is configured for the selected request path.}
+        "500": {description: A required data adapter is absent or an internal read/signing operation failed.}
+
+  /api/v1/data/has-many:
+    post:
+      x-sparkwing-scope: data.read or data.read or data.read
+      tags: [artifacts]
+      summary: Return readable live digests from a batch.
+      description: Missing and unreadable digests are omitted. Duplicate digests appear once. The query transfers no object bytes and consumes no download allowance. An explicit deadline bounds this query.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.dataPresenceRequest
+              type: object
+              required: [digests]
+              properties:
+                digests: {type: array, items: {type: string, pattern: '^[a-f0-9]{64}$'}}
+                deadline: {type: string, format: date-time}
+      responses:
+        "200":
+          description: Readable live digests, including an explicit empty array on a miss.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.dataPresenceResponse
+                type: object
+                required: [present]
+                properties:
+                  present: {type: array, items: {type: string}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "408": {description: The explicit query deadline passed.}
+        "500": {description: A required data adapter is absent or an internal read operation failed.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/attempt:
     parameters:
@@ -5755,8 +5255,16 @@ paths:
                         team: {type: string}
                         display_name: {type: string}
                         owners: {type: array, items: {type: string}}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
+        "401":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "403":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
 
   /api/v1/operator/teams/{team}:
     parameters:
@@ -5794,9 +5302,59 @@ paths:
                         kind: {type: string}
                         actor: {type: string}
                         attrs: {type: object, additionalProperties: true}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
+        "401":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "403":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "404":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+    delete:
+      x-sparkwing-scope: operator
+      tags: [teams]
+      summary: Delete a team on the operator's word.
+      description: The deletion `DELETE /api/v1/team` performs, without its owner and only-team checks. The default team cannot be deleted.
+      parameters:
+        - {name: team, in: path, required: true, schema: {type: string}}
+      responses:
+        "202":
+          description: Deletion queued; the team is closed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TeamDeletion"}
+        "400":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "401":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "403":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "404":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "409":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
 
   /api/v1/operator/teams/{team}/freeze:
     parameters:
@@ -5825,10 +5383,26 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/OperatorFreeze"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
+        "400":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "401":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "403":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "404":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
 
   /api/v1/operator/teams/{team}/grants:
     parameters:
@@ -5859,11 +5433,31 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/CreditGrant"}
-        "409": {description: "The grant would take the team past the balance cap."}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
+        "409":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "400":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "401":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "403":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "404":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
 
   /api/v1/operator/teams/{team}/trust:
     parameters:
@@ -5897,10 +5491,26 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/BillingTrust"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
+        "400":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "401":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "403":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "404":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
 
   /api/v1/operator/teams/{team}/unfreeze:
     parameters:
@@ -5930,10 +5540,26 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/OperatorFreeze"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
+        "400":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "401":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "403":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "404":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
 
   /api/v1/operator/waitlist:
     get:
@@ -5970,9 +5596,21 @@ paths:
                         provider: {type: string, description: "The sign-in provider of the user's first identity, such as google or github."}
                         created_at: {type: integer, format: int64, description: Unix seconds.}
                         waitlisted_at: {type: integer, format: int64, description: Unix seconds.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
+        "400":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "401":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "403":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
 
   /api/v1/operator/waitlist/approve:
     post:
@@ -5982,7 +5620,7 @@ paths:
       tags: [operator]
       summary: Admit waitlisted users from the operator console.
       description: >-
-        Takes the body and answers the shape of POST /api/v1/signups/waitlist/approve. Each admission and its account.admitted business event, naming the operator, commit together.
+        Takes the body and answers the shape of POST /api/v1/operator/signups/waitlist/approve. Each admission and its account.admitted business event, naming the operator, commit together.
       requestBody:
         required: true
         content:
@@ -6016,60 +5654,53 @@ paths:
                         id: {type: string}
                         email: {type: string}
                         active_team: {type: string}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
+        "400":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "401":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "403":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
 
-  /api/v1/runs/{id}/source-credential:
+  /api/v1/runs/{run}/source-credential:
     parameters:
       - in: path
-        name: id
+        name: run
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: claim
+      x-sparkwing-scope: source.read
       tags: [runs]
-      summary: Issue the one credential a claim fetches its run's source with.
+      summary: Release the stored source credential authorized for a live claim.
       description: >-
-        The only route that releases a source credential. It answers only a live, uncancelled claim token of the run: a launcher's plan or work claim, or a runner's node or trigger claim; any other bearer gets 403 claim_token_required. When the run's repository is on github.com and an installation bound to the team covers it, the answer is a read-only GitHub App installation token (`contents: read`, about an hour) for the run's repository and the repositories a team owner listed for it (Team > GitHub), named by their GitHub IDs so a rename or a reused name changes nothing it reaches. The run's repository qualifies by the ID the App's webhook recorded on its trigger; a repository the run names by hand qualifies only when one of the team's App trigger subscriptions names it, under the ID that subscription recorded. Otherwise a runner's claim gets the git credential the team stored for the host of the run's repository, when the claim's machine is a cloud runner or a machine a team owner opted in; a launcher's claim never does, since Sparkwing Cloud fetches source only through the App. With neither the answer is 404 no_source_credential with a message naming the remedies. The answer carries the run's commit and branch, and for a launcher's claim the clone URL and the checkout the run's plan asks for (depth, tags, submodules, LFS). A claim with a node of its own gets at most three credentials, so a failed or lost mint can be asked for again, and none once its attempt has started, since the node's own process holds the same claim token. Every claim asks at most ten times a minute. Each issue and release is recorded as a git credential release. The route reads no request body.
+        Takes no body. The store derives the repository, host, executor enrollment and machine-owner consent from persisted authority and the sealed request. It commits the release audit before the controller opens the team-and-host-bound envelope. Node authority loses source access when execution starts. The response contains ephemeral credential material. Checkout location, SHA and policy come from the sealed execution input.
       responses:
         "200":
-          description: The credential and what to check out.
+          description: The audited source credential.
           content:
             application/json:
               schema:
-                x-sparkwing-go-type: pkg/store.SourceCredential
+                x-sparkwing-go-type: pkg/controller.SourceCredentialResponse
                 type: object
-                required: [kind, host, repositories, source]
+                required: [kind, host, secret]
                 properties:
-                  kind: {type: string, enum: [github_app, ssh, https]}
-                  host: {type: string, description: "The host the credential is bound to; the runner refuses to present it to any other."}
-                  token: {type: string, description: "The App token, for kind github_app."}
-                  expires_at: {type: integer, format: int64, description: Unix seconds the App token expires at.}
-                  repo_url: {type: string, description: "The run's https clone URL, for kind github_app."}
-                  sha: {type: string}
-                  branch: {type: string}
-                  repositories:
-                    type: array
-                    items: {type: string}
-                    description: "owner/name, the run's own first, then the ones a team owner listed for it; an App token reads them all. Empty for a run on a host other than github.com."
-                  source:
-                    x-sparkwing-go-type: pkg/store.SourceSpec
-                    type: object
-                    properties:
-                      depth: {type: integer}
-                      tags: {type: boolean}
-                      submodules: {type: boolean}
-                      lfs: {type: boolean}
-                  username: {type: string, description: "The https username, for kind https."}
-                  secret: {type: string, description: "The https token, or the ssh private key, for kind https or ssh."}
-                  known_hosts: {type: string, description: "The known_hosts entry of the host key the owner confirmed, for kind ssh."}
+                  kind: {type: string, enum: [ssh, https]}
+                  host: {type: string}
+                  username: {type: string}
+                  secret: {type: string}
+                  known_hosts: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
-        "409": {description: "The run records no commit for a launcher's claim, an extra repository is no longer covered, or the team's ssh credential awaits its host key's confirmation."}
-        "429": {description: This claim asked more than ten times in a minute; Retry-After says when to ask again.}
-        "502": {description: GitHub could not be reached to find the repository's installation or mint its token.}
 
   /api/v1/outputs/objects/{key}:
     parameters:
@@ -6540,6 +6171,665 @@ paths:
         "422": {description: The manifest lists a segment the controller did not sign for that size and digest.}
         "503": {description: The controller has nowhere to keep log segments.}
 
+  /api/v1/operator/accounts/{account}:
+    delete:
+      x-sparkwing-scope: operator
+      tags: [teams]
+      summary: Delete an account on the operator's word.
+      description: >-
+        Carries out a deletion request that reached the operator by other means. The path names the account by id or by email; an address held by more than one account, none verified, answers 409 and needs the id. The deletion is the one `DELETE /api/v1/me` performs, including its 409 for a last owner of a team with other members.
+      parameters:
+        - {name: account, in: path, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.deletedAccountJSON
+                type: object
+                required: [account_id, deleted_teams]
+                properties:
+                  account_id: {type: string}
+                  deleted_teams:
+                    type: array
+                    items: {type: string}
+                    description: Teams the account was the only member of, now queued for deletion.
+        "401":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "403":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "404":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "409":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+
+  /api/v1/operator/github-app/installations/{installation}:
+    parameters:
+      - in: path
+        name: installation
+        required: true
+        schema: {type: string}
+    delete:
+      x-sparkwing-scope: operator
+      tags: [teams]
+      summary: Unbind a GitHub App installation from whichever team holds it.
+      description: >-
+        The operator's route for moving an installation: once it is unbound, an owner of the new team connects it. Drops that team's subscriptions to the installation. Does not uninstall the App from GitHub. Answers 404 when no team holds the installation, and 404 when the controller has no GitHub App.
+      responses:
+        "204": {description: Unbound.}
+        "401":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "403":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "404":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+
+  /api/v1/operator/credits/settings:
+    put:
+      x-sparkwing-scope: operator
+      tags: [credits]
+      summary: Set the rate, the grace period, or the charge cap.
+      description: |
+        Sets each setting the body names, in one transaction, and answers the
+        full set as `GET` does. An omitted field leaves that setting as it was,
+        so changing one value is a one-field body. A body that names nothing is
+        refused with `400`, as is a rate outside one micro-credit to ten million
+        credits ($10,000) per second, a negative grace period, and a charge cap outside
+        the band whose floor is one second past the longest node heartbeat
+        cadence and whose ceiling is one day. The bounds keep the reservation a
+        claim takes and a capped charge inside a signed 64-bit integer, and the
+        floor keeps a cap from truncating every tick that arrives a little
+        late. A refused body writes none of its fields. `grace_seconds` at zero
+        cancels a metered node at the first heartbeat past the reservation its
+        claim paid for, which bounds the unpaid overrun to one heartbeat
+        interval per node. Charges already written keep the rate they were
+        charged at.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SetCreditSettings"}
+      responses:
+        "200":
+          description: The settings after the change.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreditSettings"}
+        "400":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+
+  /api/v1/operator/object-store:
+    get:
+      x-sparkwing-scope: operator.object_store or operator
+      summary: Read deployment storage settings, quotas and usage.
+      description: Includes sampled database size, configured team quotas and largest-team storage totals. Team reads use GET /api/v1/storage.
+      responses:
+        "200":
+          description: Deployment storage view.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StorageState"
+
+  /api/v1/runs/{run}/jobs/{job}/expansion:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: expansion.submit
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/runs/{run}/jobs/{job}/transition:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: node.result or node.result or data.write
+      tags: [runs]
+      summary: Apply one job state transition.
+      description: The controller derives the actor and fence from capability authorization. The store owns legal edges, result records, replay and lifecycle events.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngineJobTransitionRequest"}
+      responses:
+        "200":
+          description: Committed result, including replay.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineApplied"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+        "409": {description: The state or authority changed before the transaction committed.}
+
+  /api/v1/runs/{run}/jobs/{job}/heartbeat:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: node.report or node.report
+      tags: [runs]
+      summary: Renew the authorized job claim.
+      description: A job claimant renews its exact lease and bound concurrency holders. A trigger owner renews through its owner transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngineRenewalRequest"}
+      responses:
+        "200":
+          description: Committed result, including replay.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineRenewalResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+        "409": {description: The state or authority changed before the transaction committed.}
+
+  /api/v1/operator/tokens:
+    post:
+      x-sparkwing-scope: operator.tokens or operator
+      tags: [tokens]
+      summary: Provision a deployment service root.
+      description: Requires operator.tokens or an operator console session and a transactionally verified service registration. Grants select deployment operations or claims.launch. Console authority cannot be issued. The bearer is returned once and issuance must not be replayed automatically.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.serviceCredentialRequest
+              type: object
+              required: [name, grants]
+              additionalProperties: false
+              properties:
+                name: {type: string}
+                grants: {type: array, items: {type: string, enum: [claims.launch, operator.limits, operator.object_store, operator.tokens]}, minItems: 1, uniqueItems: true}
+                expires_at: {type: string, format: date-time}
+      responses:
+        "201":
+          description: Committed root with its one-time bearer.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CredentialResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "503": {description: Root origin verification is unavailable.}
+    get:
+      x-sparkwing-scope: operator.tokens or operator
+      tags: [tokens]
+      summary: List deployment service/operator capability metadata.
+      parameters:
+        - in: query
+          name: kind
+          schema: {type: string, enum: [account, machine, service, operator]}
+        - in: query
+          name: include_revoked
+          schema: {type: string, enum: ["0", "1"]}
+      responses:
+        "200":
+          description: Tokens.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: none
+                type: object
+                required: [tokens]
+                properties:
+                  tokens:
+                    type: array
+                    items: {$ref: "#/components/schemas/CapabilityMetadata"}
+
+  /api/v1/operator/tokens/{token}:
+    parameters:
+      - in: path
+        name: token
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: operator.tokens or operator
+      tags: [tokens]
+      summary: Read deployment capability metadata by prefix.
+      responses:
+        "200":
+          description: Token (no raw value).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CapabilityMetadata"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      x-sparkwing-scope: operator.tokens or operator
+      tags: [tokens]
+      summary: Revoke a deployment service or operator capability.
+      description: The transaction rechecks the authenticated actor and target and advances the root revocation generation. Descendant operations observe the revoked ancestry. Browser requests require CSRF proof.
+      responses:
+        "204": {description: Revoked.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/operator/tokens/{token}/rotate:
+    parameters:
+      - in: path
+        name: token
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: operator.tokens or operator
+      tags: [tokens]
+      summary: Replace a deployment capability with a bounded grace window.
+      description: Preserves original authority and registration in one transaction. The response returns the replacement bearer once. Clients must never replay a lost response. Browser mutations require session-bound CSRF proof.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CapabilityRotationRequest"}
+      responses:
+        "200":
+          description: Committed replacement with its one-time bearer.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RotateTokenResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/runs/{run}/snapshot:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: trigger.host
+      tags: [runs]
+      summary: Read one committed owner scheduling snapshot.
+      description: Requires a live trigger owner bound to this run. Job state, accepted declarations and generator membership come from one store read and the shared scheduling projection. Empty generator groups are retained. Cancellation or owner lease loss refuses a new read. Claimant credentials and execution seals are excluded.
+      responses:
+        "200":
+          description: The consistent scheduling view, including store time and cancellation first observed by this read.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineScheduleSnapshot"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/runs/{run}/jobs:
+    parameters:
+      - name: run
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: runs.read or trigger.host
+      tags: [runs]
+      summary: Read safe job statuses from one committed run snapshot.
+      description: Requires member read access or live run ownership. An executor cannot enumerate siblings.
+      responses:
+        "200":
+          description: Safe job status array, empty when the run has no jobs.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: "#/components/schemas/EngineJobDetail"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/runs/{run}/jobs/{job}:
+    parameters:
+      - name: run
+        in: path
+        required: true
+        schema: {type: string}
+      - name: job
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: runs.read or data.read or trigger.host
+      tags: [runs]
+      summary: Read one safe job status.
+      description: Requires member read access, live run ownership, or this job's live data-read authority.
+      responses:
+        "200":
+          description: Status without raw declarations, environment, execution settings or claim identities.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineJobDetail"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/runs/{run}/jobs/{job}/cancel:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: runs.control or trigger.host
+      tags: [runs]
+      summary: Request cancellation of one job.
+      description: An authorized member or the live trigger owner requests cancellation. A held job retains its result rights. The transaction records a cancellation request instead of ending its attempt. The current job transition does not persist the optional reason.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngineCancelRequest"}
+      responses:
+        "200":
+          description: Committed cancellation or cancellation request, including replay.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineApplied"}
+        default:
+          description: Shared capability error. Authentication is checked before request errors.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CapabilityFailure"}
+
+  /api/v1/runs/{run}/jobs/{job}/failure:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: data.read
+      tags: [runs]
+      summary: Read the persisted masked failure for a recovery source.
+      description: Requires data.read and a declared recovery read edge to this source and generation. An absent failure returns null. Status strings do not create synthetic errors.
+      parameters:
+        - in: query
+          name: generation
+          required: true
+          schema: {type: integer, format: int64, minimum: 1}
+      responses:
+        "200":
+          description: Recorded masked failure, or null when no failure was recorded.
+          content:
+            application/json:
+              schema:
+                allOf: [{$ref: "#/components/schemas/EngineJobFailure"}]
+                nullable: true
+        default:
+          description: Shared capability error. Authentication is checked before selector errors.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CapabilityFailure"}
+
+  /api/v1/runners/claim:
+    post:
+      x-sparkwing-scope: nodes.claim or triggers.claim
+      tags: [runs]
+      summary: Claim the next eligible trigger or job.
+      description: Enrollment supplies identity and scope. Every requested kind needs its grant. Awards carry a bearer once. No match returns an empty object. Do not retry a lost response automatically.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngineClaimRequest"}
+      responses:
+        "200":
+          description: Claim the next eligible trigger or job.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineClaimResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or work fence changed before commit.}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/launcher/claim:
+    post:
+      x-sparkwing-scope: claims.launch
+      tags: [runs]
+      summary: Claim eligible plan, eval or job work for a launcher.
+      description: Enrollment supplies identity and scope. Every requested kind needs its grant. Awards carry a bearer once. No match returns an empty object. Do not retry a lost response automatically.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngineClaimRequest"}
+      responses:
+        "200":
+          description: Claim eligible plan, eval or job work for a launcher.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineClaimResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or work fence changed before commit.}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/runs/{run}/claim:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: trigger.host or triggers.claim
+      tags: [runs]
+      summary: Claim the named trigger.
+      description: Enrollment supplies identity and scope. Every requested kind needs its grant. Awards carry a bearer once. No match returns an empty object. Do not retry a lost response automatically.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngineClaimRequest"}
+      responses:
+        "200":
+          description: Claim the named trigger.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineClaimResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or work fence changed before commit.}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/launcher/sync:
+    post:
+      x-sparkwing-scope: claims.launch
+      tags: [runs]
+      summary: Reconcile observed launcher Jobs.
+      description: The transactional snapshot supplies current awards and cleanup names. Returned awards have empty capabilities. Missing snapshot wiring returns policy_missing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngineLauncherSyncRequest"}
+      responses:
+        "200":
+          description: Reconcile observed launcher Jobs.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineLauncherSyncResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or work fence changed before commit.}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/claims/exchange:
+    post:
+      x-sparkwing-scope: claim.exchange
+      tags: [runs]
+      summary: Consume a bootstrap and return its original award.
+      description: The authenticated bootstrap selects the run, unit and fence. The replacement capability is delivered once. A consumed bootstrap cannot be reused.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false}
+      responses:
+        "200":
+          description: Consume a bootstrap and return its original award.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineExchangeResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or work fence changed before commit.}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/claims/{claim}/heartbeat:
+    parameters:
+      - in: path
+        name: claim
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: node.report or expansion.submit
+      tags: [runs]
+      summary: Renew the authenticated unit.
+      description: The path claim is the award unit ID. Executing records owner or eval execution. Job starts require the start transition.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngineRenewalRequest"}
+      responses:
+        "200":
+          description: Renew the authenticated unit.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineRenewalResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or work fence changed before commit.}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/runs/{run}/jobs/{job}/reconcile:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: nodes.claim
+      tags: [runs]
+      summary: Resolve the current scheduling decision for a job.
+      description: The store rechecks owner authority, source edges and persisted fences. Only a fresh execution award returns a bearer. Materialize-only misses return dispatch without claiming.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EngineReconcileRequest"}
+      responses:
+        "200":
+          description: Resolve the current scheduling decision for a job.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EngineReconcileResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or work fence changed before commit.}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/data/depcache/lookup:
+    post:
+      x-sparkwing-scope: data.read or data.read or data.read
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/data/memo/copy:
+    post:
+      x-sparkwing-scope: data.read + data.write
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/data/memo/lookup:
+    post:
+      x-sparkwing-scope: data.read or data.read or data.read
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
+
 components:
   securitySchemes:
     bearerToken:
@@ -6621,6 +6911,49 @@ components:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
   schemas:
+    GitHubRunnerBindings:
+      x-sparkwing-go-type: pkg/controller.githubBindingsResp
+      type: object
+      properties:
+        bindings:
+          type: array
+          items: {$ref: "#/components/schemas/GitHubRunnerBinding"}
+        workflow: {type: string}
+    GitHubRunnerBinding:
+      x-sparkwing-go-type: pkg/controller.githubBindingJSON
+      type: object
+      properties:
+        repository: {type: string}
+        repository_id: {type: integer, format: int64}
+        repository_owner_id: {type: integer, format: int64}
+        created_by: {type: string}
+        created_at: {type: integer, format: int64, description: Unix seconds.}
+    DataRecord:
+      x-sparkwing-go-type: pkg/controller.dataRecordJSON
+      type: object
+      required: [kind, repo, ref, pipeline, job, key, name, digest, provenance, created_at]
+      properties:
+        kind: {type: string}
+        repo: {type: string}
+        ref: {type: string}
+        pipeline: {type: string}
+        job: {type: string}
+        key: {type: string}
+        name: {type: string}
+        digest: {type: string}
+        manifest_digest: {type: string}
+        provenance: {type: string, enum: [cloud, local]}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+    DataMember:
+      x-sparkwing-go-type: pkg/controller.dataMemberJSON
+      type: object
+      required: [digest, path, size, mode]
+      properties:
+        digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        path: {type: string}
+        size: {type: integer, format: int64, minimum: 0}
+        mode: {type: integer, format: int64, minimum: 0}
     LaunchJob:
       x-sparkwing-go-type: pkg/store.LaunchJob
       type: object
@@ -6758,6 +7091,20 @@ components:
         done:
           type: boolean
           description: The node has finished writing, so `next` will not advance again.
+    PolicyError:
+      x-sparkwing-go-type: internal/apierr.Envelope
+      type: object
+      required: [error]
+      properties:
+        error:
+          x-sparkwing-go-type: internal/apierr.Error
+          type: object
+          required: [code, message]
+          properties:
+            code: {type: string}
+            message: {type: string}
+            hint: {type: string}
+            details: {type: object, additionalProperties: true}
     Error:
       x-sparkwing-go-type: none
       type: object
@@ -7153,25 +7500,6 @@ components:
         released_at: {type: string, format: date-time, nullable: true}
         released_by: {type: string}
         release_kind: {type: string}
-    Token:
-      x-sparkwing-go-type: pkg/controller.tokenRecordJSON
-      type: object
-      description: One bearer-token row (raw value redacted; only `prefix` is shown after mint).
-      properties:
-        prefix: {type: string}
-        principal: {type: string}
-        kind: {type: string}
-        scopes:
-          type: array
-          items: {type: string}
-        created_at: {type: integer, format: int64, description: Unix seconds.}
-        expires_at: {type: integer, format: int64, nullable: true, description: Unix seconds.}
-        last_used_at: {type: integer, format: int64, nullable: true, description: Unix seconds.}
-        revoked_at: {type: integer, format: int64, nullable: true, description: Unix seconds.}
-        replaced_by: {type: string}
-        metered:
-          type: boolean
-          description: The operator marked this token as one whose node claims cost credits.
     StorageSettings:
       x-sparkwing-go-type: pkg/controller.storageSettingsJSON
       type: object
@@ -7255,27 +7583,6 @@ components:
         last_status: {type: string}
         last_run_at: {type: string, format: date-time}
         last_finished_at: {type: string, format: date-time}
-    UsageMetrics:
-      x-sparkwing-go-type: pkg/controller.usageMetricsResponse
-      type: object
-      properties:
-        generated_at: {type: string, format: date-time}
-        excluded_teams: {type: array, items: {type: string}}
-        weeks: {type: array, description: Oldest first; the last entry is the week in progress., items: {$ref: "#/components/schemas/UsageWeek"}}
-        time_to_first_green: {$ref: "#/components/schemas/FirstGreenStats"}
-    UsageWeek:
-      x-sparkwing-go-type: pkg/store.UsageWeek
-      type: object
-      properties:
-        week_start: {type: string, format: date-time}
-        active_teams: {type: integer}
-        runs: {type: integer}
-        cloud_runs: {type: integer, description: Runs with at least one node on a cloud runner.}
-        connected_runs: {type: integer, description: Runs whose every node ran on a machine the team connected.}
-        teams_by_runs: {$ref: "#/components/schemas/RunsBands"}
-        median_runs_per_active_team: {type: number}
-        new_accounts: {type: integer}
-        new_teams: {type: integer}
     RunsBands:
       x-sparkwing-go-type: pkg/store.RunsBands
       type: object
@@ -7285,19 +7592,6 @@ components:
         runs_2_to_9: {type: integer}
         runs_10_to_49: {type: integer}
         runs_50_plus: {type: integer}
-    FirstGreenStats:
-      x-sparkwing-go-type: pkg/store.FirstGreenStats
-      type: object
-      description: Time from a team's creation to the finish of its first successful run, for teams created in the window.
-      properties:
-        teams_created: {type: integer}
-        teams_green: {type: integer}
-        median_seconds: {type: integer, format: int64}
-        p90_seconds: {type: integer, format: int64}
-        within_hour: {type: integer}
-        within_day: {type: integer}
-        within_week: {type: integer}
-        later: {type: integer}
     StorageState:
       x-sparkwing-go-type: pkg/controller.storageStateJSON
       type: object
@@ -7500,18 +7794,6 @@ components:
         charges:
           type: array
           items: {$ref: "#/components/schemas/CreditCharge"}
-    PaymentReversal:
-      x-sparkwing-go-type: pkg/controller.reversePaymentJSON
-      type: object
-      required: [team, payment_id, paid_micro, reversed_micro, balance_micro, created]
-      properties:
-        team: {type: string, description: The team the payment funded.}
-        payment_id: {type: string}
-        paid_micro: {type: integer, format: int64, description: What the payment granted.}
-        reversed_micro: {type: integer, format: int64, description: What the payment's reversals have taken back in total.}
-        balance_micro: {type: integer, format: int64, description: "The team's balance afterwards, which may be negative."}
-        created: {type: boolean, description: Whether this call wrote the reversal.}
-        grant: {$ref: "#/components/schemas/CreditGrant"}
     CreditsRefused:
       x-sparkwing-go-type: pkg/controller.creditsRefusalJSON
       type: object
@@ -7522,33 +7804,71 @@ components:
         code: {type: string, enum: [insufficient_credits, credits_frozen, spend_limit], description: "credits_frozen when the team is held; spend_limit when the 30-day ceiling, the daily cap, the owner's budget or a failed card charge refuses it."}
         balance_micro: {type: integer, format: int64}
         required_micro: {type: integer, format: int64}
-    CreateTokenRequest:
-      x-sparkwing-go-type: pkg/controller.createTokenReq
+    CredentialRequest:
+      x-sparkwing-go-type: pkg/controller.credentialRequest
       type: object
-      required: [principal, scopes]
+      required: [grants]
       properties:
-        principal: {type: string}
-        kind: {type: string}
-        scopes:
+        grants:
           type: array
           items: {type: string}
-        ttl_secs:
-          type: integer
-          format: int64
-          description: Lifetime in seconds from mint time. Omit or zero for a token that does not expire.
-        metered:
-          type: boolean
-          description: Mint the token as one whose node claims cost credits.
-    CreateTokenResponse:
-      x-sparkwing-go-type: pkg/controller.createTokenResp
-      type: object
-      description: Returned only at mint time. The raw `token` is never re-served.
-      required: [token, metadata]
-      properties:
-        token:
+          description: Unique known permissions bounded by the issuer's current authority.
+        expires_at:
           type: string
-          description: Full bearer token. Copy now; the controller never re-shows it.
-        metadata: {$ref: "#/components/schemas/Token"}
+          format: date-time
+          description: Absolute expiry. A delegation inherits its parent's expiry when omitted.
+    CredentialResponse:
+      x-sparkwing-go-type: pkg/controller.credentialResponse
+      type: object
+      required: [capability, prefix, team, grants]
+      properties:
+        capability: {type: string, description: One-time bearer.}
+        prefix: {type: string}
+        team: {type: string}
+        grants:
+          type: array
+          items: {type: string}
+        expires_at: {type: string, format: date-time}
+    CapabilitySubject:
+      x-sparkwing-go-type: internal/capability.Subject
+      type: object
+      required: [kind, id]
+      properties:
+        kind: {type: string, enum: [account, machine, service, operator]}
+        id: {type: string}
+    CapabilityMetadata:
+      x-sparkwing-go-type: internal/capability.Metadata
+      type: object
+      required: [prefix, team, subject, audience, grants, created_by, issued_at, git_credentials, metered]
+      properties:
+        prefix: {type: string}
+        team: {type: string}
+        subject: {$ref: "#/components/schemas/CapabilitySubject"}
+        audience: {type: string, enum: [controller]}
+        grants: {type: array, items: {type: string}}
+        created_by: {type: string}
+        issued_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        revoked_at: {type: string, format: date-time}
+        last_used_at: {type: string, format: date-time}
+        git_credentials: {type: boolean}
+        metered: {type: boolean, description: Root execution metering classification.}
+    CapabilityRotationRequest:
+      x-sparkwing-go-type: pkg/controller.capabilityRotationRequest
+      type: object
+      additionalProperties: false
+      properties:
+        grace_secs: {type: integer, format: int64, minimum: 0, maximum: 604800, default: 86400}
+        expires_at: {type: string, format: date-time, description: Checked against original parent ceilings or current root-origin policy. Omission preserves the original expiry.}
+    RotateTokenResponse:
+      x-sparkwing-go-type: pkg/controller.capabilityRotationResponse
+      type: object
+      required: [capability, new, old_prefix, old_revoked_at]
+      properties:
+        capability: {type: string, description: One-time replacement bearer.}
+        new: {$ref: "#/components/schemas/CapabilityMetadata"}
+        old_prefix: {type: string}
+        old_revoked_at: {type: string, format: date-time}
     Secret:
       x-sparkwing-go-type: pkg/controller.secretJSON
       type: object
@@ -7865,12 +8185,13 @@ components:
         cost: {type: integer}
         position: {type: integer, description: One-based place in the key's queue.}
     FinishRunRequest:
-      x-sparkwing-go-type: pkg/controller.finishRunReq
+      x-sparkwing-go-type: internal/controllerwire.FinishRequest
       type: object
-      required: [status]
+      required: [outcome]
       properties:
-        status: {type: string}
-        error: {type: string}
+        outcome: {type: string}
+        reason: {type: string}
+        error: {type: object, description: The shared inner error with code and masked message.}
     FinishNodeRequest:
       x-sparkwing-go-type: pkg/controller.finishNodeReq
       type: object
@@ -8176,3 +8497,282 @@ components:
         overlap: {type: string, enum: [skip, queue]}
         catch_up: {type: string, description: A Go duration such as 6h.}
         args: {type: object, additionalProperties: {type: string}}
+    EngineCreateRunRequest:
+      x-sparkwing-go-type: internal/controllerwire.CreateRunRequest
+      type: object
+      properties:
+        request: {type: object}
+        idempotency_key: {type: string}
+    EngineCreateRunResponse:
+      x-sparkwing-go-type: internal/controllerwire.CreateRunResponse
+      type: object
+      properties:
+        run_id: {type: string}
+        number: {type: integer}
+        request: {type: object}
+        here_bearer: {type: string}
+        replayed: {type: boolean}
+    EnginePlanSubmission:
+      x-sparkwing-go-type: internal/controllerwire.PlanSubmission
+      type: object
+      properties:
+        declarations: {type: object}
+        resolved: {type: object}
+        plan: {type: object}
+    EnginePlanAccepted:
+      x-sparkwing-go-type: internal/controllerwire.PlanAccepted
+      type: object
+      properties:
+        spec: {type: object}
+        plan: {type: object}
+        plan_hash: {type: string}
+        replayed: {type: boolean}
+        notices: {type: array, items: {type: object}}
+    EngineJobTransitionRequest:
+      x-sparkwing-go-type: internal/controllerwire.JobTransitionRequest
+      type: object
+      properties:
+        to: {type: string}
+        cause: {type: string}
+        result: {type: object}
+        retry_at: {type: string, format: date-time}
+    EngineApplied:
+      x-sparkwing-go-type: internal/controllerwire.Applied
+      type: object
+      properties:
+        replayed: {type: boolean}
+        cancel_requested: {type: boolean}
+        state_seq: {type: integer}
+        generation: {type: integer}
+        attempt: {type: integer}
+    EngineJobFailure:
+      x-sparkwing-go-type: internal/nodeproto.JobFailure
+      type: object
+      required: [job, stage, error]
+      properties:
+        job: {type: string}
+        stage: {type: string}
+        error: {$ref: "#/components/schemas/InnerAPIError"}
+    InnerAPIError:
+      x-sparkwing-go-type: internal/apierr.Error
+      type: object
+      required: [code, message]
+      properties:
+        code: {type: string}
+        message: {type: string}
+        hint: {type: string}
+        details: {type: object, additionalProperties: true}
+    CapabilityFailure:
+      x-sparkwing-go-type: internal/apierr.Envelope
+      type: object
+      required: [error]
+      properties:
+        error: {$ref: "#/components/schemas/InnerAPIError"}
+    EngineCancelRequest:
+      x-sparkwing-go-type: internal/controllerwire.CancelRequest
+      type: object
+      properties:
+        reason: {type: string}
+    EngineRetryRequest:
+      x-sparkwing-go-type: internal/controllerwire.RetryRequest
+      type: object
+      properties:
+        idempotency_key: {type: string}
+    EngineRenewalRequest:
+      x-sparkwing-go-type: internal/controllerwire.RenewalRequest
+      type: object
+      properties:
+        executing: {type: boolean}
+    EngineRenewalResponse:
+      x-sparkwing-go-type: internal/controllerwire.RenewalResponse
+      type: object
+      properties:
+        expires_at: {type: string, format: date-time}
+        cancel_requested: {type: boolean}
+        cancel_reason: {type: string}
+        watched: {type: boolean}
+        watched_jobs: {type: array, items: {type: string}}
+    EngineRunDetail:
+      x-sparkwing-go-type: internal/controllerwire.RunDetail
+      type: object
+      required: [id, number, team, status, state_seq, inputs, jobs, attempts, logs, notices]
+      properties:
+        id: {type: string}
+        number: {type: integer, format: int64}
+        team: {type: string}
+        status: {type: string}
+        state_seq: {type: integer, format: int64}
+        inputs: {$ref: "#/components/schemas/EngineRunDisplay"}
+        jobs: {type: array, items: {$ref: "#/components/schemas/EngineJobDetail"}}
+        attempts: {type: array, items: {$ref: "#/components/schemas/EngineAttemptDetail"}}
+        logs: {type: array, items: {$ref: "#/components/schemas/EngineLogSubject"}}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+        cancel_requested_at: {type: string, format: date-time}
+        engine: {type: object}
+        notices: {type: array, items: {type: object}}
+    EngineRunDisplay:
+      x-sparkwing-go-type: internal/runspec.Display
+      type: object
+      properties:
+        pipeline: {type: string}
+        requested_args: {type: object, additionalProperties: {type: string}}
+        args: {type: object, additionalProperties: {type: string}}
+        secret_args: {type: array, items: {type: string}}
+        git: {type: object}
+        actor: {type: object}
+        pull_request: {type: object}
+        lineage: {type: object}
+        env_names: {type: array, items: {type: string}}
+        reproducer: {type: array, items: {type: string}}
+    EngineAttemptDetail:
+      x-sparkwing-go-type: internal/controllerwire.AttemptDetail
+      type: object
+      required: [job_id, attempt, generation, executor]
+      properties:
+        job_id: {type: string}
+        attempt: {type: integer, format: int64}
+        generation: {type: integer, format: int64}
+        outcome: {type: string}
+        reason: {type: string}
+        executor: {type: string}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+    EngineLogSubject:
+      x-sparkwing-go-type: internal/blob.LogSubject
+      type: object
+      required: [kind, team, run_id]
+      properties:
+        kind: {type: string, enum: [job_attempt, owner_unit]}
+        team: {type: string}
+        run_id: {type: string}
+        attempt: {type: object}
+        unit: {type: object}
+    EngineJobDetail:
+      x-sparkwing-go-type: internal/controllerwire.JobDetail
+      type: object
+      required: [id, status, generation, attempt, state_seq, expansion]
+      properties:
+        id: {type: string}
+        status: {type: string}
+        outcome: {type: string}
+        status_detail: {type: string}
+        generation: {type: integer, format: int64}
+        attempt: {type: integer, format: int64}
+        state_seq: {type: integer, format: int64}
+        expansion: {type: string}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+        cancel_requested_at: {type: string, format: date-time}
+    EngineScheduleSnapshot:
+      x-sparkwing-go-type: internal/controllerwire.ScheduleSnapshot
+      type: object
+      required: [run_id, store_now, cancel_requested, jobs, generators, expansions]
+      properties:
+        run_id: {type: string}
+        store_now: {type: string, format: date-time}
+        cancel_requested: {type: boolean}
+        jobs:
+          type: array
+          description: Jobs in accepted scheduling order, with safe status fields, persisted declarations and ready/claimed observations.
+          items: {type: object}
+        generators:
+          type: array
+          items: {$ref: "#/components/schemas/EngineScheduleGenerator"}
+        expansions:
+          type: array
+          items: {$ref: "#/components/schemas/EngineAcceptedExpansion"}
+    EngineAcceptedExpansion:
+      x-sparkwing-go-type: internal/controllerwire.AcceptedExpansion
+      type: object
+      required: [source_job, source_generation, body, body_hash]
+      properties:
+        source_job: {type: string}
+        source_generation: {type: integer, format: int64}
+        body: {type: object}
+        body_hash: {type: string}
+    EngineScheduleGenerator:
+      x-sparkwing-go-type: internal/controllerwire.ScheduleGenerator
+      type: object
+      required: [id, source_job, state, members]
+      properties:
+        id: {type: string}
+        source_job: {type: string}
+        state: {type: string}
+        members: {type: array, items: {type: string}}
+    EngineClaimRequest:
+      x-sparkwing-go-type: internal/controllerwire.ClaimRequest
+      type: object
+      properties:
+        runner_version: {type: string}
+        kinds: {type: array, items: {type: string}}
+        labels: {type: array, items: {type: string}}
+        available_cores: {type: number}
+        available_memory_bytes: {type: integer}
+        run_id: {type: string}
+        job_id: {type: string}
+    EngineClaimResponse:
+      x-sparkwing-go-type: internal/controllerwire.ClaimResponse
+      type: object
+      properties:
+        claim: {$ref: "#/components/schemas/EngineClaimedUnit"}
+    EngineClaimedUnit:
+      x-sparkwing-go-type: internal/controllerwire.ClaimedUnit
+      type: object
+      properties:
+        unit: {type: string}
+        purpose: {type: string}
+        delivery: {type: string}
+        unit_id: {type: string}
+        run_id: {type: string}
+        job_id: {type: string}
+        binding: {type: object}
+        capability: {type: string}
+        runner: {type: object}
+        request: {type: object}
+        accepted: {type: object}
+        execution: {type: object}
+        lease_expires_at: {type: string, format: date-time}
+        owner_deadline: {type: string, format: date-time}
+        attempt_deadline: {type: string, format: date-time}
+        parent_capability_expiry: {type: string, format: date-time}
+        source_generation: {type: integer}
+        engine: {type: object}
+    EngineLauncherSyncRequest:
+      x-sparkwing-go-type: internal/controllerwire.LauncherSyncRequest
+      type: object
+      properties:
+        observed: {type: array, items: {$ref: "#/components/schemas/EngineLauncherObservation"}}
+    EngineLauncherSyncResponse:
+      x-sparkwing-go-type: internal/controllerwire.LauncherSyncResponse
+      type: object
+      properties:
+        awards: {type: array, items: {$ref: "#/components/schemas/EngineClaimedUnit"}}
+        remove: {type: array, items: {type: string}}
+    EngineLauncherObservation:
+      x-sparkwing-go-type: internal/controllerwire.LauncherObservation
+      type: object
+      properties:
+        unit_id: {type: string}
+        job_name: {type: string}
+        node_uid: {type: string}
+    EngineExchangeResponse:
+      x-sparkwing-go-type: internal/controllerwire.ExchangeResponse
+      type: object
+      properties:
+        claim: {$ref: "#/components/schemas/EngineClaimedUnit"}
+    EngineReconcileRequest:
+      x-sparkwing-go-type: internal/controllerwire.ReconcileRequest
+      type: object
+      properties:
+        policy: {type: string}
+        source: {type: object}
+        materialize_only: {type: boolean}
+    EngineReconcileResponse:
+      x-sparkwing-go-type: internal/controllerwire.ReconcileResponse
+      type: object
+      properties:
+        kind: {type: string}
+        job: {type: object}
+        claim: {$ref: "#/components/schemas/EngineClaimedUnit"}
+        source: {type: object}

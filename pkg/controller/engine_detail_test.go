@@ -21,14 +21,14 @@ import (
 func TestEngineRunDetailHidesPrivateInputs(t *testing.T) {
 	property := func(value string, sealed, classified, declassified bool) bool {
 		secret := "private-value-" + hex.EncodeToString([]byte(value))
-		request := runspec.SealedRequest{Hash: runspec.Hash(secret + "-request"), Request: runspec.Request{
-			Pipeline: "ci", RequestedArgs: map[string]string{"secret": secret, "public": "visible"},
+		request := runspec.SealedRequest{RunID: "run", Hash: runspec.Hash(secret + "-request"), Request: runspec.Request{
+			Team: "a", Pipeline: "ci", RequestedArgs: map[string]string{"secret": secret, "public": "visible"},
 			Env: runspec.EnvSnapshot{Digest: runspec.Hash(secret + "-env")},
 		}}
 		if classified {
 			request.Request.SecretArgs = runspec.Optional[[]string]{Set: true, Value: []string{"secret"}}
 		}
-		view := store.RunView{Snapshot: store.RunSnapshot{Run: store.RunRow{ID: "run", Request: request, PlanHash: secret + "-plan"}}}
+		view := store.RunView{Snapshot: store.RunSnapshot{StoreNow: time.Unix(1, 0), Run: store.RunRow{ID: "run", Team: "a", Request: request, PlanHash: secret + "-plan"}}}
 		if sealed {
 			view.Snapshot.Run.Spec = &runspec.Spec{Request: request, Hash: runspec.Hash(secret + "-spec"), Resolved: runspec.Resolved{Args: map[string]string{"secret": secret, "public": "visible"}}}
 			if classified {
@@ -38,9 +38,9 @@ func TestEngineRunDetailHidesPrivateInputs(t *testing.T) {
 				}
 			}
 		}
-		got := engineRunDetail(view)
+		got, projectionErr := runDetailResponse(capability.Target{Team: "a", RunID: view.Snapshot.Run.ID}, RunStatusFacts{Snapshot: view.Snapshot, Attempts: view.Attempts, Logs: view.Logs})
 		raw, err := json.Marshal(got)
-		if err != nil || bytes.Contains(raw, []byte(secret)) || got.Inputs.RequestedArgs["secret"] != runspec.RedactedArgValue {
+		if projectionErr != nil || err != nil || bytes.Contains(raw, []byte(secret)) || got.Inputs.RequestedArgs["secret"] != runspec.RedactedArgValue {
 			return false
 		}
 		if got.Inputs.RequestedArgs["public"] != map[bool]string{true: "visible", false: runspec.RedactedArgValue}[classified && !(sealed && declassified)] {
@@ -54,11 +54,11 @@ func TestEngineRunDetailHidesPrivateInputs(t *testing.T) {
 }
 
 func TestEngineRunDetailUsesCurrentInvocationLineage(t *testing.T) {
-	request := runspec.SealedRequest{RunID: "original", Request: runspec.Request{Lineage: runspec.Lineage{RetryOf: "earlier"}}}
+	request := runspec.SealedRequest{RunID: "original", Request: runspec.Request{Team: "a", Lineage: runspec.Lineage{RetryOf: "earlier"}}}
 	lineage := runspec.Lineage{RetryOf: "original", Retrier: runspec.Optional[runspec.Actor]{Set: true, Value: runspec.Actor{Kind: "account", ID: "retrier"}}}
-	view := store.RunView{Snapshot: store.RunSnapshot{Run: store.RunRow{ID: "retry", Request: request, Lineage: lineage, Spec: &runspec.Spec{Request: request}}}}
-	got := engineRunDetail(view)
-	if got.ID != "retry" || !reflect.DeepEqual(got.Inputs.Lineage, lineage) || request.RunID != "original" || request.Request.Lineage.RetryOf != "earlier" {
+	view := store.RunView{Snapshot: store.RunSnapshot{StoreNow: time.Unix(1, 0), Run: store.RunRow{ID: "retry", Team: "a", Request: request, Lineage: lineage, Spec: &runspec.Spec{Request: request}}}}
+	got, err := runDetailResponse(capability.Target{Team: "a", RunID: "retry"}, RunStatusFacts{Snapshot: view.Snapshot})
+	if err != nil || got.ID != "retry" || !reflect.DeepEqual(got.Inputs.Lineage, lineage) || request.RunID != "original" || request.Request.Lineage.RetryOf != "earlier" {
 		t.Fatalf("retry lineage: %+v", got)
 	}
 }
@@ -73,15 +73,20 @@ func TestEngineRunDetailBeforePlanningNeedsNoVersionPolicy(t *testing.T) {
 }
 
 func TestEngineRunDetailReadsPersistedHistoryAndTaggedLogs(t *testing.T) {
-	server, _ := engineRuntimeStore(t)
+	server, tenant := engineRuntimeStore(t)
 	owner := engineRuntimeClaim(t, server, capability.UnitNode)
 	now := time.Unix(1700000000, 0).UTC()
 	identity := engine.Identity{Version: "v1.2.3"}
-	spec, err := json.Marshal(runspec.Spec{Resolved: runspec.Resolved{Engine: identity, SecretArgs: []string{}}})
+	run, err := tenant.ReadRun(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := json.Marshal(runspec.Spec{Request: run.Request, Resolved: runspec.Resolved{Engine: identity, SecretArgs: []string{}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	engineSQL(t, server.Store, `UPDATE runs SET status='failed',spec_json=?,spec_hash='spec',sealed_at=1,plan_json=?,plan_hash='plan',state_seq=7,started_at=?,finished_at=?,cancel_requested_at=? WHERE team='a' AND id='run'`, spec, []byte(`{"jobs":[{"id":"job"}]}`), now.UnixNano(), now.Add(time.Minute).UnixNano(), now.Add(time.Second).UnixNano())
+	engineSQL(t, server.Store, `UPDATE nodes SET generation=2,attempt=2 WHERE run_id='run' AND node_id='job'`)
 	engineSQL(t, server.Store, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at,finished_at,outcome,failure_reason) VALUES ('a','run','job',1,1,'runner','old-capability','runner','runner','remote',?,?,'failed','agent_lost'),('a','run','job',2,2,'runner','new-capability','runner','runner','remote',?,NULL,'','')`, now.UnixNano(), now.Add(time.Second).UnixNano(), now.Add(2*time.Second).UnixNano())
 	engineSQL(t, server.Store, `INSERT INTO log_streams(team,run_id,id,subject_kind,node_id,attempt,generation,prefix,retention_class,created_at,updated_at) VALUES ('a','run','job-log','job_attempt','job',1,1,'private-object-prefix','r30',1,1)`)
 	engineSQL(t, server.Store, `INSERT INTO log_streams(team,run_id,id,subject_kind,generation,unit_kind,source_node_id,source_generation,prefix,retention_class,created_at,updated_at) VALUES ('a','run','plan-log','owner_unit',3,'plan',NULL,NULL,'private-plan-prefix','r30',2,2),('a','run','eval-log','owner_unit',4,'eval','job',2,'private-eval-prefix','r30',3,3)`)

@@ -14,7 +14,7 @@ func TestControllerEventsUseTenantAndReplica(t *testing.T) {
 	}
 	other := New(s.store, nil)
 	for _, server := range []*Server{s, other} {
-		r := storeDataRequest(http.MethodPost, "/api/v1/runs/run/events?team=b", `{"kind":"note","payload":"YWJj"}`, Principal{Name: "same-name", Team: "a", Scopes: []string{ScopeAdmin}})
+		r := storeDataRequest(t, server, http.MethodPost, "/api/v1/runs/run/events?team=b", `{"kind":"note","payload":"YWJj"}`, Principal{Name: "same-name", Team: "a", Scopes: []string{ScopeAdmin}})
 		r.SetPathValue("id", "run")
 		response := httptest.NewRecorder()
 		server.handleAppendEvent(response, r)

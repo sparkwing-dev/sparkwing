@@ -27,6 +27,9 @@ func (a *Authenticator) Authenticate(raw string) (*Principal, error)
 func (a *Authenticator) Invalidate(prefix string)
 func (a *Authenticator) Middleware(next http.Handler) http.Handler
 func (a *Authenticator) WithLogger(l *slog.Logger) *Authenticator
+type AuthorityRevoker interface {
+	RevokeAuthority(context.Context, store.Actor, capability.AuthorityRef) error
+}
 const BalanceCapCode = "balance_cap"
 const BootstrapAdminPrincipal = "bootstrap:admin"
 type BoundCipher interface {
@@ -41,13 +44,16 @@ type CacheGrantResponse struct {
 	Team      string
 	ExpiresAt time.Time
 }
-const CardBillingCapability = "card-billing-v1"
+type CapabilityManager interface {
+	Team() store.Team
+	ListCapabilities(context.Context, capability.Authorized, capability.InventoryFilter) ([]capability.Metadata, error)
+	ReadCapability(context.Context, capability.Authorized) (capability.Metadata, error)
+	RotateCapability(context.Context, capability.Authorized, time.Duration, *time.Time) (capability.Rotation, error)
+}
 const CardBillingInterval = 30 * time.Second
 const CardNotTrustedCode = "card_not_trusted"
 const CardOnFileCode = "card_on_file"
-const CardSetupOrderCapability = "card-setup-order-v1"
 const CheckoutAmountCode = "amount_out_of_range"
-const CheckoutServicePrincipal = "checkout-service"
 const CheckoutUnavailableCode = "checkout_unavailable"
 type Cipher interface {
 	Seal(plain string) (string, error)
@@ -60,6 +66,33 @@ const CloudRetentionDays = 90
 func CompliantClaimPollsPerMinute() int
 const ComputeLimitRefusedCode = "compute_limit"
 const ComputeLimitRetryAfterSeconds = 5
+type CredentialInventoryReader interface {
+	Team() store.Team
+	ListSecrets() ([]store.Secret, error)
+	GitCredentials(context.Context) ([]store.GitCredential, error)
+}
+type CredentialIssuer interface {
+	ProvisionCapability(context.Context, capability.ProvisionSpec) (capability.Issued, error)
+	DelegateCapability(context.Context, capability.DelegateSpec) (capability.Issued, error)
+}
+type CredentialRotator interface {
+	Team() store.Team
+	RotateCredentials(context.Context, capability.Authorized, func(store.Secret) (string, error), func(store.GitCredential) (string, error)) (int, int, error)
+}
+type CredentialWriter interface {
+	Team() store.Team
+	WriteSecret(context.Context, capability.Authorized, store.Secret) error
+	RemoveSecret(context.Context, capability.Authorized, string, string) error
+	WriteGitCredential(context.Context, capability.Authorized, store.GitCredential) (store.GitCredential, error)
+	ConfirmGitCredentialFor(context.Context, capability.Authorized, string, string) (store.GitCredential, error)
+	RemoveGitCredential(context.Context, capability.Authorized, string) error
+}
+type CreditReader interface {
+	Team() store.Team
+	CreditState(context.Context, time.Duration) (store.CreditState, error)
+	ListCreditGrants(context.Context, int) ([]store.CreditGrant, error)
+	ListCreditCharges(context.Context, int) ([]store.CreditCharge, error)
+}
 const CreditsFrozenCode = "credits_frozen"
 const CreditsRefusedCode = "insufficient_credits"
 func CronIdempotencyKey(scheduleID string, due time.Time) string
@@ -86,14 +119,31 @@ type DataBinding struct {
 type DataController struct {
 	Store   *store.Store
 	Objects blob.ObjectBackend
+
+	ResolveTenant func(context.Context, store.Team) (DataTransactions, error)
+
+	ResolveAuthority func(context.Context, capability.Authorized) (blob.Authority, error)
+
+	ReadBlob func(context.Context, blob.Authority, blob.Digest) (blob.Blob, error)
+
+	ChargeDownload func(context.Context, blob.Authority, blob.Blob) error
+	Access         capability.DataAccessChecker
 }
 func (s *DataController) BindData(ctx context.Context, authorized capability.Authorized) (DataBinding, error)
 func (s *DataController) DataAuthority(ctx context.Context, authorized capability.Authorized) (blob.Authority, error)
 type DataDownloadResponse struct {
 	URL     string
+	Headers map[string]string
 	SHA256  string
 	Size    int64
 	Expires time.Time
+}
+type DataTransactions interface {
+	blob.RecordStore
+	ReserveBlobUpload(context.Context, store.UploadReservationRequest) (store.UploadReservation, error)
+	LookupBlobUpload(context.Context, blob.Authority, string) (store.UploadReservation, error)
+	CommitBlobUpload(context.Context, store.VerifiedUploadCommit) (blob.Receipt, error)
+	AbortBlobUpload(context.Context, blob.Authority, string) error
 }
 const DefaultLiveLogIdleTimeout = 10 * time.Minute
 const DefaultLiveLogMaxNodes = 1024
@@ -104,13 +154,6 @@ const DefaultRunnersPerToken = 64
 const DefaultSessionMaxLifetime = 30 * 24 * time.Hour
 const DefaultTeamDailyDownloadFreeBytes int64 = 5 << 30
 const DefaultTeamDailyDownloadFundedBytes int64 = 50 << 30
-type DirectUploadResponse struct {
-	UploadID  string
-	URL       string
-	Headers   map[string]string
-	ExpiresAt time.Time
-}
-const DisputeConflictCode = "dispute_conflict"
 const EgressDownloadLimitCode = "egress_download_limit"
 const EgressStreamLimitCode = "egress_stream_limit"
 type Endpoint struct {
@@ -118,35 +161,52 @@ type Endpoint struct {
 	Pattern        string
 	Authentication capability.Authentication
 	Decode         func(*http.Request) (capability.RequestEvidence, error)
-	Verify         func(*http.Request) error
-	Handle         func(http.ResponseWriter, *http.Request, capability.Authorized) error
+
+	ResolveTarget func(capability.Principal, capability.Target) (capability.Target, error)
+	Verify        func(*http.Request) error
+	Handle        func(http.ResponseWriter, *http.Request, capability.Authorized) error
 }
 type EngineController struct {
 	Store         *store.Store
 	RunnerPolicy  RunnerAdmissionPolicy
 	VersionPolicy *SignedEngineVersionPolicy
+	Units         UnitRenewer
+	Launcher      LauncherSyncReader
+
+	ResolveTenant func(context.Context, store.Team) (RunTransactions, error)
+
+	ResolveRunTeam func(context.Context, string) (store.Team, error)
+
+	ResolveOperator func(context.Context) (AuthorityRevoker, error)
+
+	ProjectScheduling func(store.RunSnapshot) (store.ScheduleSnapshot, error)
+
+	ReadRunStatus func(context.Context, store.Team, string) (RunStatusFacts, error)
 }
 func (s *EngineController) AcceptExpansion(ctx context.Context, authorized capability.Authorized, body controllerwire.ExpansionSubmission) (controllerwire.ExpansionAccepted, error)
-func (s *EngineController) AcceptPlan(ctx context.Context, authorized capability.Authorized, body controllerwire.PlanSubmission) (controllerwire.PlanAccepted, error)
-func (s *EngineController) Cancel(ctx context.Context, authorized capability.Authorized, body controllerwire.CancelRequest) (controllerwire.Applied, error)
-func (s *EngineController) CancelJob(ctx context.Context, authorized capability.Authorized, body controllerwire.CancelRequest) (controllerwire.Applied, error)
+func (s *EngineController) AcceptPlan(ctx context.Context, a capability.Authorized, body controllerwire.PlanSubmission) (controllerwire.PlanAccepted, error)
+func (s *EngineController) Cancel(ctx context.Context, a capability.Authorized, body controllerwire.CancelRequest) (controllerwire.Applied, error)
+func (s *EngineController) CancelJob(ctx context.Context, a capability.Authorized, body controllerwire.CancelRequest) (controllerwire.Applied, error)
 func (s *EngineController) Claim(ctx context.Context, authorized capability.Authorized, body controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error)
 func (s *EngineController) Compatibility(ctx context.Context, engineVersion string) (controllerwire.Compatibility, error)
 func (s *EngineController) CreateRun(ctx context.Context, authorized capability.Authorized, body controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error)
 func (s *EngineController) Exchange(ctx context.Context, authorized capability.Authorized) (controllerwire.ExchangeResponse, error)
-func (s *EngineController) Finish(ctx context.Context, authorized capability.Authorized, body controllerwire.FinishRequest) (controllerwire.Applied, error)
-func (s *EngineController) ReadFailure(ctx context.Context, authorized capability.Authorized) (*nodeproto.JobFailure, error)
+func (s *EngineController) Finish(ctx context.Context, a capability.Authorized, body controllerwire.FinishRequest) (controllerwire.Applied, error)
+func (s *EngineController) ReadFailure(ctx context.Context, a capability.Authorized) (*nodeproto.JobFailure, error)
 func (s *EngineController) ReconcileJob(ctx context.Context, authorized capability.Authorized, body controllerwire.ReconcileRequest) (controllerwire.ReconcileResponse, error)
-func (s *EngineController) Renew(ctx context.Context, authorized capability.Authorized, body controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error)
-func (s *EngineController) Retry(ctx context.Context, authorized capability.Authorized, body controllerwire.RetryRequest) (controllerwire.CreateRunResponse, error)
-func (s *EngineController) RunDetail(ctx context.Context, authorized capability.Authorized) (controllerwire.RunDetail, error)
+func (s *EngineController) Renew(ctx context.Context, a capability.Authorized, body controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error)
+func (s *EngineController) Retry(ctx context.Context, a capability.Authorized, body controllerwire.RetryRequest) (controllerwire.CreateRunResponse, error)
+func (s *EngineController) RunDetail(ctx context.Context, a capability.Authorized) (controllerwire.RunDetail, error)
 func (s *EngineController) Snapshot(ctx context.Context, authorized capability.Authorized) (controllerwire.ScheduleSnapshot, error)
 func (s *EngineController) SyncLauncher(ctx context.Context, authorized capability.Authorized, body controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error)
-func (s *EngineController) TransitionJob(ctx context.Context, authorized capability.Authorized, body controllerwire.JobTransitionRequest) (controllerwire.Applied, error)
+func (s *EngineController) TransitionJob(ctx context.Context, a capability.Authorized, body controllerwire.JobTransitionRequest) (controllerwire.Applied, error)
 func EnsureBootstrapAdminToken(st *store.Store, raw string, now time.Time) (bool, error)
-func EnsureCheckoutToken(ctx context.Context, st *store.Store, raw string, now time.Time) (bool, error)
 const EnvDefaultBranch = "GITHUB_DEFAULT_BRANCH"
-func ExpansionForStore(authorized capability.Authorized, body controllerwire.ExpansionSubmission) (store.ExpansionSubmission, error)
+func ExpansionForStore(a capability.Authorized, body controllerwire.ExpansionSubmission) (store.ExpansionSubmission, error)
+type FilesystemDataSigner struct {
+}
+func (s *FilesystemDataSigner) Sign(ctx context.Context, object capability.ObjectToSign) (capability.SignedObject, error)
+func (s *FilesystemDataSigner) Verify(r *http.Request) (capability.ObjectToSign, error)
 type FloodPolicy struct {
 	RunsPerPrincipalHour int
 
@@ -178,18 +238,27 @@ type GitCredentialJSON struct {
 	UpdatedAt int64
 }
 type GitCredentialReleaseJSON struct {
-	Host        string
-	RunID       string
-	Runner      string
-	TokenPrefix string
-	ReleasedAt  int64
+	Host             string
+	Repository       string
+	RunID            string
+	JobID            string
+	Generation       int64
+	Runner           string
+	CapabilityPrefix string
+	ReleasedAt       int64
 }
 const GitHubActionsLabel = "github-actions"
+type GitHubRunnerRegistry interface {
+	Team() store.Team
+	GitHubRunnerBindings(context.Context) ([]store.GitHubRunnerBinding, error)
+	RegisterGitHubRunner(context.Context, capability.Authorized, store.GitHubRunnerBinding) (store.GitHubRunnerBinding, error)
+	RevokeGitHubRunner(context.Context, capability.Authorized, int64) error
+}
 func GitHubRunnerWorkflow(controllerURL, team string) string
 const IdleClaimPollJitterFactor = 1.25
-func IntakeForStore(authorized capability.Authorized, body controllerwire.CreateRunRequest) (store.IntakeRequest, error)
-type LegacyCipher interface {
-	OpenLegacy(name, scope string, shared, masked bool, envelope string) (string, error)
+func IntakeForStore(a capability.Authorized, body controllerwire.CreateRunRequest) (store.IntakeRequest, error)
+type LauncherSyncReader interface {
+	ReadLauncherSync(context.Context, capability.AuthorityRef, []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error)
 }
 func LimitsProfile(name string) (LimitsProfileValues, error)
 const LimitsProfileCloud = "cloud"
@@ -231,7 +300,9 @@ const MaxHonoredIdleClaimPoll = 8 * time.Second
 const MeteredInProcessNodesCode = "metered_inprocess_nodes"
 func New(st *store.Store, logger *slog.Logger) *Server
 func NewAuthenticator(st *store.Store, cacheTTL time.Duration) *Authenticator
+func NewFilesystemDataSigner(baseURL string, key []byte) (*FilesystemDataSigner, error)
 func NewPolicyRouter(authorization RouteAuthorization) *PolicyRouter
+func NewS3DataSigner(client *s3.Client, bucket string) (*S3DataSigner, error)
 const NoPayableChargeCode = "no_payable_charge"
 type OIDCTokenRequest struct {
 	Audience string
@@ -257,10 +328,13 @@ type ObjectStoreBreakerResponse struct {
 }
 func OpenSecretValue(c Cipher, team store.Team, sec *store.Secret) (string, error)
 func OperatorReason(reason string) (string, error)
-const PaidGrantLookupCapability = "paid-grant-lookup-v1"
+type PaymentSettler interface {
+	SettlePayment(context.Context, capability.VerifiedPaymentEvent) (store.PaymentSettlement, error)
+}
 const PaymentWarnedCode = "payment_warned"
-type PolicyRouter struct{}
-func (router *PolicyRouter) Register(endpoint Endpoint) error
+type PolicyRouter struct {
+}
+func (router *PolicyRouter) Register(endpoint Endpoint) (err error)
 func (router *PolicyRouter) Registrations() []string
 func (router *PolicyRouter) ServeHTTP(w http.ResponseWriter, r *http.Request)
 func (router *PolicyRouter) Validate() error
@@ -283,6 +357,10 @@ func (p *Principal) HasScope(s string) bool
 func PrincipalFromContext(ctx context.Context) (*Principal, bool)
 func PullRequestForTrigger(env map[string]string) *sparkwing.PullRequest
 const PurchaseLimitCode = "purchase_limit"
+type QueueReader interface {
+	Team() store.Team
+	ListConcurrencyStates(context.Context) ([]*store.ConcurrencyState, error)
+}
 const RecommendedHeartbeatsPerMinute = 1200
 type RequestBudget struct {
 	ClaimsPerMinute     int
@@ -296,13 +374,44 @@ type RouteAuthorization struct {
 	Identify      func(*http.Request) (capability.Presentation, error)
 	CheckCSRF     func(*http.Request, capability.Principal) error
 }
+type RunStatusFacts struct {
+	Snapshot store.RunSnapshot
+	Attempts []store.NodeAttempt
+	Logs     []blob.LogSubject
+	Notices  []engine.Notice
+}
+type RunTransactions interface {
+	AuthorityRevoker
+	UpdateMembership(context.Context, store.Actor, store.MembershipUpdate) error
+	Members(context.Context) ([]store.Membership, error)
+	AdmitRun(context.Context, store.IntakeRequest) (store.AdmissionResult, error)
+	ReadRun(context.Context, string) (store.RunRow, error)
+	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
+	ReadOwnerSnapshot(context.Context, capability.AuthorityRef, string) (store.RunSnapshot, error)
+	ReadNode(context.Context, store.NodeRef) (store.NodeRow, error)
+	ReconcileNode(context.Context, store.ReconcileRequest) (store.ReconciledNode, error)
+	ReadFailure(context.Context, store.NodeRef, int64, store.Actor) (*nodeproto.JobFailure, error)
+	AcceptPlan(context.Context, store.PlanAcceptance) (store.AcceptedPlan, error)
+	AcceptExpansion(context.Context, store.ExpansionSubmission) (store.AcceptedExpansion, error)
+	TransitionNode(context.Context, store.NodeTransition) (store.Applied, error)
+	TransitionRun(context.Context, store.RunTransition) (store.Applied, error)
+	FinishRunAndUnit(context.Context, store.FinishRunRequest) (store.Applied, error)
+	WriteAnnotation(context.Context, store.AnnotationWrite) error
+	WriteSummary(context.Context, store.SummaryWrite) error
+	RecordStep(context.Context, store.StepReport) error
+}
 type RunnerAdmissionPolicy interface {
 	CheckRunner(context.Context, string) error
 }
+type RunnerMeteringWriter interface {
+	SetRunnerMetered(context.Context, capability.Authorized, string, bool) error
+}
+type S3DataSigner struct {
+}
+func (s *S3DataSigner) Sign(ctx context.Context, object capability.ObjectToSign) (capability.SignedObject, error)
 const ScopeAdmin = "admin"
 const ScopeApprovalsWrite = store.ScopeApprovalsWrite
 const ScopeClaimsLaunch = store.LaunchScope
-const ScopeCreditsGrant = "credits.grant"
 const ScopeLogsRead = store.ScopeLogsRead
 const ScopeNodesClaim = store.ScopeNodesClaim
 const ScopeRunsControl = store.ScopeRunsControl
@@ -316,12 +425,15 @@ const ScopeTriggersClaim = store.ScopeTriggersClaim
 const ScopeTriggersRead = store.ScopeTriggersRead
 func ScopesForRole(role store.Role) []string
 func SealSecretValue(c Cipher, team store.Team, sec *store.Secret, plain string) (string, error)
+type SecretReader interface {
+	Team() store.Team
+	ReadSecret(context.Context, capability.Authorized) (*store.Secret, error)
+}
 func ServeWith(ctx context.Context, s *Server, addr string) error
 type Server struct {
 }
 func (s *Server) AuthEnabled() bool
 func (s *Server) CheckFreeTierSource()
-func (s *Server) DaemonHandler() http.Handler
 func (s *Server) EgressMeter() *egress.Meter
 func (s *Server) EnableAuthFromStore() *Server
 func (s *Server) Handler() http.Handler
@@ -330,25 +442,35 @@ func (s *Server) Metering() bool
 func (s *Server) MultiTeam() bool
 func (s *Server) ProcessTeamDeletions(ctx context.Context, now time.Time)
 func (s *Server) RegisteredRoute(r *http.Request) bool
-func (s *Server) ResealStoredSecrets(ctx context.Context) (store.SecretResealCounts, error)
 func (s *Server) Shutdown(ctx context.Context) error
 func (s *Server) SignUpFreeTier(ctx context.Context) (FreeTierState, error)
 func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server
 func (s *Server) WithAuthenticator(a *Authenticator) *Server
+func (s *Server) WithAuthorization(authorization RouteAuthorization) *Server
 func (s *Server) WithBillingCheckout(url, token string) *Server
 func (s *Server) WithBucketUsage(a storage.ArtifactStore) *Server
 func (s *Server) WithCacheGrantKey(key string) *Server
 func (s *Server) WithCachePodURL(url string) *Server
 func (s *Server) WithCacheURL(url string) *Server
+func (s *Server) WithCapabilityManager(resolve func(context.Context, store.Team) (CapabilityManager, error)) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
+func (s *Server) WithCredentialInventoryReader(resolve func(context.Context, store.Team) (CredentialInventoryReader, error)) *Server
+func (s *Server) WithCredentialIssuer(issuer CredentialIssuer) *Server
+func (s *Server) WithCredentialRotator(resolve func(context.Context, store.Team) (CredentialRotator, error)) *Server
+func (s *Server) WithCredentialWriter(resolve func(context.Context, store.Team) (CredentialWriter, error)) *Server
+func (s *Server) WithCreditReader(resolve func(context.Context, store.Team) (CreditReader, error)) *Server
 func (s *Server) WithDashboard(d Dashboard) *Server
 func (s *Server) WithDashboardURL(url string) *Server
+func (s *Server) WithDataController(data *DataController) *Server
 func (s *Server) WithDirectUploads(client *s3.Client, bucket, prefix string) *Server
 func (s *Server) WithEgressMeter(m *egress.Meter) *Server
+func (s *Server) WithEngineController(engine *EngineController) *Server
 func (s *Server) WithExternalURL(rawURL string) *Server
 func (s *Server) WithFloodPolicy(p FloodPolicy) *Server
 func (s *Server) WithFreeTier(src FreeTierSource) *Server
 func (s *Server) WithGitHubApp(cfg githubapp.Config) *Server
+func (s *Server) WithGitHubRunnerBindingLookup(lookup func(context.Context, store.Team, int64) (store.GitHubRunnerBinding, error)) *Server
+func (s *Server) WithGitHubRunnerRegistry(resolve func(context.Context, store.Team) (GitHubRunnerRegistry, error)) *Server
 func (s *Server) WithGitHubRunners(cfg githuboidc.Config) *Server
 func (s *Server) WithGitHubSignIn(client *githubauth.Client, redirectURIs []string) *Server
 func (s *Server) WithGoogleSignIn(client *googleauth.Client, redirectURIs []string) *Server
@@ -365,14 +487,21 @@ func (s *Server) WithMetricsListener(ln net.Listener) *Server
 func (s *Server) WithOIDCIssuer(iss *oidcissuer.Issuer) *Server
 func (s *Server) WithOperatorAccounts(ids []string) *Server
 func (s *Server) WithOutputSignKey(key []byte) *Server
+func (s *Server) WithPayments(verifier capability.PaymentAuthenticator, ledger PaymentSettler) *Server
 func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server
+func (s *Server) WithQueueReader(resolve func(context.Context, store.Team) (QueueReader, error)) *Server
 func (s *Server) WithQueueTimeout(d time.Duration) *Server
 func (s *Server) WithRequestBudget(b RequestBudget) *Server
+func (s *Server) WithRunnerMeteringWriter(writer RunnerMeteringWriter) *Server
+func (s *Server) WithSecretReader(resolve func(context.Context, store.Team) (SecretReader, error)) *Server
 func (s *Server) WithSecretsCipher(c Cipher) *Server
 func (s *Server) WithSessionMaxLifetime(d time.Duration) *Server
 func (s *Server) WithSignUpApprovalNotifier(fn func(context.Context, store.Account) error) *Server
 func (s *Server) WithSignUpWaitlist(on bool) *Server
 func (s *Server) WithSignedDownloads(cache *teamblob.Store, client *s3.Client, domain, keyPairID, privateKey string) error
+func (s *Server) WithSizingStore(resolve func(context.Context, store.Team) (SizingStore, error)) *Server
+func (s *Server) WithSourceAuditReader(resolve func(context.Context, store.Team) (SourceAuditReader, error)) *Server
+func (s *Server) WithSourceController(source *SourceController) *Server
 func (s *Server) WithTeamDownloadCaps(free, funded int64) *Server
 func (s *Server) WithTeamStorage(ts TeamStorage) *Server
 func (s *Server) WithTokenRequestBudget(b TokenRequestBudget) *Server
@@ -395,8 +524,38 @@ func (p SignedEngineVersionPolicy) Compatibility(ctx context.Context, version st
 func (p SignedEngineVersionPolicy) Notices(ctx context.Context, version string) ([]engine.Notice, error)
 type SignedRunnerAdmission struct{ Resolver *engine.Resolver }
 func (p SignedRunnerAdmission) CheckRunner(ctx context.Context, version string) error
+type SizingReader interface {
+	GetPipelineProfile(context.Context, string, string) (*store.PipelineProfile, error)
+}
+type SizingStore interface {
+	SizingReader
+	SetProfilePin(context.Context, capability.Authorized, float64, int64) error
+	RecordProfileObservation(context.Context, capability.Authorized, store.ProfileObservation) error
+	RecordContention(context.Context, capability.Authorized) error
+	RecordWaitObservation(context.Context, capability.Authorized, time.Duration) error
+}
+type SourceAuditReader interface {
+	Team() store.Team
+	SourceReleaseAudits(context.Context, int) ([]capability.SourceReleaseAudit, error)
+}
+type SourceController struct {
+	Store         *store.Store
+	Cipher        BoundCipher
+	ResolveTenant func(context.Context, store.Team) (SourceTransactions, error)
+}
+func (s *SourceController) Release(ctx context.Context, a capability.Authorized) (SourceCredentialResponse, error)
+type SourceCredentialResponse struct {
+	Kind       string
+	Host       string
+	Username   string
+	Secret     string
+	KnownHosts string
+}
+type SourceTransactions interface {
+	ReleaseSourceCredential(context.Context, capability.Authorized) (store.GitCredential, capability.SourceReleaseAudit, error)
+	SetSourceMachineConsent(context.Context, capability.AuthorityRef, string, bool) error
+}
 const SpendLimitCode = "spend_limit"
-const StaleCardSetupCode = "stale_card_setup"
 const StorageMaintenanceInterval = time.Hour
 const TeamDeletionInterval = time.Minute
 type TeamStorage struct {
@@ -417,12 +576,23 @@ type TrendPoint struct {
 	P95DurMs  int64
 	AvgWaitMs int64
 }
-const UnknownPaymentCode = "unknown_payment"
+type UnitRenewer interface {
+	RenewUnit(context.Context, string, bool) (store.LeaseBeat, error)
+}
 const UnpricedCPUClassCode = "unpriced_cpu_class"
 const UnsupportedRouteError = "unsupported"
 func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request)
 
 # methods on un-declared receiver types (likely a bug)
+func (s *boundData) Commit(ctx context.Context, request blob.CommitUpload) (blob.Receipt, error)
+func (s *boundData) CommitRecord(ctx context.Context, request blob.CommitRecordRequest) (blob.Record, error)
+func (s *boundData) CopyMemo(ctx context.Context, request blob.CopyMemoRequest) (blob.MemoHit, error)
+func (s *boundData) Download(ctx context.Context, request blob.GetRequest) (blob.SignedTransfer, error)
+func (s *boundData) HasMany(ctx context.Context, request blob.HasManyRequest) (blob.Presence, error)
+func (s *boundData) LookupDepcache(ctx context.Context, request blob.DepcacheLookup) (blob.DepcacheHit, error)
+func (s *boundData) LookupMemo(ctx context.Context, request blob.MemoLookup) (blob.MemoHit, error)
+func (s *boundData) LookupRecord(ctx context.Context, request blob.RecordLookup) (blob.RecordLookupResult, error)
+func (s *boundData) Upload(ctx context.Context, intent blob.UploadIntent) (blob.UploadTicket, error)
 func (c *claimTokenRoute) ServeHTTP(w http.ResponseWriter, r *http.Request)
 func (t *creditRateTableIn) UnmarshalJSON(raw []byte) error
 func (creditsCollector) Collect(ch chan<- prometheus.Metric)
@@ -457,6 +627,8 @@ func (objectStoreCollector) Describe(ch chan<- *prometheus.Desc)
 func (v *optionalCreditInt64) UnmarshalJSON(raw []byte) error
 func (t *optionalCreditRateTable) UnmarshalJSON(raw []byte) error
 func (pipeSink) Flush() error
+func (c planSecretCipher) OpenPlanSecret(ctx context.Context, team store.Team, secret store.Secret) (string, error)
+func (reader policyStoreReader) ReadAuthentication(ctx context.Context, lookup capability.CredentialLookup, evidence capability.RequestEvidence) (capability.AuthenticationSnapshot, error)
 func (o s3LogObjects) Get(ctx context.Context, key string) (io.ReadCloser, error)
 func (o s3LogObjects) List(ctx context.Context, prefix string) ([]string, error)
 func (l segmentLogs) Append(context.Context, string, string, []byte) error
@@ -473,3 +645,4 @@ func (sharedEngineVersionContracts) Index(ctx context.Context, resolver *engine.
 func (sharedEngineVersionContracts) Policy(index engine.VerifiedIndex) engine.VersionIndex
 func (r *statusRecorder) Unwrap() http.ResponseWriter
 func (r *statusRecorder) WriteHeader(code int)
+func (s storeOperatorSettings) StorageTenant(ctx context.Context, team store.Team) (storageQuotaStore, error)

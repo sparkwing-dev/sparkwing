@@ -214,37 +214,6 @@ func (s *Server) endPriorSession(r *http.Request, newSessionID string) {
 	}
 }
 
-func (s *Server) handleBrowserLogout(w http.ResponseWriter, r *http.Request) {
-	secure := s.cookiesSecure()
-	raw := sessionCookie(r, secure)
-	if raw == "" {
-		clearSessionCookies(w, secure)
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
-	sess, err := s.resolveBrowserSession(r.Context(), raw)
-	if errors.Is(err, store.ErrSessionBackend) {
-		s.refuseBrowserSession(w, err, secure)
-		return
-	}
-	if err != nil {
-		clearSessionCookies(w, secure)
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
-	if !constantTimeEqual(r.PostForm.Get("csrf_token"), sess.csrfToken) {
-		csrfError(w)
-		return
-	}
-	if err := s.store.DeleteSession(raw); err != nil {
-		s.logger.Error("logout", "error", err.Error())
-		http.Error(w, "sign-out failed; try again", http.StatusInternalServerError)
-		return
-	}
-	clearSessionCookies(w, secure)
-	http.Redirect(w, r, "/login", http.StatusSeeOther)
-}
-
 // safety: a form post is checked for its origin and its double-submitted token before a handler reads it, so a
 // page on another site cannot sign a browser in, out, or into a flow.
 func (s *Server) formCSRF(next http.HandlerFunc) http.Handler {

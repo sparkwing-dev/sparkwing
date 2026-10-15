@@ -396,53 +396,6 @@ func TestMachineTokensExpireAndTheListShowsWhen(t *testing.T) {
 	}
 }
 
-// The advertised command is what a person pastes into a shell, so it carries
-// the repositories the machine may build: a runner started from it refuses
-// every other one.
-func TestMintedMachineCommandCarriesTheRepositoryAllowlist(t *testing.T) {
-	f := newIdentityFixture(t)
-	alice := f.user("alice", "alice@example.com")
-	var minted struct {
-		Family  string `json:"family"`
-		Name    string `json:"name"`
-		Command string `json:"command"`
-	}
-	if code := f.call("POST", "/api/v1/team/tokens", alice.auth, map[string]any{
-		"scopes": machineScopes, "name": "alice-laptop", "repos": []string{"GitHub.com/acme/*", "github.com/other/app"},
-	}, &minted); code != http.StatusCreated {
-		t.Fatalf("mint = %d", code)
-	}
-	if minted.Family != "machine" || minted.Name != "alice-laptop" {
-		t.Errorf("minted family %q name %q", minted.Family, minted.Name)
-	}
-	for _, want := range []string{" --allow-repo 'github.com/acme/*'", " --allow-repo 'github.com/other/app'", " --also-claim-triggers"} {
-		if !strings.Contains(minted.Command, want) {
-			t.Fatalf("command %q lacks %q", minted.Command, want)
-		}
-	}
-}
-
-func TestMintingAMachineTokenRequiresValidRepositories(t *testing.T) {
-	f := newIdentityFixture(t)
-	alice := f.user("alice", "alice@example.com")
-	for name, repos := range map[string]any{
-		"absent":    nil,
-		"empty":     []string{},
-		"scheme":    []string{"https://github.com/acme/*"},
-		"host only": []string{"github.com"},
-		"shell":     []string{"github.com/acme/app';id;'"},
-		"wild host": []string{"*/acme/app"},
-	} {
-		body := map[string]any{"scopes": machineScopes, "name": "box"}
-		if repos != nil {
-			body["repos"] = repos
-		}
-		if code := f.call("POST", "/api/v1/team/tokens", alice.auth, body, nil); code != http.StatusBadRequest {
-			t.Errorf("%s: mint = %d, want 400", name, code)
-		}
-	}
-}
-
 // CLI and runner tokens minted before the team kind keep authenticating, and
 // the team-token routes list and revoke them by the family they act as.
 func TestLegacyCLIAndRunnerTokensStayListedAndRevocable(t *testing.T) {

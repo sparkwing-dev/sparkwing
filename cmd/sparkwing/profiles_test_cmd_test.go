@@ -158,13 +158,13 @@ func TestProbeAuthWarnsOnTheControllersAnonymousPrincipal(t *testing.T) {
 	}{
 		{
 			name:       "anonymous principal",
-			whoami:     `{"principal":"unauthed","kind":"none"}`,
+			whoami:     `{"principal":"","kind":"anonymous","scopes":[]}`,
 			wantStatus: "warn",
-			wantDetail: "serving unauthenticated",
+			wantDetail: "controller identifies this request as anonymous",
 		},
 		{
 			name:       "real principal",
-			whoami:     `{"principal":"runner-1","kind":"runner","scopes":["logs.read"]}`,
+			whoami:     `{"principal":"runner-1","kind":"machine","scopes":["logs.read"]}`,
 			wantStatus: "ok",
 			wantDetail: "principal=runner-1",
 		},

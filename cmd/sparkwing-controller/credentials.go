@@ -1,10 +1,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/credentials"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
@@ -23,9 +27,32 @@ const (
 	credGitHubAppWebhookSecret = "github-app-webhook-secret"
 	credCloudFrontKey          = "cloudfront-key"
 	credBillingToken           = "billing-token"
-	credCreditsToken           = "credits-token"
+	credStripeAPIKey           = "stripe-api-key"
+	credStripeWebhookSecret    = "stripe-webhook-secret"
 	credCacheGrantKey          = authwire.CacheGrantKeyCredential
 )
+
+func readPaymentAuthenticator(dir, mode string) (capability.PaymentAuthenticator, error) {
+	if mode == "" {
+		if dir != "" {
+			for _, name := range []string{credStripeAPIKey, credStripeWebhookSecret} {
+				if _, err := os.Lstat(filepath.Join(dir, name)); err == nil {
+					return nil, errors.New("Stripe credentials require --payment-mode test or live")
+				} else if !errors.Is(err, os.ErrNotExist) {
+					return nil, fmt.Errorf("payment credential: %w", err)
+				}
+			}
+		}
+		return nil, nil
+	}
+	if dir == "" {
+		return nil, errors.New("--payment-mode requires --credentials-dir with Stripe credentials")
+	}
+	return capability.NewPaymentAuthenticator(capability.PaymentConfig{
+		Mode: capability.PaymentMode(mode), APIKeyFile: filepath.Join(dir, credStripeAPIKey),
+		WebhookSecretFile: filepath.Join(dir, credStripeWebhookSecret),
+	})
+}
 
 type controllerCredentials struct {
 	PGURL                  string
@@ -41,7 +68,6 @@ type controllerCredentials struct {
 	GitHubAppWebhookSecret string
 	CloudFrontKey          string
 	BillingToken           string
-	CreditsToken           string
 	CacheGrantKey          string
 }
 
@@ -61,7 +87,6 @@ func readCredentials(path string) (controllerCredentials, error) {
 		credGitHubAppWebhookSecret: &c.GitHubAppWebhookSecret,
 		credCloudFrontKey:          &c.CloudFrontKey,
 		credBillingToken:           &c.BillingToken,
-		credCreditsToken:           &c.CreditsToken,
 		credCacheGrantKey:          &c.CacheGrantKey,
 	} {
 		if *dst, err = readCredential(dir, name); err != nil {

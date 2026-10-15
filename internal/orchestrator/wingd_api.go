@@ -64,16 +64,19 @@ type wingdAPI struct {
 // to milliseconds against a four-second foreign write. An allow-list, not
 // every GET, because several GET routes write.
 var apiReadRoutes = []string{
+	"POST /api/v1/data/has-many",
+	"GET /api/v1/runs/{run}/snapshot",
 	"GET /api/v1/runs/{id}/logs",
 	"GET /api/v1/runs/{id}/logs/search",
 	"GET /api/v1/runs/{id}/logs/{node}",
 	"GET /api/v1/runs/{id}/logs/{node}/completeness",
 	"GET /api/v1/runs/grep",
 	"GET /api/v1/runs",
+	"GET /api/v1/queue",
 	"GET /api/v1/runs/{id}/pending-triggers",
-	"GET /api/v1/runs/{id}",
-	"GET /api/v1/runs/{id}/nodes",
-	"GET /api/v1/runs/{id}/nodes/{nodeID}",
+	"GET /api/v1/runs/{run}",
+	"GET /api/v1/runs/{run}/jobs",
+	"GET /api/v1/runs/{run}/jobs/{job}",
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/output",
 	"GET /api/v1/outputs/objects/{key...}",
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/metrics",
@@ -91,14 +94,12 @@ var apiReadRoutes = []string{
 	"GET /api/v1/triggers/spawned-child",
 	"GET /api/v1/concurrency/{key}/state",
 	"GET /api/v1/concurrency/{key}/holder",
-	"GET /api/v1/object-store/breaker",
 	"GET /api/v1/pipelines/{name}/latest",
-	"GET /api/v1/pipelines/{name}/profile",
+	"GET /api/v1/pipelines/{name}/sizing",
 	"GET /api/v1/crons",
 	"GET /api/v1/crons/{id}",
 	"GET /api/v1/storage",
 	"GET /api/v1/credits/settings",
-	"GET /api/v1/credits/payments/{reference}",
 }
 
 // safety: these routes hold a response open past any request bound: the live
@@ -325,21 +326,10 @@ func (a *wingdAPI) handlerFor(ctx context.Context, rw, ro *store.Store) http.Han
 	return a.handler
 }
 
-// safety: a store whose sealed values this daemon cannot open must not gain
-// values sealed under a second key, so its secret routes answer with the
-// reason instead; every other route keeps serving, because runs do not wait
-// on a secrets key.
 func (a *wingdAPI) prepareSecrets(ctx context.Context, rw *store.Store) controller.Cipher {
 	a.secretsProblem = ""
 	cipher := a.secrets.For(rw)
 	if err := a.secrets.MissingKey(ctx, rw); err != nil {
-		return a.refuseSecrets(err)
-	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), APIRequestTimeout)
-	defer cancel()
-	// safety: prove the key against existing values before serving secret reads.
-	srv := controller.New(rw, a.logger).WithSecretsCipher(cipher)
-	if _, err := srv.ResealStoredSecrets(ctx); err != nil {
 		return a.refuseSecrets(err)
 	}
 	return cipher
@@ -386,7 +376,7 @@ func (a *wingdAPI) controllerOn(st *store.Store, auth *controller.Authenticator,
 		WithAuthenticator(auth).
 		WithPeerPrincipal(peerPrincipal).
 		WithLocalExecution().
-		DaemonHandler()
+		Handler()
 }
 
 // safety: the daemon refuses a connection from another account before the
