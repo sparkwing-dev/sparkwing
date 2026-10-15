@@ -21,6 +21,12 @@ files keep working. A failed enrollment revokes its new authority, removes its
 new private files and service file, and restores the previous runner
 section. Existing service files and unrelated settings survive cleanup.
 
+The unified loop requests triggers and jobs by default. A here loop with RunID
+and omitted Kinds requests only its trigger, selecting the shared client's named
+`/runs/{run}/claim` route. It refuses foreign awards and returns an uncertain claim
+error without retrying for another one-time bearer. Claim windows and reclaim
+authority remain server decisions.
+
 Hosting accepts direct trigger, here and work awards with matching unit purposes
 and claim fences. Bootstrap credentials require the Cloud exchange path. Renewal,
 source preparation and execution share the earliest binding, owner or parent

@@ -89,7 +89,10 @@ func (l *Loop) start() (<-chan struct{}, error) {
 		return nil, errors.New("runner requires its release version, positive concurrency and nonnegative durations and claim count")
 	}
 	if l.Config.Kinds == nil {
-		l.Config.Kinds = []capability.UnitKind{capability.UnitTrigger, capability.UnitNode}
+		l.Config.Kinds = []capability.UnitKind{capability.UnitTrigger}
+		if l.Config.RunID == "" {
+			l.Config.Kinds = append(l.Config.Kinds, capability.UnitNode)
+		}
 	}
 	if len(l.Config.Kinds) == 0 {
 		return nil, errors.New("runner must claim triggers or jobs")

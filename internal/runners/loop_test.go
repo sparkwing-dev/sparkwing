@@ -243,6 +243,47 @@ func TestLoopPreservesFractionalCapacityAndHereBinding(t *testing.T) {
 	}
 }
 
+func FuzzLoopHereSelection(f *testing.F) {
+	f.Add("run", false)
+	f.Add("run/other", true)
+	f.Add("run:\x00\u2603", false)
+	f.Fuzz(func(t *testing.T, suffix string, foreign bool) {
+		run := "here:" + suffix
+		claims, hosted := 0, 0
+		loop := &Loop{
+			Config: LoopConfig{Version: "v1.2.3", RunID: run, MaxConcurrent: 1, MaxClaims: 1},
+			Controller: claimFunc(func(_ context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+				claims++
+				if request.RunID != run || request.JobID != "" || !reflect.DeepEqual(request.Kinds, []capability.UnitKind{capability.UnitTrigger}) {
+					t.Error("request escaped named trigger selection")
+					return controllerwire.ClaimResponse{}, errors.New("request escaped named trigger selection")
+				}
+				awarded := run
+				if foreign {
+					awarded += "\x00"
+				}
+				return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitTrigger, UnitID: "unit", RunID: awarded, Capability: "private"}}, nil
+			}),
+			Host: hostFunc(func(_ context.Context, unit controllerwire.ClaimedUnit) error {
+				hosted++
+				if unit.RunID != run || foreign {
+					return errors.New("foreign award reached host")
+				}
+				return nil
+			}),
+			CheckVersion: func(context.Context, string) error { return nil },
+		}
+		err := loop.Run(t.Context())
+		wantHosted := 1
+		if foreign {
+			wantHosted = 0
+		}
+		if (err == nil) == foreign || claims != 1 || hosted != wantHosted {
+			t.Fatalf("foreign=%v error=%v claims=%d hosted=%d", foreign, err, claims, hosted)
+		}
+	})
+}
+
 func TestLoopReclaimedGenerationDoesNotLoseItsAward(t *testing.T) {
 	firstFinished := make(chan struct{})
 	var loop *Loop

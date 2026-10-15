@@ -6,10 +6,10 @@ This snapshot covers every amendment-1 row whose action column names W8. A
 component pass proves its named boundary. It does not activate a native catalog
 cell or establish an HTTP, Cloud or OS deployment proof.
 
-The continuation from `7ca0ca82a` found no pending merge or new amendment.
+The continuation from `1f6989265` found no pending merge or new amendment.
 All 26 assigned rows and the W8 handoffs retain the dependencies recorded here.
-W8 also implemented the declared launcher polling option and recorded the
-remaining launch grammar gaps in handoffs.md.
+W8 also corrected the here loop's default claim selection to match the declared
+named trigger route. The prior launcher grammar requests remain in handoffs.md.
 The merge-resolution sections below describe earlier sessions.
 
 | Amendment | W8 action and remaining integration |
@@ -39,7 +39,7 @@ The merge-resolution sections below describe earlier sessions.
 | A1-51 | W8's retired cluster v1 host paths stay deleted. Shared Go/TS corpus parity, remaining orchestrator fixtures and generated references remain W3/W4/W5/W9 work. |
 | A1-52 | The install result has no preload. Windows npm shim argv uses Node through the shared npmcmd helper and process-group runner. Windows execution and the packaged TS bridge still need native evidence. No Linux fixture is counted as Windows proof. |
 | A1-53 | Native catalog cells stay blocked. Component acceptance passes only its component suite. No native driver or real-repository QA was available in this sandbox. |
-| A1-55 | The loop confines here work by RunID and preserves server claim deadlines. Named claim/reclaim, ancestry and one-time-bearer response-loss behavior still depend on the W1/W2/W9 implementations. |
+| A1-55 | A here loop with RunID and omitted Kinds now requests only its trigger, matching the shared client's named route contract. A component checks the request, unchanged award and no retry after a lost response. A fuzz property checks request selection and foreign-run refusal. Native claim/reclaim, requester ancestry and HTTP response-loss evidence remain integration obligations. |
 
 ## Merge resolution
 
@@ -304,5 +304,29 @@ with its socket-based metrics listener excluded. No new production mechanism,
 setting, environment variable or timeout was introduced. Remaining source/keeper,
 HTTP/data, shared host/local-service, plan/eval resource, launcher sync and native
 deployment obligations are unchanged.
+
+## Continuation: named here claims
+
+The default here loop previously sent both trigger and node kinds. The shared
+client contract selects /runs/{run}/claim only for one trigger kind, so the loop
+could not select that route without caller correction. RunID with omitted Kinds
+now defaults to one trigger kind. Ordinary runners retain their mixed scan, and
+explicit kind selections retain their behavior.
+
+The invariant is that default here requests select only the named trigger and
+foreign-run awards never reach the host. TestHereRunnerNamedClaimW8Components
+failed before the fix. Its award and response-loss cases now pass with the real
+loop and fake transport/host. FuzzLoopHereSelection covers arbitrary run bytes,
+valid awards and foreign awards. These are component proofs. Real HTTP routing,
+requester ancestry, server reclaim windows and native placements remain open.
+
+No contract signature, caller, setting, environment variable or customer timeout
+changed. Old code deleted: 0 lines. No native cell or new T1 port is claimed.
+
+Whole-repository build, W8 vet and package suites, focused local-controller
+checks, W8 components and commentcheck pass. The here property passed 25,326 fuzz
+executions. Sleepcheck against HEAD passes. Against main it finds three inherited
+waits in untouched W6/W4 tests: limits/deadline_test.go:58,66 and
+sparkwing/sparkwingtest/host_test.go:214. Those files remain with their owners.
 
 <!-- design:end -->
