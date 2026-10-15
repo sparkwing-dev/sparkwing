@@ -370,19 +370,6 @@ func PersistIncarnation(dir string, n uint64) (selected uint64, result error) {
 	return n, errors.Join(readErr, result)
 }
 
-// Incarnation reads the latest elected daemon number.
-func Incarnation(dir string) uint64 {
-	b, err := os.ReadFile(filepath.Join(dir, "incarnation"))
-	if err != nil {
-		return 0
-	}
-	n, err := parseIncarnation(b)
-	if err != nil {
-		return 0
-	}
-	return n
-}
-
 func parseIncarnation(b []byte) (uint64, error) {
 	return strconv.ParseUint(strings.TrimSpace(string(b)), 10, 64)
 }

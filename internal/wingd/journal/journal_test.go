@@ -284,3 +284,15 @@ func appendRecord(dir, name string, maxSize int64, files int, r Record) error {
 	err := a.append(r)
 	return errors.Join(err, a.close())
 }
+
+func Incarnation(dir string) uint64 {
+	b, err := os.ReadFile(filepath.Join(dir, "incarnation"))
+	if err != nil {
+		return 0
+	}
+	n, err := parseIncarnation(b)
+	if err != nil {
+		return 0
+	}
+	return n
+}

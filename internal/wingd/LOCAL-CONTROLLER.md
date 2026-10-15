@@ -126,7 +126,8 @@ The runtime counts its dashboard HTTP connections until they close, including
 idle keep-alive sockets and hijacked connections. Closing the last connection
 starts a fresh idle interval. Controller activity updates cannot erase that hold.
 Admission holders and waiting runs also remain active. `SetStay` pins the
-daemon. Health probes, repeated unchanged counts and idle API connections do
+daemon. The client `Probe` API observes the handshake without requesting queue work.
+Health probes, repeated unchanged counts and idle API connections do
 not extend its idle deadline. The timeout comes from
 `limits.LocalControllerIdleTimeout` unless the existing admission configuration
 overrides it.

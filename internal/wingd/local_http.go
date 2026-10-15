@@ -18,11 +18,7 @@ type localPeerKey struct{}
 // LocalPeer reads the verified api.sock connection identity from a request context.
 func LocalPeer(ctx context.Context) (LocalPeerIdentity, bool) {
 	peer, ok := ctx.Value(localPeerKey{}).(LocalPeerIdentity)
-	if peer.UID != nil {
-		uid := *peer.UID
-		peer.UID = &uid
-	}
-	return peer, ok
+	return copyPeerIdentity(peer), ok
 }
 
 // ServeAPI carries verified transport identity to the shared route authorizer.
