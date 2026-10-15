@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func defaultTenant(t *testing.T, st *store.Store) *store.Tenant {
@@ -278,7 +279,7 @@ func TestTenantCreateRunStillUpsertsItsOwnPendingRun(t *testing.T) {
 func TestUnportedStoreWritesLandInTheDefaultTeam(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.New(t).Open(t)
-	if err := st.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
 		ID: "run-legacy", Pipeline: "build", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)

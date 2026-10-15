@@ -57,7 +57,7 @@ func populateInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) {
 	for i, pipeline := range []string{"build", "deploy", "nightly"} {
 		runID := fmt.Sprintf("drill-run-%d", i)
 		finished := start.Add(time.Duration(i+1) * time.Minute)
-		if err := st.CreateRun(ctx, store.Run{
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
 			ID:            runID,
 			Pipeline:      pipeline,
 			Status:        "success",

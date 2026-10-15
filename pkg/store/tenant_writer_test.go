@@ -7,6 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 // safety: reads the stored column itself rather than a struct field, so a
@@ -119,7 +120,7 @@ func TestUnscopedWritersStayInTheDefaultTeam(t *testing.T) {
 	if got := storedTeam(t, st, `SELECT team FROM tokens WHERE prefix = ?`, tok.Prefix); got != store.DefaultTeam {
 		t.Errorf("unscoped mint carries team %q, want %q", got, store.DefaultTeam)
 	}
-	if err := st.CreateTrigger(ctx, store.Trigger{ID: "trg-local", Pipeline: "build", CreatedAt: time.Now()}); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{ID: "trg-local", Pipeline: "build", CreatedAt: time.Now()}); err != nil {
 		t.Fatalf("CreateTrigger: %v", err)
 	}
 	if got := storedTeam(t, st, `SELECT team FROM triggers WHERE id = ?`, "trg-local"); got != store.DefaultTeam {

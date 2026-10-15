@@ -5,11 +5,12 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func seedRunNode(t *testing.T, st *store.Store, runID, nodeID string) {
 	t.Helper()
-	if err := st.CreateRun(t.Context(), store.Run{
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(t.Context(), store.Run{
 		ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatal(err)

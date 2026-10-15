@@ -89,33 +89,3 @@ func snapshotNodeResource(raw []byte, nodeID string) ExecutorResource {
 	}
 	return ExecutorResource{}
 }
-
-func snapshotNodePrefers(raw []byte, nodeID string) []string {
-	var snapshot struct {
-		Nodes []struct {
-			ID        string `json:"id"`
-			Modifiers *struct {
-				Prefers []string `json:"prefers"`
-			} `json:"modifiers"`
-		} `json:"nodes"`
-	}
-	if json.Unmarshal(raw, &snapshot) != nil {
-		return nil
-	}
-	for _, node := range snapshot.Nodes {
-		if node.ID == nodeID && node.Modifiers != nil {
-			return append([]string(nil), node.Modifiers.Prefers...)
-		}
-	}
-	return nil
-}
-
-func snapshotRunPriority(raw []byte) int {
-	var snapshot struct {
-		Priority int `json:"priority"`
-	}
-	if json.Unmarshal(raw, &snapshot) != nil {
-		return 0
-	}
-	return max(-100, min(100, snapshot.Priority))
-}

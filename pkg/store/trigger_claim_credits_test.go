@@ -8,11 +8,12 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func pendingTrigger(t *testing.T, st *store.Store, id string) {
 	t.Helper()
-	if err := st.CreateTrigger(context.Background(), store.Trigger{
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateTrigger(context.Background(), store.Trigger{
 		ID: id, Pipeline: "build", Status: "pending", CreatedAt: time.Now(),
 	}); err != nil {
 		t.Fatal(err)

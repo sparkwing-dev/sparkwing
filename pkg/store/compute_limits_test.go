@@ -43,7 +43,7 @@ func rewindRunCreation(t *testing.T, s *store.Store, runID string, at time.Time)
 func createRunAs(t *testing.T, s *store.Store, principal, runID string) error {
 	t.Helper()
 	ctx := store.WithCreatingPrincipal(context.Background(), principal)
-	return s.CreateRun(ctx, store.Run{
+	return teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
 		ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 	})
 }
@@ -204,7 +204,7 @@ func TestPerPrincipalGuardsLeaveLocalWorkAlone(t *testing.T) {
 		t.Fatalf("a local run's node was refused: %v", err)
 	}
 	for _, id := range []string{"run-local-2", "run-local-3"} {
-		if err := s.CreateRun(ctx, store.Run{
+		if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
 			ID: id, Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 		}); err != nil {
 			t.Fatalf("a local run was refused: %v", err)
@@ -229,7 +229,7 @@ func TestGuardsLetAnIdempotentRecreateThrough(t *testing.T) {
 	setLimit(t, s, store.ComputeLimitGlobalRunsPerHour, 1)
 	seedClaimedNode(t, s, "run-again", "build")
 
-	if err := s.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
 		ID: "run-again", Pipeline: "demo", Status: "failed", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("re-creating the same run must not meet the hourly guard: %v", err)
@@ -339,7 +339,7 @@ func TestRunsPerHourGuardChecksFirstAttributionOfPendingRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	if err := s.CreateTriggerWithRun(ctx,
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateTriggerWithRun(ctx,
 		store.Trigger{ID: "run-pending", Pipeline: "demo", CreatedAt: now},
 		store.Run{ID: "run-pending", Pipeline: "demo", Status: "pending", CreatedAt: now, StartedAt: now},
 	); err != nil {
@@ -372,12 +372,12 @@ func TestGlobalRunsPerHourGuardCountsEveryPrincipal(t *testing.T) {
 	ctx := context.Background()
 	setLimit(t, s, store.ComputeLimitGlobalRunsPerHour, 1)
 
-	if err := s.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
 		ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("the first run must be allowed: %v", err)
 	}
-	err := s.CreateRun(ctx, store.Run{
+	err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
 		ID: "run-2", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 	})
 	limitRefusal(t, err, store.ComputeLimitGlobalRunsPerHour)
@@ -497,7 +497,7 @@ func TestConcurrentRunCreationNeverPassesTheHourlyGuard(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_ = s.CreateRun(ctx, store.Run{
+			_ = teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
 				ID: fmt.Sprintf("run-%d", i), Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 			})
 		}(i)
@@ -517,13 +517,13 @@ func TestTriggerAndItsRunAreRefusedTogether(t *testing.T) {
 	ctx := context.Background()
 	setLimit(t, s, store.ComputeLimitGlobalRunsPerHour, 1)
 	now := time.Now()
-	if err := s.CreateTriggerWithRun(ctx,
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateTriggerWithRun(ctx,
 		store.Trigger{ID: "run-1", Pipeline: "demo", TriggerSource: "manual", CreatedAt: now},
 		store.Run{ID: "run-1", Pipeline: "demo", Status: "pending", StartedAt: now, CreatedAt: now}); err != nil {
 		t.Fatalf("the first admission must be allowed: %v", err)
 	}
 
-	err := s.CreateTriggerWithRun(ctx,
+	err := teststore.ForTeam(t, s, store.DefaultTeam).CreateTriggerWithRun(ctx,
 		store.Trigger{ID: "run-2", Pipeline: "demo", TriggerSource: "manual", CreatedAt: now},
 		store.Run{ID: "run-2", Pipeline: "demo", Status: "pending", StartedAt: now, CreatedAt: now})
 	limitRefusal(t, err, store.ComputeLimitGlobalRunsPerHour)

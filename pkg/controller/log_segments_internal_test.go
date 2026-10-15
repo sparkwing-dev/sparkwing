@@ -27,7 +27,7 @@ func newLogSegmentFixture(t *testing.T) logSegmentFixture {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	now := time.Now()
-	if err := st.CreateRun(t.Context(), store.Run{ID: "run-d", Pipeline: "demo", Status: "pending", StartedAt: now}); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(t.Context(), store.Run{ID: "run-d", Pipeline: "demo", Status: "pending", StartedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	srv := New(st, nil)

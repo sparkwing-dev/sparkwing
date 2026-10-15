@@ -15,6 +15,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestRenderJSONL_FormatsRecord(t *testing.T) {
@@ -324,11 +325,11 @@ func TestRunsGrep_FindsOlderFilteredMatchBeyondRecentRuns(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	ctx := context.Background()
 	base := time.Now().Add(-time.Hour)
-	if err := st.CreateRun(ctx, store.Run{ID: "older-match", Pipeline: "build", Status: "success", GitBranch: "rare", GitSHA: "deadbeef1234", StartedAt: base}); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{ID: "older-match", Pipeline: "build", Status: "success", GitBranch: "rare", GitSHA: "deadbeef1234", StartedAt: base}); err != nil {
 		t.Fatal(err)
 	}
 	for i := range 201 {
-		if err := st.CreateRun(ctx, store.Run{ID: fmt.Sprintf("newer-%03d", i), Pipeline: "build", Status: "success", GitBranch: "main", GitSHA: "cafebabe1234", StartedAt: base.Add(time.Duration(i+1) * time.Second)}); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{ID: fmt.Sprintf("newer-%03d", i), Pipeline: "build", Status: "success", GitBranch: "main", GitSHA: "cafebabe1234", StartedAt: base.Add(time.Duration(i+1) * time.Second)}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -428,7 +429,7 @@ func TestRunsGrep_PagesOlderRunsByCursorWithExclusionsAppliedBeforeTheLimit(t *t
 		if i%2 == 1 {
 			branch = "noise"
 		}
-		if err := st.CreateRun(ctx, store.Run{ID: fmt.Sprintf("run-%03d", i), Pipeline: "build", Status: "success", GitBranch: branch, StartedAt: base.Add(time.Duration(i) * time.Second)}); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{ID: fmt.Sprintf("run-%03d", i), Pipeline: "build", Status: "success", GitBranch: branch, StartedAt: base.Add(time.Duration(i) * time.Second)}); err != nil {
 			t.Fatal(err)
 		}
 	}

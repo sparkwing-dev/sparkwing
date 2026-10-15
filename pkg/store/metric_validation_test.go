@@ -34,7 +34,7 @@ func TestAddNodeMetricSample_Validation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			st := storetest.Open(t)
 			ctx := t.Context()
-			if err := st.CreateRun(ctx, store.Run{ID: "run", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+			if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{ID: "run", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
 				t.Fatal(err)
 			}
 			if err := st.CreateNode(ctx, store.Node{RunID: "run", NodeID: "node", Status: "running"}); err != nil {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 // Two controllers reporting one run take its GitHub report lock in turn: the
@@ -21,7 +22,7 @@ func TestReportGitHubCheckAdmitsOneHolderAtATime(t *testing.T) {
 		second = target.Open(t)
 	}
 	ctx := context.Background()
-	if err := first.CreateTrigger(ctx, store.Trigger{ID: "run-1", Pipeline: "p", CreatedAt: time.Now()}); err != nil {
+	if err := teststore.ForTeam(t, first, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{ID: "run-1", Pipeline: "p", CreatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	a, err := first.ForTeam(ctx, store.DefaultTeam)
@@ -97,7 +98,7 @@ func waitForAdvisoryWaiter(t *testing.T, st *store.Store, key string, entered <-
 func TestReportGitHubCheckRecordsNothingPastTheHoldersDeadline(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
-	if err := st.CreateTrigger(ctx, store.Trigger{ID: "run-1", Pipeline: "p", CreatedAt: time.Now()}); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{ID: "run-1", Pipeline: "p", CreatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	tenant, err := st.ForTeam(ctx, store.DefaultTeam)

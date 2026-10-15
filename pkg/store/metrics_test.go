@@ -20,7 +20,7 @@ func TestMetrics_RoundTrip(t *testing.T) {
 	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
-	if err := st.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
 		ID:        "run-1",
 		Pipeline:  "demo",
 		Status:    "running",
@@ -68,7 +68,7 @@ func TestMetrics_RoundTrip(t *testing.T) {
 func TestNodeMetricsCapAndPages(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
-	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "a", Status: "pending"}); err != nil {

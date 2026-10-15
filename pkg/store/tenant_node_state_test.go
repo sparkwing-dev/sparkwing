@@ -10,49 +10,28 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-// A node's writes and its steps belong to its run's team: every write
-// another team's handle aims at the node reads as not found and leaves it
-// as it was, and that handle lists none of its steps.
 func TestTenantNodeWritesStayInTheRunsTeam(t *testing.T) {
-	ctx := context.Background()
-	st := storetest.New(t).Open(t)
-	acme := tenantFor(t, st, "acme")
-	globex := tenantFor(t, st, "globex")
-	seedTenantRun(t, acme, "run-a", "deploy")
-	if err := st.CreateNode(ctx, store.Node{RunID: "run-a", NodeID: "build", Status: "pending"}); err != nil {
+	f := newStoreRecoveryFixtureAt(t, false, storetest.New(t))
+	foreign := tenantFor(t, f.s, "globex")
+	start := store.NodeTransition{Ref: f.ref, Actor: f.holder, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: acceptanceAttempt(0)}
+	if _, err := foreign.TransitionNode(t.Context(), start); err == nil {
+		t.Fatal("foreign tenant started the job")
+	}
+	if _, err := f.tenant.TransitionNode(t.Context(), start); err != nil {
 		t.Fatal(err)
 	}
-
-	writes := map[string]func(*store.Tenant) error{
-		"StartNode":               func(tn *store.Tenant) error { return tn.StartNode(ctx, "run-a", "build") },
-		"SetNodeArtifactManifest": func(tn *store.Tenant) error { return tn.SetNodeArtifactManifest(ctx, "run-a", "build", "sha256:x") },
-	}
-	for name, write := range writes {
-		if err := write(globex); !errors.Is(err, store.ErrNotFound) {
-			t.Errorf("globex.%s = %v, want ErrNotFound", name, err)
+	attempt := metadataAttempt(t, f)
+	for _, step := range []string{"compile", "test"} {
+		if err := foreign.RecordStep(t.Context(), store.StepReport{Actor: f.holder, Attempt: attempt, StepID: step, State: "running"}); err == nil {
+			t.Fatal("foreign tenant wrote a step")
 		}
+		metadataStep(t, f, step, "running")
 	}
-	usage := store.NodeUsage{CPUTime: time.Second, Wall: time.Second}
-	if err := globex.AddNodeUsage(ctx, "run-a", "build", usage); err != nil {
-		t.Errorf("globex.AddNodeUsage = %v, want the no-op a missing node gets", err)
+	if steps, err := foreign.ListNodeSteps(t.Context(), f.ref.RunID); err != nil || len(steps) != 0 {
+		t.Fatalf("foreign steps = %v, %v", steps, err)
 	}
-	n, err := acme.GetNode(ctx, "run-a", "build")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n.Status != "pending" || n.Summary != "" || len(n.Annotations) != 0 || n.ArtifactManifest != "" || n.CPUNanos != 0 {
-		t.Fatalf("another team's writes changed the node: %+v", n)
-	}
-	for name, write := range writes {
-		if err := write(acme); err != nil {
-			t.Errorf("acme.%s: %v", name, err)
-		}
-	}
-	if steps, err := globex.ListNodeSteps(ctx, "run-a"); err != nil || len(steps) != 0 {
-		t.Fatalf("globex.ListNodeSteps = %v, %v, want none", steps, err)
-	}
-	if steps, err := acme.ListNodeSteps(ctx, "run-a"); err != nil || len(steps) != 2 {
-		t.Fatalf("acme.ListNodeSteps = %v, %v, want compile and test", steps, err)
+	if steps, err := f.tenant.ListNodeSteps(t.Context(), f.ref.RunID); err != nil || len(steps) != 2 {
+		t.Fatalf("owner steps = %v, %v", steps, err)
 	}
 }
 
@@ -113,32 +92,25 @@ func TestTenantRunControlStaysInTheRunsTeam(t *testing.T) {
 }
 
 func TestTenantMetricsStayInTheRunsTeam(t *testing.T) {
-	ctx := context.Background()
-	st := storetest.New(t).Open(t)
-	acme := tenantFor(t, st, "acme")
-	globex := tenantFor(t, st, "globex")
-	seedTenantRun(t, acme, "run-a", "deploy")
-	if err := st.CreateNode(ctx, store.Node{RunID: "run-a", NodeID: "build", Status: "pending"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := acme.StartNode(ctx, "run-a", "build"); err != nil {
-		t.Fatal(err)
-	}
+	ctx := t.Context()
+	f := newStoreRecoveryFixtureAt(t, true, storetest.New(t))
+	acme := f.tenant
+	globex := tenantFor(t, f.s, "globex")
 
 	sample := store.MetricSample{TS: time.Now(), CPUMillicores: 5}
-	if err := globex.AddNodeMetricSample(ctx, "run-a", "build", sample); !errors.Is(err, store.ErrNotFound) {
+	if err := globex.AddNodeMetricSample(ctx, f.ref.RunID, f.ref.NodeID, sample); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("globex.AddNodeMetricSample = %v, want ErrNotFound", err)
 	}
-	if err := acme.AddNodeMetricSample(ctx, "run-a", "build", sample); err != nil {
+	if err := acme.AddNodeMetricSample(ctx, f.ref.RunID, f.ref.NodeID, sample); err != nil {
 		t.Fatalf("acme.AddNodeMetricSample: %v", err)
 	}
-	if err := acme.AddNodeMetricSample(ctx, "run-a", "build", sample); err != nil {
+	if err := acme.AddNodeMetricSample(ctx, f.ref.RunID, f.ref.NodeID, sample); err != nil {
 		t.Fatalf("an identical retry: %v", err)
 	}
-	if got, err := globex.ListNodeMetricsPage(ctx, "run-a", "build", time.Time{}, 0); err != nil || len(got) != 0 {
+	if got, err := globex.ListNodeMetricsPage(ctx, f.ref.RunID, f.ref.NodeID, time.Time{}, 0); err != nil || len(got) != 0 {
 		t.Fatalf("globex.ListNodeMetricsPage = %v, %v, want none", got, err)
 	}
-	if got, err := acme.ListNodeMetricsPage(ctx, "run-a", "build", time.Time{}, 0); err != nil || len(got) != 1 {
+	if got, err := acme.ListNodeMetricsPage(ctx, f.ref.RunID, f.ref.NodeID, time.Time{}, 0); err != nil || len(got) != 1 {
 		t.Fatalf("acme.ListNodeMetricsPage = %v, %v, want the one sample", got, err)
 	}
 }

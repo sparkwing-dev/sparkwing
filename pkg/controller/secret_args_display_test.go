@@ -30,7 +30,7 @@ func seedSecretArgRun(t *testing.T, st *store.Store, id string) {
 
 func seedSecretArgRunAs(t *testing.T, st *store.Store, id, status string) {
 	t.Helper()
-	err := st.CreateRun(context.Background(), store.Run{
+	err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(context.Background(), store.Run{
 		ID:        id,
 		Pipeline:  "deploy",
 		Status:    status,
@@ -159,7 +159,7 @@ func TestSecretArgs_ControllerRejectsOlderWriterInputHash(t *testing.T) {
 func TestSecretArgs_ControllerPipelineLatestRedacts(t *testing.T) {
 	st, srv := secretArgController(t)
 	seedSecretArgRunAs(t, st, "run-1", "pending")
-	if err := st.FinishRun(context.Background(), "run-1", "success", ""); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).FinishRun(context.Background(), "run-1", "success", ""); err != nil {
 		t.Fatal(err)
 	}
 	assertRedactedResponse(t, "GET /api/v1/pipelines/{name}/latest",
@@ -223,7 +223,7 @@ func TestSecretArgs_RetryStillReceivesPlaintext(t *testing.T) {
 func TestSecretArgs_ExecutionViewDoesNotWidenOtherEndpoints(t *testing.T) {
 	st, srv := secretArgController(t)
 	seedSecretArgRunAs(t, st, "run-1", "pending")
-	if err := st.FinishRun(context.Background(), "run-1", "success", ""); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).FinishRun(context.Background(), "run-1", "success", ""); err != nil {
 		t.Fatal(err)
 	}
 	const q = "?include=" + store.IncludeSecretValues

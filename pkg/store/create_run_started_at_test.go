@@ -7,6 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 // A run created without a start time has to land on the timeline the
@@ -16,7 +17,7 @@ func TestCreateRun_ZeroStartedAtStartsNow(t *testing.T) {
 	ctx := context.Background()
 	before := time.Now()
 
-	if err := s.CreateRun(ctx, store.Run{ID: "z", Pipeline: "demo", Status: "pending"}); err != nil {
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{ID: "z", Pipeline: "demo", Status: "pending"}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
 	got, err := s.GetRun(ctx, "z")

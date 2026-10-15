@@ -8,12 +8,13 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func seedRunAndNode(t *testing.T, s *store.Store, runID, nodeID string) {
 	t.Helper()
 	ctx := context.Background()
-	if err := s.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
 		ID:        runID,
 		Pipeline:  "demo",
 		Status:    "running",
@@ -96,7 +97,7 @@ func TestNodeClaim_MarkReadyIsIdempotent(t *testing.T) {
 func seedNodeWithLabels(t *testing.T, s *store.Store, runID, nodeID string, labels []string) {
 	t.Helper()
 	ctx := context.Background()
-	if err := s.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
 		ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)

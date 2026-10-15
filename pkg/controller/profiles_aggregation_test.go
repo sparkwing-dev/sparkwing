@@ -22,7 +22,7 @@ func TestFoldRunProfilesRequiresSingleContributingNode(t *testing.T) {
 			start := time.Unix(1700000000, 0)
 			finish := start.Add(time.Minute)
 			run := store.Run{ID: "r", Pipeline: "aggregate", Status: "success", StartedAt: start, FinishedAt: &finish}
-			if err := st.CreateRun(ctx, run); err != nil {
+			if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, run); err != nil {
 				t.Fatal(err)
 			}
 			if err := teststore.ForTeam(t, st, store.DefaultTeam).UpsertProfilePin(ctx, "aggregate", "", 4, 400); err != nil {

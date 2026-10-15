@@ -1,5 +1,31 @@
 # Migrating to the next release
 
+## Tenant writes and typed claim fences
+
+`Store.CreateRun`, `CreateTrigger`, `CreateTriggerWithRun` and `FinishRun` are
+removed. Select the registered tenant with `ForTeam(ctx, team)` for tenant
+operations. Executable lifecycle writes use `Tenant.AdmitRun`, `AcceptPlan`,
+`TransitionNode` and `FinishRunAndUnit` with current authority.
+
+`Store.SetNodeArtifactManifest` and `Tenant.SetNodeArtifactManifest` are
+removed. Commit the authorized manifest record with the terminal
+`TransitionNode` result through `NodeResult.ManifestRecord`. The separate
+raw manifest-column write is removed.
+
+`Store.StartNode` and `Tenant.StartNode` are removed. Start a claimed job with
+`Tenant.TransitionNode`, `NodeRunning`, `CauseStart` and the source attempt.
+The transaction checks the current holder and establishes the attempt ordinal.
+
+`Tenant.CreateSourceTriggerWithRun` and the unused source-upload admission
+branch are removed. Source acquisition uses the accepted request and source
+contracts. `NodeClaimFence`, `TriggerClaimFence`, their context constructors,
+readers and `WithoutClaimFences` are removed. The unused holder, membership,
+reservation, generation, attempt and trigger-generation header constants are
+removed too. Supply the typed actor and claim
+fence on each lifecycle request. Tenant checks remain in metric and metadata
+writes. Metric insertion uses `(team, run_id, node_id, ts)`, accepts identical
+retries and refuses conflicting readings without changing the stored sample.
+
 ## Execution attempts and Cloud metering
 
 `AcknowledgeNodeExecutionStart`, `FinishNodeExecutionAttempt`, `ExecutionStart`

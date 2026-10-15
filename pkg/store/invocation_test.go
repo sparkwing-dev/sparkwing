@@ -7,6 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestCreateRun_InvocationRoundTrip(t *testing.T) {
@@ -31,7 +32,7 @@ func TestCreateRun_InvocationRoundTrip(t *testing.T) {
 		"inputs_hash": "sha256:0000111122223333",
 	}
 
-	if err := s.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
 		ID:         "run-X",
 		Pipeline:   "release",
 		Status:     "running",
@@ -72,7 +73,7 @@ func TestCreateRun_InvocationRoundTrip(t *testing.T) {
 func TestCreateRun_NoInvocationLeavesColumnNil(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	if err := s.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
 		ID: "run-Y", Pipeline: "p", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)

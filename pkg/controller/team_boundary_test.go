@@ -367,7 +367,7 @@ func TestTeamBoundary_ARunnerCreatesItsRunInItsOwnTeam(t *testing.T) {
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", f.runnerB)
-		req.Header.Set(store.TriggerGenerationHeader, strconv.FormatInt(claimed.ClaimSeq, 10))
+		req.Header.Set("X-Sparkwing-Trigger-Generation", strconv.FormatInt(claimed.ClaimSeq, 10))
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -668,7 +668,7 @@ func TestTeamBoundary_ARunnerOfAnotherTeamFinishesTheRunItClaimed(t *testing.T) 
 			}
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Authorization", f.runnerB)
-			req.Header.Set(store.TriggerGenerationHeader, strconv.FormatInt(claimed.ClaimSeq, 10))
+			req.Header.Set("X-Sparkwing-Trigger-Generation", strconv.FormatInt(claimed.ClaimSeq, 10))
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				t.Fatal(err)

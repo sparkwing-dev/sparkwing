@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func (f dispatchRouteFixture) admin(t *testing.T) string {
@@ -91,7 +92,7 @@ func (f dispatchRouteFixture) readOutput(t *testing.T, path, bearer string) (int
 func TestClaimOutputs_ReadOnlyAncestorsOfItsOwnRun(t *testing.T) {
 	f := newDispatchRouteFixture(t)
 	ctx := context.Background()
-	if err := f.st.CreateRun(ctx, store.Run{ID: "run-other", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+	if err := teststore.ForTeam(t, f.st, store.DefaultTeam).CreateRun(ctx, store.Run{ID: "run-other", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.st.CreateNode(ctx, store.Node{RunID: "run-other", NodeID: "a", Status: "running"}); err != nil {

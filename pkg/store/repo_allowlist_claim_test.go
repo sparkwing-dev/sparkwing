@@ -7,11 +7,12 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func seedRepoTrigger(t *testing.T, st *store.Store, id, repoURL string, at time.Time) {
 	t.Helper()
-	if err := st.CreateTriggerWithRun(context.Background(), store.Trigger{
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateTriggerWithRun(context.Background(), store.Trigger{
 		ID: id, Pipeline: "demo", TriggerSource: "manual", RepoURL: repoURL, CreatedAt: at,
 	}, store.Run{ID: id, Pipeline: "demo", Status: "pending", RepoURL: repoURL, CreatedAt: at, StartedAt: at}); err != nil {
 		t.Fatalf("CreateTriggerWithRun(%s): %v", id, err)
@@ -22,7 +23,7 @@ func seedRepoNode(t *testing.T, st *store.Store, runID, repoURL string) {
 	t.Helper()
 	ctx := context.Background()
 	if repoURL == "" {
-		if err := st.CreateRun(ctx, store.Run{ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
 			t.Fatal(err)
 		}
 	} else {

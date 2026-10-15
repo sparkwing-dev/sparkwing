@@ -88,7 +88,7 @@ func (f *appFixture) runnerCall(c claimedRun, method, path string, body any) int
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", c.auth)
-	req.Header.Set(store.TriggerGenerationHeader, strconv.FormatInt(c.generation, 10))
+	req.Header.Set("X-Sparkwing-Trigger-Generation", strconv.FormatInt(c.generation, 10))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		f.t.Fatal(err)

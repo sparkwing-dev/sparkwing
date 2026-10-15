@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestControllerFixturesKeepCredentialsAndRunsSeparate(t *testing.T) {
@@ -36,7 +37,7 @@ func TestControllerFixturesKeepCredentialsAndRunsSeparate(t *testing.T) {
 		}
 	}
 
-	if err := firstStore.CreateRun(t.Context(), store.Run{
+	if err := teststore.ForTeam(t, firstStore, store.DefaultTeam).CreateRun(t.Context(), store.Run{
 		ID: "fixture-run", Pipeline: "first", Status: "running", StartedAt: time.Unix(100, 0),
 	}); err != nil {
 		t.Fatal(err)
@@ -44,7 +45,7 @@ func TestControllerFixturesKeepCredentialsAndRunsSeparate(t *testing.T) {
 	if _, err := secondStore.GetRun(t.Context(), "fixture-run"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("fresh fixture found another fixture's run: %v", err)
 	}
-	if err := secondStore.CreateRun(t.Context(), store.Run{
+	if err := teststore.ForTeam(t, secondStore, store.DefaultTeam).CreateRun(t.Context(), store.Run{
 		ID: "fixture-run", Pipeline: "second", Status: "running", StartedAt: time.Unix(100, 0),
 	}); err != nil {
 		t.Fatal(err)

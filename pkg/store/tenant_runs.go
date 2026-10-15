@@ -60,9 +60,6 @@ func (t *Tenant) FinishRun(ctx context.Context, runID, status, errMsg string) er
 	if err := assertRunBelongsToTeamTx(ctx, tx, t.team, runID); err != nil {
 		return err
 	}
-	if err := t.s.assertRunMutationFenceTx(ctx, tx, t.team, runID); err != nil {
-		return err
-	}
 	if err := finishRunOnceTx(ctx, tx, runID, status, errMsg, t.team); err != nil {
 		return err
 	}

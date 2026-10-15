@@ -30,7 +30,7 @@ func newDispatchRouteFixture(t *testing.T) dispatchRouteFixture {
 	t.Cleanup(func() { _ = st.Close() })
 	ctx := context.Background()
 	now := time.Now()
-	if err := st.CreateRun(ctx, store.Run{ID: "run-d", Pipeline: "demo", Status: "pending", StartedAt: now}); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{ID: "run-d", Pipeline: "demo", Status: "pending", StartedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	return dispatchRouteFixture{st: st, handler: New(st, nil).Handler()}

@@ -40,7 +40,7 @@ func TestFinishRunFoldsPartialSamplesRaiseOnly(t *testing.T) {
 			})
 			ctx := t.Context()
 			start := time.Now().Add(-time.Minute)
-			if err := st.CreateRun(ctx, store.Run{ID: "partial", Pipeline: "demo", Status: "running", StartedAt: start}); err != nil {
+			if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{ID: "partial", Pipeline: "demo", Status: "running", StartedAt: start}); err != nil {
 				t.Fatal(err)
 			}
 			if err := st.CreateNode(ctx, store.Node{RunID: "partial", NodeID: "build", Status: "running", StartedAt: &start}); err != nil {

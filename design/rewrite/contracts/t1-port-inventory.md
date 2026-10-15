@@ -2374,3 +2374,30 @@ lineage and parent-fence coverage. The unused child-trigger lookup and legacy
 mutable-token `NodeSettlement` have no callers or retained tests.
 
 No native acceptance matrix cell is enabled by these package properties.
+
+## Raw node-start retirement
+
+`Store.StartNode` and `Tenant.StartNode` are removed.
+
+| Port | Current evidence |
+| --- | --- |
+| `TestListNodesKeepsInsertionOrderAcrossUpdates` | `TestRunSnapshotKeepsDeclarationOrderAcrossStarts` admits and accepts five jobs, reconciles and starts them in reverse order, then reads their original declaration order through the typed snapshot. |
+| `TestPostgresListNodesKeepsInsertionOrderAcrossUpdates` | `TestPostgresRunSnapshotKeepsDeclarationOrderAcrossStarts` uses the same body against the configured PostgreSQL store. Native execution remains pending when no server is configured. |
+| `TestTenantNodeWritesStayInTheRunsTeam` | Uses real admission, acceptance and claims. The foreign tenant cannot start the job or write steps. The actual holder starts and records two steps. |
+| `TestTenantMetricsStayInTheRunsTeam` | Uses a real claimed and started job. Foreign reads and writes stay empty, and identical samples replay once. |
+| Metric identity and replay | `TestMetricIdentityPreservesTenantAndConflictingRetriesProperty` generates 64 readings with foreign tenants, exact retries and changed CPU, memory or process-time readings. Refused writes preserve the recorded sample. |
+
+The dashboard log-reader fixture no longer starts a node before seeding its
+terminal result. Four default-team Store write wrappers are removed. Existing
+callers select explicit tenant handles. Remaining raw run fixtures still need
+migration from the retired run schema to sealed intake.
+
+`Store.SetNodeArtifactManifest` and its tenant twin are removed.
+`TestSetNodeArtifactManifest_RoundTrips` and
+`TestSetNodeArtifactManifest_SurvivesFinishNode` retire with the raw digest
+column. `TestBlobResultRecordsCommitAndReplayWithTerminalState` verifies
+committed manifest selectors with terminal state and replay.
+`TestBlobResultRecordsRejectForgedResultKeys` generates tenant, run, attempt,
+generation and record-key forgeries. `TestNode_DefaultsToEmptyManifest` retires
+with that column. `TestResultRecordsCommitWithTerminalState` verifies absent
+selectors after refused attachment. Those current tests are unchanged.

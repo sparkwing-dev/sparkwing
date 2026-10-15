@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestATerminalRunAlwaysCarriesAFinishTime(t *testing.T) {
@@ -16,7 +17,7 @@ func TestATerminalRunAlwaysCarriesAFinishTime(t *testing.T) {
 			s := storetest.Open(t)
 			ctx := context.Background()
 			before := time.Now()
-			if err := s.CreateRun(ctx, store.Run{
+			if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
 				ID: "run-" + status, Pipeline: "p", Status: status, StartedAt: time.Now(),
 			}); err != nil {
 				t.Fatalf("CreateRun: %v", err)
@@ -42,7 +43,7 @@ func TestATerminalRunAlwaysCarriesAFinishTime(t *testing.T) {
 func TestAPendingRunCarriesNoFinishTime(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	if err := s.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
 		ID: "run-pending", Pipeline: "p", Status: "pending", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
@@ -61,7 +62,7 @@ func TestCreateRunKeepsTheFinishTimeItsCallerSupplied(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	ended := time.Now().Add(-2 * time.Hour).Truncate(time.Second)
-	if err := s.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
 		ID: "run-replayed", Pipeline: "p", Status: "success",
 		StartedAt: ended, FinishedAt: &ended,
 	}); err != nil {
@@ -81,12 +82,12 @@ func TestCreateRunKeepsTheFinishTimeItsCallerSupplied(t *testing.T) {
 func TestAPendingRunStampedTerminalCarriesAFinishTime(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	if err := s.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
 		ID: "run-upserted", Pipeline: "p", Status: "pending", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if err := s.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
 		ID: "run-upserted", Pipeline: "p", Status: "failed", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("CreateRun over a pending row: %v", err)
@@ -109,7 +110,7 @@ func TestFinishedPendingRowCannotBeReopenedOrRewritten(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	ended := time.Now().Add(-time.Hour).Truncate(time.Second)
-	if err := s.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
 		ID: "legacy-pending-finish", Pipeline: "p", Status: "pending", StartedAt: ended,
 	}); err != nil {
 		t.Fatal(err)
@@ -119,7 +120,7 @@ func TestFinishedPendingRowCannotBeReopenedOrRewritten(t *testing.T) {
 		ended.UnixNano(), "legacy-pending-finish"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
 		ID: "legacy-pending-finish", Pipeline: "p", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatal(err)
@@ -128,7 +129,7 @@ func TestFinishedPendingRowCannotBeReopenedOrRewritten(t *testing.T) {
 	if err != nil || run.Status != "pending" || run.FinishedAt == nil || !run.FinishedAt.Equal(ended) {
 		t.Fatalf("finished pending row reopened: %+v, %v", run, err)
 	}
-	if err := s.FinishRun(ctx, run.ID, "failed", "late claimant"); !errors.Is(err, store.ErrInvalidInput) {
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).FinishRun(ctx, run.ID, "failed", "late claimant"); !errors.Is(err, store.ErrInvalidInput) {
 		t.Fatalf("single finish = %v, want invalid input", err)
 	}
 	tn, err := s.ForTeam(ctx, store.DefaultTeam)
@@ -147,17 +148,17 @@ func TestFinishedPendingRowCannotBeReopenedOrRewritten(t *testing.T) {
 func TestFinishRunIdenticalRetryKeepsFinishTime(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	if err := s.CreateRun(ctx, store.Run{ID: "retry-finish", Pipeline: "p", Status: "running"}); err != nil {
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{ID: "retry-finish", Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.FinishRun(ctx, "retry-finish", "success", ""); err != nil {
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).FinishRun(ctx, "retry-finish", "success", ""); err != nil {
 		t.Fatal(err)
 	}
 	first, err := s.GetRun(ctx, "retry-finish")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.FinishRun(ctx, "retry-finish", "success", ""); err != nil {
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).FinishRun(ctx, "retry-finish", "success", ""); err != nil {
 		t.Fatal(err)
 	}
 	again, err := s.GetRun(ctx, "retry-finish")
@@ -169,7 +170,7 @@ func TestFinishRunIdenticalRetryKeepsFinishTime(t *testing.T) {
 func TestCreateRunRejectsFinishedAtOnNonTerminalRow(t *testing.T) {
 	s := storetest.Open(t)
 	ended := time.Now()
-	err := s.CreateRun(t.Context(), store.Run{
+	err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(t.Context(), store.Run{
 		ID: "bad-finished-pending", Pipeline: "p", Status: "pending", StartedAt: ended, FinishedAt: &ended,
 	})
 	if !errors.Is(err, store.ErrInvalidInput) {

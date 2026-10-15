@@ -78,8 +78,8 @@ func (s *Store) CreateCapabilitySession(ctx context.Context, prefix string, ttl 
 		return "", nil, err
 	}
 	c := p.Capability
-	if c.Subject.Kind != capability.SubjectAccount || c.Team == "" || c.Audience != capability.Controller || c.Binding.Kind != capability.BindingNone || c.Unit != "" {
-		return "", nil, authorityError(apierr.Forbidden, "session requires an unbound account capability")
+	if c.Subject.Kind != capability.SubjectAccount || c.Team == "" || c.Audience != capability.Controller || c.Binding.Kind != capability.BindingNone || c.Unit != "" || c.Data != nil {
+		return "", nil, authorityError(apierr.Forbidden, "session requires an unbound account capability without data scope")
 	}
 	var email string
 	if err := tx.QueryRowContext(ctx, `SELECT email FROM accounts WHERE id=?`, c.Subject.ID).Scan(&email); err != nil {
@@ -198,12 +198,4 @@ func (s *Store) lookupSession(ctx context.Context, rawSession string, ttl, maxLi
 func (s *Store) DeleteSession(rawSession string) error {
 	_, err := s.execNoCtx(`DELETE FROM sessions WHERE hash = ?`, sessionDigest(rawSession))
 	return err
-}
-
-func nullableUnix(v sql.NullInt64) *time.Time {
-	if !v.Valid {
-		return nil
-	}
-	t := time.Unix(v.Int64, 0).UTC()
-	return &t
 }

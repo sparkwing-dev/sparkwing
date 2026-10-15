@@ -169,10 +169,10 @@ func TestCronLauncherActive_TreatsAnUnclaimedRunAsStale(t *testing.T) {
 
 	ctx := context.Background()
 	now := time.Now()
-	if err := st.CreateTrigger(ctx, store.Trigger{ID: "run_old", Pipeline: "nightly", CreatedAt: now}); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{ID: "run_old", Pipeline: "nightly", CreatedAt: now}); err != nil {
 		t.Fatalf("CreateTrigger: %v", err)
 	}
-	if err := st.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
 		ID: "run_old", Pipeline: "nightly", Status: "pending",
 		CreatedAt: now.Add(-2 * time.Hour), StartedAt: now.Add(-2 * time.Hour),
 	}); err != nil {

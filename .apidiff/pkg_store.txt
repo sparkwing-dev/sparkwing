@@ -152,7 +152,6 @@ func Argon2Concurrency(budget int64) int
 const Argon2HashBytes = int64(argonMemory) << 10
 func Argon2Shed() int64
 func Argon2Slots() int
-const AttemptOrdinalHeader = "X-Sparkwing-Attempt-Ordinal"
 const AutoTrustPaymentAge = 30 * 24 * time.Hour
 type BillingStanding struct {
 	Trust              string
@@ -350,13 +349,10 @@ type ClaimAward struct {
 	Generation       int64
 	LeaseExpiresAt   time.Time
 }
-const ClaimGenerationHeader = "X-Sparkwing-Claim-Generation"
-const ClaimHolderHeader = "X-Sparkwing-Claim-Holder"
 type ClaimIdentity struct {
 	Principal   string
 	TokenPrefix string
 }
-const ClaimMembershipHeader = "X-Sparkwing-Claim-Membership"
 type ClaimPlacement struct {
 	Preferences []PlacementPreference
 	Liveness    time.Duration
@@ -366,7 +362,6 @@ const ClaimPollAfterHeader = "X-Sparkwing-Poll-After"
 type ClaimProfileResolver interface {
 	ResolveClaimProfile(context.Context, capability.Principal) (match.Profile, match.Resources, error)
 }
-const ClaimReservationHeader = "X-Sparkwing-Claim-Reservation"
 type ClaimToken struct {
 	Prefix     string
 	Team       Team
@@ -1413,14 +1408,6 @@ type NodeAttention struct {
 	Reason        string
 }
 const NodeCancelled NodeState = "cancelled"
-type NodeClaimFence struct {
-	Claimant        ClaimIdentity
-	HolderID        string
-	MembershipID    string
-	ReservationID   string
-	ClaimGeneration int64
-}
-func NodeClaimFenceFromContext(ctx context.Context) (NodeClaimFence, bool)
 const NodeClaimed NodeState = "claimed"
 type NodeDecision struct {
 	NodeID      string
@@ -2513,14 +2500,11 @@ func (s *Store) CreateAccountSession(ctx context.Context, acct Account, team Tea
 func (s *Store) CreateCapabilitySession(ctx context.Context, prefix string, ttl time.Duration) (string, *Session, error)
 func (s *Store) CreateIdentityAccountSession(ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration) (string, string, *Session, error)
 func (s *Store) CreateNode(ctx context.Context, n Node) error
-func (s *Store) CreateRun(ctx context.Context, r Run) error
 func (s *Store) CreateTeam(ctx context.Context, accountID string, slug Team, displayName string, now time.Time) (TeamInfo, error)
 func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error)
 func (s *Store) CreateTokenWith(
 	ctx context.Context, principal, kind string, scopes []string, ttl time.Duration, now time.Time, opts TokenOptions,
 ) (string, *Token, error)
-func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error
-func (s *Store) CreateTriggerWithRun(ctx context.Context, t Trigger, r Run) error
 func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error)
 func (s *Store) DB() *sql.DB
 func (s *Store) DelegateCapability(ctx context.Context, spec capability.DelegateSpec) (capability.Issued, error)
@@ -2533,7 +2517,6 @@ func (s *Store) ExchangeCapability(ctx context.Context, spec capability.Exchange
 func (s *Store) FinalizeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error)
 func (s *Store) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error
 func (s *Store) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error
-func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) error
 func (s *Store) ForTeam(ctx context.Context, team Team) (*Tenant, error)
 func (s *Store) FreeSlots(ctx context.Context) (taken, limit int64, err error)
 func (s *Store) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*DebugPause, error)
@@ -2582,7 +2565,6 @@ func (s *Store) SetConsolePolicy(policy func(capability.Principal, time.Time) bo
 func (s *Store) SetEventLimits(ctx context.Context, limits EventLimits) (err error)
 func (s *Store) SetFreeTeamSlots(ctx context.Context, slots int64) error
 func (s *Store) SetIntakePolicy(policy IntakePolicy)
-func (s *Store) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
 func (s *Store) SetOutputDir(dir string)
 func (s *Store) SetPlanSecretOpener(opener PlanSecretOpener)
 func (s *Store) SetProvisionPolicy(policy ProvisionPolicy)
@@ -2593,7 +2575,6 @@ func (s *Store) SetSignUpMode(ctx context.Context, mode SignUpMode, reason, setB
 func (s *Store) SettlePayment(ctx context.Context, proof capability.VerifiedPaymentEvent) (PaymentSettlement, error)
 func (s *Store) SignUpCounts(ctx context.Context, now time.Time) (SignUpCounts, error)
 func (s *Store) SignUpGate(ctx context.Context) (SignUpGate, error)
-func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error
 func (s *Store) SwitchSessionTeam(ctx context.Context, rawSession, accountID string, from, to Team) error
 func (s *Store) TeamDeletionsRequestedBy(ctx context.Context, accountID string) ([]TeamDeletion, error)
 func (s *Store) TeamInfo(ctx context.Context, team Team) (TeamInfo, error)
@@ -2682,7 +2663,6 @@ func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error)
 func (t *Tenant) CreateGitHubAutomationTriggerWithRun(ctx context.Context, trig Trigger, run Run, grant GitHubAppAutomation) error
 func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, role Role, now time.Time) (Invitation, error)
 func (t *Tenant) CreateRun(ctx context.Context, r Run) error
-func (t *Tenant) CreateSourceTriggerWithRun(ctx context.Context, trig Trigger, r Run, key, principal, tokenPrefix string) error
 func (t *Tenant) CreateToken(
 	ctx context.Context, principal, kind string, scopes []string, ttl time.Duration, now time.Time,
 ) (string, *Token, error)
@@ -2837,7 +2817,6 @@ func (t *Tenant) SetCronScheduleNextDue(ctx context.Context, id string, next *ti
 func (t *Tenant) SetCronSchedulePaused(ctx context.Context, id string, paused bool, now time.Time) error
 func (t *Tenant) SetGitHubAppExtraRepoIDs(ctx context.Context, repository string, ids map[string]int64) error
 func (t *Tenant) SetGitHubAppExtraRepos(ctx context.Context, repository string, extras []string, by string, now time.Time) (_ []string, err error)
-func (t *Tenant) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
 func (t *Tenant) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (t *Tenant) SetSourceMachineConsent(ctx context.Context, authority capability.AuthorityRef, machine string, enabled bool) error
 func (t *Tenant) SetSpendBudget(ctx context.Context, cents int64) error
@@ -2847,7 +2826,6 @@ func (t *Tenant) SetTrustLocalBuilds(ctx context.Context, trust bool) error
 func (t *Tenant) SettleQuota(ctx context.Context, reservationID string, used int64) error
 func (t *Tenant) SourceReleaseAudits(ctx context.Context, limit int) (_ []capability.SourceReleaseAudit, err error)
 func (t *Tenant) SpendStanding(ctx context.Context, now time.Time) (SpendStanding, error)
-func (t *Tenant) StartNode(ctx context.Context, runID, nodeID string) error
 func (t *Tenant) StartRecoveryAttempt(ctx context.Context, now time.Time) (_ CardChargeWork, err error)
 func (t *Tenant) StorageQuota(ctx context.Context) (StorageQuota, error)
 func (t *Tenant) StorageRetainedBytes(ctx context.Context) (int64, error)
@@ -2966,18 +2944,12 @@ type Trigger struct {
 	RunnerPin string
 }
 func (t Trigger) IsFinished() bool
-type TriggerClaimFence struct {
-	Claimant        ClaimIdentity
-	ClaimGeneration int64
-}
-func TriggerClaimFenceFromContext(ctx context.Context) (TriggerClaimFence, bool)
 type TriggerFilter struct {
 	Statuses  []string
 	Pipelines []string
 	Repo      string
 	Limit     int
 }
-const TriggerGenerationHeader = "X-Sparkwing-Trigger-Generation"
 const TriggerIdempotencyIndexName = "idx_triggers_idempotency_key"
 const TriggerWebhookReplayKeyIndexName = "idx_triggers_webhook_replay_key"
 const TrustedDailyCapCents = 20_000
@@ -3123,9 +3095,6 @@ type WarnedCardPayment struct {
 }
 func WithClaimPlacement(ctx context.Context, placement ClaimPlacement) context.Context
 func WithCreatingPrincipal(ctx context.Context, principal string) context.Context
-func WithNodeClaimFence(ctx context.Context, fence NodeClaimFence) context.Context
-func WithTriggerClaimFence(ctx context.Context, fence TriggerClaimFence) context.Context
-func WithoutClaimFences(ctx context.Context) context.Context
 func WithoutCreditMetering(ctx context.Context) context.Context
 
 # methods on un-declared receiver types (likely a bug)

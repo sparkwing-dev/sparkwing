@@ -156,6 +156,37 @@ func TestLoginHTTPProofProperty(t *testing.T) {
 	}
 }
 
+func TestLoginHTTPRefusesDataScopeProperty(t *testing.T) {
+	f := newSessionFlow(t)
+	root := loginCapability(t, f)
+	b := newCredentialBoundary()
+	b.raw = root.Raw
+	b.snapshot.Now = time.Now()
+	p := capability.Principal{Class: capability.CredentialBearer, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root.Capability.Prefix}, Capability: root.Capability}
+	b.snapshot.Authorities = []capability.AuthorityState{{Principal: p, MembershipValid: true}}
+	h := f.server.WithAuthorization(consoleAuthorization(b)).WithDashboard(controller.Dashboard{}).Handler()
+	property := func(value []byte, publish bool) bool {
+		scope := &capability.DataScope{Use: capability.DataRemoteCache, RepositoryKey: "repo-" + hex.EncodeToString(value), ReadRefs: []string{"main"}, VerifiedDefaultOnly: true}
+		if publish {
+			scope.Use, scope.RunID = capability.DataPublish, "run"
+		}
+		b.snapshot.Authorities[0].Principal.Capability.Data = scope
+		before, expiry := f.state(t)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, loginRequest(root.Raw, "browser-proof", "/"))
+		after, renewed := f.state(t)
+		var result apierr.Envelope
+		ok := w.Code == 403 && json.Unmarshal(w.Body.Bytes(), &result) == nil && result.Error != nil && result.Error.Code == apierr.Forbidden && before == after && expiry == renewed && len(w.Result().Cookies()) == 0
+		if !ok {
+			t.Logf("scoped sign-in: status=%d body=%s sessions=%d->%d", w.Code, w.Body.String(), before, after)
+		}
+		return ok
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLoginHTTPPageAndMethods(t *testing.T) {
 	f := newSessionFlow(t)
 	h := f.server.WithDashboard(controller.Dashboard{Version: "</script><script>alert(1)</script>\u2028"}).Handler()

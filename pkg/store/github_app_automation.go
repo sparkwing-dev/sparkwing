@@ -26,7 +26,7 @@ func (t *Tenant) CreateGitHubAutomationTriggerWithRun(ctx context.Context, trig 
 	if grant.InstallationID <= 0 || grant.RepositoryID <= 0 || grant.EnabledAt.IsZero() || trig.GithubRepoID != grant.RepositoryID {
 		return ErrInvalidInput
 	}
-	return t.createTriggerWithRun(ctx, trig, run, "", "", "", &grant)
+	return t.createTriggerWithRun(ctx, trig, run, &grant)
 }
 
 func (t *Tenant) checkGitHubAppAutomationTx(ctx context.Context, tx *storeTx, grant GitHubAppAutomation) error {

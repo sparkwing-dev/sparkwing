@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestRunTrendsUseTheStoreDialect(t *testing.T) {
@@ -22,7 +23,7 @@ func TestRunTrendsUseTheStoreDialect(t *testing.T) {
 		{id: "mixed-run", pipeline: "alpha", outcomes: []string{"cached", "success"}},
 		{id: "other-run", pipeline: "beta", outcomes: []string{"cached"}},
 	} {
-		if err := st.CreateRun(ctx, store.Run{ID: run.id, Pipeline: run.pipeline, Status: "running", StartedAt: now}); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{ID: run.id, Pipeline: run.pipeline, Status: "running", StartedAt: now}); err != nil {
 			t.Fatal(err)
 		}
 		for _, outcome := range run.outcomes {
@@ -34,11 +35,11 @@ func TestRunTrendsUseTheStoreDialect(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if err := st.FinishRun(ctx, run.id, "success", ""); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).FinishRun(ctx, run.id, "success", ""); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := st.CreateRun(ctx, store.Run{ID: "empty-run", Pipeline: "alpha", Status: "success", StartedAt: now}); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{ID: "empty-run", Pipeline: "alpha", Status: "success", StartedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	tenant, err := st.ForTeam(ctx, store.DefaultTeam)

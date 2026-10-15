@@ -88,7 +88,7 @@ func (t *Tenant) AddNodeMetricSample(ctx context.Context, runID, nodeID string, 
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := t.assertNodeMutationTx(ctx, tx, runID, nodeID); err != nil {
+	if err := assertRunBelongsToTeamTx(ctx, tx, t.team, runID); err != nil {
 		return err
 	}
 	var held int
@@ -104,7 +104,7 @@ func (t *Tenant) AddNodeMetricSample(ctx context.Context, runID, nodeID string, 
 	result, err := tx.ExecContext(ctx, `
 INSERT INTO node_metrics (team, run_id, node_id, ts, cpu_millicores, memory_bytes, cpu_time_nanos, kind)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT (run_id, node_id, ts) DO UPDATE SET kind = node_metrics.kind
+ON CONFLICT (team, run_id, node_id, ts) DO UPDATE SET kind = node_metrics.kind
   WHERE node_metrics.team = excluded.team AND 1 = 0`,
 		string(t.team), runID, nodeID, sample.TS.UnixNano(), sample.CPUMillicores, sample.MemoryBytes,
 		int64(sample.CPUTime), sample.Kind)

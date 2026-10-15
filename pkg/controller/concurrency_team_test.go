@@ -46,7 +46,7 @@ func TestTeamBoundary_ResolveWaiterDoesNotReadAnotherTeamsLeader(t *testing.T) {
 				t.Fatal(err)
 			}
 			req.Header.Set("Authorization", f.runnerB)
-			req.Header.Set(store.TriggerGenerationHeader, strconv.FormatInt(claimSeq, 10))
+			req.Header.Set("X-Sparkwing-Trigger-Generation", strconv.FormatInt(claimSeq, 10))
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				t.Fatal(err)
@@ -102,7 +102,7 @@ func (f *tenancyFixture) claimRun(auth, runID, extraRunJSON string) int64 {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", auth)
-	req.Header.Set(store.TriggerGenerationHeader, strconv.FormatInt(claimed.ClaimSeq, 10))
+	req.Header.Set("X-Sparkwing-Trigger-Generation", strconv.FormatInt(claimed.ClaimSeq, 10))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -141,7 +141,7 @@ func TestTeamBoundary_TriggerAncestryStaysInTheCallersTeam(t *testing.T) {
 			}
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Authorization", spawner)
-			req.Header.Set(store.TriggerGenerationHeader, strconv.FormatInt(claimSeq, 10))
+			req.Header.Set("X-Sparkwing-Trigger-Generation", strconv.FormatInt(claimSeq, 10))
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				t.Fatal(err)

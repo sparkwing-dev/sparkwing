@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestOpenCreatesPrivateSQLiteFiles(t *testing.T) {
@@ -58,7 +59,7 @@ func TestOpenTightensExistingSQLiteFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = first.Close() }()
-	if err := first.CreateRun(t.Context(), store.Run{
+	if err := teststore.ForTeam(t, first, store.DefaultTeam).CreateRun(t.Context(), store.Run{
 		ID: "run-before", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatal(err)
@@ -143,7 +144,7 @@ func TestOpenReadOnlySnapshotIncludesLiveWALWithoutTouchingSource(t *testing.T) 
 	if _, err := writer.DB().Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
 		t.Fatal(err)
 	}
-	if err := writer.CreateRun(t.Context(), store.Run{
+	if err := teststore.ForTeam(t, writer, store.DefaultTeam).CreateRun(t.Context(), store.Run{
 		ID: "run-in-wal", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatal(err)
@@ -217,7 +218,7 @@ func TestOpenReadOnlySnapshotDoesNotCreateMissingSourceSHM(t *testing.T) {
 	if _, err := writer.DB().Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
 		t.Fatal(err)
 	}
-	if err := writer.CreateRun(t.Context(), store.Run{
+	if err := teststore.ForTeam(t, writer, store.DefaultTeam).CreateRun(t.Context(), store.Run{
 		ID: "run-in-wal", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatal(err)

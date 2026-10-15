@@ -183,7 +183,7 @@ func TestControllerCrons_ASecondLaunchOfOneDueInstantReachesTheFirstRun(t *testi
 		t.Fatalf("idempotency key = %q", key)
 	}
 	first := "run_first"
-	if err := f.store.CreateTrigger(ctx, store.Trigger{
+	if err := teststore.ForTeam(t, f.store, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{
 		ID: first, Pipeline: sched.Pipeline, CreatedAt: time.Now(), IdempotencyKey: key,
 	}); err != nil {
 		t.Fatalf("CreateTrigger: %v", err)

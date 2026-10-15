@@ -122,10 +122,10 @@ func assertFirstRunSucceededOncePerTeam(t *testing.T, st *store.Store) {
 	t.Helper()
 	ctx := context.Background()
 	for id, status := range map[string]string{"run-fail": "failed", "run-ok-1": "success", "run-ok-2": "success"} {
-		if err := st.CreateRun(ctx, store.Run{ID: id, Pipeline: "demo", Status: "running"}); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{ID: id, Pipeline: "demo", Status: "running"}); err != nil {
 			t.Fatal(err)
 		}
-		if err := st.FinishRun(ctx, id, status, ""); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).FinishRun(ctx, id, status, ""); err != nil {
 			t.Fatal(err)
 		}
 	}

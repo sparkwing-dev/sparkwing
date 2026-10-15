@@ -7,6 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func ctxT(t *testing.T) context.Context {
@@ -39,7 +40,7 @@ func acquireBareT(t *testing.T, s *store.Store, req store.AcquireSlotRequest) st
 func createLiveRunT(t *testing.T, s *store.Store, runID string) {
 	t.Helper()
 	ctx := ctxT(t)
-	if err := s.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
 		ID:        runID,
 		Pipeline:  "test-pipeline",
 		Status:    "running",
@@ -111,7 +112,7 @@ func TestConcurrency_QueueWhenFull(t *testing.T) {
 func finishRunT(t *testing.T, s *store.Store, runID string) {
 	t.Helper()
 	now := time.Now()
-	if err := s.CreateRun(ctxT(t), store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctxT(t), store.Run{
 		ID:        runID,
 		Pipeline:  "test",
 		Status:    "running",
@@ -120,7 +121,7 @@ func finishRunT(t *testing.T, s *store.Store, runID string) {
 	}); err != nil {
 		t.Fatalf("CreateRun(%s): %v", runID, err)
 	}
-	if err := s.FinishRun(ctxT(t), runID, "success", ""); err != nil {
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).FinishRun(ctxT(t), runID, "success", ""); err != nil {
 		t.Fatalf("FinishRun(%s): %v", runID, err)
 	}
 }
@@ -418,7 +419,7 @@ func TestConcurrency_PromoteSkipsAndDeletesFinishedRunWaiter(t *testing.T) {
 	ctx := ctxT(t)
 	started := time.Now()
 	for _, id := range []string{"r2", "r3"} {
-		if err := s.CreateRun(ctx, store.Run{ID: id, Pipeline: "p", Status: "running", StartedAt: started}); err != nil {
+		if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{ID: id, Pipeline: "p", Status: "running", StartedAt: started}); err != nil {
 			t.Fatalf("CreateRun %s: %v", id, err)
 		}
 	}
@@ -434,7 +435,7 @@ func TestConcurrency_PromoteSkipsAndDeletesFinishedRunWaiter(t *testing.T) {
 		Key: "k", HolderID: "r3/n1", RunID: "r3", NodeID: "n1",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
-	if err := s.FinishRun(ctx, "r2", "success", ""); err != nil {
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).FinishRun(ctx, "r2", "success", ""); err != nil {
 		t.Fatalf("finish r2: %v", err)
 	}
 	released, _, promoted, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, "k", "r1/n1", "success", "", "", 0, 30*time.Second)

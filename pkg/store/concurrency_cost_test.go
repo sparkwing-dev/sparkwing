@@ -6,6 +6,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestConcurrency_CostWeightedAdmission(t *testing.T) {
@@ -294,7 +295,7 @@ func TestConcurrency_CancelOthersSupersedesSiblingInheritedHolders(t *testing.T)
 func createRunningRunT(t *testing.T, s *store.Store, runID string) {
 	t.Helper()
 	now := time.Now()
-	if err := s.CreateRun(ctxT(t), store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctxT(t), store.Run{
 		ID:        runID,
 		Pipeline:  "test",
 		Status:    "running",
@@ -518,7 +519,7 @@ func TestConcurrency_CostBackfillDeletesDeadEarlierWaiter(t *testing.T) {
 	}); r.Kind != store.AcquireQueued {
 		t.Fatalf("dead: want Queued got %s", r.Kind)
 	}
-	if err := s.FinishRun(ctxT(t), "dead", "failed", "test terminal run"); err != nil {
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).FinishRun(ctxT(t), "dead", "failed", "test terminal run"); err != nil {
 		t.Fatalf("FinishRun(dead): %v", err)
 	}
 	if r := acquireT(t, s, store.AcquireSlotRequest{

@@ -40,13 +40,6 @@ func (d Dialect) String() string {
 	}
 }
 
-func (s *Store) forUpdateSkipLocked() string {
-	if s.dialect == DialectPostgres {
-		return " FOR UPDATE SKIP LOCKED"
-	}
-	return ""
-}
-
 // safety: SQLite's variadic max() is a scalar function; Postgres spells that
 // GREATEST and reserves max for an aggregate, which no WHERE clause accepts.
 func (s *Store) greatest() string {

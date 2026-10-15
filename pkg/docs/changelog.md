@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **store (Breaking):** Remove default-team run/trigger writers, raw node-start and manifest setters, unused source-upload admission and context-carried claim fences. Select a tenant and use its typed lifecycle transactions. Metric retries use the final tenant-keyed schema. See [migration guide](docs/migrations/_unreleased.md#tenant-writes-and-typed-claim-fences).
+
 - **store (Breaking):** Use ordered placement preferences with per-step holds on the store clock. Existing local-first flags configure the preferred runner and everyone else. Only accepted polls refresh placement liveness. Remove unused raw debug-pause writers, ancestor and child-trigger lookups, and legacy node settlement. See [migration guide](docs/migrations/_unreleased.md#ordered-placement-and-unused-store-apis).
 
 - **store (Breaking):** Remove raw plan, step, annotation, summary, activity and approval writers, the old cross-run input resolver and unused `StateStoreOld`. Use sealed acceptance and fenced tenant transitions. Closing an attempt now closes its unfinished steps in the same transaction. See [migration guide](docs/migrations/_unreleased.md#fenced-store-metadata-and-approval-transitions).

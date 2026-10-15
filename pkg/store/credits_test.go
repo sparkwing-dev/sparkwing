@@ -23,7 +23,7 @@ var unpinnedNodeRateMicro = store.DefaultCreditRateTable(store.DefaultCreditRate
 func seedClaimedNode(t *testing.T, s *store.Store, runID, nodeID string) {
 	t.Helper()
 	ctx := context.Background()
-	if err := s.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
 		ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("create run: %v", err)
@@ -171,7 +171,7 @@ func TestRunnerChargesKeepTheRunPrincipalAfterRunDeletion(t *testing.T) {
 	create := func(principal, runID string) {
 		t.Helper()
 		created := store.WithCreatingPrincipal(ctx, principal)
-		if err := s.CreateRun(created, store.Run{
+		if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(created, store.Run{
 			ID: runID, Pipeline: "demo", Status: "running", StartedAt: time.Now(),
 		}); err != nil {
 			t.Fatalf("create run %s: %v", runID, err)

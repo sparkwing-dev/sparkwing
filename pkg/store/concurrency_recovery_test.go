@@ -168,7 +168,7 @@ func TestConcurrency_PromoteUsesRunningRunCreatedBeforeHeartbeatLoop(t *testing.
 		Key: "k", HolderID: "leader", RunID: "leader", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
-	if err := s.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
 		ID:        "queued",
 		Pipeline:  "queued-pipeline",
 		Status:    "running",
@@ -205,7 +205,7 @@ func TestConcurrency_PromotePreservesFreshRunningRunWithNullHeartbeat(t *testing
 		Key: "k", HolderID: "leader", RunID: "leader", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
-	if err := s.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{
 		ID:        "queued",
 		Pipeline:  "queued-pipeline",
 		Status:    "running",
@@ -312,7 +312,7 @@ func TestConcurrency_CoalesceFollowerPromotesWhenLeaderRunEndsWithoutNodeVerdict
 	if follower.Kind != store.AcquireCoalesced {
 		t.Fatalf("follower: want Coalesced got %s", follower.Kind)
 	}
-	if err := s.FinishRun(ctx, "leader", "cancelled", "executor cancelled before node verdict"); err != nil {
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).FinishRun(ctx, "leader", "cancelled", "executor cancelled before node verdict"); err != nil {
 		t.Fatalf("FinishRun: %v", err)
 	}
 

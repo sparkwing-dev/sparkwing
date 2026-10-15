@@ -7,12 +7,13 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func seedRunWithNode(t *testing.T, st *store.Store, runID, nodeID, status string) {
 	t.Helper()
 	ctx := context.Background()
-	if err := st.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
 		ID: runID, Pipeline: "p", Status: status, StartedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("create run %s: %v", runID, err)

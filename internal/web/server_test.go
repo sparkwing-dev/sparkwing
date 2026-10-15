@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -31,19 +32,17 @@ func seedRun(t *testing.T, paths paths.Paths, runID, nodeID, msg string) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if err := st.CreateRun(ctx, store.Run{ID: runID, Pipeline: nodeID, Status: "running", StartedAt: time.Now()}); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{ID: runID, Pipeline: nodeID, Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.StartNode(ctx, runID, nodeID); err != nil {
-		t.Fatal(err)
-	}
+
 	if err := st.FinishNode(ctx, runID, nodeID, "success", "", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.FinishRun(ctx, runID, "success", ""); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).FinishRun(ctx, runID, "success", ""); err != nil {
 		t.Fatal(err)
 	}
 	line, err := json.Marshal(sparkwing.LogRecord{TS: time.Now(), Level: "info", JobID: nodeID, Msg: msg})

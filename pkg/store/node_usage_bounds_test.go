@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestAddNodeUsageRejectsOverflowAtomically(t *testing.T) {
@@ -26,7 +27,7 @@ func TestAddNodeUsageRejectsOverflowAtomically(t *testing.T) {
 			}
 			defer func() { _ = st.Close() }()
 			ctx := t.Context()
-			if err := st.CreateRun(ctx, store.Run{ID: "overflow", Pipeline: "test", Status: "running", StartedAt: time.Now()}); err != nil {
+			if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{ID: "overflow", Pipeline: "test", Status: "running", StartedAt: time.Now()}); err != nil {
 				t.Fatal(err)
 			}
 			if err := st.CreateNode(ctx, store.Node{RunID: "overflow", NodeID: "node", Status: "running"}); err != nil {
@@ -56,7 +57,7 @@ func TestAddNodeUsageAcceptsExactIntegerBoundary(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 	ctx := t.Context()
-	if err := st.CreateRun(ctx, store.Run{ID: "boundary", Pipeline: "test", Status: "running", StartedAt: time.Now()}); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{ID: "boundary", Pipeline: "test", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.CreateNode(ctx, store.Node{RunID: "boundary", NodeID: "node", Status: "running"}); err != nil {

@@ -655,58 +655,12 @@ type RunPullRequest struct {
 	HeadSHA string `json:"head_sha,omitempty"`
 }
 
-// CreateRun inserts a run row, or upgrades an existing 'pending' row
-// (controller-pre-allocated at trigger-intake) to the
-// caller's status. Idempotent for the (pending -> running) transition
-// the orchestrator performs at start-of-run; non-pending existing rows
-// are left untouched so this stays a no-op on retry / replay paths.
-// The repository identity (repo, repo URL, GitHub owner and name) is
-// written once, at the insert that first names it, and every later
-// upsert keeps it: secret resolution reads it, so a caller that can
-// upsert a run must not be able to repoint it.
-func (s *Store) CreateRun(ctx context.Context, r Run) error {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	// safety: this method has not moved to Tenant yet, so it writes the
-	// team the column's default writes; a run it created landing in any
-	// other team would be invisible to the install that asked for it.
-	if err := s.createRunTx(ctx, tx, DefaultTeam, r); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-// CreateTriggerWithRun writes a trigger and the pending run it names in one
-// transaction, so a guard that refuses the run leaves no trigger behind for a
-// worker to claim. It maps the same duplicate-key errors [Store.CreateTrigger]
-// does.
-func (s *Store) CreateTriggerWithRun(ctx context.Context, t Trigger, r Run) error {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	if err := createTriggerTx(ctx, tx, DefaultTeam, t); err != nil {
-		return err
-	}
-	if err := s.createRunTx(ctx, tx, DefaultTeam, r); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 func (s *Store) createRunTx(ctx context.Context, tx *storeTx, team Team, r Run) error {
 	if err := ValidateRunInvocation(r); err != nil {
 		return err
 	}
 	if r.FinishedAt != nil && !isTerminalRunStatus(r.Status) {
 		return fmt.Errorf("%w: a non-terminal run cannot have finished_at", ErrInvalidInput)
-	}
-	if err := s.assertRunMutationFenceTx(ctx, tx, team, r.ID); err != nil {
-		return err
 	}
 	argsJSON, _ := json.Marshal(r.Args)
 	var invocationJSON []byte
@@ -854,22 +808,6 @@ func finishRunOnceTx(ctx context.Context, tx *storeTx, runID, status, errMsg str
 		return nil
 	}
 	return fmt.Errorf("%w: run %s already finished as %s", ErrInvalidInput, runID, priorStatus)
-}
-
-// FinishRun marks a run terminal with the given status and optional error.
-func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) error {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := s.assertRunMutationFenceTx(ctx, tx, DefaultTeam, runID); err != nil {
-		return err
-	}
-	if err := finishRunOnceTx(ctx, tx, runID, status, errMsg, DefaultTeam); err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 // safety: every run read shares this list, because a column added to runs
@@ -1372,9 +1310,6 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 	if err != nil {
 		return err
 	}
-	if err := s.assertRunMutationFenceTx(ctx, tx, team, n.RunID); err != nil {
-		return err
-	}
 	if err := enforceNodesPerRunTx(ctx, tx, team, n.RunID, n.NodeID); err != nil {
 		return err
 	}
@@ -1417,41 +1352,6 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 	return tx.Commit()
 }
 
-// StartNode marks a node as running and stamps started_at.
-//
-// It is idempotent for a node that has not finished, which is what a
-// re-executed node needs: a bounced node's replacement process calls
-// it again, and the fresh stamp is what makes the node's recorded
-// duration measure the attempt that survived.
-//
-// It will not reopen a node that already recorded its outcome. A
-// terminal row is the executing process's own verdict and the last
-// word on the node -- FinishNodeWithReason refuses to overwrite one
-// for the same reason -- so a start arriving after it is a no-op
-// rather than a resurrection. Without that guard a re-execution racing
-// a terminal write would flip the row back to running with its outcome
-// still attached, and the second execution's finish, which the
-// terminal guard would otherwise have refused, would land on a node
-// that had already succeeded.
-//
-// A no-op is silent: every caller starts a node it is about to
-// execute and finish, and none reads the row count.
-func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error {
-	return s.defaultTenant().StartNode(ctx, runID, nodeID)
-}
-
-// StartNode is [Store.StartNode] confined to t's team.
-func (t *Tenant) StartNode(ctx context.Context, runID, nodeID string) error {
-	res, fenced, err := t.execNodeMutation(ctx, runID, nodeID, `
-UPDATE nodes SET status = ?, started_at = ?
- WHERE team = ? AND run_id = ? AND node_id = ? AND status != ?`,
-		nodeStatusRunning, time.Now().UnixNano(), string(t.team), runID, nodeID, nodeStatusDone)
-	if err != nil {
-		return err
-	}
-	return fencedRows(res, fenced)
-}
-
 // FinishNode marks terminal with outcome + optional output/error.
 func (s *Store) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error {
 	return s.FinishNodeWithReason(ctx, runID, nodeID, outcome, errMsg, output, FailureUnknown, nil)
@@ -1491,9 +1391,6 @@ func (t *Tenant) finishNode(ctx context.Context, runID, nodeID, outcome, errMsg 
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := t.s.assertNodeMutationFenceTx(ctx, tx, t.team, runID, nodeID); err != nil {
-		return err
-	}
 	var team string
 	var generation, consumed int64
 	err = tx.QueryRowContext(ctx, `SELECT team, claim_generation, attempts_consumed FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(), string(t.team), runID, nodeID).Scan(&team, &generation, &consumed)
@@ -1516,9 +1413,6 @@ UPDATE nodes
 		nodeStatusDone, outcome, errMsg, time.Now().UnixNano(), reason, code,
 		string(t.team), runID, nodeID, nodeStatusDone)
 	if err != nil {
-		return err
-	}
-	if err := fencedRows(res, hasClaimFence(ctx)); err != nil {
 		return err
 	}
 	if n, err := res.RowsAffected(); err != nil {
@@ -1549,25 +1443,6 @@ UPDATE node_steps SET status = ?, finished_at = ?
  WHERE team = ? AND run_id = ? AND node_id = ? AND status = ?`,
 		status, time.Now().UnixNano(), team, runID, nodeID, StepRunning)
 	return err
-}
-
-// SetNodeArtifactManifest records the content-addressed digest of a
-// node's published-artifact manifest. Written before the terminal
-// FinishNode flip so a consumer dispatched on completion always sees
-// the reference. Empty digest is a no-op-equivalent clear.
-func (s *Store) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error {
-	return s.defaultTenant().SetNodeArtifactManifest(ctx, runID, nodeID, manifestDigest)
-}
-
-// SetNodeArtifactManifest is [Store.SetNodeArtifactManifest] confined to t's team.
-func (t *Tenant) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error {
-	res, fenced, err := t.execNodeMutation(ctx, runID, nodeID,
-		`UPDATE nodes SET artifact_manifest = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
-		manifestDigest, string(t.team), runID, nodeID)
-	if err != nil {
-		return err
-	}
-	return fencedRows(res, fenced)
 }
 
 // NodeUsage is the kernel's exit accounting for one process that
@@ -1609,9 +1484,6 @@ func (t *Tenant) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeU
 		return err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := t.s.assertNodeMutationFenceTx(ctx, tx, t.team, runID, nodeID); err != nil {
-		return err
-	}
 	var cpu, wall int64
 	err = tx.QueryRowContext(ctx, `SELECT cpu_nanos, process_wall_nanos FROM nodes
  WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(), string(t.team), runID, nodeID).Scan(&cpu, &wall)
@@ -1630,7 +1502,7 @@ func (t *Tenant) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeU
 	if wall > math.MaxInt64-int64(u.Wall) {
 		return errors.New("node wall time overflow")
 	}
-	result, err := tx.ExecContext(ctx, `
+	_, err = tx.ExecContext(ctx, `
 UPDATE nodes
    SET cpu_nanos = cpu_nanos + ?,
        process_wall_nanos = process_wall_nanos + ?,
@@ -1638,9 +1510,6 @@ UPDATE nodes
  WHERE team = ? AND run_id = ? AND node_id = ?`,
 		int64(u.CPUTime), int64(u.Wall), u.MaxRSSBytes, u.MaxRSSBytes, string(t.team), runID, nodeID)
 	if err != nil {
-		return err
-	}
-	if err := fencedRows(result, hasClaimFence(ctx)); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -2016,13 +1885,6 @@ func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, pay
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if nodeID != "" {
-		if err := s.assertNodeMutationFenceInRunsTeamTx(ctx, tx, runID, nodeID); err != nil {
-			return err
-		}
-	} else if err := s.assertRunMutationFenceInRunsTeamTx(ctx, tx, runID); err != nil {
-		return err
-	}
 	if _, err := appendRunEventTx(ctx, tx, runID, nodeID, kind, payload, time.Now()); err != nil {
 		return err
 	}
@@ -2064,20 +1926,6 @@ func appendRunEventTx(ctx context.Context, tx *storeTx, runID, nodeID, kind stri
 		return 0, err
 	}
 	return appendEventTx(ctx, tx, team, runID, nodeID, kind, payload, at)
-}
-
-// safety: an append bumps the run row's event counters, so it takes the run's
-// row lock before the event-sequence lock, the order a claim round takes
-// them in; the other order deadlocks the two on PostgreSQL.
-func lockEventSequenceTx(ctx context.Context, tx *storeTx, team Team, runID string) error {
-	if tx.dialect != DialectPostgres {
-		return nil
-	}
-	if err := lockStateRunTx(ctx, tx, team, runID); err != nil {
-		return err
-	}
-	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, runID)
-	return err
 }
 
 // ErrNotFound is returned when a lookup misses.
@@ -2279,21 +2127,6 @@ const MaxLeaseDuration = 10 * time.Minute
 type ClaimIdentity struct {
 	Principal   string
 	TokenPrefix string
-}
-
-// CreateTrigger inserts a new trigger with status='pending'.
-func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	// safety: the unscoped twin writes [DefaultTeam], the team the migration
-	// put every pre-tenant row in.
-	if err := createTriggerTx(ctx, tx, DefaultTeam, t); err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 func createTriggerTx(ctx context.Context, tx *storeTx, team Team, t Trigger) error {

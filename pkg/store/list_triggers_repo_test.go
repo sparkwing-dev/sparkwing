@@ -24,7 +24,7 @@ func TestListTriggers_RepoFilterLooksPastTheFirstPage(t *testing.T) {
 
 	seedRepoTrigger := func(id, repo string, created time.Time) {
 		t.Helper()
-		if err := s.CreateTrigger(ctx, store.Trigger{
+		if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{
 			ID:         id,
 			Pipeline:   "demo",
 			CreatedAt:  created,
@@ -62,7 +62,7 @@ func TestListTriggers_RepoFilterHonoursLimit(t *testing.T) {
 		if i%2 == 0 {
 			repo = "other/repo"
 		}
-		if err := s.CreateTrigger(ctx, store.Trigger{
+		if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{
 			ID:         fmt.Sprintf("t-%02d", i),
 			Pipeline:   "demo",
 			CreatedAt:  base.Add(time.Duration(i) * time.Minute),
@@ -98,7 +98,7 @@ func TestListTriggers_RepoFilterCrossesAPageBoundary(t *testing.T) {
 
 	seed := func(id, repo string, created time.Time) {
 		t.Helper()
-		if err := s.CreateTrigger(ctx, store.Trigger{
+		if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{
 			ID:         id,
 			Pipeline:   "demo",
 			CreatedAt:  created,
@@ -139,7 +139,7 @@ func TestListTriggers_RepoFilterTiedTimestampsAcrossPages(t *testing.T) {
 		if i%130 == 0 {
 			repo = "want/repo"
 		}
-		if err := s.CreateTrigger(ctx, store.Trigger{
+		if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{
 			ID:         fmt.Sprintf("t-%03d", i),
 			Pipeline:   "demo",
 			CreatedAt:  tied,
@@ -173,7 +173,7 @@ func TestListTriggers_RepoFilterWarnsWhenItStopsAtTheHorizon(t *testing.T) {
 	base := time.Now().Add(-24 * time.Hour)
 
 	for i := 0; i < 5100; i++ {
-		if err := s.CreateTrigger(ctx, store.Trigger{
+		if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{
 			ID:         fmt.Sprintf("other-%04d", i),
 			Pipeline:   "demo",
 			CreatedAt:  base.Add(time.Duration(i) * time.Second),

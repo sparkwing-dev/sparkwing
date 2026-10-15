@@ -35,7 +35,7 @@ func TestFinishNodeWithOutputRef_RefusesAnotherRunsObject(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := t.Context()
 	for _, run := range []string{"run-fin-a", "run-fin-b"} {
-		if err := s.CreateRun(ctx, store.Run{ID: run, Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+		if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{ID: run, Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
 			t.Fatal(err)
 		}
 		if err := s.CreateNode(ctx, store.Node{RunID: run, NodeID: "n", Status: "running"}); err != nil {
@@ -56,7 +56,7 @@ func TestFinishNode_KeepsLocalOutputBytesBesideTheStore(t *testing.T) {
 	s := storetest.Open(t)
 	s.SetOutputDir(t.TempDir())
 	ctx := context.Background()
-	if err := s.CreateRun(ctx, store.Run{ID: "run-local", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{ID: "run-local", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.CreateNode(ctx, store.Node{RunID: "run-local", NodeID: "n", Status: "running"}); err != nil {
@@ -86,7 +86,7 @@ func TestFinishNode_HoldsALocalRunToItsOutputLimit(t *testing.T) {
 	s := storetest.Open(t)
 	s.SetOutputDir(t.TempDir())
 	ctx := t.Context()
-	if err := s.CreateRun(ctx, store.Run{ID: "run-full", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{ID: "run-full", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	for _, n := range []string{"big", "last"} {
@@ -110,7 +110,7 @@ func TestFinishNode_HoldsALocalRunToItsOutputLimit(t *testing.T) {
 func TestGetNodeOutput_ReportsBadOrMissingBytes(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := t.Context()
-	if err := s.CreateRun(ctx, store.Run{ID: "run-a", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+	if err := teststore.ForTeam(t, s, store.DefaultTeam).CreateRun(ctx, store.Run{ID: "run-a", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.CreateNode(ctx, store.Node{RunID: "run-a", NodeID: "n", Status: "running"}); err != nil {

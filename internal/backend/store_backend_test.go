@@ -10,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func newTestStore(t *testing.T) (*store.Store, paths.Paths) {
@@ -52,7 +53,7 @@ func TestStoreBackend_RunsRoundTrip(t *testing.T) {
 	ctx := context.Background()
 
 	now := time.Now().UTC().Truncate(time.Second)
-	if err := st.CreateRun(ctx, store.Run{
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
 		ID: "r1", Pipeline: "demo", Status: "running", StartedAt: now,
 	}); err != nil {
 		t.Fatal(err)

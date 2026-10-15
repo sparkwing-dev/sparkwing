@@ -27,7 +27,7 @@ func TestListRunsFiltersGitIdentityBeforeLimit(t *testing.T) {
 		{ID: "newer-b", Pipeline: "push", Status: "failed", GitSHA: "fed654", GitBranch: "topic", RepoURL: "https://example.com/other/app.git"},
 	} {
 		run.StartedAt = time.Unix(int64(i+1), 0)
-		if err := st.CreateRun(ctx, run); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, run); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -103,7 +103,7 @@ func TestListRunsClampsLimitToOneRowAboveTheCap(t *testing.T) {
 
 	ctx := context.Background()
 	for i := range store.MaxRunListLimit + 5 {
-		if err := st.CreateRun(ctx, store.Run{
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{
 			ID:        "run-" + strconv.Itoa(i),
 			Pipeline:  "push",
 			Status:    "passed",
@@ -131,7 +131,7 @@ func TestListTriggersClampsLimitToTheCap(t *testing.T) {
 
 	ctx := context.Background()
 	for i := range store.MaxRunListLimit + 5 {
-		if err := st.CreateTrigger(ctx, store.Trigger{
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateTrigger(ctx, store.Trigger{
 			ID:        "tg-" + strconv.Itoa(i),
 			Pipeline:  "push",
 			CreatedAt: time.Unix(int64(i+1), 0),
@@ -157,7 +157,7 @@ func TestListEventsAfterClampsLimitToTheCap(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 
 	ctx := context.Background()
-	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "push", Status: "running"}); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "push", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
 	for range store.MaxRunListLimit + 5 {
