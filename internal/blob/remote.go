@@ -15,7 +15,8 @@ type remoteCache struct {
 	readable map[Digest]bool
 }
 
-func openRemoteCache(options RemoteCacheOptions, store Store) (RemoteCache, error) {
+// OpenRemoteCache opens read-only storage with a repo-bound user authority.
+func OpenRemoteCache(options RemoteCacheOptions, store Store) (RemoteCache, error) {
 	if options.Profile == "" || options.AuthorityRef == "" || options.Repo == "" || options.Records == nil || store == nil {
 		return nil, fmt.Errorf("remote cache requires a profile, repository authority, records and signed store")
 	}

@@ -45,9 +45,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"globalRunsPerHourRefusal":          "the global hourly cap counts runs from every team",
 	"(*Store).NodeClaimFenceNodeForRun": "the run ID is global, and the query matches its exact claimant and generation",
 	"runOwnerTx":                        "asks which team owns an id, so an answer scoped to the asker is no answer",
-	"(*Store).NodeOutputKey":            "the run ID is global, and the key only names an attempt the upload's own check binds",
-	"(*Store).RecordLocalOutput": "a laptop store records an output its own process wrote for a node it holds; " +
-		"the run ID is global and the row takes that node's team",
 	"(*Store).claimScope": "asks which team a claim credential belongs to, so an answer scoped to " +
 		"the asker is no answer; it is the read every other claim predicate is built from",
 	"(*Store).readClaimCandidates": "the team predicate comes from claimTeamWhere at run time; " +

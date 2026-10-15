@@ -13,6 +13,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
+// ObjectBackend owns verified publication, tenant manifest reads and physical deletion.
+type ObjectBackend interface {
+	capability.DataSigner
+	CommitObject(context.Context, string, Blob) error
+	DeleteObject(context.Context, string) error
+	DeleteBlob(context.Context, Blob) error
+	ReadManifest(context.Context, string, Digest) ([]Member, error)
+	VerifyBlob(context.Context, Blob) error
+}
+
 func validateObject(o capability.ObjectToSign, now time.Time) error {
 	if o.Size < 0 || !validDigest(Digest(o.SHA256)) || !o.ExpiresAt.After(now) {
 		return fmt.Errorf("invalid signed object size, digest or expiry")

@@ -232,7 +232,7 @@ func TestFinishNode_SettlesStepsStillRunning(t *testing.T) {
 			if err := s.FinishNodeStep(ctx, "run-1", "node-a", "done", store.StepPassed); err != nil {
 				t.Fatalf("FinishNodeStep: %v", err)
 			}
-			if err := s.FinishNode(ctx, "run-1", "node-a", tc.outcome, "", nil); err != nil {
+			if err := s.FinishNode(ctx, "run-1", "node-a", tc.outcome, ""); err != nil {
 				t.Fatalf("FinishNode: %v", err)
 			}
 			steps, err := s.ListNodeSteps(ctx, "run-1")

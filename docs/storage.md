@@ -56,6 +56,11 @@ writes cannot overwrite verified branch entries. Memo reads its own scope
 before a verified default-branch fallback. Dependency caches try their own
 ref, the pull-request base, then the verified default branch.
 
+Outputs use the terminal result's committed record selector and verified blob
+bytes. The old store-local output directory, inline byte writes, signed output
+grants and obsolete scheduler are removed. Native hosts consume `StorageBinding`
+and `OutputRecords.ReadResult`.
+
 Memo materialization uses `RecordStore.CopyMemo` to authorize and copy output
 and manifest records in one transaction. The old `output_from` attempt payload
 and `Store.FinishNodeCopyingOutput` are removed. Neither can attach an output
@@ -158,8 +163,10 @@ Authentication and award issuance remain fixtures.
 <!-- design:end -->
 
 Retained log reads select tagged subjects from the tenant's committed run view.
-The controller verifies each persisted segment through the configured blob backend
-and rechecks read authority before serving a live-ring continuation. Filesystem
+The controller rechecks read authority before each persisted segment and each
+live-ring continuation. It verifies each segment through the configured blob
+backend before sending its bytes. Filesystem
 and S3 dashboards use this same reader. Local run-directory logs and the separate
-raw S3 log reader are removed. Deployment bucket measurements use the read-only
+raw S3 log reader are removed. The separate live-ring backend and web fallback
+are removed too. The committed reader owns ring continuation. Deployment bucket measurements use the read-only
 `MeasurementStore` and cannot publish or read object payloads.

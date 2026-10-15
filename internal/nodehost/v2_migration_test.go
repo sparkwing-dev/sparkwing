@@ -1,21 +1,13 @@
 package nodehost
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"os"
-	"runtime"
-	"slices"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestV2SessionRequiresGrantedIdentity(t *testing.T) {
@@ -61,33 +53,6 @@ func FuzzV2SessionRefusesIncompleteIdentity(f *testing.F) {
 	})
 }
 
-func TestV2SessionHelloKeepsAuthorityOffEnvironment(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("fixture uses Unix protocol descriptors")
-	}
-	executable, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	binding := &nodeproto.ProcessBinding{RunID: "r", JobID: "build", Routes: nodeproto.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "test-route-authority"}}
-	runner := nodeproto.RunnerIdentity{Name: "granted-runner", Type: "cloud", Labels: []string{"linux"}}
-	sess, err := StartSession(t.Context(), SessionConfig{
-		Entry: pipelineentry.Command{executable, "-test.run=^TestV2SDKProcess$", "--"},
-		Env:   []string{"SPARKWING_TEST_V2_SDK=1"}, Engine: nodeproto.EngineIdentity{Version: "v1.2.3"}, Runner: runner, Binding: binding, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sess.Close()
-	var got nodeproto.Request
-	if err := ask(t.Context(), sess, nodeproto.Request{Op: nodeproto.OpDescribe}, &got); err != nil {
-		t.Fatal(err)
-	}
-	if got.Op != nodeproto.OpHello || got.Engine.Version != "v1.2.3" || got.Runner.Name != runner.Name || got.Binding.Routes.Bearer != binding.Routes.Bearer {
-		t.Fatalf("wrong hello: %+v", got)
-	}
-}
-
 func TestV2SDKProcess(t *testing.T) {
 	if os.Getenv("SPARKWING_TEST_V2_SDK") != "1" {
 		return
@@ -122,103 +87,3 @@ func TestV2SDKProcess(t *testing.T) {
 type noV2Secrets struct{}
 
 func (noV2Secrets) ContainsSecret(string) bool { return false }
-
-func TestV2DriftChecksDeclarationFields(t *testing.T) {
-	accepted := nodeproto.JobSpec{ID: "build", Steps: []nodeproto.StepSpec{{ID: "run"}}, ResultStep: "run"}
-	raw, err := json.Marshal(nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{accepted}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := checkDrift(raw, accepted, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}); err != nil {
-		t.Fatal(err)
-	}
-	changed := accepted
-	changed.Optional = true
-	var refusal *apierr.Error
-	if err := checkDrift(raw, changed, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}); !errors.As(err, &refusal) || refusal.Code != apierr.PlanDrift {
-		t.Fatalf("changed declaration: %v", err)
-	}
-}
-
-func TestV2AfterRunPreservesCanonicalFailure(t *testing.T) {
-	failure := &apierr.Error{Code: apierr.DeadlineExceeded, Message: "attempt deadline", Details: map[string]any{"job": "build"}}
-	got := afterRunArgOf(Result{Outcome: sparkwing.Failed, Err: failure})
-	if got.Outcome != "failed" || got.Error != failure {
-		t.Fatalf("failure lost: %+v", got)
-	}
-	if got := afterRunArgOf(Result{Outcome: sparkwing.Success}); got.Outcome != "success" || got.Error != nil {
-		t.Fatalf("success: %+v", got)
-	}
-}
-
-type v2Admitter struct{ requests []wingwire.AdmissionRequest }
-
-func (a *v2Admitter) Acquire(_ context.Context, req wingwire.AdmissionRequest, _ func(wingwire.Queued)) (Lease, error) {
-	a.requests = append(a.requests, req)
-	return &v2Lease{done: make(chan struct{})}, nil
-}
-
-type v2Lease struct{ done chan struct{} }
-
-func (*v2Lease) Token() string                                               { return "lease" }
-func (l *v2Lease) Release() error                                            { close(l.done); return nil }
-func (l *v2Lease) Watch(func(wingwire.Evicted), func(wingwire.Cancel)) error { <-l.done; return nil }
-
-func TestV2MultipleLocalConcurrencyGroupsShareResourceLease(t *testing.T) {
-	daemon := &v2Admitter{}
-	cores := 2.0
-	node := &NodeRun{Run: &Run{ID: "r", Pipeline: "ci", validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}, Plan: nodeproto.JobSpec{
-		ID: "build", Resources: &nodeproto.ResourceSpec{Cores: &cores},
-		Concurrency: []nodeproto.ConcurrencySpec{{Group: "b", Scope: new(string("run")), Capacity: new(int(1)), Cost: new(int(1)), OnLimit: new(string("queue"))}, {Group: "a", Scope: new(string("box")), Capacity: new(int(2)), Cost: new(int(1)), OnLimit: new(string("queue"))}}, Steps: []nodeproto.StepSpec{{ID: "body"}},
-	}}
-	admission := &Admission{Daemon: daemon, BoxID: func() string { return "machine" }}
-	result := admission.admit(t.Context(), node, func(context.Context, *NodeRun) Result { return Result{Outcome: sparkwing.Success} })
-	if result.Outcome != sparkwing.Success {
-		t.Fatalf("admission: %+v", result)
-	}
-	if len(daemon.requests) != 1 {
-		t.Fatalf("resource leases: %d", len(daemon.requests))
-	}
-	req := daemon.requests[0]
-	if len(req.Semaphores) != 2 || req.Resources.Cores != cores || req.SemaphoresOnly {
-		t.Fatalf("claims: %+v", req)
-	}
-	if req.Semaphores[0].Name != "box:machine:a" || req.Semaphores[1].Name != "run:r:b" {
-		t.Fatalf("scope/order: %+v", req.Semaphores)
-	}
-}
-
-func TestV2RetryBudgetCountsAdditionalAttempts(t *testing.T) {
-	timeout, backoff := int64(100), int64(10)
-	job := nodeproto.JobSpec{TimeoutMS: &timeout, Retry: &nodeproto.RetrySpec{Attempts: 2, BackoffMS: &backoff}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
-	if got := AttemptsBudget(job); got != 330*time.Millisecond {
-		t.Fatalf("budget = %v", got)
-	}
-}
-
-func TestV2AttemptEnvironmentSeparatesStartupAndBody(t *testing.T) {
-	base := SessionConfig{Env: []string{"PATH=/bin", "SPARKWING_NODE_TOKEN=old", "SPARKWING_NODE_URL=old", "DOCKER_HOST=tcp://captured:2375", "SPARKWING_RUNNER_NAME=forged"}, Runner: nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}}
-	node := &NodeRun{Run: &Run{ID: "run"}, Plan: nodeproto.JobSpec{ID: "build", Env: map[string]nodeproto.EnvValue{"NODE_OPTIONS": {Value: "--max-old-space-size=2048"}, "GOMAXPROCS": {Value: "2"}, "BODY": {Value: "later"}, "DOCKER_HOST": {Value: "tcp://declared:2375"}}}}
-	startup, cleanup, err := attemptEnvironments(base, node)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range []string{"PATH=/bin", "NODE_OPTIONS=--max-old-space-size=2048", "GOMAXPROCS=2", "DOCKER_HOST=tcp://captured:2375", "SPARKWING_RUNNER_NAME=granted"} {
-		if !slices.Contains(startup, entry) {
-			t.Fatalf("startup omitted %s: %v", entry, startup)
-		}
-	}
-	for _, entry := range []string{"NODE_OPTIONS=--max-old-space-size=2048", "GOMAXPROCS=2", "DOCKER_HOST=tcp://declared:2375", "BODY=later", "SPARKWING_RUNNER_NAME=granted"} {
-		if !slices.Contains(cleanup, entry) {
-			t.Fatalf("cleanup omitted %s: %v", entry, cleanup)
-		}
-	}
-	all := strings.Join(slices.Concat(startup, cleanup), "\n")
-	if slices.Contains(startup, "BODY=later") || slices.Contains(cleanup, "DOCKER_HOST=tcp://captured:2375") || strings.Contains(all, "=old") || strings.Contains(all, "=forged") {
-		t.Fatal("environment mixed startup/body values or inherited host authority")
-	}
-	node.Plan.Env["SPARKWING_RUNNER_NAME"] = nodeproto.EnvValue{Value: "forged"}
-	if startup, cleanup, err := attemptEnvironments(base, node); err == nil || startup != nil || cleanup != nil {
-		t.Fatal("invalid declaration produced a partial environment")
-	}
-}

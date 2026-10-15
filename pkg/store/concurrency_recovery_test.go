@@ -446,7 +446,7 @@ func TestConcurrency_CoalesceFollowerPromotesAfterFailedLeaderRelease(t *testing
 	if follower.Kind != store.AcquireCoalesced {
 		t.Fatalf("follower: want Coalesced got %s", follower.Kind)
 	}
-	if err := s.FinishNode(ctx, "leader", "node", "failed", "command terminated", nil); err != nil {
+	if err := s.FinishNode(ctx, "leader", "node", "failed", "command terminated"); err != nil {
 		t.Fatalf("FinishNode: %v", err)
 	}
 	released, followers, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, "cache-failed-release", "leader/node", "failed", "", "same-content", time.Hour, 0)
@@ -501,7 +501,7 @@ func TestConcurrency_CoalesceFollowerPromotesAfterSkippedLeaderRelease(t *testin
 	if follower.Kind != store.AcquireCoalesced {
 		t.Fatalf("follower: want Coalesced got %s", follower.Kind)
 	}
-	if err := s.FinishNode(ctx, "leader", "node", "skipped", "", nil); err != nil {
+	if err := s.FinishNode(ctx, "leader", "node", "skipped", ""); err != nil {
 		t.Fatalf("FinishNode: %v", err)
 	}
 	released, followers, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, "cache-skipped-release", "leader/node", "skipped", "", "same-content", time.Hour, 0)
@@ -613,7 +613,7 @@ func TestConcurrency_CoalesceFollowerPromotesAfterLeaderAgentLost(t *testing.T) 
 	if follower.Kind != store.AcquireCoalesced {
 		t.Fatalf("follower: want Coalesced got %s", follower.Kind)
 	}
-	if err := s.FinishNodeWithReason(ctx, "leader", "node", "failed", "runner heartbeat expired", nil, store.FailureAgentLost, nil); err != nil {
+	if err := s.FinishNodeWithReason(ctx, "leader", "node", "failed", "runner heartbeat expired", store.FailureAgentLost, nil); err != nil {
 		t.Fatalf("FinishNodeWithReason: %v", err)
 	}
 	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
@@ -663,7 +663,7 @@ func TestConcurrency_CoalesceFollowerPromotesAfterLeaderAgentLostRelease(t *test
 	if follower.Kind != store.AcquireCoalesced {
 		t.Fatalf("follower: want Coalesced got %s", follower.Kind)
 	}
-	if err := s.FinishNodeWithReason(ctx, "leader", "node", "failed", "runner heartbeat expired", nil, store.FailureAgentLost, nil); err != nil {
+	if err := s.FinishNodeWithReason(ctx, "leader", "node", "failed", "runner heartbeat expired", store.FailureAgentLost, nil); err != nil {
 		t.Fatalf("FinishNodeWithReason: %v", err)
 	}
 	released, followers, _, err := tenantFor(t, s, store.DefaultTeam).ReleaseAndNotify(ctx, "cache-agent-lost-release", "leader/node", "failed", "", "same-content", time.Hour, 0)
@@ -692,7 +692,7 @@ func TestConcurrency_CoalesceFollowerRejectsNonReusableCompletedOutcomes(t *test
 			s := storetest.Open(t)
 			ctx := ctxT(t)
 			seedRunAndNode(t, s, "leader", "node")
-			if err := s.FinishNode(ctx, "leader", "node", outcome, "", nil); err != nil {
+			if err := s.FinishNode(ctx, "leader", "node", outcome, ""); err != nil {
 				t.Fatalf("FinishNode: %v", err)
 			}
 

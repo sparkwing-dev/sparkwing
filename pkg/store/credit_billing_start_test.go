@@ -216,7 +216,7 @@ func TestSetupRefundFollowsWhoseFailureItWas(t *testing.T) {
 			if billed <= store.MinBillableSeconds*unpinnedNodeRateMicro {
 				t.Fatalf("billed %d before the failure, want setup past the minimum", billed)
 			}
-			if err := s.FinishNodeWithReason(ctx, n.RunID, n.NodeID, tc.outcome, "stopped", nil, tc.reason, nil); err != nil {
+			if err := s.FinishNodeWithReason(ctx, n.RunID, n.NodeID, tc.outcome, "stopped", tc.reason, nil); err != nil {
 				t.Fatalf("finish: %v", err)
 			}
 			if _, err := s.FinalizeNodeCredits(ctx, n.RunID, n.NodeID, claimant.TokenPrefix, time.Now()); err != nil {

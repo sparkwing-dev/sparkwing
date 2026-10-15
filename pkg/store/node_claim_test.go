@@ -332,7 +332,7 @@ func TestNodeClaim_DoneNodesNotClaimable(t *testing.T) {
 	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.FinishNode(ctx, "run-1", "node-a", "success", "", []byte(`"ok"`)); err != nil {
+	if err := s.FinishNode(ctx, "run-1", "node-a", "success", ""); err != nil {
 		t.Fatal(err)
 	}
 	_, err := s.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "runner-principal", TokenPrefix: "swr_runner-principal"}, "pod-1", 30*time.Second, nil)

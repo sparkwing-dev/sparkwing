@@ -338,7 +338,7 @@ func TestStoreFinishRefusesAnotherTeamsNode(t *testing.T) {
 	if err := st.CreateNode(ctx, store.Node{RunID: "run-a", NodeID: "build", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	err := st.FinishNodeWithReason(ctx, "run-a", "build", "success", "", []byte(`{"ok":true}`), store.FailureUnknown, nil)
+	err := st.FinishNodeWithReason(ctx, "run-a", "build", "success", "", store.FailureUnknown, nil)
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("FinishNodeWithReason on acme's node = %v, want ErrNotFound", err)
 	}

@@ -2,6 +2,8 @@ package store_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"testing"
 	"time"
@@ -133,4 +135,9 @@ func TestClaimLaunch_ReservesAtTheClaimAndBillsFromTheFirstRenewal(t *testing.T)
 	if got, want := balance(), granted-reserved-10*rate; got != want {
 		t.Fatalf("balance at the end = %d, want %d: the minimum and ten seconds from the renewal", got, want)
 	}
+}
+
+func digestOf(body []byte) string {
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
 }

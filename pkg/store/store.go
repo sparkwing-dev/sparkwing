@@ -115,7 +115,6 @@ type Store struct {
 	csrfCipher       SessionKeyCipher
 	launchResumeMu   sync.Mutex
 	launchResume     *launchCursor
-	outputDir        string
 	githubCheckMu    sync.Mutex
 }
 
@@ -177,7 +176,6 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	st.outputDir = filepath.Dir(path)
 	return st, nil
 }
 
@@ -293,11 +291,7 @@ func sqliteReadOnlyDSNWithMode(path string, immutable bool) string {
 // its own Open). Opening a database whose schema this binary doesn't
 // understand surfaces as query errors at read time, not here.
 func OpenReadOnly(path string) (*Store, error) {
-	st, err := openReadOnlyDSN(sqliteReadOnlyDSN(path))
-	if err == nil {
-		st.outputDir = filepath.Dir(path)
-	}
-	return st, err
+	return openReadOnlyDSN(sqliteReadOnlyDSN(path))
 }
 
 // OpenReadOnlySnapshot copies a stable database-and-WAL pair from an existing
@@ -328,7 +322,6 @@ func OpenReadOnlySnapshot(path string) (*Store, error) {
 		return nil, err
 	}
 	st.cleanup = cleanup
-	st.outputDir = filepath.Dir(path)
 	return st, nil
 }
 
@@ -1080,7 +1073,6 @@ func (f RunFilter) HasBeforeCursor() bool { return f.BeforeID != "" }
 // by f. The cursor clause depends on that order.
 //
 // Scope: this reads every team. Tenant callers use [Tenant.ListRuns].
-// The raw method remains part of pkg/storage.StateStoreOld.
 func (s *Store) ListRuns(ctx context.Context, f RunFilter) (_ []*Run, err error) {
 	return s.listRuns(ctx, allTeams(), f)
 }
@@ -1669,26 +1661,14 @@ func (t *Tenant) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps 
 	return fencedRows(res, fenced)
 }
 
-// FinishNode marks terminal with outcome + optional output/error.
-func (s *Store) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error {
-	return s.FinishNodeWithReason(ctx, runID, nodeID, outcome, errMsg, output, FailureUnknown, nil)
+// FinishNode records terminal outcome and error metadata.
+func (s *Store) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string) error {
+	return s.FinishNodeWithReason(ctx, runID, nodeID, outcome, errMsg, FailureUnknown, nil)
 }
 
-// FinishNodeWithReason additionally records a Failure* code + exit. Output
-// bytes are written to the store's own output directory, so only a store
-// with one ([Store.OutputDir]) accepts them.
-func (s *Store) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error {
-	// safety: the output is written into the node's own team and the finish
-	// below is the default team's, so a node of another team is refused before
-	// its bytes are stored and charged.
-	if _, err := s.defaultTenant().GetNode(ctx, runID, nodeID); err != nil {
-		return err
-	}
-	ref, err := s.writeLocalOutput(ctx, runID, nodeID, output)
-	if err != nil {
-		return fmt.Errorf("%w: %w", ErrOutputNotStored, err)
-	}
-	return s.defaultTenant().FinishNodeWithOutputRef(ctx, runID, nodeID, outcome, errMsg, ref, reason, exitCode)
+// FinishNodeWithReason records terminal metadata and its failure reason.
+func (s *Store) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, reason string, exitCode *int) error {
+	return s.defaultTenant().FinishNodeWithOutputRef(ctx, runID, nodeID, outcome, errMsg, nil, reason, exitCode)
 }
 
 // FinishNodeWithOutputRef finishes a node whose output, when there is one,

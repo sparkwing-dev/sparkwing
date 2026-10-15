@@ -171,12 +171,6 @@ type EdgeRequest struct {
 	OwnReceipt runspec.Optional[Receipt]
 }
 
-// safety: AuthorizeEdge rejects unrelated same-run receipts as digest_not_readable.
-// Own-upload job edges require the exact Attempt, including generation. Owner and non-job
-// publication receipts authorize only binary/source_bundle, never another job's outputs.
-// Imported publication output edges require the matching imported attempt in a publish run.
-func AuthorizeEdge(request EdgeRequest) error { return authorizeEdge(request) }
-
 // safety: CommitRecordRequest leaves provenance to server derivation and checks every member.
 type CommitRecordRequest struct {
 	Source         UploadIdentity
@@ -290,12 +284,6 @@ type HTTPClient interface {
 	Transfer(context.Context, SignedTransfer, io.Reader) (io.ReadCloser, error)
 }
 
-// safety: NewSignedStore verifies transferred bytes and never falls back to cache-service routes.
-func NewSignedStore(options SignedStoreOptions) Store { return newSignedStore(options) }
-
-// safety: ObjectKey produces teams/<team>/cas/<sha256> after validating both components.
-func ObjectKey(team string, digest Digest) (string, error) { return objectKey(team, digest) }
-
 // MemoRecordName identifies the result within a scoped memo key.
 const MemoRecordName = "output"
 
@@ -407,9 +395,6 @@ type BinaryExecution struct {
 	Digest Digest
 }
 
-// safety: CheckBinaryExecution permits local provenance only with trust_local_builds.
-func CheckBinaryExecution(execution BinaryExecution) error { return checkBinaryExecution(execution) }
-
 // safety: RemoteCacheOptions uses the user's existing repo-bound read authority.
 type RemoteCacheOptions struct {
 	Profile      string
@@ -425,11 +410,6 @@ type RemoteCache interface {
 	Memo(context.Context, MemoKey, Budget) (MemoHit, error)
 	Depcache(context.Context, DepcacheKey, Budget) (Record, error)
 	Artifact(context.Context, Digest) (VerifiedReader, error)
-}
-
-// safety: OpenRemoteCache is opt-in by profile and never borrows a runner credential.
-func OpenRemoteCache(options RemoteCacheOptions, store Store) (RemoteCache, error) {
-	return openRemoteCache(options, store)
 }
 
 // safety: PublishPolicy labels published results local and never creates an owner claim.
@@ -493,19 +473,6 @@ type WriteScopeIntent struct {
 	Name     string
 }
 
-// safety: ResolveWriteKey derives repository and vouched/manual ref scope from live authority.
-// It rejects client-selected real-ref writes without server-verified facts.
-func ResolveWriteKey(authority Authority, intent WriteScopeIntent) (RecordKey, error) {
-	return resolveWriteKey(authority, intent)
-}
-
-// safety: RecordNamespace encodes typed components without delimiter collisions.
-// Memo namespaces preserve memo/<repo_key>/<ref_scope>/<pipeline>/<job>/<hash> semantics.
-func RecordNamespace(key RecordKey) (string, error) { return recordNamespace(key) }
-
-// safety: DepcacheNamespace shares the memo write-ref rule while preserving the cache name and key.
-func DepcacheNamespace(key DepcacheKey) (string, error) { return depcacheNamespace(key) }
-
 // safety: UploadIdentityKind covers executable jobs, preplan owners and non-executable publication.
 type UploadIdentityKind string
 
@@ -564,11 +531,4 @@ var UploadRules = []UploadRule{
 	{UploadOwnerUnit, false, true, false, []Kind{KindBinary, KindSourceBundle}},
 	{UploadPublication, false, false, true, []Kind{KindBinary, KindSourceBundle}},
 	{UploadPublication, true, false, true, []Kind{KindOutput, KindManifest}},
-}
-
-// safety: AuthorizeUpload checks the C2-resolved identity and target kind in the write transaction.
-// It requires a live owner fence or publication authority, verifies imported job identity,
-// and rejects identity/principal/capability mismatches with the authenticated authority.
-func AuthorizeUpload(authority Authority, identity UploadIdentity, kind Kind) error {
-	return authorizeUpload(authority, identity, kind)
 }

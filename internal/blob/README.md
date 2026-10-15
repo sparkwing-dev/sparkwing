@@ -367,3 +367,8 @@ through the controller Handler, including real tenant-record and log-record
 proofs. Authentication and award issuance remain seeded or contract fixtures.
 Signed paths bind the method and exact object. The old filesystem output MAC,
 output handlers, raw log adapter and log PUT handler are removed.
+
+The implemented byte and record types live in `types.go`, tagged log subjects
+in `logs.go`, and the physical backend interface in `objects.go`. Their former
+contract files and forwarding declarations are removed. `pkg/storage` has no
+legacy state-store interface. Native hosts use their existing tenant boundaries.

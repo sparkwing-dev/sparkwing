@@ -39,7 +39,7 @@ func TestMonitoringHTTPRoutesUseTheStoreDialect(t *testing.T) {
 	if err := st.CreateNode(ctx, store.Node{RunID: "http-trend-run", NodeID: "work", Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.FinishNode(ctx, "http-trend-run", "work", "cached", "", nil); err != nil {
+	if err := st.FinishNode(ctx, "http-trend-run", "work", "cached", ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.FinishRun(ctx, "http-trend-run", "success", ""); err != nil {
@@ -123,7 +123,7 @@ func TestRunTrendsUseTheStoreDialect(t *testing.T) {
 			if err := st.CreateNode(ctx, store.Node{RunID: run.id, NodeID: nodeID, Status: "pending"}); err != nil {
 				t.Fatal(err)
 			}
-			if err := st.FinishNode(ctx, run.id, nodeID, outcome, "", nil); err != nil {
+			if err := st.FinishNode(ctx, run.id, nodeID, outcome, ""); err != nil {
 				t.Fatal(err)
 			}
 		}

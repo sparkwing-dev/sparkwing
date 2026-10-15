@@ -56,7 +56,7 @@ object backends. Its controller route remains an integration point.
 `blob.S3.LogClassReady` supplies the lifecycle callback for the S3 bucket.
 The controller runs filesystem expiry after renewing its maintenance lease.
 
-`CommittedReader` calls `ReadLogSegments` on each read. It checks the returned
+`CommittedReader` calls `ReadLogSegments` before each segment. It checks the returned
 subject, keys and contiguous ranges before reading any object. Each segment must
 close successfully and pass digest and raw-size verification before its bytes
 reach the response. `ReadResult.Bytes` counts bytes emitted, including partial
@@ -96,11 +96,8 @@ retention has separate expiry tests.
 Filesystem and S3 acceptance proofs join the physical components to the store's
 transactional log records. Authenticated controller routes, egress settlement
 and host bindings remain integration work.
-S3 log signing still needs admission for future slots whose payload size and
-digest are unknown. The existing job-only controller and host transport uses
-tagged manifest identities and prefixes. It still signs individual segments.
-Owner-unit transport, batch-signing routes and transactional record bindings
-remain separate integration work.
+Authenticated signing, verification and segment-commit adapters remain W2
+integration work. Hosts consume `blob.LogTransport` and `SegmentRecorder`.
 
 `internal/blob` owns physical log keys. `LogObjectKey` reserves index zero for
 the final manifest and positive indexes for segments. Signing, verification and
@@ -128,3 +125,12 @@ filesystem upload, segment commit, exact-offset read and SSE resume.
 `TestCommittedDashboardLogsNeverEmitForForeignOrRevokedActors` generates payloads
 against the real tenant and verifies that ended authority emits no bytes.
 Authenticated log signing and commit routes remain W2 integration work.
+
+`TestCommittedDashboardLogsRecheckAuthorityBetweenSegments` revokes a real
+SQLite capability after the first segment is written. The next segment is
+refused before physical I/O. The partial byte count remains exact, and the
+reader cannot report completeness.
+
+The backend's separate live-ring interface and the web fallback are removed.
+Dashboard streams use the same bound reader for persisted segments and ring
+continuation. An unavailable stream has no alternate byte path.

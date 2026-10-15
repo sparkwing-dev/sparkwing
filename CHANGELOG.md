@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **storage (Breaking):** Remove store-local output bytes and obsolete host storage paths
+  Outputs use committed result selectors and verified blobs. The old scheduler, output grants and state-store interface are removed. Dashboard streams use the bound segment reader. See [migration guide](docs/migrations/_unreleased.md#committed-result-storage).
+
 - **controller (Breaking):** Use shared object backends for signing and capability subjects for authentication metrics
   CloudFront download signing wraps the S3 backend. Duplicate signer types and legacy upload helpers are removed. Authenticated requests use subject-kind labels, and the token-cache metric is removed. See [migration guide](docs/migrations/_unreleased.md#data-signing-and-authentication-metrics).
 
@@ -298,6 +301,7 @@ unlock.
   for that object.
 
 ### Removed
+- **store (Breaking):** Deployment card collection, settlement, fraud warnings and queued refunds move from Store to Operator. See [migration guide](docs/migrations/_unreleased.md#card-workers-use-operator).
 
 - **storage (Breaking):** Remove the separate raw S3 log store and local log-file fallback
   Dashboard reads use committed tenant log ranges and the shared blob backend. `WithS3Logs`, `s3.ArtifactStore` and the obsolete teamblob key builder are removed. Bucket measurements use `s3.MeasurementStore`. See [migration guide](docs/migrations/_unreleased.md#data-signing-and-authentication-metrics).

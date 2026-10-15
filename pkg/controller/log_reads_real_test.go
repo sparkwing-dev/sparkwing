@@ -3,6 +3,7 @@ package controller
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -24,6 +25,11 @@ import (
 
 func committedDashboardLogs(t *testing.T, payload []byte) (segmentLogs, blob.LogSubject, *store.Store) {
 	t.Helper()
+	return committedDashboardLogSegments(t, payload)
+}
+
+func committedDashboardLogSegments(t *testing.T, payloads ...[]byte) (segmentLogs, blob.LogSubject, *store.Store) {
+	t.Helper()
 	engine, tenant := engineRuntimeStore(t)
 	authorized := engineRuntimeClaim(t, engine, capability.UnitNode)
 	actor := engineActor(authorized)
@@ -41,29 +47,34 @@ func committedDashboardLogs(t *testing.T, payload []byte) (segmentLogs, blob.Log
 			t.Error(err)
 		}
 	})
-	var compressed bytes.Buffer
-	zipper := gzip.NewWriter(&compressed)
-	if _, err := zipper.Write(payload); err != nil {
-		t.Fatal(err)
+	var segments []store.Segment
+	var offset int64
+	for i, payload := range payloads {
+		var compressed bytes.Buffer
+		zipper := gzip.NewWriter(&compressed)
+		if _, err := zipper.Write(payload); err != nil {
+			t.Fatal(err)
+		}
+		if err := zipper.Close(); err != nil {
+			t.Fatal(err)
+		}
+		key, err := blob.LogObjectKey(subject, "r30", int64(i+1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		signed, _, err := objects.SignLogPut(t.Context(), key, time.Now().Add(time.Minute))
+		if err != nil {
+			t.Fatal(err)
+		}
+		response := httptest.NewRecorder()
+		objects.ServeHTTP(response, httptest.NewRequest(http.MethodPut, signed, bytes.NewReader(compressed.Bytes())))
+		if response.Code != http.StatusCreated {
+			t.Fatalf("signed log PUT: %d %s", response.Code, response.Body)
+		}
+		segments = append(segments, store.Segment{Index: int64(i + 1), Offset: offset, Size: int64(len(payload)), StoredBytes: int64(compressed.Len()), Digest: fmt.Sprintf("%x", sha256.Sum256(compressed.Bytes())), ObjectKey: key})
+		offset += int64(len(payload))
 	}
-	if err := zipper.Close(); err != nil {
-		t.Fatal(err)
-	}
-	key, err := blob.LogObjectKey(subject, "r30", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	signed, _, err := objects.SignLogPut(t.Context(), key, time.Now().Add(time.Minute))
-	if err != nil {
-		t.Fatal(err)
-	}
-	response := httptest.NewRecorder()
-	objects.ServeHTTP(response, httptest.NewRequest(http.MethodPut, signed, bytes.NewReader(compressed.Bytes())))
-	if response.Code != http.StatusCreated {
-		t.Fatalf("signed log PUT: %d %s", response.Code, response.Body)
-	}
-	segment := store.Segment{Index: 1, Offset: 0, Size: int64(len(payload)), StoredBytes: int64(compressed.Len()), Digest: fmt.Sprintf("%x", sha256.Sum256(compressed.Bytes())), ObjectKey: key}
-	if err := tenant.RecordSegments(t.Context(), store.SegmentCommit{Actor: actor, Subject: subject, Segments: []store.Segment{segment}, Final: true, RetentionClass: "r30"}); err != nil {
+	if err := tenant.RecordSegments(t.Context(), store.SegmentCommit{Actor: actor, Subject: subject, Segments: segments, Final: true, RetentionClass: "r30"}); err != nil {
 		t.Fatal(err)
 	}
 	return segmentLogs{records: tenant, actor: actor, live: New(engine.Store, nil).WithDataObjects(objects).liveLogs, objs: objects}, subject, engine.Store
@@ -146,5 +157,49 @@ func TestCommittedDashboardLogStreamCloseCancelsPendingReads(t *testing.T) {
 	}
 	if _, err := io.ReadAll(stream); err == nil {
 		t.Fatal("closed log stream remained readable")
+	}
+}
+
+type countedLogObjects struct {
+	logseg.SegmentObjects
+	opens int
+}
+
+func (o *countedLogObjects) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	o.opens++
+	return o.SegmentObjects.Get(ctx, key)
+}
+
+type revokeLogWriter struct {
+	bytes.Buffer
+	afterWrite func()
+}
+
+func (w *revokeLogWriter) Write(body []byte) (int, error) {
+	n, err := w.Buffer.Write(body)
+	w.afterWrite()
+	return n, err
+}
+
+func TestCommittedDashboardLogsRecheckAuthorityBetweenSegments(t *testing.T) {
+	property := func(seed [16]byte) bool {
+		first := []byte(fmt.Sprintf("%x first\n", seed))
+		second := []byte(fmt.Sprintf("%x second\n", seed))
+		logs, subject, st := committedDashboardLogSegments(t, first, second)
+		objects := &countedLogObjects{SegmentObjects: logs.objs}
+		logs.objs = objects
+		var out revokeLogWriter
+		out.afterWrite = func() {
+			engineSQL(t, st, `UPDATE capabilities SET revoked_at=1 WHERE prefix=?`, logs.actor.CapabilityPrefix)
+		}
+		result, err := logs.read(t.Context(), subject, 0, &out)
+		if err == nil || result.Complete || objects.opens != 1 || result.Bytes != int64(len(first)) || !bytes.Equal(out.Bytes(), first) {
+			t.Logf("revoked read = %+v, %v, %q", result, err, out.Bytes())
+			return false
+		}
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 8, Rand: rand.New(rand.NewSource(73))}); err != nil {
+		t.Fatal(err)
 	}
 }

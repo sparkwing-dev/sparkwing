@@ -1822,9 +1822,25 @@ Runner budgets use the verified team and holder after shared policy authorizatio
 Empty claims spend the polling budget. Awarded work does not. Empty polls are not
 audited. Job path identifiers appear as `run_id` and `job_id` in audit records.
 The unused live-log HTTP handlers and their `LiveLogRead` type are removed.
-Dashboard log reads retain the shared policy routes and in-memory live reader.
+Dashboard log reads retain the shared policy routes and committed segment reader.
+That reader joins its authorized segments to the in-memory ring.
 
 Egress concurrency refusals use `error.code=rate_limited`, with
 `egress_download_limit` or `egress_stream_limit` in `error.details.reason`.
 The exported `EgressDownloadLimitCode` and `EgressStreamLimitCode` constants are
 removed. Read the canonical error object instead of a top-level code.
+
+## Committed result storage
+
+Use the native owner and executor hosts with `StorageBinding`. Read outputs
+through `OutputRecords.ReadResult` and publish them through signed blob uploads
+and record commits. The store no longer accepts inline output bytes or exposes
+`OutputDir`, `RecordLocalOutput`, `GetNodeOutput` or `ReadOutputFile`.
+`OutputUploadGrant`, `OutputReadGrant`, `ResolveClaimInput`, the old node-host
+scheduler, its route server and `StateStoreOld` are removed.
+
+The dashboard uses its bound segment reader for both retained and live logs.
+`backend.LiveLogReader`, `StreamLiveLog` and the separate ring fallback are
+removed. A backend without a stream reader returns HTTP 501. Every later
+segment rechecks current read authority. Revocation stops the response with its
+partial byte count preserved.

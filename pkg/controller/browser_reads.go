@@ -1,8 +1,6 @@
 package controller
 
 import (
-	"context"
-	"io"
 	"net/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
@@ -19,7 +17,7 @@ func (s *Server) dashboardRead(read func(backend.Backend) http.HandlerFunc, clas
 		if err != nil {
 			return engineLookupError(err)
 		}
-		b := backend.NewStoreBackend(s.store, s.dashboardLogs(tenant, engineActor(a))).Scoped(tenant, liveLogReader{s.liveLogs})
+		b := backend.NewStoreBackend(s.store, s.dashboardLogs(tenant, engineActor(a))).Scoped(tenant)
 		r.SetPathValue("id", a.Target.RunID)
 		r.SetPathValue("node", a.Target.NodeID)
 		handler := read(b)
@@ -50,28 +48,3 @@ func (s *Server) capacityRead(read func(web.ProfileReader) http.HandlerFunc) fun
 func (s *Server) dashboardLogs(tenant *store.Tenant, actor store.Actor) storage.LogStore {
 	return segmentLogs{records: tenant, actor: actor, live: s.liveLogs, objs: s.logObjects()}
 }
-
-type liveLogReader struct{ l *liveLogs }
-
-func (l liveLogReader) StreamNodeLiveLog(ctx context.Context, runID, nodeID string, since int64) (io.ReadCloser, error) {
-	if _, ok := l.l.Read(runID, nodeID, since); !ok {
-		return nil, nil
-	}
-	pr, pw := io.Pipe()
-	go func() {
-		pw.CloseWithError(streamLiveLog(ctx, l.l, pipeSink{pw}, runID, nodeID, since))
-	}()
-	return pr, nil
-}
-
-func (l liveLogReader) ReadNodeLiveLog(_ context.Context, runID, nodeID string, since int64) ([]byte, int64, bool, bool, error) {
-	chunk, ok := l.l.Read(runID, nodeID, since)
-	if !ok {
-		return nil, 0, false, false, nil
-	}
-	return chunk.Data, chunk.Next, chunk.Done, true, nil
-}
-
-type pipeSink struct{ *io.PipeWriter }
-
-func (pipeSink) Flush() error { return nil }
