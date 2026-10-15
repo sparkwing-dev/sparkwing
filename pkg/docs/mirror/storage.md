@@ -71,7 +71,7 @@ A refused binding runs cold or skips the save. Local runs keep local archives.
 ## Source and package downloads
 
 Runners clone the source repository directly. The controller releases the
-run's permitted Git credential. A machine owner can use `--allow-repo` during enrollment or `runner.repos`
+run's permitted Git credential. A machine owner can use `--repos` during enrollment or `runner.repos`
 in the machine file to restrict builds and permit fallback to that machine's Git
 credentials. Working-tree snapshots travel as signed source bundles.
 

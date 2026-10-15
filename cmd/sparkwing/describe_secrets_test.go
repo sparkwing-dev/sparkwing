@@ -1,10 +1,17 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 )
 
 const describeSecretsSource = `package main
@@ -34,20 +41,35 @@ func main() {
 }
 `
 
-// safety: describe --secrets is what an operator checks before setting a
-// secret, so a stale or empty answer after a declaration changes, or a
-// success when the pipeline cannot describe itself, sends them wrong.
 func TestPipelineDescribeSecretsFollowsTheSourceAndFailsLoudly(t *testing.T) {
 	if testing.Short() {
-		t.Skip("slow: builds the CLI and compiles a pipeline twice")
+		t.Skip("builds a Go SDK pipeline twice")
 	}
-	e := newSubmitTestEnv(t)
-	describe := func(name string) {
-		t.Helper()
-		e.useHostedFixture(t, strings.Replace(describeSecretsSource, "NAME", name, 1))
-		stdout, stderr, err := e.runStdout("pipeline", "describe", "--pipeline", "fixture", "--secrets", "-o", "json")
-		if err != nil {
-			t.Fatalf("describe --secrets: %v\n%s", err, stderr)
+	checkout := t.TempDir()
+	dir := filepath.Join(checkout, ".sparkwing")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeRepoFile(t, filepath.Join(dir, "sparkwing.yaml"), "pipelines:\n  - name: fixture\n    entrypoint: fixture\n")
+	binary := filepath.Join(t.TempDir(), "pipeline")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
+	}
+	inspect := func(_ string, inspect func(context.Context, pipelineentry.Command, string) error) error {
+		build := exec.CommandContext(t.Context(), "go", "-C", dir, "build", "-mod=mod", "-o", binary, ".")
+		build.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-buildvcs=false")
+		if out, err := build.CombinedOutput(); err != nil {
+			return fmt.Errorf("build source: %w: %s", err, out)
+		}
+		return inspect(t.Context(), pipelineentry.Binary(binary), checkout)
+	}
+	args := []string{"--pipeline", "fixture", "--secrets", "-o", "json"}
+	for _, name := range []string{"FIRST_TOKEN", "RENAMED_TOKEN"} {
+		writeSDKFixture(t, dir, strings.Replace(describeSecretsSource, "NAME", name, 1))
+		var commandErr error
+		stdout := captureStdout(t, func() { commandErr = runPipelineDescribeCommand(args, inspect) })
+		if commandErr != nil {
+			t.Fatal(commandErr)
 		}
 		var got struct {
 			Secrets []struct {
@@ -61,11 +83,10 @@ func TestPipelineDescribeSecretsFollowsTheSourceAndFailsLoudly(t *testing.T) {
 			t.Fatalf("describe --secrets = %s, want only %s", stdout, name)
 		}
 	}
-	describe("FIRST_TOKEN")
-	describe("RENAMED_TOKEN")
-
-	writeSDKFixture(t, filepath.Join(e.repoDir, ".sparkwing"), "package main\n\nfunc main() { undefined() }\n")
-	if out, err := e.run("pipeline", "describe", "--pipeline", "fixture", "--secrets", "-o", "json"); err == nil {
-		t.Fatalf("describe --secrets of a pipeline that cannot build succeeded:\n%s", out)
+	writeSDKFixture(t, dir, "package main\n\nfunc main() { undefined() }\n")
+	var commandErr error
+	stdout := captureStdout(t, func() { commandErr = runPipelineDescribeCommand(args, inspect) })
+	if commandErr == nil || stdout != "" {
+		t.Fatalf("unbuildable source returned a successful schema: %v, output=%s", commandErr, stdout)
 	}
 }

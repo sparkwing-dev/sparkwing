@@ -29,7 +29,7 @@ func TestRun_RefusesAPinnedPipelineAndNamesTrigger(t *testing.T) {
 func TestPipelineTrigger_ThePinIsNoDefault(t *testing.T) {
 	projectAt(t, pinnedProject)
 	err := runPipelineTrigger([]string{"release"})
-	if err == nil || !strings.Contains(err.Error(), "--profile NAME is required") {
+	if err == nil || !strings.Contains(err.Error(), "--profile is required") {
 		t.Fatalf("trigger release with no --profile = %v, want --profile required", err)
 	}
 }
@@ -109,7 +109,11 @@ func TestPinRefusal_SuggestsACommandTriggerParses(t *testing.T) {
 		if !ok {
 			t.Fatalf("dispatchRun(%q) = %v, names no trigger command", args, err)
 		}
-		flags, perr := parseTriggerFlags(strings.Fields(suggested))
+		invocation := strings.Fields(suggested)
+		if len(invocation) > 0 && invocation[0] == "<pipeline>" {
+			invocation[0] = args[0]
+		}
+		flags, perr := parseTriggerFlags(invocation)
 		if perr != nil || flags.pipeline != args[0] || flags.profile == "" {
 			t.Fatalf("suggested %q parses to %+v, %v; want pipeline %s with a --profile", suggested, flags, perr, args[0])
 		}

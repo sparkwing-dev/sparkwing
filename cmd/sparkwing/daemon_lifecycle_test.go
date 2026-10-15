@@ -217,10 +217,14 @@ func TestDaemonLifecycleMissingAndCancelledRuntime(t *testing.T) {
 	if err := runDaemonLifecycleCommand(ctx, []string{"stop"}, &out, nil); !errors.Is(err, context.Canceled) || out.Len() != 0 {
 		t.Fatalf("cancelled: %v %s", err, &out)
 	}
-	for _, resolve := range []func(context.Context) (dashboardServices, error){resolveLocalServices, func(context.Context) (dashboardServices, error) { return dashboardServices{}, nil }} {
-		if err := runDaemonLifecycleCommand(t.Context(), []string{"status", "-o", "json"}, &out, resolve); err == nil || out.Len() != 0 {
-			t.Fatalf("missing runtime: %v %s", err, &out)
-		}
+	missing := func(context.Context) (dashboardServices, error) { return dashboardServices{}, nil }
+	if err := runDaemonLifecycleCommand(t.Context(), []string{"status", "-o", "json"}, &out, missing); err == nil || out.Len() != 0 {
+		t.Fatalf("missing runtime: %v %s", err, &out)
+	}
+	want := errors.New("runtime construction failed")
+	failed := func(context.Context) (dashboardServices, error) { return dashboardServices{}, want }
+	if err := runDaemonLifecycleCommand(t.Context(), []string{"status", "-o", "json"}, &out, failed); !errors.Is(err, want) || out.Len() != 0 {
+		t.Fatalf("failed runtime: %v %s", err, &out)
 	}
 }
 

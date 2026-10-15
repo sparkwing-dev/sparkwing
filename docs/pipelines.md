@@ -491,15 +491,14 @@ for a secret it could have named at the start.
   runs. The run fails before any of its nodes runs. Its error names the
   declared secrets the run cannot read, and `sparkwing runs status --run
   RUN_ID --profile PROFILE` shows the team which scope each is missing from
-  and the command that fixes it: `sparkwing secrets set --name NAME --file
+  and the command that fixes it: `sparkwing secrets set --secret NAME --file
   <path> --pipeline PIPELINE --profile PROFILE` for this pipeline only, or
   `--shared` instead of `--pipeline` for a team-wide secret every pipeline
   may read. That detail is a `secret_preflight_refused` run event, read with
   the team's `runs.read` access and never by the run's claim tokens, because
   it names secrets and pipelines the run has no access to.
 - **On a laptop,** `sparkwing run` checks the same declarations against the
-  store the run reads from, which is this machine's local store unless the
-  profile names a secrets backend, and reports every missing secret at once
+  local controller and reports every missing secret at once
   with the command or setting that supplies it.
 
 A missing optional secret never stops a run; its field stays empty and

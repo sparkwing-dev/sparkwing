@@ -185,12 +185,7 @@ func (c *tokenManager) RotateToken(ctx context.Context, prefix string, input con
 		GraceSecs int64      `json:"grace_secs"`
 		ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	}{input.GraceSecs, expires}
-	var response struct {
-		Capability   string              `json:"capability"`
-		New          capability.Metadata `json:"new"`
-		OldPrefix    string              `json:"old_prefix"`
-		OldRevokedAt time.Time           `json:"old_revoked_at"`
-	}
+	var response RotatedToken
 	if err := c.client.request(ctx, "POST", c.base+"/{token}/rotate", c.base+"/"+url.PathEscape(prefix)+"/rotate", "", request, &response); err != nil {
 		return result, err
 	}

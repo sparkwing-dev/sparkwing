@@ -411,6 +411,8 @@ and the overlay. What each subcommand does:
   For a range or `latest` constraint this picks up any newer tag; for an
   exact pin it is a no-op. Does not edit the `sparks:` block.
 - **add** / **remove** -- add or remove a library entry in the `sparks:` block.
+  Select its name with `--spark NAME`. JSON receipts contain the action, spark,
+  source, version and project-file path. Plain output contains the spark name.
 - **inflate** -- copy a spark library's source into your repo so you can own
   and edit it (see [Inflating a spark library](#inflating-a-spark-library)
   below).
@@ -538,8 +540,10 @@ Filters are advisory metadata on each template. A template that declares
 no cloud is cloud-agnostic and always passes a `--cloud` filter; a
 `--category` filter matches templates that declare that exact category.
 Every view has an `-o json` form for agent consumption -- the list emits
-the manifests, and a `--name` detail view emits the manifest, README, and
+the manifests, and an `--example` detail view emits the manifest, README, and
 (with `--body`) the rendered body.
+Plain output lists example names. With `--example NAME --body -o plain`, it
+prints only that example's source. `--body` requires `--example`.
 
 Once you have read one, start your own from the shape it uses:
 

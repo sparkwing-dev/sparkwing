@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 )
 
@@ -23,7 +24,9 @@ func TestOutputContractProcess(t *testing.T) {
 	for index, argument := range os.Args {
 		if argument == "--" {
 			if err := runSparkwing(os.Args[index+1:]); err != nil {
-				fmt.Fprintln(os.Stderr, err)
+				if writeErr := writeInvocationError(os.Stderr, err, apierr.WriteJSON); writeErr != nil {
+					fmt.Fprintln(os.Stderr, writeErr)
+				}
 				os.Exit(exitCodeFor(err))
 			}
 			os.Exit(0)
@@ -83,11 +86,11 @@ func TestOutputContractPipeRoutes(t *testing.T) {
 		{"info", "--for-agent"},
 		{"info", "--first-time"},
 		{"--output=json", "version", "--offline"},
-		{"configure", "profiles", "show"},
+		{"profiles", "show", "--profile", "production"},
 		{"docs", "list"},
 		{"docs", "list", "--guides"},
 		{"docs", "list", "--versions"},
-		{"docs", "read", "--all"},
+		{"docs", "read", "--full"},
 		{"docs", "read", "--topic", "getting-started"},
 		{"docs", "migrations", "--version", "v0.37.3"},
 		{"--help"},
@@ -100,6 +103,13 @@ func TestOutputContractPipeRoutes(t *testing.T) {
 	} {
 		t.Run(strings.Join(arguments, " "), func(t *testing.T) {
 			command := outputContractCommand(t, arguments...)
+			if len(arguments) > 1 && arguments[0] == "profiles" && arguments[1] == "show" {
+				path := filepath.Join(t.TempDir(), "config.yaml")
+				if err := writePrivateConfigFixture(path, []byte("profiles: {production: {controller: {url: https://api.example}}}\n")); err != nil {
+					t.Fatal(err)
+				}
+				command.Env = setEnv(command.Env, "SPARKWING_CONFIG", path)
+			}
 			var stderr bytes.Buffer
 			command.Stderr = &stderr
 			output, err := command.Output()
@@ -129,7 +139,7 @@ func TestOutputContractOverridesAndErrors(t *testing.T) {
 		var stderr bytes.Buffer
 		command.Stderr = &stderr
 		output, err := command.Output()
-		if err == nil || len(output) != 0 || !strings.Contains(stderr.String(), "pretty|json|plain") {
+		if command.ProcessState == nil || command.ProcessState.ExitCode() != 2 || err == nil || len(output) != 0 || !strings.Contains(stderr.String(), "--output requires") {
 			t.Fatalf("%v: err=%v stdout=%q stderr=%q", flag, err, output, &stderr)
 		}
 	}
@@ -148,7 +158,7 @@ func TestOutputContractPlainCompletionAndEmptyList(t *testing.T) {
 	if err != nil || !strings.Contains(string(output), "complete ") || json.Valid(output) {
 		t.Fatalf("plain completion: %v: %s", err, output)
 	}
-	command = outputContractCommand(t, "configure", "profiles", "list")
+	command = outputContractCommand(t, "profiles", "list")
 	output, err = command.Output()
 	if err != nil || len(output) != 0 {
 		t.Fatalf("empty profile listing: %v: %s", err, output)
@@ -160,7 +170,7 @@ func TestOutputContractKeepsFlagValues(t *testing.T) {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
 	for _, query := range []string{"-output", "help", "--help"} {
-		command := outputContractCommand(t, "docs", "search", "-q", query, "-o", "json")
+		command := outputContractCommand(t, "docs", "search", "--search="+query, "-o", "json")
 		output, err := command.Output()
 		if err != nil {
 			t.Fatalf("query %q: %v", query, err)
