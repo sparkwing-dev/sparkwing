@@ -41,8 +41,16 @@ return the persisted metadata or deletion receipt instead of an empty response.
 
 The unused orchestrator `HostTriggerRun`, `TriggerHost`, `RunNodeOnce`,
 `RunNodeOption`, claim options and global metrics hook are removed. The CLI
-already selects the shared run and node host contracts. Source admission and
-install helpers still used by the local consumer remain.
+already selects the shared run and node host contracts. `RunHosted`, `HostClaimedTrigger`, `RunLocalTriggerConsumer` and `ServeConsumer`
+are also removed, along with the legacy state, logging, admission and child-dispatch
+backends. The old `pkg/localws` server is removed. Local lifecycle uses
+`wingd.LocalRuntime` with the shared controller factory. The former consumer
+no longer selects a standalone store or propagates its environment to a child.
+
+The private submission-environment files and direct secret-store sources used by
+that consumer are removed. Captured environments use the shared host snapshot
+contract. The raw `Client` and W3's retained `StateStoreOld` scheduler still need
+retirement. Native controller and execution composition remain unfinished.
 
 Foreground runtime construction now receives its parsed `--home` before the
 runtime binds its store election. Lifecycle, managed units and log reads share

@@ -1,5 +1,122 @@
 # W9 handoff
 
+## Continuation from 2a3a0970a
+
+This section supersedes conflicting status below. The worktree started clean.
+W9 remains incomplete. The lead owns commits, pipelines, independent review,
+native QA and release. No Git write or Sparkwing executable ran. Lead-owned
+handoffs and amendments are unchanged.
+
+### Legacy local-host cut
+
+Removed pkg/localws, the separate trigger-consumer election/queue/heartbeat
+loop, RunHosted and HostClaimedTrigger. Removed their state/coordination
+backends, API probes and retry transport, admission adapters, standalone-store
+selection, child dispatch, source preparation, private submission-environment
+files, log wrappers, resource/profile helpers, and unused runner interface and
+result reconstruction package. The public CLI already calls the final controller
+and host contracts. No legacy host was restored as a fallback.
+
+The retained orchestrator root contains only the CLI's source/ref selectors,
+profile-pin refusal, paths, run-handle publisher and concurrency label reader.
+The receipt and nodemetrics subpackages retain real callers. The podnodefixture
+remains because sdkserve's fixture-build test still uses it. Removed the unused
+local socket/direct-store secret sources and the raw Client's StateStoreOld
+assertion. Client's legacy routes have no production caller outside the client
+package. Their fixture migrations and deletion remain work.
+
+Production Go delta versus HEAD is 2 added, 10,372 removed, net **-10,370**.
+Orchestrator accounts for -9,322, pkg/localws -912, localsecrets -97 and
+controller/client plus controller docs -39. W9-owned paths are -5 this session
+and **-5,999 versus main**, within the -2,900 budget. Tests, testdata, acceptance
+and contract declaration paths are excluded by the lead's budget convention.
+
+[W9-LEGACY-CUT-FILES.md](W9-LEGACY-CUT-FILES.md) lists all 74 deleted production
+files and 125 removed test paths. One removed test path moves to a generic
+run-handle test, and the paths-without-store assertion moves to paths_test.go.
+The remaining tests in those removed files exercised the retired graph.
+The nodehost log-sink/local-backend combination test and its private helpers
+are removed with LocalBackends. Existing log-sink behavior tests remain.
+
+### Verification and test ports
+
+- Whole-repository `go build -p 4 ./...` passes after the final production cut.
+- Scoped vet passes for CLI, orchestrator, localsecrets, nodehost,
+  controller/client, controller and store.
+- The complete remaining orchestrator suite passes. The formerly Windows-only
+  run-handle test now runs on all platforms and preserves immutable first-receipt,
+  existing-destination and temporary-file assertions. This run
+  establishes Linux evidence only.
+- Focused local, standalone, dashboard, doctor, here and foreground CLI tests pass.
+  TestSurface acceptance components pass. No native acceptance cell was enabled.
+- Existing NativeHost, ClaimedNodeHost, OwnerHost, OwnerPolicy, OwnerEvaluation,
+  Keeper and native-process fuzz seeds pass. These use foreign contract fakes.
+  Focused log-sink tests pass after removing the old backend dependency.
+- Full clisurface, controllerwire, runspec, doccheck and localsecrets suites pass.
+  This rechecks sealed step selections and launcher grammar. The pruned-run doctor
+  regression and TypeScript bridge/publication tests and fuzz seeds also pass.
+- Controller, storage, nodehost and localsecrets test packages compile. The typed
+  default-team caller inventory passes after removing entries for deleted callers.
+- The retained podnode fixture builds through TestPodNodeFixtureBuilds.
+- Commentcheck against main passes across 2,039 files. All public API snapshots
+  match generated source after deleting pkg_localws.txt. Whitespace checks pass.
+
+No archived T1 source-function port is marked complete. Retired host/consumer
+fixtures do not establish final source, process, cancellation, retention,
+secret-release, child, admission, environment, log, retry or placement behavior.
+The lead and W3 still need final runtime ports for those concerns. Native local
+peer/origin/session enforcement, encrypted secret composition, queue/timer serving
+and graceful shutdown also require W2/W8's real controller factory. The old
+localws serve-token and readonly configuration are retired surfaces, not final
+authority contracts. Native placements and the full QA gate remain open.
+
+### Assignments and integration left open
+
+Lead decisions 07:40 items 1 and 6, the doctor handoff and Windows packaging stay
+implemented and their focused checks pass. No reimplementation was needed.
+The previous assignment audit still applies, except A1-51's legacy local consumer
+and host graph are now removed. The remaining raw Client and W3's retained
+StateStoreOld scheduler prevent declaring the legacy cut complete.
+
+There is no foreign contract-shape change. The required real-integration points
+remain:
+
+- W2 must supply the elected wingd.LocalController factory with shared HTTP,
+  dashboard, store, queue and leased maintenance. CLI composition already takes
+  that exact factory contract and does not open a store before election.
+- W3's RemoteOwnerStore supplies scheduling, reconciliation and expansion, but
+  not NativeHostStore's private execution snapshots, acceptance, transitions,
+  completion and renewal. Public scheduling rows cannot replace those snapshots.
+  The C3 Controller interface has no private snapshot operation to adapt. W2/W3
+  and the lead must resolve that transport contract before remote native hosting.
+- W9 still needs real selected-engine/source/environment capture, process
+  delegation, authorized data/log storage and native local/here construction.
+  Its resolvers continue to return named unavailable errors before intake.
+- Detached local-controller startup/readiness must leave a surviving process.
+  The existing in-process lifecycle does not supply that CLI process boundary.
+- Publication, schedule checkout/proof/pinning/tick and debug release still need
+  the missing authority-bearing contracts or native implementations described in
+  the earlier audit. A publication error must preserve the completed local verdict.
+
+### Shared files and friction
+
+The deletion inventory names shared production/test files. Other shared edits are
+internal/nodehost/logs_test.go, pkg/store/default_team_callers_test.go,
+pkg/controller/doc.go, the deleted localsecrets source, the localws API snapshot,
+CHANGELOG.md and its mirror. C3 wire notes and source/mirrored migration and local
+execution docs describe the cut. The native host and controller implementations
+are unchanged. No new mechanism, environment variable or dependency was added.
+
+The first dependent compilation caught that StateStoreOld still serves W3's
+scheduler. Its attempted deletion was reverted exactly to HEAD before the passing
+build and checks. The inventory check then identified the deleted callers' stale
+entries, which were removed. Neither failed check is counted as passing evidence.
+Early checks set GOTMPDIR but left TMPDIR unset, so Go's test temporary directories
+used /tmp and were automatically cleaned. Later checks bind both to the authorized
+scratch directory. Scratch is removed before the final report, while the shared
+Go cache remains. Git identity still resolves to Korey without core.worktree.
+Overwing discovery worked with its stale-binary notice.
+
 ## Continuation from fac7dd6ae
 
 This section supersedes conflicting status below. The worktree started clean.

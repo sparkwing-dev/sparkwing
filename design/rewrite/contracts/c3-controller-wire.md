@@ -727,9 +727,15 @@ Debug resume still needs W2's declared release route, authority and replay body.
 Native controller, Kubernetes, Windows and Darwin integration remains open.
 
 The unused legacy secret mutation methods are removed. `SecretManager` owns
-writes and deletes with typed persistence receipts. The retained execution
-secret read still serves the local consumer and requires its final host cutover.
-The unreachable orchestrator remote trigger and node entrypoints are deleted.
-Its resident local-consumer host graph remains a separate integration task.
+writes and deletes with typed persistence receipts. The raw execution secret reads remain for legacy controller fixtures. The unused
+local socket and direct-store secret sources are removed. There is no production
+caller of the raw Client after the legacy run-host cut.
+
+The orchestrator RunHosted and HostClaimedTrigger entrypoints, separate trigger
+consumer, state/backends, admission, child dispatch, submission-environment files,
+old runner interface and pkg/localws server are removed. The source selectors,
+run-handle publisher, scope label reader and paths still used by the CLI remain.
+W3's retained scheduler still uses StateStoreOld. Its retirement, the raw Client's
+fixture migrations and native controller/host composition remain open.
 
 <!-- design:end -->

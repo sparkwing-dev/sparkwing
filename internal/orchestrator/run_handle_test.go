@@ -1,5 +1,3 @@
-//go:build windows
-
 package orchestrator
 
 import (
@@ -10,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestPublishRunHandleOnWindows(t *testing.T) {
+func TestPublishRunHandleKeepsFirstReceipt(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "run.json")
 	want := NewRunHandle("run-123", "windows-verify", "logs", "running")

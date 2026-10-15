@@ -11,6 +11,10 @@ unbound in this rewrite checkout, so execution refuses before intake where those
 bindings are required. The command's presence in help is not native execution
 evidence. See [rewrite integration](architecture.md).
 
+The old `pkg/localws` server, trigger-consumer election and `RunHosted` entrypoint
+are removed with their state, admission, logging and child-dispatch backends.
+They cannot serve as a fallback for missing native controller or host bindings.
+
 ## Execution commands
 
 ```bash

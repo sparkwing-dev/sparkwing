@@ -13,12 +13,7 @@ import (
 const modulePath = "github.com/sparkwing-dev/sparkwing"
 
 const (
-	defaultTeamCrons    = "local workspace crons launch runs into the laptop's state database, in the default team"
-	defaultTeamState    = "the laptop and admission-daemon state backend, whose runs and triggers are created through Store.CreateRun and the unbound local claim, so every row it touches is the default team's"
-	defaultTeamConsumer = "the local trigger consumer claims through ClaimNextTrigger, whose unbound claimant reaches only the default team's queue, so every trigger it settles is the default team's"
-	defaultTeamWorktree = "ref worktrees and submission environments exist only for triggers the local consumer claimed, which are the default team's"
-	defaultTeamBackend  = "the store backend serves one install's runs in the default team, as its ListRuns already does; a multi-team deployment serves its dashboard through the controller backend"
-	defaultTeamSecrets  = "local secrets live in the laptop's state database under the default team"
+	defaultTeamBackend = "the store backend serves one install's runs in the default team, as its ListRuns already does; a multi-team deployment serves its dashboard through the controller backend"
 )
 
 // safety: every entry names a function outside this package that reaches a
@@ -26,50 +21,9 @@ const (
 // team is the one it means; a call nobody vouched for is how another team's
 // rows go unread.
 var defaultTeamCallers = map[string]string{
-	"internal/backend.(*StoreBackend).GetRun":                          defaultTeamBackend,
-	"internal/backend.(*StoreBackend).ListEventsAfter":                 defaultTeamBackend,
-	"internal/backend.(*StoreBackend).ListNodes":                       defaultTeamBackend,
-	"internal/localsecrets.(*storeSource).read":                        defaultTeamSecrets,
-	"internal/orchestrator.(consumerRuntime).shouldExit":               defaultTeamConsumer,
-	"internal/orchestrator.(localState).AcknowledgeNodeExecutionStart": defaultTeamState,
-	"internal/orchestrator.(localState).AddNodeMetricSample":           defaultTeamState,
-	"internal/orchestrator.(localState).AddNodeUsage":                  defaultTeamState,
-	"internal/orchestrator.(localState).AppendNodeAnnotation":          defaultTeamState,
-	"internal/orchestrator.(localState).AppendStepAnnotation":          defaultTeamState,
-	"internal/orchestrator.(localState).CreateApproval":                defaultTeamState,
-	"internal/orchestrator.(localState).CreateDebugPause":              defaultTeamState,
-	"internal/orchestrator.(localState).EnqueueTriggerWithEnv":         defaultTeamState,
-	"internal/orchestrator.(localState).FindSpawnedChildTriggerID":     defaultTeamState,
-	"internal/orchestrator.(localState).FinishNodeExecutionAttempt":    defaultTeamState,
-	"internal/orchestrator.(localState).FinishNodeStep":                defaultTeamState,
-	"internal/orchestrator.(localState).FinishTrigger":                 defaultTeamState,
-	"internal/orchestrator.(localState).GetActiveDebugPause":           defaultTeamState,
-	"internal/orchestrator.(localState).GetApproval":                   defaultTeamState,
-	"internal/orchestrator.(localState).GetNode":                       defaultTeamState,
-	"internal/orchestrator.(localState).GetRun":                        defaultTeamState,
-	"internal/orchestrator.(localState).GetTrigger":                    defaultTeamState,
-	"internal/orchestrator.(localState).ListNodeMetrics":               defaultTeamState,
-	"internal/orchestrator.(localState).ListNodes":                     defaultTeamState,
-	"internal/orchestrator.(localState).ListPendingTriggersForParent":  defaultTeamState,
-	"internal/orchestrator.(localState).ReleaseClaimAtGeneration":      defaultTeamState,
-	"internal/orchestrator.(localState).ReleaseDebugPause":             defaultTeamState,
-	"internal/orchestrator.(localState).ResolveApproval":               defaultTeamState,
-	"internal/orchestrator.(localState).SetNodeArtifactManifest":       defaultTeamState,
-	"internal/orchestrator.(localState).SetNodeSummary":                defaultTeamState,
-	"internal/orchestrator.(localState).SetStepSummary":                defaultTeamState,
-	"internal/orchestrator.(localState).SkipNodeStep":                  defaultTeamState,
-	"internal/orchestrator.(localState).StartNode":                     defaultTeamState,
-	"internal/orchestrator.(localState).StartNodeStep":                 defaultTeamState,
-	"internal/orchestrator.(localState).UpdateNodeActivity":            defaultTeamState,
-	"internal/orchestrator.(localState).UpdateNodeDeps":                defaultTeamState,
-	"internal/orchestrator.ReconcileSubmissionEnvironments":            defaultTeamWorktree,
-	"internal/orchestrator.cancelClaimedTriggerIfRequested":            defaultTeamConsumer,
-	"internal/orchestrator.cleanupRefWorktree":                         defaultTeamWorktree,
-	"internal/orchestrator.finishCancelledClaimedTrigger":              defaultTeamConsumer,
-	"internal/orchestrator.finishClaimedTriggerFailure":                defaultTeamConsumer,
-	"internal/orchestrator.refWorktreeTriggerSettled":                  defaultTeamWorktree,
-	"internal/orchestrator.settleClaimedTriggerDispatch":               defaultTeamConsumer,
-	"pkg/localws.cronRunStatus":                                        defaultTeamCrons,
+	"internal/backend.(*StoreBackend).GetRun":          defaultTeamBackend,
+	"internal/backend.(*StoreBackend).ListEventsAfter": defaultTeamBackend,
+	"internal/backend.(*StoreBackend).ListNodes":       defaultTeamBackend,
 }
 
 // The default-team twins are what keep the laptop store and the local paths

@@ -20,7 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// Client implements orchestrator.StateBackend over HTTP.
+// Client calls the legacy controller routes.
 type Client struct {
 	baseURL string
 	token   string
