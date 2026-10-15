@@ -28,7 +28,7 @@ func TestRunnerCredentialW8Components(t *testing.T) {
 		t.Fatal(err)
 	}
 	reached := errors.New("runner composition")
-	cli := cluster.RunnerCLI{Factory: func(ctx context.Context, options cluster.RunnerOptions) (*runners.ManagedRunner, error) {
+	cli := cluster.RunnerCLI{Factory: func(ctx context.Context, options cluster.RunnerOptions) (runners.RuntimeConfig, error) {
 		if options.Bearer == nil || len(options.Config.Repos) != 1 || options.Config.Repos[0] != "github.com/acme/*" {
 			t.Fatal("startup did not retain enrollment credentials and repository fence")
 		}
@@ -47,14 +47,14 @@ func TestRunnerCredentialW8Components(t *testing.T) {
 		if got, err := options.Bearer(cancelled); got != "" || !errors.Is(err, cause) {
 			t.Fatalf("cancelled transport received a credential: %v", err)
 		}
-		return nil, reached
+		return runners.RuntimeConfig{}, reached
 	}}
 	if err := cli.Run(t.Context(), "start", []string{"--config", path}, "v1.2.3"); !errors.Is(err, reached) {
 		t.Fatal(err)
 	}
-	cli.Factory = func(context.Context, cluster.RunnerOptions) (*runners.ManagedRunner, error) {
+	cli.Factory = func(context.Context, cluster.RunnerOptions) (runners.RuntimeConfig, error) {
 		t.Fatal("missing private credential reached composition")
-		return nil, nil
+		return runners.RuntimeConfig{}, nil
 	}
 	if err := cli.Run(t.Context(), "start", []string{"--config", path}, "v1.2.3"); err == nil || strings.Contains(err.Error(), raw) {
 		t.Fatalf("missing credential was accepted or exposed: %v", err)

@@ -155,6 +155,9 @@ restart.
 
 The adapter retains observed Job identities separately from the request passed
 to the transport, so request mutation cannot select a different cleanup target.
+The launcher-side award fence and Job-instance correlation are implemented.
+The controller and store must check those observations against transactional
+ownership before returning decisions.
 
 `BootstrapHost` creates a separate controller client whose bearer callback holds
 only the Job's bootstrap. It calls exchange once. Before dispatch, it checks the

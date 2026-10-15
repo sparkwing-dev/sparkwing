@@ -26,7 +26,7 @@ func TestStartUsesRunnerSectionAndReplacesRepos(t *testing.T) {
 			}
 			return userconfig.Config{Runner: &userconfig.RunnerConfig{Controller: &controller, CredentialsDir: &credentials, MaxConcurrent: &concurrent, Repos: []string{"github.com/old/*"}, Labels: []string{"linux"}, Heartbeat: &heartbeat, Lease: &lease}}, nil
 		},
-		Factory: func(_ context.Context, options RunnerOptions) (*runners.ManagedRunner, error) {
+		Factory: func(_ context.Context, options RunnerOptions) (runners.RuntimeConfig, error) {
 			if !reflect.DeepEqual(options.Config.Repos, []string{"github.com/a/*", "github.com/b/*", "github.com/c/*"}) {
 				t.Errorf("repos: %v", options.Config.Repos)
 			}
@@ -36,7 +36,7 @@ func TestStartUsesRunnerSectionAndReplacesRepos(t *testing.T) {
 			if options.Heartbeat != 20*time.Second || options.Lease != 2*time.Minute {
 				t.Errorf("renewal: %v/%v", options.Heartbeat, options.Lease)
 			}
-			return nil, boundary
+			return runners.RuntimeConfig{}, boundary
 		},
 	}
 	err := cli.Run(t.Context(), "start", []string{"--config=/fixture/config.yaml", "--repos=github.com/a/*,github.com/b/*", "--repos=github.com/c/*"}, "v1.2.3")
@@ -61,9 +61,9 @@ func TestRunnerRejectsRemovedVerbsAndFlagsBeforeComposition(t *testing.T) {
 func TestRunnerInvalidExplicitValuesNeverReachFactory(t *testing.T) {
 	for _, option := range []string{"--max-concurrent=0", "--poll=0s", "--heartbeat=0s", "--lease=0s", "--heartbeat=3m", "--idle-exit=-1s", "--max-claims-before-restart=-1", "--repos=bad", "--warm-module=example.com/a@bad", "--keep-free=nonsense", "--cpu-ceiling=-1", "--memory-ceiling=9223372036854775808", "--memory-ceiling=0"} {
 		t.Run(option, func(t *testing.T) {
-			cli := RunnerCLI{Factory: func(context.Context, RunnerOptions) (*runners.ManagedRunner, error) {
+			cli := RunnerCLI{Factory: func(context.Context, RunnerOptions) (runners.RuntimeConfig, error) {
 				t.Error("invalid config reached factory")
-				return nil, nil
+				return runners.RuntimeConfig{}, nil
 			}}
 			if err := cli.Run(t.Context(), "warm", []string{"--controller=https://controller.example", option}, "v1.2.3"); err == nil {
 				t.Error("invalid flag accepted")
@@ -85,14 +85,17 @@ func TestActionsExchangeUsesCallerContextAndServerPushBinding(t *testing.T) {
 			}
 			return capability.Issued{Raw: "private", Capability: capability.Capability{Team: team, Binding: capability.Binding{Push: &push}, ExpiresAt: &expires}}, nil
 		},
-		Factory: func(got context.Context, options RunnerOptions) (*runners.ManagedRunner, error) {
-			if got != ctx || options.Actions == nil || options.Actions.Capability.Binding.Push != &push {
+		Factory: func(got context.Context, options RunnerOptions) (runners.RuntimeConfig, error) {
+			if got != ctx || options.Bearer == nil {
 				t.Error("runtime lost Actions scope")
+			}
+			if raw, err := options.Bearer(got); err != nil || raw != "private" {
+				t.Fatalf("runtime lost Actions credential: %v", err)
 			}
 			if !options.Loop.ClaimUntil.Equal(expires) || !reflect.DeepEqual(options.Config.Repos, []string{push.RepositoryKey}) {
 				t.Errorf("Actions loop: %#v", options)
 			}
-			return nil, boundary
+			return runners.RuntimeConfig{}, boundary
 		},
 	}
 	err := cli.Run(ctx, "warm", []string{"--controller=https://controller.example", "--github-actions", "--team=acme"}, "v1.2.3")
@@ -122,22 +125,22 @@ func TestRunnerUnwiredCompositionReturnsErrorWithoutCallingStubs(t *testing.T) {
 
 func TestWarmMapsPollingKindsAndClaimBudgetToUnifiedLoop(t *testing.T) {
 	boundary := errors.New("runtime boundary")
-	cli := RunnerCLI{Factory: func(_ context.Context, options RunnerOptions) (*runners.ManagedRunner, error) {
+	cli := RunnerCLI{Factory: func(_ context.Context, options RunnerOptions) (runners.RuntimeConfig, error) {
 		if options.Loop.PollInterval != 2*time.Second || options.Loop.MaxClaims != 7 || !reflect.DeepEqual(options.Loop.Kinds, []capability.UnitKind{capability.UnitNode}) {
 			t.Errorf("loop: %#v", options.Loop)
 		}
 		if options.CPUCeiling == nil || *options.CPUCeiling != .5 || options.MemoryCeiling == nil || *options.MemoryCeiling != 1<<30 {
 			t.Errorf("resource ceilings lost")
 		}
-		return nil, boundary
+		return runners.RuntimeConfig{}, boundary
 	}}
 	err := cli.Run(t.Context(), "warm", []string{"--controller=https://controller.example", "--credentials-dir=" + runnerCredentials(t), "--poll=2s", "--max-claims-before-restart=7", "--also-claim-triggers=false", "--claim-jobs=true", "--cpu-ceiling=500m", "--memory-ceiling=1Gi"}, "v1.2.3")
 	if !errors.Is(err, boundary) {
 		t.Fatal(err)
 	}
-	cli.Factory = func(context.Context, RunnerOptions) (*runners.ManagedRunner, error) {
+	cli.Factory = func(context.Context, RunnerOptions) (runners.RuntimeConfig, error) {
 		t.Error("empty kinds reached factory")
-		return nil, nil
+		return runners.RuntimeConfig{}, nil
 	}
 	if err := cli.Run(t.Context(), "warm", []string{"--controller=https://controller.example", "--also-claim-triggers=false", "--claim-jobs=false"}, "v1.2.3"); err == nil {
 		t.Error("runner accepted no work kinds")
@@ -161,9 +164,9 @@ func TestActionsCancellationAndInvalidScopePreventRuntime(t *testing.T) {
 	cancel()
 	cli := RunnerCLI{Actions: func(ctx context.Context, _, _ string) (capability.Issued, error) {
 		return capability.Issued{}, context.Cause(ctx)
-	}, Factory: func(context.Context, RunnerOptions) (*runners.ManagedRunner, error) {
+	}, Factory: func(context.Context, RunnerOptions) (runners.RuntimeConfig, error) {
 		t.Error("invalid exchange reached runtime")
-		return nil, nil
+		return runners.RuntimeConfig{}, nil
 	}}
 	args := []string{"--controller=https://controller.example", "--github-actions", "--team=team"}
 	if err := cli.Run(ctx, "warm", args, "v1.2.3"); !errors.Is(err, context.Canceled) {
@@ -178,9 +181,9 @@ func TestActionsCancellationAndInvalidScopePreventRuntime(t *testing.T) {
 }
 
 func TestRunnerRejectsSelectorsMissingFromControllerContract(t *testing.T) {
-	cli := RunnerCLI{Factory: func(context.Context, RunnerOptions) (*runners.ManagedRunner, error) {
+	cli := RunnerCLI{Factory: func(context.Context, RunnerOptions) (runners.RuntimeConfig, error) {
 		t.Error("unsupported selector reached runtime")
-		return nil, nil
+		return runners.RuntimeConfig{}, nil
 	}}
 	for _, option := range []string{"--trigger-source=github", "--holder-prefix=worker"} {
 		if err := cli.Run(t.Context(), "warm", []string{"--controller=https://controller.example", option}, "v1.2.3"); err == nil || !strings.Contains(err.Error(), "claim contract") {

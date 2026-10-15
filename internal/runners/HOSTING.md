@@ -26,8 +26,17 @@ machine owner's credentials.
 empty lists, changed accepted locations, missing SHA and escaping directories.
 The managed native-store fixture supplies the same list at composition.
 
-`RunnerCLI` serves the existing metrics address alongside its bound factory's
-managed loop. Binding fails before any claim. Every claim records claimed,
+`RunnerCLI` captures the configured controller URL, credential provider, loop
+selection and repository list before calling its service factory. The factory
+returns `RuntimeConfig` services. The CLI applies the captured settings and calls
+`NewManagedRunner`, so every machine runner uses the repository fence. Factory
+edits to its options or returned claimant settings cannot replace that capture.
+The factory receives the Actions bearer callback and expiry without the raw
+issued capability. `FuzzRunnerCLIEnforcesRepositoryFence` checks these boundaries
+against foreign intake and accepted sources and factory mutation.
+
+`RunnerCLI` serves the existing metrics address alongside the managed loop.
+Binding fails before any claim. Every claim records claimed,
 empty or error without changing its returned award or error. Metrics failure
 cancels and joins the loop. Runner exit stops and joins the listener, including
 the HTTP shutdown worker. An empty address starts no listener.
