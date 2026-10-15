@@ -2828,7 +2828,9 @@ changed. W1 data-authority, metadata and charging composition remains required.
 ## Runner observation cutover
 
 `Server.WithRunnerInventory` supplies the tenant-scoped `RunnerInventoryReader`:
-`Team() store.Team` and `ReadRunners(context.Context) (RunnerSnapshot, error)`.
+`Team() store.Team` and `ReadRunners(context.Context) (capability.RunnerSnapshot, error)`.
+The snapshot types live in `internal/capability/runners.go` so persistence can
+implement the reader without importing the controller.
 `RunnerSnapshot.Now` is the store clock for the same snapshot as its `Runners`.
 Each `RunnerObservation` carries its `Team`, granted `nodeproto.RunnerIdentity`,
 location, last accepted observation time, active job references, enrolled maximum

@@ -44,7 +44,7 @@ unlock.
 ### Changed
 
 - **controller (Breaking):** Runner lists, queue headroom and runner metrics read tenant store snapshots
-  Holder-string identity and process-local presence, heartbeat and headroom caches are removed. Embedded controllers supply `WithRunnerInventory`. See [migration guide](docs/migrations/_unreleased.md#runner-observation-snapshots).
+  Holder-string identity and process-local presence, heartbeat and headroom caches are removed. Embedded controllers supply `WithRunnerInventory` using the shared credential snapshot types. See [migration guide](docs/migrations/_unreleased.md#runner-observation-snapshots).
 
 - **controller (Breaking):** Schedule and review routes use shared capability authorization
   Schedules move to `/api/v1/schedules`. Run-now, approval decisions and debug-pause creation carry replay keys. Approval objects use `job_id`; the raw gate-request route is removed. See [migration guide](docs/migrations/_unreleased.md#schedule-and-review-credential-routes).

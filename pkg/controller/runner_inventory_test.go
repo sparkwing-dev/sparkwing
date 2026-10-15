@@ -19,13 +19,13 @@ import (
 
 type runnerInventoryFake struct {
 	team     store.Team
-	snapshot RunnerSnapshot
+	snapshot capability.RunnerSnapshot
 	err      error
 	calls    int
 }
 
 func (f *runnerInventoryFake) Team() store.Team { return f.team }
-func (f *runnerInventoryFake) ReadRunners(context.Context) (RunnerSnapshot, error) {
+func (f *runnerInventoryFake) ReadRunners(context.Context) (capability.RunnerSnapshot, error) {
 	f.calls++
 	return f.snapshot, f.err
 }
@@ -50,12 +50,12 @@ func runnerInventoryFixture(t *testing.T, f *runnerInventoryFake) (http.Handler,
 
 func TestRunnerInventoryHTTPUsesCommittedSnapshot(t *testing.T) {
 	now := time.Unix(1800000000, 123).UTC()
-	f := &runnerInventoryFake{team: "a", snapshot: RunnerSnapshot{Now: now, Runners: []RunnerObservation{
+	f := &runnerInventoryFake{team: "a", snapshot: capability.RunnerSnapshot{Now: now, Runners: []capability.RunnerObservation{
 		{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "same", Type: "runner", Labels: []string{"gpu"}}, Location: "machine", LastSeen: now, ActiveJobs: []string{"run/job", "run/job"}, MaxConcurrent: 2,
-			Headroom: &RunnerHeadroom{Cores: 1.5, MemoryBytes: 1024, QueueDepth: 3, ObservedAt: now}},
+			Headroom: &capability.RunnerHeadroom{Cores: 1.5, MemoryBytes: 1024, QueueDepth: 3, ObservedAt: now}},
 		{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "same", Type: "runner"}, Location: "machine", LastSeen: now.Add(-3 * time.Minute)},
 		{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "idle", Type: "runner"}, Location: "machine", LastSeen: now,
-			Headroom: &RunnerHeadroom{Cores: 1, ObservedAt: now.Add(-2 * time.Hour)}},
+			Headroom: &capability.RunnerHeadroom{Cores: 1, ObservedAt: now.Add(-2 * time.Hour)}},
 	}}}
 	h, raw := runnerInventoryFixture(t, f)
 	w := engineClaimHTTP(t, h, raw, "GET", "/api/v1/runners?team=foreign", "", 200)
@@ -95,9 +95,9 @@ func TestRunnerInventoryHTTPTenantProperty(t *testing.T) {
 		if team == "" || team == "a" {
 			team = "foreign" + team
 		}
-		foreign := RunnerObservation{Team: store.Team(team), Runner: nodeproto.RunnerIdentity{Name: name, Type: "runner"}, Location: "machine", LastSeen: now}
-		own := RunnerObservation{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "allowed", Type: "runner"}, Location: "machine", LastSeen: now}
-		f.snapshot = RunnerSnapshot{Now: now, Runners: []RunnerObservation{own, foreign}}
+		foreign := capability.RunnerObservation{Team: team, Runner: nodeproto.RunnerIdentity{Name: name, Type: "runner"}, Location: "machine", LastSeen: now}
+		own := capability.RunnerObservation{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "allowed", Type: "runner"}, Location: "machine", LastSeen: now}
+		f.snapshot = capability.RunnerSnapshot{Now: now, Runners: []capability.RunnerObservation{own, foreign}}
 		if first {
 			f.snapshot.Runners[0], f.snapshot.Runners[1] = foreign, own
 		}
@@ -117,7 +117,7 @@ func TestRunnerInventoryHTTPNameProperty(t *testing.T) {
 		if name == "" {
 			name = "runner"
 		}
-		f.snapshot = RunnerSnapshot{Now: now, Runners: []RunnerObservation{
+		f.snapshot = capability.RunnerSnapshot{Now: now, Runners: []capability.RunnerObservation{
 			{Team: "a", Runner: nodeproto.RunnerIdentity{Name: name, Type: "runner"}, LastSeen: now, ActiveJobs: []string{"own/job"}},
 			{Team: "a", Runner: nodeproto.RunnerIdentity{Name: name, Type: "runner"}, LastSeen: now.Add(-time.Hour), ActiveJobs: []string{}},
 		}}
@@ -138,7 +138,7 @@ func TestRunnerInventoryHTTPNameProperty(t *testing.T) {
 
 func TestRunnerInventoryHTTPRequiresMemberCredential(t *testing.T) {
 	s, session := credentialSessionServer(t)
-	f := &runnerInventoryFake{team: "a", snapshot: RunnerSnapshot{Now: time.Now()}}
+	f := &runnerInventoryFake{team: "a", snapshot: capability.RunnerSnapshot{Now: time.Now()}}
 	s.WithRunnerInventory(func(context.Context, store.Team) (RunnerInventoryReader, error) { return f, nil })
 	h := s.Handler()
 	issued := credentialRequestHTTP(t, h, session, `{"grants":["runs.read"]}`, false)
@@ -162,7 +162,7 @@ func TestRunnerInventoryHTTPRequiresMemberCredential(t *testing.T) {
 
 func TestRunnerInventoryHTTPRefusesMissingAndCorruptFacts(t *testing.T) {
 	now := time.Unix(1800000000, 0).UTC()
-	f := &runnerInventoryFake{team: "a", snapshot: RunnerSnapshot{Now: now}}
+	f := &runnerInventoryFake{team: "a", snapshot: capability.RunnerSnapshot{Now: now}}
 	h, raw := runnerInventoryFixture(t, f)
 	w := engineClaimHTTP(t, h, raw, "GET", "/api/v1/runners", "", 200)
 	if strings.TrimSpace(w.Body.String()) != `{"agents":[]}` {
@@ -172,15 +172,15 @@ func TestRunnerInventoryHTTPRefusesMissingAndCorruptFacts(t *testing.T) {
 		func() { f.team = "foreign" },
 		func() { f.err = errors.New("private inventory credential") },
 		func() { f.snapshot.Now = time.Time{} },
-		func() { f.snapshot.Runners = []RunnerObservation{{Team: "a"}} },
+		func() { f.snapshot.Runners = []capability.RunnerObservation{{Team: "a"}} },
 		func() {
-			f.snapshot.Runners = []RunnerObservation{{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "bad", Type: "runner"}, MaxConcurrent: -1}}
+			f.snapshot.Runners = []capability.RunnerObservation{{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "bad", Type: "runner"}, MaxConcurrent: -1}}
 		},
 		func() {
-			f.snapshot.Runners = []RunnerObservation{{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "bad", Type: "runner"}, Headroom: &RunnerHeadroom{Cores: math.NaN(), ObservedAt: now}}}
+			f.snapshot.Runners = []capability.RunnerObservation{{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "bad", Type: "runner"}, Headroom: &capability.RunnerHeadroom{Cores: math.NaN(), ObservedAt: now}}}
 		},
 	} {
-		f.team, f.err, f.snapshot = "a", nil, RunnerSnapshot{Now: now}
+		f.team, f.err, f.snapshot = "a", nil, capability.RunnerSnapshot{Now: now}
 		mutate()
 		w := engineClaimHTTP(t, h, raw, "GET", "/api/v1/runners", "", 500)
 		if strings.Contains(w.Body.String(), "private inventory") || strings.Contains(w.Body.String(), `"agents"`) {
@@ -205,7 +205,7 @@ func TestRunnerInventoryMetricsPreservesSamplesOnReadFailure(t *testing.T) {
 	t.Cleanup(func() { setActiveRunners(0) })
 	s, _ := credentialSessionServer(t)
 	now := time.Unix(1800000000, 0).UTC()
-	f := &runnerInventoryFake{team: "a", snapshot: RunnerSnapshot{Now: now, Runners: []RunnerObservation{
+	f := &runnerInventoryFake{team: "a", snapshot: capability.RunnerSnapshot{Now: now, Runners: []capability.RunnerObservation{
 		{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "same", Type: "runner", Labels: []string{"gpu"}}, LastSeen: now},
 		{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "same", Type: "runner", Labels: []string{"gpu"}}, LastSeen: now},
 		{Team: "a", Runner: nodeproto.RunnerIdentity{Name: "offline", Type: "runner"}, LastSeen: now.Add(-time.Hour)},
@@ -214,7 +214,7 @@ func TestRunnerInventoryMetricsPreservesSamplesOnReadFailure(t *testing.T) {
 		if team == "a" {
 			return f, nil
 		}
-		return &runnerInventoryFake{team: team, snapshot: RunnerSnapshot{Now: now}}, nil
+		return &runnerInventoryFake{team: team, snapshot: capability.RunnerSnapshot{Now: now}}, nil
 	})
 	s.sampleRunners(t.Context())
 	if got := mustSample(t, scrapeRegistry(t), "sparkwing_active_runners"); got != 2 {

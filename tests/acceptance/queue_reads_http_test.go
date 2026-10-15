@@ -34,8 +34,8 @@ func (f *queueReads) ListConcurrencyStates(context.Context) ([]*store.Concurrenc
 	return f.states, f.err
 }
 
-func (f *queueReads) ReadRunners(context.Context) (controller.RunnerSnapshot, error) {
-	return controller.RunnerSnapshot{Now: time.Unix(1800000000, 0)}, nil
+func (f *queueReads) ReadRunners(context.Context) (capability.RunnerSnapshot, error) {
+	return capability.RunnerSnapshot{Now: time.Unix(1800000000, 0)}, nil
 }
 
 func queueReadFixture() (*credentialBoundary, *queueReads) {

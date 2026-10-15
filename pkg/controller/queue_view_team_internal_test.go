@@ -24,7 +24,7 @@ func TestQueueStateShowsOnlyTheCallersTeamsRunners(t *testing.T) {
 		if team == "team-b" {
 			name, cores = "team-b-box", 2.0
 		}
-		return &runnerInventoryFake{team: team, snapshot: RunnerSnapshot{Now: now, Runners: []RunnerObservation{{Team: team, Runner: nodeproto.RunnerIdentity{Name: name, Type: "runner"}, Headroom: &RunnerHeadroom{Cores: cores, ObservedAt: now}}}}}, nil
+		return &runnerInventoryFake{team: team, snapshot: capability.RunnerSnapshot{Now: now, Runners: []capability.RunnerObservation{{Team: string(team), Runner: nodeproto.RunnerIdentity{Name: name, Type: "runner"}, Headroom: &capability.RunnerHeadroom{Cores: cores, ObservedAt: now}}}}}, nil
 	})
 
 	view := func(team store.Team) []string {

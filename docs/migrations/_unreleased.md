@@ -27,6 +27,10 @@ The `/api/v1/runners` response retains `agents`. Equal display names can appear 
 separate rows because they do not merge credentials. Last-seen and headroom
 observation times remain separate. Runner metrics read the same snapshots.
 
+`RunnerInventoryReader.ReadRunners` returns `capability.RunnerSnapshot`.
+The snapshot, observation and headroom types live in `internal/capability`,
+so the store adapter can implement the reader without a controller import.
+
 ## Reporting credential routes
 
 Reporting reads use the shared capability policy and the authorized resource's team. This includes run lists, receipts, attempts, steps, events, approvals, debug pauses, pipeline lists and latest runs, trends, runner views, sizing and logs. Unbound machine roots and deployment credentials cannot substitute for team membership. Work and trigger claims receive only the read alternatives declared for their bindings.

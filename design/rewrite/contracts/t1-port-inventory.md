@@ -1402,3 +1402,61 @@ writes. TestServerPolicyConsoleUsesDirectSessionAndConfiguredGate uses real
 SQLite session and CSRF persistence through the production console adapter and a
 fake committing writer. The roleless-session and durable transaction gates remain
 W1 work. No new scenario catalog or harness cell was added.
+
+
+## W2 member, claim and GitHub identity fixture ports
+
+The legacy tests in `pkg/controller/team_tokens_test.go` retire with the combined
+team-token route. `TestCredentialMemberHTTPRoleCeilingProperty` exercises every
+role ceiling and exact requested grants through real SQLite issuance.
+`TestCredentialMemberHTTPMembershipAndSessionLifecycle` verifies root independence
+from the minting session, membership removal and current-role narrowing through
+real HTTP delegation. Owner member roots may request team.admin under the final
+role contract. A reader retains read authority after demotion and cannot delegate
+runs.write. Narrow delegation is permitted. The old terminal/no-delegation rule,
+swt_ encoding, setup-command response and legacy token compatibility assertions
+are removed because they describe the retired API.
+
+Member metadata ownership, expiry and rotation are covered by
+`TestCapabilityManagementHTTPReads`, `ScopeProperty`, `ReplacementProperty` and
+`MissingAdaptersAndCSRF`. Machine enrollment, allowed grant subsets, trusted
+origin, expiry and refusal are covered by `TestRootProvisioningHTTPOrigin`,
+`Refusals`, `Input`, `ExpiryAndCSRF` and `ClaimGrantCeilings`. These management and
+enrollment tests use explicit transaction fakes. W1 still owns registry limits,
+origin invalidation, personal inventory and rotation persistence.
+
+The five legacy tests in `pkg/controller/runner_claim_test.go` are replaced by
+`TestCredentialClaimHTTPAncestryAndFenceProperty`, which obtains real node and
+trigger awards, reads their run, refuses root/claim grant confusion, and refuses
+revoked ancestry, replacement fences and terminal holders despite forged headers.
+`TestCredentialStartedClaimHTTPConsumesContractAttempt` proves the positive
+annotation, sibling refusal and committing revocation check using the declared
+current-attempt authentication snapshot and real SQLite writes. Its snapshot is
+an explicit fake because W1's real snapshot retains the awarded attempt zero
+after start advances the job to attempt one. Real post-start HTTP integration
+remains open. Secret selection and refusal are covered by `TestSecretReadHTTPUsesPolicyAndCommittedRow`,
+`AuthorityProperty`, `BindingProperty` and `RefusalsNeverOpenValues`. Their reader
+is fake. Release-audit persistence remains W1 work. The old operator secret
+bypass and 403-for-dead-claim assertions retire.
+
+The five tests in `pkg/controller/identity_github_test.go` move to the final OAuth
+start/callback and identity-link surfaces. `TestOAuthHTTPGitHubPrimaryEmailProperty`
+generates hostile profile, unverified-primary and verified-secondary addresses.
+None issues a session. `TestOAuthHTTPGitHubUsesNumericIdentityProperty` reads real
+committed identities with arbitrary display names and distinguishes two numeric
+subjects. OAuth start checks the exact read:user/user:email scope.
+`TestOAuthHTTPSessionAndReplay`, `ProviderAndStoreRefusals`, `ProofProperty` and
+`TestIdentityLinkHTTPCommitsVerifiedIdentityOnce` retain session/proof/provider
+and link transport behavior. The provider and link writer are fake.
+
+New-account creation, personal-space naming and same-email provider linking
+remain real W1 integrations. Targeted existing W1 tests
+`TestIdentitySignInCreatesOnePersonalSpace`,
+`TestIdentitySecondSubjectFromTheSameProviderGetsItsOwnAccount` and
+`TestSignInRefusesANewProviderOnAnExistingAccountsAddress` all fail at
+`ResolveSignIn` with an admission foreign-key constraint. No new-account or
+link-persistence success is claimed by the component ports.
+
+The remaining token/claim helper declarations support other unported fixtures.
+The cross-run, identity, team and log fixtures still need their final ports.
+No native cell, scenario catalog, Harness or boundary registry changed.

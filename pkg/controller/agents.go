@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -37,35 +36,10 @@ type AgentHeadroom struct {
 	ObservedAt  string  `json:"observed_at"`
 }
 
-// RunnerHeadroom carries accepted capacity and its store-owned observation time.
-type RunnerHeadroom struct {
-	Cores       float64
-	MemoryBytes int64
-	QueueDepth  int
-	ObservedAt  time.Time
-}
-
-// RunnerObservation is one tenant's granted runner identity and committed activity.
-type RunnerObservation struct {
-	Team          store.Team
-	Runner        nodeproto.RunnerIdentity
-	Location      string
-	LastSeen      time.Time
-	ActiveJobs    []string
-	MaxConcurrent int
-	Headroom      *RunnerHeadroom
-}
-
-// RunnerSnapshot reads live enrollment, activity and time in one store snapshot.
-type RunnerSnapshot struct {
-	Now     time.Time
-	Runners []RunnerObservation
-}
-
 // RunnerInventoryReader projects tenant runners without inferring identity from holders.
 type RunnerInventoryReader interface {
 	Team() store.Team
-	ReadRunners(context.Context) (RunnerSnapshot, error)
+	ReadRunners(context.Context) (capability.RunnerSnapshot, error)
 }
 
 // WithRunnerInventory supplies tenant snapshots before Handler is constructed.
@@ -74,9 +48,9 @@ func (s *Server) WithRunnerInventory(resolve func(context.Context, store.Team) (
 	return s
 }
 
-func (s *Server) runnerInventory(ctx context.Context, team string) (RunnerSnapshot, error) {
+func (s *Server) runnerInventory(ctx context.Context, team string) (capability.RunnerSnapshot, error) {
 	if team == "" {
-		return RunnerSnapshot{}, missingEndpointPolicy()
+		return capability.RunnerSnapshot{}, missingEndpointPolicy()
 	}
 	var reader RunnerInventoryReader
 	var err error
@@ -88,27 +62,27 @@ func (s *Server) runnerInventory(ctx context.Context, team string) (RunnerSnapsh
 		reader, _ = any(tenant).(RunnerInventoryReader)
 	}
 	if errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
-		return RunnerSnapshot{}, engineLookupError(store.ErrNotFound)
+		return capability.RunnerSnapshot{}, engineLookupError(store.ErrNotFound)
 	}
 	if err != nil {
-		return RunnerSnapshot{}, engineLookupError(err)
+		return capability.RunnerSnapshot{}, engineLookupError(err)
 	}
 	if reader == nil || reader.Team() != store.Team(team) {
-		return RunnerSnapshot{}, missingEndpointPolicy()
+		return capability.RunnerSnapshot{}, missingEndpointPolicy()
 	}
 	snapshot, err := reader.ReadRunners(ctx)
 	if err != nil {
-		return RunnerSnapshot{}, engineLookupError(err)
+		return capability.RunnerSnapshot{}, engineLookupError(err)
 	}
 	if snapshot.Now.IsZero() {
-		return RunnerSnapshot{}, missingEndpointPolicy()
+		return capability.RunnerSnapshot{}, missingEndpointPolicy()
 	}
 	for _, row := range snapshot.Runners {
-		if row.Team != store.Team(team) || row.Runner.Name == "" || row.Runner.Type == "" || row.MaxConcurrent < 0 || row.LastSeen.After(snapshot.Now) {
-			return RunnerSnapshot{}, missingEndpointPolicy()
+		if row.Team != team || row.Runner.Name == "" || row.Runner.Type == "" || row.MaxConcurrent < 0 || row.LastSeen.After(snapshot.Now) {
+			return capability.RunnerSnapshot{}, missingEndpointPolicy()
 		}
 		if h := row.Headroom; h != nil && (math.IsNaN(h.Cores) || math.IsInf(h.Cores, 0) || h.Cores < 0 || h.MemoryBytes < 0 || h.QueueDepth < 0 || h.ObservedAt.IsZero() || h.ObservedAt.After(snapshot.Now)) {
-			return RunnerSnapshot{}, missingEndpointPolicy()
+			return capability.RunnerSnapshot{}, missingEndpointPolicy()
 		}
 	}
 	return snapshot, nil
