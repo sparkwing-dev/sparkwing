@@ -411,7 +411,7 @@ func TestTeamBoundary_EveryRunRouteAnswersAnotherTeamWith404(t *testing.T) {
 			"POST /api/v1/runs/{id}/cancel", "POST /api/v1/runs/{id}/retry",
 			"POST /api/v1/runs/{id}/approvals/{nodeID}", "GET /api/v1/runs/{id}/events",
 			"GET /api/v1/runs/{id}/nodes/{nodeID}/logs", "POST /api/v1/runs/{id}/nodes/{nodeID}/release",
-			"POST /api/v1/runs/{id}/nodes/{nodeID}/bounce", "GET /api/v1/runs/{id}/receipt",
+			"GET /api/v1/runs/{id}/receipt",
 			"GET /api/v1/runs/{id}/attempts", "GET /api/v1/runs/{id}/steps",
 			"POST /api/v1/triggers/{id}/claim", "GET /api/v1/triggers/{id}",
 		}

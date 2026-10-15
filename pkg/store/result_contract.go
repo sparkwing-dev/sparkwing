@@ -59,17 +59,17 @@ type SegmentCommit struct {
 
 // RecordStep refuses stale attempts instead of letting delayed reports replace a later attempt's steps.
 func (t *Tenant) RecordStep(ctx context.Context, report StepReport) error {
-	panic("unimplemented: c1-data")
+	return t.recordStep(ctx, report)
 }
 
 // WriteAnnotation refuses an oversized masked annotation so the store cannot split UTF-8 or reveal a raw suffix.
 func (t *Tenant) WriteAnnotation(ctx context.Context, annotation AnnotationWrite) error {
-	panic("unimplemented: c1-data")
+	return t.writeAnnotation(ctx, annotation)
 }
 
 // WriteSummary stores job or step markdown only after the claim binding is rechecked.
 func (t *Tenant) WriteSummary(ctx context.Context, summary SummaryWrite) error {
-	panic("unimplemented: c1-data")
+	return t.writeSummary(ctx, summary)
 }
 
 // RecordSegments checks subject shape, actor binding, exact persisted generation and
@@ -81,37 +81,12 @@ func (t *Tenant) WriteSummary(ctx context.Context, summary SummaryWrite) error {
 // flush after result completion without reopening execution. After final sealing,
 // only the identical final commit replays. Owner units retain their own liveness
 // rules; eval does not inherit the job-attempt grace exception.
+// A live run-bound publisher with data.write may import logs for an exact terminal
+// job attempt in its publish-mode run, without an execution lease or tail grace.
 // The run owns RetentionClass; incomplete logs never change the unit's result.
 func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error {
-	panic("unimplemented: c1-data")
+	return t.recordSegments(ctx, commit)
 }
-
-// CommitRecord checks all member existence and reference authority before making any digest reachable.
-func (t *Tenant) CommitRecord(ctx context.Context, request blob.CommitRecordRequest) (blob.Record, error) {
-	panic("unimplemented: c1-data")
-}
-
-// CopyMemo creates destination output and manifest edges atomically from a server-scoped cache hit.
-func (t *Tenant) CopyMemo(ctx context.Context, request blob.CopyMemoRequest) (blob.MemoHit, error) {
-	panic("unimplemented: c1-data")
-}
-
-// LookupRecord adds no authority merely because a key exists; all returned bytes must be in the caller's read set.
-func (t *Tenant) LookupRecord(ctx context.Context, request blob.RecordLookup) (blob.RecordLookupResult, error) {
-	panic("unimplemented: c1-data")
-}
-
-// LookupMemo applies the claim's repo/ref/pipeline scope and the verified default-branch fallback.
-func (t *Tenant) LookupMemo(ctx context.Context, request blob.MemoLookup) (blob.MemoHit, error) {
-	panic("unimplemented: c1-data")
-}
-
-// LookupDepcache follows the single restore-order table and runs cold on absent or invalid bytes.
-func (t *Tenant) LookupDepcache(ctx context.Context, request blob.DepcacheLookup) (blob.DepcacheHit, error) {
-	panic("unimplemented: c1-data")
-}
-
-var _ blob.RecordStore = (*Tenant)(nil)
 
 // LogSegments is the persisted read model for one tagged subject, including an empty tail.
 type LogSegments struct {
@@ -125,5 +100,5 @@ type LogSegments struct {
 // Controller reads reauthorize each request; terminal logs remain readable under
 // run-read authority after the writer's lease ends.
 func (t *Tenant) ReadLogSegments(ctx context.Context, actor Actor, request blob.LogReadRequest) (LogSegments, error) {
-	panic("unimplemented: c1-logs")
+	return t.readLogSegments(ctx, actor, request)
 }

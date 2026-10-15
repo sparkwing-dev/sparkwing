@@ -1,3 +1,127 @@
+# W9 merge, local transport and recovery continuation
+
+W9 remains incomplete. This continuation started at 68bef3fb7 during the merge
+of bw-3095-rewrite. All 20 conflicted file contents are resolved. There are no
+remaining conflict markers. The index still lists the paths as unmerged because
+the swarm brief prohibits worker Git writes. The lead must stage the resolved
+paths and finish the merge. No Sparkwing binary, pipeline, service or Git write
+ran. Scratch is confined to /tmp/sw-astra-W9 and is deleted before reporting.
+
+## Implemented
+
+- Kept W9's final registry, help and command docs instead of restoring removed
+  commands. Preserved incoming store retention guidance in the migration guide
+  and source-bundle security prose. Took the incoming hostedBounces removal and
+  kept removed CLI callers out of the default-team inventory and client snapshot.
+- Final CLI local clients now use a socket transport without the legacy hosted
+  retry layer. The shared C2 route policy owns retries for HTTP and api.sock.
+  Dial, request and idle settings retain their preceding values.
+- Retained here authority now binds the actual absolute API socket path as well
+  as controller URL and run ID. Handoff and resume derive it from the captured
+  transport. A second home, another socket, or an unbound network transport cannot
+  recover the local bearer. Remote URLs remain usable without a socket binding.
+  Private records contain the socket selector but no new execution inputs.
+- Non-retryable requests disable body replay in net/http. Its standard transport
+  otherwise retries keyed POSTs on reused connections after losing a response,
+  even when the engine's own retry loop is disabled. The regression reproduced
+  two here-intake and retry-intake requests before this change, and one afterward.
+  This applies to the existing route policy rather than a second retry list.
+- ReadFailure now preserves JSON null as no recorded failure, matching the merged
+  store's nullable result. Other successful controller responses still require
+  objects. A present structured error cannot be null and still uses DecodeInner.
+  This closes the earlier absent-failure wire question without synthesizing an
+  SDK failure or changing another area's Go interface.
+- Updated the here guide, W9 wire contract prose and changelog, then regenerated
+  embedded documentation with the owning sync script.
+
+Invariants: retained authority cannot cross controller/run/socket bindings, and
+an award-capable request is never automatically replayed after response loss.
+Both have fuzz tests. The HTTP test uses real net/http connection reuse over
+net.Pipe, so it exercises the standard transport's replay behavior without a
+native listener. The local transport tests also cover dial refusal and 503 replies.
+
+Assumption/mechanism: the small CLI socket transport wrapper retains its endpoint
+identity while removing the old retry wrapper. URL-only identity cannot distinguish
+homes. Undo removes the wrapper and socket-bound storage together. No public API,
+flag, environment variable, timeout, grant or customer restriction was added.
+The private record filename now hashes all three binding components. No legacy
+record reader or compatibility adapter was added.
+
+## Tests and accounting
+
+Added seven test functions and two fuzz targets. The new
+TestRecoveryFailureAbsenceContract passes over HTTP and api.sock-shaped fake
+transports. Existing W9 acceptance contract tests and the full acceptance package
+pass. Native T1 cells remain skipped and are not claimed complete.
+No inventory function is assigned directly to W9, and none was ported here.
+
+Replaced 15 gross production lines across controller_client.go, here_credentials.go,
+engine.go and engine_methods.go. No complete legacy host file was retired. Initial
+trigger intake, legacy here hosting, local/detached hosting and their hard cuts
+remain unfinished. Incoming areas' deletions are not counted as W9 implementation.
+
+All Go commands used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4,
+and GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W9. Passing evidence:
+
+- Whole-repository go build -p 4 ./... on final Go source.
+- Focused go vet over cmd/sparkwing, clisurface, controllerwire,
+  controller/client, doccheck and tests/acceptance.
+- Full clisurface, controllerwire, doccheck and tests/acceptance packages.
+- Controller/client selection ^(TestEngine|FuzzEngineNoReplay).
+- CLI selection ^(TestHere|FuzzHere|TestLocalController|TestRetry|FuzzRetry|
+  TestParseTrigger|TestSDKInstall|TestCacheWarm|TestInvocation|TestTriggeredOutcome|
+  TestSurface|TestAllCommands|TestDiscovery|TestEveryDiscovered|TestCommandsMarkdown|
+  TestCommandReference|TestEmbeddedReference|TestEveryPageExemption|
+  TestRepoDocsNameOnlyDispatched|TestShippedProse|TestHonestyCheck|TestPrintHelp|
+  TestHelpListing|TestCommandFlags|TestExamplesUse).
+- Pkg/docs content, changelog, privacy, read/list/search, section, guide, migration,
+  catalog and command-name checks using the preceding continuation's selection.
+- FuzzEngineNoReplayPolicySurvivesHTTPReuse: 1,930 executions, two workers, 3s.
+  FuzzHereCredentialsNeverCrossSockets: 421 executions, two workers, 3s.
+- Scoped W9 commentcheck -base HEAD, whole-tree sleepcheck -base HEAD,
+  sync-docs --check, gofmt and git diff --check.
+
+The required commentcheck -base main . ran and failed only on incoming W1
+narration at pkg/store/state_materialize.go:15 and
+pkg/store/state_result_records.go:9. Those files are outside W9 and were left
+untouched. The whole-tree comment gate is not claimed clean. No native socket,
+PostgreSQL, deployment, platform or real-repository launch QA ran.
+
+## Remaining contracts and real integration
+
+The existing amendment action ledger below remains applicable. This continuation
+advances A1-03, A1-08/A1-09/A1-55, A1-14 and A1-50. No foreign contract was changed.
+
+- W1/W2: selected retry still needs a transaction contract. The merged
+  EngineController.Retry now calls AdmitRun but ignores RetryRequest.Mode.
+  It must validate and retain failed/all selection in intake and idempotency.
+  The earlier report that both adapters were stubs is superseded by this finding.
+- W6/W1: initial here intake still lacks its sealed reason/audit proposal.
+- W3/W8: supply the concrete shared RunHost and owner, source, engine, storage,
+  plan-cache and lease bindings. RemoteOwnerStore methods and
+  NewLocalLifecycle remain stubs. Fakes do not establish native execution.
+- W9: finish initial trigger and local/detached hosting, public log following and
+  signal behavior around the shared host, read-only cache/publication composition,
+  native schedule/tick and managed-unit wiring, and Go preparation. The initial
+  trigger still uses TriggerResponse and its legacy host. No adapter was added.
+- W2/W7/W8: finish signed-data bindings, real local runtime/unit constructors,
+  exact engine/installer execution and native acceptance. DataController.BindData
+  and engine.Resolved.InstallSDK remain unimplemented in this tree.
+
+Shared files touched are internal/orchestrator/hosted_run.go and
+pkg/store/default_team_callers_test.go for conflict resolution, the client API
+snapshot, tests/acceptance/recovery_failure_contract_test.go, CHANGELOG.md,
+embedded docs/changelog, the W9 wire contract prose and this handoff. Other
+changes are within W9 ownership. No new cross-area caller migration was needed.
+
+Friction: Git staging is prohibited, native listeners and Sparkwing binaries are
+outside this worker's verification path, and the two W1 comments block the
+whole-tree comment gate. Instrumented fuzz compilation needed a cold cache.
+Git identity remains Korey Gambill and core.worktree is unset. The lead owns
+independent review, merge completion and landing.
+
+---
+
 # W9 private here handoff and resume continuation
 
 W9 remains incomplete. This continuation started clean at 2c8def4ac. All writes

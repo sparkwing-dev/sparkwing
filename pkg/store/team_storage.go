@@ -827,59 +827,6 @@ func (s *Store) PruneDownloadDays(ctx context.Context, day string) (int64, error
 	return res.RowsAffected()
 }
 
-// EgressTotals is what one service sent in a UTC day and in that day's
-// month.
-type EgressTotals struct {
-	Service    string `json:"service"`
-	Day        string `json:"day"`
-	DayBytes   int64  `json:"day_bytes"`
-	Month      string `json:"month"`
-	MonthBytes int64  `json:"month_bytes"`
-}
-
-// RecordEgressTotals keeps the larger of each stored total and what t
-// reports, and returns the stored totals. A restarted service records zeros
-// to read back where its day and month stood.
-func (s *Store) RecordEgressTotals(ctx context.Context, t EgressTotals) (_ EgressTotals, err error) {
-	if t.Service == "" || t.Day == "" || t.Month == "" || t.DayBytes < 0 || t.MonthBytes < 0 {
-		return EgressTotals{}, fmt.Errorf("%w: egress totals need a service, a day and a month", ErrInvalidInput)
-	}
-	now := time.Now().UnixNano()
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return EgressTotals{}, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	out := t
-	for _, p := range []struct {
-		period string
-		bytes  *int64
-	}{{t.Day, &out.DayBytes}, {t.Month, &out.MonthBytes}} {
-		if _, err := tx.ExecContext(ctx, `
-INSERT INTO egress_day (service, period, bytes, updated_at) VALUES (?, ?, ?, ?)
-ON CONFLICT (service, period) DO UPDATE SET
-    bytes = CASE WHEN excluded.bytes > egress_day.bytes THEN excluded.bytes ELSE egress_day.bytes END,
-    updated_at = excluded.updated_at`, t.Service, p.period, *p.bytes, now); err != nil {
-			return EgressTotals{}, err
-		}
-		if err := tx.QueryRowContext(ctx, `SELECT bytes FROM egress_day WHERE service = ? AND period = ?`,
-			t.Service, p.period).Scan(p.bytes); err != nil {
-			return EgressTotals{}, err
-		}
-	}
-	return out, tx.Commit()
-}
-
-// PruneEgressTotals deletes every service's totals for periods before
-// month, which is spelled "2006-01"; a day of that month sorts after it.
-func (s *Store) PruneEgressTotals(ctx context.Context, month string) (int64, error) {
-	res, err := s.exec(ctx, `DELETE FROM egress_day WHERE period < ?`, month)
-	if err != nil {
-		return 0, err
-	}
-	return res.RowsAffected()
-}
-
 // TeamOverShare is a free team whose logs hold more than its share.
 type TeamOverShare struct {
 	Team      Team

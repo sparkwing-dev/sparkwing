@@ -50,6 +50,7 @@ func handoffHereRun(ctx context.Context, options client.EngineOptions, response 
 	if err != nil {
 		return incompleteHereHandoff(response.RunID, err)
 	}
+	store = store.forController(options)
 	if response.HereBearer != "" {
 		if err := store.save(options.URL, response.RunID, response.HereBearer); err != nil {
 			return incompleteHereHandoff(response.RunID, err)
@@ -74,6 +75,7 @@ func resumeHereRun(ctx context.Context, options client.EngineOptions, run string
 	if err != nil {
 		return completion, incompleteHereHandoff(run, err)
 	}
+	store = store.forController(options)
 	bearer, err := store.load(options.URL, run)
 	if err != nil {
 		return completion, incompleteHereHandoff(run, fmt.Errorf("load retained authority: %w; a lost bearer requires a fresh trigger request", err))

@@ -45,17 +45,11 @@ func claimNode(t *testing.T, s *store.Store, runID string, identity store.ClaimI
 func claimRetryNode(t *testing.T, s *store.Store, runID string, identity store.ClaimIdentity, holder string) *store.Node {
 	t.Helper()
 	n := claimNode(t, s, runID, identity, holder)
-	coordinatorID, err := s.CoordinatorID(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := s.DB().ExecContext(context.Background(), storetest.Rebind(s, `UPDATE nodes
-   SET required_coordinator_id = ?, required_executor_location = 'local', executor_location = 'local'
- WHERE run_id = ? AND node_id = ?`), coordinatorID, n.RunID, n.NodeID); err != nil {
+   SET executor_location = 'local'
+ WHERE run_id = ? AND node_id = ?`), n.RunID, n.NodeID); err != nil {
 		t.Fatal(err)
 	}
-	n.RequiredCoordinatorID = coordinatorID
-	n.RequiredExecutorLocation = "local"
 	n.ExecutorLocation = "local"
 	return n
 }

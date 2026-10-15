@@ -734,6 +734,12 @@ right. See [data uploads](data-uploads.md) and [authentication](auth.md).
 Native authorization, record, quota and physical-byte verification still require
 the final controller/store/storage bindings in this rewrite build.
 
+Source bundle lifetime follows its blob record. A live record keeps its bytes
+regardless of object age or deletion of the originating run. After record expiry,
+reachability collection marks unreferenced bytes and waits 24 hours before
+rechecking references and deleting them. Uncommitted upload tickets release
+their quota holds through leased retention.
+
 ## Local daemon socket
 
 The admission daemon (`wingd`) is a per-user process on the developer's

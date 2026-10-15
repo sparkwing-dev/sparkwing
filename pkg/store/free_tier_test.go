@@ -296,10 +296,14 @@ func TestExpiryAndReconcileLowerAFreeTeamsEventBytes(t *testing.T) {
 		`UPDATE runs SET status = 'success', finished_at = ? WHERE id = 'old'`), now.Add(-31*24*time.Hour).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetStorageSettings(ctx, store.StorageSettings{EventRetentionDays: 30}); err != nil {
+	if err := st.AsOperator().SetStorageSettings(ctx, store.StorageSettings{RunRetentionDays: 30}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.ExpireRetainedRuns(ctx, now); err != nil {
+	lease, err := st.AsOperator().AcquireSingletonLease(ctx, "maintenance", "free-tier", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AsOperator().MaintainRetention(ctx, store.RetentionRequest{Lease: lease, Limit: 100}); err != nil {
 		t.Fatal(err)
 	}
 	if got := standing(t, st, "acme"); got.EventBytes != 200 {

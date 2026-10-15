@@ -52,7 +52,7 @@ func TestDirectUploadReservesAndPublishesOnlyAfterCommit(t *testing.T) {
 	}
 }
 
-func TestSourceBundleOneRunAndRetention(t *testing.T) {
+func TestSourceBundleBindsOneRun(t *testing.T) {
 	st := storetest.Open(t)
 	setFreeAllowance(t, st, 1<<30)
 	tn := freeTeam(t, st, "team-source")
@@ -72,7 +72,6 @@ func TestSourceBundleOneRunAndRetention(t *testing.T) {
 		}
 		return u
 	}
-	orphan := newSource(strings.Repeat("1", 32))
 	bound := newSource(strings.Repeat("2", 32))
 	if err := tn.CreateSourceTriggerWithRun(t.Context(),
 		store.Trigger{ID: "run-source", Pipeline: "build", TriggerSource: "pipeline-working-tree@test", CreatedAt: now},
@@ -85,43 +84,6 @@ func TestSourceBundleOneRunAndRetention(t *testing.T) {
 		store.Run{ID: "run-reuse", Pipeline: "build", Status: "pending", CreatedAt: now, StartedAt: now},
 		bound.Key, "owner", "swu_owner"); !errors.Is(err, store.ErrSourceAlreadyBound) {
 		t.Fatalf("second source bind = %v", err)
-	}
-	if rows, err := st.ClaimExpiredSourceBundles(t.Context(), now.Add(23*time.Hour)); err != nil || len(rows) != 0 {
-		t.Fatalf("premature source expiry = %v, %v", rows, err)
-	}
-	if rows, err := st.ClaimExpiredSourceBundles(t.Context(), now.Add(25*time.Hour)); err != nil || len(rows) != 1 || rows[0].ID != orphan.ID {
-		t.Fatalf("orphan expiry with pending run = %v, %v", rows, err)
-	}
-	late := now.Add(25 * time.Hour)
-	if err := tn.CreateSourceTriggerWithRun(t.Context(),
-		store.Trigger{ID: "run-too-late", Pipeline: "build", CreatedAt: late},
-		store.Run{ID: "run-too-late", Pipeline: "build", Status: "pending", CreatedAt: late, StartedAt: late},
-		orphan.Key, "owner", "swu_owner"); !errors.Is(err, store.ErrSourceAlreadyBound) {
-		t.Fatalf("expired orphan source bound to a run: %v", err)
-	}
-	if _, err := st.DB().ExecContext(t.Context(), storetest.Rebind(st,
-		`UPDATE runs SET finished_at = ? WHERE id = ? AND team = ?`),
-		time.Now().UnixNano(), "run-source", "team-source"); err != nil {
-		t.Fatal(err)
-	}
-	if rows, err := st.ClaimExpiredSourceBundles(t.Context(), time.Now().Add(25*time.Hour)); err != nil || len(rows) != 1 {
-		t.Fatalf("nonterminal source with a finish timestamp was claimed: %v, %v", rows, err)
-	}
-	if _, err := st.DB().ExecContext(t.Context(), storetest.Rebind(st,
-		`UPDATE runs SET finished_at = NULL WHERE id = ? AND team = ?`), "run-source", "team-source"); err != nil {
-		t.Fatal(err)
-	}
-	if err := tn.FinishRun(t.Context(), "run-source", "success", ""); err != nil {
-		t.Fatal(err)
-	}
-	if rows, err := st.ClaimExpiredSourceBundles(t.Context(), time.Now().Add(25*time.Hour)); err != nil || len(rows) != 2 {
-		t.Fatalf("terminal source expiry = %v, %v", rows, err)
-	}
-	if err := st.DeleteSourceBundleRows(t.Context(), bound); err != nil {
-		t.Fatal(err)
-	}
-	if exists, err := st.SourceBoundToRun(t.Context(), "team-source", bound.Key, "run-source"); err != nil || exists {
-		t.Fatalf("deleted source bind = %t, %v", exists, err)
 	}
 }
 
@@ -184,9 +146,6 @@ func TestSourceCanBindForTwentyFourHoursAfterCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	if rows, err := st.ClaimExpiredSourceBundles(t.Context(), now); err != nil || len(rows) != 0 {
-		t.Fatalf("two-hour-old committed source expired: %v, %v", rows, err)
-	}
 	err = tn.CreateSourceTriggerWithRun(t.Context(),
 		store.Trigger{ID: "run-late", Pipeline: "build", CreatedAt: now},
 		store.Run{ID: "run-late", Pipeline: "build", Status: "pending", CreatedAt: now, StartedAt: now},
@@ -221,95 +180,6 @@ func TestExpiredSourceCannotBindWithEarlierTriggerTimestamp(t *testing.T) {
 		u.Key, "owner", "swu_owner")
 	if !errors.Is(err, store.ErrSourceAlreadyBound) {
 		t.Fatalf("expired source bound with stale trigger timestamp: %v", err)
-	}
-}
-
-func TestSourcePruneClaimAndBinderChooseOneOwner(t *testing.T) {
-	for _, pruneFirst := range []bool{false, true} {
-		name := "binder-first"
-		if pruneFirst {
-			name = "prune-first"
-		}
-		t.Run(name, func(t *testing.T) {
-			st := storetest.Open(t)
-			setFreeAllowance(t, st, 1<<30)
-			tn := freeTeam(t, st, "team-source")
-			reservedAt := time.Now().Add(-time.Hour)
-			committedAt := reservedAt.Add(time.Minute)
-			digest := strings.Repeat("a", 64)
-			u, err := st.ReserveUpload(t.Context(), store.UploadRequest{
-				Team: "team-source", Kind: store.StorageCache,
-				Key: "sources/" + digest + "/" + strings.Repeat("1", 32), Size: 10,
-				SHA256: digest, Principal: "owner", ClaimPrefix: "swu_owner", Provenance: "local", Now: reservedAt,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := st.CommitUpload(t.Context(), u.Team, u.ID, u.Principal, committedAt); err != nil {
-				t.Fatal(err)
-			}
-			bind := func() error {
-				at := time.Now()
-				return tn.CreateSourceTriggerWithRun(t.Context(),
-					store.Trigger{ID: "run-bound", Pipeline: "build", CreatedAt: at},
-					store.Run{ID: "run-bound", Pipeline: "build", Status: "pending", CreatedAt: at, StartedAt: at},
-					u.Key, "owner", "swu_owner")
-			}
-			claim := func() []store.Upload {
-				t.Helper()
-				rows, err := st.ClaimExpiredSourceBundles(t.Context(), committedAt.Add(25*time.Hour))
-				if err != nil {
-					t.Fatal(err)
-				}
-				return rows
-			}
-			if pruneFirst {
-				if rows := claim(); len(rows) != 1 || rows[0].ID != u.ID {
-					t.Fatalf("first prune claim = %+v", rows)
-				}
-				if err := bind(); !errors.Is(err, store.ErrSourceAlreadyBound) {
-					t.Fatalf("source bound after prune claim: %v", err)
-				}
-				if rows := claim(); len(rows) != 1 || rows[0].ID != u.ID {
-					t.Fatalf("failed S3 delete did not leave a retry candidate: %+v", rows)
-				}
-				if _, err := st.CommittedObject(t.Context(), u.Team, u.Key); err != nil {
-					t.Fatalf("marked source lost object row before S3 delete: %v", err)
-				}
-				if got := usageOf(t, st, u.Team, store.StorageCache); got.UsedBytes != u.Size {
-					t.Fatalf("marked source released quota before S3 delete: %+v", got)
-				}
-			} else {
-				if err := bind(); err != nil {
-					t.Fatal(err)
-				}
-				if rows := claim(); len(rows) != 0 {
-					t.Fatalf("prune claimed pending run's source: %+v", rows)
-				}
-			}
-		})
-	}
-}
-
-func TestPruneExpiredCacheObjectsIncludesDefaultTeam(t *testing.T) {
-	st := storetest.Open(t)
-	old := time.Now().Add(-31 * 24 * time.Hour)
-	key := "artifacts/blobs/" + strings.Repeat("a", 64)
-	u, err := st.ReserveUpload(t.Context(), store.UploadRequest{
-		Team: store.DefaultTeam, RunID: "run-operator", Kind: store.StorageCache,
-		Key: key, Size: 1, SHA256: strings.Repeat("a", 64), Principal: "operator", Provenance: "local", Now: old,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CommitUpload(t.Context(), store.DefaultTeam, u.ID, u.Principal, old.Add(time.Minute)); err != nil {
-		t.Fatal(err)
-	}
-	if n, err := st.PruneExpiredCacheObjects(t.Context(), time.Now()); err != nil || n != 1 {
-		t.Fatalf("expired default cache rows = %d, %v, want one", n, err)
-	}
-	if _, err := st.CommittedObject(t.Context(), store.DefaultTeam, key); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("expired default cache object is still committed: %v", err)
 	}
 }
 
@@ -427,39 +297,6 @@ func TestCloudBinaryLookupNeverReturnsLocalDuringCloudExpiry(t *testing.T) {
 		default:
 			t.Fatal(err)
 		}
-	}
-}
-
-func TestExpiredDirectUploadReleasesItsReservationWithoutPublishing(t *testing.T) {
-	st := storetest.Open(t)
-	setFreeAllowance(t, st, 16<<10)
-	freeTeam(t, st, "team-a")
-	now := time.Now()
-	u, err := st.ReserveUpload(t.Context(), store.UploadRequest{
-		Team: "team-a", RunID: "run-a", Kind: store.StorageCache, Key: "artifacts/blobs/" + strings.Repeat("c", 64),
-		Size: 100, SHA256: strings.Repeat("c", 64), Principal: "runner", Provenance: "cloud", Now: now,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := usageOf(t, st, "team-a", store.StorageCache); got.ReservedBytes != 100 {
-		t.Fatalf("reserved = %+v", got)
-	}
-	expired := now.Add(store.DirectUploadTTL)
-	if _, err := st.ReleaseExpiredStorage(t.Context(), expired); err != nil {
-		t.Fatal(err)
-	}
-	if n, err := st.PruneExpiredUploads(t.Context(), expired); err != nil || n != 1 {
-		t.Fatalf("pruned = %d, %v", n, err)
-	}
-	if got := usageOf(t, st, "team-a", store.StorageCache); got.ReservedBytes != 0 || got.UsedBytes != 0 {
-		t.Fatalf("expired usage = %+v", got)
-	}
-	if _, err := st.UploadForTeam(t.Context(), "team-a", u.ID); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("expired upload = %v", err)
-	}
-	if _, err := st.CommittedObject(t.Context(), "team-a", u.Key); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("expired object = %v", err)
 	}
 }
 

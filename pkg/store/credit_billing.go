@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"time"
@@ -114,20 +113,4 @@ func (t *Tenant) CreditUsageByRun(ctx context.Context, limit int) (_ []RunCredit
 		out = append(out, u)
 	}
 	return out, rows.Err()
-}
-
-// PaidGrantTeam returns the team whose ledger holds the paid grant carrying
-// reference, which is a payment id and so unique across the deployment. A
-// refund names only the payment, and this is how its reversal finds the team.
-func (s *Store) PaidGrantTeam(ctx context.Context, reference string) (Team, bool, error) {
-	var team string
-	err := s.queryRow(ctx, `SELECT team FROM credit_grants WHERE kind = ? AND reference = ?
-	  ORDER BY created_at ASC, id ASC LIMIT 1`, CreditGrantPaid, reference).Scan(&team)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
-	}
-	if err != nil {
-		return "", false, err
-	}
-	return Team(team), true, nil
 }

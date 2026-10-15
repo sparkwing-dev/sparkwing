@@ -2,6 +2,10 @@ package main
 
 import (
 	"context"
+	"net"
+	"net/http"
+	"path/filepath"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -58,9 +62,32 @@ func controllerOptions(ctx context.Context, profileName string) (client.EngineOp
 		if !ready || socket == "" {
 			return options, nil, &apierr.Error{Code: apierr.Unavailable, Message: "local controller API is unavailable", Hint: "run sparkwing doctor", Details: map[string]any{"reason": problem}}
 		}
-		httpClient := orchestrator.NewAPISocketClient(socket)
-		options.URL, options.HTTP = orchestrator.HostedAPIBaseURL, httpClient
-		closeTransport = httpClient.CloseIdleConnections
+		return controllerSocketOptions(socket)
 	}
 	return options, closeTransport, nil
+}
+
+type controllerSocketTransport struct {
+	*http.Transport
+	socket string
+}
+
+func controllerSocketOptions(socket string) (client.EngineOptions, func(), error) {
+	if !filepath.IsAbs(socket) {
+		return client.EngineOptions{}, nil, &apierr.Error{Code: apierr.Unavailable, Message: "local controller returned a non-absolute API socket"}
+	}
+	socket = filepath.Clean(socket)
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	transport := &controllerSocketTransport{socket: socket, Transport: &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return dialer.DialContext(ctx, "unix", socket)
+		},
+		MaxIdleConns: 16, MaxIdleConnsPerHost: 16,
+		IdleConnTimeout:       90 * time.Second,
+		ResponseHeaderTimeout: orchestrator.APIRequestTimeout + 15*time.Second,
+	}}
+	options := client.EngineOptions{URL: orchestrator.HostedAPIBaseURL, HTTP: &http.Client{
+		Timeout: orchestrator.APIRequestTimeout + 15*time.Second, Transport: transport,
+	}}
+	return options, transport.CloseIdleConnections, nil
 }

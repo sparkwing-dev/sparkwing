@@ -261,3 +261,22 @@ func TestEngineClientRecoveryRejectsInvalidSelectorsAndInnerFailure(t *testing.T
 		t.Fatal("malformed persisted failure accepted")
 	}
 }
+
+func TestEngineClientRecoveryPreservesAbsentFailure(t *testing.T) {
+	for _, body := range []string{"null", " \nnull\t"} {
+		c := testEngine(t, func(*http.Request) (*http.Response, error) { return engineResponse(200, body), nil })
+		got, err := c.ReadFailure(t.Context(), "r1", "j1", 2)
+		if err != nil || got != nil {
+			t.Fatalf("absent recorded failure: got=%+v error=%v", got, err)
+		}
+		if _, err := c.ReadRun(t.Context(), "r1"); err == nil {
+			t.Fatal("public run read accepted null")
+		}
+	}
+	for _, body := range []string{"", "{}", "null null", "[]", "false", `{"job":"j1","stage":"body","error":null}`} {
+		c := testEngine(t, func(*http.Request) (*http.Response, error) { return engineResponse(200, body), nil })
+		if _, err := c.ReadFailure(t.Context(), "r1", "j1", 2); err == nil {
+			t.Fatalf("accepted malformed failure %q", body)
+		}
+	}
+}

@@ -33,11 +33,11 @@ func TestDetectToolsAdvertisesOnlyKnownToolsOnPath(t *testing.T) {
 func TestToolTermRefusesAnAgentWithoutTheTool(t *testing.T) {
 	demand := match.Demand{Selector: []string{"tool:terraform"}}
 	without := match.Profile{Labels: []string{"tool:git", "terraform"}}
-	if v := match.EvaluateOld(without, demand); v.Reason != match.ReasonSelector || v.Term != "tool:terraform" {
+	if v := match.Evaluate(without, demand); v.Reason != match.ReasonSelector || v.Term != "tool:terraform" {
 		t.Fatalf("an agent without terraform = %v, want a selector refusal", v)
 	}
 	with := match.Profile{Labels: match.SelfAsserted([]string{"tool:terraform"})}
-	if v := match.EvaluateOld(with, demand); !v.OK() {
+	if v := match.Evaluate(with, demand); !v.OK() {
 		t.Fatalf("an agent advertising terraform = %v", v)
 	}
 	if len(match.CloudTools) == 0 {

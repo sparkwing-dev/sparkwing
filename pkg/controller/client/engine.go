@@ -67,6 +67,10 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 		// safety: the source run's sealed runner selection is unavailable at this boundary.
 		mayRetry = false
 	}
+	if !mayRetry {
+		// safety: net/http otherwise replays keyed POSTs after a reused connection loses its reply.
+		req.GetBody = nil
+	}
 	for attempt := 0; ; attempt++ {
 		resp, requestErr := c.http.Do(req)
 		if requestErr != nil {
@@ -109,6 +113,13 @@ func (c *engineClient) readResponse(resp *http.Response, output any) (bool, erro
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 		return false, &apierr.Error{Code: apierr.ProtocolError, Message: "controller API redirects are refused"}
 	}
+	resultType := reflect.TypeOf(output).Elem()
+	if resultType == reflect.TypeFor[*nodeproto.JobFailure]() {
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 && bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+			return false, json.Unmarshal(data, output)
+		}
+		resultType = resultType.Elem()
+	}
 	fields, err := responseObject(data)
 	if err != nil {
 		return false, err
@@ -129,10 +140,10 @@ func (c *engineClient) readResponse(resp *http.Response, output any) (bool, erro
 		return retry, failure
 	}
 	// safety: recovery carries a persisted inner error as part of its successful result.
-	if _, exists := fields["error"]; exists && reflect.TypeOf(output).Elem() != reflect.TypeFor[nodeproto.JobFailure]() {
+	if _, exists := fields["error"]; exists && resultType != reflect.TypeFor[nodeproto.JobFailure]() {
 		return false, fmt.Errorf("successful controller response contains an error")
 	}
-	if err := requiredResponseFields(fields, reflect.TypeOf(output).Elem()); err != nil {
+	if err := requiredResponseFields(fields, resultType); err != nil {
 		return false, err
 	}
 	if err := json.Unmarshal(data, output); err != nil {
@@ -214,6 +225,10 @@ func responseValue(raw json.RawMessage, typ reflect.Type) error {
 	if typ == reflect.TypeFor[json.RawMessage]() {
 		return nil
 	}
+	if typ == reflect.TypeFor[apierr.Error]() || typ == reflect.TypeFor[*apierr.Error]() {
+		_, err := apierr.DecodeInner(raw)
+		return err
+	}
 	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		switch typ.Kind() {
 		case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Interface:
@@ -221,10 +236,6 @@ func responseValue(raw json.RawMessage, typ reflect.Type) error {
 		default:
 			return fmt.Errorf("null is not a %s", typ.Kind())
 		}
-	}
-	if typ == reflect.TypeFor[apierr.Error]() {
-		_, err := apierr.DecodeInner(raw)
-		return err
 	}
 	if reflect.PointerTo(typ).Implements(reflect.TypeFor[json.Unmarshaler]()) {
 		return nil

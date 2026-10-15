@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,12 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
-	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 )
 
 func newBudgetedServer(t *testing.T, token string, cfg egress.Config) *httptest.Server {
@@ -282,51 +277,5 @@ func TestTheCacheDailyAlarmRefusesNothing(t *testing.T) {
 	}
 	if !egressMeter.Alarm() {
 		t.Fatal("the alarm did not rise past its threshold")
-	}
-}
-
-// With a controller, the day's egress total survives a restart: a cache
-// that restarts mid-day resumes the spent amount rather than a fresh daily
-// cap.
-func TestARestartMidDayKeepsTheSpentEgress(t *testing.T) {
-	var cfg Config
-	newBlobServerWith(t, "s3cret", func(c *Config, _ *s3.Client) {
-		c.EgressDailyAlarmBytes = 1000
-		cfg = *c
-	})
-	egressMeter.Record(BearerPrincipal, egress.ClassArtifact, 600)
-	if err := flushEgressDay(context.Background()); err != nil {
-		t.Fatalf("flush: %v", err)
-	}
-	egressMeter = nil
-	if _, err := New(cfg); err != nil {
-		t.Fatalf("restart: %v", err)
-	}
-	if got := egressMeter.State().GlobalDayBytes; got != 600 {
-		t.Fatalf("day total after a restart = %d, want the 600 spent before it", got)
-	}
-	if got := egressMeter.State().GlobalMonthBytes; got != 600 {
-		t.Fatalf("month total after a restart = %d, want the 600 spent before it", got)
-	}
-}
-
-// The month's total is kept apart from each day's, so a restart on a later
-// day of the month finds it even though today has no saved total yet.
-func TestARestartLaterInTheMonthKeepsTheMonthTotal(t *testing.T) {
-	var cfg Config
-	newBlobServerWith(t, "s3cret", func(c *Config, _ *s3.Client) { cfg = *c })
-	month := time.Now().UTC().Format("2006-01")
-	if _, err := counter.RecordEgress(context.Background(), counterAuth, storagequota.EgressTotals{
-		Service: egressService, Day: month + "-00", DayBytes: 900, Month: month, MonthBytes: 900,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	egressMeter = nil
-	if _, err := New(cfg); err != nil {
-		t.Fatalf("restart: %v", err)
-	}
-	if state := egressMeter.State(); state.GlobalMonthBytes != 900 || state.GlobalDayBytes != 0 {
-		t.Fatalf("after a restart on a later day = month %d, day %d; want the month's 900 and a fresh day",
-			state.GlobalMonthBytes, state.GlobalDayBytes)
 	}
 }

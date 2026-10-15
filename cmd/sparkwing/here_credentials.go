@@ -8,17 +8,31 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
-type hereCredentials struct{ dir string }
+type hereCredentials struct{ dir, socket string }
 
 type hereCredential struct {
 	Controller string `json:"controller"`
+	Socket     string `json:"socket,omitempty"`
 	RunID      string `json:"run_id"`
 	Bearer     string `json:"bearer"`
+}
+
+func (s hereCredentials) forController(options client.EngineOptions) hereCredentials {
+	s.socket = ""
+	if options.HTTP != nil {
+		if transport, ok := options.HTTP.Transport.(*controllerSocketTransport); ok {
+			s.socket = transport.socket
+		}
+	}
+	return s
 }
 
 func localHereCredentials() (hereCredentials, error) {
@@ -31,7 +45,10 @@ func (s hereCredentials) path(controller, run string) (string, error) {
 	if err != nil || !utf8.ValidString(base) || run == "" || !utf8.ValidString(run) || !filepath.IsAbs(s.dir) {
 		return "", errors.New("invalid here credential binding")
 	}
-	body, err := json.Marshal([2]string{base, run})
+	if s.socket != "" && (base != orchestrator.HostedAPIBaseURL || !filepath.IsAbs(s.socket) || filepath.Clean(s.socket) != s.socket || !utf8.ValidString(s.socket) || strings.ContainsRune(s.socket, 0)) {
+		return "", errors.New("invalid here controller socket binding")
+	}
+	body, err := json.Marshal([3]string{base, s.socket, run})
 	if err != nil {
 		return "", err
 	}
@@ -59,7 +76,7 @@ func (s hereCredentials) load(controller, run string) (string, error) {
 	}
 	closeErr := f.Close()
 	base, _ := normalizeControllerURL(controller)
-	if decodeErr != nil || saved.Controller != base || saved.RunID != run || saved.Bearer == "" {
+	if decodeErr != nil || saved.Controller != base || saved.Socket != s.socket || saved.RunID != run || saved.Bearer == "" {
 		return "", errors.New("invalid retained here credential")
 	}
 	return saved.Bearer, closeErr
@@ -94,7 +111,7 @@ func (s hereCredentials) save(controller, run, bearer string) error {
 		return err
 	}
 	base, _ := normalizeControllerURL(controller)
-	err = errors.Join(json.NewEncoder(f).Encode(hereCredential{Controller: base, RunID: run, Bearer: bearer}), f.Close())
+	err = errors.Join(json.NewEncoder(f).Encode(hereCredential{Controller: base, Socket: s.socket, RunID: run, Bearer: bearer}), f.Close())
 	if err != nil {
 		return errors.Join(err, os.Remove(path))
 	}

@@ -10,7 +10,7 @@ sparkwing pipeline trigger release --profile prod --runner here --reason "runner
 
 ## Authority and recovery
 
-Intake requires the caller's live `runs.write` authority. It returns a private bearer once, bound to the requesting authority and the reserved run. The CLI retains that bearer in an owner-only file under the Sparkwing configuration directory's `here/` directory. The file is bound to the controller URL and stable run ID. It contains no execution environment or run spec.
+Intake requires the caller's live `runs.write` authority. It returns a private bearer once, bound to the requesting authority and the reserved run. The CLI retains that bearer in an owner-only file under the Sparkwing configuration directory's `here/` directory. The file is bound to the controller URL and stable run ID. A local controller binding also includes its absolute API socket path, so another Sparkwing home cannot reuse that authority. It contains no execution environment or run spec.
 
 The first claim must meet the controller's ten-minute `claim_by` window. After a claim lapses, the same bearer can reclaim the same live run beyond that initial window. The reservation and its original expiry stay unchanged. The controller rechecks the run, requester, ancestry and current `runs.write` authority. Other runners cannot take the reservation.
 

@@ -15,7 +15,10 @@ reconciliation also disable automatic retries because they can award a new beare
 Here intake/retry never transparently retries. Idempotent replay retains the run
 but cannot return its raw HereBearer. A lost first response is a failed handoff,
 with a fresh trigger request as the recovery and the abandoned reservation expiring
-at its original claim_by. Resume uses the retained private bearer.
+at its original claim_by. Resume uses the retained private bearer, bound to the controller URL and run.
+Local transport also binds the absolute API socket path. Local clients use a raw
+socket transport under the same C2 route retry policy as HTTP clients, without
+an additional transport retry loop.
 
 NewDataClient uses the same HTTP/api.sock transport to provide blob.DataSigner
 and blob.RecordStore. Each call reauthorizes server-derived scope/uploader facts.
@@ -64,8 +67,10 @@ ScheduleSnapshot.Expansions carries accepted body/hash and source fence, includi
 empty expansions, for deterministic code reconstruction without adding topology.
 
 Controller.CancelJob reaches the scoped cancellation route. Controller.ReadFailure
-uses the source-generation query and returns persisted nodeproto.JobFailure under
-a declared recovery edge. Actor/grants never enter request bodies. Adapters map
+uses the source-generation query and returns a persisted nodeproto.JobFailure or
+JSON null when that source has no recorded failure, under a declared recovery
+edge. Null is not a synthetic failure and is not a valid successful response for
+other controller operations. A present failure requires its structured inner error. Actor/grants never enter request bodies. Adapters map
 private wire state directly to persisted state rather than inventing pending rows,
 retry counters or failures. Applied.Attempt from start/retry supplies the execution
 ordinal. The initial zero attempt is not a synthetic attempt for owner-unit logs.

@@ -86,7 +86,7 @@ indexed in [cli-reference.md](cli-reference.md):
 | `pipeline` | This repo's pipelines: list / describe / new / lint / plan / trigger / hooks / sparks |
 | `run` | Run a pipeline locally: `sparkwing run <pipeline>` |
 | `crons` | This host's pipeline schedules: install / uninstall / list / show / set / run |
-| `runs` | Inspect and manage runs: list / status / logs / stats / retry / cancel / bounce / prune, plus `approvals` and `annotations` |
+| `runs` | Inspect and manage runs: list / status / logs / stats / retry / cancel / prune, plus `approvals` and `annotations` |
 | `repos` | The machine's fleet of sparkwing repos and their SDK pins: list / info / update / add / remove / prune |
 | `queue` | `list` reads admission or a selected concurrency group. `priority` changes a queued run's rank. See [Queue views](diagnosing-admission.md#queue-views). |
 | `cache` | The compiled pipeline binary cache and the docs cache: info / prune / explain |

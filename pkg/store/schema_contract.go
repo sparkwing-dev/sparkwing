@@ -1,10 +1,68 @@
 package store
 
+import (
+	"errors"
+	"strings"
+)
+
 // safety: TranslateSchema preserves the neutral schema's constraints on both
 // engines. SQLite uses the input unchanged; PostgreSQL maps BLOB to BYTEA.
 // Unsupported dialects or syntax return an error rather than dropping clauses.
 func TranslateSchema(neutral string, dialect Dialect) (string, error) {
-	panic("unimplemented: neutral schema translation")
+	if dialect != DialectSQLite && dialect != DialectPostgres {
+		return "", errors.New("unsupported schema dialect")
+	}
+	var out strings.Builder
+	for i := 0; i < len(neutral); {
+		start := i
+		switch {
+		case strings.HasPrefix(neutral[i:], "--"):
+			for i < len(neutral) && neutral[i] != '\n' {
+				i++
+			}
+		case strings.HasPrefix(neutral[i:], "/*"):
+			end := strings.Index(neutral[i+2:], "*/")
+			if end < 0 {
+				return "", errors.New("unterminated SQL comment")
+			}
+			i += end + 4
+		case neutral[i] == '\'' || neutral[i] == '"':
+			quote := neutral[i]
+			i++
+			closed := false
+			for i < len(neutral) {
+				if neutral[i] == quote {
+					i++
+					if i < len(neutral) && neutral[i] == quote {
+						i++
+						continue
+					}
+					closed = true
+					break
+				}
+				i++
+			}
+			if !closed {
+				return "", errors.New("unterminated SQL quoted value")
+			}
+		case neutral[i] >= 'A' && neutral[i] <= 'Z' || neutral[i] >= 'a' && neutral[i] <= 'z' || neutral[i] == '_':
+			for i < len(neutral) && ((neutral[i] >= 'A' && neutral[i] <= 'Z') || (neutral[i] >= 'a' && neutral[i] <= 'z') || (neutral[i] >= '0' && neutral[i] <= '9') || neutral[i] == '_') {
+				i++
+			}
+			token := strings.ToUpper(neutral[start:i])
+			if token == "PRAGMA" || token == "AUTOINCREMENT" || token == "SERIAL" || token == "BYTEA" {
+				return "", errors.New("schema contains non-neutral syntax")
+			}
+			if token == "BLOB" && dialect == DialectPostgres {
+				out.WriteString("BYTEA")
+				continue
+			}
+		default:
+			i++
+		}
+		out.WriteString(neutral[start:i])
+	}
+	return out.String(), nil
 }
 
 // safety: SchemaOwner makes deployment authority explicit even when an operator
