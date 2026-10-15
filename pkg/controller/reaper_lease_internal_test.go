@@ -27,7 +27,6 @@ func TestReaperRunsInOneOfTwoOverlappingControllers(t *testing.T) {
 		t.Fatal(err)
 	}
 	servers := []*Server{New(st, slog.New(slog.DiscardHandler)), New(st, slog.New(slog.DiscardHandler))}
-	servers[0].cronHolder, servers[1].cronHolder = "first", "second"
 	ran := make([]bool, len(servers))
 	var wg sync.WaitGroup
 	for i, srv := range servers {
