@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -83,51 +81,6 @@ func TestNodeAttentionShowsOnTheRunUntilAClaim(t *testing.T) {
 	}
 	if run, err = s.GetRun(ctx, "run-tf"); err != nil || run.NeedsAttention != "" {
 		t.Fatalf("run after a claim = %+v, %v; want no attention", run, err)
-	}
-}
-
-// A ready node fails as unclaimable, with its reason, only once its run's
-// claim wait has passed: 24 hours by default, or what the plan set.
-func TestUnclaimedNodesFailAtTheirClaimWait(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	seedMatchNode(t, s, "run-default", "", 1, "tool:terraform")
-	seedMatchNode(t, s, "run-short", "", 1, "tool:terraform")
-	if err := s.UpdatePlanSnapshot(ctx, "run-short", []byte(`{"claim_wait_ms":3600000,"nodes":[]}`)); err != nil {
-		t.Fatal(err)
-	}
-	ageReadyNode(t, s, "run-default", 2*time.Hour)
-	ageReadyNode(t, s, "run-short", 2*time.Hour)
-	// safety: an agent that cannot take the nodes polls, moving ready_at forward;
-	// the waits still run from when each node first became ready.
-	for i := range 3 {
-		if _, err := s.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "agent:pi", TokenPrefix: "swr_pi"},
-			"pi:"+string(rune('a'+i)), time.Minute, []string{"tool:git"}); !errors.Is(err, store.ErrNotFound) {
-			t.Fatalf("an ineligible poll = %v", err)
-		}
-	}
-	if waiting, err := s.ListWaitingNodes(ctx, time.Now().Add(-time.Hour), [2]string{}, 10); err != nil || len(waiting) != 2 {
-		t.Fatalf("waiting after ineligible polls = %+v, %v; want both nodes", waiting, err)
-	}
-	if err := s.SetNodeAttention(ctx, []store.NodeAttention{{
-		Team: store.DefaultTeam, RunID: "run-short", NodeID: "work", Reason: "node work needs tool:terraform",
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	pairs, err := store.Maintenance.FailStaleQueuedNodes(s, ctx, match.DefaultClaimWait)
-	if err != nil || len(pairs) != 1 || pairs[0] != [2]string{"run-short", "work"} {
-		t.Fatalf("failed = %v, %v; want only the node past its one-hour wait", pairs, err)
-	}
-	n, err := s.GetNode(ctx, "run-short", "work")
-	if err != nil || n.Error != "unclaimable: node work needs tool:terraform" || n.FailureReason != store.FailureQueueTimeout {
-		t.Fatalf("node = %+v, %v; want unclaimable with its reason", n, err)
-	}
-	ageReadyNode(t, s, "run-default", 25*time.Hour)
-	if pairs, err = store.Maintenance.FailStaleQueuedNodes(s, ctx, match.DefaultClaimWait); err != nil || len(pairs) != 1 {
-		t.Fatalf("failed after 25h = %v, %v; want the default-wait node", pairs, err)
-	}
-	if n, _ = s.GetNode(ctx, "run-default", "work"); !strings.HasPrefix(n.Error, "unclaimable: ") {
-		t.Fatalf("node error = %q", n.Error)
 	}
 }
 

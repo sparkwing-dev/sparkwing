@@ -177,6 +177,21 @@ Owner requeue clears the claim and appends one `run_requeued` event in the
 same transaction. It advances the run state sequence without changing its
 pending or running status. Repeated sweeps cannot duplicate that event.
 
+`Operator.ReconcileControllerRuns` resumes accepted controller-owned runs
+under the exact live `controller.owner` lease. It visits a bounded page across
+teams, ordered by global run ID. Callers pass the last visited ID to the next
+page and start the next sweep with an empty cursor. Each run settles in its
+own transaction. Errors return the committed prefix. The sweep renews only
+continuously live concurrency holders and waiters to the persisted owner
+lease expiry. It cannot revive expired capacity.
+
+Controller ownership begins at a positive `plan_accepted_generation`, after
+the current invocation's planner accepts its plan. A retry carries its source
+spec before that handoff, so a spec alone cannot establish controller ownership.
+Read projections, owner authorization, settlement and owner reaping use the
+accepted generation. A lost retry planner still requeues or fails at its
+disruption limit. The carried request, spec and plan remain unchanged.
+
 Published plans, job results and completion share one publisher check:
 controller audience, `data.write`, a run binding, publish data scope, matching
 repository and live ancestry. Completion requires an accepted plan and a
@@ -730,6 +745,13 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Store.ReleaseUnit` | ReleaseUnit returns an unstarted unit without consuming an attempt; cancellation and started leases use transitions. |
 | `Store.RenewUnit` | Renews the capability-derived unit, records owner execution starts and delivers cancellation without accepting caller-selected fences. |
 | `OperatorStore` | OperatorStore restricts deployment work to explicit methods without embedding a tenant or raw Store. |
+
+### pkg/store/controller_recovery.go
+
+| Export | Purpose |
+|---|---|
+| `ControllerRun` | Carries the team and global run ID of a visited controller-owned run. |
+| `Operator.ReconcileControllerRuns` | Resumes settlement and live capacity renewal in bounded pages under the elected controller fence. |
 
 ### pkg/store/completion_contract.go
 

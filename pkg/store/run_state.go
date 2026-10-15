@@ -278,7 +278,7 @@ func guardRunEdgeTx(ctx context.Context, tx *storeTx, team Team, row RunRow, cha
 				return errors.New("run queue deadline not reached")
 			}
 		} else {
-			if row.Dispatch == "controller" && row.Spec != nil {
+			if row.Owner != nil && row.Owner.Kind == OwnerController {
 				return errors.New("controller ownership expiry does not fail a run")
 			}
 			if row.Owner == nil {

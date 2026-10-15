@@ -67,6 +67,7 @@ func (s *Store) RenewUnit(ctx context.Context, capabilityPrefix string, executin
 type OperatorStore interface {
 	AcquireSingletonLease(context.Context, string, string, time.Duration) (SingletonLease, error)
 	RenewSingletonLease(context.Context, SingletonLease, time.Duration) (SingletonLease, error)
+	ReconcileControllerRuns(context.Context, SingletonLease, string, int) ([]ControllerRun, error)
 	DueRunEffects(context.Context, SingletonLease, int) ([]DesiredRunEffect, error)
 	MaintainRetention(context.Context, RetentionRequest) (RetentionResult, error)
 }

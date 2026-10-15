@@ -83,7 +83,7 @@ func (s *Store) expiredUnits(ctx context.Context, limit int) ([]expiredUnit, err
 	 UNION ALL
 	 SELECT t.team,t.id,'',t.unit_kind,0,COALESCE(t.lease_expires_at,t.expires_at,t.created_at) AS due FROM triggers t
  JOIN runs r ON r.team=t.team AND r.id=t.id
-	 WHERE r.status IN ('pending','running') AND NOT (r.dispatch='controller' AND r.sealed_at IS NOT NULL) AND (
+	 WHERE r.status IN ('pending','running') AND NOT (r.dispatch='controller' AND r.plan_accepted_generation>0) AND (
  (t.status='claimed' AND t.lease_expires_at<=?) OR
  (t.status IN ('pending','claimed') AND t.expires_at<=?) OR
 	 (t.status='pending' AND r.claim_wait_ns>0 AND r.created_at<=?-r.claim_wait_ns) OR

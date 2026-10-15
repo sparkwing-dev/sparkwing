@@ -27,62 +27,6 @@ func planClaimWait(snapshot []byte) int64 {
 	return (time.Duration(plan.ClaimWaitMS) * time.Millisecond).Nanoseconds()
 }
 
-func (s *Store) failStaleQueuedNodes(ctx context.Context, wait time.Duration) ([][2]string, error) {
-	if wait <= 0 {
-		return nil, nil
-	}
-	now := time.Now().UnixNano()
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer rollbackOrLog(tx)
-	rows, err := tx.QueryContext(ctx, `SELECT n.run_id, n.node_id, n.attention_reason, n.kind FROM nodes n JOIN runs r ON r.id = n.run_id
- WHERE n.ready_at IS NOT NULL AND n.claimed_by IS NULL AND n.`+nodeNotDone+`
-   AND COALESCE(n.placement_hold_from, n.ready_at) + CASE WHEN r.claim_wait_ns > 0 THEN r.claim_wait_ns ELSE ? END < ?`,
-		wait.Nanoseconds(), now)
-	if err != nil {
-		return nil, err
-	}
-	var pairs [][2]string
-	var reasons []string
-	for rows.Next() {
-		var rid, nid, reason, kind string
-		if err := rows.Scan(&rid, &nid, &reason, &kind); err != nil {
-			return nil, errors.Join(err, rows.Close())
-		}
-		// safety: the launcher takes every node the Cloud image can run whose
-		// team can pay, so its node that waited out the claim wait needs a tool
-		// the image lacks or compute its team cannot pay for, and the wait is
-		// what ends a run that could otherwise never finish.
-		if reason == "" && kind != "" {
-			reason = "Sparkwing Cloud did not launch this node before its claim wait ran out: " +
-				"it needs a tool the Cloud runner image lacks, or the team could not pay for it"
-		}
-		if reason == "" {
-			reason = "no agent claimed this node before its claim wait ran out"
-		}
-		pairs = append(pairs, [2]string{rid, nid})
-		reasons = append(reasons, "unclaimable: "+reason)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return nil, err
-	}
-	for i, p := range pairs {
-		if _, err := tx.ExecContext(ctx, `
-UPDATE nodes
-   SET `+nodeFailSet+`, error = ?, failure_reason = ?, finished_at = ?, ready_at = NULL
- WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL AND `+nodeNotDone,
-			reasons[i], FailureQueueTimeout, now, p[0], p[1]); err != nil {
-			return nil, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return pairs, nil
-}
-
 // RecordAgentLabels stores the labels the agent holding tokenPrefix advertised
 // on its latest claim, which say what it could run while it is offline.
 func (s *Store) RecordAgentLabels(ctx context.Context, tokenPrefix string, labels []string) error {

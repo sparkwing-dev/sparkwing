@@ -5,9 +5,62 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 )
+
+func TestReaperQueueDeadlineKeepsLiveClaimsAndFreshReleases(t *testing.T) {
+	s, demand := unitClaimFixture(t)
+	now := s.now()
+	s.clock = func() time.Time { return now }
+	claim, err := s.ClaimUnit(t.Context(), demand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: claim.RunID}
+	if _, err := s.ClaimUnit(t.Context(), demand); err != nil {
+		t.Fatal(err)
+	}
+	request, err := json.Marshal(runspec.SealedRequest{Request: runspec.Request{Options: runspec.Options{ClaimWait: runspec.Setting[time.Duration]{Optional: runspec.Optional[time.Duration]{Set: true, Value: time.Minute}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=?,claim_wait_ns=?`, request, int64(time.Minute))
+	rewriteSchemaExec(t, s.db, `UPDATE nodes SET queue_started_at=? WHERE node_id='job'`, now.Add(-time.Hour).UnixNano())
+	for _, id := range []string{"old", "fresh"} {
+		started := now
+		if id == "old" {
+			started = now.Add(-time.Minute)
+		}
+		rewriteSchemaExec(t, s.db, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json,ready_at,queue_started_at) VALUES ('a','run',?,'pending',?,?,?,?)`, id, []byte(`{"id":"`+id+`"}`), []byte(`{}`), started.UnixNano(), started.UnixNano())
+	}
+	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reaped, err := s.ReapUnits(t.Context(), lease, 10)
+	if err != nil || len(reaped) != 1 || reaped[0].NodeID != "old" || !reaped[0].Failed {
+		t.Fatalf("queue expiry: %+v, %v", reaped, err)
+	}
+	tenant := &Tenant{s: s, team: claim.Team}
+	old, err := tenant.ReadNode(t.Context(), NodeRef{"run", "old"})
+	if err != nil || old.Outcome != NodeFailed || old.ReadyAt != nil {
+		t.Fatalf("expired row: %+v, %v", old, err)
+	}
+	var reason string
+	if err := s.db.QueryRow(`SELECT failure_reason FROM nodes WHERE team='a' AND run_id='run' AND node_id='old'`).Scan(&reason); err != nil || reason != "queue_timeout" {
+		t.Fatalf("failure reason: %s, %v", reason, err)
+	}
+	fresh, err := tenant.ReadNode(t.Context(), NodeRef{"run", "fresh"})
+	if err != nil || fresh.ReadyAt == nil || fresh.Status != StatusPending {
+		t.Fatalf("fresh release: %+v, %v", fresh, err)
+	}
+	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix}, CapabilityPrefix: claim.Award.CapabilityPrefix, Holder: claim.Award.Holder, Generation: claim.Award.Generation}
+	if _, err := tenant.RenewNodeClaim(t.Context(), NodeRef{"run", "job"}, actor); err != nil {
+		t.Fatalf("live claim expired by queue wait: %v", err)
+	}
+}
 
 func TestReaperUsesAcceptedPlanClaimWait(t *testing.T) {
 	tenant, request, now := planFixture(t, runspec.DispatchController)

@@ -41,10 +41,11 @@ func checkOwnerTx(ctx context.Context, tx *storeTx, team Team, actor Actor, runI
 			return holderRefusal()
 		}
 		var dispatch, mode string
-		if err := tx.QueryRowContext(ctx, `SELECT dispatch,intake_mode FROM runs WHERE team=? AND id=?`, team, runID).Scan(&dispatch, &mode); err != nil {
+		var accepted int64
+		if err := tx.QueryRowContext(ctx, `SELECT dispatch,intake_mode,plan_accepted_generation FROM runs WHERE team=? AND id=?`, team, runID).Scan(&dispatch, &mode, &accepted); err != nil {
 			return err
 		}
-		if dispatch != "controller" || mode != "execute" {
+		if dispatch != "controller" || mode != "execute" || accepted <= 0 {
 			return holderRefusal()
 		}
 		return assertSingletonLeaseTx(ctx, tx, SingletonLease{Name: ref.Name, Holder: ref.Holder, Generation: ref.Generation}, "controller.owner", now)

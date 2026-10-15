@@ -16,15 +16,16 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
-	"readAuthorityTx":               "a globally unique capability prefix or session hash identifies authority before its team and membership are resolved",
-	"revokeAuthorityTx":             "the authorized revocation path names its exact capability or session by global identity",
-	"advanceAuthGenerationsTx":      "membership and revocation changes invalidate exact ancestor session hashes, including ancestors outside the affected team",
-	"claimUnitTx":                   "the matcher checks claimant team or deployment launcher authority before the claim reads the target run's team by global id",
-	"resolveMatchingInputsTx":       "reads the run's team by global id, then refuses a foreign claimant unless it holds deployment launcher authority",
-	"loadAwardRowTx":                "awards derive team from the globally identified unit and check it against the authenticated claimant before issuing authority",
-	"(*Store).settlePaymentFacts":   "a verified provider event identifies a committed checkout by payment mode and session id; the stored checkout supplies the team",
-	"(*Operator).maintainRetention": "the elected deployment maintenance pass expires sessions across teams while preserving live capability ancestry",
-	"deleteRetentionMetricsTx":      "the elected deployment maintenance pass selects expired metrics across teams and deletes each exact team/run/job/time identity",
+	"(*Operator).ReconcileControllerRuns": "the elected controller enumerates active controller-owned runs across teams, then settles each exact tenant/run under the same lease fence",
+	"readAuthorityTx":                     "a globally unique capability prefix or session hash identifies authority before its team and membership are resolved",
+	"revokeAuthorityTx":                   "the authorized revocation path names its exact capability or session by global identity",
+	"advanceAuthGenerationsTx":            "membership and revocation changes invalidate exact ancestor session hashes, including ancestors outside the affected team",
+	"claimUnitTx":                         "the matcher checks claimant team or deployment launcher authority before the claim reads the target run's team by global id",
+	"resolveMatchingInputsTx":             "reads the run's team by global id, then refuses a foreign claimant unless it holds deployment launcher authority",
+	"loadAwardRowTx":                      "awards derive team from the globally identified unit and check it against the authenticated claimant before issuing authority",
+	"(*Store).settlePaymentFacts":         "a verified provider event identifies a committed checkout by payment mode and session id; the stored checkout supplies the team",
+	"(*Operator).maintainRetention":       "the elected deployment maintenance pass expires sessions across teams while preserving live capability ancestry",
+	"deleteRetentionMetricsTx":            "the elected deployment maintenance pass selects expired metrics across teams and deletes each exact team/run/job/time identity",
 	"(*Store).DueCardCharges": "the payment worker expires every team's stale pay-now attempts in one pass " +
 		"under the ledger lock",
 	"startDueAttemptsTx": "the payment worker starts the due attempts of every team's open charges; " +
@@ -142,11 +143,10 @@ var reviewedUnscopedSQL = map[string]string{
 		"another team is refused; a dispute id is unique across teams",
 	"(*Store).reapExpiredTriggers": "the trigger-lease reaper returns every team's lapsed claims to the queue, because a " +
 		"sweep that only reaped one team would leave the rest held",
-	"(*Store).reapQueueExpiredRuns": "the queue-deadline sweep ends every team's runs no claimant took; each write names a " +
-		"run its own scan selected by global id",
+
 	"(*Store).reapStalePendingRuns": "the stale-run sweep fails every team's pending runs whose trigger is gone or " +
 		"finished; each write names a run its own scan selected by global id",
-	"(*Store).reapStaleRunningRuns": "the stale-run sweep fails every team's running runs no orchestrator heartbeats",
+
 	"(*Store).reapTimedOutApprovals": "the approval sweep resolves every team's approvals past their timeout; each write " +
 		"names an approval its own scan selected",
 	"(*Store).reconcileOrphanedLocalRuns": "the orphan sweep fails every team's runs whose orchestrator stopped " +
@@ -155,9 +155,7 @@ var reviewedUnscopedSQL = map[string]string{
 		"heartbeats",
 	"(*Store).cascadeOrphanedNodes": "fails the open nodes of a run an orphan sweep selected by global id from its own " +
 		"scan",
-	"(*Store).failNodesInRun": "the trigger-claim sweep fails the open nodes of a run it reaped; the global run id comes " +
-		"off that sweep's own scan",
-	"(*Store).failStaleQueuedNodes": "the queue-wait sweep fails every team's ready nodes no runner claimed in time",
+
 	"(*Store).recoverExpiredNodeClaims": "the expired-claim reaper fails every team's nodes whose runner lease " +
 		"lapsed; each write names a node its own locked scan selected",
 	"(*Store).ReapExpiredNodeClaims": "clears every team's lapsed node claims in one locked pass; each write names a node " +

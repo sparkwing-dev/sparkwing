@@ -16,10 +16,6 @@ func TestRunSweepsFinishAStaleRunInItsOwnTeam(t *testing.T) {
 		name  string
 		sweep func(*store.Store, context.Context) error
 	}{
-		{"stale running", func(st *store.Store, ctx context.Context) error {
-			_, err := store.Maintenance.ReapStaleRunningRuns(st, ctx, time.Minute, "stale")
-			return err
-		}},
 		{"orphaned local", func(st *store.Store, ctx context.Context) error {
 			_, err := store.Maintenance.ReconcileOrphanedLocalRuns(st, ctx, time.Minute)
 			return err

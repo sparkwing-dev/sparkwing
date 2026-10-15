@@ -135,7 +135,7 @@ func TestOwnerReaperEvalRecoveryAndBarrier(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			tenant, now, request := expansionFixture(t)
 			rewriteSchemaExec(t, tenant.s.db, `DELETE FROM triggers WHERE id='run'`)
-			rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET dispatch='controller' WHERE id='run'`)
+			rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET dispatch='controller',plan_accepted_generation=1 WHERE id='run'`)
 			until := now.Add(time.Hour).UnixNano()
 			if mode == "controller_lapse" {
 				until = now.UnixNano()
@@ -207,7 +207,7 @@ func TestOwnerReaperEvalRecoveryAndBarrier(t *testing.T) {
 
 func TestOwnerReaperLeavesControllerOwnershipToElection(t *testing.T) {
 	tenant, now, _ := expansionFixture(t)
-	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET dispatch='controller' WHERE id='run'`)
+	rewriteSchemaExec(t, tenant.s.db, `UPDATE runs SET dispatch='controller',plan_accepted_generation=1 WHERE id='run'`)
 	rewriteSchemaExec(t, tenant.s.db, `UPDATE triggers SET status='done',unit_kind='plan',claimed_by=NULL,capability_prefix='',lease_expires_at=NULL WHERE id='run'`)
 	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO leases(name,holder,generation,until) VALUES ('controller.owner','previous',4,?)`, now.UnixNano())
 	lease, err := tenant.s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Minute)
@@ -275,5 +275,37 @@ func TestOwnerRequeueRollsBackWhenEventCannotCommit(t *testing.T) {
 	rewriteSchemaExec(t, tenant.s.db, `DROP TRIGGER refuse_requeue`)
 	if reaped, err := tenant.s.ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
 		t.Fatalf("recovery retry: %+v, %v", reaped, err)
+	}
+}
+
+func TestOwnerReaperRecoversEveryTeamWithoutFailingRemoteRuns(t *testing.T) {
+	s, _, now := maintenanceStore(t)
+	for i, team := range []Team{"a", "b"} {
+		id := "run-" + string(team)
+		maintenanceRun(t, s, id, i+1, RunRunning)
+		request := []byte(`{"request":{"origin":"local"}}`)
+		if team == "b" {
+			request = []byte(`{"request":{"origin":"trigger"}}`)
+		}
+		rewriteSchemaExec(t, s.db, `UPDATE runs SET team=?,request_json=? WHERE id=?`, team, request, id)
+		rewriteSchemaExec(t, s.db, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,started_at,needs_labels,prefers_labels) VALUES (?,?,'claimed','trigger',1,1,'owner','owner-cap',2,?,?,?,?)`, team, id, now.UnixNano(), now.Add(-time.Minute).UnixNano(), []byte(`[]`), []byte(`[]`))
+	}
+	lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "replica", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reaped, err := s.ReapUnits(t.Context(), lease, 10)
+	if err != nil || len(reaped) != 2 {
+		t.Fatalf("all-team recovery: %+v, %v", reaped, err)
+	}
+	for _, team := range []Team{"a", "b"} {
+		run, err := (&Tenant{s: s, team: team}).ReadRun(t.Context(), "run-"+string(team))
+		want := RunFailed
+		if team == "b" {
+			want = RunRunning
+		}
+		if err != nil || run.State != want {
+			t.Fatalf("team %s: %+v, %v", team, run, err)
+		}
 	}
 }

@@ -15,8 +15,8 @@ func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, 
 	v := RunRow{ID: id, Team: team}
 	var request, spec, lineage, pools, actor, plan []byte
 	var cancel, start, finish sql.NullInt64
-	var created int64
-	err := tx.QueryRowContext(ctx, `SELECT number,pipeline,status,request_json,spec_json,lineage_json,plan_json,plan_hash,dispatch,allowed_pools,cancel_requested_at,started_at,finished_at,state_seq,state_digest,state_actor,created_at FROM runs WHERE team=? AND id=?`, team, id).Scan(&v.Number, &v.Pipeline, &v.State, &request, &spec, &lineage, &plan, &v.PlanHash, &v.Dispatch, &pools, &cancel, &start, &finish, &v.StateSeq, &v.StateDigest, &actor, &created)
+	var created, accepted int64
+	err := tx.QueryRowContext(ctx, `SELECT number,pipeline,status,request_json,spec_json,lineage_json,plan_json,plan_hash,dispatch,allowed_pools,cancel_requested_at,started_at,finished_at,state_seq,state_digest,state_actor,created_at,plan_accepted_generation FROM runs WHERE team=? AND id=?`, team, id).Scan(&v.Number, &v.Pipeline, &v.State, &request, &spec, &lineage, &plan, &v.PlanHash, &v.Dispatch, &pools, &cancel, &start, &finish, &v.StateSeq, &v.StateDigest, &actor, &created, &accepted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return v, notFound("run", id)
 	}
@@ -39,7 +39,7 @@ func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, 
 	if v.Request.Request.Mode == runspec.IntakePublish {
 		return v, nil
 	}
-	if v.Dispatch == "controller" && v.Spec != nil {
+	if v.Dispatch == "controller" && accepted > 0 {
 		var owner OwnerLeaseRef
 		owner.Kind, owner.Name, owner.RunID = OwnerController, "controller.owner", id
 		err = tx.QueryRowContext(ctx, `SELECT holder,generation FROM leases WHERE name='controller.owner'`).Scan(&owner.Holder, &owner.Generation)
