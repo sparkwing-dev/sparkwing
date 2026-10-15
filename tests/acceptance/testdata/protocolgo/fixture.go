@@ -91,5 +91,7 @@ func Register() {
 		sparkwing.Register[Inputs](Name, func() sparkwing.Pipeline[Inputs] { return Pipeline{} })
 		sparkwing.Register[sparkwing.NoInputs](ClosureName, func() sparkwing.Pipeline[sparkwing.NoInputs] { return ClosurePipeline{} })
 		sparkwing.Register[sparkwing.NoInputs](ArgumentsName, func() sparkwing.Pipeline[sparkwing.NoInputs] { return ArgumentsPipeline{} })
+		sparkwing.Register[sparkwing.NoInputs](RecoveryChainName, func() sparkwing.Pipeline[sparkwing.NoInputs] { return RecoveryChainPipeline{} })
+		sparkwing.Register[GeneratedRecoveryInputs](GeneratedRecoveryChainName, func() sparkwing.Pipeline[GeneratedRecoveryInputs] { return GeneratedRecoveryChainPipeline{} })
 	})
 }

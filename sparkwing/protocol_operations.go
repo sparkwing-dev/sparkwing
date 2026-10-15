@@ -297,16 +297,11 @@ func evaluate(ctx context.Context, p *Plan, n *JobNode, id string, input json.Ra
 		if err := g.fn(ctx, expansion); err != nil {
 			return nil, err
 		}
-		for _, child := range expansion.nodes {
-			child.addNeed(n.id)
-			if child.onFailure != nil {
-				child.onFailure.addNeed(n.id)
-			}
-		}
-		members := append([]*JobNode(nil), expansion.nodes...)
-		for _, child := range expansion.nodes {
-			if child.onFailure != nil {
-				members = append(members, child.onFailure)
+		var members []*JobNode
+		for _, root := range expansion.nodes {
+			for child := range recoveryChain(root) {
+				child.addNeed(n.id)
+				members = append(members, child)
 			}
 		}
 		GroupJobs(expansion, g.id, members...)
@@ -325,12 +320,24 @@ func evaluate(ctx context.Context, p *Plan, n *JobNode, id string, input json.Ra
 		}); err != nil {
 			return nil, err
 		}
+		registerRecoveryArgs(expansion)
+		var schema inputSchema
+		if p.registration != nil {
+			schema = p.registration.Schema
+		}
+		if err := assertJobArgsDisjoint(expansion, schema, p.jobArgs...); err != nil {
+			return nil, sdkError(apierr.PlanInvalid, err.Error())
+		}
+		if err := resolveAndBindJobArgs(expansion, p.args); err != nil {
+			return nil, sdkError(apierr.InvalidArgs, err.Error())
+		}
 		p.mu.Lock()
 		for _, child := range expansion.nodes {
 			p.nodes = append(p.nodes, child)
 			p.byID[child.id] = child
 		}
 		p.groups = append(p.groups, expansion.groups...)
+		p.jobArgs = append(p.jobArgs, expansion.jobArgs...)
 		if p.generated == nil {
 			p.generated = map[string][]nodeproto.JobSpec{}
 		}

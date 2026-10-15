@@ -44,12 +44,13 @@ func planDocument(p *Plan) nodeproto.PlanDoc {
 	for _, c := range p.planConcurrency {
 		doc.Concurrency = append(doc.Concurrency, concurrencyDocument(c.Group, c.Cost))
 	}
-	for _, n := range p.nodes {
-		doc.Jobs = append(doc.Jobs, jobDocument(p, n))
-		if n.onFailure != nil {
-			recovery := jobDocument(p, n.onFailure)
-			recovery.OnFailureOf = n.id
-			doc.Jobs = append(doc.Jobs, recovery)
+	for _, root := range p.nodes {
+		parent := ""
+		for n := range recoveryChain(root) {
+			job := jobDocument(p, n)
+			job.OnFailureOf = parent
+			doc.Jobs = append(doc.Jobs, job)
+			parent = n.id
 		}
 	}
 	return doc
@@ -186,9 +187,11 @@ func planJob(p *Plan, id string) *JobNode {
 	if n := p.byID[id]; n != nil {
 		return n
 	}
-	for _, n := range p.nodes {
-		if n.onFailure != nil && n.onFailure.id == id {
-			return n.onFailure
+	for _, root := range p.nodes {
+		for n := range recoveryChain(root.onFailure) {
+			if n.id == id {
+				return n
+			}
 		}
 	}
 	return nil

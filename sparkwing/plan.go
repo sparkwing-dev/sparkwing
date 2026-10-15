@@ -3,6 +3,7 @@ package sparkwing
 import (
 	"context"
 	"fmt"
+	"iter"
 	"reflect"
 	"slices"
 	"strings"
@@ -39,12 +40,23 @@ type Plan struct {
 	admissionClass AdmissionClass
 
 	inputs any
+	args   map[string]string
 
 	jobArgs []jobArgsDecl
 }
 
 func NewPlan() *Plan {
 	return &Plan{byID: map[string]*JobNode{}}
+}
+
+func recoveryChain(root *JobNode) iter.Seq[*JobNode] {
+	return func(yield func(*JobNode) bool) {
+		for n := root; n != nil; n = n.onFailure {
+			if !yield(n) {
+				return
+			}
+		}
+	}
 }
 
 func (p *Plan) setInputs(in any) {

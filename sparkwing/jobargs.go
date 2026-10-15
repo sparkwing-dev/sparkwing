@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -14,6 +15,14 @@ type jobArgsDecl struct {
 	schema inputSchema
 	goType reflect.Type
 	holder argsHolder
+}
+
+func registerRecoveryArgs(p *Plan) {
+	for _, job := range p.nodes {
+		for recovery := range recoveryChain(job.onFailure) {
+			registerJobArgs(p, recovery.id, recovery.job)
+		}
+	}
 }
 
 func registerJobArgs(p *Plan, id string, jobValue any) {
@@ -80,25 +89,29 @@ func (p *Plan) declaredArguments() []describeArg {
 
 // safety: the CLI maps every flag and alias of the pipeline and its jobs
 // into one table, so a shared name would silently route a value to one owner.
-func assertJobArgsDisjoint(p *Plan, pipe inputSchema) error {
-	names := map[string]bool{}
+func assertJobArgsDisjoint(p *Plan, pipe inputSchema, existing ...jobArgsDecl) error {
+	names := map[string]string{}
 	shorts := map[string]string{}
 	for _, f := range pipe.Fields {
 		if f.isExtraBag {
 			continue
 		}
-		names[f.Name] = true
+		names[f.Name] = "pipeline Inputs"
 		if f.Short != "" {
 			shorts[f.Short] = f.Name
 		}
 	}
-	for _, d := range p.jobArgs {
+	for _, d := range slices.Concat(existing, p.jobArgs) {
 		for _, f := range d.schema.Fields {
-			if names[f.Name] {
-				return fmt.Errorf("job %q declares --%s, which the pipeline Inputs already declare", d.jobID, f.Name)
+			if prior, exists := names[f.Name]; exists {
+				return fmt.Errorf("job %q declares --%s, already declared by %s", d.jobID, f.Name, prior)
 			}
 			if prior, dup := shorts[f.Short]; f.Short != "" && dup {
-				return fmt.Errorf("job %q declares -%s for --%s, which the pipeline Inputs already use for --%s", d.jobID, f.Short, f.Name, prior)
+				return fmt.Errorf("job %q declares -%s for --%s, already used for --%s", d.jobID, f.Short, f.Name, prior)
+			}
+			names[f.Name] = fmt.Sprintf("job %q", d.jobID)
+			if f.Short != "" {
+				shorts[f.Short] = f.Name
 			}
 		}
 	}

@@ -3,6 +3,7 @@ package sparkwing
 import (
 	"context"
 	"fmt"
+	"maps"
 	"reflect"
 	"sort"
 	"sync"
@@ -140,11 +141,7 @@ func buildRegistration[T any](name string, factory func() Pipeline[T], callerLab
 		if err := p.Plan(sdkserve.DeclarationContext(ctx), plan, in, rc); err != nil {
 			return nil, err
 		}
-		for _, job := range plan.nodes {
-			if recovery := job.onFailure; recovery != nil {
-				registerJobArgs(plan, recovery.id, recovery.job)
-			}
-		}
+		registerRecoveryArgs(plan)
 		if err := assertJobArgsDisjoint(plan, schema); err != nil {
 			return nil, fmt.Errorf("pipeline %q: %w", name, err)
 		}
@@ -158,6 +155,7 @@ func buildRegistration[T any](name string, factory func() Pipeline[T], callerLab
 				return nil, &InputError{Err: fmt.Errorf("pipeline %q: %w", name, err)}
 			}
 		}
+		plan.args = maps.Clone(args)
 		return plan, nil
 	}
 

@@ -59,6 +59,7 @@ func TestProtocol(t *testing.T) {
 						t.Run("entrypoint-alias", testGoSDKEntrypointAlias)
 						t.Run("closure-identifiers", testGoSDKClosureIdentifiers)
 						t.Run("job-arguments", testGoSDKJobArguments)
+						t.Run("recovery-chains", testGoSDKRecoveryChains)
 						t.Run("output-failures", testGoSDKOutputFailures)
 						t.Run("reply-result-reuse", testGoSDKReplyResultReuse)
 						t.Run("interface-outputs", testGoSDKInterfaceOutputs)

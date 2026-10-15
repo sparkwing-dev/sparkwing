@@ -272,10 +272,15 @@ func (j *jobargsTargetJob) Work(w *Work) (*WorkStep, error) {
 type jobargsCollidePipe struct {
 	job      Workable
 	recovery bool
+	nested   bool
 }
 
 func (c jobargsCollidePipe) Plan(_ context.Context, plan *Plan, _ jobargsPipeInputs, _ RunContext) error {
-	if c.recovery {
+	if c.nested {
+		recovery := plan.Approval("gate", ApprovalConfig{}).
+			OnFailure("source", func(context.Context) error { return nil })
+		recovery.OnFailure("recover", c.job)
+	} else if c.recovery {
 		Job(plan, "source", func(context.Context) error { return nil }).OnFailure("recover", c.job)
 	} else {
 		Job(plan, "deploy", c.job)
@@ -291,16 +296,12 @@ func TestInvoke_RefusesJobFlagsThatShadowPipelineInputs(t *testing.T) {
 		"short": {&jobargsTagJob{}, "-t for --tag"},
 		"long":  {&jobargsTargetJob{}, "declares --target"},
 	} {
-		for _, recovery := range []bool{false, true} {
-			kind := "job"
-			if recovery {
-				kind = "recovery"
-			}
+		for _, kind := range []string{"job", "recovery", "nested-recovery"} {
 			t.Run(name+"/"+kind, func(t *testing.T) {
 				pipe := "jobargs-collide-" + name + "-" + kind
 				job := tc.job
 				Register[jobargsPipeInputs](pipe, func() Pipeline[jobargsPipeInputs] {
-					return jobargsCollidePipe{job: job, recovery: recovery}
+					return jobargsCollidePipe{job: job, recovery: kind == "recovery", nested: kind == "nested-recovery"}
 				})
 				reg, _ := lookup(pipe)
 				_, err := reg.Invoke(t.Context(), map[string]string{"target": "prod"}, RunContext{Pipeline: pipe})
