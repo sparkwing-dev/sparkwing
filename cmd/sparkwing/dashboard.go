@@ -120,9 +120,7 @@ func executeDashboard(ctx context.Context, inv clisurface.Invocation, services d
 		options.Stay, options.DashboardAddress = inv.Bool("stay"), dashboardAddress(inv)
 		status, err = services.lifecycle.StartDashboard(ctx, options)
 	case "stop":
-		if err = services.lifecycle.Stop(ctx); err == nil {
-			status, err = services.lifecycle.Status(ctx)
-		}
+		status, err = stopLocalController(ctx, services.lifecycle)
 	case "status":
 		status, err = services.lifecycle.Status(ctx)
 	case "install", "uninstall":
@@ -145,11 +143,5 @@ func executeDashboard(ctx context.Context, inv clisurface.Invocation, services d
 	if err != nil {
 		return result, err
 	}
-	result.State = "stopped"
-	if status.Running {
-		result.State = "running"
-	}
-	result.PID, result.Version, result.Stay, result.Installed = status.PID, status.Version, status.Stay, status.Installed
-	result.Activity = dashboardActivity{IdleSince: status.Activity.IdleSince, Runs: status.Activity.Runs, QueuedTriggers: status.Activity.QueuedTriggers, HeldLeases: status.Activity.HeldLeases, DashboardConnections: status.Activity.DashboardConnections}
-	return result, nil
+	return localStatusResult("dashboard", action, status), nil
 }

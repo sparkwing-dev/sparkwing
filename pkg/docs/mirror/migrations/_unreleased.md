@@ -1,5 +1,31 @@
 # Migrating to the next release
 
+## Daemon lifecycle reports
+
+Daemon status, stop and restart share the local controller lifecycle used by
+dashboard and doctor. JSON uses `kind: service`, `service: controller`, `action`
+and `state: running|stopped`. It also carries `version`, `pid` when present,
+`stay`, `installed` and `activity`. Mutation reports include `restarted`,
+`stopped` and the preceding `previous_version` when a controller was replaced
+or stopped. Plain output is the state.
+
+Consumers of `running`, `healthy`, `binary_version`, schema versions or socket
+paths must switch to this projection. Use doctor for controller diagnostics.
+No status command opens the runs database. These adapters need the native
+local-services binding before they can inspect a running controller.
+
+Restart leaves a stopped controller stopped. The same exact version stays
+running unless `--force` is selected. Replacement preserves the home, dashboard
+address and stay policy, waits for shutdown, and refuses an unready or
+wrong-version replacement.
+
+## Job failure reports
+
+Replace `JobResult.error` with `failure: {job, stage, error}`. The nested error
+uses the canonical code, message, hint and details shape. The job must match the
+report's job selector. Stage must be present. Recovery reads the persisted
+failure without inferring its stage from an outcome or reason.
+
 ## Reconciliation sources and sealed guards
 
 Private reconciliation can identify a previously materialized result with

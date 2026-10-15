@@ -100,9 +100,9 @@ func nodeTransitionForStore(authorized capability.Authorized, body controllerwir
 	change := store.NodeTransition{Ref: store.NodeRef{RunID: authorized.Target.RunID, NodeID: authorized.Target.NodeID}, Actor: actor, To: store.NodeState(body.To), Cause: store.TransitionCause(body.Cause), Extra: store.TransitionExtra{RetryAt: body.RetryAt}}
 	if body.Result != nil {
 		result := body.Result
-		change.Extra.Result = &store.NodeResult{Outcome: store.NodeState(result.Outcome), Reason: result.Reason, ExitCode: result.ExitCode, OutputRecord: result.Output, ManifestRecord: result.Manifest}
-		if result.Error != nil {
-			change.Extra.Result.MaskedError = result.Error.Message
+		change.Extra.Result = &store.NodeResult{Outcome: store.NodeState(result.Outcome), Reason: result.Reason, ExitCode: result.ExitCode, OutputRecord: result.Output, ManifestRecord: result.Manifest, Failure: result.Failure}
+		if result.Failure != nil && result.Failure.Error != nil {
+			change.Extra.Result.MaskedError = result.Failure.Error.Message
 		}
 	}
 	return change, nil

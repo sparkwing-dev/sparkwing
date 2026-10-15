@@ -87,7 +87,12 @@ A snapshot is one consistent scheduling read. Generator replay uses the exact
 accepted body and source fence, including empty expansions. The persisted topology
 stays authoritative. Held jobs receive a cancellation request while their current
 holder retains result rights. A result replay compares the actor, operation,
-fence, attempt and body digest.
+fence and body digest. Source-attempt fencing remains an integration requirement.
+
+A reported job result carries `failure: {job, stage, error}` when it has a
+structured failure. The inner error retains its code, message, hint and details.
+Recovery reads that same persisted failure. An outcome or reason cannot replace
+its stage. The error-only result field is removed.
 
 ## Logs and stored data
 

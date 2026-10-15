@@ -161,12 +161,12 @@ type RenewalResponse struct {
 
 // JobResult references authorized records, so a raw digest cannot grant reachability.
 type JobResult struct {
-	Outcome  string          `json:"outcome"`
-	Reason   string          `json:"reason,omitempty"`
-	Error    *apierr.Error   `json:"error,omitempty"`
-	ExitCode *int            `json:"exit_code,omitempty"`
-	Output   *blob.RecordKey `json:"output,omitempty"`
-	Manifest *blob.RecordKey `json:"manifest,omitempty"`
+	Outcome  string                `json:"outcome"`
+	Reason   string                `json:"reason,omitempty"`
+	Failure  *nodeproto.JobFailure `json:"failure,omitempty"`
+	ExitCode *int                  `json:"exit_code,omitempty"`
+	Output   *blob.RecordKey       `json:"output,omitempty"`
+	Manifest *blob.RecordKey       `json:"manifest,omitempty"`
 }
 
 // JobTransitionRequest is the single report/transition body. The adapter derives

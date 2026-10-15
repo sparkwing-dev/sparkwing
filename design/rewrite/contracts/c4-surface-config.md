@@ -41,6 +41,17 @@ is bound to one home, owns one store and uses the shared controller, queue and U
 Readiness includes startup reconciliation. Drain joins shutdown. The four existing
 activity counts determine idle exit, with stay as an explicit override.
 
+The CLI's daemon status, stop and restart adapters consume `LocalLifecycle`
+through the same local-services binding as dashboard, doctor and update.
+Status projects only `LocalStatus`. It never opens the store or probes the old
+daemon transport. Restart preserves a stopped controller, skips the same exact
+version unless forced, joins Stop, confirms stopped status, then calls
+EnsureStarted with the captured home/executable/address and preceding stay value.
+An answering controller after Stop or an unready/wrong-version start is an error.
+No success receipt is emitted after a lifecycle, cancellation or output failure.
+The existing 2/20/30-second status/restart/stop observation budgets remain.
+Native local-services construction and readiness remain W8 integration points.
+
 Managed controller units call foreground `wingd run --stay --home <absolute-home>`.
 Managed timers call `__tick --home <absolute-home>`. Public dashboard start stays a
 lifecycle client. ManagedUnit retains Home and update re-renders both kinds before

@@ -1,3 +1,138 @@
+# W9 failure reporting and daemon lifecycle continuation
+
+Started clean at d294d02fa after the completed integration merge. W9 remains
+incomplete. No Git write, Sparkwing binary, service, pipeline or release ran.
+Writes stayed inside this worktree and /tmp/sw-astra-W9, removed at handoff.
+
+## Implemented
+
+- JobResult.Failure replaces JobResult.Error. It transports the existing
+  nodeproto.JobFailure with job, stage and canonical error. The controller
+  passes it unchanged to NodeResult.Failure and derives MaskedError from its
+  inner message. C1 still owns validation, authority, persistence and replay.
+  Unknown error codes, hints and details survive recovery reads. This is a
+  local W9 C3 contract cut. No foreign contract shape changed.
+- Daemon status, stop and restart parse clisurface and use LocalLifecycle via
+  resolveLocalServices. The native constructor remains W8 work. Status uses
+  LocalStatus without opening state.db or probing the legacy daemon transport.
+  JSON reports safe lifecycle fields and activity. Plain output is the state.
+- Restart leaves stopped controllers stopped. It skips an exact-version match
+  unless forced, joins Stop, confirms stopped status, then starts the captured
+  executable/home/address with the preceding stay value. A still-answering
+  controller or an unready/wrong-version replacement fails without a success
+  receipt. The existing status/restart/stop budgets remain 2/20/30 seconds.
+- Dashboard and daemon share one stop confirmation and one status projection.
+  Dashboard stop previously returned success with state running if Stop did
+  not finish. Its regression failed before this change and passes now.
+- Updated the C3/C4 contracts, API/local-execution guides, migration notes,
+  changelog, generated OpenAPI and embedded mirrors.
+
+## Tests, ports and deletions
+
+Invariant: a reported failure retains its complete job, stage and canonical
+error through the wire and persisted recovery boundary. The new acceptance
+TestSurfaceJobFailureReportTransport passes on fake HTTP and api.sock transports.
+It failed on the preceding source because the failure disappeared. The SQLite
+TestEngineReportedFailureReachesRecovery also failed before the cut with a nil
+failure. It now verifies persisted recovery, exact replay and refusal of a
+foreign job, missing stage, null inner error and empty error code without
+advancing the state. FuzzEngineReportedFailureProjection passed its seeds and
+694 executions over three seconds with four workers.
+
+Ported the old daemon exact-version, forced-restart, absent-controller, stop
+confirmation, output/preflight and nested-shutdown-budget regressions through
+LocalLifecycle. Added cancellation, error propagation, captured home/address/
+stay preservation, unready replacement and dashboard stop cases. The recovery
+and journal tests remain active and pass. No test sleeps were added.
+
+Removed 369 gross lines from daemon.go's legacy status/control implementation,
+including daemonReport, schema/store readers, probes, restart/stop dependency
+wrappers and obsolete remedies. Removed 568 gross old daemon-test lines,
+including all 149 lines of daemon_api_report_test.go and 99 lines of
+daemon_stop_test.go. Retained the recovery test in daemon_test.go. The removed
+native schema/API-ready tests are not claimed as final runtime ports: W8 must
+provide those diagnostics through LocalLifecycle.Doctor and readiness through
+its native runtime. No old health projection or cache-artifact fallback remains
+in these CLI commands. T1's parked inventory assigns no source function to W9.
+
+## Verification
+
+Go used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and GOCACHE,
+GOTMPDIR/TMPDIR under /tmp/sw-astra-W9. Tests used -p 4 or less.
+
+- Whole-repository go build -p 4 ./... passes on the final source.
+- Vet passes for cmd/sparkwing, clisurface, controllerwire, apispec, doccheck,
+  pkg/controller, controller/client and tests/acceptance. CLI vet was repeated
+  after the shared stop change.
+- Full clisurface, controllerwire, apispec and doccheck tests pass.
+- CLI TestDaemon, TestDashboard, TestShutdownWindowsNest, TestDoctor,
+  TestCommandReferenceMatchesRegistry and TestHelp selections pass.
+- All controller TestEngine tests and the new failure fuzz seeds pass.
+- Client TestEngineClient, TestQueue and TestDataClient selections pass.
+- Acceptance TestSurface and TestProtocolSchema selections pass.
+  internal/acceptance compiles with no test files. No native T1 cell was
+  unskipped, and no full native acceptance pass is claimed.
+- Focused pkg/docs mirror/changelog/link/catalog/privacy/symbol tests pass.
+  Source doccheck passes 308 CLI invocations, 69 HTTP references and 397 links.
+  Its 72 Go blocks remain partial/non-self-contained, not compile evidence.
+- commentcheck -base main is clean across 1,295 Go files. sleepcheck -base HEAD,
+  sync-docs --check, gofmt and git diff --check pass.
+
+The initial doccheck invocation lacked its required path arguments. The corrected
+source-doc check passed. No full CLI/client/native suite or pipeline ran. The
+lead owns independent review, commits, integration checks and landing.
+
+## Amendment and handoff audit
+
+Every amendments-1.md row naming W9 and every W9 handoff was rechecked. The
+previous ledgers below retain completed work and remain applicable except where
+this continuation advances them.
+
+| Rows / handoff | Action and remaining integration |
+| --- | --- |
+| A1-03/08/09/13/15/16/17/18/20/22/38/55 | Retained strict error, claims, reconciliation, expansion, cloud and authority adapters. Native owner/controller/store composition remains. |
+| A1-14 | Complete report failure and persisted recovery now work through the wire/server adapter. W3 native report producers must consume JobResult.Failure. |
+| A1-10/11/19; execution identity and alias handoffs | Existing installer and alias-inspection work retained. Native engine/source/host constructors, granted identity and alias execution remain open. |
+| A1-29/30/34/37 | Existing signed-data transport retained. Native remote cache, publication and legacy storage consumer retirement remain. |
+| A1-39/40/41/49/50 | Daemon control now uses the final lifecycle with fakes. W8 native local services, effective endpoints, timers/units and runner startup remain open. Initial/local/detached hosting, publication and cache-from composition remain W9 work. |
+| A1-43/45/47 | Retained notice/upgrade/settings/guard adapters. Native engine/index and scheduled sealed-intake composition remain. |
+| A1-51 | Regenerated the changed JobResult schema and source/embedded docs. Remaining unmapped API bodies and old runtime consumers still need retirement. |
+| A1-52; Windows packaging | Prior implementation retained. Native Windows execution and publication credentials remain unverified. |
+| A1-53 | New fake transport and SQLite component evidence only. Native platform/placement/backend drivers and real-repository QA remain T1/lead work. |
+
+Contract changes needed in other areas: the existing W1/W9/W3 source-attempt
+handoff remains open. NodeTransition still lacks its source ordinal. Do not
+invent a digest salt or infer the source attempt from mutable state. W9's wire
+field must be finalized together with that C1 contract and W3's report producer.
+No new human decision is requested.
+
+Do not redo the merged machine profile reader or cache-warm masking. Source
+inspection confirmed loadProfiles uses userconfig.ReadConfig, userconfig.Read
+has no legacy migration, and cache warm composes procenv.Build with the shared
+masked install writer. Exact engine selection and executable-lease lifetime
+still require their native owners.
+
+The old remaining-work list also includes final initial-trigger intake, detached
+consumer deletion, source/repository identity, publication copying, local schedule
+installation/tick, sizing reset, member annotations, runner pool registration,
+daemon event cursor cutover, unfinished guides/examples and native acceptance.
+
+## Shared files and friction
+
+Minimal foreign caller migrations: pkg/controller/engine_contract.go and
+engine_store.go. Ported engine_store_test.go and added engine_failure_report_test.go.
+Other shared files: tests/acceptance/job_failure_contract_test.go, api/openapi.yaml,
+the C3/C4 contracts, this handoff, CHANGELOG.md and generated pkg/docs artifacts.
+All remaining edits are W9 CLI source/tests and source guides.
+
+No new service, environment variable, flag, timeout, credential class or authority
+mechanism was added. LocalLifecycle and JobFailure are existing contracts.
+Friction remains the unimplemented native W8 constructor, C1 attempt-fence seam
+and native acceptance environment. Overwing discovery worked despite its stale
+binary notice. Git identity remains Korey Gambill and core.worktree is unset.
+
+---
+
 # W9 integration-merge, result identity and guide continuation
 
 Started at 3718486f4 with an integration merge in progress. W9 remains incomplete.

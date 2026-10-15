@@ -4,6 +4,17 @@
 
 ## Amendment 1: private execution and claim wire
 
+`JobResult.Failure` carries the complete persisted `nodeproto.JobFailure` as
+`{job, stage, error}`. It replaces the error-only `JobResult.Error` field.
+The adapter passes the failure to `NodeResult.Failure` and derives the masked
+display message from its canonical inner error. C1 validates job identity,
+stage, error and size before committing it with the result. Report replay
+includes that complete failure. Recovery reads preserve its code, message,
+hint and details, including unknown additive codes. No stage is inferred from
+an outcome, reason or error string. Native hosts still need to report through
+this boundary. The separate source-attempt fencing handoff remains open because
+C1 `NodeTransition` has no source-attempt field.
+
 `ReuseSource.Result` transports C1's materialized-result source as
 `{run_id, job_id, state_seq}`. It identifies the exact persisted terminal state
 when no execution attempt produced that result. It is exclusive with a nonzero

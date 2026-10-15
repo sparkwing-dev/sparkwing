@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+- **daemon (Breaking):** Status, stop and restart use the shared local controller lifecycle
+  JSON reports safe lifecycle state and activity. Restart preserves stopped controllers and waits for shutdown before replacement. Store/API diagnostics move to doctor. Native local-services construction remains an integration requirement. See [migration](docs/migrations/_unreleased.md#daemon-lifecycle-reports).
+- **controller wire (Breaking):** Job reports retain the complete structured failure for recovery
+  `JobResult.Failure` replaces the error-only field and preserves job, stage and canonical error details. See [migration](docs/migrations/_unreleased.md#job-failure-reports).
+
 - **TypeScript SDK release:** required native Windows x64 and arm64 bridge builds feed one version-stamped package assembly. Publication uses the checked package, and missing or skipped native verification blocks assembly. Windows execution still requires CI evidence.
 - **API documentation:** OpenAPI is generated from the final capability policy and shared JSON types. Removed legacy trigger routes and handler/store schemas are deleted. Operations without a documented success body are marked explicitly.
 

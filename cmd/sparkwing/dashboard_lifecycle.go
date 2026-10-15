@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
 type dashboardActivity struct {
@@ -26,6 +30,41 @@ type dashboardResult struct {
 	Stay      bool              `json:"stay"`
 	Installed bool              `json:"installed"`
 	Activity  dashboardActivity `json:"activity"`
+}
+
+func localStatusResult(service, action string, status wingd.LocalStatus) dashboardResult {
+	state := "stopped"
+	if status.Running {
+		state = "running"
+	}
+	return dashboardResult{
+		Kind: "service", Tool: "sparkwing", Service: service, Action: action, State: state,
+		PID: status.PID, Version: status.Version, Stay: status.Stay, Installed: status.Installed,
+		Activity: dashboardActivity{IdleSince: status.Activity.IdleSince, Runs: status.Activity.Runs, QueuedTriggers: status.Activity.QueuedTriggers, HeldLeases: status.Activity.HeldLeases, DashboardConnections: status.Activity.DashboardConnections},
+	}
+}
+
+func stopLocalController(ctx context.Context, lifecycle wingd.LocalLifecycle) (wingd.LocalStatus, error) {
+	if err := ctx.Err(); err != nil {
+		return wingd.LocalStatus{}, err
+	}
+	if err := lifecycle.Stop(ctx); err != nil {
+		return wingd.LocalStatus{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return wingd.LocalStatus{}, err
+	}
+	status, err := lifecycle.Status(ctx)
+	if err != nil {
+		return wingd.LocalStatus{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return wingd.LocalStatus{}, err
+	}
+	if status.Running {
+		return wingd.LocalStatus{}, &apierr.Error{Code: apierr.Unavailable, Message: fmt.Sprintf("controller %s still answers after drain", status.Version), Hint: "run sparkwing doctor"}
+	}
+	return status, nil
 }
 
 func renderDashboard(out io.Writer, result dashboardResult, mode string) error {

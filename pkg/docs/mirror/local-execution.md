@@ -52,6 +52,18 @@ sparkwing dashboard status
 sparkwing doctor -o json
 ```
 
+Daemon status, stop and restart use the shared local lifecycle. JSON reports
+`state`, `version`, `pid`, `stay`, `installed` and the four activity counts.
+Stop and restart also report `stopped`, `restarted` and `previous_version`.
+Plain output is the resulting state. Store and API diagnostics come from doctor.
+These adapters require the native local-services binding described above.
+
+Restart preserves a stopped controller. An answering controller on the exact
+installed version stays running unless `--force` is selected. Replacement waits
+for shutdown before starting the installed executable with the same home,
+dashboard address and stay policy. An incomplete drain or unready replacement
+returns an error without a success receipt.
+
 Active runs, queued triggers, held leases and open dashboard connections keep
 it alive. Health checks alone do not. `--stay` keeps it up until stopped.
 Linux and macOS support an installed login service through `dashboard install`.

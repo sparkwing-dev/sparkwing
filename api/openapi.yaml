@@ -1497,13 +1497,13 @@ components:
     internal.controllerwire.JobResult:
       additionalProperties: true
       properties:
-        error:
-          anyOf:
-            - $ref: '#/components/schemas/internal.apierr.Error'
-            - type: "null"
         exit_code:
           anyOf:
             - type: integer
+            - type: "null"
+        failure:
+          anyOf:
+            - $ref: '#/components/schemas/internal.nodeproto.JobFailure'
             - type: "null"
         manifest:
           anyOf:

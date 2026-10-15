@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -134,9 +135,10 @@ func TestEngineJobResultPreservesRecordsAndRetry(t *testing.T) {
 	output, manifest := blob.RecordKey{Name: "output"}, blob.RecordKey{Name: "manifest"}
 	exit := 7
 	retry := time.Unix(100, 0).UTC()
-	body := controllerwire.JobTransitionRequest{To: "running", Cause: "retry", RetryAt: &retry, Result: &controllerwire.JobResult{Outcome: "failed", Reason: "exit", Error: &apierr.Error{Code: apierr.SDKError, Message: "masked"}, ExitCode: &exit, Output: &output, Manifest: &manifest}}
+	failure := &nodeproto.JobFailure{Job: "job", Stage: "step:verify", Error: &apierr.Error{Code: apierr.SDKError, Message: "masked"}}
+	body := controllerwire.JobTransitionRequest{To: "running", Cause: "retry", RetryAt: &retry, Result: &controllerwire.JobResult{Outcome: "failed", Reason: "exit", Failure: failure, ExitCode: &exit, Output: &output, Manifest: &manifest}}
 	got, err := nodeTransitionForStore(authorized, body)
-	if err != nil || got.Ref != (store.NodeRef{RunID: "run", NodeID: "job"}) || got.Actor.Kind != store.ActorHolder || got.Actor.Holder != "runner" || got.Actor.Generation != 9 || got.To != store.NodeRunning || got.Cause != store.CauseRetry || got.Extra.RetryAt != &retry || !reflect.DeepEqual(got.Extra.Result, &store.NodeResult{Outcome: store.NodeFailed, Reason: "exit", MaskedError: "masked", ExitCode: &exit, OutputRecord: &output, ManifestRecord: &manifest}) {
+	if err != nil || got.Ref != (store.NodeRef{RunID: "run", NodeID: "job"}) || got.Actor.Kind != store.ActorHolder || got.Actor.Holder != "runner" || got.Actor.Generation != 9 || got.To != store.NodeRunning || got.Cause != store.CauseRetry || got.Extra.RetryAt != &retry || !reflect.DeepEqual(got.Extra.Result, &store.NodeResult{Outcome: store.NodeFailed, Reason: "exit", MaskedError: "masked", ExitCode: &exit, OutputRecord: &output, ManifestRecord: &manifest, Failure: failure}) {
 		t.Fatalf("job transition: %+v, %v", got, err)
 	}
 }

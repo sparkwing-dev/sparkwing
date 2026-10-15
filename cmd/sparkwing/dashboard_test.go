@@ -19,6 +19,7 @@ type dashboardLifecycleFake struct {
 	options wingd.LocalStartOptions
 	status  wingd.LocalStatus
 	err     error
+	keepUp  bool
 }
 
 func (f *dashboardLifecycleFake) StartDashboard(_ context.Context, options wingd.LocalStartOptions) (wingd.LocalStatus, error) {
@@ -29,6 +30,9 @@ func (f *dashboardLifecycleFake) StartDashboard(_ context.Context, options wingd
 
 func (f *dashboardLifecycleFake) Stop(context.Context) error {
 	f.calls = append(f.calls, "stop")
+	if f.err == nil && !f.keepUp {
+		f.status.Running = false
+	}
 	return f.err
 }
 
@@ -82,7 +86,11 @@ func TestDashboardUsesLocalControllerLifecycle(t *testing.T) {
 			if err := json.Unmarshal(output.Bytes(), &got); err != nil {
 				t.Fatal(err)
 			}
-			if got.State != "running" || got.Version != "v1.2.3" || got.PID != 123 || !got.Stay || !got.Installed || got.Activity != (dashboardActivity{Runs: 2, QueuedTriggers: 3, HeldLeases: 4, DashboardConnections: 5}) {
+			state := "running"
+			if tc.args[0] == "stop" {
+				state = "stopped"
+			}
+			if got.State != state || got.Version != "v1.2.3" || got.PID != 123 || !got.Stay || !got.Installed || got.Activity != (dashboardActivity{Runs: 2, QueuedTriggers: 3, HeldLeases: 4, DashboardConnections: 5}) {
 				t.Fatalf("lost controller status: %+v", got)
 			}
 			if tc.args[0] == "start" {
@@ -188,5 +196,16 @@ func TestDashboardMissingRuntimeFailsWithoutLegacyServiceFallback(t *testing.T) 
 	var failure *apierr.Error
 	if !errors.As(err, &failure) || failure.Code != apierr.Unavailable || output.Len() != 0 {
 		t.Fatalf("error=%v output=%s", err, &output)
+	}
+}
+
+func TestDashboardRefusesAnUndrainedStop(t *testing.T) {
+	fake := &dashboardLifecycleFake{status: wingd.LocalStatus{Running: true, Version: "v1"}, keepUp: true}
+	var out bytes.Buffer
+	err := runDashboardCommand(t.Context(), []string{"stop", "-o", "json"}, &out, "linux", func(context.Context) (dashboardServices, error) {
+		return dashboardServices{lifecycle: fake}, nil
+	})
+	if err == nil || out.Len() != 0 {
+		t.Fatalf("undrained stop: %v %s", err, &out)
 	}
 }

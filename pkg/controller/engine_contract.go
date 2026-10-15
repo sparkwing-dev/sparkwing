@@ -211,8 +211,8 @@ func (s *EngineController) Renew(ctx context.Context, authorized capability.Auth
 }
 
 func (s *EngineController) TransitionJob(ctx context.Context, authorized capability.Authorized, body controllerwire.JobTransitionRequest) (controllerwire.Applied, error) {
-	if body.Result != nil {
-		if err := validateEngineFailure(body.Result.Error, apierr.DecodeInner); err != nil {
+	if body.Result != nil && body.Result.Failure != nil {
+		if err := validateEngineFailure(body.Result.Failure.Error, apierr.DecodeInner); err != nil {
 			return controllerwire.Applied{}, err
 		}
 	}
