@@ -1,149 +1,135 @@
 # W1b handoff
 
-This continuation starts at `0273b4571`. W1b remains incomplete. Earlier
-metering, payment, blob/record, policy, reporting and tagged-log implementations
-are retained. W1's schema, admission, claims, state, reaper, quota-admission and
-SQL-guard files were not edited. No Git writes were made.
+This continuation starts at `d795fc6b3`. Earlier metering, payment, blob,
+record, upload-quota, policy, reporting and tagged-log implementations remain.
+W1b is incomplete. W1's schema, admission, claims, state, reaper, generic quota
+and SQL-guard files were not changed. No Git writes were made.
 
-## Implemented
+## Changes
 
-- Blob upload tickets enforce configured monthly byte, lifetime run byte and
-  lifetime run object limits. Pending transfers reserve all three dimensions.
-  Empty new blobs reserve one object. Authorized existing content reserves zero
-  bytes and objects. Existing tier values and zero-as-unlimited semantics stay
-  the same.
-- `upload_quota.go` owns three durable dimensions in the existing quota tables.
-  The aggregate keys are `storage`, `storage.run.bytes:<run>` and
-  `storage.run.objects:<run>`. Reservation IDs are the existing `upload:<ticket>`
-  plus `run-bytes:` and `run-objects:` children. No schema change was needed.
-- Reserve, commit and abort acquire monthly, run-byte and run-object quota locks
-  in that order. Commit acquires all three before the blob lock. Settlement,
-  receipt creation, unique-byte/object counts and replica usage remain atomic.
-  Exact commit replay adds no usage. Abort releases all dimensions once.
-- Monthly rollover resets only monthly capacity. Run dimensions and pending
-  holds survive calendar changes and reopening. Historical reports keep their
-  reservation period and sum run usage across periods.
-- Leased expiry releases child holds after run/upload cascades, even when a
-  generic monthly reservation already marked the parent hold released.
-- Upload admission resolves effective default-tier policy for every new ticket.
-  It creates no quota override row. An absent policy is unlimited. Changing the
-  deployment default affects the next ticket. W1's separate generic quota path
-  remains an integration point described below.
-- The SQLite `storage-quota-settlement-crash-replay/store-data-sqlite` cell is
-  active. Its fixture starts child test processes at before/after commit and
-  before/after abort checkpoints. Each child exits with its store open. The
-  parent waits, reopens, checks pending/committed/aborted state, replays operations,
-  checks deduplicated usage and verifies every aggregate and hold. It also proves
-  that pending uploads cannot exceed the configured run limit. Publication
-  authority is preseeded and verified-upload evidence is a contract fake. Native
-  signing, byte verification and controller checkpoints are not claimed.
+- Removed both `SetNodeArtifactManifestCharged` methods. Verified uploads charge
+  each new tenant blob once. Logical output and memo references consume no
+  additional byte or object budget. A new regression publishes and replays both
+  records at the run's one-object ceiling, then refuses a new blob.
+- Removed the legacy `artifact-manifest` HTTP handler, registration, tenant-route
+  entry, hosted-retry entry and obsolete assertions. The final schema has no
+  `nodes.artifact_manifest` column. Reusing the old setter would preserve a
+  broken route, so there is no forwarding route or schema compatibility column.
+  `TestLegacyManifestEndpointIsGone` invokes the HTTP handler without a socket
+  and requires 404.
+- Activated `storage-log-segments-and-fallback/store-data-sqlite`. It proves
+  immutable segment replay, rollback of an entire gapped batch, persistence
+  across closing/reopening, offset reads, incomplete sealing, exact final
+  replay, unique retained-byte accounting, subject isolation and revocation.
+  A lost log tail leaves the job result unchanged.
+- Updated the daemon's two quota route inventory entries from `{principal}` to
+  `{team}`. Its route classification check exposed this earlier migration gap.
+- Updated the C1 contract note, quota prose, changelog, API reference and OpenAPI
+  specification. The API/doc generators made only the expected route deletion.
 
-## Deleted and ported
+The log proof uses a real final SQLite store and preseeded capability/segment
+metadata. It does not transfer or verify physical bytes. Native placements,
+owner-unit transport, ring gaps/stalls, signing, physical expiry and egress
+remain integration work. The native scenario cells stay skipped.
 
-Replaced the single-budget upload reservation/settlement implementation:
-**69 gross removed implementation Go lines**, including replaced declarations,
-and **4 obsolete test lines** that counted one primitive reservation per ticket.
-No legacy API family was fully removed in this continuation. Store implementation
-Go grows by 82 lines including contract comments. The new quota owner is 74 lines.
+## Deletion and ports
 
-Seven store regression tests cover pending run bytes, empty objects and aborts,
-rollover/reopening/replay, default policy, independent clients, orphan expiry and
-missing empty duplicates. The last two incorporate independent review probes.
-Assertions use the tenant API and real SQLite databases. The expiry test uses a
-read-only SQL oracle for orphan holds. No additional complete row of the archived
-T1 port inventory is claimed closed.
+Deleted **76 gross production Go lines**: 44 in the store, 29 in the handler and
+three route/policy entries. Removed **79 obsolete test lines**, including the
+old manifest-per-object accounting assertions and route inventory entries.
+The quota inventory correction replaces two additional test lines. Six API
+snapshot lines and the removed OpenAPI/reference entry were also deleted.
 
-## Verification
+The old manifest-count expectation is replaced by the final unique-blob budget
+regression. Existing final blob tests retain tenant, unrelated-job, member and
+read-edge refusal coverage. No additional complete archived T1 inventory row is
+claimed closed. No new table, runtime interface, setting or environment variable
+was added.
+
+## Unit evidence
+
+- Store selection: **112 top-level tests / 207 including subtests**, no skips.
+  Pattern: `^(TestStoreData|TestLogPersistence|TestResult|TestBlob|TestPayment|TestReversePaymentTakesBack|TestCreditSettings|TestSetCreditSettings|TestUnsetRateTable|TestSetRateTable|TestAStoredRateTable|TestATableWithoutAFourCore)`.
+- Acceptance packages: **20 top-level tests / 197 passes**, with **2,995 existing
+  skips**. SQLite cells cover replica accounting, upload crash/replay, financial
+  retention and now log persistence.
+- Controller route checks: `^(TestLegacyManifestEndpointIsGone|TestRouteGuard_|TestTenantRoutes_)` passed.
+- Orchestrator checks: `^(TestEveryControllerRouteIsClassified|TestReadRouteListCarriesNoDuplicates|TestHostedRetryPolicy_)` passed after the two quota path repairs.
+- A Go overlay disabling the log replay content comparison makes the new cell
+  fail with `log replay replaced immutable content`. The production source was
+  unchanged by this negative control.
+
+## Manual verification
 
 Go commands used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4`,
-`-p 4`, and `GOCACHE`, `GOTMPDIR` and `TMPDIR` under `/tmp/sw-astra-W1b/`.
-The scratch tree is removed at handoff. The only installed Sparkwing invocation
-was read-only `info --for-agent` during orientation. No candidate, daemon,
-pipeline, external service, release or Git write was run.
+`-p 4`, and `GOCACHE`, `GOTMPDIR`, `TMPDIR` under `/tmp/sw-astra-W1b/`.
+Use the assigned worktree with `go -C <worktree>`.
 
-- Whole-repository `go build -p 4 ./...` passed.
-- `go vet -p 4 ./pkg/store/... ./internal/acceptance/... ./tests/acceptance/...`
-  passed.
-- Owned regression: **111 top-level tests / 206 including subtests**, no skips.
-  Selection: `^(TestStoreData|TestLogPersistence|TestResult|TestBlob|TestPayment|TestReversePaymentTakesBack|TestCreditSettings|TestSetCreditSettings|TestUnsetRateTable|TestSetRateTable|TestAStoredRateTable|TestATableWithoutAFourCore)`.
-- Race: **57 top-level tests / 108 including subtests**, no skips. Selection:
-  `^(TestStoreData|TestBlobUpload|TestBlobGC)`.
-- Acceptance packages: **20 top-level tests / 196 passes**, with **2,995 existing
-  test skips**. SQLite cells now include storage replica accounting, storage
-  settlement/crash/replay, and billing-ledger retention. Native targets remain
-  skipped. `internal/acceptance` has no package-local tests.
-- The new pending-byte and empty-object tests failed before implementation. A
-  Go overlay restoring the prior upload implementation also made the new SQLite
-  cell fail because the second upload bypassed the run limit.
-- Independent snapshot review found lock ordering and missing process crashes
-  in the first proof. Both were corrected. The second review found no remaining
-  concrete issue. Its separate upload/GC tests and crash cell passed. Initial
-  usage backfill was removed after review because the frozen design requires a
-  fresh final store. There is no per-request historical scan or migration.
-- `commentcheck -base HEAD` passed across 10 Go files. `sleepcheck -base HEAD`,
-  embedded-doc sync checking and `git diff --check` passed. Public production
-  API signatures are unchanged, so no API snapshot regeneration was needed.
-- SQL scope guard still fails with **28 inherited findings**: 14 unscoped SQL
-  statements and 14 stale exemptions. None concerns the new quota owner. W1's
-  guard was not edited. PostgreSQL, native placements and pipeline gates were
-  not run in this socket-restricted worker.
-- No local Git identity or `core.worktree` override was found. Test subprocesses
-  are joined by the fixture driver. No scratch-owned test process remains.
+- Whole-repository `go build -p 4 ./...` passed after the endpoint cut.
+- `go vet -p 4` passed for `pkg/store/...`, `pkg/controller/...`,
+  `internal/acceptance/...`, `tests/acceptance/...`, `internal/orchestrator/...`.
+- `commentcheck -base HEAD <worktree>`, `sleepcheck -base HEAD <worktree>`,
+  OpenAPI drift checking, embedded-doc sync checking and `git diff --check` passed.
+- SQL scope guard retains **28 inherited diagnostics**. Its owned files were
+  untouched. The generated Go API snapshot has broad inherited rewrite drift.
+  Only the six lines for the two removed methods were cut from its baseline.
+- No local Git identity or `core.worktree` override was found.
 
-## Assumptions and mechanisms
+## Not tested
 
-Two run quota dimensions use the existing reservation mechanism because monthly
-bytes alone cannot reserve per-run capacity or count a zero-byte object. This
-adds no table, environment variable, service or customer limit. Removing those
-run dimensions would undo this implementation and restore the enforcement gap.
-The final store starts empty, as the frozen hard-cut policy requires. Existing
-prototype upload tickets are not backfilled or adapted.
+No native placement, PostgreSQL, daemon, candidate, pipeline, external payment
+provider or release was run. This worker cannot run the lead's socket-based
+pipelines. Race tests were not repeated because this continuation removes a
+legacy path and adds synchronous persistence proofs. Independent landing review
+remains with the lead. Scratch is deleted at handoff.
 
-## Remaining work and real integration
+## Contract and integration work remaining
 
-1. W1 must integrate immutable billing awards into issuance with server-derived
-   resources/pricing, open/close billable intervals at execution/wait boundaries,
-   charge renewals and settle terminal/release/reaper transactions at persisted
-   finish/lapse. Reconciliation still needs atomic memo materialization.
-2. W1's generic `quotaPolicyTx` still requires an explicit storage quota row.
-   It must consume effective policy without freezing deployment defaults. The
-   owned upload path now resolves defaults and enforces per-run bytes/objects.
-   W1's maintenance coordinator must retain the upload hold/GC ordering.
-3. W2 still owns billing calculation, verified opaque payment events, payment
-   configuration and final operator routes. W1/W2/W9 must settle test/live mode
-   identity for retained cards, attempts, warnings, freezes and refund work.
-4. W1b still needs legacy cuts in claim-time credits, paid grants, node logs,
-   old event/manifest charges, raw storage counters and legacy uploads.
-   `chargeStorageTx` still writes principal columns. Its old consumers and
-   fixtures remain. Allowance/nonpayment eviction still needs record/pin policy.
-5. W7 must wire upload reserve/lookup/verified commit/abort to physical integrity
-   and trusted ReplicaID, manifest reads, blob deletion and cloud provenance.
-   Shared edge/namespace contract stubs remain covered by existing fakes.
-6. Final maintenance must coordinate allowance/nonpayment eviction, both GC
-   phases and the remaining retention tasks. Legacy receipt/identity pruning
-   and the separate storage pass still need final elected-worker ordering.
-7. W2/W7 must wire tagged log subjects, canonical keys, retention classes,
-   proxy egress, lifecycle rules, physical expiry and live-ring fallback.
+1. W1 must join immutable billing awards and intervals to issuance, starts,
+   waits, renewals, release, finish and reaping. Its generic storage quota path
+   must resolve effective policy. Memo materialization must remain atomic.
+2. W2 must wire billing calculation and verified payment events. Test/live mode
+   identity for retained cards, attempts, warnings, freezes and refunds remains
+   a cross-area concern.
+3. W7/W9 must wire final manifest publication through records/results and the
+   physical manifest reader. The old `StateStoreOld` client/host adapters still
+   name `SetNodeArtifactManifest`; their full family must be cut when those
+   hosts switch contracts. The HTTP endpoint removed here is not restored.
+4. W1/W9 need the final custom-event append/sequence boundary before
+   `AppendEventCharged` and `chargeStorageTx` can be deleted. The old charged
+   route returns a sequence; the existing raw append returns only an error and
+   does not preserve its event-limit checks. No competing contract was added.
+5. Remaining W1b legacy families include claim-time credits, paid grants, raw
+   storage counters, direct uploads and old node logs. W7 must connect upload
+   verification, trusted ReplicaID, physical deletion and shared edge/namespace
+   rules. Existing store tests use contract fakes for those foreign stubs.
+6. W1/W7 must coordinate elected maintenance, allowance/nonpayment eviction,
+   record/pin policy, GC and identity/receipt pruning. W2/W7 own signing,
+   retention classes, lifecycle checks, proxy egress and ring fallback.
 
-No new foreign contract change or human decision is requested. The C1 document
-records local quota keys, lock order and the SQLite proof boundary. Outstanding
-cross-area contracts and old code prevent a COMPLETE claim.
+No new human decision was made. The missing integrations and legacy families
+prevent a COMPLETE claim.
 
 ## Shared files
 
-- `internal/acceptance/store_data.go`: dispatch the new proof and require its
-  crash driver. Its sole caller in `tests/acceptance/storage_test.go` is migrated.
-- `internal/acceptance/store_upload.go`: new SQLite proof and child fixture.
-- `tests/acceptance/storage_test.go`: subprocess crash driver and checkpoint mode.
-- `design/rewrite/contracts/c1-data.md`: local implementation/verification notes.
-- `docs/self-hosting.md`, `CHANGELOG.md` and their generated `pkg/docs` mirrors.
+- `internal/acceptance/store_data.go`, new `store_logs.go`: persistence dispatch
+  and the SQLite log proof.
+- `pkg/controller/handlers.go`, `server.go`, `tenant_routes.go`: endpoint cut.
+- New `pkg/controller/store_manifest_internal_test.go`, plus
+  `storage_test.go`, `node_claim_ownership_test.go`,
+  `node_client_contract_test.go`: removed-route proof and obsolete assertions.
+- `internal/orchestrator/hosted_retry.go`, `wingd_api_routes_test.go`: route
+  policy/inventory deletion and the team quota path correction.
+- `.apidiff/pkg_store.txt`, `api/openapi.yaml`, `docs/api-reference.md`,
+  `docs/self-hosting.md`, `CHANGELOG.md`, their generated `pkg/docs` mirrors,
+  and `design/rewrite/contracts/c1-data.md`.
 
-Owned store files are `blob_accounting.go`, `blob_persistence.go`,
-`upload_runtime.go`, `upload_contract.go`, `upload_runtime_test.go`, the new
-`upload_quota.go`, the new `upload_quota_runtime_test.go` and this handoff.
-There are no production caller migrations outside `pkg/store`.
+Owned store changes are `storage.go`, `storage_test.go`,
+`upload_quota_runtime_test.go` and this handoff. No W1 implementation file changed.
 
-Friction remains in foreign integration stubs, inherited SQL-guard debt,
-old-schema fixtures and native/PostgreSQL execution. No new tooling blocker.
+Friction: the first quota fixture used an invalid memo record name and was
+corrected. A controller probe exposed the missing legacy manifest column, which
+led to deleting its endpoint. The old log pruner still has a maintenance caller;
+its family was left intact. API snapshot and SQL guard debt remain inherited.
 
 STATUS: CONTINUE

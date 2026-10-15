@@ -129,10 +129,7 @@ func (f storageFixture) monthUsage(t *testing.T) store.StorageUsage {
 	return usage
 }
 
-const (
-	storageEventPath    = "/api/v1/runs/run-1/events"
-	storageManifestPath = "/api/v1/runs/run-1/nodes/only/artifact-manifest"
-)
+const storageEventPath = "/api/v1/runs/run-1/events"
 
 func eventBody(payload string) string {
 	buf, err := json.Marshal(map[string]any{
@@ -170,21 +167,6 @@ func TestEventAppendRefusedPastTheBytesPerMonthQuota(t *testing.T) {
 	}
 	if !strings.Contains(body, store.StorageLimitBytesPerMonth) {
 		t.Fatalf("the refusal reads %q and does not name the monthly limit", body)
-	}
-}
-
-func TestArtifactManifestRefusedPastTheObjectsPerRunQuota(t *testing.T) {
-	f := newStorageFixture(t, store.StorageQuota{Team: store.DefaultTeam, MaxObjectsPerRun: 1})
-	manifest := `{"manifest_digest":"sha256:abc"}`
-	if code, body := f.request(t, http.MethodPost, storageManifestPath, f.team, manifest, true); code != http.StatusNoContent {
-		t.Fatalf("the first manifest = %d %s, want 204", code, body)
-	}
-	code, body := f.request(t, http.MethodPost, storageManifestPath, f.team, manifest, true)
-	if code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("the second manifest = %d %s, want 413", code, body)
-	}
-	if !strings.Contains(body, store.StorageLimitObjectsPerRun) {
-		t.Fatalf("the refusal reads %q and does not name the object limit", body)
 	}
 }
 

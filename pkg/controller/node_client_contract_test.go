@@ -97,9 +97,6 @@ func runContractSurface(t *testing.T, c *client.Client) {
 	if err := c.SetNodeSummary(ctx, runID, "produce", "# done"); err != nil {
 		t.Fatalf("SetNodeSummary: %v", err)
 	}
-	if err := c.SetNodeArtifactManifest(ctx, runID, "produce", "sha256:abc"); err != nil {
-		t.Fatalf("SetNodeArtifactManifest: %v", err)
-	}
 	for i, kind := range []store.MetricKind{store.MetricInterval, store.MetricCommand, store.MetricUnknown} {
 		if err := c.AddNodeMetricSample(ctx, runID, "produce", store.MetricSample{Kind: kind, TS: time.Unix(int64(i+1), 0), MemoryBytes: 400}); err != nil {
 			t.Fatal(err)

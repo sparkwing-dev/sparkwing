@@ -506,6 +506,9 @@ so deleting a run does not lower them. `retained_bytes` measures the team's
 unique committed blobs and stored log segments. Multiple references to the
 same blob count once. Each team accounts for its own copy.
 
+Output, manifest and memo pointers add no quota usage. Their underlying blobs
+consume bytes and objects when a verified upload first commits them.
+
 ### Storage allowances
 
 `storage_allowance_bytes` caps the retained byte count used for billing. Zero

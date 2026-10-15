@@ -2310,35 +2310,6 @@ func (s *Server) handleSetNodeSummary(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) handleSetNodeArtifactManifest(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	runID := r.PathValue("id")
-	nodeID := r.PathValue("nodeID")
-	var body struct {
-		ManifestDigest string `json:"manifest_digest"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if err := tenant.SetNodeArtifactManifestCharged(r.Context(), chargedPrincipal(r),
-		runID, nodeID, body.ManifestDigest); err != nil {
-		if writeStorageWriteRefusal(w, s.logger, err) {
-			return
-		}
-		if errors.Is(err, store.ErrLockHeld) {
-			writeError(w, http.StatusConflict, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 func (s *Server) handleStartNodeStep(w http.ResponseWriter, r *http.Request) {
 	tenant, ok := s.requestTenant(w, r)
 	if !ok {

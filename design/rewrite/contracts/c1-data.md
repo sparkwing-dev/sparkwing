@@ -76,6 +76,13 @@ in every dimension. Abort and leased expiry release all three holds, including
 holds whose upload row was removed by a run cascade. Effective default-tier
 policy is read for every new upload without creating an override row.
 
+Logical record pointers add no storage usage. Output and memo records may point
+to the same authorized blob at the run's object ceiling. A new blob still needs
+an object reservation. The legacy `SetNodeArtifactManifestCharged` methods are
+removed with the legacy manifest-pointer endpoint. W7/W9 wire final publication
+and member validation through the record and result contracts. No manifest
+column or mutable pointer route is restored to the final schema.
+
 The `storage-quota-settlement-crash-replay/store-data-sqlite` proof exercises
 upload admission, commit, abort and deduplication. Child processes exit without
 closing their store at before/after commit and abort checkpoints. The parent
@@ -240,6 +247,13 @@ Owner-unit liveness stays separate; eval gains no job-attempt grace exception.
 subject and run. `ReadLogSegments` and `LogTransport.ReadLog` reauthorize the same
 subject, proxy bytes through the controller, meter egress and apply the log
 exception to download caps. Persisted segments fill gaps or stalls in the ring.
+
+The `storage-log-segments-and-fallback/store-data-sqlite` proof exercises
+immutable job segments, transactional rollback of a gapped batch, reopening,
+offset reads, final incomplete seals, exact replay, retained-byte accounting,
+subject isolation and revocation. Claim authority and segment digests are
+preseeded contract facts. Physical bytes, owner-unit transport, ring fallback,
+signing, lifecycle expiry and proxy egress remain cross-area integrations.
 
 | Export | Purpose |
 |---|---|

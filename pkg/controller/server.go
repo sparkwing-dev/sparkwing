@@ -964,7 +964,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/touch", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleTouchNodeHeartbeat)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleTouchNodeHeartbeat)))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/annotations", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleAppendNodeAnnotation)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAppendNodeAnnotation)))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/summary", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleSetNodeSummary)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleSetNodeSummary)))))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleSetNodeArtifactManifest)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleSetNodeArtifactManifest)))))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/start", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleStartNodeStep)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleStartNodeStep)))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/finish", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleFinishNodeStep)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleFinishNodeStep)))))

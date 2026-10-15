@@ -86,32 +86,6 @@ func TestChargedEventRefusesEachLimit(t *testing.T) {
 	}
 }
 
-func TestChargedManifestRefusesTheObjectLimit(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	seedRunWithNode(t, st, "r1", "n1", "running")
-	if err := storageTestTenant(t, st).SetStorageQuota(ctx, store.StorageQuota{
-		Team: store.DefaultTeam, MaxObjectsPerRun: 1,
-	}); err != nil {
-		t.Fatalf("set quota: %v", err)
-	}
-	if err := st.SetNodeArtifactManifestCharged(ctx, "alice", "r1", "n1", "sha256:a"); err != nil {
-		t.Fatalf("the first manifest: %v", err)
-	}
-	err := st.SetNodeArtifactManifestCharged(ctx, "alice", "r1", "n1", "sha256:b")
-	var refusal *store.StorageQuotaError
-	if !errors.As(err, &refusal) || refusal.Limit != store.StorageLimitObjectsPerRun {
-		t.Fatalf("the second manifest returned %v, want an objects-per-run refusal", err)
-	}
-	node, err := st.GetNode(ctx, "r1", "n1")
-	if err != nil {
-		t.Fatalf("get node: %v", err)
-	}
-	if node.ArtifactManifest != "sha256:a" {
-		t.Fatalf("manifest = %q, want the first one; the refused write was committed", node.ArtifactManifest)
-	}
-}
-
 func TestChargedWriteAccumulatesUnderTheLimit(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
@@ -210,35 +184,6 @@ func TestChargedWriteRefusesARunThatDoesNotExist(t *testing.T) {
 	}
 	if got := countRows(t, st, `SELECT COUNT(*) FROM storage_run_usage`); got != 0 {
 		t.Fatalf("per-run usage rows = %d, want none for a run that does not exist", got)
-	}
-}
-
-func TestChargedManifestOnAnotherTeamsNodeChargesNothing(t *testing.T) {
-	ctx := context.Background()
-	st := storetest.New(t).Open(t)
-	acme := tenantFor(t, st, "acme")
-	globex := tenantFor(t, st, "globex")
-	seedTenantRun(t, acme, "run-a", "deploy")
-	if err := st.CreateNode(ctx, store.Node{RunID: "run-a", NodeID: "build", Status: "running"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := globex.SetStorageQuota(ctx, store.StorageQuota{MaxObjectsPerRun: 1}); err != nil {
-		t.Fatalf("set quota: %v", err)
-	}
-	err := globex.SetNodeArtifactManifestCharged(ctx, "team:globex", "run-a", "build", "sha256:x")
-	if !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("globex's manifest on acme's node = %v, want ErrNotFound", err)
-	}
-	usage, err := globex.StorageUsageFor(ctx, "run-a", store.StorageMonth(time.Now().UTC()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if usage.RunObjects != 0 || usage.MonthObjects != 0 {
-		t.Fatalf("a refused manifest was charged: %+v", usage)
-	}
-	n, err := acme.GetNode(ctx, "run-a", "build")
-	if err != nil || n.ArtifactManifest != "" {
-		t.Fatalf("acme's node = %+v, %v; want it unchanged", n, err)
 	}
 }
 

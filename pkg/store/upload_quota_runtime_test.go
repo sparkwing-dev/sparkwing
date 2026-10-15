@@ -258,3 +258,39 @@ func TestBlobUploadEmptyDuplicateCannotFundMissingObject(t *testing.T) {
 	}
 	rewriteSchemaCount(t, s.db, "blobs", 0)
 }
+
+func TestBlobUploadRecordPointersShareTheObjectBudget(t *testing.T) {
+	s, tenant, request := uploadFixture(t)
+	if err := tenant.SetStorageQuota(t.Context(), StorageQuota{MaxObjectsPerRun: 1}); err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := tenant.ReserveBlobUpload(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.CommitBlobUpload(t.Context(), verifiedUpload(ticket, request.Intent.Authority)); err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, s.db, "UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'", []byte(`{"id":"job","memo":{}}`))
+	records := &blobRecords{tenant: tenant, rules: fakeBlobRules{}}
+	output := blobOutputRequest(request.Intent)
+	for range 2 {
+		if _, err := records.CommitRecord(t.Context(), output); err != nil {
+			t.Fatal(err)
+		}
+		memo := output
+		memo.Key.Kind, memo.Key.Name = blob.KindMemo, "output"
+		memo.Key.Scope = blob.Scope{Repo: "gh:1", Pipeline: "ci", Job: "job", Key: "memo-key"}
+		if _, err := records.CommitRecord(t.Context(), memo); err != nil {
+			t.Fatal(err)
+		}
+	}
+	usage, err := tenant.StorageUsageFor(t.Context(), "run", StorageMonth(s.now()))
+	if err != nil || usage.RunObjects != 1 || usage.MonthObjects != 1 || usage.RunBytes != 3 {
+		t.Fatalf("record pointers consumed upload budget: %+v: %v", usage, err)
+	}
+	request.ID, request.Intent.Digest = "new_object", blob.Digest(strings.Repeat("d", 64))
+	if _, err := tenant.ReserveBlobUpload(t.Context(), request); !errors.Is(err, ErrStorageQuota) {
+		t.Fatalf("new blob bypassed object budget: %v", err)
+	}
+}

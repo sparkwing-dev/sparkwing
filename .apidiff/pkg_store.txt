@@ -2510,9 +2510,6 @@ func (s *Store) SetCronSchedulePaused(ctx context.Context, id string, paused boo
 func (s *Store) SetEventLimits(ctx context.Context, limits EventLimits) (err error)
 func (s *Store) SetFreeTeamSlots(ctx context.Context, slots int64) error
 func (s *Store) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
-func (s *Store) SetNodeArtifactManifestCharged(
-	ctx context.Context, principal, runID, nodeID, manifestDigest string,
-) (err error)
 func (s *Store) SetNodeAttention(ctx context.Context, updates []NodeAttention) error
 func (s *Store) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error
 func (s *Store) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
@@ -2829,9 +2826,6 @@ func (t *Tenant) SetGitHubAppExtraRepoIDs(ctx context.Context, repository string
 func (t *Tenant) SetGitHubAppExtraRepos(ctx context.Context, repository string, extras []string, by string, now time.Time) (_ []string, err error)
 func (t *Tenant) SetMemberRole(ctx context.Context, actorID, subjectID string, role Role, now time.Time) ([]string, error)
 func (t *Tenant) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
-func (t *Tenant) SetNodeArtifactManifestCharged(
-	ctx context.Context, principal, runID, nodeID, manifestDigest string,
-) (err error)
 func (t *Tenant) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error
 func (t *Tenant) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
 func (t *Tenant) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
