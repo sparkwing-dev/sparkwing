@@ -29,9 +29,7 @@ test("flat declarations keep zero and false settings and leave authority to the 
   const doc = plan.toDoc();
   assert.deepEqual(Object.keys(doc).sort(), ["admission_class", "claim_wait_ms", "concurrency", "jobs", "priority", "resources", "source"]);
   assert.deepEqual(doc.source, { depth: 0, full_history: false, tags: false, submodules: false, lfs: false });
-  assert.deepEqual(doc.concurrency, [
-    { group: "builds", scope: "box", capacity: 2, cost: 1, on_limit: "queue", queue_timeout_ms: 0, cancel_timeout_ms: 0 },
-  ]);
+  assert.deepEqual(doc.concurrency, [{ group: "builds", scope: "box", capacity: 2, queue_timeout_ms: 0, cancel_timeout_ms: 0 }]);
   assert.deepEqual(doc.jobs[0], {
     id: "gate",
     approval: { timeout_ms: 0, on_timeout: "deny" },

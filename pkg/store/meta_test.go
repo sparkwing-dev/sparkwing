@@ -16,7 +16,7 @@ func TestSweepClaimClearKeepsNewerOwner(t *testing.T) {
 	defer store.Close()
 	ctx := context.Background()
 	claimed, oldToken, err := store.claimSweepWindowAt(
-		ctx, metaKeyConcurrencySwept, metaKeyConcurrencySweepClaim, time.Hour, time.Nanosecond, time.Unix(1700000000, 0),
+		ctx, "stamp", "claim", time.Hour, time.Nanosecond, time.Unix(1700000000, 0),
 	)
 	if err != nil {
 		t.Fatalf("claim old: %v", err)
@@ -26,7 +26,7 @@ func TestSweepClaimClearKeepsNewerOwner(t *testing.T) {
 	}
 	res, err := store.DB().ExecContext(ctx,
 		`UPDATE sparkwing_meta SET value = ? WHERE key = ? AND value = ?`,
-		"0", metaKeyConcurrencySweepClaim, oldToken,
+		"0", "claim", oldToken,
 	)
 	if err != nil {
 		t.Fatalf("expire old claim: %v", err)
@@ -39,7 +39,7 @@ func TestSweepClaimClearKeepsNewerOwner(t *testing.T) {
 		t.Fatalf("expired claims = %d, want 1", changed)
 	}
 	claimed, newToken, err := store.claimSweepWindowAt(
-		ctx, metaKeyConcurrencySwept, metaKeyConcurrencySweepClaim, time.Hour, time.Nanosecond, time.Unix(1700000000, 0),
+		ctx, "stamp", "claim", time.Hour, time.Nanosecond, time.Unix(1700000000, 0),
 	)
 	if err != nil {
 		t.Fatalf("claim new: %v", err)
@@ -50,12 +50,12 @@ func TestSweepClaimClearKeepsNewerOwner(t *testing.T) {
 	if oldToken == newToken {
 		t.Fatal("repeated clock reused the old token")
 	}
-	if err := store.clearSweepClaim(ctx, metaKeyConcurrencySweepClaim, oldToken); err != nil {
+	if err := store.clearSweepClaim(ctx, "claim", oldToken); err != nil {
 		t.Fatalf("clear old claim: %v", err)
 	}
 	var value string
 	if err := store.DB().QueryRow(
-		`SELECT value FROM sparkwing_meta WHERE key = ?`, metaKeyConcurrencySweepClaim,
+		`SELECT value FROM sparkwing_meta WHERE key = ?`, "claim",
 	).Scan(&value); err != nil {
 		t.Fatalf("read claim: %v", err)
 	}

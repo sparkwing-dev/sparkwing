@@ -13,10 +13,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 const riskFixtureModule = "riskfixture"
@@ -43,17 +44,17 @@ func TestPersistSubmissionRefusesDeclaredRiskBeforeQueuing(t *testing.T) {
 	repoDir := t.TempDir()
 	gate := riskGate{
 		Surface: "detached", Pipeline: "risky", SubmitDir: repoDir,
-		Declared: []sparkwing.DescribePipeline{{
+		Declared: []nodeproto.PipelineDescription{{
 			Name: "risky",
-			RisksBySteps: []sparkwing.DescribeStepRisks{{
-				NodeID: "cut", StepID: "push", Labels: []string{"destructive", "prod"},
+			RisksByStep: []nodeproto.StepRisks{{
+				JobID: "cut", StepID: "push", Labels: []string{"destructive", "prod"},
 			}},
 		}},
 	}
 	_, err = persistSubmission(t.Context(), st, paths, submission{
 		Pipeline: "risky", RepoDir: repoDir, Gate: gate.check,
 	})
-	var blocked *sparkwing.RiskBlockedError
+	var blocked *riskBlockedError
 	if !errors.As(err, &blocked) || blocked.StepID != "push" ||
 		strings.Join(blocked.MissingLabels, ",") != "destructive,prod" {
 		t.Fatalf("submission refusal = %v, want the step and both unapproved labels", err)
@@ -413,6 +414,7 @@ func riskWriteFixture(t *testing.T, declaration string) (repoDir, sparkwingDir s
 const riskFixtureJobs = `package jobs
 
 import (
+"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"context"
 	"errors"
 	"os"
@@ -455,6 +457,7 @@ func init() {
 const riskFixtureMain = `package main
 
 import (
+"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	_ "riskfixture/jobs"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/runner"

@@ -11,7 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/oidcissuer"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 const (
@@ -193,12 +192,12 @@ func oidcClaimsFor(claimed store.ClaimedRun, run *store.Run, trig *store.Trigger
 func oidcTriggerKind(trig *store.Trigger) string {
 	// safety: the event name is reserved to the signed App webhook, which records it with the
 	// repository id at intake; a github source without both proves no event and no repository.
-	event := trig.TriggerEnv[sparkwing.EnvGitHubEventName]
+	event := trig.TriggerEnv["GITHUB_EVENT_NAME"]
 	signed := trig.TriggerSource == oidcWebhookSource && trig.GithubRepoID > 0
 	switch {
 	case signed && event == githubEventPush:
 		return oidcTriggerPush
-	case signed && event == sparkwing.EventPullRequest && pullNumber(trig.TriggerEnv) != "":
+	case signed && event == "pull_request" && pullNumber(trig.TriggerEnv) != "":
 		return oidcTriggerPR
 	case signed && event == "release" && strings.HasPrefix(trig.TriggerEnv["GITHUB_REF"], "refs/tags/"):
 		return oidcTriggerRelease
@@ -215,7 +214,7 @@ func oidcTriggerKind(trig *store.Trigger) string {
 }
 
 func pullNumber(env map[string]string) string {
-	n := env[sparkwing.EnvPRNumber]
+	n := env["GITHUB_PR_NUMBER"]
 	if n == "" || strings.Trim(n, "0123456789") != "" {
 		return ""
 	}

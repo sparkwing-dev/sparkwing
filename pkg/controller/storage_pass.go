@@ -15,14 +15,6 @@ import (
 // service's buckets to reconcile every team's stored bytes.
 const StoragePassEvery = time.Hour
 
-const cacheObjectMaxAge = store.DirectCacheMaxAge
-
-// CacheObjectMaxAge is how long the storage pass keeps cache objects in every
-// team namespace and the operator token's root namespace.
-func CacheObjectMaxAge(team string) time.Duration {
-	return cacheObjectMaxAge
-}
-
 type storagePass struct {
 	stores map[store.StorageKind]*teamblob.Store
 
@@ -31,9 +23,8 @@ type storagePass struct {
 	lastErr error
 }
 
-// WithStoragePass names the bucket the storage pass lists beside the node
-// log segments: the cache's blob store, which it also expires. A nil
-// store is not listed.
+// WithStoragePass names the bucket listed beside the node log segments.
+// A nil store is not listed. Blob lifetime follows record reachability.
 func (s *Server) WithStoragePass(cache *teamblob.Store) *Server {
 	p := &storagePass{stores: map[store.StorageKind]*teamblob.Store{}}
 	if cache != nil {
@@ -68,9 +59,6 @@ func (s *Server) storagePassOnce(ctx context.Context, p *storagePass) error {
 	if _, err := s.store.ReleaseExpiredStorage(ctx, now); err != nil {
 		errs = append(errs, fmt.Errorf("release expired reservations: %w", err))
 	}
-	if _, err := s.store.PruneExpiredUploads(ctx, now); err != nil {
-		errs = append(errs, fmt.Errorf("prune expired uploads: %w", err))
-	}
 	if err := s.pruneExpiredOutputs(ctx, now); err != nil {
 		errs = append(errs, fmt.Errorf("prune expired outputs: %w", err))
 	}
@@ -82,22 +70,6 @@ func (s *Server) storagePassOnce(ctx context.Context, p *storagePass) error {
 		}
 		if bucket == nil && segments == nil {
 			continue
-		}
-		if kind == store.StorageCache {
-			expired, err := s.store.ClaimExpiredSourceBundles(ctx, now)
-			if err != nil {
-				errs = append(errs, fmt.Errorf("list expired source bundles: %w", err))
-			} else {
-				for _, source := range expired {
-					if err := bucket.Delete(ctx, string(source.Team), "local/"+source.Key); err != nil {
-						errs = append(errs, fmt.Errorf("delete source bundle %s: %w", source.ID, err))
-						continue
-					}
-					if err := s.store.DeleteSourceBundleRows(ctx, source); err != nil {
-						errs = append(errs, fmt.Errorf("prune source bundle %s: %w", source.ID, err))
-					}
-				}
-			}
 		}
 		// safety: the marks are read before the listing, so what is committed
 		// while it runs is added back to what it finds.
@@ -131,11 +103,6 @@ func (s *Server) storagePassOnce(ctx context.Context, p *storagePass) error {
 			errs = append(errs, fmt.Errorf("reconcile %s: %w", kind, err))
 			continue
 		}
-		if kind == store.StorageCache {
-			if _, err := s.store.PruneExpiredCacheObjects(ctx, now); err != nil {
-				errs = append(errs, fmt.Errorf("prune expired cache object rows: %w", err))
-			}
-		}
 		if kind == store.StorageLogs {
 			if err := s.pruneLogsOverShare(ctx, segments, now); err != nil {
 				errs = append(errs, fmt.Errorf("prune logs over a free share: %w", err))
@@ -147,9 +114,6 @@ func (s *Server) storagePassOnce(ctx context.Context, p *storagePass) error {
 	utc := now.UTC()
 	if _, err := s.store.PruneDownloadDays(ctx, utc.AddDate(0, 0, -7).Format("2006-01-02")); err != nil {
 		errs = append(errs, fmt.Errorf("prune download days: %w", err))
-	}
-	if _, err := s.store.PruneEgressTotals(ctx, utc.AddDate(0, -1, 0).Format("2006-01")); err != nil {
-		errs = append(errs, fmt.Errorf("prune egress totals: %w", err))
 	}
 	return errors.Join(errs...)
 }

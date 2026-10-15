@@ -5,6 +5,7 @@ import (
 	"context"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -51,6 +52,7 @@ type Options struct {
 	Engines   *engine.Resolver
 	Target    releaseasset.Target
 	SDK       engine.SDKKind
+	Base      procenv.Base
 }
 
 // Entry is the acquired checkout and SDK command. Command excludes protocol argv.
@@ -82,6 +84,7 @@ func (e *Entry) Close() error { panic("unimplemented: c3-protocol-sdk") }
 
 // ForRequest uses the captured intake checkout policy for planning acquisition.
 // Code and checkout-derived policy can resolve only at AcceptPlan.
+// Source.Location supplies URL/local path/pipeline directory. Repo display is never a clone URL.
 func ForRequest(request runspec.SealedRequest) (Spec, error) {
 	panic("unimplemented: c3-protocol-sdk")
 }
@@ -89,6 +92,7 @@ func ForRequest(request runspec.SealedRequest) (Spec, error) {
 // ForExecution uses the accepted checkout winner and immutable acquisition identity.
 // Executors never inspect raw PlanDoc.Source or a host's machine preferences.
 // The projection also carries the accepted portable engine identity.
+// It preserves the first seal's source location, never the executor's ambient checkout.
 func ForExecution(spec runspec.Spec) (Spec, error) {
 	panic("unimplemented: c3-protocol-sdk")
 }

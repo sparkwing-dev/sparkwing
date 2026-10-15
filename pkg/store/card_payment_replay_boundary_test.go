@@ -1,92 +1,87 @@
-package store_test
+package store
 
 import (
 	"errors"
 	"reflect"
 	"testing"
-	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-func TestCardPaymentReferenceCannotFundTwoTeams(t *testing.T) {
-	for _, tc := range []struct{ name, first, second string }{
-		{"card to card", "card", "card"}, {"grant to card", "grant", "card"}, {"card to grant", "card", "grant"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			s := storetest.Open(t)
-			ctx, now := t.Context(), time.Now()
-			for _, name := range []string{"acme", "globex"} {
-				team := teamHandle(t, s, store.Team(name))
-				trustWithCard(t, team, now)
-				spend(t, s, name, "charge-"+name, 15_000)
+func TestPaymentCardIdentityCannotFundTwoTeams(t *testing.T) {
+	for _, kinds := range [][2]string{{"card", "card"}, {"grant", "card"}, {"card", "grant"}, {"checkout", "card"}, {"card", "checkout"}, {"checkout", "grant"}, {"grant", "checkout"}} {
+		t.Run(kinds[0]+"_to_"+kinds[1], func(t *testing.T) {
+			s, event := paymentFixture(t, capability.PaymentTest)
+			now := s.now()
+			rewriteSchemaExec(t, s.db, `INSERT INTO credit_checkouts(id,team,session_id,payment_mode,currency,amount_minor,amount_micro,opened_at,expires_at) VALUES ('other','b','other-session','test','usd',100,1000000,1,2)`)
+			for _, team := range []Team{"a", "b"} {
+				rewriteSchemaExec(t, s.db, `INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,seconds,kind,amount_micro,charged_at) VALUES (?,?,'','','',1,'usage',1000000,1)`, "spent-"+string(team), team)
+				rewriteSchemaExec(t, s.db, `INSERT INTO card_charges(id,team,amount_micro,cause,state,next_attempt_at,opened_at) VALUES (?,?,1000000,'rung','open',1,1)`, "charge-"+string(team), team)
+				rewriteSchemaExec(t, s.db, `INSERT INTO card_attempts(id,team,charge_id,kind,status,created_at,updated_at) VALUES (?,?,?,'off_session','live',1,1)`, "attempt-"+string(team), team, "charge-"+string(team))
 			}
-			work, _, err := s.DueCardCharges(ctx, now)
-			if err != nil || len(work) != 2 {
-				t.Fatalf("due charges = %d, %v; want two", len(work), err)
-			}
-			charges := map[store.Team]store.CardChargeWork{}
-			for _, item := range work {
-				charges[item.Team] = item
-			}
-			settle := func(kind string, p store.CardPayment) (bool, error) {
-				if kind == "card" {
-					created, _, err := s.SettleCardPayment(ctx, p, now)
+			settle := func(kind string, team Team) (bool, error) {
+				switch kind {
+				case "card":
+					created, _, err := s.SettleCardPayment(t.Context(), CardPayment{Team: team, ChargeID: "charge-" + string(team), AttemptID: "attempt-" + string(team), PaymentIntent: event.PaymentID, AmountCents: 100}, now)
 					return created, err
+				case "grant":
+					result, err := (&Tenant{s: s, team: team}).RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantPaid, AmountMicro: 1000000, Reference: event.PaymentID, CreatedBy: "console"})
+					return result.Created, err
+				default:
+					facts := event
+					if team == "b" {
+						facts.CheckoutID, facts.EventID = "other-session", "other-event"
+					}
+					result, err := s.settlePaymentFacts(t.Context(), facts)
+					return err == nil && !result.Replayed, err
 				}
-				team, err := s.ForTeam(ctx, p.Team)
-				if err != nil {
-					return false, err
-				}
-				result, err := team.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: p.AmountCents * store.MicroCreditsPerCent, Reference: p.PaymentIntent})
-				return result.Created, err
 			}
-			first := charges["acme"]
-			payment := store.CardPayment{
-				Team: first.Team, ChargeID: first.ChargeID, AttemptID: first.AttemptID,
-				PaymentIntent: "pi_private_fixture", AmountCents: first.AmountCents,
+			if created, err := settle(kinds[0], "a"); err != nil || !created {
+				t.Fatalf("first payment=%v: %v", created, err)
 			}
-			if created, err := settle(tc.first, payment); err != nil || !created {
-				t.Fatalf("first settlement = %v, %v", created, err)
+			if created, err := settle(kinds[0], "a"); err != nil || created {
+				t.Fatalf("payment replay=%v: %v", created, err)
 			}
-			if created, err := settle(tc.first, payment); err != nil || created {
-				t.Fatalf("same-team replay = %v, %v; want no new grant", created, err)
-			}
-			type state struct {
+			type ledger struct {
 				balance int64
-				grants  []store.CreditGrant
+				grants  []CreditGrant
 			}
-			snapshot := func() map[store.Team]state {
+			snapshot := func() map[Team]ledger {
 				t.Helper()
-				result := map[store.Team]state{}
-				for name := range charges {
-					team, err := s.ForTeam(ctx, name)
+				out := map[Team]ledger{}
+				for _, team := range []Team{"a", "b"} {
+					tenant := &Tenant{s: s, team: team}
+					balance, err := tenant.CreditBalanceMicro(t.Context())
 					if err != nil {
 						t.Fatal(err)
 					}
-					balance, err := team.CreditBalanceMicro(ctx)
+					grants, err := tenant.ListCreditGrants(t.Context(), 50)
 					if err != nil {
 						t.Fatal(err)
 					}
-					grants, err := team.ListCreditGrants(ctx, 50)
-					if err != nil {
-						t.Fatal(err)
-					}
-					result[name] = state{balance, grants}
+					out[team] = ledger{balance, grants}
 				}
-				return result
+				return out
 			}
 			before := snapshot()
-			second := charges["globex"]
-			payment.Team, payment.ChargeID, payment.AttemptID = second.Team, second.ChargeID, second.AttemptID
-			created, settleErr := settle(tc.second, payment)
-			if !errors.Is(settleErr, store.ErrCreditGrantConflict) || created {
-				t.Fatalf("cross-team payment replay: created=%v err=%v; want conflict", created, settleErr)
+			if created, err := settle(kinds[1], "b"); created || !errors.Is(err, ErrCreditGrantConflict) {
+				t.Fatalf("cross-team payment=%v: %v", created, err)
 			}
-			if !reflect.DeepEqual(before, snapshot()) {
-				t.Fatal("refused payment replay changed team balances or grant history")
+			if after := snapshot(); !reflect.DeepEqual(before, after) {
+				t.Fatalf("refused payment moved ledger: before=%+v, after=%+v", before, after)
 			}
 		})
+	}
+}
+
+func TestPaymentRefundCanTakeSpentBalanceBelowZero(t *testing.T) {
+	s, event := paymentFixture(t, capability.PaymentTest)
+	if _, err := s.settlePaymentFacts(t.Context(), event); err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, s.db, `INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,seconds,kind,amount_micro,charged_at) VALUES ('spent','a','','','',1,'usage',700000,1)`)
+	got, err := s.ReversePayment(t.Context(), event.PaymentID, "refund", "console", 0)
+	if err != nil || got.Grant == nil || got.Grant.AmountMicro != -1000000 || got.BalanceMicro != -700000 {
+		t.Fatalf("spent payment refund=%+v: %v", got, err)
 	}
 }

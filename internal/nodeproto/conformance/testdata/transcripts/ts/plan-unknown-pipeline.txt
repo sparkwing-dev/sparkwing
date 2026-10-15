@@ -1,2 +1,0 @@
--> {"args":{},"id":"1","op":"plan","pipeline":"nope","run":{"git":{"branch":"main","repo":"acme/app","sha":"4f2c1e0"},"run_id":"run-1","trigger":{"source":"push"}}}
-<- {"error":{"code":"unknown_pipeline","message":"pipeline \"nope\" is not registered"},"ok":false,"reply":"1"}

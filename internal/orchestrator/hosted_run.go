@@ -22,7 +22,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -36,6 +35,8 @@ type HostedEntry struct {
 	// Command is run with --sw-node-protocol appended in Dir, the repository
 	// root, with Env, the user's environment.
 	Command pipelineentry.Command
+	Engine  nodeproto.EngineIdentity
+	Runner  nodeproto.RunnerIdentity
 	Dir     string
 	Env     []string
 	// SecretArgs names the pipeline's secret flags, whose values are masked
@@ -89,7 +90,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 
 	// safety: nodehost registers the secret-flagged args with this masker while it plans, before any node runs.
 	masker := secrets.NewMasker()
-	delegate := secrets.MaskingLogger(opts.Delegate, masker)
+	opts.Delegate = nodehost.MaskingLogger(opts.Delegate, masker)
 	routes, err := nodehost.Start(slog.Default())
 	if err != nil {
 		return nil, err
@@ -97,7 +98,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 	//nolint:contextcheck // Close bounds its own shutdown; the run's context may already be cancelled here.
 	defer func() { warnHostedClose("node routes", routes.Close()) }()
 	state := &hostedRunState{
-		StateBackend: backends.State, logs: backends.Logs, delegate: delegate, diskRoot: backends.DiskRoot, starts: map[string]time.Time{},
+		StateBackend: backends.State, logs: backends.Logs, delegate: opts.Delegate, diskRoot: backends.DiskRoot, starts: map[string]time.Time{},
 		lineage:       store.Run{ParentRunID: opts.ParentRunID, RetryOf: opts.RetryOf, RetrySource: opts.RetrySource, TriggerSource: opts.Trigger.Source},
 		retryPlanHash: opts.RetryPlanHash,
 	}
@@ -139,8 +140,8 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 
 	resolver := secrets.NewCached(localSecretsFor(ctx, paths, backends, runID, opts.Pipeline), masker)
 	opts.localSecrets = true
-	state.preflight = func(ctx context.Context, doc nodeproto.PlanDocOld) error {
-		return hostedSecretPreflight(ctx, resolver, doc, opts)
+	checkSecrets := func(ctx context.Context, names []string) error {
+		return hostedSecretPreflight(ctx, resolver, names, opts)
 	}
 	children := hostedChildren{
 		state: backends.State, concurrency: backends.Concurrency, admission: opts.Admission, masker: masker, dryRun: opts.DryRun,
@@ -153,7 +154,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 			if err != nil {
 				return nil, err
 			}
-			return hostedNodeLog{NodeLog: log, delegate: delegate}, nil
+			return hostedNodeLog{NodeLog: log, delegate: opts.Delegate}, nil
 		},
 	}
 	if backends.LocalCoordination {
@@ -163,18 +164,18 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 	if err != nil {
 		return nil, err
 	}
-	planSink, err := newHostedPlanSink(ctx, runID, masker, delegate)
+	planSink, err := newHostedPlanSink(ctx, runID, masker, opts.Delegate)
 	if err != nil {
 		return nil, err
 	}
 	cfg := nodehost.Config{
-		Session:  nodehost.SessionConfig{Entry: entry.Command, Dir: entry.Dir, Env: engineenv.Strip(entry.Env), Sink: planSink},
-		Pipeline: opts.Pipeline, Args: invokeArgs, CheckArgs: checkArgs, Run: hostedRunContext(opts, runID),
+		Session:  nodehost.SessionConfig{Entry: entry.Command, Dir: entry.Dir, Env: engineenv.Strip(entry.Env), Sink: planSink, Engine: entry.Engine, Runner: entry.Runner, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: masker}},
+		Pipeline: opts.Pipeline, Args: invokeArgs, CheckArgs: checkArgs, CheckSecrets: checkSecrets, Run: hostedRunContext(opts, runID),
 		StartAt: opts.StartAt, StopAt: opts.StopAt, Only: opts.Only, Workers: opts.MaxParallel,
 		State: state, Artifacts: backends.Artifact, Attempts: attempts, Admission: admission,
 		Debug: nodehost.Debug{
 			PauseBefore: opts.Debug.PauseBefore, PauseAfter: opts.Debug.PauseAfter,
-			PauseOnFailure: opts.Debug.PauseOnFailure, PauseTimeout: pauseTimeout(), Bounces: hostedBounces(backends.State),
+			PauseOnFailure: opts.Debug.PauseOnFailure, PauseTimeout: pauseTimeout(),
 		},
 		Invocation: invocation, Requires: requires,
 		Memo: &nodehost.Memo{
@@ -184,9 +185,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 			},
 		},
 	}
-	if cfg.Rehydrate, err = hostedRehydration(ctx, backends.State, opts, runID); err != nil {
-		return nil, err
-	}
+	cfg.Rehydrate = hostedRehydration(opts)
 	if backends.LocalCoordination {
 		stopTriggers, err := hostedTriggerLoop(ctx, backends.State, runID, entry.Dir, opts.standalone)
 		if err != nil {
@@ -196,7 +195,6 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 	}
 	execStart := time.Now()
 	out, err := nodehost.Execute(ctx, cfg)
-	planSink.Flush()
 	if err != nil {
 		return nil, err
 	}
@@ -204,9 +202,9 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 	if doc := state.planDoc(); backends.LocalCoordination && doc != nil {
 		var pin *capacity.Pin
 		charge := runCharge{}
-		if r := doc.Resources; r != nil && (r.Cores > 0 || r.MemoryBytes > 0) {
-			pin = &capacity.Pin{Cores: r.Cores, MemoryBytes: r.MemoryBytes}
-			charge = runCharge{Cores: r.Cores, MemoryBytes: r.MemoryBytes}
+		if r := doc.Resources; r != nil && (pointerValue(r.Cores) > 0 || pointerValue(r.MemoryBytes) > 0) {
+			pin = &capacity.Pin{Cores: pointerValue(r.Cores), MemoryBytes: pointerValue(r.MemoryBytes)}
+			charge = runCharge{Cores: pointerValue(r.Cores), MemoryBytes: pointerValue(r.MemoryBytes)}
 		}
 		recordRunProfile(finishCtx, backends.State, currentProfileKey(opts.Pipeline), runID, pin, hostedCapacityFingerprint(doc), charge, false, execStart, time.Now())
 	}
@@ -231,26 +229,26 @@ func hostedInterruptCancel(parent context.Context) (context.Context, func()) {
 // its own working directory, so a --sw-ref or declared-source run gets that
 // checkout's defaults and guards rather than the caller's.
 func applyHostedProjectConfig(opts *Options, dir string) error {
-	_, cfg, err := projectconfig.DiscoverOld(dir)
+	_, cfg, err := projectconfig.Discover(dir)
 	if err != nil {
 		return &projectConfigError{err: err}
 	}
 	if cfg == nil {
 		return nil
 	}
-	opts.DefaultArgs = cfg.Defaults.Args
-	opts.PipelineYAML = (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(opts.Pipeline)
-	if p := opts.PipelineYAML; p != nil {
-		if p.Guards.IsEmpty() {
-			p.Guards = cfg.Defaults.Guards
+	opts.PipelineYAML = cfg.Registry().Find(opts.Pipeline)
+	if cfg.Defaults != nil {
+		opts.DefaultArgs = cfg.Defaults.Args
+		if opts.PipelineYAML == nil && cfg.Defaults.Guards != nil {
+			opts.PipelineYAML = &pipelines.Pipeline{Name: opts.Pipeline, Guards: pipelines.Guards{Require: cfg.Defaults.Guards.When, Reject: cfg.Defaults.Guards.Unless}}
 		}
 	}
 	return RefusePinnedLocalRun(opts.PipelineYAML)
 }
 
-func hostedRunContext(opts Options, runID string) nodeproto.RunContextOld {
-	rc := nodeproto.RunContextOld{
-		RunID: runID, NoCache: opts.NoCache, DryRun: opts.DryRun,
+func hostedRunContext(opts Options, runID string) nodeproto.RunContext {
+	rc := nodeproto.RunContext{
+		RunID: runID, Pipeline: opts.Pipeline, NoMemo: opts.NoCache, DryRun: opts.DryRun,
 		Trigger: &nodeproto.Trigger{Source: protocolTriggerSource(opts.Trigger.Source), User: opts.Trigger.User},
 	}
 	if g := opts.Git; g != nil {
@@ -259,22 +257,11 @@ func hostedRunContext(opts Options, runID string) nodeproto.RunContextOld {
 	return rc
 }
 
-func hostedBounces(state StateBackend) nodehost.Bounces {
-	switch s := state.(type) {
-	case localState:
-		return s.st
-	case *client.Client:
-		return s
-	}
-	return nil
-}
-
 // safety: plan code's logs have no node log to land in, so they go to the
-// renderer through a node-host log sink, which masks a value even across the
-// session's split of a long line. Flush it once the run's sessions end.
+// renderer through a node-host log sink, which masks its records as a node's.
 func newHostedPlanSink(ctx context.Context, runID string, masker *secrets.Masker, delegate sparkwing.Logger) (*nodehost.LogSink, error) {
 	return nodehost.NewLogSink(ctx, nodehost.LogSinkConfig{
-		RunID: runID, NodeID: store.PlanNodeID, Log: hostedPlanLog{delegate}, State: podPlanState{}, Masker: masker,
+		RunID: runID, NodeID: store.PlanNodeID, Log: hostedPlanLog{delegate}, Masker: masker,
 	})
 }
 
@@ -298,7 +285,6 @@ type hostedRunState struct {
 	delegate sparkwing.Logger
 	diskRoot string
 
-	preflight func(context.Context, nodeproto.PlanDocOld) error
 	// safety: the handle is published only once its run row exists, so it never names a run the store lacks.
 	publishHandle func() error
 	// safety: the run row records the surface that started the run, such as a child's await-pipeline, which
@@ -308,7 +294,7 @@ type hostedRunState struct {
 	retryPlanHash string
 
 	mu     sync.Mutex
-	doc    *nodeproto.PlanDocOld
+	doc    *nodeproto.PlanDoc
 	starts map[string]time.Time
 }
 
@@ -339,29 +325,21 @@ func (s *hostedRunState) UpdatePlanSnapshot(ctx context.Context, runID string, s
 	if err := s.StateBackend.UpdatePlanSnapshot(ctx, runID, snapshot); err != nil {
 		return err
 	}
-	var doc nodeproto.PlanDocOld
+	var doc nodeproto.PlanDoc
 	if json.Unmarshal(snapshot, &doc) == nil {
 		s.mu.Lock()
 		s.doc = &doc
 		s.mu.Unlock()
 		emitHostedPlan(s.delegate, doc)
-		if s.preflight != nil {
-			return s.preflight(ctx, doc)
-		}
 	}
 	return nil
 }
 
-// safety: a run missing a required secret stops before any node starts, naming each one with its fix, as the
-// dispatcher's preflight did; the snapshot write is the first point the host knows the declared secrets.
-func hostedSecretPreflight(ctx context.Context, r *secrets.Cached, doc nodeproto.PlanDocOld, opts Options) error {
+func hostedSecretPreflight(ctx context.Context, r *secrets.Cached, names []string, opts Options) error {
 	missing := &sparkwingruntime.MissingSecretsError{Pipeline: opts.Pipeline}
-	for _, sec := range doc.Secrets {
-		if sec.Optional {
-			continue
-		}
-		if _, _, err := r.Resolve(ctx, sec.Name); errors.Is(err, secrets.ErrSecretMissing) {
-			missing.Names = append(missing.Names, sec.Name)
+	for _, name := range names {
+		if _, _, err := r.Resolve(ctx, name); errors.Is(err, secrets.ErrSecretMissing) {
+			missing.Names = append(missing.Names, name)
 		} else if err != nil {
 			return err
 		}
@@ -372,7 +350,7 @@ func hostedSecretPreflight(ctx context.Context, r *secrets.Cached, doc nodeproto
 	return secretPreflightError(missing, opts)
 }
 
-func (s *hostedRunState) planDoc() *nodeproto.PlanDocOld {
+func (s *hostedRunState) planDoc() *nodeproto.PlanDoc {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.doc
@@ -413,7 +391,7 @@ func (s *hostedRunState) FinishNodeWithReason(ctx context.Context, runID, nodeID
 		s.failureExcerpt(ctx, runID, nodeID)
 	}
 	// safety: the memo layer writes a cached node's node_end itself, with its cache_hit attribute.
-	if outcome != string(sparkwing.Cached) {
+	if outcome != string(sparkwing.Memoized) {
 		s.nodeRecord(ctx, runID, nodeID, func(log sparkwing.Logger) {
 			log.Emit(sparkwing.LogRecord{TS: time.Now(), Level: "info", Event: "node_end", Attrs: attrs})
 		})
@@ -466,19 +444,19 @@ func warnHostedClose(what string, err error) {
 	}
 }
 
-func emitHostedPlan(delegate sparkwing.Logger, doc nodeproto.PlanDocOld) {
-	rows := make([]any, 0, len(doc.Nodes))
-	for _, n := range doc.Nodes {
-		row := map[string]any{"id": n.ID, "deps": n.Deps}
+func emitHostedPlan(delegate sparkwing.Logger, doc nodeproto.PlanDoc) {
+	rows := make([]any, 0, len(doc.Jobs))
+	for _, n := range doc.Jobs {
+		row := map[string]any{"id": n.ID, "deps": n.Needs}
 		if n.Approval != nil {
 			row["approval"] = true
 		}
 		if len(n.Groups) > 0 {
 			row["groups"] = n.Groups
 		}
-		if w := n.Work; w != nil && !(len(w.Steps) == 1 && w.Steps[0].ID == "run") {
-			steps := make([]map[string]any, 0, len(w.Steps))
-			for _, st := range w.Steps {
+		if len(n.Steps) > 0 && !(len(n.Steps) == 1 && n.Steps[0].ID == "run") {
+			steps := make([]map[string]any, 0, len(n.Steps))
+			for _, st := range n.Steps {
 				steps = append(steps, map[string]any{"id": st.ID, "deps": st.Needs})
 			}
 			row["steps"] = steps
@@ -523,18 +501,19 @@ func emitHostedRunEnd(ctx context.Context, delegate sparkwing.Logger, state Stat
 }
 
 // safety: like capacityFingerprint, it covers the edges and concurrency memberships, which change what a run costs.
-func hostedCapacityFingerprint(doc *nodeproto.PlanDocOld) string {
-	edges := make([]planEdge, 0, len(doc.Nodes))
+func hostedCapacityFingerprint(doc *nodeproto.PlanDoc) string {
+	edges := make([]planEdge, 0, len(doc.Jobs))
 	var conc []any
-	for _, n := range doc.Nodes {
-		edges = append(edges, planEdge{ID: n.ID, Deps: n.Deps})
-		if m := n.Modifiers; m != nil && m.ConcGroup != "" {
-			conc = append(conc, []any{n.ID, m.ConcGroup, m.ConcCapacity, m.ConcScope, m.ConcOnLimit, m.ConcCost})
+	for _, n := range doc.Jobs {
+		edges = append(edges, planEdge{ID: n.ID, Deps: n.Needs})
+		for _, membership := range n.Concurrency {
+			conc = append(conc, []any{n.ID, membership.Group, membership.Capacity, membership.Scope, membership.OnLimit, membership.Cost})
 		}
 	}
-	for _, pc := range doc.PlanConcs {
-		conc = append(conc, []any{"", pc.Key, pc.Capacity, pc.OnLimit, pc.Cost})
+	for _, membership := range doc.Concurrency {
+		conc = append(conc, []any{"", membership.Group, membership.Capacity, membership.Scope, membership.OnLimit, membership.Cost})
 	}
+
 	return hashCanonicalJSON(map[string]any{"edges": edges, "concurrency": conc})
 }
 
@@ -612,7 +591,7 @@ func (h hostedChildren) StartChild(ctx context.Context, parent nodehost.ChildPar
 		return "", err
 	}
 	if payload, err := json.Marshal(map[string]any{"child_run_id": id, "pipeline": req.Pipeline, "args": req.Args}); err == nil {
-		noteEvent(ctx, h.state, parent.RunID, parent.NodeID, "child_run_start", maskEventPayload(h.masker, payload))
+		noteEvent(ctx, h.state, parent.RunID, parent.NodeID, "child_run_start", h.masker.MaskJSON(payload))
 	}
 	return id, nil
 }
@@ -668,23 +647,11 @@ func (l hostedNodeLog) EmitText(rec sparkwing.LogRecord) {
 
 // safety: a retry copies the nodes its source run already finished instead of running them, as the dispatcher
 // did, and an automatic retry with causes copies every node but those and what they reach.
-func hostedRehydration(ctx context.Context, state StateBackend, opts Options, runID string) (*nodehost.Rehydration, error) {
+func hostedRehydration(opts Options) *nodehost.Rehydration {
 	if opts.RetryOf == "" || opts.Full {
-		return nil, nil
+		return nil
 	}
-	r := &nodehost.Rehydration{SourceRunID: opts.RetryOf}
-	if opts.RetrySource != store.RetrySourceAuto {
-		return r, nil
-	}
-	row, err := state.GetRun(ctx, runID)
-	switch {
-	case errors.Is(err, store.ErrNotFound):
-	case err != nil:
-		return nil, fmt.Errorf("read retry run %s: %w", runID, err)
-	default:
-		r.Causes = row.RetryCauseNodeIDs
-	}
-	return r, nil
+	return &nodehost.Rehydration{SourceRunID: opts.RetryOf}
 }
 
 // safety: a retry copies its source run's results only when it planned the same plan; the plan names its own
@@ -698,4 +665,11 @@ func retryPlanMatches(snapshot []byte, runID, retryOf, hash string) error {
 		return fmt.Errorf("retry provenance drift: source plan %s, checkout plan %s", hash, got)
 	}
 	return nil
+}
+
+func pointerValue[T any](p *T) (v T) {
+	if p != nil {
+		return *p
+	}
+	return v
 }

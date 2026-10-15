@@ -51,11 +51,11 @@ export function makeContext(options: ContextOptions): Context {
     stepOutput: (step) => options.outputs.get(typeof step === "string" ? step : step.id) as never,
     annotate: async (annotation) => {
       checkAnnotation(annotation);
-      await services().annotate(annotation, signal);
+      await services().annotate(annotation, signal, options.stepId);
     },
     summary: async (markdown) => {
-      checkSize(markdown);
-      await services().summary(markdown, signal);
+      if (typeof markdown !== "string") throw failure("bad_request", "summary markdown must be a string");
+      await services().summary(markdown, signal, options.stepId);
     },
     mask: (value) => services().mask(value, signal),
     oidcToken: (audience) => services().oidcToken(audience, signal),
@@ -68,12 +68,9 @@ export function makeContext(options: ContextOptions): Context {
   registerCommandContext(ctx, (event, attrs) => log.event(event, attrs), options.bodyEnv);
   return ctx;
 }
-function checkSize(value: unknown): void {
-  if (Buffer.byteLength(typeof value === "string" ? value : JSON.stringify(value)) > 128 << 10)
-    throw failure("bad_request", "annotation or summary exceeds 131072 bytes");
-}
 function checkAnnotation(annotation: Annotation): void {
-  checkSize(annotation);
+  if (annotation.endLine !== undefined && annotation.endLine > 0 && annotation.endLine < (annotation.line ?? 0))
+    throw failure("bad_request", "annotation end line precedes its start");
   if (typeof annotation.message !== "string") throw failure("bad_request", "annotation message must be a string");
   if (annotation.level !== undefined && !["debug", "info", "warn", "error"].includes(annotation.level))
     throw failure("bad_request", "invalid annotation level");

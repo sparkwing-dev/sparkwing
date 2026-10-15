@@ -22,7 +22,7 @@ func TestMaskEventPayload_RedactsForwardedSecrets(t *testing.T) {
 	m.Register("s3cr3t-token-value")
 
 	payload := []byte(`{"child_run_id":"c1","args":{"token":"s3cr3t-token-value","env":"prod"}}`)
-	got := string(maskEventPayload(m, payload))
+	got := string(m.MaskJSON(payload))
 
 	if strings.Contains(got, "s3cr3t-token-value") {
 		t.Errorf("payload still carries the secret: %s", got)
@@ -38,18 +38,19 @@ func TestMaskEventPayload_RedactsForwardedSecrets(t *testing.T) {
 func TestMaskEventPayload_CoversEmbeddedSecrets(t *testing.T) {
 	m := secrets.NewMasker()
 	m.Register("s3cr3t")
-	got := string(maskEventPayload(m, []byte(`{"args":{"url":"https://x/?t=s3cr3t"}}`)))
+	got := string(m.MaskJSON([]byte(`{"args":{"url":"https://x/?t=s3cr3t"}}`)))
 	if strings.Contains(got, "s3cr3t") {
 		t.Errorf("embedded secret survived: %s", got)
 	}
 }
 
-func TestMaskEventPayload_NoOpWithoutSecrets(t *testing.T) {
+func TestMaskEventPayload_CanonicalWithoutSecrets(t *testing.T) {
 	payload := []byte(`{"child_run_id":"c1","args":{"env":"prod"}}`)
-	if got := maskEventPayload(secrets.NewMasker(), payload); string(got) != string(payload) {
+	want := `{"args":{"env":"prod"},"child_run_id":"c1"}`
+	if got := secrets.NewMasker().MaskJSON(payload); string(got) != want {
 		t.Errorf("payload changed: %s", got)
 	}
-	if got := maskEventPayload(nil, payload); string(got) != string(payload) {
+	if got := (*secrets.Masker)(nil).MaskJSON(payload); string(got) != want {
 		t.Errorf("nil masker changed the payload: %s", got)
 	}
 }
@@ -81,7 +82,7 @@ func TestEscapedChildEventSecretsStayMaskedInStoreAndReaderHTTP(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := st.AppendEvent(ctx, "parent", "", event.kind, maskEventPayload(m, raw)); err != nil {
+				if err := st.AppendEvent(ctx, "parent", "", event.kind, m.MaskJSON(raw)); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -144,35 +145,33 @@ func TestEscapedChildEventSecretsStayMaskedInStoreAndReaderHTTP(t *testing.T) {
 	}
 }
 
-func TestMaskEventPayloadPreservesUnchangedAndPlainFallback(t *testing.T) {
+func TestMaskEventPayloadPreservesCanonicalAndPlainFallback(t *testing.T) {
 	m := secrets.NewMasker()
 	m.Register("plain-private-token")
-	for _, raw := range []string{`{ "value": 9007199254740993, "safe": true }`, "ordinary plain bytes"} {
-		if got := maskEventPayload(m, []byte(raw)); string(got) != raw {
-			t.Fatalf("unchanged payload rewritten: %s", got)
+	for raw, want := range map[string]string{
+		`{ "value": 9007199254740993, "safe": true }`: `{"safe":true,"value":9007199254740993}`,
+		"ordinary plain bytes":                        "ordinary plain bytes",
+	} {
+		if got := m.MaskJSON([]byte(raw)); string(got) != want {
+			t.Fatalf("payload = %s, want %s", got, want)
 		}
 	}
-	if got := string(maskEventPayload(m, []byte("invalid JSON plain-private-token"))); got != "invalid JSON ***" {
+	if got := string(m.MaskJSON([]byte("invalid JSON plain-private-token"))); got != "invalid JSON ***" {
 		t.Fatalf("plain fallback=%q", got)
 	}
 }
 
-func TestMaskEventPayloadKeepsNumericFieldsWhenSecretIsNumericText(t *testing.T) {
+// A payload is masked as a log record's attrs are: a numeric secret is masked
+// in keys and numbers too, and the payload stays JSON the event reader serves.
+func TestMaskEventPayloadMasksNumericSecretsAsLogAttrs(t *testing.T) {
 	m := secrets.NewMasker()
 	m.Register("12345")
-	for _, raw := range []string{`12345`, `{ "count": 12345, "12345": "safe" }`} {
-		if got := maskEventPayload(m, []byte(raw)); string(got) != raw {
-			t.Errorf("nonsecret numeric/key data changed: %s", got)
-		}
+	payload := m.MaskJSON([]byte(`{"count":12345,"large":9007199254740993,"12345":"safe"}`))
+	var value map[string]string
+	if err := json.Unmarshal(payload, &value); err != nil {
+		t.Fatalf("masked payload is not JSON: %s", payload)
 	}
-	payload := maskEventPayload(m, []byte(`{"count":12345,"large":9007199254740993,"token":"12345"}`))
-	var value map[string]any
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	decoder.UseNumber()
-	if err := decoder.Decode(&value); err != nil {
-		t.Fatal(err)
-	}
-	if value["count"] != json.Number("12345") || value["large"] != json.Number("9007199254740993") || value["token"] != "***" {
-		t.Fatalf("numeric/string separation=%+v", value)
+	if strings.Contains(string(payload), "12345,") || !strings.Contains(value["masked_attrs"], "9007199254740993") {
+		t.Fatalf("masked payload = %s", payload)
 	}
 }

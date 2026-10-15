@@ -76,7 +76,7 @@ test("artifact edges, output references and child results reach the bound routes
   assert.deepEqual(jobs[1].consumes, [{ producer: "producer", into: "vendor" }]);
   assert.deepEqual(jobs[1].deps, ["producer"]);
   assert.deepEqual(jobs[1].pipeline_refs, [{ pipeline: "release/candidate", job: "bundle" }]);
-  const result = await host.send({ id: "body", op: "run_step", job: "consumer", step: jobs[1].steps[0].id, attempt: 1 });
+  const result = await host.send({ id: "body", op: "run_step", settled: [], job: "consumer", step: jobs[1].steps[0].id, attempt: 1 });
   assert.equal(result.result.outcome, "success", JSON.stringify(result));
   assert.deepEqual(result.result.output, { direct: { revision: 7 }, previous: 42, child: false });
   assert.deepEqual(calls, [
@@ -126,7 +126,7 @@ test("optional references suppress only genuine absence through the protocol", a
             return Response.json(entry.body, { status: entry.status });
           },
         );
-        const result = await host.send({ id: "body", op: "run_step", job: "consumer", step: jobs[1].steps[0].id, attempt: 1 });
+        const result = await host.send({ id: "body", op: "run_step", settled: [], job: "consumer", step: jobs[1].steps[0].id, attempt: 1 });
         assert.equal(reads, 1);
         assert.equal(result.ok, true);
         if (entry.code === undefined) {
@@ -153,6 +153,6 @@ test("a child's canonical failure survives the parent's body reply", async (t) =
         ? Response.json({ run_id: "child-run" }, { status: 201 })
         : Response.json({ status: "failed", error }),
   );
-  const result = await host.send({ id: "body", op: "run_step", job: "consumer", step: jobs[0].steps[0].id, attempt: 1 });
+  const result = await host.send({ id: "body", op: "run_step", settled: [], job: "consumer", step: jobs[0].steps[0].id, attempt: 1 });
   assert.deepEqual(result, { reply: "body", ok: true, result: { outcome: "failed", error } });
 });

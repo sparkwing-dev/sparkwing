@@ -44,12 +44,14 @@ type CreateRunRequest struct {
 	IdempotencyKey string          `json:"idempotency_key"`
 }
 
+// CreateRunResponse returns the accepted run and any first-intake here bearer.
 type CreateRunResponse struct {
-	RunID      string                `json:"run_id"`
-	Number     int64                 `json:"number"`
-	Request    runspec.SealedRequest `json:"request"`
-	HereBearer string                `json:"here_bearer,omitempty"`
-	Replayed   bool                  `json:"replayed"`
+	RunID   string                `json:"run_id"`
+	Number  int64                 `json:"number"`
+	Request runspec.SealedRequest `json:"request"`
+	// HereBearer is issued once; lost handoffs need fresh intake, while resume requires the retained private bearer.
+	HereBearer string `json:"here_bearer,omitempty"`
+	Replayed   bool   `json:"replayed"`
 }
 
 // PlanSubmission has no client-selected acceptance timestamp, actor or authority.
@@ -88,21 +90,53 @@ type ClaimRequest struct {
 // ClaimedUnit delivers the award once, over authenticated transport. It must never
 // be logged or copied into environment variables, public run detail or durable seals.
 type ClaimedUnit struct {
-	Unit           capability.UnitKind           `json:"unit"`
-	UnitID         string                        `json:"unit_id"`
-	RunID          string                        `json:"run_id"`
-	JobID          string                        `json:"job_id,omitempty"`
-	Binding        capability.Binding            `json:"binding"`
-	Capability     string                        `json:"capability"`
-	Runner         nodeproto.RunnerIdentity      `json:"runner"`
-	Request        runspec.SealedRequest         `json:"request"`
-	Accepted       *PlanAccepted                 `json:"accepted,omitempty"`
-	Execution      *runspec.JobExecutionSettings `json:"execution,omitempty"`
-	LeaseExpiresAt time.Time                     `json:"lease_expires_at"`
+	Unit                   capability.UnitKind           `json:"unit"`
+	Purpose                capability.AwardPurpose       `json:"purpose"`
+	Delivery               capability.DeliveryPurpose    `json:"delivery"`
+	UnitID                 string                        `json:"unit_id"`
+	RunID                  string                        `json:"run_id"`
+	JobID                  string                        `json:"job_id,omitempty"`
+	Binding                capability.Binding            `json:"binding"`
+	Capability             string                        `json:"capability"`
+	Runner                 nodeproto.RunnerIdentity      `json:"runner"`
+	Request                runspec.SealedRequest         `json:"request"`
+	Accepted               *PlanAccepted                 `json:"accepted,omitempty"`
+	Execution              *runspec.JobExecutionSettings `json:"execution,omitempty"`
+	LeaseExpiresAt         time.Time                     `json:"lease_expires_at"`
+	OwnerDeadline          *time.Time                    `json:"owner_deadline,omitempty"`
+	AttemptDeadline        *time.Time                    `json:"attempt_deadline,omitempty"`
+	ParentCapabilityExpiry *time.Time                    `json:"parent_capability_expiry,omitempty"`
+	SourceGeneration       int64                         `json:"source_generation,omitempty"`
+	Engine                 *engine.Identity              `json:"engine,omitempty"`
 }
 
 type ClaimResponse struct {
 	Claim *ClaimedUnit `json:"claim,omitempty"`
+}
+
+// LauncherObservation reports Kubernetes identity only; it cannot replace the stored claim fence.
+type LauncherObservation struct {
+	UnitID  string `json:"unit_id"`
+	JobName string `json:"job_name"`
+	NodeUID string `json:"node_uid"`
+}
+
+// LauncherSyncRequest reconciles observed Jobs against the launcher's current awards.
+type LauncherSyncRequest struct {
+	Observed []LauncherObservation `json:"observed"`
+}
+
+// LauncherSyncResponse contains immutable execution inputs and cleanup identities, never new bearers.
+// Awards have an empty Capability. Lost bootstrap material recovers through lease expiry and re-award.
+type LauncherSyncResponse struct {
+	Awards []ClaimedUnit `json:"awards"`
+	Remove []string      `json:"remove"`
+}
+
+// ExchangeResponse returns the original unit with its exchanged in-memory authority once.
+// The bootstrap is presented by the authenticated transport; there is no caller-selected binding.
+type ExchangeResponse struct {
+	Claim ClaimedUnit `json:"claim"`
 }
 
 // RenewalRequest reports activity, never a replacement holder or generation.
@@ -160,6 +194,7 @@ type ExpandedJob struct {
 	Job       nodeproto.JobSpec            `json:"job"`
 	SpecHash  string                       `json:"spec_hash"`
 	Execution runspec.JobExecutionSettings `json:"execution"`
+	Current   ExecutionJob                 `json:"current"`
 }
 
 type ExpansionAccepted struct {
@@ -178,15 +213,40 @@ type ReuseSource struct {
 }
 
 type ReconcileRequest struct {
-	Policy string       `json:"policy"`
-	Source *ReuseSource `json:"source,omitempty"`
+	Policy          string       `json:"policy"`
+	Source          *ReuseSource `json:"source,omitempty"`
+	MaterializeOnly bool         `json:"materialize_only,omitempty"`
 }
 
 type ReconcileResponse struct {
 	Kind   string       `json:"kind"`
-	Job    JobDetail    `json:"job"`
+	Job    ExecutionJob `json:"job"`
 	Claim  *ClaimedUnit `json:"claim,omitempty"`
 	Source *ReuseSource `json:"source,omitempty"`
+}
+
+// ExecutionJob is restricted to a live owner or awarded executor, never a public status response.
+// It preserves the persisted state needed to resume; only a new award carries a bearer in Claim.
+type ExecutionJob struct {
+	JobDetail
+	Spec               json.RawMessage              `json:"spec"`
+	SpecHash           string                       `json:"spec_hash"`
+	Execution          runspec.JobExecutionSettings `json:"execution"`
+	ClaimedBy          string                       `json:"claimed_by,omitempty"`
+	CapabilityPrefix   string                       `json:"capability_prefix,omitempty"`
+	ReadyAt            *time.Time                   `json:"ready_at,omitempty"`
+	LeaseExpiresAt     *time.Time                   `json:"lease_expires_at,omitempty"`
+	ApplicationRetries int                          `json:"application_retries"`
+	Disruptions        int                          `json:"disruptions"`
+	ExpansionDigest    string                       `json:"expansion_digest,omitempty"`
+}
+
+// AcceptedExpansion retains exact accepted declarations for reconstruction, including empty groups.
+type AcceptedExpansion struct {
+	SourceJob        string          `json:"source_job"`
+	SourceGeneration int64           `json:"source_generation"`
+	Body             json.RawMessage `json:"body"`
+	BodyHash         string          `json:"body_hash"`
 }
 
 type FinishRequest struct {
@@ -256,6 +316,7 @@ type ScheduleSnapshot struct {
 	CancelRequested bool                `json:"cancel_requested"`
 	Jobs            []ScheduleJob       `json:"jobs"`
 	Generators      []ScheduleGenerator `json:"generators"`
+	Expansions      []AcceptedExpansion `json:"expansions"`
 }
 
 type ScheduleJob struct {
@@ -275,6 +336,8 @@ type ScheduleGenerator struct {
 // Controller is implemented by the shared authenticated HTTP client. Request
 // retries use capability.Routes metadata; errors unwrap once via apierr.DecodeInner.
 // Identical lifecycle payloads replay. Clients must not retry arbitrary failures.
+// Award-capable claim/reconcile/exchange calls never retry automatically. Here
+// CreateRun/Retry also suppress automatic retries despite intake's idempotency policy.
 type Controller interface {
 	Compatibility(context.Context, string) (Compatibility, error)
 	CreateRun(context.Context, CreateRunRequest) (CreateRunResponse, error)
@@ -282,11 +345,15 @@ type Controller interface {
 	ReadSnapshot(context.Context, string) (ScheduleSnapshot, error)
 	AcceptPlan(context.Context, string, PlanSubmission) (PlanAccepted, error)
 	Claim(context.Context, ClaimRequest) (ClaimResponse, error)
+	SyncLauncher(context.Context, LauncherSyncRequest) (LauncherSyncResponse, error)
+	Exchange(context.Context) (ExchangeResponse, error)
 	Renew(context.Context, string, RenewalRequest) (RenewalResponse, error)
 	TransitionJob(context.Context, string, string, JobTransitionRequest) (Applied, error)
 	ReconcileJob(context.Context, string, string, ReconcileRequest) (ReconcileResponse, error)
 	AcceptExpansion(context.Context, string, string, ExpansionSubmission) (ExpansionAccepted, error)
 	Finish(context.Context, string, FinishRequest) (Applied, error)
 	Cancel(context.Context, string, CancelRequest) (Applied, error)
+	CancelJob(context.Context, string, string, CancelRequest) (Applied, error)
+	ReadFailure(context.Context, string, string, int64) (*nodeproto.JobFailure, error)
 	Retry(context.Context, string, RetryRequest) (CreateRunResponse, error)
 }

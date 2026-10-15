@@ -2,10 +2,75 @@
 
 <!-- design:begin -->
 
+## Amendment 1: selected routes and trusted adapters
+
+[Amendments 1](amendments-1.md) resolves the provisioning and transport questions.
+`DecodeInner` is implemented. The remaining runtime work stays with W2 and the
+store/host adapters. Its inner object requires a nonempty string code and a
+present string message. Empty messages are accepted. Optional hint/details must
+be a string/object. Duplicate keys at any depth, null fields, outer envelopes and
+trailing JSON fail without echoing input. Unknown codes and additive fields remain
+readable. HTTP readers unwrap once and both SDK protocol readers use this decoder.
+
+| Route | Authority and result |
+| --- | --- |
+| POST `/api/v1/runners/claim` | One ordered trigger/node scan. claimSelection requires the grant for every requested kind. Separate jobs/runs claim routes are removed. |
+| POST `/api/v1/launcher/claim` | claims.launch independently authorizes plan/eval/node selection. A client routing option confers no authority. |
+| POST `/api/v1/runs/{run}/jobs/{job}/cancel` | Member runs.control or the live run owner. Held rows receive a cancellation request only. |
+| GET `/api/v1/runs/{run}/jobs/{job}/failure?generation=…` | data.read plus the declared recovery read edge and source generation. Returns persisted masked JobFailure. |
+| POST `/node/v1/masks` | NodeReport, ownNode, live node process. `{value:string}` returns `{}` only after all host sinks and identifier matching register it. |
+| POST `/node/v1/annotations` | Same process authority. AnnotationRequest carries optional step, file/line/end_line/column. |
+| POST `/node/v1/summary` | Same process authority. SummaryRequest carries markdown and optional step. |
+
+Claim and reconciliation endpoints do not automatically retry a lost response because new bearers
+are delivered once and are not stored raw. A held unit recovers through its lease.
+Mixed-kind requests cannot borrow a grant from one access alternative to authorize
+another kind. Claim identity and pools come from enrollment, not the request.
+The named trigger route accepts a here Award's trigger.host only for its reserved
+run under LiveHereClaim. It never grants a general queue scan. Here intake replay
+returns the same run without a new raw bearer. Clients suppress automatic here
+intake/retry and report a lost initial bearer as a failed handoff requiring a fresh
+trigger request. The unused reservation expires at its original claim_by.
+Target.ClaimKinds carries the requested set to BindClaimSelection, and ClaimUnit
+repeats every kind/grant check in its transaction.
+
+Mask registration first checks the accepted job/step/group/approval identifiers
+and subsequent generated declarations. A collision returns secret_in_identifier
+with the field path, never the identifier or value, before acknowledging success.
+Every nonempty registered value participates, including short values. Annotation
+and summary writes validate step membership, mask before limits.Record, and
+propagate delivery errors. No secret crosses a log frame as a registration message.
+
+`authentication_contract.go` declares AuthenticationReader and the authority,
+binding, expansion and result snapshots used by NewAuthenticator. Persistence
+receives the SHA-256 presentation digest, never the raw bearer. Presentation.Evidence
+carries decoded selectors and the exact body digest. Route matching supplies the
+method/pattern. Replay compares actor, operation/resource, fence, attempt and body.
+The node host supplies equivalent in-memory process/delegation facts. Endpoint and
+PolicyRouter declarations bind actual registrations to this verifier. Authenticate
+before returning existence-sensitive decoding errors. Session mutations require
+CSRF and external-proof routes use their named proof mechanism.
+
+ProvisionSpec is ratified as trusted root-only Delegate input, with the origin
+checks in issuance.go. It is never decoded from a delegation body. Root authority
+is derived from the bootstrap gate, current membership, machine/service registration
+or verified Actions evidence. Its authorizer is checked but is not a revocation
+parent. Ordinary delegation and here Award ancestry remain unchanged. Deployment
+credentials cannot acquire console trust/grant/refund/freeze powers through this seam.
+
+`controller.DataController` binds C2 authority to blob.DataSigner and blob.RecordStore.
+It resolves Authority.Upload and scope from authenticated, persisted facts, then
+reauthorizes each operation. Signing follows W1 reservation. Commit physically
+verifies bytes and repeats W1's transaction checks. S3 and filesystem backends use
+blob.ObjectBackend. Filesystem transfer endpoints require exact signed-object proof.
+DataRemoteCache always forces verified-default-only reads and never grants writes.
+
+
+
 This contract covers frozen architecture sections 3.6, 5, 6.5, 8 and 9.5,
 including A58, A59, A66, A68, A72 and A73. The Go files declare the target
 interfaces. Runtime authorization, issuance, billing settlement and signing
-remain panic stubs. The existing controller has not switched to this table.
+remain panic stubs. DecodeInner is implemented by amendment 1. The existing controller has not switched to this table.
 
 ## Ownership
 
@@ -47,7 +112,7 @@ All capability names below are in `internal/capability`.
 | `DelegateSpec` | Request a subset of existing authority. |
 | `AwardSpec` | Select a locked unit whose row supplies privileged authority. |
 | `ExchangeSpec` | Consume a bootstrap and recover its original unit policy. |
-| `ProvisionKind`, `ProvisionSpec` | Supply trusted root-origin authority to the same issuer, pending the root clarification below. |
+| `ProvisionKind`, `ProvisionSpec` | Supply trusted root-origin authority to the same issuer, as the trusted root-only Delegate case. |
 | `IssueRequest` | Carry exactly one issuance variant. |
 | `ValidateDelegation` | Refuse widening of team, grants, binding, repo/data scope or expiry. |
 | `Owner` | Select the lookup that establishes resource tenancy. |
@@ -398,7 +463,9 @@ not a list generated from `Routes`. A separate handler-policy lint must reject
 authorization calls inside handlers. T1 owns runtime scenarios; C2's tests
 exercise only available contract data and functions.
 
-## Open questions for the lead
+## Contract interpretations
+
+Amendment 1 ratifies the interpretations below. They are not approval gates.
 
 1. **Root origins and sessions.** Section 5.1 names three issuance forms but
    does not define how the first operator, member/machine/service roots or
@@ -407,15 +474,15 @@ exercise only available contract data and functions.
    `Store.Issue`, represent trusted provisioning as the root-only Delegate
    case (`ProvisionSpec`), and use `AuthorityRef` for capability/session
    ancestry. No new issuance kind or detached here root is added. C1 must
-   match both ancestry forms and root provisioning checks. This needs lead
-   ratification because literal parent-subset delegation has no parent here.
+   match both ancestry forms and root provisioning checks. Amendment 1 ratifies this root-only exception. Provisioned roots have no
+   revocation parent; here awards retain requester ancestry.
 2. **Host billing minimum.** A59 assigns explicit zero minima to plan/eval
    compute and a minimum to job compute. The retained host interpretation
    uses `limits.HostBillingMinimum` independently, excludes customer waits
    and never bills planning/evaluation twice. The number remains C4-owned.
 3. **Route spellings and fixed non-work grants.** The frozen document names
    resources and one work grant table, not every final path or trigger/plan
-   grant. Chosen spellings include `/runners/{jobs,runs}/claim`,
+   grant. Chosen spellings include `/runners/claim`,
    `/claims/{claim}/heartbeat`, `/jobs/{job}/transition`,
    `/jobs/{job}/expansion`, `/queue/groups/{group}/*`, `/sizing` and
    `/operator/limits`. Existing reporting routes remain where no deletion

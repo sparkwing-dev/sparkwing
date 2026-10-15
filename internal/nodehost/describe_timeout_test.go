@@ -15,16 +15,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
+const testHelloScript = `IFS= read -r line <&3
+id=$(printf '%s' "$line" | sed 's/.*"id":"\([^"]*\)".*/\1/')
+printf '{"reply":"%s","ok":true,"result":{"protocol":2,"sdk":{"language":"go","version":"test"},"features":[]}}\n' "$id" >&4
+`
+
 func TestAStalledDescribeEndsTheRunBeforeItIsRecorded(t *testing.T) {
 	dir := t.TempDir()
 	entry := filepath.Join(dir, "stall-describe")
-	script := fmt.Sprintf("#!/bin/sh\ntrap '' TERM\n/bin/sleep 3600 &\necho $! > %s/child\nIFS= read -r line <&3\nwait\n", dir)
+	script := "#!/bin/sh\n" + testHelloScript + fmt.Sprintf("trap '' TERM\n/bin/sleep 3600 &\necho $! > %s/child\nIFS= read -r line <&3\nwait\n", dir)
 	if err := os.WriteFile(entry, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -34,9 +40,9 @@ func TestAStalledDescribeEndsTheRunBeforeItIsRecorded(t *testing.T) {
 	_, err := Execute(ctx, Config{
 		Session: SessionConfig{
 			Entry: pipelineentry.Binary(entry), Dir: dir, Env: []string{"PATH=/usr/bin:/bin"},
-			Grace: 50 * time.Millisecond, DescribeTimeout: 200 * time.Millisecond,
+			Grace: 50 * time.Millisecond, DescribeTimeout: 200 * time.Millisecond, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 		},
-		Pipeline: "demo", Run: nodeproto.RunContextOld{RunID: "stalled-describe"},
+		Pipeline: "demo", Run: nodeproto.RunContext{RunID: "stalled-describe"},
 		State: st, Logger: slog.New(slog.DiscardHandler),
 	})
 	if err == nil || !strings.Contains(err.Error(), "describe failed: no reply within 200ms") {
@@ -67,23 +73,23 @@ func describeFails(t *testing.T, script, via string, sink Sink) error {
 	t.Helper()
 	dir := t.TempDir()
 	entry := filepath.Join(dir, "describe-fails")
-	if err := os.WriteFile(entry, []byte("#!/bin/sh\n"+script), 0o700); err != nil {
+	if err := os.WriteFile(entry, []byte("#!/bin/sh\n"+testHelloScript+script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	cfg := SessionConfig{
 		Entry: pipelineentry.Binary(entry), Dir: dir, Env: []string{"PATH=/usr/bin:/bin"},
-		Grace: 50 * time.Millisecond, DescribeTimeout: 300 * time.Millisecond, Sink: sink,
+		Grace: 50 * time.Millisecond, DescribeTimeout: 300 * time.Millisecond, Sink: sink, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 	var err error
 	if via == "execute" {
 		_, err = Execute(ctx, Config{
-			Session: cfg, Pipeline: "demo", Run: nodeproto.RunContextOld{RunID: "describe-fails"},
+			Session: cfg, Pipeline: "demo", Run: nodeproto.RunContext{RunID: "describe-fails", Pipeline: "demo"},
 			State: openStore(t), Logger: slog.New(slog.DiscardHandler), Attempts: &Attempts{Masker: secrets.NewMasker()},
 		})
 	} else {
-		_, err = PlanDocument(ctx, cfg, PlanRequest{Pipeline: "demo", Run: nodeproto.RunContextOld{RunID: "describe-fails"}, Masker: secrets.NewMasker()})
+		_, err = PlanDocument(ctx, cfg, PlanRequest{Pipeline: "demo", Run: nodeproto.RunContext{RunID: "describe-fails", Pipeline: "demo"}, Masker: secrets.NewMasker()})
 	}
 	if err == nil {
 		t.Fatal("describe succeeded")
@@ -126,7 +132,7 @@ IFS= read -r line <&3
 	for _, via := range describeVias {
 		t.Run(via, func(t *testing.T) {
 			err := describeFails(t, script, via, discardSink{})
-			var perr *nodeproto.Error
+			var perr *apierr.Error
 			if strings.Contains(err.Error(), secret) || !strings.Contains(err.Error(), "describe failed: plan_failed") || !errors.As(err, &perr) {
 				t.Fatalf("err = %v, want its class without its text", err)
 			}
@@ -136,8 +142,8 @@ IFS= read -r line <&3
 
 type stalledSink struct{ unblock chan struct{} }
 
-func (s stalledSink) Text(string, string)        { <-s.unblock }
-func (s stalledSink) Record(nodeproto.LogRecord) { <-s.unblock }
+func (s stalledSink) Text(string, string)       { <-s.unblock }
+func (s stalledSink) Record(nodeproto.FrameLog) { <-s.unblock }
 
 // A sink that never returns cannot hold planning past the session's grace,
 // whether describe's output is released or withheld.
@@ -154,8 +160,21 @@ func TestAStalledSinkDoesNotHoldPlanningOpen(t *testing.T) {
 // Every line describe's output held counts against the cap and in the notice,
 // empty ones and those the cap dropped included.
 func TestTheWithheldNoticeCountsEveryLine(t *testing.T) {
+	dir := t.TempDir()
+	entry := filepath.Join(dir, "describe-fails")
+	script := "#!/bin/sh\n" + testHelloScript + "i=0; while [ $i -lt 140000 ]; do echo; i=$((i+1)); done\nexit 3\n"
+	if err := os.WriteFile(entry, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	sink := &planSinkText{masker: secrets.NewMasker()}
-	describeFails(t, "i=0; while [ $i -lt 140000 ]; do echo; i=$((i+1)); done\nexit 3\n", "plan", sink)
+	// hack: the stalled-describe deadline can interrupt the output loop before all lines reach the sink.
+	_, err := PlanDocument(t.Context(), SessionConfig{
+		Entry: pipelineentry.Binary(entry), Dir: dir, Env: []string{"PATH=/usr/bin:/bin"}, Sink: sink, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
+	}, PlanRequest{Pipeline: "demo", Run: nodeproto.RunContext{RunID: "describe-fails", Pipeline: "demo"}, Masker: secrets.NewMasker()})
+	var perr *apierr.Error
+	if !errors.As(err, &perr) || perr.Code != apierr.SDKExited {
+		t.Fatalf("err = %v, want the process to exit after writing every line", err)
+	}
 	if got := sink.String(); !strings.Contains(got, "(140000 lines)") {
 		t.Fatalf("plan output = %q, want a notice counting all 140000 lines", got[max(0, len(got)-200):])
 	}

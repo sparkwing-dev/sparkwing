@@ -47,9 +47,7 @@ func hostNodeLog(ctx context.Context, cfg *Config, n *NodeRun, rec sparkwing.Log
 	if rec.TS.IsZero() {
 		rec.TS = time.Now()
 	}
-	rec.Msg = a.Masker.Mask(rec.Msg)
-	rec.Attrs = a.Masker.MaskAttrs(rec.Attrs)
-	nlog.Emit(rec)
+	nlog.Emit(maskRecord(a.Masker, rec))
 	if err := nlog.Close(); err != nil {
 		run.Logger.Warn("nodehost: close node log", "run", run.ID, "node", id, "err", err)
 	}
@@ -59,7 +57,7 @@ func hostNodeLog(ctx context.Context, cfg *Config, n *NodeRun, rec sparkwing.Log
 // `runs logs --events-only` read a hosted node's end as they read a dispatched
 // one. A cached node's event is the memo's own.
 func nodeEndEvent(ctx context.Context, run *Run, id string, res Result) {
-	text := []byte(recordedErrText(res.Err))
+	text := []byte(recordedErrText(run.Masker, res.Err))
 	switch res.Outcome {
 	case sparkwing.Success:
 		hostEvent(ctx, run, id, "node_succeeded", nil)
@@ -69,8 +67,6 @@ func nodeEndEvent(ctx context.Context, run *Run, id string, res Result) {
 		hostEvent(ctx, run, id, "node_cancelled", text)
 	case sparkwing.Skipped:
 		hostEvent(ctx, run, id, "node_skipped", text)
-	case sparkwing.SkippedConcurrent:
-		hostEvent(ctx, run, id, "node_skipped_concurrent", nil)
 	case sparkwing.Superseded:
 		hostEvent(ctx, run, id, "node_superseded", text)
 	}

@@ -9,9 +9,8 @@ import (
 	"time"
 )
 
-// ErrUnknownPayment is returned when no paid grant carries the payment id a
-// reversal or a freeze names.
-var ErrUnknownPayment = errors.New("credits: no paid grant carries this payment id")
+// ErrUnknownPayment is returned when a provider payment has no settled grant.
+var ErrUnknownPayment = errors.New("credits: no settled grant belongs to this payment id")
 
 // CreditReversal reports what reversing a payment did. Grant is the reversal
 // the call wrote, or the one an earlier call wrote under the same reference;
@@ -26,7 +25,7 @@ type CreditReversal struct {
 }
 
 // ReversePayment takes back what a payment still has on the ledger: the paid
-// grant carrying paymentID, less what earlier reversals of it took back, or
+// grant linked to paymentID, less what earlier reversals of it took back, or
 // amountMicro of it when that is positive and smaller, as a partial refund. It
 // writes one reversal under reference, which makes the call idempotent: a
 // repeat returns the reversal already written. The team is the one the
@@ -56,7 +55,7 @@ func (s *Store) ReversePayment(
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return CreditReversal{}, err
 	}
-	paid, found, err := creditGrantByReferenceTx(ctx, tx, "", CreditGrantPaid, paymentID)
+	paid, found, err := paidGrantForPaymentTx(ctx, tx, paymentID)
 	if err != nil {
 		return CreditReversal{}, err
 	}
@@ -75,32 +74,32 @@ func (s *Store) ReversePayment(
 		return CreditReversal{}, err
 	}
 	if found {
-		if existing.Reverses != paymentID {
+		if existing.Reverses != paid.Reference {
 			return CreditReversal{}, fmt.Errorf("%w: %q reverses %q, not %q",
-				ErrCreditGrantConflict, reference, existing.Reverses, paymentID)
+				ErrCreditGrantConflict, reference, existing.Reverses, paid.Reference)
 		}
 		out.Grant = &existing
 	}
-	already, err := reversedMicroTx(ctx, tx, paid.Team, paymentID)
+	already, err := reversedMicroTx(ctx, tx, paid.Team, paid.Reference)
 	if err != nil {
 		return CreditReversal{}, err
 	}
 	if out.Grant == nil && amountMicro > 0 {
-		released, err := releaseUnappliedTx(ctx, tx, paid.Team, paymentID, reference, createdBy, amountMicro)
+		released, err := releaseUnappliedTx(ctx, tx, paid.Team, paid.Reference, reference, createdBy, amountMicro)
 		if err != nil {
 			return CreditReversal{}, err
 		}
 		already -= released
 	}
 	if out.Grant == nil && already < paid.AmountMicro {
-		now := time.Now().UTC()
+		now := tx.now()
 		take := paid.AmountMicro - already
 		if amountMicro > 0 && amountMicro < take {
 			take = amountMicro
 		}
 		grant := CreditGrant{
 			ID: id, Team: paid.Team, Kind: CreditGrantReversal, AmountMicro: -take,
-			Reference: reference, Reverses: paymentID, CreatedBy: createdBy, CreatedAt: now,
+			Reference: reference, Reverses: paid.Reference, CreatedBy: createdBy, CreatedAt: now,
 		}
 		if _, err := tx.ExecContext(ctx, `
         INSERT INTO credit_grants (team, id, kind, amount_micro, reference, reverses, created_by, created_at)
@@ -147,7 +146,7 @@ func releaseUnappliedTx(
 	if _, err := tx.ExecContext(ctx, `INSERT INTO credit_grants (team, id, kind, amount_micro, reference, reverses,
 	    created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(team), id, CreditGrantReversal, release, unappliedPrefix+"refund:"+reference, paymentID, createdBy,
-		time.Now().UTC().UnixNano()); err != nil {
+		tx.now().UnixNano()); err != nil {
 		return 0, fmt.Errorf("credits: release unapplied payment: %w", err)
 	}
 	return release, nil

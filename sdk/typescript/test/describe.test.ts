@@ -84,3 +84,44 @@ test("describe rejects shared argument names before publishing ambiguous flags",
   });
   await assert.rejects(describe(run), /duplicate argument/);
 });
+
+test("describe failures are pipeline-attributed and cannot expose secret defaults", async () => {
+  const { SDKError } = await import("../src/errors.ts");
+  let seed = 104;
+  for (let n = 0; n < 32; n++) {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    const first = `private-${seed.toString(16)}-秘密-${['\u0000"\\\n', ".*+?^${}()|[]", "", "é"][n % 4]}`;
+    const second = first + "-tail";
+    for (const kind of ["error", "canonical", "string"]) {
+      resetPipelines();
+      definePipeline({
+        name: "a-valid",
+        plan(p) {
+          p.job("ok", () => 1);
+        },
+      });
+      definePipeline({
+        name: "broken",
+        args: [
+          { name: "first", type: "string", secret: true, default: first },
+          { name: "second", type: "string", secret: true, default: second },
+        ],
+        plan() {
+          const message = `declaration refused ${first} ${second}`;
+          if (kind === "canonical") throw new SDKError(message, { code: "future", hint: first, details: { value: second } });
+          if (kind === "string") throw message;
+          throw new Error(message);
+        },
+      });
+      await assert.rejects(describe(run), (error: any) => {
+        assert.equal(error.code, "plan_failed");
+        assert.match(error.message, /describe pipeline "broken"/);
+        assert.match(error.message, /declaration refused/);
+        const serialized = JSON.stringify(error) + error.message;
+        assert.equal(serialized.includes(first), false);
+        assert.equal(serialized.includes(second), false);
+        return true;
+      });
+    }
+  }
+});

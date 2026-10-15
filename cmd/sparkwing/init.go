@@ -139,19 +139,16 @@ func isResolvableModuleVersion(v string) bool {
 }
 
 func renderInitMainGo(moduleName string) string {
-	return fmt.Sprintf(`// Command %s is this repo's local pipeline runner.
-// It re-exports runner.Main, which dispatches based on argv:
-// `+"`sparkwing run <pipeline>`"+` invokes the pipeline; `+"`sparkwing pipeline ...`"+`
-// is the agent/operator surface.
+	return fmt.Sprintf(`// Command %s serves this repo's pipeline definitions to the Sparkwing host.
 package main
 
 import (
-	"github.com/sparkwing-dev/sparkwing/pkg/runner"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 
 	_ %q
 )
 
-func main() { runner.Main() }
+func main() { sparkwing.Main() }
 `, moduleName, moduleName+"/jobs")
 }
 
@@ -175,7 +172,7 @@ func renderInitReadme() string {
 		"  .gitignore          ignores the cached pipeline binary\n" +
 		"  sparkwing.yaml      registry of every pipeline (name -> entrypoint)\n" +
 		"  jobs/               Go package holding pipeline definitions; scaffold lands one .go file per pipeline\n" +
-		"  main.go             thin entrypoint; delegates to runner.Main\n" +
+		"  main.go             thin entrypoint; delegates to sparkwing.Main\n" +
 		"  go.mod / go.sum     module + pinned SDK version\n" +
 		"  sparkwing-pipeline  cached compiled binary (gitignored, regenerated)\n" +
 		"```\n" +
@@ -197,7 +194,7 @@ func renderInitPipelinesYAML() string {
 # release | scheduled-report. An entry with no ` + "`on:`" + ` block runs only
 # when invoked; see ` + "`sparkwing docs read --topic pipelines`" + ` for the
 # trigger schema.
-pipelines:
+pipelines: []
 `
 }
 

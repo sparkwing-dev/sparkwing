@@ -59,17 +59,21 @@ export class ConcurrencyGroup implements API.ConcurrencyGroup {
     return this.name;
   }
 }
-function concurrency(group: API.ConcurrencyGroup, cost: number): ConcurrencySpec {
+function concurrency(group: API.ConcurrencyGroup, cost: number | undefined): ConcurrencySpec {
   const limit = group.limit;
-  const capacity = limit.capacity ?? 1;
-  integer("concurrency cost", cost, 1);
-  if (cost > capacity) throw new Error(`cost ${cost} exceeds group capacity ${capacity}`);
-  const spec: ConcurrencySpec = { group: group.name, scope: limit.scope ?? "global", capacity, cost, on_limit: limit.onLimit ?? "queue" };
+  if (cost !== undefined) integer("concurrency cost", cost, 1);
+  if (cost !== undefined && limit.capacity !== undefined && cost > limit.capacity)
+    throw new Error(`cost ${cost} exceeds group capacity ${limit.capacity}`);
+  const spec: ConcurrencySpec = { group: group.name };
+  if (limit.scope !== undefined) spec.scope = limit.scope;
+  if (limit.capacity !== undefined) spec.capacity = limit.capacity;
+  if (cost !== undefined) spec.cost = cost;
+  if (limit.onLimit !== undefined) spec.on_limit = limit.onLimit;
   if (limit.queueTimeoutMs !== undefined) spec.queue_timeout_ms = limit.queueTimeoutMs;
   if (limit.cancelTimeoutMs !== undefined) spec.cancel_timeout_ms = limit.cancelTimeoutMs;
   return spec;
 }
-function addConcurrency(spec: { concurrency?: ConcurrencySpec[] }, group: API.ConcurrencyGroup, cost: number): void {
+function addConcurrency(spec: { concurrency?: ConcurrencySpec[] }, group: API.ConcurrencyGroup, cost: number | undefined): void {
   const entry = concurrency(group, cost);
   const entries = (spec.concurrency ??= []);
   const i = entries.findIndex((other) => other.group === entry.group && other.scope === entry.scope);
@@ -466,7 +470,7 @@ export class Job<T = unknown> extends Declaration implements API.Job<T> {
     );
     return this.needs(...ids);
   }
-  concurrency(group: API.ConcurrencyGroup, cost = 1): this {
+  concurrency(group: API.ConcurrencyGroup, cost?: number): this {
     this.assertMutable();
     addConcurrency(this.spec, group, cost);
     return this;
@@ -586,7 +590,7 @@ class JobGroup implements API.JobGroup {
   consumes(producer: API.Job<unknown>, options?: { into?: string }): this {
     return this.apply((job) => job.consumes(producer, options));
   }
-  concurrency(group: API.ConcurrencyGroup, cost = 1): this {
+  concurrency(group: API.ConcurrencyGroup, cost?: number): this {
     return this.apply((job) => job.concurrency(group, cost));
   }
   resources(value: API.Resources): this {
@@ -652,7 +656,7 @@ export class Plan implements API.Plan {
     this.#groups.add(id);
     return new JobGroup(id, members);
   }
-  concurrency(group: API.ConcurrencyGroup, cost = 1): this {
+  concurrency(group: API.ConcurrencyGroup, cost?: number): this {
     this.assertMutable();
     addConcurrency(this.settings, group, cost);
     return this;

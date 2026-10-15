@@ -130,7 +130,7 @@ func (p *JevSweeper) run(ctx context.Context, in JevSweeperArgs) error {
 			}
 			sparkwing.Info(ctx, "jev-sweeper dry run; %s follows:\n%s", item.Name, body)
 		}
-		sparkwing.AnnotateOld(ctx, fmt.Sprintf("jev-sweeper: dry run prepared %d request(s)", len(work)))
+		sparkwing.Annotate(ctx, sparkwing.Annotation{Message: fmt.Sprintf("jev-sweeper: dry run prepared %d request(s)", len(work))})
 		return nil
 	}
 	var key string
@@ -138,7 +138,7 @@ func (p *JevSweeper) run(ctx context.Context, in JevSweeperArgs) error {
 		key = strings.TrimSpace(secrets.APIKey)
 	}
 	client := &http.Client{Timeout: 45 * time.Second}
-	cacheDir := sparkwing.ToolCacheDir("jev-lint")
+	cacheDir := pipelineCacheDir("jev-lint")
 	reported, judged, cachedRequests := 0, 0, 0
 	for _, item := range work {
 		response, cached, resolveErr := resolveJevLint(ctx, client, jevLintEndpoint, key, item.Request, cacheDir)
@@ -178,7 +178,7 @@ func (p *JevSweeper) run(ctx context.Context, in JevSweeperArgs) error {
 			sparkwing.Info(ctx, "jev-sweeper %s: %s and %s: duplicate responsibility %.2f; structure %s (confidence %.2f)", level, finding.Changed, finding.Candidate, finding.SameResponsibility, finding.Structure, finding.Confidence)
 		}
 	}
-	sparkwing.AnnotateOld(ctx, fmt.Sprintf("jev-sweeper: %d advisory finding(s) across %d judgment(s); %d/%d request(s) cached", reported, judged, cachedRequests, len(work)))
+	sparkwing.Annotate(ctx, sparkwing.Annotation{Message: fmt.Sprintf("jev-sweeper: %d advisory finding(s) across %d judgment(s); %d/%d request(s) cached", reported, judged, cachedRequests, len(work))})
 	return nil
 }
 

@@ -240,23 +240,8 @@ func DefaultCreditRateTable(rate int64) CreditRateTable {
 // [DefaultCreditRateTable], whose four-core class is
 // credit_rate_micro_per_second.
 func (s *Store) CreditRateTable(ctx context.Context) (CreditRateTable, error) {
-	rate, err := s.CreditRateMicroPerSecond(ctx)
-	if err != nil {
-		return nil, err
-	}
-	raw, err := s.creditSettingRaw(ctx, metaKeyCreditRateTable)
-	if err != nil {
-		return nil, err
-	}
-	return creditRateTable(raw, rate)
-}
-
-// CreditRateTableSet reports whether an operator has written a rate table. An
-// installation that has not prices every class at the single rate, and the
-// single rate is a setting it may still write.
-func (s *Store) CreditRateTableSet(ctx context.Context) (bool, error) {
-	raw, err := s.creditSettingRaw(ctx, metaKeyCreditRateTable)
-	return raw != "", err
+	settings, err := s.CreditSettings(ctx)
+	return settings.RateTable, err
 }
 
 func creditRateTableTx(ctx context.Context, tx *storeTx) (CreditRateTable, error) {
@@ -280,10 +265,10 @@ func creditRateTable(raw string, rate int64) (CreditRateTable, error) {
 	}
 	var stored CreditRateTable
 	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
-		return nil, fmt.Errorf("credits: the stored rate table %q is not readable: %w", raw, err)
+		return nil, fmt.Errorf("%w: stored rate table is not readable: %w", ErrInvalidCreditSetting, err)
 	}
 	if err := stored.Validate(); err != nil {
-		return nil, fmt.Errorf("credits: the stored rate table %q prices nothing usable: %w", raw, err)
+		return nil, fmt.Errorf("stored rate table prices nothing usable: %w", err)
 	}
 	out := stored.Sorted()
 	// safety: the two settings name one price, so the scalar an operator or an

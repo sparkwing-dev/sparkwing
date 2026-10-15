@@ -78,7 +78,7 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	// safety: the class judges the tree the tag will carry, and it judges it
 	// before prepare-changelog commits, so no lint or suite reads a checkout
 	// that changes under it.
-	cutChecks := sparkwing.Job(plan, "release-cut-checks", &releaseCutChecksJob{})
+	cutChecks := sparkwing.Job(plan, "release-cut-checks", &releaseCutChecksJob{}).Cache(lintCache())
 	cutChecks.Needs(home)
 
 	changelog := sparkwing.Job(plan, "prepare-changelog", &prepareChangelogJob{
@@ -114,7 +114,7 @@ type releaseCutChecksJob struct{ sparkwing.Base }
 // chaos and browser suites are the heavier classes that hosted CI runs on
 // every pull request and every push to main.
 func (j *releaseCutChecksJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	w.ParallelFailures(sparkwing.FailFast)
+	w.FailurePolicy(sparkwing.FailFast)
 	budget := newTierBudget("release cut", releaseCutBudget)
 	budget.step(w, "build", runBuild)
 	budget.step(w, "lint", runGolangciLint)

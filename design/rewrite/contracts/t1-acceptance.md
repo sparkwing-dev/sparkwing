@@ -2,6 +2,17 @@
 
 <!-- design:begin -->
 
+## Amendment 1 integration evidence
+
+[Amendments 1](amendments-1.md) assigns each cross-area dependency. Shared decoder
+and text-bounding tests are component evidence. Native placement cells require the
+real host, controller/auth, store and storage adapters. Keep cells blocked until the
+actual HTTP/api.sock, backend and OS path runs. W4/W5 share the v2 conformance corpus
+and canonical hash/presence fixtures. W5/W9 package and test native Windows handle
+bridging. W8 supplies node/network/teardown evidence. T1 and the lead own the full
+real-repo QA required by decision 99. No fake driver or parser-only pass replaces it.
+
+
 This contract defines the evidence required to accept the rewrite. It is based on
 `ARCHITECTURE-v4-frozen.md` and decisions 87-104. Sections below refer to that
 frozen architecture. Historical requirements in its sections 14-15 do not override
@@ -278,6 +289,14 @@ and `sparkwing upgrade`; that command bumps and verifies both SDK pins. Runner
 self-update verifies release bytes, and a stale runner cannot bypass its minimum.
 
 ## Activation and launch gate
+
+`TestRecovery` also runs two SQLite persistence cells through
+`CheckStoreRecoveryBoundary`: cancellation after holder loss and reconciliation
+before and after reaping. They check late-report refusal, one self-award under
+concurrent reconciliation, unchanged run identity and attempt history, memo-miss
+dispatch, unique lifecycle events, and persistence across reopening. Authority is
+preseeded in the final schema and enrollment uses a contract fake. These cells
+do not replace the native placement cells below.
 
 The nine skeleton groups are `TestLifecycle`, `TestRecovery`, `TestPlacement`,
 `TestCredentials`, `TestStorage`, `TestProtocol`, `TestEnvironment`, `TestSurface`

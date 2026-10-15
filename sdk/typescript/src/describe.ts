@@ -1,6 +1,7 @@
 import type { ArgSpec, RunContext } from "../index.d.ts";
 import { resolveArgs, validateArgSpecs } from "./args.ts";
 import { Plan, pipelines } from "./plan.ts";
+import { failure, messageOf } from "./errors.ts";
 
 export interface DescribeArg {
   name: string;
@@ -43,37 +44,50 @@ function argument(spec: ArgSpec, jobID?: string): DescribeArg {
 export async function describe(run: RunContext): Promise<DescribeDoc> {
   const descriptions: DescribePipeline[] = [];
   for (const definition of pipelines()) {
-    const entry: DescribePipeline = { name: definition.name, args: (definition.args ?? []).map((spec) => argument(spec)) };
-    if (definition.short !== undefined) entry.short = definition.short;
-    const help = definition.help ?? definition.description;
-    if (help !== undefined) entry.help = help;
-    if (definition.extra !== undefined) entry.extra = definition.extra;
-    if (definition.examples)
-      entry.examples = definition.examples.map((example) => ({ command: example.command, comment: example.comment ?? "" }));
-    if (definition.envVars) entry.env_vars = definition.envVars.map((env) => ({ ...env }));
-    if (definition.secrets)
-      entry.secrets = definition.secrets.map((secret) => ({
-        name: secret.name,
-        ...(secret.optional === undefined ? {} : { optional: secret.optional }),
-      }));
     const plan = new Plan();
-    const args = resolveArgs(definition.args ?? [], {}, { allowMissing: true });
-    await definition.plan(plan, { ...run, pipeline: definition.name, args });
-    validateArgSpecs([...(definition.args ?? []), ...plan.jobs().flatMap((job) => job.argSpecs())]);
-    const risks = new Set<string>();
-    const byStep: NonNullable<DescribePipeline["risks_by_step"]> = [];
-    for (const job of plan.jobs()) {
-      entry.args.push(...job.argSpecs().map((spec) => argument(spec, job.id)));
-      for (const step of job.steps()) {
-        const labels = step.toSpec().risks ?? [];
-        if (labels.length) byStep.push({ job_id: job.id, step_id: step.id, labels });
-        for (const label of labels) risks.add(label);
+    try {
+      const entry: DescribePipeline = { name: definition.name, args: (definition.args ?? []).map((spec) => argument(spec)) };
+      if (definition.short !== undefined) entry.short = definition.short;
+      const help = definition.help ?? definition.description;
+      if (help !== undefined) entry.help = help;
+      if (definition.extra !== undefined) entry.extra = definition.extra;
+      if (definition.examples)
+        entry.examples = definition.examples.map((example) => ({ command: example.command, comment: example.comment ?? "" }));
+      if (definition.envVars) entry.env_vars = definition.envVars.map((env) => ({ ...env }));
+      if (definition.secrets)
+        entry.secrets = definition.secrets.map((secret) => ({
+          name: secret.name,
+          ...(secret.optional === undefined ? {} : { optional: secret.optional }),
+        }));
+      const args = resolveArgs(definition.args ?? [], {}, { allowMissing: true });
+      await definition.plan(plan, { ...run, pipeline: definition.name, args });
+      validateArgSpecs([...(definition.args ?? []), ...plan.jobs().flatMap((job) => job.argSpecs())]);
+      const risks = new Set<string>();
+      const byStep: NonNullable<DescribePipeline["risks_by_step"]> = [];
+      for (const job of plan.jobs()) {
+        entry.args.push(...job.argSpecs().map((spec) => argument(spec, job.id)));
+        for (const step of job.steps()) {
+          const labels = step.toSpec().risks ?? [];
+          if (labels.length) byStep.push({ job_id: job.id, step_id: step.id, labels });
+          for (const label of labels) risks.add(label);
+        }
       }
+      if (risks.size) entry.risks = [...risks].sort();
+      if (byStep.length) entry.risks_by_step = byStep;
+      plan.seal();
+      descriptions.push(entry);
+    } catch (error) {
+      const specs = [...(definition.args ?? []), ...plan.jobs().flatMap((job) => job.argSpecs())];
+      const secrets = specs.filter((spec) => spec.secret && spec.default).map((spec) => spec.default!);
+      throw failure("plan_failed", maskDiagnostic(`describe pipeline ${JSON.stringify(definition.name)}: ${messageOf(error)}`, secrets));
     }
-    if (risks.size) entry.risks = [...risks].sort();
-    if (byStep.length) entry.risks_by_step = byStep;
-    plan.seal();
-    descriptions.push(entry);
   }
   return { pipelines: descriptions };
+}
+
+function maskDiagnostic(message: string, secrets: readonly string[]): string {
+  const values = [...new Set(secrets)].filter(Boolean).sort((a, b) => b.length - a.length);
+  if (!values.length) return message;
+  const pattern = values.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  return message.replace(new RegExp(pattern, "g"), "***");
 }

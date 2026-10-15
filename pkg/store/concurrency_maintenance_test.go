@@ -1,8 +1,6 @@
 package store_test
 
 import (
-	"strconv"
-	"sync"
 	"testing"
 	"time"
 
@@ -115,7 +113,7 @@ func TestMaintainConcurrency_SweepsExpiredCacheRows(t *testing.T) {
 	if res.CacheExpired != 1 {
 		t.Fatalf("CacheExpired = %d, want 1", res.CacheExpired)
 	}
-	if n, err := s.CountConcurrencyCache(ctxT(t)); err != nil {
+	if n, err := s.AsOperator().CountConcurrencyCache(ctxT(t)); err != nil {
 		t.Fatalf("count cache: %v", err)
 	} else if n != 0 {
 		t.Fatalf("cache rows = %d, want 0 after TTL sweep", n)
@@ -137,7 +135,7 @@ func TestMaintainConcurrency_EvictsOverCapCacheRows(t *testing.T) {
 	if res.CacheEvicted != 3 {
 		t.Fatalf("CacheEvicted = %d, want 3 (5 rows down to cap 2)", res.CacheEvicted)
 	}
-	if n, err := s.CountConcurrencyCache(ctxT(t)); err != nil {
+	if n, err := s.AsOperator().CountConcurrencyCache(ctxT(t)); err != nil {
 		t.Fatalf("count cache: %v", err)
 	} else if n != 2 {
 		t.Fatalf("cache rows = %d, want 2 (cap)", n)
@@ -404,93 +402,6 @@ func TestMaintainConcurrency_DropsAgedWaiterWhenHeartbeatGraceExpiresBeforeWaite
 	}
 }
 
-func TestMaintainConcurrencyThrottled_RespectsInterval(t *testing.T) {
-	s := storetest.Open(t)
-
-	if _, ran, err := s.MaintainConcurrencyThrottled(ctxT(t), store.ConcurrencyMaintenanceOptions{}, time.Hour); err != nil {
-		t.Fatalf("first throttled pass: %v", err)
-	} else if !ran {
-		t.Fatalf("first pass did not run; the window should have been free")
-	}
-
-	if _, ran, err := s.MaintainConcurrencyThrottled(ctxT(t), store.ConcurrencyMaintenanceOptions{}, time.Hour); err != nil {
-		t.Fatalf("second throttled pass: %v", err)
-	} else if ran {
-		t.Fatalf("second pass ran inside the interval; throttle did not hold")
-	}
-
-	if _, ran, err := s.MaintainConcurrencyThrottled(ctxT(t), store.ConcurrencyMaintenanceOptions{}, 0); err != nil {
-		t.Fatalf("zero-interval pass: %v", err)
-	} else if !ran {
-		t.Fatalf("zero interval should always claim the window")
-	}
-}
-
-func TestMaintainConcurrencyThrottled_InProgressClaimSuppressesStampede(t *testing.T) {
-	s := storetest.Open(t)
-	nowNS := time.Now().UnixNano()
-	if _, err := s.DB().Exec(storetest.Rebind(s,
-		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)`),
-		"concurrency_sweep_claimed_at", strconv.FormatInt(nowNS, 10), nowNS,
-	); err != nil {
-		t.Fatalf("insert claim: %v", err)
-	}
-	if _, ran, err := s.MaintainConcurrencyThrottled(ctxT(t), store.ConcurrencyMaintenanceOptions{}, time.Hour); err != nil {
-		t.Fatalf("claimed throttled pass: %v", err)
-	} else if ran {
-		t.Fatalf("pass ran while another process held the in-progress claim")
-	}
-
-	oldNS := time.Now().Add(-time.Hour).UnixNano()
-	if _, err := s.DB().Exec(storetest.Rebind(s,
-		`UPDATE sparkwing_meta SET value = ?, updated_at = ? WHERE key = ?`),
-		strconv.FormatInt(oldNS, 10), oldNS, "concurrency_sweep_claimed_at",
-	); err != nil {
-		t.Fatalf("expire claim: %v", err)
-	}
-	if _, ran, err := s.MaintainConcurrencyThrottled(ctxT(t), store.ConcurrencyMaintenanceOptions{}, time.Hour); err != nil {
-		t.Fatalf("expired-claim throttled pass: %v", err)
-	} else if !ran {
-		t.Fatalf("expired claim should allow the next caller to retry")
-	}
-}
-
-func TestMaintainConcurrencyThrottled_ConcurrentCallersShareOneClaim(t *testing.T) {
-	s := storetest.Open(t)
-	const callers = 8
-	var wg sync.WaitGroup
-	start := make(chan struct{})
-	ran := make(chan bool, callers)
-	for i := 0; i < callers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-start
-			_, didRun, err := s.MaintainConcurrencyThrottled(ctxT(t), store.ConcurrencyMaintenanceOptions{}, time.Hour)
-			if err != nil {
-				t.Errorf("MaintainConcurrencyThrottled: %v", err)
-				return
-			}
-			ran <- didRun
-		}()
-	}
-	close(start)
-	wg.Wait()
-	close(ran)
-	count := 0
-	for didRun := range ran {
-		if didRun {
-			count++
-		}
-	}
-	if count != 1 {
-		t.Fatalf("ran count = %d, want 1", count)
-	}
-}
-
-// A memo entry whose origin run is gone can only fail the node that hits
-// it, and entries written before deletes cleaned them up outlive the run
-// by their whole TTL.
 func TestMaintainConcurrency_SweepsCacheRowsWhoseOriginRunIsGone(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := ctxT(t)
@@ -506,7 +417,7 @@ func TestMaintainConcurrency_SweepsCacheRowsWhoseOriginRunIsGone(t *testing.T) {
 	if res.CacheOrphaned != 1 {
 		t.Fatalf("CacheOrphaned = %d, want 1", res.CacheOrphaned)
 	}
-	if n, err := s.CountConcurrencyCache(ctx); err != nil {
+	if n, err := s.AsOperator().CountConcurrencyCache(ctx); err != nil {
 		t.Fatalf("count cache: %v", err)
 	} else if n != 1 {
 		t.Fatalf("cache rows = %d, want 1 (the live run's entry kept)", n)
@@ -519,7 +430,7 @@ func TestMaintainConcurrency_SweepsCacheRowsWhoseOriginRunIsGone(t *testing.T) {
 	if again.CacheOrphaned != 0 {
 		t.Fatalf("second pass CacheOrphaned = %d, want 0", again.CacheOrphaned)
 	}
-	if n, err := s.CountConcurrencyCache(ctx); err != nil {
+	if n, err := s.AsOperator().CountConcurrencyCache(ctx); err != nil {
 		t.Fatalf("count cache: %v", err)
 	} else if n != 1 {
 		t.Fatalf("cache rows after second pass = %d, want 1", n)

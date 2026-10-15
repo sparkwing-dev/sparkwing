@@ -95,9 +95,11 @@ CREATE TABLE nodes (
     finished_at BIGINT,
     error TEXT NOT NULL DEFAULT '',
     ready_at BIGINT,
+    queue_started_at BIGINT,
     claimed_by TEXT,
     claim_principal TEXT NOT NULL DEFAULT '',
     capability_prefix TEXT NOT NULL DEFAULT '',
+    owner_capability_prefix TEXT NOT NULL DEFAULT '',
     lease_expires_at BIGINT,
     executor_kind TEXT NOT NULL DEFAULT '',
     executor_id TEXT NOT NULL DEFAULT '',
@@ -152,6 +154,7 @@ CREATE TABLE nodes (
     expansion_body BLOB,
     expansion_failure BLOB,
     PRIMARY KEY (team, run_id, node_id),
+    CHECK(owner_capability_prefix = '' OR (claimed_by IS NOT NULL AND capability_prefix <> '')),
     CHECK((status = 'done') = (outcome <> '')),
     CHECK((status = 'done') = (finished_at IS NOT NULL)),
     CHECK(status <> 'done' OR (claimed_by IS NULL AND lease_expires_at IS NULL AND capability_prefix = '')),
@@ -211,15 +214,19 @@ CREATE TABLE triggers (
 CREATE TABLE node_steps (
     run_id TEXT NOT NULL,
     node_id TEXT NOT NULL,
+    attempt BIGINT NOT NULL CHECK(attempt > 0),
+    generation BIGINT NOT NULL CHECK(generation > 0),
     step_id TEXT NOT NULL,
     status TEXT NOT NULL CHECK(status IN ('running','passed','failed','cancelled','skipped')),
+    error TEXT NOT NULL DEFAULT '',
     started_at BIGINT,
     finished_at BIGINT,
     annotations_json BLOB,
     summary TEXT NOT NULL DEFAULT '',
     team TEXT NOT NULL REFERENCES teams(name),
-    PRIMARY KEY (team, run_id, node_id, step_id),
-    FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE
+    PRIMARY KEY (team, run_id, node_id, attempt, step_id),
+    FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE,
+    FOREIGN KEY(team,run_id,node_id,generation,attempt) REFERENCES node_attempts(team,run_id,node_id,generation,attempt) ON DELETE CASCADE
 );
 
 CREATE TABLE node_metrics (
@@ -269,7 +276,7 @@ CREATE TABLE approvals (
     requested_at BIGINT NOT NULL,
     message TEXT NOT NULL DEFAULT '',
     timeout_ms BIGINT NOT NULL DEFAULT 0,
-    on_timeout TEXT NOT NULL DEFAULT 'fail' CHECK(on_timeout IN ('fail','approve')),
+    on_timeout TEXT NOT NULL DEFAULT 'fail' CHECK(on_timeout IN ('fail','deny','approve')),
     approver TEXT NOT NULL DEFAULT '',
     resolved_at BIGINT,
     resolution TEXT NOT NULL DEFAULT '' CHECK(resolution IN ('','approved','denied','timed_out')),
@@ -712,15 +719,6 @@ CREATE TABLE team_download_day (
     PRIMARY KEY(team,period,replica_id)
 );
 
-CREATE TABLE egress_day (
-    service TEXT NOT NULL,
-    period TEXT NOT NULL,
-    bytes BIGINT NOT NULL DEFAULT 0,
-    updated_at BIGINT NOT NULL,
-    replica_id TEXT NOT NULL,
-    PRIMARY KEY(service,period,replica_id)
-);
-
 CREATE TABLE git_credentials (
     id TEXT NOT NULL PRIMARY KEY,
     team TEXT NOT NULL REFERENCES teams(name),
@@ -741,7 +739,12 @@ CREATE TABLE git_credential_releases (
     team TEXT NOT NULL REFERENCES teams(name),
     credential_id TEXT NOT NULL,
     host TEXT NOT NULL,
+    repository_key TEXT NOT NULL,
     run_id TEXT NOT NULL,
+    node_id TEXT NOT NULL DEFAULT '',
+    generation BIGINT NOT NULL CHECK(generation > 0),
+    machine_id TEXT NOT NULL,
+    owner_account_id TEXT NOT NULL DEFAULT '',
     runner TEXT NOT NULL,
     capability_prefix TEXT NOT NULL,
     released_at BIGINT NOT NULL,
@@ -995,7 +998,7 @@ CREATE TABLE log_segments (
     generation BIGINT NOT NULL CHECK(generation > 0),
     n BIGINT NOT NULL CHECK(n >= 0),
     stored_bytes BIGINT NOT NULL,
-    md5 TEXT NOT NULL,
+    object_key TEXT NOT NULL,
     sha256 TEXT NOT NULL,
     start_offset BIGINT NOT NULL CHECK(start_offset >= 0),
     end_offset BIGINT NOT NULL CHECK(end_offset >= start_offset),
@@ -1334,6 +1337,8 @@ CREATE INDEX idx_runs_branch_started ON runs(team,git_branch, started_at DESC);
 
 CREATE INDEX idx_nodes_claimable ON nodes(team,ready_at) WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND status != 'done';
 
+CREATE INDEX idx_nodes_queued ON nodes(team,queue_started_at) WHERE queue_started_at IS NOT NULL AND claimed_by IS NULL AND status = 'pending';
+
 CREATE INDEX idx_nodes_claimed_lease ON nodes(team,lease_expires_at) WHERE claimed_by IS NOT NULL;
 
 CREATE INDEX idx_triggers_claimed_lease ON triggers(team,status, lease_expires_at) WHERE status = 'claimed';
@@ -1395,8 +1400,6 @@ CREATE UNIQUE INDEX idx_invitations_open ON invitations(team, email) WHERE accep
 CREATE INDEX idx_invitations_email ON invitations(team,email);
 
 CREATE UNIQUE INDEX idx_cron_schedules_repo_pipeline_name ON cron_schedules(team, repo_path, pipeline, schedule_name);
-
-CREATE UNIQUE INDEX idx_triggers_webhook_delivery ON triggers(team, webhook_delivery) WHERE webhook_delivery != '';
 
 CREATE UNIQUE INDEX idx_triggers_webhook_replay_key ON triggers(team, webhook_replay_key) WHERE webhook_replay_key != '';
 

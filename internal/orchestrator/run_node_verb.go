@@ -57,7 +57,7 @@ func runNodeCommand(parent context.Context, args []string, opts ...RunNodeOption
 		return errors.New("--controller + <runID> + <nodeID> are required")
 	}
 
-	// safety: leave SIGTERM unhandled; bounce, cancellation, and pod termination
+	// safety: leave SIGTERM unhandled; cancellation and pod termination
 	// rely on the supervisor rather than the killed node to record the outcome.
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt)
 	defer stop()

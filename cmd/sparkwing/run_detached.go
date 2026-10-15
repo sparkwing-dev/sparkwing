@@ -14,13 +14,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 const SubmitRequestIDKey = "_SPARKWING_SUBMIT_REQUEST_ID"
@@ -545,7 +546,7 @@ func submitPaths(home string) (orchestrator.Paths, error) {
 	return orchestrator.DefaultPaths()
 }
 
-func resolveSubmitRepo(ctx context.Context, pipeline, pipelineRef string) (string, []sparkwing.DescribePipeline, error) {
+func resolveSubmitRepo(ctx context.Context, pipeline, pipelineRef string) (string, []nodeproto.PipelineDescription, error) {
 	start := mustGetwd()
 	if pipelineRef == "" {
 		if dir, err := findSparkwingDirFrom(start); err == nil {
@@ -586,7 +587,7 @@ func resolveSubmitRepo(ctx context.Context, pipeline, pipelineRef string) (strin
 	return "", nil, fmt.Errorf("run --sw-detached: resolve %q: %w", pipeline, err)
 }
 
-func localRepoDeclaring(start, pipeline string) (string, []sparkwing.DescribePipeline, bool) {
+func localRepoDeclaring(start, pipeline string) (string, []nodeproto.PipelineDescription, bool) {
 	sparkwingDir, err := findSparkwingDirFrom(start)
 	if err != nil {
 		return "", nil, false
@@ -647,7 +648,7 @@ type riskGate struct {
 	// safety: a checkout whose declarations the caller already read, so the
 	// gate weighs that build instead of making a second one.
 	SubmitDir string
-	Declared  []sparkwing.DescribePipeline
+	Declared  []nodeproto.PipelineDescription
 }
 
 func (g riskGate) check(execDir, pinnedBinary string) error {
@@ -667,7 +668,7 @@ func (g riskGate) check(execDir, pinnedBinary string) error {
 			return fmt.Errorf("%s: read what %s declares: %w", g.Surface, g.Pipeline, err)
 		}
 	}
-	if !slices.ContainsFunc(declared, func(p sparkwing.DescribePipeline) bool { return p.Name == g.Pipeline }) {
+	if !slices.ContainsFunc(declared, func(p nodeproto.PipelineDescription) bool { return p.Name == g.Pipeline }) {
 		return fmt.Errorf("%s: no selected source declares a pipeline named %q", g.Surface, g.Pipeline)
 	}
 	if err := enforceRiskGate(g.Pipeline, risksIn(declared, g.Pipeline), g.Flags); err != nil {

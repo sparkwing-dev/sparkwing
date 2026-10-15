@@ -63,10 +63,10 @@ export interface ClosureSpec {
 
 export interface ConcurrencySpec {
   group: string;
-  scope: string;
-  capacity: number;
-  cost: number;
-  on_limit: string;
+  scope?: string;
+  capacity?: number;
+  cost?: number;
+  on_limit?: string;
   queue_timeout_ms?: number;
   cancel_timeout_ms?: number;
 }

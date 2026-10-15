@@ -1,12 +1,9 @@
-package sparkwing_test
+package sparkwing
 
 import (
 	"context"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type deployArgs struct {
@@ -16,8 +13,8 @@ type deployArgs struct {
 
 func TestInputs_RoundTrip(t *testing.T) {
 	want := deployArgs{Service: "api", Env: "prod"}
-	ctx := sparkwingruntime.WithInputs(context.Background(), want)
-	got := sparkwing.Inputs[deployArgs](ctx)
+	ctx := withTestInputs(context.Background(), want)
+	got := Inputs[deployArgs](ctx)
 	if got != want {
 		t.Fatalf("Inputs[deployArgs] = %+v, want %+v", got, want)
 	}
@@ -34,14 +31,14 @@ func TestInputs_PanicsWithoutInstaller(t *testing.T) {
 			t.Fatalf("panic should mention Inputs and missing installer, got %q", msg)
 		}
 	}()
-	_ = sparkwing.Inputs[deployArgs](context.Background())
+	_ = Inputs[deployArgs](context.Background())
 }
 
 func TestInputs_PanicsOnTypeMismatch(t *testing.T) {
 	type otherArgs struct {
 		Region string
 	}
-	ctx := sparkwingruntime.WithInputs(context.Background(), deployArgs{Service: "x"})
+	ctx := withTestInputs(context.Background(), deployArgs{Service: "x"})
 	defer func() {
 		r := recover()
 		if r == nil {
@@ -52,12 +49,5 @@ func TestInputs_PanicsOnTypeMismatch(t *testing.T) {
 			t.Fatalf("panic should say not assignable, got %q", msg)
 		}
 	}()
-	_ = sparkwing.Inputs[otherArgs](ctx)
-}
-
-func TestPlanInputs_RoundTrip(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	if got := plan.Inputs(); got != nil {
-		t.Fatalf("fresh Plan.Inputs() = %+v, want nil", got)
-	}
+	_ = Inputs[otherArgs](ctx)
 }

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -13,12 +13,11 @@ import (
 func TestPlanDocument_CarriesTheCheckout(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	sparkwing.Job(plan, "a", func(context.Context) error { return nil })
-	plan.CheckoutOld(sparkwing.CheckoutOld{Depth: 3, LFS: true})
-	doc, err := planDocument(plan, sparkwing.RunContext{RunID: "run-1", Pipeline: "demo"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if doc.Source == nil || *doc.Source != (nodeproto.PlanSource{Depth: 3, LFS: true}) {
+	plan.Checkout(sparkwing.Checkout{Depth: testOrchestratorPtr(3), LFS: testOrchestratorPtr(true)})
+	doc := sdkserve.DefaultOperations.Document(plan)
+	if doc.Source == nil || doc.Source.Depth == nil || *doc.Source.Depth != 3 || doc.Source.LFS == nil || !*doc.Source.LFS {
 		t.Fatalf("source = %+v", doc.Source)
 	}
 }
+
+func testOrchestratorPtr[T any](value T) *T { return &value }

@@ -87,7 +87,7 @@ test("annotations, summaries and masks await delivery errors", async () => {
   await assert.rejects(routes.summary("markdown", signal), /delivery failed/);
   await assert.rejects(routes.mask("secret", signal), /delivery failed/);
   assert.deepEqual(bodies, [
-    { message: "note", file: "file.ts", line: 1, column: 2, end_line: 3 },
+    { message: "note", level: "info", file: "file.ts", line: 1, column: 2, end_line: 3 },
     { markdown: "markdown" },
     { value: "secret" },
   ]);

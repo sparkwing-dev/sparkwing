@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	fixtureDescribe = `"ok":true,"result":{"protocol":"1","pipelines":[{"name":"demo","args":[{"name":"env","go_name":"Env","type":"string","required":true},{"name":"fast","go_name":"Fast","type":"bool"}]}]}}`
-	fixturePlan     = `"ok":true,"result":{"protocol":"1","pipeline":"demo","run_id":"plan","nodes":[{"id":"build","deps":[],"work":{"steps":[{"id":"lint","has_skip_if":true,"closures":{"skip_if":["build/step/lint/skip_if/0"]}},{"id":"compile","needs":["lint"]},{"id":"test","needs":["compile"]}],"failure_policy":"fail-fast"}},{"id":"deploy-prod","deps":["build"],"modifiers":{"retry":2,"timeout_ms":60000},"work":{"steps":[{"id":"run"}]}}]}}`
+	fixtureDescribe = `"ok":true,"result":{"pipelines":[{"name":"demo","args":[{"name":"env","type":"string","required":true},{"name":"fast","type":"bool"}]}]}}`
+	fixturePlan     = `"ok":true,"result":{"jobs":[{"id":"build","steps":[{"id":"lint","closures":{"skip_if":["build/step/lint/skip_if/0"]}},{"id":"compile","needs":["lint"]},{"id":"test","needs":["compile"]}],"failure_policy":"fail_fast"},{"id":"deploy-prod","deps":["build"],"retry":{"attempts":2},"timeout_ms":60000,"steps":[{"id":"run"}]}]}}`
 	fixtureEval     = `"ok":true,"result":{"value":true}}`
 )
 
@@ -24,7 +24,7 @@ func fakePlanSDK(t *testing.T, describe, plan, eval string) (bin, requests strin
 	t.Helper()
 	dir := t.TempDir()
 	bin, requests = filepath.Join(dir, "pipeline"), filepath.Join(dir, "requests")
-	for name, body := range map[string]string{"describe": describe, "plan": plan, "eval": eval} {
+	for name, body := range map[string]string{"hello": `"ok":true,"result":{"protocol":2,"sdk":{"language":"go","version":"fixture"},"features":[]}}`, "describe": describe, "plan": plan, "eval": eval} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -84,8 +84,8 @@ Args:
 	}
 	reqs := readRequests(t, requests)
 	for _, sent := range []string{
-		`{"id":"1","op":"describe"}`,
-		`{"id":"2","op":"plan","pipeline":"demo","args":{"env":"prod","fast":"true"},"run":{"run_id":"plan"}}`,
+		`{"id":"2","op":"describe"}`,
+		`{"id":"3","op":"plan","pipeline":"demo","args":{"env":"prod","fast":"true"},"run":{"run_id":"plan","pipeline":"demo"}}`,
 	} {
 		if !strings.Contains(reqs, sent) {
 			t.Fatalf("requests:\n%s\nlack %s", reqs, sent)
@@ -141,8 +141,7 @@ func TestExplainRendersThePlanDocument(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := captureStdout(t, func() { printPlanSnapshot(&planned.doc) })
-	want := `Plan: demo
-  Node "build"
+	want := `  Node "build"
     Work
       Step "lint" [skip_if]
       Step "compile"  needs: lint

@@ -106,7 +106,7 @@ test("Git helpers clone, fetch and protect tags against a real local remote", as
     assert.equal((await host.send({ ...hello, binding })).ok, true);
     const planned = await host.send({ id: "plan", op: "plan", pipeline: "fixture", args: {}, run: { run_id: "run", pipeline: "fixture" } });
     assert.equal(planned.ok, true, JSON.stringify(planned));
-    const executed = await host.send({ id: "body", op: "run_step", job: "build", step: "run", attempt: 1 });
+    const executed = await host.send({ id: "body", op: "run_step", settled: [], job: "build", step: "run", attempt: 1 });
     assert.equal(executed.result?.outcome, "success", JSON.stringify(executed));
     assert.equal(executed.result.output, "verified");
   } finally {

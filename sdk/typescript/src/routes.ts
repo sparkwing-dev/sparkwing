@@ -1,3 +1,4 @@
+import { parseJSON } from "./json.ts";
 import type { Annotation, ChildOptions, CleanupRegistration, CleanupSpec, PipelineRef } from "../index.d.ts";
 import { decodeError, failure, object, string } from "./errors.ts";
 import { assertExecution } from "./scope.ts";
@@ -10,8 +11,8 @@ export interface HostServices {
   secret(name: string, signal: AbortSignal): Promise<string>;
   output<T>(job: string, signal: AbortSignal): Promise<T | undefined>;
   latest<T>(ref: PipelineRef<T>, signal: AbortSignal): Promise<T>;
-  annotate(annotation: Annotation, signal: AbortSignal): Promise<void>;
-  summary(markdown: string, signal: AbortSignal): Promise<void>;
+  annotate(annotation: Annotation, signal: AbortSignal, step?: string): Promise<void>;
+  summary(markdown: string, signal: AbortSignal, step?: string): Promise<void>;
   mask(value: string, signal: AbortSignal): Promise<void>;
   oidcToken(audience: string, signal: AbortSignal): Promise<string>;
   runPipeline<T, In extends object>(pipeline: string, job: string, options: ChildOptions<In>, signal: AbortSignal): Promise<T>;
@@ -62,7 +63,7 @@ export class NodeRoutes implements HostServices {
     if (response.status === 204 && response.ok) return {};
     let data: Record<string, unknown>;
     try {
-      data = object(JSON.parse(text), "route response");
+      data = object(parseJSON(text), "route response");
     } catch {
       throw failure("protocol_error", `invalid JSON response (HTTP ${response.status})`);
     }
@@ -86,12 +87,17 @@ export class NodeRoutes implements HostServices {
     if (!("output" in data)) throw failure("protocol_error", "latest response requires output");
     return data.output as T;
   }
-  async annotate(annotation: Annotation, signal: AbortSignal): Promise<void> {
+  async annotate(annotation: Annotation, signal: AbortSignal, step?: string): Promise<void> {
     const { endLine, ...fields } = annotation;
-    await this.#request("POST", "/node/v1/annotations", signal, { ...fields, ...(endLine === undefined ? {} : { end_line: endLine }) });
+    await this.#request("POST", "/node/v1/annotations", signal, {
+      ...fields,
+      level: annotation.level ?? "info",
+      ...(endLine === undefined ? {} : { end_line: endLine }),
+      ...(step === undefined ? {} : { step }),
+    });
   }
-  async summary(markdown: string, signal: AbortSignal): Promise<void> {
-    await this.#request("POST", "/node/v1/summary", signal, { markdown });
+  async summary(markdown: string, signal: AbortSignal, step?: string): Promise<void> {
+    await this.#request("POST", "/node/v1/summary", signal, { markdown, ...(step === undefined ? {} : { step }) });
   }
   async mask(value: string, signal: AbortSignal): Promise<void> {
     await this.#request("POST", "/node/v1/masks", signal, { value });

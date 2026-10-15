@@ -91,50 +91,21 @@ func encoded(t *testing.T, records []sparkwing.LogRecord) string {
 	return string(raw)
 }
 
-func TestLogSinkMasksTextAndRecords(t *testing.T) {
+func TestLogSinkMasksRecords(t *testing.T) {
 	log := &recordLog{}
 	sink := newSink(t, log, &fakeState{})
-	sink.Text(nodehost.LevelInfo, "token="+logSecret)
-	sink.Text(nodehost.LevelWarn, "stderr "+logSecret)
-	sink.Record(nodeproto.LogRecord{TS: "x", Msg: "msg " + logSecret, Attrs: json.RawMessage(`{"nested":{"v":"` + logSecret + `"}}`)})
-	sink.Flush()
-	if got := encoded(t, log.records); strings.Contains(got, logSecret) || strings.Count(got, "***") != 4 {
+	sink.Record(nodeproto.FrameLog{TS: "x", Message: "msg " + logSecret, Attrs: json.RawMessage(`{"nested":{"v":"` + logSecret + `"}}`)})
+	if got := encoded(t, log.records); strings.Contains(got, logSecret) || strings.Count(got, "***") != 2 {
 		t.Fatalf("records not masked: %s", got)
-	}
-}
-
-func TestLogSinkMasksSecretSplitAcrossLinePieces(t *testing.T) {
-	log := &recordLog{}
-	sink := newSink(t, log, &fakeState{})
-	head := strings.Repeat("x", nodehost.MaxTextLine-4)
-	sink.Text(nodehost.LevelInfo, head+logSecret[:4])
-	sink.Text(nodehost.LevelInfo, logSecret[4:]+" tail")
-	long := strings.Repeat("y", nodehost.MaxTextLine)
-	sink.Text(nodehost.LevelWarn, long)
-	sink.Flush()
-
-	var info, warn strings.Builder
-	for _, rec := range log.records {
-		if rec.Level == nodehost.LevelInfo {
-			info.WriteString(rec.Msg)
-		} else {
-			warn.WriteString(rec.Msg)
-		}
-	}
-	if want := head + "*** tail"; info.String() != want {
-		t.Fatalf("stdout pieces stored as %q...%q, want the secret masked whole", info.String()[:8], info.String()[len(head)-8:])
-	}
-	if warn.String() != long {
-		t.Fatalf("held tail of an unfinished line not flushed: got %d bytes, want %d", warn.Len(), len(long))
 	}
 }
 
 func TestLogSinkMasksAttrKeysNumbersAndNestedValues(t *testing.T) {
 	log := &recordLog{}
 	sink := newSink(t, log, &fakeState{}, "1234567")
-	sink.Record(nodeproto.LogRecord{TS: "x", Attrs: json.RawMessage(`{"` + logSecret + `":"ok","n":3}`)})
-	sink.Record(nodeproto.LogRecord{TS: "x", Attrs: json.RawMessage(`{"pin":1234567,"big":12345678}`)})
-	sink.Record(nodeproto.LogRecord{TS: "x", Attrs: json.RawMessage(`{"a":{"b":["x","<` + logSecret + `>"]}}`)})
+	sink.Record(nodeproto.FrameLog{TS: "x", Attrs: json.RawMessage(`{"` + logSecret + `":"ok","n":3}`)})
+	sink.Record(nodeproto.FrameLog{TS: "x", Attrs: json.RawMessage(`{"pin":1234567,"big":12345678}`)})
+	sink.Record(nodeproto.FrameLog{TS: "x", Attrs: json.RawMessage(`{"a":{"b":["x","<` + logSecret + `>"]}}`)})
 	got := encoded(t, log.records)
 	if strings.Contains(got, logSecret) || strings.Contains(got, "1234567") {
 		t.Fatalf("attrs not masked: %s", got)
@@ -150,48 +121,11 @@ func TestLogSinkMasksAttrKeysNumbersAndNestedValues(t *testing.T) {
 	}
 }
 
-func TestLogSinkKeepsDropNoticesOutOfASplitStderrSecret(t *testing.T) {
-	log := &recordLog{}
-	sink := newSink(t, log, &fakeState{})
-	head := strings.Repeat("x", nodehost.MaxTextLine-4)
-	sink.Text(nodehost.LevelWarn, head+logSecret[:4])
-	sink.Record(nodeproto.LogRecord{TS: "x", Level: "warn", Msg: "sparkwing: 3 log lines dropped while the log sink was behind"})
-	sink.Text(nodehost.LevelWarn, logSecret[4:]+" tail")
-	sink.Flush()
-	var stderr strings.Builder
-	for _, rec := range log.records {
-		if !strings.Contains(rec.Msg, "dropped") {
-			stderr.WriteString(rec.Msg)
-		}
-	}
-	if stderr.String() != head+"*** tail" || strings.Contains(encoded(t, log.records), logSecret[4:]) {
-		t.Fatal("drop notice broke the split stderr secret apart")
-	}
-}
-
-func TestLogSinkHoldsAtMostOneValueOfOverlappingText(t *testing.T) {
-	log := &recordLog{}
-	sink := newSink(t, log, &fakeState{}, "aa")
-	run := strings.Repeat("a", nodehost.MaxTextLine)
-	for i := range 3 {
-		sink.Text(nodehost.LevelInfo, run)
-		if len(log.records) != i+1 || len(log.records[i].Msg) < nodehost.MaxTextLine {
-			t.Fatalf("piece %d held back: %d records stored", i, len(log.records))
-		}
-	}
-	sink.Flush()
-	for _, rec := range log.records {
-		if strings.Contains(rec.Msg, "aa") {
-			t.Fatalf("overlapping secret stored unmasked in a %d-byte record", len(rec.Msg))
-		}
-	}
-}
-
 func TestLogSinkAttributesNodeStepAndHostTime(t *testing.T) {
 	log := &recordLog{}
 	sink := newSink(t, log, &fakeState{})
-	sink.Record(nodeproto.LogRecord{TS: "1999-01-01T00:00:00Z", Level: "error", Node: "forged", Step: "compile", Msg: "boom"})
-	sink.Record(nodeproto.LogRecord{TS: "1999-01-01T00:00:00Z", Level: "shout", Node: "forged", Msg: "loud"})
+	sink.Record(nodeproto.FrameLog{TS: "1999-01-01T00:00:00Z", Level: "error", Step: "compile", Message: "boom"})
+	sink.Record(nodeproto.FrameLog{TS: "1999-01-01T00:00:00Z", Level: "shout", Message: "loud"})
 	sink.Text(nodehost.LevelInfo, "plain")
 	want := []sparkwing.LogRecord{
 		{TS: hostNow, Level: "error", JobID: "build", Step: "compile", Msg: "boom"},
@@ -206,13 +140,13 @@ func TestLogSinkAttributesNodeStepAndHostTime(t *testing.T) {
 func TestLogSinkPersistsAnnotationsAndSummaries(t *testing.T) {
 	log, state := &recordLog{}, &fakeState{}
 	sink := newSink(t, log, state)
-	sink.Record(nodeproto.LogRecord{
-		TS: "x", Event: "node_annotation", Msg: "ignored",
+	sink.Record(nodeproto.FrameLog{
+		TS: "x", Event: "job_annotation", Message: "ignored",
 		Attrs: json.RawMessage(`{"message":"leaked ` + logSecret + `","level":"error","file":"main.go","line":4}`),
 	})
-	sink.Record(nodeproto.LogRecord{TS: "x", Event: "node_annotation", Step: "test", Msg: "from msg"})
-	sink.Record(nodeproto.LogRecord{TS: "x", Event: "node_summary", Attrs: json.RawMessage(`{"markdown":"# done"}`)})
-	sink.Record(nodeproto.LogRecord{TS: "x", Event: "node_summary", Step: "test", Attrs: json.RawMessage(`{"markdown":"step md"}`)})
+	sink.Record(nodeproto.FrameLog{TS: "x", Event: "job_annotation", Step: "test", Message: "from msg"})
+	sink.Record(nodeproto.FrameLog{TS: "x", Event: "job_summary", Attrs: json.RawMessage(`{"markdown":"# done"}`)})
+	sink.Record(nodeproto.FrameLog{TS: "x", Event: "job_summary", Step: "test", Attrs: json.RawMessage(`{"markdown":"step md"}`)})
 	want := []string{
 		"node-annotation run-1/build leaked ***",
 		"step-annotation run-1/build/test from msg",
@@ -222,7 +156,7 @@ func TestLogSinkPersistsAnnotationsAndSummaries(t *testing.T) {
 	if strings.Join(state.ops, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("store writes:\n%s\nwant\n%s", strings.Join(state.ops, "\n"), strings.Join(want, "\n"))
 	}
-	if len(log.records) != 4 || log.records[0].Event != sparkwing.EventNodeAnnotation || log.records[0].Attrs["file"] != "main.go" {
+	if len(log.records) != 4 || log.records[0].Event != "job_annotation" || log.records[0].Attrs["file"] != "main.go" {
 		t.Fatalf("annotation records not stored with their event: %s", encoded(t, log.records))
 	}
 }
@@ -230,7 +164,7 @@ func TestLogSinkPersistsAnnotationsAndSummaries(t *testing.T) {
 func TestLogSinkReportsFailedStateWrites(t *testing.T) {
 	log := &recordLog{}
 	sink := newSink(t, log, &fakeState{err: errors.New("store down: " + logSecret)})
-	sink.Record(nodeproto.LogRecord{TS: "x", Event: "node_summary", Attrs: json.RawMessage(`{"markdown":"md"}`)})
+	sink.Record(nodeproto.FrameLog{TS: "x", Event: "job_summary", Attrs: json.RawMessage(`{"markdown":"md"}`)})
 	got := encoded(t, log.records)
 	if len(log.records) != 2 || log.records[0].Event != "state_write_failed" || strings.Contains(got, logSecret) {
 		t.Fatalf("failed write not reported masked: %s", got)
@@ -241,9 +175,9 @@ func TestLogSinkStoresHostEventsFromTheSDKAsPlainMessages(t *testing.T) {
 	log, state := &recordLog{}, &fakeState{}
 	sink := newSink(t, log, state)
 	for _, event := range []string{"step_start", "step_end", "step_skipped", "work_fail_fast", "node_start", "node_end", "retry", "invented"} {
-		sink.Record(nodeproto.LogRecord{TS: "x", Event: event, Msg: event, Attrs: json.RawMessage(`{"outcome":"success"}`)})
+		sink.Record(nodeproto.FrameLog{TS: "x", Event: event, Message: event, Attrs: json.RawMessage(`{"outcome":"success"}`)})
 	}
-	sink.Record(nodeproto.LogRecord{TS: "x", Event: "exec_end", Attrs: json.RawMessage(`{"exit_code":0}`)})
+	sink.Record(nodeproto.FrameLog{TS: "x", Event: "exec_end", Attrs: json.RawMessage(`{"exit_code":0}`)})
 	for _, rec := range log.records[:8] {
 		if rec.Event != "" {
 			t.Errorf("SDK record %q kept host event %q", rec.Msg, rec.Event)
@@ -284,9 +218,8 @@ func writeThrough(t *testing.T, logs orchestrator.LogBackend) {
 		t.Fatalf("open node log: %v", err)
 	}
 	sink := newSink(t, nlog, &fakeState{})
-	sink.Text(nodehost.LevelInfo, "out "+logSecret)
-	sink.Record(nodeproto.LogRecord{TS: "x", Step: "s", Event: "step_end", Msg: "done"})
-	sink.Flush()
+	sink.Text(nodehost.LevelInfo, "out ***")
+	sink.Record(nodeproto.FrameLog{TS: "x", Step: "s", Event: "step_end", Message: "done"})
 	if err := nlog.Close(); err != nil {
 		t.Fatalf("close node log: %v", err)
 	}
@@ -323,8 +256,8 @@ func (l *textLog) EmitText(rec sparkwing.LogRecord) { l.text = append(l.text, re
 func TestLogSinkHandsPrintedTextToATextWriter(t *testing.T) {
 	log := &textLog{}
 	sink := newSink(t, log, &fakeState{})
-	sink.Record(nodeproto.LogRecord{Level: "info", Msg: "from the sdk"})
-	sink.Text(nodehost.LevelInfo, "printed "+logSecret)
+	sink.Record(nodeproto.FrameLog{Level: "info", Message: "from the sdk"})
+	sink.Text(nodehost.LevelInfo, "printed ***")
 	sink.Text(nodehost.LevelWarn, "to stderr")
 	if got, exp := encoded(t, log.records), encoded(t, []sparkwing.LogRecord{{TS: hostNow, Level: "info", JobID: "build", Msg: "from the sdk"}}); got != exp {
 		t.Errorf("records:\n got %s\nwant %s", got, exp)
@@ -344,9 +277,9 @@ func TestLogSinkBoundsAnOversizedSummary(t *testing.T) {
 	state := &fakeState{}
 	sink := newSink(t, &recordLog{}, state)
 	huge := strings.Repeat("\x01", 128<<10-200) + logSecret + strings.Repeat("\x01", 1<<20)
-	sink.Record(nodeproto.LogRecord{Event: sparkwing.EventNodeSummary, Msg: huge})
-	sink.Record(nodeproto.LogRecord{Event: sparkwing.EventNodeSummary, Step: "s", Msg: huge})
-	sink.Record(nodeproto.LogRecord{Event: sparkwing.EventNodeSummary, Msg: "## small"})
+	sink.Record(nodeproto.FrameLog{Event: "job_summary", Message: huge})
+	sink.Record(nodeproto.FrameLog{Event: "job_summary", Step: "s", Message: huge})
+	sink.Record(nodeproto.FrameLog{Event: "job_summary", Message: "## small"})
 	if len(state.ops) != 3 {
 		t.Fatalf("ops = %d, want 3", len(state.ops))
 	}
@@ -370,9 +303,9 @@ func TestLogSinkBoundsAnOversizedAnnotation(t *testing.T) {
 	state := &fakeState{}
 	sink := newSink(t, &recordLog{}, state)
 	huge := strings.Repeat("\x01", 128<<10-200) + logSecret + strings.Repeat("\x01", 1<<20)
-	sink.Record(nodeproto.LogRecord{Event: sparkwing.EventNodeAnnotation, Msg: huge})
-	sink.Record(nodeproto.LogRecord{Event: sparkwing.EventNodeAnnotation, Step: "s", Msg: huge})
-	sink.Record(nodeproto.LogRecord{Event: sparkwing.EventNodeAnnotation, Msg: "built"})
+	sink.Record(nodeproto.FrameLog{Event: "job_annotation", Message: huge})
+	sink.Record(nodeproto.FrameLog{Event: "job_annotation", Step: "s", Message: huge})
+	sink.Record(nodeproto.FrameLog{Event: "job_annotation", Message: "built"})
 	if len(state.ops) != 3 {
 		t.Fatalf("ops = %d, want 3", len(state.ops))
 	}

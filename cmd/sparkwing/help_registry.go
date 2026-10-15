@@ -1,7 +1,5 @@
 package main
 
-import "github.com/sparkwing-dev/sparkwing/sparkwing"
-
 func helpExampleScratchDir(name string) string {
 	return "./" + name
 }
@@ -925,7 +923,7 @@ var cmdDebug = Command{
 	Synopsis: "Interactive debugging for pipeline runs",
 	Description: `Pause nodes at selected execution points, inspect them, open a shell,
 or resume execution. Pause settings apply to the launched run.`,
-	SubcommandOrder: []string{"run", "release", "attach", "env", "rerun"},
+	SubcommandOrder: []string{"run", "release", "attach", "env"},
 	Examples: []Example{
 		{"Pause before the tests node", "sparkwing debug run build --pause-before tests"},
 		{"Resume a paused node", "sparkwing debug release --run run-fictional --node tests"},
@@ -1006,36 +1004,6 @@ exits 0.`,
 	},
 }
 
-var cmdDebugRerun = Command{
-	Path:              "sparkwing debug rerun",
-	ReachesController: true,
-	Synopsis:          "Reproduce a node's dispatch frame in an interactive shell",
-	Description: `Opens an interactive shell using a node's recorded environment and working
-directory. Local execution writes upstream reference outputs beneath the
-run's rerun directory. Cluster execution creates a temporary pod using
---image, else the profile's rerun_image in config.yaml, attaches to it,
-and deletes it on exit.
-
-Snapshots omit credential names and values and remove URL credentials.
-Controller access to the captured environment requires an admin token.
-The command lists omitted keys so you can supply required credentials.
-Secrets resolve when accessed, and the selected runner image applies.
-
---seq selects an attempt index; its default selects the latest attempt.`,
-	Flags: []FlagSpec{
-		{Name: "run", Argument: "ID", Desc: "Run ID holding the node", Required: true, Group: "Target"},
-		{Name: "node", Argument: "NAME", Desc: "Node ID to reproduce", Required: true, Group: "Target"},
-		{Name: "seq", Argument: "N", Desc: "Attempt index; -1 selects most recent", Group: "Target"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (cluster mode)", Group: "System"},
-		{Name: "image", Argument: "REF", Desc: "Runner image for cluster-mode debug pod (cluster mode)", Group: "System"},
-	},
-	Examples: []Example{
-		{"Rerun locally", "sparkwing debug rerun --run run-fictional --node tests"},
-		{"Rerun a specific attempt", "sparkwing debug rerun --run run-fictional --node tests --seq 1"},
-		{"Rerun in prod", "sparkwing debug rerun --run run-fictional --node tests --profile prod --image ghcr.io/me/runner:v1"},
-	},
-}
-
 var cmdDebugEnv = Command{
 	Path:              "sparkwing debug env",
 	ReachesController: true,
@@ -1053,22 +1021,30 @@ and exits zero.`,
 	},
 }
 
-var runFlagSpecs = runFlagSpecsFromDocs()
-
-func runFlagSpecsFromDocs() []FlagSpec {
-	docs := sparkwing.SparkwingFlagDocs()
-	out := make([]FlagSpec, 0, len(docs))
-	for _, document := range docs {
-		out = append(out, FlagSpec{
-			Name:     document.Name,
-			Short:    document.Short,
-			Argument: document.Argument,
-			Desc:     document.Desc,
-			Group:    document.Group,
-			Hot:      document.Hot,
-		})
-	}
-	return out
+var runFlagSpecs = []FlagSpec{
+	{Name: "sw-ref", Argument: "REF", Desc: "Run the pipeline at REF (branch/tag/SHA) instead of the working tree", Group: "System", Hot: true},
+	{Name: "sw-pipeline-ref", Argument: "REF", Desc: "Compile the pipeline at REF and execute it in this checkout; cannot be combined with --sw-ref", Group: "System"},
+	{Name: "sw-detached", Desc: "Queue the run for this machine's resident consumer and print its handle instead of executing here; the run outlives the terminal", Group: "System", Hot: true},
+	{Name: "sw-idempotency-key", Argument: "KEY", Desc: "Detached only: deduplication token; a repeat carrying this key returns the original run instead of starting a second one", Group: "System"},
+	{Name: "sw-request-id", Argument: "ID", Desc: "Detached only: tracing identifier recorded on the run; never affects deduplication", Group: "System"},
+	{Name: "sw-consumer-idle", Argument: "DUR", Desc: "Detached only, and only if this starts a consumer: how long it stays alive with no work (default 5m)", Group: "System"},
+	{Name: "sw-consumer-claim-lease", Argument: "DUR", Desc: "Detached only, and only if this starts a consumer: the lease it stamps on each claimed run, renewed while the run executes (default 3m)", Group: "System"},
+	{Name: "sw-output", Argument: "FORMAT", Desc: "Detached only: run-handle format, pretty|json|plain (default: pretty on a TTY, json when piped)", Group: "System"},
+	{Name: "sw-verbose", Short: "v", Desc: "Enable debug logging and the complete live JSON event stream", Group: "System"},
+	{Name: "sw-start-at", Argument: "STEP", Desc: "Start the run at STEP", Group: "System", Hot: true},
+	{Name: "sw-stop-at", Argument: "STEP", Desc: "Stop the run after STEP", Group: "System", Hot: true},
+	{Name: "sw-only", Argument: "GLOB", Desc: "Run only jobs whose ID matches GLOB (plus their Needs ancestors)", Group: "System", Hot: true},
+	{Name: "sw-no-cache", Desc: "Ignore cached per-node results (writes still happen)", Group: "System", Hot: true},
+	{Name: "sw-priority", Argument: "VALUE", Desc: "Local admission priority: an integer, or front/back for one step past the queue as it stands; overrides the plan's own Priority", Group: "System", Hot: true},
+	{Name: "sw-no-update", Desc: "Compile against the committed sparks overlay instead of resolving sparks first; CI sets it so the runner needs no resolve", Group: "System"},
+	{Name: "sw-no-bincache", Desc: "Build a temporary pipeline binary with debug symbols instead of using the binary cache", Group: "System"},
+	{Name: "sw-hash-all-files", Desc: "Hash files Git ignores into the binary cache key, for a build that embeds them", Group: "System"},
+	{Name: "sw-allow-unadmitted", Desc: "Run without the admission daemon even when the pipeline reserves host capacity", Group: "System"},
+	{Name: "sw-dry-run", Desc: "Run each step's dry-run probe instead of its real action", Group: "System", Hot: true},
+	{Name: "sw-allow", Argument: "LABEL[,LABEL...]", Desc: "Authorize risk-labeled steps (repeatable)", Group: "System"},
+	{Name: "sw-index", Argument: "PATH", Desc: "Judge the git index at PATH instead of the repository's own (prints an index_bound event naming it)", Group: "System"},
+	{Name: "sw-run-handle-file", Argument: "PATH", Desc: "Atomically publish the accepted run's machine-readable handle to PATH", Group: "System"},
+	{Name: "target", Argument: "TARGET", Desc: "Run against the named pipeline deployment target (e.g. dev, prod)", Group: "System", Hot: true},
 }
 
 var cmdPipeline = Command{
@@ -1998,7 +1974,7 @@ var cmdJobs = Command{
 	Description: `Inspect recorded pipeline executions and control their lifecycle.
 Commands support local runs and runs stored through a named profile.
 Pass --profile NAME to select that profile's backend.`,
-	SubcommandOrder: []string{"consumer", "list", "status", "logs", "stats", "annotations", "approvals", "retry", "cancel", "bounce", "prune"},
+	SubcommandOrder: []string{"consumer", "list", "status", "logs", "stats", "annotations", "approvals", "retry", "cancel", "prune"},
 }
 
 var cmdJobsList = Command{
@@ -2100,8 +2076,8 @@ With --follow, polls until the run reaches a terminal status. Pass
 
 A local read looks the id up in this home's own store first and then
 in each standalone store, and reports which one held it. The verbs
-that write to a run -- bounce, annotations add, approvals approve
-and deny, debug rerun -- write in whichever store held
+that write to a run -- annotations add, approvals approve
+and deny -- write in whichever store held
 it. Cancel and retry cannot act on a standalone run at all, because
 no daemon arbitrates one, and say so instead of reporting it
 missing.
@@ -2404,43 +2380,6 @@ lease root, and the daemon logs the parent resolution.`,
 	Examples: []Example{
 		{"Cancel one run", "sparkwing runs cancel --run run-fictional --profile prod"},
 		{"Cancel every running prod run", "sparkwing runs list --status running --profile prod -q | sparkwing runs cancel --run - --profile prod"},
-	},
-}
-
-var cmdJobsBounce = Command{
-	Path:              "sparkwing runs bounce",
-	ReachesController: true,
-	Synopsis:          "Restart one running job's process without failing the run",
-	Description: `Stops the process executing one running job and runs that
-job again, in place. The run keeps going: the job never reaches a
-terminal state, so nothing downstream sees a failure and no other
-job is disturbed.
-
-Use it for a job that is wedged or misbehaving when cancelling the
-whole run would cost more than it saves.
-
-The request is recorded and the verb returns; the runner supervising
-the job picks it up within a few seconds, stops the process (SIGTERM,
-then SIGKILL after the grace period), and re-runs the job from its
-first step. Steps therefore run again, so a job with side effects
-needs the same idempotency a restarted pod already demands.
-
-A job that finishes before the stop lands is left alone. Bouncing
-again is allowed -- one request is one restart.
-
-The local runner is what acts on the request, whether the run's state
-lives here or on a controller. A job the in-cluster Kubernetes runner
-executes records the request and nothing consumes it, so the job keeps
-running; cancel the run and retry it instead.`,
-	Flags: []FlagSpec{
-		{Name: "run", Argument: "RUN_ID", Desc: "Run id owning the job", Group: "Input"},
-		{Name: "node", Argument: "NODE_ID", Desc: "Job id to bounce", Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name for remote runs; omit for local runs", Group: "System"},
-	},
-	GroupOrder: []string{"Input", "System", "Other"},
-	Examples: []Example{
-		{"Bounce a wedged job", "sparkwing runs bounce --run run-fictional --node build"},
-		{"Bounce a job in a run a controller holds", "sparkwing runs bounce --run run-fictional --node build --profile prod"},
 	},
 }
 
@@ -3297,7 +3236,7 @@ var cmdAnnotations = Command{
 	Path:     "sparkwing runs annotations",
 	Synopsis: "Read or append persistent node + step annotations",
 	Description: `Annotations are short summary strings that pipelines (via
-sparkwing.AnnotateOld) and agents append to a node or step during a
+sparkwing.Annotate) and agents append to a node or step during a
 run. They show up on the dashboard alongside outcome. This verb
 lets an agent read every annotation on a run or contribute one
 without going through the SDK.`,

@@ -1,14 +1,12 @@
-package sparkwing_test
+package sparkwing
 
 import (
 	"context"
 	"testing"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-type populateInputs struct {
+type describeInputs struct {
 	Env       string            `flag:"env" required:"true" desc:"Target environment"`
 	Version   string            `flag:"version" desc:"Image tag"`
 	NoApply   bool              `flag:"no-apply"`
@@ -18,22 +16,22 @@ type populateInputs struct {
 }
 
 type populatePipe struct {
-	sparkwing.Base
-	captured populateInputs
+	Base
+	captured describeInputs
 }
 
-func (pp *populatePipe) Plan(_ context.Context, plan *sparkwing.Plan, in populateInputs, rc sparkwing.RunContext) error {
+func (pp *populatePipe) Plan(_ context.Context, plan *Plan, in describeInputs, rc RunContext) error {
 	pp.captured = in
-	sparkwing.Job(plan, rc.Pipeline, func(ctx context.Context) error { return nil })
+	Job(plan, rc.Pipeline, func(ctx context.Context) error { return nil })
 	return nil
 }
 
 func TestRegistration_InvokeParsesTypes(t *testing.T) {
 	captured := &populatePipe{}
-	sparkwing.Register[populateInputs]("populate-fixture", func() sparkwing.Pipeline[populateInputs] {
+	Register[describeInputs]("populate-fixture", func() Pipeline[describeInputs] {
 		return captured
 	})
-	reg, ok := sparkwing.Lookup("populate-fixture")
+	reg, ok := lookup("populate-fixture")
 	if !ok {
 		t.Fatal("not registered")
 	}
@@ -44,7 +42,7 @@ func TestRegistration_InvokeParsesTypes(t *testing.T) {
 		"timeout":  "1m30s",
 		"version":  "v1.2.3",
 		"unknown":  "stashed-in-bag",
-	}, sparkwing.RunContext{Pipeline: "populate-fixture"})
+	}, RunContext{Pipeline: "populate-fixture"})
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
@@ -69,14 +67,14 @@ func TestRegistration_InvokeParsesTypes(t *testing.T) {
 }
 
 func TestRegistration_InvokeBadInt(t *testing.T) {
-	sparkwing.Register[populateInputs]("populate-bad-int", func() sparkwing.Pipeline[populateInputs] {
+	Register[describeInputs]("populate-bad-int", func() Pipeline[describeInputs] {
 		return &populatePipe{}
 	})
-	reg, _ := sparkwing.Lookup("populate-bad-int")
+	reg, _ := lookup("populate-bad-int")
 	_, err := reg.Invoke(context.Background(), map[string]string{
 		"env":   "prod",
 		"count": "not-a-number",
-	}, sparkwing.RunContext{Pipeline: "populate-bad-int"})
+	}, RunContext{Pipeline: "populate-bad-int"})
 	if err == nil {
 		t.Fatal("expected error on bad int")
 	}

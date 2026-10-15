@@ -42,7 +42,7 @@ func typeScriptBoundary(t *testing.T, scenario string) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			command := exec.CommandContext(t.Context(), "go", "test", "-p", "4", "./sdk/typescript/test/nativehost", "-run", "^TestNativeProtocol$")
+			command := exec.CommandContext(t.Context(), "go", "test", "-p", "4", "./sdk/typescript/test/nativehost", "-run", "^TestNative")
 			command.Dir = root
 			command.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-buildvcs=false", "TMPDIR="+t.TempDir())
 			output, err := command.CombinedOutput()

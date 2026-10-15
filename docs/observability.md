@@ -49,7 +49,7 @@ the logs.
 | `oom_killed` | Container exceeded its memory limit and was killed by the kernel (exit 137). | Raise the runner memory limit or reduce the pipeline's memory use; check the resource chart. |
 | `timeout` | Node exceeded its configured execution timeout. | Raise the timeout or optimize the pipeline. |
 | `no_progress_timeout` | Node emitted no observable progress for its configured inactivity window. | Check where the node stopped, stream command output or report progress when work is healthy, and raise the inactivity window if the expected quiet period is longer. |
-| `agent_lost` | The runner holding the node's claim stopped renewing it. The source node is terminal; a fresh linked run may retry it within `.Retry(n)`. | Check the runner and `agent_loss_*` events. A post-start retry is at-least-once and spends each acknowledged invocation. |
+| `agent_lost` | The runner holding the job's claim stopped renewing it. Started work requeues in the same run until three disruptions have occurred. | Check the runner and `job_requeued` events. Recovery preserves the application retry budget. |
 | `queue_timeout` | Either a node waited past its concurrency group's `OnLimit: Queue` timeout without getting a slot, or no agent claimed the node within its claim wait (default 24h; the error starts `unclaimable:` and names why). The node's error text names which. | For a concurrency wait, raise the group's capacity or its queue timeout. For an unclaimed node, ensure runners are up and their advertised `--label` set satisfies the pipeline's `requires:` / node `.Requires()`. |
 | `credits_exhausted` | The controller's prepaid credit balance ran out and the node was cancelled after the grace period. Its claim is released. | Add credits, then re-run. A node cancelled this way held no slot afterwards, so nothing is left to reclaim. |
 | `unpriced_cpu_class` | The node asks for more cpu than the largest class the credit rate table prices, and the runner that tried to take it reported nothing smaller, so no claim could be billed. | A Sparkwing Cloud operator can add the class with the private `sparkwing-ops` tool. Otherwise lower the node's cpu request, then re-run. The `credits_unpriced_class` event carries the request and the ceiling. |
@@ -948,14 +948,9 @@ store on the maintenance sweep and reloads both at startup, so a restart
 resumes the month and the day rather than hiding a crash loop's spend from
 the alarm, and no response costs a store write; that sweep
 also prunes totals older than thirteen months, once a month rather than
-on every tick. A cache with `--controller` keeps its own totals for the
-UTC day and the UTC month in the controller's database with
-`POST /internal/egress/totals`, written at most once a minute and at
-shutdown and read back at start, so a restart keeps the day's alarm
-and `global_month_bytes` counting. Each team's download day is the
-controller's own row and needs no saving. A cache without a controller
-counts in memory alone: its counters are per process and start over on a
-restart.
+on every tick. Each team's download day is the controller's own row and
+needs no saving. Cache-service counters remain in memory and start over on
+restart. The controller does not accept cache-service egress-total reports.
 
 Read the controller's meter from `/metrics` (`sparkwing_egress_day_bytes`
 and `sparkwing_egress_daily_alarm`); `/api/v1/health` reports only whether

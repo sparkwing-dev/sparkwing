@@ -260,48 +260,6 @@ func TestClaimPlacement_SelfAssertedLocationSatisfiesNoRequirement(t *testing.T)
 	}
 }
 
-// A mismatched runner's poll bumps ready_at to keep the queue moving, and the
-// hold has to expire anyway, so it runs from the node's hold-from time.
-func TestClaimPlacement_ReadyBumpDoesNotRestartTheHold(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	if err := s.CreateRun(ctx, store.Run{
-		ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
-	}); err != nil {
-		t.Fatalf("CreateRun: %v", err)
-	}
-	if err := s.CreateNode(ctx, store.Node{
-		RunID: "run-1", NodeID: "node-a", Status: "pending",
-		NeedsLabels: []string{"gpu"}, PrefersLabels: []string{"location=local"},
-	}); err != nil {
-		t.Fatalf("CreateNode: %v", err)
-	}
-	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
-		t.Fatalf("MarkNodeReady: %v", err)
-	}
-	placement := store.ClaimPlacement{
-		Hold: 200 * time.Millisecond,
-		Live: []store.RunnerPresence{{
-			Name: "laptop", Labels: []string{"gpu", "location=local"}, FreeSlots: 1,
-		}},
-	}
-	held := store.WithClaimPlacement(ctx, placement)
-	agePlacementHold(t, s, "run-1", "node-a", time.Now().Add(-time.Minute))
-
-	if _, err := s.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "cpu", TokenPrefix: "swr_cpu"},
-		"runner:other:1", time.Minute, []string{"cpu"}); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("cpu runner claim of a gpu node: %v", err)
-	}
-	n, err := s.ClaimNextReadyNode(held, cloudRunner, "runner:cloud:1", time.Minute,
-		[]string{"gpu", "location=cloud"})
-	if err != nil {
-		t.Fatalf("cloud claim after the hold expired: %v", err)
-	}
-	if n.PlacementReason != store.PlacementFallback {
-		t.Fatalf("placement reason = %q, want %q", n.PlacementReason, store.PlacementFallback)
-	}
-}
-
 // A runner that advertises the preference but cannot satisfy the node's
 // Requires is no reason to withhold the node from one that can.
 func TestClaimPlacement_LiveRunnerMustAlsoSatisfyRequires(t *testing.T) {

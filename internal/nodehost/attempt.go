@@ -7,14 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"runtime"
 	"slices"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/protofd"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/secretsource"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -94,12 +92,9 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	if err != nil {
 		return failed(err)
 	}
-	names := make([]string, 0, len(run.Doc.Secrets))
-	for _, s := range run.Doc.Secrets {
-		names = append(names, s.Name)
-	}
+	names := run.Secrets
 	bearer, revoke, err := a.Routes.Admit(Node{
-		RunID: run.ID, NodeID: id, Secrets: names, Resolver: a.Resolver, Masker: a.Masker, Claim: a.Claim, Local: a.Local, Refs: n.Plan.PipelineRefs,
+		RunID: run.ID, NodeID: id, Secrets: names, Resolver: a.Resolver, Masker: a.Masker, Claim: a.Claim, Local: a.Local, Refs: n.Plan.References,
 		Children: a.Children, Pause: n.Pause, Hold: n.Hold, Output: n.memoOutput,
 	})
 	if err != nil {
@@ -108,9 +103,10 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	// safety: registered before the process starts, so an environment dump never logs a live bearer.
 	a.Masker.Register(bearer)
 	cfg := base
-	cfg.Sink = sink
-	cfg.Env = attemptEnv(base.Env, n.Plan.Env, run.ID, id, a.Routes.URL(), bearer)
-	cfg.Env = append(append(withoutRunnerEnv(cfg.Env), dryRunEnv(n)...), runnerEnv()...)
+	cfg.Sink, cfg.Masker = sink, a.Masker
+	cfg.Env = attemptEnv(base.Env, n.Plan.Env)
+	cfg.Binding = &nodeproto.ProcessBinding{RunID: run.ID, JobID: id, Routes: nodeproto.ProcessRoutes{URL: a.Routes.URL(), Bearer: bearer}}
+	cfg.Env = append(withoutRunnerEnv(cfg.Env), dryRunEnv(n)...)
 	res := Result{}
 	sess, err := StartSession(ctx, cfg)
 	if err == nil {
@@ -119,7 +115,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 		if lost, ok := nlog.(LossRecorder); ok && sess.Lost() > 0 {
 			lost.RecordLoss(sess.Lost())
 		}
-		var perr *nodeproto.Error
+		var perr *apierr.Error
 		switch {
 		case cerr == nil || res.Outcome != sparkwing.Success:
 		case errors.As(cerr, &perr):
@@ -134,15 +130,13 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	} else {
 		res = failed(err)
 	}
-	sink.Flush()
 	revoke()
-	out := &LineWriter{Sink: sink, Level: LevelInfo}
+	out := NewLineWriter(sink, LevelInfo, a.Masker)
 	// safety: a cancelled node's cleanups still run, each bounded by CleanupTimeout.
 	if err := a.Routes.RunCleanups(context.WithoutCancel(ctx), bearer, CleanupScope{Dir: cfg.Dir, Env: cfg.Env, Log: out}); err != nil {
 		run.Logger.Warn("nodehost: node cleanups", "run", run.ID, "node", id, "err", err)
 	}
 	out.Flush()
-	sink.Flush()
 	return res
 }
 
@@ -161,83 +155,41 @@ func nodeReplan(ctx context.Context, sess *Session, n *NodeRun) error {
 	}
 	rc := run.Context
 	var raw json.RawMessage
-	err := ask(ctx, sess, nodeproto.RequestOld{Op: nodeproto.OpPlanOld, Pipeline: run.Pipeline, Args: args, Run: &rc}, &raw)
+	err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: run.Pipeline, Args: args, Run: &rc}, &raw)
 	switch {
 	case err != nil:
 		return err
 	case len(n.Generators) > 0:
 		return regenerate(ctx, sess, n)
 	}
-	return checkDrift(raw, n.Plan)
+	return checkDrift(raw, n.Plan, sess.cfg.Validation)
 }
 
 func attemptBody(ctx context.Context, sess *Session, sink *LogSink, n *NodeRun) Result {
-	attempt := max(n.Attempt, 1)
-	if w := n.Plan.Work; w != nil && len(w.Steps) > 0 {
-		return driveSteps(ctx, sess, sink, n, attempt)
-	}
-	var rr nodeproto.RunResultOld
-	err := ask(ctx, sess, nodeproto.RequestOld{Op: nodeproto.OpRunNodeOld, Node: n.Plan.ID, Attempt: attempt, Failure: n.Failure}, &rr)
-	if err == nil {
-		err = rr.Validate()
-	}
-	switch {
-	case err != nil:
-		return failed(err)
-	case rr.Outcome == nodeproto.OutcomeFailed:
-		msg := rr.Error
-		if msg == "" {
-			msg = "node body failed"
-		}
-		return failed(errors.New(msg))
-	}
-	return Result{Outcome: sparkwing.Success, Output: rr.Output}
+	return driveSteps(ctx, sess, sink, n, max(n.Attempt, 1))
 }
 
 // safety: the node runs only as the run accepted it, so a process that plans
 // it differently, or not at all, fails the attempt before its body starts.
-func checkDrift(raw json.RawMessage, accepted nodeproto.PlanNode) error {
-	stamped, err := nodeproto.StampSpecHashes(raw)
+func checkDrift(raw json.RawMessage, accepted nodeproto.JobSpec, validation nodeproto.ValidationContext) error {
+	doc, err := nodeproto.ValidatePlan(raw, validation)
 	if err != nil {
 		return err
 	}
-	var doc struct {
-		Protocol string `json:"protocol"`
-		Nodes    []struct {
-			ID       string `json:"id"`
-			SpecHash string `json:"spec_hash"`
-		} `json:"nodes"`
-	}
-	if err := json.Unmarshal(stamped, &doc); err != nil {
-		return fmt.Errorf("%w: plan document: %w", nodeproto.ErrMalformed, err)
-	}
-	if doc.Protocol != nodeproto.VersionOld {
-		return mismatch("plan", doc.Protocol)
-	}
-	drift := func(format string, args ...any) error {
-		return &nodeproto.Error{Code: nodeproto.CodePlanDrift, Message: fmt.Sprintf(format, args...)}
-	}
-	if accepted.SpecHash == "" {
-		return drift("the accepted plan holds no spec_hash for node %s", accepted.ID)
-	}
-	for _, got := range doc.Nodes {
-		if got.ID != accepted.ID {
-			continue
+	for _, got := range doc.Jobs {
+		if got.ID == accepted.ID && jobHash(got) == jobHash(accepted) {
+			return nil
 		}
-		if got.SpecHash != accepted.SpecHash {
-			return drift("node %s plans differently than when the run was accepted; plan code must be deterministic for a run", accepted.ID)
-		}
-		return nil
 	}
-	return drift("node %s is not in this process's plan; plan code must be deterministic for a run", accepted.ID)
+	return &apierr.Error{Code: apierr.PlanDrift, Message: fmt.Sprintf("job %s differs from its accepted specification", accepted.ID)}
 }
 
 // safety: an SDK refusal with no code is recorded as sdk_error, and a body's own error has no reason.
 func failed(err error) Result {
 	reason := ""
-	var perr *nodeproto.Error
+	var perr *apierr.Error
 	if errors.As(err, &perr) {
-		reason = string(cmp.Or(perr.Code, nodeproto.CodeSDKError))
+		reason = string(cmp.Or(perr.Code, apierr.SDKError))
 	}
 	return Result{Outcome: sparkwing.Failed, Err: err, Reason: reason}
 }
@@ -250,24 +202,6 @@ func dryRunEnv(n *NodeRun) []string {
 	return nil
 }
 
-// safety: a pod host's Job sets the runner variables on the host itself; a host
-// without them runs nodes on this machine, the local runner. A node process
-// reads them for sparkwing.Runner and its tools for the runner's identity.
-func runnerEnv() []string {
-	name, typ := os.Getenv("SPARKWING_RUNNER_NAME"), os.Getenv("SPARKWING_RUNNER_TYPE")
-	labels := os.Getenv("SPARKWING_RUNNER_LABELS")
-	if name == "" && typ == "" && labels == "" {
-		name, typ, labels = "local", "local", "local,os="+runtime.GOOS+",arch="+runtime.GOARCH
-	}
-	var env []string
-	for _, kv := range [][2]string{{"SPARKWING_RUNNER_NAME", name}, {"SPARKWING_RUNNER_TYPE", typ}, {"SPARKWING_RUNNER_LABELS", labels}} {
-		if kv[1] != "" {
-			env = append(env, kv[0]+"="+kv[1])
-		}
-	}
-	return env
-}
-
 // safety: a runner variable the host leaves unset must not survive from the caller's or the plan's env, or a
 // node in a launcher Job could report the labels a pipeline wrote, such as local.
 func withoutRunnerEnv(env []string) []string {
@@ -278,7 +212,11 @@ func withoutRunnerEnv(env []string) []string {
 
 // safety: the plan process sees the dry-run switch its node processes see, so plan code that reads it plans
 // the run each later process plans again, and no attempt fails with plan_drift.
-func planSession(cfg Config) SessionConfig { return dryRunSession(cfg.Session, cfg.Run.DryRun) }
+func planSession(cfg Config) SessionConfig {
+	s := dryRunSession(cfg.Session, cfg.Run.DryRun)
+	s.Binding = nil
+	return s
+}
 
 func dryRunSession(s SessionConfig, dryRun bool) SessionConfig {
 	if dryRun {
@@ -291,37 +229,40 @@ func dryRunSession(s SessionConfig, dryRun bool) SessionConfig {
 	return s
 }
 
-// safety: the node's contract variables are set last so neither the engine nor the node's env overrides them.
-func attemptEnv(base []string, nodeEnv map[string]string, runID, nodeID, url, bearer string) []string {
+// safety: body environment is applied by the SDK after planning; only startup values reach process initialization.
+func attemptEnv(base []string, nodeEnv map[string]nodeproto.EnvValue) []string {
 	if base == nil {
 		base = engineenv.Minimal()
 	}
 	env := make([]string, 0, len(base)+len(nodeEnv)+4)
 	env = append(env, engineenv.Strip(base)...)
 	keys := make([]string, 0, len(nodeEnv))
-	for k := range nodeEnv {
-		keys = append(keys, k)
+	for k, v := range nodeEnv {
+		if v.Startup {
+			keys = append(keys, k)
+		}
 	}
 	slices.Sort(keys)
 	for _, k := range keys {
-		env = append(env, k+"="+nodeEnv[k])
+		env = append(env, k+"="+nodeEnv[k].Value)
 	}
-	return append(env,
-		"SPARKWING_RUN_ID="+runID,
-		"SPARKWING_NODE_ID="+nodeID,
-		protofd.NodeURLEnv+"="+url,
-		protofd.NodeTokenEnv+"="+bearer,
-	)
+	return env
 }
 
-// LineWriter hands what is written to it to Sink as text lines at Level; a
-// line that grows past the session's line limit goes in pieces, whose split
-// values a [LogSink] still masks whole. Call Flush once writing ends. It is
-// unlocked, so one goroutine writes at a time.
+// LineWriter masks what is written to it as one text stream and hands each
+// line to a [LogSink] at one level; a line that grows past the session's line
+// limit goes in pieces, masked whole across them. Call Flush once writing
+// ends. It is unlocked, so one goroutine writes at a time.
 type LineWriter struct {
-	Sink  *LogSink
-	Level string
-	buf   []byte
+	sink   *LogSink
+	level  string
+	stream *secrets.Stream
+	buf    []byte
+}
+
+// NewLineWriter returns a writer whose lines reach sink at level, masked with masker.
+func NewLineWriter(sink *LogSink, level string, masker *secrets.Masker) *LineWriter {
+	return &LineWriter{sink: sink, level: level, stream: masker.Stream()}
 }
 
 func (w *LineWriter) Write(p []byte) (int, error) {
@@ -331,19 +272,18 @@ func (w *LineWriter) Write(p []byte) (int, error) {
 		if i < 0 {
 			break
 		}
-		w.Sink.Text(w.Level, strings.TrimSuffix(string(w.buf[:i]), "\r"))
+		w.sink.Text(w.level, w.stream.Mask(strings.TrimSuffix(string(w.buf[:i]), "\r"), true))
 		w.buf = w.buf[i+1:]
 	}
 	if len(w.buf) >= maxTextLine {
-		w.Flush()
+		w.sink.Text(w.level, w.stream.Mask(string(w.buf), false))
+		w.buf = nil
 	}
 	return len(p), nil
 }
 
-// Flush hands any unterminated rest to the sink.
+// Flush hands the unterminated rest, and any tail held for it, to the sink.
 func (w *LineWriter) Flush() {
-	if len(w.buf) > 0 {
-		w.Sink.Text(w.Level, string(w.buf))
-		w.buf = nil
-	}
+	w.sink.Text(w.level, w.stream.Mask(string(w.buf), true))
+	w.buf = nil
 }

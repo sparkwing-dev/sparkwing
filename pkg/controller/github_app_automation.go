@@ -14,7 +14,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type githubAppAutomationPipeline struct {
@@ -61,12 +60,15 @@ func validateAutomationPatterns(patterns []string) error {
 }
 
 func automationDeclarations(content []byte) ([]githubAppAutomationPipeline, string, error) {
-	cfg, err := projectconfig.ParseOld(content)
+	cfg, err := projectconfig.Parse(content)
 	if err != nil {
 		return nil, "invalid", err
 	}
 	out := []githubAppAutomationPipeline{}
 	for _, pipeline := range cfg.Pipelines {
+		if pipeline.On == nil {
+			continue
+		}
 		decl := githubAppAutomationPipeline{Pipeline: pipeline.Name, Branches: []string{}, Actions: []string{}, BaseBranches: []string{}}
 		if push := pipeline.On.Push; push != nil {
 			if len(push.Paths) != 0 {
@@ -255,7 +257,7 @@ func automationSubscribes(decl githubAppAutomationPipeline, event, action string
 	case "push":
 		return decl.Push && intake.env["GITHUB_REF_TYPE"] == "branch" && githubAppBranchMatches(decl.Branches, intake.branch)
 	case "pull_request":
-		return decl.PullRequest && slices.Contains(decl.Actions, action) && githubAppBranchMatches(decl.BaseBranches, intake.env[sparkwing.EnvPRBaseRef])
+		return decl.PullRequest && slices.Contains(decl.Actions, action) && githubAppBranchMatches(decl.BaseBranches, intake.env["GITHUB_BASE_REF"])
 	}
 	return false
 }

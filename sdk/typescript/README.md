@@ -12,14 +12,19 @@ definePipeline({
   args: [{ name: "target", type: "string", default: "all" }],
   secrets: [{ name: "DEPLOY_TOKEN", optional: true }],
   plan(plan, run) {
-    const build = plan.job("build", async ctx => {
-      await ctx.exec(["npm", "run", "build"]).run();
-      return { target: run.args.target };
-    }).artifacts("dist/**");
-    plan.job("report", async ctx => {
-      const output = await ctx.output(build);
-      await ctx.summary(`Built ${output?.target}`);
-    }).needs(build).consumes(build, { into: "build-output" });
+    const build = plan
+      .job("build", async (ctx) => {
+        await ctx.exec(["npm", "run", "build"]).run();
+        return { target: run.args.target };
+      })
+      .artifacts("dist/**");
+    plan
+      .job("report", async (ctx) => {
+        const output = await ctx.output(build);
+        await ctx.summary(`Built ${output?.target}`);
+      })
+      .needs(build)
+      .consumes(build, { into: "build-output" });
   },
 });
 
@@ -31,7 +36,7 @@ the matching engine. The package requires Node.js 22.18 or later. The public
 API is [index.d.ts](index.d.ts).
 
 Numeric duration options use milliseconds. Memory uses bytes. Omitted options
-remain unset where the wire supports presence. Explicit zero remains zero, including an
+remain unset. Explicit zero remains zero, including an
 indefinite approval timeout. Argument values stay strings, including `int64`.
 Duration arguments use Go syntax such as `1h30m`, including `0`, `+0` and `-0`.
 String-array arguments use comma splitting, trimming and empty-item removal.
@@ -43,11 +48,14 @@ and cancellation signal. Plan callbacks declare work; helpers that perform I/O
 refuse calls during planning. Generated jobs reconstruct from recorded source
 output. The host validates the reconstructed declarations against accepted state.
 
-Step output reads stay within the current attempt, including retry hooks.
+Step output reads stay within the current attempt. Before a step condition or
+body runs, the host supplies the terminal predecessor state. A skipped predecessor
+has no local output. A terminal step cannot run again in the same attempt.
 Run facts stay read-only across planning and retries, including trigger details
 and nested pull-request facts.
 Cancellation reaches bodies and every closure kind. A callback that finishes
-after cancellation still reports a failed invocation.
+after cancellation still reports a failed invocation. The SDK acknowledges
+cancellation after the selected operations finish and receive their own replies.
 Service scopes also reject after cancellation when their callback returns normally.
 They remove their containers before rejecting. If removal fails, host cleanup
 stays registered and the cancellation error is preserved.
@@ -85,10 +93,11 @@ release version. Hello reads that package version.
 
 Run `npm run test:native` from this directory with the repository's Go toolchain
 installed and `GOWORK=off` when a parent workspace points at another checkout.
-The test builds the SDK and launches a public-package fixture with inherited
+The tests build the SDK and launch public-package fixtures with inherited
 Unix descriptors or Windows argv handles. It exchanges requests and replies
-using the Go contract types and checks that a child tool cannot access the
-protocol pipes. Use Node and Go for the same CPU architecture. On Windows,
+using the Go contract types and check that a child tool cannot access the
+protocol pipes. A second fixture runs the same v2 corpus as the Go SDK, including
+strict plan validation, generated hashes, replay and canonical error envelopes. Use Node and Go for the same CPU architecture. On Windows,
 build the matching native bridge first. Missing Node, TypeScript dependencies
 or bridge binaries fail the test.
 

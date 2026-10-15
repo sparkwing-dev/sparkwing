@@ -2,7 +2,7 @@
 
 The author SDK owns declarations, typed input and output access, protocol serving, and calls to host services. The host owns YAML, placement, concurrency keys, authorization, secret preflight, debug filtering, risk enforcement, state transitions, and storage. `sparkwingtest` owns isolated fake-host fixtures. `RuntimePlumbing`, including every exported context key and function field in `runtime_bridge.go`, is deleted from the target public surface.
 
-`*_contract.go` declares the changed surface. Its bodies panic until implementation. Existing declarations marked Retain below supply unchanged signatures, not a claim that their old implementation satisfies the target behavior. Old and Delete entries are excluded from the target API. This inventory is the boundary while old runtime code still compiles. There are no forwarding aliases.
+`*_contract.go` declares the changed surface. Retain entries keep their author-facing signatures. Delete entries are excluded from the public API, including forwarding aliases.
 
 ## Invariants
 
@@ -13,13 +13,78 @@ The author SDK owns declarations, typed input and output access, protocol servin
 - `MemoValue`, `MemoKeyFn`, `MemoKey`, `MemoTTL`, and `NoMemo` concern result reuse. `Cache` concerns files and routes through depcache. Hosts own key scoping and trusted fallback. Empty memo keys fail. A missing or corrupt memo object is a miss. A depcache failure runs cold, an artifact staging failure fails, and a missing output read fails.
 - `Artifacts` publishes files. `Consumes` adds a producer dependency and stages only authorized artifacts. Typed output remains `Produces`, `RefTo`, and `StepGet`, with the 16 MiB host limit.
 - Generators run on successful and memoized source outputs. `GenerateFn` receives an expansion plan and reads source output through a typed reference. Each registration receives a stable group ID from source ID plus registration ordinal. `NeedsGenerated` waits for settlement and generated prerequisites. The host accepts at most 256 jobs per generator fan-out and persists the topology. Replay reconstructs code only and must reproduce the accepted spec hash. Failed, skipped, cancelled and superseded sources resolve the barrier without running the callback.
+- Generator contexts and their SDK commands exclude the source job's body environment. Conditions, hooks and step bodies retain their own job's body environment. Replay cannot let source assignments change reconstructed declarations.
+- Closure and generator IDs keep job IDs distinct from closure kinds and step IDs. A job condition on `scope/step/release` cannot collide with a step condition on job `scope`, step `release`. IDs containing literal percent escapes remain distinct from IDs containing slashes.
 - `Env` is body-scoped by default. `Startup()` and the engine's fixed interpreter variable list take effect before the attempt process starts. Startup values must not influence declarations. Drift fails as `plan_drift`. Tools and cleanups inherit body environment. Credentials stay in memory or the protocol pipe.
 - `Mask` acknowledges host registration before returning. Annotation levels are exactly `debug`, `info`, `warn`, `error`. Empty level means `info`. `File` is optional and line, end-line and column are one-based when supplied. Zero omits a position. Annotation text is masked before enforcing the 128 KiB limit. The host sets the job envelope and filters debug.
 - Approvals execute no before/after job hooks. SkipIf remains an admission condition. Zero timeout remains indefinite on local and controller-owned runs, and a bounded owner's deadline still applies. `OnTimeout` uses `fail`, `deny`, or `approve`. `OnFailure` creates a separate executable recovery job.
-- Retry attempts stay under one claim. `RetryAuto` and the old `RetryConfig.Auto` field are outside the target. `RetryConfig` retains Attempts and Backoff only. The host refuses values above its ceiling rather than clamping.
+- Recovery chains include every declared recovery job, with each `on_failure_of` naming its immediate parent. Nested jobs participate in argument binding, describe, closure lookup and execution. Generated recovery chains retain their source dependency and generator groups at every depth.
+- Retry attempts stay under one claim. Step predicates and bodies consume the same explicit host `attempt` and `settled` snapshot. Each new node-wide attempt resets in-process step outputs and completion state before its first predicate or body. Parallel steps within one attempt share those outputs. Every terminal body outcome settles before releasing activity. Stale ordinals, incomplete terminal snapshots, repeated terminal steps, duplicate active steps or a new attempt overlapping active predicates/bodies fail with `protocol_error` before state changes. `RetryAuto` and the old `RetryConfig.Auto` field are outside the target. `RetryConfig` retains Attempts and Backoff only. The host refuses values above its ceiling rather than clamping.
 - Final outcome constants are `Success`, `Failed`, `Cancelled`, `Skipped`, `Superseded`, `Memoized`, with values `success`, `failed`, `cancelled`, `skipped`, `superseded`, `memoized`. `Satisfied`, `Cached`, `SkippedConcurrent` and `Paused` are excluded. Reasons carry concurrency skips. `Outcome.Terminal` must reject unknown values. Step failure policy wire values are `fail_fast` and `collect_all`, and concurrency cancellation is `cancel_others`.
 - Secrets are declared once in describe through `SecretsProvider.Secrets`, resolved lazily with `Secret` or `PipelineSecrets`. Plain values use `Variable` and `MustVariable`. Registered secret values cannot occur in job, step, group or approval IDs. The shared protocol validator enforces that rule before storing IDs.
-- `sparkwingtest.Host.Context` installs only the fixture's runner, inputs, secret classification and service answers. `Plan`, `RunStep` and `Eval` exercise SDK operations without controller/store imports. Records and masks are snapshots. `Close` cancels outstanding fake requests and releases resources. Fixtures share no mutable global state.
+- Node-host responses must carry their result fields. Secrets require an explicit string value and boolean masking classification, preserving empty values and `false`. OIDC and cleanup registration require a nonempty token or ID. Output, latest-output and successful child responses require an output member, which may be JSON null. Missing fields are transport failures, never optional-reference absence. Additive response fields remain readable.
+- `WithArgs` fields on ordinary and recovery jobs share the pipeline's flag namespace and input validation. Describe includes their defaults and owning job IDs. Required fields, enums and name collisions are checked before execution, and recovery bodies receive the resolved values.
+- Describe builds declarations with pipeline defaults and initialized extra-argument bags, separately from execution input validation. Required run inputs do not erase job metadata. Declaration errors and panics fail discovery with a pipeline-attributed, secret-masked canonical error. Describe never returns a successful partial schema. Execution still validates all required pipeline and job arguments.
+- Generated jobs bind `WithArgs` from the original run argument snapshot before their expansion becomes executable. Defaults, required values and enums apply to generated recovery jobs too. Their flags cannot collide with pipeline inputs, initial jobs or prior expansions. Flags introduced only during generation can arrive through the pipeline's `flag:",extra"` bag. Describe does not execute generators to discover them.
+- Cross-pipeline `Ref.TryGet` treats JSON null as absent, including null surrounded by JSON whitespace. `Ref.Get` returns the zero value. An in-run null output remains present, and the JSON string `"null"` remains a value. Invalid JSON fails instead of becoming absence.
+- `sparkwingtest.Host.Context` installs only the fixture's runner, inputs, secret classification and service answers. `Plan`, `RunStep` and `Eval` exercise SDK operations without controller/store imports. Planning has no execution binding, so secret, variable, output, latest-output, child, OIDC and Mask calls fail before reading fixture answers or invoking callbacks. Declaration logs remain available. RunStep records carry the host-bound job. Plan and eval records go to run logs without a job. Records and masks are snapshots. Cancelled service calls never invoke fixture callbacks. `Close` cancels outstanding fake requests and releases resources. Fixtures share no mutable global state.
+
+## Dependency cache keys
+
+`DirCache.Key(workdir string) (string, error)` exposes dependency-input hashing
+without importing engine packages. It reads the first present declared key file
+through a directory root that rejects escaping symlinks. Absolute paths and
+parent traversal fail. The hash covers the cache name, key scope, OS, architecture
+and exact file bytes. Moving the checkout preserves it. Host authorization still
+selects the repository and ref namespace. This helper grants no storage access.
+
+## Service records and fixture validation
+
+The Go protocol transport sends Mask, annotation and summary writes through the
+shared node-host service routes. Each write waits for an object acknowledgement.
+A record write error fails its body or evaluation with the canonical error.
+Ordinary logs continue over the frame pipe.
+
+Host-service identifiers travel as opaque URL path segments. The SDK escapes
+dots as well as separators so `.` and `..` cannot trigger path cleaning.
+Receivers match the escaped segments and unescape each identifier once.
+An encoded slash remains one identifier, including when the whole value is `/`.
+
+Annotations require an execution context. The fake host refuses annotation and summary
+writes after fixture cancellation, including writes from retained detached contexts.
+Refused writes add no records. Eval records remain in run logs without a job.
+
+The fake host retains accepted declaration snapshots. It refuses a dynamic mask
+that occurs in an accepted identifier before changing its registry. Later plans
+and generated declarations use that same registry. Acceptance and registration
+share one fixture lock so neither can race past the other.
+Mask registration also rechecks fixture cancellation under that lock, so a call
+admitted before Close cannot commit after Close returns.
+
+The fake host refuses an empty OIDC callback result, matching the node-host
+transport's nonempty token requirement.
+
+Closing a fake host cancels and joins admitted plan, step, eval and service callback
+calls. Active callbacks remain cancellable when callers use `context.WithoutCancel`.
+New calls fail after closing begins, including service calls whose contexts detach
+cancellation from the fixture. Close runs outside those calls.
+
+The shared v2 corpus at `internal/nodeproto/conformance/testdata/v2-corpus.json`
+contains declaration and error vectors in addition to process sessions. Its
+`plans` rows include raw JSON, canonical JSON, SHA-256, expected validation code,
+and any expansion or secret context. `inner_errors` supplies the shared decoder
+cases. W4's reader checks them against structural validation and the canonical
+hash owner. Other SDKs consume these same rows for parity.
+Go builders also reproduce the source-presence, approval-condition and snake_case
+job vectors. Jobs and steps omit empty closure objects, preserving their shared
+canonical hashes. The Go process corpus uses the native acceptance pipe driver
+on Unix and Windows.
+Process session steps can name a `plan_vector` for generator results. The Go
+driver validates those jobs against the initial plan and compares their canonical
+hash with that vector. Repeated evaluation and a fresh process reconstruct the
+same expansion. The fresh process carries the generated job's delegated binding
+and executes its body after reconstruction. Every eval also checks its declared
+value kind through `EvalResult.ValidateValue`.
 
 ## Acceptance evidence required
 
@@ -36,11 +101,13 @@ The author SDK owns declarations, typed input and output access, protocol servin
 | Mask acknowledgement followed by log, annotation and summary | No registration race, correct masking and host envelope |
 | Secret-bearing job, step, group and approval IDs | Decision 90 refusal without exposing the secret in diagnostics |
 | Retry with Backoff and no auto option | Application retries retain the claim |
-| Pinned SDK with unsupported protocol | Actionable mismatch and the A32 negotiated-version contract |
+| Older pinned SDK and active signed security policy | Exact matching engine and twelve-month controller API compatibility under D102-103; actionable revocation when required |
 
-## Open questions for the lead
+## Contract interpretations
 
-1. §3.2/A27 requires parity for approval plus SkipIf, while A28 and the chapter cut approval hooks. This contract keeps SkipIf as an admission condition and removes executable BeforeRun/AfterRun hooks, matching the shared validator and the all-features launch scope. The lead should confirm that distinction against A28.
+Amendment 1 ratifies the interpretations below. They are not approval gates.
+
+1. §3.2/A27 requires parity for approval plus SkipIf, while A28 and the chapter cut approval hooks. This contract keeps SkipIf as an admission condition and removes executable BeforeRun/AfterRun hooks, matching the shared validator and the all-features launch scope. Amendment 1 ratifies that distinction under A28 and decision 99.
 2. `JobNode` is the retained Go handle name because `Job` is the constructor. Renaming the handle would require a new name absent from the frozen design.
 ## Cross-area assumptions
 
@@ -48,6 +115,14 @@ The author SDK owns declarations, typed input and output access, protocol servin
 - C4 resolves `Startup` and automatic interpreter variables with the same startup/body rules, and owns ceilings. SDK declarations do not resolve settings.
 - C1 implements memoized outcomes, artifact/reference authority and expansion settlement. SDK callbacks never write topology or state directly.
 - C2 supplies acknowledged mask registration and secret/variable authorization through node-host routes. The SDK stores the hello bearer only in memory.
+
+`Host.Plan` takes the registered SDK entrypoint as its name argument. A nonempty `Options.Run.Pipeline` supplies the invoked project alias to author code. When unset, the entrypoint is also the invoked name.
+
+`sparkwingtest.New` snapshots option values, including Git and pull-request metadata. Reusing and changing an options value for another fixture cannot change an existing fixture's plans. Injected service callbacks remain test-owned dependencies.
+
+Fake-host records mask attribute keys and nested values, including numeric, boolean and null values whose text contains a registered secret. Longer masks precede their prefixes. `Host.Records` preserves attribute numbers as `json.Number` so masking and snapshots never round large integers.
+
+SDK planning errors redact longer secret inputs before their prefixes, including defaults, so input field order cannot expose a suffix.
 
 ## Public symbol inventory
 

@@ -13,7 +13,7 @@ type oidcTokenSourceKey struct{}
 
 // OIDCTokenSource signs an ID token for the current run with the given
 // audience. The runtime installs one on the node's context.
-type OIDCTokenSource func(ctx context.Context, audience string) (string, error)
+type oIDCTokenSource func(ctx context.Context, audience string) (string, error)
 
 // OIDCToken returns an ID token the controller signed for this run, with
 // aud set to audience. Exchange it with a cloud provider for short-lived
@@ -26,7 +26,7 @@ type OIDCTokenSource func(ctx context.Context, audience string) (string, error)
 // returns ErrOIDCUnavailable when the node runs with no controller behind
 // it. The runtime masks every token it returns in logs.
 func OIDCToken(ctx context.Context, audience string) (string, error) {
-	src, ok := ctx.Value(oidcTokenSourceKey{}).(OIDCTokenSource)
+	src, ok := ctx.Value(oidcTokenSourceKey{}).(oIDCTokenSource)
 	if !ok || src == nil {
 		return "", ErrOIDCUnavailable
 	}

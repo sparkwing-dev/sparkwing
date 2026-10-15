@@ -19,9 +19,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeclient"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
 )
 
@@ -49,11 +49,11 @@ type Spec struct {
 // no run and node in the environment -- there is nothing to reap for, so
 // Register is a no-op returning a no-op release.
 func Register(ctx context.Context, spec Spec) (release func(), err error) {
-	if c, bound := nodeclient.Bound(); bound {
+	if c, ok := sdkserve.ServicesFrom(ctx).(cleanupHost); ok {
 		return registerWithHost(ctx, c, spec)
 	}
 	run := os.Getenv("SPARKWING_RUN_ID")
-	node := os.Getenv("SPARKWING_NODE_ID")
+	node := os.Getenv("SPARKWING_JOB_ID")
 	if run == "" || node == "" || len(spec.Argv) == 0 {
 		return func() {}, nil
 	}
@@ -87,7 +87,7 @@ func Register(ctx context.Context, spec Spec) (release func(), err error) {
 	return rel, nil
 }
 
-func registerWithHost(ctx context.Context, c *nodeclient.Client, spec Spec) (func(), error) {
+func registerWithHost(ctx context.Context, c cleanupHost, spec Spec) (func(), error) {
 	if c == nil || len(spec.Argv) == 0 {
 		return func() {}, nil
 	}
@@ -103,4 +103,9 @@ func registerWithHost(ctx context.Context, c *nodeclient.Client, spec Spec) (fun
 		defer cancel()
 		_ = c.ReleaseCleanup(rctx, id) //nolint:errcheck // a failed release only reruns an idempotent argv
 	}, nil
+}
+
+type cleanupHost interface {
+	RegisterCleanup(context.Context, []string, string) (string, error)
+	ReleaseCleanup(context.Context, string) error
 }

@@ -19,7 +19,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestTrigger_Validation(t *testing.T) {
@@ -516,7 +515,7 @@ func TestTrigger_ReservesGitHubProvenanceForTheWebhook(t *testing.T) {
 			body: map[string]any{
 				"pipeline": "demo",
 				"trigger": map[string]any{"source": "manual", "env": map[string]string{
-					sparkwing.EnvPRHeadSHA: "deadbeef",
+					"GITHUB_HEAD_SHA": "deadbeef",
 				}},
 			},
 			want: http.StatusForbidden,
@@ -536,8 +535,8 @@ func TestTrigger_ReservesGitHubProvenanceForTheWebhook(t *testing.T) {
 			body: map[string]any{
 				"pipeline": "demo",
 				"trigger": map[string]any{"source": "github", "env": map[string]string{
-					sparkwing.EnvGitHubEventName: sparkwing.EventPullRequest,
-					sparkwing.EnvPRHeadSHA:       "deadbeef",
+					"GITHUB_EVENT_NAME": "pull_request",
+					"GITHUB_HEAD_SHA":   "deadbeef",
 				}},
 				"git": map[string]any{"github_owner": "acme", "github_repo": "widgets"},
 			},

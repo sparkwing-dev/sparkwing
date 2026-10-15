@@ -14,15 +14,12 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/runflags"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -224,7 +221,7 @@ func TestLaunchedNode_PlansWithTheTriggersActorAndPullRequest(t *testing.T) {
 	base := newLaunchedRun(t, nil)
 	r := &launchedRun{
 		st: base.st, url: base.url, runID: "run-pull-request", src: base.src, user: "octocat",
-		triggerEnv: map[string]string{sparkwing.EnvGitHubEventName: sparkwing.EventPullRequest, sparkwing.EnvPRNumber: "42"},
+		triggerEnv: map[string]string{"GITHUB_EVENT_NAME": "pull_request", "SPARKWING_PR_NUMBER": "42"},
 	}
 	envOut := filepath.Join(t.TempDir(), "env")
 	r.create(t, map[string]string{"envout": envOut})
@@ -293,7 +290,7 @@ func TestPodNode_WithoutAnAcceptedHashFailsClosed(t *testing.T) {
 // A retry_auto node's every attempt is its own claim and pod: before_run runs
 // in each, as every dispatch did, and after_run in the last, the one the
 // controller does not retry.
-func TestLaunchedNode_RetryAutoRunsAfterRunLast(t *testing.T) {
+func TestLaunchedNode_RetryRunsAfterRunLast(t *testing.T) {
 	trace := filepath.Join(t.TempDir(), "trace")
 	r := newLaunchedRun(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "trace": trace, "auto": "true"})
 	requests := r.recordRequests(t)
@@ -341,7 +338,7 @@ func (r *launchedRun) recordRequests(t *testing.T) string {
 
 // A retry_auto node whose before_run refuses never runs its body, though the
 // controller dispatches it again.
-func TestLaunchedNode_RetryAutoNeverRunsABodyItsBeforeRunRefused(t *testing.T) {
+func TestLaunchedNode_RetryNeverRunsABodyItsBeforeRunRefused(t *testing.T) {
 	envOut := filepath.Join(t.TempDir(), "env")
 	r := newLaunchedRun(t, map[string]string{
 		"envout": envOut, "trace": filepath.Join(t.TempDir(), "trace"), "auto": "true", "refuse": "true",
@@ -445,8 +442,8 @@ func TestPodNodeLog_SealsIncompleteAfterALoss(t *testing.T) {
 // the first run's artifact manifest with it; a source that recorded no
 // manifest runs as a miss, since a hit would hand its consumers nothing.
 func TestLaunchedNode_MemoHitsThroughTheClaim(t *testing.T) {
-	t.Run("Hit", func(t *testing.T) { podMemoRuns(t, false, true, sparkwing.Cached, "body\n") })
-	t.Run("ArtifactsHit", func(t *testing.T) { podMemoRuns(t, true, true, sparkwing.Cached, "body\n") })
+	t.Run("Hit", func(t *testing.T) { podMemoRuns(t, false, true, sparkwing.Memoized, "body\n") })
+	t.Run("ArtifactsHit", func(t *testing.T) { podMemoRuns(t, true, true, sparkwing.Memoized, "body\n") })
 	t.Run("NoManifestRunsAsAMiss", func(t *testing.T) { podMemoRuns(t, true, false, sparkwing.Success, "body\nbody\n") })
 }
 
@@ -562,82 +559,4 @@ func TestLaunchedNode_NoCacheMissesTheMemo(t *testing.T) {
 		t.Fatalf("no-cache run's memoized = %s/%s (%s), want a fresh success", got.Status, got.Outcome, got.Error)
 	}
 	wantTrace(t, marker, "body\nbody\n")
-}
-
-// A secret that straddles the session's split of a long plan line is masked
-// whole, never printed as two fragments.
-func TestPodPlanSink_MasksASecretAcrossASplitLine(t *testing.T) {
-	const secret = "hunter2-straddles-the-split"
-	masker := secrets.NewMasker()
-	masker.Register(secret)
-	var out strings.Builder
-	sink, err := newPodPlanSink(t.Context(), "run-split", masker, &out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	head := strings.Repeat("x", 1<<20-10) + secret[:10]
-	sink.Text(nodehost.LevelInfo, head)
-	sink.Text(nodehost.LevelInfo, secret[10:]+" tail")
-	sink.end()
-	if got := strings.ReplaceAll(out.String(), "\n", ""); strings.Contains(got, secret[:10]) || !strings.Contains(got, "*** tail") {
-		t.Fatalf("plan output ends %q, want the split secret masked whole", got[max(0, len(got)-80):])
-	}
-}
-
-// A plan whose stderr blocks past the session's grace ends with the head of a
-// split secret still held and its rest still queued; ending the sink then
-// prints neither piece.
-func TestPodPlanSink_EndingDropsAHeldSecretAndItsLateRest(t *testing.T) {
-	const secret = "hunter2-straddles-the-split"
-	masker := secrets.NewMasker()
-	masker.Register(secret)
-	out := &blockingStderr{entered: make(chan struct{}), release: make(chan struct{})}
-	sink, err := newPodPlanSink(t.Context(), "run-blocked", masker, out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	delivered := make(chan struct{})
-	go func() {
-		defer close(delivered)
-		sink.Text(nodehost.LevelInfo, strings.Repeat("x", 1<<20-10)+secret[:10])
-		sink.Text(nodehost.LevelInfo, secret[10:]+" tail")
-	}()
-	<-out.entered
-	ended := make(chan struct{})
-	go func() {
-		defer close(ended)
-		sink.end()
-	}()
-	close(out.release)
-	<-ended
-	<-delivered
-	got := out.String()
-	if strings.Contains(got, secret[:10]) || strings.Contains(got, secret[10:]) {
-		t.Fatalf("plan output after the end holds a piece of the secret: ...%q", got[max(0, len(got)-80):])
-	}
-}
-
-// hack: holds its first write until release, standing in for a stalled container log.
-type blockingStderr struct {
-	mu      sync.Mutex
-	buf     strings.Builder
-	entered chan struct{}
-	release chan struct{}
-	once    sync.Once
-}
-
-func (w *blockingStderr) Write(p []byte) (int, error) {
-	w.once.Do(func() {
-		close(w.entered)
-		<-w.release
-	})
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.buf.Write(p)
-}
-
-func (w *blockingStderr) String() string {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.buf.String()
 }

@@ -161,14 +161,6 @@ func pathExposure(path string) (string, bool) {
 }
 
 func configSummary(path string, dryRun bool) string {
-	// safety: reading config.yaml first copies any legacy settings file into it.
-	if dryRun {
-		for _, l := range userconfig.Leftovers() {
-			if !l.Copied && !l.Variable {
-				return "not read under --dry-run, because reading it copies " + l.Name + " into it"
-			}
-		}
-	}
 	profiles, perr := profile.Load(path)
 	registry, rerr := repos.Load(path)
 	if perr != nil || rerr != nil {

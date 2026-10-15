@@ -88,7 +88,7 @@ func nativePlan(t *testing.T, h *host) nodeproto.PlanDoc {
 	}
 	job := plan.Jobs[0]
 	if job.Retry == nil || job.Retry.Attempts != 0 || job.Retry.BackoffMS == nil || *job.Retry.BackoffMS != 0 ||
-		len(plan.Concurrency) != 1 || plan.Concurrency[0].Scope != "box" {
+		len(plan.Concurrency) != 1 || (plan.Concurrency[0].Scope == nil || *plan.Concurrency[0].Scope != "box") {
 		t.Fatalf("job or concurrency policy lost: %+v", plan)
 	}
 	return plan
@@ -97,7 +97,7 @@ func nativePlan(t *testing.T, h *host) nodeproto.PlanDoc {
 func nativeProbe(t *testing.T, h *host) json.RawMessage {
 	t.Helper()
 	var run nodeproto.RunResult
-	h.call(nodeproto.Request{ID: "probe", Op: nodeproto.OpRunStep, Job: "build", Step: "probe", Attempt: 1}, &run)
+	h.call(nodeproto.Request{ID: "probe", Op: nodeproto.OpRunStep, Job: "build", Step: "probe", Attempt: 1, Settled: []string{}}, &run)
 	if run.Outcome != "success" || run.Error != nil {
 		t.Fatalf("probe: %+v", run)
 	}
@@ -137,13 +137,13 @@ func nativeEvals(t *testing.T, h *host, job nodeproto.JobSpec, output json.RawMe
 		{"memo", job.Closures.MemoKey, "", `"native"`},
 	} {
 		var result nodeproto.EvalResult
-		h.call(nodeproto.Request{ID: tc.id, Op: nodeproto.OpEval, Job: "build", Closure: tc.closure, Input: json.RawMessage(tc.input)}, &result)
+		h.call(nodeproto.Request{ID: tc.id, Op: nodeproto.OpEval, Closure: tc.closure, Input: json.RawMessage(tc.input)}, &result)
 		if result.Error != nil || string(result.Value) != tc.want {
 			t.Fatalf("%s: %+v", tc.id, result)
 		}
 	}
 	var generated nodeproto.EvalResult
-	h.call(nodeproto.Request{ID: "generate", Op: nodeproto.OpEval, Job: "build", Closure: job.Closures.Generate[0], Input: output}, &generated)
+	h.call(nodeproto.Request{ID: "generate", Op: nodeproto.OpEval, Closure: job.Closures.Generate[0], Input: output}, &generated)
 	var jobs []nodeproto.JobSpec
 	decode(t, generated.Value, &jobs)
 	if generated.Error != nil || len(jobs) != 1 || jobs[0].ID != "generated" || len(jobs[0].Groups) != 1 || jobs[0].Groups[0] != job.Closures.Generate[0] {
@@ -153,7 +153,7 @@ func nativeEvals(t *testing.T, h *host, job nodeproto.JobSpec, output json.RawMe
 
 func nativeCancel(t *testing.T, h *host) {
 	t.Helper()
-	h.send(nodeproto.Request{ID: "wait", Op: nodeproto.OpRunStep, Job: "build", Step: "wait", Attempt: 1})
+	h.send(nodeproto.Request{ID: "wait", Op: nodeproto.OpRunStep, Job: "build", Step: "wait", Attempt: 1, Settled: []string{"probe"}})
 	for h.frame().Message != "waiting-for-cancel" {
 	}
 	h.send(nodeproto.Request{ID: "cancel", Op: nodeproto.OpCancel, Job: "build", Step: "wait"})
@@ -190,6 +190,11 @@ type host struct {
 
 func startSDK(t *testing.T, node, root string) *host {
 	t.Helper()
+	return startSDKAt(t, node, root, "fixture.mjs")
+}
+
+func startSDKAt(t *testing.T, node, root, fixture string) *host {
+	t.Helper()
 	// safety: A broken native transport must not leave a child holding the test pipes forever.
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	t.Cleanup(cancel)
@@ -204,7 +209,7 @@ func startSDK(t *testing.T, node, root string) *host {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = frameRead.Close(); _ = frameWrite.Close() })
-	h.command = exec.CommandContext(ctx, node, filepath.Join(root, "test/nativehost/fixture.mjs"), "--sw-node-protocol")
+	h.command = exec.CommandContext(ctx, node, filepath.Join(root, "test/nativehost", fixture), "--sw-node-protocol")
 	h.command.Dir = root
 	h.command.Env = append(os.Environ(), "SPARKWING_NODE_TOKEN=legacy-env-bearer")
 	h.command.Stdout, h.command.Stderr = &h.stdout, &h.stderr
@@ -245,8 +250,17 @@ func (h *host) frame() wireFrame {
 	line := h.frames.Bytes()
 	h.transcript.Write(line)
 	h.transcript.WriteByte('\n')
+	parsed, err := nodeproto.ParseFrame(line)
+	if err != nil {
+		h.t.Fatalf("frame: %v\n%s", err, line)
+	}
 	var frame wireFrame
-	decode(h.t, line, &frame)
+	if parsed.Reply != nil {
+		frame.Reply = *parsed.Reply
+	}
+	if parsed.Log != nil {
+		frame.FrameLog = *parsed.Log
+	}
 	return frame
 }
 
@@ -261,7 +275,9 @@ func (h *host) call(request nodeproto.Request, result any) {
 		if frame.ID != request.ID || !frame.OK || frame.Error != nil {
 			h.t.Fatalf("%s: %+v", request.ID, frame.Reply)
 		}
-		decode(h.t, frame.Result, result)
+		if err := frame.Reply.Decode(result); err != nil {
+			h.t.Fatalf("reply %s: %v", request.ID, err)
+		}
 		return
 	}
 }

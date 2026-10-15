@@ -153,7 +153,7 @@ func TestExec_CancelTerminatesTheStepJobAndClearsItsRecord(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
 	t.Setenv("SPARKWING_RUN_ID", "run-w")
-	t.Setenv("SPARKWING_NODE_ID", "build")
+	t.Setenv("SPARKWING_JOB_ID", "build")
 	p := paths.PathsAt(home)
 	ledger := sessionledger.Open(p.SessionLedgerDir())
 

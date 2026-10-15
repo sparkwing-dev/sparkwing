@@ -84,33 +84,6 @@ func TestTenantApprovalsStayInTheRunsTeam(t *testing.T) {
 	}
 }
 
-// A dispatch snapshot belongs to its run's team: another team's handle can
-// neither write one onto that run nor read or list it.
-func TestTenantNodeDispatchesStayInTheRunsTeam(t *testing.T) {
-	ctx := context.Background()
-	st := storetest.New(t).Open(t)
-	acme := tenantFor(t, st, "acme")
-	globex := tenantFor(t, st, "globex")
-	seedTenantRun(t, acme, "run-a", "deploy")
-	d := store.NodeDispatch{RunID: "run-a", NodeID: "build", Seq: -1, CodeVersion: "v1"}
-
-	if err := globex.WriteNodeDispatch(ctx, d); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("globex.WriteNodeDispatch = %v, want ErrNotFound", err)
-	}
-	if err := acme.WriteNodeDispatch(ctx, d); err != nil {
-		t.Fatalf("acme.WriteNodeDispatch: %v", err)
-	}
-	if _, err := globex.GetNodeDispatch(ctx, "run-a", "build", -1); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("globex.GetNodeDispatch = %v, want ErrNotFound", err)
-	}
-	if out, err := globex.ListNodeDispatches(ctx, "run-a", "build"); err != nil || len(out) != 0 {
-		t.Fatalf("globex.ListNodeDispatches = %v, %v, want none", out, err)
-	}
-	if got, err := acme.GetNodeDispatch(ctx, "run-a", "build", 0); err != nil || got.CodeVersion != "v1" {
-		t.Fatalf("acme.GetNodeDispatch = %+v, %v, want the snapshot", got, err)
-	}
-}
-
 // A node's writes and its steps belong to its run's team: every write
 // another team's handle aims at the node reads as not found and leaves it
 // as it was, and that handle lists none of its steps.
@@ -293,9 +266,7 @@ func TestTenantTriggersStayInTheirTeam(t *testing.T) {
 	}
 }
 
-// Bounce requests and metric samples belong to the run's team: another
-// team's handle can neither write them onto the node nor read them back.
-func TestTenantBouncesAndMetricsStayInTheRunsTeam(t *testing.T) {
+func TestTenantMetricsStayInTheRunsTeam(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.New(t).Open(t)
 	acme := tenantFor(t, st, "acme")
@@ -306,26 +277,6 @@ func TestTenantBouncesAndMetricsStayInTheRunsTeam(t *testing.T) {
 	}
 	if err := acme.StartNode(ctx, "run-a", "build"); err != nil {
 		t.Fatal(err)
-	}
-
-	if _, err := globex.RequestNodeBounce(ctx, "run-a", "build", "mallory"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("globex.RequestNodeBounce = %v, want ErrNotFound", err)
-	}
-	b, err := acme.RequestNodeBounce(ctx, "run-a", "build", "alice")
-	if err != nil {
-		t.Fatalf("acme.RequestNodeBounce: %v", err)
-	}
-	if got, err := globex.PendingNodeBounce(ctx, "run-a", "build"); err != nil || got != nil {
-		t.Fatalf("globex.PendingNodeBounce = %+v, %v, want none", got, err)
-	}
-	if got, err := globex.ListNodeBounces(ctx, "run-a"); err != nil || len(got) != 0 {
-		t.Fatalf("globex.ListNodeBounces = %v, %v, want none", got, err)
-	}
-	if err := globex.ConsumeNodeBounce(ctx, "run-a", "build", b.Seq, store.BounceMissed); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("globex.ConsumeNodeBounce = %v, want ErrNotFound", err)
-	}
-	if got, err := acme.PendingNodeBounce(ctx, "run-a", "build"); err != nil || got == nil || got.Seq != b.Seq {
-		t.Fatalf("acme.PendingNodeBounce = %+v, %v, want the open request", got, err)
 	}
 
 	sample := store.MetricSample{TS: time.Now(), CPUMillicores: 5}

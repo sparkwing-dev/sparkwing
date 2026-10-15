@@ -59,7 +59,7 @@ test(
       const plan = await send({ id: "plan", op: "plan", pipeline: "conformance", args: {}, run: { run_id: "r", pipeline: "alias" } });
       assert.equal(plan.result.jobs.length, 2);
       assert.equal("protocol" in plan.result, false);
-      const run = await send({ id: "run", op: "run_step", job: "build", step: plan.result.jobs[0].steps[0].id, attempt: 1 });
+      const run = await send({ id: "run", op: "run_step", settled: [], job: "build", step: plan.result.jobs[0].steps[0].id, attempt: 1 });
       assert.deepEqual(run.result.output, { message: "hello", runner: "granted", pipeline: "alias" });
       requests.end();
       assert.equal(await closed, 0, stderr);

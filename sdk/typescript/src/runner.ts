@@ -13,6 +13,7 @@ import type { LineSink } from "./log.ts";
 import { jsonOutput, readRequests, stringMap, validateRequest, writeReply, type Request } from "./protocol.ts";
 import { NodeRoutes, type HostServices, type ProcessRoutes } from "./routes.ts";
 import { runScope } from "./scope.ts";
+import { StepState } from "./step-state.ts";
 
 export interface ServeOptions {
   input: Readable;
@@ -30,6 +31,8 @@ interface Active {
   job: string;
   step?: string;
   controller: AbortController;
+  done: Promise<void>;
+  finish: () => void;
 }
 
 export async function serve(options: ServeOptions): Promise<void> {
@@ -37,7 +40,7 @@ export async function serve(options: ServeOptions): Promise<void> {
   try {
     for await (const request of readRequests(options.input)) session.answer(request);
   } finally {
-    session.close();
+    await session.close();
   }
 }
 class Session {
@@ -52,9 +55,8 @@ class Session {
   #planned: Planned | undefined;
   readonly #ids = new Set<string>();
   readonly #active = new Map<string, Active>();
-  readonly #outputs = new Map<string, Map<string, unknown>>();
-  readonly #attempts = new Map<string, number>();
-  readonly #generated = new Set<string>();
+  readonly #steps = new Map<string, StepState>();
+  readonly #generated = new Map<string, unknown>();
   readonly #generating = new Set<string>();
   readonly #originalEnv = new Map<string, string | undefined>();
   constructor(options: ServeOptions) {
@@ -65,9 +67,10 @@ class Session {
       },
     };
   }
-  close(): void {
+  async close(): Promise<void> {
     this.#done = true;
     for (const { controller } of this.#active.values()) controller.abort(new Error("host closed request pipe"));
+    await Promise.all([...this.#active.values()].map((active) => active.done));
     for (const [key, value] of this.#originalEnv) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -76,15 +79,21 @@ class Session {
   answer(req: Request): void {
     if (this.#ids.has(req.id)) throw failure("protocol_error", "duplicate request id");
     this.#ids.add(req.id);
-    void this.#handle(req).then(
-      (result) => writeReply(this.#frames, { reply: req.id, ok: true, result }),
-      (error) => writeReply(this.#frames, { reply: req.id, ok: false, error: errorFields(error) }),
-    );
+    void this.#handle(req)
+      .then(
+        (result) => writeReply(this.#frames, { reply: req.id, ok: true, result }),
+        (error) => writeReply(this.#frames, { reply: req.id, ok: false, error: errorFields(error) }),
+      )
+      .finally(() => {
+        const active = this.#active.get(req.id);
+        this.#active.delete(req.id);
+        active?.finish();
+      });
   }
   async #handle(req: Request): Promise<unknown> {
     validateRequest(req);
     if (req.op === "hello") return this.#hello(req);
-    if (!this.#runner) throw failure("bad_request", "hello must precede operations");
+    if (!this.#runner) throw failure("protocol_error", "hello must precede operations");
     switch (req.op) {
       case "describe":
         return runScope({ phase: "plan", root: this.#root() }, () => describe(this.#run({ run_id: "describe", pipeline: "describe" }, {})));
@@ -95,15 +104,31 @@ class Session {
       case "eval":
         return this.#eval(req);
       case "cancel":
-        for (const active of this.#active.values())
-          if (active.job === req.job && (req.step === undefined || active.step === req.step))
-            active.controller.abort(new Error("cancelled by host"));
-        return {};
+        return this.#cancel(req);
     }
     throw failure("unknown_op", "unknown operation");
   }
+  async #cancel(req: Request): Promise<unknown> {
+    if (req.job !== undefined && req.job !== this.#binding?.job)
+      throw failure("protocol_error", "cancel does not match the process job binding");
+    const selected = [...this.#active.entries()].filter(
+      ([id, active]) =>
+        req.target === id || (req.target === undefined && active.job === req.job && (req.step === undefined || active.step === req.step)),
+    );
+    for (const [, active] of selected) active.controller.abort(new Error("cancelled by host"));
+    await Promise.all(selected.map(([, active]) => active.done));
+    return {};
+  }
+  #state(job: string): StepState {
+    let state = this.#steps.get(job);
+    if (!state) {
+      state = new StepState();
+      this.#steps.set(job, state);
+    }
+    return state;
+  }
   #hello(req: Request): unknown {
-    if (this.#helloSeen) throw failure("bad_request", "hello occurs exactly once");
+    if (this.#helloSeen) throw failure("protocol_error", "hello occurs exactly once");
     this.#helloSeen = true;
     if (req.protocol !== 2) throw failure("protocol_mismatch", "rebuild .sparkwing with the matching SDK", { supported: [2] });
     const runner = Object.freeze({ ...(req.runner as RunnerInfo), labels: Object.freeze([...(req.runner as RunnerInfo).labels]) });
@@ -159,7 +184,7 @@ class Session {
     });
   }
   async #plan(req: Request): Promise<unknown> {
-    if (this.#planSeen) throw failure("bad_request", "plan occurs at most once per process");
+    if (this.#planSeen) throw failure("protocol_error", "plan occurs at most once per process");
     this.#planSeen = true;
     const definition = lookupPipeline(String(req.pipeline));
     if (!definition) throw failure("unknown_pipeline", "pipeline is not registered");
@@ -186,8 +211,8 @@ class Session {
     return this.#planned;
   }
   #authorize(job: string, replay: boolean): void {
-    if (!this.#binding) throw failure("bad_request", "execution requires a hello binding");
-    if (!replay && this.#binding.job !== job) throw failure("forbidden", "job does not match hello binding");
+    if (!this.#binding) throw failure("protocol_error", "execution requires a hello binding");
+    if (!replay && this.#binding.job !== job) throw failure("protocol_error", "job does not match hello binding");
   }
   #context(req: Request, spec: JobSpec, step?: string, replay = false): Context {
     const { run, definition, plan, rawArgs } = this.#current();
@@ -197,7 +222,7 @@ class Session {
       else process.env[key] = value;
     }
     const env: Record<string, string> = Object.create(null);
-    for (const [name, value] of Object.entries(spec.env ?? {}))
+    for (const [name, value] of Object.entries(replay ? {} : (spec.env ?? {})))
       if (!value.startup && !["NODE_OPTIONS", "GODEBUG", "GOMAXPROCS"].includes(name)) {
         if (!this.#originalEnv.has(name)) this.#originalEnv.set(name, Object.hasOwn(process.env, name) ? process.env[name] : undefined);
         process.env[name] = value.value;
@@ -208,7 +233,7 @@ class Session {
       const f = object(req.failure, "failure");
       failureInfo = { job: String(f.job), stage: String(f.stage), message: decodeError(f.error).message };
     }
-    const inputs = { ...run.args, ...rawArgs, ...(req.args === undefined ? {} : stringMap(req.args, "args")) };
+    const inputs = { ...run.args, ...rawArgs };
     const pipelineArgs = resolvedArgs(
       [...(definition.args ?? []), ...plan.jobs().flatMap((job) => job.argSpecs())],
       inputs,
@@ -220,21 +245,13 @@ class Session {
     } catch (error) {
       throw failure("invalid_args", messageOf(error));
     }
-    if (req.attempt !== undefined) {
-      const attempt = Number(req.attempt);
-      const prior = this.#attempts.get(spec.id);
-      if (prior !== undefined && attempt < prior) throw failure("bad_request", "attempt ordinal moved backwards");
-      if (prior !== attempt) {
-        if ([...this.#active.values()].some((active) => active.job === spec.id))
-          throw failure("bad_request", "previous attempt is still running");
-        this.#attempts.set(spec.id, attempt);
-        this.#outputs.delete(spec.id);
-      }
-    }
     const controller = new AbortController();
-    this.#active.set(req.id, { job: spec.id, ...(step === undefined ? {} : { step }), controller });
-    const outputs = this.#outputs.get(spec.id) ?? new Map<string, unknown>();
-    this.#outputs.set(spec.id, outputs);
+    let finish!: () => void;
+    const done = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    this.#active.set(req.id, { job: this.#binding!.job, ...(step === undefined ? {} : { step }), controller, done, finish });
+    const outputs = this.#state(spec.id).outputs;
     return makeContext({
       run,
       jobId: spec.id,
@@ -256,20 +273,22 @@ class Session {
     const step = job.findStep(String(req.step));
     if (!step) throw failure("unknown_step", "step is not in this job");
     const spec = plan.toDoc().jobs.find((value) => value.id === job.id)!;
-    if ([...this.#active.values()].some((active) => active.job === job.id && active.step === step.id))
-      throw failure("bad_request", "step is already running");
-    const ctx = this.#context(req, spec, step.id);
+    this.#authorize(job.id, false);
+    const state = this.#state(job.id);
+    state.begin(spec, step.id, Number(req.attempt), req.settled as string[]);
     try {
+      const ctx = this.#context(req, spec, step.id);
+      if (run.dryRun && !step.dryRunBody && !step.toSpec().safe_without_dry_run) throw failure("sdk_error", "step has no dry-run body");
       const body = run.dryRun && step.dryRunBody ? step.dryRunBody : step.body;
       ctx.signal.throwIfAborted();
       const output = jsonOutput(await runScope({ phase: "execute", root: this.#root() }, () => body(ctx)));
       ctx.signal.throwIfAborted();
-      this.#outputs.get(job.id)!.set(step.id, output);
+      state.outputs.set(step.id, output);
       return { outcome: "success", ...(output === undefined ? {} : { output }) };
     } catch (error) {
       return { outcome: "failed", error: errorFields(error) };
     } finally {
-      this.#active.delete(req.id);
+      state.finish(step.id, true);
     }
   }
   async #eval(req: Request): Promise<unknown> {
@@ -277,31 +296,37 @@ class Session {
     const closure = plan.findClosure(String(req.closure));
     if (!closure) throw failure("unknown_closure", "closure is not in this process's plan");
     const spec = plan.toDoc().jobs.find((value) => value.id === closure.job.id)!;
-    if ((req.job !== undefined && req.job !== spec.id) || (req.step !== undefined && req.step !== closure.step?.id))
-      throw failure("bad_request", "closure attribution does not match declaration");
+    this.#authorize(spec.id, closure.kind === "generate");
+    if (closure.step) this.#state(spec.id).begin(spec, closure.step.id, Number(req.attempt), req.settled as string[]);
+    else if (req.attempt !== undefined || req.settled !== undefined) throw failure("protocol_error", "job closure cannot carry step state");
     const ctx = this.#context(req, spec, closure.step?.id, closure.kind === "generate");
     try {
       return { value: jsonOutput(await runScope({ phase: "execute", root: this.#root() }, () => this.#call(closure, ctx, req))) ?? null };
     } catch (error) {
       return { value: null, error: errorFields(error) };
     } finally {
-      this.#active.delete(req.id);
+      if (closure.step) this.#state(spec.id).finish(closure.step.id, false);
     }
   }
   async #call(closure: Closure, ctx: Context, req: Request): Promise<unknown> {
     ctx.signal.throwIfAborted();
     if (closure.kind === "generate") {
-      if (!("input" in req)) throw failure("bad_request", "generation requires recorded source output in input");
-      if (this.#generated.has(closure.id) || this.#generating.has(closure.id))
-        throw failure("bad_request", "generator already evaluated in this process");
+      if (this.#generated.has(closure.id)) return structuredClone(this.#generated.get(closure.id));
+      if (this.#generating.has(closure.id)) throw failure("protocol_error", "generator is already running");
       this.#generating.add(closure.id);
       try {
         const generated = new Generated(closure.generator.source, closure.id, this.#current().plan);
-        await closure.fn(generated, req.input, ctx);
+        await closure.fn(generated, req.input ?? null, ctx);
         ctx.signal.throwIfAborted();
         const jobs = jsonOutput(generated.toDoc().jobs);
-        this.#current().plan.insert(generated);
-        this.#generated.add(closure.id);
+        const { definition, plan, rawArgs } = this.#current();
+        resolvedArgs(
+          [...(definition.args ?? []), ...[...plan.jobs(), ...generated.jobs()].flatMap((job) => job.argSpecs())],
+          rawArgs,
+          definition.extra === true,
+        );
+        plan.insert(generated);
+        this.#generated.set(closure.id, jobs);
         return jobs;
       } finally {
         this.#generating.delete(closure.id);
@@ -310,11 +335,10 @@ class Session {
 
     if (closure.kind === "after_run") {
       const result = object(req.input, "after_run input");
-      if (
-        typeof result.outcome !== "string" ||
-        !["success", "failed", "cancelled", "skipped", "superseded", "memoized"].includes(result.outcome)
-      )
+      if (typeof result.outcome !== "string" || !["success", "failed"].includes(result.outcome))
         throw failure("bad_request", "after_run requires a valid outcome");
+      if ((result.outcome === "failed") !== (result.error !== undefined))
+        throw failure("protocol_error", "after_run outcome requires a matching error");
       const finalResult = { ...result } as unknown as JobResult<unknown>;
       if (result.error !== undefined) {
         const error = decodeError(result.error);

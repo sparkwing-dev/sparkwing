@@ -97,9 +97,6 @@ func runContractSurface(t *testing.T, c *client.Client) {
 	if err := c.SetNodeSummary(ctx, runID, "produce", "# done"); err != nil {
 		t.Fatalf("SetNodeSummary: %v", err)
 	}
-	if err := c.SetNodeArtifactManifest(ctx, runID, "produce", "sha256:abc"); err != nil {
-		t.Fatalf("SetNodeArtifactManifest: %v", err)
-	}
 	for i, kind := range []store.MetricKind{store.MetricInterval, store.MetricCommand, store.MetricUnknown} {
 		if err := c.AddNodeMetricSample(ctx, runID, "produce", store.MetricSample{Kind: kind, TS: time.Unix(int64(i+1), 0), MemoryBytes: 400}); err != nil {
 			t.Fatal(err)
@@ -188,19 +185,6 @@ func runContractSurface(t *testing.T, c *client.Client) {
 	}
 	if string(childOut) != `{"findings":7}` {
 		t.Errorf("spawn child output = %s", childOut)
-	}
-
-	if err := c.WriteNodeDispatch(ctx, store.NodeDispatch{
-		RunID: runID, NodeID: "produce", Seq: 1, CodeVersion: "local", DispatchedAt: time.Now().UTC(),
-	}); err != nil && !isUnsupported(err) {
-		t.Fatalf("WriteNodeDispatch: %v", err)
-	} else if err == nil {
-		if _, gerr := c.GetNodeDispatch(ctx, runID, "produce", -1); gerr != nil {
-			t.Fatalf("GetNodeDispatch: %v", gerr)
-		}
-		if _, lerr := c.ListNodeDispatches(ctx, runID, "produce"); lerr != nil {
-			t.Fatalf("ListNodeDispatches: %v", lerr)
-		}
 	}
 
 	if err := c.FinishRun(ctx, runID, "success", ""); err != nil {

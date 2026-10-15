@@ -15,13 +15,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func hostPlanned(t *testing.T, ctx context.Context, st *store.Store, runID string, doc nodeproto.PlanDocOld, adm *Admission, exec Executor) (RunResult, func()) {
+func hostPlanned(t *testing.T, ctx context.Context, st *store.Store, runID string, doc nodeproto.PlanDoc, adm *Admission, exec Executor) (RunResult, func()) {
 	t.Helper()
 	if err := st.CreateRun(ctx, store.Run{ID: runID, Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
 	cfg := Config{Execute: exec, Admission: adm}
-	run := &Run{ID: runID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest)}
+	run := &Run{ID: runID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
 	res := RunResult{RunID: runID, Nodes: map[string]Result{}}
 	release := runPlanned(ctx, &cfg, run, &res)
 	return res, release
@@ -46,22 +46,27 @@ func (d *fakeDaemon) lease(runID string) *fakeLease {
 	return d.leases[runID]
 }
 
-func planGrouped(key, onLimit string, nodes ...string) nodeproto.PlanDocOld {
-	doc := nodeproto.PlanDocOld{Pipeline: "p", PlanConcs: []nodeproto.PlanConc{{Key: key, Capacity: 1, OnLimit: onLimit}}}
+func planGrouped(key, onLimit string, nodes ...string) nodeproto.PlanDoc {
+	parts := strings.Split(key, ":")
+	concurrency := nodeproto.ConcurrencySpec{Group: parts[len(parts)-1], Scope: new(parts[0]), Capacity: new(1)}
+	if onLimit != "" {
+		concurrency.OnLimit = new(onLimit)
+	}
+	doc := nodeproto.PlanDoc{Concurrency: []nodeproto.ConcurrencySpec{concurrency}}
 	for _, id := range nodes {
-		doc.Nodes = append(doc.Nodes, nodeproto.PlanNode{ID: id})
+		doc.Jobs = append(doc.Jobs, nodeproto.JobSpec{ID: id, Steps: []nodeproto.StepSpec{{ID: "body"}}})
 	}
 	return doc
 }
 
-var boxKey = nodeproto.ConcurrencyGroupKey("deploys", "box", "", func() string { return testBox })
+var boxKey = scopedConcurrencyKey("deploys", "box", "", testBox)
 
 func TestPlanGroupBoundsTwoRuns(t *testing.T) {
 	for _, c := range []struct {
 		name, key string
 		daemon    bool
 	}{
-		{"store", "g:deploys", false},
+		{"store", "global:deploys", false},
 		{"daemon", boxKey, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -125,14 +130,14 @@ func TestPlanGroupLimitPoliciesAndEviction(t *testing.T) {
 		status, err   string
 		node          sparkwing.Outcome
 	}{
-		{name: "store skip", onLimit: "skip", status: "success", node: sparkwing.SkippedConcurrent},
+		{name: "store skip", onLimit: "skip", status: "success", node: sparkwing.Skipped},
 		{name: "store fail", onLimit: "fail", status: "failed", err: "slot full under OnLimit:Fail", node: sparkwing.Cancelled},
-		{name: "daemon skip", onLimit: "skip", daemon: true, status: "success", node: sparkwing.SkippedConcurrent},
+		{name: "daemon skip", onLimit: "skip", daemon: true, status: "success", node: sparkwing.Skipped},
 		{name: "daemon fail", onLimit: "fail", daemon: true, status: "failed", err: "slot full under OnLimit:Fail", node: sparkwing.Cancelled},
 		{
 			name: "store evict", onLimit: "cancel_others", status: "cancelled", err: "superseded", node: sparkwing.Cancelled,
 			evict: func(t *testing.T, st *store.Store, _ *fakeDaemon) {
-				resp, err := st.AcquireConcurrencySlot(t.Context(), store.AcquireSlotRequest{Key: "g:deploys", HolderID: "newer/-", RunID: "newer", Capacity: 1, Policy: "cancel_others"})
+				resp, err := st.AcquireConcurrencySlot(t.Context(), store.AcquireSlotRequest{Key: "global:deploys", HolderID: "newer/-", RunID: "newer", Capacity: 1, Policy: "cancel_others"})
 				if err != nil || resp.Kind != store.AcquireCancellingOthers {
 					t.Errorf("newer arrival: %+v %v", resp, err)
 				}
@@ -157,7 +162,7 @@ func TestPlanGroupLimitPoliciesAndEviction(t *testing.T) {
 			defer cancel()
 			d := newFakeDaemon()
 			adm := &Admission{Slots: storeSlots{st: st}}
-			key := "g:deploys"
+			key := "global:deploys"
 			if c.daemon {
 				adm.Daemon, key = d, boxKey
 			}
@@ -225,8 +230,8 @@ func TestPlanGroupReleasedOnEveryExit(t *testing.T) {
 			defer cancel()
 			d := newFakeDaemon()
 			adm := &Admission{Daemon: d, Slots: storeSlots{st: st}}
-			doc := planGrouped("g:deploys", "queue", "a")
-			doc.PlanConcs = append(doc.PlanConcs, nodeproto.PlanConc{Key: boxKey, Capacity: 1})
+			doc := planGrouped("global:deploys", "queue", "a")
+			doc.Concurrency = append(doc.Concurrency, nodeproto.ConcurrencySpec{Group: boxKey, Capacity: new(int(1))})
 			exec := c.exec
 			runCtx, cancelRun := context.WithCancelCause(ctx)
 			defer cancelRun(nil)
@@ -239,7 +244,7 @@ func TestPlanGroupReleasedOnEveryExit(t *testing.T) {
 			if res.Status != c.status {
 				t.Fatalf("run %s %v, want %s", res.Status, res.Err, c.status)
 			}
-			wantNoLiveHold(t, st, "g:deploys")
+			wantNoLiveHold(t, st, "global:deploys")
 			if live, _, _ := d.counts(); live != 1 || d.lease(testRunID) == nil {
 				t.Fatalf("%d leases live before release, want the run lease held until the row is terminal", live)
 			}
@@ -257,9 +262,9 @@ func TestRunLeaseIsTheNodeLeasesOwner(t *testing.T) {
 	defer cancel()
 	d := newFakeDaemon()
 	front := 7
-	doc := nodeproto.PlanDocOld{
-		Pipeline: "p", AdmissionClass: "critical", Nodes: []nodeproto.PlanNode{{ID: "a"}},
-		PlanConcs: []nodeproto.PlanConc{{Key: boxKey, Capacity: 2, Cost: 1, OnLimit: "queue", QueueTimeoutMS: 5000}},
+	doc := nodeproto.PlanDoc{
+		AdmissionClass: new("critical"), Jobs: []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}},
+		Concurrency: []nodeproto.ConcurrencySpec{{Group: boxKey, Capacity: new(int(2)), Cost: new(int(1)), OnLimit: new(string("queue")), QueueTimeoutMS: new(int64(5000))}},
 	}
 	res, release := hostPlanned(t, ctx, st, testRunID, doc, &Admission{Daemon: d, Priority: &front}, nil)
 	release()
@@ -286,7 +291,7 @@ func TestRunLeaseChargesThePlanResources(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	d := newFakeDaemon()
-	doc := nodeproto.PlanDocOld{Pipeline: "p", Resources: &nodeproto.PlanResources{Cores: 4, MemoryBytes: 1 << 30}, Nodes: []nodeproto.PlanNode{{ID: "a"}}}
+	doc := nodeproto.PlanDoc{Resources: &nodeproto.ResourceSpec{Cores: new(float64(4)), MemoryBytes: new(int64(1 << 30))}, Jobs: []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
 	_, release := hostPlanned(t, ctx, st, testRunID, doc, &Admission{Daemon: d}, func(context.Context, *NodeRun) Result { return Result{Outcome: sparkwing.Success} })
 	release()
 	reqs := d.requests()
@@ -299,7 +304,7 @@ func TestPlanGroupWithoutAStoreFailsTheRun(t *testing.T) {
 	st := openStore(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	res, release := hostPlanned(t, ctx, st, testRunID, planGrouped("g:deploys", "queue", "a"), &Admission{}, nil)
+	res, release := hostPlanned(t, ctx, st, testRunID, planGrouped("global:deploys", "queue", "a"), &Admission{}, nil)
 	release()
 	if res.Status != "failed" || !strings.Contains(errText(res.Err), "no coordination store") {
 		t.Fatalf("run %s %v", res.Status, res.Err)

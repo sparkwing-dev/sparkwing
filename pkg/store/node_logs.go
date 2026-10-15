@@ -261,28 +261,6 @@ func (s *Store) RunNodeLogs(ctx context.Context, team Team, runID string) (_ []N
 	return collectNodeLogs(rows)
 }
 
-// AbandonedNodeLogs lists unsealed attempts no writer will seal: the
-// node finished or another claim generation holds it, nothing has been
-// heard from the attempt since before cutoff, a finished node finished
-// before cutoff too, and no live trigger claim drives the run. A deleted
-// run's records are not listed; deleting the run deletes its logs.
-func (s *Store) AbandonedNodeLogs(ctx context.Context, cutoff time.Time, limit int) (_ []NodeLog, err error) {
-	// safety: a trigger's in-process nodes keep their logs open until the trigger's child exits, so a node the
-	// child finished long ago is still sealed by its writer while the trigger claim lives.
-	rows, err := s.query(ctx, `SELECT `+nodeLogColumnsOf("l")+` FROM node_logs l
-  JOIN nodes n ON n.team = l.team AND n.run_id = l.run_id AND n.node_id = l.node_id
- WHERE l.sealed_at IS NULL AND l.updated_at < ?
-   AND ((n.status = ? AND COALESCE(n.finished_at, 0) < ?)
-        OR (n.status != ? AND l.generation != n.claim_generation))
-   AND NOT EXISTS (SELECT 1 FROM triggers t WHERE t.team = l.team AND t.id = l.run_id AND `+triggerClaimLiveSQL("t.")+`)
- ORDER BY l.updated_at LIMIT ?`,
-		cutoff.UnixNano(), nodeStatusDone, cutoff.UnixNano(), nodeStatusDone, cutoff.UnixNano(), limit)
-	if err != nil {
-		return nil, err
-	}
-	return collectNodeLogs(rows)
-}
-
 // DeleteRunNodeLogs forgets a run's log records once their objects are
 // gone.
 func (s *Store) DeleteRunNodeLogs(ctx context.Context, team Team, runID string) error {

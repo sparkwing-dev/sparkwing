@@ -178,26 +178,6 @@ func (c *Client) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]s
 	}
 }
 
-// ReconcileOrphanedLocalRuns finishes runs left "running" by a process that
-// died, and returns how many it closed. threshold is the idle age a run must
-// exceed; the controller refuses a non-positive one.
-func (c *Client) ReconcileOrphanedLocalRuns(ctx context.Context, threshold time.Duration) (int, error) {
-	var out reconcileOrphansBody
-	if err := c.post(ctx, "/api/v1/maintenance/reconcile-orphans",
-		reconcileOrphansRequest{ThresholdNanos: threshold.Nanoseconds()}, http.StatusOK, &out); err != nil {
-		return 0, err
-	}
-	return out.Reconciled, nil
-}
-
-type reconcileOrphansRequest struct {
-	ThresholdNanos int64 `json:"threshold_nanos,omitempty"`
-}
-
-type reconcileOrphansBody struct {
-	Reconciled int `json:"reconciled"`
-}
-
 func (c *Client) getJSON(ctx context.Context, u string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {

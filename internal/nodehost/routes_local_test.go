@@ -99,7 +99,7 @@ func TestLocalPipelineLatestReadsTheNewestSuccessfulRun(t *testing.T) {
 	st := localRuns()
 	bearer := admit(t, s, nodehost.Node{
 		RunID: "run-1", NodeID: "deploy", Resolver: &fakeResolver{}, Masker: secrets.NewMasker(), Local: st,
-		Refs: []nodeproto.PlanPipelineRef{{Pipeline: "other", Node: "build"}},
+		Refs: []nodeproto.PipelineReference{{Pipeline: "other", Job: "build"}},
 	})
 	if got := ask(t, s, http.MethodGet, "/node/v1/pipelines/other/latest?node=build", bearer, ""); got.status != http.StatusNotFound || got.body["code"] != "no_run" {
 		t.Fatalf("status %d body %v", got.status, got.body)
@@ -117,7 +117,7 @@ func TestLocalPipelineLatestRefusesAnUndeclaredReference(t *testing.T) {
 	st.latest = &store.Run{ID: "run-0"}
 	bearer := admit(t, s, nodehost.Node{
 		RunID: "run-1", NodeID: "deploy", Resolver: &fakeResolver{}, Masker: secrets.NewMasker(), Local: st,
-		Refs: []nodeproto.PlanPipelineRef{{Pipeline: "other", Node: "test"}, {Pipeline: "another", Node: "build"}},
+		Refs: []nodeproto.PipelineReference{{Pipeline: "other", Job: "test"}, {Pipeline: "another", Job: "build"}},
 	})
 	for _, path := range []string{"/node/v1/pipelines/other/latest?node=build", "/node/v1/pipelines/third/latest?node=build"} {
 		got := ask(t, s, http.MethodGet, path, bearer, "")

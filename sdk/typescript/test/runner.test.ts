@@ -68,7 +68,7 @@ test("duration arguments preserve signed zero in defaults and explicit inputs", 
           );
           const planned = await host.send({ ...planRequest, args });
           assert.equal(planned.ok, true, JSON.stringify(planned));
-          const executed = await host.send({ id: "step", op: "run_step", job: "build", step: "run", attempt: 1 });
+          const executed = await host.send({ id: "step", op: "run_step", settled: [], job: "build", step: "run", attempt: 1 });
           assert.equal(executed.result.outcome, "success", JSON.stringify(executed));
           assert.deepEqual(executed.result.output, { pipeline: value, job: value });
         } finally {
@@ -109,7 +109,7 @@ test("hello facts remain sealed, plans stay flat, body env starts only after pla
     const job = result.result.jobs[0];
     assert.equal(job.env.W5_BODY.value, "ready");
     assert.equal("modifiers" in job, false);
-    const frame = await host.send({ id: "step", op: "run_step", job: "build", step: job.steps[0].id, attempt: 1 });
+    const frame = await host.send({ id: "step", op: "run_step", settled: [], job: "build", step: job.steps[0].id, attempt: 1 });
     assert.deepEqual(frame.result.output, { env: "ready", args: { count: "9223372036854775807" }, identity: "granted" });
   } finally {
     await host.close();
@@ -145,7 +145,7 @@ test("prototype-shaped body env reaches tools and restores the prior process env
     const planned = await host.send(planRequest);
     assert.equal(planned.ok, true, JSON.stringify(planned));
     assert.deepEqual(planned.result.jobs[0].env, JSON.parse('{"__proto__":{"value":"body-value"}}'));
-    const executed = await host.send({ id: "step", op: "run_step", job: "build", step: "run", attempt: 1 });
+    const executed = await host.send({ id: "step", op: "run_step", settled: [], job: "build", step: "run", attempt: 1 });
     assert.equal(executed.result.outcome, "success", JSON.stringify(executed));
     assert.deepEqual(executed.result.output, ["body-value", "body-value"]);
   } finally {
@@ -192,7 +192,7 @@ test("trigger facts survive author mutations during planning and retry attempts"
         assert.equal(planned.ok, true, JSON.stringify(planned));
         const step = planned.result.jobs[0].steps[0].id;
         for (const attempt of [1, 2]) {
-          const result = await host.send({ id: `attempt-${attempt}`, op: "run_step", job: "build", step, attempt });
+          const result = await host.send({ id: `attempt-${attempt}`, op: "run_step", settled: [], job: "build", step, attempt });
           assert.equal(result.result.outcome, "success", JSON.stringify(result));
           assert.deepEqual(result.result.output, expected);
         }
@@ -220,13 +220,13 @@ test("outputs are per attempt, all step outputs are returned, bad JSON fails lou
   const host = await setup();
   try {
     await host.send(planRequest);
-    const first = await host.send({ id: "first", op: "run_step", job: "build", step: "first", attempt: 1 });
+    const first = await host.send({ id: "first", op: "run_step", settled: [], job: "build", step: "first", attempt: 1 });
     assert.deepEqual(first.result.output, { value: 3 });
-    const same = await host.send({ id: "same", op: "run_step", job: "build", step: "second", attempt: 1 });
+    const same = await host.send({ id: "same", op: "run_step", settled: ["first"], job: "build", step: "second", attempt: 1 });
     assert.deepEqual(same.result.output, { value: 3 });
-    const retry = await host.send({ id: "retry", op: "run_step", job: "build", step: "second", attempt: 2 });
+    const retry = await host.send({ id: "retry", op: "run_step", settled: ["first"], job: "build", step: "second", attempt: 2 });
     assert.equal(retry.result.output, "unset");
-    const bad = await host.send({ id: "bad", op: "run_step", job: "build", step: "bad", attempt: 2 });
+    const bad = await host.send({ id: "bad", op: "run_step", settled: [], job: "build", step: "bad", attempt: 2 });
     assert.equal(bad.ok, true);
     assert.equal(bad.result.outcome, "failed");
     assert.equal(bad.result.error.code, "sdk_error");
@@ -235,81 +235,20 @@ test("outputs are per attempt, all step outputs are returned, bad JSON fails lou
   }
 });
 
-test("eval starts the new attempt before hooks can read prior step outputs", async () => {
+test("job closures cannot carry attempt or step settlement fields", async () => {
   resetPipelines();
-  const observed: unknown[] = [];
-  let output = 0;
   definePipeline({
     name: "fixture",
-    plan(plan) {
-      const job = plan.job("build");
-      const step = job.step("produce", () => ++output);
-      job.beforeRun((ctx) => {
-        observed.push(ctx.stepOutput(step));
-      });
-      job.afterRun((ctx) => {
-        observed.push(ctx.stepOutput(step));
-      });
+    plan(p) {
+      p.job("build", () => 1).beforeRun(() => {});
     },
   });
   const host = await setup();
   try {
     const plan = await host.send(planRequest);
-    const closures = plan.result.jobs[0].closures;
-    const step = { op: "run_step", job: "build", step: "produce" };
-    assert.equal((await host.send({ ...step, id: "first", attempt: 1 })).result.output, 1);
-    assert.equal((await host.send({ id: "before", op: "eval", closure: closures.before_run[0], attempt: 2 })).result.error, undefined);
-    assert.deepEqual(observed, [undefined]);
-    assert.equal((await host.send({ ...step, id: "stale-step", attempt: 1 })).error.code, "bad_request");
-    assert.equal(
-      (await host.send({ id: "stale-eval", op: "eval", closure: closures.before_run[0], attempt: 1 })).error.code,
-      "bad_request",
-    );
-    assert.equal((await host.send({ ...step, id: "second", attempt: 2 })).result.output, 2);
-    const after = await host.send({ id: "after", op: "eval", closure: closures.after_run[0], attempt: 2, input: { outcome: "success" } });
-    assert.equal(after.result.error, undefined);
-    assert.deepEqual(observed, [undefined, 2]);
+    const reply = await host.send({ id: "hook", op: "eval", closure: plan.result.jobs[0].closures.before_run[0], attempt: 2, settled: [] });
+    assert.equal(reply.error.code, "protocol_error");
   } finally {
-    await host.close();
-  }
-});
-
-test("an eval cannot advance the attempt while an earlier step is running", async () => {
-  resetPipelines();
-  let started!: () => void, proceed!: () => void;
-  const entered = new Promise<void>((resolve) => {
-    started = resolve;
-  });
-  const release = new Promise<void>((resolve) => {
-    proceed = resolve;
-  });
-  definePipeline({
-    name: "fixture",
-    plan(plan) {
-      plan
-        .job("build", async () => {
-          started();
-          await release;
-          return "finished";
-        })
-        .beforeRun(() => {});
-    },
-  });
-  const host = await setup();
-  try {
-    const plan = await host.send(planRequest);
-    const job = plan.result.jobs[0];
-    const pending = host.send({ id: "body", op: "run_step", job: "build", step: job.steps[0].id, attempt: 1 });
-    await entered;
-    const overlap = await host.send({ id: "overlap", op: "eval", closure: job.closures.before_run[0], attempt: 2 });
-    assert.equal(overlap.error?.code, "bad_request");
-    proceed();
-    assert.equal((await pending).result.output, "finished");
-    const next = await host.send({ id: "next", op: "eval", closure: job.closures.before_run[0], attempt: 2 });
-    assert.equal(next.ok, true);
-    assert.equal(next.result.error, undefined);
-  } finally {
-    proceed();
     await host.close();
   }
 });
@@ -335,7 +274,7 @@ test("cancel acknowledges separately and the in-flight body retains its reply", 
   try {
     const plan = await host.send(planRequest);
     const step = plan.result.jobs[0].steps[0].id;
-    const pending = host.send({ id: "body", op: "run_step", job: "build", step, attempt: 1 });
+    const pending = host.send({ id: "body", op: "run_step", settled: [], job: "build", step, attempt: 1 });
     await barrier;
     assert.equal((await host.send({ id: "cancel", op: "cancel", job: "build", step })).ok, true);
     const body = await pending;
@@ -400,7 +339,7 @@ test("secrets are lazy and declared, optional absence is narrow, masks are ackno
   try {
     const plan = await host.send(planRequest);
     assert.deepEqual(calls, []);
-    const pending = host.send({ id: "run", op: "run_step", job: "build", step: plan.result.jobs[0].steps[0].id, attempt: 1 });
+    const pending = host.send({ id: "run", op: "run_step", settled: [], job: "build", step: plan.result.jobs[0].steps[0].id, attempt: 1 });
     await maskReached;
     assert.equal(
       host.frames.some((frame) => frame.msg === "after mask"),
@@ -454,7 +393,12 @@ test("eval supports predicates, hooks, noMemo and generation from recorded outpu
       ["verify", closures.verify],
       ["after", closures.after_run[0]],
     ]) {
-      const frame = await host.send({ id, op: "eval", closure, ...(id === "after" ? { input: { outcome: "failed" } } : {}) });
+      const frame = await host.send({
+        id,
+        op: "eval",
+        closure,
+        ...(id === "after" ? { input: { outcome: "failed", error: { code: "sdk_error", message: "failed" } } } : {}),
+      });
       assert.equal(frame.result.value, null);
     }
     assert.deepEqual(called, ["before", "verify", "failed"]);
@@ -462,7 +406,7 @@ test("eval supports predicates, hooks, noMemo and generation from recorded outpu
     assert.equal(expansion.result.value[0].id, "generated");
     assert.ok(expansion.result.value[0].groups.includes(closures.generate[0]));
     const again = await host.send({ id: "again", op: "eval", closure: closures.generate[0], input: "changed" });
-    assert.equal(again.result.error.code, "bad_request");
+    assert.deepEqual(again.result.value, expansion.result.value);
   } finally {
     await host.close();
   }
@@ -472,14 +416,18 @@ test("cancelled closures retain a failed eval reply even when author code return
   for (const kind of ["skip_if", "before_run", "verify", "after_run", "memo_key", "generate"]) {
     await t.test(kind, async () => {
       resetPipelines();
-      let started!: () => void, proceed!: () => void;
+      let started!: () => void, proceed!: () => void, stop!: () => void;
+      const stopped = new Promise<void>((resolve) => {
+        stop = resolve;
+      });
       const entered = new Promise<void>((resolve) => {
         started = resolve;
       });
       const release = new Promise<void>((resolve) => {
         proceed = resolve;
       });
-      const wait = async () => {
+      const wait = async (ctx: Context) => {
+        ctx.signal.addEventListener("abort", stop, { once: true });
         started();
         await release;
       };
@@ -488,20 +436,20 @@ test("cancelled closures retain a failed eval reply even when author code return
         plan(plan) {
           plan
             .job("build", () => null)
-            .skipIf(async () => {
-              await wait();
+            .skipIf(async (ctx) => {
+              await wait(ctx);
               return false;
             })
             .beforeRun(wait)
             .verify(wait)
             .afterRun(wait)
-            .memo(async () => {
-              await wait();
+            .memo(async (ctx) => {
+              await wait(ctx);
               return "key";
             })
-            .generate(async (generated) => {
+            .generate(async (generated, _output, ctx) => {
               generated.job("child", () => null);
-              await wait();
+              await wait(ctx);
             });
         },
       });
@@ -516,8 +464,10 @@ test("cancelled closures retain a failed eval reply even when author code return
           ...(kind === "after_run" ? { input: { outcome: "success" } } : kind === "generate" ? { input: null } : {}),
         });
         await entered;
-        const cancelled = await host.send({ id: "cancel", op: "cancel", job: "build" });
+        const cancellation = host.send({ id: "cancel", op: "cancel", job: "build" });
+        await stopped;
         proceed();
+        const cancelled = await cancellation;
         const evaluated = await pending;
         assert.equal(cancelled.ok, true);
         assert.equal(evaluated.ok, true);
@@ -564,7 +514,14 @@ test("a generated-job process reconstructs from recorded source output without r
     });
     assert.equal(expanded.ok, true, JSON.stringify(expanded));
     assert.equal(expanded.result.error, undefined);
-    const result = await host.send({ id: "child", op: "run_step", job: "child", step: expanded.result.value[0].steps[0].id, attempt: 7 });
+    const result = await host.send({
+      id: "child",
+      op: "run_step",
+      settled: [],
+      job: "child",
+      step: expanded.result.value[0].steps[0].id,
+      attempt: 7,
+    });
     assert.deepEqual(result.result.output, { persisted: true });
   } finally {
     await host.close();
@@ -573,7 +530,10 @@ test("a generated-job process reconstructs from recorded source output without r
 
 test("cancelled generation leaves no reconstructed child code behind", async () => {
   resetPipelines();
-  let ready!: () => void, proceed!: () => void;
+  let ready!: () => void, proceed!: () => void, stop!: () => void;
+  const stopped = new Promise<void>((resolve) => {
+    stop = resolve;
+  });
   const entered = new Promise<void>((resolve) => {
     ready = resolve;
   });
@@ -585,7 +545,8 @@ test("cancelled generation leaves no reconstructed child code behind", async () 
     plan(plan) {
       plan
         .job("build", () => null)
-        .generate(async (generated) => {
+        .generate(async (generated, _output, ctx) => {
+          ctx.signal.addEventListener("abort", stop, { once: true });
           generated.job("child", () => true);
           ready();
           await barrier;
@@ -597,10 +558,12 @@ test("cancelled generation leaves no reconstructed child code behind", async () 
     const plan = await host.send(planRequest);
     const pending = host.send({ id: "expand", op: "eval", closure: plan.result.jobs[0].closures.generate[0], input: null });
     await entered;
-    await host.send({ id: "cancel", op: "cancel", job: "build" });
+    const cancellation = host.send({ id: "cancel", op: "cancel", job: "build" });
+    await stopped;
     proceed();
+    await cancellation;
     assert.equal((await pending).result.error.code, "sdk_error");
-    const child = await host.send({ id: "child", op: "run_step", job: "child", step: "body", attempt: 1 });
+    const child = await host.send({ id: "child", op: "run_step", settled: [], job: "child", step: "body", attempt: 1 });
     assert.equal(child.error.code, "unknown_job");
   } finally {
     proceed();
@@ -608,7 +571,7 @@ test("cancelled generation leaves no reconstructed child code behind", async () 
   }
 });
 
-test("execution cannot mutate topology and argument failures use invalid_args", async () => {
+test("execution cannot mutate topology and per-operation argument injection is refused", async () => {
   resetPipelines();
   definePipeline({
     name: "fixture",
@@ -630,12 +593,13 @@ test("execution cannot mutate topology and argument failures use invalid_args", 
     const invalid = await host.send({
       id: "run",
       op: "run_step",
+      settled: [],
       job: "build",
       step: plan.result.jobs[0].steps[0].id,
       attempt: 1,
       args: { mode: "invalid" },
     });
-    assert.equal(invalid.error.code, "invalid_args");
+    assert.equal(invalid.error.code, "bad_request");
   } finally {
     await host.close();
   }
@@ -655,7 +619,7 @@ test("a failed hello cannot authorize planning", async () => {
   try {
     const rejected = await host.send({ ...hello, binding: { ...binding, routes: { url: "https://outside.example", bearer: "private" } } });
     assert.equal(rejected.error.code, "bad_request");
-    assert.equal((await host.send(planRequest)).error.code, "bad_request");
+    assert.equal((await host.send(planRequest)).error.code, "protocol_error");
     assert.equal(planned, false);
   } finally {
     await host.close();
@@ -679,7 +643,14 @@ test("generator source body env does not leak into the reconstructed child", asy
   try {
     const plan = await host.send(planRequest);
     const expanded = await host.send({ id: "expand", op: "eval", closure: plan.result.jobs[0].closures.generate[0], input: null });
-    const result = await host.send({ id: "child", op: "run_step", job: "child", step: expanded.result.value[0].steps[0].id, attempt: 1 });
+    const result = await host.send({
+      id: "child",
+      op: "run_step",
+      settled: [],
+      job: "child",
+      step: expanded.result.value[0].steps[0].id,
+      attempt: 1,
+    });
     assert.equal(result.result.output, "absent");
   } finally {
     await host.close();
@@ -706,12 +677,13 @@ test("unknown execution args and malformed after-run outcomes are refused", asyn
     const invalid = await host.send({
       id: "args",
       op: "run_step",
+      settled: [],
       job: "build",
       step: job.steps[0].id,
       attempt: 1,
       args: { undeclared: "value" },
     });
-    assert.equal(invalid.error.code, "invalid_args");
+    assert.equal(invalid.error.code, "bad_request");
     const wrong = await host.send({ id: "outcome", op: "eval", closure: job.closures.after_run[0], input: { outcome: ["success"] } });
     assert.equal(wrong.result.error.code, "bad_request");
     const failed = await host.send({
@@ -739,7 +711,14 @@ test("output at 16 MiB passes and the next byte fails", async () => {
     const host = await setup();
     try {
       const plan = await host.send(planRequest);
-      const result = await host.send({ id: "output", op: "run_step", job: "build", step: plan.result.jobs[0].steps[0].id, attempt: 1 });
+      const result = await host.send({
+        id: "output",
+        op: "run_step",
+        settled: [],
+        job: "build",
+        step: plan.result.jobs[0].steps[0].id,
+        attempt: 1,
+      });
       assert.equal(result.result.outcome, excess ? "failed" : "success");
       if (!excess) assert.equal(Buffer.byteLength(JSON.stringify(result.result.output)), 16 << 20);
       else assert.equal(result.result.error.code, "sdk_error");
@@ -775,11 +754,33 @@ test("independent steps run concurrently and EOF aborts them without late frames
   });
   const host = await setup();
   await host.send(planRequest);
-  void host.send({ id: "one", op: "run_step", job: "build", step: "one", attempt: 1 });
-  void host.send({ id: "two", op: "run_step", job: "build", step: "two", attempt: 1 });
+  void host.send({ id: "one", op: "run_step", settled: [], job: "build", step: "one", attempt: 1 });
+  void host.send({ id: "two", op: "run_step", settled: [], job: "build", step: "two", attempt: 1 });
   await started;
   const before = host.frames.length;
   await host.close();
   await aborted;
   assert.equal(host.frames.length, before);
+});
+
+test("generated argument binding fails before child code is registered", async () => {
+  resetPipelines();
+  definePipeline({
+    name: "fixture",
+    plan(p) {
+      p.job("build", () => null).generate((g) => {
+        g.job("child", (ctx) => ctx.args.required).withArgs({ name: "required", type: "string", required: true });
+      });
+    },
+  });
+  const host = await setup(undefined, "child");
+  try {
+    const planned = await host.send(planRequest);
+    const expanded = await host.send({ id: "expand", op: "eval", closure: planned.result.jobs[0].closures.generate[0], input: null });
+    assert.equal(expanded.result.error?.code, "invalid_args");
+    const child = await host.send({ id: "child", op: "run_step", job: "child", step: "run", attempt: 1, settled: [] });
+    assert.equal(child.error?.code, "unknown_job");
+  } finally {
+    await host.close();
+  }
 });

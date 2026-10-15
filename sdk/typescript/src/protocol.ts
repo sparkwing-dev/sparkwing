@@ -1,3 +1,4 @@
+import { parseJSON } from "./json.ts";
 import type { Readable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 import type { LineSink } from "./log.ts";
@@ -34,7 +35,7 @@ export async function* readRequests(input: Readable): AsyncGenerator<Request> {
 function parseRequest(line: string): Request {
   let value: unknown;
   try {
-    value = JSON.parse(line);
+    value = parseJSON(line);
   } catch {
     throw new UnanswerableRequest("request is not JSON");
   }
@@ -52,16 +53,17 @@ const fields: Record<string, readonly string[]> = {
   hello: ["protocol", "engine", "runner", "binding"],
   describe: [],
   plan: ["pipeline", "args", "run"],
-  run_step: ["job", "step", "attempt", "failure", "args"],
-  eval: ["closure", "input", "job", "step", "attempt", "failure", "args"],
-  cancel: ["job", "step"],
+  run_step: ["job", "step", "attempt", "settled", "failure"],
+  eval: ["closure", "input", "attempt", "settled"],
+  cancel: ["job", "step", "target"],
 };
 const operationFields = new Set(Object.values(fields).flat());
 export function validateRequest(req: Request): void {
   if (typeof req.op !== "string") throw failure("bad_request", "op must be a string");
   if (!(OPS as readonly string[]).includes(req.op)) throw failure("unknown_op", `unknown operation ${req.op}`);
   for (const key of Object.keys(req))
-    if (operationFields.has(key) && !fields[req.op]!.includes(key)) throw failure("bad_request", `${key} contradicts ${req.op}`);
+    if (operationFields.has(key) && (!fields[req.op]!.includes(key) || (req[key] === null && key !== "input")))
+      throw failure("bad_request", `${key} contradicts ${req.op}`);
   if (req.op === "hello") {
     if (!Number.isInteger(req.protocol)) throw failure("bad_request", "protocol must be an integer");
     string(object(req.engine, "engine").version, "engine.version");
@@ -110,11 +112,23 @@ export function validateRequest(req: Request): void {
         throw failure("bad_request", "run.started_at must be RFC3339");
     }
   }
-  if (req.op === "run_step" || req.op === "cancel") string(req.job, "job");
+  if (req.op === "cancel") {
+    if (req.target !== undefined) {
+      string(req.target, "target");
+      if (req.job !== undefined || req.step !== undefined) throw failure("bad_request", "cancel selectors cannot be mixed");
+    } else string(req.job, "job");
+  }
+  if (req.op === "run_step") string(req.job, "job");
   if (req.op === "run_step" || req.step !== undefined) string(req.step, "step");
   if (req.job !== undefined) string(req.job, "job");
-  if (req.op === "run_step" || req.attempt !== undefined) {
-    if (!Number.isSafeInteger(req.attempt) || Number(req.attempt) < 1) throw failure("bad_request", "attempt must be a positive integer");
+  if (req.op === "run_step" || req.attempt !== undefined || req.settled !== undefined) {
+    if (
+      !Number.isSafeInteger(req.attempt) ||
+      Number(req.attempt) < 1 ||
+      !Array.isArray(req.settled) ||
+      req.settled.some((id) => typeof id !== "string")
+    )
+      throw failure("bad_request", "step state needs a positive attempt and settled steps");
   }
   if (req.op === "eval") string(req.closure, "closure");
   if (req.args !== undefined) stringMap(req.args, "args");

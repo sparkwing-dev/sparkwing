@@ -1,132 +1,40 @@
-package sparkwing_test
+package sparkwing
 
 import (
 	"context"
-	"reflect"
 	"slices"
 	"testing"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func TestJobFanOut_StaticMembers(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	items := []string{"a", "b", "c"}
-	g := sparkwing.JobFanOut(plan, "builds", items, func(s string) (string, any) {
-		return "build-" + s, func(ctx context.Context) error { return nil }
+func TestJobFanOutStaticMembers(t *testing.T) {
+	plan := NewPlan()
+	group := JobFanOut(plan, "builds", []string{"a", "b"}, func(item string) (string, any) {
+		return "build-" + item, func(context.Context) error { return nil }
 	})
-	if g == nil {
-		t.Fatal("JobFanOut should return a Group")
-	}
-	if g.Name() != "builds" {
-		t.Fatalf("group name = %q, want %q", g.Name(), "builds")
-	}
-	if g.Dynamic() {
-		t.Fatal("JobFanOut group should be static, not dynamic")
-	}
-	got := []string{}
-	for _, m := range g.Members() {
-		got = append(got, m.ID())
-	}
-	want := []string{"build-a", "build-b", "build-c"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("members = %v, want %v", got, want)
-	}
-	for _, id := range want {
-		if plan.Job(id) == nil {
-			t.Fatalf("plan should contain node %q", id)
-		}
+	if group.Name() != "builds" || len(group.Members()) != 2 || plan.byID["build-a"] == nil || plan.byID["build-b"] == nil {
+		t.Fatalf("fan-out members = %+v", group.Members())
 	}
 }
 
-func TestJobFanOut_EmptyItemsReturnsEmptyGroup(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	calls := 0
-	g := sparkwing.JobFanOut(plan, "noop", []int{}, func(int) (string, any) {
-		calls++
-		return "x", func(ctx context.Context) error { return nil }
-	})
-	if g == nil {
-		t.Fatal("JobFanOut should return a Group even when items is empty")
-	}
-	if len(g.Members()) != 0 {
-		t.Fatalf("expected 0 members, got %d", len(g.Members()))
-	}
-	if calls != 0 {
-		t.Fatalf("fn should not run on empty items; ran %d times", calls)
-	}
-	consumer := sparkwing.Job(plan, "after", func(ctx context.Context) error { return nil })
-	consumer.Needs(g)
-	if deps := consumer.DepIDs(); len(deps) != 0 {
-		t.Fatalf("Needs(empty group) should add no deps; got %v", deps)
+func TestEmptyJobFanOutSatisfiesDependency(t *testing.T) {
+	plan := NewPlan()
+	group := JobFanOut(plan, "empty", []int{}, func(int) (string, any) { t.Fatal("callback ran"); return "", nil })
+	consumer := Job(plan, "after", func(context.Context) error { return nil }).Needs(group)
+	if len(group.Members()) != 0 || len(consumer.needs) != 0 {
+		t.Fatalf("empty fan-out left dependencies: %v", consumer.needs)
 	}
 }
 
-func TestGroup_NeedsAppliesToEveryMember(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	upstream := sparkwing.Job(plan, "upstream", func(ctx context.Context) error { return nil })
-	g := sparkwing.JobFanOut(plan, "builds", []string{"a", "b"}, func(s string) (string, any) {
-		return "build-" + s, func(ctx context.Context) error { return nil }
-	}).Needs(upstream)
-	for _, m := range g.Members() {
-		if !slices.Contains(m.DepIDs(), "upstream") {
-			t.Fatalf("member %q should depend on upstream; deps=%v", m.ID(), m.DepIDs())
+func TestGroupModifiersApplyToEveryMember(t *testing.T) {
+	plan := NewPlan()
+	upstream := Job(plan, "upstream", func(context.Context) error { return nil })
+	group := JobFanOut(plan, "builds", []string{"a", "b"}, func(item string) (string, any) {
+		return "build-" + item, func(context.Context) error { return nil }
+	}).Needs(upstream).Retry(3).Timeout(10 * time.Second).NoProgressTimeout(2 * time.Second)
+	for _, member := range group.Members() {
+		if !slices.Equal(member.needs, []string{"upstream"}) || member.retryAttempts != 3 || member.timeout != 10*time.Second || member.noProgressTimeout != 2*time.Second {
+			t.Fatalf("group member %s settings = %+v", member.id, member)
 		}
 	}
-}
-
-func TestGroup_ResilienceModifiersApplyToEveryMember(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	g := sparkwing.JobFanOut(plan, "builds", []string{"a", "b"}, func(s string) (string, any) {
-		return "build-" + s, func(ctx context.Context) error { return nil }
-	}).Retry(3).Timeout(10 * time.Second).NoProgressTimeout(2 * time.Second)
-	for _, m := range g.Members() {
-		if got := m.RetryConfig().Attempts; got != 3 {
-			t.Fatalf("member %q retry attempts = %d, want 3", m.ID(), got)
-		}
-		if got := m.TimeoutDuration(); got != 10*time.Second {
-			t.Fatalf("member %q timeout = %v, want 10s", m.ID(), got)
-		}
-		if got := m.NoProgressTimeoutDuration(); got != 2*time.Second {
-			t.Fatalf("member %q no-progress timeout = %v, want 2s", m.ID(), got)
-		}
-	}
-}
-
-func TestGroupModifiersMirrorNode(t *testing.T) {
-	exempt := map[string]bool{
-		"OnFailure":     true,
-		"Dynamic":       true,
-		"OnFailureNode": true,
-	}
-	nodeChainable := chainableMethods(reflect.TypeOf(&sparkwing.JobNode{}))
-	groupChainable := chainableMethods(reflect.TypeOf(&sparkwing.JobGroup{}))
-	groupSet := map[string]bool{}
-	for _, m := range groupChainable {
-		groupSet[m] = true
-	}
-	for _, name := range nodeChainable {
-		if exempt[name] {
-			continue
-		}
-		if !groupSet[name] {
-			t.Errorf("chainable Job.%s has no Group counterpart (add it to combinator.go or update the exempt list)", name)
-		}
-	}
-}
-
-func chainableMethods(t reflect.Type) []string {
-	var names []string
-	for i := range t.NumMethod() {
-		m := t.Method(i)
-		if m.Type.NumOut() != 1 {
-			continue
-		}
-		if m.Type.Out(0) != t {
-			continue
-		}
-		names = append(names, m.Name)
-	}
-	return names
 }
