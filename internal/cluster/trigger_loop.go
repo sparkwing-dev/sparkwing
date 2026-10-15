@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
-	"github.com/sparkwing-dev/sparkwing/internal/directdata"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
@@ -240,7 +239,6 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 	if sourceErr != nil {
 		return awaitHeartbeat(), sourceErr
 	}
-	grant := orchestrator.RequestRunCacheGrant(ctx, opts.ControllerURL, opts.Token, trigger.ID, logger)
 	workspaceSource := strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@")
 	if repoURL == "" && !workspaceSource {
 		return awaitHeartbeat(), fmt.Errorf("trigger %s has no repo_url, so there is no pipeline source to build", trigger.ID)
@@ -265,6 +263,7 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 	var fetchErr error
 	switch {
 	case workspaceSource:
+		grant := orchestrator.RequestRunCacheGrant(ctx, opts.ControllerURL, opts.Token, trigger.ID, logger)
 		sparkwingDir, fetchErr = bincache.FetchSourceBundleDirect(ctx, opts.ControllerURL, grant,
 			trigger.ID, trigger.TriggerEnv[bincache.SourceBundleObjectEnvKey], sha, repoURL, workDir)
 	default:
@@ -322,7 +321,7 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 		trigger.TriggerEnv[orchestrator.PipelineRevKey] = strings.TrimSpace(string(out))
 	}
 
-	binary, buildErr := triggerBuildOrFetchBinary(ctx, sparkwingDir, opts, grant, trigger.ID, logger)
+	binary, buildErr := triggerBuildOrFetchBinary(ctx, sparkwingDir, nil, logger)
 	if buildErr != nil {
 		shipCompileOutput(ctx, compileLog, trigger.ID, buildErr, logger)
 		return awaitHeartbeat(), buildErr
@@ -463,7 +462,7 @@ func (b triggerBinary) release() {
 	}
 }
 
-func triggerBuildOrFetchBinary(ctx context.Context, sparkwingDir string, opts TriggerLoopOptions, cacheGrant, runID string, logger *slog.Logger) (triggerBinary, error) {
+func triggerBuildOrFetchBinary(ctx context.Context, sparkwingDir string, data *bincache.BinaryData, logger *slog.Logger) (triggerBinary, error) {
 	start := time.Now()
 	ts, err := pipelineentry.IsTypeScript(sparkwingDir)
 	if err != nil {
@@ -487,9 +486,8 @@ func triggerBuildOrFetchBinary(ctx context.Context, sparkwingDir string, opts Tr
 	}
 	compiled := false
 	fetched := false
-	data := directdata.New(opts.ControllerURL, cacheGrant, runID, nil)
 	lease, published, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
-		if cacheGrant != "" {
+		if data != nil {
 			if fetchErr := bincache.DownloadBinary(ctx, data, key, tempPath); fetchErr == nil {
 				fetched = true
 				return nil
@@ -503,7 +501,7 @@ func triggerBuildOrFetchBinary(ctx context.Context, sparkwingDir string, opts Tr
 	if err != nil {
 		return triggerBinary{}, err
 	}
-	if published && compiled && cacheGrant != "" {
+	if published && compiled && data != nil {
 		if err := bincache.UploadBinary(ctx, data, key, lease.Path()); err != nil {
 			logger.Warn("trigger loop: bin cache upload failed", "err", err, "hash", key)
 		}

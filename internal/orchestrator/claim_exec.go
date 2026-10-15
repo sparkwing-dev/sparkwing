@@ -12,8 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
-	"github.com/sparkwing-dev/sparkwing/internal/directdata"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
@@ -76,21 +74,13 @@ func runLaunchedNode(ctx context.Context, controllerURL, runID, nodeID, token st
 	if err := applyGoEnvFile(filepath.Join(filepath.Dir(src), GoEnvFile)); err != nil {
 		return fail(err)
 	}
-	grant := RequestRunCacheGrant(ctx, controllerURL, token, runID, logger)
-	binary, err := resolveLaunchedBinary(ctx, filepath.Join(src, ".sparkwing"), directdata.New(controllerURL, grant, runID, nil), logger)
+	binary, err := resolveLaunchedBinary(ctx, filepath.Join(src, ".sparkwing"), nil, logger)
 	if err != nil {
 		return fail(fmt.Errorf("build the pipeline: %w", err))
 	}
 	defer binary.release()
 	if nodeID == store.PlanNodeID {
 		return planLaunchedRun(ctx, c, src, binary.entry, runID, fail)
-	}
-	// safety: the grant feeds this process's cache and artifact clients; the node's process never sees it.
-	if grant != "" {
-		if err := os.Setenv(authwire.CacheGrantEnv, grant); err != nil {
-			return fail(err)
-		}
-		go renewCacheGrant(ctx, controllerURL, token, runID)
 	}
 	row, err := c.GetNode(ctx, runID, nodeID)
 	if err != nil {

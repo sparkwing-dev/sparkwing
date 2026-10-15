@@ -26,9 +26,6 @@ import (
 
 var ErrMiss = errors.New("remote binary cache: miss")
 
-// ErrDigest reports a binary whose bytes do not match the signed digest.
-var ErrDigest = errors.New("remote binary cache: digest verification failed")
-
 func mkdirCache(dir string) error {
 	err := os.MkdirAll(dir, 0o755)
 	if err == nil {
@@ -54,42 +51,6 @@ func underSparkwingHome(dir string) bool {
 		return false
 	}
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
-func installVerifiedBinary(dest string, src io.Reader, want []byte, size int64, hash string) error {
-	if err := mkdirCache(filepath.Dir(dest)); err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(filepath.Dir(dest), ".fetch-*")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	sum := sha256.New()
-	n, err := io.Copy(io.MultiWriter(f, sum), io.LimitReader(src, size))
-	if err != nil {
-		_ = f.Close()
-		_ = os.Remove(tmp)
-		return err
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	// safety: the key folds source inputs, not content, so only this digest ties the bytes to the cache entry.
-	var extra [1]byte
-	_, endErr := io.ReadFull(src, extra[:])
-	if n != size || !errors.Is(endErr, io.EOF) || !bytes.Equal(sum.Sum(nil), want) {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("%w: %s", ErrDigest, hash)
-	}
-	if err := os.Chmod(tmp, 0o755); err != nil {
-		return errors.Join(err, os.Remove(tmp))
-	}
-	if err := os.Rename(tmp, dest); err != nil {
-		return errors.Join(err, os.Remove(tmp))
-	}
-	return nil
 }
 
 func SparkwingHome() string {

@@ -16,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
@@ -86,7 +85,7 @@ func newClaimedCommand(t *testing.T, args map[string]string, nodeID string) *cla
 func (c *claimedCommand) start(t *testing.T, ctx context.Context) <-chan error {
 	t.Helper()
 	for _, name := range []string{
-		"SPARKWING_CONTROLLER_URL", "SPARKWING_RUN_ID", "SPARKWING_NODE_ID", authwire.CacheGrantEnv,
+		"SPARKWING_CONTROLLER_URL", "SPARKWING_RUN_ID", "SPARKWING_NODE_ID", "SPARKWING_CACHE_GRANT",
 		"SPARKWING_GITCACHE_URL", "SPARKWING_DRY_RUN", "SPARKWING_START_AT", "SPARKWING_STOP_AT",
 	} {
 		t.Setenv(name, "")

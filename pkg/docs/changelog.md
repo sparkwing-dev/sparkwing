@@ -22,6 +22,8 @@ unlock.
 
 ### Removed
 - **storage (Breaking):** removed runner and launcher gitcache/package-proxy options, agent `gitcache`, controller cache URL announcements, and the CLI cache-health probe. Runners fetch source directly. Custom registry settings use `run.submit_env_allow`.
+- **runner (Breaking):** removed legacy shared binary transfers and cache-grant environment renewal
+  Runners build into their machine's binary cache while the new record-backed storage client awaits host binding. Working-tree source bundles still use an in-memory grant.
 
 ### Added
 - **cli + controller:** `sparkwing pipeline trigger --runner here --reason TEXT` hosts a hotfix run on the caller's machine under a one-shot runner credential bound to that run

@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -98,21 +97,6 @@ func runNodeCommand(parent context.Context, args []string, opts ...RunNodeOption
 				client.NewWithToken(*controllerURL, &http.Client{Timeout: 60 * time.Second}, token).WithWatchObserver(NoteWatch),
 				runID, nodeID, fence, lease, abandon, slog.Default())
 		}()
-	}
-
-	// safety: the pod runs the team's code, so its dispatcher hands it no cache
-	// credential; it asks for its own run's grant, which the source fetch, the
-	// binary cache, the artifact store and the node's steps all read from here.
-	if os.Getenv(authwire.CacheGrantEnv) == "" {
-		grantCtx := ctx
-		if fence.HolderID != "" {
-			grantCtx = store.WithNodeClaimFence(ctx, fence)
-		}
-		if grant := RequestRunCacheGrant(grantCtx, *controllerURL, token, runID, slog.Default()); grant != "" {
-			if err := os.Setenv(authwire.CacheGrantEnv, grant); err != nil {
-				return fmt.Errorf("hand the node its cache grant: %w", err)
-			}
-		}
 	}
 
 	ctx = withProcessNode(ctx, runID, nodeID)

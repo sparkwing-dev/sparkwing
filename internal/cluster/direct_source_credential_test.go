@@ -20,7 +20,6 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -45,7 +44,7 @@ func TestCloudRunnerFetchesWithTheTeamsDeployKey(t *testing.T) {
 	}
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	t.Setenv("SPARKWING_GITCACHE_URL", "")
-	t.Setenv(authwire.CacheGrantEnv, "")
+	t.Setenv("SPARKWING_CACHE_GRANT", "")
 	t.Setenv("SSH_AUTH_SOCK", "")
 
 	origins, record := t.TempDir(), t.TempDir()

@@ -84,3 +84,17 @@ row and exact uploader receipt in the store transaction. Only afterward may it
 delete the pending object. GC calls `DeleteObject` after the store's reachability
 and tombstone decision. Provenance stays on records because identical bytes may
 be uploaded by principals with different trust.
+
+`bincache.BinaryData` binds remote pipeline binaries to these same byte and
+record contracts. A download checks the exact repo/ref/build record and team
+provenance policy before reading its committed digest. It installs the
+executable only after EOF verification and successful close. An upload obtains
+the exact owner/job receipt before committing its binary record. The record
+store assigns provenance. The binding keeps the host's authority in memory.
+
+Remote runtime bindings remain pending. The old hosts compile into their
+machine's binary cache without a remote storage binding. They no longer use
+the legacy binary data client or mint and renew a cache grant in the process
+environment. Working-tree bundle fetches still use the legacy source transport
+with an in-memory grant. That source transport and the old controller handlers
+remain part of the storage cut.

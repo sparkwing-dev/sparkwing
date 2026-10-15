@@ -4,14 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -112,29 +108,4 @@ func (s *claimState) attempt(res runner.Result, runErr error) store.AttemptRepor
 		}
 	}
 	return report
-}
-
-// perf: a grant lives five minutes; renewing at two keeps one miss from
-// letting it lapse under a long step.
-const cacheGrantRenewal = 2 * time.Minute
-
-// safety: the grant is minted through the claim, so it stops renewing the
-// moment the claim ends or its run is cancelled, and lapses soon after.
-func renewCacheGrant(ctx context.Context, controllerURL, token, runID string) {
-	t := time.NewTicker(cacheGrantRenewal)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			grant := RequestRunCacheGrant(ctx, controllerURL, token, runID, slog.Default())
-			if grant == "" {
-				continue
-			}
-			if err := os.Setenv(authwire.CacheGrantEnv, grant); err != nil {
-				slog.Default().Warn("renew the cache grant", "run_id", runID, "err", err)
-			}
-		}
-	}
 }

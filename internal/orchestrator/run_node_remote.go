@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
-	"github.com/sparkwing-dev/sparkwing/internal/directdata"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
@@ -71,11 +70,11 @@ func runNodeRemote(
 		return runner.Result{}, fmt.Errorf("create private work directory: %w", err)
 	}
 
-	cacheGrant := RequestRunCacheGrant(ctx, controllerURL, token, runID, logger)
 	var sparkwingDir string
 	var err error
 	switch {
 	case workspaceSource:
+		cacheGrant := RequestRunCacheGrant(ctx, controllerURL, token, runID, logger)
 		sparkwingDir, err = bincache.FetchSourceBundleDirect(ctx, controllerURL, cacheGrant, runID,
 			trigger.TriggerEnv[bincache.SourceBundleObjectEnvKey], trigger.GitSHA, repoURL, workDir)
 	default:
@@ -93,7 +92,7 @@ func runNodeRemote(
 			repoURL, controllerURL, token, ownerFenced, runID, nodeID, logger)
 	}
 
-	binary, err := resolveRemoteBinary(ctx, sparkwingDir, directdata.New(controllerURL, cacheGrant, runID, nil), logger)
+	binary, err := resolveRemoteBinary(ctx, sparkwingDir, nil, logger)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("resolve binary: %w", err)
 	}
@@ -249,7 +248,7 @@ func (b remoteBinary) release() {
 	}
 }
 
-func resolveRemoteBinary(ctx context.Context, sparkwingDir string, data *directdata.Client, logger *slog.Logger) (remoteBinary, error) {
+func resolveRemoteBinary(ctx context.Context, sparkwingDir string, data *bincache.BinaryData, logger *slog.Logger) (remoteBinary, error) {
 	ts, err := pipelineentry.IsTypeScript(sparkwingDir)
 	if err != nil {
 		return remoteBinary{}, err

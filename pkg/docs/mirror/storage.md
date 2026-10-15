@@ -1,7 +1,7 @@
 # Storage rewrite contract
 
 This page describes the target storage contract. The byte backends and
-artifact clients implement it. Controller, tenant-store and host integration
+artifact and binary clients implement it. Controller, tenant-store and host integration
 are still in progress.
 
 <!-- design:begin -->
@@ -42,6 +42,8 @@ or package proxy.
 
 Local pipeline binaries stay in the local binary cache. Remote binaries use
 signed transfers and require authorized build provenance before execution.
+The binary client implements that check. Host binding is pending, so remote
+hosts build into their machine's binary cache without shared binary transfers.
 See [Caching](caching.md) for authoring cache declarations.
 
 ## Logs

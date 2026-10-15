@@ -34,7 +34,7 @@ func TestTriggerLoopStartsATypeScriptPipelineBehindTheBootstrap(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got, err := triggerBuildOrFetchBinary(t.Context(), dir, TriggerLoopOptions{}, "", "run-ts", slog.New(slog.DiscardHandler))
+	got, err := triggerBuildOrFetchBinary(t.Context(), dir, nil, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}

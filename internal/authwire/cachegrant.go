@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -201,20 +200,5 @@ func VerifyCacheGrant(signingKey, raw string, now time.Time) (CacheGrant, error)
 	return g, nil
 }
 
-// CacheGrantEnv names the variable a runner hands a run's cache grant in. The
-// run's processes send it to the cache as their bearer.
-const CacheGrantEnv = "SPARKWING_CACHE_GRANT"
-
-// CacheGrantKeyCredential and CacheControllerTokenCredential are the file
-// names the grant signing key and the cache's storage.count service token
-// take in the cache's credentials directory.
-const (
-	CacheGrantKeyCredential        = "cache-grant-key"
-	CacheControllerTokenCredential = "controller-token"
-)
-
-// CacheBearerFromEnv returns the bearer this process sends the cache: the
-// run's grant when a runner handed it one.
-func CacheBearerFromEnv() string {
-	return os.Getenv(CacheGrantEnv)
-}
+// CacheGrantKeyCredential names the controller's remaining source-grant signing key.
+const CacheGrantKeyCredential = "cache-grant-key"
