@@ -1,90 +1,97 @@
 # Direct data uploads
 
-When the controller has an S3 `--cache-blob-store`, runners can move binary
-and artifact bytes between themselves and the bucket. The controller handles
-small requests and the storage ledger. `GET /api/v1/services` announces
-`direct_data`; a runner with only a cache grant can probe
-`GET /api/v1/data/capabilities`. An `fs://` artifact store uses its existing
-local byte path; it does not issue S3 or CloudFront URLs. This signing route
-serves claimed runners.
-Source bundles have a separate pretrigger user-token path described below.
+The controller authorizes blobs and logical records through `/api/v1/data`.
+S3 and filesystem backends implement the same signed-object contract. A runner
+uses its current capability. Local publication uses run-bound publisher authority.
+The signed object client receives only the returned transfer URL and headers.
 
-The runner must hold a live claim on `run_id` for each request and send a
-cache grant minted for that claim. The runner's raw token cannot sign uploads.
-A signing grant carries the exact node or trigger claim, including its
-generation. Reserve, commit and download check that claim and its token again.
-Revoking the token stops new signed URLs, even while the claim remains live.
-Signing requests share the team's controller request budget across grants and
-answer `429` with `Retry-After` when it is spent.
-The pending row fixes the run ID and claimant. The
-operator's metered marker classifies a token as cloud for build trust. Keep
-cloud tokens on trusted machines because that marker controls provenance.
+This page describes the frozen data contract. Native signer, transaction and
+backend integration require separate evidence. The shared wire client and its
+transport tests do not establish those server guarantees.
 
-1. `POST /api/v1/data/upload` takes `{kind,key,size,sha256,run_id}`. `kind` is
-   `binary` or `artifact`. Binary keys are `bin/<input-hash>/<sha256>`;
-   artifact keys are `artifacts/blobs/<sha256>` or
-   `artifacts/manifests/<sha256>`. The controller reserves the declared bytes
-   in the team's cache share and returns `{upload_id,url,headers,expires_at}`.
-   The URL addresses exactly `pending/<upload_id>`. Its SigV4 signature covers
-   `Content-Length` and `x-amz-checksum-sha256`.
-2. The runner sends a PUT to that URL with the returned headers and exactly
-   the declared bytes. It sends no controller bearer to S3.
-3. `POST /api/v1/data/commit` takes `{upload_id,run_id}`. The controller HEADs
-   the pending object with checksum mode enabled. Size and SHA-256 must match
-   the declaration. It copies to the team's immutable key with
-   `If-None-Match: *`, storing uploader, provenance, digest and upload ID as
-   object metadata. The final key includes `cloud/` or `local/` after the team
-   prefix. The controller then publishes a database object row and moves the
-   reservation into used bytes. Direct readers cannot see the key until that
-   row commits. If a copy completed before the database commit, a new
-   reservation can adopt it only when S3 reports the same size, checksum and
-   provenance. The committed row keeps the original uploader from S3 metadata;
-   the new reservation records who recovered it.
+<!-- design:begin -->
 
-For `kind: source`, a user token with `runs.write` may reserve and commit
-`sources/<bundle-sha256>/<random-submission-id>` before a run exists, with
-`run_id: ""`. The source takes a free-team slot without incrementing the run
-count; the later trigger uses that same slot. The controller atomically binds
-the committed upload row to exactly one run from the same team, uploader and
-token. Only that run's live trigger or node claim can sign a source download.
-A retry must upload a new bundle. `runs retry` and Cloud
-`RunAndAwait` children cannot inherit an older run's one-run bundle; both
-are refused before admission. Submit a new Cloud run from the checkout
-(`sparkwing pipeline trigger <pipeline> --profile <cloud-profile> --working-tree`) to upload fresh bytes. A source consumes the cache share of the
-team's 1 GiB free allowance and is limited to 500 MiB. The hourly storage
-pass removes an unused source 24 hours after commit, or a bound source 24
-hours after the run finishes. Pending and running runs retain their sources until the bucket's absolute
-90-day lifecycle backstop, including unusually long active runs. It deletes S3 first, then removes the upload and object rows and reconciles
-the byte count.
+## Authorization
 
-The bucket's one-day `pending/` lifecycle removes abandoned bytes. The
-controller's hourly storage pass releases expired reservations and removes
-their upload rows. Uploads are limited to 500 MiB per object. Unknown-length
-artifacts spool to a temporary file before reserve.
+Repository identity, ref facts, uploader and read edges come from authenticated,
+persisted state. Request fields select values to compare with that state.
+Possession of a digest or another receipt from the same run grants no access.
+Each signing, commit, record lookup and record write rechecks current authority.
 
-For a binary, the final key includes its content hash. `POST /api/v1/data/download`
-takes `{kind,key}` and returns `{url,sha256,size,expires}`. A binary read uses
-`bin/<input-hash>` as its key; an artifact read names the committed key. The
-route applies the team's daily download cap to both paths. In-cluster callers
-receive an S3 URL, and callers through the
-public ingress receive a CloudFront URL. Cloud runners receive only cloud-built
-binaries unless the team owner sets
-`trust_local_builds` with `PUT /api/v1/team/build-trust`. The default is
-false. `GET /api/v1/team/build-trust` reports the team's choice. Runners
-verify the committed digest while reading.
+A job upload binds team, run, job, attempt and generation. Owner-unit receipts
+and non-job publication receipts cover binary/source bundles. Imported publication
+attempts may attach output and manifest records only for their bound published job.
+The server assigns provenance independently of caller-supplied metadata.
 
-Launcher claim tokens follow this cloud provenance policy for both binaries and
-artifacts. Their source bundle remains readable through its exact run binding.
+## Transfer messages
 
-A controller-dispatched node's claim token writes cache under its run's
-GitHub repository ID and git ref, which the controller reads from the run and
-never from the request, as GitHub Actions scopes caches: `GITHUB_REF` for a
-GitHub App trigger, otherwise the run's branch. Its binary reads take the
-first binary its repository holds under its own ref, then its pull request's
-base branch, then the repository's default branch, so another repository's
-binary, or a feature branch's, never reaches `main`. A repository's ref holds
-one binary per input hash: the first committed wins, and a second is refused
-`409`. A claim whose run names no repository or ref writes no binary, and
-still writes artifacts. Every other caller
-writes and reads only binaries no claim wrote, and a claim never reads theirs.
-Artifact keys name their content hash exactly, so they are not scoped.
+All names use snake_case. The shared messages live in `internal/controllerwire`.
+
+| Operation | Request | Response |
+| --- | --- | --- |
+| `POST /api/v1/data/upload` | `DataUploadRequest` | `DataUploadTicket` |
+| `POST /api/v1/data/commit` | `DataCommitRequest` | `DataReceipt` |
+| `POST /api/v1/data/download` | `DataDownloadRequest` | `DataSignedTransfer` |
+| `POST /api/v1/data/has-many` | `DataHasManyRequest` | `DataPresence` |
+| `GET /api/v1/data/records` | `lookup` and URL-escaped `selector` JSON | Matching record, memo or depcache result |
+| `POST /api/v1/data/records` | `DataRecordWriteRequest` | Committed record or copied memo hit |
+
+`DataUploadRequest` carries `authority`, `identity`, `digest` and `size`.
+The digest is a lowercase SHA-256 string. The controller reserves quota before
+signing. The ticket contains `id` and a `transfer` with `url`, `headers`,
+`expires_at`, `digest` and `size`.
+
+The client sends the exact bytes and signed headers to that one-object URL. It
+then commits with `authority` and `ticket_id`. Commit verifies physical size and
+digest, repeats current authorization and publishes the immutable object and
+receipt. A reservation or an uploaded temporary object alone is not a receipt.
+Retries retain the upload idempotency key and the exact commit body.
+
+Downloads select `authority` and `digest`. The server checks the live readable
+set before returning a transfer. The client verifies size and digest through EOF.
+Closing a partial reader does not establish a successful verified read. A signed
+URL remains a temporary credential until its expiry. Revocation stops new signing
+and commits but cannot revoke a URL already issued.
+
+The object client refuses reusable authorization, cookie and proxy credentials
+in signed transfer headers. It does not forward the controller bearer to storage.
+Redirects cannot move those headers to another destination.
+
+`HasMany` reports readable live blobs only. Unauthorized and absent digests are
+indistinguishable. A deadline or storage budget failure remains an error rather
+than successful absence.
+
+## Logical records and reuse
+
+Record lookup selects `lookup=record`, `memo` or `depcache` with the matching
+selector payload. `verified_default_only` is explicit. Responses retain authorized
+member metadata, read edges and provenance. A client cannot submit response read
+sets or ref facts as authorization proof.
+
+Record writes tag `operation=commit` or `copy_memo` and contain exactly the matching
+payload. The store checks record, member and copy edges in the mutation transaction.
+A memo hit copies output and manifest records and installs read edges atomically.
+
+Memo scope contains repository, ref, pipeline, job and hash. Depcache restores the
+own ref, verified pull-request base, then verified default branch. Memo has no
+pull-request-base fallback. A submitter-vouched ref writes under `manual:<ref>`.
+It cannot overwrite a verified ref. Missing or corrupt memo becomes a miss,
+depcache runs cold, and required output or artifact reads fail loudly.
+
+## Local cache reads and publication
+
+`run --sw-cache-from PROFILE`, or the machine's `run.cache_from`, opts into
+repo-bound reads under the user's existing authority. Eligible entries come from
+verified default-branch runs. The interface exposes memo, artifact and depcache
+reads. Pipeline binaries stay in the local binary cache.
+
+`run --publish PROFILE` is the separate one-way path for a local run record,
+results and logs under `trust_local_builds`. Publication failure is reported
+independently and does not change the completed local run outcome. Source-bundle
+intake and publication result-copy composition still need their owner bindings.
+
+Logs use their own signed upload and controller-proxied read path. They are not
+blob data downloads. See [Controller HTTP API](api.md), [Observability](observability.md)
+and [Storage limits](limits.md).
+
+<!-- design:end -->

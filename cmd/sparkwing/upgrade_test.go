@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -169,8 +172,15 @@ func TestUpgradeVerifierUsesStagedCheckoutAndExactEngine(t *testing.T) {
 				t.Fatal(err)
 			}
 			var commands [][]string
+			installs := 0
 			var kinds []procenv.Kind
-			verifier := upgradeVerifier{environment: []string{"PATH=/tools"}, buildEnv: func(kind procenv.Kind, _ procenv.Base, _ procenv.Runtime) ([]string, error) {
+			verifier := upgradeVerifier{environment: []string{"PATH=/tools"}, install: func(ctx context.Context, got engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
+				installs++
+				if ctx.Err() != nil || !reflect.DeepEqual(got, selected) || request.Directory != root || request.PipelineDir != ".sparkwing" || request.SDK != sdk || !reflect.DeepEqual(request.Environment, []string{"CLEAN=yes"}) {
+					t.Fatalf("selected installer: %+v %+v", got, request)
+				}
+				return engine.SDKCommand{Directory: filepath.Join(root, ".sparkwing"), Command: []string{filepath.Join(root, "sdk-entry")}}, nil
+			}, buildEnv: func(kind procenv.Kind, _ procenv.Base, _ procenv.Runtime) ([]string, error) {
 				kinds = append(kinds, kind)
 				return []string{"CLEAN=yes"}, nil
 			}, exec: func(_ context.Context, dir string, env []string, program string, args ...string) ([]byte, error) {
@@ -192,23 +202,23 @@ func TestUpgradeVerifierUsesStagedCheckoutAndExactEngine(t *testing.T) {
 			if !reflect.DeepEqual(kinds, []procenv.Kind{procenv.Install, procenv.HostChild}) {
 				t.Fatalf("environment boundaries: %v", kinds)
 			}
-			if len(commands) != 7 {
+			if installs != 1 || len(commands) != 6 {
 				t.Fatalf("commands: %v", commands)
 			}
-			wantNative := [][]string{{"go", "mod", "download"}, {"go", "build", "-mod=readonly", "-o", os.DevNull, "./..."}}
+			wantNative := [][]string{{"go", "build", "-mod=readonly", "-o", os.DevNull, "./..."}}
 			if sdk == engine.TypeScriptSDK {
-				wantNative = [][]string{{"npm", "ci", "--no-audit", "--no-fund"}, {"npm", "exec", "--offline", "--no", "--", "tsc", "--noEmit"}}
+				wantNative = [][]string{{"npm", "exec", "--offline", "--no", "--", "tsc", "--noEmit"}}
 			}
-			if !reflect.DeepEqual(commands[:2], wantNative) {
-				t.Fatalf("dependency/type checks: %v", commands[:2])
+			if !reflect.DeepEqual(commands[:1], wantNative) {
+				t.Fatalf("dependency/type checks: %v", commands[:1])
 			}
-			for _, command := range commands[2:] {
+			for _, command := range commands[1:] {
 				if command[0] != selected.Executable || command[1] != "pipeline" || (command[2] != "list" && command[2] != "describe" && command[2] != "plan") {
 					t.Fatalf("unverified engine or body command: %v", command)
 				}
 			}
-			if !reflect.DeepEqual(commands[2][1:], []string{"pipeline", "list", "--all", "--output=json"}) {
-				t.Fatalf("hidden pipelines excluded: %v", commands[2])
+			if !reflect.DeepEqual(commands[1][1:], []string{"pipeline", "list", "--all", "--output=json"}) {
+				t.Fatalf("hidden pipelines excluded: %v", commands[1])
 			}
 		})
 	}
@@ -227,7 +237,13 @@ func TestUpgradeVerifierStopsAtFailure(t *testing.T) {
 	for _, failAt := range []int{1, 2, 3, 4, 5} {
 		calls := 0
 		failure := errors.New("verification failed")
-		verifier := upgradeVerifier{buildEnv: func(procenv.Kind, procenv.Base, procenv.Runtime) ([]string, error) { return nil, nil }, exec: func(context.Context, string, []string, string, ...string) ([]byte, error) {
+		verifier := upgradeVerifier{install: func(context.Context, engine.Resolved, engine.SDKInstallRequest) (engine.SDKCommand, error) {
+			calls++
+			if calls == failAt {
+				return engine.SDKCommand{}, failure
+			}
+			return engine.SDKCommand{Directory: filepath.Join(root, ".sparkwing"), Command: []string{filepath.Join(root, "sdk-entry")}}, nil
+		}, buildEnv: func(procenv.Kind, procenv.Base, procenv.Runtime) ([]string, error) { return nil, nil }, exec: func(context.Context, string, []string, string, ...string) ([]byte, error) {
 			calls++
 			if calls == failAt {
 				return nil, failure
@@ -239,4 +255,114 @@ func TestUpgradeVerifierStopsAtFailure(t *testing.T) {
 			t.Fatalf("failure %d: calls=%d error=%v", failAt, calls, err)
 		}
 	}
+}
+
+func TestUpgradeVerifierRefusesInvalidInputsBeforeInstalling(t *testing.T) {
+	root := upgradeFixture(t, engine.GoSDK)
+	for _, selected := range []engine.Resolved{
+		{Executable: "relative", Identity: engine.Identity{Pin: engine.Pin{SDK: engine.GoSDK}}},
+		{Executable: filepath.Join(root, "engine"), Identity: engine.Identity{Pin: engine.Pin{SDK: "other"}}},
+	} {
+		verifier := upgradeVerifier{
+			install: func(context.Context, engine.Resolved, engine.SDKInstallRequest) (engine.SDKCommand, error) {
+				t.Fatal("installed invalid input")
+				return engine.SDKCommand{}, nil
+			},
+			buildEnv: procenv.Build,
+		}
+		if err := verifier.Verify(t.Context(), root, selected); err == nil {
+			t.Fatalf("accepted %+v", selected)
+		}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	verifier := upgradeVerifier{}
+	if err := verifier.Verify(ctx, root, engine.Resolved{Executable: filepath.Join(root, "engine")}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation: %v", err)
+	}
+}
+
+func TestUpgradeVerifierRequiresSelectedInstallerResult(t *testing.T) {
+	root := upgradeFixture(t, engine.GoSDK)
+	for _, command := range []engine.SDKCommand{
+		{},
+		{Directory: root, Command: []string{filepath.Join(root, "entry")}},
+		{Directory: filepath.Join(root, ".sparkwing"), Command: []string{"relative"}},
+	} {
+		verifier := upgradeVerifier{
+			buildEnv: procenv.Build,
+			install: func(context.Context, engine.Resolved, engine.SDKInstallRequest) (engine.SDKCommand, error) {
+				return command, nil
+			},
+			exec: func(context.Context, string, []string, string, ...string) ([]byte, error) {
+				t.Fatal("checked after invalid installation")
+				return nil, nil
+			},
+		}
+		if err := verifier.Verify(t.Context(), root, engine.Resolved{Executable: filepath.Join(root, "engine"), Identity: engine.Identity{Pin: engine.Pin{SDK: engine.GoSDK}}}); err == nil {
+			t.Fatalf("accepted %+v", command)
+		}
+	}
+}
+
+func FuzzUpgradeVerifierMasksStageFailures(f *testing.F) {
+	f.Add("private-upgrade-credential")
+	f.Add("secret with spaces and : / ?")
+	root := f.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".sparkwing"), 0o700); err != nil {
+		f.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".sparkwing", "main.go"), []byte("package main\n"), 0o600); err != nil {
+		f.Fatal(err)
+	}
+	f.Fuzz(func(t *testing.T, payload string) {
+		secret := "private-" + strings.ReplaceAll(strings.ToValidUTF8(payload, "?"), "\x00", "?") + "-credential"
+		encoded := base64.StdEncoding.EncodeToString([]byte(secret))
+		for failAt := 0; failAt < 5; failAt++ {
+			calls := 0
+			failure := &apierr.Error{Code: apierr.Internal, Message: secret, Hint: encoded, Details: map[string]any{secret: []string{encoded, secret}}}
+			fail := func() error {
+				calls++
+				if calls == failAt+1 {
+					return failure
+				}
+				return nil
+			}
+			verifier := upgradeVerifier{
+				environment: []string{"SPARKWING_TOKEN=" + secret, "HTTPS_PROXY=http://" + url.UserPassword("upgrade", secret).String() + "@proxy.example"}, buildEnv: procenv.Build,
+				install: func(_ context.Context, _ engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
+					if strings.Contains(strings.Join(request.Environment, "\n"), "SPARKWING_TOKEN=") {
+						t.Fatal("installer received a credential")
+					}
+					return engine.SDKCommand{Directory: filepath.Join(root, ".sparkwing"), Command: []string{filepath.Join(root, "entry")}}, fail()
+				},
+				exec: func(_ context.Context, _ string, env []string, _ string, _ ...string) ([]byte, error) {
+					if strings.Contains(strings.Join(env, "\n"), "SPARKWING_TOKEN=") {
+						t.Fatal("verification received a credential")
+					}
+					return []byte("{\"name\":\"check\"}\n"), fail()
+				},
+			}
+			err := verifier.Verify(t.Context(), root, engine.Resolved{Executable: filepath.Join(root, "engine"), Identity: engine.Identity{Pin: engine.Pin{SDK: engine.GoSDK}}})
+			if !errors.Is(err, failure) || strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), encoded) {
+				t.Fatalf("stage %d: credential leaked or cause lost", failAt)
+			}
+			for _, format := range []string{"json", "pretty", "plain"} {
+				inv, parseErr := clisurface.Parse("sparkwing", []string{"upgrade", "-o", format})
+				if parseErr != nil {
+					t.Fatal(parseErr)
+				}
+				var out bytes.Buffer
+				encode := func(w io.Writer, failure *apierr.Error) error {
+					return json.NewEncoder(w).Encode(apierr.Envelope{Error: failure})
+				}
+				if err := writeInvocationError(&out, &invocationError{inv: inv, cause: err}, encode); err != nil {
+					t.Fatal(err)
+				}
+				if strings.Contains(out.String(), secret) || strings.Contains(out.String(), encoded) {
+					t.Fatalf("stage %d %s: credential leaked", failAt, format)
+				}
+			}
+		}
+	})
 }

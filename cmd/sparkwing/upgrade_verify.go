@@ -16,15 +16,24 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 type upgradeVerifier struct {
 	environment []string
+	install     func(context.Context, engine.Resolved, engine.SDKInstallRequest) (engine.SDKCommand, error)
 	buildEnv    func(procenv.Kind, procenv.Base, procenv.Runtime) ([]string, error)
 	exec        func(context.Context, string, []string, string, ...string) ([]byte, error)
 }
 
-func (v *upgradeVerifier) Verify(ctx context.Context, checkout string, selected engine.Resolved) error {
+func (v *upgradeVerifier) Verify(ctx context.Context, checkout string, selected engine.Resolved) (resultErr error) {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	sdk := selected.Identity.Pin.SDK
+	if sdk != engine.GoSDK && sdk != engine.TypeScriptSDK {
+		return errors.New("upgrade: selected engine has no supported SDK")
+	}
 	if !filepath.IsAbs(selected.Executable) {
 		return errors.New("upgrade: verified engine executable must be an absolute path")
 	}
@@ -35,12 +44,31 @@ func (v *upgradeVerifier) Verify(ctx context.Context, checkout string, selected 
 	if dir != filepath.Join(checkout, ".sparkwing") {
 		return errors.New("upgrade: staged checkout contains no pipeline")
 	}
-	base := procenv.Base{Local: true, Captured: v.environment}
+	masker := secrets.NewMasker()
+	defer func() {
+		if resultErr != nil {
+			resultErr = &maskedCLIError{err: resultErr, masker: masker}
+		}
+	}()
+	base := procenv.Base{Local: true, Captured: v.environment, Masker: masker}
 	installEnv, err := v.buildEnv(procenv.Install, base, procenv.Runtime{})
 	if err != nil {
 		return err
 	}
-	if err := v.checkDependencies(ctx, dir, installEnv, selected.Identity.Pin.SDK); err != nil {
+	install := v.install
+	if install == nil {
+		install = func(ctx context.Context, selected engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
+			return selected.InstallSDK(ctx, request)
+		}
+	}
+	command, err := install(ctx, selected, engine.SDKInstallRequest{Directory: checkout, PipelineDir: ".sparkwing", SDK: sdk, Environment: installEnv})
+	if err := errors.Join(err, ctx.Err()); err != nil {
+		return fmt.Errorf("upgrade: install SDK: %w", err)
+	}
+	if command.Directory != dir || len(command.Command) == 0 || !filepath.IsAbs(command.Command[0]) {
+		return errors.New("upgrade: selected installer returned an invalid SDK command")
+	}
+	if err := v.checkTypes(ctx, dir, installEnv, sdk); err != nil {
 		return err
 	}
 	hostEnv, err := v.buildEnv(procenv.HostChild, base, procenv.Runtime{})
@@ -66,22 +94,20 @@ func (v *upgradeVerifier) Verify(ctx context.Context, checkout string, selected 
 	return nil
 }
 
-func (v *upgradeVerifier) checkDependencies(ctx context.Context, dir string, env []string, sdk engine.SDKKind) error {
-	var commands [][]string
+func (v *upgradeVerifier) checkTypes(ctx context.Context, dir string, env []string, sdk engine.SDKKind) error {
+	var command []string
 	switch sdk {
 	case engine.GoSDK:
 		// safety: a parent workspace must not substitute another checkout's SDK pin.
 		env = setEnv(env, "GOWORK", "off")
-		commands = [][]string{{"go", "mod", "download"}, {"go", "build", "-mod=readonly", "-o", os.DevNull, "./..."}}
+		command = []string{"go", "build", "-mod=readonly", "-o", os.DevNull, "./..."}
 	case engine.TypeScriptSDK:
-		commands = [][]string{{"npm", "ci", "--no-audit", "--no-fund"}, {"npm", "exec", "--offline", "--no", "--", "tsc", "--noEmit"}}
+		command = []string{"npm", "exec", "--offline", "--no", "--", "tsc", "--noEmit"}
 	default:
 		return fmt.Errorf("upgrade: unsupported SDK %q", sdk)
 	}
-	for _, command := range commands {
-		if _, err := v.exec(ctx, dir, env, command[0], command[1:]...); err != nil {
-			return fmt.Errorf("upgrade: %s: %w", strings.Join(command, " "), err)
-		}
+	if _, err := v.exec(ctx, dir, env, command[0], command[1:]...); err != nil {
+		return fmt.Errorf("upgrade: %s: %w", strings.Join(command, " "), err)
 	}
 	return nil
 }

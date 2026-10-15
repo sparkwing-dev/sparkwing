@@ -1,3 +1,137 @@
+# W9 selected-engine upgrade and HTTP reference continuation
+
+This continuation started clean at 7f556bd82. W9 remains incomplete. No Git
+writes, Sparkwing executable, candidate, service or pipeline ran. Writes stayed
+inside this worktree and /tmp/sw-astra-W9. Scratch is removed before reporting.
+
+## Delivered
+
+- Upgrade verification calls the supplied verified engine's InstallSDK with the
+  staged checkout, SDK kind and filtered install environment. It no longer
+  performs a second Go dependency download or npm install. Go package compilation
+  and TypeScript type checking remain, followed by list, describe and plan through
+  that same engine, including hidden pipelines. Invalid SDKs/executables, cancelled
+  input and invalid installer results fail before later verification stages.
+- The install and host-child environment builders share a masker. Every returned
+  verification failure passes through maskedCLIError, preserving its cause and
+  canonical code while masking message, hint, details and detail keys.
+- The HTTP reference now derives directly from capability.Routes. Each row retains
+  audience, ownership lookup, authentication, retry policy and complete access
+  alternatives. Conjoined grants stay within their alternative. Removed the AST
+  route/scope renderer, its admin-bypass prose and the unused repo-root argument.
+  Its only script caller now uses the new invocation. A drift test compares the
+  rendered reference with the published artifact. Output errors remain failures.
+- Replaced the API, signed-data and versioning guides with their frozen contracts.
+  Removed old trigger/node paths, cache grants, legacy cache fallback, historical
+  toolchain substitution, automatic second-store fallback and age/floor behavior
+  that conflicts with signed engine policy. The target sections use design markers
+  and explicitly name native integration boundaries. Updated changelog and mirrors.
+
+The masking invariant is: no registered proxy credential appears in upgrade
+failure output, whether the failure comes from installation, type checking,
+list, describe or plan. The fuzzer varies credential content and URL userinfo
+escaping, checks raw/base64 forms, canonical hints/details/detail keys and every
+CLI output mode, and verifies that excluded bearer env never reaches the tools.
+An overlay removing only error masking makes the seed property fail. The checked-in
+source passes. This introduces no new credential source or masking algorithm.
+
+## Verification
+
+All Go commands used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and
+GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W9. Tests used -p 4.
+
+- Whole-repository go build -p 4 ./... passes on the final production source.
+- Vet passes for cmd/sparkwing, internal/apiref, internal/clisurface,
+  internal/controllerwire and tests/acceptance. CLI/apiref vet was repeated after
+  their final source/test edits.
+- All upgrade tests and the masking property's seeds pass, as do all apiref tests.
+  The final adversarial fuzzer completed 18 executions with two workers over its
+  three-second fuzz budget, after loading twelve cached/seed corpus entries.
+- Full clisurface, controllerwire and tests/acceptance suites pass.
+  internal/acceptance has no test files. No native placement cell was unskipped.
+- Full doccheck/apiref package tests and focused pkg/docs mirror, changelog,
+  section, search, read, guide, symbol and privacy tests pass.
+- Full source doccheck passes: 313 CLI invocations, no unresolved grammar,
+  valid YAML, no broken links or schema/auxiliary/sidebar drift. Its 72 Go blocks
+  are partial/non-self-contained with no SDK drift, not complete-program compile
+  evidence. Protocol schemas were already current and were not rewritten.
+- commentcheck -base main is clean across 1,143 Go files. Mirror check,
+  gofmt and diff --check pass. No test sleeps were added.
+
+Ported the existing exact-engine and stage-failure upgrade verifier tests to the
+InstallSDK boundary. Added two upgrade validation tests and one fuzz property.
+Replaced the old apiref scope fixture with four tests covering complete policy
+alternatives, every final route once, artifact drift and output failure. No parked
+T1 port-inventory row names a W9-owned source test.
+
+Gross deletion counts against this continuation's starting HEAD are 54 production
+Go lines, 23 old test lines and 501 source-guide lines. The regenerated HTTP
+reference replaces another 243 generated lines. Mirrors are excluded. No entire
+production file was deleted, and these are not net-reduction counts.
+
+## Remaining amendments and handoffs
+
+Every amendments-1.md row naming W9 and both W9 design handoffs were rechecked
+against the previous ledger. Previously completed work was retained.
+
+| Rows | Status and remaining integration |
+| --- | --- |
+| A1-03/08/09/13-18/22/29/30/34/55 | Existing strict errors, claim/reconcile, execution-state and signed-data clients remain. Native authorization, claims, read edges, log completeness and store/backend composition remain with their owners. The generated reference now preserves their complete policy metadata. |
+| A1-10/11/19; handoff finding 3 | Upgrade now consumes selected-engine SDK installation. Source.Acquire/ForRequest/ForExecution and engine resolution/InstallSDK remain declared stubs. Initial/local/detached execution and one granted-identity constructor through hello still need the W3/W8 host binding. |
+| A1-20/38/39/40/41/49 | Prior enrollment/schema/private-file, cloud award, foreground and managed-unit adapters remain. Native issuance, unified runner, local lifecycle, service refresh, schedule tick and pool registration remain open. |
+| A1-43/50 | This continuation completes the upgrade verifier's selected-install and diagnostic boundary with contract fakes. Exact-engine resolution/staging, local host retirement, cache/publication composition, initial here intake and target/source dispatch remain unfinished. |
+| A1-37/45/47 | Existing lint/guard/settings work remains. Native cache binding, schedule intake/captured env, timer ownership and old client/consumer retirement remain unfinished. |
+| A1-51; handoff finding 7 | Protocol schemas remain current. API/signed-data/versioning guides and generated policy reference are corrected. OpenAPI still derives from legacy controller registrations, and other runtime guides need the final audit. Alias inspection evidence does not prove native execution. |
+| A1-52/53 | Windows bridge packaging/stamping, native platform/placement drivers and real-repository QA remain unclaimed. |
+
+## Contract changes needed and next integration
+
+No foreign contract was changed and no new contract question was introduced.
+Existing unresolved contracts still apply:
+
+- W6/W1/W2 must agree a typed persisted/audited here reason. Request and
+  CreateRunRequest still have no such field. W9 does not encode it as actor,
+  source or environment data.
+- W2/W6/source intake must agree URL-to-numeric-ID resolution for GitHub.
+  CanonicalRepository requires that numeric identity. W9 does not synthesize
+  a git:github.com key or grant authority from a typed display name.
+- Source-bundle upload ownership, publication result-copy operations, sizing reset,
+  schedule install/tick ownership and runner pool registration still need their
+  existing owner resolution.
+
+Next W9 work includes migrating OpenAPI from legacy registration/schema inputs,
+then replacing the initial/local/detached intake and old host/consumer once their
+contract projections can be composed. Fakes should continue to establish those
+adapters while the owner implementations remain unavailable. Native evidence
+requires the source/engine/shared-host, owner actor, claim-scoped controller/storage,
+captured environment, plan cache and lease keeper bindings. resolveHereRuntime
+still returns an explicit unavailable error. No legacy runtime was claimed retired.
+
+## Shared files, mechanisms and friction
+
+Shared files changed are internal/apiref/main.go and main_test.go,
+bin/gen-api-docs.sh, CHANGELOG.md, this handoff, and generated pkg/docs artifacts.
+No foreign production caller was migrated. The generator script is the only caller
+migrated for the removed apiref repository argument. No API/schema contract changed.
+
+The only new callback is the private upgrade install function, defaulting directly
+to Resolved.InstallSDK. It lets tests use the existing engine contract while that
+implementation is a stub. The smaller direct call cannot be exercised with a fake
+Resolved receiver. Undo is to remove the callback and invoke the method directly.
+The renderer reads the existing policy table without another registry or service.
+No public flag, setting, environment variable, retry loop or customer limit was added.
+
+Friction: native Sparkwing executables/pipelines remain forbidden for this worker,
+so actual engine resolution/installation and placement QA are unverified. OpenAPI's
+legacy generator is still separate work and was not claimed synchronized by the
+HTTP reference change. Doccheck caught one banned word, which was removed.
+The property fixture was corrected to use URL userinfo encoding and an actual
+pipeline entry before its final run. Overwing discovery/show work but report a stale
+installed binary. Git still resolves Korey Gambill's default identity and no local
+core.worktree. The lead retains independent review, commits, native gates and landing.
+
+---
+
 # W9 documentation grammar and library inflation continuation
 
 This continuation started clean at fe2071f89. W9 remains incomplete. No Git

@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **upgrade:** verification calls the selected engine's SDK installer before Go compilation or TypeScript type checking and describe/plan checks. Captured install/check environments share a masker for proxy credentials. Native engine resolution and upgrade staging remain integration requirements.
+- **API documentation:** the HTTP reference is generated from the final capability policy, retaining credential alternatives, grants, binding, liveness, audience and retry rules. API, signed-data and versioning guides describe the frozen contracts and name native integration boundaries.
+
 - **sparks:** (Breaking) `pipeline sparks inflate --library MODULE` copies a library into the project through the shared command grammar. Plain output reports its destination. Catalog and agent guidance use the same selector. See [migration](docs/migrations/_unreleased.md#spark-library-inflation).
 - **documentation:** fenced CLI examples are checked against the shared parser, including flags, selectors and pipeline argument separators. Local execution, scheduling and security guides describe sealed inputs, capabilities and the exclusive Cloud Job boundary, with native integration gaps stated.
 

@@ -3,7 +3,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-go -C "$REPO_ROOT" run ./internal/apiref "$REPO_ROOT" > "$REPO_ROOT/docs/api-reference.md"
+go -C "$REPO_ROOT" run ./internal/apiref > "$REPO_ROOT/docs/api-reference.md"
 
 spec="$REPO_ROOT/api/openapi.yaml"
 rewritten="$(mktemp)"
