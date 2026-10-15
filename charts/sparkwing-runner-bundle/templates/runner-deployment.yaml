@@ -112,34 +112,6 @@ spec:
             {{- end }}
             {{- if .Values.runner.alsoClaimTriggers }}
             - --also-claim-triggers
-            {{- if eq .Values.runner.triggerRunner.kind "warm" }}
-            - --claim-nodes=false
-            {{- end }}
-            {{- if ne .Values.runner.triggerRunner.kind "inprocess" }}
-            - {{ printf "--trigger-runner=%s" .Values.runner.triggerRunner.kind | quote }}
-            - {{ printf "--trigger-runner-namespace=%s" .Release.Namespace | quote }}
-            - {{ printf "--trigger-runner-image=%s" $runnerImage | quote }}
-            - {{ printf "--trigger-runner-sa=%s" (include "sparkwing-runner-bundle.serviceAccountName" .) | quote }}
-            - {{ printf "--trigger-runner-image-pull-policy=%s" .Values.runner.image.pullPolicy | quote }}
-            {{- range .Values.runner.triggerRunner.labels }}
-            - {{ printf "--trigger-runner-label=%s" . | quote }}
-            {{- end }}
-            {{- if .Values.cache.enabled }}
-            - {{ printf "--trigger-artifact-store=http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.cache.fullname" .) .Release.Namespace | quote }}
-            {{- end }}
-            {{- end }}
-            {{- end }}
-            {{- with .Values.runner.jobCeiling.cpu }}
-            - {{ printf "--cpu-ceiling=%v" . | quote }}
-            {{- end }}
-            {{- with .Values.runner.jobCeiling.memory }}
-            - {{ printf "--memory-ceiling=%v" . | quote }}
-            {{- end }}
-            {{- with .Values.runner.jobDeadline }}
-            - {{ printf "--deadline=%v" . | quote }}
-            {{- end }}
-            {{- if .Values.runner.teamNodes }}
-            - --team-nodes
             {{- end }}
             {{- if gt (int .Values.runner.maxClaimsBeforeRestart) 0 }}
             - {{ printf "--max-claims-before-restart=%d" (int .Values.runner.maxClaimsBeforeRestart) | quote }}

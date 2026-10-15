@@ -159,33 +159,6 @@ func TestIdleExit_PreHelloConnectionsDoNotResetIdleClock(t *testing.T) {
 	}
 }
 
-func TestIdleExit_WaitsForWorkingConnections(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
-	}
-
-	home := shortHome(t)
-	const idleTimeout = 250 * time.Millisecond
-	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: idleTimeout})
-
-	cl := ensure(t, home, "")
-	started := time.Now()
-	select {
-	case err := <-td.done:
-		t.Fatalf("daemon exited while a working client was connected: %v", err)
-	case <-time.After(idleTimeout + 100*time.Millisecond):
-	}
-	if elapsed := time.Since(started); elapsed >= 600*time.Millisecond {
-		t.Fatalf("working-connection observation took %s, want under 600ms", elapsed)
-	}
-
-	_ = cl.Close()
-	if err := td.waitExit(t, 3*time.Second); err != nil {
-		t.Fatalf("daemon should idle out after the working client leaves, got %v", err)
-	}
-}
-
 func TestIdleExit_GraceThenIdleUnderHealthProbes(t *testing.T) {
 	t.Parallel()
 	if testing.Short() {

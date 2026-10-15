@@ -1,7 +1,6 @@
 package cluster
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -17,7 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
@@ -37,36 +35,15 @@ type TriggerLoopOptions struct {
 	// build. It binds only when given; a direct-source runner given one may
 	// also fetch with the machine's own git credentials when the controller
 	// releases none.
-	AllowRepos      sourceurl.RepoAllowlist
-	Token           string
-	RunnerKind      string
-	K8sNamespace    string
-	K8sImage        string
-	K8sRunnerSA     string
-	K8sPullSecret   string
-	K8sCtrlURL      string
-	Kubeconfig      string
-	ArtifactStore   string
-	K8sLabels       []string
-	K8sNodeSelector []string
-	K8sTolerations  []string
-
-	DependencyProxy string
-
-	K8sImagePullPolicy string
-	K8sCPUCeiling      string
-	K8sMemoryCeiling   string
-	K8sJobDeadline     time.Duration
-	K8sTeamNodes       bool
-	WorkRoot           string
-	Poll               time.Duration
-	Logger             *slog.Logger
+	AllowRepos sourceurl.RepoAllowlist
+	Token      string
+	WorkRoot   string
+	Poll       time.Duration
+	Logger     *slog.Logger
 
 	MaxConcurrent int
 
 	Sources []string
-
-	nodeRunner func(orchestrator.Backends, *store.Trigger) runner.Runner
 }
 
 func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
@@ -91,19 +68,9 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 		return fmt.Errorf("mkdir work-root: %w", err)
 	}
 	sweepLeftoverDeployKeys(logger)
-	factory, err := triggerNodeRunner(opts)
-	if err != nil {
-		return fmt.Errorf("trigger loop: %w", err)
-	}
-	opts.nodeRunner = factory
-
-	nodeRunner := opts.RunnerKind
-	if nodeRunner == "" {
-		nodeRunner = "inprocess"
-	}
 	cli := client.NewWithToken(opts.ControllerURL, nil, opts.Token).
 		WithRunnerIdentity(processRunnerIdentity("trigger-loop")).
-		WithTriggerNodeRunner(nodeRunner)
+		WithTriggerNodeRunner("inprocess")
 	if !opts.AllowRepos.Empty() {
 		cli.WithAllowRepos(opts.AllowRepos.Patterns())
 	}
@@ -352,36 +319,13 @@ var hostTriggerRunFn = orchestrator.HostTriggerRun
 const triggerRunLimit = 6 * time.Hour
 
 func hostTriggerRun(ctx context.Context, entry pipelineentry.Command, workDir string, trigger *store.Trigger, opts TriggerLoopOptions, logger *slog.Logger) error {
-	var nodeRunner runner.Runner
-	if opts.nodeRunner != nil {
-		nodeRunner = opts.nodeRunner(orchestrator.Backends{}, trigger)
-	}
 	ctx, cancel := context.WithTimeout(ctx, triggerRunLimit)
 	defer cancel()
 	logger.Info("trigger loop: hosting the run", "trigger_id", trigger.ID, "entry", entry, "dir", workDir)
 	return hostTriggerRunFn(ctx, orchestrator.TriggerHost{
 		ControllerURL: opts.ControllerURL, Token: opts.Token, Trigger: trigger,
-		Entry: entry, Dir: workDir, Runner: nodeRunner, Logger: logger,
+		Entry: entry, Dir: workDir, Logger: logger,
 	})
-}
-
-// safety: the Jobs and warm runners a node goes to reach the controller
-// themselves, under the claim each node's dispatch takes, so they get the
-// controller's address and never this runner's token.
-func triggerNodeRunner(opts TriggerLoopOptions) (func(orchestrator.Backends, *store.Trigger) runner.Runner, error) {
-	var deadline string
-	if opts.K8sJobDeadline > 0 {
-		deadline = opts.K8sJobDeadline.String()
-	}
-	return orchestrator.BuildTriggerRunnerFactory(opts.RunnerKind, orchestrator.K8sRunnerFactoryConfig{
-		Kubeconfig: opts.Kubeconfig, Namespace: opts.K8sNamespace, Image: opts.K8sImage,
-		ServiceAccount: opts.K8sRunnerSA, ImagePullSecret: opts.K8sPullSecret,
-		ControllerURL: cmp.Or(opts.K8sCtrlURL, opts.ControllerURL), DispatcherURL: opts.ControllerURL,
-		ArtifactStoreURL: opts.ArtifactStore, GitcacheURL: opts.GitcacheURL, AgentToken: opts.Token,
-		Labels: opts.K8sLabels, TeamNodes: opts.K8sTeamNodes,
-		DependencyProxyURL: cmp.Or(opts.DependencyProxy, "off"), ImagePullPolicy: opts.K8sImagePullPolicy,
-		CPUCeiling: opts.K8sCPUCeiling, MemoryCeiling: opts.K8sMemoryCeiling, JobDeadline: deadline,
-	}, opts.K8sNodeSelector, opts.K8sTolerations)
 }
 
 func shipCompileOutput(ctx context.Context, compileLog *orchestrator.EngineNodeLog, runID string, buildErr error, logger *slog.Logger) {

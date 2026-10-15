@@ -6,6 +6,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
 
 var errPeerClosed = errors.New("wingd: peer closed connection")
@@ -14,7 +16,7 @@ func (d *Daemon) elect() (bool, error) {
 	if err := d.layout.ensureDir(); err != nil {
 		return false, err
 	}
-	f, err := os.OpenFile(d.layout.lock, os.O_CREATE|os.O_RDWR, 0o600)
+	f, err := fssecure.OpenFile(d.layout.lock, os.O_CREATE|os.O_RDWR)
 	if err != nil {
 		return false, fmt.Errorf("wingd: open lock %s: %w", d.layout.lock, err)
 	}
@@ -45,7 +47,7 @@ func LockHeld(home string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	f, err := os.OpenFile(l.lock, os.O_RDWR, 0o600)
+	f, err := fssecure.OpenFile(l.lock, os.O_RDWR)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
@@ -108,7 +110,7 @@ func ClaimDaemonStart(home string) (release func(), claimed bool, err error) {
 	if err := l.ensureDir(); err != nil {
 		return nil, false, err
 	}
-	f, err := os.OpenFile(l.start, os.O_CREATE|os.O_RDWR, 0o600)
+	f, err := fssecure.OpenFile(l.start, os.O_CREATE|os.O_RDWR)
 	if err != nil {
 		return nil, false, err
 	}
@@ -130,7 +132,7 @@ func PrepareDaemonSocket(home string) (SocketPreparation, error) {
 	if err := l.ensureDir(); err != nil {
 		return SocketPreparationUnknown, err
 	}
-	f, err := os.OpenFile(l.lock, os.O_CREATE|os.O_RDWR, 0o600)
+	f, err := fssecure.OpenFile(l.lock, os.O_CREATE|os.O_RDWR)
 	if err != nil {
 		return SocketPreparationUnknown, err
 	}

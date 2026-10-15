@@ -1,13 +1,15 @@
-// Package launcher runs controller-dispatched nodes as Kubernetes Jobs. It
-// claims each ready node from the controller and builds the node's Job in
-// trusted code; it never runs a pipeline's code itself.
 package launcher
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"net/url"
 	"regexp"
-	"slices"
 	"strconv"
 	"time"
 
@@ -15,210 +17,184 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
-// ServiceAccount is the one service account every launcher Job runs as. Its
-// manifest carries no cloud-role annotation, and the Job mounts no token.
-const ServiceAccount = "sparkwing-customer-job"
-
-// JobLabel names every launcher Job's pod by its Job, so no node runs two.
-const JobLabel = "sparkwing.dev/job"
-
-// Annotations naming the claim a launcher Job was built for.
+// Cloud Jobs use a separate API identity, and labels bind Kubernetes objects to their reservation.
 const (
-	RunAnnotation        = "sparkwing.dev/run-id"
-	NodeAnnotation       = "sparkwing.dev/node-id"
-	GenerationAnnotation = "sparkwing.dev/claim-generation"
-)
-
-// MaxDeadline bounds a Job's life, and with it the life of its claim token.
-const MaxDeadline = store.MaxClaimTokenLifetime
-
-// DeadlineMargin is taken off a claim token's lifetime for its Job's deadline.
-const DeadlineMargin = 30 * time.Second
-
-const (
-	jobUID              = 65534
-	jobTTLAfterFinished = 60
-	minimumClassCores   = 2
-	managedByLauncher   = "sparkwing-launcher"
-	jobAppName          = "sparkwing-job"
-	runNodeVerb         = "run-node"
-	fetchSourceVerb     = "fetch-source"
-	sourceDir           = "/tmp/src"
-	jobBearerEnv        = "SPARKWING_AGENT_TOKEN"
+	ServiceAccount        = "sparkwing-customer-job"
+	JobLabel              = "sparkwing.dev/job"
+	JobBinary             = "sparkwing-runner"
+	TeamLabel             = "sparkwing.dev/team"
+	TeamNodeLabel         = "sparkwing.dev/team-node"
+	managedByLauncher     = "sparkwing-launcher"
+	bindingAnnotation     = "sparkwing.dev/award-binding"
+	deadlineAnnotation    = "sparkwing.dev/job-deadline"
+	reservationAnnotation = "sparkwing.dev/node-reservation"
+	cleanupFinalizer      = "sparkwing.dev/cloud-cleanup"
+	bootstrapPath         = "/etc/sparkwing/bootstrap/bootstrap"
 )
 
 var digestPinned = regexp.MustCompile(`^[a-z0-9][a-z0-9.:/_-]*@sha256:[0-9a-f]{64}$`)
 
-// Config is the operator's whole say over a launcher Job. Nothing a pipeline
-// declares reaches a Job except its node's cpu class, which these ceilings
-// cap, and the pipeline's own run and node IDs.
-type Config struct {
-	Namespace     string
-	Image         string
-	ControllerURL string
-	CPUCeiling    float64
-	MemoryCeiling int64
-	Deadline      time.Duration
-	ScratchLimit  string
-	// CacheURL, GitcacheURL and DependencyProxyURL are the caches a runner
-	// Job is handed. A pod opens a cache only with the grant its claim token
-	// asks the controller for, which reaches its own team's trees alone.
-	CacheURL, GitcacheURL, DependencyProxyURL string
+// Validate rejects unpinned images and missing operator resource ceilings before reserving a node.
+func (c CloudJobConfig) Validate() error {
+	u, err := url.Parse(c.ControllerURL)
+	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return errors.New("controller URL must be an HTTP(S) origin without credentials, query or fragment")
+	}
+	if len(validation.IsDNS1123Label(c.Namespace)) != 0 {
+		return errors.New("a valid namespace is required")
+	}
+	if !digestPinned.MatchString(c.RunnerImage) || !digestPinned.MatchString(c.DockerImage) {
+		return errors.New("runner and Docker images must be pinned by SHA-256 digest")
+	}
+	if math.IsNaN(c.CPUCeiling) || math.IsInf(c.CPUCeiling, 0) || c.CPUCeiling < 0.001 || c.CPUCeiling >= float64(math.MaxInt64)/1000 || c.MemoryCeiling <= 0 {
+		return errors.New("positive finite CPU and memory ceilings are required")
+	}
+	return nil
 }
 
-// Validate refuses a Config that would let a Job run unpinned, uncapped or
-// past its claim token.
-func (c Config) Validate() error {
-	var errs []error
-	if c.Namespace == "" || c.ControllerURL == "" {
-		errs = append(errs, errors.New("the namespace and the controller URL are required"))
+func buildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award CloudJobAward, boundary CloudBoundary) (CloudJobResources, error) {
+	if err := cfg.Validate(); err != nil {
+		return CloudJobResources{}, err
 	}
-	if !digestPinned.MatchString(c.Image) {
-		errs = append(errs, fmt.Errorf("image %q is not pinned by a sha256 digest", c.Image))
+	if err := validateAward(award); err != nil {
+		return CloudJobResources{}, err
 	}
-	if c.CPUCeiling <= 0 || c.MemoryCeiling <= 0 {
-		errs = append(errs, errors.New("a cpu and a memory ceiling are required"))
+	if err := ctx.Err(); err != nil {
+		return CloudJobResources{}, err
 	}
-	if c.Deadline < store.MinLaunchLifetime || c.Deadline > MaxDeadline {
-		errs = append(errs, fmt.Errorf("the deadline must be from %s to %s", store.MinLaunchLifetime, MaxDeadline))
+	if boundary == nil {
+		return CloudJobResources{}, errors.New("Cloud boundary is required")
 	}
-	if _, err := resource.ParseQuantity(c.scratchLimit()); err != nil {
-		errs = append(errs, fmt.Errorf("scratch limit: %w", err))
+	b := award.Binding
+	deadline, err := limits.JobDeadline(now, b.OwnerDeadline, b.AttemptDeadline)
+	if err != nil {
+		return CloudJobResources{}, err
 	}
-	return errors.Join(errs...)
-}
-
-func (c Config) scratchLimit() string {
-	if c.ScratchLimit == "" {
-		return k8s.DefaultScratchLimit
+	if !b.ParentCapabilityExpiry.After(now) {
+		return CloudJobResources{}, limits.ErrNoTime
 	}
-	return c.ScratchLimit
-}
-
-// BuildJobOld returns the Job that runs claim's node. Every field is fixed here
-// or by cfg; the claim contributes its IDs, its token, its class only through
-// the ceilings, and its token's lifetime as the Job's deadline.
-func BuildJobOld(cfg Config, claim store.LaunchClaim) *batchv1.Job {
-	name := k8s.JobName(claim.RunID, claim.NodeID, int(claim.Generation))
-	team := k8s.TeamLabelValue(string(claim.Team))
-	labels := map[string]string{
-		"app.kubernetes.io/name":       jobAppName,
-		"app.kubernetes.io/managed-by": managedByLauncher,
-		JobLabel:                       name,
-		k8s.TeamLabel:                  team,
+	if deadline.IsZero() || b.ParentCapabilityExpiry.Before(deadline) {
+		deadline = b.ParentCapabilityExpiry
 	}
-	env := []corev1.EnvVar{
-		{Name: "SPARKWING_CONTROLLER_URL", Value: cfg.ControllerURL},
-		{Name: "SPARKWING_RUN_ID", Value: claim.RunID},
-		{Name: "SPARKWING_NODE_ID", Value: claim.NodeID},
-		{Name: jobBearerEnv, Value: claim.Token},
-		{Name: "HOME", Value: "/tmp"},
-		{Name: "SPARKWING_HOME", Value: "/tmp/sparkwing"},
-		{Name: "GOCACHE", Value: "/tmp/go-build"},
-		{Name: "GOMODCACHE", Value: "/tmp/go-mod"},
-		{Name: "SPARKWING_SOURCE_DIR", Value: sourceDir},
-		{Name: "SPARKWING_LOG_FORMAT", Value: "json"},
-		{Name: "SPARKWING_RUNNER_NAME", Value: name},
-		{Name: "SPARKWING_RUNNER_TYPE", Value: "kubernetes"},
+	seconds := int64(deadline.Sub(now) / time.Second)
+	if seconds <= 0 {
+		return CloudJobResources{}, limits.ErrNoTime
 	}
-	for _, v := range []corev1.EnvVar{
-		{Name: "SPARKWING_CACHE_URL", Value: cfg.CacheURL},
-		{Name: "SPARKWING_GITCACHE_URL", Value: cfg.GitcacheURL},
-	} {
-		if v.Value != "" {
-			env = append(env, v)
+	name := jobName(b)
+	bindingJSON, err := json.Marshal(b)
+	if err != nil {
+		return CloudJobResources{}, fmt.Errorf("invalid award binding: %w", err)
+	}
+	var engineJSON []byte
+	if award.Engine != nil {
+		engineJSON, err = json.Marshal(award.Engine)
+		if err != nil {
+			return CloudJobResources{}, fmt.Errorf("invalid engine identity: %w", err)
 		}
 	}
-	env = append(env, k8s.DependencyProxyEnv(cfg.DependencyProxyURL)...)
-	// safety: the init container gets the same fixed env, and its command is
-	// the launcher's own; the pipeline's container adds only the module mode.
-	fetchEnv := slices.Clone(env)
-	env = append(env, corev1.EnvVar{Name: "GOFLAGS", Value: "-mod=mod"})
-	scratch := resource.MustParse(cfg.scratchLimit())
-	// safety: the lifetime runs from the claim on the controller's clock, so the
-	// margin covers the response and the Job create, and the Job never outlives
-	// the credential it carries whatever the launcher's clock says.
-	deadline := max(claim.LifetimeSecs-int64(DeadlineMargin/time.Second), 1)
-	backoff, ttl := int32(0), int32(jobTTLAfterFinished)
-	pod := k8s.HardenedPodSpec(scratch)
-	pod.ServiceAccountName = ServiceAccount
-	pod.NodeSelector = map[string]string{k8s.CPUBandKey: k8s.CPUBandSmall, k8s.TeamNodeLabel: team}
-	pod.Tolerations = []corev1.Toleration{{
-		Key: k8s.CPUBandKey, Operator: corev1.TolerationOpEqual,
-		Value: k8s.CPUBandSmall, Effect: corev1.TaintEffectNoSchedule,
-	}}
-	pod.Affinity = oneJobPerMachine()
-	pod.SecurityContext.RunAsUser = ptr(int64(jobUID))
-	pod.SecurityContext.RunAsGroup = ptr(int64(jobUID))
-	pod.InitContainers = []corev1.Container{jobContainer(cfg, claim, "source", fetchSourceVerb, fetchEnv)}
-	pod.Containers = []corev1.Container{jobContainer(cfg, claim, "node", runNodeVerb, env)}
-	return &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels, Annotations: map[string]string{
-			RunAnnotation: claim.RunID, NodeAnnotation: claim.NodeID, GenerationAnnotation: strconv.FormatInt(claim.Generation, 10),
-		}},
-		Spec: batchv1.JobSpec{
-			BackoffLimit:            &backoff,
-			TTLSecondsAfterFinished: &ttl,
-			ActiveDeadlineSeconds:   &deadline,
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: labels,
-					// safety: consolidation would evict a running node, and a
-					// node runs once per claim.
-					Annotations: map[string]string{k8s.KarpenterDoNotDisrupt: "true"},
-				},
-				Spec: pod,
-			},
-		},
+	reservation, network, err := boundary.Reserve(ctx, b, name)
+	if err != nil {
+		return CloudJobResources{}, fmt.Errorf("reserve Cloud boundary: %w", err)
+	}
+	if err = validateBoundary(cfg.Namespace, b.Team, name, reservation, network); err != nil {
+		return CloudJobResources{}, errors.Join(err, boundary.Release(ctx, reservation))
+	}
+	labels := map[string]string{"app.kubernetes.io/managed-by": managedByLauncher, JobLabel: name, TeamLabel: labelHash(b.Team)}
+	reservationJSON, err := json.Marshal(reservation)
+	if err != nil {
+		return CloudJobResources{}, errors.Join(err, boundary.Release(ctx, reservation))
+	}
+	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels, Finalizers: []string{cleanupFinalizer}, Annotations: map[string]string{bindingAnnotation: string(bindingJSON), reservationAnnotation: string(reservationJSON), deadlineAnnotation: deadline.Format(time.RFC3339Nano)}}, Spec: batchv1.JobSpec{BackoffLimit: ptr(int32(0)), ActiveDeadlineSeconds: &seconds, Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: labels}, Spec: cloudPod(cfg, award, reservation, name, string(engineJSON))}}}
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels}, Immutable: ptr(true), Type: corev1.SecretTypeOpaque, Data: map[string][]byte{"bootstrap": append([]byte(nil), award.Bootstrap...)}}
+	return CloudJobResources{Job: job, BootstrapSecret: secret, Reservation: reservation, Network: network, JobDeadline: deadline, ClaimDeadline: deadline}, nil
+}
+
+func validateAward(a CloudJobAward) error {
+	b := a.Binding
+	if b.Team == "" || b.RunID == "" || b.Holder == "" || b.Generation <= 0 || b.Attempt < 0 || len(a.Bootstrap) == 0 {
+		return errors.New("award requires team, run, holder, generation and bootstrap, with a nonnegative attempt")
+	}
+	if math.IsNaN(a.CPUCores) || math.IsInf(a.CPUCores, 0) || a.CPUCores < 0.001 || a.Memory <= 0 {
+		return errors.New("award requires positive finite CPU and memory")
+	}
+	switch b.Kind {
+	case CloudPlan:
+	case CloudEval:
+		if b.NodeID == "" || b.SourceNodeID == "" || b.SourceGeneration <= 0 {
+			return errors.New("eval award requires its source generation")
+		}
+	case CloudWork:
+		if b.NodeID == "" || b.Attempt <= 0 {
+			return errors.New("work award requires a job and attempt")
+		}
+	default:
+		return errors.New("unknown Cloud unit kind")
+	}
+	if b.Kind != CloudPlan && (a.Engine == nil || a.Engine.Version == "" || a.Engine.Pin.Version == "" || a.Engine.ManifestDigest == "") {
+		return errors.New("eval and work awards require the accepted engine identity")
+	}
+	return nil
+}
+
+func validateBoundary(namespace, team, name string, r CloudNodeReservation, n CloudNetworkEvidence) error {
+	if r.NodeName == "" || r.NodeUID == "" || r.ReservationID == "" || r.Team != team || r.JobName != name {
+		return errors.New("Cloud boundary did not reserve a dedicated node for this team and Job")
+	}
+	if n.Namespace != namespace || n.NodeUID != r.NodeUID || n.PolicyRevision == "" || !n.DefaultDenyEgressEnforced || !n.RequiredDestinationsAllowed || !n.DaemonSetPortsInventoried || !n.EscapeProbePassed {
+		return errors.New("Cloud boundary has no complete network enforcement evidence")
+	}
+	return nil
+}
+
+func cloudPod(cfg CloudJobConfig, a CloudJobAward, r CloudNodeReservation, secret, engineJSON string) corev1.PodSpec {
+	scratch := resource.NewQuantity(limits.JobScratchBytes, resource.BinarySI)
+	main := hostContainer(cfg, a, "run-node", engineJSON)
+	// safety: one container's ephemeral limit establishes the aggregate pod budget, including sidecar logs and writable layers.
+	main.Resources = corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceEphemeralStorage: *scratch}, Limits: corev1.ResourceList{corev1.ResourceEphemeralStorage: *scratch}}
+	cpu := resource.NewMilliQuantity(int64(math.Floor(min(a.CPUCores, cfg.CPUCeiling)*1000)), resource.DecimalSI)
+	memory := resource.NewQuantity(min(a.Memory, cfg.MemoryCeiling), resource.BinarySI)
+	budget := corev1.ResourceList{corev1.ResourceCPU: *cpu, corev1.ResourceMemory: *memory}
+	return corev1.PodSpec{
+		NodeName: r.NodeName, NodeSelector: map[string]string{TeamNodeLabel: labelHash(a.Binding.Team)}, ServiceAccountName: ServiceAccount, AutomountServiceAccountToken: ptr(false), EnableServiceLinks: ptr(false), RestartPolicy: corev1.RestartPolicyNever,
+		SecurityContext: &corev1.PodSecurityContext{RunAsUser: ptr(int64(0)), RunAsGroup: ptr(int64(0)), RunAsNonRoot: ptr(false)},
+		// safety: the pod cgroup shares the awarded CPU and memory with DinD instead of doubling the billed allocation.
+		Resources:      &corev1.ResourceRequirements{Requests: budget, Limits: budget.DeepCopy()},
+		Volumes:        []corev1.Volume{{Name: "scratch", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: scratch}}}, {Name: "bootstrap", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: secret, DefaultMode: ptr(int32(0400))}}}},
+		InitContainers: []corev1.Container{dockerContainer(cfg), hostContainer(cfg, a, "fetch-source", engineJSON)}, Containers: []corev1.Container{main},
 	}
 }
 
-func jobContainer(cfg Config, claim store.LaunchClaim, name, verb string, env []corev1.EnvVar) corev1.Container {
-	return k8s.HardenedContainer(corev1.Container{
-		Name:            name,
-		Image:           cfg.Image,
-		ImagePullPolicy: corev1.PullIfNotPresent,
-		Command:         []string{k8s.JobBinary},
-		Args:            []string{verb, claim.RunID, claim.NodeID},
-		Env:             env,
-		Resources:       classResources(cfg, claim.Class),
-	})
-}
-
-// safety: requests equal limits, so the pod is Guaranteed and no neighbour's
-// burst can take what the class bills for; the ceilings cap both.
-func classResources(cfg Config, class store.CPUClass) corev1.ResourceRequirements {
-	cores := max(class.Cores, minimumClassCores)
-	memory := class.MemoryBytes
-	if memory <= 0 {
-		memory = store.CPUClassMemoryBytes(cores)
+func hostContainer(cfg CloudJobConfig, a CloudJobAward, verb, engineJSON string) corev1.Container {
+	b := a.Binding
+	args := []string{verb, "--controller", cfg.ControllerURL, "--run", b.RunID, "--generation", strconv.FormatInt(b.Generation, 10), "--attempt", strconv.FormatInt(b.Attempt, 10), "--unit", string(b.Kind), "--source-dir", "/tmp/source", "--module-cache", "/tmp/modules", "--bootstrap-file", bootstrapPath}
+	if b.NodeID != "" {
+		args = append(args, "--job", b.NodeID)
 	}
-	cpu := resource.NewMilliQuantity(int64(min(float64(cores)-k8s.BandCPUHeadroom, cfg.CPUCeiling)*1000), resource.DecimalSI)
-	mem := resource.NewQuantity(min(memory, cfg.MemoryCeiling), resource.BinarySI)
-	list := corev1.ResourceList{
-		corev1.ResourceCPU: *cpu, corev1.ResourceMemory: *mem,
-		corev1.ResourceEphemeralStorage: resource.MustParse(cfg.scratchLimit()),
+	if b.Kind == CloudEval {
+		args = append(args, "--source-job", b.SourceNodeID, "--source-generation", strconv.FormatInt(b.SourceGeneration, 10))
 	}
-	return corev1.ResourceRequirements{Requests: list, Limits: list.DeepCopy()}
+	if a.Engine != nil {
+		args = append(args, "--engine", engineJSON)
+	}
+	return corev1.Container{Name: verb, Image: cfg.RunnerImage, ImagePullPolicy: corev1.PullIfNotPresent, Command: []string{JobBinary}, Args: args, WorkingDir: "/tmp", Env: []corev1.EnvVar{{Name: "HOME", Value: "/tmp"}, {Name: "DOCKER_HOST", Value: "unix:///tmp/docker.sock"}}, VolumeMounts: []corev1.VolumeMount{{Name: "scratch", MountPath: "/tmp"}, {Name: "bootstrap", MountPath: "/etc/sparkwing/bootstrap", ReadOnly: true}}, SecurityContext: &corev1.SecurityContext{RunAsUser: ptr(int64(0))}}
 }
 
-// safety: a Job's machine is billed at its class and shared with no other Job,
-// whatever namespace or team that Job belongs to.
-func oneJobPerMachine() *corev1.Affinity {
-	return &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{
-		RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
-			LabelSelector: &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
-				{Key: JobLabel, Operator: metav1.LabelSelectorOpExists},
-			}},
-			NamespaceSelector: &metav1.LabelSelector{},
-			TopologyKey:       corev1.LabelHostname,
-		}},
-	}}
+func dockerContainer(cfg CloudJobConfig) corev1.Container {
+	return corev1.Container{Name: "docker", Image: cfg.DockerImage, ImagePullPolicy: corev1.PullIfNotPresent, RestartPolicy: ptr(corev1.ContainerRestartPolicyAlways), Command: []string{"dockerd"}, Args: []string{"--host=unix:///tmp/docker.sock", "--data-root=/tmp/docker", "--exec-root=/tmp/docker-exec", "--pidfile=/tmp/docker.pid", "--tls=false"}, SecurityContext: &corev1.SecurityContext{RunAsUser: ptr(int64(0)), Privileged: ptr(true)}, VolumeMounts: []corev1.VolumeMount{{Name: "scratch", MountPath: "/tmp"}}, StartupProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{"docker", "--host=unix:///tmp/docker.sock", "info"}}}, PeriodSeconds: 1, FailureThreshold: math.MaxInt32}}
 }
 
-func ptr[T any](v T) *T { return &v }
+func jobName(b CloudJobBinding) string {
+	raw := fmt.Sprintf("%q/%q/%q/%q/%d/%d", b.Team, b.RunID, b.NodeID, b.Kind, b.Generation, b.Attempt)
+	sum := sha256.Sum256([]byte(raw))
+	return "sw-" + hex.EncodeToString(sum[:24])
+}
+func labelHash(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return "sha256-" + hex.EncodeToString(sum[:20])
+}
+func ptr[T any](value T) *T { return &value }

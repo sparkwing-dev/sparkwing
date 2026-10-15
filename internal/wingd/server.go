@@ -34,10 +34,9 @@ type Daemon struct {
 	lockFile *os.File
 	ln       net.Listener
 
-	apiLn    net.Listener
-	apiDone  chan struct{}
-	apiConns int
-	apiErr   string
+	apiLn   net.Listener
+	apiDone chan struct{}
+	apiErr  string
 
 	connSeq atomic.Uint64
 
@@ -71,6 +70,8 @@ type Daemon struct {
 	disconnectedPending map[string]struct{}
 	draining            bool
 	shuttingDown        bool
+	localActivity       LocalActivity
+	stay                bool
 	lastActivity        time.Time
 	startedAt           time.Time
 
@@ -156,6 +157,7 @@ func New(cfg Config) (*Daemon, error) {
 	}
 	return &Daemon{
 		cfg:                 cfg,
+		stay:                cfg.Stay,
 		layout:              lay,
 		sampler:             sampler,
 		procSampler:         procSampler,

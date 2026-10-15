@@ -9,7 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 )
 
-func TestStateIsWrittenAtTheRollbackReadableSchema(t *testing.T) {
+func TestStateIsWrittenAtTheCurrentSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	if err := writeStateWithCancellations(path, admission.Snapshot{}, nil, nil); err != nil {
 		t.Fatal(err)
@@ -25,33 +25,16 @@ func TestStateIsWrittenAtTheRollbackReadableSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	if state.Schema != stateSchema {
-		t.Fatalf("state schema = %d, want rollback-readable schema %d", state.Schema, stateSchema)
+		t.Fatalf("state schema = %d, want current schema %d", state.Schema, stateSchema)
 	}
 }
 
-func TestStateWrittenByAGuardedDaemonStillLoads(t *testing.T) {
+func TestStateRejectsRemovedSchemas(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
-	legacy := map[string]any{
-		"schema":   legacyGuardedStateSchema,
-		"snapshot": admission.Snapshot{EventSeq: 4},
-		"guards": []map[string]any{{
-			"lease_id": "lease-1",
-			"run_id":   "run-1",
-			"session":  map[string]any{"leader_pid": 37, "session_id": 37, "birth_token": "birth-37"},
-		}},
-	}
-	blob, err := json.Marshal(legacy)
-	if err != nil {
+	if err := os.WriteFile(path, []byte(`{"schema":2,"snapshot":{"event_seq":4}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, blob, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	snap, _, _, err := readStateWithCancellations(path)
-	if err != nil {
-		t.Fatalf("read a state file left by a guarded daemon: %v", err)
-	}
-	if snap.EventSeq != 4 {
-		t.Fatalf("restored event sequence = %d, want 4", snap.EventSeq)
+	if _, _, _, err := readStateWithCancellations(path); err == nil {
+		t.Fatal("removed schema was accepted")
 	}
 }

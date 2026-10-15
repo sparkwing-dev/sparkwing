@@ -33,7 +33,19 @@ func CheckRenewal(every, ttl time.Duration) error { panic("unimplemented: c4-sur
 // uses the owner's budget; both zero remain unbounded. An already-expired attempt or owner is ErrNoTime.
 // Both the Kubernetes Job and its launch claim use this result, preventing a pod from outliving its owner.
 func JobDeadline(now, ownerDeadline, attemptDeadline time.Time) (time.Time, error) {
-	panic("unimplemented: c4-surface-config")
+	for _, bound := range []time.Time{ownerDeadline, attemptDeadline} {
+		if !bound.IsZero() && !bound.After(now) {
+			return time.Time{}, ErrNoTime
+		}
+	}
+	deadline := ownerDeadline
+	if !attemptDeadline.IsZero() {
+		attemptEnd := attemptDeadline.Add(JobSlack)
+		if deadline.IsZero() || attemptEnd.Before(deadline) {
+			deadline = attemptEnd
+		}
+	}
+	return deadline, nil
 }
 
 // Error bounds already-masked UTF-8 error text with a head and tail within ErrorBytes.

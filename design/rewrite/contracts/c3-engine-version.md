@@ -2,8 +2,10 @@
 
 <!-- design:begin -->
 
-These are target contracts. All new functions remain panic stubs. The existing
-CLI, runner and launcher do not yet call them.
+The engine package implements these contracts. Component tests cover pin
+resolution, signed releases, policy, caching and upgrades. Source/host composition,
+CLI entrypoints and native installer integration remain separate work. The
+implementation status is recorded in [the W8 handoff](../W8-IMPLEMENTATION.md).
 
 ## Ownership
 

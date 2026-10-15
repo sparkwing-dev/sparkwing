@@ -3,7 +3,6 @@ package wingd
 import (
 	"context"
 	"net"
-	"sync"
 	"time"
 )
 
@@ -15,7 +14,7 @@ const APIDrainWindow = 5 * time.Second
 
 // APIConn is a connection accepted on api.sock. The daemon checks the peer's
 // uid before it yields the connection, so PeerUID names the account the
-// kernel reported, or this daemon's own uid on a platform that reports none.
+// kernel reported. Missing kernel identity refuses access.
 type APIConn interface {
 	net.Conn
 	PeerUID() int
@@ -106,38 +105,13 @@ func (l apiListener) Accept() (net.Conn, error) {
 			_ = nc.Close()
 			continue
 		}
-		l.d.apiConnOpened()
-		return &apiConn{Conn: nc, d: l.d, uid: uid}, nil
+		return &apiConn{Conn: nc, uid: uid}, nil
 	}
 }
 
 type apiConn struct {
 	net.Conn
-	d    *Daemon
-	uid  int
-	once sync.Once
+	uid int
 }
 
 func (c *apiConn) PeerUID() int { return c.uid }
-
-func (c *apiConn) Close() error {
-	err := c.Conn.Close()
-	c.once.Do(c.d.apiConnClosed)
-	return err
-}
-
-func (d *Daemon) apiConnOpened() {
-	d.mu.Lock()
-	d.apiConns++
-	d.touchLocked()
-	d.mu.Unlock()
-}
-
-func (d *Daemon) apiConnClosed() {
-	d.mu.Lock()
-	if d.apiConns > 0 {
-		d.apiConns--
-	}
-	d.touchLocked()
-	d.mu.Unlock()
-}

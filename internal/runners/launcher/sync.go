@@ -2,124 +2,141 @@ package launcher
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
+	"slices"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"k8s.io/apimachinery/pkg/types"
 )
 
-const (
-	// UnschedulableRelease is how long before the launcher hands the claim
-	// of a Job that never got a machine back, well inside the claim's lease,
-	// so the node waits in the queue unbilled with no attempt spent.
-	UnschedulableRelease = 4 * time.Minute
-	// SyncInterval is how often the launcher reconciles its Jobs with the
-	// controller.
-	SyncInterval = 5 * time.Second
-	// MaxPendingJobs is how many of its Jobs may be not yet running before the
-	// launcher stops claiming more, so a full pool does not pile up Pending
-	// Jobs until each is handed back.
-	MaxPendingJobs = 5
-	// safety: under the controller's per-request cap, so any number of Jobs
-	// syncs.
-	syncBatch = 500
-)
+// ErrContainersRunning keeps the reservation until Kubernetes confirms every container has stopped.
+var ErrContainersRunning = errors.New("Cloud Job containers are still running")
 
-// Sync reconciles the launcher's Jobs with the controller: it deletes each Job
-// whose claim ended or whose run is being cancelled, and hands back the claim
-// of a Job that never got a machine.
+// Sync reconstructs ownership from Kubernetes and retires expired, terminal or cancelled Jobs.
 func (l *Launcher) Sync(ctx context.Context) error {
-	sel := metav1.ListOptions{LabelSelector: "app.kubernetes.io/managed-by=" + managedByLauncher}
-	jobs, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).List(ctx, sel)
+	if err := l.validate(); err != nil {
+		return err
+	}
+	jobs, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/managed-by=" + managedByLauncher})
 	if err != nil {
-		return fmt.Errorf("list jobs: %w", err)
-	}
-	pods, err := l.Kube.CoreV1().Pods(l.Config.Namespace).List(ctx, sel)
-	if err != nil {
-		return fmt.Errorf("list pods: %w", err)
-	}
-	unplaced := map[string]time.Duration{}
-	started := map[string]bool{}
-	for _, p := range pods.Items {
-		if p.Status.Phase != corev1.PodPending {
-			started[p.Labels[JobLabel]] = true
-		}
-		if since, ok := unschedulableSince(p); ok {
-			unplaced[p.Labels[JobLabel]] = max(unplaced[p.Labels[JobLabel]], time.Since(since))
-		}
-	}
-	claims := make([]store.LaunchJob, 0, len(jobs.Items))
-	names := map[store.LaunchJob]string{}
-	for _, j := range jobs.Items {
-		gen, err := strconv.ParseInt(j.Annotations[GenerationAnnotation], 10, 64)
-		// safety: a finished Job's pod holds its log until the Job's TTL
-		// removes it, so only a Job still running is ever deleted here.
-		if err != nil || j.Annotations[RunAnnotation] == "" || jobFinished(j) {
-			continue
-		}
-		key := store.LaunchJob{RunID: j.Annotations[RunAnnotation], NodeID: j.Annotations[NodeAnnotation], Generation: gen}
-		names[key] = j.Name
-		key.Release = unplaced[j.Name] >= UnschedulableRelease
-		claims = append(claims, key)
-	}
-	var results []store.LaunchJobResult
-	for start := 0; start == 0 || start < len(claims); start += syncBatch {
-		batch, err := l.Ctrl.LauncherSync(ctx, claims[start:min(start+syncBatch, len(claims))])
-		if err != nil {
-			return fmt.Errorf("sync jobs: %w", err)
-		}
-		results = append(results, batch...)
+		return fmt.Errorf("list Cloud Jobs: %w", err)
 	}
 	var errs []error
-	pending := map[string]bool{}
-	for _, name := range names {
-		if !started[name] {
-			pending[name] = true
-		}
-	}
-	for _, r := range results {
-		key := store.LaunchJob{RunID: r.RunID, NodeID: r.NodeID, Generation: r.Generation}
-		name := names[key]
-		if r.State != store.LaunchJobDelete || name == "" {
-			continue
-		}
-		background := metav1.DeletePropagationBackground
-		err := l.Kube.BatchV1().Jobs(l.Config.Namespace).Delete(ctx, name, metav1.DeleteOptions{PropagationPolicy: &background})
-		if err != nil && !apierrors.IsNotFound(err) {
+	for _, job := range jobs.Items {
+		binding, reservation, err := jobOwnership(job)
+		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
-		delete(pending, name)
-		l.Logger.Info("launcher: job deleted", "job", name, "run_id", key.RunID, "node_id", key.NodeID)
+		remove := job.DeletionTimestamp != nil || jobFinished(job) || (job.Spec.Suspend != nil && *job.Spec.Suspend)
+		deadline, deadlineErr := time.Parse(time.RFC3339Nano, job.Annotations[deadlineAnnotation])
+		if deadlineErr != nil {
+			errs = append(errs, fmt.Errorf("Job %s has invalid deadline: %w", job.Name, deadlineErr))
+			continue
+		}
+		if !deadline.After(time.Now()) {
+			remove = true
+		}
+		if !remove {
+			states, err := l.Control.Sync(ctx, []CloudJobBinding{binding})
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			if len(states) != 1 || states[0].Binding != binding {
+				errs = append(errs, errors.New("controller sync returned a mismatched binding"))
+				continue
+			}
+			remove = states[0].Delete
+		}
+		if remove {
+			if err := l.teardown(ctx, &job, reservation); err != nil && !errors.Is(err, ErrContainersRunning) {
+				errs = append(errs, err)
+			}
+		}
 	}
-	l.pending = pending
 	return errors.Join(errs...)
 }
 
-func jobFinished(j batchv1.Job) bool {
-	for _, c := range j.Status.Conditions {
-		if (c.Type == batchv1.JobComplete || c.Type == batchv1.JobFailed) && c.Status == corev1.ConditionTrue {
+func jobOwnership(job batchv1.Job) (CloudJobBinding, CloudNodeReservation, error) {
+	var binding CloudJobBinding
+	var reservation CloudNodeReservation
+	if err := json.Unmarshal([]byte(job.Annotations[bindingAnnotation]), &binding); err != nil {
+		return binding, reservation, fmt.Errorf("Job %s has invalid binding: %w", job.Name, err)
+	}
+	if err := json.Unmarshal([]byte(job.Annotations[reservationAnnotation]), &reservation); err != nil {
+		return binding, reservation, fmt.Errorf("Job %s has invalid reservation: %w", job.Name, err)
+	}
+	if job.Name != jobName(binding) || reservation.JobName != job.Name || reservation.Team != binding.Team || reservation.NodeName != job.Spec.Template.Spec.NodeName || reservation.NodeUID == "" || reservation.ReservationID == "" {
+		return binding, reservation, errors.New("Cloud Job ownership does not match its reservation")
+	}
+	return binding, reservation, nil
+}
+
+func (l *Launcher) teardown(ctx context.Context, job *batchv1.Job, reservation CloudNodeReservation) error {
+	namespace := l.Config.Namespace
+	foreground := metav1.DeletePropagationForeground
+	err := l.Kube.BatchV1().Jobs(namespace).Delete(ctx, job.Name, metav1.DeleteOptions{PropagationPolicy: &foreground, Preconditions: &metav1.Preconditions{UID: &job.UID}})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	err = l.Kube.CoreV1().Secrets(namespace).Delete(ctx, job.Name, metav1.DeleteOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	pods, err := l.Kube.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: JobLabel + "=" + job.Name})
+	if err != nil {
+		return err
+	}
+	for _, pod := range pods.Items {
+		if !podStopped(pod) {
+			return ErrContainersRunning
+		}
+	}
+	if err = l.Boundary.Release(ctx, reservation); err != nil {
+		return err
+	}
+	if !slices.Contains(job.Finalizers, cleanupFinalizer) {
+		return nil
+	}
+	finalizers := slices.DeleteFunc(slices.Clone(job.Finalizers), func(s string) bool { return s == cleanupFinalizer })
+	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"uid": job.UID, "resourceVersion": job.ResourceVersion, "finalizers": finalizers}})
+	if err != nil {
+		return err
+	}
+	_, err = l.Kube.BatchV1().Jobs(namespace).Patch(ctx, job.Name, types.MergePatchType, patch, metav1.PatchOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
+func podStopped(pod corev1.Pod) bool {
+	// safety: an absent status on a live pod is not evidence that its privileged sidecar stopped.
+	if pod.Status.Phase != corev1.PodSucceeded && pod.Status.Phase != corev1.PodFailed {
+		return false
+	}
+	statuses := append(slices.Clone(pod.Status.InitContainerStatuses), pod.Status.ContainerStatuses...)
+	statuses = append(statuses, pod.Status.EphemeralContainerStatuses...)
+	for _, status := range statuses {
+		if status.State.Running != nil {
+			return false
+		}
+	}
+	return true
+}
+
+func jobFinished(job batchv1.Job) bool {
+	for _, condition := range job.Status.Conditions {
+		if (condition.Type == batchv1.JobComplete || condition.Type == batchv1.JobFailed) && condition.Status == corev1.ConditionTrue {
 			return true
 		}
 	}
 	return false
-}
-
-func unschedulableSince(p corev1.Pod) (time.Time, bool) {
-	if p.Status.Phase != corev1.PodPending {
-		return time.Time{}, false
-	}
-	for _, c := range p.Status.Conditions {
-		if c.Type == corev1.PodScheduled && c.Status == corev1.ConditionFalse && c.Reason == corev1.PodReasonUnschedulable {
-			return c.LastTransitionTime.Time, true
-		}
-	}
-	return time.Time{}, false
 }

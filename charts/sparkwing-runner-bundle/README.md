@@ -138,8 +138,6 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `runner.labels` | `--label` flags for `Requires` matching. | `[cluster]` |
 | `runner.maxConcurrent` | Per-pod node concurrency. | `2` |
 | `runner.alsoClaimTriggers` | Pool also claims webhook triggers. | `true` |
-| `runner.triggerRunner.kind` | Node execution for claimed triggers: `inprocess`, `k8s`, or agent-first `warm`. A metered token's pool needs `k8s` or `warm`; the controller refuses its `inprocess` trigger claims. | `inprocess` |
-| `runner.triggerRunner.labels` | Static capabilities every trigger-spawned Kubernetes Job advertises. | `[]` |
 | `runner.extraEnv` | Extra runner environment. | `[]` |
 | `runner.gitcacheUrl` | External gitcache passed as `--gitcache` when `cache.enabled=false`. | `""` |
 | `runner.image.tag` | Override sparkwing-runner tag. | (chart appVersion) |
@@ -159,56 +157,42 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `serviceAccount.annotations` | Add IRSA / Workload Identity annotations. | `{}` |
 | `serviceAccount.shareAcrossComponents` | Accept one shared account when `serviceAccount.create=false`. | `false` |
 | `imagePullSecrets` | Private-registry pull secrets for both images. | `[]` |
-| `runner.jobCeiling.cpu` | Hard CPU ceiling the runner clamps every pipeline pin and measured charge to before it creates a Job pod. Empty means no ceiling. | `""` |
-| `runner.jobCeiling.memory` | Hard memory ceiling for the same. | `""` |
-| `runner.jobDeadline` | Wall-clock bound on one Job pod, as a Go duration of at least a minute, passed as `--deadline`. Empty keeps 6h. | `""` |
-| `runner.teamNodes` | Keep each band node to the team whose Job booted it, passed as `--team-nodes`. | `false` |
 | `limitRange.enabled` | Bound what one container in the namespace may request, including the Job pods the runner creates. | `false` |
 | `limitRange.max` | Per-container ceiling when the LimitRange is on. | `cpu: "16"`, `memory: 64Gi` |
 | `limitRange.min` | Per-container floor, which rejects a pod asking for a sliver no quota counts. | `cpu: 10m`, `memory: 16Mi` |
 | `resourceQuota.enabled` | Bound the namespace totals. Requires `limitRange.enabled=true`. | `false` |
 | `resourceQuota.hard` | Namespace totals, passed through as `spec.hard`. | 32 / 64 CPU, 64Gi / 128Gi memory |
 
-### Remote capacity before Kubernetes
-
-Set `runner.triggerRunner.kind=warm` and
-`runner.automountServiceAccountToken=true` to offer each unlabeled pipeline
-node to remote agents before creating a Kubernetes Job. Remote agents may run on
-Windows, macOS, or Linux workstations and servers. They poll the controller
-over outbound HTTP(S); they need no inbound route, and Tailscale is optional.
-Labels and advertised capacity keep incompatible or saturated machines from
-claiming work. An offline or saturated pool therefore sends unlabeled work to
-Kubernetes after a short internal claim window. A labeled node stays queued
-for a matching agent by default. Set `runner.triggerRunner.labels` only to
-capabilities every spawned Job can honor; matching labeled work may then use
-the fallback. These labels are separate from `runner.labels`, which describes
-the outer pool process and may name a different architecture.
-
-Warm mode reuses the runner image, pull policy, namespace, service account,
-and cache configuration already present in this chart. It grants the runner
-Role namespace-scoped Job create, get, and delete plus pod list. The default
-`inprocess` mode retains the prior arguments and empty Role.
-The fallback Job runs `sparkwing-runner run-node`, the executable the runner
-image installs, and that process receives the runner token in its environment,
-so use warm mode only for trusted pipeline code and rotate short-lived tokens.
-The compiled pipeline binary interprets `runner.triggerRunner.kind=warm`.
-Upgrade the controller, runner, and pipeline module to the same Sparkwing
-release before enabling it.
-
 ## Auth
+
+Set `launcher.serviceAccountName` to provision the Cloud launcher's identity,
+its node reservation permissions, and `sparkwing-customer-job`. The launcher
+can create and delete bootstrap Secrets. It cannot read or list them. Customer
+Jobs use the separate account without a Kubernetes token or cloud role.
+
+The launcher requires a wired controller award client, a real network probe,
+and node cleanup. The chart does not start that process. Nodes must carry
+`sparkwing.dev/team-node` with the value produced by `launcher.TeamNodeValue`.
+The launcher reserves each node with a version-checked Kubernetes update and
+keeps it reserved until every Job pod is removed and cleanup succeeds.
+Cleanup must be idempotent and confined to the old reservation's state. If the
+launcher stops between reservation and Job creation, a later reservation can
+clear that orphan only after its original parent capability expires.
+
+Cloud Jobs need native sidecars and Kubernetes `PodLevelResources` enabled.
+Plan, eval and work run as root with privileged DinD. The host starts after
+Docker's startup probe succeeds. CPU and memory are shared at pod level. One
+20 GiB scratch volume holds the workspace and Docker data. The aggregate pod
+ephemeral-storage limit also counts logs and writable layers. Kubelet accounting
+and eviction must be enabled. These are eviction bounds, not a synchronous disk
+quota. Cluster acceptance must exercise Docker and verify egress enforcement,
+allowed destinations, DaemonSet ports and the escape probe.
 
 The runner reads its bearer token from `controller.tokenSecret`, which the
 chart projects as the file `agent-token` under `--credentials-dir`, and uses it
-to claim, renew its claims and make its own controller calls. The work a claim
-runs uses the claim token the controller returns with it: a node the runner
-executes, every Job a `k8s` or `warm` trigger runner creates, and the trigger's
-own secret reads. A Job spec carries its node's claim token, never this
-bearer. Mint it with `nodes.claim`, `triggers.claim` and `runs.state`: enough
-to claim triggers and nodes, drive the runs it claimed from plan to finish,
-and upload their logs. The claims' own tokens read the secrets each run's plan
-declares. It needs no `admin`. A warm-pool dispatcher that marks nodes ready
-for a pool is the exception and keeps an `admin` token. Once a Secret name is
-configured, its key and the Secret itself are required.
+to claim, renew its claims and make its own controller calls. Each claim carries
+its own unit capability for source, execution and data access. Once a Secret name
+is configured, its key and the Secret itself are required.
 
 The chart projects `cache.grantKeySecret` into a volume at
 `/etc/sparkwing/credentials` and passes it as `--credentials-dir`: the cache

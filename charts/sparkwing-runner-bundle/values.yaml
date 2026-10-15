@@ -42,6 +42,10 @@ controller:
     # Key inside the Secret holding the bearer token.
     key: token
 
+# Provision identities and permissions for a separately configured Cloud launcher.
+launcher:
+  serviceAccountName: ""
+
 # -----------------------------------------------------------------------
 # 2. Runner pool. Long-lived pods that poll the controller, claim
 #    triggers + nodes, and execute pipeline DAGs.
@@ -88,19 +92,7 @@ runner:
   # to trigger-claiming and leave the others node-only.
   alsoClaimTriggers: true
 
-  triggerRunner:
-    # inprocess executes nodes inside the trigger worker. warm offers nodes
-    # to remote agents first, then sends eligible overflow to Kubernetes.
-    # k8s sends every node to Kubernetes.
-    kind: inprocess
-    # Static capabilities common to every Job created by the k8s backend.
-    # Empty keeps labeled work on agents.
-    labels: []
-
-  # Mount the runner pod's ServiceAccount token. The runner reaches the
-  # controller over HTTP and needs no API access, so this stays false.
-  # Set it true for triggerRunner.kind k8s or warm, whose trigger worker
-  # creates and inspects runner Jobs through the Kubernetes API.
+  # The runner claims through the controller and needs no Kubernetes API token.
   automountServiceAccountToken: false
 
   # Optional metrics scrape port. The Prometheus client registry on
@@ -114,27 +106,6 @@ runner:
     limits:
       cpu: "2"
       memory: 2Gi
-
-  # Hard ceiling on the Job pods this runner creates, as Kubernetes
-  # quantities. A pipeline's own .Resources() pin, and the charge
-  # sparkwing measured for it, are both clamped to these before the pod
-  # is created, requests and burst limits alike. Empty means no ceiling,
-  # so a pin becomes the pod size verbatim. Set them at or under
-  # limitRange.max, and at or under what one node can actually schedule.
-  jobCeiling:
-    cpu: ""
-    memory: ""
-
-  # Wall-clock bound on one Job pod this runner creates, as a Go duration
-  # of at least a minute (6h, 90m), passed as --deadline. Kubernetes kills
-  # a pod that outlives it, and a node's own .Timeout() outranks it.
-  # Empty keeps the 6h default.
-  jobDeadline: ""
-
-  # Keep each band node to the team whose Job booted it, passed as
-  # --team-nodes. Turn it on only for a band pool whose nodes carry the
-  # sparkwing.dev/team-node label.
-  teamNodes: false
 
   # An external gitcache the runners fetch source through, passed as
   # --gitcache, when cache.enabled is false. Empty fetches each run's

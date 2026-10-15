@@ -13,6 +13,8 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -41,7 +43,7 @@ const FinalizeDrainWindow = 10 * time.Second
 const HeartbeatStaleWindow = time.Minute
 
 const (
-	DefaultIdleTimeout = 5 * time.Minute
+	DefaultIdleTimeout = limits.LocalControllerIdleTimeout
 
 	DefaultGraceWindow = 2 * time.Minute
 
@@ -87,6 +89,8 @@ type Config struct {
 	OwnedCPUSampler OwnedCPUSampler
 
 	Now func() time.Time
+
+	Stay bool
 
 	IdleTimeout time.Duration
 
@@ -266,7 +270,7 @@ func resolveLayout(home string) (layout, error) {
 }
 
 func (l layout) ensureDir() error {
-	if err := os.MkdirAll(l.dir, 0o700); err != nil {
+	if err := fssecure.EnsureDir(l.dir); err != nil {
 		return fmt.Errorf("wingd: prepare %s: %w", l.dir, err)
 	}
 	return nil

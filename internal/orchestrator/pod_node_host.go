@@ -21,8 +21,8 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runflags"
-	k8srunner "github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
@@ -200,7 +200,13 @@ func maskedInstallOutput(ctx context.Context, masker *secrets.Masker, dst io.Wri
 }
 
 func podEnvNames() []string {
-	return slices.Concat(k8srunner.DependencyProxyEnvNames, k8srunner.NetworkEnvNames)
+	var names []string
+	for _, rule := range procenv.Registry {
+		if rule.RemoteBase && !rule.Prefix {
+			names = append(names, rule.Name)
+		}
+	}
+	return names
 }
 
 // safety: the operator's run.submit_env_allow names and prefixes reach the node from this runner's environment, as

@@ -2,6 +2,7 @@ package wingd
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -32,16 +33,8 @@ func (d *Daemon) idleLoop(ctx context.Context) {
 func (d *Daemon) idleElapsed() time.Duration {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	// safety: a hosted run reaches its state over api.sock and may hold no
-	// wingwire connection between admission and finish, so an open API
-	// connection is activity or the daemon idles out from under the run.
-	if d.apiConns > 0 {
+	if d.stay || hasLocalActivity(d.localActivity) || len(d.byRun) > 0 {
 		return 0
-	}
-	for c := range d.conns {
-		if !c.healthProbe {
-			return 0
-		}
 	}
 	if len(d.reattachWait) > 0 {
 		return 0
@@ -51,4 +44,33 @@ func (d *Daemon) idleElapsed() time.Duration {
 		return 0
 	}
 	return d.now().Sub(d.lastActivity)
+}
+
+func hasLocalActivity(activity LocalActivity) bool {
+	return activity.Runs != 0 || activity.QueuedTriggers != 0 || activity.HeldLeases != 0 || activity.DashboardConnections != 0
+}
+
+// SetLocalActivity supplies the controller's live activity independently of API probes.
+func (d *Daemon) SetLocalActivity(activity LocalActivity) error {
+	if activity.Runs < 0 || activity.QueuedTriggers < 0 || activity.HeldLeases < 0 || activity.DashboardConnections < 0 {
+		return fmt.Errorf("wingd: local activity counts must be nonnegative")
+	}
+	activity.IdleSince = time.Time{}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.localActivity != activity {
+		d.localActivity = activity
+		d.touchLocked()
+	}
+	return nil
+}
+
+// SetStay pins the controller until it is drained or stay mode is removed.
+func (d *Daemon) SetStay(stay bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.stay != stay {
+		d.stay = stay
+		d.touchLocked()
+	}
 }

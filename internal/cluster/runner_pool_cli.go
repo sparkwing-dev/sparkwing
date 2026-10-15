@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"slices"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
@@ -21,7 +22,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/logutil"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
-	k8srunner "github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -380,7 +380,7 @@ const agentTokenCredential = "agent-token"
 const defaultRunnerMetricsAddr = "127.0.0.1:9090"
 
 func runRunnerCLI(args []string, version string) error {
-	fs := flag.NewFlagSet("runner", flag.ExitOnError)
+	fs := flag.NewFlagSet("runner", flag.ContinueOnError)
 	controllerURL := fs.String("controller", "",
 		"controller base URL (required)")
 	poll := fs.Duration("poll", 500*time.Millisecond,
@@ -424,48 +424,6 @@ func runRunnerCLI(args []string, version string) error {
 			"the controller supplies a snapshot's code, which no listed repository holds")
 	triggerSources := fs.String("trigger-sources", "",
 		"comma-separated trigger_source values the trigger loop handles (e.g. github); empty = accept any source")
-	triggerRunnerKind := fs.String("trigger-runner", "",
-		"node runner used by claimed triggers: inprocess | k8s | warm")
-	triggerRunnerNamespace := fs.String("trigger-runner-namespace", os.Getenv("POD_NAMESPACE"),
-		"namespace for trigger-spawned runner Jobs (k8s or warm fallback)")
-	triggerRunnerImage := fs.String("trigger-runner-image", "",
-		"runner image for trigger-spawned runner Jobs (k8s or warm fallback)")
-	triggerRunnerSA := fs.String("trigger-runner-sa", "",
-		"service account for trigger-spawned runner Jobs (k8s or warm fallback)")
-	triggerRunnerPullSecret := fs.String("trigger-runner-image-pull-secret", "",
-		"imagePullSecret for trigger-spawned runner Jobs (k8s or warm fallback)")
-	triggerRunnerCtrlURL := fs.String("trigger-runner-controller-url", "",
-		"controller URL for trigger-spawned runner Jobs (defaults to --controller)")
-	triggerRunnerKubeconfig := fs.String("trigger-runner-kubeconfig", os.Getenv("KUBECONFIG"),
-		"kubeconfig path for creating trigger-spawned Jobs (empty = in-cluster)")
-	triggerArtifactStore := fs.String("trigger-artifact-store", "",
-		"artifact/cache store URL passed to trigger-spawned runner Jobs")
-	triggerDependencyProxy := fs.String("dependency-proxy", "",
-		"base URL of the in-cluster pull-through package proxy stamped on trigger-spawned runner Jobs as "+
-			"GOPROXY / npm_config_registry / PIP_INDEX_URL; empty derives it from --gitcache, \"off\" disables")
-	triggerRunnerPullPolicy := fs.String("trigger-runner-image-pull-policy", "",
-		"imagePullPolicy for trigger-spawned runner Jobs: Always | IfNotPresent | Never (default IfNotPresent)")
-	cpuCeiling := fs.String("cpu-ceiling", "",
-		"hard CPU ceiling for trigger-spawned runner Jobs as a Kubernetes quantity (8, 500m); a pipeline pin or "+
-			"measured charge above it is clamped (empty = no ceiling)")
-	memoryCeiling := fs.String("memory-ceiling", "",
-		"hard memory ceiling for trigger-spawned runner Jobs as a Kubernetes quantity (8Gi); a pipeline pin or "+
-			"measured charge above it is clamped (empty = no ceiling)")
-	deadline := fs.Duration("deadline", 0,
-		"wall-clock bound on one trigger-spawned runner Job; Kubernetes kills a pod that outlives it, and a "+
-			"node's own .Timeout() outranks it (0 = 6h)")
-	teamNodes := fs.Bool("team-nodes", false,
-		"keep each band node to the team whose Job booted it by selecting sparkwing.dev/team-node; "+
-			"the band pool must stamp that label on its nodes")
-	var triggerRunnerLabels multiFlag
-	fs.Var(&triggerRunnerLabels, "trigger-runner-label",
-		"static capability every trigger-spawned runner Job advertises (repeatable)")
-	var triggerRunnerNodeSelector multiFlag
-	fs.Var(&triggerRunnerNodeSelector, "trigger-runner-node-selector",
-		"node selector for trigger-spawned runner Jobs, key=value (repeatable)")
-	var triggerRunnerTolerations multiFlag
-	fs.Var(&triggerRunnerTolerations, "trigger-runner-toleration",
-		"toleration for trigger-spawned runner Jobs, key[=value]:Effect (repeatable)")
 	warmModules := fs.String("warm-modules", "",
 		"comma-separated modules downloaded into GOMODCACHE at startup so the first pipeline compile after a "+
 			"restart is not fully cold; each entry may carry an @version, \"off\" warms nothing "+
@@ -491,45 +449,17 @@ func runRunnerCLI(args []string, version string) error {
 		if !*claimNodes {
 			return errors.New("--github-actions requires --claim-nodes")
 		}
-		if *triggerRunnerKind != "" && *triggerRunnerKind != "inprocess" {
-			return errors.New("--github-actions requires --trigger-runner=inprocess")
-		}
 		*alsoClaimTriggers = true
-		*triggerRunnerKind = "inprocess"
 	}
 	if *controllerURL == "" {
 		fs.Usage()
 		return errors.New("--controller is required")
-	}
-	if *triggerRunnerKind != "" && *triggerRunnerKind != "inprocess" &&
-		*triggerRunnerKind != "k8s" && *triggerRunnerKind != "warm" {
-		return fmt.Errorf("--trigger-runner=%q: expected inprocess, k8s, or warm", *triggerRunnerKind)
-	}
-	if (*triggerRunnerKind == "k8s" || *triggerRunnerKind == "warm") && !*alsoClaimTriggers {
-		return errors.New("--trigger-runner=k8s or warm requires --also-claim-triggers")
-	}
-	if *triggerRunnerKind == "warm" && *claimNodes {
-		return errors.New("--trigger-runner=warm requires --claim-nodes=false so this process does not race remote agents")
 	}
 	if !*claimNodes && !*alsoClaimTriggers {
 		return errors.New("--claim-nodes=false requires --also-claim-triggers")
 	}
 	if *idleExit < 0 {
 		return errors.New("--idle-exit must not be negative")
-	}
-	if *deadline < 0 {
-		return errors.New("--deadline must not be negative; pass 0 for the 6h default")
-	}
-	if *deadline > 0 {
-		if _, err := k8srunner.ParseJobDeadline(deadline.String()); err != nil {
-			return fmt.Errorf("--deadline: %w", err)
-		}
-	}
-	if _, err := k8srunner.ParseCPUCeiling(*cpuCeiling); err != nil {
-		return fmt.Errorf("--cpu-ceiling: %w", err)
-	}
-	if _, err := k8srunner.ParseMemoryCeiling(*memoryCeiling); err != nil {
-		return fmt.Errorf("--memory-ceiling: %w", err)
 	}
 	creds, err := credentials.Open(*credentialsDir)
 	if err != nil {
@@ -595,7 +525,7 @@ func runRunnerCLI(args []string, version string) error {
 		return fmt.Errorf("--warm-modules: %w", err)
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	tel, err := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-warm-runner", Log: readLog()})
@@ -628,39 +558,15 @@ func runRunnerCLI(args []string, version string) error {
 	}
 
 	if *alsoClaimTriggers {
-		// safety: without this the child rejects each claimed trigger after admission.
-		usesK8sJobs := *triggerRunnerKind == "k8s" ||
-			(*triggerRunnerKind == "warm" && *triggerRunnerImage != "")
-		if usesK8sJobs && *triggerRunnerSA == "" {
-			return fmt.Errorf("--trigger-runner-sa is required with --trigger-runner=%s", *triggerRunnerKind)
-		}
 		go func() {
 			if err := RunTriggerLoop(ctx, TriggerLoopOptions{
-				ControllerURL:   *controllerURL,
-				GitcacheURL:     *gitcacheURL,
-				AllowRepos:      allow,
-				Token:           *token,
-				RunnerKind:      *triggerRunnerKind,
-				K8sNamespace:    *triggerRunnerNamespace,
-				K8sImage:        *triggerRunnerImage,
-				K8sRunnerSA:     *triggerRunnerSA,
-				K8sPullSecret:   *triggerRunnerPullSecret,
-				K8sCtrlURL:      firstNonEmpty(*triggerRunnerCtrlURL, *controllerURL),
-				Kubeconfig:      *triggerRunnerKubeconfig,
-				ArtifactStore:   *triggerArtifactStore,
-				K8sLabels:       triggerRunnerLabels,
-				K8sNodeSelector: triggerRunnerNodeSelector,
-				K8sTolerations:  triggerRunnerTolerations,
-
-				DependencyProxy:    k8srunner.ResolveDependencyProxy(*triggerDependencyProxy, *gitcacheURL),
-				K8sImagePullPolicy: *triggerRunnerPullPolicy,
-				K8sCPUCeiling:      *cpuCeiling,
-				K8sMemoryCeiling:   *memoryCeiling,
-				K8sJobDeadline:     *deadline,
-				K8sTeamNodes:       *teamNodes,
-				Poll:               *poll,
-				Logger:             slog.Default().With("loop", "trigger"),
-				Sources:            splitCSV(*triggerSources),
+				ControllerURL: *controllerURL,
+				GitcacheURL:   *gitcacheURL,
+				AllowRepos:    allow,
+				Token:         *token,
+				Poll:          *poll,
+				Logger:        slog.Default().With("loop", "trigger"),
+				Sources:       splitCSV(*triggerSources),
 			}); err != nil {
 				slog.Default().Error("trigger loop exited with error", "err", err)
 			}

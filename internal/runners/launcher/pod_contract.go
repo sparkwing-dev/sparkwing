@@ -140,5 +140,5 @@ func CloudPodInvariants() []CloudPodInvariant {
 // returning any runnable object. Failure releases acquired reservations and leaves no reusable Secret.
 // Claim expiry must cover the Job and never exceed its parent; expired inputs refuse launch.
 func BuildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award CloudJobAward, boundary CloudBoundary) (CloudJobResources, error) {
-	panic("unimplemented: c4-surface-config")
+	return buildJob(ctx, now, cfg, award, boundary)
 }

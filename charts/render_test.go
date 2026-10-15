@@ -384,11 +384,13 @@ type renderedPolicyRule struct {
 }
 
 type renderedResource struct {
-	Kind     string `yaml:"kind"`
-	Metadata struct {
-		Name      string            `yaml:"name"`
-		Namespace string            `yaml:"namespace"`
-		Labels    map[string]string `yaml:"labels"`
+	Kind                         string `yaml:"kind"`
+	AutomountServiceAccountToken *bool  `yaml:"automountServiceAccountToken"`
+	Metadata                     struct {
+		Name        string            `yaml:"name"`
+		Namespace   string            `yaml:"namespace"`
+		Labels      map[string]string `yaml:"labels"`
+		Annotations map[string]string `yaml:"annotations"`
 	} `yaml:"metadata"`
 	Rules []renderedPolicyRule `yaml:"rules"`
 	Spec  struct {
@@ -864,7 +866,7 @@ func TestFullChartVendorsTheRunnerGoCache(t *testing.T) {
 	}
 }
 
-func TestRunnerTriggerRunnerDefaultsToInProcess(t *testing.T) {
+func TestRunnerUsesNoKubernetesDispatchPrivileges(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
 	}
@@ -880,139 +882,6 @@ func TestRunnerTriggerRunnerDefaultsToInProcess(t *testing.T) {
 		for _, rule := range resource.Rules {
 			if reflect.DeepEqual(rule.Resources, []string{"jobs"}) {
 				t.Fatalf("default %s/%s grants Job mutation: %+v", resource.Kind, resource.Metadata.Name, rule)
-			}
-		}
-	}
-}
-
-func TestRunnerWarmTriggerRunnerUsesRemoteCapacityBeforeKubernetes(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	args := runnerContainer(t, renderRunnerInNamespace(t, "capacity",
-		"runner.triggerRunner.kind=warm",
-		"runner.triggerRunner.labels={cluster,kubernetes}",
-		"runner.labels={cluster,arch=arm64}",
-		"runner.automountServiceAccountToken=true",
-		"runner.image.repository=registry.example/sparkwing-runner",
-		"runner.image.tag=remote",
-		"runner.image.pullPolicy=Always",
-		"serviceAccount.create=false",
-		"serviceAccount.name=remote-fallback",
-		"serviceAccount.shareAcrossComponents=true",
-	)).Args
-	want := []string{
-		"--claim-nodes=false",
-		"--trigger-runner=warm",
-		"--trigger-runner-namespace=capacity",
-		"--trigger-runner-image=registry.example/sparkwing-runner:remote",
-		"--trigger-runner-sa=remote-fallback",
-		"--trigger-runner-image-pull-policy=Always",
-		"--trigger-artifact-store=http://sparkwing-sparkwing-runner-bundle-cache.capacity.svc.cluster.local",
-		"--trigger-runner-label=cluster",
-		"--trigger-runner-label=kubernetes",
-	}
-	if !containsArg(args, "--label=arch=arm64") {
-		t.Fatalf("warm runner args = %v, want the outer pool architecture label", args)
-	}
-	if containsArg(args, "--trigger-runner-label=arch=arm64") {
-		t.Fatalf("warm runner args = %v, copied an outer architecture label to a differently placed Job", args)
-	}
-	for _, arg := range want {
-		if !containsArg(args, arg) {
-			t.Errorf("warm runner args = %v, want %q", args, arg)
-		}
-	}
-	for _, arg := range args {
-		if strings.HasPrefix(arg, "--trigger-warm-") || strings.HasPrefix(arg, "--warm-claim-") || strings.HasPrefix(arg, "--warm-poll") {
-			t.Errorf("warm runner args expose internal timing flag %q", arg)
-		}
-	}
-}
-
-func TestRunnerWarmTriggerRunnerGrantsNamespaceJobCRUD(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "capacity",
-		"runner.triggerRunner.kind=warm", "runner.automountServiceAccountToken=true"))
-	var jobRule *renderedPolicyRule
-	var podRule *renderedPolicyRule
-	for i := range resources {
-		if resources[i].Kind == "ClusterRole" {
-			t.Fatalf("warm mode rendered cluster-scoped RBAC: %+v", resources[i].Metadata)
-		}
-		if resources[i].Kind != "Role" {
-			continue
-		}
-		if resources[i].Metadata.Namespace != "capacity" {
-			t.Fatalf("Role namespace = %q, want capacity", resources[i].Metadata.Namespace)
-		}
-		for j := range resources[i].Rules {
-			if reflect.DeepEqual(resources[i].Rules[j].Resources, []string{"jobs"}) {
-				jobRule = &resources[i].Rules[j]
-			} else if reflect.DeepEqual(resources[i].Rules[j].Resources, []string{"pods"}) {
-				podRule = &resources[i].Rules[j]
-			} else {
-				t.Errorf("warm mode grants unrelated resources: %+v", resources[i].Rules[j])
-			}
-		}
-	}
-	if jobRule == nil {
-		t.Fatal("warm mode rendered no Job rule")
-	}
-	if !reflect.DeepEqual(jobRule.APIGroups, []string{"batch"}) ||
-		!reflect.DeepEqual(jobRule.Verbs, []string{"create", "get", "delete"}) {
-		t.Fatalf("Job rule = %+v, want the exact fallback lifecycle verbs", *jobRule)
-	}
-	if podRule == nil || len(podRule.APIGroups) != 1 || podRule.APIGroups[0] != "" ||
-		!reflect.DeepEqual(podRule.Verbs, []string{"list"}) {
-		t.Fatalf("Pod rule = %+v, want the exact fallback inspection verb", podRule)
-	}
-}
-
-func TestRunnerClusterTriggerRunnersRequireAnAPIToken(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
-	}
-	for _, kind := range []string{"k8s", "warm"} {
-		out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing", "runner.triggerRunner.kind="+kind)
-		if !strings.Contains(out, "runner.automountServiceAccountToken=true") {
-			t.Errorf("%s render error does not name the required token setting:\n%s", kind, out)
-		}
-	}
-}
-
-func TestRunnerClusterTriggerRunnersRequireTheTriggerLoop(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing",
-		"runner.triggerRunner.kind=warm", "runner.alsoClaimTriggers=false")
-	if !strings.Contains(out, "runner.alsoClaimTriggers=true") {
-		t.Fatalf("render error does not name the required trigger loop:\n%s", out)
-	}
-}
-
-func TestRunnerTriggerRunnerKindRejectsInvalidValue(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing", "runner.triggerRunner.kind=remote")
-	if !strings.Contains(out, "runner.triggerRunner.kind must be inprocess, k8s, or warm") {
-		t.Fatalf("render error does not identify trigger runner kinds:\n%s", out)
-	}
-}
-
-func TestRunnerWarmTimingIsNotChartConfiguration(t *testing.T) {
-	for _, path := range []string{"sparkwing-runner-bundle/values.yaml", "sparkwing-full/values.yaml"} {
-		body, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, removed := range []string{"warmClaimWait", "warmPollInterval", "claimNodes"} {
-			if strings.Contains(string(body), removed) {
-				t.Errorf("%s exposes removed setting %q", path, removed)
 			}
 		}
 	}
@@ -1394,26 +1263,6 @@ func TestFullChartCarriesTheDependencyProxyWiring(t *testing.T) {
 	if got := env["GOPROXY"]; got != "http://"+host+"/proxy/golang|https://proxy.golang.org,direct" {
 		t.Errorf("GOPROXY = %q; the vendored sub-chart may be stale. "+
 			"Fix: helm dep up ./charts/sparkwing-full", got)
-	}
-}
-
-func TestFullChartVendorsWarmTriggerRunner(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	rendered := helmRenderInNamespace(t, "./sparkwing-full",
-		"charts/sparkwing-runner-bundle/templates/runner-deployment.yaml", "sparkwing", "capacity",
-		"sparkwing-runner-bundle.runner.triggerRunner.kind=warm",
-		"sparkwing-runner-bundle.runner.automountServiceAccountToken=true")
-	args := runnerContainer(t, rendered).Args
-	for _, want := range []string{
-		"--trigger-runner=warm",
-		"--claim-nodes=false",
-		"--trigger-runner-namespace=capacity",
-	} {
-		if !containsArg(args, want) {
-			t.Errorf("vendored runner args = %v, want %q", args, want)
-		}
 	}
 }
 
@@ -2599,45 +2448,6 @@ func TestRunnerCarriesNoJobCeilingByDefault(t *testing.T) {
 		if arg, ok := hasFlag(args, name); ok {
 			t.Errorf("default install passes %s; the ceiling is opt-in", arg)
 		}
-	}
-}
-
-func TestRunnerCarriesTheConfiguredJobCeiling(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	args := runnerContainer(t, renderRunner(t, "runner.jobCeiling.cpu=8", "runner.jobCeiling.memory=16Gi")).Args
-	if !containsArg(args, "--cpu-ceiling=8") || !containsArg(args, "--memory-ceiling=16Gi") {
-		t.Errorf("runner args = %v, want the configured job ceiling", args)
-	}
-}
-
-func TestRunnerCarriesTheConfiguredJobDeadlineAndTeamNodes(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	args := runnerContainer(t, renderRunner(t)).Args
-	if arg, ok := hasFlag(args, "--deadline"); ok {
-		t.Errorf("default install passes %s; the 6h default needs no flag", arg)
-	}
-	if containsArg(args, "--team-nodes") {
-		t.Error("default install passes --team-nodes; team nodes are opt-in")
-	}
-	args = runnerContainer(t, renderRunner(t, "runner.jobDeadline=90m", "runner.teamNodes=true")).Args
-	if !containsArg(args, "--deadline=90m") || !containsArg(args, "--team-nodes") {
-		t.Errorf("runner args = %v, want --deadline=90m and --team-nodes", args)
-	}
-}
-
-func TestFullChartCarriesTheJobCeiling(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	rendered := helmRenderAll(t, "./sparkwing-full", "sparkwing", "default",
-		"sparkwing-runner-bundle.controller.tokenSecret.name=tok",
-		"sparkwing-runner-bundle.runner.jobCeiling.cpu=8")
-	if !strings.Contains(rendered, "--cpu-ceiling=8") {
-		t.Error("flagship chart carries no job ceiling flag; the vendored sub-chart may be stale")
 	}
 }
 
