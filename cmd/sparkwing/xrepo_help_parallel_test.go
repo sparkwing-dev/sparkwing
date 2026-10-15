@@ -27,3 +27,23 @@ func TestXrepoRuntimeHelpRunsInParallel(t *testing.T) {
 		t.Fatal("TestXrepoRuntimeHelpUsesCommandRegistry declaration is missing")
 	}
 }
+
+func firstStatementIsParallel(fn *ast.FuncDecl) bool {
+	if fn.Body == nil || len(fn.Body.List) == 0 {
+		return false
+	}
+	expr, ok := fn.Body.List[0].(*ast.ExprStmt)
+	if !ok {
+		return false
+	}
+	call, ok := expr.X.(*ast.CallExpr)
+	if !ok || len(call.Args) != 0 {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "Parallel" {
+		return false
+	}
+	receiver, ok := sel.X.(*ast.Ident)
+	return ok && receiver.Name == "t"
+}

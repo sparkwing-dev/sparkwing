@@ -58,7 +58,7 @@ func TestAdmissionClassInferenceAtPlanSeal(t *testing.T) {
 }
 
 func TestRequestOverridesSurvivePlan(t *testing.T) {
-	request, err := ResolveRequest(Inputs{Context: Context{Submitter: true, Local: true, NumCPU: 8}, Flags: Values{Priority: ptr(0), Requires: []string{}, DryRun: ptr(false)}})
+	request, err := ResolveRequest(Inputs{Context: Context{Submitter: true, Local: true, NumCPU: 8}, Flags: Values{Priority: ptr(0), Requires: []string{}, DryRun: ptr(false), StartAt: ptr("build/compile"), StopAt: ptr("test/verify"), Only: ptr("build*")}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,6 +79,9 @@ func TestRequestOverridesSurvivePlan(t *testing.T) {
 	}
 	if result.Options.Priority.Value != 0 || result.Options.Priority.Origin.Layer != runspec.LayerFlag {
 		t.Fatalf("priority: %+v", result.Options.Priority)
+	}
+	if result.Options.StartAt != request.StartAt || result.Options.StopAt != request.StopAt || result.Options.Only != request.Only {
+		t.Fatal("plan resolution changed the intake step selections")
 	}
 	if !reflect.DeepEqual(result.Jobs["test"].Requires.Value, []string{"go"}) {
 		t.Fatalf("requires: %+v", result.Jobs["test"].Requires)

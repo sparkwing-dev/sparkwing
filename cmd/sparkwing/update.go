@@ -181,14 +181,6 @@ func downloadAndInstall(version, currentBin string) (installedRelease, error) {
 	return installedRelease{path: currentBin, version: version, digest: verified.digest}, nil
 }
 
-func releaseAssetName() string {
-	name, err := currentReleaseTarget(releaseasset.Sparkwing).Name()
-	if err != nil {
-		panic(err)
-	}
-	return name
-}
-
 func currentReleaseTarget(binary releaseasset.Binary) releaseasset.Target {
 	return releaseasset.Target{Binary: binary, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
 }

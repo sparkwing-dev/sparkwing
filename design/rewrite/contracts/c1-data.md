@@ -1369,8 +1369,9 @@ Open intervals stop at their persisted charged checkpoint for reporting. Closed
 intervals use their finish time. A delayed reaper cannot add unconfirmed time.
 Reporting cannot advance charged checkpoints or close intervals. Operational
 run, node, trigger and credential rows do not control these totals. Settled and
-unmetered awards need no calculator call. Generated store tests use a contract
-fake while C2's production calculator remains unimplemented. The retention proof
+unmetered awards need no calculator call. Generated store tests can use a contract
+fake. The SQLite billing-start boundary uses C2's production calculator through
+final settlement and replay after reopening. The retention proof
 also checks exact deployment totals across pruning and reopening, with storage
 seconds excluded. The unused `Store.RunFinished` pruning query is removed.
 `Operator.CreditSettings`, `Operator.CreditRateTable` and
@@ -1401,7 +1402,9 @@ maintenance coordinator owns the shared retention, quota and GC ordering.
 The `billing-start-award-versus-start/store-sqlite` proof now lives in
 `pkg/store/store_unit_billing_boundary_test.go` as
 `TestStoreBillingStartAwardVersusStart`. It uses the store's existing metered
-claim fixtures and reopens SQLite after execution starts. The ordinary-package
+claim fixtures with the production C2 calculator and reopens SQLite after execution
+starts. Finish and replay retain the award's original price after settings change.
+The ordinary-package
 `internal/acceptance/store_unit_billing.go` harness and its acceptance wrapper
 are removed. No native placement proof is implied.
 

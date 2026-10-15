@@ -48,7 +48,7 @@ func TestEngineAmendmentsPreservePrivateWireContract(t *testing.T) {
 					}
 					return engineContractResponse(t, controllerwire.ClaimResponse{}), nil
 				case "/api/v1/runs/r1/jobs/source/failure":
-					if req.Method != "GET" || req.URL.Query().Get("source_generation") != "3" {
+					if req.Method != "GET" || req.URL.Query().Get("generation") != "3" {
 						t.Fatalf("failure selector: %s %s", req.Method, req.URL)
 					}
 					inner := `{"code":"future_error","message":"masked","hint":"recover","future":true}`

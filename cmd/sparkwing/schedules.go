@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -15,7 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 type scheduleOptions struct {
@@ -109,40 +109,44 @@ func parseScheduleOptions(inv clisurface.Invocation) (scheduleOptions, error) {
 }
 
 func runSchedules(ctx context.Context, args []string) error {
+	return runScheduleCommand(ctx, args, os.Stdout, defaultScheduleCommand())
+}
+
+func runScheduleCommand(ctx context.Context, args []string, out io.Writer, command scheduleCommand) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	inv, err := clisurface.Parse("sparkwing", append([]string{"schedules"}, args...))
 	if err != nil {
 		return err
 	}
 	if inv.Help() || inv.Command.Path == "sparkwing schedules" {
-		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
+		return writeCommandHelp(surfaceHelp(inv.Command), out, inv.Output(color.IsInteractiveStdout()))
 	}
 	opts, err := parseScheduleOptions(inv)
 	if err != nil {
 		return err
 	}
-	switch inv.Command.Path {
-	case "sparkwing schedules install":
-		return runCronsInstall(args[1:])
-	case "sparkwing schedules uninstall":
-		if len(inv.Flags["schedule"]) == 0 {
-			return runCronsUninstall(args[1:])
-		}
+	if err := validateScheduleScope(inv, opts); err != nil {
+		return err
 	}
-	if opts.action == "pin" || opts.action == "unpin" {
-		return pinSchedules(inv, opts)
-	}
-	ctx, cancel := context.WithTimeout(ctx, cronsProfileTimeout)
+	ctx, cancel := context.WithTimeout(ctx, scheduleOperationTimeout)
 	defer cancel()
-	options, closeTransport, err := controllerOptions(ctx, inv.Value("profile"))
+	if inv.Command.Path == "sparkwing schedules install" {
+		return installSchedules(ctx, inv, opts, out, command)
+	}
+	if inv.Value("profile") == "" && (inv.Command.Path == "sparkwing schedules uninstall" || opts.action == "pin" || opts.action == "unpin") {
+		return changeLocalSchedules(ctx, inv, opts, out, command)
+	}
+	if inv.Command.Path == "sparkwing schedules uninstall" && len(inv.Flags["schedule"]) == 0 {
+		return uninstallRepositorySchedules(ctx, inv, opts, out, command)
+	}
+	connection, err := command.connect(ctx, inv.Value("profile"))
 	if err != nil {
 		return err
 	}
-	defer closeTransport()
-	manager, err := client.NewScheduleManager(options)
-	if err != nil {
-		return err
-	}
-	return manageSchedules(ctx, inv, manager, os.Stdout)
+	defer connection.close()
+	return manageSchedules(ctx, inv, connection.manager, out)
 }
 
 func manageSchedules(ctx context.Context, inv clisurface.Invocation, manager controllerwire.ScheduleManager, out io.Writer) error {
@@ -355,7 +359,7 @@ func renderScheduleDetail(out io.Writer, detail controllerwire.DetailView) error
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(tw, "schedule\t%s\nname\t%s\nrepo\t%s\npipeline\t%s\nwhere\t%s\nstate\t%s\nlock\t%s %s\nbinary\t%s\ndigest\t%s\nlast run\t%s\nlast outcome\t%s\n", row.ID, row.Name, row.RepoPath, row.Pipeline, row.Where, row.State, row.Lock.State, row.Lock.Ref, row.Lock.Binary, row.Lock.Digest, row.LastRunID, row.LastOutcome)
 	fmt.Fprintln(tw, "FIELD\tDECLARED\tOVERRIDE\tEFFECTIVE")
-	fmt.Fprintf(tw, "cron\t%s\t%s\t%s\ntz\t%s\t%s\t%s\noverlap\t%s\t%s\t%s\ncatch up\t%s\t%s\t%s\nargs\t%s\t%s\t%s\n", row.Cron, row.Override.Cron, row.Effective.Cron, row.TZ, row.Override.TZ, row.Effective.TZ, row.Overlap, row.Override.Overlap, row.Effective.Overlap, time.Duration(row.CatchUpNS), time.Duration(row.Override.CatchUpNS), time.Duration(row.Effective.CatchUpNS), renderArgs(row.Args), renderArgs(row.Override.Args), renderArgs(row.Effective.Args))
+	fmt.Fprintf(tw, "cron\t%s\t%s\t%s\ntz\t%s\t%s\t%s\noverlap\t%s\t%s\t%s\ncatch up\t%s\t%s\t%s\nargs\t%s\t%s\t%s\n", row.Cron, row.Override.Cron, row.Effective.Cron, row.TZ, row.Override.TZ, row.Effective.TZ, row.Overlap, row.Override.Overlap, row.Effective.Overlap, time.Duration(row.CatchUpNS), time.Duration(row.Override.CatchUpNS), time.Duration(row.Effective.CatchUpNS), renderScheduleArgs(row.Args), renderScheduleArgs(row.Override.Args), renderScheduleArgs(row.Effective.Args))
 	if row.Override.Stale {
 		fmt.Fprintln(tw, "override\tdeclaration changed; run sparkwing schedules install")
 	}
@@ -366,31 +370,18 @@ func renderScheduleDetail(out io.Writer, detail controllerwire.DetailView) error
 	return tw.Flush()
 }
 
-func pinSchedules(inv clisurface.Invocation, opts scheduleOptions) error {
-	if inv.Value("profile") != "" {
-		return cronsRemotePinError("--" + opts.action)
+func renderScheduleArgs(args map[string]string) string {
+	if len(args) == 0 {
+		return "-"
 	}
-	session, release, err := openCrons("")
-	if err != nil {
-		return err
+	keys := make([]string, 0, len(args))
+	for key := range args {
+		keys = append(keys, key)
 	}
-	defer release()
-	var ids []string
-	seen := map[string]bool{}
-	for _, name := range inv.Flags["schedule"] {
-		row, err := session.svc.Resolve(context.Background(), name)
-		if err != nil {
-			return err
-		}
-		if !seen[row.ID] {
-			ids = append(ids, row.ID)
-			seen[row.ID] = true
-		}
+	slices.Sort(keys)
+	pairs := make([]string, 0, len(keys))
+	for _, key := range keys {
+		pairs = append(pairs, key+"="+args[key])
 	}
-	for _, id := range ids {
-		if err := runCronsPin(session, id, opts.format, opts.action == "pin"); err != nil {
-			return err
-		}
-	}
-	return nil
+	return strings.Join(pairs, ", ")
 }

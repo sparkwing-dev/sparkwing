@@ -121,7 +121,11 @@ func resolveWarmEngine(ctx context.Context, dir string, sdk engine.SDKKind) (eng
 	if err != nil {
 		return engine.Resolved{}, err
 	}
-	resolver, err := engine.NewResolver(engine.Config{Mode: toolchain.Mode(os.Getenv(toolchainModeEnv))})
+	mode, err := toolchain.ParseMode(os.Getenv(toolchainModeEnv))
+	if err != nil {
+		return engine.Resolved{}, err
+	}
+	resolver, err := engine.NewResolver(engine.Config{Mode: mode})
 	if err != nil {
 		return engine.Resolved{}, err
 	}
@@ -145,7 +149,7 @@ func warmLocalPipelineWith(ctx context.Context, dir string, env []string, diagno
 	if err := writeEngineNotices(diagnostics, selected.Notices); err != nil {
 		return result, err
 	}
-	prepared, err := install(ctx, selected, engine.SDKInstallRequest{Directory: dir, SDK: sdk, Environment: env})
+	prepared, err := install(ctx, selected, engine.SDKInstallRequest{Directory: filepath.Dir(dir), PipelineDir: filepath.Base(dir), SDK: sdk, Environment: env})
 	if err != nil {
 		return result, err
 	}

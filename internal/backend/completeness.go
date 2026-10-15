@@ -15,8 +15,7 @@ type logStoreHolder interface {
 	nodeLogStore() storage.LogStore
 }
 
-func (b *ClientBackend) nodeLogStore() storage.LogStore { return b.logStore }
-func (b *StoreBackend) nodeLogStore() storage.LogStore  { return b.logStore }
+func (b *StoreBackend) nodeLogStore() storage.LogStore { return b.logStore }
 
 // NodeLogCompleteness reports the controller's verdict or StateUnknown when unavailable.
 func NodeLogCompleteness(ctx context.Context, b Backend, runID, nodeID string) (logseg.Completeness, error) {

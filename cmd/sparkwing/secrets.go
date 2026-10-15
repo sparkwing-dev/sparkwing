@@ -20,6 +20,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/secretname"
 )
 
+const secretConnectTimeout = 10 * time.Second
+
 func runSecret(args []string) error {
 	inv, err := clisurface.Parse("sparkwing", append([]string{"secrets"}, args...))
 	if err != nil {
@@ -33,7 +35,7 @@ func runSecret(args []string) error {
 		return err
 	}
 	ctx := context.Background()
-	connectCtx, cancel := context.WithTimeout(ctx, ensureDaemonTimeout)
+	connectCtx, cancel := context.WithTimeout(ctx, secretConnectTimeout)
 	options, closeTransport, err := controllerOptions(connectCtx, inv.Value("profile"))
 	cancel()
 	if err != nil {

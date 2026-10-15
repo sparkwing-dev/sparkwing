@@ -97,7 +97,7 @@ profiles:
 `)
 	for _, name := range []string{"prod", "lite"} {
 		err := dispatchRun([]string{"deploy", "--profile", name})
-		if err == nil || !strings.Contains(err.Error(), "sparkwing pipeline trigger deploy --profile "+name) {
+		if err == nil || !strings.Contains(err.Error(), "sparkwing pipeline trigger <pipeline> --profile NAME") {
 			t.Errorf("run deploy --profile %s = %v, want a refusal naming pipeline trigger", name, err)
 		}
 	}

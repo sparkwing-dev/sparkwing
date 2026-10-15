@@ -11,6 +11,7 @@ func TestStoreBillingStartAwardVersusStart(t *testing.T) {
 	for _, cloud := range []bool{false, true} {
 		t.Run(map[bool]string{false: "runner", true: "cloud"}[cloud], func(t *testing.T) {
 			s, demand, now := meteredUnitFixture(t, cloud)
+			s.billing = nil
 			path := blobAccountingDiskStore(t, s)
 			awardedAt := *now
 			claim, actor := meteredUnitClaim(t, s, demand)
@@ -58,6 +59,15 @@ func TestStoreBillingStartAwardVersusStart(t *testing.T) {
 			}
 			if err != nil || award != awardedAt.UnixNano() || began != wantStart.UnixNano() || price != 10 || reserved != 600 {
 				t.Fatalf("reopened billing: award=%d start=%d price=%d reserved=%d: %v", award, began, price, reserved, err)
+			}
+			*now = now.Add(5 * time.Second)
+			change := NodeTransition{Ref: ref, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(row.Attempt)}
+			for replay := range 2 {
+				applied, err := tenant.TransitionNode(t.Context(), change)
+				if err != nil || applied.Replayed != (replay == 1) {
+					t.Fatalf("real calculator settlement: %+v: %v", applied, err)
+				}
+				unitBillingTotal(t, s, 600, true)
 			}
 		})
 	}

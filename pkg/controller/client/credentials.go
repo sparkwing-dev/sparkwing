@@ -19,6 +19,35 @@ type tokenManager struct {
 
 var _ controllerwire.TokenManager = (*tokenManager)(nil)
 
+// RunnerTokenManager enrolls machines and manages their team credentials through one transport.
+type RunnerTokenManager interface {
+	controllerwire.TokenManager
+	EnrollRunner(context.Context, EnrollRunnerRequest) (*CreatedToken, error)
+}
+
+// NewRunnerTokenManager binds enrollment and token management to the team namespace.
+func NewRunnerTokenManager(options EngineOptions) (RunnerTokenManager, error) {
+	c, err := newEngineClient(options)
+	if err != nil {
+		return nil, err
+	}
+	return &tokenManager{client: c, base: "/api/v1/tokens"}, nil
+}
+
+func (c *tokenManager) EnrollRunner(ctx context.Context, request EnrollRunnerRequest) (*CreatedToken, error) {
+	if c.deployment {
+		return nil, &apierr.Error{Code: apierr.BadRequest, Message: "runner enrollment requires the team credential namespace"}
+	}
+	var result CreatedToken
+	if err := c.client.request(ctx, "POST", "/api/v1/runners", "/api/v1/runners", "", request, &result); err != nil {
+		return nil, err
+	}
+	if result.Capability == "" || !validSelector(result.Prefix) || result.Team == "" || len(result.Grants) == 0 {
+		return nil, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned incomplete runner enrollment"}
+	}
+	return &result, nil
+}
+
 // NewTokenManager selects the credential namespace while the server authorizes every operation.
 func NewTokenManager(options EngineOptions, deployment bool) (controllerwire.TokenManager, error) {
 	c, err := newEngineClient(options)
@@ -211,7 +240,9 @@ func tokenMetadata(row capability.Metadata) controllerwire.TokenMetadata {
 			kind = candidate
 		}
 	}
-	return controllerwire.TokenMetadata{Prefix: row.Prefix, Kind: kind, Principal: row.Subject.ID, Subject: &row.Subject,
+	return controllerwire.TokenMetadata{
+		Prefix: row.Prefix, Kind: kind, Principal: row.Subject.ID, Subject: &row.Subject,
 		Team: row.Team, Scopes: append([]capability.Grant{}, row.Grants...), Metered: row.Metered,
-		IssuedAt: tokenTime(&row.IssuedAt), ExpiresAt: tokenTime(row.ExpiresAt), LastUsedAt: tokenTime(row.LastUsedAt), RevokedAt: tokenTime(row.RevokedAt)}
+		IssuedAt: tokenTime(&row.IssuedAt), ExpiresAt: tokenTime(row.ExpiresAt), LastUsedAt: tokenTime(row.LastUsedAt), RevokedAt: tokenTime(row.RevokedAt),
+	}
 }

@@ -56,41 +56,6 @@ func requestedOutput(args []string) (string, bool, error) {
 	return requested, present, nil
 }
 
-func commandHelp(args []string) (*Command, bool) {
-	path, selected := "sparkwing", &cmdSparkwing
-	help := len(args) == 0
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
-			return nil, false
-		}
-		if arg == "--help" || arg == "-h" || arg == "help" {
-			help = true
-			continue
-		}
-		if arg == "--output" || arg == "-o" {
-			if i+1 < len(args) {
-				i++
-			}
-			continue
-		}
-		if strings.HasPrefix(arg, "--output=") || strings.HasPrefix(arg, "-o=") || (strings.HasPrefix(arg, "-o") && len(arg) > 2) {
-			continue
-		}
-		candidate, found := path+" "+arg, false
-		for _, cmd := range allCommands {
-			if cmd.Path == candidate {
-				selected, path, found = cmd, candidate, true
-				break
-			}
-		}
-		if !found {
-			return nil, false
-		}
-	}
-	return selected, help || selected == &cmdSparkwing
-}
-
 func writeDocument(w io.Writer, slug, text, mode string) error {
 	if mode != "json" {
 		return writeText(w, "document", text, mode)

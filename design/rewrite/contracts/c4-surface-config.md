@@ -84,11 +84,21 @@ A1-07, A1-11, A1-12, A1-47 and A1-49.
 Project-file readers use the strict schema. `Config.Registry` projects validated
 project declarations into dispatch metadata for the existing CLI and hosts.
 Settings winners remain owned by `settings.ResolvePlan` and the store seals.
+`runspec.Options.StartAt`, `StopAt` and `Only` retain the CLI's step-window
+selections as `Setting[string]`. Intake sets them through the shared settings
+table. Plan resolution preserves their values and origins, and `SealSpec`
+refuses a changed selection. Retry carries them with the original request.
+W3 consumes these sealed values when validating and executing the plan.
 CLI grammar, host execution and local lifecycle have separate owners.
 The acceptance suite runs each configuration boundary under its scenario's
 `runspec-config` cell. Placement cells require the T1 driver and real hosts.
 
 ## Ownership
+
+The internal launcher grammar requires `--docker-image` beside `--image` and
+does not accept `--deadline`. Both images are digest-pinned by W8's validator.
+`fetch-source` and `run-node` permit an absent `--job` for a plan award. W8
+validates the private award's kind and binding before source or execution.
 
 W9 fills the library-inflation selector omitted from the initial registry.
 `pipeline sparks inflate --library MODULE` takes a required sparks-core name or
@@ -313,6 +323,9 @@ GlobalFlags and CommonRules apply to every row. Unknown engine flags fail;
 pipeline arguments start after `--`. Only run and pipeline trigger take a
 pipeline positional. Output selection is validated before side effects; lists
 are NDJSON and diagnostics use the C2 error object on stderr.
+
+`Flag.AllowEmpty` records an allowed empty scalar. `--sw-cache-from=` clears
+the machine cache profile without losing flag presence.
 
 `__complete --word` accepts an empty value to select root completions. Shell
 completion requests use `--kind` and `--word`, with explicit plain output.
@@ -649,15 +662,15 @@ holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 
 | Export | Purpose |
 | --- | --- |
-| [`Authority`](../../../internal/clisurface/contract.go#L10) | Authority separates team credentials from deployment and in-pod powers. |
-| [`Flag`](../../../internal/clisurface/contract.go#L22) | Flag is parser and help metadata; Argument empty means a boolean switch. |
-| [`Command`](../../../internal/clisurface/contract.go#L41) | Command separates parser metadata from handlers; Flags adds to GlobalFlags. |
-| [`GlobalFlags`](../../../internal/clisurface/contract.go#L56) | GlobalFlags is inherited everywhere; profile selection is command-local, but an accepted --profile may appear before the verb. |
-| [`ExitCode`](../../../internal/clisurface/contract.go#L66) | ExitCode keeps usage failures distinguishable from incomplete observations. |
-| [`ErrorFormat`](../../../internal/clisurface/contract.go#L78) | ErrorFormat delegates JSON encoding and codes to internal/apierr; the CLI must not create another error envelope or leak pipeline secrets in hints. |
-| [`Errors`](../../../internal/clisurface/contract.go#L86) | Errors keeps diagnostics on stderr even when stdout contains records. |
-| [`CommonRules`](../../../internal/clisurface/contract.go#L96) | CommonRules fixes shared meanings so a new command cannot reinterpret a flag. |
-| [`Validate`](../../../internal/clisurface/contract.go#L117) | Validate catches grammar drift before a parser or help generator consumes it. |
+| [`Authority`](../../../internal/clisurface/grammar.go) | Authority separates team credentials from deployment and in-pod powers. |
+| [`Flag`](../../../internal/clisurface/grammar.go) | Flag is parser and help metadata; Argument empty means a boolean switch. |
+| [`Command`](../../../internal/clisurface/grammar.go) | Command separates parser metadata from handlers; Flags adds to GlobalFlags. |
+| [`GlobalFlags`](../../../internal/clisurface/grammar.go) | GlobalFlags is inherited everywhere; profile selection is command-local, but an accepted --profile may appear before the verb. |
+| [`ExitCode`](../../../internal/clisurface/grammar.go) | ExitCode keeps usage failures distinguishable from incomplete observations. |
+| [`ErrorFormat`](../../../internal/clisurface/grammar.go) | ErrorFormat delegates JSON encoding and codes to internal/apierr; the CLI must not create another error envelope or leak pipeline secrets in hints. |
+| [`Errors`](../../../internal/clisurface/grammar.go) | Errors keeps diagnostics on stderr even when stdout contains records. |
+| [`CommonRules`](../../../internal/clisurface/grammar.go) | CommonRules fixes shared meanings so a new command cannot reinterpret a flag. |
+| [`Validate`](../../../internal/clisurface/grammar.go) | Validate catches grammar drift before a parser or help generator consumes it. |
 | [`Registry`](../../../internal/clisurface/registry.go#L4) | the final tree is independent of runtime dispatch so help and parsers share one contract. |
 | [`PipelineIdentity`](../../../internal/clisurface/pipeline.go) | Captures the invoked name separately from the registered SDK entrypoint. |
 | [`ResolvePipeline`](../../../internal/clisurface/pipeline.go) | Resolves the configured pair without process globals or later configuration reads. |
@@ -752,7 +765,7 @@ holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 
 New contract and test files:
 
-- `internal/clisurface/contract.go`
+- `internal/clisurface/grammar.go`
 - `internal/clisurface/contract_test.go`
 - `internal/clisurface/registry.go`
 - `internal/limits/billing.go`

@@ -4753,6 +4753,8 @@ components:
           $ref: '#/components/schemas/internal.runspec.JobExecutionSettings'
         no_memo:
           $ref: '#/components/schemas/internal.runspec.Setting.bool.'
+        only:
+          $ref: '#/components/schemas/internal.runspec.Setting.string.'
         output:
           $ref: '#/components/schemas/internal.runspec.Setting.string.'
         owner_execution_timeout:
@@ -4777,6 +4779,10 @@ components:
           $ref: '#/components/schemas/internal.runspec.Setting.github.com.sparkwing-dev.sparkwing.internal.runspec.Resources.'
         runner:
           $ref: '#/components/schemas/internal.runspec.Setting.github.com.sparkwing-dev.sparkwing.internal.runspec.RunnerSelection.'
+        start_at:
+          $ref: '#/components/schemas/internal.runspec.Setting.string.'
+        stop_at:
+          $ref: '#/components/schemas/internal.runspec.Setting.string.'
         submit_env_allow:
           $ref: '#/components/schemas/internal.runspec.Setting...string.'
         workers:
@@ -4791,6 +4797,9 @@ components:
         - checkout
         - requires
         - prefers
+        - start_at
+        - stop_at
+        - only
         - dry_run
         - no_memo
         - allow_risk

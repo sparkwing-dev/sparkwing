@@ -7,10 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
@@ -36,7 +34,7 @@ type pipelineEngineSwitcher struct {
 	diagnostics io.Writer
 }
 
-func switchToolchain(dir string) error {
+func switchToolchain(dir string, beforeExec func()) error {
 	ctx, stop, _ := interruptContext()
 	defer stop()
 	typescript, err := pipelineentry.IsTypeScript(dir)
@@ -54,7 +52,12 @@ func switchToolchain(dir string) error {
 	command := pipelineEngineSwitcher{
 		readPin: readEnginePin, versionFor: enginePinVersion,
 		current: current, target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
-		execute: execToolchain, diagnostics: os.Stderr,
+		execute: func(binary string, args, environment []string) error {
+			if beforeExec != nil {
+				beforeExec()
+			}
+			return execToolchain(binary, args, environment)
+		}, diagnostics: os.Stderr,
 		resolve: func(ctx context.Context, pin engine.Pin, target releaseasset.Target, mode toolchain.Mode) (engine.Resolved, error) {
 			resolver, err := engine.NewResolver(engine.Config{Mode: mode})
 			if err != nil {
@@ -74,7 +77,7 @@ func (c pipelineEngineSwitcher) run(ctx context.Context, dir string, sdk engine.
 	if err != nil {
 		return &apierr.Error{Code: apierr.InvalidArgs, Message: err.Error()}
 	}
-	pin, err := c.readPin(filepath.Dir(dir), sdk)
+	pin, err := c.readPin(dir, sdk)
 	if err := errors.Join(err, ctx.Err()); err != nil {
 		return err
 	}
@@ -116,21 +119,4 @@ func toolchainArgs() []string {
 		return toolchainReplayArgs
 	}
 	return os.Args[1:]
-}
-
-func isReleaseTag(version string) bool { return buildinfo.IsReleaseVersion(version) }
-
-func tildePath(path string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return path
-	}
-	if path == home {
-		return "~"
-	}
-	prefix := home + string(os.PathSeparator)
-	if strings.HasPrefix(path, prefix) {
-		return "~" + string(os.PathSeparator) + strings.TrimPrefix(path, prefix)
-	}
-	return path
 }

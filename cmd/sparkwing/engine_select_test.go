@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
@@ -55,7 +57,7 @@ func TestPipelineEngineSwitchUsesExactPinAndCapturedInvocation(t *testing.T) {
 				order := []string{}
 				command.readPin = func(checkout string, got engine.SDKKind) (engine.Pin, error) {
 					order = append(order, "pin")
-					if checkout != filepath.Dir(command.current) || got != sdk {
+					if checkout != filepath.Join(filepath.Dir(command.current), ".sparkwing") || got != sdk {
 						t.Fatalf("pin source changed: %s %s", checkout, got)
 					}
 					return selected.Identity.Pin, nil
@@ -81,6 +83,58 @@ func TestPipelineEngineSwitchUsesExactPinAndCapturedInvocation(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestPipelineEnginePinComesFromPipelineDirectoryProperty(t *testing.T) {
+	for _, sdk := range []engine.SDKKind{engine.GoSDK, engine.TypeScriptSDK} {
+		t.Run(string(sdk), func(t *testing.T) {
+			root := t.TempDir()
+			pipeline := filepath.Join(root, ".sparkwing")
+			manifest := "go.mod"
+			body := "module pipeline\nrequire github.com/sparkwing-dev/sparkwing v1.2.3\n"
+			if sdk == engine.TypeScriptSDK {
+				manifest, body = "package.json", `{"dependencies":{"@sparkwing/sdk":"1.2.3"}}`
+				writeRepoFile(t, filepath.Join(pipeline, "package-lock.json"), `{"lockfileVersion":3,"packages":{"":{"dependencies":{"@sparkwing/sdk":"1.2.3"}},"node_modules/@sparkwing/sdk":{"version":"1.2.3"}}}`)
+			}
+			writeRepoFile(t, filepath.Join(pipeline, manifest), body)
+			pin, err := engine.ReadPin(pipeline, sdk)
+			if err != nil {
+				t.Fatal(err)
+			}
+			property := func(minor, mode uint8) bool {
+				parent := filepath.Join(root, manifest)
+				switch mode % 3 {
+				case 0:
+					if err := os.Remove(parent); err != nil && !os.IsNotExist(err) {
+						t.Fatal(err)
+					}
+				case 1:
+					parentBody := fmt.Sprintf("module parent\nrequire github.com/sparkwing-dev/sparkwing v1.%d.0\n", minor)
+					if sdk == engine.TypeScriptSDK {
+						parentBody = fmt.Sprintf(`{"dependencies":{"@sparkwing/sdk":"1.%d.0"}}`, minor)
+						writeRepoFile(t, filepath.Join(root, "package-lock.json"), fmt.Sprintf(`{"lockfileVersion":3,"packages":{"":{"dependencies":{"@sparkwing/sdk":"1.%d.0"}},"node_modules/@sparkwing/sdk":{"version":"1.%d.0"}}}`, minor, minor))
+					}
+					writeRepoFile(t, parent, parentBody)
+				case 2:
+					writeRepoFile(t, parent, "malformed parent manifest")
+				}
+				command, selected, _, calls := engineSwitchFixture(t, sdk)
+				command.readPin, command.versionFor = engine.ReadPin, engine.VersionForPin
+				selected.Identity.Pin = pin
+				command.resolve = func(_ context.Context, got engine.Pin, _ releaseasset.Target, _ toolchain.Mode) (engine.Resolved, error) {
+					if got != pin {
+						return engine.Resolved{}, errors.New("parent checkout selected the engine")
+					}
+					return selected, nil
+				}
+				report := gatherSDKPinWith(Info{Project: InfoProject{Found: true, SparkwingDir: pipeline}}, sdk, engine.ReadPin, engine.VersionForPin)
+				return command.run(t.Context(), pipeline, sdk, "auto", nil, nil) == nil && *calls == 1 && report.Refusal == "" && report.Pin == pin.Version && report.Runs == "v1.2.3"
+			}
+			if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

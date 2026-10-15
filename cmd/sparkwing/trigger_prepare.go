@@ -7,14 +7,17 @@ import (
 	"fmt"
 	"net/url"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -32,6 +35,7 @@ type triggerSourceInput struct {
 
 type preparedTriggerSource struct {
 	pipeline string
+	profile  string
 	git      runspec.Git
 	source   runspec.Source
 	checkout triggerCheckout
@@ -40,6 +44,26 @@ type preparedTriggerSource struct {
 type triggerCheckout struct {
 	directory   string
 	environment []string
+}
+
+func (s preparedTriggerSource) sdk(ctx context.Context) (engine.SDKKind, error) {
+	manifest := path.Join(s.source.Location.PipelineDir, "package.json")
+	listed, err := s.checkout.read(ctx, "ls-tree", "--name-only", s.source.Ref, "--", manifest)
+	if err != nil || listed == "" {
+		return engine.GoSDK, err
+	}
+	raw, err := s.checkout.read(ctx, "show", s.source.Ref+":"+manifest)
+	if err != nil {
+		return "", err
+	}
+	typescript, err := pipelineentry.IsTypeScriptManifest([]byte(raw))
+	if err != nil {
+		return "", fmt.Errorf("selected pipeline package.json: %w", err)
+	}
+	if typescript {
+		return engine.TypeScriptSDK, nil
+	}
+	return engine.GoSDK, nil
 }
 
 func (c triggerCheckout) read(ctx context.Context, args ...string) (string, error) {
@@ -149,10 +173,23 @@ func prepareTriggerSource(ctx context.Context, input triggerSourceInput) (prepar
 	if err != nil {
 		return result, err
 	}
-	return preparedTriggerSource{pipeline: identity.Name, git: git, source: runspec.Source{
+	profile := ""
+	if cfg != nil {
+		if entry := cfg.Registry().Find(identity.Name); entry != nil {
+			profile = entry.Profile
+		}
+	}
+	return preparedTriggerSource{pipeline: identity.Name, profile: profile, git: git, source: runspec.Source{
 		Ref: pipelineSHA, Entrypoint: identity.Entrypoint,
 		Location: runspec.SourceLocation{RemoteURL: remote, PipelineDir: ".sparkwing"},
 	}, checkout: reader}, nil
+}
+
+func (s preparedTriggerSource) checkProfile(profile string) error {
+	if s.profile != "" && s.profile != profile {
+		return fmt.Errorf("pipeline trigger: pipeline %s is pinned to profile %s; pass --profile %s", s.pipeline, s.profile, s.profile)
+	}
+	return nil
 }
 
 func triggerPipelineRevision(ctx context.Context, checkout triggerCheckout, cfg *projectconfig.Config, pipeline, explicit, execution string) (string, error) {

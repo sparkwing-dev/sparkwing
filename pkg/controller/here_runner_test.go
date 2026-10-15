@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -294,9 +295,12 @@ func TestHereRunner_AClaimedRunOutlivesTheFirstHour(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.restart()
-	beat := client.NewWithToken(f.url, nil, out.RunnerToken)
+	beat, err := client.NewEngineClient(client.EngineOptions{URL: f.url, Bearer: func(context.Context) (string, error) { return out.RunnerToken, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
 	fenced := store.WithTriggerClaimFence(t.Context(), store.TriggerClaimFence{ClaimGeneration: claimed.ClaimSeq})
-	if _, err := beat.HeartbeatTrigger(fenced, out.RunID); err != nil {
+	if _, err := beat.Renew(fenced, out.RunID, controllerwire.RenewalRequest{}); err != nil {
 		t.Fatalf("heartbeat 90 minutes after the mint: %v", err)
 	}
 	if code := f.do("GET", "/api/v1/runs/"+out.RunID, out.RunnerToken, nil, nil); code != http.StatusOK {

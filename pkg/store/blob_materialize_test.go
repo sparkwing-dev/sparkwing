@@ -36,6 +36,12 @@ func blobMaterializationFixture(t *testing.T) (*Store, *Tenant, ReconcileRequest
 	if _, err := records.tenant.TransitionNode(t.Context(), change); err != nil {
 		t.Fatal(err)
 	}
+	s.SetResultBlobRecords(records.manifests)
+	return materializationTarget(t, s, records.tenant, change.Ref)
+}
+
+func materializationTarget(t *testing.T, s *Store, tenant *Tenant, sourceRef NodeRef) (*Store, *Tenant, ReconcileRequest) {
+	t.Helper()
 	maintenanceRun(t, s, "target", 2, RunRunning)
 	rewriteSchemaExec(t, s.db, "UPDATE runs SET pipeline='ci',repo_key='gh:1',request_json=? WHERE id='target'", []byte(`{"version":1,"request":{"git":{"ref":"main"}}}`))
 	rewriteSchemaExec(t, s.db, "UPDATE runs SET lineage_json=? WHERE id='target'", []byte(`{"retry_of":"run"}`))
@@ -53,16 +59,55 @@ func blobMaterializationFixture(t *testing.T) (*Store, *Tenant, ReconcileRequest
 	owner.ExpiresAt = &expiry
 	authorityPersist(t, s, owner)
 	rewriteSchemaExec(t, s.db, "INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,needs_labels,prefers_labels) VALUES ('a','target','claimed','trigger',1,1,'host','target-owner',1,?,?,?)", expiry.UnixNano(), []byte(`[]`), []byte(`[]`))
-	s.SetResultBlobRecords(records.manifests)
 	actor := Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: owner.Prefix}, CapabilityPrefix: owner.Prefix, Owner: OwnerLeaseRef{Kind: OwnerTrigger, RunID: "target", Holder: "host", Generation: 1}}
-	source := MaterializeSource{Kind: SourceManualRetry, Result: &MaterializedResultSource{Ref: change.Ref, StateSeq: 1}}
-	return s, records.tenant, ReconcileRequest{Ref: NodeRef{"target", "job"}, Actor: actor, Policy: source.Kind, Source: &source}
+	source := MaterializeSource{Kind: SourceManualRetry, Result: &MaterializedResultSource{Ref: sourceRef, StateSeq: 1}}
+	return s, tenant, ReconcileRequest{Ref: NodeRef{"target", "job"}, Actor: actor, Policy: source.Kind, Source: &source}
 }
 
-func MaterializationTestFixture(t *testing.T) (*Store, *Tenant, ReconcileRequest) {
-	s, tenant, request := blobMaterializationFixture(t)
-	request.Source = seedMaterializationMemo(t, s, tenant)
-	request.Policy = SourceMemo
+func MaterializationTestFixture(t *testing.T, manifests BlobManifestReader, output, manifest blob.Blob, members []blob.Blob) (*Store, *Tenant, ReconcileRequest) {
+	t.Helper()
+	s, records, intent := blobRecordFixture(t)
+	rewriteSchemaExec(t, s.db, "UPDATE nodes SET spec_hash='same'")
+	records.manifests = manifests
+	s.SetResultBlobRecords(manifests)
+	for _, object := range append([]blob.Blob{output, manifest}, members...) {
+		intent.Digest, intent.Size = object.Digest, object.Size
+		if _, err := commitTestBlob(t, records.tenant, intent); err != nil {
+			t.Fatal(err)
+		}
+	}
+	intent.Digest, intent.Size = output.Digest, output.Size
+	out := blobOutputRequest(intent)
+	if _, err := records.CommitRecord(t.Context(), out); err != nil {
+		t.Fatal(err)
+	}
+	intent.Digest, intent.Size = manifest.Digest, manifest.Size
+	artifacts := blobOutputRequest(intent)
+	artifacts.Key.Kind = blob.KindManifest
+	var err error
+	artifacts.Members, err = manifests.ReadBlobManifest(t.Context(), records.tenant.team, manifest.Digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := records.CommitRecord(t.Context(), artifacts); err != nil {
+		t.Fatal(err)
+	}
+	memo := out
+	memo.Key.Kind, memo.Key.Name, memo.Key.Scope.Key = blob.KindMemo, "output", fixtureMemoHash
+	memo.ManifestDigest = runspec.Optional[blob.Digest]{Set: true, Value: manifest.Digest}
+	memo.Members = artifacts.Members
+	if _, err := records.CommitRecord(t.Context(), memo); err != nil {
+		t.Fatal(err)
+	}
+	attempt := intent.Identity.Attempt.Value
+	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, Holder: "machine", Generation: attempt.Generation}
+	ref := NodeRef{attempt.RunID, attempt.NodeID}
+	change := NodeTransition{Ref: ref, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(attempt.Attempt), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &out.Key, ManifestRecord: &artifacts.Key}}}
+	if _, err := records.tenant.TransitionNode(t.Context(), change); err != nil {
+		t.Fatal(err)
+	}
+	s, tenant, request := materializationTarget(t, s, records.tenant, ref)
+	request.Policy, request.Source = SourceMemo, &MaterializeSource{Kind: SourceMemo, Record: memo.Key}
 	return s, tenant, request
 }
 
