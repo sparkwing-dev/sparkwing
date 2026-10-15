@@ -75,10 +75,10 @@ both owner and job construction. `FuzzNativeStoreAwardW8` rejects changed fences
 seals, settings and bearers before service construction. These checks do not
 establish native placement, SDK-process or deployed Cloud behavior.
 
-<!-- design:begin -->
-
-The node-duration histogram still needs a committed-outcome observation from
-the host integration. A host method's returned error does not identify the
-terminal job verdict, so claim metrics do not manufacture that observation.
-
-<!-- design:end -->
+Claimed hosting rejects an accepted award without a sealed source location
+before acquisition. Cancelling source acquisition joins git and removes its
+owned checkout. `TestClaimedRunnerRefusesAwardWithoutSourceBeforeAcquisition`
+uses the persisted-input constructor and shared claimed host.
+`TestRunnerSourceCancellationJoinsFetchAndRemovesCheckout` blocks a git fetch
+through a process fixture and checks cancellation and cleanup. It exercises
+Unix process handling without network or controller transport.

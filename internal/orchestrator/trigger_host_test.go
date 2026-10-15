@@ -394,29 +394,6 @@ func TestDispatchedNode_AStopWithACauseRecordsTheNodeCancelled(t *testing.T) {
 	}
 }
 
-// safety: a claimed node runs only the pipeline its run's source builds, so
-// a run that names no source is refused rather than run from whatever binary
-// the runner happens to be.
-func TestDispatchedNode_WithoutASourceIsRefused(t *testing.T) {
-	t.Setenv("SPARKWING_HOME", t.TempDir())
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	if err := st.CreateRun(t.Context(), store.Run{ID: "run-sourceless", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
-		t.Fatal(err)
-	}
-	srv := httptest.NewServer(controller.New(st, slog.New(slog.DiscardHandler)).Handler())
-	t.Cleanup(srv.Close)
-	node := &store.Node{RunID: "run-sourceless", NodeID: "build", ClaimedBy: "holder", ClaimGeneration: 1}
-	_, err = RunNodeOnce(t.Context(), srv.URL, node.RunID, node.NodeID, node.ClaimedBy, "runner-token",
-		slog.New(slog.DiscardHandler), ClaimedNodeAttempt(node))
-	if err == nil || !strings.Contains(err.Error(), "no repository or working-tree source") {
-		t.Fatalf("RunNodeOnce = %v, want the sourceless node refused", err)
-	}
-}
-
 // safety: a guard that reads a secret answers on the run host through the
 // trigger's claim, so a guard set to skip skips the deploy rather than fail
 // open for want of the secret.

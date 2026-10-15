@@ -977,3 +977,23 @@ restart, atomic rollback and serialized table-update checks through that owner.
 `TestStoreDataUnmeteredSettlementNeedsNoCalculator` closes the shared settlement
 helper's dependency on a calculator for unmetered work. No native cell is newly
 marked complete by these caller migrations.
+
+## W8 orphan run-node entry point retirement
+
+The former cluster and dispatcher callers use the shared native hosts.
+`RunNodeOnce`, its claim options and its separate remote source/build path are
+removed. `hostDispatchedNode` and the stopping-state adapter remain because the
+W3 trigger host still consumes them.
+
+| Retired test | Replacement and evidence limit |
+| --- | --- |
+| `TestDispatchedNode_WithoutASourceIsRefused` | `internal/runners.TestClaimedRunnerRefusesAwardWithoutSourceBeforeAcquisition` constructs persisted native inputs and invokes `ClaimedNodeHost.Execute`. It checks the source-location refusal and forbids acquisition and execution. |
+| `TestRunNodeRemoteCancelAbortsSourceFetch` | `internal/runners.TestRunnerSourceCancellationJoinsFetchAndRemovesCheckout` cancels `source.PrepareCheckout` while its git fetch is blocked, joins the process and checks workspace removal. It uses real git initialization with a Unix fetch-process fixture. No network evidence is claimed. |
+| `TestRunNodeRemoteRefusesARepositoryOutsideTheAllowlistBeforeFetching` | `TestAdmitTriggerSourceRefusesARepositoryOutsideTheAllowlist` retains the rejection at W3's source-policy helper. The removed fetch wrapper had no production caller. Production machine-source binding remains open. |
+| `TestRunNodeRemoteRefusesUncheckableSourcesBeforeFetching` | `TestAdmitTriggerSourceRefusesUncheckableSources` retains every refusal and accepted working-tree case at that helper. This is policy evidence only. |
+| `TestShouldRunRemoteAcceptsStoredRepoURL` | Drop the dead path selector. The retained `TestRemoteTriggerSourceURLUsesStoredRepoURLWithoutGitHubMetadata` checks the stored URL. Final source-location projections also retain their own tests. |
+| `TestObserveNodeExecution` and `TestObserveNodeExecution_SkipsEmpty` | Drop the unused histogram and observer with their last legacy producer. Unified claim metrics retain their existing behavior tests. |
+
+No native acceptance cell closes through this cut. The real runner-source
+authorization binding remains required before claiming the allow-list boundary
+through native execution.

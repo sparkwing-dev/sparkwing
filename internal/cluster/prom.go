@@ -19,15 +19,6 @@ import (
 var (
 	metricsRegistry = prometheus.NewRegistry()
 
-	nodeExecutionSeconds = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Name:    "sparkwing_node_execution_seconds",
-			Help:    "Wall time for a single node from claim-accepted to terminal state.",
-			Buckets: []float64{0.25, 0.5, 1, 5, 10, 30, 60, 300, 900},
-		},
-		[]string{"pipeline", "outcome"},
-	)
-
 	runnerClaimsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "sparkwing_runner_claims_total",
@@ -39,21 +30,10 @@ var (
 
 func init() {
 	metricsRegistry.MustRegister(
-		nodeExecutionSeconds,
 		runnerClaimsTotal,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
-}
-
-func observeNodeExecution(pipeline, outcome string, d time.Duration) {
-	if pipeline == "" || outcome == "" {
-		return
-	}
-	if d <= 0 {
-		return
-	}
-	nodeExecutionSeconds.WithLabelValues(pipeline, outcome).Observe(d.Seconds())
 }
 
 func observeClaimOutcome(outcome string) {

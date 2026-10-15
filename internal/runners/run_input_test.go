@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,8 +14,39 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+type sourceRefusalExecutor struct{ t *testing.T }
+
+func (e sourceRefusalExecutor) Execute(context.Context, nodehost.NodeInput) error {
+	e.t.Fatal("sourceless award reached execution")
+	return nil
+}
+
+func TestClaimedRunnerRefusesAwardWithoutSourceBeforeAcquisition(t *testing.T) {
+	unit, principal, state := hostingStateFor(t, capability.UnitNode)
+	input, err := RunInputForAward(unit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputs, err := nativeInputs(t.Context(), state, unit, principal, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := nodehost.ClaimedNodeHost{
+		Store: state, Executor: sourceRefusalExecutor{t}, Mask: func(s string) string { return s },
+		Acquire: func(context.Context, source.Spec, source.Options) (*source.Entry, error) {
+			t.Fatal("sourceless award reached acquisition")
+			return nil, nil
+		},
+	}
+	host.Lease.Interval, host.Lease.Lease = time.Second, time.Minute
+	if err := host.Execute(t.Context(), inputs.node); err == nil || !strings.Contains(err.Error(), "sealed source requires exactly one acquisition location") {
+		t.Fatalf("sourceless award: %v", err)
+	}
+}
 
 type hostingState struct {
 	nodehost.NativeHostStore

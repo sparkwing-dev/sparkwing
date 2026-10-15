@@ -134,15 +134,6 @@ func PodBaseEnv() []string {
 	return engineenv.Minimal(podEnvNames()...)
 }
 
-// PrepareTypeScriptOnRunner installs and returns sparkwingDir's TypeScript
-// entry on a runner: npm runs with the environment a node process gets,
-// [PodBaseEnv] plus the operator's allow-listed names, and its output reaches
-// stderr only after the credentials and long values that environment carries
-// are masked.
-func PrepareTypeScriptOnRunner(ctx context.Context, sparkwingDir string) (pipelineentry.Command, error) {
-	return prepareTypeScriptOnRunner(ctx, sparkwingDir, os.Stderr)
-}
-
 func prepareTypeScriptOnRunner(ctx context.Context, sparkwingDir string, dst io.Writer) (pipelineentry.Command, error) {
 	masker := secrets.NewMasker()
 	// safety: the allow list is operator-trusted config a private registry or a tool's install may need.

@@ -4,106 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
-	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
-	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
-
-func shouldRunRemote(trigger *store.Trigger) bool {
-	if trigger == nil {
-		return false
-	}
-	return strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@") || triggerGitHubRepository(trigger) != "" || trigger.RepoURL != ""
-}
-
-func runNodeRemote(
-	ctx context.Context,
-	trigger *store.Trigger,
-	run *store.Run,
-	controllerURL, runID, nodeID, token string,
-	allow *sourceurl.RepoAllowlist,
-	logger *slog.Logger,
-) (runner.Result, error) {
-	repoURL, sourceErr := TriggerSourceURL(trigger)
-	if sourceErr != nil {
-		return runner.Result{}, sourceErr
-	}
-	ownerFenced := allow != nil && !allow.Empty()
-	if ownerFenced {
-		if err := AdmitTriggerSource(*allow, trigger, repoURL); err != nil {
-			logger.Warn("runNodeRemote: refused a node from a repository this machine does not allow",
-				"run_id", runID, "node_id", nodeID, "allow_repo", allow.String(), "err", err)
-			return runner.Result{}, err
-		}
-	}
-	workspaceSource := strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@")
-	if repoURL == "" && !workspaceSource {
-		return runner.Result{},
-			fmt.Errorf("pipeline %q not registered locally, and trigger has no repo_url for remote fallback",
-				run.Pipeline)
-	}
-	branch := trigger.GitBranch
-	if branch == "" {
-		branch = run.GitBranch
-	}
-	if branch == "" {
-		branch = "main"
-	}
-
-	logger.Info("runNodeRemote: fetching source",
-		"run_id", runID, "node_id", nodeID, "repo", sourceurl.Redact(repoURL), "branch", branch,
-		"sha", trigger.GitSHA)
-
-	workDir := filepath.Join(bincache.SparkwingHome(), "node-runner", runID+"-"+nodeID)
-	// #nosec G703 -- a work directory under this user's own Sparkwing home
-	defer func() { _ = os.RemoveAll(workDir) }()
-	if err := fssecure.EnsureDir(workDir); err != nil {
-		return runner.Result{}, fmt.Errorf("create private work directory: %w", err)
-	}
-
-	var sparkwingDir string
-	var err error
-	switch {
-	case workspaceSource:
-		sparkwingDir, err = bincache.FetchSourceBundle(ctx, nil,
-			blob.Digest(trigger.TriggerEnv[bincache.SourceBundleObjectEnvKey]), trigger.GitSHA, repoURL, workDir)
-	default:
-		sparkwingDir, err = bincache.FetchRunSourceDirect(ctx, bincache.RunSource{
-			ControllerURL: controllerURL, ClaimToken: token, RunID: runID,
-			RepoURL: repoURL, Branch: branch, SHA: trigger.GitSHA, WorkDir: workDir,
-			OwnerCredentials: ownerFenced,
-		}, logger)
-	}
-	if err != nil {
-		return runner.Result{}, fmt.Errorf("fetch source: %w", err)
-	}
-	if workspaceSource && repoURL != "" {
-		adoptNodeBaseline(ctx, trigger, filepath.Dir(sparkwingDir),
-			repoURL, controllerURL, token, ownerFenced, runID, nodeID, logger)
-	}
-
-	binary, err := resolveRemoteBinary(ctx, sparkwingDir, nil, logger)
-	if err != nil {
-		return runner.Result{}, fmt.Errorf("resolve binary: %w", err)
-	}
-	defer binary.release()
-	logger.Info("runNodeRemote: binary ready",
-		"run_id", runID, "node_id", nodeID, "entry", binary.entry)
-	return hostDispatchedNode(ctx, podNode{
-		entry: binary.entry, dir: filepath.Dir(sparkwingDir), controllerURL: controllerURL, token: token,
-		runID: runID, nodeID: nodeID, logger: logger,
-	})
-}
 
 // safety: a host stopped with no cause of its own, as a runner shutting down
 // is, leaves its node and run rows to their claims' leases, so the controller
@@ -147,29 +55,6 @@ func hostDispatchedNode(ctx context.Context, p podNode) (runner.Result, error) {
 		return runner.Result{}, err
 	}
 	return runner.Result{Outcome: res.Outcome, Err: res.Err}, nil
-}
-
-func adoptNodeBaseline(ctx context.Context, trigger *store.Trigger, checkoutDir, repoURL, controllerURL, token string, ownerFenced bool, runID, nodeID string, logger *slog.Logger) {
-	baseline := bincache.WorkspaceBaselineFromEnv(trigger.TriggerEnv)
-	if baseline == (bincache.WorkspaceBaseline{}) {
-		return
-	}
-	err := bincache.AdoptWorkspaceBaseline(ctx, bincache.RunSource{
-		ControllerURL: controllerURL, ClaimToken: token, RunID: runID,
-		RepoURL: repoURL, OwnerCredentials: ownerFenced,
-	}, checkoutDir, trigger.GitSHA, baseline, logger)
-	switch {
-	case err == nil:
-		logger.Info("runNodeRemote: baseline ready",
-			"run_id", runID, "node_id", nodeID, "ref", baseline.Ref, "sha", baseline.SHA)
-	case errors.Is(err, bincache.ErrBaselineUnservable):
-		logger.Debug("runNodeRemote: baseline source unavailable",
-			"run_id", runID, "node_id", nodeID, "ref", baseline.Ref)
-	default:
-		// safety: the checkout runs without the baseline, and a step that needs it says so itself.
-		logger.Warn("runNodeRemote: baseline unavailable; a step that diffs against it judges this checkout against nothing",
-			"run_id", runID, "node_id", nodeID, "ref", baseline.Ref, "sha", baseline.SHA, "err", err)
-	}
 }
 
 // ErrRepoNotAllowed marks a run whose repository this machine's owner did not
@@ -224,69 +109,4 @@ func TriggerSourceURL(trigger *store.Trigger) (string, error) {
 	}
 	return bincache.TriggerRepoURL(trigger.RepoURL, trigger.TriggerEnv["GITHUB_REPOSITORY"],
 		trigger.GithubOwner, trigger.GithubRepo)
-}
-
-func triggerGitHubRepository(trigger *store.Trigger) string {
-	if repo := trigger.TriggerEnv["GITHUB_REPOSITORY"]; repo != "" {
-		return repo
-	}
-	if trigger.GithubOwner != "" && trigger.GithubRepo != "" {
-		return trigger.GithubOwner + "/" + trigger.GithubRepo
-	}
-	return ""
-}
-
-type remoteBinary struct {
-	entry pipelineentry.Command
-	lease *bincache.Lease
-}
-
-func (b remoteBinary) release() {
-	if b.lease != nil {
-		_ = b.lease.Release()
-	}
-}
-
-func resolveRemoteBinary(ctx context.Context, sparkwingDir string, data *bincache.BinaryData, logger *slog.Logger) (remoteBinary, error) {
-	ts, err := pipelineentry.IsTypeScript(sparkwingDir)
-	if err != nil {
-		return remoteBinary{}, err
-	}
-	if ts {
-		cmd, err := PrepareTypeScriptOnRunner(ctx, sparkwingDir)
-		return remoteBinary{entry: cmd}, err
-	}
-	key, err := bincache.PipelineCacheKey(sparkwingDir)
-	if err != nil {
-		tmp := filepath.Join(sparkwingDir, ".sparkwing-runner-bin")
-		if cerr := bincache.CompilePipeline(ctx, sparkwingDir, tmp, bincache.CompileOptions{Environment: os.Environ(), Diagnostics: os.Stderr}); cerr != nil {
-			return remoteBinary{}, cerr
-		}
-		return remoteBinary{entry: pipelineentry.Binary(tmp)}, nil
-	}
-	entry, err := bincache.PipelineEntry(key)
-	if err != nil {
-		return remoteBinary{}, err
-	}
-	compiled := false
-	lease, published, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
-		if data != nil {
-			if fetchErr := bincache.DownloadBinary(ctx, data, key, tempPath); fetchErr == nil {
-				return nil
-			} else if !errors.Is(fetchErr, bincache.ErrMiss) {
-				logger.Warn("runNodeRemote: bin cache fetch failed; compiling", "err", fetchErr, "hash", key)
-			}
-		}
-		compiled = true
-		return bincache.CompilePipeline(ctx, sparkwingDir, tempPath, bincache.CompileOptions{Environment: os.Environ(), Diagnostics: os.Stderr})
-	})
-	if err != nil {
-		return remoteBinary{}, err
-	}
-	if published && compiled && data != nil {
-		if err := bincache.UploadBinary(ctx, data, key, lease.Path()); err != nil {
-			logger.Warn("runNodeRemote: bin cache upload failed", "err", err, "hash", key)
-		}
-	}
-	return remoteBinary{entry: pipelineentry.Binary(lease.Path()), lease: lease}, nil
 }

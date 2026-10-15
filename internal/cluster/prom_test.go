@@ -12,7 +12,6 @@ import (
 	"sync"
 	"testing"
 	"testing/synctest"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
@@ -42,16 +41,6 @@ func TestMetricsCountUnifiedClaimsWithoutChangingResults(t *testing.T) {
 	}
 }
 
-func TestObserveNodeExecution(t *testing.T) {
-	const prefix = `sparkwing_node_execution_seconds_count{outcome="Success",pipeline="prom-exec-pipeline"}`
-	before := metricSampleValue(t, gatherMetrics(t), prefix)
-	observeNodeExecution("prom-exec-pipeline", "Success", 2*time.Second)
-
-	if got := metricSampleValue(t, gatherMetrics(t), prefix); got != before+1 {
-		t.Errorf("node execution count=%v before=%v, want one observation", got, before)
-	}
-}
-
 func metricSampleValue(t *testing.T, body, prefix string) float64 {
 	t.Helper()
 	for line := range strings.SplitSeq(body, "\n") {
@@ -66,18 +55,6 @@ func metricSampleValue(t *testing.T, body, prefix string) float64 {
 		return parsed
 	}
 	return 0
-}
-
-func TestObserveNodeExecution_SkipsEmpty(t *testing.T) {
-	observeNodeExecution("", "Success", 1*time.Second)
-	observeNodeExecution("some-pipeline", "", 1*time.Second)
-	observeNodeExecution("some-pipeline", "Success", 0)
-
-	body := gatherMetrics(t)
-	if strings.Contains(body, `outcome="",pipeline=`) ||
-		strings.Contains(body, `pipeline="",outcome=`) {
-		t.Errorf("observeNodeExecution emitted empty label row:\n%s", body)
-	}
 }
 
 func TestRunnerMetricsServesAndJoins(t *testing.T) {
@@ -170,6 +147,7 @@ type metricsListener struct {
 func newMetricsListener() *metricsListener {
 	return &metricsListener{connections: make(chan net.Conn, 1), closed: make(chan struct{})}
 }
+
 func (l *metricsListener) Accept() (net.Conn, error) {
 	if l.failure != nil {
 		return nil, l.failure
@@ -181,6 +159,7 @@ func (l *metricsListener) Accept() (net.Conn, error) {
 		return nil, net.ErrClosed
 	}
 }
+
 func (l *metricsListener) Close() error {
 	l.once.Do(func() { close(l.closed) })
 	return nil
