@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"errors"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -233,7 +232,7 @@ func oneShotDaemon(t *testing.T, home string, ack wingwire.HelloAck) {
 	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
 		t.Fatalf("mkdir socket dir: %v", err)
 	}
-	ln, err := net.Listen("unix", sock)
+	ln, err := wingd.ListenSocket(sock)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}

@@ -76,6 +76,24 @@ for Git and Install. Resolve the pin after acquisition, then call the selected
 engine's InstallSDK. Accepted executions Ensure the sealed engine identity before
 reconstruction. Host-version binaries and ambient runner identity are not substitutes.
 
+W8's `runners.NodePreparation` constructs accepted executor input and acquires
+source under `Hosting`'s keeper. Its default acquisition calls `source.ForExecution`
+and `source.Acquire`. It preserves the cleanup returned with partial acquisition.
+Bound host services supply the job hash, delegated routes, storage and replay.
+The node-input constructor captures accepted seals, job settings, engine,
+runner and claim identity before renewal or preparation. It owns their projection
+for every preparation path and copies nested mutable settings. The preparer
+acquires the accepted source and uses that constructor. `NewManagedRunner` composes one claim
+client and award clients over the same HTTP transport with separate bearers.
+Concrete shared host constructors and run/plan/eval execution identities remain
+with W3.
+
+For trigger and here awards, Hosting constructs RunInput's run ID, first seal
+and accepted second seal before renewal or preparation. Prepared host services
+supply storage, authority, engine resolution and plan caching. They cannot
+replace the awarded seals or add an accepted plan to a new run. Trigger and node
+preparation share the accepted-plan projection.
+
 Reconciliation supports MaterializeOnly: an authorized cache/retry hit is committed,
 while a miss returns Dispatch without stealing remote execution. Private execution
 responses preserve declaration bytes/hash, settings, retries, fences, cancellation
@@ -159,6 +177,8 @@ are part of this contract.
 | `nodehost.RunHost.Run` | Runs acquire through completion for every run-host placement. |
 | `nodehost.OwnerHost`, `OwnerStore` | Coordinate renewal, planning, acceptance, scheduling and atomic finish through the Tenant contracts. |
 | `nodehost.NewNativeHost`, `NativeHostConfig` | Assemble owner and claimed execution with one native executor and register their delegated process services. |
+| `nodehost.LocalAdmission`, `LocalAdmission.Run`, `LocalAdmission.Node` | Hold local run resources and run/box semaphores through joined scheduling, and job admission through execution and cleanup, using sealed settings. Nonlocal concurrency requires its store adapter. |
+| `nodehost.OwnerHost.Around`, `OwnerHost.Admit` | Bracket scheduling and local release/execution without releasing a lease between readiness and author code. |
 | `nodehost.NativeProcesses` | Bind native startup, attributed masked logs, child-wait activity and cleanup to one live process delegation. |
 | `nodehost.OwnerPlanning`, `OwnerLayerResult` | Supply checkout planning inputs and owner policy results without replacing intake or claim authority. |
 | `nodehost.GeneratorReplay` | Supplies recorded source output for code-only reconstruction. |

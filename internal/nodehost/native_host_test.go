@@ -192,9 +192,7 @@ func TestNativeHostRunsSharedTransportForOwnerAndClaimedWork(t *testing.T) {
 				config.Owner.Renew = lifecycle.RenewOwner
 				config.Owner.Acquire = func(context.Context, RunInput) (*source.Entry, error) { return entry, nil }
 				config.Owner.Local = func(store.NodeRow) bool { return true }
-				config.Owner.Layer = func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
-					return OwnerLayerResult{}, nil
-				}
+				config.Admission = &LocalAdmission{Daemon: newFakeDaemon()}
 				follower := StateFollower{Store: lifecycle, Subscribe: func(context.Context, string) (StateSubscription, error) {
 					return StateSubscription{Changed: lifecycle.changed, Close: func() error { return nil }}, nil
 				}}
@@ -226,6 +224,11 @@ func TestNativeHostRunsSharedTransportForOwnerAndClaimedWork(t *testing.T) {
 			}
 			if config.Processes.computing(input.Accepted.RunID) {
 				t.Fatal("host returned with active SDK compute")
+			}
+			if role == "owner" {
+				if live, granted, released := config.Admission.Daemon.(*fakeDaemon).counts(); live != 0 || granted != 2 || released != 2 {
+					t.Fatalf("owner admission leases=%d/%d/%d", live, granted, released)
+				}
 			}
 			authorities.mu.RLock()
 			live := len(authorities.live)
@@ -272,7 +275,7 @@ func TestNativeHostOpensApprovalThroughOwnerTransition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request, err := owner.release(t.Context(), RunInput{GrantedRunner: input.GrantedRunner}, input.Accepted, input.Entry, state.row, store.DecisionApproval)
+	request, err := releasedRequest(owner, t.Context(), RunInput{GrantedRunner: input.GrantedRunner}, input.Accepted, input.Entry, state.row, store.DecisionApproval)
 	if err != nil || request != nil || len(state.changes) != 1 || state.changes[0].To != store.NodeApprovalPending || state.changes[0].Cause != store.CauseApprovalOpen {
 		t.Fatalf("request=%+v changes=%+v error=%v", request, state.changes, err)
 	}
@@ -310,7 +313,7 @@ func TestNativeHostRequiresOnlyActiveOwnerPolicyAdapters(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			request, err := owner.release(t.Context(), RunInput{GrantedRunner: input.GrantedRunner}, input.Accepted, input.Entry, state.row, store.DecisionReady)
+			request, err := releasedRequest(owner, t.Context(), RunInput{GrantedRunner: input.GrantedRunner}, input.Accepted, input.Entry, state.row, store.DecisionReady)
 			if request != nil || (err != nil) != (mode != "remote") {
 				t.Fatalf("request=%+v error=%v", request, err)
 			}
@@ -341,7 +344,7 @@ func TestNativeHostSkipPolicyUsesSharedEvaluator(t *testing.T) {
 		t.Fatal(err)
 	}
 	run := RunInput{GrantedRunner: input.GrantedRunner}
-	request, err := owner.release(t.Context(), run, input.Accepted, input.Entry, state.row, store.DecisionReady)
+	request, err := releasedRequest(owner, t.Context(), run, input.Accepted, input.Entry, state.row, store.DecisionReady)
 	var failure *apierr.Error
 	if !errors.As(err, &failure) || failure.Code != apierr.SDKError || failure.Message != refused.Error() || request != nil || !reflect.DeepEqual(layers, []string{"debug"}) || len(state.changes) != 0 {
 		t.Fatalf("request=%+v layers=%v changes=%+v error=%v", request, layers, state.changes, err)
@@ -399,7 +402,7 @@ func TestNativeHostSkipPolicyJoinsEvaluationBeforeTransition(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	run := RunInput{GrantedRunner: input.GrantedRunner}
-	request, err := owner.release(ctx, run, input.Accepted, input.Entry, state.row, store.DecisionReady)
+	request, err := releasedRequest(owner, ctx, run, input.Accepted, input.Entry, state.row, store.DecisionReady)
 	if err != nil || request != nil || delegated != 2 || !reflect.DeepEqual(layers, []string{"debug"}) || len(state.changes) != 1 || state.changes[0].To != store.NodeSkipped {
 		t.Fatalf("request=%+v layers=%v changes=%+v delegations=%d error=%v", request, layers, state.changes, delegated, err)
 	}

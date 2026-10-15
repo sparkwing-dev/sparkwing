@@ -51,8 +51,10 @@ type CloudJobConfig struct {
 
 // safety: CloudJobBinding is derived from an awarded row, not the launcher's requested team or fence.
 // Eval SourceNodeID and SourceGeneration bind expansion to the immutable terminal source generation.
+// UnitID is persisted with the Job for controller reconciliation after launcher restart.
 type CloudJobBinding struct {
 	Kind                           CloudUnitKind
+	UnitID                         string
 	Team, RunID, NodeID, Holder    string
 	Generation, Attempt            int64
 	SourceNodeID                   string
@@ -65,12 +67,12 @@ type CloudJobBinding struct {
 // Credentials are excluded from JSON and must not appear in diagnostics, argv or environment.
 // Engine is required for eval/work; a first plan resolves its pin after source acquisition.
 type CloudJobAward struct {
-	Engine    *engine.Identity
-	Source    source.Spec
-	Binding   CloudJobBinding
-	Bootstrap []byte `json:"-"`
-	CPUCores  float64
-	Memory    int64
+	Engine    *engine.Identity `json:"engine,omitempty"`
+	Source    source.Spec      `json:"source"`
+	Binding   CloudJobBinding  `json:"binding"`
+	Bootstrap []byte           `json:"-"`
+	CPUCores  float64          `json:"cpu_cores"`
+	Memory    int64            `json:"memory_bytes"`
 }
 
 // safety: CloudNodeReservation is an exclusive placement fact held until the Job and DinD have stopped.
@@ -142,5 +144,5 @@ func CloudPodInvariants() []CloudPodInvariant {
 // returning any runnable object. Failure releases acquired reservations and leaves no reusable Secret.
 // Claim expiry must cover the Job and never exceed its parent; expired inputs refuse launch.
 func BuildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award CloudJobAward, boundary CloudBoundary) (CloudJobResources, error) {
-	panic("unimplemented: c4-surface-config")
+	return buildJob(ctx, now, cfg, award, boundary)
 }

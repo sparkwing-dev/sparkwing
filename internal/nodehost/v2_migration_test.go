@@ -1,7 +1,6 @@
 package nodehost
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -14,7 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -148,43 +146,6 @@ func TestV2AfterRunPreservesCanonicalFailure(t *testing.T) {
 	}
 	if got := afterRunArgOf(Result{Outcome: sparkwing.Success}); got.Outcome != "success" || got.Error != nil {
 		t.Fatalf("success: %+v", got)
-	}
-}
-
-type v2Admitter struct{ requests []wingwire.AdmissionRequest }
-
-func (a *v2Admitter) Acquire(_ context.Context, req wingwire.AdmissionRequest, _ func(wingwire.Queued)) (Lease, error) {
-	a.requests = append(a.requests, req)
-	return &v2Lease{done: make(chan struct{})}, nil
-}
-
-type v2Lease struct{ done chan struct{} }
-
-func (*v2Lease) Token() string                                               { return "lease" }
-func (l *v2Lease) Release() error                                            { close(l.done); return nil }
-func (l *v2Lease) Watch(func(wingwire.Evicted), func(wingwire.Cancel)) error { <-l.done; return nil }
-
-func TestV2MultipleLocalConcurrencyGroupsShareResourceLease(t *testing.T) {
-	daemon := &v2Admitter{}
-	cores := 2.0
-	node := &NodeRun{Run: &Run{ID: "r", Pipeline: "ci", validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}, Plan: nodeproto.JobSpec{
-		ID: "build", Resources: &nodeproto.ResourceSpec{Cores: &cores},
-		Concurrency: []nodeproto.ConcurrencySpec{{Group: "b", Scope: new(string("run")), Capacity: new(int(1)), Cost: new(int(1)), OnLimit: new(string("queue"))}, {Group: "a", Scope: new(string("box")), Capacity: new(int(2)), Cost: new(int(1)), OnLimit: new(string("queue"))}}, Steps: []nodeproto.StepSpec{{ID: "body"}},
-	}}
-	admission := &Admission{Daemon: daemon, BoxID: func() string { return "machine" }}
-	result := admission.admit(t.Context(), node, func(context.Context, *NodeRun) Result { return Result{Outcome: sparkwing.Success} })
-	if result.Outcome != sparkwing.Success {
-		t.Fatalf("admission: %+v", result)
-	}
-	if len(daemon.requests) != 1 {
-		t.Fatalf("resource leases: %d", len(daemon.requests))
-	}
-	req := daemon.requests[0]
-	if len(req.Semaphores) != 2 || req.Resources.Cores != cores || req.SemaphoresOnly {
-		t.Fatalf("claims: %+v", req)
-	}
-	if req.Semaphores[0].Name != "box:machine:a" || req.Semaphores[1].Name != "run:r:b" {
-		t.Fatalf("scope/order: %+v", req.Semaphores)
 	}
 }
 

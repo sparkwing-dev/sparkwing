@@ -2,6 +2,7 @@ package wingd_test
 
 import (
 	"bufio"
+	"context"
 	"net"
 	"strings"
 	"testing"
@@ -22,7 +23,7 @@ func dialAs(t *testing.T, home string, probe bool) (net.Conn, *bufio.Scanner) {
 	if err != nil {
 		t.Fatalf("socket path: %v", err)
 	}
-	nc, err := net.Dial("unix", sock)
+	nc, err := wingd.DialSocket(context.Background(), sock, 3*time.Second)
 	if err != nil {
 		t.Fatalf("dial daemon: %v", err)
 	}
@@ -101,7 +102,7 @@ func dialRaw(t *testing.T, home string) (net.Conn, *bufio.Scanner) {
 	if err != nil {
 		t.Fatalf("socket path: %v", err)
 	}
-	nc, err := net.Dial("unix", sock)
+	nc, err := wingd.DialSocket(context.Background(), sock, 3*time.Second)
 	if err != nil {
 		t.Fatalf("dial daemon: %v", err)
 	}

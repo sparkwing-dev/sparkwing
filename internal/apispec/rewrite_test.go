@@ -52,7 +52,7 @@ func TestRewriteRestampsAChangedScope(t *testing.T) {
 func TestRewriteIsIdempotent(t *testing.T) {
 	routes := []apiroutes.Route{
 		{Method: "GET", Path: "/api/v1/runs", Scope: "runs.read"},
-		{Method: "GET", Path: "/api/v1/gitcache/git/{path...}", Scope: "admin"},
+		{Method: "GET", Path: "/api/v1/gitcache/git/{path...}", Scope: "admin` or `operator.tokens"},
 	}
 	once, err := rewrite(minimalSpec, routes, nil)
 	if err != nil {

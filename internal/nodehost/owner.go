@@ -71,6 +71,8 @@ type OwnerHost struct {
 	WaitNode  WaitNodeChange
 	Layer     func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error)
 	Local     func(store.NodeRow) bool
+	Admit     func(context.Context, AcceptedRun, store.NodeRow, func(context.Context) error) error
+	Around    func(context.Context, AcceptedRun, func(context.Context) (RunCompletion, error)) (RunCompletion, error)
 	// AdoptClaim retains the private award for per-attempt process delegation.
 	AdoptClaim func(context.Context, store.ReconciledNode) error
 	Executor   NodeHost
@@ -171,6 +173,11 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 		}
 	}
 	preparing.Store(false)
+	if h.Around != nil {
+		return h.Around(ctx, accepted, func(ctx context.Context) (RunCompletion, error) {
+			return h.schedule(ctx, input, accepted, entry)
+		})
+	}
 	return h.schedule(ctx, input, accepted, entry)
 }
 

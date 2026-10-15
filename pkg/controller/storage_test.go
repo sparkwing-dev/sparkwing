@@ -72,6 +72,7 @@ func newStorageFixture(t *testing.T, quotas ...store.StorageQuota) storageFixtur
 		t.Fatalf("mark ready: %v", err)
 	}
 	srv := controller.New(st, nil).EnableAuthFromStore()
+	controller.ConfigureConsoleFixture(srv)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	n, err := client.NewWithToken(ts.URL, nil, team).ClaimNode(ctx, "runner:acme:1", nil, time.Minute, nil)

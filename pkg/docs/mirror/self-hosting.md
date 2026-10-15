@@ -119,7 +119,8 @@ these file names, mounted whole.
 | `github-app-key`, `github-app-webhook-secret` | GitHub App private key and webhook secret | no GitHub App |
 | `cloudfront-key` | CloudFront signing key | no signed CloudFront downloads |
 | `billing-token` | Bearer for the hosted checkout service | `--billing-url` refuses to start |
-| `credits-token` | The checkout service's own token (`sws_`), seeded as a `credits.grant` service token; see [Buying credits](auth.md#buying-credits) | the checkout service has no token |
+| `stripe-api-key` | Stripe API credential matching `--payment-mode test` or `live` | a configured payment callback refuses to start |
+| `stripe-webhook-secret` | Signature key for `/webhooks/stripe` | a configured payment callback refuses to start |
 | `cache-grant-key` | Key cache grants are signed with, the same value as the cache's | no cache grants |
 
 Keep the directory readable by the controller's user alone (`0700`, files
@@ -238,18 +239,21 @@ go install github.com/sparkwing-dev/sparkwing/cmd/sparkwing-runner@latest
 sparkwing cluster runners add --profile prod --name dev-laptop
 ```
 
-It mints a runner token scoped to `nodes.claim`, `triggers.claim` and
-`runs.state`, writes
-the `agent` section of `~/.config/sparkwing/config.yaml` at mode `0600`,
-keeping the file's other sections, installs the user service, and
-prints the token prefix with the command that revokes it. The runner uploads
-its nodes' logs to the controller as segments. The config and the machine are checked
-before the mint, so a host with no `sparkwing-runner` or no
-user service session fails before a credential exists; a failure after the mint
-prints the live token and its revoke command. `--max-concurrent`,
-`--contribution` and `--labels` set the same fields the interactive installer
-asks for, `--no-service` writes the config for a machine you supervise
-yourself, and an existing config is replaced only with `--force`. Retire the
+Enrollment writes the validated `runner` section of
+`~/.config/sparkwing/config.yaml`, preserving other settings. The credential
+lives in a private `agent-token` file under `runner.credentials_dir`. It is
+absent from YAML and service arguments. `--allow-repo` writes `runner.repos`.
+The runner reads its credential once at startup.
+
+The config and service manager are checked before minting. If enrollment then
+fails, it attempts revocation and removes its private files and any new
+service file. Cleanup errors remain part of the enrollment failure. A forced replacement restores the prior runner section
+and leaves its credential intact. Unrelated settings survive cleanup. If
+revocation also fails, the error includes a command to revoke the prefix.
+
+`--max-concurrent`, `--contribution` and `--labels` set machine preferences.
+`--no-service` writes the configuration for a machine you supervise yourself.
+An existing runner section is replaced only with `--force`. Retire the
 machine with `sparkwing cluster runners remove --profile prod`, which stops the
 service and then revokes the token.
 
@@ -257,14 +261,6 @@ From a source checkout, `bash bin/install.sh` installs both `sparkwing` and
 `sparkwing-runner` into `~/.local/bin` (or `SPARKWING_INSTALL_BIN`). Each run
 updates both binaries from the same checkout. Keep that directory on the
 service's PATH when using the source installer.
-
-The command needs an admin credential on the profile, because minting a token
-is an admin route. A machine whose operator holds no admin token uses the
-interactive installer with a token an administrator minted for them:
-
-```bash
-bash install/service-install.sh
-```
 
 GitHub Releases also contain `sparkwing-runner` binaries for amd64 and arm64
 on macOS, Linux, and Windows (Windows asset names end in `.exe`). Before
@@ -280,62 +276,24 @@ VCS provenance embedded by the Go build. The runner does not yet download or
 replace its own executable; update the service binary through the same installer
 or service manager you used to install it.
 
-The installer asks for the controller URL, API token, runner name,
-and maximum concurrent jobs. It writes the agent format `sparkwing cluster
-runners add` writes, which uses FIFO claims with local admission enabled. Its default CPU
-and memory contribution ceiling is 50%. On macOS it installs a LaunchAgent under
-`~/Library/LaunchAgents/`. On Linux it installs a systemd user unit under
-`~/.config/systemd/user/`.
+Runner service definitions run `sparkwing-runner start --config PATH` in the
+foreground. Linux uses a systemd user service. macOS uses a launchd agent.
+The service file names an existing machine configuration and contains no
+credential. The duplicate shell enrollment installer has been removed.
 
-The agent defaults `gitcache` to the controller's claim-scoped proxy. Set
-`SPARKWING_GITCACHE_URL` only for a direct cache on a trusted LAN, VPN, or
-tailnet; the value is stored in the mode-0600 agent configuration. The agent
-holds no cache token: for each claimed run it asks the controller for a cache
-grant, and runs without the binary cache when the controller mints none.
+<!-- design:begin -->
 
-For unattended installation, supply the same values as environment variables:
+The shared controller and host composition must be connected
+before the installed runner can execute work. An updater outside the runner's
+service can refresh the managed registration while preserving its config path
+and stopped state. Automatic self-update must hand service replacement to an
+external owner because a launchd reload stops the process performing it.
 
-```bash
-SPARKWING_CONTROLLER=https://api-sparkwing.example.com \
-SPARKWING_API_TOKEN="$MY_TOKEN" \
-RUNNER_NAME=dev-laptop \
-MAX_CONCURRENT=2 \
-SPARKWING_CONTRIBUTION='4,8gb' \
-SPARKWING_LOCAL_RESERVE='1,2gb' \
-bash install/service-install.sh --yes
-```
+<!-- design:end -->
 
-`SPARKWING_CONTRIBUTION` and `SPARKWING_LOCAL_RESERVE` use the same machine
-budget grammar as local admission. The contribution defaults to `50%,50%`;
-the reserve defaults to empty because the contribution already retains half
-the machine for other work.
-
-A runner warms its Go module cache at startup from `--warm-modules`, a comma-separated list of module paths with an
-optional `@version`; it defaults to the SDK at the runner's own version, and
-`off` disables it. The warm runs in the background and a failed download only
-logs, so a cold cache never blocks a claim.
-
-The installer writes the token to the `agent` section of a new
-`~/.config/sparkwing/config.yaml` with mode `0600`, and refuses when that file
-already exists, because a shell script cannot merge YAML without risking the
-other sections; `sparkwing cluster runners add` merges it instead. The service
-uses that file rather than embedding the token in its
-launchd plist or systemd unit. The contribution caps reported capacity; the
-reserve constrains local admission.
-
-The section carries claim-mode keys only. It has no `name` and no
-`coordinators`; a section that still sets either key fails to load and says
-enrolled mode has been removed. `allow_repos`, which `runners add --allow-repo`
-writes, makes the agent fetch source directly rather than through the
-controller's gitcache proxy; see
-[local-execution.md](local-execution.md#an-agent-that-fetches-source-itself).
-
-The native Windows runner uses the same YAML and `sparkwing-runner.exe agent
---config <path>` command, but neither installer creates a Windows service. On
-Windows `sparkwing cluster runners add` mints the token, writes the config, and
-prints those manual steps. Supervise the agent with the service manager you
-already use, or run the Linux installer inside WSL when systemd user services
-are enabled.
+The native Windows runner uses the same YAML and
+`sparkwing-runner.exe start --config <path>`. Enrollment prints manual service
+steps on Windows. Supervise that command with your service manager.
 
 ### Operate the service
 
@@ -362,8 +320,9 @@ remain active after logout.
 
 ### Troubleshooting
 
-**The runner returns `401 unauthorized`.** Confirm that `token:` in the `agent`
-section of `~/.config/sparkwing/config.yaml` is a valid controller token.
+**The runner returns `401 unauthorized`.** Confirm that `agent-token` under
+`runner.credentials_dir` holds a live controller credential. Restart the runner
+after replacing that file because it retains the credential read at startup.
 
 **The runner does not claim work.** Confirm that the pipeline was remotely
 triggered and that the runner can reach the configured controller and logs
@@ -433,11 +392,11 @@ Run retention is disabled by default on a self-hosted controller. A multi-team
 controller defaults to 90 days. An explicit operator value, including zero,
 survives restarts. Node metrics have their own retention window.
 
-Read policy with `GET /api/v1/storage` and replace it with
-`PUT /api/v1/storage/settings` (scope `admin`):
+Read the deployment policy with `GET /api/v1/operator/object-store` and write it with
+`PUT /api/v1/operator/object-store/settings` (grant `operator.object_store`):
 
 ```bash
-curl -sS -X PUT "$CONTROLLER/api/v1/storage/settings" \
+curl -sS -X PUT "$CONTROLLER/api/v1/operator/object-store/settings" \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"run_retention_days":90,"node_metric_retention_days":14,
@@ -452,7 +411,7 @@ usage survive run deletion. Metrics expire under their independent window.
 
 `database_alarm_bytes` sets a warning threshold. Passing it logs a warning and
 sets `database.alarm` on `GET /api/v1/health`. Sizes and table names appear only
-in the `admin` view of `GET /api/v1/storage`.
+on `GET /api/v1/operator/object-store` with `operator.object_store`.
 
 SQLite samples allocated pages minus its free pages. Removing data can lower
 the sample while the file keeps its size until `VACUUM`. PostgreSQL samples
@@ -472,21 +431,15 @@ monthly budget while the run's byte and object totals continue across months.
 Deployment default-tier changes apply to the next ticket for teams without an
 explicit quota.
 
-The free tier configures ten megabytes per run, a gigabyte per month and a
-thousand objects per run. The paid tier configures a gigabyte per run, a hundred
-gigabytes per month and a hundred thousand objects per run. Set an explicit
-team policy with `PUT /api/v1/storage/quotas/{team}` (scope `admin`):
+Hold one team to a tier, or to limits of your own, with
+`PUT /api/v1/operator/object-store/quotas/{team}` (grant `operator.object_store`):
 
 ```bash
-curl -sS -X PUT "$CONTROLLER/api/v1/storage/quotas/acme" \
+curl -sS -X PUT "$CONTROLLER/api/v1/operator/object-store/quotas/acme" \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"tier":"paid"}'
 ```
-
-Naming a tier with zero write limits selects that tier's limits. Unknown teams
-return `404`. Reads report the authenticated caller's team. An operator also
-receives the explicit quotas and the largest teams for the month.
 
 Monthly reports sum each team's replica counters. They are historical usage,
 so deleting a run does not lower them. `retained_bytes` measures the team's
@@ -500,10 +453,10 @@ consume bytes and objects when a verified upload first commits them.
 
 `storage_allowance_bytes` caps the retained byte count used for billing. Zero
 leaves that count uncapped. Set it independently of write limits with
-`PUT /api/v1/storage/quotas/{team}/allowance` (scope `admin`):
+`PUT /api/v1/operator/object-store/quotas/{team}/allowance` (grant `operator.object_store`):
 
 ```bash
-curl -sS -X PUT "$CONTROLLER/api/v1/storage/quotas/acme/allowance" \
+curl -sS -X PUT "$CONTROLLER/api/v1/operator/object-store/quotas/acme/allowance" \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"storage_allowance_bytes":53687091200}'

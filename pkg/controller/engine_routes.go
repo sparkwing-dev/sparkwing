@@ -1,0 +1,313 @@
+package controller
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+)
+
+// WithEngineController supplies the engine and authority transaction adapter before
+// Handler is constructed. The default adapter uses the server's store.
+func (s *Server) WithEngineController(engine *EngineController) *Server {
+	s.engineController = engine
+	return s
+}
+
+func (s *Server) engineEndpoints() []Endpoint {
+	engine := s.engineController
+	if engine == nil {
+		engine = &EngineController{Store: s.store}
+	}
+	return []Endpoint{
+		{
+			Method: "POST", Pattern: "/api/v1/runs", Authentication: capability.AuthCapability,
+			Decode: engine.intakeTarget, Handle: engine.handleIntake,
+		},
+		{
+			Method: "POST", Pattern: "/api/v1/runs/{run}/plan", Authentication: capability.AuthCapability,
+			Decode: engine.runResultTarget, Handle: engine.handlePlan,
+		},
+		{
+			Method: "GET", Pattern: "/api/v1/runs/{run}", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleRunDetail,
+		},
+		{
+			Method: "GET", Pattern: "/api/v1/runs/{run}/snapshot", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleSnapshot,
+		},
+		{
+			Method: "GET", Pattern: "/api/v1/runs/{run}/jobs", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleJobs,
+		},
+		{
+			Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleJob,
+		},
+		{
+			Method: "POST", Pattern: "/api/v1/runs/{run}/finish", Authentication: capability.AuthCapability,
+			Decode: engine.runResultTarget, Handle: engine.handleFinish,
+		},
+		{
+			Method: "POST", Pattern: "/api/v1/runs/{run}/cancel", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleCancel,
+		},
+		{
+			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/cancel", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleCancelJob,
+		},
+		{
+			Method: "GET", Pattern: "/api/v1/runs/{run}/jobs/{job}/failure", Authentication: capability.AuthCapability,
+			Decode: engine.failureTarget, Handle: engine.handleFailure,
+		},
+		{
+			Method: "POST", Pattern: "/api/v1/runs/{run}/retry", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleRetry,
+		},
+		{
+			Method: "POST", Pattern: "/api/v1/runs/{run}/heartbeat", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleRenewal,
+		},
+		{
+			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/transition", Authentication: capability.AuthCapability,
+			Decode: engine.runResultTarget, Handle: engine.handleTransition,
+		},
+		{
+			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/heartbeat", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleRenewal,
+		},
+		{
+			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/expansion", Authentication: capability.AuthCapability,
+			Decode: engine.expansionTarget, Handle: engine.handleExpansion,
+		},
+		{
+			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/annotations", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleAnnotation,
+		},
+		{
+			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/steps/annotations", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleAnnotation,
+		},
+		{
+			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/summary", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleSummary,
+		},
+		{
+			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/steps/summary", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleSummary,
+		},
+		{
+			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/steps/start", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleStep,
+		},
+		{
+			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/steps/finish", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleStep,
+		},
+		{
+			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/steps/skip", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleStep,
+		},
+	}
+}
+
+func (s *EngineController) handleExpansion(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	body, err := decodeExpansion(r)
+	if err != nil {
+		return err
+	}
+	accepted, err := s.AcceptExpansion(r.Context(), a, body)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, accepted)
+	return nil
+}
+
+func (s *Server) registerEngineRoutes(mux *http.ServeMux) {
+	endpoints := s.engineEndpoints()
+	// safety: the run list still has its own registration on this shared collection path.
+	router := NewPolicyRouter(s.authorization)
+	if err := router.Register(endpoints[0]); err != nil {
+		mux.HandleFunc("POST /api/v1/runs", func(w http.ResponseWriter, _ *http.Request) { writePolicyError(w, err) })
+	} else {
+		mux.Handle("POST /api/v1/runs", noStore(router))
+	}
+	s.registerPolicyEndpoints(mux, endpoints[1:])
+}
+
+func (s *EngineController) runTarget(r *http.Request) (capability.RequestEvidence, error) {
+	evidence := capability.RequestEvidence{Target: capability.Target{RunID: r.PathValue("run"), NodeID: r.PathValue("job")}}
+	var team store.Team
+	var err error
+	if s.ResolveRunTeam != nil {
+		team, err = s.ResolveRunTeam(r.Context(), evidence.Target.RunID)
+	} else if s.Store != nil {
+		team, err = s.Store.AsOperator().RunTeam(r.Context(), evidence.Target.RunID)
+	} else {
+		return evidence, missingEndpointPolicy()
+	}
+	if err != nil {
+		return evidence, engineLookupError(err)
+	}
+	evidence.Target.Team = string(team)
+	return evidence, nil
+}
+
+func (s *EngineController) runResultTarget(r *http.Request) (capability.RequestEvidence, error) {
+	evidence, err := s.runTarget(r)
+	if err != nil {
+		return evidence, err
+	}
+	data, err := readEngineBody(r)
+	if err != nil {
+		return evidence, err
+	}
+	digest := sha256.Sum256(data)
+	evidence.ResultDigest = hex.EncodeToString(digest[:])
+	return evidence, nil
+}
+
+func (s *EngineController) intakeTarget(r *http.Request) (capability.RequestEvidence, error) {
+	var body controllerwire.CreateRunRequest
+	if err := decodeEngineRequest(r, &body); err != nil {
+		return capability.RequestEvidence{}, err
+	}
+	target := capability.Target{
+		Team: body.Request.Team, BodyRunID: body.Request.Lineage.ParentRunID,
+		RunID: body.Request.Lineage.ParentRunID, NodeID: body.Request.Lineage.ParentJobID,
+	}
+	if target.Team == "" {
+		return capability.RequestEvidence{}, invalidEngineBody("request.team is required")
+	}
+	return capability.RequestEvidence{Target: target}, nil
+}
+
+func (s *EngineController) handleIntake(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	var body controllerwire.CreateRunRequest
+	if err := decodeEngineRequest(r, &body); err != nil {
+		return err
+	}
+	response, err := s.CreateRun(r.Context(), a, body)
+	if err != nil {
+		return err
+	}
+	status := http.StatusCreated
+	if response.Replayed {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, response)
+	return nil
+}
+
+func (s *EngineController) handlePlan(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	var body controllerwire.PlanSubmission
+	if err := decodeEngineRequest(r, &body); err != nil {
+		return err
+	}
+	response, err := s.AcceptPlan(r.Context(), a, body)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, response)
+	return nil
+}
+
+func (s *EngineController) expansionTarget(r *http.Request) (capability.RequestEvidence, error) {
+	evidence, err := s.runTarget(r)
+	if err != nil {
+		return evidence, err
+	}
+	ref := store.NodeRef{RunID: evidence.Target.RunID, NodeID: evidence.Target.NodeID}
+	team := evidence.Target.Team
+	tenant, err := s.runTransactions(r.Context(), team)
+	if err != nil {
+		return evidence, err
+	}
+	node, err := tenant.ReadNode(r.Context(), ref)
+	if err != nil {
+		return evidence, engineLookupError(err)
+	}
+	if node.Ref != ref || node.Generation <= 0 {
+		return evidence, missingEndpointPolicy()
+	}
+	evidence.Target.UnitSourceNodeID, evidence.Target.UnitSourceGeneration = node.Ref.NodeID, node.Generation
+	return evidence, nil
+}
+
+func readEngineBody(r *http.Request) ([]byte, error) {
+	if err := requireJSONContentType(r.Header.Get("Content-Type")); err != nil {
+		return nil, invalidEngineBody("content-type application/json required")
+	}
+	body := r.Body
+	defer body.Close()
+	data, err := io.ReadAll(http.MaxBytesReader(nil, body, maxPlanSnapshotBody))
+	if err != nil {
+		return nil, invalidEngineBody("invalid engine request body")
+	}
+	r.Body = io.NopCloser(bytes.NewReader(data))
+	return data, nil
+}
+
+func decodeEngineRequest(r *http.Request, body any) error {
+	data, err := readEngineBody(r)
+	if err != nil {
+		return err
+	}
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return invalidEngineBody("request requires one JSON object")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(body); err != nil {
+		return invalidEngineBody("invalid engine request")
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		return invalidEngineBody("request requires one JSON object")
+	}
+	return nil
+}
+
+func engineLookupError(err error) error {
+	var transition *store.ErrIllegalTransition
+	if errors.As(err, &transition) {
+		code := apierr.IllegalTransition
+		if transition.Reason == store.ReasonHolderRights || transition.Reason == store.ReasonStaleGeneration {
+			code = apierr.LockHeld
+		}
+		return &apierr.Error{Code: code, Message: "state transition refused", Details: map[string]any{"reason": string(transition.Reason)}}
+	}
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
+		return &apierr.Error{Code: apierr.NotFound, Message: "resource not found"}
+	}
+	return err
+}
+
+func decodeExpansion(r *http.Request) (controllerwire.ExpansionSubmission, error) {
+	var wire struct {
+		SourceGeneration int64           `json:"source_generation"`
+		Body             json.RawMessage `json:"body"`
+		Failure          json.RawMessage `json:"failure"`
+	}
+	if err := decodeEngineRequest(r, &wire); err != nil {
+		return controllerwire.ExpansionSubmission{}, err
+	}
+	body := controllerwire.ExpansionSubmission{SourceGeneration: wire.SourceGeneration, Body: wire.Body}
+	if len(wire.Failure) > 0 && !bytes.Equal(bytes.TrimSpace(wire.Failure), []byte("null")) {
+		failure, err := apierr.DecodeInner(wire.Failure)
+		if err != nil {
+			return controllerwire.ExpansionSubmission{}, invalidEngineBody("invalid expansion failure")
+		}
+		body.Failure = failure
+	}
+	return body, nil
+}

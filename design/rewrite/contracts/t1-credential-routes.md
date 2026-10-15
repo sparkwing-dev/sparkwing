@@ -11,7 +11,7 @@ C2 owns the production route policy. T1 owns independent expected results and cr
 ## Final route permission coverage
 
 `internal/acceptance/credential_routes.go` contains committed literal expectations
-for all 239 declared final C2 method/path pairs, including the eleven node-host
+for all declared final C2 method/path pairs, including the eleven node-host
 routes and every public, browser and external-proof route. Each alternative pins
 its credential class, complete grant conjunction, binding and liveness together.
 Audience, resource owner and authentication proof are pinned per route. Empty
@@ -24,6 +24,13 @@ annotations and summaries (A1-05), unified runner claims (A1-08), failure reads
 (A1-14) and job cancellation (A1-15). The literals include those routes and
 remove the separate runner job/run claim routes. A mixed-kind claim still
 requires every requested kind's grant through claimSelection.
+
+The cache transport adds POST `/api/v1/data/memo/lookup`,
+`/api/v1/data/depcache/lookup` and `/api/v1/data/memo/copy`. Lookups retain the
+data-read alternatives. Copy requires the conjunction `data.read,data.write`
+on one sensitive claim alternative. Its destination is the bound attempt.
+HTTP component proofs exercise these registrations. Native placement cells
+remain separate.
 
 `TestFinalCredentialRouteDeclarations` compares the expected inventory with
 `capability.Routes`. Missing, extra and duplicate routes fail. Missing, extra and duplicate
@@ -66,7 +73,27 @@ accepted by regenerating a golden file from C2 or a running controller.
 | Public, browser, signed-object, GitHub webhook, Actions exchange and payment webhook | Frozen §§3.5, 5.1, 5.5, 8.1; decision 98; C2's billing contract: webhook-derived trust, exact signed-object scope, separate Actions proof and signed Stripe settlement | Browser endpoint paths and account-flow choices remain C2 assumptions. Payment proof and settlement still require runtime evidence. |
 | Node-host process operations | Frozen §§5.1, 5.5, 6.2–6.3: nodehost audience, process lifetime and declared operation bindings | C3 must expose actual node-host registrations; no controller credential or process-env bearer fallback is permitted. |
 
+### Credential creation correction
+
+`POST /api/v1/tokens` requires member `runs.read` with `none` binding.
+Creation has no existing token selector. The issuer derives the member subject
+and team from live authority and checks grants in the committing transaction.
+Its one-time bearer makes automatic retries unsafe, so retry policy is `never`.
+
+The Actions exchange at `POST /api/v1/runners/github/exchange` also has retry
+policy `never` because it returns a new bearer without secret replay. Its proof
+is the signed Actions JWT plus the selected team's matching repository/owner
+binding. Caller-selected grants, push facts, pools and metering are refused.
+Token-specific lookup, revocation and rotation keep their own-token binding.
+
 ### Reconciled C2 permissions
+
+Capability inventory uses member `runs.read` with `none` for the collection.
+The persistence read filters owned credentials or the current team admin's
+tenant. A collection has no existing token selector. Detail and rotation keep
+`ownToken`. Rotation returns a one-time bearer and has retry policy `never`.
+The component proofs are `TestCapabilityManagementHTTP*`. Native matrix
+activation still needs the real persistence adapter and transports.
 
 C2's [route and liveness invariants](c2-credentials.md#route-and-liveness-invariants)
 and [billing contract](c2-credentials.md#billing) settle these expectations.

@@ -1,7 +1,7 @@
 <!-- GENERATED from the route registrations in pkg/controller/server.go by internal/apiref. Do not edit by hand; regenerate with `bash bin/gen-api-docs.sh`. -->
 # HTTP API reference
 
-Every route the controller registers, with the scope each requires, generated from the routing code. All paths are under the `/api/v1` base (webhook and `/metrics` excepted). Scope enforcement and the token model are in [auth.md](auth.md); `admin` satisfies any scope check except `credits.grant`, which only the checkout service's own token passes. `public` routes run with no bearer check (the GitHub webhook is HMAC-verified instead); `authenticated` routes take any valid bearer and check no further scope. `claim` routes answer the claim token of one node claim, and only for that claim's own run and node. `operator` routes answer only the signed-in session of an account the controller lists with --operator-accounts; no token reaches them.
+Every route the controller registers, with the scope each requires, generated from the routing code. All paths are under the `/api/v1` base (webhook and `/metrics` excepted). Scope enforcement and the token model are in [auth.md](auth.md); `admin` satisfies any scope check on legacy routes. `public` routes run with no bearer check (the GitHub and Stripe webhooks require their HMAC signatures); `authenticated` routes require live identity under their credential policy and no named grant. `claim` routes answer the claim token of one node claim, and only for that claim's own run and node. `operator` routes require an operator-console session through the shared route policy and CSRF proof for writes; no bearer reaches them.
 
 ## Controller
 
@@ -9,20 +9,18 @@ Every route the controller registers, with the scope each requires, generated fr
 |---|---|---|
 | `GET` | `/.well-known/jwks.json` | `public` |
 | `GET` | `/.well-known/openid-configuration` | `public` |
-| `DELETE` | `/api/v1/accounts/{account}` | `admin` |
-| `GET` | `/api/v1/admin/usage-metrics` | `admin` |
 | `GET` | `/api/v1/agents` | `runs.read` |
 | `GET` | `/api/v1/approvals/pending` | `runs.read` |
-| `POST` | `/api/v1/auth/logout` | `public` |
-| `GET` | `/api/v1/auth/session` | `public` |
+| `POST` | `/api/v1/auth/logout` | `browser_flow_csrf_nonce` |
+| `GET` | `/api/v1/auth/session` | `browser_flow_csrf_nonce` |
 | `GET` | `/api/v1/auth/whoami` | `authenticated` |
 | `POST` | `/api/v1/cache/store-ceiling/measure` | `admin` |
 | `POST` | `/api/v1/cache/store-ceiling/thaw` | `admin` |
 | `GET` | `/api/v1/capabilities` | `public` |
 | `GET` | `/api/v1/capacity/profiles` | `runs.read` |
 | `GET` | `/api/v1/capacity/profiles/explain` | `runs.read` |
-| `GET` | `/api/v1/compute-limits` | `runs.read` |
-| `PUT` | `/api/v1/compute-limits` | `admin` |
+| `POST` | `/api/v1/claims/exchange` | `claim.exchange` |
+| `POST` | `/api/v1/claims/{claim}/heartbeat` | `node.report` or `expansion.submit` |
 | `POST` | `/api/v1/concurrency/{key}/acquire` | `claim` or `runs.state` |
 | `POST` | `/api/v1/concurrency/{key}/cancel-waiter` | `claim` or `runs.state` |
 | `POST` | `/api/v1/concurrency/{key}/force-release` | `admin` |
@@ -32,17 +30,8 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/concurrency/{key}/resolve` | `claim` or `runs.state` |
 | `GET` | `/api/v1/concurrency/{key}/state` | `claim` or `runs.read` |
 | `GET` | `/api/v1/credits` | `runs.read` |
-| `POST` | `/api/v1/credits/card-payments` | `credits.grant` |
-| `POST` | `/api/v1/credits/card-refunds` | `credits.grant` |
-| `POST` | `/api/v1/credits/cards` | `credits.grant` |
-| `POST` | `/api/v1/credits/freezes` | `credits.grant` |
 | `GET` | `/api/v1/credits/history` | `runs.read` |
-| `GET` | `/api/v1/credits/payments/{reference}` | `credits.grant` |
-| `POST` | `/api/v1/credits/reversals` | `credits.grant` |
 | `GET` | `/api/v1/credits/settings` | `runs.read` |
-| `PUT` | `/api/v1/credits/settings` | `admin` |
-| `GET` | `/api/v1/credits/units` | `credits.grant` |
-| `POST` | `/api/v1/credits/warnings` | `credits.grant` |
 | `GET` | `/api/v1/crons` | `runs.read` |
 | `DELETE` | `/api/v1/crons/repos` | `runs.control` |
 | `PUT` | `/api/v1/crons/repos` | `runs.control` |
@@ -53,18 +42,23 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/crons/{id}/pause` | `runs.control` |
 | `POST` | `/api/v1/crons/{id}/resume` | `runs.control` |
 | `POST` | `/api/v1/crons/{id}/run` | `runs.control` |
-| `GET` | `/api/v1/data/capabilities` | `public` |
-| `POST` | `/api/v1/data/commit` | `public` |
-| `POST` | `/api/v1/data/download` | `public` |
-| `POST` | `/api/v1/data/upload` | `public` |
+| `GET` | `/api/v1/data/capabilities` | `authenticated` |
+| `POST` | `/api/v1/data/commit` | `data.write` or `data.write` |
+| `POST` | `/api/v1/data/depcache/lookup` | `data.read` or `data.read` or `data.read` |
+| `POST` | `/api/v1/data/download` | `data.read` or `data.read` or `data.read` |
+| `POST` | `/api/v1/data/has-many` | `data.read` or `data.read` or `data.read` |
+| `POST` | `/api/v1/data/memo/copy` | `data.read + data.write` |
+| `POST` | `/api/v1/data/memo/lookup` | `data.read` or `data.read` or `data.read` |
+| `GET` | `/api/v1/data/records` | `data.read` or `data.read` or `data.read` |
+| `POST` | `/api/v1/data/records` | `data.write` or `data.write` |
+| `POST` | `/api/v1/data/upload` | `data.write` or `data.write` |
 | `POST` | `/api/v1/gitcache/git/register` | `admin` |
 | `GET` | `/api/v1/gitcache/git/{path...}` | `admin` |
 | `POST` | `/api/v1/gitcache/git/{path...}` | `admin` |
-| `DELETE` | `/api/v1/github-app/installations/{installation_id}` | `admin` |
 | `GET` | `/api/v1/health` | `public` |
 | `POST` | `/api/v1/invitations/{id}/accept` | `authenticated` |
-| `POST` | `/api/v1/launcher/claim` | `ScopeClaimsLaunch` |
-| `POST` | `/api/v1/launcher/sync` | `ScopeClaimsLaunch` |
+| `POST` | `/api/v1/launcher/claim` | `claims.launch` |
+| `POST` | `/api/v1/launcher/sync` | `claims.launch` |
 | `PUT` | `/api/v1/log-segments/{key...}` | `public` |
 | `DELETE` | `/api/v1/me` | `authenticated` |
 | `GET` | `/api/v1/me` | `authenticated` |
@@ -72,40 +66,60 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/me/identities` | `authenticated` |
 | `DELETE` | `/api/v1/me/identities/{provider}` | `authenticated` |
 | `GET` | `/api/v1/me/team-deletions` | `authenticated` |
-| `POST` | `/api/v1/nodes/claim` | `nodes.claim` |
-| `GET` | `/api/v1/object-store/breaker` | `admin` |
-| `POST` | `/api/v1/object-store/reset-breaker` | `admin` |
+| `DELETE` | `/api/v1/operator/accounts/{account}` | `operator` |
+| `PUT` | `/api/v1/operator/credits/settings` | `operator` |
+| `DELETE` | `/api/v1/operator/github-app/installations/{installation}` | `operator` |
+| `GET` | `/api/v1/operator/limits` | `operator.limits` or `operator` |
+| `PUT` | `/api/v1/operator/limits` | `operator.limits` or `operator` |
+| `GET` | `/api/v1/operator/object-store` | `operator.object_store` or `operator` |
+| `GET` | `/api/v1/operator/object-store/breaker` | `operator.object_store` or `operator` |
+| `PUT` | `/api/v1/operator/object-store/quotas/{team}` | `operator.object_store` or `operator` |
+| `PUT` | `/api/v1/operator/object-store/quotas/{team}/allowance` | `operator.object_store` or `operator` |
+| `POST` | `/api/v1/operator/object-store/reset-breaker` | `operator.object_store` or `operator` |
+| `PUT` | `/api/v1/operator/object-store/settings` | `operator.object_store` or `operator` |
+| `POST` | `/api/v1/operator/runners/{runner}/metered` | `operator` |
+| `GET` | `/api/v1/operator/signups` | `operator.limits` or `operator` |
+| `PUT` | `/api/v1/operator/signups` | `operator.limits` or `operator` |
 | `GET` | `/api/v1/operator/teams` | `operator` |
+| `DELETE` | `/api/v1/operator/teams/{team}` | `operator` |
 | `GET` | `/api/v1/operator/teams/{team}` | `operator` |
 | `POST` | `/api/v1/operator/teams/{team}/freeze` | `operator` |
 | `POST` | `/api/v1/operator/teams/{team}/grants` | `operator` |
 | `POST` | `/api/v1/operator/teams/{team}/trust` | `operator` |
 | `POST` | `/api/v1/operator/teams/{team}/unfreeze` | `operator` |
+| `GET` | `/api/v1/operator/tokens` | `operator.tokens` or `operator` |
+| `POST` | `/api/v1/operator/tokens` | `operator.tokens` or `operator` |
+| `DELETE` | `/api/v1/operator/tokens/{token}` | `operator.tokens` or `operator` |
+| `GET` | `/api/v1/operator/tokens/{token}` | `operator.tokens` or `operator` |
+| `POST` | `/api/v1/operator/tokens/{token}/rotate` | `operator.tokens` or `operator` |
 | `GET` | `/api/v1/operator/waitlist` | `operator` |
 | `POST` | `/api/v1/operator/waitlist/approve` | `operator` |
 | `GET` | `/api/v1/outputs/objects/{key...}` | `public` |
 | `PUT` | `/api/v1/outputs/uploads/{id}` | `public` |
 | `GET` | `/api/v1/pipelines` | `runs.read` |
 | `GET` | `/api/v1/pipelines/{name}/latest` | `runs.read` |
-| `GET` | `/api/v1/pipelines/{name}/profile` | `nodes.claim` |
-| `POST` | `/api/v1/pipelines/{name}/profile/contention` | `runs.state` |
-| `POST` | `/api/v1/pipelines/{name}/profile/observations` | `runs.state` |
-| `PUT` | `/api/v1/pipelines/{name}/profile/pin` | `runs.state` |
-| `POST` | `/api/v1/pipelines/{name}/profile/waits` | `runs.state` |
-| `GET` | `/api/v1/queue/state` | `runs.read` |
-| `POST` | `/api/v1/runners/github/exchange` | `public` |
+| `GET` | `/api/v1/pipelines/{name}/sizing` | `runs.read` or `source.read` |
+| `POST` | `/api/v1/pipelines/{name}/sizing/contention` | `node.report` |
+| `POST` | `/api/v1/pipelines/{name}/sizing/observations` | `node.report` |
+| `PUT` | `/api/v1/pipelines/{name}/sizing/pin` | `node.report` |
+| `POST` | `/api/v1/pipelines/{name}/sizing/waits` | `node.report` |
+| `GET` | `/api/v1/queue` | `runs.read` |
+| `POST` | `/api/v1/runners` | `team.admin` |
+| `POST` | `/api/v1/runners/claim` | `nodes.claim` or `triggers.claim` |
+| `GET` | `/api/v1/runners/github` | `runs.read` |
+| `POST` | `/api/v1/runners/github` | `team.admin` |
+| `POST` | `/api/v1/runners/github/exchange` | `github_actions_oidc` |
+| `DELETE` | `/api/v1/runners/github/{repository}` | `team.admin` |
 | `GET` | `/api/v1/runs` | `runs.read` |
-| `POST` | `/api/v1/runs` | `runs.state` |
+| `POST` | `/api/v1/runs` | `runs.write` or `children.start` |
 | `GET` | `/api/v1/runs/grep` | `logs.read` |
 | `DELETE` | `/api/v1/runs/{id}` | `admin` |
-| `GET` | `/api/v1/runs/{id}` | `claim` or `runs.read` or `nodes.claim` or `triggers.claim` |
 | `GET` | `/api/v1/runs/{id}/approvals` | `runs.read` |
 | `GET` | `/api/v1/runs/{id}/approvals/{nodeID}` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/approvals/{nodeID}` | `approvals.write` |
 | `POST` | `/api/v1/runs/{id}/approvals/{nodeID}/request` | `admin` |
 | `GET` | `/api/v1/runs/{id}/attempts` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/cache-grant` | `claim` or `nodes.claim` or `triggers.claim` |
-| `POST` | `/api/v1/runs/{id}/cancel` | `runs.control` |
 | `POST` | `/api/v1/runs/{id}/children` | `claim` |
 | `GET` | `/api/v1/runs/{id}/children/{childID}` | `claim` |
 | `GET` | `/api/v1/runs/{id}/children/{childID}/nodes/{nodeID}/output` | `claim` |
@@ -114,7 +128,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/runs/{id}/events` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/events` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/events/stream` | `runs.read` |
-| `POST` | `/api/v1/runs/{id}/finish` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/gitcache/git/register` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |
@@ -123,11 +136,8 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/runs/{id}/logs/{node}` | `logs.read` |
 | `GET` | `/api/v1/runs/{id}/logs/{node}/completeness` | `logs.read` |
 | `GET` | `/api/v1/runs/{id}/logs/{node}/stream` | `logs.read` |
-| `GET` | `/api/v1/runs/{id}/nodes` | `runs.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes` | `runs.state` |
-| `GET` | `/api/v1/runs/{id}/nodes/{nodeID}` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/activity` | `claim` or `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/annotations` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/attempt` | `claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim/input` | `claim` |
@@ -150,33 +160,43 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/output-upload` | `claim` or `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/release` | `runs.control` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/start` | `claim` or `runs.state` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/annotations` | `claim` or `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/finish` | `claim` or `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/skip` | `claim` or `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/start` | `claim` or `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/summary` | `claim` or `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/summary` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/usage` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/oidc-token` | `claim` or `nodes.claim` or `triggers.claim` |
 | `GET` | `/api/v1/runs/{id}/paused` | `runs.read` |
 | `GET` | `/api/v1/runs/{id}/pending-triggers` | `triggers.read` or `nodes.claim` or `triggers.claim` |
-| `POST` | `/api/v1/runs/{id}/plan` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/receipt` | `runs.read` |
-| `POST` | `/api/v1/runs/{id}/retry` | `runs.control` |
-| `POST` | `/api/v1/runs/{id}/source-credential` | `claim` |
 | `GET` | `/api/v1/runs/{id}/steps` | `runs.read` |
+| `GET` | `/api/v1/runs/{run}` | `runs.read` or `source.read` or `trigger.host` |
+| `POST` | `/api/v1/runs/{run}/cancel` | `runs.control` |
+| `POST` | `/api/v1/runs/{run}/claim` | `trigger.host` or `triggers.claim` |
+| `POST` | `/api/v1/runs/{run}/finish` | `runs.state` or `data.write` |
+| `POST` | `/api/v1/runs/{run}/heartbeat` | `trigger.host` |
+| `GET` | `/api/v1/runs/{run}/jobs` | `runs.read` or `trigger.host` |
+| `GET` | `/api/v1/runs/{run}/jobs/{job}` | `runs.read` or `data.read` or `trigger.host` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/annotations` | `node.report` or `node.report` or `data.write` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/cancel` | `runs.control` or `trigger.host` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/expansion` | `expansion.submit` |
+| `GET` | `/api/v1/runs/{run}/jobs/{job}/failure` | `data.read` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/heartbeat` | `node.report` or `node.report` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/reconcile` | `nodes.claim` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/steps/annotations` | `node.report` or `node.report` or `data.write` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/steps/finish` | `node.report` or `node.report` or `data.write` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/steps/skip` | `node.report` or `node.report` or `data.write` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/steps/start` | `node.report` or `node.report` or `data.write` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/steps/summary` | `node.report` or `node.report` or `data.write` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/summary` | `node.report` or `node.report` or `data.write` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/transition` | `node.result` or `node.result` or `data.write` |
+| `POST` | `/api/v1/runs/{run}/plan` | `node.result` or `data.write` |
+| `POST` | `/api/v1/runs/{run}/retry` | `runs.control` |
+| `GET` | `/api/v1/runs/{run}/snapshot` | `trigger.host` |
+| `POST` | `/api/v1/runs/{run}/source-credential` | `source.read` |
 | `GET` | `/api/v1/secrets` | `runs.read` or `team.admin` |
-| `POST` | `/api/v1/secrets` | `admin` or `team.admin` |
-| `POST` | `/api/v1/secrets/rotate` | `admin` |
-| `DELETE` | `/api/v1/secrets/{name}` | `admin` or `team.admin` |
-| `GET` | `/api/v1/secrets/{name}` | `claim` or `secrets.read` or `team.admin` |
+| `POST` | `/api/v1/secrets` | `team.admin` |
+| `POST` | `/api/v1/secrets/rotate` | `team.admin` |
+| `DELETE` | `/api/v1/secrets/{name}` | `team.admin` |
+| `GET` | `/api/v1/secrets/{name}` | `secrets.read` or `team.admin` or `secrets.release` |
 | `GET` | `/api/v1/services` | `authenticated` |
-| `GET` | `/api/v1/signups` | `admin` |
-| `PUT` | `/api/v1/signups` | `admin` |
 | `GET` | `/api/v1/storage` | `runs.read` |
-| `PUT` | `/api/v1/storage/quotas/{team}` | `admin` |
-| `PUT` | `/api/v1/storage/quotas/{team}/allowance` | `admin` |
-| `PUT` | `/api/v1/storage/settings` | `admin` |
 | `DELETE` | `/api/v1/team` | `team.admin` |
 | `PATCH` | `/api/v1/team` | `team.admin` |
 | `GET` | `/api/v1/team/billing` | `runs.read` |
@@ -202,37 +222,27 @@ Every route the controller registers, with the scope each requires, generated fr
 | `DELETE` | `/api/v1/team/github-app/triggers` | `team.admin` |
 | `GET` | `/api/v1/team/github-app/triggers` | `runs.read` |
 | `PUT` | `/api/v1/team/github-app/triggers` | `team.admin` |
-| `GET` | `/api/v1/team/github-runners` | `runs.read` |
-| `POST` | `/api/v1/team/github-runners` | `team.admin` |
-| `DELETE` | `/api/v1/team/github-runners/{repository_id}` | `team.admin` |
 | `GET` | `/api/v1/team/invitations` | `team.admin` |
 | `POST` | `/api/v1/team/invitations` | `team.admin` |
 | `DELETE` | `/api/v1/team/invitations/{id}` | `team.admin` |
 | `GET` | `/api/v1/team/members` | `runs.read` |
-| `DELETE` | `/api/v1/team/members/{user_id}` | `runs.read` |
-| `PATCH` | `/api/v1/team/members/{user_id}` | `team.admin` |
-| `GET` | `/api/v1/team/tokens` | `runs.read` |
-| `POST` | `/api/v1/team/tokens` | `runs.read` |
-| `DELETE` | `/api/v1/team/tokens/{prefix}` | `runs.read` |
-| `PUT` | `/api/v1/team/tokens/{prefix}/git-credentials` | `team.admin` |
+| `DELETE` | `/api/v1/team/members/{account}` | `runs.read` |
+| `PATCH` | `/api/v1/team/members/{account}` | `team.admin` |
 | `POST` | `/api/v1/teams` | `authenticated` |
-| `DELETE` | `/api/v1/teams/{team}` | `admin` |
-| `PUT` | `/api/v1/teams/{team}/repos/{owner}/{name}/dispatch` | `admin` |
-| `GET` | `/api/v1/tokens` | `admin` |
-| `POST` | `/api/v1/tokens` | `admin` |
-| `DELETE` | `/api/v1/tokens/{prefix}` | `admin` |
-| `GET` | `/api/v1/tokens/{prefix}` | `admin` |
-| `POST` | `/api/v1/tokens/{prefix}/metered` | `admin` |
-| `POST` | `/api/v1/tokens/{prefix}/rotate` | `admin` |
+| `GET` | `/api/v1/tokens` | `runs.read` |
+| `POST` | `/api/v1/tokens` | `runs.read` |
+| `DELETE` | `/api/v1/tokens/{token}` | `runs.read` |
+| `GET` | `/api/v1/tokens/{token}` | `runs.read` |
+| `PUT` | `/api/v1/tokens/{token}/git-credentials` | `authenticated` |
+| `POST` | `/api/v1/tokens/{token}/rotate` | `runs.read` |
 | `GET` | `/api/v1/trends` | `runs.read` |
 | `GET` | `/api/v1/triggers` | `triggers.read` |
 | `POST` | `/api/v1/triggers` | `runs.write` |
-| `POST` | `/api/v1/triggers/claim` | `triggers.claim` |
 | `GET` | `/api/v1/triggers/spawned-child` | `triggers.read` |
 | `GET` | `/api/v1/triggers/{id}` | `triggers.read` or `nodes.claim` or `triggers.claim` |
-| `POST` | `/api/v1/triggers/{id}/claim` | `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/done` | `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/heartbeat` | `triggers.claim` |
 | `GET` | `/metrics` | `admin` |
 | `POST` | `/webhooks/github-app` | `public` |
+| `POST` | `/webhooks/stripe` | `public` |
 

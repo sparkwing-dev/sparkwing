@@ -61,7 +61,7 @@ type ObjectStoreBreaker struct {
 // ObjectStoreBreakerState reads the controller's object-store request
 // budget without changing it.
 func (c *Client) ObjectStoreBreakerState(ctx context.Context) (*ObjectStoreBreaker, error) {
-	return c.objectStoreBreaker(ctx, http.MethodGet, "/api/v1/object-store/breaker")
+	return c.objectStoreBreaker(ctx, http.MethodGet, "/api/v1/operator/object-store/breaker")
 }
 
 // ResetObjectStoreBreaker clears every tripped class and any
@@ -69,7 +69,7 @@ func (c *Client) ObjectStoreBreakerState(ctx context.Context) (*ObjectStoreBreak
 // stands afterwards, with Cleared naming the classes that were refusing
 // requests and Thawed reporting whether a ceiling freeze was lifted.
 func (c *Client) ResetObjectStoreBreaker(ctx context.Context) (*ObjectStoreBreaker, error) {
-	return c.objectStoreBreaker(ctx, http.MethodPost, "/api/v1/object-store/reset-breaker")
+	return c.objectStoreBreaker(ctx, http.MethodPost, "/api/v1/operator/object-store/reset-breaker")
 }
 
 func (c *Client) objectStoreBreaker(ctx context.Context, method, path string) (*ObjectStoreBreaker, error) {

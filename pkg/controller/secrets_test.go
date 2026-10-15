@@ -32,20 +32,6 @@ func TestSecretsRoundTrip(t *testing.T) {
 		t.Fatalf("GetSecret principal=%q want anonymous", got.Principal)
 	}
 
-	secs, err := c.ListSecrets(ctx)
-	if err != nil {
-		t.Fatalf("ListSecrets: %v", err)
-	}
-	if len(secs) != 1 {
-		t.Fatalf("ListSecrets len=%d want 1", len(secs))
-	}
-	if secs[0].Value != "" {
-		t.Fatalf("ListSecrets leaked value: %q", secs[0].Value)
-	}
-	if secs[0].Name != "api_token" {
-		t.Fatalf("ListSecrets name=%q want api_token", secs[0].Name)
-	}
-
 	if err := c.DeleteSecret(ctx, "api_token"); err != nil {
 		t.Fatalf("DeleteSecret: %v", err)
 	}

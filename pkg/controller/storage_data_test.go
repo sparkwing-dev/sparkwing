@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -31,8 +32,15 @@ func storeDataServer(t *testing.T) *Server {
 	return New(s, nil)
 }
 
-func storeDataRequest(method, path, body string, principal Principal) *http.Request {
+func storeDataRequest(t *testing.T, s *Server, method, path, body string, principal Principal) *http.Request {
+	t.Helper()
+	_, _, authority := newOperatorSettingsFixture(t)
+	if !principal.HasScope(ScopeAdmin) {
+		authority.principal.Capability.Grants = []capability.Grant{capability.RunsRead}
+	}
+	s.WithAuthorization(RouteAuthorization{Authenticator: capability.NewAuthenticator(authority), Bindings: authority})
 	r := httptest.NewRequest(method, path, strings.NewReader(body))
+	r.Header.Set("Authorization", "Bearer "+authority.raw)
 	r.Header.Set("Content-Type", "application/json")
 	return r.WithContext(contextWithPrincipal(r.Context(), &principal))
 }
@@ -40,10 +48,10 @@ func storeDataRequest(method, path, body string, principal Principal) *http.Requ
 func TestStoreDataStorageRoutesScopeQuotaAndReplicaReports(t *testing.T) {
 	s := storeDataServer(t)
 	admin := Principal{Name: "operator", Scopes: []string{ScopeAdmin}, Team: store.DefaultTeam}
-	r := storeDataRequest(http.MethodPut, "/api/v1/storage/quotas/a", `{"max_bytes_per_month":123}`, admin)
+	r := storeDataRequest(t, s, http.MethodPut, "/api/v1/operator/object-store/quotas/a", `{"max_bytes_per_month":123}`, admin)
 	r.SetPathValue("team", "a")
 	w := httptest.NewRecorder()
-	requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageQuota)).ServeHTTP(w, r)
+	s.Handler().ServeHTTP(w, r)
 	if w.Code != http.StatusOK {
 		t.Fatalf("quota=%d %s", w.Code, w.Body.String())
 	}
@@ -51,10 +59,10 @@ func TestStoreDataStorageRoutesScopeQuotaAndReplicaReports(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &quota); err != nil || quota.Team != "a" || quota.MaxBytesPerMonth != 123 {
 		t.Fatalf("quota=%+v: %v", quota, err)
 	}
-	r = storeDataRequest(http.MethodPut, "/api/v1/storage/quotas/a/allowance", `{"storage_allowance_bytes":456}`, admin)
+	r = storeDataRequest(t, s, http.MethodPut, "/api/v1/operator/object-store/quotas/a/allowance", `{"storage_allowance_bytes":456}`, admin)
 	r.SetPathValue("team", "a")
 	w = httptest.NewRecorder()
-	requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageAllowance)).ServeHTTP(w, r)
+	s.Handler().ServeHTTP(w, r)
 	if w.Code != http.StatusOK {
 		t.Fatalf("allowance=%d %s", w.Code, w.Body.String())
 	}
@@ -73,7 +81,7 @@ func TestStoreDataStorageRoutesScopeQuotaAndReplicaReports(t *testing.T) {
 			}
 		}
 	}
-	r = storeDataRequest(http.MethodGet, "/api/v1/storage?team=b", "", Principal{Name: "same-name", Team: "a", Scopes: []string{ScopeRunsRead}})
+	r = storeDataRequest(t, s, http.MethodGet, "/api/v1/storage?team=b", "", Principal{Name: "same-name", Team: "a", Scopes: []string{ScopeRunsRead}})
 	w = httptest.NewRecorder()
 	s.handleStorageShow(w, r)
 	if w.Code != http.StatusOK {
@@ -86,9 +94,9 @@ func TestStoreDataStorageRoutesScopeQuotaAndReplicaReports(t *testing.T) {
 	if got.Quota.Team != "a" || got.Quota.StorageAllowanceBytes != 456 || got.Usage.MonthBytes != 14 || len(got.Quotas) != 0 || len(got.Teams) != 0 || got.Database != nil {
 		t.Fatalf("scoped report=%+v", got)
 	}
-	r = storeDataRequest(http.MethodGet, "/api/v1/storage", "", admin)
+	r = storeDataRequest(t, s, http.MethodGet, "/api/v1/operator/object-store", "", admin)
 	w = httptest.NewRecorder()
-	s.handleStorageShow(w, r)
+	s.Handler().ServeHTTP(w, r)
 	if w.Code != http.StatusOK {
 		t.Fatalf("admin read=%d %s", w.Code, w.Body.String())
 	}
@@ -111,10 +119,10 @@ func TestStoreDataStorageRoutesRefuseMissingTeamAndNonOperator(t *testing.T) {
 		{"a", []string{ScopeRunsRead}, http.StatusForbidden},
 		{"missing", []string{ScopeAdmin}, http.StatusNotFound},
 	} {
-		r := storeDataRequest(http.MethodPut, "/api/v1/storage/quotas/"+tc.team, `{"max_bytes_per_month":123}`, Principal{Team: "a", Scopes: tc.scopes})
+		r := storeDataRequest(t, s, http.MethodPut, "/api/v1/operator/object-store/quotas/"+tc.team, `{"max_bytes_per_month":123}`, Principal{Team: "a", Scopes: tc.scopes})
 		r.SetPathValue("team", tc.team)
 		w := httptest.NewRecorder()
-		requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageQuota)).ServeHTTP(w, r)
+		s.Handler().ServeHTTP(w, r)
 		if w.Code != tc.want {
 			t.Fatalf("team=%s response=%d %s", tc.team, w.Code, w.Body.String())
 		}
@@ -122,10 +130,10 @@ func TestStoreDataStorageRoutesRefuseMissingTeamAndNonOperator(t *testing.T) {
 	if quotas, err := s.store.AsOperator().ListStorageQuotas(t.Context()); err != nil || len(quotas) != 0 {
 		t.Fatalf("refusal wrote quota=%+v: %v", quotas, err)
 	}
-	r := storeDataRequest(http.MethodPut, "/api/v1/storage/quotas/a/allowance", `{"storage_allowance_bytes":-1}`, Principal{Team: store.DefaultTeam, Scopes: []string{ScopeAdmin}})
+	r := storeDataRequest(t, s, http.MethodPut, "/api/v1/operator/object-store/quotas/a/allowance", `{"storage_allowance_bytes":-1}`, Principal{Team: store.DefaultTeam, Scopes: []string{ScopeAdmin}})
 	r.SetPathValue("team", "a")
 	w := httptest.NewRecorder()
-	requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageAllowance)).ServeHTTP(w, r)
+	s.Handler().ServeHTTP(w, r)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("negative allowance=%d %s", w.Code, w.Body.String())
 	}
@@ -133,9 +141,9 @@ func TestStoreDataStorageRoutesRefuseMissingTeamAndNonOperator(t *testing.T) {
 
 func TestStoreDataStorageSettingsRouteUsesFinalPolicy(t *testing.T) {
 	s := storeDataServer(t)
-	r := storeDataRequest(http.MethodPut, "/api/v1/storage/settings", `{"run_retention_days":90,"node_metric_retention_days":7,"database_alarm_bytes":123,"default_tier":"paid"}`, Principal{Team: store.DefaultTeam, Scopes: []string{ScopeAdmin}})
+	r := storeDataRequest(t, s, http.MethodPut, "/api/v1/operator/object-store/settings", `{"run_retention_days":90,"node_metric_retention_days":7,"database_alarm_bytes":123,"default_tier":"paid"}`, Principal{Team: store.DefaultTeam, Scopes: []string{ScopeAdmin}})
 	w := httptest.NewRecorder()
-	requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageSettings)).ServeHTTP(w, r)
+	s.Handler().ServeHTTP(w, r)
 	if w.Code != http.StatusOK {
 		t.Fatalf("settings=%d %s", w.Code, w.Body.String())
 	}

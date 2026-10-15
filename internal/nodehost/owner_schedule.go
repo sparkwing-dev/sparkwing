@@ -77,20 +77,14 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 			}
 			if action.Kind == store.DecisionReady || action.Kind == store.DecisionApproval {
 				launch(action.NodeID, func() error {
-					request, err := h.release(ctx, input, accepted, entry, row, action.Kind)
-					if err != nil || request == nil {
-						return err
-					}
-					return h.execute(ctx, input, accepted, entry, *request)
+					return h.release(ctx, input, accepted, entry, row, action.Kind, func(ctx context.Context, request store.ReconcileRequest) error {
+						return h.execute(ctx, input, accepted, entry, request)
+					})
 				})
 				continue
 			}
-			request, err := h.apply(ctx, input, accepted, entry, row, action)
-			if err != nil {
+			if err := h.apply(ctx, input, accepted, entry, row, action); err != nil {
 				return RunCompletion{}, err
-			}
-			if request != nil {
-				launch(request.Ref.NodeID, func() error { return h.execute(ctx, input, accepted, entry, *request) })
 			}
 			expanded[action.NodeID] = action.Kind == store.DecisionExpand
 			changed = true
@@ -102,7 +96,13 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 			}
 			if row.ReadyAt != nil || row.ClaimedBy != "" {
 				launch(row.Ref.NodeID, func() error {
-					return h.execute(ctx, input, accepted, entry, store.ReconcileRequest{Ref: row.Ref, Actor: input.Owner, Policy: store.SourceNone})
+					work := func(ctx context.Context) error {
+						return h.execute(ctx, input, accepted, entry, store.ReconcileRequest{Ref: row.Ref, Actor: input.Owner, Policy: store.SourceNone})
+					}
+					if h.Admit != nil {
+						return h.Admit(ctx, accepted, row, work)
+					}
+					return work(ctx)
 				})
 			}
 		}
@@ -158,11 +158,9 @@ func ownerNode(snapshot store.RunSnapshot, id string) (store.NodeRow, bool) {
 	return store.NodeRow{}, false
 }
 
-func (h *OwnerHost) apply(ctx context.Context, input RunInput, accepted AcceptedRun, entry *source.Entry, row store.NodeRow, action store.NodeDecision) (*store.ReconcileRequest, error) {
+func (h *OwnerHost) apply(ctx context.Context, input RunInput, accepted AcceptedRun, entry *source.Entry, row store.NodeRow, action store.NodeDecision) error {
 	change := store.NodeTransition{Ref: row.Ref, Actor: input.Owner}
 	switch action.Kind {
-	case store.DecisionReady, store.DecisionApproval:
-		return h.release(ctx, input, accepted, entry, row, action.Kind)
 	case store.DecisionTerminal:
 		change.To, change.Cause = store.NodeState(action.Outcome), store.CauseDependency
 		change.Extra.Result = &store.NodeResult{Outcome: change.To, Reason: action.Reason}
@@ -170,17 +168,17 @@ func (h *OwnerHost) apply(ctx context.Context, input RunInput, accepted Accepted
 		change.To, change.Cause = store.NodeCancelled, store.CauseCancel
 		change.Extra.Result = &store.NodeResult{Outcome: store.NodeCancelled, Reason: action.Reason}
 	case store.DecisionExpand:
-		return nil, h.expand(ctx, input, accepted, entry, row)
+		return h.expand(ctx, input, accepted, entry, row)
 	default:
-		return nil, fmt.Errorf("unknown scheduling decision %q", action.Kind)
+		return fmt.Errorf("unknown scheduling decision %q", action.Kind)
 	}
 	_, err := h.Store.TransitionNode(ctx, change)
-	return nil, err
+	return err
 }
 
-func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted AcceptedRun, entry *source.Entry, row store.NodeRow, kind store.DecisionKind) (*store.ReconcileRequest, error) {
+func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted AcceptedRun, entry *source.Entry, row store.NodeRow, kind store.DecisionKind, next func(context.Context, store.ReconcileRequest) error) error {
 	if h.Layer == nil {
-		return nil, errors.New("run host requires owner layer policies before dispatch")
+		return errors.New("run host requires owner layer policies before dispatch")
 	}
 	request := store.ReconcileRequest{Ref: row.Ref, Actor: input.Owner, Policy: store.SourceNone}
 	for _, layer := range LayerTable() {
@@ -189,13 +187,13 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 		}
 		result, err := h.Layer(ctx, layer, ownerEvaluation(input, accepted, entry, row), row, input.Storage)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if result.Transition != nil {
 			change := *result.Transition
 			change.Ref, change.Actor = row.Ref, input.Owner
 			_, err = h.Store.TransitionNode(ctx, change)
-			return nil, err
+			return err
 		}
 		if result.Source != nil {
 			request.Source, request.Policy = result.Source, result.Source.Kind
@@ -203,10 +201,10 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 			probe.MaterializeOnly = true
 			reused, err := FollowReconciliation(ctx, h.Store, probe, h.WaitNode)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			if reused.Kind != store.Dispatch {
-				return nil, nil
+				return nil
 			}
 			request.Source, request.Policy = nil, store.SourceNone
 		}
@@ -214,17 +212,24 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 			break
 		}
 	}
-	change := store.NodeTransition{Ref: row.Ref, Actor: input.Owner, To: store.NodeReady, Cause: store.CauseRelease}
-	if kind == store.DecisionApproval {
-		change.To, change.Cause = store.NodeApprovalPending, store.CauseApprovalOpen
+	local := kind != store.DecisionApproval && h.Local != nil && h.Local(row)
+	work := func(ctx context.Context) error {
+		change := store.NodeTransition{Ref: row.Ref, Actor: input.Owner, To: store.NodeReady, Cause: store.CauseRelease}
+		if kind == store.DecisionApproval {
+			change.To, change.Cause = store.NodeApprovalPending, store.CauseApprovalOpen
+		}
+		if _, err := h.Store.TransitionNode(ctx, change); err != nil {
+			return err
+		}
+		if local {
+			return next(ctx, request)
+		}
+		return nil
 	}
-	if _, err := h.Store.TransitionNode(ctx, change); err != nil {
-		return nil, err
+	if local && h.Admit != nil {
+		return h.Admit(ctx, accepted, row, work)
 	}
-	if kind == store.DecisionApproval || h.Local == nil || !h.Local(row) {
-		return nil, nil
-	}
-	return &request, nil
+	return work(ctx)
 }
 
 func (h *OwnerHost) execute(ctx context.Context, run RunInput, accepted AcceptedRun, entry *source.Entry, request store.ReconcileRequest) error {

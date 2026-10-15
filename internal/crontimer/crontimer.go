@@ -1,5 +1,5 @@
 // Package crontimer installs the per-user OS timer that runs
-// `sparkwing crons tick` every minute for one Sparkwing home: a systemd user
+// `sparkwing __tick --home <home>` every minute for one Sparkwing home: a systemd user
 // timer on Linux, a launchd agent on macOS. A single timer serves every armed
 // schedule in that home because sparkwing evaluates the cron expressions itself.
 //
@@ -12,8 +12,7 @@
 package crontimer
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -22,6 +21,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runners/service/unitfile"
 )
 
 // Marker appears verbatim in every file this package writes.
@@ -29,9 +30,6 @@ const Marker = "Installed by sparkwing"
 
 // ErrUnsupported is returned, wrapped, for a GOOS that has no cron timer.
 var ErrUnsupported = errors.New("no sparkwing cron timer on this operating system")
-
-// hack: 0644, not the runner installer's 0600 -- a unit or plist carries no token.
-const fileMode os.FileMode = 0o644
 
 // Host is everything the installer needs to know about the machine.
 type Host struct {
@@ -47,6 +45,9 @@ type Host struct {
 	// Binary is the absolute path of the sparkwing binary the timer runs.
 	Binary string
 
+	// Version is recorded in the managed file for doctor and software updates.
+	Version string
+
 	// PathEnv is the PATH baked into the unit or plist. A launchd or systemd
 	// job inherits almost nothing, so the installer's own PATH is what makes
 	// git, docker and the rest reachable from the tick.
@@ -56,7 +57,7 @@ type Host struct {
 	Env map[string]string
 
 	// SparkwingHome is the Sparkwing home whose schedules the tick fires. The
-	// timer carries it as SPARKWING_HOME, and a home other than ~/.sparkwing
+	// timer carries it in --home, and a home other than ~/.sparkwing
 	// gets a timer name of its own, so installing from one home never replaces
 	// another home's timer.
 	SparkwingHome string
@@ -68,11 +69,14 @@ type Host struct {
 	UID int
 
 	// Exec runs systemctl or launchctl and returns stdout and stderr combined.
-	Exec func(name string, args ...string) (string, error)
+	Exec func(context.Context, string, ...string) (string, error)
 }
 
 // State describes the timer as it exists on the host.
 type State struct {
+	Arguments []string `json:"arguments,omitempty"`
+	Home      string   `json:"home,omitempty"`
+	Version   string   `json:"version,omitempty"`
 	// Installed reports a managed unit or plist at the expected path.
 	Installed bool `json:"installed"`
 
@@ -103,32 +107,35 @@ type State struct {
 // follows. A foreign file at either path is an error and nothing is written.
 // When enabling fails the files stay on disk and the returned State says so,
 // alongside the error.
-func Install(h Host) (State, error) {
+func Install(ctx context.Context, h Host) (State, error) {
+	if err := checkOperation(ctx, h); err != nil {
+		return State{}, err
+	}
+	if h.GOOS == "linux" || h.GOOS == "darwin" {
+		if err := requireBinary(h); err != nil {
+			return State{}, err
+		}
+	}
 	switch h.GOOS {
 	case "linux":
-		return installLinux(h)
+		return installLinux(ctx, h)
 	case "darwin":
-		return installDarwin(h)
+		return installDarwin(ctx, h)
 	}
 	return State{}, unsupported(h.GOOS)
 }
 
 // Uninstall disables the timer and removes the files sparkwing wrote. A
 // foreign file is left in place and reported through State.Foreign.
-func Uninstall(h Host) (State, error) {
+func Uninstall(ctx context.Context, h Host) (State, error) {
+	if err := checkOperation(ctx, h); err != nil {
+		return State{}, err
+	}
 	switch h.GOOS {
 	case "linux":
-		state, err := uninstallLinux(h)
-		if err != nil || state.Foreign {
-			return state, err
-		}
-		return state, retireLegacyLinux(h)
+		return uninstallLinux(ctx, h)
 	case "darwin":
-		state, err := uninstallDarwin(h)
-		if err != nil || state.Foreign {
-			return state, err
-		}
-		return state, retireLegacyDarwin(h)
+		return uninstallDarwin(ctx, h)
 	}
 	return State{}, unsupported(h.GOOS)
 }
@@ -137,20 +144,23 @@ func Uninstall(h Host) (State, error) {
 // cannot be reached -- no user session under a bare WSL, no launchd domain --
 // leaves Enabled false and says why in Detail; it is not an error, because the
 // files on disk still answer the question that was asked.
-func Status(h Host) (State, error) {
+func Status(ctx context.Context, h Host) (State, error) {
+	if err := checkOperation(ctx, h); err != nil {
+		return State{}, err
+	}
 	switch h.GOOS {
 	case "linux":
-		return statusLinux(h)
+		return statusLinux(ctx, h)
 	case "darwin":
-		return statusDarwin(h)
+		return statusDarwin(ctx, h)
 	}
 	return State{}, unsupported(h.GOOS)
 }
 
 // DefaultExec runs a command and returns its output, stdout and stderr
 // combined, for a Host that talks to the real machine.
-func DefaultExec(name string, args ...string) (string, error) {
-	out, err := exec.Command(name, args...).CombinedOutput()
+func DefaultExec(ctx context.Context, name string, args ...string) (string, error) {
+	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
 	return string(out), err
 }
 
@@ -161,11 +171,14 @@ func unsupported(goos string) error {
 	return fmt.Errorf("crontimer: %s: %w", goos, ErrUnsupported)
 }
 
-func (h Host) run(name string, args ...string) (string, error) {
+func (h Host) run(ctx context.Context, name string, args ...string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if h.Exec == nil {
 		return "", errors.New("crontimer: Host.Exec is required")
 	}
-	return h.Exec(name, args...)
+	return h.Exec(ctx, name, args...)
 }
 
 type managed struct {
@@ -176,46 +189,12 @@ type managed struct {
 }
 
 func readManaged(path string) (managed, error) {
-	body, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return managed{path: path}, nil
-	}
-	if err != nil {
-		return managed{path: path}, fmt.Errorf("crontimer: read %s: %w", path, err)
-	}
-	return managed{path: path, exists: true, ours: strings.Contains(string(body), Marker), body: string(body)}, nil
+	body, exists, ours, err := unitfile.Read(path, Marker)
+	return managed{path: path, body: body, exists: exists, ours: ours}, err
 }
 
 func writeManaged(path, body string) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("crontimer: create %s: %w", dir, err)
-	}
-	f, err := os.CreateTemp(dir, ".crontimer-*.tmp")
-	if err != nil {
-		return fmt.Errorf("crontimer: create temp file in %s: %w", dir, err)
-	}
-	tmp := f.Name()
-	defer func() {
-		if err := os.Remove(tmp); err != nil && !errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintf(os.Stderr, "sparkwing: could not clear the temporary file %s: %v\n", tmp, err)
-		}
-	}()
-	if _, err := f.WriteString(body); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("crontimer: write %s: %w", tmp, err)
-	}
-	if err := f.Chmod(fileMode); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("crontimer: chmod %s: %w", tmp, err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("crontimer: close %s: %w", tmp, err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return fmt.Errorf("crontimer: rename %s to %s: %w", tmp, path, err)
-	}
-	return nil
+	return unitfile.Write(path, body)
 }
 
 // safety: systemd's append: and launchd's StandardOutPath create the log file but not its directory.
@@ -260,25 +239,12 @@ func notLoaded(out string) bool {
 	return false
 }
 
-const homeEnv = "SPARKWING_HOME"
-
 func (h Host) instance() string {
-	cleanHome := filepath.Clean(h.SparkwingHome)
-	if h.SparkwingHome == "" || (filepath.Base(cleanHome) == ".sparkwing" && filepath.Dir(cleanHome) == filepath.Clean(h.Home)) {
-		return ""
-	}
-	sum := sha256.Sum256([]byte(cleanHome))
-	return hex.EncodeToString(sum[:4])
-}
-
-// safety: a timer installed before each home had its own name can tick
-// another home, and reporting it loaded would tell this home its schedules fire.
-func servesOtherHome(h Host, body, homeEntry string) bool {
-	return h.SparkwingHome != "" && !strings.Contains(body, homeEntry)
+	return unitfile.Instance(h.Home, h.SparkwingHome)
 }
 
 func otherHomeDetail(h Host, path string) string {
-	return fmt.Sprintf("%s ticks another Sparkwing home, not %s; run `sparkwing crons install` from this home to replace it",
+	return fmt.Sprintf("%s ticks another Sparkwing home, not %s; inspect the unit before reinstalling schedules",
 		path, h.SparkwingHome)
 }
 
@@ -294,9 +260,6 @@ func envPairs(h Host) [][2]string {
 		}
 		merged[k] = v
 	}
-	if h.SparkwingHome != "" {
-		merged[homeEnv] = h.SparkwingHome
-	}
 	pairs := make([][2]string, 0, len(merged))
 	for _, k := range slices.Sorted(maps.Keys(merged)) {
 		pairs = append(pairs, [2]string{k, merged[k]})
@@ -305,6 +268,9 @@ func envPairs(h Host) [][2]string {
 }
 
 func requireBinary(h Host) error {
+	if h.Version == "" || strings.ContainsAny(h.Version, "\r\n<>\x00") {
+		return errors.New("crontimer: Host.Version is required and must be one line")
+	}
 	if h.Binary == "" {
 		return errors.New("crontimer: Host.Binary is required")
 	}

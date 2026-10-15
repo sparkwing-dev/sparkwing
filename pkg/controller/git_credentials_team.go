@@ -14,7 +14,8 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -39,7 +40,7 @@ type GitCredentialJSON struct {
 type gitCredentialPutReq struct {
 	Host       string `json:"host"`
 	Kind       string `json:"kind"`
-	Port       int    `json:"port,omitempty"`
+	Port       *int   `json:"port,omitempty"`
 	PrivateKey string `json:"private_key,omitempty"`
 	Username   string `json:"username,omitempty"`
 	Token      string `json:"token,omitempty"`
@@ -51,11 +52,14 @@ type gitCredentialConfirmReq struct {
 
 // GitCredentialReleaseJSON is one audit row of a release.
 type GitCredentialReleaseJSON struct {
-	Host        string `json:"host"`
-	RunID       string `json:"run_id"`
-	Runner      string `json:"runner"`
-	TokenPrefix string `json:"token_prefix"`
-	ReleasedAt  int64  `json:"released_at"`
+	Host             string `json:"host"`
+	Repository       string `json:"repository"`
+	RunID            string `json:"run_id"`
+	JobID            string `json:"job_id"`
+	Generation       int64  `json:"generation"`
+	Runner           string `json:"runner"`
+	CapabilityPrefix string `json:"capability_prefix"`
+	ReleasedAt       int64  `json:"released_at"`
 }
 
 const (
@@ -80,78 +84,58 @@ func gitCredentialBinding(team store.Team, host string) secretBinding {
 	return secretBinding{Team: team, Name: gitCredentialScope + ":" + host, Scope: gitCredentialScope, Masked: true}
 }
 
-func (s *Server) boundCipher(w http.ResponseWriter) (BoundCipher, bool) {
-	bc, ok := s.secretsCipher.(BoundCipher)
-	if !ok || s.secretsCipher == nil {
-		writeAuthError(w, http.StatusConflict, authErrorBody{
-			Code: "secrets_key_required",
-			Message: "this controller has no secrets key, so it holds no git credential; " +
-				"give it one and restart",
-		})
-		return nil, false
-	}
-	return bc, true
-}
-
-func (s *Server) handleListGitCredentials(w http.ResponseWriter, r *http.Request) {
-	_, t, ok := s.teamMember(w, r, store.RoleReader)
-	if !ok {
-		return
+func (s *Server) handleListGitCredentials(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	t, err := s.credentialInventory(r.Context(), a.Target.Team)
+	if err != nil {
+		return err
 	}
 	creds, err := t.GitCredentials(r.Context())
 	if err != nil {
-		s.writeInternalError(w, r, "list git credentials", err)
-		return
+		return engineLookupError(err)
 	}
 	out := make([]GitCredentialJSON, 0, len(creds))
 	for _, c := range creds {
 		out = append(out, gitCredentialJSON(c, ""))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"credentials": out})
+	return nil
 }
 
-// safety: A stored SSH key is released only after its owner confirms the fetched host-key fingerprint.
-func (s *Server) handlePutGitCredential(w http.ResponseWriter, r *http.Request) {
-	p, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
+func (s *Server) handlePutGitCredential(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	req, err := decodeCredentialRequest[gitCredentialPutReq](r)
+	if err != nil {
+		return err
 	}
-	cipher, ok := s.boundCipher(w)
-	if !ok {
-		return
+	t, err := s.credentialWriter(r.Context(), a.Target.Team)
+	if err != nil {
+		return err
 	}
-	var req gitCredentialPutReq
-	if err := decodeJSONLimit(r, &req, maxSecretJSONBody); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	cipher, ok := s.secretsCipher.(BoundCipher)
+	if !ok {
+		return &apierr.Error{Code: apierr.Unavailable, Message: "bound secret encryption is unavailable", Details: map[string]any{"reason": apierr.ReasonSecretsKeyRequired}}
 	}
 	host := strings.ToLower(strings.TrimSpace(req.Host))
 	if !validGitCredentialHost(host) {
-		writeError(w, http.StatusBadRequest, errors.New("host is a hostname such as gitlab.com, with no scheme, port or path"))
-		return
+		return invalidEngineBody("host must be a hostname with no scheme, port or path")
 	}
-	cred := store.GitCredential{Host: host, Kind: req.Kind, CreatedBy: p.AccountID}
+	cred := store.GitCredential{Team: t.Team(), Host: host, Kind: req.Kind, CreatedBy: a.Principal.Capability.Subject.ID}
 	var secret, publicKey string
 	switch req.Kind {
 	case store.GitCredentialSSH:
 		signer, err := parseDeployKey(req.PrivateKey)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
+			return invalidEngineBody(err.Error())
 		}
-		port := req.Port
-		if port == 0 {
-			port = 22
+		port := 22
+		if req.Port != nil {
+			port = *req.Port
 		}
 		if port < 1 || port > 65535 {
-			writeError(w, http.StatusBadRequest, errors.New("port is an ssh port between 1 and 65535"))
-			return
+			return invalidEngineBody("port must be an ssh port between 1 and 65535")
 		}
 		key, err := s.scanHostKey(r.Context(), host, port)
 		if err != nil {
-			s.logger.Info("git credential host key scan failed", "team", string(p.Team), "host", host, "err", err.Error())
-			writeError(w, http.StatusBadGateway, fmt.Errorf("read the ssh host key of %s: %w", host, err))
-			return
+			return &apierr.Error{Code: apierr.Unavailable, Message: "could not read the ssh host key"}
 		}
 		addr := host
 		if port != 22 {
@@ -167,136 +151,66 @@ func (s *Server) handlePutGitCredential(w http.ResponseWriter, r *http.Request) 
 			cred.Username = defaultHTTPSUsername
 		}
 		if !credentialProtocolValue(cred.Username) || len(cred.Username) > 128 {
-			writeError(w, http.StatusBadRequest, errors.New("username is up to 128 printable characters with no space"))
-			return
+			return invalidEngineBody("username is up to 128 printable characters with no space")
 		}
 		if !credentialProtocolValue(req.Token) {
-			writeError(w, http.StatusBadRequest, errors.New("token is up to 1024 printable characters with no space"))
-			return
+			return invalidEngineBody("token is up to 1024 printable characters with no space")
 		}
 		secret = req.Token
 	default:
-		writeError(w, http.StatusBadRequest, errors.New("kind is ssh or https"))
-		return
+		return invalidEngineBody("kind is ssh or https")
 	}
 	sealed, err := sealSecret(cipher, gitCredentialBinding(t.Team(), host), secret)
-	if errors.Is(err, secrets.ErrKeyRefused) {
-		writeError(w, http.StatusConflict, err)
-		return
-	}
 	if err != nil {
-		s.writeInternalError(w, r, "seal git credential", err)
-		return
+		return credentialWriteError(err)
 	}
 	cred.Secret = sealed
-	stored, err := t.PutGitCredential(r.Context(), cred, time.Now())
-	if errors.Is(err, store.ErrGitCredentialLimit) {
-		writeError(w, http.StatusConflict, err)
-		return
-	}
+	stored, err := t.WriteGitCredential(r.Context(), a, cred)
 	if err != nil {
-		s.writeInternalError(w, r, "store git credential", err)
-		return
+		return credentialWriteError(err)
 	}
-	s.logger.Info("git credential stored", "team", string(p.Team), "host", host, "kind", stored.Kind,
-		"fingerprint", stored.Fingerprint, "confirmed", stored.ConfirmedAt != nil, "by", p.AccountID)
+	if stored.Team != t.Team() || stored.Host != host {
+		return errors.New("invalid persisted git credential")
+	}
 	writeJSON(w, http.StatusOK, gitCredentialJSON(stored, publicKey))
+	return nil
 }
 
-func (s *Server) handleConfirmGitCredential(w http.ResponseWriter, r *http.Request) {
-	p, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
+func (s *Server) handleConfirmGitCredential(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	req, err := decodeCredentialRequest[gitCredentialConfirmReq](r)
+	if err != nil {
+		return err
 	}
-	var req gitCredentialConfirmReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if strings.TrimSpace(req.Fingerprint) == "" {
+		return invalidEngineBody("fingerprint is required")
+	}
+	t, err := s.credentialWriter(r.Context(), a.Target.Team)
+	if err != nil {
+		return err
 	}
 	host := r.PathValue("host")
-	c, err := t.ConfirmGitCredential(r.Context(), host, strings.TrimSpace(req.Fingerprint), time.Now())
-	switch {
-	case errors.Is(err, store.ErrNotFound):
-		writeError(w, http.StatusNotFound, err)
-		return
-	case errors.Is(err, store.ErrFingerprintMismatch):
-		writeError(w, http.StatusConflict, err)
-		return
-	case err != nil:
-		s.writeInternalError(w, r, "confirm git credential", err)
-		return
+	c, err := t.ConfirmGitCredentialFor(r.Context(), a, host, strings.TrimSpace(req.Fingerprint))
+	if err != nil {
+		return credentialWriteError(err)
 	}
-	s.logger.Info("git credential confirmed", "team", string(p.Team), "host", host,
-		"fingerprint", c.Fingerprint, "by", p.AccountID)
+	if c.Team != t.Team() || c.Host != host {
+		return errors.New("invalid persisted git credential")
+	}
 	writeJSON(w, http.StatusOK, gitCredentialJSON(c, ""))
+	return nil
 }
 
-func (s *Server) handleDeleteGitCredential(w http.ResponseWriter, r *http.Request) {
-	p, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
+func (s *Server) handleDeleteGitCredential(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	t, err := s.credentialWriter(r.Context(), a.Target.Team)
+	if err != nil {
+		return err
 	}
 	host := r.PathValue("host")
-	if err := t.DeleteGitCredential(r.Context(), host); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		s.writeInternalError(w, r, "delete git credential", err)
-		return
+	if err := t.RemoveGitCredential(r.Context(), a, host); err != nil {
+		return credentialWriteError(err)
 	}
-	s.logger.Info("git credential deleted", "team", string(p.Team), "host", host, "by", p.AccountID)
 	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) handleListGitCredentialReleases(w http.ResponseWriter, r *http.Request) {
-	_, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
-	}
-	rels, err := t.GitCredentialReleases(r.Context(), gitCredentialListSize)
-	if err != nil {
-		s.writeInternalError(w, r, "list git credential releases", err)
-		return
-	}
-	out := make([]GitCredentialReleaseJSON, 0, len(rels))
-	for _, rel := range rels {
-		out = append(out, GitCredentialReleaseJSON{
-			Host: rel.Host, RunID: rel.RunID, Runner: rel.Runner, TokenPrefix: rel.TokenPrefix,
-			ReleasedAt: rel.ReleasedAt.Unix(),
-		})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"releases": out})
-}
-
-type runnerGitCredentialsReq struct {
-	Enabled bool `json:"enabled"`
-}
-
-// safety: Owner opt-in controls machine access to team credentials; metered cloud runners do not need it.
-func (s *Server) handleSetTeamTokenGitCredentials(w http.ResponseWriter, r *http.Request) {
-	p, t, ok := s.teamMember(w, r, store.RoleOwner)
-	if !ok {
-		return
-	}
-	var req runnerGitCredentialsReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	prefix := r.PathValue("prefix")
-	err := t.SetGitCredentialMachine(r.Context(), prefix, req.Enabled, p.AccountID, time.Now())
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	if err != nil {
-		s.writeInternalError(w, r, "set machine git credentials", err)
-		return
-	}
-	s.logger.Info("machine git credentials set", "team", string(p.Team), "prefix", prefix,
-		"enabled", req.Enabled, "by", p.AccountID)
-	writeJSON(w, http.StatusOK, req)
+	return nil
 }
 
 func validGitCredentialHost(host string) bool {

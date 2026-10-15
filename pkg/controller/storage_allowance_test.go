@@ -12,7 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-const storageAllowancePath = "/api/v1/storage/quotas/acme/allowance"
+const storageAllowancePath = "/api/v1/operator/object-store/quotas/acme/allowance"
 
 func licenseStorageMetering(t *testing.T, f storageFixture) {
 	t.Helper()

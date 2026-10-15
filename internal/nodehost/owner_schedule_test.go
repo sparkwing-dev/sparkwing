@@ -140,7 +140,7 @@ func TestOwnerHostRemoteDispatchNeverSelfClaims(t *testing.T) {
 	h.Layer = func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
 		return OwnerLayerResult{}, nil
 	}
-	request, err := h.release(t.Context(), in, *in.Accepted, &source.Entry{}, row, store.DecisionReady)
+	request, err := releasedRequest(&h, t.Context(), in, *in.Accepted, &source.Entry{}, row, store.DecisionReady)
 	if err != nil || request != nil {
 		t.Fatalf("request=%+v error=%v", request, err)
 	}
@@ -264,7 +264,7 @@ func TestOwnerHostRemoteReuseProbesBeforeDispatch(t *testing.T) {
 				}
 				return OwnerLayerResult{}, nil
 			}
-			request, err := h.release(t.Context(), input, *input.Accepted, &source.Entry{}, row, store.DecisionReady)
+			request, err := releasedRequest(&h, t.Context(), input, *input.Accepted, &source.Entry{}, row, store.DecisionReady)
 			if err != nil || request != nil || !probe.request.MaterializeOnly || probe.request.Policy != store.SourceMemo {
 				t.Fatalf("probe=%+v returned=%+v error=%v", probe.request, request, err)
 			}
@@ -282,7 +282,7 @@ func TestOwnerHostRemoteReuseProbesBeforeDispatch(t *testing.T) {
 func TestOwnerHostRequestsHolderCancellationThroughTransition(t *testing.T) {
 	f, h, input := newOwnerFixture(t, true)
 	row := store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Generation: 4, Status: store.StatusRunning, ClaimedBy: "remote"}
-	if _, err := h.apply(t.Context(), input, *input.Accepted, &source.Entry{}, row, store.NodeDecision{Kind: store.DecisionCancelHolder, NodeID: "job", Generation: 4}); err != nil {
+	if err := h.apply(t.Context(), input, *input.Accepted, &source.Entry{}, row, store.NodeDecision{Kind: store.DecisionCancelHolder, NodeID: "job", Generation: 4}); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(f.trace, []string{"cancelled"}) {
@@ -307,10 +307,19 @@ func TestOwnerHostPassesOwnerStorageToLayerPolicies(t *testing.T) {
 		policies++
 		return OwnerLayerResult{}, nil
 	}
-	if _, err := host.release(t.Context(), input, *input.Accepted, entry, row, store.DecisionReady); err != nil {
+	if _, err := releasedRequest(&host, t.Context(), input, *input.Accepted, entry, row, store.DecisionReady); err != nil {
 		t.Fatal(err)
 	}
 	if policies != 5 {
 		t.Fatalf("owner policies=%d", policies)
 	}
+}
+
+func releasedRequest(h *OwnerHost, ctx context.Context, input RunInput, accepted AcceptedRun, entry *source.Entry, row store.NodeRow, kind store.DecisionKind) (*store.ReconcileRequest, error) {
+	var result *store.ReconcileRequest
+	err := h.release(ctx, input, accepted, entry, row, kind, func(_ context.Context, request store.ReconcileRequest) error {
+		result = &request
+		return nil
+	})
+	return result, err
 }

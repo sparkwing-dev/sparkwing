@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http/httptest"
@@ -13,8 +14,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
-	"github.com/sparkwing-dev/sparkwing/internal/agentservice"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/runners/service"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -35,6 +36,8 @@ type runnersFixture struct {
 
 // safety: a real controller with auth from its own store, so token minting and
 // revocation run through the handlers an operator's controller runs.
+var runnerTokenScopes = []string{"nodes.claim", "triggers.claim"}
+
 func newRunnersFixture(t *testing.T) *runnersFixture {
 	t.Helper()
 	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
@@ -65,14 +68,14 @@ func newRunnersFixture(t *testing.T) *runnersFixture {
 	if runtime.GOOS == "windows" {
 		f.binary = "C:/usr/local/bin/sparkwing-runner.exe"
 	}
-	t.Cleanup(swapRunnerServiceHost(func(configPath string) (agentservice.Host, error) {
-		return agentservice.Host{
+	t.Cleanup(swapRunnerServiceHost(func(configPath string) (service.Host, error) {
+		return service.Host{
 			GOOS:       "linux",
 			Home:       home,
 			ConfigHome: filepath.Join(home, ".config"),
 			Binary:     f.binary,
 			ConfigPath: configPath,
-			Exec: func(name string, args ...string) (string, error) {
+			Exec: func(_ context.Context, name string, args ...string) (string, error) {
 				call := strings.TrimSpace(name + " " + strings.Join(args, " "))
 				calls = append(calls, call)
 				for prefix, out := range f.failExec {
@@ -87,7 +90,7 @@ func newRunnersFixture(t *testing.T) *runnersFixture {
 	return f
 }
 
-func swapRunnerServiceHost(fn func(string) (agentservice.Host, error)) func() {
+func swapRunnerServiceHost(fn func(string) (service.Host, error)) func() {
 	prev := runnerServiceHost
 	previousGOOS := runnerServiceGOOS
 	runnerServiceGOOS = "linux"
@@ -148,7 +151,7 @@ func TestRunnersAddMintsAScopedTokenAndWritesTheClaimModeConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the written config does not load: %v", err)
 	}
-	if raw.HolderPrefix != "dev-laptop" || raw.MaxConcurrent != 3 || raw.Contribution != "4,8gb" {
+	if raw.HolderPrefix != "" || raw.MaxConcurrent != 3 || raw.Contribution != "4,8gb" {
 		t.Errorf("config = %+v", raw)
 	}
 	if !slices.Equal(raw.Labels, []string{"linux", "arch=amd64"}) {
@@ -198,7 +201,7 @@ func TestRunnersAddSkipsTheServiceWhenAsked(t *testing.T) {
 	if len(*f.calls) != 0 {
 		t.Errorf("--no-service still drove the service manager: %v", *f.calls)
 	}
-	if !strings.Contains(out, "agent --config "+f.config) {
+	if !strings.Contains(out, "start --config "+f.config) {
 		t.Errorf("output does not name the manual start command:\n%s", out)
 	}
 	cfg, err := userconfig.ReadConfig(f.config)
@@ -318,7 +321,7 @@ func TestTokenPrefixMatchesTheStoresPrefixLength(t *testing.T) {
 	}
 }
 
-func TestRunnersAddNamesTheRevokeCommandWhenTheServiceInstallFails(t *testing.T) {
+func TestRunnersAddRevokesTheNewCredentialWhenTheServiceInstallFails(t *testing.T) {
 	f := newRunnersFixture(t)
 	f.failExec["systemctl --user daemon-reload"] = "Failed to connect to bus: No medium found"
 
@@ -341,13 +344,12 @@ func TestRunnersAddNamesTheRevokeCommandWhenTheServiceInstallFails(t *testing.T)
 		t.Fatalf("minted %d tokens, want 1", len(tokens))
 	}
 	prefix := tokens[0].Prefix
-	if tokens[0].RevokedAt != nil {
-		t.Error("the failed install revoked the token behind the operator's back")
+	if tokens[0].RevokedAt == nil {
+		t.Error("the failed install left new authority live")
 	}
 	for _, want := range []string{
 		"minted runner token " + prefix,
-		"the token " + prefix + " is live",
-		"sparkwing cluster tokens revoke --profile prod --prefix " + prefix,
+		"revoked runner token " + prefix + " after enrollment failed",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
@@ -427,8 +429,8 @@ func TestRunnersAddForceTwiceKeepsTheLatestConfigReadable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load after the second add: %v", err)
 	}
-	if second.HolderPrefix != "second" {
-		t.Errorf("holder_prefix = %q, want the second name", second.HolderPrefix)
+	if second.HolderPrefix != "" {
+		t.Errorf("enrollment supplied a caller-selected claim holder: %q", second.HolderPrefix)
 	}
 	if second.Token == first.Token {
 		t.Error("the second add reused the first token")
@@ -490,7 +492,7 @@ func TestRunnersRemoveRefusesANonRunnerToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}
-	if err := writeAgentConfig(f.config, agentFileConfig{Controller: "http://localhost:4344", Token: raw, HolderPrefix: "desk", MaxConcurrent: 1}, false); err != nil {
+	if _, err := writeAgentConfig(f.config, agentFileConfig{Controller: "http://localhost:4344", Token: raw, MaxConcurrent: 1}, false); err != nil {
 		t.Fatal(err)
 	}
 

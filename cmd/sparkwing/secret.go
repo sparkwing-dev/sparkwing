@@ -94,7 +94,7 @@ func localSecretsTarget(ctx context.Context, verb string, write bool) (*secretsT
 		return nil, fmt.Errorf("%s: this machine's sparkwing daemon (%s) cannot serve the local secret store: %s; "+
 			"run `sparkwing daemon restart` to start this release's daemon", verb, daemon, apiErr)
 	}
-	httpClient := orchestrator.NewAPISocketClient(sock)
+	httpClient := wingdclient.NewAPIClient(sock)
 	health, err := orchestrator.ReadLocalAPIHealth(ctx, sock)
 	if err != nil {
 		httpClient.CloseIdleConnections()
@@ -112,7 +112,7 @@ func localSecretsTarget(ctx context.Context, verb string, write bool) (*secretsT
 		return nil, fmt.Errorf("%s: %s", verb, health.SecretsProblem)
 	}
 	return &secretsTarget{
-		c:     client.New(orchestrator.HostedAPIBaseURL, httpClient),
+		c:     client.New(wingdclient.APIBaseURL, httpClient),
 		label: "local",
 		local: true,
 		empty: health.Store == "absent",

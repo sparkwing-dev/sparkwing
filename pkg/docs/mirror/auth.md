@@ -1,26 +1,224 @@
 # Authentication + authorization
 
-Sparkwing uses a shared-secret bearer token model with typed principals
-and per-endpoint scope annotations.
+The controller's shared policy routes use the store's authentication snapshot
+and binding checker by default. Each request reads current capability ancestry
+and account membership. Browser writes use the session-bound CSRF verifier by default. The header
+and cookie must match the token derived from the persisted encrypted key, and
+the request must come from the same origin. A forged or cross-session token
+returns `forbidden`. Session key failures return `unavailable`. Verified local-peer and operator-console presentations need
+their transport-specific adapters. Request headers and loopback addresses do
+not supply those identities.
+
+`GET /api/v1/queue` uses the shared capability policy. A member or verified
+local peer needs `runs.read` for its active team. Queue groups and advertised
+runner headroom belong to that team. Machine roots and work claims cannot read
+the team queue. The former `/api/v1/queue/state` path is removed.
+
+Run intake, plan acceptance, job status reads, job transitions, finish,
+cancellation, retry and run/job renewal use the shared capability policy. The
+controller resolves the resource's team before authorization and derives
+actors and fences from the credential. Unknown or ended credentials get
+`unauthenticated`. A live
+credential without the grant or binding gets `forbidden`.
+
+`GET /api/v1/runs/{run}/jobs` returns a status array from one committed
+snapshot. It accepts member `runs.read` or the live run owner's `trigger.host`.
+`GET /api/v1/runs/{run}/jobs/{job}` also accepts that job's live `data.read`
+authority. An executor cannot list siblings or read another job through this
+route. Both responses use the shared safe job status fields. They omit job
+declarations, environment, claim identities and execution settings. The old
+`GET /nodes` and `GET /nodes/{nodeID}` paths are removed.
+
+`POST /api/v1/runs/{run}/jobs/{job}/cancel` accepts `runs.control` from a
+member or `trigger.host` from the live owner of that run. The state transaction
+requests cancellation of held jobs and preserves the holder's result rights.
+The first cancellation reason is recorded separately from the holder's
+terminal result and reaches the holder on renewal.
+
+`GET /api/v1/runs/{run}/jobs/{job}/failure?generation=N` requires `data.read`
+and a declared recovery read edge to that source generation. It returns the
+persisted masked job failure, including its stage, or `null` when none was
+recorded. Status text is never converted into a synthetic failure. Missing,
+duplicate or nonpositive generation selectors return `bad_request` after
+credential authentication.
+
+`GET /api/v1/runs/{run}/snapshot` requires a live trigger owner with
+`trigger.host` bound to that run. It returns one committed scheduling view,
+including generated jobs and empty generator groups. Ordinary members and
+work or plan claims cannot read this private owner view. Cancellation and
+owner lease loss refuse new reads. A cancellation committed after
+authentication appears in the returned snapshot. Accepted expansion bodies,
+hashes and source generations travel in the same committed read. Replayed
+expansion responses retain each generated job's current state and attempt.
+
+Pipeline sizing uses `/api/v1/pipelines/{name}/sizing`. Members need
+`runs.read`. Executable claims need `source.read` and the bound run's exact
+sealed repository and pipeline. Bare runner and Actions roots cannot read
+sizing. Bootstrap credentials can acquire source but cannot read sizing.
+The `job` query selects one job. Omitting it selects the pipeline rollup.
+An authorized missing measurement returns `not_found`.
+
+Pins, observations, contention and waits use the `pin`, `observations`,
+`contention` and `waits` suffixes on that path. They require `node.report`
+and the same pipeline binding. Cancellation permits reporting while the
+claim remains live. Member and admin grants cannot bypass this binding.
+Writes require an authority-bearing sizing transaction adapter. Without one,
+the controller returns `policy_missing` before storing a measurement.
+The old `/profile` paths are removed.
+
+Token revocation and member updates use the same policy router. A team token is
+revoked at `DELETE /api/v1/tokens/{token}`. Deployment service/operator roots use
+`DELETE /api/v1/operator/tokens/{token}` with `operator.tokens` or an operator
+console session. Team routes derive their active team from the committed
+credential. Header and query hints cannot select another team.
+
+`GET /api/v1/team/members` returns the active team's member directory and
+requires `runs.read`. An empty team returns `[]`.
+
+`GET /api/v1/credits` and `GET /api/v1/credits/history` require a live member
+or verified local peer with `runs.read`. The committed credential selects the
+team. Machine roots, executable claims and bootstrap credentials cannot read
+the team ledger. Both routes use the common error envelope and authenticate
+before checking whether credit billing is enabled. An authorized caller gets
+`not_found` when billing is unavailable. History retains the `limit` query
+and returns empty grants and charges as arrays.
+
+`PATCH /api/v1/team/members/{account}` accepts a role of `owner`, `editor` or
+`reader`. `DELETE` on that path removes the membership. The store rechecks the
+authenticated authority and updates the membership generation in the same
+transaction. A missing member returns `not_found`. A last-owner change returns
+`conflict`. Browser mutations require CSRF proof. Revocation stops descendants'
+new controller operations, including those parented to a session. Previously
+issued external credentials and signed URLs keep their documented lifetimes.
+
+`POST /api/v1/runs` accepts a `request` and `idempotency_key`. The request names
+its team. A bound job creating a child must name its own run and job as the
+parent. Intake returns the committed run number and first seal. A here bearer
+is returned once. Replaying intake returns the committed response without
+another bearer.
+
+`POST /api/v1/runs/{run}/plan` accepts `declarations`, `resolved` and `plan`.
+The store validates the second seal against the persisted first seal, including
+a retry's preserved source seal. Raw plan snapshots are no longer accepted.
+Plan, job-transition and finish requests from ended claims require the exact
+recorded body, actor and fence to replay. Mutations recheck authority inside
+the store transaction. A lost fence gets `lock_held`.
+
+Job transitions use `/api/v1/runs/{run}/jobs/{job}/transition`. Finish ends the
+run and its owner unit together. Published local runs use a separate transition
+edge and receive no executable owner. Cancellation carries a reason. Retry
+carries an idempotency key and leaves source seals unchanged. Run/job heartbeat
+responses carry the committed lease expiry, cancellation and watched jobs.
+Every request uses JSON. Bodies cannot replace authority, holders or fences.
+
+Job and step annotations, summaries and step transitions use the same policy
+under `/api/v1/runs/{run}/jobs/{job}`. A job claim reports only its own job.
+A trigger owner may report its run's jobs, subject to the transaction's holder
+check. A local publisher uses its separate run-bound publication authority.
+Cancellation permits reporting while the claim remains live. An ended claim
+cannot write these reports.
+
+Step start and skip take `step_id`. Step finish also takes `status` (`passed`,
+`failed` or `cancelled`) and an optional masked inner error. The controller
+derives the attempt from the claim or the persisted job, and the store owns
+timestamps and stale-attempt refusal. Annotations and summaries accept at most
+128 KiB of masked text. The old `/nodes/` reporting paths are removed.
+
+## Data read authority
+
+Download signing and batched presence use the shared capability policy.
+A live claim needs its data grant and sealed run/repository/ref binding.
+A repository reader needs existing repository authority. Cache grants,
+ordinary member tokens and machine roots cannot substitute for either.
+Each operation resolves current authority again and checks the read set
+before reading metadata. Presence queries omit unreadable digests. Download
+signing applies the team's daily byte cap and returns a 60-second URL for
+one immutable object. The returned storage headers contain no controller bearer.
+
+## Credential discovery
+
+`GET /api/v1/auth/whoami` uses the shared policy verifier. It returns the
+committed subject ID as `principal`, the subject kind as `kind`, and grants
+as `scopes`. `team` is present when the credential has an active team.
+`token_prefix` names a capability. Sessions and verified local peers omit it.
+The response excludes session IDs, ancestry, claim fences and billing facts.
+An empty grant set returns `"scopes":[]`.
+
+`GET /api/v1/services` and `GET /api/v1/data/capabilities` use the same verifier
+and require an active team. They announce configured services and data transfer
+support. Availability is checked after authorization. An authorized caller gets
+`not_found` when nothing is configured. Missing or dead credentials receive
+`unauthenticated` regardless of service configuration. Bootstrap and eval
+credentials cannot use these discovery routes or `whoami`.
+
+All three routes return `Cache-Control: no-store`. Unsupported methods return
+`method_not_allowed` with `Allow: GET`. Identity lookup requires an explicit
+credential or a verified local peer. An address, query parameter or identity
+header cannot supply authority.
+
+The OIDC discovery document at `/.well-known/openid-configuration` and public
+key set at `/.well-known/jwks.json` also use the policy router. Providers can
+read them without a Sparkwing credential. Both retain their one-hour public
+cache header. A controller without an issuer returns `not_found`, and
+unsupported methods return `method_not_allowed` with `Allow: GET`.
+
+## Generator expansion authority
+
+`POST /api/v1/runs/{run}/jobs/{job}/expansion` uses the shared capability
+policy. It requires `expansion.submit`, the bound source job and generation,
+and a live owner or eval lease. Eval also requires a live controller ownership
+lease. The ended source claim cannot submit an expansion.
+
+The body supplies `source_generation` and exactly one of `body` or `failure`.
+A successful empty expansion uses `"body":{"jobs":[]}`. A failure uses the
+shared inner error object with `code` and `message`. The controller derives
+the actor, holder and lease generation from authorization. Success and failure
+reach the same store transaction, which rechecks authority before acceptance
+and owns replay. Unsupported methods return a JSON `method_not_allowed` error
+with `Allow: POST`.
 
 ## Token format
 
-Raw tokens are `<prefix>_<entropy>`:
+Member issuance and rewritten claim routes return opaque reference capabilities.
+Controller capabilities start `swk_`. Node-host capabilities start `swn_`.
+The stored authority determines subject, grants, binding and billing. A prefix
+does not grant a role. The response's `prefix` is the first 16 characters and
+is safe to use as an identifier. The controller keeps a SHA-256 presentation
+digest and returns the reusable bearer only at issuance.
 
-- `swu_...` -- user. Created for humans (`sparkwing cluster tokens create --type user`,
-  or `sparkwing cloud connect --admin-token-stdin`, which mints one and writes the
-  profile that holds it).
-- `swr_...` -- runner. Created for remote machine agents or pool replicas.
-- `swt_...` -- team. Minted by a team member, either for the CLI or for a
-  machine, with `POST /api/v1/team/tokens` (see [team tokens](#team-tokens)).
-- `sws_...` -- service. Created for in-cluster back-channel callers.
-- `swc_...` -- claim. Minted by the controller with each claim it awards and
-  returned once in the claim's answer; nobody creates one by hand (see
-  [claim tokens](#claim-tokens)).
+Member issuance uses `POST /api/v1/tokens` (see [team tokens](#team-tokens)).
 
-The **prefix segment** is the first 12 characters of a raw token. It's
-a non-secret identifier used in `sparkwing cluster tokens list`, `revoke`, and
-audit logs. The remaining ~35 characters carry the secret entropy.
+## Capability inventory and rotation
+
+`GET /api/v1/tokens` lists credentials within the authenticated team. Members
+need `runs.read` and see their own credentials. A team admin can see the team's
+credentials. `GET /api/v1/tokens/{token}` checks ownership of that prefix.
+Deployment service and operator credentials use the corresponding collection
+and detail routes under `/api/v1/operator/tokens`, requiring `operator.tokens`
+or an operator console session.
+
+The collection returns `{tokens:[...]}`. Each row carries `prefix`, `team`,
+`subject`, `audience`, `grants`, `created_by`, `issued_at`, `git_credentials`,
+`metered`, and optional `expires_at`, `last_used_at` and `revoked_at`. Times are RFC3339
+timestamps. The response omits bearer secrets, digests, bindings and ancestry.
+`kind` filters by `account`, `machine`, `service` or `operator`.
+`include_revoked=1` includes revoked rows. Duplicate or invalid filters fail.
+
+`POST /api/v1/tokens/{token}/rotate` replaces an owned credential. Deployment
+credentials use `/api/v1/operator/tokens/{token}/rotate`. The body accepts
+`grace_secs` and optional `expires_at`. Grace defaults to 24 hours and accepts
+zero through seven days. An omitted expiry keeps the original expiry. An
+explicit expiry must pass the original parent's ceilings or the current root
+origin policy. The transaction preserves the original
+authority and ends the old credential after the grace window. Explicit
+revocation ends that window at once.
+
+The rotation response returns `capability` once, `new` public metadata,
+`old_prefix` and the RFC3339 `old_revoked_at`. Do not replay a rotation after
+losing its response. Browser mutations require session-bound CSRF proof.
+All inventory and rotation responses use `Cache-Control: no-store` and the
+common error envelope. Embedded controllers provide `WithCapabilityManager`
+for authority-bearing inventory and rotation transactions.
 
 ## Metered runners
 
@@ -183,40 +381,24 @@ active team. The controller takes the team from that session, refuses an
 amount outside the range, and asks the hosted checkout service at
 `--billing-url`, authenticated with the
 `billing-token` credential, to open a session for that team. The browser is
-sent to the page it returns.
+sent to the page it returns. Stripe delivers payment events to
+`POST /webhooks/stripe`. The controller verifies the exact body, signature,
+timestamp and configured test/live mode before passing a verified event to
+the store. The committed checkout supplies the team and credit amount.
+Unpaid completions stay pending. Failed and expired sessions close without
+granting credit. Unsupported authenticated events are acknowledged without
+settlement. A failed settlement returns an error so Stripe can retry.
 
-The raw paid-credit grant endpoint is removed. Checkout integrations must supply
-authenticated provider events matched to committed checkout sessions.
-The store derives the team and credit amount from that session and deduplicates
-event delivery. Provider verification and its controller adapter remain required
-integration work. The service holds a service token carrying
-only `credits.grant`; it holds by payment and reads the
-ledger's units, and every other route refuses it. Those routes answer only a
-service token carrying `credits.grant`: an admin token, a session, a user or
-runner token and an anonymous caller are refused, the last even on a
-controller that serves without credentials.
+Configure the callback with `--payment-mode test` or `--payment-mode live`
+and the private `stripe-api-key` and `stripe-webhook-secret` files in the
+controller's credentials directory. Both modes use the same verifier and
+settlement path. Missing or inconsistent credentials refuse startup.
+An unconfigured callback returns `503 unavailable`.
 
-No API call mints or rotates that scope: `POST /api/v1/tokens` and
-`POST /api/v1/tokens/{prefix}/rotate` answer `403` for it, an admin token
-included. The controller seeds the token from the `credits-token` file in its
-credentials directory, as it seeds the bootstrap admin token. Generate the
-value once and give the same string to the checkout service:
-
-```bash
-printf 'sws_%s' "$(openssl rand -hex 24)" > credits-token
-```
-
-The controller seeds each value once and records that it did, so a restart
-with the same file writes nothing. Once that token is revoked, the value is
-never seeded again, even after the revoked row is pruned: the controller logs
-an `ERROR` naming the `credits-token` credential at every start until the file
-holds a new value. To rotate it, put a new value in the file and in the
-checkout service, restart the controller, then revoke the old prefix with
-`sparkwing cluster tokens revoke`. A token stored under the file's prefix
-before it was provisioned, such as one minted by an earlier release, is
-adopted as it stands. A controller with no `--billing-url` sells no credits
-and answers the checkout route with `503` and
-`"code": "checkout_unavailable"`.
+Service credentials cannot submit payment, card or dispute outcomes. The
+`credits-token` credential and its service routes are removed. The signed
+callback accepts checkout payment, failure and expiry events. Other provider
+event types are acknowledged without settlement.
 
 A team's balance holds at most $5,000, and the cap is held when a checkout
 opens. The controller adds the balance, every checkout of the team still
@@ -247,71 +429,8 @@ raise the limit to $5,000, and a revocation holds the team to the new-team
 limits even when it would earn trust; `automatic` returns it to the rule. Team -> Billing shows the limit and what
 remains of it.
 
-Purchases are final, so a refund is the operator's decision, issued in the
-Stripe dashboard. The refund reaches the ledger: the checkout service answers
-`charge.refunded` by reversing exactly what each refund returned, under the
-refund's id, through `POST /api/v1/credits/reversals` with `amount_micro`. A
-reversal never takes back more than its payment has left, and replaying it
-reverses once. The balance can go below zero, and the team's metered claims
-then stop until it is funded again.
-
-Every team spends within limits, counted in daily buckets of gross usage at
-list price, promotional credit included. A new team may spend $50 over 30
-days and $25 in one UTC day; a trusted team $500 and $200. An owner may set a
-lower budget through `PUT /api/v1/team/billing/budget`, and owners are
-mailed at 50, 80 and 100% of it. A claim past any limit is refused with `402`
-and `"code": "spend_limit"`, and the run log's `credits_blocked` event names
-the limit. Limits stop new work; running jobs finish within about a minute.
-A refunded reservation counts against the day of its charge, so a refund
-never frees room today.
-
-A trusted team may add a card (`POST /api/v1/team/billing/card`, owners
-only), which opens a Stripe setup page that asks for 3-D Secure and shows the
-charge authorization. With a card on file the team buys no prepaid credit
-(`409`, `"code": "card_on_file"`), spends any prepaid balance first, and may
-then run up to twice its rung below zero. The controller's payment worker
-charges the card off-session when the debt reaches the rung ($100), on the
-first of the month for a smaller debt, and at once when trust is revoked.
-Each charge has one attempt in flight at a time, and the attempt id is both
-Stripe's idempotency key and the payment's `metadata.attempt_id`, so a retried
-attempt finds the payment already made. Stripe emails the receipt. A declined
-charge withdraws the card's credit, so new work waits, and is retried after
-1, 3 and 7 days; an owner can pay it at once through
-`POST /api/v1/team/billing/pay`, and a new card retries it at once. A team
-with debt or a charge open cannot be deleted.
-
-An early fraud warning gives each affected team its own hold, blocks the
-card's fingerprint for every team, and refunds the payment; the refund then
-reverses the credits as above. Debt is usage already consumed, so any card may
-repay it through `POST /api/v1/team/billing/pay`: a payment of the open charge
-by a card warned on another payment pays off that charge, repays what the
-team owes at that moment, grants nothing beyond it, holds the team, and logs
-`alert=card_payment_warned` with the repaid and unapplied amounts. Returning
-the unapplied rest, or the whole payment, is the operator's decision; a refund
-returns the unapplied rest first, which reverses nothing, and only what it
-returns beyond that reopens the debt. Use the returned hold id to release
-that hold. Existing warning holds keep their ids, and replaying
-a warning does not undo an operator's release. Business events retain the
-provider's warning id alongside the hold id.
-
-A chargeback holds the team. Holds are one per dispute, and a team is held
-while any of its holds stands: its metered claims are refused with `402` and
-`"code": "credits_frozen"` while work already running finishes, and
-Team -> Billing says so. When Stripe reports a dispute opened on a purchase,
-the checkout service logs an alert (`alert=chargeback_opened`) and holds the
-team the payment funded through `POST /api/v1/credits/freezes`. A dispute
-lost reverses the purchase the way a refund does and holds the team too, so a
-lost dispute holds it even when Stripe delivered the close before the open. A
-dispute won logs `alert=dispute_won` and changes nothing: the checkout service
-never releases a team, because one dispute's outcome says nothing about
-another's. The operator releases a settled dispute's hold from the
-[operator console](#operator-console). Replaying any
-dispute event changes nothing, and a replayed hold never undoes a release. A
-dispute is bound to the one payment and team its first hold named: a hold or
-a lost-dispute reversal that names the same dispute for another payment is
-refused with `409` and `"code": "dispute_conflict"` and logged as
-`alert=dispute_conflict`. A hold takes the ledger lock a metered claim takes,
-so no claim that read the team as not held commits after the hold.
+Purchases are final. The operator can issue refunds in the Stripe dashboard.
+The controller's callback does not settle refund or dispute events.
 
 ## Operator console
 
@@ -326,20 +445,20 @@ admits them. Each team action takes a reason and a confirmation step naming
 the team and the effect.
 
 Trust, overrides, free grants, holds and the waitlist are reachable only here.
-No bearer token reaches them, an admin token included, and the checkout
-service's `credits.grant` routes refuse every other credential, so a
-standing credential grants no credit, changes no trust and releases no hold.
+No bearer token reaches them. A standing credential grants no credit, changes
+no trust and releases no hold.
 
-Only the operator's own signed-in account reaches it. The controller lists
-operator accounts by account id with `--operator-accounts`
-(comma-separated), and every route under
-`/api/v1/operator/` answers `403` to any other caller: a team owner, an
-operator-token session and every bearer token, an admin token included. A console
-action therefore needs the operator's sign-in, not a credential that
-automation can hold. The controller serves the `/operator` page only to a
-listed operator's own signed-in session and answers `403` to every other
-browser, and the console's writes pass the same CSRF check as every other
-cookie-authenticated write. With no account listed, the console is off.
+Console API actions require an operator-console session and session-bound CSRF
+proof for writes. A live bearer, ordinary account session or local peer receives
+`403 forbidden`. An unknown, expired or revoked session receives
+`401 unauthenticated`. Trust, grant and hold events record the authenticated
+account ID. A request body cannot select the actor.
+
+Account/team deletion, installation unbinding and
+credit-settings writes also use console-only routes under `/api/v1/operator`.
+The former deployment-admin URLs are removed. The controller's
+`--operator-accounts` list gates the dashboard page. API authentication uses the
+shared route-policy adapters and fails closed when they are not configured.
 
 Every action commits together with its business event, which names the
 operator and the reason: `billing.trust_changed` for trust and the limit,
@@ -554,24 +673,23 @@ mapping is in the generated [api-reference.md](api-reference.md):
 
 | Scope             | Unlocks                                                                                           |
 |-------------------|---------------------------------------------------------------------------------------------------|
-| `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/runs/{id}/events`, `/trends`, `/agents`, `/queue/state`, `/credits`, `/credits/history`, `/compute-limits`, per-node metrics GETs, and similar team-scoped reads. `/runs/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
+| `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/runs/{id}/events`, `/trends`, `/agents`, `/queue`, `/credits`, `/credits/history`, per-node metrics GETs, and similar team-scoped reads. `/runs/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
 | `runs.write`      | POST `/api/v1/triggers`: starting new work |
 | `runs.control`    | POST `/runs/{id}/cancel`, `/runs/{id}/retry`, `/runs/{id}/nodes/{id}/release`, and the cron writes (`/crons/repos`, `pause`, `resume`, `run`, `disarm`, `override`): acting on a run or schedule somebody else started |
 | `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, the per-node write routes, GET claimed node data, GET the claimed run and trigger, and read-only Git proxy routes scoped to a live claimed run |
 | `logs.read`       | GET `/api/v1/runs/{id}/logs`, `/runs/{id}/logs/{node}`, `/runs/{id}/logs/{node}/stream`, `/runs/{id}/logs/{node}/completeness`, `/runs/{id}/logs/search` and `/runs/grep` |
 | `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`. `/triggers/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
 | `triggers.claim`  | POST `/api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`, and GET the live claimed trigger and its run. The heartbeat and the done name a trigger, and each is bound to the claimant that trigger's row records |
-| `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, the readiness route `mark-ready`, the slot routes `/concurrency/{key}/acquire`, `heartbeat`, `release`, `holder`, `resolve`, `cancel-waiter`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
-| `secrets.read`    | Releases no secret. A bearer holding it without `admin` or `team.admin` is answered `403 claim_required` on GET `/api/v1/secrets/{name}`; a node reads its run's secrets with its claim token. Tokens minted with it keep authenticating, and no team token or runner token is minted with it |
+| `runs.state`      | Run creation and owner-fenced run and job transitions, events, and concurrency operations. Every write naming a run is bound to a run the caller owns; see [api-reference.md](api-reference.md) for the routes. |
+| `secrets.read` | Member or verified local reads of unmasked config through GET `/api/v1/secrets/{name}`. Masked values require a live, declaring `secrets.release` claim |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
 | `team.admin`      | Administering the caller's own team: rename it, change roles, remove members, invitations, and revoking any of its machine tokens. A team owner holds it; it reaches no other team |
-| `credits.grant`   | The hosted checkout service's scope: POST `/api/v1/credits/reversals`, POST `/api/v1/credits/freezes` naming a payment, the card routes under `/api/v1/credits/`, GET `/api/v1/credits/units`, and GET `/api/v1/credits/payments/{reference}`. It reaches no other route. Only the controller's `credits-token` credential provisions it; no API call mints or rotates it, and no team's token may carry it. These routes answer only a service token carrying it; `admin` does not stand in |
-| `admin`           | tokens / users / secrets CRUD, the token metering marker, credit pricing, the sign-up gate's mode and limits, the compute guards, run delete, gitcache registration, and concurrency `force-release` -- see [api-reference.md](api-reference.md) for the per-route mapping |
+| `storage.count`   | The cache service's scope: POST `/internal/storage/reserve`, `/internal/storage/commit` and `/internal/storage/release` for any team's cache or logs, POST `/internal/downloads/charge`. It reaches no other route, and only the operator mints it, with `sparkwing cluster tokens create --type service --principal cache --scope storage.count`; no team's token may carry it. The cache reads it from the file `controller-token` in its `--credentials-dir` |
+| `admin`           | tokens / users / secrets CRUD, credit pricing, the sign-up gate's mode and limits, the compute guards, run delete, gitcache registration, and concurrency `force-release` -- see [api-reference.md](api-reference.md) for the per-route mapping |
 
 Scope checks are set membership. `admin` is a superset -- any handler's
 scope check passes if the principal carries `admin` -- except on the
-`credits.grant` routes and the [operator console](#operator-console)'s
-routes, which no admin token reaches.
+[operator console](#operator-console) routes, which require console proof.
 
 A runner needs `nodes.claim`, `triggers.claim` and
 `runs.state`. That set claims work, drives the run it claimed from plan to
@@ -707,21 +825,14 @@ claim:
   request after that answers `403 claim_ended`, or `401` for a dead runner
   token.
 
-A trigger claim token answers `GET /api/v1/secrets/{name}` and
-`POST /api/v1/runs/{id}/source-credential` alone, for the trigger's own run,
-and stops with the trigger claim. The source credential route answers a node
-or trigger claim token and no bearer, so the runner's token fetches no
-source credential (see [Git credentials](git-credentials.md)). The closures the
-run host evaluates after the first plan read the run's declared secrets under
-the trigger claim, which is why the trigger claim reads secrets; the first plan
-gets no node routes. The runner hosts the trigger's run with its own token,
-which never reaches the pipeline's processes.
+A live trigger, plan or job capability uses `source.read` and its run binding
+at `POST /api/v1/runs/{run}/source-credential`. A bare runner root cannot use
+this route. The store checks current enrollment and the machine owner's consent,
+then commits the release audit before decryption. A job loses source access
+when execution starts. Missing or ended credentials receive 401. Live authority
+without the required grant or binding receives 403. See
+[Git credentials](git-credentials.md).
 
-`PUT /pipelines/{name}/profile/pin` is the one `runs.state` write that names a
-pipeline instead of a run, and a pin becomes a hard Kubernetes limit for every
-later run of it. The caller must hold a live claim on some run of that
-pipeline, so a token executing one pipeline cannot pin another's. `admin`
-bypasses, which is what lets a dispatcher pin a pipeline it is not running.
 
 The two reads a node process opens with, `GET /api/v1/runs/{id}` and
 `GET /api/v1/triggers/{id}`, run the ownership check the other way: a caller
@@ -759,15 +870,12 @@ paused, the old write cannot land. An append already accepted by the log
 service remains confined to the old attempt substream rather than entering the
 replacement's log.
 
-The execution view (`GET /api/v1/runs/{id}?include=secret_values`) follows the
-same rule: it returns plaintext argument values to an `admin` principal, or to
-a `nodes.claim` principal holding an unexpired claim on one of the run's nodes.
-A trigger claimant may read the run record but receives redacted secret values
-until it holds a node claim.
-A controller serving unauthenticated returns **plaintext**, because the whole
-API is open in that mode and handing a runner `***` as a real argument value
-would corrupt the run rather than protect it. Once authentication is on, a
-request that carries no principal is refused.
+`GET /api/v1/runs/{run}` always returns display-safe inputs, even when a live
+claim reads it. `include=secret_values` cannot reveal plaintext arguments.
+Missing or invalid classification redacts every value. Execution uses the
+private awarded wire. Status reads require member `runs.read`, or a live
+claim with `source.read` or `trigger.host` bound to the run. Verified local
+authority follows the same policy. Missing or dead credentials receive `401`.
 
 ## Secret ownership
 
@@ -782,52 +890,57 @@ The scope is the pipeline and not the repository, because a run's repository is
 a string its submitter typed: the product grants nothing on it. Two teams may
 name the same repository and it means nothing either way.
 
-`GET /api/v1/secrets/{name}` resolves differently per principal:
+`GET /api/v1/secrets/{name}` uses the shared capability policy. A live member
+or verified local credential with `secrets.read` or `team.admin` reads unmasked
+config within its authenticated team. A masked member read is forbidden.
+`?pipeline=<name>` selects a pipeline row. `?run=<id>` resolves a run within that
+same team. Unknown or dead credentials cannot probe names or selector validity.
 
-- An `admin` principal reads any row. `?pipeline=<name>` selects a pipeline's
-  row, `?run=<id>` selects the pipeline of that run, and without either the
-  unscoped row answers.
-- A `team.admin` principal reads its own team's rows the same way, a
-  management read by name. A masked row answers it `403 write_only`.
-- Any other bearer, a runner's token or a `secrets.read` token included, is
-  answered `403 claim_required`, even while it holds the run's claim: a node
-  reads with its claim token.
-- A claim token (a controller-dispatched work node's, a runner's node claim
-  or a runner's trigger claim) names its own run with `?run=<id>` and reads
-  only a name the run's plan declares, resolved against the run's pipeline
-  and falling back to an unscoped row only when that row is shared. Each
-  release is recorded as a `secret_released` event on the run, naming the
-  node for a node's claim. The pipeline's code declares its secrets, as in GitHub
-  Actions, so push access to the repository is the trust boundary; fork pull
-  requests never run on this path. A plan is refused when a declared name
-  breaks the secret-name grammar, it declares more than 100 names, or a
-  required name resolves to no row the run may read, and a
-  read of an undeclared name is answered `403` `secret_undeclared` and logged
-  as an `audit` record with `event=secret_undeclared` and the claim's token
-  prefix. A team-shared secret is readable by any of the team's opted-in
-  repositories whose pipeline declares its name; scoping a shared secret to
-  chosen repositories is a future feature.
+A live `secrets.release` claim reads only a name its sealed run declares. The
+store resolves the run's pipeline row, falling back to an unscoped row only when
+it is shared, and enforces the row's `only_on` pool. Each release commits its
+`secret_released` event with its authority check. Machine roots and
+operator deployment credentials supply no secret-read authority. A caller's
+team header or query cannot select another tenant.
 
-So one runner token cannot lift another pipeline's deploy credential by asking
-for it by name, a claim reads only its own run's declared secrets, and every
-node read leaves a `secret_released` event. `GET /api/v1/secrets` (the list) and the secret writes
-stay `admin`; the list carries each row's pipeline and shared flag.
+Embedded controllers supply `WithSecretReader` with the authority-bearing tenant
+transaction. Missing adapters return `policy_missing`. The old ClaimToken reader
+cannot provide this contract. The controller decrypts only a returned bound
+envelope, using its authenticated team and stored row access fields. Missing
+bound encryption returns `unavailable`. Invalid or moved envelopes fail without
+values or cipher diagnostics. Responses use `Cache-Control: no-store`.
 
-Token creation validates scopes against that same set: a scope the
-controller does not honor is rejected with a `400` naming the offending
-scope and the valid set, so a typo fails at mint time instead of
-producing a token that authenticates and then fails every scope check.
-A token with no scopes is still legal; it just unlocks nothing.
+Startup never migrates plaintext or pre-team envelopes. Rewrite those rows
+through the authenticated credential API. Explicit key rotation opens only
+bound envelopes and retains unreadable secrets in its skipped list.
 
-Per-endpoint scope annotations live in `pkg/controller/server.go`. If
-you add a new route, annotate it with `requireScope`.
+`GET /api/v1/secrets` requires live member or verified local authority with
+`runs.read` or `team.admin`. It lists only the authenticated team's rows,
+including their pipeline and shared flag. Masked values are omitted. Unmasked
+config values are decrypted with their stored row binding. If a config value
+cannot be opened, the request fails without returning a partial list. Missing
+decryption returns `unavailable`. The response uses `Cache-Control: no-store`.
+Machine roots, claims and bootstraps cannot read the inventory.
 
-`GET /api/v1/auth/whoami` is authenticated by the middleware like any
-other route but carries no scope check, so any valid token can read
-back its own principal, kind, scopes, and prefix. It shows as `public` in
-[api-reference.md](api-reference.md) because that table is generated
-from `requireScope` wrappers -- there, `public` means no scope check,
-not no authentication.
+Secret creation and deletion require live member or verified local authority
+with `team.admin`. Session mutations require CSRF proof. These routes use only
+the authenticated team and return `Cache-Control: no-store`. Secret names must
+pass the shared grammar on every write, including replacement. Masking defaults
+to true. Missing encryption returns `unavailable`, and failed writes return no
+secret value.
+
+Embedded controllers supply `WithCredentialWriter` with transactions that
+recheck authority before commit. A missing or foreign-team writer returns
+`policy_missing`. The legacy tenant writer is not used as a fallback.
+
+`POST /api/v1/tokens` rejects unknown or duplicate grants and caller-selected
+authority fields with `400`. Issuance beyond current grants or expiry is
+refused with `403`. An explicit empty grants array is legal and unlocks
+nothing. Endpoints check the credential's audience, complete grant conjunction,
+resource binding and liveness before entering their handler.
+
+Identity and service discovery use the shared policy described in
+[Credential discovery](#credential-discovery).
 
 ## Teams and sign-in
 
@@ -977,56 +1090,61 @@ secrets.
 
 ### Team tokens
 
-A member mints a team token with `POST /api/v1/team/tokens`, from a signed-in
-session only; a bearer token cannot mint one. The raw token starts `swt_` and
-belongs to the team that minted it. Its `scopes` come from exactly one of two
-families, and a request that mixes them, names an unknown scope or sends an
-empty list answers `400`:
+`POST /api/v1/tokens` accepts `{grants, expires_at?}`. A signed-in account
+session provisions a controller root for its own account and active team.
+A member bearer creates a narrowed child that keeps the bearer's revocation
+ancestry. The request cannot choose a subject, team, origin, metering, pool or
+registration. Cookies require the session-bound CSRF proof.
 
-- A **member** token is for the CLI. Its scopes are a subset of the caller's
-  role scopes without `team.admin`, so a reader's token only reads, and a
-  scope above the caller's role answers `403`. Any member mints one, and the
-  request sends no `name` or `repos`. The token acts as the member and expires
-  90 days after it is minted. A member holds at most 10 live ones in a team.
-  The response carries `token`, `prefix`, `family`, `scopes`, `expires_at`,
-  and the `profile`, `setup` and `run` values the dashboard shows for
-  connecting the CLI.
-- A **machine** token is for a runner. Its scopes are a subset of
-  `nodes.claim`, `triggers.claim` and `runs.state` that includes
-  `nodes.claim` or `triggers.claim`. Minting one
-  needs `editor` (`403` otherwise), and the request names the agent in `name`
-  (1 to 63 letters, digits, `-`, `_` or `.`) and the repositories in `repos`,
-  allowlist patterns that the returned connect `command` passes to the runner.
-  The token's principal is `agent:<name>`, and a name a live machine or runner
-  token already holds answers `409`. It expires once it goes 90 days unused:
-  each use moves its expiry to 90 days past that use, written at most once an
-  hour, and the token list shows when. A team holds at most 100 live machine
-  tokens.
+The transaction checks current membership, grants and expiry. A provisioned
+member root survives the issuing session ending, but loses authority when its
+membership ends. Delegation cannot outlive or exceed its parent. Omitting a
+delegation expiry inherits the parent's expiry. No automatic retry is permitted
+because the raw bearer is returned once.
 
-Token creation uses the role held when the token is written, so a pending
+The response carries `capability`, `prefix`, `team`, `grants` and optional
+`expires_at`. Expiry is an RFC3339 timestamp. The dashboard sends its selected
+member grants to this route. POST `/api/v1/team/tokens` is removed.
+
+`POST /api/v1/runners` enrolls a machine under `team.admin`. The request names
+its `name` (1 to 63 letters, digits, `-`, `_` or `.`), `repos` (1 to 32 host/path
+patterns), optional `reserved_pools`, optional `grants` and optional absolute
+`expires_at`. Omitted grants select `nodes.claim` and `triggers.claim`.
+Explicit grants select a nonempty subset of those two. Work reporting, source,
+secrets and data permissions come from an awarded claim. The authenticated
+team supplies the root's team, and the subject is the named machine.
+
+`POST /api/v1/operator/tokens` provisions a deployment service root under
+`operator.tokens` or a verified operator console session. The request accepts
+`name`, `grants` and optional absolute `expires_at`. Grants select
+`claims.launch`, `operator.limits`, `operator.object_store` or `operator.tokens`.
+The root cannot acquire console powers. Deployment scope has an empty team.
+
+Both routes return `capability`, `prefix`, `team`, `grants` and optional
+RFC3339 `expires_at`. They use the sole transactional issuer and require its
+root-origin policy. Missing policy returns `unavailable`. The policy checks
+registration, identity, repository and pool rights and issuance limits.
+Cookies require CSRF, responses use no-store, and clients must not replay a
+request after losing its one-time bearer. The dashboard's setup command writes
+the bearer to a private file before starting its granted claim loops.
+
+Token issuance uses the role held when the token is written, so a pending
 request cannot restore authority after a demotion. No token minted into a team
 carries `admin`.
 
-`GET /api/v1/team/tokens` answers any member with the tokens they minted, of
-either family, and adds every machine token of the team for an editor or
-owner. Each row names `prefix`, `name`, `family`, `scopes`, `created_by`,
-`created_at`, `expires_at`, `last_used_at` and `git_credentials`.
-`DELETE /api/v1/team/tokens/{prefix}` revokes a token at once: the member who
+`GET /api/v1/tokens` returns capability metadata as described in
+[Capability inventory and rotation](#capability-inventory-and-rotation).
+`GET /api/v1/team/tokens` is removed.
+`DELETE /api/v1/tokens/{token}` revokes a token at once: the member who
 minted it revokes their own, and an owner revokes any machine token. A token
 the caller cannot see answers `404`, and one they see but may not revoke
-answers `403`. An owner releases stored git credentials to a machine with
-`PUT /api/v1/team/tokens/{prefix}/git-credentials` (see
+answers `403`. The machine owner consents to stored git credential release with
+`PUT /api/v1/tokens/{token}/git-credentials` (see
 [Git credentials](git-credentials.md#who-receives-it)).
 
-Removing a member revokes every token they minted in that team, and demoting a
-member to `reader` revokes them too, both in the same step as the role change.
-An owner demoted to `editor` keeps theirs, since a member token already
-carried only the editor's scopes.
-
-CLI tokens (`swu_`) and runner tokens (`swr_`) minted from team settings
-before team tokens existed keep authenticating as they did until they expire
-or are revoked. The same routes list and revoke them, and they count toward
-the 10 member tokens and 100 machine tokens a team may hold.
+Membership changes advance the team auth generation in the same transaction.
+Authentication rechecks the current membership and effective grants. Here
+authority also ends when its requesting parent loses `runs.write`.
 
 ### Linked sign-ins
 
@@ -1141,12 +1259,12 @@ controller with none logs `signup.free_tier_unwired` once at startup and
 treats the free tier as open. Google states no account age, so the age
 check applies to GitHub alone.
 
-The gate's settings need the `admin` scope:
+The gate's settings require a deployment credential with `operator.limits` or an operator-console session. Console writes require CSRF proof:
 
 | Route | Does |
 |-------|------|
-| `GET /api/v1/signups` | the effective state (`open` or `waitlist`) and every reason holding it, the stored mode with its source, reason, setter and time, the free-tier state, the limits, and the counts of users created in the last hour and day and waiting on the list |
-| `PUT /api/v1/signups` | sets `mode` (`open` or `waitlist`, with an optional `reason`) and any of `hourly_limit`, `daily_limit`, `hourly_warn`, `github_min_account_days`, `free_team_members`; fields left out keep their values |
+| `GET /api/v1/operator/signups` | the effective state (`open` or `waitlist`) and every reason holding it, the stored mode with its source, reason, setter and time, the free-tier state, the limits, and the counts of users created in the last hour and day and waiting on the list |
+| `PUT /api/v1/operator/signups` | sets `mode` (`open` or `waitlist`, with an optional `reason`) and any of `hourly_limit`, `daily_limit`, `hourly_warn`, `github_min_account_days`, `free_team_members`; fields left out keep their values |
 
 The operator lists and admits waitlisted users from the
 [operator console](#operator-console)'s Waitlist tab, which no token reaches.
@@ -1171,20 +1289,15 @@ alert fires before anyone is waitlisted. It logs `signup.gate_closed` and counts
 `sparkwing_signups_total` counts every new user by outcome and reason, with
 waitlisted users admitted by invitation under `admitted`/`invitation`. Alert on
 any increase in the closure counter, on the warning counter, on
-`signup.free_tier_unreadable`, and on `GET /api/v1/signups` answering
+`signup.free_tier_unreadable`, and on `GET /api/v1/operator/signups` answering
 `"state": "waitlist"`.
 
 ## Unauthenticated endpoints
 
-Routes registered on the controller's outer router are matched before
-the auth middleware runs, so they are open regardless of auth config:
-the health probe (k8s httpGet probes can't carry `Authorization`), the
-service-discovery endpoint
-the runner uses to find the cache pod, the session endpoints a client
-uses to validate and end a session (`/api/v1/auth/session`,
-`/api/v1/auth/logout`), the capabilities report a
-signed-out dashboard draws its sign-in page from, and the GitHub webhook,
-which is HMAC-verified instead of bearer-authenticated. The sign-in pages
+The health probe and capabilities report need no credential. The GitHub
+webhook verifies its HMAC, and the Stripe webhook verifies its signed body.
+Session renewal and logout verify their own session proof through the shared
+route policy. Their outer-router placement grants no public access. The sign-in pages
 (`/login`, `/auth/{provider}/start` and `/auth/{provider}/callback`) and the
 dashboard bundle's static assets need no session either. The controller's
 `/metrics` is not among them: its run counters name every team's
@@ -1200,6 +1313,32 @@ principal and scopes as it does for an `Authorization: Session` credential.
 The cookie authenticates only a request that carries no `Authorization`
 header of its own. CLI and automation clients authenticate with a bearer
 through a profile.
+
+`GET /api/v1/auth/session` accepts a live account session from one session
+cookie or one `Authorization: Session <id>` header. An Authorization header
+takes precedence over cookies. Duplicate headers, duplicate session cookies,
+unknown or ended sessions and HEAD are refused. The response includes the
+current role, narrowed scopes, session-bound CSRF token and renewed expiry.
+Renewal cannot extend the absolute session lifetime. A disabled account-session
+license or failed proof cannot renew the session.
+
+`POST /api/v1/auth/logout` takes no body. It ends only the presented session,
+requires the session's CSRF header and cookie plus same-origin proof, and
+clears the browser cookies on success. A body or query parameter cannot select
+another session. Both endpoints return `Cache-Control: no-store` and the
+canonical error envelope. Session-key and deletion failures return `unavailable`.
+
+Other policy routes accept the same Session header or one session cookie and
+check the configured absolute lifetime without renewing. A malformed header
+cannot fall back to a cookie. Dashboard requests reach that proof boundary
+before session renewal, so a failed CSRF check cannot extend a live session.
+
+The browser form posts to `POST /logout`. It requires a live session and a
+`csrf_token` field matching both the CSRF cookie and the stored session, plus
+same-origin proof. It deletes only that session, clears its browser cookies and
+redirects to `/login`. It never renews before checking proof. Refusals use the
+canonical error envelope. An unavailable session returns `401`; a key or
+deletion failure returns `503` and leaves the cookies in place.
 
 ## Dashboard authorization
 
@@ -1236,10 +1375,19 @@ origin: `GET /auth/<provider>/start` creates a state and a PKCE verifier,
 keeps the provider, state, verifier and return path in a ten-minute
 `__Host-sw_oauth` cookie (`Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`), and
 redirects to the provider. The provider returns to
-`GET /auth/<provider>/callback`, which refuses a callback whose `state` does
-not match that cookie or whose provider is not the one the flow started with,
-then redeems the code and sets the session cookies. Any other provider name
-answers `404`.
+`GET /auth/<provider>/callback`. Both routes use the shared policy router's
+browser proof. Callback requires one flow cookie, the matching provider and
+one matching state. It accepts one code or a provider refusal. Duplicate
+selectors and unsupported methods fail before provider access. A valid code
+is redeemed with that flow's verifier before the controller creates a session
+and sets its cookies. Refused proofs preserve the flow. Any other provider
+name answers `404`.
+
+Refusals use the common error envelope and `Cache-Control: no-store`.
+An invalid or replayed code returns `401`, an unverified email returns `403`,
+and a provider or session backend failure returns `503`. The existing login
+budgets return `429` with `Retry-After`. HEAD returns `405`. Error responses
+and audit records omit codes, verifiers, access tokens and provider diagnostics.
 
 Register `https://<console-host>/auth/<provider>/callback` as the OAuth
 client's redirect URI (the authorization callback URL on GitHub), and list it
@@ -1299,7 +1447,8 @@ argon2 memory bound.
 
 The sign-in and logout forms carry a CSRF token in both a
 `SameSite=Strict` cookie and a hidden field. The controller rejects a missing,
-cross-origin, or mismatched token with `403` before it checks a credential.
+cross-origin, or mismatched token with `403`. Logout checks the live session
+before returning form errors.
 Unsafe API requests (`POST`, `PUT`, `PATCH`, and `DELETE`) that the session
 cookie authenticates also require a same-origin request whose `X-CSRF-Token`
 header matches both the browser's CSRF cookie and the live session.
@@ -1509,9 +1658,10 @@ every request and the dashboard resolves the session on every protected
 request, so deleting a session or a user logs that browser out on its
 next request.
 
-A session expires seven days after its last use. Each successful use renews
-that term, but never past 30 days from creation. Reaching that age deletes the
-row and answers `401`, so the browser signs in again. An embedder changes the cap with
+A session renewal extends expiry by seven days, but never past 30 days from
+creation. Ordinary policy reads and writes check that lifetime without
+renewing. The renewal endpoint refuses an over-age or future-created session
+and removes its row. An embedder changes the cap with
 `controller.Server.WithSessionMaxLifetime`.
 
 ## When a runner's token dies
