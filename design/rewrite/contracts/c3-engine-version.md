@@ -29,13 +29,13 @@ locally built entries separate from the retired remote binary path. TypeScript
 returns Node and its main file. Native tool diagnostics pass through the shared
 proxy masker. The hidden CLI route skips update and version-state startup hooks.
 
-`internal/engine/npmcmd.Command` constructs npm argv for installation, upgrades
+`internal/pipelineentry.NPMCommand` constructs npm argv for installation, upgrades
 and cache-directory queries. Windows command shims use Node with the installed
 npm-cli.js. Native npm executables and Unix npm keep their direct invocation.
 Arguments never pass through a shell. Callers supply the environment and run
 through gotoolchain.Run so cancellation reaches the existing process group.
-`npmcmd.ForPlatform` accepts the host's captured executable lookup for job cache
-queries. It uses the same argv builder without consulting an ambient PATH.
+The same function accepts the host's captured executable lookup for job cache
+queries, without consulting an ambient PATH.
 Upgrade tools also receive procenv.Install with its proxy masker, and errors
 mask captured diagnostics before returning them.
 The Windows layout follows [npm's launcher](https://github.com/npm/cli/blob/latest/bin/npm.cmd).

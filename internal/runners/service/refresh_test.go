@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,6 +12,56 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/runners/service/unitfile"
 )
+
+func FuzzRefreshPreservesInstalledSettings(f *testing.F) {
+	f.Add(false, []byte("credentials $USER 100%"))
+	f.Add(true, []byte("credentials $USER 100%"))
+	f.Fuzz(func(t *testing.T, darwin bool, value []byte) {
+		exec := &fakeExec{}
+		makeHost := linuxHost
+		if darwin {
+			makeHost = darwinHost
+		}
+		h := makeHost(t, exec)
+		state, err := Install(t.Context(), h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := os.ReadFile(state.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		setting := "$USER 100% " + hex.EncodeToString(value)
+		args := []string{h.Binary, "start", "--config", filepath.Join(h.Home, "superseded.yaml"), "--config", h.ConfigPath, "--repos", "github.com/team/*", "--checkout", filepath.Join(h.Home, setting), "--output", "plain"}
+		installed, err := unitfile.RewriteCommand(h.GOOS, string(body), args, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		policy := "Environment=" + unitfile.Assignment("CUSTOM_SETTING", setting) + "\nRestartSec=17\n"
+		if darwin {
+			policy = "<key>CustomSetting</key><string>" + unitfile.XMLText(setting) + "</string>"
+			installed = strings.Replace(installed, "</dict>\n</plist>", policy+"</dict>\n</plist>", 1)
+		} else {
+			installed += policy
+		}
+		if err := os.WriteFile(state.Path, []byte(installed), 0600); err != nil {
+			t.Fatal(err)
+		}
+		h.Binary = filepath.Join(h.Home, "updated $USER 100%", "sparkwing-runner")
+		state, err = Refresh(t.Context(), h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		updated, err := os.ReadFile(state.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		args[0] = h.Binary
+		if !slices.Equal(unitfile.Arguments(h.GOOS, string(updated)), args) || !strings.Contains(string(updated), policy) || state.Binary != h.Binary || !slices.Equal(state.Arguments, args[1:]) {
+			t.Fatalf("refresh discarded installed settings: state=%+v body=%s", state, updated)
+		}
+	})
+}
 
 func TestRefreshLeavesForeignAndOtherRegistrationsUntouched(t *testing.T) {
 	for _, fixture := range []struct {

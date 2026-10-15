@@ -13,39 +13,47 @@ import (
 
 // Inspect reads the registration command and configuration without contacting its service manager.
 func Inspect(ctx context.Context, h Host) (State, error) {
+	state, _, err := inspect(ctx, h)
+	return state, err
+}
+
+func inspect(ctx context.Context, h Host) (State, string, error) {
 	if err := ctx.Err(); err != nil {
-		return State{}, err
+		return State{}, "", err
 	}
 	path, err := registrationPath(h)
 	if err != nil {
-		return State{}, err
+		return State{}, "", err
 	}
-	existing, err := readManaged(path)
+	body, exists, managed, err := unitfile.Read(path, Marker)
 	if err != nil {
-		return State{}, err
+		return State{}, "", err
 	}
-	if existing.foreign() {
-		return foreignState(path), nil
+	if exists && !managed {
+		return foreignState(path), body, nil
 	}
-	state := State{Path: path, Installed: existing.exists}
-	if !existing.exists {
-		return state, nil
+	state := State{Path: path, Installed: exists}
+	if !exists {
+		return state, body, nil
 	}
-	args := unitfile.Arguments(h.GOOS, existing.body)
+	args := unitfile.Arguments(h.GOOS, body)
 	if len(args) < 2 || !filepath.IsAbs(args[0]) {
-		return state, fmt.Errorf("runner service: unreadable command in %s", path)
+		return state, body, fmt.Errorf("runner service: unreadable command in %s", path)
 	}
 	state.Binary, state.Arguments = args[0], slices.Clone(args[1:])
-	if config := configArgument(args); !sameConfig(config, h.ConfigPath) {
+	if config := configArgument(args); config == "" || config != h.ConfigPath {
 		state.Mismatch = true
-		state.Detail = mismatchState(path, config, h.ConfigPath).Detail
+		if config == "" {
+			config = "(none it could read)"
+		}
+		state.Detail = fmt.Sprintf("%s runs the runner config %s, not %s, so sparkwing left it alone", path, config, h.ConfigPath)
 	}
-	return state, nil
+	return state, body, nil
 }
 
 // Refresh updates a matching registration and restarts it if active, from outside the service.
 func Refresh(ctx context.Context, h Host) (State, error) {
-	state, err := Inspect(ctx, h)
+	state, body, err := inspect(ctx, h)
 	if err != nil {
 		return state, err
 	}
@@ -71,10 +79,14 @@ func Refresh(ctx context.Context, h Host) (State, error) {
 	if err != nil {
 		return state, err
 	}
-	if err := h.writeRegistration(state.Path); err != nil {
+	body, err = unitfile.RewriteCommand(h.GOOS, body, append([]string{h.Binary}, state.Arguments...), unitfile.Version(body))
+	if err != nil {
 		return state, err
 	}
-	state.Binary, state.Arguments = h.Binary, []string{"start", "--config", h.ConfigPath}
+	if err := unitfile.Write(state.Path, body); err != nil {
+		return state, err
+	}
+	state.Binary = h.Binary
 	if h.GOOS == "linux" {
 		if err := runCommand(ctx, h, "systemctl", "--user", "daemon-reload"); err != nil {
 			return state, err

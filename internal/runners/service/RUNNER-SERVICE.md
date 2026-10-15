@@ -54,7 +54,10 @@ A job renewal cannot report execution before its start transition commits.
 `Inspect` reads the executable and arguments from the actual registration.
 It uses the runner's shared parser to identify the effective config, including
 repeated flags and values that resemble flags.
-`Refresh` preserves the config path while updating the executable and command.
+`Refresh` replaces the executable in the installed command. It preserves all
+arguments, including repository overrides and repeated config flags, and keeps
+the unit's environment, log paths and native policy. Inspection, refresh and
+uninstall share one registration reader and config check.
 An absent registration stays absent. Linux reloads systemd and uses
 `try-restart`, which leaves stopped services stopped. macOS reloads only an
 agent whose launchd state is running. An inactive agent's updated file takes

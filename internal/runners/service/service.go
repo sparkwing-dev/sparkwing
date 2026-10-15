@@ -99,11 +99,11 @@ func Install(ctx context.Context, h Host) (State, error) {
 	if err := requireHost(h); err != nil {
 		return State{}, err
 	}
-	existing, err := readManaged(path)
+	_, exists, managed, err := unitfile.Read(path, Marker)
 	if err != nil {
 		return State{}, err
 	}
-	if existing.foreign() {
+	if exists && !managed {
 		return foreignState(path), foreignError(path)
 	}
 	loaded, _, err := h.registration(ctx, path)
@@ -138,28 +138,18 @@ func Install(ctx context.Context, h Host) (State, error) {
 
 // Uninstall stops and removes the managed registration for this configuration.
 func Uninstall(ctx context.Context, h Host) (State, error) {
-	if err := ctx.Err(); err != nil {
-		return State{}, err
-	}
-	path, err := registrationPath(h)
+	state, err := Inspect(ctx, h)
 	if err != nil {
-		return State{}, err
+		return state, err
 	}
-	existing, err := readManaged(path)
-	if err != nil {
-		return State{}, err
-	}
-	if existing.foreign() {
-		return foreignState(path), nil
-	}
-	state := State{Path: path, Detail: "no sparkwing runner service is installed here"}
-	if !existing.exists {
+	if state.Foreign || state.Mismatch {
 		return state, nil
 	}
-	if other := configArgument(unitfile.Arguments(h.GOOS, existing.body)); !sameConfig(other, h.ConfigPath) {
-		return mismatchState(path, other, h.ConfigPath), nil
+	state.Detail = "no sparkwing runner service is installed here"
+	if !state.Installed {
+		return state, nil
 	}
-	loaded, _, err := h.registration(ctx, path)
+	loaded, _, err := h.registration(ctx, state.Path)
 	if err != nil {
 		return State{}, err
 	}
@@ -172,9 +162,10 @@ func Uninstall(ctx context.Context, h Host) (State, error) {
 	} else if loaded {
 		stopErr = runCommand(ctx, h, "launchctl", "bootout", h.serviceTarget())
 	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return state, errors.Join(stopErr, fmt.Errorf("runner service: remove %s: %w", path, err))
+	if err := os.Remove(state.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return state, errors.Join(stopErr, fmt.Errorf("runner service: remove %s: %w", state.Path, err))
 	}
+	state.Installed = false
 	state.Detail = "the sparkwing runner service is stopped and removed"
 	if stopErr != nil {
 		state.Detail = "the registration is removed but the service manager failed to stop it"
@@ -273,19 +264,6 @@ func unsupported(goos string) error {
 	return fmt.Errorf("runner service: %s: %w", goos, ErrUnsupported)
 }
 
-type managed struct {
-	exists bool
-	ours   bool
-	body   string
-}
-
-func (m managed) foreign() bool { return m.exists && !m.ours }
-
-func readManaged(path string) (managed, error) {
-	body, exists, ours, err := unitfile.Read(path, Marker)
-	return managed{body: body, exists: exists, ours: ours}, err
-}
-
 func foreignState(path string) State {
 	return State{Path: path, Foreign: true, Detail: fmt.Sprintf("%s exists but sparkwing did not write it, so sparkwing will not touch it", path)}
 }
@@ -322,25 +300,6 @@ func notLoaded(out string) bool {
 		}
 	}
 	return false
-}
-
-// safety: an empty parse means the file names no config, which no comparison can clear.
-func sameConfig(found, want string) bool {
-	return found != "" && found == want
-}
-
-func mismatchState(path, found, want string) State {
-	return State{
-		Path: path, Installed: true, Mismatch: true,
-		Detail: fmt.Sprintf("%s runs the runner config %s, not %s, so sparkwing left it alone", path, describeConfig(found), want),
-	}
-}
-
-func describeConfig(found string) string {
-	if found == "" {
-		return "(none it could read)"
-	}
-	return found
 }
 
 func configArgument(words []string) string {
