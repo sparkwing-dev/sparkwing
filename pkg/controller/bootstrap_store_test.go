@@ -50,4 +50,18 @@ func TestBootstrapSeedStoreOnceProperty(t *testing.T) {
 	if ready, err := e.Store.HasDeploymentAdministrator(t.Context()); err != nil || ready {
 		t.Fatalf("revoked administrator remains ready: %v, %v", ready, err)
 	}
+	t.Run("administrator without marker", func(t *testing.T) {
+		e, _ := engineRuntimeStore(t)
+		if created, err := EnsureBootstrapAdminToken(t.Context(), e.Store, initial); err != nil || !created {
+			t.Fatalf("initial administrator: created=%v err=%v", created, err)
+		}
+		engineSQL(t, e.Store, `DELETE FROM settings WHERE key='bootstrap_capability_issued'`)
+		raw := capability.ControllerPrefix + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+		if created, err := EnsureBootstrapAdminToken(t.Context(), e.Store, raw); err != nil || created {
+			t.Fatalf("second administrator without marker: created=%v err=%v", created, err)
+		}
+		if _, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(raw))); err == nil {
+			t.Fatal("seed became authority while an administrator already existed")
+		}
+	})
 }
