@@ -14,6 +14,13 @@ projection. It follows controller pagination and reports history-read failures.
 Each pipeline shows the status of its latest admitted run. A queued run has no
 start time until execution starts.
 
+The old orchestrator run-list, status, log, summary and timeline readers are
+removed with their direct SQLite/profile backend factories and standalone-store
+merge paths. Use the shared controller projections through `NewRunReader` and
+`NewLogReader`. `Client.ListRuns` and `Client.ListApprovalsForRun` are removed.
+`storeurl.OpenStateStoreFromSpec` and `backend.ClientBackend` are removed.
+The unused warm-runner cache sweep is removed with its old listing dependency.
+
 ## Sealed step selections
 
 `--sw-start-at`, `--sw-stop-at` and `--sw-only` enter the request seal as
@@ -1385,7 +1392,7 @@ kept for S3 and Postgres state profiles.
   `Surfaces.BinaryCache` and `Spec.URLSource` and adds
   `MigrationGuideURL`. `stdoutlogs.CheckSpec` drops its `urlSource`
   parameter.
-  `storeurl.OpenStateStoreFromSpec` opens `sqlite` and `controller` only.
+  `storeurl.OpenStateStoreFromSpec` is removed.
   `pkg/localws` drops `Options.NoLocalStore`. `pkg/pipelines` drops
   `KindProfileName` and `GuardContext.ProfileName`.
 

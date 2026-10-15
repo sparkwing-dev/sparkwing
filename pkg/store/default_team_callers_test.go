@@ -17,8 +17,6 @@ const (
 	defaultTeamState    = "the laptop and admission-daemon state backend, whose runs and triggers are created through Store.CreateRun and the unbound local claim, so every row it touches is the default team's"
 	defaultTeamConsumer = "the local trigger consumer claims through ClaimNextTrigger, whose unbound claimant reaches only the default team's queue, so every trigger it settles is the default team's"
 	defaultTeamWorktree = "ref worktrees and submission environments exist only for triggers the local consumer claimed, which are the default team's"
-	defaultTeamStores   = "finds and reads runs in the laptop's own state databases, where every run is the default team's"
-	defaultTeamView     = "a local run view over the laptop's state database, where every run is the default team's"
 	defaultTeamBackend  = "the store backend serves one install's runs in the default team, as its ListRuns already does; a multi-team deployment serves its dashboard through the controller backend"
 	defaultTeamSecrets  = "local secrets live in the laptop's state database under the default team"
 )
@@ -32,7 +30,6 @@ var defaultTeamCallers = map[string]string{
 	"internal/backend.(*StoreBackend).ListEventsAfter":                 defaultTeamBackend,
 	"internal/backend.(*StoreBackend).ListNodes":                       defaultTeamBackend,
 	"internal/localsecrets.(*storeSource).read":                        defaultTeamSecrets,
-	"internal/orchestrator.(*StandaloneStores).Find":                   defaultTeamStores,
 	"internal/orchestrator.(consumerRuntime).shouldExit":               defaultTeamConsumer,
 	"internal/orchestrator.(localState).AcknowledgeNodeExecutionStart": defaultTeamState,
 	"internal/orchestrator.(localState).AddNodeMetricSample":           defaultTeamState,
@@ -68,26 +65,13 @@ var defaultTeamCallers = map[string]string{
 	"internal/orchestrator.(localState).StartNodeStep":                 defaultTeamState,
 	"internal/orchestrator.(localState).UpdateNodeActivity":            defaultTeamState,
 	"internal/orchestrator.(localState).UpdateNodeDeps":                defaultTeamState,
-	"internal/orchestrator.JobErrors":                                  defaultTeamView,
-	"internal/orchestrator.JobLogs":                                    defaultTeamView,
-	"internal/orchestrator.JobStatus":                                  defaultTeamView,
-	"internal/orchestrator.OpenStoreForRun":                            defaultTeamStores,
-	"internal/orchestrator.OpenStoreForRunWrite":                       defaultTeamStores,
 	"internal/orchestrator.ReconcileSubmissionEnvironments":            defaultTeamWorktree,
-	"internal/orchestrator.RunSummaryLocal":                            defaultTeamView,
-	"internal/orchestrator.RunTimeline":                                defaultTeamView,
 	"internal/orchestrator.cancelClaimedTriggerIfRequested":            defaultTeamConsumer,
 	"internal/orchestrator.cleanupRefWorktree":                         defaultTeamWorktree,
 	"internal/orchestrator.finishCancelledClaimedTrigger":              defaultTeamConsumer,
 	"internal/orchestrator.finishClaimedTriggerFailure":                defaultTeamConsumer,
-	"internal/orchestrator.followFromEnvelope":                         defaultTeamView,
-	"internal/orchestrator.followLogs":                                 defaultTeamView,
 	"internal/orchestrator.refWorktreeTriggerSettled":                  defaultTeamWorktree,
-	"internal/orchestrator.renderStatus":                               defaultTeamView,
-	"internal/orchestrator.runningNodeDetail":                          defaultTeamView,
 	"internal/orchestrator.settleClaimedTriggerDispatch":               defaultTeamConsumer,
-	"internal/orchestrator.writeLogsTreeLocal":                         defaultTeamView,
-	"internal/orchestrator.writeRunDetailJSON":                         defaultTeamView,
 	"pkg/localws.cronRunStatus":                                        defaultTeamCrons,
 }
 

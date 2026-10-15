@@ -6,25 +6,29 @@ import (
 	"net/http"
 	"net/http/httptest"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func ExampleClient_ListRuns() {
+func ExampleNewRunReader() {
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"runs":[{"id":"run-1","pipeline":"build","status":"success"}]}`)
+		fmt.Fprint(w, `{"runs":[{"id":"run-1","inputs":{"pipeline":"build"},"status":"success"}]}`)
 	}))
 	defer mock.Close()
 
-	c := client.New(mock.URL, nil)
-	runs, err := c.ListRuns(context.Background(), store.RunFilter{})
+	c, err := client.NewRunReader(client.EngineOptions{URL: mock.URL})
+	if err != nil {
+		fmt.Println("client:", err)
+		return
+	}
+	page, err := c.ListRuns(context.Background(), controllerwire.RunQuery{})
 	if err != nil {
 		fmt.Println("list:", err)
 		return
 	}
-	for _, r := range runs {
-		fmt.Printf("%s %s %s\n", r.ID, r.Pipeline, r.Status)
+	for _, r := range page.Runs {
+		fmt.Printf("%s %s %s\n", r.ID, r.Inputs.Pipeline, r.Status)
 	}
 	// Output: run-1 build success
 }

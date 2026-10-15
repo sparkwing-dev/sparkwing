@@ -66,7 +66,7 @@ func startWingdCfg(t *testing.T, cfg wingd.Config) {
 				if err != nil {
 					return false, err
 				}
-				return isTerminalStatus(run.Status), nil
+				return (run.Status == "success" || run.Status == "failed" || run.Status == "cancelled"), nil
 			},
 			Finalize: func(id string) {
 				if err := st.FinishRunsIfActive(ctx, []string{id}, "cancelled", "admission connection lost"); err != nil {

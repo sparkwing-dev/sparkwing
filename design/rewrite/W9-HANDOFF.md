@@ -1,5 +1,123 @@
 # W9 handoff
 
+## This continuation (session 15)
+
+Started at 862a1e1a8 with a clean worktree. This section supersedes conflicting
+status below. W9 remains incomplete. The lead owns commits, review, pipelines,
+native QA and release/publication.
+
+### Changes and deletions
+
+Deleted the unused orchestrator run-list, status, log, summary and timeline
+commands. The CLI already calls the final controller readers. Deleted their
+pagination, pivot, rendering, raw/SSE log readers and standalone-store merge
+code, plus the old direct SQLite/profile reader factories. Removed the now
+unreachable ClientBackend, FromSpecs and OpenStateStoreFromSpec paths. Removed
+the unused warm-runner cache sweep and its TerminalRunLister dependency.
+
+Deleted Client.ListRuns, its old filter-version negotiation and duplicate query
+encoding, and Client.ListApprovalsForRun. The example uses NewRunReader. The
+remaining controller approval-test caller uses NewRunReview.ListApprovals and
+the public job_id projection. There is no forwarding alias or test-only shim.
+The retained host state resolver, excerpt writer and store backend remain.
+
+Moved ParseLooseDate and its four date/lookback tests to internal/clisurface.
+runs_list.go calls that owner. Deleted the rest of the unused client-side run
+filter. The existing wingd end-to-end test checks its terminal status directly
+instead of retaining the old CLI's helper. Doctor's comment no longer names the
+deleted profile factory.
+
+This pass deletes 48 files, including 16 production Go files. Net production Go
+change is -4,939 lines across touched files: 42 added and 4,981 removed. The W9
+path budget is -5,612 production lines against main, within its -2,900 target.
+Most deletions in this pass are old CLI implementations under orchestrator,
+which the lead's path-based budget counts under W3. No run-host implementation
+was replaced or removed in this continuation.
+
+The store-caller inventory initially reported 14 entries for the removed paths.
+Those entries and their two unused rationale constants are deleted. The real
+inventory check passes. No new default-team exemption was added.
+
+### Verification
+
+All Go commands used GOWORK=off, GOFLAGS=-buildvcs=false,
+GOCACHE=/tmp/sw-gocache, TMPDIR/GOTMPDIR under /tmp/sw-astra-W9 and -p 4.
+
+- Whole-repository go build passes.
+- Scoped vet passes for CLI, client, clisurface, orchestrator, backend, storeurl,
+  storage and opsview.
+- Focused CLI listing/status/log, local-run, lifecycle, schedule and release
+  tests pass. Final client engine, run-reader/query, log-reader and secret-manager
+  component tests pass.
+- Existing TestSurface* and TestEngine* acceptance components pass.
+- Full clisurface, controllerwire, doccheck, apiref and apispec suites pass.
+- Retained local-backend resolver tests pass. Changed/dependent package test
+  compilation passes, including controller and the migrated approval caller.
+- TypeScript Windows bridge assembly/publication tests and publication fuzz
+  seeds pass in bin. Packaging was already implemented and needed no changes.
+- The default-team caller inventory, commentcheck, whitespace and embedded
+  migration/changelog mirror checks pass. Client/storeurl API snapshots are
+  regenerated.
+
+No native acceptance cell was enabled, and no archived T1 port was completed.
+The four moved parser tests retain existing coverage. Obsolete tests exercise
+only deleted implementations and are removed with them. Existing final CLI
+suites cover listing, pagination, safe views, timelines, summaries and log
+following. This is component evidence. Full legacy suites, HTTP/api.sock,
+Windows/Darwin execution, Docker/Kubernetes and real-repository QA remain unrun.
+No operational Sparkwing binary, pipeline, installer or release ran.
+
+### Remaining assignments and real integration
+
+The session-14 assignment audit below still governs unfinished work, except
+that the old read/backend graph and storeurl/spec.go are now deleted.
+The remaining legacy Client graph is rooted in W3's StateStoreOld/
+RunCoordination, trigger_host.go, run_node.go, backends.go and hosted_backends.go.
+Raw queued claims additionally have legacy W2/W3 fixture callers. They remain.
+Priority (1) is incomplete.
+
+W9 must finish native local-services construction against wingd.LocalController,
+source/environment capture, selected-engine host composition, per-process
+credentials, authorized data/log/result bindings, here resume and publication.
+W2's elected LocalController factory and W3's full remote NativeHostStore
+implementation remain real-integration points. The current contract adapters
+and fakes do not establish native execution. Schedule checkout/environment/
+proof/pin, timer/tick/dry-run, debug-release policy/acknowledgement and authorized
+publication remain open as recorded below. Publication must preserve the local
+verdict after an upload failure.
+
+No foreign contract change was made. Existing contract requests remain open.
+The Windows packaging handoff is implemented and reverified locally. Native
+Windows execution and actual publication remain CI/lead evidence.
+
+### Shared files and friction
+
+Shared production deletions in internal/orchestrator:
+jobs_cli.go, jobs_cli_remote.go, jobs_cli_logs_backend.go, runs_summary.go,
+runs_timeline.go, runs_page.go, runs_pivot.go, status_pretty.go, log_tail.go,
+run_stores.go, runs_filter.go, read_backend.go and warmgc.go.
+Shared production edits there: profile_backend.go and failure_excerpt.go.
+Shared backend changes: internal/backend/client_backend.go and from_specs.go
+are deleted, and completeness.go drops only the deleted receiver.
+Shared storage changes: pkg/storage/storeurl/spec.go is deleted and
+pkg/storage/state.go drops obsolete factory documentation.
+Other shared changes: internal/opsview/doctor.go removes the stale comment,
+internal/orchestrator/wingd_e2e_test.go removes its old helper dependency,
+pkg/controller/approvals_test.go migrates one reader call, and
+pkg/store/default_team_callers_test.go removes the 14 stale entries.
+Associated obsolete tests are deleted beside those implementations.
+CHANGELOG.md, both generated documentation mirrors and the client/storeurl API
+snapshots are updated. Lead-owned handoffs/amendments files are untouched.
+
+Assumption: the final controller readers replace the unreachable CLI readers.
+The old exports have no production callers. No customer command or flag was
+removed in this pass. No new runtime mechanism, option or limit was added.
+
+Friction: a controller test still called the removed approval method and was
+caught by the direct-dependent compilation check, then migrated. Broader native
+verification remains with the lead under the swarm brief. No Git writes.
+Session scratch is removed. The shared build cache is retained.
+
 Session 14 starts at edc98d9d4 with a clean worktree. This report supersedes
 conflicting status below. W9 remains incomplete. The lead owns Git writes,
 independent review, pipelines, native QA and release/publication.

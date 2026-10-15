@@ -22,6 +22,9 @@ unlock.
 
 ### Changed
 
+- **cli client (Breaking):** Remove the unused orchestrator run readers and their direct store/profile wiring
+  Run listing, status, logs, summaries and timelines use the CLI's shared controller projections. The obsolete standalone-store merge path, warm-cache sweep, `Client.ListRuns`, `Client.ListApprovalsForRun`, `backend.ClientBackend` and `storeurl.OpenStateStoreFromSpec` are removed. See [migration guide](docs/migrations/_unreleased.md#cli-client-retirement).
+
 - **cli + controller/client (Breaking):** Repository pipeline history uses the local controller's public run projection, and unused launcher, source-credential and unpositioned log-write client APIs are removed
   History reads follow pagination and fail loudly. Here hosting preserves the controller-awarded runner identity. Run deletion uses `NewRunPruner` and its persistence receipt. The unused CLI supervisor-stop path and duplicate parsers/renderers are removed. See [migration guide](docs/migrations/_unreleased.md#cli-client-retirement).
 - **runner enrollment (Breaking):** `NewRunnerTokenManager` replaces `Client.EnrollRunner`, and service issuance uses `NewTokenManager` instead of `Client.CreateServiceToken`. Enrollment uses the shared authenticated transport without replaying one-time credentials. `runners add --reserved-for` forwards pool proposals to team-admin registration. See [migration guide](docs/migrations/_unreleased.md#root-provisioning).

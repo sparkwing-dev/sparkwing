@@ -7,18 +7,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// StateStoreOld is the run-record store: runs, nodes, steps, annotations,
-// approvals, debug pauses, and the schema migrations the
-// orchestrator depends on.
-//
-// A profile's state is opened from a backends.Spec via
-// pkg/storage/storeurl.OpenStateStoreFromSpec, which selects the
-// SQLite-backed *store.Store or the controller HTTP client by spec type;
-// a controller opens its SQLite or Postgres *store.Store directly.
-// Methods whose wrappers add
-// adapter logic on top of the store (output extraction, trigger
-// cycle detection) live on the orchestrator's runtime interface that
-// embeds this one, not here.
+// StateStoreOld supplies the legacy orchestrator state operations.
 type StateStoreOld interface {
 	// Lifecycle.
 	Close() error

@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -72,130 +71,6 @@ func (c *Client) Close() error { return nil }
 
 func (c *Client) CreateRun(ctx context.Context, r store.Run) error {
 	return c.post(ctx, "/api/v1/runs", r, http.StatusCreated, nil)
-}
-
-// ListRuns fetches recent runs filtered by f. Mirrors store.ListRuns.
-func (c *Client) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run, error) {
-	q := url.Values{}
-	if len(f.Pipelines) > 0 {
-		q.Set("pipeline", strings.Join(f.Pipelines, ","))
-	}
-	if len(f.Statuses) > 0 {
-		q.Set("status", strings.Join(f.Statuses, ","))
-	}
-	if len(f.GitSHAPrefixes) > 0 {
-		q.Set("git_sha", strings.Join(f.GitSHAPrefixes, ","))
-	}
-	if len(f.GitBranches) > 0 {
-		q.Set("git_branch", strings.Join(f.GitBranches, ","))
-	}
-	if len(f.DeclaredRepos) > 0 {
-		q.Set("repo", strings.Join(f.DeclaredRepos, ","))
-	}
-	if len(f.RepoURLs) > 0 {
-		q.Set("repo_url", strings.Join(f.RepoURLs, ","))
-	}
-	for param, values := range map[string][]string{
-		"exclude_pipeline":       f.ExcludePipelines,
-		"exclude_status":         f.ExcludeStatuses,
-		"exclude_git_sha":        f.ExcludeGitSHAPrefixes,
-		"exclude_git_branch":     f.ExcludeGitBranches,
-		"trigger_source":         f.TriggerSources,
-		"exclude_trigger_source": f.ExcludeTriggerSources,
-		"repo_name":              f.RepoNames,
-		"exclude_repo_name":      f.ExcludeRepoNames,
-	} {
-		if len(values) > 0 {
-			q.Set(param, strings.Join(values, ","))
-		}
-	}
-	if f.RootOnly {
-		q.Set("root_only", "true")
-	}
-	if !f.Since.IsZero() {
-		q.Set("since", time.Since(f.Since).String())
-	}
-	for param, t := range map[string]time.Time{
-		"started_before":  f.StartedBefore,
-		"finished_after":  f.FinishedAfter,
-		"finished_before": f.FinishedBefore,
-	} {
-		if !t.IsZero() {
-			q.Set(param, t.UTC().Format(time.RFC3339Nano))
-		}
-	}
-	if search := runSearchQuery(f.Text, f.ExcludeText); search != "" {
-		q.Set("q", search)
-	}
-	if f.Limit > 0 {
-		q.Set("limit", fmt.Sprintf("%d", f.Limit))
-	}
-	if f.HasCursor() {
-		q.Set("after_started_at", fmt.Sprintf("%d", f.AfterStartedAt))
-		q.Set("after_id", f.AfterID)
-	}
-	if f.HasBeforeCursor() {
-		q.Set("before_started_at", fmt.Sprintf("%d", f.BeforeStartedAt))
-		q.Set("before_id", f.BeforeID)
-	}
-	u := c.baseURL + "/api/v1/runs"
-	if enc := q.Encode(); enc != "" {
-		u += "?" + enc
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, readHTTPError(resp)
-	}
-	advancedFilter := len(f.GitSHAPrefixes) > 0 || len(f.GitBranches) > 0 || len(f.DeclaredRepos) > 0 || len(f.RepoURLs) > 0 || f.RootOnly
-	if advancedFilter && !store.SupportsRunIdentityFilters(resp.Header.Get("X-Sparkwing-Run-Filter-Version")) {
-		return nil, errors.New("controller does not support native run identity filters")
-	}
-	// safety: a controller that drops the cursor answers with the first page again, so a
-	// walk would re-serve rows it already read rather than fail.
-	cursorCapable := store.SupportsRunCursor(resp.Header.Get("X-Sparkwing-Run-Filter-Version"))
-	if f.HasCursor() && !cursorCapable {
-		return nil, errors.New("controller does not support paging runs by cursor")
-	}
-	if usesRunDisplayFilters(f) && !store.SupportsRunDisplayFilters(resp.Header.Get("X-Sparkwing-Run-Filter-Version")) {
-		return nil, errors.New("controller does not support the run exclusion, trigger, repository name, time range, text or before-cursor filters")
-	}
-	// safety: an older controller clamps away the row that tells a full page from a cut
-	// one, and answers a full page, which reads as the whole set.
-	if f.Limit > store.MaxRunListLimit && !cursorCapable && !f.ProbeMayBeClamped {
-		return nil, fmt.Errorf(
-			"controller serves at most %d runs and cannot report whether more remain; ask for a smaller --limit",
-			store.MaxRunListLimit)
-	}
-	var body struct {
-		Runs []*store.Run `json:"runs"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return nil, err
-	}
-	return body.Runs, nil
-}
-
-func usesRunDisplayFilters(f store.RunFilter) bool {
-	return len(f.ExcludePipelines)+len(f.ExcludeStatuses)+len(f.ExcludeGitSHAPrefixes)+len(f.ExcludeGitBranches)+
-		len(f.TriggerSources)+len(f.ExcludeTriggerSources)+len(f.RepoNames)+len(f.ExcludeRepoNames)+
-		len(f.Text)+len(f.ExcludeText) > 0 ||
-		!f.StartedBefore.IsZero() || !f.FinishedAfter.IsZero() || !f.FinishedBefore.IsZero() || f.HasBeforeCursor()
-}
-
-func runSearchQuery(include, exclude []string) string {
-	terms := slices.Clone(include)
-	for _, term := range exclude {
-		terms = append(terms, "-"+term)
-	}
-	return strings.Join(terms, " ")
 }
 
 // GetRun fetches a run for display. Values of args the pipeline
@@ -1239,30 +1114,6 @@ func (c *Client) ResolveApproval(ctx context.Context, runID, nodeID, resolution,
 	default:
 		return nil, readHTTPError(resp)
 	}
-}
-
-// ListApprovalsForRun returns every approval row for a run.
-func (c *Client) ListApprovalsForRun(ctx context.Context, runID string) ([]*store.Approval, error) {
-	u := fmt.Sprintf("%s/api/v1/runs/%s/approvals", c.baseURL, url.PathEscape(runID))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, readHTTPError(resp)
-	}
-	var body struct {
-		Approvals []*store.Approval `json:"approvals"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return nil, err
-	}
-	return body.Approvals, nil
 }
 
 // ListPendingApprovals returns every unresolved approval, oldest-first.
