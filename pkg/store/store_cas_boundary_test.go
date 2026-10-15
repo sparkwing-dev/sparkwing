@@ -1,4 +1,4 @@
-package acceptance
+package store_test
 
 import (
 	"context"
@@ -6,21 +6,24 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"path/filepath"
+	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func checkStoreCASBoundary(ctx context.Context, root string) (err error) {
-	path := filepath.Join(root, "store-cas.db")
-	s, err := store.Open(path)
+func checkStoreCASBoundary(t *testing.T) (err error) {
+	ctx := t.Context()
+	target := storetest.NewSQLite(t)
+	s, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
-	request, err := seedStorePresenceAttempts(ctx, s.DB())
+	request, err := teststore.SeedPresence(ctx, s.DB())
 	if err != nil {
 		return err
 	}
@@ -32,7 +35,7 @@ func checkStoreCASBoundary(ctx context.Context, root string) (err error) {
 		if err := s.Close(); err != nil {
 			return err
 		}
-		next, err := store.Open(path)
+		next, err := target.TryOpen()
 		if err != nil {
 			return err
 		}
@@ -145,4 +148,10 @@ func checkStoreCASRows(ctx context.Context, s *store.Store, want int) error {
 		}
 	}
 	return nil
+}
+
+func TestStoreCASIntegrity(t *testing.T) {
+	if err := checkStoreCASBoundary(t); err != nil {
+		t.Fatal(err)
+	}
 }

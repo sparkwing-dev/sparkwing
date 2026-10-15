@@ -36,31 +36,6 @@ func execStatements(ctx context.Context, tx *storeTx, script string) error {
 	return nil
 }
 
-// safety: the lock order puts the free tier before team_storage rows, so a
-// commit takes its slot before it locks a row. A commit whose team finds every
-// slot taken is refused, so no team without a slot commits a byte.
-func takeStorageSlotTx(ctx context.Context, tx *storeTx, team Team, bytes int64, now time.Time) error {
-	team = NormalizeTeam(team)
-	if bytes <= 0 || !holdsFreeAllowance(team) {
-		return nil
-	}
-	standing, err := storageStandingTx(ctx, tx, team)
-	if err != nil || standing.Tier != TeamTierNone {
-		return err
-	}
-	if now.IsZero() {
-		now = time.Now()
-	}
-	if err := lockFreeTierTx(ctx, tx); err != nil {
-		return err
-	}
-	slotted, err := takeFreeSlotTx(ctx, tx, team, now)
-	if err != nil || slotted {
-		return err
-	}
-	return freeStoragePaused(team)
-}
-
 // safety: a refusal returns before the first write, so a caller that keeps
 // the transaction after one commits nothing of the reservation.
 // safety: every change to a team_storage row locks it here first, so the lock orders them.

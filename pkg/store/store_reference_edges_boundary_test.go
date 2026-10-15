@@ -1,4 +1,4 @@
-package acceptance
+package store_test
 
 import (
 	"context"
@@ -6,20 +6,23 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"strings"
+	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func checkStoreReferenceBoundary(ctx context.Context, root string) (err error) {
-	path := filepath.Join(root, "store-reference-edges.db")
-	s, err := store.Open(path)
+func checkStoreReferenceBoundary(t *testing.T) (err error) {
+	ctx := t.Context()
+	target := storetest.NewSQLite(t)
+	s, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
@@ -31,7 +34,7 @@ func checkStoreReferenceBoundary(ctx context.Context, root string) (err error) {
 	if err := s.Close(); err != nil {
 		return err
 	}
-	reopened, err := store.Open(path)
+	reopened, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
@@ -96,7 +99,7 @@ func checkStoreReferenceBoundary(ctx context.Context, root string) (err error) {
 
 // safety: persisted graph fixtures isolate edge decisions from plan intake and verified manifest bytes.
 func seedStoreReferenceBoundary(ctx context.Context, db *sql.DB) (blob.Authority, []blob.Digest, error) {
-	request, err := seedStorePresenceAttempts(ctx, db)
+	request, err := teststore.SeedPresence(ctx, db)
 	if err != nil {
 		return blob.Authority{}, nil, err
 	}
@@ -137,4 +140,10 @@ func seedStoreReferenceBoundary(ctx context.Context, db *sql.DB) (blob.Authority
 	}
 	digests = append(digests, blob.Digest(strings.Repeat("e", 64)), blob.Digest(strings.Repeat("f", 64)))
 	return authority, digests, nil
+}
+
+func TestStoreReferenceEdges(t *testing.T) {
+	if err := checkStoreReferenceBoundary(t); err != nil {
+		t.Fatal(err)
+	}
 }

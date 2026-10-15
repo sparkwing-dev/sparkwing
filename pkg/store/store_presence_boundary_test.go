@@ -1,28 +1,32 @@
-package acceptance
+package store_test
 
 import (
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func checkStorePresenceBoundary(ctx context.Context, root string) (err error) {
-	s, err := store.Open(filepath.Join(root, "store-presence.db"))
+func checkStorePresenceBoundary(t *testing.T) (err error) {
+	ctx := t.Context()
+	target := storetest.NewSQLite(t)
+	s, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
-	request, err := seedStorePresenceAttempts(ctx, s.DB())
+	request, err := teststore.SeedPresence(ctx, s.DB())
 	if err != nil {
 		return err
 	}
@@ -98,7 +102,7 @@ func checkStorePresenceBoundary(ctx context.Context, root string) (err error) {
 	if err := s.Close(); err != nil {
 		return err
 	}
-	reopened, err := store.Open(filepath.Join(root, "store-presence.db"))
+	reopened, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
@@ -148,22 +152,6 @@ func checkStorePresenceAccess(ctx context.Context, s *store.Store, tenant *store
 	return nil
 }
 
-func seedStorePresenceAttempts(ctx context.Context, db *sql.DB) (store.UploadReservationRequest, error) {
-	request, err := seedStoreUploadBoundary(ctx, db)
-	if err != nil {
-		return request, err
-	}
-	for _, job := range []string{"a", "b", "unrelated"} {
-		if _, err := db.ExecContext(ctx, `INSERT INTO nodes(team,run_id,node_id,status,outcome,finished_at,attempt,generation,spec_json,execution_json) VALUES (?,'upload',?,'done','success',2,1,7,?,?)`, store.DefaultTeam, job, []byte(`{}`), []byte(`{}`)); err != nil {
-			return request, err
-		}
-		if _, err := db.ExecContext(ctx, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at,finished_at,outcome) VALUES (?,'upload',?,1,7,'publisher','upload-boundary','local','publisher','local',1,2,'success')`, store.DefaultTeam, job); err != nil {
-			return request, err
-		}
-	}
-	return request, nil
-}
-
 func checkStorePresenceUsage(ctx context.Context, tenant *store.Tenant, db *sql.DB) error {
 	usage, err := tenant.StorageUsageFor(ctx, "upload", store.StorageMonth(time.Now()))
 	if err != nil || usage.RunBytes != 3 || usage.MonthBytes != 3 || usage.RunObjects != 1 || usage.MonthObjects != 1 {
@@ -179,4 +167,10 @@ func checkStorePresenceUsage(ctx context.Context, tenant *store.Tenant, db *sql.
 		}
 	}
 	return nil
+}
+
+func TestStorePresenceReadSet(t *testing.T) {
+	if err := checkStorePresenceBoundary(t); err != nil {
+		t.Fatal(err)
+	}
 }

@@ -1,144 +1,122 @@
 # W1b handoff
 
-Continues 3b6125cb3. Earlier payment mutations and other completed work remain in
-that commit and W1b-session1792078204.out. The worktree started clean. W1
-implementation files and the lead-owned handoffs/amendments are unchanged.
+Continues 7cf7e987c. This session handles the lead's 09:40 harness move and
+removes one unused storage helper. W1 implementation files, schema and lead-owned
+handoffs/amendments are unchanged. No git writes or Sparkwing binaries were used.
 
-Implemented:
+Implemented and deleted:
 
-- Cut controller persisted log reads over to Tenant.ReadRunView and
-  logseg.CommittedReader with Tenant.ReadLogSegments. Job reads choose the newest
-  ordinal/generation. Streams use that same ordering for their cursor. Whole-run
-  reads include tagged job, trigger, plan and eval logs.
-- Bound the browser log reader to its authenticated capability prefix or session
-  digest. Each persisted-segment read and live-ring delivery rechecks authority.
-  No listing or physical manifest grants access. Existing response-byte egress
-  metering and log download-cap exemption remain at the HTTP boundary.
-- Missing or corrupt committed bytes fail loudly. Incomplete seals emit a loss
-  line or a JSON log_incomplete SSE event. Completeness verifies persisted bytes
-  before reporting the database seal. It never changes the job verdict.
-- Moved Segment, SegmentCommit and LogSegments into result_logs.go. RecordSegments
-  and ReadLogSegments are the implementations there, with their forwarding
-  methods removed from result_contract.go. Steps, annotations and summaries remain
-  in that contract file. logIdentity uses blob.LogSubject.Validate instead of its
-  separate shape validator.
+- Moved store_billing, store_cache_scope, store_cas, store_gc_fence,
+  store_presence, store_presence_large, store_reachability and
+  store_reference_edges from internal/acceptance to pkg/store/*_test.go.
+  Seven plain Test functions execute their checks. They use
+  pkg/store/internal/storetest.NewSQLite targets and retain reopen assertions.
+- Deleted store_data.go, both exported boundary catalogs, both exported Check
+  dispatchers and their loops in tests/acceptance. No scenario, Harness or
+  boundary registry was added. All prior assertions in these checks remain.
+- Moved the publication, imported-attempt and cache fixtures used by both the
+  store checks and W7 components into pkg/store/teststore/publication.go.
+  Deleted internal/acceptance/blob_publication_fixtures.go. The three shared
+  seed functions have one implementation. W7's component callers use it.
+  The existing public teststore package is needed because Go's internal import
+  rule prevents internal/acceptance from importing pkg/store/internal/storetest.
+- Removed takeStorageSlotTx from team_storage.go. It had no caller, including
+  tests. Current blob quota admission and storage standing remain the owners.
+- Moved W7's physical-deletion function adapter into blob_collection.go because
+  it previously depended on the moved reachability harness file.
 
-Invariant: physical listings never authorize bytes, and log delivery requires
-current persisted authority for the exact tagged subject. The generated reader
-property covers arbitrary payloads, foreign actors and authority ending after
-inventory selection. A real final-schema SQLite test drives award, start, segment
-commit and terminal transition through the controller reader, then revokes its
-capability and verifies refusal before object I/O. A live-ring test proves fresh
-authority checks without sleeps or sockets.
+The SQL fixture replacement part of the 09:40 decision remains open. These tests
+now use the store's target/schema helpers, but some graph and financial fixtures
+still insert rows directly. Moving or renaming that SQL does not prove real
+issuance, publication or settlement. The shared publication seeder also retains
+its prior SQL. No API-driven fixture conversion is claimed.
 
-Deleted and ported:
+Evidence:
 
-- Removed NodeLog, LatestNodeLog, RunNodeLogs, NodeLogSettled, their scanners and
-  nodeLogColumns. node_logs.go loses 109 net lines. No production Go reader or
-  writer queries node_logs or node_log_segments. W1's tenantTables catalog still
-  names those retired tables; it was left untouched under the ownership rule.
-- Removed the controller's logseg.Open/listing/manifest read path. It reads exact
-  committed segment keys instead. The legacy claim grace constant and old writer
-  wire structs remain because their callers have not cut over.
-- Ported TestNodeLogSettlesOnlyWithNoRetryToCome from legacy handwritten SQL and
-  its dispatch fixture to final RunView state. It keeps failure-until-run-finish,
-  successful/skipped/cancelled terminal and unknown-job assertions. No archived
-  finding is claimed closed.
-- This session adds no acceptance cells, registry entries or harness files.
-
-Contract changes and real integrations still needed, in priority order:
-
-1. Lead 07:40 item 2 / A1-28: internal/capability/payment.go still exposes only
-   checkout_paid, checkout_expired and checkout_failed. W2 must supply the opaque
-   verified setup, refund, warning, dispute and collection facts and provider
-   handoff. W1 must supply receipt schema and trusted setup/customer correlation.
-   payment_events still requires a checkout FK and restricts kind to those three
-   outcomes. SettlePayment remains checkout-only and refuses zero proof. Its
-   transaction-local mutation owners from the prior session are ready. No shadow
-   proof type, metadata-selected payer or unverified replacement was introduced.
-2. A1-27: spend/grace needs a committing renewal-policy result and a durable
-   exhaustion fence per immutable award. W1's accountUnitBillingTx returns only
-   error, and LeaseBeat is built before accounting. The existing node-only
-   credit_exhausted_anchor cannot represent independent host/plan/eval awards.
-   The join must preserve prepaid runway, unit minima, customer-runner wait
-   exclusion and holder drain. Ordinary award/start/finish accounting and C2's
-   calculator are implemented. Legacy claim-credit callers still block deletion.
-3. Output clients still use OutputReadGrant, NodeOutputObject and unbound
-   Store.GetNodeOutput. W2/W3/W9 need the authenticated reader and persisted
-   selected record key. This branch's ReadNode still has no persisted result
-   selector. W1's newer result_records work is visible in its predecessor report
-   but is not merged here. Attempt-free materialization still conflicts with
-   positive destination-attempt keys/authority. W1/W7 must settle that contract
-   before CopyMaterializedRecords can use the transaction-local mutation owner.
-4. Log read persistence is cut over. The production HTTP/host cutover remains:
-   W2 owns authenticated blob.LogTransport signing/verification and final tagged
-   readers, W3 supplies persisted subjects, and W9 migrates the old client.
-   LogSegmentUploader still calls retired writer routes from
-   internal/orchestrator/segment_logs.go. This session migrates existing browser
-   readers; it does not claim the new policy-router log endpoints are installed.
-   The remote browser object adapter is still the configured S3 log object store.
-   Native/provider/PostgreSQL and real HTTP transport evidence remain open.
-5. Lead 09:40 cleanup still includes store_billing, store_cache_scope, store_cas,
-   store_data, store_gc_fence, store_presence, store_presence_large,
-   store_reachability and store_reference_edges harness files. Some seed helpers
-   serve W7. They remain behind the requested runtime priorities.
-6. Source-before-run binding, ReadBlob/ChargeDownload composition and physical
-   allowance eviction remain open. A1-24 and A1-29 through A1-35 persistence stays
-   implemented. Record mutation authorization and the two approved catalog edits
-   were completed in earlier sessions.
-
-Verification:
+- Whole-repository go build -p 4 ./... passes.
+- Scoped go vet passes for pkg/store, pkg/store/teststore,
+  internal/acceptance and tests/acceptance.
+- All seven moved package tests pass without skips: TestStoreCASIntegrity,
+  TestStorePresenceReadSet, TestStoreLargePresenceBudget, TestStoreCacheScope,
+  TestStoreReferenceEdges, TestStoreReachabilityRetention and
+  TestStoreBillingRetention. The final rerun took 1.293 seconds.
+- Six affected W7 components pass: reference-edge laundering with the filesystem
+  store, filesystem manifests and filesystem manifest records, remote cache
+  store-data and filesystem archives, and filesystem reachability/retention.
+  Native launcher placeholders selected by the parent harness remain skipped.
+- commentcheck -base main is clean across 2,118 files. git diff --check passes.
 
 All Go commands used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
-GOCACHE=/tmp/sw-gocache and GOTMPDIR/TMPDIR=/tmp/sw-astra-W1b/gotmp. Passed:
+GOCACHE=/tmp/sw-gocache and GOTMPDIR/TMPDIR under /tmp/sw-astra-W1b. No provider,
+PostgreSQL, native launcher, real HTTP or whole-repository test pass is claimed.
+The initial component filter selected no tests. The corrected filter ran the six
+components above, and their JSON verdicts were inspected.
 
-- go build -p 4 ./... for the whole repository.
-- go vet -p 4 ./pkg/store ./pkg/controller ./pkg/storage/logseg ./tests/acceptance.
-- Focused controller/store/logseg tests matching TestCommittedDashboard*,
-  TestDashboardLogActor*, TestNodeLogSettles*, TestLogPersistence*,
-  TestCommittedRead* and TestRunView*. Final timings were 0.211, 4.718 and 0.037
-  seconds respectively, without skips.
-- Existing storage-log-segments-and-fallback/filesystem-records and
-  filesystem-sink acceptance cells, 12.510 seconds total, without skips. They use
-  fake authenticated transports and direct signed filesystem handlers. They do
-  not prove W2's production HTTP log binding.
-- go run ./internal/commentcheck -base main . clean across 2,119 files.
-- git diff --check.
+Line budget:
 
-No whole-repository test suite, provider, PostgreSQL, native execution or pipeline
-pass is claimed. The lead owns independent review and commits.
+- Net production Go delta this session is -1,289 across touched packages.
+- internal/acceptance loses 1,381 net production lines.
+- pkg/store changes by +92: the shared fixture adds 117 lines and the dead
+  storage helper removes 25. Moving checks into test files removes their
+  production classification without changing their assertions.
+- pkg/store is +3,658 against main, 7,908 above the combined -4,250 target.
+  This remains over budget. The fixture move is not a store runtime reduction.
+  Tests, testdata and *_contract.go/*_contracts.go scaffolds are excluded from
+  these counts. The session total includes internal/acceptance because its
+  ordinary Go files are the subject of the lead's harness audit.
 
-Budget, shared files and assumptions:
+Remaining work and contract/integration requests, in priority order:
 
-The session reduces production Go by 77 lines across touched packages. pkg/store
-falls by 102 lines and is +3,566 versus main, 7,816 over the combined -4,250
-W1/W1b target. Measurement excludes tests, testdata and *_contract.go /
-*_contracts.go scaffolds. The area is not within budget. Legacy
-credit/output/claim cuts remain necessary. Moving implemented log declarations
-out of excluded scaffolding accounts for result_logs.go's seven-line increase.
+1. Output cutover: this branch's NodeRow/ReadNode still lacks the committed
+   OutputRecord/ManifestRecord projection. W1's later report implements it on
+   its branch. W2/W3/W9 must carry that selector and authenticated record reads
+   before NodeOutputObject, OutputReadGrant and unbound Store.GetNodeOutput
+   can be removed with working callers. Attempt-free materialization still
+   needs agreement on destination record identity before the copier joins.
+2. Log uploads: persisted reads were cut over in the preceding session.
+   LogSegmentUploader still calls the old writer routes. W2 owns the real
+   authenticated blob.LogTransport signing and verification endpoints, W3
+   supplies persisted tagged subjects, and W9 owns the transport client.
+   There is no production LogTransport adapter in this checkout. Its existence
+   must not be inferred from the fake filesystem components.
+3. Spend/grace: W1's accountUnitBillingTx returns only error and LeaseBeat is
+   assembled before accounting. The durable node-only exhaustion anchor cannot
+   represent host/plan/eval awards. W1 must provide the per-award exhaustion
+   fence and committing renewal-policy result so W1b can join prepaid runway,
+   minima, customer-runner wait exclusion and drain without another legacy path.
+   Legacy Store claim and trigger writers still call the old credit helpers.
+4. Lead 07:40 item 2 / A1-28: W2's PaymentEvent still declares only checkout
+   outcomes and the verified proof has no setup/refund/warning/dispute facts.
+   W1's payment_events schema still requires a checkout and restricts kind to
+   those outcomes. W2 must provide verified facts/provider correlation and W1
+   must supply the matching receipt/setup correlation schema. The earlier
+   transaction-local payment mutation owners remain ready. SettlePayment is
+   still checkout-only. No fake proof or metadata-selected payer was added.
+5. Finish API-based fixture seeding for the moved checks. Raw financial/graph
+   SQL remains visible in tests. No acceptance catalog or skip loop was added.
+6. Source-before-run binding, ReadBlob/ChargeDownload composition and physical
+   allowance eviction remain integration work. Previously completed A1-24 and
+   A1-29 through A1-35 persistence and mutation authorization are unchanged.
 
-Caller migrations outside pkg/store:
+No new foreign contract change is made. No new test port closes an archived
+finding. This session relocates existing checks and preserves their assertions.
 
-- pkg/controller/browser_reads.go
-- pkg/controller/log_reads.go
-- pkg/controller/log_segments_internal_test.go
-- pkg/controller/log_reads_test.go (new focused tests)
+Shared files changed outside pkg/store:
 
-Shared documentation: design/rewrite/contracts/c1-data.md records the read cutover
-and the new declaration locations. No foreign contract was changed. The local
-segmentLogRecords interface combines two existing Tenant methods and has a
-scripted test double. No new table, setting, cache, trust root or service was
-added. Whole-run reads now include every committed tagged subject; job reads
-still select the latest attempt.
+- internal/acceptance/blob_collection.go
+- internal/acceptance/blob_manifests.go
+- internal/acceptance/blob_remote_edges.go
+- internal/acceptance/blob_upload_isolation.go
+- tests/acceptance/billing_test.go
+- tests/acceptance/storage_test.go
+- The ten deleted internal/acceptance files named above.
 
-Friction: the expanded verified-event contract and receipt schema remain absent
-on this branch. Initial compilation caught the live-ring chunk type name, which
-is corrected. The filesystem acceptance cells emit about 2,300 audit lines with
--v; bounded output hid the middle, but both cell verdicts and the final exit
-status were retained. Final checks pass.
+Friction: the payment proof/schema and result-selector gaps remain absent on
+this branch. W1's later result-selector work was found in its predecessor report
+and was not copied into its owned files. No production behavior was replaced by
+a stub. The build and focused checks pass, but the area is incomplete and over
+budget. The lead owns review and commits.
 
-Scratch /tmp/sw-astra-W1b is removed after final checks. /tmp/sw-gocache is kept.
-No service was started. Git author remains Korey Gambill and core.worktree is
-unset. No Git metadata or harness memory was written.
+Scratch /tmp/sw-astra-W1b is removed after checks. The shared build cache is kept.
 
 STATUS: CONTINUE

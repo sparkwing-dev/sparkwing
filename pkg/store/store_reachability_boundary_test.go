@@ -1,30 +1,33 @@
-package acceptance
+package store_test
 
 import (
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 type storeBoundaryDeleter func(context.Context, blob.Blob) error
 
 func (f storeBoundaryDeleter) DeleteBlob(ctx context.Context, b blob.Blob) error { return f(ctx, b) }
 
-func checkStoreReachabilityBoundary(ctx context.Context, root string) (err error) {
-	path := filepath.Join(root, "store-reachability.db")
-	s, err := store.Open(path)
+func checkStoreReachabilityBoundary(t *testing.T) (err error) {
+	ctx := t.Context()
+	target := storetest.NewSQLite(t)
+	s, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
-	request, err := seedStoreUploadBoundary(ctx, s.DB())
+	request, err := teststore.SeedUpload(ctx, s.DB())
 	if err != nil {
 		return err
 	}
@@ -60,7 +63,7 @@ func checkStoreReachabilityBoundary(ctx context.Context, root string) (err error
 	if err := s.Close(); err != nil {
 		return err
 	}
-	reopened, err := store.Open(path)
+	reopened, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
@@ -124,7 +127,7 @@ func checkStoreReachabilityBoundary(ctx context.Context, root string) (err error
 	if err := s.Close(); err != nil {
 		return err
 	}
-	s, err = store.Open(path)
+	s, err = target.TryOpen()
 	if err != nil {
 		return err
 	}
@@ -256,4 +259,10 @@ SELECT team,kind,'copied',name,digest,manifest_digest,'copy',repo_key,ref_scope,
 		return err
 	}
 	return nil
+}
+
+func TestStoreReachabilityRetention(t *testing.T) {
+	if err := checkStoreReachabilityBoundary(t); err != nil {
+		t.Fatal(err)
+	}
 }

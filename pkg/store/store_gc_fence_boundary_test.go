@@ -1,4 +1,4 @@
-package acceptance
+package store_test
 
 import (
 	"context"

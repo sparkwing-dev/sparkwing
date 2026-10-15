@@ -1,4 +1,4 @@
-package acceptance
+package store_test
 
 import (
 	"context"
@@ -6,27 +6,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-// StoreBillingBoundaryScenarios names store proofs without claiming native or provider execution.
-func StoreBillingBoundaryScenarios() []string {
-	return []string{"billing-ledger-survives-retention"}
-}
-
-// CheckStoreBillingBoundary checks committed financial rows across leased run retention and reopening.
-func CheckStoreBillingBoundary(ctx context.Context, root, id string) (err error) {
-	if id != "billing-ledger-survives-retention" {
-		return fmt.Errorf("no store billing boundary proof for %q", id)
-	}
-	path := filepath.Join(root, "store-billing.db")
-	s, err := store.Open(path)
+func checkStoreBillingRetention(t *testing.T) (err error) {
+	ctx := t.Context()
+	target := storetest.NewSQLite(t)
+	s, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
@@ -146,7 +139,7 @@ func CheckStoreBillingBoundary(ctx context.Context, root, id string) (err error)
 	if err := s.Close(); err != nil {
 		return err
 	}
-	reopened, err := store.Open(path)
+	reopened, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
@@ -273,4 +266,10 @@ func billingFinancialSnapshot(ctx context.Context, db *sql.DB) (map[string][]str
 		slices.Sort(snapshot[table])
 	}
 	return snapshot, nil
+}
+
+func TestStoreBillingRetention(t *testing.T) {
+	if err := checkStoreBillingRetention(t); err != nil {
+		t.Fatal(err)
+	}
 }

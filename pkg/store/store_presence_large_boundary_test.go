@@ -1,28 +1,30 @@
-package acceptance
+package store_test
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"slices"
+	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func checkStoreLargePresenceBoundary(ctx context.Context, root string) (err error) {
-	path := filepath.Join(root, "store-large-presence.db")
-	s, err := store.Open(path)
+func checkStoreLargePresenceBoundary(t *testing.T) (err error) {
+	ctx := t.Context()
+	target := storetest.NewSQLite(t)
+	s, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
-	request, err := seedStorePresenceAttempts(ctx, s.DB())
+	request, err := teststore.SeedPresence(ctx, s.DB())
 	if err != nil {
 		return err
 	}
@@ -67,7 +69,7 @@ func checkStoreLargePresenceBoundary(ctx context.Context, root string) (err erro
 	if err := s.Close(); err != nil {
 		return err
 	}
-	reopened, err := store.Open(path)
+	reopened, err := target.TryOpen()
 	if err != nil {
 		return err
 	}
@@ -108,4 +110,10 @@ func checkStoreLargePresenceBoundary(ctx context.Context, root string) (err erro
 		}
 	}
 	return nil
+}
+
+func TestStoreLargePresenceBudget(t *testing.T) {
+	if err := checkStoreLargePresenceBoundary(t); err != nil {
+		t.Fatal(err)
+	}
 }

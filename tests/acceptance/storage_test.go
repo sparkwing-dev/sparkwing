@@ -8,13 +8,6 @@ import (
 )
 
 func TestStorage(t *testing.T) {
-	for _, id := range acceptance.StoreDataBoundaryScenarios() {
-		t.Run(id+"/store-data-sqlite", func(t *testing.T) {
-			if err := acceptance.CheckStoreDataBoundary(t.Context(), t.TempDir(), id); err != nil {
-				t.Fatal(err)
-			}
-		})
-	}
 	t.Run("storage-reference-edge-laundering/filesystem-store", func(t *testing.T) {
 		objects, _ := storageFilesystem(t)
 		if err := acceptance.CheckBlobUploadIsolation(t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: storageFilesystemHTTP(objects)}); err != nil {

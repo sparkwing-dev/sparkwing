@@ -12,12 +12,5 @@ func TestBilling(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	for _, id := range acceptance.StoreBillingBoundaryScenarios() {
-		t.Run(id+"/store-data-sqlite", func(t *testing.T) {
-			if err := acceptance.CheckStoreBillingBoundary(t.Context(), t.TempDir(), id); err != nil {
-				t.Fatal(err)
-			}
-		})
-	}
 	pendingScenarios(t, "billing")
 }
