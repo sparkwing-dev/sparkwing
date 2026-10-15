@@ -33,6 +33,9 @@ security policy comes from the verified version index.
 Every placement acquires its sealed source, reads the pin, resolves and verifies
 the matching engine, then uses that engine to install/build and host the SDK.
 A newer ambient CLI or runner image does not substitute for an older exact pin.
+The CLI resolves the pin even when its installed version matches. It reuses the
+selected executable only after the resolver checks policy and cached bytes.
+A missing release fails instead of selecting another version.
 Retries retain the accepted portable engine identity and exact source SHA. Each
 machine resolves the appropriate platform asset for that same identity.
 

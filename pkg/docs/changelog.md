@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **engine CLI (Breaking):** Local dispatch uses the shared exact SDK-matched engine resolver
+  Newer installed versions and missing release assets cannot substitute another engine. Cached starts still check signed policy. The legacy CLI downloader, cache and environment recursion marker are removed. Native engine resolution remains an integration requirement.
+
 - **daemon events (Breaking):** Cursor pagination replaces offsets
   Continuations retain the original time cutoff and unread history across appends. Changed history fails with a restart hint. JSON includes a final page record. See [migration](docs/migrations/_unreleased.md#daemon-event-cursors).
 - **daemon (Breaking):** Status, stop and restart use the shared local controller lifecycle

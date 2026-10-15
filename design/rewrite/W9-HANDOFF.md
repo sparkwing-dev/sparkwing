@@ -1,39 +1,87 @@
 # W9 handoff
 
-W9 remains incomplete. This continuation started clean at 343536d14. No Git
-writes, Sparkwing executables, services, pipelines or releases ran. The lead
-owns commits, independent review and native integration. Earlier implementation
-and verification details are in this file's Git history through 343536d14.
+W9 remains incomplete. This continuation started clean at acaf0edf8. The lead
+owns commits, independent review, pipelines and native integration. Only the
+required installed-tool discovery ran. No install, service-management command, pipeline,
+release or Git write ran. Earlier work remains in Git history.
 
 ## This continuation
 
-Public operator limits and object-store commands use the shared authenticated
-client and C2's final /operator routes. Their messages now live in controllerwire.
-Both local api.sock and explicit profiles use the same adapter. The registry
-parser validates arguments and help before connection resolution. All three
-output formats preserve their documented shape and return write failures.
+Local dispatch consumes engine.ReadPin, VersionForPin and Resolver.Resolve for
+both SDKs and the current executable platform. Every invocation checks policy,
+including one already running the resolved executable. Matching file identity
+ends re-execution. Installed version ordering and ambient recursion markers no
+longer choose an engine. The adapter refuses a changed pin, version or platform,
+missing verification metadata and relative executable paths. Resolver errors,
+policy notices, cancellation and output failures retain their result. Invocation
+arguments, cwd and captured environment survive the process replacement.
 
-Limit writes preserve explicit zero and require the response to confirm each
-supplied key and value. The controller owns supported setting names. Rendering
-uses returned keys instead of inventing omitted guards with zero values. Storage
-projections retain class counters, incomplete measurements and their errors.
-Breaker resets generate one idempotency key. Transport retries retain the key
-and exact body. The common client owns credentials, canonical errors and retry
-policy. No route, authority rule, environment variable, service, timeout or cap
-was added.
+Info reads the same pin owner without fetching an engine. It reports the exact
+required release, including an older pin under a newer CLI. It no longer invents
+a toolchain-store path or infers local-mode cache availability. Invalid pin reads
+remain visible. Native pin-reader and resolver implementations are still W8 work.
+The default bindings call those declared owners; tests inject their results.
 
-The old client admin.go and objectstore.go files are deleted, removing 122 lines.
-The unreachable debug run function block is deleted, removing 85 lines. Its
-two-line dispatch case and seven unused help bindings are also deleted. These
-216 lines are obsolete code, separate from the replaced operator CLI paths.
-The retained debug commands use job/resume in diagnostics but still need their
-controller cutover. No foreign production caller required migration.
+The old CLI downloader/cache, Go-only pin reader, permissive selection policy,
+legacy digest sidecars and release fallback are removed. The selector shrank
+from 418 to 136 lines. The still-used updater identity check moved into its own
+44-line file. Three deleted test files account for 828 lines, and deleting the
+unused selector matrix removes another 25. Other obsolete production deletions
+remove 115 lines across update, toolchain policy, paths and doctor. No old cache
+on the user's machine was read or deleted.
 
-OpenAPI binds all four operator operations to the shared messages. Source limits
-documentation and its embedded mirror are updated. Fake transport and command
-tests prove the W9 boundaries. W2 still needs to serve the final projections,
-supported setting names and reset replay through its policy routes. Native
-authorization, persistence and storage operations remain unverified.
+The smallest shared caller cleanup removes the unused cache listing from
+internal/opsview/doctor.go and its doctor_toolchains_test.go, the old path methods
+from internal/paths/paths.go, and the unused selection API/matrix from
+internal/toolchain/policy.go and policy_test.go. Mode parsing and version holds
+remain with that package. The final public doctor already uses LocalLifecycle.
+
+Environment documentation now matches native reads. It drops retired variables,
+names SPARKWING_JOB_ID, and records the moved SDK caller-selected input reader.
+Unported host inputs remain identified as such. Versioning and changelog changes
+are mirrored with the repository sync script. No public flag, interface shape,
+credential, service, cap or deadline was added.
+
+## Verification for this continuation
+
+Invariant: SDK work can start only with the resolver's exact pin, release and
+platform result; ambient state cannot bypass verification. The property test
+passed 3,196 executions across two runs with four workers. The final run passed
+193 executions after the last source changes. These tests check the CLI boundary,
+not release signatures or the resolver's native cache.
+
+New tests cover both SDKs and all three platform selectors, mismatch refusals,
+resolver denials without fallback, policy checks in the selected file, notices,
+context cancellation, write errors and read-only pin summaries. A Unix shell
+fixture proves argv boundaries, cwd and captured environment through real exec.
+A hard-link fixture proves same-file convergence. Windows/Darwin selectors in
+component tests do not establish native platform execution.
+
+Ported concerns: root-flag replay, switch-before-daemon ordering, exact pin
+summaries, invalid mode/pin handling, selected-file convergence, and updater
+version-query diagnostics. TestInfoReportsInvalidPipelineConfig now supplies a
+fake pin owner. Old downloader signature/cache/private-store cases require W8's
+native resolver evidence. T1's parked inventory assigns no original test to W9.
+No native acceptance cell was unskipped or claimed complete.
+
+All Go commands used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4 or
+less, with GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W9. Whole-repository build
+and scoped vet pass. Focused selector/info/environment-documentation tests pass.
+Full clisurface, controllerwire, toolchain and doccheck tests pass. Paths and
+focused doctor-rendering tests pass. Commentcheck and sleepcheck against main,
+gofmt, embedded-doc drift and diff checks pass.
+
+A broader CLI documentation run exposed stale environment documentation, now
+fixed and checked, then reached a socket test that the sandbox refuses. A broad
+legacy opsview diagnostic selection was interrupted; focused rendering passed.
+Neither broader suite is claimed green. Native source selection, SDK releases,
+HTTP/api.sock/host integration, services, timers, cache/publication, Windows,
+Darwin and launch QA remain unverified. Scratch is removed before the final report.
+
+Shared edits beyond the caller cleanup above are CHANGELOG.md,
+pkg/docs/changelog.md, the two changed embedded documentation mirrors, C3's
+engine integration notes, the handoff ledger and this report. No foreign
+contract shape changed. Overwing discovery retained its stale-binary notice.
 
 ## Retained source preparation
 
@@ -77,6 +125,7 @@ Native selected-engine process-tree cancellation remains unverified.
 
 ## Completed W9 work to retain
 
+- Shared operator limits/object-store commands, final routes and OpenAPI bindings.
 - Final clisurface grammar, help, completion and command discovery. Machine-only
   profiles use the strict userconfig schema. Final run/trigger flags are parsed.
 - Authenticated engine HTTP/api.sock transport, strict errors, one-time authority
@@ -131,7 +180,8 @@ Native selected-engine process-tree cancellation remains unverified.
   CreateRunRequest, IntakeRequest and runspec.Request still lack it.
 - W1/W3/W9: job transitions need the source attempt ordinal in the wire request,
   committing transaction and replay identity. The existing handoff still applies.
-- W6: procenv.Git is declared, but Build rejects it. Git fixtures inject the
+- W6: remove the retired SPARKWING_TOOLCHAIN_ACTIVE CLI inheritance allowance,
+  retaining its protocol deny classification. procenv.Git is declared, but Build rejects it. Git fixtures inject the
   declared builder boundary. W9 has no alternate environment filter.
 - W3/W8: source acquisition, exact-engine resolution/InstallSDK, shared host
   constructors, execution-input identity through hello and local lifecycle are
@@ -140,6 +190,9 @@ Native selected-engine process-tree cancellation remains unverified.
   operations. Existing upload identities require a live owner/publication/job.
 - W1/W2: retain RetryRequest.Mode in intake, replay and successful-job reuse.
   Specify authorized sizing reset and preserve explicit resource pins.
+- W2: debug resume has no release route in C2. The legacy debug path cannot
+  cut over until the route, authority and replay body are specified. The old
+  /nodes release route is not a final contract.
 - W2: profile scope enrollment, pool-reserving runner provisioning, run/member
   annotation authority, remote admission priority without a group and final read
   projections remain owner integration or route-contract gaps. Serve the new
@@ -166,12 +219,12 @@ acceptance from component tests.
 | A1-10/11/19; identity and alias handoffs | Separate commits, preflight and selected-engine inspection added. Native source/engine/host construction and hello remain. |
 | A1-20/39/40/41/49 | Credential, runner and lifecycle adapters retained. Native provisioning, shared runner, local runtime, services and timers remain. |
 | A1-29/30/34/37/50 | Signed-data, local-cache, here and prepared-intake components retained. Public cutover, cache/publication and old runtime/client removal remain. |
-| A1-43/45/47 | Notices, upgrade, settings and guards retained. Inspection now renders selected-engine notices. Native version policy and scheduled intake remain. |
+| A1-43/45/47 | Exact resolver dispatch and read-only pin summaries replace the old CLI selector/cache. Notices, upgrade, settings and guards retained. Native version policy, selected-source hosting and scheduled intake remain. |
 | A1-51 | C3 and eight intake transport combinations retain separate source commits. Operator clients and dead debug run are removed. Operator OpenAPI messages are generated. Remaining public/runtime retirement and reference audit stay open. |
 | A1-52; Windows packaging handoff | Packaging implementation retained. Native Windows and publication evidence remain unclaimed. |
 | A1-53 | New native Git and shell-fixture evidence only. No native T1 scenario was unskipped. |
 
-## Verification and accounting
+## Previous verification and accounting
 
 Invariant: operator input may change operational request bodies, never the
 route or credential that authorizes them. FuzzOperatorMutationsStayOnDeclaredRoutes

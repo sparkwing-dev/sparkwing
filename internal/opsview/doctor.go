@@ -126,8 +126,6 @@ type DoctorReport struct {
 
 	Daemon DoctorDaemon `json:"daemon"`
 
-	Toolchains []DoctorToolchain `json:"toolchains,omitempty"`
-
 	StandaloneStores []DoctorStandaloneStore `json:"standalone_stores,omitempty"`
 }
 
@@ -144,16 +142,6 @@ type DoctorStandaloneStore struct {
 	Runs int `json:"runs"`
 
 	OldestRunAt *time.Time `json:"oldest_run_at,omitempty"`
-}
-
-// DoctorToolchain is one CLI release in the version store that a repo's SDK pin
-// can select.
-type DoctorToolchain struct {
-	Version string `json:"version"`
-
-	Path string `json:"path"`
-
-	Bytes int64 `json:"bytes"`
 }
 
 type DoctorDaemon struct {
@@ -307,7 +295,6 @@ func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryR
 		return report, err
 	}
 	home = p.Root
-	diagnoseToolchains(p, &report)
 	diagnoseStandaloneStores(p, &report)
 	if err := validateDoctorMutationPaths(p, nil, false); err != nil {
 		return report, err
@@ -682,32 +669,6 @@ func sqliteHasTables(path string, names ...string) bool {
 		}
 	}
 	return true
-}
-
-func diagnoseToolchains(p paths.Paths, report *DoctorReport) {
-	entries, err := os.ReadDir(p.ToolchainsDir())
-	if err != nil {
-		return
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		version := entry.Name()
-		binary := p.ToolchainBinary(version)
-		info, err := os.Stat(binary)
-		if err != nil {
-			continue
-		}
-		report.Toolchains = append(report.Toolchains, DoctorToolchain{
-			Version: version,
-			Path:    binary,
-			Bytes:   info.Size(),
-		})
-	}
-	sort.Slice(report.Toolchains, func(i, j int) bool {
-		return semver.Compare(report.Toolchains[i].Version, report.Toolchains[j].Version) < 0
-	})
 }
 
 func diagnoseStandaloneStores(p paths.Paths, report *DoctorReport) {
@@ -1476,7 +1437,6 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 		competing = len(r.InstallConflict.Competing)
 	}
 	fmt.Fprintf(w, "competing_installs\t%d\n", competing)
-	fmt.Fprintf(w, "toolchains\t%d\n", len(r.Toolchains))
 	standaloneRuns := 0
 	for _, sa := range r.StandaloneStores {
 		if sa.Runs > 0 {
@@ -1507,7 +1467,6 @@ func renderDoctorPretty(w io.Writer, r DoctorReport) error {
 		fmt.Fprintf(w, "healthy: nothing to repair%s\n", would)
 		renderDaemonSection(w, r)
 		renderMachineBudget(w, r)
-		renderToolchains(w, r)
 		renderStandaloneStores(w, r)
 		renderUngatedRepos(w, r)
 		renderStrayDaemons(w, r)
@@ -1603,7 +1562,6 @@ func renderDoctorPretty(w io.Writer, r DoctorReport) error {
 	}
 
 	renderMachineBudget(w, r)
-	renderToolchains(w, r)
 	renderStandaloneStores(w, r)
 	renderStrayDaemons(w, r)
 	renderFaultedPeers(w, r)
@@ -1777,18 +1735,6 @@ func renderInstallConflict(w io.Writer, r DoctorReport) {
 	fmt.Fprintf(w, "  which one a caller gets depends on whose PATH resolved it: an interactive shell and a launchd, systemd, or cron job order theirs differently, so the same command can be two different builds\n")
 	fmt.Fprintf(w, "  each install keeps its own version memory under the sparkwing home, so they cannot rewrite each other's records -- but their outputs are evidence from different builds\n")
 	fmt.Fprintf(w, "  to resolve: keep one and retire the rest with the guidance above, or point each job at the absolute path of the copy you mean\n")
-}
-
-func renderToolchains(w io.Writer, r DoctorReport) {
-	if len(r.Toolchains) == 0 {
-		return
-	}
-	fmt.Fprintf(w, "\ntoolchain store: %d CLI release(s) fetched for repos whose SDK pin outranks the installed CLI\n", len(r.Toolchains))
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	for _, t := range r.Toolchains {
-		fmt.Fprintf(tw, "  %s\t%s\t%d bytes\n", t.Version, t.Path, t.Bytes)
-	}
-	_ = tw.Flush()
 }
 
 func renderStandaloneStores(w io.Writer, r DoctorReport) {

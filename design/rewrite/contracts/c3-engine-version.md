@@ -42,6 +42,16 @@ Fake pin readers and preparation callbacks establish the Go CLI adapter. Native
 fake npm/Node tools establish TypeScript invocation and argv without running the
 pipeline. Neither proves release verification or a real dependency installation.
 
+The CLI's local dispatch now consumes ReadPin, VersionForPin and Resolve for
+both SDKs. It rechecks policy on every invocation and stops re-executing only
+when the current executable and resolved executable are the same file. Installed
+version ordering and an environment recursion marker cannot bypass that check.
+Resolver failures never select another release. Info reads pin metadata without
+fetching or guessing cache paths. The CLI downloader/cache and unused shared
+selection/path/doctor helpers are deleted. Native pin reading, release verification
+and selected-source hosting still require W8/W3 integration. Component fakes and
+a real Unix exec fixture establish the CLI adapter only.
+
 ## Ownership
 
 `internal/engine` owns exact SDK-to-engine selection, release verification,

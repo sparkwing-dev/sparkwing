@@ -36,8 +36,6 @@ func init() {
 }
 
 func main() {
-	toolchainActive = takeToolchainActive()
-
 	if err := runSparkwing(os.Args[1:]); err != nil {
 		if writeErr := writeInvocationError(os.Stderr, err, apierr.WriteJSON); writeErr != nil {
 			fmt.Fprintln(os.Stderr, "sparkwing: write diagnostic:", writeErr)
@@ -101,6 +99,10 @@ func exitCodeFor(err error) int {
 }
 
 func dispatchRun(args []string) error {
+	return dispatchRunWithEngine(args, switchToolchain)
+}
+
+func dispatchRunWithEngine(args []string, selectEngine func(string) error) error {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		if len(args) == 0 {
 			PrintHelp(cmdRun, os.Stderr)
@@ -166,7 +168,7 @@ func dispatchRun(args []string) error {
 	}
 
 	// safety: the exec replays this command, so the pin must settle before any daemon, worktree, run, or output.
-	if err := switchToolchain(dir); err != nil {
+	if err := selectEngine(dir); err != nil {
 		return err
 	}
 

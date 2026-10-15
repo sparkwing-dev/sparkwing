@@ -95,3 +95,21 @@ and command are in `../w1-session12-progress.md`.
 **DESIGN approved (lead): W8 cancellation classification (third finding in the pending-claim mechanism).** Invariant: classifying a stop reason never panics and never confuses a caller's cancellation cause with a denial. Recognise cancellation only with `errors.Is(err, context.Canceled)` / `errors.Is(err, context.DeadlineExceeded)` (ctx.Err's comparable sentinels); never compare against `context.Cause(ctx)` with `==`. Run's joining defer returns the caller's arbitrary cause unchanged. Test nested wraps and joins, independent denials, and comparable and non-comparable custom causes, including a property test. Three bugs in one mechanism means it is too clever: while fixing this, cut the pending-claim stop logic to the smallest form that satisfies the approved outcome representation, and report the line count before and after.
 
 **Lead decision for W3: "the W4 expansion-concurrency mismatch question" is settled by c3-protocol-notes.md line 66.** A generated job's concurrency membership must match the existing plan or job definition of that group on capacity, scope and on_limit; cost may differ; a mismatch refuses the expansion with `plan_invalid` naming the field path. The host supplies existing definitions through `ExistingConcurrency`. W3 implements this in the strict raw-bytes expansion validation (handoff "W3 expansion acceptance"). If a W4 membership test accepts a mismatch on capacity, scope or on_limit, W3 corrects that test as a minimal shared-file edit and lists it. No further lead input is needed.
+
+
+**W6: retire the CLI engine recursion-marker allowance.** W9 removed every
+production read/write of SPARKWING_TOOLCHAIN_ACTIVE. Exact local dispatch now
+calls the shared resolver even in the selected executable and converges on file
+identity. procenv.inherited still permits this protocol-class name for CLI.
+Remove that inheritance allowance and retain the deny classification. No
+replacement variable is needed. W9's property test covers forged ambient marker
+values without allowing them to select the engine.
+
+**Contract change needed, W2/W9: final debug resume transport.** C2 declares
+GET /runs/{run}/jobs/{job}/debug-pause and the run-level debug-pauses routes, but
+no job pause-release operation. W9 cannot port debug resume's legacy /nodes
+release call or local direct-store writer without a specified final route,
+authority and replay body. W2 must declare that operation before this piece can
+cut over. The CLI must send no caller-selected releasing principal. Debug env
+and attach still need final safe job/pause/execution projections. This is an
+unfinished integration, not an approved feature cut.

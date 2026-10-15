@@ -14,9 +14,11 @@ import (
 	flag "github.com/spf13/pflag"
 	"golang.org/x/mod/semver"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
@@ -39,8 +41,7 @@ type Info struct {
 	SDKPin *InfoSDKPin `json:"sdk_pin,omitempty"`
 }
 
-// InfoSDKPin reports the repo's SDK pin when it names a different CLI version
-// than the installed one, and which of the two a pipeline run would use.
+// InfoSDKPin reports the repository pin and its required engine before runtime verification.
 type InfoSDKPin struct {
 	Pin       string `json:"pin"`
 	Installed string `json:"installed"`
@@ -508,47 +509,42 @@ func sdkPinLine(pin *InfoSDKPin) string {
 	if pin.Refusal != "" {
 		return pin.Refusal
 	}
-	if pin.Switches {
-		return fmt.Sprintf("this repo pins SDK %s, so a pipeline run switches to %s at %s",
-			pin.Pin, pin.Runs, tildePath(pin.RunsFrom))
-	}
-	return fmt.Sprintf("this repo pins SDK %s, and the installed %s runs it", pin.Pin, pin.Installed)
+	return fmt.Sprintf("this repo pins SDK %s; execution requires verified engine %s", pin.Pin, pin.Runs)
 }
 
 func gatherSDKPin(info Info) *InfoSDKPin {
 	if !info.Project.Found {
 		return nil
 	}
-	pin, err := readSDKPin(info.Project.SparkwingDir)
-	if err != nil || pin.version == "" || pin.version == info.Version.Installed {
+	typescript, err := pipelineentry.IsTypeScript(info.Project.SparkwingDir)
+	if err != nil {
+		return &InfoSDKPin{Installed: info.Version.Installed, Refusal: err.Error()}
+	}
+	sdk := engine.GoSDK
+	if typescript {
+		sdk = engine.TypeScriptSDK
+	}
+	return gatherSDKPinWith(info, sdk, readEnginePin, enginePinVersion)
+}
+
+func gatherSDKPinWith(info Info, sdk engine.SDKKind, readPin func(string, engine.SDKKind) (engine.Pin, error), versionFor func(engine.Pin) (string, error)) *InfoSDKPin {
+	if !info.Project.Found {
 		return nil
 	}
-	report := &InfoSDKPin{
-		Pin:       pin.version,
-		Installed: info.Version.Installed,
-		Runs:      info.Version.Installed,
-		RunsFrom:  info.Binary,
-	}
-	mode, err := toolchainMode(os.Getenv(toolchainModeEnv))
+	report := &InfoSDKPin{Installed: info.Version.Installed}
+	pin, err := readPin(filepath.Dir(info.Project.SparkwingDir), sdk)
 	if err != nil {
+		report.Refusal = err.Error()
 		return report
 	}
-	decision := planToolchainSwitch(info.Version.Installed, pin, mode, toolchainActive)
-	if decision.action == toolchainRefuse {
-		report.Runs, report.RunsFrom = "", ""
-		report.Refusal = toolchainLocalRefusal(decision).Error()
-		return report
-	}
-	if decision.action != toolchainSwitch {
-		return report
-	}
-	p, err := paths.DefaultPaths()
+	report.Pin = pin.Version
+	version, err := versionFor(pin)
 	if err != nil {
+		report.Refusal = err.Error()
 		return report
 	}
-	report.Switches = true
-	report.Runs = pin.version
-	report.RunsFrom = p.ToolchainBinary(pin.version)
+	report.Runs = version
+	report.Switches = version != info.Version.Installed
 	return report
 }
 
