@@ -3,9 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -47,16 +45,6 @@ func (c *Client) WithRunnerIdentity(id string) *Client {
 	return c
 }
 
-// ProcessIdentity names this process for [Client.WithRunnerIdentity] as
-// "role:host:pid", for a caller with no stabler name of its own.
-func ProcessIdentity(role string) string {
-	host, err := os.Hostname()
-	if err != nil || host == "" {
-		host = "unknown-host"
-	}
-	return fmt.Sprintf("%s:%s:%d", role, host, os.Getpid())
-}
-
 // WithTriggerNodeRunner names inprocess or k8s execution before the client is shared.
 func (c *Client) WithTriggerNodeRunner(kind string) *Client {
 	c.triggerNodeRunner = kind
@@ -76,24 +64,6 @@ func (c *Client) WithAllowRepos(patterns []string) *Client {
 		return c
 	}
 	c.allowRepos = append([]string{}, patterns...)
-	return c
-}
-
-// ClaimResources is what a runner reports about its CPU and memory with each
-// claim: Capacity is the most it could give one node, Availability what it has
-// free now.
-type ClaimResources struct {
-	Capacity     store.ExecutorResource `json:"capacity"`
-	Availability store.ExecutorResource `json:"availability"`
-}
-
-// WithClaimResources has every trigger and node claim report what fn returns,
-// alongside the platform the client detects for itself. Both go only to a
-// controller whose GET /api/v1/capabilities advertises claims.profile. A nil
-// report sends no resources. It returns the same client for chaining; set it
-// before the client serves requests.
-func (c *Client) WithClaimResources(fn func() *ClaimResources) *Client {
-	c.claimResources = fn
 	return c
 }
 
@@ -137,11 +107,6 @@ func (c *Client) addClaimProfile(ctx context.Context, body map[string]any, allow
 	}
 	platform := observedPlatform()
 	body["platform"] = map[string]string{"os": platform.OS, "arch": platform.Arch}
-	if c.claimResources != nil {
-		if resources := c.claimResources(); resources != nil {
-			body["resources"] = resources
-		}
-	}
 }
 
 func (c *Client) readClaimCapabilities(ctx context.Context) (claimCapabilities, bool) {

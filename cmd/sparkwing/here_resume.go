@@ -165,6 +165,7 @@ func runHereAward(ctx context.Context, options client.EngineOptions, run string,
 		return completion, incompleteHereHandoff(run, err)
 	}
 	session.input.RunID, session.input.SealedRequest, session.input.RequestHash, session.input.Accepted = input.RunID, input.SealedRequest, input.RequestHash, input.Accepted
+	session.input.GrantedRunner = award.Runner
 	completion, runErr := session.host.Run(ctx, session.input)
 	if err := errors.Join(runErr, ctx.Err()); err != nil {
 		return completion, incompleteHereHandoff(run, err)

@@ -39,25 +39,7 @@ type LiveLogChunk struct {
 	Done bool `json:"done"`
 }
 
-// AppendNodeLiveLog posts one batch of a running node's log lines to
-// the controller, which holds them in a bounded ring for live readers.
-// The durable copy is the logs surface's job; this call only feeds the
-// live view. The node's claim travels in ctx, exactly as it does for
-// every other node write.
-func (c *Client) AppendNodeLiveLog(ctx context.Context, runID, nodeID string, data []byte) error {
-	if len(data) == 0 {
-		return nil
-	}
-	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/logs",
-		url.PathEscape(runID), url.PathEscape(nodeID))
-	return c.postRaw(ctx, path, data, http.StatusNoContent)
-}
-
-// AppendNodeLiveLogAt is [Client.AppendNodeLiveLog] for a writer that
-// numbers its bytes: data begins at byte offset off of the node's whole
-// log, which lets a reader join the live view to the log's segments.
-// attempt names the attempt the offsets count, as [store.LiveLogAttempt]
-// spells it.
+// AppendNodeLiveLogAt posts bytes at an offset in a fenced execution attempt's log.
 func (c *Client) AppendNodeLiveLogAt(ctx context.Context, runID, nodeID, attempt string, off int64, data []byte) error {
 	if len(data) == 0 {
 		return nil

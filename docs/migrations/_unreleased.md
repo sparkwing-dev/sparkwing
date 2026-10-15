@@ -1,5 +1,18 @@
 # Migrating to the next release
 
+## CLI client retirement
+
+The legacy controller client no longer exposes `ClaimLaunch`, `SourceCredential`,
+`WithClaimResources`, `BaseURL` or `AppendNodeLiveLog`. Launcher claims use
+`NewEngineClient` with `EngineOptions.Launcher` and the shared `ClaimRequest`.
+The controller's source-release route retains its capability policy and audited
+credential response. Log writers name their execution attempt and byte offset.
+
+`repos info` reads pipeline history through the local controller's public run
+projection. It follows controller pagination and reports history-read failures.
+Each pipeline shows the status of its latest admitted run. A queued run has no
+start time until execution starts.
+
 ## Sealed step selections
 
 `--sw-start-at`, `--sw-stop-at` and `--sw-only` enter the request seal as

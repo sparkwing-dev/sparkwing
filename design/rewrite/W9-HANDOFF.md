@@ -1,8 +1,96 @@
 # W9 handoff
 
-This continuation starts at 9a68cf36b in the integration merge. W9 is still
+This continuation starts at bea01dfe3 with a clean worktree. W9 is still
 incomplete. The lead owns Git staging/commits, independent review, pipelines
-and native QA. The session 10 notes supersede conflicting earlier status below.
+and native QA. Session 11 supersedes conflicting earlier status below.
+
+## This continuation (session 11)
+
+### Implementation and deletion
+
+Deleted the unused legacy launcher client, its source-credential decoder and
+server-failure sentinel. Removed the unused claim-resource callback/type,
+process-identity helper, base-URL accessor and unpositioned live-log writer.
+Final launcher claims retain EngineOptions.Launcher and the shared ClaimRequest.
+No production caller required migration for these dead APIs.
+
+Removed repos info's remaining direct state.db opener and Store.ListRuns path.
+Its caller and builder now use controllerwire.RunReader. Pipeline history follows
+the existing validated cursor visitor. Read failures propagate. Latest run number
+selects the displayed state, including queued runs without a start time.
+The migrated caller is cmd/sparkwing/repos_info.go.
+
+Invariant: every here host receives the runner identity from its controller
+award, regardless of the native binder's proposed identity. runHereAward now
+sets GrantedRunner before invoking RunHost. A generated property reproduced
+the missing assignment and passes 128 varied awarded/ambient identities.
+This closes the CLI part of that handoff. Native hello remains W3 integration.
+
+The tracked CLI/client diff deletes 169 production lines and 23 old test lines,
+including two whole files. These are gross deleted-line counts, including
+imports, comments and blanks. Production source is 129 lines smaller overall.
+The retired source-error test covered only the removed classifier. Final typed
+client retry/error tests remain active. No parked T1 source test is newly ported.
+
+### Verification
+
+Commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOCACHE and GOTMPDIR under
+/tmp/sw-astra-W9. Test temporary files also use that root through TMPDIR.
+
+- Whole-repository go build -p 4 ./... passes.
+- Scoped go vet -p 4 passes for cmd/sparkwing, pkg/controller/client,
+  internal/clisurface, internal/controllerwire and tests/acceptance.
+- CLI here/local/repository tests pass, including the runner property,
+  controller pagination, queued-state display and loud history failures.
+- Typed engine/step/data/cache/sizing and launcher-sync client checks pass.
+- All TestSurface components pass. Removed-client-API assertions now cover
+  ClaimLaunch, SourceCredential, WithClaimResources, BaseURL and AppendNodeLiveLog.
+  No native acceptance cell was unskipped or claimed complete.
+- Full clisurface, controllerwire, doccheck, apiref and apispec tests pass.
+- The default-team caller inventory passes. It reports no stale W9 row.
+- Both TypeScript release/publication checks and both release-target checks
+  pass. The existing Windows x64/arm64 packaging handoff required no new edit.
+  Native Windows bridge execution remains CI evidence.
+- Commentcheck passes across 2,113 files. Changelog and whitespace checks pass.
+
+The client API snapshot was regenerated with cmd/apidiff. Migration/changelog
+source and embedded copies are synchronized. No Sparkwing binary, operational
+service, release or publication ran. No Git state was written.
+
+### Remaining integration and contracts
+
+No new foreign contract change is requested. Earlier open requests remain:
+initial here-reason persistence through intake/replay, local schedule registration
+and proof/pin operations, timer/tick/dry-run bindings, debug-release policy and
+acknowledgement, and authorized result/log publication.
+
+A1-50 still needs the native local-controller factory, private captured inputs,
+source/data/cache authority and W3 host/process/lease assembly. Publication has
+PublishPolicy but no callable result/log publisher contract to bind. W9 must keep
+the local verdict when the eventual upload fails. The shared native bootstrap
+composition for fetch-source/run-node also remains open. The interfaces and
+fake/component checks do not establish real execution through those seams.
+
+The remaining Client trigger, claim and raw state methods still serve W3's old
+StateStoreOld/RunCoordination graph. Its live call sites include
+internal/orchestrator/{trigger_host.go,run_node.go,backends.go,hosted_backends.go}
+and pkg/storage/storeurl/spec.go. Removing that graph requires its owner to move
+to the final sealed run and fenced transaction interfaces. No forwarding shim
+or replacement stub was added. Full native HTTP/api.sock, platform, storage,
+Docker/Kubernetes and real-repository acceptance remains open.
+
+### Shared files and friction
+
+Shared edits are tests/acceptance/surface_contract_test.go,
+.apidiff/pkg_controller_client.txt, CHANGELOG.md and the generated docs mirrors.
+No foreign runtime caller file changed. Lead-owned amendments and handoffs are
+unchanged. No new environment variable, interface, package or compatibility
+mechanism was added.
+
+Friction remains the missing native composition, sandbox socket restrictions,
+read-only Git metadata and native-platform evidence. Overwing reports that its
+installed binary is stale, but matching/showing standards succeeded. The lead
+must review and commit this continuation. Scratch is removed before reporting.
 
 ## This continuation (session 10)
 

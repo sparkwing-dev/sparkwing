@@ -30,11 +30,8 @@ type Client struct {
 	runnerIdentity atomic.Pointer[string]
 
 	triggerNodeRunner string
-	// bug: Old controllers reject allow_repos, platform and resources, so they
-	// are sent only after capability discovery.
-	allowRepos     []string
-	claimResources func() *ClaimResources
-	claimCaps      atomic.Pointer[claimCapabilities]
+	allowRepos        []string
+	claimCaps         atomic.Pointer[claimCapabilities]
 
 	pollAdvice atomic.Int64
 
@@ -61,11 +58,6 @@ func NewWithToken(baseURL string, httpClient *http.Client, token string) *Client
 	c.token = token
 	return c
 }
-
-// BaseURL returns the controller URL the client was constructed
-// against. Used by RemoteBackends to spin up sibling HTTP backends
-// (concurrency, logs) against the same controller.
-func (c *Client) BaseURL() string { return c.baseURL }
 
 // Token returns the bearer token the client was constructed with, or
 // "" when constructed without auth. Used by RemoteBackends to thread

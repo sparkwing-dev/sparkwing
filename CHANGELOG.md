@@ -22,6 +22,8 @@ unlock.
 
 ### Changed
 
+- **cli + controller/client (Breaking):** Repository pipeline history uses the local controller's public run projection, and unused launcher, source-credential and unpositioned log-write client APIs are removed
+  History reads follow pagination and fail loudly. Here hosting preserves the controller-awarded runner identity. See [migration guide](docs/migrations/_unreleased.md#cli-client-retirement).
 - **Breaking:** Pipeline trigger submits the sealed run request through the shared controller client. The old trigger request builder and separate here-host loop are removed. Here reasons, source bundles and captured environment delivery still require their native intake bindings.
 - **Breaking:** Local and detached runs, standalone hosting, schedules, debug resume and repository history use the final controller/host boundaries. The CLI's direct store writers, resident consumer, duplicate supervisor command and obsolete client helpers are removed. Native factories and missing local schedule/release/publication contracts still block those operations before effects.
 - **Cache selection:** `run --sw-cache-from=` explicitly disables a machine cache profile.

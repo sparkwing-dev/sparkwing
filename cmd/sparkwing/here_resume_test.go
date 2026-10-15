@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 	"unicode/utf8"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
@@ -127,6 +129,32 @@ func TestHereResumeUsesOnlyAwardedInputs(t *testing.T) {
 	completion, err := resumeHereRun(t.Context(), client.EngineOptions{URL: "https://controller.example"}, "retry-run", deps)
 	if err != nil || completion.Outcome != "success" || closed != 1 || !reflect.DeepEqual(calls, []string{"claim", "bind", "host"}) {
 		t.Fatalf("completion=%+v calls=%v closed=%d error=%v", completion, calls, closed, err)
+	}
+}
+
+func TestHereHostPreservesAwardedRunnerProperty(t *testing.T) {
+	base := hereAward(t)
+	property := func(name, kind string, labels []string, ambient nodeproto.RunnerIdentity) bool {
+		award := base
+		award.Runner = nodeproto.RunnerIdentity{Name: name, Type: kind, Labels: labels}
+		called, closed := false, false
+		completion, err := runHereAward(t.Context(), client.EngineOptions{}, award.RunID, award,
+			func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (hereHostSession, error) {
+				return hereHostSession{
+					input: nodehost.RunInput{GrantedRunner: ambient}, close: func() error { closed = true; return nil },
+					host: hereTestHost(func(_ context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {
+						called = true
+						if !reflect.DeepEqual(input.GrantedRunner, award.Runner) {
+							return nodehost.RunCompletion{}, errors.New("host received ambient runner identity")
+						}
+						return nodehost.RunCompletion{Outcome: "success"}, nil
+					}),
+				}, nil
+			})
+		return err == nil && called && closed && completion.Outcome == "success"
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 128}); err != nil {
+		t.Fatal(err)
 	}
 }
 
