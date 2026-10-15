@@ -132,7 +132,6 @@ func TestNodeClaimOwnership_StrangerTokenCannotWriteAnotherRunnersNode(t *testin
 		{"steps/skip", "/api/v1/runs/run-1/nodes/only/steps/skip", `{"step_id":"s1"}`},
 		{"steps/annotations", "/api/v1/runs/run-1/nodes/only/steps/annotations", `{"step_id":"s1","message":"hi"}`},
 		{"steps/summary", "/api/v1/runs/run-1/nodes/only/steps/summary", `{"step_id":"s1","markdown":"hi"}`},
-		{"bounce/consume", "/api/v1/runs/run-1/nodes/only/bounce/consume", `{"seq":1,"outcome":"bounced"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := f.post(t, f.stranger, tc.path, tc.body); got != http.StatusForbidden {
@@ -371,7 +370,6 @@ func TestNodeClaimOwnership_CrossRunReadsAndHeartbeatNeedAClaim(t *testing.T) {
 	for _, path := range []string{
 		"/api/v1/runs/run-2/nodes/victim",
 		"/api/v1/runs/run-2/nodes/victim/output",
-		"/api/v1/runs/run-2/nodes/victim/bounce",
 	} {
 		code, body := f.get(t, f.owner, path)
 		if code != http.StatusForbidden {

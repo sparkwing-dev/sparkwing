@@ -3,10 +3,13 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func ownerReaperFixture(t *testing.T, started bool, disruptions int, origin runspec.Origin) (*Tenant, *time.Time, SingletonLease) {
@@ -225,6 +228,77 @@ func TestOwnerReaperLeavesControllerOwnershipToElection(t *testing.T) {
 	*now = now.Add(time.Minute)
 	if _, err := tenant.s.ReapUnits(t.Context(), lease, 10); err == nil {
 		t.Fatal("expired reaper accepted an empty sweep")
+	}
+}
+
+func TestOwnerReaperRechecksControllerHandoff(t *testing.T) {
+	for _, mode := range []string{"live", "lapsed", "missing"} {
+		t.Run(mode, func(t *testing.T) {
+			tenant, request, now := planFixture(t, runspec.DispatchController)
+			s := tenant.s
+			rewriteSchemaExec(t, s.db, `UPDATE triggers SET lease_expires_at=? WHERE id=?`, now.UnixNano(), request.RunID)
+			stale, err := s.expiredUnits(t.Context(), 10)
+			if err != nil || len(stale) != 1 {
+				t.Fatalf("expired planner: %+v, %v", stale, err)
+			}
+			lease, err := s.AsOperator().AcquireSingletonLease(t.Context(), "controller.reaper", "reaper", time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if reaped, err := s.ReapUnits(t.Context(), lease, 10); err != nil || len(reaped) != 1 || !reaped[0].Requeued {
+				t.Fatalf("recover planner: %+v, %v", reaped, err)
+			}
+			launcher := authorityRoot("launcher", "")
+			launcher.Subject.Kind = capability.SubjectService
+			launcher.Grants = []capability.Grant{capability.ClaimsLaunch}
+			authorityPersist(t, s, launcher)
+			claim, err := s.ClaimUnit(t.Context(), UnitDemand{CapabilityPrefix: launcher.Prefix, Target: &UnitRef{Kind: capability.UnitPlan, RunID: request.RunID}, Capacity: match.Resources{Cores: 1}, Available: match.Resources{Cores: 1}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			issued, err := s.ExchangeCapability(t.Context(), capability.ExchangeSpec{BootstrapPrefix: claim.Award.CapabilityPrefix})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Actor = Actor{Kind: ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: issued.Capability.Prefix}, CapabilityPrefix: issued.Capability.Prefix, Owner: claim.Owner}
+			if _, err := tenant.AcceptPlan(t.Context(), request); err != nil {
+				t.Fatal(err)
+			}
+			switch mode {
+			case "lapsed":
+				rewriteSchemaExec(t, s.db, `UPDATE leases SET until=? WHERE name='controller.owner'`, now.UnixNano())
+			case "missing":
+				rewriteSchemaExec(t, s.db, `DELETE FROM leases WHERE name='controller.owner'`)
+			}
+			before, err := tenant.ReadRun(t.Context(), request.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			actor := Actor{Kind: ActorReaper, Owner: OwnerLeaseRef{Kind: OwnerController, Name: lease.Name, Holder: lease.Holder, Generation: lease.Generation}}
+			// safety: another pass can commit recovery and plan acceptance
+			// between candidate selection and the per-unit transaction.
+			err = s.inTx(t.Context(), func(tx *storeTx) error {
+				if err := assertSingletonLeaseTx(t.Context(), tx, lease, "controller.reaper", tx.now()); err != nil {
+					return err
+				}
+				reaped, err := reapOwnerUnitTx(t.Context(), tx, stale[0], actor, tx.now())
+				if err == nil && reaped != nil {
+					t.Errorf("stale candidate recovered accepted plan: %+v", reaped)
+				}
+				return err
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var status string
+			if err := s.db.QueryRow(`SELECT status FROM triggers WHERE id=?`, request.RunID).Scan(&status); err != nil || status != "done" {
+				t.Fatalf("accepted planner: %q, %v", status, err)
+			}
+			after, err := tenant.ReadRun(t.Context(), request.RunID)
+			if err != nil || !reflect.DeepEqual(after, before) {
+				t.Fatalf("stale candidate changed controller run: %+v, %v", after, err)
+			}
+		})
 	}
 }
 

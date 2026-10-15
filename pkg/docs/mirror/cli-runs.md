@@ -23,7 +23,6 @@ Pass --profile NAME to select that profile's backend.
 - `approvals` -- List approval gates (pending and history)
 - `retry` -- Trigger fresh runs copying pipeline + args from old ones
 - `cancel` -- Request cancellation of in-flight runs
-- `bounce` -- Restart one running job's process without failing the run
 - `prune` -- Delete finished runs older than a threshold, or by id
 
 ## `sparkwing runs annotations`
@@ -205,50 +204,6 @@ sparkwing runs approvals list --run run-fictional
 
 # Emit JSON for an agent
 sparkwing runs approvals list -o json
-```
-
-## `sparkwing runs bounce`
-
-Restart one running job's process without failing the run
-
-Stops the process executing one running job and runs that
-job again, in place. The run keeps going: the job never reaches a
-terminal state, so nothing downstream sees a failure and no other
-job is disturbed.
-
-Use it for a job that is wedged or misbehaving when cancelling the
-whole run would cost more than it saves.
-
-The request is recorded and the verb returns; the runner supervising
-the job picks it up within a few seconds, stops the process (SIGTERM,
-then SIGKILL after the grace period), and re-runs the job from its
-first step. Steps therefore run again, so a job with side effects
-needs the same idempotency a restarted pod already demands.
-
-A job that finishes before the stop lands is left alone. Bouncing
-again is allowed -- one request is one restart.
-
-The local runner is what acts on the request, whether the run's state
-lives here or on a controller. A job the in-cluster Kubernetes runner
-executes records the request and nothing consumes it, so the job keeps
-running; cancel the run and retry it instead.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--run RUN_ID` | Run id owning the job |
-| `--node NODE_ID` | Job id to bounce |
-| `--profile NAME` | Profile name for remote runs; omit for local runs |
-
-### Examples
-
-```sh
-# Bounce a wedged job
-sparkwing runs bounce --run run-fictional --node build
-
-# Bounce a job in a run a controller holds
-sparkwing runs bounce --run run-fictional --node build --profile prod
 ```
 
 ## `sparkwing runs cancel`
@@ -741,7 +696,7 @@ With --follow, polls until the run reaches a terminal status. Pass
 
 A local read looks the id up in this home's own store first and then
 in each standalone store, and reports which one held it. The verbs
-that write to a run -- bounce, annotations add, approvals approve
+that write to a run -- annotations add, approvals approve
 and deny, debug rerun -- write in whichever store held
 it. Cancel and retry cannot act on a standalone run at all, because
 no daemon arbitrates one, and say so instead of reporting it

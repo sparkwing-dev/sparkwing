@@ -5715,3 +5715,7 @@ func databaseEmpty(ctx context.Context, tx *storeTx) (bool, error) {
 	err := tx.QueryRowContext(ctx, q).Scan(&n)
 	return n == 0, err
 }
+
+func isTerminalRunStatus(status string) bool {
+	return status == "success" || status == runStatusFailed || status == runStatusCancelled
+}

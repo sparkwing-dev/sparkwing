@@ -585,7 +585,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 |-------------------|---------------------------------------------------------------------------------------------------|
 | `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/runs/{id}/events`, `/trends`, `/agents`, `/queue/state`, `/credits`, `/credits/history`, `/compute-limits`, per-node metrics GETs, and similar team-scoped reads. `/runs/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
 | `runs.write`      | POST `/api/v1/triggers`: starting new work |
-| `runs.control`    | POST `/runs/{id}/cancel`, `/runs/{id}/retry`, `/runs/{id}/nodes/{id}/bounce`, `/runs/{id}/nodes/{id}/release`, and the cron writes (`/crons/repos`, `pause`, `resume`, `run`, `disarm`, `override`): acting on a run or schedule somebody else started |
+| `runs.control`    | POST `/runs/{id}/cancel`, `/runs/{id}/retry`, `/runs/{id}/nodes/{id}/release`, and the cron writes (`/crons/repos`, `pause`, `resume`, `run`, `disarm`, `override`): acting on a run or schedule somebody else started |
 | `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, the per-node write routes, GET claimed node data, GET the claimed run and trigger, and read-only Git proxy routes scoped to a live claimed run |
 | `logs.read`       | GET `/api/v1/runs/{id}/logs`, `/runs/{id}/logs/{node}`, `/runs/{id}/logs/{node}/stream`, `/runs/{id}/logs/{node}/completeness`, `/runs/{id}/logs/search` and `/runs/grep` |
 | `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`. `/triggers/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
@@ -784,7 +784,7 @@ already lapsed, because a lapsed row proves nothing about who is calling. The
 `admin` bypasses all of it.
 
 A `nodes.claim` token also reaches only the runs it is working on. The node
-read routes (`GET nodes/{id}`, `nodes/{id}/output`, `nodes/{id}/bounce`) and
+read routes (`GET nodes/{id}`, `nodes/{id}/output`) and
 `POST /runs/{id}/heartbeat` answer `403 claim_required` unless the caller holds
 an unexpired claim on some node of that run. `admin` bypasses; so does
 `runs.read` on the reads, which already grants the wider view through
@@ -987,7 +987,7 @@ identities, memberships and sessions go, and every token it minted in any team
 is revoked. Teams the user is the only member of, their personal space
 included, are deleted as above. In teams the user shares, rows that recorded
 the user stay with the team and name `deleted user` instead: runs, triggers,
-approvals, cron schedules armed, node bounces, debug-pause releases, credit
+approvals, cron schedules armed, debug-pause releases, credit
 grants, node and trigger claims, secrets, egress usage (bytes kept, merged per
 month) and the text of event payloads. The match is on the account's email and
 every email its sign-in identities asserted, never a linked sign-in's, in every

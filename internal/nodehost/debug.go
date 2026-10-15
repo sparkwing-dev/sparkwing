@@ -10,8 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Debug says where a run pauses for an operator and where operators' bounce
-// requests come from. The zero value pauses nowhere and polls no bounces.
+// Debug selects the operator pauses for a run.
 type Debug struct {
 	// PauseBefore and PauseAfter name the nodes to hold before they start and
 	// after they end, as --sw-pause-before and --sw-pause-after.
@@ -20,24 +19,11 @@ type Debug struct {
 	PauseOnFailure bool
 	// PauseTimeout releases a pause nobody resumes; zero means 30 minutes.
 	PauseTimeout time.Duration
-	// Bounces is polled while a node runs; nil turns bounce off.
-	Bounces Bounces
 }
 
-// Bounces is the bounce-request surface of the store or the controller client.
-type Bounces interface {
-	PendingNodeBounce(ctx context.Context, runID, nodeID string) (*store.NodeBounce, error)
-	ConsumeNodeBounce(ctx context.Context, runID, nodeID string, seq int64, outcome string) error
-}
-
-var (
-	debugPausePoll = 500 * time.Millisecond
-	bouncePoll     = 5 * time.Second
-)
+var debugPausePoll = 500 * time.Millisecond
 
 const defaultDebugPauseTimeout = 30 * time.Minute
-
-var errBounced = errors.New("bounced by an operator")
 
 // safety: outermost, so pause-before holds an approval gate before it waits
 // and comes before skip_if, as in the dispatcher. A recovery node never
@@ -129,101 +115,4 @@ func debugSetStatus(ctx context.Context, n *NodeRun, status string) {
 
 func debugEvent(ctx context.Context, n *NodeRun, kind string, attrs map[string]any) {
 	hostEventJSON(ctx, n.Run, n.Plan.ID, kind, attrs)
-}
-
-// safety: inside admission, so a bounced node keeps the lease it was admitted
-// with, and outside the rest of the envelope, so a bounce restarts the node
-// from its artifacts down, as killing run-node did.
-func bounceLayer(cfg *Config, next Executor) Executor {
-	b := cfg.Debug.Bounces
-	if b == nil {
-		return next
-	}
-	return func(ctx context.Context, n *NodeRun) Result {
-		honored := map[int64]string{}
-		defer bounceSweep(context.WithoutCancel(ctx), b, n, honored)
-		for {
-			res, req := bounceWatch(ctx, b, n, next)
-			if req == nil {
-				return res
-			}
-			outcome, kind, reason := store.BounceBounced, "node_bounced", ""
-			switch {
-			case ctx.Err() != nil:
-				outcome, kind, reason = store.BounceMissed, "node_bounce_missed", "the run was ending"
-			case res.Outcome == sparkwing.Success:
-				outcome, kind, reason = store.BounceMissed, "node_bounce_missed", "the node finished before the kill landed"
-			}
-			writeCtx := context.WithoutCancel(ctx)
-			debugEvent(writeCtx, n, kind, bouncePayload(req, reason))
-			honored[req.Seq] = outcome
-			if err := b.ConsumeNodeBounce(writeCtx, n.Run.ID, n.Plan.ID, req.Seq, outcome); err != nil {
-				n.Run.Logger.Warn("nodehost: consume bounce", "run", n.Run.ID, "node", n.Plan.ID, "seq", req.Seq, "err", err)
-			}
-			if outcome == store.BounceMissed {
-				return res
-			}
-		}
-	}
-}
-
-// safety: the kill is the context's cancel, which every inner layer and the session already obey.
-func bounceWatch(ctx context.Context, b Bounces, n *NodeRun, next Executor) (Result, *store.NodeBounce) {
-	actx, cancel := context.WithCancelCause(ctx)
-	defer cancel(nil)
-	// safety: buffered so the node's goroutine never blocks on a watcher that returned.
-	done := make(chan Result, 1)
-	go func() { done <- next(actx, n) }()
-	ticker := time.NewTicker(bouncePoll)
-	defer ticker.Stop()
-	for {
-		select {
-		case res := <-done:
-			return res, nil
-		case <-ticker.C:
-		}
-		pollCtx, stop := context.WithTimeout(ctx, bouncePoll)
-		req, err := b.PendingNodeBounce(pollCtx, n.Run.ID, n.Plan.ID)
-		stop()
-		if err != nil {
-			n.Run.Logger.Debug("nodehost: poll bounce", "run", n.Run.ID, "node", n.Plan.ID, "err", err)
-			continue
-		}
-		if req != nil {
-			cancel(errBounced)
-			return <-done, req
-		}
-	}
-}
-
-// safety: a request that arrived after the node's last poll is closed as
-// missed rather than left pending to bounce a later node by the same id.
-func bounceSweep(ctx context.Context, b Bounces, n *NodeRun, honored map[int64]string) {
-	for range 8 {
-		req, err := b.PendingNodeBounce(ctx, n.Run.ID, n.Plan.ID)
-		if err != nil || req == nil {
-			return
-		}
-		outcome, ok := honored[req.Seq]
-		if !ok {
-			outcome = store.BounceMissed
-			debugEvent(ctx, n, "node_bounce_missed", bouncePayload(req, "the node ended before the kill was delivered"))
-		}
-		if err := b.ConsumeNodeBounce(ctx, n.Run.ID, n.Plan.ID, req.Seq, outcome); err != nil {
-			n.Run.Logger.Warn("nodehost: consume bounce", "run", n.Run.ID, "node", n.Plan.ID, "seq", req.Seq, "err", err)
-			return
-		}
-		honored[req.Seq] = outcome
-	}
-}
-
-func bouncePayload(req *store.NodeBounce, reason string) map[string]any {
-	attrs := map[string]any{
-		"seq": req.Seq, "requested_by": req.RequestedBy, "requested_at": req.RequestedAt,
-		"admission_lease_retained": true,
-	}
-	if reason != "" {
-		attrs["reason"] = reason
-	}
-	return attrs
 }

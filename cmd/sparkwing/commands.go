@@ -32,7 +32,7 @@ var allCommands = []*Command{
 	&cmdTokensRotate,
 	&cmdLimits, &cmdLimitsShow, &cmdLimitsSet,
 	&cmdJobs, &cmdJobsList, &cmdJobsStatus, &cmdJobsLogs, &cmdJobsStats, &cmdJobsRetry,
-	&cmdJobsCancel, &cmdJobsBounce, &cmdJobsPrune,
+	&cmdJobsCancel, &cmdJobsPrune,
 	&cmdJobsConsumer, &cmdJobsConsumerStart, &cmdJobsConsumerStatus, &cmdJobsConsumerStop,
 	&cmdHooks, &cmdHooksInstall, &cmdHooksUninstall, &cmdHooksStatus,
 	&cmdSecret, &cmdSecretSet, &cmdSecretGet, &cmdSecretList, &cmdSecretDelete, &cmdSecretRotate,

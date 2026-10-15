@@ -47,7 +47,7 @@ type Config struct {
 	Heartbeat time.Duration
 	// Admission admits each node before it runs; nil admits every node at once.
 	Admission *Admission
-	// Debug holds the run's debug pauses and bounce requests.
+	// Debug selects the run's operator pauses.
 	Debug Debug
 	// Invocation is the run row's invocation record, which the read paths
 	// redact secret arguments by.
@@ -204,7 +204,7 @@ type Layer func(cfg *Config, next Executor) Executor
 
 // safety: the order is the envelope's nesting, outermost first: debug pauses, then skip_if, which the
 // dispatcher checks after a pause-before but before a gate waits, then approvals and recovery, memo, which
-// copies a hit before any admission lease or group slot is taken, admission, bounce, artifacts, caches,
+// copies a hit before any admission lease or group slot is taken, admission, artifacts, caches,
 // retries, the worker cap and timeouts, expansion. The attempt closures and steps run inside the attempt executor.
 var layers = []Layer{
 	debugLayer,
@@ -212,7 +212,6 @@ var layers = []Layer{
 	approvalsLayer,
 	memoLayer,
 	admissionLayer,
-	bounceLayer,
 	artifactsLayer,
 	cachesLayer,
 	retryLayer,

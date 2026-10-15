@@ -32,6 +32,15 @@ func reapOwnerUnitTx(ctx context.Context, tx *storeTx, target expiredUnit, actor
 	if run.FinishedAt != nil {
 		return nil, nil
 	}
+	if run.Dispatch == string(runspec.DispatchController) {
+		var accepted int64
+		if err := tx.QueryRowContext(ctx, `SELECT plan_accepted_generation FROM runs WHERE team=? AND id=?`, target.team, run.ID).Scan(&accepted); err != nil {
+			return nil, err
+		}
+		if accepted > 0 {
+			return nil, nil
+		}
+	}
 	now = tx.now()
 	if owner.status == "claimed" && owner.lease.Valid && owner.lease.Int64 > now.UnixNano() {
 		return nil, nil

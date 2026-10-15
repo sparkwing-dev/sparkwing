@@ -1,8 +1,163 @@
 # W1 store handoff
 
-This session continues commit 1b3588e78. Its changes are uncommitted.
-The store transactions from earlier sessions remain in place. W1b's files
-were not edited. The lead owns committing and the full delivery checks.
+This session continues f5e05c1b8. Its changes are uncommitted. W1b's
+accounting, blob and log files were not edited. The lead owns committing,
+independent review and the full delivery checks.
+
+## Owner recovery fix
+
+A stale reaper candidate could reopen a completed planner after another pass
+recovered it and its successor accepted the plan. The candidate scan excluded
+accepted controller runs, but the per-unit transaction did not repeat that
+check. It wrote the planner back to pending and emitted run_requeued after
+ownership had passed to controller.owner.
+
+reapOwnerUnitTx now checks plan_accepted_generation under the run lock before
+recovery. It leaves an accepted controller plan alone with a live, lapsed or
+missing controller lease. A carried retry spec still does not count as acceptance.
+
+TestOwnerReaperRechecksControllerHandoff captures an expired planner candidate,
+recovers it with ReapUnits, awards and exchanges its successor with ClaimUnit
+and ExchangeCapability, then accepts its plan with AcceptPlan. It executes the
+saved candidate's transaction afterward and checks that the owner unit remains
+done and the complete run projection is unchanged. The test reproduced the
+pending planner and extra requeue before the fix. Its three lease cases pass.
+The test schedules committed phases directly without sleeps or timing guesses.
+It exercises SQLite transactions, not concurrent PostgreSQL lock acquisition.
+
+The plan validator and input/settings services are the existing contract fakes.
+The test uses the real capability, claim, acceptance and recovery transactions.
+It makes no billing, blob-integrity or native-process claim.
+
+## Bounce hard cut
+
+Removed RequestNodeBounce, PendingNodeBounce, ConsumeNodeBounce and
+ListNodeBounces from both Store and Tenant. Deleted NodeBounce, its outcomes,
+errors and SQL scanner. The final schema already has no node_bounces table.
+The shared terminal-run helper moved to store.go because retained legacy
+claim and accounting readers still use it.
+
+Removed the controller handlers, client methods, three route registrations,
+route classifications, CLI command/help, host polling layer and hosted-run
+injection. Account deletion and its fixture no longer name the missing table.
+The nodehost debug pause behavior remains in place.
+
+Deleted bounce-specific tests and removed their cases from mixed tests. Kept
+metric isolation, event-sequence concurrency and unrelated authorization cases.
+No archived test was ported in this session because bounce is an explicit
+feature deletion. Existing application-retry, lease-loss, disruption-limit and
+cancellation proofs continue to pass through the final APIs.
+
+The Go diff removes 690 production lines and 679 test lines, adding 24
+production lines and 80 test lines. That is 1,265 fewer Go lines. These counts
+include the recovery fix and exclude documentation, snapshots and this report.
+
+Updated the source docs, CLI reference, OpenAPI source, API reference, scoped
+API-snapshot entries and generated documentation mirrors. A pre-existing
+AnnotateOld spelling in CLI help prevented exact reference regeneration. The
+help now names the final Annotate API, matching the existing reference.
+
+## Verification
+
+All Go commands use GOWORK=off GOFLAGS=-buildvcs=false. GOCACHE is
+/tmp/sw-astra-W1/cache and GOTMPDIR/TMPDIR is /tmp/sw-astra-W1/tmp.
+Test parallelism is at most -p 4. The scratch directory is deleted at handoff.
+
+- Full repository go build -p 4 ./... passes.
+- The W1 selection documented below passes 171 top-level tests, 499 including
+  subtests, with no failures or skips. It includes the new handoff test.
+- go vet -p 4 passes for pkg/store, pkg/controller, pkg/controller/client,
+  internal/nodehost, internal/orchestrator and cmd/sparkwing.
+- Tests compile for pkg/controller, cmd/sparkwing, internal/nodehost and
+  internal/orchestrator with -run '^$'. Their full legacy suites are not claimed.
+- All TestEngine tests and the controller route-classification checks pass.
+- The default-team caller guard passes after removing the retired CLI caller.
+- The selected CLI help/registration/honesty checks pass. A temporary Go test
+  overlay compares every CLI reference page with splitCommandsMarkdown and
+  passes. It calls the renderer directly and runs no Sparkwing executable.
+- The complete internal/apispec suite passes, including committed Go-type,
+  route inventory and deterministic-generation checks.
+- Acceptance catalog, port inventory/destination, credential-route declaration
+  and invariant coverage checks pass. These execute no runtime acceptance cell.
+- Documentation mirror and whitespace checks pass. The repository-local Git
+  configuration has no user.name, user.email or core.worktree override.
+
+The full API snapshot already differs from the rewrite contracts in this
+branch. Only the removed bounce entries were changed. Full snapshot regeneration,
+PostgreSQL, race tests, lint, pipelines and independent review remain lead checks.
+SPARKWING_TEST_PG_URL is unset. No candidate runtime or pipeline was run.
+No Git write was performed.
+
+## Contract changes needed and remaining integration
+
+No other area's contract was changed. The previous controller-adapter gaps
+remain: W9 ReuseSource cannot carry MaterializeSource.Result, W9 ScheduleSnapshot
+cannot carry GuardRefusal, and W2 Authorized/IntakeForStore has no verified App
+delivery identity. Do not substitute body labels for those authenticated facts.
+EngineController.Claim still needs the signed runner-policy and enrolled-capacity
+adapters. Snapshot remains blocked on its declared wire gap. RunDetail and
+Compatibility remain W9 implementation work.
+
+W4/W6 must replace the plan/sealing/settings fakes. W2/W3/W8/W9 must wire the
+final authorization, lifecycle and keeper routes. The controller must run
+ReapUnits, ReconcileControllerRuns and completion delivery under their leases.
+W1b must join metered award/renewal/result/plan-end settlement and implement
+materializationRecords and nodeResultRecords inside the state transactions.
+
+Legacy StateStoreOld and old plan/claim/trigger APIs still have callers. Some
+remaining sweep/requeue APIs have W1b billing-test callers, and RunReaperLeased
+lives in W1b's storage-lease file. Those files were left to their owner.
+The earlier report below preserves the specific runtime boundaries and ports.
+
+No native acceptance cell was activated. internal/acceptance.New and Run still
+panic. T1's native driver and the host/runner integrations are required before
+those cells can truthfully pass. W1 remains incomplete until the remaining
+legacy callers migrate and the acceptance cells execute.
+
+## Shared files touched
+
+Production caller changes outside pkg/store:
+
+- cmd/sparkwing/commands.go, help_registry.go and main.go.
+- cmd/sparkwing/runs_bounce.go (deleted).
+- internal/nodehost/debug.go and scheduler.go.
+- internal/orchestrator/hosted_run.go and run_node_verb.go.
+- pkg/controller/auth.go, server.go and tenant_routes.go.
+- pkg/controller/bounce.go and client/bounce.go (deleted).
+
+Shared test changes:
+
+- cmd/sparkwing/help_test.go and runs_bounce_test.go (deleted).
+- internal/nodehost/debug_test.go.
+- internal/orchestrator/wingd_api_routes_test.go.
+- pkg/controller/bounce_test.go (deleted), node_claim_ownership_test.go and
+  team_boundary_test.go.
+
+Shared docs and artifacts:
+
+- .apidiff/pkg_store.txt and .apidiff/pkg_controller_client.txt.
+- CHANGELOG.md and api/openapi.yaml.
+- docs/api-reference.md, auth.md, cli-runs.md, cli.md and local-execution.md.
+- Corresponding pkg/docs/mirror files and pkg/docs/changelog.md, generated
+  through bin/sync-docs.sh.
+- This handoff.
+
+## Friction and assumptions
+
+Removing the hosted bounce adapter exposed an unused client import, which was
+removed before the successful repository build. The first CLI renderer check
+found the unrelated AnnotateOld help spelling. Its one-word correction closes
+that drift without publishing a scaffolding API name. The full API-snapshot
+drift predates this session and was left outside this cut.
+
+The recovery regression exposed a missing transaction recheck, fixed in nine
+production lines. No new setting, flag, interface, runtime service or retry loop
+was added. The temporary renderer overlay is verification scratch only.
+
+## Previous controller-adapter handoff
+
+The following records the work committed in f5e05c1b8. Its remaining contract
+boundaries still apply, except that the bounce surface described above is gone.
 
 ## Controller adapters
 

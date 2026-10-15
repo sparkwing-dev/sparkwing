@@ -22,7 +22,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -174,7 +173,7 @@ func RunHosted(ctx context.Context, paths Paths, opts Options, entry HostedEntry
 		State: state, Artifacts: backends.Artifact, Attempts: attempts, Admission: admission,
 		Debug: nodehost.Debug{
 			PauseBefore: opts.Debug.PauseBefore, PauseAfter: opts.Debug.PauseAfter,
-			PauseOnFailure: opts.Debug.PauseOnFailure, PauseTimeout: pauseTimeout(), Bounces: hostedBounces(backends.State),
+			PauseOnFailure: opts.Debug.PauseOnFailure, PauseTimeout: pauseTimeout(),
 		},
 		Invocation: invocation, Requires: requires,
 		Memo: &nodehost.Memo{
@@ -255,16 +254,6 @@ func hostedRunContext(opts Options, runID string) nodeproto.RunContextOld {
 		rc.Git = &nodeproto.Git{SHA: g.SHA, Branch: g.Branch, DefaultBranch: g.DefaultBranch, Repo: g.Repo, RepoURL: g.RepoURL}
 	}
 	return rc
-}
-
-func hostedBounces(state StateBackend) nodehost.Bounces {
-	switch s := state.(type) {
-	case localState:
-		return s.st
-	case *client.Client:
-		return s
-	}
-	return nil
 }
 
 // safety: plan code's logs have no node log to land in, so they go to the
