@@ -2,6 +2,7 @@ package sparkwing
 
 import (
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -14,7 +15,10 @@ func milliseconds(d time.Duration) *int64 {
 	}
 	return &v
 }
-func closureID(job, kind string, index int) string { return fmt.Sprintf("%s/%s/%d", job, kind, index) }
+
+func closureID(job, kind string, index int) string {
+	return fmt.Sprintf("%s/%s/%d", url.PathEscape(job), kind, index)
+}
 
 func planDocument(p *Plan) nodeproto.PlanDoc {
 	p.mu.Lock()
@@ -50,6 +54,7 @@ func planDocument(p *Plan) nodeproto.PlanDoc {
 	}
 	return doc
 }
+
 func resourceDocument(r *ResourceHints) *nodeproto.ResourceSpec {
 	if r == nil {
 		return nil
@@ -63,6 +68,7 @@ func resourceDocument(r *ResourceHints) *nodeproto.ResourceSpec {
 	}
 	return s
 }
+
 func concurrencyDocument(g *ConcurrencyGroup, cost int) nodeproto.ConcurrencySpec {
 	l := g.limit
 	scope := l.Scope
@@ -75,6 +81,7 @@ func concurrencyDocument(g *ConcurrencyGroup, cost int) nodeproto.ConcurrencySpe
 	}
 	return nodeproto.ConcurrencySpec{Group: g.name, Scope: string(scope), Capacity: l.Capacity, Cost: cost, OnLimit: string(policy), QueueTimeoutMS: milliseconds(l.QueueTimeout), CancelTimeoutMS: milliseconds(l.CancelTimeout)}
 }
+
 func jobDocument(p *Plan, n *JobNode) nodeproto.JobSpec {
 	s := nodeproto.JobSpec{ID: n.id, Needs: n.needs, NeedsIfPresent: n.needsOptional, NeedsGenerated: n.needsGenerated, Groups: jobGroups(p, n), Env: n.declaredEnv, Artifacts: n.outputGlobs, Requires: append(append([]string(nil), n.requires...), n.tools...), Prefers: n.prefers, Inline: n.inline, Optional: n.optional, ContinueOnError: n.continueOnError, Resources: resourceDocument(n.resources)}
 	for _, e := range n.consumes {
@@ -165,12 +172,14 @@ func jobGroups(p *Plan, n *JobNode) []string {
 	}
 	return groups
 }
+
 func failurePolicy(w *Work) ParallelFailurePolicy {
 	if w.failures == "" {
 		return FailFast
 	}
 	return w.failures
 }
+
 func planJob(p *Plan, id string) *JobNode {
 	p.mu.Lock()
 	defer p.mu.Unlock()

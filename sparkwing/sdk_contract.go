@@ -5,10 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"os"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
 // safety: Main keeps a pipeline executable independent of the controller and store.
@@ -60,7 +61,6 @@ func (n *JobNode) Memo(key MemoKeyFn, opts ...MemoOption) *JobNode {
 		}
 	}
 	return n
-
 }
 
 // safety: Memo applies one reuse policy to each static or generated group member.
@@ -69,7 +69,6 @@ func (g *JobGroup) Memo(key MemoKeyFn, opts ...MemoOption) *JobGroup {
 		n.Memo(key, opts...)
 	}
 	return g
-
 }
 
 // safety: Backoff declares retry delay without selecting an execution placement.
@@ -158,7 +157,7 @@ func (n *JobNode) Generate(fn GenerateFn) *Generator {
 	if fn == nil {
 		panic("sparkwing: Generate: callback required")
 	}
-	g := &Generator{id: fmt.Sprintf("%s/generate/%d", n.id, len(n.generators)), fn: fn}
+	g := &Generator{id: closureID(n.id, "generate", len(n.generators)), fn: fn}
 	n.generators = append(n.generators, g)
 	return g
 }
@@ -177,7 +176,6 @@ func (n *JobNode) NeedsGenerated(generators ...*Generator) *JobNode {
 		n.needsGenerated = append(n.needsGenerated, g.id)
 	}
 	return n
-
 }
 
 // safety: NeedsGenerated carries the same expansion barrier to every group member.
@@ -186,7 +184,6 @@ func (g *JobGroup) NeedsGenerated(generators ...*Generator) *JobGroup {
 		n.NeedsGenerated(generators...)
 	}
 	return g
-
 }
 
 // safety: EnvOption distinguishes process startup settings from body-only environment.
@@ -213,7 +210,6 @@ func (n *JobNode) Env(key, value string, opts ...EnvOption) *JobNode {
 	}
 	n.declaredEnv[key] = nodeproto.EnvValue{Value: value, Startup: o.startup}
 	return n
-
 }
 
 // safety: Env applies the same startup/body distinction to all members.
@@ -222,7 +218,6 @@ func (g *JobGroup) Env(key, value string, opts ...EnvOption) *JobGroup {
 		n.Env(key, value, opts...)
 	}
 	return g
-
 }
 
 // safety: ApprovalConfig preserves indefinite waiting when Timeout is zero.
@@ -252,13 +247,13 @@ func (p *Plan) Approval(id string, cfg ApprovalConfig) *Approval {
 	p.nodes = append(p.nodes, n)
 	p.byID[id] = n
 	return &Approval{id: id, node: n}
-
 }
 
 // safety: ID permits gate references without exposing executable-job internals.
 func (a *Approval) ID() string {
 	return a.id
 }
+
 func (a *Approval) depID() string {
 	return a.id
 }
@@ -279,7 +274,6 @@ func (a *Approval) NeedsIfPresent(deps ...Dep) *Approval {
 func (a *Approval) NeedsGenerated(generators ...*Generator) *Approval {
 	a.node.NeedsGenerated(generators...)
 	return a
-
 }
 
 // safety: Optional excludes a denied or expired gate from required run success.
@@ -309,7 +303,6 @@ func (w *Work) FailurePolicy(policy ParallelFailurePolicy) *Work {
 		panic("sparkwing: unknown failure policy")
 	}
 	return w
-
 }
 
 // safety: Annotation carries source location and the same severity vocabulary as log records.
@@ -366,7 +359,6 @@ func Variable(ctx context.Context, name string) (string, error) {
 		return "", fmt.Errorf("sparkwing: Variable(%q) is a secret", name)
 	}
 	return v, nil
-
 }
 
 // safety: MustVariable makes a missing required plain value fail the job.
@@ -400,5 +392,4 @@ func (p *Plan) Checkout(config Checkout) *Plan {
 func (a *Approval) SkipIf(predicate SkipPredicate, opts ...SkipOption) *Approval {
 	a.node.SkipIf(predicate, opts...)
 	return a
-
 }

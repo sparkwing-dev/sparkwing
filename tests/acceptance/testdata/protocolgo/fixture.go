@@ -89,5 +89,6 @@ var registerOnce sync.Once
 func Register() {
 	registerOnce.Do(func() {
 		sparkwing.Register[Inputs](Name, func() sparkwing.Pipeline[Inputs] { return Pipeline{} })
+		sparkwing.Register[sparkwing.NoInputs](ClosureName, func() sparkwing.Pipeline[sparkwing.NoInputs] { return ClosurePipeline{} })
 	})
 }
