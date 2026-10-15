@@ -122,14 +122,18 @@ func makeSubmodulePath(checkout, relative string) error {
 }
 
 func checkoutLFS(ctx context.Context, client *gitClient, checkout, remote, sha string) error {
-	endpoint, err := sourceurl.HTTPSForm(remote)
-	if err != nil {
-		return err
+	endpoint := remote
+	if strings.HasPrefix(remote, "https://") {
+		endpoint = strings.TrimRight(remote, "/")
+		if !strings.HasSuffix(endpoint, ".git") {
+			endpoint += ".git"
+		}
+		endpoint += "/info/lfs"
 	}
-	endpoint = strings.TrimRight(endpoint, "/") + "/info/lfs"
-	if _, err := client.run(ctx, checkout, remote, "-c", "lfs.url="+endpoint, "lfs", "fetch", "origin", sha); err != nil {
+	// safety: an explicit endpoint overrides repository .lfsconfig without dropping SSH authentication.
+	if _, err := client.run(ctx, checkout, endpoint, "-c", "lfs.url="+endpoint, "lfs", "fetch", "origin", sha); err != nil {
 		return fmt.Errorf("fetch source LFS: %w", err)
 	}
-	_, err = client.run(ctx, checkout, "", "lfs", "checkout")
+	_, err := client.run(ctx, checkout, "", "lfs", "checkout")
 	return err
 }

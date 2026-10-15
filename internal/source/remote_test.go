@@ -14,7 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
-func remoteFixture(t *testing.T, repositories map[string]string) string {
+func remoteFixture(t *testing.T, repositories map[string]string, lfsEndpoint ...string) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("fixture uses a POSIX executable shim; Windows source support requires Windows CI")
@@ -29,10 +29,17 @@ func remoteFixture(t *testing.T, repositories map[string]string) string {
 	}
 	bin := t.TempDir()
 	log := filepath.Join(bin, "commands.jsonl")
+	if lfsEndpoint == nil {
+		lfsEndpoint = []string{}
+	}
 	encode := func(value any) string { b, _ := json.Marshal(value); return string(b) }
-	program := "#!" + python + "\n" + `import json, os, stat, sys
+	program := "#!" + python + "\n" + `import json, os, shlex, stat, subprocess, sys
 args = sys.argv[1:]
 config = [x.split('=', 1)[1] for x in args if x.startswith('include.path=')]
+ssh = shlex.split(os.environ.get('GIT_SSH_COMMAND', ''))
+if '-i' in ssh:
+    config.append(ssh[ssh.index('-i') + 1])
+    config.extend(x.split('=', 1)[1] for x in ssh if x.startswith('UserKnownHostsFile='))
 record = {'args': args, 'env': dict(os.environ), 'files': config}
 for name in config:
     if stat.S_IMODE(os.stat(name).st_mode) != 0o600:
@@ -40,6 +47,21 @@ for name in config:
 with open(` + encode(log) + `, 'a') as out:
     out.write(json.dumps(record) + '\n')
 mapping = ` + encode(repositories) + `
+lfs_endpoint = ` + encode(lfsEndpoint) + `
+if 'lfs' in args and lfs_endpoint:
+    if 'fetch' in args:
+        if 'lfs.url=' + lfs_endpoint[0] not in args:
+            sys.exit(2)
+        if lfs_endpoint[0].startswith(('ssh://', 'git@')) and '-i' not in ssh:
+            sys.exit(3)
+        if lfs_endpoint[0].startswith('https://'):
+            auth = subprocess.run([` + encode(realGit) + `] + args[:args.index('lfs')] + ['config', '--get-urlmatch', 'http.extraheader', lfs_endpoint[0]], capture_output=True)
+            if auth.returncode != 0 or not auth.stdout:
+                sys.exit(4)
+    elif 'checkout' in args:
+        with open(os.path.join(args[args.index('-C') + 1], 'lfs.bin'), 'w') as out:
+            out.write('downloaded LFS content')
+    sys.exit(0)
 if 'fetch' in args or 'ls-remote' in args:
     args = [mapping.get(x, x) for x in args]
     os.environ['GIT_ALLOW_PROTOCOL'] = 'file'
@@ -51,6 +73,66 @@ os.execv(` + encode(realGit) + `, [` + encode(realGit) + `] + args)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return log
+}
+
+func TestPrepareCheckoutLFSKeepsAuthorizedSSHTransport(t *testing.T) {
+	for _, test := range []struct {
+		name, remote, endpoint string
+	}{
+		{"scp SSH", "git@8.8.8.8:team/repo.git", "git@8.8.8.8:team/repo.git"},
+		{"URL SSH", "ssh://git@8.8.8.8:2222/team/repo.git", "ssh://git@8.8.8.8:2222/team/repo.git"},
+		{"HTTPS", "https://8.8.8.8/team/repo", "https://8.8.8.8/team/repo.git/info/lfs"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir, _ := repository(t)
+			write(t, filepath.Join(dir, ".lfsconfig"), "[lfs]\n\turl = https://attacker.invalid/leak\n")
+			write(t, filepath.Join(dir, "lfs.bin"), "version https://git-lfs.github.com/spec/v1\n")
+			git(t, dir, "add", ".")
+			git(t, dir, "commit", "-qm", "lfs")
+			sha := git(t, dir, "rev-parse", "HEAD")
+			log := remoteFixture(t, map[string]string{test.remote: dir}, test.endpoint)
+			credential := source.Credential{Kind: "ssh", Host: "8.8.8.8", Secret: "-----BEGIN PRIVATE KEY-----\nprivate-key-content\n-----END PRIVATE KEY-----", KnownHosts: "8.8.8.8 ssh-ed25519 confirmed-key\n"}
+			if test.name == "HTTPS" {
+				credential = source.Credential{Kind: "https", Host: "8.8.8.8", Username: "source", Secret: "private-source-password"}
+			}
+			entry, err := source.PrepareCheckout(t.Context(), source.Spec{
+				RepoKey: "git:8.8.8.8/team/repo", RemoteURL: test.remote, SHA: sha, DefaultBranch: "trunk",
+				Checkout: runspec.CheckoutPolicy{Policy: nodeproto.SourceSpec{LFS: new(true)}},
+			}, source.Options{GitEnvironment: gitBase(t), Workspace: t.TempDir(), Access: &access{credential: credential}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := entry.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			content, err := os.ReadFile(filepath.Join(filepath.Dir(entry.Directory), "lfs.bin"))
+			if err != nil || string(content) != "downloaded LFS content" {
+				t.Fatalf("LFS content = %q, %v", content, err)
+			}
+			commands, err := os.ReadFile(log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(commands), credential.Secret) {
+				t.Fatal("LFS credential reached argv or environment")
+			}
+			for _, line := range strings.Split(strings.TrimSpace(string(commands)), "\n") {
+				var record struct {
+					Files []string `json:"files"`
+				}
+				if err := json.Unmarshal([]byte(line), &record); err != nil {
+					t.Fatal(err)
+				}
+				for _, file := range record.Files {
+					if _, err := os.Stat(file); !os.IsNotExist(err) {
+						t.Fatalf("LFS credential remains after exit: %s, %v", file, err)
+					}
+				}
+			}
+		})
+	}
 }
 
 func TestPrepareCheckoutFetchesSealedCommitAfterHeadAdvances(t *testing.T) {

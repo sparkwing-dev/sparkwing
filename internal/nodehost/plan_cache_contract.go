@@ -1,7 +1,6 @@
 package nodehost
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -174,11 +173,12 @@ func planCacheDigestValid(digest runspec.Hash) bool {
 // with the current secret matcher and placement. It refuses expansions and replays
 // neither stored settings nor old acceptance authority. Acceptance is still mandatory.
 func ValidatePlanCacheHit(entry PlanCacheEntry, inputs PlanCacheInputs, validation nodeproto.ValidationContext) (ValidatedPlanHit, error) {
-	if validation.Expansion || len(validation.ExistingJobs) != 0 || validation.SourceJob != "" {
-		return ValidatedPlanHit{}, errors.New("plan cache cannot supply generator expansions")
-	}
-	if validation.Secrets == nil {
-		return ValidatedPlanHit{}, errors.New("plan cache requires the current secret matcher")
+	return validatePlanCacheHit(entry, inputs, validation, (PlanningFunctions{}).defaults())
+}
+
+func validatePlanCacheHit(entry PlanCacheEntry, inputs PlanCacheInputs, validation nodeproto.ValidationContext, functions PlanningFunctions) (ValidatedPlanHit, error) {
+	if err := initialPlanningContext(validation); err != nil {
+		return ValidatedPlanHit{}, err
 	}
 	if err := planCacheEntryIdentity(entry); err != nil {
 		return ValidatedPlanHit{}, err
@@ -190,26 +190,16 @@ func ValidatePlanCacheHit(entry PlanCacheEntry, inputs PlanCacheInputs, validati
 	if !eligible.Eligible || key != entry.Key {
 		return ValidatedPlanHit{}, errors.New("plan cache entry does not match current planning inputs")
 	}
-	hash, err := runspec.CanonicalHash(entry.Plan)
+	canonical, hash, err := canonicalPlanningDocument(entry.Plan, functions.Hash)
 	if err != nil {
 		return ValidatedPlanHit{}, err
 	}
 	if hash != entry.PlanHash {
 		return ValidatedPlanHit{}, errors.New("plan cache plan hash mismatch")
 	}
-	plan, err := nodeproto.ValidatePlan(entry.Plan, validation)
+	plan, err := functions.Validate(entry.Plan, validation)
 	if err != nil {
 		return ValidatedPlanHit{}, err
-	}
-	decoder := json.NewDecoder(bytes.NewReader(entry.Plan))
-	decoder.UseNumber()
-	var value any
-	if err := decoder.Decode(&value); err != nil {
-		return ValidatedPlanHit{}, errors.New("plan cache plan cannot be canonicalized")
-	}
-	canonical, err := json.Marshal(value)
-	if err != nil {
-		return ValidatedPlanHit{}, errors.New("plan cache plan cannot be canonicalized")
 	}
 	return ValidatedPlanHit{Key: key, Plan: plan, CanonicalPlan: canonical, PlanHash: hash}, nil
 }

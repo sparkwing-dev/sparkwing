@@ -53,10 +53,13 @@ are part of this contract.
 | `nodehost.RunInput` | Gives a new or resumed owner the sealed request and existing acceptance. |
 | `nodehost.RunCompletion` | Reports the verdict after atomic run/unit finish. |
 | `nodehost.RunHost.Run` | Runs acquire through completion for every run-host placement. |
+| `nodehost.OwnerHost`, `OwnerStore` | Coordinate renewal, planning, acceptance, scheduling and atomic finish through the Tenant contracts. |
+| `nodehost.OwnerPlanning`, `OwnerLayerResult` | Supply checkout planning inputs and owner policy results without replacing intake or claim authority. |
 | `nodehost.GeneratorReplay` | Supplies recorded source output for code-only reconstruction. |
 | `nodehost.ClaimAuthority` | Refers to authenticated executor authority without granting it from a request body. |
 | `nodehost.NodeInput` | Binds an attempt to accepted spec, node, generation, runner and route bearer. |
 | `nodehost.NodeHost.Execute` | Replans, checks drift, runs executor layers and reports through store transitions. |
+| `nodehost.NewNodeExecutor`, `ExecutorDependencies`, `ExecutorProcess` | Connect the common executor to the fenced store, matched engine, SDK process and storage adapters. |
 | `nodehost.LayerSide` | Distinguishes owner decisions from executor work. |
 | `nodehost.OwnerSide`, `nodehost.ExecutorSide` | Name the two layer owners. |
 | `nodehost.LayerSpec`, `nodehost.LayerTable` | Declare the complete outer-to-inner envelope and retry scope. |
@@ -93,6 +96,7 @@ are part of this contract.
 | `source.Access.BundleURL` | Obtains a signed URL for an authorized source-bundle seed. |
 | `source.Credential` | Carries host-bound App, HTTPS or SSH material in memory. |
 | `source.Options` | Supplies host workspace and source access separately from sealed source data. |
+| `source.EngineResolver`, `source.EntryInstaller` | Resolve the pinned engine and install the SDK entry with that engine and an explicit install environment. |
 | `source.Entry` | Returns acquired checkout, exact commit, resolved default branch and SDK argv. |
 | `source.ForRequest`, `source.ForExecution` | Project intake acquisition inputs or the accepted execution checkout policy without rereading mutable settings. |
 | `source.Acquire` | Acquires source and builds or resolves the SDK entry through one placement-independent path. |
@@ -196,6 +200,44 @@ preflight and commits seal point two. A hit bypasses SDK planning compute, so
 it has no planning charge. Cache writes happen only for validated initial
 plans; generator expansions remain under their own transactional barrier.
 `PlanningInput` supplies this dependency to every placement's planning path.
+
+`PlanInitial` connects cache lookup, validation, invalidation and fresh planning.
+Its `PlanningFunctions` use the shared validator and canonical hasher by default.
+`PlannedInitial.CacheHit` records whether SDK planning ran. Every result still
+passes `AcceptPlan`. Cache diagnostics omit input hashes and declaration contents.
+
+## Host adapter boundaries
+
+`OwnerHost` waits for its first successful renewal before acquiring source.
+Acquisition receives the persisted acceptance on resume, even when the caller
+omitted it. Checkout resolution cannot replace the stored intake request.
+Owner policy tasks run independently so a waiting approval or admission does
+not stop ready siblings. Completed executor errors are checked against persisted
+terminal state because a committed failure must still release recovery jobs.
+
+The host implementation accepts the declared store, validator, hash and engine
+interfaces so their independent implementations can be tested with fakes.
+This does not complete the native placement adapters. Those adapters must supply
+SDK process launch, source installation, environment construction, owner policy
+evaluation, blob storage, route delegation and a state follower that catches up
+from persistence before waiting. The store owns the scheduling projection and
+decider. No host adapter may substitute its own readiness policy.
+
+Owner operations need cross-area contract completion. Remote result reuse
+needs a materialize-only reconciliation choice because a cache miss must remain
+available to the selected remote executor. The run-host actor also needs an
+authorized route for `DecisionCancelHolder`; the node transition table reserves
+that edge for controller, operator and reaper actors. These paths return errors
+until their authority and transaction contracts are supplied.
+
+The controller wire reconciliation response must carry enough persisted state
+to reconstruct `ReconciledNode`, including claim identity, retry consumption,
+job spec and execution settings. Expansion responses must distinguish newly
+inserted rows from replayed rows with subsequent lifecycle changes. The host
+cannot infer those facts from public job details or declaration bytes.
+Recovery execution also needs a store reader for the source's persisted failure
+stage and masked structured error. `ExecutorDependencies.ReadFailure` is the
+host adapter for that reader. It must not synthesize a failure from a status string.
 
 Decision 104 supports TypeScript on Windows. Both SDKs use hello for the bearer
 and argv for Windows protocol handles; no preload or platform refusal remains

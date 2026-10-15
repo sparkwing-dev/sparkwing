@@ -3,7 +3,6 @@ package source
 
 import (
 	"context"
-	"errors"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
@@ -45,13 +44,32 @@ type Credential struct {
 	ExtraRepositories []string
 }
 
+// EngineResolver selects a verified engine or restores the accepted engine identity.
+// engine.Resolver implements this contract for every placement.
+type EngineResolver interface {
+	Resolve(context.Context, engine.Pin, releaseasset.Target) (engine.Resolved, error)
+	Ensure(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error)
+}
+
+// EntryInstaller delegates SDK build or installation to the selected engine.
+// Install receives only the procenv.Install environment and returns SDK argv,
+// excluding protocol arguments. Installation must not run through the ambient engine.
+type EntryInstaller interface {
+	Install(context.Context, engine.Resolved, string, []string) ([]string, error)
+}
+
 // Options supplies host-owned workspace and authority, separate from sealed source data.
 type Options struct {
 	Workspace string
 	Access    Access
-	Engines   *engine.Resolver
+	Engines   EngineResolver
 	Target    releaseasset.Target
 	SDK       engine.SDKKind
+	Installer EntryInstaller
+	// ReadPin defaults to engine.ReadPin and must not execute repository code.
+	ReadPin func(string, engine.SDKKind) (engine.Pin, error)
+	// InstallEnvironment is the host's procenv.Install output, never ambient input.
+	InstallEnvironment []string
 	// GitEnvironment is a host-built procenv base, never implicit ambient input.
 	// The source authority may add its owner's SSH_AUTH_SOCK after authorization.
 	GitEnvironment []string
@@ -79,10 +97,7 @@ type Entry struct {
 // A supplied sealed Engine uses Engines.Ensure and must agree with the checkout pin. The result's
 // executable hosts the SDK command on every placement, including TypeScript on Windows.
 func Acquire(ctx context.Context, spec Spec, options Options) (*Entry, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return nil, errors.New("source acquisition requires the matched engine's SDK entry-install contract")
+	return acquire(ctx, spec, options)
 }
 
 // Close releases acquisition-owned resources without removing a user's checkout.

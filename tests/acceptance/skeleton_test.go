@@ -21,6 +21,8 @@ func pendingScenarios(t *testing.T, group string) {
 				t.Run("hermetic-library", acceptance.CheckKeeperCauses)
 			case "recovery-keeper-conflict-and-stop-join":
 				t.Run("hermetic-library", acceptance.CheckKeeperConflictAndStop)
+			case "recovery-reconciler-waits-and-reclaims":
+				t.Run("hermetic-library", acceptance.CheckHostReconciliation)
 			}
 			var areas []string
 			for _, area := range scenario.Requires {

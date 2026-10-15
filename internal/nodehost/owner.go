@@ -1,0 +1,225 @@
+package nodehost
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"reflect"
+	"sync"
+
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+)
+
+// OwnerStore is the transactional boundary used by every run-host placement.
+// Its methods are the Tenant contracts; hosts never append lifecycle events.
+type OwnerStore interface {
+	Reconciler
+	ExpansionStore
+	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
+	AcceptPlan(context.Context, store.PlanAcceptance) (store.AcceptedPlan, error)
+	TransitionRun(context.Context, store.RunTransition) (store.Applied, error)
+	TransitionNode(context.Context, store.NodeTransition) (store.Applied, error)
+	FinishRunAndUnit(context.Context, store.FinishRunRequest) (store.Applied, error)
+	RenewOwner(context.Context, store.Actor) (store.LeaseBeat, error)
+}
+
+// OwnerPlanning supplies checkout facts and SDK planning without replacing intake.
+type OwnerPlanning struct {
+	Declarations runspec.CheckoutDeclarations
+	Resolved     runspec.Resolved
+	Planning     PlanningInput
+	Functions    PlanningFunctions
+}
+
+// OwnerLayerResult either proposes a store transition or an authorized reuse candidate.
+// A transition ends this scheduling pass; a source still needs atomic reconciliation.
+type OwnerLayerResult struct {
+	Transition *store.NodeTransition
+	Source     *store.MaterializeSource
+}
+
+// OwnerHost coordinates the frozen lifecycle with source, SDK and placement adapters.
+// Project and Decide default to the shared store functions. Wait must catch up
+// against the snapshot's persisted state sequences before waiting for notification.
+// Layer implements each owner-side policy named by LayerTable; it is required before
+// dispatch so an unwired policy cannot silently permit execution.
+type OwnerHost struct {
+	Store    OwnerStore
+	Lease    lease.Keeper
+	Acquire  func(context.Context, RunInput) (*source.Entry, error)
+	Prepare  func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error)
+	Project  func(store.RunSnapshot) (store.ScheduleSnapshot, error)
+	Decide   func(store.ScheduleSnapshot) store.ScheduleDecision
+	Wait     func(context.Context, store.RunSnapshot) error
+	WaitNode WaitNodeChange
+	Layer    func(context.Context, LayerSpec, AcceptedRun, store.NodeRow) (OwnerLayerResult, error)
+	Local    func(store.NodeRow) bool
+	Bind     func(context.Context, AcceptedRun, store.ReconciledNode, *source.Entry) (NodeInput, error)
+	Executor NodeHost
+	Expand   func(context.Context, AcceptedRun, store.NodeRow) (json.RawMessage, *store.ExpansionFailure, error)
+}
+
+var (
+	_ RunHost    = (*OwnerHost)(nil)
+	_ OwnerStore = (*store.Tenant)(nil)
+)
+
+// Run requires an initial successful renewal before acquiring source or resuming work.
+// It joins every executor and renewal before returning, including error paths.
+func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunCompletion, err error) {
+	if h.Store == nil || h.Acquire == nil || h.Wait == nil {
+		return completion, errors.New("run host requires store, source and state follower")
+	}
+	if input.RunID == "" || input.RequestHash == "" || input.Owner.Kind != store.ActorRunHost || input.Owner.Owner.RunID != input.RunID {
+		return completion, errors.New("run host requires a bound owner and sealed request")
+	}
+	if h.Lease.Interval <= 0 || h.Lease.Lease <= h.Lease.Interval {
+		return completion, errors.New("run host requires a positive renewal interval below its lease")
+	}
+	ctx, stop := h.keepOwner(parent, input.Owner)
+	defer stop()
+	if err := context.Cause(ctx); err != nil {
+		return completion, err
+	}
+	snapshot, err := h.Store.ReadSnapshot(ctx, input.RunID)
+	if err != nil {
+		return completion, err
+	}
+	if err := ownerRequestMatches(input, snapshot.Run); err != nil {
+		return completion, err
+	}
+	if snapshot.Run.Spec != nil {
+		persisted, err := ownerAccepted(snapshot.Run)
+		if err != nil {
+			return completion, err
+		}
+		if input.Accepted != nil && !reflect.DeepEqual(*input.Accepted, persisted) {
+			return completion, errors.New("resume differs from persisted acceptance")
+		}
+		input.Accepted = &persisted
+	} else if input.Accepted != nil {
+		return completion, errors.New("resume has no persisted acceptance")
+	}
+	entry, err := h.Acquire(ctx, input)
+	if err != nil {
+		return completion, err
+	}
+	if entry == nil {
+		return completion, errors.New("source acquisition returned no entry")
+	}
+	defer func() { err = errors.Join(err, entry.Close()) }()
+	accepted, err := h.accept(ctx, input, snapshot.Run, entry)
+	if err != nil {
+		return completion, err
+	}
+	if snapshot.Run.State == store.RunPending {
+		_, err = h.Store.TransitionRun(ctx, store.RunTransition{RunID: input.RunID, To: store.RunRunning, Actor: input.Owner, Cause: store.RunStart})
+		if err != nil {
+			return completion, err
+		}
+	}
+	return h.schedule(ctx, input, accepted, entry)
+}
+
+func (h *OwnerHost) keepOwner(parent context.Context, actor store.Actor) (context.Context, func()) {
+	ready := make(chan struct{})
+	var once sync.Once
+	keeper := h.Lease
+	keeper.Renew = func(ctx context.Context) (lease.Beat, error) {
+		beat, err := h.Store.RenewOwner(ctx, actor)
+		return lease.Beat{CancelRequested: beat.CancelRequested, Watched: beat.Watched, WatchedNodes: beat.WatchedNodes}, err
+	}
+	keeper.Observe = func(beat lease.Beat) {
+		if h.Lease.Observe != nil {
+			h.Lease.Observe(beat)
+		}
+		once.Do(func() { close(ready) })
+	}
+	ctx, stop := keeper.Run(parent)
+	select {
+	case <-ctx.Done():
+	case <-ready:
+	}
+	return ctx, stop
+}
+
+func ownerRequestMatches(input RunInput, row store.RunRow) error {
+	if row.ID != input.RunID || string(row.Request.Hash) != input.RequestHash {
+		return errors.New("run host request does not match persisted intake")
+	}
+	var request runspec.Request
+	if err := json.Unmarshal(input.SealedRequest, &request); err != nil {
+		return fmt.Errorf("decode sealed request: %w", err)
+	}
+	if !reflect.DeepEqual(request, row.Request.Request) {
+		return errors.New("run host cannot replace sealed intake fields")
+	}
+	if row.Owner == nil || *row.Owner != input.Owner.Owner {
+		return errors.New("run host owner does not match persisted authority")
+	}
+	return nil
+}
+
+func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow, entry *source.Entry) (AcceptedRun, error) {
+	if err := context.Cause(ctx); err != nil {
+		return AcceptedRun{}, err
+	}
+	if row.Spec != nil {
+		accepted, err := ownerAccepted(row)
+		if err != nil {
+			return AcceptedRun{}, err
+		}
+		if input.Accepted != nil && !reflect.DeepEqual(*input.Accepted, accepted) {
+			return AcceptedRun{}, errors.New("resume differs from persisted acceptance")
+		}
+		return accepted, nil
+	}
+	if input.Accepted != nil {
+		return AcceptedRun{}, errors.New("resume has no persisted acceptance")
+	}
+	if h.Prepare == nil {
+		return AcceptedRun{}, errors.New("new run requires checkout resolution and planning")
+	}
+	prepared, err := h.Prepare(ctx, input, entry)
+	if err != nil {
+		return AcceptedRun{}, err
+	}
+	if input.PlanCache != nil {
+		prepared.Planning.Cache = input.PlanCache
+	}
+	plan, err := PlanInitial(ctx, prepared.Planning, prepared.Functions)
+	if err != nil {
+		return AcceptedRun{}, err
+	}
+	accepted, err := h.Store.AcceptPlan(ctx, store.PlanAcceptance{RunID: input.RunID, Actor: input.Owner, Seal: runspec.SealInput{
+		Request: row.Request, Declarations: prepared.Declarations, Resolved: prepared.Resolved, Plan: plan.CanonicalPlan,
+	}})
+	if err != nil {
+		return AcceptedRun{}, err
+	}
+	if !reflect.DeepEqual(accepted.Spec.Request, row.Request) || accepted.PlanHash != string(plan.PlanHash) {
+		return AcceptedRun{}, errors.New("acceptance changed sealed request or planned declarations")
+	}
+	row.Spec, row.Plan, row.PlanHash = &accepted.Spec, accepted.Plan, accepted.PlanHash
+	return ownerAccepted(row)
+}
+
+func ownerAccepted(row store.RunRow) (AcceptedRun, error) {
+	if row.Spec == nil || row.Spec.Hash == "" || row.PlanHash == "" || string(row.Spec.PlanHash) != row.PlanHash {
+		return AcceptedRun{}, errors.New("store returned an incomplete run seal")
+	}
+	result := AcceptedRun{RunID: row.ID, SpecHash: string(row.Spec.Hash), PlanHash: row.PlanHash}
+	var err error
+	result.Spec, err = json.Marshal(row.Spec)
+	if err != nil {
+		return AcceptedRun{}, err
+	}
+	if err = json.Unmarshal(row.Plan, &result.Plan); err != nil {
+		return AcceptedRun{}, fmt.Errorf("decode accepted plan: %w", err)
+	}
+	return result, nil
+}
