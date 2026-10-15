@@ -33,7 +33,6 @@ func NativeServices(ctx context.Context, home string, owned *store.Store, bindin
 	if owned == nil || binding.Tenant == nil || binding.Refresh == nil || binding.Principal.Capability.Team != string(binding.Tenant.Team()) || binding.Principal.Capability.Binding.RunID == "" {
 		return runners.NativeServices{}, errors.New("local native host requires its authenticated tenant and run")
 	}
-	lookup := capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.Controller, Digest: binding.Principal.Capability.Digest}
 	current := func(ctx context.Context) (capability.Principal, error) {
 		principal, err := binding.Refresh(ctx)
 		if err == nil && principal.Authority != binding.Principal.Authority {
@@ -74,6 +73,7 @@ func NativeServices(ctx context.Context, home string, owned *store.Store, bindin
 			err = errors.Join(err, closeResources())
 		}
 	}()
+	claims := &nodeClaims{auth: capability.NewAuthenticator(owned), bindings: owned, masker: masker, current: current, readNode: binding.Tenant.ReadNode}
 	masks := nodehost.NewMaskRegistry(masker)
 	router := controller.NewPolicyRouter(controller.RouteAuthorization{Authenticator: capability.NewAuthenticator(authorities), Bindings: authorities})
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -83,39 +83,21 @@ func NativeServices(ctx context.Context, home string, owned *store.Store, bindin
 	serve, closeHTTP := localProcessHTTP(ctx, listener, router, authorities.Close)
 	closeResources = closeHTTP
 	processes := &nodehost.NativeProcesses{Authorities: authorities, Masks: masks, URL: "http://" + listener.Addr().String()}
+	claims.processes = processes
 	processes.Log = localHostLog(home, run.Run.ID, current, masker)
 	delegate := func(ctx context.Context, node string, generation, attempt int64) (nodehost.ProcessGrant, error) {
-		principal, err := current(ctx)
-		if err != nil {
-			return nodehost.ProcessGrant{}, err
+		grant, err := claims.delegate(ctx, node, generation, attempt)
+		if err == nil {
+			serve()
 		}
-		row, err := binding.Tenant.ReadNode(ctx, store.NodeRef{RunID: run.Run.ID, NodeID: node})
-		if err != nil {
-			return nodehost.ProcessGrant{}, err
-		}
-		if row.Generation != generation || row.Attempt != attempt {
-			return nodehost.ProcessGrant{}, &apierr.Error{Code: apierr.LockHeld, Message: "process delegation differs from the current attempt"}
-		}
-		var job nodeproto.JobSpec
-		if err := json.Unmarshal(row.Spec, &job); err != nil {
-			return nodehost.ProcessGrant{}, err
-		}
-		fence := principal.Capability.Binding
-		if fence.NodeID != node || fence.Generation != generation || fence.Attempt != attempt {
-			return nodehost.ProcessGrant{}, &apierr.Error{Code: apierr.PolicyMissing, Message: "local owner needs its independently awarded node authority before process delegation"}
-		}
-		serve()
-		return processes.Delegate(ctx, lookup, capability.DelegateSpec{
-			Parent: principal.Authority, Audience: capability.NodeHost,
-			Grants: principal.Capability.Grants, Binding: fence, Repositories: principal.Capability.Repositories, Data: principal.Capability.Data, ExpiresAt: principal.Capability.ExpiresAt,
-		},
-			nodehost.ProcessServices{RunID: run.Run.ID, Job: job})
+		return grant, err
 	}
+
 	follower := nodehost.StateFollower{Store: binding.Tenant, Subscribe: localStateSubscription}
 	config := nodehost.NativeHostConfig{
 		Store: binding.Tenant, Lease: lease.Keeper{Lease: limits.DefaultLease, Interval: limits.Renew(limits.DefaultLease)},
 		Source: sourceOptions, Snapshots: snapshots, Masks: masks, Processes: processes, Router: router,
-		Owner: nodehost.OwnerHost{Wait: follower.Wait, WaitNode: follower.WaitNode},
+		Owner: nodehost.OwnerHost{Wait: follower.Wait, WaitNode: follower.WaitNode, AdoptClaim: claims.adopt},
 		Planner: nodehost.SDKPlanner{Log: func(ctx context.Context, frame nodeproto.FrameLog) error {
 			return processes.Log(ctx, run.Run.ID, "", frame)
 		}},

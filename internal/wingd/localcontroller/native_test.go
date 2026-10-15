@@ -59,8 +59,11 @@ type nativeAuthentication struct {
 	snapshot capability.AuthenticationSnapshot
 }
 
-func (a *nativeAuthentication) ReadAuthentication(context.Context, capability.CredentialLookup, capability.RequestEvidence) (capability.AuthenticationSnapshot, error) {
-	return a.snapshot, nil
+func (a *nativeAuthentication) ReadAuthentication(ctx context.Context, lookup capability.CredentialLookup, _ capability.RequestEvidence) (capability.AuthenticationSnapshot, error) {
+	if len(a.snapshot.Authorities) == 0 || lookup.Class != capability.CredentialBearer || lookup.Audience != capability.Controller || lookup.Digest != a.snapshot.Authorities[0].Principal.Capability.Digest {
+		return capability.AuthenticationSnapshot{}, errors.New("unknown parent credential")
+	}
+	return a.snapshot, context.Cause(ctx)
 }
 
 func (*nativeAuthentication) CheckBinding(context.Context, capability.Principal, capability.BindingRule, capability.Target) error {

@@ -172,33 +172,33 @@ identity survives replacement owners, retries and children. Missing or altered
 values fail before acquisition. The remaining legacy CLI capture writer still
 needs migration to that intake contract. It has no consumer after the hard cut.
 
+The `localcontroller.State` interface supplies readiness, the owned secrets read, startup
+reconciliation and live activity observation. The CLI binder supplies the
+production state projection, shared API/dashboard handlers, peer claimant and
+native host configuration. `Open` constructs the shared queue from those inputs.
+`Run` joins the queue, activity observer and maintenance before returning.
+The runtime adds its dashboard connection count. Its API server consumes the
+kernel identity on `APIConn`. Its dashboard server retains browser authentication.
 
-`localcontroller.Config.Bind` still needs the production shared services.
-Its `State` interface supplies readiness, the owned secrets read, startup
-reconciliation and live activity observation. The binder
-also supplies the authenticated API and dashboard handlers, provisioned claimant
-and native host services. `Open` constructs the shared queue from those inputs.
-The SQLite composition tests substitute these foreign boundaries. They prove
-store ownership, admission cancellation and leased maintenance. Shared policy
-routes and the production activity projection remain unbound.
+The native binder adopts committed self-claims through `OwnerHost.AdoptClaim`.
+It checks each private node award through the shared authentication and relation
+policy, registers its bearer with the shared masker, and captures it separately
+from the run owner's authority. Every process delegation rechecks the current
+owner, node award and persisted generation and attempt. The parent claim stays
+at attempt zero across retries. SDK process authority and its data scope narrow
+to the running attempt. Its process revoker ends the child authority when
+execution joins.
+
 `TestNativeStoreOwnerW8/local_controller` exercises `Config.Open`, leased
 reconciliation, the shared queue, native host, persisted completion and joined
-shutdown. It supplies fixture state/HTTP, enrollment, version policy and source
-services. It does not establish production activity or peer authorization.
-
-The controller composition supplies `LocalController` from the shared
-`pkg/controller` implementation. Its `Run` method reports all four activity
-counts for activity outside the runtime's own HTTP connections and joins its
-consumer and maintenance children before returning. The runtime adds its
-dashboard connection count. Its API server consumes the kernel identity on
-`APIConn`. Its dashboard server retains browser authentication. Local runs
-continue to execute in the CLI.
-
-The final state projection, peer authorization and native service binder remain
-unbound here. `runners.NewStoreRunner` supplies the shared consumer over the elected
-store. The runtime tests still substitute its surrounding services.
-The final store also needs an activity projection and a typed incompatible-store error. No
-compatibility router or second store opener supplies those gaps.
+shutdown. It substitutes state/HTTP, enrollment, version policy and source
+services. The local node-adoption properties use C2 snapshot and relation fakes, including
+claim-spanning authentication.
+The delegation test uses the shared `NativeProcesses` and `ProcessAuthorities`.
+These tests do not establish persisted peer authentication, remote native state,
+owner policy composition, byte/record bindings or native process execution.
+The local CLI host and schedule operation transport still require those shared
+contracts. The store also needs a typed incompatible-store error.
 
 `client.QueryLocalController` discovers the owner through the authenticated
 admission socket. It reports readiness, PID, version, stay policy and the four
@@ -248,8 +248,8 @@ If another process wins its election, the lifecycle joins local cleanup before
 querying the winner. A joined cleanup failure remains an error. Starting or
 draining local processes retain lifecycle operations until cleanup finishes.
 
-The foreground `wingd run` process still needs the shared state, HTTP and native
-host services supplied through `localcontroller.Config.Bind`.
+The foreground `wingd run` process constructs shared state, HTTP and native
+host services through the CLI's `localcontroller.Config.Bind` adapter.
 `NewLocalRuntime` refuses a foreign election before opening its store. Windows
 transport still refuses API access when it cannot supply a client SID.
 
@@ -274,8 +274,7 @@ Systemd commands disable variable expansion because captured paths must remain
 literal. Native files share private atomic publication and argument encoding
 with runner services. Release metadata survives XML-sensitive prerelease names.
 
-The W9 dashboard, schedule, update and doctor adapters still need to supply this
-manager. The foreground process still needs the shared-controller factory.
+The CLI service resolver supplies this manager and the shared-controller factory.
 The foreground CLI uses `runWingdRunCommand` and the shared flag registry. Its
 former second runtime constructor is removed. Election and factory-failure
 coverage now use that same command path.
