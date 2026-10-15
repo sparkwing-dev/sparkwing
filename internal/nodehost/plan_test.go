@@ -31,14 +31,13 @@ func TestExecutePlansWithTheSDK(t *testing.T) {
 	}
 	config := func(st *store.Store, runID string, args map[string]string, exec Executor) Config {
 		return Config{
-			Session:   SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}},
-			Pipeline:  "conformance",
-			Args:      args,
-			Run:       nodeproto.RunContext{RunID: runID, Git: &nodeproto.Git{SHA: "4f2c1e0", Branch: "main", Repo: "acme/app"}},
-			State:     st,
-			Execute:   exec,
-			Logger:    slog.New(slog.DiscardHandler),
-			Heartbeat: time.Hour,
+			Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}},
+			Pipeline: "conformance",
+			Args:     args,
+			Run:      nodeproto.RunContext{RunID: runID, Git: &nodeproto.Git{SHA: "4f2c1e0", Branch: "main", Repo: "acme/app"}},
+			State:    st,
+			Execute:  exec,
+			Logger:   slog.New(slog.DiscardHandler),
 		}
 	}
 	t.Run("RunsThePlannedNodes", func(t *testing.T) { runsThePlannedNodes(t, config) })
@@ -123,8 +122,8 @@ func runsThePlannedNodes(t *testing.T, config configFn) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Status != "failed" || run.FinishedAt == nil || run.LastHeartbeatAt == nil || run.GitSHA != "4f2c1e0" || run.TriggerSource != "manual" {
-		t.Errorf("run row status=%s finished=%v heartbeat=%v sha=%s trigger=%s", run.Status, run.FinishedAt, run.LastHeartbeatAt, run.GitSHA, run.TriggerSource)
+	if run.Status != "failed" || run.FinishedAt == nil || run.GitSHA != "4f2c1e0" || run.TriggerSource != "manual" {
+		t.Errorf("run row status=%s finished=%v sha=%s trigger=%s", run.Status, run.FinishedAt, run.GitSHA, run.TriggerSource)
 	}
 	if run.Args["env"] != "prod" || run.Args["count"] != "3" {
 		t.Errorf("run args = %v, want env from the invocation and count from its default", run.Args)

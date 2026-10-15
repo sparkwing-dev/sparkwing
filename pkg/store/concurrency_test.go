@@ -47,9 +47,6 @@ func createLiveRunT(t *testing.T, s *store.Store, runID string) {
 	}); err != nil {
 		t.Fatalf("CreateRun(%s): %v", runID, err)
 	}
-	if err := s.TouchRunHeartbeat(ctx, runID); err != nil {
-		t.Fatalf("TouchRunHeartbeat(%s): %v", runID, err)
-	}
 }
 
 func TestConcurrency_GrantedWhenSlotAvailable(t *testing.T) {

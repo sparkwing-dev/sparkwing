@@ -300,7 +300,7 @@ func (h *nodeExecutor) transition(ctx context.Context, input NodeInput, cause st
 		result := recordNodeFailure(input.NodeID, *extra.Result, h.deps.Mask)
 		extra.Result = &result
 	}
-	applied, err := h.deps.Store.TransitionNode(ctx, store.NodeTransition{Ref: store.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}, To: to, Cause: cause, Actor: executorActor(input), Extra: extra})
+	applied, err := h.deps.Store.TransitionNode(ctx, store.NodeTransition{Ref: store.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}, To: to, Cause: cause, Actor: executorActor(input), SourceAttempt: &input.Attempt, Extra: extra})
 	if err != nil {
 		return applied, &executorTransitionError{err: err}
 	}

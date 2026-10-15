@@ -205,7 +205,7 @@ func (s *Store) CheckClaimKey(ctx context.Context, tok ClaimToken, key string) e
 	return err
 }
 
-func (s *Store) claimKey(ctx context.Context, tok ClaimToken, key string) (m submittedModifiers, memo bool, err error) {
+func (s *Store) claimKey(ctx context.Context, tok ClaimToken, key string) (m declaredClaimModifiers, memo bool, err error) {
 	n, ok, err := s.declaredNode(ctx, tok.Team, tok.RunID, tok.NodeID)
 	if err != nil {
 		return m, false, err
@@ -228,9 +228,18 @@ func (s *Store) claimKey(ctx context.Context, tok ClaimToken, key string) (m sub
 }
 
 type declaredPlanNode struct {
-	ID           string             `json:"id"`
-	Modifiers    submittedModifiers `json:"modifiers"`
-	PipelineRefs []PlanPipelineRef  `json:"pipeline_refs"`
+	ID           string                 `json:"id"`
+	Modifiers    declaredClaimModifiers `json:"modifiers"`
+	PipelineRefs []PlanPipelineRef      `json:"pipeline_refs"`
+}
+
+type declaredClaimModifiers struct {
+	Cache        bool   `json:"cache"`
+	ConcGroup    string `json:"conc_group"`
+	ConcCapacity int    `json:"conc_capacity"`
+	ConcCost     int    `json:"conc_cost"`
+	ConcScope    string `json:"conc_scope"`
+	ConcOnLimit  string `json:"conc_on_limit"`
 }
 
 // safety: a run with no stored plan, or a plan without the node, declares
@@ -466,7 +475,7 @@ func (s *Store) claimMemoPrefix(ctx context.Context, tok ClaimToken) (string, er
 
 // safety: the SDK's key for a node's group: a run-scoped group is qualified
 // by its run, so a claim can name no other run's run-scoped key.
-func declaredSlotKey(m submittedModifiers, runID string) string {
+func declaredSlotKey(m declaredClaimModifiers, runID string) string {
 	if m.ConcScope == "run" {
 		return "r:" + strconv.Itoa(len(runID)) + ":" + runID + m.ConcGroup
 	}

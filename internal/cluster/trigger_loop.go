@@ -147,7 +147,7 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 			// safety: the controller refuses every claim this loop will make, so
 			// polling on would only repeat the refusal.
 			if errors.Is(err, store.ErrMeteredInProcessNodes) {
-				return fmt.Errorf("trigger loop: this credential is metered, so it claims triggers only with --trigger-runner=k8s or warm: %w", err)
+				return fmt.Errorf("trigger loop: this credential is metered, so it claims triggers only with --trigger-runner=k8s: %w", err)
 			}
 			pacing.failed(ctx, err, nil)
 			continue
@@ -366,9 +366,6 @@ func hostTriggerRun(ctx context.Context, entry pipelineentry.Command, workDir st
 	})
 }
 
-// safety: the Jobs and warm runners a node goes to reach the controller
-// themselves, under the claim each node's dispatch takes, so they get the
-// controller's address and never this runner's token.
 func triggerNodeRunner(opts TriggerLoopOptions) (func(orchestrator.Backends, *store.Trigger) runner.Runner, error) {
 	var deadline string
 	if opts.K8sJobDeadline > 0 {

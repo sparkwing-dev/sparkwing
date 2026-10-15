@@ -63,7 +63,7 @@ func TestAFrozenTeamsEventsAreHeldToTheFreeShare(t *testing.T) {
 	acme := teamHandle(t, st, "acme")
 	teamRun(t, acme, "r1")
 	fund(t, acme)
-	if err := appendBytes(st, "team:acme", "r1", 500); err != nil {
+	if err := appendBytes(acme, "r1", 500); err != nil {
 		t.Fatalf("a funded team's write past the share: %v", err)
 	}
 	if _, err := st.HoldTeamForDispute(ctx, "acme", "dp_ev", "", "dispute opened", time.Now()); err != nil {
@@ -72,7 +72,7 @@ func TestAFrozenTeamsEventsAreHeldToTheFreeShare(t *testing.T) {
 	if got := standing(t, st, "acme"); got.Tier == store.TeamTierFunded {
 		t.Fatalf("a frozen team's tier = %+v, want not funded", got)
 	}
-	err := appendBytes(st, "team:acme", "r1", 200)
+	err := appendBytes(acme, "r1", 200)
 	var quota *store.StorageQuotaError
 	if !errors.As(err, &quota) || quota.Limit != store.StorageLimitFreeEvents {
 		t.Fatalf("a frozen team's write past the share = %v, want a free event share refusal", err)

@@ -59,7 +59,7 @@ func TestCancellationIntentAndHolderResultStayIndependentProperty(t *testing.T) 
 				}
 			}
 			result := &NodeResult{Outcome: NodeCancelled, Reason: "executor_cancelled", MaskedError: "drained"}
-			if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, Actor: holder, To: NodeCancelled, Cause: CauseReport, Extra: TransitionExtra{Result: result}}); err != nil {
+			if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: ref, Actor: holder, To: NodeCancelled, Cause: CauseReport, SourceAttempt: sourceAttempt(3), Extra: TransitionExtra{Result: result}}); err != nil {
 				t.Fatal(err)
 			}
 			row, err := tenant.ReadNode(t.Context(), ref)

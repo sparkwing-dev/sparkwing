@@ -7,7 +7,9 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -39,9 +41,51 @@ func (f *ownerFixture) record(value string) {
 	f.trace = append(f.trace, value)
 }
 
-func (f *ownerFixture) RenewOwner(context.Context, store.Actor) (store.LeaseBeat, error) {
+func (f *ownerFixture) RenewOwner(context.Context, store.Actor, bool) (store.LeaseBeat, error) {
 	f.record("renew")
 	return store.LeaseBeat{}, f.renewErr
+}
+
+func TestOwnerHostReportsCurrentComputeOnRenewal(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		_, host, input := newOwnerFixture(t, true)
+		host.Lease.Interval = time.Second
+		var computing atomic.Bool
+		host.Computing = func(string) bool { return computing.Load() }
+		beats := make(chan bool, 1)
+		host.Renew = func(ctx context.Context, actor store.Actor, executing bool) (store.LeaseBeat, error) {
+			if actor != input.Owner {
+				t.Error("renewal changed owner authority")
+			}
+			select {
+			case beats <- executing:
+			case <-ctx.Done():
+				return store.LeaseBeat{}, context.Cause(ctx)
+			}
+			return store.LeaseBeat{}, nil
+		}
+		host.Decide = func(store.ScheduleSnapshot) store.ScheduleDecision { return store.ScheduleDecision{} }
+		waiting := make(chan struct{})
+		host.Wait = func(ctx context.Context, _ store.RunSnapshot) error {
+			close(waiting)
+			<-ctx.Done()
+			return context.Cause(ctx)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { _, err := host.Run(ctx, input); done <- err }()
+		defer func() { cancel(); <-done }()
+		if executing := <-beats; !executing {
+			t.Fatal("source preparation was reported as idle")
+		}
+		<-waiting
+		for _, want := range []bool{false, true, false} {
+			computing.Store(want)
+			if got := <-beats; got != want {
+				t.Fatalf("renewal executing=%v, want %v", got, want)
+			}
+		}
+	})
 }
 
 func (f *ownerFixture) ReadSnapshot(context.Context, string) (store.RunSnapshot, error) {
@@ -139,7 +183,7 @@ func newOwnerFixture(t *testing.T, resumed bool) (*ownerFixture, OwnerHost, RunI
 	selected := engine.Resolved{Identity: engine.Identity{Version: "v1.0.0", ManifestDigest: "manifest", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.0.0"}}}
 	h := OwnerHost{
 		Mask:  func(value string) string { return value },
-		Store: f, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
+		Store: f, Renew: f.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
 		Acquire: func(context.Context, RunInput) (*source.Entry, error) {
 			f.record("acquire")
 			return &source.Entry{Engine: selected}, nil

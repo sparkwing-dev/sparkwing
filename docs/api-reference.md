@@ -36,7 +36,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/credits/card-refunds` | `credits.grant` |
 | `POST` | `/api/v1/credits/cards` | `credits.grant` |
 | `POST` | `/api/v1/credits/freezes` | `credits.grant` |
-| `POST` | `/api/v1/credits/grants` | `credits.grant` |
 | `GET` | `/api/v1/credits/history` | `runs.read` |
 | `GET` | `/api/v1/credits/payments/{reference}` | `credits.grant` |
 | `POST` | `/api/v1/credits/reversals` | `credits.grant` |
@@ -119,7 +118,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/runs/{id}/gitcache/git/register` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/heartbeat` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/logs` | `logs.read` |
 | `GET` | `/api/v1/runs/{id}/logs/search` | `logs.read` |
 | `GET` | `/api/v1/runs/{id}/logs/{node}` | `logs.read` |
@@ -137,7 +135,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/deps` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/execution-finish` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/execution-start` | `claim` or `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finalize-ready` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finish` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/heartbeat` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/log-manifest` | `claim` or `runs.state` |
@@ -152,21 +149,18 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/output-commit` | `claim` or `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/output-upload` | `claim` or `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/release` | `runs.control` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/revoke-ready` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/start` | `claim` or `runs.state` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/status` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/annotations` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/finish` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/skip` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/start` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/summary` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/summary` | `claim` or `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/touch` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/usage` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/oidc-token` | `claim` or `nodes.claim` or `triggers.claim` |
 | `GET` | `/api/v1/runs/{id}/paused` | `runs.read` |
 | `GET` | `/api/v1/runs/{id}/pending-triggers` | `triggers.read` or `nodes.claim` or `triggers.claim` |
-| `POST` | `/api/v1/runs/{id}/plan` | `claim` or `runs.state` |
+| `POST` | `/api/v1/runs/{id}/plan` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/receipt` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/retry` | `runs.control` |
 | `POST` | `/api/v1/runs/{id}/source-credential` | `claim` |
@@ -239,10 +233,6 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/triggers/{id}/claim` | `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/done` | `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/heartbeat` | `triggers.claim` |
-| `POST` | `/internal/downloads/charge` | `public` |
-| `POST` | `/internal/storage/commit` | `public` |
-| `POST` | `/internal/storage/release` | `public` |
-| `POST` | `/internal/storage/reserve` | `public` |
 | `GET` | `/metrics` | `admin` |
 | `POST` | `/webhooks/github-app` | `public` |
 

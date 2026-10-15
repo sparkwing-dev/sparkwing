@@ -230,7 +230,7 @@ func CheckOwnerExpansion(t *testing.T) {
 			}
 			entry := &source.Entry{Engine: resolved}
 			runner := nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
-			host := nodehost.OwnerHost{Mask: func(value string) string { return value }, Store: s, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Acquire: func(context.Context, nodehost.RunInput) (*source.Entry, error) { return entry, nil }, Wait: func(context.Context, store.RunSnapshot) error { return errors.New("expansion did not settle") }, Expand: func(ctx context.Context, input nodehost.EvaluationInput, row store.NodeRow, binding nodehost.StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
+			host := nodehost.OwnerHost{Mask: func(value string) string { return value }, Store: s, Renew: s.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Acquire: func(context.Context, nodehost.RunInput) (*source.Entry, error) { return entry, nil }, Wait: func(context.Context, store.RunSnapshot) error { return errors.New("expansion did not settle") }, Expand: func(ctx context.Context, input nodehost.EvaluationInput, row store.NodeRow, binding nodehost.StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
 				if s.finished.Transition.RunID != "" || s.count != 0 {
 					t.Fatal("owner settled before expansion")
 				}

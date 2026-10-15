@@ -34,8 +34,8 @@ who reaches them, not the name, and a service that reads these names must not
 treat one as a boundary.
 
 **Operators and service credentials have separate authority.** `admin` is
-deployment authority. Service scopes such as `credits.grant`, `claims.launch`
-and `storage.count` cross teams for their documented operations. Team membership
+deployment authority. Service scopes such as `credits.grant` and `claims.launch`
+cross teams for their documented operations. Team membership
 does not grant them, and `admin` does not stand in for `credits.grant`.
 Operator powers over a team's billing standing and the sign-up waitlist answer
 only a listed operator's own console session, never a bearer token; see
@@ -750,13 +750,9 @@ with `--disable-proxy`, which drops `/proxy/` and `/stats`, and
 `--metrics-addr`, which moves `/metrics` to a listener the ingress does not
 route to.
 
-In the other direction the cache counts each team's storage and downloads on
-the controller's `/internal/storage/...` and `/internal/downloads/charge`
-routes with a `service` token holding only the
-`storage.count` scope, the file `controller-token` in its `--credentials-dir`.
-It is an ordinary hashed row in the tokens table: `sparkwing cluster tokens
-list --type service` shows it, and rotating it is minting a new one and
-revoking the old.
+The service-token storage and download counter routes are removed. A cache
+credential cannot select a tenant and submit usage. Upload accounting belongs
+to the transaction that verifies and commits the authenticated uploader's ticket.
 
 Registering a repository name validates it against
 `^[A-Za-z0-9._-]{1,64}$`, and repointing a name that already maps to a

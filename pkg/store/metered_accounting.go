@@ -252,14 +252,15 @@ func accountBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservat
 	if err != nil {
 		return capability.BillingSettlement{}, err
 	}
-	result, err := calculate(a.provenance, intervals)
-	if err != nil {
-		return result, err
-	}
-	if err := validateBillingCalculation(a, intervals, result); err != nil {
-		return result, err
-	}
+	result := capability.BillingSettlement{ReservationID: a.provenance.ReservationID}
 	if a.provenance.Metered {
+		result, err = calculate(a.provenance, intervals)
+		if err != nil {
+			return result, err
+		}
+		if err := validateBillingCalculation(a, intervals, result); err != nil {
+			return result, err
+		}
 		if err := settleBillingChargesTx(ctx, tx, a, result, through, final); err != nil {
 			return result, err
 		}

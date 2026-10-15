@@ -52,6 +52,9 @@ func (s *executorStore) ReadNode(_ context.Context, ref store.NodeRef) (store.No
 
 func (s *executorStore) TransitionNode(_ context.Context, c store.NodeTransition) (store.Applied, error) {
 	s.changes = append(s.changes, c)
+	if c.Actor.Kind == store.ActorHolder && (c.SourceAttempt == nil || *c.SourceAttempt != s.row.Attempt) {
+		return store.Applied{}, executorError(apierr.LockHeld, "source attempt differs from current attempt")
+	}
 	if c.Cause == s.fail {
 		return store.Applied{}, errors.New("transition refused")
 	}
@@ -206,6 +209,50 @@ func TestNodeExecutorRetriesRetainGenerationAndAdvanceOrdinal(t *testing.T) {
 			}
 		}
 	}
+}
+
+func FuzzNodeExecutorCapturesSourceAttempt(f *testing.F) {
+	f.Add(uint16(0), uint8(0), false)
+	f.Add(uint16(43), uint8(2), false)
+	f.Add(uint16(15), uint8(1), true)
+	f.Fuzz(func(t *testing.T, initial uint16, retries uint8, replaced bool) {
+		input, state, deps, processes := executorFixture(t)
+		input.Attempt, state.row.Attempt = int64(initial), int64(initial)
+		executorRetryBudget(t, &input, state, int(retries%4))
+		start := deps.Start
+		deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
+			process, err := start(ctx, in, activity)
+			process.(*executorProcess).result.Outcome = "failed"
+			return process, err
+		}
+		host, err := NewNodeExecutor(deps)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := host.Execute(t.Context(), input); err != nil {
+			t.Fatal(err)
+		}
+		ordinal := int64(initial)
+		for _, change := range state.changes {
+			if change.SourceAttempt == nil || *change.SourceAttempt != ordinal {
+				t.Fatalf("%s lost source ordinal %d: %+v", change.Cause, ordinal, change)
+			}
+			if change.Cause == store.CauseStart || change.Cause == store.CauseRetry {
+				ordinal++
+			}
+		}
+		if len(*processes) != int(retries%4)+1 || state.row.Attempt != ordinal {
+			t.Fatal("execution did not consume authoritative attempt ordinals")
+		}
+		captured := state.changes[len(state.changes)-1]
+		if replaced {
+			state.row.Attempt++
+			before := state.row
+			if _, err := state.TransitionNode(t.Context(), captured); err == nil || !reflect.DeepEqual(before, state.row) {
+				t.Fatal("stale captured report affected a replacement attempt")
+			}
+		}
+	})
 }
 
 func TestNodeExecutorRetryReceivesFreshProcessBinding(t *testing.T) {

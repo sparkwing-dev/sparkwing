@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -99,7 +101,7 @@ func newCronFixture(t *testing.T, readOnly bool) *cronFixture {
 	if err := os.WriteFile(filepath.Join(cfgDir, "sparkwing.yaml"), []byte(config), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	svc := &crons.Service{Store: st, ArmedBy: "tester@test-host"}
+	svc := &crons.Service{Store: st, Schedules: teststore.ForTeam(t, st, store.DefaultTeam), ArmedBy: "tester@test-host"}
 	if _, err := svc.Arm(context.Background(), repo, crons.ArmOptions{}); err != nil {
 		t.Fatalf("arm %s: %v", repo, err)
 	}
@@ -119,7 +121,7 @@ func newCronFixture(t *testing.T, readOnly bool) *cronFixture {
 
 func (fx *cronFixture) fire(t *testing.T, scheduleID, outcome, runID, detail string, at time.Time) {
 	t.Helper()
-	err := fx.store.ResolveCronDue(context.Background(), scheduleID, at, nil, &store.CronFire{
+	err := teststore.ForTeam(t, fx.store, store.DefaultTeam).ResolveCronDue(context.Background(), scheduleID, at, nil, &store.CronFire{
 		DueAt:     at,
 		DecidedAt: at.Add(800 * time.Millisecond),
 		Outcome:   outcome,
@@ -174,7 +176,7 @@ func objectAt(t *testing.T, parent map[string]any, key string) map[string]any {
 
 func TestCronsOverview_MatchesTheDashboardContract(t *testing.T) {
 	fx := newCronFixture(t, false)
-	if err := fx.store.SetCronSchedulePaused(context.Background(), fx.weekly, true, time.Now()); err != nil {
+	if err := teststore.ForTeam(t, fx.store, store.DefaultTeam).SetCronSchedulePaused(context.Background(), fx.weekly, true, time.Now()); err != nil {
 		t.Fatalf("pause: %v", err)
 	}
 
@@ -325,7 +327,7 @@ func TestCronPauseAndResume_FlipTheRow(t *testing.T) {
 	if row["paused"] != true || row["state"] != "paused" {
 		t.Fatalf("pause did not flip the row: %+v", row)
 	}
-	stored, err := fx.store.GetCronSchedule(context.Background(), fx.nights)
+	stored, err := teststore.ForTeam(t, fx.store, store.DefaultTeam).GetCronSchedule(context.Background(), fx.nights)
 	if err != nil || !stored.Paused {
 		t.Fatalf("stored row = %+v, err %v, want paused", stored, err)
 	}
@@ -393,7 +395,7 @@ func TestCronRoutes_ReadOnlyRefusesWritesAndServesReads(t *testing.T) {
 	if rec := fx.do(t, http.MethodGet, "/api/v1/crons/"+fx.nights); rec.Code != http.StatusOK {
 		t.Errorf("GET detail = %d, want 200 in read-only mode", rec.Code)
 	}
-	if stored, err := fx.store.GetCronSchedule(context.Background(), fx.nights); err != nil || stored.Paused {
+	if stored, err := teststore.ForTeam(t, fx.store, store.DefaultTeam).GetCronSchedule(context.Background(), fx.nights); err != nil || stored.Paused {
 		t.Errorf("a refused pause changed the row: %+v, err %v", stored, err)
 	}
 }

@@ -242,13 +242,18 @@ func (s *ProtocolSession) Request(ctx context.Context, request nodeproto.Request
 			return nodeproto.Reply{}, err
 		}
 	case <-ctx.Done():
+		// safety: the SDK can consume a full frame before its writer publishes completion.
+		draining := time.NewTimer(procgroup.DefaultTerminationGrace)
+		defer draining.Stop()
 		select {
 		case err := <-written:
 			if err != nil {
 				s.failProtocol(err)
 				return nodeproto.Reply{}, err
 			}
-		default:
+		case <-s.done:
+			return nodeproto.Reply{}, errors.Join(context.Cause(ctx), s.protocolFailure())
+		case <-draining.C:
 			s.failProtocol(protocolSessionError(apierr.ProtocolError, "SDK request write interrupted"))
 			<-s.joined
 			return nodeproto.Reply{}, context.Cause(ctx)

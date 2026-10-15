@@ -56,6 +56,10 @@ func readMatchingInputsTx(ctx context.Context, tx *storeTx, request UnitDemand, 
 	if err = json.Unmarshal(requestBody, &requestSeal); err != nil {
 		return profile, match.Demand{}, err
 	}
+	git := requestSeal.Request.Git
+	if err := checkPushClaimScope(chain, string(git.Repository.Key), git.Ref, git.SHA); err != nil {
+		return profile, match.Demand{}, err
+	}
 	options := requestSeal.Request.Options
 	if options.Runner.Value.Kind == runspec.RunnerHere && !here {
 		return profile, match.Demand{}, authorityError(apierr.Forbidden, "work is reserved for its here claimant")
@@ -127,6 +131,20 @@ func authenticatedClaimProfile(c capability.Capability, profile match.Profile, h
 
 func validMatchingResources(v match.Resources) bool {
 	return v.Cores >= 0 && !math.IsNaN(v.Cores) && !math.IsInf(v.Cores, 0) && v.MemoryBytes >= 0
+}
+
+func checkPushClaimScope(chain []authorityNode, repo, ref, sha string) error {
+	for _, node := range chain {
+		binding := node.principal.Capability.Binding
+		if binding.Kind != capability.BindingPush {
+			continue
+		}
+		push := binding.Push
+		if push == nil || push.WorkflowRunID == "" || push.RepositoryKey != repo || push.Ref != ref || push.SHA != sha {
+			return authorityError(apierr.Forbidden, "work is outside the Actions push scope")
+		}
+	}
+	return nil
 }
 
 func launcherClaimant(c capability.Capability) bool {

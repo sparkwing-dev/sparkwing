@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"sync/atomic"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
@@ -27,7 +28,6 @@ type OwnerStore interface {
 	TransitionRun(context.Context, store.RunTransition) (store.Applied, error)
 	TransitionNode(context.Context, store.NodeTransition) (store.Applied, error)
 	FinishRunAndUnit(context.Context, store.FinishRunRequest) (store.Applied, error)
-	RenewOwner(context.Context, store.Actor) (store.LeaseBeat, error)
 }
 
 // OwnerPlanning supplies checkout facts and SDK planning without replacing intake.
@@ -57,6 +57,9 @@ type OwnerHost struct {
 	Snapshots CapturedEnvironmentLoader
 	Store     OwnerStore
 	Lease     lease.Keeper
+	// Renew reports current compute through the authenticated unit renewal transaction.
+	Renew     func(context.Context, store.Actor, bool) (store.LeaseBeat, error)
+	Computing func(string) bool
 	Source    source.Options
 	Acquire   func(context.Context, RunInput) (*source.Entry, error)
 	Prepare   func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error)
@@ -86,8 +89,8 @@ var (
 // Run requires an initial successful renewal before acquiring source or resuming work.
 // It joins every executor and renewal before returning, including error paths.
 func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunCompletion, err error) {
-	if h.Store == nil || h.Wait == nil || h.Mask == nil {
-		return completion, errors.New("run host requires store, state follower and masking adapters")
+	if h.Store == nil || h.Wait == nil || h.Mask == nil || h.Renew == nil {
+		return completion, errors.New("run host requires store, unit renewal, state follower and masking adapters")
 	}
 	defer func() { err = maskHostError(err, h.Mask) }()
 	if input.RunID == "" || input.RequestHash == "" || input.Owner.Kind != store.ActorRunHost || input.Owner.Owner.RunID != input.RunID {
@@ -96,7 +99,11 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 	if h.Lease.Interval <= 0 || h.Lease.Lease <= h.Lease.Interval {
 		return completion, errors.New("run host requires a positive renewal interval below its lease")
 	}
-	ctx, stop := h.keepOwner(parent, input.Owner)
+	var preparing atomic.Bool
+	preparing.Store(true)
+	ctx, stop := h.keepOwner(parent, input.Owner, func() bool {
+		return preparing.Load() || h.Computing != nil && h.Computing(input.RunID)
+	})
 	defer stop()
 	if err := context.Cause(ctx); err != nil {
 		return completion, err
@@ -163,6 +170,7 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 			return completion, err
 		}
 	}
+	preparing.Store(false)
 	return h.schedule(ctx, input, accepted, entry)
 }
 
@@ -191,10 +199,10 @@ func (h *OwnerHost) acquire(ctx context.Context, input RunInput, row store.RunRo
 	return source.Acquire(ctx, spec, options)
 }
 
-func (h *OwnerHost) keepOwner(parent context.Context, actor store.Actor) (context.Context, func()) {
+func (h *OwnerHost) keepOwner(parent context.Context, actor store.Actor, computing func() bool) (context.Context, func()) {
 	keeper := h.Lease
 	keeper.Renew = func(ctx context.Context) (lease.Beat, error) {
-		beat, err := h.Store.RenewOwner(ctx, actor)
+		beat, err := h.Renew(ctx, actor, computing())
 		return lease.Beat{CancelRequested: beat.CancelRequested, CancelReason: beat.CancelReason, Watched: beat.Watched, WatchedNodes: beat.WatchedNodes}, err
 	}
 	return startHostKeeper(parent, keeper)

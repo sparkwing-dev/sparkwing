@@ -12,9 +12,6 @@ func TestDoctorPlainReportsEveryConditionThatMakesAHomeUnclean(t *testing.T) {
 	marks := map[string]func(*DoctorReport){
 		"PermissionRepairs":         func(r *DoctorReport) { r.PermissionRepairs = []fssecure.Change{{Path: "p"}} },
 		"PermissionAuditUnverified": func(r *DoctorReport) { r.PermissionAuditUnverified = true },
-		"OrphanedRuns":              func(r *DoctorReport) { r.OrphanedRuns = []string{"run-1"} },
-		"DeadConcurrencyHolders":    func(r *DoctorReport) { r.DeadConcurrencyHolders = 1 },
-		"DeadConcurrencyWaiters":    func(r *DoctorReport) { r.DeadConcurrencyWaiters = 1 },
 		"DanglingRunDirs":           func(r *DoctorReport) { r.DanglingRunDirs = []string{"run-2"} },
 		"StaleRefWorktrees":         func(r *DoctorReport) { r.StaleRefWorktrees = []string{"run-3"} },
 		"AdmissionRejections":       func(r *DoctorReport) { r.AdmissionRejections = []DoctorRejection{{Count: 1}} },

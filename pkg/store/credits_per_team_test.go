@@ -123,7 +123,7 @@ func TestCreditsFundedTeamDoesNotMaskAnotherTeamsExhaustion(t *testing.T) {
 	globexRunner := meteredTeamClaimant(t, globex, "agent:globex-cloud")
 
 	grace := int64(30)
-	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{GraceSeconds: &grace}); err != nil {
+	if _, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{GraceSeconds: &grace}); err != nil {
 		t.Fatalf("set grace: %v", err)
 	}
 	floor := unpinnedNodeRateMicro * store.MinBillableSeconds
@@ -188,7 +188,7 @@ func TestCreditsDefaultTenantReadsItsLedger(t *testing.T) {
 	}
 
 	def := tenant(t, s, store.DefaultTeam)
-	if _, err := def.GrantCredits(ctx, store.CreditGrantPaid,
+	if _, err := def.GrantCredits(ctx, store.CreditGrantFree,
 		100*store.MicroCreditsPerCent, "pay_local", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}

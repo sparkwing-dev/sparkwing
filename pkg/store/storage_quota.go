@@ -7,8 +7,10 @@ import (
 	"fmt"
 )
 
-const storageQuotaColumns = "team,tier,max_bytes_per_run,max_bytes_per_month,max_objects_per_run,storage_allowance_bytes"
-const storageUsageTotals = "COALESCE(SUM(bytes),0),COALESCE(SUM(objects),0),COALESCE(SUM(CASE WHEN bytes<0 OR objects<0 THEN 1 ELSE 0 END),0)"
+const (
+	storageQuotaColumns = "team,tier,max_bytes_per_run,max_bytes_per_month,max_objects_per_run,storage_allowance_bytes"
+	storageUsageTotals  = "COALESCE(SUM(bytes),0),COALESCE(SUM(objects),0),COALESCE(SUM(CASE WHEN bytes<0 OR objects<0 THEN 1 ELSE 0 END),0)"
+)
 
 func validateStorageQuota(q StorageQuota) error {
 	if q.Tier != "" {
@@ -151,8 +153,8 @@ func scanStorageTotals(row rowScanner) (bytes, objects int64, err error) {
 func (t *Tenant) StorageRetainedBytes(ctx context.Context) (int64, error) {
 	var bytes int64
 	err := t.s.inTx(ctx, func(tx *storeTx) error {
-		var err error
-		bytes, _, err = retainedStorageSampleTx(ctx, tx, t.team)
+		inventory, err := retainedStorageSampleTx(ctx, tx, t.team)
+		bytes = inventory.blobs + inventory.logs
 		return err
 	})
 	return bytes, err

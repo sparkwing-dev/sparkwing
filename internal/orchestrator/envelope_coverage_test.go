@@ -263,7 +263,7 @@ func (r *envelopeRig) start(runID, pipeline string, args map[string]string, twea
 			Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: masker},
 		},
 		Pipeline: pipeline, Args: args, Run: nodeproto.RunContext{RunID: runID},
-		State: r.st, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
+		State: r.st, Logger: slog.New(slog.DiscardHandler),
 		Attempts: &nodehost.Attempts{
 			Routes: r.routes, Resolver: noEnvelopeSecrets{}, Masker: masker,
 			OpenLog: func(context.Context, string, string) (nodehost.NodeLog, error) { return discardNodeLog{}, nil },

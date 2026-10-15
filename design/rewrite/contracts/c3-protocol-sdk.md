@@ -499,6 +499,15 @@ stderr into run logs. Plan, validation and cleanup errors are masked before they
 leave the host. A failed close or cleanup discards the proposed plan.
 
 `OwnerHost` waits for its first successful renewal before acquiring source.
+`OwnerHost.Renew` is required and carries the current `Executing` value to the
+authenticated unit renewal transaction. It replaces the liveness-only
+`OwnerStore.RenewOwner` requirement. Trigger and plan adapters use
+`Store.RenewUnit` or the corresponding controller request. Controller-owner
+adapters retain their singleton fence. Preparation reports compute until
+acceptance. Native assembly then uses live SDK process counts per run, through
+startup, close and cleanup. Waiting without an SDK process reports false.
+Overlapping processes keep compute active until the last cleanup returns,
+including failed cleanup. Failed startup without a process releases its count.
 Acquisition receives the persisted acceptance on resume, even when the caller
 omitted it. Checkout resolution cannot replace the stored intake request.
 Without a custom acquisition adapter, `OwnerHost.Source` supplies the shared
@@ -629,8 +638,11 @@ don't skip and records the predicate index in `SkipEvaluation.TimedOut` for host
 diagnostics. The next predicate starts after close and cleanup join. Null and
 non-boolean results, drift, SDK failures and cleanup errors prevent dispatch.
 
-`NewNativeHost` installs this evaluator for the `skip_if` owner layer. Its
-caller-supplied `Owner.Layer` handles debug, approval, memo and admission. The
+`NewNativeHost` installs this evaluator for the `skip_if` owner layer. Approval
+opening uses the store transition and state follower. Its caller-supplied
+`Owner.Layer` handles active debug, memo and admission policies. Jobs without
+those policies need no callback. Local execution still requires admission,
+even without a concurrency group. The
 native layer logs timeout indices and proposes a skipped transition only after
 evaluation, revocation and cleanup join. Approval SkipIf success still requires
 the missing C1 owner approval-success edge. The native layer refuses that case
@@ -642,6 +654,18 @@ assembly is exercised through `OwnerHost.Run`, self-claim, execution and atomic
 finish with explicit store and C2 validation fakes. See the
 [owner assembly continuation](w3-owner-assembly-continuation.md) for the remaining
 placement and legacy-runtime cuts.
+
+Holder start, retry and result transitions include the captured
+`NodeTransition.SourceAttempt`. Setup failures before execution report the
+award's retained ordinal. Start and retry consume `Applied.Attempt` before
+later SDK calls or reports. Neither path rereads an ordinal to refresh an old
+report.
+
+Request cancellation joins an outstanding request-pipe write within the existing
+process termination grace before deciding that the write was interrupted. The
+SDK may already have consumed the frame while the writer has not yet published
+completion. A completed write proceeds to targeted cancellation and leaves the
+session usable. A blocked write still fails the session and joins the child.
 
 `OwnerEvaluator.MemoKey` evaluates the declared closure with its existing
 30-second budget. A nonempty string supplies the key; null disables memoization

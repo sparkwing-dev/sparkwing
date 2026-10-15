@@ -125,7 +125,7 @@ func checkCheckoutPlanning(t *testing.T, mode string) {
 		},
 	}
 	host := nodehost.OwnerHost{
-		Mask: planner.Masker.Mask, Store: s, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
+		Mask: planner.Masker.Mask, Store: s, Renew: s.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
 		Acquire: func(context.Context, nodehost.RunInput) (*source.Entry, error) { return entry, nil },
 		Prepare: func(ctx context.Context, _ nodehost.RunInput, e *source.Entry) (nodehost.OwnerPlanning, error) {
 			return planner.PrepareCheckout(ctx, nodehost.CheckoutPlanningInput{Request: sealed, Entry: e, Runner: nodeproto.RunnerIdentity{Name: "granted", Type: "local"}, Project: project, ProjectFile: "sparkwing.yaml"})

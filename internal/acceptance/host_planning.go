@@ -126,7 +126,7 @@ func acceptPlanningDefaults(t *testing.T, prepared nodehost.PreparedPlanning, en
 	accepted := errors.New("stop at accepted plan")
 	host := nodehost.OwnerHost{
 		Mask:  func(value string) string { return value },
-		Store: s, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
+		Store: s, Renew: s.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
 		Acquire: func(context.Context, nodehost.RunInput) (*source.Entry, error) {
 			return &source.Entry{Engine: engine}, nil
 		},

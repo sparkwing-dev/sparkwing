@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -44,8 +45,8 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	if config.Lease.Interval <= 0 || config.Lease.Lease <= config.Lease.Interval {
 		return nil, nil, nil, errors.New("native host requires a positive renewal interval below its lease")
 	}
-	if config.Owner.Wait == nil || config.Planner.Log == nil {
-		return nil, nil, nil, errors.New("native host requires state following and planning logs")
+	if config.Owner.Wait == nil || config.Owner.Renew == nil || config.Planner.Log == nil {
+		return nil, nil, nil, errors.New("native host requires unit renewal, state following and planning logs")
 	}
 	if config.Executor.Bind == nil || config.Evaluation.Bind == nil {
 		return nil, nil, nil, errors.New("native host requires fresh execution and evaluation delegation")
@@ -87,6 +88,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	planner.Masker, planner.ValidatePlan, planner.CanonicalHash = config.Masks.masker, functions.Validate, functions.Hash
 	owner := config.Owner
 	owner.Store, owner.Lease, owner.Source = config.Store, config.Lease, config.Source
+	owner.Computing = processes.computing
 	owner.Snapshots, owner.Masks, owner.Mask = config.Snapshots, config.Masks, config.Masks.masker.Mask
 	owner.Executor, owner.Planner = executor, &planner
 	owner.Planning.Validation = validation
@@ -95,7 +97,14 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 		if layer.Name == "skip_if" {
 			return evaluator.skipLayer(ctx, input, row, processes.Log)
 		}
+		if layer.Name == "approval" {
+			return OwnerLayerResult{}, nil
+		}
 		if layers == nil {
+			unused, err := unusedOwnerPolicy(layer.Name, input, row, owner.Local)
+			if err != nil || unused {
+				return OwnerLayerResult{}, err
+			}
 			return OwnerLayerResult{}, errors.New("native host requires the " + layer.Name + " owner policy adapter")
 		}
 		return layers(ctx, layer, input, row, storage)
@@ -113,4 +122,23 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 		return nil, nil, nil, err
 	}
 	return &owner, claimed, evaluator, nil
+}
+
+func unusedOwnerPolicy(name string, input EvaluationInput, row store.NodeRow, local func(store.NodeRow) bool) (bool, error) {
+	var spec runspec.Spec
+	var job nodeproto.JobSpec
+	if json.Unmarshal(input.Accepted.Spec, &spec) != nil || json.Unmarshal(row.Spec, &job) != nil {
+		return false, errors.New("owner policy requires accepted run and job declarations")
+	}
+	switch name {
+	case "debug":
+		pause := spec.Resolved.Settings.Options.Pause.Value
+		return job.OnFailureOf != "" || !slices.Contains(pause.Before.Value, job.ID) && (job.Approval != nil || !slices.Contains(pause.After.Value, job.ID) && !pause.OnFailure.Value), nil
+	case "memo":
+		return job.Memo == nil && job.Closures.MemoKey == "", nil
+	case "admission":
+		return len(spec.Resolved.Settings.Concurrency) == 0 && len(row.Execution.Concurrency) == 0 && (local == nil || !local(row)), nil
+	default:
+		return false, nil
+	}
 }

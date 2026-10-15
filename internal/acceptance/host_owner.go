@@ -34,7 +34,7 @@ type ownerSealSecrets struct{}
 
 func (ownerSealSecrets) ContainsSecret(string) bool { return false }
 
-func (s *ownerSealStore) RenewOwner(context.Context, store.Actor) (store.LeaseBeat, error) {
+func (s *ownerSealStore) RenewOwner(context.Context, store.Actor, bool) (store.LeaseBeat, error) {
 	return s.beat, s.renewError
 }
 
@@ -106,7 +106,7 @@ func CheckOwnerSeals(t *testing.T) {
 			}
 			host := nodehost.OwnerHost{
 				Mask:  func(value string) string { return strings.ReplaceAll(value, secret, "***") },
-				Store: s, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
+				Store: s, Renew: s.RenewOwner, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
 				Acquire: func(_ context.Context, in nodehost.RunInput) (*source.Entry, error) {
 					s.trace = append(s.trace, "acquire")
 					if mode == "resume" && in.Accepted == nil {

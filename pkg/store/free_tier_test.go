@@ -15,7 +15,7 @@ import (
 
 func setFreeAllowance(t *testing.T, st *store.Store, bytes int64) {
 	t.Helper()
-	if _, err := st.SetCreditSettings(context.Background(), store.CreditSettingsUpdate{
+	if _, err := st.AsOperator().SetCreditSettings(context.Background(), store.CreditSettingsUpdate{
 		StorageFreeAllowanceBytes: &bytes,
 	}); err != nil {
 		t.Fatalf("set the free allowance: %v", err)
@@ -36,7 +36,7 @@ func fund(t *testing.T, tenant *store.Tenant) {
 
 func standing(t *testing.T, st *store.Store, team store.Team) store.StorageStanding {
 	t.Helper()
-	got, err := st.StorageStandingFor(context.Background(), team)
+	got, err := tenant(t, st, team).StorageStanding(context.Background())
 	if err != nil {
 		t.Fatalf("standing of %s: %v", team, err)
 	}
@@ -219,8 +219,8 @@ func TestTriggersAreNeverRefusedForBilling(t *testing.T) {
 	}
 }
 
-func appendBytes(st *store.Store, principal, runID string, n int) error {
-	_, err := st.AppendEventCharged(context.Background(), principal, runID, "", "k",
+func appendBytes(tenant *store.Tenant, runID string, n int) error {
+	_, err := tenant.AppendEventCharged(context.Background(), "replica", runID, "", "k",
 		[]byte(strings.Repeat("x", n-1)))
 	return err
 }
@@ -241,13 +241,13 @@ func TestAFreeTeamsEventsStopAtTheirShare(t *testing.T) {
 	setFreeAllowance(t, st, 1600)
 	acme := teamHandle(t, st, "acme")
 	teamRun(t, acme, "r1")
-	if err := appendBytes(st, "team:acme", "r1", 60); err != nil {
+	if err := appendBytes(acme, "r1", 60); err != nil {
 		t.Fatalf("first write: %v", err)
 	}
 	if got := standing(t, st, "acme"); got.Tier != store.TeamTierFree || got.EventBytes != 60 {
 		t.Fatalf("after the first write = %+v, want a slot holding 60 bytes", got)
 	}
-	err := appendBytes(st, "team:acme", "r1", 41)
+	err := appendBytes(acme, "r1", 41)
 	var quota *store.StorageQuotaError
 	if !errors.As(err, &quota) || quota.Limit != store.StorageLimitFreeEvents || !errors.Is(err, store.ErrStorageQuota) {
 		t.Fatalf("a write past the share = %v, want a free event share refusal", err)
@@ -255,11 +255,11 @@ func TestAFreeTeamsEventsStopAtTheirShare(t *testing.T) {
 	if !strings.Contains(err.Error(), "60 of 100 bytes") || !strings.Contains(err.Error(), "add credits") {
 		t.Fatalf("refusal = %q, want it to name the share and the remedy", err)
 	}
-	if err := appendBytes(st, "team:acme", "r1", 40); err != nil {
+	if err := appendBytes(acme, "r1", 40); err != nil {
 		t.Fatalf("a write that fills the share exactly: %v", err)
 	}
 	fund(t, acme)
-	if err := appendBytes(st, "team:acme", "r1", 500); err != nil {
+	if err := appendBytes(acme, "r1", 500); err != nil {
 		t.Fatalf("a funded team's write past the share: %v", err)
 	}
 	if got := standing(t, st, "acme"); got.EventBytes != 600 {
@@ -273,7 +273,7 @@ func TestTheOperatorsTeamIsNotHeldToAnEventShare(t *testing.T) {
 	st := storetest.Open(t)
 	setFreeAllowance(t, st, 1600)
 	seedRunWithNode(t, st, "r1", "n1", "running")
-	if err := appendBytes(st, "admin", "r1", 500); err != nil {
+	if err := appendBytes(storageTestTenant(t, st), "r1", 500); err != nil {
 		t.Fatalf("an operator write past the share: %v", err)
 	}
 	if taken, _, err := st.FreeSlots(context.Background()); err != nil || taken != 0 {
@@ -281,14 +281,14 @@ func TestTheOperatorsTeamIsNotHeldToAnEventShare(t *testing.T) {
 	}
 }
 
-func TestExpiryAndReconcileLowerAFreeTeamsEventBytes(t *testing.T) {
+func TestExpiryAndDeletionLowerAFreeTeamsEventBytes(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	acme := teamHandle(t, st, "acme")
 	now := time.Now()
 	for _, id := range []string{"old", "gone", "new"} {
 		teamRun(t, acme, id)
-		if err := appendBytes(st, "team:acme", id, 100); err != nil {
+		if err := appendBytes(acme, id, 100); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -312,18 +312,12 @@ func TestExpiryAndReconcileLowerAFreeTeamsEventBytes(t *testing.T) {
 	if err := acme.DeleteRun(ctx, "gone"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.ReconcileFreeEventBytes(ctx); err != nil {
-		t.Fatal(err)
-	}
 	if got := standing(t, st, "acme"); got.EventBytes != 100 {
-		t.Fatalf("after the reconcile = %d, want the one run left", got.EventBytes)
+		t.Fatalf("after deletion = %d, want the one run left", got.EventBytes)
 	}
 }
 
-// The slot is enforced on every commit path: a team that reserved while a
-// slot was open is refused its upload commit and its renewal once another
-// team took the last slot, and counts nothing.
-func TestEveryCommitPathRefusesATeamThatCannotTakeASlot(t *testing.T) {
+func TestUploadCommitRefusesATeamThatCannotTakeASlot(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	if err := st.SetFreeTeamSlots(ctx, 1); err != nil {
@@ -339,10 +333,6 @@ func TestEveryCommitPathRefusesATeamThatCannotTakeASlot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := reserve(st, "team-a", store.StorageLogs, 10, now)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if err := storeBytes(st, "team-b"); err != nil {
 		t.Fatal(err)
 	}
@@ -351,11 +341,6 @@ func TestEveryCommitPathRefusesATeamThatCannotTakeASlot(t *testing.T) {
 	}
 	if _, err := st.CommittedObject(ctx, "team-a", u.Key); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("a refused upload was published: %v", err)
-	}
-	_, err = st.RenewStorage(ctx, store.StorageCommit{ID: res.ID, Team: "team-a", Kind: store.StorageLogs, Bytes: 10, Now: now},
-		store.StorageReserve{Team: "team-a", Kind: store.StorageLogs, Bytes: 10, UpTo: true, Now: now})
-	if !errors.Is(err, store.ErrFreeStoragePaused) {
-		t.Fatalf("renewal without a slot = %v, want free storage paused", err)
 	}
 	for _, kind := range []store.StorageKind{store.StorageCache, store.StorageLogs} {
 		if got := usageOf(t, st, "team-a", kind); got.UsedBytes != 0 {

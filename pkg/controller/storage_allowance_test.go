@@ -23,7 +23,7 @@ func licenseStorageMetering(t *testing.T, f storageFixture) {
 func TestUnlicensedStorageWriteIgnoresCreditRate(t *testing.T) {
 	f := newStorageFixture(t, store.StorageQuota{Team: store.DefaultTeam, MaxBytesPerRun: 1 << 20})
 	rate := int64(store.CloudStorageRateMicroPerGBDay)
-	if _, err := f.store.SetCreditSettings(context.Background(), store.CreditSettingsUpdate{
+	if _, err := f.store.AsOperator().SetCreditSettings(context.Background(), store.CreditSettingsUpdate{
 		StorageRateMicroPerGBDay: &rate,
 	}); err != nil {
 		t.Fatal(err)
@@ -37,14 +37,14 @@ func TestUnlicensedStorageMaintenanceWritesNoCharges(t *testing.T) {
 	f := newStorageFixture(t, store.StorageQuota{Team: store.DefaultTeam, MaxBytesPerRun: 1 << 40})
 	ctx := context.Background()
 	rate, free := int64(store.CloudStorageRateMicroPerGBDay), int64(0)
-	if _, err := f.store.SetCreditSettings(ctx, store.CreditSettingsUpdate{
+	if _, err := f.store.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{
 		StorageRateMicroPerGBDay: &rate, StorageFreeAllowanceBytes: &free,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	seedRetainedRuns(t, f.store, "acme", 1, 1<<30)
 	f.server.MaintainStorage(ctx)
-	charges, err := f.store.ListCreditCharges(ctx, 10)
+	charges, err := teamTenant(t, f.store, store.DefaultTeam).ListCreditCharges(ctx, 10)
 	if err != nil || len(charges) != 0 {
 		t.Fatalf("unlicensed storage charges = %+v, %v", charges, err)
 	}
@@ -78,7 +78,7 @@ func TestAnEmptyBalanceRefusesAChargedWriteWithPaymentRequired(t *testing.T) {
 	licenseStorageMetering(t, f)
 	ctx := context.Background()
 	rate := int64(store.CloudStorageRateMicroPerGBDay)
-	if _, err := f.store.SetCreditSettings(ctx, store.CreditSettingsUpdate{
+	if _, err := f.store.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{
 		StorageRateMicroPerGBDay: &rate,
 	}); err != nil {
 		t.Fatalf("set the storage rate: %v", err)
@@ -92,7 +92,7 @@ func TestAnEmptyBalanceRefusesAChargedWriteWithPaymentRequired(t *testing.T) {
 		t.Fatalf("the refusal reads %q and does not say why", body)
 	}
 
-	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
 		100*store.MicroCreditsPerCent, "pay_1", "operator"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}

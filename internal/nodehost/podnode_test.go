@@ -79,7 +79,7 @@ func TestExecuteMasksSecretInputs(t *testing.T) {
 		Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}},
 		Pipeline: "attempts", Args: map[string]string{"marker": t.TempDir(), "pass": "input-secret-4242"},
 		Run:   nodeproto.RunContext{RunID: "run-secret-input"},
-		State: openStore(t), Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
+		State: openStore(t), Logger: slog.New(slog.DiscardHandler),
 		Attempts: &Attempts{
 			Routes: srv, Resolver: fixtureResolver{}, Masker: secrets.NewMasker(),
 			OpenLog: func(_ context.Context, _, node string) (NodeLog, error) {

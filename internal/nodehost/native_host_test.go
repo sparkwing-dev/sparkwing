@@ -48,7 +48,7 @@ func (s *nativeOwnerState) ReadNode(ctx context.Context, ref store.NodeRef) (sto
 	return s.acquiredClaimStore.ReadNode(ctx, ref)
 }
 
-func (s *nativeOwnerState) RenewOwner(_ context.Context, actor store.Actor) (store.LeaseBeat, error) {
+func (s *nativeOwnerState) RenewOwner(_ context.Context, actor store.Actor, _ bool) (store.LeaseBeat, error) {
 	if actor != s.owner {
 		return store.LeaseBeat{}, errors.New("changed owner renewal")
 	}
@@ -140,7 +140,7 @@ func nativeHostFixture(t *testing.T) (NativeHostConfig, NodeInput, *acquiredClai
 			},
 		},
 		Planner: SDKPlanner{Log: func(context.Context, nodeproto.FrameLog) error { return nil }},
-		Owner:   OwnerHost{Wait: func(context.Context, store.RunSnapshot) error { return nil }},
+		Owner:   OwnerHost{Renew: func(context.Context, store.Actor, bool) (store.LeaseBeat, error) { return store.LeaseBeat{}, nil }, Wait: func(context.Context, store.RunSnapshot) error { return nil }},
 	}
 	return config, input, state, claimed
 }
@@ -189,6 +189,7 @@ func TestNativeHostRunsSharedTransportForOwnerAndClaimedWork(t *testing.T) {
 				run = RunInput{RunID: input.Accepted.RunID, Owner: actor, RequestHash: "request", SealedRequest: request, Accepted: &input.Accepted, GrantedRunner: input.GrantedRunner}
 				lifecycle = &nativeOwnerState{acquiredClaimStore: state, owner: actor, changed: make(chan struct{}, 1)}
 				config.Store = lifecycle
+				config.Owner.Renew = lifecycle.RenewOwner
 				config.Owner.Acquire = func(context.Context, RunInput) (*source.Entry, error) { return entry, nil }
 				config.Owner.Local = func(store.NodeRow) bool { return true }
 				config.Owner.Layer = func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
@@ -223,6 +224,9 @@ func TestNativeHostRunsSharedTransportForOwnerAndClaimedWork(t *testing.T) {
 			if err != nil || delegated != 1 || len(state.changes) != wantChanges || state.changes[wantChanges-1].Extra.Result.Outcome != store.NodeSuccess {
 				t.Fatalf("delegations=%d transitions=%+v error=%v", delegated, state.changes, err)
 			}
+			if config.Processes.computing(input.Accepted.RunID) {
+				t.Fatal("host returned with active SDK compute")
+			}
 			authorities.mu.RLock()
 			live := len(authorities.live)
 			authorities.mu.RUnlock()
@@ -251,6 +255,69 @@ func TestNativeHostDefaultExpansionUsesSharedEvaluator(t *testing.T) {
 	body, failure, err := owner.Expand(t.Context(), input, state.row, StorageBinding{})
 	if err != nil || len(body) != 0 || failure == nil || failure.MaskedError != refused.Error() {
 		t.Fatalf("body=%s failure=%+v error=%v", body, failure, err)
+	}
+}
+
+func TestNativeHostOpensApprovalThroughOwnerTransition(t *testing.T) {
+	config, _, state, _ := nativeHostFixture(t)
+	input, policyState, _, _ := policyFixture(t, func(job *nodeproto.JobSpec) {
+		job.Approval, job.Steps = &nodeproto.ApprovalSpec{Message: "ship?"}, nil
+	})
+	state.executorStore = policyState
+	config.Owner.Local = func(store.NodeRow) bool {
+		t.Fatal("approval entered compute admission")
+		return false
+	}
+	owner, _, _, err := NewNativeHost(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := owner.release(t.Context(), RunInput{GrantedRunner: input.GrantedRunner}, input.Accepted, input.Entry, state.row, store.DecisionApproval)
+	if err != nil || request != nil || len(state.changes) != 1 || state.changes[0].To != store.NodeApprovalPending || state.changes[0].Cause != store.CauseApprovalOpen {
+		t.Fatalf("request=%+v changes=%+v error=%v", request, state.changes, err)
+	}
+}
+
+func TestNativeHostRequiresOnlyActiveOwnerPolicyAdapters(t *testing.T) {
+	for _, mode := range []string{"remote", "local", "concurrency", "memo", "debug"} {
+		t.Run(mode, func(t *testing.T) {
+			config, _, state, _ := nativeHostFixture(t)
+			input, policyState, _, _ := policyFixture(t, func(job *nodeproto.JobSpec) {
+				if mode == "memo" {
+					job.Memo, job.Closures.MemoKey = &nodeproto.MemoSpec{}, "key"
+				}
+			})
+			state.executorStore = policyState
+			if mode == "local" {
+				config.Owner.Local = func(store.NodeRow) bool { return true }
+			}
+			if mode == "concurrency" {
+				state.row.Execution.Concurrency = []runspec.Concurrency{{Group: "db", Capacity: 1, Cost: 1, Scope: "global", OnLimit: "queue"}}
+			}
+			if mode == "debug" {
+				var spec runspec.Spec
+				if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
+					t.Fatal(err)
+				}
+				spec.Resolved.Settings.Options.Pause.Value.Before.Value = []string{input.NodeID}
+				var err error
+				input.Accepted.Spec, err = json.Marshal(spec)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			owner, _, _, err := NewNativeHost(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request, err := owner.release(t.Context(), RunInput{GrantedRunner: input.GrantedRunner}, input.Accepted, input.Entry, state.row, store.DecisionReady)
+			if request != nil || (err != nil) != (mode != "remote") {
+				t.Fatalf("request=%+v error=%v", request, err)
+			}
+			if mode == "remote" && (len(state.changes) != 1 || state.changes[0].To != store.NodeReady) || mode != "remote" && len(state.changes) != 0 {
+				t.Fatalf("changes=%+v", state.changes)
+			}
+		})
 	}
 }
 
