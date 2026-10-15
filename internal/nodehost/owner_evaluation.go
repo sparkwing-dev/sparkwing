@@ -96,16 +96,24 @@ func (h *OwnerEvaluator) Expand(ctx context.Context, input EvaluationInput) (jso
 	if row.Generation < 0 || row.Status != store.StatusDone || (row.Outcome != store.NodeSuccess && row.Outcome != store.NodeMemoized) || row.Expansion != store.ExpansionExpected || len(job.Closures.Generate) == 0 {
 		return nil, nil, executorError(apierr.IllegalTransition, "expansion requires a successful source with expected generators")
 	}
-	output, err := h.deps.ReadOutput(ctx, row.Ref, row.Generation)
+	bounded, cancel, err := h.deps.ChildContext(ctx, row.Execution.Timeout.Value, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer cancel()
+	output, err := h.deps.ReadOutput(bounded, row.Ref, row.Generation)
 	if err == nil && !json.Valid(output) {
 		err = executorError(apierr.ProtocolError, "generator source output is missing or invalid JSON")
 	}
 	var body json.RawMessage
 	if err == nil {
-		body, err = h.expand(ctx, input, spec, job, output)
+		body, err = h.expand(bounded, input, spec, job, output)
 	}
 	if cause := context.Cause(ctx); cause != nil {
 		return nil, nil, errors.Join(cause, err)
+	}
+	if cause := context.Cause(bounded); cause != nil {
+		err = errors.Join(executorError(apierr.DeadlineExceeded, "generator evaluation exceeded its job timeout"), cause, err)
 	}
 	if err != nil {
 		code := apierr.SDKError

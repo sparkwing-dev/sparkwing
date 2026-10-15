@@ -1015,7 +1015,13 @@ pause persistence, expiry, activity and event assertions still need W1's adapter
 The old cancellation assertion that rewrote a terminal job is removed because
 terminal results are absorbing.
 
+The [service and store continuation](../w3-service-store-port-progress.md) ports
+HTTP service tests to the real policy router and process authorities over an
+in-memory transport. Cleanup tests use native cleanup processes. Generated retry
+tests use native scheduling and real tenant state. The report distinguishes the
+target-side reuse assertions from unverified source materialization and lists
+the retired legacy adapter assertions that still need native integration.
+
 The selection test remains in its old fixture because sealed selection fields
-are absent. Socket coverage remains unverified in the sandbox. The complete
-nodehost package does not pass. No native acceptance cell is added, unskipped or
-claimed complete.
+are absent. The complete nodehost package does not pass. No native acceptance
+cell is added, unskipped or claimed complete.

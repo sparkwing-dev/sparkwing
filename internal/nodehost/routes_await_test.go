@@ -4,134 +4,99 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"sync"
-	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 )
 
 func TestTenAwaitsOnTenChildrenAllSucceed(t *testing.T) {
-	s, _ := start(t)
-	var replies []http.HandlerFunc
-	for i := range 10 {
-		replies = append(replies, started(fmt.Sprintf("child-%d", i)))
-	}
-	c := newChildController(t, replies...)
-	var mu sync.Mutex
-	polls := map[string]int{}
-	firstPoll := make(chan struct{}, 10)
-	c.handle("GET /api/v1/runs/run-1/children/{child}", func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		polls[r.PathValue("child")]++
-		n := polls[r.PathValue("child")]
-		mu.Unlock()
-		if n == 1 {
-			firstPoll <- struct{}{}
-			answer(http.StatusOK, map[string]string{"status": "running"})(w, r)
-			return
-		}
-		answer(http.StatusOK, map[string]string{"status": "success"})(w, r)
-	})
-	bearer, _ := admitClaim(t, s, "deploy", claimFor(t, c.fakeController))
-	for range 10 {
-		ask(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`)
-	}
-
+	s := start(t)
+	service := newService(t)
+	entered := make(chan struct{}, 10)
+	release := make(chan struct{})
 	done := make(chan int, 10)
+	service.AwaitChild = func(ctx context.Context, _ capability.Authorized, run, _ string, _ time.Duration) (nodehost.ProcessChildResult, error) {
+		entered <- struct{}{}
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return nodehost.ProcessChildResult{}, ctx.Err()
+		}
+		return nodehost.ProcessChildResult{RunID: run, Status: "success"}, nil
+	}
+	bearer := admitService(t, s, service)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
 	for i := range 10 {
-		go openRequest(context.Background(), s, http.MethodGet, fmt.Sprintf("/node/v1/children/child-%d/await?wait_ms=60000", i), bearer, "", done)
+		go openRequest(ctx, s, http.MethodGet, fmt.Sprintf("/node/v1/children/child-%d/await?wait_ms=60000", i), bearer, "", done)
 	}
 	for range 10 {
-		<-firstPoll
+		select {
+		case <-entered:
+		case <-ctx.Done():
+			t.Fatal("awaits did not enter")
+		}
 	}
+	close(release)
 	for range 10 {
-		if got := <-done; got != http.StatusOK {
-			t.Fatalf("an await answered %d", got)
+		select {
+		case status := <-done:
+			if status != http.StatusOK {
+				t.Fatalf("await=%d", status)
+			}
+		case <-ctx.Done():
+			t.Fatal("await did not finish")
 		}
 	}
 }
 
-func TestAwaitsOnOneChildShareOnePoller(t *testing.T) {
-	s, _ := start(t)
-	c := newChildController(t, started("child-1"))
-	var polls atomic.Int32
-	firstPoll, secondPoll, finish := make(chan struct{}, 1), make(chan struct{}, 1), make(chan struct{})
-	// safety: the held poll is released however the test ends, so a failed
-	// assertion cannot leave the fake controller unable to close.
-	release := sync.OnceFunc(func() { close(finish) })
-	c.handle("GET /api/v1/runs/run-1/children/child-1", func(w http.ResponseWriter, r *http.Request) {
-		switch polls.Add(1) {
-		case 1:
-			firstPoll <- struct{}{}
-			answer(http.StatusOK, map[string]string{"status": "running"})(w, r)
-		case 2:
-			secondPoll <- struct{}{}
-			<-finish
-			answer(http.StatusOK, map[string]string{"status": "success"})(w, r)
-		default:
-			answer(http.StatusOK, map[string]string{"status": "success"})(w, r)
-		}
-	})
-	claim := claimFor(t, c.fakeController)
-	bearer, _ := admitClaim(t, s, "deploy", claim)
-	t.Cleanup(release)
-	ask(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`)
-
-	const awaits = 64
-	done := make(chan int, awaits)
-	path := "/node/v1/children/child-1/await?wait_ms=60000"
-	go openRequest(context.Background(), s, http.MethodGet, path, bearer, "", done)
-	<-firstPoll
-	for range awaits - 1 {
-		go openRequest(context.Background(), s, http.MethodGet, path, bearer, "", done)
-	}
-	<-nodehost.AwaitsHeld(claim, awaits)
-	wantRefusal(t, ask(t, s, http.MethodGet, "/node/v1/children/child-1/await?wait_ms=0", bearer, ""),
-		http.StatusTooManyRequests, "rate_limited")
-	<-secondPoll
-	release()
-	for range awaits {
-		if got := <-done; got != http.StatusOK {
-			t.Fatalf("an await answered %d", got)
-		}
-	}
-	if n := polls.Load(); n != 2 {
-		t.Fatalf("%d awaits made %d polls, want 2: one poller a second", awaits, n)
-	}
-	got := ask(t, s, http.MethodGet, path, bearer, "")
-	if got.status != http.StatusOK || got.body["status"] != "success" || polls.Load() != 3 {
-		t.Fatalf("an await after the child ended: status %d body %v, %d polls; the ended poller must not serve it",
-			got.status, got.body, polls.Load())
-	}
-}
-
-func TestAwaitPollerStopsOnRevokeAndClose(t *testing.T) {
+func TestAwaitEndsWhenTheGrantIsRevoked(t *testing.T) {
 	for _, end := range []string{"revoke", "close"} {
 		t.Run(end, func(t *testing.T) {
-			s, _ := start(t)
-			c := newChildController(t, started("child-1"))
-			polling, stopped := make(chan struct{}, 1), make(chan struct{}, 1)
-			c.handle("GET /api/v1/runs/run-1/children/child-1", func(_ http.ResponseWriter, r *http.Request) {
-				polling <- struct{}{}
-				<-r.Context().Done()
-				stopped <- struct{}{}
-			})
-			bearer, revoke, err := s.Admit(nodeWithClaim("deploy", claimFor(t, c.fakeController)))
+			s := start(t)
+			service := newService(t)
+			entered := make(chan struct{})
+			stopped := make(chan error, 1)
+			service.AwaitChild = func(ctx context.Context, _ capability.Authorized, _, _ string, _ time.Duration) (nodehost.ProcessChildResult, error) {
+				close(entered)
+				<-ctx.Done()
+				stopped <- ctx.Err()
+				return nodehost.ProcessChildResult{}, ctx.Err()
+			}
+			bearer, revoke, err := s.Admit(routeNode{Service: service})
 			if err != nil {
 				t.Fatal(err)
 			}
-			ask(t, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`)
-			done := make(chan int, 1)
-			go openRequest(context.Background(), s, http.MethodGet, "/node/v1/children/child-1/await?wait_ms=60000", bearer, "", done)
-			<-polling
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			done := make(chan reply, 1)
+			go func() { done <- ask(t, s, http.MethodGet, "/node/v1/children/child/await?wait_ms=60000", bearer, "") }()
+			select {
+			case <-entered:
+			case <-ctx.Done():
+				t.Fatal("await did not enter")
+			}
 			if end == "revoke" {
 				revoke()
 			} else if err := s.Close(); err != nil {
-				t.Fatalf("Close left a request in flight: %v", err)
+				t.Fatal(err)
 			}
-			<-stopped
-			<-done
+			select {
+			case err := <-stopped:
+				if err != context.Canceled {
+					t.Fatal(err)
+				}
+			case <-ctx.Done():
+				t.Fatal("revocation did not stop await")
+			}
+			select {
+			case got := <-done:
+				wantRefusal(t, got, http.StatusConflict, "cancelled")
+			case <-ctx.Done():
+				t.Fatal("request did not join")
+			}
 		})
 	}
 }

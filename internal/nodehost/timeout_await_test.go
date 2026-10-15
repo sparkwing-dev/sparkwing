@@ -1,70 +1,58 @@
-package nodehost_test
+package nodehost
 
 import (
 	"context"
 	"errors"
 	"net/http"
-	"sync"
+	"net/http/httptest"
 	"testing"
+	"testing/synctest"
+	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 func TestAnAwaitHoldsTheNoProgressTimeout(t *testing.T) {
-	s, _ := start(t)
-	c := newChildController(t, started("child-1"))
-	polling, finish := make(chan struct{}, 1), make(chan struct{})
-	release := sync.OnceFunc(func() { close(finish) })
-	t.Cleanup(release)
-	c.handle("GET /api/v1/runs/run-1/children/child-1", func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case polling <- struct{}{}:
-		default:
+	synctest.Test(t, func(t *testing.T) {
+		ctx, activity, stop := executorProgressContext(t.Context(), time.Second)
+		defer stop()
+		routes, service, auth := serviceFixture(t)
+		service.activity = &nativeProcessActivity{activity: activity}
+		entered, finish := make(chan struct{}), make(chan struct{})
+		service.AwaitChild = func(ctx context.Context, _ capability.Authorized, run, job string, wait time.Duration) (ProcessChildResult, error) {
+			close(entered)
+			select {
+			case <-finish:
+				return ProcessChildResult{RunID: run, Status: "success"}, nil
+			case <-ctx.Done():
+				return ProcessChildResult{}, context.Cause(ctx)
+			}
 		}
-		<-finish
-		answer(http.StatusOK, map[string]string{"status": "success"})(w, r)
-	})
-	claim := claimFor(t, c.fakeController)
-	timeoutMS := int64(1000)
-	plan := nodeproto.JobSpec{ID: "deploy", NoProgressTimeoutMS: &timeoutMS}
-
-	awaiting := func(ctx context.Context, n *nodehost.NodeRun) nodehost.Result {
-		node := nodeWithClaim("deploy", claim)
-		node.Pause = n.Pause
-		bearer, revoke, err := s.Admit(node)
-		if err != nil {
-			return nodehost.Result{Outcome: sparkwing.Failed, Err: err}
+		done := make(chan error, 1)
+		for _, endpoint := range routes.endpoints {
+			if endpoint.Pattern != "/node/v1/children/{run}/await" {
+				continue
+			}
+			go func() {
+				request := httptest.NewRequest(http.MethodGet, "/node/v1/children/child/await?wait_ms=60000", nil).WithContext(ctx)
+				request.SetPathValue("run", "child")
+				done <- endpoint.Handle(httptest.NewRecorder(), request, auth)
+			}()
 		}
-		defer revoke()
-		codes := make(chan int, 1)
-		openRequest(ctx, s, http.MethodPost, "/node/v1/children", bearer, `{"pipeline":"build"}`, codes)
-		if code := <-codes; code >= 300 {
-			return nodehost.Result{Outcome: sparkwing.Failed, Err: errors.New(http.StatusText(code))}
+		<-entered
+		silent, _, stopSilent := executorProgressContext(t.Context(), time.Second)
+		defer stopSilent()
+		<-silent.Done()
+		if !errors.Is(context.Cause(silent), errExecutorNoProgress) || ctx.Err() != nil {
+			t.Fatal("the authorized wait consumed the job's no-progress budget")
 		}
-		openRequest(ctx, s, http.MethodGet, "/node/v1/children/child-1/await?wait_ms=60000", bearer, "", codes)
-		if code := <-codes; code != http.StatusOK {
-			return nodehost.Result{Outcome: sparkwing.Failed, Err: errors.New(http.StatusText(code))}
+		close(finish)
+		if err := <-done; err != nil {
+			t.Fatal(err)
 		}
-		return nodehost.Result{Outcome: sparkwing.Success}
-	}
-	done := make(chan nodehost.Result, 1)
-	go func() { done <- nodehost.TimeoutLayer(awaiting)(t.Context(), &nodehost.NodeRun{Plan: plan}) }()
-	<-polling
-
-	// safety: the silent node starts after the await opened and has the same budget, so its
-	// timeout proves the awaiting node sat silent past its own.
-	silent := nodehost.TimeoutLayer(func(ctx context.Context, _ *nodehost.NodeRun) nodehost.Result {
 		<-ctx.Done()
-		return nodehost.Result{Outcome: sparkwing.Failed, Err: ctx.Err()}
-	})(t.Context(), &nodehost.NodeRun{Plan: plan})
-	if silent.Reason != store.FailureNoProgressTimeout {
-		t.Fatalf("a silent node ended %s %q, want no_progress_timeout", silent.Outcome, silent.Reason)
-	}
-	release()
-	if res := <-done; res.Outcome != sparkwing.Success {
-		t.Errorf("the awaiting node ended %s %q: %v, want success", res.Outcome, res.Reason, res.Err)
-	}
+		if !errors.Is(context.Cause(ctx), errExecutorNoProgress) {
+			t.Fatal("child completion did not resume the no-progress budget")
+		}
+	})
 }

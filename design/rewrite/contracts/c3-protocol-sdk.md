@@ -186,7 +186,7 @@ are part of this contract.
 | `nodehost.NativeProcesses` | Bind native startup, attributed masked logs, child-wait activity and cleanup to one live process delegation. |
 | `nodehost.OwnerPlanning`, `OwnerLayerResult` | Supply checkout planning inputs and owner policy results without replacing intake or claim authority. |
 | `nodehost.GeneratorReplay` | Supplies recorded source output for code-only reconstruction. |
-| `nodehost.OwnerEvaluator`, `NewOwnerEvaluator`, `EvaluationInput`, `EvaluationDependencies`, `EvaluationStore` | Reconstruct accepted source code and evaluate every source generator through the common protocol and hash checks. |
+| `nodehost.OwnerEvaluator`, `NewOwnerEvaluator`, `EvaluationInput`, `EvaluationDependencies`, `EvaluationStore` | Reconstruct accepted source code and evaluate every source generator through the common protocol and hash checks, bounded by its persisted job timeout and parent deadline. |
 | `nodehost.OwnerEvaluator.SkipIf`, `SkipEvaluation`, `OwnerEvaluator.MemoKey` | Evaluate pre-dispatch conditions and memo keys without starting job attempts or writing lifecycle state. |
 | `nodehost.ProcessGrant` | Transfers a process binding and its idempotent revoker to the executor or owner evaluator. |
 | `nodehost.ProtocolSessionConfig.StartEvaluation` | Launches the owner evaluator with private pipes, run-log attribution and route revocation. |

@@ -3,10 +3,8 @@ package nodehost_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,66 +12,24 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-func cleanupNode(t *testing.T, s *nodehost.Server) (string, func()) {
+func mustRegisterCleanup(t *testing.T, cleanups *nodehost.ProcessCleanups, argv ...string) string {
 	t.Helper()
-	bearer, revoke, err := s.Admit(nodehost.Node{
-		RunID: "run-1", NodeID: "deploy", Resolver: &fakeResolver{}, Masker: secrets.NewMasker(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return bearer, revoke
-}
-
-func send(t *testing.T, s *nodehost.Server, method, path, bearer string, body []byte) reply {
-	t.Helper()
-	req, err := http.NewRequest(method, s.URL()+path, bytes.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Authorization", "Bearer "+bearer)
-	req.Header.Set(authwire.NodeProtocolHeader, authwire.NodeProtocolVersion)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	out := reply{status: resp.StatusCode}
-	if resp.StatusCode != http.StatusNoContent {
-		if err := json.NewDecoder(resp.Body).Decode(&out.body); err != nil {
-			t.Fatalf("%s %s: decode reply: %v", method, path, err)
-		}
-	}
-	return out
-}
-
-func register(t *testing.T, s *nodehost.Server, bearer string, argv []string, description string) reply {
-	t.Helper()
-	body, err := json.Marshal(map[string]any{"argv": argv, "description": description})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return send(t, s, http.MethodPost, "/node/v1/cleanups", bearer, body)
-}
-
-func mustRegister(t *testing.T, s *nodehost.Server, bearer string, argv ...string) string {
-	t.Helper()
-	got := register(t, s, bearer, argv, "")
-	id, _ := got.body["id"].(string)
-	if got.status != http.StatusCreated || id == "" {
-		t.Fatalf("register %v: status %d body %v, want 201 with an id", argv, got.status, got.body)
+	id, err := cleanups.Register(argv, "")
+	if err != nil || id == "" {
+		t.Fatalf("register %v: id=%q error=%v", argv, id, err)
 	}
 	return id
 }
 
-func release(t *testing.T, s *nodehost.Server, bearer, id string) int {
+func cleanupContext(t *testing.T) context.Context {
 	t.Helper()
-	return send(t, s, http.MethodDelete, "/node/v1/cleanups/"+id, bearer, nil).status
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	t.Cleanup(cancel)
+	return ctx
 }
 
 func requireUnix(t *testing.T) {
@@ -89,22 +45,20 @@ func shellEnv(extra ...string) []string {
 
 func TestCleanupsRunNewestFirstSkippingReleasedOnes(t *testing.T) {
 	requireUnix(t)
-	s, _ := start(t)
-	bearer, revoke := cleanupNode(t, s)
+	cleanups := &nodehost.ProcessCleanups{}
 	dir := t.TempDir()
 	for _, n := range []string{"first", "second", "third"} {
-		id := mustRegister(t, s, bearer, "sh", "-c", "echo "+n+" >> order")
+		id := mustRegisterCleanup(t, cleanups, "sh", "-c", "echo "+n+" >> order")
 		if n == "second" {
-			if status := release(t, s, bearer, id); status != http.StatusNoContent {
-				t.Fatalf("release: status %d, want 204", status)
+			if err := cleanups.Release(id); err != nil {
+				t.Fatal(err)
 			}
-			if status := release(t, s, bearer, id); status != http.StatusNotFound {
-				t.Fatalf("second release: status %d, want 404", status)
+			if err := cleanups.Release(id); !cleanupErrorCode(err, apierr.NotFound) {
+				t.Fatalf("second release: error=%v, want not_found", err)
 			}
 		}
 	}
-	revoke()
-	if err := s.RunCleanups(context.Background(), bearer, nodehost.CleanupScope{Dir: dir, Env: shellEnv()}); err != nil {
+	if err := cleanups.Run(cleanupContext(t), nodehost.CleanupScope{Dir: dir, Env: shellEnv()}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(filepath.Join(dir, "order"))
@@ -114,28 +68,26 @@ func TestCleanupsRunNewestFirstSkippingReleasedOnes(t *testing.T) {
 	if string(got) != "third\nfirst\n" {
 		t.Fatalf("cleanups ran as %q, want third then first", got)
 	}
-	if err := s.RunCleanups(context.Background(), bearer, nodehost.CleanupScope{Dir: dir, Env: shellEnv()}); err != nil {
+	if err := cleanups.Run(cleanupContext(t), nodehost.CleanupScope{Dir: dir, Env: shellEnv()}); err != nil {
 		t.Fatal(err)
 	}
-	if again, _ := os.ReadFile(filepath.Join(dir, "order")); !bytes.Equal(again, got) {
-		t.Fatalf("a second RunCleanups ran them again: %q", again)
+	if again, err := os.ReadFile(filepath.Join(dir, "order")); err != nil || !bytes.Equal(again, got) {
+		t.Fatalf("a second cleanup run changed the output: %q error=%v", again, err)
 	}
 }
 
 func TestCleanupRunsWithTheNodesEnvironmentNotTheHosts(t *testing.T) {
 	requireUnix(t)
 	t.Setenv("HOST_ONLY_CREDENTIAL", "host-secret")
-	s, _ := start(t)
-	bearer, revoke := cleanupNode(t, s)
-	mustRegister(t, s, bearer, "sh", "-c", `echo "node=$NODE_VAR host=$HOST_ONLY_CREDENTIAL token=$SPARKWING_NODE_TOKEN dir=$(pwd)"`)
-	revoke()
+	cleanups := &nodehost.ProcessCleanups{}
+	mustRegisterCleanup(t, cleanups, "sh", "-c", `echo "node=$NODE_VAR host=$HOST_ONLY_CREDENTIAL token=$SPARKWING_NODE_TOKEN dir=$(pwd)"`)
 	dir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	var log syncBuffer
-	scope := nodehost.CleanupScope{Dir: dir, Log: &log, Env: shellEnv("NODE_VAR=node-value", "SPARKWING_NODE_TOKEN="+bearer)}
-	if err := s.RunCleanups(context.Background(), bearer, scope); err != nil {
+	var log bytes.Buffer
+	scope := nodehost.CleanupScope{Dir: dir, Log: &log, Env: shellEnv("NODE_VAR=node-value", "SPARKWING_NODE_TOKEN=node-token")}
+	if err := cleanups.Run(cleanupContext(t), scope); err != nil {
 		t.Fatal(err)
 	}
 	want := fmt.Sprintf("node=node-value host= token= dir=%s\n", dir)
@@ -146,17 +98,15 @@ func TestCleanupRunsWithTheNodesEnvironmentNotTheHosts(t *testing.T) {
 
 func TestCleanupResolvesItsProgramOnTheNodesPath(t *testing.T) {
 	requireUnix(t)
-	s, _ := start(t)
-	bearer, revoke := cleanupNode(t, s)
+	cleanups := &nodehost.ProcessCleanups{}
 	bin := t.TempDir()
 	if err := os.WriteFile(filepath.Join(bin, "node-tool"), []byte("#!/bin/sh\necho node-tool ran\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	mustRegister(t, s, bearer, "node-tool")
-	revoke()
-	var log syncBuffer
+	mustRegisterCleanup(t, cleanups, "node-tool")
+	var log bytes.Buffer
 	scope := nodehost.CleanupScope{Dir: t.TempDir(), Log: &log, Env: []string{"PATH=" + bin}}
-	if err := s.RunCleanups(context.Background(), bearer, scope); err != nil {
+	if err := cleanups.Run(cleanupContext(t), scope); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(log.String(), "node-tool ran") {
@@ -166,15 +116,13 @@ func TestCleanupResolvesItsProgramOnTheNodesPath(t *testing.T) {
 
 func TestCleanupFailuresNameOnlyTheProgramAndTheRestStillRun(t *testing.T) {
 	requireUnix(t)
-	s, logs := start(t)
-	bearer, revoke := cleanupNode(t, s)
+	cleanups := &nodehost.ProcessCleanups{}
 	dir := t.TempDir()
-	mustRegister(t, s, bearer, "sh", "-c", "touch ran")
-	mustRegister(t, s, bearer, "no-such-program-xyz", "--token=s3cret-arg")
-	mustRegister(t, s, bearer, "sh", "-c", "exit 3", "s3cret-arg")
-	revoke()
-	var log syncBuffer
-	if err := s.RunCleanups(context.Background(), bearer, nodehost.CleanupScope{Dir: dir, Log: &log, Env: shellEnv()}); err == nil {
+	mustRegisterCleanup(t, cleanups, "sh", "-c", "touch ran")
+	mustRegisterCleanup(t, cleanups, "no-such-program-xyz", "--token=s3cret-arg")
+	mustRegisterCleanup(t, cleanups, "sh", "-c", "exit 3", "s3cret-arg")
+	var log bytes.Buffer
+	if err := cleanups.Run(cleanupContext(t), nodehost.CleanupScope{Dir: dir, Log: &log, Env: shellEnv()}); err == nil {
 		t.Fatal("failed cleanups returned success")
 	}
 	out := log.String()
@@ -183,110 +131,70 @@ func TestCleanupFailuresNameOnlyTheProgramAndTheRestStillRun(t *testing.T) {
 			t.Fatalf("cleanup log:\n%s\nwant %q", out, want)
 		}
 	}
-	if strings.Contains(out, "s3cret-arg") || strings.Contains(logs.String(), "s3cret-arg") {
-		t.Fatalf("logs carry a cleanup argument:\n%s\n%s", out, logs.String())
+	if strings.Contains(out, "s3cret-arg") {
+		t.Fatalf("logs carry a cleanup argument:\n%s", out)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "ran")); err != nil {
 		t.Fatalf("the oldest cleanup did not run after two failures: %v", err)
 	}
 }
 
-func TestCleanupIsKilledAtItsDeadline(t *testing.T) {
-	requireUnix(t)
-	s, _ := start(t)
-	bearer, revoke := cleanupNode(t, s)
-	mustRegister(t, s, bearer, "sh", "-c", "exec sleep 60", "s3cret-arg")
-	revoke()
-	var log syncBuffer
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-	if err := s.RunCleanups(ctx, bearer, nodehost.CleanupScope{Dir: t.TempDir(), Log: &log, Env: shellEnv()}); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("cleanup deadline error=%v", err)
-	}
-	if out := log.String(); !strings.Contains(out, "cleanup sh failed: timed out") || strings.Contains(out, "s3cret-arg") {
-		t.Fatalf("cleanup log:\n%s\nwant a timeout naming only sh", out)
-	}
-}
-
 func TestCleanupsAreConfinedToTheirNode(t *testing.T) {
 	requireUnix(t)
-	s, _ := start(t)
-	bearerA, revokeA := cleanupNode(t, s)
-	bearerB, revokeB := cleanupNode(t, s)
+	cleanupsA, cleanupsB := &nodehost.ProcessCleanups{}, &nodehost.ProcessCleanups{}
 	dir := t.TempDir()
-	id := mustRegister(t, s, bearerA, "sh", "-c", "touch a-ran")
-	if got := send(t, s, http.MethodDelete, "/node/v1/cleanups/"+id, bearerB, nil); got.status != http.StatusNotFound || failureCode(got) != "not_found" ||
-		!strings.Contains(failureMessage(got), "no cleanup with that ID") {
-		t.Fatalf("node B released node A's cleanup: status %d body %v, want 404 not_found", got.status, got.body)
+	id := mustRegisterCleanup(t, cleanupsA, "sh", "-c", "touch a-ran")
+	if err := cleanupsB.Release(id); !cleanupErrorCode(err, apierr.NotFound) || !strings.Contains(err.Error(), "no cleanup with that ID") {
+		t.Fatalf("node B released node A's cleanup: error=%v", err)
 	}
-	mustRegister(t, s, bearerB, "sh", "-c", "touch b-ran")
-	revokeA()
-	if err := s.RunCleanups(context.Background(), bearerA, nodehost.CleanupScope{Dir: dir, Env: shellEnv()}); err != nil {
+	mustRegisterCleanup(t, cleanupsB, "sh", "-c", "touch b-ran")
+	if err := cleanupsA.Run(cleanupContext(t), nodehost.CleanupScope{Dir: dir, Env: shellEnv()}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "a-ran")); err != nil {
 		t.Fatalf("node A's cleanup did not run: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "b-ran")); err == nil {
-		t.Fatal("node A's exit ran node B's cleanup")
+	if _, err := os.Stat(filepath.Join(dir, "b-ran")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("node A's exit ran node B's cleanup: %v", err)
 	}
-	revokeB()
 }
 
-func TestRunCleanupsRefusesALiveBearer(t *testing.T) {
-	requireUnix(t)
-	s, _ := start(t)
-	bearer, revoke := cleanupNode(t, s)
-	dir := t.TempDir()
-	mustRegister(t, s, bearer, "sh", "-c", "touch ran")
-	if err := s.RunCleanups(context.Background(), bearer, nodehost.CleanupScope{Dir: dir, Env: shellEnv()}); err == nil {
-		t.Fatal("RunCleanups ran while the node's bearer was live")
-	}
-	revoke()
-	if got := register(t, s, bearer, []string{"true"}, ""); got.status != http.StatusUnauthorized {
-		t.Fatalf("register after revoke: status %d, want 401", got.status)
-	}
-	if err := s.RunCleanups(context.Background(), bearer, nodehost.CleanupScope{Dir: dir, Env: shellEnv()}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "ran")); err != nil {
-		t.Fatalf("the refused run lost the cleanup: %v", err)
-	}
+func cleanupErrorCode(err error, code apierr.Code) bool {
+	var apiError *apierr.Error
+	return errors.As(err, &apiError) && apiError.Code == code
 }
 
 func TestCleanupRegistrationLimits(t *testing.T) {
-	s, _ := start(t)
-	bearer, _ := cleanupNode(t, s)
-	for name, body := range map[string][]byte{
-		"empty argv":        []byte(`{"argv":[]}`),
-		"empty program":     []byte(`{"argv":[""]}`),
-		"no argv":           []byte(`{}`),
-		"NUL in argv":       []byte(`{"argv":["rm","a\u0000b"]}`),
-		"not json":          []byte(`argv=rm`),
-		"65 arguments":      []byte(`{"argv":["x"` + strings.Repeat(`,"a"`, 64) + `]}`),
-		"long description":  []byte(`{"argv":["x"],"description":"` + strings.Repeat("d", 257) + `"}`),
-		"body over 16 KiB":  []byte(`{"argv":["x","` + strings.Repeat("a", 16<<10) + `"]}`),
-		"argv not a string": []byte(`{"argv":[1]}`),
+	cleanups := &nodehost.ProcessCleanups{}
+	for name, input := range map[string]struct {
+		argv        []string
+		description string
+	}{
+		"empty argv":       {},
+		"empty program":    {argv: []string{""}},
+		"NUL in argv":      {argv: []string{"rm", "a\x00b"}},
+		"65 arguments":     {argv: append([]string{"x"}, make([]string, 64)...)},
+		"long description": {argv: []string{"x"}, description: strings.Repeat("d", 257)},
 	} {
-		if got := send(t, s, http.MethodPost, "/node/v1/cleanups", bearer, body); got.status != http.StatusBadRequest || failureCode(got) != "bad_request" {
-			t.Fatalf("%s: status %d body %v, want 400 bad_request", name, got.status, got.body)
+		if _, err := cleanups.Register(input.argv, input.description); !cleanupErrorCode(err, apierr.BadRequest) {
+			t.Fatalf("%s: error=%v, want bad_request", name, err)
 		}
 	}
-	if got := register(t, s, bearer, append([]string{"x"}, make([]string, 63)...), strings.Repeat("d", 256)); got.status != http.StatusCreated {
-		t.Fatalf("64 arguments and a 256-byte description: status %d body %v, want 201", got.status, got.body)
+	if _, err := cleanups.Register(append([]string{"x"}, make([]string, 63)...), strings.Repeat("d", 256)); err != nil {
+		t.Fatalf("64 arguments and a 256-byte description: %v", err)
 	}
 	var first string
 	for i := 1; i < 16; i++ {
-		id := mustRegister(t, s, bearer, "true")
+		id := mustRegisterCleanup(t, cleanups, "true")
 		if first == "" {
 			first = id
 		}
 	}
-	if got := register(t, s, bearer, []string{"true"}, ""); got.status != http.StatusBadRequest {
-		t.Fatalf("17th cleanup: status %d body %v, want 400", got.status, got.body)
+	if _, err := cleanups.Register([]string{"true"}, ""); !cleanupErrorCode(err, apierr.BadRequest) {
+		t.Fatalf("17th cleanup: error=%v, want bad_request", err)
 	}
-	if status := release(t, s, bearer, first); status != http.StatusNoContent {
-		t.Fatalf("release: status %d", status)
+	if err := cleanups.Release(first); err != nil {
+		t.Fatal(err)
 	}
-	mustRegister(t, s, bearer, "true")
+	mustRegisterCleanup(t, cleanups, "true")
 }

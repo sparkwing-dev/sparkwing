@@ -237,7 +237,7 @@ func (a *ProcessAuthorities) CheckBinding(ctx context.Context, principal capabil
 		}
 	case capability.BindDeclaredSecret:
 		if !executorContains(service.Secrets, target.SecretName) {
-			return processBindingDenied()
+			return &apierr.Error{Code: apierr.Forbidden, Message: "secret is not declared by the bound job", Details: map[string]any{"reason": apierr.ReasonSecretUndeclared}}
 		}
 	case capability.BindBodyNamesRun:
 		if target.BodyRunID != "" && target.BodyRunID != binding.RunID {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -12,11 +13,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type routerSDK struct {
@@ -48,23 +49,47 @@ func (routerSDK) Eval(context.Context, any, nodeproto.Request) (nodeproto.EvalRe
 }
 
 func TestSDKHTTPServicesUseTheRegisteredProductionRouter(t *testing.T) {
-	s, _ := start(t)
-	c := newChildController(t, started("child-1"), started("child-2"))
-	output := c.object("build", []byte(`{"image":"ready"}`))
-	c.handle("GET /api/v1/runs/run-1/nodes/build", nodeRow("done", "success"))
-	c.handle("GET /api/v1/runs/run-1/nodes/build/output", answer(http.StatusOK, output))
-	c.handle("POST /api/v1/runs/run-1/nodes/deploy/claim/input", answer(http.StatusOK, store.ClaimInput{RunID: "previous", Output: output}))
-	c.handle("POST /api/v1/runs/run-1/oidc-token", answer(http.StatusOK, nodehost.ProcessOIDCToken{Token: "minted-credential", ExpiresAt: time.Now().Add(time.Hour)}))
-	c.handle("GET /api/v1/runs/run-1/children/child-1", answer(http.StatusOK, map[string]string{"status": "success"}))
-	c.handle("GET /api/v1/runs/run-1/children/child-1/nodes/build/output", answer(http.StatusOK, output))
-	c.handle("GET /api/v1/runs/run-1/children/child-2", answer(http.StatusOK, map[string]any{"status": "failed", "error": &apierr.Error{Code: apierr.SDKError, Message: "dynamic-credential", Details: map[string]any{"why": "dynamic-credential"}}}))
+	s := start(t)
 	masker := secrets.NewMasker()
-	state, records := &fakeState{}, &recordLog{}
-	sink, err := nodehost.NewLogSink(t.Context(), nodehost.LogSinkConfig{RunID: "run-1", NodeID: "deploy", State: state, Log: records, Masker: masker})
-	if err != nil {
-		t.Fatal(err)
+	service := newService(t)
+	service.Masks = nodehost.NewMaskRegistry(masker)
+	service.Secrets = []string{"TOKEN"}
+	service.Secret = func(context.Context, capability.Authorized, string) (string, bool, error) {
+		return "resolved-credential", true, nil
 	}
-	bearer := admit(t, s, nodehost.Node{RunID: "run-1", NodeID: "deploy", Job: nodeproto.JobSpec{ID: "deploy", Steps: []nodeproto.StepSpec{{ID: "body"}}}, Secrets: []string{"TOKEN"}, Resolver: &fakeResolver{entries: map[string]entry{"TOKEN": {value: "resolved-credential", masked: true}}}, Masker: masker, Claim: claimFor(t, c.fakeController), Sink: sink})
+	service.Output = func(context.Context, capability.Authorized, string) (json.RawMessage, error) {
+		return json.RawMessage(`{"image":"ready"}`), nil
+	}
+	service.Latest = func(context.Context, capability.Authorized, string, string, time.Duration) (nodehost.ProcessOutput, error) {
+		return nodehost.ProcessOutput{RunID: "previous", Output: json.RawMessage(`{"image":"ready"}`)}, nil
+	}
+	service.OIDC = func(context.Context, capability.Authorized, string) (nodehost.ProcessOIDCToken, error) {
+		return nodehost.ProcessOIDCToken{Token: "minted-credential", ExpiresAt: time.Now().Add(time.Hour)}, nil
+	}
+	children := 0
+	service.StartChild = func(context.Context, capability.Authorized, nodehost.ChildRequest) (string, error) {
+		children++
+		return fmt.Sprintf("child-%d", children), nil
+	}
+	service.AwaitChild = func(_ context.Context, _ capability.Authorized, run, _ string, _ time.Duration) (nodehost.ProcessChildResult, error) {
+		if run == "child-2" {
+			return nodehost.ProcessChildResult{RunID: run, Status: "failed", Error: &apierr.Error{Code: apierr.SDKError, Message: "dynamic-credential", Details: map[string]any{"why": "dynamic-credential"}}}, nil
+		}
+		return nodehost.ProcessChildResult{RunID: run, Status: "success", Output: json.RawMessage(`{"image":"ready"}`)}, nil
+	}
+	var records []string
+	service.Annotation = func(_ context.Context, _ capability.Authorized, request nodeproto.AnnotationRequest) error {
+		records = append(records, request.Message)
+		return nil
+	}
+	service.Summary = func(_ context.Context, _ capability.Authorized, request nodeproto.SummaryRequest) error {
+		records = append(records, request.Markdown)
+		return nil
+	}
+	bearer := admitService(t, s, service)
+	originalTransport := http.DefaultTransport
+	http.DefaultTransport = routeTransport{handler: s.handler}
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	complete := make(chan error, 1)
@@ -72,7 +97,7 @@ func TestSDKHTTPServicesUseTheRegisteredProductionRouter(t *testing.T) {
 		check := func() error {
 			value, masked, err := services.Secret(ctx, "TOKEN")
 			if err != nil || value != "resolved-credential" || !masked {
-				return errors.New("SDK secret service did not preserve its value")
+				return fmt.Errorf("SDK secret service value=%q masked=%v error=%w", value, masked, err)
 			}
 			_, _, err = services.Secret(ctx, "OTHER")
 			var failure *apierr.Error
@@ -145,8 +170,8 @@ func TestSDKHTTPServicesUseTheRegisteredProductionRouter(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("SDK protocol did not join before deadline")
 	}
-	if len(state.ops) != 2 || len(records.records) != 2 || strings.Contains(strings.Join(state.ops, " "), "dynamic-credential") {
-		t.Fatalf("records were not acknowledged and masked: %v %+v", state.ops, records.records)
+	if len(records) != 2 || strings.Contains(strings.Join(records, " "), "dynamic-credential") {
+		t.Fatalf("records were not acknowledged and masked: %v %+v", records, records)
 	}
 	for _, credential := range []string{"dynamic-credential", "resolved-credential", "minted-credential"} {
 		if masker.Mask(credential) != "***" {
