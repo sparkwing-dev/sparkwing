@@ -11,8 +11,6 @@ import (
 	"slices"
 	"strings"
 
-	flag "github.com/spf13/pflag"
-
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
@@ -414,21 +412,6 @@ func isTerminalRunStatus(s string) bool {
 	return s == "success" || s == "failed" || s == "cancelled"
 }
 
-func runIDFromArgs(path string, rest []string, flagValue string) (string, error) {
-	switch {
-	case len(rest) == 0 && flagValue == "":
-		return "", fmt.Errorf("%s: a run id is required, as --run RUN_ID or as a positional", path)
-	case len(rest) == 0:
-		return flagValue, nil
-	case len(rest) > 1:
-		return "", fmt.Errorf("%s: unexpected positional %q", path, rest[1])
-	case flagValue != "":
-		return "", fmt.Errorf("%s: run id given twice; pass it as --run or as a positional", path)
-	default:
-		return rest[0], nil
-	}
-}
-
 func normalizeRunID(id string) string {
 	if id == "" || strings.HasPrefix(id, "run-") {
 		return id
@@ -441,12 +424,6 @@ func statusExitCode(status string) error {
 		return nil
 	}
 	return exitErrorf(1, "run status: %s", status)
-}
-
-func multiFlagVar(fs *flag.FlagSet, name, usage string) *[]string {
-	var dest []string
-	fs.StringSliceVar(&dest, name, nil, usage)
-	return &dest
 }
 
 func findSparkwingDir() (string, error) {
@@ -483,9 +460,4 @@ func findSparkwingDirFrom(start string) (string, error) {
 		}
 		dir = parent
 	}
-}
-
-func mustGetwd() string {
-	d, _ := os.Getwd()
-	return d
 }

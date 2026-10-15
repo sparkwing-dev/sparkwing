@@ -67,7 +67,6 @@ func (c *Client) CreateSecretForPipeline(ctx context.Context, name, value, pipel
 func (c *Client) CreateServiceToken(ctx context.Context, req CreateServiceTokenRequest) (*CreatedToken, error)
 func (c *Client) CreateToken(ctx context.Context, req CreateTokenRequest) (*CreatedToken, error)
 func (c *Client) CreateTrigger(ctx context.Context, req TriggerRequest) (*TriggerResponse, error)
-func (c *Client) DeleteRun(ctx context.Context, runID string) error
 func (c *Client) DeleteSecret(ctx context.Context, name string) error
 func (c *Client) DeleteSecretForPipeline(ctx context.Context, name, pipeline string) error
 func (c *Client) EnqueueTrigger(

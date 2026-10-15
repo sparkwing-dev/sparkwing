@@ -621,29 +621,6 @@ func (c *Client) GetTrigger(ctx context.Context, triggerID string) (*store.Trigg
 	}
 }
 
-// DeleteRun removes a run (and its nodes/events/trigger row).
-// Idempotent: missing ids return nil.
-func (c *Client) DeleteRun(ctx context.Context, runID string) error {
-	u := fmt.Sprintf("%s/api/v1/runs/%s", c.baseURL, url.PathEscape(runID))
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := c.do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	switch resp.StatusCode {
-	case http.StatusNoContent:
-		return nil
-	case http.StatusNotFound:
-		return classifyNotFound(resp)
-	default:
-		return readHTTPError(resp)
-	}
-}
-
 // ClaimTrigger asks the controller for the next pending trigger,
 // atomically flipping it to 'claimed'. Returns (nil, nil) when the
 // queue is empty.

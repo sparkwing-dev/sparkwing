@@ -189,33 +189,6 @@ func setupRefWorktree(sparkwingDir, ref string) (worktreeDir, pipelineDirectory 
 	return temporaryDir, pipelineDirectory, cleanup, nil
 }
 
-func gitContextIn(dir string) (branch, sha, repo, repoURL string) {
-	git := func(args ...string) (string, bool) {
-		if dir != "" {
-			args = append([]string{"-C", dir}, args...)
-		}
-		out, err := exec.Command("git", args...).Output()
-		if err != nil {
-			return "", false
-		}
-		return strings.TrimSpace(string(out)), true
-	}
-	if v, ok := git("rev-parse", "--abbrev-ref", "HEAD"); ok {
-		branch = v
-		if branch == "HEAD" {
-			branch = ""
-		}
-	}
-	if v, ok := git("rev-parse", "HEAD"); ok {
-		sha = v
-	}
-	if v, ok := git("remote", "get-url", "origin"); ok {
-		repoURL = v
-		repo = parseGithubOwnerRepo(repoURL)
-	}
-	return branch, sha, repo, repoURL
-}
-
 func parseGithubOwnerRepo(url string) string {
 	if strings.HasPrefix(url, "git@github.com:") {
 		rest := strings.TrimPrefix(url, "git@github.com:")
@@ -230,16 +203,4 @@ func parseGithubOwnerRepo(url string) string {
 		}
 	}
 	return ""
-}
-
-func repoNameFromURL(url string) string {
-	url = strings.TrimSpace(strings.TrimSuffix(url, ".git"))
-	if url == "" {
-		return ""
-	}
-	i := strings.LastIndexAny(url, "/:")
-	if i < 0 || i == len(url)-1 {
-		return url
-	}
-	return url[i+1:]
 }

@@ -1,8 +1,99 @@
 # W9 handoff
 
-This continuation starts at bea01dfe3 with a clean worktree. W9 is still
+This continuation starts at 53740f1ff with a clean worktree. W9 is still
 incomplete. The lead owns Git staging/commits, independent review, pipelines
-and native QA. Session 11 supersedes conflicting earlier status below.
+and native QA. Session 12 supersedes conflicting earlier status below.
+
+## This continuation (session 12)
+
+### Deletion and caller migration
+
+Removed the unused CLI consumer supervisor stop, PID polling and Unix/Windows
+process-signaling path. LocalLifecycle remains the lifecycle owner. Deleted the
+duplicate service-status renderer, positional run-ID parser, unused flag/display
+helpers, old Git-context collector and unused home-path adapter. The stale
+mustHomePaths test helper had no callers and is also removed.
+
+Deleted Client.DeleteRun. The CLI already uses NewRunPruner and its acknowledged
+RunDeletion response. Removed its entries from the old client's error tables and
+API snapshot. The existing surface transport check still exercises typed deletion.
+The client package documentation now names the shared controllerwire transport.
+
+Gross deletion is 395 production-source Go lines and 110 test-source Go lines,
+including comments and blanks. Eight complete files are deleted. Production
+source is 394 lines smaller overall. No foreign runtime caller changed. The
+lookback-duration test now parses the final runs-list grammar and calls the
+shared duration owner. Removed tests covered the retired positional-ID grammar
+and private zombie/PID helper. No parked T1 source test was newly ported.
+
+### Verification
+
+All Go checks use GOWORK=off, GOFLAGS=-buildvcs=false, with caches, temporary
+build files and test scratch under /tmp/sw-astra-W9. Test parallelism is four.
+
+- Whole-repository go build -p 4 ./... passes.
+- Scoped vet passes for cmd/sparkwing, controller/client, clisurface,
+  controllerwire and tests/acceptance.
+- TestSurface components pass, including refusal of Client.DeleteRun and the
+  typed run-query/deletion transport. No native acceptance cell was activated.
+- Focused CLI lifecycle, local intake/hosting, standalone hosting, retained
+  grammar and removed-command checks pass.
+- Full clisurface, controllerwire, doccheck, apiref and apispec tests pass.
+- The default-team caller inventory passes with no stale W9 entry. Its table
+  needed no edit.
+- Both TypeScript release/publication checks and both release-target checks
+  pass. Windows x64/arm64 packaging remains implemented. Native bridge execution
+  remains hosted evidence and was not rerun on Linux.
+- Commentcheck passes across 2,111 files. Whitespace checks pass.
+
+Migration/changelog source and embedded copies agree. The client API snapshot
+was generated with cmd/apidiff. No Sparkwing binary, operational service,
+publication or release ran. No Git state was written.
+
+### Remaining contracts and integration
+
+No foreign contract changed or new mechanism was added. The prior W9 assignment
+audit still applies to every amendments-1/handoffs entry. Completed step-window,
+source-attempt, step-report, launcher-fence, grammar and Windows packaging work
+was retained.
+
+Correction to earlier handoffs: W3 provides NewNativeHost and W8 provides
+NewLocalRuntime/NewLocalLifecycle. Their constructors are present. W9 still
+has unfinished native resolvers in run_host.go, here_resume.go, dashboard.go and
+schedules_local.go. NativeHost needs complete owner/claim transactions,
+delegated process services, owner policy/state following, captured snapshots,
+authorized storage and log sinks. RemoteOwnerStore currently implements only
+reconciliation, expansion and scheduling. The elected local controller factory
+and full remote host-store composition remain real integration work.
+
+Foreign contract requests still open are immutable initial here-reason retention,
+local schedule checkout/environment/proof and pin operations, managed timer/tick
+and dry-run operations, debug-release policy/acknowledgement, and authorized
+result/log publication. W9 must preserve the local verdict on publication failure.
+Cloud fetch-source/run-node still need their native bootstrap/host composition.
+
+The remaining legacy Client lifecycle/trigger/state methods still satisfy
+StateStoreOld/RunCoordination. Their live callers include orchestrator's
+trigger_host.go, run_node.go, backends.go, hosted_backends.go and
+pkg/storage/storeurl/spec.go. Queued-claim methods have no production caller but
+are still used by controller/client and W2/W3 legacy fixtures. This continuation
+does not restore those methods as a test helper or declare their retirement done.
+Full native HTTP/api.sock, Windows/Darwin, storage, Docker/Kubernetes and real-repo
+acceptance remains open.
+
+### Shared edits and friction
+
+Shared edits are tests/acceptance/surface_contract_test.go,
+.apidiff/pkg_controller_client.txt, CHANGELOG.md, pkg/docs/changelog.md and
+pkg/docs/mirror/migrations/_unreleased.md. Lead-owned handoffs/amendments are
+unchanged. No other area's runtime or test files changed.
+
+The first build overlapped file deletion and had to be restarted. The first
+post-deletion compile found an unused pflag import, which is removed. The final
+build and scoped vet/tests pass. Overwing's installed binary reports staleness
+but matching/showing standards succeeded. Native evidence and the declared
+composition/contract gaps remain the unfinished work. The lead reviews and
+commits. Scratch is deleted before reporting.
 
 ## This continuation (session 11)
 

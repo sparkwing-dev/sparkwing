@@ -57,7 +57,7 @@ func TestSurfaceGrammarContract(t *testing.T) {
 func TestSurfaceRemovedClientRecoveryAPIs(t *testing.T) {
 	clientType := reflect.TypeFor[*client.Client]()
 	for _, name := range []string{
-		"HeartbeatTrigger", "ClaimLaunch", "SourceCredential", "WithClaimResources", "BaseURL", "AppendNodeLiveLog",
+		"HeartbeatTrigger", "ClaimLaunch", "SourceCredential", "WithClaimResources", "BaseURL", "AppendNodeLiveLog", "DeleteRun",
 		"PendingNodeBounce", "ConsumeNodeBounce", "ResetNodeForAutoRetry", "RetryRun", "ListTriggers",
 		"ListCrons", "GetCron", "PutCronRepo", "DeleteCronRepo", "PauseCron", "ResumeCron",
 		"DisarmCron", "RunCronNow", "SetCronOverride", "ClearCronOverride",

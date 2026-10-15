@@ -3,7 +3,8 @@
 ## CLI client retirement
 
 The legacy controller client no longer exposes `ClaimLaunch`, `SourceCredential`,
-`WithClaimResources`, `BaseURL` or `AppendNodeLiveLog`. Launcher claims use
+`WithClaimResources`, `BaseURL`, `AppendNodeLiveLog` or `DeleteRun`. Run deletion
+uses `NewRunPruner` and its acknowledged `RunDeletion` response. Launcher claims use
 `NewEngineClient` with `EngineOptions.Launcher` and the shared `ClaimRequest`.
 The controller's source-release route retains its capability policy and audited
 credential response. Log writers name their execution attempt and byte offset.
