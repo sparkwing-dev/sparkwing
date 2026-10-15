@@ -61,16 +61,6 @@ func (m *memObjects) putIfAbsent(_ context.Context, key string, body []byte) err
 	return nil
 }
 
-func (m *memObjects) deletePrefix(prefix string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for k := range m.objs {
-		if strings.HasPrefix(k, prefix) {
-			delete(m.objs, k)
-		}
-	}
-}
-
 func (m *memObjects) resetGets() {
 	m.mu.Lock()
 	defer m.mu.Unlock()

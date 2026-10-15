@@ -2,6 +2,71 @@
 
 <!-- design:begin -->
 
+## Latest continuation
+
+This continuation starts at `ac5a08859` during the integration merge. The only
+source conflict was `tests/acceptance/skeleton_test.go`. It now keeps both W7's
+storage dispatch and the incoming TypeScript check. There are no conflict
+markers. The index remains unmerged because SWARM-BRIEF forbids Git writes.
+The lead must stage this resolution and finish the merge.
+
+Deleted `pkg/storage/conformance/log.go` (253 lines),
+`pkg/storage/logseg/conformance_test.go` (121 lines), and the unused
+`memObjects.deletePrefix` helper (10 lines). That is **384 legacy code/test
+lines**. The facade was the portable log suite's only caller. Its run deletion
+and append-after-delete behavior existed in the fixture, not a product backend.
+Its stream test skipped. Physical retention and verified reads retain their
+existing coverage.
+
+Ported the retained read assertions to
+`TestSegmentReadsApplyFiltersAcrossCuts`, through the real sink and segmented
+reader. Its seven cases check full output, head, tail, grep, line range,
+combined filters and empty selection. An invalid range fails. The test passed
+before the old suite was deleted and the complete storage package tests passed
+afterward. No new native acceptance cell is claimed.
+
+`TestStorage` passes with **72 passing events and 425 skips**, unchanged from
+the earlier continuation. All W7 rows in `amendments-1.md` and every handoff
+naming W7 were checked. Their W7 implementations remain as recorded in the
+ledger below. The authenticated data constructors still panic. W1's result and
+physical-log key implementations still disagree with the recorded C1 layout.
+The real-store log cell remains skipped. No W1/W2 implementation was replaced
+by a W7 copy or compatibility transport.
+
+Verification passes with `GOWORK=off GOFLAGS=-buildvcs=false GOMAXPROCS=4`,
+`-p 4`, and cache/temp directories under `/tmp/sw-astra-W7/`:
+
+- Whole-repository `go build -p 4 ./...`.
+- Full tests for `internal/blob/...`, `internal/artifacts`, `internal/depcache`
+  and `pkg/storage/...`.
+- Complete `TestStorage` acceptance run.
+- Vet for those storage packages and `tests/acceptance`.
+- Both embedded-document drift guards.
+- `go run ./internal/commentcheck -base main .`.
+- `go run ./internal/sleepcheck -base HEAD .`.
+- Formatting and diff whitespace checks.
+
+The additional `TestDocsNameOnlySymbolsThatExist` check fails on 17 removed
+Go SDK symbols across seven untouched pages. The SDK and those pages have no
+diff relative to HEAD. This is separate from the two passing embedded-document
+drift guards. The exact symbols, paths and command are handed to W4/W9 in
+`handoffs.md`. W7's changed migration text adds no SDK symbol reference.
+
+The portable API snapshot is regenerated from source. Only
+`.apidiff/pkg_storage_conformance.txt` is copied back, keeping unrelated API
+snapshots untouched. Shared files changed this continuation are
+`tests/acceptance/skeleton_test.go`, `VERSIONING.md`, `CHANGELOG.md`,
+`pkg/docs/changelog.md`, `docs/migrations/_unreleased.md`, its embedded copy,
+`handoffs.md` and this report. All remaining changes belong to W7 storage.
+
+No new contract, mechanism, setting, limit, dependency or product decision was
+added. The remaining real integration and live legacy callers are listed below.
+The lead owns W1/W2 integration, host/profile construction, native acceptance,
+review, staging and the merge commit. No Sparkwing binary, pipeline, deployment,
+release or Git write ran. Scratch is deleted before the final response.
+
+## Earlier continuation evidence
+
 W7 remains incomplete. This continuation starts from `1d3eaa535` with a clean
 worktree. Earlier implementations and ports remain committed. This session
 deletes the unused filesystem append-log backend and dead cache diagnostics,

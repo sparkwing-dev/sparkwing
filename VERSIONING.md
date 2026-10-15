@@ -155,7 +155,6 @@ current set. The suites shipped today:
 | Interface | Suite |
 |---|---|
 | [`storage.ArtifactStore`](./pkg/storage/storage.go) | [`pkg/storage/conformance.TestArtifactStore`](./pkg/storage/conformance) |
-| [`storage.LogStore`](./pkg/storage/storage.go) | [`pkg/storage/conformance.TestLogStore`](./pkg/storage/conformance) |
 | [`controller.Cipher`](./pkg/controller/cipher.go) | [`pkg/controller/ciphertest.TestCipher`](./pkg/controller/ciphertest) |
 
 Each suite is a single exported `TestX(t, factory)` function. A
@@ -167,6 +166,9 @@ the implementation opts out of (`storage.ErrNotSupported`,
 `ArtifactStore` provides create-only `PutIfAbsent` writes. An existing key
 returns `ErrPreconditionFailed`. The mutable `Put` and unscoped `Has` APIs
 are removed. Distributed presence queries use the authorized blob read set.
+
+Tagged log sinks and committed readers are tested in `pkg/storage/logseg`.
+The append/delete `TestLogStore` suite and its test-only facade are removed.
 
 The conformance contract counts as part of the public API: changes
 to what an implementation must support to pass are breaking, and

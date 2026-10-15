@@ -80,6 +80,12 @@ offset reads and spool removal through the real sink. Each backend runs 128
 generated cases. Record persistence and authorization remain fakes. The removed
 `fs.LogStore` has no production caller.
 
+The append/delete `LogStore` conformance facade and its unused portable suite
+are removed. Log tests call the tagged sink, reader and physical expiry APIs.
+`TestSegmentReadsApplyFiltersAcrossCuts` checks head, tail, grep and line ranges
+across immutable cuts, including combined filters and invalid ranges. Physical
+retention has separate expiry tests.
+
 The store's transactional authorization and log persistence, controller routes,
 egress settlement, retention scheduling and host bindings still need integration.
 S3 log signing still needs admission for future slots whose payload size and

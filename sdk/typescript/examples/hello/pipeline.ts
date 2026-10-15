@@ -1,13 +1,13 @@
 // A two-job pipeline: build publishes a digest, publish reads it through the
 // engine's output route. The engine starts it as
-// `node pipeline.ts --sw-node-protocol` and sends describe first.
+// `node pipeline.ts --sw-node-protocol` and sends hello first.
 
 import { definePipeline, main } from "../../src/index.ts";
 
 definePipeline({
   name: "hello",
   short: "Build, then publish what the build produced",
-  args: [{ name: "target", desc: "where to publish", default: "staging" }],
+  args: [{ name: "target", type: "string", description: "where to publish", default: "staging" }],
   plan(plan, run) {
     const build = plan.job("build", (ctx) => {
       ctx.log.info("building");
@@ -25,4 +25,4 @@ definePipeline({
   },
 });
 
-process.exitCode = await main();
+await main();

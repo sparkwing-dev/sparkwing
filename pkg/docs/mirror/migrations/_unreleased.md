@@ -6,6 +6,10 @@
 `logseg.Sink` with the host's bound `logseg.SubjectUploader`. Filesystem and S3
 storage use the same immutable segment format.
 
+`conformance.TestLogStore` is removed.
+Tagged-log coverage lives in `pkg/storage/logseg` and the storage acceptance
+cells, including verified offset reads and physical retention.
+
 Daemon handshake and status responses drop `artifact_store_error`, which
 described a cache backend the daemon no longer opens. Remove that field from
 status consumers. API binding faults still use `api_ready` and `api_error`.

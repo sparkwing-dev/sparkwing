@@ -2,6 +2,39 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
+## From W7 merge resolution and log conformance cut
+
+**Completed W7 cuts.** The acceptance dispatcher keeps both storage checks and
+the incoming TypeScript boundary check. Its conflict markers are removed. The
+index still lists it as unmerged because the swarm brief prohibits Git writes.
+The lead must stage the resolved file before completing the merge.
+
+The append/delete `conformance.TestLogStore` suite, its only caller
+`segmentLogStore`, and its unused deletion helper are removed. That deletes
+384 legacy code/test lines. Filter assertions now call the real sink and reader
+across immutable cuts. Seven cases cover full reads, head, tail, grep, line
+ranges, combined filters and empty selections. Invalid ranges also fail.
+The suite's fake deletion and stream opt-out supplied no production coverage.
+Physical expiry and committed-reader coverage remain in their existing tests.
+The API snapshot, versioning page, migration guide and embedded docs match the cut.
+
+W7 package tests, vet, commentcheck and the whole-repository build pass.
+`TestStorage` still reports 72 passing events and 425 skips. No native cell is
+newly claimed. W1's record layouts, W2's authenticated data adapters and W3/W8/W9
+host/profile construction remain open as detailed below. No new contract change
+or product decision is requested.
+
+**W4/W9 docs symbol cutover.** `go test -p 4 ./pkg/docs -run
+'^TestDocsNameOnlySymbolsThatExist$' -count=1` fails on 17 removed Go SDK
+symbols: Await, CacheDir, CacheKey, CacheKeyFn, DefaultCacheTTL, DescribePipeline,
+JobApproval, JobFanOutDynamic, MaxCacheTTL, Memoize, NoCache, NpmCache, Resolve,
+TTL, ToolCacheDir, ToolSlot and WhenRunner. The affected pages are
+`docs/sdk-reference.md`, `docs/caching.md`, `docs/authoring-pipelines.md`,
+`docs/pipelines.md`, `docs/sdk-inputs.md`, `docs/cli.md` and
+`docs/local-execution.md`. Both the SDK and these pages are unchanged relative
+to W7's HEAD. W4/W9 should migrate the pages to the final SDK surface and sync
+the embedded copies. W7's two embedded-document drift guards pass.
+
 ## From W7 tagged-sink acceptance and unused backend deletion
 
 **Completed W7 cuts.** The unused `fs.LogStore` and `fs.NewLogStore`, their
@@ -166,3 +199,5 @@ W3 also owns finding 1's retained test port. `go test -p 4 -gcflags=-e ./interna
 **W1: separate cancellation intent for W2.** W2's cancellation-reason persistence test fails because the store has no cancellation-intent field separate from the terminal reason. Add it to the store's authentication/cancellation snapshot (amendment A1-21), and finish the session digest and CSRF persistence W2 reads. W2 consumes it through the contract interface.
 
 **DESIGN approved (lead, pending Korey's ratification): SDK planning diagnostic sanitization, W5 and W4.** Invariant: no declared secret argument value (default or supplied, pipeline or job scope) appears in any error the SDK returns from describe, argument resolution or planning: not in message, hint, details or detail keys, in any encoding. Each SDK collects the nonempty declared secret values once at its discovery/planning boundary and passes every outgoing canonical error through one sanitizer, which keeps codes and field paths. That replaces the describe-only replacement. Host masking still owns execution output and dynamic service values. Both SDKs carry a property test over thrown values, canonical errors, overlapping values, encodings and both argument scopes. W5 implements it in TypeScript; W4 implements the same in the Go SDK. No cross-area contract change.
+
+**DESIGN: W9 Windows release packaging for the TypeScript SDK (from W5 review finding 6).** Invariant: every published TypeScript SDK package contains working protocol bridges for win32-x64 and win32-arm64. The release workflow builds both `native/win32-*/protocol.node` artifacts on native Windows runners, runs TestNativeProtocol and TestNativeConformance on each, stamps the SDK version, and makes publication depend on package assembly. W5's proposal is in `sdk/typescript/IMPLEMENTATION.md`.

@@ -21,7 +21,8 @@ unlock.
 ## [Unreleased]
 
 - **storage (Breaking):** Removed the unused filesystem append-log backend
-  and the cache-specific `artifact_store_error` daemon status field.
+  and append/delete `conformance.TestLogStore` suite, plus the cache-specific
+  `artifact_store_error` daemon status field.
   Tagged sinks write immutable log segments. See
   [migration steps](docs/migrations/_unreleased.md#filesystem-logs-use-tagged-segments).
 

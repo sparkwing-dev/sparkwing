@@ -331,6 +331,45 @@ func TestTailReadFetchesOnlyTheSegmentsItNeeds(t *testing.T) {
 	}
 }
 
+func TestSegmentReadsApplyFiltersAcrossCuts(t *testing.T) {
+	objs := newMemObjects()
+	s := newSink(t, newMemUploader(objs, testPrefix), logseg.Options{SegmentBytes: 1})
+	for _, body := range []string{"alpha", "keep one\n", "beta\n", "keep two", "gamma\n"} {
+		if err := s.Append([]byte(body), "", 0, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.Close(t.Context(), logseg.End{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name string
+		opts storage.ReadOpts
+		want string
+	}{
+		{"all", storage.ReadOpts{}, "alpha\nkeep one\nbeta\nkeep two\ngamma\n"},
+		{"head", storage.ReadOpts{Head: 2}, "alpha\nkeep one\n"},
+		{"tail", storage.ReadOpts{Tail: 2}, "keep two\ngamma\n"},
+		{"grep", storage.ReadOpts{Grep: "keep"}, "keep one\nkeep two\n"},
+		{"range", storage.ReadOpts{Lines: "2:4"}, "keep one\nbeta\nkeep two\n"},
+		{"ordered", storage.ReadOpts{Lines: "2:5", Grep: "keep", Tail: 1, Head: 1}, "keep two\n"},
+		{"empty", storage.ReadOpts{Grep: "absent"}, ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, got := readAll(t, objs, test.opts); got != test.want {
+				t.Fatalf("read = %q, want %q", got, test.want)
+			}
+		})
+	}
+	log, err := logseg.Open(t.Context(), objs, testPrefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := log.Read(t.Context(), objs, storage.ReadOpts{Lines: "invalid"}); err == nil {
+		t.Fatal("invalid line range succeeded")
+	}
+}
+
 func TestNodeSealLosesToControllerSeal(t *testing.T) {
 	objs := newMemObjects()
 	up := newMemUploader(objs, testPrefix)
