@@ -246,8 +246,8 @@ func (r Request) Validate() error {
 		}
 	case OpDescribe:
 	case OpPlan:
-		if r.Pipeline == "" || r.Args == nil || r.Run == nil || r.Run.RunID == "" || r.Run.Pipeline != r.Pipeline {
-			return bad("plan needs a pipeline, args object and matching run context")
+		if r.Pipeline == "" || r.Args == nil || r.Run == nil || r.Run.RunID == "" || r.Run.Pipeline == "" {
+			return bad("plan needs an SDK entrypoint, args object and invoked pipeline in run context")
 		}
 	case OpRunStep:
 		if r.Job == "" || r.Step == "" || r.Attempt < 1 {

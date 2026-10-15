@@ -3,7 +3,34 @@ package sparkwing
 import (
 	"context"
 	"fmt"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
+
+func (w *Work) beginAttempt(attempt int) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if attempt < 1 || attempt < w.attempt || (attempt != w.attempt && w.active != 0) {
+		return sdkError(apierr.ProtocolError, "run_step attempt is stale or overlaps another attempt")
+	}
+	if attempt != w.attempt {
+		// safety: StepGet must never return output left by an earlier attempt.
+		for _, step := range w.steps {
+			step.mu.Lock()
+			step.resolved, step.out, step.done = false, nil, nil
+			step.mu.Unlock()
+		}
+		w.attempt = attempt
+	}
+	w.active++
+	return nil
+}
+
+func (w *Work) finishAttempt() {
+	w.mu.Lock()
+	w.active--
+	w.mu.Unlock()
+}
 
 func runStep(ctx context.Context, work *Work, step *WorkStep) (any, error) {
 	if work == nil || step == nil || work.byID[step.id] != step {

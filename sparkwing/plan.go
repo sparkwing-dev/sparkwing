@@ -3,12 +3,13 @@ package sparkwing
 import (
 	"context"
 	"fmt"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"reflect"
 	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
 // Plan holds the job graph populated by a pipeline's Plan method.
@@ -515,15 +516,6 @@ func normalizeLabels(in []string) []string {
 	if len(out) == 0 {
 		return nil
 	}
-	return out
-}
-
-func copyLabels(in []string) []string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]string, len(in))
-	copy(out, in)
 	return out
 }
 

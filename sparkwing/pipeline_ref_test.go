@@ -83,14 +83,18 @@ func TestRefToLastRun_Get_PanicsOnResolverError(t *testing.T) {
 	ref.Get(ctx)
 }
 
-func TestRefToLastRun_Get_EmptyDataProducesZeroValue(t *testing.T) {
+func TestRefToLastRun_Get_MissingOutputFails(t *testing.T) {
+	defer func() {
+		failure := recover()
+		message, _ := failure.(string)
+		if !strings.Contains(message, "build/artifact") || !strings.Contains(message, ErrRefAbsent.Error()) {
+			t.Fatalf("missing output panic = %v", failure)
+		}
+	}()
 	r := &stubResolver{runID: "run-empty", data: nil}
 	ctx := context.WithValue(context.Background(), keyPipelineResolver, r)
 	ref := RefToLastRun[buildOut]("build", "artifact")
-	got := ref.Get(ctx)
-	if got.Digest != "" || got.Tag != "" {
-		t.Fatalf("expected zero value, got %+v", got)
-	}
+	ref.Get(ctx)
 }
 
 func TestRefToLastRun_NoOptions(t *testing.T) {

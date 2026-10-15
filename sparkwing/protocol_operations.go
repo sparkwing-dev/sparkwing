@@ -131,6 +131,10 @@ func (sdkOperations) RunStep(ctx context.Context, built any, req nodeproto.Reque
 	if step == nil {
 		return result, sdkError(apierr.UnknownStep, "step is not declared")
 	}
+	if err := n.work.beginAttempt(req.Attempt); err != nil {
+		return result, err
+	}
+	defer n.work.finishAttempt()
 	result.Outcome = "failed"
 	defer func() {
 		if v := recover(); v != nil {

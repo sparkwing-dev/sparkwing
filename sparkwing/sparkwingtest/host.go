@@ -275,6 +275,9 @@ func newHost(opts Options) Host {
 
 func (h *host) runContext(name string) nodeproto.RunContext {
 	r := h.opts.Run
+	if r.Pipeline != "" {
+		name = r.Pipeline
+	}
 	out := nodeproto.RunContext{RunID: r.RunID, Pipeline: name, StartedAt: r.StartedAt, NoMemo: r.NoMemo, DryRun: r.DryRun}
 	if g := r.Git; g != nil {
 		out.Git = &nodeproto.Git{SHA: g.SHA, Branch: g.Branch, DefaultBranch: g.DefaultBranch, Repo: g.Repo, RepoURL: g.RepoURL}

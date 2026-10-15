@@ -113,7 +113,6 @@ const (
 	keyPipelineAwaiter
 	keyInputs
 	keyStep
-	keyPipelineConfig
 	keyPipelineSecrets
 	keyResourceReporter
 )

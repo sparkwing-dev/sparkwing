@@ -21,7 +21,10 @@ type Output struct {
 
 type Pipeline struct{}
 
-func (Pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in Inputs, _ sparkwing.RunContext) error {
+func (Pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in Inputs, run sparkwing.RunContext) error {
+	if in.Name == "alias" {
+		sparkwing.Job(plan, "invoked-"+run.Pipeline, func(context.Context) error { return nil })
+	}
 	producer := sparkwing.Job(plan, "producer", producer{value: in.Name})
 	sparkwing.Job(plan, "consumer", consumer{Source: sparkwing.RefTo[Output](producer)})
 	sparkwing.Job(plan, "secret", func(ctx context.Context) error {
@@ -40,6 +43,7 @@ func (Pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in Inputs, _ spark
 	})
 	sparkwing.Job(plan, "probe", probe{wait: in.Name == "cancel"}).
 		SkipIf(func(context.Context) bool { return false })
+	sparkwing.Job(plan, "retry", &retryProbe{}).Retry(1)
 	return nil
 }
 

@@ -55,6 +55,7 @@ import (
 //
 // Callers that can't import the target's Inputs type pass
 // sparkwing.NoInputs and use WithFreshArgs as the escape hatch.
+// Missing output fails the call. An explicit JSON null decodes to the zero Out.
 func RunAndAwait[Out, In any](ctx context.Context, pipeline, nodeID string, opts ...AwaitOption) (Out, error) {
 	var zero Out
 	cfg := awaitConfig{}
@@ -76,8 +77,8 @@ func RunAndAwait[Out, In any](ctx context.Context, pipeline, nodeID string, opts
 	if err != nil {
 		return zero, fmt.Errorf("RunAndAwait(%s/%s): %w", pipeline, nodeID, err)
 	}
-	if len(resolved.Data) == 0 || string(resolved.Data) == "null" {
-		return zero, nil
+	if resolved == nil || len(resolved.Data) == 0 {
+		return zero, fmt.Errorf("RunAndAwait(%s/%s): %w", pipeline, nodeID, ErrRefAbsent)
 	}
 	var out Out
 	if err := json.Unmarshal(resolved.Data, &out); err != nil {

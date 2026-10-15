@@ -19,8 +19,9 @@ import (
 )
 
 type routeServices struct {
-	binding *nodeproto.ProcessBinding
-	emit    func(nodeproto.FrameLog)
+	binding   *nodeproto.ProcessBinding
+	emit      func(nodeproto.FrameLog)
+	transport http.RoundTripper
 }
 
 func (s *routeServices) call(ctx context.Context, method, path string, body, out any) error {
@@ -45,7 +46,7 @@ func (s *routeServices) call(ctx context.Context, method, path string, body, out
 	}
 	req.Header.Set("Authorization", "Bearer "+s.binding.Routes.Bearer)
 	req.Header.Set("Content-Type", "application/json")
-	client := http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := http.Client{Transport: s.transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -76,6 +77,7 @@ func (s *routeServices) call(ctx context.Context, method, path string, body, out
 	}
 	return json.Unmarshal(data, out)
 }
+
 func (s *routeServices) Secret(ctx context.Context, name string) (string, bool, error) {
 	var out struct {
 		Value  string `json:"value"`
@@ -84,6 +86,7 @@ func (s *routeServices) Secret(ctx context.Context, name string) (string, bool, 
 	err := s.call(ctx, "GET", "/node/v1/secrets/"+url.PathEscape(name), nil, &out)
 	return out.Value, out.Masked, err
 }
+
 func (s *routeServices) Output(ctx context.Context, job string) (json.RawMessage, error) {
 	var out struct {
 		Output json.RawMessage `json:"output"`
@@ -91,6 +94,7 @@ func (s *routeServices) Output(ctx context.Context, job string) (json.RawMessage
 	err := s.call(ctx, "GET", "/node/v1/jobs/"+url.PathEscape(job)+"/output", nil, &out)
 	return out.Output, err
 }
+
 func (s *routeServices) Latest(ctx context.Context, pipeline, job string, age time.Duration) (json.RawMessage, error) {
 	var out struct {
 		Output json.RawMessage `json:"output"`
@@ -98,6 +102,7 @@ func (s *routeServices) Latest(ctx context.Context, pipeline, job string, age ti
 	err := s.call(ctx, "GET", "/node/v1/pipelines/"+url.PathEscape(pipeline)+"/latest?job="+url.QueryEscape(job)+"&max_age_ms="+strconv.FormatInt(age.Milliseconds(), 10), nil, &out)
 	return out.Output, err
 }
+
 func (s *routeServices) RunPipeline(ctx context.Context, request ChildRequest) (json.RawMessage, error) {
 	var started struct {
 		RunID string `json:"run_id"`
@@ -148,6 +153,7 @@ func (s *routeServices) OIDC(ctx context.Context, audience string) (string, erro
 	err := s.call(ctx, "POST", "/node/v1/oidc-token", map[string]string{"audience": audience}, &out)
 	return out.Token, err
 }
+
 func (s *routeServices) Mask(context.Context, string) error {
 	return &apierr.Error{Code: apierr.Unavailable, Message: "the host route contract does not provide mask registration"}
 }
@@ -160,6 +166,7 @@ func (s *routeServices) RegisterCleanup(ctx context.Context, argv []string, desc
 	err := s.call(ctx, "POST", "/node/v1/cleanups", map[string]any{"argv": argv, "description": description}, &out)
 	return out.ID, err
 }
+
 func (s *routeServices) ReleaseCleanup(ctx context.Context, id string) error {
 	return s.call(ctx, "DELETE", "/node/v1/cleanups/"+url.PathEscape(id), nil, nil)
 }

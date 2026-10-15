@@ -78,16 +78,13 @@ func TestRunAndAwait_AwaiterError(t *testing.T) {
 	}
 }
 
-func TestRunAndAwait_EmptyDataZeroValue(t *testing.T) {
+func TestRunAndAwait_MissingOutputFails(t *testing.T) {
 	aw := &stubAwaiter{runID: "child", data: nil}
 	ctx := context.WithValue(context.Background(), keyPipelineAwaiter, aw)
 
 	got, err := RunAndAwait[awaitOut, NoInputs](ctx, "up", "n")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Image != "" {
-		t.Fatalf("want zero, got %+v", got)
+	if err == nil || !strings.Contains(err.Error(), "up/n") || got.Image != "" {
+		t.Fatalf("missing output = %+v, %v", got, err)
 	}
 }
 

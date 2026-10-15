@@ -104,7 +104,7 @@ func (r Ref[T]) Get(ctx context.Context) T {
 // every miss is logged at warn naming the pipeline and node.
 //
 // One input divides the two accessors: a cross-pipeline run that stored
-// empty or null output. Get renders that as the zero T and carries on;
+// JSON null. Get renders that as the zero T and carries on;
 // TryGet reports it as a miss. Swapping one for the other on such a ref
 // changes which branch runs.
 //
@@ -162,9 +162,7 @@ func (r Ref[T]) describe() string {
 	return r.JobID
 }
 
-// resolve reads the referenced output. present is true only when a
-// stored output was read and unmarshalled; Get renders the absent case
-// as the zero T and TryGet reports it as a miss.
+// safety: TryGet must not mistake a read or decoding failure for a missing upstream.
 func (r Ref[T]) resolve(ctx context.Context) (value T, present bool, err error) {
 	if r.Pipeline != "" {
 		return r.getCrossPipeline(ctx)
@@ -202,7 +200,10 @@ func (r Ref[T]) getCrossPipeline(ctx context.Context) (T, bool, error) {
 		return out, false, fmt.Errorf("sparkwing: Ref[%T].Get failed (pipeline=%q node=%q): %w",
 			out, r.Pipeline, r.JobID, err)
 	}
-	if len(resolved.Data) == 0 || string(resolved.Data) == "null" {
+	if resolved == nil || len(resolved.Data) == 0 {
+		return out, false, fmt.Errorf("sparkwing: Ref.Get(%s): %w", r.describe(), ErrRefAbsent)
+	}
+	if string(resolved.Data) == "null" {
 		return out, false, nil
 	}
 	if err := json.Unmarshal(resolved.Data, &out); err != nil {
