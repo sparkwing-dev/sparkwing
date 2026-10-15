@@ -56,7 +56,7 @@ func (c *ControllerControl) Claim(ctx context.Context) (*CloudJobAward, error) {
 		return nil, err
 	}
 	unit := *response.Claim
-	binding, err := cloudBinding(unit)
+	binding, err := cloudBinding(unit, capability.DeliveryBootstrap)
 	if err != nil {
 		return nil, err
 	}
@@ -85,9 +85,9 @@ func (c *ControllerControl) Claim(ctx context.Context) (*CloudJobAward, error) {
 	return award, nil
 }
 
-func cloudBinding(unit controllerwire.ClaimedUnit) (CloudJobBinding, error) {
+func cloudBinding(unit controllerwire.ClaimedUnit, delivery capability.DeliveryPurpose) (CloudJobBinding, error) {
 	fence := unit.Binding
-	if unit.Delivery != capability.DeliveryBootstrap || unit.UnitID == "" || unit.RunID == "" || unit.Request.RunID != unit.RunID || fence.RunID != unit.RunID || unit.Request.Request.Team == "" || fence.Generation <= 0 || fence.Attempt < 0 || unit.ParentCapabilityExpiry == nil || unit.ParentCapabilityExpiry.IsZero() {
+	if unit.Delivery != delivery || unit.UnitID == "" || unit.RunID == "" || unit.Request.RunID != unit.RunID || fence.RunID != unit.RunID || unit.Request.Request.Team == "" || fence.Generation <= 0 || fence.Attempt < 0 || unit.ParentCapabilityExpiry == nil || unit.ParentCapabilityExpiry.IsZero() {
 		return CloudJobBinding{}, errors.New("controller returned an invalid Cloud award binding")
 	}
 	binding := CloudJobBinding{UnitID: unit.UnitID, Team: unit.Request.Request.Team, RunID: unit.RunID, NodeID: unit.JobID, Holder: fence.Holder, Generation: fence.Generation, Attempt: fence.Attempt, OwnerDeadline: deadlineValue(unit.OwnerDeadline), AttemptDeadline: deadlineValue(unit.AttemptDeadline), ParentCapabilityExpiry: *unit.ParentCapabilityExpiry}
@@ -170,7 +170,7 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 		if !ok {
 			continue
 		}
-		binding, err := cloudBinding(unit)
+		binding, err := cloudBinding(unit, capability.DeliveryBootstrap)
 		if err != nil {
 			return nil, err
 		}

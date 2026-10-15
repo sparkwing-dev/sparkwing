@@ -400,60 +400,53 @@ archives and binaries are caches and repopulate).
 
 ## Bound storage growth
 
-A controller keeps every event and every per-node metric sample forever until
-an operator sets a window. Retention is off on an existing install and stays
-off after an upgrade; nothing in this release turns it on for you.
+Run retention is disabled by default on a self-hosted controller. A multi-team
+controller defaults to 90 days. An explicit operator value, including zero,
+survives restarts. Node metrics have their own retention window.
 
-Read the current policy with `GET /api/v1/storage` and write it with
+Read policy with `GET /api/v1/storage` and replace it with
 `PUT /api/v1/storage/settings` (scope `admin`):
 
 ```bash
 curl -sS -X PUT "$CONTROLLER/api/v1/storage/settings" \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"event_retention_days":30,"node_metric_retention_days":14,
+  -d '{"run_retention_days":90,"node_metric_retention_days":14,
        "database_alarm_bytes":8589934592,"default_tier":"free"}'
 ```
 
-Every window is a whole number of days and zero is unbounded. An hourly timer
-removes the rows past their window, never a request. It removes them in
-batches of 5000 so a first sweep on a long-unbounded database does not hold
-one transaction over millions of rows, and it skips any run that has not
-finished, because a run still writing its own history keeps it however old.
+Retention windows use whole days. Zero disables expiration for that window. The hourly
+maintenance worker holds a database lease and removes eligible data in bounded
+batches. Run retention removes operational children with the run and preserves
+each pipeline's newest successful run and outputs. Financial rows and recorded
+usage survive run deletion. Metrics expire under their independent window.
 
-`database_alarm_bytes` sets the size worth a warning. Passing it logs a
-warning and sets `database.alarm` on `GET /api/v1/health`; the reported status
-does not change, so an alarm is a signal to read rather than a controller that
-stopped working. The health route answers without a token and so publishes the
-alarm alone: sizes and table names are on the `admin` view of
-`GET /api/v1/storage`.
+`database_alarm_bytes` sets a warning threshold. Passing it logs a warning and
+sets `database.alarm` on `GET /api/v1/health`. Sizes and table names appear only
+in the `admin` view of `GET /api/v1/storage`.
 
-The size is sampled on the same timer. SQLite counts the pages it holds less
-the pages on its free list, so the sample falls as soon as a sweep removes the
-rows and an alarm clears without anyone reclaiming anything; the file keeps its
-size on disk until an operator runs `VACUUM`, which is the step that returns
-the space to the filesystem. Postgres sums `pg_total_relation_size` over its
-relations and names the largest.
+SQLite samples allocated pages minus its free pages. Removing data can lower
+the sample while the file keeps its size until `VACUUM`. PostgreSQL samples
+relation sizes, including indexes.
 
 ### Per-team storage quotas
 
-`default_tier` holds every principal without a quota row of its own to a
-tier's limits, and an empty default leaves them unlimited, which is what an
-install that never enabled quotas reads. The free tier allows ten megabytes
-per run, a gigabyte per month, and a thousand objects per run; the paid tier
-allows a gigabyte per run, a hundred gigabytes per month, and a hundred
-thousand objects per run.
+Quotas belong to registered teams. Token principal labels do not select a
+quota. `default_tier` supplies limits only when a team has no explicit row.
+An empty default leaves those teams unlimited. A zero write limit is unbounded.
 
-Read the byte limits narrowly on this release: they bound the bytes the
-controller itself stores, which is run-event payloads, and they do not bound
-artifact content. A runner writes artifact blobs straight to the object store,
-and the controller sees only the manifest digest, so `max_objects_per_run` is
-what bounds artifacts today, by capping how many manifests one run may
-publish. Counting artifact bytes needs the manifest to carry its entries'
-sizes, which it does not yet.
+Blob upload tickets reserve pending capacity against monthly bytes and per-run
+bytes and objects. Commit counts each new blob once. An authorized duplicate
+adds no bytes or objects, and a new empty blob counts as one object. Aborting or
+expiring a ticket releases its pending capacity. A month's boundary resets the
+monthly budget while the run's byte and object totals continue across months.
+Deployment default-tier changes apply to the next ticket for teams without an
+explicit quota.
 
-Hold one team to a tier, or to limits of your own, with
-`PUT /api/v1/storage/quotas/{principal}` (scope `admin`):
+The free tier configures ten megabytes per run, a gigabyte per month and a
+thousand objects per run. The paid tier configures a gigabyte per run, a hundred
+gigabytes per month and a hundred thousand objects per run. Set an explicit
+team policy with `PUT /api/v1/storage/quotas/{team}` (scope `admin`):
 
 ```bash
 curl -sS -X PUT "$CONTROLLER/api/v1/storage/quotas/acme" \
@@ -462,31 +455,23 @@ curl -sS -X PUT "$CONTROLLER/api/v1/storage/quotas/acme" \
   -d '{"tier":"paid"}'
 ```
 
-What counts is what the controller commits durably: a run event is charged its
-payload bytes, and a published artifact manifest is charged one object. Live
-logs are not charged, because the controller holds them in an in-memory ring
-and stores nothing. The team charged is the one the calling token's principal
-names, never a team named in the request. A signed-up team's writes are all
-charged to `team:<slug>`, whatever principal made them, because a team names
-its own principals and two teams can hold the same name; set its quota with
-`PUT /api/v1/storage/quotas/team:<slug>`. The charge is written inside the
-same transaction as the write it pays for, so a write that fails is not billed
-and a retry pays once.
+Naming a tier with zero write limits selects that tier's limits. Unknown teams
+return `404`. Reads report the authenticated caller's team. An operator also
+receives the explicit quotas and the largest teams for the month.
 
-A write past a limit is refused with `413` and a reason naming the limit, the
-team, what it has already stored and what the write asked for, which is what
-the CLI prints. Per-run totals are removed with their run, so a run that
-retention or an operator deletes stops counting against the per-run limit; the
-month's total outlives it deliberately, so a deleted run does not refund a
-spent month.
+Monthly reports sum each team's replica counters. They are historical usage,
+so deleting a run does not lower them. `retained_bytes` measures the team's
+unique committed blobs and stored log segments. Multiple references to the
+same blob count once. Each team accounts for its own copy.
+
+Output, manifest and memo pointers add no quota usage. Their underlying blobs
+consume bytes and objects when a verified upload first commits them.
 
 ### Storage allowances
 
-`storage_allowance_bytes` on a quota row is how many retained bytes the team
-asked to keep. The hourly storage pass expires its oldest finished runs above
-the allowance, so the allowance is the ceiling; zero keeps everything, which is
-what every quota written before this release reads. Write one with
-`PUT /api/v1/storage/quotas/{principal}/allowance` (scope `admin`):
+`storage_allowance_bytes` caps the retained byte count used for billing. Zero
+leaves that count uncapped. Set it independently of write limits with
+`PUT /api/v1/storage/quotas/{team}/allowance` (scope `admin`):
 
 ```bash
 curl -sS -X PUT "$CONTROLLER/api/v1/storage/quotas/acme/allowance" \
@@ -495,10 +480,7 @@ curl -sS -X PUT "$CONTROLLER/api/v1/storage/quotas/acme/allowance" \
   -d '{"storage_allowance_bytes":53687091200}'
 ```
 
-`GET /api/v1/storage` reports the allowance and `retained_bytes`, which is what
-the team still has stored and what the storage charge and the sweep both
-measure. The quota route does not take the allowance: rewriting a quota leaves
-it where it stands, so the two cannot overwrite each other. A licensed
-metering controller charges retained bytes against the credit ledger when
-the operator prices storage. [Credits](auth.md) describes the rate, the free
-allowance, which bytes count, and what a spent balance does.
+Quota and allowance writes preserve each other's fields. Creating an allowance
+for a team without a quota preserves its effective default-tier limits.
+[Retained storage billing](auth.md#retained-storage) describes the rate, free
+allowance and billing interval.

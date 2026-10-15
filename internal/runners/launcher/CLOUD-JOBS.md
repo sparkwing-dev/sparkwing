@@ -79,6 +79,14 @@ one live or removal decision per observed Job. Changed fences, duplicate or
 missing decisions and returned credentials fail before activation or teardown.
 No in-memory award map or replacement bootstrap is needed after restart.
 
+`BootstrapHost` creates a separate controller client whose bearer callback holds
+only the Job's bootstrap. It calls exchange once. Before dispatch, it checks the
+direct award against the original unit, team, run, job, live lease, attempt,
+source generation, deadlines, engine and resources. Missing authority, a repeated
+bootstrap or changed execution inputs fail before the unit host runs. Cancellation
+before or after exchange also prevents dispatch. The unit host receives the complete
+exchanged claim and owns renewal, source acquisition and execution.
+
 <!-- design:begin -->
 
 The HTTP client, source projections, deployment network probes and node cleanup
@@ -87,5 +95,11 @@ source projections and Kubernetes API. They do not prove that a deployed cluster
 node isolation, native sidecar shutdown or scratch accounting. Those checks
 also need real images, an explicit Kubernetes context and bootstrap/host
 composition from the owning areas.
+
+The bootstrap component consumes the original CloudJobAward in memory. The
+container still needs a declared transport for that award and its source input.
+The shared CLI registry also rejects the builder's unit/attempt/engine/source-fence
+flags and requires a job for plan units. Those grammar and handoff contracts
+remain open. Component exchange tests do not establish a working pod entrypoint.
 
 <!-- design:end -->

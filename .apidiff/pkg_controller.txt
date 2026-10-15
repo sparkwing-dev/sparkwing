@@ -41,7 +41,6 @@ type CacheGrantResponse struct {
 	Team      string
 	ExpiresAt time.Time
 }
-func CacheObjectMaxAge(team string) time.Duration
 const CardBillingCapability = "card-billing-v1"
 const CardBillingInterval = 30 * time.Second
 const CardNotTrustedCode = "card_not_trusted"
@@ -57,7 +56,7 @@ type Cipher interface {
 }
 const ClaimCacheGrantTTL = 5 * time.Minute
 const ClaimPollInterval = 500 * time.Millisecond
-const CloudRetentionDays = 30
+const CloudRetentionDays = 90
 func CompliantClaimPollsPerMinute() int
 const ComputeLimitRefusedCode = "compute_limit"
 const ComputeLimitRetryAfterSeconds = 5
@@ -355,7 +354,6 @@ type TrendPoint struct {
 	P95DurMs  int64
 	AvgWaitMs int64
 }
-const UnknownCheckoutCode = "unknown_checkout"
 const UnknownPaymentCode = "unknown_payment"
 const UnpricedCPUClassCode = "unpriced_cpu_class"
 const UnsupportedRouteError = "unsupported"

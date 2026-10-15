@@ -171,7 +171,6 @@ func TestTheCounterRoutesAnswerOnlyTheCacheToken(t *testing.T) {
 			{"/internal/storage/commit", map[string]any{"team": "first", "store": "logs", "reservation": "r", "bytes": 10}},
 			{"/internal/storage/release", map[string]any{"team": "first", "reservation": "r"}},
 			{"/internal/downloads/charge", map[string]any{"team": "first", "bytes": 1}},
-			{"/internal/egress/totals", map[string]any{"service": "cache", "day": "2026-09-23", "month": "2026-09"}},
 		} {
 			if code := f.call("POST", c.path, auth, c.body, nil); code != http.StatusUnauthorized {
 				t.Errorf("%s on %s = %d, want 401", name, c.path, code)

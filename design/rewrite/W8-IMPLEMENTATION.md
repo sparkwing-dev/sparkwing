@@ -1671,3 +1671,79 @@ identity or core.worktree override. Overwing reports ten commits of staleness
 but returned its standards. The lead retains staging and the merge commit,
 including the new untracked runner_controller_w8_test.go. Scratch is removed
 after all checks finish.
+
+## Continuation: bootstrap exchange boundary
+
+The sole incoming conflict keeps the deletion of
+internal/orchestrator/wingd_api_routes_test.go. Its 336 incoming lines test the
+retired local API. The lead must stage the deletion and finish the merge because
+the swarm brief forbids worker Git writes.
+
+BootstrapHost now binds the shared controller client to one bootstrap, exchanges
+once and validates the returned direct award before dispatching to runners.UnitHost.
+It preserves the original binding, eval source/live fences, deadlines, accepted
+engine and execution resources. It forwards the complete granted runner and
+accepted inputs. Cancellation and transport/validation failures stop before
+dispatch. The unit host still owns its keeper and source/execution lifecycle.
+
+TestCloudBootstrapW8Components exercises all three Cloud kinds through BuildJob
+and the new exchange boundary with fakes. Launcher unit tests cover changed
+bindings, authority, engine/resources and connection/exchange/cancellation failures.
+FuzzBootstrapBinding generates identity, generation and bearer changes. No native
+catalog cell or additional T1 inventory port is claimed.
+
+The new W8-local API consumes existing contracts. Its smaller alternative, the
+unimplemented CLI callback, leaves exchange and fence validation to each caller.
+The shared private binding validator gains an explicit delivery argument instead
+of a second validator. Undo removes the new bootstrap implementation/tests and
+restores that private signature. No configuration, timeout, trust root or
+compatibility mechanism is added.
+
+Shared edits are tests/acceptance/bootstrap_w8_test.go and the W8 audit/handoff.
+Production/package-test edits stay in internal/runners/launcher. No other-area
+production caller requires migration. Source documentation is CLOUD-JOBS.md.
+No generated reference consumes this internal document.
+
+The bootstrap CLI grammar and original award/source handoff remain contract
+requests with W9/W3. Concrete shared HTTP/host/source/keeper adapters and local
+controller services, workspace-off cache hashing, native Windows/services and
+deployed Cloud proofs remain integration obligations. The new component is not
+a working container entrypoint or evidence that native acceptance passes.
+
+Read-only inspection verifies another integration point:
+pkg/controller/engine_claim.go clears Execution for plan/eval in claimedUnit,
+including exchange. W1/W2 must populate those resolved Cloud resources under the
+existing wire shape. ControllerControl.Claim already requires them before creating
+a CloudJobAward. This continuation keeps that requirement and edits no other-area
+runtime or contract.
+
+### Verification for bootstrap exchange
+
+Commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and private
+GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W8. Package parallelism is at most four.
+
+- Whole-repository `go build -p 4 ./...` passes.
+- Vet passes for runners/engine/wingd and their subpackages, cluster,
+  tests/acceptance and internal/acceptance.
+- Full runners, engine and tests/acceptance suites pass. The new component's
+  plan/eval/work cases run without skips. Its first eval fixture failed because
+  the older shared builder fixture gave the source and eval different job IDs.
+  The new test now uses the amended wire's same source job and separate generations.
+- Focused bootstrap and component acceptance tests pass with `-race`, including
+  the review's self-consistent replacement-engine and nonzero-deadline cases.
+- FuzzBootstrapBinding passes 6,249 generated cases in five seconds with two workers.
+- Launcher tests cross-compile for windows/amd64. Native execution remains untested.
+- Required `commentcheck -base main .` reports the same existing W1/W9 comments
+  in controllerwire/contracts.go:47, store/state_materialize.go:15 and
+  store/state_result_records.go:9. Those files are untouched.
+- `commentcheck -base HEAD .` passes across 126 changed files, including the new
+  untracked Go files. HEAD-based sleepcheck and `git diff --check` pass.
+- Independent immutable-snapshot review finds no blocking correctness/security
+  defect and accepts the small UnitHost boundary. Its two coverage suggestions
+  are included in the passing race run. Review ran no tests.
+
+The lead retains staging and the merge commit, including bootstrap.go,
+bootstrap_test.go and tests/acceptance/bootstrap_w8_test.go. No candidate, service,
+pipeline or Git write ran. Local Git configuration has no author/core.worktree
+override. Initial discovery ran the installed Sparkwing info command only.
+Worker scratch is deleted after the checks. No new product decision is requested.

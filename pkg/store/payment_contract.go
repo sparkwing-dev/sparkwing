@@ -34,7 +34,7 @@ type paymentCheckout struct {
 	result            PaymentSettlement
 	payment, currency string
 	amount            int64
-	paid              sql.NullInt64
+	paid, closed      sql.NullInt64
 	grant             sql.NullString
 }
 
@@ -53,11 +53,14 @@ func (s *Store) settlePaymentFacts(ctx context.Context, event capability.Payment
 		return PaymentSettlement{}, err
 	}
 	defer rollbackOrLog(tx)
+	if err := lockCreditLedgerTx(ctx, tx); err != nil {
+		return PaymentSettlement{}, err
+	}
 	if err := configuredPaymentModeTx(ctx, tx, event.Mode); err != nil {
 		return PaymentSettlement{}, err
 	}
 	var checkout paymentCheckout
-	err = tx.QueryRowContext(ctx, `SELECT id,team,payment_id,currency,amount_minor,amount_micro,paid_at,grant_id FROM credit_checkouts WHERE payment_mode = ? AND session_id = ?`+tx.forUpdate(), string(event.Mode), event.CheckoutID).Scan(&checkout.result.CheckoutID, &checkout.result.Team, &checkout.payment, &checkout.currency, &checkout.amount, &checkout.result.AmountMicro, &checkout.paid, &checkout.grant)
+	err = tx.QueryRowContext(ctx, `SELECT id,team,payment_id,currency,amount_minor,amount_micro,paid_at,closed_at,grant_id FROM credit_checkouts WHERE payment_mode = ? AND session_id = ? AND session_id <> id`+tx.forUpdate(), string(event.Mode), event.CheckoutID).Scan(&checkout.result.CheckoutID, &checkout.result.Team, &checkout.payment, &checkout.currency, &checkout.amount, &checkout.result.AmountMicro, &checkout.paid, &checkout.closed, &checkout.grant)
 	if errors.Is(err, sql.ErrNoRows) {
 		return PaymentSettlement{}, authorityError(apierr.NotFound, "committed checkout is unavailable")
 	}
@@ -66,6 +69,22 @@ func (s *Store) settlePaymentFacts(ctx context.Context, event capability.Payment
 	}
 	if checkout.currency != event.Currency || checkout.amount != event.AmountMinor || (event.PaymentID != "" && checkout.payment != "" && checkout.payment != event.PaymentID) {
 		return PaymentSettlement{}, authorityError(apierr.Conflict, "payment facts conflict with committed checkout")
+	}
+	if event.PaymentID != "" {
+		var used int
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM credit_checkouts WHERE payment_mode=? AND payment_id=? AND id<>?", string(event.Mode), event.PaymentID, checkout.result.CheckoutID).Scan(&used); err != nil {
+			return PaymentSettlement{}, err
+		}
+		if used != 0 {
+			return PaymentSettlement{}, errors.Join(ErrCreditGrantConflict, authorityError(apierr.Conflict, "payment identity belongs to another checkout"))
+		}
+		grant, found, err := paidGrantForPaymentTx(ctx, tx, event.PaymentID)
+		if err != nil {
+			return PaymentSettlement{}, err
+		}
+		if found && (grant.Team != checkout.result.Team || grant.ID != checkout.grant.String) {
+			return PaymentSettlement{}, errors.Join(ErrCreditGrantConflict, authorityError(apierr.Conflict, "payment identity already funded another grant"))
+		}
 	}
 	body, err := json.Marshal(event)
 	if err != nil {
@@ -96,18 +115,26 @@ func (s *Store) settlePaymentFacts(ctx context.Context, event capability.Payment
 }
 
 func configuredPaymentModeTx(ctx context.Context, tx *storeTx, eventMode capability.PaymentMode) error {
-	var encoded []byte
-	if err := tx.QueryRowContext(ctx, "SELECT value FROM settings WHERE key = 'payment_mode'"+tx.forShare()).Scan(&encoded); err != nil {
-		return authorityError(apierr.Unavailable, "payment mode is not configured")
-	}
-	var mode capability.PaymentMode
-	if json.Unmarshal(encoded, &mode) != nil || (mode != capability.PaymentTest && mode != capability.PaymentLive) {
-		return authorityError(apierr.Unavailable, "configured payment mode is invalid")
+	mode, err := paymentModeTx(ctx, tx)
+	if err != nil {
+		return err
 	}
 	if mode != eventMode {
 		return authorityError(apierr.Forbidden, "payment mode does not match configuration")
 	}
 	return nil
+}
+
+func paymentModeTx(ctx context.Context, tx *storeTx) (capability.PaymentMode, error) {
+	var encoded []byte
+	if err := tx.QueryRowContext(ctx, "SELECT value FROM settings WHERE key = 'payment_mode'"+tx.forShare()).Scan(&encoded); err != nil {
+		return "", authorityError(apierr.Unavailable, "payment mode is not configured")
+	}
+	var mode capability.PaymentMode
+	if json.Unmarshal(encoded, &mode) != nil || (mode != capability.PaymentTest && mode != capability.PaymentLive) {
+		return "", authorityError(apierr.Unavailable, "configured payment mode is invalid")
+	}
+	return mode, nil
 }
 
 func paymentEventReplayTx(ctx context.Context, tx *storeTx, event capability.PaymentEvent, digest string) (bool, error) {
@@ -136,8 +163,17 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 		return nil
 	}
 	if event.Kind != capability.PaymentCheckoutPaid {
-		_, err := tx.ExecContext(ctx, "UPDATE credit_checkouts SET closed_at = COALESCE(closed_at,?) WHERE team = ? AND id = ? AND payment_mode = ?", now, string(checkout.result.Team), checkout.result.CheckoutID, string(event.Mode))
-		return err
+		if checkout.closed.Valid {
+			return nil
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE credit_checkouts SET closed_at = ? WHERE team = ? AND id = ? AND payment_mode = ?", now, string(checkout.result.Team), checkout.result.CheckoutID, string(event.Mode)); err != nil {
+			return err
+		}
+		kind := BusinessEventCheckoutFailed
+		if event.Kind == capability.PaymentCheckoutExpired {
+			kind = BusinessEventCheckoutExpired
+		}
+		return RecordBusinessEvent(tx, BusinessEvent{At: tx.now(), Team: checkout.result.Team, Kind: kind, SubjectID: checkout.result.CheckoutID, Actor: "payment_provider", Attrs: map[string]any{"session_id": event.CheckoutID, "payment_mode": event.Mode, "event_id": event.EventID}})
 	}
 	grant, err := newCreditID("paid")
 	if err != nil {
@@ -148,8 +184,19 @@ func applyPaymentOutcomeTx(ctx context.Context, tx *storeTx, event capability.Pa
 		return err
 	}
 	_, err = tx.ExecContext(ctx, "UPDATE credit_checkouts SET paid_at = ?, grant_id = ?, closed_at = COALESCE(closed_at,?) WHERE team = ? AND id = ? AND payment_mode = ?", now, grant, now, string(checkout.result.Team), checkout.result.CheckoutID, string(event.Mode))
-	if err == nil {
-		checkout.result.GrantID = grant
+	if err != nil {
+		return err
 	}
-	return err
+	checkout.result.GrantID = grant
+	if err := recordGrantEventTx(tx, CreditGrant{ID: grant, Team: checkout.result.Team, Kind: CreditGrantPaid, AmountMicro: checkout.result.AmountMicro, Reference: "payment:" + string(event.Mode) + ":" + checkout.result.CheckoutID, CreatedBy: "payment_provider", CreatedAt: tx.now()}, event.CheckoutID, ""); err != nil {
+		return err
+	}
+	balance, err := creditBalanceTx(ctx, tx, checkout.result.Team)
+	if err != nil {
+		return err
+	}
+	if balance > 0 {
+		return clearTeamCreditExhaustedTx(ctx, tx, checkout.result.Team, now)
+	}
+	return nil
 }

@@ -114,7 +114,7 @@ func TestControllerClaimPreservesAwardWithoutRetry(t *testing.T) {
 
 func TestControllerSyncUsesPersistedObservationsAndExactFences(t *testing.T) {
 	unit := wireAward(capability.UnitNode)
-	binding, err := cloudBinding(unit)
+	binding, err := cloudBinding(unit, capability.DeliveryBootstrap)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestControllerEvalSyncPreservesBothGenerations(t *testing.T) {
 	for _, change := range []string{"none", "source", "lease", "holder", "missing_lease", "wrong_lease"} {
 		t.Run(change, func(t *testing.T) {
 			unit := wireAward(capability.UnitEval)
-			binding, err := cloudBinding(unit)
+			binding, err := cloudBinding(unit, capability.DeliveryBootstrap)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -294,7 +294,7 @@ func TestControllerEvalSyncPreservesBothGenerations(t *testing.T) {
 
 func TestCloudJobNamesSeparateAwardedUnits(t *testing.T) {
 	unit := wireAward(capability.UnitEval)
-	first, err := cloudBinding(unit)
+	first, err := cloudBinding(unit, capability.DeliveryBootstrap)
 	if err != nil {
 		t.Fatal(err)
 	}

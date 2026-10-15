@@ -26,8 +26,7 @@ type hold struct {
 	bytes int64
 }
 
-// Controller answers /internal/storage/*, /internal/downloads/charge and
-// /internal/egress/totals.
+// Controller answers storage reservation and download-charge requests.
 type Controller struct {
 	// Share is each free team's room in each store; DownloadCap its bytes
 	// a day. Zero DownloadCap is no cap.
@@ -45,7 +44,6 @@ type Controller struct {
 	holds    map[string]hold
 	next     int
 	days     map[string]int64
-	egress   map[string]int64
 }
 
 // New returns a fake holding free teams to share bytes per store and
@@ -54,7 +52,7 @@ func New(share, downloadCap int64) *Controller {
 	return &Controller{
 		Share: share, DownloadCap: downloadCap, Tiers: map[string]storagequota.Tier{},
 		used: map[key]int64{}, reserved: map[key]int64{}, holds: map[string]hold{},
-		days: map[string]int64{}, egress: map[string]int64{},
+		days: map[string]int64{},
 	}
 }
 
@@ -79,13 +77,6 @@ func (c *Controller) Downloaded(team string) int64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.days[team]
-}
-
-// Egress reports the stored egress total for a period, day or month.
-func (c *Controller) Egress(period string) int64 {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.egress[period]
 }
 
 // Auths lists the Authorization header of every call so far.
@@ -144,7 +135,6 @@ func (c *Controller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Reservation string            `json:"reservation"`
 		Record      bool              `json:"record"`
 		NextBytes   int64             `json:"next_bytes"`
-		storagequota.EgressTotals
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		refuse(w, http.StatusBadRequest, "%v", err)
@@ -207,12 +197,6 @@ func (c *Controller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		c.days[req.Team] += req.Bytes
 		writeJSON(w, map[string]any{"tier": tier, "day_bytes": c.days[req.Team], "cap_bytes": c.DownloadCap})
-	case "/internal/egress/totals":
-		t := req.EgressTotals
-		c.egress[t.Day] = max(c.egress[t.Day], t.DayBytes)
-		c.egress[t.Month] = max(c.egress[t.Month], t.MonthBytes)
-		t.DayBytes, t.MonthBytes = c.egress[t.Day], c.egress[t.Month]
-		writeJSON(w, t)
 	default:
 		http.NotFound(w, r)
 	}

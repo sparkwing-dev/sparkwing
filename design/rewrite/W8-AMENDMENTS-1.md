@@ -19,7 +19,7 @@ cell or establish an HTTP, Cloud or OS deployment proof.
 | A1-26 | The loop sends observed labels/capacity without manufacturing granted identity. ClaimProfileResolver and final root registration remain controller integration. |
 | A1-27 | W8 does not calculate settlement. Final store claim/start/finish/reaper integration must preserve the server award's billing facts. |
 | A1-36 | Hosting retains the complete award for preparation. Bound byte/record clients must still be supplied to RunInput/NodeInput by the concrete host composition. |
-| A1-38 | NewControllerControl maps immutable awards and sync decisions. Jobs persist UnitID and report Job name/node UID after restart. Eval retains its source fence and separate Expansion lease. Server identity replaces the removed caller holder. Component claim/sync/restart tests pass with fakes. Real HTTP/source/exchange composition remains open. |
+| A1-38 | NewControllerControl maps immutable awards and sync decisions. Jobs persist UnitID and report Job name/node UID after restart. Eval retains its source fence and separate Expansion lease. BootstrapHost now exchanges once and validates the original binding, engine and resources before host dispatch. Component claim/sync/restart/exchange tests pass with fakes. Real HTTP/source/container handoff and host composition remain open. |
 | A1-39 | The old cluster claim/source/heartbeat loops and old daemon remain deleted. Unified loop and Hosting components pass. Hosting checks direct delivery and unit purpose, and uses the earliest binding/owner/parent deadline. Property and controlled-clock component tests exercise these bounds. source.Acquire, lease.Keeper.Run and the engine HTTP client still panic. Host factories, delegated node routes and generated-code replay construction remain undeclared. |
 | A1-40 | The implemented local runtime keeps readiness/status/stay/drain and dynamic dashboard attachment. APIConn now exposes a verified UID/SID identity snapshot to the shared controller, replacing the UID-only accessor. Shared local controller/store/consumer services and native Windows SID transport remain unwired. |
 | A1-41 | Implemented the native home-bound ManagedUnitManager and final foreground/timer arguments. Refresh preserves captured settings and restarts installed controllers. W9 dashboard/schedule/update/doctor composition and native login/crash/drain proofs remain open. |
@@ -156,5 +156,44 @@ ports. The existing workspace-off cache-key, host construction/delegation/replay
 local services/activity and Cloud bootstrap grammar/source-handoff requests remain.
 A1-41/42/43/51/52/53 keep their recorded CLI, deployment and native proof limits.
 No native catalog cell is unskipped and no T1 inventory port is newly claimed.
+
+## Continuation: bootstrap exchange boundary
+
+The new merge has one modify/delete conflict. The W8 deletion of
+internal/orchestrator/wingd_api_routes_test.go is retained, removing 336 incoming
+legacy test lines. Its additions classify routes on the retired local API.
+No Git write ran. The lead must stage the resolution and complete the merge.
+
+A1-38 now has BootstrapHost against the amended controller Exchange interface.
+Its transport retains the bootstrap in a context-aware bearer callback, calls
+exchange once and gives the complete direct award to runners.UnitHost. It refuses
+changed binding, engine, accepted-run or resource inputs and checks cancellation
+before dispatch. A1-19's accepted engine and granted runner reach the host intact.
+Renewal/source/execution remain that host's responsibility under A1-39.
+
+The original binding, including the eval's distinct live generation and terminal
+source generation, is the execution confinement invariant. Table tests and a fuzz
+property cover changed identities, generations and authority. The new acceptance
+component covers plan/eval/work with fake transport and unit hosts. Native cells
+remain blocked. No additional T1 inventory test is claimed.
+
+The new W8-local BootstrapHost API replaces no public or other-area contract.
+The existing binding validator now accepts the required delivery kind as an
+argument, so claim/sync keep bootstrap-only validation and exchange requires direct
+delivery. No duplicate binding validator, setting, environment variable, timeout,
+trust root or compatibility path is added. Undo removes BootstrapHost and its new
+tests and restores the private validator's signature.
+
+The concrete grammar request remains with W9: fetch-source/run-node require a job
+for plan units and reject --unit, --attempt, --engine, --source-job and
+--source-generation emitted by BuildJob. The original award/source handoff also
+needs a shared declaration. This continuation leaves those contracts unchanged.
+W3 host construction/delegated routes/replay and W1/W2 local-service composition,
+workspace-off binary-cache hashing and native/Cloud proofs remain open.
+
+Inspection also confirms that pkg/controller/engine_claim.go clears Execution
+for plan/eval claims and exchanges. W1/W2 must supply the resolved Cloud resources
+already required by ControllerControl.Claim and BootstrapHost. The existing wire
+shape supports this. No other-area runtime or contract was edited to work around it.
 
 <!-- design:end -->
