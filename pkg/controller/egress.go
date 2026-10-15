@@ -131,9 +131,14 @@ func (s *Server) chargeTeamDownload(w http.ResponseWriter, r *http.Request, next
 		next.ServeHTTP(w, r)
 		return
 	}
+	tenant, err := s.store.ForTeam(r.Context(), team)
+	if err != nil {
+		s.writeInternalError(w, r, "resolve download team", err)
+		return
+	}
 	charge := func(ctx context.Context, n int64, record bool) error {
-		_, err := s.store.ChargeDownload(ctx, store.DownloadCharge{
-			Team: team, Bytes: n, Record: record, Now: time.Now(),
+		_, err := tenant.ChargeDownload(ctx, store.DownloadCharge{
+			ReplicaID: s.leaseHolder, Bytes: n, Record: record,
 			FreeCapBytes: s.downloadFree, FundedCapBytes: s.downloadFunded,
 		})
 		return err

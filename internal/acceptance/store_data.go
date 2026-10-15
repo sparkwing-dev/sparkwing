@@ -179,7 +179,10 @@ func CheckStoreDataBoundary(ctx context.Context, root, id string, crash StoreUpl
 	if _, err := tenants[1].ReserveQuota(ctx, "storage", 8); err != nil {
 		return fmt.Errorf("release did not restore capacity: %w", err)
 	}
-	return storeDataSingletonRace(ctx, clients)
+	if err := storeDataSingletonRace(ctx, clients); err != nil {
+		return err
+	}
+	return checkStoreDownloadBoundary(ctx, root)
 }
 
 func storeDataSingletonRace(ctx context.Context, clients []*store.Store) error {

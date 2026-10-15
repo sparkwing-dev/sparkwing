@@ -872,6 +872,19 @@ are exempt from download quota. Deferred plan counters add no enforcement here.
 The unused service-wide `egress_day` table is removed. Tenant egress remains in
 `egress_usage` with period and replica identity.
 
+`Tenant.ChargeDownload` replaces `Store.ChargeDownload`. `DownloadCharge`
+carries the controller's trusted `ReplicaID`, byte count, delivered-byte flag
+and existing free/funded caps. It accepts no team or caller clock. The tenant
+handle supplies the team. Store time after the shared `download` quota lock
+selects the UTC day. Admission totals and additive `team_download_day` replica
+rows commit together. Unexpired download reservations consume shared capacity.
+Expiry releases their holds before another charge can use that capacity.
+Already delivered bytes remain countable after the cap, and the download that
+crosses the cap finishes. Zero-byte checks add no usage row. Midnight resets
+admission while preserving earlier report rows. Overflow or a failed counter
+write rolls back both sides. Controller adapters reuse their existing lease
+holder identity as the replica ID. Logs retain their download-cap exemption.
+
 `Operator.ChargeRetainedStorage(ctx, maintenanceLease)` bills unique `blobs`
 and committed `log_streams.stored_bytes`. Historical replica usage and reference
 counts cannot multiply the charge. The team's cache and log rows share their

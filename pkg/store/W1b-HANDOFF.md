@@ -1,172 +1,152 @@
 # W1b handoff
 
-Continues committed session 4, 665d47e18. W1b remains incomplete. The lead owns
-commits, independent review, pipelines and native integration.
+Continues session 5 on HEAD 57a20c17b. The lead owns commits, independent review,
+pipelines and native integration. W1b remains incomplete.
 
 ## This continuation
 
-The first two lead handoffs remain done. The record-mutation owner and two
-catalog removals were not repeated. The third lead item advances by retiring
-raw storage reads and an unused unleased reservation sweep. The raw paid-credit
-and service-counter route cuts remain intact.
+The first two lead handoffs were already done and were not repeated.
+`TestBlobRecordsMutationCannotOutliveAuthority` passed its full generated run.
+The two catalog removals remain absent. No W1 implementation file was edited.
 
-`Tenant.StorageStanding` replaces `Store.StorageStandingFor` and `Store.TeamStorage`.
-The controller now reads one tenant snapshot for policy, retained event bytes,
-unique blob bytes, tagged log bytes and live blob-upload holds. It shares the
-inventory reader with storage billing. Committed, aborted, deduplicated and expired
-holds are reported without modifying quota or financial records. Corrupt or
-overflowing inventory fails with no partial report. PostgreSQL uses the existing
-repeatable-read snapshot helper. SQLite uses its existing transaction snapshot.
+The third lead item advances by removing raw download accounting.
+`Tenant.ChargeDownload` replaces `Store.ChargeDownload`. Its request carries a
+trusted replica ID, bytes, delivered-byte flag and the existing cap policy.
+It accepts no team or caller clock. The tenant owns scope. Store time after
+locking the shared download admission row selects the UTC day.
 
-Removed `TeamStorageUsage`, `Store.ReconcileFreeEventBytes`, its duplicate
-`free_slots.event_bytes` column and the event-cache writer. Standing and free-event
-admission read retained `runs.event_bytes`. Admission keeps its existing free-tier
-lock. Run deletion therefore needs no repair pass. Historical financial usage
-still survives deletion. Funding reads use the store clock. Tier, allowance and
-free-slot rules are unchanged.
+Admission, expiry of held download reservations and additive replica usage commit
+together. Unexpired generic download reservations consume capacity. Expired holds
+cannot be subtracted twice by later settlement. Midnight resets admission while
+earlier usage remains reportable. The download that crosses a cap finishes.
+Already delivered bytes can be recorded after exhaustion. Funding changes and
+the operator exemption keep their existing meaning. A zero-byte cap check writes
+no replica usage. Overflow and failed usage writes roll back the entire charge.
 
-Removed `Store.ReleaseExpiredStorage`, `expiredReservationRows` and their
-`storageRow` type. Final upload admission and leased blob maintenance already own
-expiry. The legacy direct-upload test now releases its exact reservation, rather
-than invoking a deployment-wide sweep. Other raw upload/log writers and their
-internal reservations remain for their consumer cutovers.
+Both production callers now use tenant handles. Signed downloads and delivered
+response bytes retain the controller's existing `leaseHolder` as their trusted
+replica identity. Log and live-log reads remain exempt from the download cap.
+No new setting, environment variable, timeout, cap, schema or service is added.
 
-Invariant: a tenant's standing contains only its retained inventory and live
-upload holds, and reporting never changes accounting. The generated property
-uses own and foreign sizes, shared digests, adversarial replica strings, stale
-raw counters and reopening. It verifies tenant isolation, unchanged usage and no
-slot or ledger writes. An initial behavioral test failed before implementation:
-standing reported 900 cached event bytes when the retained run held 17.
+Invariant: concurrent replicas cannot lose a team's charges, and one tenant
+cannot charge another tenant's budget. A generated property varies amounts and
+hostile replica strings against independent SQLite connections. It checks the
+shared admission total and summed tenant reports. The race proof admits exactly
+one of eight contenders for the last capacity, then reopens the exhausted store.
 
-Deleted 156 production Go lines and added 117, a 39-line net reduction. Deleted
-98 test lines and added 273. The final schema loses one net line. These figures
-exclude documentation and generated API snapshots.
+Deleted 106 production Go lines from team_storage.go, replacing the raw method
+and its declarations with 118 lines in download_accounting.go. The controller
+caller migration adds nine net production lines. Deleted 65 legacy test lines.
+The replacement store proof has 214 lines, the controller proof 75, and the
+acceptance helper 83. These figures exclude docs and generated API snapshots.
 
 ## Ports and acceptance
 
-`storage_standing_runtime_test.go` ports retained-event release after deletion
-and the funded/free/held standing matrix to the final schema. It also checks
-pending, committed, duplicate, aborted and expired upload reports, corrupt totals,
-tenant isolation and reopening. The controller proof consumes that final snapshot.
-The old free-tier deletion test no longer calls a repair method. Remaining legacy
-storage/log fixtures read their own SQL assertions after the raw usage reader cut.
-Those fixtures are caller migrations, not a claim that their legacy scenarios pass.
+Ported TestChargeDownloadHoldsATeamToItsDailyCap and
+TestChargeDownloadRaceForTheLastBytesAdmitsExactlyOne to final-schema tests.
+They cover funding, cap crossing, delivered bytes, midnight, operator exemption,
+shared reservations, expiry, restart, overflow and failed-write rollback.
 
-The two legacy reservation-sweep tests are removed. The final
-`TestBlobUploadExpiredReservationFreesCapacity` now covers empty and nonempty
-uploads. Empty uploads reserve object capacity, expired tickets cannot commit,
-and aborting an expired ticket leaves its successor's hold intact. The old
-assertion that a late raw commit counts bytes is reversed by final ticket expiry.
-Committed-ticket replay remains covered by the existing final tests.
-
-The existing upload crash/replay SQLite proof checks a live hold before commit
-and unique retained bytes after reopening. No archived T1 source row or native
-acceptance cell is newly closed. Native transports remain unclaimed.
+The existing storage-replica-safe-accounting/store-data-sqlite cell now includes
+real tenant charges through independent clients, a last-capacity race and the
+exhausted cap after reopening. All 12 existing store-data-sqlite cells pass.
+No new native cell or archived T1 source row is marked complete. The controller
+proof uses real middleware and persistence without opening a socket.
 
 ## Verification
 
-All Go commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and
-GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W1b/. Commands use go -C with this
-worktree's absolute path and -p 4. The scratch directory was removed after all owned check processes exited.
+All Go commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
+-p 4 and GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W1b/.
 
-- Whole-repository go build ./... passed after the final embedded-doc sync.
+- Whole-repository go build -p 4 ./... passed after the final SQL change.
 - Scoped go vet passed for store, controller and both acceptance package trees.
-- The final store selection passed 200 top-level tests / 618 cases, without
-  skips or failures, in 51.851 seconds. This includes final record-mutation,
-  metered-accounting, payment, upload, inventory, result and tenant-scope proofs.
-- Four controller top-level tests / seven cases passed without skips, including
-  the final standing adapter, maintenance inventory and retired-counter checks.
-- FuzzStorageStandingTenantInventory passed 149 generated executions with four
-  workers. Its final schema and production inventory implementation were in place.
-- TestStorage and TestBilling passed two top-level tests / 43 cases, including
-  all 12 existing store-data-sqlite proofs. The 563 native/platform skips remain.
-- The focused embedded changelog tests passed. sync-docs.sh --check passed.
-- commentcheck -base main passed across 1019 Go files. sleepcheck -base HEAD,
-  gofmt and git diff --check passed. The store API snapshot matches generation.
+- The broad store selection passed 205 top-level tests / 627 cases. One source
+  guard failed because it cannot resolve usageStatement's dynamic table name.
+  The new owner now uses its explicit tenant INSERT. The final focused selection
+  passed 13 top-level tests / 38 cases, including every new download proof and
+  tenant scope/writer/twin guards. The broad selection was not rerun after this
+  equivalent SQL spelling change.
+- TestBlobRecordsMutationCannotOutliveAuthority passed separately, unchanged.
+- TestStorage and TestBilling passed 43 cases, including all 12 existing SQLite
+  proofs. The 562 native/platform skips remain unclaimed.
+- The new controller proof and focused embedded migration/changelog/privacy
+  checks passed. Four controller tests passed in the broader selection, but
+  TestTeamDeletionReachesARetiredRetentionClass failed in its inherited fixture
+  because newLogSegmentFixture still reads the removed sparkwing_meta table.
+- commentcheck -base main passed across 1025 files. sleepcheck -base HEAD,
+  gofmt, git diff --check and sync-docs.sh --check passed.
+- The generated store API snapshot matches. A full snapshot-directory comparison
+  also finds the inherited .apidiff/pkg_runner.txt for a package no longer
+  generated. That foreign snapshot was not changed.
 
-The store command uses go test -json -p 4 ./pkg/store -count=1 -timeout=480s
-with this selection:
-
-```text
-^(TestStoreData|TestLogPersistence|TestResult|TestBlob|TestPayment|TestAWarnedPurchaseIsNotGranted|TestCreditSettings|TestSetCreditSettings|TestUnsetRateTable|TestSetRateTable|TestAStoredRateTable|TestATableWithoutAFourCore|TestStorage|TestBilling|TestGrantCredits|TestCreditGrant|TestCreditReversal|TestCreditHistory|TestCreditsBalanceIs|TestCreditsDefaultTenant|TestTenantSQLScope|TestTenantWriters|TestTenantTwins|FuzzPaymentRawPaidGrantsCannotFundTeam|FuzzStorageStandingTenantInventory)
-```
-
+The broad store selection is the prior handoff's selection with the new
+TestStoreDataDownload functions included by its existing prefix. The final
+focused command is go test -json -p 4 ./pkg/store -count=1 -timeout=180s
+-run '^(TestStoreDataDownload|TestTenantSQLScope|TestTenantWriters|TestTenantTwins)'.
 Acceptance uses ./internal/acceptance/... ./tests/acceptance/... with
--run '^(TestStorage|TestBilling)$'. The generated property uses -run '^$'
--fuzz '^FuzzStorageStandingTenantInventory$' -fuzztime=128x -parallel=4
--timeout=120s. The fuzz runner reports executions above its requested target.
-No full-store, full-controller, race, PostgreSQL, provider, physical-backend or
-native-platform pass is claimed.
+-run '^(TestStorage|TestBilling)$'. No full-store, full-controller, race,
+PostgreSQL, provider, physical-backend or native-platform pass is claimed.
 
 ## Remaining assignments and real integration
 
 - A1-24: transaction-owned data authorization and binding proofs remain intact.
   W2 DataController.DataAuthority and BindData still need real adapters.
-- A1-27: issuance/start/renew/release/reap/finish billing joins remain open.
-  authority_issue.go still refuses metered roots and persists unmetered awards
-  through W1's separate writer. C2 SettleBilling remains a panic stub. The
-  execution-start/customer-wait transport is still missing. The at_award helper
-  alone cannot distinguish an unstarted refund from compute or customer-runner
-  wait. W1/W2/W3 must expose those facts before that join preserves BillingRules.
-  Accounting proofs continue to use contract calculator fakes. W1 files were
-  not edited or supplied a second transition owner.
-- A1-28: committed-checkout settlement and raw paid-grant refusal are implemented.
-  W2 still owns provider verification and its HTTP adapter.
-  VerifiedPaymentEvent.Event remains a stub. Card billing keeps its separate
-  payment-linked settlement contract.
+- A1-27: this checkout still refuses metered roots in authority_issue.go and
+  persists unmetered awards separately. W1's session-18 report and its current
+  worktree contain the real lifecycle join in unit_billing.go. The lead must
+  integrate that parallel work. It was read and not copied into W1b's branch.
+  After integration, W1b still owns spend-exhaustion/grace enforcement and the
+  legacy accounting cut. C2 SettleBilling remains a panic stub. W3 must report
+  actual owner compute on renewal so customer-runner waits stay excluded.
+  Existing W1b accounting tests continue to use calculator contract fakes.
+- A1-28: committed-checkout settlement and raw paid-grant refusal remain done.
+  W2 owns provider verification and its HTTP adapter. VerifiedPaymentEvent.Event
+  remains a stub. Card billing retains its payment-linked settlement contract.
 - A1-29 through A1-35: upload tickets, tagged receipts, provenance, record/member
   persistence, read-set authorization, memo/depcache, tombstones and tagged logs
   remain implemented behind contracts. W7 RecordNamespace and AuthorizeEdge
   remain stubs. Store proofs use contract fakes. Physical verification/deletion,
-  manifest-reader configuration, GC, trusted replica identity, binary execution
-  policy, signed transfers and exact proxy egress remain integration work.
-  Allowance-driven physical eviction remains open.
-- Legacy claim-credit, principal event/download counters, raw storage helpers,
-  output objects, direct uploads and node-log transport still need consumer
-  cutovers. Direct-upload/log paths retain reserveStorageTx, commitStorageTx and
-  old reservation tables. The controller standing report now reads final inventory. Raw upload/log writers still use those rows. W7's old
-  internal/storagequota and internal/cache RPC clients have no counter fallback.
+  manifest-reader configuration, GC, binary execution policy, signed transfers
+  and exact proxy egress remain integration work. Allowance-driven physical
+  eviction remains open. Download callers now supply trusted replica identity.
+- Legacy claim-credit, principal event and egress counters, raw storage helpers,
+  output objects, direct uploads and node-log transport need consumer cutovers.
+  Direct-upload/log paths still use internal raw reservations and old tables.
   The source/artifact/binary data_download adapter still uses cache grants.
-  Earlier materialization and imported-owner-log identity contracts remain open.
+  Materialization and imported-owner-log identity handoffs remain open.
 - A1-53: native placements, provider/backend and PostgreSQL evidence remain with
-  the lead and integrating areas. The first two lead handoffs are done. The
-  third remains in progress. No new foreign contract change is requested.
+  the lead and integrating areas. The first two lead entries are done. The third
+  remains in progress. No new foreign contract change is requested.
 
 ## Shared files, assumptions and friction
 
-Shared production caller: `pkg/controller/storage_standing.go`.
-Shared test caller migrations: `pkg/controller/log_segments_internal_test.go` and
-`pkg/controller/direct_upload_test.go`. `internal/acceptance/store_upload.go`
-extends the existing persistence proof. `pkg/store/schema.sql` removes only the
-duplicate free-slot event cache. `tenant_sql_scope_guard_test.go` removes only
-the two entries naming deleted APIs. W1's implementation files remain untouched.
+Shared production caller migrations: pkg/controller/egress.go and
+pkg/controller/data_download.go. Shared test caller migration:
+pkg/controller/team_download_test.go. New controller proof:
+pkg/controller/download_accounting_internal_test.go.
 
-Owned production files: `free_tier.go`, `storage.go`, `storage_quota.go`,
-`retained_storage_billing.go`, `team_storage.go`, and new `storage_standing.go`.
-Owned test files: `free_tier_test.go`, `team_storage_test.go`,
-`upload_runtime_test.go`, and new `storage_standing_runtime_test.go`.
-The new controller proof is `storage_standing_internal_test.go`.
+Acceptance changes: internal/acceptance/store_data.go and new
+internal/acceptance/store_download.go. Owned files: team_storage.go,
+team_storage_test.go, new download_accounting.go and
+new download_accounting_runtime_test.go, all under pkg/store.
 
-Shared docs: `contracts/c1-data.md`, `contracts/t1-port-inventory.md`,
-`CHANGELOG.md`, `docs/migrations/_unreleased.md`, `.apidiff/pkg_store.txt`, and
-sync-docs-generated copies under `pkg/docs`. `STORE-DATA.md` describes the new
-persistence read path. The C1-local contract adds the tenant standing method and
-three inventory fields, removes four raw Store APIs and one unused result type,
-and drops the duplicated free-slot column. No foreign contract change is needed.
+Shared docs: contracts/c1-data.md, contracts/t1-port-inventory.md, CHANGELOG.md,
+docs/migrations/_unreleased.md, .apidiff/pkg_store.txt and sync-docs-generated
+copies under pkg/docs. STORE-DATA.md documents the current owner. W1's catalog,
+transition, admission, claim and reconciliation files remain untouched.
 
-Mechanisms added: none beyond the tenant read replacing the two raw reads.
-The existing snapshot and retained-inventory owners are reused. No new policy,
-quota, price, setting, environment variable, compatibility path or service is added.
-Undoing this cut means restoring the removed reads/cache and their callers.
+Mechanisms added: the tenant owner replaces the raw writer using the existing
+shared quota row and replica table. No alternate admission store or process
+counter is added. A raw-method rename alone was insufficient because its SQL
+still targeted the removed day shape. Undo restores the raw method and callers.
 
-Friction: the one-letter fake tenant cannot pass the public slug validator, so
-its standing-policy test seeds its slot as fixture data. An intermediate targeted
-check compiled while its obsolete test functions were being removed and failed
-with undefined test names. Final checks run after those edits and replace that
-result. Legacy storage/claim/token fixtures outside the final selection remain
-for their consumer cutovers. Missing C2 calculation/verification, W1 timing joins
-and W7 adapters still prevent real execution/billing/data integration.
-No Sparkwing binary, service, deployment, release or Git write ran.
+Friction: the initial behavioral test failed on the removed day column. The
+literal SQL writer guard could not recognize the shared dynamic usage builder.
+The explicit equivalent INSERT resolves that guard without changing W1 files.
+The inherited log fixture failure and extra runner API snapshot remain visible.
+The initial cold build was slow. No Sparkwing binary, service, Git write,
+deployment, release or harness-memory write ran.
 
-Git HEAD remained 665d47e18. The shared repository config has no core.worktree
-or repository-local user identity override. Scratch cleanup is complete.
+All owned check processes exited before /tmp/sw-astra-W1b/ was removed.
+HEAD remained 57a20c17b. The shared repository has no local user identity or
+core.worktree override. No Git writes ran.

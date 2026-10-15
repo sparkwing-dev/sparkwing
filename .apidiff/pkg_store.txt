@@ -906,19 +906,14 @@ type DownloadCapError struct {
 func (e *DownloadCapError) Error() string
 func (e *DownloadCapError) Unwrap() error
 type DownloadCharge struct {
-	Team Team
-
-	Bytes int64
-
-	Record bool
-	Now    time.Time
-
+	ReplicaID                    string
+	Bytes                        int64
+	Record                       bool
 	FreeCapBytes, FundedCapBytes int64
 }
 type DownloadCharged struct {
 	Tier     TeamStorageTier
 	DayBytes int64
-
 	CapBytes int64
 }
 type EdgeGuard string
@@ -2854,7 +2849,6 @@ func (s *Store) CancelNodeForExhaustedCredits(
 	ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time,
 ) error
 func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, error)
-func (s *Store) ChargeDownload(ctx context.Context, c DownloadCharge) (_ DownloadCharged, err error)
 func (s *Store) CheckBinding(ctx context.Context, principal capability.Principal, rule capability.BindingRule, target capability.Target) error
 func (s *Store) CheckClaimKey(ctx context.Context, tok ClaimToken, key string) error
 func (s *Store) CheckClaimSensitive(ctx context.Context, tok ClaimToken, now time.Time) (ClaimToken, error)
@@ -3221,6 +3215,7 @@ func (t *Tenant) BusinessEvents(ctx context.Context, kind string) (_ []BusinessE
 func (t *Tenant) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error)
 func (t *Tenant) CancelPendingTrigger(ctx context.Context, id string) (bool, error)
 func (t *Tenant) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
+func (t *Tenant) ChargeDownload(ctx context.Context, c DownloadCharge) (_ DownloadCharged, err error)
 func (t *Tenant) CheckDataAccess(ctx context.Context, authorized capability.Authorized, target capability.DataTarget) error
 func (t *Tenant) ClearCronOverride(ctx context.Context, id string, now time.Time) error
 func (t *Tenant) CommitBlobUpload(ctx context.Context, request VerifiedUploadCommit) (blob.Receipt, error)

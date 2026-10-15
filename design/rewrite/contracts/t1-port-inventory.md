@@ -8,6 +8,22 @@ The primary inventory has 74 changed or added functions: 6 lifecycle, 6 state-ma
 
 ## Source snapshots
 
+`pkg/store/download_accounting_runtime_test.go` ports
+`TestChargeDownloadHoldsATeamToItsDailyCap` and
+`TestChargeDownloadRaceForTheLastBytesAdmitsExactlyOne` from the retired raw
+Store method. Final-schema tests preserve cap crossing, delivered-byte counting,
+funding changes, operator exemption and UTC-day reset. Independent SQLite
+connections race the last capacity and reopen the exhausted budget. A generated
+property varies byte counts and hostile replica strings while checking tenant
+isolation and conservation. Expired generic download holds release without
+double subtraction. Failed counter writes and overflow roll back admission.
+
+The existing `storage-replica-safe-accounting/store-data-sqlite` cell now includes
+real tenant download charges, their last-capacity race and exhausted-budget
+reopening. The controller proof exercises delivered-byte accounting, trusted
+replica identity, tenant isolation and log/live-log exemptions without a socket.
+No new native acceptance cell or archived source row is marked complete.
+
 `pkg/store/storage_standing_runtime_test.go` ports retained event-byte release
 after deletion and the funded/free/held storage-standing matrix to final rows.
 It checks unique blob/log inventory, commit/abort/expiry holds, corrupt totals

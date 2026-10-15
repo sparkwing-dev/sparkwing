@@ -8,6 +8,23 @@ usage, raw storage counters and other tenants cannot change retained byte totals
 Corrupt inventory or an overflowing total returns an error and no partial report.
 The controller's team storage report consumes this snapshot.
 
+Download accounting uses `Tenant.ChargeDownload`. The raw Store method is
+removed. The request accepts a trusted replica ID and the existing cap policy,
+with no team or caller clock. The tenant owns the team and the store owns time.
+The shared download quota row serializes admission with reservations. Admission
+and additive replica reports commit together. Unexpired holds consume capacity.
+Expired holds release before charging. Midnight resets admission but retains
+the earlier day's report. The download that crosses a cap finishes, and bytes
+already delivered can still be recorded. A zero-byte check records no bytes.
+Overflow and write failures roll the entire charge back.
+
+The controller's signed downloads and delivered-byte middleware use the tenant
+method and their existing lease-holder identity for replica accounting. Log and
+live-log reads stay exempt. The SQLite replica acceptance proof races real
+charges through independent clients and checks the exhausted cap after reopening.
+The principal egress-meter persistence, signed-data capability adapter and native
+PostgreSQL path remain integration work.
+
 `Store.StorageStandingFor`, `Store.TeamStorage`, `TeamStorageUsage` and
 `Store.ReconcileFreeEventBytes` are removed. `free_slots` retains slot ownership
 and its timestamp. Its duplicate event-byte column and writer are removed.

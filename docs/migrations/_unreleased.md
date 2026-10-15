@@ -1,5 +1,17 @@
 # Migrating to the next release
 
+## Download charges use tenant handles and replica identity
+
+`Store.ChargeDownload` is removed. Obtain a tenant with `Store.ForTeam`, then
+call `Tenant.ChargeDownload`. `DownloadCharge.ReplicaID` identifies the trusted
+controller replica. The request no longer accepts `Team` or `Now`. The store
+selects the current UTC day under its shared quota lock.
+
+Admission and replica usage commit together. Free and funded caps keep their
+existing behavior, including finishing the download that crosses the cap and
+recording already delivered bytes. Logs stay exempt. Controller integrations
+use their existing lease-holder identity and require no new configuration.
+
 ## Paid credit requires verified checkout settlement
 
 `POST /api/v1/credits/grants` is removed. `Store.GrantCredits`,

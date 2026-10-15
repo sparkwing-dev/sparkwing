@@ -76,6 +76,8 @@ unlock.
 - **sdk:** describe lists each pipeline's declared secrets as `secrets`, which `sparkwing pipeline describe --secrets` prints
 
 ### Changed
+- **store:** [(Breaking)](docs/migrations/_unreleased.md#download-charges-use-tenant-handles-and-replica-identity) Download charges use tenant handles, store time and additive replica accounting
+  `Tenant.ChargeDownload` replaces the raw Store method. The controller's signed and streamed downloads share one daily admission lock. Existing caps and log-read exemptions stay the same.
 - **controller + store (Breaking):** Remove the service-token storage and download counter routes and `Store.RenewStorage`. Verified upload tickets own quota reservation and settlement. The signup slot setting writes the final settings table. See [migration guide](docs/migrations/_unreleased.md#storage-counters-use-verified-upload-tickets).
 - **store:** [(Breaking)](docs/migrations/_unreleased.md#unit-recovery-requires-the-elected-reaper-lease) removed the unfenced node and trigger reapers. `Store.ReapUnits` requires the current `controller.reaper` lease and returns tagged unit recovery results. Remote lease loss recovers within the same run. A started local owner fails in place.
 - **store (Breaking):** Remove the unused `Store.CreditRateTableSet` getter. Read rate-table presence through `CreditSettings.RateTableSet` with the prices from the same snapshot. See [migration guide](docs/migrations/_unreleased.md#rate-table-presence-uses-the-settings-snapshot).
