@@ -383,6 +383,21 @@ transport. Its log callback attributes owner eval output to run logs. The output
 reader must verify the source generation and authorize the recorded bytes. These
 adapters still need placement wiring.
 
+Code replay evaluates every declared generator of a recorded source together,
+including empty groups. It uses the same raw-body collector as initial expansion
+and validates the combined body because jobs can depend on another generator's
+members. Persisted jobs from other sources supply the remaining validation
+topology even when their code has not been reconstructed yet. Every reconstructed
+member must retain its persisted hash. Repeated replay entries for one source
+evaluate it once and must agree on its generation and recorded output.
+
+`lifecycle-generator-reconstruct-code/hermetic-replay` checks nested generation,
+dependencies within and between source expansions, recovery ancestry, empty
+groups, duplicate replay, changed or missing siblings, raw unknown fields and
+conflicting source inputs. Changed declarations fail with plan_drift before the body.
+Its persistence, validator and SDK transport are fakes. Native placement and
+transactional insertion coverage remain open.
+
 The host implementation accepts the declared store, validator, hash and engine
 interfaces so their independent implementations can be tested with fakes.
 This does not complete the native placement adapters. Those adapters must supply

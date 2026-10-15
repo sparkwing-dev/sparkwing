@@ -1,7 +1,6 @@
 package nodehost
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -191,34 +190,7 @@ func (h *OwnerEvaluator) expansionBody(ctx context.Context, session *executorSes
 		}
 		validation.ExistingJobs = append(validation.ExistingJobs, existing)
 	}
-	jobs := []json.RawMessage{}
-	for _, id := range job.Closures.Generate {
-		value, evalErr := h.eval(ctx, session, code, id, output)
-		if evalErr != nil {
-			return nil, evalErr
-		}
-		value = bytes.TrimSpace(value)
-		if len(value) == 0 || value[0] != '[' {
-			return nil, executorError(apierr.ProtocolError, "generator must return a jobs array")
-		}
-		var group []json.RawMessage
-		if err := json.Unmarshal(value, &group); err != nil {
-			return nil, executorError(apierr.ProtocolError, "generator returned an invalid jobs array")
-		}
-		for _, raw := range group {
-			var member struct {
-				Groups []string `json:"groups"`
-			}
-			if err := json.Unmarshal(raw, &member); err != nil || !executorContains(member.Groups, id) {
-				return nil, executorError(apierr.PlanInvalid, "generated job does not belong to its evaluated generator")
-			}
-		}
-		jobs = append(jobs, group...)
-	}
-	// safety: validate the raw combined body so unknown fields and cross-generator edges reach the shared validator.
-	body, err := json.Marshal(struct {
-		Jobs []json.RawMessage `json:"jobs"`
-	}{Jobs: jobs})
+	body, err := h.generate(ctx, session, code, job, output)
 	if err != nil {
 		return nil, err
 	}

@@ -1,7 +1,6 @@
 package nodehost
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"strconv"
@@ -12,7 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type sdkCode struct {
@@ -101,84 +99,9 @@ func (h *sdkCode) replan(ctx context.Context, session *executorSession, input No
 	if string(hash) != input.Accepted.PlanHash {
 		return executorError(apierr.PlanDrift, "SDK plan differs from the accepted plan")
 	}
-	jobs := append([]nodeproto.JobSpec(nil), plan.Jobs...)
-	var snapshot store.RunSnapshot
-	if len(input.Replay) > 0 {
-		snapshot, err = h.Store.ReadSnapshot(ctx, input.Accepted.RunID)
-		if err != nil {
-			return err
-		}
-		if snapshot.Run.ID != input.Accepted.RunID {
-			return executorError(apierr.PlanDrift, "generator snapshot belongs to another run")
-		}
-	}
-	for _, replay := range input.Replay {
-		if replay.SourceGeneration < 0 || replay.SourceJob == "" || replay.GeneratorID == "" {
-			return executorError(apierr.PlanDrift, "generator replay lacks its persisted source identity")
-		}
-		var sourceJob *nodeproto.JobSpec
-		for i := range jobs {
-			if jobs[i].ID == replay.SourceJob {
-				sourceJob = &jobs[i]
-				break
-			}
-		}
-		if sourceJob == nil || !executorContains(sourceJob.Closures.Generate, replay.GeneratorID) {
-			return executorError(apierr.PlanDrift, "generator replay names an undeclared source")
-		}
-		replayInput := input
-		replayInput.NodeID = replay.SourceJob
-		value, evalErr := h.eval(ctx, session, replayInput, replay.GeneratorID, replay.Output)
-		if evalErr != nil {
-			return evalErr
-		}
-		validation := h.Validation
-		validation.Expansion = true
-		validation.ExistingJobs = jobs
-		validation.SourceJob = replay.SourceJob
-		value = bytes.TrimSpace(value)
-		if len(value) == 0 || value[0] != '[' {
-			return executorError(apierr.ProtocolError, "generator replay must return a jobs array")
-		}
-		wrapped := append([]byte(`{"jobs":`), value...)
-		wrapped = append(wrapped, '}')
-		expansion, validateErr := h.ValidatePlan(wrapped, validation)
-		if validateErr != nil {
-			return validateErr
-		}
-		expected, expectedErr := h.replayMembers(snapshot, replay)
-		if expectedErr != nil {
-			return expectedErr
-		}
-		if len(expansion.Jobs) != len(expected) {
-			return executorError(apierr.PlanDrift, "generator replay changed the accepted member set")
-		}
-		for _, generated := range expansion.Jobs {
-			for _, existing := range jobs {
-				if existing.ID == generated.ID {
-					return executorError(apierr.PlanDrift, "generator replay overwrote an existing job")
-				}
-			}
-			if !expected[generated.ID] || !executorContains(generated.Groups, replay.GeneratorID) {
-				return executorError(apierr.PlanDrift, "generator replay changed the accepted member set")
-			}
-			row, readErr := h.Store.ReadNode(ctx, store.NodeRef{RunID: input.Accepted.RunID, NodeID: generated.ID})
-			if readErr != nil {
-				return executorError(apierr.PlanDrift, "generator replay added a job absent from the accepted expansion")
-			}
-			hash, hashErr := h.CanonicalHash(generated)
-			if hashErr != nil {
-				return hashErr
-			}
-			if string(hash) != row.SpecHash {
-				return executorError(apierr.PlanDrift, "generator replay changed a persisted job")
-			}
-			if row.Ref.RunID != input.Accepted.RunID || row.Ref.NodeID != generated.ID {
-				return executorError(apierr.PlanDrift, "generated job row belongs to another identity")
-			}
-			delete(expected, generated.ID)
-			jobs = append(jobs, generated)
-		}
+	jobs, err := h.replay(ctx, session, input, plan.Jobs)
+	if err != nil {
+		return err
 	}
 	for _, job := range jobs {
 		if job.ID != input.NodeID {
@@ -194,33 +117,6 @@ func (h *sdkCode) replan(ctx context.Context, session *executorSession, input No
 		return nil
 	}
 	return executorError(apierr.PlanDrift, "SDK did not reconstruct the accepted job")
-}
-
-func (h *sdkCode) replayMembers(snapshot store.RunSnapshot, replay GeneratorReplay) (map[string]bool, error) {
-	for _, accepted := range snapshot.Expansions {
-		if accepted.Source.RunID != snapshot.Run.ID || accepted.Source.NodeID != replay.SourceJob || accepted.SourceGeneration != replay.SourceGeneration {
-			continue
-		}
-		var plan nodeproto.PlanDoc
-		if err := json.Unmarshal(accepted.Body, &plan); err != nil {
-			return nil, executorError(apierr.PlanDrift, "accepted expansion is malformed")
-		}
-		hash, err := h.CanonicalHash(plan)
-		if err != nil {
-			return nil, err
-		}
-		if string(hash) != accepted.BodyHash {
-			return nil, executorError(apierr.PlanDrift, "accepted expansion hash differs from its body")
-		}
-		members := map[string]bool{}
-		for _, job := range plan.Jobs {
-			if executorContains(job.Groups, replay.GeneratorID) {
-				members[job.ID] = true
-			}
-		}
-		return members, nil
-	}
-	return nil, executorError(apierr.PlanDrift, "generator replay has no accepted expansion for its source generation")
 }
 
 func (h *sdkCode) eval(ctx context.Context, session *executorSession, input NodeInput, closure string, payload json.RawMessage) (json.RawMessage, error) {

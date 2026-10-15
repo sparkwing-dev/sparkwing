@@ -17,6 +17,8 @@ func pendingScenarios(t *testing.T, group string) {
 		count++
 		t.Run(scenario.ID, func(t *testing.T) {
 			switch scenario.ID {
+			case "lifecycle-generator-reconstruct-code":
+				t.Run("hermetic-replay", acceptance.CheckGeneratorReplay)
 			case "environment-startup-versus-body":
 				t.Run("hermetic-native-environment-policy", acceptance.CheckSDKEnvironmentProjection)
 			case "protocol-host-layers-risk-cleanup":
