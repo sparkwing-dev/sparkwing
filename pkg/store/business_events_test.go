@@ -7,6 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestBusinessEventsRecordLifecycleSQLite(t *testing.T) {
@@ -37,16 +38,16 @@ func assertBusinessEventsRecordLifecycle(t *testing.T, st *store.Store) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.ReversePayment(ctx, "pi_1", "re_1", "operator", 0); err != nil {
+	if _, err := st.AsOperator().TestOnlyReversePayment(ctx, "pi_1", "re_1", "operator", 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tn.GrantCredits(ctx, store.CreditGrantFree, store.MicroCreditsPerCredit, "promo", "operator"); err != nil {
+	if _, err := tn.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: store.MicroCreditsPerCredit, Reference: "promo", CreatedBy: "operator"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.HoldTeamForDispute(ctx, team, "dp_1", "pi_1", "card holder says fraud", now); err != nil {
+	if _, err := teststore.ForTeam(t, st, team).TestOnlyHoldForDispute(ctx, "dp_1", "pi_1", "card holder says fraud", now); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := st.ReleaseCreditFreezes(ctx, team, "dp_1", "", "", now); err != nil || n != 1 {
+	if n, err := teststore.ForTeam(t, st, team).ReleaseCreditFreezes(ctx, "dp_1", "", "", now); err != nil || n != 1 {
 		t.Fatalf("released = %d, %v", n, err)
 	}
 

@@ -269,13 +269,6 @@ func readOwnBlobReceiptTx(ctx context.Context, tx *storeTx, source blob.UploadId
 	return runspec.Optional[blob.Receipt]{Set: true, Value: blob.Receipt{Identity: source, Digest: digest, CreatedAt: *stateTime(sql.NullInt64{Int64: at, Valid: true})}}, nil
 }
 
-func blobRefScope(ref blob.RefScope) string {
-	if ref.Verified {
-		return ref.Ref
-	}
-	return "manual:" + ref.Ref
-}
-
 func blobKindAllowed(source blob.UploadIdentity, kind blob.Kind) bool {
 	for _, rule := range blob.UploadRules {
 		if rule.IdentityKind == source.Kind && rule.RequiresAttempt == source.Attempt.Set && rule.RequiresUnit == source.Unit.Set && slices.Contains(rule.RecordKinds, kind) {

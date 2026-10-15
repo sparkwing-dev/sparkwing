@@ -131,7 +131,10 @@ func TestConsoleNativeFinanceAndStableWaitlistBatch(t *testing.T) {
 	if err != nil || !freeze.Frozen || len(freeze.Disputes) != 1 {
 		t.Fatalf("freeze: %+v %v", freeze, err)
 	}
-	if _, err := s.HoldTeamForDispute(ctx, "b", "dispute", "", "test", time.Now()); err != nil {
+	if err := s.inTx(ctx, func(tx *storeTx) error {
+		_, err := holdCreditFreezeTx(ctx, tx, "b", "dispute", "", "test", "", tx.now())
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
 	freeze, err = c.ConsoleUnfreeze(ctx, a, "", "resolved")

@@ -15,12 +15,12 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// perf: an output is at most 64 MiB, and the node route's reply is bounded by
-// the server's write timeout anyway.
+// perf: the server write timeout also bounds upstream output replies.
 const upstreamTimeout = 60 * time.Second
 
 const maxUpstreamReply = 1 << 20
@@ -144,14 +144,14 @@ func (c *Claim) fetchOutput(ctx context.Context, grant store.OutputReadGrant) (j
 	if resp.StatusCode != http.StatusOK {
 		return nil, errUpstream
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, store.MaxOutputBytes+1))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, limits.NodeOutputBytes+1))
 	if err != nil {
 		return nil, errUpstream
 	}
 	// safety: the bytes must match the digest the controller recorded at
 	// commit, so an object store serving anything else is refused.
 	sum := sha256.Sum256(data)
-	if int64(len(data)) != grant.Size || hex.EncodeToString(sum[:]) != grant.SHA256 || !json.Valid(data) {
+	if int64(len(data)) > limits.NodeOutputBytes || int64(len(data)) != grant.Size || hex.EncodeToString(sum[:]) != grant.SHA256 || !json.Valid(data) {
 		return nil, errUpstream
 	}
 	return data, nil

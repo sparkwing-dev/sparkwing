@@ -15,7 +15,7 @@ type BootstrapAdminIssuer interface {
 }
 
 // EnsureBootstrapAdminToken sends the mounted presentation to the gated capability issuer.
-func EnsureBootstrapAdminToken(ctx context.Context, issuer CredentialIssuer, raw string) (bool, error) {
+func EnsureBootstrapAdminToken(ctx context.Context, issuer BootstrapAdminIssuer, raw string) (bool, error) {
 	if raw == "" {
 		return false, nil
 	}
@@ -28,9 +28,8 @@ func EnsureBootstrapAdminToken(ctx context.Context, issuer CredentialIssuer, raw
 	if err := capability.ValidateProvisionSeed(spec); err != nil {
 		return false, err
 	}
-	bootstrap, ok := issuer.(BootstrapAdminIssuer)
-	if !ok {
+	if issuer == nil {
 		return false, missingEndpointPolicy()
 	}
-	return bootstrap.EnsureBootstrapCapability(ctx, spec)
+	return issuer.EnsureBootstrapCapability(ctx, spec)
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -67,18 +68,28 @@ func runClaimWait(run RunRow) runspec.Setting[time.Duration] {
 	return run.Request.Request.Options.ClaimWait
 }
 
-const nodeReadColumns = `status,outcome,status_detail,COALESCE(claimed_by,''),capability_prefix,owner_capability_prefix,generation,attempt,disruptions,ready_at,queue_started_at,lease_expires_at,started_at,finished_at,cancel_requested_at,cancel_reason,state_seq,state_digest,state_actor,expansion,expansion_digest,execution_json,spec_json,spec_hash`
+const nodeReadColumns = `status,outcome,status_detail,COALESCE(claimed_by,''),capability_prefix,owner_capability_prefix,generation,attempt,disruptions,ready_at,queue_started_at,lease_expires_at,started_at,finished_at,cancel_requested_at,cancel_reason,state_seq,state_digest,state_actor,expansion,expansion_digest,execution_json,spec_json,spec_hash,output_record,manifest_record`
 
 func readNodeTx(ctx context.Context, tx *storeTx, team Team, ref NodeRef) (NodeRow, error) {
 	v := NodeRow{Ref: ref}
 	var ready, queued, lease, start, finish, cancel sql.NullInt64
-	var actor, execution []byte
-	err := tx.QueryRowContext(ctx, `SELECT `+nodeReadColumns+` FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, ref.RunID, ref.NodeID).Scan(&v.Status, &v.Outcome, &v.StatusDetail, &v.ClaimedBy, &v.CapabilityPrefix, &v.OwnerCapabilityPrefix, &v.Generation, &v.Attempt, &v.Disruptions, &ready, &queued, &lease, &start, &finish, &cancel, &v.CancelReason, &v.StateSeq, &v.StateDigest, &actor, &v.Expansion, &v.ExpansionDigest, &execution, &v.Spec, &v.SpecHash)
+	var actor, execution, output, manifest []byte
+	err := tx.QueryRowContext(ctx, `SELECT `+nodeReadColumns+` FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, ref.RunID, ref.NodeID).Scan(&v.Status, &v.Outcome, &v.StatusDetail, &v.ClaimedBy, &v.CapabilityPrefix, &v.OwnerCapabilityPrefix, &v.Generation, &v.Attempt, &v.Disruptions, &ready, &queued, &lease, &start, &finish, &cancel, &v.CancelReason, &v.StateSeq, &v.StateDigest, &actor, &v.Expansion, &v.ExpansionDigest, &execution, &v.Spec, &v.SpecHash, &output, &manifest)
 	if errors.Is(err, sql.ErrNoRows) {
 		return v, notFound("job", ref.NodeID)
 	}
 	if err != nil {
 		return v, err
+	}
+	for _, part := range []struct {
+		raw []byte
+		key **blob.RecordKey
+	}{{output, &v.OutputRecord}, {manifest, &v.ManifestRecord}} {
+		if len(part.raw) > 0 {
+			if err := json.Unmarshal(part.raw, part.key); err != nil {
+				return v, err
+			}
+		}
 	}
 	if len(actor) > 0 {
 		if err = json.Unmarshal(actor, &v.StateActor); err != nil {

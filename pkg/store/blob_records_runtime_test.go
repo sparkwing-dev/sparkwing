@@ -14,24 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-type fakeBlobRules struct{}
-
-func (fakeBlobRules) RecordNamespace(key blob.RecordKey) (string, error) {
-	b, err := json.Marshal(key.Scope)
-	return string(b), err
-}
-
-func (fakeBlobRules) AuthorizeEdge(e blob.EdgeRequest) error {
-	if e.OwnReceipt.Set && e.OwnReceipt.Value.Identity.Attempt == e.Authority.Attempt && e.OwnReceipt.Value.Identity.CapabilityRef == e.Authority.CapabilityRef && e.OwnReceipt.Value.Digest == e.Digest {
-		return nil
-	}
-	for _, edge := range e.ReadSet.Edges {
-		if edge.Digest == e.Digest && edge.Reader == e.Authority.Attempt.Value {
-			return nil
-		}
-	}
-	return blob.ErrDigestNotReadable
-}
+const fixtureMemoHash = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
 type fakeBlobManifests map[blob.Digest][]blob.Member
 
@@ -48,14 +31,36 @@ func blobRecordFixture(t *testing.T) (*Store, *blobRecords, blob.UploadIntent) {
 	s, tenant, actor, attempt := resultFixture(t)
 	rewriteSchemaExec(t, s.db, "UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'", []byte(`{"id":"job","memo":{}}`))
 	intent := blobIntent(actor, attempt)
+	setBlobRecordRef(t, s, intent.Authority.CapabilityRef)
+	intent.Authority.Ref.Scope.Ref = "main"
 	if _, err := commitTestBlob(t, tenant, intent); err != nil {
 		t.Fatal(err)
 	}
-	return s, &blobRecords{tenant: tenant, rules: fakeBlobRules{}}, intent
+	return s, &blobRecords{tenant: tenant}, intent
+}
+
+func setBlobRecordRef(t *testing.T, s *Store, prefix string) {
+	t.Helper()
+	var body []byte
+	if err := s.db.QueryRow("SELECT authority_json FROM capabilities WHERE prefix=?", prefix).Scan(&body); err != nil {
+		t.Fatal(err)
+	}
+	var record CapabilityRecord
+	if err := json.Unmarshal(body, &record); err != nil {
+		t.Fatal(err)
+	}
+	record.Value.Data.WriteRef = "manual:main"
+	record.Value.Data.ReadRefs = []string{"manual:main"}
+	body, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, s.db, "UPDATE capabilities SET authority_json=?,ref_scope='manual:main' WHERE prefix=?", body, prefix)
+	rewriteSchemaExec(t, s.db, "UPDATE runs SET request_json=? WHERE team='a' AND id='run'", []byte(`{"version":1,"request":{"git":{"ref":"main"}}}`))
 }
 
 func blobOutputRequest(intent blob.UploadIntent) blob.CommitRecordRequest {
-	return blob.CommitRecordRequest{Authority: intent.Authority, Source: intent.Identity, Key: blob.ResultRecordKey(intent.Identity.Attempt.Value, "gh:1", blob.RefScope{}, "ci", blob.KindOutput), Digest: intent.Digest}
+	return blob.CommitRecordRequest{Authority: intent.Authority, Source: intent.Identity, Key: blob.ResultRecordKey(intent.Identity.Attempt.Value, "gh:1", intent.Authority.Ref.Scope, "ci", blob.KindOutput), Digest: intent.Digest}
 }
 
 func addBlobJob(t *testing.T, s *Store, original blob.UploadIntent, id string) blob.UploadIntent {
@@ -138,7 +143,7 @@ func TestBlobRecordsRejectUnrelatedSameRunAndAllowDependency(t *testing.T) {
 	if err != nil || len(presence.Present) != 0 {
 		t.Fatalf("existence oracle: %+v,%v", presence, err)
 	}
-	rewriteSchemaExec(t, s.db, `UPDATE nodes SET status='done',outcome='success',finished_at=1000000000000,claimed_by=NULL,lease_expires_at=NULL,capability_prefix='' WHERE team='a' AND run_id='run' AND node_id='job'`)
+	finishBlobRecordJob(t, records, first)
 	rewriteSchemaExec(t, s.db, `UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='consumer'`, []byte(`{"id":"consumer","deps":["job"]}`))
 	if _, err := records.CommitRecord(t.Context(), request); err != nil {
 		t.Fatal(err)
@@ -159,7 +164,7 @@ func TestBlobRecordsManifestChecksEveryMemberAndKeepsMetadata(t *testing.T) {
 	if _, err := commitTestBlob(t, records.tenant, manifestIntent); err != nil {
 		t.Fatal(err)
 	}
-	key := blob.ResultRecordKey(intent.Identity.Attempt.Value, "gh:1", blob.RefScope{}, "ci", blob.KindManifest)
+	key := blob.ResultRecordKey(intent.Identity.Attempt.Value, "gh:1", intent.Authority.Ref.Scope, "ci", blob.KindManifest)
 	request := blob.CommitRecordRequest{Authority: intent.Authority, Source: intent.Identity, Key: key, Digest: member.ManifestDigest, Members: []blob.Member{member}}
 	if _, err := records.CommitRecord(t.Context(), request); err != nil {
 		t.Fatal(err)
@@ -196,7 +201,7 @@ func TestBlobRecordsMemoCopyAndDepcachePointers(t *testing.T) {
 	if _, err := records.CommitRecord(t.Context(), memo); err != nil {
 		t.Fatal(err)
 	}
-	lookup := blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Pipeline: "ci", Job: "job", Hash: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}}
+	lookup := blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: blob.RefScope{Ref: "main"}, Pipeline: "ci", Job: "job", Hash: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}}
 	hit, err := records.LookupMemo(t.Context(), lookup)
 	if err != nil || !hit.Found || hit.Output.Value != intent.Digest {
 		t.Fatalf("memo=%+v,%v", hit, err)
@@ -209,11 +214,11 @@ func TestBlobRecordsMemoCopyAndDepcachePointers(t *testing.T) {
 	}
 	rewriteSchemaCount(t, s.db, "blob_records", 2)
 	dep := blobOutputRequest(intent)
-	dep.Key = blob.RecordKey{Team: "a", Kind: blob.KindDepcache, Scope: blob.Scope{Repo: "gh:1", Key: "v1"}, Name: "modules"}
+	dep.Key = blob.RecordKey{Team: "a", Kind: blob.KindDepcache, Scope: blob.Scope{Repo: "gh:1", Ref: blob.RefScope{Ref: "main"}, Key: "v1"}, Name: "modules"}
 	if _, err := records.CommitRecord(t.Context(), dep); err != nil {
 		t.Fatal(err)
 	}
-	cache, err := records.LookupDepcache(t.Context(), blob.DepcacheLookup{Authority: intent.Authority, Key: blob.DepcacheKey{Repo: "gh:1", Name: "modules", Key: "v1"}})
+	cache, err := records.LookupDepcache(t.Context(), blob.DepcacheLookup{Authority: intent.Authority, Key: blob.DepcacheKey{Repo: "gh:1", Ref: blob.RefScope{Ref: "main"}, Name: "modules", Key: "v1"}})
 	if err != nil || !cache.Found || cache.Source != blob.RestoreOwnRef || cache.Record.Digest != intent.Digest {
 		t.Fatalf("depcache=%+v,%v", cache, err)
 	}
@@ -240,7 +245,7 @@ func TestBlobRecordsMemoCopyRollsBackBothDestinations(t *testing.T) {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_manifest_copy BEFORE INSERT ON blob_records WHEN NEW.kind='manifest' BEGIN SELECT RAISE(ABORT,'manifest insert unavailable'); END`)
-	request := blob.CopyMemoRequest{Lookup: blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Pipeline: "ci", Job: "job", Hash: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}}, Destination: intent.Identity.Attempt.Value}
+	request := blob.CopyMemoRequest{Lookup: blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: blob.RefScope{Ref: "main"}, Pipeline: "ci", Job: "job", Hash: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}}, Destination: intent.Identity.Attempt.Value}
 	if _, err := records.CopyMemo(t.Context(), request); err == nil {
 		t.Fatal("partial copy accepted")
 	}
@@ -264,7 +269,7 @@ func TestBlobRecordsCacheSurvivesSourceRetention(t *testing.T) {
 	rewriteSchemaExec(t, s.db, "DELETE FROM runs WHERE team='a' AND id='run'")
 	rewriteSchemaCount(t, s.db, "blob_receipts", 0)
 	rewriteSchemaCount(t, s.db, "blob_records", 1)
-	scope, err := records.rules.RecordNamespace(memo.Key)
+	scope, err := blob.RecordNamespace(memo.Key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,5 +311,17 @@ func TestBlobRecordsAuthorizeManifestBeforeReadingBytes(t *testing.T) {
 	request.Digest = other.Digest
 	if _, err := records.CommitRecord(t.Context(), request); !errors.Is(err, blob.ErrDigestNotReadable) || called {
 		t.Fatalf("foreign manifest read: called=%v,err=%v", called, err)
+	}
+}
+
+func finishBlobRecordJob(t *testing.T, records *blobRecords, intent blob.UploadIntent) {
+	t.Helper()
+	records.tenant.s.SetResultBlobRecords(records.manifests)
+	id := intent.Identity.Attempt.Value
+	key := blobOutputRequest(intent).Key
+	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, Holder: "machine", Generation: id.Generation}
+	_, err := records.tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{id.RunID, id.NodeID}, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(id.Attempt), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &key}}})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

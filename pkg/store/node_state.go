@@ -141,6 +141,8 @@ type NodeRow struct {
 	Execution             runspec.JobExecutionSettings
 	Spec                  json.RawMessage
 	SpecHash              string
+	OutputRecord          *blob.RecordKey
+	ManifestRecord        *blob.RecordKey
 }
 
 // NodeAttempt preserves the node-wide ordinal across claims; generation is an attribute of that ordinal.
@@ -471,6 +473,11 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change N
 	row.StateActor = change.Actor
 	if err := writeNodeStateTx(ctx, tx, team, row); err != nil {
 		return Applied{}, err
+	}
+	if !edge.RequestOnly {
+		if err := persistNodeResultSelectorsTx(ctx, tx, team, row, change.Extra.Result); err != nil {
+			return Applied{}, err
+		}
 	}
 	if result := change.Extra.Result; result != nil && !edge.RequestOnly {
 		var failure []byte

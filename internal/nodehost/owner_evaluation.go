@@ -37,6 +37,7 @@ type EvaluationInput struct {
 	GrantedRunner nodeproto.RunnerIdentity
 	RouteBinding  nodeproto.ProcessBinding
 	Replay        []GeneratorReplay
+	Storage       StorageBinding
 }
 
 // EvaluationDependencies connects the evaluator to the same engine, protocol and
@@ -67,8 +68,8 @@ type OwnerEvaluator struct {
 
 // NewOwnerEvaluator requires explicit authority, output and process adapters.
 func NewOwnerEvaluator(deps EvaluationDependencies) (*OwnerEvaluator, error) {
-	if deps.Store == nil || deps.Start == nil || deps.EnsureEngine == nil || deps.ReadOutput == nil || deps.Mask == nil {
-		return nil, errors.New("owner evaluator requires store, process, engine, output and masking adapters")
+	if deps.Store == nil || deps.Start == nil || deps.EnsureEngine == nil || deps.Mask == nil {
+		return nil, errors.New("owner evaluator requires store, process, engine and masking adapters")
 	}
 	if deps.ValidatePlan == nil {
 		deps.ValidatePlan = nodeproto.ValidatePlan
@@ -96,7 +97,7 @@ func (h *OwnerEvaluator) Expand(ctx context.Context, input EvaluationInput) (jso
 	if row.Generation < 0 || row.Status != store.StatusDone || (row.Outcome != store.NodeSuccess && row.Outcome != store.NodeMemoized) || row.Expansion != store.ExpansionExpected || len(job.Closures.Generate) == 0 {
 		return nil, nil, executorError(apierr.IllegalTransition, "expansion requires a successful source with expected generators")
 	}
-	output, err := h.deps.ReadOutput(ctx, row.Ref, row.Generation)
+	output, err := h.readResult(ctx, row, input.Storage)
 	if err == nil && !json.Valid(output) {
 		err = executorError(apierr.ProtocolError, "generator source output is missing or invalid JSON")
 	}

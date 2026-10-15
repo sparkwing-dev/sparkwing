@@ -20,7 +20,7 @@ func (s *Server) dashboardRead(read func(backend.Backend) http.HandlerFunc, clas
 		if err != nil {
 			return engineLookupError(err)
 		}
-		b := backend.NewStoreBackend(s.store, s.dashboardPaths(), s.dashboardLogs(tenant.Team())).Scoped(tenant, liveLogReader{s.liveLogs})
+		b := backend.NewStoreBackend(s.store, s.dashboardPaths(), s.dashboardLogs(tenant, engineActor(a))).Scoped(tenant, liveLogReader{s.liveLogs})
 		r.SetPathValue("id", a.Target.RunID)
 		r.SetPathValue("node", a.Target.NodeID)
 		handler := read(b)
@@ -57,7 +57,7 @@ func (s *Server) dashboardPaths() paths.Paths {
 
 // safety: a laptop dashboard reads the runs on its own disk, so a nil store there sends reads to the run
 // directories; elsewhere nil means a controller with nowhere to keep segments, so a read finds no log.
-func (s *Server) dashboardLogs(team store.Team) storage.LogStore {
+func (s *Server) dashboardLogs(tenant *store.Tenant, actor store.Actor) storage.LogStore {
 	if s.dashboard != nil && s.dashboard.Local {
 		return nil
 	}
@@ -65,7 +65,7 @@ func (s *Server) dashboardLogs(team store.Team) storage.LogStore {
 	if objs == nil {
 		return nil
 	}
-	return segmentLogs{s: s, team: team, objs: objs}
+	return segmentLogs{records: tenant, actor: actor, live: s.liveLogs, objs: objs}
 }
 
 type liveLogReader struct{ l *liveLogs }

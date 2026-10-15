@@ -27,7 +27,7 @@ func TestClaimLaunch_ReservesAtTheClaimAndBillsFromTheFirstRenewal(t *testing.T)
 	}
 	intake(t, team, "run-launch-bill", "korey", "probe")
 	granted := int64(100 * store.MicroCreditsPerCent)
-	if _, err := team.GrantCredits(ctx, store.CreditGrantPaid, granted, "pay_launch_bill", "admin"); err != nil {
+	if _, err := team.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: granted, Reference: "pay_launch_bill", CreatedBy: "admin"}); err != nil {
 		t.Fatal(err)
 	}
 	balance := func() int64 {

@@ -28,7 +28,7 @@ func TestBlobRecordsLookupCannotBorrowAnotherRecordsDigestAuthority(t *testing.T
 func TestBlobRecordsMemoRequiresDeclaredMemoization(t *testing.T) {
 	s, records, intent := blobRecordFixture(t)
 	request := blobOutputRequest(intent)
-	request.Key.Kind, request.Key.Name, request.Key.Scope.Key = blob.KindMemo, "output", "input-hash"
+	request.Key.Kind, request.Key.Name, request.Key.Scope.Key = blob.KindMemo, "output", fixtureMemoHash
 	if _, err := records.CommitRecord(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestBlobRecordsMemoRequiresDeclaredMemoization(t *testing.T) {
 	if _, err := records.CommitRecord(t.Context(), request); !errors.Is(err, blob.ErrDigestNotReadable) {
 		t.Fatalf("undeclared memo write: %v", err)
 	}
-	lookup := blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: request.Key.Scope.Repo, Ref: request.Key.Scope.Ref, Pipeline: "ci", Job: "job", Hash: "input-hash"}}
+	lookup := blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: request.Key.Scope.Repo, Ref: request.Key.Scope.Ref, Pipeline: "ci", Job: "job", Hash: fixtureMemoHash}}
 	if _, err := records.LookupMemo(t.Context(), lookup); !errors.Is(err, blob.ErrDigestNotReadable) {
 		t.Fatalf("undeclared memo lookup: %v", err)
 	}

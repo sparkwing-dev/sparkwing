@@ -95,12 +95,8 @@ func TestManualRetryPreservesOnlyItsTeamsGithubRepositoryID(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			repoID, err := st.TriggerRepoID(ctx, "acme", "retry")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if repoID != tc.want {
-				t.Errorf("retry repository ID = %d, want %d", repoID, tc.want)
+			if trig.GithubRepoID != tc.want {
+				t.Errorf("retry repository ID = %d, want %d", trig.GithubRepoID, tc.want)
 			}
 			if trig.Team != "acme" || trig.GithubOwner != source.GithubOwner || trig.GithubRepo != source.GithubRepo || trig.GitSHA != source.GitSHA || trig.RetryOf != source.ID {
 				t.Fatalf("retry lost source metadata: %+v", trig)

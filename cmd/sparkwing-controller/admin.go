@@ -110,7 +110,7 @@ func runAdmin(args []string, stdout, stderr io.Writer) error {
 		}
 		changed = []string{id}
 	case holdID != "":
-		n, err := st.ReleaseCreditFreezes(ctx, t.Team(), holdID, breakGlassActor, why, now)
+		n, err := t.ReleaseCreditFreezes(ctx, holdID, breakGlassActor, why, now)
 		if err != nil {
 			return err
 		}

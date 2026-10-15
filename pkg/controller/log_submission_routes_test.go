@@ -24,6 +24,7 @@ import (
 type logHTTPObjects struct {
 	blob.ObjectBackend
 	signed []string
+	reads  int
 	bytes  map[string][]byte
 }
 
@@ -32,6 +33,7 @@ func (o *logHTTPObjects) SignLogPut(_ context.Context, key string, _ time.Time) 
 	return "https://objects.invalid/" + key, map[string]string{"If-None-Match": "*"}, nil
 }
 func (o *logHTTPObjects) Get(_ context.Context, key string) (io.ReadCloser, error) {
+	o.reads++
 	body, ok := o.bytes[key]
 	if !ok {
 		return nil, blob.ErrNotFound
@@ -77,8 +79,8 @@ func TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject(t *testing.T) 
 	}
 	objects.bytes[key] = compressed.Bytes()
 	digest := sha256.Sum256(compressed.Bytes())
-	first := store.Segment{Index: 1, Size: int64(len(plain)), Digest: hex.EncodeToString(digest[:])}
-	second := store.Segment{Index: 2, Offset: int64(len(plain)), Size: int64(len(plain)), Digest: first.Digest}
+	first := store.Segment{Index: 1, Size: int64(len(plain)), StoredBytes: int64(compressed.Len()), Digest: hex.EncodeToString(digest[:])}
+	second := store.Segment{Index: 2, Offset: int64(len(plain)), Size: int64(len(plain)), StoredBytes: int64(compressed.Len()), Digest: first.Digest}
 	secondKey, err := blob.LogObjectKey(subject, batch.RetentionClass, 2)
 	if err != nil {
 		t.Fatal(err)

@@ -51,8 +51,9 @@ dispute holds and closed-dispute outcomes keep the existing ledger rules.
 Unknown payments must never become metadata-selected grants. Checkout and
 payment-intent events for one payment must not credit it twice. W2's shared
 HTTP route forwards VerifiedPaymentEvent and acknowledges only after commit.
-The existing Store implementation refuses non-checkout kinds. No fallback to
-raw financial methods is added.
+Store.SettlePayment dispatches non-checkout kinds through W1b's transaction
+owners. Their final receipt/correlation schema and trusted setup association
+writer remain W1 integration work. No raw financial fallback is added.
 
 ProvisionSpec gains Seed, excluded from JSON in both directions.
 ValidateProvisionSeed permits a supplied presentation only for
@@ -60,7 +61,7 @@ ProvisionBootstrap and only in the strict swk_ reference encoding. W1 must call
 it in Issue and reject a supplied seed on every other origin.
 controller.BootstrapAdminIssuer declares
 EnsureBootstrapCapability(ctx, ProvisionSpec) (created bool, error).
-EnsureBootstrapAdminToken now accepts context, CredentialIssuer and raw seed.
+EnsureBootstrapAdminToken accepts context, BootstrapAdminIssuer and raw seed.
 It fixes the unbound operator subject bootstrap:admin and grants only
 operator.tokens, operator.limits and operator.object_store. It forwards no
 caller clock and never calls the legacy token table. Empty input is a no-op.
@@ -75,8 +76,8 @@ topology evidence remain with the acceptance driver.
 
 EnableAuthFromStore always installs credential verification. It no longer
 consults ListTokens or opens legacy private routes when that read is empty or
-fails. The remaining legacy credential verifier still needs its final route
-cut. The controller's --require-auth readiness check consumes
+fails. The legacy credential verifier and routes are removed. The controller's
+--require-auth readiness check consumes
 HasDeploymentAdministrator(ctx) (bool, error), refusing a missing reader.
 Store implements that read under its store clock with complete live ancestry.
 A deployment administrator is an unbound controller operator/service capability
@@ -93,6 +94,23 @@ then strips bearer material from a copied response. Operator.ReadLauncherSync no
 use the default-tenant local snapshot. Authority-bearing local mutations remain
 C1 integration work.
 No native launcher or peer matrix cell is inferred from those component tests.
+
+
+### Native log read composition
+
+Log signing, commits and dashboard reads use the configured data object backend.
+Reads retain the shared engine actor projection, including the authenticated
+holder and generation. Store.ReadLogSegments rechecks current authority before
+physical I/O. A refused request produces no log bytes and no egress charge.
+Stream responses use Cache-Control: no-store. HEAD remains unregistered.
+Segment commits carry decoded Size separately from compressed StoredBytes and
+Digest. Both byte counts participate in immutable replay.
+
+The retained egress tests now use native awards, sealed account sessions and
+committed tagged segments. Generated mutations cover foreign paths, stale
+holder/generation, unknown presentations and membership loss. Native root
+revocation prevents the next read before object I/O. The object bytes are fake
+in these HTTP tests. Native topology evidence remains with T1.
 
 ### Legacy execution credential cut
 

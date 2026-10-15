@@ -13,7 +13,7 @@ import (
 )
 
 func (h *sdkCode) recordedReplay(ctx context.Context, input NodeInput, initial []nodeproto.JobSpec) ([]GeneratorReplay, error) {
-	if h.ReadOutput == nil {
+	if h.ReadOutput == nil && (input.Storage.Bytes == nil || input.Storage.Records == nil) {
 		return nil, executorError(apierr.PlanDrift, "generated reconstruction requires authorized ancestor outputs")
 	}
 	snapshot, err := h.Store.ReadSnapshot(ctx, input.Accepted.RunID)
@@ -88,7 +88,8 @@ func (h *sdkCode) recordedReplay(ctx context.Context, input NodeInput, initial [
 		if cause := context.Cause(ctx); cause != nil {
 			return nil, cause
 		}
-		replay[i].Output, err = h.ReadOutput(ctx, store.NodeRef{RunID: input.Accepted.RunID, NodeID: replay[i].SourceJob}, replay[i].SourceGeneration)
+		row, _ := ownerNode(snapshot, replay[i].SourceJob)
+		replay[i].Output, err = h.readResult(ctx, row, input.Storage)
 		if err != nil {
 			return nil, err
 		}

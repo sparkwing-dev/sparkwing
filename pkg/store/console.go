@@ -127,7 +127,7 @@ func (c *Console) ConsoleFreeze(ctx context.Context, a capability.Authorized, re
 		if err != nil {
 			return TeamCreditFreeze{}, err
 		}
-		if _, err := holdTeamTx(ctx, tx, t.team, OperatorHoldPrefix+id, "", reason, actor, tx.now()); err != nil {
+		if _, err := holdCreditFreezeTx(ctx, tx, t.team, OperatorHoldPrefix+id, "", reason, actor, tx.now()); err != nil {
 			return TeamCreditFreeze{}, err
 		}
 		return teamCreditFreezeTx(ctx, tx, t.team)
@@ -146,7 +146,7 @@ func (c *Console) ConsoleUnfreeze(ctx context.Context, a capability.Authorized, 
 			return TeamCreditFreeze{}, err
 		}
 		hold = strings.TrimSpace(hold)
-		count, err := releaseFreezesTx(ctx, tx, t.team, hold, hold == "", actor, reason, tx.now())
+		count, err := releaseCreditFreezesTx(ctx, tx, t.team, hold, hold == "", actor, reason, tx.now())
 		if err != nil {
 			return TeamCreditFreeze{}, err
 		}

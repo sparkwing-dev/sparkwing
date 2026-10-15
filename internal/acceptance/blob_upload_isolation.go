@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -22,7 +24,7 @@ func CheckBlobUploadIsolation(ctx context.Context, root string, objects blob.Obj
 		return err
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
-	request, err := seedStorePresenceAttempts(ctx, s.DB())
+	request, err := teststore.SeedPresence(ctx, s.DB())
 	if err != nil {
 		return err
 	}

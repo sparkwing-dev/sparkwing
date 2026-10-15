@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"reflect"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
@@ -38,7 +39,7 @@ func (s *Server) submissionObjects() (logSubmissionObjects, error) {
 			return objects, nil
 		}
 	}
-	return nil, errLogsUnavailable
+	return nil, &apierr.Error{Code: apierr.Unavailable, Message: "log storage is not configured"}
 }
 
 func (s *Server) logSubmission(r *http.Request, a capability.Authorized, proposed blob.LogSubject) (*store.Tenant, blob.LogSubject, error) {
@@ -201,7 +202,7 @@ func (s *Server) handleLiveLogSubmission(w http.ResponseWriter, r *http.Request,
 		node = subject.Attempt.NodeID
 	}
 	if s.liveLogs == nil {
-		return errLogsUnavailable
+		return &apierr.Error{Code: apierr.Unavailable, Message: "log storage is not configured"}
 	}
 	attemptID := hex.EncodeToString(sum[:])
 	if subject.Attempt != nil {

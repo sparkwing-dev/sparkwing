@@ -48,7 +48,7 @@ func (f consoleStoreFake) ConsoleUnfreeze(ctx context.Context, a capability.Auth
 		return store.TeamCreditFreeze{}, err
 	}
 	if hold != "" {
-		_, err = f.store.ReleaseCreditFreezes(ctx, tenant.Team(), hold, a.Principal.Capability.Subject.ID, reason, time.Now())
+		_, err = tenant.ReleaseCreditFreezes(ctx, hold, a.Principal.Capability.Subject.ID, reason, time.Now())
 	} else {
 		_, err = tenant.ReleaseOperatorHolds(ctx, a.Principal.Capability.Subject.ID, reason, time.Now())
 	}

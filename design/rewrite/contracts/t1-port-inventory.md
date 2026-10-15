@@ -19,6 +19,35 @@ pending. This adds no archived source-function port identity.
 
 # Acceptance test port inventory
 
+## W1b raw cancellation writer retirement
+
+`TestMeteredUnpricedClaimLeavesWorkUnchanged` replaces
+`TestFailNodeForUnpricedClassEndsTheNodeWithAnEvent`. Named and queued claims on
+runner and Cloud paths refuse an unpriced resource request without changing the
+job, balance, attempts, events or billing rows. The uncalled cancellation writer
+and its separate event kind are removed. Final terminal changes require the
+state machine's current actor and attempt fence.
+
+`TestPaymentDeclineHoldsPrepaidClaimsUntilCollectionSucceeds` replaces
+`TestADeclineHoldsATeamWithPrepaidBalanceAtNew`. It submits trusted failure and
+success facts through the provider settlement owner, binds the retry through
+RecordAttemptIntent, and exercises the real ClaimUnit refusal while the team has
+prepaid credit. The hold lowers billing trust until collection succeeds. Event
+receipts commit with the outcomes. Provider verification and final payment schema
+remain contract fixtures.
+
+`TestMeteredFailureReportSettlesAndReleasesClaimProperty` replaces
+`TestCancelNodeForExhaustedCreditsFailsAndReleasesTheNode`,
+`TestCancelNodeForComputeLimitFailsTheNodeAndReleasesTheClaim` and
+`TestStaleCancellationSettlesAtTheExecutionStart`. It exercises real capability
+issuance, terminal transitions and settlement for runner and Cloud claims,
+before and after execution starts. It checks persisted failure reasons, claim
+release, closed compute intervals, nonnegative settlement, exact replay and
+refusal of changed replay. Job and attempt finish times use the store clock
+and cannot precede execution. Unstarted Cloud claims refund their reservation.
+This ports result persistence and settlement. Renewal-time exhaustion and grace
+remain separate integration requirements.
+
 W2 runner-observation ports: the five tests in agents_test.go move to
 TestRunnerInventoryHTTPUsesCommittedSnapshot,
 TestRunnerInventoryHTTPNameProperty, TestRunnerInventoryHTTPTenantProperty,
@@ -1591,3 +1620,21 @@ TestAuthenticationCancellationIntentPrecedenceProperty covers separate job/run
 intent. TestControllerClaimProjectsOnlyItsCurrentAttemptProperty keeps controller
 holder generations and process attempt fences distinct. No native topology
 matrix cell is inferred from these component and in-process HTTP checks.
+
+
+### W2 native log egress continuation
+
+The eight tests in pkg/controller/egress_test.go replace their token-table and
+retired node-route fixtures with native awards, account sessions and committed
+log segments. They retain separate readers, authentication before byte delivery,
+bodyless refusal accounting, download/stream slots, daily alarm privacy, and
+caller-header isolation. HEAD is refused by the final router. The old live and
+dashboard stream aliases stay removed and share one final job-log stream route.
+Canonical rate_limited envelopes replace the retired flat egress error shape.
+
+TestNativeLogReadAuthorityProperty generates foreign paths, stale holders and
+generations, unknown presentations and membership loss. TestNativeLogReadEndsWithItsRoot
+uses the store's real revocation transaction. Both refuse before physical I/O or
+egress charging. Physical object bytes are fake. No native topology matrix cell
+is claimed by these HTTP components. The merged legacy launch-release test stays
+deleted, with the native release coverage listed above.

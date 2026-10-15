@@ -219,21 +219,6 @@ func finishBillableIntervalTx(ctx context.Context, tx *storeTx, team Team, reser
 
 type billingCalculator func(capability.BillingProvenance, []capability.BillableInterval) (capability.BillingSettlement, error)
 
-// safety: transitions pass the persisted lease lapse on disruption, never the later reaper clock.
-// Calculation reads durable awards and intervals even after the claimant or run has been pruned.
-func settleBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservation string, through time.Time) (capability.BillingSettlement, error) {
-	return settleBillingAwardWithTx(ctx, tx, team, reservation, through, capability.SettleBilling)
-}
-
-func settleBillingAwardWithTx(ctx context.Context, tx *storeTx, team Team, reservation string, through time.Time, calculate billingCalculator) (capability.BillingSettlement, error) {
-	return accountBillingAwardTx(ctx, tx, team, reservation, through, true, calculate)
-}
-
-// safety: renewal charges elapsed compute in its lease transaction without closing the interval.
-func chargeBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservation string, through time.Time) (capability.BillingSettlement, error) {
-	return accountBillingAwardTx(ctx, tx, team, reservation, through, false, capability.SettleBilling)
-}
-
 func accountBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservation string, through time.Time, final bool, calculate billingCalculator) (capability.BillingSettlement, error) {
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return capability.BillingSettlement{}, err

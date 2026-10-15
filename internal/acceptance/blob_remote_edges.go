@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -19,7 +21,7 @@ func CheckBlobRemoteCacheEdges(ctx context.Context, root string) (err error) {
 		return err
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
-	request, err := seedStoreCacheScopeBoundary(ctx, s.DB())
+	request, err := teststore.SeedCacheScope(ctx, s.DB())
 	if err != nil {
 		return err
 	}
