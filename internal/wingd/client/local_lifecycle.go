@@ -8,11 +8,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
-// NewLocalLifecycle reuses the elected controller through its authenticated
-// admission socket, or starts runtime in this process when no owner is present.
-// The supplied runtime must already be bound to home.
-// It never spawns or replaces a process. Empty start options use the bound home;
-// another home is refused before querying or changing an owner.
+// NewLocalLifecycle starts the controller detached, reserving runtime for standalone execution.
 func NewLocalLifecycle(home string, runtime wingd.LocalRuntime, units wingd.ManagedUnitManager) (wingd.LocalLifecycle, error) {
 	if runtime == nil {
 		return nil, errors.New("wingd/client: local controller runtime is required")
@@ -21,7 +17,7 @@ func NewLocalLifecycle(home string, runtime wingd.LocalRuntime, units wingd.Mana
 	if err != nil {
 		return nil, err
 	}
-	return newOwnerLifecycle(home, runtime, units, localOwnerClient{home: home}), nil
+	return newProcessLifecycle(home, runtime, units, localOwnerClient{home: home}, ensureLocalProcess), nil
 }
 
 type controllerOwner interface {
@@ -55,7 +51,7 @@ type ownerLifecycle struct {
 	home string
 }
 
-func newOwnerLifecycle(home string, runtime wingd.LocalRuntime, units wingd.ManagedUnitManager, owner controllerOwner) wingd.LocalLifecycle {
+func newOwnerLifecycle(home string, runtime wingd.LocalRuntime, units wingd.ManagedUnitManager, owner controllerOwner) *ownerLifecycle {
 	return &ownerLifecycle{LocalLifecycle: wingd.NewLocalLifecycle(&ownerRuntime{local: runtime, owner: owner}, units), home: home}
 }
 

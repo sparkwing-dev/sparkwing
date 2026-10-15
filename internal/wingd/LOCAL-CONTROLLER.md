@@ -162,26 +162,26 @@ error, including cancellation during the switch from handshake to readiness.
 The handshake has the existing probe budget. Readiness follows the caller's
 context because dashboard startup can take longer than a health probe.
 
-`client.NewLocalLifecycle` composes these operations with an in-process runtime.
-It reuses a ready owner, promotes stay, starts the dashboard and drains the
-elected process. The adapter binds one home before any owner query. An empty
-start Home selects that bound home. Another home is refused before mutation.
-Standalone refuses an existing owner. Status and version skew never cause a
-takeover, and unreachable, stalled or unsupported owners remain errors.
+`client.NewLocalLifecycle` reuses a ready owner or starts the captured absolute
+executable through `wingd supervise --home HOME --version VERSION`. Its
+`wingd run` child owns the controller. Startup uses the admission client's shared
+start claim and election checks, with takeover disabled. Readiness requires the
+local controller status to report running within the existing startup budget.
+The request can finish while that detached process continues hosting other runs.
 
-An absent owner delegates startup to the in-process runtime. If another process
-wins the election, the lifecycle joins its own startup cleanup before querying
-and reusing the ready winner. A winner still starting returns the election
-error, so the caller can retry readiness. A joined cleanup failure remains an
-error. Startup success requires the owner to remain ready after stay promotion.
-Starting or draining local processes keep lifecycle operations until cleanup
-finishes, even though they no longer report ready.
+The adapter binds one home before any owner query. An empty start Home selects
+that bound home. Another home is refused before mutation. It promotes stay,
+attaches the dashboard and drains the elected process through the authenticated
+socket. Status retains installed-unit information. Unreachable, stalled or
+unsupported owners remain errors. Version skew does not replace a ready owner.
 
-The adapter supplies process composition without a detached launcher. The CLI
-must use it with the shared-controller factory and supply detached startup once
-its argument contract is defined. The admission spawner uses the declared
-`wingd supervise` entrypoint. Its `wingd run` child still lacks the shared
-controller factory needed for startup.
+Standalone uses the supplied in-process runtime and refuses an existing owner.
+If another process wins its election, the lifecycle joins local cleanup before
+querying the winner. A joined cleanup failure remains an error. Starting or
+draining local processes retain lifecycle operations until cleanup finishes.
+
+The foreground `wingd run` child still needs the shared state, HTTP and native
+host services supplied through `localcontroller.Config.Bind`.
 `NewLocalRuntime` refuses a foreign election before opening its store. Windows
 transport still refuses API access when it cannot supply a client SID.
 
