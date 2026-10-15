@@ -3472,18 +3472,6 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) (out [][2]string, err
 	return pairs, nil
 }
 
-func (s *Store) failExpiredNodeClaims(ctx context.Context) ([][2]string, error) {
-	recoveries, err := s.recoverExpiredNodeClaims(ctx)
-	if err != nil {
-		return nil, err
-	}
-	pairs := make([][2]string, 0, len(recoveries))
-	for _, recovery := range recoveries {
-		pairs = append(pairs, [2]string{recovery.RunID, recovery.NodeID})
-	}
-	return pairs, nil
-}
-
 // Event is one audit/wire record for a run; Seq is per-run monotonic.
 type Event struct {
 	RunID   string          `json:"run_id"`
@@ -4118,34 +4106,6 @@ func (t *Tenant) endTriggerClaim(ctx context.Context, id string, refundAll bool,
 	return true, nil
 }
 
-// FinishLapsedClaim closes out a claimed trigger whose lease expired and whose
-// run ended under that same claim, reporting false without writing when it did
-// not. A re-dispatch inherits the previous attempt's terminal run row, so a run
-// that ended before this claim began says nothing about the dispatch holding it.
-func (s *Store) FinishLapsedClaim(ctx context.Context, id string) (bool, error) {
-	var team string
-	err := s.queryRow(ctx, `SELECT team FROM triggers WHERE id = ?`, id).Scan(&team)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return (&Tenant{s: s, team: Team(team)}).endTriggerClaim(ctx, id, false,
-		`UPDATE triggers SET status = CASE WHEN EXISTS
-		   (SELECT 1 FROM runs WHERE runs.id = triggers.id AND runs.status = 'failed')
-		   THEN 'failed' ELSE 'done' END, lease_expires_at = NULL
-		  WHERE id = ? AND status = ?
-		    AND lease_expires_at IS NOT NULL AND lease_expires_at < ?
-		    AND claimed_at IS NOT NULL
-		    AND EXISTS (SELECT 1 FROM runs
-		                 WHERE runs.id = triggers.id
-		                   AND runs.finished_at IS NOT NULL
-		                   AND runs.finished_at > triggers.claimed_at
-		                   AND `+runTerminalIn+`)`,
-		id, triggerStatusClaimed, time.Now().UnixNano())
-}
-
 // FinishRunAtGeneration writes a run's terminal status only while seq is
 // still its trigger's current claim generation.
 //
@@ -4190,36 +4150,6 @@ func (t *Tenant) FinishRunAtGeneration(ctx context.Context, runID string, seq in
 		return false, err
 	}
 	return true, nil
-}
-
-// ListExpiredClaims returns the ids of claimed triggers whose lease has
-// lapsed, without changing anything.
-//
-// It is deliberately a read. ReapExpiredTriggers flips every lapsed
-// claim straight back to pending, which is the right move for a cluster
-// worker but not for a local consumer: a lapsed lease there can mean a
-// dead dispatch or merely a suspended laptop, and the caller has to look
-// at the run row -- and at what it is executing itself -- before
-// deciding. Separating the observation from the action is what lets that
-// judgment happen.
-func (s *Store) ListExpiredClaims(ctx context.Context) ([]string, error) {
-	rows, err := s.query(ctx,
-		`SELECT id FROM triggers
-		  WHERE status = ? AND lease_expires_at IS NOT NULL AND lease_expires_at < ?`,
-		triggerStatusClaimed, time.Now().UnixNano())
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
 }
 
 // RequeueUnstartedClaim returns a lapsed claim to the pending queue only
@@ -4822,73 +4752,6 @@ func (t *Tenant) FinishTrigger(ctx context.Context, id string) error {
 		return err
 	}
 	return ErrLockHeld
-}
-
-func (s *Store) reapTimedOutApprovals(ctx context.Context) ([][2]string, error) {
-	now := time.Now()
-	nowNS := now.UnixNano()
-	controlled, err := s.timeOutControllerApprovals(ctx, now)
-	if err != nil {
-		return controlled, err
-	}
-
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	rows, err := tx.QueryContext(ctx, `
-		SELECT run_id, node_id FROM approvals
-		WHERE resolved_at IS NULL
-		  AND timeout_ms > 0
-		  AND requested_at + (timeout_ms * 1000000) < ?
-		  AND NOT EXISTS (SELECT 1 FROM nodes n WHERE n.team = approvals.team
-		      AND n.run_id = approvals.run_id AND n.node_id = approvals.node_id AND n.kind = ?)
-	`, nowNS, nodeKindApproval)
-	if err != nil {
-		return nil, err
-	}
-	var pairs [][2]string
-	for rows.Next() {
-		var rid, nid string
-		if err := rows.Scan(&rid, &nid); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		pairs = append(pairs, [2]string{rid, nid})
-	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if len(pairs) == 0 {
-		return controlled, nil
-	}
-
-	for _, p := range pairs {
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE approvals
-			   SET resolved_at = ?,
-			       resolution  = ?,
-			       approver    = ?,
-			       comment     = ?
-			 WHERE run_id = ? AND node_id = ?
-			   AND resolved_at IS NULL
-		`,
-			nowNS,
-			ApprovalResolutionTimedOut,
-			"controller-reaper",
-			"timeout enforced by controller (orchestrator silent past timeout_ms)",
-			p[0], p[1],
-		); err != nil {
-			return nil, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return append(controlled, pairs...), nil
 }
 
 // ListPendingTriggersForParent returns every pending trigger whose

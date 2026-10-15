@@ -805,6 +805,10 @@ func checkApprovalEdgeTx(ctx context.Context, tx *storeTx, team Team, row NodeRo
 	if change.Extra.Approval != nil {
 		comment = change.Extra.Approval.Comment
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE approvals SET resolved_at=?,resolution=?,approver=?,comment=? WHERE team=? AND run_id=? AND node_id=? AND resolved_at IS NULL`, now.UnixNano(), resolution, change.Actor.Authority.ID, comment, team, row.Ref.RunID, row.Ref.NodeID)
+	approver := change.Actor.Authority.ID
+	if change.Actor.Kind == ActorReaper {
+		approver = change.Actor.Owner.Holder
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE approvals SET resolved_at=?,resolution=?,approver=?,comment=? WHERE team=? AND run_id=? AND node_id=? AND resolved_at IS NULL`, now.UnixNano(), resolution, approver, comment, team, row.Ref.RunID, row.Ref.NodeID)
 	return err
 }

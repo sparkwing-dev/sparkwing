@@ -3,7 +3,6 @@ package warmpool
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -433,67 +432,6 @@ func TestRunnerCancellationDuringMarkReadyReportsCancelled(t *testing.T) {
 	}
 	if node.ReadyAt != nil {
 		t.Fatalf("ready_at = %v, want revoked on cancellation", node.ReadyAt)
-	}
-	if fallback.calls.Load() != 0 {
-		t.Fatalf("fallback calls = %d, want 0", fallback.calls.Load())
-	}
-}
-
-func TestRunnerObservesExpiredClaimFailure(t *testing.T) {
-	st, ctrl, cleanup := newWarmPoolFixture(t, nil, nil)
-	defer cleanup()
-	fallback := &fallbackRunner{}
-	r := New(ctrl, fallback, Config{
-		PollInterval:      time.Millisecond,
-		ClaimWaitTimeout:  time.Second,
-		HeartbeatInterval: time.Millisecond,
-	}, quietTestLogger())
-
-	done := make(chan runner.Result, 1)
-	go func() {
-		done <- r.RunNode(context.Background(), runner.Request{RunID: "run-1", NodeID: "build"})
-	}()
-	claimDeadline := time.After(time.Second)
-	for {
-		node, err := st.ClaimNextReadyNode(context.Background(), store.ClaimIdentity{
-			Principal:   "offline-server",
-			TokenPrefix: "swr_offline-server",
-		}, "agent:offline-server", time.Minute, nil)
-		if err == nil {
-			if node.NodeID != "build" {
-				t.Fatalf("claimed node = %q, want build", node.NodeID)
-			}
-			break
-		}
-		if !errors.Is(err, store.ErrNotFound) {
-			t.Fatal(err)
-		}
-		select {
-		case <-claimDeadline:
-			t.Fatal("node did not become ready for the remote executor")
-		case <-time.After(time.Millisecond):
-		}
-	}
-	if _, err := st.DB().ExecContext(context.Background(),
-		`UPDATE nodes SET lease_expires_at = ? WHERE run_id = ? AND node_id = ?`,
-		time.Now().Add(-time.Second).UnixNano(), "run-1", "build"); err != nil {
-		t.Fatalf("expire remote claim: %v", err)
-	}
-	pairs, err := store.Maintenance.FailExpiredNodeClaims(st, context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(pairs) != 1 {
-		t.Fatalf("expired claims = %v, want run-1/build", pairs)
-	}
-
-	select {
-	case result := <-done:
-		if result.Outcome != sparkwing.Failed || result.Err == nil || result.Err.Error() != "runner heartbeat expired" {
-			t.Fatalf("result = %+v, want bounded agent-lost failure", result)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("runner did not observe expired claim failure")
 	}
 	if fallback.calls.Load() != 0 {
 		t.Fatalf("fallback calls = %d, want 0", fallback.calls.Load())

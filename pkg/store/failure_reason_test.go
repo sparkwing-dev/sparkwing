@@ -115,36 +115,4 @@ func TestFinishNode_LeavesReasonEmpty(t *testing.T) {
 	}
 }
 
-func TestFailExpiredNodeClaims_TerminatesWithAgentLost(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	seedRunAndNode(t, s, "run-1", "node-a")
-	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "runner-principal", TokenPrefix: "swr_runner-principal"}, "pod-dead", 1*time.Millisecond, nil); err != nil {
-		t.Fatal(err)
-	}
-	expireNodeClaim(t, s, "run-1", "node-a")
-
-	pairs, err := store.Maintenance.FailExpiredNodeClaims(s, ctx)
-	if err != nil {
-		t.Fatalf("FailExpiredNodeClaims: %v", err)
-	}
-	if len(pairs) != 1 || pairs[0] != [2]string{"run-1", "node-a"} {
-		t.Fatalf("unexpected pairs: %v", pairs)
-	}
-
-	n, _ := s.GetNode(ctx, "run-1", "node-a")
-	if n.Status != "done" || n.Outcome != "failed" {
-		t.Fatalf("expected terminal failed; got status=%q outcome=%q", n.Status, n.Outcome)
-	}
-	if n.FailureReason != store.FailureAgentLost {
-		t.Fatalf("expected agent_lost, got %q", n.FailureReason)
-	}
-	if n.ClaimedBy != "" || n.LeaseExpiresAt != nil {
-		t.Fatalf("claim not cleared after termination: claimed_by=%q lease=%v", n.ClaimedBy, n.LeaseExpiresAt)
-	}
-}
-
 var _ sql.NullInt64 = sql.NullInt64{}
