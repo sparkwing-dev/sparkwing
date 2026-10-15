@@ -1300,18 +1300,6 @@ func (c *Client) RevokeNodeReady(ctx context.Context, runID, nodeID string) (boo
 	return resp.Revoked, nil
 }
 
-// FinalizeNodeReady takes an unclaimed node back from the queue once its claim
-// round has run out, so the dispatcher's own fallback may run it.
-func (c *Client) FinalizeNodeReady(ctx context.Context, runID, nodeID string) (store.ClaimRoundResult, error) {
-	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/finalize-ready",
-		url.PathEscape(runID), url.PathEscape(nodeID))
-	var resp store.ClaimRoundResult
-	if err := c.post(ctx, path, nil, http.StatusOK, &resp); err != nil {
-		return store.ClaimRoundResult{}, err
-	}
-	return resp, nil
-}
-
 // HeartbeatNodeClaim extends the claim lease for holderID, optionally
 // refreshing the box's advertised headroom. ErrLockHeld when the caller
 // isn't the current claim holder.

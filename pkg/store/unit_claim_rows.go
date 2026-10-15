@@ -25,7 +25,7 @@ func lockClaimOwnerTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef)
 }
 
 func checkClaimantBindingTx(ctx context.Context, tx *storeTx, c capability.Capability, unit UnitRef) error {
-	if c.Binding.Kind == capability.BindingNone {
+	if c.Binding.Kind == capability.BindingNone || c.Binding.Kind == capability.BindingPush {
 		return nil
 	}
 	if c.Binding.Kind != capability.BindingTrigger || c.Binding.RunID != unit.RunID {

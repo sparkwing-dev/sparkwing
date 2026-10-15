@@ -2464,9 +2464,7 @@ WHERE team = ? AND run_id = ? AND node_id = ? AND step_id = ?`,
 	return tx.Commit()
 }
 
-// MarkNodeReady opens the node's offer round with the highest attainable
-// executor priority from the same transaction that snapshots its requirements.
-// The node is opened in its run's own team, where CreateNode wrote it.
+// MarkNodeReady publishes a job to its team's queue.
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
 	t, err := s.runTenant(ctx, runID)
 	if err != nil {
@@ -2475,76 +2473,34 @@ func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
 	return t.MarkNodeReady(ctx, runID, nodeID)
 }
 
-// MarkNodeReady is [Store.MarkNodeReady] confined to t's team.
+// MarkNodeReady publishes a job to the tenant's queue.
 func (t *Tenant) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
 	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackOrLog(tx)
 	node := &Node{}
 	if err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
-  FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(), string(t.team), runID, nodeID), node); err != nil {
+ FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`+tx.forUpdate(), string(t.team), runID, nodeID), node); err != nil {
 		return err
 	}
-	opened := node.OfferStartedAt != nil
-	var summary claimRoundSummary
-	if !opened {
-		summary, err = claimRoundSummaryTx(ctx, tx, runID, nodeID)
-		if err != nil {
-			return err
-		}
-	}
-	now := time.Now()
-	class, err := readyCPUClassTx(ctx, tx, summary.Resources)
+	charge, err := nodeChargeTx(ctx, tx, runID, nodeID)
 	if err != nil {
 		return err
 	}
-	offerStart := now
-	if !opened {
-		idle, err := t.s.offerRoundIdleTx(ctx, tx, runID, summary, class, now)
-		if err != nil {
-			return err
-		}
-		if idle {
-			offerStart = now.Add(-nodeClaimOfferWindow)
-		}
-	}
-	res, err := tx.ExecContext(
-		ctx,
-		`UPDATE nodes SET ready_at = COALESCE(ready_at, ?),
-		                  placement_hold_from = COALESCE(placement_hold_from, ?),
-		                  offer_started_at = COALESCE(offer_started_at, ?),
-		                  credit_cpu_class = ?
-		  WHERE team = ? AND run_id = ? AND node_id = ?`,
-		now.UnixNano(), now.UnixNano(), offerStart.UnixNano(), class, string(t.team), runID, nodeID,
-	)
+	class, err := readyCPUClassTx(ctx, tx, charge)
 	if err != nil {
 		return err
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
+	now := tx.now().UnixNano()
+	if _, err := tx.ExecContext(ctx, `UPDATE nodes SET ready_at=COALESCE(ready_at,?), placement_hold_from=COALESCE(placement_hold_from,?), credit_cpu_class=? WHERE team=? AND run_id=? AND node_id=?`, now, now, class, t.team, runID, nodeID); err != nil {
 		return err
-	}
-	if n == 0 {
-		return notFound("node", runID+"/"+nodeID)
-	}
-	if !opened {
-		if _, err := appendEventTx(ctx, tx, t.team, runID, nodeID, "executor_offer_round_opened", map[string]any{
-			"deadline":               offerStart.Add(nodeClaimOfferWindow),
-			"hard_capabilities":      summary.HardCapabilities,
-			"preferred_capabilities": summary.PreferredCapabilities,
-			"resources":              summary.Resources,
-			"slots":                  summary.Slots,
-			"run_priority":           summary.RunPriority,
-		}, now); err != nil {
-			return err
-		}
 	}
 	return tx.Commit()
 }
 
-// RevokeNodeReady cancels an unclaimed offer round.
+// RevokeNodeReady withdraws an unclaimed job from the queue.
 func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error) {
 	return s.defaultTenant().RevokeNodeReady(ctx, runID, nodeID)
 }

@@ -178,6 +178,9 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	if err != nil {
 		return capability.Capability{}, err
 	}
+	if err := checkPushClaimScope(chain, row.repo, row.ref, row.sha); err != nil {
+		return capability.Capability{}, err
+	}
 	if prospective != nil {
 		// safety: the locked row supplies scope; the claim transaction supplies only its next fence.
 		if prospective.team != row.team || prospective.run != row.run || prospective.node != row.node || row.holder != "" || row.prefix != "" || prospective.generation != row.generation+1 {

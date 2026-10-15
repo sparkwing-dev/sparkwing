@@ -424,10 +424,6 @@ const ClaimResult
 type ClaimResultCommit struct {
 }
 func (c ClaimResultCommit) Token() ClaimToken
-type ClaimRoundResult struct {
-	Revoked bool
-	Pending bool
-}
 type ClaimRouteClass int
 const ClaimSensitive ClaimRouteClass = iota + 1
 const ClaimTeamHeader = "X-Sparkwing-Claim-Team"
@@ -2913,7 +2909,6 @@ func (s *Store) ExchangeCapability(ctx context.Context, spec capability.Exchange
 func (s *Store) FailCardAttempt(
 	ctx context.Context, attemptID, paymentIntent, declineCode string, now time.Time,
 ) (team Team, first bool, err error)
-func (s *Store) FinalizeClaimRound(ctx context.Context, runID, nodeID string) (ClaimRoundResult, error)
 func (s *Store) FinalizeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error)
 func (s *Store) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 func (s *Store) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error)
@@ -3065,7 +3060,6 @@ func (s *Store) RunBucketMeasureLeased(ctx context.Context, holder string, windo
 func (s *Store) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) RunExceedsWallClock(ctx context.Context, runID string, now time.Time) (int64, bool, error)
 func (s *Store) RunNodeLogs(ctx context.Context, team Team, runID string) (_ []NodeLog, err error)
-func (s *Store) RunReaperLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) RunStoragePassLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) SampleSealedSecrets(ctx context.Context, sealedPrefix string, limit int) (_ []TeamSecret, err error)
 func (s *Store) SearchTeams(ctx context.Context, q string) (_ []TeamMatch, err error)
@@ -3785,7 +3779,6 @@ func WithClaimProfile(ctx context.Context, profile match.Profile) context.Contex
 func WithCreatingPrincipal(ctx context.Context, principal string) context.Context
 func WithGitHubRunnerScope(ctx context.Context, scope GitHubRunnerScope) context.Context
 func WithNodeClaimFence(ctx context.Context, fence NodeClaimFence) context.Context
-func WithQueueRunners(ctx context.Context, live []RunnerPresence) context.Context
 func WithTriggerClaimFence(ctx context.Context, fence TriggerClaimFence) context.Context
 func WithoutClaimFences(ctx context.Context) context.Context
 func WithoutCreditMetering(ctx context.Context) context.Context

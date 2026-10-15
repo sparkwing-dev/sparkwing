@@ -1,5 +1,15 @@
 # Acceptance test port inventory
 
+`TestPlacement/placement-ordered-matching/store-sqlite` adds final-store evidence
+for scoped trigger order, job requirements and soft preferences. The claim queue
+property generates 32 selectors and checks that failed polls change no row or
+event. Push properties vary repository/ref/SHA across named and queued node and
+trigger claims, delegated credentials and awarded hosts. Direct issuance also
+refuses an out-of-scope award. The old offer-window, idle-registry and concurrent
+finalization tests are deleted with the warm dispatcher. Their matching,
+tenant-scope and no-fallback concerns move to the final claim proofs. Enrollment
+remains a fake and native Actions/launcher transport is still required.
+
 `pkg/store/concurrency_maintenance_fence_test.go` ports expired-holder promotion,
 aged-waiter liveness, abandoned-work cleanup and repeated-pass assertions from the
 old maintenance suite. The fence property generates forged names, holders and

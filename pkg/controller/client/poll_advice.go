@@ -57,11 +57,7 @@ func ProcessIdentity(role string) string {
 	return fmt.Sprintf("%s:%s:%d", role, host, os.Getpid())
 }
 
-// WithTriggerNodeRunner names how this client runs the nodes of the triggers
-// it claims: "inprocess", "k8s" or "warm". The controller refuses a metered
-// credential's trigger claim unless it names k8s or warm, because only those
-// run every node under a node claim that credits pay for. It returns the same
-// client for chaining; set it before the client serves requests.
+// WithTriggerNodeRunner names inprocess or k8s execution before the client is shared.
 func (c *Client) WithTriggerNodeRunner(kind string) *Client {
 	c.triggerNodeRunner = kind
 	return c

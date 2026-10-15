@@ -653,8 +653,8 @@ Polls the trigger queue at the selected profile's
 controller and hosts each claimed trigger's run on this host, building the
 pipeline from the checkout the worker runs in. Each node runs here in its own
 process under a claim of its own.
-For k8s or warm execution, run sparkwing-runner runner --also-claim-triggers
---trigger-runner k8s|warm, which carries the image and service-account flags.
+For k8s execution, run sparkwing-runner runner --also-claim-triggers
+--trigger-runner k8s, which carries the image and service-account flags.
 
 Run against a remote controller via --profile prod (or whichever profile),
 or against a local 'sparkwing serve start' via --profile local.

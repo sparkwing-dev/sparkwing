@@ -18,9 +18,8 @@ also prevent delivery of this diagnostic.
 
 ## Claim-round events
 
-When a node becomes ready the controller opens a claim round of at most five
-seconds and writes its transitions to the run stream. The events carry the
-node's requirements, preferred labels, resources, slots and run priority.
+Ready work is eligible for a matching claim immediately. Requirements and soft
+preferences come from accepted execution settings.
 Events never carry a credential, token prefix, principal, holder, or internal
 controller ID. An execution-start request accepts at most 128 bytes for
 `executor_name`. Attempt display names strip terminal escapes and inline
@@ -28,14 +27,10 @@ control characters.
 
 | Event | Meaning |
 |---|---|
-| `executor_offer_round_opened` | The controller opened a five-second claim round for the node. |
-| `executor_offer_round_empty` | No runner claimed the node before the round ended, so the dispatcher's own fallback took it (`outcome: coordinator_fallback`). |
 | `credits_unpriced_class` | A claim was refused because the node's cpu request is above the largest class the credit rate table prices. Carries `cores` and `max_cores`. |
 
-Runs recorded before the assisted-offer protocol was removed may also hold
-`executor_offer_received`, `executor_offer_expired`,
-`executor_offer_declined`, `executor_offer_awarded` and `executor_selected`
-events; nothing emits them now.
+Offer-round and assisted-offer events are removed. The shared claim path records
+the awarded unit and its generation through the store's state transitions.
 
 ## Failure reasons
 

@@ -558,7 +558,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `logs.read`       | GET `/api/v1/runs/{id}/logs`, `/runs/{id}/logs/{node}`, `/runs/{id}/logs/{node}/stream`, `/runs/{id}/logs/{node}/completeness`, `/runs/{id}/logs/search` and `/runs/grep` |
 | `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`. `/triggers/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
 | `triggers.claim`  | POST `/api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`, and GET the live claimed trigger and its run. The heartbeat and the done name a trigger, and each is bound to the claimant that trigger's row records |
-| `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, the offer-round routes `mark-ready`, `revoke-ready`, `finalize-ready`, the slot routes `/concurrency/{key}/acquire`, `heartbeat`, `release`, `holder`, `resolve`, `cancel-waiter`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
+| `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, the readiness routes `mark-ready` and `revoke-ready`, the slot routes `/concurrency/{key}/acquire`, `heartbeat`, `release`, `holder`, `resolve`, `cancel-waiter`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
 | `secrets.read`    | Releases no secret. A bearer holding it without `admin` or `team.admin` is answered `403 claim_required` on GET `/api/v1/secrets/{name}`; a node reads its run's secrets with its claim token. Tokens minted with it keep authenticating, and no team token or runner token is minted with it |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
 | `team.admin`      | Administering the caller's own team: rename it, change roles, remove members, invitations, and revoking any of its machine tokens. A team owner holds it; it reaches no other team |
@@ -589,9 +589,8 @@ opens with exactly those two reads: `GET /api/v1/runs/{id}` and
 run in place of the scope, so the claim the runner already took is what opens
 them. Add `runs.read` only to give a token the deployment-wide view.
 
-A warm-pool dispatcher hands nodes to a pool on that same set. It opens and
-closes each claim round while holding the run's trigger claim, so the readiness
-routes admit it without an `admin` token.
+Queued and named claims use the shared matcher. The warm dispatcher and its
+offer-round finalization route are removed.
 
 Registered secret string values are masked in child-run events before storage,
 including values escaped by JSON. Numeric fields retain their types and precision.
@@ -727,7 +726,7 @@ The two reads a node process opens with, `GET /api/v1/runs/{id}` and
 without `runs.read` or `triggers.read` is admitted when it holds a live claim
 on that run, and refused with `403 missing_scope` otherwise.
 
-`mark-ready`, `revoke-ready`, and `finalize-ready` take `runs.state` plus the
+`mark-ready` and `revoke-ready` take `runs.state` plus the
 live claim on the run's trigger. A
 node claim never satisfies them: readiness is a dispatcher decision, and the
 dispatcher is whoever claimed the trigger. A caller that does not hold that
@@ -1539,11 +1538,10 @@ renew the claim nor report the result, so the runner cancels the node or run
 rather than beating until the lease lapses.
 
 A dispatcher whose token dies mid-run treats it as a lost claim. The local,
-Kubernetes and warm-pool runners stop their node heartbeats and status polls,
+and Kubernetes runners stop their node heartbeats and status polls,
 write no row for the node, and hand it back as cancelled. They leave running
 work alone: a local child process or a Job's pod renews its node claim with its
-own credential, so it finishes or stops by that claim. A warm-pool node is not
-handed to the fallback. `sparkwing runs logs --follow` against a controller
+own credential, so it finishes or stops by that claim. `sparkwing runs logs --follow` against a controller
 stops at the first dead-token refusal, and backs off from 300ms to 5s on other
 failures.
 

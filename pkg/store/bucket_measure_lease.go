@@ -44,19 +44,6 @@ func (s *Store) RunStoragePassLeased(ctx context.Context, holder string, window,
 	return s.runLeased(ctx, "storage pass", metaKeyStoragePassAt, metaKeyStoragePassClaim, holder, window, ttl, fn)
 }
 
-const (
-	metaKeyReaperAt    = "controller.reaper"
-	metaKeyReaperClaim = "controller.reaper.claim"
-)
-
-// RunReaperLeased runs the controller's maintenance sweep under its own
-// store-wide lease, so two controllers sharing a store during a rolling
-// deploy do not both fail the same stale run or judge the same waiting node.
-// It reports whether fn ran, like [Store.RunStoragePassLeased].
-func (s *Store) RunReaperLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error) {
-	return s.runLeased(ctx, "maintenance sweep", metaKeyReaperAt, metaKeyReaperClaim, holder, window, ttl, fn)
-}
-
 func (s *Store) runLeased(ctx context.Context, what, atKey, claimKey, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error) {
 	if fn == nil {
 		return false, fmt.Errorf("run the %s: a function is required", what)

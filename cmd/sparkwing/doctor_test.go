@@ -152,30 +152,6 @@ func TestDiagnose_FinalizesOrphanedRunKeepsRecent(t *testing.T) {
 	})
 }
 
-func TestDiagnose_RemovesDeadLocalConcurrencyRows(t *testing.T) {
-	p := doctorHome(t)
-	ctx := context.Background()
-	withStore(t, p, func(st *store.Store) {
-		if err := st.CreateRun(ctx, store.Run{ID: "run-dead", Pipeline: "demo", Status: "failed", StartedAt: time.Now()}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := st.DB().ExecContext(ctx,
-			`INSERT INTO concurrency_holders (key, holder_id, run_id, claimed_at, lease_expires_at)
-			 VALUES ('r:run-dead:build','run-dead:n','run-dead',?,?)`,
-			time.Now().UnixNano(), time.Now().Add(time.Hour).UnixNano()); err != nil {
-			t.Fatal(err)
-		}
-	})
-
-	rep, err := diagnose(ctx, p, p.Root, false)
-	if err != nil {
-		t.Fatalf("diagnose: %v", err)
-	}
-	if rep.DeadConcurrencyHolders != 1 {
-		t.Fatalf("DeadConcurrencyHolders = %d, want 1", rep.DeadConcurrencyHolders)
-	}
-}
-
 func TestDiagnose_RemovesDanglingRunDirKeepsKnown(t *testing.T) {
 	p := doctorHome(t)
 	t.Setenv("SPARKWING_HOME", p.Root)

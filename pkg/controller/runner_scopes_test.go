@@ -185,10 +185,7 @@ func TestRunnerScopes_DocumentedSetCompletesARunWithoutAdmin(t *testing.T) {
 	}
 }
 
-// Warm dispatch opens and closes the executor offer round from the process
-// holding the run's trigger claim, so the three readiness routes answer that
-// claim and refuse every other bearer of the same scope set.
-func TestRunnerScopes_TriggerHolderRunsTheOfferRound(t *testing.T) {
+func TestRunnerScopes_TriggerHolderControlsReadiness(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
@@ -216,9 +213,6 @@ func TestRunnerScopes_TriggerHolderRunsTheOfferRound(t *testing.T) {
 
 	if err := c.MarkNodeReady(held, trigger.ID, "build"); err != nil {
 		t.Fatalf("MarkNodeReady holding the trigger claim: %v", err)
-	}
-	if _, err := c.FinalizeNodeReady(held, trigger.ID, "build"); err != nil {
-		t.Fatalf("FinalizeNodeReady holding the trigger claim: %v", err)
 	}
 	if _, err := c.RevokeNodeReady(held, trigger.ID, "build"); err != nil {
 		t.Fatalf("RevokeNodeReady holding the trigger claim: %v", err)

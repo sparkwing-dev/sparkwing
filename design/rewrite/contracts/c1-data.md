@@ -284,6 +284,25 @@ cannot replace machine ownership. Its timestamp uses the store clock.
 The production C2 policy, route/decryption adapter, trusted machine-owner
 enrollment and GitHub App issuance path remain separate integrations.
 
+Offer-round finalization and the warm-dispatch fallback are removed.
+`Store.FinalizeClaimRound`, `ClaimRoundResult` and `WithQueueRunners` no longer
+exist. The controller endpoint and client finalizer are removed with their warm
+dispatcher caller. `ClaimUnit` uses shared matching and persisted queue order.
+A soft preference never requires an offer window. A mismatch changes no ready
+row and emits no event. The final ordered-queue SQLite acceptance proof covers
+push scope, eligible ordering, soft preferences and a later matching claimant.
+
+Legacy node readiness writers remain until their host callers migrate. They no
+longer open or emit offer rounds. The old offer columns remain because legacy
+claim and credit code still references them. Their removal is part of that cut.
+
+Actions claims and awards check every push binding in the capability ancestry.
+The sealed repository, ref and SHA must match. The workflow run identifies the
+verified credential and cannot be replaced by a claim request. Named and queued
+claims use the same check, and direct issuance repeats it in the award transaction.
+Push authority never creates verified-branch trust. Production Actions evidence
+and enrollment remain C2's integration.
+
 ### Upload and record persistence
 
 `Tenant.TrustLocalBuilds` and `Tenant.SetTrustLocalBuilds` own the team's

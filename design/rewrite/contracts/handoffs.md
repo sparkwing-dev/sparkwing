@@ -2,6 +2,15 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
+W1's offer-round cut is complete. The finalizer, timer, idle-registry path,
+warm-dispatch caller, factory and HTTP/client endpoint are removed. Legacy
+readiness writers remain until host migration, but open no offer rounds. Shared
+matching now accepts scoped Actions claims and checks every push ancestor during
+matching and award issuance. The SQLite ordered-matching cell and adversarial
+claim properties pass. W2/W8 still own production Actions evidence, enrollment
+and runner wiring. Old offer columns remain until legacy claim/credit retirement.
+See `../w1-session15-progress.md` for the caller list and evidence.
+
 ## From W4 review fixes (2026-10-15)
 
 

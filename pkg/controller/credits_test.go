@@ -373,6 +373,7 @@ func TestCredits_MeteredTriggerClaimRefusesInProcessNodes(t *testing.T) {
 	for name, c := range map[string]*client.Client{
 		"no node runner named": client.NewWithToken(f.url, nil, f.runner),
 		"inprocess":            client.NewWithToken(f.url, nil, f.runner).WithTriggerNodeRunner("inprocess"),
+		"removed warm":         client.NewWithToken(f.url, nil, f.runner).WithTriggerNodeRunner("warm"),
 	} {
 		if tr, err := c.ClaimTrigger(ctx); !errors.Is(err, store.ErrMeteredInProcessNodes) {
 			t.Errorf("%s: trigger claim = %+v, %v; want ErrMeteredInProcessNodes", name, tr, err)

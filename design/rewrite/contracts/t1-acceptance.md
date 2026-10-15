@@ -4,6 +4,14 @@
 
 ## Amendment 1 integration evidence
 
+`TestPlacement/placement-ordered-matching/store-sqlite` checks that an Actions
+push cannot claim another repository's earlier trigger. Two jobs prove that soft
+preferences rank eligible choices and remain optional. An ineligible oldest job
+keeps its queue position through failed polls and can be claimed as soon as its
+requirement is satisfied. The final store transactions, matcher and capability
+ancestry are real. Enrollment is a contract fake. Native placement cells remain
+required.
+
 `TestRecovery/recovery-concurrency-no-revival/store-sqlite` runs the elected
 capacity maintenance pass. A forged fence cannot promote work. After expiry, the
 queued competitor takes capacity exactly once. Reopening preserves that holder,

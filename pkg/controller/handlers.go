@@ -2017,11 +2017,7 @@ func (s *Server) handleMarkNodeReady(w http.ResponseWriter, r *http.Request) {
 	}
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
-	ctx := r.Context()
-	if now := time.Now(); s.runnerPresence.complete(now, s.placement.liveness) {
-		ctx = store.WithQueueRunners(ctx, s.runnerPresence.live(now, s.placement.liveness, presenceKey{}))
-	}
-	if err := tenant.MarkNodeReady(ctx, runID, nodeID); err != nil {
+	if err := tenant.MarkNodeReady(r.Context(), runID, nodeID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
 			return
@@ -2030,24 +2026,6 @@ func (s *Server) handleMarkNodeReady(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) handleFinalizeNodeReady(w http.ResponseWriter, r *http.Request) {
-	runID := r.PathValue("id")
-	nodeID := r.PathValue("nodeID")
-	result, err := s.store.FinalizeClaimRound(r.Context(), runID, nodeID)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		s.writeInternalError(w, r, "finalize ready node", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, struct {
-		Revoked bool `json:"revoked"`
-		Pending bool `json:"pending,omitempty"`
-	}{Revoked: result.Revoked, Pending: result.Pending})
 }
 
 type revokeResp struct {

@@ -1,5 +1,14 @@
 # Migrating to the next release
 
+## Offer-round fallback is removed
+
+The warm dispatcher, its factory and the `finalize-ready` endpoint are removed.
+`Store.FinalizeClaimRound`, `ClaimRoundResult`, `WithQueueRunners` and
+`Client.FinalizeNodeReady` are removed with them. Use `Store.ClaimUnit` for queued
+or named claims and `Tenant.ReconcileNode` for owner execution decisions.
+Eligible work can be claimed immediately. Soft preferences rank eligible work.
+A mismatch leaves the ready row and its queue position unchanged.
+
 ## Concurrency maintenance requires the operator fence
 
 `Store.MaintainConcurrency` and the `store.Maintenance` registry are removed.
@@ -385,9 +394,8 @@ To upgrade:
    `OfferExecutorClaim` and `HeartbeatExecutor`, and calls `ClaimNode` where
    it called `ClaimNodeAs`. Code embedding `pkg/store` renames
    `Tenant.ListLegacyAgentClaims` to `ListAgentClaims`, `LegacyAgentClaim` to
-   `AgentClaim`, `FinalizeExecutorClaimRound` to `FinalizeClaimRound` and
-   `ExecutorClaimRoundResult` to `ClaimRoundResult`, and drops the executor,
-   offer and scheduling-summary methods.
+   `AgentClaim`, and drops the executor, offer and scheduling-summary methods.
+   Claim-round finalization is removed entirely.
 
 **Edge cases:**
 
