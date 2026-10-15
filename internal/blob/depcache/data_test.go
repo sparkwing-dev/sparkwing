@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -17,11 +18,12 @@ import (
 
 type fixture struct {
 	blob.RecordStore
-	intent  blob.UploadIntent
-	record  blob.Record
-	data    []byte
-	corrupt bool
-	lookups int
+	intent           blob.UploadIntent
+	record           blob.Record
+	data             []byte
+	corrupt          bool
+	lookups          int
+	downloadCloseErr error
 }
 
 func (f *fixture) Upload(_ context.Context, i blob.UploadIntent) (blob.UploadTicket, error) {
@@ -53,8 +55,15 @@ func (f *fixture) Transfer(_ context.Context, _ blob.SignedTransfer, body io.Rea
 	if f.corrupt {
 		data[len(data)-1] ^= 0xff
 	}
-	return io.NopCloser(bytes.NewReader(data)), nil
+	return archiveResponse{Reader: bytes.NewReader(data), closeErr: f.downloadCloseErr}, nil
 }
+
+type archiveResponse struct {
+	io.Reader
+	closeErr error
+}
+
+func (r archiveResponse) Close() error { return r.closeErr }
 func (f *fixture) LookupDepcache(_ context.Context, q blob.DepcacheLookup) (blob.DepcacheHit, error) {
 	f.lookups++
 	if q.Key.Repo != "gh:123" || q.Authority.Attempt.Value.NodeID != "job" {
@@ -97,12 +106,24 @@ func TestSignedDepcacheMissSaveHitAndCorruption(t *testing.T) {
 	if err != nil || string(body) != "executable bytes" {
 		t.Fatalf("restored=%q %v", body, err)
 	}
+	f.downloadCloseErr = errors.New("download close failed")
+	if err := os.WriteFile(filepath.Join(dest, "tool"), []byte("preserved"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Fetch(t.Context(), "deps", dest); !errors.Is(err, f.downloadCloseErr) {
+		t.Fatalf("download close = %v", err)
+	}
+	body, err = os.ReadFile(filepath.Join(dest, "tool"))
+	if err != nil || string(body) != "preserved" {
+		t.Fatalf("failed close published archive: %q, %v", body, err)
+	}
+	f.downloadCloseErr = nil
 	f.corrupt = true
 	if _, err := b.Fetch(t.Context(), "deps", dest); err == nil {
 		t.Fatal("corrupt archive published")
 	}
 	body, err = os.ReadFile(filepath.Join(dest, "tool"))
-	if err != nil || string(body) != "executable bytes" {
+	if err != nil || string(body) != "preserved" {
 		t.Fatal("failed restore changed destination")
 	}
 }

@@ -18,6 +18,9 @@ Each object is named by its SHA-256 digest. Uploads verify the expected length
 and digest before commit. Downloads verify both at EOF. A missing object or a
 checksum mismatch cannot produce a successful output read or artifact stage.
 Memo uses a miss and dependency caches start cold when verification fails.
+Artifact staging and dependency-cache restore close the verified download
+before publishing files. A close failure preserves the destination for that
+download and returns an error.
 
 A record names an output, artifact manifest, memo result, dependency cache,
 pipeline binary or source bundle. Each reference requires either the exact
@@ -42,9 +45,14 @@ in the operator's `run.submit_env_allow`. Network proxy and CA settings remain
 available to pipeline processes. Sparkwing provides no Git mirror service
 or package proxy.
 
-Local pipeline binaries stay in the local binary cache. Remote binaries use
-signed transfers and require authorized build provenance before execution.
-The binary client implements that check. Host binding is pending, so remote
+Local pipeline binaries stay in the local binary cache. It stores entries under
+`cache/pipelines/v1/entries` in the Sparkwing home. Cache status and pruning
+operate on that layout. Older layouts
+have no migration or retirement path. `cache info -o json` omits
+`legacy_entries` and `legacy_bytes`.
+
+Remote binaries use signed transfers and require authorized build provenance
+before execution. The binary client implements that check. Host binding is pending, so remote
 hosts build into their machine's binary cache without shared binary transfers.
 See [Caching](caching.md) for authoring cache declarations.
 

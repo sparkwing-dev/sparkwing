@@ -442,7 +442,7 @@ func TestConcurrentMaterializationQueuesOnlyThePublisher(t *testing.T) {
 	}
 }
 
-func TestStatusMeasuresManagedLivenessAndLegacyBytes(t *testing.T) {
+func TestStatusMeasuresCurrentCacheLiveness(t *testing.T) {
 	cacheRoot := t.TempDir()
 	root := filepath.Join(cacheRoot, pipelineCacheSchema)
 	active := testEntry(t, root, "11111111-11111111")
@@ -469,136 +469,37 @@ func TestStatusMeasuresManagedLivenessAndLegacyBytes(t *testing.T) {
 	if status.ObservedBytes != 8 || status.EntryCount != 2 || status.ActiveEntries != 1 || status.ActiveBytes != 3 {
 		t.Fatalf("managed status: %+v", status)
 	}
-	if status.LegacyBytes != 7 || status.LegacyEntries != 1 {
-		t.Fatalf("legacy status: %+v", status)
-	}
 }
 
-func TestPruneRetiresLegacyEntriesAutomatically(t *testing.T) {
-	originalNow := cacheNow
-	t.Cleanup(func() { cacheNow = originalNow })
-	now := time.Unix(100, 0)
-	cacheNow = func() time.Time { return now }
+func TestPruneOnlyCurrentCacheLayout(t *testing.T) {
 	cacheRoot := t.TempDir()
 	root := filepath.Join(cacheRoot, pipelineCacheSchema)
-	legacyDir := filepath.Join(cacheRoot, "11111111-11111111")
-	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
-		t.Fatal(err)
+	entry := testEntry(t, root, "22222222-22222222")
+	seedEntry(t, entry, "current", time.Unix(1, 0))
+	paths := []string{
+		filepath.Join(cacheRoot, "11111111-11111111", "pipelines"),
+		filepath.Join(root, "legacy-retired", "33333333-33333333", "pipelines"),
 	}
-	if err := os.WriteFile(filepath.Join(legacyDir, "pipelines"), []byte("legacy"), 0o755); err != nil {
-		t.Fatal(err)
+	for _, path := range paths {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("outside current layout"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
-
-	result, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	result, err := Prune(t.Context(), PruneOptions{Root: root, ReclaimEntries: 3, MaxEntries: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.ReclaimedEntries != 0 || result.GoalSatisfied {
-		t.Fatalf("first legacy prune must quarantine without claiming bytes: %+v", result)
+	if result.ReclaimedEntries != 1 || result.ExaminedEntries != 1 || result.ObservedBytes != int64(len("current")) {
+		t.Fatalf("prune = %+v", result)
 	}
-	if _, err := os.Stat(legacyDir); !os.IsNotExist(err) {
-		t.Fatalf("legacy entry remains in its live namespace: %v", err)
-	}
-	quarantine := filepath.Join(root, "legacy-retired", "11111111-11111111")
-	if _, err := os.Stat(quarantine); err != nil {
-		t.Fatalf("quarantined entry: %v", err)
-	}
-
-	now = now.Add(legacyRetirementGrace)
-	result, err = Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.ReclaimedEntries != 1 {
-		t.Fatalf("mature legacy prune result = %+v", result)
-	}
-	if _, err := os.Stat(quarantine); !os.IsNotExist(err) {
-		t.Fatalf("mature quarantine remains: %v", err)
-	}
-}
-
-func TestPruneQuarantinesActiveLegacyWriterUntilGraceExpires(t *testing.T) {
-	if testNativeActiveLegacyWriter(t) {
-		return
-	}
-	originalNow := cacheNow
-	t.Cleanup(func() { cacheNow = originalNow })
-	now := time.Unix(100, 0)
-	cacheNow = func() time.Time { return now }
-	cacheRoot := t.TempDir()
-	root := filepath.Join(cacheRoot, pipelineCacheSchema)
-	legacyDir := filepath.Join(cacheRoot, "11111111-11111111")
-	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writer, err := os.OpenFile(filepath.Join(legacyDir, "pipelines"), os.O_CREATE|os.O_WRONLY, 0o755)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = writer.Close() }()
-	if _, err := writer.WriteString("before"); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1}); err != nil {
-		t.Fatal(err)
-	}
-	quarantine := filepath.Join(root, "legacy-retired", "11111111-11111111")
-	if _, err := writer.WriteString("after"); err != nil {
-		t.Fatalf("quarantine interrupted active writer: %v", err)
-	}
-	now = now.Add(legacyRetirementGrace - time.Second)
-	if _, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(quarantine); err != nil {
-		t.Fatalf("active writer quarantine retired before grace: %v", err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	now = now.Add(time.Second)
-	result, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.ReclaimedEntries != 1 {
-		t.Fatalf("closed writer quarantine was not reclaimed: %+v", result)
-	}
-}
-
-func TestDeferredLegacyDoesNotStarveManagedPressureReclaim(t *testing.T) {
-	originalNow := cacheNow
-	t.Cleanup(func() { cacheNow = originalNow })
-	now := time.Unix(100, 0)
-	cacheNow = func() time.Time { return now }
-	cacheRoot := t.TempDir()
-	root := filepath.Join(cacheRoot, pipelineCacheSchema)
-	managed := testEntry(t, root, "22222222-22222222")
-	seedEntry(t, managed, "managed", time.Unix(1, 0))
-	retired := filepath.Join(root, "legacy-retired", "11111111-11111111")
-	if err := os.MkdirAll(retired, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(retired, "pipelines"), []byte("legacy"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chtimes(retired, now, now); err != nil {
-		t.Fatal(err)
-	}
-
-	result, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.ReclaimedEntries != 1 {
-		t.Fatalf("managed pressure reclaim was starved: %+v", result)
-	}
-	if _, err := os.Stat(managed.entryDir()); !os.IsNotExist(err) {
-		t.Fatalf("managed entry remains: %v", err)
-	}
-	if _, err := os.Stat(retired); err != nil {
-		t.Fatalf("deferred legacy entry changed: %v", err)
+	for _, path := range paths {
+		body, err := os.ReadFile(path)
+		if err != nil || string(body) != "outside current layout" {
+			t.Fatalf("outside layout %s = %q, %v", path, body, err)
+		}
 	}
 }
 

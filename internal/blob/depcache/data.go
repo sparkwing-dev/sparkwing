@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -64,14 +65,14 @@ func (b *dataBackend) Fetch(ctx context.Context, key, dir string) (int64, error)
 	if err != nil {
 		return 0, err
 	}
-	defer r.Close()
 	f, err := os.CreateTemp("", "sparkwing-depcache-*")
 	if err != nil {
-		return 0, err
+		return 0, errors.Join(err, r.Close())
 	}
 	defer os.Remove(f.Name())
 	defer f.Close()
 	n, err := io.Copy(f, io.LimitReader(r, limits.CacheArchiveBytes+1))
+	err = errors.Join(err, r.Close())
 	if err != nil {
 		return n, err
 	}

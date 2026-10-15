@@ -20,6 +20,14 @@ unlock.
 
 ## [Unreleased]
 
+- **storage (Breaking):** Local binary-cache status and pruning use only the
+  current entry layout. Removed old-layout discovery, quarantine and retirement,
+  and the `legacy_entries` and `legacy_bytes` fields from `cache info -o json`.
+  See [migration steps](docs/migrations/_unreleased.md#local-binary-caches-use-one-layout).
+- **storage:** Artifact staging and dependency-cache restore now check download
+  close errors before publishing files. Failed downloads preserve the destination
+  for that object.
+
 ### Removed
 - **logs (Breaking):** moved retention-class parsing from `logseg.ClassDays` into the internal byte-storage owner
   Log keys, expiry and controller cleanup use the same canonical class check.

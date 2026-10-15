@@ -19,11 +19,13 @@ import (
 
 type testBytes struct {
 	blob.Store
-	values map[blob.Digest][]byte
-	puts   []blob.PutRequest
-	gets   []blob.GetRequest
-	getErr error
-	onPut  func()
+	values      map[blob.Digest][]byte
+	puts        []blob.PutRequest
+	gets        []blob.GetRequest
+	getErr      error
+	closeErr    error
+	closeDigest blob.Digest
+	onPut       func()
 }
 
 func (b *testBytes) Put(_ context.Context, q blob.PutRequest) (blob.Receipt, error) {
@@ -51,14 +53,19 @@ func (b *testBytes) Get(_ context.Context, q blob.GetRequest) (blob.VerifiedRead
 	if !ok {
 		return nil, blob.ErrNotFound
 	}
-	return &testVerified{Reader: bytes.NewReader(contents), want: q.Digest}, nil
+	r := &testVerified{Reader: bytes.NewReader(contents), want: q.Digest}
+	if q.Digest == b.closeDigest {
+		r.closeErr = b.closeErr
+	}
+	return r, nil
 }
 
 type testVerified struct {
 	*bytes.Reader
-	want blob.Digest
-	hash []byte
-	eof  bool
+	want     blob.Digest
+	hash     []byte
+	eof      bool
+	closeErr error
 }
 
 func (r *testVerified) Read(p []byte) (int, error) {
@@ -69,7 +76,7 @@ func (r *testVerified) Read(p []byte) (int, error) {
 	}
 	return n, err
 }
-func (r *testVerified) Close() error   { return nil }
+func (r *testVerified) Close() error   { return r.closeErr }
 func (r *testVerified) Verified() bool { return r.eof && digestOf(r.hash) == r.want }
 
 type testRecords struct {
@@ -87,6 +94,7 @@ func (r *testRecords) CommitRecord(_ context.Context, q blob.CommitRecordRequest
 	}
 	return blob.Record{Key: q.Key, Digest: q.Digest}, nil
 }
+
 func (r *testRecords) LookupRecord(_ context.Context, _ blob.RecordLookup) (blob.RecordLookupResult, error) {
 	return r.result, r.lookupErr
 }
@@ -226,6 +234,44 @@ func TestStageReplacesAfterVerification(t *testing.T) {
 	got, err := os.ReadFile(filepath.Join(consumer, "out"))
 	if err != nil || string(got) != "fresh" {
 		t.Fatalf("content %q, %v", got, err)
+	}
+}
+
+func TestStageRefusesDownloadCloseFailure(t *testing.T) {
+	for _, object := range []string{"manifest", "member"} {
+		t.Run(object, func(t *testing.T) {
+			d, b, r := testData()
+			producer := t.TempDir()
+			if err := os.WriteFile(filepath.Join(producer, "out"), []byte("fresh"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			record, err := Capture(t.Context(), d, producer, []string{"out"}, func(string) {})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := r.commits[0]
+			r.result = blob.RecordLookupResult{Found: true, Record: record, Members: request.Members}
+			b.closeDigest = record.Digest
+			if object == "member" {
+				b.closeDigest = request.Members[0].Digest
+			}
+			b.closeErr = errors.New("download close failed")
+			consumer := t.TempDir()
+			if err := os.WriteFile(filepath.Join(consumer, "out"), []byte("stale"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if n, err := Stage(t.Context(), d, consumer, []Edge{{Record: record.Key}}); n != 0 || !errors.Is(err, b.closeErr) {
+				t.Fatalf("stage = %d, %v", n, err)
+			}
+			body, err := os.ReadFile(filepath.Join(consumer, "out"))
+			if err != nil || string(body) != "stale" {
+				t.Fatalf("destination = %q, %v", body, err)
+			}
+			entries, err := os.ReadDir(consumer)
+			if err != nil || len(entries) != 1 {
+				t.Fatalf("staging cleanup = %v, %v", entries, err)
+			}
+		})
 	}
 }
 
@@ -457,9 +503,12 @@ func TestGlobMatch(t *testing.T) {
 		pattern, name string
 		want          bool
 	}{
-		{"dist/**", "dist/a", true}, {"dist/**", "dist/sub/b", true},
-		{"dist/**", "other/a", false}, {"a/**/c", "a/c", true},
-		{"a/**/c", "a/x/y/c", true}, {"*.json", "sub/x.json", false},
+		{"dist/**", "dist/a", true},
+		{"dist/**", "dist/sub/b", true},
+		{"dist/**", "other/a", false},
+		{"a/**/c", "a/c", true},
+		{"a/**/c", "a/x/y/c", true},
+		{"*.json", "sub/x.json", false},
 	} {
 		if got := globMatch(tc.pattern, tc.name); got != tc.want {
 			t.Errorf("globMatch(%q,%q)=%v, want %v", tc.pattern, tc.name, got, tc.want)

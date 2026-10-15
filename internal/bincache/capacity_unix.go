@@ -54,11 +54,11 @@ func cacheAllocatedBytes(ctx context.Context, root string) (int64, error) {
 		}
 		stat, ok := info.Sys().(*syscall.Stat_t)
 		if !ok {
-			return errors.New("legacy cache allocated size is unavailable")
+			return errors.New("cache allocated size is unavailable")
 		}
 		bytes := stat.Blocks * 512
 		if bytes > 0 && total > math.MaxInt64-bytes {
-			return errors.New("legacy cache allocated size overflow")
+			return errors.New("cache allocated size overflow")
 		}
 		total += bytes
 		return nil

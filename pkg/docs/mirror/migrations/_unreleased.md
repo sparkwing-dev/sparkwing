@@ -1,5 +1,16 @@
 # Migrating to the next release
 
+## Local binary caches use one layout
+
+- **Before:** cache status counted binaries in older directories, and pruning
+  quarantined those entries before deleting them after a grace period.
+- **After:** status and pruning use `cache/pipelines/v1/entries` in the Sparkwing
+  home. Older directories are left untouched. The CLI's JSON cache report drops
+  `legacy_entries` and `legacy_bytes`.
+- **Upgrade steps:** update report consumers to use `entries` and `total_bytes`.
+  Pipelines without a current cache entry compile on their next run. Stop older
+  Sparkwing processes before removing their unused cache directories.
+
 ## Node logs reach the controller as segments
 
 - **Before:** a Kubernetes Job, warm runner, self-hosted agent, GitHub

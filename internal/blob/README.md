@@ -109,6 +109,10 @@ delete the pending object. GC calls `DeleteObject` after the store's reachabilit
 and tombstone decision. Provenance stays on records because identical bytes may
 be uploaded by principals with different trust.
 
+Artifact staging and dependency-cache restore close each verified stream before
+publishing the downloaded files. A close failure returns an error and preserves
+the destination for that download.
+
 `bincache.BinaryData` binds remote pipeline binaries to these same byte and
 record contracts. A download checks the exact repo/ref/build record and team
 provenance policy before reading its committed digest. It installs the

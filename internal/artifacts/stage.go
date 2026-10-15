@@ -88,8 +88,8 @@ func readManifest(ctx context.Context, data Data, digest blob.Digest, team strin
 	if err != nil {
 		return blob.Manifest{}, err
 	}
-	defer func() { _ = r.Close() }()
 	b, err := io.ReadAll(r)
+	err = errors.Join(err, r.Close())
 	if err != nil {
 		return blob.Manifest{}, err
 	}
@@ -99,7 +99,7 @@ func readManifest(ctx context.Context, data Data, digest blob.Digest, team strin
 	return blob.DecodeManifest(b, digest, team, members)
 }
 
-func stageMember(ctx context.Context, data Data, root *os.Root, member blob.Member, rel string) error {
+func stageMember(ctx context.Context, data Data, root *os.Root, member blob.Member, rel string) (err error) {
 	if member.Size < 0 {
 		return blob.ErrIntegrity
 	}
@@ -107,7 +107,11 @@ func stageMember(ctx context.Context, data Data, root *os.Root, member blob.Memb
 	if err != nil {
 		return err
 	}
-	defer func() { _ = r.Close() }()
+	defer func() {
+		if r != nil {
+			err = errors.Join(err, r.Close())
+		}
+	}()
 	parent := filepath.Dir(rel)
 	if parent != "." {
 		if err := root.MkdirAll(parent, 0o755); err != nil {
@@ -137,6 +141,11 @@ func stageMember(ctx context.Context, data Data, root *os.Root, member blob.Memb
 	}
 	if n != member.Size || extraN != 0 || endErr != io.EOF || !r.Verified() || blob.Digest(hex.EncodeToString(hash.Sum(nil))) != member.Digest {
 		return blob.ErrIntegrity
+	}
+	err = r.Close()
+	r = nil
+	if err != nil {
+		return err
 	}
 	if err := root.Chmod(tmp, os.FileMode(member.Mode).Perm()); err != nil {
 		return err
