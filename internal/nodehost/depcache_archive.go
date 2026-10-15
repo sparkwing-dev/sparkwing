@@ -1,0 +1,97 @@
+package nodehost
+
+import (
+	"archive/tar"
+	"compress/gzip"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"io"
+	"os"
+
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/tarsafe"
+)
+
+func restoreDirectory(ctx context.Context, dir string, get func() (blob.VerifiedReader, error)) error {
+	return tarsafe.ExtractIntoDirStaged(dir, ".sparkwing-cache-*", func(stage string) (err error) {
+		reader, err := get()
+		if reader != nil {
+			defer func() { err = errors.Join(err, reader.Close()) }()
+		}
+		if err != nil {
+			return err
+		}
+		if reader == nil {
+			return errors.New("cache backend returned no reader")
+		}
+		gzipReader, err := gzip.NewReader(reader)
+		if err != nil {
+			return err
+		}
+		defer func() { err = errors.Join(err, gzipReader.Close()) }()
+		if err := tarsafe.ExtractInRoot(tar.NewReader(gzipReader), stage, tarsafe.Policy{AllowSymlinks: true}); err != nil {
+			return err
+		}
+		if _, err := io.Copy(io.Discard, gzipReader); err != nil {
+			return err
+		}
+		if _, err := io.Copy(io.Discard, struct{ io.Reader }{reader}); err != nil {
+			return err
+		}
+		if !reader.Verified() {
+			return blob.ErrIntegrity
+		}
+		return context.Cause(ctx)
+	})
+}
+
+func (d DepcacheRecords) save(ctx context.Context, input NodeInput, cache directoryCache) (err error) {
+	if err := context.Cause(ctx); err != nil {
+		return err
+	}
+	if input.Storage.Bytes == nil || input.Storage.Records == nil {
+		return errors.New("cache save requires the current storage binding")
+	}
+	entries, err := os.ReadDir(cache.dir)
+	if err != nil || len(entries) == 0 {
+		return err
+	}
+	key := cache.key
+	if key.Repo != input.Storage.Authority.Repo || key.Ref != input.Storage.Authority.Ref.Scope {
+		return errors.New("cache save changed its repository or ref")
+	}
+	upload, err := d.Bind(ctx, input, key)
+	if err != nil {
+		return err
+	}
+	if upload.Authority != input.Storage.Authority || upload.Key.Scope.Key != key.Key || upload.Key.Name != key.Name {
+		return errors.New("cache upload differs from its bound key")
+	}
+	if err := upload.check(input, blob.KindDepcache); err != nil {
+		return err
+	}
+	file, err := os.CreateTemp("", "sparkwing-cache-*.tar.gz")
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, file.Close(), os.Remove(file.Name())) }()
+	hash := sha256.New()
+	if err := tarsafe.WriteGzip(ctx, io.MultiWriter(file, hash), cache.dir); err != nil {
+		return err
+	}
+	size, err := file.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	digest := blob.Digest(hex.EncodeToString(hash.Sum(nil)))
+	if err := upload.put(ctx, input.Storage.Bytes, digest, size, file); err != nil {
+		return err
+	}
+	_, err = upload.commit(ctx, input.Storage.Records, digest, nil)
+	return err
+}

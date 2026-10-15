@@ -88,7 +88,7 @@ func TestAwaitsOnOneChildShareOnePoller(t *testing.T) {
 	}
 	<-nodehost.AwaitsHeld(claim, awaits)
 	wantRefusal(t, ask(t, s, http.MethodGet, "/node/v1/children/child-1/await?wait_ms=0", bearer, ""),
-		http.StatusTooManyRequests, "too_many_requests")
+		http.StatusTooManyRequests, "rate_limited")
 	<-secondPoll
 	release()
 	for range awaits {

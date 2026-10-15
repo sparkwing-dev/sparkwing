@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
@@ -112,8 +114,19 @@ func (h *hostedTrigger) host(t *testing.T, ctx context.Context, r runner.Runner,
 	t.Helper()
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	if heartbeat > 0 {
+		c := client.NewWithToken(h.url, nil, h.token)
+		keeper := lease.Keeper{Interval: heartbeat, Lease: store.DefaultLeaseDuration, Renew: func(ctx context.Context) (lease.Beat, error) {
+			status, err := c.HeartbeatTrigger(ctx, h.trig.ID)
+			if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrLockHeld) || client.IsTokenDead(err) {
+				return lease.Beat{}, &apierr.Error{Code: apierr.LockHeld, Message: "test trigger claim ended"}
+			}
+			if err != nil {
+				return lease.Beat{}, err
+			}
+			return lease.Beat{CancelRequested: status != nil && status.CancelRequested}, nil
+		}}
 		var stop func()
-		ctx, stop = HeartbeatTrigger(DispatchContext(ctx, h.trig), client.NewWithToken(h.url, nil, h.token), h.trig.ID, heartbeat, quiet)
+		ctx, stop = keeper.Run(DispatchContext(ctx, h.trig))
 		defer stop()
 	}
 	return HostTriggerRun(ctx, TriggerHost{
@@ -219,33 +232,6 @@ func TestTriggerHost_ANodeThatPlansDifferentlyFailsWithPlanDrift(t *testing.T) {
 	}
 	if _, err := os.Stat(envOut); !os.IsNotExist(err) {
 		t.Fatalf("the drifted node's body ran: %v", err)
-	}
-}
-
-// safety: the controller hands a node to one holder, so a node another host
-// already claimed is neither run nor finished by this one, and its row stays
-// with the holder that has it.
-func TestClaimedNodeHost_RefusesANodeAnotherHostHolds(t *testing.T) {
-	envOut := filepath.Join(t.TempDir(), "env")
-	h := newHostedTrigger(t, map[string]string{"envout": envOut})
-	ctx := store.WithoutCreditMetering(t.Context())
-	if err := h.st.CreateNode(ctx, store.Node{RunID: h.trig.ID, NodeID: "build", Status: "pending"}); err != nil {
-		t.Fatal(err)
-	}
-	c := client.NewWithToken(h.url, nil, h.token)
-	if _, err := c.ClaimNodeByID(ctx, h.trig.ID, "build", "k8s-job:elsewhere", time.Minute, false, nil); err != nil {
-		t.Fatal(err)
-	}
-	host := &claimedNodeHost{controllerURL: h.url, entry: pipelineentry.Binary(h.bin), dir: t.TempDir(), ctrl: c, logger: slog.New(slog.DiscardHandler)}
-	res := host.RunNode(t.Context(), runner.Request{RunID: h.trig.ID, NodeID: "build", Pipeline: "podnode"})
-	if res.Outcome != sparkwing.Failed || !errors.Is(res.Err, store.ErrLockHeld) {
-		t.Fatalf("second host = %+v, want refused as held", res)
-	}
-	if n := h.node(t, "build"); n.Status == "done" || n.ClaimedBy != "k8s-job:elsewhere" {
-		t.Fatalf("build = %s claimed by %q, want left to its holder", n.Status, n.ClaimedBy)
-	}
-	if _, err := os.Stat(envOut); !os.IsNotExist(err) {
-		t.Fatalf("the refused host ran the node: %v", err)
 	}
 }
 

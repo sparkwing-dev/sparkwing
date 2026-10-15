@@ -10,7 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Debug selects the operator pauses for a run.
+// Debug says where a run pauses for an operator. The zero value pauses nowhere.
 type Debug struct {
 	// PauseBefore and PauseAfter name the nodes to hold before they start and
 	// after they end, as --sw-pause-before and --sw-pause-after.

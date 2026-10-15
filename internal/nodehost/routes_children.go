@@ -3,10 +3,10 @@ package nodehost
 import (
 	"context"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -21,140 +21,106 @@ const (
 	maxChildBody = 64 << 10
 )
 
-// ChildRequest is a node's request to start a child run.
+// ChildRequest starts a child pipeline and selects its eventual output job.
 type ChildRequest struct {
 	Pipeline string            `json:"pipeline"`
+	Job      string            `json:"job,omitempty"`
 	Args     map[string]string `json:"args,omitempty"`
 	Repo     string            `json:"repo,omitempty"`
 	Branch   string            `json:"branch,omitempty"`
 }
 
-// safety: the controller reads the parent run, node and attempt from the
-// claim, so the node names none of them.
-func (s *Server) serveStartChild(w http.ResponseWriter, r *http.Request, g *grant) {
+func (g *grant) startChild(ctx context.Context, request ChildRequest) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, upstreamTimeout)
+	defer cancel()
+	if !validName(request.Pipeline) || len(request.Args) > 256 {
+		return "", executorError(apierr.BadRequest, "invalid child pipeline or arguments")
+	}
+	request.Job = ""
 	if g.Claim == nil && g.Children != nil {
-		var req ChildRequest
-		if !decodeBody(r, maxChildBody, &req) || !validName(req.Pipeline) || len(req.Args) > 256 {
-			s.writeError(w, http.StatusBadRequest, "bad_request", "the body must name a pipeline, in at most 64 KiB")
-			return
-		}
-		s.serveLocalStartChild(w, r, g, req)
-		return
+		return g.localStartChild(ctx, request)
 	}
-	claim, ctx, done, ok := s.forward(w, r, g)
-	if !ok {
-		return
+	if g.Claim == nil {
+		return "", serviceUnavailable()
 	}
-	defer done()
-	var req ChildRequest
-	if !decodeBody(r, maxChildBody, &req) || !validName(req.Pipeline) || len(req.Args) > 256 {
-		s.writeError(w, http.StatusBadRequest, "bad_request", "the body must name a pipeline, in at most 64 KiB")
-		return
+	if !acquire(ctx, g.Claim.childSlot) {
+		return "", ctx.Err()
 	}
-	if !acquire(ctx, claim.childSlot) {
-		s.upstreamFailed(w, g, "children", 0, ctx.Err())
-		return
-	}
-	defer func() { <-claim.childSlot }()
+	defer func() { <-g.Claim.childSlot }()
 	var out struct {
 		RunID string `json:"run_id"`
 	}
-	status, code, err := claim.call(ctx, http.MethodPost, runPath(g.RunID, "children"), struct {
+	status, code, err := g.Claim.call(ctx, http.MethodPost, runPath(g.RunID, "children"), struct {
 		Ordinal int64 `json:"ordinal"`
 		ChildRequest
-	}{claim.nextChild, req}, &out)
-	// safety: an ordinal is spent only once the controller answered, so a
-	// retry after a lost reply returns the child the first call started.
+	}{g.Claim.nextChild, request}, &out)
 	if err == nil && status < http.StatusInternalServerError {
-		claim.nextChild++
+		g.Claim.nextChild++
 	}
 	switch {
 	case err != nil:
-		s.upstreamFailed(w, g, "children", status, err)
+		return "", serviceUnavailable()
 	case status == http.StatusAccepted && validName(out.RunID):
-		claim.recordChild(out.RunID)
-		s.writeJSON(w, http.StatusCreated, map[string]string{"run_id": out.RunID})
+		g.Claim.recordChild(out.RunID)
+		return out.RunID, nil
 	case status == http.StatusConflict && strings.HasPrefix(code, "cycle"):
-		s.writeError(w, http.StatusConflict, "cycle", "pipeline "+quote(req.Pipeline)+" is already among this run's ancestors")
+		return "", routeFailure(apierr.Conflict, apierr.ReasonChildCycle, "pipeline is already an ancestor")
 	case status == http.StatusUnprocessableEntity:
-		s.writeError(w, http.StatusUnprocessableEntity, "child_repo", "a child run builds its parent's repository and commit only")
+		return "", executorError(apierr.PlanInvalid, "child must build its parent repository and commit")
 	case status == http.StatusBadRequest:
-		s.writeError(w, http.StatusBadRequest, "bad_request", "the controller refused the child run's request")
+		return "", executorError(apierr.BadRequest, "child request was refused")
 	default:
-		s.upstreamFailed(w, g, "children", status, nil)
+		return "", serviceUnavailable()
 	}
 }
 
-func (s *Server) serveAwaitChild(w http.ResponseWriter, r *http.Request, g *grant) {
-	child, node := r.PathValue("run"), r.URL.Query().Get("node")
-	wait, waitOK := waitParam(r.URL.Query().Get("wait_ms"))
-	if !validName(child) || (node != "" && !validNodeID(node)) || !waitOK {
-		s.writeError(w, http.StatusBadRequest, "bad_request", "the run id, node or wait_ms is malformed")
-		return
+func (g *grant) awaitChild(ctx context.Context, child, job string, wait time.Duration) (ProcessChildResult, error) {
+	if !validName(child) || (job != "" && !validNodeID(job)) {
+		return ProcessChildResult{}, executorError(apierr.BadRequest, "invalid child run or job")
 	}
 	if g.Claim == nil && g.Children != nil {
-		s.serveLocalAwaitChild(w, r, g, child, node, wait)
-		return
+		return g.localAwaitChild(ctx, child, job, wait)
 	}
 	if g.Claim == nil {
-		s.writeError(w, http.StatusBadGateway, "upstream_unavailable", "this node has no controller to forward to")
-		return
+		return ProcessChildResult{}, serviceUnavailable()
 	}
-	// safety: only a child this claim started is reachable; the controller
-	// checks the same, and the host refuses before asking it or admitting the wait.
 	if !g.Claim.startedChild(child) {
-		s.logger.Warn("audit", "event", "child_unknown", "run", g.RunID, "node", g.NodeID, "child", child)
-		s.writeError(w, http.StatusNotFound, "unknown_child", "node "+quote(g.NodeID)+" did not start run "+quote(child))
-		return
+		return ProcessChildResult{}, executorError(apierr.NotFound, "process did not start this child")
 	}
-	claim, ctx, done, ok := s.admit(w, r, g, g.Claim.awaitSlots, "child-run awaits")
-	if !ok {
-		return
+	done, err := claimSlot(ctx, g.Claim.awaitSlots)
+	if err != nil {
+		return ProcessChildResult{}, err
 	}
 	defer done()
-	// safety: a node blocked on its child prints nothing, so the await holds its no-progress timeout, as in-process.
 	if g.Pause != nil {
 		defer g.Pause()()
 	}
-	run, status, err := claim.await(ctx, g, child, wait)
-	switch {
-	case err != nil:
-		s.upstreamFailed(w, g, "await", status, err)
-		return
-	case status == http.StatusNotFound:
-		s.writeError(w, http.StatusNotFound, "unknown_child", "node "+quote(g.NodeID)+" did not start run "+quote(child))
-		return
-	case status != http.StatusOK:
-		s.upstreamFailed(w, g, "await", status, nil)
-		return
+	run, status, err := g.Claim.await(ctx, g, child, wait)
+	if status == http.StatusNotFound {
+		return ProcessChildResult{}, executorError(apierr.NotFound, "process did not start this child")
 	}
-	reply := map[string]any{"run_id": child, "status": run.Status}
-	if run.Error != "" {
-		reply["error"] = run.Error
+	if err != nil || status != http.StatusOK {
+		return ProcessChildResult{}, serviceUnavailable()
 	}
-	if run.Status == "success" && node != "" {
-		var grant store.OutputReadGrant
-		status, _, err := claim.call(ctx, http.MethodGet, runPath(g.RunID, "children", child, "nodes", node, "output"), nil, &grant)
-		switch {
-		case err != nil:
-			s.upstreamFailed(w, g, "await", status, err)
-			return
-		case status == http.StatusNotFound:
-			s.writeError(w, http.StatusNotFound, "unknown_node", "run "+quote(child)+" has no node "+quote(node))
-			return
-		case status != http.StatusOK:
-			s.upstreamFailed(w, g, "await", status, nil)
-			return
-		}
-		s.writeOutput(ctx, w, g, "await", grant, reply)
-		return
+	result := ProcessChildResult{RunID: child, Status: run.Status, Error: run.Error}
+	if run.Status != "success" || job == "" {
+		return result, nil
 	}
-	s.writeJSON(w, http.StatusOK, reply)
+	var output store.OutputReadGrant
+	status, _, err = g.Claim.call(ctx, http.MethodGet, runPath(g.RunID, "children", child, "nodes", job, "output"), nil, &output)
+	if status == http.StatusNotFound {
+		return ProcessChildResult{}, executorError(apierr.UnknownJob, "child has no such job")
+	}
+	if err != nil || status != http.StatusOK {
+		return ProcessChildResult{}, serviceUnavailable()
+	}
+	result.Output, err = g.Claim.output(ctx, output)
+	return result, err
 }
 
 type childRun struct {
-	Status string `json:"status"`
-	Error  string `json:"error"`
+	Status string        `json:"status"`
+	Error  *apierr.Error `json:"error,omitempty"`
 }
 
 // safety: one poller per child serves every await of it, so the
@@ -254,9 +220,9 @@ func waitParam(raw string) (time.Duration, bool) {
 	if raw == "" {
 		return defaultAwait, true
 	}
-	ms, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || ms < 0 || time.Duration(ms)*time.Millisecond > maxAwait {
+	wait, err := serviceDuration(raw)
+	if err != nil || wait > maxAwait {
 		return 0, false
 	}
-	return time.Duration(ms) * time.Millisecond, true
+	return wait, true
 }

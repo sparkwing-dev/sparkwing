@@ -30,6 +30,7 @@ type RunInput struct {
 	Storage       StorageBinding
 	Engines       *engine.Resolver
 	PlanCache     PlanCache
+	GrantedRunner nodeproto.RunnerIdentity
 	RunID         string
 	SealedRequest json.RawMessage
 	RequestHash   string
@@ -70,10 +71,12 @@ type ClaimAuthority struct {
 	Holder           string
 }
 
-// NodeInput ties an executor to one claim and node-wide attempt ordinal.
+// NodeInput ties an executor to one claim and the last persisted node-wide attempt ordinal.
+// A new node has ordinal zero; the execution start returns its first or next ordinal.
 // GrantedRunner and RouteBinding come from the award and delegated node bearer;
 // SDK processes receive them in hello, never through process environment.
 type NodeInput struct {
+	processRevoke func() error
 	Storage       StorageBinding
 	Engine        engine.Resolved
 	Accepted      AcceptedRun
