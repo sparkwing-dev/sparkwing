@@ -2,6 +2,11 @@
 
 <!-- design:begin -->
 
+The engine package implements these contracts. Component tests cover pin
+resolution, signed releases, policy, caching, selected-engine SDK installation
+and upgrades. Source/host composition and native platform evidence remain separate work. The
+implementation status is recorded in [the W8 handoff](../W8-IMPLEMENTATION.md).
+
 ## Amendment 1: selected-engine installation
 
 `install_contract.go` declares `Resolved.InstallSDK(SDKInstallRequest) SDKCommand`.
@@ -13,17 +18,35 @@ Node/main argv without protocol flags or a preload. Installation rechecks the pi
 against Resolved and cannot substitute the host's engine or a remote pipeline binary.
 Eval/work use the accepted identity and the same selected engine's host operations.
 
+`internal/engine/sdkinstall.Run` serves that request in the selected executable.
+It rechecks the build version, uses the existing local binary cache for Go and
+uses `npm ci` for TypeScript. Go dependency selection must retain the pinned SDK.
+The cache key includes the pin, source key and install environment, keeping these
+locally built entries separate from the retired remote binary path. TypeScript
+returns Node and its main file. Native tool diagnostics pass through the shared
+proxy masker. The hidden CLI route skips update and version-state startup hooks.
+
+`internal/engine/npmcmd.Command` constructs npm argv for installation, upgrades
+and cache-directory queries. Windows command shims use Node with the installed
+npm-cli.js. Native npm executables and Unix npm keep their direct invocation.
+Arguments never pass through a shell. Callers supply the environment and run
+through gotoolchain.Run so cancellation reaches the existing process group.
+Upgrade tools also receive procenv.Install with its proxy masker, and errors
+mask captured diagnostics before returning them.
+The Windows layout follows [npm's launcher](https://github.com/npm/cli/blob/latest/bin/npm.cmd).
+
+`SDKInstallRequest.UnmarshalJSON` rejects duplicate and unknown fields, including
+an attempted environment field. `PipelineDirectory` keeps both sides on the same
+checkout-relative path validation. These are W8-local additions. The install
+adapter is a child package because the binary cache depends on store/runspec,
+which already imports the engine identity package.
+
 W8 retains historical signed asset matrices even after current cache-binary removal.
 W9 renders shared version notices and wires upgrade verification. W5/W9 package and
 stamp the TypeScript Windows bridge for supported architectures with its matching
 engine release. Decision 104 requires native Windows handle-inheritance evidence.
 These are integration obligations under decisions 102-104, not a new distribution
 origin, trust root, fallback-age cutoff or support-window expiry refusal.
-
-
-
-These are target contracts. All new functions remain panic stubs. The existing
-CLI, runner and launcher do not yet call them.
 
 ## Ownership
 
@@ -90,6 +113,9 @@ Publication accepts `VerifiedRelease` only. It retains the verification material
 and publishes atomically, so partial downloads never become executable. Concurrent
 requests may converge on the same valid entry. Missing or corrupt recoverable
 cache entries cause a miss and verification on refetch.
+An executable replaced by a directory, or missing its owner's execute permission
+on Unix, is also a cache miss. Auto mode restores the verified executable. Local
+mode reports the missing executable without fetching.
 
 Every start checks the current verified policy, even for a cached executable.
 `Cached` alone grants no execution permission. `Resolve` and `Ensure` enforce the
@@ -127,9 +153,11 @@ signature or validation failure retains the last verified copy without an age
 cutoff and emits a fallback notice. It never replaces verified state with
 unverified bytes. An index with an older `published_at`, or different body bytes
 at the same timestamp, cannot replace the cached policy. Identical replay is
-allowed. Without any verified copy, a failed fetch or verification returns
-`unavailable` with connectivity/retry guidance before execution. First use has
-only the fetched signature as freshness evidence.
+allowed. On refresh failure, fallback adopts any newer verified policy another
+process has saved in the machine cache. An older in-memory copy cannot bypass
+that policy's revocations or minimum. Without any verified copy, a failed fetch
+or verification returns `unavailable` with connectivity/retry guidance before
+execution. First use has only the fetched signature as freshness evidence.
 
 An active individual revocation returns `version_revoked`. A release below an
 effective minimum returns `version_unsupported`. Both include the signed reason

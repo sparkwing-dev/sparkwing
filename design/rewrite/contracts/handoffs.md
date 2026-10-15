@@ -442,3 +442,127 @@ representation remain integration points.
 **W2 continuation evidence.** Session verification/default CSRF and cancellation-reason delivery are covered in [W2-sessions-cancellation-handoff.md](../W2-sessions-cancellation-handoff.md). W1 can now project C2 BindingState.CancelReason. Native TypeScript setup and unrelated docs failures remain with their owners.
 
 **W1: authority-bearing secret reads for W2.** The secret-by-name HTTP cutover now uses C2's local SecretReader interface: Team() Team and ReadSecret(ctx, Authorized) (*Secret, error). Use one store-clock transaction to recheck ancestry, current membership, the selected route alternative and claim liveness/cancellation. Derive claim run/pipeline from its binding and seal, require declaration, enforce pipeline/shared precedence and only_on pools, and commit secret_released with selection. A missing run selector never detaches a claim from its bound run. Member run selectors stay tenant-scoped, and masked member reads are forbidden. Return no row after a failed audit or authority check. Tenant.ReleaseClaimSecret takes the retired ClaimToken and caller clock and is not an adapter. W2 tests the final HTTP/decryption path with fakes. The default refuses missing transactions with policy_missing. See [W2-secret-reads-handoff.md](../W2-secret-reads-handoff.md).
+
+
+## From bw-3095-w8-runners-engine (unreviewed by lead)
+
+### W8 composition continuation
+
+`runners.NewManagedRunner` and `launcher.NewLauncher` compose the shared wire
+client with the unified loop or launcher. `Hosting.HTTP` and `BootstrapHost.HTTP`
+retain the caller's HTTP/api.sock transport for awarded and exchanged clients.
+Launcher construction always selects `EngineOptions.Launcher`.
+
+W8 now constructs trigger/here RunInput seals from the award before callbacks
+run. The SQLite/controller lifecycle component checks those inputs through
+RunHost and persisted completion. Generated cases cover new runs, resume,
+prepared replacements and mutation after capture. This completes W8's awarded
+run/seal projection; W3's run/plan/eval runner-identity fields and shared host
+constructors remain open.
+
+`runners.NodePreparation.Prepare` fills accepted executor input, acquires the
+accepted source and retains partial cleanup until the keeper joins. Its default
+uses W3's `ForExecution`/`Acquire`; components inject that boundary while it is a
+stub. Bound host services must still supply the job hash, delegated node routes,
+storage and generator replay. No shared host constructor is inferred.
+
+W8's local `LocalController` composition interface now returns `HTTP() LocalHTTP`
+instead of implementing ServeAPI/ServeDashboard. The runtime owns both HTTP
+servers, request cancellation and joined drain. W2's local adapter supplies the
+shared handlers and reads verified API identity with
+`wingd.LocalPeer(request.Context())`. This changes W8's composition interface,
+not the frozen LocalRuntime operations. The sole implemented backend was the
+W8 fixture; all its callers are migrated. Store/queue/maintenance construction
+and shared policy handlers remain W1/W2 integration.
+
+W8's node-input constructor now captures the accepted spec/plan seals and job
+settings alongside engine, runner and claim identity before renewal or preparation.
+Every preparation path uses that projection. Nested settings are copied, and
+missing or inconsistent seals fail before renewal. NodePreparation's duplicate
+accepted-input projection is removed. The SQLite lifecycle component constructs
+NewManagedRunner with a verified signed version policy before real claim/start/
+finish persistence. Source/keeper/host and controller-client bodies remain fake
+boundaries. See [the node composition report](../W8-NODE-INPUT-COMPOSITION.md).
+
+W8's runtime now owns dashboard HTTP connection holds through close, including
+keep-alive and hijacked connections. Controller activity reports cover holds
+outside those connections. Status sums both owners, and closing the last
+dashboard connection restarts the existing idle interval. The real serving loop
+passes controlled-clock and race regressions with in-memory connections. See
+[the continuation report](../W8-DASHBOARD-ACTIVITY.md). This advances A1-40
+without supplying native or final store/controller composition evidence.
+
+The local HTTP serving scope now cancels its request contexts on listener
+failure as well as caller cancellation. Hijacked handlers finish before the
+runtime closes its store and releases the home election. In-memory HTTP and
+runtime regressions cover that exit and preserve the listener error. The shared
+controller/store factory remains an integration point. See
+[the HTTP exit report](../W8-HTTP-EXIT.md).
+
+The approved cancellation code is unchanged and both original regressions pass.
+New preparation and HTTP properties exercise fake foreign contracts and in-memory
+connections. Native cells remain blocked. See [the W8 audit](../W8-AMENDMENTS-1.md).
+
+W8 node-award slice done: Hosting captures the server runner, engine and claim fence before preparation and constructs NodeInput with the matching acquired engine. Claimed jobs and exchanged Cloud work use that constructor. Component and fuzz tests cover forged prepared/ambient identities, source mismatches and copied runner labels. The full handoff remains open: W3 must declare run/plan/eval identity inputs and the shared process constructor, then exercise actual hello. RunInput has no granted runner field, and the retained node-host runtime still reads ambient runner variables.
+
+**W8 to W9: Cloud private award transport.** BuildJob now mounts `award.json`
+beside the unchanged `bootstrap` file in its immutable Secret. The metadata
+carries the complete CloudJobAward without bootstrap bytes. Compose fetch-source
+with `launcher.ReadBootstrapAward(bootstrapFile)` and run-node with
+`launcher.BootstrapHost.RunFile(ctx, bootstrapFile)`. Builder-to-file-to-exchange
+components pass for plan/eval/work. The builder now emits only declared arguments,
+and its eval/work commands pass the shared parser. The registry still requires
+a job for plan units. Allow that owner-unit case without a synthetic job ID.
+Source acquisition, shared host construction and real HTTP remain integration
+work. No new flag or environment variable selects the metadata file.
+
+**W8 to W9: launcher grammar contract.** `RunLaunchCLI` requires the
+digest-pinned Docker image from `CloudJobConfig`, but the shared launch registry
+has no `--docker-image`. Passing valid runtime arguments to `runnerflags.Parse`
+fails with `unknown flag: --docker-image`. The registry also declares
+`--deadline`, while the runtime rejects it and `CloudJobConfig` has no corresponding
+field. Declare the image argument and resolve the deadline's meaning and plumbing
+before switching this entrypoint to the shared parser. Temporary overlay probes
+reproduce both failures. W8 now implements the registry's existing `--poll` flag,
+with controlled-clock acceptance coverage. The plan-without-job request above
+remains open. This entry requests contract changes and does not amend the grammar.
+
+W8 pending-claim outcome representation is implemented. The original regression,
+managed-update error preservation, here component and outcome property pass.
+
+W8 completed the approved pending-claim cancellation classification. One policy
+helper traverses wraps and joins, tests only context cancellation/deadline
+sentinels at leaves, and preserves independent denials. The original
+arbitrary-cause regression and expanded property pass with committed awards,
+caller cancellation/deadlines and comparable/non-comparable custom causes.
+The policy/claim stop path shrinks from 84 to 75 lines, the pending wait from
+44 to 40, and loop.go from 408 to 401 including a capacity-wait correction that
+returns to the existing stop checks. This completes the interruption redesign
+under the lead's cancellation-classification approval. W3's shared run/plan/eval
+identity construction remains open. See
+../W8-AMENDMENTS-1.md for verification and remaining real-integration points.
+
+**W8 to W9: local HTTP transport implemented.**
+`wingd/client.NewAPIClient(socket)` and `APIBaseURL` supply the private HTTP
+transport for `EngineOptions.HTTP` and `URL`. It uses `DialSocket` on every
+platform, has no proxy or application retry, and returns redirects unchanged.
+The exported orchestrator socket client, URL constant and duplicate dialer are
+removed; secret CLI, host coordination, health probes and retry tests use the
+shared owner. Legacy orchestration retains its own retry wrapper until W3's
+host cutover. Socket-free HTTP and generated destination tests pass. W9's
+`NewEngineClient` and `NewDataClient` still need their implementations.
+
+W8 launcher reconciliation now sends every live persisted Job in one sync call
+and validates the complete unordered decision set before retiring any live Job.
+The two-Job wire-adapter acceptance component passes. The controller-side
+`EngineController.SyncLauncher` remains a stub owned by W2; launcher components
+test that contract with a fake rather than invoking the stub.
+
+W8's Kubernetes restart component now constructs `NewLauncher`, retains its
+HTTP transport and launcher credential, and routes sync through
+`ControllerControl` before real reservation cleanup. Plan/eval/work cases use
+canonical operational-unit bindings. `BuildJob` and private award decoding now
+reject job-bearing plans, mismatched eval sources and work expansion sources.
+The generated binding property checks refusal before reservation. W2's
+`SyncLauncher` and W9's HTTP client remain fake boundaries in this component.
+See [the composition report](../W8-LAUNCHER-COMPOSITION.md) for verification.

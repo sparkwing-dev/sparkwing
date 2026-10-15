@@ -1,6 +1,7 @@
 package wingd_test
 
 import (
+	"context"
 	"net"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ func dialAtMajor(t *testing.T, home string, major int) (net.Conn, wingwire.Hello
 	if err != nil {
 		t.Fatalf("socket path: %v", err)
 	}
-	nc, err := net.Dial("unix", sock)
+	nc, err := wingd.DialSocket(context.Background(), sock, 3*time.Second)
 	if err != nil {
 		t.Fatalf("dial daemon: %v", err)
 	}

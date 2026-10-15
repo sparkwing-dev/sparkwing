@@ -48,14 +48,16 @@ func cronsTestHome(t *testing.T) (home string, launcher *recordingLauncher) {
 	priorHost := cronsTimerHost
 	cronsTimerHost = func(paths orchestrator.Paths) (crontimer.Host, error) {
 		return crontimer.Host{
-			GOOS:       "linux",
-			Home:       unitRoot,
-			ConfigHome: filepath.Join(unitRoot, ".config"),
-			Binary:     cronsTestTimerBinary(),
-			PathEnv:    "/usr/bin:/bin",
-			LogPath:    filepath.Join(paths.Root, cronsLogFile),
-			UID:        1000,
-			Exec:       func(string, ...string) (string, error) { return "", nil },
+			GOOS:          "linux",
+			Home:          unitRoot,
+			ConfigHome:    filepath.Join(unitRoot, ".config"),
+			Binary:        cronsTestTimerBinary(),
+			SparkwingHome: paths.Root,
+			Version:       "v1.2.3",
+			PathEnv:       "/usr/bin:/bin",
+			LogPath:       filepath.Join(paths.Root, cronsLogFile),
+			UID:           1000,
+			Exec:          func(context.Context, string, ...string) (string, error) { return "", nil },
 		}, nil
 	}
 	t.Cleanup(func() { cronsTimerHost = priorHost })

@@ -197,7 +197,7 @@ func ensureCronsTimer(ctx context.Context, session *cronsSession, report *cronsI
 	if err != nil {
 		return err
 	}
-	state, err := crontimer.Status(host)
+	state, err := crontimer.Status(ctx, host)
 	if err != nil {
 		return err
 	}
@@ -205,7 +205,7 @@ func ensureCronsTimer(ctx context.Context, session *cronsSession, report *cronsI
 		report.Timer = &state
 		return nil
 	}
-	installed, err := crontimer.Install(host)
+	installed, err := crontimer.Install(ctx, host)
 	if err != nil {
 		return err
 	}
@@ -389,7 +389,7 @@ func runCronsUninstall(args []string) error {
 		if herr != nil {
 			return fmt.Errorf("crons uninstall: %w", herr)
 		}
-		state, terr := crontimer.Uninstall(host)
+		state, terr := crontimer.Uninstall(ctx, host)
 		switch {
 		case errors.Is(terr, crontimer.ErrUnsupported):
 			report.TimerDetail = "no OS timer runs the tick on this platform"

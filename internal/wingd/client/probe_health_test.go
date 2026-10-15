@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -64,7 +63,7 @@ func startHealthProbeServer(t *testing.T, protocolMajor int) (string, string) {
 	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	listener, err := net.Listen("unix", sock)
+	listener, err := wingd.ListenSocket(sock)
 	if err != nil {
 		t.Fatal(err)
 	}

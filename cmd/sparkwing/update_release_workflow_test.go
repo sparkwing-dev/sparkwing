@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
+	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 )
 
 func TestReleaseWorkflowPublishesImmutableSignedUpdaterAssets(t *testing.T) {
@@ -68,17 +68,15 @@ func TestReleaseWorkflowUsesTheRunnerImageContract(t *testing.T) {
 		"COPY --from=" + goImage + " /usr/local/go /usr/local/go",
 		"COPY bin/check-runner-image.sh /usr/local/bin/check-runner-image.sh",
 		"RUN /bin/sh /usr/local/bin/check-runner-image.sh",
-		"COPY build/runner-entrypoint.sh /usr/local/bin/runner-entrypoint.sh",
-		"COPY --from=build /out/" + k8s.JobBinary + " /usr/local/bin/" + k8s.JobBinary,
-		`ENTRYPOINT ["/usr/local/bin/runner-entrypoint.sh"]`,
-		`CMD ["/usr/local/bin/` + k8s.JobBinary + `"]`,
+		"COPY --from=build /out/" + launcher.JobBinary + " /usr/local/bin/" + launcher.JobBinary,
+		`ENTRYPOINT ["/usr/local/bin/` + launcher.JobBinary + `"]`,
 	} {
 		if !containsDockerInstruction(instructions, required) {
 			t.Errorf("runner image contract missing %q", required)
 		}
 	}
-	if !strings.Contains(string(runnerDockerfile), "-o /out/"+k8s.JobBinary) {
-		t.Errorf("runner image does not build %s, the binary the Kubernetes Job fallback invokes", k8s.JobBinary)
+	if !strings.Contains(string(runnerDockerfile), "-o /out/"+launcher.JobBinary) {
+		t.Errorf("runner image does not build %s, the binary the launcher Job invokes", launcher.JobBinary)
 	}
 	if !strings.Contains(string(body), `go-version: "`+goVersion+`"`) {
 		t.Errorf("release workflow Go version does not match runner toolchain %s", goVersion)
