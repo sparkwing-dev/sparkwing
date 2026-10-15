@@ -1,5 +1,13 @@
 # Migrating to the next release
 
+## Unit recovery requires the elected reaper lease
+
+`Store.ReapExpiredNodeClaims`, `Maintenance.RecoverExpiredNodeClaims`,
+`Maintenance.ReapExpiredTriggers` and `AgentLossRecovery` are removed. Acquire
+`controller.reaper` through `Operator.AcquireSingletonLease`, then pass that fence
+and a batch limit to `Store.ReapUnits`. Results identify the team, run and unit.
+Lease loss requeues unfinished remote work within the same run. Started local
+owners fail in place. Unstarted owners consume no execution attempt or disruption.
 ## Build trust uses tenant handles
 
 `Store.TrustLocalBuilds` and `Store.SetTrustLocalBuilds` are removed. Obtain a

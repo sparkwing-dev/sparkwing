@@ -59,7 +59,7 @@ func TestPoisonedFloorRecoversWithoutManualReset(t *testing.T) {
 
 	const grantable = 7.5
 	charge := func() float64 {
-		prof, err := st.GetPipelineProfile(ctx, "ci", "")
+		prof, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "ci", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -111,7 +111,7 @@ func TestRatchetedFloorRecoversAtGrantableMemoryCeiling(t *testing.T) {
 
 	charge := func() capacity.Resolution {
 		t.Helper()
-		prof, err := st.GetPipelineProfile(ctx, "repo/ci", "")
+		prof, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "repo/ci", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -171,7 +171,7 @@ func TestContentionInOneRepoLeavesAnothersPricingAlone(t *testing.T) {
 	resolve := func() capacity.Resolution {
 		t.Helper()
 		key := currentProfileKey("ci")
-		prof, err := st.GetPipelineProfile(ctx, key, "")
+		prof, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, key, "")
 		if err != nil {
 			t.Fatal(err)
 		}

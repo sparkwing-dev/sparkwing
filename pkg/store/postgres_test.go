@@ -116,7 +116,7 @@ func TestPostgresAcquireConcurrencySlot_Serializes(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			resp, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+			resp, err := tenantFor(t, st, store.DefaultTeam).AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 				Key:      key,
 				RunID:    fmt.Sprintf("r-%d", i),
 				NodeID:   "n",
@@ -183,7 +183,7 @@ func TestPostgresResolveWaiterPromotesOnceUnderConcurrentPoll(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			resolution, err := st.ResolveWaiter(ctx, "resolve-slot", fmt.Sprintf("waiter-%d", i), "n", "", "", "", false)
+			resolution, err := tenantFor(t, st, store.DefaultTeam).ResolveWaiter(ctx, "resolve-slot", fmt.Sprintf("waiter-%d", i), "n", "", "", "", false)
 			results[i] = result{resolution: resolution, err: err}
 		}(i)
 	}
@@ -206,7 +206,7 @@ func TestPostgresResolveWaiterPromotesOnceUnderConcurrentPoll(t *testing.T) {
 	if promoted != 1 || waiting != 1 {
 		t.Fatalf("promoted=%d waiting=%d, want promoted=1 waiting=1", promoted, waiting)
 	}
-	state, err := st.GetConcurrencyState(ctx, "resolve-slot")
+	state, err := tenantFor(t, st, store.DefaultTeam).GetConcurrencyState(ctx, "resolve-slot")
 	if err != nil {
 		t.Fatalf("state: %v", err)
 	}

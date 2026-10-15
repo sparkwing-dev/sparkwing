@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 // safety: a node whose plan pins no cpu resolves to one core, which the
@@ -329,7 +330,7 @@ func TestReapExpiredNodeClaimKeepsTheMinimumWhenExecutionNeverStarts(t *testing.
 		t.Fatalf("claim: %v", err)
 	}
 	expireNodeLease(t, s, "run-expired", "build", time.Now().Add(-time.Minute))
-	if _, err := s.ReapExpiredNodeClaims(ctx); err != nil {
+	if _, err := teststore.ReapUnits(ctx, s); err != nil {
 		t.Fatalf("reap expired claim: %v", err)
 	}
 
@@ -537,7 +538,7 @@ func TestReclaimedNodeIsNotBilledForItsIdleGap(t *testing.T) {
 	// safety: the first attempt's lease expired an hour ago, so the reaper
 	// requeues it and the second attempt must not inherit its charge window.
 	expireNodeLease(t, s, "run-gap", "build", time.Now().Add(-time.Hour))
-	if _, err := s.ReapExpiredNodeClaims(ctx); err != nil {
+	if _, err := teststore.ReapUnits(ctx, s); err != nil {
 		t.Fatalf("reap expired claims: %v", err)
 	}
 	if anchor := chargeWindowAnchor(t, s, "run-gap", "build"); anchor != 0 {

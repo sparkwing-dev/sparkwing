@@ -4,6 +4,12 @@
 
 ## Amendment 1 integration evidence
 
+`TestRecovery/recovery-local-orphans/store-sqlite` proves the local store boundary.
+It runs the elected reaper, repeats the pass and reopens the database. Unstarted
+owners requeue without a disruption. Started owners fail in place. Each case has
+one lifecycle event and retains its original run and owner rows. Native local
+controller/process cells remain required.
+
 [Amendments 1](amendments-1.md) assigns each cross-area dependency. Shared decoder
 and text-bounding tests are component evidence. Native placement cells require the
 real host, controller/auth, store and storage adapters. Keep cells blocked until the
@@ -290,6 +296,15 @@ self-update verifies release bytes, and a stale runner cannot bypass its minimum
 
 ## Activation and launch gate
 
+`TestCredentials/credentials-session-digest-csrf/store-sqlite` exercises account
+session creation, digest lookup, sealed CSRF-key persistence, reopening, demotion
+and revocation against a real SQLite file. It also checks maintenance-fence
+refusal, expired-session cleanup, preservation of a live session and persistence
+after another reopen. It is store-boundary evidence. Native
+browser, OAuth and production C2 route-matrix cells remain blocked. The existing
+`recovery-cancel-beats-loss/store-sqlite` proof also checks that the first reason
+survives cooperative draining, reaping and reopening.
+
 `TestRecovery` also runs two SQLite persistence cells through
 `CheckStoreRecoveryBoundary`: cancellation after holder loss and reconciliation
 before and after reaping. They check late-report refusal, one self-award under
@@ -297,6 +312,14 @@ concurrent reconciliation, unchanged run identity and attempt history, memo-miss
 dispatch, unique lifecycle events, and persistence across reopening. Authority is
 preseeded in the final schema and enrollment uses a contract fake. These cells
 do not replace the native placement cells below.
+
+`TestRecovery/recovery-application-retry-ordinal/store-sqlite` checks a failed
+attempt followed by a successful retry under one holder, generation and lease.
+Both completed attempt records and the three exact lifecycle events survive
+reopening. Terminal replay emits no extra event and a conflicting result fails.
+The repeated-identical-failure contract gap in `handoffs.md` remains open.
+This cell proves one application retry at the store boundary. Native process,
+backoff and launcher-Job continuity still require their placement cells.
 
 The nine skeleton groups are `TestLifecycle`, `TestRecovery`, `TestPlacement`,
 `TestCredentials`, `TestStorage`, `TestProtocol`, `TestEnvironment`, `TestSurface`

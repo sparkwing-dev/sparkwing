@@ -24,8 +24,8 @@ var reviewedUnscopedSQL = map[string]string{
 	"claimUnitTx":                         "the matcher checks claimant team or deployment launcher authority before the claim reads the target run's team by global id",
 	"readMatchingInputsTx":                "reads the run's team by global id, then refuses a foreign claimant unless it holds deployment launcher authority",
 	"loadAwardRowTx":                      "awards derive team from the globally identified unit and check it against the authenticated claimant before issuing authority",
-	"(*Operator).maintainRetention":       "the elected deployment maintenance pass expires sessions across teams while preserving live capability ancestry",
 	"deleteRetentionMetricsTx":            "the elected deployment maintenance pass selects expired metrics across teams and deletes each exact team/run/job/time identity",
+	"deleteRetentionIdentityTx":           "the elected deployment maintenance pass expires every team's spent identity rows while preserving session ancestry",
 	"paidGrantForPaymentTx":               "provider payment identity is resolved before the payer is known; the configured mode and persisted checkout select the grant",
 	"paymentWarningTeamTx":                "a provider warning names a payment identity; its persisted grant or card attempt supplies the team",
 	"(*Store).settlePaymentFacts":         "a verified event resolves its committed checkout by configured mode and provider session, then rejects payment identities already used by any other checkout",
@@ -53,10 +53,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"lockCommittedTx":                "the storage pass reconciles every team's count of one store from one bucket listing",
 	"(*Store).PruneDownloadDays": "drops every team's download days past the window, which is a deployment-wide " +
 		"retention, not one team's data",
-	"expiredClaimRunsTx": "the expired-claim reaper finds every team's runs holding a lapsed claim, " +
-		"to lock them before their nodes",
-	"(*Store).expiredDispatchRuns": "the expired-claim reaper finds every team's controller-dispatched runs " +
-		"holding a lapsed claim; each is then settled under that team's own run row",
+
 	"runOwnerTx":             "asks which team owns an id, so an answer scoped to the asker is no answer",
 	"(*Store).NodeOutputKey": "the run ID is global, and the key only names an attempt the upload's own check binds",
 	"(*Store).RecordLocalOutput": "a laptop store records an output its own process wrote for a node it holds; " +
@@ -85,10 +82,8 @@ var reviewedUnscopedSQL = map[string]string{
 		"a scope with no team and no all-teams flag is refused there",
 	"(*Operator).CountConcurrencyCache":      "an ops gauge of the whole table, which is what the ceiling is set against",
 	"(*Store).CountDeadLocalConcurrency":     "the dry run of that repair, and has to count what it would remove",
-	"(*Store).ListConcurrencyStates":         "enumerates the deployment's live keys with their teams and reads each through that team's handle",
 	"(*Store).PurgeDeadLocalConcurrency":     "repairs local-scope rows left by dead runs across the deployment, and deletes each through its own team",
 	"(*Store).reapStaleConcurrencyHolders":   "reaps every team's lease-expired holders, because a sweep that only reaped one team would leave the rest held",
-	"(*Store).reapStaleConcurrencyWaiters":   "reaps every team's abandoned waiters, for the same reason as the holder sweep",
 	"(*Store).reconcileConcurrencyKeys":      "enumerates every team's queued keys with their teams and promotes each through that team's handle",
 	"(*Store).sweepExpiredConcurrencyCache":  "an expiry sweep is the deployment's, and a memo past its TTL answers no team",
 	"(*Store).sweepLRUConcurrencyCache":      "the row ceiling is the deployment's, so eviction ranks every team's memos together",
@@ -126,25 +121,14 @@ var reviewedUnscopedSQL = map[string]string{
 		"so the installation's binding is how either finds the team it belongs to",
 	"(*Operator).usageRuns": "counts every team's runs per week for the operator's usage metrics, " +
 		"which report totals across teams and name none",
-	"(*Store).PruneSpentIdentity": "deletes every team's invitations, tokens and runner credentials that stopped " +
-		"admitting anyone, because a sweep that pruned one team would leave the rest to grow",
 	"(*Store).FreeSlots": "the free tier is bounded by how many teams hold a slot, so it counts every team's",
 	"freeSlotOpenTx":     "a reservation asks whether any slot is left, so it counts every team's",
 	"(*Operator).ListCronSchedulesAcrossTeams": "the controller's tick evaluates every team's schedules and resolves and " +
 		"launches each one through its own team's handle",
 	"disputeHoldTx": "asks which payment and team a dispute's hold names, so a hold or reversal naming it for " +
 		"another team is refused; a dispute id is unique across teams",
-	"(*Store).reapExpiredTriggers": "the trigger-lease reaper returns every team's lapsed claims to the queue, because a " +
-		"sweep that only reaped one team would leave the rest held",
-
-	"(*Store).recoverExpiredNodeClaims": "the expired-claim reaper fails every team's nodes whose runner lease " +
-		"lapsed; each write names a node its own locked scan selected",
-	"(*Store).ReapExpiredNodeClaims": "clears every team's lapsed node claims in one locked pass; each write names a node " +
-		"its own scan selected",
 
 	"(*Store).PruneEgressUsage": "drops every team's egress months past the window, which is a deployment-wide retention",
-	"(*Store).ExpireSessions":   "the identity prune deletes every team's expired sessions",
-	"txLiveRunningRunIDs":       "the concurrency reapers ask which of the runs they found in any team are still live",
 	"ownedTeamsTx": "lists the teams one account belongs to as owner, with each team's own owner and member counts, so the " +
 		"account deletion can tell sole ownership from shared",
 	"(*Store).ExpiredOutputRuns": "the output retention sweep finds every team's expired or deleted runs holding outputs, " +

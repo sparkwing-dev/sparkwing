@@ -62,7 +62,7 @@ func TestFinishRunExcludesIncompleteAndRetriedNodes(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, node := range []string{"", "build", "good"} {
-				profile, err := st.GetPipelineProfile(ctx, "completion", node)
+				profile, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "completion", node)
 				if err != nil {
 					t.Fatal(err)
 				}

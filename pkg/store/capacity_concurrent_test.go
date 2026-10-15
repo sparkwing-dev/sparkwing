@@ -61,7 +61,7 @@ func assertConcurrentProfileObservations(t *testing.T, st *store.Store, seeded b
 		writers = []*store.Store{st}
 	}
 	if seeded {
-		if err := st.UpsertProfilePin(ctx, "concurrent-observations", "build", 2, 512<<20); err != nil {
+		if err := tenantFor(t, st, store.DefaultTeam).UpsertProfilePin(ctx, "concurrent-observations", "build", 2, 512<<20); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -70,7 +70,7 @@ func assertConcurrentProfileObservations(t *testing.T, st *store.Store, seeded b
 	var ready sync.WaitGroup
 	ready.Add(observations)
 	for i := range observations {
-		writer := writers[i%len(writers)]
+		writer := tenantFor(t, writers[i%len(writers)], store.DefaultTeam)
 		go func() {
 			ready.Done()
 			<-start
@@ -88,7 +88,7 @@ func assertConcurrentProfileObservations(t *testing.T, st *store.Store, seeded b
 			t.Error(err)
 		}
 	}
-	profile, err := st.GetPipelineProfile(ctx, "concurrent-observations", "build")
+	profile, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "concurrent-observations", "build")
 	if err != nil || profile == nil {
 		t.Fatalf("profile missing: %v", err)
 	}

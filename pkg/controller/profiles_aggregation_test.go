@@ -25,13 +25,13 @@ func TestFoldRunProfilesRequiresSingleContributingNode(t *testing.T) {
 			if err := st.CreateRun(ctx, run); err != nil {
 				t.Fatal(err)
 			}
-			if err := st.UpsertProfilePin(ctx, "aggregate", "", 4, 400); err != nil {
+			if err := teststore.ForTeam(t, st, store.DefaultTeam).UpsertProfilePin(ctx, "aggregate", "", 4, 400); err != nil {
 				t.Fatal(err)
 			}
-			if err := st.RecordWaitObservation(ctx, "aggregate", time.Second); err != nil {
+			if err := teststore.ForTeam(t, st, store.DefaultTeam).RecordWaitObservation(ctx, "aggregate", time.Second); err != nil {
 				t.Fatal(err)
 			}
-			before, err := st.GetPipelineProfile(ctx, "aggregate", "")
+			before, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "aggregate", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -82,12 +82,12 @@ func TestFoldRunProfilesRequiresSingleContributingNode(t *testing.T) {
 				if id == "b" && (mode == "single" || mode == "cached") {
 					continue
 				}
-				p, err := st.GetPipelineProfile(ctx, "aggregate", id)
+				p, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "aggregate", id)
 				if err != nil || p == nil || p.SampleCount != 1 || !p.CPUMeasured || p.PeakCores != 1 || p.PeakMemoryBytes != 100 {
 					t.Fatalf("node %s measurement lost: %+v, %v", id, p, err)
 				}
 			}
-			after, err := st.GetPipelineProfile(ctx, "aggregate", "")
+			after, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "aggregate", "")
 			if err != nil {
 				t.Fatal(err)
 			}

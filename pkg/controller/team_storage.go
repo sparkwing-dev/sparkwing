@@ -1,11 +1,6 @@
 package controller
 
-import (
-	"context"
-	"time"
-
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
-)
+import "context"
 
 // CloudRetentionDays is the run retention default for a multi-team controller.
 // An explicit operator value, including zero, takes precedence.
@@ -24,16 +19,5 @@ func (s *Server) seedCloudRetention(ctx context.Context) {
 	}
 	if seeded {
 		s.logger.Info("seeded the cloud retention window", "run_retention_days", CloudRetentionDays)
-	}
-}
-
-func (s *Server) maintainTeamStorage(ctx context.Context, now time.Time) {
-	pruned, err := s.store.PruneSpentIdentity(ctx, now)
-	if err != nil {
-		s.logger.Error("pruning spent identity rows failed", "err", err)
-	} else if pruned != (store.IdentityPrune{}) {
-		s.logger.Info("pruned spent identity rows",
-			"invitations", pruned.Invitations, "tokens", pruned.Tokens,
-			"sessions", pruned.Sessions, "github_runner_credentials", pruned.GitHubRunnerCredentials)
 	}
 }

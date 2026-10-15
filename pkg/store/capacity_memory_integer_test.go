@@ -24,13 +24,13 @@ func TestPipelineProfileMemoryFloorIntegers(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			st := storetest.Open(t)
-			if err := st.RecordProfileObservation(t.Context(), "memory", "node", store.ProfileObservation{CPUMeasured: true, Contended: true, FloorMemoryBytes: tc.initial}); err != nil {
+			if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(t.Context(), "memory", "node", store.ProfileObservation{CPUMeasured: true, Contended: true, FloorMemoryBytes: tc.initial}); err != nil {
 				t.Fatal(err)
 			}
-			if err := st.RecordProfileObservation(t.Context(), "memory", "node", store.ProfileObservation{CPUMeasured: true, Contended: true, FloorMemoryBytes: tc.observed}); err != nil {
+			if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(t.Context(), "memory", "node", store.ProfileObservation{CPUMeasured: true, Contended: true, FloorMemoryBytes: tc.observed}); err != nil {
 				t.Fatal(err)
 			}
-			profile, err := st.GetPipelineProfile(t.Context(), "memory", "node")
+			profile, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(t.Context(), "memory", "node")
 			if err != nil || profile == nil {
 				t.Fatalf("profile = %+v, error = %v", profile, err)
 			}

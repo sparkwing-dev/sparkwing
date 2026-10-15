@@ -50,7 +50,7 @@ func TestConcurrentWriters_FailPolicyNoBusyError(t *testing.T) {
 			defer func() { _ = s.Close() }()
 
 			<-start
-			resp, err := s.AcquireConcurrencySlot(context.Background(), store.AcquireSlotRequest{
+			resp, err := tenantFor(t, s, store.DefaultTeam).AcquireConcurrencySlot(context.Background(), store.AcquireSlotRequest{
 				Key: key, HolderID: fmt.Sprintf("h-%d", i),
 				RunID: fmt.Sprintf("r-%d", i), NodeID: "n",
 				Capacity: 1, Policy: store.OnLimitFail,
@@ -122,7 +122,7 @@ func TestConcurrentWriters_QueuePolicyNoBusyError(t *testing.T) {
 			defer func() { _ = s.Close() }()
 
 			<-start
-			resp, err := s.AcquireConcurrencySlot(context.Background(), store.AcquireSlotRequest{
+			resp, err := tenantFor(t, s, store.DefaultTeam).AcquireConcurrencySlot(context.Background(), store.AcquireSlotRequest{
 				Key: key, HolderID: fmt.Sprintf("h-%d", i),
 				RunID: fmt.Sprintf("r-%d", i), NodeID: "n",
 				Capacity: 1, Policy: store.OnLimitQueue,

@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -16,7 +18,7 @@ import (
 func seedLapsedHolder(t *testing.T, st *store.Store, key, holderID, runID string) {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+	if _, err := teststore.ForTeam(t, st, store.DefaultTeam).AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key: key, HolderID: holderID, RunID: runID, NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	}); err != nil {

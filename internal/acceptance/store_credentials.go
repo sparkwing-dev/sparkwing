@@ -13,7 +13,7 @@ import (
 
 // StoreCredentialBoundaryScenarios lists SQLite credential proofs below transport and process execution.
 func StoreCredentialBoundaryScenarios() []string {
-	return []string{"credentials-operator-console-split"}
+	return []string{"credentials-operator-console-split", "credentials-session-digest-csrf"}
 }
 
 type storeProvisionPolicy struct{}
@@ -31,6 +31,9 @@ func (storeProvisionPolicy) AuthorizeProvision(ctx context.Context, resolver cap
 
 // CheckStoreCredentialBoundary exercises root provisioning and deployment revocation against SQLite.
 func CheckStoreCredentialBoundary(ctx context.Context, root, id string) (err error) {
+	if id == "credentials-session-digest-csrf" {
+		return checkStoreSessions(ctx, root)
+	}
 	if id != "credentials-operator-console-split" {
 		return fmt.Errorf("unknown store credential boundary %q", id)
 	}

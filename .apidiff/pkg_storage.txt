@@ -51,6 +51,25 @@ func SafeLogIDs(runID, nodeID string) error
 func SafeRelPath(id string) error
 func SafeSegment(id string) error
 type StateStore interface {
+	AdmitRun(context.Context, store.IntakeRequest) (store.AdmissionResult, error)
+	AcceptPlan(context.Context, store.PlanAcceptance) (store.AcceptedPlan, error)
+	AcceptExpansion(context.Context, store.ExpansionSubmission) (store.AcceptedExpansion, error)
+	TransitionNode(context.Context, store.NodeTransition) (store.Applied, error)
+	TransitionRun(context.Context, store.RunTransition) (store.Applied, error)
+	FinishRunAndUnit(context.Context, store.FinishRunRequest) (store.Applied, error)
+	ReadRun(context.Context, string) (store.RunRow, error)
+	ReadNode(context.Context, store.NodeRef) (store.NodeRow, error)
+	ReadSnapshot(context.Context, string) (store.RunSnapshot, error)
+	ReadStateEvents(context.Context, string, int64, int) ([]store.StateEvent, error)
+	ReconcileNode(context.Context, store.ReconcileRequest) (store.ReconciledNode, error)
+	RenewOwner(context.Context, store.Actor) (store.LeaseBeat, error)
+	RenewNodeClaim(context.Context, store.NodeRef, store.Actor) (store.LeaseBeat, error)
+	RecordStep(context.Context, store.StepReport) error
+	WriteAnnotation(context.Context, store.AnnotationWrite) error
+	WriteSummary(context.Context, store.SummaryWrite) error
+	RecordSegments(context.Context, store.SegmentCommit) error
+}
+type StateStoreOld interface {
 	Close() error
 
 	CreateRun(ctx context.Context, r store.Run) error

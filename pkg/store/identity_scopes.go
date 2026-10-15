@@ -24,9 +24,9 @@ const (
 
 // safety: no role grants deployment administration; unknown roles grant nothing.
 var roleScopes = map[Role][]string{
-	RoleReader: {ScopeRunsRead, ScopeLogsRead, ScopeTriggersRead},
-	RoleEditor: {ScopeRunsRead, ScopeLogsRead, ScopeTriggersRead, ScopeRunsWrite, ScopeRunsControl, ScopeApprovalsWrite},
-	RoleOwner:  {ScopeRunsRead, ScopeLogsRead, ScopeTriggersRead, ScopeRunsWrite, ScopeRunsControl, ScopeApprovalsWrite, ScopeTeamAdmin},
+	RoleReader: {ScopeRunsRead, ScopeLogsRead},
+	RoleEditor: {ScopeRunsRead, ScopeLogsRead, ScopeRunsWrite, ScopeRunsControl, ScopeApprovalsWrite},
+	RoleOwner:  {ScopeRunsRead, ScopeLogsRead, ScopeRunsWrite, ScopeRunsControl, ScopeApprovalsWrite, ScopeTeamAdmin},
 }
 
 // ScopesForRole returns an independent copy of the role's scopes, or none for an unknown role.

@@ -878,7 +878,7 @@ func TestRunnerScopes_ProfilePinNeedsAClaimOnThatPipeline(t *testing.T) {
 	if _, err := c.ClaimNode(ctx, "holder-1", nil, time.Minute, nil); err != nil {
 		t.Fatalf("ClaimNode: %v", err)
 	}
-	if err := f.store.RecordProfileObservation(ctx, "demo", "build", store.ProfileObservation{
+	if err := teststore.ForTeam(t, f.store, store.DefaultTeam).RecordProfileObservation(ctx, "demo", "build", store.ProfileObservation{
 		Duration: time.Minute, PeakCores: 3, PeakMemoryBytes: 4 << 30, CPUMeasured: true,
 	}); err != nil {
 		t.Fatal(err)
@@ -887,7 +887,7 @@ func TestRunnerScopes_ProfilePinNeedsAClaimOnThatPipeline(t *testing.T) {
 	if err := c.SetPipelinePin(ctx, "demo", "build", 3, 4<<30); err != nil {
 		t.Fatalf("SetPipelinePin on the pipeline this runner is executing: %v", err)
 	}
-	prof, err := f.store.GetPipelineProfile(ctx, "demo", "build")
+	prof, err := teststore.ForTeam(t, f.store, store.DefaultTeam).GetPipelineProfile(ctx, "demo", "build")
 	if err != nil || prof == nil {
 		t.Fatalf("GetPipelineProfile: %v (profile %v)", err, prof)
 	}
@@ -1149,7 +1149,7 @@ func TestRunnerScopes_CoordinationRoutesRunOnATriggerClaim(t *testing.T) {
 		}
 	}
 
-	prof, err := f.store.GetPipelineProfile(ctx, "deploy", "")
+	prof, err := teststore.ForTeam(t, f.store, store.DefaultTeam).GetPipelineProfile(ctx, "deploy", "")
 	if err != nil || prof == nil {
 		t.Fatalf("GetPipelineProfile: %v (profile %v)", err, prof)
 	}
@@ -1244,10 +1244,10 @@ func TestRunnerScopes_ProfileWritesAreScopedToTheClaimedPipeline(t *testing.T) {
 	if err := c.RecordContention(ctx, otherPipeline); err == nil {
 		t.Error("recorded contention on a pipeline this runner holds no claim in")
 	}
-	if prof, err := f.store.GetPipelineProfile(ctx, otherPipeline, ""); err != nil || prof != nil {
+	if prof, err := teststore.ForTeam(t, f.store, store.DefaultTeam).GetPipelineProfile(ctx, otherPipeline, ""); err != nil || prof != nil {
 		t.Errorf("other-pipeline profile = %v (err %v), want none: every write to it was refused", prof, err)
 	}
-	if prof, err := f.store.GetPipelineProfile(ctx, own, ""); err != nil || prof == nil || prof.PinnedCores != 64 {
+	if prof, err := teststore.ForTeam(t, f.store, store.DefaultTeam).GetPipelineProfile(ctx, own, ""); err != nil || prof == nil || prof.PinnedCores != 64 {
 		t.Fatalf("own profile = %v (err %v), want a row pinned at 64 cores", prof, err)
 	}
 }
@@ -1270,7 +1270,7 @@ func TestRunnerScopes_PinRefusesAnUnboundedFigure(t *testing.T) {
 	if err := c.SetPipelinePin(ctx, "deploy", "", 1e9, 1<<30); err == nil {
 		t.Error("a billion-core pin was accepted")
 	}
-	prof, err := f.store.GetPipelineProfile(ctx, "deploy", "")
+	prof, err := teststore.ForTeam(t, f.store, store.DefaultTeam).GetPipelineProfile(ctx, "deploy", "")
 	if err != nil {
 		t.Fatalf("GetPipelineProfile: %v", err)
 	}

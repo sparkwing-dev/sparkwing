@@ -1,174 +1,72 @@
-package controller_test
+package controller
 
 import (
-	"context"
-	"net/http/httptest"
+	"log/slog"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func TestReaper_RequeuesDeadWorkerTrigger(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-
-	ctx := context.Background()
-	_ = st.CreateTrigger(ctx, store.Trigger{
-		ID:        "run-dead-1",
-		Pipeline:  "demo",
-		CreatedAt: time.Now(),
-	})
-	claimed, err := st.ClaimNextTrigger(ctx, 100*time.Millisecond)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = st.CreateRun(ctx, store.Run{
-		ID:        claimed.ID,
-		Pipeline:  "demo",
-		Status:    "running",
-		StartedAt: time.Now(),
-	})
-
-	srv := controller.New(st, nil)
-	ts := httptest.NewServer(srv.Handler())
-	defer ts.Close()
-	reaperCtx, cancelReaper := context.WithCancel(ctx)
-
-	reaperDone := make(chan struct{})
-	defer func() {
-		cancelReaper()
-		<-reaperDone
-	}()
-
-	reaped := make(chan string, 4)
-	go func() {
-		defer close(reaperDone)
-		ticker := time.NewTicker(50 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-reaperCtx.Done():
-				return
-			case <-ticker.C:
-				ids, err := store.Maintenance.ReapExpiredTriggers(st, reaperCtx)
-				if err != nil {
-					continue
+func TestReaperRecoversExpiredOwnerAndKeepsLiveOwner(t *testing.T) {
+	for _, expired := range []bool{false, true} {
+		t.Run(map[bool]string{false: "live", true: "expired"}[expired], func(t *testing.T) {
+			st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := st.Close(); err != nil {
+					t.Error(err)
 				}
-				for _, id := range ids {
-					run, err := st.GetRun(reaperCtx, id)
-					if err == nil && run.FinishedAt == nil {
-						_ = st.FinishRun(reaperCtx, id, "failed", "worker lease expired")
-					}
-					select {
-					case reaped <- id:
-					case <-reaperCtx.Done():
-						return
-					}
+			})
+			ctx := t.Context()
+			if _, err := st.DB().ExecContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES (?,'run',1,'p','running',?,'request',1,'gh:1','host','execute',?,'account',1,'r30',30)`, store.DefaultTeam, []byte(`{"version":1,"request":{"origin":"trigger"}}`), []byte(`[]`)); err != nil {
+				t.Fatal(err)
+			}
+			until := time.Now().Add(time.Hour).UnixNano()
+			if expired {
+				until = 1
+			}
+			if _, err := st.DB().ExecContext(ctx, `INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,claimed_by,capability_prefix,generation,lease_expires_at,started_at,needs_labels,prefers_labels) VALUES (?,'run','claimed','trigger',1,1,'owner','owner-cap',7,?,1,?,?)`, store.DefaultTeam, until, []byte(`[]`), []byte(`[]`)); err != nil {
+				t.Fatal(err)
+			}
+			srv := New(st, slog.New(slog.DiscardHandler))
+			for range 2 {
+				if !srv.reapLeased(ctx) {
+					t.Fatal("controller could not acquire its reaper fence")
 				}
 			}
-		}
-	}()
-
-	select {
-	case id := <-reaped:
-		if id != "run-dead-1" {
-			t.Fatalf("reaped %q, want run-dead-1", id)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("trigger was not reaped after its lease expired")
-	}
-
-	trig, err := st.GetTrigger(ctx, "run-dead-1")
-	if err != nil {
-		t.Fatalf("GetTrigger: %v", err)
-	}
-	if trig.Status != "pending" {
-		t.Fatalf("trigger not re-queued after lease expiry: %+v", trig)
-	}
-
-	run, err := st.GetRun(ctx, "run-dead-1")
-	if err != nil {
-		t.Fatalf("GetRun: %v", err)
-	}
-	if run.Status != "failed" {
-		t.Errorf("run.Status=%q want failed", run.Status)
-	}
-	if run.Error == "" {
-		t.Error("run.Error empty; want lease-expiry message")
-	}
-
-	c := client.New(ts.URL, nil)
-	second, err := c.ClaimTrigger(ctx)
-	if err != nil {
-		t.Fatalf("second claim: %v", err)
-	}
-	if second == nil || second.ID != "run-dead-1" {
-		t.Fatalf("second claim didn't get run-dead-1: %+v", second)
-	}
-}
-
-func TestReaper_HeartbeatKeepsAlive(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-	srv := controller.New(st, nil)
-	ts := httptest.NewServer(srv.Handler())
-	defer ts.Close()
-	c := client.New(ts.URL, nil)
-
-	ctx := context.Background()
-	_ = st.CreateTrigger(ctx, store.Trigger{
-		ID: "run-live-1", Pipeline: "demo", CreatedAt: time.Now(),
-	})
-	claimed, err := st.ClaimNextTrigger(ctx, 150*time.Millisecond)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if claimed.LeaseExpiresAt == nil {
-		t.Fatal("claimed trigger has no lease expiry")
-	}
-	initialExpiry := *claimed.LeaseExpiresAt
-	if _, err := c.HeartbeatTrigger(ctx, claimed.ID); err != nil {
-		t.Fatalf("heartbeat: %v", err)
-	}
-	renewed, err := st.GetTrigger(ctx, claimed.ID)
-	if err != nil {
-		t.Fatalf("read renewed trigger: %v", err)
-	}
-	if renewed.LeaseExpiresAt == nil {
-		t.Fatal("heartbeated trigger has no lease expiry")
-	}
-	minimumExpiry := initialExpiry.Add(store.DefaultLeaseDuration / 2)
-	if renewed.LeaseExpiresAt.Before(minimumExpiry) {
-		t.Fatalf("heartbeat expiry = %s, want at or after %s", renewed.LeaseExpiresAt, minimumExpiry)
-	}
-	reaped, err := store.Maintenance.ReapExpiredTriggers(st, ctx)
-	if err != nil {
-		t.Fatalf("reap: %v", err)
-	}
-	for _, id := range reaped {
-		if id == claimed.ID {
-			t.Fatalf("heartbeated trigger %q was reaped", id)
-		}
-	}
-
-	got, err := st.GetTrigger(ctx, claimed.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Status != "claimed" {
-		t.Errorf("heartbeated trigger got reaped: status=%q", got.Status)
+			tenant, err := st.ForTeam(ctx, store.DefaultTeam)
+			if err != nil {
+				t.Fatal(err)
+			}
+			run, err := tenant.ReadRun(ctx, "run")
+			if err != nil || run.State != store.RunRunning || run.FinishedAt != nil {
+				t.Fatalf("owner recovery ended its run: state=%s, %v", run.State, err)
+			}
+			var status string
+			var generation int64
+			var disruptions int
+			if err := st.DB().QueryRowContext(ctx, `SELECT status,generation,disruptions FROM triggers WHERE team=? AND id='run'`, store.DefaultTeam).Scan(&status, &generation, &disruptions); err != nil {
+				t.Fatal(err)
+			}
+			wantStatus, wantDisruptions, wantEvents := "claimed", 0, 0
+			if expired {
+				wantStatus, wantDisruptions, wantEvents = "pending", 1, 1
+			}
+			if status != wantStatus || disruptions != wantDisruptions || generation != 7 {
+				t.Fatalf("owner status=%s generation=%d disruptions=%d", status, generation, disruptions)
+			}
+			events, err := tenant.ReadStateEvents(ctx, "run", 0, 10)
+			if err != nil || len(events) != wantEvents {
+				t.Fatalf("recovery events: %+v, %v", events, err)
+			}
+			if expired && events[0].Kind != "run_requeued" {
+				t.Fatalf("owner event=%s", events[0].Kind)
+			}
+		})
 	}
 }

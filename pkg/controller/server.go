@@ -345,6 +345,10 @@ func (s *Server) WithMetricsListener(ln net.Listener) *Server {
 // set works -- the default implementation lives in internal/secrets.
 func (s *Server) WithSecretsCipher(c Cipher) *Server {
 	s.secretsCipher = c
+	if s.store != nil {
+		bound, _ := c.(store.SessionKeyCipher)
+		s.store.SetSessionKeyCipher(bound)
+	}
 	return s
 }
 

@@ -1,8 +1,6 @@
 package store
 
 import (
-	"errors"
-	"slices"
 	"testing"
 	"time"
 )
@@ -50,35 +48,5 @@ func TestRevokeToken_AlreadyEffectiveIsRejected(t *testing.T) {
 	}
 	if err := s.RevokeToken(tok.Prefix, now.Add(time.Second)); err == nil {
 		t.Fatalf("second revoke should report the token already revoked")
-	}
-}
-
-func TestTokenSession_EndsWithItsToken(t *testing.T) {
-	s := newTestStore(t)
-	now := time.Now().UTC()
-
-	_, tok, err := s.CreateToken("operator", TokenKindUser, []string{"admin"}, time.Hour, now)
-	if err != nil {
-		t.Fatalf("CreateToken: %v", err)
-	}
-	raw, _, err := s.CreateTokenSession(t.Context(), tok.Prefix, tok.Principal, tok.Team, 24*time.Hour, now)
-	if err != nil {
-		t.Fatalf("CreateTokenSession: %v", err)
-	}
-	sess, err := s.LookupSession(t.Context(), raw, now.Add(time.Second))
-	if err != nil {
-		t.Fatalf("LookupSession: %v", err)
-	}
-	if !slices.Equal(sess.Scopes, []string{"admin"}) || sess.TokenPrefix != tok.Prefix || sess.Team != DefaultTeam {
-		t.Fatalf("session = scopes %v prefix %q team %q, want the token's", sess.Scopes, sess.TokenPrefix, sess.Team)
-	}
-	if _, err := s.LookupSession(t.Context(), raw, now.Add(2*time.Hour)); !errors.Is(err, ErrTokenExpired) {
-		t.Fatalf("session past its token's expiry = %v, want ErrTokenExpired", err)
-	}
-	if err := s.RevokeToken(tok.Prefix, now.Add(time.Minute)); err != nil {
-		t.Fatalf("RevokeToken: %v", err)
-	}
-	if _, err := s.LookupSession(t.Context(), raw, now.Add(2*time.Minute)); !errors.Is(err, ErrTokenRevoked) {
-		t.Fatalf("session of a revoked token = %v, want ErrTokenRevoked", err)
 	}
 }

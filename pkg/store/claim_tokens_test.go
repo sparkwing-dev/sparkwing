@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 var claimTokenClasses = []store.ClaimRouteClass{store.ClaimSensitive, store.ClaimReporting, store.ClaimResult}
@@ -178,7 +179,7 @@ func expireAndReap(t *testing.T, f claimedFixture) {
 		time.Now().Add(-time.Second).UnixNano(), f.node.RunID, f.node.NodeID); err != nil {
 		t.Fatalf("expire the lease: %v", err)
 	}
-	if _, err := f.s.ReapExpiredNodeClaims(ctx); err != nil {
+	if _, err := teststore.ReapUnits(ctx, f.s); err != nil {
 		t.Fatalf("reap: %v", err)
 	}
 }

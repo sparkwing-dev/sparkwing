@@ -66,6 +66,56 @@ These declarations leave transaction implementation with W1.
   none. Application retry advances under the same generation. Start/retry return
   the authoritative ordinal in Applied. Owner/eval logs always use unit subjects.
 
+`Store.ReapUnits` is the sole unit-expiry entry point. Every pass requires the
+current `controller.reaper` lease and rechecks it in each unit transaction.
+`Store.ReapExpiredNodeClaims`, `Maintenance.RecoverExpiredNodeClaims`,
+`Maintenance.ReapExpiredTriggers` and `AgentLossRecovery` are removed. Recovery
+returns tagged `ReapedUnit` results and never creates a retry run. A local owner
+that has started fails in place after lease loss. An unstarted local owner
+requeues without consuming a disruption. Terminal owner timestamps stay recorded.
+The old dispatcher-expiry path and its application-retry accounting are removed.
+Metered recovery still needs W1b's final transactional settlement integration.
+
+Cancellation intent persists in `runs.cancel_reason` and `nodes.cancel_reason`,
+separately from terminal result fields. The first request owns that intent.
+`RunRow.CancelReason` and `NodeRow.CancelReason` retain it after draining and
+reopening. Renewal carries it in `LeaseBeat.CancelReason` for job, owner and eval
+units. A request-only edge never writes a holder's error, failure reason or exit
+code. Run cancellation passes its reason to affected jobs without replacing an
+earlier job request. C2's authentication snapshot still needs a reason field to
+transport the same intent through `AuthenticationReader`.
+
+Session creation and lookup use the store clock and Unix nanoseconds. The session
+row holds a SHA-256 digest. Every authentication reads current membership and
+complete capability ancestry. Account sessions follow current role grants.
+Capability-backed sessions also retain their parent's team, account and grant
+ceiling. The controller preserves those verified grants instead of replacing them
+with the full role. The removed `triggers.read` permission is absent from the role
+map because C2's final grant registry excludes it.
+
+`SessionKeyCipher` and `Store.SetSessionKeyCipher` configure row-bound encryption
+for `settings.session_csrf_key`. The row must be sealed and open under that cipher.
+A missing key is minted once, atomically invalidating sessions signed by no
+available key. Replicas open the same committed envelope. Wrong keys, malformed
+envelopes and missing cipher configuration refuse session operations. The
+controller's existing `WithSecretsCipher` installs its bound cipher on the store.
+No new key file, environment variable or encryption implementation is introduced.
+
+`CreateCapabilitySession(ctx, prefix, ttl)` replaces `CreateTokenSession`.
+It derives identity from an unbound account capability and retains that capability
+as its revocation parent. `Session.CapabilityPrefix` replaces `TokenPrefix`.
+`CreateAccountSession`, `CreateIdentityAccountSession`, `LookupSession` and
+`LookupSessionAndRenew` no longer accept caller clocks. Their callers select
+session identity and duration. The store supplies timestamps, digest persistence,
+current grants and the committing transaction.
+
+The SQLite session proof `credentials-session-digest-csrf/store-sqlite` checks
+creation, digest authentication, encrypted key storage, identical CSRF after store
+reopening, membership demotion and session revocation. It does not exercise OAuth,
+a native browser, production C2 middleware or a network listener. The controller
+component property separately exercises the registered session handler with
+sixteen generated grant subsets and a fake origin verifier.
+
 `IntakePolicyFacts.SourceLocation` is the server-verified acquisition location for
 the selected repository. Intake replaces the proposed location with that fact.
 A nonempty proposed location without this fact is refused before either run or
@@ -111,6 +161,35 @@ Their raw `Store` methods are removed. The unused raw `SetRetriedAs`,
 `ActiveConcurrencyHolder` and `ListSpawnedChildrenByRun` wrappers are removed.
 Their tenant methods remain while legacy callers migrate.
 
+`Tenant.ResetPipelineProfile`, `Tenant.ResetAllProfiles` and
+`Tenant.ProfileSamples` own capacity resets and sample reads. Their raw Store
+twins are removed. Local stats reset selects DefaultTeam explicitly. The local
+dashboard selects the request's tenant before reading profiles or samples.
+Query parameters cannot select another team's profiles.
+
+The remaining raw Store profile methods are removed: RecordProfileObservation,
+RecordWaitObservation, RecordContention, SetProfilePin, UpsertProfilePin,
+GetPipelineProfile, ListPipelineProfiles and CacheExcludedCounts. Tenant owns
+the complete profile API. Local orchestration, capacity stats and profile
+diagnostics select the registered DefaultTeam explicitly.
+
+Tenant owns concurrency acquisition, holder reads and renewal, release,
+follower resolution, promotion, waiter polling/cancellation and state reads.
+The raw Store twins and unused deployment-wide ListConcurrencyStates are removed.
+The local adapter selects the registered DefaultTeam and propagates handle errors.
+Acquisition and promotion persist the work's current generation. Queued arrivals
+also persist their lease. Expired waiters cannot keep arrival order or promote.
+Admission, polling, renewal and cache expiry use the store clock. Promotion and
+waiter maintenance use the owner lease or a live run job claim instead of the
+removed run heartbeat. Run queries carry the selected tenant key.
+
+The SQLite recovery proof `recovery-concurrency-continuous-adoption/store-sqlite`
+holds node and plan capacity through owner loss, remote claim renewal and store
+reopening. It reclaims the owner through ClaimUnit and adopts both holders.
+Job completion releases node capacity. Run completion releases plan capacity.
+Each release allows one queued competitor, and repeated promotion admits none.
+Enrollment is a contract fake. Native process recovery remains separate evidence.
+
 `Tenant.ReadOwnerSnapshot` reads the current owner authority, lease and scheduling
 state in one snapshot. A replaced, expired or revoked owner receives no snapshot.
 Cancellation remains readable while a held owner drains. The controller transports
@@ -151,6 +230,15 @@ cannot reuse that holder's live fence.
 Final run pruning uses `Operator.MaintainRetention`. The unleased
 `Store.PruneRunsOlderThan` API is removed. Finish time controls eligibility, and
 a failed pass rolls back every removal and discards its result counters.
+
+Identity expiry also uses `Operator.MaintainRetention`. The unleased
+`Store.PruneSpentIdentity` and `Store.ExpireSessions` methods, `IdentityPrune` and
+`SpentIdentityRetention` are removed. Invitations expire thirty days after
+acceptance, withdrawal or expiry. Invitation and email-delivery timestamps use
+nanoseconds. Each identity table observes the pass limit. Session expiry preserves
+any row named by a capability parent. `RetentionResult.Invitations` and
+`RetentionResult.Sessions` count only committed deletions. Controller maintenance
+calls this fenced pass once instead of running a second identity sweep.
 
 `Tenant.ReleaseSourceCredential` accepts C2's authorized authority reference and
 route target. In one write transaction it reloads ancestry, locks the owner, run

@@ -308,7 +308,7 @@ func TestTokenSessionAuthenticatesWithItsTokensScopes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, _, err := f.store.CreateTokenSession(t.Context(), tok.Prefix, tok.Principal, tok.Team, time.Hour, time.Now().UTC())
+	session, _, err := f.store.CreateCapabilitySession(t.Context(), tok.Prefix, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

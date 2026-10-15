@@ -22,7 +22,11 @@ func TestHeartbeatConcurrencySlot_RetriesTransientBusy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed open: %v", err)
 	}
-	if _, err := seed.AcquireConcurrencySlot(ctx, AcquireSlotRequest{
+	tenant, err := seed.ForTeam(ctx, DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.AcquireConcurrencySlot(ctx, AcquireSlotRequest{
 		Key: "k", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
 		Capacity: 1, Policy: OnLimitQueue,
 	}); err != nil {
