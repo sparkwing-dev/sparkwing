@@ -53,6 +53,9 @@ func (s *Store) settlePaymentFacts(ctx context.Context, event capability.Payment
 		return PaymentSettlement{}, err
 	}
 	defer rollbackOrLog(tx)
+	if err := lockCreditLedgerTx(ctx, tx); err != nil {
+		return PaymentSettlement{}, err
+	}
 	if err := configuredPaymentModeTx(ctx, tx, event.Mode); err != nil {
 		return PaymentSettlement{}, err
 	}
@@ -66,6 +69,15 @@ func (s *Store) settlePaymentFacts(ctx context.Context, event capability.Payment
 	}
 	if checkout.currency != event.Currency || checkout.amount != event.AmountMinor || (event.PaymentID != "" && checkout.payment != "" && checkout.payment != event.PaymentID) {
 		return PaymentSettlement{}, authorityError(apierr.Conflict, "payment facts conflict with committed checkout")
+	}
+	if event.PaymentID != "" {
+		var used int
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM credit_checkouts WHERE payment_mode=? AND payment_id=? AND id<>?", string(event.Mode), event.PaymentID, checkout.result.CheckoutID).Scan(&used); err != nil {
+			return PaymentSettlement{}, err
+		}
+		if used != 0 {
+			return PaymentSettlement{}, authorityError(apierr.Conflict, "payment identity belongs to another checkout")
+		}
 	}
 	body, err := json.Marshal(event)
 	if err != nil {

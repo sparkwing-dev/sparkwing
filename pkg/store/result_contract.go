@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -84,7 +83,7 @@ func (t *Tenant) WriteSummary(ctx context.Context, summary SummaryWrite) error {
 // rules; eval does not inherit the job-attempt grace exception.
 // The run owns RetentionClass; incomplete logs never change the unit's result.
 func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error {
-	return authorityError(apierr.Unavailable, "log subject validation is unavailable")
+	return t.recordSegments(ctx, commit)
 }
 
 // LogSegments is the persisted read model for one tagged subject, including an empty tail.
@@ -99,5 +98,5 @@ type LogSegments struct {
 // Controller reads reauthorize each request; terminal logs remain readable under
 // run-read authority after the writer's lease ends.
 func (t *Tenant) ReadLogSegments(ctx context.Context, actor Actor, request blob.LogReadRequest) (LogSegments, error) {
-	return LogSegments{}, authorityError(apierr.Unavailable, "log subject validation is unavailable")
+	return t.readLogSegments(ctx, actor, request)
 }
