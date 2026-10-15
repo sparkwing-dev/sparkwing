@@ -70,7 +70,7 @@ func TestProfileHistory(t *testing.T) {
 						}
 					}
 					seed()
-					p, err := st.GetPipelineProfile(ctx, "history", node)
+					p, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "history", node)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -78,7 +78,7 @@ func TestProfileHistory(t *testing.T) {
 					if p.CPUMeasured || p.PlanHash != "" {
 						t.Errorf("obsolete measurement metadata survived: %+v", p)
 					}
-					profiles, err := st.ListPipelineProfiles(ctx, "history")
+					profiles, err := tenantFor(t, st, store.DefaultTeam).ListPipelineProfiles(ctx, "history")
 					if err != nil || len(profiles) != 1 {
 						t.Fatalf("list: %v, %d profiles", err, len(profiles))
 					}
@@ -90,11 +90,11 @@ func TestProfileHistory(t *testing.T) {
 					if err != nil || len(window) != 0 {
 						t.Errorf("obsolete samples: %v, %v", window, err)
 					}
-					if err := st.UpsertProfilePin(ctx, "history", node, 2, 100); err != nil {
+					if err := tenantFor(t, st, store.DefaultTeam).UpsertProfilePin(ctx, "history", node, 2, 100); err != nil {
 						t.Fatal(err)
 					}
 					if node == "" {
-						if err := st.RecordWaitObservation(ctx, "history", time.Millisecond); err != nil {
+						if err := tenantFor(t, st, store.DefaultTeam).RecordWaitObservation(ctx, "history", time.Millisecond); err != nil {
 							t.Fatal(err)
 						}
 					}
@@ -109,19 +109,19 @@ func TestProfileHistory(t *testing.T) {
 						for _, contended := range []bool{false, true} {
 							seed()
 							obs := store.ProfileObservation{PlanHash: hash, Duration: time.Second, PeakCores: 3, SustainedCores: 1, PeakMemoryBytes: 80, Contended: contended, FloorCores: 2, FloorMemoryBytes: 60, CPUMeasured: true}
-							if err := st.RecordProfileObservation(ctx, "history", node, obs); err != nil {
+							if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "history", node, obs); err != nil {
 								t.Fatal(err)
 							}
-							p, err := st.GetPipelineProfile(ctx, "history", node)
+							p, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "history", node)
 							if err != nil {
 								t.Fatal(err)
 							}
 							if contended {
 								check(p, 0, 2, 60)
-								if err := st.RecordProfileObservation(ctx, "history", node, store.ProfileObservation{CPUMeasured: true, PlanHash: hash, Contended: true}); err != nil {
+								if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "history", node, store.ProfileObservation{CPUMeasured: true, PlanHash: hash, Contended: true}); err != nil {
 									t.Fatal(err)
 								}
-								p, err = st.GetPipelineProfile(ctx, "history", node)
+								p, err = tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "history", node)
 								if err != nil {
 									t.Fatal(err)
 								}

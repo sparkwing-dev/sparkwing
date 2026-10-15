@@ -35,19 +35,23 @@ func runCapacityStats(ctx context.Context, paths orchestrator.Paths, pipeline st
 	}
 	defer func() { _ = st.Close() }()
 
-	profiles, err := st.ListPipelineProfiles(ctx, pipeline)
+	tenant, err := st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return err
+	}
+	profiles, err := tenant.ListPipelineProfiles(ctx, pipeline)
 	if err != nil {
 		return err
 	}
 	if len(profiles) == 0 && pipeline != "" {
-		all, err := st.ListPipelineProfiles(ctx, "")
+		all, err := tenant.ListPipelineProfiles(ctx, "")
 		if err != nil {
 			return err
 		}
 		profiles = matchProfileName(all, pipeline)
 	}
 	stats := groupCapacityStats(profiles)
-	cachedExcluded, err := st.CacheExcludedCounts(ctx, barePipeline(pipeline), string(sparkwing.Memoized), capacity.CacheDominantFraction)
+	cachedExcluded, err := tenant.CacheExcludedCounts(ctx, barePipeline(pipeline), string(sparkwing.Memoized), capacity.CacheDominantFraction)
 	if err != nil {
 		return err
 	}

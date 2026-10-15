@@ -1,3 +1,4 @@
 # pkg/store/teststore
 
+func ForTeam(t testing.TB, s *store.Store, team store.Team) *store.Tenant
 func Open(path string) (*store.Store, error)

@@ -18,7 +18,7 @@ func TestProfileSamples_ReturnsWindowOldestFirst(t *testing.T) {
 		{CPUMeasured: true, Duration: 20 * time.Second, PeakCores: 4.0, SustainedCores: 3.0, PeakMemoryBytes: 2 << 30},
 		{CPUMeasured: true, Duration: 30 * time.Second, PeakCores: 8.0, SustainedCores: 5.0, PeakMemoryBytes: 3 << 30},
 	} {
-		if err := st.RecordProfileObservation(ctx, "demo", "", obs); err != nil {
+		if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "demo", "", obs); err != nil {
 			t.Fatalf("RecordProfileObservation: %v", err)
 		}
 	}
@@ -46,7 +46,7 @@ func TestProfileSamples_ReproduceStoredCharges(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 1; i <= 12; i++ {
-		if err := st.RecordProfileObservation(ctx, "demo", "", store.ProfileObservation{
+		if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "demo", "", store.ProfileObservation{
 			CPUMeasured:     true,
 			Duration:        time.Duration(i) * time.Second,
 			PeakCores:       float64(i),
@@ -57,7 +57,7 @@ func TestProfileSamples_ReproduceStoredCharges(t *testing.T) {
 		}
 	}
 
-	prof, err := st.GetPipelineProfile(ctx, "demo", "")
+	prof, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "demo", "")
 	if err != nil {
 		t.Fatal(err)
 	}

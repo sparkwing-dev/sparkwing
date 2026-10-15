@@ -25,6 +25,14 @@ first execution then starts attempt one. Old holders cannot finish the job,
 and the five lapses create no sibling run. This adds coverage to the existing
 recovery ports without completing the native process cells.
 
+`recovery_test.go:TestRecovery/recovery-started-lapse-cap/store-sqlite` exercises
+three started job lapses with reopening after each loss. Generations advance,
+attempts retain ordinals one through three, and application retries stay zero.
+Each lost attempt closes with agent_lost. The third loss fails the job and
+reconciliation keeps it terminal without another claim. The proof checks exact
+events and refuses stale reports after every loss. It adds coverage without a
+new archived source-function identity or native process evidence.
+
 `placement_test.go:TestPlacement/placement-granted-identity-and-capacity/store-sqlite`
 extends the existing package ports into active SQLite acceptance. It checks
 named and queued claims for capacity, authenticated name, self-asserted labels,

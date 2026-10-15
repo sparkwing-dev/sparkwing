@@ -117,6 +117,12 @@ twins are removed. Local stats reset selects DefaultTeam explicitly. The local
 dashboard selects the request's tenant before reading profiles or samples.
 Query parameters cannot select another team's profiles.
 
+The remaining raw Store profile methods are removed: RecordProfileObservation,
+RecordWaitObservation, RecordContention, SetProfilePin, UpsertProfilePin,
+GetPipelineProfile, ListPipelineProfiles and CacheExcludedCounts. Tenant owns
+the complete profile API. Local orchestration, capacity stats and profile
+diagnostics select the registered DefaultTeam explicitly.
+
 `Tenant.ReadOwnerSnapshot` reads the current owner authority, lease and scheduling
 state in one snapshot. A replaced, expired or revoked owner receives no snapshot.
 Cancellation remains readable while a held owner drains. The controller transports

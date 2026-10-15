@@ -84,7 +84,11 @@ func TestLocalStateServesEveryRunCoordinationMethod(t *testing.T) {
 	if err := state.FinishTrigger(ctx, childID); err != nil {
 		t.Fatalf("FinishTrigger: %v", err)
 	}
+}
 
+func TestLocalStateServesProfileMethods(t *testing.T) {
+	state := localState{st: coordinationStore(t)}
+	ctx := t.Context()
 	obs := store.ProfileObservation{Duration: 5 * time.Second, PeakCores: 2, SustainedCores: 1, PeakMemoryBytes: 1 << 30, CPUMeasured: true}
 	if err := state.RecordProfileObservation(ctx, "demo", "", obs); err != nil {
 		t.Fatalf("RecordProfileObservation: %v", err)
@@ -104,6 +108,10 @@ func TestLocalStateServesEveryRunCoordinationMethod(t *testing.T) {
 	}
 	if err := state.RecordWaitObservation(ctx, "demo", 250*time.Millisecond); err != nil {
 		t.Fatalf("RecordWaitObservation: %v", err)
+	}
+	prof, err = state.GetPipelineProfile(ctx, "demo", "")
+	if err != nil || prof == nil || prof.ContendedCount != 1 || prof.WaitSampleCount != 1 || prof.WaitP50 != 250*time.Millisecond {
+		t.Fatalf("profile observations = %+v, %v", prof, err)
 	}
 }
 

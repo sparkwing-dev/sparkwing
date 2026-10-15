@@ -503,28 +503,48 @@ func (l localState) ReleaseClaimAtGeneration(ctx context.Context, id string, seq
 }
 
 func (l localState) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*store.PipelineProfile, error) {
-	return l.st.GetPipelineProfile(ctx, pipeline, nodeID)
+	tenant, err := l.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return nil, err
+	}
+	return tenant.GetPipelineProfile(ctx, pipeline, nodeID)
 }
 
 func (l localState) SetPipelinePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error {
+	tenant, err := l.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return err
+	}
 	// safety: mirrors the controller route, so a pin lands in the same row
 	// whether the run writes it here or over the wire.
 	if cores <= 0 && memoryBytes <= 0 {
-		return l.st.SetProfilePin(ctx, pipeline, nodeID, 0, 0)
+		return tenant.SetProfilePin(ctx, pipeline, nodeID, 0, 0)
 	}
-	return l.st.UpsertProfilePin(ctx, pipeline, nodeID, cores, memoryBytes)
+	return tenant.UpsertProfilePin(ctx, pipeline, nodeID, cores, memoryBytes)
 }
 
 func (l localState) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs store.ProfileObservation) error {
-	return l.st.RecordProfileObservation(ctx, pipeline, nodeID, obs)
+	tenant, err := l.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return err
+	}
+	return tenant.RecordProfileObservation(ctx, pipeline, nodeID, obs)
 }
 
 func (l localState) RecordContention(ctx context.Context, pipeline string) error {
-	return l.st.RecordContention(ctx, pipeline)
+	tenant, err := l.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return err
+	}
+	return tenant.RecordContention(ctx, pipeline)
 }
 
 func (l localState) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error {
-	return l.st.RecordWaitObservation(ctx, pipeline, wait)
+	tenant, err := l.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return err
+	}
+	return tenant.RecordWaitObservation(ctx, pipeline, wait)
 }
 
 type localLogs struct {

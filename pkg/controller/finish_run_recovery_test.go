@@ -71,7 +71,7 @@ func TestFinishRunRetryReportsCommittedOutcomeWithoutRefolding(t *testing.T) {
 				t.Fatalf("check run writes = %+v, want the committed success", calls)
 			}
 			for _, node := range []string{"", "build"} {
-				profile, err := st.GetPipelineProfile(t.Context(), "profile", node)
+				profile, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(t.Context(), "profile", node)
 				if err != nil || (profile != nil && profile.SampleCount != 0) {
 					t.Fatalf("retry folded after terminal commit: profile=%+v error=%v", profile, err)
 				}
