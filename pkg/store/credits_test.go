@@ -1024,7 +1024,7 @@ func TestCreditClaimIsRefusedAtTheHighestAllowedRate(t *testing.T) {
 	for i := range table {
 		table[i].MicroPerSecond = store.MaxCreditRateMicro
 	}
-	if err := s.SetCreditRateTable(ctx, table); err != nil {
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &table}); err != nil {
 		t.Fatalf("set rate: %v", err)
 	}
 	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid,

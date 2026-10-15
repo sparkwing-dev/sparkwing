@@ -382,7 +382,7 @@ func TestMeteredTriggerRequeueRefundsHeartbeatUsage(t *testing.T) {
 	for i := range table {
 		table[i].MicroPerSecond *= 2
 	}
-	if err := st.SetCreditRateTable(ctx, table); err != nil {
+	if _, err := st.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &table}); err != nil {
 		t.Fatal(err)
 	}
 	backdateTriggerClaim(t, st, "run-unstarted-paid", pastTriggerMinimum(5*time.Second), time.Time{})

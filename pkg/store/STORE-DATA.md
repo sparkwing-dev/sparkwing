@@ -1,6 +1,8 @@
 # Store data persistence
 
 Financial writes use the same transaction as the state change that caused them.
+Rate-table writes use `SetCreditSettings` with `CreditSettingsUpdate.RateTable`.
+The separate `SetCreditRateTable` wrapper is removed.
 `recordBillingAwardTx` stores immutable provenance and a reservation charge. The
 charge snapshots the CPU class, rate and card fingerprint. Its caller must pass
 server-derived authority, pricing and reservation size after taking claim locks.
@@ -52,6 +54,14 @@ the ticket and authority again, then records existence, the exact receipt, ticke
 completion, quota settlement and per-replica usage in one transaction. A job
 receipt retains team, run, job, attempt, generation and capability. Owner and
 publication identities remain tagged.
+
+The owner-receipt SQLite acceptance proof uploads through trigger and plan
+awards before jobs exist. It checks refused verification, exact receipt replay,
+reopening and refusal to transfer the receipt or ticket to a job in the same run.
+Its awards and physical verification are contract fixtures. Eval upload tests
+also check the source attempt and unit generation independently, using explicit
+fake write authority. Issued eval awards retain their read-only data grant.
+Signed transfers and EOF verification remain physical-backend integration work.
 
 Attempt-scoped publication requires an imported terminal attempt with a persisted
 finish time. Reservation, lookup, commit, abort, data checks and log commits use

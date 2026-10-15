@@ -76,7 +76,7 @@ unlock.
 - **sdk:** describe lists each pipeline's declared secrets as `secrets`, which `sparkwing pipeline describe --secrets` prints
 
 ### Changed
-- **store (Breaking):** Remove `Store.CreditRateTableSet`, `Store.CreditRateMicroPerSecond` and `Store.CreditGraceSeconds`. Read presence, prices and grace through `CreditSettings` in one snapshot. See [migration guide](docs/migrations/_unreleased.md#rate-table-presence-uses-the-settings-snapshot).
+- **store (Breaking):** Remove `Store.CreditRateTableSet`, `Store.CreditRateMicroPerSecond`, `Store.CreditGraceSeconds` and `Store.SetCreditRateTable`. Read presence, prices and grace through `CreditSettings` in one snapshot. Write rate tables through `SetCreditSettings`. See [migration guide](docs/migrations/_unreleased.md#rate-table-presence-uses-the-settings-snapshot).
 - **store:** Data authorization can run inside the transaction that owns a write. Receipt, reference, revocation and holder changes in that transaction govern access before commit.
 - **store + controller (Breaking):** Abandoned execution logs close as incomplete through `Operator.SealAbandonedLogStreams` under the maintenance lease. Tagged job streams keep their final tail grace, and owner streams check their own unit fences. The old `Store.AbandonedNodeLogs` API and periodic node-log sweep are removed. See [migration guide](docs/migrations/_unreleased.md#abandoned-logs-use-tagged-streams).
 - **store + controller (Breaking):** Remove the cache service's `POST /internal/egress/totals` endpoint and `Store.RecordEgressTotals` / `PruneEgressTotals`. Cache-service totals stay in memory. Tenant usage uses additive replica rows.

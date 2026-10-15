@@ -144,7 +144,8 @@ func TestStoreDataCreditSettingsIndependentWritersPreserveRateAuthority(t *testi
 	results := make(chan error, 2)
 	go func() {
 		<-start
-		results <- s.SetCreditRateTable(t.Context(), table)
+		_, err := s.SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table})
+		results <- err
 	}()
 	go func() {
 		<-start

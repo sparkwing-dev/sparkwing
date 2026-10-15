@@ -163,7 +163,8 @@ func TestUnsetRateTablePricesTheDefaultLadder(t *testing.T) {
 func TestSetRateTableWritesTheFourCorePriceToTheSingleRate(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	if err := s.SetCreditRateTable(ctx, githubRateTable()); err != nil {
+	rates := githubRateTable()
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
 		t.Fatalf("set the rate table: %v", err)
 	}
 	settings, err := s.CreditSettings(ctx)
@@ -195,7 +196,8 @@ func TestMeteredClaimReservesAtTheNodesCPUClass(t *testing.T) {
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	fundLedger(t, s, 10_000)
-	if err := s.SetCreditRateTable(ctx, githubRateTable()); err != nil {
+	rates := githubRateTable()
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
 		t.Fatalf("set the rate table: %v", err)
 	}
 	readyNodeWithCores(t, s, "run-small", "build", 2)
@@ -231,7 +233,8 @@ func TestHeartbeatChargesAtTheNodesCPUClass(t *testing.T) {
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	fundLedger(t, s, 10_000)
-	if err := s.SetCreditRateTable(ctx, githubRateTable()); err != nil {
+	rates := githubRateTable()
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
 		t.Fatalf("set the rate table: %v", err)
 	}
 	readyNodeWithCores(t, s, "run-small", "build", 2)
@@ -272,7 +275,8 @@ func TestClaimIsRefusedAboveTheLargestPricedClass(t *testing.T) {
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	fundLedger(t, s, 10_000)
-	if err := s.SetCreditRateTable(ctx, githubRateTable()); err != nil {
+	rates := githubRateTable()
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
 		t.Fatalf("set the rate table: %v", err)
 	}
 	readyNodeWithCores(t, s, "run-huge", "build", 96)
@@ -328,7 +332,8 @@ func TestTheDefaultLadderRefusesAClassAboveEight(t *testing.T) {
 		t.Fatalf("a refused claim reserved %+v", charges)
 	}
 
-	if err := s.SetCreditRateTable(ctx, githubRateTable()); err != nil {
+	rates := githubRateTable()
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
 		t.Fatalf("set the rate table: %v", err)
 	}
 	if _, err := s.ClaimNamedNode(ctx, claimant, "run-sixteen", "build", "pod-1", time.Minute,
@@ -349,7 +354,8 @@ func TestARateTableChangeLeavesWrittenChargesAlone(t *testing.T) {
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	fundLedger(t, s, 10_000)
-	if err := s.SetCreditRateTable(ctx, githubRateTable()); err != nil {
+	rates := githubRateTable()
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
 		t.Fatalf("set the rate table: %v", err)
 	}
 	readyNodeWithCores(t, s, "run-repriced", "build", 8)
@@ -367,7 +373,7 @@ func TestARateTableChangeLeavesWrittenChargesAlone(t *testing.T) {
 	for i := range doubled {
 		doubled[i].MicroPerSecond *= 2
 	}
-	if err := s.SetCreditRateTable(ctx, doubled); err != nil {
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &doubled}); err != nil {
 		t.Fatalf("reprice: %v", err)
 	}
 	second, err := store.ChargeNodeCreditsForTest(ctx, s, "run-repriced", "build", claimant.TokenPrefix, start.Add(20*time.Second))
@@ -417,7 +423,8 @@ func TestAnEarlyFinishPaysTheMinimumAtTheRateTheClaimReserved(t *testing.T) {
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	fundLedger(t, s, 10_000)
-	if err := s.SetCreditRateTable(ctx, githubRateTable()); err != nil {
+	rates := githubRateTable()
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
 		t.Fatalf("set the rate table: %v", err)
 	}
 	readyNodeWithCores(t, s, "run-early", "build", 8)
@@ -431,7 +438,7 @@ func TestAnEarlyFinishPaysTheMinimumAtTheRateTheClaimReserved(t *testing.T) {
 	for i := range doubled {
 		doubled[i].MicroPerSecond *= 2
 	}
-	if err := s.SetCreditRateTable(ctx, doubled); err != nil {
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &doubled}); err != nil {
 		t.Fatalf("reprice: %v", err)
 	}
 	res, err := s.FinalizeNodeCredits(ctx, "run-early", "build", claimant.TokenPrefix, time.Now())
@@ -472,7 +479,8 @@ func TestAClaimantsOwnCPUFigureDoesNotLowerTheBill(t *testing.T) {
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	fundLedger(t, s, 10_000)
-	if err := s.SetCreditRateTable(ctx, githubRateTable()); err != nil {
+	rates := githubRateTable()
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
 		t.Fatalf("set the rate table: %v", err)
 	}
 	readyNodeWithCores(t, s, "run-big", "build", 64)
@@ -494,7 +502,8 @@ func TestTheChargeRowCarriesThePinnedClass(t *testing.T) {
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	fundLedger(t, s, 10_000)
-	if err := s.SetCreditRateTable(ctx, githubRateTable()); err != nil {
+	rates := githubRateTable()
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
 		t.Fatalf("set the rate table: %v", err)
 	}
 	readyNodeWithCores(t, s, "run-eight", "build", 8)
@@ -548,7 +557,8 @@ func TestAnEmptyBalanceIsReportedBeforeTheUnpricedClass(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
-	if err := s.SetCreditRateTable(ctx, githubRateTable()); err != nil {
+	rates := githubRateTable()
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
 		t.Fatalf("set the rate table: %v", err)
 	}
 	readyNodeWithCores(t, s, "run-broke-huge", "build", 96)
@@ -566,7 +576,8 @@ func TestFailNodeForUnpricedClassEndsTheNodeWithAnEvent(t *testing.T) {
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	fundLedger(t, s, 10_000)
-	if err := s.SetCreditRateTable(ctx, githubRateTable()); err != nil {
+	rates := githubRateTable()
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
 		t.Fatalf("set the rate table: %v", err)
 	}
 	readyNodeWithCores(t, s, "run-unpriced", "build", 96)
@@ -630,9 +641,9 @@ func TestAStoredRateTableNothingCanReadIsAnError(t *testing.T) {
 func TestATableWithoutAFourCoreClassLeavesTheScalarAlone(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	if err := s.SetCreditRateTable(ctx, store.CreditRateTable{
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &store.CreditRateTable{
 		{Cores: 2, MicroPerSecond: 10_000}, {Cores: 8, MicroPerSecond: 36_667},
-	}); err != nil {
+	}}); err != nil {
 		t.Fatalf("set the rate table: %v", err)
 	}
 	settings, err := s.CreditSettings(ctx)

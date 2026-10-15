@@ -7,6 +7,9 @@
 `CreditSettings.RateMicroPerSecond` and `CreditSettings.GraceSeconds` from the
 same settings snapshot.
 
+`Store.SetCreditRateTable` is removed. Write the table through
+`SetCreditSettings` with `CreditSettingsUpdate.RateTable`.
+
 ## Abandoned logs use tagged streams
 
 `Store.AbandonedNodeLogs` and the controller's old periodic node-log sweep are

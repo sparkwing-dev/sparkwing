@@ -1,10 +1,98 @@
 # W1b handoff
 
-Continues `4ffe3830a`. W1b remains incomplete. This continuation is uncommitted.
+Continues `812583080`. W1b remains incomplete. This continuation is uncommitted.
 The lead owns review, commits, pipelines and native integration. W1 implementation
 files are unchanged. No Git write or candidate Sparkwing runtime was used.
 
 ## Current continuation
+
+Activated `storage-owner-receipts-and-stream-verification/store-data-sqlite`.
+Trigger and plan uploads reserve and commit before jobs exist. The proof rejects
+conflicting verification, checks hidden presence before commit and after failure,
+replays exact tagged receipts, reopens the database and retains the owner ticket.
+A separately seeded job in the same run cannot read or reference the digest or
+adopt the owner's ticket. Upload usage stays three bytes and one object,
+with no metadata download or egress charge. Award and physical verification facts
+are preseeded contract fixtures. Native signed transfers and EOF verification are
+still untested. The native cell remains skipped.
+
+Added two eval-owner tests. The invariant is that an owner receipt stays bound
+to its exact tagged unit and source fences. The property checks 128 forged source
+and unit identities through reserve, lookup, commit and abort after reopening.
+Six cases independently replace the persisted unit generation, source generation,
+lease, holder, prefix or status and require every upload operation to refuse.
+No refused pending commit creates a blob or receipt.
+
+Eval's real fixed grant table is `expansion.submit,data.read`; its data scope has
+no write ref. The tests first reached that refusal. They now use explicit fake
+write authority to exercise store persistence without widening C2's issuance
+policy or editing W1 files. These tests do not establish real eval upload support.
+No foreign contract change is requested. This establishes persistence under
+preseeded authority only. Trigger and plan ownership need no extra grant
+beyond their preseeded awards.
+
+Removed `Store.SetCreditRateTable`, **9 production Go lines**, including its
+comments and separating blank line. The 18 test calls use the existing
+`SetCreditSettings` and `CreditSettingsUpdate.RateTable`. No production caller
+outside pkg/store changed. No wrapper, setting, schema, limit, environment variable
+or runtime mechanism was added. No archived T1 inventory row is newly complete.
+The new proof adds owner-identity evidence to the acceptance contract.
+
+Verification uses the environment and store selection under Manual below.
+
+- Whole-repository `go build -p 4 ./...` passed after the final code changes.
+- Scoped vet over store and both acceptance trees passed.
+- The focused store selection passed **156 top-level tests / 420 cases**, with
+  no skips. The eval selection and changed settings selection also passed.
+- Both acceptance trees passed **20 top-level tests / 208 cases**, including
+  **11 storage SQLite cells and one billing SQLite cell**. The native/platform
+  skeleton still has **2,995 skips**. internal/acceptance has no test files.
+- Tenant SQL-scope, writer and twin guards passed.
+- Documentation mirror/changelog tests, sync-docs --check, session commentcheck,
+  session sleepcheck and whitespace checks passed.
+- Required `commentcheck -base main` reports one inherited W9 finding at
+  internal/controllerwire/contracts.go:47. This continuation's comments pass.
+
+The full legacy store suite, provider transactions, PostgreSQL, physical backends,
+real routes, native placements, candidates and pipelines were not run. The brief
+assigns native checks and pipelines to the lead. Some migrated legacy test callers
+still use old claim fixtures. Their compilation is covered by the store test run;
+this continuation claims no new runtime evidence for those old claim paths.
+
+Amendment status for W1b:
+
+- A1-24: transactional data checking and W1's binding join are implemented and
+  tested in the merged tree. PostgreSQL/native route evidence remains open.
+- A1-27: accounting helpers are implemented with calculator fakes. W1 still
+  inserts unmetered billing awards directly and owns joining award/start/wait/
+  renewal/finish/reap transactions to those helpers. C2's calculator is a stub.
+- A1-28: verified committed-checkout settlement is implemented. W2 owns provider
+  verification and replacing caller-selected paid grant routes.
+- A1-29 through A1-35: store upload, record, member, receipt, quota and reference
+  owners are implemented. W7 namespace/edge policy, verified manifest reads,
+  physical verification/deletion and W2 authenticated signing remain open.
+- A1-53: the additional SQLite proof is active. Native acceptance stays open.
+- handoffs.md has no entry assigned to W1b.
+
+The prior imported publication-attempt, owner-publication and materialized
+result-destination identity gaps remain W1 integration points. W2 must configure
+SetResultBlobRecords with W7's real verified manifest reader. Final log signing,
+transfer, lifecycle expiry, ring fallback and proxy egress remain foreign runtime
+integrations. Old upload, log, grant and claim-credit consumers still prevent the
+remaining hard cuts. W1 implementation files are unchanged.
+
+Shared files touched: internal/acceptance/store_data.go, new
+internal/acceptance/store_owner_receipts.go, c1-data.md, CHANGELOG.md, the source
+migration guide, its generated mirror, pkg/docs/changelog.md and the one removed
+API snapshot declaration. All other edits are owned store tests, credit_rates.go,
+STORE-DATA.md and this handoff. No cross-package production caller was migrated.
+
+Friction was foreign stubs, the inherited W9 comment, a fixture SQL placeholder
+count and an enum spelling corrected before passing checks. Scratch is deleted
+after final inspection.
+No Git writes, service starts or candidate Sparkwing execution occurred.
+
+## Previous continuation (committed in 52b693463)
 
 Fixed attempt-scoped publication authorization in the shared blob resolver.
 The invariant is that a publisher can act for an imported attempt only after

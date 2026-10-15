@@ -212,6 +212,14 @@ uploader can read the digest and usage counts one blob. Authority and physical
 verification are contract fixtures. Native transfer integrity and EOF checks
 remain separate integration proofs.
 
+The `storage-owner-receipts-and-stream-verification/store-data-sqlite` proof
+commits trigger and plan uploads before jobs exist. It checks failed verification,
+exact tagged receipt replay, reopening and refusal to transfer the receipt or
+ticket to a job in the same run. Award issuance and physical verification are
+contract fixtures. Generated eval tests check both source and unit fences under
+explicit fake write authority. C2's issued eval grant table remains read-only.
+The native cell still requires signed transfer and stream EOF verification.
+
 Upload tickets reserve monthly bytes, lifetime run bytes and lifetime run objects
 in the existing quota tables. Each dimension has its own durable reservation.
 The aggregate keys are `storage`, `storage.run.bytes:<run>` and
