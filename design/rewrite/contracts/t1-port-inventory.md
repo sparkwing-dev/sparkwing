@@ -1279,7 +1279,7 @@ tenant selection fails the fixture instead of dropping an error.
 
 | Retired check | Retained evidence |
 | --- | --- |
-| Live/stale node lookup assertions in `TestClaimNamedNodeAwardsAnUnqueuedNode` | The lookup reader has no production caller and is removed. The retained `NodeClaimFenceIsLive` assertion still checks the award's fence. `TestStoreClaimMatching` and `TestStoreLauncherSync` cover current award selection and immutable launcher correlation. |
+| Live/stale node lookup assertions in `TestClaimNamedNodeAwardsAnUnqueuedNode` | The lookup reader has no production caller and is removed. The legacy named fixture is also removed. The generated named-job property checks the current award and immutable accepted spec. `TestStoreClaimMatching` and `TestStoreLauncherSync` cover current award selection and immutable launcher correlation. |
 | `TestNodeExecutionAttemptBelongsToLiveClaimOutlivesTheAttempt` | Both unused node-attempt readers and the old fixture are removed. `TestAuthenticationSnapshotRetainsFinalAttemptFenceAndLogState` covers final attempt state. Tagged-log tests retain claim fencing and tail grace. |
 | `TestTriggerExecutionAttemptBelongsToLiveClaimOutlivesTheAttempt` | Both unused trigger-attempt readers are removed. Current tagged logs use `TestLogPersistenceOwnerUnitsHaveIndependentFences`, `TestLogPersistenceTriggerReadRechecksItsOwnerLease` and `TestLogPersistenceLaterNodeFinishCannotExtendAttemptGrace`. |
 
@@ -1393,3 +1393,27 @@ production fallback or forwarding method is added.
 The legacy financial fixture changes only replace queue selection with their
 known trigger IDs. Their assertions and the accounting implementation are
 unchanged. Those legacy fixtures are not new final-schema execution evidence.
+
+## Named job and renewal hard cut
+
+| Retired check | Retained evidence |
+| --- | --- |
+| `node_claim_named_test.go` and `node_claim_award_internal_test.go` | `TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty` covers absent, unready, held and terminal jobs and terminal runs with real intake, plan acceptance, enrollment and transitions. Naming work never bypasses readiness. `ReconcileNode` owns authorized self-claims. |
+| Named claim credit reservation and insufficient-funds checks | `TestMeteredUnitClaimAndReservationCommitTogether`, `TestMeteredUnitConcurrentClaimsCannotSpendTheSameCredit` and the unit billing lifecycle suite cover atomic reservation, refusal and settlement on the current named award. |
+| `node_spec_hash_test.go` | The named-job property checks the accepted job's nonempty spec hash before and after claiming and completion. |
+| Five `node_claim_test.go` heartbeat/principal/cap checks and `TestClaimToken_HeartbeatRenewsItUntilTheLeaseLapses` | `TestRenewUnitCannotMutateAStaleJobProperty` generates revoked, expired, superseded, wrong-holder, root and forged authorities. `TestRenewUnitRefusesStaleAndRootAuthority`, `TestRenewUnitNodeRequiresCommittedStart`, `TestRenewUnitRequiresBootstrapExchange` and owner-liveness properties retain current renewal, execution and deadline behavior. |
+| Expired-node heartbeat assertion in `agent_loss_retry_test.go` | The renewal property covers exact-boundary expiry and refuses both execution observations without changing the row. The old execution-start assertion remains. |
+| Older-credential renewal projection assertion in `agents_test.go` | The old heartbeat route is removed. `TestEngineClaimHTTPLauncherExchangesAndRenewsItsOwnUnit` verifies current claim exchange, identity-scoped renewal and refusal of both removed routes. Persisted host observations remain an integration task. |
+| `TestANamedClaimSizingToClassNeedsAMeteredToken` | The sizes-to-class input is removed. `TestClaimUnitRepositoryEnrollmentAndMeteringDoNotGrantPlacement`, `TestClaimUnitGrantedProfileKeys` and `TestStoreClaimMatching` check that metering and observed labels cannot grant cloud placement. |
+
+The remaining legacy finance and host fixtures receive only callsite migrations.
+They still require their owners' current-schema setup and are not reported as
+passing. The old PostgreSQL race test retains its queue branch. Native current
+named-award locking evidence remains with the lead.
+
+The legacy `TestNamedClaimRefusesAnotherTeamsNode`, the metered team's named
+lookup assertion and `TestToolNodeIsNeverClaimedByAnAgentWithoutTheTool` are
+ported to the named-job property and `TestStoreClaimMatching`. The property
+provisions a real second tenant's machine capability before attempting the
+foreign award. Both the complete job snapshot and the award/event counts remain
+unchanged. The matching suite retains granted cloud-tool and repository checks.

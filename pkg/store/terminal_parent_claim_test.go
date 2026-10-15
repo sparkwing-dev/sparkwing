@@ -13,7 +13,7 @@ import (
 func TestTerminalParentsCannotSupplyQueuedWorkOrReserveCredits(t *testing.T) {
 	for _, status := range []string{"failed", "success", "cancelled"} {
 		for _, metered := range []bool{false, true} {
-			for _, method := range []string{"queue", "named"} {
+			for _, method := range []string{"queue"} {
 				t.Run(status+"/"+method+map[bool]string{false: "/free", true: "/metered"}[metered], func(t *testing.T) {
 					s := storetest.Open(t)
 					ctx := context.Background()
@@ -39,9 +39,7 @@ func TestTerminalParentsCannotSupplyQueuedWorkOrReserveCredits(t *testing.T) {
 						t.Fatalf("pending = %d, %v", count, err)
 					}
 					claim := func(run string) (*store.Node, error) {
-						if method == "named" {
-							return s.ClaimNamedNode(ctx, claimant, run, "ready", "holder", time.Minute, store.NamedClaimOptions{})
-						}
+
 						return s.ClaimNextReadyNode(ctx, claimant, "holder", time.Minute, nil)
 					}
 					n, err := claim("terminal")

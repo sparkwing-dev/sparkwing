@@ -1,5 +1,20 @@
 # Migrating to the next release
 
+## Named job claims and renewal
+
+`Store.ClaimNamedNode` and `NamedClaimOptions` are removed. Use `ClaimUnit` with
+a `UnitDemand.Target` selecting `capability.UnitNode`, the run and the job.
+Supply the live claimant capability prefix and observed labels and capacity.
+The store derives the holder and checks the job's readiness and sealed demand.
+Run owners self-claim through `Tenant.ReconcileNode`.
+
+`HeartbeatNodeClaim` and `HeartbeatNodeClaimWithCredits` are removed. Use
+`Store.RenewUnit` with the awarded capability prefix and the current execution
+observation. `LeaseBeat` carries cancellation and the store-selected deadline.
+
+The old `POST /api/v1/runs/{id}/nodes/{nodeID}/claim` and node heartbeat routes
+are removed. Use the engine client's named claim and claim renewal methods.
+
 ## Unified trigger queue
 
 `Store.ClaimNextTrigger` and `Store.ClaimNextTriggerFor` are removed. Use

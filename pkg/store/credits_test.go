@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -242,8 +244,7 @@ func TestFinalizeNodeCreditsRefundsAReservationWhenExecutionNeverStarts(t *testi
 	}
 	// safety: a dispatcher's claim whose pod never renewed it is a machine that
 	// never started, which is the claim a finish refunds whole.
-	if _, err := s.ClaimNamedNode(ctx, claimant, "run-never-started", "build", "pod-1", time.Minute,
-		store.NamedClaimOptions{SizesToClass: true}); err != nil {
+	if _, err := s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: claimant.TokenPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run-never-started", NodeID: "build"}, Available: match.Resources{Cores: 128}}); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 
@@ -397,8 +398,7 @@ func TestRunnerChargesKeepTheRunPrincipalAfterRunDeletion(t *testing.T) {
 	create("tenant-b", "run-b")
 
 	claimedAt := time.Now()
-	if _, err := s.ClaimNamedNode(ctx, pool, "run-a", "build", "pod-a", time.Minute,
-		store.NamedClaimOptions{}); err != nil {
+	if _, err := s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: pool.TokenPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run-a", NodeID: "build"}, Available: match.Resources{Cores: 128}}); err != nil {
 		t.Fatalf("claim tenant A: %v", err)
 	}
 	if res, err := s.FinalizeNodeCredits(ctx, "run-a", "build", pool.TokenPrefix,
@@ -410,8 +410,7 @@ func TestRunnerChargesKeepTheRunPrincipalAfterRunDeletion(t *testing.T) {
 		t.Fatalf("repeat finalize tenant A = %+v, %v; want no charge", res.Charge, err)
 	}
 
-	if _, err := s.ClaimNamedNode(ctx, pool, "run-b", "build", "pod-b", time.Minute,
-		store.NamedClaimOptions{}); err != nil {
+	if _, err := s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: pool.TokenPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run-b", NodeID: "build"}, Available: match.Resources{Cores: 128}}); err != nil {
 		t.Fatalf("claim tenant B: %v", err)
 	}
 	usageStart := time.Now()
@@ -1032,10 +1031,13 @@ func exhaustedReservedNode(t *testing.T, s *store.Store, runID string, grace int
 	}
 	// safety: a dispatched claim bills from its execution start, which is the
 	// instant these tests measure the reservation and the grace period from.
-	n, err := s.ClaimNamedNode(ctx, claimant, runID, "build", "pod-1", time.Minute,
-		store.NamedClaimOptions{SizesToClass: true})
+	_, err := s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: claimant.TokenPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runID, NodeID: "build"}, Available: match.Resources{Cores: 128}})
 	if err != nil {
 		t.Fatalf("claim: %v", err)
+	}
+	n, err := s.GetNode(ctx, runID, "build")
+	if err != nil {
+		t.Fatal(err)
 	}
 	start := acknowledgeClaimedExecution(t, s, claimant, n)
 	return claimant, start
@@ -1147,10 +1149,13 @@ func TestChargeNodeCreditsNeverCancelsInsideTheClaimReservation(t *testing.T) {
 	if _, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{GraceSeconds: &grace}); err != nil {
 		t.Fatalf("set grace: %v", err)
 	}
-	n, err := s.ClaimNamedNode(ctx, claimant, "run-reserved", "build", "pod-1", time.Minute,
-		store.NamedClaimOptions{SizesToClass: true})
+	_, err := s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: claimant.TokenPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run-reserved", NodeID: "build"}, Available: match.Resources{Cores: 128}})
 	if err != nil {
 		t.Fatalf("claim: %v", err)
+	}
+	n, err := s.GetNode(ctx, "run-reserved", "build")
+	if err != nil {
+		t.Fatal(err)
 	}
 	start := acknowledgeClaimedExecution(t, s, claimant, n)
 

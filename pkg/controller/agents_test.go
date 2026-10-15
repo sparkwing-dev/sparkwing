@@ -248,27 +248,6 @@ func TestAgents_PlainHolderUsesOwnLivePoll(t *testing.T) {
 	if err != nil || claimedSeen.After(time.Now()) {
 		t.Fatalf("claim observed in the future: %q, %v", takeover.LastSeen, err)
 	}
-	first, err := st.GetNode(ctx, "run-a", "work")
-	if err != nil {
-		t.Fatal(err)
-	}
-	claimant := store.ClaimIdentity{Principal: "agent-a", TokenPrefix: ownerToken.Prefix}
-	heartbeatCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
-		Claimant: claimant, HolderID: first.ClaimedBy,
-		MembershipID: first.ClaimMembershipID, ReservationID: first.ReservationID,
-		ClaimGeneration: first.ClaimGeneration,
-	})
-	if err := st.HeartbeatNodeClaim(heartbeatCtx, "run-a", "work", claimant, first.ClaimedBy, 10*time.Minute); err != nil {
-		t.Fatal(err)
-	}
-	renewed := list()
-	if len(renewed.ActiveJobs) != 1 || renewed.ActiveJobs[0] != "run-b" {
-		t.Fatalf("older credential's lease renewal changed display owner: %v", renewed.ActiveJobs)
-	}
-	renewedSeen, err := time.Parse(time.RFC3339, renewed.LastSeen)
-	if err != nil || renewedSeen.After(time.Now()) {
-		t.Fatalf("heartbeat observed in the future: %q, %v", renewed.LastSeen, err)
-	}
 }
 
 func agentRequest(t *testing.T, method, target, token string, body any) (int, string) {

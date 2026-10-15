@@ -6,7 +6,9 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -76,7 +78,7 @@ func TestARetryNeverCopiesOverARowItsRunAlreadyHolds(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "claimed":
-				if _, err := st.ClaimNamedNode(ctx, store.ClaimIdentity{}, testRunID, "a", "other", store.MaxLeaseDuration, store.NamedClaimOptions{}); err != nil {
+				if _, err := st.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: "", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: testRunID, NodeID: "a"}, Available: match.Resources{Cores: 128}}); err != nil {
 					t.Fatal(err)
 				}
 			}

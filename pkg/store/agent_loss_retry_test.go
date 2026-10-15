@@ -48,13 +48,6 @@ func TestExpiredNodeClaimCannotBeRevivedOrStarted(t *testing.T) {
 		t.Fatalf("claim: %v", err)
 	}
 	expireNodeClaim(t, s, n.RunID, n.NodeID)
-	heartbeatCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
-		Claimant: claimant, HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
-		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
-	})
-	if err := s.HeartbeatNodeClaim(heartbeatCtx, n.RunID, n.NodeID, claimant, n.ClaimedBy, time.Minute); !errors.Is(err, store.ErrLockHeld) {
-		t.Fatalf("late heartbeat = %v, want ErrLockHeld", err)
-	}
 	if err := s.AcknowledgeNodeExecutionStart(ctx, n.RunID, n.NodeID, claimant, store.ExecutionStart{HolderID: n.ClaimedBy, ClaimGeneration: n.ClaimGeneration, AttemptOrdinal: 1}); !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("late execution start = %v, want ErrLockHeld", err)
 	}

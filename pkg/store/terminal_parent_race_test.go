@@ -11,7 +11,7 @@ import (
 )
 
 func TestPostgresNodeAwardRefusesParentFinishedAfterCandidateRead(t *testing.T) {
-	for _, method := range []string{"queue", "named"} {
+	for _, method := range []string{"queue"} {
 		for _, status := range []string{"failed", "success", "cancelled"} {
 			t.Run(method+"/"+status, func(t *testing.T) {
 				s := storetest.NewPostgres(t).Open(t)
@@ -35,11 +35,7 @@ func TestPostgresNodeAwardRefusesParentFinishedAfterCandidateRead(t *testing.T) 
 				go func() {
 					var n *store.Node
 					var err error
-					if method == "named" {
-						n, err = s.ClaimNamedNode(ctx, claimant, "racing", "ready", "holder", time.Minute, store.NamedClaimOptions{})
-					} else {
-						n, err = s.ClaimNextReadyNode(ctx, claimant, "holder", time.Minute, nil)
-					}
+					n, err = s.ClaimNextReadyNode(ctx, claimant, "holder", time.Minute, nil)
 					if n != nil || !(errors.Is(err, store.ErrLockHeld) || errors.Is(err, store.ErrNotFound)) {
 						done <- errors.New("claim awarded or failed for a reason other than terminal parent")
 						return

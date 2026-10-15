@@ -88,30 +88,6 @@ func TestClaimRefusesAnotherTeamsNodeAtTheHeadOfTheQueue(t *testing.T) {
 	}
 }
 
-// Naming a node is not a way past the boundary the queue scan draws.
-func TestNamedClaimRefusesAnotherTeamsNode(t *testing.T) {
-	ctx := context.Background()
-	st := storetest.New(t).Open(t)
-
-	foreign := tenantFor(t, st, "acme")
-	seedTenantRun(t, foreign, "run-acme", "demo")
-	seedReadyNode(t, st, "run-acme", "build")
-	if got := nodeTeam(t, st, "run-acme", "build"); got != "acme" {
-		t.Fatalf("the nodes writer put a node of an acme run in team %q, so the "+
-			"boundary below would be proven against the wrong team", got)
-	}
-
-	claimant := mintClaimant(t, st, "agent:laptop")
-	claimed, err := st.ClaimNamedNode(ctx, claimant, "run-acme", "build", "agent:laptop",
-		time.Minute, store.NamedClaimOptions{})
-	if err == nil {
-		t.Fatalf("a laptop named another team's node and was given it: %+v", claimed)
-	}
-	if !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("named claim across teams returned %v, want not found", err)
-	}
-}
-
 // A credential the deployment cannot place claims nothing once more than one
 // team exists, because guessing which team it meant is the leak.
 func TestClaimFailsClosedForAnUnplaceableCredentialOnAMultiTeamDeployment(t *testing.T) {
@@ -273,10 +249,6 @@ func TestMeteredTokenClaimsOnlyItsOwnTeam(t *testing.T) {
 	}
 	if rest, err := st.ClaimNextReadyNode(ctx, pool, "pod-2", time.Minute, nil); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("after its own queue drained a metered token claimed %+v (err %v), want not found", rest, err)
-	}
-	if named, err := st.ClaimNamedNode(ctx, pool, "run-acme", "build", "pod-3",
-		time.Minute, store.NamedClaimOptions{}); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("a metered token named another team's node and got %+v (err %v), want not found", named, err)
 	}
 
 	// safety: flipping the flag afterwards is the admin endpoint's move, and

@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log/slog"
-	"math"
 	"mime"
 	"net/http"
 	"os"
@@ -22,7 +20,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/api"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
-	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/runflags"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -1074,38 +1071,9 @@ func removeLocalRunDir(runsDir, runID string) error {
 	return errors.Join(root.RemoveAll(runID), root.Close())
 }
 
-type claimPlatform struct {
-	OS   string `json:"os"`
-	Arch string `json:"arch"`
-}
-
 type claimResources struct {
 	Capacity     match.Resources `json:"capacity"`
 	Availability match.Resources `json:"availability"`
-}
-
-// safety: an allow list that is present, even empty, binds; an absent one
-// claims as it always has, and the runner refuses a disallowed run itself.
-// The platform and resources steer scheduling only.
-func claimProfileContext(ctx context.Context, allowRepos []string, platform *claimPlatform, resources *claimResources) (context.Context, match.Profile, error) {
-	var profile match.Profile
-	if allowRepos != nil {
-		allow, err := sourceurl.ParseRepoAllowlist(allowRepos)
-		if err != nil {
-			return ctx, profile, fmt.Errorf("allow_repos: %w", err)
-		}
-		profile.Accept = allow
-	}
-	if platform != nil {
-		profile.OS, profile.Arch = platform.OS, platform.Arch
-	}
-	if r := resources; r != nil {
-		if r.Capacity.Cores < 0 || math.IsNaN(r.Capacity.Cores) || math.IsInf(r.Capacity.Cores, 0) || r.Capacity.MemoryBytes < 0 {
-			return ctx, profile, errors.New("resources.capacity must be finite and non-negative")
-		}
-		profile.Capacity = r.Capacity
-	}
-	return store.WithClaimProfile(ctx, profile), profile, nil
 }
 
 func newRunID() string {
@@ -1217,179 +1185,9 @@ func (s *Server) handleGetNode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, public[0])
 }
 
-type claimNodeReq struct {
-	HolderID   string          `json:"holder_id"`
-	LeaseSecs  int             `json:"lease_secs,omitempty"`
-	Labels     []string        `json:"labels,omitempty"`
-	Headroom   *claimHeadroom  `json:"headroom,omitempty"`
-	Capacity   *claimCapacity  `json:"capacity,omitempty"`
-	AllowRepos []string        `json:"allow_repos,omitempty"`
-	Platform   *claimPlatform  `json:"platform,omitempty"`
-	Resources  *claimResources `json:"resources,omitempty"`
-}
-
-type claimHeadroom struct {
-	Cores       float64 `json:"cores"`
-	MemoryBytes int64   `json:"memory_bytes"`
-	QueueDepth  int     `json:"queue_depth"`
-}
-
 type claimCapacity struct {
 	MaxConcurrent int `json:"max_concurrent"`
 	ActiveClaims  int `json:"active_claims"`
-}
-
-func (s *Server) recordAdvertisedHeadroom(r *http.Request, holderID string, h *claimHeadroom) {
-	if h == nil {
-		return
-	}
-	team := store.DefaultTeam
-	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil && store.NormalizeTeam(p.Team) != "" {
-		team = store.NormalizeTeam(p.Team)
-	}
-	s.runnerHeadroom.record(presenceKey{tokenPrefix: claimIdentity(r).TokenPrefix, name: presenceName(holderID)}, runnerHeadroom{
-		Team:        team,
-		Cores:       h.Cores,
-		MemoryBytes: h.MemoryBytes,
-		QueueDepth:  h.QueueDepth,
-		UpdatedAt:   time.Now(),
-	})
-}
-
-func (s *Server) placementContext(ctx context.Context, claimer presenceKey) context.Context {
-	if s.placement.hold <= 0 {
-		return ctx
-	}
-	return store.WithClaimPlacement(ctx, store.ClaimPlacement{
-		DefaultPrefers: s.placement.defaultPrefers,
-		Hold:           s.placement.hold,
-		Live:           s.runnerPresence.live(time.Now(), s.placement.liveness, claimer),
-	})
-}
-
-type claimNamedNodeReq struct {
-	HolderID  string `json:"holder_id"`
-	LeaseSecs int    `json:"lease_secs"`
-	// safety: without this the caller runs the node on an executor it already
-	// has, so a metered claim is held to the class the warm pool serves.
-	SizesToClass bool            `json:"sizes_to_class,omitempty"`
-	Labels       []string        `json:"labels,omitempty"`
-	AllowRepos   []string        `json:"allow_repos,omitempty"`
-	Platform     *claimPlatform  `json:"platform,omitempty"`
-	Resources    *claimResources `json:"resources,omitempty"`
-}
-
-func (s *Server) handleClaimNamedNode(w http.ResponseWriter, r *http.Request) {
-	var body claimNamedNodeReq
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if body.HolderID == "" {
-		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
-		return
-	}
-	runID, nodeID := r.PathValue("id"), r.PathValue("nodeID")
-	if !s.mayClaimNamedNode(w, r, runID, nodeID) {
-		return
-	}
-	ctx, _, err := claimProfileContext(r.Context(), body.AllowRepos, body.Platform, body.Resources)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	n, err := s.store.ClaimNamedNode(ctx, claimIdentity(r), runID, nodeID,
-		body.HolderID, time.Duration(body.LeaseSecs)*time.Second,
-		store.NamedClaimOptions{SizesToClass: body.SizesToClass, Labels: body.Labels})
-	if writeClaimTeamRefusal(w, err) {
-		return
-	}
-	// safety: the flag is what admits a class the queue would refuse, and only
-	// the operator's own pool token may set it, so every use is on the record.
-	if body.SizesToClass && err == nil {
-		slog.InfoContext(r.Context(), "a named claim took a node at its cpu class",
-			"run_id", runID, "node_id", nodeID, "holder_id", body.HolderID,
-			"cpu_class_cores", n.CreditCPUClassCores)
-	}
-	if err != nil {
-		if s.writeCreditsRefusal(w, r, err) {
-			return
-		}
-		if s.writeUnpricedClassRefusal(w, r, err) {
-			return
-		}
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		if errors.Is(err, store.ErrLockHeld) {
-			writeError(w, http.StatusConflict, err)
-			return
-		}
-		s.writeInternalError(w, r, "claim named node", err)
-		return
-	}
-	writeClaimedNode(w, r, s, n)
-}
-
-// safety: naming a node skips the queue, and every pipeline pod carries a
-// claim-scoped token, so an unlabeled node the queue already opened is fair
-// game and anything else needs the run's dispatch claim. The store then checks
-// the node's selector against the labels the claim sent.
-func (s *Server) mayClaimNamedNode(w http.ResponseWriter, r *http.Request, runID, nodeID string) bool {
-	p, ok := PrincipalFromContext(r.Context())
-	if !ok || p.HasScope(ScopeAdmin) {
-		return true
-	}
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return false
-	}
-	n, err := tenant.GetNode(r.Context(), runID, nodeID)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return false
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return false
-	}
-	if n.ReadyAt != nil && len(n.NeedsLabels) == 0 {
-		return true
-	}
-	held, err := s.store.PrincipalHoldsTriggerClaim(r.Context(), runID, claimIdentity(r), time.Now())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return false
-	}
-	if held {
-		return true
-	}
-	reason := "has not been made ready"
-	if len(n.NeedsLabels) > 0 {
-		reason = "requires runner labels a named claim cannot advertise"
-	}
-	writeAuthError(w, http.StatusForbidden, authErrorBody{
-		Code: "claim_required", Principal: p.label(),
-		Message: "node " + runID + "/" + nodeID + " " + reason + ", so naming it requires the run's live trigger claim",
-	})
-	return false
-}
-
-func writeClaimedNode(w http.ResponseWriter, r *http.Request, s *Server, n *store.Node) {
-	s.recordQueueActivity(time.Now())
-	pipeline := ""
-	if tenant, err := s.tenantFor(r); err == nil {
-		if run, err := tenant.GetRun(r.Context(), n.RunID); err == nil && run != nil {
-			pipeline = run.Pipeline
-		}
-	}
-	observeNodeClaim(pipeline)
-	observeClaimWait(n)
-	otelutil.StampSpan(r.Context(), otelutil.SpanAttrs{
-		RunID: n.RunID, NodeID: n.NodeID, Pipeline: pipeline,
-	})
-	writeJSON(w, http.StatusOK, nodeForClaimResponse(n))
 }
 
 // safety: only a host's own daemon can vouch for a node run in the caller's
@@ -1509,60 +1307,6 @@ func (s *Server) handleMarkNodeReady(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) handleHeartbeatNodeClaim(w http.ResponseWriter, r *http.Request) {
-	runID := r.PathValue("id")
-	nodeID := r.PathValue("nodeID")
-	var body claimNodeReq
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if body.HolderID == "" {
-		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
-		return
-	}
-	fence, err := nodeClaimFenceFromRequest(r)
-	if err != nil || fence.HolderID != body.HolderID {
-		writeError(w, http.StatusConflict, store.ErrLockHeld)
-		return
-	}
-	s.recordAdvertisedHeadroom(r, body.HolderID, body.Headroom)
-	lease := time.Duration(body.LeaseSecs) * time.Second
-	claimCtx := store.WithNodeClaimFence(r.Context(), fence)
-	charge, metered, err := s.store.HeartbeatNodeClaimWithCredits(claimCtx, runID, nodeID, fence.Claimant, body.HolderID, lease, s.Metering())
-	if err != nil {
-		if !errors.Is(err, store.ErrLockHeld) {
-			s.logger.Error("heartbeat node claim failed", "run_id", runID, "node_id", nodeID, "err", err)
-		}
-		writeError(w, http.StatusConflict, store.ErrLockHeld)
-		return
-	}
-	// safety: the runner abandons a node whose claim the controller refuses,
-	// which is how a cancellation for an empty balance reaches it.
-	if charge.ForgivenSeconds > 0 {
-		s.logger.Warn("charge cap engaged; the gap since the previous charge is not billed",
-			"run_id", runID, "node_id", nodeID, "forgiven_s", charge.ForgivenSeconds)
-	}
-	if charge.Cancel {
-		s.cancelForExhaustedCredits(r, runID, nodeID, fence.Claimant.TokenPrefix, charge)
-	}
-	if charge.Cancel || (metered && s.stopForWallClockLimit(r, runID, nodeID, fence.Claimant.TokenPrefix)) {
-		writeError(w, http.StatusConflict, store.ErrLockHeld)
-		return
-	}
-	s.runnerHeartbeats.record(presenceKey{tokenPrefix: fence.Claimant.TokenPrefix, name: presenceName(body.HolderID)}, time.Now())
-	// safety: a runner that predates the watched flag reads any answer but 204 as a refused renewal.
-	if r.Header.Get(store.LogWatchHeader) == "1" {
-		writeJSON(w, http.StatusOK, nodeHeartbeatResp{Watched: s.liveLogs.Watched(runID, nodeID)})
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-type nodeHeartbeatResp struct {
-	Watched bool `json:"watched"`
 }
 
 func (s *Server) handleUpdateNodeActivity(w http.ResponseWriter, r *http.Request) {

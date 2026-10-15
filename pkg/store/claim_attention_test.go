@@ -2,7 +2,6 @@ package store_test
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"strconv"
 	"testing"
@@ -18,38 +17,6 @@ func ageReadyNode(t *testing.T, s *store.Store, runID string, age time.Duration)
 		`UPDATE nodes SET ready_at = ?, placement_hold_from = ? WHERE run_id = ?`),
 		time.Now().Add(-age).UnixNano(), time.Now().Add(-age).UnixNano(), runID); err != nil {
 		t.Fatal(err)
-	}
-}
-
-// A node that needs a tool is never taken by an agent without it, by queue or
-// by name, and the Cloud pool has exactly the tools its image declares.
-func TestToolNodeIsNeverClaimedByAnAgentWithoutTheTool(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	seedMatchNode(t, s, "run-tf", "", 1, "tool:terraform")
-	agent := store.ClaimIdentity{Principal: "agent:pi", TokenPrefix: "swr_pi"}
-	if _, err := s.ClaimNextReadyNode(ctx, agent, "pi:1", time.Minute, []string{"tool:git", "tool:go"}); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("a queue claim without terraform = %v, want not found", err)
-	}
-	if _, err := s.ClaimNamedNode(ctx, agent, "run-tf", "work", "pi:2", time.Minute,
-		store.NamedClaimOptions{Labels: []string{"tool:git"}}); !errors.Is(err, store.ErrLockHeld) {
-		t.Fatalf("a named claim without terraform = %v, want held", err)
-	}
-	pool := meteredClaimant(t, s, "agent:pool")
-	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.ClaimNamedNode(ctx, pool, "run-tf", "work", "k8s-job:1", time.Minute,
-		store.NamedClaimOptions{Labels: []string{"tool:terraform"}}); err == nil {
-		t.Fatal("the Cloud pool claimed a terraform node its image does not declare")
-	}
-	seedMatchNode(t, s, "run-go", "", 1, "tool:go")
-	if n, err := s.ClaimNamedNode(ctx, pool, "run-go", "work", "k8s-job:2", time.Minute,
-		store.NamedClaimOptions{}); err != nil || n.ClaimedBy != "k8s-job:2" {
-		t.Fatalf("the Cloud pool's claim of a node needing a declared tool = %+v, %v", n, err)
-	}
-	if n, err := s.ClaimNextReadyNode(ctx, agent, "pi:3", time.Minute, []string{"tool:terraform"}); err != nil || n.RunID != "run-tf" {
-		t.Fatalf("a queue claim with terraform = %+v, %v; want run-tf", n, err)
 	}
 }
 

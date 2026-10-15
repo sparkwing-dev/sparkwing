@@ -81,26 +81,6 @@ func TestClaimToken_UnknownTamperedOrExpiredTokenIsInvalid(t *testing.T) {
 	}
 }
 
-// The lease is the token's renewal: past the lease the claim has ended, and a
-// heartbeat that extends the lease authorizes the same token again.
-func TestClaimToken_HeartbeatRenewsItUntilTheLeaseLapses(t *testing.T) {
-	f := claimForToken(t, "run-renew")
-	ctx := context.Background()
-	now := time.Now()
-	raw := f.mint(t, now)
-	later := now.Add(5 * time.Minute)
-	wantClaimAuth(t, f.s, raw, store.ClaimReporting, later, store.ErrClaimNotLive)
-	fenced := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
-		Claimant: f.identity, HolderID: f.node.ClaimedBy, MembershipID: f.node.ClaimMembershipID,
-		ReservationID: f.node.ReservationID, ClaimGeneration: f.node.ClaimGeneration,
-	})
-	if err := f.s.HeartbeatNodeClaim(fenced, "run-renew", "build", f.identity, "holder-1", 10*time.Minute); err != nil {
-		t.Fatalf("heartbeat: %v", err)
-	}
-	wantClaimAuth(t, f.s, raw, store.ClaimReporting, later, nil)
-	wantClaimAuth(t, f.s, raw, store.ClaimSensitive, later, nil)
-}
-
 func TestClaimToken_CancelRefusesSensitiveButNotReportingOrResult(t *testing.T) {
 	f := claimForToken(t, "run-cancel")
 	ctx := context.Background()

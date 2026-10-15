@@ -31,9 +31,11 @@ func engineHTTPRoot(t *testing.T, e *EngineController, team, prefix string, gran
 	if team == "" {
 		kind = capability.SubjectService
 	}
-	c := capability.Capability{Prefix: prefix, Team: team, Subject: capability.Subject{Kind: kind, ID: prefix},
+	c := capability.Capability{
+		Prefix: prefix, Team: team, Subject: capability.Subject{Kind: kind, ID: prefix},
 		Audience: capability.Controller, Grants: grants, Binding: capability.Binding{Kind: capability.BindingNone},
-		Issuance: capability.Delegate, ReservedPools: []string{}, Repositories: []string{}, IssuedAt: time.Unix(0, 1).UTC()}
+		Issuance: capability.Delegate, ReservedPools: []string{}, Repositories: []string{}, IssuedAt: time.Unix(0, 1).UTC(),
+	}
 	envelope, err := json.Marshal(store.CapabilityRecord{Version: 1, Value: c})
 	if err != nil {
 		t.Fatal(err)
@@ -177,7 +179,7 @@ func TestEngineClaimHTTPLauncherExchangesAndRenewsItsOwnUnit(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &renewal); err != nil || renewal.ExpiresAt.IsZero() {
 		t.Fatalf("renewal: %+v, %v", renewal, err)
 	}
-	for _, path := range []string{"/api/v1/triggers/claim", "/api/v1/nodes/claim", "/api/v1/triggers/run/claim"} {
+	for _, path := range []string{"/api/v1/triggers/claim", "/api/v1/nodes/claim", "/api/v1/triggers/run/claim", "/api/v1/runs/run/nodes/job/claim", "/api/v1/runs/run/nodes/job/heartbeat"} {
 		status := http.StatusNotFound
 		if path == "/api/v1/triggers/claim" {
 			status = http.StatusMethodNotAllowed

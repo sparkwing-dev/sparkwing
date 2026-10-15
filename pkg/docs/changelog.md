@@ -32,6 +32,9 @@ unlock.
   The seven default-team secret methods on `Store` and four unused legacy fence readers are removed. Local readers select `DefaultTeam`. See [migration guide](docs/migrations/_unreleased.md#secret-store-calls-select-a-tenant).
 ### Changed
 
+- **store (Breaking):** Named job claims and renewal use current capability authority
+  Removed `ClaimNamedNode`, `NamedClaimOptions`, `HeartbeatNodeClaim`, `HeartbeatNodeClaimWithCredits` and the two legacy HTTP routes. Use `ClaimUnit`, `ReconcileNode` and `RenewUnit`. See [migration guide](docs/migrations/_unreleased.md#named-job-claims-and-renewal).
+
 - **store (Breaking):** Trigger queues use the shared unit claimant
   Removed `ClaimNextTrigger`, `ClaimNextTriggerFor` and the unused `NodeExecutionAttemptBelongsToLiveClaim` reader. Trigger queues use `ClaimUnit` with current capability authority. See [migration guide](docs/migrations/_unreleased.md#unified-trigger-queue).
 - **store (Breaking):** Run completion requires the current owner

@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -36,10 +38,13 @@ func fundedMeteredNode(t *testing.T, s *store.Store, runID string) (store.ClaimI
 
 func dispatchedClaim(t *testing.T, s *store.Store, claimant store.ClaimIdentity, runID string) *store.Node {
 	t.Helper()
-	n, err := s.ClaimNamedNode(context.Background(), claimant, runID, "build", "k8s-job:"+runID, time.Minute,
-		store.NamedClaimOptions{SizesToClass: true})
+	_, err := s.ClaimUnit(context.Background(), store.UnitDemand{CapabilityPrefix: claimant.TokenPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: runID, NodeID: "build"}, Available: match.Resources{Cores: 128}})
 	if err != nil {
 		t.Fatalf("dispatched claim: %v", err)
+	}
+	n, err := s.GetNode(context.Background(), runID, "build")
+	if err != nil {
+		t.Fatal(err)
 	}
 	return n
 }

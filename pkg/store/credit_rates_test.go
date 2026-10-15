@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -211,7 +213,7 @@ func TestMeteredClaimReservesAtTheNodesCPUClass(t *testing.T) {
 		{runID: "run-small", class: 2, rate: 10_000},
 		{runID: "run-large", class: 16, rate: 70_000},
 	} {
-		if _, err := s.ClaimNamedNode(ctx, claimant, tc.runID, "build", "pod-"+tc.runID, time.Minute, store.NamedClaimOptions{SizesToClass: true}); err != nil {
+		if _, err := s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: claimant.TokenPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: tc.runID, NodeID: "build"}, Available: match.Resources{Cores: 128}}); err != nil {
 			t.Fatalf("claim %s: %v", tc.runID, err)
 		}
 		charge := lastChargeFor(t, s, tc.runID)
@@ -248,7 +250,7 @@ func TestHeartbeatChargesAtTheNodesCPUClass(t *testing.T) {
 		{runID: "run-small", class: 2, rate: 10_000},
 		{runID: "run-large", class: 8, rate: 36_667},
 	} {
-		if _, err := s.ClaimNamedNode(ctx, claimant, tc.runID, "build", "pod-"+tc.runID, time.Minute, store.NamedClaimOptions{SizesToClass: true}); err != nil {
+		if _, err := s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: claimant.TokenPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: tc.runID, NodeID: "build"}, Available: match.Resources{Cores: 128}}); err != nil {
 			t.Fatalf("claim %s: %v", tc.runID, err)
 		}
 		start := time.Now()
@@ -281,7 +283,7 @@ func TestClaimIsRefusedAboveTheLargestPricedClass(t *testing.T) {
 	}
 	readyNodeWithCores(t, s, "run-huge", "build", 96)
 
-	_, err := s.ClaimNamedNode(ctx, claimant, "run-huge", "build", "pod-1", time.Minute, store.NamedClaimOptions{SizesToClass: true})
+	_, err := s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: claimant.TokenPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run-huge", NodeID: "build"}, Available: match.Resources{Cores: 128}})
 	if !errors.Is(err, store.ErrUnpricedCPUClass) {
 		t.Fatalf("claim of a 96-core node = %v, want ErrUnpricedCPUClass", err)
 	}
@@ -312,8 +314,7 @@ func TestTheDefaultLadderRefusesAClassAboveEight(t *testing.T) {
 	fundLedger(t, s, 10_000)
 	readyNodeWithCores(t, s, "run-sixteen", "build", 16)
 
-	_, err := s.ClaimNamedNode(ctx, claimant, "run-sixteen", "build", "pod-1", time.Minute,
-		store.NamedClaimOptions{SizesToClass: true})
+	_, err := s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: claimant.TokenPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run-sixteen", NodeID: "build"}, Available: match.Resources{Cores: 128}})
 	var unpriced *store.UnpricedCPUClassError
 	if !errors.As(err, &unpriced) {
 		t.Fatalf("claim of a 16-core node on the default ladder = %v, want a refusal", err)
@@ -336,8 +337,7 @@ func TestTheDefaultLadderRefusesAClassAboveEight(t *testing.T) {
 	if _, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
 		t.Fatalf("set the rate table: %v", err)
 	}
-	if _, err := s.ClaimNamedNode(ctx, claimant, "run-sixteen", "build", "pod-1", time.Minute,
-		store.NamedClaimOptions{SizesToClass: true}); err != nil {
+	if _, err := s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: claimant.TokenPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run-sixteen", NodeID: "build"}, Available: match.Resources{Cores: 128}}); err != nil {
 		t.Fatalf("claim under a stored table that prices 16 cores: %v", err)
 	}
 	if charge := lastChargeFor(t, s, "run-sixteen"); charge.CPUClassCores != 16 ||
@@ -359,7 +359,7 @@ func TestARateTableChangeLeavesWrittenChargesAlone(t *testing.T) {
 		t.Fatalf("set the rate table: %v", err)
 	}
 	readyNodeWithCores(t, s, "run-repriced", "build", 8)
-	if _, err := s.ClaimNamedNode(ctx, claimant, "run-repriced", "build", "pod-1", time.Minute, store.NamedClaimOptions{SizesToClass: true}); err != nil {
+	if _, err := s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: claimant.TokenPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run-repriced", NodeID: "build"}, Available: match.Resources{Cores: 128}}); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	start := time.Now()
@@ -428,9 +428,13 @@ func TestAnEarlyFinishPaysTheMinimumAtTheRateTheClaimReserved(t *testing.T) {
 		t.Fatalf("set the rate table: %v", err)
 	}
 	readyNodeWithCores(t, s, "run-early", "build", 8)
-	n, err := s.ClaimNamedNode(ctx, claimant, "run-early", "build", "pod-1", time.Minute, store.NamedClaimOptions{SizesToClass: true})
+	_, err := s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: claimant.TokenPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run-early", NodeID: "build"}, Available: match.Resources{Cores: 128}})
 	if err != nil {
 		t.Fatalf("claim: %v", err)
+	}
+	n, err := s.GetNode(ctx, "run-early", "build")
+	if err != nil {
+		t.Fatal(err)
 	}
 	acknowledgeClaimedExecution(t, s, claimant, n)
 
@@ -485,7 +489,7 @@ func TestAClaimantsOwnCPUFigureDoesNotLowerTheBill(t *testing.T) {
 	}
 	readyNodeWithCores(t, s, "run-big", "build", 64)
 
-	if _, err := s.ClaimNamedNode(ctx, claimant, "run-big", "build", "pod-1", time.Minute, store.NamedClaimOptions{SizesToClass: true}); err != nil {
+	if _, err := s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: claimant.TokenPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run-big", NodeID: "build"}, Available: match.Resources{Cores: 128}}); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	charge := lastChargeFor(t, s, "run-big")
@@ -516,7 +520,7 @@ func TestTheChargeRowCarriesThePinnedClass(t *testing.T) {
 		{"run-eight", 8},
 		{"run-wide", 8},
 	} {
-		if _, err := s.ClaimNamedNode(ctx, claimant, tc.runID, "build", "pod-"+tc.runID, time.Minute, store.NamedClaimOptions{SizesToClass: true}); err != nil {
+		if _, err := s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: claimant.TokenPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: tc.runID, NodeID: "build"}, Available: match.Resources{Cores: 128}}); err != nil {
 			t.Fatalf("claim %s: %v", tc.runID, err)
 		}
 		if charge := lastChargeFor(t, s, tc.runID); charge.CPUClassCores != tc.want {
@@ -563,7 +567,7 @@ func TestAnEmptyBalanceIsReportedBeforeTheUnpricedClass(t *testing.T) {
 	}
 	readyNodeWithCores(t, s, "run-broke-huge", "build", 96)
 
-	_, err := s.ClaimNamedNode(ctx, claimant, "run-broke-huge", "build", "pod-1", time.Minute, store.NamedClaimOptions{SizesToClass: true})
+	_, err := s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: claimant.TokenPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run-broke-huge", NodeID: "build"}, Available: match.Resources{Cores: 128}})
 	if !errors.Is(err, store.ErrInsufficientCredits) {
 		t.Fatalf("claim on an empty ledger = %v, want ErrInsufficientCredits", err)
 	}
@@ -582,7 +586,7 @@ func TestFailNodeForUnpricedClassEndsTheNodeWithAnEvent(t *testing.T) {
 	}
 	readyNodeWithCores(t, s, "run-unpriced", "build", 96)
 
-	_, err := s.ClaimNamedNode(ctx, claimant, "run-unpriced", "build", "pod-1", time.Minute, store.NamedClaimOptions{SizesToClass: true})
+	_, err := s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: claimant.TokenPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run-unpriced", NodeID: "build"}, Available: match.Resources{Cores: 128}})
 	var unpriced *store.UnpricedCPUClassError
 	if !errors.As(err, &unpriced) {
 		t.Fatalf("claim = %v, want an unpriced-class refusal", err)
@@ -701,31 +705,6 @@ func TestAnUnmeteredClaimStillTakesALargeNode(t *testing.T) {
 	}
 	if n.RunID != "run-big" {
 		t.Fatalf("claimed %s, want the eight-core node", n.RunID)
-	}
-}
-
-// Only the operator's metered pool may claim it sizes a node to its class, so
-// a customer's local agent can never route a class node to itself.
-func TestANamedClaimSizingToClassNeedsAMeteredToken(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	fundLedger(t, s, 10_000)
-	_, tok, err := s.CreateTokenWith(ctx, "agent:laptop", store.TokenKindRunner,
-		[]string{"nodes.claim"}, 0, time.Now(), store.TokenOptions{})
-	if err != nil {
-		t.Fatalf("mint a token: %v", err)
-	}
-	local := store.ClaimIdentity{Principal: "agent:laptop", TokenPrefix: tok.Prefix}
-	readyNodeWithCores(t, s, "run-big", "build", 8)
-
-	_, err = s.ClaimNamedNode(ctx, local, "run-big", "build", "laptop-1", time.Minute,
-		store.NamedClaimOptions{SizesToClass: true})
-	if !errors.Is(err, store.ErrLockHeld) {
-		t.Fatalf("an unmetered claim sizing to the class = %v, want a refusal", err)
-	}
-	if _, err := s.ClaimNamedNode(ctx, local, "run-big", "build", "laptop-1", time.Minute,
-		store.NamedClaimOptions{}); err != nil {
-		t.Fatalf("an unmetered claim of the same node: %v", err)
 	}
 }
 

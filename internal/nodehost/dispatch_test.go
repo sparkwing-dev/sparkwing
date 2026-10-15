@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -152,13 +154,13 @@ func TestDispatchAdoptsTheResultOfTheHolderThatWonTheClaim(t *testing.T) {
 	finished := make(chan error, 1)
 	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}}},
 		func(ctx context.Context, n *NodeRun) Result {
-			won, err := st.ClaimNamedNode(ctx, store.ClaimIdentity{}, n.Run.ID, n.Plan.ID, "pool:other", time.Minute, store.NamedClaimOptions{})
+			won, err := st.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: "", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: n.Run.ID, NodeID: n.Plan.ID}, Available: match.Resources{Cores: 128}})
 			if err != nil {
 				t.Errorf("claim: %v", err)
 				return Result{Outcome: sparkwing.Failed, Err: err}
 			}
 			fenced := store.WithNodeClaimFence(context.WithoutCancel(ctx), store.NodeClaimFence{
-				HolderID: won.ClaimedBy, MembershipID: won.ClaimMembershipID, ReservationID: won.ReservationID, ClaimGeneration: won.ClaimGeneration,
+				HolderID: won.Award.Holder, ClaimGeneration: won.Award.Generation,
 			})
 			// safety: the holder may finish after the refused dispatch returns, so the host waits for its result.
 			go func() {
@@ -186,7 +188,7 @@ func TestDispatchStopsWaitingOnAHolderWhoseLeaseLapsed(t *testing.T) {
 	defer cancel()
 	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}}},
 		func(ctx context.Context, n *NodeRun) Result {
-			if _, err := st.ClaimNamedNode(ctx, store.ClaimIdentity{}, n.Run.ID, n.Plan.ID, "pool:dead", time.Millisecond, store.NamedClaimOptions{}); err != nil {
+			if _, err := st.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: "", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: n.Run.ID, NodeID: n.Plan.ID}, Available: match.Resources{Cores: 128}}); err != nil {
 				t.Errorf("claim: %v", err)
 			}
 			return Result{Outcome: sparkwing.Failed, Err: store.ErrLockHeld}
@@ -214,7 +216,7 @@ func TestResumeRefusesARowPlannedUnderAnotherSpec(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := st.ClaimNamedNode(ctx, store.ClaimIdentity{}, testRunID, "held", "pool:live", time.Hour, store.NamedClaimOptions{}); err != nil {
+	if _, err := st.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: "", Target: &store.UnitRef{Kind: capability.UnitNode, RunID: testRunID, NodeID: "held"}, Available: match.Resources{Cores: 128}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.FinishNodeWithReason(ctx, testRunID, "lost", "failed", "holder lost", nil, store.FailureAgentLost, nil); err != nil {

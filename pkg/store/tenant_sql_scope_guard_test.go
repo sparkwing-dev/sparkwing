@@ -63,7 +63,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"a scope that is not exactly one team is refused there",
 	"(*Store).awardScannedNodeTx": "the award carries the same runtime predicate; the read that follows " +
 		"it is of the row the award just proved in team",
-	"(*Store).ClaimNamedNode": "shares the claim scan's runtime predicate and its refusal",
 	"(*Store).ClaimSpecificTriggerFor": "shares the claim scan's runtime predicate and its refusal; the " +
 		"read after the award is of the row the scoped update just proved in team",
 	"(*Store).listRuns": "the team predicate comes from runFilterWhere at run time; " +

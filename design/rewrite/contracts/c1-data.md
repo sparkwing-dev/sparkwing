@@ -1,5 +1,26 @@
 # C1 data contract
 
+## Named job awards and renewal
+
+`Store.ClaimNamedNode`, `NamedClaimOptions`, `HeartbeatNodeClaim` and
+`HeartbeatNodeClaimWithCredits` are removed. Named job awards use `ClaimUnit`
+with a `UnitNode` target and live capability authority. The stored enrollment
+selects the holder and placement. Naming a job requires the same readiness,
+repository, grant and capacity checks as the queue. Owners self-claim through
+`ReconcileNode`. Renewal uses `RenewUnit` with the awarded capability prefix.
+
+The legacy node claim and node heartbeat HTTP routes are removed. The current
+engine routes own claim delivery, exchange and renewal. No caller-selected
+holder, lease or sizes-to-class flag survives on those routes.
+
+`TestNamedJobClaimCannotBypassReadinessOrAuthorityProperty` drives real intake,
+acceptance, enrollment, start, report and owner completion with generated job
+identifiers, labels and resources. Refused requests preserve the full snapshot,
+award count and event count. `TestRenewUnitCannotMutateAStaleJobProperty` checks
+root, revoked, expired, superseded, wrong-holder and forged authority with both
+execution observations. Refusal preserves the job and creates no interval or
+attempt.
+
 ## Unified trigger queue
 
 `Store.ClaimNextTrigger` and `Store.ClaimNextTriggerFor` are removed with their

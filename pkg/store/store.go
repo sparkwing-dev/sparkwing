@@ -2366,7 +2366,7 @@ func (t *Tenant) MarkNodeReady(ctx context.Context, runID, nodeID string) error 
 // [PlacementPreferred], [PlacementFallback], or [PlacementNone].
 //
 // claimant is the authenticated token the claim answers to;
-// [Store.HeartbeatNodeClaim] admits only that token afterwards. Pass the zero value when the caller is
+// Claims answer only to that credential. Pass the zero value when the caller is
 // unauthenticated, which leaves the claim unbound. lease is clamped to
 // [MaxLeaseDuration].
 //
@@ -2406,7 +2406,7 @@ func (s *Store) ClaimNextReadyNode(ctx context.Context, claimant ClaimIdentity, 
 		if target == nil {
 			return nil, notFound("ready node", "")
 		}
-		claimed, err := s.awardScannedNode(ctx, *target, claimant, holderID, coordinatorID, lease, placement, true, scope)
+		claimed, err := s.awardScannedNode(ctx, *target, claimant, holderID, coordinatorID, lease, placement, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -2688,19 +2688,15 @@ func decodeCandidateLabels(runID, nodeID string, raw []byte, out *[]string) bool
 // safety: returns nil when another runner took the node between the scan and
 // the award, which the caller answers by scanning again.
 func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, claimant ClaimIdentity,
-	holderID, coordinatorID string, lease time.Duration, placement ClaimPlacement, queued bool, scope teamScope,
+	holderID, coordinatorID string, lease time.Duration, placement ClaimPlacement, scope teamScope,
 ) (*Node, error) {
-	readyClause := ""
-	if queued {
-		readyClause = ` AND ready_at IS NOT NULL`
-	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer rollbackOrLog(tx)
 	now := time.Now()
-	n, err := s.awardScannedNodeTx(ctx, tx, candidate, claimant, holderID, coordinatorID, lease, placement, readyClause, scope, now)
+	n, err := s.awardScannedNodeTx(ctx, tx, candidate, claimant, holderID, coordinatorID, lease, placement, scope, now)
 	if err != nil || n == nil {
 		return nil, err
 	}
@@ -2714,12 +2710,9 @@ func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, 
 }
 
 func (s *Store) awardScannedNodeTx(ctx context.Context, tx *storeTx, candidate claimCandidate, claimant ClaimIdentity,
-	holderID, coordinatorID string, lease time.Duration, placement ClaimPlacement, readyClause string, scope teamScope,
+	holderID, coordinatorID string, lease time.Duration, placement ClaimPlacement, scope teamScope,
 	now time.Time,
 ) (*Node, error) {
-	// safety: the award repeats the scan's team predicate rather than trusting
-	// it, because [Store.ClaimNamedNode] reaches this with a node the caller
-	// named and no scan behind it.
 	teamClause, teamArgs, err := claimTeamWhere(scope, "team")
 	if err != nil {
 		return nil, err
@@ -2751,7 +2744,7 @@ func (s *Store) awardScannedNodeTx(ctx context.Context, tx *storeTx, candidate c
 		        executor_location = 'unknown', reservation_id = '', claim_membership_id = '',
 		        credit_charged_through = 0,
 		        placement_reason = ?, claim_generation = claim_generation + 1
-		  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL`+readyClause+`
+		  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL AND ready_at IS NOT NULL
 		    AND `+nodeNotDone+nodeRunNotCancelled+` AND `+nodeRunActiveSQL("nodes.")+teamClause,
 		awardArgs...,
 	)
@@ -2765,7 +2758,7 @@ func (s *Store) awardScannedNodeTx(ctx context.Context, tx *storeTx, candidate c
 	if awarded == 0 {
 		return nil, nil
 	}
-	if err := s.reserveNodeCreditsTx(ctx, tx, claimant, candidate.runID, candidate.nodeID, now, readyClause != ""); err != nil {
+	if err := s.reserveNodeCreditsTx(ctx, tx, claimant, candidate.runID, candidate.nodeID, now, true); err != nil {
 		return nil, err
 	}
 	// safety: a preference the controller supplies for every node it never
@@ -2802,93 +2795,6 @@ func (t *Tenant) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail s
 		return err
 	}
 	return fencedRows(res, fenced)
-}
-
-// HeartbeatNodeClaim extends the exact claim generation carried by ctx.
-// The lease cannot outrun the claim cap or revive expired capacity.
-func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string, lease time.Duration) error {
-	_, _, err := s.HeartbeatNodeClaimWithCredits(ctx, runID, nodeID, claimant, holderID, lease, false)
-	return err
-}
-
-// HeartbeatNodeClaimWithCredits renews a claim and charges a licensed metered
-// token in one transaction. It reports the charge and whether the token was
-// metered. A failed ledger write leaves the lease unchanged.
-func (s *Store) HeartbeatNodeClaimWithCredits(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string, lease time.Duration, meteringLicensed bool) (CreditChargeResult, bool, error) {
-	fence, ok := NodeClaimFenceFromContext(ctx)
-	if !ok || fence.HolderID != holderID || fence.Claimant != claimant || fence.ClaimGeneration < 1 {
-		return CreditChargeResult{}, false, ErrLockHeld
-	}
-	var charge CreditChargeResult
-	var metered bool
-	err := s.inTx(ctx, func(tx *storeTx) error {
-		var currentLease int64
-		err := tx.QueryRowContext(ctx, `SELECT COALESCE(lease_expires_at, 0) FROM nodes
-		  WHERE run_id = ? AND node_id = ? AND claimed_by = ?
-		    AND COALESCE(claim_principal, '') = ?
-		    AND COALESCE(claim_token_prefix, '') = ?
-		    AND COALESCE(claim_membership_id, '') = ?
-		    AND COALESCE(reservation_id, '') = ?
-		    AND claim_generation = ? AND cancel_requested_at IS NULL AND `+nodeRunActiveSQL("")+nodeRunNotCancelled+tx.forUpdate(),
-			runID, nodeID, holderID, claimant.Principal, claimant.TokenPrefix,
-			fence.MembershipID, fence.ReservationID, fence.ClaimGeneration).Scan(&currentLease)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrLockHeld
-		}
-		if err != nil {
-			return err
-		}
-		now := time.Now()
-		if currentLease < now.UnixNano() {
-			return ErrLockHeld
-		}
-		if meteringLicensed {
-			metered, err = tokenMeteredTx(ctx, tx, claimant.TokenPrefix)
-			if err != nil {
-				return err
-			}
-			if metered {
-				charged, err := s.chargeNodeTx(ctx, tx, runID, nodeID, claimant.TokenPrefix, now, false)
-				if err != nil {
-					return err
-				}
-				charge = charged.CreditChargeResult
-				if charge.Cancel {
-					return nil
-				}
-			}
-		}
-		// safety: the ledger can block past the lease, so renewal uses a fresh clock.
-		renewAt := time.Now()
-		if currentLease < renewAt.UnixNano() {
-			return ErrLockHeld
-		}
-		expires := renewAt.Add(clampNodeLease(lease)).UnixNano()
-		res, err := tx.ExecContext(ctx, `UPDATE nodes SET lease_expires_at = ?
-		  WHERE run_id = ? AND node_id = ? AND claimed_by = ?
-		    AND COALESCE(claim_principal, '') = ?
-		    AND COALESCE(claim_token_prefix, '') = ?
-		    AND COALESCE(claim_membership_id, '') = ?
-		    AND COALESCE(reservation_id, '') = ?
-		    AND claim_generation = ? AND cancel_requested_at IS NULL AND `+nodeRunActiveSQL("")+nodeRunNotCancelled+` AND `+nodeClaimLiveSQL(""),
-			expires, runID, nodeID, holderID, claimant.Principal, claimant.TokenPrefix,
-			fence.MembershipID, fence.ReservationID, fence.ClaimGeneration, renewAt.UnixNano())
-		if err != nil {
-			return err
-		}
-		updated, err := res.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if updated == 0 {
-			return ErrLockHeld
-		}
-		return nil
-	})
-	if err != nil {
-		return CreditChargeResult{}, false, err
-	}
-	return charge, metered, nil
 }
 
 // PrincipalHoldsTriggerClaim reports whether claimant holds the
