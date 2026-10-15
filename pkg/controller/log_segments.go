@@ -6,6 +6,11 @@ import (
 )
 
 func (s *Server) logObjects() logseg.SegmentObjects {
+	if s.dataController != nil {
+		if objects, ok := s.dataController.Objects.(logseg.SegmentObjects); ok {
+			return objects
+		}
+	}
 	if s.s3Logs == nil {
 		return nil
 	}

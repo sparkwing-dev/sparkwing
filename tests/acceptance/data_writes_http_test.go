@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -60,7 +62,7 @@ func TestDataWriteHTTPRecordEdgesAndLookup(t *testing.T) {
 	body := `{"kind":"output","pipeline":"build","job":"job","name":"out","digest":"` + string(dataDigest()) + `","manifest_digest":"` + manifest + `","members":[{"digest":"` + member + `","path":"file","size":1,"mode":420}]}`
 	h := f.handler()
 	w := authorityHTTP(h, f.boundary, "POST", "/api/v1/data/records?team=foreign", body)
-	if w.Code != http.StatusOK || tx.record.Authority != dataAuthority(a) || tx.record.Source != dataAuthority(a).Upload.Value || tx.record.Key.Team != "team" || tx.record.Key.Scope.Repo != "gh:12" || tx.record.Key.Scope.Ref.Ref != "manual:main" || len(tx.record.Members) != 1 || tx.record.Members[0].Team != "team" || tx.record.Members[0].ManifestDigest != blob.Digest(manifest) {
+	if w.Code != http.StatusOK || tx.record.Authority != dataAuthority(a) || tx.record.Source != dataAuthority(a).Upload.Value || tx.record.Key.Team != "team" || tx.record.Key.Scope.Repo != "gh:12" || tx.record.Key.Scope.Ref != (blob.RefScope{Ref: "main"}) || len(tx.record.Members) != 1 || tx.record.Members[0].Team != "team" || tx.record.Members[0].ManifestDigest != blob.Digest(manifest) {
 		t.Fatalf("record HTTP %d %s transaction=%+v", w.Code, w.Body.String(), tx.record)
 	}
 	if !reflect.DeepEqual(*events, []string{"authorize", "authorize", "authorize", "commit record"}) {
@@ -76,6 +78,49 @@ func TestDataWriteHTTPRecordEdgesAndLookup(t *testing.T) {
 	}
 	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &lookup) != nil || !lookup.Found || len(lookup.Members) != 1 || lookup.Members[0].Digest != blob.Digest(member) || tx.lookup.Key != tx.record.Key || strings.Contains(w.Body.String(), "private-uploader") {
 		t.Fatalf("lookup HTTP %d %s transaction=%+v", w.Code, w.Body.String(), tx.lookup)
+	}
+}
+
+func TestDataRecordHTTPRefScopeProperty(t *testing.T) {
+	property := func(value [16]byte, verified bool) bool {
+		ref := blob.RefScope{Ref: hex.EncodeToString(value[:]) + "/release +%&?#", Verified: verified}
+		a := dataAuthorized()
+		a.Principal.Capability.Data.WriteRef = ref.CapabilityScope()
+		a.Principal.Capability.Data.ReadRefs = []string{ref.CapabilityScope()}
+		f := newDataHTTPFixture()
+		f.boundary.snapshot.Authorities[0].Principal.Capability.Data = a.Principal.Capability.Data
+		data, tx, objects, edges, events := dataControllerFixture(a)
+		authority := dataAuthority(a)
+		authority.Ref.Scope = ref
+		data.ResolveAuthority = func(context.Context, capability.Authorized) (blob.Authority, error) { return authority, nil }
+		f.data, f.objects, f.edges, f.events = data, objects, edges, events
+		h := f.handler()
+		w := authorityHTTP(h, f.boundary, "POST", "/api/v1/data/records", `{"kind":"output","job":"job","name":"out","digest":"`+string(dataDigest())+`"}`)
+		var written struct{ Ref string }
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &written) != nil || written.Ref != ref.CapabilityScope() || tx.record.Key.Scope.Ref != ref {
+			t.Logf("write ref=%+v: HTTP %d %s key=%+v", ref, w.Code, w.Body, tx.record.Key)
+			return false
+		}
+		tx.lookupResult = blob.RecordLookupResult{Found: true, Record: blob.Record{Key: tx.record.Key, Digest: dataDigest()}}
+		query := url.Values{"kind": {"output"}, "job": {"job"}, "name": {"out"}, "ref": {written.Ref}}
+		w = authorityHTTP(h, f.boundary, "GET", "/api/v1/data/records?"+query.Encode(), "")
+		var read struct{ Record struct{ Ref string } }
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &read) != nil || read.Record.Ref != written.Ref || tx.lookup.Key != tx.record.Key {
+			t.Logf("lookup ref=%+v: HTTP %d %s key=%+v", ref, w.Code, w.Body, tx.lookup.Key)
+			return false
+		}
+		*events = nil
+		ref.Verified = !ref.Verified
+		query.Set("ref", ref.CapabilityScope())
+		w = authorityHTTP(h, f.boundary, "GET", "/api/v1/data/records?"+query.Encode(), "")
+		if w.Code != http.StatusForbidden || len(*events) != 0 {
+			t.Logf("trust substitution: HTTP %d %s events=%v", w.Code, w.Body, *events)
+			return false
+		}
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 128}); err != nil {
+		t.Fatal(err)
 	}
 }
 

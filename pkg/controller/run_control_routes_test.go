@@ -28,6 +28,13 @@ type runControlWriterFake struct {
 }
 
 func (f *runControlWriterFake) Team() store.Team { return f.team }
+
+func (f *runControlWriterFake) ResumeAuthorizedDebugPause(_ context.Context, a capability.Authorized) error {
+	f.seen = a
+	f.calls++
+	return f.failure
+}
+
 func (f *runControlWriterFake) CreateAuthorizedDebugPause(_ context.Context, a capability.Authorized, job, reason string, _ time.Time, key string) error {
 	f.seen, f.job, f.reason, f.key = a, job, reason, key
 	f.calls++
@@ -119,6 +126,25 @@ func TestRunControlHTTPRefusals(t *testing.T) {
 	}
 	f.s.WithRunControlWriter(nil)
 	f.call(t, "POST", "/api/v1/runs/bound-run/approvals/bound-job", `{"resolution":"approved"}`, "key", 500, nil)
+}
+
+func TestResumeDebugPauseWriterScopeAndErrors(t *testing.T) {
+	f := newScheduleHTTPFixture(t)
+	f.facts.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.RunsControl}
+	f.s.WithEngineController(&EngineController{ResolveRunTeam: func(context.Context, string) (store.Team, error) { return store.DefaultTeam, nil }})
+	writer := &runControlWriterFake{team: store.DefaultTeam}
+	f.s.WithRunControlWriter(func(context.Context, store.Team) (RunControlWriter, error) { return writer, nil })
+	f.call(t, "POST", "/api/v1/runs/run/jobs/job/resume", `{}`, "", 204, nil)
+	if writer.calls != 1 || writer.seen.Target.RunID != "run" || writer.seen.Target.NodeID != "job" {
+		t.Fatalf("resume=%+v calls=%d", writer.seen, writer.calls)
+	}
+	writer.failure = &apierr.Error{Code: apierr.Forbidden, Message: "authority changed"}
+	f.call(t, "POST", "/api/v1/runs/run/jobs/job/resume", `{}`, "", 403, nil)
+	writer.team = "foreign"
+	f.call(t, "POST", "/api/v1/runs/run/jobs/job/resume", `{}`, "", 500, nil)
+	if writer.calls != 2 {
+		t.Fatal("foreign writer received resume")
+	}
 }
 
 func TestBusinessRetiredRoutesAndExactMethods(t *testing.T) {

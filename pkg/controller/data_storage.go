@@ -15,6 +15,7 @@ func (s *Server) WithDataObjects(objects blob.ObjectBackend) *Server {
 		s.dataController = &DataController{Store: s.store}
 	}
 	s.dataController.Objects = objects
+	s.configureDataStore(s.dataController)
 	if s.store != nil {
 		s.store.SetResultBlobRecords(storage.BlobManifests{Objects: objects})
 	}

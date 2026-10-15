@@ -185,7 +185,7 @@ func (t *Tenant) SetSourceMachineConsent(ctx context.Context, authority capabili
 		if err != nil {
 			return err
 		}
-		if p.Capability.Team != string(t.team) || p.Capability.Audience != capability.Controller || p.Capability.Subject.Kind != capability.SubjectAccount || p.Capability.Binding.Kind != capability.BindingNone {
+		if !p.DirectAccountSession() || p.Capability.Team != string(t.team) || p.Capability.Audience != capability.Controller {
 			return bindingRefusal()
 		}
 		root, err := readAuthorityTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: machine}, true)

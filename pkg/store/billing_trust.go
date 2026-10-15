@@ -226,6 +226,19 @@ type BillingTrustChange struct {
 // standing before and after it. The change and its business event commit
 // together.
 func (t *Tenant) SetBillingTrust(ctx context.Context, c BillingTrustChange, now time.Time) (before, after BillingStanding, err error) {
+	tx, err := t.s.beginTx(ctx)
+	if err != nil {
+		return before, after, err
+	}
+	defer rollbackOrLog(tx)
+	before, after, err = t.setBillingTrustTx(ctx, tx, c, now)
+	if err != nil {
+		return before, after, err
+	}
+	return before, after, tx.Commit()
+}
+
+func (t *Tenant) setBillingTrustTx(ctx context.Context, tx *storeTx, c BillingTrustChange, now time.Time) (before, after BillingStanding, err error) {
 	if c.Trust != BillingTrustGranted && c.Trust != BillingTrustRevoked && c.Trust != BillingTrustAutomatic {
 		return before, after, fmt.Errorf("%w: trust must be %q, %q or automatic", ErrInvalidInput, BillingTrustGranted, BillingTrustRevoked)
 	}
@@ -240,11 +253,7 @@ func (t *Tenant) SetBillingTrust(ctx context.Context, c BillingTrustChange, now 
 	if c.RungCents > 0 && c.RungCents < MinCardChargeCents {
 		return before, after, fmt.Errorf("%w: a rung is at least %d cents, the smallest card charge", ErrInvalidInput, MinCardChargeCents)
 	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return before, after, err
-	}
-	defer rollbackUnlessDone(tx, &err)
+
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return before, after, err
 	}
@@ -290,5 +299,5 @@ func (t *Tenant) SetBillingTrust(ctx context.Context, c BillingTrustChange, now 
 	}); err != nil {
 		return before, after, err
 	}
-	return before, after, tx.Commit()
+	return before, after, nil
 }

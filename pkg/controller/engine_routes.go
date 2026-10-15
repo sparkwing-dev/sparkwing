@@ -30,7 +30,7 @@ func (s *Server) engineEndpoints() []Endpoint {
 	return []Endpoint{
 		{
 			Method: "POST", Pattern: "/api/v1/runs", Authentication: capability.AuthCapability,
-			Decode: engine.intakeTarget, Handle: engine.handleIntake,
+			Decode: engine.intakeTarget, Handle: s.handleIntake(engine),
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/plan", Authentication: capability.AuthCapability,
@@ -176,21 +176,26 @@ func (s *EngineController) intakeTarget(r *http.Request) (capability.RequestEvid
 	return capability.RequestEvidence{Target: target}, nil
 }
 
-func (s *EngineController) handleIntake(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	var body controllerwire.CreateRunRequest
-	if err := decodeEngineRequest(r, &body); err != nil {
-		return err
+func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter, *http.Request, capability.Authorized) error {
+	return func(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+		var body controllerwire.CreateRunRequest
+		if err := decodeEngineRequest(r, &body); err != nil {
+			return err
+		}
+		if err := s.resolveIntakeSource(r.Context(), a.Target.Team, &body.Request); err != nil {
+			return err
+		}
+		response, err := engine.CreateRun(r.Context(), a, body)
+		if err != nil {
+			return err
+		}
+		status := http.StatusCreated
+		if response.Replayed {
+			status = http.StatusOK
+		}
+		writeJSON(w, status, response)
+		return nil
 	}
-	response, err := s.CreateRun(r.Context(), a, body)
-	if err != nil {
-		return err
-	}
-	status := http.StatusCreated
-	if response.Replayed {
-		status = http.StatusOK
-	}
-	writeJSON(w, status, response)
-	return nil
 }
 
 func (s *EngineController) handlePlan(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {

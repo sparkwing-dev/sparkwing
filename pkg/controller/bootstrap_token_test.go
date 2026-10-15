@@ -11,11 +11,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type bootstrapIssuer struct {
-	*store.Store
 	ensure func(context.Context, capability.ProvisionSpec) (bool, error)
 }
 
@@ -60,8 +58,7 @@ func TestEnsureBootstrapAdminTokenRefusals(t *testing.T) {
 	if created, err := controller.EnsureBootstrapAdminToken(t.Context(), issuer, raw); err == nil || created || calls != 1 {
 		t.Fatal("commit refusal suppressed")
 	}
-	var st *store.Store
-	created, err := controller.EnsureBootstrapAdminToken(t.Context(), st, raw)
+	created, err := controller.EnsureBootstrapAdminToken(t.Context(), nil, raw)
 	var api *apierr.Error
 	if created || !errors.As(err, &api) || api.Code != apierr.PolicyMissing {
 		t.Fatalf("missing transaction: %t %v", created, err)

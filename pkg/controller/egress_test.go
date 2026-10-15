@@ -1,418 +1,313 @@
-package controller_test
+package controller
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
-	"io"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
+const egressLogPath = "/api/v1/runs/run/jobs/job/logs"
+
 type egressFixture struct {
-	url        string
-	store      *store.Store
-	meter      *egress.Meter
-	adminToken string
-	runner     string
-	runnerID   store.ClaimIdentity
-	reader     string
+	store         *store.Store
+	objects       *logHTTPObjects
+	handler       http.Handler
+	meter         *egress.Meter
+	claim, member string
 }
 
 func newEgressFixture(t *testing.T, cfg egress.Config) egressFixture {
 	t.Helper()
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-
-	now := time.Now().UTC()
-	admin, _, err := st.CreateToken("root", store.TokenKindUser, []string{"admin"}, 0, now)
-	if err != nil {
-		t.Fatalf("CreateToken admin: %v", err)
-	}
-	runner, runnerTok, err := st.CreateToken("pool", store.TokenKindRunner, []string{
-		"nodes.claim", "triggers.claim",
-		"runs.state",
-	}, 0, now)
-	if err != nil {
-		t.Fatalf("CreateToken runner: %v", err)
-	}
-	reader, _, err := st.CreateToken("cli", store.TokenKindUser, []string{
-		"runs.read", "logs.read",
-	}, 0, now)
-	if err != nil {
-		t.Fatalf("CreateToken reader: %v", err)
-	}
-
+	e, _, root := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
+	objects := &logHTTPObjects{bytes: map[string][]byte{}}
 	meter := egress.New(cfg)
-	ctrl := controller.New(st, nil).WithEgressMeter(meter)
-	srv := httptest.NewServer(ctrl.Handler())
-	t.Cleanup(srv.Close)
-	return egressFixture{
-		url: srv.URL, store: st, meter: meter,
-		adminToken: admin, reader: reader,
-		runner:   runner,
-		runnerID: store.ClaimIdentity{Principal: "pool", TokenPrefix: runnerTok.Prefix},
-	}
-}
-
-// safety: helpers hand back a whole answer rather than a live
-// *http.Response, so no call site owns a body it can forget to close.
-type fetched struct {
-	status int
-	header http.Header
-	body   []byte
-}
-
-func (f egressFixture) request(t *testing.T, method, path, token string) *http.Request {
-	t.Helper()
-	req, err := http.NewRequestWithContext(context.Background(), method, f.url+path, nil)
+	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+	s := New(e.Store, slog.New(slog.DiscardHandler)).WithSecretsCipher(cipher).WithEngineController(e).WithLicense(accountSessionTestLicense(t)).WithEgressMeter(meter).WithDataController(&DataController{Store: e.Store, Objects: objects})
+	h := s.Handler()
+	response := engineClaimHTTP(t, h, root, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":1}`, 200)
+	var award controllerwire.ClaimResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &award); err != nil || award.Claim == nil {
+		t.Fatalf("claim: %s %v", response.Body, err)
 	}
-	return req
-}
-
-func (f egressFixture) fetch(t *testing.T, method, path, token string) fetched {
-	t.Helper()
-	resp, err := http.DefaultClient.Do(f.request(t, method, path, token))
+	raw := award.Claim.Capability
+	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, 200)
+	tenant, err := e.Store.ForTeam(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read response: %v", err)
-	}
-	return fetched{status: resp.StatusCode, header: resp.Header, body: body}
-}
-
-func (f egressFixture) get(t *testing.T, path, token string) fetched {
-	t.Helper()
-	return f.fetch(t, http.MethodGet, path, token)
-}
-
-func seedLiveLog(t *testing.T, f egressFixture, runID, nodeID, text string) {
-	t.Helper()
-	ctx := context.Background()
-	if err := f.store.CreateRun(ctx, store.Run{ID: runID, Pipeline: "p", Status: "running"}); err != nil {
-		t.Fatalf("CreateRun: %v", err)
-	}
-	if err := f.store.CreateNode(ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "running"}); err != nil {
-		t.Fatalf("CreateNode: %v", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		f.url+"/api/v1/runs/"+runID+"/nodes/"+nodeID+"/logs", strings.NewReader(text))
+	f := newScriptedSegmentLogs()
+	subject := jobLogSubject(1, award.Claim.Binding.Generation)
+	f.add(t, subject, "hello\n", true)
+	objects.bytes = f.objects
+	principal, err := e.Store.LookupCapability(t.Context(), sha256.Sum256([]byte(raw)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set("Authorization", "Bearer "+f.adminToken)
-	resp, err := http.DefaultClient.Do(req)
+	actor := engineActor(capability.Authorized{Principal: principal, Binding: principal.Capability.Binding})
+	if err := tenant.RecordSegments(t.Context(), store.SegmentCommit{Subject: subject, Actor: actor, Segments: f.views[logSubjectID(subject)].Segments, Final: true, RetentionClass: "r30"}); err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, e.Store, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('reader','reader@example.test',1,1)`)
+	engineSQL(t, e.Store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','reader','reader',1)`)
+	member, _, _, err := e.Store.CreateAccountSession(t.Context(), store.Account{ID: "reader"}, "a", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("append live log: status %d", resp.StatusCode)
-	}
+	return egressFixture{handler: h, meter: meter, claim: raw, member: member, store: e.Store, objects: objects}
 }
 
-func claimRunForRunner(t *testing.T, f egressFixture, runID string) {
-	t.Helper()
-	ctx := context.Background()
-	if err := f.store.CreateTrigger(ctx, store.Trigger{
-		ID: runID, Pipeline: "p", CreatedAt: time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("CreateTrigger: %v", err)
+func (f egressFixture) request(method, path, credential string) *http.Request {
+	r := httptest.NewRequest(method, path, nil)
+	if credential != "" {
+		kind := "Bearer "
+		if credential == f.member {
+			kind = "Session "
+		}
+		r.Header.Set("Authorization", kind+credential)
 	}
-	claimed, err := f.store.ClaimNextTriggerFor(ctx, f.runnerID, time.Minute, nil, nil)
-	if err != nil {
-		t.Fatalf("ClaimNextTriggerFor: %v", err)
-	}
-	if claimed == nil || claimed.ID != runID {
-		t.Fatalf("claimed trigger = %+v, want %s", claimed, runID)
-	}
+	return r
+}
+
+func (f egressFixture) fetch(method, path, credential string) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	f.handler.ServeHTTP(w, f.request(method, path, credential))
+	return w
 }
 
 func TestMeteredRoutesStillServeTheRunnerAndCLITokens(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
+	f := newEgressFixture(t, egress.Config{})
+	for _, credential := range []string{f.claim, f.member} {
+		w := f.fetch("GET", egressLogPath, credential)
+		if w.Code != 200 || w.Body.String() != "hello\n" {
+			t.Fatalf("log read: %d %s", w.Code, w.Body)
+		}
 	}
-	f := newEgressFixture(t, egress.Config{MaxStreamsPerPrincipal: 4, MaxDownloadsPerPrincipal: 4})
-	seedLiveLog(t, f, "r1", "n1", "hello\n")
-
-	// safety: a runner reads a node's logs on its claim scope, which is the
-	// path a metered route must not break.
-	claimRunForRunner(t, f, "r1")
-	runnerLogs := f.get(t, "/api/v1/runs/r1/nodes/n1/logs", f.runner)
-	if runnerLogs.status != http.StatusOK || !strings.Contains(string(runnerLogs.body), "hello") {
-		t.Fatalf("runner log read = %d, body %q", runnerLogs.status, runnerLogs.body)
-	}
-
-	logs := f.get(t, "/api/v1/runs/r1/nodes/n1/logs", f.reader)
-	if logs.status != http.StatusOK || !strings.Contains(string(logs.body), "hello") {
-		t.Fatalf("CLI log read = %d, body %q", logs.status, logs.body)
-	}
-
 	state := f.meter.State()
-	if state.GlobalMonthBytes < int64(len(runnerLogs.body)+len(logs.body)) {
-		t.Errorf("metered %d bytes, want at least the two bodies", state.GlobalMonthBytes)
-	}
-	if len(state.Top) != 2 {
-		t.Errorf("top consumers = %+v, want the runner and the CLI counted apart", state.Top)
+	if state.GlobalMonthBytes != 12 || len(state.Top) != 2 {
+		t.Fatalf("separate readers: %+v", state)
 	}
 }
 
 func TestDownloadRoutesRefuseARequestWithoutABearer(t *testing.T) {
 	f := newEgressFixture(t, egress.Config{})
-	seedLiveLog(t, f, "r1", "n1", "hello\n")
-
-	for _, path := range []string{
-		"/api/v1/runs/r1/nodes/n1/logs",
-		"/api/v1/runs/r1/nodes/n1/logs/stream",
-	} {
-		if got := f.get(t, path, "").status; got != http.StatusUnauthorized {
-			t.Errorf("GET %s without a bearer = %d, want 401", path, got)
+	for _, path := range []string{egressLogPath, egressLogPath + "/stream"} {
+		w := f.fetch("GET", path, "")
+		if w.Code != 401 {
+			t.Fatalf("anonymous read: %d %s", w.Code, w.Body)
 		}
 	}
 	if state := f.meter.State(); state.GlobalMonthBytes != 0 {
-		t.Errorf("an unauthenticated refusal metered %d bytes, want 0", state.GlobalMonthBytes)
+		t.Fatalf("refusal charged: %+v", state)
 	}
 }
 
 func TestHeadRequestsChargeNothingAndHoldNoSlot(t *testing.T) {
-	f := newEgressFixture(t, egress.Config{GlobalDailyAlarmBytes: 4 << 10, MaxDownloadsPerPrincipal: 1})
-	seedLiveLog(t, f, "r1", "n1", strings.Repeat("x", 1<<10)+"\n")
-
+	f := newEgressFixture(t, egress.Config{GlobalDailyAlarmBytes: 4, MaxDownloadsPerPrincipal: 1})
+	release, err := f.meter.Open("a/reader", egress.SlotDownload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
 	for range 8 {
-		if got := f.fetch(t, http.MethodHead, "/api/v1/runs/r1/nodes/n1/logs", f.adminToken).status; got != http.StatusOK {
-			t.Fatalf("HEAD = %d, want 200", got)
+		w := f.fetch("HEAD", egressLogPath, f.member)
+		if w.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("HEAD: %d %s", w.Code, w.Body)
 		}
 	}
-
-	// safety: net/http discards a HEAD body, so eight of them over a
-	// 1 KiB log once latched a 4 KiB daily alarm with nothing on the wire.
-	state := f.meter.State()
-	if state.GlobalDayBytes != 0 {
-		t.Fatalf("eight HEADs charged %d bytes, want 0", state.GlobalDayBytes)
-	}
-	if state.Alarm {
-		t.Fatal("a HEAD raised the daily alarm")
+	if state := f.meter.State(); state.GlobalDayBytes != 0 || state.Alarm {
+		t.Fatalf("HEAD charged: %+v", state)
 	}
 }
 
 func TestConcurrentDownloadsAreCappedPerPrincipal(t *testing.T) {
 	f := newEgressFixture(t, egress.Config{MaxDownloadsPerPrincipal: 1})
-	seedLiveLog(t, f, "r1", "n1", "hello\n")
-
-	// safety: a log read finishes before a second request can overlap it, so
-	// the first download's slot is taken on the meter directly.
-	release, err := f.meter.Open(egress.TeamPrincipal(string(store.DefaultTeam), "root"), egress.SlotDownload)
+	release, err := f.meter.Open("a/reader", egress.SlotDownload)
 	if err != nil {
-		t.Fatalf("hold the principal's download slot: %v", err)
+		t.Fatal(err)
 	}
-	refused := f.get(t, "/api/v1/runs/r1/nodes/n1/logs", f.adminToken)
-	if refused.status != http.StatusTooManyRequests {
-		t.Fatalf("a second simultaneous download = %d, want 429", refused.status)
-	}
-	var refusal struct {
-		Error string `json:"error"`
-		Code  string `json:"code"`
-	}
-	if err := json.Unmarshal(refused.body, &refusal); err != nil {
-		t.Fatalf("decode refusal: %v -- raw %q", err, refused.body)
-	}
-	if refusal.Code != "egress_download_limit" {
-		t.Fatalf("refusal code = %q, want %q", refusal.Code, "egress_download_limit")
-	}
-	if !strings.Contains(refusal.Error, "egress concurrency limit reached") {
-		t.Errorf("error member %q does not carry the reason", refusal.Error)
-	}
-
+	assertEgressLimit(t, f.fetch("GET", egressLogPath, f.member), "egress_download_limit")
 	release()
-	if got := f.get(t, "/api/v1/runs/r1/nodes/n1/logs", f.adminToken).status; got != http.StatusOK {
-		t.Fatalf("a download after the first finished = %d, want 200", got)
+	for range 2 {
+		w := f.fetch("GET", egressLogPath, f.member)
+		if w.Code != 200 || w.Body.String() != "hello\n" {
+			t.Fatalf("released slot: %d %s", w.Code, w.Body)
+		}
 	}
-	if got := f.get(t, "/api/v1/runs/r1/nodes/n1/logs", f.adminToken).status; got != http.StatusOK {
-		t.Fatalf("a download after the second finished = %d, want 200; the route kept its slot", got)
+}
+
+func assertEgressLimit(t *testing.T, w *httptest.ResponseRecorder, reason string) {
+	t.Helper()
+	var body apierr.Envelope
+	if w.Code != 429 || json.Unmarshal(w.Body.Bytes(), &body) != nil || body.Error == nil || body.Error.Code != apierr.RateLimited || body.Error.Details["reason"] != reason || w.Header().Get("Retry-After") == "" {
+		t.Fatalf("limit: %d %s", w.Code, w.Body)
+	}
+}
+
+type egressFlushRecorder struct {
+	*httptest.ResponseRecorder
+	onFlush func()
+}
+
+func (w *egressFlushRecorder) Flush() {
+	w.ResponseRecorder.Flush()
+	if run := w.onFlush; run != nil {
+		w.onFlush = nil
+		run()
 	}
 }
 
 func TestLiveLogStreamCapRefusesPastTheLimit(t *testing.T) {
 	f := newEgressFixture(t, egress.Config{MaxStreamsPerPrincipal: 1})
-	seedLiveLog(t, f, "r1", "n1", "hello\n")
-
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		f.url+"/api/v1/runs/r1/nodes/n1/logs/stream", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Authorization", "Bearer "+f.adminToken)
-	open, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer open.Body.Close()
-	if open.StatusCode != http.StatusOK {
-		t.Fatalf("first stream = %d, want 200", open.StatusCode)
-	}
-	if got := open.Header.Get("Cache-Control"); got != "no-store" {
-		t.Errorf("live log stream Cache-Control = %q, want no-store", got)
-	}
-	// safety: the handler holds the slot only once it has written, so the
-	// first byte of the stream is what proves the reservation is in place.
-	buf := make([]byte, 1)
-	if _, err := open.Body.Read(buf); err != nil {
-		t.Fatalf("read the open stream: %v", err)
-	}
-
-	second := f.get(t, "/api/v1/runs/r1/nodes/n1/logs/stream", f.adminToken)
-	if second.status != http.StatusTooManyRequests {
-		t.Fatalf("second stream = %d, want 429", second.status)
-	}
-	if second.header.Get("Retry-After") == "" {
-		t.Error("the stream refusal named no Retry-After")
-	}
-	var refusal struct {
-		Error string `json:"error"`
-		Code  string `json:"code"`
-	}
-	if err := json.Unmarshal(second.body, &refusal); err != nil {
-		t.Fatalf("decode refusal: %v -- raw %q", err, second.body)
-	}
-	if refusal.Code != "egress_stream_limit" {
-		t.Fatalf("refusal code = %q, want %q", refusal.Code, "egress_stream_limit")
-	}
-	if !strings.Contains(refusal.Error, "egress concurrency limit reached") {
-		t.Errorf("error member %q does not carry the reason", refusal.Error)
+	checked := false
+	w := &egressFlushRecorder{ResponseRecorder: httptest.NewRecorder(), onFlush: func() {
+		checked = true
+		assertEgressLimit(t, f.fetch("GET", egressLogPath+"/stream", f.member), "egress_stream_limit")
+		cancel()
+	}}
+	f.handler.ServeHTTP(w, f.request("GET", egressLogPath+"/stream", f.member).WithContext(ctx))
+	if !checked || w.Code != 200 || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("stream: checked=%v %d %s", checked, w.Code, w.Body)
 	}
 }
 
 func TestHealthReportsTheAlarmWithoutUsage(t *testing.T) {
-	f := newEgressFixture(t, egress.Config{GlobalDailyAlarmBytes: 60})
-	seedLiveLog(t, f, "r1", "n1", strings.Repeat("x", 100)+"\n")
-
-	var health struct {
-		Status   string         `json:"status"`
-		Problems []string       `json:"problems"`
-		Egress   map[string]any `json:"egress"`
-	}
-	before := f.get(t, "/api/v1/health", "")
-	if err := json.Unmarshal(before.body, &health); err != nil {
-		t.Fatalf("decode health: %v -- raw %q", err, before.body)
-	}
-	if health.Egress["alarm"] != false {
-		t.Fatalf("health egress = %+v, want no alarm", health.Egress)
-	}
-
-	read := f.get(t, "/api/v1/runs/r1/nodes/n1/logs", f.adminToken)
-	if read.status != http.StatusOK {
-		t.Fatalf("log read = %d, want 200", read.status)
-	}
-
-	after := f.get(t, "/api/v1/health", "")
-	if err := json.Unmarshal(after.body, &health); err != nil {
-		t.Fatalf("decode health: %v -- raw %q", err, after.body)
-	}
-	if health.Egress["alarm"] != true {
-		t.Fatalf("health egress = %+v, want the alarm up", health.Egress)
-	}
-	if len(health.Egress) != 2 || health.Egress["enabled"] != true {
-		t.Fatalf("public health exposed egress usage: %+v", health.Egress)
-	}
-	if health.Status != "degraded" {
-		t.Errorf("health status = %q, want degraded", health.Status)
-	}
-	if len(health.Problems) != 1 || health.Problems[0] != "egress: daily alarm threshold reached" {
-		t.Errorf("public health exposed egress usage in problems: %v", health.Problems)
+	f := newEgressFixture(t, egress.Config{GlobalDailyAlarmBytes: 6})
+	for _, alarm := range []bool{false, true} {
+		if alarm {
+			w := f.fetch("GET", egressLogPath, f.member)
+			if w.Code != 200 {
+				t.Fatalf("read: %d %s", w.Code, w.Body)
+			}
+		}
+		w := f.fetch("GET", "/api/v1/health", "")
+		var health struct {
+			Status   string         `json:"status"`
+			Problems []string       `json:"problems"`
+			Egress   map[string]any `json:"egress"`
+		}
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &health) != nil || len(health.Egress) != 2 || health.Egress["enabled"] != true || health.Egress["alarm"] != alarm {
+			t.Fatalf("health: %d %s", w.Code, w.Body)
+		}
+		if alarm && (health.Status != "degraded" || len(health.Problems) != 1 || health.Problems[0] != "egress: daily alarm threshold reached") {
+			t.Fatalf("alarm: %s", w.Body)
+		}
 	}
 }
 
-// safety: the pod header is the caller's to write, so a slot keyed on it
-// let one bearer open as many downloads as it invented pod names.
 func TestARequestNamingAnotherPodSharesThePrincipalsDownloadSlot(t *testing.T) {
 	f := newEgressFixture(t, egress.Config{MaxDownloadsPerPrincipal: 1})
-	seedLiveLog(t, f, "r1", "n1", "hello\n")
-	release, err := f.meter.Open(egress.TeamPrincipal(string(store.DefaultTeam), "root"), egress.SlotDownload)
+	release, err := f.meter.Open("a/reader", egress.SlotDownload)
 	if err != nil {
-		t.Fatalf("hold the principal's download slot: %v", err)
+		t.Fatal(err)
 	}
 	defer release()
-
-	for _, header := range []string{store.RunnerIdentityHeader, store.ClaimHolderHeader} {
-		req := f.request(t, http.MethodGet, "/api/v1/runs/r1/nodes/n1/logs", f.adminToken)
-		req.Header.Set(header, "pod-b")
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
+	property := func(noise []byte) bool {
+		r := f.request("GET", egressLogPath, f.member)
+		value := strings.Repeat("x", len(noise)+1)
+		for _, header := range []string{store.RunnerIdentityHeader, store.ClaimHolderHeader, "X-Sparkwing-Team"} {
+			r.Header.Set(header, value)
 		}
-		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusTooManyRequests {
-			t.Errorf("a second download naming %s pod-b = %d, want 429 from the principal's one slot", header, resp.StatusCode)
+		w := httptest.NewRecorder()
+		f.handler.ServeHTTP(w, r)
+		return w.Code == 429 && !strings.Contains(w.Body.String(), value)
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 32}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDashboardLogStreamSharesTheLiveLogStreamCap(t *testing.T) {
+	f := newEgressFixture(t, egress.Config{MaxStreamsPerPrincipal: 1})
+	release, err := f.meter.Open("a/reader", egress.SlotLogStream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	assertEgressLimit(t, f.fetch("GET", egressLogPath+"/stream", f.member), "egress_stream_limit")
+	for _, old := range []string{"/api/v1/runs/run/nodes/job/logs/stream", "/api/v1/runs/run/logs/job/stream"} {
+		w := f.fetch("GET", old, f.member)
+		if w.Code != 404 {
+			t.Fatalf("retired stream: %d %s", w.Code, w.Body)
 		}
 	}
 }
 
-// safety: the dashboard's node log stream and the live log stream draw on one
-// per-principal stream cap, so neither route is a way around the other's.
-func TestDashboardLogStreamSharesTheLiveLogStreamCap(t *testing.T) {
-	const (
-		live      = "/api/v1/runs/r1/nodes/n1/logs/stream"
-		dashboard = "/api/v1/runs/r1/logs/n1/stream"
-	)
-	for _, tc := range []struct{ held, refused string }{
-		{live, dashboard},
-		{dashboard, live},
-	} {
-		t.Run(tc.held, func(t *testing.T) {
-			f := newEgressFixture(t, egress.Config{MaxStreamsPerPrincipal: 1})
-			seedLiveLog(t, f, "r1", "n1", "hello\n")
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.url+tc.held, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			req.Header.Set("Authorization", "Bearer "+f.adminToken)
-			open, err := http.DefaultClient.Do(req)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() { _ = open.Body.Close() }()
-			if open.StatusCode != http.StatusOK {
-				t.Fatalf("held stream %s = %d, want 200", tc.held, open.StatusCode)
-			}
-			if _, err := open.Body.Read(make([]byte, 1)); err != nil {
-				t.Fatalf("read the held stream: %v", err)
-			}
-			req, err = http.NewRequestWithContext(ctx, http.MethodGet, f.url+tc.refused, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			req.Header.Set("Authorization", "Bearer "+f.adminToken)
-			second, err := http.DefaultClient.Do(req)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() { _ = second.Body.Close() }()
-			if second.StatusCode != http.StatusTooManyRequests {
-				t.Fatalf("%s while %s holds the only slot = %d, want 429", tc.refused, tc.held, second.StatusCode)
-			}
-		})
+func TestNativeLogReadAuthorityProperty(t *testing.T) {
+	f := newEgressFixture(t, egress.Config{})
+	property := func(choice uint8, seed uint32) bool {
+		path, raw := egressLogPath, f.claim
+		switch choice % 6 {
+		case 0:
+			path = fmt.Sprintf("/api/v1/runs/run/jobs/foreign-%d/logs", seed)
+		case 1:
+			path = fmt.Sprintf("/api/v1/runs/foreign-%d/jobs/job/logs", seed)
+		case 2:
+			engineSQL(t, f.store, `UPDATE nodes SET generation=generation+1 WHERE team='a' AND run_id='run' AND node_id='job'`)
+		case 3:
+			engineSQL(t, f.store, `UPDATE nodes SET claimed_by='foreign' WHERE team='a' AND run_id='run' AND node_id='job'`)
+		case 4:
+			raw = f.member
+			engineSQL(t, f.store, `DELETE FROM memberships WHERE team='a' AND account_id='reader'`)
+		case 5:
+			raw = fmt.Sprintf("swk_unknown_%d", seed)
+		}
+		before := f.objects.reads
+		w := f.fetch("GET", path, raw)
+		switch choice % 6 {
+		case 2:
+			engineSQL(t, f.store, `UPDATE nodes SET generation=generation-1 WHERE team='a' AND run_id='run' AND node_id='job'`)
+		case 3:
+			engineSQL(t, f.store, `UPDATE nodes SET claimed_by='root' WHERE team='a' AND run_id='run' AND node_id='job'`)
+		case 4:
+			engineSQL(t, f.store, `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('a','reader','reader',1)`)
+		}
+		if w.Code != 401 && w.Code != 403 && w.Code != 404 {
+			t.Logf("refusal: %d %s", w.Code, w.Body)
+			return false
+		}
+		return !strings.Contains(w.Body.String(), "hello") && f.objects.reads == before && f.meter.State().GlobalMonthBytes == 0
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 36}); err != nil {
+		t.Fatal(err)
+	}
+	if w := f.fetch("GET", egressLogPath, f.claim); w.Code != 200 || w.Body.String() != "hello\n" {
+		t.Fatalf("valid claim: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestNativeLogReadEndsWithItsRoot(t *testing.T) {
+	f := newEgressFixture(t, egress.Config{})
+	tenant, err := f.store.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "root"}
+	if err := tenant.RevokeAuthority(t.Context(), store.Actor{Authority: authority, CapabilityPrefix: "root"}, authority); err != nil {
+		t.Fatal(err)
+	}
+	before := f.objects.reads
+	w := f.fetch("GET", egressLogPath, f.claim)
+	if w.Code != 401 || strings.Contains(w.Body.String(), "hello") || f.objects.reads != before || f.meter.State().GlobalMonthBytes != 0 {
+		t.Fatalf("revoked read: %d %s", w.Code, w.Body)
 	}
 }

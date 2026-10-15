@@ -67,7 +67,8 @@ func TestEngineIntakeHTTP(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			b := intakeBoundary()
 			f := &engineTransactions{admitted: store.AdmissionResult{RunID: "created", Number: 19, HereBearer: []byte("here-once")}}
-			body := `{"request":{"version":1,"team":"team","pipeline":"build","actor":{"kind":"operator","id":"forged"}},"idempotency_key":"once"}`
+			sourceFields := `"git":{"repository":{"key":"git:example.com/team/repo"},"ref":"main","sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"source":{"ref":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","location":{"remote_url":"https://example.com/team/repo.git","pipeline_dir":".sparkwing"}}`
+			body := `{"request":{"version":1,"team":"team","pipeline":"build","mode":"execute","origin":"trigger","dispatch":"host",` + sourceFields + `,"actor":{"kind":"operator","id":"forged"}},"idempotency_key":"once"}`
 			status, code, writes := http.StatusCreated, apierr.Code(""), 1
 			switch name {
 			case "replay":
@@ -84,7 +85,7 @@ func TestEngineIntakeHTTP(t *testing.T) {
 				if name == "sibling parent job" {
 					job, status, code, writes = "sibling", 403, apierr.Forbidden, 0
 				}
-				body = `{"request":{"version":1,"team":"team","pipeline":"build","lineage":{"parent_run_id":"` + parent + `","parent_job_id":"` + job + `"}},"idempotency_key":"once"}`
+				body = `{"request":{"version":1,"team":"team","pipeline":"build","mode":"execute","origin":"child","dispatch":"host",` + sourceFields + `,"lineage":{"parent_run_id":"` + parent + `","parent_job_id":"` + job + `"}},"idempotency_key":"once"}`
 			case "foreign team":
 				body = strings.Replace(body, `"team":"team"`, `"team":"foreign"`, 1)
 				status, code, writes = 403, apierr.Forbidden, 0
@@ -133,6 +134,9 @@ func TestEngineIntakeHTTP(t *testing.T) {
 			}
 			if f.intake.Authority != b.snapshot.Authorities[0].Principal.Authority || f.intake.Request.Actor.ID == "forged" || f.intake.IdempotencyKey != "once" {
 				t.Fatalf("intake transaction = %+v", f.intake)
+			}
+			if f.intake.Request.Git.Repository.Key != "git:example.com/team/repo" || f.intake.Request.Source.Location.RemoteURL != "https://example.com/team/repo.git" || f.intake.Request.Source.Location.PipelineDir != ".sparkwing" || f.intake.Request.Source.Ref != f.intake.Request.Git.SHA {
+				t.Fatalf("intake source = %+v", f.intake.Request)
 			}
 			if w.Header().Get("Cache-Control") != "no-store" {
 				t.Fatal("one-time bearer response may be cached")

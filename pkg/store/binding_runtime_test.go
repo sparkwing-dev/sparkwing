@@ -1,8 +1,11 @@
 package store
 
 import (
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"testing"
+	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -156,25 +159,66 @@ func TestBindingSourceRequiresTheLiveUnstartedAward(t *testing.T) {
 }
 
 func TestBindingChildRequiresItsCreatingJobGeneration(t *testing.T) {
-	s, demand := unitClaimFixture(t)
-	claim, err := s.ClaimUnit(t.Context(), demand)
+	tenant, request := childIntakeFixture(t)
+	child, err := tenant.AdmitRun(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+	s := tenant.s
+	p, err := s.ResolveAuthority(t.Context(), request.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rewriteSchemaExec(t, s.db, `INSERT INTO child_invocations(team,parent_run_id,parent_node_id,generation,ordinal,request_digest,child_run_id,created_at) VALUES ('a','run','job',1,1,'digest','child',1)`)
-	for _, child := range []string{"child", "unrelated", ""} {
-		err := s.CheckBinding(t.Context(), p, capability.BindChildOfBoundNode, capability.Target{Team: "a", RunID: "run", ChildRunID: child})
-		if (err == nil) != (child == "child") {
-			t.Fatalf("child %q: %v", child, err)
+	for _, id := range []string{child.RunID, "unrelated", ""} {
+		err := s.CheckBinding(t.Context(), p, capability.BindChildOfBoundNode, capability.Target{Team: "a", RunID: "run", ChildRunID: id})
+		if (err == nil) != (id == child.RunID) {
+			t.Fatalf("child %q: %v", id, err)
 		}
 	}
-	rewriteSchemaExec(t, s.db, `UPDATE child_invocations SET generation=2`)
-	if err := s.CheckBinding(t.Context(), p, capability.BindChildOfBoundNode, capability.Target{Team: "a", RunID: "run", ChildRunID: "child"}); err == nil {
+	foreign := p.Capability
+	foreign.Prefix = "next-generation"
+	foreign.Digest = sha256.Sum256([]byte("next-generation"))
+	foreign.Binding.Generation++
+	authorityPersist(t, s, foreign)
+	other, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: foreign.Prefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CheckBinding(t.Context(), other, capability.BindChildOfBoundNode, capability.Target{Team: "a", RunID: "run", ChildRunID: child.RunID}); err == nil {
 		t.Fatal("child from another generation was readable")
+	}
+	serial := 0
+	property := func(choice uint8, noise string) bool {
+		serial++
+		forged := p.Capability
+		forged.Prefix = fmt.Sprintf("other-%d", serial)
+		forged.Digest = sha256.Sum256([]byte(forged.Prefix))
+		target := capability.Target{Team: "a", RunID: "run", ChildRunID: child.RunID}
+		switch choice % 7 {
+		case 0:
+			target.Team = "b"
+		case 1:
+			target.RunID += noise + "x"
+		case 2:
+			forged.Binding.NodeID += noise + "x"
+		case 3:
+			forged.Binding.Holder += noise + "x"
+		case 4:
+			forged.Binding.Generation++
+		case 5:
+			forged.Binding.Kind = capability.BindingTrigger
+		case 6:
+			target.ChildRunID += noise + "x"
+		}
+		authorityPersist(t, s, forged)
+		principal, err := s.ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: forged.Prefix})
+		if err != nil {
+			return true
+		}
+		return s.CheckBinding(t.Context(), principal, capability.BindChildOfBoundNode, target) != nil
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 30}); err != nil {
+		t.Fatal(err)
 	}
 }
 

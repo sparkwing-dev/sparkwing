@@ -37,30 +37,39 @@ func (f *consoleWritesFake) record(a capability.Authorized, value any) error {
 	f.seen, f.value = a, value
 	return f.err
 }
+
 func (f *consoleWritesFake) ConsoleGrantCredit(_ context.Context, a capability.Authorized, value store.CreditGrantRequest) (store.CreditGrantResult, error) {
 	return store.CreditGrantResult{}, f.record(a, value)
 }
+
 func (f *consoleWritesFake) ConsoleSetBillingTrust(_ context.Context, a capability.Authorized, value store.BillingTrustChange) (store.BillingStanding, error) {
 	return store.BillingStanding{}, f.record(a, value)
 }
+
 func (f *consoleWritesFake) ConsoleFreeze(_ context.Context, a capability.Authorized, value string) (store.TeamCreditFreeze, error) {
 	return store.TeamCreditFreeze{Frozen: true}, f.record(a, value)
 }
+
 func (f *consoleWritesFake) ConsoleUnfreeze(_ context.Context, a capability.Authorized, hold, reason string) (store.TeamCreditFreeze, error) {
 	return store.TeamCreditFreeze{}, f.record(a, []string{hold, reason})
 }
+
 func (f *consoleWritesFake) ConsoleDeleteAccount(_ context.Context, a capability.Authorized) (store.AccountDeletion, error) {
 	return store.AccountDeletion{AccountID: a.Target.AccountID}, f.record(a, a.Target.AccountID)
 }
+
 func (f *consoleWritesFake) ConsoleDeleteTeam(_ context.Context, a capability.Authorized) (store.TeamDeletion, error) {
 	return store.TeamDeletion{Team: store.Team(a.Target.Team)}, f.record(a, a.Target.Team)
 }
+
 func (f *consoleWritesFake) ConsoleApproveWaitlist(_ context.Context, a capability.Authorized, ids []string, oldest int, key string) ([]store.Account, error) {
 	return nil, f.record(a, consoleApprovalInput{ids, oldest, key})
 }
+
 func (f *consoleWritesFake) ConsoleSetCreditSettings(_ context.Context, a capability.Authorized, value store.CreditSettingsUpdate) (store.CreditSettings, error) {
 	return store.CreditSettings{}, f.record(a, value)
 }
+
 func (f *consoleWritesFake) ConsoleUnbindGitHubInstallation(_ context.Context, a capability.Authorized, id int64) (store.Team, error) {
 	return "customer", f.record(a, id)
 }
@@ -113,7 +122,7 @@ func TestConsoleWriteHTTPAuthorityProperty(t *testing.T) {
 				r.Header.Set(csrfHeaderName, "session-proof")
 				r.Header.Set("Content-Type", "application/json")
 				r.Header.Set("Idempotency-Key", "approve-once")
-				switch phase % 7 {
+				switch phase % 6 {
 				case 1:
 					authority.principal.Class = capability.CredentialSession
 					authority.principal.Capability.Subject.Kind = capability.SubjectAccount
@@ -130,15 +139,12 @@ func TestConsoleWriteHTTPAuthorityProperty(t *testing.T) {
 				case 5:
 					f.err = errors.New("private-backend-fault")
 					want = 500
-				case 6:
-					s.consoleWrites = nil
-					want = 500
 				}
 				w := httptest.NewRecorder()
 				s.Handler().ServeHTTP(w, r)
-				writes := phase%7 == 0 || phase%7 == 4 || phase%7 == 5
+				writes := phase%6 == 0 || phase%6 == 4 || phase%6 == 5
 				if w.Code != want || (f.calls == 1) != writes || f.calls > 1 || strings.Contains(w.Body.String(), "private-backend-fault") {
-					t.Logf("phase %d = %d %s calls=%d want=%d", phase%7, w.Code, w.Body, f.calls, want)
+					t.Logf("phase %d = %d %s calls=%d want=%d", phase%6, w.Code, w.Body, f.calls, want)
 					return false
 				}
 				if writes && (f.seen.Principal.Authority != base.Authority || f.seen.Principal.Capability.Subject.ID != "operator-account" || f.seen.Target.Team != "customer" && strings.Contains(tc.path, "/teams/")) {

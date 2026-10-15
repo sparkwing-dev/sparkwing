@@ -475,6 +475,14 @@ func (s *Store) approveOneOnce(ctx context.Context, id, actor string, now time.T
 		return Account{}, false, err
 	}
 	defer rollbackOrLog(tx)
+	acct, changed, err := approveOneTx(ctx, tx, id, actor, now)
+	if err != nil {
+		return Account{}, false, err
+	}
+	return acct, changed, tx.Commit()
+}
+
+func approveOneTx(ctx context.Context, tx *storeTx, id, actor string, now time.Time) (Account, bool, error) {
 	at := now.UTC().Unix()
 	res, err := tx.ExecContext(ctx,
 		`UPDATE accounts SET waitlisted_at = 0, waitlist_reason = '', updated_at = ? WHERE id = ? AND waitlisted_at <> 0`,
@@ -510,5 +518,5 @@ func (s *Store) approveOneOnce(ctx context.Context, id, actor string, now time.T
 	if acct, err = accountTx(ctx, tx, id); err != nil {
 		return Account{}, false, err
 	}
-	return acct, true, tx.Commit()
+	return acct, true, nil
 }
