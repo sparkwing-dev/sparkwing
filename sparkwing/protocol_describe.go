@@ -26,17 +26,15 @@ func (sdkOperations) Describe(ctx context.Context) (nodeproto.DescribeDoc, error
 }
 
 func describePipeline(ctx context.Context, reg *registration) (d nodeproto.PipelineDescription, err error) {
+	diagnostics := &planningDiagnostics{}
+	diagnostics.collect(reg.Schema)
+	ctx = withPlanningDiagnostics(ctx, diagnostics)
 	defer func() {
 		if failure := recover(); failure != nil {
-			var ok bool
-			err, ok = failure.(error)
-			if !ok {
-				err = fmt.Errorf("%v", failure)
-			}
+			err = planningFailure(failure)
 		}
 		if err != nil {
-			message := fmt.Sprintf("describe pipeline %q: %v", reg.Name, err)
-			err = sdkError(apierr.PlanFailed, maskText(message, reg.secretValues(nil)))
+			err = diagnostics.sanitize(err, apierr.PlanFailed, fmt.Sprintf("describe pipeline %q: ", reg.Name))
 		}
 	}()
 	p := reg.instance()
@@ -75,7 +73,7 @@ func describePipeline(ctx context.Context, reg *registration) (d nodeproto.Pipel
 		return d, err
 	}
 	for _, a := range plan.declaredArguments() {
-		d.Args = append(d.Args, nodeproto.ArgumentDescription{Name: a.Name, Short: a.Short, Type: a.Type, Required: a.Required, Description: a.Desc, Default: declaredDefault(a.Default), Enum: a.Enum, JobID: a.JobID})
+		d.Args = append(d.Args, nodeproto.ArgumentDescription{Name: a.Name, Short: a.Short, Type: a.Type, Required: a.Required, Description: a.Desc, Default: declaredDefault(a.Default), Enum: a.Enum, Secret: a.Secret, JobID: a.JobID})
 	}
 	riskSet := map[string]bool{}
 	for _, job := range planDocument(plan).Jobs {

@@ -237,7 +237,7 @@ func (p *Plan) Approval(id string, cfg ApprovalConfig) *Approval {
 	if err := validateNodeID(id); err != nil {
 		panic(err)
 	}
-	n := &JobNode{id: id, approvalSpec: &cfg}
+	n := &JobNode{id: id, approvalSpec: &cfg, diagnostics: p.diagnostics}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.byID[id] != nil {

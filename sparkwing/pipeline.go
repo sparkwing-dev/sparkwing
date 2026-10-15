@@ -144,6 +144,7 @@ func buildRegistration[T any](name string, factory func() Pipeline[T], callerLab
 			return nil, fmt.Errorf("sparkwing: factory for pipeline %q returned nil", name)
 		}
 		plan := NewPlan()
+		plan.diagnostics, _ = ctx.Value(planningDiagnosticsKey{}).(*planningDiagnostics)
 		plan.setInputs(in)
 		if err := p.Plan(sdkserve.DeclarationContext(ctx), plan, in, rc); err != nil {
 			return nil, err
@@ -199,30 +200,6 @@ func lookup(name string) (*registration, bool) {
 		return nil, false
 	}
 	return r, true
-}
-
-// SecretValues resolves the schema's secret-marked Inputs fields
-// against the wire-format args map (applying tag-declared defaults
-// for unset keys) and returns the resolved string values. Empty
-// values are skipped. Bag-field secrets are out of scope: `,extra`
-// bags carry arbitrary keys with no per-key opt-in.
-func (r *registration) secretValues(args map[string]string) []string {
-	var out []string
-	for _, f := range r.Schema.Fields {
-		if !f.Secret || f.isExtraBag {
-			continue
-		}
-		v, ok := args[f.Name]
-		if !ok {
-			v = f.Default
-		}
-		if v == "" {
-			continue
-		}
-		out = append(out, v)
-	}
-	sort.Slice(out, func(i, j int) bool { return len(out[i]) > len(out[j]) })
-	return out
 }
 
 // Registered returns the names of all registered pipelines, sorted.
