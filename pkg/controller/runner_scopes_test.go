@@ -147,9 +147,6 @@ func TestRunnerScopes_DocumentedSetCompletesARunWithoutAdmin(t *testing.T) {
 		{"create the deploy node", func() error {
 			return c.CreateNode(ctx, store.Node{RunID: trig.ID, NodeID: "deploy", Status: "pending"})
 		}},
-		{"expand dependencies", func() error {
-			return c.UpdateNodeDeps(ctx, trig.ID, "deploy", []string{"build"})
-		}},
 		{"append a run event", func() error {
 			return c.AppendEvent(ctx, trig.ID, "build", "node_queued", []byte(`{}`))
 		}},

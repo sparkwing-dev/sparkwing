@@ -99,7 +99,6 @@ func TestTenantNodeWritesStayInTheRunsTeam(t *testing.T) {
 
 	writes := map[string]func(*store.Tenant) error{
 		"StartNode":               func(tn *store.Tenant) error { return tn.StartNode(ctx, "run-a", "build") },
-		"UpdateNodeDeps":          func(tn *store.Tenant) error { return tn.UpdateNodeDeps(ctx, "run-a", "build", []string{"lint"}) },
 		"UpdateNodeActivity":      func(tn *store.Tenant) error { return tn.UpdateNodeActivity(ctx, "run-a", "build", "compiling") },
 		"AppendNodeAnnotation":    func(tn *store.Tenant) error { return tn.AppendNodeAnnotation(ctx, "run-a", "build", "note") },
 		"SetNodeSummary":          func(tn *store.Tenant) error { return tn.SetNodeSummary(ctx, "run-a", "build", "# done") },

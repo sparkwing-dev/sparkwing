@@ -49,7 +49,11 @@ func prepareExpansionTx(ctx context.Context, tx *storeTx, team Team, request Exp
 	if err != nil {
 		return result, err
 	}
-	validation := nodeproto.ValidationContext{Placement: planPlacement(snapshot.Run), Secrets: secrets, Expansion: true, SourceJob: request.Source.NodeID}
+	var plan nodeproto.PlanDoc
+	if err := decodeScheduleDeclaration(snapshot.Run.Plan, &plan); err != nil {
+		return result, err
+	}
+	validation := nodeproto.ValidationContext{Placement: planPlacement(snapshot.Run), Secrets: secrets, Expansion: true, SourceJob: request.Source.NodeID, ExistingConcurrency: plan.Concurrency}
 	for _, node := range snapshot.Nodes {
 		if priorJobs[node.Ref.NodeID] {
 			continue

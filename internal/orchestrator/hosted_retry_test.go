@@ -30,7 +30,6 @@ func TestHostedRetryPolicy_ClassifiesEveryWriteTheRunMakes(t *testing.T) {
 		{"POST", "/api/v1/runs/r1/nodes/n1/start", hostedRetryRepeatable},
 		{"POST", "/api/v1/runs/r1/nodes/n1/finish", hostedRetryRepeatable},
 		{"POST", "/api/v1/runs/r1/nodes/n1/activity", hostedRetryRepeatable},
-		{"POST", "/api/v1/runs/r1/nodes/n1/deps", hostedRetryRepeatable},
 		{"POST", "/api/v1/runs/r1/nodes/n1/steps/skip", hostedRetryRepeatable},
 		{"POST", "/api/v1/concurrency/k/acquire", hostedRetryRepeatable},
 		{"POST", "/api/v1/concurrency/k/release", hostedRetryRepeatable},

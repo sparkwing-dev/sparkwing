@@ -462,3 +462,23 @@ publisher remains pending its caller migrations.
 
 The package selection is in `../w1-session22-tests.txt`. Native route and
 platform cells remain pending.
+
+## W1 raw dependency writer retirement
+
+`UpdateNodeDeps` and its store/client/HTTP callers are removed. Generated
+membership is accepted once and scheduling projects its dependencies.
+The legacy host keeps its own membership for execution ordering.
+
+| Assertion | Final evidence |
+| --- | --- |
+| Generated members hold their dependent until every member succeeds | `TestLifecycle/lifecycle-generator-barrier/store-sqlite` accepts two members and an empty group, reopens SQLite, completes the members separately and checks the dependent's release. |
+| Expansion preserves initial declarations and terminal member state | The same cell checks unchanged initial plan/hash and dependent spec, terminal replay and atomic refusal of a different body. |
+| Mutable dependency projections cannot alter accepted topology | `TestGeneratedDependenciesUseAcceptedTopologyProperty` generates 32 expansions with zero to six members and adversarial deps_json values, then compares the full graph, decisions and replay. |
+| Old host resolves generated waits without a dependency writer | `TestGeneratedWaitsUsesMembershipWithoutRewritingDeclarations` checks unresolved, populated and empty groups through the host's wait calculation. |
+| Expansion validation receives initial plan concurrency on submission and replay | `TestExpansionValidationReceivesAcceptedPlanConcurrency` checks the contract context. Enforcement remains with the shared validator. |
+
+The store checks port the persisted-dependency expectation from
+`TestExpansionFansOutAndHoldsItsWaiter`. That host test retains execution-order
+assertions and expects its original declaration to stay unchanged. Its complete
+runtime fixture still needs W3's final admission/lifecycle migration. No archived
+T1 source-function identity or native cell is newly claimed complete.

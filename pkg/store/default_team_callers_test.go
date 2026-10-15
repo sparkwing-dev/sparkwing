@@ -87,7 +87,6 @@ var defaultTeamCallers = map[string]string{
 	"internal/orchestrator.(localState).StartNode":                     defaultTeamState,
 	"internal/orchestrator.(localState).StartNodeStep":                 defaultTeamState,
 	"internal/orchestrator.(localState).UpdateNodeActivity":            defaultTeamState,
-	"internal/orchestrator.(localState).UpdateNodeDeps":                defaultTeamState,
 	"internal/orchestrator.JobErrors":                                  defaultTeamView,
 	"internal/orchestrator.JobLogs":                                    defaultTeamView,
 	"internal/orchestrator.JobStatus":                                  defaultTeamView,

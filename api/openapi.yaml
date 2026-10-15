@@ -531,29 +531,6 @@ paths:
         "422": {description: The output ref names no committed output of this node.}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/runs/{id}/nodes/{nodeID}/deps:
-    parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
-    post:
-      x-sparkwing-scope: runs.state
-      tags: [nodes]
-      summary: Rewrite a node's dependency list.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.updateDepsReq
-              type: object
-              required: [deps]
-              properties:
-                deps:
-                  type: array
-                  items: {type: string}
-      responses:
-        "204": {description: Updated.}
-
   /api/v1/runs/{id}/nodes/{nodeID}/output:
     parameters:
       - {$ref: "#/components/parameters/RunID"}

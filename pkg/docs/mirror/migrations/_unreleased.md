@@ -1,5 +1,13 @@
 # Migrating to the next release
 
+## Generated dependencies use accepted expansions
+
+`UpdateNodeDeps` on Store, Tenant and Client and
+`POST /api/v1/runs/{id}/nodes/{nodeID}/deps` are removed.
+Declare `needs_generated` in the accepted plan and submit generated jobs with
+`Tenant.AcceptExpansion`. Read `RunSnapshot.Scheduling` to resolve group members
+and decide when dependents can run. Accepted declarations stay unchanged.
+
 ## Node state writes use transitions
 
 `SetNodeStatus` and `RevokeNodeReady` on Store, Tenant and Client are removed.

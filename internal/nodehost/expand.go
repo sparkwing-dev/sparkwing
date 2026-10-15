@@ -168,20 +168,6 @@ func (s *scheduler) addGenerated(ctx context.Context, source string, e expansion
 	}
 	s.run.Logger.Info("nodehost: expansion generated", "run", s.run.ID, "source", source, "generator", e.closure, "nodes", len(e.nodes))
 	hostEvent(ctx, s.run, source, "expansion_generated", fmt.Appendf(nil, "%d children", children))
-	for _, w := range s.nodes {
-		if !slices.Contains(w.NeedsGenerated, e.closure) {
-			continue
-		}
-		deps := append(slices.Clone(w.Needs), w.NeedsIfPresent...)
-		for _, id := range w.NeedsGenerated {
-			if g := s.groups[id]; g != nil {
-				deps = append(deps, g.members...)
-			}
-		}
-		if err := s.run.State.UpdateNodeDeps(context.WithoutCancel(ctx), s.run.ID, w.ID, deps); err != nil {
-			s.run.Logger.Warn("nodehost: record generated deps", "run", s.run.ID, "node", w.ID, "err", err)
-		}
-	}
 	return nil
 }
 

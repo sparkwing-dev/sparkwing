@@ -4,6 +4,14 @@
 
 ## Amendment 1: authority and execution seams
 
+`UpdateNodeDeps` on Store, Tenant and Client and its HTTP endpoint are removed.
+Generated dependencies come from accepted expansion membership in `Scheduling`.
+Expansion never rewrites the initial plan or a dependent's declaration. Acceptance
+passes the accepted plan's concurrency declarations through `ExistingConcurrency`
+on initial submission and replay. The SQLite `lifecycle-generator-barrier/store-sqlite`
+proof checks two members, an empty group, reopening, terminal replay and dependent
+release. Delegation issuance is seeded because C2's validator remains a stub.
+
 `SetNodeStatus` and `RevokeNodeReady` on Store, Tenant and Client are removed
 with their legacy HTTP handlers. Debug pauses use `status_detail` through
 activity writes and leave lifecycle state intact. Queue withdrawal uses

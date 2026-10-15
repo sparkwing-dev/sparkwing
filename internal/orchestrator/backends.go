@@ -188,10 +188,6 @@ func (l localState) FinishNodeExecutionAttempt(ctx context.Context, runID, nodeI
 	return l.st.FinishNodeExecutionAttempt(ctx, runID, nodeID, fence.Claimant, finish)
 }
 
-func (l localState) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error {
-	return l.st.UpdateNodeDeps(ctx, runID, nodeID, deps)
-}
-
 func (l localState) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error {
 	return l.st.UpdateNodeActivity(ctx, runID, nodeID, detail)
 }

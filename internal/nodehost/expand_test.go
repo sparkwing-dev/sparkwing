@@ -55,7 +55,7 @@ func TestExpansionFansOutAndHoldsItsWaiter(t *testing.T) {
 		t.Errorf("summary ran with generator %q, want none", got)
 	}
 	row := nodeRow(t, st, "summary")
-	if want := []string{"lint", "test-0", "test-1", "test-2", "test-3", "test-4"}; !slices.Equal(row.Deps, want) {
+	if want := []string{"lint"}; !slices.Equal(row.Deps, want) {
 		t.Errorf("summary row deps = %v, want %v", row.Deps, want)
 	}
 }
@@ -136,5 +136,22 @@ func TestValidateNodesChecksGeneratedEdges(t *testing.T) {
 	doc.Jobs[0].Needs = deps("summary")
 	if err := validateNodes(doc.Jobs, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}); err == nil || !strings.Contains(err.Error(), "dependency cycle") {
 		t.Errorf("a source that needs its own waiter: err = %v", err)
+	}
+}
+
+func TestGeneratedWaitsUsesMembershipWithoutRewritingDeclarations(t *testing.T) {
+	job := nodeproto.JobSpec{ID: "summary", Needs: []string{"lint"}, NeedsGenerated: []string{"group"}}
+	s := scheduler{}
+	if _, ready, err := s.generatedWaits(job, slices.Clone(job.Needs)); err != nil || ready {
+		t.Fatalf("unresolved group: ready=%t, %v", ready, err)
+	}
+	s.groups = map[string]*genGroup{"group": {done: true, members: []string{"first", "second"}}}
+	waits, ready, err := s.generatedWaits(job, slices.Clone(job.Needs))
+	if err != nil || !ready || !slices.Equal(waits, []string{"lint", "first", "second"}) || !slices.Equal(job.Needs, []string{"lint"}) {
+		t.Fatalf("generated waits: %v, ready=%t, declaration=%v, %v", waits, ready, job.Needs, err)
+	}
+	s.groups["group"].members = nil
+	if waits, ready, err := s.generatedWaits(job, slices.Clone(job.Needs)); err != nil || !ready || !slices.Equal(waits, job.Needs) {
+		t.Fatalf("empty group: %v, ready=%t, %v", waits, ready, err)
 	}
 }

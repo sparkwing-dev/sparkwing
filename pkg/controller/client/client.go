@@ -356,14 +356,6 @@ func (c *Client) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcom
 	return c.post(ctx, path, body, http.StatusNoContent, nil)
 }
 
-func (c *Client) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error {
-	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/deps",
-		url.PathEscape(runID), url.PathEscape(nodeID))
-	return c.post(ctx, path,
-		map[string]any{"deps": deps},
-		http.StatusNoContent, nil)
-}
-
 // UpdateNodeActivity POSTs a status_detail update that also bumps
 // last_heartbeat. Empty detail clears the prior detail.
 func (c *Client) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error {

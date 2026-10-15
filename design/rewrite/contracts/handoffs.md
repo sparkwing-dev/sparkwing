@@ -186,3 +186,22 @@ W4/W9's SDK symbol-doc drift remains separate. StateStoreOld, CreatePlanNode,
 raw readiness publication and other legacy lifecycle/claim/trigger APIs remain
 open, along with the earlier foreign contract gaps. W1b implementation files
 are unchanged. See `../w1-session22-progress.md` for evidence and shared files.
+
+W1's raw dependency writer cut is complete. `UpdateNodeDeps` on Store, Tenant
+and Client and its HTTP endpoint are removed. The old host computes generated
+waits from membership without rewriting declarations. The SQLite
+`lifecycle-generator-barrier/store-sqlite` cell checks two generated members,
+an empty group, reopening, terminal replay and dependent release. The generated
+property checks that arbitrary legacy dependency projections cannot change the
+accepted graph or its decisions. W1b implementation files are unchanged.
+
+W1 now passes accepted plan-level concurrency to expansion validation through
+`ExistingConcurrency`, including replay. W3/W4's existing concurrency-definition
+handoff still needs implementation. An overlay of the existing W4 membership
+test that expects `plan_invalid` for capacity, scope and on_limit changes fails
+all six job/plan cases because ValidatePlan returns nil. Cost changes remain
+allowed. W1 tests its context handoff with a contract fake and does not claim
+the shared validator enforces the policy. No foreign contract shape changed.
+C2's ValidateDelegation is also a panic stub, so the SQLite expansion credential
+is seeded. Native issuance, HTTP transport and host execution remain integrations.
+See `../w1-session23-progress.md` for checks and remaining W1 work.

@@ -1646,29 +1646,6 @@ UPDATE nodes SET status = ?, started_at = ?
 	return fencedRows(res, fenced)
 }
 
-// UpdateNodeDeps rewrites a node's stored dependency list.
-func (s *Store) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error {
-	return s.defaultTenant().UpdateNodeDeps(ctx, runID, nodeID, deps)
-}
-
-// UpdateNodeDeps is [Store.UpdateNodeDeps] confined to t's team.
-func (t *Tenant) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error {
-	depsJSON, _ := json.Marshal(deps)
-	res, fenced, err := t.execNodeMutation(ctx, runID, nodeID,
-		`UPDATE nodes SET deps_json = ?
-		  WHERE team = ? AND run_id = ? AND node_id = ? AND ready_at IS NULL`,
-		depsJSON, string(t.team), runID, nodeID)
-	if err != nil {
-		return err
-	}
-	if affected, err := res.RowsAffected(); err != nil {
-		return err
-	} else if affected != 1 {
-		return ErrLockHeld
-	}
-	return fencedRows(res, fenced)
-}
-
 // FinishNode marks terminal with outcome + optional output/error.
 func (s *Store) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error {
 	return s.FinishNodeWithReason(ctx, runID, nodeID, outcome, errMsg, output, FailureUnknown, nil)

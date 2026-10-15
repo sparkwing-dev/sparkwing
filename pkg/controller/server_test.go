@@ -255,10 +255,6 @@ func TestController_RunLifecycle(t *testing.T) {
 		map[string]any{"outcome": "success"},
 		http.StatusNoContent)
 
-	mustPostJSON(t, base+"/api/v1/runs/run-ctrl-1/nodes/b/deps",
-		map[string]any{"deps": []string{"a", "dyn-1", "dyn-2"}},
-		http.StatusNoContent)
-
 	mustPostJSON(t, base+"/api/v1/runs/run-ctrl-1/finish",
 		map[string]any{"status": "success"},
 		http.StatusNoContent)
@@ -291,8 +287,8 @@ func TestController_RunLifecycle(t *testing.T) {
 	if bNode == nil {
 		t.Fatalf("node b not found")
 	}
-	if len(bNode.Deps) != 3 || bNode.Deps[2] != "dyn-2" {
-		t.Errorf("node b deps=%v want [a dyn-1 dyn-2]", bNode.Deps)
+	if len(bNode.Deps) != 1 || bNode.Deps[0] != "a" {
+		t.Errorf("node b deps=%v want [a]", bNode.Deps)
 	}
 }
 

@@ -3110,7 +3110,6 @@ func (s *Store) TriggerExecutionAttemptIsLive(ctx context.Context, runID, nodeID
 func (s *Store) TriggerRepoID(ctx context.Context, team Team, id string) (int64, error)
 func (s *Store) UnlinkIdentity(ctx context.Context, accountID, provider, keepSession string, now time.Time) (Identity, int64, error)
 func (s *Store) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
-func (s *Store) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
 func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
 func (s *Store) UploadForTeam(ctx context.Context, team Team, id string) (Upload, error)
 func (s *Store) WaitlistedAccounts(ctx context.Context, limit int) ([]WaitlistedAccount, error)
@@ -3450,7 +3449,6 @@ func (t *Tenant) TrustLocalBuilds(ctx context.Context) (bool, error)
 func (t *Tenant) UnbindGitHubAppInstallation(ctx context.Context, installation int64) error
 func (t *Tenant) UpdateMembership(ctx context.Context, actor Actor, change MembershipUpdate) error
 func (t *Tenant) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
-func (t *Tenant) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
 func (t *Tenant) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
 func (t *Tenant) UpsertProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (t *Tenant) WithdrawGitHubAppAutomation(ctx context.Context, installation, repository int64) error

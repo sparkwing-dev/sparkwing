@@ -207,7 +207,6 @@ func (c *Client) Token() string
 func (c *Client) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
 func (c *Client) TouchRunHeartbeat(ctx context.Context, runID string) error
 func (c *Client) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
-func (c *Client) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
 func (c *Client) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
 func (c *Client) UploadNodeOutput(ctx context.Context, runID, nodeID string, data []byte) (*store.OutputRef, error)
 func (c *Client) WithAllowRepos(patterns []string) *Client

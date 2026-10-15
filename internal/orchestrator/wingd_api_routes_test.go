@@ -93,7 +93,6 @@ var apiWriteRoutes = []string{
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/attempt",
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/claim",
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/claim/input",
-	"POST /api/v1/runs/{id}/nodes/{nodeID}/deps",
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/execution-finish",
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/execution-start",
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/finalize-ready",

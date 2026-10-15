@@ -620,29 +620,6 @@ func (s *Server) handleFinishNode(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-type updateDepsReq struct {
-	Deps []string `json:"deps"`
-}
-
-func (s *Server) handleUpdateNodeDeps(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	runID := r.PathValue("id")
-	nodeID := r.PathValue("nodeID")
-	var body updateDepsReq
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if err := tenant.UpdateNodeDeps(r.Context(), runID, nodeID, body.Deps); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 type appendEventReq struct {
 	NodeID  string `json:"node_id,omitempty"`
 	Kind    string `json:"kind"`

@@ -73,9 +73,6 @@ func runContractSurface(t *testing.T, c *client.Client) {
 	if err := c.CreateNode(ctx, store.Node{RunID: runID, NodeID: "produce", Status: "pending"}); err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
-	if err := c.UpdateNodeDeps(ctx, runID, "produce", []string{}); err != nil {
-		t.Fatalf("UpdateNodeDeps: %v", err)
-	}
 	if err := c.StartNode(ctx, runID, "produce"); err != nil {
 		t.Fatalf("StartNode: %v", err)
 	}
