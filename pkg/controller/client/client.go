@@ -33,8 +33,6 @@ type Client struct {
 	claimCaps         atomic.Pointer[claimCapabilities]
 
 	pollAdvice atomic.Int64
-
-	watchObserver func(WatchReport)
 }
 
 // New constructs a Client targeting the given controller base URL.
@@ -57,11 +55,6 @@ func NewWithToken(baseURL string, httpClient *http.Client, token string) *Client
 	c.token = token
 	return c
 }
-
-// Token returns the bearer token the client was constructed with, or
-// "" when constructed without auth. Used by RemoteBackends to thread
-// the same auth to sibling HTTP backends.
-func (c *Client) Token() string { return c.token }
 
 // Close releases resources held by the client. The HTTP transport
 // runs idle connections under its own GC; Close is a no-op kept on
@@ -288,33 +281,6 @@ func (c *Client) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md s
 	return c.post(ctx, path,
 		map[string]string{"step_id": stepID, "markdown": md},
 		http.StatusNoContent, nil)
-}
-
-// ListNodeSteps fetches every step row for the run, across nodes.
-// The wire shape matches the local store (per-step status + started/
-// finished timestamps); the dashboard's nodes endpoint joins this in
-// when serving ?include=nodes.
-func (c *Client) ListNodeSteps(ctx context.Context, runID string) ([]*store.NodeStep, error) {
-	u := fmt.Sprintf("%s/api/v1/runs/%s/steps", c.baseURL, url.PathEscape(runID))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, readHTTPError(resp)
-	}
-	var body struct {
-		Steps []*store.NodeStep `json:"steps"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return nil, err
-	}
-	return body.Steps, nil
 }
 
 func (c *Client) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error {
@@ -922,7 +888,6 @@ func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID
 	req.Header.Set("Content-Type", "application/json")
 	c.setRunnerIdentity(req)
 	setNodeClaimFenceHeaders(req, ctx)
-	c.askWatched(req)
 	resp, err := c.do(req)
 	if err != nil {
 		return err
@@ -930,15 +895,6 @@ func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID
 	defer resp.Body.Close()
 	switch resp.StatusCode {
 	case http.StatusNoContent:
-		return nil
-	case http.StatusOK:
-		var out struct {
-			Watched bool `json:"watched"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-			return fmt.Errorf("decode node claim heartbeat: %w", err)
-		}
-		c.reportWatch(WatchReport{RunID: runID, NodeID: nodeID, Watched: out.Watched})
 		return nil
 	case http.StatusConflict:
 		return store.ErrLockHeld
@@ -983,54 +939,6 @@ func (c *Client) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedB
 	return c.post(ctx, path,
 		map[string]string{"released_by": releasedBy, "release_kind": kind},
 		http.StatusNoContent, nil)
-}
-
-// ListEventsAfter pulls events for a run with seq > afterSeq.
-// Mirrors Store.ListEventsAfter.
-func (c *Client) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]store.Event, error) {
-	if limit <= 0 {
-		limit = 500
-	}
-	u := fmt.Sprintf("%s/api/v1/runs/%s/events?after=%d&limit=%d",
-		c.baseURL, url.PathEscape(runID), afterSeq, limit)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, readHTTPError(resp)
-	}
-	var out []store.Event
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *Client) ListDebugPauses(ctx context.Context, runID string) ([]*store.DebugPause, error) {
-	u := fmt.Sprintf("%s/api/v1/runs/%s/debug-pauses", c.baseURL, url.PathEscape(runID))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, readHTTPError(resp)
-	}
-	var out []*store.DebugPause
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 // CreateApproval requests a human decision on a gated node. The
@@ -1116,30 +1024,6 @@ func (c *Client) ResolveApproval(ctx context.Context, runID, nodeID, resolution,
 	}
 }
 
-// ListPendingApprovals returns every unresolved approval, oldest-first.
-func (c *Client) ListPendingApprovals(ctx context.Context) ([]*store.Approval, error) {
-	u := c.baseURL + "/api/v1/approvals/pending"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, readHTTPError(resp)
-	}
-	var body struct {
-		Approvals []*store.Approval `json:"approvals"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return nil, err
-	}
-	return body.Approvals, nil
-}
-
 func (c *Client) post(ctx context.Context, path string, body any, wantStatus int, out any) error {
 	var reader io.Reader
 	if body != nil {
@@ -1170,10 +1054,6 @@ func (c *Client) post(ctx context.Context, path string, body any, wantStatus int
 		return json.NewDecoder(resp.Body).Decode(out)
 	}
 	return nil
-}
-
-func (c *Client) put(ctx context.Context, path string, body any, wantStatus int, out any) error {
-	return c.sendJSON(ctx, http.MethodPut, path, body, wantStatus, out)
 }
 
 func (c *Client) sendJSON(ctx context.Context, method, path string, body any, wantStatus int, out any) error {

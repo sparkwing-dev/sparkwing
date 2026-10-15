@@ -148,18 +148,18 @@ func TestApprovals_ListPendingAndForRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pend, err := c.ListPendingApprovals(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(pend) != 2 {
-		t.Fatalf("expected 2 pending, got %d", len(pend))
-	}
-
 	review, err := client.NewRunReview(client.EngineOptions{URL: ts.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
+	pend, err := review.ListApprovals(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pend.Approvals) != 2 {
+		t.Fatalf("expected 2 pending, got %d", len(pend.Approvals))
+	}
+
 	forRun, err := review.ListApprovals(ctx, "run-1")
 	if err != nil {
 		t.Fatal(err)

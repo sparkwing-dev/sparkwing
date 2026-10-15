@@ -34,16 +34,30 @@ func TestNodeClientContract_EveryRouteTheNodeClientCalls(t *testing.T) {
 	srv := httptest.NewServer(controller.New(st, quietLogger()).Handler())
 	t.Cleanup(srv.Close)
 
-	runContractSurface(t, client.NewWithToken(srv.URL, nil, ""))
+	runContractSurface(t, srv.URL)
 }
 
 func quietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 }
 
-func runContractSurface(t *testing.T, c *client.Client) {
+func runContractSurface(t *testing.T, base string) {
 	t.Helper()
 	ctx := context.Background()
+	c := client.New(base, nil)
+	options := client.EngineOptions{URL: base}
+	reader, err := client.NewRunReader(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := client.NewRunReview(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	debug, err := client.NewDebugReader(options)
+	if err != nil {
+		t.Fatal(err)
+	}
 	const runID = contractRunID
 
 	if err := c.CreateRun(ctx, store.Run{
@@ -129,16 +143,16 @@ func runContractSurface(t *testing.T, c *client.Client) {
 	if err := c.SkipNodeStep(ctx, runID, "produce", "skipped"); err != nil {
 		t.Fatalf("SkipNodeStep: %v", err)
 	}
-	steps, err := c.ListNodeSteps(ctx, runID)
+	page, err := reader.ReadSteps(ctx, runID)
 	if err != nil {
-		t.Fatalf("ListNodeSteps: %v", err)
+		t.Fatalf("ReadSteps: %v", err)
 	}
-	if len(steps) != 3 {
-		t.Fatalf("ListNodeSteps returned %d rows after passed, cancelled, and skipped writes", len(steps))
+	if len(page.Steps) != 3 {
+		t.Fatalf("ReadSteps returned %d rows after passed, cancelled, and skipped writes", len(page.Steps))
 	}
-	statuses := make(map[string]string, len(steps))
-	for _, step := range steps {
-		statuses[step.StepID] = step.Status
+	statuses := make(map[string]string, len(page.Steps))
+	for _, step := range page.Steps {
+		statuses[step.ID] = step.Status
 	}
 	if statuses["run"] != store.StepPassed || statuses["cancelled"] != store.StepCancelled || statuses["skipped"] != store.StepSkipped {
 		t.Fatalf("step statuses = %v", statuses)
@@ -218,8 +232,8 @@ func runContractSurface(t *testing.T, c *client.Client) {
 	if pauseErr != nil && !isUnsupported(pauseErr) {
 		t.Fatalf("CreateDebugPause: %v", pauseErr)
 	}
-	if _, err := c.ListDebugPauses(ctx, runID); err != nil && !isUnsupported(err) {
-		t.Fatalf("ListDebugPauses: %v", err)
+	if _, err := debug.ReadDebugPause(ctx, runID, "produce"); err != nil && !isUnsupported(err) {
+		t.Fatalf("ReadDebugPause: %v", err)
 	}
 	if pauseErr == nil {
 		if _, err := c.GetActiveDebugPause(ctx, runID, "produce"); err != nil {
@@ -242,8 +256,8 @@ func runContractSurface(t *testing.T, c *client.Client) {
 			store.ApprovalResolutionApproved, "tester", ""); err != nil {
 			t.Fatalf("ResolveApproval: %v", err)
 		}
-		if _, err := c.ListPendingApprovals(ctx); err != nil {
-			t.Fatalf("ListPendingApprovals: %v", err)
+		if _, err := review.ListApprovals(ctx, ""); err != nil {
+			t.Fatalf("ListApprovals: %v", err)
 		}
 	}
 

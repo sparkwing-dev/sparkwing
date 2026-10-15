@@ -1,5 +1,131 @@
 # W9 handoff
 
+## Continuation from 725342711
+
+Started with a clean worktree. This section supersedes conflicting status below.
+W9 remains incomplete. The lead owns commits, independent review, pipelines,
+native QA and release/publication. Lead-owned handoffs and amendments are untouched.
+
+### Implementation and deletion
+
+Removed the unused controller-client raw/SSE log reader and its NodeLogs type,
+live-log read/stream methods and error/response types, and raw event listing.
+Removed ListNodeSteps, ListDebugPauses and ListPendingApprovals from Client,
+StateStoreOld and the localState wrappers. No production host calls those readers.
+RunReader, DebugReader, RunReview and LogReader retain the final public APIs.
+
+Removed WithWatchObserver, WatchReport, heartbeat watch decoding and the host's
+unconnected NoteWatch bridge and process-global sink registry. No production
+caller installed that observer. Segment uploaders still deliver watch changes
+through OnWatched. Removed the unused KeepsLogSegments capability probe, Token
+bearer getter and private put wrapper. No alias or forwarding helper was added.
+
+Deleted client/logs.go and client/watch_test.go. Removed tests and fixture code
+that exercised only the deleted watch bridge and capability probe. Controller
+and host log-handler tests now make direct HTTP requests. Their existing handler
+assertions remain. Step, pause and pending-approval callers use the typed readers.
+The cross-run credential fixture retains its own claim input instead of retrieving
+it through Client.Token.
+
+Production Go delta is 0 added, 477 removed, net -477. W9-owned paths account for
+-432. Shared production removals account for -45. W9 totals -6,044 production Go
+lines versus main, within the -2,900 target. Existing host code and raw claim/state
+wire still exist, so the budget does not establish completion.
+
+The inventory check reported exactly three stale entries after the localState
+reader deletion. Removed those entries. The real typed caller inventory passes.
+No new default-team exemption was added.
+
+### Verification
+
+Go used GOWORK=off, GOFLAGS=-buildvcs=false, GOCACHE=/tmp/sw-gocache and
+TMPDIR/GOTMPDIR under /tmp/sw-astra-W9. Tests used -p 4 at most.
+
+- Whole-repository go build passes after the final source changes.
+- Scoped vet passes for client, controller, storage, orchestrator and nodehost.
+  CLI vet also passed earlier in this continuation.
+- Dependent-package test compilation passes for controller, orchestrator,
+  nodehost and storage after all caller migrations.
+- Focused final engine, log-reader, run-reader/query and secret-management
+  client tests pass. Existing TestSurface* acceptance components pass.
+- Focused local-run/intake/preparation, standalone-host, dashboard and schedule
+  CLI components pass. Full clisurface, controllerwire and doccheck suites pass.
+- The Windows TypeScript bridge assembly/publication checks and publication
+  fuzz seeds pass. That handoff was already implemented and needed no source
+  changes. Native Windows execution and actual publication remain CI/lead work.
+- Commentcheck passes across 2,111 files. The typed store-caller inventory,
+  whitespace and embedded-doc mirror checks pass. Client/storage API snapshots
+  are regenerated from source.
+
+The migrated redirect test now exercises the final LogReader with a fake
+transport. Invariant: redirect responses never make a log read leave its selected
+controller or send another request. Five seeds and 6,959 generated cases pass,
+including same-origin, foreign-origin and malformed Location values. The test
+also checks that the caller's HTTP client remains unchanged. This ports the
+existing redirect-boundary concern to the replacement reader. No new production
+security mechanism was added.
+
+No native acceptance cell was enabled and no archived T1 port was completed.
+Dependent legacy controller/host runtime tests were compile-checked only. Their
+old store setup and HTTP projections still require the owning areas' migration.
+Full legacy suites, real HTTP/api.sock execution, Windows/Darwin execution,
+Docker/Kubernetes and real-repository QA remain unrun. No Sparkwing binary,
+pipeline, installer, release or publication ran.
+
+### Remaining assignments and integration
+
+The session-14 assignment audit below still applies. This pass completes only
+the additional reader/watch/probe deletion above. Priority (1) remains open.
+
+- Raw state/claim Client calls still reach W3's StateStoreOld/RunCoordination
+  graph in trigger_host.go, run_node.go, pod_node_host.go, run_node_remote.go,
+  backends.go and hosted_backends.go. Those hosts must use their final store,
+  credential and signed data/log contracts before the remaining wire is cut.
+- Queued raw trigger/job claim methods have legacy W2/W3 test-fixture callers.
+  Their final claim/intake migration remains separate from this reader cut.
+- W2's elected factory implementing wingd.LocalController is still absent.
+  The final foreground/runtime/lifecycle interfaces exist. W9's native service
+  resolver remains unfinished and must bind that factory without reopening a
+  second store.
+- W3's full remote NativeHostStore remains a real-integration point, including
+  private execution snapshots, acceptance, transitions, finish and renewal.
+  Public scheduling projections cannot replace private store snapshots.
+- W9 still needs native source/environment capture, selected-engine host
+  composition, process credentials, authorized byte/record/log bindings,
+  here resume and publication. Publication failure must preserve the local
+  verdict. Local schedule checkout/environment/proof/pin, timer/tick/dry-run,
+  here-reason retention and debug-release policy/acknowledgement remain open
+  as recorded in the earlier audit. Existing contract/fake components remain
+  component evidence only.
+
+No final foreign contract was changed. The legacy shared state interface loses
+only its unused public readers. There is no new contract request in this pass.
+The Windows packaging handoff and its existing verification remain complete at
+the component level. A1-53's native QA is still unclaimed.
+
+### Shared files, assumptions and friction
+
+Shared production edits: internal/orchestrator/backends.go and segment_logs.go,
+and pkg/storage/state.go. These delete wrappers and an unused bridge only.
+Shared test caller edits: internal/orchestrator/trigger_host_test.go,
+segment_logs_test.go, and pkg/controller/approvals_test.go, livelogs_test.go,
+log_segments_internal_test.go, node_client_contract_test.go and
+runner_claim_cross_run_test.go. The inventory loses three entries in
+pkg/store/default_team_callers_test.go. Client/storage API snapshots,
+CHANGELOG.md and generated documentation mirrors are updated. W9's own wire
+contract notes the retirement.
+
+Assumption: the typed public readers replace the unused legacy read surface.
+No customer command or flag changed. No production mechanism, option, setting,
+environment variable, timeout or limit was added. Reverting this cut would
+restore the removed methods and their callers together.
+
+Friction: dependent compilation found one host log-reader caller and the final
+step projection's ID spelling. Both were migrated. Overwing matching/showing
+worked and reported its installed-binary staleness notice. No Git writes.
+Git still resolves Korey's identity and has no injected core.worktree.
+Session scratch is removed before reporting. The shared build cache is retained.
+
 ## This continuation (session 15)
 
 Started at 862a1e1a8 with a clean worktree. This section supersedes conflicting

@@ -3,7 +3,7 @@ package controller_test
 import (
 	"bufio"
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -46,10 +46,14 @@ func TestLiveLog_AppendNeedsTheNodesOwnClaim(t *testing.T) {
 		t.Errorf("claiming runner POST %s = %d, want 204", path, got)
 	}
 
-	chunk, err := client.NewWithToken(f.url, nil, f.owner).
-		ReadNodeLiveLog(context.Background(), "run-1", "only", 0)
-	if err != nil {
-		t.Fatalf("ReadNodeLiveLog: %v", err)
+	status, data := f.get(t, f.owner, "/api/v1/runs/run-1/nodes/only/logs?since=0")
+	var chunk struct {
+		Start, Next int64
+		Data        string
+		Done        bool
+	}
+	if err := json.Unmarshal([]byte(data), &chunk); status != http.StatusOK || err != nil {
+		t.Fatalf("live read status=%d body=%q error=%v", status, data, err)
 	}
 	if !strings.Contains(chunk.Data, `"first"`) {
 		t.Fatalf("live read returned %q, want the posted line", chunk.Data)
@@ -67,9 +71,8 @@ func TestLiveLog_ReadIsNotFoundForANodeThatNeverWrote(t *testing.T) {
 		t.Skip("slow: 0.9s of real work; the fast class runs under -short")
 	}
 	f := newLiveLogFixture(t)
-	_, err := client.NewWithToken(f.url, nil, f.owner).
-		ReadNodeLiveLog(context.Background(), "run-1", "only", 0)
-	if err == nil {
+	status, _ := f.get(t, f.owner, "/api/v1/runs/run-1/nodes/only/logs?since=0")
+	if status != http.StatusNotFound {
 		t.Fatal("live read of a silent node succeeded, want a not-found so the caller uses the durable copy")
 	}
 }
@@ -83,10 +86,19 @@ func TestLiveLog_ReaderSeesLinesAppendedAfterItConnected(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	body, err := client.NewWithToken(f.url, nil, f.owner).
-		StreamNodeLiveLog(ctx, "run-1", "only", 0)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.url+"/api/v1/runs/run-1/nodes/only/logs/stream?since=0", nil)
 	if err != nil {
-		t.Fatalf("StreamNodeLiveLog: %v", err)
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+f.owner)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := resp.Body
+	if resp.StatusCode != http.StatusOK {
+		body.Close()
+		t.Fatalf("stream status=%d", resp.StatusCode)
 	}
 	defer func() { _ = body.Close() }()
 
@@ -123,9 +135,19 @@ func TestLiveLog_FinishingTheNodeEndsTheStream(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := client.NewWithToken(f.url, nil, f.owner)
-	body, err := c.StreamNodeLiveLog(ctx, "run-1", "only", 0)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.url+"/api/v1/runs/run-1/nodes/only/logs/stream?since=0", nil)
 	if err != nil {
-		t.Fatalf("StreamNodeLiveLog: %v", err)
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+f.owner)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := resp.Body
+	if resp.StatusCode != http.StatusOK {
+		body.Close()
+		t.Fatalf("stream status=%d", resp.StatusCode)
 	}
 	defer func() { _ = body.Close() }()
 
@@ -195,9 +217,8 @@ func TestLiveLog_AppendRefusesANodeTheRunDoesNotHave(t *testing.T) {
 			t.Errorf("POST %s = 204; a node the run does not have must not mint a buffer", path)
 		}
 	}
-	if _, err := client.NewWithToken(f.url, nil, f.owner).
-		ReadNodeLiveLog(context.Background(), "run-1", "invented", 0); !errors.Is(err, client.ErrNoLiveLog) {
-		t.Fatalf("live read of the invented node = %v, want ErrNoLiveLog", err)
+	if status, _ := f.get(t, f.owner, "/api/v1/runs/run-1/nodes/invented/logs?since=0"); status != http.StatusNotFound {
+		t.Fatalf("live read of the invented node status=%d, want 404", status)
 	}
 }
 
@@ -213,10 +234,14 @@ func TestLiveLog_ReaderIsToldWhenTheBufferDroppedBytesItHadNotRead(t *testing.T)
 		}
 	}
 
-	chunk, err := client.NewWithToken(f.url, nil, f.owner).
-		ReadNodeLiveLog(context.Background(), "run-1", "only", 0)
-	if err != nil {
-		t.Fatalf("ReadNodeLiveLog: %v", err)
+	status, data := f.get(t, f.owner, "/api/v1/runs/run-1/nodes/only/logs?since=0")
+	var chunk struct {
+		Start, Next int64
+		Data        string
+		Done        bool
+	}
+	if err := json.Unmarshal([]byte(data), &chunk); status != http.StatusOK || err != nil {
+		t.Fatalf("live read status=%d body=%q error=%v", status, data, err)
 	}
 	if chunk.Start == 0 {
 		t.Fatal("the buffer never evicted, so the gap cannot be reported")
@@ -224,10 +249,19 @@ func TestLiveLog_ReaderIsToldWhenTheBufferDroppedBytesItHadNotRead(t *testing.T)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	body, err := client.NewWithToken(f.url, nil, f.owner).
-		StreamNodeLiveLog(ctx, "run-1", "only", 0)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.url+"/api/v1/runs/run-1/nodes/only/logs/stream?since=0", nil)
 	if err != nil {
-		t.Fatalf("StreamNodeLiveLog: %v", err)
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+f.owner)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := resp.Body
+	if resp.StatusCode != http.StatusOK {
+		body.Close()
+		t.Fatalf("stream status=%d", resp.StatusCode)
 	}
 	defer func() { _ = body.Close() }()
 

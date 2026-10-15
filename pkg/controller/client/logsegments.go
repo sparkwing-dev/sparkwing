@@ -24,67 +24,6 @@ import (
 // segments: it predates the route, or it has no store to keep them in.
 var ErrLogSegmentsUnavailable = errors.New("controller/client: the controller keeps no log segments")
 
-// WatchReport is what a heartbeat reply says about viewers. A node
-// report names NodeID and whether a viewer watches it; a run report sets
-// WholeRun and lists in Nodes every node of the run a viewer watches.
-type WatchReport struct {
-	RunID    string
-	NodeID   string
-	Watched  bool
-	WholeRun bool
-	Nodes    []string
-}
-
-// WithWatchObserver has this client hand fn every watch report a node
-// claim or run heartbeat reply carries, so the process that writes a
-// node's log knows when to push its lines to the live view. Set it
-// before the client serves requests.
-func (c *Client) WithWatchObserver(fn func(WatchReport)) *Client {
-	c.watchObserver = fn
-	return c
-}
-
-func (c *Client) askWatched(req *http.Request) {
-	if c.watchObserver != nil {
-		req.Header.Set(store.LogWatchHeader, "1")
-	}
-}
-
-func (c *Client) reportWatch(r WatchReport) {
-	if c.watchObserver != nil {
-		c.watchObserver(r)
-	}
-}
-
-// KeepsLogSegments reports whether the controller advertises that it
-// keeps node logs as segments. A controller that predates segments
-// answers false.
-func (c *Client) KeepsLogSegments(ctx context.Context) (bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, capabilitiesReadTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/capabilities", nil)
-	if err != nil {
-		return false, err
-	}
-	resp, err := c.do(req)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return false, readHTTPError(resp)
-	}
-	var caps struct {
-		Logs struct {
-			Segments bool `json:"segments"`
-		} `json:"logs"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&caps); err != nil {
-		return false, fmt.Errorf("decode capabilities: %w", err)
-	}
-	return caps.Logs.Segments, nil
-}
-
 // LogSegment asks the controller to sign the upload of one log segment
 // of a node attempt, or with req.N zero names the attempt the writer
 // writes. A controller that keeps no segments answers

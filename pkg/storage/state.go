@@ -36,7 +36,6 @@ type StateStoreOld interface {
 	SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 	AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
 	SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error
-	ListNodeSteps(ctx context.Context, runID string) ([]*store.NodeStep, error)
 
 	// Events. Payload is stored as given; most kinds carry JSON.
 	AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
@@ -48,7 +47,6 @@ type StateStoreOld interface {
 	CreateDebugPause(ctx context.Context, p store.DebugPause) error
 	GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*store.DebugPause, error)
 	ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
-	ListDebugPauses(ctx context.Context, runID string) ([]*store.DebugPause, error)
 
 	FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 
@@ -56,7 +54,6 @@ type StateStoreOld interface {
 	CreateApproval(ctx context.Context, a store.Approval) error
 	GetApproval(ctx context.Context, runID, nodeID string) (*store.Approval, error)
 	ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*store.Approval, error)
-	ListPendingApprovals(ctx context.Context) ([]*store.Approval, error)
 }
 
 var _ StateStoreOld = (*store.Store)(nil)

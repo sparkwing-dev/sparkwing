@@ -22,6 +22,9 @@ unlock.
 
 ### Changed
 
+- **controller/client (Breaking):** Remove the old raw/SSE log and event readers, duplicate step, pause and pending-approval readers, and unused heartbeat watch callback
+  Use `NewLogReader`, `NewRunReader`, `NewDebugReader` and `NewRunReview`. Segment-upload watch notifications remain. See [migration guide](docs/migrations/_unreleased.md#cli-client-retirement).
+
 - **cli client (Breaking):** Remove the unused orchestrator run readers and their direct store/profile wiring
   Run listing, status, logs, summaries and timelines use the CLI's shared controller projections. The obsolete standalone-store merge path, warm-cache sweep, `Client.ListRuns`, `Client.ListApprovalsForRun`, `backend.ClientBackend` and `storeurl.OpenStateStoreFromSpec` are removed. See [migration guide](docs/migrations/_unreleased.md#cli-client-retirement).
 

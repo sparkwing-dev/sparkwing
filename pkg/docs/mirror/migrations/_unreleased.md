@@ -21,6 +21,19 @@ merge paths. Use the shared controller projections through `NewRunReader` and
 `storeurl.OpenStateStoreFromSpec` and `backend.ClientBackend` are removed.
 The unused warm-runner cache sweep is removed with its old listing dependency.
 
+`Client.NodeLogs`, `ReadNodeLiveLog`, `StreamNodeLiveLog`, `ListEventsAfter`,
+`ListNodeSteps`, `ListDebugPauses` and `ListPendingApprovals` are removed.
+Use `NewLogReader.ReadLogs` for tagged log pages, `NewRunReader.ReadSteps`
+for steps, `NewDebugReader.ReadDebugPause` for a job's current pause, and
+`NewRunReview.ListApprovals` with an empty run selector for pending approvals.
+Lifecycle events share the log page's event projection. Follow logs by polling
+with the returned cursor until the page is complete. The unused
+`WithWatchObserver` callback and process-global watch bridge are removed.
+Segment writers still receive watch notifications through their uploader.
+`Client.KeepsLogSegments` and the unused bearer getter `Client.Token` are
+removed. Callers retain their own credential input. The final clients do not
+probe old controller capabilities before choosing an API.
+
 ## Sealed step selections
 
 `--sw-start-at`, `--sw-stop-at` and `--sw-only` enter the request seal as
@@ -234,8 +247,8 @@ data/host bindings remain separate integration work.
 ## Log readers expose only reads
 
 `storage.LogStore` provides `Read`, `ReadRun` and `Stream`. Its unused
-`Append` and `DeleteRun` methods and the corresponding `client.NodeLogs`
-methods are removed. Writers publish tagged segments with `logseg.Sink`.
+`Append` and `DeleteRun` methods are removed. Controller readers use
+`client.NewLogReader`; the old `client.NodeLogs` adapter is removed. Writers publish tagged segments with `logseg.Sink`.
 Delete a run through the controller's run API to remove its logs.
 
 ```go
@@ -940,8 +953,9 @@ that keep the logs service running.
   from the run directories, and `sparkwing runs prune` removes them through
   the dashboard.
 - **Go packages:** `pkg/logs` and `pkg/storage/sparkwinglogs` are removed.
-  Read node logs with `client.NodeLogs` from
-  `pkg/controller/client`, and their completeness with `pkg/storage/logseg`.
+  Read tagged log pages through `client.NewLogReader` from
+  `pkg/controller/client`. Each page reports whether the run and its logs
+  are complete.
 - **Mixed versions:** upgrade the runners and the controller together. A
   runner from before segments has nowhere to send its logs once the
   service is gone, and keeps them on its own disk.

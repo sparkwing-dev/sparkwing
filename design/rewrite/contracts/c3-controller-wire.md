@@ -550,6 +550,15 @@ provisioning still need integration evidence. No C2 contract changed here.
 
 ### Legacy client retirement
 
+The legacy raw/SSE log adapter, live-log reads and event listing are removed.
+Their callers use the final tagged `LogReader` pages and cursor polling.
+`Client.ListNodeSteps`, `ListDebugPauses` and `ListPendingApprovals` are removed
+with the unused declarations and local wrappers in `StateStoreOld`. Typed
+`RunReader`, `DebugReader` and `RunReview` own those public observations.
+The unused heartbeat watch observer and global host bridge are removed.
+Segment-upload watch callbacks remain with their writer. The unused
+log-capability probe and bearer getter are removed.
+
 `Client.CreateToken`, `ListTokens`, `LookupToken`, `RevokeToken`, `RotateToken`
 and `ListSecrets` are removed. Credential and secret management use the typed
 managers above. Their issuance and metadata messages remain shared with the

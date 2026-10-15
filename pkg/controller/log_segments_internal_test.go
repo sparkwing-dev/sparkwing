@@ -256,9 +256,19 @@ func TestNodeLogReadsThroughTheControllerRoutes(t *testing.T) {
 	if _, err := s.Close(ctx, logseg.End{}); err != nil {
 		t.Fatal(err)
 	}
-	logs := client.NewWithToken(f.url, nil, f.admin(t)).NodeLogs()
-	if got, err := logs.Read(ctx, "run-d", "a", storage.ReadOpts{Tail: 1}); err != nil || string(got) != "needle two\n" {
-		t.Fatalf("tail read = %q, %v", got, err)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.url+"/api/v1/runs/run-d/logs/a?format=raw&tail=1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+f.admin(t))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, readErr := io.ReadAll(resp.Body)
+	closeErr := resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || readErr != nil || closeErr != nil || string(got) != "needle two\n" {
+		t.Fatalf("tail read status=%d body=%q errors=%v, %v", resp.StatusCode, got, readErr, closeErr)
 	}
 	for _, limit := range []int{0, 1} {
 		query := url.Values{"grep": {"needle"}, "line_numbers": {"1"}}
@@ -333,14 +343,6 @@ func TestCompileLogTakesSegmentsUnderTheTriggerClaim(t *testing.T) {
 	code, body := post(true)
 	if code != http.StatusOK || !strings.Contains(string(body), "/runs/run-d/_5fcompile/a1-g3/") {
 		t.Fatalf("compile log under the trigger claim: %d %s", code, body)
-	}
-}
-
-func TestCapabilitiesAdvertiseLogSegments(t *testing.T) {
-	f := newLogSegmentFixture(t)
-	keeps, err := client.NewWithToken(f.url, nil, "").KeepsLogSegments(t.Context())
-	if err != nil || !keeps {
-		t.Fatalf("KeepsLogSegments = %v, %v", keeps, err)
 	}
 }
 

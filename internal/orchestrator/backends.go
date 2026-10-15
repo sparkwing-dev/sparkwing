@@ -210,10 +210,6 @@ func (l localState) AppendStepAnnotation(ctx context.Context, runID, nodeID, ste
 	return l.st.AppendStepAnnotation(ctx, runID, nodeID, stepID, msg)
 }
 
-func (l localState) ListNodeSteps(ctx context.Context, runID string) ([]*store.NodeStep, error) {
-	return l.st.ListNodeSteps(ctx, runID)
-}
-
 func (l localState) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample store.MetricSample) error {
 	return l.st.AddNodeMetricSample(ctx, runID, nodeID, sample)
 }
@@ -254,10 +250,6 @@ func (l localState) ReleaseDebugPause(ctx context.Context, runID, nodeID, releas
 	return l.st.ReleaseDebugPause(ctx, runID, nodeID, releasedBy, kind)
 }
 
-func (l localState) ListDebugPauses(ctx context.Context, runID string) ([]*store.DebugPause, error) {
-	return l.st.ListDebugPauses(ctx, runID)
-}
-
 func (l localState) CreateApproval(ctx context.Context, a store.Approval) error {
 	return l.st.CreateApproval(ctx, a)
 }
@@ -268,10 +260,6 @@ func (l localState) GetApproval(ctx context.Context, runID, nodeID string) (*sto
 
 func (l localState) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*store.Approval, error) {
 	return l.st.ResolveApproval(ctx, runID, nodeID, resolution, approver, comment)
-}
-
-func (l localState) ListPendingApprovals(ctx context.Context) ([]*store.Approval, error) {
-	return l.st.ListPendingApprovals(ctx)
 }
 
 func (l localState) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error) {

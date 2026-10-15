@@ -115,7 +115,8 @@ func refused(err error) bool { return err != nil && strings.Contains(err.Error()
 func TestRunnerClaim_NodeTokenReadsItsTeamsPipelineRefs(t *testing.T) {
 	f := newCrossRunFixture(t)
 	ctx := context.Background()
-	c := client.NewWithToken(f.url, nil, f.claim(t, "parent"))
+	claim := f.claim(t, "parent")
+	c := client.NewWithToken(f.url, nil, claim)
 	run, err := c.GetLatestRun(ctx, "lib", []string{"success"}, 0)
 	if err != nil || run == nil || run.ID != "lib-1" {
 		t.Fatalf("latest lib run = %+v, %v; want the claim's team's lib-1", run, err)
@@ -138,7 +139,7 @@ func TestRunnerClaim_NodeTokenReadsItsTeamsPipelineRefs(t *testing.T) {
 		{"GET", "/api/v1/pipelines/lib/profile"},
 		{"GET", "/api/v1/triggers"},
 	} {
-		if got, body := f.do(t, c2.method, c2.path, c.Token(), ""); got != http.StatusForbidden || body["error"] != "claim_mismatch" {
+		if got, body := f.do(t, c2.method, c2.path, claim, ""); got != http.StatusForbidden || body["error"] != "claim_mismatch" {
 			t.Errorf("%s %s = %d %v, want 403 claim_mismatch", c2.method, c2.path, got, body)
 		}
 	}

@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -31,7 +33,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -742,9 +743,19 @@ func TestTriggerHost_MasksTheProxyCredentialsANodeReceives(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	logs, err := client.NewWithToken(h.url, nil, h.token).NodeLogs().Read(t.Context(), h.trig.ID, "build", storage.ReadOpts{})
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.url+"/api/v1/runs/"+url.PathEscape(h.trig.ID)+"/logs/build?format=raw", nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+h.token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs, readErr := io.ReadAll(resp.Body)
+	closeErr := resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || readErr != nil || closeErr != nil {
+		t.Fatalf("log status=%d errors=%v, %v", resp.StatusCode, readErr, closeErr)
 	}
 	for name, value := range values {
 		if !strings.Contains(string(env), name+"="+value) {
