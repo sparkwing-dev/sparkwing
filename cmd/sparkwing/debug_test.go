@@ -19,18 +19,14 @@ func TestDebugNamespaceBelongsOnlyToAttach(t *testing.T) {
 	}
 }
 
-func TestParseDebugTarget_RequiresRunAndJob(t *testing.T) {
-	if _, err := parseDebugTarget(cmdDebugRelease, []string{"--run", "r1"}); err == nil {
-		t.Fatal("expected error when --job missing")
+func TestDebugResumeRequiresRunAndJob(t *testing.T) {
+	for _, args := range [][]string{{"debug", "resume", "--run=r1"}, {"debug", "resume", "--job=n1"}} {
+		if _, err := clisurface.Parse("sparkwing", args); err == nil {
+			t.Fatal("accepted an incomplete selector")
+		}
 	}
-	if _, err := parseDebugTarget(cmdDebugRelease, []string{"--job", "n1"}); err == nil {
-		t.Fatal("expected error when --run missing")
-	}
-	tgt, err := parseDebugTarget(cmdDebugRelease, []string{"--run", "r1", "--job", "n1"})
-	if err != nil {
-		t.Fatalf("valid args: %v", err)
-	}
-	if tgt.run != "r1" || tgt.node != "n1" {
-		t.Fatalf("got %+v", tgt)
+	inv, err := clisurface.Parse("sparkwing", []string{"debug", "resume", "--run=r1", "--job=n1"})
+	if err != nil || inv.Value("run") != "r1" || inv.Value("job") != "n1" {
+		t.Fatalf("inv=%+v err=%v", inv, err)
 	}
 }

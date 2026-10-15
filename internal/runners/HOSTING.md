@@ -71,9 +71,12 @@ after those hosts return, including partial construction failures. Configured
 storage still needs fresh per-attempt bindings in the shared executor.
 
 `RunInputForAward` captures the request, accepted plan and granted runner for
-remote, embedded and CLI here hosting. The execution run ID can differ from the
-original request seal on retry. Persisted rows and authenticated claim bindings
-still name the execution run.
+remote and embedded hosting. The execution run ID can differ from the
+original request seal on retry. `ValidateAwardIdentity` checks that relationship
+for hosting, launcher claim and bootstrap exchange. The accepted request must
+retain the origin run, team and hash. Persisted rows and authenticated claim
+bindings still name the execution run. Hosting uses `ClaimedUnit.HostContext`
+for the shared authority deadline.
 `RunInput.SealedRequest` contains the captured `runspec.Request` body. Its hash
 and run ID are separate fields. `GrantedRunner` is the server-granted identity,
 with its own label slice. It reaches both planning and self-claimed work. A node's

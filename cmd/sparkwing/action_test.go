@@ -13,11 +13,13 @@ import (
 
 func TestPipelineJSON_SurfacesRisks(t *testing.T) {
 	p := Pipeline{
-		Name:  "cluster-down",
-		Risks: []string{"destructive", "prod"},
-		RisksBySteps: []nodeproto.StepRisks{
-			{JobID: "cluster-down", StepID: "terraform-destroy-eks", Labels: []string{"destructive", "prod"}},
-			{JobID: "cluster-down", StepID: "terraform-destroy-nat", Labels: []string{"destructive"}},
+		PipelineDescription: nodeproto.PipelineDescription{
+			Name:  "cluster-down",
+			Risks: []string{"destructive", "prod"},
+			RisksByStep: []nodeproto.StepRisks{
+				{JobID: "cluster-down", StepID: "terraform-destroy-eks", Labels: []string{"destructive", "prod"}},
+				{JobID: "cluster-down", StepID: "terraform-destroy-nat", Labels: []string{"destructive"}},
+			},
 		},
 	}
 	raw, err := json.Marshal(p)
@@ -39,7 +41,7 @@ func TestPipelineJSON_SurfacesRisks(t *testing.T) {
 }
 
 func TestPipelineJSON_OmitsEmptyRisks(t *testing.T) {
-	p := Pipeline{Name: "hello"}
+	p := Pipeline{PipelineDescription: nodeproto.PipelineDescription{Name: "hello"}}
 	raw, err := json.Marshal(p)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -59,15 +61,7 @@ func TestCatalogCopy_PreservesRisks(t *testing.T) {
 			{JobID: "cluster-down", StepID: "destroy", Labels: []string{"destructive", "prod"}},
 		},
 	}
-	a := Pipeline{
-		Name:         dp.Name,
-		Short:        dp.Short,
-		Help:         dp.Help,
-		Args:         dp.Args,
-		Examples:     dp.Examples,
-		Risks:        dp.Risks,
-		RisksBySteps: dp.RisksByStep,
-	}
+	a := Pipeline{PipelineDescription: dp}
 
 	if a.Name != dp.Name {
 		t.Errorf("Name = %q, want %q", a.Name, dp.Name)
@@ -87,20 +81,20 @@ func TestCatalogCopy_PreservesRisks(t *testing.T) {
 	if got, want := len(a.Risks), 2; got != want {
 		t.Errorf("Risks len = %d, want %d", got, want)
 	}
-	if got, want := len(a.RisksBySteps), 1; got != want {
-		t.Errorf("RisksBySteps len = %d, want %d", got, want)
+	if got, want := len(a.RisksByStep), 1; got != want {
+		t.Errorf("RisksByStep len = %d, want %d", got, want)
 	}
-	if a.RisksBySteps[0].StepID != "destroy" {
-		t.Errorf("RisksBySteps[0].StepID = %q, want %q",
-			a.RisksBySteps[0].StepID, "destroy")
+	if a.RisksByStep[0].StepID != "destroy" {
+		t.Errorf("RisksByStep[0].StepID = %q, want %q",
+			a.RisksByStep[0].StepID, "destroy")
 	}
 }
 
 func TestPipelineDescribe_NoPipelineNamed_SuggestsClosest(t *testing.T) {
 	catalog := []Pipeline{
-		{Name: "cluster-up"},
-		{Name: "cluster-down"},
-		{Name: "hello"},
+		{PipelineDescription: nodeproto.PipelineDescription{Name: "cluster-up"}},
+		{PipelineDescription: nodeproto.PipelineDescription{Name: "cluster-down"}},
+		{PipelineDescription: nodeproto.PipelineDescription{Name: "hello"}},
 	}
 	name := "claster-up"
 
@@ -127,8 +121,8 @@ func TestPipelineDescribe_NoPipelineNamed_SuggestsClosest(t *testing.T) {
 
 func TestPipelineDescribe_FarTypoNoSuggestion(t *testing.T) {
 	catalog := []Pipeline{
-		{Name: "cluster-up"},
-		{Name: "hello"},
+		{PipelineDescription: nodeproto.PipelineDescription{Name: "cluster-up"}},
+		{PipelineDescription: nodeproto.PipelineDescription{Name: "hello"}},
 	}
 	candidates := make([]string, 0, len(catalog))
 	for _, p := range catalog {

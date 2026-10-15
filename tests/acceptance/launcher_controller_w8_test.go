@@ -83,7 +83,7 @@ func TestLauncherPollingRefusesInvalidW8Components(t *testing.T) {
 	for _, value := range []string{"0s", "-1s", "invalid", ""} {
 		t.Run(value, func(t *testing.T) {
 			_, cfg, _ := cloudFixture(launcher.CloudWork)
-			args := []string{"--controller=" + cfg.ControllerURL, "--image=" + cfg.RunnerImage, "--docker-image=" + cfg.DockerImage, "--cpu-ceiling=4", "--memory-ceiling=8Gi", "--credentials-dir=" + t.TempDir(), "--poll=" + value}
+			args := []string{"--poll=" + value, "--controller=" + cfg.ControllerURL, "--image=" + cfg.RunnerImage, "--docker-image=" + cfg.DockerImage, "--cpu-ceiling=1", "--memory-ceiling=1Gi", "--credentials-dir=" + t.TempDir()}
 			err := cluster.RunLaunchCLI(t.Context(), args, func(context.Context, launcher.CloudJobConfig, string) (*launcher.Launcher, error) {
 				t.Fatal("invalid poll reached launcher construction")
 				return nil, nil

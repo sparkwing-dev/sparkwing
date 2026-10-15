@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -14,6 +15,57 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 )
+
+func FuzzRunnerEnrollmentNeverReplays(f *testing.F) {
+	f.Add("desk", "prod", uint8(0))
+	f.Add("worker", "release", uint8(1))
+	f.Add("runner", "build", uint8(2))
+	f.Fuzz(func(t *testing.T, name, pool string, failure uint8) {
+		name, pool = "runner-"+hex.EncodeToString([]byte(name)), "pool-"+hex.EncodeToString([]byte(pool))
+		calls := 0
+		manager, err := NewRunnerTokenManager(EngineOptions{URL: "https://controller.example", HTTP: &http.Client{Transport: engineTransport(func(req *http.Request) (*http.Response, error) {
+			calls++
+			if req.Method != "POST" || req.URL.Path != "/api/v1/runners" || req.GetBody != nil || req.Header.Get("Idempotency-Key") != "" {
+				t.Fatalf("enrollment can replay or select another route: %s %s", req.Method, req.URL)
+			}
+			var proposal EnrollRunnerRequest
+			if err := json.NewDecoder(req.Body).Decode(&proposal); err != nil {
+				t.Fatal(err)
+			}
+			if proposal.Name != name || !reflect.DeepEqual(proposal.ReservedPools, []string{pool}) {
+				t.Fatalf("enrollment proposal changed: %+v", proposal)
+			}
+			switch failure % 3 {
+			case 0:
+				return nil, io.EOF
+			case 1:
+				return engineResponse(503, `{"error":{"code":"unavailable","message":"reply lost"}}`), nil
+			default:
+				return engineResponse(201, `{"capability":"one-time-secret","prefix":"prefix","team":"team","grants":[]}`), nil
+			}
+		})}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := manager.EnrollRunner(t.Context(), EnrollRunnerRequest{Name: name, Repos: []string{"github.com/acme/*"}, ReservedPools: []string{pool}})
+		if err == nil || result != nil || calls != 1 {
+			t.Fatalf("enrollment calls=%d returned=%v error=%v", calls, result != nil, err)
+		}
+	})
+}
+
+func TestRunnerEnrollmentRefusesDeploymentNamespace(t *testing.T) {
+	manager, err := NewTokenManager(EngineOptions{URL: "https://controller.example", HTTP: &http.Client{Transport: engineTransport(func(*http.Request) (*http.Response, error) {
+		t.Fatal("deployment manager attempted runner enrollment")
+		return nil, io.EOF
+	})}}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.(RunnerTokenManager).EnrollRunner(t.Context(), EnrollRunnerRequest{Name: "desk"}); err == nil {
+		t.Fatal("deployment namespace accepted runner enrollment")
+	}
+}
 
 func TestCredentialManagementUsesCurrentControllerContract(t *testing.T) {
 	for _, deployment := range []bool{false, true} {

@@ -112,7 +112,7 @@ var flagDescriptions = map[string]string{
 	"body":                "Include document bodies in search results.",
 	"full":                "Read the full documentation topic.",
 	"publish":             "Copy this local run's results to the named controller profile.",
-	"sw-cache-from":       "Read authorized cache entries from the named controller profile.",
+	"sw-cache-from":       "Read authorized cache entries from the named controller profile; empty disables the machine default.",
 	"sw-no-memo":          "Execute jobs without reusing memoized results.",
 	"sw-allow-risk":       "Authorize the listed pipeline risks.",
 	"stay":                "Keep the local controller running until stopped.",
@@ -280,7 +280,6 @@ var commandSynopses = map[string]string{
 	"sparkwing version hold":                        "Show, set, or clear the operator ceiling on CLI upgrades",
 	"sparkwing wingd":                               "Host the local controller (spawned by the CLI)",
 	"sparkwing wingd run":                           "Serve the local controller in this process",
-	"sparkwing wingd supervise":                     "Supervise a local controller run child and restart it when it wedges",
 }
 
 var (
@@ -307,7 +306,6 @@ var (
 	cmdCachePrune         = surfaceCommand("sparkwing cache prune")
 	cmdCacheExplain       = surfaceCommand("sparkwing cache explain")
 	cmdDebug              = surfaceCommand("sparkwing debug")
-	cmdDebugRelease       = surfaceCommand("sparkwing debug resume")
 	cmdDebugAttach        = surfaceCommand("sparkwing debug attach")
 	cmdDebugEnv           = surfaceCommand("sparkwing debug env")
 	cmdPipeline           = surfaceCommand("sparkwing pipeline")
@@ -385,7 +383,6 @@ var (
 	cmdCronsTick          = surfaceCommand("sparkwing __tick")
 	cmdWingd              = surfaceCommand("sparkwing wingd")
 	cmdWingdRun           = surfaceCommand("sparkwing wingd run")
-	cmdWingdSupervise     = surfaceCommand("sparkwing wingd supervise")
 	cmdTriggerHost        = surfaceCommand("sparkwing __host-trigger")
 	cmdComplete           = surfaceCommand("sparkwing __complete")
 )

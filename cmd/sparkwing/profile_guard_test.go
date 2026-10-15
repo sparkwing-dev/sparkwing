@@ -73,7 +73,7 @@ type profileGuardRules struct{ handoff, controllerSecrets map[string]bool }
 var profileGuardDirs = map[string]profileGuardRules{
 	".": {handoff: map[string]bool{"dropProfileEnv": true, "renderHookScript": true}},
 	"../../internal/orchestrator": {
-		handoff: map[string]bool{"refuseProfileHandoff": true},
+		handoff: map[string]bool{"submissionExecutionEnvironment": true, "refuseProfileHandoff": true},
 		controllerSecrets: map[string]bool{
 			"controllerSecretSource": true, "ExecuteClaimedTrigger": true,
 		},

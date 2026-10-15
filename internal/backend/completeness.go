@@ -17,8 +17,7 @@ type logStoreHolder interface {
 	nodeLogStore() storage.LogStore
 }
 
-func (b *ClientBackend) nodeLogStore() storage.LogStore { return b.logStore }
-func (b *StoreBackend) nodeLogStore() storage.LogStore  { return b.logStore }
+func (b *StoreBackend) nodeLogStore() storage.LogStore { return b.logStore }
 
 // NodeLogCompleteness reports whether n's log is whole. A backend whose
 // log store keeps no manifests answers [logseg.StateUnknown].

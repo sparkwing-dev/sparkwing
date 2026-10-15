@@ -14,7 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -144,28 +143,6 @@ func (tr reportTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	w := httptest.NewRecorder()
 	tr.handler.ServeHTTP(w, r)
 	return w.Result(), nil
-}
-
-func TestReportingClientUsesJobRoutes(t *testing.T) {
-	b, f := newCredentialBoundary(), &engineTransactions{}
-	c := client.NewWithToken("http://controller.invalid", &http.Client{Transport: reportTransport{expansionServer(t, b, f)}}, b.raw)
-	ctx := t.Context()
-	for _, send := range []func() error{
-		func() error { return c.AppendNodeAnnotation(ctx, "run", "job", "masked") },
-		func() error { return c.SetNodeSummary(ctx, "run", "job", "masked") },
-		func() error { return c.AppendStepAnnotation(ctx, "run", "job", "compile", "masked") },
-		func() error { return c.SetStepSummary(ctx, "run", "job", "compile", "masked") },
-		func() error { return c.StartNodeStep(ctx, "run", "job", "compile") },
-		func() error { return c.FinishNodeStep(ctx, "run", "job", "compile", "cancelled") },
-		func() error { return c.SkipNodeStep(ctx, "run", "job", "compile") },
-	} {
-		if err := send(); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if f.writes != 7 {
-		t.Fatalf("accepted %d reports, want 7", f.writes)
-	}
 }
 
 func TestEngineReportingAuthorities(t *testing.T) {

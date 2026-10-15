@@ -193,8 +193,8 @@ The handshake has the existing probe budget. Readiness follows the caller's
 context because dashboard startup can take longer than a health probe.
 
 `client.NewLocalLifecycle` reuses a ready owner or starts the captured absolute
-executable through `wingd supervise --home HOME --version VERSION`. Its
-`wingd run` child owns the controller. Startup uses the admission client's shared
+executable through `wingd run --home HOME --version VERSION`. That process
+owns the controller. Startup uses the admission client's shared
 start claim and election checks, with takeover disabled. Readiness requires the
 local controller status to report running within the existing startup budget.
 The request can finish while that detached process continues hosting other runs.
@@ -210,7 +210,7 @@ If another process wins its election, the lifecycle joins local cleanup before
 querying the winner. A joined cleanup failure remains an error. Starting or
 draining local processes retain lifecycle operations until cleanup finishes.
 
-The foreground `wingd run` child still needs the shared state, HTTP and native
+The foreground `wingd run` process still needs the shared state, HTTP and native
 host services supplied through `localcontroller.Config.Bind`.
 `NewLocalRuntime` refuses a foreign election before opening its store. Windows
 transport still refuses API access when it cannot supply a client SID.

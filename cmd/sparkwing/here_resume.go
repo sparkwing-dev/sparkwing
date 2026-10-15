@@ -12,7 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -138,61 +137,26 @@ func resumeHereRun(ctx context.Context, options client.EngineOptions, run string
 
 func runHereAward(ctx context.Context, options client.EngineOptions, run string, award controllerwire.ClaimedUnit,
 	bind func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (hereHostSession, error),
-) (completion nodehost.RunCompletion, resultErr error) {
+) (completion nodehost.RunCompletion, err error) {
 	input, err := hereRunInput(run, award)
 	if err != nil {
 		return completion, incompleteHereHandoff(run, err)
 	}
-	if err := ctx.Err(); err != nil {
-		return completion, incompleteHereHandoff(run, err)
-	}
-	options.Bearer = func(context.Context) (string, error) { return award.Capability, nil }
-	session, err := bind(ctx, options, award)
+	completion, err = runOwnerSession(ctx, award, input, func(ctx context.Context, award controllerwire.ClaimedUnit) (hereHostSession, error) {
+		options.Bearer = func(context.Context) (string, error) { return award.Capability, nil }
+		return bind(ctx, options, award)
+	})
 	if err != nil {
 		return completion, incompleteHereHandoff(run, err)
-	}
-	defer func() {
-		if session.close != nil {
-			if err := session.close(); err != nil {
-				resultErr = errors.Join(resultErr, incompleteHereHandoff(run, err))
-			}
-		}
-	}()
-	if session.host == nil || session.close == nil {
-		return completion, incompleteHereHandoff(run, &apierr.Error{Code: apierr.Unavailable, Message: "here runtime returned no host or cleanup binding"})
-	}
-	if err := ctx.Err(); err != nil {
-		return completion, incompleteHereHandoff(run, err)
-	}
-	input.Owner, input.Storage = session.input.Owner, session.input.Storage
-	completion, runErr := session.host.Run(ctx, input)
-	if err := errors.Join(runErr, ctx.Err()); err != nil {
-		return completion, incompleteHereHandoff(run, err)
-	}
-	if !isTerminalRunStatus(completion.Outcome) {
-		return completion, incompleteHereHandoff(run, &apierr.Error{Code: apierr.ProtocolError, Message: "here host returned no terminal outcome"})
 	}
 	return completion, nil
 }
 
 func hereRunInput(run string, award controllerwire.ClaimedUnit) (nodehost.RunInput, error) {
-	input := nodehost.RunInput{RunID: run, RequestHash: string(award.Request.Hash)}
-	if award.Unit != capability.UnitTrigger || award.Purpose != capability.PurposeHere || award.Delivery != capability.DeliveryDirect || award.RunID != run || award.UnitID == "" || award.JobID != "" || award.Capability == "" || award.Binding.Kind != capability.BindingTrigger || award.Binding.RunID != run || award.Binding.Holder == "" || award.Binding.Generation <= 0 || !award.Request.Request.Options.Runner.Set || award.Request.Request.Options.Runner.Value.Kind != runspec.RunnerHere {
-		return input, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned an invalid here owner award"}
+	if !award.Request.Request.Options.Runner.Set || award.Request.Request.Options.Runner.Value.Kind != runspec.RunnerHere {
+		return nodehost.RunInput{}, localRunProtocolError("controller returned a different here runner selection")
 	}
-	hash, err := runspec.CanonicalHash(award.Request)
-	if err != nil || award.Request.Version != 1 || award.Request.Request.Version != 1 || award.Request.RunID == "" || award.Request.Hash == "" || hash != award.Request.Hash {
-		return input, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned an invalid here request seal"}
-	}
-	if award.Accepted != nil {
-		accepted := award.Accepted
-		_, sealErr := runspec.CheckSeal(accepted.Spec, accepted.Spec)
-		planHash, planErr := runspec.CanonicalHash(accepted.Plan)
-		if sealErr != nil || planErr != nil || planHash != accepted.PlanHash || accepted.Spec.Request.Hash != award.Request.Hash || accepted.Spec.PlanHash != accepted.PlanHash {
-			return input, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned inconsistent here seals"}
-		}
-	}
-	return runners.RunInputForAward(award)
+	return ownerRunInput(run, award, capability.PurposeHere)
 }
 
 func runHereResumeCommand(ctx context.Context, flags triggerFlags, out io.Writer,

@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 	"unicode/utf8"
 
@@ -67,7 +68,6 @@ func hereAward(t *testing.T) controllerwire.ClaimedUnit {
 
 func TestHereResumeUsesOnlyAwardedInputs(t *testing.T) {
 	award := hereAward(t)
-	award.Runner = nodeproto.RunnerIdentity{Name: "server-runner", Type: "runner", Labels: []string{"trusted"}}
 	plan := json.RawMessage(`{"jobs":[]}`)
 	spec, err := runspec.SealSpec(runspec.SealInput{
 		Request: award.Request, Plan: plan, Now: time.Unix(2, 0),
@@ -104,8 +104,7 @@ func TestHereResumeUsesOnlyAwardedInputs(t *testing.T) {
 					if err != nil || token != award.Capability || !reflect.DeepEqual(got, award) {
 						t.Fatal("binder lost server-granted identity or authority")
 					}
-					got.Runner.Labels[0] = "changed-by-binding"
-					return hereHostSession{input: nodehost.RunInput{GrantedRunner: nodeproto.RunnerIdentity{Name: "forged", Type: "cloud"}}, close: func() error { closed++; return nil }, host: hereTestHost(func(ctx context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {
+					return hereHostSession{close: func() error { closed++; return nil }, host: hereTestHost(func(ctx context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {
 						calls = append(calls, "host")
 						var request runspec.Request
 						var accepted runspec.Spec
@@ -118,7 +117,7 @@ func TestHereResumeUsesOnlyAwardedInputs(t *testing.T) {
 						if err := json.Unmarshal(input.Accepted.Spec, &accepted); err != nil {
 							t.Fatal(err)
 						}
-						if input.RunID != "retry-run" || input.RequestHash != string(award.Request.Hash) || !reflect.DeepEqual(request, award.Request.Request) || !reflect.DeepEqual(input.GrantedRunner, nodeproto.RunnerIdentity{Name: "server-runner", Type: "runner", Labels: []string{"trusted"}}) || !reflect.DeepEqual(accepted, spec) || input.Accepted.RunID != "retry-run" || input.Accepted.PlanHash != string(spec.PlanHash) {
+						if input.RunID != "retry-run" || input.RequestHash != string(award.Request.Hash) || !reflect.DeepEqual(request, award.Request.Request) || !reflect.DeepEqual(accepted, spec) || input.Accepted.RunID != "retry-run" || input.Accepted.PlanHash != string(spec.PlanHash) {
 							t.Fatal("resume changed the request or accepted seal")
 						}
 						return nodehost.RunCompletion{Outcome: "success"}, nil
@@ -130,6 +129,32 @@ func TestHereResumeUsesOnlyAwardedInputs(t *testing.T) {
 	completion, err := resumeHereRun(t.Context(), client.EngineOptions{URL: "https://controller.example"}, "retry-run", deps)
 	if err != nil || completion.Outcome != "success" || closed != 1 || !reflect.DeepEqual(calls, []string{"claim", "bind", "host"}) {
 		t.Fatalf("completion=%+v calls=%v closed=%d error=%v", completion, calls, closed, err)
+	}
+}
+
+func TestHereHostPreservesAwardedRunnerProperty(t *testing.T) {
+	base := hereAward(t)
+	property := func(name, kind string, labels []string, ambient nodeproto.RunnerIdentity) bool {
+		award := base
+		award.Runner = nodeproto.RunnerIdentity{Name: name, Type: kind, Labels: labels}
+		called, closed := false, false
+		completion, err := runHereAward(t.Context(), client.EngineOptions{}, award.RunID, award,
+			func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (hereHostSession, error) {
+				return hereHostSession{
+					input: nodehost.RunInput{GrantedRunner: ambient}, close: func() error { closed = true; return nil },
+					host: hereTestHost(func(_ context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {
+						called = true
+						if !reflect.DeepEqual(input.GrantedRunner, award.Runner) {
+							return nodehost.RunCompletion{}, errors.New("host received ambient runner identity")
+						}
+						return nodehost.RunCompletion{Outcome: "success"}, nil
+					}),
+				}, nil
+			})
+		return err == nil && called && closed && completion.Outcome == "success"
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 128}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -487,6 +512,53 @@ func TestHereHostCleanupFailureIsIncomplete(t *testing.T) {
 	_, err := resumeHereRun(t.Context(), client.EngineOptions{URL: "https://controller.example"}, "retry-run", deps)
 	if !errors.Is(err, io.ErrClosedPipe) || exitCodeFor(err) != 3 {
 		t.Fatalf("cleanup failure: %v", err)
+	}
+}
+
+func TestHereHostAlwaysJoinsReturnedSessionProperty(t *testing.T) {
+	award := hereAward(t)
+	bindingFailure, hostFailure, cleanupFailure := errors.New("binding failed"), errors.New("host failed"), errors.New("cleanup failed")
+	property := func(bindFails, hostFails, closeFails, cancelBinding, missingHost bool) bool {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		closed, hosted := 0, false
+		completion, err := runHereAward(ctx, client.EngineOptions{}, award.RunID, award,
+			func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (hereHostSession, error) {
+				session := hereHostSession{close: func() error {
+					closed++
+					if closeFails {
+						return cleanupFailure
+					}
+					return nil
+				}}
+				if !missingHost {
+					session.host = hereTestHost(func(context.Context, nodehost.RunInput) (nodehost.RunCompletion, error) {
+						hosted = true
+						if hostFails {
+							return nodehost.RunCompletion{}, hostFailure
+						}
+						return nodehost.RunCompletion{Outcome: "success"}, nil
+					})
+				}
+				if cancelBinding {
+					cancel()
+				}
+				if bindFails {
+					return session, bindingFailure
+				}
+				return session, nil
+			})
+		shouldHost := !bindFails && !cancelBinding && !missingHost
+		if closed != 1 || hosted != shouldHost || errors.Is(err, cleanupFailure) != closeFails || errors.Is(err, bindingFailure) != bindFails || errors.Is(err, hostFailure) != (shouldHost && hostFails) {
+			return false
+		}
+		if bindFails || hostFails || closeFails || cancelBinding || missingHost {
+			return exitCodeFor(err) == 3
+		}
+		return err == nil && completion.Outcome == "success"
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 128}); err != nil {
+		t.Fatal(err)
 	}
 }
 

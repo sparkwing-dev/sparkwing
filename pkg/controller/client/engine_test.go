@@ -119,7 +119,7 @@ func TestEngineClientErrorsAndRetry(t *testing.T) {
 				}
 				want := 1
 				if code == apierr.Unavailable {
-					want = UnavailableRetries + 1
+					want = unavailableRetries + 1
 				}
 				if calls != want {
 					t.Fatalf("calls=%d want=%d", calls, want)

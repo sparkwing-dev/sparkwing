@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -43,17 +42,8 @@ func hostAward(ctx context.Context, unit controllerwire.ClaimedUnit, bind func(c
 	if err != nil {
 		return err
 	}
-	deadline := captured.Binding.Deadline
-	for _, bound := range []*time.Time{captured.OwnerDeadline, captured.ParentCapabilityExpiry} {
-		if bound != nil && (deadline == nil || bound.Before(*deadline)) {
-			deadline = bound
-		}
-	}
-	if deadline != nil {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithDeadline(ctx, *deadline)
-		defer cancel()
-	}
+	ctx, cancel := captured.HostContext(ctx)
+	defer cancel()
 	defer func() { result = errors.Join(result, context.Cause(ctx)) }()
 	if err := context.Cause(ctx); err != nil {
 		return err
@@ -149,14 +139,14 @@ func validateHostedAward(unit controllerwire.ClaimedUnit) error {
 		return errors.New("runner hosting requires a directly usable award")
 	}
 	binding := unit.Binding
-	if binding.RunID != unit.RunID || binding.Holder == "" || binding.Generation <= 0 {
+	if binding.Holder == "" || binding.Generation <= 0 {
 		return errors.New("runner award has an invalid run or claim fence")
 	}
 	if unit.Unit == capability.UnitNode {
 		if unit.Purpose != capability.PurposeWork || binding.Kind != capability.BindingNode || unit.JobID == "" || binding.NodeID != unit.JobID || binding.Attempt < 0 {
 			return errors.New("runner award has an invalid job or attempt binding")
 		}
-		if unit.Engine == nil || unit.Accepted == nil || unit.Execution == nil || unit.Request.RunID == "" || unit.Request.Request.Team == "" || unit.Accepted.Spec.Request.RunID != unit.Request.RunID || unit.Accepted.Spec.Request.Request.Team != unit.Request.Request.Team || unit.Accepted.Spec.Resolved.Engine != *unit.Engine {
+		if unit.Engine == nil || unit.Accepted == nil || unit.Execution == nil || unit.Accepted.Spec.Resolved.Engine != *unit.Engine {
 			return errors.New("runner award is missing its matching accepted engine, execution settings and run")
 		}
 		if unit.Runner.Name == "" || unit.Runner.Type == "" {

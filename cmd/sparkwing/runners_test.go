@@ -705,11 +705,15 @@ func TestRunnersRemoveRejectsAnotherNameOrControllerBeforeStopping(t *testing.T)
 	}
 }
 
-func TestRunnersEnrollmentRequiresProvisioningContractForPools(t *testing.T) {
-	_, _, err := prepareRunnerEnrollment([]string{"--runner", "desk", "--reserved-for", "prod"})
-	var structured *apierr.Error
-	if !errors.As(err, &structured) || structured.Code != apierr.PolicyMissing {
-		t.Fatalf("pool proposal: %v", err)
+func TestRunnersEnrollmentSendsReservedPoolProposal(t *testing.T) {
+	f := newRunnersFixture(t)
+	captureStdout(t, func() {
+		if err := f.run([]string{"add", "--profile", "prod", "--runner", "desk", "--repos", "github.com/acme/*", "--reserved-for", "prod,release", "--reserved-for", "build", "--config", f.config, "--no-service"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if len(f.enrolled) != 1 || f.enrolled[0].Name != "desk" || !slices.Equal(f.enrolled[0].ReservedPools, []string{"prod", "release", "build"}) || !slices.Equal(f.enrolled[0].Repos, []string{"github.com/acme/*"}) {
+		t.Fatalf("pool proposal: %+v", f.enrolled)
 	}
 }
 

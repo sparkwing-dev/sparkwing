@@ -90,6 +90,12 @@ pipelines:
 settings and ceiling checks. Values above a ceiling fail with both values
 named. They are never silently lowered.
 
+Installing without `--schedule` reconciles the repository's complete declaration
+set and withdraws entries removed from the project file. Installing with
+`--schedule` updates only the selected entries. It preserves other schedules,
+their pins, overrides and pause state. A selection that runs elsewhere makes no
+declaration changes on the selected controller.
+
 Installation is intended to capture the installing environment and pin a proved
 binary unless `--unpinned` is selected. Linux and macOS managed timers are
 intended to invoke the stable hidden `sparkwing __tick` entrypoint and start the

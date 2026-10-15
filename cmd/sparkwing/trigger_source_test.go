@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,37 +33,28 @@ func pushedAndLocalCommits(t *testing.T) (work, pushed, local string) {
 
 // A team runner fetches the triggered commit from origin, so only a commit a
 // remote-tracking branch of origin contains counts as fetchable.
-func TestCommitOnOriginSeesOnlyPushedCommits(t *testing.T) {
+func TestTriggerPreflightSeesOnlyPushedCommits(t *testing.T) {
 	work, pushed, local := pushedAndLocalCommits(t)
-	if !commitOnOrigin(work, pushed) {
-		t.Errorf("commitOnOrigin(%s) = false for a pushed commit", pushed)
+	check := func(directory, sha string) error {
+		selected := preparedTriggerSource{git: runspec.Git{SHA: sha}, source: runspec.Source{Ref: sha}, checkout: triggerCheckout{directory: directory, environment: os.Environ()}}
+		return selected.checkReachable(t.Context())
 	}
-	if commitOnOrigin(work, local) {
-		t.Errorf("commitOnOrigin(%s) = true for a commit that was never pushed", local)
+	if err := check(work, pushed); err != nil {
+		t.Fatalf("pushed source refused: %v", err)
 	}
-	if commitOnOrigin(work, "") {
-		t.Error("commitOnOrigin accepted an empty commit")
+	for _, source := range []struct{ directory, sha string }{{work, local}, {work, ""}, {filepath.Join(os.TempDir(), "no-such-checkout-"+pushed[:8]), pushed}} {
+		if err := check(source.directory, source.sha); err == nil {
+			t.Fatal("unreachable source accepted")
+		}
 	}
-	if commitOnOrigin(filepath.Join(os.TempDir(), "no-such-checkout-"+pushed[:8]), pushed) {
-		t.Error("commitOnOrigin accepted a directory that is not a checkout")
-	}
+
 }
 
-func TestOfferTriggerSourceRequiresPushedCommit(t *testing.T) {
-	work, pushed, local := pushedAndLocalCommits(t)
-	if err := offerTriggerSource(nil, work, "https://github.com/acme/app.git", pushed); err != nil {
-		t.Fatalf("pushed commit = %v", err)
-	}
-	err := offerTriggerSource(nil, work, "https://github.com/acme/app.git", local)
-	if err == nil || !strings.Contains(err.Error(), "--working-tree") {
-		t.Fatalf("unpushed commit = %v, want working-tree guidance", err)
-	}
-}
-
-func TestCronPinRejectsCommitOnlyOnAnotherRemote(t *testing.T) {
+func TestTriggerPreflightRejectsCommitOnlyOnAnotherRemote(t *testing.T) {
 	work, _, local := pushedAndLocalCommits(t)
 	gitInRepo(t, work, "update-ref", "refs/remotes/upstream/main", local)
-	if err := checkPushableHead(work, false); err == nil || !strings.Contains(err.Error(), "Push the branch first") {
-		t.Fatalf("cron pinned an unpushed origin commit: %v", err)
+	selection := preparedTriggerSource{git: runspec.Git{SHA: local}, source: runspec.Source{Ref: local}, checkout: triggerCheckout{directory: work, environment: os.Environ()}}
+	if err := selection.checkReachable(t.Context()); err == nil || !strings.Contains(err.Error(), "not on origin") {
+		t.Fatalf("preflight accepted an unpushed origin commit: %v", err)
 	}
 }

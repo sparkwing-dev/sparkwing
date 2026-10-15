@@ -1,12 +1,6 @@
 package client
 
-import (
-	"context"
-	"encoding/json"
-	"net/http"
-	"net/url"
-	"time"
-)
+import "time"
 
 // CreateTokenRequest narrows a member credential's grants and optional expiry.
 type CreateTokenRequest struct {
@@ -67,94 +61,4 @@ type RotatedToken struct {
 	New          TokenInfo `json:"new"`
 	OldPrefix    string    `json:"old_prefix"`
 	OldRevokedAt time.Time `json:"old_revoked_at"`
-}
-
-// CreateToken provisions or delegates the authenticated account's member credential once.
-func (c *Client) CreateToken(ctx context.Context, req CreateTokenRequest) (*CreatedToken, error) {
-	var out CreatedToken
-	if err := c.post(ctx, "/api/v1/tokens", req, http.StatusCreated, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// EnrollRunner provisions a team machine root once under current team administration.
-func (c *Client) EnrollRunner(ctx context.Context, req EnrollRunnerRequest) (*CreatedToken, error) {
-	var out CreatedToken
-	if err := c.post(ctx, "/api/v1/runners", req, http.StatusCreated, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// CreateServiceToken provisions a deployment service root once under operator.tokens.
-func (c *Client) CreateServiceToken(ctx context.Context, req CreateServiceTokenRequest) (*CreatedToken, error) {
-	var out CreatedToken
-	if err := c.post(ctx, "/api/v1/operator/tokens", req, http.StatusCreated, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// ListTokens lists the controller's tokens, narrowed to one kind when kind is
-// not empty. Revoked tokens are left out unless includeRevoked is set.
-func (c *Client) ListTokens(ctx context.Context, kind string, includeRevoked bool) ([]TokenInfo, error) {
-	q := url.Values{}
-	if kind != "" {
-		q.Set("kind", kind)
-	}
-	if includeRevoked {
-		q.Set("include_revoked", "1")
-	}
-	u := c.baseURL + "/api/v1/tokens"
-	if len(q) > 0 {
-		u += "?" + q.Encode()
-	}
-	var out struct {
-		Tokens []TokenInfo `json:"tokens"`
-	}
-	if err := c.getJSON(ctx, u, &out); err != nil {
-		return nil, err
-	}
-	return out.Tokens, nil
-}
-
-// LookupToken returns the controller's record of the token with prefix, as
-// sent.
-func (c *Client) LookupToken(ctx context.Context, prefix string) (json.RawMessage, error) {
-	var out json.RawMessage
-	if err := c.getJSON(ctx, c.baseURL+"/api/v1/tokens/"+url.PathEscape(prefix), &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// RevokeToken revokes a deployment service or operator capability by prefix.
-func (c *Client) RevokeToken(ctx context.Context, prefix string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+"/api/v1/operator/tokens/"+url.PathEscape(prefix), nil)
-	if err != nil {
-		return err
-	}
-	response, err := c.do(req)
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusNoContent {
-		return readCapabilityHTTPError(response)
-	}
-	return nil
-}
-
-// RotateToken replaces an owned capability once; a nil expiry preserves its original expiry.
-func (c *Client) RotateToken(ctx context.Context, prefix string, grace time.Duration, expires *time.Time) (*RotatedToken, error) {
-	body := struct {
-		GraceSecs int64      `json:"grace_secs"`
-		ExpiresAt *time.Time `json:"expires_at,omitempty"`
-	}{GraceSecs: int64(grace / time.Second), ExpiresAt: expires}
-	var out RotatedToken
-	if err := c.post(ctx, "/api/v1/tokens/"+url.PathEscape(prefix)+"/rotate", body, http.StatusOK, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
 }

@@ -1,9 +1,7 @@
 package main
 
 import (
-	"context"
 	"errors"
-	"fmt"
 	"strings"
 )
 
@@ -21,21 +19,7 @@ func checkHereFlags(flags triggerFlags) error {
 	case flags.detach:
 		return errors.New("--runner here hosts the run in this process, so it cannot --detach")
 	case flags.workingTree:
-		return errors.New("--runner here uses the recorded commit; commit changes instead of passing --working-tree")
-	}
-	return nil
-}
-
-// safety: the run records the commit HEAD names, so a tracked change that
-// would run without being recorded is refused.
-func refuseUncommittedCheckout() error {
-	out, err := gitOutput(context.Background(), ".", nil, "status", "--porcelain", "--untracked-files=no")
-	if err != nil {
-		return fmt.Errorf("pipeline trigger: read the checkout's status: %w", err)
-	}
-	if strings.TrimSpace(out) != "" {
-		return errors.New("pipeline trigger: --runner here uses the commit recorded from HEAD, " +
-			"so commit the tracked changes first")
+		return errors.New("--runner here builds this checkout as it is; commit the change instead of passing --working-tree")
 	}
 	return nil
 }

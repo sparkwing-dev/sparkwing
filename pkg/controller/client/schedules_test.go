@@ -15,6 +15,7 @@ import (
 func scheduleTestRow() controllerwire.ScheduleView {
 	return controllerwire.ScheduleView{ID: "s1", Name: "api/check/nightly", RepoPath: "https://github.com/acme/api.git", Pipeline: "check", Where: "controller", State: "armed", Declared: true, Cron: "0 3 * * *", TZ: "UTC", Overlap: "skip", Effective: controllerwire.EffectiveView{Cron: "0 3 * * *", TZ: "UTC", Overlap: "skip"}}
 }
+
 func scheduleTestResponse(t *testing.T, value any) *http.Response {
 	t.Helper()
 	data, err := json.Marshal(value)
@@ -23,6 +24,7 @@ func scheduleTestResponse(t *testing.T, value any) *http.Response {
 	}
 	return engineResponse(200, string(data))
 }
+
 func TestScheduleManagerRejectsMalformedResponses(t *testing.T) {
 	row := scheduleTestRow()
 	duplicate := controllerwire.ScheduleOverview{Schedules: []controllerwire.ScheduleView{row, row}}
@@ -34,9 +36,12 @@ func TestScheduleManagerRejectsMalformedResponses(t *testing.T) {
 		value any
 		read  bool
 	}{
-		{"missing fields", map[string]any{}, false}, {"missing identity", controllerwire.ScheduleOverview{Schedules: []controllerwire.ScheduleView{invalid}}, false},
-		{"duplicate", duplicate, false}, {"foreign upcoming", controllerwire.ScheduleOverview{Schedules: []controllerwire.ScheduleView{row}, Upcoming: []controllerwire.ScheduleUpcoming{{Schedule: "other", Name: "other", At: "2026-10-14T03:00:00Z"}}}, false},
-		{"foreign history", foreignFire, true}, {"invalid instant", controllerwire.DetailView{Schedule: row, Upcoming: []string{"yesterday"}}, true},
+		{"missing fields", map[string]any{}, false},
+		{"missing identity", controllerwire.ScheduleOverview{Schedules: []controllerwire.ScheduleView{invalid}}, false},
+		{"duplicate", duplicate, false},
+		{"foreign upcoming", controllerwire.ScheduleOverview{Schedules: []controllerwire.ScheduleView{row}, Upcoming: []controllerwire.ScheduleUpcoming{{Schedule: "other", Name: "other", At: "2026-10-14T03:00:00Z"}}}, false},
+		{"foreign history", foreignFire, true},
+		{"invalid instant", controllerwire.DetailView{Schedule: row, Upcoming: []string{"yesterday"}}, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			c := testEngine(t, func(*http.Request) (*http.Response, error) { return scheduleTestResponse(t, test.value), nil })
@@ -52,6 +57,7 @@ func TestScheduleManagerRejectsMalformedResponses(t *testing.T) {
 		})
 	}
 }
+
 func TestScheduleManagerConfirmsPauseAndReset(t *testing.T) {
 	row := scheduleTestRow()
 	c := testEngine(t, func(*http.Request) (*http.Response, error) {
@@ -68,6 +74,7 @@ func TestScheduleManagerConfirmsPauseAndReset(t *testing.T) {
 		t.Fatal("unconfirmed reset accepted")
 	}
 }
+
 func TestScheduleManagerValidatesBeforeHTTP(t *testing.T) {
 	c := testEngine(t, func(*http.Request) (*http.Response, error) { t.Fatal("invalid input reached HTTP"); return nil, io.EOF })
 	if _, err := c.ReadSchedule(t.Context(), "", controllerwire.ScheduleReadQuery{}); err == nil {
@@ -86,6 +93,7 @@ func TestScheduleManagerValidatesBeforeHTTP(t *testing.T) {
 		}
 	}
 }
+
 func TestScheduleManagerRetriesOneLaunchWithoutChangingKey(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		calls := 0
@@ -105,6 +113,7 @@ func TestScheduleManagerRetriesOneLaunchWithoutChangingKey(t *testing.T) {
 		}
 	})
 }
+
 func TestScheduleRepositoryManagement(t *testing.T) {
 	calls := 0
 	row := scheduleTestRow()
@@ -132,7 +141,7 @@ func TestScheduleRepositoryManagement(t *testing.T) {
 		t.Fatal("extra request")
 		return nil, io.EOF
 	})
-	got, err := c.ReplaceSchedules(t.Context(), controllerwire.ScheduleRepoRequest{RepoURL: row.RepoPath, Branch: "main", SHA: "original-sha", Schedules: []controllerwire.ScheduleDeclaration{{Pipeline: "check", Cron: "0 3 * * *", CatchUp: "0s"}}})
+	got, err := c.WriteSchedules(t.Context(), controllerwire.ScheduleRepoRequest{Mode: controllerwire.ScheduleReplace, RepoURL: row.RepoPath, Branch: "main", SHA: "original-sha", Schedules: []controllerwire.ScheduleDeclaration{{Pipeline: "check", Cron: "0 3 * * *", CatchUp: "0s"}}})
 	if err != nil || len(got.Schedules) != 1 || !reflect.DeepEqual(got.Withdrawn, []string{"check/old"}) {
 		t.Fatalf("replace: %+v %v", got, err)
 	}
@@ -141,12 +150,39 @@ func TestScheduleRepositoryManagement(t *testing.T) {
 		t.Fatalf("withdraw: %+v %v", removed, err)
 	}
 }
+
 func TestScheduleRepositoryRejectsConflictingDeletion(t *testing.T) {
 	c := testEngine(t, func(*http.Request) (*http.Response, error) {
 		return engineResponse(200, `{"repo_url":"other","removed":1}`), nil
 	})
 	if _, err := c.DeleteSchedulesForRepo(t.Context(), "acme/api"); err == nil {
 		t.Fatal("conflicting repository accepted")
+	}
+}
+
+func TestScheduleRepositoryPreservesSelectiveModeAndRefusesWithdrawal(t *testing.T) {
+	row := scheduleTestRow()
+	for _, mode := range []controllerwire.ScheduleWriteMode{controllerwire.ScheduleReplace, controllerwire.ScheduleUpsert} {
+		t.Run(string(mode), func(t *testing.T) {
+			c := testEngine(t, func(req *http.Request) (*http.Response, error) {
+				var input controllerwire.ScheduleRepoRequest
+				if err := json.NewDecoder(req.Body).Decode(&input); err != nil || input.Mode != mode {
+					t.Fatalf("write lost reconciliation mode: %+v %v", input, err)
+				}
+				return scheduleTestResponse(t, controllerwire.ScheduleRepoWritten{Schedules: []controllerwire.ScheduleView{row}, Withdrawn: []string{"check/other"}}), nil
+			})
+			_, err := c.WriteSchedules(t.Context(), controllerwire.ScheduleRepoRequest{Mode: mode, RepoURL: row.RepoPath})
+			if (err != nil) != (mode == controllerwire.ScheduleUpsert) {
+				t.Fatalf("mode %s accepted invalid withdrawal: %v", mode, err)
+			}
+		})
+	}
+	c := testEngine(t, func(*http.Request) (*http.Response, error) {
+		t.Fatal("missing mode reached the controller")
+		return nil, io.EOF
+	})
+	if _, err := c.WriteSchedules(t.Context(), controllerwire.ScheduleRepoRequest{RepoURL: row.RepoPath}); err == nil {
+		t.Fatal("unset reconciliation scope was accepted")
 	}
 }
 

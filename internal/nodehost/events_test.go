@@ -5,39 +5,24 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"net/http/httptest"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
-
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// safety: the controller serves the same store, so every check reads what each backend stored.
 func eventBackends(t *testing.T, body func(t *testing.T, st *store.Store, state storage.StateStoreOld)) {
 	t.Run("local", func(t *testing.T) {
 		st := openStore(t)
 		body(t, st, st)
-	})
-	t.Run("controller", func(t *testing.T) {
-		st := openStore(t)
-		srv := controller.New(st, slog.New(slog.DiscardHandler))
-		hs := httptest.NewServer(srv.Handler())
-		t.Cleanup(func() {
-			hs.Close()
-			_ = srv.Shutdown(context.Background())
-		})
-		body(t, st, client.New(hs.URL, nil))
 	})
 }
 

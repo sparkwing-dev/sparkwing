@@ -118,18 +118,16 @@ func TestControllerClaimPreservesAwardWithoutRetry(t *testing.T) {
 
 func FuzzControllerRetryAwardPreservesSealsAndFence(f *testing.F) {
 	for kind := uint8(0); kind < 3; kind++ {
-		f.Add(kind, []byte("original-run"), false)
-		f.Add(kind, []byte("original-run"), true)
+		for mutation := uint8(0); mutation < 5; mutation++ {
+			f.Add(kind, []byte("original-run"), mutation)
+		}
 	}
-	f.Fuzz(func(t *testing.T, kind uint8, origin []byte, changedFence bool) {
+	f.Fuzz(func(t *testing.T, kind uint8, origin []byte, mutation uint8) {
 		unit := wireAward([]capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}[kind%3])
 		unit.Request.RunID = "source-" + hex.EncodeToString(origin)
 		unit.Request.Hash = "request-hash"
 		if unit.Accepted != nil {
 			unit.Accepted.Spec.Request = unit.Request
-		}
-		if changedFence {
-			unit.Binding.RunID = unit.Request.RunID
 		}
 		control, err := NewControllerControl(launcherWireFake{claim: func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 			return controllerwire.ClaimResponse{Claim: &unit}, nil
@@ -138,14 +136,29 @@ func FuzzControllerRetryAwardPreservesSealsAndFence(f *testing.F) {
 			t.Fatal(err)
 		}
 		award, err := control.Claim(t.Context())
-		if changedFence {
-			if err == nil || award != nil {
-				t.Fatal("source-run binding authorized a retry execution")
-			}
-			return
-		}
 		if err != nil || award == nil || award.Binding.RunID != unit.RunID || award.Source.RepoKey != string(unit.Request.Request.Git.Repository.Key) || award.Source.SHA != unit.Request.Request.Git.SHA {
 			t.Fatalf("retry lost its execution fence or original source: award=%+v error=%v", award, err)
+		}
+		mutation %= 5
+		switch mutation {
+		case 1:
+			unit.Binding.RunID = unit.Request.RunID
+		case 2, 3, 4:
+			if unit.Accepted == nil {
+				unit.Request.RunID = ""
+			} else {
+				switch mutation {
+				case 2:
+					unit.Accepted.Spec.Request.RunID += "foreign"
+				case 3:
+					unit.Accepted.Spec.Request.Hash += "foreign"
+				case 4:
+					unit.Accepted.Spec.Request.Request.Team += "foreign"
+				}
+			}
+		}
+		if _, err := control.Claim(t.Context()); (err != nil) != (mutation != 0) {
+			t.Fatalf("claim mutation=%d error=%v", mutation, err)
 		}
 		exchanged := unit
 		exchanged.Delivery, exchanged.Capability, exchanged.LeaseExpiresAt = capability.DeliveryDirect, "exchanged", *unit.ParentCapabilityExpiry
@@ -161,14 +174,8 @@ func FuzzControllerRetryAwardPreservesSealsAndFence(f *testing.F) {
 			}
 			return nil
 		})}
-		if err := host.Run(t.Context(), *award); err != nil || !hosted {
-			t.Fatalf("retry bootstrap hosted=%v error=%v", hosted, err)
-		}
-		if unit.Accepted != nil {
-			unit.Accepted.Spec.Request.Hash += "changed"
-			if _, err := control.Claim(t.Context()); err == nil {
-				t.Fatal("different accepted source seal reached Cloud execution")
-			}
+		if err := host.Run(t.Context(), *award); hosted != (mutation == 0) || (err != nil) != (mutation != 0) {
+			t.Fatalf("exchange mutation=%d hosted=%v error=%v", mutation, hosted, err)
 		}
 	})
 }

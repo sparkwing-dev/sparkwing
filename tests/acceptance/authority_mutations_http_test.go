@@ -332,8 +332,11 @@ func TestAuthorityMutationHTTPRemovesLegacyTeamRevoke(t *testing.T) {
 
 func TestOperatorTokenRevocationClient(t *testing.T) {
 	b, f := deploymentBoundary(capability.OperatorTokens), &engineTransactions{}
-	c := client.NewWithToken("http://controller.invalid", &http.Client{Transport: reportTransport{authorityServer(t, b, f)}}, b.raw)
-	if err := c.RevokeToken(t.Context(), "root"); err != nil {
+	c, err := client.NewTokenManager(client.EngineOptions{URL: "http://controller.invalid", HTTP: &http.Client{Transport: reportTransport{authorityServer(t, b, f)}}, Bearer: func(context.Context) (string, error) { return b.raw, nil }}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.RevokeToken(t.Context(), "root"); err != nil {
 		t.Fatal(err)
 	}
 	if f.writes != 1 || f.revokedAuthority.ID != "root" {

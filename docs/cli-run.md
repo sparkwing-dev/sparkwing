@@ -29,7 +29,7 @@ Cache-from reads only authorized verified-default-branch memo/artifacts/depcache
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--publish PROFILE` | Copy this local run's results to the named controller profile. |
-| `--sw-cache-from PROFILE` | Read authorized cache entries from the named controller profile. |
+| `--sw-cache-from PROFILE` | Read the authorized remote cache; an empty value disables the machine default. |
 | `--sw-pause-before JOB` | Pause before the selected job. Repeatable; comma-separated values are accepted. |
 | `--sw-pause-after JOB` | Pause after the selected job. Repeatable; comma-separated values are accepted. |
 | `--sw-pause-on-failure` | Keep failed jobs paused for inspection. |

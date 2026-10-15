@@ -53,15 +53,23 @@ engine release. Decision 104 requires native Windows handle-inheritance evidence
 These are integration obligations under decisions 102-104, not a new distribution
 origin, trust root, fallback-age cutoff or support-window expiry refusal.
 
-The CLI dispatches `__sdk-install` through the shared installer above. Local
-execution consumes `ReadPin`, `VersionForPin` and `Resolve` for both SDKs. It
+
+The CLI delegates `__sdk-install` to `sdkinstall.Run`. Cache warm resolves the
+exact verified engine and calls its `InstallSDK`; it has no second Go/npm
+installer. The old CLI installer and its duplicate tests are removed. Shared
+engine tests own dependency installation and version checks.
+
+Go installation must preserve sparks overlays, populate missing checksums before
+cache hashing and hold or reacquire its executable lease through execution.
+The shared installer and source-host composition still need that integration
+review and native platform evidence.
+
+Local dispatch consumes ReadPin, VersionForPin and Resolve for both SDKs. It
 rechecks policy on every invocation and stops re-executing only when the current
-executable and resolved executable are the same file. Installed version ordering
-and an environment recursion marker cannot bypass that check. Resolver failures
-never select another release. Info reads pin metadata without fetching or
-guessing cache paths. The CLI downloader/cache and duplicate selection helpers
-are removed. Source/host composition and native platform evidence remain
-separate work.
+and resolved executables are the same file. Info reads pin metadata without
+fetching or guessing cache paths. Source/host composition and native execution
+remain separate integration work.
+
 
 ## Ownership
 
@@ -77,7 +85,8 @@ at seal point two. C3 hosts consume it on every execution placement.
 The Go pin is the `github.com/sparkwing-dev/sparkwing` module requirement in the
 pipeline's go.mod. The TypeScript pin is `@sparkwing/sdk`, resolved exactly by its
 manifest and native lockfile. `ReadPin` reads those files before executing pipeline
-code. A range alone cannot select an exact engine. Go `vX.Y.Z` and TypeScript
+code. CLI selection and `info` pass the pipeline directory to `ReadPin`, matching
+source acquisition. A range alone cannot select an exact engine. Go `vX.Y.Z` and TypeScript
 `X.Y.Z` select engine `vX.Y.Z`, retaining any prerelease suffix. A newer installed
 engine does not satisfy an older pin. Missing, conflicting and non-release pins
 produce an actionable `invalid_args` error.

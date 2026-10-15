@@ -1,0 +1,146 @@
+package main
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+)
+
+func TestLocalServicesRejectInvalidAdmissionBeforeConstruction(t *testing.T) {
+	for _, body := range []string{"admission:\n  mode: broken\n", "admission:\n  budget: broken\n"} {
+		t.Run(body, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("SPARKWING_CONFIG", path)
+			services, err := resolveLocalServicesAt(t.Context(), t.TempDir())
+			if err == nil || !strings.Contains(err.Error(), "admission") || services.runtime != nil {
+				t.Fatalf("invalid admission constructed runtime: %v, %v", services.runtime, err)
+			}
+		})
+	}
+}
+
+func TestLocalRuntimeConstructionRetainsAdmissionPolicyAndBudget(t *testing.T) {
+	for _, mode := range []string{"off", "auto", "jev", "custom", "classic"} {
+		t.Run(mode, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			body := "admission:\n  budget: 50%,ignore-external\n  mode: " + mode + "\n"
+			if mode == "custom" || mode == "jev" {
+				body += "  custom:\n    class_weight: {batch: 37}\n    aging_every: 5\n"
+			}
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("SPARKWING_CONFIG", path)
+			home := t.TempDir()
+			config, err := resolveLocalRuntimeConfig(home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := config.Admission
+			if got.Home != home || got.AdmissionPolicy == nil || string(got.AdmissionPolicy.Mode) != mode || got.Budget.CoresFraction != .5 || !got.Budget.IgnoreExternal || got.BudgetSource != wingd.BudgetSourceConfig || got.BudgetOrigin != path+" admission.budget" {
+				t.Fatalf("lost admission configuration: %+v", got)
+			}
+			if (mode == "custom" || mode == "jev") && (got.AdmissionPolicy.Scheduling.ClassWeight["batch"] != 37 || got.AdmissionPolicy.Scheduling.AgingEvery != 5) {
+				t.Fatalf("lost custom admission policy: %+v", got.AdmissionPolicy.Scheduling)
+			}
+		})
+	}
+}
+
+func localServicesFixture(t testing.TB, home string) (wingd.LocalRuntimeConfig, crontimer.Host) {
+	t.Helper()
+	userHome := t.TempDir()
+	return wingd.LocalRuntimeConfig{
+			Admission: wingd.Config{Home: home},
+			Open: func(context.Context, string) (wingd.LocalController, error) {
+				t.Fatal("composition opened the controller before election")
+				return nil, errors.New("unexpected controller open")
+			},
+		}, crontimer.Host{
+			GOOS: runtime.GOOS, Home: userHome,
+			ConfigHome: filepath.Join(userHome, ".config"), SparkwingHome: home,
+			Binary: filepath.Join(userHome, "sparkwing"), Version: "test",
+		}
+}
+
+func TestLocalServicesComposeRuntimeUnitsAndPrivateLogs(t *testing.T) {
+	home := t.TempDir()
+	config, host := localServicesFixture(t, home)
+	services, err := composeLocalServices(t.Context(), config, host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if services.runtime == nil || services.lifecycle == nil || services.units == nil || services.options.Home != home || services.options.Executable != host.Binary || services.options.Version != host.Version {
+		t.Fatalf("incomplete local services: %+v", services.options)
+	}
+	status, err := services.runtime.Status(t.Context())
+	if err != nil || status.Running || status.PID != 0 {
+		t.Fatalf("composition started an owner: %+v %v", status, err)
+	}
+	log, err := wingd.LogPath(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(log), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(log, []byte("owned controller log"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := services.openLog(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(file)
+	if err := errors.Join(err, file.Close()); err != nil || string(data) != "owned controller log" {
+		t.Fatalf("log = %q, error = %v", data, err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if file, err := services.openLog(ctx); file != nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled log open = %v, %v", file, err)
+	}
+}
+
+func FuzzLocalServicesKeepOneCapturedHome(f *testing.F) {
+	f.Add("controller", "controller")
+	f.Add("controller", "other")
+	f.Add("../controller", "\x00other")
+	f.Fuzz(func(t *testing.T, runtimeName, unitName string) {
+		root := t.TempDir()
+		home := func(name string) string {
+			hash := sha256.Sum256([]byte(name))
+			return filepath.Join(root, hex.EncodeToString(hash[:]))
+		}
+		config, host := localServicesFixture(t, home(runtimeName))
+		host.SparkwingHome = home(unitName)
+		services, err := composeLocalServices(t.Context(), config, host)
+		if runtimeName != unitName {
+			if err == nil || services.runtime != nil || services.lifecycle != nil {
+				t.Fatal("composed runtime and units across homes")
+			}
+			return
+		}
+		if err != nil || services.options.Home != host.SparkwingHome {
+			t.Fatalf("lost captured home: %q %v", services.options.Home, err)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		if err := services.runtime.Run(ctx, wingd.LocalStartOptions{Home: home(unitName + "other"), Version: "test"}); err == nil {
+			t.Fatal("bound runtime accepted a different start home")
+		}
+	})
+}
