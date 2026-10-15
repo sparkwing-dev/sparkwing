@@ -12,27 +12,27 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
-// safety: Main keeps a pipeline executable independent of the controller and store.
+// Main serves registered pipelines over the node protocol.
 func Main() {
 	os.Exit(sdkserve.Main(sdkserve.Config{SDKVersion: sdkVersion(), Operations: sdkOperations{}}))
 }
 
-// safety: MemoValue separates job-result reuse from dependency file caches.
+// MemoValue separates job-result reuse from dependency file caches.
 type MemoValue string
 
-// safety: NoMemo bypasses reuse without treating an empty key as valid.
+// NoMemo bypasses reuse without treating an empty key as valid.
 const NoMemo MemoValue = "memo:none"
 
-// safety: MemoKeyFn evaluates author-owned inputs before the host scopes their key.
+// MemoKeyFn evaluates author-owned inputs before the host scopes their key.
 type MemoKeyFn func(context.Context) (MemoValue, error)
 
-// safety: MemoOption keeps unset TTL distinct from an explicit duration.
+// MemoOption keeps unset TTL distinct from an explicit duration.
 type (
 	MemoOption  func(*memoOptions)
 	memoOptions struct{ ttl *time.Duration }
 )
 
-// safety: MemoKey hashes ordered inputs; callers resolve references before hashing.
+// MemoKey hashes ordered inputs; callers resolve references before hashing.
 func MemoKey(parts ...any) MemoValue {
 	for _, p := range parts {
 		if v, ok := p.(MemoValue); ok && v == NoMemo {
@@ -46,12 +46,12 @@ func MemoKey(parts ...any) MemoValue {
 	return MemoValue(fmt.Sprintf("%x", sha256.Sum256(raw)))
 }
 
-// safety: MemoTTL declares retention subject to the host's ceiling at plan acceptance.
+// MemoTTL declares retention subject to the host's ceiling at plan acceptance.
 func MemoTTL(d time.Duration) MemoOption {
 	return func(o *memoOptions) { o.ttl = &d }
 }
 
-// safety: Memo declares result reuse; missing or corrupt cached bytes produce a miss.
+// Memo declares result reuse; missing or corrupt cached bytes produce a miss.
 func (n *JobNode) Memo(key MemoKeyFn, opts ...MemoOption) *JobNode {
 	n.memoKey = key
 	n.memoOptions = memoOptions{}
@@ -63,7 +63,7 @@ func (n *JobNode) Memo(key MemoKeyFn, opts ...MemoOption) *JobNode {
 	return n
 }
 
-// safety: Memo applies one reuse policy to each static or generated group member.
+// Memo applies one reuse policy to each static or generated group member.
 func (g *JobGroup) Memo(key MemoKeyFn, opts ...MemoOption) *JobGroup {
 	for _, n := range g.Members() {
 		n.Memo(key, opts...)
@@ -71,12 +71,12 @@ func (g *JobGroup) Memo(key MemoKeyFn, opts ...MemoOption) *JobGroup {
 	return g
 }
 
-// safety: Backoff declares retry delay without selecting an execution placement.
+// Backoff declares retry delay without selecting an execution placement.
 func Backoff(d time.Duration) RetryOption {
 	return func(c *RetryConfig) { c.Backoff = d; c.backoffSet = true }
 }
 
-// safety: Cache declares files restored through the host-authorized depcache scope.
+// Cache declares files restored through the host-authorized depcache scope.
 func (n *JobNode) Cache(caches ...DirCache) *JobNode {
 	for _, c := range caches {
 		if c.spec.Path == "" && c.spec.Resolver == "" {
@@ -90,7 +90,7 @@ func (n *JobNode) Cache(caches ...DirCache) *JobNode {
 	return n
 }
 
-// safety: Cache applies dependency-file declarations to every group member.
+// Cache applies dependency-file declarations to every group member.
 func (g *JobGroup) Cache(caches ...DirCache) *JobGroup {
 	for _, n := range g.Members() {
 		n.Cache(caches...)
@@ -98,18 +98,18 @@ func (g *JobGroup) Cache(caches ...DirCache) *JobGroup {
 	return g
 }
 
-// safety: Npm requests npm's download cache without introducing a package proxy.
+// Npm requests npm's download cache without introducing a package proxy.
 func Npm() DirCache {
 	return DirCache{spec: nodeproto.CacheSpec{Name: "npm", Resolver: "npm", KeyFiles: []string{"package-lock.json"}}}
 }
 
-// safety: Artifacts distinguishes published files from the job's typed output.
+// Artifacts distinguishes published files from the job's typed output.
 func (n *JobNode) Artifacts(globs ...string) *JobNode {
 	n.outputGlobs = append(n.outputGlobs, globs...)
 	return n
 }
 
-// safety: Artifacts applies published-file patterns to every group member.
+// Artifacts applies published-file patterns to every group member.
 func (g *JobGroup) Artifacts(globs ...string) *JobGroup {
 	for _, n := range g.Members() {
 		n.Artifacts(globs...)
@@ -117,7 +117,7 @@ func (g *JobGroup) Artifacts(globs ...string) *JobGroup {
 	return g
 }
 
-// safety: NeedsIfPresent ignores absent dependencies but preserves failure ordering for present jobs.
+// NeedsIfPresent ignores absent dependencies but preserves failure ordering for present jobs.
 func (n *JobNode) NeedsIfPresent(deps ...Dep) *JobNode {
 	for _, d := range deps {
 		if d == nil {
@@ -134,7 +134,7 @@ func (n *JobNode) NeedsIfPresent(deps ...Dep) *JobNode {
 	return n
 }
 
-// safety: NeedsIfPresent applies presence-sensitive ordering to every group member.
+// NeedsIfPresent applies presence-sensitive ordering to every group member.
 func (g *JobGroup) NeedsIfPresent(deps ...Dep) *JobGroup {
 	for _, n := range g.Members() {
 		n.NeedsIfPresent(deps...)
@@ -142,18 +142,16 @@ func (g *JobGroup) NeedsIfPresent(deps ...Dep) *JobGroup {
 	return g
 }
 
-// safety: GenerateFn reconstructs executable declarations from the source's persisted output.
-// Replay must produce the accepted topology hash; a mismatch fails as plan_drift.
-// Generators and their SDK commands run without the source job's body environment.
+// GenerateFn reconstructs declarations from persisted source output without the source job's body environment.
 type GenerateFn func(context.Context, *Plan) error
 
-// safety: Generator identifies a source expansion whose settlement precedes dependent jobs.
+// Generator identifies a source expansion whose settlement precedes dependent jobs.
 type Generator struct {
 	id string
 	fn GenerateFn
 }
 
-// safety: Generate declares an expansion after source success or memo reuse; the host owns acceptance.
+// Generate declares an expansion after source success or memo reuse; the host owns acceptance.
 func (n *JobNode) Generate(fn GenerateFn) *Generator {
 	if fn == nil {
 		panic("sparkwing: Generate: callback required")
@@ -163,12 +161,12 @@ func (n *JobNode) Generate(fn GenerateFn) *Generator {
 	return g
 }
 
-// safety: ID exposes the stable group identifier used in persisted expansion identity.
+// ID exposes the stable group identifier used in persisted expansion identity.
 func (g *Generator) ID() string {
 	return g.id
 }
 
-// safety: NeedsGenerated waits for expansion settlement and all generated prerequisites.
+// NeedsGenerated waits for expansion settlement and all generated prerequisites.
 func (n *JobNode) NeedsGenerated(generators ...*Generator) *JobNode {
 	for _, g := range generators {
 		if g == nil {
@@ -179,7 +177,7 @@ func (n *JobNode) NeedsGenerated(generators ...*Generator) *JobNode {
 	return n
 }
 
-// safety: NeedsGenerated carries the same expansion barrier to every group member.
+// NeedsGenerated carries the same expansion barrier to every group member.
 func (g *JobGroup) NeedsGenerated(generators ...*Generator) *JobGroup {
 	for _, n := range g.Members() {
 		n.NeedsGenerated(generators...)
@@ -187,18 +185,18 @@ func (g *JobGroup) NeedsGenerated(generators ...*Generator) *JobGroup {
 	return g
 }
 
-// safety: EnvOption distinguishes process startup settings from body-only environment.
+// EnvOption distinguishes process startup settings from body-only environment.
 type (
 	EnvOption  func(*envOptions)
 	envOptions struct{ startup bool }
 )
 
-// safety: Startup marks interpreter configuration that must never influence plan declarations.
+// Startup marks interpreter configuration that must never influence plan declarations.
 func Startup() EnvOption {
 	return func(o *envOptions) { o.startup = true }
 }
 
-// safety: Env defaults to body scope; startup declarations take effect before attempt process creation.
+// Env defaults to body scope; startup declarations take effect before attempt process creation.
 func (n *JobNode) Env(key, value string, opts ...EnvOption) *JobNode {
 	o := envOptions{}
 	for _, opt := range opts {
@@ -213,7 +211,7 @@ func (n *JobNode) Env(key, value string, opts ...EnvOption) *JobNode {
 	return n
 }
 
-// safety: Env applies the same startup/body distinction to all members.
+// Env applies the same startup/body distinction to all members.
 func (g *JobGroup) Env(key, value string, opts ...EnvOption) *JobGroup {
 	for _, n := range g.Members() {
 		n.Env(key, value, opts...)
@@ -221,20 +219,20 @@ func (g *JobGroup) Env(key, value string, opts ...EnvOption) *JobGroup {
 	return g
 }
 
-// safety: ApprovalConfig preserves indefinite waiting when Timeout is zero.
+// ApprovalConfig preserves indefinite waiting when Timeout is zero.
 type ApprovalConfig struct {
 	Message   string
 	Timeout   time.Duration
 	OnTimeout ApprovalTimeoutPolicy
 }
 
-// safety: Approval exposes only declarative gate behavior because gates execute no job hooks.
+// Approval exposes only declarative gate behavior because gates execute no job hooks.
 type Approval struct {
 	id   string
 	node *JobNode
 }
 
-// safety: Approval declares a manual gate whose owner enforces waiting and timeout policy.
+// Approval declares a manual gate whose owner enforces waiting and timeout policy.
 func (p *Plan) Approval(id string, cfg ApprovalConfig) *Approval {
 	if err := validateNodeID(id); err != nil {
 		panic(err)
@@ -250,7 +248,7 @@ func (p *Plan) Approval(id string, cfg ApprovalConfig) *Approval {
 	return &Approval{id: id, node: n}
 }
 
-// safety: ID permits gate references without exposing executable-job internals.
+// ID permits gate references without exposing executable-job internals.
 func (a *Approval) ID() string {
 	return a.id
 }
@@ -259,43 +257,42 @@ func (a *Approval) depID() string {
 	return a.id
 }
 
-// safety: Needs waits for prerequisite jobs before requesting a decision.
+// Needs waits for prerequisite jobs before requesting a decision.
 func (a *Approval) Needs(deps ...Dep) *Approval {
 	a.node.Needs(deps...)
 	return a
 }
 
-// safety: NeedsIfPresent permits plans whose optional prerequisite is absent.
+// NeedsIfPresent permits plans whose optional prerequisite is absent.
 func (a *Approval) NeedsIfPresent(deps ...Dep) *Approval {
 	a.node.NeedsIfPresent(deps...)
 	return a
 }
 
-// safety: NeedsGenerated keeps a gate behind the persisted expansion barrier.
+// NeedsGenerated keeps a gate behind the persisted expansion barrier.
 func (a *Approval) NeedsGenerated(generators ...*Generator) *Approval {
 	a.node.NeedsGenerated(generators...)
 	return a
 }
 
-// safety: Optional excludes a denied or expired gate from required run success.
+// Optional excludes a denied or expired gate from required run success.
 func (a *Approval) Optional() *Approval {
 	a.node.optional = true
 	return a
 }
 
-// safety: ContinueOnError permits dependents after a gate failure.
+// ContinueOnError permits dependents after a gate failure.
 func (a *Approval) ContinueOnError() *Approval {
 	a.node.continueOnError = true
 	return a
 }
 
-// safety: OnFailure declares an executable recovery job separate from the gate.
+// OnFailure declares and returns a recovery job for a failed gate.
 func (a *Approval) OnFailure(id string, body any) *JobNode {
-	a.node.OnFailure(id, body)
-	return a.node.onFailure
+	return a.node.OnFailure(id, body)
 }
 
-// safety: FailurePolicy chooses fail_fast or collect_all without changing dependency requirements.
+// FailurePolicy chooses fail_fast or collect_all without changing dependency requirements.
 func (w *Work) FailurePolicy(policy ParallelFailurePolicy) *Work {
 	switch policy {
 	case FailFast, CollectAll:
@@ -306,7 +303,7 @@ func (w *Work) FailurePolicy(policy ParallelFailurePolicy) *Work {
 	return w
 }
 
-// safety: Annotation carries source location and the same severity vocabulary as log records.
+// Annotation carries source location and the same severity vocabulary as log records.
 type Annotation struct {
 	Level   string
 	Message string
@@ -316,8 +313,7 @@ type Annotation struct {
 	EndLine int
 }
 
-// safety: Annotate preserves structured location while the host masks and enforces the 128 KiB limit.
-// It requires an execution context. A host write failure panics so the operation reports failure.
+// Annotate emits a located annotation during execution and panics on invalid input or host write failure.
 func Annotate(ctx context.Context, annotation Annotation) {
 	sdkserve.RequireExecution(ctx, "sparkwing.Annotate")
 	if annotation.Level == "" {
@@ -347,12 +343,12 @@ func Annotate(ctx context.Context, annotation Annotation) {
 	loggerFromContext(ctx).Emit(recordEnvelope(ctx, LogRecord{Level: annotation.Level, Event: "annotation", Msg: annotation.Message, Attrs: attrs}))
 }
 
-// safety: Mask returns only after host registration so subsequent output cannot race masking.
+// Mask returns only after host registration so subsequent output cannot race masking.
 func Mask(ctx context.Context, value string) error {
 	return sdkserve.ServicesFrom(ctx).Mask(ctx, value)
 }
 
-// safety: Variable distinguishes a declared unmasked value from a secret.
+// Variable distinguishes a declared unmasked value from a secret.
 func Variable(ctx context.Context, name string) (string, error) {
 	v, masked, err := resolveValue(ctx, "Variable", name)
 	if err != nil {
@@ -364,7 +360,7 @@ func Variable(ctx context.Context, name string) (string, error) {
 	return v, nil
 }
 
-// safety: MustVariable makes a missing required plain value fail the job.
+// MustVariable makes a missing required plain value fail the job.
 func MustVariable(ctx context.Context, name string) string {
 	v, err := Variable(ctx, name)
 	if err != nil {
@@ -373,10 +369,10 @@ func MustVariable(ctx context.Context, name string) string {
 	return v
 }
 
-// safety: Memoized records successful reuse without pretending the body executed.
+// Memoized records successful reuse without pretending the body executed.
 const Memoized Outcome = "memoized"
 
-// safety: Checkout distinguishes absent source settings from explicit zero and false values.
+// Checkout distinguishes absent source settings from explicit zero and false values.
 type Checkout struct {
 	Depth       *int
 	FullHistory *bool
@@ -385,13 +381,13 @@ type Checkout struct {
 	LFS         *bool
 }
 
-// safety: Checkout declares source preferences for host resolution without reading YAML in the SDK.
+// Checkout declares source preferences for host resolution without reading YAML in the SDK.
 func (p *Plan) Checkout(config Checkout) *Plan {
 	p.source = &config
 	return p
 }
 
-// safety: SkipIf conditions gate admission without running executable before/after hooks.
+// SkipIf conditions gate admission without running executable before/after hooks.
 func (a *Approval) SkipIf(predicate SkipPredicate, opts ...SkipOption) *Approval {
 	a.node.SkipIf(predicate, opts...)
 	return a

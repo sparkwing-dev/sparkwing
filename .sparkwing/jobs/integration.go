@@ -42,10 +42,10 @@ const (
 
 func (Integration) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
 	fixtures := sparkwing.Job(plan, "fixtures", startFixtures).
-		Verify(fixturesReady).
-		OnFailure("teardown-on-fixture-fail", func(ctx context.Context, _ sparkwing.Failure) error {
-			return teardownFixtures(ctx)
-		})
+		Verify(fixturesReady)
+	fixtures.OnFailure("teardown-on-fixture-fail", func(ctx context.Context, _ sparkwing.Failure) error {
+		return teardownFixtures(ctx)
+	})
 
 	sparkwing.Job(plan, "test", runIntegrationSuite).
 		Needs(fixtures).
