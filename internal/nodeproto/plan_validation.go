@@ -235,6 +235,9 @@ func (v *planValidator) validatePlanSettings(plan PlanDoc) error {
 	if plan.ClaimWaitMS != nil && *plan.ClaimWaitMS < 0 {
 		return planInvalid("plan.claim_wait_ms", "duration is negative")
 	}
+	if plan.AdmissionClass != nil && !planOneOf(*plan.AdmissionClass, "critical", "interactive", "normal", "batch") {
+		return planInvalid("plan.admission_class", "unknown admission class")
+	}
 	if plan.Source != nil && plan.Source.Depth != nil && *plan.Source.Depth < 0 {
 		return planInvalid("plan.source.depth", "depth is negative")
 	}

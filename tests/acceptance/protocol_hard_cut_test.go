@@ -64,6 +64,48 @@ func testGoSDKVersionAndHardCut(t *testing.T) {
 		}
 	})
 	t.Run("public-api", testGoSDKCompileSurface)
+	t.Run("admission-class", testProtocolAdmissionClass)
+}
+
+func testProtocolAdmissionClass(t *testing.T) {
+	for _, placement := range []nodeproto.Placement{
+		nodeproto.PlacementLocal, nodeproto.PlacementLocalTriggered, nodeproto.PlacementRunnerHosted,
+		nodeproto.PlacementLauncher, nodeproto.PlacementHere, nodeproto.PlacementGitHubActions,
+	} {
+		t.Run(string(placement), func(t *testing.T) {
+			for _, class := range []string{"critical", "interactive", "normal", "batch", "", "urgent", "Batch", " batch "} {
+				t.Run("class="+class, func(t *testing.T) {
+					raw, err := json.Marshal(map[string]any{"jobs": []any{}, "admission_class": class})
+					if err != nil {
+						t.Fatal(err)
+					}
+					plan, err := nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{
+						Placement: placement, Secrets: noProbeSecrets{},
+					})
+					switch class {
+					case "critical", "interactive", "normal", "batch":
+						if err != nil || plan.AdmissionClass == nil || *plan.AdmissionClass != class {
+							t.Fatalf("admission_class = %v, %v", plan.AdmissionClass, err)
+						}
+					default:
+						var failure *apierr.Error
+						if !errors.As(err, &failure) || failure.Code != apierr.PlanInvalid {
+							t.Fatalf("invalid admission_class returned %v, want plan_invalid", err)
+						}
+						if !strings.Contains(failure.Message, "admission_class") {
+							t.Fatalf("invalid class error omits field: %v", failure)
+						}
+					}
+				})
+			}
+			plan, err := nodeproto.ValidatePlan(json.RawMessage(`{"jobs":[]}`), nodeproto.ValidationContext{
+				Placement: placement, Secrets: noProbeSecrets{},
+			})
+			if err != nil || plan.AdmissionClass != nil {
+				t.Fatalf("omitted admission_class = %v, %v", plan.AdmissionClass, err)
+			}
+		})
+	}
 }
 
 type noProbeSecrets struct{}
