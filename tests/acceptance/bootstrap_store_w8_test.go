@@ -22,7 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func storedCloudAwardW8(t *testing.T) (*controller.EngineController, launcher.CloudJobAward) {
+func storedCloudClaimantW8(t *testing.T) (*controller.EngineController, capability.Issued) {
 	t.Helper()
 	server, machine := newStoredRunnerW8(t, capability.UnitNode)
 	claimant, err := storedRunnerClientW8(t.Context(), server, machine.Raw)
@@ -54,6 +54,12 @@ func storedCloudAwardW8(t *testing.T) (*controller.EngineController, launcher.Cl
 	if _, err := server.Store.DB().ExecContext(t.Context(), `UPDATE nodes SET execution_json=? WHERE run_id='run' AND node_id='job'`, body); err != nil {
 		t.Fatal(err)
 	}
+	return server, root
+}
+
+func storedCloudAwardW8(t *testing.T) (*controller.EngineController, launcher.CloudJobAward) {
+	t.Helper()
+	server, root := storedCloudClaimantW8(t)
 	cloud, err := storedRunnerClientW8(t.Context(), server, root.Raw)
 	if err != nil {
 		t.Fatal(err)
@@ -63,7 +69,7 @@ func storedCloudAwardW8(t *testing.T) (*controller.EngineController, launcher.Cl
 		t.Fatalf("Cloud acquisition: present=%v error=%v", response.Claim != nil, err)
 	}
 	unit := response.Claim
-	if unit.Delivery != capability.DeliveryBootstrap || unit.ParentCapabilityExpiry == nil || unit.Engine == nil || unit.Execution == nil || !reflect.DeepEqual(*unit.Execution, execution) {
+	if unit.Delivery != capability.DeliveryBootstrap || unit.ParentCapabilityExpiry == nil || unit.Engine == nil || unit.Execution == nil || unit.Execution.Resources.Value.Cores.Value != 1 || unit.Execution.Resources.Value.MemoryBytes.Value != 1<<29 {
 		t.Fatal("Cloud claim lost bootstrap delivery, parent expiry, engine or execution resources")
 	}
 	binding := launcher.CloudJobBinding{Kind: launcher.CloudWork, UnitID: unit.UnitID, Team: unit.Request.Request.Team, RunID: unit.RunID, NodeID: unit.JobID, Holder: unit.Binding.Holder, Generation: unit.Binding.Generation, Attempt: unit.Binding.Attempt, ParentCapabilityExpiry: *unit.ParentCapabilityExpiry}

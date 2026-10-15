@@ -24,11 +24,6 @@ type State interface {
 	Watch(context.Context, func(wingd.LocalActivity) error) error
 }
 
-// Queue is the shared runner's joined consumer lifetime.
-type Queue interface {
-	Run(context.Context) error
-}
-
 // Binding gives shared service constructors the elected process's only store handle.
 type Binding struct {
 	Home       string
@@ -47,10 +42,10 @@ func (b Binding) NewQueue(cfg runners.StoreRunnerConfig) (*runners.Loop, error) 
 
 // Services binds shared authorization, host execution and local state to one process.
 type Services struct {
-	State State
-	HTTP  wingd.LocalHTTP
-	Queue Queue
-	Close func() error
+	State  State
+	HTTP   wingd.LocalHTTP
+	Runner runners.StoreRunnerConfig
+	Close  func() error
 }
 
 // Config supplies shared service constructors without opening another store.
@@ -87,23 +82,29 @@ func (cfg Config) Open(ctx context.Context, home string) (_ wingd.LocalControlle
 	if err != nil {
 		return nil, err
 	}
-	services, err = cfg.Bind(ctx, Binding{Home: home, Store: s, Tenant: tenant, Controller: &controller.EngineController{Store: s}})
+	binding := Binding{Home: home, Store: s, Tenant: tenant, Controller: &controller.EngineController{Store: s}}
+	services, err = cfg.Bind(ctx, binding)
 	if err != nil {
 		return nil, err
 	}
 	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}
-	if services.State == nil || services.Queue == nil || services.HTTP.API == nil || services.HTTP.Dashboard == nil {
-		return nil, errors.New("wingd: local services require state, queue and shared HTTP handlers")
+	if services.State == nil || services.HTTP.API == nil || services.HTTP.Dashboard == nil {
+		return nil, errors.New("wingd: local services require state and shared HTTP handlers")
 	}
-	return &localController{State: services.State, services: services, store: s}, nil
+	queue, err := binding.NewQueue(services.Runner)
+	if err != nil {
+		return nil, err
+	}
+	return &localController{State: services.State, services: services, store: s, queue: queue}, nil
 }
 
 type localController struct {
 	State
 	services Services
 	store    *store.Store
+	queue    *runners.Loop
 	mu       sync.Mutex
 	lease    store.SingletonLease
 	running  bool
@@ -156,7 +157,7 @@ func (c *localController) Run(ctx context.Context, report func(wingd.LocalActivi
 		name string
 		run  func(context.Context) error
 	}{
-		{"queue", c.services.Queue.Run},
+		{"queue", c.queue.Run},
 		{"activity", func(ctx context.Context) error { return c.State.Watch(ctx, report) }},
 		{"maintenance", func(ctx context.Context) error { return c.maintain(ctx, lease) }},
 	}

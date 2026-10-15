@@ -3,7 +3,8 @@
 `NewManagedRunner` takes a `UnitHost`. `RuntimeConfig.NewController` opens the
 claimant transport. The host owns each award's execution lifetime. An embedded
 controller uses `NewStoreRunner` with its existing `EngineController` and store.
-The local controller exposes that construction through `Binding.NewQueue`.
+The local controller constructs that queue in `Config.Open` from its service
+binder's `StoreRunnerConfig`. `Binding.NewQueue` also exposes the same constructor.
 An HTTP placement supplies `Hosting` with its award-specific controller factory,
 source preparation and shared host adapters.
 
@@ -13,7 +14,11 @@ every requested kind before calling the shared controller. Named trigger claims
 use their run's ownership and named route. Other claims use the ordered runner
 route. The controller still owns enrollment, signed version admission, matching
 and issuance.
-Revocation and narrowed grants take effect on the next claim.
+`StoreController` supplies the embedded policy adapter for both runners and
+launchers. Launcher requests select the launcher policy and still require
+`claims.launch` from a service credential. Synchronization reauthenticates before
+calling the shared controller's persisted cleanup reader. Revocation and narrowed
+grants take effect on the next request.
 
 `StoreHosting` authenticates and authorizes the presented award through C2's
 heartbeat policy before binding native services. It selects the authenticated
@@ -37,8 +42,8 @@ selected executable is acquired by the shared host from the accepted engine
 identity before SDK execution.
 
 `TestNativeStoreOwnerW8` constructs the embedded queue through the local binding
-and runs real C2 claim authentication, shared controller issuance, the native
-owner and C1 completion. Enrollment, version policy, source entry and unused
+and through `Config.Open`. It runs real C2 claim authentication, shared controller
+issuance, the native owner and C1 completion before joining local workers. Enrollment, version policy, source entry and unused
 process services are fixtures. `FuzzStoreQueueClaimAuthorityW8` checks named and
 ordered claims against revoked, changed and narrowed credentials, duplicate and
 unsupported kinds, and omitted selection. Refusals leave the queue unclaimed.

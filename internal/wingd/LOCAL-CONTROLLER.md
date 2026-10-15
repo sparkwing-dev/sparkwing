@@ -22,7 +22,8 @@ starts. A losing election opens no store and returns `ErrNotElected`.
 `localcontroller.Config.Open` supplies that factory's store ownership and
 maintenance. It opens `<home>/state.db`, selects `DefaultTeam`, and gives the
 shared service binder that store, tenant and `EngineController`. The binder
-returns the shared policy handlers, queue and state projection.
+returns the shared policy handlers, state projection and `StoreRunnerConfig`.
+`Config.Open` constructs the shared queue over its owned store before returning.
 `Binding.NewQueue` constructs that queue from the shared controller and
 `runners.StoreRunnerConfig`. It rejects another controller store and supplies
 `StoreHosting` over the owned handle. The controller needs its signed runner
@@ -30,8 +31,9 @@ admission policy and the store needs its enrollment resolver. The bearer provide
 supplies a provisioned claimant credential.
 The native service binder supplies W3's source, process, logging and storage
 services. Cleanup must accompany partially constructed services even when
-binding fails. Cleanup
-closes those services before the store. An incomplete binding fails startup.
+binding fails. It closes those services before the store. Missing runner services
+or signed policy fail startup through the same cleanup path. Replacing the
+controller's store also fails startup.
 
 Before readiness, this composition acquires the store's `controller.reaper`
 lease, runs unit recovery and concurrency maintenance, then asks the state
@@ -107,12 +109,14 @@ the current schema.
 `localcontroller.Config.Bind` still needs the production shared services.
 Its `State` interface supplies admission's run-store operations, the owned
 secrets read, startup reconciliation and live activity observation. The binder
-also supplies the authenticated API and dashboard handlers and the shared queue.
+also supplies the authenticated API and dashboard handlers, provisioned claimant
+and native host services. `Open` constructs the shared queue from those inputs.
 The SQLite composition tests substitute these foreign boundaries. They prove
 store ownership and leased maintenance, but do not establish working policy
-routes or a production activity projection. The embedded queue constructor and
-its real claim-to-owner completion are exercised separately with fixture
-enrollment, version policy and source services.
+routes or a production activity projection. `TestNativeStoreOwnerW8/local_controller` exercises `Config.Open`, leased
+reconciliation, the shared queue, native host, persisted completion and joined
+shutdown. It supplies fixture state/HTTP, enrollment, version policy and source
+services. It does not establish production activity or peer authorization.
 
 The controller composition supplies `LocalController` from the shared
 `pkg/controller` implementation. Its `Run` method reports all four activity

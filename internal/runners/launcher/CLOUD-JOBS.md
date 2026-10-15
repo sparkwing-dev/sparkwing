@@ -4,6 +4,11 @@
 Cloud boundary. Its client always selects `EngineOptions.Launcher`, independent
 of the requested unit kinds. `Hosting` and `BootstrapHost` keep the caller's
 HTTP transport when opening award or exchange clients. Each uses its own bearer.
+`NewStoreLauncher` constructs the same launcher over an existing
+`EngineController` and store. Its `StoreController` authenticates and authorizes
+each claim and synchronization request through the shared C2 route policy.
+The shared controller retains issuance, enrollment, version admission and cleanup
+reading. No additional store handle or issuer is opened.
 
 `BuildJob` builds plan, eval and work Jobs from an awarded binding. It checks
 images, resources, deadlines and engine identity before reserving an exclusive
@@ -140,10 +145,15 @@ and generator replay. `NodeHost` owns policy checks at each process start.
 
 <!-- design:begin -->
 
-The HTTP client, source projections, deployment network probes and node cleanup
-must supply their declared interfaces. Component tests use a fake controller,
-source projections and Kubernetes API. They do not prove that a deployed cluster enforces egress,
-node isolation, native sidecar shutdown or scratch accounting. Those checks
+The HTTP client, persisted cleanup reader, deployment network probes and node
+cleanup must supply their declared interfaces. `TestStoreLauncherW8` constructs
+the embedded launcher against SQLite and shared C2/controller issuance, then
+publishes and activates a Job and retires it after synchronization. The cleanup
+reader and Kubernetes API are fixtures. `FuzzStoreLauncherAuthorityW8` checks
+changed, narrowed and revoked credentials, route selection and provider failure
+across claims and synchronization. Refusals leave work unclaimed. Other
+components retain their fake controller boundaries. Deployed egress, node
+isolation, native sidecar shutdown and scratch accounting remain unproven. They
 also need real images, an explicit Kubernetes context and bootstrap/host
 composition from the owning areas.
 

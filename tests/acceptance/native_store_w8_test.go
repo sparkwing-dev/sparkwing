@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"reflect"
 	"testing"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -28,7 +30,13 @@ import (
 func nativeStoreFixtureW8(t *testing.T, kind capability.UnitKind) (*controller.EngineController, capability.Issued) {
 	t.Helper()
 	server, root := newStoredRunnerW8(t, kind)
-	tenant, err := server.Store.ForTeam(t.Context(), store.DefaultTeam)
+	prepareNativeStoreW8(t, server.Store, kind)
+	return server, root
+}
+
+func prepareNativeStoreW8(t *testing.T, s *store.Store, kind capability.UnitKind) {
+	t.Helper()
+	tenant, err := s.ForTeam(t.Context(), store.DefaultTeam)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,15 +50,14 @@ func nativeStoreFixtureW8(t *testing.T, kind capability.UnitKind) (*controller.E
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := server.Store.DB().ExecContext(t.Context(), `UPDATE runs SET spec_json=? WHERE id='run'`, body); err != nil {
+	if _, err := s.DB().ExecContext(t.Context(), `UPDATE runs SET spec_json=? WHERE id='run'`, body); err != nil {
 		t.Fatal(err)
 	}
 	if kind == capability.UnitNode {
-		if _, err := server.Store.DB().ExecContext(t.Context(), `UPDATE nodes SET spec_hash='job-hash' WHERE run_id='run'`); err != nil {
+		if _, err := s.DB().ExecContext(t.Context(), `UPDATE nodes SET spec_hash='job-hash' WHERE run_id='run'`); err != nil {
 			t.Fatal(err)
 		}
 	}
-	return server, root
 }
 
 func nativeStoreAwardW8(t *testing.T, kind capability.UnitKind) (*store.Store, controllerwire.ClaimedUnit) {
@@ -86,25 +93,28 @@ func (nativeStoreEnginesW8) Ensure(context.Context, engine.Identity, releaseasse
 }
 
 func TestNativeStoreOwnerW8(t *testing.T) {
-	t.Run("embedded_queue", func(t *testing.T) { checkNativeStoreOwnerW8(t, false) })
-	t.Run("award_snapshot", func(t *testing.T) { checkNativeStoreOwnerW8(t, true) })
+	for _, mode := range []string{"embedded_queue", "award_snapshot", "local_controller"} {
+		t.Run(mode, func(t *testing.T) { checkNativeStoreOwnerW8(t, mode) })
+	}
 }
 
-func checkNativeStoreOwnerW8(t *testing.T, direct bool) {
+func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 	t.Helper()
+	direct := mode == "award_snapshot"
 	var server *controller.EngineController
 	var root capability.Issued
 	var s *store.Store
 	var unit controllerwire.ClaimedUnit
 	if direct {
 		s, unit = nativeStoreAwardW8(t, capability.UnitTrigger)
-	} else {
+	} else if mode == "embedded_queue" {
 		server, root = nativeStoreFixtureW8(t, capability.UnitTrigger)
 		s = server.Store
 	}
 	expected := unit.Runner
 	expected.Labels = append([]string{}, unit.Runner.Labels...)
 	bound, acquired, closed := false, false, false
+	done := make(chan struct{})
 	bind := func(ctx context.Context, binding runners.StoreBinding) (runners.NativeServices, error) {
 		bound = true
 		if binding.Tenant.Team() != store.DefaultTeam || binding.Principal.Capability.Binding.Holder == "" {
@@ -152,14 +162,14 @@ func checkNativeStoreOwnerW8(t *testing.T, direct bool) {
 				},
 			},
 		}
-		return runners.NativeServices{Config: cfg, Close: func() error { closed = true; return authorities.Close() }}, nil
+		return runners.NativeServices{Config: cfg, Close: func() error { closed = true; close(done); return authorities.Close() }}, nil
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	var executionErr error
 	if direct {
 		executionErr = (runners.StoreHosting{Store: s, Bind: bind}).Host(ctx, unit)
-	} else {
+	} else if mode == "embedded_queue" {
 		runner, err := (localcontroller.Binding{Store: s, Controller: server}).NewQueue(runners.StoreRunnerConfig{
 			Bearer:          func(context.Context) (string, error) { return root.Raw, nil },
 			Loop:            runners.LoopConfig{Version: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, MaxConcurrent: 1, MaxClaims: 1},
@@ -170,6 +180,39 @@ func checkNativeStoreOwnerW8(t *testing.T, direct bool) {
 			t.Fatal(err)
 		}
 		executionErr = runner.Run(ctx)
+	} else {
+		cfg := localcontroller.Config{Bind: func(_ context.Context, binding localcontroller.Binding) (localcontroller.Services, error) {
+			s = binding.Store
+			server, root = seedStoredRunnerW8(t, s, capability.UnitTrigger)
+			prepareNativeStoreW8(t, s, capability.UnitTrigger)
+			binding.Controller.RunnerPolicy = server.RunnerPolicy
+			return localcontroller.Services{
+				State: &nativeLocalStateW8{done: done, stop: cancel},
+				HTTP:  wingd.LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.NotFoundHandler()},
+				Runner: runners.StoreRunnerConfig{
+					Bearer: func(context.Context) (string, error) { return root.Raw, nil },
+					Loop:   runners.LoopConfig{Version: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, MaxConcurrent: 1},
+					Bind:   bind, RequestCapacity: func() (float64, int64) { return 2, 1 << 30 },
+				},
+			}, nil
+		}}
+		owner, err := cfg.Open(ctx, t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := owner.Close(); err != nil {
+				t.Error(err)
+			}
+		}()
+		if _, err := owner.Reconcile(ctx); err != nil {
+			t.Fatal(err)
+		}
+		executionErr = owner.Run(ctx, func(wingd.LocalActivity) error { return nil })
+		if executionErr != nil {
+			requireLocalCancellationW8(t, executionErr)
+			executionErr = nil
+		}
 	}
 	if executionErr != nil {
 		t.Fatal(executionErr)
@@ -182,6 +225,41 @@ func checkNativeStoreOwnerW8(t *testing.T, direct bool) {
 	run, err := tenant.ReadRun(t.Context(), "run")
 	if err != nil || run.State != store.RunSuccess || !bound || !acquired || !closed {
 		t.Fatalf("state=%s bound=%v acquired=%v closed=%v error=%v", run.State, bound, acquired, closed, err)
+	}
+}
+
+func requireLocalCancellationW8(t *testing.T, err error) {
+	t.Helper()
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, part := range joined.Unwrap() {
+			requireLocalCancellationW8(t, part)
+		}
+	} else if wrapped := errors.Unwrap(err); wrapped != nil {
+		requireLocalCancellationW8(t, wrapped)
+	} else if !errors.Is(err, context.Canceled) {
+		t.Fatalf("local controller shutdown: %v", err)
+	}
+}
+
+type nativeLocalStateW8 struct {
+	wingd.FuncRunStore
+	done <-chan struct{}
+	stop context.CancelFunc
+}
+
+func (*nativeLocalStateW8) TypeSafeAPIKey(context.Context) (string, error) { return "", nil }
+
+func (*nativeLocalStateW8) Reconcile(context.Context, store.SingletonLease) (wingd.LocalActivity, error) {
+	return wingd.LocalActivity{Runs: 1, QueuedTriggers: 1}, nil
+}
+
+func (s *nativeLocalStateW8) Watch(ctx context.Context, report func(wingd.LocalActivity) error) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.done:
+		defer s.stop()
+		return report(wingd.LocalActivity{})
 	}
 }
 

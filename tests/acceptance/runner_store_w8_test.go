@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -99,6 +100,11 @@ func newStoredRunnerW8(t *testing.T, kind capability.UnitKind) (*controller.Engi
 			t.Error(err)
 		}
 	})
+	return seedStoredRunnerW8(t, s, kind)
+}
+
+func seedStoredRunnerW8(t *testing.T, s *store.Store, kind capability.UnitKind) (*controller.EngineController, capability.Issued) {
+	t.Helper()
 	s.SetProvisionPolicy(runnerStorePolicyW8{})
 	s.SetClaimProfileResolver(runnerStorePolicyW8{})
 	operator, err := s.ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionBootstrap, RegistrationID: "runner-store-fixture", Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.OperatorTokens}})
@@ -113,6 +119,8 @@ func newStoredRunnerW8(t *testing.T, kind capability.UnitKind) (*controller.Engi
 	unit := runnerAuthorityAwardW8(capability.UnitNode)
 	unit.Request.Request.Team = string(store.DefaultTeam)
 	unit.Request.Request.Git.Repository.Key = "gh:1"
+	unit.Request.Request.Git.SHA = strings.Repeat("a", 40)
+	unit.Request.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://github.com/team/repo.git", PipelineDir: ".sparkwing"}
 	unit.Request.Hash = "request"
 	unit.Accepted.Spec.Request = unit.Request
 	unit.Accepted.Spec.Hash = "spec"

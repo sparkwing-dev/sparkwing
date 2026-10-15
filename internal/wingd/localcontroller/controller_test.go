@@ -10,6 +10,7 @@ import (
 	"testing"
 	"testing/synctest"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -37,15 +38,22 @@ func (s *stateFixture) Watch(ctx context.Context, report func(wingd.LocalActivit
 	return nil
 }
 
-type queueFunc func(context.Context) error
+type runnerPolicy func(context.Context, string) error
 
-func (q queueFunc) Run(ctx context.Context) error { return q(ctx) }
+func (p runnerPolicy) CheckRunner(ctx context.Context, version string) error { return p(ctx, version) }
 
-func serviceFixture() Services {
+func serviceFixture(b Binding) Services {
+	b.Controller.RunnerPolicy = runnerPolicy(func(context.Context, string) error { return nil })
 	return Services{
 		State: &stateFixture{},
 		HTTP:  wingd.LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.NotFoundHandler()},
-		Queue: queueFunc(func(ctx context.Context) error { <-ctx.Done(); return nil }),
+		Runner: runners.StoreRunnerConfig{
+			Loop:   runners.LoopConfig{Version: "v0.71.0", MaxConcurrent: 1},
+			Bearer: func(ctx context.Context) (string, error) { <-ctx.Done(); return "", ctx.Err() },
+			Bind: func(context.Context, runners.StoreBinding) (runners.NativeServices, error) {
+				return runners.NativeServices{}, errors.New("unexpected host")
+			},
+		},
 	}
 }
 
@@ -91,7 +99,7 @@ func TestCompositionUsesOneStoreAndRecoversBeforeReadiness(t *testing.T) {
 		}
 		seedOwner(t, b, "unstarted", false)
 		seedOwner(t, b, "started", true)
-		services := serviceFixture()
+		services := serviceFixture(b)
 		services.State.(*stateFixture).reconcile = func(ctx context.Context, lease store.SingletonLease) (wingd.LocalActivity, error) {
 			if lease.Name != "controller.reaper" || lease.Generation < 1 {
 				return wingd.LocalActivity{}, errors.New("projection did not receive the elected fence")
@@ -142,7 +150,7 @@ func TestCompositionUsesOneStoreAndRecoversBeforeReadiness(t *testing.T) {
 }
 
 func TestCompositionCleansPartialBindings(t *testing.T) {
-	for _, mode := range []string{"bind_error", "cancelled", "incomplete"} {
+	for _, mode := range []string{"bind_error", "cancelled", "incomplete", "runner", "policy", "foreign_store"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
@@ -151,7 +159,7 @@ func TestCompositionCleansPartialBindings(t *testing.T) {
 			var closed int
 			_, err := (Config{Bind: func(_ context.Context, b Binding) (Services, error) {
 				owned = b.Store
-				services := serviceFixture()
+				services := serviceFixture(b)
 				services.Close = func() error {
 					closed++
 					return errors.Join(closeFailure, b.Store.DB().PingContext(t.Context()))
@@ -163,6 +171,12 @@ func TestCompositionCleansPartialBindings(t *testing.T) {
 					cancel()
 				case "incomplete":
 					services.HTTP.API = nil
+				case "runner":
+					services.Runner.Bind = nil
+				case "policy":
+					b.Controller.RunnerPolicy = nil
+				case "foreign_store":
+					b.Controller.Store = nil
 				}
 				return services, nil
 			}}).Open(ctx, t.TempDir())
@@ -182,14 +196,14 @@ func TestCompositionJoinsQueueAndActivityBeforeStoreClose(t *testing.T) {
 		started, release, joined := make(chan struct{}), make(chan struct{}), make(chan struct{})
 		var closeCount atomic.Int32
 		c := openFixture(t, func(_ context.Context, b Binding) (Services, error) {
-			services := serviceFixture()
-			services.Queue = queueFunc(func(ctx context.Context) error {
+			services := serviceFixture(b)
+			services.Runner.Bearer = func(ctx context.Context) (string, error) {
 				close(started)
 				<-ctx.Done()
 				<-release
 				defer close(joined)
-				return b.Store.DB().PingContext(t.Context())
-			})
+				return "", errors.Join(ctx.Err(), b.Store.DB().PingContext(t.Context()))
+			}
 			services.State.(*stateFixture).watch = func(ctx context.Context, report func(wingd.LocalActivity) error) error {
 				<-started
 				if err := report(wingd.LocalActivity{Runs: 1}); err != nil {
@@ -235,8 +249,8 @@ func FuzzLocalReconciliationKeepsFence(f *testing.F) {
 	f.Fuzz(func(t *testing.T, expire bool, replacement uint8) {
 		var queued atomic.Bool
 		c := openFixture(t, func(_ context.Context, b Binding) (Services, error) {
-			services := serviceFixture()
-			services.Queue = queueFunc(func(context.Context) error { queued.Store(true); return nil })
+			services := serviceFixture(b)
+			services.Runner.Bearer = func(context.Context) (string, error) { queued.Store(true); return "", errors.New("unexpected claim") }
 			services.State.(*stateFixture).reconcile = func(ctx context.Context, _ store.SingletonLease) (wingd.LocalActivity, error) {
 				var err error
 				if expire {
