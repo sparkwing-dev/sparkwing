@@ -11,6 +11,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -239,34 +240,20 @@ func (s *Server) identityLinkFinish(ctx context.Context, p *Principal, name stri
 	return nil
 }
 
-func (s *Server) handleIdentityUnlink(w http.ResponseWriter, r *http.Request) {
-	p, ok := accountPrincipal(w, r)
-	if !ok {
-		return
-	}
+func (s *Server) handleIdentityUnlink(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	name := r.PathValue("provider")
 	if _, known := providerLabels[name]; !known {
-		writeError(w, http.StatusNotFound, errors.New("no sign-in provider by that name"))
-		return
+		return &apierr.Error{Code: apierr.NotFound, Message: "sign-in provider not found"}
 	}
-	if refusal := s.recentSignIn(p, name); refusal != nil {
-		s.refuseIdentityChange(w, p, refusal)
-		return
+	writer, err := s.accountWriter()
+	if err != nil {
+		return err
 	}
-	gone, ended, err := s.store.UnlinkIdentity(r.Context(), p.AccountID, name, p.session, time.Now())
-	switch {
-	case errors.Is(err, store.ErrNotFound):
-		writeError(w, http.StatusNotFound, errors.New("this account has no "+providerLabels[name]+" sign-in"))
-		return
-	case errors.Is(err, store.ErrLastSignInMethod):
-		s.refuseIdentityChange(w, p, s.identityChangeRefusal(p, http.StatusConflict, "last_sign_in_method", name,
-			"this is the account's only sign-in method; link another before unlinking it"))
-		return
-	case err != nil:
-		s.writeInternalError(w, r, "unlink identity", err)
-		return
+	ended, err := writer.UnlinkAccountIdentity(r.Context(), a, name)
+	if err != nil {
+		return accountMutationError(err)
 	}
-	s.logger.Info("identity.unlinked", "account", p.AccountID, "provider", name, "subject", gone.Subject,
-		"sessions_ended", ended)
+	s.logger.Info("identity.unlinked", "account", a.Principal.Capability.Subject.ID, "provider", name, "sessions_ended", ended)
 	w.WriteHeader(http.StatusNoContent)
+	return nil
 }

@@ -76,6 +76,24 @@ for Git and Install. Resolve the pin after acquisition, then call the selected
 engine's InstallSDK. Accepted executions Ensure the sealed engine identity before
 reconstruction. Host-version binaries and ambient runner identity are not substitutes.
 
+W8's `runners.NodePreparation` constructs accepted executor input and acquires
+source under `Hosting`'s keeper. Its default acquisition calls `source.ForExecution`
+and `source.Acquire`. It preserves the cleanup returned with partial acquisition.
+Bound host services supply the job hash, delegated routes, storage and replay.
+The node-input constructor captures accepted seals, job settings, engine,
+runner and claim identity before renewal or preparation. It owns their projection
+for every preparation path and copies nested mutable settings. The preparer
+acquires the accepted source and uses that constructor. `NewManagedRunner` composes one claim
+client and award clients over the same HTTP transport with separate bearers.
+Concrete shared host constructors and run/plan/eval execution identities remain
+with W3.
+
+For trigger and here awards, Hosting constructs RunInput's run ID, first seal
+and accepted second seal before renewal or preparation. Prepared host services
+supply storage, authority, engine resolution and plan caching. They cannot
+replace the awarded seals or add an accepted plan to a new run. Trigger and node
+preparation share the accepted-plan projection.
+
 Reconciliation supports MaterializeOnly: an authorized cache/retry hit is committed,
 while a miss returns Dispatch without stealing remote execution. Private execution
 responses preserve declaration bytes/hash, settings, retries, fences, cancellation

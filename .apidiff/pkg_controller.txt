@@ -7,6 +7,12 @@ type AccountReader interface {
 	AccountIdentities(context.Context, string) ([]store.Identity, error)
 	TeamDeletionsRequestedBy(context.Context, string) ([]store.TeamDeletion, error)
 }
+type AccountWriter interface {
+	SelectAccountTeam(context.Context, capability.Authorized, store.Team) error
+	CreateAccountTeam(context.Context, capability.Authorized, store.TeamInfo) (store.TeamInfo, error)
+	AcceptAccountInvitation(context.Context, capability.Authorized, string) (store.InvitationAcceptance, error)
+	UnlinkAccountIdentity(context.Context, capability.Authorized, string) (int64, error)
+}
 type Agent struct {
 	Name          string
 	Type          string
@@ -452,6 +458,7 @@ func (s *Server) RegisteredRoute(r *http.Request) bool
 func (s *Server) Shutdown(ctx context.Context) error
 func (s *Server) SignUpFreeTier(ctx context.Context) (FreeTierState, error)
 func (s *Server) WithAccountReader(reader AccountReader) *Server
+func (s *Server) WithAccountWriter(writer AccountWriter) *Server
 func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server
 func (s *Server) WithAuthenticator(a *Authenticator) *Server
 func (s *Server) WithAuthorization(authorization RouteAuthorization) *Server

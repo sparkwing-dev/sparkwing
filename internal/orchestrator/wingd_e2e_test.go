@@ -55,12 +55,28 @@ func startWingdCfg(t *testing.T, cfg wingd.Config) {
 		cfg.StoreSchemaVersion = store.ExpectedSchemaVersion()
 	}
 	if cfg.Runs == nil {
-		runs, err := NewHeldRunStore(cfg.Home)
-		if err != nil {
-			t.Fatalf("held run store: %v", err)
+		_, st, _ := openWingdBackends(t, cfg.Home)
+		ctx := context.WithoutCancel(t.Context())
+		cfg.Runs = &wingd.FuncRunStore{
+			IsTerminal: func(id string) (bool, error) {
+				run, err := st.GetRun(ctx, id)
+				if errors.Is(err, store.ErrNotFound) {
+					return false, nil
+				}
+				if err != nil {
+					return false, err
+				}
+				return isTerminalStatus(run.Status), nil
+			},
+			Finalize: func(id string) {
+				if err := st.FinishRunsIfActive(ctx, []string{id}, "cancelled", "admission connection lost"); err != nil {
+					t.Errorf("finalize run: %v", err)
+				}
+			},
+			FinalizeCancelled: func(ids []string, reason string) error {
+				return st.FinishRunsIfActive(ctx, ids, "cancelled", reason)
+			},
 		}
-		t.Cleanup(func() { _ = runs.Close() })
-		cfg.Runs = runs
 	}
 	d, err := wingd.New(cfg)
 	if err != nil {

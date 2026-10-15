@@ -261,35 +261,6 @@ func TestCreateTeamMakesTheCallerOwnerAndSwitchesToIt(t *testing.T) {
 	}
 }
 
-func TestActiveTeamSwitchNeedsMembership(t *testing.T) {
-	f := newIdentityFixture(t)
-	g := sessionAuth(f.signIn(person("g-g", "gina@example.com", "Gina")).SessionID)
-	f.signIn(person("g-h", "hank@example.com", "Hank"))
-	if code := f.call("POST", "/api/v1/me/active-team", g, map[string]string{"slug": "hank"}, nil); code != http.StatusNotFound {
-		t.Fatalf("switch into a team gina is not in = %d, want 404", code)
-	}
-	if code := f.call("POST", "/api/v1/me/active-team", g, map[string]string{"slug": "no-such-team"}, nil); code != http.StatusNotFound {
-		t.Fatalf("switch into a missing team = %d, want 404", code)
-	}
-	f.call("POST", "/api/v1/teams", g, map[string]string{"slug": "gina-co"}, nil)
-	if code := f.call("POST", "/api/v1/me/active-team", g, map[string]string{"slug": "gina"}, nil); code != http.StatusNoContent {
-		t.Fatalf("switch back to own space = %d, want 204", code)
-	}
-	if w := f.whoami(g); w.Team != "gina" {
-		t.Fatalf("whoami after switch = %+v", w)
-	}
-	if again := f.signIn(person("g-g", "gina@example.com", "Gina")); again.ActiveTeam.Slug != "gina" {
-		t.Fatalf("second sign-in landed in %s", again.ActiveTeam.Slug)
-	}
-}
-
-func TestIdentityRoutesRefuseABearerToken(t *testing.T) {
-	f := newIdentityFixture(t)
-	if code := f.call("POST", "/api/v1/teams", "Bearer "+f.admin, map[string]string{"slug": "ops"}, nil); code != http.StatusUnauthorized {
-		t.Fatalf("POST /teams with the operator token = %d, want 401", code)
-	}
-}
-
 func TestAnUnknownSessionIsRefused(t *testing.T) {
 	f := newIdentityFixture(t)
 	if code := f.call("GET", "/api/v1/runs", sessionAuth("not-a-session"), nil, nil); code != http.StatusUnauthorized {

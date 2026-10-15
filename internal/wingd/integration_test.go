@@ -652,7 +652,7 @@ func openRawQueuedAdmission(t *testing.T, home string, req wingwire.AdmissionReq
 	if err != nil {
 		t.Fatalf("socket path: %v", err)
 	}
-	nc, err := net.Dial("unix", sock)
+	nc, err := wingd.DialSocket(context.Background(), sock, 3*time.Second)
 	if err != nil {
 		t.Fatalf("dial daemon: %v", err)
 	}
@@ -815,7 +815,7 @@ func TestExplicitCancelStateWriteFailureStillSignalsOwnerWithoutAcknowledging(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	control, err := net.Dial("unix", sock)
+	control, err := wingd.DialSocket(context.Background(), sock, 3*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -860,7 +860,7 @@ func TestCancelledLeaseCannotReattachAfterStateWriteFailureAndRestart(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	control, err := net.Dial("unix", sock)
+	control, err := wingd.DialSocket(context.Background(), sock, 3*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,5 +1,162 @@
 # Migrating to the next release
 
+## Node state writes use transitions
+
+`SetNodeStatus` and `RevokeNodeReady` on Store, Tenant and Client are removed.
+The per-node `status` and `revoke-ready` HTTP endpoints are removed with them.
+Use `Tenant.TransitionNode` for lifecycle changes. Queue withdrawal supplies
+`To: NodePending`, `Cause: CauseRevoke` and the current run owner's authority.
+Only ready, unclaimed jobs can be withdrawn. A competing claim or stale owner
+returns an error without changing state or events. An identical committed
+transition replays.
+
+Debug pauses write `paused` to activity detail and clear it on resume.
+They preserve the job's lifecycle status, start timestamp and claim.
+
+## Owner leases replace run heartbeats
+
+`TouchRunHeartbeat` and `TouchNodeHeartbeat` on Store, Tenant and Client, plus
+`Run.LastHeartbeatAt`, are removed. Hosts use `Store.RenewUnit` or
+`Tenant.RenewOwner` with their current owner authority. Owner renewal also
+renews self-claimed jobs. A remotely renewed job
+cannot extend the owner's lease.
+
+Doctor no longer finalizes runs from heartbeat age or reports `orphaned_runs`.
+The controller's elected `ReapUnits` pass recovers expired owners under the
+store clock. Started local orphans fail in place. Unstarted owners requeue.
+The legacy run-heartbeat and node-touch HTTP handlers are removed. The old
+Kubernetes dispatcher no longer sends advisory heartbeat writes for its pods.
+The pod's own claim renewal supplies its liveness timestamp.
+
+## Plan acceptance uses tenant seals
+
+`Store.AcceptPlan`, its legacy plan validator and `Client.SubmitPlan` are removed.
+Use `Tenant.AcceptPlan` with `PlanAcceptance`, including the admitted request,
+checkout declarations, resolved settings and the v2 `jobs` document. The store
+reruns the shared validator and settings resolver before committing both the
+second seal and jobs. Identical submissions replay. Changed sealed input returns
+`spec_drift`. The controller's legacy claim-token plan-acceptance branch and the
+old launched planner are removed.
+
+Missing required secrets return canonical `plan_invalid`. The detailed refusal
+is saved once for run status, after the failed acceptance rolls back, under the
+current owner fence and store clock. No seal or job is committed by that refusal.
+
+## Unit claims reserve compute credit
+
+Metered `Store.ClaimUnit` awards commit a refundable compute reservation with
+the claim. The award retains its CPU class, rate and payer after settings change
+or bootstrap exchange. Unfunded queued work leaves funded matches eligible.
+The shared billing calculator is required for renewal and final settlement.
+
+## Offer-round fallback is removed
+
+The warm dispatcher, its factory and the `finalize-ready` endpoint are removed.
+`Store.FinalizeClaimRound`, `ClaimRoundResult`, `WithQueueRunners` and
+`Client.FinalizeNodeReady` are removed with them. Use `Store.ClaimUnit` for queued
+or named claims and `Tenant.ReconcileNode` for owner execution decisions.
+Eligible work can be claimed immediately. Soft preferences rank eligible work.
+A mismatch leaves the ready row and its queue position unchanged.
+
+## Concurrency maintenance requires the operator fence
+
+`Store.MaintainConcurrency` and the `store.Maintenance` registry are removed.
+Acquire `controller.reaper` through `Operator.AcquireSingletonLease` and pass that
+fence to `Operator.MaintainConcurrency(ctx, lease, options)`. The pass commits
+holder cleanup, waiter cleanup and promotion together. An error returns no
+committed counts. The old concurrency-cache sweep and count APIs are removed.
+Memo-record retention uses `Operator.MaintainRetention` under its maintenance
+lease. `Store.PurgeDeadLocalConcurrency` and `Store.CountDeadLocalConcurrency`
+are removed. The elected pass cleans terminal capacity in every scope. Doctor's
+`dead_concurrency_holders` and `dead_concurrency_waiters` fields are removed with
+its independent repair path.
+
+## Egress accounting uses tenant and replica counters
+
+`Store.RecordEgressUsage`, `Store.ListEgressUsage` and `Store.PruneEgressUsage`
+are removed. Write additive bytes with `Tenant.AddUsage` using `egress_bytes`,
+a UTC day and the controller's trusted replica ID. Read day or month totals with
+`Tenant.EgressUsage`. Deployment reports use `Operator.EgressUsageAcrossTeams`.
+Pruning uses `Operator.PruneEgressUsage` with the maintenance lease.
+
+The controller records delivered successful-response bytes at request completion,
+including partial transfers and reads served without an in-memory meter. Logs
+consume egress while remaining exempt from download caps. Alarm reload uses team
+totals. A failed counter write emits an error. A controller crash before request
+completion can lose that request's egress sample. Thirteen months of reports stay
+available. There is no principal-based persistence or periodic flush.
+
+## Event charges use tenant handles and replica identity
+
+`Store.AppendEventCharged` is removed. Obtain a tenant with `Store.ForTeam`,
+then call `Tenant.AppendEventCharged(ctx, replicaID, runID, nodeID, kind, payload)`.
+The replica ID is the controller's trusted identity. The caller no longer
+selects a charged principal. The tenant supplies the team and the store owns time.
+
+Event writes, retained run counters, shared storage quotas and replica usage
+commit together. Pending uploads and events share monthly and run byte capacity.
+Events consume no object capacity. Usage is recorded without a configured quota.
+The existing event limits and free-tier policy keep their meaning. The HTTP
+request and response shapes stay the same.
+
+## Download charges use tenant handles and replica identity
+
+`Store.ChargeDownload` is removed. Obtain a tenant with `Store.ForTeam`, then
+call `Tenant.ChargeDownload`. `DownloadCharge.ReplicaID` identifies the trusted
+controller replica. The request no longer accepts `Team` or `Now`. The store
+selects the current UTC day under its shared quota lock.
+
+Admission and replica usage commit together. Free and funded caps keep their
+existing behavior, including finishing the download that crosses the cap and
+recording already delivered bytes. Logs stay exempt. Controller integrations
+use their existing lease-holder identity and require no new configuration.
+
+## Paid credit requires verified checkout settlement
+
+`POST /api/v1/credits/grants` is removed. `Tenant.GrantCredits` and
+`Tenant.RecordCreditGrant` refuse `paid` grants.
+Free operator grants keep their console path. Payment reversals require a
+verified provider event.
+
+Checkout integrations must supply C2's verified provider event to
+`Store.SettlePayment`. The committed checkout supplies the team and credit
+amount. The event must match its session, payment, amount, currency and test/live
+mode. Actionable fraud warnings refuse settlement before any credit or event
+receipt commits. Replayed events grant once. Provider verification and its
+controller adapter remain integration work.
+
+## Storage counters use verified upload tickets
+
+The `/internal/storage/reserve`, `/internal/storage/commit`,
+`/internal/storage/release` and `/internal/downloads/charge` endpoints are removed.
+Remove cache `controller-token` credentials and service-counter integrations.
+`Store.RenewStorage` and its rolling block receipts are removed.
+
+The final storage adapter reserves quota with `Tenant.ReserveBlobUpload`, verifies
+physical bytes, then commits with `Tenant.CommitBlobUpload`. Signing or transfer
+failure uses `Tenant.AbortBlobUpload`. The ticket binds the exact uploader and
+retains immutable replay state. The signed-data controller adapter remains an
+integration dependency. There is no service-token fallback.
+
+`SetFreeTeamSlots` writes the final settings table and refuses sealed values.
+Its slot count and signup behavior keep their existing meaning.
+
+## Storage maintenance uses committed inventory
+
+Remove `Server.WithStoragePass` and `Server.RunStoragePass` calls. The controller's
+existing maintenance timer runs leased retention, tagged-log sealing and storage
+billing. An embedding that serves `Handler` directly calls `Server.MaintainStorage`.
+`StoragePassEvery` is removed. `StorageMaintenanceInterval` names the timer period.
+
+`Store.StorageMarks`, `ReconcileStorage`, `TeamsOverFreeLogShare`,
+`PrunableNodeLogs`, `PruneStorageCommitReceipts` and `PruneDownloadDays` are removed.
+Use `Tenant.StorageRetainedBytes` for retained inventory and `Tenant.StorageUsageFor`
+for summed replica usage. `Operator.ChargeRetainedStorage` and `MaintainRetention`
+require the current maintenance lease. Bucket listings no longer replace usage
+counters. Log retention follows the run's persisted class. Allowance-driven
+physical eviction still requires the final storage adapter.
+
+
 ## OAuth browser callbacks
 
 OAuth start and callback use the shared route policy and browser-flow verifier.
@@ -314,161 +471,6 @@ the run's local publication authority. Caller-supplied holder and generation
 headers grant no authority. Step finish accepts `passed`, `failed` and
 `cancelled`, plus an optional inner error with a code and masked message.
 Annotations and summaries accept at most 128 KiB of masked text.
-
-## Node state writes use transitions
-
-`SetNodeStatus` and `RevokeNodeReady` on Store, Tenant and Client are removed.
-The per-node `status` and `revoke-ready` HTTP endpoints are removed with them.
-Use `Tenant.TransitionNode` for lifecycle changes. Queue withdrawal supplies
-`To: NodePending`, `Cause: CauseRevoke` and the current run owner's authority.
-Only ready, unclaimed jobs can be withdrawn. A competing claim or stale owner
-returns an error without changing state or events. An identical committed
-transition replays.
-
-Debug pauses write `paused` to activity detail and clear it on resume.
-They preserve the job's lifecycle status, start timestamp and claim.
-
-## Owner leases replace run heartbeats
-
-`TouchRunHeartbeat` and `TouchNodeHeartbeat` on Store, Tenant and Client, plus
-`Run.LastHeartbeatAt`, are removed. Hosts use `Store.RenewUnit` or
-`Tenant.RenewOwner` with their current owner authority. Owner renewal also
-renews self-claimed jobs. A remotely renewed job
-cannot extend the owner's lease.
-
-Doctor no longer finalizes runs from heartbeat age or reports `orphaned_runs`.
-The controller's elected `ReapUnits` pass recovers expired owners under the
-store clock. Started local orphans fail in place. Unstarted owners requeue.
-The legacy run-heartbeat and node-touch HTTP handlers are removed. The old
-Kubernetes dispatcher no longer sends advisory heartbeat writes for its pods.
-The pod's own claim renewal supplies its liveness timestamp.
-
-## Plan acceptance uses tenant seals
-
-`Store.AcceptPlan`, its legacy plan validator and `Client.SubmitPlan` are removed.
-Use `Tenant.AcceptPlan` with `PlanAcceptance`, including the admitted request,
-checkout declarations, resolved settings and the v2 `jobs` document. The store
-reruns the shared validator and settings resolver before committing both the
-second seal and jobs. Identical submissions replay. Changed sealed input returns
-`spec_drift`. The controller's legacy claim-token plan-acceptance branch and the
-old launched planner are removed.
-
-Missing required secrets return canonical `plan_invalid`. The detailed refusal
-is saved once for run status, after the failed acceptance rolls back, under the
-current owner fence and store clock. No seal or job is committed by that refusal.
-
-## Unit claims reserve compute credit
-
-Metered `Store.ClaimUnit` awards commit a refundable compute reservation with
-the claim. The award retains its CPU class, rate and payer after settings change
-or bootstrap exchange. Unfunded queued work leaves funded matches eligible.
-The shared billing calculator is required for renewal and final settlement.
-
-## Offer-round fallback is removed
-
-The warm dispatcher, its factory and the `finalize-ready` endpoint are removed.
-`Store.FinalizeClaimRound`, `ClaimRoundResult`, `WithQueueRunners` and
-`Client.FinalizeNodeReady` are removed with them. Use `Store.ClaimUnit` for queued
-or named claims and `Tenant.ReconcileNode` for owner execution decisions.
-Eligible work can be claimed immediately. Soft preferences rank eligible work.
-A mismatch leaves the ready row and its queue position unchanged.
-
-## Concurrency maintenance requires the operator fence
-
-`Store.MaintainConcurrency` and the `store.Maintenance` registry are removed.
-Acquire `controller.reaper` through `Operator.AcquireSingletonLease` and pass that
-fence to `Operator.MaintainConcurrency(ctx, lease, options)`. The pass commits
-holder cleanup, waiter cleanup and promotion together. An error returns no
-committed counts. The old concurrency-cache sweep and count APIs are removed.
-Memo-record retention uses `Operator.MaintainRetention` under its maintenance
-lease. `Store.PurgeDeadLocalConcurrency` and `Store.CountDeadLocalConcurrency`
-are removed. The elected pass cleans terminal capacity in every scope. Doctor's
-`dead_concurrency_holders` and `dead_concurrency_waiters` fields are removed with
-its independent repair path.
-
-## Egress accounting uses tenant and replica counters
-
-`Store.RecordEgressUsage`, `Store.ListEgressUsage` and `Store.PruneEgressUsage`
-are removed. Write additive bytes with `Tenant.AddUsage` using `egress_bytes`,
-a UTC day and the controller's trusted replica ID. Read day or month totals with
-`Tenant.EgressUsage`. Deployment reports use `Operator.EgressUsageAcrossTeams`.
-Pruning uses `Operator.PruneEgressUsage` with the maintenance lease.
-
-The controller records delivered successful-response bytes at request completion,
-including partial transfers and reads served without an in-memory meter. Logs
-consume egress while remaining exempt from download caps. Alarm reload uses team
-totals. A failed counter write emits an error. A controller crash before request
-completion can lose that request's egress sample. Thirteen months of reports stay
-available. There is no principal-based persistence or periodic flush.
-
-## Event charges use tenant handles and replica identity
-
-`Store.AppendEventCharged` is removed. Obtain a tenant with `Store.ForTeam`,
-then call `Tenant.AppendEventCharged(ctx, replicaID, runID, nodeID, kind, payload)`.
-The replica ID is the controller's trusted identity. The caller no longer
-selects a charged principal. The tenant supplies the team and the store owns time.
-
-Event writes, retained run counters, shared storage quotas and replica usage
-commit together. Pending uploads and events share monthly and run byte capacity.
-Events consume no object capacity. Usage is recorded without a configured quota.
-The existing event limits and free-tier policy keep their meaning. The HTTP
-request and response shapes stay the same.
-
-## Download charges use tenant handles and replica identity
-
-`Store.ChargeDownload` is removed. Obtain a tenant with `Store.ForTeam`, then
-call `Tenant.ChargeDownload`. `DownloadCharge.ReplicaID` identifies the trusted
-controller replica. The request no longer accepts `Team` or `Now`. The store
-selects the current UTC day under its shared quota lock.
-
-Admission and replica usage commit together. Free and funded caps keep their
-existing behavior, including finishing the download that crosses the cap and
-recording already delivered bytes. Logs stay exempt. Controller integrations
-use their existing lease-holder identity and require no new configuration.
-
-## Paid credit requires verified checkout settlement
-
-`POST /api/v1/credits/grants` is removed. `Tenant.GrantCredits` and
-`Tenant.RecordCreditGrant` refuse `paid` grants.
-Free operator grants and payment-linked reversals keep their existing paths.
-
-Checkout integrations must supply C2's verified provider event to
-`Store.SettlePayment`. The committed checkout supplies the team and credit
-amount. The event must match its session, payment, amount, currency and test/live
-mode. Actionable fraud warnings refuse settlement before any credit or event
-receipt commits. Replayed events grant once. Provider verification and its
-controller adapter remain integration work.
-
-## Storage counters use verified upload tickets
-
-The `/internal/storage/reserve`, `/internal/storage/commit`,
-`/internal/storage/release` and `/internal/downloads/charge` endpoints are removed.
-Remove cache `controller-token` credentials and service-counter integrations.
-`Store.RenewStorage` and its rolling block receipts are removed.
-
-The final storage adapter reserves quota with `Tenant.ReserveBlobUpload`, verifies
-physical bytes, then commits with `Tenant.CommitBlobUpload`. Signing or transfer
-failure uses `Tenant.AbortBlobUpload`. The ticket binds the exact uploader and
-retains immutable replay state. The signed-data controller adapter remains an
-integration dependency. There is no service-token fallback.
-
-`SetFreeTeamSlots` writes the final settings table and refuses sealed values.
-Its slot count and signup behavior keep their existing meaning.
-
-## Storage maintenance uses committed inventory
-
-Remove `Server.WithStoragePass` and `Server.RunStoragePass` calls. The controller's
-existing maintenance timer runs leased retention, tagged-log sealing and storage
-billing. An embedding that serves `Handler` directly calls `Server.MaintainStorage`.
-`StoragePassEvery` is removed. `StorageMaintenanceInterval` names the timer period.
-
-`Store.StorageMarks`, `ReconcileStorage`, `TeamsOverFreeLogShare`,
-`PrunableNodeLogs`, `PruneStorageCommitReceipts` and `PruneDownloadDays` are removed.
-Use `Tenant.StorageRetainedBytes` for retained inventory and `Tenant.StorageUsageFor`
-for summed replica usage. `Operator.ChargeRetainedStorage` and `MaintainRetention`
-require the current maintenance lease. Bucket listings no longer replace usage
-counters. Log retention follows the run's persisted class. Allowance-driven
-physical eviction still requires the final storage adapter.
 
 ## Unit recovery requires the elected reaper lease
 
@@ -1202,6 +1204,33 @@ script that called the binary directly moves to the CLI:
 describe, instead of the per-field Go names and resolution notes the binary
 printed.
 
+## Storage standing uses retained inventory
+
+Use `Store.ForTeam(ctx, team)` followed by `Tenant.StorageStanding(ctx)` for
+the team's storage report. The snapshot returns retained event, blob and log
+bytes plus live blob-upload reservation bytes. Historical usage counters remain
+financial records and do not determine retained storage. Deleting a run releases
+its retained event bytes without a repair call.
+
+`Store.StorageStandingFor`, `Store.TeamStorage`, `TeamStorageUsage` and
+`Store.ReconcileFreeEventBytes` are removed. The pre-launch schema also removes
+the duplicate `free_slots.event_bytes` column. Rebuild the disposable store.
+
+`Store.ReleaseExpiredStorage` is removed. Final upload reservations expire
+through quota admission and leased blob maintenance. An expired upload ticket
+cannot commit, including a zero-byte ticket.
+
+## Credit persistence uses explicit handles
+
+Deployment billing settings now use `store.AsOperator()`. This includes
+`CreditSettings`, `SetCreditSettings`, `SetOperatorCreditSettings`,
+`CreditRateTable` and `WarmCPUClassCores`. Their raw Store methods are removed.
+The settings, validation and update rules are unchanged.
+
+`Store.GrantCredits`, `Store.ListCreditCharges` and `Store.AppendEventOnce` are
+removed. Select the intended team with `ForTeam` and call its Tenant method.
+Local callers that mean the default team must select `store.DefaultTeam`.
+
 ## Console authorization
 
 Account deletion, team deletion, GitHub App installation unbinding, orphan
@@ -1273,33 +1302,6 @@ existing `WithCredentialIssuer` and C1 `ProvisionPolicy` transaction boundary.
 Missing origin policy refuses with `unavailable`. Production enrollment and
 console-origin persistence must be provided before enabling those flows.
 
-## Storage standing uses retained inventory
-
-Use `Store.ForTeam(ctx, team)` followed by `Tenant.StorageStanding(ctx)` for
-the team's storage report. The snapshot returns retained event, blob and log
-bytes plus live blob-upload reservation bytes. Historical usage counters remain
-financial records and do not determine retained storage. Deleting a run releases
-its retained event bytes without a repair call.
-
-`Store.StorageStandingFor`, `Store.TeamStorage`, `TeamStorageUsage` and
-`Store.ReconcileFreeEventBytes` are removed. The pre-launch schema also removes
-the duplicate `free_slots.event_bytes` column. Rebuild the disposable store.
-
-`Store.ReleaseExpiredStorage` is removed. Final upload reservations expire
-through quota admission and leased blob maintenance. An expired upload ticket
-cannot commit, including a zero-byte ticket.
-
-## Credit persistence uses explicit handles
-
-Deployment billing settings now use `store.AsOperator()`. This includes
-`CreditSettings`, `SetCreditSettings`, `SetOperatorCreditSettings`,
-`CreditRateTable` and `WarmCPUClassCores`. Their raw Store methods are removed.
-The settings, validation and update rules are unchanged.
-
-`Store.GrantCredits`, `Store.ListCreditCharges` and `Store.AppendEventOnce` are
-removed. Select the intended team with `ForTeam` and call its Tenant method.
-Local callers that mean the default team must select `store.DefaultTeam`.
-
 ## Account discovery authorization
 
 The three account discovery reads under `/api/v1/me` require a live account
@@ -1317,3 +1319,17 @@ route authorization before constructing an embedded controller's handler.
 check. Use `DELETE /api/v1/operator/accounts/{account}` from an operator-console
 session with CSRF proof. A member session or deployment bearer cannot delete an
 account. The existing last-owner and financial refusals still apply.
+
+## Account mutations use session policy
+
+Active-team selection, team creation, invitation acceptance and identity
+unlinking use the shared account-session policy. Cookie and Session-header
+mutations require session-bound CSRF and same-origin proof. These calls no
+longer renew the session. Bearer and local-peer authority cannot use them.
+Errors use the common object, and closed invitations return `conflict`.
+
+Embedded controllers supply `WithAccountWriter` with authority-bearing account
+transactions. Each operation rechecks the selected session at commit. Team
+changes commit account and session selection together. Unlinking retains the
+recent-sign-in and last-method checks. Missing transactions return
+`policy_missing`; raw account-store methods are not fallback adapters.

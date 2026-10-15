@@ -35,8 +35,10 @@ func init() {
 }
 
 func main() {
-	cleanupStaleUpdate()
-	toolchainActive = takeToolchainActive()
+	if len(os.Args) < 2 || os.Args[1] != "__sdk-install" {
+		cleanupStaleUpdate()
+		toolchainActive = takeToolchainActive()
+	}
 
 	if err := runSparkwing(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, color.Red(color.Bold("sparkwing error:")), err)
@@ -323,6 +325,9 @@ func printPin(pipelineName string) {
 }
 
 func runSparkwing(args []string) error {
+	if len(args) > 0 && args[0] == "__sdk-install" {
+		return runSDKInstall(args[1:])
+	}
 	args, err := moveRootFlags(args)
 	if err != nil {
 		return err

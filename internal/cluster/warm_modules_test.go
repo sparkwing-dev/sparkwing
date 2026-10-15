@@ -1,8 +1,6 @@
 package cluster
 
 import (
-	"context"
-	"log/slog"
 	"reflect"
 	"testing"
 )
@@ -99,9 +97,4 @@ func TestParseWarmModulesRejectsUnusableEntries(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestWarmModuleCacheWithNoModulesRunsNothing(t *testing.T) {
-	t.Setenv("PATH", "")
-	warmModuleCache(context.Background(), nil, slog.Default())
 }

@@ -758,7 +758,7 @@ func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
 		t.Fatalf("unit constants = %d/%d", state.MicroPerCredit, state.CreditsPerDollar)
 	}
 
-	if _, err := teststore.ForTeam(t, f.store, store.DefaultTeam).GrantCredits(t.Context(), store.CreditGrantPaid, 1000*store.MicroCreditsPerCent, "pay_9", "test"); err != nil {
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(t.Context(), store.CreditGrantPaid, 1000*store.MicroCreditsPerCent, "pay_9", "test"); err != nil {
 		t.Fatal(err)
 	}
 

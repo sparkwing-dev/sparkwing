@@ -10,6 +10,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
@@ -447,43 +448,24 @@ type activeTeamReq struct {
 	Slug string `json:"slug"`
 }
 
-func (s *Server) handleSetActiveTeam(w http.ResponseWriter, r *http.Request) {
-	p, ok := accountPrincipal(w, r)
-	if !ok {
-		return
-	}
+func (s *Server) handleSetActiveTeam(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	var req activeTeamReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	team := store.NormalizeTeam(store.Team(req.Slug))
-	// safety: a team the account is not in answers 404, the same as a team
-	// that does not exist, so the route does not report which slugs are taken.
-	role, err := s.memberRole(r.Context(), team, p.AccountID)
-	if err != nil {
-		s.writeInternalError(w, r, "active team", err)
-		return
-	}
-	if role == "" {
-		writeError(w, http.StatusNotFound, errors.New("no team by that slug has you as a member"))
-		return
-	}
-	if err := s.switchTeam(r.Context(), p, team); err != nil {
-		s.writeInternalError(w, r, "active team", err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) switchTeam(ctx context.Context, p *Principal, team store.Team) error {
-	if err := s.store.SetActiveTeam(ctx, p.AccountID, team, time.Now().UTC()); err != nil {
+	if err := decodeEngineRequest(r, &req); err != nil {
 		return err
 	}
-	if p.Team == team {
-		return nil
+	team := store.NormalizeTeam(store.Team(req.Slug))
+	if team == "" {
+		return invalidEngineBody("team slug is required")
 	}
-	return s.store.SwitchSessionTeam(ctx, p.session, p.AccountID, p.Team, team)
+	writer, err := s.accountWriter()
+	if err != nil {
+		return err
+	}
+	if err := writer.SelectAccountTeam(r.Context(), a, team); err != nil {
+		return accountMutationError(err)
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 type createTeamReq struct {
@@ -497,33 +479,31 @@ type teamJSON struct {
 	Role        string `json:"role"`
 }
 
-func (s *Server) handleCreateTeam(w http.ResponseWriter, r *http.Request) {
-	p, ok := accountPrincipal(w, r)
-	if !ok {
-		return
-	}
+func (s *Server) handleCreateTeam(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	if !s.MultiTeam() {
-		writeError(w, http.StatusForbidden, errors.New("this controller holds one team; creating another needs a multi-team license"))
-		return
+		return &apierr.Error{Code: apierr.Forbidden, Message: "creating a team requires a multi-team license"}
 	}
 	var req createTeamReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeEngineRequest(r, &req); err != nil {
+		return err
 	}
-	slug := store.NormalizeTeam(store.Team(req.Slug))
-	info, err := s.store.CreateTeam(r.Context(), p.AccountID, slug, req.DisplayName, time.Now().UTC())
+	team := store.NormalizeTeam(store.Team(req.Slug))
+	if err := store.ValidateSlug(string(team)); err != nil {
+		return accountMutationError(err)
+	}
+	writer, err := s.accountWriter()
 	if err != nil {
-		writeIdentityError(w, s, r, "create team", err)
-		return
+		return err
 	}
-	if p.Team != slug {
-		if err := s.store.SwitchSessionTeam(r.Context(), p.session, p.AccountID, p.Team, slug); err != nil {
-			s.writeInternalError(w, r, "create team switch", err)
-			return
-		}
+	info, err := writer.CreateAccountTeam(r.Context(), a, store.TeamInfo{Slug: team, DisplayName: req.DisplayName})
+	if err != nil {
+		return accountMutationError(err)
+	}
+	if info.Slug != team {
+		return errors.New("inconsistent created team")
 	}
 	writeJSON(w, http.StatusCreated, teamJSON{Slug: string(info.Slug), DisplayName: info.Label(), Role: string(store.RoleOwner)})
+	return nil
 }
 
 // safety: another team's row answers 404, never 403, so a member learns nothing about other teams

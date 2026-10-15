@@ -80,11 +80,6 @@ var tenantRoutes = map[string]tenantResource{
 	"POST /api/v1/gitcache/git/{path...}": resGitCache,
 	"POST /api/v1/gitcache/git/register":  resNone,
 
-	"POST /api/v1/invitations/{id}/accept": resOwnInvitation,
-
-	"POST /api/v1/me/active-team":             resNone,
-	"DELETE /api/v1/me/identities/{provider}": resOwnIdentity,
-
 	"GET /api/v1/pipelines":               resNone,
 	"GET /api/v1/pipelines/{name}/latest": resPipeline,
 
@@ -173,8 +168,6 @@ var tenantRoutes = map[string]tenantResource{
 	"GET /api/v1/team/invitations":         resNone,
 	"POST /api/v1/team/invitations":        resNone,
 	"DELETE /api/v1/team/invitations/{id}": resInvitation,
-
-	"POST /api/v1/teams": resNone,
 
 	"GET /api/v1/trends": resNone,
 

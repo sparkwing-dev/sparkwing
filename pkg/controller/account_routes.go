@@ -37,24 +37,17 @@ func (s *Server) accountReader() (AccountReader, error) {
 func (s *Server) accountEndpoints() []Endpoint {
 	return []Endpoint{
 		{Method: "GET", Pattern: "/api/v1/me", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleMe},
+		{Method: "POST", Pattern: "/api/v1/me/active-team", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleSetActiveTeam},
 		{Method: "GET", Pattern: "/api/v1/me/identities", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleIdentities},
+		{Method: "DELETE", Pattern: "/api/v1/me/identities/{provider}", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleIdentityUnlink},
 		{Method: "GET", Pattern: "/api/v1/me/team-deletions", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleMyTeamDeletions},
+		{Method: "POST", Pattern: "/api/v1/teams", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleCreateTeam},
+		{Method: "POST", Pattern: "/api/v1/invitations/{invitation}/accept", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleAcceptInvitation},
 	}
 }
 
 func (s *Server) registerAccountRoutes(mux *http.ServeMux) {
-	router := NewPolicyRouter(s.authorization)
-	for _, endpoint := range s.accountEndpoints() {
-		if err := router.Register(endpoint); err != nil {
-			mux.HandleFunc(endpoint.Method+" "+endpoint.Pattern, func(w http.ResponseWriter, _ *http.Request) { writePolicyError(w, err) })
-			continue
-		}
-		pattern := endpoint.Pattern
-		if pattern == "/api/v1/me/identities" {
-			pattern = endpoint.Method + " " + pattern
-		}
-		mux.Handle(pattern, noStore(router))
-	}
+	s.registerPolicyEndpoints(mux, s.accountEndpoints())
 }
 
 var _ AccountReader = (*store.Store)(nil)

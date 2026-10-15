@@ -2166,4 +2166,39 @@ mutate state. The last-owner conflict is ported through the real console route.
 C1 DeleteAccount still needs the final-schema transaction and authority-bearing
 commit check. No legacy token-table fallback is provided.
 
+### Account mutation cutover
+
+POST `/api/v1/me/active-team`, POST `/api/v1/teams`, POST
+`/api/v1/invitations/{invitation}/accept` and DELETE
+`/api/v1/me/identities/{provider}` use PolicyRouter's account-session policy.
+Cookie and Session-header mutations require the selected session's CSRF proof.
+They neither renew the session nor use the legacy Principal. Account, session
+and current team come from Authorized. Query and header selectors grant nothing.
+Creation normalizes and validates its slug. Team selection permits existing
+team names, including default, and requires membership at commit.
+
+C2 declares controller.AccountWriter and Server.WithAccountWriter. Its methods
+are SelectAccountTeam(ctx, Authorized, Team) error,
+CreateAccountTeam(ctx, Authorized, TeamInfo) (TeamInfo, error),
+AcceptAccountInvitation(ctx, Authorized, invitationID)
+(InvitationAcceptance, error), and UnlinkAccountIdentity(ctx, Authorized, provider)
+(sessionsEnded, error). Each transaction must reread the hashed session,
+its complete ancestry and account under the store clock. It must refuse changed
+or ended authority and derive the account from that session. Team creation and
+invitation acceptance commit the existing account/membership/admission changes,
+active team and selected session's team together. Selection checks membership
+and commits both active-team records together. Retain the existing creation
+limits, invitation email/expiry/use rules and audit facts. Unlinking retains the
+ten-minute recent-sign-in rule, protects the last sign-in method and ends the
+account's other sessions while preserving the selected session and
+GitHub App installations. Its freshness check belongs inside that transaction.
+
+The default uses Store only if it implements AccountWriter. Existing raw
+account methods do not satisfy it. Missing adapters return policy_missing.
+No old method fallback, SQL copy, new clock or schema is added. C1 must provide
+these transactions before successful production mutations are enabled. HTTP
+properties exercise real SQLite authentication and CSRF with fake transactions.
+They prove transport behavior and private errors, not atomic persistence or
+native credential matrix cells. Closed invitations use canonical conflict.
+
 <!-- design:end -->

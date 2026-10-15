@@ -22,6 +22,8 @@ unlock.
 
 ### Changed
 
+- Account mutations require the selected account session and CSRF proof through the shared authorization policy. They no longer renew sessions, and closed invitations return the common `conflict` error.
+
 - **Breaking:** Remove self-service `DELETE /api/v1/me`. Account deletion uses
   the operator console path with session-bound CSRF proof.
 
@@ -129,8 +131,6 @@ unlock.
 - **sdk:** describe lists each pipeline's declared secrets as `secrets`, which `sparkwing pipeline describe --secrets` prints
 
 ### Changed
-- **controller (Breaking):** Replace caller-selected paid grants with signed Stripe callbacks at `POST /webhooks/stripe`
-  `--payment-mode test|live` and private Stripe credentials configure verification. The callback passes verified provider facts to the settlement store. `POST /api/v1/credits/grants` and its request schema are removed. See [Buying credits](docs/auth.md#buying-credits).
 
 - **store + controller:** [(Breaking)](docs/migrations/_unreleased.md#plan-acceptance-uses-tenant-seals) removed `Store.AcceptPlan`, its legacy validator and `Client.SubmitPlan`. Use `Tenant.AcceptPlan` with both seals and a v2 plan. Required-secret refusals return `plan_invalid` and retain one fenced diagnostic for run status.
 - **store:** Unit claims reserve compute credit atomically, keep the awarded price through exchange, and pass over unfunded queued work. See [migration guide](docs/migrations/_unreleased.md#unit-claims-reserve-compute-credit).
@@ -144,6 +144,8 @@ unlock.
 - **store:** [(Breaking)](docs/migrations/_unreleased.md#download-charges-use-tenant-handles-and-replica-identity) Download charges use tenant handles, store time and additive replica accounting
   `Tenant.ChargeDownload` replaces the raw Store method. The controller's signed and streamed downloads share one daily admission lock. Existing caps and log-read exemptions stay the same.
 - **controller + store (Breaking):** Remove the service-token storage and download counter routes and `Store.RenewStorage`. Verified upload tickets own quota reservation and settlement. The signup slot setting writes the final settings table. See [migration guide](docs/migrations/_unreleased.md#storage-counters-use-verified-upload-tickets).
+- **controller (Breaking):** Replace caller-selected paid grants with signed Stripe callbacks at `POST /webhooks/stripe`
+  `--payment-mode test|live` and private Stripe credentials configure verification. The callback passes verified provider facts to the settlement store. `POST /api/v1/credits/grants` and its request schema are removed. See [Buying credits](docs/auth.md#buying-credits).
 - **store:** [(Breaking)](docs/migrations/_unreleased.md#unit-recovery-requires-the-elected-reaper-lease) removed the unfenced node and trigger reapers. `Store.ReapUnits` requires the current `controller.reaper` lease and returns tagged unit recovery results. Remote lease loss recovers within the same run. A started local owner fails in place.
 - **store (Breaking):** Remove the unused `Store.CreditRateTableSet` getter. Read rate-table presence through `CreditSettings.RateTableSet` with the prices from the same snapshot. See [migration guide](docs/migrations/_unreleased.md#rate-table-presence-uses-the-settings-snapshot).
 - **store (Breaking):** Move `TrustLocalBuilds` and `SetTrustLocalBuilds` from Store to Tenant. Build-trust policy stays scoped to the selected team. See [migration guide](docs/migrations/_unreleased.md#build-trust-uses-tenant-handles).
@@ -217,6 +219,7 @@ unlock.
 ### Fixed
 - **controller:** Accept Session authorization headers on policy routes and enforce the configured session lifetime
   Dashboard requests and browser logout no longer renew sessions before a failed CSRF check. Browser logout returns canonical errors and deletes only the verified session.
+- **runner enrollment:** failed enrollment revokes its newly minted credential, removes its new private files and service registration, and restores the previous runner settings. Machine startup reads the credential file named by `runner.credentials_dir` once.
 - **store:** Replaying an output or manifest commit accepts the same expiry instant in another timezone and preserves omitted metadata across restarts
 - **store:** Blob collection checks the persisted maintenance lease on empty passes and while tombstones are within their grace period. Expired and superseded collectors return a fence error.
 - **store:** HasMany returns a budget error when its final read reaches the deadline, with no partial presence result.
@@ -271,6 +274,10 @@ unlock.
   The retry trigger was written with an empty `trigger_user` and only retry provenance in `trigger_env`, so a retried pull-request run planned as an anonymous push. It now copies the source trigger's user and the `GITHUB_EVENT_NAME` and `GITHUB_PR_*`/`GITHUB_BASE_*`/`GITHUB_HEAD_*` keys `PullRequestFromEnv` reads.
 
 ### Removed
+- **store + controller (Breaking):** Removed `SetNodeStatus`, `RevokeNodeReady` and their legacy HTTP handlers. Debug pauses use activity detail. Queue withdrawal uses the owner-fenced node transition. See [migration guide](docs/migrations/_unreleased.md#node-state-writes-use-transitions).
+- **store + controller + doctor (Breaking):** Removed `TouchRunHeartbeat`, `TouchNodeHeartbeat`, `Run.LastHeartbeatAt`, the independent timestamp heartbeat loops and their legacy HTTP handlers. Run liveness follows the owner lease. Doctor no longer finalizes runs from heartbeat age or reports `orphaned_runs`. The elected unit reaper owns expired-owner recovery.
+- **store + controller (Breaking):** Remove `POST /api/v1/credits/grants` and caller-selected paid grants. Paid credit uses verified provider events matched to committed checkouts. Free operator grants and payment-linked reversals keep their existing paths. See the [migration guide](docs/migrations/_unreleased.md#paid-credit-requires-verified-checkout-settlement).
+- **store + controller (Breaking):** retire bucket-listing storage reconciliation, free-share log pruning and legacy receipt/download-day pruning. `Server.WithStoragePass`, `RunStoragePass` and `StoragePassEvery`, plus the store mark/reconcile/pruning APIs, are removed. Leased maintenance uses committed blob and tagged-log inventory and preserves replica usage. See [migration guide](docs/migrations/_unreleased.md#storage-maintenance-uses-committed-inventory).
 
 - **Breaking:** Remove the `credits.grant` service routes and `credits-token`
   startup seeding. Signed checkout events use `/webhooks/stripe`. Card and
@@ -279,10 +286,6 @@ unlock.
   and runner metering to the console-only
   `/api/v1/operator/runners/{runner}/metered`. Remove the old team and token
   routes.
-- **store + controller (Breaking):** Removed `SetNodeStatus`, `RevokeNodeReady` and their legacy HTTP handlers. Debug pauses use activity detail. Queue withdrawal uses the owner-fenced node transition. See [migration guide](docs/migrations/_unreleased.md#node-state-writes-use-transitions).
-- **store + controller + doctor (Breaking):** Removed `TouchRunHeartbeat`, `TouchNodeHeartbeat`, `Run.LastHeartbeatAt`, the independent timestamp heartbeat loops and their legacy HTTP handlers. Run liveness follows the owner lease. Doctor no longer finalizes runs from heartbeat age or reports `orphaned_runs`. The elected unit reaper owns expired-owner recovery.
-- **store + controller (Breaking):** Remove `POST /api/v1/credits/grants` and caller-selected paid grants. Paid credit uses verified provider events matched to committed checkouts. Free operator grants and payment-linked reversals keep their existing paths. See the [migration guide](docs/migrations/_unreleased.md#paid-credit-requires-verified-checkout-settlement).
-- **store + controller (Breaking):** retire bucket-listing storage reconciliation, free-share log pruning and legacy receipt/download-day pruning. `Server.WithStoragePass`, `RunStoragePass` and `StoragePassEvery`, plus the store mark/reconcile/pruning APIs, are removed. Leased maintenance uses committed blob and tagged-log inventory and preserves replica usage. See [migration guide](docs/migrations/_unreleased.md#storage-maintenance-uses-committed-inventory).
 - **store + controller (Breaking):** Removed `Store.ExpiredOutputRuns`, `Store.ReleaseRunOutputs`, `Store.ForgetRunOutputs`, `ExpiredOutputRun` and the store's duplicate `OutputRetention` constant. The controller no longer runs the old output-key sweep. Leased record expiry and blob reachability GC own output lifetime and preserve live copies after their source run expires.
 - **store + controller + cli (Breaking):** Remove dispatch snapshots and `sparkwing debug rerun`
   The store no longer exposes `NodeDispatch`, `WriteNodeDispatch`, `GetNodeDispatch` or `ListNodeDispatches`. The controller no longer serves the node `/dispatch` and `/dispatches` routes.

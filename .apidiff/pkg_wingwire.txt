@@ -71,7 +71,7 @@ type BudgetState struct {
 
 	Raw string
 }
-const BuildIdentity = "wingwire-v1-nonblocking-admission"
+const BuildIdentity = "wingwire-v1-local-dashboard-control"
 type Cancel struct {
 	RunID  string
 	Reason string
@@ -273,6 +273,26 @@ type LivenessAck struct {
 type LivenessProbe struct {
 	Nonce uint64
 }
+type LocalControl struct {
+	Stay *bool
+}
+type LocalControlStatus struct {
+	Running              bool
+	Stay                 bool
+	PID                  int
+	Version              string
+	Runs                 int
+	QueuedTriggers       int
+	HeldLeases           int
+	DashboardConnections int
+	IdleSince            time.Time
+}
+type LocalDashboard struct {
+	Address string
+}
+type LocalDashboardAck struct {
+	Error string
+}
 type Message interface {
 	wireType() MessageType
 }
@@ -412,6 +432,10 @@ const TypeHello MessageType = "hello"
 const TypeHelloAck MessageType = "hello_ack"
 const TypeLivenessAck MessageType = "liveness_ack"
 const TypeLivenessProbe MessageType = "liveness_probe"
+const TypeLocalControl MessageType = "local_control"
+const TypeLocalControlStatus MessageType = "local_control_status"
+const TypeLocalDashboard MessageType = "local_dashboard"
+const TypeLocalDashboardAck MessageType = "local_dashboard_ack"
 func TypeOf(m Message) MessageType
 const TypeQueueState MessageType = "queue_state"
 const TypeQueued MessageType = "queued"

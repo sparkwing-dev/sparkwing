@@ -19,6 +19,19 @@ pending. This adds no archived source-function port identity.
 
 # Acceptance test port inventory
 
+W2 account mutation ports: the deleted `TestActiveTeamSwitchNeedsMembership`
+and `TestIdentityRoutesRefuseABearerToken` use
+`TestAccountMutationHTTPIdentityProperty`,
+`TestAccountMutationHTTPAuthorityRefusals` and
+`TestAccountMutationHTTPTransactionRefusals`. They retain account-only policy,
+normalization and nonmember/missing-team refusal through the final HTTP boundary.
+The identity and CSRF properties use real SQLite session authentication and fake
+account transactions. Successful atomic team/session changes and the sticky
+selection on a later sign-in remain C1 integration obligations. Existing C1
+identity tests retain those persistence requirements. No native matrix cell
+is completed by these component ports.
+
+
 W2 browser-login ports: the ten tests in the deleted 271-line
 pkg/controller/browser_login_test.go move to TestLoginHTTPAccountCapabilitySession,
 TestLoginHTTPProofProperty, TestLoginHTTPPageAndMethods,
@@ -143,6 +156,7 @@ startup/body/dry-run assertions to procenv. The debug wait now reports an early
 host failure. It adds no acceptance cell. Store-backed legacy runtime ports and
 native placements remain open.
 
+
 This repository-owned inventory records every parked source function and its required port. Acceptance destinations name existing skeletons; package destinations name required focused proofs to implement with their owning area. A scenario is complete only when every mapped case is implemented. Product skeletons remain skipped until their required areas exist; a wrong result must fail once activated.
 
 Branch labels below retain the descriptive suffix of each source branch. Tracker prefixes are omitted because repository files cannot contain tracker identifiers. The full Git revision identifies the exact branch snapshot independently of ref movement. Resolve source files with `git show <revision>:<file>`; removed predecessors are present before the branch comparison range. This inventory requires no personal filesystem path or live branch ref.
@@ -245,6 +259,7 @@ semaphore-only checks at the resolved W3 seam. Native assembly and automatic
 persisted generator reconstruction use existing process/replay components.
 No acceptance cell is added or activated by this continuation. The remaining
 legacy scheduler/store fixtures still fail against the removed schema.
+
 
 The unfenced node/trigger reapers and their dispatcher-expiry helpers are removed.
 `pkg/controller/reaper_test.go:TestReaperRecoversExpiredOwnerAndKeepsLiveOwner`
@@ -441,7 +456,7 @@ The final three comparisons include all changes since the recorded merge base. E
 | `storage-hotfixes` | `80ce329157569a0d0d1cf1d3f67e3e06060512ed` | `pkg/store/generated_node_test.go` | `TestAGeneratedNodesRecordedSpecIsAdmitted` | `TestAGeneratedNodesRecordedSpecIsAdmitted` | Replace | `pkg/store/expansion_test.go:TestGeneratedSpecAuthority` and `lifecycle_test.go:TestLifecycle/lifecycle-generator-reconstruct-code/declared_references`. Persisted spec/hash controls generated-job references. Forged hash and undeclared references are refused. |
 | `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `internal/nodehost/onfailure_test.go` | `TestRecoveryWaitsOnItsOwnDeps` | `TestRecoveryWaitsOnItsOwnDeps` | Keep | `lifecycle_test.go:TestLifecycle/lifecycle-dependency-verdicts/own_dependencies`. Recovery waits for its own dependencies and generated groups as well as its parent. Only the failed parent is exempt from ordinary failure propagation. |
 | `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `internal/nodehost/onfailure_test.go` | `TestRecoveryIsCancelledByAFailedDepOfItsOwn` | `TestRecoveryIsCancelledByAFailedDepOfItsOwn` | Keep | `lifecycle_test.go:TestLifecycle/lifecycle-dependency-verdicts/failed_own_dependency`. An ordinary failed prerequisite prevents recovery. Use reason `upstream_failed`. |
-| `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `internal/runners/k8s/k8s_test.go` | `TestResolveResources_StaysQuietUnderTheCeiling` | `TestResolveResources_StaysQuietUnderTheCeiling` | Replace | `internal/launcher/sizing_test.go:TestSizingBelowCeiling`. Missing measurements are normal and under-ceiling work emits no warning event. Delete the old k8s dispatcher and use the shared error envelope. |
+| `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `internal/runners/k8s/k8s_test.go` | `TestResolveResources_StaysQuietUnderTheCeiling` | `TestResolveResources_StaysQuietUnderTheCeiling` | Replace | `internal/runners/launcher/launcher_test.go:TestSizingBelowCeiling`. Missing measurements are normal and under-ceiling work emits no warning event. Delete the old k8s dispatcher and use the shared error envelope. |
 | `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/controller/github_runners_test.go` | `TestGitHubRunnerCredentialReadsOnlyAClaimedPipelinesProfile` | `TestGitHubRunnerCredentialReadsOnlyAClaimedPipelinesProfile` | Replace | `credentials_test.go:TestCredentials/credentials-holder-mutation-races/github_actions`. No claim and another pipeline are denied. An authorized missing sizing record returns not-found. Use `pipelineOfBoundRun` on the final sizing route. |
 | `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/controller/log_segments_internal_test.go` | `TestTriggerFencedLogWritesRefuseALiveHolder` | `TestTriggerFencedLogWritesRefuseALiveHolder` | Replace | `credentials_test.go:TestCredentials/credentials-holder-mutation-races/log_mutations`. A competing holder cannot append, sign or seal logs. Delete the unfenced-admin bypass. Recheck after request-body consumption and before mutation. |
 | `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/controller/runner_scopes_test.go` | `TestRunnerScopes_ProfileWritesAreScopedToTheClaimedPipeline` | `TestRunnerScopes_ProfileWritesAreScopedToTheClaimedPipeline` | Replace | `credentials_test.go:TestCredentials/credentials-holder-mutation-races/read_and_write`. Exact sealed repo and pipeline bind observations and pins. Delete shared bare-key authority. |

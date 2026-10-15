@@ -56,7 +56,7 @@ Every route the controller registers, with the scope each requires, generated fr
 | `GET` | `/api/v1/gitcache/git/{path...}` | `admin` |
 | `POST` | `/api/v1/gitcache/git/{path...}` | `admin` |
 | `GET` | `/api/v1/health` | `public` |
-| `POST` | `/api/v1/invitations/{id}/accept` | `authenticated` |
+| `POST` | `/api/v1/invitations/{invitation}/accept` | `authenticated` |
 | `POST` | `/api/v1/launcher/claim` | `claims.launch` |
 | `POST` | `/api/v1/launcher/sync` | `claims.launch` |
 | `PUT` | `/api/v1/log-segments/{key...}` | `public` |

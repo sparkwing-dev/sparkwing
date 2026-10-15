@@ -38,7 +38,6 @@ type StateStoreOld interface {
 	UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
 	UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
 	GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error)
-	SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
 	AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
 	SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
 

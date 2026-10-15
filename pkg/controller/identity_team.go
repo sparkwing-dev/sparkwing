@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -178,32 +179,25 @@ func (s *Server) handleDeleteInvitation(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) {
-	p, ok := accountPrincipal(w, r)
-	if !ok {
-		return
-	}
-	acc, err := s.store.AcceptInvitation(r.Context(), p.AccountID, r.PathValue("id"), time.Now())
+func (s *Server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	writer, err := s.accountWriter()
 	if err != nil {
-		writeIdentityError(w, s, r, "accept invitation", err)
-		return
+		return err
 	}
-	team := acc.Team
+	acc, err := writer.AcceptAccountInvitation(r.Context(), a, r.PathValue("invitation"))
+	if err != nil {
+		return accountMutationError(err)
+	}
 	if acc.Admitted {
 		observeSignUpOutcome("admitted", "invitation")
-		s.logger.Info("signup.admitted_by_invitation", "account", p.AccountID, "team", string(team))
+		s.logger.Info("signup.admitted_by_invitation", "account", a.Principal.Capability.Subject.ID, "team", string(acc.Team))
 	}
 	if g := acc.GateClosed; g != nil {
 		observeSignUpGateClosed(g.Source)
 		s.logger.Warn("signup.gate_closed", "source", g.Source, "reason", g.Reason)
 	}
-	if p.Team != team {
-		if err := s.store.SwitchSessionTeam(r.Context(), p.session, p.AccountID, p.Team, team); err != nil {
-			s.writeInternalError(w, r, "accept invitation switch", err)
-			return
-		}
-	}
 	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 const maxRunnerRepos = 32

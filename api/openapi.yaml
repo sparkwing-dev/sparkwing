@@ -592,6 +592,8 @@ paths:
                 detail: {type: string}
       responses:
         "204": {description: Updated.}
+
+  /api/v1/runs/{run}/jobs/{job}/annotations:
     parameters:
       - in: path
         name: run
@@ -602,7 +604,7 @@ paths:
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: claim or nodes.claim
+      x-sparkwing-scope: node.report or node.report or data.write
       tags: [jobs]
       summary: Append one annotation string to the job.
       description: Requires a live job claim, trigger owner, or local publisher. The controller derives authority and fences. Cancellation allows reporting. Ended claims cannot report. The transaction rechecks holder rights.
@@ -3527,7 +3529,7 @@ paths:
       tags: [teams]
       summary: Switch the session to another team the user belongs to.
       description: >-
-        Records the team as the user's sticky team, so the next sign-in returns to it. A team the user is not in answers 404, the same as a team that does not exist.
+        Requires account-session CSRF and same-origin proof without renewing the session. Records the team as the user's sticky team, so the next sign-in returns to it. A team the user is not in answers 404, the same as a team that does not exist.
       requestBody:
         required: true
         content:
@@ -3579,13 +3581,13 @@ paths:
       tags: [teams]
       summary: Unlink one of the signed-in user's sign-in methods.
       description: >-
-        Needs an identity-provider session signed in within the last 10 minutes. The account keeps at least one sign-in method, and its email does not change. Every other session of the account ends. The unlinked provider account then signs in as a new account, even when it asserts the account's own address. Unlinking GitHub leaves any GitHub App installation the user connected bound to its team.
+        Requires account-session CSRF, same-origin proof and a sign-in within the last 10 minutes. The session is not renewed. The account keeps at least one sign-in method, and its email does not change. Every other session of the account ends. The unlinked provider account then signs in as a new account, even when it asserts the account's own address. Unlinking GitHub leaves any GitHub App installation the user connected bound to its team.
       responses:
         "204": {description: Unlinked.}
         "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {description: "The session signed in more than 10 minutes ago (`error: reauth_required`); sign in again and retry."}
+        "403": {description: "The session signed in more than 10 minutes ago (`forbidden` with `details.reason: reauth_required`); sign in again and retry."}
         "404": {$ref: "#/components/responses/NotFound"}
-        "409": {description: "It is the account's only sign-in method (`error: last_sign_in_method`)."}
+        "409": {description: "It is the account's only sign-in method (`conflict` with `details.reason: last_sign_in_method`)."}
 
   /api/v1/teams:
     post:
@@ -3593,7 +3595,7 @@ paths:
       tags: [teams]
       summary: Create a team with the caller as owner and switch to it.
       description: >-
-        Refused with 403 unless the controller holds a multi-team license. The slug is 3 to 30 lowercase letters, digits and hyphens, becomes the team's hostname label and never changes here; reserved names such as `default`, `api` and anything starting `demo-` answer 400. One user creates at most ten teams over the account's life, the personal space included, and deleting one does not give it back; the eleventh answers 403. A slug that ever named a team, including a deleted one, answers 409.
+        Refused with 403 unless the controller holds a multi-team license. The slug is 3 to 30 lowercase letters, digits and hyphens, becomes the team's hostname label and never changes here; reserved names such as `default`, `api` and anything starting `demo-` answer 400. One account creates at most three teams over its life, the personal space included, and deleting one does not give it back; the fourth answers 403. A slug that ever named a team, including a deleted one, answers 409.
       requestBody:
         required: true
         content:
@@ -3629,22 +3631,21 @@ paths:
       responses:
         default: {description: Undescribed.}
 
-  /api/v1/invitations/{id}/accept:
+  /api/v1/invitations/{invitation}/accept:
     post:
       x-sparkwing-scope: authenticated
       tags: [teams]
       summary: Accept an invitation and switch the session to its team.
       description: >-
-        The signed-in user's verified email must equal the invited address; any other user answers 403. A team that has bought no credits and already holds the sign-up gate's `free_team_members` answers 403. A used or expired invitation answers 410. Invitations live seven days. A user on the sign-up waitlist may accept, and the acceptance counts toward the gate's hourly and daily limits as an admission.
+        Requires account-session CSRF and same-origin proof. The session is not renewed. The signed-in user's verified email must equal the invited address; any other user answers 403. A team that has bought no credits and already holds the sign-up gate's `free_team_members` answers 403. A used or expired invitation answers 409 with the common conflict error. Invitations live seven days. A user on the sign-up waitlist may accept, and the acceptance counts toward the gate's hourly and daily limits as an admission.
       parameters:
-        - {name: id, in: path, required: true, schema: {type: string}}
+        - {name: invitation, in: path, required: true, schema: {type: string}}
       responses:
         "204": {description: Joined.}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
-        "409": {description: Already a member.}
-        "410": {description: The invitation is used or expired.}
+        "409": {description: "Already a member, or the invitation is used or expired."}
 
   /api/v1/team:
     patch:
@@ -6768,23 +6769,6 @@ paths:
         schema: {type: string}
     post:
       x-sparkwing-scope: trigger.host
-      summary: Registered route awaiting a description.
-      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
-      responses:
-        default: {description: Undescribed.}
-
-  /api/v1/runs/{run}/jobs/{job}/annotations:
-    parameters:
-      - in: path
-        name: run
-        required: true
-        schema: {type: string}
-      - in: path
-        name: job
-        required: true
-        schema: {type: string}
-    post:
-      x-sparkwing-scope: node.report or node.report or data.write
       summary: Registered route awaiting a description.
       description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
       responses:
