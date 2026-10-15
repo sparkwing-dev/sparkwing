@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
@@ -40,7 +41,7 @@ func (l *logCapture) joined() string {
 
 func TestDaemonStartup_LogsBudgetClampToMachine(t *testing.T) {
 	log := &logCapture{}
-	budget, err := wingd.ParseBudget("100")
+	budget, err := userconfig.ParseBudget("100")
 	if err != nil {
 		t.Fatalf("parse budget: %v", err)
 	}
@@ -60,7 +61,7 @@ func TestDaemonStartup_LogsBudgetClampToMachine(t *testing.T) {
 
 func TestDaemonStartup_LogsIgnoreExternal(t *testing.T) {
 	log := &logCapture{}
-	budget, err := wingd.ParseBudget("ignore-external")
+	budget, err := userconfig.ParseBudget("ignore-external")
 	if err != nil {
 		t.Fatalf("parse budget: %v", err)
 	}

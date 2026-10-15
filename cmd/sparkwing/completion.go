@@ -107,8 +107,8 @@ func runInternalCompletePipelines(_ []string) error {
 	}
 	var rows []completionRow
 	pipelineNames := map[string]struct{}{}
-	if _, cfg, derr := projectconfig.DiscoverPipelines(cwd); derr == nil && cfg != nil {
-		for _, p := range cfg.Pipelines {
+	if _, cfg, derr := projectconfig.Discover(cwd); derr == nil && cfg != nil {
+		for _, p := range cfg.Registry().Pipelines {
 			pipelineNames[p.Name] = struct{}{}
 			rows = append(rows, completionRow{
 				name: p.Name,

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,6 +18,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/agentservice"
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
@@ -64,8 +64,8 @@ func runRunnersAdd(args []string) error {
 	contribution := fs.String("contribution", "50%,50%", "CPU and memory this machine contributes")
 	labels := fs.String("labels", "", "comma-separated self-asserted placement labels")
 	allowRepos := fs.StringArray("allow-repo", nil, "repository this machine may build and fetch directly (repeatable)")
-	configPath := fs.String("config", "", "config.yaml whose agent section to write (default: ~/.config/sparkwing/config.yaml)")
-	force := fs.Bool("force", false, "replace an existing agent section")
+	configPath := fs.String("config", "", "config.yaml whose runner section to write (default: ~/.config/sparkwing/config.yaml)")
+	force := fs.Bool("force", false, "replace an existing runner section")
 	noService := fs.Bool("no-service", false, "write the config without installing or starting the service")
 	if err := parseAndCheck(cmdRunnersAdd, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -138,7 +138,7 @@ func finishRunnerEnrollment(path string, cfg agentFileConfig, force bool, servic
 	if err := writeAgentConfig(path, cfg, force); err != nil {
 		return err
 	}
-	fmt.Printf("wrote the agent section of %s (mode 0600)\n", path)
+	fmt.Printf("wrote the runner section of %s (mode 0600)\n", path)
 	return service.start(path)
 }
 
@@ -152,7 +152,7 @@ func printRunnerRevokeHint(profileName, prefix string) {
 func runRunnersRemove(args []string) error {
 	fs := flag.NewFlagSet(cmdRunnersRemove.Path, flag.ContinueOnError)
 	on := addProfileFlag(fs)
-	configPath := fs.String("config", "", "config.yaml whose agent section holds the token (default: ~/.config/sparkwing/config.yaml)")
+	configPath := fs.String("config", "", "config.yaml whose runner section references the credential (default: ~/.config/sparkwing/config.yaml)")
 	noService := fs.Bool("no-service", false, "revoke the token without touching the service")
 	if err := parseAndCheck(cmdRunnersRemove, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -194,7 +194,7 @@ func runRunnersRemove(args []string) error {
 		return err
 	}
 	fmt.Printf("revoked %s on profile %s\n", prefix, prof.Name)
-	fmt.Printf("the agent section of %s still holds that dead token; `sparkwing cluster runners add --force` replaces it\n", path)
+	fmt.Printf("the runner credential referenced by %s is revoked; `sparkwing cluster runners add --force` replaces it\n", path)
 	return nil
 }
 
@@ -257,30 +257,23 @@ func requireRunnerToken(controller, adminToken, prefix, configPath string) error
 }
 
 func validateAgentFileConfig(cfg agentFileConfig) error {
-	body, err := yaml.Marshal(cfg)
+	body, err := yaml.Marshal(map[string]agentFileConfig{userconfig.Runner: cfg})
 	if err != nil {
 		return err
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(body))
-	decoder.KnownFields(true)
-	var parsed agentconfig.Config
-	if err := decoder.Decode(&parsed); err != nil {
-		return fmt.Errorf("the assembled agent config does not parse: %w", err)
-	}
-	if _, err := agentconfig.Validate(parsed); err != nil {
-		return err
-	}
-	return nil
+	_, err = userconfig.Decode("runner configuration", body)
+	return err
 }
 
 // safety: the claim-mode subset install/service-install.sh writes.
 type agentFileConfig struct {
 	Controller     string   `yaml:"controller"`
-	Token          string   `yaml:"token"`
+	CredentialsDir string   `yaml:"credentials_dir,omitempty"`
+	Token          string   `yaml:"-"`
 	MaxConcurrent  int      `yaml:"max_concurrent"`
 	HolderPrefix   string   `yaml:"holder_prefix"`
 	Labels         []string `yaml:"labels,omitempty"`
-	AllowRepos     []string `yaml:"allow_repos,omitempty"`
+	AllowRepos     []string `yaml:"repos,omitempty"`
 	Contribution   string   `yaml:"contribution,omitempty"`
 	LocalAdmission bool     `yaml:"local_admission"`
 }
@@ -293,7 +286,7 @@ func agentConfigPath(override string) (string, error) {
 }
 
 func checkAgentConfigAbsent(path string, force bool) error {
-	section, err := userconfig.Node(path, userconfig.Agent)
+	section, err := userconfig.Node(path, userconfig.Runner)
 	if err != nil || section == nil || force {
 		return err
 	}
@@ -301,17 +294,33 @@ func checkAgentConfigAbsent(path string, force bool) error {
 }
 
 func errAgentSectionExists(path string) error {
-	return fmt.Errorf("%s already has an agent section; pass --force to replace it (its token stays live until you revoke it)", path)
+	return fmt.Errorf("%s already has a runner section; pass --force to replace it (its token stays live until you revoke it)", path)
 }
 
 // safety: the absence check repeats under the settings lock, so a second
 // enrollment racing this one cannot overwrite the section it wrote.
 func writeAgentConfig(path string, cfg agentFileConfig, force bool) error {
+	if err := validateAgentFileConfig(cfg); err != nil {
+		return err
+	}
+	if strings.TrimSpace(cfg.Token) == "" {
+		return errors.New("runner credential is empty")
+	}
 	var section yaml.Node
-	return userconfig.Update(path, userconfig.Agent, "the agent config", &section, func(found bool) error {
+	return userconfig.Update(path, userconfig.Runner, "the runner config", &section, func(found bool) error {
 		if found && !force {
 			return errAgentSectionExists(path)
 		}
+		// safety: a failed config replacement must leave the previous credential intact.
+		credentialDir, err := fssecure.MkdirPrivateTemp(filepath.Dir(path), "runner-credentials-")
+		if err != nil {
+			return err
+		}
+		if err := fssecure.WriteFile(filepath.Join(credentialDir, "agent-token"), []byte(cfg.Token)); err != nil {
+			return errors.Join(err, os.RemoveAll(credentialDir))
+		}
+		// safety: config replacement can fail after rename, so its credential must survive that error.
+		cfg.CredentialsDir = credentialDir
 		section = yaml.Node{}
 		return section.Encode(cfg)
 	})

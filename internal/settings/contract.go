@@ -190,6 +190,7 @@ type OperatorInputs struct {
 // Context carries facts used for defaults without reading process-global state.
 // Schedule and host argument overrides become request args before intake seals.
 type Context struct {
+	Origin              runspec.Origin
 	Submitter           bool
 	Local               bool
 	ControllerOwned     bool
@@ -234,14 +235,6 @@ type Error struct {
 	Reason      string
 }
 
-// Error supplies a stable message for the shared apierr translation boundary.
-func (e *Error) Error() string { panic("unimplemented: c4-surface-config") }
-
-// ResolveRequest resolves only intake inputs; project and code fields remain
-// unset and their winning request overrides remain distinguishable from defaults.
-// The store owns sealing and write-once enforcement in runspec.Request.
-func ResolveRequest(in Inputs) (runspec.Options, error) { panic("unimplemented: c4-surface-config") }
-
 // PlanInputs permits only captured request inputs and checkout-derived declarations.
 // Context supplies trusted execution facts, never machine or environment preferences.
 // Request and its ceilings are loaded from server-owned intake state; Declarations is the
@@ -251,15 +244,6 @@ type PlanInputs struct {
 	Declarations runspec.CheckoutDeclarations
 	Plan         nodeproto.PlanDoc
 	Context      Context
-}
-
-// ResolvePlan returns every job winner keyed by declared job ID after C3 validation.
-// It reapplies request precedence and sealed ceilings without changing either seal.
-// C1 calls it and secret preflight inside AcceptPlan before writing any accepted state.
-// It validates Declarations and derives winners from separate pipeline/default layers plus
-// decoded plan declarations. It never accepts a planner-supplied resolved winner as authority.
-func ResolvePlan(in PlanInputs) (runspec.ExecutionSettings, error) {
-	panic("unimplemented: c4-surface-config")
 }
 
 // ResolveConcurrency preserves explicit values and fills only omitted policy fields:
@@ -278,49 +262,6 @@ type ExpansionInputs struct {
 	Context Context
 }
 
-// ResolveExpansion resolves generated declarations using Spec.Declarations, accepted run settings
-// and the server-owned sealed request/ceilings. It never rereads a checkout or host preferences.
-// C1 persists these winners alongside each declaration/hash.
-func ResolveExpansion(in ExpansionInputs) (map[string]runspec.JobExecutionSettings, error) {
-	panic("unimplemented: c4-surface-config")
-}
-
-// ProjectCheckoutDeclarations validates the project schema and captures the selected pipeline
-// and defaults without merging them. Raw file positions become file/key/line origins; no
-// startup or credential field can enter the result. Missing files yield the versioned empty layers.
-func ProjectCheckoutDeclarations(raw []byte, file, pipeline string) (runspec.CheckoutDeclarations, error) {
-	panic("unimplemented: c4-surface-config")
-}
-
-// ValidateCheckoutDeclarations checks the format, presence and field/source membership in Table.
-// Every nested Origin must agree with its structural layer and checkout-relative file. An origin
-// claiming flag, env, run, machine or operator authority is invalid. Explicit empty/zero survives.
-// Both acceptance and expansion call this before resolving any author-provided setting.
-func ValidateCheckoutDeclarations(declarations runspec.CheckoutDeclarations) error {
-	panic("unimplemented: c4-surface-config")
-}
-
-// ProjectRequest preserves presence and original origins when values enter C1.
-// It maps only request-owned fields; startup credentials and machine runner config stay local.
-// Pointers, nil collections and Origins preserve unset/empty/zero. Nested keys carry their own origins.
-// RequestProjection lists every run-owned Values field and its C1 destination.
-func ProjectRequest(values Values) (runspec.Options, error) {
-	panic("unimplemented: c4-surface-config")
-}
-
-// ProjectCeilings preserves operator origins and adds C4's fixed retry/memo bounds.
-// AllowedSources is a set of complete checkout policies; unset permits all, empty permits none.
-// Every tuple field must be present, including explicit false. Matching compares all fields.
-func ProjectCeilings(values OperatorValues) (runspec.Ceilings, error) {
-	panic("unimplemented: c4-surface-config")
-}
-
-// ProjectOrigin retains file, key and line and rejects unknown source values.
-// A sealed winner keeps its original origin; Run maps to LayerSealed only for raw run input.
-func ProjectOrigin(origin Origin) (runspec.SettingOrigin, error) {
-	panic("unimplemented: c4-surface-config")
-}
-
 // OriginLayers is the complete C4-to-C1 mapping; operator sources remain distinguishable.
 var OriginLayers = map[Source]runspec.Layer{
 	Flag: runspec.LayerFlag, Env: runspec.LayerEnv, Run: runspec.LayerSealed,
@@ -328,12 +269,6 @@ var OriginLayers = map[Source]runspec.Layer{
 	Code: runspec.LayerCode, Machine: runspec.LayerMachine, Default: runspec.LayerDefault,
 	TeamDB: runspec.LayerOperatorTeam, GlobalDB: runspec.LayerOperatorGlobal,
 	LimitsProfile: runspec.LayerOperatorProfile,
-}
-
-// ControllerCeilings resolves each operator key with OperatorPrecedence. Shared
-// store quota reservations enforce deployment guards; replica guards only shed.
-func ControllerCeilings(in OperatorInputs) (OperatorValues, error) {
-	panic("unimplemented: c4-surface-config")
 }
 
 // ProjectionField names a complete request-field mapping without reimplementing precedence.

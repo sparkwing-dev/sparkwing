@@ -1,6 +1,7 @@
 package agentconfig
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,18 +10,41 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
 
+func TestLoadReadsPrivateRunnerCredential(t *testing.T) {
+	dir := t.TempDir()
+	credential := filepath.Join(dir, "agent-token")
+	if err := fssecure.WriteFile(credential, []byte("runner-private-token\n")); err != nil {
+		t.Fatal(err)
+	}
+	path := writePrivateConfig(t, fmt.Sprintf("controller: https://controller.example\ncredentials_dir: %q\n", dir))
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Token != "runner-private-token" {
+		t.Fatal("runner credential directory was not consumed")
+	}
+	if err := os.Remove(credential); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("missing configured credential was silently accepted")
+	}
+}
+
 func TestConfig_RoundTripFromYAML(t *testing.T) {
-	path := writePrivateConfig(t, `controller: http://localhost:4344
-gitcache: http://localhost:4344/api/v1/gitcache
-profile: dev
-token: tok-abc
+	dir := t.TempDir()
+	if err := fssecure.WriteFile(filepath.Join(dir, "agent-token"), []byte("private-runner-token")); err != nil {
+		t.Fatal(err)
+	}
+	path := writePrivateConfig(t, fmt.Sprintf(`controller: http://localhost:4344
+credentials_dir: %q
 max_concurrent: 3
 labels:
   - laptop
   - arch=arm64
-  - "  "
 spawn_policy: return-to-queue
-`)
+`, dir))
 
 	cfg, err := Load(path)
 	if err != nil {
@@ -29,10 +53,10 @@ spawn_policy: return-to-queue
 	if cfg.Controller != "http://localhost:4344" {
 		t.Fatalf("controller: %q", cfg.Controller)
 	}
-	if cfg.Gitcache != "http://localhost:4344/api/v1/gitcache" {
-		t.Fatalf("gitcache url=%q", cfg.Gitcache)
+	if cfg.CredentialsDir != dir {
+		t.Fatalf("credentials directory = %q", cfg.CredentialsDir)
 	}
-	if cfg.Token != "tok-abc" || cfg.MaxConcurrent != 3 {
+	if cfg.MaxConcurrent != 3 {
 		t.Fatalf("unexpected cfg: %+v", cfg)
 	}
 	norm, err := Validate(*cfg)
@@ -51,10 +75,10 @@ func TestConfig_RejectsUnknownFieldsAndAdditionalDocuments(t *testing.T) {
 	for _, tc := range []struct {
 		name, body, want string
 	}{
-		{"unknown field", "agent:\n  controller: http://localhost:4344\n  admin: true\n", "field admin not found"},
-		{"removed logs key", "agent:\n  controller: http://localhost:4344\n  logs: http://localhost:4345\n", "field logs not found"},
-		{"second document", "agent:\n  controller: http://localhost:4344\n---\nagent:\n  token: hidden\n", "multiple YAML documents"},
-		{"no agent section", "profiles: {}\n", "has no agent section"},
+		{"unknown field", "runner:\n  controller: http://localhost:4344\n  admin: true\n", "runner.admin"},
+		{"removed logs key", "runner:\n  controller: http://localhost:4344\n  logs: http://localhost:4345\n", "runner.logs"},
+		{"second document", "runner:\n  controller: http://localhost:4344\n---\nrunner:\n  token: hidden\n", "expected one YAML document"},
+		{"no agent section", "profiles: {}\n", "has no runner section"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := writeRawConfig(t, tc.body)
@@ -126,8 +150,8 @@ func TestLoad_RefusesTheRemovedEnrolledKeys(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			path := writePrivateConfig(t, tc.body)
 			_, err := Load(path)
-			if err == nil || !strings.Contains(err.Error(), EnrolledModeRemoved) {
-				t.Fatalf("Load error = %v, want %q", err, EnrolledModeRemoved)
+			if err == nil || !strings.Contains(err.Error(), "unknown key") {
+				t.Fatalf("Load error = %v, want %q", err, "unknown key")
 			}
 			if !strings.Contains(err.Error(), path) {
 				t.Fatalf("refusal does not name the file: %v", err)
@@ -138,12 +162,11 @@ func TestLoad_RefusesTheRemovedEnrolledKeys(t *testing.T) {
 
 func TestLoad_KeepsEveryClaimModeSetting(t *testing.T) {
 	path := writePrivateConfig(t, `controller: http://localhost:4344
-token: tok-abc
 holder_prefix: dev-laptop
 max_concurrent: 2
 contribution: 4,8gb
 local_admission: true
-local_reserve: 1,2gb
+keep_free: 1,2gb
 labels:
   - linux
 `)
@@ -156,7 +179,7 @@ labels:
 		t.Fatalf("Validate: %v", err)
 	}
 	if cfg.Controller != "http://localhost:4344" ||
-		cfg.Token != "tok-abc" || cfg.HolderPrefix != "dev-laptop" || cfg.MaxConcurrent != 2 ||
+		cfg.HolderPrefix != "dev-laptop" || cfg.MaxConcurrent != 2 ||
 		cfg.Contribution != "4,8gb" || cfg.LocalReserve != "1,2gb" ||
 		cfg.LocalAdmission == nil || !*cfg.LocalAdmission || len(cfg.Labels) != 1 {
 		t.Fatalf("claim-mode config = %+v", cfg)
@@ -165,7 +188,7 @@ labels:
 
 func writePrivateConfig(t *testing.T, body string) string {
 	t.Helper()
-	return writeRawConfig(t, "agent:\n  "+strings.ReplaceAll(strings.TrimSuffix(body, "\n"), "\n", "\n  ")+"\n")
+	return writeRawConfig(t, "runner:\n  "+strings.ReplaceAll(strings.TrimSuffix(body, "\n"), "\n", "\n  ")+"\n")
 }
 
 func writeRawConfig(t *testing.T, body string) string {
@@ -215,38 +238,10 @@ func TestConfig_AllowReposSelectsDirectSource(t *testing.T) {
 }
 
 func TestLoad_ReadsAllowRepos(t *testing.T) {
-	path := writePrivateConfig(t, "controller: http://x\nallow_repos:\n  - github.com/acme/*\n")
+	path := writePrivateConfig(t, "controller: http://x\nrepos:\n  - github.com/acme/*\n")
 	cfg, err := Load(path)
 	if err != nil || len(cfg.AllowRepos) != 1 || cfg.AllowRepos[0] != "github.com/acme/*" {
 		t.Fatalf("load = %+v, %v", cfg, err)
-	}
-}
-
-// A runner service installed before config.yaml passes its own agent.yaml to
-// --config, and it must keep loading after an upgrade restarts it.
-func TestConfig_LoadsAPreConfigYAMLAgentFileAtACustomPath(t *testing.T) {
-	path := writeRawConfig(t, "controller: http://localhost:4344\ntoken: tok-abc\nmax_concurrent: 2\n")
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load legacy agent file: %v", err)
-	}
-	if cfg.Controller != "http://localhost:4344" || cfg.Token != "tok-abc" || cfg.MaxConcurrent != 2 {
-		t.Fatalf("legacy agent file loaded as %+v", cfg)
-	}
-	if _, err := Load(writeRawConfig(t, "controller: http://localhost:4344\nadmin: true\n")); err == nil ||
-		!strings.Contains(err.Error(), "field admin not found") {
-		t.Fatalf("legacy agent file with an unknown key = %v, want it refused", err)
-	}
-	if _, err := Load(writeRawConfig(t, "controller: http://localhost:4344\nname: old\n")); err == nil ||
-		!strings.Contains(err.Error(), EnrolledModeRemoved) {
-		t.Fatalf("legacy enrolled-mode agent file = %v, want the removal message", err)
-	}
-}
-
-func TestConfig_RefusesASecondDocumentInAPreConfigYAMLAgentFile(t *testing.T) {
-	_, err := Load(writeRawConfig(t, "controller: http://localhost:4344\n---\ntoken: hidden\n"))
-	if err == nil || !strings.Contains(err.Error(), "multiple YAML documents") {
-		t.Fatalf("legacy agent file with two documents = %v, want it refused", err)
 	}
 }
 

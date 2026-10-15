@@ -11,7 +11,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/protofd"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -28,19 +27,19 @@ func Main() {
 	os.Exit(2)
 }
 
-func bindProjectPipelines() (*projectconfig.ConfigOld, error) {
+func bindProjectPipelines() (*projectconfig.Config, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, fmt.Errorf("find the project config: %w", err)
 	}
-	_, cfg, err := projectconfig.DiscoverOld(cwd)
+	_, cfg, err := projectconfig.Discover(cwd)
 	if err != nil {
 		return nil, err
 	}
 	if cfg == nil {
 		return nil, nil
 	}
-	sparkwing.BindPipelinesFromYAML(&pipelines.Config{Pipelines: cfg.Pipelines})
+	sparkwing.BindPipelinesFromYAML(cfg.Registry())
 	return cfg, nil
 }
 

@@ -77,23 +77,23 @@ func TestShapesNamedForAnEventCarryItsTrigger(t *testing.T) {
 		t.Run(tc.shape, func(t *testing.T) {
 			dir := t.TempDir()
 			path := filepath.Join(dir, projectconfig.Filename)
-			if err := os.WriteFile(path, []byte("pipelines:\n"), 0o644); err != nil {
+			if err := os.WriteFile(path, []byte("pipelines: []\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			if err := appendPipelinesYAML(dir, "sample", "Sample", false, "    on:\n"+tc.trigger); err != nil {
 				t.Fatal(err)
 			}
-			cfg, err := projectconfig.LoadOld(path)
+			cfg, err := projectconfig.Load(path)
 			if err != nil {
 				t.Fatalf("scaffolded config does not parse: %v", err)
 			}
-			if len(cfg.Pipelines) != 1 {
-				t.Fatalf("got %d pipelines, want 1", len(cfg.Pipelines))
+			if len(cfg.Registry().Pipelines) != 1 {
+				t.Fatalf("got %d pipelines, want 1", len(cfg.Registry().Pipelines))
 			}
-			if len(describeTriggers(cfg.Pipelines[0].On)) == 0 {
+			if len(describeTriggers(cfg.Registry().Pipelines[0].On)) == 0 {
 				t.Fatal("entry has no triggers at all")
 			}
-			tc.check(t, cfg.Pipelines[0].On)
+			tc.check(t, cfg.Registry().Pipelines[0].On)
 		})
 	}
 }
@@ -101,18 +101,18 @@ func TestShapesNamedForAnEventCarryItsTrigger(t *testing.T) {
 func TestShapesWithoutAnEventStayManual(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, projectconfig.Filename)
-	if err := os.WriteFile(path, []byte("pipelines:\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("pipelines: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := appendPipelinesYAML(dir, "sample", "Sample", false, ""); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := projectconfig.LoadOld(path)
+	cfg, err := projectconfig.Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(describeTriggers(cfg.Pipelines[0].On)) > 0 {
-		t.Errorf("structural shape declared triggers %+v", cfg.Pipelines[0].On)
+	if len(describeTriggers(cfg.Registry().Pipelines[0].On)) > 0 {
+		t.Errorf("structural shape declared triggers %+v", cfg.Registry().Pipelines[0].On)
 	}
 }
 
@@ -159,7 +159,7 @@ func TestEveryTriggerBlockParses(t *testing.T) {
 			}
 			dir := t.TempDir()
 			path := filepath.Join(dir, projectconfig.Filename)
-			if err := os.WriteFile(path, []byte("pipelines:\n"), 0o644); err != nil {
+			if err := os.WriteFile(path, []byte("pipelines: []\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			body := block
@@ -169,11 +169,11 @@ func TestEveryTriggerBlockParses(t *testing.T) {
 			if err := appendPipelinesYAML(dir, "sample", "Sample", false, body); err != nil {
 				t.Fatal(err)
 			}
-			cfg, err := projectconfig.LoadOld(path)
+			cfg, err := projectconfig.Load(path)
 			if err != nil {
 				t.Fatalf("--on %s emits yaml the parser rejects: %v", event, err)
 			}
-			on := cfg.Pipelines[0].On
+			on := cfg.Registry().Pipelines[0].On
 			if event == "manual" {
 				if len(describeTriggers(on)) > 0 {
 					t.Errorf("--on manual declared %+v; it is the opt-out", on)
@@ -326,17 +326,17 @@ func TestMultiTriggerYAMLParses(t *testing.T) {
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, projectconfig.Filename)
-	if err := os.WriteFile(path, []byte("pipelines:\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("pipelines: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := appendPipelinesYAML(dir, "sample", "Sample", false, block); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := projectconfig.LoadOld(path)
+	cfg, err := projectconfig.Load(path)
 	if err != nil {
 		t.Fatalf("multi-trigger entry does not parse: %v\n%s", err, block)
 	}
-	on := cfg.Pipelines[0].On
+	on := cfg.Registry().Pipelines[0].On
 	if on.Push == nil || on.PullRequest == nil || len(on.Schedule) == 0 {
 		t.Errorf("decoded %+v; want all three declared", on)
 	}
@@ -346,7 +346,6 @@ func TestAppendPipelinesYAML_PreservesOtherSections(t *testing.T) {
 	for _, tail := range []string{
 		"sparks:\n  - name: tools\n    source: example.com/tools\n    version: v1.0.0\n",
 		"defaults: {}\n",
-		"profiles: {}\n",
 	} {
 		t.Run(strings.Split(tail, ":")[0], func(t *testing.T) {
 			dir := t.TempDir()
@@ -358,12 +357,12 @@ func TestAppendPipelinesYAML_PreservesOtherSections(t *testing.T) {
 			if err := appendPipelinesYAML(dir, "sample", "Sample", true, "    on:\n      pre_commit: {}\n"); err != nil {
 				t.Fatal(err)
 			}
-			cfg, err := projectconfig.LoadOld(path)
+			cfg, err := projectconfig.Load(path)
 			if err != nil {
 				t.Fatalf("scaffolded config does not parse: %v", err)
 			}
-			if len(cfg.Pipelines) != 2 || cfg.Pipelines[0].Name != "existing" || cfg.Pipelines[1].Name != "sample" || !cfg.Pipelines[1].Hidden || cfg.Pipelines[1].On.PreHook == nil {
-				t.Fatalf("pipelines = %+v", cfg.Pipelines)
+			if len(cfg.Registry().Pipelines) != 2 || cfg.Registry().Pipelines[0].Name != "existing" || cfg.Registry().Pipelines[1].Name != "sample" || !cfg.Registry().Pipelines[1].Hidden || cfg.Registry().Pipelines[1].On.PreHook == nil {
+				t.Fatalf("pipelines = %+v", cfg.Registry().Pipelines)
 			}
 			after, err := os.ReadFile(path)
 			if err != nil {
@@ -388,7 +387,7 @@ func TestOnDeclaresTheGitHooksBootstrapCanArm(t *testing.T) {
 	} {
 		t.Run(tc.event, func(t *testing.T) {
 			dir := t.TempDir()
-			if err := os.WriteFile(filepath.Join(dir, projectconfig.Filename), []byte("pipelines:\n"), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, projectconfig.Filename), []byte("pipelines: []\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			trigger, err := resolveTrigger(shape, []string{tc.event}, true)
@@ -488,5 +487,31 @@ func TestFinishScaffold_FailsWhenGoModTidyFails(t *testing.T) {
 	err := finishScaffold(dir, filepath.Join(dir, "jobs", "sample.go"), "sample", false, "")
 	if err == nil || !strings.Contains(err.Error(), "go mod tidy") {
 		t.Fatalf("finishScaffold = %v, want the go mod tidy failure", err)
+	}
+}
+
+func TestAppendPipelinesRefusesProjectConnections(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, projectconfig.Filename)
+	body := []byte("profiles: {}\n")
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := appendPipelinesYAML(dir, "build", "Build", false, ""); err == nil {
+		t.Fatal("project connections accepted")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != string(body) {
+		t.Fatal("invalid project file changed")
+	}
+}
+
+func TestInitialProjectUsesExplicitEmptyPipelines(t *testing.T) {
+	cfg, err := projectconfig.Parse([]byte(renderInitPipelinesYAML()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Pipelines == nil || len(cfg.Pipelines) != 0 {
+		t.Fatal("initial registry must be explicitly empty")
 	}
 }
