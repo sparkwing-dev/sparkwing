@@ -64,8 +64,9 @@ also refuses peers when its platform implementation cannot supply credentials.
 `APIConn.PeerIdentity` exposes that verified identity to the shared controller.
 The connection owns its identity snapshot. Changing an input UID or a returned
 UID cannot change the account attached to the connection. The API listener
-checks `LocalSubject` before yielding a connection. Its Unix reader supplies
-kernel UIDs. A Windows client-SID transport remains required.
+checks `LocalSubject` before yielding a connection. Unix uses kernel UIDs.
+Windows uses owner-only named pipes and the client's identification-token SID.
+The [transport contract](LOCAL-TRANSPORT.md) lists the native tests still required.
 Admission state and election files use `fssecure`. Admission state accepts only
 the current schema.
 

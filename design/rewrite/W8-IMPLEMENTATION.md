@@ -1,9 +1,35 @@
 # W8 implementation handoff
 
-W8 remains incomplete. This continuation resolves the TypeScript trigger-test
-merge conflict and verifies the integrated SDK changes against W8. All 26 W8
-amendment rows and both W8 handoffs were rechecked. The shared host declarations
-and integration points below remain open. Native acceptance cells remain blocked.
+W8 remains incomplete. The continuation audit at `965c71a6b` found a clean
+worktree with no unresolved merge conflicts. All 26 W8 amendment rows and both
+W8 handoffs retain the integration requirements below. The earlier merge
+instructions in this file are historical. Native acceptance cells remain blocked.
+
+This continuation changes documentation only. `LOCAL-CONTROLLER.md` now describes
+the implemented Windows named-pipe transport. No runtime API, contract or caller
+changed. Old code deleted: **0 lines**. New acceptance cells and T1 ports: **0**.
+The existing `TestSizingBelowCeiling` inventory port remains in place.
+
+Verification used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4`,
+`-p 4` and private cache/temp directories under `/tmp/sw-astra-W8`:
+
+- Whole-repository build and vet for cluster, runners, engine, wingd and both acceptance packages passed.
+- Full runner, launcher, engine and acceptance suites passed. Acceptance took 29.298 seconds and retains the skipped native catalog cells.
+- Cluster passed with only its socket-based metrics listener test excluded. Focused local lifecycle, runtime, identity, dashboard, drain and managed-unit tests passed in wingd and its client.
+- Required `commentcheck -base main` passed across 1,051 files. `git diff --check` passed.
+
+Existing contract requests remain open for W3's host/process construction and
+run/plan/eval identity inputs, the cache owner's workspace-off key operation,
+and W9's plan-without-job grammar. Controller plan/eval resources, launcher sync
+and the production clients/local services remain implementation dependencies.
+W8's deployment probe/cleanup adapters and native Windows/Cloud evidence remain
+open. No new product question or mechanism was introduced.
+
+Changed files are this report, `W8-AMENDMENTS-1.md` and
+`internal/wingd/LOCAL-CONTROLLER.md`. No shared implementation file changed.
+No Sparkwing binary, pipeline, Git write, deployment or release ran. The sandbox
+prevents socket and native Windows/Cloud checks. All check processes finished,
+Git config has no identity/worktree override, and worker scratch was deleted.
 
 | Owner | Remaining boundary | Evidence in this checkout |
 | --- | --- | --- |

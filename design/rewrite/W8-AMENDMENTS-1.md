@@ -6,6 +6,10 @@ This snapshot covers every amendment-1 row whose action column names W8. A
 component pass proves its named boundary. It does not activate a native catalog
 cell or establish an HTTP, Cloud or OS deployment proof.
 
+The continuation audit at `965c71a6b` found no pending merge or new amendment.
+All 26 assigned rows and both W8 handoffs retain the dependencies recorded here.
+The merge-resolution sections below describe earlier sessions.
+
 | Amendment | W8 action and remaining integration |
 | --- | --- |
 | A1-08 | The unified loop uses one ClaimRequest with both kinds. RunnerStoreLifecycleW8Components now exercises the real EngineController and SQLite claim scan through that loop. W9 NewEngineClient remains a stub. HTTP response-loss evidence remains open. |
