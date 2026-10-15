@@ -4,6 +4,43 @@ Snapshot: 2026-10-14. W5 remains incomplete at the native Windows and integrated
 host acceptance boundaries. The source implementation and local SDK proofs are
 ready for integration. The lead owns commits, pipelines and native verification.
 
+## Continuation: data-service acceptance boundaries
+
+Added protocol tests for artifact declarations and consumption edges, dependency
+and prior-run output reads, explicit child inputs, pending child waits, false-valued
+child output and canonical child failures. The tests run the SDK against its
+`HostServices` interface with `NodeRoutes` and fake HTTP responses. Optional reads
+return absence only for `not_found`. Forbidden, not-ready, unknown future errors
+and missing response payloads fail the body instead of becoming cache misses.
+
+`protocol-sdk-artifacts-references-children` now runs these tests as its
+`typescript_sdk_boundary` child. `protocol-mask-acknowledgement` now runs the
+existing acknowledgement and delivery-error tests. Artifact bytes, authorization,
+retention pins, child ancestry and persistence still require the real host/store.
+No placement target was enabled by these SDK proofs.
+
+The only shared edit is four lines in `internal/acceptance/typescript.go` selecting
+those tests. No runtime or contract changed. No further T1 inventory tests were
+ported or legacy lines deleted. The prior 2,896-line deletion remains.
+
+W4's parser and validator are still stubs in this branch. Windows bridge artifacts
+and a Windows compiler/runtime are absent. Native Windows, real W3/W4 and
+W1/W2/W7 integration, DinD and placements remain open. The W3 route definitions
+and W4 cancellation/concurrency agreements below remain unchanged. Another Linux
+SDK-only session cannot establish those integration results.
+
+Verification: all 122 TypeScript tests passed with `node --test
+--experimental-test-isolation=none 'test/**/*.test.ts'`. Strict typechecking,
+Prettier and focused `go vet -p 4 ./sdk/typescript/test/nativehost
+./internal/acceptance ./tests/acceptance` passed. `go test -p 4
+./internal/acceptance ./tests/acceptance` passed, including Linux native pipes
+and both newly enabled SDK children. Package preflight still refuses the missing
+Windows x64 bridge. Go checks used `GOWORK=off`, `GOFLAGS=-buildvcs=false`,
+`GOMAXPROCS=4`, and caches and temporary files under `/tmp/sw-astra-W5`.
+Repository-wide `go build -p 4 ./...` and `git diff --check` passed. The temporary
+directory was removed. No Sparkwing binary, Git write or new runtime mechanism
+was used.
+
 ## Continuation: sealed trigger facts
 
 Pipeline code could change `run.trigger` and its nested pull-request facts.
@@ -131,6 +168,8 @@ removed after verification.
 - protocol-strict-plan-parity
 - protocol-errors-and-frame-identity
 - protocol-sdk-secrets-mask-annotations
+- protocol-sdk-artifacts-references-children
+- protocol-mask-acknowledgement
 - protocol-job-closures-and-skip
 - protocol-memo-input-boundaries
 - protocol-host-layers-risk-cleanup

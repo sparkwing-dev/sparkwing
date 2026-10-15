@@ -16,6 +16,10 @@ func TypeScriptTests(scenario string) []string {
 		return []string{"log.test.ts", "routes.test.ts"}
 	case "protocol-sdk-secrets-mask-annotations", "protocol-job-closures-and-skip":
 		return []string{"runner.test.ts"}
+	case "protocol-mask-acknowledgement":
+		return []string{"runner.test.ts", "routes.test.ts"}
+	case "protocol-sdk-artifacts-references-children":
+		return []string{"data-services.test.ts"}
 	case "protocol-memo-input-boundaries":
 		return []string{"files-memo.test.ts"}
 	case "protocol-host-layers-risk-cleanup":
