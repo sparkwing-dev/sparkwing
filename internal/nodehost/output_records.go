@@ -1,10 +1,7 @@
 package nodehost
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -71,12 +68,11 @@ func (o OutputRecords) PublishOutput(ctx context.Context, input NodeInput, value
 	if err := upload.check(input, blob.KindOutput); err != nil {
 		return nil, err
 	}
-	sum := sha256.Sum256(value)
-	digest := blob.Digest(hex.EncodeToString(sum[:]))
-	if err := upload.put(ctx, o.Blobs, digest, int64(len(value)), bytes.NewReader(value)); err != nil {
+	record, err := (blob.OutputData{Bytes: o.Blobs, Records: o.Records, Authority: upload.Authority, Identity: upload.Identity, Pipeline: upload.Key.Scope.Pipeline}).Put(ctx, value)
+	if err != nil {
 		return nil, err
 	}
-	return upload.commit(ctx, o.Records, digest, nil)
+	return &record.Key, nil
 }
 
 func (u JobUpload) check(input NodeInput, kind blob.Kind) error {
@@ -99,6 +95,9 @@ func (u JobUpload) check(input NodeInput, kind blob.Kind) error {
 	}
 	if spec.Request.Request.Git.Repository.Key != "" && u.Key.Scope.Repo != spec.Request.Request.Git.Repository.Key {
 		return errors.New("job record differs from its sealed repository")
+	}
+	if (kind == blob.KindOutput || kind == blob.KindManifest) && u.Key != blob.ResultRecordKey(attempt, u.Authority.Repo, u.Authority.Ref.Scope, u.Key.Scope.Pipeline, kind) {
+		return errors.New("job result record differs from its exact attempt layout")
 	}
 	return nil
 }

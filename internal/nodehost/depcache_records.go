@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	depcacheblob "github.com/sparkwing-dev/sparkwing/internal/blob/depcache"
 	"github.com/sparkwing-dev/sparkwing/internal/depcachekey"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -175,7 +176,14 @@ func (d DepcacheRecords) restore(ctx context.Context, input NodeInput, cache dir
 	if record.Key.Team == "" || record.Key.Kind != blob.KindDepcache || record.Key.Scope.Repo != cache.key.Repo || record.Key.Scope.Key != cache.key.Key || record.Key.Name != cache.key.Name || !artifactDigestValid(record.Digest) {
 		return false, errors.New("cache lookup returned a different record")
 	}
-	if err := restoreDirectory(ctx, cache.dir, func() (blob.VerifiedReader, error) { return get(ctx, record.Digest) }); err != nil {
+	reader, err := get(ctx, record.Digest)
+	if err != nil {
+		if reader != nil {
+			err = errors.Join(err, reader.Close())
+		}
+		return false, err
+	}
+	if _, err := depcacheblob.RestoreArchive(ctx, reader, cache.dir); err != nil {
 		return false, err
 	}
 	return true, nil

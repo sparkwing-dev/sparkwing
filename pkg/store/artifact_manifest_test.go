@@ -32,7 +32,7 @@ func TestSetNodeArtifactManifest_SurvivesFinishNode(t *testing.T) {
 	if err := s.SetNodeArtifactManifest(ctx, "run-1", "node-a", "m1"); err != nil {
 		t.Fatalf("SetNodeArtifactManifest: %v", err)
 	}
-	if err := s.FinishNode(ctx, "run-1", "node-a", "success", "", []byte(`"ok"`)); err != nil {
+	if err := s.FinishNode(ctx, "run-1", "node-a", "success", ""); err != nil {
 		t.Fatalf("FinishNode: %v", err)
 	}
 	n, _ := s.GetNode(ctx, "run-1", "node-a")

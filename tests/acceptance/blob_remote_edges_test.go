@@ -1,4 +1,4 @@
-package acceptance
+package acceptance_test
 
 import (
 	"context"
@@ -14,8 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// CheckBlobRemoteCacheEdges checks repository readers without job attempts against real record rules.
-func CheckBlobRemoteCacheEdges(ctx context.Context, root string) (err error) {
+func checkBlobRemoteCacheEdges(ctx context.Context, root string) (err error) {
 	s, err := store.Open(filepath.Join(root, "remote-edges.db"))
 	if err != nil {
 		return err

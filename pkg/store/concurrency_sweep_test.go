@@ -202,7 +202,7 @@ func TestConcurrency_ResolveWaiterRejectsFailedLeaderOutcome(t *testing.T) {
 	s := storetest.Open(t)
 	seedRunAndNode(t, s, "rLeader", "n")
 	if err := s.FinishNodeWithReason(ctxT(t), "rLeader", "n",
-		"failed", "boom", nil, store.FailureOOMKilled, nil); err != nil {
+		"failed", "boom", store.FailureOOMKilled, nil); err != nil {
 		t.Fatalf("FinishNodeWithReason: %v", err)
 	}
 	res, err := tenantFor(t, s, store.DefaultTeam).ResolveWaiter(ctxT(t), "k", "rF", "n", "", "rLeader", "n", false)

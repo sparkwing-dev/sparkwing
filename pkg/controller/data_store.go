@@ -22,6 +22,7 @@ func (s *Server) configureDataStore(d *DataController) {
 	if d.Store == nil {
 		return
 	}
+	d.replicaID = s.leaseHolder
 	if d.Access == nil {
 		d.Access = dataStoreAccess{d.Store}
 	}

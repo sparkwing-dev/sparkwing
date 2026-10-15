@@ -27,7 +27,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
@@ -529,7 +528,7 @@ func run(args []string) error {
 	}
 	srv = srv.WithLogRetention(retention)
 	if strings.HasPrefix(*cacheBlobStore, "s3://") {
-		client, bucket, prefix, err := s3store.Open(ctx, *cacheBlobStore)
+		client, bucket, _, err := s3store.Open(ctx, *cacheBlobStore)
 		if err != nil {
 			return fmt.Errorf("--cache-blob-store: direct uploads: %w", err)
 		}
@@ -544,7 +543,7 @@ func run(args []string) error {
 				return err
 			}
 		}
-		srv = srv.WithDataObjects(backend).WithS3Logs(client, bucket, prefix)
+		srv = srv.WithDataObjects(backend)
 	} else {
 		objects, err := openFilesystemData(p.Root, *externalURL, *addr)
 		if err != nil {
@@ -838,7 +837,7 @@ func parseLogRetention(raw string) (map[store.Team]int, error) {
 		}
 		team, rawDays, ok := strings.Cut(item, "=")
 		days, err := strconv.Atoi(rawDays)
-		if !ok || err != nil || days < 1 || !teamblob.ValidTeam(team) {
+		if !ok || err != nil || days < 1 || !blob.ValidLogTeam(team) {
 			return nil, fmt.Errorf("%q is not team=days with a team slug and a positive number of days", item)
 		}
 		out[store.Team(team)] = days

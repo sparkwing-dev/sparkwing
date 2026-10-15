@@ -7,10 +7,6 @@ import (
 	"time"
 )
 
-// ErrNotFound is returned by Get / Has-style reads when the requested
-// key (or run/node pair) does not exist.
-var ErrNotFound = errors.New("storage: not found")
-
 // ErrNotSupported reports an operation unavailable on the selected backend.
 var ErrNotSupported = errors.New("storage: operation not supported")
 
@@ -32,9 +28,6 @@ func LogCursor(ctx context.Context) string {
 	c, _ := ctx.Value(logCursorKey{}).(string)
 	return c
 }
-
-// ErrPreconditionFailed reports an object that already exists.
-var ErrPreconditionFailed = errors.New("storage: conditional write precondition failed")
 
 // StoreUsage is how much a store holds: its total stored bytes and the
 // number of objects those bytes sit in, measured at ObservedAt.
@@ -73,9 +66,6 @@ type LogStore interface {
 	// in the run.
 	ReadRun(ctx context.Context, runID string) ([]byte, error)
 
-	// Stream opens a live-tail stream for one node's log, resuming after
-	// the cursor [WithLogCursor] put on ctx, if any. Implementations
-	// that don't support streaming return (nil, nil); the caller falls
-	// back to polling Read.
+	// Stream opens a live tail using the cursor from WithLogCursor.
 	Stream(ctx context.Context, runID, nodeID string) (io.ReadCloser, error)
 }

@@ -3,19 +3,15 @@ package backend
 import (
 	"context"
 	"io"
-	"os"
 
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type StoreBackend struct {
 	st       *store.Store
-	paths    paths.Paths
 	logStore storage.LogStore
 	runs     RunReader
-	live     LiveLogReader
 
 	caps Capabilities
 }
@@ -27,35 +23,15 @@ type RunReader interface {
 	GetRun(ctx context.Context, runID string) (*store.Run, error)
 }
 
-// Scoped returns a copy of b that lists and reads runs through runs and, when
-// live is non-nil, answers a running node's log from it. A caller that serves
-// one team builds one per request from that team's view.
-func (b *StoreBackend) Scoped(runs RunReader, live LiveLogReader) *StoreBackend {
+// Scoped returns a backend whose run reads use the supplied tenant.
+func (b *StoreBackend) Scoped(runs RunReader) *StoreBackend {
 	c := *b
-	c.runs, c.live = runs, live
+	c.runs = runs
 	return &c
 }
 
-// StreamNodeLiveLog opens the live view Scoped attached, or answers (nil, nil)
-// when it attached none.
-func (b *StoreBackend) StreamNodeLiveLog(ctx context.Context, runID, nodeID string, since int64) (io.ReadCloser, error) {
-	if b.live == nil {
-		return nil, nil
-	}
-	return b.live.StreamNodeLiveLog(ctx, runID, nodeID, since)
-}
-
-// ReadNodeLiveLog reads the live view Scoped attached, or answers ok false when
-// it attached none.
-func (b *StoreBackend) ReadNodeLiveLog(ctx context.Context, runID, nodeID string, since int64) ([]byte, int64, bool, bool, error) {
-	if b.live == nil {
-		return nil, 0, false, false, nil
-	}
-	return b.live.ReadNodeLiveLog(ctx, runID, nodeID, since)
-}
-
-func NewStoreBackend(st *store.Store, paths paths.Paths, logStore storage.LogStore) *StoreBackend {
-	return &StoreBackend{st: st, paths: paths, logStore: logStore}
+func NewStoreBackend(st *store.Store, logStore storage.LogStore) *StoreBackend {
+	return &StoreBackend{st: st, logStore: logStore}
 }
 
 var _ Backend = (*StoreBackend)(nil)
@@ -101,15 +77,7 @@ func (b *StoreBackend) ReadNodeLog(ctx context.Context, runID, nodeID string, op
 	if b.logStore != nil {
 		return b.logStore.Read(ctx, runID, nodeID, toStorageReadOpts(opts))
 	}
-	f, err := os.Open(b.paths.NodeLog(runID, nodeID))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	defer f.Close()
-	return io.ReadAll(f)
+	return nil, storage.ErrNotSupported
 }
 
 func (b *StoreBackend) StreamNodeLog(ctx context.Context, runID, nodeID string) (io.ReadCloser, error) {

@@ -7,8 +7,11 @@ backend and pass it through `WithDataController` or `WithDataObjects`. The dupli
 controller filesystem and S3 signer types and `WithSignedDownloads` are removed.
 Wrap an S3 backend with `controller.NewCloudFrontDataBackend` to sign public-ingress
 downloads through CloudFront. Direct requests retain regional S3 URLs. Uploads keep
-the backend's size and checksum constraints. `WithS3Logs` replaces
-`WithDirectUploads` for retained S3 log readers.
+the backend's size and checksum constraints. Retained log readers use that same
+backend. `WithS3Logs` and the raw S3 log object adapter are removed. Replace
+`s3.NewArtifactStore` with `s3.NewMeasurementStore` for bucket measurements.
+Measurement handles expose `Usage` only. Local dashboard logs require committed
+tagged segments because run-directory log fallback is removed.
 
 Replace the `user` and `runner` credential labels on
 `sparkwing_requests_by_principal_total` with `account` and `machine`. The other
@@ -1819,12 +1822,14 @@ Runner budgets use the verified team and holder after shared policy authorizatio
 Empty claims spend the polling budget. Awarded work does not. Empty polls are not
 audited. Job path identifiers appear as `run_id` and `job_id` in audit records.
 The unused live-log HTTP handlers and their `LiveLogRead` type are removed.
-Dashboard log reads retain the shared policy routes and in-memory live reader.
+Dashboard log reads retain the shared policy routes and committed segment reader.
+That reader joins its authorized segments to the in-memory ring.
 
 Egress concurrency refusals use `error.code=rate_limited`, with
 `egress_download_limit` or `egress_stream_limit` in `error.details.reason`.
 The exported `EgressDownloadLimitCode` and `EgressStreamLimitCode` constants are
 removed. Read the canonical error object instead of a top-level code.
+
 
 ## Egress accounting uses tenant and replica counters
 

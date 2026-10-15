@@ -149,7 +149,7 @@ func TestClaimToken_CancelRefusesSensitiveButNotReportingOrResult(t *testing.T) 
 func TestClaimToken_FinishOrLossEndsItOnTheNextRequest(t *testing.T) {
 	cases := map[string]func(t *testing.T, f claimedFixture){
 		"finish": func(t *testing.T, f claimedFixture) {
-			if err := f.s.FinishNode(context.Background(), f.node.RunID, "build", "success", "", nil); err != nil {
+			if err := f.s.FinishNode(context.Background(), f.node.RunID, "build", "success", ""); err != nil {
 				t.Fatalf("finish: %v", err)
 			}
 		},
@@ -217,7 +217,7 @@ func TestClaimToken_ResultCommitsOnceAndReplaysOnlyTheSameResult(t *testing.T) {
 		t.Fatalf("differing result while live: err = %v", err)
 	}
 
-	if err := f.s.FinishNode(ctx, "run-result", "build", "success", "", nil); err != nil {
+	if err := f.s.FinishNode(ctx, "run-result", "build", "success", ""); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
 	ended := wantClaimAuth(t, f.s, raw, store.ClaimResult, now, nil)

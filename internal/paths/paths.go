@@ -204,23 +204,6 @@ func (p Paths) RunDir(runID string) string {
 	return filepath.Join(p.RunsDir(), runID)
 }
 
-func (p Paths) NodeLog(runID, nodeID string) string {
-	return filepath.Join(p.RunDir(runID), sanitizeNodeFile(nodeID)+".log")
-}
-
-func (p Paths) EnvelopeLog(runID string) string {
-	return filepath.Join(p.RunDir(runID), "_envelope.ndjson")
-}
-
-var reservedNodeFileChars = []string{"/", `\`, ":", "*", "?", `"`, "<", ">", "|"}
-
-func sanitizeNodeFile(nodeID string) string {
-	for _, c := range reservedNodeFileChars {
-		nodeID = strings.ReplaceAll(nodeID, c, "__")
-	}
-	return nodeID
-}
-
 func (p Paths) EnsureRunDir(runID string) error {
 	if err := p.EnsureRoot(); err != nil {
 		return err

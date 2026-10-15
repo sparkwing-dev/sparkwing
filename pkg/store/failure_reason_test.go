@@ -17,7 +17,7 @@ func TestFinishNodeWithReason_PersistsStructuredMetadata(t *testing.T) {
 
 	code := 137
 	if err := s.FinishNodeWithReason(ctx, "run-1", "node-a",
-		"failed", "pod OOMKilled", nil, store.FailureOOMKilled, &code); err != nil {
+		"failed", "pod OOMKilled", store.FailureOOMKilled, &code); err != nil {
 		t.Fatalf("FinishNodeWithReason: %v", err)
 	}
 
@@ -41,12 +41,12 @@ func TestFinishNodeWithReason_DoesNotOverwriteTerminalNode(t *testing.T) {
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "node-a")
 
-	if err := s.FinishNode(ctx, "run-1", "node-a", "success", "", []byte(`"ok"`)); err != nil {
+	if err := s.FinishNode(ctx, "run-1", "node-a", "success", ""); err != nil {
 		t.Fatalf("FinishNode: %v", err)
 	}
 	code := 137
 	if err := s.FinishNodeWithReason(ctx, "run-1", "node-a",
-		"failed", "late infrastructure failure", nil, store.FailureOOMKilled, &code); err != nil {
+		"failed", "late infrastructure failure", store.FailureOOMKilled, &code); err != nil {
 		t.Fatalf("FinishNodeWithReason: %v", err)
 	}
 
@@ -60,9 +60,7 @@ func TestFinishNodeWithReason_DoesNotOverwriteTerminalNode(t *testing.T) {
 	if n.Error != "" {
 		t.Fatalf("error = %q, want empty", n.Error)
 	}
-	if out, err := s.GetNodeOutput(ctx, "run-1", "node-a"); err != nil || string(out) != `"ok"` {
-		t.Fatalf("output = %s, %v, want original output", out, err)
-	}
+
 	if n.FailureReason != store.FailureUnknown {
 		t.Fatalf("failure_reason = %q, want original empty reason", n.FailureReason)
 	}
@@ -83,7 +81,7 @@ func TestFinishNodeWithReason_FinalizesDoneNodeWithEmptyOutcome(t *testing.T) {
 		t.Fatalf("CreateNode: %v", err)
 	}
 
-	if err := s.FinishNode(ctx, "run-1", "node-a", "success", "", []byte(`"ok"`)); err != nil {
+	if err := s.FinishNode(ctx, "run-1", "node-a", "success", ""); err != nil {
 		t.Fatalf("FinishNode: %v", err)
 	}
 	n, err := s.GetNode(ctx, "run-1", "node-a")
@@ -93,9 +91,7 @@ func TestFinishNodeWithReason_FinalizesDoneNodeWithEmptyOutcome(t *testing.T) {
 	if n.Status != "done" || n.Outcome != "success" {
 		t.Fatalf("status/outcome: %q %q, want done/success", n.Status, n.Outcome)
 	}
-	if out, err := s.GetNodeOutput(ctx, "run-1", "node-a"); err != nil || string(out) != `"ok"` {
-		t.Fatalf("output = %s, %v, want finalized output", out, err)
-	}
+
 }
 
 func TestFinishNode_LeavesReasonEmpty(t *testing.T) {
@@ -103,7 +99,7 @@ func TestFinishNode_LeavesReasonEmpty(t *testing.T) {
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "node-a")
 
-	if err := s.FinishNode(ctx, "run-1", "node-a", "success", "", []byte(`"ok"`)); err != nil {
+	if err := s.FinishNode(ctx, "run-1", "node-a", "success", ""); err != nil {
 		t.Fatalf("FinishNode: %v", err)
 	}
 	n, _ := s.GetNode(ctx, "run-1", "node-a")

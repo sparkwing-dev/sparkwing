@@ -1,10 +1,12 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +16,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
@@ -23,9 +26,24 @@ import (
 
 const egressLogPath = "/api/v1/runs/run/jobs/job/logs"
 
+type egressLogObjects struct {
+	blob.ObjectBackend
+	reads int
+	bytes map[string][]byte
+}
+
+func (o *egressLogObjects) Get(_ context.Context, key string) (io.ReadCloser, error) {
+	o.reads++
+	body, ok := o.bytes[key]
+	if !ok {
+		return nil, blob.ErrNotFound
+	}
+	return io.NopCloser(bytes.NewReader(body)), nil
+}
+
 type egressFixture struct {
 	store         *store.Store
-	objects       *logHTTPObjects
+	objects       *egressLogObjects
 	handler       http.Handler
 	meter         *egress.Meter
 	claim, member string
@@ -34,7 +52,7 @@ type egressFixture struct {
 func newEgressFixture(t *testing.T, cfg egress.Config) egressFixture {
 	t.Helper()
 	e, _, root := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
-	objects := &logHTTPObjects{bytes: map[string][]byte{}}
+	objects := &egressLogObjects{bytes: map[string][]byte{}}
 	meter := egress.New(cfg)
 	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {

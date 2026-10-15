@@ -80,7 +80,7 @@ func TestClaimNamedNodeRefusesAFinishedNode(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	seedClaimedNode(t, s, "run-done", "build")
-	if err := s.FinishNode(ctx, "run-done", "build", "success", "", nil); err != nil {
+	if err := s.FinishNode(ctx, "run-done", "build", "success", ""); err != nil {
 		t.Fatalf("FinishNode: %v", err)
 	}
 

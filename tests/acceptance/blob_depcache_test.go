@@ -1,4 +1,4 @@
-package acceptance
+package acceptance_test
 
 import (
 	"bytes"
@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -19,111 +18,66 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/depcache"
 	"github.com/sparkwing-dev/sparkwing/internal/depcachekey"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-type depcacheBoundarySigner struct {
-	blob.DataSigner
-	s       *store.Store
-	objects blob.ObjectBackend
-	next    int
-}
-
-func (s *depcacheBoundarySigner) tenant(ctx context.Context) (*store.Tenant, error) {
-	return s.s.ForTeam(ctx, store.DefaultTeam)
-}
-
-func (s *depcacheBoundarySigner) Upload(ctx context.Context, intent blob.UploadIntent) (blob.UploadTicket, error) {
-	tenant, err := s.tenant(ctx)
-	if err != nil {
-		return blob.UploadTicket{}, err
-	}
-	s.next++
-	ticket, err := tenant.ReserveBlobUpload(ctx, store.UploadReservationRequest{ID: fmt.Sprintf("archive-%d", s.next), Intent: intent, ExpiresAt: time.Now().Add(time.Minute)})
-	if err != nil {
-		return blob.UploadTicket{}, err
-	}
-	object, err := s.objects.Sign(ctx, capability.ObjectToSign{Method: http.MethodPut, Key: ticket.StagingKey, Size: ticket.Blob.Size, SHA256: string(ticket.Blob.Digest), ExpiresAt: ticket.ExpiresAt})
-	if err != nil {
-		return blob.UploadTicket{}, errors.Join(err, tenant.AbortBlobUpload(ctx, intent.Authority, ticket.ID))
-	}
-	return blob.UploadTicket{ID: ticket.ID, Transfer: boundaryTransfer(object)}, nil
-}
-
-func (s *depcacheBoundarySigner) Commit(ctx context.Context, request blob.CommitUpload) (blob.Receipt, error) {
-	tenant, err := s.tenant(ctx)
-	if err != nil {
-		return blob.Receipt{}, err
-	}
-	ticket, err := tenant.LookupBlobUpload(ctx, request.Authority, request.TicketID)
-	if err != nil {
-		return blob.Receipt{}, err
-	}
-	if err := s.objects.CommitObject(ctx, ticket.StagingKey, ticket.Blob); err != nil {
-		return blob.Receipt{}, err
-	}
-	receipt, err := tenant.CommitBlobUpload(ctx, store.VerifiedUploadCommit{Authority: request.Authority, TicketID: ticket.ID, Verified: ticket.Blob, ReplicaID: "fixture"})
-	if err != nil {
-		return blob.Receipt{}, err
-	}
-	return receipt, s.objects.DeleteObject(ctx, ticket.StagingKey)
-}
-
-func (s *depcacheBoundarySigner) Download(ctx context.Context, request blob.GetRequest) (blob.SignedTransfer, error) {
-	tenant, err := s.tenant(ctx)
-	if err != nil {
-		return blob.SignedTransfer{}, err
-	}
-	presence, err := tenant.ReadableBlobs(ctx, blob.HasManyRequest{Authority: request.Authority, Digests: []blob.Digest{request.Digest}})
-	if err != nil {
-		return blob.SignedTransfer{}, err
-	}
-	if len(presence.Present) != 1 {
-		return blob.SignedTransfer{}, blob.ErrDigestNotReadable
-	}
-	var size int64
-	if err := s.s.DB().QueryRowContext(ctx, "SELECT size FROM blobs WHERE team=? AND digest=?", store.DefaultTeam, request.Digest).Scan(&size); err != nil {
-		return blob.SignedTransfer{}, err
-	}
-	key, err := blob.ObjectKey(string(store.DefaultTeam), request.Digest)
-	if err != nil {
-		return blob.SignedTransfer{}, err
-	}
-	object, err := s.objects.Sign(ctx, capability.ObjectToSign{Method: http.MethodGet, Key: key, Size: size, SHA256: string(request.Digest), ExpiresAt: time.Now().Add(time.Minute)})
-	return boundaryTransfer(object), err
-}
-
-func boundaryTransfer(object capability.SignedObject) blob.SignedTransfer {
-	return blob.SignedTransfer{URL: object.URL, Headers: object.Headers, Size: object.Size, Digest: blob.Digest(object.SHA256), ExpiresAt: object.ExpiresAt}
-}
-
-// CheckBlobDepcache joins archive recovery to physical transfers and persisted upload/record transactions.
-func CheckBlobDepcache(ctx context.Context, root string, objects blob.ObjectBackend, transfers blob.HTTPClient, corrupt func(string) error, seed [16]byte) (err error) {
+func checkBlobDepcache(ctx context.Context, root string, objects blob.ObjectBackend, transfers blob.HTTPClient, corrupt func(string) error, seed [16]byte) (err error) {
 	path := filepath.Join(root, "archives.db")
 	s, err := store.Open(path)
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
-	authority, identity, err := seedDepcacheBoundary(ctx, s)
+	_, identity, err := seedDepcacheBoundary(ctx, s)
 	if err != nil {
 		return err
 	}
-	signer := &depcacheBoundarySigner{s: s, objects: objects}
-	data := depcacheblob.Data{Bytes: blob.NewSignedStore(blob.SignedStoreOptions{Signer: signer, HTTPClient: transfers}), Authority: authority, Identity: identity, Budget: blob.Budget{Deadline: time.Now().Add(time.Minute)}}
-	tenant, err := s.ForTeam(ctx, store.DefaultTeam)
+	binding, err := bindStorageData(ctx, s, objects, identity.CapabilityRef)
 	if err != nil {
 		return err
 	}
-	data.Records = tenant.BlobRecords(storage.BlobManifests{Objects: objects})
+	authority, identity := binding.Authority, binding.Authority.Upload.Value
+	settlement, receipt, err := settleStorageProbe(ctx, binding, objects, transfers, seed[:])
+	if err != nil {
+		return err
+	}
+	data := depcacheblob.Data{Bytes: blob.NewSignedStore(blob.SignedStoreOptions{Signer: binding.Signer, HTTPClient: transfers}), Records: binding.Records, Authority: authority, Identity: identity, Budget: blob.Budget{Deadline: time.Now().Add(time.Minute)}}
 	output := blob.OutputData{Bytes: data.Bytes, Records: data.Records, Authority: authority, Identity: identity, Pipeline: "fixture", Budget: data.Budget}
+	attempt := identity.Attempt.Value
+	accepted := runspec.Spec{Hash: "spec", PlanHash: "plan", Request: runspec.SealedRequest{Request: runspec.Request{Team: identity.Team, Pipeline: "fixture", Git: runspec.Git{Repository: runspec.Repository{Key: authority.Repo}}}}}
+	raw, err := json.Marshal(accepted)
+	if err != nil {
+		return err
+	}
+	input := nodehost.NodeInput{Accepted: nodehost.AcceptedRun{RunID: identity.RunID, Spec: raw, SpecHash: string(accepted.Hash), PlanHash: string(accepted.PlanHash)}, NodeID: attempt.NodeID, Attempt: attempt.Attempt, Generation: attempt.Generation, Authority: nodehost.ClaimAuthority{Holder: "logger", CapabilityPrefix: identity.CapabilityRef}, Storage: nodehost.StorageBinding{Bytes: data.Bytes, Records: data.Records, Authority: authority}}
 	body := seed[:]
 	if seed[0]%2 == 0 {
 		body = nil
 	}
-	result, err := output.Put(ctx, body)
+	var result blob.Record
+	if body == nil {
+		result, err = output.Put(ctx, body)
+	} else {
+		body, err = json.Marshal(seed)
+		if err != nil {
+			return err
+		}
+		writer := nodehost.OutputRecords{Bind: func(context.Context, nodehost.NodeInput) (nodehost.JobUpload, error) {
+			return nodehost.JobUpload{Identity: identity, Authority: authority, Key: blob.ResultRecordKey(attempt, authority.Repo, authority.Ref.Scope, "fixture", blob.KindOutput)}, nil
+		}}
+		key, writeErr := writer.PublishOutput(ctx, input, body)
+		if writeErr != nil {
+			return fmt.Errorf("store host output: %w", writeErr)
+		}
+		hit, readErr := data.Records.LookupRecord(ctx, blob.RecordLookup{Authority: authority, Key: *key, Budget: data.Budget})
+		if readErr != nil || !hit.Found {
+			return fmt.Errorf("read host output record: %v", readErr)
+		}
+		result = hit.Record
+	}
 	if err != nil {
 		return fmt.Errorf("store physical output: %w", err)
 	}
@@ -148,14 +102,18 @@ func CheckBlobDepcache(ctx context.Context, root string, objects blob.ObjectBack
 		return err
 	}
 	artifactData := artifacts.Data{Bytes: data.Bytes, Records: data.Records, Authority: authority, Identity: identity, Pipeline: "fixture", Budget: data.Budget}
-	manifest, err := artifacts.Capture(ctx, artifactData, source, []string{"module"}, func(string) {})
+	publisher := nodehost.ArtifactRecords{Bind: func(context.Context, nodehost.NodeInput) (nodehost.JobUpload, error) {
+		return nodehost.JobUpload{Identity: identity, Authority: authority, Key: blob.ResultRecordKey(attempt, authority.Repo, authority.Ref.Scope, "fixture", blob.KindManifest)}, nil
+	}}
+	manifestKey, err := publisher.Publish(ctx, input, source, []string{"module"}, func(string) {})
 	if err != nil {
-		return fmt.Errorf("store physical artifacts: %w", err)
+		return fmt.Errorf("store host artifacts: %w", err)
 	}
-	manifestHit, err := data.Records.LookupRecord(ctx, blob.RecordLookup{Authority: authority, Key: manifest.Key, Budget: data.Budget})
+	manifestHit, err := data.Records.LookupRecord(ctx, blob.RecordLookup{Authority: authority, Key: *manifestKey, Budget: data.Budget})
 	if err != nil || !manifestHit.Found {
 		return fmt.Errorf("read physical artifact manifest: %v", err)
 	}
+	manifest := manifestHit.Record
 	if _, err := data.Records.CommitRecord(ctx, blob.CommitRecordRequest{Authority: authority, Source: identity, Key: memoKey, Digest: result.Digest, ManifestDigest: runspec.Optional[blob.Digest]{Set: true, Value: manifest.Digest}, Members: manifestHit.Members}); err != nil {
 		return fmt.Errorf("store physical memo: %w", err)
 	}
@@ -170,12 +128,17 @@ func CheckBlobDepcache(ctx context.Context, root string, objects blob.ObjectBack
 	if err != nil {
 		return err
 	}
-	s, signer.s = reopened, reopened
-	tenant, err = s.ForTeam(ctx, store.DefaultTeam)
+	s = reopened
+	binding, err = bindStorageData(ctx, s, objects, identity.CapabilityRef)
 	if err != nil {
 		return err
 	}
-	data.Records = tenant.BlobRecords(storage.BlobManifests{Objects: objects})
+	if replay, err := binding.Signer.Commit(ctx, settlement); err != nil || replay != receipt {
+		return fmt.Errorf("reopened upload settlement replay differs: %+v: %v", replay, err)
+	}
+	data.Bytes = blob.NewSignedStore(blob.SignedStoreOptions{Signer: binding.Signer, HTTPClient: transfers})
+	data.Records = binding.Records
+	output.Bytes = data.Bytes
 	output.Records = data.Records
 	if got, err := output.Read(ctx, result.Key); err != nil || !bytes.Equal(got, body) {
 		return fmt.Errorf("reopened physical output differs: %v", err)
@@ -188,7 +151,7 @@ func CheckBlobDepcache(ctx context.Context, root string, objects blob.ObjectBack
 	if err != nil || !copied.Hit.Found || !bytes.Equal(copied.Output, body) || !copied.Hit.Manifest.Set || copied.Hit.Manifest.Value != manifest.Digest {
 		return fmt.Errorf("materialize physical memo: %+v: %v", copied, err)
 	}
-	artifactData.Records = data.Records
+	artifactData.Bytes, artifactData.Records = data.Bytes, data.Records
 	if err := os.Mkdir(filepath.Join(root, "staged"), 0o700); err != nil {
 		return err
 	}
@@ -227,7 +190,19 @@ func CheckBlobDepcache(ctx context.Context, root string, objects blob.ObjectBack
 	if body, err := os.ReadFile(filepath.Join(destination, "module")); err != nil || !bytes.Equal(body, payload) {
 		return fmt.Errorf("failed archive read replaced destination: %v", err)
 	}
-	return checkDepcacheColdSave(ctx, data, root, spec, key, hit.Record.Digest, append(bytes.Clone(payload), seed[:]...), objects)
+	if err := checkDepcacheColdSave(ctx, data, root, spec, key, hit.Record.Digest, append(bytes.Clone(payload), seed[:]...), objects); err != nil {
+		return err
+	}
+	if _, err := s.DB().ExecContext(ctx, "UPDATE capabilities SET revoked_at=? WHERE prefix=?", time.Now().UnixNano(), identity.CapabilityRef); err != nil {
+		return err
+	}
+	if _, err := binding.Signer.Commit(ctx, settlement); err == nil {
+		return errors.New("revoked writer replayed settled upload")
+	}
+	if _, err := binding.Records.LookupRecord(ctx, blob.RecordLookup{Authority: authority, Key: result.Key}); err == nil {
+		return errors.New("revoked writer read output record")
+	}
+	return nil
 }
 
 func checkDepcacheScopes(ctx context.Context, data depcacheblob.Data, key, destination string, seed [16]byte) error {
@@ -300,6 +275,10 @@ func seedDepcacheBoundary(ctx context.Context, s *store.Store) (blob.Authority, 
 	if err != nil {
 		return blob.Authority{}, blob.UploadIdentity{}, err
 	}
+	return seedStorageJobClaim(ctx, s, commit)
+}
+
+func seedStorageJobClaim(ctx context.Context, s *store.Store, commit store.SegmentCommit) (blob.Authority, blob.UploadIdentity, error) {
 	var raw []byte
 	if err := s.DB().QueryRowContext(ctx, "SELECT authority_json FROM capabilities WHERE prefix=?", commit.Actor.CapabilityPrefix).Scan(&raw); err != nil {
 		return blob.Authority{}, blob.UploadIdentity{}, err
@@ -352,4 +331,54 @@ SELECT ?,?,team,subject_kind,subject_id,audience,?,'award',1,?,bind_kind,bind_ru
 	identity := blob.UploadIdentity{Kind: blob.UploadJob, Team: c.Team, RunID: c.Binding.RunID, Principal: blob.Principal(c.Subject.ID), CapabilityRef: c.Prefix, Attempt: attempt}
 	authority := blob.Authority{CapabilityRef: c.Prefix, Principal: identity.Principal, Attempt: attempt, Repo: "gh:1", Ref: blob.RefFacts{Scope: blob.RefScope{Ref: "main"}}}
 	return authority, identity, nil
+}
+
+func bindStorageData(ctx context.Context, s *store.Store, objects blob.ObjectBackend, prefix string) (controller.DataBinding, error) {
+	data := &controller.DataController{Store: s, Objects: objects}
+	controller.New(s, nil).WithDataController(data)
+	p, err := s.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
+	if err != nil {
+		return controller.DataBinding{}, err
+	}
+	return data.BindData(ctx, capability.Authorized{
+		Principal: p, Binding: p.Capability.Binding, Target: capability.Target{Team: p.Capability.Team},
+		Access: capability.AccessRule{Credential: capability.CredentialClaim, Grants: p.Capability.Grants, Binding: capability.BindData, Liveness: capability.LiveSensitive},
+	})
+}
+
+func settleStorageProbe(ctx context.Context, binding controller.DataBinding, objects blob.ObjectBackend, transfers blob.HTTPClient, body []byte) (blob.CommitUpload, blob.Receipt, error) {
+	authority := binding.Authority
+	intent := blob.UploadIntent{Authority: authority, Identity: authority.Upload.Value, Digest: storageDigest(body), Size: int64(len(body))}
+	forged := intent
+	forged.Identity.Attempt.Value.Generation++
+	if _, err := binding.Signer.Upload(ctx, forged); err == nil {
+		return blob.CommitUpload{}, blob.Receipt{}, errors.New("forged uploader obtained a ticket")
+	}
+	ticket, err := binding.Signer.Upload(ctx, intent)
+	if err != nil {
+		return blob.CommitUpload{}, blob.Receipt{}, err
+	}
+	request := blob.CommitUpload{Authority: authority, TicketID: ticket.ID}
+	if _, err := binding.Signer.Commit(ctx, request); !errors.Is(err, blob.ErrNotFound) {
+		return request, blob.Receipt{}, fmt.Errorf("unverified ticket settled: %v", err)
+	}
+	response, err := transfers.Transfer(ctx, ticket.Transfer, bytes.NewReader(body))
+	if response != nil {
+		err = errors.Join(err, response.Close())
+	}
+	if err != nil {
+		return request, blob.Receipt{}, err
+	}
+	receipt, err := binding.Signer.Commit(ctx, request)
+	if err != nil || receipt.Identity != intent.Identity || receipt.Digest != intent.Digest {
+		return request, receipt, fmt.Errorf("verified ticket settlement differs: %+v: %v", receipt, err)
+	}
+	key := "teams/" + intent.Identity.Team + "/pending/" + ticket.ID
+	if err := objects.CommitObject(ctx, key, blob.Blob{Team: intent.Identity.Team, Digest: intent.Digest, Size: intent.Size}); !errors.Is(err, blob.ErrNotFound) {
+		return request, receipt, fmt.Errorf("settlement retained staging: %v", err)
+	}
+	if replay, err := binding.Signer.Commit(ctx, request); err != nil || replay != receipt {
+		return request, receipt, fmt.Errorf("settlement replay differs: %+v: %v", replay, err)
+	}
+	return request, receipt, nil
 }

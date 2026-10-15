@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -23,7 +22,7 @@ func capacityBackend(t *testing.T) (*store.Store, backend.Backend) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	return st, backend.NewStoreBackend(st, paths.Paths{Root: dir}, nil)
+	return st, backend.NewStoreBackend(st, nil)
 }
 
 func measure(t *testing.T, st *store.Store, pipeline string, n int) {

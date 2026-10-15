@@ -37,7 +37,7 @@ func TestCountNodesByQueueState_SeparatesEveryOutstandingState(t *testing.T) {
 	if err := s.StartNode(ctx, "run-q", "running"); err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	if err := s.FinishNode(ctx, "run-q", "done", "success", "", nil); err != nil {
+	if err := s.FinishNode(ctx, "run-q", "done", "success", ""); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
 
@@ -319,7 +319,7 @@ func TestNodeSettlement_ReadsTheNodesOwnClaimCredential(t *testing.T) {
 	if err := s.StartNode(ctx, "run-settled", "metered"); err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	if err := s.FinishNode(ctx, "run-settled", "metered", "success", "", nil); err != nil {
+	if err := s.FinishNode(ctx, "run-settled", "metered", "success", ""); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
 
@@ -345,7 +345,7 @@ func TestNodeSettlement_ReadsTheNodesOwnClaimCredential(t *testing.T) {
 	if err := s.StartNode(ctx, "run-settled-local", "plain"); err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	if err := s.FinishNode(ctx, "run-settled-local", "plain", "success", "", nil); err != nil {
+	if err := s.FinishNode(ctx, "run-settled-local", "plain", "success", ""); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
 	local, err := s.NodeSettlement(ctx, "run-settled-local", "plain")

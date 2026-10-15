@@ -1,4 +1,4 @@
-package acceptance
+package acceptance_test
 
 import (
 	"bytes"
@@ -15,8 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// CheckBlobLogRecords joins physical signed uploads to persisted, authorized log ranges.
-func CheckBlobLogRecords(ctx context.Context, root string, transport blob.LogTransport, objects logseg.SegmentObjects, transfers blob.HTTPClient, seed [16]byte, count int) (err error) {
+func checkBlobLogRecords(ctx context.Context, root string, transport blob.LogTransport, objects logseg.SegmentObjects, transfers blob.HTTPClient, seed [16]byte, count int) (err error) {
 	path := filepath.Join(root, "physical-logs.db")
 	s, err := store.Open(path)
 	if err != nil {

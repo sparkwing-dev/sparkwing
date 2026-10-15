@@ -236,7 +236,7 @@ func TestDepcacheRecords(t *testing.T) {
 			if backend.reader != nil && !backend.reader.closed {
 				t.Fatal("failed cache left its reader open")
 			}
-			stages, err := filepath.Glob(filepath.Join(input.Entry.Directory, ".sparkwing-cache-*"))
+			stages, err := filepath.Glob(filepath.Join(input.Entry.Directory, ".depcache-restore-*"))
 			if err != nil || len(stages) != 0 {
 				t.Fatalf("cache left staging files: %v %v", stages, err)
 			}

@@ -16,7 +16,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
-	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 )
@@ -99,7 +98,7 @@ func storageS3(t *testing.T) (*blob.S3, collectionS3) {
 
 func checkStorageS3Collection(t *testing.T) {
 	objects, transport := storageS3(t)
-	if err := acceptance.CheckBlobCollection(t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: transport}); err != nil {
+	if err := checkBlobCollection(t.Context(), t.TempDir(), objects, blob.TransferClient{Transport: transport}); err != nil {
 		t.Fatal(err)
 	}
 	if len(transport.objects) != 0 {
@@ -115,7 +114,7 @@ func checkStorageS3Logs(t *testing.T) {
 		if lost {
 			transfers = storageLostResponse{transport}
 		}
-		if err := acceptance.CheckBlobLogRecords(t.Context(), t.TempDir(), signing, objects, blob.TransferClient{Transport: transfers}, seed, 1+int(ordinal%17)); err != nil {
+		if err := checkBlobLogRecords(t.Context(), t.TempDir(), signing, objects, blob.TransferClient{Transport: transfers}, seed, 1+int(ordinal%17)); err != nil {
 			t.Fatal(err)
 		}
 		return true

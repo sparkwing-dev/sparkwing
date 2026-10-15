@@ -1,10 +1,7 @@
 package s3
 
 import (
-	"bytes"
 	"context"
-	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -18,8 +15,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/johannesboyne/gofakes3"
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
-
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
 const testBucket = "sparkwing-test"
@@ -62,109 +57,11 @@ func fakeS3(t *testing.T) *awss3.Client {
 	return client
 }
 
-func TestArtifactStore_RoundTrip(t *testing.T) {
+func TestMeasurementStore_UsageTotalsStoredBytesAndObjects(t *testing.T) {
 	t.Parallel()
 	client := fakeS3(t)
 
-	s := NewArtifactStore(testBucket, "cache", client)
-	ctx := context.Background()
-
-	if err := s.PutIfAbsent(ctx, "abcd1234", bytes.NewReader([]byte("hello"))); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
-
-	rc, err := s.Get(ctx, "abcd1234")
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	got, _ := io.ReadAll(rc)
-	rc.Close()
-	if string(got) != "hello" {
-		t.Fatalf("Get = %q", got)
-	}
-
-	if _, err := s.Get(ctx, "missing"); !errors.Is(err, storage.ErrNotFound) {
-		t.Fatalf("Get(missing) err = %v, want ErrNotFound", err)
-	}
-
-}
-
-func TestArtifactStore_PrefixIsolation(t *testing.T) {
-	t.Parallel()
-	client := fakeS3(t)
-
-	a := NewArtifactStore(testBucket, "cache", client)
-	b := NewArtifactStore(testBucket, "other", client)
-	ctx := context.Background()
-
-	if err := a.PutIfAbsent(ctx, "k", bytes.NewReader([]byte("A"))); err != nil {
-		t.Fatalf("Put a: %v", err)
-	}
-	if err := b.PutIfAbsent(ctx, "k", bytes.NewReader([]byte("B"))); err != nil {
-		t.Fatalf("Put b: %v", err)
-	}
-	rc, _ := a.Get(ctx, "k")
-	gotA, _ := io.ReadAll(rc)
-	rc.Close()
-	rc, _ = b.Get(ctx, "k")
-	gotB, _ := io.ReadAll(rc)
-	rc.Close()
-	if string(gotA) != "A" || string(gotB) != "B" {
-		t.Fatalf("isolation broken: a=%q b=%q", gotA, gotB)
-	}
-}
-
-func TestArtifactStore_List(t *testing.T) {
-	t.Parallel()
-	client := fakeS3(t)
-
-	s := NewArtifactStore(testBucket, "cache", client)
-	ctx := context.Background()
-
-	put := func(key string) {
-		t.Helper()
-		if err := s.PutIfAbsent(ctx, key, bytes.NewReader([]byte("x"))); err != nil {
-			t.Fatalf("Put %s: %v", key, err)
-		}
-	}
-	put("runs/abc/state.ndjson")
-	put("runs/def/state.ndjson")
-	put("bin/some-key")
-
-	got, err := s.List(ctx, "runs/")
-	if err != nil {
-		t.Fatalf("List runs/: %v", err)
-	}
-	want := map[string]bool{
-		"runs/abc/state.ndjson": true,
-		"runs/def/state.ndjson": true,
-	}
-	if len(got) != len(want) {
-		t.Fatalf("List runs/ = %v, want %v", got, want)
-	}
-	for _, k := range got {
-		if !want[k] {
-			t.Errorf("unexpected key %q", k)
-		}
-	}
-
-	other := NewArtifactStore(testBucket, "other", client)
-	if err := other.PutIfAbsent(ctx, "runs/xyz/state.ndjson", bytes.NewReader([]byte("x"))); err != nil {
-		t.Fatalf("Put other: %v", err)
-	}
-	got, _ = s.List(ctx, "runs/")
-	for _, k := range got {
-		if strings.Contains(k, "xyz") {
-			t.Errorf("List leaked sibling-prefix key %q", k)
-		}
-	}
-}
-
-func TestArtifactStore_UsageTotalsStoredBytesAndObjects(t *testing.T) {
-	t.Parallel()
-	client := fakeS3(t)
-
-	s := NewArtifactStore(testBucket, "cache", client)
+	s := NewMeasurementStore(testBucket, "cache", client)
 	ctx := context.Background()
 
 	usage, err := s.Usage(ctx)
@@ -176,7 +73,7 @@ func TestArtifactStore_UsageTotalsStoredBytesAndObjects(t *testing.T) {
 	}
 
 	for key, body := range map[string]string{"a": "hello", "b": "worldly"} {
-		if err := s.PutIfAbsent(ctx, key, strings.NewReader(body)); err != nil {
+		if err := putMeasurement(ctx, client, "cache/"+key, body); err != nil {
 			t.Fatalf("Put %s: %v", key, err)
 		}
 	}
@@ -196,17 +93,16 @@ func TestArtifactStore_UsageTotalsStoredBytesAndObjects(t *testing.T) {
 	}
 }
 
-func TestArtifactStore_UsageIgnoresAnotherPrefix(t *testing.T) {
+func TestMeasurementStore_UsageIgnoresAnotherPrefix(t *testing.T) {
 	t.Parallel()
 	client := fakeS3(t)
 
 	ctx := context.Background()
-	mine := NewArtifactStore(testBucket, "mine", client)
-	theirs := NewArtifactStore(testBucket, "theirs", client)
-	if err := mine.PutIfAbsent(ctx, "k", strings.NewReader("1234")); err != nil {
+	mine := NewMeasurementStore(testBucket, "mine", client)
+	if err := putMeasurement(ctx, client, "mine/k", "1234"); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-	if err := theirs.PutIfAbsent(ctx, "k", strings.NewReader("123456789")); err != nil {
+	if err := putMeasurement(ctx, client, "theirs/k", "123456789"); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
 
@@ -240,10 +136,10 @@ func (b *endlessBucket) ListObjectsV2(
 	}, nil
 }
 
-func TestArtifactStore_UsageStopsAtItsPageCapAndSaysSo(t *testing.T) {
+func TestMeasurementStore_UsageStopsAtItsPageCapAndSaysSo(t *testing.T) {
 	t.Parallel()
 	bucket := &endlessBucket{}
-	s := NewArtifactStore(testBucket, "cache", bucket)
+	s := NewMeasurementStore(testBucket, "cache", bucket)
 	s.MaxUsagePages = 3
 
 	usage, err := s.Usage(context.Background())
@@ -261,12 +157,12 @@ func TestArtifactStore_UsageStopsAtItsPageCapAndSaysSo(t *testing.T) {
 	}
 }
 
-func TestArtifactStore_UsageStopsOnACancelledContext(t *testing.T) {
+func TestMeasurementStore_UsageStopsOnACancelledContext(t *testing.T) {
 	t.Parallel()
 	client := fakeS3(t)
 
-	s := NewArtifactStore(testBucket, "cache", client)
-	if err := s.PutIfAbsent(context.Background(), "a", strings.NewReader("x")); err != nil {
+	s := NewMeasurementStore(testBucket, "cache", client)
+	if err := putMeasurement(context.Background(), client, "cache/a", "x"); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
 
@@ -279,4 +175,9 @@ func TestArtifactStore_UsageStopsOnACancelledContext(t *testing.T) {
 	if !usage.Partial {
 		t.Error("a measurement cut short by its deadline reported a complete total")
 	}
+}
+
+func putMeasurement(ctx context.Context, client *awss3.Client, key, body string) error {
+	_, err := client.PutObject(ctx, &awss3.PutObjectInput{Bucket: aws.String(testBucket), Key: aws.String(key), Body: strings.NewReader(body)})
+	return err
 }

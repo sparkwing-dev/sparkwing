@@ -94,9 +94,7 @@ type Server struct {
 	computeAlarmOn bool
 
 	bucketUsageStore storage.UsageReporter
-	s3Logs           *s3LogStorage
 	logRetention     map[store.Team]int
-	logLifecycle     logLifecycle
 	egress           *egress.Meter
 
 	dashboardURL string

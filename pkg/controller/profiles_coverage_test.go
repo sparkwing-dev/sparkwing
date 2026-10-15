@@ -30,7 +30,7 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 				if id == "c" && mode == "cached" {
 					outcome = "cached"
 				}
-				if err := st.FinishNode(t.Context(), "r", id, outcome, "", nil); err != nil {
+				if err := st.FinishNode(t.Context(), "r", id, outcome, ""); err != nil {
 					t.Fatal(err)
 				}
 				cpu := int64(100)

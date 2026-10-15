@@ -3,47 +3,36 @@ package controller
 import (
 	"bytes"
 	"compress/gzip"
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"testing/quick"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-type logHTTPObjects struct {
-	blob.ObjectBackend
-	signed []string
-	reads  int
-	bytes  map[string][]byte
-}
-
-func (o *logHTTPObjects) SignLogPut(_ context.Context, key string, _ time.Time) (string, map[string]string, error) {
-	o.signed = append(o.signed, key)
-	return "https://objects.invalid/" + key, map[string]string{"If-None-Match": "*"}, nil
-}
-func (o *logHTTPObjects) Get(_ context.Context, key string) (io.ReadCloser, error) {
-	o.reads++
-	body, ok := o.bytes[key]
-	if !ok {
-		return nil, blob.ErrNotFound
-	}
-	return io.NopCloser(bytes.NewReader(body)), nil
-}
-
 func TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject(t *testing.T) {
 	e, _, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
-	objects := &logHTTPObjects{bytes: map[string][]byte{}}
+	objects, err := blob.NewFilesystem(blob.FilesystemOptions{
+		Directory: t.TempDir(), Endpoint: "https://controller.invalid", SigningKey: bytes.Repeat([]byte{41}, 32),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := objects.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	server := New(e.Store, nil).WithEngineController(e).WithDataController(&DataController{Store: e.Store, Objects: objects})
 	h := server.Handler()
 	response := engineClaimHTTP(t, h, raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"available_cores":1}`, 200)
@@ -61,12 +50,8 @@ func TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject(t *testing.T) 
 	}
 	response = engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/log-segments", string(encoded), 200)
 	var batch blob.LogUploadBatch
-	if err := json.Unmarshal(response.Body.Bytes(), &batch); err != nil || batch.RetentionClass != "r30" || len(objects.signed) != 3 {
+	if err := json.Unmarshal(response.Body.Bytes(), &batch); err != nil || batch.RetentionClass != "r30" || len(batch.Segments) != 2 || batch.ManifestURL == "" {
 		t.Fatalf("batch=%+v: %v", batch, err)
-	}
-	key, err := blob.LogObjectKey(subject, batch.RetentionClass, 1)
-	if err != nil {
-		t.Fatal(err)
 	}
 	plain := []byte("masked log\n")
 	var compressed bytes.Buffer
@@ -77,15 +62,20 @@ func TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject(t *testing.T) 
 	if err := z.Close(); err != nil {
 		t.Fatal(err)
 	}
-	objects.bytes[key] = compressed.Bytes()
 	digest := sha256.Sum256(compressed.Bytes())
 	first := store.Segment{Index: 1, Size: int64(len(plain)), StoredBytes: int64(compressed.Len()), Digest: hex.EncodeToString(digest[:])}
 	second := store.Segment{Index: 2, Offset: int64(len(plain)), Size: int64(len(plain)), StoredBytes: int64(compressed.Len()), Digest: first.Digest}
-	secondKey, err := blob.LogObjectKey(subject, batch.RetentionClass, 2)
-	if err != nil {
-		t.Fatal(err)
+	for _, slot := range batch.Segments {
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPut, slot.URL, bytes.NewReader(compressed.Bytes()))
+		for key, value := range slot.Headers {
+			request.Header.Set(key, value)
+		}
+		h.ServeHTTP(response, request)
+		if response.Code != http.StatusCreated {
+			t.Fatalf("log PUT: %d %s", response.Code, response.Body)
+		}
 	}
-	objects.bytes[secondKey] = compressed.Bytes()
 	for _, segment := range []store.Segment{first, second} {
 		encoded, err := json.Marshal(logCommitRequest{Subject: subject, Segments: []store.Segment{segment}})
 		if err != nil {
@@ -117,7 +107,15 @@ func TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject(t *testing.T) 
 	if strings.Contains(history.Body.String(), "holder") || strings.Contains(history.Body.String(), "capability") || !strings.Contains(history.Body.String(), `"attempt":1`) {
 		t.Fatalf("private or missing attempt projection: %s", history.Body.String())
 	}
-	initial := len(objects.signed)
+	var output bytes.Buffer
+	read, err := (logseg.CommittedReader{Records: tenant, Objects: objects}).Read(t.Context(), engineActor(a), blob.LogReadRequest{Subject: subject}, &output)
+	if err != nil || !read.Complete || !bytes.Equal(output.Bytes(), bytes.Repeat(plain, 2)) {
+		t.Fatalf("committed bytes = %q, %+v: %v", output.Bytes(), read, err)
+	}
+	response = engineClaimHTTP(t, h, claim.Capability, "GET", "/api/v1/runs/run/jobs/job/logs", "", http.StatusOK)
+	if !bytes.Equal(response.Body.Bytes(), output.Bytes()) {
+		t.Fatalf("controller log read = %q; want %q", response.Body.Bytes(), output.Bytes())
+	}
 	property := func(choice uint8, noise string) bool {
 		wrong := signing
 		identity := *signing.Subject.Attempt
@@ -139,7 +137,7 @@ func TestLogSubmissionRoutesCommitOnlyTheirExactAuthorizedSubject(t *testing.T) 
 			return false
 		}
 		response := engineClaimHTTP(t, h, claim.Capability, "POST", "/api/v1/runs/run/jobs/job/log-segments", string(encoded), http.StatusBadRequest)
-		return !strings.Contains(response.Body.String(), "https://objects") && len(objects.signed) == initial
+		return !strings.Contains(response.Body.String(), "https://controller.invalid")
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 30}); err != nil {
 		t.Fatal(err)

@@ -15,15 +15,12 @@ type remoteCache struct {
 	readable map[Digest]bool
 }
 
-func openRemoteCache(options RemoteCacheOptions, store Store) (RemoteCache, error) {
-	if options.Profile == "" || options.AuthorityRef == "" || options.Repo == "" || options.Records == nil || store == nil {
-		return nil, fmt.Errorf("remote cache requires a profile, repository authority, records and signed store")
+// OpenRemoteCache opens read-only storage with a repo-bound user authority.
+func OpenRemoteCache(options RemoteCacheOptions, store Store) (RemoteCache, error) {
+	if options.Profile == "" || options.Team == "" || options.Authority.CapabilityRef == "" || options.Authority.Principal == "" || options.Repo == "" || options.Authority.Repo != options.Repo || options.Records == nil || store == nil {
+		return nil, fmt.Errorf("remote cache requires a profile, tenant, bound repository authority, records and signed store")
 	}
 	return &remoteCache{options: options, store: store, readable: make(map[Digest]bool)}, nil
-}
-
-func (c *remoteCache) authority() Authority {
-	return Authority{CapabilityRef: c.options.AuthorityRef, Repo: c.options.Repo}
 }
 
 func (c *remoteCache) lookup(ctx context.Context, key RecordKey, budget Budget) (RecordLookupResult, error) {
@@ -38,13 +35,14 @@ func (c *remoteCache) lookup(ctx context.Context, key RecordKey, budget Budget) 
 	if err := ctx.Err(); err != nil {
 		return RecordLookupResult{}, budgetError(err)
 	}
-	result, err := c.options.Records.LookupRecord(ctx, RecordLookup{Authority: c.authority(), Key: key, Budget: budget, VerifiedDefaultOnly: true})
+	key.Team = c.options.Team
+	result, err := c.options.Records.LookupRecord(ctx, RecordLookup{Authority: c.options.Authority, Key: key, Budget: budget, VerifiedDefaultOnly: true})
 	if err != nil || !result.Found {
 		return RecordLookupResult{}, err
 	}
 	r := result.Record
 	f := r.RefFacts
-	if r.Key.Kind != key.Kind || r.Key.Scope.Repo != c.options.Repo || !f.Scope.Verified || !f.DefaultBranchVerified || f.AppDeliveryKey == "" || f.SHA == "" || f.DefaultBranch == "" || f.Scope.Ref != f.DefaultBranch || r.Key.Scope.Ref != f.Scope {
+	if r.Key.Team != key.Team || r.Key.Kind != key.Kind || r.Key.Scope.Repo != c.options.Repo || !f.Scope.Verified || !f.DefaultBranchVerified || f.AppDeliveryKey == "" || f.SHA == "" || f.DefaultBranch == "" || f.Scope.Ref != f.DefaultBranch || r.Key.Scope.Ref != f.Scope {
 		return RecordLookupResult{}, ErrDigestNotReadable
 	}
 	if r.Key.Scope.Pipeline != key.Scope.Pipeline || r.Key.Scope.Job != key.Scope.Job || r.Key.Scope.Key != key.Scope.Key || r.Key.Name != key.Name {
@@ -61,13 +59,13 @@ func (c *remoteCache) lookup(ctx context.Context, key RecordKey, budget Budget) 
 		digests = append(digests, m.Digest)
 	}
 	if key.Kind == KindMemo {
-		_, err = readMemoBytes(ctx, c.store, c.authority(), r.Key.Team, MemoHit{
+		_, err = readMemoBytes(ctx, c.store, c.options.Authority, r.Key.Team, MemoHit{
 			Found: true, Output: runspec.Optional[Digest]{Set: true, Value: r.Digest},
 			Manifest: r.ManifestDigest, Members: result.Members,
 		})
 	} else {
 		for _, d := range digests {
-			if _, err = verifyMemoBlob(ctx, c.store, c.authority(), d); err != nil {
+			if _, err = verifyMemoBlob(ctx, c.store, c.options.Authority, d); err != nil {
 				break
 			}
 		}
@@ -127,5 +125,5 @@ func (c *remoteCache) Artifact(ctx context.Context, digest Digest) (VerifiedRead
 	if !allowed {
 		return nil, ErrDigestNotReadable
 	}
-	return c.store.Get(ctx, GetRequest{Authority: c.authority(), Digest: digest})
+	return c.store.Get(ctx, GetRequest{Authority: c.options.Authority, Digest: digest})
 }
