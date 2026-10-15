@@ -59,7 +59,7 @@ func run(args []string) error {
 				credPGURL, credSecretsKey, credSecretsPreviousKey, credBootstrapAdminToken,
 				credLicense, credOIDCKey, credOIDCPublishedKey, credGitHubClientSecret, credGoogleClientSecret,
 				credGitHubAppKey, credGitHubAppWebhookSecret, credCloudFrontKey,
-				credBillingToken, credCreditsToken, credCacheGrantKey,
+				credBillingToken, credCacheGrantKey, credStripeAPIKey, credStripeWebhookSecret,
 			}, ", ")+
 			". An absent file leaves its feature off; docs/self-hosting.md says what each one turns on.")
 	cachePodURL := fs.String("cache-pod-url", "",
@@ -74,6 +74,7 @@ func run(args []string) error {
 		"base URL of the hosted checkout service that opens a Stripe Checkout Session "+
 			"when a team owner buys credits; the controller authenticates with the "+
 			credBillingToken+" credential. Empty sells no credits.")
+	paymentMode := fs.String("payment-mode", "", "Stripe callback mode: test or live. Requires stripe-api-key and stripe-webhook-secret in --credentials-dir. Empty disables settlement.")
 	operatorAccounts := fs.String("operator-accounts", "",
 		"comma-separated account ids whose signed-in dashboard sessions may use the "+
 			"operator console. No token reaches the console. Empty leaves it off.")
@@ -271,7 +272,7 @@ func run(args []string) error {
 	signUpGate := fs.String("signup-gate", string(store.SignUpOpen),
 		"open or waitlist. waitlist places every new account on the sign-up "+
 			"waitlist whatever the operator's stored setting says; open defers to "+
-			"that setting, which PUT /api/v1/signups changes. Existing accounts are "+
+			"that setting, which PUT /api/v1/operator/signups changes. Existing accounts are "+
 			"never affected.")
 	hsts := fs.Bool("hsts", false,
 		"assert that browsers reach this controller's dashboard over TLS: send "+
@@ -296,6 +297,10 @@ func run(args []string) error {
 	creds, err := readCredentials(*credentialsDir)
 	if err != nil {
 		return err
+	}
+	paymentVerifier, err := readPaymentAuthenticator(*credentialsDir, *paymentMode)
+	if err != nil {
+		return fmt.Errorf("payment configuration: %w", err)
 	}
 	egressCfg, egressNamed, err := readEgress()
 	if err != nil {
@@ -432,19 +437,6 @@ func run(args []string) error {
 		}
 	}
 
-	switch created, err := controller.EnsureCheckoutToken(ctx, st, creds.CreditsToken, time.Now().UTC()); {
-	case errors.Is(err, store.ErrSeededTokenRevoked):
-		// safety: a revoked credential is never seeded again; the controller
-		// starts without a checkout token so selling credits stops visibly.
-		fmt.Fprintln(os.Stderr, "sparkwing-controller: ERROR: the "+credCreditsToken+
-			" credential holds a checkout token that was revoked; it is not seeded again. "+
-			"Write a new sws_ value to the credential and to the checkout service, then restart.")
-	case err != nil:
-		return fmt.Errorf("%s credential: %w", credCreditsToken, err)
-	case created:
-		fmt.Fprintln(os.Stderr, "sparkwing-controller: checkout service token created from the "+credCreditsToken+" credential")
-	}
-
 	if strings.TrimSpace(*billingURL) != "" && creds.BillingToken == "" {
 		return errors.New("--billing-url is set but the " + credBillingToken + " credential is absent; " +
 			"the checkout service refuses a controller without its token")
@@ -456,6 +448,7 @@ func run(args []string) error {
 		WithTeamDownloadCaps(*teamDownloadFree, *teamDownloadFunded).
 		WithDashboardURL(*dashboardURL).
 		WithBillingCheckout(*billingURL, creds.BillingToken).
+		WithPayments(paymentVerifier, st).
 		WithOperatorAccounts(splitCSV(*operatorAccounts)).
 		WithCacheURL(*cacheURL).
 		WithCacheGrantKey(creds.CacheGrantKey).
@@ -781,8 +774,7 @@ func configureSecrets(ctx context.Context, srv *controller.Server, st *store.Sto
 		srv.WithSecretsCipher(keylessCipher{})
 		return nil
 	}
-	_, err = srv.ResealStoredSecrets(ctx)
-	return err
+	return nil
 }
 
 // safety: the generated key sits beside the database on its volume, so a

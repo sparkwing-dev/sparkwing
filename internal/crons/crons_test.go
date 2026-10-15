@@ -1234,18 +1234,19 @@ func fakeTimerHost(t *testing.T, home string, installed bool) crontimer.Host {
 	t.Helper()
 	root := t.TempDir()
 	h := crontimer.Host{
-		GOOS:       "linux",
-		Home:       root,
-		ConfigHome: filepath.Join(root, ".config"),
-		Binary:     nativeTimerFixtureBinary(),
-		PathEnv:    "/usr/bin:/bin",
-		Env:        map[string]string{"SPARKWING_HOME": home},
-		LogPath:    filepath.Join(home, "crons.log"),
-		UID:        1000,
-		Exec:       func(string, ...string) (string, error) { return "", nil },
+		GOOS:          "linux",
+		Home:          root,
+		ConfigHome:    filepath.Join(root, ".config"),
+		Binary:        nativeTimerFixtureBinary(),
+		PathEnv:       "/usr/bin:/bin",
+		SparkwingHome: home,
+		Version:       "v1.2.3",
+		LogPath:       filepath.Join(home, "crons.log"),
+		UID:           1000,
+		Exec:          func(context.Context, string, ...string) (string, error) { return "", nil },
 	}
 	if installed {
-		if _, err := crontimer.Install(h); err != nil {
+		if _, err := crontimer.Install(t.Context(), h); err != nil {
 			t.Fatalf("install the timer fixture: %v", err)
 		}
 	}

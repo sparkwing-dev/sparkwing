@@ -61,7 +61,6 @@ func (r *pipelineRun) materialize(env []string) error {
 	if err := resolveSparks(r.ctx, r.sparkwingDir, r.opts); err != nil {
 		return err
 	}
-	env = withWingdHost(env)
 	key, keyParts, err := bincache.ExplainCacheKey(r.sparkwingDir, env)
 	if err != nil {
 		return fmt.Errorf("read .sparkwing/ to weigh what it declares: %w", err)

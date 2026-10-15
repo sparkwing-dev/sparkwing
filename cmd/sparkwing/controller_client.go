@@ -2,14 +2,13 @@ package main
 
 import (
 	"context"
-	"net"
+	"errors"
 	"net/http"
 	"path/filepath"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
@@ -51,18 +50,11 @@ func controllerOptions(ctx context.Context, profileName string) (client.EngineOp
 		options.URL = profile.ControllerURL()
 		options.Bearer = func(context.Context) (string, error) { return profile.ControllerToken(), nil }
 	} else {
-		d, err := wingdclient.EnsureDaemon(ctx, wingdclient.Options{Version: installedVersion()})
+		home, err := wingd.HomeDir("")
 		if err != nil {
 			return options, nil, err
 		}
-		ready, problem, socket := d.APIReady(), d.APIError(), d.APISocket()
-		if err := d.Close(); err != nil {
-			return options, nil, err
-		}
-		if !ready || socket == "" {
-			return options, nil, &apierr.Error{Code: apierr.Unavailable, Message: "local controller API is unavailable", Hint: "run sparkwing doctor", Details: map[string]any{"reason": problem}}
-		}
-		return controllerSocketOptions(socket)
+		return localControllerOptions(ctx, home, wingdclient.QueryLocalController, resolveLocalServices)
 	}
 	return options, closeTransport, nil
 }
@@ -77,17 +69,45 @@ func controllerSocketOptions(socket string) (client.EngineOptions, func(), error
 		return client.EngineOptions{}, nil, &apierr.Error{Code: apierr.Unavailable, Message: "local controller returned a non-absolute API socket"}
 	}
 	socket = filepath.Clean(socket)
-	dialer := &net.Dialer{Timeout: 5 * time.Second}
-	transport := &controllerSocketTransport{socket: socket, Transport: &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return dialer.DialContext(ctx, "unix", socket)
-		},
-		MaxIdleConns: 16, MaxIdleConnsPerHost: 16,
-		IdleConnTimeout:       90 * time.Second,
-		ResponseHeaderTimeout: orchestrator.APIRequestTimeout + 15*time.Second,
-	}}
-	options := client.EngineOptions{URL: orchestrator.HostedAPIBaseURL, HTTP: &http.Client{
-		Timeout: orchestrator.APIRequestTimeout + 15*time.Second, Transport: transport,
-	}}
-	return options, transport.CloseIdleConnections, nil
+	hc := wingdclient.NewAPIClient(socket)
+	transport := &controllerSocketTransport{socket: socket, Transport: hc.Transport.(*http.Transport)}
+	hc.Transport = transport
+	return client.EngineOptions{URL: wingdclient.APIBaseURL, HTTP: hc}, transport.CloseIdleConnections, nil
+}
+
+func localControllerOptions(ctx context.Context, home string, query func(context.Context, string) (wingd.LocalStatus, error), resolve func(context.Context) (dashboardServices, error)) (client.EngineOptions, func(), error) {
+	if err := ctx.Err(); err != nil {
+		return client.EngineOptions{}, nil, err
+	}
+	if !filepath.IsAbs(home) {
+		return client.EngineOptions{}, nil, &apierr.Error{Code: apierr.Unavailable, Message: "local controller home must be absolute"}
+	}
+	status, err := query(ctx, home)
+	if err != nil && !errors.Is(err, wingdclient.ErrNoDaemon) {
+		return client.EngineOptions{}, nil, err
+	}
+	if err != nil || !status.Running {
+		services, err := resolve(ctx)
+		if err != nil {
+			return client.EngineOptions{}, nil, err
+		}
+		if services.lifecycle == nil || filepath.Clean(services.options.Home) != filepath.Clean(home) {
+			return client.EngineOptions{}, nil, &apierr.Error{Code: apierr.Unavailable, Message: "local controller lifecycle is unavailable or bound to another home"}
+		}
+		status, err = services.lifecycle.EnsureStarted(ctx, services.options)
+		if err != nil {
+			return client.EngineOptions{}, nil, err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return client.EngineOptions{}, nil, err
+	}
+	if !status.Running || status.PID <= 0 || status.Version == "" {
+		return client.EngineOptions{}, nil, &apierr.Error{Code: apierr.Unavailable, Message: "local controller has not established API readiness"}
+	}
+	socket, err := wingd.APISocketPath(home)
+	if err != nil {
+		return client.EngineOptions{}, nil, err
+	}
+	return controllerSocketOptions(socket)
 }

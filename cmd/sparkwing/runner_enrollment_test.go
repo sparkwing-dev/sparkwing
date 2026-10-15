@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -8,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
-	"github.com/sparkwing-dev/sparkwing/internal/agentservice"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/runners/service"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
@@ -58,9 +59,9 @@ func TestRunnerEnrollmentReachesServiceFailure(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	t.Setenv("SPARKWING_CONFIG", path)
 	called := false
-	service := runnerServicePlan{host: agentservice.Host{
+	service := runnerServicePlan{host: service.Host{
 		GOOS: "linux", Home: t.TempDir(), ConfigHome: t.TempDir(), Binary: "/test/sparkwing-runner", ConfigPath: path,
-		Exec: func(name string, args ...string) (string, error) {
+		Exec: func(_ context.Context, name string, args ...string) (string, error) {
 			called = true
 			return "fixture service failure", errors.New("service failed")
 		},

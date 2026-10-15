@@ -13,7 +13,6 @@ import (
 const modulePath = "github.com/sparkwing-dev/sparkwing"
 
 const (
-	defaultTeamCli      = "a local CLI command over the laptop's own state database, where every run is created in the default team"
 	defaultTeamCrons    = "local workspace crons launch runs into the laptop's state database, in the default team"
 	defaultTeamState    = "the laptop and admission-daemon state backend, whose runs and triggers are created through Store.CreateRun and the unbound local claim, so every row it touches is the default team's"
 	defaultTeamConsumer = "the local trigger consumer claims through ClaimNextTrigger, whose unbound claimant reaches only the default team's queue, so every trigger it settles is the default team's"
@@ -29,18 +28,10 @@ const (
 // team is the one it means; a call nobody vouched for is how another team's
 // rows go unread.
 var defaultTeamCallers = map[string]string{
-	"cmd/sparkwing.(cronLauncher).Active":                              defaultTeamCrons,
-	"cmd/sparkwing.existingSubmissionResult":                           defaultTeamCli,
-	"cmd/sparkwing.findExistingSubmission":                             defaultTeamCli,
-	"cmd/sparkwing.persistSubmission":                                  defaultTeamCli,
-	"cmd/sparkwing.runDebugRelease":                                    defaultTeamCli,
 	"internal/backend.(*StoreBackend).GetRun":                          defaultTeamBackend,
 	"internal/backend.(*StoreBackend).ListEventsAfter":                 defaultTeamBackend,
 	"internal/backend.(*StoreBackend).ListNodes":                       defaultTeamBackend,
 	"internal/localsecrets.(*storeSource).read":                        defaultTeamSecrets,
-	"internal/orchestrator.(*HeldRunStore).FinalizeCancelledRuns":      defaultTeamStores,
-	"internal/orchestrator.(*HeldRunStore).IsRunTerminal":              defaultTeamStores,
-	"internal/orchestrator.(*HeldRunStore).finalizeRun":                defaultTeamStores,
 	"internal/orchestrator.(*StandaloneStores).Find":                   defaultTeamStores,
 	"internal/orchestrator.(consumerRuntime).shouldExit":               defaultTeamConsumer,
 	"internal/orchestrator.(localState).AcknowledgeNodeExecutionStart": defaultTeamState,

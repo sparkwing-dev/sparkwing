@@ -92,12 +92,6 @@ const (
 	// ScopeAdmin is the deployment operator's scope. No team membership
 	// grants it.
 	ScopeAdmin = "admin"
-	// ScopeCreditsGrant is the hosted checkout service's scope. It records a
-	// paid grant for a verified payment, reverses a payment, holds the team a
-	// payment funded, and reads the ledger's units, and reaches nothing else.
-	// Only the operator mints it; no team's token may carry it, and the admin
-	// scope does not stand in for it.
-	ScopeCreditsGrant = "credits.grant"
 	// ScopeClaimsLaunch is the launcher's scope. It claims any team's ready
 	// node of a controller-dispatched run, and the claim's token, for the Job
 	// the launcher builds, and it marks that claim as Cloud compute. It reads
@@ -125,7 +119,6 @@ var allScopes = []string{
 	ScopeApprovalsWrite,
 	ScopeTeamAdmin,
 	ScopeAdmin,
-	ScopeCreditsGrant,
 	ScopeClaimsLaunch,
 	ScopeStorageCount,
 }
@@ -641,31 +634,6 @@ func requireScope(scope string, next http.Handler, alternatives ...string) http.
 			Principal:    p.label(),
 			Message:      "token lacks required scope: " + scope,
 		})
-	})
-}
-
-// safety: the checkout service's scope reaches money, so only a service token
-// minted with it passes. No admin token, session or anonymous caller does,
-// even on a controller that serves without credentials.
-func requireServiceScope(scope string, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p, ok := PrincipalFromContext(r.Context())
-		if !ok || p == nil {
-			writeAuthError(w, http.StatusUnauthorized, authErrorBody{
-				Code: "unauthenticated", Message: "this route answers a service token carrying " + scope,
-			})
-			return
-		}
-		if p.Kind != store.TokenKindService || p.TokenPrefix == "" || p.session != "" || p.AccountID != "" || !p.HasScope(scope) {
-			writeAuthError(w, http.StatusForbidden, authErrorBody{
-				Code:         "missing_scope",
-				MissingScope: scope,
-				Principal:    p.label(),
-				Message:      "only a service token carrying " + scope + " reaches this route",
-			})
-			return
-		}
-		next.ServeHTTP(w, r)
 	})
 }
 

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"syscall"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
@@ -16,7 +17,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/toolchain"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
@@ -113,20 +116,38 @@ func warmLocalPipeline(ctx context.Context, dir string, env []string, diagnostic
 	if err != nil {
 		return result, err
 	}
+	sdk := engine.GoSDK
+	result.Language = "go"
 	if ts {
-		if err := pipelineentry.InstallTypeScript(ctx, dir, env, diagnostics); err != nil {
-			return result, err
-		}
-		result.Language, result.Status, result.Path = "typescript", "prepared", filepath.Join(dir, "node_modules")
-		return result, nil
+		sdk = engine.TypeScriptSDK
+		result.Language = "typescript"
 	}
-	prepared, err := prepareInstalledSDK(ctx, dir, engine.GoSDK, env, diagnostics)
+	pin, err := engine.ReadPin(dir, sdk)
+	if err != nil {
+		return result, err
+	}
+	mode, err := toolchain.ParseMode(os.Getenv(toolchainModeEnv))
+	if err != nil {
+		return result, err
+	}
+	resolver, err := engine.NewResolver(engine.Config{Mode: mode})
+	if err != nil {
+		return result, err
+	}
+	selected, err := resolver.Resolve(ctx, pin, releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH})
+	if err != nil {
+		return result, err
+	}
+	if err := writeEngineNotices(diagnostics, selected.Notices); err != nil {
+		return result, err
+	}
+	prepared, err := selected.InstallSDK(ctx, engine.SDKInstallRequest{Directory: filepath.Dir(dir), PipelineDir: filepath.Base(dir), SDK: sdk, Environment: env})
 	if err != nil {
 		return result, err
 	}
 	if len(prepared.Command) == 0 || !filepath.IsAbs(prepared.Command[0]) {
 		return result, errors.New("Go preparation returned an invalid command")
 	}
-	result.Language, result.Status, result.Path = "go", "prepared", prepared.Command[0]
+	result.Status, result.Path = "prepared", prepared.Command[0]
 	return result, nil
 }

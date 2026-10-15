@@ -13,9 +13,9 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
-	"github.com/sparkwing-dev/sparkwing/internal/agentservice"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/runners/service"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -45,10 +45,10 @@ func newRunnersFixture(t *testing.T) *runnersFixture {
 	if runtime.GOOS == "windows" {
 		f.binary = "C:/usr/local/bin/sparkwing-runner.exe"
 	}
-	t.Cleanup(swapRunnerServiceHost(func(configPath string) (agentservice.Host, error) {
-		return agentservice.Host{
+	t.Cleanup(swapRunnerServiceHost(func(configPath string) (service.Host, error) {
+		return service.Host{
 			GOOS: "linux", Home: home, ConfigHome: filepath.Join(home, ".config"), Binary: f.binary, ConfigPath: configPath,
-			Exec: func(name string, args ...string) (string, error) {
+			Exec: func(_ context.Context, name string, args ...string) (string, error) {
 				call := strings.TrimSpace(name + " " + strings.Join(args, " "))
 				calls = append(calls, call)
 				f.timeline = append(f.timeline, call)
@@ -130,7 +130,7 @@ func (f *runnersFixture) RevokeToken(_ context.Context, prefix string) (controll
 	return controllerwire.TokenRevoked{}, errors.New("token missing")
 }
 
-func swapRunnerServiceHost(fn func(string) (agentservice.Host, error)) func() {
+func swapRunnerServiceHost(fn func(string) (service.Host, error)) func() {
 	prev := runnerServiceHost
 	previousGOOS := runnerServiceGOOS
 	runnerServiceGOOS = "linux"
@@ -211,6 +211,7 @@ func TestRunnersAddMintsAScopedTokenAndWritesTheClaimModeConfig(t *testing.T) {
 
 	wantCalls := []string{
 		"systemctl --user show -p Version --value",
+		"systemctl --user show -p FragmentPath --value sparkwing-runner.service",
 		"systemctl --user daemon-reload",
 		"systemctl --user enable --now sparkwing-runner.service",
 	}

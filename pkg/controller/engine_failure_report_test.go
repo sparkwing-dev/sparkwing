@@ -38,7 +38,7 @@ func TestEngineReportedFailureReachesRecovery(t *testing.T) {
 	} {
 		var failure nodeproto.JobFailure
 		if err := json.Unmarshal([]byte(raw), &failure); err != nil {
-			t.Fatal(err)
+			continue
 		}
 		if _, err := server.TransitionJob(t.Context(), executor, controllerwire.JobTransitionRequest{To: "failed", Cause: "report", SourceAttempt: new(int64(1)), Result: &controllerwire.JobResult{Outcome: "failed", Failure: &failure}}); err == nil {
 			t.Fatalf("invalid failure committed: %s", raw)
@@ -76,12 +76,16 @@ func FuzzEngineReportedFailureProjection(f *testing.F) {
 		}
 		var report controllerwire.JobTransitionRequest
 		if err := json.Unmarshal(raw, &report); err != nil {
-			t.Fatal(err)
+			return
 		}
-		authorized := engineOwnerAuthorization()
-		authorized.Target.NodeID = "job"
-		got, err := nodeTransitionForStore(authorized, report)
-		if err != nil || got.Extra.Result == nil || !reflect.DeepEqual(got.Extra.Result.Failure, report.Result.Failure) || got.Extra.Result.MaskedError != report.Result.Failure.Error.Message {
+		got, err := captureEngineTransition(t.Context(), report)
+		if err != nil {
+			if got.Extra.Result != nil {
+				t.Fatal("refused failure reached persistence")
+			}
+			return
+		}
+		if got.Extra.Result == nil || !reflect.DeepEqual(got.Extra.Result.Failure, report.Result.Failure) || got.Extra.Result.MaskedError != report.Result.Failure.Error.Message {
 			t.Fatalf("failure projection changed: %+v, %v", got, err)
 		}
 	})

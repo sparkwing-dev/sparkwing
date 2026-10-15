@@ -1,8 +1,156 @@
 # W9 handoff
 
-W9 remains incomplete. The lead owns staging, commits, review, pipelines and native
-integration. This continuation began mid-merge at 0928e54ad. No Git write,
-Sparkwing binary, install, service-management command or release ran.
+W9 remains incomplete because native owner bindings and foreign contract shapes
+are still missing. This continuation began at 28366059d in the integration merge.
+No Git write, Sparkwing executable, service, install or release ran. The lead owns
+staging, commits, independent review, pipelines and native QA.
+
+## This continuation (session 9)
+
+All 60 unmerged paths have resolved contents or the selected deletion. No marker
+remains. The index stays unmerged under the brief's no-Git-writes rule. The lead
+must stage the resolutions. amendments-1.md and handoffs.md are unchanged. W9's
+final grammar is preserved. Incoming W2 controller implementations and W8's SDK
+installer replace duplicate W9 implementations, with amended wire data retained.
+
+### Implemented and deleted
+
+- Local, detached and standalone commands use sealed CreateRun, named trigger
+  claims and nodehost.RunHost. Real C4 preparation retains presence, origins,
+  alias/entrypoint, secret classification, risk checks, pauses, workers, no-memo,
+  cache defaults and publication selection. The native seam supplies captured
+  facts rather than constructing request semantics. A returned intake cannot
+  switch pipeline/purpose. Malformed/partial responses cannot expose a bearer.
+  Durable run handles retain the admitted ID through later cancellation.
+- Deleted run_detached.go, runs_consumer.go and their old persistence/consumer
+  tests. Replaced the old RunHostedCommand/HostClaimedTrigger paths. Shared
+  compiler/describe fixtures survive in cli_fixture_test.go. Dead argument,
+  source, index-environment and follow helpers are removed with obsolete tests.
+- Public trigger uses prepared source, exact selected-engine inspection and
+  sealed /runs intake. Deleted createRemoteTrigger, direct-data bundle upload,
+  worker.go and the separate here-host loop. Initial here/bundle/environment
+  requests fail before intake when their required contract/binding is missing.
+- __sdk-install delegates to engine/sdkinstall.Run. Cache warm calls the exact
+  verified engine's InstallSDK. The second CLI installer and duplicate tests are
+  gone. The remaining diagnostic writer masks inspection/warm output.
+- Deleted all crons*.go production files: 1,220 lines. Final schedule managers
+  handle observations and remote repository install/uninstall. Local registration,
+  pin and tick adapters check required bindings before effects. __tick passes its
+  explicit absolute Home into resolution. Existing managed timers use Refresh.
+- Local HTTP reuses an elected controller or starts through LocalLifecycle.
+  W8 NewAPIClient owns dialing, including Windows. Retained here credentials keep
+  the socket binding. Deleted the CLI host-environment injector and warm-up helper.
+  Removed wingd supervise; W8's spawn caller now invokes foreground wingd run.
+- Debug resume no longer opens the store or calls the old client writer. Its
+  adapter resolves the observed stable job identity and uses common output. It
+  refuses the absent C2 release policy before effects. Repository history uses
+  RunReader and propagates read failures. Deleted the dead stray-session sweep.
+- Deleted unused claim-token/child-run/launcher-sync/cancel client APIs and the
+  dead Pacer/backoff/advice/shedding chain. The bounded client sweep was net -638
+  lines. StateStoreOld and RunCoordination still keep other legacy client methods
+  live in W3. Removing that foreign runtime graph is still owner work.
+
+Against the starting HEAD, tracked cmd/sparkwing and pkg/controller/client paths
+remove **9,252 lines**, including tests, with **33 whole-file deletions**. This is
+not a net reduction claim and excludes new untracked source files. Local/consumer
+whole-file removals account for 3,831 lines. Generated output is excluded.
+
+W9-local contract repair: clisurface.Flag.AllowEmpty lets --sw-cache-from= clear
+a machine profile while retaining flag presence. Output still rejects empty and
+unknown formats. C4 and generated help document this. No C1/C2/W7 shape changed.
+
+### Launcher and controller merge
+
+SourceAttempt and full structured failures reach W2's current TransitionJob
+adapter. Materialized-result identity and guard-refusal/cancellation survive the
+incoming snapshot/reconciliation implementations. Projection tests now exercise
+the current transaction interface rather than a deleted private mapper.
+
+Invariant: every launcher observation retains its awarded unit fence, and cleanup
+names one Job namespace/name/UID. W8 creation/restart callers now send those facts.
+ControllerControl rejects a different namespace or UID. Eval keeps separate
+source and award generations. Existing fixtures supply API instance UIDs. W2's
+SyncLauncher now uses LauncherSyncReader; its native store binding remains open.
+
+### Packaging, inventory and verification
+
+Windows TypeScript packaging was already implemented in 3718486f4. Current source
+requires native x64/windows-2025 and arm64/windows-11-arm build/conformance jobs,
+matching bridge receipts, stamped assembly and publication depending on assembly.
+Release/publication Go tests, four Node packaging tests and bin vet pass. No
+packaging edit or publication occurred. Native Windows evidence remains CI work.
+
+The store-caller inventory reported exactly five stale W9 entries: cronLauncher.Active,
+existingSubmissionResult, findExistingSubmission, persistSubmission and
+runDebugRelease. Those rows and the unused CLI rationale constant are removed.
+The inventory test passes. Thirteen retired environment rows were also removed;
+the environment and command-reference checks pass.
+
+Whole-repository build and test compilation pass. Compilation used -exec
+/usr/bin/true, so this is not a whole-suite runtime claim. Scoped vet, focused
+CLI/C4/source/enrollment/lifecycle/debug/history tests, real SQLite controller
+transition/failure tests, final client transports, full clisurface/controllerwire/
+apispec/apiref/doccheck and launcher tests pass. All TestSurface transport/grammar
+components and existing W8 launcher components pass. No native W9 matrix cell was
+unskipped. The T1 parked inventory assigns no original test directly to W9.
+
+Generated properties passed 26,549 cases: local diagnostic privacy 2,925, sealed
+owner preservation 515, launcher instance identity 7,541, debug identity 2,971 and
+current-controller structured-failure projection 12,597. Receipt/purpose and
+malformed-bearer defects were reproduced before fixing. Ported fixtures retain
+alias, risk, receipt, source, attempt, failure, scheduling, cancellation, launcher
+and credential assertions through their final boundaries. The old apispec text-
+rewrite fixture is retired; final policy/spec drift checks remain.
+
+Commentcheck and whitespace checks pass. Sleepcheck reports one incoming W2 wall-
+clock assertion in tests/acceptance/session_flow_http_test.go:102. It was not
+edited. Full client/docs runtime suites hit the sandbox's socket prohibition;
+focused transports pass. The lead retains those listener suites and native QA.
+
+### Amendment disposition and remaining work
+
+A1-09/16/17 and W9's A1-38 wire work are retained through current implementations.
+A1-41 now uses foreground lifecycle/Home arguments and the stable tick adapter.
+A1-43 exact-engine/notice/upgrade adapters remain. A1-49 enrollment uses the current
+runners/service API, private credential file and rollback. A1-51 schemas/docs are
+regenerated. A1-52 packaging is implemented, with native evidence still open.
+A1-50 has its CLI adapters and old W9 runtime cut; native execution is incomplete.
+The existing typed-step, private award-file, launcher grammar, HTTP/api.sock,
+pipeline identity and execution identity handoffs remain part of native integration.
+
+Contract changes needed outside W9:
+
+- C1/W2: retain the initial here reason through intake and replay.
+- W6: seal StartAt/StopAt/Only and clarify retained build/index/admission controls.
+- W2/C3: local schedule checkout/environment/proof registration and pin/unpin.
+- W8: schedule timer install/removal and controller tick/dry-run operations.
+  TickView currently has status without dry-run decisions.
+- W2: final debug-pause release operation/policy and persistence acknowledgement.
+- W7: authorized result/log publication contract. Its signed-store/remote-cache
+  constructors are still panic stubs; W9 does not call them in an unbound runtime.
+
+Native bindings still needed: local controller factory by captured Home, source
+preparation/access and numeric GitHub identity, private environment retention,
+shared host/process/storage/lease construction, data/cache authority, launcher
+ownership lookup and W3's production step/source-ordinal senders. Missing cache
+or publisher bindings fail before intake. Publication's local-verdict guarantee
+still needs the real publisher. W8/W3 must verify sparks overlays, checksum/cache
+identity and executable lease retention through installation and use. These are
+open implementation/contract gaps, not approved feature cuts.
+
+Shared edits beyond W9: pkg/controller engine lifecycle/store/snapshot/sync and
+attempt/failure/materialized/snapshot/sync fixtures; claim_run_test.go (authority
+assertions retained), cancel_test.go (retired); pkg/store/default_team_callers_test.go;
+internal/runners/launcher controller/launcher/sync and controller fixtures;
+internal/wingd/client/spawn.go (run argv); internal/depcache merge/import resolution;
+internal/apispec/path_parameters_test.go (retired); acceptance authority/launcher
+fixtures; api/openapi.yaml, .apidiff, CHANGELOG.md and generated docs/mirrors.
+The integration's trigger_loop and old contention-fixture deletions are preserved.
+
+Friction: Git staging is prohibited, overwing reports a stale installed binary,
+sockets are unavailable, and native Windows/Darwin/cluster evidence cannot be
+produced here. No service or background runtime was started. Scratch is removed
+before the final report. The lead must stage and commit the merge.
 
 ## This continuation (session 8)
 

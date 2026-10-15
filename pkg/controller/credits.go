@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -221,14 +223,6 @@ type creditHistoryJSON struct {
 	Charges []creditChargeJSON `json:"charges"`
 }
 
-func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	s.writeCreditState(w, r, tenant)
-}
-
 // safety: An unregistered team must read as not found, never as an empty operator balance.
 func (s *Server) namedTenant(w http.ResponseWriter, r *http.Request, slug string) (*store.Tenant, bool) {
 	t, err := s.tenantForTeam(r.Context(), store.Team(slug))
@@ -243,11 +237,14 @@ func (s *Server) namedTenant(w http.ResponseWriter, r *http.Request, slug string
 	return t, true
 }
 
-func (s *Server) writeCreditState(w http.ResponseWriter, r *http.Request, tenant *store.Tenant) {
+func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	tenant, err := s.creditReader(r.Context(), a.Target.Team)
+	if err != nil {
+		return err
+	}
 	state, err := tenant.CreditState(r.Context(), creditsBurnWindow)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
 	out := creditStateJSON{
 		BalanceMicro:       state.BalanceMicro,
@@ -275,6 +272,7 @@ func (s *Server) writeCreditState(w http.ResponseWriter, r *http.Request, tenant
 		out.ExhaustedAt = &v
 	}
 	writeJSON(w, http.StatusOK, out)
+	return nil
 }
 
 func (s *Server) handleCreditsSettingsShow(w http.ResponseWriter, r *http.Request) {
@@ -286,20 +284,17 @@ func (s *Server) handleCreditsSettingsShow(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, creditSettingsToJSON(settings))
 }
 
-func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
 	var body setCreditSettingsReq
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
 	}
 	settings, err := s.store.AsOperator().SetOperatorCreditSettings(r.Context(), body.update())
 	if err != nil {
 		if errors.Is(err, store.ErrInvalidCreditSetting) {
-			writeError(w, http.StatusBadRequest, err)
-			return
+			return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
 		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return err
 	}
 	s.logger.Info("credit settings set",
 		"rate_micro_per_second", settings.RateMicroPerSecond,
@@ -308,6 +303,7 @@ func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request
 		"storage_rate_micro_per_gb_day", settings.StorageRateMicroPerGBDay,
 		"storage_free_allowance_bytes", settings.StorageFreeAllowanceBytes)
 	writeJSON(w, http.StatusOK, creditSettingsToJSON(settings))
+	return nil
 }
 
 func creditSettingsToJSON(settings store.CreditSettings) creditSettingsJSON {
@@ -333,34 +329,32 @@ func creditRateTableToJSON(table store.CreditRateTable) []creditRateJSON {
 	return out
 }
 
-func (s *Server) handleCreditsHistory(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCreditsHistory(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	limit := 0
+	if len(r.URL.Query()["limit"]) > 1 {
+		return invalidEngineBody("limit must appear once")
+	}
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		v, err := strconv.Atoi(raw)
 		if err != nil || v < 0 {
-			writeError(w, http.StatusBadRequest, errors.New("limit must be a non-negative integer"))
-			return
+			return invalidEngineBody("limit must be a non-negative integer")
 		}
 		if v > store.CreditHistoryMaxLimit {
-			writeError(w, http.StatusBadRequest, fmt.Errorf(
-				"limit must not exceed %d rows of each kind", store.CreditHistoryMaxLimit))
-			return
+			return invalidEngineBody(fmt.Sprintf("limit must not exceed %d rows of each kind", store.CreditHistoryMaxLimit))
 		}
 		limit = v
 	}
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+	tenant, err := s.creditReader(r.Context(), a.Target.Team)
+	if err != nil {
+		return err
 	}
 	grants, err := tenant.ListCreditGrants(r.Context(), limit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
 	charges, err := tenant.ListCreditCharges(r.Context(), limit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return engineLookupError(err)
 	}
 	out := creditHistoryJSON{
 		Grants:  make([]creditGrantJSON, 0, len(grants)),
@@ -379,6 +373,7 @@ func (s *Server) handleCreditsHistory(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
+	return nil
 }
 
 func creditGrantToJSON(g store.CreditGrant) creditGrantJSON {

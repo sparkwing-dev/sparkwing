@@ -73,18 +73,18 @@ export async function disableAutomation(repositoryID: number): Promise<void> {
 }
 
 export async function getRunnerBindings(): Promise<RunnerBindings> {
-  const res = await send("GET", "/api/v1/team/github-runners", "Read GitHub Actions permissions");
+  const res = await send("GET", "/api/v1/runners/github", "Read GitHub Actions permissions");
   const body = await res.json() as Partial<RunnerBindings>;
   return { bindings: body.bindings ?? [], workflow: body.workflow ?? "" };
 }
 
 export async function enableGitHubRunner(repository: string): Promise<RunnerBindings> {
-  const res = await send("POST", "/api/v1/team/github-runners", "Allow GitHub Actions execution", { repository });
+  const res = await send("POST", "/api/v1/runners/github", "Allow GitHub Actions execution", { repository });
   return await res.json() as RunnerBindings;
 }
 
 export async function disableGitHubRunner(repositoryID: number): Promise<void> {
-  await send("DELETE", `/api/v1/team/github-runners/${repositoryID}`, "Revoke GitHub Actions execution");
+  await send("DELETE", `/api/v1/runners/github/${repositoryID}`, "Revoke GitHub Actions execution");
 }
 
 export interface GitHubAppSubscription {

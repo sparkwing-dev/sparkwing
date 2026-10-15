@@ -34,8 +34,6 @@ rewrite. Final credentials travel through private files or protocol hello. See
 
 | Variable | Described in |
 |---|---|
-| `SPARKWING_AGENT_TOKEN` | [architecture](architecture.md), [auth](auth.md), [local-execution](local-execution.md), [threat-model](threat-model.md) |
-| `SPARKWING_CONTROLLER_URL` | [architecture](architecture.md), [auth](auth.md), [security](security.md), [self-hosting](self-hosting.md) |
 | `SPARKWING_GITCACHE_URL` | [cache storage](caching.md#storage) |
 | `SPARKWING_CACHE_URL` | [architecture](architecture.md), [caching](caching.md) |
 
@@ -71,14 +69,8 @@ identity. Entries for unported hosts remain here while their consumers exist.
 | `SPARKWING_RUN_ID` | [architecture](architecture.md) |
 | `SPARKWING_NODE_ID` | [architecture](architecture.md) |
 | `SPARKWING_DRY_RUN` | [sparks-core](sparks-core.md) |
-| `SPARKWING_SOURCE_DIR` | [git-credentials](git-credentials.md) |
 | `SPARKWING_STANDALONE_REASON` | [local-execution](local-execution.md) |
 | `SPARKWING_STATE_DB` | [local-execution](local-execution.md) |
-| `SPARKWING_NODE_CLAIM_GENERATION` | [local-execution](local-execution.md) |
-| `SPARKWING_NODE_CLAIM_HOLDER` | [local-execution](local-execution.md) |
-| `SPARKWING_NODE_CLAIM_LEASE_SECONDS` | [local-execution](local-execution.md) |
-| `SPARKWING_NODE_CLAIM_MEMBERSHIP` | [local-execution](local-execution.md) |
-| `SPARKWING_NODE_CLAIM_RESERVATION` | [local-execution](local-execution.md) |
 | `SPARKWING_GATE_INDEX` | [hooks](hooks.md) |
 
 ## Plumbing
@@ -106,14 +98,9 @@ These names still have consumers in hosts being replaced by the rewrite. Protoco
 
 | Variable | Defined by |
 |---|---|
-| `ACTIONS_ID_TOKEN_REQUEST_TOKEN` | GitHub Actions; see [github-actions-runners](github-actions-runners.md) |
-| `ACTIONS_ID_TOKEN_REQUEST_URL` | GitHub Actions; see [github-actions-runners](github-actions-runners.md) |
 | `AWS_ENDPOINT_URL` | AWS SDK; see [deployment-modes](deployment-modes.md) |
 | `AWS_ENDPOINT_URL_S3` | AWS SDK; see [deployment-modes](deployment-modes.md) |
 | `GITHUB_REPOSITORY` | GitHub Actions |
-| `GITHUB_RUN_ID` | GitHub Actions |
-| `KUBECONFIG` | Kubernetes client configuration |
-| `POD_NAMESPACE` | Kubernetes downward API |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OpenTelemetry; see [observability](observability.md) |
 | `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` | OpenTelemetry |
 | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | OpenTelemetry |

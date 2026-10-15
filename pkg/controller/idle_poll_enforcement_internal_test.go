@@ -178,16 +178,15 @@ func TestRateAlarm_SpeaksOncePerWindow(t *testing.T) {
 }
 
 func TestComputeLimits_ReportsTheBudgetsInForce(t *testing.T) {
-	srv := newAdviceServer(t).
-		WithRequestBudget(RequestBudget{ClaimsPerMinute: 480, HeartbeatsPerMinute: 1200}).
+	srv, _, authority := newOperatorSettingsFixture(t)
+	srv.WithRequestBudget(RequestBudget{ClaimsPerMinute: 480, HeartbeatsPerMinute: 1200}).
 		WithTokenRequestBudget(TokenRequestBudget{PerTokenMinute: 2000, AlarmPerMinute: 5000}).
 		WithIdleClaimPollEnforced(true).
 		WithEgressMeter(egress.New(egress.Config{
 			MaxStreamsPerPrincipal: 50, MaxDownloadsPerPrincipal: 20,
 		}))
 
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/compute-limits", nil))
+	rec := operatorRequest(t, srv.Handler(), authority.raw, http.MethodGet, "/api/v1/operator/limits", "", http.StatusOK)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d want 200: %s", rec.Code, rec.Body.String())
 	}
@@ -211,10 +210,9 @@ func TestComputeLimits_ReportsTheBudgetsInForce(t *testing.T) {
 }
 
 func TestComputeLimits_ReportsNoBudgetOnAnInstallThatSetsNone(t *testing.T) {
-	srv := newAdviceServer(t)
+	srv, _, authority := newOperatorSettingsFixture(t)
 
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/compute-limits", nil))
+	rec := operatorRequest(t, srv.Handler(), authority.raw, http.MethodGet, "/api/v1/operator/limits", "", http.StatusOK)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d want 200: %s", rec.Code, rec.Body.String())
 	}

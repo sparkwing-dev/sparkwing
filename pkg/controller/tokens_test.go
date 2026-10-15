@@ -194,12 +194,7 @@ func TestCreateToken_AllowlistCoversEveryScopeConstant(t *testing.T) {
 	for _, m := range matches {
 		status, body := postJSONWithStatus(t, base+"/api/v1/tokens",
 			createTokenBody("drift-probe-"+m[1], []string{m[1]}))
-		// safety: the checkout service's scope is valid on a token but is only
-		// ever provisioned from the controller's credits-token credential.
 		want := http.StatusCreated
-		if m[1] == "credits.grant" {
-			want = http.StatusForbidden
-		}
 		if status != want {
 			t.Errorf("scope %q at creation: status=%d body=%s, want %d", m[1], status, body, want)
 		}

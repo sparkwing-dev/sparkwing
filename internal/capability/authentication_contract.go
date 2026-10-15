@@ -62,6 +62,7 @@ type BindingState struct {
 	LeaseExpiresAt time.Time
 	FinishedAt     *time.Time
 	RunCancelled   bool
+	CancelReason   string
 	RunFinished    bool
 	HereClaimed    bool
 	LogSealed      bool
@@ -83,17 +84,4 @@ type AuthenticationSnapshot struct {
 // It owns persistence, while the verifier owns the route's liveness decision.
 type AuthenticationReader interface {
 	ReadAuthentication(context.Context, CredentialLookup, RequestEvidence) (AuthenticationSnapshot, error)
-}
-
-// NewAuthenticator verifies fresh snapshots so ancestry and membership changes
-// take effect without a credential-cache invalidation window.
-func NewAuthenticator(reader AuthenticationReader) Authenticator {
-	panic("unimplemented: c2-credentials")
-}
-
-// ValidateAuthority checks complete ancestry and current membership for both
-// request authentication and transactional authority resolution. Unit liveness
-// remains separate because result replay has a narrower terminal exception.
-func ValidateAuthority(chain []AuthorityState, now time.Time) (Principal, error) {
-	panic("unimplemented: c2-credentials")
 }

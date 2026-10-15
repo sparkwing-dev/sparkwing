@@ -54,7 +54,7 @@ func (p SignedEngineVersionPolicy) services() (engineVersionContracts, error) {
 // Compatibility uses the exact verified release without applying execution eligibility.
 func (p SignedEngineVersionPolicy) Compatibility(ctx context.Context, version string) (controllerwire.Compatibility, error) {
 	if version == "" {
-		return controllerwire.Compatibility{}, engineBadRequest("engine_version is required")
+		return controllerwire.Compatibility{}, invalidEngineBody("engine_version is required")
 	}
 	services, err := p.services()
 	if err != nil {
@@ -75,7 +75,7 @@ func (p SignedEngineVersionPolicy) Compatibility(ctx context.Context, version st
 // Notices retains signed warnings and displays enforcement without hiding persisted run status.
 func (p SignedEngineVersionPolicy) Notices(ctx context.Context, version string) ([]engine.Notice, error) {
 	if version == "" {
-		return nil, engineBadRequest("engine version is required")
+		return nil, invalidEngineBody("engine version is required")
 	}
 	services, err := p.services()
 	if err != nil {

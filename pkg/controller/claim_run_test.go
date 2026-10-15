@@ -563,9 +563,13 @@ func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
 		{"c", memoIn(store.ClaimInputCoalesced, "c", "h1"), "run-leader", `{"from":"leader"}`, "manifest-run-leader"},
 		{"r", lastRun, "run-last", `{"from":"last"}`, ""},
 	} {
-		in, data, err := client.NewWithToken(f.url, nil, raws[c.node]).ClaimInput(ctx, "run-in", c.node, c.req)
-		if err != nil || in.RunID != c.run || string(data) != c.output || in.ArtifactManifest != c.manifest {
-			t.Errorf("node %s's %s input %s = %v %s %s %q, want %s %s %q", c.node, c.req.Kind, c.req.Key, err, in.RunID, data,
+		code, in := input(c.node, c.req)
+		var data json.RawMessage
+		if code == http.StatusOK {
+			code = f.call("GET", strings.TrimPrefix(in.Output.URL, f.url), "", nil, &data)
+		}
+		if code != http.StatusOK || in.RunID != c.run || string(data) != c.output || in.ArtifactManifest != c.manifest {
+			t.Errorf("node %s's %s input %s = %d %s %s %q, want %s %s %q", c.node, c.req.Kind, c.req.Key, code, in.RunID, data,
 				in.ArtifactManifest, c.run, c.output, c.manifest)
 		}
 	}

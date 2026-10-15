@@ -103,7 +103,7 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `GET` | `/api/v1/team/github-app/automation` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
 | `GET` | `/api/v1/team/github-app/extra-repos` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
 | `GET` | `/api/v1/team/members` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
-| `POST` | `/api/v1/runners` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
+| `POST` | `/api/v1/runners` | `controller` | `team` | `capability` | `never` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `DELETE` | `/api/v1/runners/{runner}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `POST` | `/api/v1/runners/github` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `DELETE` | `/api/v1/runners/github/{repository}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
@@ -125,11 +125,11 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `POST` | `/api/v1/queue/groups/{group}/cancel-waiter` | `controller` | `team` | `capability` | `safe` | `awarded_or_delegated_claim` / `node.report` / `slotOfBoundNode` / `reporting`<br>`awarded_or_delegated_claim` / `runs.state` / `slotOfBoundNode` / `reporting` |
 | `GET` | `/api/v1/queue/groups/{group}/holder` | `controller` | `team` | `capability` | `safe` | `awarded_or_delegated_claim` / `node.report` / `slotOfBoundNode` / `reporting`<br>`awarded_or_delegated_claim` / `runs.state` / `slotOfBoundNode` / `reporting` |
 | `GET` | `/api/v1/queue/groups/{group}/resolve` | `controller` | `team` | `capability` | `safe` | `awarded_or_delegated_claim` / `node.report` / `slotOfBoundNode` / `sensitive`<br>`awarded_or_delegated_claim` / `runs.state` / `slotOfBoundNode` / `sensitive` |
-| `GET` | `/api/v1/tokens` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `ownToken` / `credential` |
-| `POST` | `/api/v1/tokens` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `runs.read` / `ownToken` / `credential` |
+| `GET` | `/api/v1/tokens` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
+| `POST` | `/api/v1/tokens` | `controller` | `team` | `capability` | `never` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
 | `GET` | `/api/v1/tokens/{token}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `ownToken` / `credential` |
 | `DELETE` | `/api/v1/tokens/{token}` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `ownToken` / `credential` |
-| `POST` | `/api/v1/tokens/{token}/rotate` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `runs.read` / `ownToken` / `credential` |
+| `POST` | `/api/v1/tokens/{token}/rotate` | `controller` | `team` | `capability` | `never` | `unbound_member_or_local` / `runs.read` / `ownToken` / `credential` |
 | `PUT` | `/api/v1/tokens/{token}/git-credentials` | `controller` | `team` | `capability` | `safe` | `account_session` / `` / `machineOwner` / `credential` |
 | `GET` | `/api/v1/secrets` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential`<br>`unbound_member_or_local` / `team.admin` / `none` / `credential` |
 | `POST` | `/api/v1/secrets` | `controller` | `team` | `capability` | `idempotency_key` | `unbound_member_or_local` / `team.admin` / `none` / `credential` |
@@ -181,6 +181,9 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `POST` | `/api/v1/data/records` | `controller` | `team` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `data.write` / `data` / `sensitive`<br>`local_run_publisher` / `data.write` / `data` / `credential` |
 | `POST` | `/api/v1/data/has-many` | `controller` | `team` | `capability` | `safe` | `awarded_or_delegated_claim` / `data.read` / `data` / `sensitive`<br>`awarded_or_delegated_claim` / `data.read` / `data` / `expansion`<br>`repo_cache_reader` / `data.read` / `data` / `credential` |
 | `GET` | `/api/v1/data/records` | `controller` | `team` | `capability` | `safe` | `awarded_or_delegated_claim` / `data.read` / `data` / `sensitive`<br>`awarded_or_delegated_claim` / `data.read` / `data` / `expansion`<br>`repo_cache_reader` / `data.read` / `data` / `credential` |
+| `POST` | `/api/v1/data/memo/lookup` | `controller` | `team` | `capability` | `safe` | `awarded_or_delegated_claim` / `data.read` / `data` / `sensitive`<br>`awarded_or_delegated_claim` / `data.read` / `data` / `expansion`<br>`repo_cache_reader` / `data.read` / `data` / `credential` |
+| `POST` | `/api/v1/data/depcache/lookup` | `controller` | `team` | `capability` | `safe` | `awarded_or_delegated_claim` / `data.read` / `data` / `sensitive`<br>`awarded_or_delegated_claim` / `data.read` / `data` / `expansion`<br>`repo_cache_reader` / `data.read` / `data` / `credential` |
+| `POST` | `/api/v1/data/memo/copy` | `controller` | `team` | `capability` | `exact_body` | `awarded_or_delegated_claim` / `data.read + data.write` / `data` / `sensitive` |
 | `GET` | `/api/v1/data/capabilities` | `controller` | `team` | `capability` | `safe` | `discovery` / `` / `none` / `credential` |
 | `GET` | `/api/v1/operator/limits` | `controller` | `deployment` | `capability` | `safe` | `deployment_admin` / `operator.limits` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
 | `PUT` | `/api/v1/operator/limits` | `controller` | `deployment` | `capability` | `safe` | `deployment_admin` / `operator.limits` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
@@ -193,10 +196,10 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `PUT` | `/api/v1/operator/object-store/quotas/{team}` | `controller` | `deployment` | `capability` | `safe` | `deployment_admin` / `operator.object_store` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
 | `PUT` | `/api/v1/operator/object-store/quotas/{team}/allowance` | `controller` | `deployment` | `capability` | `safe` | `deployment_admin` / `operator.object_store` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
 | `GET` | `/api/v1/operator/tokens` | `controller` | `deployment` | `capability` | `safe` | `deployment_admin` / `operator.tokens` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
-| `POST` | `/api/v1/operator/tokens` | `controller` | `deployment` | `capability` | `idempotency_key` | `deployment_admin` / `operator.tokens` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
+| `POST` | `/api/v1/operator/tokens` | `controller` | `deployment` | `capability` | `never` | `deployment_admin` / `operator.tokens` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
 | `GET` | `/api/v1/operator/tokens/{token}` | `controller` | `deployment` | `capability` | `safe` | `deployment_admin` / `operator.tokens` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
 | `DELETE` | `/api/v1/operator/tokens/{token}` | `controller` | `deployment` | `capability` | `safe` | `deployment_admin` / `operator.tokens` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
-| `POST` | `/api/v1/operator/tokens/{token}/rotate` | `controller` | `deployment` | `capability` | `idempotency_key` | `deployment_admin` / `operator.tokens` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
+| `POST` | `/api/v1/operator/tokens/{token}/rotate` | `controller` | `deployment` | `capability` | `never` | `deployment_admin` / `operator.tokens` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
 | `GET` | `/api/v1/operator/teams` | `controller` | `deployment` | `capability` | `safe` | `operator_console_session` / `operator.console` / `none` / `credential` |
 | `GET` | `/api/v1/operator/teams/{team}` | `controller` | `deployment` | `capability` | `safe` | `operator_console_session` / `operator.console` / `none` / `credential` |
 | `DELETE` | `/api/v1/operator/teams/{team}` | `controller` | `deployment` | `capability` | `safe` | `operator_console_session` / `operator.console` / `none` / `credential` |
@@ -209,14 +212,13 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `GET` | `/api/v1/operator/waitlist` | `controller` | `deployment` | `capability` | `safe` | `operator_console_session` / `operator.console` / `none` / `credential` |
 | `POST` | `/api/v1/operator/waitlist/approve` | `controller` | `deployment` | `capability` | `idempotency_key` | `operator_console_session` / `operator.console` / `none` / `credential` |
 | `DELETE` | `/api/v1/operator/github-app/installations/{installation}` | `controller` | `deployment` | `capability` | `safe` | `operator_console_session` / `operator.console` / `none` / `credential` |
-| `POST` | `/api/v1/operator/maintenance/reconcile-orphans` | `controller` | `deployment` | `capability` | `idempotency_key` | `operator_console_session` / `operator.console` / `none` / `credential` |
 | `PUT` | `/api/v1/operator/credits/settings` | `controller` | `deployment` | `capability` | `safe` | `operator_console_session` / `operator.console` / `none` / `credential` |
 | `POST` | `/api/v1/operator/runners/{runner}/metered` | `controller` | `deployment` | `capability` | `idempotency_key` | `operator_console_session` / `operator.console` / `none` / `credential` |
 | `GET` | `/api/v1/health` | `controller` | `none` | `public` | `safe` |  |
 | `GET` | `/api/v1/capabilities` | `controller` | `none` | `public` | `safe` |  |
 | `POST` | `/webhooks/stripe` | `controller` | `team` | `payment_webhook_signature` | `exact_body` |  |
 | `POST` | `/webhooks/github-app` | `controller` | `team` | `github_webhook_hmac` | `exact_body` |  |
-| `POST` | `/api/v1/runners/github/exchange` | `controller` | `team` | `github_actions_oidc` | `idempotency_key` |  |
+| `POST` | `/api/v1/runners/github/exchange` | `controller` | `team` | `github_actions_oidc` | `never` |  |
 | `GET` | `/.well-known/openid-configuration` | `controller` | `none` | `public` | `safe` |  |
 | `GET` | `/.well-known/jwks.json` | `controller` | `none` | `public` | `safe` |  |
 | `PUT` | `/api/v1/data/uploads/{upload}` | `controller` | `team` | `signed_object_url` | `exact_body` |  |

@@ -103,9 +103,9 @@ func TestRenderTokensJSON_ExposesScopesArray(t *testing.T) {
 	}
 
 	warm := got[0]
-	scopes, ok := warm["scopes"].([]any)
+	scopes, ok := warm["grants"].([]any)
 	if !ok {
-		t.Fatalf("scopes field is not an array: %T (%v)", warm["scopes"], warm["scopes"])
+		t.Fatalf("scopes field is not an array: %T (%v)", warm["grants"], warm["grants"])
 	}
 	if len(scopes) != 3 {
 		t.Errorf("warm-runner scopes length = %d, want 3", len(scopes))

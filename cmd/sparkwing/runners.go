@@ -19,7 +19,6 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/sparkwing-dev/sparkwing/internal/agentservice"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
@@ -27,6 +26,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/runners/service"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
@@ -507,7 +507,7 @@ func (w runnerConfigWrite) rollback() error {
 
 // safety: the decision about this machine's service manager, taken before anything irreversible happens.
 type runnerServicePlan struct {
-	host    agentservice.Host
+	host    service.Host
 	skipped bool
 	manual  bool
 }
@@ -528,8 +528,8 @@ func planRunnerService(configPath string, skip bool) (runnerServicePlan, error) 
 	if host.Binary == "" {
 		return runnerServicePlan{}, errRunnerBinaryMissing()
 	}
-	if err := agentservice.Preflight(host); err != nil {
-		if errors.Is(err, agentservice.ErrUnsupported) {
+	if err := service.Preflight(context.Background(), host); err != nil {
+		if errors.Is(err, service.ErrUnsupported) {
 			return runnerServicePlan{manual: true}, nil
 		}
 		return runnerServicePlan{}, err
@@ -545,7 +545,7 @@ func (p runnerServicePlan) start(configPath string) (runnerServiceResult, error)
 		}
 		return runnerServiceResult{Status: status, Command: []string{runnerBinaryName, "start", "--config", configPath}}, nil
 	}
-	state, err := agentservice.Install(p.host)
+	state, err := service.Install(context.Background(), p.host)
 	if err != nil {
 		return runnerServiceResult{}, err
 	}
@@ -560,17 +560,17 @@ func stopRunnerService(configPath string, skip bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	state, err := agentservice.Uninstall(host)
-	if errors.Is(err, agentservice.ErrUnsupported) {
+	state, err := service.Uninstall(context.Background(), host)
+	if errors.Is(err, service.ErrUnsupported) {
 		return "", nil
 	}
 	return state.Detail, err
 }
 
-func defaultRunnerServiceHost(configPath string) (agentservice.Host, error) {
+func defaultRunnerServiceHost(configPath string) (service.Host, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return agentservice.Host{}, fmt.Errorf("resolve the home directory the service is installed under: %w", err)
+		return service.Host{}, fmt.Errorf("resolve the home directory the service is installed under: %w", err)
 	}
 	configHome := os.Getenv("XDG_CONFIG_HOME")
 	if configHome == "" {
@@ -578,9 +578,9 @@ func defaultRunnerServiceHost(configPath string) (agentservice.Host, error) {
 	}
 	root, err := paths.DefaultPaths()
 	if err != nil {
-		return agentservice.Host{}, err
+		return service.Host{}, err
 	}
-	return agentservice.Host{
+	return service.Host{
 		GOOS:       runnerServiceGOOS,
 		Home:       home,
 		ConfigHome: configHome,
@@ -588,7 +588,7 @@ func defaultRunnerServiceHost(configPath string) (agentservice.Host, error) {
 		ConfigPath: configPath,
 		LogPath:    filepath.Join(root.Root, "runner.log"),
 		UID:        os.Getuid(),
-		Exec:       agentservice.DefaultExec,
+		Exec:       service.DefaultExec,
 	}, nil
 }
 

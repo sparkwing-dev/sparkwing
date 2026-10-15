@@ -321,10 +321,6 @@ curl -sS -X PUT "$CONTROLLER/api/v1/operator/object-store/quotas/acme" \
   -d '{"tier":"paid"}'
 ```
 
-Naming a tier with zero write limits selects that tier's limits. Unknown teams
-return `404`. Reads report the authenticated caller's team. An operator also
-receives the explicit quotas and the largest teams for the month.
-
 Monthly reports sum each team's replica counters. They are historical usage,
 so deleting a run does not lower them. `retained_bytes` measures the team's
 unique committed blobs and stored log segments. Multiple references to the

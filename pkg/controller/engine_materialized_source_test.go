@@ -49,7 +49,11 @@ func FuzzEngineSnapshotPreservesGuardVerdict(f *testing.F) {
 			now := time.Unix(1, 0)
 			snapshot.Run.CancelRequestedAt = &now
 		}
-		got, err := engineSchedule(snapshot)
+		graph, err := snapshot.Scheduling()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := schedulingResponse(snapshot, graph)
 		if err != nil || got.CancelRequested != cancel || (got.GuardRefusal == "") != passed {
 			t.Fatalf("guard verdict changed: %+v, %v", got, err)
 		}

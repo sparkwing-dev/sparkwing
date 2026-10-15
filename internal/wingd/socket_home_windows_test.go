@@ -3,7 +3,7 @@
 package wingd
 
 import (
-	"net"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,6 +37,8 @@ func TestWindowsSocketHomeAliasesReachTheSameElectedListener(t *testing.T) {
 	}()
 	for _, alias := range aliases {
 		t.Run(alias, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
 			layout, err := resolveLayout(alias)
 			if err != nil || !strings.EqualFold(layout.home, daemon.layout.home) || layout.sock != daemon.layout.sock {
 				t.Fatalf("alias layout differs from elected layout: %+v, %v", layout, err)
@@ -45,12 +47,29 @@ func TestWindowsSocketHomeAliasesReachTheSameElectedListener(t *testing.T) {
 			if err != nil || !held {
 				t.Fatalf("alias election held = %v, %v", held, err)
 			}
-			connection, err := net.DialTimeout("unix", layout.sock, 3*time.Second)
+			accepted := make(chan error, 1)
+			go func() {
+				connection, err := listener.Accept()
+				if err == nil {
+					defer connection.Close()
+					err = checkPeerCredentials(connection)
+				}
+				accepted <- err
+			}()
+			connection, err := DialSocket(ctx, layout.sock, 0)
 			if err != nil {
 				t.Fatalf("alias cannot reach elected listener: %v", err)
 			}
 			if err := connection.Close(); err != nil {
 				t.Fatal(err)
+			}
+			select {
+			case err := <-accepted:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-ctx.Done():
+				t.Fatal("alias authentication did not finish")
 			}
 		})
 	}

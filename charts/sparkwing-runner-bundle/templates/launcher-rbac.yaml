@@ -1,0 +1,66 @@
+{{- if .Values.launcher.serviceAccountName }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.launcher.serviceAccountName | quote }}
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sparkwing-customer-job
+  namespace: {{ .Release.Namespace }}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "sparkwing-runner-bundle.runner.fullname" . }}-launcher
+  namespace: {{ .Release.Namespace }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "sparkwing-runner-bundle.runner.fullname" . }}-launcher
+  namespace: {{ .Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.launcher.serviceAccountName | quote }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "sparkwing-runner-bundle.runner.fullname" . }}-launcher
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Namespace }}-{{ include "sparkwing-runner-bundle.runner.fullname" . }}-boundary
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "update"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Namespace }}-{{ include "sparkwing-runner-bundle.runner.fullname" . }}-boundary
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.launcher.serviceAccountName | quote }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Namespace }}-{{ include "sparkwing-runner-bundle.runner.fullname" . }}-boundary
+{{- end }}

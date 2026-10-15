@@ -6,6 +6,7 @@
 package depcache
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -20,7 +21,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/engine/npmcmd"
+	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/tarsafe"
 )
 
@@ -274,10 +276,12 @@ func resolveNpmCacheDir(workdir string) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if command, err := pipelineentry.NPMCommand(ctx, goruntime.GOOS, exec.LookPath, "config", "get", "cache"); err == nil {
+	if command, err := npmcmd.Command("config", "get", "cache"); err == nil {
 		command.Dir = workdir
-		if out, err := command.Output(); err == nil {
-			if v := strings.TrimSpace(string(out)); v != "" && v != "undefined" {
+		var output bytes.Buffer
+		command.Stdout = &output
+		if err := gotoolchain.Run(ctx, command); err == nil {
+			if v := strings.TrimSpace(output.String()); v != "" && v != "undefined" {
 				return v, nil
 			}
 		}

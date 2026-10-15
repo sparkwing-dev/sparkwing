@@ -3,8 +3,6 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -14,7 +12,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
-	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
 func TestLocalPipelineBinaryBuildsOnceWithoutRemoteTransfers(t *testing.T) {
@@ -69,78 +66,5 @@ exit 1
 	builds, err := os.ReadFile(buildLog)
 	if err != nil || string(builds) != "build\n" || calls != 0 {
 		t.Fatalf("builds=%q network=%d err=%v", builds, calls, err)
-	}
-}
-
-func TestWarmTypeScriptInstallsDependenciesWithoutExecutingPipeline(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "package.json"), `{"main":"pipeline.ts","dependencies":{"@sparkwing/sdk":"1.0.0"}}`)
-	writeFile(t, filepath.Join(dir, "pipeline.ts"), "throw new Error('must not execute')")
-	bin := t.TempDir()
-	marker := filepath.Join(dir, "npm-invocation")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$INSTALL_MARKER\"\n"
-	if err := os.WriteFile(filepath.Join(bin, "npm"), []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin)
-	result, err := warmLocalPipeline(t.Context(), dir, []string{"PATH=" + bin, "INSTALL_MARKER=" + marker}, io.Discard)
-	if err != nil {
-		t.Fatal(err)
-	}
-	called, err := os.ReadFile(marker)
-	if err != nil || string(called) != "ci --no-audit --no-fund\n" || result.Language != "typescript" || result.Status != "prepared" || result.Path != filepath.Join(dir, "node_modules") || result.Key != "" {
-		t.Fatalf("TypeScript preparation: %+v called=%q err=%v", result, called, err)
-	}
-}
-
-func TestCacheWarmTypeScriptMasksNativeInstallerDiagnostics(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "package.json"), `{"main":"pipeline.ts","dependencies":{"@sparkwing/sdk":"1.0.0"}}`)
-	writeFile(t, filepath.Join(dir, "pipeline.ts"), "throw new Error('must not execute')")
-	bin := t.TempDir()
-	script := "#!/bin/sh\nif [ -n \"$AWS_SECRET_ACCESS_KEY\" ]; then printf 'credential inherited'; exit 2; fi\nprintf 'using alice:p@ss\\n'\nprintf 'alice:p@ss failed\\n' >&2\nexit 1\n"
-	if err := os.WriteFile(filepath.Join(bin, "npm"), []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin)
-	var out, diagnostics bytes.Buffer
-	err := runCacheWarmCommand(t.Context(), []string{"-o", "json"}, &out, cacheWarmDependencies{
-		locate:      func() (string, error) { return dir, nil },
-		environment: []string{"PATH=" + bin, "HTTPS_PROXY=http://alice:p%40ss@proxy.test", "AWS_SECRET_ACCESS_KEY=private"},
-		buildEnv:    procenv.Build, diagnostics: &diagnostics, prepare: warmLocalPipeline,
-	})
-	if err == nil || !strings.Contains(err.Error(), "npm ci") || out.Len() != 0 || !strings.Contains(diagnostics.String(), "***") || strings.Contains(diagnostics.String(), "alice") || strings.Contains(diagnostics.String(), "p@ss") || strings.Contains(diagnostics.String(), "credential inherited") {
-		t.Fatalf("native installer diagnostics: err=%v stdout=%s stderr=%s", err, &out, &diagnostics)
-	}
-}
-
-func TestCacheWarmGoBuildsThroughSharedCompiler(t *testing.T) {
-	installer, body, log := goInstallerFixture(t, false)
-	var request struct {
-		Directory   string `json:"directory"`
-		PipelineDir string `json:"pipeline_dir"`
-	}
-	if err := json.Unmarshal([]byte(body), &request); err != nil {
-		t.Fatal(err)
-	}
-	dir := filepath.Join(request.Directory, request.PipelineDir)
-	var out, diagnostics bytes.Buffer
-	err := runCacheWarmCommand(t.Context(), []string{"-o", "json"}, &out, cacheWarmDependencies{
-		locate: func() (string, error) { return dir, nil }, environment: installer.environment,
-		buildEnv: procenv.Build, diagnostics: &diagnostics, prepare: warmLocalPipeline,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var result cacheWarmResult
-	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
-		t.Fatal(err)
-	}
-	if result.Language != "go" || result.Status != "prepared" || !filepath.IsAbs(result.Path) || strings.Contains(diagnostics.String(), "p@ss") || strings.Contains(diagnostics.String(), "alice") {
-		t.Fatalf("Go warming: result=%+v diagnostics=%q", result, &diagnostics)
-	}
-	builds, err := os.ReadFile(log)
-	if err != nil || string(builds) != "build\n" {
-		t.Fatalf("Go warming: builds=%q error=%v", builds, err)
 	}
 }

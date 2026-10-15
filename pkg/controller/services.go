@@ -1,8 +1,10 @@
 package controller
 
 import (
-	"encoding/json"
 	"net/http"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // ServicesResponse is the wire shape of GET /api/v1/services. Names
@@ -31,26 +33,36 @@ type ServicesResponse struct {
 	// cache's refresh and seed routes take the cache's operator token, which
 	// no team member holds there, so a CLI skips them.
 	MultiTeam bool `json:"multi_team,omitempty"`
-	// DirectData advertises S3-backed signed data routes for claimed runs.
+	// DirectData advertises capability-authorized upload and commit routes.
 	DirectData bool `json:"direct_data,omitempty"`
 }
 
-func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleServices(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
 	multiTeam := s.MultiTeam()
 	downloadURL := s.dataDownloadURL()
-	if downloadViaIngress(r) && s.downloadCDN == nil {
-		downloadURL = ""
+	if s.cachePodURL == "" && s.dashboardURL == "" && !multiTeam && downloadURL == "" && !s.dataUploadsAvailable() {
+		return &apierr.Error{Code: apierr.NotFound, Message: "no services announced"}
 	}
-	if s.cachePodURL == "" && s.dashboardURL == "" && !multiTeam && downloadURL == "" && s.directUploads == nil {
-		http.Error(w, "no services announced", http.StatusNotFound)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(ServicesResponse{
+	writeJSON(w, http.StatusOK, ServicesResponse{
 		DataDownloadURL: downloadURL,
-		DirectData:      s.directUploads != nil,
+		DirectData:      s.dataUploadsAvailable(),
 		CachePod:        s.cachePodURL,
 		Dashboard:       s.dashboardURL,
 		MultiTeam:       multiTeam,
 	})
+	return nil
+}
+
+func (s *Server) handleDirectCapabilities(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
+	if !s.dataUploadsAvailable() {
+		return &apierr.Error{Code: apierr.NotFound, Message: "data uploads are unavailable"}
+	}
+	download := s.dataDownloadURL() != ""
+	writeJSON(w, http.StatusOK, map[string]bool{"upload": true, "source": download, "download": download})
+	return nil
+}
+
+func (s *Server) dataUploadsAvailable() bool {
+	d := s.dataController
+	return d != nil && d.ResolveAuthority != nil && d.Access != nil && d.Objects != nil && (d.Store != nil || d.ResolveTenant != nil)
 }

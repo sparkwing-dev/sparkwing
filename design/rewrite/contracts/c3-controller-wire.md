@@ -108,9 +108,10 @@ W6 must implement `procenv.Build(procenv.Git, ...)`, which rejects the kind in t
 checkout. Native numeric-ID lookup, W3 source acquisition, W8 engine resolution,
 private environment retention and authorized working-tree bundle upload remain
 bindings. Native selected-engine process-tree cancellation remains unverified.
-The public command still uses its preceding preparation
-and intake path. Its cutover also requires a contract for persisting the required
-here reason. Neither `CreateRunRequest` nor C1 `IntakeRequest` carries
+The public command now uses this prepared request and sealed intake path.
+GitHub numeric-ID lookup, private source access and captured environment delivery
+still need native bindings. Initial here intake requires a contract for persisting
+the required reason and refuses before submission until that contract exists. Neither `CreateRunRequest` nor C1 `IntakeRequest` carries
 that reason. It must survive intake and replay before the CLI can replace the old
 path without dropping it. No foreign contract is changed by this component.
 

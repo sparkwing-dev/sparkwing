@@ -2,9 +2,9 @@ package wingd
 
 import (
 	"context"
-	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -38,7 +38,7 @@ func TestSocketPath_StaysShortForDeepHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sock) >= maxSunPath() {
+	if runtime.GOOS != "windows" && len(sock) >= maxSunPath() {
 		t.Fatalf("resolved socket %q is %d bytes, over the %d-byte limit", sock, len(sock), maxSunPath())
 	}
 	if base := testSocketBase(t); !strings.HasPrefix(sock, base) {
@@ -80,12 +80,31 @@ func bindLiveSocket(t *testing.T, home string) string {
 	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	ln, err := net.Listen("unix", sock)
+	ln, err := bindSocket(sock)
 	if err != nil {
 		t.Fatal(err)
 	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			connection, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_ = checkPeerCredentials(connection)
+			connection.Close()
+		}
+	}()
 	t.Cleanup(func() {
 		_ = ln.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		select {
+		case <-done:
+		case <-ctx.Done():
+			t.Error("socket fixture did not stop")
+		}
 		_ = os.RemoveAll(filepath.Dir(sock))
 	})
 	return sock
@@ -112,6 +131,12 @@ func TestPeerSockets_FindsOtherHomesAndOmitsOwn(t *testing.T) {
 func TestValidateSocketPath_RejectsOverLength(t *testing.T) {
 	long := "/tmp/" + strings.Repeat("x", maxSunPath())
 	err := ValidateSocketPath(long)
+	if runtime.GOOS == "windows" {
+		if err != nil {
+			t.Fatalf("hashed pipe name acquired a Unix path limit: %v", err)
+		}
+		return
+	}
 	if err == nil {
 		t.Fatal("expected an over-length socket path to be rejected")
 	}

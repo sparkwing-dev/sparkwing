@@ -12,7 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
@@ -45,7 +45,7 @@ func (s hereCredentials) path(controller, run string) (string, error) {
 	if err != nil || !utf8.ValidString(base) || run == "" || !utf8.ValidString(run) || !filepath.IsAbs(s.dir) {
 		return "", errors.New("invalid here credential binding")
 	}
-	if s.socket != "" && (base != orchestrator.HostedAPIBaseURL || !filepath.IsAbs(s.socket) || filepath.Clean(s.socket) != s.socket || !utf8.ValidString(s.socket) || strings.ContainsRune(s.socket, 0)) {
+	if s.socket != "" && (base != wingdclient.APIBaseURL || !filepath.IsAbs(s.socket) || filepath.Clean(s.socket) != s.socket || !utf8.ValidString(s.socket) || strings.ContainsRune(s.socket, 0)) {
 		return "", errors.New("invalid here controller socket binding")
 	}
 	body, err := json.Marshal([3]string{base, s.socket, run})

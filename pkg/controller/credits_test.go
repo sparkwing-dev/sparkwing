@@ -32,7 +32,6 @@ type creditsFixture struct {
 	url      string
 	store    *store.Store
 	admin    string
-	service  string
 	runner   string
 	prefix   string
 	readonly string
@@ -65,12 +64,8 @@ func newCreditsFixtureWithLicense(t *testing.T, metered bool, feature string) cr
 	if err != nil {
 		t.Fatalf("reader token: %v", err)
 	}
-	service, _, err := st.CreateToken("checkout-service", store.TokenKindService,
-		[]string{controller.ScopeCreditsGrant}, 0, now)
-	if err != nil {
-		t.Fatalf("service token: %v", err)
-	}
 	ctrl := controller.New(st, nil).EnableAuthFromStore()
+	controller.ConfigureConsoleFixture(ctrl)
 	if feature != "" {
 		pub, priv := licensetest.NewKey(t)
 		raw := licensetest.Sign(t, priv, licensetest.Terms{
@@ -83,7 +78,7 @@ func newCreditsFixtureWithLicense(t *testing.T, metered bool, feature string) cr
 	t.Cleanup(srv.Close)
 	return creditsFixture{
 		url: srv.URL, store: st,
-		admin: admin, service: service, runner: runner, prefix: runnerTok.Prefix, readonly: readonly,
+		admin: admin, runner: runner, prefix: runnerTok.Prefix, readonly: readonly,
 	}
 }
 
@@ -763,27 +758,8 @@ func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
 		t.Fatalf("unit constants = %d/%d", state.MicroPerCredit, state.CreditsPerDollar)
 	}
 
-	status, _ = creditsRequest(t, http.MethodPost, f.url+"/api/v1/credits/grants", f.readonly,
-		map[string]any{"kind": "paid", "amount_micro": 1000})
-	if status != http.StatusForbidden {
-		t.Fatalf("grant without credits.grant = %d, want 403", status)
-	}
-	status, _ = creditsRequest(t, http.MethodPost, f.url+"/api/v1/credits/grants", f.admin,
-		map[string]any{"kind": "paid", "amount_micro": 1000, "reference": "pay_admin"})
-	if status != http.StatusForbidden {
-		t.Fatalf("grant with an admin token = %d, want 403", status)
-	}
-
-	status, body = creditsRequest(t, http.MethodPost, f.url+"/api/v1/credits/grants", f.service,
-		map[string]any{"kind": "paid", "amount_micro": 1000 * store.MicroCreditsPerCent, "reference": "pay_9"})
-	if status != http.StatusCreated {
-		t.Fatalf("grant = %d: %s", status, body)
-	}
-
-	status, body = creditsRequest(t, http.MethodPost, f.url+"/api/v1/credits/grants", f.service,
-		map[string]any{"kind": "gift", "amount_micro": 5})
-	if status != http.StatusBadRequest {
-		t.Fatalf("unknown grant kind = %d: %s", status, body)
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(t.Context(), store.CreditGrantPaid, 1000*store.MicroCreditsPerCent, "pay_9", "test"); err != nil {
+		t.Fatal(err)
 	}
 
 	status, body = creditsRequest(t, http.MethodGet, f.url+"/api/v1/credits/history", f.readonly, nil)
@@ -805,7 +781,7 @@ func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
 	if len(history.Grants) != 1 {
 		t.Fatalf("grants = %d, want 1", len(history.Grants))
 	}
-	if history.Grants[0].Reference != "pay_9" || history.Grants[0].CreatedBy != "checkout-service" {
+	if history.Grants[0].Reference != "pay_9" || history.Grants[0].CreatedBy != "test" {
 		t.Fatalf("grant row = %+v", history.Grants[0])
 	}
 	if len(history.Charges) != 0 {
@@ -819,49 +795,6 @@ func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
 	}
 	if !bytes.Contains(body, []byte("1000")) {
 		t.Fatalf("the refusal does not name the ceiling: %s", body)
-	}
-}
-
-func TestCredits_SetMeteredRouteMarksAnExistingToken(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	f := newCreditsFixture(t, false)
-	ctx := context.Background()
-
-	status, body := creditsRequest(t, http.MethodPost,
-		f.url+"/api/v1/tokens/"+f.prefix+"/metered", f.readonly, map[string]any{"metered": true})
-	if status != http.StatusForbidden {
-		t.Fatalf("set-metered without admin = %d: %s", status, body)
-	}
-
-	status, body = creditsRequest(t, http.MethodPost,
-		f.url+"/api/v1/tokens/"+f.prefix+"/metered", f.admin, map[string]any{"metered": true})
-	if status != http.StatusOK {
-		t.Fatalf("set-metered = %d: %s", status, body)
-	}
-	var record struct {
-		Prefix  string `json:"prefix"`
-		Metered bool   `json:"metered"`
-	}
-	if err := json.Unmarshal(body, &record); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if record.Prefix != f.prefix || !record.Metered {
-		t.Fatalf("set-metered returned %+v", record)
-	}
-	metered, err := f.store.TokenMetered(ctx, f.prefix)
-	if err != nil {
-		t.Fatalf("token metered: %v", err)
-	}
-	if !metered {
-		t.Fatal("the marker did not reach the database")
-	}
-
-	status, body = creditsRequest(t, http.MethodPost,
-		f.url+"/api/v1/tokens/swu_notatoken/metered", f.admin, map[string]any{"metered": true})
-	if status != http.StatusNotFound {
-		t.Fatalf("set-metered on an unknown prefix = %d: %s", status, body)
 	}
 }
 

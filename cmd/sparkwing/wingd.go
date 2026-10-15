@@ -15,18 +15,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
-	"github.com/sparkwing-dev/sparkwing/internal/wingd/supervise"
 )
 
 func runWingd(args []string) error {
 	if len(args) == 0 {
-		return errors.New("wingd: subcommand required (run, supervise)")
+		return errors.New("wingd: subcommand required (run)")
 	}
 	switch args[0] {
 	case "run":
 		return runWingdRun(args[1:])
-	case "supervise":
-		return supervise.Run(args[1:])
 	default:
 		return fmt.Errorf("wingd: unknown subcommand %q", args[0])
 	}

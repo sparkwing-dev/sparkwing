@@ -26,6 +26,7 @@ type Flag struct {
 	Values     []string
 	Repeatable bool
 	CommaList  bool
+	AllowEmpty bool
 	Required   bool
 	Minimum    int64
 	HasMinimum bool

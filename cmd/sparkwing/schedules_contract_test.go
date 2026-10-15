@@ -47,7 +47,11 @@ func (f *scheduleFixture) RunSchedule(_ context.Context, name, key string) (cont
 }
 func (f *scheduleFixture) ListSchedules(_ context.Context, q controllerwire.ScheduleQuery) (controllerwire.ScheduleOverview, error) {
 	f.query = q
-	return controllerwire.ScheduleOverview{Schedules: []controllerwire.ScheduleView{f.rows["s1"].Schedule}, Upcoming: []controllerwire.ScheduleUpcoming{{Schedule: "s1", Name: "check/nightly", At: "2099-01-01T01:00:00Z"}}}, nil
+	result := controllerwire.ScheduleOverview{Schedules: []controllerwire.ScheduleView{}, Upcoming: []controllerwire.ScheduleUpcoming{{Schedule: "s1", Name: "check/nightly", At: "2099-01-01T01:00:00Z"}}}
+	if row, ok := f.rows["s1"]; ok {
+		result.Schedules = append(result.Schedules, row.Schedule)
+	}
+	return result, nil
 }
 func scheduleInvocation(t *testing.T, args ...string) clisurface.Invocation {
 	t.Helper()

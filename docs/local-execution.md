@@ -4,10 +4,12 @@
 submits it to a controller. Both placements use the shared run and job hosts,
 sealed inputs and matching SDK engine.
 
-This guide describes the rewrite contract. The CLI's local and initial-trigger
-paths still need their final host, source, storage and lifecycle bindings.
-Native execution, detachment and standalone behavior require acceptance evidence.
-See [rewrite integration](architecture.md) for that boundary.
+The command adapters use sealed intake and the shared host interfaces. The CLI
+no longer opens the runs database or starts a separate trigger consumer. Native
+local controller, source, private environment, storage and host factories remain
+unbound in this rewrite checkout, so execution refuses before intake where those
+bindings are required. The command's presence in help is not native execution
+evidence. See [rewrite integration](architecture.md).
 
 ## Execution commands
 
@@ -27,6 +29,15 @@ selects the controller for `pipeline trigger`, run observations and management.
 | `sparkwing run build --sw-detached` | The local controller queues and hosts work independently of the submitting terminal. |
 | `sparkwing pipeline trigger build --profile prod` | The selected controller queues the run for an eligible runner or launcher. |
 | `sparkwing pipeline trigger build --profile prod --runner here --reason repair` | This CLI hosts the controller's named here run. |
+
+An explicit empty `--sw-cache-from=` disables `run.cache_from` from the machine
+file. Publication still needs its authorized result/log publisher. A missing
+publisher fails before intake. It cannot change a completed local verdict.
+
+Local schedule registration, pins, timer installation and `__tick` now use
+controller/lifecycle adapters. Their remaining request and factory contracts must
+be connected before local schedules can run. Timers carry their absolute state
+home into resolution. The old CLI schedule writer is removed.
 
 ## Local execution
 
@@ -153,6 +164,15 @@ sparkwing runs status --run RUN_ID --profile prod
 sparkwing runs logs --run RUN_ID --profile prod --follow
 ```
 
+The command prepares one sealed request and submits it to `POST /api/v1/runs`.
+Detached output includes the stable run ID, team number and replay flag. Preparation
+failures submit nothing. The old trigger request and separate here-host loop are
+removed.
+
+GitHub numeric-ID lookup, private source access and captured environment delivery
+still need their native bindings. Initial here intake refuses before submission
+until its reason can survive the sealed request and replay.
+
 The selected controller owns the run's records. Its intake derives the caller's
 authority. A runner claims trigger and job units through one ordered queue. The
 launcher creates Jobs for awarded plan, eval and work units. Both use the shared
@@ -161,8 +181,8 @@ matcher and hosts. Inline jobs stay with the run host.
 The working-tree option submits an immutable source snapshot. Secret-shaped
 files require explicit review through the allowed-file option. Keep credentials
 in ignored files or outside the repository and inspect `git status` before
-submission. Final signed source-bundle upload and initial-trigger intake still
-need their controller and storage bindings. The option's presence in help is not
+submission. Signed source-bundle upload still needs its controller and storage
+bindings, so working-tree submission fails before intake. The option's presence in help is not
 native integration evidence.
 
 Here execution retains its one-time authority in an owner-only controller/run

@@ -67,10 +67,8 @@ func (c *Client) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byt
 	return c.readOutput(ctx, c.baseURL+claimNodePath(runID, nodeID, "output"))
 }
 
-// GetChildNodeOutput reads a node's output from childID, a child run runID
-// started, through the calling claim.
-func (c *Client) GetChildNodeOutput(ctx context.Context, runID, childID, nodeID string) ([]byte, error) {
-	return c.readOutput(ctx, c.baseURL+childPath(runID, childID)+"/nodes/"+url.PathEscape(nodeID)+"/output")
+func claimNodePath(runID, nodeID, verb string) string {
+	return fmt.Sprintf("/api/v1/runs/%s/nodes/%s/%s", url.PathEscape(runID), url.PathEscape(nodeID), verb)
 }
 
 func (c *Client) readOutput(ctx context.Context, u string) ([]byte, error) {

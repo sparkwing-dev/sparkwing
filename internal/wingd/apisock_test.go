@@ -35,8 +35,11 @@ func (a *apiRecorder) accept(ctx context.Context, ln net.Listener) {
 			return
 		}
 		if peer, ok := nc.(APIConn); ok {
+			identity := peer.PeerIdentity()
 			a.mu.Lock()
-			a.uids = append(a.uids, peer.PeerUID())
+			if identity.UID != nil {
+				a.uids = append(a.uids, int(*identity.UID))
+			}
 			a.mu.Unlock()
 		}
 		a.held <- nc
@@ -251,48 +254,5 @@ func send(t *testing.T, nc net.Conn, msg wingwire.Message) {
 	}
 	if _, err := nc.Write(line); err != nil {
 		t.Fatalf("write %T: %v", msg, err)
-	}
-}
-
-func TestAnOpenAPIConnectionKeepsTheDaemonFromIdling(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.9s of real work; the fast class runs under -short")
-	}
-	d, rec, errc := startAPIDaemon(t, Config{
-		IdleTimeout:      300 * time.Millisecond,
-		GraceWindow:      -1,
-		HeadroomFraction: -1,
-	})
-	select {
-	case <-rec.serve:
-	case <-time.After(3 * time.Second):
-		t.Fatal("the daemon never handed the API listener over")
-	}
-	nc, err := net.Dial("unix", d.layout.apiSock)
-	if err != nil {
-		t.Fatalf("dial api socket: %v", err)
-	}
-	defer func() { _ = nc.Close() }()
-	var accepted net.Conn
-	select {
-	case accepted = <-rec.held:
-	case <-time.After(3 * time.Second):
-		t.Fatal("the API server never saw the connection")
-	}
-
-	select {
-	case err := <-errc:
-		t.Fatalf("the daemon idled out while an API connection was open: %v", err)
-	case <-time.After(1500 * time.Millisecond):
-	}
-
-	// safety: an HTTP server closes its own end when the peer goes away, and
-	// that close is what the idle predicate counts, so the test releases the
-	// server side rather than only the dialing one.
-	_ = accepted.Close()
-	select {
-	case <-errc:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the daemon did not idle out after the API connection closed")
 	}
 }

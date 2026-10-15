@@ -14,12 +14,10 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
-	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
@@ -121,42 +119,17 @@ func dispatchRunWithEngine(args []string, selectEngine func(string) error) error
 	if flags.parseErr != nil {
 		return flags.parseErr
 	}
-	for _, option := range []struct{ name, value string }{
-		{"publish", flags.publish}, {"sw-cache-from", flags.cacheFrom}, {"target", flags.target},
-	} {
-		if option.value != "" {
-			return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "run: --" + option.name + " is unavailable in this build"}
-		}
-	}
-	var err error
-
-	if flags.profile != "" {
-		return fmt.Errorf("run: --profile is removed; sparkwing run executes on this machine against its own store, so run on the profile's controller with sparkwing pipeline trigger %s --profile %s",
-			pipelineName, flags.profile)
-	}
-	if flags.unknownRunnerFlag != "" {
-		return fmt.Errorf("run: unknown runner flag %q; see `sparkwing run --help`, or put pipeline arguments after --", flags.unknownRunnerFlag)
-	}
-	priority := ""
-	if flags.prioritySet {
-		priority, err = validatePriorityFlag(flags.priority)
-		if err != nil {
+	helpRequested := slices.Contains(passthrough, "-h") || slices.Contains(passthrough, "--help")
+	if !helpRequested {
+		if err := validateLocalRunFlags(flags); err != nil {
 			return err
 		}
-	}
-	// safety: the consumer owns execution setup for detached runs.
-	if flags.detached {
-		return runDetached(context.Background(), pipelineName, flags, passthrough)
-	}
-	if err := refuseDetachedOnlyFlags(flags); err != nil {
-		return err
 	}
 
 	dir, err := findSparkwingDir()
 	if err != nil {
 		return err
 	}
-	helpRequested := slices.Contains(passthrough, "-h") || slices.Contains(passthrough, "--help")
 	if !helpRequested {
 		entry, err := pinnedPipelineAt(dir, flags.ref, pipelineName)
 		if err != nil {
@@ -172,101 +145,20 @@ func dispatchRunWithEngine(args []string, selectEngine func(string) error) error
 		return err
 	}
 
-	// safety: errors dropped intentionally; read-only home shouldn't break dispatch.
-	_ = repos.AutoRegister(filepath.Dir(dir))
-
-	executionDir := dir
-	source, err := orchestrator.ResolvePipelineSource(context.Background(), filepath.Dir(dir), pipelineName, flags.pipelineRef)
-	if err != nil {
-		return err
+	if !helpRequested {
+		return runLocalInvocation(pipelineName, flags, passthrough)
 	}
-	if source != "" && flags.ref != "" {
-		return errors.New("a declared pipeline source cannot be combined with --sw-ref")
-	}
-	var afterChild func()
-	if flags.ref != "" {
-		_, pipelineDirectory, cleanup, err := setupRefWorktree(dir, flags.ref)
-		if err != nil {
-			return fmt.Errorf("--sw-ref %s: %w", flags.ref, err)
-		}
-		afterChild = cleanup
-		defer cleanup()
-		dir = pipelineDirectory
-	}
-
-	if source != "" {
-		_, selectedDir, cleanup, err := setupRefWorktree(dir, string(source))
-		if err != nil {
-			return err
-		}
-		afterChild = cleanup
-		defer cleanup()
-		dir = selectedDir
-	} else {
-		executionDir = ""
-	}
-
-	env := os.Environ()
-	logFormat := flags.outputFormat
-	if flags.index != "" {
-		bound, bindErr := bindRunIndex(env, flags.index, os.Stdout, logFormat)
-		if bindErr != nil {
-			return bindErr
-		}
-		env = bound
-	}
-	runHandle := ""
-	if flags.runHandleFile != "" {
-		path, pathErr := filepath.Abs(flags.runHandleFile)
-		if pathErr != nil {
-			return fmt.Errorf("--sw-run-handle-file %s: %w", flags.runHandleFile, pathErr)
-		}
-		runHandle = path
-	}
-	bincache.SetHashAllFiles(flags.hashAllFiles)
-	run := newPipelineRun(dir, compileOptions{
-		NoUpdate:     flags.noUpdate,
-		NoBincache:   flags.noBincache,
-		ExecutionDir: executionDir,
-		AfterChild:   afterChild,
-	})
+	run := newPipelineRun(dir, compileOptions{NoUpdate: flags.noUpdate, NoBincache: flags.noBincache})
 	defer run.stop()
-	run.ctx = gotoolchain.WithSession(run.ctx, env, nil)
-
-	run.sparkwingDir = dir
-	run.opts.ExecutionDir = executionDir
-	run.opts.AfterChild = afterChild
-	if err := run.materialize(env); err != nil {
-		return run.finish(err)
-	}
-	if helpRequested {
-		schema, err := run.describedPipeline(pipelineName)
-		if err == nil {
-			printPipelineHelp(os.Stdout, schema)
-		}
+	run.ctx = gotoolchain.WithSession(run.ctx, os.Environ(), nil)
+	if err := run.materialize(os.Environ()); err != nil {
 		return run.finish(err)
 	}
 	schema, err := run.describedPipeline(pipelineName)
-	var pipelineArgs map[string]string
 	if err == nil {
-		pipelineArgs, err = parsePipelineArgs(schema, passthrough)
+		printPipelineHelp(os.Stdout, schema)
 	}
-	if err != nil {
-		return run.finish(fmt.Errorf("%s: %w", pipelineName, err))
-	}
-	findings := risksIn(schema)
-	if err := enforceRiskGate(pipelineName, findings, flags); err != nil {
-		return run.finish(err)
-	}
-
-	if !flags.dryRun {
-		ensureRunDaemonFn()
-	}
-	sweepStraySessionsBeforeRun()
-	return run.finish(run.host(hostedRun{
-		schema: schema, args: pipelineArgs, flags: flags, env: env, source: string(source),
-		priority: priority, logFormat: logFormat, runHandle: runHandle,
-	}))
+	return run.finish(err)
 }
 
 func pinnedPipeline(sparkwingDir, pipelineName string) (*pipelines.Pipeline, error) {
@@ -444,7 +336,7 @@ func dispatchCommand(args []string) error {
 	case "wingd":
 		return runWingd(args[1:])
 	case "__tick":
-		return runCronsTick(args[1:])
+		return runScheduleTick(args[1:])
 	case "__sdk-install":
 		return runSDKInstall(args[1:])
 	case "__host-trigger":
@@ -483,8 +375,6 @@ func runJobs(args []string) error {
 	case "logs", "grep":
 		return runRunsLogs(contextValue, args[0], args[1:])
 
-	case "consumer":
-		return runRunsConsumer(args[1:])
 	case "cancel":
 		return runRunsCancel(contextValue, args[1:])
 	case "retry":

@@ -1,6 +1,7 @@
 package wingd
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,13 +10,10 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
 
 const stateSchema = 1
-
-// safety: schema 2 was written only while an admission was parked on a process
-// session; refusing it would stop the successor of such a daemon from starting.
-const legacyGuardedStateSchema = 2
 
 type persistedState struct {
 	Schema        int                `json:"schema"`
@@ -35,7 +33,7 @@ func writeStateWithCancellations(path string, snap admission.Snapshot, events []
 
 func writeAtomicFile(path string, data []byte) error {
 	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+"-*.tmp")
+	tmp, err := fssecure.OpenFile(filepath.Join(dir, "."+filepath.Base(path)+"-"+rand.Text()+".tmp"), os.O_CREATE|os.O_EXCL|os.O_WRONLY)
 	if err != nil {
 		return fmt.Errorf("wingd: temp %s: %w", path, err)
 	}
@@ -84,8 +82,8 @@ func readStateWithCancellations(path string) (*admission.Snapshot, []admissionEv
 	if err := json.Unmarshal(data, &st); err != nil {
 		return nil, nil, nil, fmt.Errorf("wingd: parse state: %w", err)
 	}
-	if st.Schema != stateSchema && st.Schema != legacyGuardedStateSchema {
-		return nil, nil, nil, fmt.Errorf("wingd: state schema %d, want %d or %d", st.Schema, stateSchema, legacyGuardedStateSchema)
+	if st.Schema != stateSchema {
+		return nil, nil, nil, fmt.Errorf("wingd: state schema %d, want %d", st.Schema, stateSchema)
 	}
 	return &st.Snapshot, st.Events, st.CancelledRuns, nil
 }

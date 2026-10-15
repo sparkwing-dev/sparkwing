@@ -314,6 +314,9 @@ pipeline arguments start after `--`. Only run and pipeline trigger take a
 pipeline positional. Output selection is validated before side effects; lists
 are NDJSON and diagnostics use the C2 error object on stderr.
 
+`Flag.AllowEmpty` records an allowed empty scalar. `--sw-cache-from=` clears
+the machine cache profile without losing flag presence.
+
 `__complete --word` accepts an empty value to select root completions. Shell
 completion requests use `--kind` and `--word`, with explicit plain output.
 
@@ -360,6 +363,18 @@ restarts an installed controller. Doctor reports skew, incompatible stores and
 removed timer verbs. Windows supports stay and daemon schedules; install is
 refused. Kernel UID or client SID establishes local identity; absent evidence
 refuses access. Private files use fssecure on every supported OS.
+
+`wingd.APIConn.PeerIdentity()` carries `LocalPeerIdentity` from the verified
+transport to the shared controller. The connection retains its own snapshot
+and returns a caller-owned UID copy. `LocalSubject` checks the peer against
+the controller account before the API listener yields the connection.
+This replaces the UID-only accessor. `DialSocket` and `ListenSocket` own the
+platform transport. Windows uses owner-only local named pipes and checks the
+client's identification-token SID before application traffic. Unix uses kernel
+UIDs. Missing identity refuses access. Listener shutdown joins pending transport
+work and retains authenticated connections for drain. See
+[the transport contract](../../../internal/wingd/LOCAL-TRANSPORT.md) for framing
+and native acceptance requirements.
 
 Every plan/eval/work Cloud Job runs root with privileged DinD, including jobs
 from run-host dispatch. Before a runnable object exists, CloudBoundary must
@@ -696,6 +711,8 @@ holds unevaluated predicates. `CheckoutDeclarationsVersion` names format 1.
 
 | Export | Purpose |
 | --- | --- |
+| [`DialSocket`](../../../internal/wingd/socket_transport.go) | Connects to the platform's private controller transport under the caller's context and timeout. |
+| [`ListenSocket`](../../../internal/wingd/socket_transport.go) | Binds that transport and yields only authenticated APIConn connections. |
 | [`KeepAliveReason`](../../../internal/wingd/lifecycle_contract.go#L9) | KeepAliveReason separates the four activity holds from the explicit --stay policy. |
 | [`KeepAliveReasons`](../../../internal/wingd/lifecycle_contract.go#L19) | KeepAliveReasons is exhaustive; health probes alone must not prevent idle exit. |
 | [`LocalActivity`](../../../internal/wingd/lifecycle_contract.go#L24) | LocalActivity counts live state, not historical runs or configured schedules. |

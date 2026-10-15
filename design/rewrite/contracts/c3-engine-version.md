@@ -2,6 +2,11 @@
 
 <!-- design:begin -->
 
+The engine package implements these contracts. Component tests cover pin
+resolution, signed releases, policy, caching, selected-engine SDK installation
+and upgrades. Source/host composition and native platform evidence remain separate work. The
+implementation status is recorded in [the W8 handoff](../W8-IMPLEMENTATION.md).
+
 ## Amendment 1: selected-engine installation
 
 `install_contract.go` declares `Resolved.InstallSDK(SDKInstallRequest) SDKCommand`.
@@ -13,6 +18,29 @@ Node/main argv without protocol flags or a preload. Installation rechecks the pi
 against Resolved and cannot substitute the host's engine or a remote pipeline binary.
 Eval/work use the accepted identity and the same selected engine's host operations.
 
+`internal/engine/sdkinstall.Run` serves that request in the selected executable.
+It rechecks the build version, uses the existing local binary cache for Go and
+uses `npm ci` for TypeScript. Go dependency selection must retain the pinned SDK.
+The cache key includes the pin, source key and install environment, keeping these
+locally built entries separate from the retired remote binary path. TypeScript
+returns Node and its main file. Native tool diagnostics pass through the shared
+proxy masker. The hidden CLI route skips update and version-state startup hooks.
+
+`internal/engine/npmcmd.Command` constructs npm argv for installation, upgrades
+and cache-directory queries. Windows command shims use Node with the installed
+npm-cli.js. Native npm executables and Unix npm keep their direct invocation.
+Arguments never pass through a shell. Callers supply the environment and run
+through gotoolchain.Run so cancellation reaches the existing process group.
+Upgrade tools also receive procenv.Install with its proxy masker, and errors
+mask captured diagnostics before returning them.
+The Windows layout follows [npm's launcher](https://github.com/npm/cli/blob/latest/bin/npm.cmd).
+
+`SDKInstallRequest.UnmarshalJSON` rejects duplicate and unknown fields, including
+an attempted environment field. `PipelineDirectory` keeps both sides on the same
+checkout-relative path validation. These are W8-local additions. The install
+adapter is a child package because the binary cache depends on store/runspec,
+which already imports the engine identity package.
+
 W8 retains historical signed asset matrices even after current cache-binary removal.
 W9 renders shared version notices and wires upgrade verification. W5/W9 package and
 stamp the TypeScript Windows bridge for supported architectures with its matching
@@ -21,36 +49,21 @@ These are integration obligations under decisions 102-104, not a new distributio
 origin, trust root, fallback-age cutoff or support-window expiry refusal.
 
 
+The CLI delegates `__sdk-install` to `sdkinstall.Run`. Cache warm resolves the
+exact verified engine and calls its `InstallSDK`; it has no second Go/npm
+installer. The old CLI installer and its duplicate tests are removed. Shared
+engine tests own dependency installation and version checks.
 
-The CLI dispatches `__sdk-install` through the declared stdin/result contract.
-It checks the checkout pin before preparation and again before emitting argv.
-The selected directory must contain that pin's manifest. TypeScript installs from its lockfile and returns Node/main without
-executing pipeline code or requiring a preload. Diagnostics use the shared
-stream masker, including proxy credential components registered by procenv.
+Go installation must preserve sparks overlays, populate missing checksums before
+cache hashing and hold or reacquire its executable lease through execution.
+The shared installer and source-host composition still need that integration
+review and native platform evidence.
 
-The engine resolver, pin reader and InstallSDK caller are still declarations.
-Their W8 implementations and W3 source/host composition are required for native
-matched-engine execution. Go preparation also needs a shared compiler binding
-that accepts the filtered install environment and masked diagnostics, preserves
-sparks overlays and verifies the effective SDK pin. It must populate missing
-checksums before cache hashing, include the effective build environment in its
-key, and hold or reacquire the executable lease through execution. The CLI refuses
-native Go preparation until that binding exists. It does not substitute a second
-compiler or change process-global environment/output to call the existing one.
-
-Fake pin readers and preparation callbacks establish the Go CLI adapter. Native
-fake npm/Node tools establish TypeScript invocation and argv without running the
-pipeline. Neither proves release verification or a real dependency installation.
-
-The CLI's local dispatch now consumes ReadPin, VersionForPin and Resolve for
-both SDKs. It rechecks policy on every invocation and stops re-executing only
-when the current executable and resolved executable are the same file. Installed
-version ordering and an environment recursion marker cannot bypass that check.
-Resolver failures never select another release. Info reads pin metadata without
-fetching or guessing cache paths. The CLI downloader/cache and unused shared
-selection/path/doctor helpers are deleted. Native pin reading, release verification
-and selected-source hosting still require W8/W3 integration. Component fakes and
-a real Unix exec fixture establish the CLI adapter only.
+Local dispatch consumes ReadPin, VersionForPin and Resolve for both SDKs. It
+rechecks policy on every invocation and stops re-executing only when the current
+and resolved executables are the same file. Info reads pin metadata without
+fetching or guessing cache paths. Source/host composition and native execution
+remain separate integration work.
 
 ## Ownership
 
@@ -117,6 +130,9 @@ Publication accepts `VerifiedRelease` only. It retains the verification material
 and publishes atomically, so partial downloads never become executable. Concurrent
 requests may converge on the same valid entry. Missing or corrupt recoverable
 cache entries cause a miss and verification on refetch.
+An executable replaced by a directory, or missing its owner's execute permission
+on Unix, is also a cache miss. Auto mode restores the verified executable. Local
+mode reports the missing executable without fetching.
 
 Every start checks the current verified policy, even for a cached executable.
 `Cached` alone grants no execution permission. `Resolve` and `Ensure` enforce the
@@ -154,9 +170,11 @@ signature or validation failure retains the last verified copy without an age
 cutoff and emits a fallback notice. It never replaces verified state with
 unverified bytes. An index with an older `published_at`, or different body bytes
 at the same timestamp, cannot replace the cached policy. Identical replay is
-allowed. Without any verified copy, a failed fetch or verification returns
-`unavailable` with connectivity/retry guidance before execution. First use has
-only the fetched signature as freshness evidence.
+allowed. On refresh failure, fallback adopts any newer verified policy another
+process has saved in the machine cache. An older in-memory copy cannot bypass
+that policy's revocations or minimum. Without any verified copy, a failed fetch
+or verification returns `unavailable` with connectivity/retry guidance before
+execution. First use has only the fetched signature as freshness evidence.
 
 An active individual revocation returns `version_revoked`. A release below an
 effective minimum returns `version_unsupported`. Both include the signed reason

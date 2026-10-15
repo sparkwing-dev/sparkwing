@@ -131,7 +131,6 @@ func clientCalls() []struct {
 			_, err := c.GetLatestRun(ctx, "p", nil, 0)
 			return err
 		}},
-		{"CancelRun", func(ctx context.Context, c *client.Client) error { return c.CancelRun(ctx, "r1") }},
 		{"DeleteRun", func(ctx context.Context, c *client.Client) error { return c.DeleteRun(ctx, "r1") }},
 		{"GetNode", func(ctx context.Context, c *client.Client) error { _, err := c.GetNode(ctx, "r1", "n1"); return err }},
 		{"GetNodeOutput", func(ctx context.Context, c *client.Client) error {

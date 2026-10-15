@@ -74,21 +74,30 @@ func (s *Server) browserHandler(api http.Handler) http.Handler {
 	} else {
 		s.signInRoutes(browser)
 		browser.Handle("/", s.pageGate(pages))
-		// safety: a page on another site can make a visitor's browser send a write that needs no credential, which an
-		// open controller would take as its operator's; no browser on another site has a reason to write here.
-		top.Handle("/api/", originguard.RefuseCrossSiteWrites(s.cookieSessions(api)))
+		top.Handle("/api/", s.browserAPI(api))
 	}
 	top.Handle("/", s.pageOrAPI(api, s.logged(browser)))
 	return web.SecurityHeaders(d.HSTS, top)
+}
+
+func (s *Server) browserAPI(api http.Handler) http.Handler {
+	legacy := originguard.RefuseCrossSiteWrites(s.cookieSessions(api))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, router := s.routeProbe()
+		if routeRegistered(router, r) {
+			api.ServeHTTP(w, r)
+			return
+		}
+		legacy.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) signInRoutes(mux *http.ServeMux) {
 	signIn := func(h http.Handler) http.Handler { return s.loginLimit.middleware(h) }
 	mux.HandleFunc("GET /login", s.handleLoginPage)
 	mux.Handle("POST /login", signIn(s.formCSRF(s.handleLoginSubmit)))
-	mux.Handle("POST /logout", s.formCSRF(s.handleBrowserLogout))
-	mux.Handle("GET /auth/{provider}/start", signIn(http.HandlerFunc(s.handleOAuthStart)))
-	mux.Handle("GET /auth/{provider}/callback", signIn(http.HandlerFunc(s.handleOAuthCallback)))
+	s.registerPolicyEndpoints(mux, s.browserSessionEndpoints())
+	s.registerPolicyEndpoints(mux, s.oauthEndpoints())
 	mux.Handle("POST /auth/{provider}/link", s.formCSRF(s.handleIdentityLinkStart))
 	mux.HandleFunc("GET /auth/{provider}/link/complete", s.handleIdentityLinkComplete)
 	mux.Handle("POST /github/app/connect", s.formCSRF(s.handleGitHubAppConnect(false)))

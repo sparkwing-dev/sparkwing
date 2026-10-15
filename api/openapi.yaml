@@ -6311,6 +6311,41 @@ paths:
             binding: data
             liveness: credential
         retry: exact_body
+  /api/v1/data/depcache/lookup:
+    post:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: POST /api/v1/data/depcache/lookup
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/data/depcache/lookup
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: awarded_or_delegated_claim
+            grants:
+              - data.read
+            binding: data
+            liveness: sensitive
+          - credential: awarded_or_delegated_claim
+            grants:
+              - data.read
+            binding: data
+            liveness: expansion
+          - credential: repo_cache_reader
+            grants:
+              - data.read
+            binding: data
+            liveness: credential
+        retry: safe
+      x-sparkwing-wire: undocumented
   /api/v1/data/download:
     post:
       requestBody:
@@ -6401,6 +6436,67 @@ paths:
             binding: data
             liveness: credential
         retry: safe
+  /api/v1/data/memo/copy:
+    post:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: POST /api/v1/data/memo/copy
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/data/memo/copy
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: awarded_or_delegated_claim
+            grants:
+              - data.read
+              - data.write
+            binding: data
+            liveness: sensitive
+        retry: exact_body
+      x-sparkwing-wire: undocumented
+  /api/v1/data/memo/lookup:
+    post:
+      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
+      responses:
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: POST /api/v1/data/memo/lookup
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/data/memo/lookup
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: awarded_or_delegated_claim
+            grants:
+              - data.read
+            binding: data
+            liveness: sensitive
+          - credential: awarded_or_delegated_claim
+            grants:
+              - data.read
+            binding: data
+            liveness: expansion
+          - credential: repo_cache_reader
+            grants:
+              - data.read
+            binding: data
+            liveness: credential
+        retry: safe
+      x-sparkwing-wire: undocumented
   /api/v1/data/objects/{key}:
     get:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
@@ -7037,37 +7133,6 @@ paths:
             binding: none
             liveness: credential
         retry: safe
-  /api/v1/operator/maintenance/reconcile-orphans:
-    post:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
-      parameters:
-        - description: Retain one key and the exact body when replaying a request.
-          in: header
-          name: Idempotency-Key
-          schema:
-            type: string
-      responses:
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/internal.apierr.Envelope'
-          description: Canonical API failure.
-      summary: POST /api/v1/operator/maintenance/reconcile-orphans
-      x-sparkwing-policy:
-        method: POST
-        path: /api/v1/operator/maintenance/reconcile-orphans
-        audience: controller
-        owner: deployment
-        authentication: capability
-        access:
-          - credential: operator_console_session
-            grants:
-              - operator.console
-            binding: none
-            liveness: credential
-        retry: idempotency_key
-      x-sparkwing-wire: undocumented
   /api/v1/operator/object-store:
     get:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
@@ -7679,12 +7744,6 @@ paths:
             liveness: credential
         retry: safe
     post:
-      parameters:
-        - description: Retain one key and the exact body when replaying a request.
-          in: header
-          name: Idempotency-Key
-          schema:
-            type: string
       requestBody:
         content:
           application/json:
@@ -7722,7 +7781,7 @@ paths:
               - operator.console
             binding: none
             liveness: credential
-        retry: idempotency_key
+        retry: never
   /api/v1/operator/tokens/{token}:
     delete:
       parameters:
@@ -7810,11 +7869,6 @@ paths:
           required: true
           schema:
             type: string
-        - description: Retain one key and the exact body when replaying a request.
-          in: header
-          name: Idempotency-Key
-          schema:
-            type: string
       requestBody:
         content:
           application/json:
@@ -7852,7 +7906,7 @@ paths:
               - operator.console
             binding: none
             liveness: credential
-        retry: idempotency_key
+        retry: never
   /api/v1/operator/waitlist:
     get:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
@@ -8648,12 +8702,6 @@ paths:
         retry: safe
     post:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
-      parameters:
-        - description: Retain one key and the exact body when replaying a request.
-          in: header
-          name: Idempotency-Key
-          schema:
-            type: string
       responses:
         default:
           content:
@@ -8674,7 +8722,7 @@ paths:
               - team.admin
             binding: none
             liveness: credential
-        retry: idempotency_key
+        retry: never
       x-sparkwing-wire: undocumented
   /api/v1/runners/{runner}:
     delete:
@@ -8836,12 +8884,6 @@ paths:
   /api/v1/runners/github/exchange:
     post:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
-      parameters:
-        - description: Retain one key and the exact body when replaying a request.
-          in: header
-          name: Idempotency-Key
-          schema:
-            type: string
       responses:
         default:
           content:
@@ -8857,7 +8899,7 @@ paths:
         owner: team
         authentication: github_actions_oidc
         access: []
-        retry: idempotency_key
+        retry: never
       x-sparkwing-wire: undocumented
   /api/v1/runs:
     get:
@@ -13417,16 +13459,10 @@ paths:
           - credential: unbound_member_or_local
             grants:
               - runs.read
-            binding: ownToken
+            binding: none
             liveness: credential
         retry: safe
     post:
-      parameters:
-        - description: Retain one key and the exact body when replaying a request.
-          in: header
-          name: Idempotency-Key
-          schema:
-            type: string
       requestBody:
         content:
           application/json:
@@ -13457,9 +13493,9 @@ paths:
           - credential: unbound_member_or_local
             grants:
               - runs.read
-            binding: ownToken
+            binding: none
             liveness: credential
-        retry: idempotency_key
+        retry: never
   /api/v1/tokens/{token}:
     delete:
       parameters:
@@ -13567,11 +13603,6 @@ paths:
           required: true
           schema:
             type: string
-        - description: Retain one key and the exact body when replaying a request.
-          in: header
-          name: Idempotency-Key
-          schema:
-            type: string
       requestBody:
         content:
           application/json:
@@ -13604,7 +13635,7 @@ paths:
               - runs.read
             binding: ownToken
             liveness: credential
-        retry: idempotency_key
+        retry: never
   /api/v1/trends:
     get:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.

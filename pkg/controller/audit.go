@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // RequestIDHeader carries a request's correlation id. A caller's value is
@@ -58,13 +58,14 @@ var (
 // is the caller's text, which can be a whole bearer pasted in place of a prefix, so each value passes its shape check
 // first: a token keeps only the prefix the store keys on, and an id must look like one the store mints.
 var auditTargetIDs = map[string]map[string]auditTarget{
-	"/api/v1/team/members/{user_id}":               {"user_id": memberTarget},
+	"/api/v1/team/members/{account}":               {"account": memberTarget},
 	"/api/v1/team/invitations/{id}":                {"id": invitationTarget},
 	"/api/v1/invitations/{id}/accept":              {"id": invitationTarget},
-	"/api/v1/tokens/{prefix}":                      {"prefix": tokenTarget},
-	"/api/v1/tokens/{prefix}/rotate":               {"prefix": tokenTarget},
-	"/api/v1/tokens/{prefix}/metered":              {"prefix": tokenTarget},
-	"/api/v1/team/tokens/{prefix}":                 {"prefix": tokenTarget},
+	"/api/v1/tokens/{token}":                       {"token": tokenTarget},
+	"/api/v1/operator/tokens/{token}":              {"token": tokenTarget},
+	"/api/v1/tokens/{token}/rotate":                {"token": tokenTarget},
+	"/api/v1/operator/tokens/{token}/rotate":       {"token": tokenTarget},
+	"/api/v1/operator/runners/{runner}/metered":    {"runner": tokenTarget},
 	"/api/v1/team/tokens/{prefix}/git-credentials": {"prefix": tokenTarget},
 }
 
@@ -76,10 +77,10 @@ func opaqueID(v string) string {
 }
 
 func tokenPrefixTarget(v string) string {
-	if store.TokenKindFromPrefix(v) == "" {
+	if len(v) < 16 || !strings.HasPrefix(v, capability.ControllerPrefix) || strings.Trim(v[4:16], "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") != "" {
 		return ""
 	}
-	return tokenPrefixOf(v)
+	return v[:16]
 }
 
 // safety: a read of these routes can hand out a secret, a credential or every
@@ -91,9 +92,9 @@ var auditedReadPrefixes = []string{
 // safety: authentication runs below the log middleware, so it fills this
 // holder and the line written after the handler returns can name the caller.
 type auditRecord struct {
-	id, route string
-	principal *Principal
-	targets   []any
+	id, route               string
+	principalID, kind, team string
+	targets                 []any
 	// safety: a GET that changes who can act, such as a sign-in callback, is audited like a write.
 	write bool
 }
@@ -106,9 +107,16 @@ func withAuditRecord(ctx context.Context, id, route string) (context.Context, *a
 }
 
 func noteAuditPrincipal(ctx context.Context, p *Principal) {
-	if rec, ok := ctx.Value(auditCtxKey{}).(*auditRecord); ok {
-		rec.principal = p
+	if rec, ok := ctx.Value(auditCtxKey{}).(*auditRecord); ok && p != nil {
+		rec.principalID, rec.kind, rec.team = auditPrincipalID(p), p.Kind, string(p.Team)
 	}
+}
+
+func notePolicyPrincipal(ctx context.Context, p capability.Principal) {
+	if rec, ok := ctx.Value(auditCtxKey{}).(*auditRecord); ok {
+		rec.principalID, rec.kind, rec.team = clip(p.Capability.Subject.ID), string(p.Capability.Subject.Kind), p.Capability.Team
+	}
+	otelutil.StampSpan(ctx, otelutil.SpanAttrs{Principal: clip(p.Capability.Subject.ID)})
 }
 
 // safety: a browser flow finishes on a GET the provider redirects to, so the step that signs an account in or
@@ -221,8 +229,8 @@ func logRequest(ctx context.Context, logger *slog.Logger, r *http.Request, rec *
 		"method", r.Method, "route", rec.route, "status", status, "dur_ms", elapsed.Milliseconds(),
 		"client_ip", clientIP, "client_class", clientClass(r.UserAgent()),
 	}
-	if p := rec.principal; p != nil {
-		attrs = append(attrs, "principal_kind", p.Kind, "principal_id", auditPrincipalID(p), "team", string(p.Team))
+	if rec.kind != "" {
+		attrs = append(attrs, "principal_kind", rec.kind, "principal_id", rec.principalID, "team", rec.team)
 	}
 	attrs = append(attrs, auditPathAttrs(rec.route, r.URL.EscapedPath())...)
 	attrs = append(attrs, rec.targets...)

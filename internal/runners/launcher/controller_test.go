@@ -1,0 +1,353 @@
+package launcher
+
+import (
+	"context"
+	"errors"
+	"reflect"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
+)
+
+type launcherWireFake struct {
+	claim func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error)
+	sync  func(context.Context, controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error)
+}
+
+func (f launcherWireFake) Claim(ctx context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+	return f.claim(ctx, request)
+}
+
+func (f launcherWireFake) SyncLauncher(ctx context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
+	return f.sync(ctx, request)
+}
+
+func wireAward(kind capability.UnitKind) controllerwire.ClaimedUnit {
+	deadline := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
+	identity := engine.Identity{Version: "v1.2.3", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}, ManifestDigest: strings.Repeat("a", 64)}
+	unit := controllerwire.ClaimedUnit{
+		Unit: kind, Purpose: capability.PurposeWork, Delivery: capability.DeliveryBootstrap,
+		UnitID: "awarded-unit", RunID: "run", JobID: "job", Capability: "one-time-bootstrap",
+		Binding: capability.Binding{Kind: capability.BindingNode, RunID: "run", NodeID: "job", Holder: "server-holder", Generation: 3},
+		Request: runspec.SealedRequest{RunID: "run", Request: runspec.Request{Team: "awarded-team"}},
+		Execution: &runspec.JobExecutionSettings{Resources: runspec.Setting[runspec.Resources]{Optional: runspec.Optional[runspec.Resources]{Set: true, Value: runspec.Resources{
+			Cores:       runspec.Setting[float64]{Optional: runspec.Optional[float64]{Set: true, Value: 1.5}},
+			MemoryBytes: runspec.Setting[int64]{Optional: runspec.Optional[int64]{Set: true, Value: 2 << 30}},
+		}}}},
+		OwnerDeadline: &deadline, AttemptDeadline: &deadline, ParentCapabilityExpiry: &deadline, Engine: &identity,
+	}
+	unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: unit.Request, Resolved: runspec.Resolved{Engine: identity}}}
+	switch kind {
+	case capability.UnitPlan:
+		unit.Purpose, unit.Binding.Kind = capability.PurposePlan, capability.BindingRun
+		unit.JobID, unit.Binding.NodeID = "", ""
+		unit.Accepted, unit.Engine = nil, nil
+	case capability.UnitEval:
+		unit.Purpose, unit.SourceGeneration = capability.PurposeEval, 7
+		unit.Binding.Generation, unit.Binding.Holder = 7, "source-holder"
+		unit.Binding.Expansion = &capability.LeaseRef{Kind: capability.UnitEval, ID: unit.UnitID, Generation: 3, Holder: "server-holder"}
+	}
+	return unit
+}
+
+func TestControllerClaimPreservesAwardWithoutRetry(t *testing.T) {
+	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
+		t.Run(string(kind), func(t *testing.T) {
+			unit := wireAward(kind)
+			demand := controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{kind}, Labels: []string{"os=linux"}, AvailableCores: 4, AvailableMemoryBytes: 8 << 30}
+			calls := 0
+			control, err := NewControllerControl(launcherWireFake{claim: func(ctx context.Context, got controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+				calls++
+				if ctx != t.Context() || !reflect.DeepEqual(got, demand) {
+					t.Fatalf("claim changed context or observations: %+v", got)
+				}
+				return controllerwire.ClaimResponse{Claim: &unit}, nil
+			}}, demand)
+			if err != nil {
+				t.Fatal(err)
+			}
+			projected := source.Spec{RepoKey: "gh:42", SHA: "sealed-sha", RemoteURL: "https://github.com/acme/repo", PipelineDir: ".sparkwing"}
+			control.forRequest = func(request runspec.SealedRequest) (source.Spec, error) {
+				if kind != capability.UnitPlan || !reflect.DeepEqual(request, unit.Request) {
+					t.Fatal("planning lost the sealed request")
+				}
+				return projected, nil
+			}
+			control.forExecution = func(spec runspec.Spec) (source.Spec, error) {
+				if kind == capability.UnitPlan || !reflect.DeepEqual(spec, unit.Accepted.Spec) {
+					t.Fatal("execution lost the accepted spec")
+				}
+				return projected, nil
+			}
+			award, err := control.Claim(t.Context())
+			if err != nil || award == nil || calls != 1 {
+				t.Fatalf("claim=%+v calls=%d err=%v", award, calls, err)
+			}
+			if !reflect.DeepEqual(award.Source, projected) || award.Binding.Team != "awarded-team" || award.Binding.UnitID != unit.UnitID || award.Binding.Holder != "server-holder" || award.Binding.Generation != 3 || award.Binding.Attempt != 0 || string(award.Bootstrap) != unit.Capability || award.CPUCores != 1.5 || award.Memory != 2<<30 || !reflect.DeepEqual(award.Engine, unit.Engine) {
+				t.Fatalf("award lost execution inputs: %+v", award.Binding)
+			}
+			if kind == capability.UnitEval && (award.Binding.SourceNodeID != "job" || award.Binding.SourceGeneration != 7) {
+				t.Fatal("eval lost its source fence")
+			}
+		})
+	}
+	failure := errors.New("lost claim response")
+	calls := 0
+	control, err := NewControllerControl(launcherWireFake{claim: func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+		calls++
+		return controllerwire.ClaimResponse{}, failure
+	}}, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitNode}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if award, err := control.Claim(t.Context()); award != nil || !errors.Is(err, failure) || calls != 1 {
+		t.Fatalf("lost one-time delivery was replayed: calls=%d err=%v", calls, err)
+	}
+}
+
+func TestControllerSyncUsesPersistedObservationsAndExactFences(t *testing.T) {
+	unit := wireAward(capability.UnitNode)
+	binding, err := cloudBinding(unit, capability.DeliveryBootstrap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation := CloudJobObservation{Binding: binding, JobName: jobName(binding), JobNamespace: "cloud", JobUID: "instance", NodeUID: "node-uid"}
+	for _, test := range []struct {
+		name           string
+		response       func() controllerwire.LauncherSyncResponse
+		remove, reject bool
+	}{
+		{name: "live", response: func() controllerwire.LauncherSyncResponse {
+			u := unit
+			u.Capability = ""
+			return controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{u}}
+		}},
+		{name: "retired", remove: true, response: func() controllerwire.LauncherSyncResponse {
+			return controllerwire.LauncherSyncResponse{Remove: []controllerwire.LauncherJobRef{{Namespace: observation.JobNamespace, Name: observation.JobName, UID: observation.JobUID}}}
+		}},
+		{name: "missing", reject: true, response: func() controllerwire.LauncherSyncResponse { return controllerwire.LauncherSyncResponse{} }},
+		{name: "bearer", reject: true, response: func() controllerwire.LauncherSyncResponse {
+			return controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{unit}}
+		}},
+		{name: "changed_fence", reject: true, response: func() controllerwire.LauncherSyncResponse {
+			u := unit
+			u.Capability = ""
+			u.Binding.Generation++
+			return controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{u}}
+		}},
+		{name: "contradiction", reject: true, response: func() controllerwire.LauncherSyncResponse {
+			u := unit
+			u.Capability = ""
+			return controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{u}, Remove: []controllerwire.LauncherJobRef{{Namespace: observation.JobNamespace, Name: observation.JobName, UID: observation.JobUID}}}
+		}},
+		{name: "unknown_cleanup", reject: true, response: func() controllerwire.LauncherSyncResponse {
+			return controllerwire.LauncherSyncResponse{Remove: []controllerwire.LauncherJobRef{{Namespace: observation.JobNamespace, Name: "some-other-job", UID: observation.JobUID}}}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			control, err := NewControllerControl(launcherWireFake{sync: func(_ context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
+				want := controllerwire.LauncherObservation{Award: capability.LeaseRef{Kind: unit.Unit, ID: unit.UnitID, Holder: binding.Holder, Generation: binding.Generation}, Job: controllerwire.LauncherJobRef{Namespace: observation.JobNamespace, Name: observation.JobName, UID: observation.JobUID}, NodeUID: observation.NodeUID}
+				if !slices.Equal(request.Observed, []controllerwire.LauncherObservation{want}) {
+					t.Fatalf("observation=%+v", request.Observed)
+				}
+				return test.response(), nil
+			}}, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitNode}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			states, err := control.Sync(t.Context(), []CloudJobObservation{observation})
+			if test.reject {
+				if err == nil || len(states) != 0 || strings.Contains(err.Error(), unit.Capability) {
+					t.Fatalf("unsafe sync result: %+v err=%v", states, err)
+				}
+				return
+			}
+			if err != nil || len(states) != 1 || !sameBinding(states[0].Binding, binding) || states[0].Delete != test.remove {
+				t.Fatalf("states=%+v err=%v", states, err)
+			}
+		})
+	}
+}
+
+func TestControllerClaimRejectsIncompleteOrConflictingAwards(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		change func(*controllerwire.ClaimedUnit)
+	}{
+		{"direct_credential", func(u *controllerwire.ClaimedUnit) { u.Delivery = capability.DeliveryDirect }},
+		{"missing_bootstrap", func(u *controllerwire.ClaimedUnit) { u.Capability = "" }},
+		{"missing_unit", func(u *controllerwire.ClaimedUnit) { u.UnitID = "" }},
+		{"missing_holder", func(u *controllerwire.ClaimedUnit) { u.Binding.Holder = "" }},
+		{"different_run", func(u *controllerwire.ClaimedUnit) { u.Binding.RunID = "other-run" }},
+		{"different_job", func(u *controllerwire.ClaimedUnit) { u.Binding.NodeID = "other-job" }},
+		{"negative_attempt", func(u *controllerwire.ClaimedUnit) { u.Binding.Attempt = -1 }},
+		{"missing_parent_expiry", func(u *controllerwire.ClaimedUnit) { u.ParentCapabilityExpiry = nil }},
+		{"missing_resources", func(u *controllerwire.ClaimedUnit) { u.Execution = nil }},
+		{"unset_cores", func(u *controllerwire.ClaimedUnit) { u.Execution.Resources.Value.Cores.Set = false }},
+		{"missing_accepted_spec", func(u *controllerwire.ClaimedUnit) { u.Accepted = nil }},
+		{"missing_engine", func(u *controllerwire.ClaimedUnit) { u.Engine = nil }},
+		{"different_engine", func(u *controllerwire.ClaimedUnit) { u.Engine.Version = "v2.0.0" }},
+		{"unexpected_source_generation", func(u *controllerwire.ClaimedUnit) { u.SourceGeneration = 1 }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			unit := wireAward(capability.UnitNode)
+			test.change(&unit)
+			control, err := NewControllerControl(launcherWireFake{claim: func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+				return controllerwire.ClaimResponse{Claim: &unit}, nil
+			}}, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitNode}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			control.forExecution = func(runspec.Spec) (source.Spec, error) {
+				t.Fatal("invalid award reached source projection")
+				return source.Spec{}, nil
+			}
+			if award, err := control.Claim(t.Context()); award != nil || err == nil || strings.Contains(err.Error(), "one-time-bootstrap") {
+				t.Fatalf("invalid award accepted or exposed: %v", err)
+			}
+		})
+	}
+}
+
+func TestControllerControlCapturesDemandAndHonorsCancellation(t *testing.T) {
+	for _, kinds := range [][]capability.UnitKind{nil, {capability.UnitNode, capability.UnitNode}, {capability.UnitTrigger}, {"unknown"}} {
+		if _, err := NewControllerControl(launcherWireFake{}, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: kinds}); err == nil {
+			t.Fatalf("invalid launcher kinds accepted: %v", kinds)
+		}
+	}
+	demand := controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitNode}, Labels: []string{"os=linux"}}
+	calls := 0
+	control, err := NewControllerControl(launcherWireFake{claim: func(_ context.Context, got controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+		calls++
+		if got.Kinds[0] != capability.UnitNode || got.Labels[0] != "os=linux" {
+			t.Fatal("caller or transport mutated captured claim observations")
+		}
+		got.Kinds[0], got.Labels[0] = capability.UnitTrigger, "os=windows"
+		return controllerwire.ClaimResponse{}, nil
+	}}, demand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	demand.Kinds[0], demand.Labels[0] = capability.UnitPlan, "os=darwin"
+	for range 2 {
+		if _, err := control.Claim(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithCancelCause(t.Context())
+	cause := errors.New("launcher stopped")
+	cancel(cause)
+	if _, err := control.Claim(ctx); !errors.Is(err, cause) || calls != 2 {
+		t.Fatalf("cancelled claim reached transport: calls=%d err=%v", calls, err)
+	}
+	if _, err := control.Sync(ctx, nil); !errors.Is(err, cause) {
+		t.Fatalf("cancelled sync reached transport: %v", err)
+	}
+}
+
+func TestControllerEvalSyncPreservesBothGenerations(t *testing.T) {
+	for _, change := range []string{"none", "source", "lease", "holder", "missing_lease", "wrong_lease"} {
+		t.Run(change, func(t *testing.T) {
+			unit := wireAward(capability.UnitEval)
+			binding, err := cloudBinding(unit, capability.DeliveryBootstrap)
+			if err != nil {
+				t.Fatal(err)
+			}
+			unit.Capability = ""
+			switch change {
+			case "source":
+				unit.SourceGeneration++
+				unit.Binding.Generation++
+			case "lease":
+				unit.Binding.Expansion.Generation++
+			case "holder":
+				unit.Binding.Expansion.Holder = "different-holder"
+			case "missing_lease":
+				unit.Binding.Expansion = nil
+			case "wrong_lease":
+				unit.Binding.Expansion.ID = "another-eval"
+			}
+			control, err := NewControllerControl(launcherWireFake{sync: func(context.Context, controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
+				return controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{unit}}, nil
+			}}, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitEval}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			states, err := control.Sync(t.Context(), []CloudJobObservation{{Binding: binding, JobName: jobName(binding), JobNamespace: "cloud", JobUID: "instance", NodeUID: "node-uid"}})
+			if change == "none" {
+				if err != nil || len(states) != 1 || states[0].Binding.Generation != 3 || states[0].Binding.SourceGeneration != 7 {
+					t.Fatalf("live eval lost its two fences: %+v err=%v", states, err)
+				}
+			} else if err == nil || len(states) != 0 {
+				t.Fatalf("changed eval fence accepted: %+v err=%v", states, err)
+			}
+		})
+	}
+}
+
+func TestCloudJobNamesSeparateAwardedUnits(t *testing.T) {
+	unit := wireAward(capability.UnitEval)
+	first, err := cloudBinding(unit, capability.DeliveryBootstrap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := first
+	second.UnitID = "another-awarded-unit"
+	if jobName(first) == jobName(second) {
+		t.Fatal("different awarded units alias the same Kubernetes Job")
+	}
+	second = first
+	second.SourceGeneration++
+	if jobName(first) == jobName(second) {
+		t.Fatal("different terminal source generations alias the same Kubernetes Job")
+	}
+}
+
+func FuzzControllerSyncPreservesAwardAndJobInstance(f *testing.F) {
+	f.Add("instance", "replacement", int64(7), true)
+	f.Add("same-instance", "same-instance", int64(3), false)
+	f.Fuzz(func(t *testing.T, uid, replacement string, generation int64, replace bool) {
+		if uid == "" || replacement == "" || generation <= 0 {
+			return
+		}
+		unit := wireAward(capability.UnitNode)
+		unit.Binding.Generation = generation
+		binding, err := cloudBinding(unit, capability.DeliveryBootstrap)
+		if err != nil {
+			t.Fatal(err)
+		}
+		observation := CloudJobObservation{Binding: binding, JobName: jobName(binding), JobNamespace: "cloud", JobUID: uid, NodeUID: "node-uid"}
+		control, err := NewControllerControl(launcherWireFake{sync: func(_ context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
+			if len(request.Observed) != 1 {
+				t.Fatal("award observation missing")
+			}
+			got := request.Observed[0]
+			want := capability.LeaseRef{Kind: capability.UnitNode, ID: binding.UnitID, Holder: binding.Holder, Generation: generation}
+			if got.Award != want || got.Job.Namespace != "cloud" || got.Job.Name != observation.JobName || got.Job.UID != uid || got.NodeUID != observation.NodeUID {
+				t.Fatal("award or Job instance changed")
+			}
+			if replace {
+				got.Job.UID = replacement
+			}
+			return controllerwire.LauncherSyncResponse{Remove: []controllerwire.LauncherJobRef{got.Job}}, nil
+		}}, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitNode}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		states, err := control.Sync(t.Context(), []CloudJobObservation{observation})
+		if replace && replacement != uid {
+			if err == nil || len(states) != 0 {
+				t.Fatal("replacement Job cleanup was accepted")
+			}
+		} else if err != nil || len(states) != 1 || !states[0].Delete || !sameBinding(states[0].Binding, binding) {
+			t.Fatalf("original instance was not retained: %+v %v", states, err)
+		}
+	})
+}

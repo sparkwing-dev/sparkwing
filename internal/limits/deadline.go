@@ -58,7 +58,7 @@ func Renew(ttl time.Duration) time.Duration { return ttl / 3 }
 // CheckRenewal refuses nonpositive values or a cadence that cannot renew twice strictly before expiry.
 func CheckRenewal(every, ttl time.Duration) error {
 	if every <= 0 || ttl <= 0 || every >= ttl || every >= ttl-every {
-		return errors.New("renewal interval must permit two renewals strictly before expiry")
+		return errors.New("lease and renewal interval must be positive, with two renewals strictly before expiry")
 	}
 	return nil
 }
@@ -67,17 +67,19 @@ func CheckRenewal(every, ttl time.Duration) error {
 // uses the owner's budget; both zero remain unbounded. An already-expired attempt or owner is ErrNoTime.
 // Both the Kubernetes Job and its launch claim use this result, preventing a pod from outliving its owner.
 func JobDeadline(now, ownerDeadline, attemptDeadline time.Time) (time.Time, error) {
-	if (!ownerDeadline.IsZero() && !ownerDeadline.After(now)) || (!attemptDeadline.IsZero() && !attemptDeadline.After(now)) {
-		return time.Time{}, ErrNoTime
+	for _, bound := range []time.Time{ownerDeadline, attemptDeadline} {
+		if !bound.IsZero() && !bound.After(now) {
+			return time.Time{}, ErrNoTime
+		}
 	}
-	if attemptDeadline.IsZero() {
-		return ownerDeadline, nil
+	deadline := ownerDeadline
+	if !attemptDeadline.IsZero() {
+		attemptEnd := attemptDeadline.Add(JobSlack)
+		if deadline.IsZero() || attemptEnd.Before(deadline) {
+			deadline = attemptEnd
+		}
 	}
-	end := attemptDeadline.Add(JobSlack)
-	if !ownerDeadline.IsZero() && ownerDeadline.Before(end) {
-		end = ownerDeadline
-	}
-	return end, nil
+	return deadline, nil
 }
 
 // Error bounds already-masked UTF-8 error text with a head and tail within ErrorBytes.

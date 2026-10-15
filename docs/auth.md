@@ -274,6 +274,32 @@ their declared proof requirements. A route being reachable without a bearer is
 not an authorization bypass. A signed URL, verified webhook or provider proof
 is valid only for its own operation. Every registered route declares its proof.
 
+`GET /api/v1/auth/session` accepts a live account session from one session
+cookie or one `Authorization: Session <id>` header. An Authorization header
+takes precedence over cookies. Duplicate headers, duplicate session cookies,
+unknown or ended sessions and HEAD are refused. The response includes the
+current role, narrowed scopes, session-bound CSRF token and renewed expiry.
+Renewal cannot extend the absolute session lifetime. A disabled account-session
+license or failed proof cannot renew the session.
+
+`POST /api/v1/auth/logout` takes no body. It ends only the presented session,
+requires the session's CSRF header and cookie plus same-origin proof, and
+clears the browser cookies on success. A body or query parameter cannot select
+another session. Both endpoints return `Cache-Control: no-store` and the
+canonical error envelope. Session-key and deletion failures return `unavailable`.
+
+Other policy routes accept the same Session header or one session cookie and
+check the configured absolute lifetime without renewing. A malformed header
+cannot fall back to a cookie. Dashboard requests reach that proof boundary
+before session renewal, so a failed CSRF check cannot extend a live session.
+
+The browser form posts to `POST /logout`. It requires a live session and a
+`csrf_token` field matching both the CSRF cookie and the stored session, plus
+same-origin proof. It deletes only that session, clears its browser cookies and
+redirects to `/login`. It never renews before checking proof. Refusals use the
+canonical error envelope. An unavailable session returns `401`; a key or
+deletion failure returns `503` and leaves the cookies in place.
+
 ## Dashboard authorization
 
 Browser sessions use account and team authority. State-changing browser requests

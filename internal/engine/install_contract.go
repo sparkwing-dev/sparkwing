@@ -1,6 +1,10 @@
 package engine
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+	"errors"
+)
 
 // SDKInstallRequest gives the verified matching engine its acquired source and filtered install base.
 // Directory is the checkout, PipelineDir is relative to it, and Environment comes from procenv.Install.
@@ -10,6 +14,28 @@ type SDKInstallRequest struct {
 	PipelineDir string   `json:"pipeline_dir"`
 	SDK         SDKKind  `json:"sdk"`
 	Environment []string `json:"-"`
+}
+
+// UnmarshalJSON refuses ambiguous requests and credentials sent through the input pipe.
+func (r *SDKInstallRequest) UnmarshalJSON(body []byte) error {
+	var fields map[string]json.RawMessage
+	if err := decodeUniqueJSON(body, &fields); err != nil {
+		return err
+	}
+	for field := range fields {
+		switch field {
+		case "directory", "pipeline_dir", "sdk":
+		default:
+			return errors.New("unknown SDK install request field")
+		}
+	}
+	type request SDKInstallRequest
+	var decoded request
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return err
+	}
+	*r = SDKInstallRequest(decoded)
+	return nil
 }
 
 // SDKCommand names the locally built Go command or Node/main command without protocol argv.
@@ -25,5 +51,5 @@ type SDKCommand struct {
 // It rechecks the checkout pin against the resolved identity and never resolves to the ambient CLI.
 // Go builds use the local binary cache. TypeScript installs from its native lockfile without a preload.
 func (r Resolved) InstallSDK(ctx context.Context, request SDKInstallRequest) (SDKCommand, error) {
-	panic("unimplemented: c3-engine")
+	return r.installSDK(ctx, request)
 }
