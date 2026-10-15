@@ -45,6 +45,16 @@ func (cfg ProtocolSessionConfig) Start(ctx context.Context, input NodeInput, act
 	return StartProtocolSession(ctx, cfg)
 }
 
+// StartEvaluation launches owner closures using the same private transport as
+// execution. Configure Log for run logs and Revoke for the delegated eval route.
+func (cfg ProtocolSessionConfig) StartEvaluation(ctx context.Context, input EvaluationInput) (ExecutorProcess, error) {
+	if input.Entry == nil {
+		return nil, errors.New("SDK evaluation requires a source entry")
+	}
+	cfg.Command, cfg.Directory = input.Entry.Command, input.Entry.Directory
+	return StartProtocolSession(ctx, cfg)
+}
+
 type protocolCall struct {
 	request  nodeproto.Request
 	callerID string

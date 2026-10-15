@@ -409,7 +409,11 @@ func TestProtocolSessionChild(t *testing.T) {
 			if mode == "mismatch" {
 				version++
 			}
-			reply(request, nodeproto.HelloResult{Protocol: version, SDK: nodeproto.SDKIdentity{Language: "go", Version: "test"}, Features: []string{}})
+			sdkVersion := "test"
+			if mode == "owner_expand" {
+				sdkVersion = "v1.0.0"
+			}
+			reply(request, nodeproto.HelloResult{Protocol: version, SDK: nodeproto.SDKIdentity{Language: "go", Version: sdkVersion}, Features: []string{}})
 			if mode == "blocked" {
 				reader, writer, err := os.Pipe()
 				if err != nil {
@@ -422,6 +426,19 @@ func TestProtocolSessionChild(t *testing.T) {
 			continue
 		}
 		switch mode {
+		case "owner_expand":
+			switch request.Op {
+			case nodeproto.OpPlan:
+				reply(request, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}, Closures: nodeproto.ClosureSpec{Generate: []string{"first", "empty", "last"}}}}})
+			case nodeproto.OpEval:
+				if request.Job != "build" || string(request.Input) != `{"count":2}` {
+					os.Exit(6)
+				}
+				raw, _ := json.Marshal([]nodeproto.JobSpec{{ID: request.Closure, Groups: []string{request.Closure}}})
+				reply(request, nodeproto.EvalResult{Value: raw})
+			default:
+				os.Exit(7)
+			}
 		case "eval_cancel":
 			if request.Op == nodeproto.OpEval {
 				held = append(held, request)
@@ -485,5 +502,39 @@ func TestProtocolSessionChild(t *testing.T) {
 		default:
 			reply(request, map[string]bool{})
 		}
+	}
+}
+
+func TestOwnerEvaluationNativeProcess(t *testing.T) {
+	in, _, deps, _ := evaluationFixture(t)
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.Entry.Command = []string{exe, "-test.run=^TestProtocolSessionChild$", "--", "owner_expand"}
+	in.RouteBinding.Routes = nodeproto.ProcessRoutes{URL: "http://host", Bearer: "private-test-bearer"}
+	revoked, cleaned := false, false
+	cfg := ProtocolSessionConfig{Environment: []string{"GORACE=atexit_sleep_ms=0"}, ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, Revoke: func() error { revoked = true; return nil }, RunCleanups: func(context.Context) error {
+		if !revoked {
+			return errors.New("routes still live during cleanup")
+		}
+		cleaned = true
+		return nil
+	}}
+	deps.Start = cfg.StartEvaluation
+	h, err := NewOwnerEvaluator(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, failure, err := h.Expand(t.Context(), in)
+	if err != nil || failure != nil {
+		t.Fatalf("failure = %+v, error = %v", failure, err)
+	}
+	var plan nodeproto.PlanDoc
+	if err := json.Unmarshal(body, &plan); err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Jobs) != 3 || !revoked || !cleaned {
+		t.Fatalf("plan = %+v, revoked = %v, cleaned = %v", plan, revoked, cleaned)
 	}
 }

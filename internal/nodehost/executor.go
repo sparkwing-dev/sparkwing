@@ -68,7 +68,10 @@ type ExecutorDependencies struct {
 	Mask          func(string) string
 }
 
-type nodeExecutor struct{ deps ExecutorDependencies }
+type nodeExecutor struct {
+	deps ExecutorDependencies
+	sdkCode
+}
 
 // NewNodeExecutor builds the common executor for local and dispatched claims.
 // Validation, hashing and deadline defaults are owned by their contract packages.
@@ -85,7 +88,7 @@ func NewNodeExecutor(deps ExecutorDependencies) (NodeHost, error) {
 	if deps.ChildContext == nil {
 		deps.ChildContext = limits.ChildContext
 	}
-	return &nodeExecutor{deps: deps}, nil
+	return &nodeExecutor{deps: deps, sdkCode: sdkCode{Store: deps.Store, ValidatePlan: deps.ValidatePlan, CanonicalHash: deps.CanonicalHash, Validation: deps.Validation}}, nil
 }
 
 func (h *nodeExecutor) Execute(ctx context.Context, input NodeInput) error {

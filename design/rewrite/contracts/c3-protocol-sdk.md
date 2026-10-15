@@ -56,6 +56,8 @@ are part of this contract.
 | `nodehost.OwnerHost`, `OwnerStore` | Coordinate renewal, planning, acceptance, scheduling and atomic finish through the Tenant contracts. |
 | `nodehost.OwnerPlanning`, `OwnerLayerResult` | Supply checkout planning inputs and owner policy results without replacing intake or claim authority. |
 | `nodehost.GeneratorReplay` | Supplies recorded source output for code-only reconstruction. |
+| `nodehost.OwnerEvaluator`, `NewOwnerEvaluator`, `EvaluationInput`, `EvaluationDependencies`, `EvaluationStore` | Reconstruct accepted source code and evaluate every source generator through the common protocol and hash checks. |
+| `nodehost.ProtocolSessionConfig.StartEvaluation` | Launches the owner evaluator with private pipes, run-log attribution and route revocation. |
 | `nodehost.ClaimAuthority` | Refers to authenticated executor authority without granting it from a request body. |
 | `nodehost.NodeInput` | Binds an attempt to accepted spec, node, generation, runner and route bearer. |
 | `nodehost.NodeHost.Execute` | Replans, checks drift, runs executor layers and reports through store transitions. |
@@ -241,6 +243,28 @@ closure ID. Until C3's protocol owner defines eval cancellation, the native
 session terminates and joins on an eval timeout. Host-registered cleanup still
 runs. Finally or after_run requiring that SDK process cannot run after this cut.
 
+`OwnerEvaluator.Expand` checks the persisted source generation and declaration
+hash, then reads its authorized recorded output. A successful or memoized source
+with expected expansion evaluates all declared generators in one SDK process.
+Generated sources first reconstruct their ancestor chain with the executor's
+shared replay code. A source materialized before any claim may have generation
+zero. Its persisted generation still fences expansion and replay.
+
+Each returned job must belong to the generator that emitted it. The evaluator
+preserves raw job JSON until the shared validator checks the complete expansion,
+so unknown fields and dependencies between generator groups cannot be hidden by
+a host decoder. Empty expansion is an explicit jobs array. Evaluation, drift,
+validation and cleanup failures discard the entire proposed body and return one
+masked `ExpansionFailure`. Owner cancellation or lease loss returns an error and
+leaves settlement to live authority. `OwnerHost` submits the body or failure once
+through `AcceptExpansion`. The evaluator writes no topology or lifecycle state.
+
+`EvaluationDependencies.Start` supplies the environment and delegated route
+binding. `ProtocolSessionConfig.StartEvaluation` provides the native process
+transport. Its log callback attributes owner eval output to run logs. The output
+reader must verify the source generation and authorize the recorded bytes. These
+adapters still need placement wiring.
+
 The host implementation accepts the declared store, validator, hash and engine
 interfaces so their independent implementations can be tested with fakes.
 This does not complete the native placement adapters. Those adapters must supply
@@ -255,6 +279,14 @@ available to the selected remote executor. The run-host actor also needs an
 authorized route for `DecisionCancelHolder`; the node transition table reserves
 that edge for controller, operator and reaper actors. These paths return errors
 until their authority and transaction contracts are supplied.
+
+Owner policy also needs a fenced store edge for a skip predicate that errors
+before dispatch. `NodeTransitions` permits owner dependency skips and cancels,
+but no pending-to-failed policy result. Debug pause status detail has no typed
+mutation in `TransitionExtra`. Neither path may fall back to legacy raw writers.
+Eval log identity must allow a materialized source at generation zero because
+`nodes.generation` starts at zero and unclaimed materialization needs no award.
+The `log_streams.source_generation > 0` constraint does not cover that source.
 
 The controller wire reconciliation response must carry enough persisted state
 to reconstruct `ReconciledNode`, including claim identity, retry consumption,
