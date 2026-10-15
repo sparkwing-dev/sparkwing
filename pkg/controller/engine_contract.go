@@ -3,8 +3,10 @@ package controller
 import (
 	"context"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -19,35 +21,119 @@ type EngineController struct{ Store *store.Store }
 // store.ExpansionSubmission; Failure.Code and masked Message are preserved.
 // No acceptance or state mutation happens before Tenant.AcceptExpansion.
 func ExpansionForStore(authorized capability.Authorized, body controllerwire.ExpansionSubmission) (store.ExpansionSubmission, error) {
-	panic("unimplemented: controller-wire")
+	return expansionForStore(authorized, body, apierr.DecodeInner)
 }
 
 func (s *EngineController) AcceptExpansion(ctx context.Context, authorized capability.Authorized, body controllerwire.ExpansionSubmission) (controllerwire.ExpansionAccepted, error) {
-	panic("unimplemented: controller-wire")
+	request, err := ExpansionForStore(authorized, body)
+	if err != nil {
+		return controllerwire.ExpansionAccepted{}, err
+	}
+	tenant, err := s.tenant(ctx, authorized)
+	if err != nil {
+		return controllerwire.ExpansionAccepted{}, err
+	}
+	result, err := tenant.AcceptExpansion(ctx, request)
+	if err != nil {
+		return controllerwire.ExpansionAccepted{}, err
+	}
+	return engineExpansion(result)
 }
 
 // IntakeForStore keeps tagged session or capability authority separate from the
 // claim prefix and preserves body.IdempotencyKey. The store derives its scope.
 // Verified App facts come from the authenticated delivery record.
 func IntakeForStore(authorized capability.Authorized, body controllerwire.CreateRunRequest) (store.IntakeRequest, error) {
-	panic("unimplemented: controller-wire")
+	team, err := engineTeam(authorized)
+	if err != nil {
+		return store.IntakeRequest{}, err
+	}
+	if body.Request.Team != "" && body.Request.Team != string(team) {
+		return store.IntakeRequest{}, engineBadRequest("request names another team")
+	}
+	body.Request.Team = string(team)
+	request := store.IntakeRequest{Authority: authorized.Principal.Authority, Request: body.Request, IdempotencyKey: body.IdempotencyKey}
+	if request.Authority.Kind == capability.AuthorityCapability {
+		request.CapabilityPrefix = authorized.Principal.Capability.Prefix
+	}
+	return request, nil
 }
 
 func (s *EngineController) CreateRun(ctx context.Context, authorized capability.Authorized, body controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error) {
-	panic("unimplemented: controller-wire")
+	request, err := IntakeForStore(authorized, body)
+	if err != nil {
+		return controllerwire.CreateRunResponse{}, err
+	}
+	tenant, err := s.tenant(ctx, authorized)
+	if err != nil {
+		return controllerwire.CreateRunResponse{}, err
+	}
+	result, err := tenant.AdmitRun(ctx, request)
+	if err != nil {
+		return controllerwire.CreateRunResponse{}, err
+	}
+	return engineAdmission(result), nil
 }
 
 // AcceptPlan carries body.Declarations unchanged into PlanAcceptance.Seal.Declarations.
 // The store validates the author-only layers and resolves against its stored request
 // and ceilings; a caller cannot supply replacement intake or operator authority.
 func (s *EngineController) AcceptPlan(ctx context.Context, authorized capability.Authorized, body controllerwire.PlanSubmission) (controllerwire.PlanAccepted, error) {
-	panic("unimplemented: controller-wire")
+	tenant, err := s.tenant(ctx, authorized)
+	if err != nil {
+		return controllerwire.PlanAccepted{}, err
+	}
+	run, err := tenant.ReadRun(ctx, authorized.Target.RunID)
+	if err != nil {
+		return controllerwire.PlanAccepted{}, err
+	}
+	request, err := planForStore(authorized, body, run)
+	if err != nil {
+		return controllerwire.PlanAccepted{}, err
+	}
+	result, err := tenant.AcceptPlan(ctx, request)
+	if err != nil {
+		return controllerwire.PlanAccepted{}, err
+	}
+	return enginePlan(result), nil
 }
 
 // ReconcileJob uses C1 ReconcileRequest and returns its persisted node and claim.
 // The proposal's source outcome is loaded by the store, never supplied by HTTP.
 func (s *EngineController) ReconcileJob(ctx context.Context, authorized capability.Authorized, body controllerwire.ReconcileRequest) (controllerwire.ReconcileResponse, error) {
-	panic("unimplemented: controller-wire")
+	actor, err := engineActor(authorized)
+	if err != nil {
+		return controllerwire.ReconcileResponse{}, err
+	}
+	tenant, err := s.tenant(ctx, authorized)
+	if err != nil {
+		return controllerwire.ReconcileResponse{}, err
+	}
+	request := store.ReconcileRequest{Ref: store.NodeRef{RunID: authorized.Target.RunID, NodeID: authorized.Target.NodeID}, Actor: actor, Policy: store.SourcePolicy(body.Policy)}
+	if body.Source != nil {
+		request.Source = &store.MaterializeSource{Kind: store.SourcePolicy(body.Source.Policy), Source: body.Source.Attempt, Record: body.Source.Record}
+	}
+	result, err := tenant.ReconcileNode(ctx, request)
+	if err != nil {
+		return controllerwire.ReconcileResponse{}, err
+	}
+	response := controllerwire.ReconcileResponse{Kind: string(result.Kind), Job: engineJob(result.Node)}
+	if result.Source != nil {
+		response.Source = &controllerwire.ReuseSource{Policy: string(result.Source.Kind), Attempt: result.Source.Source, Record: result.Source.Record}
+	}
+	if result.Claim == nil {
+		return response, nil
+	}
+	principal, err := s.Store.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: result.Claim.CapabilityPrefix})
+	if err != nil {
+		return controllerwire.ReconcileResponse{}, err
+	}
+	run, err := tenant.ReadRun(ctx, request.Ref.RunID)
+	if err != nil {
+		return controllerwire.ReconcileResponse{}, err
+	}
+	response.Claim = engineReconciledClaim(principal.Capability, result, run)
+	return response, nil
 }
 
 // Claim calls engine.EvaluateRunner against signed policy before a new award, derives total
@@ -57,25 +143,100 @@ func (s *EngineController) Claim(ctx context.Context, authorized capability.Auth
 }
 
 func (s *EngineController) Renew(ctx context.Context, authorized capability.Authorized, body controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error) {
-	panic("unimplemented: controller-wire")
+	if _, err := engineTeam(authorized); err != nil {
+		return controllerwire.RenewalResponse{}, err
+	}
+	if authorized.Principal.Authority.Kind != capability.AuthorityCapability || authorized.Principal.Authority.ID != authorized.Principal.Capability.Prefix {
+		return controllerwire.RenewalResponse{}, engineBadRequest("renewal requires an awarded capability")
+	}
+	beat, err := s.Store.RenewUnit(ctx, authorized.Principal.Capability.Prefix, body.Executing)
+	if err != nil {
+		return controllerwire.RenewalResponse{}, err
+	}
+	return controllerwire.RenewalResponse{ExpiresAt: beat.ExpiresAt, CancelRequested: beat.CancelRequested, CancelReason: beat.CancelReason, Watched: beat.Watched, WatchedJobs: beat.WatchedNodes}, nil
 }
 
 func (s *EngineController) TransitionJob(ctx context.Context, authorized capability.Authorized, body controllerwire.JobTransitionRequest) (controllerwire.Applied, error) {
-	panic("unimplemented: controller-wire")
+	if body.Result != nil {
+		if err := validateEngineFailure(body.Result.Error, apierr.DecodeInner); err != nil {
+			return controllerwire.Applied{}, err
+		}
+	}
+	request, err := nodeTransitionForStore(authorized, body)
+	if err != nil {
+		return controllerwire.Applied{}, err
+	}
+	tenant, err := s.tenant(ctx, authorized)
+	if err != nil {
+		return controllerwire.Applied{}, err
+	}
+	result, err := tenant.TransitionNode(ctx, request)
+	if err != nil {
+		return controllerwire.Applied{}, err
+	}
+	return engineApplied(result), nil
 }
 
 func (s *EngineController) Finish(ctx context.Context, authorized capability.Authorized, body controllerwire.FinishRequest) (controllerwire.Applied, error) {
-	panic("unimplemented: controller-wire")
+	if err := validateEngineFailure(body.Error, apierr.DecodeInner); err != nil {
+		return controllerwire.Applied{}, err
+	}
+	request, err := finishForStore(authorized, body)
+	if err != nil {
+		return controllerwire.Applied{}, err
+	}
+	tenant, err := s.tenant(ctx, authorized)
+	if err != nil {
+		return controllerwire.Applied{}, err
+	}
+	var result store.Applied
+	if request.Transition.Cause == store.RunPublish {
+		result, err = tenant.TransitionRun(ctx, request.Transition)
+	} else {
+		result, err = tenant.FinishRunAndUnit(ctx, request)
+	}
+	if err != nil {
+		return controllerwire.Applied{}, err
+	}
+	return engineApplied(result), nil
 }
 
 func (s *EngineController) Cancel(ctx context.Context, authorized capability.Authorized, body controllerwire.CancelRequest) (controllerwire.Applied, error) {
-	panic("unimplemented: controller-wire")
+	actor, err := engineActor(authorized)
+	if err != nil {
+		return controllerwire.Applied{}, err
+	}
+	actor.Kind, actor.Owner = store.ActorOperator, store.OwnerLeaseRef{}
+	tenant, err := s.tenant(ctx, authorized)
+	if err != nil {
+		return controllerwire.Applied{}, err
+	}
+	result, err := tenant.TransitionRun(ctx, store.RunTransition{RunID: authorized.Target.RunID, To: store.RunCancelled, Cause: store.RunCancel, Actor: actor, Reason: body.Reason})
+	if err != nil {
+		return controllerwire.Applied{}, err
+	}
+	return engineApplied(result), nil
 }
 
 // Retry carries body.IdempotencyKey through AdmitRun while loading unchanged
 // source seals and recording retrier lineage. It never edits the source run.
 func (s *EngineController) Retry(ctx context.Context, authorized capability.Authorized, body controllerwire.RetryRequest) (controllerwire.CreateRunResponse, error) {
-	panic("unimplemented: controller-wire")
+	tenant, err := s.tenant(ctx, authorized)
+	if err != nil {
+		return controllerwire.CreateRunResponse{}, err
+	}
+	request := store.IntakeRequest{Authority: authorized.Principal.Authority, IdempotencyKey: body.IdempotencyKey, Request: runspec.Request{Team: string(tenant.Team()), Lineage: runspec.Lineage{RetryOf: authorized.Target.RunID}}}
+	if request.Request.Lineage.RetryOf == "" {
+		return controllerwire.CreateRunResponse{}, engineBadRequest("retry requires a source run")
+	}
+	if request.Authority.Kind == capability.AuthorityCapability {
+		request.CapabilityPrefix = authorized.Principal.Capability.Prefix
+	}
+	result, err := tenant.AdmitRun(ctx, request)
+	if err != nil {
+		return controllerwire.CreateRunResponse{}, err
+	}
+	return engineAdmission(result), nil
 }
 
 // RunDetail uses runspec.DisplayRequest/DisplaySpec and the same safe projection

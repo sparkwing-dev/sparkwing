@@ -1,6 +1,137 @@
 # W1 store handoff
 
-This session continues commit c8481cf9c. Its changes are uncommitted.
+This session continues commit 1b3588e78. Its changes are uncommitted.
+The store transactions from earlier sessions remain in place. W1b's files
+were not edited. The lead owns committing and the full delivery checks.
+
+## Controller adapters
+
+Implemented eleven declared entry points in pkg/controller/engine_contract.go:
+IntakeForStore, CreateRun, AcceptPlan, ExpansionForStore, AcceptExpansion,
+ReconcileJob, Renew, TransitionJob, Finish, Cancel and Retry. They use the
+final Tenant and capability-derived Store APIs. The HTTP router is still
+the other area's integration work.
+
+The adapters retain tagged session authority. They derive actors and fences
+from C2 Authorized values, and the store rechecks them in each transaction.
+Plan acceptance loads the persisted request seal rather than accepting one
+from the body. This preserves retries whose carried seal names the original
+invocation. Restricted checkout declarations pass through unchanged.
+
+Expansion retains the source generation separately from its evaluator lease
+generation. Structured failures pass apierr.DecodeInner before conversion.
+The conversion tests fake that decoder because its C2 implementation still
+panics. The real success adapter handles an explicit empty jobs array.
+
+Reconciliation returns the committed self-claim bearer only in the private
+claim response. Its binding comes from the persisted capability. Execution
+settings come from the returned node, and accepted inputs come from the run.
+Public job detail omits the bearer. A competing live claim returns WaitHolder.
+A finished job returns KeepTerminal without another lifecycle event.
+
+Job results preserve authorized output and manifest record keys, retry time,
+exit code and masked error. Run finish uses FinishRunAndUnit for an owner and
+TransitionRun with RunPublish for a publisher. Cancel stays a cooperative
+request. Retry sends the source ID and idempotency key to AdmitRun, which
+loads the source seals and records the retrier.
+
+## Removed APIs
+
+Deleted Store.ClaimAttemptOrdinal and Tenant.OwnedRunIDs, plus their API
+snapshot entries. They had no Go callers or tests. The first queried removed
+attempts_consumed and claim_generation columns. Final hosts read NodeRow's
+persisted attempt ordinal.
+
+The two source deletions remove 40 Go lines, including the unused import and
+spacing. Eleven adapter panic lines were replaced by implementations. Broader
+legacy claim and plan removal remains dependent on callers, including W1b's
+billing tests. Those files were left to W1b.
+
+## Package proofs and verification
+
+Nine new top-level controller tests pass, eleven including subtests. They
+cover session/team identity, persisted request seals, retry seal identity,
+expansion fences and decoder refusal, record-key and retry conversion,
+publisher versus owner finish, and private bearer delivery.
+
+SQLite integration exercises a real award, renewal, job start, result and
+exact replay. A second integration walks owner award and execution start,
+self-claim, WaitHolder, executor start/report, terminal adoption and run finish.
+An injected owner-write failure rolls back the finish. The retry commits the
+run and owner unit together, and an exact repeat replays. Cancellation tests
+prove that membership removal after route authorization refuses the write.
+Live cancellation writes one event and one due GitHub effect revision.
+
+The profile resolver is a fake. The run/spec/plan fixtures are seeded final
+schema rows because W4/W6 validation, sealing and resolution remain stubs.
+These tests prove adapter/store transactions. They execute no SDK process,
+HTTP authorization middleware or blob persistence. No additional parked-source
+function was ported in this session. The new integration extends the existing
+package proofs for lifecycle replay, terminal adoption and reconciliation.
+
+Final checks use GOWORK=off GOFLAGS=-buildvcs=false, with GOCACHE and
+GOTMPDIR/TMPDIR under /tmp/sw-astra-W1. Go test uses -p 4.
+
+- Full repository go build -p 4 ./... passes after the API removals.
+- go vet -p 4 ./pkg/store ./pkg/controller passes.
+- The established W1 selection below passes 170 top-level tests, 495 including
+  subtests, with no skips. The new controller selection is -run '^TestEngine'.
+- Acceptance catalog, port inventory/destination, credential-route declaration
+  and invariant-coverage checks pass. These checks execute no runtime cell.
+- git diff --check passes. The repository-local Git configuration has no
+  user.name, user.email or core.worktree override.
+
+PostgreSQL is unverified because SPARKWING_TEST_PG_URL is unset. The full
+legacy suite, race suite, lint, Sparkwing pipelines and independent review
+remain the lead's checks. The scratch directory is removed before handoff.
+No Sparkwing executable or Git write was run.
+
+## Contract changes needed and remaining integration
+
+These other-area contracts were left unchanged:
+
+- W9's controllerwire.ReuseSource cannot represent C1 MaterializeSource.Result
+  by job and state sequence. The adapter supports the declared attempt/record
+  variant. Chained materialized-result reuse still needs that wire change.
+- W9's controllerwire.ScheduleSnapshot has no GuardRefusal. Returning a
+  scheduling graph without the sealed refusal would change its verdict.
+  EngineController.Snapshot remains unimplemented until that field exists.
+- W2's Authorized/IntakeForStore signature carries no verified App delivery
+  identifier. App-specific intake must supply the authenticated delivery ID
+  to the store. A client-supplied origin or git label cannot replace it.
+
+Real integration also remains for C2 route authorization and DecodeInner,
+W4 ValidatePlan, W6 sealing/settings, and W1b metered reservation/settlement
+and result-record attachment. EngineController.Claim still needs W8's signed
+runner policy and enrolled capacity. RunDetail and Compatibility remain W9
+work. The controller route registration must call these adapters and run
+ReapUnits, ReconcileControllerRuns and completion delivery under their leases.
+
+No native acceptance cell was activated. internal/acceptance.New and Run
+still panic. The native harness and host/runner implementations are required
+before a cross-placement cell can be claimed as passing.
+
+## Shared files and friction
+
+The shared production file is pkg/controller/engine_contract.go. New controller
+files are engine_store.go, engine_store_test.go and engine_store_runtime_test.go.
+Other edits are pkg/store/claim_run.go, pkg/store/tenant_boundary.go,
+.apidiff/pkg_store.txt and this handoff. There were no callers to migrate for
+the two removed APIs.
+
+The first integration fixture expected cancellation to finish immediately.
+The final store contract keeps it request-only until owner/controller draining.
+The fixtures now assert that behavior, include an explicit owner deadline for
+awards, and supply every column required by the sealed-schema constraint.
+
+The existing EngineController contract is now backed by adapter functions.
+No exported contract shape, flag, setting, table, runtime service or retry loop
+was added. The private decoder parameter lets tests fake C2's declared boundary.
+
+## Previous recovery handoff
+
+The following records the prior session based on c8481cf9c, now committed in
+1b3588e78. Its tests and unresolved broader-store work remain relevant.
 The earlier admission, AcceptPlan, matching, claims, reconciliation,
 materialization, publication, owner renewal and controller recovery work remains.
 W1b accounting, blob and log implementation files were not edited.

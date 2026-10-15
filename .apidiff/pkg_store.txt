@@ -2215,7 +2215,6 @@ func (s *Store) ChargeRetainedStorage(ctx context.Context, now time.Time) (Stora
 func (s *Store) CheckClaimKey(ctx context.Context, tok ClaimToken, key string) error
 func (s *Store) CheckClaimSensitive(ctx context.Context, tok ClaimToken, now time.Time) (ClaimToken, error)
 func (s *Store) CheckClaimSlot(ctx context.Context, tok ClaimToken, key, policy string, capacity, cost int) error
-func (s *Store) ClaimAttemptOrdinal(ctx context.Context, tok ClaimToken) (int, error)
 func (s *Store) ClaimExpiredSourceBundles(ctx context.Context, now time.Time) (out []Upload, err error)
 func (s *Store) ClaimInvitationEmail(ctx context.Context, invitationID string, now time.Time) (bool, error)
 func (s *Store) ClaimLaunch(ctx context.Context, launcher ClaimIdentity, req LaunchClaimRequest, now time.Time) (*LaunchClaim, error)
@@ -2796,7 +2795,6 @@ func (t *Tenant) OldestWaitingReadyNodeForPrincipal(
 	ctx context.Context, principal string,
 ) (runID, nodeID string, err error)
 func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now time.Time, hold time.Duration) (_ string, err error)
-func (t *Tenant) OwnedRunIDs(ctx context.Context, ids []string) (_ map[string]bool, err error)
 func (t *Tenant) OwnsRun(ctx context.Context, id string) (bool, error)
 func (t *Tenant) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*NodeBounce, error)
 func (t *Tenant) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)
