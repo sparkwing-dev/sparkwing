@@ -73,7 +73,7 @@ func (p *executionSDK) Request(ctx context.Context, request nodeproto.Request) (
 		}
 		*p.trace = append(*p.trace, fmt.Sprintf("body:%d", request.Attempt))
 		outcome := "success"
-		if (p.mode == "retry" || p.mode == "artifact_retry" || p.mode == "artifact_publish_retry") && request.Attempt < 3 || p.mode == "artifact_publish_failed" {
+		if (p.mode == "retry" || p.mode == "artifact_retry" || p.mode == "artifact_publish_retry" || p.mode == "cache_retry") && request.Attempt < 3 || p.mode == "artifact_publish_failed" || p.mode == "cache_failed" {
 			outcome = "failed"
 		}
 		result = nodeproto.RunResult{Outcome: outcome}
@@ -113,6 +113,9 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 	if strings.HasPrefix(mode, "artifact_publish_") {
 		job.Artifacts = []string{"dist/**"}
 	}
+	if strings.HasPrefix(mode, "cache_") {
+		job.Caches = []nodeproto.CacheSpec{{Name: "dependencies", Path: "vendor", KeyFiles: []string{"lockfile"}}}
+	}
 	plan := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{job}}
 	if mode == "artifact_retry" {
 		plan.Jobs = append(plan.Jobs, nodeproto.JobSpec{ID: "producer", Artifacts: []string{"bin/program"}})
@@ -124,7 +127,7 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 	execution := runspec.JobExecutionSettings{}
 	execution.Retry.Set, execution.Retry.Value = true, 2
 	request := runspec.SealedRequest{RunID: "run", Request: runspec.Request{Pipeline: "build"}}
-	if strings.HasPrefix(mode, "artifact_") {
+	if strings.HasPrefix(mode, "artifact_") || strings.HasPrefix(mode, "cache_") {
 		request.Request.Team = "team"
 	}
 	request.Request.Source.Location = runspec.SourceLocation{RemoteURL: "https://example.com/acme/repo.git", PipelineDir: ".sparkwing"}

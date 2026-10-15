@@ -6,6 +6,8 @@ records the current host boundary. Native placement assembly remains incomplete.
 boundary and its executor acceptance checks.
 [Artifact publication](w3-publication-continuation.md) adds capture and the shared
 artifact layer. Native placement and cache assembly remain open.
+[Directory caching](w3-depcache-continuation.md) adds the executor depcache layer,
+package-manager resolution and opt-in remote directory-cache reads.
 
 ## Amendment 1: shared host inputs
 
@@ -122,6 +124,8 @@ are part of this contract.
 | `nodehost.NewNodeExecutor`, `ExecutorDependencies`, `ExecutorProcess` | Connect the common executor to the fenced store, matched engine, SDK process and storage adapters. |
 | `nodehost.OutputRecords`, `nodehost.JobUpload` | Publish typed output through verified uploads and record commits; read authorized output only after verified EOF. JobUpload supplies the common attempt/scope binding for output and artifact writes. |
 | `nodehost.ArtifactRecords`, `ArtifactRecords.Stage`, `ArtifactRecords.Publish`, `ArtifactRecords.Prepare` | Stage authorized manifest members and capture workspace files through verified uploads and a transactional manifest commit. The artifact layer stages once and publishes after retries with the last attempt's binding. |
+| `nodehost.DepcacheRecords`, `DepcacheRecords.Prepare` | Restore declared directories once and save cold successful caches after retries through the current storage binding. |
+| `nodehost.SDKEnvironment.CacheDirectory` | Resolve Go/npm cache directories with the captured environment, persisted job values and platform tool invocation. |
 | `nodehost.ClaimedNodeHost`, `ClaimStore` | Own source acquisition and renewal around the common executor for an awarded remote job. |
 | `nodehost.ExecutorActivity` | Reports progress and brackets authorized child awaits without extending the execution deadline. |
 | `nodehost.ProtocolSessionConfig`, `ProtocolSession`, `StartProtocolSession` | Launch protocol-v2 SDK processes with private pipes, request correlation, cancellation, log attribution and joined cleanup. |
@@ -238,6 +242,39 @@ are part of this contract.
     scheduling snapshots come from trusted host/store adapters. Capabilities,
     holders and generations supplied by an SDK or arbitrary HTTP body grant no
     authority. The store derives binding from authenticated capability records.
+
+## Executor directory caches
+
+`DepcacheRecords.Prepare` implements the caches row of `LayerTable`. `Bind`
+resolves a write destination for the current attempt and the derived
+`blob.DepcacheKey`. It must return a `JobUpload` whose authority, repository,
+ref, pipeline, job, cache name and key match those inputs. The controller still
+reauthorizes every write. `Resolve` handles ecosystem directories and can use
+`SDKEnvironment.CacheDirectory`. Explicit paths retain relative and absolute
+directory support.
+
+Lockfiles are opened inside the acquired workspace. The first readable regular
+candidate supplies the key through `depcache.Key`. Key derivation uses the same
+platform, scope and bytes for all cache callers. An escaping lockfile symlink
+cannot contribute bytes. The key stays fixed through application retries.
+
+The layer submits own repo/ref authority to `LookupDepcache`. The record store
+owns own-ref, PR-base and verified-default ordering and provenance checks.
+An explicit `StorageBinding.RemoteCache` permits a remote lookup after a local
+miss. Remote reads use that interface alone. The layer has no remote writer.
+Its profile authority may belong to a different team from the local run. A
+remote record never becomes a local byte-read grant.
+Cache records hold gzip tar archives. `tarsafe.WriteGzip` captures files through
+rooted opens and rejects escaping links. Restoration verifies gzip, tar, blob
+EOF and successful reader Close before installing the staged directory.
+
+Warm directories are left in place. Missing keys disable the declaration.
+Empty directories are not saved.
+Missing, corrupt, refused or over-budget reads start cold. Save uses the last
+attempt's clients and binding after a successful job. Save failures produce a
+safe warning and preserve the job verdict. `Budget` bounds cache reads only
+when its caller supplies a deadline. No cache timeout, size cap or expiry is
+added here.
 
 ## Planning cache
 

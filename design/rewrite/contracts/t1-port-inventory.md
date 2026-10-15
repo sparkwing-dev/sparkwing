@@ -136,6 +136,20 @@ attempt/scope binding. Real byte/record authorization uses separate drivers.
 Memo materialization, native assembly and the legacy runtime cut remain open.
 No additional parked-test row is claimed complete by these publication checks.
 
+`storage-memo-and-depcache-scope/hermetic-depcache-layer` and
+`hermetic-executor-depcache` exercise the shared directory-cache layer with
+storage fakes. They cover cold save/restore, warm directories, fixed lockfile
+keys, failed-job suppression, read integrity/budget failures, safe diagnostics,
+and one restore/save envelope across retries with the final attempt binding.
+`storage-local-remote-cache-opt-in/hermetic-depcache-opt-in` checks directory
+reads through an explicit remote binding without a remote write method.
+Fuzz drivers generate archive paths, capture symlinks and mismatched upload
+bindings. Native Go/npm resolver tests use the captured job environment.
+These preserve dependency-cache behaviors from the retained depcache tests.
+They close no additional parked memo/materialization row. Real fallback and
+provenance transactions, memo reuse, native composition and the legacy host
+cut remain open. See [the continuation](w3-depcache-continuation.md).
+
 Amendment 1 adds `CheckHostServices` under the secret-identifier and SDK service
 scenarios. It drives registered endpoint handlers with policy/persistence fakes,
 checks acknowledged dynamic masks, short identifier collisions, optional step

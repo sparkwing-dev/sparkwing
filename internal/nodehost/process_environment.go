@@ -77,6 +77,14 @@ func (e SDKEnvironment) job(ctx context.Context, kind procenv.Kind, accepted Acc
 	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}
+	if kind == procenv.StepTool {
+		runtime.Startup = append(runtime.Startup, jobEnv.Body...)
+		attempt, err := e.build(ctx, procenv.Attempt, spec.Request.Request.Env, runtime)
+		if err != nil {
+			return nil, err
+		}
+		return e.build(ctx, procenv.StepTool, spec.Request.Request.Env, procenv.Runtime{AttemptEnv: attempt})
+	}
 	return e.build(ctx, kind, spec.Request.Request.Env, runtime)
 }
 

@@ -29,6 +29,11 @@ func pendingScenarios(t *testing.T, group string) {
 				t.Run("hermetic-executor-artifacts", acceptance.CheckExecutorArtifactStaging)
 				t.Run("hermetic-artifact-publication", acceptance.CheckArtifactPublication)
 				t.Run("hermetic-executor-publication", acceptance.CheckExecutorArtifactPublication)
+			case "storage-memo-and-depcache-scope":
+				t.Run("hermetic-depcache-layer", acceptance.CheckDepcacheRecords)
+				t.Run("hermetic-executor-depcache", acceptance.CheckExecutorDepcache)
+			case "storage-local-remote-cache-opt-in":
+				t.Run("hermetic-depcache-opt-in", acceptance.CheckRemoteDepcache)
 			case "lifecycle-generator-reconstruct-code":
 				t.Run("hermetic-replay", acceptance.CheckGeneratorReplay)
 			case "environment-startup-versus-body":
