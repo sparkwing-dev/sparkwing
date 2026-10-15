@@ -22,19 +22,8 @@ import (
 
 var ErrNotElected = errors.New("wingd: another daemon is already elected")
 
-// FinalizeDrainWindow bounds the admission daemon's warning about a slow
-// finalizer. The local runtime still joins that finalizer before closing its
-// store. The supervisor's termination grace must outlast this window.
-//
-// Health probes run every 2s with a 3s timeout. A failed probe needs three
-// samples and 60s without heartbeat progress before replacement; continuous
-// failures have a 5m ceiling. A successor holds restored leases for 2m after
-// startup. Clients have 12m to reattach across replacements, while each
-// handshake can wait 60s for an overloaded daemon.
+// FinalizeDrainWindow bounds admission's warning before the local runtime joins finalizers.
 const FinalizeDrainWindow = 10 * time.Second
-
-// HeartbeatStaleWindow bounds a failed health probe episode without daemon progress.
-const HeartbeatStaleWindow = time.Minute
 
 const (
 	DefaultIdleTimeout = limits.LocalControllerIdleTimeout
@@ -464,15 +453,6 @@ func LogPath(home string) (string, error) {
 		return "", err
 	}
 	return l.log, nil
-}
-
-// HeartbeatPath reports the daemon progress file for a home.
-func HeartbeatPath(home string) (string, error) {
-	l, err := resolveLayout(home)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(l.dir, "heartbeat"), nil
 }
 
 const ProtocolMajor = wingwire.ProtocolMajor

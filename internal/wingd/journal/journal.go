@@ -19,14 +19,13 @@ import (
 
 const (
 	daemonFile     = "events.jsonl"
-	supervisorFile = "supervisor-events.jsonl"
 	maxRecordBytes = 1 << 20
 	closeDeadline  = 100 * time.Millisecond
 )
 
 var lastIncarnation atomic.Uint64
 
-// Record describes one decision or observation made by the daemon or its supervisor.
+// Record describes one decision or observation made by the daemon.
 type Record struct {
 	TS           time.Time      `json:"ts"`
 	Seq          uint64         `json:"seq"`
@@ -151,21 +150,6 @@ func (w *Writer) run() {
 	}
 }
 
-// AppendSupervisor writes a supervisor record to a separate stream in the same directory.
-func AppendSupervisor(dir string, r Record) error {
-	if r.TS.IsZero() {
-		r.TS = time.Now().UTC()
-	}
-	r.Source = "supervisor"
-	return appendRecord(dir, supervisorFile, 1<<20, 2, r)
-}
-
-func appendRecord(dir, name string, maxSize int64, files int, r Record) error {
-	a := &appender{dir: dir, name: name, maxSize: maxSize, files: files}
-	err := a.append(r)
-	return errors.Join(err, a.close())
-}
-
 type appender struct {
 	dir     string
 	name    string
@@ -282,39 +266,34 @@ func (a *appender) close() error {
 func ReadWithStats(dir string) ([]Record, int, error) {
 	var records []Record
 	var skipped int
-	for _, stream := range []struct {
-		name  string
-		files int
-	}{{daemonFile, 3}, {supervisorFile, 2}} {
-		for i := stream.files - 1; i >= 0; i-- {
-			path := filepath.Join(dir, stream.name)
-			if i > 0 {
-				path = fmt.Sprintf("%s.%d", path, i)
-			}
-			body, err := os.ReadFile(path)
-			if errors.Is(err, os.ErrNotExist) {
+	for i := 2; i >= 0; i-- {
+		path := filepath.Join(dir, daemonFile)
+		if i > 0 {
+			path = fmt.Sprintf("%s.%d", path, i)
+		}
+		body, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, skipped, err
+		}
+		lines := bytes.Split(body, []byte{'\n'})
+		for lineIndex, line := range lines {
+			last := lineIndex == len(lines)-1
+			if last && len(line) == 0 {
 				continue
 			}
-			if err != nil {
-				return nil, skipped, err
+			if len(line) > maxRecordBytes {
+				skipped++
+				continue
 			}
-			lines := bytes.Split(body, []byte{'\n'})
-			for lineIndex, line := range lines {
-				last := lineIndex == len(lines)-1
-				if last && len(line) == 0 {
-					continue
-				}
-				if len(line) > maxRecordBytes {
-					skipped++
-					continue
-				}
-				var r Record
-				if err := json.Unmarshal(line, &r); err != nil {
-					skipped++
-					continue
-				}
-				records = append(records, r)
+			var r Record
+			if err := json.Unmarshal(line, &r); err != nil {
+				skipped++
+				continue
 			}
+			records = append(records, r)
 		}
 	}
 	sort.SliceStable(records, func(i, j int) bool {

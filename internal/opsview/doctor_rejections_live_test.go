@@ -28,7 +28,7 @@ func rejectAdmission(t *testing.T, home, runID string) {
 		Version:     "v1.0.0",
 		DialTimeout: 500 * time.Millisecond,
 		Backoff:     20 * time.Millisecond,
-		Spawn:       wingdclient.NoHostSpawn,
+		NoTakeover:  true,
 	})
 	if err != nil {
 		t.Fatalf("connect to the daemon at %s: %v", home, err)

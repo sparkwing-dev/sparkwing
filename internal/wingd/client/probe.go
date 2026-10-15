@@ -169,10 +169,7 @@ func healthProbeOnce(ctx context.Context, sock string) error {
 		return ErrNoDaemon
 	}
 	defer func() { _ = nc.Close() }()
-	// safety: a daemon that accepts but never answers must fail the probe
-	// within its deadline, not hang the supervisor's watch loop. The
-	// caller's ctx deadline is the probe budget when it has one --
-	// [probeTimeout] only bounds a caller that set none.
+	// safety: an accepted connection can stop responding, so the probe deadline also bounds its handshake.
 	deadline := time.Now().Add(probeTimeout)
 	if d, ok := ctx.Deadline(); ok {
 		deadline = d

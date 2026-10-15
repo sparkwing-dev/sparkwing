@@ -121,7 +121,8 @@ func runHold(args []string) {
 	semaphoresOnly := fs.Bool("semaphores-only", false, "")
 	realSpawn := fs.Bool("real-spawn", false, "")
 
-	hostSpawn := fs.Bool("host-spawn", false, "")
+	externalHost := fs.Bool("external-host", false, "")
+	hostBin := fs.String("host-bin", "", "")
 	version := fs.String("version", "v1.0.0", "")
 	_ = fs.Parse(args)
 
@@ -134,11 +135,17 @@ func runHold(args []string) {
 	if *realSpawn {
 		opts.Spawn = nil
 	}
-	if *hostSpawn {
+	if *externalHost {
 		opts.NoTakeover = true
-		opts.Spawn = client.NoHostSpawn
-		if spawn, ok := client.HostSpawn(); ok {
-			opts.Spawn = spawn
+		opts.Spawn = nil
+		if *hostBin != "" {
+			opts.Spawn = func(home, version string) error {
+				cmd := exec.Command(*hostBin, "wingd", "run", "--home", home, "--version", version)
+				if err := cmd.Start(); err != nil {
+					return err
+				}
+				return cmd.Process.Release()
+			}
 		}
 	}
 	cl, err := client.EnsureDaemon(context.Background(), opts)
