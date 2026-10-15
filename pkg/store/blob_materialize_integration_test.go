@@ -7,11 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/quick"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -148,24 +150,45 @@ func checkMaterializedResultBytes(t *testing.T, damage string) {
 	}
 	data := &controller.DataController{
 		Store: s, Objects: objects, Access: tenant,
-		ResolveAuthority: func(ctx context.Context, a capability.Authorized) (blob.Authority, error) {
-			return store.MaterializationDataAuthority(s, ctx, a.Principal.Authority)
-		},
 		ReadBlob: tenant.ReadBlob,
 		ChargeDownload: func(ctx context.Context, _ blob.Authority, object blob.Blob) error {
 			_, err := tenant.ChargeDownload(ctx, store.DownloadCharge{ReplicaID: "materialization", Bytes: object.Size})
 			return err
 		},
 	}
-	binding, err := data.BindData(t.Context(), capability.Authorized{
+	authorized := capability.Authorized{
 		Principal: principal, Binding: principal.Capability.Binding,
 		Target: capability.Target{Team: "a", RunID: "target"},
 		Access: capability.AccessRule{Grants: []capability.Grant{capability.DataRead}, Binding: capability.BindData, Liveness: capability.LiveSensitive},
-	})
+	}
+	binding, err := data.BindData(t.Context(), authorized)
 	if err != nil {
 		t.Fatal(err)
 	}
 	authority := binding.Authority
+	property := func(value uint32, field uint8) bool {
+		changed := authorized
+		other := fmt.Sprintf("other-%d", value)
+		switch field % 5 {
+		case 0:
+			changed.Principal.Authority.ID = other
+		case 1:
+			changed.Principal.Capability.Prefix = other
+		case 2:
+			changed.Principal.Capability.Team = other
+		case 3:
+			changed.Target.Team = other
+		case 4:
+			scope := *changed.Principal.Capability.Data
+			scope.RepositoryKey = other
+			changed.Principal.Capability.Data = &scope
+		}
+		got, err := data.DataAuthority(t.Context(), changed)
+		return err != nil && got == (blob.Authority{})
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 96, Rand: rand.New(rand.NewSource(329))}); err != nil {
+		t.Fatal(err)
+	}
 	reader := nodehost.OutputRecords{Blobs: blob.NewSignedStore(blob.SignedStoreOptions{Signer: binding.Signer, HTTPClient: materializationTransfers{objects}}), Records: binding.Records}
 	got, err := reader.ReadResult(t.Context(), result.Node, authority)
 	if err != nil || !bytes.Equal(got, output) {
@@ -196,5 +219,11 @@ func checkMaterializedResultBytes(t *testing.T, damage string) {
 	}
 	if want := int64(len(output) + len(manifest) + len(artifact)); charged != want {
 		t.Fatalf("copied result download accounting: got %d want %d", charged, want)
+	}
+	if _, err := s.DB().Exec("UPDATE capabilities SET revoked_at=? WHERE prefix=?", int64(1), authority.CapabilityRef); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := binding.Records.LookupRecord(t.Context(), blob.RecordLookup{Authority: authority, Key: selectedOutput}); err == nil || got.Found {
+		t.Fatalf("revoked bound reader: %+v: %v", got, err)
 	}
 }

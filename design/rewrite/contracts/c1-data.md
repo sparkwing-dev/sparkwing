@@ -24,6 +24,13 @@ records in their run. Dependencies and pinned references require the exact selec
 record even when the producing result has no attempt. Digest equality grants no
 record metadata authority.
 
+`Tenant.ResolveBlobAuthority` exposes the transaction-local scope and uploader
+resolver to the data controller. It accepts only a data read or write grant and
+refuses caller hints that differ from persisted authority. Failed resolution
+returns no authority. `DataController` uses this resolver for capability records
+when no override is supplied. The materialization proof needs no custom data
+authority callback and checks identity substitution and revocation after binding.
+
 ## Payment mutation transactions
 
 Card setup, collection, payment reversal, dispute hold/release, warning and

@@ -1,114 +1,123 @@
 # W1b store-data continuation
 
-Session base: d7899b31a. The worktree was clean at entry. The interrupted merge
-was already finalized. No unmerged entries or conflict markers remain. No Git
-writes were made.
+Session base: 2ce2a43be. The worktree was clean at entry. The interrupted merge
+was already finalized. No unmerged entries remain. No Git writes were made.
 
-Materialization now passes through the production DataController binding.
-The previous proof bypassed that binding with a custom signer. Replacing the
-signer exposed a ref comparison failure: sealed manual grants contain
-`manual:main`, while the controller compared them with raw `main`.
+Materialization now uses the data controller's default persisted capability
+resolver. The previous proof supplied a test-only authority projection.
+`Tenant.ResolveBlobAuthority` exposes the existing transaction owner for data
+read/write grants. The controller resolves the tenant and current scope through
+that method when no resolver override is configured. Other authority kinds,
+including sessions, retain their explicit resolver contract.
 
-Invariant: record authorization compares both the ref and its trust level through
-the same scope encoding. The store's private seven-line encoder moves to
-`blob.RefScope.CapabilityScope`. Store callers, controller write projection,
-record reads and logical targets use it. Wire and schema values stay the same.
-The generated controller property checks 128 refs and trust tags, permits the
-exact grant and refuses changed refs and trust tags for reads and writes.
-Both the property and the production-binding integration proof failed before
-the fix and pass after it.
+Invariant: caller hints cannot change the persisted tenant, repo, trust-tagged
+ref, attempt or uploader, and revoked authority cannot resolve. The store's
+128-case property checks forged projections, foreign tenants, invalid grants
+and revocation. The controller integration adds 96 generated identity/scope
+substitutions and refuses a bound record read after revocation. Every refusal
+returns no authority. The integration failed with incomplete route policy before
+the default resolver was connected and passes with it.
 
-The memoized result proof retains the real selection, transactional copies,
-committed selectors, controller-wire round trip and host consumption. It deletes
-the source run and memo, then restores typed output and an independent artifact
-with its mode. Record lookups, access checks, live blob metadata, download charging
-and filesystem signing now use production owners. The exact signed output,
-manifest and artifact byte total reaches the real download ledger. Missing and
-corrupt source bytes still produce executable misses.
+The memoized-result proof still drives real selection, transactional record
+copies, committed selectors, controller-wire serialization and host consumption.
+After deleting the source run and memo, it restores the exact typed output and
+independent artifact bytes and mode. Missing or corrupt output, manifest or
+member bytes remain executable misses. Production record authorization, live blob
+metadata, filesystem signing and the exact download ledger are exercised.
 
-The proof retains an in-process controller adapter, HTTP transfer transport and
-a test-only projection into the existing private store authority resolver.
-Provider middleware, production authority-resolver assembly, S3 delivery and
-native placement remain real-integration points. No native acceptance cell is
-newly claimed. No archived test port identity is added.
+The materialization path is closed for the lead's memoized-or-coalesced proof.
+W7 can proceed with its separately owned legacy S3 output and log cut. The test
+still supplies an in-process reconciliation-controller adapter and transfer
+transport. Provider middleware, session/repo-reader resolver assembly, S3 delivery
+and native placement remain integration points. No new native acceptance cell
+or archived test-port identity is claimed.
 
-Deleted the seven-line private ref encoder and the 20-line signer fake.
-All encoder callers migrate in this change. No legacy production API was retired
-this session. Production delta against the session base is **+1**: 22 added,
-21 deleted. Within pkg/store it is **-7**. The combined W1+W1b delta against main
-is **+3,328**, or **7,578 over** its -4,250 budget. No waiver is claimed.
+Deleted the ten-line test-only authority resolver and its three-line callback.
+No legacy production API was retired this session. Production Go delta against
+session HEAD is **+57 lines**, 61 added and four deleted. The lead's metric excludes
+four net implementation lines in data_contract.go, giving **+53**. The store-only
+delta is **+29**. Combined W1+W1b store production against main is **+3,357**, or
+**7,607 over** its -4,250 budget. No waiver is claimed. The added method exposes
+an existing transaction because production data binding had no persisted resolver.
+It adds no new policy algorithm, cache, retry or interface. Removing the method
+and controller default reverses this addition.
 
 Files changed:
 
-- pkg/store/blob_lookup.go, blob_materialize.go, blob_persistence.go,
-  blob_read_authority.go, blob_record_mutation.go, blob_record_runtime.go and
-  upload_runtime.go migrate to the shared encoder.
-- pkg/store/blob_materialize_integration_test.go uses the production binding and
-  checks its download ledger. blob_materialize_test.go supplies the test-only
-  projection into the private resolver.
-- internal/blob/authority.go owns the existing encoder.
-- pkg/controller/data_authority.go and data_record_binding.go use tagged refs.
-  data_ref_scope_test.go adds the generated regression.
-- pkg/store/STORE-DATA.md and this report describe the final behavior and limits.
+- pkg/store/blob_authority.go owns the public transaction entry point.
+- pkg/store/blob_authority_runtime_test.go checks the generated invariant.
+- pkg/store/blob_materialize_integration_test.go removes custom data authority,
+  checks identity substitution and checks revocation after binding.
+- pkg/store/blob_materialize_test.go loses the test-only resolver.
+- pkg/controller/data_authority.go and data_contract.go connect the default
+  persisted resolver. These are the minimal shared production edits under 12:15.
+- tests/acceptance/data_binding_test.go migrates the ObjectBackend fake to
+  VerifyBlob and fixes three raw RefScope values that contained the manual tag.
+  The fake refuses verification because it stores no physical bytes.
+- design/rewrite/contracts/c1-data.md and pkg/store/STORE-DATA.md document the
+  public resolver and its integration. This file records the handoff.
 
-Earlier materialization files retained unchanged: internal/controllerwire/engine.go,
+Earlier materialization files remain unchanged: internal/controllerwire/engine.go,
 pkg/controller/engine_snapshot.go, internal/nodehost/output_records.go,
 owner_evaluation.go, owner_schedule.go, remote_contract.go, sdk_code.go and
-sdk_replay.go, internal/blob/keys.go, object_contract.go and objects.go, and
-pkg/storage/manifest.go. No W1 implementation, lead-owned amendment, handoff,
-acceptance registry or scenario catalog was edited.
+sdk_replay.go, internal/blob/authority.go, keys.go, object_contract.go and
+objects.go, pkg/storage/manifest.go and the existing store materialization owners.
+No W1 implementation, lead-owned amendment, handoffs.md or scenario catalog changed.
 
 Verification uses GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
 GOCACHE=/tmp/sw-gocache, TMPDIR=/tmp/sw-astra-W1b, GOTMPDIR beneath it and test
 parallelism at most four.
 
 - Whole-repository go build ./... passes.
-- Scoped go vet passes for pkg/store, internal/blob, pkg/controller and
-  internal/nodehost.
-- Commentcheck against main is clean across 2,070 files.
-- Full internal/blob tests pass. Focused native-host materialization, artifacts,
-  memo-miss, oversized-output and reconciliation tests pass.
-- The final materialization proof passes in pkg/store (0.501 seconds). The
-  controller's generated ref property passes (0.014 seconds).
-- The nine named store boundary proofs pass in 3.479 seconds. They cover billing
-  retention/start, CAS, presence, large presence, cache scope, reference edges,
-  reachability retention and a reference added after marking.
-- The broader store/controller selection fails. Legacy token, trigger and run
-  fixtures still expect deleted schema columns/tables. Its final-store
-  TestMeteredRootPolicyCannotRewriteAwardProperty also fails for cloud=true,
-  RootMetered=false. These failures are outside the ref-scope change.
+- Scoped go vet passes for pkg/store, pkg/controller, internal/blob,
+  internal/nodehost and tests/acceptance.
+- Commentcheck against main is clean across 2,072 files.
+- Focused store tests pass in 89.890 seconds. They cover blobs, logs, final
+  metered units, payment mutation/refund transactions, storage policy/accounting,
+  materialization and the nine moved W1b boundary proofs.
+- Final authority and materialization proofs pass in 0.623 seconds.
+- The controller's ref-trust property passes in 0.013 seconds.
+- All 13 data-binding test entry points pass in tests/acceptance (0.025 seconds).
+  These are fake-boundary tests, including opaque-session identity preservation.
+- The broader store selection fails on the inherited cloud-award metering
+  property and legacy token/run/trigger schema fixtures. The same metering defect
+  was reproduced against session HEAD by the preceding session. No W1 fix is
+  attempted here.
+- Formatting, whitespace and merge-state checks pass. Local git config has no
+  user identity or core.worktree override.
 
-Remaining contracts, integration and friction:
+Remaining contracts and handoffs:
 
-1. **W2/C2 payment events, 07:40 item 2:** PaymentEvent still declares only paid,
-   expired and failed checkouts. Verified setup, collection, refund, warning and
-   dispute facts plus durable setup/payment correlation remain undeclared.
-   SettlePayment cannot dispatch those events without changing a foreign
-   contract. The private C1 mutation owners and their fake-provider tests remain.
-2. **W1 issuance:** authority_issue.go derives Billing.Metered solely from
-   parent.Capability.RootMetered, despite identifying claims.launch as launcher
-   authority. Cloud awards must be metered when the root flag is false. The
-   existing generated regression catches this. An overlay restoring every changed
-   tracked Go file to session HEAD reproduces the same failure. W1 owns that file,
-   and the lead
-   forbids further W1 edits beyond catalog changes and caller migrations.
-3. **W1 exhaustion:** accountUnitBillingTx still returns only error. A persisted
-   per-award exhaustion/grace result and cancellation reason remain needed for
-   node, trigger, plan and eval renewals. The legacy node-only policy is not a
-   substitute. No W1 renewal or schema implementation was changed.
-4. **Legacy cuts:** credits.go, node_output.go and raw storage still have live
-   old claim, scheduler, rehydration, controller and runner-result callers.
-   W1's newer reports describe cuts on its branch that are absent here. No merge
-   was attempted. W7's legacy output/log transport cut remains separate.
-5. **Coalescing:** SourceCoalesced needs a persisted read edge. Matching specs
-   and a selector cannot grant cross-run reads. Memoization satisfies the lead's
-   memoized-or-coalesced proof requirement.
-6. **Harness move, 09:40 item 1:** W1b's move and real data mutations were finished
-   before this session. Remaining internal/acceptance/store_* files belong to W1.
+1. **07:40 item 2, W2/C2 plus W1 schema:** PaymentEvent still declares only paid,
+   expired and failed checkouts. It lacks verified setup, collection, refund,
+   warning and dispute facts. payment_events requires a checkout foreign key
+   and CHECKs only those three kinds. Durable setup/payment correlation is also
+   absent. W2 must declare the expanded proof and its provider association.
+   W1 must supply the matching receipt/correlation schema. W1b can then dispatch
+   SettlePayment into the existing private transaction owners and persist the
+   receipt atomically. Those owners and fake-provider properties already pass.
+   No foreign contract or W1 schema was changed.
+2. **W1 issuance:** authority_issue.go derives metering solely from RootMetered.
+   A cloud launcher award must be metered when that flag is false.
+   TestMeteredRootPolicyCannotRewriteAwardProperty still catches this.
+3. **W1 exhaustion:** accountUnitBillingTx returns only error. A durable per-award
+   exhaustion/grace result and cancellation reason remain needed across node,
+   trigger, plan and eval renewals. The node-only legacy mechanism cannot cover
+   those units. This needs the W1 renewal/schema join before its legacy cut.
+4. **Legacy cuts:** credits.go still serves old claim/scheduler/controller callers.
+   node_output.go and direct_upload.go retain old controller and host read paths.
+   W1's separate branch has caller cuts absent here. Do not recreate its deleted
+   APIs or merge its branch from this worker. W7 owns the remaining legacy S3
+   output and log transport cut after materialization closure.
+5. **Coalescing:** SourceCoalesced still requires a declared persisted read edge.
+   A matching spec and selector cannot grant cross-run reads. Memoization meets
+   the 12:15 proof requirement without inventing that authority.
+6. **09:40 item 1:** W1b's nine harness proofs already live in pkg/store tests and
+   pass. Remaining internal/acceptance/store_* files concern W1's claims, plans,
+   credentials, schedules, capacity, transitions and recovery. None was moved again.
 
-No service, pipeline, native PostgreSQL, deployment or release was run. The lead
-still owns independent review and landing. Worker scratch is deleted. The shared
-build cache stays. Whitespace and formatting checks pass. The worktree config
-has no user identity or core.worktree override.
+No pipeline, service, native PostgreSQL, deployment or release was run. The lead
+owns independent review and landing. Worker scratch is removed at completion.
+The shared build cache stays.
 
 STATUS: CONTINUE

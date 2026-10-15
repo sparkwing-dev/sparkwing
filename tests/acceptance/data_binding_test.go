@@ -77,7 +77,7 @@ func TestDataRecordRequiresEveryReferenceEdge(t *testing.T) {
 			manifest, member := blob.Digest(strings.Repeat("c", 64)), blob.Digest(strings.Repeat("d", 64))
 			request := blob.CommitRecordRequest{
 				Authority: binding.Authority, Source: binding.Authority.Upload.Value,
-				Key: blob.RecordKey{Team: "team", Kind: blob.KindOutput, Scope: blob.Scope{Repo: "gh:12", Ref: blob.RefScope{Ref: "manual:main"}, Job: "job"}, Name: "output"}, Digest: dataDigest(),
+				Key: blob.RecordKey{Team: "team", Kind: blob.KindOutput, Scope: blob.Scope{Repo: "gh:12", Ref: blob.RefScope{Ref: "main"}, Job: "job"}, Name: "output"}, Digest: dataDigest(),
 				ManifestDigest: runspec.Optional[blob.Digest]{Set: true, Value: manifest}, Members: []blob.Member{{Team: "team", ManifestDigest: manifest, Digest: member, Path: "file", Size: 1}},
 			}
 			switch state {
@@ -116,7 +116,7 @@ func TestDataCacheOperationsPreserveBoundAuthorityAndDestination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	memo := blob.MemoLookup{Authority: binding.Authority, Key: blob.MemoKey{Repo: "gh:12", Ref: blob.RefScope{Ref: "manual:main"}, Pipeline: "build", Job: "job", Hash: "memo-hash"}, Budget: blob.Budget{Deadline: time.Unix(42, 0)}}
+	memo := blob.MemoLookup{Authority: binding.Authority, Key: blob.MemoKey{Repo: "gh:12", Ref: blob.RefScope{Ref: "main"}, Pipeline: "build", Job: "job", Hash: "memo-hash"}, Budget: blob.Budget{Deadline: time.Unix(42, 0)}}
 	if _, err := binding.Records.LookupMemo(t.Context(), memo); err != nil || f.memo != memo {
 		t.Fatalf("memo=%+v err=%v", f.memo, err)
 	}
@@ -276,6 +276,10 @@ func (f *dataObjects) DeleteBlob(context.Context, blob.Blob) error {
 func (f *dataObjects) ReadManifest(context.Context, string, blob.Digest) ([]blob.Member, error) {
 	*f.events = append(*f.events, "read-manifest")
 	return nil, blob.ErrNotFound
+}
+
+func (f *dataObjects) VerifyBlob(context.Context, blob.Blob) error {
+	return blob.ErrNotFound
 }
 
 func (f *dataObjects) DeleteObject(context.Context, string) error {
@@ -438,7 +442,7 @@ func dataAuthority(a capability.Authorized) blob.Authority {
 	authority := blob.Authority{
 		CapabilityRef: a.Principal.Authority.ID, Principal: blob.Principal(a.Principal.Capability.Subject.ID),
 		Attempt: runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: identity}, Repo: "gh:12",
-		Ref: blob.RefFacts{Scope: blob.RefScope{Ref: "manual:main"}, DefaultBranch: "main", SHA: "sealed-sha"},
+		Ref: blob.RefFacts{Scope: blob.RefScope{Ref: "main"}, DefaultBranch: "main", SHA: "sealed-sha"},
 	}
 	authority.Upload = runspec.Optional[blob.UploadIdentity]{Set: true, Value: blob.UploadIdentity{
 		Kind: blob.UploadJob, Team: "team", RunID: "run", Principal: authority.Principal, CapabilityRef: authority.CapabilityRef, Attempt: authority.Attempt,

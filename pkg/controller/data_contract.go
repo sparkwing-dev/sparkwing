@@ -18,8 +18,8 @@ type DataController struct {
 	ResolveTenant func(context.Context, store.Team) (DataTransactions, error)
 	// ResolveAuthority rechecks ancestry, membership and liveness, then reads sealed scope
 	// and the exact uploader from persisted facts. It runs on every bound operation.
-	// A missing resolver fails closed; a capability's asserted data scope is insufficient.
-	// Its opaque references retain the input authority kind, including sessions.
+	// Capability records default to Store's persisted scope and uploader resolver.
+	// Other authority kinds require a resolver that preserves their opaque references.
 	ResolveAuthority func(context.Context, capability.Authorized) (blob.Authority, error)
 	// ReadBlob returns live existence and size after CheckDataAccess grants a read edge.
 	// It returns blob.ErrNotFound for missing or tombstoned bytes and never creates an edge.
@@ -55,13 +55,17 @@ type DataBinding struct {
 // only for an authorized job, live owner unit or publication; ordinary repo-read
 // authority cannot acquire an uploader identity. No caller trust flag is copied.
 func (s *DataController) DataAuthority(ctx context.Context, authorized capability.Authorized) (blob.Authority, error) {
-	if s == nil || s.ResolveAuthority == nil {
+	if s == nil {
 		return blob.Authority{}, missingEndpointPolicy()
 	}
 	if err := ctx.Err(); err != nil {
 		return blob.Authority{}, err
 	}
-	authority, err := s.ResolveAuthority(ctx, authorized)
+	resolve := s.ResolveAuthority
+	if resolve == nil {
+		resolve = s.persistedDataAuthority
+	}
+	authority, err := resolve(ctx, authorized)
 	if err != nil {
 		return blob.Authority{}, engineLookupError(err)
 	}

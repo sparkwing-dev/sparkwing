@@ -390,8 +390,12 @@ record pointing to the same digest grants no metadata access.
 The materialization proof uses the bound data controller for record lookup,
 authorization, blob metadata, download charging and filesystem signing. Restoring
 its copied output, manifest and independent artifact records the exact signed
-byte total. It still uses an in-process HTTP transport and test-only authority
-projection into the store's existing resolver.
+byte total. It still uses an in-process controller adapter and transfer transport.
+Data authority uses the controller's
+default persisted resolver through `Tenant.ResolveBlobAuthority`. This resolver
+checks tenant scope, live ancestry and the current uploader in its transaction.
+Caller hints can only narrow the result. Failed resolution returns no authority.
+The bound reader rechecks authority on each call, including after revocation.
 
 `blob.RefScope.CapabilityScope` supplies the same trust-tagged ref for store and
 controller checks. Manual refs compare as `manual:<ref>`. Verified refs compare
