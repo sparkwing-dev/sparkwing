@@ -3,11 +3,13 @@
 package nodehost
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
-	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -26,6 +28,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -34,7 +37,7 @@ func TestNativeHostFromIntakeThroughSDKAndPersistedCompletion(t *testing.T) {
 	defer cancel()
 	bin := buildNativeSDKFixture(t, ctx, "stepsfixture")
 	runner := nodeproto.RunnerIdentity{Name: "host", Type: "agent", Labels: []string{}}
-	hello, _ := planNativeSDKFixture(t, ctx, bin, "steps", map[string]string{"set": "dry"}, nodeproto.RunContext{RunID: "describe", Pipeline: "steps"}, runner)
+	hello, _ := planNativeSDKFixture(t, ctx, bin, "steps", map[string]string{"set": "output"}, nodeproto.RunContext{RunID: "describe", Pipeline: "steps"}, runner)
 	for _, role := range []string{"owner", "claimed"} {
 		t.Run(role, func(t *testing.T) { nativeStoreHost(t, ctx, bin, hello.SDK.Version, role) })
 	}
@@ -56,10 +59,10 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 		Origin: runspec.OriginLocal, Dispatch: runspec.DispatchHost, Env: environment,
 		Git:           runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, SHA: sha},
 		Source:        runspec.Source{Location: runspec.SourceLocation{LocalCheckout: root, PipelineDir: "."}},
-		RequestedArgs: map[string]string{"set": "dry"},
+		RequestedArgs: map[string]string{"set": "output"},
 	}
 	f := newStoreOwnerFixture(t, openStore(t), request)
-	outputs := nativeStoreOutputRecords(t, ctx, f, request)
+	outputs, dataDirectory := nativeStoreOutputRecords(t, ctx, f, request)
 	resolved := engine.Resolved{
 		Identity:   engine.Identity{Version: "v1.0.0", ManifestDigest: "verified", Pin: engine.Pin{SDK: engine.GoSDK, Version: sdkVersion}},
 		Executable: bin, Target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
@@ -75,7 +78,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 	processes := &NativeProcesses{
 		Authorities: authorities, URL: "http://host",
 		Log: func(_ context.Context, run, job string, frame nodeproto.FrameLog) error {
-			if run != f.Input.RunID || job != "dry" {
+			if run != f.Input.RunID || job != "output" {
 				return errors.New("native log lost its run or job identity")
 			}
 			mu.Lock()
@@ -147,7 +150,7 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 	completion, err := host.Run(ctx, f.Input)
 	if err != nil || completion.Outcome != "success" {
 		var failure []byte
-		readErr := f.Store.DB().QueryRowContext(ctx, "SELECT failure_json FROM nodes WHERE run_id=? AND node_id='dry'", f.Input.RunID).Scan(&failure)
+		readErr := f.Store.DB().QueryRowContext(ctx, "SELECT failure_json FROM nodes WHERE run_id=? AND node_id='output'", f.Input.RunID).Scan(&failure)
 		t.Fatalf("completion=%+v error=%v failure=%s read=%v logs=%v", completion, err, failure, readErr, logs)
 	}
 	snapshot, err := f.Tenant.ReadSnapshot(ctx, f.Input.RunID)
@@ -158,13 +161,24 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 	if row.Outcome != store.NodeSuccess || row.Attempt != 1 || row.Generation != 1 || row.ClaimedBy != "" || snapshot.Run.Spec.Resolved.Engine != resolved.Identity {
 		t.Fatalf("persisted completion lost seals or execution identity: %+v", row)
 	}
+	const output = `"result-from-a"`
+	key, err := blob.ObjectKey(request.Team, outputDigest([]byte(output)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := os.ReadFile(filepath.Join(dataDirectory, filepath.FromSlash(key)))
+	if err != nil || string(stored) != output {
+		t.Fatalf("persisted output=%s error=%v", stored, err)
+	}
+	pending, err := os.ReadDir(filepath.Join(dataDirectory, "teams", request.Team, "pending"))
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("unsettled upload files=%v error=%v", pending, err)
+	}
 	mu.Lock()
 	text := strings.Join(logs, "\n")
 	mu.Unlock()
-	for _, message := range []string{"real body", "safe ran", "plain ran"} {
-		if !strings.Contains(text, message) {
-			t.Fatalf("native body missing %q: %s", message, text)
-		}
+	if !strings.Contains(text, "b saw from-a after 2 checks") {
+		t.Fatalf("native body lost its dependency output or group settlement: %s", text)
 	}
 	if processes.computing(f.Input.RunID) || len(authorities.live) != 0 {
 		t.Fatal("native host returned with active compute or delegated authority")
@@ -178,26 +192,55 @@ func nativeStoreHost(t *testing.T, ctx context.Context, bin, sdkVersion, role st
 	}
 }
 
-func nativeStoreOutputRecords(t *testing.T, ctx context.Context, f *storeHostFixture, request runspec.Request) OutputRecords {
+func nativeStoreOutputRecords(t *testing.T, ctx context.Context, f *storeHostFixture, request runspec.Request) (OutputRecords, string) {
 	t.Helper()
-	f.Store.SetResultBlobRecords(nil)
+	directory := t.TempDir()
+	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: directory, Endpoint: "http://host", SigningKey: bytes.Repeat([]byte{7}, sha256.Size)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := objects.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	controller.New(f.Store, nil).WithDataObjects(objects)
 	if err := f.Tenant.SetStorageQuota(ctx, store.StorageQuota{}); err != nil {
 		t.Fatal(err)
 	}
-	bytes := &scriptedStorage{onPut: func(ctx context.Context, request blob.PutRequest) (blob.Receipt, error) {
-		value, err := io.ReadAll(request.Body)
-		if err != nil || outputDigest(value) != request.Digest || int64(len(value)) != request.Size {
-			return blob.Receipt{}, errors.Join(blob.ErrIntegrity, err)
-		}
+	transfer := blob.TransferClient{Transport: sourceTransfer(func(request *http.Request) (*http.Response, error) {
+		response := httptest.NewRecorder()
+		objects.ServeHTTP(response, request)
+		return response.Result(), nil
+	})}
+	signer := scriptedDataSigner{onUpload: func(ctx context.Context, request blob.UploadIntent) (blob.UploadTicket, error) {
 		ticket, err := f.Tenant.ReserveBlobUpload(ctx, store.UploadReservationRequest{
-			ID: "native-output", Intent: blob.UploadIntent{Identity: request.Identity, Authority: request.Authority, Digest: request.Digest, Size: request.Size}, ExpiresAt: time.Now().Add(time.Hour),
+			ID: "native-output", Intent: request, ExpiresAt: time.Now().Add(time.Minute),
 		})
+		if err != nil {
+			return blob.UploadTicket{}, err
+		}
+		signed, err := objects.Sign(ctx, capability.ObjectToSign{Method: http.MethodPut, Key: ticket.StagingKey, Size: ticket.Blob.Size, SHA256: string(ticket.Blob.Digest), ExpiresAt: ticket.ExpiresAt})
+		if err != nil {
+			return blob.UploadTicket{}, err
+		}
+		return blob.UploadTicket{ID: ticket.ID, Transfer: blob.SignedTransfer{URL: signed.URL, Headers: signed.Headers, Size: signed.Size, Digest: blob.Digest(signed.SHA256), ExpiresAt: signed.ExpiresAt}}, nil
+	}, onCommit: func(ctx context.Context, request blob.CommitUpload) (blob.Receipt, error) {
+		ticket, err := f.Tenant.LookupBlobUpload(ctx, request.Authority, request.TicketID)
 		if err != nil {
 			return blob.Receipt{}, err
 		}
-		return f.Tenant.CommitBlobUpload(ctx, store.VerifiedUploadCommit{Authority: request.Authority, TicketID: ticket.ID, Verified: ticket.Blob, ReplicaID: "native-host"})
+		if err := objects.CommitObject(ctx, ticket.StagingKey, ticket.Blob); err != nil {
+			return blob.Receipt{}, err
+		}
+		receipt, err := f.Tenant.CommitBlobUpload(ctx, store.VerifiedUploadCommit{Authority: request.Authority, TicketID: ticket.ID, Verified: ticket.Blob, ReplicaID: "native-host"})
+		if err != nil {
+			return blob.Receipt{}, err
+		}
+		return receipt, objects.DeleteObject(ctx, ticket.StagingKey)
 	}}
-	return OutputRecords{Blobs: bytes, Records: f.Tenant.BlobRecords(nil), Bind: func(ctx context.Context, input NodeInput) (JobUpload, error) {
+	backend := blob.NewSignedStore(blob.SignedStoreOptions{Signer: signer, HTTPClient: transfer})
+	return OutputRecords{Blobs: backend, Records: f.Tenant.BlobRecords(nil), Bind: func(ctx context.Context, input NodeInput) (JobUpload, error) {
 		principal, err := f.Store.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix})
 		if err != nil {
 			return JobUpload{}, err
@@ -206,7 +249,7 @@ func nativeStoreOutputRecords(t *testing.T, ctx context.Context, f *storeHostFix
 		identity := blob.UploadIdentity{Kind: blob.UploadJob, Team: request.Team, RunID: input.Accepted.RunID, Principal: blob.Principal(principal.Capability.Subject.ID), CapabilityRef: input.Authority.CapabilityPrefix, Attempt: attempt}
 		authority := blob.Authority{CapabilityRef: identity.CapabilityRef, Principal: identity.Principal, Repo: request.Git.Repository.Key, Attempt: attempt, Ref: blob.RefFacts{SHA: request.Git.SHA}}
 		return JobUpload{Identity: identity, Authority: authority, Key: blob.ResultRecordKey(attempt.Value, authority.Repo, authority.Ref.Scope, request.Pipeline, blob.KindOutput)}, nil
-	}}
+	}}, directory
 }
 
 func nativeStoreClaim(t *testing.T, ctx context.Context, f *storeHostFixture, host *OwnerHost, resolved engine.Resolved) (NodeInput, store.ReconciledNode) {
@@ -226,7 +269,7 @@ func nativeStoreClaim(t *testing.T, ctx context.Context, f *storeHostFixture, ho
 	if _, err := f.Tenant.TransitionRun(ctx, store.RunTransition{RunID: f.Input.RunID, To: store.RunRunning, Actor: f.Actor, Cause: store.RunStart}); err != nil {
 		t.Fatal(err)
 	}
-	ref := store.NodeRef{RunID: f.Input.RunID, NodeID: "dry"}
+	ref := store.NodeRef{RunID: f.Input.RunID, NodeID: "output"}
 	if _, err := f.State.TransitionNode(ctx, store.NodeTransition{Ref: ref, To: store.NodeReady, Actor: f.Actor, Cause: store.CauseRelease}); err != nil {
 		t.Fatal(err)
 	}

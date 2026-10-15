@@ -10,6 +10,33 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 )
 
+type scriptedDataSigner struct {
+	onUpload func(context.Context, blob.UploadIntent) (blob.UploadTicket, error)
+	onCommit func(context.Context, blob.CommitUpload) (blob.Receipt, error)
+}
+
+func (s scriptedDataSigner) Upload(ctx context.Context, request blob.UploadIntent) (blob.UploadTicket, error) {
+	if s.onUpload == nil {
+		return blob.UploadTicket{}, errors.New("unexpected upload reservation")
+	}
+	return s.onUpload(ctx, request)
+}
+
+func (s scriptedDataSigner) Commit(ctx context.Context, request blob.CommitUpload) (blob.Receipt, error) {
+	if s.onCommit == nil {
+		return blob.Receipt{}, errors.New("unexpected upload settlement")
+	}
+	return s.onCommit(ctx, request)
+}
+
+func (scriptedDataSigner) Download(context.Context, blob.GetRequest) (blob.SignedTransfer, error) {
+	return blob.SignedTransfer{}, errors.New("unexpected signed download")
+}
+
+func (scriptedDataSigner) HasMany(context.Context, blob.HasManyRequest) (blob.Presence, error) {
+	return blob.Presence{}, errors.New("unexpected signed presence")
+}
+
 type scriptedStorage struct {
 	onPut            func(context.Context, blob.PutRequest) (blob.Receipt, error)
 	onGet            func(context.Context, blob.GetRequest) (blob.VerifiedReader, error)
@@ -27,42 +54,49 @@ func (s *scriptedStorage) Put(ctx context.Context, q blob.PutRequest) (blob.Rece
 	}
 	return s.onPut(ctx, q)
 }
+
 func (s *scriptedStorage) Get(ctx context.Context, q blob.GetRequest) (blob.VerifiedReader, error) {
 	if s.onGet == nil {
 		return nil, errors.New("unexpected blob get")
 	}
 	return s.onGet(ctx, q)
 }
+
 func (s *scriptedStorage) HasMany(ctx context.Context, q blob.HasManyRequest) (blob.Presence, error) {
 	if s.onHasMany == nil {
 		return blob.Presence{}, errors.New("unexpected blob presence")
 	}
 	return s.onHasMany(ctx, q)
 }
+
 func (s *scriptedStorage) LookupRecord(ctx context.Context, q blob.RecordLookup) (blob.RecordLookupResult, error) {
 	if s.onLookupRecord == nil {
 		return blob.RecordLookupResult{}, errors.New("unexpected record lookup")
 	}
 	return s.onLookupRecord(ctx, q)
 }
+
 func (s *scriptedStorage) LookupMemo(ctx context.Context, q blob.MemoLookup) (blob.MemoHit, error) {
 	if s.onLookupMemo == nil {
 		return blob.MemoHit{}, errors.New("unexpected memo lookup")
 	}
 	return s.onLookupMemo(ctx, q)
 }
+
 func (s *scriptedStorage) LookupDepcache(ctx context.Context, q blob.DepcacheLookup) (blob.DepcacheHit, error) {
 	if s.onLookupDepcache == nil {
 		return blob.DepcacheHit{}, errors.New("unexpected depcache lookup")
 	}
 	return s.onLookupDepcache(ctx, q)
 }
+
 func (s *scriptedStorage) CommitRecord(ctx context.Context, q blob.CommitRecordRequest) (blob.Record, error) {
 	if s.onCommitRecord == nil {
 		return blob.Record{}, errors.New("unexpected record commit")
 	}
 	return s.onCommitRecord(ctx, q)
 }
+
 func (s *scriptedStorage) CopyMemo(ctx context.Context, q blob.CopyMemoRequest) (blob.MemoHit, error) {
 	if s.onCopyMemo == nil {
 		return blob.MemoHit{}, errors.New("unexpected memo copy")
@@ -82,12 +116,14 @@ func (s *scriptedRemoteCache) Memo(ctx context.Context, key blob.MemoKey, b blob
 	}
 	return s.onMemo(ctx, key, b)
 }
+
 func (s *scriptedRemoteCache) Depcache(ctx context.Context, key blob.DepcacheKey, b blob.Budget) (blob.Record, error) {
 	if s.onDepcache == nil {
 		return blob.Record{}, errors.New("unexpected remote depcache")
 	}
 	return s.onDepcache(ctx, key, b)
 }
+
 func (s *scriptedRemoteCache) Artifact(ctx context.Context, d blob.Digest) (blob.VerifiedReader, error) {
 	if s.onArtifact == nil {
 		return nil, errors.New("unexpected remote artifact")
@@ -207,6 +243,7 @@ func newArtifactBackend(manifest, value []byte) *artifactBackendFixture {
 	}
 	return b
 }
+
 func newOutputBackend(mode string, upload JobUpload, value []byte) *outputBackendFixture {
 	b := &outputBackendFixture{scriptedStorage: &scriptedStorage{}, mode: mode, upload: upload, value: value}
 	b.onPut = func(_ context.Context, request blob.PutRequest) (blob.Receipt, error) {
@@ -274,6 +311,7 @@ func newOutputBackend(mode string, upload JobUpload, value []byte) *outputBacken
 	}
 	return b
 }
+
 func newArtifactPublisher(upload JobUpload) *artifactPublisherFixture {
 	p := &artifactPublisherFixture{scriptedStorage: &scriptedStorage{}, upload: upload, values: map[blob.Digest][]byte{}}
 	p.onPut = func(_ context.Context, request blob.PutRequest) (blob.Receipt, error) {
@@ -346,6 +384,7 @@ func newArtifactPublisher(upload JobUpload) *artifactPublisherFixture {
 	}
 	return p
 }
+
 func newMemoBackend(hit blob.MemoHit, values map[blob.Digest][]byte) *memoBackendFixture {
 	b := &memoBackendFixture{scriptedStorage: &scriptedStorage{}, hit: hit, values: values}
 	b.onLookupMemo = func(_ context.Context, request blob.MemoLookup) (blob.MemoHit, error) {
@@ -404,6 +443,7 @@ func newMemoBackend(hit blob.MemoHit, values map[blob.Digest][]byte) *memoBacken
 	}
 	return b
 }
+
 func newDepcacheBackend(publisher *artifactPublisherFixture) *depcacheBackendFixture {
 	b := &depcacheBackendFixture{artifactPublisherFixture: publisher}
 	b.onLookupDepcache = func(_ context.Context, request blob.DepcacheLookup) (blob.DepcacheHit, error) {
@@ -452,6 +492,7 @@ func newDepcacheBackend(publisher *artifactPublisherFixture) *depcacheBackendFix
 	}
 	return b
 }
+
 func newRemoteMemoCache(backend *memoBackendFixture) *remoteMemoCacheFixture {
 	r := &remoteMemoCacheFixture{scriptedRemoteCache: &scriptedRemoteCache{}, backend: backend}
 	r.onMemo = func(_ context.Context, key blob.MemoKey, budget blob.Budget) (blob.MemoHit, error) {
@@ -464,6 +505,7 @@ func newRemoteMemoCache(backend *memoBackendFixture) *remoteMemoCacheFixture {
 	}
 	return r
 }
+
 func newRemoteDirectoryCache(backend *depcacheBackendFixture, record blob.Record) *remoteDirectoryCacheFixture {
 	r := &remoteDirectoryCacheFixture{scriptedRemoteCache: &scriptedRemoteCache{}, backend: backend, record: record}
 	r.onDepcache = func(_ context.Context, key blob.DepcacheKey, _ blob.Budget) (blob.Record, error) {

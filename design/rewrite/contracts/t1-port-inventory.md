@@ -1089,8 +1089,12 @@ state machine. Both roles use real tenant intake, claims, acceptance, starts,
 step/result writes and completion. Acquired local Git source, captured
 environments, the Go SDK and process-authority validators are real. The claimed
 case runs the same accepted work under its own keeper, then resumes its owner
-to settle the run. Engine resolution/install, byte transport and admission are
-test adapters. Full placement cells remain blocked.
+to settle the run. The typed SDK result now crosses NewSignedStore, signed
+filesystem PUT, verified CAS publication, receipt settlement and record commit.
+The test checks the exact stored result and removal of staged files. One scripted
+DataSigner connects the real tenant and object operations. Engine resolution,
+installation, admission and the in-process HTTP transport remain test adapters.
+Full placement cells remain blocked.
 
 Scope-label tests and their tuple-injectivity property move beside the shared
 codec in nodehost. The CLI queue fixture uses that codec. The state-path test

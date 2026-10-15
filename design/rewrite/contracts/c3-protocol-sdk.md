@@ -814,8 +814,12 @@ missing bytes, invalid JSON, oversized output, integrity failures and close
 errors fail the read. Explicit JSON null remains a valid recorded value.
 The adapter does not grant access from a digest or infer a missing value as null.
 
-The output acceptance cells use fake blob and record stores. Native wiring
-still needs C2 upload binding and W7 byte/record implementations. Persisted
+The output acceptance cells use fake blob and record stores. The native store
+composition also exercises typed SDK output through NewSignedStore, signed
+filesystem PUT, verified CAS publication, receipt settlement and record commit.
+Its signer scripts the real tenant and filesystem operations. The transport
+invokes the filesystem HTTP handler in-process. Native placement wiring still
+needs the authenticated C2 upload binding. Persisted
 result reads also need C1/W9 to expose the output record key with its terminal
 generation and distinguish an absent declared result from a missing required
 record. `NodeRow` exposes no result reference, so the host cannot construct that
@@ -912,13 +916,11 @@ owns catch-up and progress checks. It adds no polling interval or lease inferenc
 The recovery acceptance cell uses the follower with fake persistence and
 subscriptions. Native controller and local-controller subscriptions remain open.
 
-The legacy envelope's retry-auto dispatch branch, duplicate start-event condition
-and dedicated tests are removed. Automatic retry-cause traversal and the host's
-terminal-agent-loss reset hook are also removed. A terminal row stays terminal;
-only a committed requeue permits recovery. Application retries keep their existing budget
-and backoff. The common executor's fenced retry acceptance remains the target
-proof. The legacy scheduler, dispatched-pod executor and run-host entry points
-still need their lifecycle cut.
+The legacy envelope, scheduler, Session, Server, dispatched-pod executor and
+run-host entry points are removed. A terminal row stays terminal. Only a
+committed requeue permits recovery. Application retries retain their existing
+budget and backoff under the common executor's attempt fence. Production
+runner, launcher and local factories still need the shared native host assembly.
 
 Decision 104 supports TypeScript on Windows. Both SDKs use hello for the bearer
 and argv for Windows protocol handles; no preload or platform refusal remains
