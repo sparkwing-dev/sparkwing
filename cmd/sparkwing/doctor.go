@@ -171,6 +171,10 @@ func renderDoctor(out io.Writer, report doctorReport, format string) error {
 func renderDoctorMachine(text *bytes.Buffer, report doctorReport) {
 	if toolchain := report.GoToolchain; toolchain != nil {
 		fmt.Fprintf(text, "go_toolchain\t%s\t%s\n", toolchain.Current, toolchain.Verdict)
+		fmt.Fprintf(text, "go_toolchain_setting\t%s\ngo_toolchain_source\t%s\ngo_toolchain_floor\t%s\ngo_toolchain_module\t%s\n", toolchain.Setting, toolchain.Source, toolchain.Floor, toolchain.Module)
+		if toolchain.Override != "" {
+			fmt.Fprintf(text, "go_toolchain_override\t%s\n", toolchain.Override)
+		}
 		if toolchain.Error != "" {
 			fmt.Fprintf(text, "go_toolchain_error\t%s\n", toolchain.Error)
 		}
@@ -189,7 +193,7 @@ func renderDoctorMachine(text *bytes.Buffer, report doctorReport) {
 	if conflict := report.InstallConflict; conflict != nil {
 		fmt.Fprintf(text, "executable\t%s\n", conflict.Self)
 		for _, copy := range conflict.Competing {
-			fmt.Fprintf(text, "competing_install\t%s\t%s\n", copy.Path, installsite.RetireRemedy(copy.Path).Text())
+			fmt.Fprintf(text, "competing_install\t%s\t%s\t%s\t%s\n", copy.Path, installsite.RetireRemedy(copy.Path).Text(), copy.Modified, copy.Resolved)
 		}
 	}
 }

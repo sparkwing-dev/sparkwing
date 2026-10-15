@@ -205,6 +205,7 @@ func printPin(pipelineName string) {
 }
 
 func runSparkwing(args []string) (result error) {
+	gitenv.Unbind()
 	inv, err := clisurface.Parse("sparkwing", args)
 	defer func() {
 		if result != nil {
@@ -233,7 +234,6 @@ func runSparkwing(args []string) (result error) {
 	cleanupStaleUpdate()
 	args = invocationArgs(inv)
 	toolchainReplayArgs = args
-	gitenv.Unbind()
 	noteVersionTransition(os.Stderr, args[0])
 	return dispatchCommand(args)
 }

@@ -124,6 +124,10 @@ indexed in [cli-reference.md](cli-reference.md):
   `pipeline list` or tab-complete but stay invocable by exact name. Pass
   `--all` to `pipeline list` to see them.
 
+Repository updates apply to the selected checkout by default. Use
+`repos update --dry-run` to preview and `--all-repos --yes` to apply across the
+fleet. With `--in-place`, `--dry-run` reports the SDK pin without editing it.
+
 ## Agent discovery
 
 Use the command index to find a command, then read its help:

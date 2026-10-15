@@ -16,7 +16,7 @@ func TestPipelineScaffoldDoesNotRequireGoPatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
-	if err := runPipelineNew([]string{"--name", "sample", "--template", "minimal"}); err != nil {
+	if err := runPipelineNew([]string{"--pipeline", "sample", "--template", "minimal"}); err != nil {
 		t.Fatal(err)
 	}
 	name := filepath.Join(repo, ".sparkwing", "go.mod")

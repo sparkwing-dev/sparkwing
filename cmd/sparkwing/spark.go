@@ -449,7 +449,6 @@ func runSparksResolve(args []string) error {
 
 func runSparksUpdate(args []string) error {
 	fs := flag.NewFlagSet(cmdSparksUpdate.Path, flag.ContinueOnError)
-	name := fs.String("name", "", "refused: update re-resolves every declared library")
 	if err := parseAndCheck(cmdSparksUpdate, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -470,11 +469,6 @@ func runSparksUpdate(args []string) error {
 	if len(m.Libraries) == 0 {
 		return fmt.Errorf("spark update: %s has no libraries", path)
 	}
-	if *name != "" {
-		return fmt.Errorf("spark update: --name is not supported. Resolution rebuilds the overlay from the whole manifest, "+
-			"so updating %q alone would drop the other libraries' resolved versions.\n"+
-			"Pin its \"version:\" field in %s to hold it still, then run `sparkwing pipeline sparks update`", *name, path)
-	}
 	ctx := context.Background()
 	changed, err := sparksResolveAndWrite(ctx, sparkwingDir)
 	if err != nil {
@@ -490,27 +484,27 @@ func runSparksUpdate(args []string) error {
 }
 
 func runSparksAdd(args []string) error {
-	fs := flag.NewFlagSet(cmdSparksAdd.Path, flag.ContinueOnError)
-	sourceFlag := fs.String("source", "", "library source path (e.g. github.com/user/lib)")
-	version := fs.String("version", "latest", "declared version ('latest', exact tag, or semver range)")
-	name := fs.String("name", "", "short library name (default: last path segment of --source)")
-	if err := parseAndCheck(cmdSparksAdd, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
+	inv, err := clisurface.Parse("sparkwing", append([]string{"pipeline", "sparks", "add"}, args...))
+	if err != nil {
 		return err
 	}
-	if rest := fs.Args(); len(rest) > 0 {
-		return fmt.Errorf("spark add: unexpected positional %q (use --source)", rest[0])
+	output := inv.Output(color.IsInteractiveStdout())
+	if inv.Help() {
+		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, output)
 	}
-	source := strings.TrimSpace(*sourceFlag)
+	source := strings.TrimSpace(inv.Value("source"))
 	if source == "" {
-		return errors.New("spark add: --source is required (e.g. --source github.com/user/lib)")
+		return &clisurface.UsageError{Path: inv.Command.Path, Message: "--source must not be blank"}
 	}
-	libName := *name
+	version := inv.Value("version")
+	if version == "" {
+		version = "latest"
+	}
+	libName := inv.Value("spark")
 	if libName == "" {
 		libName = filepath.Base(source)
 	}
+
 	sparkwingDir, err := defaultSparkwingDir()
 	if err != nil {
 		return err
@@ -526,31 +520,28 @@ func runSparksAdd(args []string) error {
 		}
 	}
 	m.Libraries = append(m.Libraries, sparks.Library{
-		Name: libName, Source: source, Version: *version,
+		Name: libName, Source: source, Version: version,
 	})
 	if err := writeSparksYAML(path, m); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stdout, "added %s (%s@%s) to %s\n", libName, source, *version, path)
-	return nil
+	return writeSparkMutation("added", m.Libraries[len(m.Libraries)-1], path, output)
 }
 
 func runSparksRemove(args []string) error {
-	fs := flag.NewFlagSet(cmdSparksRemove.Path, flag.ContinueOnError)
-	nameFlag := fs.String("name", "", "library name (or source) to remove")
-	if err := parseAndCheck(cmdSparksRemove, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
+	inv, err := clisurface.Parse("sparkwing", append([]string{"pipeline", "sparks", "remove"}, args...))
+	if err != nil {
 		return err
 	}
-	if rest := fs.Args(); len(rest) > 0 {
-		return fmt.Errorf("spark remove: unexpected positional %q (use --name)", rest[0])
+	output := inv.Output(color.IsInteractiveStdout())
+	if inv.Help() {
+		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, output)
 	}
-	target := strings.TrimSpace(*nameFlag)
+	target := strings.TrimSpace(inv.Value("spark"))
 	if target == "" {
-		return errors.New("spark remove: --name is required")
+		return &clisurface.UsageError{Path: inv.Command.Path, Message: "--spark must not be blank"}
 	}
+
 	sparkwingDir, err := defaultSparkwingDir()
 	if err != nil {
 		return err
@@ -574,8 +565,26 @@ func runSparksRemove(args []string) error {
 	if err := writeSparksYAML(path, m); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stdout, "removed %s (%s) from %s\n", removed.Name, removed.Source, path)
-	return nil
+	return writeSparkMutation("removed", removed, path, output)
+}
+
+func writeSparkMutation(action string, library sparks.Library, path, output string) error {
+	switch output {
+	case "json":
+		return json.NewEncoder(os.Stdout).Encode(struct {
+			Action  string `json:"action"`
+			Spark   string `json:"spark"`
+			Source  string `json:"source"`
+			Version string `json:"version"`
+			Path    string `json:"path"`
+		}{action, library.Name, library.Source, library.Version, path})
+	case "plain":
+		_, err := fmt.Fprintln(os.Stdout, library.Name)
+		return err
+	default:
+		_, err := fmt.Fprintf(os.Stdout, "%s %s (%s@%s) in %s\n", action, library.Name, library.Source, library.Version, path)
+		return err
+	}
 }
 
 const sparksCoreModulePrefix = "github.com/sparkwing-dev/sparks-core/"

@@ -110,7 +110,7 @@ most `cores`; memory and semaphores remain hard limits, and a second burst waits
 ## Jev policy
 
 Store the TypeSafe key as the local secret `TYPESAFE_API_KEY`
-(`sparkwing secrets set --name TYPESAFE_API_KEY --file <path>`); the daemon
+(`sparkwing secrets set --secret TYPESAFE_API_KEY --file <path>`); the daemon
 reads it when it starts in `jev` mode and admits without the advisor when the
 secret is missing. Then select `jev`:
 

@@ -54,7 +54,7 @@ func TestRunsLogs_ErrorUsesPublicCommandName(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected conflicting range error")
 	}
-	if !strings.HasPrefix(err.Error(), "runs logs:") {
+	if !strings.HasPrefix(err.Error(), "sparkwing: runs logs:") {
 		t.Fatalf("error = %q, want runs logs prefix", err)
 	}
 }
