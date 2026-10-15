@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/testshell"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
@@ -95,20 +96,8 @@ func checkUpdate(t *testing.T, args ...string) (updateCheckReport, int) {
 	return report, exitCodeFor(commandError)
 }
 
-func checkPinUpdate(t *testing.T, args ...string) (updateCheckReport, int) {
-	t.Helper()
-	var commandError error
-	out := captureStdout(t, func() {
-		commandError = runSparkwing(append([]string{"repos", "update", "--in-place"}, args...))
-	})
-	var report updateCheckReport
-	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("pin check output is not one JSON record: %v %q (%v)", err, out, commandError)
-	}
-	if report.Kind != "update_check" || report.Tool != "sparkwing" || report.Strategy != "release" {
-		t.Fatalf("shared update contract: %+v", report)
-	}
-	return report, exitCodeFor(commandError)
+func readPinSummary(dir string) *InfoSDKPin {
+	return gatherSDKPinWith(Info{Project: InfoProject{Found: true, SparkwingDir: dir}}, engine.GoSDK, engine.ReadPin, engine.VersionForPin)
 }
 
 func TestUnifiedUpdateCheckReleaseStatesAndProvenance(t *testing.T) {
@@ -278,9 +267,9 @@ func TestUnifiedSDKCheckReadsPinWithoutGoOrModuleWrites(t *testing.T) {
 	bin := t.TempDir()
 	testshell.Install(t, filepath.Join(bin, "go"), "#!/bin/sh\nprintf called > "+shellSingleQuote(filepath.ToSlash(spy))+"\nexit 99\n")
 	t.Setenv("PATH", bin)
-	report, code := checkPinUpdate(t, "--check", "--version", "v0.49.0")
-	if report.Target != "sdk" || report.Status != "update_available" || code != 1 || report.Installed.Version != "v0.48.0" {
-		t.Fatalf("SDK report: %+v code%d", report, code)
+	report := readPinSummary(dir)
+	if report.Pin != "v0.48.0" || report.Runs != "v0.48.0" || report.Refusal != "" {
+		t.Fatalf("SDK summary: %+v", report)
 	}
 	after, err := os.ReadFile(filepath.Join(dir, "go.mod"))
 	if err != nil || string(after) != string(before) {
@@ -295,9 +284,9 @@ func TestUnifiedSDKCheckReadsPinWithoutGoOrModuleWrites(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), append(before, []byte("replace "+sdkModulePath+" => ../local-sdk\n")...), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	report, code = checkPinUpdate(t, "--check")
-	if report.Status != "unknown" || code != 2 || !strings.Contains(report.Reason, "replacement") {
-		t.Fatalf("replacement misreported: %+v code%d", report, code)
+	report = readPinSummary(dir)
+	if report.Runs != "" || !strings.Contains(report.Refusal, "replacement") {
+		t.Fatalf("replacement misreported: %+v", report)
 	}
 }
 
@@ -583,9 +572,9 @@ func TestSDKCheckRefusesOversizedModuleWithoutWriting(t *testing.T) {
 	if err := os.WriteFile(file, []byte(strings.Repeat("x", maxMetadataBytes+1)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	report, code := checkPinUpdate(t, "--check")
-	if report.Status != "unknown" || code != 2 || report.Installed.Path != file || !strings.Contains(report.Reason, "1 MiB") {
-		t.Fatalf("oversized module misreported: %+v %d", report, code)
+	report := readPinSummary(dir)
+	if report.Runs != "" || !strings.Contains(report.Refusal, "1 MiB") {
+		t.Fatalf("oversized module misreported: runs=%q refusal=%.200q (%d bytes)", report.Runs, report.Refusal, len(report.Refusal))
 	}
 	if _, err := os.Stat(os.Getenv("SPARKWING_HOME")); !os.IsNotExist(err) {
 		t.Fatal("oversized module check wrote state")

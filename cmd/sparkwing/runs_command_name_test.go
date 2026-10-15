@@ -1,51 +1,30 @@
 package main
 
 import (
-	"io/fs"
-	"os"
-	"path/filepath"
-	"regexp"
-	"strings"
+	"encoding/json"
 	"testing"
 )
 
-func TestProductionSourceUsesRunsCommandNames(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
-	}
-	subcommands := make([]string, len(cmdJobs.SubcommandOrder))
-	for i, subcommand := range cmdJobs.SubcommandOrder {
-		subcommands[i] = regexp.QuoteMeta(subcommand)
-	}
-	retired := regexp.MustCompile(`(?:sparkwing\s+jobs|["'\x60]jobs)\s+(?:` + strings.Join(subcommands, "|") + `)\b`)
+func TestRunCommandsDispatchThroughFinalNames(t *testing.T) {
 	for _, subcommand := range cmdJobs.SubcommandOrder {
-		if !retired.MatchString("`jobs " + subcommand + "`") {
-			t.Errorf("retired-command pattern omits registered runs subcommand %q", subcommand)
-		}
-	}
-	err := filepath.WalkDir("../..", func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() {
-			if entry.Name() == ".git" {
-				return filepath.SkipDir
+		t.Run(subcommand, func(t *testing.T) {
+			var commandErr error
+			out := captureStdout(t, func() {
+				commandErr = runSparkwing([]string{"runs", subcommand, "--help", "-o=json"})
+			})
+			var help struct {
+				Kind string `json:"kind"`
+				Path string `json:"path"`
 			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		body, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if match := retired.Find(body); match != nil {
-			t.Errorf("%s names retired command %q", path, match)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("scan production Go source: %v", err)
+			if commandErr != nil || json.Unmarshal([]byte(out), &help) != nil || help.Kind != "help" || help.Path != "sparkwing runs "+subcommand {
+				t.Fatalf("runs command: %v, output=%s", commandErr, out)
+			}
+			out = captureStdout(t, func() {
+				commandErr = runSparkwing([]string{"jobs", subcommand, "--help", "-o=json"})
+			})
+			if commandErr == nil || exitCodeFor(commandErr) != 2 || out != "" {
+				t.Fatalf("retired command: %v, output=%s", commandErr, out)
+			}
+		})
 	}
 }

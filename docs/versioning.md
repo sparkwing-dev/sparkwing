@@ -15,6 +15,10 @@ TypeScript pipelines pin `@sparkwing/sdk` through their manifest and native
 lockfile. A version range alone cannot select an exact engine. Go `vX.Y.Z` and
 TypeScript `X.Y.Z` identify engine `vX.Y.Z`, including any prerelease suffix.
 
+Pin inspection reads regular manifest and lock files without running repository
+code. It refuses linked or special files. Go module inspection retains its
+1 MiB limit and reports oversized input before parsing it.
+
 Sparks libraries are ordinary independent modules. A consuming pipeline pins
 them like other dependencies. A library upgrade does not silently change the
 pipeline's Sparkwing pin. See [Sparks](sparks.md).

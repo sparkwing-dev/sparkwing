@@ -21,14 +21,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/scaffold"
 )
 
-func bootstrapDotSparkwingOpts(cwd, sparkwingDir string, terse bool) error {
+func bootstrapDotSparkwing(cwd, sparkwingDir string) error {
 	moduleName := scaffoldModuleName(filepath.Base(cwd))
 	existed := dirExists(sparkwingDir)
 	report, err := writeSkeleton(sparkwingDir, moduleName, false)
 	if err != nil {
 		return err
 	}
-	printInitReport(moduleName, existed, report, terse)
+	printInitReport(moduleName, existed, report)
 	return nil
 }
 
@@ -162,7 +162,7 @@ func renderInitReadme() string {
 		"Add a pipeline:\n" +
 		"\n" +
 		"```\n" +
-		"sparkwing pipeline new --name <name>\n" +
+		"sparkwing pipeline new --pipeline <name>\n" +
 		"```\n" +
 		"\n" +
 		"## Layout\n" +
@@ -188,7 +188,7 @@ func renderInitPipelinesYAML() string {
 # below becomes an invocable target for ` + "`sparkwing run <name>`" + `.
 #
 # Add an entry by running:
-#   sparkwing pipeline new --name <name> [--template <shape>]
+#   sparkwing pipeline new --pipeline <name> [--template <shape>]
 #
 # Shapes: minimal (default) | build-test-deploy | ci-pr-check |
 # release | scheduled-report. An entry with no ` + "`on:`" + ` block runs only
@@ -302,7 +302,7 @@ func runSpinner(w io.Writer, frames []rune, label string, done <-chan struct{}, 
 	}
 }
 
-func printInitReport(moduleName string, existedBefore bool, rep initFileReport, terse bool) {
+func printInitReport(moduleName string, existedBefore bool, rep initFileReport) {
 	if existedBefore {
 		fmt.Printf("%s .sparkwing already in place (module %s)\n", color.Cyan("==>"), moduleName)
 	} else {
@@ -323,18 +323,4 @@ func printInitReport(moduleName string, existedBefore bool, rep initFileReport, 
 		fmt.Println("toolchain: Go is NOT on PATH")
 		fmt.Printf("  %s\n", goInstallHintForce())
 	}
-
-	if terse {
-		return
-	}
-
-	fmt.Println()
-	fmt.Println("next steps:")
-	fmt.Printf("  1. sparkwing pipeline new --name release   %s\n", color.Dim("# scaffold a single-node pipeline (default --template minimal)"))
-	fmt.Printf("  2. sparkwing run release                   %s\n", color.Dim("# run it; replace the placeholder step with real logic"))
-	fmt.Printf("  %s\n", color.Dim("for a build/test/deploy DAG: sparkwing pipeline new --name release --template build-test-deploy"))
-	fmt.Println()
-	fmt.Printf("  %s\n", color.Dim("dashboard:    sparkwing serve start"))
-	fmt.Printf("  %s\n", color.Dim("docs:         sparkwing docs list  (or https://sparkwing.dev/docs)"))
-	fmt.Printf("  %s\n", color.Dim("AI agents:    sparkwing info --for-agent  (current one-wake context)"))
 }

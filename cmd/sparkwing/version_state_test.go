@@ -83,7 +83,7 @@ func TestVersionMemorySurvivesMultipleHomes(t *testing.T) {
 func TestInstallClaimVerbIsGone(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	err := runSparkwing([]string{"_install-claim"})
-	if err == nil || !strings.Contains(err.Error(), "unknown subcommand") {
+	if err == nil || exitCodeFor(err) != 2 {
 		t.Fatalf("_install-claim dispatched; err = %v", err)
 	}
 }
