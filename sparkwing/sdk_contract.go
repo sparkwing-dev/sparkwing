@@ -144,6 +144,7 @@ func (g *JobGroup) NeedsIfPresent(deps ...Dep) *JobGroup {
 
 // safety: GenerateFn reconstructs executable declarations from the source's persisted output.
 // Replay must produce the accepted topology hash; a mismatch fails as plan_drift.
+// Generators and their SDK commands run without the source job's body environment.
 type GenerateFn func(context.Context, *Plan) error
 
 // safety: Generator identifies a source expansion whose settlement precedes dependent jobs.

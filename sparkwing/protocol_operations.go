@@ -173,9 +173,11 @@ func executionContext(ctx context.Context, p *Plan, n *JobNode, req nodeproto.Re
 	ctx = context.WithValue(ctx, keyInputs, p.inputs)
 	ctx = withStep(ctx, req.Step)
 	env := map[string]string{}
-	for k, v := range n.declaredEnv {
-		if !v.Startup {
-			env[k] = v.Value
+	if !generatorClosure(n, req.Closure) {
+		for k, v := range n.declaredEnv {
+			if !v.Startup {
+				env[k] = v.Value
+			}
 		}
 	}
 	ctx = WithCommandEnv(ctx, env)
