@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -286,20 +288,17 @@ func (s *Server) handleCreditsSettingsShow(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, creditSettingsToJSON(settings))
 }
 
-func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
 	var body setCreditSettingsReq
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
 	}
 	settings, err := s.store.SetOperatorCreditSettings(r.Context(), body.update())
 	if err != nil {
 		if errors.Is(err, store.ErrInvalidCreditSetting) {
-			writeError(w, http.StatusBadRequest, err)
-			return
+			return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
 		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return err
 	}
 	s.logger.Info("credit settings set",
 		"rate_micro_per_second", settings.RateMicroPerSecond,
@@ -308,6 +307,7 @@ func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request
 		"storage_rate_micro_per_gb_day", settings.StorageRateMicroPerGBDay,
 		"storage_free_allowance_bytes", settings.StorageFreeAllowanceBytes)
 	writeJSON(w, http.StatusOK, creditSettingsToJSON(settings))
+	return nil
 }
 
 func creditSettingsToJSON(settings store.CreditSettings) creditSettingsJSON {

@@ -35,8 +35,8 @@ func main() {
 		"GitHub and Stripe webhooks require their HMAC signatures); `authenticated` routes take any " +
 		"valid bearer and check no further scope. `claim` routes answer the claim " +
 		"token of one node claim, and only for that claim's own run and node. " +
-		"`operator` routes answer only the signed-in session of an account the " +
-		"controller lists with --operator-accounts; no token reaches them.\n\n")
+		"`operator` routes require an operator-console session through the shared " +
+		"route policy and CSRF proof for writes; no bearer reaches them.\n\n")
 
 	writeRoutes(&b, "Controller", scopes, controller)
 

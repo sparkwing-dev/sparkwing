@@ -39,8 +39,6 @@ var (
 	resOwnIdentity        = tenantResource{"sign-in identity", ownerAccount}
 	resToken              = tenantResource{"token", ownerDeployment}
 	resTeam               = tenantResource{"team", ownerDeployment}
-	resAccount            = tenantResource{"account", ownerDeployment}
-	resAnyInstallation    = tenantResource{"any team's github app installation", ownerDeployment}
 	resStorageQuota       = tenantResource{"storage quota", ownerDeployment}
 	resPayment            = tenantResource{"payment", ownerDeployment}
 	resGitCache           = tenantResource{"git cache repository", ownerDeployment}
@@ -50,8 +48,6 @@ var (
 // server.go registers one this table lacks, so a new route is classified
 // before it serves anything.
 var tenantRoutes = map[string]tenantResource{
-	"DELETE /api/v1/accounts/{account}": resAccount,
-
 	"GET /api/v1/admin/usage-metrics": resNone,
 
 	"GET /api/v1/agents": resNone,
@@ -88,7 +84,6 @@ var tenantRoutes = map[string]tenantResource{
 	"GET /api/v1/credits/payments/{reference}": resPayment,
 	"POST /api/v1/credits/reversals":           resNone,
 	"GET /api/v1/credits/settings":             resNone,
-	"PUT /api/v1/credits/settings":             resNone,
 	"GET /api/v1/credits/units":                resNone,
 	"POST /api/v1/credits/warnings":            resNone,
 
@@ -107,14 +102,10 @@ var tenantRoutes = map[string]tenantResource{
 	"POST /api/v1/gitcache/git/{path...}": resGitCache,
 	"POST /api/v1/gitcache/git/register":  resNone,
 
-	"DELETE /api/v1/github-app/installations/{installation_id}": resAnyInstallation,
-
 	"POST /api/v1/invitations/{id}/accept": resOwnInvitation,
 
 	"POST /api/v1/launcher/claim": resNone,
 	"POST /api/v1/launcher/sync":  resNone,
-
-	"POST /api/v1/maintenance/reconcile-orphans": resNone,
 
 	"DELETE /api/v1/me":                       resNone,
 	"GET /api/v1/me":                          resNone,
@@ -127,15 +118,6 @@ var tenantRoutes = map[string]tenantResource{
 
 	"GET /api/v1/object-store/breaker":        resNone,
 	"POST /api/v1/object-store/reset-breaker": resNone,
-
-	"GET /api/v1/operator/teams":                  resNone,
-	"GET /api/v1/operator/teams/{team}":           resTeam,
-	"POST /api/v1/operator/teams/{team}/freeze":   resTeam,
-	"POST /api/v1/operator/teams/{team}/grants":   resTeam,
-	"POST /api/v1/operator/teams/{team}/trust":    resTeam,
-	"POST /api/v1/operator/teams/{team}/unfreeze": resTeam,
-	"GET /api/v1/operator/waitlist":               resNone,
-	"POST /api/v1/operator/waitlist/approve":      resNone,
 
 	"GET /api/v1/pipelines":                              resNone,
 	"GET /api/v1/pipelines/{name}/latest":                resPipeline,
@@ -290,8 +272,7 @@ var tenantRoutes = map[string]tenantResource{
 	"DELETE /api/v1/team/members/{user_id}": resMember,
 	"PATCH /api/v1/team/members/{user_id}":  resMember,
 
-	"POST /api/v1/teams":                                     resNone,
-	"DELETE /api/v1/teams/{team}":                            resTeam,
+	"POST /api/v1/teams": resNone,
 	"PUT /api/v1/teams/{team}/repos/{owner}/{name}/dispatch": resTeam,
 
 	"GET /api/v1/team/tokens":                          resNone,

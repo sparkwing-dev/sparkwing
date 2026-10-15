@@ -42,7 +42,8 @@ type Server struct {
 	sourceCredentialLimit perMinuteLimiter
 	identityLinkLimit     perMinuteLimiter
 
-	auth *Authenticator
+	auth          *Authenticator
+	authorization RouteAuthorization
 
 	peerPrincipal func(*http.Request) *Principal
 
@@ -922,8 +923,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("PUT /api/v1/crons/{id}/override", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleSetCronOverride)))
 	mux.Handle("DELETE /api/v1/crons/{id}/override", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleClearCronOverride)))
 
-	mux.Handle("POST /api/v1/maintenance/reconcile-orphans", requireScope(ScopeAdmin, http.HandlerFunc(s.handleReconcileOrphans)))
-
 	// safety: a slot is a cross-run lock, so the routes that move one bind to the
 	// live claim on the run they name rather than to the scope alone. force-release
 	// acts on holders from other runs and stays admin.
@@ -1044,7 +1043,6 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("DELETE /api/v1/team/github-app/automation", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppAutomation)))
 	mux.Handle("GET /api/v1/team/github-app/extra-repos", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListGitHubAppExtraRepos)))
 	mux.Handle("PUT /api/v1/team/github-app/extra-repos", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handlePutGitHubAppExtraRepos)))
-	mux.Handle("DELETE /api/v1/github-app/installations/{installation_id}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleOperatorGitHubAppUnbind)))
 
 	// safety: service discovery names the internal cache URL, so any bearer will do but anonymity will not.
 	mux.Handle("GET /api/v1/services", refuseRoleless(http.HandlerFunc(s.handleServices)))
@@ -1074,23 +1072,12 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("GET /api/v1/credits/units", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditUnits)))
 	mux.Handle("GET /api/v1/credits/payments/{reference}", requireServiceScope(ScopeCreditsGrant, http.HandlerFunc(s.handlePaidGrantLookup)))
 	mux.Handle("GET /api/v1/credits/settings", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsSettingsShow)))
-	mux.Handle("PUT /api/v1/credits/settings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreditsSettingsSet)))
 	mux.Handle("GET /api/v1/compute-limits", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleComputeLimitsShow)))
 	mux.Handle("PUT /api/v1/compute-limits", requireScope(ScopeAdmin, http.HandlerFunc(s.handleComputeLimitsSet)))
 
-	mux.Handle("DELETE /api/v1/accounts/{account}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleOperatorDeleteAccount)))
-	mux.Handle("DELETE /api/v1/teams/{team}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleOperatorDeleteTeam)))
 	mux.Handle("PUT /api/v1/teams/{team}/repos/{owner}/{name}/dispatch", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetRepoDispatch)))
 	mux.Handle("POST /api/v1/launcher/claim", requireScope(ScopeClaimsLaunch, http.HandlerFunc(s.handleLaunchClaim)))
 	mux.Handle("POST /api/v1/launcher/sync", requireScope(ScopeClaimsLaunch, http.HandlerFunc(s.handleLauncherSync)))
-	mux.Handle("GET /api/v1/operator/teams", s.requireOperator(s.handleOperatorTeams))
-	mux.Handle("GET /api/v1/operator/teams/{team}", s.requireOperator(s.handleOperatorTeam))
-	mux.Handle("POST /api/v1/operator/teams/{team}/trust", s.requireOperator(s.handleBillingTrustSet))
-	mux.Handle("POST /api/v1/operator/teams/{team}/grants", s.requireOperator(s.handleOperatorGrant))
-	mux.Handle("POST /api/v1/operator/teams/{team}/freeze", s.requireOperator(s.handleOperatorFreeze))
-	mux.Handle("POST /api/v1/operator/teams/{team}/unfreeze", s.requireOperator(s.handleOperatorUnfreeze))
-	mux.Handle("GET /api/v1/operator/waitlist", s.requireOperator(s.handleOperatorWaitlist))
-	mux.Handle("POST /api/v1/operator/waitlist/approve", s.requireOperator(s.handleApproveWaitlist))
 	mux.Handle("GET /api/v1/signups", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSignUpStatus)))
 	mux.Handle("PUT /api/v1/signups", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetSignUp)))
 
@@ -1101,6 +1088,7 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 	mux.Handle("POST /api/v1/secrets/rotate", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRotateSecrets)))
 
 	router := http.NewServeMux()
+	s.registerConsoleRoutes(router)
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
 	// safety: the cache proves itself with its storage.count service token,
 	// which these handlers check.

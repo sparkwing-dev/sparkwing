@@ -183,7 +183,7 @@ func (c *Client) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]s
 // exceed; the controller refuses a non-positive one.
 func (c *Client) ReconcileOrphanedLocalRuns(ctx context.Context, threshold time.Duration) (int, error) {
 	var out reconcileOrphansBody
-	if err := c.post(ctx, "/api/v1/maintenance/reconcile-orphans",
+	if err := c.post(ctx, "/api/v1/operator/maintenance/reconcile-orphans",
 		reconcileOrphansRequest{ThresholdNanos: threshold.Nanoseconds()}, http.StatusOK, &out); err != nil {
 		return 0, err
 	}

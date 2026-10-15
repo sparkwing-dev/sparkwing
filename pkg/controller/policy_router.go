@@ -177,6 +177,7 @@ func (router *PolicyRouter) serveEndpoint(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		return err
 	}
+	notePolicyPrincipal(r.Context(), authenticated.Principal)
 	// safety: unknown or dead credentials cannot use decoder failures as an existence oracle.
 	if decodeErr != nil {
 		return decodeErr

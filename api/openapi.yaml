@@ -2034,67 +2034,6 @@ paths:
               schema: {$ref: "#/components/schemas/CreateTokenResponse"}
         "403": {description: "The token is the checkout service's; replace the controller's `credits-token` credential instead."}
 
-  /api/v1/accounts/{account}:
-    delete:
-      x-sparkwing-scope: admin
-      tags: [teams]
-      summary: Delete an account on the operator's word.
-      description: >-
-        Carries out a deletion request that reached the operator by other means. The path names the account by id or by email; an address held by more than one account, none verified, answers 409 and needs the id. The deletion is the one `DELETE /api/v1/me` performs, including its 409 for a last owner of a team with other members.
-      parameters:
-        - {name: account, in: path, required: true, schema: {type: string}}
-      responses:
-        "200":
-          description: Deleted.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.deletedAccountJSON
-                type: object
-                required: [account_id, deleted_teams]
-                properties:
-                  account_id: {type: string}
-                  deleted_teams:
-                    type: array
-                    items: {type: string}
-                    description: Teams the account was the only member of, now queued for deletion.
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409":
-          description: The account is the last owner of teams that have other members, or a team being deleted has a credit checkout in progress (wait for it to expire or complete), is on hold over a disputed payment (contact support), or owes for usage on its card or has a card charge in progress (pay it first).
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.lastOwnerRefusalJSON
-                type: object
-                required: [error, teams]
-                properties:
-                  error: {type: string}
-                  teams:
-                    type: array
-                    items: {$ref: "#/components/schemas/TeamRef"}
-
-  /api/v1/teams/{team}:
-    delete:
-      x-sparkwing-scope: admin
-      tags: [teams]
-      summary: Delete a team on the operator's word.
-      description: The deletion `DELETE /api/v1/team` performs, without its owner and only-team checks. The default team cannot be deleted.
-      parameters:
-        - {name: team, in: path, required: true, schema: {type: string}}
-      responses:
-        "202":
-          description: Deletion queued; the team is closed.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/TeamDeletion"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {description: "The team has a credit checkout in progress (wait for it to expire or complete), is on hold over a disputed payment (contact support), or owes for usage on its card or has a card charge in progress (pay it first)."}
-
   /api/v1/teams/{team}/repos/{owner}/{name}/dispatch:
     parameters:
       - {name: team, in: path, required: true, schema: {type: string}}
@@ -2854,40 +2793,6 @@ paths:
         "405": {description: Anything but an upload-pack fetch.}
         "502": {description: The cache is unreachable or answered badly.}
         "503": {description: No cache is configured on this controller.}
-
-  /api/v1/maintenance/reconcile-orphans:
-    post:
-      x-sparkwing-scope: admin
-      tags: [runs]
-      summary: Close runs whose orchestrator process died.
-      description: |
-        Finishes every run still marked running whose run and node heartbeats
-        are all older than `threshold_nanos`, cascading its pending nodes to
-        cancelled, and answers how many runs it closed. The threshold must be
-        positive: zero would treat every running run as orphaned.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.reconcileOrphansReq
-              type: object
-              required: [threshold_nanos]
-              properties:
-                threshold_nanos: {type: integer, format: int64}
-      responses:
-        "200":
-          description: Sweep complete.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.reconcileOrphansResp
-                type: object
-                properties:
-                  reconciled: {type: integer}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/pipelines/{name}/profile/contention:
     parameters: [{$ref: "#/components/parameters/PipelineName"}]
@@ -4068,37 +3973,6 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/CreditSettings"}
-    put:
-      x-sparkwing-scope: admin
-      tags: [credits]
-      summary: Set the rate, the grace period, or the charge cap.
-      description: |
-        Sets each setting the body names, in one transaction, and answers the
-        full set as `GET` does. An omitted field leaves that setting as it was,
-        so changing one value is a one-field body. A body that names nothing is
-        refused with `400`, as is a rate outside one micro-credit to ten million
-        credits ($10,000) per second, a negative grace period, and a charge cap outside
-        the band whose floor is one second past the longest node heartbeat
-        cadence and whose ceiling is one day. The bounds keep the reservation a
-        claim takes and a capped charge inside a signed 64-bit integer, and the
-        floor keeps a cap from truncating every tick that arrives a little
-        late. A refused body writes none of its fields. `grace_seconds` at zero
-        cancels a metered node at the first heartbeat past the reservation its
-        claim paid for, which bounds the unpaid overrun to one heartbeat
-        interval per node. Charges already written keep the rate they were
-        charged at.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/SetCreditSettings"}
-      responses:
-        "200":
-          description: The settings after the change.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/CreditSettings"}
-        "400": {$ref: "#/components/responses/BadRequest"}
 
   /api/v1/tokens/{prefix}/metered:
     parameters:
@@ -4575,14 +4449,7 @@ paths:
           content:
             application/json:
               schema:
-                x-sparkwing-go-type: pkg/controller.lastOwnerRefusalJSON
-                type: object
-                required: [error, teams]
-                properties:
-                  error: {type: string}
-                  teams:
-                    type: array
-                    items: {$ref: "#/components/schemas/TeamRef"}
+                $ref: "#/components/schemas/PolicyError"
 
   /api/v1/me/team-deletions:
     get:
@@ -5201,24 +5068,6 @@ paths:
       description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
       responses:
         default: {description: Undescribed.}
-
-  /api/v1/github-app/installations/{installation_id}:
-    parameters:
-      - in: path
-        name: installation_id
-        required: true
-        schema: {type: string}
-    delete:
-      x-sparkwing-scope: admin
-      tags: [teams]
-      summary: Unbind a GitHub App installation from whichever team holds it.
-      description: >-
-        The operator's route for moving an installation: once it is unbound, an owner of the new team connects it. Drops that team's subscriptions to the installation. Does not uninstall the App from GitHub. Answers 404 when no team holds the installation, and 404 when the controller has no GitHub App.
-      responses:
-        "204": {description: Unbound.}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/team/github-app:
     get:
@@ -6353,8 +6202,16 @@ paths:
                         team: {type: string}
                         display_name: {type: string}
                         owners: {type: array, items: {type: string}}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
+        "401":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "403":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
 
   /api/v1/operator/teams/{team}:
     parameters:
@@ -6392,9 +6249,59 @@ paths:
                         kind: {type: string}
                         actor: {type: string}
                         attrs: {type: object, additionalProperties: true}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
+        "401":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "403":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "404":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+    delete:
+      x-sparkwing-scope: operator
+      tags: [teams]
+      summary: Delete a team on the operator's word.
+      description: The deletion `DELETE /api/v1/team` performs, without its owner and only-team checks. The default team cannot be deleted.
+      parameters:
+        - {name: team, in: path, required: true, schema: {type: string}}
+      responses:
+        "202":
+          description: Deletion queued; the team is closed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TeamDeletion"}
+        "400":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "401":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "403":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "404":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "409":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
 
   /api/v1/operator/teams/{team}/freeze:
     parameters:
@@ -6423,10 +6330,26 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/OperatorFreeze"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
+        "400":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "401":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "403":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "404":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
 
   /api/v1/operator/teams/{team}/grants:
     parameters:
@@ -6457,11 +6380,31 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/CreditGrant"}
-        "409": {description: "The grant would take the team past the balance cap."}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
+        "409":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "400":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "401":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "403":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "404":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
 
   /api/v1/operator/teams/{team}/trust:
     parameters:
@@ -6495,10 +6438,26 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/BillingTrust"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
+        "400":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "401":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "403":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "404":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
 
   /api/v1/operator/teams/{team}/unfreeze:
     parameters:
@@ -6528,10 +6487,26 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/OperatorFreeze"}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
+        "400":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "401":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "403":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "404":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
 
   /api/v1/operator/waitlist:
     get:
@@ -6568,9 +6543,21 @@ paths:
                         provider: {type: string, description: "The sign-in provider of the user's first identity, such as google or github."}
                         created_at: {type: integer, format: int64, description: Unix seconds.}
                         waitlisted_at: {type: integer, format: int64, description: Unix seconds.}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
+        "400":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "401":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "403":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
 
   /api/v1/operator/waitlist/approve:
     post:
@@ -6614,9 +6601,21 @@ paths:
                         id: {type: string}
                         email: {type: string}
                         active_team: {type: string}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
+        "400":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "401":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "403":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
 
   /api/v1/runs/{id}/source-credential:
     parameters:
@@ -7138,6 +7137,160 @@ paths:
         "422": {description: The manifest lists a segment the controller did not sign for that size and digest.}
         "503": {description: The controller has nowhere to keep log segments.}
 
+  /api/v1/operator/accounts/{account}:
+    delete:
+      x-sparkwing-scope: operator
+      tags: [teams]
+      summary: Delete an account on the operator's word.
+      description: >-
+        Carries out a deletion request that reached the operator by other means. The path names the account by id or by email; an address held by more than one account, none verified, answers 409 and needs the id. The deletion is the one `DELETE /api/v1/me` performs, including its 409 for a last owner of a team with other members.
+      parameters:
+        - {name: account, in: path, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.deletedAccountJSON
+                type: object
+                required: [account_id, deleted_teams]
+                properties:
+                  account_id: {type: string}
+                  deleted_teams:
+                    type: array
+                    items: {type: string}
+                    description: Teams the account was the only member of, now queued for deletion.
+        "401":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "403":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "404":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "409":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+
+  /api/v1/operator/github-app/installations/{installation}:
+    parameters:
+      - in: path
+        name: installation
+        required: true
+        schema: {type: string}
+    delete:
+      x-sparkwing-scope: operator
+      tags: [teams]
+      summary: Unbind a GitHub App installation from whichever team holds it.
+      description: >-
+        The operator's route for moving an installation: once it is unbound, an owner of the new team connects it. Drops that team's subscriptions to the installation. Does not uninstall the App from GitHub. Answers 404 when no team holds the installation, and 404 when the controller has no GitHub App.
+      responses:
+        "204": {description: Unbound.}
+        "401":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "403":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "404":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+
+  /api/v1/operator/maintenance/reconcile-orphans:
+    post:
+      x-sparkwing-scope: operator
+      tags: [runs]
+      summary: Close runs whose orchestrator process died.
+      description: |
+        Finishes every run still marked running whose run and node heartbeats
+        are all older than `threshold_nanos`, cascading its pending nodes to
+        cancelled, and answers how many runs it closed. The threshold must be
+        positive: zero would treat every running run as orphaned.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.reconcileOrphansReq
+              type: object
+              required: [threshold_nanos]
+              properties:
+                threshold_nanos: {type: integer, format: int64}
+      responses:
+        "200":
+          description: Sweep complete.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.reconcileOrphansResp
+                type: object
+                properties:
+                  reconciled: {type: integer}
+        "400":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "401":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/operator/credits/settings:
+    put:
+      x-sparkwing-scope: operator
+      tags: [credits]
+      summary: Set the rate, the grace period, or the charge cap.
+      description: |
+        Sets each setting the body names, in one transaction, and answers the
+        full set as `GET` does. An omitted field leaves that setting as it was,
+        so changing one value is a one-field body. A body that names nothing is
+        refused with `400`, as is a rate outside one micro-credit to ten million
+        credits ($10,000) per second, a negative grace period, and a charge cap outside
+        the band whose floor is one second past the longest node heartbeat
+        cadence and whose ceiling is one day. The bounds keep the reservation a
+        claim takes and a capped charge inside a signed 64-bit integer, and the
+        floor keeps a cap from truncating every tick that arrives a little
+        late. A refused body writes none of its fields. `grace_seconds` at zero
+        cancels a metered node at the first heartbeat past the reservation its
+        claim paid for, which bounds the unpaid overrun to one heartbeat
+        interval per node. Charges already written keep the rate they were
+        charged at.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SetCreditSettings"}
+      responses:
+        "200":
+          description: The settings after the change.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreditSettings"}
+        "400":
+          description: Console request refused with the shared error object.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PolicyError"}
+
 components:
   securitySchemes:
     bearerToken:
@@ -7356,6 +7509,20 @@ components:
         done:
           type: boolean
           description: The node has finished writing, so `next` will not advance again.
+    PolicyError:
+      x-sparkwing-go-type: internal/apierr.Envelope
+      type: object
+      required: [error]
+      properties:
+        error:
+          x-sparkwing-go-type: internal/apierr.Error
+          type: object
+          required: [code, message]
+          properties:
+            code: {type: string}
+            message: {type: string}
+            hint: {type: string}
+            details: {type: object, additionalProperties: true}
     Error:
       x-sparkwing-go-type: none
       type: object

@@ -8,8 +8,8 @@ interfaces. The policy evaluator, authentication verifier, HTTP policy router,
 delegation validator, data/source checks, billing calculation, payment verifier
 and error codec are implemented. Filesystem and S3 object signers implement the
 signing boundary. Persistent issuance and authentication reads still need the
-store implementation. The Stripe callback uses this table in the existing controller. Its remaining
-routes have not switched to it.
+store implementation. The Stripe callback and thirteen console endpoints use this table in the existing
+controller. The remaining routes have not switched to it.
 
 ## Ownership
 
@@ -119,6 +119,7 @@ All capability names below are in `internal/capability`.
 | `controller.NewFilesystemDataSigner`, `FilesystemDataSigner.Sign`, `FilesystemDataSigner.Verify` | Sign and verify exact filesystem transfer constraints. The blob owner verifies uploaded bytes before recording a receipt. |
 | `controller.NewS3DataSigner`, `S3DataSigner.Sign` | Sign one configured bucket's GET or checksum/size-bound PUT without making a storage request. |
 | `controller.PaymentSettler`, `Server.WithPayments` | Supply C1 settlement to the signed Stripe callback. The server registers `/webhooks/stripe` through `PolicyRouter` and passes only verified events to the store. |
+| `controller.Server.WithAuthorization` | Configure the shared verifier, bindings, transport identity and CSRF adapters before constructing the server handler. Missing adapters fail closed. |
 | `controller.RouteAuthorization`, `controller.Endpoint`, `controller.PolicyRouter` | Wire identity, decoding, CSRF, external proof and authorized handlers into the matched route. |
 | `controller.NewPolicyRouter`, `PolicyRouter.Register`, `PolicyRouter.Validate`, `PolicyRouter.Registrations` | Register handlers independently of the policy table and check their proof wiring. Combine controller and node-host registrations for the complete inventory check. |
 
@@ -507,6 +508,29 @@ T1 should implement these behavioral scenarios against the running contracts:
 | Auth cache | Both TTL and fresh full-generation equality are required. Ancestor/session revocation, cross-team launcher revocation and membership loss invalidate reuse. |
 | Windows | SID-verified local subjects, private-file ACLs and equivalent refusal semantics. |
 
+`TestOperatorHTTPRefusesNonConsoleAuthority` exercises thirteen actual Server
+registrations with the real verifier and fake committed facts. It refuses deployment
+and delegated bearers, ordinary sessions, local peers, dead sessions, wrong audiences,
+missing grants and missing CSRF proof. `TestOperatorHTTPCommitsAuthorizedActions`
+checks grant replay, trust, freeze/unfreeze and their authenticated actor IDs against
+SQLite, with and without the dashboard wrapper. Console handlers receive `Authorized`
+and use its subject ID for attribution. They no longer read the legacy principal.
+
+Five deployment-admin entry points are removed: account/team deletion, GitHub App
+installation unbinding, orphan reconciliation and credit-settings writes. Their
+replacements live under `/api/v1/operator`. No aliases remain. The handler-policy
+lint checks every function that takes `capability.Authorized`. Legacy handlers still
+need migration before that lint can cover the complete server.
+
+`WithAuthorization` is the controller wiring boundary. W1 must supply the committed
+reader and bindings. The application must supply verified session/peer identity and
+session-bound CSRF checks. The old `WithOperatorAccounts` list still gates dashboard
+pages, but it does not replace those API dependencies. Authentication fixtures for
+legacy handler tests are test-only adapters and establish no C1 snapshot guarantee.
+The existing store credit-summary/settings and session methods still query the removed
+`sparkwing_meta` table. Their real integration remains open. Console refunds and runner
+metering also remain outside this cutover.
+
 The registered-route comparison must use actual rewritten router registrations,
 not a list generated from `Routes`. A separate handler-policy lint must reject
 authorization calls inside handlers. T1 owns runtime scenarios; C2's tests
@@ -542,7 +566,8 @@ exercise only available contract data and functions.
    also supply `BindingChecker`, `DataAccessChecker` and the source-release
    audit transaction. C2 supplies no alternate SQL implementation. Persistent
    root, delegation, claim and exchange entry points must reach `Store.Issue`.
-5. **Controller cutover.** The running `Server` still uses legacy auth and
+5. **Controller cutover.** The running `Server` uses `PolicyRouter` for the
+   Stripe callback and thirteen console-only endpoints. Other routes retain legacy auth and
    registrations. Wire final handlers and decoders to `PolicyRouter`, provide
    account/console/verified-local identity and CSRF adapters, then delete the
    old auth stack and handler authorization. Final route-inventory and
@@ -556,6 +581,17 @@ exercise only available contract data and functions.
    service-bearer routes. No new event kinds or settlement semantics were
    inferred here. The old external checkout service also needs to send paid
    callbacks to `/webhooks/stripe` and commit checkout mode/currency through C1.
+
+7. **Console mutation rechecks.** Existing grant, trust, hold, deletion,
+   waitlist and credit-settings store methods do not accept `AuthorityRef`.
+   C1 must replace those signatures with an authority-bearing transaction
+   boundary that rechecks revocation and derives the audit actor. The HTTP
+   policy gate is implemented, but it cannot establish that transaction
+   guarantee. No C1 signature was changed in this cutover.
+
+8. **Local orphan reconciliation.** The shared HTTP client uses the console-only
+   maintenance path. W3/W8's automatic local maintenance must use its internal
+   store boundary rather than a deployment or local-peer credential on that path.
 
 ## Cross-area assumptions
 

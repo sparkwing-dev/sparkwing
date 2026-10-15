@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -354,40 +356,37 @@ type approvedJSON struct {
 	ActiveTeam string `json:"active_team"`
 }
 
-func (s *Server) handleApproveWaitlist(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleApproveWaitlist(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
 	var req approveWaitlistReq
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
 	}
 	if (len(req.AccountIDs) > 0) == (req.Oldest > 0) {
-		writeError(w, http.StatusBadRequest, errors.New("name either account_ids or oldest"))
-		return
+		return &apierr.Error{Code: apierr.BadRequest, Message: "name either account_ids or oldest"}
 	}
 	if len(req.AccountIDs) > maxWaitlistPage || req.Oldest > maxWaitlistPage {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("approve at most %d accounts at a time", maxWaitlistPage))
-		return
+		return &apierr.Error{Code: apierr.BadRequest, Message: fmt.Sprintf("approve at most %d accounts at a time", maxWaitlistPage)}
 	}
 	ctx, now := r.Context(), time.Now().UTC()
-	p, _ := PrincipalFromContext(ctx)
+	actor := authorized.Principal.Capability.Subject.ID
 	var approved []store.Account
 	var err error
 	if req.Oldest > 0 {
-		approved, err = s.store.ApproveOldestWaitlisted(ctx, req.Oldest, p.Name, now)
+		approved, err = s.store.ApproveOldestWaitlisted(ctx, req.Oldest, actor, now)
 	} else {
-		approved, err = s.store.ApproveWaitlisted(ctx, req.AccountIDs, p.Name, now)
+		approved, err = s.store.ApproveWaitlisted(ctx, req.AccountIDs, actor, now)
 	}
 	out := make([]approvedJSON, 0, len(approved))
 	for _, a := range approved {
-		s.logger.Info("signup.approved", "account", a.ID, "by", p.label(), "team", string(a.ActiveTeam))
+		s.logger.Info("signup.approved", "account", a.ID, "by", actor, "team", string(a.ActiveTeam))
 		s.notifyApproved(ctx, a)
 		out = append(out, approvedJSON{ID: a.ID, Email: a.Email, ActiveTeam: string(a.ActiveTeam)})
 	}
 	if err != nil {
-		s.writeInternalError(w, r, "waitlist approve", err)
-		return
+		return err
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"approved": out})
+	return nil
 }
 
 func (s *Server) notifyApproved(ctx context.Context, a store.Account) {

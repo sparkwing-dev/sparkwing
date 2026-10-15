@@ -10,6 +10,7 @@ package apiroutes
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -32,7 +33,8 @@ const Claim = "claim"
 const Operator = "operator"
 
 var (
-	handleRE = regexp.MustCompile(`(\w+)\.Handle(?:Func)?\("([A-Z]+) (/[^"]+)",\s*(.*)$`)
+	handleRE   = regexp.MustCompile(`(\w+)\.Handle(?:Func)?\("([A-Z]+) (/[^"]+)",\s*(.*)$`)
+	endpointRE = regexp.MustCompile(`\{Method: "([A-Z]+)", Pattern: "(/[^"]+)", Handle: `)
 
 	scopeRefRE = regexp.MustCompile(`\b((?:Scope|scope)[A-Za-z]\w*)\b`)
 
@@ -77,6 +79,16 @@ func Parse(file string, scopes map[string]string) ([]Route, error) {
 		return nil, fmt.Errorf("read routes: %w", err)
 	}
 	var routes []Route
+	if strings.Contains(string(data), "s.registerConsoleRoutes(router)") {
+		// safety: the reference follows actual endpoint declarations, independently of the policy table.
+		endpoints, err := os.ReadFile(filepath.Join(filepath.Dir(file), "operator_routes.go"))
+		if err != nil {
+			return nil, fmt.Errorf("read console endpoints: %w", err)
+		}
+		for _, match := range endpointRE.FindAllStringSubmatch(string(endpoints), -1) {
+			routes = append(routes, Route{Method: match[1], Path: match[2], Scope: Operator})
+		}
+	}
 	for line := range strings.SplitSeq(string(data), "\n") {
 		m := handleRE.FindStringSubmatch(line)
 		if m == nil {

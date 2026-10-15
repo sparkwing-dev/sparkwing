@@ -74,7 +74,7 @@ func TestTenantRoutes_DeploymentRoutesNeedDeploymentAuthority(t *testing.T) {
 			}
 		}
 	}
-	if checked < 15 {
+	if checked < 10 {
 		t.Errorf("checked %d deployment routes; the parse is not reading server.go", checked)
 	}
 }

@@ -11,12 +11,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // WithOperatorAccounts names the accounts, by account id, whose signed-in
-// browser sessions may use the operator console routes under
-// /api/v1/operator. None is named by default, which leaves the console off.
+// browser sessions may view the operator console page. API authorization
+// additionally requires the committed-fact adapters supplied by WithAuthorization.
 func (s *Server) WithOperatorAccounts(ids []string) *Server {
 	set := map[string]bool{}
 	for _, id := range ids {
@@ -28,30 +30,9 @@ func (s *Server) WithOperatorAccounts(ids []string) *Server {
 	return s
 }
 
-// safety: only a browser session of a listed account passes. No bearer token
-// does, an admin token included, so a console action needs the operator's own
-// sign-in and never a credential that automation can hold.
-func (s *Server) requireOperator(next http.HandlerFunc) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p, _ := PrincipalFromContext(r.Context())
-		if !s.operatorSession(p) {
-			writeAuthError(w, http.StatusForbidden, authErrorBody{
-				Code: "forbidden", Message: "the operator console needs the operator's own signed-in account",
-			})
-			return
-		}
-		next(w, r)
-	})
-}
-
 func (s *Server) operatorSession(p *Principal) bool {
 	set := s.operators.Load()
 	return p != nil && p.session != "" && p.AccountID != "" && set != nil && (*set)[p.AccountID]
-}
-
-func operatorActor(r *http.Request) string {
-	p, _ := PrincipalFromContext(r.Context())
-	return p.Name
 }
 
 type operatorTeamMatchJSON struct {
@@ -60,11 +41,10 @@ type operatorTeamMatchJSON struct {
 	Owners      []string `json:"owners"`
 }
 
-func (s *Server) handleOperatorTeams(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleOperatorTeams(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
 	matches, err := s.store.SearchTeams(r.Context(), r.URL.Query().Get("q"))
 	if err != nil {
-		s.writeInternalError(w, r, "operator team search", err)
-		return
+		return err
 	}
 	out := make([]operatorTeamMatchJSON, 0, len(matches))
 	for _, m := range matches {
@@ -73,6 +53,7 @@ func (s *Server) handleOperatorTeams(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"teams": out})
+	return nil
 }
 
 type operatorEventJSON struct {
@@ -95,17 +76,17 @@ type operatorTeamJSON struct {
 
 const operatorEventLimit = 50
 
-func (s *Server) handleOperatorTeam(w http.ResponseWriter, r *http.Request) {
-	t, ok := s.namedTenant(w, r, r.PathValue("team"))
-	if !ok {
-		return
+func (s *Server) handleOperatorTeam(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
+	t, err := s.consoleTenant(r.Context(), authorized.Target.Team)
+	if err != nil {
+		return err
 	}
 	out, err := operatorTeamView(r.Context(), t)
 	if err != nil {
-		s.writeInternalError(w, r, "operator team read", err)
-		return
+		return err
 	}
 	writeJSON(w, http.StatusOK, out)
+	return nil
 }
 
 func operatorTeamView(ctx context.Context, t *store.Tenant) (operatorTeamJSON, error) {
@@ -144,19 +125,17 @@ type operatorActionReq struct {
 	Hold string `json:"hold,omitempty"`
 }
 
-func decodeOperatorAction(w http.ResponseWriter, r *http.Request) (operatorActionReq, bool) {
+func decodeOperatorAction(r *http.Request) (operatorActionReq, error) {
 	var req operatorActionReq
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return req, false
+		return req, &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
 	}
 	reason, err := OperatorReason(req.Reason)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return req, false
+		return req, &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
 	}
 	req.Reason = reason
-	return req, true
+	return req, nil
 }
 
 // OperatorReason trims the reason an operator gives for acting on a team and
@@ -169,94 +148,95 @@ func OperatorReason(reason string) (string, error) {
 	return reason, nil
 }
 
-func (s *Server) handleOperatorGrant(w http.ResponseWriter, r *http.Request) {
-	req, ok := decodeOperatorAction(w, r)
-	if !ok {
-		return
+func (s *Server) handleOperatorGrant(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
+	req, err := decodeOperatorAction(r)
+	if err != nil {
+		return err
 	}
 	if req.AmountCents <= 0 || req.AmountCents > store.MaxPurchaseLimitCents {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("amount_cents must be 1 to %d", store.MaxPurchaseLimitCents))
-		return
+		return &apierr.Error{Code: apierr.BadRequest, Message: fmt.Sprintf("amount_cents must be 1 to %d", store.MaxPurchaseLimitCents)}
 	}
 	if req.Key = strings.TrimSpace(req.Key); req.Key == "" {
-		writeError(w, http.StatusBadRequest, errors.New("key is required, so a retried grant grants once"))
-		return
+		return &apierr.Error{Code: apierr.BadRequest, Message: "key is required, so a retried grant grants once"}
 	}
-	t, ok := s.namedTenant(w, r, r.PathValue("team"))
-	if !ok {
-		return
+	t, err := s.consoleTenant(r.Context(), authorized.Target.Team)
+	if err != nil {
+		return err
 	}
 	res, err := t.RecordCreditGrant(r.Context(), store.CreditGrantRequest{
 		Kind: store.CreditGrantFree, AmountMicro: req.AmountCents * store.MicroCreditsPerCent,
-		Reference: "console:" + req.Key, CreatedBy: operatorActor(r), Reason: req.Reason,
+		Reference: "console:" + req.Key, CreatedBy: authorized.Principal.Capability.Subject.ID, Reason: req.Reason,
 	})
-	if s.writeBalanceCapRefusal(w, err) {
-		return
+	var capErr *store.CreditBalanceCapError
+	if errors.As(err, &capErr) {
+		return &apierr.Error{Code: apierr.Conflict, Message: "credit balance cap exceeded", Details: map[string]any{
+			"reason": BalanceCapCode, "balance_micro": capErr.BalanceMicro, "open_micro": capErr.OpenMicro,
+			"cap_micro": capErr.CapMicro, "amount_micro": capErr.AmountMicro,
+		}}
+	}
+	if errors.Is(err, store.ErrInvalidInput) {
+		return &apierr.Error{Code: apierr.BadRequest, Message: err.Error()}
 	}
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return err
 	}
 	writeJSON(w, http.StatusCreated, creditGrantToJSON(res.Grant))
+	return nil
 }
 
-func (s *Server) handleOperatorFreeze(w http.ResponseWriter, r *http.Request) {
-	req, ok := decodeOperatorAction(w, r)
-	if !ok {
-		return
+func (s *Server) handleOperatorFreeze(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
+	req, err := decodeOperatorAction(r)
+	if err != nil {
+		return err
 	}
-	t, ok := s.namedTenant(w, r, r.PathValue("team"))
-	if !ok {
-		return
+	t, err := s.consoleTenant(r.Context(), authorized.Target.Team)
+	if err != nil {
+		return err
 	}
-	if _, err := t.HoldByOperator(r.Context(), operatorActor(r), req.Reason, time.Now()); err != nil {
-		s.writeInternalError(w, r, "operator freeze", err)
-		return
+	if _, err := t.HoldByOperator(r.Context(), authorized.Principal.Capability.Subject.ID, req.Reason, time.Now()); err != nil {
+		return err
 	}
-	s.writeOperatorFreeze(w, r, t)
+	return s.writeOperatorFreeze(w, r, t)
 }
 
-func (s *Server) handleOperatorUnfreeze(w http.ResponseWriter, r *http.Request) {
-	req, ok := decodeOperatorAction(w, r)
-	if !ok {
-		return
+func (s *Server) handleOperatorUnfreeze(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
+	req, err := decodeOperatorAction(r)
+	if err != nil {
+		return err
 	}
-	t, ok := s.namedTenant(w, r, r.PathValue("team"))
-	if !ok {
-		return
+	t, err := s.consoleTenant(r.Context(), authorized.Target.Team)
+	if err != nil {
+		return err
 	}
-	var err error
 	if hold := strings.TrimSpace(req.Hold); hold != "" {
 		var n int64
-		n, err = s.store.ReleaseCreditFreezes(r.Context(), t.Team(), hold, operatorActor(r), req.Reason, time.Now())
+		n, err = s.store.ReleaseCreditFreezes(r.Context(), t.Team(), hold, authorized.Principal.Capability.Subject.ID, req.Reason, time.Now())
 		if err == nil && n == 0 {
-			writeError(w, http.StatusNotFound, fmt.Errorf("team %s holds no hold %q", t.Team(), hold))
-			return
+			return &apierr.Error{Code: apierr.NotFound, Message: "team does not hold the named hold"}
 		}
 	} else {
-		_, err = t.ReleaseOperatorHolds(r.Context(), operatorActor(r), req.Reason, time.Now())
+		_, err = t.ReleaseOperatorHolds(r.Context(), authorized.Principal.Capability.Subject.ID, req.Reason, time.Now())
 	}
 	if err != nil {
-		s.writeInternalError(w, r, "operator unfreeze", err)
-		return
+		return err
 	}
-	s.writeOperatorFreeze(w, r, t)
+	return s.writeOperatorFreeze(w, r, t)
 }
 
-func (s *Server) writeOperatorFreeze(w http.ResponseWriter, r *http.Request, t *store.Tenant) {
+func (s *Server) writeOperatorFreeze(w http.ResponseWriter, r *http.Request, t *store.Tenant) error {
 	freeze, err := t.CreditFreeze(r.Context())
 	if err != nil {
-		s.writeInternalError(w, r, "operator read freeze", err)
-		return
+		return err
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"team": string(t.Team()), "frozen": freeze.Frozen, "holds": append([]string{}, freeze.Disputes...),
 	})
+	return nil
 }
 
 const operatorWaitlistPage = 50
 
-func (s *Server) handleOperatorWaitlist(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleOperatorWaitlist(w http.ResponseWriter, r *http.Request, authorized capability.Authorized) error {
 	q := r.URL.Query()
 	limit, offset := operatorWaitlistPage, 0
 	for _, v := range []struct {
@@ -267,8 +247,7 @@ func (s *Server) handleOperatorWaitlist(w http.ResponseWriter, r *http.Request) 
 		if raw := q.Get(v.name); raw != "" {
 			n, err := strconv.Atoi(raw)
 			if err != nil || n < v.min || n > v.max {
-				writeError(w, http.StatusBadRequest, fmt.Errorf("%s is %d to %d", v.name, v.min, v.max))
-				return
+				return &apierr.Error{Code: apierr.BadRequest, Message: fmt.Sprintf("%s is %d to %d", v.name, v.min, v.max)}
 			}
 			*v.dst = n
 		}
@@ -277,8 +256,8 @@ func (s *Server) handleOperatorWaitlist(w http.ResponseWriter, r *http.Request) 
 	waiting, err := s.store.NewestWaitlisted(ctx, limit, offset)
 	counts, cerr := s.store.SignUpCounts(ctx, time.Now())
 	if err := errors.Join(err, cerr); err != nil {
-		s.writeInternalError(w, r, "operator waitlist", err)
-		return
+		return err
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"accounts": waitlistBody(waiting), "total": counts.Waitlisted})
+	return nil
 }

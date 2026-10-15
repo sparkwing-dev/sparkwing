@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -91,9 +92,9 @@ var auditedReadPrefixes = []string{
 // safety: authentication runs below the log middleware, so it fills this
 // holder and the line written after the handler returns can name the caller.
 type auditRecord struct {
-	id, route string
-	principal *Principal
-	targets   []any
+	id, route               string
+	principalID, kind, team string
+	targets                 []any
 	// safety: a GET that changes who can act, such as a sign-in callback, is audited like a write.
 	write bool
 }
@@ -106,9 +107,16 @@ func withAuditRecord(ctx context.Context, id, route string) (context.Context, *a
 }
 
 func noteAuditPrincipal(ctx context.Context, p *Principal) {
-	if rec, ok := ctx.Value(auditCtxKey{}).(*auditRecord); ok {
-		rec.principal = p
+	if rec, ok := ctx.Value(auditCtxKey{}).(*auditRecord); ok && p != nil {
+		rec.principalID, rec.kind, rec.team = auditPrincipalID(p), p.Kind, string(p.Team)
 	}
+}
+
+func notePolicyPrincipal(ctx context.Context, p capability.Principal) {
+	if rec, ok := ctx.Value(auditCtxKey{}).(*auditRecord); ok {
+		rec.principalID, rec.kind, rec.team = clip(p.Capability.Subject.ID), string(p.Capability.Subject.Kind), p.Capability.Team
+	}
+	otelutil.StampSpan(ctx, otelutil.SpanAttrs{Principal: clip(p.Capability.Subject.ID)})
 }
 
 // safety: a browser flow finishes on a GET the provider redirects to, so the step that signs an account in or
@@ -221,8 +229,8 @@ func logRequest(ctx context.Context, logger *slog.Logger, r *http.Request, rec *
 		"method", r.Method, "route", rec.route, "status", status, "dur_ms", elapsed.Milliseconds(),
 		"client_ip", clientIP, "client_class", clientClass(r.UserAgent()),
 	}
-	if p := rec.principal; p != nil {
-		attrs = append(attrs, "principal_kind", p.Kind, "principal_id", auditPrincipalID(p), "team", string(p.Team))
+	if rec.kind != "" {
+		attrs = append(attrs, "principal_kind", rec.kind, "principal_id", rec.principalID, "team", rec.team)
 	}
 	attrs = append(attrs, auditPathAttrs(rec.route, r.URL.EscapedPath())...)
 	attrs = append(attrs, rec.targets...)

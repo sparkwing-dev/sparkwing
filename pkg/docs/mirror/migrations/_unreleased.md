@@ -670,3 +670,17 @@ script that called the binary directly moves to the CLI:
 [{"name": ..., "required": true}]}` (or `"optional": true`), read from
 describe, instead of the per-field Go names and resolution notes the binary
 printed.
+
+## Console authorization
+
+Account deletion, team deletion, GitHub App installation unbinding, orphan
+reconciliation and credit-settings writes move under `/api/v1/operator`.
+The former deployment-admin paths are removed. These actions require an
+operator-console session and CSRF proof. Bearer tokens cannot perform them.
+Console errors use the shared `error` object with `code`, `message`, and optional
+`details`. Account-deletion conflicts place affected teams in `error.details.teams`.
+
+Controller embedders must configure `Server.WithAuthorization` with the shared
+verifier, binding checker, verified transport identity and session-bound CSRF
+adapter before constructing the handler. Missing dependencies refuse requests.
+The operator account list alone does not configure API authentication.

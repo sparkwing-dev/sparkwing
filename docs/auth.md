@@ -338,16 +338,17 @@ No bearer token reaches them, an admin token included, and the checkout
 service's `credits.grant` routes refuse every other credential, so a
 standing credential grants no credit, changes no trust and releases no hold.
 
-Only the operator's own signed-in account reaches it. The controller lists
-operator accounts by account id with `--operator-accounts`
-(comma-separated), and every route under
-`/api/v1/operator/` answers `403` to any other caller: a team owner, an
-operator-token session and every bearer token, an admin token included. A console
-action therefore needs the operator's sign-in, not a credential that
-automation can hold. The controller serves the `/operator` page only to a
-listed operator's own signed-in session and answers `403` to every other
-browser, and the console's writes pass the same CSRF check as every other
-cookie-authenticated write. With no account listed, the console is off.
+Console API actions require an operator-console session and session-bound CSRF
+proof for writes. A live bearer, ordinary account session or local peer receives
+`403 forbidden`. An unknown, expired or revoked session receives
+`401 unauthenticated`. Trust, grant and hold events record the authenticated
+account ID. A request body cannot select the actor.
+
+Account/team deletion, installation unbinding, orphan reconciliation and
+credit-settings writes also use console-only routes under `/api/v1/operator`.
+The former deployment-admin URLs are removed. The controller's
+`--operator-accounts` list gates the dashboard page. API authentication uses the
+shared route-policy adapters and fails closed when they are not configured.
 
 Every action commits together with its business event, which names the
 operator and the reason: `billing.trust_changed` for trust and the limit,

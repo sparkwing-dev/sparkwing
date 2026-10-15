@@ -100,6 +100,7 @@ func newIdentityFixtureWith(t *testing.T, o fixtureOpts) *identityFixture {
 	if o.configure != nil {
 		o.configure(srv)
 	}
+	controller.ConfigureConsoleFixture(srv)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
@@ -126,6 +127,11 @@ func (f *identityFixture) call(method, path, auth string, body, out any) int {
 	if auth != "" {
 		req.Header.Set("Authorization", auth)
 	}
+	if strings.HasPrefix(path, "/api/v1/operator/") && strings.HasPrefix(auth, "Session ") {
+		if err := controller.ConsoleFixtureRequest(f.srv, req, strings.TrimPrefix(auth, "Session ")); err != nil {
+			f.t.Fatal(err)
+		}
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		f.t.Fatal(err)
@@ -138,6 +144,12 @@ func (f *identityFixture) call(method, path, auth string, body, out any) int {
 		}
 	}
 	return resp.StatusCode
+}
+
+func (f *identityFixture) consoleAuth() string {
+	operator := f.user("console-operator", "console@example.com")
+	f.srv.WithOperatorAccounts([]string{operator.id})
+	return operator.auth
 }
 
 type exchangeBody struct {

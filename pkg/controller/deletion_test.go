@@ -214,15 +214,19 @@ func TestDeleteAccountNeedsTheEmailAndNoOrphanedTeam(t *testing.T) {
 		t.Fatalf("confirming with another address = %d, want 400", code)
 	}
 	var refusal struct {
-		Teams []struct {
-			Slug string `json:"slug"`
-		} `json:"teams"`
+		Error struct {
+			Details struct {
+				Teams []struct {
+					Slug string `json:"slug"`
+				} `json:"teams"`
+			} `json:"details"`
+		} `json:"error"`
 	}
 	if code := f.call("DELETE", "/api/v1/me", owner.auth, map[string]string{"confirm_email": "olga@example.com"}, &refusal); code != http.StatusConflict {
 		t.Fatalf("last owner deleting their account = %d, want 409", code)
 	}
-	if len(refusal.Teams) != 1 || refusal.Teams[0].Slug != owner.team {
-		t.Fatalf("refusal names %+v, want %s", refusal.Teams, owner.team)
+	if len(refusal.Error.Details.Teams) != 1 || refusal.Error.Details.Teams[0].Slug != owner.team {
+		t.Fatalf("refusal names %+v, want %s", refusal.Error.Details.Teams, owner.team)
 	}
 
 	var done struct {
@@ -250,23 +254,23 @@ func TestOperatorDeletesAnAccountByEmailAndATeamBySlug(t *testing.T) {
 	gone := f.user("g", "gus@example.com")
 	f.createTeam(&owner, "acme")
 
-	if code := f.call("DELETE", "/api/v1/accounts/gus@example.com", owner.auth, nil, nil); code != http.StatusForbidden {
+	if code := f.call("DELETE", "/api/v1/operator/accounts/gus@example.com", owner.auth, nil, nil); code != http.StatusForbidden {
 		t.Fatalf("a team owner using the operator route = %d, want 403", code)
 	}
-	if code := f.call("DELETE", "/api/v1/accounts/nobody@example.com", "Bearer "+f.admin, nil, nil); code != http.StatusNotFound {
+	if code := f.call("DELETE", "/api/v1/operator/accounts/nobody@example.com", f.consoleAuth(), nil, nil); code != http.StatusNotFound {
 		t.Fatalf("an unknown address = %d, want 404", code)
 	}
-	if code := f.call("DELETE", "/api/v1/accounts/gus@example.com", "Bearer "+f.admin, nil, nil); code != http.StatusOK {
+	if code := f.call("DELETE", "/api/v1/operator/accounts/gus@example.com", f.consoleAuth(), nil, nil); code != http.StatusOK {
 		t.Fatalf("operator deleting an account = %d, want 200", code)
 	}
 	if code := f.call("GET", "/api/v1/me", gone.auth, nil, nil); code != http.StatusUnauthorized {
 		t.Fatalf("the deleted account's session = %d, want 401", code)
 	}
-	if code := f.call("DELETE", "/api/v1/teams/acme", owner.auth, nil, nil); code != http.StatusForbidden {
+	if code := f.call("DELETE", "/api/v1/operator/teams/acme", owner.auth, nil, nil); code != http.StatusForbidden {
 		t.Fatalf("a team owner using the operator team route = %d, want 403", code)
 	}
 	var del teamDeletionBody
-	if code := f.call("DELETE", "/api/v1/teams/acme", "Bearer "+f.admin, nil, &del); code != http.StatusAccepted || del.State != store.TeamDeletionPending {
+	if code := f.call("DELETE", "/api/v1/operator/teams/acme", f.consoleAuth(), nil, &del); code != http.StatusAccepted || del.State != store.TeamDeletionPending {
 		t.Fatalf("operator deleting a team = %d %+v, want 202 pending", code, del)
 	}
 }

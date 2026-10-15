@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+- **controller (Breaking):** Thirteen console endpoints use the shared authorization policy. Account/team deletion, installation unbinding, orphan reconciliation and credit-settings writes move under `/api/v1/operator` and refuse deployment bearers. Console mutations require CSRF proof and record the authenticated account ID. See [migration guide](docs/migrations/_unreleased.md#console-authorization).
+
 ### Added
 - **cli + controller:** `sparkwing pipeline trigger --runner here --reason TEXT` hosts a hotfix run on the caller's machine under a one-shot runner credential bound to that run
   `POST /api/v1/triggers` takes `runner: here` and a one-line `reason`, mints a runner credential with the trigger, pins the trigger to it and returns it once as `runner_token` with `runner_token_expires_at` (six hours, the hosted-run limit). Only that credential may claim the pinned trigger, once and within 10 minutes; its requests are fenced to the run's own routes; secrets reach the run through its claims as on any runner. The audit line and a `runner_here` run event record the caller, the credential prefix and the reason. See [Hotfix runner](docs/hotfix-runner.md).
