@@ -1,10 +1,7 @@
-package store_test
+package store
 
 import (
-	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -14,35 +11,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func checkStoreReferenceBoundary(t *testing.T) (err error) {
+func checkStoreReferenceBoundary(t *testing.T) error {
 	ctx := t.Context()
-	target := storetest.NewSQLite(t)
-	s, err := target.TryOpen()
-	if err != nil {
-		return err
-	}
-	defer func() { err = errors.Join(err, s.Close()) }()
-	authority, digests, err := seedStoreReferenceBoundary(ctx, s.DB())
-	if err != nil {
-		return err
-	}
-	if err := s.Close(); err != nil {
-		return err
-	}
-	reopened, err := target.TryOpen()
-	if err != nil {
-		return err
-	}
-	s = reopened
-	tenant, err := s.ForTeam(ctx, store.DefaultTeam)
-	if err != nil {
-		return err
-	}
+	s, tenant, authority, digests := seedStoreReferenceBoundary(t)
+	blobAccountingDiskStore(t, s)
 	reader := authority.Attempt.Value
 	authorized := capability.Authorized{Principal: capability.Principal{Capability: capability.Capability{Prefix: authority.CapabilityRef, Team: reader.Team}}}
 	for _, test := range []struct {
@@ -51,19 +25,19 @@ func checkStoreReferenceBoundary(t *testing.T) (err error) {
 		allowed bool
 	}{
 		{"unrelated", nodeproto.JobSpec{}, false},
-		{"dependency", nodeproto.JobSpec{Needs: []string{"a"}}, true},
-		{"optional_dependency", nodeproto.JobSpec{NeedsIfPresent: []string{"a"}}, true},
+		{"dependency", nodeproto.JobSpec{Needs: []string{"job"}}, true},
+		{"optional_dependency", nodeproto.JobSpec{NeedsIfPresent: []string{"job"}}, true},
 		{"transitive_dependency", nodeproto.JobSpec{Needs: []string{"unrelated"}}, true},
-		{"artifact_input", nodeproto.JobSpec{Consumes: []nodeproto.ArtifactInput{{Producer: "a"}}}, true},
+		{"artifact_input", nodeproto.JobSpec{Consumes: []nodeproto.ArtifactInput{{Producer: "job"}}}, true},
 		{"generated_group", nodeproto.JobSpec{NeedsGenerated: []string{"generated"}}, true},
-		{"failure_handler", nodeproto.JobSpec{OnFailureOf: "a"}, true},
+		{"failure_handler", nodeproto.JobSpec{OnFailureOf: "job"}, true},
 	} {
 		test.spec.ID = reader.NodeID
 		body, err := json.Marshal(test.spec)
 		if err != nil {
 			return err
 		}
-		if _, err := s.DB().ExecContext(ctx, "UPDATE nodes SET spec_json=? WHERE team=? AND run_id='upload' AND node_id='b'", body, store.DefaultTeam); err != nil {
+		if _, err := s.DB().ExecContext(ctx, "UPDATE nodes SET spec_json=? WHERE team=? AND run_id='run' AND node_id='b'", body, tenant.Team()); err != nil {
 			return err
 		}
 		presence, err := tenant.ReadableBlobs(ctx, blob.HasManyRequest{Authority: authority, Digests: digests})
@@ -97,68 +71,64 @@ func checkStoreReferenceBoundary(t *testing.T) (err error) {
 	return nil
 }
 
-// safety: persisted graph fixtures isolate edge decisions from plan intake and verified manifest bytes.
-func seedStoreReferenceBoundary(ctx context.Context, db *sql.DB) (blob.Authority, []blob.Digest, error) {
-	request, err := teststore.SeedPresence(ctx, db)
-	if err != nil {
-		return blob.Authority{}, nil, err
-	}
-	reader := runspec.AttemptIdentity{Team: string(store.DefaultTeam), RunID: "upload", NodeID: "b", Attempt: 1, Generation: 7}
-	authority := request.Intent.Authority
-	authority.Attempt = runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: reader}
-	source := request.Intent.Identity
-	reader.NodeID = "a"
-	source.Attempt = runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: reader}
-	body, err := json.Marshal(source)
-	if err != nil {
-		return authority, nil, err
-	}
+func seedStoreReferenceBoundary(t *testing.T) (*Store, *Tenant, blob.Authority, []blob.Digest) {
+	t.Helper()
+	s, records, intent := blobRecordFixture(t)
+	reader := addBlobJob(t, s, intent, "b")
+	unrelated := addBlobJob(t, s, intent, "unrelated")
 	var digests []blob.Digest
 	for _, letter := range []string{"a", "b", "c", "d"} {
-		digest := blob.Digest(strings.Repeat(letter, 64))
-		digests = append(digests, digest)
-		if _, err := db.ExecContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,3,1)", store.DefaultTeam, digest); err != nil {
-			return authority, nil, err
+		object := intent
+		if letter == "d" {
+			object = unrelated
 		}
-	}
-	statements := []struct {
-		query string
-		args  []any
-	}{
-		{`UPDATE nodes SET status='done',outcome='success',finished_at=1,spec_json=? WHERE team=? AND run_id='upload' AND node_id='a'`, []any{[]byte(`{"id":"a","groups":["generated"]}`), store.DefaultTeam}},
-		{`UPDATE node_attempts SET finished_at=1,outcome='success' WHERE team=? AND run_id='upload' AND node_id='a'`, []any{store.DefaultTeam}},
-		{`UPDATE nodes SET spec_json=? WHERE team=? AND run_id='upload' AND node_id='unrelated'`, []any{[]byte(`{"id":"unrelated","deps":["a"]}`), store.DefaultTeam}},
-		{`INSERT INTO blob_records(team,kind,scope,name,digest,manifest_digest,run_id,node_id,attempt,generation,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,source_node_id,source_attempt,source_generation,verified_ref,verified_default_branch,ref_facts_json,pipeline,created_at) VALUES (?,'output','fixture','result',?,?,'upload','a',1,7,'gh:1','manual:','publisher','local',?,'publication','upload','a',1,7,0,0,?,'fixture',1)`, []any{store.DefaultTeam, digests[0], digests[1], body, []byte(`{}`)}},
-		{`INSERT INTO blob_members(team,manifest_digest,member_digest) VALUES (?,?,?)`, []any{store.DefaultTeam, digests[1], digests[2]}},
-		{`INSERT INTO teams(name,created_at,updated_at) VALUES ('foreign',1,1)`, nil},
-		{`INSERT INTO blobs(team,digest,size,created_at) VALUES ('foreign',?,3,1)`, []any{strings.Repeat("e", 64)}},
-	}
-	for _, statement := range statements {
-		if _, err := db.ExecContext(ctx, statement.query, statement.args...); err != nil {
-			return authority, nil, err
+		object.Digest = blob.Digest(strings.Repeat(letter, 64))
+		if _, err := commitTestBlob(t, records.tenant, object); err != nil {
+			t.Fatal(err)
 		}
+		digests = append(digests, object.Digest)
 	}
-	key := blob.ResultRecordKey(source.Attempt.Value, "gh:1", blob.RefScope{}, "fixture", blob.KindOutput)
-	namespace, err := blob.RecordNamespace(key)
-	if err != nil {
-		return authority, nil, err
+	members := []blob.Member{{Team: "a", ManifestDigest: digests[1], Digest: digests[2], Path: "artifact", Size: 3, Mode: 0o644}}
+	records.manifests = fakeBlobManifests{digests[1]: members}
+	output := blobOutputRequest(intent)
+	output.ManifestDigest = runspec.Optional[blob.Digest]{Set: true, Value: digests[1]}
+	output.Members = members
+	if _, err := records.CommitRecord(t.Context(), output); err != nil {
+		t.Fatal(err)
 	}
-	selector, err := json.Marshal(key)
-	if err != nil {
-		return authority, nil, err
+	source := intent.Identity.Attempt.Value
+	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, Holder: "machine", Generation: source.Generation}
+	s.SetResultBlobRecords(records.manifests)
+	if _, err := records.tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{source.RunID, source.NodeID}, Actor: actor, Cause: CauseReport, To: NodeSuccess, SourceAttempt: sourceAttempt(source.Attempt), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &output.Key}}}); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, "UPDATE blob_records SET scope=? WHERE team=? AND scope='fixture'", namespace, store.DefaultTeam); err != nil {
-		return authority, nil, err
+	rewriteSchemaExec(t, s.db, "UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='job'", []byte(`{"id":"job","groups":["generated"]}`))
+	rewriteSchemaExec(t, s.db, "UPDATE nodes SET spec_json=? WHERE team='a' AND run_id='run' AND node_id='unrelated'", []byte(`{"id":"unrelated","deps":["job"]}`))
+	foreign, object := storeBoundaryForeignUploader(t, s)
+	if _, err := commitTestBlob(t, foreign, object); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, "UPDATE nodes SET output_record=? WHERE team=? AND run_id='upload' AND node_id='a'", selector, store.DefaultTeam); err != nil {
-		return authority, nil, err
-	}
-	digests = append(digests, blob.Digest(strings.Repeat("e", 64)), blob.Digest(strings.Repeat("f", 64)))
-	return authority, digests, nil
+	digests = append(digests, object.Digest, blob.Digest(strings.Repeat("f", 64)))
+	return s, records.tenant, reader.Authority, digests
 }
 
 func TestStoreReferenceEdges(t *testing.T) {
 	if err := checkStoreReferenceBoundary(t); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func storeBoundaryForeignUploader(t *testing.T, s *Store) (*Tenant, blob.UploadIntent) {
+	t.Helper()
+	maintenanceRun(t, s, "foreign", 2, RunRunning)
+	rewriteSchemaExec(t, s.db, "UPDATE runs SET team='b',intake_mode='publish',created_principal='publisher' WHERE id='foreign'")
+	publisher := authorityRoot("foreign-publisher", "b")
+	publisher.Subject.ID = "publisher"
+	publisher.Grants = []capability.Grant{capability.DataRead, capability.DataWrite}
+	publisher.Binding = capability.Binding{Kind: capability.BindingRun, RunID: "foreign"}
+	publisher.Data = &capability.DataScope{Use: capability.DataPublish, RepositoryKey: "gh:1", RunID: "foreign", WriteRef: "manual:", ReadRefs: []string{"manual:"}}
+	authorityPersist(t, s, publisher)
+	foreign := &Tenant{s: s, team: "b"}
+	object := blob.UploadIntent{Authority: blob.Authority{CapabilityRef: publisher.Prefix}, Identity: blob.UploadIdentity{Kind: blob.UploadPublication, Team: "b", RunID: "foreign", Principal: "publisher", CapabilityRef: publisher.Prefix}, Digest: blob.Digest(strings.Repeat("e", 64)), Size: 3}
+	return foreign, object
 }

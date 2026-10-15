@@ -1,176 +1,107 @@
-package store_test
+package store
 
 import (
-	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
-func checkStorePresenceBoundary(t *testing.T) (err error) {
-	ctx := t.Context()
-	target := storetest.NewSQLite(t)
-	s, err := target.TryOpen()
+func TestStorePresenceReadSet(t *testing.T) {
+	s, tenant, actor, attempt := resultFixture(t)
+	first := blobIntent(actor, attempt)
+	second := addBlobJob(t, s, first, "b")
+	unrelated := addBlobJob(t, s, first, "unrelated")
+	unrelated.Digest, unrelated.Size = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", 9
+	if _, err := commitTestBlob(t, tenant, unrelated); err != nil {
+		t.Fatal(err)
+	}
+	foreign, object := storeBoundaryForeignUploader(t, s)
+	if _, err := commitTestBlob(t, foreign, object); err != nil {
+		t.Fatal(err)
+	}
+	receiptA, err := commitTestBlob(t, tenant, first)
 	if err != nil {
-		return err
+		t.Fatal(err)
 	}
-	defer func() { err = errors.Join(err, s.Close()) }()
-	request, err := teststore.SeedPresence(ctx, s.DB())
+	query := []blob.Digest{first.Digest, unrelated.Digest, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", object.Digest, first.Digest}
+	checkStorePresenceAccess(t, s, tenant, first.Authority, query, []blob.Digest{first.Digest})
+	checkStorePresenceAccess(t, s, tenant, second.Authority, query, nil)
+	ticket, err := tenant.ReserveBlobUpload(t.Context(), UploadReservationRequest{ID: "independent", Intent: second, ExpiresAt: s.now().Add(time.Hour)})
 	if err != nil {
-		return err
+		t.Fatal(err)
 	}
-	tenant, err := s.ForTeam(ctx, store.DefaultTeam)
-	if err != nil {
-		return err
-	}
-	bindJob := func(job string) {
-		attempt := runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: string(store.DefaultTeam), RunID: "upload", NodeID: job, Attempt: 1, Generation: 7}}
-		request.Intent.Authority.Attempt = attempt
-		request.Intent.Identity.Attempt = attempt
-	}
-	bindJob("a")
-	first, err := tenant.ReserveBlobUpload(ctx, request)
-	if err != nil {
-		return err
-	}
-	commit := store.VerifiedUploadCommit{TicketID: first.ID, Authority: request.Intent.Authority, Verified: first.Blob, ReplicaID: "a"}
-	receiptA, err := tenant.CommitBlobUpload(ctx, commit)
-	if err != nil || receiptA.Identity != request.Intent.Identity {
-		return fmt.Errorf("first uploader receipt=%+v: %v", receiptA, err)
-	}
-	foreign := blob.Digest(strings.Repeat("c", 64))
-	if _, err := s.DB().ExecContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,9,1)", store.DefaultTeam, foreign); err != nil {
-		return err
-	}
-	if _, err := s.DB().ExecContext(ctx, "INSERT INTO teams(name,created_at,updated_at) VALUES ('foreign',1,1)"); err != nil {
-		return err
-	}
-	foreignTeam := blob.Digest(strings.Repeat("d", 64))
-	if _, err := s.DB().ExecContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES ('foreign',?,9,1)", foreignTeam); err != nil {
-		return err
-	}
-	query := blob.HasManyRequest{Digests: []blob.Digest{first.Blob.Digest, foreign, blob.Digest(strings.Repeat("b", 64)), foreignTeam, first.Blob.Digest}}
-	check := func(want []blob.Digest) error {
-		query.Authority = request.Intent.Authority
-		presence, err := tenant.ReadableBlobs(ctx, query)
-		if err != nil || !slices.Equal(presence.Present, want) {
-			return fmt.Errorf("presence for %s=%+v, want %v: %v", request.Intent.Identity.Attempt.Value.NodeID, presence, want, err)
-		}
-		return checkStorePresenceAccess(ctx, s, tenant, request.Intent.Authority, query.Digests, want)
-	}
-	if err := check([]blob.Digest{first.Blob.Digest}); err != nil {
-		return err
-	}
-	bindJob("b")
-	if err := check(nil); err != nil {
-		return err
-	}
-	request.ID = "independent"
-	second, err := tenant.ReserveBlobUpload(ctx, request)
-	if err != nil {
-		return err
-	}
-	if err := check(nil); err != nil {
-		return fmt.Errorf("reservation granted a receipt: %w", err)
-	}
-	commit.TicketID, commit.Authority, commit.Verified, commit.ReplicaID = second.ID, request.Intent.Authority, second.Blob, "b"
+	checkStorePresenceAccess(t, s, tenant, second.Authority, query, nil)
+	commit := verifiedUpload(ticket, second.Authority)
 	bad := commit
 	bad.Verified.Size++
-	if _, err := tenant.CommitBlobUpload(ctx, bad); err == nil {
-		return errors.New("substituted verification evidence minted a receipt")
+	if _, err := tenant.CommitBlobUpload(t.Context(), bad); err == nil {
+		t.Fatal("substituted verification minted a receipt")
 	}
-	if err := check(nil); err != nil {
-		return err
-	}
+	checkStorePresenceAccess(t, s, tenant, second.Authority, query, nil)
 	for range 2 {
-		receiptB, err := tenant.CommitBlobUpload(ctx, commit)
-		if err != nil || receiptB.Identity != request.Intent.Identity || receiptB.Identity == receiptA.Identity {
-			return fmt.Errorf("independent uploader receipt=%+v: %v", receiptB, err)
+		got, err := tenant.CommitBlobUpload(t.Context(), commit)
+		if err != nil || got.Identity != second.Identity || got.Identity == receiptA.Identity {
+			t.Fatalf("independent receipt: %+v: %v", got, err)
 		}
 	}
-	if err := s.Close(); err != nil {
-		return err
+	blobAccountingDiskStore(t, s)
+	checkStorePresenceAccess(t, s, tenant, second.Authority, query, []blob.Digest{first.Digest})
+	checkStorePresenceAccess(t, s, tenant, unrelated.Authority, query, []blob.Digest{unrelated.Digest})
+	if _, err := tenant.ReadableBlobs(t.Context(), blob.HasManyRequest{Authority: first.Authority, Digests: query, Budget: blob.Budget{Deadline: s.now()}}); !errors.Is(err, blob.ErrBudget) {
+		t.Fatalf("expired budget: %v", err)
 	}
-	reopened, err := target.TryOpen()
-	if err != nil {
-		return err
+	usage, err := tenant.StorageUsageFor(t.Context(), "run", StorageMonth(s.now()))
+	if err != nil || usage.RunBytes != 12 || usage.MonthBytes != 12 || usage.RunObjects != 2 || usage.MonthObjects != 2 {
+		t.Fatalf("deduplicated usage: %+v: %v", usage, err)
 	}
-	s = reopened
-	tenant, err = s.ForTeam(ctx, store.DefaultTeam)
-	if err != nil {
-		return err
+	for _, table := range []string{"team_download_day", "egress_usage"} {
+		rewriteSchemaCount(t, s.db, table, 0)
 	}
-	if err := check([]blob.Digest{first.Blob.Digest}); err != nil {
-		return err
-	}
-	bindJob("unrelated")
-	if err := check(nil); err != nil {
-		return err
-	}
-	query.Authority, query.Budget.Deadline = request.Intent.Authority, time.Unix(1, 0)
-	if _, err := tenant.ReadableBlobs(ctx, query); !errors.Is(err, blob.ErrBudget) {
-		return fmt.Errorf("expired presence budget=%v", err)
-	}
-	return checkStorePresenceUsage(ctx, tenant, s.DB())
 }
 
-func checkStorePresenceAccess(ctx context.Context, s *store.Store, tenant *store.Tenant, authority blob.Authority, digests, present []blob.Digest) error {
+func checkStorePresenceAccess(t *testing.T, s *Store, tenant *Tenant, authority blob.Authority, digests, present []blob.Digest) {
+	t.Helper()
+	result, err := tenant.ReadableBlobs(t.Context(), blob.HasManyRequest{Authority: authority, Digests: digests})
+	if err != nil || !slices.Equal(result.Present, present) {
+		t.Fatalf("presence: %+v, want %v: %v", result, present, err)
+	}
 	a := authority.Attempt.Value
-	authorized := capability.Authorized{Principal: capability.Principal{Capability: capability.Capability{Prefix: authority.CapabilityRef, Team: a.Team}}}
-	authorized.Principal.Authority = capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: authority.CapabilityRef}
+	principal := capability.Principal{Capability: capability.Capability{Prefix: authority.CapabilityRef, Team: a.Team}, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: authority.CapabilityRef}}
 	for _, operation := range []capability.DataOperation{capability.DataDownload, capability.DataHasMany, capability.DataLookup} {
 		for _, digest := range digests {
 			target := capability.DataTarget{Operation: operation, Digest: string(digest), RunID: a.RunID, NodeID: a.NodeID, Attempt: a.Attempt, Generation: a.Generation}
-			err := tenant.CheckDataAccess(ctx, authorized, target)
-			if slices.Contains(present, digest) {
-				if err != nil {
-					return fmt.Errorf("readable receipt refused by %s: %w", operation, err)
-				}
-			} else if !errors.Is(err, blob.ErrDigestNotReadable) {
-				return fmt.Errorf("%s exposed unreadable digest: %v", operation, err)
+			if err := checkStorePresenceVerdict(tenant.CheckDataAccess(t.Context(), capability.Authorized{Principal: principal}, target), slices.Contains(present, digest)); err != nil {
+				t.Fatal(err)
 			}
 			for _, rule := range []capability.BindingRule{capability.BindData, capability.BindReadSet} {
 				selected := capability.Target{Team: a.Team, RunID: a.RunID, NodeID: a.NodeID, Data: &target}
-				err := s.CheckBinding(ctx, authorized.Principal, rule, selected)
-				if slices.Contains(present, digest) && err != nil || !slices.Contains(present, digest) && !errors.Is(err, blob.ErrDigestNotReadable) {
-					return fmt.Errorf("%s/%s binding exposed the wrong read set: %v", operation, rule, err)
+				if err := checkStorePresenceVerdict(s.CheckBinding(t.Context(), principal, rule, selected), slices.Contains(present, digest)); err != nil {
+					t.Fatal(err)
 				}
 			}
 		}
 	}
-	return nil
 }
 
-func checkStorePresenceUsage(ctx context.Context, tenant *store.Tenant, db *sql.DB) error {
-	usage, err := tenant.StorageUsageFor(ctx, "upload", store.StorageMonth(time.Now()))
-	if err != nil || usage.RunBytes != 3 || usage.MonthBytes != 3 || usage.RunObjects != 1 || usage.MonthObjects != 1 {
-		return fmt.Errorf("presence/upload usage=%+v: %v", usage, err)
-	}
-	for _, table := range []string{"team_download_day", "egress_usage"} {
-		var count int
-		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE team=?", store.DefaultTeam).Scan(&count); err != nil {
-			return err
-		}
-		if count != 0 {
-			return fmt.Errorf("presence metadata consumed %s budget", table)
-		}
+func checkStorePresenceVerdict(err error, readable bool) error {
+	if readable && err != nil || !readable && !errors.Is(err, blob.ErrDigestNotReadable) {
+		return fmt.Errorf("readable=%v: %v", readable, err)
 	}
 	return nil
 }
 
-func TestStorePresenceReadSet(t *testing.T) {
-	if err := checkStorePresenceBoundary(t); err != nil {
+func storeBoundaryUpload(t *testing.T, tenant *Tenant, intent blob.UploadIntent, id string) {
+	t.Helper()
+	ticket, err := tenant.ReserveBlobUpload(t.Context(), UploadReservationRequest{ID: id, Intent: intent, ExpiresAt: tenant.s.now().Add(time.Hour)})
+	if err != nil {
 		t.Fatal(err)
+	}
+	if got, err := tenant.CommitBlobUpload(t.Context(), verifiedUpload(ticket, intent.Authority)); err != nil || got.Identity != intent.Identity {
+		t.Fatalf("receipt: %+v: %v", got, err)
 	}
 }

@@ -1,4 +1,4 @@
-package store_test
+package store
 
 import (
 	"context"
@@ -7,57 +7,43 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func checkStoreCASBoundary(t *testing.T) (err error) {
 	ctx := t.Context()
-	target := storetest.NewSQLite(t)
-	s, err := target.TryOpen()
-	if err != nil {
-		return err
-	}
-	defer func() { err = errors.Join(err, s.Close()) }()
-	request, err := teststore.SeedPresence(ctx, s.DB())
-	if err != nil {
-		return err
-	}
-	tenant, err := s.ForTeam(ctx, store.DefaultTeam)
-	if err != nil {
-		return err
-	}
+	s, tenant, actor, attempt := resultFixture(t)
+	now := s.now()
+	s.clock = func() time.Time { return now }
+	first := blobIntent(actor, attempt)
+	identities := map[string]blob.UploadIntent{"a": first, "b": addBlobJob(t, s, first, "b"), "unrelated": addBlobJob(t, s, first, "unrelated")}
+	path := blobAccountingDiskStore(t, s)
 	reopen := func() error {
-		if err := s.Close(); err != nil {
+		if err := s.db.Close(); err != nil {
 			return err
 		}
-		next, err := target.TryOpen()
-		if err != nil {
-			return err
-		}
-		s = next
-		tenant, err = s.ForTeam(ctx, store.DefaultTeam)
-		return err
+		s.db = blobAccountingDB(t, path)
+		return nil
 	}
-	if err := tenant.SetStorageQuota(ctx, store.StorageQuota{MaxBytesPerMonth: 3, MaxBytesPerRun: 3, MaxObjectsPerRun: 1}); err != nil {
+	request := UploadReservationRequest{ID: "interrupted", Intent: first, ExpiresAt: now.Add(time.Hour)}
+	if err := tenant.SetStorageQuota(ctx, StorageQuota{MaxBytesPerMonth: 3, MaxBytesPerRun: 3, MaxObjectsPerRun: 1}); err != nil {
 		return err
 	}
 	sum := sha256.Sum256([]byte("abc"))
 	request.Intent.Digest = blob.Digest(hex.EncodeToString(sum[:]))
+	digest := request.Intent.Digest
 	bind := func(job string) {
-		selected := runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: string(store.DefaultTeam), RunID: "upload", NodeID: job, Attempt: 1, Generation: 7}}
-		request.Intent.Authority.Attempt, request.Intent.Identity.Attempt = selected, selected
+		request.Intent = identities[job]
+		request.Intent.Digest = digest
 	}
 	bind("a")
 	interrupted, err := tenant.ReserveBlobUpload(ctx, request)
 	if err != nil {
 		return err
 	}
-	commit := store.VerifiedUploadCommit{TicketID: interrupted.ID, Authority: request.Intent.Authority, Verified: interrupted.Blob, ReplicaID: "first"}
+	commit := VerifiedUploadCommit{TicketID: interrupted.ID, Authority: request.Intent.Authority, Verified: interrupted.Blob, ReplicaID: "first"}
 	for _, changed := range []string{"digest", "short", "long", "team", "ticket"} {
 		bad := commit
 		switch changed {
@@ -79,20 +65,15 @@ func checkStoreCASBoundary(t *testing.T) (err error) {
 			return err
 		}
 	}
-	if _, err := s.DB().ExecContext(ctx, "UPDATE uploads SET expires_at=1 WHERE team=?", store.DefaultTeam); err != nil {
-		return err
-	}
-	if _, err := s.DB().ExecContext(ctx, "UPDATE quota_reservations SET expires_at=1 WHERE team=?", store.DefaultTeam); err != nil {
-		return err
-	}
+	now = request.ExpiresAt
 	if err := reopen(); err != nil {
 		return err
 	}
-	if _, err := tenant.CommitBlobUpload(ctx, commit); !errors.Is(err, store.ErrLockHeld) {
+	if _, err := tenant.CommitBlobUpload(ctx, commit); !errors.Is(err, ErrLockHeld) {
 		return fmt.Errorf("expired ticket committed after reopen: %v", err)
 	}
 	bind("b")
-	request.ID = "replacement"
+	request.ID, request.ExpiresAt = "replacement", now.Add(time.Hour)
 	replacement, err := tenant.ReserveBlobUpload(ctx, request)
 	if err != nil {
 		return fmt.Errorf("expired reservation blocked replacement: %w", err)
@@ -134,13 +115,13 @@ func checkStoreCASBoundary(t *testing.T) (err error) {
 	if err := checkStoreCASRows(ctx, s, 1); err != nil {
 		return err
 	}
-	return checkStorePresenceUsage(ctx, tenant, s.DB())
+	return checkStorePresenceUsage(ctx, tenant)
 }
 
-func checkStoreCASRows(ctx context.Context, s *store.Store, want int) error {
+func checkStoreCASRows(ctx context.Context, s *Store, want int) error {
 	for _, table := range []string{"blobs", "blob_receipts"} {
 		var count int
-		if err := s.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE team=?", store.DefaultTeam).Scan(&count); err != nil {
+		if err := s.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE team=?", "a").Scan(&count); err != nil {
 			return err
 		}
 		if count != want {
@@ -154,4 +135,21 @@ func TestStoreCASIntegrity(t *testing.T) {
 	if err := checkStoreCASBoundary(t); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func checkStorePresenceUsage(ctx context.Context, tenant *Tenant) error {
+	usage, err := tenant.StorageUsageFor(ctx, "run", StorageMonth(tenant.s.now()))
+	if err != nil || usage.RunBytes != 3 || usage.MonthBytes != 3 || usage.RunObjects != 1 || usage.MonthObjects != 1 {
+		return fmt.Errorf("upload usage: %+v: %v", usage, err)
+	}
+	for _, table := range []string{"team_download_day", "egress_usage"} {
+		var count int
+		if err := tenant.s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE team=?", "a").Scan(&count); err != nil {
+			return err
+		}
+		if count != 0 {
+			return fmt.Errorf("presence consumed %s budget", table)
+		}
+	}
+	return nil
 }

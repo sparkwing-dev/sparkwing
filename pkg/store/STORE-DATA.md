@@ -108,12 +108,12 @@ and runless charges affect the balance but stay outside this report. Per-run
 usage survives operational run retention and reopening.
 `Operator.CreditLedgerTotals` reads deployment-wide grants and charges in one
 snapshot. Open metered awards exclude their refundable seconds using C2's
-calculator and immutable intervals. It uses the same configured calculator as
+calculator and immutable intervals. It uses the same calculator as
 unit renewal and settlement. The raw Store method is removed. A report cannot
 advance charged checkpoints,
 close intervals or write settlement. It counts no storage seconds and consults
 no node, trigger or current credential rows. Settled and unmetered awards need
-no calculator call. C2's production calculator is still an integration dependency.
+no calculator call. C2's production calculator is the default.
 Open intervals stop at `charged_through` in reports. Closed intervals use their
 persisted finish time. This keeps a late disruption from refunding time that a
 report counted only because the reaper had not run yet.
@@ -391,3 +391,13 @@ Coalesced source copies remain closed until their contract supplies persisted
 read-edge authority. A source result and matching spec hash cannot grant that
 read. The legacy waiter table cannot supply it because its final schema excludes
 the coalesce policy.
+
+The moved store boundary proofs now build their reference graphs through upload
+and record commits. The retention proof materializes records through reconciliation,
+finishes the destination to create its success pin, and keeps copied provenance
+after source deletion. GC uses a controlled store clock across grace and takeover.
+The ledger retention proof creates all financial-table rows through their mutation
+owners, then verifies them unchanged after run retention and reopening. Provider
+verification for card, warning and refund facts is still a C2 integration point.
+The unused legacy storage-pass lease API is removed; maintenance uses the elected
+Operator pass.

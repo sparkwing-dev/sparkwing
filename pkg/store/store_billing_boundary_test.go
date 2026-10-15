@@ -1,4 +1,4 @@
-package store_test
+package store
 
 import (
 	"context"
@@ -8,230 +8,213 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-func checkStoreBillingRetention(t *testing.T) (err error) {
-	ctx := t.Context()
-	target := storetest.NewSQLite(t)
-	s, err := target.TryOpen()
+func TestStoreBillingRetention(t *testing.T) {
+	s, tenant, now := seedStoreBillingBoundary(t)
+	op := s.AsOperator()
+	rate, free := int64(StorageBytesPerGB), int64(3)
+	if _, err := op.SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate, StorageFreeAllowanceBytes: &free}); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := op.AcquireSingletonLease(t.Context(), "maintenance", "billing-boundary", 200*24*time.Hour)
 	if err != nil {
-		return err
+		t.Fatal(err)
 	}
-	defer func() { err = errors.Join(err, s.Close()) }()
-	db := s.DB()
-	if err := seedStoreBillingBoundary(ctx, db); err != nil {
-		return err
+	if initial, err := op.ChargeRetainedStorage(t.Context(), lease); err != nil || len(initial.Charges) != 0 {
+		t.Fatalf("initial sample: %+v: %v", initial, err)
 	}
-	for _, team := range []store.Team{store.DefaultTeam, "neighbor_%'--"} {
-		tenant, err := s.ForTeam(ctx, team)
-		if err != nil {
-			return err
-		}
-		_, err = tenant.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000000, Reference: "caller-selected", CreatedBy: "billing"})
-		if !errors.Is(err, store.ErrInvalidInput) {
-			return fmt.Errorf("raw paid grant for %s: %v", team, err)
-		}
-	}
-	rate, free := int64(store.StorageBytesPerGB), int64(3)
-	if _, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate, StorageFreeAllowanceBytes: &free}); err != nil {
-		return err
-	}
-	operator := s.AsOperator()
-	lease, err := operator.AcquireSingletonLease(ctx, "maintenance", "billing-boundary", time.Hour)
-	if err != nil {
-		return err
-	}
-	first, err := operator.ChargeRetainedStorage(ctx, lease)
-	if err != nil {
-		return err
-	}
-	if len(first.Charges) != 0 {
-		return fmt.Errorf("initial storage sample billed historical bytes: %+v", first)
-	}
-	if _, err := db.ExecContext(ctx, "UPDATE team_storage SET storage_charged_through=?", time.Now().Add(-24*time.Hour).UnixNano()); err != nil {
-		return err
-	}
-	billed, err := operator.ChargeRetainedStorage(ctx, lease)
-	if err != nil {
-		return err
-	}
-	if len(billed.Charges) != 1 {
-		return fmt.Errorf("storage charges=%d, want one", len(billed.Charges))
+	*now = now.Add(24 * time.Hour)
+	billed, err := op.ChargeRetainedStorage(t.Context(), lease)
+	if err != nil || len(billed.Charges) != 1 {
+		t.Fatalf("storage charge: %+v: %v", billed, err)
 	}
 	charge := billed.Charges[0]
-	if charge.Team != store.DefaultTeam || charge.StorageBytes != store.StorageBytesPerGB || charge.RunID != "" || charge.Seconds < store.StorageChargeDaySeconds || charge.AmountMicro != rate*charge.Seconds/store.StorageChargeDaySeconds {
-		return fmt.Errorf("storage charge disagrees with byte/second oracle: %+v", charge)
+	if charge.Team != tenant.Team() || charge.StorageBytes != StorageBytesPerGB || charge.RunID != "" || charge.Seconds != StorageChargeDaySeconds || charge.AmountMicro != rate {
+		t.Fatalf("storage oracle: %+v", charge)
 	}
-	tenant, err := s.ForTeam(ctx, store.DefaultTeam)
+	before, err := billingFinancialSnapshot(t.Context(), s.db)
 	if err != nil {
-		return err
+		t.Fatal(err)
 	}
-	before, err := billingFinancialSnapshot(ctx, db)
+	state, err := tenant.CreditState(t.Context(), 0)
 	if err != nil {
-		return err
+		t.Fatal(err)
 	}
-	balance, err := tenant.CreditBalanceMicro(ctx)
+	grants, err := tenant.ListCreditGrants(t.Context(), 100)
 	if err != nil {
-		return err
+		t.Fatal(err)
 	}
-	if want := int64(10_000_000_000-30) - billed.ChargedMicro; balance != want {
-		return fmt.Errorf("fixture balance=%d, want %d", balance, want)
-	}
-	state, err := tenant.CreditState(ctx, 0)
+	charges, err := tenant.ListCreditCharges(t.Context(), 100)
 	if err != nil {
-		return err
+		t.Fatal(err)
 	}
-	if state.BalanceMicro != balance || state.GrantedMicro != 10_000_000_000 || state.ReversedMicro != 0 || state.ChargedMicro != 30+billed.ChargedMicro || state.StorageChargedMicro != billed.ChargedMicro {
-		return fmt.Errorf("tenant credit state includes a foreign ledger: %+v", state)
-	}
-	grants, err := tenant.ListCreditGrants(ctx, 100)
+	usage, err := tenant.CreditUsageByRun(t.Context(), 100)
 	if err != nil {
-		return err
+		t.Fatal(err)
 	}
-	if len(grants) != 1 || grants[0].Team != tenant.Team() || grants[0].ID != "fund" || grants[0].AmountMicro != state.GrantedMicro {
-		return fmt.Errorf("tenant grant history includes a foreign grant: %+v", grants)
-	}
-	charges, err := tenant.ListCreditCharges(ctx, 100)
+	totals, err := op.CreditLedgerTotals(t.Context())
 	if err != nil {
-		return err
+		t.Fatal(err)
 	}
-	wantCharges := []store.CreditCharge{charge, {ID: "compute", Team: tenant.Team(), RunID: "old", NodeID: "job", TokenPrefix: "award", Kind: store.CreditChargeUsage, Seconds: 3, AmountMicro: 30, ChargedAt: grants[0].CreatedAt}}
-	if !slices.Equal(charges, wantCharges) {
-		return fmt.Errorf("tenant charge history lost attribution or includes a foreign charge: %+v", charges)
-	}
-	usage, err := tenant.CreditUsageByRun(ctx, 100)
-	if err != nil {
-		return err
-	}
-	if !slices.Equal(usage, []store.RunCreditUsage{{RunID: "old", Seconds: 3, AmountMicro: 30, LastChargedAt: grants[0].CreatedAt}}) {
-		return fmt.Errorf("tenant run usage includes storage or a foreign ledger: %+v", usage)
-	}
-	totals, err := s.AsOperator().CreditLedgerTotals(ctx)
-	if err != nil {
-		return err
-	}
-	wantTotals := store.CreditLedgerTotals{GrantedPaidMicro: 17_000_000_000, ChargedMicro: 121, StorageMicro: billed.ChargedMicro, SettledSeconds: 6, BalanceMicro: 17_000_000_000 - 121 - billed.ChargedMicro}
-	if totals != wantTotals {
-		return fmt.Errorf("deployment totals include reserved or storage seconds: %+v, want %+v", totals, wantTotals)
-	}
-	result, err := operator.MaintainRetention(ctx, store.RetentionRequest{Lease: lease, Limit: 100})
-	if err != nil {
-		return err
-	}
-	if result.Runs != 1 {
-		return fmt.Errorf("retention removed %d runs, want one", result.Runs)
+	*now = now.Add(120 * 24 * time.Hour)
+	rewriteSchemaExec(t, s.db, "INSERT INTO settings(key,value) VALUES ('operator.run_retention_days',?)", []byte(`90`))
+	result, err := op.MaintainRetention(t.Context(), RetentionRequest{Lease: lease, Limit: 100})
+	if err != nil || result.Runs != 1 {
+		t.Fatalf("retention: %+v: %v", result, err)
 	}
 	for _, table := range []string{"runs", "log_streams", "log_segments"} {
-		var count int
-		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil {
-			return err
-		}
-		if count != 0 {
-			return fmt.Errorf("operational %s survived retention", table)
-		}
+		rewriteSchemaCount(t, s.db, table, 0)
 	}
-	if err := s.Close(); err != nil {
-		return err
-	}
-	reopened, err := target.TryOpen()
+	blobAccountingDiskStore(t, s)
+	after, err := billingFinancialSnapshot(t.Context(), s.db)
 	if err != nil {
-		return err
-	}
-	s = reopened
-	after, err := billingFinancialSnapshot(ctx, s.DB())
-	if err != nil {
-		return err
+		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(before, after) {
-		return errors.New("financial evidence changed during run retention or restart")
+		t.Fatal("retention or reopening changed financial evidence")
 	}
-	tenant, err = s.ForTeam(ctx, store.DefaultTeam)
+	afterState, err := tenant.CreditState(t.Context(), 0)
 	if err != nil {
-		return err
+		t.Fatal(err)
 	}
-	got, err := tenant.CreditBalanceMicro(ctx)
+	afterGrants, err := tenant.ListCreditGrants(t.Context(), 100)
 	if err != nil {
-		return err
+		t.Fatal(err)
 	}
-	if got != balance {
-		return fmt.Errorf("retention balance=%d, want %d", got, balance)
-	}
-	afterState, err := tenant.CreditState(ctx, 0)
+	afterCharges, err := tenant.ListCreditCharges(t.Context(), 100)
 	if err != nil {
-		return err
+		t.Fatal(err)
 	}
-	afterGrants, err := tenant.ListCreditGrants(ctx, 100)
+	afterUsage, err := tenant.CreditUsageByRun(t.Context(), 100)
 	if err != nil {
-		return err
+		t.Fatal(err)
 	}
-	afterCharges, err := tenant.ListCreditCharges(ctx, 100)
+	afterTotals, err := op.CreditLedgerTotals(t.Context())
 	if err != nil {
-		return err
+		t.Fatal(err)
 	}
-	afterUsage, err := tenant.CreditUsageByRun(ctx, 100)
-	if err != nil {
-		return err
+	if !reflect.DeepEqual(state, afterState) || !reflect.DeepEqual(grants, afterGrants) || !reflect.DeepEqual(charges, afterCharges) || !slices.Equal(usage, afterUsage) || totals != afterTotals {
+		t.Fatal("retention or reopening changed billing reports")
 	}
-	if !reflect.DeepEqual(state, afterState) || !reflect.DeepEqual(grants, afterGrants) || !reflect.DeepEqual(charges, afterCharges) || !slices.Equal(usage, afterUsage) {
-		return errors.New("tenant credit state or history changed during run retention or restart")
-	}
-	afterTotals, err := s.AsOperator().CreditLedgerTotals(ctx)
-	if err != nil {
-		return err
-	}
-	if afterTotals != totals {
-		return fmt.Errorf("deployment totals changed during run retention or restart: %+v, want %+v", afterTotals, totals)
-	}
-	return nil
 }
 
-func seedStoreBillingBoundary(ctx context.Context, db *sql.DB) error {
-	team := string(store.DefaultTeam)
-	old := time.Now().Add(-120 * 24 * time.Hour).UnixNano()
-	fixtures := []struct {
-		query string
-		args  []any
-	}{
-		{`INSERT INTO teams(name,created_at,updated_at) VALUES ('neighbor_%''--',1,1)`, nil},
-		{`INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES ('neighbor-fund','neighbor_%''--','paid',7000000000,?)`, []any{old}},
-		{`INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,kind,seconds,amount_micro,charged_at) VALUES ('neighbor-compute','neighbor_%''--','other','job','other-award','usage',3,91,?)`, []any{old}},
-		{`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES (?,'old',1,'fixture','failed',?,'fixture',1,'gh:1','host','execute',?,'fixture',?,?,'r30',30)`, []any{team, []byte(`{}`), []byte(`[]`), old, old}},
-		{`INSERT INTO log_streams(team,run_id,id,subject_kind,generation,unit_kind,prefix,retention_class,stored_bytes,created_at,updated_at) VALUES (?,'old','stream','owner_unit',1,'plan','fixture','r30',3,?,?)`, []any{team, old, old}},
-		{`INSERT INTO log_segments(team,run_id,stream_id,generation,n,stored_bytes,object_key,sha256,start_offset,end_offset) VALUES (?,'old','stream',1,0,3,'fixture','fixture',0,3)`, []any{team}},
-		{`INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?)`, []any{team, strings.Repeat("a", 64), int64(store.StorageBytesPerGB), old}},
-		{`INSERT INTO settings(key,value) VALUES ('operator.run_retention_days',?)`, []any{[]byte(`90`)}},
-		{`INSERT INTO credit_grants(id,team,kind,amount_micro,reference,created_at) VALUES ('fund',?,'paid',10000000000,'payment',?)`, []any{team, old}},
-		{`INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,kind,seconds,amount_micro,charged_at) VALUES ('compute',?,'old','job','award','usage',3,30,?)`, []any{team, old}},
-		{`INSERT INTO credit_checkouts(id,team,session_id,payment_mode,payment_id,currency,amount_minor,amount_micro,opened_at,expires_at,paid_at,grant_id) VALUES ('checkout',?,'session','test','payment','usd',100000,10000000000,?,?,?,'fund')`, []any{team, old, old, old}},
-		{`INSERT INTO payment_events(team,payment_mode,event_id,checkout_id,payment_id,event_kind,event_digest,grant_id,processed_at) VALUES (?,'test','event','checkout','payment','checkout_paid','fixture','fund',?)`, []any{team, old}},
-		{`INSERT INTO credit_freezes(dispute_id,team,payment_id,created_at,released_at) VALUES ('freeze',?,'payment',?,?)`, []any{team, old, old}},
-		{`INSERT INTO card_charges(id,team,amount_micro,cause,state,next_attempt_at,opened_at,closed_at) VALUES ('card',?,10,'settle','paid',?,?,?)`, []any{team, old, old, old}},
-		{`INSERT INTO card_attempts(id,team,charge_id,kind,status,payment_intent,created_at,updated_at) VALUES ('attempt',?,'card','off_session','succeeded','payment',?,?)`, []any{team, old, old}},
-		{`INSERT INTO card_refunds(team,payment_intent,reason,status,created_at) VALUES (?,'payment','fixture','succeeded',?)`, []any{team, old}},
-		{`INSERT INTO payment_warnings(warning_id,payment_intent,created_at) VALUES ('warning','payment',?)`, []any{old}},
-		{`INSERT INTO team_spend_days(team,day,amount_micro) VALUES (?,1,30)`, []any{team}},
-		{`INSERT INTO card_spend_days(fingerprint,day,amount_micro) VALUES ('card',1,30)`, nil},
-		{`INSERT INTO storage_run_usage(team,period,replica_id,run_id,bytes,updated_at) VALUES (?,'old','replica','old',3,?)`, []any{team, old}},
-		{`INSERT INTO storage_month_usage(team,period,replica_id,bytes,updated_at) VALUES (?,'old','replica',3,?)`, []any{team, old}},
-		{`INSERT INTO billing_awards(team,reservation_id,capability_prefix,run_id,node_id,generation,payer_team,metered,executor_class,billing_start,unit_kind,billing_unit,awarded_at,reserved_amount_micro,settled_at) VALUES (?,'reservation','award','old','job',1,?,1,'cloud','at_start','node','job',?,30,?)`, []any{team, team, old, old}},
-		{`INSERT INTO billable_intervals(team,id,run_id,node_id,attempt,generation,capability_prefix,reservation_id,payer_team,metered,executor_class,unit_kind,billing_unit,billing_start,started_at,finished_at,charged_through) VALUES (?,'interval','old','job',1,1,'award','reservation',?,1,'cloud','node','job','at_start',?,?,?)`, []any{team, team, old, old, old}},
+func seedStoreBillingBoundary(t *testing.T) (*Store, *Tenant, *time.Time) {
+	t.Helper()
+	s, demand, now := meteredUnitFixture(t, false)
+	s.billing = nil
+	tenant := &Tenant{s: s, team: "a"}
+	op := s.AsOperator()
+	rewriteSchemaExec(t, s.db, "DELETE FROM credit_grants")
+	rewriteSchemaExec(t, s.db, "INSERT INTO settings(key,value) VALUES ('payment_mode',?)", []byte(`"test"`))
+	if err := op.CreateTeam(t.Context(), "neighbor_%'--"); err != nil {
+		t.Fatal(err)
 	}
-	for _, fixture := range fixtures {
-		if _, err := db.ExecContext(ctx, fixture.query, fixture.args...); err != nil {
-			return fmt.Errorf("billing fixture: %w", err)
+	for _, team := range []Team{"a", "neighbor_%'--"} {
+		payer := &Tenant{s: s, team: team}
+		if _, _, err := payer.SetBillingTrust(t.Context(), BillingTrustChange{Trust: BillingTrustGranted, Actor: "console", Reason: "fixture"}, *now); err != nil {
+			t.Fatal(err)
+		}
+		checkout, err := payer.OpenCreditCheckout(t.Context(), 10000*MicroCreditsPerCent, *now, time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		session := "session-" + string(team)
+		if err := payer.AttachCreditCheckout(t.Context(), checkout, session, now.Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.settlePaymentFacts(t.Context(), capability.PaymentEvent{Mode: capability.PaymentTest, EventID: "paid-" + string(team), CheckoutID: session, PaymentID: "payment-" + string(team), Kind: capability.PaymentCheckoutPaid, Currency: "usd", AmountMinor: 10000}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := payer.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantPaid, AmountMicro: 1000000, Reference: "caller-selected", CreatedBy: "billing"}); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("raw paid grant: %v", err)
 		}
 	}
-	return nil
+	if err := tenant.TestOnlySaveCard(t.Context(), Card{Customer: "customer", PaymentMethod: "method", Fingerprint: "card"}, "provider", *now); err != nil {
+		t.Fatal(err)
+	}
+	table := CreditRateTable{{Cores: 1, MicroPerSecond: 1000000}, {Cores: 4, MicroPerSecond: 1000000}}
+	if _, err := op.SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table}); err != nil {
+		t.Fatal(err)
+	}
+	claim, actor := meteredUnitClaim(t, s, demand)
+	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{claim.RunID, claim.NodeID}, Actor: actor, Cause: CauseStart, To: NodeRunning, SourceAttempt: sourceAttempt(0)}); err != nil {
+		t.Fatal(err)
+	}
+	attempt := runspec.AttemptIdentity{Team: "a", RunID: claim.RunID, NodeID: claim.NodeID, Attempt: 1, Generation: claim.Award.Generation}
+	if err := tenant.RecordSegments(t.Context(), logCommit(actor, attempt)); err != nil {
+		t.Fatal(err)
+	}
+	intent := blobIntent(actor, attempt)
+	intent.Authority.Principal, intent.Identity.Principal = blob.Principal(actor.Holder), blob.Principal(actor.Holder)
+	intent.Size = StorageBytesPerGB
+	if _, err := commitTestBlob(t, tenant, intent); err != nil {
+		t.Fatal(err)
+	}
+	*now = now.Add(3 * time.Second)
+	if _, err := tenant.TransitionNode(t.Context(), NodeTransition{Ref: NodeRef{claim.RunID, claim.NodeID}, Actor: actor, Cause: CauseReport, To: NodeFailed, SourceAttempt: sourceAttempt(1)}); err != nil {
+		t.Fatal(err)
+	}
+	demand.Target = &UnitRef{Kind: capability.UnitTrigger, RunID: claim.RunID}
+	ownerClaim, owner := meteredUnitClaim(t, s, demand)
+	if _, err := tenant.FinishRunAndUnit(t.Context(), FinishRunRequest{Transition: RunTransition{RunID: claim.RunID, To: RunFailed, Actor: owner, Cause: RunFinish}, Unit: owner.Owner}); err != nil {
+		t.Fatalf("finish %s: %v", ownerClaim.RunID, err)
+	}
+	if _, err := op.TestOnlyReversePayment(t.Context(), "payment-a", "refund", "provider", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := op.DueCardCharges(t.Context(), *now); err != nil {
+		t.Fatal(err)
+	}
+	*now = time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, time.UTC)
+	workItems, _, err := op.DueCardCharges(t.Context(), *now)
+	if err != nil || len(workItems) != 1 {
+		t.Fatalf("collection work: %+v: %v", workItems, err)
+	}
+	work := workItems[0]
+	payment := CardPayment{Team: "a", ChargeID: work.ChargeID, AttemptID: work.AttemptID, PaymentIntent: "recovery", AmountCents: work.AmountCents}
+	if _, _, err := op.SettleCardPayment(t.Context(), payment, *now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.inTx(t.Context(), func(tx *storeTx) error {
+		return queueCardRefundTx(t.Context(), tx, tenant.team, payment, "fixture", *now)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := op.TestOnlyRecordPaymentWarning(t.Context(), PaymentWarning{WarningID: "warning", PaymentIntent: payment.PaymentIntent}, *now); err != nil {
+		t.Fatal(err)
+	}
+	hold, err := tenant.HoldByOperator(t.Context(), "console", "fixture", *now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.ReleaseCreditFreezes(t.Context(), hold, "console", "resolved", *now); err != nil {
+		t.Fatal(err)
+	}
+	completion, err := op.AcquireSingletonLease(t.Context(), "completion", "billing-boundary", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effects, err := op.DueRunEffects(t.Context(), completion, 100)
+	if err != nil || len(effects) != 4 {
+		t.Fatalf("completion work: %+v: %v", effects, err)
+	}
+	for _, effect := range effects {
+		if err := tenant.AcknowledgeRunEffect(t.Context(), EffectDelivery{RunID: effect.RunID, Effect: effect.Effect, Revision: effect.DesiredRev, Lease: completion}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return s, tenant, now
 }
 
 func billingFinancialSnapshot(ctx context.Context, db *sql.DB) (map[string][]string, error) {
-	tables := append(store.FinancialTables(), "payment_events")
+	tables := append(FinancialTables(), "payment_events")
 	snapshot := make(map[string][]string, len(tables))
 	for _, table := range tables {
 		rows, err := db.QueryContext(ctx, "SELECT * FROM "+table)
@@ -266,10 +249,4 @@ func billingFinancialSnapshot(ctx context.Context, db *sql.DB) (map[string][]str
 		slices.Sort(snapshot[table])
 	}
 	return snapshot, nil
-}
-
-func TestStoreBillingRetention(t *testing.T) {
-	if err := checkStoreBillingRetention(t); err != nil {
-		t.Fatal(err)
-	}
 }

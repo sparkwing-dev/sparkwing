@@ -1,268 +1,215 @@
-package store_test
+package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
-type storeBoundaryDeleter func(context.Context, blob.Blob) error
-
-func (f storeBoundaryDeleter) DeleteBlob(ctx context.Context, b blob.Blob) error { return f(ctx, b) }
-
-func checkStoreReachabilityBoundary(t *testing.T) (err error) {
-	ctx := t.Context()
-	target := storetest.NewSQLite(t)
-	s, err := target.TryOpen()
-	if err != nil {
-		return err
-	}
-	defer func() { err = errors.Join(err, s.Close()) }()
-	request, err := teststore.SeedUpload(ctx, s.DB())
-	if err != nil {
-		return err
-	}
-	tenant, err := s.ForTeam(ctx, store.DefaultTeam)
-	if err != nil {
-		return err
-	}
-	ticket, err := tenant.ReserveBlobUpload(ctx, request)
-	if err != nil {
-		return err
-	}
-	if _, err := tenant.CommitBlobUpload(ctx, store.VerifiedUploadCommit{TicketID: ticket.ID, Authority: request.Intent.Authority, Verified: ticket.Blob, ReplicaID: "gc-boundary"}); err != nil {
-		return err
-	}
-	if err := seedStoreReachabilityBoundary(ctx, s.DB()); err != nil {
-		return err
-	}
-	operator := s.AsOperator()
-	lease, err := operator.AcquireSingletonLease(ctx, "maintenance", "gc-boundary", time.Hour)
-	if err != nil {
-		return err
-	}
-	if err := checkStoreGCFences(ctx, operator, lease); err != nil {
-		return err
-	}
-	retained, err := operator.MaintainRetention(ctx, store.RetentionRequest{Lease: lease, Limit: 100})
-	if err != nil || retained.Runs != 0 || retained.Records != 1 || retained.PinnedOutputs != 1 {
-		return fmt.Errorf("pinned output and expired record retention=%+v: %v", retained, err)
-	}
-	if n, err := operator.MarkBlobTombstones(ctx, lease, 100); err != nil || n != 2 {
-		return fmt.Errorf("unreachable marks=%d, want 2: %v", n, err)
-	}
-	if err := s.Close(); err != nil {
-		return err
-	}
-	reopened, err := target.TryOpen()
-	if err != nil {
-		return err
-	}
-	s = reopened
-	operator = s.AsOperator()
-	if err := checkStoreGCFences(ctx, operator, lease); err != nil {
-		return err
-	}
-	calls := 0
-	refusal := errors.New("physical deletion unavailable")
-	deleter := storeBoundaryDeleter(func(context.Context, blob.Blob) error { calls++; return refusal })
-	if n, err := operator.CollectBlobTombstones(ctx, lease, 100, deleter); err != nil || n != 0 || calls != 0 {
-		return fmt.Errorf("grace period deleted bytes: removed=%d calls=%d: %v", n, calls, err)
-	}
-	old := time.Now().Add(-25 * time.Hour).UnixNano()
-	if _, err := s.DB().ExecContext(ctx, "UPDATE blob_tombstones SET marked_at=?", old); err != nil {
-		return err
-	}
-	if _, err := operator.CollectBlobTombstones(ctx, lease, 100, deleter); !errors.Is(err, refusal) || calls != 1 {
-		return fmt.Errorf("failed deletion lost its error: calls=%d: %v", calls, err)
-	}
-	if err := checkStoreGCRows(ctx, s.DB(), 7, 2); err != nil {
-		return err
-	}
-	// safety: a committed graph added after marking must win the collector's reachability recheck.
-	if _, err := s.DB().ExecContext(ctx, "INSERT INTO blob_members(team,manifest_digest,member_digest) VALUES (?,?,?)", store.DefaultTeam, strings.Repeat("c", 64), strings.Repeat("e", 64)); err != nil {
-		return err
-	}
-	deleter = storeBoundaryDeleter(func(_ context.Context, b blob.Blob) error {
-		if b.Team != string(store.DefaultTeam) || b.Digest != blob.Digest(strings.Repeat("f", 64)) || b.Size != 17 {
-			return fmt.Errorf("collector deleted a reachable blob: %+v", b)
-		}
-		return nil
-	})
-	if n, err := operator.CollectBlobTombstones(ctx, lease, 100, deleter); err != nil || n != 1 {
-		return fmt.Errorf("rechecked collection=%d, want 1: %v", n, err)
-	}
-	if err := checkStoreGCRows(ctx, s.DB(), 6, 0); err != nil {
-		return err
-	}
-	// safety: deleting the seeded uploader also drops its last operational reference and receipt.
-	if _, err := s.DB().ExecContext(ctx, "DELETE FROM pipeline_success_pins WHERE team=?", store.DefaultTeam); err != nil {
-		return err
-	}
-	if _, err := s.DB().ExecContext(ctx, "DELETE FROM runs WHERE team=? AND id='upload'", store.DefaultTeam); err != nil {
-		return err
-	}
-	if n, err := operator.MarkBlobTombstones(ctx, lease, 100); err != nil || n != 1 {
-		return fmt.Errorf("source deletion marks=%d, want 1 while copied outputs remain: %v", n, err)
-	}
-	if _, err := s.DB().ExecContext(ctx, "UPDATE blob_tombstones SET marked_at=?", old); err != nil {
-		return err
-	}
-	deleter = storeBoundaryDeleter(func(context.Context, blob.Blob) error { return nil })
-	if n, err := operator.CollectBlobTombstones(ctx, lease, 100, deleter); err != nil || n != 1 {
-		return fmt.Errorf("source deletion collection=%d, want 1: %v", n, err)
-	}
-	if err := checkStoreGCRows(ctx, s.DB(), 5, 0); err != nil {
-		return err
-	}
-	if err := s.Close(); err != nil {
-		return err
-	}
-	s, err = target.TryOpen()
-	if err != nil {
-		return err
-	}
-	operator = s.AsOperator()
-	if err := checkStoreRetainedGraphBytes(ctx, s, 55); err != nil {
-		return err
-	}
-	var copies int
-	if err := s.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM blob_records WHERE team=? AND run_id='copy' AND source_run_id='upload' AND digest=?", store.DefaultTeam, strings.Repeat("b", 64)).Scan(&copies); err != nil || copies != 1 {
-		return fmt.Errorf("copied output lost its source provenance across retention: copies=%d: %v", copies, err)
-	}
-	if _, err := s.DB().ExecContext(ctx, "DELETE FROM runs WHERE team=? AND id='copy'", store.DefaultTeam); err != nil {
-		return err
-	}
-	if n, err := operator.MarkBlobTombstones(ctx, lease, 100); err != nil || n != 4 {
-		return fmt.Errorf("last-copy deletion marks=%d, want 4: %v", n, err)
-	}
-	if _, err := s.DB().ExecContext(ctx, "UPDATE blob_tombstones SET marked_at=?", old); err != nil {
-		return err
-	}
-	if n, err := operator.CollectBlobTombstones(ctx, lease, 100, deleter); err != nil || n != 4 {
-		return fmt.Errorf("last-copy deletion collection=%d, want 4: %v", n, err)
-	}
-	if err := checkStoreGCRows(ctx, s.DB(), 1, 0); err != nil {
-		return err
-	}
-	if err := checkStoreRetainedGraphBytes(ctx, s, 19); err != nil {
-		return err
-	}
-	if err := expireStoreSourceBoundary(ctx, s, lease, old); err != nil {
-		return err
-	}
-	if err := checkStoreRetainedGraphBytes(ctx, s, 0); err != nil {
-		return err
-	}
-	return checkStoreGCTakeoverBoundary(ctx, s, lease)
-}
-
-func checkStoreRetainedGraphBytes(ctx context.Context, s *store.Store, want int64) error {
-	tenant, err := s.ForTeam(ctx, store.DefaultTeam)
-	if err != nil {
-		return err
-	}
-	bytes, err := tenant.StorageRetainedBytes(ctx)
-	if err != nil || bytes != want {
-		return fmt.Errorf("retained graph bytes=%d, want %d: %v", bytes, want, err)
-	}
-	return nil
-}
-
-func expireStoreSourceBoundary(ctx context.Context, s *store.Store, lease store.SingletonLease, old int64) error {
-	// safety: source records retain bytes independently of the originating run and object age.
-	if _, err := s.DB().ExecContext(ctx, "UPDATE blob_records SET expires_at=? WHERE team=? AND kind='source_bundle'", old, store.DefaultTeam); err != nil {
-		return err
-	}
-	op := s.AsOperator()
-	retained, err := op.MaintainRetention(ctx, store.RetentionRequest{Lease: lease, Limit: 100})
-	if err != nil || retained.Records != 1 {
-		return fmt.Errorf("source record expiry=%+v: %v", retained, err)
-	}
-	if n, err := op.MarkBlobTombstones(ctx, lease, 100); err != nil || n != 1 {
-		return fmt.Errorf("expired source marks=%d, want 1: %v", n, err)
-	}
-	deleter := storeBoundaryDeleter(func(_ context.Context, b blob.Blob) error {
-		if b.Team != string(store.DefaultTeam) || b.Digest != blob.Digest(strings.Repeat("1", 64)) || b.Size != 19 {
-			return fmt.Errorf("wrong source deletion: %+v", b)
-		}
-		return nil
-	})
-	if n, err := op.CollectBlobTombstones(ctx, lease, 100, deleter); err != nil || n != 0 {
-		return fmt.Errorf("source deleted before grace: %d: %v", n, err)
-	}
-	if _, err := s.DB().ExecContext(ctx, "UPDATE blob_tombstones SET marked_at=? WHERE team=?", old, store.DefaultTeam); err != nil {
-		return err
-	}
-	if n, err := op.CollectBlobTombstones(ctx, lease, 100, deleter); err != nil || n != 1 {
-		return fmt.Errorf("expired source collection=%d, want 1: %v", n, err)
-	}
-	return checkStoreGCRows(ctx, s.DB(), 0, 0)
-}
-
-func checkStoreGCRows(ctx context.Context, db *sql.DB, blobs, tombstones int) error {
-	for _, check := range []struct {
-		table string
-		want  int
-	}{{"blobs", blobs}, {"blob_tombstones", tombstones}} {
-		var got int
-		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+check.table+" WHERE team=?", store.DefaultTeam).Scan(&got); err != nil {
-			return err
-		}
-		if got != check.want {
-			return fmt.Errorf("%s=%d, want %d", check.table, got, check.want)
-		}
-	}
-	return nil
-}
-
-// safety: graph seeds isolate persistence and retention from manifest verification and the byte backend.
-func seedStoreReachabilityBoundary(ctx context.Context, db *sql.DB) error {
-	old := time.Now().Add(-120 * 24 * time.Hour).UnixNano()
-	for i, letter := range []string{"b", "c", "d", "e", "f", "1"} {
-		if _, err := db.ExecContext(ctx, "INSERT INTO blobs(team,digest,size,created_at) VALUES (?,?,?,?)", store.DefaultTeam, strings.Repeat(letter, 64), []int64{5, 7, 11, 13, 17, 19}[i], old); err != nil {
-			return err
-		}
-	}
-	statements := []struct {
-		query string
-		args  []any
-	}{
-		{"UPDATE runs SET status='success',finished_at=?,created_at=? WHERE team=? AND id='upload'", []any{old, old, store.DefaultTeam}},
-		{"INSERT INTO settings(key,value) VALUES ('operator.run_retention_days',?)", []any{[]byte(`90`)}},
-		{"INSERT INTO pipeline_success_pins(team,pipeline,run_id,finished_at) VALUES (?,'fixture','upload',?)", []any{store.DefaultTeam, old}},
-		{`INSERT INTO blob_records(team,kind,scope,name,digest,manifest_digest,run_id,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,ref_facts_json,created_at,expires_at) VALUES (?,'output','pinned','result',?,?,'upload','gh:1','manual:','publisher','local',?,'publication','upload',0,0,?,?,?)`, []any{store.DefaultTeam, strings.Repeat("b", 64), strings.Repeat("c", 64), []byte(`{}`), []byte(`{}`), old, old}},
-		{`INSERT INTO blob_records(team,kind,scope,name,digest,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,ref_facts_json,created_at,expires_at) VALUES (?,'depcache','expired','modules',?,'gh:1','manual:','publisher','local',?,'publication','upload',0,0,?,?,?)`, []any{store.DefaultTeam, strings.Repeat("e", 64), []byte(`{}`), []byte(`{}`), old, old}},
-		{`INSERT INTO blob_records(team,kind,scope,name,digest,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,ref_facts_json,created_at,expires_at) VALUES (?,'source_bundle','source','working-tree',?,'gh:1','manual:','publisher','local',?,'publication','upload',0,0,?,?,?)`, []any{store.DefaultTeam, strings.Repeat("1", 64), []byte(`{}`), []byte(`{}`), old, time.Now().Add(time.Hour).UnixNano()}},
-		{"INSERT INTO blob_members(team,manifest_digest,member_digest) VALUES (?,?,?)", []any{store.DefaultTeam, strings.Repeat("c", 64), strings.Repeat("d", 64)}},
-	}
-	for _, statement := range statements {
-		if _, err := db.ExecContext(ctx, statement.query, statement.args...); err != nil {
-			return err
-		}
-	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days)
-SELECT team,'copy',2,pipeline,'success',request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,?,?,log_retention_class,log_retention_days FROM runs WHERE team=? AND id='upload'`, time.Now().UnixNano(), time.Now().UnixNano(), store.DefaultTeam); err != nil {
-		return err
-	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO blob_records(team,kind,scope,name,digest,manifest_digest,run_id,repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,ref_facts_json,created_at)
-SELECT team,kind,'copied',name,digest,manifest_digest,'copy',repo_key,ref_scope,uploader_principal,provenance,source_identity_json,source_kind,source_run_id,verified_ref,verified_default_branch,ref_facts_json,? FROM blob_records WHERE team=? AND kind='output' AND scope='pinned'`, time.Now().UnixNano(), store.DefaultTeam); err != nil {
-		return err
-	}
-	return nil
-}
-
 func TestStoreReachabilityRetention(t *testing.T) {
-	if err := checkStoreReachabilityBoundary(t); err != nil {
+	s, records, change := blobResultFixture(t)
+	rewriteSchemaExec(t, s.db, "UPDATE nodes SET spec_hash='same'")
+	now := s.now()
+	s.clock = func() time.Time { return now }
+	intent := blobIntent(change.Actor, runspec.AttemptIdentity{Team: "a", RunID: "run", NodeID: "job", Attempt: 2, Generation: 7})
+	intent.Authority.Ref.Scope.Ref = "main"
+	expires := now.Add(time.Minute)
+	for _, object := range []struct {
+		kind    blob.Kind
+		digest  string
+		size    int64
+		expires time.Time
+	}{
+		{blob.KindDepcache, "e", 13, expires},
+		{blob.KindSourceBundle, "1", 19, now.Add(200 * 24 * time.Hour)},
+	} {
+		intent.Digest, intent.Size = blob.Digest(strings.Repeat(object.digest, 64)), object.size
+		if _, err := commitTestBlob(t, records.tenant, intent); err != nil {
+			t.Fatal(err)
+		}
+		request := blobOutputRequest(intent)
+		request.Key.Kind, request.Key.Name = object.kind, "fixture"
+		if object.kind == blob.KindDepcache {
+			request.Key.Scope.Pipeline, request.Key.Scope.Job = "", ""
+		}
+		request.ExpiresAt = runspec.Optional[time.Time]{Set: true, Value: object.expires}
+		if _, err := records.CommitRecord(t.Context(), request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := records.tenant.TransitionNode(t.Context(), change); err != nil {
 		t.Fatal(err)
 	}
+	s.SetResultBlobRecords(records.manifests)
+	_, tenant, request := materializationTarget(t, s, records.tenant, change.Ref)
+	copied, err := tenant.ReconcileNode(t.Context(), request)
+	if err != nil || copied.Kind != Materialize {
+		t.Fatalf("copy: %+v: %v", copied, err)
+	}
+	if _, err := tenant.TransitionRun(t.Context(), RunTransition{RunID: "target", Actor: request.Actor, Cause: RunFinish, To: RunSuccess}); err != nil {
+		t.Fatal(err)
+	}
+	path := blobAccountingDiskStore(t, s)
+	reopen := func() {
+		t.Helper()
+		if err := s.db.Close(); err != nil {
+			t.Fatal(err)
+		}
+		s.db = blobAccountingDB(t, path)
+	}
+	op := s.AsOperator()
+	lease, err := op.AcquireSingletonLease(t.Context(), "maintenance", "gc-boundary", 200*24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkStoreGCFences(t, op, lease)
+	now = expires
+	retained, err := op.MaintainRetention(t.Context(), RetentionRequest{Lease: lease, Limit: 100})
+	if err != nil || retained.Records != 1 || retained.PinnedOutputs != 1 {
+		t.Fatalf("retention: %+v: %v", retained, err)
+	}
+	if n, err := op.MarkBlobTombstones(t.Context(), lease, 100); err != nil || n != 0 {
+		t.Fatalf("receipts did not protect bytes: %d: %v", n, err)
+	}
+	rewriteSchemaExec(t, s.db, "DELETE FROM runs WHERE team='a' AND id='run'")
+	if n, err := op.MarkBlobTombstones(t.Context(), lease, 100); err != nil || n != 1 {
+		t.Fatalf("expired cache marks=%d: %v", n, err)
+	}
+	reopen()
+	checkStoreGCFences(t, op, lease)
+	calls := 0
+	failure := errors.New("physical deletion unavailable")
+	deleter := blobDeleteFunc(func(context.Context, blob.Blob) error { calls++; return failure })
+	if n, err := op.CollectBlobTombstones(t.Context(), lease, 100, deleter); err != nil || n != 0 || calls != 0 {
+		t.Fatalf("grace: removed=%d calls=%d: %v", n, calls, err)
+	}
+	now = now.Add(limits.BlobGCGrace)
+	if _, err := op.CollectBlobTombstones(t.Context(), lease, 100, deleter); !errors.Is(err, failure) || calls != 1 {
+		t.Fatalf("deletion failure: calls=%d: %v", calls, err)
+	}
+	rewriteSchemaCount(t, s.db, "blobs", 4)
+	rewriteSchemaCount(t, s.db, "blob_tombstones", 1)
+	deleter = blobDeleteFunc(func(_ context.Context, b blob.Blob) error {
+		if b.Team != "a" || b.Digest != blob.Digest(strings.Repeat("e", 64)) || b.Size != 13 {
+			t.Fatalf("collected reachable blob: %+v", b)
+		}
+		return nil
+	})
+	if n, err := op.CollectBlobTombstones(t.Context(), lease, 100, deleter); err != nil || n != 1 {
+		t.Fatalf("collect=%d: %v", n, err)
+	}
+	reopen()
+	checkStoreRetainedGraphBytes(t, tenant, 25)
+	var sources int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM blob_records WHERE team='a' AND run_id='target' AND source_run_id='run'").Scan(&sources); err != nil || sources != 2 {
+		t.Fatalf("copied provenance: %d: %v", sources, err)
+	}
+	now = now.Add(120 * 24 * time.Hour)
+	retained, err = op.MaintainRetention(t.Context(), RetentionRequest{Lease: lease, Limit: 100})
+	if err != nil || retained.PinnedRuns != 1 || retained.PinnedOutputs != 1 || retained.Records != 0 {
+		t.Fatalf("pinned output: %+v: %v", retained, err)
+	}
+	rewriteSchemaExec(t, s.db, "DELETE FROM pipeline_success_pins WHERE team='a'")
+	rewriteSchemaExec(t, s.db, "DELETE FROM runs WHERE team='a' AND id='target'")
+	if n, err := op.MarkBlobTombstones(t.Context(), lease, 100); err != nil || n != 2 {
+		t.Fatalf("last copy marks=%d: %v", n, err)
+	}
+	now = now.Add(limits.BlobGCGrace)
+	deleter = blobDeleteFunc(func(_ context.Context, b blob.Blob) error {
+		if b.Digest != blob.Digest(strings.Repeat("a", 64)) && b.Digest != blob.Digest(strings.Repeat("b", 64)) {
+			t.Fatalf("source record lost bytes: %+v", b)
+		}
+		return nil
+	})
+	if n, err := op.CollectBlobTombstones(t.Context(), lease, 100, deleter); err != nil || n != 2 {
+		t.Fatalf("last copy collection=%d: %v", n, err)
+	}
+	checkStoreRetainedGraphBytes(t, tenant, 19)
+	now = now.Add(80 * 24 * time.Hour)
+	lease, err = op.AcquireSingletonLease(t.Context(), "maintenance", "gc-boundary", 2*limits.BlobGCGrace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retained, err = op.MaintainRetention(t.Context(), RetentionRequest{Lease: lease, Limit: 100})
+	if err != nil || retained.Records != 1 {
+		t.Fatalf("source expiry: %+v: %v", retained, err)
+	}
+	if n, err := op.MarkBlobTombstones(t.Context(), lease, 100); err != nil || n != 1 {
+		t.Fatalf("source mark=%d: %v", n, err)
+	}
+	now = now.Add(limits.BlobGCGrace)
+	deleter = blobDeleteFunc(func(_ context.Context, b blob.Blob) error {
+		if b.Digest != blob.Digest(strings.Repeat("1", 64)) || b.Size != 19 {
+			t.Fatalf("wrong source deletion: %+v", b)
+		}
+		return nil
+	})
+	if n, err := op.CollectBlobTombstones(t.Context(), lease, 100, deleter); err != nil || n != 1 {
+		t.Fatalf("source collection=%d: %v", n, err)
+	}
+	checkStoreRetainedGraphBytes(t, tenant, 0)
+	now = lease.ExpiresAt
+	refuseStoreGCCollection(t, op, lease)
+	replacement, err := op.AcquireSingletonLease(t.Context(), "maintenance", lease.Holder, time.Hour)
+	if err != nil || replacement.Generation <= lease.Generation {
+		t.Fatalf("takeover: %+v: %v", replacement, err)
+	}
+	refuseStoreGCCollection(t, op, lease)
+	if n, err := op.CollectBlobTombstones(t.Context(), replacement, 100, deleter); err != nil || n != 0 {
+		t.Fatalf("empty collection=%d: %v", n, err)
+	}
+}
+
+func checkStoreRetainedGraphBytes(t *testing.T, tenant *Tenant, want int64) {
+	t.Helper()
+	got, err := tenant.StorageRetainedBytes(t.Context())
+	if err != nil || got != want {
+		t.Fatalf("retained bytes=%d, want %d: %v", got, want, err)
+	}
+}
+
+func TestStoreReachabilityNewReferenceWinsMarkedCollection(t *testing.T) {
+	s, records, source := blobResultFixture(t)
+	_, tenant, target := materializationTarget(t, s, records.tenant, source.Ref)
+	now := s.now()
+	s.clock = func() time.Time { return now }
+	op := s.AsOperator()
+	lease, err := op.AcquireSingletonLease(t.Context(), "maintenance", "late-reference", 3*limits.BlobGCGrace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteSchemaExec(t, s.db, "DELETE FROM runs WHERE team='a' AND id='run'")
+	if n, err := op.MarkBlobTombstones(t.Context(), lease, 100); err != nil || n != 2 {
+		t.Fatalf("retired source marks=%d: %v", n, err)
+	}
+	identity := blob.UploadIdentity{
+		Kind: blob.UploadOwnerUnit, Team: "a", RunID: "target", Principal: "host", CapabilityRef: target.Actor.CapabilityPrefix,
+		Unit: runspec.Optional[blob.UploadUnit]{Set: true, Value: blob.UploadUnit{Kind: blob.UploadTriggerUnit, ID: "target", Generation: target.Actor.Owner.Generation}},
+	}
+	authority := blob.Authority{CapabilityRef: identity.CapabilityRef, Upload: runspec.Optional[blob.UploadIdentity]{Set: true, Value: identity}}
+	intent := blob.UploadIntent{Authority: authority, Identity: identity, Digest: blob.Digest(strings.Repeat("a", 64)), Size: 3}
+	storeBoundaryUpload(t, tenant, intent, "rescued")
+	key := blob.RecordKey{Team: "a", Kind: blob.KindSourceBundle, Scope: blob.Scope{Repo: "gh:1", Ref: blob.RefScope{Ref: "main"}, Pipeline: "ci", Key: "rescued"}, Name: "modules"}
+	if _, err := tenant.CommitRecord(t.Context(), blob.CommitRecordRequest{Authority: authority, Key: key, Source: identity, Digest: intent.Digest}); err != nil {
+		t.Fatal(err)
+	}
+	blobAccountingDiskStore(t, s)
+	now = now.Add(limits.BlobGCGrace)
+	deleter := blobDeleteFunc(func(_ context.Context, b blob.Blob) error {
+		if b.Digest != blob.Digest(strings.Repeat("b", 64)) {
+			t.Fatalf("new reference lost marked bytes: %+v", b)
+		}
+		return nil
+	})
+	if n, err := op.CollectBlobTombstones(t.Context(), lease, 100, deleter); err != nil || n != 1 {
+		t.Fatalf("rechecked collection=%d: %v", n, err)
+	}
+	rewriteSchemaCount(t, s.db, "blobs", 1)
+	rewriteSchemaCount(t, s.db, "blob_tombstones", 0)
 }

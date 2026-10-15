@@ -1,124 +1,131 @@
 # W1b store-data continuation
 
-Base: c461f5715, with the interrupted integration merge still in the index.
-No Git writes were made. All 18 unmerged paths have resolved content or the
-integration branch's intended deletion. There are no conflict markers. The lead
-must stage those resolutions and finish the merge because the swarm brief forbids
-worker Git writes and this sandbox cannot write the shared Git metadata.
+Session base: d9ddb016c. The interrupted merge is already finalized. The worktree
+was clean at entry, `git ls-files -u` is empty, and no Git writes were made.
 
-The lead's 12:15 materialization assignment is closed for memoized results.
-The committed implementation already copies exact records, verifies physical
-bytes, persists result selectors without creating an attempt, and carries them
-through the controller and host. This session strengthens that proof:
+The lead's 12:15 materialization assignment remains closed for memoized results.
+The existing real-store/controller/host proof passes unchanged. It verifies typed
+output and independent artifact bytes and mode after source run and memo deletion.
+Missing output, corrupt output, corrupt manifest, missing member and corrupt member
+remain executable misses. It uses an in-process controller transport and download
+signer; provider middleware, S3 delivery and native placement remain unproved.
 
-- Output, manifest and a separate artifact member are registered through upload
-  reservation/commit and record commit APIs. The proof no longer inserts blobs,
-  members or records directly, or rewrites their digests.
-- After copying, the source run and source memo are deleted. A fresh controller
-  reconciliation returns the persisted destination selectors. The host reads
-  JSON and stages the artifact from those records, preserving bytes and mode.
-- Missing output, corrupt output, corrupt manifest, missing member and corrupt
-  member each leave an executable materialization miss.
+This session replaces the moved proofs' fabricated data rows with real mutations:
 
-The proof uses the real SQLite store, EngineController, RemoteOwnerStore, signed
-filesystem backend, OutputRecords and ArtifactRecords. The controller transport
-and download signer are in-process test adapters. This does not prove provider
-middleware, native placement or S3 delivery.
+- CAS uses live executable claims and independent uploaders, and expires the
+  interrupted ticket with the store clock before reopening and retrying.
+- Presence and the 1,025-digest proof create same-team and foreign-team objects
+  through reservation and verified upload commit. Only the caller's receipts
+  appear, and duplicate bytes count once. Both check the resulting real usage.
+- Reference-edge tests create output, manifest members and uploader receipts
+  through their mutation owners, attach the output with TransitionNode, reopen,
+  then check dependencies, optional and transitive dependencies, artifacts,
+  generated groups and failure handlers. Unrelated, foreign and absent bytes
+  remain unreadable.
+- Reachability uses actual output/manifest commits and reconciliation to create
+  the destination copy. Finishing the destination creates the success pin.
+  Source deletion preserves copied provenance. Controlled time checks expired
+  caches, receipt roots, physical-deletion failure, grace, pinned output, source
+  records and takeover. A separate proof uploads and commits a new source record
+  after marking; collection deletes only the object that stayed unreachable.
+- Ledger retention creates every FinancialTables row and payment_events through
+  the checkout, billing, card, refund, warning, upload and log mutation owners.
+  It uses C2's production calculator, real node and owner claims, starts, finishes
+  and completion acknowledgements. Retention and reopening preserve every
+  financial row and all captured billing reports. Provider-only facts enter
+  through the existing test-only transaction adapters, not a new verifier.
+- Cache-scope cases use the existing W1b provenance seeder and reopen each case.
+  The upload receipt is removed to isolate cache-edge authorization. This fixture
+  must inject provenance that ordinary publication would refuse.
 
-The W1b billing-start boundary now clears the test calculator override and uses
-C2's real SettleBilling. Runner and Cloud cases claim, start, reopen SQLite,
-finish and replay. Both retain their original 600-micro reservation price after
-the price table changes. C1's stale calculator-stub description is corrected.
-This closes that earlier A1-27 calculator integration gap.
+All W1b store boundary files are now in package store and reuse its existing
+private fixtures. Those fixtures still seed intake/authority declarations while
+exercising real data mutations. pkg/store/internal/storetest imports store, so
+internal store tests cannot import it without a cycle. No second seed library was
+added. W1b no longer uses the shared teststore publication/imported-attempt seeds;
+W7's three blob harness files still use those helpers. The remaining store_*
+files in internal/acceptance belong to W1 and were not edited. No catalog,
+scenario registry, Harness or skeleton change was made.
 
-The merge left pkg/controller/client/logwatch.go referring to the removed Client.
-It is deleted with its unused WatchReport and observer methods: 38 production
-lines removed. The merge also dropped the store import needed by the test-only
-seedLegacyMeteredCredential helper. The import is restored. The whole repository
-builds, and controller plus client tests compile.
+Deleted RunStoragePassLeased and its unused metadata keys: **13 production lines**.
+It has no callers or tests. The elected Operator maintenance pass remains the
+implemented maintenance path. No other production API or cross-area caller was
+changed. Across the eight changed test files: **539 added, 834 deleted, -295 net**.
 
-Net production Go delta for this session: **-38** (0 added, 38 deleted).
-The pkg/store production delta is **0** this session. Using the lead's exclusions,
-combined W1+W1b against main remains **+3,348**, which is **7,598 over** the -4,250
-budget. No overage waiver or completion is claimed.
+The combined W1+W1b production Go delta against main is **+3,335**, using the
+lead's exclusions for tests, testdata, acceptance and contract declarations.
+That is **7,585 over** the -4,250 budget. This session's production delta is
+**-13** (0 added, 13 deleted). No budget waiver or area completion is claimed.
 
 Verification uses GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
 GOCACHE=/tmp/sw-gocache, TMPDIR=/tmp/sw-astra-W1b, GOTMPDIR beneath that directory,
 and test parallelism at most 4.
 
 - Whole-repository go build ./... passes.
-- Scoped go vet passes for store, host, controller and client. Earlier scoped vet
-  also covered blob, storage and controllerwire.
-- The materialization integration proof and its generated scope, expiry and
-  selector-alias properties pass. The real-calculator billing proof passes
-  separately.
-- The eight moved store proofs passed: CAS, presence, large presence, cache scope,
-  reference edges, reachability, ledger retention and billing start.
-- internal/blob, pkg/storage, internal/controllerwire and pkg/controller/client
-  pass their full package tests. Focused host materialized-output, remote,
-  output-record and artifact-record tests pass.
-- Commentcheck against main and diff whitespace checks pass.
-- The broad store/host run fails in retained legacy fixtures using args_json,
-  tokens, sparkwing_meta and other removed schema. Native listener tests fail
-  because sockets are denied. W1's TestMeteredRootPolicyCannotRewriteAwardProperty
-  also fails for Cloud roots whose metered marker is false. Its implementation
-  and fixture are outside W1b ownership and are unchanged.
-- A broader StoreData/Blob/Payment selection exceeded its 120-second test budget.
-  It is not counted as a pass. No native PostgreSQL, pipeline, service, deployment
-  or release was run.
+- Scoped go vet passes for pkg/store and pkg/store/internal/storetest.
+- The final focused store suite passes in 6.746 seconds. It selects all eight
+  moved TestStore proofs, the late-reference GC proof, the materialization
+  integration proof and the materialization property/rollback/miss tests.
+- Commentcheck against main is clean across 2,069 files. Diff whitespace checks
+  pass. The changed tests compile as part of the focused package run.
+- Native and broad legacy suites were not rerun. This is not a whole-store or
+  whole-repository test pass.
 
-Tests ported this session: the materialization fixture now uses real upload and
-record writes, and the billing-start proof now settles with the production C2
-calculator. No archived provider-HTTP port or new native acceptance cell is claimed.
-The earlier W1b store_* harness moves remain in pkg/store/*_test.go. No W1b-owned
-store_* harness remains in internal/acceptance. Some moved retention/reference
-fixtures still contain direct SQL seeding, so the seeding cleanup from 09:40 is
-not fully closed. The remaining internal/acceptance/store_* files are W1's claim,
-plan, recovery, capacity, schedule and credential checks and were not edited.
+No native PostgreSQL, socket, pipeline, service, deployment or release was run.
+
+No new native acceptance cell is claimed. The moved CAS, presence, large-presence,
+cache-scope, reference-edge, reachability, ledger-retention and billing-start
+proofs retain their plain TestStore names. The additional late-reference proof
+ports the old reachability harness's marked-object resurrection check to real
+upload and record writes. No archived provider-HTTP test was ported.
 
 Remaining contracts and integration:
 
-1. **W2/C2, 07:40 item 2.** PaymentEvent still declares only checkout outcomes.
-   It has no setup, refund, warning or dispute facts. payment_events likewise
-   requires a checkout FK and permits only three checkout kinds. SettlePayment
-   cannot settle the extra events until W2 declares verified provider facts and
-   setup/payment correlation. Private C1 mutation owners remain available.
-   No parallel provider contract or caller-selected financial authority was added.
-2. **W1/C1 coalescing.** SourceCoalesced still needs a persisted read edge. A source
-   selector and matching spec do not grant cross-run access. The memoized path
-   satisfies the lead's memoized-or-coalesced proof. Coalescing remains closed.
-3. **W1 exhaustion.** accountUnitBillingTx returns only error. Renewal still needs
-   a persisted per-award exhaustion outcome and cancellation reason for every
-   unit. W1b's legacy node-only exhaustion policy cannot supply that contract.
-4. Legacy credits.go still serves old claims in store.go, claim_run.go,
-   node_attempt.go and launch_sync.go. node_outputs still serves the old scheduler,
-   rehydration, child and runner-result handlers. W1/W3/W7 must finish those caller
-   cuts before W1b can remove the remaining data implementations without changing
-   their behavior or reintroducing adapters.
-5. Production assembly must supply the authenticated StorageBinding and real
-   data authority, upload verification and download allowance bindings. Tagged
-   log transport, imported terminal-attempt seeding and physical allowance
-   eviction remain integration work.
+1. **W2/C2, 07:40 item 2.** PaymentEvent still has only checkout paid, failed and
+   expired outcomes. W2 must declare verified card setup, collection, refund,
+   warning and dispute facts and their durable setup/payment correlation.
+   payment_events currently requires a checkout FK and three checkout kinds.
+   C1 transaction mutation owners are ready, but SettlePayment cannot dispatch
+   those events through the current foreign contract. No parallel proof type or
+   caller-selected financial authority was added.
+2. **W1/C1 coalescing.** SourceCoalesced still needs a persisted read edge. Equal
+   specs and a source selector do not grant cross-run access. The memoized path
+   satisfies the lead's memoized-or-coalesced acceptance requirement.
+3. **W1 exhaustion.** accountUnitBillingTx returns only error. Every awarded unit
+   still needs a persisted exhaustion/grace outcome and cancellation reason.
+   The legacy node-only exhaustion policy cannot supply that contract.
+4. **Legacy caller cuts.** credits.go still serves old claims in store.go,
+   claim_run.go, node_attempt.go and launch_sync.go. node_output.go still serves
+   the old scheduler, rehydration, child and runner-result paths. Those caller
+   migrations need W1/W3/W7's remaining branch work before W1b can delete the
+   implementations without restoring adapters. The newest W1 reports describe
+   further cuts that are not present on this branch; no Git merge was attempted.
+5. Production assembly still needs authenticated StorageBinding, real data
+   authority/upload verification/download allowance bindings, tagged log
+   transport, imported terminal-attempt seeding and physical allowance eviction.
 
-Files changed this session: pkg/store/blob_materialize_test.go,
-blob_materialize_integration_test.go, store_unit_billing_boundary_test.go and this
-report. Shared files: pkg/controller/client/logwatch.go (deleted),
-pkg/controller/git_credentials_team_test.go (import restored), and
-design/rewrite/contracts/c1-data.md (calculator evidence only).
+Files changed this session: pkg/store/bucket_measure_lease.go, STORE-DATA.md,
+store_billing_boundary_test.go, store_cas_boundary_test.go,
+store_cache_scope_boundary_test.go, store_gc_fence_boundary_test.go,
+store_presence_boundary_test.go, store_presence_large_boundary_test.go,
+store_reachability_boundary_test.go, store_reference_edges_boundary_test.go,
+and this report. No W1 implementation file or file outside pkg/store changed.
 
-Materialization implementation files retained from session 4: pkg/store/
-blob_materialize.go, blob_read_authority.go, blob_record_mutation.go,
-blob_record_runtime.go, blob_result_records.go, state_materialize.go,
-state_reconcile.go, state_read.go, node_state.go and schema.sql;
-internal/controllerwire/engine.go (formerly contracts.go);
-pkg/controller/engine_snapshot.go; internal/nodehost/output_records.go,
-owner_evaluation.go, owner_schedule.go, remote_contract.go, sdk_code.go and
-sdk_replay.go; internal/blob/authority.go, keys.go, object_contract.go and
-objects.go; pkg/storage/manifest.go. No additional production edit was needed
-in those files this session. Lead-owned handoffs and amendments are unchanged.
+Cross-area materialization files retained from the earlier implementation:
+internal/controllerwire/engine.go (ExecutionJob selectors),
+pkg/controller/engine_snapshot.go (selector projection),
+internal/nodehost/output_records.go, owner_evaluation.go, owner_schedule.go,
+remote_contract.go, sdk_code.go and sdk_replay.go (host consumption),
+internal/blob/authority.go, keys.go, object_contract.go and objects.go
+(selected record and byte authorization), and pkg/storage/manifest.go.
+The store owners remain blob_materialize.go, blob_read_authority.go,
+blob_record_mutation.go, blob_record_runtime.go, blob_result_records.go,
+state_materialize.go, state_reconcile.go, state_read.go, node_state.go and schema.sql.
+No further edits to these materialization files were needed this session.
+Lead-owned handoffs and amendments are unchanged.
 
-Friction: the merge index cannot be finalized here. Expanded provider events,
-coalesced read authority and unit exhaustion need the contracts above. Worker
-scratch is deleted after checks finish. The shared build cache is retained.
+Friction: C2's expanded provider event contract and W1's unit-exhaustion outcome
+remain missing. Remaining legacy callers and the production budget prevent
+completion. Worker scratch is deleted after checks; the shared build cache stays.
 
 STATUS: CONTINUE
