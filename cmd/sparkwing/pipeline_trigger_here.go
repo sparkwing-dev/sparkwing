@@ -10,7 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
@@ -87,8 +86,10 @@ func hostAndFollowHere(prof *profile.Profile, pipeline string, resp *client.Trig
 		<-hosted
 		return err
 	}
-	followErr := orchestrator.JobLogsRemoteWithTokens(followCtx, prof.ControllerURL(), prof.ControllerToken(),
-		resp.RunID, orchestrator.LogsOpts{Follow: true, Format: format, JSON: format == "json"}, os.Stdout)
+	followErr := followControllerRunLogs(followCtx, client.EngineOptions{
+		URL:    prof.ControllerURL(),
+		Bearer: func(context.Context) (string, error) { return prof.ControllerToken(), nil },
+	}, resp.RunID, format, os.Stdout)
 	<-hosted
 	return remoteFollowExit(context.Background(), prof, resp.RunID, followErr)
 }

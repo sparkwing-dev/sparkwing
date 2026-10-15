@@ -21,6 +21,7 @@ unlock.
 ## [Unreleased]
 
 ### Added
+- **cli rewrite:** run listing, logs/search, annotations, approvals and prune use typed controller adapters. Listing filters and pagination reach the controller, follow retains runs that match later, and prune completes selection before deleting. Final server adapters, annotation policy and persisted log completeness remain integration requirements.
 - **cli rewrite:** repository upgrade now has an adapter for staged dependency checks, compilation or type checking, and describe/plan verification with the selected engine. The engine resolver and process-environment implementations are still required for end-to-end upgrades.
 - **cli rewrite:** run status reads the shared controller display model, including attempts and version notices. Receipt, step and paginated child-tree views use typed controller reads. Incomplete observations exit 3, and numeric run selectors reach the controller unchanged. Final controller read adapters remain an integration requirement.
 - **cli rewrite:** dashboard commands use the local controller lifecycle and managed-unit contracts. The separate supervisor, PID records and restart command are removed. Runtime, service and log-source composition remains an integration requirement.

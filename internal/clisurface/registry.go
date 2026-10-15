@@ -377,14 +377,18 @@ func Registry() []Command {
 		}},
 		{Path: "sparkwing runs", Flags: []Flag{}},
 		{Path: "sparkwing runs annotations", Flags: []Flag{}},
-		{Path: "sparkwing runs annotations add", Flags: []Flag{
+		{Path: "sparkwing runs annotations add", Rules: []string{
+			"Plain emits run/job[/step]. JSON retains the controller replay result.",
+		}, Flags: []Flag{
 			{Name: "run", Argument: "RUN_ID", Required: true},
 			{Name: "job", Argument: "JOB"},
 			{Name: "step", Argument: "STEP_ID"},
 			{Name: "message", Argument: "TEXT", Required: true},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing runs annotations list", Flags: []Flag{
+		{Path: "sparkwing runs annotations list", Rules: []string{
+			"JSON emits job_id, optional step_id, level, message and source location per annotation. Plain emits one message per line, with line breaks replaced by spaces.",
+		}, Flags: []Flag{
 			{Name: "run", Argument: "RUN_ID", Required: true},
 			{Name: "job", Argument: "JOB"},
 			{Name: "step", Argument: "STEP_ID"},
@@ -392,19 +396,25 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME"},
 		}},
 		{Path: "sparkwing runs approvals", Flags: []Flag{}},
-		{Path: "sparkwing runs approvals approve", Flags: []Flag{
+		{Path: "sparkwing runs approvals approve", Rules: []string{
+			"The controller derives the approver from authentication. Plain emits run/job. JSON includes the approval and replay result.",
+		}, Flags: []Flag{
 			{Name: "run", Argument: "ID", Required: true},
 			{Name: "job", Argument: "JOB", Required: true},
 			{Name: "comment", Argument: "STR"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing runs approvals deny", Flags: []Flag{
+		{Path: "sparkwing runs approvals deny", Rules: []string{
+			"The controller derives the approver from authentication. Plain emits run/job. JSON includes the approval and replay result.",
+		}, Flags: []Flag{
 			{Name: "run", Argument: "ID", Required: true},
 			{Name: "job", Argument: "JOB", Required: true},
 			{Name: "comment", Argument: "STR"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing runs approvals list", Flags: []Flag{
+		{Path: "sparkwing runs approvals list", Rules: []string{
+			"Without --run, list pending approvals. With --run, include resolved history. Plain emits run/job.",
+		}, Flags: []Flag{
 			{Name: "run", Argument: "RUN_ID"},
 			{Name: "profile", Argument: "NAME"},
 		}},
@@ -412,7 +422,10 @@ func Registry() []Command {
 			{Name: "run", Argument: "RUN_ID", Required: true},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing runs grep", Flags: []Flag{
+		{Path: "sparkwing runs grep", Rules: []string{
+			"Search controller logs across matching runs. Filters apply before the run page limit. --max-matches limits matches per log subject, with zero meaning uncapped.",
+			"JSON emits matching records and a page record with next_cursor and truncated. Quiet JSON emits run_id records and sends continuation metadata to stderr. Plain emits matching lines, or run IDs with --quiet.",
+		}, Flags: []Flag{
 			{Name: "job", Argument: "JOB"},
 			{Name: "grep", Argument: "PATTERN"},
 			{Name: "since", Argument: "DURATION"},
@@ -428,7 +441,12 @@ func Registry() []Command {
 			{Name: "quiet", Short: "q"},
 			{Name: "cursor", Argument: "CURSOR"},
 		}},
-		{Path: "sparkwing runs list", Flags: []Flag{
+		{Path: "sparkwing runs list", Rules: []string{
+			"Read runs through the selected controller. Filters apply before pagination. Runs are ordered by descending team number. --since accepts days and weeks, such as 7d or 2w.",
+			"JSON emits compact run records and a page record with next_cursor and truncated. Quiet JSON emits id records and sends continuation metadata to stderr. Plain emits run IDs.",
+			"--by-pipeline totals every matching page and retains the newest --sparkline statuses. --group-by run|job|step requires --status failed and groups the selected page.",
+			"--wait blocks until a matching run appears. --follow reads every newer matching run between polls. Grouped follow output describes each new batch. Interrupted or timed-out waits exit 3.",
+		}, Flags: []Flag{
 			{Name: "pipeline", Argument: "NAME"},
 			{Name: "status", Argument: "STATUS"},
 			{Name: "branch", Argument: "BRANCH", Repeatable: true, CommaList: true},
@@ -454,7 +472,11 @@ func Registry() []Command {
 			{Name: "follow", Short: "f"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing runs logs", Flags: []Flag{
+		{Path: "sparkwing runs logs", Rules: []string{
+			"Read job-attempt and trigger, plan or eval logs through the controller. --job selects a job. --tree includes descendants. --events-only and --no-events select lifecycle events or output.",
+			"--follow consumes every available page, then waits for new records until final log segments are complete. An incomplete or interrupted observation exits 3.",
+			"JSON emits tagged log records. Plain emits log lines. Use --grep without --run to search across runs with the same filters and pagination as runs grep.",
+		}, Flags: []Flag{
 			{Name: "run", Argument: "RUN_ID"},
 			{Name: "job", Argument: "JOB"},
 			{Name: "tail", Argument: "N"},
@@ -478,7 +500,10 @@ func Registry() []Command {
 			{Name: "quiet", Short: "q"},
 			{Name: "cursor", Argument: "CURSOR"},
 		}},
-		{Path: "sparkwing runs prune", Flags: []Flag{
+		{Path: "sparkwing runs prune", Rules: []string{
+			"Select --run, including --run - for IDs on stdin, or --older-than. Age selection reads every page and includes only terminal runs started before the cutoff. A failed selection deletes nothing.",
+			"--dry-run prints the selected IDs without deleting. The controller enforces retention pins. JSON retains deletion results and structured failures. Plain emits run IDs.",
+		}, Flags: []Flag{
 			{Name: "older-than", Argument: "DURATION"},
 			{Name: "run", Argument: "RUN_ID"},
 			{Name: "dry-run"},

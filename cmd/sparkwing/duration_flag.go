@@ -5,13 +5,13 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 )
 
 type lookbackDurationValue time.Duration
 
 func (v *lookbackDurationValue) Set(raw string) error {
-	d, err := orchestrator.ParseLooseDuration(raw)
+	d, err := clisurface.ParseLookback(raw)
 	if err != nil {
 		return err
 	}

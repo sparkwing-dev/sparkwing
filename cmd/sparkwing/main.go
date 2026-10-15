@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	flag "github.com/spf13/pflag"
 
@@ -457,24 +456,8 @@ func dispatchCommand(args []string) error {
 	return fmt.Errorf("%s: execution is not implemented", args[0])
 }
 
-func runRunsApprovals(contextValue context.Context, paths orchestrator.Paths, args []string) error {
-	if handleParentHelp(cmdApprovals, args) {
-		return nil
-	}
-	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return runApprovalsList(contextValue, paths, args)
-	}
-	switch args[0] {
-	case "list":
-		return runApprovalsList(contextValue, paths, args[1:])
-	case "approve":
-		return runApprove(contextValue, paths, args[1:])
-	case "deny":
-		return runDeny(contextValue, paths, args[1:])
-	default:
-		PrintHelp(cmdApprovals, os.Stderr)
-		return fmt.Errorf("runs approvals: unknown subcommand %q", args[0])
-	}
+func runRunsApprovals(ctx context.Context, args []string) error {
+	return runReviewCommand(ctx, append([]string{"runs", "approvals"}, args...), os.Stdout, resolveRunReview)
 }
 
 func runJobs(args []string) error {
@@ -493,208 +476,17 @@ func runJobs(args []string) error {
 
 	switch args[0] {
 	case "approvals":
-		return runRunsApprovals(contextValue, paths, args[1:])
+		return runRunsApprovals(contextValue, args[1:])
 	case "annotations":
-		return runRunsAnnotations(contextValue, paths, args[1:])
+		return runRunsAnnotations(contextValue, args[1:])
 	case "list":
-		fs := flag.NewFlagSet(cmdJobsList.Path, flag.ContinueOnError)
-		limit := fs.Int("limit", 20, "runs per page")
-		outputFormat := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: table)")
-		quiet := fs.BoolP("quiet", "q", false, "print only run ids, one per line")
-		since := lookbackDuration(fs, "since", 0, "only runs newer than this (1h, 24h, 7d, and similar durations)")
-		pipelines := multiFlagVar(fs, "pipeline", "filter by pipeline (repeatable; OR semantics; prefix `!` to exclude)")
-		statuses := multiFlagVar(fs, "status", "filter by status (repeatable; OR semantics; prefix `!` to exclude)")
-		branches := multiFlagVar(fs, "branch", "filter by git branch (repeatable; prefix `!` to exclude)")
-		shas := multiFlagVar(fs, "sha", "filter by git sha prefix (repeatable; prefix `!` to exclude)")
-		errorSubstring := fs.String("error", "", "substring match against the persisted failure reason")
-		search := fs.String("search", "", "free-text search across pipeline/branch/sha/id/error; prefix a term with `-` to exclude")
-		startedAfter := fs.String("started-after", "", "only runs whose StartedAt >= this (today, yesterday, 24h, 7d, or a date)")
-		startedBefore := fs.String("started-before", "", "only runs whose StartedAt <= this")
-		finishedAfter := fs.String("finished-after", "", "only runs whose FinishedAt >= this (excludes still-running)")
-		finishedBefore := fs.String("finished-before", "", "only runs whose FinishedAt <= this (excludes still-running)")
-		cursor := fs.String("cursor", "", "continue after next_cursor with the same filters")
-		byPipeline := fs.Bool("by-pipeline", false, "pivot into one row per pipeline with a status sparkline of the last N runs")
-		sparkline := fs.Int("sparkline", 30, "length of the sparkline when --by-pipeline is set")
-		style := fs.String("style", "ascii", "sparkline glyph style: ascii|block|dot")
-		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block) instead of this machine's store")
-		repos := multiFlagVar(fs, "repo", "filter by repository owner/name (repeatable)")
-		rootOnly := fs.Bool("root-only", false, "exclude child runs")
-		wait := fs.Bool("wait", false, "block until at least one run matches")
-		waitTimeout := fs.Duration("wait-timeout", 2*time.Minute, "give up (exit 2) after this long when --wait is set")
-		watch := fs.BoolP("follow", "f", false, "keep polling and print each newer matching run as it appears")
-		groupBy := fs.String("group-by", "", "with --status failed: one failure row per run, or cluster by step or node (run|step|node)")
-		if err := parseAndCheck(cmdJobsList, fs, args[1:]); err != nil {
-			if errors.Is(err, errHelpRequested) {
-				return nil
-			}
-			return err
-		}
-		resolvedFormat, err := resolveOutputFormat(*outputFormat, "runs list")
-		if err != nil {
-			return err
-		}
-		if *limit == 0 {
-			return fmt.Errorf("runs list: --limit 0 is not a page size; page with --cursor instead, " +
-				"following next_cursor until truncated is false")
-		}
-		if *limit < 0 {
-			return fmt.Errorf("runs list: --limit must be greater than zero, got %d", *limit)
-		}
-
-		pipelineInc, pipelineExc := orchestrator.SplitExcludes(*pipelines)
-		statusInc, statusExc := orchestrator.SplitExcludes(*statuses)
-		branchInc, branchExc := orchestrator.SplitExcludes(*branches)
-		shaInc, shaExc := orchestrator.SplitExcludes(*shas)
-
-		pipelineSet := pipelineInc
-
-		compiled := orchestrator.CompiledFilter{
-			Branches:       branchInc,
-			BranchExcludes: branchExc,
-			SHAPrefixes:    shaInc,
-			SHAExcludes:    shaExc,
-			ErrorSubstr:    *errorSubstring,
-			StatusExcludes: statusExc,
-			PipelineExcl:   pipelineExc,
-			Search:         orchestrator.ParseSearch(*search),
-		}
-		for _, ts := range []struct {
-			raw  string
-			into *time.Time
-			name string
-		}{
-			{*startedAfter, &compiled.StartedAfter, "started-after"},
-			{*startedBefore, &compiled.StartedBefore, "started-before"},
-			{*finishedAfter, &compiled.FinishedAfter, "finished-after"},
-			{*finishedBefore, &compiled.FinishedBefore, "finished-before"},
-		} {
-			if ts.raw == "" {
-				continue
-			}
-			t, err := orchestrator.ParseLooseDate(ts.raw)
-			if err != nil {
-				return fmt.Errorf("runs list: --%s: %w", ts.name, err)
-			}
-			*ts.into = t
-		}
-
-		var sparklineStyle orchestrator.SparklineStyle
-		switch *style {
-		case "ascii", "":
-			sparklineStyle = orchestrator.SparkASCII
-		case "block":
-			sparklineStyle = orchestrator.SparkBlock
-		case "dot":
-			sparklineStyle = orchestrator.SparkDot
-		default:
-			return fmt.Errorf("runs list: --style must be ascii|block|dot, got %q", *style)
-		}
-
-		listOptions := orchestrator.ListOpts{
-			Limit:      *limit,
-			Pipelines:  pipelineSet,
-			Statuses:   statusInc,
-			Repos:      *repos,
-			RootOnly:   *rootOnly,
-			Since:      *since,
-			JSON:       resolvedFormat == "json",
-			Quiet:      *quiet,
-			Filter:     compiled,
-			Cursor:     *cursor,
-			ByPipeline: *byPipeline,
-			Pivot: orchestrator.PivotOpts{
-				SparklineLen: *sparkline,
-				Style:        sparklineStyle,
-			},
-		}
-
-		p, profileErr := resolveProfileFlag(*profileName)
-		if profileErr != nil {
-			return profileErr
-		}
-		listOptions.Profile = p
-		if *groupBy != "" {
-			return listFailures(contextValue, paths, listOptions, *groupBy, resolvedFormat == "json")
-		}
-		if (*wait || *watch) && clientSideFilter(compiled) {
-			return errors.New("runs list: --wait and --watch match on --pipeline, --status, --branch, --sha, --repo, --root-only and --since only")
-		}
-		if *wait {
-			if err := waitForMatchingRun(contextValue, paths, listOptions, *waitTimeout); err != nil {
-				return err
-			}
-		}
-		if err := orchestrator.ListJobs(contextValue, paths, listOptions, os.Stdout); err != nil {
-			return err
-		}
-		if *watch {
-			return watchNewRuns(contextValue, paths, listOptions, resolvedFormat == "json")
-		}
-		return nil
+		return runRunsList(contextValue, args[1:])
 
 	case "status":
 		return runRunsStatus(contextValue, args[1:])
 
 	case "logs", "grep":
-		fs := flag.NewFlagSet(cmdJobsLogs.Path, flag.ContinueOnError)
-		runID := fs.String("run", "", "run identifier")
-		node := fs.String("job", "", "limit output to one node id")
-		outputFormat := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
-		follow := fs.BoolP("follow", "f", false, "tail the log(s) until the run terminates")
-		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block) instead of this machine's store")
-		tail := fs.Int("tail", 0, "print only the last N lines (server-side in cluster mode)")
-		head := fs.Int("head", 0, "print only the first N lines (server-side in cluster mode)")
-		lines := fs.String("lines", "", "1-indexed inclusive line range A:B (server-side in cluster mode)")
-		grep := fs.String("grep", "", "substring filter (server-side in cluster mode)")
-		since := lookbackDuration(fs, "since", 0,
-			"only include output from nodes whose StartedAt >= now-D; with --grep and no --run, only runs newer than D (5m, 1h, 7d, and similar durations)")
-		tree := fs.Bool("tree", false, "merge parent run + descendants into one chronological stream (local only)")
-		eventsOnly := fs.Bool("events-only", false, "show run and step lifecycle events; stored runs use their recorded events")
-		noEvents := fs.Bool("no-events", false, "show node output only")
-		search := addLogSearchFlags(fs)
-		if err := parseAndCheck(cmdJobsLogs, fs, args[1:]); err != nil {
-			if errors.Is(err, errHelpRequested) {
-				return nil
-			}
-			return err
-		}
-		*runID = normalizeRunID(*runID)
-		resolvedFormat, err := resolveTTYAwareOutput(*outputFormat, "runs logs")
-		if err != nil {
-			return err
-		}
-		if *runID == "" && *grep == "" {
-			return errors.New("runs logs: --run is required; pass --grep without --run to search across runs")
-		}
-		if *runID == "" && *grep != "" {
-			return searchRunLogs(contextValue, paths, fs, search, *grep, *since, *profileName, resolvedFormat)
-		}
-		if search.changed(fs) {
-			return errors.New("runs logs: --pipeline, --status, --branch, --sha, --started-after, --started-before, --limit, --max-matches and --quiet search across runs; pass --grep without --run")
-		}
-		if *tail > 0 && *head > 0 {
-			return errors.New("runs logs: --tail and --head cannot be combined")
-		}
-		options := orchestrator.LogsOpts{
-			Node:       *node,
-			JSON:       resolvedFormat == "json",
-			Follow:     *follow,
-			Format:     resolvedFormat,
-			Tail:       *tail,
-			Head:       *head,
-			Lines:      *lines,
-			Grep:       *grep,
-			Since:      *since,
-			Tree:       *tree,
-			EventsOnly: *eventsOnly,
-			NoEvents:   *noEvents,
-		}
-		p, profileErr := resolveProfileFlag(*profileName)
-		if profileErr != nil {
-			return profileErr
-		}
-		options.Profile = p
-		return orchestrator.JobLogs(contextValue, paths, *runID, options, os.Stdout)
+		return runRunsLogs(contextValue, args[0], args[1:])
 
 	case "consumer":
 		return runRunsConsumer(args[1:])

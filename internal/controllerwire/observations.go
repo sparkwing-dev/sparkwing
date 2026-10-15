@@ -8,9 +8,20 @@ import (
 // RunQuery selects a page of public run details. ParentRunID is an exact parent
 // identity, not a prefix. Cursor is opaque and retains the same filters.
 type RunQuery struct {
-	ParentRunID string
-	Limit       int
-	Cursor      string
+	ParentRunID                   string
+	Limit                         int
+	Cursor                        string
+	Pipeline                      string
+	Status                        string
+	Branches                      []string
+	SHA                           string
+	Repos                         []string
+	RootOnly                      bool
+	Error                         string
+	Search                        string
+	StartedAfter, StartedBefore   time.Time
+	FinishedAfter, FinishedBefore time.Time
+	AfterNumber                   int64
 }
 
 type RunPage struct {
@@ -22,15 +33,16 @@ type RunPage struct {
 // StepDetail contains display state only. Step inputs and execution credentials
 // cannot enter the public observation boundary.
 type StepDetail struct {
-	JobID      string     `json:"job_id"`
-	ID         string     `json:"id"`
-	Label      string     `json:"label"`
-	Attempt    int64      `json:"attempt"`
-	Status     string     `json:"status"`
-	Outcome    string     `json:"outcome,omitempty"`
-	Reason     string     `json:"reason,omitempty"`
-	StartedAt  *time.Time `json:"started_at,omitempty"`
-	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	Annotations []Annotation `json:"annotations,omitempty"`
+	JobID       string       `json:"job_id"`
+	ID          string       `json:"id"`
+	Label       string       `json:"label"`
+	Attempt     int64        `json:"attempt"`
+	Status      string       `json:"status"`
+	Outcome     string       `json:"outcome,omitempty"`
+	Reason      string       `json:"reason,omitempty"`
+	StartedAt   *time.Time   `json:"started_at,omitempty"`
+	FinishedAt  *time.Time   `json:"finished_at,omitempty"`
 }
 
 type RunSteps struct {

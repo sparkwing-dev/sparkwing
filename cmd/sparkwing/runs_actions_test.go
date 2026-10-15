@@ -1,23 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"strings"
 	"testing"
 )
-
-func TestReportResults_PrintsNoteForNoOpCancel(t *testing.T) {
-	var buf bytes.Buffer
-	err := reportResults(&buf, "cancel", []runResult{
-		{RunID: "run-done", OK: true, Note: "already finished (success) -- nothing to cancel"},
-	})
-	if err != nil {
-		t.Fatalf("a no-op cancel row must not fail the batch: %v", err)
-	}
-	if !strings.Contains(buf.String(), "ok   run-done: already finished (success) -- nothing to cancel") {
-		t.Fatalf("missing note row in:\n%s", buf.String())
-	}
-}
 
 func TestCollectRunIDs_FlagsAndStdinDash(t *testing.T) {
 	stdin := strings.NewReader("run-stdin-1\nrun-stdin-2\n")
@@ -79,33 +65,5 @@ func TestCollectRunIDs_EmptyReturnsEmpty(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("expected empty, got %v", got)
-	}
-}
-
-func TestReportResults_ExitsNonZeroOnAnyFailure(t *testing.T) {
-	var buf bytes.Buffer
-	err := reportResults(&buf, "retry", []runResult{
-		{RunID: "run-a", OK: true, NewRunID: "run-new"},
-		{RunID: "run-b", Error: "boom"},
-	})
-	if err == nil {
-		t.Fatal("expected non-nil error when any result failed")
-	}
-	out := buf.String()
-	for _, want := range []string{"ok   run-a -> run-new", "fail run-b: boom", "1 ok, 1 failed"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("missing %q in:\n%s", want, out)
-		}
-	}
-}
-
-func TestReportResults_AllOKReturnsNil(t *testing.T) {
-	var buf bytes.Buffer
-	err := reportResults(&buf, "cancel", []runResult{
-		{RunID: "run-a", OK: true},
-		{RunID: "run-b", OK: true},
-	})
-	if err != nil {
-		t.Fatalf("expected nil, got %v", err)
 	}
 }

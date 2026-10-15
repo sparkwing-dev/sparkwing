@@ -3,6 +3,34 @@
 Sparkwing tracks run health, failure reasons, and resource usage so you
 can debug failures fast and right-size containers.
 
+## Finding a run and its logs
+
+Use `sparkwing runs list --pipeline check --status failed --since 7d` to find
+failed runs. Add `--profile NAME` to select a controller. Filters apply before
+the page limit. JSON includes compact run records and a page record with
+`next_cursor` and `truncated`. Pass the cursor with the same filters to continue.
+Plain output prints run IDs, while quiet JSON prints an ID object per run.
+
+`--by-pipeline` totals all matching pages. `--group-by job` groups failures in
+the selected page by job, and `--group-by step` uses job/step identities.
+Both failure views require `--status failed`. `--follow` emits newer matching
+runs, including a run that fails after a later run has already failed.
+
+Read a selected run with `sparkwing runs status --run RUN --steps`. Use
+`sparkwing runs logs --run RUN --follow` for its logs, or add `--job JOB` for
+one job. JSON preserves job attempts and trigger, plan or eval log subjects.
+Log follow completes only after the controller reports final persisted logs.
+An interrupted or incomplete observation exits 3.
+
+Search several runs with `sparkwing runs grep --grep PATTERN --pipeline check`.
+Search output retains its continuation even when a page has no matching lines.
+Use `--quiet -o plain` for matching run IDs. Annotation and approval commands
+under `runs` use the same selected controller and preserve structured failures.
+
+The rewrite's CLI adapters are implemented against the shared controller
+contract. Final server read adapters, annotation policy and persisted log
+completion remain integration requirements.
+
 ## Observational state-write failures
 
 The node log emits a `state_write_failed` warning when a step lifecycle,

@@ -32,14 +32,10 @@ const (
 // rows go unread.
 var defaultTeamCallers = map[string]string{
 	"cmd/sparkwing.(cronLauncher).Active":                              defaultTeamCrons,
-	"cmd/sparkwing.addLocalAnnotation":                                 defaultTeamCli,
 	"cmd/sparkwing.existingSubmissionResult":                           defaultTeamCli,
 	"cmd/sparkwing.findExistingSubmission":                             defaultTeamCli,
-	"cmd/sparkwing.listLocalAnnotations":                               defaultTeamCli,
-	"cmd/sparkwing.listLocalApprovals":                                 defaultTeamCli,
 	"cmd/sparkwing.persistSubmission":                                  defaultTeamCli,
 	"cmd/sparkwing.resetNamedProfile":                                  defaultTeamCli,
-	"cmd/sparkwing.resolveLocalApproval":                               defaultTeamCli,
 	"cmd/sparkwing.retryLocalRuns":                                     defaultTeamCli,
 	"cmd/sparkwing.runCapacityReset":                                   defaultTeamCli,
 	"cmd/sparkwing.runCapacityStats":                                   defaultTeamCli,
@@ -129,7 +125,6 @@ var defaultTeamCallers = map[string]string{
 	"internal/orchestrator.refWorktreeTriggerSettled":                  defaultTeamWorktree,
 	"internal/orchestrator.renderStatus":                               defaultTeamView,
 	"internal/orchestrator.runningNodeDetail":                          defaultTeamView,
-	"internal/orchestrator.scanLocalRuns":                              defaultTeamView,
 	"internal/orchestrator.settleClaimedTriggerDispatch":               defaultTeamConsumer,
 	"internal/orchestrator.writeLogsTreeLocal":                         defaultTeamView,
 	"internal/orchestrator.writeRunDetailJSON":                         defaultTeamView,

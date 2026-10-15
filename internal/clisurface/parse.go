@@ -254,7 +254,11 @@ func validateFlag(f Flag, value string) error {
 		}
 	}
 	if f.Argument == "DURATION" || f.Argument == "DUR" {
-		if _, err := time.ParseDuration(value); err != nil {
+		parse := time.ParseDuration
+		if f.Name == "since" || f.Name == "older-than" {
+			parse = ParseLookback
+		}
+		if _, err := parse(value); err != nil {
 			return fmt.Errorf("requires a duration")
 		}
 	}

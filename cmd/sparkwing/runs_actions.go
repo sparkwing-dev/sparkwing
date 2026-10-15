@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"strings"
-	"time"
 
 	flag "github.com/spf13/pflag"
 
@@ -82,29 +81,6 @@ type runResult struct {
 
 	Note  string `json:"note,omitempty"`
 	Error string `json:"error,omitempty"`
-}
-
-func reportResults(out io.Writer, action string, results []runResult) error {
-	failures := 0
-	for _, r := range results {
-		switch {
-		case r.OK && r.NewRunID != "":
-			fmt.Fprintf(out, "ok   %s -> %s\n", r.RunID, r.NewRunID)
-		case r.OK && r.Note != "":
-			fmt.Fprintf(out, "ok   %s: %s\n", r.RunID, r.Note)
-		case r.OK:
-			fmt.Fprintf(out, "ok   %s\n", r.RunID)
-		default:
-			failures++
-			fmt.Fprintf(out, "fail %s: %s\n", r.RunID, r.Error)
-		}
-	}
-	successes := len(results) - failures
-	fmt.Fprintf(out, "%s: %d ok, %d failed\n", action, successes, failures)
-	if failures > 0 {
-		return fmt.Errorf("%s: %d of %d failed", action, failures, len(results))
-	}
-	return nil
 }
 
 func runRunsRetry(ctx context.Context, args []string) error {
@@ -242,73 +218,4 @@ func standaloneLocalRuns(
 		remaining = append(remaining, id)
 	}
 	return done, remaining
-}
-
-func runRunsPrune(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet(cmdJobsPrune.Path, flag.ContinueOnError)
-	on := fs.String("profile", "", "profile name for remote runs; omit for local runs")
-	olderThan := lookbackDuration(fs, "older-than", 0, "prune runs older than this (e.g. 7d, 48h)")
-	dryRun := fs.Bool("dry-run", false, "list matching runs without deleting")
-	runIDs := multiFlagVar(fs, "run", "specific run id to prune (repeatable; use --run - to read ids from stdin)")
-	if err := parseAndCheck(cmdJobsPrune, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if rest := fs.Args(); len(rest) > 0 {
-		return fmt.Errorf("%s: unexpected positional %q (use --run, repeatable)", cmdJobsPrune.Path, rest[0])
-	}
-	explicitIDs, err := collectRunIDs(*runIDs, os.Stdin)
-	if err != nil {
-		return err
-	}
-	if len(explicitIDs) == 0 && *olderThan <= 0 {
-		return errors.New("runs prune: either --older-than DUR or --run RUN_ID is required")
-	}
-	if len(explicitIDs) > 0 && *olderThan > 0 {
-		return errors.New("runs prune: --run and --older-than are mutually exclusive")
-	}
-	c, err := resolveRunsClient(*on, cmdJobsPrune.Path)
-	if err != nil {
-		return err
-	}
-
-	victims := explicitIDs
-	if len(victims) == 0 {
-		runs, err := c.ListRuns(ctx, store.RunFilter{Limit: 10000})
-		if err != nil {
-			return fmt.Errorf("list runs: %w", err)
-		}
-		cutoff := time.Now().Add(-*olderThan)
-		for _, r := range runs {
-			if !r.StartedAt.Before(cutoff) {
-				continue
-			}
-			if r.Status != "success" && r.Status != "failed" && r.Status != "cancelled" {
-				continue
-			}
-			victims = append(victims, r.ID)
-		}
-	}
-	if len(victims) == 0 {
-		fmt.Fprintln(os.Stdout, "no runs match prune criteria")
-		return nil
-	}
-	if *dryRun {
-		fmt.Fprintf(os.Stdout, "would prune %d run(s):\n", len(victims))
-		for _, id := range victims {
-			fmt.Fprintln(os.Stdout, "  "+id)
-		}
-		return nil
-	}
-	results := make([]runResult, 0, len(victims))
-	for _, id := range victims {
-		if err := c.DeleteRun(ctx, id); err != nil {
-			results = append(results, runResult{RunID: id, Error: err.Error()})
-			continue
-		}
-		results = append(results, runResult{RunID: id, OK: true})
-	}
-	return reportResults(os.Stdout, "prune", results)
 }

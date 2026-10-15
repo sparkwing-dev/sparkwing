@@ -22,27 +22,27 @@ func TestClaimToPod(t *testing.T) {
 }
 
 func TestParseDebugTarget_NamespaceOnAttachOnly(t *testing.T) {
-	got, err := parseDebugTarget(cmdDebugAttach, []string{"--run", "r1", "--node", "n1"})
+	got, err := parseDebugTarget(cmdDebugAttach, []string{"--run", "r1", "--job", "n1"})
 	if err != nil || got.namespace != defaultDebugNamespace {
 		t.Fatalf("attach default = %+v, %v; want namespace %s", got, err, defaultDebugNamespace)
 	}
-	got, err = parseDebugTarget(cmdDebugAttach, []string{"--run", "r1", "--node", "n1", "--namespace", "ci"})
+	got, err = parseDebugTarget(cmdDebugAttach, []string{"--run", "r1", "--job", "n1", "--namespace", "ci"})
 	if err != nil || got.namespace != "ci" {
 		t.Fatalf("attach --namespace ci = %+v, %v", got, err)
 	}
-	if _, err := parseDebugTarget(cmdDebugRelease, []string{"--run", "r1", "--node", "n1", "--namespace", "ci"}); err == nil {
+	if _, err := parseDebugTarget(cmdDebugRelease, []string{"--run", "r1", "--job", "n1", "--namespace", "ci"}); err == nil {
 		t.Fatal("debug release accepted --namespace")
 	}
 }
 
-func TestParseDebugTarget_RequiresRunAndNode(t *testing.T) {
+func TestParseDebugTarget_RequiresRunAndJob(t *testing.T) {
 	if _, err := parseDebugTarget(cmdDebugRelease, []string{"--run", "r1"}); err == nil {
-		t.Fatal("expected error when --node missing")
+		t.Fatal("expected error when --job missing")
 	}
-	if _, err := parseDebugTarget(cmdDebugRelease, []string{"--node", "n1"}); err == nil {
+	if _, err := parseDebugTarget(cmdDebugRelease, []string{"--job", "n1"}); err == nil {
 		t.Fatal("expected error when --run missing")
 	}
-	tgt, err := parseDebugTarget(cmdDebugRelease, []string{"--run", "r1", "--node", "n1"})
+	tgt, err := parseDebugTarget(cmdDebugRelease, []string{"--run", "r1", "--job", "n1"})
 	if err != nil {
 		t.Fatalf("valid args: %v", err)
 	}

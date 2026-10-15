@@ -107,6 +107,72 @@ and refreshes descendant trees independently of the parent's state sequence.
 An interrupted, timed-out or otherwise incomplete observation exits 3. Invalid
 flags exit 2. Terminal failure exits 1 unless `--exit-zero` is selected.
 
+### Listing, deletion, logs and reviews
+
+These W9-owned wire additions use existing C2 routes. W2 must implement the
+response projections and W7 must supply persisted log completeness. Transport
+and CLI tests use fakes while those owners remain stubs.
+
+`RunQuery` carries `pipeline`, `status`, repeated `branch` and `repo`, `sha`,
+`root_only`, `error`, `search`, and RFC3339 `started_after`, `started_before`,
+`finished_after` and `finished_before` filters. Filters apply before the limit.
+Pipeline, status, branch and SHA accept a leading `!` exclusion. Search terms
+match case-insensitively across public identity, pipeline, ref, SHA and masked
+failure text. A leading `-` excludes a term. Repeated positive values are ORed,
+exclusions subtract, and different filter categories are ANDed. Time bounds are
+inclusive. Unfinished runs do not match a finished-time bound.
+
+Pages are ordered by descending allocated team number. `after_number` is an
+exclusive lower bound. Cursors retain filters and the page snapshot. The CLI
+keeps its initial follow boundary fixed and deduplicates emitted IDs because
+a newer run can fail before an earlier run. Moving that boundary after every
+poll would lose the earlier run when it later matches a mutable filter.
+
+CLI list JSON projects compact selection metadata from `RunDetail`. It does
+not repeat inputs, jobs, attempts or log subjects. A `kind: page` record carries
+`next_cursor` and `truncated`. Quiet JSON emits ID objects and sends continuation
+metadata to stderr. Pipeline totals consume every matching page. Failure groups
+use job IDs or job/step IDs and count distinct runs in the selected page.
+
+`RunPruner.DeleteRun` uses `DELETE /api/v1/runs/{run}` and returns `RunDeletion`
+with canonical `run_id` and `deleted`. False means already absent. Retention pins
+must fail with a structured error rather than report a successful no-op. The
+server owns deletion authorization and financial retention. Age-based CLI prune
+collects all terminal runs strictly before its cutoff before deleting any row,
+so deletion cannot invalidate selection cursors. A failed selection deletes none.
+
+`LogReader` reads `/runs/{run}/logs`, `/runs/{run}/jobs/{job}/logs`,
+`/runs/{run}/logs/search` and `/runs/grep` under `/api/v1`. `LogQuery` carries
+explicit head/tail presence, an inclusive line range, grep text, since, tree,
+event selection and an opaque resume cursor. `LogRecord` contains either a tagged
+`blob.LogSubject` or a lifecycle event. Events may carry job/step identity.
+Output subjects retain attempt and generation or trigger/plan/eval identity.
+No synthetic job names replace owner logs.
+
+`LogPage` carries records, next cursor, truncation and completeness. Truncated
+pages require a progressing cursor. An idle live page retains a nonempty cursor.
+Complete means terminal state and final persisted segments have both been
+observed. CLI follow drains available pages before polling and cannot treat
+missing final segments as completion. `LogSearchQuery` reuses `RunQuery` and adds
+job, pattern and per-subject maximum matches. Zero means uncapped. Search can
+return no matches with a continuation because the cursor advances through
+candidate runs. No implicit tail limit was added.
+
+`RunReview` shares `ReadRun`/`ReadSteps` and adds pending or selected-run approval
+reads, approval decisions and job/step annotations. `ApprovalDecision` carries
+resolution and optional comment. Its idempotency key travels in the header, and
+the controller derives the approver from authentication. `ApprovalResult`
+preserves the resolved gate and replay marker. Pending gates use
+`GET /api/v1/approvals?pending=true`; run history and decisions use the existing
+run approval routes.
+
+`Annotation` retains level, message, file, line, column and end line. Public job
+and step details carry optional annotation arrays. `AnnotationWrite` optionally
+selects a step and posts to the existing job or job-step annotation route. Reads
+contain masked text. The existing C2 table has no run-scoped annotation write or
+ordinary-member annotation grant. Those are W2 contract gaps, not approved
+feature restrictions. W9 adds no route or grant to bypass them.
+
 `EngineOptions.Launcher` selects `/api/v1/launcher/claim` for every launcher
 selection, including node-only and named jobs. Unit kinds cannot distinguish
 a runner's `nodes.claim` credential from a launcher's `claims.launch`

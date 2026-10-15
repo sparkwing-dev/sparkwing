@@ -52,6 +52,8 @@ Read or append persistent job + step annotations
 
 Append an annotation to a job or step
 
+Plain emits run/job[/step]. JSON retains the controller replay result.
+
 ### Flags
 
 | Flag | Description |
@@ -69,6 +71,8 @@ Append an annotation to a job or step
 ## `sparkwing runs annotations list`
 
 List annotations on a run
+
+JSON emits job_id, optional step_id, level, message and source location per annotation. Plain emits one message per line, with line breaks replaced by spaces.
 
 ### Flags
 
@@ -107,6 +111,8 @@ List approval gates (pending and history)
 
 Approve a pending approval-gate job
 
+The controller derives the approver from authentication. Plain emits run/job. JSON includes the approval and replay result.
+
 ### Flags
 
 | Flag | Description |
@@ -124,6 +130,8 @@ Approve a pending approval-gate job
 
 Deny a pending approval-gate job
 
+The controller derives the approver from authentication. Plain emits run/job. JSON includes the approval and replay result.
+
 ### Flags
 
 | Flag | Description |
@@ -140,6 +148,8 @@ Deny a pending approval-gate job
 ## `sparkwing runs approvals list`
 
 List pending approvals (or one run's history)
+
+Without --run, list pending approvals. With --run, include resolved history. Plain emits run/job.
 
 ### Flags
 
@@ -171,6 +181,10 @@ Request cancellation of in-flight runs
 
 Search run log text
 
+Search controller logs across matching runs. Filters apply before the run page limit. --max-matches limits matches per log subject, with zero meaning uncapped.
+
+JSON emits matching records and a page record with next_cursor and truncated. Quiet JSON emits run_id records and sends continuation metadata to stderr. Plain emits matching lines, or run IDs with --quiet.
+
 ### Flags
 
 | Flag | Description |
@@ -197,6 +211,14 @@ Search run log text
 ## `sparkwing runs list`
 
 List recent pipeline runs
+
+Read runs through the selected controller. Filters apply before pagination. Runs are ordered by descending team number. --since accepts days and weeks, such as 7d or 2w.
+
+JSON emits compact run records and a page record with next_cursor and truncated. Quiet JSON emits id records and sends continuation metadata to stderr. Plain emits run IDs.
+
+--by-pipeline totals every matching page and retains the newest --sparkline statuses. --group-by run|job|step requires --status failed and groups the selected page.
+
+--wait blocks until a matching run appears. --follow reads every newer matching run between polls. Grouped follow output describes each new batch. Interrupted or timed-out waits exit 3.
 
 ### Flags
 
@@ -235,6 +257,12 @@ List recent pipeline runs
 
 Print a run's logs
 
+Read job-attempt and trigger, plan or eval logs through the controller. --job selects a job. --tree includes descendants. --events-only and --no-events select lifecycle events or output.
+
+--follow consumes every available page, then waits for new records until final log segments are complete. An incomplete or interrupted observation exits 3.
+
+JSON emits tagged log records. Plain emits log lines. Use --grep without --run to search across runs with the same filters and pagination as runs grep.
+
 ### Flags
 
 | Flag | Description |
@@ -269,6 +297,10 @@ Print a run's logs
 ## `sparkwing runs prune`
 
 Delete finished runs older than a threshold, or by id
+
+Select --run, including --run - for IDs on stdin, or --older-than. Age selection reads every page and includes only terminal runs started before the cutoff. A failed selection deletes nothing.
+
+--dry-run prints the selected IDs without deleting. The controller enforces retention pins. JSON retains deletion results and structured failures. Plain emits run IDs.
 
 ### Flags
 

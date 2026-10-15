@@ -1,7 +1,6 @@
 package client
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -85,37 +84,6 @@ func (l NodeLogs) Read(ctx context.Context, runID, nodeID string, opts storage.R
 // ReadRun returns every node's log of a run, each under a banner.
 func (l NodeLogs) ReadRun(ctx context.Context, runID string) ([]byte, error) {
 	return l.getRaw(ctx, l.logPath(runID, ""), url.Values{})
-}
-
-// GrepLine is a line of a node's log a [NodeLogs.Grep] matched, with
-// its 1-based position in the whole log.
-type GrepLine struct {
-	LineNo int    `json:"line_no"`
-	Line   string `json:"line"`
-}
-
-// Grep returns the lines of one node's log that contain pattern, with
-// their line numbers; maxMatches above zero stops after that many.
-func (l NodeLogs) Grep(ctx context.Context, runID, nodeID, pattern string, maxMatches int) ([]GrepLine, error) {
-	q := url.Values{"grep": {pattern}, "line_numbers": {"1"}}
-	if maxMatches > 0 {
-		q.Set("max_matches", strconv.Itoa(maxMatches))
-	}
-	raw, err := l.getRaw(ctx, l.logPath(runID, nodeID), q)
-	if err != nil {
-		return nil, err
-	}
-	var out []GrepLine
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	for {
-		var line GrepLine
-		if err := dec.Decode(&line); errors.Is(err, io.EOF) {
-			return out, nil
-		} else if err != nil {
-			return nil, fmt.Errorf("decode grep line: %w", err)
-		}
-		out = append(out, line)
-	}
 }
 
 // ErrLogStreamRefused reports a log stream the controller refused for

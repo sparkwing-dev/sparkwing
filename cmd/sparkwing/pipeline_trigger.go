@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 type triggerFlags struct {
@@ -109,8 +110,10 @@ func runPipelineTrigger(args []string) error {
 	if ferr != nil {
 		return ferr
 	}
-	followErr := orchestrator.JobLogsRemoteWithTokens(ctx, prof.ControllerURL(), prof.ControllerToken(),
-		resp.RunID, orchestrator.LogsOpts{Follow: true, Format: format, JSON: format == "json"}, os.Stdout)
+	followErr := followControllerRunLogs(ctx, client.EngineOptions{
+		URL:    prof.ControllerURL(),
+		Bearer: func(context.Context) (string, error) { return prof.ControllerToken(), nil },
+	}, resp.RunID, format, os.Stdout)
 	return remoteFollowExit(ctx, prof, resp.RunID, followErr)
 }
 

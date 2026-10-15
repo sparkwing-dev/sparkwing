@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -41,6 +42,42 @@ func TestSurfaceGrammarContract(t *testing.T) {
 		inv, err := clisurface.Parse("sparkwing", append(strings.Fields(command), "--", "--profile", "argument"))
 		if err != nil || inv.Value("profile") != "prod" || inv.Pipeline != "check" || !reflect.DeepEqual(inv.Args, []string{"--profile", "argument"}) {
 			t.Fatalf("trigger profile position: %#v %v", inv, err)
+		}
+	}
+}
+
+func TestSurfaceRunQueryAndPruneTransport(t *testing.T) {
+	for _, endpoint := range []string{"http://api.sock", "https://controller.example"} {
+		calls := 0
+		c, err := client.NewRunPruner(client.EngineOptions{URL: endpoint, HTTP: &http.Client{Transport: surfaceTransport(func(req *http.Request) (*http.Response, error) {
+			calls++
+			body := `{"runs":[],"next_cursor":"","truncated":false}`
+			switch req.Method {
+			case "GET":
+				q := req.URL.Query()
+				if req.URL.Path != "/api/v1/runs" || q.Get("after_number") != "412" || q.Get("root_only") != "true" || q.Get("finished_before") != "2026-10-14T00:00:00Z" || !reflect.DeepEqual(q["branch"], []string{"main", "!release"}) {
+					t.Fatalf("query lost: %s", req.URL)
+				}
+			case "DELETE":
+				if req.URL.Path != "/api/v1/runs/412" {
+					t.Fatalf("delete selector: %s", req.URL)
+				}
+				body = `{"run_id":"r1","deleted":true}`
+			default:
+				t.Fatalf("unexpected method: %s", req.Method)
+			}
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+		})}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = c.ListRuns(t.Context(), controllerwire.RunQuery{Limit: 20, AfterNumber: 412, RootOnly: true, Branches: []string{"main", "!release"}, FinishedBefore: time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		deleted, err := c.DeleteRun(t.Context(), "412")
+		if err != nil || deleted.RunID != "r1" || !deleted.Deleted || calls != 2 {
+			t.Fatalf("deletion: %+v calls=%d err=%v", deleted, calls, err)
 		}
 	}
 }
