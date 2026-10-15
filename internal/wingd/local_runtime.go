@@ -233,7 +233,7 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 		workers.Go(func() {
 			defer ln.Close()
 			serve("dashboard", func() error {
-				return serveLocalHTTP(ctx, &readyListener{Listener: ln, ready: dashboardReady}, controller.HTTP().Dashboard, nil, d.dashboardConnection)
+				return ServeLocalHTTP(ctx, &readyListener{Listener: ln, ready: dashboardReady}, controller.HTTP().Dashboard, nil, d.dashboardConnection)
 			})
 		})
 		return nil

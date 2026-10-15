@@ -31,41 +31,7 @@ func main(){
 }`
 
 func TestRunSDKInstallBuildsLocallyAndUsesNativeLockfile(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("HOME", root)
-	t.Setenv("SPARKWING_HOME", root)
-	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
-	source := filepath.Join(root, "tool.go")
-	if err := os.WriteFile(source, []byte(nativeInstallFixtureSource), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	toolPath := filepath.Join(root, "tool.exe")
-	build := exec.Command("go", "build", "-p", "2", "-o", toolPath, source)
-	if body, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build native tool fixture: %s %v", body, err)
-	}
-	tool, err := os.ReadFile(toolPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	bin := filepath.Join(root, "bin")
-	if err := os.Mkdir(bin, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	suffix := ""
-	if runtime.GOOS == "windows" {
-		suffix = ".exe"
-	}
-	for _, name := range []string{"go", "npm", "node"} {
-		if runtime.GOOS == "windows" && name == "npm" {
-			writeInput(t, bin, "npm.cmd", []byte("@exit /b 99\r\n"))
-			continue
-		}
-		if err := os.WriteFile(filepath.Join(bin, name+suffix), tool, 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	t.Setenv("PATH", bin)
+	bin, suffix := installNativeToolFixture(t)
 	secret := "proxy-secret-native-installer"
 	t.Setenv("HTTPS_PROXY", "http://user:"+secret+"@proxy.example")
 	for _, sdk := range []engine.SDKKind{engine.GoSDK, engine.TypeScriptSDK} {
@@ -128,7 +94,47 @@ func TestRunSDKInstallBuildsLocallyAndUsesNativeLockfile(t *testing.T) {
 	}
 }
 
-func writeInput(t *testing.T, dir, name string, body []byte) {
+func installNativeToolFixture(t testing.TB) (string, string) {
+	t.Helper()
+	root := t.TempDir()
+	t.Setenv("HOME", root)
+	t.Setenv("SPARKWING_HOME", root)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
+	source := filepath.Join(root, "tool.go")
+	if err := os.WriteFile(source, []byte(nativeInstallFixtureSource), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	toolPath := filepath.Join(root, "tool.exe")
+	build := exec.Command("go", "build", "-p", "2", "-o", toolPath, source)
+	if body, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build native tool fixture: %s %v", body, err)
+	}
+	tool, err := os.ReadFile(toolPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(root, "bin")
+	if err := os.Mkdir(bin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	suffix := ""
+	if runtime.GOOS == "windows" {
+		suffix = ".exe"
+	}
+	for _, name := range []string{"go", "npm", "node"} {
+		if runtime.GOOS == "windows" && name == "npm" {
+			writeInput(t, bin, "npm.cmd", []byte("@exit /b 99\r\n"))
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(bin, name+suffix), tool, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin)
+	return bin, suffix
+}
+
+func writeInput(t testing.TB, dir, name string, body []byte) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), body, 0o600); err != nil {
 		t.Fatal(err)

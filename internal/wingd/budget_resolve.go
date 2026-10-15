@@ -31,12 +31,13 @@ func ResolveBudget(flagValue string) (ResolvedBudget, error) {
 	if v := strings.TrimSpace(flagValue); v != "" {
 		return parseBudgetFrom(v, BudgetSourceFlag, "--budget")
 	}
-	raw, path, err := readAdmissionSection()
+	var raw userconfig.AdmissionConfig
+	path, _, err := userconfig.ReadDefault(userconfig.Admission, &raw)
 	if err != nil {
 		return ResolvedBudget{}, fmt.Errorf("machine budget: %w", err)
 	}
-	if v := strings.TrimSpace(raw.Budget); v != "" {
-		return parseBudgetFrom(v, BudgetSourceConfig, path+" admission.budget")
+	if raw.Budget != nil {
+		return parseBudgetFrom(*raw.Budget, BudgetSourceConfig, path+" admission.budget")
 	}
 	return ResolvedBudget{Source: BudgetSourceUnset}, nil
 }

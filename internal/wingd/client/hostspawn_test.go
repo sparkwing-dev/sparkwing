@@ -18,76 +18,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-func TestResolveHostBin_EnvOutranksPath(t *testing.T) {
-	t.Setenv(HostBinEnv, "/opt/sparkwing/bin/sparkwing")
-	bin, fromEnv, ok := ResolveHostBin()
-	if !ok || bin != "/opt/sparkwing/bin/sparkwing" || !fromEnv {
-		t.Fatalf("ResolveHostBin() = %q, fromEnv=%v, ok=%v; want the env value", bin, fromEnv, ok)
-	}
-}
-
-func TestResolveHostBin_FallsBackToPath(t *testing.T) {
-	fake := fakeSparkwingOnPath(t)
-	bin, fromEnv, ok := resolveHostBin(false)
-	if !ok || bin != fake || fromEnv {
-		t.Fatalf("resolveHostBin() = %q, fromEnv=%v, ok=%v; want %q from PATH", bin, fromEnv, ok, fake)
-	}
-}
-
-func TestResolveHostBin_IgnoresPathUnderTest(t *testing.T) {
-	fake := fakeSparkwingOnPath(t)
-	bin, _, ok := ResolveHostBin()
-	if ok {
-		t.Fatalf("ResolveHostBin() = %q from PATH inside a test binary; a gate puts a sparkwing there and the "+
-			"daemon it hosts is the operator's", bin)
-	}
-	if _, ok := HostSpawn(); ok {
-		t.Fatalf("HostSpawn() resolved %q from PATH inside a test binary", fake)
-	}
-}
-
-func fakeSparkwingOnPath(t *testing.T) string {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("the PATH fixture below builds a unix executable")
-	}
-	t.Setenv(HostBinEnv, "")
-	dir := t.TempDir()
-	fake := filepath.Join(dir, "sparkwing")
-	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatalf("write fake sparkwing: %v", err)
-	}
-	t.Setenv("PATH", dir)
-	return fake
-}
-
-func TestResolveHostBin_NothingResolvesReportsFalse(t *testing.T) {
-	t.Setenv(HostBinEnv, "")
-	t.Setenv("PATH", t.TempDir())
-	if bin, _, ok := ResolveHostBin(); ok {
-		t.Fatalf("ResolveHostBin() = %q on a machine with no sparkwing; want none", bin)
-	}
-	if _, ok := HostSpawn(); ok {
-		t.Fatal("HostSpawn() resolved on a machine with no sparkwing; want none")
-	}
-}
-
-func TestHostSpawn_UnstartableHostNamesTheVariableAndValue(t *testing.T) {
+func TestSpawnUnstartableHostNamesTheExecutable(t *testing.T) {
 	home := shortHome(t)
 	missing := filepath.Join(t.TempDir(), "sparkwign")
-	t.Setenv(HostBinEnv, missing)
-	spawn, ok := HostSpawn()
-	if !ok {
-		t.Fatal("HostSpawn() did not resolve an explicitly named binary")
-	}
+	spawn := func(home, version string) error { return spawnDetached(missing, home, version) }
 	err := spawn(home, "")
-	if !errors.Is(err, ErrDaemonHostUnusable) {
-		t.Fatalf("error %v does not match ErrDaemonHostUnusable", err)
-	}
-	for _, want := range []string{HostBinEnv, missing} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("message %q omits %q", err.Error(), want)
-		}
+	if !errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), missing) {
+		t.Fatalf("spawn error = %v, want missing executable %s", err, missing)
 	}
 
 	_, cerr := EnsureDaemon(context.Background(), Options{
@@ -97,8 +34,8 @@ func TestHostSpawn_UnstartableHostNamesTheVariableAndValue(t *testing.T) {
 		DialTimeout: 200 * time.Millisecond,
 		Backoff:     10 * time.Millisecond,
 	})
-	if !errors.Is(cerr, ErrDaemonHostUnusable) {
-		t.Fatalf("connect reported %v, want the unusable-host sentinel", cerr)
+	if !errors.Is(cerr, os.ErrNotExist) || !strings.Contains(cerr.Error(), missing) {
+		t.Fatalf("connect error = %v, want missing executable %s", cerr, missing)
 	}
 	if errors.Is(cerr, ErrDaemonUnreachable) {
 		t.Fatal("a bad host binary was reported as an unreachable daemon")
@@ -115,11 +52,7 @@ func TestSpawn_HostThatExitsImmediatelyFailsFast(t *testing.T) {
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fixture host: %v", err)
 	}
-	t.Setenv(HostBinEnv, bin)
-	spawn, ok := HostSpawn()
-	if !ok {
-		t.Fatal("HostSpawn() did not resolve the fixture")
-	}
+	spawn := func(home, version string) error { return spawnDetached(bin, home, version) }
 
 	start := time.Now()
 	_, err := EnsureDaemon(context.Background(), Options{
@@ -157,11 +90,7 @@ func TestTakeover_BrokenSuccessorFailsFastNamingTheBinary(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho 'wingd: cannot serve' >&2\nexit 1\n"), 0o755); err != nil {
 		t.Fatalf("write fixture host: %v", err)
 	}
-	t.Setenv(HostBinEnv, bin)
-	spawn, ok := HostSpawn()
-	if !ok {
-		t.Fatal("HostSpawn() did not resolve the fixture")
-	}
+	spawn := func(home, version string) error { return spawnDetached(bin, home, version) }
 
 	start := time.Now()
 	_, err := EnsureDaemon(context.Background(), Options{
@@ -352,22 +281,6 @@ func repoRootForTest(t *testing.T) string {
 			t.Skip("no module root above the test directory")
 		}
 		dir = parent
-	}
-}
-
-func TestEnsureDaemon_NoHostSentinelSurfaces(t *testing.T) {
-	home := shortHome(t)
-	_, err := EnsureDaemon(context.Background(), Options{
-		Home:        home,
-		Spawn:       NoHostSpawn,
-		DialTimeout: 200 * time.Millisecond,
-		Backoff:     10 * time.Millisecond,
-	})
-	if !errors.Is(err, ErrNoDaemonHost) {
-		t.Fatalf("error %v does not match ErrNoDaemonHost", err)
-	}
-	if errors.Is(err, ErrDaemonUnreachable) {
-		t.Fatal("a declared absence of any host was reported as an unreachable daemon")
 	}
 }
 

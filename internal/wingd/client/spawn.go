@@ -28,6 +28,8 @@ const hostStartGrace = 2 * time.Second
 
 const hostStartPoll = 20 * time.Millisecond
 
+var ErrNoDaemonHost = errors.New("wingd/client: no admission daemon is running and no sparkwing binary is available to host one")
+
 var ErrDaemonHostFailed = errors.New("wingd/client: the daemon host binary exited without serving")
 
 func spawnDetached(bin, home, version string) error {

@@ -64,7 +64,7 @@ func TestRunnerVersionHelpAndTopLevelUsage(t *testing.T) {
 		"usage: sparkwing-runner version",
 		"--offline",
 		"--output",
-		"pretty | json | plain",
+		"--help-all",
 	} {
 		if !bytes.Contains(diagnostics.Bytes(), []byte(want)) {
 			t.Errorf("version help %q does not contain %q", diagnostics.String(), want)

@@ -7,12 +7,11 @@ import (
 	"slices"
 	"testing"
 	"testing/synctest"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
@@ -44,73 +43,37 @@ func TestRunnerControllerW8Components(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitNode} {
 		t.Run(string(kind), func(t *testing.T) {
 			unit := runnerAuthorityAwardW8(kind)
-			unit.Runner.Name = "server-runner"
+			reached := errors.New("native binding reached")
 			var events []string
-			watched := []string{"watched-job"}
 			bound := &runnerControllerW8{renew: func(_ context.Context, id string, request controllerwire.RenewalRequest) (controllerwire.RenewalResponse, error) {
 				if id != unit.UnitID || request.Executing {
-					t.Fatalf("renewal lost its unit or started execution: %s %+v", id, request)
+					t.Fatal("confirmation changed its unit or execution state")
 				}
 				events = append(events, "renew")
-				return controllerwire.RenewalResponse{Watched: true, WatchedJobs: watched}, nil
+				return controllerwire.RenewalResponse{}, nil
 			}}
-			host := runners.Hosting{
-				ControllerURL: "https://controller.example",
-				Lease:         time.Minute, Interval: 10 * time.Second,
-				NewController: func(options client.EngineOptions) (controllerwire.Controller, error) {
-					bearer, err := options.Bearer(t.Context())
-					if err != nil || bearer != unit.Capability || options.URL != "https://controller.example" || options.Launcher {
-						t.Fatal("host client did not receive the unit's private controller binding")
-					}
-					events = append(events, "connect")
-					return bound, nil
-				},
-				Observe: func(got controllerwire.ClaimedUnit, beat lease.Beat) {
-					if !reflect.DeepEqual(got, unit) || !beat.Watched || !reflect.DeepEqual(beat.WatchedNodes, []string{"watched-job"}) {
-						t.Fatal("renewal observation lost its award or watch projection")
-					}
-					beat.WatchedNodes[0] = "observer mutation"
-				},
-				StartKeeper: func(ctx context.Context, keeper lease.Keeper) (context.Context, func()) {
-					if _, err := keeper.Renew(ctx); err != nil {
-						t.Fatal(err)
-					}
-					return ctx, func() { events = append(events, "join") }
-				},
-			}
-			prepare := func(got controllerwire.ClaimedUnit, controller controllerwire.Controller) {
-				if !reflect.DeepEqual(got, unit) || controller != bound {
-					t.Fatal("host preparation received another controller or award")
+			host := runners.Hosting{ControllerURL: "https://controller.example", NewController: func(options client.EngineOptions) (controllerwire.Controller, error) {
+				bearer, err := options.Bearer(t.Context())
+				if err != nil || bearer != unit.Capability || options.URL != "https://controller.example" || options.Launcher {
+					t.Fatal("wrong award transport")
 				}
-				events = append(events, "prepare")
-			}
-			cleanup := func() error { events = append(events, "cleanup"); return nil }
-			host.PrepareRun = func(_ context.Context, got controllerwire.ClaimedUnit, controller controllerwire.Controller) (nodehost.RunHost, nodehost.RunInput, func() error, error) {
-				prepare(got, controller)
-				return runnerRunW8(func() { events = append(events, "execute") }), nodehost.RunInput{}, cleanup, nil
-			}
-			host.PrepareNode = func(_ context.Context, got controllerwire.ClaimedUnit, controller controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
-				prepare(got, controller)
-				return runnerDeadlineNodeW8(func(context.Context) { events = append(events, "execute") }), runnerIdentityInputW8(got), cleanup, nil
-			}
-			if err := host.Host(t.Context(), unit); err != nil {
+				events = append(events, "connect")
+				return bound, nil
+			}, Bind: func(_ context.Context, got controllerwire.ClaimedUnit, controller controllerwire.Controller) (runners.NativeServices, capability.Principal, error) {
+				if !reflect.DeepEqual(got, unit) || controller != bound {
+					t.Fatal("native binder received another award or controller")
+				}
+				events = append(events, "bind")
+				return runners.NativeServices{}, capability.Principal{}, reached
+			}}
+			if err := host.Host(t.Context(), unit); !errors.Is(err, reached) {
 				t.Fatal(err)
 			}
-			if !slices.Equal(watched, []string{"watched-job"}) {
-				t.Fatal("observer mutated controller-owned watch data")
-			}
-			if !reflect.DeepEqual(events, []string{"connect", "renew", "renew", "prepare", "execute", "join", "cleanup"}) {
-				t.Fatalf("hosting sequence: %v", events)
+			if !slices.Equal(events, []string{"connect", "renew", "bind"}) {
+				t.Fatal(events)
 			}
 		})
 	}
-}
-
-type runnerRunW8 func()
-
-func (run runnerRunW8) Run(context.Context, nodehost.RunInput) (nodehost.RunCompletion, error) {
-	run()
-	return nodehost.RunCompletion{}, nil
 }
 
 func TestRunnerMixedClaimsKeepControllerBindingsSeparateW8(t *testing.T) {
@@ -139,29 +102,18 @@ func TestRunnerMixedClaimsKeepControllerBindingsSeparateW8(t *testing.T) {
 			claimed++
 			return controllerwire.ClaimResponse{Claim: &award}, nil
 		}}
-		prepare := func(unit controllerwire.ClaimedUnit, controller controllerwire.Controller) {
+		reached := errors.New("native binding reached")
+		host := runners.Hosting{ControllerURL: "https://controller.example", NewController: func(options client.EngineOptions) (controllerwire.Controller, error) {
+			opened <- options
+			<-release
+			bearer, err := options.Bearer(t.Context())
+			return clients[bearer], err
+		}, Bind: func(_ context.Context, unit controllerwire.ClaimedUnit, controller controllerwire.Controller) (runners.NativeServices, capability.Principal, error) {
 			if controller != clients[unit.Capability] {
-				t.Error("preparation received the root client or another unit's client")
+				t.Error("native binding shared another award's client")
 			}
-		}
-		host := runners.Hosting{
-			ControllerURL: "https://controller.example", Lease: time.Minute, Interval: 10 * time.Second,
-			NewController: func(options client.EngineOptions) (controllerwire.Controller, error) {
-				opened <- options
-				<-release
-				bearer, err := options.Bearer(t.Context())
-				return clients[bearer], err
-			},
-			StartKeeper: func(ctx context.Context, _ lease.Keeper) (context.Context, func()) { return ctx, func() {} },
-			PrepareRun: func(_ context.Context, unit controllerwire.ClaimedUnit, controller controllerwire.Controller) (nodehost.RunHost, nodehost.RunInput, func() error, error) {
-				prepare(unit, controller)
-				return runnerRunW8(func() {}), nodehost.RunInput{}, nil, nil
-			},
-			PrepareNode: func(_ context.Context, unit controllerwire.ClaimedUnit, controller controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
-				prepare(unit, controller)
-				return runnerDeadlineNodeW8(func(context.Context) {}), runnerIdentityInputW8(unit), nil, nil
-			},
-		}
+			return runners.NativeServices{}, capability.Principal{}, reached
+		}}
 		loop := runners.Loop{
 			Config: runners.LoopConfig{Version: "v0.20.0", MaxConcurrent: 2, MaxClaims: 2}, Controller: root, Host: host,
 			CheckVersion: func(context.Context, string) error { return nil },
@@ -180,7 +132,7 @@ func TestRunnerMixedClaimsKeepControllerBindingsSeparateW8(t *testing.T) {
 		}
 		release <- struct{}{}
 		release <- struct{}{}
-		if err := <-done; err != nil || claimed != 2 {
+		if err := <-done; !errors.Is(err, reached) || claimed != 2 {
 			t.Fatalf("mixed runner = %v, claims = %d", err, claimed)
 		}
 	})
@@ -198,7 +150,6 @@ func FuzzRunnerControllerBindingW8(f *testing.F) {
 		prepared := errors.New("preparation reached")
 		host := runners.Hosting{
 			ControllerURL: "https://controller.example",
-			Lease:         time.Minute, Interval: 10 * time.Second,
 			NewController: func(options client.EngineOptions) (controllerwire.Controller, error) {
 				ctx, cancel := context.WithCancel(t.Context())
 				if cancelBearer {
@@ -219,10 +170,8 @@ func FuzzRunnerControllerBindingW8(f *testing.F) {
 					}
 					return controllerwire.RenewalResponse{}, nil
 				}}, nil
-			},
-			StartKeeper: func(ctx context.Context, _ lease.Keeper) (context.Context, func()) { return ctx, func() {} },
-			PrepareNode: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
-				return nil, nodehost.NodeInput{}, nil, prepared
+			}, Bind: func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (runners.NativeServices, capability.Principal, error) {
+				return runners.NativeServices{}, capability.Principal{}, prepared
 			},
 		}
 		if err := host.Host(t.Context(), unit); !errors.Is(err, prepared) {

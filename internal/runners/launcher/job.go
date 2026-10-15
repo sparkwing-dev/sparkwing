@@ -58,7 +58,8 @@ func (c CloudJobConfig) Validate() error {
 	return nil
 }
 
-func buildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award CloudJobAward, boundary CloudBoundary) (CloudJobResources, error) {
+// BuildJob builds plan, eval and work Jobs after validating their award and reserving isolation.
+func BuildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award CloudJobAward, boundary CloudBoundary) (CloudJobResources, error) {
 	if err := cfg.Validate(); err != nil {
 		return CloudJobResources{}, err
 	}
@@ -80,15 +81,9 @@ func buildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award Clou
 		return CloudJobResources{}, errors.New("Cloud boundary is required")
 	}
 	b := award.Binding
-	deadline, err := limits.JobDeadline(now, b.OwnerDeadline, b.AttemptDeadline)
+	deadline, err := cloudDeadline(now, b)
 	if err != nil {
 		return CloudJobResources{}, err
-	}
-	if !b.ParentCapabilityExpiry.After(now) {
-		return CloudJobResources{}, limits.ErrNoTime
-	}
-	if deadline.IsZero() || b.ParentCapabilityExpiry.Before(deadline) {
-		deadline = b.ParentCapabilityExpiry
 	}
 	seconds := int64(deadline.Sub(now) / time.Second)
 	if seconds <= 0 {
@@ -113,7 +108,21 @@ func buildJob(ctx context.Context, now time.Time, cfg CloudJobConfig, award Clou
 	}
 	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels, Finalizers: []string{cleanupFinalizer}, Annotations: map[string]string{bindingAnnotation: string(bindingJSON), reservationAnnotation: string(reservationJSON), deadlineAnnotation: deadline.Format(time.RFC3339Nano)}}, Spec: batchv1.JobSpec{BackoffLimit: ptr(int32(0)), ActiveDeadlineSeconds: &seconds, Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: labels}, Spec: cloudPod(cfg, award, reservation, name, budget)}}}
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels}, Immutable: ptr(true), Type: corev1.SecretTypeOpaque, Data: map[string][]byte{"bootstrap": append([]byte(nil), award.Bootstrap...), awardFileName: metadata}}
-	return CloudJobResources{Job: job, BootstrapSecret: secret, Reservation: reservation, Network: network, JobDeadline: deadline, ClaimDeadline: deadline}, nil
+	return CloudJobResources{Job: job, BootstrapSecret: secret, Reservation: reservation, Network: network, JobDeadline: deadline}, nil
+}
+
+func cloudDeadline(now time.Time, binding CloudJobBinding) (time.Time, error) {
+	deadline, err := limits.JobDeadline(now, binding.OwnerDeadline, binding.AttemptDeadline)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if !binding.ParentCapabilityExpiry.After(now) {
+		return time.Time{}, limits.ErrNoTime
+	}
+	if deadline.IsZero() || binding.ParentCapabilityExpiry.Before(deadline) {
+		deadline = binding.ParentCapabilityExpiry
+	}
+	return deadline, nil
 }
 
 func cloudBudget(cfg CloudJobConfig, award CloudJobAward) (corev1.ResourceList, error) {

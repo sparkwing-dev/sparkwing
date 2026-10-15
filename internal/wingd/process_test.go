@@ -45,7 +45,7 @@ func buildFixture(t *testing.T) string {
 		fixtureDir = dir
 		bin := filepath.Join(dir, "testprog"+processFixtureSuffix())
 		cmd := exec.Command("go", "build", "-o", bin,
-			"github.com/sparkwing-dev/sparkwing/internal/wingd/testprog")
+			"github.com/sparkwing-dev/sparkwing/internal/wingd/testdata/testprog")
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
 			fixtureErr = err
@@ -310,20 +310,16 @@ func TestProcess_PipelineClientStartsDaemonViaHostBinary(t *testing.T) {
 	}
 	home := shortHome(t)
 	hostBin := buildFixture(t)
-	env := []string{
-		"SPARKWING_WINGD_BIN=" + hostBin,
-
-		"PATH=" + t.TempDir(),
-	}
+	env := []string{"PATH=" + t.TempDir()}
 	h := startProcEnv(t, env, "hold",
 		"--home", home,
 		"--run", "hosted",
 		"--cores", "0.1",
-		"--host-spawn",
+		"--external-host", "--host-bin", hostBin,
 		"--version", "v1.0.0",
 	)
 	if got := h.waitLine("DAEMON ", 20*time.Second); got != "v1.0.0" {
-		t.Fatalf("daemon version = %q, want v1.0.0 -- the daemon is not the binary $SPARKWING_WINGD_BIN named", got)
+		t.Fatalf("daemon version = %q, want v1.0.0 -- the daemon is not the explicitly selected binary", got)
 	}
 	if tok := h.waitOK(10 * time.Second); tok == "" {
 		t.Fatal("host-spawned daemon granted an empty lease token")
@@ -335,9 +331,9 @@ func TestProcess_PipelineClientWithoutAHostStartsNothing(t *testing.T) {
 		t.Skip("process test skipped in -short")
 	}
 	home := shortHome(t)
-	env := []string{"SPARKWING_WINGD_BIN=", "PATH=" + t.TempDir()}
+	env := []string{"PATH=" + t.TempDir()}
 	h := startProcEnv(t, env, "hold",
-		"--home", home, "--run", "hostless", "--cores", "0.1", "--host-spawn")
+		"--home", home, "--run", "hostless", "--cores", "0.1", "--external-host")
 	got := h.waitLine("ENSURE-ERR ", 20*time.Second)
 	if !strings.Contains(got, "no sparkwing binary is available to host one") {
 		t.Fatalf("error = %q, want the no-host sentinel", got)

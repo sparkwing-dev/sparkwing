@@ -18,10 +18,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 // RunnerOptions carries machine settings to the shared runtime composition.
-// Actions is an in-memory credential and must never enter process arguments or env.
 type RunnerOptions struct {
 	Config           userconfig.RunnerConfig
 	Loop             runners.LoopConfig
@@ -31,14 +31,12 @@ type RunnerOptions struct {
 	CPUCeiling       *float64
 	MemoryCeiling    *int64
 	Deadline         *time.Duration
-	Actions          *capability.Issued
 	Bearer           func(context.Context) (string, error) `json:"-"`
 	Output, Checkout string
 }
 
-// RunnerFactory supplies the capability transport, host library, signed update
-// resolver and installed-service replacement to one ManagedRunner.
-type RunnerFactory func(context.Context, RunnerOptions) (*runners.ManagedRunner, error)
+// RunnerFactory supplies host, policy and installation services to the shared constructor.
+type RunnerFactory func(context.Context, RunnerOptions) (runners.RuntimeConfig, error)
 
 // RunnerCLI shares the start and warm runtime. ReadConfig must implement the
 // complete userconfig.ReadConfig validation contract before returning a section.
@@ -74,15 +72,7 @@ func (cli RunnerCLI) Run(ctx context.Context, command string, args []string, ver
 	if cli.Factory == nil {
 		return errors.New("runner runtime is unavailable: compose the capability controller, host library and signed update resolver")
 	}
-	if options.Actions != nil {
-		raw := options.Actions.Raw
-		options.Bearer = func(ctx context.Context) (string, error) {
-			if err := context.Cause(ctx); err != nil {
-				return "", err
-			}
-			return raw, nil
-		}
-	} else {
+	if options.Bearer == nil {
 		directory := ""
 		if options.Config.CredentialsDir != nil {
 			directory = *options.Config.CredentialsDir
@@ -92,15 +82,24 @@ func (cli RunnerCLI) Run(ctx context.Context, command string, args []string, ver
 			return fmt.Errorf("runner credential: %w", err)
 		}
 	}
-	runner, err := cli.Factory(ctx, options)
+	repositories, err := sourceurl.ParseRepoAllowlist(options.Config.Repos)
 	if err != nil {
 		return err
 	}
-	if runner == nil || runner.Loop == nil {
-		return errors.New("runner runtime returned no unified loop")
+	transport := client.EngineOptions{URL: *options.Config.Controller, Bearer: options.Bearer}
+	loop := options.Loop
+	loop.Kinds, loop.Labels = slices.Clone(loop.Kinds), slices.Clone(loop.Labels)
+	runtimeConfig, err := cli.Factory(ctx, options)
+	if err != nil {
+		return err
 	}
-	runner.Loop.Config = options.Loop
-	return runner.Run(ctx)
+	transport.HTTP = runtimeConfig.Controller.HTTP
+	runtimeConfig.Controller, runtimeConfig.Loop, runtimeConfig.Repositories = transport, loop, repositories
+	runner, err := runners.NewManagedRunner(ctx, runtimeConfig)
+	if err != nil {
+		return err
+	}
+	return runRunner(ctx, runner, options.MetricsAddress)
 }
 
 func (cli RunnerCLI) config(command string, fs *flag.FlagSet) (userconfig.RunnerConfig, error) {
@@ -313,7 +312,12 @@ func (cli RunnerCLI) authorizeActions(ctx context.Context, fs *flag.FlagSet, opt
 	if issued.Raw == "" || issued.Capability.Team != team || push == nil || push.RepositoryKey == "" || push.Ref == "" || push.SHA == "" || push.WorkflowRunID == "" || expires == nil || !expires.After(time.Now()) {
 		return errors.New("GitHub Actions exchange returned no live push-bound capability")
 	}
-	options.Actions = &issued
+	options.Bearer = func(ctx context.Context) (string, error) {
+		if err := context.Cause(ctx); err != nil {
+			return "", err
+		}
+		return issued.Raw, nil
+	}
 	options.Loop.ClaimUntil = *expires
 	if options.Config.Repos == nil {
 		options.Config.Repos = []string{push.RepositoryKey}

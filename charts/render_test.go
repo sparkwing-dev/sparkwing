@@ -26,8 +26,8 @@ func TestFullChartVersion(t *testing.T) {
 	if err := yaml.Unmarshal(data, &chart); err != nil {
 		t.Fatal(err)
 	}
-	if chart.Version != "0.2.0" {
-		t.Fatalf("full chart version = %q, want 0.2.0", chart.Version)
+	if chart.Version != "0.2.1" {
+		t.Fatalf("full chart version = %q, want 0.2.1", chart.Version)
 	}
 }
 
@@ -1238,7 +1238,6 @@ func TestConfiguredSecretRefsAreRequired(t *testing.T) {
 	if strings.Contains(runner, "optional: true") {
 		t.Fatalf("configured runner token Secret is optional:\n%s", runner)
 	}
-
 }
 
 func TestConfiguredSecretNamesRequireKeys(t *testing.T) {
@@ -1324,7 +1323,6 @@ func TestMaximumLengthReleaseKeepsComponentNamesAndServiceURLsDistinct(t *testin
 			t.Errorf("runner args = %v, want %q", runnerArgs, want)
 		}
 	}
-
 }
 
 func TestMaximumLengthOverridesKeepComponentNamesDistinct(t *testing.T) {
@@ -1431,25 +1429,17 @@ func TestRemovedLogsValuesFailTheRender(t *testing.T) {
 	}
 }
 
-func TestRunnerBundleRoleGrantsNoNamespaceReads(t *testing.T) {
+func TestRunnerBundleCreatesNoKubernetesPermissions(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
 	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "default",
 		"controller.url=http://controller"))
-	var roles int
 	for _, resource := range resources {
-		if resource.Kind != "Role" && resource.Kind != "ClusterRole" {
-			continue
+		switch resource.Kind {
+		case "Role", "ClusterRole", "RoleBinding", "ClusterRoleBinding":
+			t.Errorf("runner created unused Kubernetes permissions: %s/%s", resource.Kind, resource.Metadata.Name)
 		}
-		roles++
-		for _, rule := range resource.Rules {
-			t.Errorf("%s %s grants %v on %v; the runner reads none of it through the API",
-				resource.Kind, resource.Metadata.Name, rule.Verbs, rule.Resources)
-		}
-	}
-	if roles != 1 {
-		t.Fatalf("rendered %d runner Roles, want exactly one", roles)
 	}
 }
 

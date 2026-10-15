@@ -72,11 +72,19 @@ func (r *localRuntimeFixture) AwaitReady(ctx context.Context) (wingd.LocalStatus
 	return wingd.LocalStatus{}, ctx.Err()
 }
 
+func localLifecycleFixture(t *testing.T, home string, runtime wingd.LocalRuntime, owner controllerOwner) *processLifecycle {
+	t.Helper()
+	return newProcessLifecycle(home, runtime, nil, owner, func(context.Context, wingd.LocalStartOptions) (wingd.LocalStatus, error) {
+		t.Fatal("unexpected detached startup")
+		return wingd.LocalStatus{}, nil
+	})
+}
+
 func TestLocalLifecycleReusesForeignOwner(t *testing.T) {
 	home := t.TempDir()
 	local := &localRuntimeFixture{}
 	owner := &lifecycleOwner{status: wingd.LocalStatus{Running: true, PID: 72, Version: "v1"}}
-	lifecycle := newOwnerLifecycle(home, local, nil, owner)
+	lifecycle := localLifecycleFixture(t, home, local, owner)
 	opts := wingd.LocalStartOptions{Home: home, Version: "v2", Stay: true, DashboardAddress: "127.0.0.1:9173"}
 	status, err := lifecycle.StartDashboard(t.Context(), opts)
 	if err != nil {
@@ -100,8 +108,8 @@ func TestLocalLifecycleReusesWinnerAfterLosingElection(t *testing.T) {
 		owner.err = nil
 		owner.status = wingd.LocalStatus{Running: true, PID: 84, Version: "v1"}
 	}}
-	lifecycle := newOwnerLifecycle(home, local, nil, owner)
-	status, err := lifecycle.EnsureStarted(t.Context(), wingd.LocalStartOptions{Home: home, Stay: true})
+	lifecycle := localLifecycleFixture(t, home, local, owner)
+	status, err := lifecycle.LocalLifecycle.EnsureStarted(t.Context(), wingd.LocalStartOptions{Home: home, Stay: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +125,7 @@ func TestLocalLifecycleRefusesStandaloneAndForeignHome(t *testing.T) {
 	home := t.TempDir()
 	local := &localRuntimeFixture{}
 	owner := &lifecycleOwner{status: wingd.LocalStatus{Running: true, PID: 72, Version: "v1"}}
-	lifecycle := newOwnerLifecycle(home, local, nil, owner)
+	lifecycle := localLifecycleFixture(t, home, local, owner)
 	for _, opts := range []wingd.LocalStartOptions{
 		{Home: home, Standalone: true, Stay: true},
 		{Home: t.TempDir(), Stay: true, DashboardAddress: "127.0.0.1:9173"},
@@ -136,7 +144,7 @@ func TestLocalLifecyclePreservesOwnerAndCancellationFailures(t *testing.T) {
 		home := t.TempDir()
 		local := &localRuntimeFixture{}
 		owner := &lifecycleOwner{err: failure}
-		lifecycle := newOwnerLifecycle(home, local, nil, owner)
+		lifecycle := localLifecycleFixture(t, home, local, owner)
 		if _, err := lifecycle.EnsureStarted(t.Context(), wingd.LocalStartOptions{}); !errors.Is(err, failure) {
 			t.Fatalf("owner error=%v, want %v", err, failure)
 		}
@@ -146,7 +154,7 @@ func TestLocalLifecyclePreservesOwnerAndCancellationFailures(t *testing.T) {
 	}
 	local := &localRuntimeFixture{}
 	owner := &lifecycleOwner{status: wingd.LocalStatus{Running: true, PID: 72, Version: "v1"}}
-	lifecycle := newOwnerLifecycle(t.TempDir(), local, nil, owner)
+	lifecycle := localLifecycleFixture(t, t.TempDir(), local, owner)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if _, err := lifecycle.EnsureStarted(ctx, wingd.LocalStartOptions{Stay: true}); !errors.Is(err, context.Canceled) {
@@ -160,7 +168,7 @@ func TestLocalLifecyclePreservesOwnerAndCancellationFailures(t *testing.T) {
 func TestLocalLifecycleRequiresOwnerAfterPromotion(t *testing.T) {
 	owner := &lifecycleOwner{status: wingd.LocalStatus{Running: true, PID: 72, Version: "v1"}}
 	owner.onStay = func() { owner.status.Running = false }
-	lifecycle := newOwnerLifecycle(t.TempDir(), &localRuntimeFixture{}, nil, owner)
+	lifecycle := localLifecycleFixture(t, t.TempDir(), &localRuntimeFixture{}, owner)
 	if _, err := lifecycle.EnsureStarted(t.Context(), wingd.LocalStartOptions{Stay: true}); err == nil {
 		t.Fatal("reported successful startup after the owner stopped")
 	}
@@ -173,8 +181,8 @@ func TestLocalLifecyclePreservesElectionCleanupFailure(t *testing.T) {
 		owner.err = nil
 		owner.status = wingd.LocalStatus{Running: true, PID: 84, Version: "v1"}
 	}}
-	lifecycle := newOwnerLifecycle(t.TempDir(), local, nil, owner)
-	if _, err := lifecycle.EnsureStarted(t.Context(), wingd.LocalStartOptions{}); !errors.Is(err, cleanup) {
+	lifecycle := localLifecycleFixture(t, t.TempDir(), local, owner)
+	if _, err := lifecycle.LocalLifecycle.EnsureStarted(t.Context(), wingd.LocalStartOptions{}); !errors.Is(err, cleanup) {
 		t.Fatalf("election cleanup error lost: %v", err)
 	}
 }
@@ -183,7 +191,7 @@ func TestLocalLifecycleRetainsLocalOwnerAndStartupFailure(t *testing.T) {
 	home := t.TempDir()
 	local := &localRuntimeFixture{lifecycleOwner: lifecycleOwner{status: wingd.LocalStatus{Running: true, PID: 17, Version: "v1"}}}
 	owner := &lifecycleOwner{err: errors.New("foreign transport must remain unused")}
-	lifecycle := newOwnerLifecycle(home, local, nil, owner)
+	lifecycle := localLifecycleFixture(t, home, local, owner)
 	status, err := lifecycle.StartDashboard(t.Context(), wingd.LocalStartOptions{Stay: true, DashboardAddress: "127.0.0.1:9173"})
 	if err != nil || status.PID != 17 || !status.Stay {
 		t.Fatalf("local owner=%+v err=%v", status, err)
@@ -196,8 +204,8 @@ func TestLocalLifecycleRetainsLocalOwnerAndStartupFailure(t *testing.T) {
 	}
 	startup := errors.New("controller factory failed")
 	local = &localRuntimeFixture{failure: startup}
-	lifecycle = newOwnerLifecycle(home, local, nil, &lifecycleOwner{err: ErrNoDaemon})
-	if _, err := lifecycle.EnsureStarted(t.Context(), wingd.LocalStartOptions{}); !errors.Is(err, startup) || local.starts != 1 {
+	lifecycle = localLifecycleFixture(t, home, local, &lifecycleOwner{err: ErrNoDaemon})
+	if _, err := lifecycle.LocalLifecycle.EnsureStarted(t.Context(), wingd.LocalStartOptions{}); !errors.Is(err, startup) || local.starts != 1 {
 		t.Fatalf("absent owner startup=%v starts=%d", err, local.starts)
 	}
 }
@@ -205,7 +213,7 @@ func TestLocalLifecycleRetainsLocalOwnerAndStartupFailure(t *testing.T) {
 func TestLocalLifecycleConcurrentForeignOwnerReuse(t *testing.T) {
 	local := &localRuntimeFixture{}
 	owner := &lifecycleOwner{status: wingd.LocalStatus{Running: true, PID: 72, Version: "v1"}}
-	lifecycle := newOwnerLifecycle(t.TempDir(), local, nil, owner)
+	lifecycle := localLifecycleFixture(t, t.TempDir(), local, owner)
 	var callers sync.WaitGroup
 	for range 20 {
 		callers.Go(func() {

@@ -19,6 +19,109 @@ run-store adapter, local queue consumer and leased maintenance. `Reconcile`
 finishes orphan recovery and supplies the initial activity before any listener
 starts. A losing election opens no store and returns `ErrNotElected`.
 
+`localcontroller.Config.Open` supplies that factory's store ownership and
+maintenance. It opens `<home>/state.db`, selects `DefaultTeam`, and gives the
+shared service binder that store, tenant and `EngineController`. The binder
+returns the shared policy handlers, state projection and `StoreRunnerConfig`.
+`Config.Open` constructs the shared queue over its owned store before returning.
+`runners.NewStoreRunner` constructs that queue from the shared controller and
+`runners.StoreRunnerConfig`. `Config.Open` rejects another controller store.
+The runner supplies `StoreHosting` over the owned handle. The controller needs its signed runner
+admission policy and the store needs its enrollment resolver. The bearer provider
+supplies a provisioned claimant credential.
+The native service binder supplies W3's source, process, logging and storage
+services. Cleanup must accompany partially constructed services even when
+binding fails. It closes those services before the store. Missing runner services
+or signed policy fail startup through the same cleanup path. Replacing the
+controller's store also fails startup.
+
+The CLI factory now binds `NewState`, the shared `Server.HTTP()` handlers,
+signed engine and runner policies, and the native service constructor.
+`NewState` reads activity in one tenant-scoped snapshot and reports changed
+counts. Published history and terminal nodes do not hold the controller open.
+It opens the optional Jev secret through the same store-bound cipher used by
+the HTTP server. The production factory test reconciles a fresh home, checks
+both HTTP handlers and verifies closure without a socket.
+
+`NewClaimant` captures the process's kernel account. Its bearer provider uses
+shared peer authentication and credential delegation. Its enrollment resolver
+accepts only that authenticated local account in `DefaultTeam`, and supplies
+the machine's CPU count, OS and architecture. Ambient runner names and tokens
+cannot select the account. Cleanup revokes the delegated queue credential.
+The store authenticates the verified peer for default-team reads. That peer has
+no persisted authority reference for delegation, so production queue startup
+cannot sustain a running controller. The socket-free `rewrite_integration`
+claimant probe reproduces the missing authority. Constructor success does not
+establish queue readiness.
+
+`NativeServices` takes `NativeConfig` with W3's `NativeHostStore`, C2's
+`AuthenticationReader` and `BindingChecker`, the authenticated principal, refresh
+and renewal callbacks, and source options. The embedded queue passes its tenant
+and elected store. An adapter can supply those interfaces without another store
+opener. Refreshed authority, persisted run identity and both tenant projections
+must agree before process transport opens. The constructor binds W3's host
+configuration, source, captured environments, lease keeper, state following and
+process router. Owner
+renewals reauthenticate the award, check its owner fence, and call the shared
+unit-renewal transaction with current compute activity. The shared host owns
+the keeper and joins it before service cleanup. It
+checks current authority before allocating resources. Process HTTP uses the
+same joined serving lifecycle as the API and dashboard. Closing the host
+cancels requests, closes HTTP and hijacked connections, and joins handlers
+before closing process authority. Repeated close calls return the same cleanup
+error. Logs are masked before private
+JSONL writes. `StoreBinding.Refresh` reauthenticates the captured award through
+the shared C2 policy, including unit liveness, before each authority refresh.
+Owner policies, authorized byte/record
+clients, controller log projection and ephemeral-process binding validation
+remain integration points. Foreground CLI hosting also needs the shared host's
+remote state adapter. These gaps prevent a completed native local run.
+
+The native local host binds W3's machine-admission port to the elected home
+with takeover and spawning disabled. W6 resolves the configured box identity
+and its hostname default. The same identity reaches local and store capacity
+admission. Every locally scheduled job uses machine admission before execution.
+Each held lease owns its admission connection, returns watch failures to the
+host, and closes that connection on release. The production CLI supplies its
+version to this binding. The adapter tests preserve the captured home and
+refuse malformed machine settings. In-memory client tests cover recovery and
+joined release. Native admission sockets still require the lead's platform run.
+
+The local schedule factory constructs the same home-bound lifecycle and native
+timer operations without opening the store. Registration, pinning and ticks
+remain unbound because the current controller contracts have no local-checkout
+registration with a captured environment, pin operation or tick operation.
+The CLI factory tests verify home preservation and native timer cancellation.
+`localcontroller.NewScheduleService` constructs the store-backed cron service
+inside the elected owner. It uses the owned default-team tenant, captures the
+OS account and hostname, and binds the tick lock and pin directory to that home.
+Its launcher must implement the shared `crons.Launcher` contract. The factory
+adds no intake path. SQLite tests cover registration, pin/unpin, tick history and
+pin deletion through this service with a fake prover and launcher. The HTTP
+operations and captured-environment association above still need contracts.
+
+Before readiness, this composition acquires the store's `controller.reaper`
+lease, runs unit recovery and concurrency maintenance, then asks the state
+projection to reconcile local activity. It renews the same fence after that
+projection returns. Expiry or replacement during reconciliation refuses startup.
+The elected home process uses the stable `wingd` maintenance holder because its
+workers join before the election is released. Periodic maintenance renews the
+fence and uses the same store operations. It is not an activity hold.
+
+Queue execution, activity observation and maintenance share cancellation.
+Failure of one stops and joins all three. Store close refuses while those
+workers are running. The runtime continues to own HTTP shutdown and closes the
+composition only after its handlers and admission finalizers join.
+
+Admission reads run state through the composition's `DefaultTeam` handle.
+Cancellation calls `Tenant.TransitionRun` with the elected reaper fence. It
+records the request while live holders drain, and maintenance finishes the run
+after their leases end. Repeated requests preserve the first reason and leave
+terminal results intact. Missing and foreign runs fail. Stale fences cannot mutate state.
+Disconnect finalization logs failures and remains usable during runtime drain
+because admission finalizers join before store close. Readiness requires the
+open, reconciled owner and the shared state binding's readiness check.
+
 Readiness waits for reconciliation, admission startup and the API serving loop.
 When `DashboardAddress` is set, it also waits for the dashboard serving loop.
 An empty address serves only `api.sock`. `AwaitReady` waits for an active start
@@ -51,7 +154,8 @@ The runtime counts its dashboard HTTP connections until they close, including
 idle keep-alive sockets and hijacked connections. Closing the last connection
 starts a fresh idle interval. Controller activity updates cannot erase that hold.
 Admission holders and waiting runs also remain active. `SetStay` pins the
-daemon. Health probes, repeated unchanged counts and idle API connections do
+daemon. The client `Probe` API observes the handshake without requesting queue work.
+Health probes, repeated unchanged counts and idle API connections do
 not extend its idle deadline. The timeout comes from
 `limits.LocalControllerIdleTimeout` unless the existing admission configuration
 overrides it.
@@ -73,23 +177,57 @@ The [transport contract](LOCAL-TRANSPORT.md) lists the native tests still requir
 Admission state and election files use `fssecure`. Admission state accepts only
 the current schema.
 
+`ResolveAdmissionPolicy` reads the complete machine configuration through
+`userconfig.ReadConfig`. The shared configuration package owns decoding and
+validation. The runtime converts its typed admission settings to scheduling and
+Jev policy, preserving explicit zero values and the defaults for omitted fields.
+
 <!-- design:begin -->
 
 ## Integration requirements
 
-The controller composition supplies `LocalController` from the shared
-`pkg/controller` implementation. Its `Run` method reports all four activity
-counts for activity outside the runtime's own HTTP connections and joins its
-consumer and maintenance children before returning. The runtime adds its
-dashboard connection count. Its API server consumes the kernel identity on
-`APIConn`. Its dashboard server retains browser authentication. Local runs
-continue to execute in the CLI.
+Detached and scheduled startup callers use the shared lifecycle, preserve its
+startup error and require a running result. They refuse a service binding for
+another home before starting it. The separate trigger-consumer command, process,
+election, store opener, dispatcher and renewal loop are removed. `localws.Run`,
+which started another consumer beside a second store owner, is removed too.
+The retained local HTTP handler fixtures use their own test server.
+The CLI service resolver and sealed local intake remain production bindings.
 
-The final controller routes, capability authorization, store reads, leased
-maintenance and local consumer are still unbound here. Their implementations
-must replace the controller fixture used by the runtime tests. The final store
-also needs an activity projection and a typed incompatible-store error. No
-compatibility router or second store opener supplies those gaps.
+The removed consumer's snapshot reader, consume-at-start rule and cleanup cursor
+are removed too. Final local hosts use `FileEnvironmentSnapshots`, whose sealed
+identity survives replacement owners, retries and children. Missing or altered
+values fail before acquisition. The remaining legacy CLI capture writer still
+needs migration to that intake contract. It has no consumer after the hard cut.
+
+The `localcontroller.State` interface supplies readiness, the owned secrets read, startup
+reconciliation and live activity observation. The CLI binder supplies the
+production state projection, shared API/dashboard handlers, peer claimant and
+native host configuration. `Open` constructs the shared queue from those inputs.
+`Run` joins the queue, activity observer and maintenance before returning.
+The runtime adds its dashboard connection count. Its API server consumes the
+kernel identity on `APIConn`. Its dashboard server retains browser authentication.
+
+The native binder adopts committed self-claims through `OwnerHost.AdoptClaim`.
+It checks each private node award through the shared authentication and relation
+policy, registers its bearer with the shared masker, and captures it separately
+from the run owner's authority. Every process delegation rechecks the current
+owner, node award and persisted generation and attempt. The parent claim stays
+at attempt zero across retries. SDK process authority and its data scope narrow
+to the running attempt. Its process revoker ends the child authority when
+execution joins.
+
+`TestNativeStoreOwnerW8/local_controller` exercises `Config.Open`, leased
+reconciliation, the shared queue, native host, persisted completion and joined
+shutdown. It substitutes state/HTTP, enrollment, version policy and source
+services. The local node-adoption properties use C2 snapshot and relation fakes
+with the shared authenticator. The persisted node-start and host-refresh tests
+verify that an attempt-zero award survives the transition to its current attempt.
+The delegation test uses the shared `NativeProcesses` and `ProcessAuthorities`.
+These tests do not establish persisted peer authentication, remote native state,
+owner policy composition, byte/record bindings or native process execution.
+The local CLI host and schedule operation transport still require those shared
+contracts. The store also needs a typed incompatible-store error.
 
 `client.QueryLocalController` discovers the owner through the authenticated
 admission socket. It reports readiness, PID, version, stay policy and the four
@@ -121,26 +259,26 @@ error, including cancellation during the switch from handshake to readiness.
 The handshake has the existing probe budget. Readiness follows the caller's
 context because dashboard startup can take longer than a health probe.
 
-`client.NewLocalLifecycle` composes these operations with an in-process runtime.
-It reuses a ready owner, promotes stay, starts the dashboard and drains the
-elected process. The adapter binds one home before any owner query. An empty
-start Home selects that bound home. Another home is refused before mutation.
-Standalone refuses an existing owner. Status and version skew never cause a
-takeover, and unreachable, stalled or unsupported owners remain errors.
+`client.NewLocalLifecycle` reuses a ready owner or starts the captured absolute
+executable through `wingd run --home HOME --version VERSION`. That process
+owns the controller. Startup uses the admission client's shared
+start claim and election checks, with takeover disabled. Readiness requires the
+local controller status to report running within the existing startup budget.
+The request can finish while that detached process continues hosting other runs.
 
-An absent owner delegates startup to the in-process runtime. If another process
-wins the election, the lifecycle joins its own startup cleanup before querying
-and reusing the ready winner. A winner still starting returns the election
-error, so the caller can retry readiness. A joined cleanup failure remains an
-error. Startup success requires the owner to remain ready after stay promotion.
-Starting or draining local processes keep lifecycle operations until cleanup
-finishes, even though they no longer report ready.
+The adapter binds one home before any owner query. An empty start Home selects
+that bound home. Another home is refused before mutation. It promotes stay,
+attaches the dashboard and drains the elected process through the authenticated
+socket. Status retains installed-unit information. Unreachable, stalled or
+unsupported owners remain errors. Version skew does not replace a ready owner.
 
-The adapter supplies process composition without a detached launcher. The CLI
-must use it with the shared-controller factory and supply detached startup once
-its argument contract is defined. The admission spawner uses the declared
-`wingd supervise` entrypoint. Its `wingd run` child still lacks the shared
-controller factory needed for startup.
+Standalone uses the supplied in-process runtime and refuses an existing owner.
+If another process wins its election, the lifecycle joins local cleanup before
+querying the winner. A joined cleanup failure remains an error. Starting or
+draining local processes retain lifecycle operations until cleanup finishes.
+
+The foreground `wingd run` process constructs shared state, HTTP and native
+host services through the CLI's `localcontroller.Config.Bind` adapter.
 `NewLocalRuntime` refuses a foreign election before opening its store. Windows
 transport still refuses API access when it cannot supply a client SID.
 
@@ -165,8 +303,10 @@ Systemd commands disable variable expansion because captured paths must remain
 literal. Native files share private atomic publication and argument encoding
 with runner services. Release metadata survives XML-sensitive prerelease names.
 
-The W9 dashboard, schedule, update and doctor adapters still need to supply this
-manager. The foreground process still needs the shared-controller factory.
+The CLI service resolver supplies this manager and the shared-controller factory.
+The foreground CLI uses `runWingdRunCommand` and the shared flag registry. Its
+former second runtime constructor is removed. Election and factory-failure
+coverage now use that same command path.
 File and service-manager fixtures exercise these ports. They do not establish
 native login, crash, shutdown or Windows behavior.
 

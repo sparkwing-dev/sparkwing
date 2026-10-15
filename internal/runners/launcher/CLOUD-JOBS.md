@@ -4,6 +4,10 @@
 Cloud boundary. Its client always selects `EngineOptions.Launcher`, independent
 of the requested unit kinds. `Hosting` and `BootstrapHost` keep the caller's
 HTTP transport when opening award or exchange clients. Each uses its own bearer.
+The launcher component uses the default engine client, shared HTTP handlers and
+real store. Its transport invokes the handlers without sockets. The embedded
+local queue has no launcher adapter. The controller's transactional launcher
+sync reader remains a fake in this component.
 
 `BuildJob` builds plan, eval and work Jobs from an awarded binding. It checks
 images, resources, deadlines and engine identity before reserving an exclusive
@@ -13,6 +17,13 @@ Plan awards have no job or expansion source. Eval awards identify the terminal
 source job and generation, while work awards have no expansion source. The
 builder and private award reader reject other shapes before source acquisition
 or node reservation. `FuzzCloudAwardUnitBindingW8` checks this boundary.
+
+Retry awards retain the original request and accepted seals. Their request run
+ID can differ from the execution run ID. Claim and bootstrap checks compare
+accepted source seals with the original request, while the capability binding
+must name the execution run. `FuzzControllerRetryAwardPreservesSealsAndFence`
+checks both boundaries through claim and exchange. The sync-generation property
+uses retained request seals when reconciling current and stale Jobs.
 
 Requested CPU and memory above the operator ceilings fail with both values in
 the error. The builder never clamps an award. CPU uses Kubernetes decimal
@@ -86,14 +97,35 @@ the shared credential reader, including Kubernetes projection symlinks. It
 rejects duplicate, unknown, incorrectly cased or malformed metadata and returns
 no partial award on failure. Source metadata must be present and non-null.
 The shared source package validates and acquires its contents.
-`BootstrapHost.RunFile` restores this award and
-uses the same one-time exchange as `Run`. Fetch-source can read the award without
+`cluster.BootstrapRuntime` restores this award and passes it to
+`BootstrapHost.Run` for one-time exchange. Its `Run` method parses the built
+container arguments and compares their fence with the private award before
+constructing either source or host services. Fetch-source can read the award without
 exchanging it. The existing Kubernetes JSON decoder supplies strict decoding
 because it checks nested duplicates without another parser implementation.
 Unit kind, attempt, eval-source fence and engine now travel in that file. The
 builder emits only the declared bootstrap arguments. Eval and work commands
-pass the real shared parser. Plans still need the shared grammar to allow an
-owner unit without a job ID.
+pass the real shared parser. Plan commands omit `--job`. Eval and work name
+their job, checked against the private award before service construction.
+
+`cluster.BootstrapRuntime` reads the private award once and compares its run,
+job and generation with argv before constructing services. It sends fetch-source
+to `SourceInit` and run-node to `BootstrapHost`. A partial host binding closes
+on failure, and normal cleanup follows exchange and host execution. The runtime
+sets the exchange URL from the parsed controller argument. `MainWithRuntime`
+supplies one set of runner, launcher and bootstrap bindings to the executable.
+All commands share the process's SIGINT/SIGTERM context.
+
+`SourceInit` captures source and deadline fields before binding live source
+access. It uses `source.PrepareCheckout` because bootstrap authority permits
+checkout before exchange, while SDK execution belongs to the resulting work
+claim. Remote repository identity and the exact SHA are required. Eval/work
+source must retain the accepted engine. Checkout uses a private staging directory
+beside the destination. Publication moves only its matching checkout into the
+requested source directory. Existing destinations are refused. Temporary Git
+credentials and staging directories are removed before return. Source-access
+cleanup and cancellation causes remain errors. The initializer never exchanges
+the bootstrap or installs an SDK.
 
 `NewControllerControl` binds the launcher's claim and sync operations to the
 shared controller wire interface. Its client must use `EngineOptions.Launcher`.
@@ -102,21 +134,37 @@ kinds in one call. The server supplies team, holder, generation, resources and
 the one-time bootstrap. The launcher has no caller-selected holder override.
 Transport failures never trigger a second claim in the adapter.
 
+`sparkwing-runner launch` uses the shared runner grammar. Both `--image` and
+`--docker-image` require digest-pinned operator images. Namespace defaults to
+`sparkwing-jobs`. Deadlines come from the award rather than a launcher flag.
 `sparkwing-runner launch --poll <duration>` sets the interval between claim and
 reconciliation cycles. The duration must be positive. Omitting it keeps the
 runtime's configured interval, which defaults to five seconds.
 
 The adapter projects plan source through `source.ForRequest`, and eval/work
 through `source.ForExecution` using the accepted spec and matching engine.
+Claim publication, source initialization and bootstrap exchange capture private
+award values before calling service bindings. The claim adapter uses the shared
+source projections directly.
 Each award must include resolved CPU and memory in `ClaimedUnit.Execution`.
 For eval, `Binding.Generation` fences the terminal source and
 `Binding.Expansion` identifies the eval's own live lease. Both survive dispatch.
 
-The Job's binding retains the controller unit ID. Sync sends that ID, the Job
-name and reserved node UID reconstructed from Kubernetes metadata. It accepts
-one live or removal decision per observed Job. Changed fences, duplicate or
-missing decisions and returned credentials fail before activation or teardown.
-No in-memory award map or replacement bootstrap is needed after restart.
+The Job's binding retains the controller unit ID, kind, holder and awarded
+generation. Sync sends that fence with the actual Job namespace, name and UID
+and the reserved node UID reconstructed from Kubernetes metadata. Different
+generations of one unit can coexist during teardown. Sync correlates each live
+award by its complete lease fence and each removal by its observed Job instance.
+Deletion retains that UID as a Kubernetes precondition. Changed fences,
+duplicate or missing decisions and returned credentials fail before activation
+or teardown. No in-memory award map or replacement bootstrap is needed after
+restart.
+
+The adapter retains observed Job identities separately from the request passed
+to the transport, so request mutation cannot select a different cleanup target.
+The launcher-side award fence and Job-instance correlation are implemented.
+The controller and store must check those observations against transactional
+ownership before returning decisions.
 
 `BootstrapHost` creates a separate controller client whose bearer callback holds
 only the Job's bootstrap. It calls exchange once. Before dispatch, it checks the
@@ -125,6 +173,15 @@ source generation, deadlines, engine and resources. Missing authority, a repeate
 bootstrap or changed execution inputs fail before the unit host runs. Cancellation
 before or after exchange also prevents dispatch. The unit host receives the complete
 exchanged claim and owns renewal, source acquisition and execution.
+Job construction, source initialization and bootstrap execution share one award
+deadline calculation. It uses `limits.JobDeadline` and the parent capability
+expiry. Exchange and host dispatch run under that deadline and any earlier caller
+deadline. Expired awards fail before transport construction. Expiry during
+exchange prevents dispatch, and expiry during hosting cancels and joins the host.
+The exchanged source must match the private projection used by fetch-source,
+including repository, remote, commit, pipeline directory, default branch, bundle,
+checkout policy and accepted engine. A matching run and generation alone cannot
+authorize another source.
 
 For work, `runners.Hosting` captures the awarded runner, engine identity,
 claim fence, accepted seals and job settings before renewal or preparation.
@@ -140,17 +197,27 @@ and generator replay. `NodeHost` owns policy checks at each process start.
 
 <!-- design:begin -->
 
-The HTTP client, source projections, deployment network probes and node cleanup
-must supply their declared interfaces. Component tests use a fake controller,
-source projections and Kubernetes API. They do not prove that a deployed cluster enforces egress,
-node isolation, native sidecar shutdown or scratch accounting. Those checks
+`TestStoreLauncherW8` constructs the launcher against the typed HTTP client,
+controller handlers, SQLite issuance and persisted cleanup reader. It publishes
+and activates a Job, exchanges its bootstrap, retains the Job through a running
+attempt, and retires it after committed completion. Kubernetes and the Cloud
+boundary remain fixtures. Deployment network probes and node cleanup still need
+native bindings. `FuzzStoreLauncherAuthorityW8` checks
+changed, narrowed and revoked credentials, route selection and provider failure
+across claims and synchronization. Refusals leave work unclaimed. Other
+components retain their fake controller boundaries. Deployed egress, node
+isolation, native sidecar shutdown and scratch accounting remain unproven. They
 also need real images, an explicit Kubernetes context and bootstrap/host
 composition from the owning areas.
 
 The private files carry the original CloudJobAward and its source input to the
-containers. The builder's eval/work arguments pass the shared CLI parser. The
-parser still requires a job for plan units, which have no job ID. Production
-entrypoints still need source acquisition, the shared host constructors and the
-HTTP client. Component exchange tests do not establish a working pod entrypoint.
+containers. All three builder argument shapes pass the shared CLI parser.
+The default executable still needs the source-access, native host, runner and
+launcher bindings supplied to `MainWithRuntime`. Source acquisition tests use
+real Git with local fixture remotes and a fake credential release. DNS and
+remote authorization are outside that proof. The native host must consume and
+revalidate the initialized checkout, acquire its selected engine and install
+its SDK after exchange. Plan/eval host composition remains open. Component
+exchange tests do not establish a working pod entrypoint.
 
 <!-- design:end -->

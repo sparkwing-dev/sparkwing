@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -13,7 +14,10 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
+	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestLocalServicesRejectInvalidAdmissionBeforeConstruction(t *testing.T) {
@@ -112,6 +116,117 @@ func TestLocalServicesComposeRuntimeUnitsAndPrivateLogs(t *testing.T) {
 	cancel()
 	if file, err := services.openLog(ctx); file != nil || !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled log open = %v, %v", file, err)
+	}
+}
+
+func TestProductionLocalControllerReconcilesAndServesSharedHandlers(t *testing.T) {
+	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(t.TempDir(), "secrets.key"))
+	owner, err := openLocalController(t.Context(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := owner.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := owner.Ready(); err == nil {
+		t.Fatal("production controller was ready before reconciliation")
+	}
+	activity, err := owner.Reconcile(t.Context())
+	if err != nil || activity != (wingd.LocalActivity{}) {
+		t.Fatalf("empty-home reconciliation: %+v: %v", activity, err)
+	}
+	if err := owner.Ready(); err != nil {
+		t.Fatal(err)
+	}
+	if key, err := owner.TypeSafeAPIKey(t.Context()); err != nil || key != "" {
+		t.Fatalf("fresh home Jev key: configured=%t: %v", key != "", err)
+	}
+	for _, handler := range []struct {
+		name string
+		path string
+	}{
+		{"API", "/api/v1/auth/whoami"},
+		{"dashboard", "/sparkwing-runtime.js"},
+	} {
+		response := httptest.NewRecorder()
+		h := owner.HTTP().API
+		want := 401
+		if handler.name == "dashboard" {
+			h, want = owner.HTTP().Dashboard, 200
+		}
+		h.ServeHTTP(response, httptest.NewRequest("GET", handler.path, nil))
+		if response.Code != want {
+			t.Fatalf("%s: HTTP %d: %s", handler.name, response.Code, response.Body)
+		}
+	}
+	if err := owner.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Ready(); err == nil {
+		t.Fatal("closed production controller remained ready")
+	}
+}
+
+func TestProductionLocalSchedulesShareCapturedControllerHome(t *testing.T) {
+	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	home := t.TempDir()
+	services, err := resolveLocalScheduleServices(t.Context(), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateLocalSchedules(services); err != nil {
+		t.Fatal(err)
+	}
+	if services.options.Home != home || services.units == nil || services.installTimer == nil || services.uninstallTimer == nil {
+		t.Fatal("local schedules lost controller or native timer bindings")
+	}
+	if _, err := os.Stat(filepath.Join(home, "state.db")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("schedule factory opened a writing store: %v", err)
+	}
+	foreign := services.options
+	foreign.Home = t.TempDir()
+	if err := services.installTimer(t.Context(), foreign); err == nil {
+		t.Fatal("native timer accepted a different controller home")
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := services.installTimer(ctx, services.options); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled timer install: %v", err)
+	}
+	if err := services.uninstallTimer(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled timer removal: %v", err)
+	}
+}
+
+func TestProductionLocalQueueAdvertisesUsableCapacity(t *testing.T) {
+	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(t.TempDir(), "secrets.key"))
+	var runner runners.StoreRunnerConfig
+	owner, err := (localcontroller.Config{Bind: func(ctx context.Context, binding localcontroller.Binding) (localcontroller.Services, error) {
+		services, err := bindLocalController(ctx, binding)
+		runner = services.Runner
+		return services, err
+	}}).Open(t.Context(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := owner.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	if runner.RequestCapacity == nil {
+		t.Fatal("local queue cannot supply available CPU to matching")
+	}
+	cores, memory := runner.RequestCapacity()
+	available := match.Resources{Cores: cores, MemoryBytes: memory}
+	capacity := match.Resources{Cores: float64(runtime.NumCPU())}
+	if verdict := match.Fits(capacity, available, match.Resources{Cores: .25}); !verdict.OK() {
+		t.Fatalf("local queue refuses a fractional CPU job on this machine: %v", verdict)
 	}
 }
 

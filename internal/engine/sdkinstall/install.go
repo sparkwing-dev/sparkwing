@@ -17,26 +17,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/engine/npmcmd"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-// Run serves __sdk-install in the selected engine. Version is its build stamp.
-// Input contains SDKInstallRequest without Environment. Native tools receive the
-// filtered inherited environment, and only the resulting SDKCommand reaches output.
+// Run serves __sdk-install with the selected engine's build stamp and filtered environment.
 func Run(ctx context.Context, version string, input io.Reader, output, diagnostics io.Writer) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	body, err := io.ReadAll(input)
-	if err != nil {
-		return err
-	}
 	var request engine.SDKInstallRequest
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
+	decoder := json.NewDecoder(input)
 	if err := decoder.Decode(&request); err != nil {
 		return errors.New("invalid SDK install request")
 	}
@@ -78,7 +71,7 @@ func Run(ctx context.Context, version string, input io.Reader, output, diagnosti
 func installGoSDK(ctx context.Context, dir string, pin engine.Pin, environment []string, diagnostics io.Writer, masker *secrets.Masker) (command []string, result error) {
 	// safety: workspace and modfile overrides must not replace the SDK that selected this engine.
 	environment = append(environment, "GOWORK=off", "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH)
-	key, err := bincache.PipelineCacheKey(dir)
+	key, _, err := bincache.ExplainCacheKey(dir, environment)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +146,7 @@ func installTool(ctx context.Context, dir string, environment []string, name str
 	command := exec.Command(name, args...)
 	if name == "npm" {
 		var err error
-		command, err = npmcmd.Command(args...)
+		command, err = pipelineentry.NPMCommand(ctx, runtime.GOOS, exec.LookPath, args...)
 		if err != nil {
 			return nil, fmt.Errorf("resolve npm: %w", err)
 		}

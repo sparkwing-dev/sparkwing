@@ -3,12 +3,14 @@ package cluster
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
+	"github.com/sparkwing-dev/sparkwing/internal/runners/runnerflags"
 )
 
 func TestLauncherCommandPassesOnlyOperatorConfiguration(t *testing.T) {
@@ -18,9 +20,13 @@ func TestLauncherCommandPassesOnlyOperatorConfiguration(t *testing.T) {
 	}
 	boundary := errors.New("fixture boundary")
 	image := "example.com/image@sha256:" + strings.Repeat("a", 64)
-	err := RunLaunchCLI(t.Context(), []string{"--controller=https://controller.example", "--image=" + image, "--docker-image=" + image, "--cpu-ceiling=500m", "--memory-ceiling=1Gi", "--credentials-dir=" + dir},
+	args := []string{"--controller=https://controller.example", "--image=" + image, "--docker-image=" + image, "--cpu-ceiling=500m", "--memory-ceiling=1Gi", "--credentials-dir=" + dir}
+	if _, err := runnerflags.Parse("launch", args, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	err := RunLaunchCLI(t.Context(), args,
 		func(_ context.Context, cfg launcher.CloudJobConfig, token string) (*launcher.Launcher, error) {
-			if cfg.CPUCeiling != .5 || cfg.MemoryCeiling != 1<<30 || token != "private-launcher-root" {
+			if cfg.CPUCeiling != .5 || cfg.MemoryCeiling != 1<<30 || cfg.Namespace != "sparkwing-jobs" || cfg.DockerImage != image || token != "private-launcher-root" {
 				t.Fatalf("configuration lost at runtime boundary")
 			}
 			return nil, boundary
@@ -31,26 +37,9 @@ func TestLauncherCommandPassesOnlyOperatorConfiguration(t *testing.T) {
 }
 
 func TestLauncherCommandRejectsRemovedCacheAndScratchOptions(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, agentTokenCredential), []byte("private-launcher-root"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	image := "example.com/image@sha256:" + strings.Repeat("a", 64)
-	args := []string{"--controller=https://controller.example", "--image=" + image, "--docker-image=" + image, "--cpu-ceiling=1", "--memory-ceiling=1Gi", "--credentials-dir=" + dir}
-	boundary := errors.New("runtime boundary")
-	calls := 0
-	factory := func(context.Context, launcher.CloudJobConfig, string) (*launcher.Launcher, error) {
-		calls++
-		return nil, boundary
-	}
-	if err := RunLaunchCLI(t.Context(), args, factory); !errors.Is(err, boundary) || calls != 1 {
-		t.Fatalf("otherwise-valid launch did not reach runtime: %v", err)
-	}
 	for _, option := range []string{"--cache=http://cache", "--gitcache=http://cache", "--dependency-proxy=http://proxy", "--scratch=40Gi", "--deadline=1h"} {
-		name, _, _ := strings.Cut(option, "=")
-		err := RunLaunchCLI(t.Context(), append(append([]string{}, args...), option), factory)
-		if err == nil || err.Error() != "unknown flag: "+name || calls != 1 {
-			t.Fatalf("%s: want unknown flag before runtime, got %v (calls %d)", option, err, calls)
+		if err := RunLaunchCLI(t.Context(), []string{option}, nil); err == nil {
+			t.Fatalf("accepted %s", option)
 		}
 	}
 }

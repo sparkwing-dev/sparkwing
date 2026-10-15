@@ -30,12 +30,6 @@ func (d *Daemon) idleLoop(ctx context.Context) {
 	}
 }
 
-func (d *Daemon) idleElapsed() time.Duration {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.idleElapsedLocked()
-}
-
 func (d *Daemon) beginIdleShutdown(idle time.Duration) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()

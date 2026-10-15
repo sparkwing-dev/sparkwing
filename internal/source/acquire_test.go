@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
 )
@@ -241,5 +242,27 @@ func TestAcquireUsesSharedEnvironmentPolicyForGitAndInstallation(t *testing.T) {
 				t.Fatalf("environment failure continued: entry=%v installed=%t err=%v", entry, installed, err)
 			}
 		})
+	}
+}
+
+func TestAcquirePassesSourceMaskRegistryToSelectedInstaller(t *testing.T) {
+	dir, sha := sourcetest.Repository(t)
+	options, _, _ := acquisitionOptions(t, filepath.Join(dir, ".sparkwing"))
+	options.Base.Masker = secrets.NewMasker()
+	const secret = "operator-registry-note-0123456789"
+	options.Base.Masker.Register(secret)
+	install := options.InstallSDK
+	options.InstallSDK = func(ctx context.Context, selected engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
+		if request.Masker == nil || request.Masker.Mask(secret) == secret {
+			t.Fatal("source masks did not reach the selected installer")
+		}
+		return install(ctx, selected, request)
+	}
+	entry, err := source.Acquire(t.Context(), source.Spec{RepoKey: "local:" + dir, LocalCheckout: dir, SHA: sha}, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := entry.Close(); err != nil {
+		t.Fatal(err)
 	}
 }

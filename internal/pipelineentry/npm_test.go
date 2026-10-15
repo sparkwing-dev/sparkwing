@@ -85,3 +85,33 @@ func TestNPMCommandAllowsNativeWindowsNpm(t *testing.T) {
 		t.Fatalf("native npm = %v %v", command, err)
 	}
 }
+
+func FuzzNPMCommandArguments(f *testing.F) {
+	f.Add("install", "--prefix=directory with spaces")
+	f.Add("ci", "& echo credential > marker")
+	f.Add("config", "$(touch marker); %PATH% \" ' \\ \n")
+	f.Fuzz(func(t *testing.T, first, second string) {
+		for _, goos := range []string{"linux", "darwin", "windows"} {
+			npm := filepath.Join("tool directory", "npm.cmd")
+			node := filepath.Join("tool directory", "node.exe")
+			arguments := []string{first, second}
+			command, err := NPMCommand(t.Context(), goos, func(name string) (string, error) {
+				if name == "node" {
+					return node, nil
+				}
+				return npm, nil
+			}, arguments...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []string{npm, first, second}
+			if goos == "windows" {
+				want = []string{node, filepath.Join(filepath.Dir(npm), "node_modules", "npm", "bin", "npm-cli.js"), first, second}
+			}
+			arguments[0] = "changed"
+			if !reflect.DeepEqual(command.Args, want) || command.Path != want[0] {
+				t.Fatalf("npm arguments changed: %q, want %q", command.Args, want)
+			}
+		}
+	})
+}

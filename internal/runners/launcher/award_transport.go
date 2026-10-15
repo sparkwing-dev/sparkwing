@@ -2,7 +2,6 @@ package launcher
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"path/filepath"
@@ -14,6 +13,19 @@ import (
 )
 
 const awardFileName = "award.json"
+
+func captureAward(award CloudJobAward) (CloudJobAward, error) {
+	body, err := json.Marshal(award)
+	if err != nil {
+		return CloudJobAward{}, errors.New("invalid Cloud award metadata")
+	}
+	var captured CloudJobAward
+	if err := json.Unmarshal(body, &captured); err != nil {
+		return CloudJobAward{}, errors.New("invalid Cloud award metadata")
+	}
+	captured.Bootstrap = slices.Clone(award.Bootstrap)
+	return captured, nil
+}
 
 // ReadBootstrapAward reads the award and token from their immutable projected Secret.
 func ReadBootstrapAward(bootstrapFile string) (CloudJobAward, error) {
@@ -50,16 +62,4 @@ func decodeBootstrapAward(metadata, bootstrap []byte) (CloudJobAward, error) {
 		return CloudJobAward{}, err
 	}
 	return award, nil
-}
-
-// RunFile restores the private award before exchanging its bootstrap once.
-func (h BootstrapHost) RunFile(ctx context.Context, bootstrapFile string) error {
-	if err := context.Cause(ctx); err != nil {
-		return err
-	}
-	award, err := ReadBootstrapAward(bootstrapFile)
-	if err != nil {
-		return err
-	}
-	return h.Run(ctx, award)
 }

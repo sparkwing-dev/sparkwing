@@ -66,7 +66,7 @@ func TestDaemonEventsCursorKeepsHistoryAcrossAppends(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", home)
 	dir := filepath.Join(home, "wingd")
 	for i := range 7 {
-		if err := journal.AppendSupervisor(dir, journal.Record{Kind: "queued", RunID: "selected", Data: map[string]any{"index": i}}); err != nil {
+		if err := appendDaemonRecord(dir, journal.Record{Kind: "queued", RunID: "selected", Data: map[string]any{"index": i}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -84,7 +84,7 @@ func TestDaemonEventsCursorKeepsHistoryAcrossAppends(t *testing.T) {
 		t.Fatalf("first: %+v", first)
 	}
 	for _, run := range []string{"selected", "other"} {
-		if err := journal.AppendSupervisor(dir, journal.Record{Kind: "queued", RunID: run, Data: map[string]any{"index": 99}}); err != nil {
+		if err := appendDaemonRecord(dir, journal.Record{Kind: "queued", RunID: run, Data: map[string]any{"index": 99}}); err != nil {
 			t.Fatal(err)
 		}
 	}

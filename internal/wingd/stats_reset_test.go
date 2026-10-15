@@ -1,36 +1,42 @@
-package wingd_test
+package wingd
 
 import (
 	"context"
 	"testing"
-	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 func TestStatsReset_ClearsTheEventWindow(t *testing.T) {
-	home := shortHome(t)
-	startDaemon(t, wingd.Config{Home: home, GraceWindow: -1})
-
-	holder := ensure(t, home, "")
-	lease := mustAcquire(t, holder, coreReq("stats-run", 1))
-	if err := lease.Release(); err != nil {
-		t.Fatalf("release: %v", err)
+	fixture := &runtimeControllerFixture{}
+	runtime := newRuntimeFixture(t, fixture)
+	lifecycle := NewLocalLifecycle(runtime, nil)
+	if _, err := lifecycle.EnsureStarted(t.Context(), LocalStartOptions{Home: fixture.home, Version: "v1"}); err != nil {
+		t.Fatal(err)
 	}
-
-	qs := queueOnce(t, home)
-	if qs.Events == nil || qs.Events.Runs == 0 {
-		t.Fatalf("expected the event window to record the grant, got %+v", qs.Events)
+	t.Cleanup(func() {
+		if err := lifecycle.Stop(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	holder := localControlPipe(t, runtime.run.daemon, false)
+	if grant := holder(&wingwire.AdmissionRequest{RunID: "stats-run", Resources: wingwire.HostResources{Cores: 1}}); wingwire.TypeOf(grant) != wingwire.TypeGrant {
+		t.Fatalf("admission: %T", grant)
 	}
-
-	ctrl := ensure(t, home, "")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := ctrl.ResetStats(ctx); err != nil {
-		t.Fatalf("reset stats: %v", err)
+	observe := localControlPipe(t, runtime.run.daemon, false)
+	before := observe(&wingwire.QueueState{}).(*wingwire.QueueState)
+	if before.Events == nil || before.Events.Runs != 1 || len(before.Holders) != 1 {
+		t.Fatalf("grant did not reach event window: %+v", before.Events)
 	}
-
-	if qs := queueOnce(t, home); qs.Events != nil {
-		t.Fatalf("stats reset did not clear the window: %+v", qs.Events)
+	if reply := observe(&wingwire.StatsReset{}); wingwire.TypeOf(reply) != wingwire.TypeStatsResetAck {
+		t.Fatalf("reset stats reply: %T", reply)
+	}
+	after := observe(&wingwire.QueueState{}).(*wingwire.QueueState)
+	if after.Events != nil || len(after.Holders) != 1 || after.Holders[0].RunID != "stats-run" || after.Holders[0].Resources != before.Holders[0].Resources {
+		t.Fatalf("reset changed leases or retained events: %+v", after)
+	}
+	_, events, _, err := readStateWithCancellations(runtime.run.daemon.layout.state)
+	if err != nil || len(events) != 0 {
+		t.Fatalf("persisted event window: %+v: %v", events, err)
 	}
 }

@@ -38,33 +38,11 @@ func protocolTooOld(selfVersion string, ack wingwire.HelloAck) error {
 	if raiseTo == "" {
 		pinAdvice = fmt.Sprintf("Raise this repo's .sparkwing/go.mod pin to a release speaking protocol %d", ack.ProtocolMajor)
 	}
-	return &skewError{daemon: ack.BinaryVersion, err: fmt.Errorf(
+	return fmt.Errorf(
 		"%w: daemon speaks protocol %d (sparkwing %s), this pipeline binary speaks protocol %d (sparkwing %s). "+
 			"%s and re-run, or set SPARKWING_HOME to run against a daemon of your own; "+
 			"upgrading the sparkwing CLI does not affect this handshake",
-		ErrProtocolTooOld, ack.ProtocolMajor, daemon, wingd.ProtocolMajor, self, pinAdvice)}
-}
-
-// safety: the ack is gone by the time a caller sees the error, and the
-// degradation warning names the daemon's release rather than re-deriving it
-// from prose.
-type skewError struct {
-	daemon string
-	err    error
-}
-
-func (e *skewError) Error() string { return e.err.Error() }
-
-func (e *skewError) Unwrap() error { return e.err }
-
-// DaemonVersionOf reports the version of the daemon a handshake error names,
-// empty for an error that names none.
-func DaemonVersionOf(err error) string {
-	var skew *skewError
-	if errors.As(err, &skew) {
-		return skew.daemon
-	}
-	return ""
+		ErrProtocolTooOld, ack.ProtocolMajor, daemon, wingd.ProtocolMajor, self, pinAdvice)
 }
 
 var ErrDaemonTooOld = errors.New("wingd/client: daemon protocol is older than this client")
@@ -114,10 +92,10 @@ func daemonTooOld(selfVersion string, ack wingwire.HelloAck) error {
 	if daemon == "" {
 		daemon = "(unknown)"
 	}
-	return &skewError{daemon: ack.BinaryVersion, err: fmt.Errorf(
+	return fmt.Errorf(
 		"%w: daemon speaks protocol %d (sparkwing %s), this pipeline binary speaks protocol %d (sparkwing %s). "+
 			"Install sparkwing %s or newer on this host, then run `sparkwing daemon restart`",
-		ErrDaemonTooOld, ack.ProtocolMajor, daemon, wingd.ProtocolMajor, self, minHostingRelease())}
+		ErrDaemonTooOld, ack.ProtocolMajor, daemon, wingd.ProtocolMajor, self, minHostingRelease())
 }
 
 func servedDownLevel(ack wingwire.HelloAck) bool {
@@ -177,10 +155,7 @@ func (o Options) spawn(home, version string) error {
 	if o.Spawn != nil {
 		return o.Spawn(home, version)
 	}
-	// safety: the self-exec default is only correct for a binary that serves
-	// the `wingd` verbs. A NoTakeover client is by definition not one, so an
-	// unset Spawn there is a wiring mistake, and re-execing anyway would put
-	// the very binary this feature keeps out of the daemon role into it.
+	// safety: a non-hosting client cannot start wingd by re-executing itself.
 	if o.NoTakeover {
 		return ErrNoDaemonHost
 	}
@@ -315,7 +290,7 @@ func spawnFailed(home, sock string, serr, dialErr error) error {
 	if errors.Is(serr, ErrNoDaemon) || errors.Is(serr, ErrNoDaemonHost) {
 		return serr
 	}
-	if errors.Is(serr, ErrDaemonHostUnusable) || errors.Is(serr, ErrDaemonHostFailed) {
+	if errors.Is(serr, ErrDaemonHostFailed) {
 		return serr
 	}
 	if tail := daemonLogTail(home); tail != "" {
@@ -540,11 +515,9 @@ func (cl *Client) connectPaced(ctx context.Context, dialMax time.Duration) error
 }
 
 const (
-	connectHandshakeTimeout = wingd.HeartbeatStaleWindow
+	connectHandshakeTimeout = time.Minute
 	defaultReconnectTimeout = 8 * time.Second
-	// safety: a lost socket can precede the old child's five-minute failure
-	// ceiling, then wait through a successor's slow startup and restart backoff.
-	defaultReattachTimeout = 12 * time.Minute
+	defaultReattachTimeout  = 12 * time.Minute
 )
 
 func (cl *Client) reconnect(ctx context.Context, within time.Duration) error {
@@ -606,7 +579,7 @@ func (cl *Client) takeover(ctx context.Context, opts Options) error {
 	_, _ = cl.dec.read()
 	cl.Close()
 	if err := opts.spawn(opts.Home, opts.Version); err != nil {
-		if errors.Is(err, ErrDaemonHostFailed) || errors.Is(err, ErrDaemonHostUnusable) {
+		if errors.Is(err, ErrDaemonHostFailed) {
 			return err
 		}
 		opts.logf("spawn successor: %v", err)
@@ -630,32 +603,7 @@ func (cl *Client) handshake(version string) (wingwire.HelloAck, error) {
 	return *ack, nil
 }
 
-func (cl *Client) Draining() bool { return cl.ack.Draining }
-
 func (cl *Client) DaemonVersion() string { return cl.ack.BinaryVersion }
-
-// DaemonStoreSchema returns the runs-store schema version the connected
-// daemon's binary understands, or 0 when the daemon predates the field and
-// the skew cannot be detected before it reads the store.
-func (cl *Client) DaemonStoreSchema() int { return cl.ack.StoreSchemaVersion }
-
-// APIReady reports whether the connected daemon serves the controller HTTP
-// API on its api.sock. A daemon that predates the field advertises nothing,
-// which reads as false.
-func (cl *Client) APIReady() bool { return cl.ack.APIReady != nil && *cl.ack.APIReady }
-
-// APIAdvertised reports whether the connected daemon answered about its
-// controller API socket at all. A daemon that predates the field advertises
-// nothing, which is not the same as advertising that the socket is unbound.
-func (cl *Client) APIAdvertised() bool { return cl.ack.APIReady != nil }
-
-// APIError reports why the connected daemon's API socket is unbound, empty
-// when it is bound or when the daemon predates the field.
-func (cl *Client) APIError() string { return cl.ack.APIError }
-
-// APISocket reports where the connected daemon serves the controller HTTP
-// API, derived from the admission socket this client reached.
-func (cl *Client) APISocket() string { return wingd.APISocketBeside(cl.sock) }
 
 // safety: the daemon drops a peer that stops reading after its own
 // connWriteTimeout; a client without the mirror image of that bound blocks a

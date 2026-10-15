@@ -210,6 +210,20 @@ func TestExactEngineCacheCorruptionAndPolicyEnforcement(t *testing.T) {
 	}
 	corruptions := []cacheCorruption{
 		{"bytes", func(path string) error { return os.WriteFile(path, []byte("corrupt"), 0o700) }},
+		{"verification_record", func(path string) error {
+			return os.WriteFile(filepath.Join(filepath.Dir(path), "verification.json"), []byte("corrupt"), 0o600)
+		}},
+		{"missing_verification_record", func(path string) error {
+			return os.Remove(filepath.Join(filepath.Dir(path), "verification.json"))
+		}},
+		{"ambiguous_verification_record", func(path string) error {
+			record := filepath.Join(filepath.Dir(path), "verification.json")
+			body, err := os.ReadFile(record)
+			if err != nil {
+				return err
+			}
+			return os.WriteFile(record, append([]byte(`{"Asset":null,`), body[1:]...), 0o600)
+		}},
 		{"directory", func(path string) error {
 			if err := os.Remove(path); err != nil {
 				return err

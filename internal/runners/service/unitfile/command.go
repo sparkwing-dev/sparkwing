@@ -32,6 +32,9 @@ func Arguments(goos, body string) []string {
 				return nil
 			}
 			args = SystemdWords(strings.TrimPrefix(value, ":"))
+			if len(args) == 0 && strings.TrimSpace(value) != "" {
+				return nil
+			}
 		}
 	}
 	return args
@@ -77,7 +80,7 @@ func RewriteCommand(goos, body string, args []string, version string) (string, e
 	if goos == "linux" {
 		lines := strings.Split(body, "\n")
 		for i, line := range lines {
-			if strings.HasPrefix(line, "ExecStart=") {
+			if value, ok := strings.CutPrefix(line, "ExecStart="); ok && strings.TrimSpace(value) != "" {
 				lines[i] = "ExecStart=" + Command(args)
 			}
 			if strings.HasPrefix(line, "# SparkwingVersion=") {

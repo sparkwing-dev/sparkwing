@@ -72,35 +72,6 @@ func connectToFakeDaemon(t *testing.T, home string) *Client {
 	return cl
 }
 
-func TestResetStatsReportsAnUnsupportedReplyWithoutRetrying(t *testing.T) {
-	home := shortHome(t)
-	frames := make(chan int, 8)
-	serveFakeDaemon(t, home, func(nc net.Conn, r *frameReader) {
-		for {
-			if _, err := r.read(); err != nil {
-				return
-			}
-			frames <- 1
-			line, err := wingwire.Encode(&wingwire.Unsupported{Type: string(wingwire.TypeStatsReset)})
-			if err != nil {
-				return
-			}
-			if _, err := nc.Write(line); err != nil {
-				return
-			}
-		}
-	})
-
-	cl := connectToFakeDaemon(t, home)
-	err := cl.ResetStats(context.Background())
-	if !errors.Is(err, ErrDaemonLacksOperation) {
-		t.Fatalf("ResetStats error = %v, want ErrDaemonLacksOperation", err)
-	}
-	if len(frames) != 1 {
-		t.Errorf("client sent %d frames; a refusal is terminal, not transient", len(frames))
-	}
-}
-
 func TestStopReportsADaemonThatRefusesTheDrain(t *testing.T) {
 	home := shortHome(t)
 	held := make(chan struct{})

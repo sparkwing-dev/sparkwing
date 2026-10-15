@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
-	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,7 +17,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 type cliClaim func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error)
@@ -40,14 +42,42 @@ type cliVersions struct {
 func (v cliVersions) Index(context.Context, time.Time) (engine.IndexResult, error) {
 	return engine.IndexResult{Index: v.index}, v.err
 }
+
 func (v cliVersions) PrepareRunnerUpdate(context.Context, string, releaseasset.Target) (engine.SoftwareUpdate, error) {
 	return engine.SoftwareUpdate{}, errors.New("unexpected update")
+}
+
+type cliWire struct {
+	controllerwire.Controller
+	claim cliClaim
+}
+
+func (w cliWire) Claim(ctx context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+	return w.claim(ctx, request)
+}
+
+func cliRuntime(claim cliClaim, host cliHost, versions cliVersions) runners.RuntimeConfig {
+	return runners.RuntimeConfig{
+		NewController: func(client.EngineOptions) (controllerwire.Controller, error) { return cliWire{claim: claim}, nil },
+		Hosting:       host, Versions: versions, Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner},
+	}
+}
+
+func cliAward(kind capability.UnitKind) controllerwire.ClaimedUnit {
+	unit := controllerwire.ClaimedUnit{Unit: kind, UnitID: string(kind), RunID: "run", Capability: "private"}
+	unit.Request = runspec.SealedRequest{RunID: "run", Request: runspec.Request{
+		Git:    runspec.Git{Repository: runspec.Repository{Key: "gh:1"}, SHA: strings.Repeat("a", 40)},
+		Source: runspec.Source{Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/app.git", PipelineDir: ".sparkwing"}},
+	}}
+	return unit
 }
 
 func TestStartAndWarmExecuteTriggerAndJobOnOneManagedLoop(t *testing.T) {
 	versions := cliVersions{index: cliVersionIndex(t)}
 	for _, command := range []string{"start", "warm"} {
 		t.Run(command, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
 			controller := "https://controller.example"
 			credentials := runnerCredentials(t)
 			concurrency := 1
@@ -56,35 +86,30 @@ func TestStartAndWarmExecuteTriggerAndJobOnOneManagedLoop(t *testing.T) {
 			claims := 0
 			cli := RunnerCLI{
 				ReadConfig: func(string) (userconfig.Config, error) {
-					return userconfig.Config{Runner: &userconfig.RunnerConfig{Controller: &controller, CredentialsDir: &credentials, MaxConcurrent: &concurrency}}, nil
+					return userconfig.Config{Runner: &userconfig.RunnerConfig{Controller: &controller, CredentialsDir: &credentials, MaxConcurrent: &concurrency, Repos: []string{"github.com/acme/*"}}}, nil
 				},
-				Factory: func(_ context.Context, _ RunnerOptions) (*runners.ManagedRunner, error) {
-					var loop *runners.Loop
-					loop = &runners.Loop{
-						Controller: cliClaim(func(_ context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
-							if !reflect.DeepEqual(request.Kinds, kinds) || request.RunnerVersion != "v1.2.3" {
-								t.Errorf("claim: %#v", request)
-							}
-							kind := kinds[claims]
-							claims++
-							return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: kind, UnitID: string(kind), RunID: "run", Capability: "private"}}, nil
-						}),
-						Host: cliHost(func(ctx context.Context, unit controllerwire.ClaimedUnit) error {
-							hosted = append(hosted, unit.Unit)
-							if len(hosted) == 2 {
-								loop.Drain()
-							}
-							return ctx.Err()
-						}),
-					}
-					return &runners.ManagedRunner{Loop: loop, Versions: versions, Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}}, nil
+				Factory: func(context.Context, RunnerOptions) (runners.RuntimeConfig, error) {
+					return cliRuntime(func(_ context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+						if !reflect.DeepEqual(request.Kinds, kinds) || request.RunnerVersion != "v1.2.3" {
+							t.Errorf("claim: %#v", request)
+						}
+						unit := cliAward(kinds[claims])
+						claims++
+						return controllerwire.ClaimResponse{Claim: &unit}, nil
+					}, func(ctx context.Context, unit controllerwire.ClaimedUnit) error {
+						hosted = append(hosted, unit.Unit)
+						if len(hosted) == 2 {
+							cancel()
+						}
+						return nil
+					}, versions), nil
 				},
 			}
 			args := []string{"--config=/fixture/config.yaml"}
 			if command == "warm" {
-				args = []string{"--controller=" + controller, "--credentials-dir=" + credentials, "--max-concurrent=1"}
+				args = []string{"--controller=" + controller, "--credentials-dir=" + credentials, "--max-concurrent=1", "--repos=github.com/acme/*"}
 			}
-			if err := cli.Run(t.Context(), command, args, "v1.2.3"); err != nil {
+			if err := cli.Run(ctx, command, args, "v1.2.3"); !errors.Is(err, context.Canceled) {
 				t.Fatal(err)
 			}
 			if !reflect.DeepEqual(hosted, kinds) {
@@ -96,20 +121,30 @@ func TestStartAndWarmExecuteTriggerAndJobOnOneManagedLoop(t *testing.T) {
 
 func TestRunnerRequiresSignedPolicyBeforeClaiming(t *testing.T) {
 	failure := errors.New("signed policy unavailable")
-	cli := RunnerCLI{Factory: func(context.Context, RunnerOptions) (*runners.ManagedRunner, error) {
-		return &runners.ManagedRunner{Loop: &runners.Loop{
-			Controller: cliClaim(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
-				t.Error("claimed without signed policy")
-				return controllerwire.ClaimResponse{}, nil
-			}),
-			Host: cliHost(func(context.Context, controllerwire.ClaimedUnit) error {
-				t.Error("hosted without signed policy")
-				return nil
-			}),
-		}, Versions: cliVersions{err: failure}, Target: releaseasset.Target{Binary: releaseasset.SparkwingRunner, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}}, nil
+	cli := RunnerCLI{Factory: func(context.Context, RunnerOptions) (runners.RuntimeConfig, error) {
+		return cliRuntime(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+			t.Error("claimed without signed policy")
+			return controllerwire.ClaimResponse{}, nil
+		}, func(context.Context, controllerwire.ClaimedUnit) error {
+			t.Error("hosted without signed policy")
+			return nil
+		}, cliVersions{err: failure}), nil
 	}}
 	if err := cli.Run(t.Context(), "warm", []string{"--controller=https://controller.example", "--credentials-dir=" + runnerCredentials(t)}, "v1.2.3"); !errors.Is(err, failure) {
 		t.Fatalf("Run = %v", err)
+	}
+}
+
+func TestRunnerBindsMetricsBeforeClaiming(t *testing.T) {
+	cli := RunnerCLI{Factory: func(context.Context, RunnerOptions) (runners.RuntimeConfig, error) {
+		return cliRuntime(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+			t.Error("claimed before metrics bound")
+			return controllerwire.ClaimResponse{}, errors.New("unexpected claim")
+		}, func(context.Context, controllerwire.ClaimedUnit) error { return nil }, cliVersions{index: cliVersionIndex(t)}), nil
+	}}
+	err := cli.Run(t.Context(), "warm", []string{"--controller=https://controller.example", "--credentials-dir=" + runnerCredentials(t), "--metrics-addr=invalid:address:port"}, "v1.2.3")
+	if err == nil || !strings.Contains(err.Error(), "metrics") {
+		t.Fatalf("metrics bind error: %v", err)
 	}
 }
 

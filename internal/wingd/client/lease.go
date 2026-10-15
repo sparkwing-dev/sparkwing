@@ -150,32 +150,17 @@ func (l *Lease) Release() error {
 // safety: the connection has exactly one reader; after Acquire returns,
 // Watch is that reader, so nothing else may read until it exits.
 func (l *Lease) Watch(onEvicted func(wingwire.Evicted)) {
-	l.WatchControl(onEvicted, nil)
-}
-
-// WatchControl is [Lease.Watch] with a callback for a daemon-initiated
-// cancel.
-//
-// A connection that keeps dropping is re-established with backoff, so a
-// daemon that accepts and immediately closes cannot turn the watcher into
-// a reconnect loop running at socket speed. The pacing returns to its
-// base once a frame arrives, which is the only proof the watch is working
-// again.
-func (l *Lease) WatchControl(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel)) {
-	if err := l.watchLease(onEvicted, onCancel, nil); err != nil {
+	if err := l.WatchControl(onEvicted, nil); err != nil {
 		l.cl.opts.logf("lease %s: eviction watch ended: %v", l.RunID, err)
 	}
 }
 
-// WatchOwnership keeps the lease attached across daemon restarts and reports
-// each recovered connection. It must remain the lease connection's only reader.
-// It returns [ErrReattachRejected] when a successor no longer has the lease, or
-// the recovery error that otherwise ended the watch.
-func (l *Lease) WatchOwnership(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel), onReattached func()) error {
-	return l.watchLease(onEvicted, onCancel, onReattached)
+// WatchControl joins lease recovery and reports lost authority to the host.
+func (l *Lease) WatchControl(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel)) error {
+	return l.watchLease(onEvicted, onCancel)
 }
 
-func (l *Lease) watchLease(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel), onReattached func()) error {
+func (l *Lease) watchLease(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel)) error {
 	retry := newRetry("lease watch", 0)
 	for {
 		msg, err := l.cl.dec.read()
@@ -188,9 +173,6 @@ func (l *Lease) watchLease(onEvicted func(wingwire.Evicted), onCancel func(wingw
 			recovered, recoverErr := l.recoverWatch()
 			if !recovered {
 				return recoverErr
-			}
-			if onReattached != nil {
-				onReattached()
 			}
 			continue
 		}
@@ -233,13 +215,13 @@ func (l *Lease) recoverWatch() (recovered bool, recoverErr error) {
 	stop := l.cl.cancelOnDone(ctx)
 	defer stop()
 	if err := l.cl.reconnect(ctx, defaultReattachTimeout); err != nil {
-		l.cl.opts.logf("lease %s: daemon connection lost and not recovered (%v); run continues without eviction watch or daemon-side cancel", l.RunID, err)
+		l.cl.opts.logf("lease %s: daemon connection lost and not recovered (%v)", l.RunID, err)
 		return false, err
 	}
 	retry := newRetry("lease re-attach", 0)
 	for {
 		if _, terminal, transient := l.cl.readReattach(l.Token, l.RunID); terminal != nil {
-			l.cl.opts.logf("lease %s: reattach after daemon restart failed (%v); run continues without eviction watch or daemon-side cancel", l.RunID, terminal)
+			l.cl.opts.logf("lease %s: reattach after daemon restart failed (%v)", l.RunID, terminal)
 			return false, terminal
 		} else if transient == nil {
 			return true, nil

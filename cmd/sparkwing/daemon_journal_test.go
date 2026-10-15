@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -53,7 +55,7 @@ func TestDaemonExplainAndEventsReadWithoutDaemon(t *testing.T) {
 		{Kind: "queued", RunID: "run-1", Data: map[string]any{"position": 1, "blocker": "run-0", "blocking_reason": "cores"}},
 		{Kind: "grant", RunID: "run-1", Data: map[string]any{"wait_ms": 350, "backfill": false}},
 	} {
-		if err := journal.AppendSupervisor(dir, record); err != nil {
+		if err := appendDaemonRecord(dir, record); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -111,7 +113,7 @@ func TestDaemonExplainIncludesOwnedSlotsAndChildAttaches(t *testing.T) {
 		{Kind: "release", RunID: "node-slot", Data: map[string]any{"lease_id": "lease-1"}},
 		{Kind: "grant", RunID: "other-slot", Data: map[string]any{"owner_run_id": "other-run"}},
 	} {
-		if err := journal.AppendSupervisor(dir, record); err != nil {
+		if err := appendDaemonRecord(dir, record); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -136,7 +138,7 @@ func TestDaemonExplainFollowsDescendantsTransitively(t *testing.T) {
 		{Kind: "request", RunID: "child", Data: map[string]any{"owner_run_id": "root"}},
 		{Kind: "grant", RunID: "unrelated", Data: map[string]any{"wait_ms": 5}},
 	} {
-		if err := journal.AppendSupervisor(dir, record); err != nil {
+		if err := appendDaemonRecord(dir, record); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -152,10 +154,10 @@ func TestDaemonExplainFollowsDescendantsTransitively(t *testing.T) {
 func TestDaemonJournalReportsSkippedRecords(t *testing.T) {
 	home := t.TempDir()
 	dir := filepath.Join(home, "wingd")
-	if err := journal.AppendSupervisor(dir, journal.Record{Kind: "grant", RunID: "run-1"}); err != nil {
+	if err := appendDaemonRecord(dir, journal.Record{Kind: "grant", RunID: "run-1"}); err != nil {
 		t.Fatal(err)
 	}
-	file, err := os.OpenFile(filepath.Join(dir, "supervisor-events.jsonl"), os.O_APPEND|os.O_WRONLY, 0)
+	file, err := os.OpenFile(filepath.Join(dir, "events.jsonl"), os.O_APPEND|os.O_WRONLY, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +189,7 @@ func TestExplainEventRendersKnownKindsWithoutRawJSON(t *testing.T) {
 		"connection_opened": "Connection opened by pid 123", "connection_handshake": "Connection handshake completed", "connection_closed": "Connection closed",
 		"child_attach_request": "Requested child attachment", "child_attach": "Attached child", "reattach_request": "Requested lease reattachment", "reattach_accepted": "Reattached after daemon replacement (incarnation 3)", "reattach_refused": "Reattachment refused",
 		"cancel": "Cancelled by pid 123", "release": "Released lease-1", "superseded": "Superseded by run run-X", "denied": "Admission denied", "rejected": "Request rejected", "rejection": "Invalid request rejected", "eviction": "Evicted", "queue_timeout": "Queue wait expired", "cancellation": "Admission cancelled", "backfill": "Backfilled", "reprioritize": "Priority changed", "contended": "Ran under contention", "grace_expiry": "Reattachment grace expired",
-		"start": "Daemon started", "ready": "Daemon ready", "shutdown": "Daemon stopped", "drain_begin": "Daemon began draining", "drain_end": "Daemon finished draining", "headroom_sample": "Available capacity sampled", "probe_failure_start": "Supervisor probe failures began", "probe_failure_end": "Supervisor probe failures ended", "replacement": "Supervisor replaced", "handshake_refused": "Connection handshake refused", "message_refused": "Message refused", "dropped": "Journal dropped",
+		"start": "Daemon started", "ready": "Daemon ready", "shutdown": "Daemon stopped", "drain_begin": "Daemon began draining", "drain_end": "Daemon finished draining", "headroom_sample": "Available capacity sampled", "handshake_refused": "Connection handshake refused", "message_refused": "Message refused", "dropped": "Journal dropped",
 	}
 	for kind, want := range cases {
 		t.Run(kind, func(t *testing.T) {
@@ -223,12 +225,12 @@ func TestDaemonEventsBoundsFilteredOutputAndContinues(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", home)
 	dir := filepath.Join(home, "wingd")
 	for i := range 55 {
-		if err := journal.AppendSupervisor(dir, journal.Record{Kind: "queued", RunID: "run-1", Data: map[string]any{"index": i}}); err != nil {
+		if err := appendDaemonRecord(dir, journal.Record{Kind: "queued", RunID: "run-1", Data: map[string]any{"index": i}}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for i := range 10 {
-		if err := journal.AppendSupervisor(dir, journal.Record{Kind: "queued", RunID: "other-run", Data: map[string]any{"index": i}}); err != nil {
+		if err := appendDaemonRecord(dir, journal.Record{Kind: "queued", RunID: "other-run", Data: map[string]any{"index": i}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -244,4 +246,24 @@ func TestDaemonEventsBoundsFilteredOutputAndContinues(t *testing.T) {
 	if len(all.Records) != 55 || all.Cursor != "" || all.Truncated {
 		t.Fatalf("all records: %+v", all)
 	}
+}
+
+func appendDaemonRecord(dir string, record journal.Record) error {
+	if record.TS.IsZero() {
+		record.TS = time.Now().UTC()
+	}
+	record.Source = "daemon"
+	body, err := json.Marshal(record)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(filepath.Join(dir, "events.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	_, writeErr := file.Write(append(body, '\n'))
+	return errors.Join(writeErr, file.Close())
 }

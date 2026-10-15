@@ -8,8 +8,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -251,66 +249,6 @@ func TestDaemon_RefusesAForeignDirectoryAtTheDerivedPath(t *testing.T) {
 	}
 	if !strings.Contains(rerr.Error(), dir) {
 		t.Errorf("bind refusal %v does not name the directory %q", rerr, dir)
-	}
-}
-
-func TestPeerSockets_SkipsAForeignSocketDirectory(t *testing.T) {
-	foreignHome := t.TempDir()
-	sock, err := SocketPath(foreignHome)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := filepath.Dir(sock)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		_ = os.Chmod(dir, 0o700)
-		_ = os.RemoveAll(dir)
-	}()
-	ln := listenAt(t, sock)
-	defer func() { _ = ln.Close() }()
-	// safety: a directory this user cannot write stands in for one another
-	// account planted, which only root can create in a test.
-	if err := os.Chmod(dir, 0o555); err != nil {
-		t.Fatal(err)
-	}
-
-	peers, err := PeerSockets(t.TempDir())
-	if err != nil {
-		t.Fatalf("peer sockets: %v", err)
-	}
-	if slices.Contains(peers, sock) {
-		t.Fatalf("peers %v include a listener in a foreign socket directory %q", peers, sock)
-	}
-}
-
-func TestPeerSockets_LeavesOldEmptySocketDirectoriesForStartingDaemons(t *testing.T) {
-	base := testSocketBase(t)
-	// safety: the base directory is shared by every test binary running as this
-	// user, so a fixed name makes two concurrent runs race on the same mkdir.
-	run := strconv.Itoa(os.Getpid())
-	stale := filepath.Join(base, socketDirPrefix()+"stale"+run)
-	fresh := filepath.Join(base, socketDirPrefix()+"fresh"+run)
-	for _, dir := range []string{stale, fresh} {
-		if err := os.Mkdir(dir, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	}
-	old := time.Now().Add(-48 * time.Hour)
-	if err := os.Chtimes(stale, old, old); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := PeerSockets(t.TempDir()); err != nil {
-		t.Fatalf("peer sockets: %v", err)
-	}
-	if _, err := os.Stat(stale); err != nil {
-		t.Errorf("a day-old empty socket directory was removed during discovery: %v", err)
-	}
-	if _, err := os.Stat(fresh); err != nil {
-		t.Errorf("a directory a starting daemon may still fill was removed: %v", err)
 	}
 }
 

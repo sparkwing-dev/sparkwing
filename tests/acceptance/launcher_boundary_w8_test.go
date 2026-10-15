@@ -175,7 +175,7 @@ func restartedLauncherW8(t *testing.T, kube *fake.Clientset, boundary launcher.C
 		Kube: kube, Boundary: boundary, Jobs: cfg, HTTP: transport,
 		Demand: controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{unit.Unit}},
 		Bearer: func(context.Context) (string, error) { return "launcher-root", nil },
-		NewController: func(options client.EngineOptions) (controllerwire.Controller, error) {
+		NewController: func(options client.EngineOptions) (launcher.LauncherController, error) {
 			bearer, err := options.Bearer(t.Context())
 			if err != nil || bearer != "launcher-root" || options.HTTP != transport || options.URL != cfg.ControllerURL || !options.Launcher {
 				t.Fatal("restart lost the shared launcher transport")

@@ -197,7 +197,7 @@ func containsRunIDs(values []any, ids ...string) bool {
 func TestHealthProbeProducesNoConnectionJournalRecords(t *testing.T) {
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home})
-	if err := client.HealthProbe(context.Background(), home); err != nil {
+	if err := probeHome(context.Background(), home); err != nil {
 		t.Fatal(err)
 	}
 	socket, err := wingd.SocketPath(home)

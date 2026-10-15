@@ -8,10 +8,16 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/runners"
+	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 )
 
 func resolveLocalServices(ctx context.Context) (dashboardServices, error) {
@@ -30,13 +36,25 @@ func resolveLocalServicesAt(ctx context.Context, home string) (dashboardServices
 	if err != nil {
 		return dashboardServices{}, err
 	}
-	userHome, err := os.UserHomeDir()
+	host, err := localServiceHost(home)
 	if err != nil {
 		return dashboardServices{}, err
 	}
-	binary, err := os.Executable()
+	config, err := resolveLocalRuntimeConfig(home)
 	if err != nil {
 		return dashboardServices{}, err
+	}
+	return composeLocalServices(ctx, config, host)
+}
+
+func localServiceHost(home string) (crontimer.Host, error) {
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		return crontimer.Host{}, err
+	}
+	binary, err := os.Executable()
+	if err != nil {
+		return crontimer.Host{}, err
 	}
 	configHome := os.Getenv("XDG_CONFIG_HOME")
 	if configHome == "" {
@@ -44,18 +62,13 @@ func resolveLocalServicesAt(ctx context.Context, home string) (dashboardServices
 	}
 	configHome, err = filepath.Abs(configHome)
 	if err != nil {
-		return dashboardServices{}, err
+		return crontimer.Host{}, err
 	}
-	host := crontimer.Host{
+	return crontimer.Host{
 		GOOS: runtime.GOOS, Home: userHome, ConfigHome: configHome,
 		SparkwingHome: home, Binary: binary, Version: installedVersion(),
 		PathEnv: os.Getenv("PATH"), UID: os.Getuid(), Exec: crontimer.DefaultExec,
-	}
-	config, err := resolveLocalRuntimeConfig(home)
-	if err != nil {
-		return dashboardServices{}, err
-	}
-	return composeLocalServices(ctx, config, host)
+	}, nil
 }
 
 func resolveLocalRuntimeConfig(home string) (wingd.LocalRuntimeConfig, error) {
@@ -73,8 +86,44 @@ func resolveLocalRuntimeConfig(home string) (wingd.LocalRuntimeConfig, error) {
 	}, Open: openLocalController}, nil
 }
 
-func openLocalController(context.Context, string) (wingd.LocalController, error) {
-	return nil, &apierr.Error{Code: apierr.Unavailable, Message: "elected local controller factory is unavailable in this build", Hint: "bind the shared controller, store, queue and maintenance through wingd.LocalController"}
+func openLocalController(ctx context.Context, home string) (wingd.LocalController, error) {
+	return (localcontroller.Config{Bind: bindLocalController}).Open(ctx, home)
+}
+
+func bindLocalController(ctx context.Context, b localcontroller.Binding) (localcontroller.Services, error) {
+	keyring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{Create: true})
+	if err != nil {
+		return localcontroller.Services{}, err
+	}
+	cipher := keyring.For(b.Store)
+	state, err := localcontroller.NewState(b, cipher)
+	if err != nil {
+		return localcontroller.Services{}, err
+	}
+	engines, err := engine.NewResolver(engine.Config{CacheDirectory: filepath.Join(b.Home, "engines")})
+	if err != nil {
+		return localcontroller.Services{}, err
+	}
+	b.Controller.RunnerPolicy = controller.SignedRunnerAdmission{Resolver: engines}
+	b.Controller.VersionPolicy = &controller.SignedEngineVersionPolicy{Resolver: engines}
+	claimant, err := localcontroller.NewClaimant(b.Store)
+	if err != nil {
+		return localcontroller.Services{}, err
+	}
+	b.Store.SetClaimProfileResolver(claimant)
+	server := controller.New(b.Store, nil).WithEngineController(b.Controller).WithSecretsCipher(cipher).
+		WithDashboard(controller.Dashboard{Local: true, Version: installedVersion(), Paths: paths.PathsAt(b.Home), Bundle: web.BundleFS()})
+	return localcontroller.Services{
+		State: state, HTTP: server.HTTP(), Close: claimant.Close,
+		Runner: runners.StoreRunnerConfig{
+			Bearer:          claimant.Bearer,
+			Loop:            runners.LoopConfig{Version: installedVersion(), MaxConcurrent: runtime.NumCPU()},
+			RequestCapacity: func() (float64, int64) { return float64(runtime.NumCPU()), 0 },
+			Bind: func(ctx context.Context, binding runners.StoreBinding) (runners.NativeServices, error) {
+				return newLocalNativeServices(ctx, b.Home, b.Store, binding)
+			},
+		},
+	}, nil
 }
 
 func composeLocalServices(ctx context.Context, config wingd.LocalRuntimeConfig, host crontimer.Host) (dashboardServices, error) {

@@ -1,149 +1,12 @@
 package wingd
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
-
-func budgetEnvSandbox(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
-	t.Setenv("SPARKWING_CONFIG", "")
-	if err := os.Unsetenv("SPARKWING_CONFIG"); err != nil {
-		t.Fatal(err)
-	}
-	return filepath.Join(dir, "sparkwing", "config.yaml")
-}
-
-func writeBudgetConfig(t *testing.T, path, body string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatalf("create config dir: %v", err)
-	}
-	if err := fssecure.WriteFile(path, []byte(body)); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-}
-
-func TestResolveBudget_Precedence(t *testing.T) {
-	path := budgetEnvSandbox(t)
-	writeBudgetConfig(t, path, "admission:\n  budget: \"2\"\n")
-	got, err := ResolveBudget("6")
-	if err != nil {
-		t.Fatalf("resolve with flag and config set: %v", err)
-	}
-	if got.Budget.Cores != 6 {
-		t.Errorf("cores = %v, want 6: the flag must beat the config file", got.Budget.Cores)
-	}
-	if got.Source != BudgetSourceFlag {
-		t.Errorf("source = %q, want %q", got.Source, BudgetSourceFlag)
-	}
-	if got.Origin != "--budget" {
-		t.Errorf("origin = %q, want --budget", got.Origin)
-	}
-
-	t.Setenv("SPARKWING_BUDGET", "4")
-	got, err = ResolveBudget("")
-	if err != nil {
-		t.Fatalf("resolve with the config file and the retired variable set: %v", err)
-	}
-	if got.Budget.Cores != 2 {
-		t.Errorf("cores = %v, want 2: SPARKWING_BUDGET is no longer read", got.Budget.Cores)
-	}
-	if got.Source != BudgetSourceConfig {
-		t.Errorf("source = %q, want %q", got.Source, BudgetSourceConfig)
-	}
-	if want := path + " admission.budget"; got.Origin != want {
-		t.Errorf("origin = %q, want the config path and key %q", got.Origin, want)
-	}
-}
-
-func TestResolveBudget_ConfigAlone(t *testing.T) {
-	path := budgetEnvSandbox(t)
-	writeBudgetConfig(t, path, "admission:\n  budget: 50%,ignore-external\n")
-
-	got, err := ResolveBudget("")
-	if err != nil {
-		t.Fatalf("resolve from config: %v", err)
-	}
-	if !got.IsSet() {
-		t.Fatal("budget is not set: the config file was not read")
-	}
-	if got.Budget.CoresFraction != 0.5 {
-		t.Errorf("cores fraction = %v, want 0.5", got.Budget.CoresFraction)
-	}
-	if !got.Budget.IgnoreExternal {
-		t.Error("ignore-external not read from the config file")
-	}
-	if want := path + " admission.budget"; got.Source != BudgetSourceConfig || got.Origin != want {
-		t.Errorf("source/origin = %q/%q, want %q/%q", got.Source, got.Origin, BudgetSourceConfig, want)
-	}
-}
-
-func TestResolveBudget_UnsetSaysSo(t *testing.T) {
-	budgetEnvSandbox(t)
-
-	got, err := ResolveBudget("")
-	if err != nil {
-		t.Fatalf("resolve with nothing set: %v", err)
-	}
-	if got.Source != BudgetSourceUnset {
-		t.Errorf("source = %q, want %q: an unconfigured machine must say so", got.Source, BudgetSourceUnset)
-	}
-	if got.IsSet() {
-		t.Error("IsSet() = true with no budget configured anywhere")
-	}
-	if got.Origin != "" {
-		t.Errorf("origin = %q, want empty: there is no setting to name", got.Origin)
-	}
-	if got.Budget.IsSet() {
-		t.Errorf("budget = %+v, want zero", got.Budget)
-	}
-}
-
-func TestResolveBudget_ConfigCommentsAndBlanks(t *testing.T) {
-	path := budgetEnvSandbox(t)
-	writeBudgetConfig(t, path, "admission:\n  # host sensor over-reads external load\n\n  budget: \"  ignore-external  \"\n")
-
-	got, err := ResolveBudget("")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if !got.Budget.IgnoreExternal {
-		t.Errorf("budget = %+v, want ignore-external read past the comment", got.Budget)
-	}
-	if got.Source != BudgetSourceConfig {
-		t.Errorf("source = %q, want %q", got.Source, BudgetSourceConfig)
-	}
-}
-
-func TestResolveBudget_CommentOnlyConfigIsUnset(t *testing.T) {
-	path := budgetEnvSandbox(t)
-	writeBudgetConfig(t, path, "admission:\n  # nothing set yet\n  mode: classic\n")
-
-	got, err := ResolveBudget("")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if got.Source != BudgetSourceUnset {
-		t.Errorf("source = %q, want %q", got.Source, BudgetSourceUnset)
-	}
-}
-
-func TestResolveBudget_MalformedConfigFails(t *testing.T) {
-	path := budgetEnvSandbox(t)
-	writeBudgetConfig(t, path, "admission:\n  budget: half of it\n")
-
-	if _, err := ResolveBudget(""); err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "admission.budget") {
-		t.Fatalf("resolve error = %v; want an error naming the file and key", err)
-	}
-}
 
 func TestConfigResolvedBudget_UnrecordedSourceIsUnknown(t *testing.T) {
 	b, err := userconfig.ParseBudget("4")
@@ -163,5 +26,31 @@ func TestConfigResolvedBudget_UnrecordedSourceIsUnknown(t *testing.T) {
 	got = Config{Budget: b, BudgetSource: BudgetSourceConfig, BudgetOrigin: "/etc/x"}.resolvedBudget()
 	if got.Source != BudgetSourceConfig || got.Origin != "/etc/x" {
 		t.Errorf("source/origin = %q/%q, want config//etc/x", got.Source, got.Origin)
+	}
+}
+
+func TestResolveBudgetUsesSharedMachineConfig(t *testing.T) {
+	path := writeAdmissionConfig(t, "budget: 50%,ignore-external")
+	t.Setenv("SPARKWING_BUDGET", "100")
+	got, err := ResolveBudget("")
+	if err != nil || got.Source != BudgetSourceConfig || got.Origin != path+" admission.budget" || got.Budget.CoresFraction != 0.5 || !got.Budget.IgnoreExternal {
+		t.Fatalf("configured budget=%+v error=%v", got, err)
+	}
+	got, err = ResolveBudget("6")
+	if err != nil || got.Source != BudgetSourceFlag || got.Origin != "--budget" || got.Budget.Cores != 6 {
+		t.Fatalf("explicit budget=%+v error=%v", got, err)
+	}
+	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "absent.yaml"))
+	got, err = ResolveBudget("")
+	if err != nil || got.Source != BudgetSourceUnset || got.Budget.IsSet() || got.Origin != "" {
+		t.Fatalf("absent budget=%+v error=%v", got, err)
+	}
+	path = writeAdmissionConfig(t, "budget: invalid")
+	if _, err := ResolveBudget(""); err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "admission.budget") {
+		t.Fatalf("invalid budget error=%v", err)
+	}
+	writeAdmissionConfig(t, "budget: 2\nunknown: true")
+	if _, err := ResolveBudget(""); err == nil {
+		t.Fatal("budget reader accepted an unknown machine-config key")
 	}
 }

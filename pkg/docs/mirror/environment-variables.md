@@ -37,7 +37,6 @@ the files in `--credentials-dir`, so no service configuration appears here.
 | `SPARKWING_SECRETS_KEY_FILE` | [machine-config](machine-config.md), [cli-secrets](cli-secrets.md) |
 | `SPARKWING_SECRETS_PREVIOUS_KEY` | [backup-restore](backup-restore.md), [machine-config](machine-config.md), [security](security.md), [cli-secrets](cli-secrets.md) |
 | `SPARKWING_TOOLCHAIN` | [versioning](versioning.md) |
-| `SPARKWING_WINGD_BIN` | [cli](cli.md), [schedules](schedules.md), [local-execution](local-execution.md) |
 
 ## Configuration: release tooling
 
@@ -187,6 +186,7 @@ and Git receives the credential-free base plus proxy and CA settings.
 | `SPARKWING_NODE_CLAIM_*` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
 | `SPARKWING_CONTROLLER_URL` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
 | `SPARKWING_NODE_ID` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_WINGD_BIN` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
 | `SPARKWING_SOURCE_DIR` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
 | `SPARKWING_STATE_DB` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
 | `SPARKWING_STANDALONE_REASON` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
