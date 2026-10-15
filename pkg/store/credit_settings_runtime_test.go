@@ -65,10 +65,7 @@ func TestStoreDataCreditSettingsUseFinalSchemaAndSurviveRestart(t *testing.T) {
 	for _, read := range []func() (int64, error){
 		func() (int64, error) { return s.CreditRateMicroPerSecond(t.Context()) },
 		func() (int64, error) { return s.CreditGraceSeconds(t.Context()) },
-		func() (int64, error) { return s.CreditMaxChargeSeconds(t.Context()) },
 		func() (int64, error) { return s.WarmCPUClassCores(t.Context()) },
-		func() (int64, error) { return s.StorageRateMicroPerGBDay(t.Context()) },
-		func() (int64, error) { return s.StorageFreeAllowanceBytes(t.Context()) },
 	} {
 		if _, err := read(); err != nil {
 			t.Fatal(err)
@@ -78,14 +75,22 @@ func TestStoreDataCreditSettingsUseFinalSchemaAndSurviveRestart(t *testing.T) {
 
 func TestStoreDataCreditSettingsCorruptionNeverChoosesAnotherPrice(t *testing.T) {
 	for _, tc := range []struct{ key, raw string }{
-		{metaKeyCreditRateMicro, `"20000"`}, {metaKeyCreditRateMicro, `null`},
-		{metaKeyCreditRateMicro, `1.5`}, {metaKeyCreditRateMicro, `+20000`},
-		{metaKeyCreditRateMicro, ``}, {metaKeyCreditRateMicro, `0`},
-		{metaKeyCreditRateMicro, `1000000000001`}, {metaKeyCreditRateMicro, `9223372036854775808`},
-		{metaKeyCreditGraceSecs, `-1`}, {metaKeyCreditMaxCharge, `0`},
-		{metaKeyWarmCPUClass, `-1`}, {metaKeyStorageRateMicroPerGBDay, `-1`},
-		{metaKeyStorageFreeAllowanceBytes, `-1`}, {metaKeyCreditRateTable, ``},
-		{metaKeyCreditRateTable, `null`}, {metaKeyCreditRateTable, `[]`},
+		{metaKeyCreditRateMicro, `"20000"`},
+		{metaKeyCreditRateMicro, `null`},
+		{metaKeyCreditRateMicro, `1.5`},
+		{metaKeyCreditRateMicro, `+20000`},
+		{metaKeyCreditRateMicro, ``},
+		{metaKeyCreditRateMicro, `0`},
+		{metaKeyCreditRateMicro, `1000000000001`},
+		{metaKeyCreditRateMicro, `9223372036854775808`},
+		{metaKeyCreditGraceSecs, `-1`},
+		{metaKeyCreditMaxCharge, `0`},
+		{metaKeyWarmCPUClass, `-1`},
+		{metaKeyStorageRateMicroPerGBDay, `-1`},
+		{metaKeyStorageFreeAllowanceBytes, `-1`},
+		{metaKeyCreditRateTable, ``},
+		{metaKeyCreditRateTable, `null`},
+		{metaKeyCreditRateTable, `[]`},
 	} {
 		t.Run(tc.key+"/"+tc.raw, func(t *testing.T) {
 			s := authorityStore(t)

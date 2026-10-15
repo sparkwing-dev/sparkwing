@@ -44,20 +44,6 @@ type StorageChargeSweep struct {
 	ChargedMicro int64
 }
 
-// StorageRateMicroPerGBDay returns what one gibibyte kept for one day costs in
-// micro-credits. An installation that never set one reads zero and is never
-// billed for storage.
-func (s *Store) StorageRateMicroPerGBDay(ctx context.Context) (int64, error) {
-	return s.creditSetting(ctx, metaKeyStorageRateMicroPerGBDay, 0)
-}
-
-// StorageFreeAllowanceBytes returns how many retained bytes a team keeps
-// without being billed for them. An installation that never set one reads
-// zero.
-func (s *Store) StorageFreeAllowanceBytes(ctx context.Context) (int64, error) {
-	return s.creditSetting(ctx, metaKeyStorageFreeAllowanceBytes, 0)
-}
-
 func validStorageRate(micro int64) error {
 	if micro < 0 || micro > MaxStorageRateMicroPerGBDay {
 		return fmt.Errorf(

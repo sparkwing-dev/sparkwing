@@ -1,141 +1,142 @@
 # W1b handoff
 
-This continuation starts at `01a6b033c`. Earlier accounting, payment, upload,
-record, GC and tagged-log work remains. W1b is incomplete. W1's schema,
-admission, claims, state, reaper, generic quota and SQL-guard files are untouched.
-No Git writes were made.
+Continues `5c2405ca0`. W1b remains incomplete. These changes are uncommitted.
+No Git writes or edits to W1 implementation files were made. The lead owns
+independent review, committing, delivery pipelines and native integration.
 
-## Changes
+## Implemented
 
-- `LookupRecord` now honors `VerifiedDefaultOnly` before reading required bytes
-  or manifest members. Persisted evidence must contain the verified default ref,
-  matching branch, App delivery key and SHA. A bound reader's sealed default
-  branch must agree when present. Excluded records return a miss. Ordinary
-  authorized reads keep their required-byte errors. Remote-cache authority stays
-  restricted when the request flag is false.
-- Removed the cache service's egress-total store methods and endpoint, including
-  the client bridge, cache startup restore/flush loop and fake route. The cache
-  no longer calls the removed route. This cuts its high-water-mark counter family.
-  The controller's separate legacy egress meter remains for its owning migration.
-- Activated `storage-hasmany-read-set/store-data-sqlite`. It checks own versus
-  hidden foreign/unrelated existence, duplicate queries, expired budgets,
-  uncommitted reservations, failed verification, independent exact receipts,
-  replay after reopening and unique-blob charging across replicas. Metadata
-  queries consume no download or egress bytes.
-- Updated source docs, changelog, C1 notes, API reference, OpenAPI and embedded
-  mirrors. The Go API snapshot loses only the removed type and two methods.
-
-The new acceptance proof uses real SQLite persistence with preseeded publication
-capabilities and imported attempts. Physical verification is trusted fixture
-input. Holder transports, signed byte transfer and native placements remain open.
-The default-branch regressions use the existing contract fakes for W7's namespace,
-edge rules and physical manifest reader. No competing implementation was added.
+- Memo and depcache default-branch fallback now use the existing
+  `VerifiedDefaultOnly` filter before required-byte or manifest reads. A
+  verified ref without default-branch evidence cannot become a default hit.
+  Memo keeps own scope before default, with no PR-base fallback. Depcache keeps
+  own ref, verified PR base, then verified default.
+- Added regression coverage for the restore orders, caller-selected scope
+  refusal, false or missing provenance, filtering before manifest reads and
+  expired lookup budgets. Shared namespace, edge and manifest contracts use
+  existing test fakes because their owning implementation is still stubbed.
+- Activated `storage-reachability-and-retention-tails/store-data-sqlite` through
+  the existing acceptance driver. It exercises real upload/receipt persistence,
+  leased record expiry, newest-success pins, transitive members, reopening,
+  tombstone grace, physical-deletion errors, reference revival after marking and
+  collection after the last root disappears. The graph and physical deletion
+  backend are fixtures. Fixture timestamps advance without sleeping.
+- Removed three unused scalar Store getters: `CreditMaxChargeSeconds`,
+  `StorageRateMicroPerGBDay` and `StorageFreeAllowanceBytes`. Their values remain
+  in the already-tested `CreditSettings` snapshot. Only an owned test fixture
+  called them, so no callers in another package needed migration.
+- Updated the C1 source notes, changelog, its embedded copy and the three API
+  snapshot declarations. No new setting, table, interface, environment variable,
+  limit or customer policy was added.
 
 ## Deletion and ports
 
-Deleted **171 gross legacy runtime Go lines**, **18 test-fixture implementation
-lines** and **75 obsolete test lines**. The four replaced lines in `blob_lookup.go`
-are excluded from these retirement totals. Removed the orphan OpenAPI schema and
-endpoint, plus nine store API snapshot lines.
+Deleted **21 legacy runtime Go lines**, **3 test lines** and **3 API snapshot
+lines** for the getters. The lookup filter removes a separate three-line late
+check and replaces two call sites. Those replacements are excluded from the
+legacy retirement count.
 
-Added the inventory's presence-budget and metadata-does-not-charge-download cases.
-No additional complete archived T1 inventory row is claimed closed. The removed
-high-water-mark and cache restart tests describe the retired service bridge.
-No table, runtime interface, setting, environment variable or customer limit was
-added. No contract declaration changed.
+Ported store-boundary portions of the archived cache-ref restore-order and
+poisoning cases, bounded cache lookups, reused-content retention and live-reference
+protection. No complete archived T1 inventory row or native placement is newly
+claimed closed. Verified App intake and backend-specific proofs remain with
+their owning integrations.
 
 ## Unit evidence
 
-- Store selection: **115 top-level tests / 215 including subtests**, no skips.
-  Pattern: `^(TestStoreData|TestLogPersistence|TestResult|TestBlob|TestPayment|TestReversePaymentTakesBack|TestCreditSettings|TestSetCreditSettings|TestUnsetRateTable|TestSetRateTable|TestAStoredRateTable|TestATableWithoutAFourCore)`.
-- Acceptance packages: **20 top-level tests / 198 passes**, with **2,995 existing
-  native/platform skips**. The new presence cell passed again after fixture cleanup.
-- Controller/orchestrator route selection: **10 top-level tests**, no skips.
-  Pattern: `^(TestLegacyEgressTotalsEndpointIsGone|TestRouteGuard_|TestTenantRoutes_|TestEveryControllerRouteIsClassified|TestReadRouteListCarriesNoDuplicates|TestHostedRetryPolicy_)`.
-- Removing the HasMany read-set condition through a Go overlay makes the new
-  SQLite cell fail because a foreign-existing digest becomes visible. The
-  production source is unchanged by the negative control.
-- The endpoint test failed with 401 before the cut and passes with 404 after it.
-  Default-only lookup tests failed on manual/feature records before the filter.
+- Selected store tests: **121 top-level tests, 223 including subtests**, no skips.
+  Pattern: `^(TestStoreData|TestLogPersistence|TestResult|TestBlob|TestPayment|TestReversePaymentTakesBack|TestCreditSettings|TestSetCreditSettings|TestUnsetRateTable|TestSetRateTable|TestAStoredRateTable|TestATableWithoutAFourCore|TestStorage|TestBilling)`.
+- Complete acceptance packages: **20 top-level tests, 199 passes including
+  subtests**, with **2,995 existing native/platform skips**.
+- The new default-fallback tests failed before the fix: depcache accepted a
+  record without default-branch evidence, and both cache lookups read an excluded
+  manifest. They pass after the change.
+- A temporary Go overlay disabling the collector's reachability recheck makes
+  the new SQLite cell fail when it tries deleting the revived digest. The real
+  production source was not mutated by this negative control.
+- Documentation mirror/changelog drift tests pass.
+
+The six passing SQLite persistence cells are:
+
+- `billing-ledger-survives-retention/store-data-sqlite`
+- `storage-replica-safe-accounting/store-data-sqlite`
+- `storage-quota-settlement-crash-replay/store-data-sqlite`
+- `storage-log-segments-and-fallback/store-data-sqlite`
+- `storage-hasmany-read-set/store-data-sqlite`
+- `storage-reachability-and-retention-tails/store-data-sqlite` (new)
 
 ## Manual verification
 
-All Go commands used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4`,
-`-p 4` and `GOCACHE`, `GOTMPDIR`, `TMPDIR` under `/tmp/sw-astra-W1b/`.
-Use this worktree with `go -C <worktree>`.
+All Go commands use `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4`,
+`-p 4` and `GOCACHE`, `GOTMPDIR`, `TMPDIR` beneath `/tmp/sw-astra-W1b/`.
+Run them with `go -C /home/bombuntu/.xwing/envs/1088/sparkwing`.
 
-- Whole-repository `go build -p 4 ./...` passed on the final production tree.
-- `go vet -p 4` passed for `pkg/store/...`, `pkg/controller/...`,
-  `internal/acceptance/...`, `tests/acceptance/...`, `internal/storagequota/...`,
-  `internal/cache/...` and `internal/orchestrator/...`.
-- `go test -p 4 ./internal/storagequota/... ./internal/cache/... -run '^$'`
-  compile-checks all retired-bridge callers and their remaining tests.
+- Whole repository `go build -p 4 ./...` passed after runtime changes.
+- `go vet -p 4 ./pkg/store/... ./internal/acceptance/... ./tests/acceptance/...`
+  passed.
+- `go test -p 4 ./pkg/store` with the Unit pattern above passed.
+- `go test -p 4 ./internal/acceptance/... ./tests/acceptance/... -count=1` passed.
+- `go test -p 4 ./pkg/docs -run '^(TestPkgDocsContentMatchesDocsRoot|TestEmbeddedChangelogMatchesRoot)$' -count=1` passed.
 - `commentcheck -base HEAD <worktree>`, `sleepcheck -base HEAD <worktree>`,
-  OpenAPI generation/drift comparison, embedded-doc sync and `git diff --check`
-  passed. SQL scope guard still reports **28 inherited findings** in untouched
-  files. The broader Go API snapshot retains inherited rewrite drift.
+  `bash <worktree>/bin/sync-docs.sh --check` and `git diff --check` passed.
 - No local Git identity or `core.worktree` override was found.
 
 ## Not tested
 
-No native placement, PostgreSQL, daemon, candidate, pipeline, external payment
-provider or release was run. Native acceptance and full legacy store tests are
-not represented as passing. Race tests were not repeated for a read filter and
-retired service bridge. Independent landing review remains with the lead.
+No PostgreSQL, native placement, daemon, candidate, pipeline, external payment
+provider or release was run. The full legacy store suite is not represented as
+passing. Race tests were not repeated for the read-filter change and removal of
+unused getters. The inherited SQL-guard and broader API snapshot drift were not
+changed or reclassified as passing.
 
 ## Contract and integration work remaining
 
-1. W1 must join `recordBillingAwardTx`, start/finish intervals and final/periodic
+1. W1 must join `recordBillingAwardTx`, interval starts/finishes and final/periodic
    settlement to issuance, starts, waits, renewals, release, finish and reaping.
-   These helpers still have no external production callers on this branch.
-   Memo materialization must join result state atomically.
-2. W2's billing calculator remains a stub here. W2 must wire verified payment
-   events. Test/live identity for retained cards, attempts, warnings, freezes and
-   refunds remains a cross-area concern.
-3. W7 must implement `RecordNamespace` and `AuthorizeEdge`, verified manifest
-   reading, physical upload verification/deletion and trusted replica identity.
-   W2's data controller remains a stub here. W7/W9 must connect final record/result
-   publication and retire the old `StateStoreOld` manifest callers.
-4. W1/W9 need the final custom-event append/sequence boundary before
-   `AppendEventCharged` and `chargeStorageTx` can be deleted. The charged route
-   returns a sequence. The raw append returns only an error and does not retain
-   all event limits. No competing event contract was added.
-5. W1 owns removal of the now-unused `egress_day` baseline table, its schema
-   classification and operator deletion-list entry. Those shared files were left
-   untouched. No store or transport caller for that table remains.
-6. Remaining W1b legacy families include claim-time credits, paid grants, raw
-   storage counters, direct uploads and old node logs. Their remaining consumers
-   cross W1/W2/W7/W9 ownership. Elected maintenance, allowance/nonpayment eviction,
-   record/pin policy, GC, receipt pruning, log lifecycle, egress and ring fallback
-   still require the declared owners' integrations.
+   The settlement helpers still have no external production callers on
+   this branch. Memo materialization must join result state atomically.
+2. W2's billing calculator and verified-payment handoff remain integration
+   obligations. Test/live identity for retained cards, attempts, warnings,
+   freezes and refunds remains a cross-area concern.
+3. W7 must implement shared namespace/edge policy, verified manifest reading,
+   physical upload verification/deletion and trusted replica identity. W2's data
+   controller remains stubbed here. W7/W9 must connect record/result publication
+   and retire `StateStoreOld` manifest consumers. The new GC proof establishes
+   the store boundary, not physical backend behavior.
+4. W1/W9 need the final custom-event append/sequence contract before
+   `AppendEventCharged` and `chargeStorageTx` can be removed. The charged route
+   returns a sequence. Raw append returns only an error and retains different
+   event-limit behavior. No competing contract was introduced.
+5. W1 owns removal of the unused `egress_day` schema table, its classification
+   and operator deletion-list entry. These shared implementation files remain
+   untouched.
+6. Remaining legacy families include claim-time credits, paid grants, raw
+   storage counters, direct uploads and node logs. Their callers span W1/W2/W7/W9.
+   Elected maintenance, allowance/nonpayment eviction, receipt pruning, log
+   lifecycle/egress and ring fallback still need their runtime integrations.
 
-No new human question or architectural decision is introduced. Missing joins,
-foreign stubs and legacy families prevent a COMPLETE claim.
+No new cross-area contract change or human decision is requested. The local C1
+cleanup removes only unused getters. Their values remain in the declared
+settings snapshot.
 
 ## Shared files
 
-- `internal/acceptance/store_data.go`, new `store_presence.go`.
-- `pkg/controller/server.go`, `storage_counters.go`, `storage_pass.go`,
-  `storage_counters_test.go`, `route_scope_guard_test.go`, new
-  `store_data_retirement_internal_test.go`.
-- `internal/cache/cache.go`, `egress_budget_test.go`, deleted `egress_day.go`.
-  These are only the removed route's caller and obsolete restart assertions.
-- `internal/storagequota/client.go`, `storagequotatest/controller.go`.
-- `internal/orchestrator/wingd_api_routes_test.go`.
-- `.apidiff/pkg_store.txt`, `api/openapi.yaml`, `CHANGELOG.md`,
-  `design/rewrite/contracts/c1-data.md`, `docs/api-reference.md`, `auth.md`,
-  `limits.md`, `observability.md`, `security.md` and their generated `pkg/docs`
-  mirrors/changelog.
+- `internal/acceptance/store_data.go`, new `store_reachability.go`.
+- `.apidiff/pkg_store.txt`, `CHANGELOG.md`, `pkg/docs/changelog.md`.
+- `design/rewrite/contracts/c1-data.md`.
 
-Owned store files are `blob_lookup.go`, new `blob_default_lookup_test.go`,
-`team_storage.go`, `team_storage_test.go` and this handoff.
+Owned store files changed: `blob_lookup.go`, new `blob_restore_test.go`,
+`credits.go`, `storage_credits.go`, `credit_settings_runtime_test.go` and this
+handoff. No outside-package API callers changed.
 
-Friction: the OpenAPI generator requires removed schemas and routes to be cut
-before it can verify drift. A missing-byte fixture initially violated a real
-foreign key and was replaced with a failing verified-manifest reader. Compile
-checks caught an obsolete fake accessor and unused imports, which were removed.
-The first overlay mutated the condition to a literal and left unused variables.
-The corrected overlay builds and fails on the intended foreign-existence assertion.
-Scratch is deleted after all checks finish.
+Friction: the first cache regression reproduced the intended failures. A later
+fixture tried storing impossible projected trust flags and hit the schema CHECK.
+It was replaced with a valid projection lacking event evidence. Initial checks
+compiled into a fresh isolated cache. Missing foreign implementations remain
+explicit integration work, not passing acceptance.
+Shell policy refused forced removal of scratch. Python removed the verified
+agent-owned directory successfully.
+
+Scratch is removed after all commands finish. No agent-owned process remains.
 
 STATUS: CONTINUE

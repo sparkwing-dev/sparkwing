@@ -78,6 +78,7 @@ unlock.
 ### Changed
 - **store + controller (Breaking):** Remove the cache service's `POST /internal/egress/totals` endpoint and `Store.RecordEgressTotals` / `PruneEgressTotals`. Cache-service totals stay in memory. Tenant usage uses additive replica rows.
 - **store:** Record lookups with `VerifiedDefaultOnly` exclude entries without persisted verified default-branch evidence before reading their bytes. Remote-cache credentials retain that restriction even when the request flag is false.
+- **store:** Memo and depcache default-branch fallbacks apply the same evidence filter before reading cached bytes or manifest members. A verified ref alone cannot qualify as the default branch.
 - **store + controller (Breaking):** Remove `SetNodeArtifactManifestCharged` from Store and Tenant and the legacy `artifact-manifest` endpoint. Records and result commits own manifest publication. Verified blob uploads own byte and object quota charges, so publishing another record pointer adds no storage usage.
 - **store (Breaking):** Retained-storage billing uses `Operator.ChargeRetainedStorage` under a maintenance lease and counts unique blobs plus committed log bytes. A team's free allowance applies once to the combined total, and billing watermarks commit with ledger charges. The principal-based `Store.ChargeRetainedStorage` API is removed.
 - **runner + cli:** A guard that names `git:branch=default` refuses the run when the repository's default branch cannot be resolved, instead of treating the token as unmatched
@@ -177,6 +178,7 @@ unlock.
   The retry trigger was written with an empty `trigger_user` and only retry provenance in `trigger_env`, so a retried pull-request run planned as an anonymous push. It now copies the source trigger's user and the `GITHUB_EVENT_NAME` and `GITHUB_PR_*`/`GITHUB_BASE_*`/`GITHUB_HEAD_*` keys `PullRequestFromEnv` reads.
 
 ### Removed
+- **store (Breaking):** Removed the unused `CreditMaxChargeSeconds`, `StorageRateMicroPerGBDay` and `StorageFreeAllowanceBytes` scalar getters. Read those values through `CreditSettings`.
 - **store + controller (Breaking):** removed `CreditGrantRequest.Checkout` and the `checkout` field from credit-grant requests. Verified payment settlement records a checkout's paid state and grant association.
 - **store + controller:** removed `Tenant.CloseCreditCheckout`, `ErrCheckoutNotFound`, `UnknownCheckoutCode` and `POST /api/v1/credits/checkouts/closed`. Verified Stripe failure and expiry events settle unpaid checkouts.
 - **pipeline binary (Breaking):** The pipeline binary answers only `--sw-node-protocol`; any other invocation exits 2 naming `sparkwing run`

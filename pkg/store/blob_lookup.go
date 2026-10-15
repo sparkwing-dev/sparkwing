@@ -216,7 +216,7 @@ func (r *blobRecords) lookupMemoTx(ctx context.Context, tx *storeTx, a blobActor
 				return result, blob.ErrBudget
 			}
 			recordKey := blob.RecordKey{Team: string(r.tenant.team), Kind: blob.KindMemo, Scope: blob.Scope{Repo: key.Repo, Ref: ref, Pipeline: key.Pipeline, Job: key.Job, Key: string(key.Hash)}, Name: name}
-			hit, err := r.lookupRecordTx(ctx, tx, a, blob.RecordLookup{Key: recordKey})
+			hit, err := r.lookupRecordTx(ctx, tx, a, blob.RecordLookup{Key: recordKey, VerifiedDefaultOnly: a.capability.Data.Use == capability.DataRemoteCache || ref != a.authority.Ref.Scope})
 			if cacheMissError(err) {
 				continue
 			}
@@ -224,9 +224,6 @@ func (r *blobRecords) lookupMemoTx(ctx context.Context, tx *storeTx, a blobActor
 				return result, err
 			}
 			if !hit.Found {
-				continue
-			}
-			if ref != a.authority.Ref.Scope && !hit.Record.RefFacts.DefaultBranchVerified {
 				continue
 			}
 			if source != nil {
@@ -288,7 +285,7 @@ func (r *blobRecords) LookupDepcache(ctx context.Context, request blob.DepcacheL
 			return result, nil
 		}
 		key := blob.RecordKey{Team: string(r.tenant.team), Kind: blob.KindDepcache, Scope: blob.Scope{Repo: a.authority.Repo, Ref: fallback.ref, Key: request.Key.Key}, Name: request.Key.Name}
-		hit, err := r.lookupRecordTx(ctx, tx, a, blob.RecordLookup{Key: key})
+		hit, err := r.lookupRecordTx(ctx, tx, a, blob.RecordLookup{Key: key, VerifiedDefaultOnly: fallback.source == blob.RestoreDefaultBranch})
 		if cacheMissError(err) {
 			continue
 		}

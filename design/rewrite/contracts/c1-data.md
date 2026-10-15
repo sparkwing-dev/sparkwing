@@ -338,6 +338,9 @@ Rate-table reads use one snapshot so a concurrent update cannot mix its scalar
 price with another table. Operator table authority is checked under the shared
 advisory lock before any settings write.
 
+`CreditSettings` supplies max-charge seconds, the storage price and the free
+storage allowance. Their unused scalar Store getters are removed.
+
 | Export | Purpose |
 |---|---|
 | `CapabilityRecord`, `CapabilityRecord.Validate` | Preserve and validate complete versioned authority alongside indexed projections. |
@@ -472,6 +475,19 @@ separate signed upload path and controller-proxied reads. Cloud binary execution
 checks committed digest and cloud provenance unless trust_local_builds is set.
 Local remote-cache opt-in uses the user's repo-bound read grant and returns only
 verified default-branch memo, artifacts and depcache, with no writes or binaries.
+
+Memo and depcache default-branch fallback apply `VerifiedDefaultOnly` before
+reading bytes or member metadata. A verified ref without default-branch evidence
+does not qualify. Memo uses own scope before default fallback and has no PR-base
+fallback. Depcache preserves its own-ref, PR-base, default order.
+
+The `storage-reachability-and-retention-tails/store-data-sqlite` proof exercises
+leased record expiry, newest-success output pins, receipt roots, transitive
+members, persisted tombstones, grace and failed physical deletion. Collection
+rechecks references added after marking, then removes tails after their last
+root disappears. Graphs and the deletion backend are contract fixtures. Native
+placement, manifest verification and physical object deletion remain integration
+obligations.
 
 ## Publication and retry interpretation
 

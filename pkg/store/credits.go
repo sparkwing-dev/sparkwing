@@ -867,13 +867,6 @@ func (s *Store) CreditGraceSeconds(ctx context.Context) (int64, error) {
 	return s.creditSetting(ctx, metaKeyCreditGraceSecs, DefaultCreditGraceSeconds)
 }
 
-// CreditMaxChargeSeconds returns the most seconds one charge may bill, which
-// is what keeps a controller outage or a stalled heartbeat loop from billing
-// the gap it left behind.
-func (s *Store) CreditMaxChargeSeconds(ctx context.Context) (int64, error) {
-	return s.creditSetting(ctx, metaKeyCreditMaxCharge, DefaultCreditMaxChargeSeconds)
-}
-
 // CreditSettings are the values the ledger prices work with. Every one of
 // them is the deployment's, so a controller serving many teams prices them
 // all the same way.

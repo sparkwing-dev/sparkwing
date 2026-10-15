@@ -2266,7 +2266,6 @@ func (s *Store) CreateTriggerWithRun(ctx context.Context, t Trigger, r Run) erro
 func (s *Store) CreditBalanceMicro(ctx context.Context) (int64, error)
 func (s *Store) CreditGraceSeconds(ctx context.Context) (int64, error)
 func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, err error)
-func (s *Store) CreditMaxChargeSeconds(ctx context.Context) (int64, error)
 func (s *Store) CreditRateMicroPerSecond(ctx context.Context) (int64, error)
 func (s *Store) CreditRateTable(ctx context.Context) (CreditRateTable, error)
 func (s *Store) CreditRateTableSet(ctx context.Context) (bool, error)
@@ -2524,9 +2523,7 @@ func (s *Store) SourceBoundToRun(ctx context.Context, team Team, key, runID stri
 func (s *Store) StartClaimExecution(ctx context.Context, tok ClaimToken, now time.Time) (specHash string, err error)
 func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error
 func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
-func (s *Store) StorageFreeAllowanceBytes(ctx context.Context) (int64, error)
 func (s *Store) StorageMarks(ctx context.Context, kind StorageKind) (_ map[Team]int64, err error)
-func (s *Store) StorageRateMicroPerGBDay(ctx context.Context) (int64, error)
 func (s *Store) StorageStandingFor(ctx context.Context, team Team) (_ StorageStanding, err error)
 func (s *Store) SwitchSessionTeam(ctx context.Context, rawSession, accountID string, from, to Team) error
 func (s *Store) SyncLaunchJobs(ctx context.Context, launcher ClaimIdentity, jobs []LaunchJob, now time.Time) ([]LaunchJobResult, error)
