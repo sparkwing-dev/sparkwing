@@ -179,6 +179,22 @@ test("command env precedence and context derivation preserve bindings", async (t
   });
 });
 
+test("commands preserve prototype-shaped environment names through every env setter", async (t) => {
+  const root = await project(t);
+  const { ctx } = context();
+  const script = "require('node:fs').writeSync(1, JSON.stringify([process.env.__proto__, process.env.constructor]))";
+  const values: Record<string, string> = JSON.parse('{"__proto__":"value","constructor":"constructor-value"}');
+  await runScope({ phase: "execute", root }, async () => {
+    const commands = [
+      node(ctx, script, { env: values }),
+      node(ctx, script).env("__proto__", "value").env("constructor", "constructor-value"),
+      node(ctx, script).envMap(values),
+      node(withCommandEnv(ctx, values), script),
+    ];
+    for (const command of commands) assert.deepEqual(await command.json(), ["value", "constructor-value"]);
+  });
+});
+
 test("relative command cwd resolves at the project root", async (t) => {
   const root = await project(t);
   const sub = join(root, "sub");

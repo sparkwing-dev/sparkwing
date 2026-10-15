@@ -82,7 +82,7 @@ export function cleanupContext(ctx: Context): Context {
 
 export function createCommand(ctx: Context, argv: readonly [string, ...string[]], options: ExecOptions = {}): Cmd {
   let cwd = options.cwd;
-  const env = { ...options.env };
+  const env: Record<string, string> = Object.assign(Object.create(null), options.env);
   const args: [string, ...string[]] = [argv[0], ...argv.slice(1)];
   const execute = (capture: boolean) => runCommand(ctx, args, { ...(cwd === undefined ? {} : { cwd }), env, capture });
   return {
@@ -151,7 +151,7 @@ const protocolEnv = new Set([
 ]);
 
 function commandEnv(ctx: Context, options: ExecOptions): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
+  const env: NodeJS.ProcessEnv = Object.create(null);
   for (const layer of [process.env, binding(ctx).env, options.env ?? {}]) {
     for (const [name, value] of Object.entries(layer)) {
       const key = process.platform === "win32" ? name.toUpperCase() : name;

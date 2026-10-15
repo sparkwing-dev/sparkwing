@@ -117,6 +117,43 @@ test("hello facts remain sealed, plans stay flat, body env starts only after pla
   assert.equal(process.env["W5_BODY"], undefined);
 });
 
+test("prototype-shaped body env reaches tools and restores the prior process env", async (t) => {
+  const previous = Object.hasOwn(process.env, "__proto__") ? process.env["__proto__"] : undefined;
+  t.after(() => {
+    if (previous === undefined) delete process.env["__proto__"];
+    else process.env["__proto__"] = previous;
+  });
+  delete process.env["__proto__"];
+  resetPipelines();
+  definePipeline({
+    name: "fixture",
+    plan(plan) {
+      plan
+        .job("build", async (ctx) => {
+          const bodyValue = process.env["__proto__"];
+          process.env["__proto__"] = "ambient-value";
+          const toolValue = await ctx
+            .exec([process.execPath, "-e", "require('node:fs').writeSync(1, JSON.stringify(process.env.__proto__))"])
+            .json();
+          return [bodyValue, toolValue];
+        })
+        .env("__proto__", "body-value");
+    },
+  });
+  const host = await setup();
+  try {
+    const planned = await host.send(planRequest);
+    assert.equal(planned.ok, true, JSON.stringify(planned));
+    assert.deepEqual(planned.result.jobs[0].env, JSON.parse('{"__proto__":{"value":"body-value"}}'));
+    const executed = await host.send({ id: "step", op: "run_step", job: "build", step: "run", attempt: 1 });
+    assert.equal(executed.result.outcome, "success", JSON.stringify(executed));
+    assert.deepEqual(executed.result.output, ["body-value", "body-value"]);
+  } finally {
+    await host.close();
+  }
+  assert.equal(Object.hasOwn(process.env, "__proto__"), false);
+});
+
 test("trigger facts survive author mutations during planning and retry attempts", async (t) => {
   const cases = [
     { name: "manual", wire: undefined, expected: { source: "manual" } },

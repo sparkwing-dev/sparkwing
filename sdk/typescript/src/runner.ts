@@ -196,10 +196,10 @@ class Session {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
-    const env: Record<string, string> = {};
+    const env: Record<string, string> = Object.create(null);
     for (const [name, value] of Object.entries(spec.env ?? {}))
       if (!value.startup && !["NODE_OPTIONS", "GODEBUG", "GOMAXPROCS"].includes(name)) {
-        if (!this.#originalEnv.has(name)) this.#originalEnv.set(name, process.env[name]);
+        if (!this.#originalEnv.has(name)) this.#originalEnv.set(name, Object.hasOwn(process.env, name) ? process.env[name] : undefined);
         process.env[name] = value.value;
         env[name] = value.value;
       }
