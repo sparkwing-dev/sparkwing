@@ -90,6 +90,9 @@ func Output(in Inputs) (string, Origin, error) {
 // AdmissionClass resolves admission_class from its permitted sources.
 func AdmissionClass(in Inputs) (string, Origin, error) {
 	fallback := "normal"
+	if in.Context.Origin == runspec.OriginSchedule || in.Context.Origin == runspec.OriginRetry {
+		fallback = "batch"
+	}
 
 	value, origin, err := pick(in, "admission_class", func(v Values) *string { return v.AdmissionClass }, fallback)
 	if err != nil {

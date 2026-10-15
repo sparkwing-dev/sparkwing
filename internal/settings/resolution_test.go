@@ -13,6 +13,50 @@ import (
 
 func ptr[T any](v T) *T { return &v }
 
+func TestAdmissionClassInferenceAtPlanSeal(t *testing.T) {
+	options, err := ResolveRequest(Inputs{Context: Context{Submitter: true, Local: true, NumCPU: 4}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.AdmissionClass.Set {
+		t.Fatal("intake promoted an inferred class to a request override")
+	}
+	for _, tc := range []struct {
+		name    string
+		origin  runspec.Origin
+		code    *string
+		request *string
+		want    string
+		layer   runspec.Layer
+	}{
+		{"scheduled", runspec.OriginSchedule, nil, nil, "batch", runspec.LayerDefault},
+		{"local", runspec.OriginLocal, nil, nil, "normal", runspec.LayerDefault},
+		{"code", runspec.OriginSchedule, ptr("interactive"), nil, "interactive", runspec.LayerCode},
+		{"request", runspec.OriginSchedule, ptr("interactive"), ptr("critical"), "critical", runspec.LayerSealed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := options
+			if tc.request != nil {
+				opts.AdmissionClass = runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: *tc.request}, Origin: runspec.SettingOrigin{Layer: runspec.LayerSealed, Key: "admission_class"}}
+			}
+			request, err := runspec.SealRequest(runspec.Request{Version: 1, Team: "team", Pipeline: "build", Mode: runspec.IntakeExecute, Dispatch: runspec.DispatchHost, Origin: tc.origin, Options: opts, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:42"}}}, runspec.IntakeFacts{RunID: "run", Ceilings: runspec.Ceilings{AllowedAdmissionClasses: runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{tc.want}}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag, Key: "operator.allowed_admission_classes"}}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := ResolvePlan(PlanInputs{Request: request, Declarations: runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}, Plan: nodeproto.PlanDoc{AdmissionClass: tc.code}, Context: Context{Local: true}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Options.AdmissionClass.Value != tc.want || got.Options.AdmissionClass.Origin.Layer != tc.layer {
+				t.Fatalf("admission class = %+v", got.Options.AdmissionClass)
+			}
+			if !reflect.DeepEqual(request.Request.Options, opts) {
+				t.Fatal("plan resolution rewrote the request")
+			}
+		})
+	}
+}
+
 func TestRequestOverridesSurvivePlan(t *testing.T) {
 	request, err := ResolveRequest(Inputs{Context: Context{Submitter: true, Local: true, NumCPU: 8}, Flags: Values{Priority: ptr(0), Requires: []string{}, DryRun: ptr(false)}})
 	if err != nil {

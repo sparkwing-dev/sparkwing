@@ -77,7 +77,7 @@ func SealSpec(input SealInput) (Spec, error) {
 	if err := verifyRequest(input.Request); err != nil {
 		return Spec{}, err
 	}
-	if !validClassification(input.Resolved.SecretArgs, input.Resolved.Args, input.Request.Request.RequestedArgs) {
+	if !validResolvedClassification(input.Request.Request, input.Resolved) {
 		return Spec{}, errors.New("resolved secret argument classification is missing or invalid")
 	}
 	if branch := input.Request.Request.Git.DefaultBranch; branch.Set && input.Resolved.DefaultBranch.Set && branch.Value != input.Resolved.DefaultBranch.Value {

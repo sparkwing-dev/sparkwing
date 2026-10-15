@@ -3,6 +3,7 @@ package procenv
 import (
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -326,6 +327,45 @@ func TestProxyMaskingErrorsDoNotEchoValues(t *testing.T) {
 	b := Base{Local: true, Captured: []string{"HTTPS_PROXY=http://user:private-password@%"}, Masker: secrets.NewMasker()}
 	if _, err := Build(Plan, b, Runtime{}); err == nil || strings.Contains(err.Error(), "private-password") {
 		t.Fatal("malformed proxy diagnostic leaked input")
+	}
+}
+
+func TestProxyCredentialsMaskedInConsumerSpellings(t *testing.T) {
+	for _, tc := range []struct{ name, value string }{
+		{"HTTPS_PROXY", "alice:private-password@proxy.example:3128"},
+		{"http_proxy", "//alice:private-password@proxy.example:3128"},
+		{"ALL_PROXY", "socks5://alice:private-password@proxy.example:1080"},
+		{"GOPROXY", "https://public.example,https://alice:private-password@proxy.example|direct"},
+		{"PIP_INDEX_URL", "https://alice:private-password@proxy.example/simple"},
+		{"PIP_EXTRA_INDEX_URL", "https://public.example/simple https://alice:private-password@proxy.example/simple"},
+		{"npm_config_registry", "https://alice:private-password@proxy.example"},
+		{"HTTPS_PROXY", "http://alice:private%2Dpassword@proxy.example"},
+	} {
+		for _, local := range []bool{true, false} {
+			t.Run(tc.name+"/"+tc.value+"/local="+strconv.FormatBool(local), func(t *testing.T) {
+				entry := tc.name + "=" + tc.value
+				b := Base{Local: local, Captured: []string{entry}, Ambient: []string{entry}, SubmitEnvAllow: []string{tc.name}, Masker: secrets.NewMasker()}
+				env, err := Build(Plan, b, Runtime{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if envMap(env)[tc.name] != tc.value {
+					t.Fatal("proxy setting was changed or dropped")
+				}
+				for _, value := range []string{tc.value, "alice", "private-password", "private%2Dpassword"} {
+					if value == "private%2Dpassword" && !strings.Contains(tc.value, value) {
+						continue
+					}
+					if strings.Contains(b.Masker.Mask(value), value) {
+						t.Errorf("credential remained visible: %q", value)
+					}
+				}
+				b.Masker = nil
+				if _, err := Build(Plan, b, Runtime{}); err == nil {
+					t.Fatal("proxy credentials accepted without masker")
+				}
+			})
+		}
 	}
 }
 

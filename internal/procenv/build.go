@@ -209,8 +209,11 @@ func registerMasks(masker *secrets.Masker, name, value string, remote bool) erro
 	if remote && len(value) >= limits.OperatorEnvMaskMinLength {
 		values = append(values, value)
 	}
-	if strings.EqualFold(name, "HTTP_PROXY") || strings.EqualFold(name, "HTTPS_PROXY") || strings.EqualFold(name, "ALL_PROXY") {
-		u, err := url.Parse(value)
+	for _, address := range proxyAddresses(name, value) {
+		if !strings.Contains(address, "://") {
+			address = "http://" + strings.TrimPrefix(address, "//")
+		}
+		u, err := url.Parse(address)
 		if err != nil {
 			return fmt.Errorf("invalid proxy URL in %q", name)
 		}
@@ -219,6 +222,12 @@ func registerMasks(masker *secrets.Masker, name, value string, remote bool) erro
 			if password, ok := u.User.Password(); ok {
 				values = append(values, password)
 			}
+			// safety: consumers may log the original escaped spelling as well as decoded credentials.
+			_, authority, _ := strings.Cut(address, "://")
+			authority = strings.FieldsFunc(authority, func(r rune) bool { return r == '/' || r == '?' || r == '#' })[0]
+			userinfo := authority[:strings.LastIndex(authority, "@")]
+			username, password, _ := strings.Cut(userinfo, ":")
+			values = append(values, userinfo, username, password)
 		}
 	}
 	for _, value := range values {
@@ -231,6 +240,19 @@ func registerMasks(masker *secrets.Masker, name, value string, remote bool) erro
 		masker.Register(value)
 	}
 	return nil
+}
+
+func proxyAddresses(name, value string) []string {
+	switch strings.ToUpper(name) {
+	case "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "PIP_INDEX_URL", "PIP_PROXY", "NPM_CONFIG_REGISTRY", "NPM_CONFIG_PROXY", "NPM_CONFIG_HTTPS_PROXY":
+		return []string{value}
+	case "GOPROXY":
+		return strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == '|' })
+	case "PIP_EXTRA_INDEX_URL":
+		return strings.Fields(value)
+	default:
+		return nil
+	}
 }
 
 func inheritAttempt(env []string, masker *secrets.Masker) ([]string, error) {

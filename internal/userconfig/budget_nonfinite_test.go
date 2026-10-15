@@ -1,4 +1,4 @@
-package wingd
+package userconfig
 
 import "testing"
 

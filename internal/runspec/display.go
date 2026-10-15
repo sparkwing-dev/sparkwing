@@ -1,6 +1,26 @@
 package runspec
 
-import "sort"
+import (
+	"slices"
+	"sort"
+)
+
+func validResolvedClassification(request Request, resolved Resolved) bool {
+	if !validClassification(resolved.SecretArgs, resolved.Args, request.RequestedArgs) {
+		return false
+	}
+	if request.SecretArgs.Set {
+		if !validClassification(request.SecretArgs.Value, request.RequestedArgs) {
+			return false
+		}
+		for _, name := range request.SecretArgs.Value {
+			if !slices.Contains(resolved.SecretArgs, name) {
+				return false
+			}
+		}
+	}
+	return true
+}
 
 func validClassification(names []string, args ...map[string]string) bool {
 	if names == nil {
@@ -61,7 +81,7 @@ func DisplayRequest(s SealedRequest) Display {
 // DisplaySpec strips private hashes and masks requested and resolved secret arguments alike.
 func DisplaySpec(s Spec) Display {
 	d := displayBase(s.Request.Request)
-	classified := validClassification(s.Resolved.SecretArgs, s.Resolved.Args, s.Request.Request.RequestedArgs)
+	classified := validResolvedClassification(s.Request.Request, s.Resolved)
 	d.RequestedArgs = redactArgs(s.Request.Request.RequestedArgs, s.Resolved.SecretArgs, classified)
 	d.Args = redactArgs(s.Resolved.Args, s.Resolved.SecretArgs, classified)
 	if classified {
@@ -78,7 +98,7 @@ func DisplaySpec(s Spec) Display {
 // Reproducer emits argv, avoiding shell interpretation and every secret argument value.
 func (s Spec) Reproducer() []string {
 	argv := []string{"sparkwing", "run", s.Request.Request.Pipeline}
-	if !validClassification(s.Resolved.SecretArgs, s.Resolved.Args, s.Request.Request.RequestedArgs) {
+	if !validResolvedClassification(s.Request.Request, s.Resolved) {
 		return argv
 	}
 	secrets := map[string]bool{}

@@ -1,6 +1,7 @@
 package agentconfig
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,15 +10,41 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
 
+func TestLoadReadsPrivateRunnerCredential(t *testing.T) {
+	dir := t.TempDir()
+	credential := filepath.Join(dir, "agent-token")
+	if err := fssecure.WriteFile(credential, []byte("runner-private-token\n")); err != nil {
+		t.Fatal(err)
+	}
+	path := writePrivateConfig(t, fmt.Sprintf("controller: https://controller.example\ncredentials_dir: %q\n", dir))
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Token != "runner-private-token" {
+		t.Fatal("runner credential directory was not consumed")
+	}
+	if err := os.Remove(credential); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("missing configured credential was silently accepted")
+	}
+}
+
 func TestConfig_RoundTripFromYAML(t *testing.T) {
-	path := writePrivateConfig(t, `controller: http://localhost:4344
-credentials_dir: /tmp/credentials
+	dir := t.TempDir()
+	if err := fssecure.WriteFile(filepath.Join(dir, "agent-token"), []byte("private-runner-token")); err != nil {
+		t.Fatal(err)
+	}
+	path := writePrivateConfig(t, fmt.Sprintf(`controller: http://localhost:4344
+credentials_dir: %q
 max_concurrent: 3
 labels:
   - laptop
   - arch=arm64
 spawn_policy: return-to-queue
-`)
+`, dir))
 
 	cfg, err := Load(path)
 	if err != nil {
@@ -26,7 +53,7 @@ spawn_policy: return-to-queue
 	if cfg.Controller != "http://localhost:4344" {
 		t.Fatalf("controller: %q", cfg.Controller)
 	}
-	if cfg.CredentialsDir != "/tmp/credentials" {
+	if cfg.CredentialsDir != dir {
 		t.Fatalf("credentials directory = %q", cfg.CredentialsDir)
 	}
 	if cfg.MaxConcurrent != 3 {
@@ -135,7 +162,6 @@ func TestLoad_RefusesTheRemovedEnrolledKeys(t *testing.T) {
 
 func TestLoad_KeepsEveryClaimModeSetting(t *testing.T) {
 	path := writePrivateConfig(t, `controller: http://localhost:4344
-credentials_dir: /tmp/credentials
 holder_prefix: dev-laptop
 max_concurrent: 2
 contribution: 4,8gb

@@ -190,6 +190,7 @@ type OperatorInputs struct {
 // Context carries facts used for defaults without reading process-global state.
 // Schedule and host argument overrides become request args before intake seals.
 type Context struct {
+	Origin              runspec.Origin
 	Submitter           bool
 	Local               bool
 	ControllerOwned     bool

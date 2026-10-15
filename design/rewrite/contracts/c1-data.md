@@ -255,7 +255,9 @@ are exempt from download quota. Deferred plan counters add no enforcement here.
 Environment snapshots persist names and a digest, not values. Raw argument
 storage retains the execution/retry contract; secret argument classification
 controls display. Before describe has classified arguments, display redacts all
-requested values. Reproduction and display omit secret values and public hashes
+requested values. The second seal must retain every secret name classified at
+intake. Display and reproduction fail closed if those classifications disagree.
+Reproduction and display omit secret values and public hashes
 of secret-bearing input. App trust comes only from verified, deduplicated webhook
 facts. Intake copies an available App default branch into the request and refuses
 a conflicting supplied branch. Origin HEAD can fill a missing default branch

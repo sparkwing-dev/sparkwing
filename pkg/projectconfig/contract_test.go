@@ -1,6 +1,7 @@
 package projectconfig
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,17 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
 )
+
+func TestNestedAliasGraphCannotExhaustValidation(t *testing.T) {
+	var raw strings.Builder
+	raw.WriteString("pipelines:\n  - &p0 {name: p0, entrypoint: Build}\n")
+	for i := 1; i <= 30; i++ {
+		fmt.Fprintf(&raw, "  - &p%d {name: p%d, <<: [*p%d, *p%d]}\n", i, i, i-1, i-1)
+	}
+	if _, err := Parse([]byte(raw.String())); err == nil {
+		t.Fatal("excessive alias graph passed typed decoding")
+	}
+}
 
 func TestFinalSchema(t *testing.T) {
 	raw := `defaults:

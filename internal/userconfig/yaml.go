@@ -51,7 +51,7 @@ func DecodeYAML(file string, raw []byte, out any) (*yaml.Node, error) {
 	if len(doc.Content) == 0 {
 		return &doc, nil
 	}
-	if err := checkYAML(doc.Content[0], t.Elem(), "$", map[*yaml.Node]bool{}); err != nil {
+	if err := checkYAML(doc.Content[0], t.Elem(), "$", map[*yaml.Node]bool{}, map[yamlVisit]bool{}); err != nil {
 		return nil, LocateError(file, &doc, err)
 	}
 	if err := doc.Decode(out); err != nil {
@@ -71,21 +71,31 @@ func yamlSyntaxError(file string, err error) error {
 	return &FieldError{File: file, Key: "$", Line: line, Problem: "invalid YAML syntax"}
 }
 
-func checkYAML(n *yaml.Node, t reflect.Type, key string, active map[*yaml.Node]bool) error {
+type yamlVisit struct {
+	node   *yaml.Node
+	typeOf reflect.Type
+}
+
+func checkYAML(n *yaml.Node, t reflect.Type, key string, active map[*yaml.Node]bool, checked map[yamlVisit]bool) error {
 	bad := func(problem string) error { return &FieldError{Key: key, Line: n.Line, Problem: problem} }
 	if active[n] {
 		return bad("cyclic YAML alias")
 	}
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	visit := yamlVisit{n, t}
+	// safety: shared aliases must be checked once per schema type, not once per path.
+	if checked[visit] {
+		return nil
+	}
 	active[n] = true
 	defer delete(active, n)
 	if n.Kind == yaml.AliasNode {
-		return checkYAML(n.Alias, t, key, active)
+		return checkYAML(n.Alias, t, key, active, checked)
 	}
 	if n.Tag == "!!null" {
 		return bad("explicit null is not allowed")
-	}
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
 	}
 	switch t.Kind() {
 	case reflect.Struct, reflect.Map:
@@ -122,11 +132,11 @@ func checkYAML(n *yaml.Node, t reflect.Type, key string, active map[*yaml.Node]b
 			if k.Tag == "!!merge" {
 				if v.Kind == yaml.SequenceNode {
 					for _, item := range v.Content {
-						if err := checkYAML(item, t, key, active); err != nil {
+						if err := checkYAML(item, t, key, active, checked); err != nil {
 							return err
 						}
 					}
-				} else if err := checkYAML(v, t, key, active); err != nil {
+				} else if err := checkYAML(v, t, key, active, checked); err != nil {
 					return err
 				}
 				continue
@@ -140,7 +150,7 @@ func checkYAML(n *yaml.Node, t reflect.Type, key string, active map[*yaml.Node]b
 					return &FieldError{Key: child, Line: k.Line, Problem: "unknown key"}
 				}
 			}
-			if err := checkYAML(v, ft, child, active); err != nil {
+			if err := checkYAML(v, ft, child, active, checked); err != nil {
 				return err
 			}
 		}
@@ -149,7 +159,7 @@ func checkYAML(n *yaml.Node, t reflect.Type, key string, active map[*yaml.Node]b
 			return bad("expected a sequence")
 		}
 		for i, v := range n.Content {
-			if err := checkYAML(v, t.Elem(), fmt.Sprintf("%s[%d]", key, i), active); err != nil {
+			if err := checkYAML(v, t.Elem(), fmt.Sprintf("%s[%d]", key, i), active, checked); err != nil {
 				return err
 			}
 		}
@@ -162,6 +172,7 @@ func checkYAML(n *yaml.Node, t reflect.Type, key string, active map[*yaml.Node]b
 			return bad("invalid scalar type or value")
 		}
 	}
+	checked[visit] = true
 	return nil
 }
 

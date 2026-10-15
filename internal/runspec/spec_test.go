@@ -169,6 +169,38 @@ func TestSecretDisplay(t *testing.T) {
 	}
 }
 
+func TestSecretClassificationCannotShrinkAtSecondSeal(t *testing.T) {
+	s := fixture(t)
+	r := s.Request.Request
+	r.SecretArgs = Optional[[]string]{Set: true, Value: []string{"token"}}
+	request, err := SealRequest(r, IntakeFacts{RunID: "run"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, names := range [][]string{{}, {"count"}} {
+		resolved := s.Resolved
+		resolved.SecretArgs = names
+		if _, err := SealSpec(SealInput{Request: request, Resolved: resolved, Plan: []byte(`{}`)}); err == nil {
+			t.Error("second seal discarded intake secret classification")
+		}
+		malformed := Spec{Request: request, Resolved: resolved}
+		raw, err := json.Marshal(DisplaySpec(malformed))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), "private-token") || strings.Contains(strings.Join(malformed.Reproducer(), " "), "private-token") {
+			t.Error("inconsistent classification exposed an intake secret")
+		}
+	}
+	for _, names := range [][]string{{"token"}, {"token", "count"}} {
+		resolved := s.Resolved
+		resolved.SecretArgs = names
+		if _, err := SealSpec(SealInput{Request: request, Resolved: resolved, Plan: []byte(`{}`)}); err != nil {
+			t.Fatalf("preserved classification refused: %v", err)
+		}
+	}
+}
+
 func TestEnvironmentDigest(t *testing.T) {
 	a, err := EnvironmentDigest(map[string]string{"B": "secret", "A": "value"})
 	if err != nil {

@@ -12,15 +12,17 @@ package agentconfig
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
-	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -42,7 +44,7 @@ type Config struct {
 	// snapshot's code, so the list alone cannot vouch for it.
 	AcceptWorkingTree bool          `yaml:"accept_working_tree"`
 	Profile           string        `yaml:"profile"`
-	Token             string        `yaml:"token"`
+	Token             string        `yaml:"-"`
 	MaxConcurrent     int           `yaml:"max_concurrent"`
 	Labels            []string      `yaml:"labels"`
 	SpawnPolicy       string        `yaml:"spawn_policy"`
@@ -82,6 +84,21 @@ func Load(path string) (*Config, error) {
 	}
 	if !found {
 		return nil, fmt.Errorf("%s has no runner section; `sparkwing cluster runners add` writes one: %w", path, os.ErrNotExist)
+	}
+	if cfg.CredentialsDir != "" {
+		file, err := fssecure.OpenPrivateConfig(filepath.Join(cfg.CredentialsDir, "agent-token"))
+		if err != nil {
+			return nil, err
+		}
+		defer file.Close()
+		token, err := io.ReadAll(file)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Token = strings.TrimSpace(string(token))
+		if cfg.Token == "" {
+			return nil, errors.New("runner credential file is empty")
+		}
 	}
 	return &cfg, nil
 }
@@ -153,10 +170,10 @@ func Validate(in Config) (Config, error) {
 	default:
 		return out, fmt.Errorf("agent: spawn_policy %q: expected return-to-queue | run-local | auto", out.SpawnPolicy)
 	}
-	if _, err := wingd.ParseBudget(out.LocalReserve); err != nil {
+	if _, err := userconfig.ParseBudget(out.LocalReserve); err != nil {
 		return out, fmt.Errorf("agent: local_reserve: %w", err)
 	}
-	if _, err := wingd.ParseBudget(out.Contribution); err != nil {
+	if _, err := userconfig.ParseBudget(out.Contribution); err != nil {
 		return out, fmt.Errorf("agent: contribution: %w", err)
 	}
 	if out.LocalAdmission == nil {

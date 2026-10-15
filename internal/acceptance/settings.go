@@ -200,7 +200,7 @@ func repositoryKeys() error {
 }
 
 func classifiedDisplay() error {
-	spec, _, err := acceptedSettings()
+	spec, plan, err := acceptedSettings()
 	if err != nil {
 		return err
 	}
@@ -219,8 +219,29 @@ func classifiedDisplay() error {
 	if strings.Contains(string(raw), "hidden-value") || strings.Contains(string(raw), "inputs_hash") {
 		return errors.New("display leaked restricted inputs")
 	}
-	spec.Resolved.SecretArgs = []string{}
-	if runspec.DisplaySpec(spec).Args["secret"] != "hidden-value" {
+	request := spec.Request.Request
+	request.SecretArgs = runspec.Optional[[]string]{Set: true, Value: []string{"secret"}}
+	sealed, err := runspec.SealRequest(request, runspec.IntakeFacts{RunID: "classified"})
+	if err != nil {
+		return err
+	}
+	resolved := spec.Resolved
+	resolved.SecretArgs = []string{}
+	if _, err := runspec.SealSpec(runspec.SealInput{Request: sealed, Resolved: resolved, Plan: plan}); err == nil {
+		return errors.New("second seal discarded intake secret classification")
+	}
+	request.RequestedArgs = map[string]string{"mode": "test"}
+	request.SecretArgs = runspec.Optional[[]string]{Set: true, Value: []string{}}
+	sealed, err = runspec.SealRequest(request, runspec.IntakeFacts{RunID: "public"})
+	if err != nil {
+		return err
+	}
+	resolved.Args = map[string]string{"mode": "test"}
+	public, err := runspec.SealSpec(runspec.SealInput{Request: sealed, Resolved: resolved, Plan: plan})
+	if err != nil {
+		return err
+	}
+	if runspec.DisplaySpec(public).Args["mode"] != "test" {
 		return errors.New("explicit empty classification treated as absent")
 	}
 	spec.Resolved.SecretArgs = nil

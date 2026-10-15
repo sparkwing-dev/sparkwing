@@ -93,6 +93,13 @@ func TestConfigAliasesAndMergesRemainStrict(t *testing.T) {
 	}
 }
 
+func TestAliasValidationUsesEachDestinationSchema(t *testing.T) {
+	_, err := Decode("machine.yaml", []byte("profiles: {p: {controller: &connection {url: https://example.com}}}\nrunner: *connection\n"))
+	if err == nil || !strings.Contains(err.Error(), "runner.url") || !strings.Contains(err.Error(), "unknown key") {
+		t.Fatalf("alias bypassed runner schema: %v", err)
+	}
+}
+
 func TestTypedMachineValidationMatchesDecode(t *testing.T) {
 	zero := 0
 	cfg := Config{Runner: &RunnerConfig{MaxConcurrent: &zero}}

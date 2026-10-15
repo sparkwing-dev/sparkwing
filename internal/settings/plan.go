@@ -18,6 +18,7 @@ func planInputs(in PlanInputs) (Inputs, error) {
 	}
 	ctx := in.Context
 	ctx.Submitter = true
+	ctx.Origin = in.Request.Request.Origin
 	return Inputs{Sealed: unprojectOptions(in.Request.Request.Options), Pipeline: unprojectLayer(in.Declarations.Pipeline), Defaults: unprojectLayer(in.Declarations.Defaults), Code: code, Operator: unprojectCeilings(in.Request.Ceilings), Context: ctx}, nil
 }
 

@@ -32,7 +32,9 @@ env after planning; C4 decides which env belongs at process startup.
 These packages use the final import root `github.com/sparkwing-dev/sparkwing`.
 The schemas are the tagged Go types plus their validation contracts. They are not
 an additional copy of the accepted run spec. Machine section reads validate the complete file before decoding a section.
-Project connections and legacy file migrations are refused or removed.
+Project connections and legacy file migrations are refused or removed. YAML
+validation checks each alias target once per destination schema type, retaining
+cycle and unknown-field refusals before typed decoding.
 
 ## Invariants
 
@@ -48,7 +50,9 @@ Project connections and legacy file migrations are refused or removed.
   Credential-class and credential-shaped names are dropped even when explicitly
   allowed. `envredact.CredentialName` remains the shared shape classifier; procenv
   owns the decision to exclude it. Values at least 12 characters long are masked
-  before child execution. Proxy credentials must be registered with the masker.
+  before child execution. Proxy credentials must be registered with the masker,
+  including scheme-less HTTP proxies, dependency proxy lists, and both escaped
+  and decoded userinfo.
 - No capability, bootstrap, controller credential or protocol handle travels in
   env. Protocol v2 carries the node bearer in hello and Windows handles in argv.
   Removed names remain deny entries only; they are never compatibility inputs.
@@ -86,6 +90,10 @@ Project connections and legacy file migrations are refused or removed.
 - Intake resolves request/machine/env inputs once. Acceptance resolves checkout
   and code inputs and reapplies request overrides without rewriting the request.
   A host consuming accepted values never reads its own preferences again.
+- Admission inference uses the sealed request origin at acceptance. Schedule and
+  retry origins default to batch. Explicit request and code classes take precedence.
+  `settings.Context.Origin` carries this fact to the resolver and never becomes an
+  intake override.
 - Nil means unset. Explicit zero, false, an empty list or an empty map keeps its
   documented meaning. Invalid settings fail with source/file/key/line information;
   they never warn-and-default. Defaults apply to pipelines with no YAML entry.
@@ -97,6 +105,12 @@ Project connections and legacy file migrations are refused or removed.
   `max_runs_per_hour` supplies the sole per-principal guard's DB override.
 - Retention keeps run and metric policies separate. Newest successful run/output
   pins survive retention; log classes still expire. Financial rows never cascade.
+- Machine resource budgets and local cache byte sizes are parsed by userconfig.
+  Runtime and CLI consumers call those parsers directly.
+- Runner enrollment writes `runner.repos` and `runner.credentials_dir`. Its
+  `agent-token` file is private and read by the runner configuration loader.
+  Configuration replacement uses a new credential directory so a failed write
+  leaves the preceding credential intact.
 
 ### Settings across the seal points
 

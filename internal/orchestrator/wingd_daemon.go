@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -31,7 +32,7 @@ type WingdOptions struct {
 	Home                  string
 	Version               string
 	HeadroomFraction      float64
-	Budget                wingd.Budget
+	Budget                userconfig.Budget
 	BudgetSource          wingd.BudgetSource
 	BudgetOrigin          string
 	AdmissionPolicy       *wingd.AdmissionPolicy
