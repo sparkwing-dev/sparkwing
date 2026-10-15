@@ -195,7 +195,7 @@ func StepGet[T any](ctx context.Context, step *WorkStep) T {
 	if step == nil {
 		panic("sparkwing: StepGet: step must be non-nil")
 	}
-	wantT := reflect.TypeOf(zero)
+	wantT := reflect.TypeFor[T]()
 	if step.outType == nil {
 		panic(fmt.Sprintf(
 			"sparkwing: StepGet[%v]: step %q has no typed output "+

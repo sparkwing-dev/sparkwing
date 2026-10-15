@@ -55,6 +55,7 @@ func TestProtocol(t *testing.T) {
 						t.Run("public-fake-host", testGoSDKFakeHost)
 						t.Run("entrypoint-alias", testGoSDKEntrypointAlias)
 						t.Run("output-failures", testGoSDKOutputFailures)
+						t.Run("interface-outputs", testGoSDKInterfaceOutputs)
 						t.Run("real-process-plan-and-output", testGoSDKProcessPlanOutput)
 						t.Run("real-process-body-failure", testGoSDKProcessFailure)
 						t.Run("real-process-application-retry", testGoSDKRetryStepOutputs)

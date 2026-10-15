@@ -66,7 +66,7 @@ func (r Ref[T]) Job() string { return r.JobID }
 //     upstream hasn't completed.
 //
 //   - Cross-pipeline (Pipeline!=""): asks the pipeline resolver
-//     installed via WithPipelineResolver. Panics if no resolver, if
+//     supplied by the host. Panics if no resolver, if
 //     no successful run within MaxAge exists, or if the JSON output
 //     fails to unmarshal into T.
 //
@@ -231,7 +231,7 @@ func (r Ref[T]) getCrossPipeline(ctx context.Context) (T, bool, error) {
 // not match the marker's declared type.
 func RefTo[T any](n *JobNode) Ref[T] {
 	var zero T
-	want := reflect.TypeOf(zero)
+	want := reflect.TypeFor[T]()
 	got := n.outType
 	if got == nil {
 		panic(fmt.Sprintf(

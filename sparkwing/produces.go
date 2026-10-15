@@ -4,7 +4,7 @@ import "reflect"
 
 // Produces is a zero-size marker embedded in a Job to declare its
 // output contract at the type level. The Job adder cross-validates
-// the marker against the Job's Work().SetResult at Plan time and
+// the marker against the typed step returned by Work at Plan time and
 // rejects mismatches; downstream consumers read the contract via
 // sw.RefTo[T](node).
 //
@@ -14,13 +14,12 @@ import "reflect"
 //	    // ... fields ...
 //	}
 //
-// The marker is mandatory for typed jobs: SetResult without
+// The marker is mandatory for typed jobs: returning a typed result step without
 // Produces[T] (or vice-versa) is a Plan-time panic.
 type Produces[T any] struct{}
 
 func (Produces[T]) producedType() reflect.Type {
-	var zero T
-	return reflect.TypeOf(zero)
+	return reflect.TypeFor[T]()
 }
 
 type producer interface {
