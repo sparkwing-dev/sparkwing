@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/http"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -133,9 +134,14 @@ func TestLocalDashboardWirePeerDisconnectCancelsAndJoins(t *testing.T) {
 
 func TestLocalDashboardWireServiceFailureJoinsShutdown(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		failure := errors.New("dashboard initialization failed")
 		entered := make(chan struct{})
-		f := &runtimeControllerFixture{dashboard: func(context.Context, net.Listener) error { close(entered); return failure }}
+		var calls atomic.Int32
+		f := &runtimeControllerFixture{http: func() LocalHTTP {
+			if calls.Add(1) == 2 {
+				close(entered)
+			}
+			return LocalHTTP{API: http.NotFoundHandler()}
+		}}
 		r := newRuntimeFixture(t, f)
 		lifecycle := NewLocalLifecycle(r, nil)
 		if _, err := lifecycle.EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1", Stay: true}); err != nil {
@@ -150,7 +156,7 @@ func TestLocalDashboardWireServiceFailureJoinsShutdown(t *testing.T) {
 			t.Fatal(err)
 		}
 		<-entered
-		if err := lifecycle.Stop(t.Context()); !errors.Is(err, failure) {
+		if err := lifecycle.Stop(t.Context()); err == nil || !strings.Contains(err.Error(), "shared handler") {
 			t.Fatalf("service error: %v", err)
 		}
 		if !f.closed.Load() {

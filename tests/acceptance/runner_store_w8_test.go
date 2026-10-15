@@ -13,7 +13,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -196,7 +199,7 @@ func TestRunnerStoreLifecycleW8Components(t *testing.T) {
 			}
 			host.PrepareNode = func(ctx context.Context, unit controllerwire.ClaimedUnit, bound controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error) {
 				held = unit
-				return identityNodeW8(func(input nodehost.NodeInput) {
+				executor := identityNodeW8(func(input nodehost.NodeInput) {
 					executed = true
 					if input.Engine.Identity != *unit.Engine || input.GrantedRunner.Name != unit.Runner.Name || input.Generation != unit.Binding.Generation || input.Attempt != unit.Binding.Attempt {
 						t.Error("host input lost its granted execution identity")
@@ -210,7 +213,17 @@ func TestRunnerStoreLifecycleW8Components(t *testing.T) {
 					if _, err := bound.TransitionJob(ctx, unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "success", Cause: "report", Result: &controllerwire.JobResult{Outcome: "success"}}); err != nil {
 						t.Error(err)
 					}
-				}), runnerIdentityInputW8(unit), cleanup, nil
+				})
+				input := runnerIdentityInputW8(unit)
+				input.SpecHash = "fixture-job-hash"
+				input.RouteBinding = nodeproto.ProcessBinding{RunID: unit.RunID, JobID: unit.JobID, Routes: nodeproto.ProcessRoutes{URL: "http://node", Bearer: "fixture-delegated-node"}}
+				preparation := runners.NodePreparation{Host: executor, Input: input, Acquire: func(_ context.Context, spec runspec.Spec, _ source.Options) (*source.Entry, func() error, error) {
+					if spec.Request.RunID != unit.RunID || spec.Resolved.Engine != *unit.Engine {
+						t.Error("source acquisition lost the accepted run or engine")
+					}
+					return input.Entry, cleanup, nil
+				}}
+				return preparation.Prepare(ctx, unit, bound)
 			}
 			loop := runners.Loop{Config: runners.LoopConfig{Version: "v0.71.0", MaxConcurrent: 1, MaxClaims: 1}, Controller: claimant, Host: host, CheckVersion: runnerStorePolicyW8{}.CheckRunner, RequestCapacity: func() (float64, int64) { return 2, 1 << 30 }}
 			if err := loop.Run(t.Context()); err != nil {

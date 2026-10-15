@@ -12,20 +12,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 )
 
-// LocalController supplies the shared controller implementation to the local process.
-// Reconcile opens no second store and returns the initial activity after orphan recovery.
-// Run owns the queue consumer and leased maintenance; it reports all four activity counts.
-// ServeAPI consumes APIConn peer identity; ServeDashboard retains browser authentication.
-// All three serving methods block until cancellation and join their children before returning.
-// Close releases the single store handle after every service and admission finalizer joins.
+// LocalController supplies the owned store, workers and authorized HTTP handlers to the local process.
 type LocalController interface {
 	RunStore
 	// TypeSafeAPIKey reads the optional Jev key through the controller's owned secrets store.
 	TypeSafeAPIKey(context.Context) (string, error)
 	Reconcile(context.Context) (LocalActivity, error)
 	Run(context.Context, func(LocalActivity) error) error
-	ServeAPI(context.Context, net.Listener) error
-	ServeDashboard(context.Context, net.Listener) error
+	HTTP() LocalHTTP
 	Close() error
 }
 
@@ -206,7 +200,7 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 	apiReady := make(chan struct{})
 	d.cfg.ServeAPI = func(_ context.Context, ln net.Listener) {
 		serve("controller API", func() error {
-			return controller.ServeAPI(ctx, &readyListener{Listener: ln, ready: apiReady})
+			return controller.HTTP().ServeAPI(ctx, &readyListener{Listener: ln, ready: apiReady})
 		})
 	}
 	var dashboardListener net.Listener
@@ -239,7 +233,7 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 		workers.Go(func() {
 			defer ln.Close()
 			serve("dashboard", func() error {
-				return controller.ServeDashboard(ctx, &readyListener{Listener: ln, ready: dashboardReady})
+				return controller.HTTP().ServeDashboard(ctx, &readyListener{Listener: ln, ready: dashboardReady})
 			})
 		})
 		return nil

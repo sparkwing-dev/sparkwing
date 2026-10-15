@@ -20,6 +20,15 @@ checks its SID. Anonymous tokens, malformed preambles and missing credentials
 fail closed. Successful authentication consumes and acknowledges the preamble
 before application traffic starts. `APIConn.PeerIdentity` returns a snapshot.
 
+`LocalController.HTTP` returns the shared API and dashboard handlers. The local
+runtime serves them through `LocalHTTP`, which carries `APIConn` identity in
+each API request context. The route authorizer reads `LocalPeer(request.Context())`.
+Request headers and remote addresses cannot replace that identity. Dashboard
+handlers retain their browser authentication. Shutdown cancels request contexts,
+uses `APIDrainWindow` for graceful drain, closes remaining HTTP connections and
+joins handlers before the runtime closes its store. `TestLocalHTTP` and
+`FuzzLocalHTTPIdentity` cover this composition with in-memory connections.
+
 Windows pipes have a protected owner-only DACL, reject remote clients and use
 first-instance ownership. Clients check the pipe owner before sending the
 preamble and request identification-level impersonation. The server reads the

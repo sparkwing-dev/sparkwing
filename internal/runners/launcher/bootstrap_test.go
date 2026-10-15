@@ -3,6 +3,7 @@ package launcher
 import (
 	"context"
 	"errors"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -47,11 +48,11 @@ func TestBootstrapExchangesOnceBeforeDispatchingOriginalUnit(t *testing.T) {
 			award, unit := bootstrapAward(t, kind)
 			failure := errors.New("host result")
 			var events []string
-			host := BootstrapHost{ControllerURL: "https://controller.example"}
+			host := BootstrapHost{ControllerURL: "https://controller.example", HTTP: &http.Client{}}
 			host.NewController = func(options client.EngineOptions) (controllerwire.Controller, error) {
 				events = append(events, "connect")
 				bearer, err := options.Bearer(t.Context())
-				if err != nil || bearer != string(award.Bootstrap) || options.URL != host.ControllerURL || options.Launcher {
+				if err != nil || bearer != string(award.Bootstrap) || options.URL != host.ControllerURL || options.HTTP != host.HTTP || options.Launcher {
 					t.Fatal("exchange transport did not retain bootstrap-only authority")
 				}
 				ctx, cancel := context.WithCancel(t.Context())

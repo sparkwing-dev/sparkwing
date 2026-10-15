@@ -1,5 +1,10 @@
 # Cloud Jobs
 
+`NewLauncher` composes the shared controller client, Kubernetes and the enforced
+Cloud boundary. Its client always selects `EngineOptions.Launcher`, independent
+of the requested unit kinds. `Hosting` and `BootstrapHost` keep the caller's
+HTTP transport when opening award or exchange clients. Each uses its own bearer.
+
 `BuildJob` builds plan, eval and work Jobs from an awarded binding. It checks
 images, resources, deadlines and engine identity before reserving an exclusive
 team node. `CloudBoundary` must return matching placement and network evidence.

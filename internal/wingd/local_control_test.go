@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"net"
+	"net/http"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -132,14 +133,10 @@ func TestLocalControlAdmissionOnlyRefuses(t *testing.T) {
 
 func TestLocalControlCannotPromoteBeforeReadiness(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
-	f := &runtimeControllerFixture{serve: func(ctx context.Context, ln net.Listener) error {
+	f := &runtimeControllerFixture{http: func() LocalHTTP {
 		close(entered)
-		select {
-		case <-release:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-		return serveRuntimeFixture(ctx, ln)
+		<-release
+		return LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.NotFoundHandler()}
 	}}
 	r := newRuntimeFixture(t, f)
 	lifecycle := NewLocalLifecycle(r, nil)

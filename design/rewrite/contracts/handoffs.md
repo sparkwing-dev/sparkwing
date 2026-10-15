@@ -1,5 +1,31 @@
 # Cross-area handoffs
 
+## W8 composition continuation
+
+`runners.NewManagedRunner` and `launcher.NewLauncher` compose the shared wire
+client with the unified loop or launcher. `Hosting.HTTP` and `BootstrapHost.HTTP`
+retain the caller's HTTP/api.sock transport for awarded and exchanged clients.
+Launcher construction always selects `EngineOptions.Launcher`.
+
+`runners.NodePreparation.Prepare` fills accepted executor input, acquires the
+accepted source and retains partial cleanup until the keeper joins. Its default
+uses W3's `ForExecution`/`Acquire`; components inject that boundary while it is a
+stub. Bound host services must still supply the job hash, delegated node routes,
+storage and generator replay. No shared host constructor is inferred.
+
+W8's local `LocalController` composition interface now returns `HTTP() LocalHTTP`
+instead of implementing ServeAPI/ServeDashboard. The runtime owns both HTTP
+servers, request cancellation and joined drain. W2's local adapter supplies the
+shared handlers and reads verified API identity with
+`wingd.LocalPeer(request.Context())`. This changes W8's composition interface,
+not the frozen LocalRuntime operations. The sole implemented backend was the
+W8 fixture; all its callers are migrated. Store/queue/maintenance construction
+and shared policy handlers remain W1/W2 integration.
+
+The approved cancellation code is unchanged and both original regressions pass.
+New preparation and HTTP properties exercise fake foreign contracts and in-memory
+connections. Native cells remain blocked. See [the W8 audit](../W8-AMENDMENTS-1.md).
+
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
 ## From W4 review fixes (2026-10-15)

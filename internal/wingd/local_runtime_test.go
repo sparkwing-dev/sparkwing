@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,8 +22,7 @@ type runtimeControllerFixture struct {
 	home       string
 	reconcile  func(context.Context) (LocalActivity, error)
 	background func(context.Context, func(LocalActivity) error) error
-	serve      func(context.Context, net.Listener) error
-	dashboard  func(context.Context, net.Listener) error
+	http       func() LocalHTTP
 	closed     atomic.Bool
 	closeErr   error
 	key        func(context.Context) (string, error)
@@ -50,18 +50,11 @@ func (f *runtimeControllerFixture) Run(ctx context.Context, report func(LocalAct
 	return nil
 }
 
-func (f *runtimeControllerFixture) ServeAPI(ctx context.Context, ln net.Listener) error {
-	if f.serve != nil {
-		return f.serve(ctx, ln)
+func (f *runtimeControllerFixture) HTTP() LocalHTTP {
+	if f.http != nil {
+		return f.http()
 	}
-	return serveRuntimeFixture(ctx, ln)
-}
-
-func (f *runtimeControllerFixture) ServeDashboard(ctx context.Context, ln net.Listener) error {
-	if f.dashboard != nil {
-		return f.dashboard(ctx, ln)
-	}
-	return serveRuntimeFixture(ctx, ln)
+	return LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.NotFoundHandler()}
 }
 
 func (f *runtimeControllerFixture) Close() error {
@@ -76,26 +69,29 @@ func (f *runtimeControllerFixture) Close() error {
 	return f.closeErr
 }
 
-func serveRuntimeFixture(ctx context.Context, ln net.Listener) error {
-	stopped := make(chan struct{})
-	defer close(stopped)
-	go func() {
-		select {
-		case <-ctx.Done():
-			ln.Close()
-		case <-stopped:
-		}
-	}()
-	_, err := ln.Accept()
-	if errors.Is(err, net.ErrClosed) {
-		return nil
-	}
-	return err
-}
-
 type runtimeListener struct {
 	closed chan struct{}
 	once   sync.Once
+}
+
+type failedRuntimeListener struct {
+	net.Listener
+	failure error
+}
+
+func (l *failedRuntimeListener) Accept() (net.Conn, error) { return nil, l.failure }
+
+type drainingRuntimeListener struct {
+	net.Listener
+	once              sync.Once
+	stopping, release chan struct{}
+	failure           error
+}
+
+func (l *drainingRuntimeListener) Close() error {
+	l.once.Do(func() { close(l.stopping) })
+	<-l.release
+	return errors.Join(l.Listener.Close(), l.failure)
 }
 
 func (l *runtimeListener) Accept() (net.Conn, error) { <-l.closed; return nil, net.ErrClosed }
@@ -239,7 +235,13 @@ func TestLocalRuntimeStartupFailuresReleaseOwnership(t *testing.T) {
 					return &runtimeListener{closed: make(chan struct{})}, nil
 				}
 			case "api_serve":
-				f.serve = func(context.Context, net.Listener) error { return failure }
+				r.listen = func(network, address string) (net.Listener, error) {
+					listener := &runtimeListener{closed: make(chan struct{})}
+					if network == "unix" && address == r.layout.apiSock {
+						return &failedRuntimeListener{Listener: listener, failure: failure}, nil
+					}
+					return listener, nil
+				}
 			case "dashboard_bind":
 				r.listen = func(network, _ string) (net.Listener, error) {
 					if network == "tcp" {
@@ -359,18 +361,14 @@ func TestLocalRuntimeJoinsAPIAndPreservesShutdownFailure(t *testing.T) {
 		failure := errors.New("final API flush failed")
 		closeFailure := errors.New("store close failed")
 		f := &runtimeControllerFixture{closeErr: closeFailure}
-		f.serve = func(ctx context.Context, ln net.Listener) error {
-			if err := serveRuntimeFixture(ctx, ln); err != nil {
-				return err
-			}
-			close(apiStopping)
-			<-release
-			if f.closed.Load() {
-				t.Error("store closed under API")
-			}
-			return errors.Join(ctx.Err(), failure)
-		}
 		r := newRuntimeFixture(t, f)
+		r.listen = func(network, address string) (net.Listener, error) {
+			listener := &runtimeListener{closed: make(chan struct{})}
+			if network == "unix" && address == r.layout.apiSock {
+				return &drainingRuntimeListener{Listener: listener, stopping: apiStopping, release: release, failure: failure}, nil
+			}
+			return listener, nil
+		}
 		lifecycle := NewLocalLifecycle(r, nil)
 		if _, err := lifecycle.EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1", Stay: true}); err != nil {
 			t.Fatal(err)

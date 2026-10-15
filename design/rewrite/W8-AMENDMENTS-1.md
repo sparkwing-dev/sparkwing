@@ -1,5 +1,104 @@
 # W8 amendment integration audit
 
+## Continuation: acquired nodes and concrete HTTP composition
+
+The committed cancellation redesign passes both retained regressions. Its stop
+path remains 84 -> 75 lines, its pending wait 44 -> 40 and loop.go 408 -> 401.
+This continuation leaves that completed mechanism unchanged.
+
+`NodePreparation.Prepare` constructs accepted node input, acquires the accepted
+source under the keeper and returns partial acquisition cleanup. Hosting joins
+the keeper before source and service cleanup. The shared execution constructor
+captures granted identity before acquisition. Foreign routes and engines refuse
+execution. Bound host services still supply the job hash, delegated routes,
+storage and generator replay. The default acquisition uses W3's declared
+ForExecution/Acquire interface. Tests substitute that boundary because its
+production body is a stub.
+
+`NewManagedRunner` composes the claimant client, unified loop, host and signed
+version policy. Award clients retain the same HTTP transport with separate
+bearers. `NewLauncher` joins the wire client, Kubernetes and enforced Cloud
+boundary, always selecting the launcher route. Bootstrap exchange also retains
+the caller's HTTP transport. Final CLI factories still require shared host and
+source-authority constructors.
+
+The local runtime now serves the shared handlers through `LocalHTTP`. The
+W8-owned LocalController interface replaces ServeAPI/ServeDashboard with
+HTTP() LocalHTTP. `LocalPeer` carries verified APIConn identity to the request
+authorizer. Shutdown joins connections and handlers, including hijacked HTTP
+connections. A synctest regression reproduced a deadlock before hijacked
+connections were tracked and passes after the correction. Closed hijacked
+connections leave the tracking set when closed.
+
+Production Go changes add 364 lines and delete 14. The removed surface is the
+local backend's pair of serving methods and their delegation. Whole old files
+deleted: zero. The earlier cluster/daemon/dispatcher cuts remain deleted. The
+fixture's old serving loop is removed. Only W8 source changed. The shared
+acceptance caller is tests/acceptance/runner_store_w8_test.go; it now uses the
+production node preparer between real SQLite claims and the fake executor.
+No caller in another production package required migration.
+
+Source documentation changed in internal/wingd/LOCAL-TRANSPORT.md and
+internal/runners/launcher/CLOUD-JOBS.md. Shared contract notes changed in
+contracts/c3-protocol-sdk.md and contracts/handoffs.md. All four W8 local-runtime
+fixture files were migrated. There is no new T1 inventory port or native cell.
+
+Verification uses GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, go -C and
+-p 4, with GOCACHE/GOTMPDIR/TMPDIR inside /tmp/sw-astra-W8.
+
+| Check | Result |
+| --- | --- |
+| Whole-repository go build -p 4 ./... | Passed after the final source edit. |
+| W8, CLI and acceptance vet | Passed. |
+| Full runners/... and engine/... suites | Passed. |
+| tests/acceptance and internal/acceptance | Passed. Acceptance took 86.120 seconds. |
+| RunnerStoreLifecycleW8Components | Passed through NodePreparation and real claim/start/finish persistence. |
+| Focused local runtime/dashboard/control/HTTP race suite | Passed, including the hijacked-handler regression. |
+| Runner/launcher composition and preparation race selection | Passed. |
+| FuzzNodePreparationRejectsForeignRoutes, 100x | Passed 128 generated executions. |
+| FuzzLocalHTTPIdentity, 100x | Passed 100 generated executions on the final HTTP implementation. |
+| commentcheck -base main . | Clean across 1,189 Go files. |
+| Cluster suite with -skip '^TestStartMetricsListener_ServesMetrics$' | Passed. The excluded test requires native sockets. |
+
+The local race selector was
+`go test -race -p 4 ./internal/wingd -run '^(TestLocal(Runtime|HTTP|Dashboard|Control)|FuzzLocalHTTP)' -count=1`.
+The runner/launcher race selector covered TestNodePreparation,
+TestManagedRunnerComposition, TestLauncherComposition, TestBootstrapExchanges
+and FuzzNodePreparation. The two properties use `-run '^$' -fuzz <name>
+-fuzztime=100x -parallel=2`. Full acceptance and runner/engine suites used
+`go test -p 4 ./internal/runners/... ./internal/engine/... ./tests/acceptance
+./internal/acceptance -count=1`.
+
+The added mechanisms are the runtime constructors, source preparer and local
+HTTP connection owner. They join the authorized contracts while keeping
+credential and resource lifetimes explicit. Reverting them removes these four
+files and restores the backend serving methods.
+
+The same 26 amendment rows retain their component/native boundary. A1-08/19/38/39/40
+advance through the compositions above. A1-10/12/36/48 retain the source,
+storage and captured-environment dependencies. A1-41/42/43/49 and the other
+assigned rows retain their previously implemented behavior and recorded native
+or cross-area obligations. All W8 handoffs were read; none introduces another
+unhandled W8 design approval.
+
+Real integration still needs W3 source/keeper bodies, shared RunHost/NodeHost
+constructors, run/plan/eval identities, delegated routes and generator replay;
+W9 EngineClient/DataClient bodies, final CLI factories and recorded launcher
+grammar repairs; W1/W2 local store/queue/maintenance adapters, shared policy
+handlers, plan/eval resource awards and SyncLauncher; and W3/W7 workspace-off
+binary-cache hashing and bound storage construction. Native HTTP/api.sock,
+Windows/macOS, deployed Cloud probes/cleanup, full placement and real-repository
+QA remain unprovided. Fakes preserve these interfaces without completing their
+owners' implementations. The local composition change is W8-owned; no foreign
+Go contract changed and no new product decision is requested.
+
+The lead retains independent review, commits and native verification. Worker
+Git writes and Sparkwing binaries/pipelines were not used. Overwing discovery
+worked while reporting its installed binary behind source. Socket-dependent
+metrics and native acceptance remain outside this sandbox's evidence.
+Git config has no local identity or core.worktree override. Checks finished
+without retained test processes. Worker scratch was removed after verification.
+
 <!-- design:begin -->
 
 This snapshot covers every amendment-1 row whose action column names W8. A

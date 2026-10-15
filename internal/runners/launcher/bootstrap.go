@@ -3,6 +3,7 @@ package launcher
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -15,6 +16,7 @@ import (
 // BootstrapHost exchanges private bootstrap authority before dispatching its Cloud unit.
 type BootstrapHost struct {
 	ControllerURL string
+	HTTP          *http.Client
 	NewController func(client.EngineOptions) (controllerwire.Controller, error)
 	Host          runners.UnitHost
 }
@@ -40,7 +42,7 @@ func (h BootstrapHost) Run(ctx context.Context, award CloudJobAward) error {
 	if open == nil {
 		open = client.NewEngineClient
 	}
-	controller, err := open(client.EngineOptions{URL: h.ControllerURL, Bearer: func(ctx context.Context) (string, error) {
+	controller, err := open(client.EngineOptions{URL: h.ControllerURL, HTTP: h.HTTP, Bearer: func(ctx context.Context) (string, error) {
 		if err := context.Cause(ctx); err != nil {
 			return "", err
 		}

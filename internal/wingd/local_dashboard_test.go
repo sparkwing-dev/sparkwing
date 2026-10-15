@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/http"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -87,8 +89,7 @@ func TestLocalDashboardBindFailureLeavesControllerAvailable(t *testing.T) {
 }
 
 func TestLocalDashboardStartupFailureReachesCaller(t *testing.T) {
-	failure := errors.New("dashboard initialization failed")
-	f := &runtimeControllerFixture{dashboard: func(context.Context, net.Listener) error { return failure }}
+	f := &runtimeControllerFixture{http: func() LocalHTTP { return LocalHTTP{API: http.NotFoundHandler()} }}
 	r := newRuntimeFixture(t, f)
 	lifecycle := NewLocalLifecycle(r, nil)
 	opts := LocalStartOptions{Home: f.home, Version: "v1", Stay: true}
@@ -96,13 +97,13 @@ func TestLocalDashboardStartupFailureReachesCaller(t *testing.T) {
 		t.Fatal(err)
 	}
 	opts.DashboardAddress = "127.0.0.1:0"
-	if _, err := lifecycle.StartDashboard(t.Context(), opts); !errors.Is(err, failure) {
+	if _, err := lifecycle.StartDashboard(t.Context(), opts); err == nil || !strings.Contains(err.Error(), "shared handler") {
 		t.Fatalf("startup error: %v", err)
 	}
 	if !f.closed.Load() {
 		t.Fatal("failed service startup returned before store close")
 	}
-	if err := lifecycle.Stop(t.Context()); !errors.Is(err, failure) {
+	if err := lifecycle.Stop(t.Context()); err == nil || !strings.Contains(err.Error(), "shared handler") {
 		t.Fatalf("shutdown error: %v", err)
 	}
 }
@@ -111,20 +112,22 @@ func TestLocalDashboardReadinessAndJoinedShutdown(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		entered, accept, closing, release := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
 		f := &runtimeControllerFixture{}
-		f.dashboard = func(ctx context.Context, ln net.Listener) error {
-			close(entered)
-			<-accept
-			if err := serveRuntimeFixture(ctx, ln); err != nil {
-				return err
+		var calls atomic.Int32
+		f.http = func() LocalHTTP {
+			if calls.Add(1) == 2 {
+				close(entered)
+				<-accept
 			}
-			close(closing)
-			<-release
-			if f.closed.Load() {
-				t.Error("store closed while dashboard drains")
-			}
-			return nil
+			return LocalHTTP{API: http.NotFoundHandler(), Dashboard: http.NotFoundHandler()}
 		}
 		r := newRuntimeFixture(t, f)
+		r.listen = func(network, _ string) (net.Listener, error) {
+			listener := &runtimeListener{closed: make(chan struct{})}
+			if network == "tcp" {
+				return &drainingRuntimeListener{Listener: listener, stopping: closing, release: release}, nil
+			}
+			return listener, nil
+		}
 		lifecycle := NewLocalLifecycle(r, nil)
 		opts := LocalStartOptions{Home: f.home, Version: "v1", Stay: true}
 		if _, err := lifecycle.EnsureStarted(t.Context(), opts); err != nil {

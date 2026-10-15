@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 	"time"
@@ -19,6 +20,7 @@ import (
 // Hosting binds each award's controller to its shared host and lease keeper.
 type Hosting struct {
 	ControllerURL string
+	HTTP          *http.Client
 	NewController func(client.EngineOptions) (controllerwire.Controller, error)
 	PrepareRun    func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.RunHost, nodehost.RunInput, func() error, error)
 	PrepareNode   func(context.Context, controllerwire.ClaimedUnit, controllerwire.Controller) (nodehost.NodeHost, nodehost.NodeInput, func() error, error)
@@ -38,8 +40,7 @@ func (h Hosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) (res
 	}
 	var execution nodeExecution
 	if unit.Unit == capability.UnitNode {
-		execution = nodeExecution{engine: *unit.Engine, runner: unit.Runner, job: unit.JobID, generation: unit.Binding.Generation, attempt: unit.Binding.Attempt}
-		execution.runner.Labels = slices.Clone(unit.Runner.Labels)
+		execution = executionFor(unit)
 	}
 	if err := limits.CheckRenewal(h.Interval, h.Lease); err != nil {
 		return err
@@ -150,7 +151,7 @@ func (h Hosting) controller(bearer string) (controllerwire.Controller, error) {
 	if open == nil {
 		open = client.NewEngineClient
 	}
-	controller, err := open(client.EngineOptions{URL: h.ControllerURL, Bearer: func(ctx context.Context) (string, error) {
+	controller, err := open(client.EngineOptions{URL: h.ControllerURL, HTTP: h.HTTP, Bearer: func(ctx context.Context) (string, error) {
 		if err := context.Cause(ctx); err != nil {
 			return "", err
 		}

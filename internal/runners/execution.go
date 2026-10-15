@@ -4,6 +4,7 @@ import (
 	"errors"
 	"slices"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -15,6 +16,12 @@ type nodeExecution struct {
 	runner              nodeproto.RunnerIdentity
 	job                 string
 	generation, attempt int64
+}
+
+func executionFor(unit controllerwire.ClaimedUnit) nodeExecution {
+	runner := unit.Runner
+	runner.Labels = slices.Clone(runner.Labels)
+	return nodeExecution{engine: *unit.Engine, runner: runner, job: unit.JobID, generation: unit.Binding.Generation, attempt: unit.Binding.Attempt}
 }
 
 func (grant nodeExecution) input(prepared nodehost.NodeInput) (nodehost.NodeInput, error) {
