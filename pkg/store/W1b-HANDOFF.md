@@ -1,10 +1,111 @@
 # W1b handoff
 
-Continues `9c5e341a8` after integration merge `5171ae77c`. W1b remains incomplete.
+Continues `add732b73`. W1b remains incomplete.
 This continuation is uncommitted.
 The lead owns review, commits, pipelines and native integration.
 
 ## Current continuation
+
+DESIGN: record mutation authorization.
+
+Invariant: record publication must check the current writer, ancestor and holder
+fences after work that can cross their expiry and before writing destination
+records. The earlier manifest-I/O repair does not cover the remainder of the
+mutation transaction. CommitRecord checks authority before RecordNamespace and
+the blob locks. CopyMemo checks through lookup, then takes blob locks, computes
+destination namespaces and persists records without another authority check.
+
+Added blob_mutation_fence_test.go. It uses the existing namespace/edge contract
+fake and injected store clock. The namespace callback advances the clock after
+the last authority check, before an output destination is written. This simulates
+elapsed time at that boundary. It does not establish native lock contention or
+credential takeover. Each operation has job-lease, leaf-capability and ancestor
+expiry cases. A live control at expiry minus one nanosecond succeeds. At exact
+expiry and at a generated positive offset, all six cases incorrectly succeed,
+return record/read-set data and persist one output record. Each observation uses
+a fresh SQLite store. No test sleeps or uses a process-global clock override.
+
+The new test is RED and remains enabled. Reproduce with:
+
+```sh
+mkdir -p /tmp/sw-astra-W1b/cache /tmp/sw-astra-W1b/tmp
+env GOWORK=off GOFLAGS=-buildvcs=false GOMAXPROCS=4 \
+  GOCACHE=/tmp/sw-astra-W1b/cache GOTMPDIR=/tmp/sw-astra-W1b/tmp \
+  TMPDIR=/tmp/sw-astra-W1b/tmp \
+  go -C /home/bombuntu/.xwing/envs/1088/sparkwing test -p 4 ./pkg/store \
+  -run '^TestBlobRecordsMutationCannotOutliveAuthority$' -count=1 -v
+```
+
+All six subtests print `crossed=true exposed=true records=1 error=<nil>`
+at exact expiry, then fail their first generated input `0xf5, 0x87` as well.
+The six live controls pass. The configured 48 generated cases per subtest are
+not a completed property run because quick.Check stops at the first failure.
+
+No production repair was made because SWARM-BRIEF's two-strikes rule says to
+report a second failure of the same mechanism and leave the redesign to the lead.
+The earlier manifest-I/O fence repair already changed this authorization flow.
+Recommendation for the lead: give record publication one transaction-local
+mutation owner used by CommitRecord and CopyMemo. Prepare namespaces and verified
+members, take the existing locks, recheck current authority and persist the
+complete destination batch through that owner. Preserve immutable replay,
+all-or-nothing output/manifest copies and caller-owned rollback. Repeating a
+new ad hoc check in each path leaves the same ordering obligation scattered.
+The lead must decide the linearization boundary before this regression lands.
+No replacement interface or foreign contract has been changed.
+
+Verification uses the environment and scratch paths in the command above.
+
+- Whole-repository `go build -p 4 ./...` passed.
+- Scoped `go vet -p 4 ./pkg/store/... ./internal/acceptance/...
+  ./tests/acceptance/...` passed.
+- The existing expanded store selection passed **197 top-level tests / 487
+  cases**, without skips. This run explicitly excludes the new red test with
+  `-skip '^TestBlobRecordsMutationCannotOutliveAuthority$'`. It is not a claim
+  that the expanded selection or the store suite is wholly green.
+- `go test -json -p 4 ./internal/acceptance/... ./tests/acceptance/...
+  -run '^(TestStorage|TestBilling)$' -count=1` passed **2 top-level tests / 43
+  cases**. All **12 existing SQLite data/billing proofs** pass. The selected
+  platform/native skeleton retains **562 skips**.
+- Required `commentcheck -base main` passed across **906 files**.
+
+Deleted **0 legacy lines**. No archived T1 test is newly ported and no acceptance
+cell is newly activated. No W1 file or other-package caller changed. The only
+changed files are the owned regression and this handoff. There is no source-doc,
+changelog, API, schema, setting, rate, limit or runtime-service change.
+
+Amendment and handoff audit:
+
+- A1-24 retains the transaction-owned data checker and binding proof.
+- A1-27 retains immutable award, interval, checkpoint and settlement helpers.
+  W1 still must join issuance/start/wait/renewal/finish/reaping transactions.
+  C2 SettleBilling remains a stub. The unstarted at_award refund operation and
+  explicit customer-runner waiting input still need the existing cross-owner
+  agreement. No competing billing calculator was added.
+- A1-28 retains committed-checkout/event settlement. W2 still owns verified
+  provider handoff and retirement of the caller-selected paid-grant route.
+  VerifiedPaymentEvent.Event and provider verification remain stubs.
+- A1-29 through A1-35 retain upload, receipt, provenance, member, reference,
+  depcache, tombstone and tagged-log persistence. The new publication-fence
+  finding prevents treating those record mutation paths as complete.
+  W7's namespace/edge policy, verified manifests, physical verification/deletion
+  and binary execution remain integrations. W2/W9 data/log transports, trusted
+  replica wiring and proxy egress remain integrations. Never-executed
+  materialization destinations and published owner-log identities still need
+  the existing cross-owner contracts.
+- A1-53 still needs native acceptance. handoffs.md adds no W1b assignment.
+
+Legacy claim-credit, paid-grant, raw storage, output, direct-upload and log
+paths still have other owners' callers. Their retirement cannot be replaced
+with aliases or forwarding shims. W1's files were not edited to force the cuts.
+No PostgreSQL, provider, physical-backend, binary-execution, race, pipeline or
+native-placement result is claimed. The full legacy store suite was not run.
+
+Friction was cold compilation and the missing real integrations above. An
+unbounded filesystem scan was stopped, then replaced with rg's repository file
+list. No Sparkwing binary, service, provider, deployment, release or Git write
+ran. Scratch is deleted after final inspection.
+
+## Previous continuation (committed in add732b73)
 
 Closed record metadata replay under A1-29/A1-35. The invariant is that equivalent
 record metadata returns the same committed record across replay and reopening.
