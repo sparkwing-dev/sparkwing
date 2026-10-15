@@ -5,12 +5,51 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
 )
+
+func FuzzSignedPolicyRejectsDuplicateKeys(f *testing.F) {
+	f.Add("field", uint8(0))
+	f.Add("escaped\"\\\n", uint8(5))
+	f.Add("", uint8(15))
+	f.Fuzz(func(t *testing.T, name string, depth uint8) {
+		key := testSigningKey(t)
+		policy, now := policyFixture()
+		body, err := json.Marshal(policy)
+		if err != nil {
+			t.Fatal(err)
+		}
+		field, err := json.Marshal(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, duplicate := range []bool{false, true} {
+			extension := fmt.Sprintf(`{%s:1}`, field)
+			if duplicate {
+				extension = fmt.Sprintf(`{%s:1,%s:2}`, field, field)
+			}
+			for i := uint8(0); i < depth%16; i++ {
+				if i%2 == 0 {
+					extension = `{"nested":` + extension + `}`
+				} else {
+					extension = `[` + extension + `]`
+				}
+			}
+			candidate := append(append([]byte(nil), body[:len(body)-1]...), []byte(`,"extension":`+extension+`}`)...)
+			_, err := VerifyIndex(SignedIndex{Body: candidate, Signature: ed25519.Sign(key, candidate)}, now)
+			if duplicate {
+				requireCode(t, err, apierr.IntegrityFailure)
+			} else if err != nil {
+				t.Fatalf("unique extension refused: %v", err)
+			}
+		}
+	})
+}
 
 func testSigningKey(t *testing.T) ed25519.PrivateKey {
 	t.Helper()
@@ -23,6 +62,7 @@ func testSigningKey(t *testing.T) ed25519.PrivateKey {
 	t.Cleanup(func() { releaseauth.TrustedPublicKeys = old })
 	return key
 }
+
 func policyFixture() (VersionIndex, time.Time) {
 	now := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
 	return VersionIndex{Format: 1, PublishedAt: now, Latest: "v0.20.0", Versions: []VersionInfo{
@@ -30,6 +70,7 @@ func policyFixture() (VersionIndex, time.Time) {
 		{Version: "v0.20.0", PublishedAt: now.AddDate(0, -1, 0), SupportUntil: now.AddDate(0, 11, 0)},
 	}}, now
 }
+
 func signPolicy(t *testing.T, key ed25519.PrivateKey, policy VersionIndex) SignedIndex {
 	t.Helper()
 	body, err := json.Marshal(policy)
@@ -38,6 +79,7 @@ func signPolicy(t *testing.T, key ed25519.PrivateKey, policy VersionIndex) Signe
 	}
 	return SignedIndex{Body: body, Signature: ed25519.Sign(key, body)}
 }
+
 func requireCode(t *testing.T, err error, want apierr.Code) {
 	t.Helper()
 	var api *apierr.Error
@@ -45,6 +87,7 @@ func requireCode(t *testing.T, err error, want apierr.Code) {
 		t.Fatalf("error=%v want code=%s", err, want)
 	}
 }
+
 func TestSignedPolicyExpiryRevocationAndMinimum(t *testing.T) {
 	key := testSigningKey(t)
 	policy, now := policyFixture()
@@ -82,6 +125,7 @@ func TestSignedPolicyExpiryRevocationAndMinimum(t *testing.T) {
 	_, err = Evaluate(index, "v0.10.2", now)
 	requireCode(t, err, apierr.VersionUnsupported)
 }
+
 func TestSignedPolicyRejectsMalformedAndUnverifiedAuthority(t *testing.T) {
 	key := testSigningKey(t)
 	policy, now := policyFixture()

@@ -38,6 +38,9 @@ The factory receives the Actions bearer callback and expiry without the raw
 issued capability. `FuzzRunnerCLIEnforcesRepositoryFence` checks these boundaries
 against foreign intake and accepted sources and factory mutation.
 
+Runner `version` uses the same registry parser as the execution commands.
+Its help, output formats and offline flag come from `clisurface`.
+
 `RunnerCLI` serves the existing metrics address alongside the managed loop.
 Binding fails before any claim. Every claim records claimed,
 empty or error without changing its returned award or error. Metrics failure
