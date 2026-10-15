@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 type corpus struct {
@@ -21,19 +22,22 @@ type corpus struct {
 }
 
 type corpusSession struct {
-	Name     string       `json:"name"`
-	Binding  bool         `json:"binding"`
-	Protocol int          `json:"protocol,omitempty"`
-	Requests []corpusStep `json:"requests"`
+	Name       string       `json:"name"`
+	Binding    bool         `json:"binding"`
+	BindingJob string       `json:"binding_job,omitempty"`
+	Protocol   int          `json:"protocol,omitempty"`
+	Requests   []corpusStep `json:"requests"`
 }
 
 type corpusStep struct {
-	Op       nodeproto.Op `json:"op"`
-	ID       string       `json:"id,omitempty"`
-	Kind     string       `json:"kind,omitempty"`
-	Code     string       `json:"code,omitempty"`
-	Contains string       `json:"contains,omitempty"`
-	Name     string       `json:"name,omitempty"`
+	Op         nodeproto.Op `json:"op"`
+	ID         string       `json:"id,omitempty"`
+	Kind       string       `json:"kind,omitempty"`
+	Code       string       `json:"code,omitempty"`
+	Contains   string       `json:"contains,omitempty"`
+	Name       string       `json:"name,omitempty"`
+	PlanVector string       `json:"plan_vector,omitempty"`
+	Job        string       `json:"job,omitempty"`
 }
 
 func TestGoSDKConformsV2(t *testing.T) {
@@ -53,6 +57,10 @@ func TestGoSDKConformsV2(t *testing.T) {
 	if err := json.Unmarshal(raw, &cases); err != nil {
 		t.Fatal(err)
 	}
+	vectors := map[string]declarationVector{}
+	for _, vector := range readVectors(t).Plans {
+		vectors[vector.Name] = vector
+	}
 	for _, session := range cases.Sessions {
 		t.Run(session.Name, func(t *testing.T) {
 			p := startFixture(t, bin)
@@ -67,6 +75,9 @@ func TestGoSDKConformsV2(t *testing.T) {
 			}
 			if session.Binding {
 				hello.Binding = &nodeproto.ProcessBinding{RunID: "r", JobID: "task", Routes: nodeproto.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "secret"}}
+				if session.BindingJob != "" {
+					hello.Binding.JobID = session.BindingJob
+				}
 			}
 			p.send(t, hello)
 			frame := p.reply(t)
@@ -108,9 +119,14 @@ func TestGoSDKConformsV2(t *testing.T) {
 				}
 				if step.Op == nodeproto.OpRunStep {
 					p.validate(t, p.wire, "RunResult", got.Result)
+					var result nodeproto.RunResult
+					if err := got.Decode(&result); err != nil {
+						t.Fatal(err)
+					}
 				}
 				if step.Op == nodeproto.OpEval {
 					p.validate(t, p.wire, "EvalResult", got.Result)
+					p.checkEval(t, got, step, vectors)
 				}
 				if step.Contains != "" && !bytes.Contains(got.Result, []byte(step.Contains)) {
 					t.Fatalf("%s result %s lacks %q", step.Op, got.Result, step.Contains)
@@ -118,6 +134,39 @@ func TestGoSDKConformsV2(t *testing.T) {
 			}
 			p.end(t)
 		})
+	}
+}
+
+func (p *fixtureProcess) checkEval(t *testing.T, reply nodeproto.Reply, step corpusStep, vectors map[string]declarationVector) {
+	t.Helper()
+	var result nodeproto.EvalResult
+	if err := reply.Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	kind := map[string]string{"skip": "skip_if", "memo": "memo_key", "before": "before_run", "after": "after_run", "verify": "verify", "generate": "generate"}[step.Kind]
+	if err := result.ValidateValue(kind); err != nil {
+		t.Fatal(err)
+	}
+	if step.PlanVector == "" {
+		return
+	}
+	vector, ok := vectors[step.PlanVector]
+	if !ok || step.Kind != "generate" || vector.Code != "" || vector.SourceJob == "" {
+		t.Fatalf("invalid expansion vector %q", step.PlanVector)
+	}
+	if result.Error != nil {
+		t.Fatalf("expansion failed: %v", result.Error)
+	}
+	raw := append(append([]byte(`{"jobs":`), result.Value...), '}')
+	if _, err := nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{
+		Placement: nodeproto.PlacementLocal, Secrets: vectorSecrets{}, Expansion: true,
+		SourceJob: vector.SourceJob, ExistingJobs: p.plan.Jobs, ExistingConcurrency: p.plan.Concurrency,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hash, err := runspec.CanonicalHash(json.RawMessage(raw))
+	if err != nil || string(hash) != vector.SHA256 {
+		t.Fatalf("generated declaration = %s, hash = %s, %v; want %s", raw, hash, err, vector.Canonical)
 	}
 }
 
@@ -216,6 +265,9 @@ func (p *fixtureProcess) makeRequest(step corpusStep, index int) nodeproto.Reque
 		r.Run = &nodeproto.RunContext{RunID: "r", Pipeline: "conformance"}
 	case nodeproto.OpRunStep:
 		r.Job, r.Step, r.Attempt = "task", "run", 1
+		if step.Job != "" {
+			r.Job = step.Job
+		}
 	case nodeproto.OpEval:
 		if len(p.plan.Jobs) != 0 {
 			switch step.Kind {

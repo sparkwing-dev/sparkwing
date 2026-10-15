@@ -62,7 +62,14 @@
         {
           "op": "eval",
           "kind": "generate",
-          "contains": "generated"
+          "contains": "generated",
+          "plan_vector": "generated-sdk-replay"
+        },
+        {
+          "op": "eval",
+          "kind": "generate",
+          "contains": "generated",
+          "plan_vector": "generated-sdk-replay"
         },
         {
           "op": "cancel"
@@ -111,6 +118,26 @@
       "name": "major_mismatch",
       "protocol": 1,
       "requests": []
+    },
+    {
+      "name": "generated_reconstruction",
+      "binding": true,
+      "requests": [
+        {
+          "op": "plan"
+        },
+        {
+          "op": "eval",
+          "kind": "generate",
+          "plan_vector": "generated-sdk-replay"
+        },
+        {
+          "op": "run_step",
+          "job": "generated",
+          "contains": "success"
+        }
+      ],
+      "binding_job": "generated"
     }
   ],
   "plans": [
@@ -198,6 +225,29 @@
           "closures": {
             "generate": [
               "generated-group"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "generated-sdk-replay",
+      "raw": "{\"jobs\":[{\"id\":\"generated\",\"deps\":[\"task\"],\"groups\":[\"task/generate/0\"],\"failure_policy\":\"fail_fast\",\"steps\":[{\"id\":\"run\"}]}]}",
+      "canonical": "{\"jobs\":[{\"deps\":[\"task\"],\"failure_policy\":\"fail_fast\",\"groups\":[\"task/generate/0\"],\"id\":\"generated\",\"steps\":[{\"id\":\"run\"}]}]}",
+      "sha256": "a3c5a574707444c3f183f9df5ee9f375808ea3839b881c41a9fca5b243627085",
+      "code": "",
+      "source_job": "task",
+      "existing_jobs": [
+        {
+          "id": "task",
+          "steps": [
+            {
+              "id": "run"
+            }
+          ],
+          "closures": {
+            "generate": [
+              "task/generate/0"
             ]
           }
         }

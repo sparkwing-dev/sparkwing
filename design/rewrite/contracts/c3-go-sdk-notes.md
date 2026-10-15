@@ -73,6 +73,12 @@ Go builders also reproduce the source-presence, approval-condition and snake_cas
 job vectors. Jobs and steps omit empty closure objects, preserving their shared
 canonical hashes. The Go process corpus uses the native acceptance pipe driver
 on Unix and Windows.
+Process session steps can name a `plan_vector` for generator results. The Go
+driver validates those jobs against the initial plan and compares their canonical
+hash with that vector. Repeated evaluation and a fresh process reconstruct the
+same expansion. The fresh process carries the generated job's delegated binding
+and executes its body after reconstruction. Every eval also checks its declared
+value kind through `EvalResult.ValidateValue`.
 
 ## Acceptance evidence required
 
