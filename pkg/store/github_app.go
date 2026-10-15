@@ -284,7 +284,7 @@ func (t *Tenant) scanGitHubAppTriggers(rows *sql.Rows) ([]GitHubAppTrigger, erro
 		if err := json.Unmarshal([]byte(labels), &tr.PullRequestLabels); err != nil {
 			return nil, err
 		}
-		tr.CreatedAt = time.Unix(created, 0).UTC()
+		tr.CreatedAt = time.Unix(0, created).UTC()
 		out = append(out, tr)
 	}
 	return out, rows.Err()
@@ -329,7 +329,7 @@ func (t *Tenant) PutGitHubAppTrigger(ctx context.Context, tr GitHubAppTrigger, n
 	if _, err := t.GitHubAppInstallation(ctx, tr.InstallationID); err != nil {
 		return GitHubAppTrigger{}, err
 	}
-	tr.Team, tr.Repository, tr.CreatedAt = t.team, repo.Slug(), now.UTC().Truncate(time.Second)
+	tr.Team, tr.Repository, tr.CreatedAt = t.team, repo.Slug(), now.UTC()
 	if tr.Tags == nil {
 		tr.Tags = []string{}
 	}
@@ -352,8 +352,8 @@ func (t *Tenant) PutGitHubAppTrigger(ctx context.Context, tr GitHubAppTrigger, n
 		return GitHubAppTrigger{}, fmt.Errorf("encode pull request base branches: %w", err)
 	}
 	_, err = t.s.exec(ctx, `
-		INSERT INTO github_app_triggers (team, `+githubAppTriggerCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO github_app_triggers (team, repo_key, `+githubAppTriggerCols+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (team, repository_id, pipeline) DO UPDATE SET
 		    repository = excluded.repository, installation_id = excluded.installation_id,
 		    on_push = excluded.on_push, tag_patterns = excluded.tag_patterns, on_pull_request = excluded.on_pull_request,
@@ -363,8 +363,8 @@ func (t *Tenant) PutGitHubAppTrigger(ctx context.Context, tr GitHubAppTrigger, n
 		    on_release_published = excluded.on_release_published, on_release_prereleased = excluded.on_release_prereleased,
 		    on_branch_create = excluded.on_branch_create, on_branch_delete = excluded.on_branch_delete,
 		    created_by = excluded.created_by, created_at = excluded.created_at`,
-		string(t.team), tr.RepositoryID, tr.Pipeline, tr.Repository, tr.InstallationID, flag(tr.Push), string(patterns),
-		flag(tr.PullRequest), string(branches), string(baseBranches), tr.CreatedBy, tr.CreatedAt.Unix(),
+		string(t.team), fmt.Sprintf("gh:%d", tr.RepositoryID), tr.RepositoryID, tr.Pipeline, tr.Repository, tr.InstallationID, flag(tr.Push), string(patterns),
+		flag(tr.PullRequest), string(branches), string(baseBranches), tr.CreatedBy, tr.CreatedAt.UnixNano(),
 		flag(tr.PullRequestClosed), flag(tr.PullRequestLabeled), string(labels), flag(tr.PullRequestReadyForReview),
 		flag(tr.ReleasePublished), flag(tr.ReleasePrereleased), flag(tr.BranchCreate), flag(tr.BranchDelete))
 	if err != nil {
@@ -424,35 +424,6 @@ func (t *Tenant) GitHubAppTriggersFor(ctx context.Context, installation, reposit
 	}
 	defer closeRowsInto(rows, &err)
 	return t.scanGitHubAppTriggers(rows)
-}
-
-// GitHubAppSubscribedRepository returns the GitHub ID of repository, as
-// owner/name in any case, when t's App trigger subscriptions name it under
-// exactly one ID, and ErrNotFound otherwise.
-func (t *Tenant) GitHubAppSubscribedRepository(ctx context.Context, repository string) (_ int64, err error) {
-	rows, err := t.s.query(ctx, `SELECT DISTINCT repository_id FROM github_app_triggers
-		WHERE team = ? AND LOWER(repository) = LOWER(?) LIMIT 2`, string(t.team), repository)
-	if err != nil {
-		return 0, err
-	}
-	defer closeRowsInto(rows, &err)
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return 0, err
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-	// safety: two IDs under one name are a rename GitHub has not reported yet,
-	// so neither is trusted to be the repository the run names.
-	if len(ids) != 1 || ids[0] <= 0 {
-		return 0, notFound("GitHub App subscription", repository)
-	}
-	return ids[0], nil
 }
 
 // RenameGitHubAppTriggerRepository updates subscriptions under the repository's

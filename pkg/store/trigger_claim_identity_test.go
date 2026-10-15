@@ -89,7 +89,7 @@ func TestTriggerClaim_ClaimantOutlivesLeaseAndCompletion(t *testing.T) {
 	if _, err := s.ClaimNextTriggerFor(ctx, runnerA, time.Hour, nil, nil); err != nil {
 		t.Fatalf("ClaimNextTriggerFor: %v", err)
 	}
-	got, err := s.TriggerClaimant(ctx, "t1")
+	got, err := tenant(t, s, store.DefaultTeam).TriggerClaimant(ctx, "t1")
 	if err != nil {
 		t.Fatalf("TriggerClaimant: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestTriggerClaim_ClaimantOutlivesLeaseAndCompletion(t *testing.T) {
 	if err := s.FinishTrigger(ctx, "t1"); err != nil {
 		t.Fatalf("FinishTrigger: %v", err)
 	}
-	got, err = s.TriggerClaimant(ctx, "t1")
+	got, err = tenant(t, s, store.DefaultTeam).TriggerClaimant(ctx, "t1")
 	if err != nil {
 		t.Fatalf("TriggerClaimant after finish: %v", err)
 	}

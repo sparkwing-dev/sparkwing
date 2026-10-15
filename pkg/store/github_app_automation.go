@@ -62,15 +62,15 @@ func (t *Tenant) PutGitHubAppAutomation(ctx context.Context, a GitHubAppAutomati
 		return fmt.Errorf("%w: automation needs a repository, installation and granting account", ErrInvalidInput)
 	}
 	_, err := t.s.exec(ctx, `INSERT INTO github_app_automation
-	    (team, repository_id, repository, installation_id, enabled_by, enabled_at)
-	    SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS
+	    (team, repo_key, repository_id, repository, installation_id, enabled_by, enabled_at)
+	    SELECT ?, ?, ?, ?, ?, ?, ? WHERE EXISTS
 	    (SELECT 1 FROM github_app_installations WHERE team = ? AND installation_id = ? AND suspended = 0)
 	    ON CONFLICT (team, repository_id) DO UPDATE SET
 	    repository = excluded.repository, installation_id = excluded.installation_id,
 	    enabled_by = excluded.enabled_by,
 	    enabled_at = CASE WHEN github_app_automation.installation_id = excluded.installation_id
 	        THEN github_app_automation.enabled_at ELSE excluded.enabled_at END`,
-		string(t.team), a.RepositoryID, repo.Slug(), a.InstallationID, a.EnabledBy, now.UnixNano(), string(t.team), a.InstallationID)
+		string(t.team), fmt.Sprintf("gh:%d", a.RepositoryID), a.RepositoryID, repo.Slug(), a.InstallationID, a.EnabledBy, now.UnixNano(), string(t.team), a.InstallationID)
 	if err != nil {
 		return err
 	}

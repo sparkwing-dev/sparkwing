@@ -577,14 +577,7 @@ func lockComputeGuardsTx(ctx context.Context, tx *storeTx) error {
 	return err
 }
 
-// RunExceedsWallClock reports whether the run has held cloud runners past the
-// wall-clock guard, which is what the heartbeat path reads to decide that a
-// node must stop. It reports false when no guard is set.
-func (s *Store) RunExceedsWallClock(ctx context.Context, runID string, now time.Time) (int64, bool, error) {
-	return s.defaultTenant().RunExceedsWallClock(ctx, runID, now)
-}
-
-// RunExceedsWallClock is [Store.RunExceedsWallClock] confined to t's team.
+// RunExceedsWallClock reports whether a tenant run exceeds its cloud wall-clock guard.
 func (t *Tenant) RunExceedsWallClock(ctx context.Context, runID string, now time.Time) (int64, bool, error) {
 	ceiling, err := t.s.creditSetting(ctx, computeLimitKey(ComputeLimitRunSeconds), 0)
 	if err != nil {

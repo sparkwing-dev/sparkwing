@@ -28,7 +28,7 @@ func (s *Store) rotateCapability(ctx context.Context, team Team, a capability.Au
 	var out capability.Rotation
 	err := s.inTx(ctx, func(tx *storeTx) error {
 		var prefix string
-		if err := tx.QueryRowContext(ctx, `SELECT prefix FROM capabilities WHERE prefix=?`+tx.forUpdate(), a.Target.TokenPrefix).Scan(&prefix); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT prefix FROM capabilities WHERE prefix=? AND COALESCE(team,'')=?`+tx.forUpdate(), a.Target.TokenPrefix, team).Scan(&prefix); err != nil {
 			return err
 		}
 		p, err := managementAuthorityTx(ctx, tx, team, a, "POST", true)
@@ -76,7 +76,7 @@ func (s *Store) rotateCapability(ctx context.Context, team Team, a capability.Au
 		if err := scheduleRotationTx(ctx, tx, c, deadline); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE capabilities SET created_by=? WHERE prefix=?`, previous.CreatedBy, issued.Capability.Prefix); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE capabilities SET created_by=? WHERE prefix=? AND COALESCE(team,'')=?`, previous.CreatedBy, issued.Capability.Prefix, team); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO git_credential_machines(team,capability_prefix,enabled_by,enabled_at) SELECT team,?,enabled_by,enabled_at FROM git_credential_machines WHERE team=? AND capability_prefix=? AND enabled_by=?`, issued.Capability.Prefix, team, c.Prefix, previous.CreatedBy); err != nil {
@@ -121,7 +121,7 @@ func scheduleRotationTx(ctx context.Context, tx *storeTx, c capability.Capabilit
 	if err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE capabilities SET authority_json=?,revoked_at=? WHERE prefix=? AND revoked_at IS NULL`, body, deadline.UnixNano(), c.Prefix)
+	result, err := tx.ExecContext(ctx, `UPDATE capabilities SET authority_json=?,revoked_at=? WHERE prefix=? AND COALESCE(team,'')=? AND revoked_at IS NULL`, body, deadline.UnixNano(), c.Prefix, c.Team)
 	if err := credentialRowChanged(result, err); err != nil {
 		return err
 	}

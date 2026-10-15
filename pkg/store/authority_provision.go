@@ -173,6 +173,6 @@ func recordProvisionCreatorTx(ctx context.Context, tx *storeTx, spec capability.
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE capabilities SET created_by=? WHERE prefix=?`, p.Capability.Subject.ID, c.Prefix)
+	_, err = tx.ExecContext(ctx, `UPDATE capabilities SET created_by=? WHERE prefix=? AND COALESCE(team,'')=?`, p.Capability.Subject.ID, c.Prefix, c.Team)
 	return err
 }

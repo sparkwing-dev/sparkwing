@@ -2948,19 +2948,7 @@ func (s *Store) PrincipalHoldsTriggerClaim(ctx context.Context, triggerID string
 	return held > 0, nil
 }
 
-// TriggerClaimant returns the claimant recorded on the trigger row,
-// whatever state that claim is in now. [Store.PrincipalHoldsTriggerClaim]
-// is the live-lease question; this is the "who took it" question, so the
-// holder is still recognisable on a lease that has just lapsed and on a
-// trigger it already finished, which is what lets it retry a close.
-// Every requeue path clears the record, so a reaped trigger comes back
-// with the zero identity -- nobody holds it -- and a trigger that does
-// not exist comes back ErrNotFound.
-func (s *Store) TriggerClaimant(ctx context.Context, triggerID string) (ClaimIdentity, error) {
-	return s.defaultTenant().TriggerClaimant(ctx, triggerID)
-}
-
-// TriggerClaimant is [Store.TriggerClaimant] confined to t's team.
+// TriggerClaimant returns the recorded claimant of a tenant trigger.
 func (t *Tenant) TriggerClaimant(ctx context.Context, triggerID string) (ClaimIdentity, error) {
 	var claimant ClaimIdentity
 	err := t.s.queryRow(ctx,

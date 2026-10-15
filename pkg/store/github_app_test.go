@@ -3,6 +3,8 @@ package store_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math/rand/v2"
 	"reflect"
 	"testing"
 	"time"
@@ -289,5 +291,50 @@ func TestGitHubCheckRunIsRecordedOnce(t *testing.T) {
 	got, err = acme.GitHubCommitTriggers(ctx, store.GitHubRepo{Owner: "acme", Name: "widgets"}, sha)
 	if err != nil || len(got) != 0 {
 		t.Fatalf("lookup without a repository id matched runs: %+v, %v", got, err)
+	}
+}
+
+func TestGitHubAppRepositoryKeysSurviveRenamesProperty(t *testing.T) {
+	random := rand.New(rand.NewPCG(193, 811))
+	for i := range 24 {
+		t.Run(fmt.Sprint(i), func(t *testing.T) {
+			st := storetest.Open(t)
+			targets := []*store.Tenant{teamHandle(t, st, "acme"), teamHandle(t, st, "other")}
+			ids := []int64{1 + random.Int64N(1<<60), 1 + random.Int64N(1<<60)}
+			now := time.Unix(1700000000, int64(1+random.IntN(999999999))).UTC()
+			for j, target := range targets {
+				installation := acmeInstallation()
+				installation.InstallationID += int64(j)
+				if _, err := target.BindGitHubAppInstallation(t.Context(), installation, now); err != nil {
+					t.Fatal(err)
+				}
+				for _, repository := range []string{"acme/widgets", "renamed/widgets"} {
+					tr := store.GitHubAppTrigger{RepositoryID: ids[j], Repository: repository, InstallationID: installation.InstallationID, Pipeline: "ci", Push: true}
+					if _, err := target.PutGitHubAppTrigger(t.Context(), tr, now); err != nil {
+						t.Fatal(err)
+					}
+					a := store.GitHubAppAutomation{RepositoryID: ids[j], Repository: repository, InstallationID: installation.InstallationID, EnabledBy: "account"}
+					if err := target.PutGitHubAppAutomation(t.Context(), a, now); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			for j, target := range targets {
+				for _, table := range []string{"github_app_triggers", "github_app_automation"} {
+					var key, display string
+					query := storetest.Rebind(st, "SELECT repo_key,repository FROM "+table+" WHERE team=? AND repository_id=?")
+					if err := st.DB().QueryRow(query, target.Team(), ids[j]).Scan(&key, &display); err != nil {
+						t.Fatal(err)
+					}
+					if key != fmt.Sprintf("gh:%d", ids[j]) || display != "renamed/widgets" {
+						t.Fatalf("table=%s team=%s key=%s repository=%s", table, target.Team(), key, display)
+					}
+				}
+				rows, err := target.GitHubAppTriggers(t.Context())
+				if err != nil || len(rows) != 1 || !rows[0].CreatedAt.Equal(now) {
+					t.Fatalf("subscription timestamp lost nanoseconds: %+v, %v", rows, err)
+				}
+			}
+		})
 	}
 }

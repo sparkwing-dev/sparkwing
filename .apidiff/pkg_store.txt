@@ -926,7 +926,6 @@ var ErrAmbiguousAccount = errors.New("store: more than one account holds that ad
 var ErrAnnotationTooLarge = errors.New("store: an annotation holds at most 64 KiB")
 var ErrAttemptInvalid = errors.New("store: attempt report refused")
 var ErrBindingLimit = errors.New("store: this team binds as many repositories as it may")
-var ErrCLITokenLimit = errors.New("store: this member holds as many member tokens as a member may")
 var ErrClaimCancelRequested = errors.New("store: the run this claim belongs to is being cancelled")
 var ErrClaimNotLive = errors.New("store: the claim on the run is no longer live")
 var ErrClaimNotRunner = errors.New("store: the claim token is not a runner's node claim")
@@ -1412,7 +1411,6 @@ type MaterializedResultSource struct {
 	StateSeq int64
 }
 const MaxAnnotationBytes = 64 << 10
-const MaxCLITokensPerMember = 10
 const MaxClaimTokenLifetime = 6 * time.Hour
 const MaxCreatedTeams = 3
 const MaxCreditGrantMicro = 1_000_000_000_000_000
@@ -2851,7 +2849,6 @@ func (s *Store) ListDebugPauses(ctx context.Context, runID string) ([]*DebugPaus
 func (s *Store) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]Event, error)
 func (s *Store) ListNodeExecutionAttempts(ctx context.Context, runID, nodeID string) ([]ExecutionAttempt, error)
 func (s *Store) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]MetricSample, error)
-func (s *Store) ListNodeMetricsPage(ctx context.Context, runID, nodeID string, after time.Time, limit int) ([]MetricSample, error)
 func (s *Store) ListNodeSteps(ctx context.Context, runID string) ([]*NodeStep, error)
 func (s *Store) ListNodes(ctx context.Context, runID string) ([]*Node, error)
 func (s *Store) ListPendingApprovals(ctx context.Context) ([]*Approval, error)
@@ -2922,7 +2919,6 @@ func (s *Store) RevokeToken(prefix string, now time.Time) error
 func (s *Store) RotateToken(prefix string, grace, ttl time.Duration, now time.Time) (raw string, newTok, oldTok *Token, err error)
 func (s *Store) RunBucketMeasureLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
-func (s *Store) RunExceedsWallClock(ctx context.Context, runID string, now time.Time) (int64, bool, error)
 func (s *Store) RunNodeLogs(ctx context.Context, team Team, runID string) (_ []NodeLog, err error)
 func (s *Store) RunStoragePassLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) SampleSealedSecrets(ctx context.Context, sealedPrefix string, limit int) (_ []TeamSecret, err error)
@@ -2961,7 +2957,6 @@ func (s *Store) TokenMetered(ctx context.Context, prefix string) (bool, error)
 func (s *Store) TriggerClaimFenceIsLive(ctx context.Context, runID string, claimant ClaimIdentity, generation int64, now time.Time) (bool, error)
 func (s *Store) TriggerClaimGeneration(ctx context.Context, id string) (int64, error)
 func (s *Store) TriggerClaimOrigin(ctx context.Context, runID string, generation int64) (principal string, metered bool, err error)
-func (s *Store) TriggerClaimant(ctx context.Context, triggerID string) (ClaimIdentity, error)
 func (s *Store) TriggerRepoID(ctx context.Context, team Team, id string) (int64, error)
 func (s *Store) UnlinkIdentity(ctx context.Context, accountID, provider, keepSession string, now time.Time) (Identity, int64, error)
 func (s *Store) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
@@ -3121,7 +3116,6 @@ func (t *Tenant) GitHubAppExtraRepoRefs(ctx context.Context, repository string) 
 func (t *Tenant) GitHubAppExtraRepos(ctx context.Context, repository string) (_ []string, err error)
 func (t *Tenant) GitHubAppInstallation(ctx context.Context, installation int64) (GitHubAppInstallation, error)
 func (t *Tenant) GitHubAppInstallations(ctx context.Context) (_ []GitHubAppInstallation, err error)
-func (t *Tenant) GitHubAppSubscribedRepository(ctx context.Context, repository string) (_ int64, err error)
 func (t *Tenant) GitHubAppTriggers(ctx context.Context) (_ []GitHubAppTrigger, err error)
 func (t *Tenant) GitHubAppTriggersFor(ctx context.Context, installation, repositoryID int64) (_ []GitHubAppTrigger, err error)
 func (t *Tenant) GitHubCheckRun(ctx context.Context, runID string) (int64, error)
@@ -3211,7 +3205,6 @@ func (t *Tenant) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedB
 func (t *Tenant) ReleaseOperatorHolds(ctx context.Context, actor, reason string, now time.Time) (int64, error)
 func (t *Tenant) ReleaseSourceCredential(ctx context.Context, authorized capability.Authorized) (GitCredential, capability.SourceReleaseAudit, error)
 func (t *Tenant) RemoveGitCredential(ctx context.Context, a capability.Authorized, host string) error
-func (t *Tenant) RemoveMember(ctx context.Context, actorID, subjectID string, now time.Time) ([]string, error)
 func (t *Tenant) RemoveSecret(ctx context.Context, a capability.Authorized, name, pipeline string) error
 func (t *Tenant) Rename(ctx context.Context, displayName string, now time.Time) (TeamInfo, error)
 func (t *Tenant) RenameGitHubAppAutomation(ctx context.Context, installation, repository int64, name string) error
@@ -3245,7 +3238,6 @@ func (t *Tenant) SetCronScheduleNextDue(ctx context.Context, id string, next *ti
 func (t *Tenant) SetCronSchedulePaused(ctx context.Context, id string, paused bool, now time.Time) error
 func (t *Tenant) SetGitHubAppExtraRepoIDs(ctx context.Context, repository string, ids map[string]int64) error
 func (t *Tenant) SetGitHubAppExtraRepos(ctx context.Context, repository string, extras []string, by string, now time.Time) (_ []string, err error)
-func (t *Tenant) SetMemberRole(ctx context.Context, actorID, subjectID string, role Role, now time.Time) ([]string, error)
 func (t *Tenant) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
 func (t *Tenant) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
 func (t *Tenant) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error

@@ -416,7 +416,8 @@ func (o *Operator) requireLease(ctx context.Context, team Team, holder, state st
 // safety: runs goes last so the rows that reference a run are removed by
 // their own statements rather than by a cascade from a very large delete.
 func (o *Operator) deleteTenantRows(ctx context.Context, team Team) error {
-	for _, table := range append(slices.DeleteFunc(slices.Clone(tenantTables), func(t string) bool { return t == "runs" }), "runs") {
+	tables := append([]string{"business_events", "capabilities", "sessions"}, tenantTables...)
+	for _, table := range append(slices.DeleteFunc(tables, func(t string) bool { return t == "runs" || t == "quota_admission" }), "quota_admission", "runs") {
 		if _, err := o.s.exec(ctx, `DELETE FROM `+table+` WHERE team = ?`, string(team)); err != nil {
 			return fmt.Errorf("purge %s: %w", table, err)
 		}

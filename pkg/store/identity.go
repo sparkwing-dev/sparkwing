@@ -1048,111 +1048,8 @@ func (t *Tenant) Members(ctx context.Context) (_ []Membership, err error) {
 	return out, rows.Err()
 }
 
-// SetMemberRole changes subject's role. The actor may not grant a role above
-// their own, may not re-role someone who outranks them, and may not demote
-// the last owner, because a team without an owner cannot be administered and
-// nobody can put one back. A demotion to reader revokes every token the
-// subject minted in t's team: a reader may not mint a machine token, and a
-// member token minted at a higher role carries write scopes. An owner's member
-// token carries at most the editor's scopes, so a demotion to editor keeps it.
-// The revoked prefixes are returned so a caller can drop them from any cache.
-func (t *Tenant) SetMemberRole(ctx context.Context, actorID, subjectID string, role Role, now time.Time) ([]string, error) {
-	if !role.Valid() {
-		return nil, fmt.Errorf("%w: unknown role %q", ErrInvalidInput, role)
-	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer rollbackOrLog(tx)
-	if err := t.lockTeamTx(ctx, tx); err != nil {
-		return nil, err
-	}
-	actor, err := t.roleTx(ctx, tx, actorID)
-	if err != nil {
-		return nil, err
-	}
-	current, err := t.roleTx(ctx, tx, subjectID)
-	if err != nil {
-		return nil, err
-	}
-	if !actor.AtLeast(role) || !actor.AtLeast(current) {
-		return nil, ErrRoleAboveOwn
-	}
-	if current == role {
-		return nil, nil
-	}
-	if current == RoleOwner {
-		if err := t.requireAnotherOwnerTx(ctx, tx, subjectID); err != nil {
-			return nil, err
-		}
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE memberships SET role = ? WHERE team = ? AND account_id = ?`,
-		string(role), string(t.team), subjectID); err != nil {
-		return nil, err
-	}
-	if err := t.withdrawInvitationsIssuedByTx(ctx, tx, subjectID, role, now); err != nil {
-		return nil, err
-	}
-	var revoked []string
-	if role == RoleReader {
-		if revoked, err = t.revokeTokensMintedByTx(ctx, tx, subjectID, now); err != nil {
-			return nil, err
-		}
-	}
-	return revoked, tx.Commit()
-}
-
-// RemoveMember takes subject out of t's team and revokes every token they
-// minted in it, returning the revoked prefixes so a caller can drop them from
-// any cache. Anyone may remove themselves; removing someone else needs an
-// actor who outranks or equals them. The last owner stays.
-func (t *Tenant) RemoveMember(ctx context.Context, actorID, subjectID string, now time.Time) ([]string, error) {
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer rollbackOrLog(tx)
-	if err := t.lockTeamTx(ctx, tx); err != nil {
-		return nil, err
-	}
-	current, err := t.roleTx(ctx, tx, subjectID)
-	if err != nil {
-		return nil, err
-	}
-	if actorID != subjectID {
-		actor, err := t.roleTx(ctx, tx, actorID)
-		if err != nil {
-			return nil, err
-		}
-		if !actor.AtLeast(current) {
-			return nil, ErrRoleAboveOwn
-		}
-	}
-	if current == RoleOwner {
-		if err := t.requireAnotherOwnerTx(ctx, tx, subjectID); err != nil {
-			return nil, err
-		}
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM memberships WHERE team = ? AND account_id = ?`,
-		string(t.team), subjectID); err != nil {
-		return nil, err
-	}
-	if err := t.moveSessionsOffTeamTx(ctx, tx, subjectID, now); err != nil {
-		return nil, err
-	}
-	if err := t.withdrawInvitationsIssuedByTx(ctx, tx, subjectID, "", now); err != nil {
-		return nil, err
-	}
-	revoked, err := t.revokeTokensMintedByTx(ctx, tx, subjectID, now)
-	if err != nil {
-		return nil, err
-	}
-	return revoked, tx.Commit()
-}
-
 func (t *Tenant) moveSessionsOffTeamTx(ctx context.Context, tx *storeTx, accountID string, now time.Time) error {
-	if err := settleActiveTeamTx(ctx, tx, accountID, now.UTC().Unix()); err != nil {
+	if err := settleActiveTeamTx(ctx, tx, accountID, now.UTC().UnixNano()); err != nil {
 		return err
 	}
 	var active string
@@ -1164,61 +1061,9 @@ func (t *Tenant) moveSessionsOffTeamTx(ctx context.Context, tx *storeTx, account
 		return nil
 	}
 	_, err := tx.ExecContext(ctx,
-		`UPDATE sessions SET team = ? WHERE account_id = ? AND team = ?`,
+		`UPDATE sessions SET team = ? WHERE account_id = ? AND team = ? AND capability_prefix = ''`,
 		active, accountID, string(t.team))
 	return err
-}
-
-// safety: accepting an invitation grants the role it names without asking
-// about its inviter again, so an invitation for more than the inviter now
-// holds goes with that authority; an empty keep withdraws every one.
-func (t *Tenant) withdrawInvitationsIssuedByTx(ctx context.Context, tx *storeTx, accountID string, keep Role, now time.Time) error {
-	var above []any
-	for _, r := range []Role{RoleReader, RoleEditor, RoleOwner} {
-		if r.rank() > keep.rank() {
-			above = append(above, string(r))
-		}
-	}
-	if accountID == "" || len(above) == 0 {
-		return nil
-	}
-	_, err := tx.ExecContext(ctx, `
-		UPDATE invitations SET withdrawn_at = ?
-		WHERE team = ? AND invited_by = ? AND accepted_at IS NULL AND withdrawn_at IS NULL
-		  AND role IN (`+placeholders(len(above))+`)`,
-		append([]any{now.UTC().UnixNano(), string(t.team), accountID}, above...)...)
-	return err
-}
-
-// safety: a machine token outlives the membership that minted it and reads
-// the secrets of every run it claims, and a member token acts as its minter,
-// so both go with the minter's access, legacy runner and CLI tokens included.
-func (t *Tenant) revokeTokensMintedByTx(ctx context.Context, tx *storeTx, accountID string, now time.Time) ([]string, error) {
-	if accountID == "" {
-		return nil, nil
-	}
-	at := now.UTC().Unix()
-	rows, err := tx.QueryContext(ctx, `
-		SELECT prefix FROM tokens
-		WHERE team = ? AND created_by = ? AND (revoked_at IS NULL OR revoked_at > ?)`,
-		string(t.team), accountID, at)
-	if err != nil {
-		return nil, err
-	}
-	prefixes, err := scanPrefixes(rows)
-	if err != nil {
-		return nil, err
-	}
-	if len(prefixes) == 0 {
-		return nil, nil
-	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE tokens SET revoked_at = ?
-		WHERE team = ? AND created_by = ? AND (revoked_at IS NULL OR revoked_at > ?)`,
-		at, string(t.team), accountID, at); err != nil {
-		return nil, err
-	}
-	return prefixes, nil
 }
 
 func scanPrefixes(rows *sql.Rows) (_ []string, err error) {
@@ -1271,9 +1116,7 @@ func (t *Tenant) requireAnotherOwnerTx(ctx context.Context, tx *storeTx, exceptI
 	return nil
 }
 
-// CreateInvitation offers email a role in t's team. The actor cannot invite
-// above their own role, because an invitation is a grant and a second account
-// invited at a higher role is the same escalation SetMemberRole refuses.
+// CreateInvitation offers an email address a role within the actor's current authority.
 func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, role Role, now time.Time) (Invitation, error) {
 	email = NormalizeEmail(email)
 	if !LooksLikeEmail(email) {
@@ -1382,13 +1225,5 @@ func (t *Tenant) DeleteInvitation(ctx context.Context, id string, now time.Time)
 	return nil
 }
 
-// Member token limits. A member token authenticates as that member from a
-// terminal, so it lapses on its own like a machine token, and one member holds
-// a bounded number because every live token is a hash a bearer lookup may try.
-const (
-	CLITokenLifetime      = 90 * 24 * time.Hour
-	MaxCLITokensPerMember = 10
-)
-
-// ErrCLITokenLimit refuses a CLI token past [MaxCLITokensPerMember].
-var ErrCLITokenLimit = errors.New("store: this member holds as many member tokens as a member may")
+// CLITokenLifetime bounds a legacy member credential.
+const CLITokenLifetime = 90 * 24 * time.Hour

@@ -16,6 +16,17 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"(*Store).LookupCapability":     "a presentation digest identifies the credential before its tenant is known",
+	"loadCapabilityRecordTx":        "globally unique prefixes resolve the complete authority envelope before its tenant and ancestry are checked",
+	"persistCapabilityTx":           "indexed columns, including nullable team, are serialized from the complete authority envelope in one INSERT",
+	"deleteRetentionCapabilitiesTx": "the elected deployment pass removes ended credentials across teams while preserving cross-team ancestry",
+
+	"paymentEventReplayTx":              "provider event identity is unique across teams and is checked before resolving the persisted payer",
+	"refundableBillingSecondsTx":        "the deployment credit sampler totals unsettled awards across teams from their immutable billing records",
+	"(*Operator).CollectBlobTombstones": "the elected blob collector visits expired tombstones across teams and deletes each exact tenant digest",
+	"(*Operator).maintainRetention":     "the elected maintenance pass counts retained pins and records across all teams",
+	"deleteRetentionRecordsTx":          "the elected maintenance pass selects expired records across teams and deletes exact tenant record keys",
+
 	"(*Operator).ReconcileControllerRuns": "the elected controller enumerates active controller-owned runs across teams, then settles each exact tenant/run under the same lease fence",
 	"readAuthorityTx":                     "a globally unique capability prefix or session hash identifies authority before its team and membership are resolved",
 	"authenticationAuthorityTx":           "a globally unique presentation digest identifies the session before its tenant and current membership are known",
@@ -48,15 +59,11 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).NodeOutputKey":   "the run ID is global, and the key only names an attempt the upload's own check binds",
 	"(*Store).RecordLocalOutput": "a laptop store records an output its own process wrote for a node it holds; " +
 		"the run ID is global and the row takes that node's team",
-	"(*Store).claimScope": "asks which team a claim credential belongs to, so an answer scoped to " +
-		"the asker is no answer; it is the read every other claim predicate is built from",
 	"(*Store).readClaimCandidates": "the team predicate comes from claimTeamWhere at run time; " +
 		"a scope that is not exactly one team is refused there",
 	"(*Store).awardScannedNodeTx": "the award carries the same runtime predicate; the read that follows " +
 		"it is of the row the award just proved in team",
 	"(*Store).ClaimNamedNode": "shares the claim scan's runtime predicate and its refusal",
-	"(*Store).runnerTeams": "asks which team each live runner's credential belongs to, so an " +
-		"answer scoped to the asker is no answer; it is how another team's runner is dropped",
 	"(*Store).ClaimNextTriggerFor": "shares the claim scan's runtime predicate and its refusal; the " +
 		"award and the read after it are of the row the scoped select just locked",
 	"(*Store).ClaimSpecificTriggerFor": "shares the claim scan's runtime predicate and its refusal; the " +
@@ -71,7 +78,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).SampleSealedSecrets": "samples envelopes from any team to prove the configured key opens them before the startup reseal writes anything",
 	"(*Store).UnlinkIdentity":      "ends one account's sessions in every team, because the sign-in it removed could have opened any of them",
 	"(*Store).lookupSession":       "resolves the globally unique digest of the presented session before its team is known, renews only that session, and reads the token it names by a prefix that is unique across teams",
-	"(*Store).claimantLive":        "checks the credential that made a claim by its prefix, which is unique across teams",
 	"(*Store).DeleteSession":       "ends the one session whose globally unique digest the caller presented, before its team is known",
 	"(*Store).mintCSRFKey":         "a new signing key cannot sign any team's live sessions, so key and sessions rotate together",
 	"(*Store).resolveSignInOnce":   "counts one account's memberships in every team, because a sign-in decides whether that human has any team at all",
@@ -88,8 +94,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"left in each, because an account is the deployment's and reaches teams only through memberships",
 	"lockOwnedTeamsTx": "lists the teams one account owns across every team, to lock each before the " +
 		"account deletion counts their owners",
-	"accountPrincipalNamesTx": "lists the principal names of the tokens one account minted in every team, " +
-		"which are what the account deletion relabels",
 	"relabelPrincipalTx": "replaces a deleted account's name in every team's rows, because the account " +
 		"belonged to the deployment and acted in each of its teams",
 	"(*Store).ClaimInvitationEmail": "counts the invitation emails one address received from every team, " +
@@ -142,24 +146,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).TopStorageTeams": "the operator's storage report ranks every team's monthly bytes, each keyed by its team " +
 		"principal",
 	"(*Operator).EgressUsageAcrossTeams": "reloads team egress totals into the controller alarm before serving",
-	"(*Store).selectTokensByPrefix": "authenticates a presented token by its prefix before its team is known; a token " +
-		"prefix is unique across teams and the row it returns carries its team",
-	"selectTokensByPrefixTx": "reads the credential the operator's rotate names by its prefix, which is unique across " +
-		"teams, and returns the row with its team",
-	"(*Store).rotateToken": "the operator rotates one credential named by its prefix, which is unique across teams; the " +
-		"replacement is minted into the old token's own team",
-	"(*Store).RevokeToken": "the operator revokes one credential named by its prefix, which is unique across teams; the " +
-		"admin scope is the deployment operator's and no team membership grants it",
-	"(*Store).ListTokens": "the operator's credential listing spans every team and returns each token's team; the admin " +
-		"scope is the deployment operator's and no team membership grants it",
-	"(*Store).SetTokenMetered": "the operator marks one credential as metered by its prefix, which is unique across teams; " +
-		"the admin scope is the deployment operator's",
-	"(*Store).TokenMetered": "reads whether one credential pays credits by its prefix, which is unique across teams, so " +
-		"the answer is that credential's own",
-	"tokenMeteredTx": "reads whether the claiming credential pays credits by its prefix, which is unique across teams, so " +
-		"the answer is that credential's own",
-	"(*Store).CreateTokenIfNoneExist": "the bootstrap mints the deployment operator's first token only while no live token " +
-		"exists in any team, because an install with any credential already has an operator path",
 }
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
@@ -170,7 +156,7 @@ var tenantOwnedTableRe = regexp.MustCompile(`(?is)\b(?:FROM|JOIN|INTO|UPDATE)\s+
 // safety: covers every shape this package writes the predicate in: a
 // bare column, a qualified one, an IN list, and the excluded.team a
 // conflict guard compares against.
-var teamPredicateRe = regexp.MustCompile(`(?is)\b(?:[a-z_][a-z0-9_]*\.)?team\s*(?:=|IN\b|<>|!=)`)
+var teamPredicateRe = regexp.MustCompile(`(?is)(?:\b(?:[a-z_][a-z0-9_]*\.)?team|\bCOALESCE\(\s*(?:[a-z_][a-z0-9_]*\.)?team\s*,\s*''\s*\))\s*(?:=|IN\b|<>|!=)`)
 
 // safety: reads an INSERT's column list, because a write with no WHERE
 // carries its key there and nowhere else.
@@ -275,6 +261,9 @@ func TestTenantSQLScope_MatcherAcceptsAndRefuses(t *testing.T) {
 		sql   string
 		scope bool
 	}{
+		{"nullable tenant", `SELECT prefix FROM capabilities WHERE COALESCE(team,'')=?`, true},
+		{"qualified nullable tenant", `SELECT prefix FROM capabilities c WHERE COALESCE(c.team, '') = ?`, true},
+		{"nullable tenant without predicate", `SELECT COALESCE(team,'') FROM capabilities WHERE prefix=?`, false},
 		{"scoped select", `SELECT id FROM runs WHERE team = ? AND id = ?`, true},
 		{"unscoped select", `SELECT id FROM runs WHERE id = ?`, false},
 		{"qualified predicate", `UPDATE nodes SET x = 1 WHERE nodes.team = ? AND run_id = ?`, true},
@@ -319,7 +308,7 @@ func tenantTablesTouchedBy(sql string) []string {
 	var out []string
 	for _, m := range tenantOwnedTableRe.FindAllStringSubmatch(sql, -1) {
 		name := strings.ToLower(m[1])
-		if slices.Contains(tenantTables, name) && !slices.Contains(out, name) {
+		if (slices.Contains(tenantTables, name) || slices.Contains([]string{"business_events", "capabilities", "sessions"}, name)) && !slices.Contains(out, name) {
 			out = append(out, name)
 		}
 	}

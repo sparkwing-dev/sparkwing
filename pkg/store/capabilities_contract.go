@@ -535,69 +535,6 @@ func revokeAuthorityTx(ctx context.Context, tx *storeTx, ref capability.Authorit
 	return advanceAuthGenerationsTx(ctx, tx, []capability.AuthorityRef{ref}, nil)
 }
 
-// MembershipUpdate changes a member's role, or removes it when Role is nil.
-type MembershipUpdate struct {
-	AccountID string
-	Role      *Role
-}
-
-// UpdateMembership preserves the last owner and invalidates cached membership authority atomically.
-func (t *Tenant) UpdateMembership(ctx context.Context, actor Actor, change MembershipUpdate) error {
-	if change.AccountID == "" || (change.Role != nil && !change.Role.Valid()) {
-		return ErrInvalidInput
-	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
-	if err := t.lockTeamTx(ctx, tx); err != nil {
-		return err
-	}
-	p, err := resolveActorTx(ctx, tx, actor)
-	if err != nil {
-		return err
-	}
-	if p.Capability.Team != string(t.team) || p.Capability.Binding.Kind != capability.BindingNone || p.Capability.Subject.Kind != capability.SubjectAccount {
-		return authorityError(apierr.Forbidden, "membership changes require an account")
-	}
-	selfRemoval := change.Role == nil && p.Capability.Subject.ID == change.AccountID
-	if !selfRemoval && !slices.Contains(p.Capability.Grants, capability.TeamAdmin) {
-		return authorityError(apierr.Forbidden, "membership changes require team administration")
-	}
-	actorRole, err := t.roleTx(ctx, tx, p.Capability.Subject.ID)
-	if err != nil {
-		return err
-	}
-	current, err := t.roleTx(ctx, tx, change.AccountID)
-	if err != nil {
-		return err
-	}
-	if !actorRole.AtLeast(current) || (change.Role != nil && !actorRole.AtLeast(*change.Role)) {
-		return ErrRoleAboveOwn
-	}
-	if change.Role != nil && current == *change.Role {
-		return tx.Commit()
-	}
-	if current == RoleOwner {
-		if err := t.requireAnotherOwnerTx(ctx, tx, change.AccountID); err != nil {
-			return err
-		}
-	}
-	if change.Role == nil {
-		_, err = tx.ExecContext(ctx, "DELETE FROM memberships WHERE team = ? AND account_id = ?", string(t.team), change.AccountID)
-	} else {
-		_, err = tx.ExecContext(ctx, "UPDATE memberships SET role = ? WHERE team = ? AND account_id = ?", string(*change.Role), string(t.team), change.AccountID)
-	}
-	if err != nil {
-		return err
-	}
-	if err := advanceAuthGenerationsTx(ctx, tx, nil, &t.team); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 // safety: generation changes share the authority mutation's transaction.
 func advanceAuthGenerationsTx(ctx context.Context, tx *storeTx, authorities []capability.AuthorityRef, membershipTeam *Team) error {
 	for _, ref := range authorities {

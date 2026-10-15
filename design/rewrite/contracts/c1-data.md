@@ -2,6 +2,41 @@
 
 <!-- design:begin -->
 
+## Membership and schema inventory
+
+`Tenant.SetMemberRole`, `RemoveMember`, `MaxCLITokensPerMember` and
+`ErrCLITokenLimit` are removed. The unused default-team
+`Store.ListNodeMetricsPage`, `TriggerClaimant` and `RunExceedsWallClock` twins
+are removed too. Their callers select a registered tenant.
+`Tenant.UpdateMembership` resolves current
+account authority and owns role changes and removal. It withdraws invitations
+above the remaining role, moves account sessions after removal, and revokes
+capabilities created by that member in that team after removal or demotion to
+reader. Account sessions move only to another current membership. With no
+remaining membership, the selected session stops authenticating. A
+capability-backed session retains its parent's team and ends with that parent.
+Revocation updates the envelope and authority generation. Descendants
+retain their ancestry check. Every effect rolls back after a failed write.
+
+`SchemaTables` is the single table inventory in `schema.go`. Runtime purge,
+tenant SQL guards and shape tests use it. Operator-owned `business_events`,
+`capabilities` and `sessions` may carry a nullable team. Their bound rows leave
+with that team. Purge removes quota reservations before aggregates and removes
+runs after their operational rows and restrictive pins. Generated SQLite checks
+compare all surviving rows across repeated purges with adversarial tenant keys.
+They exercise the purge primitive, not deletion-request authorization or billing.
+The legacy deletion request and account deletion still need their capability
+cutover. Production writers for `pool_access_rules` and `repos` remain open.
+
+The unused name-based `Tenant.GitHubAppSubscribedRepository` reader is removed.
+Source release continues through the authorized sealed repository transaction.
+Retained GitHub subscription and automation writers persist `gh:<repository_id>`
+from their validated numeric IDs. Subscription timestamps preserve nanoseconds.
+Generated rename and cross-team checks verify the persisted keys. The legacy
+GitHub automation admission writer still uses removed trigger columns.
+Membership types and methods live in `membership.go`, separate from authority
+serialization. No foreign contract changes.
+
 ## Team token API retirement
 
 `Tenant.CreateMemberToken`, `CreateMachineToken`, `TeamTokens`, `TeamToken`
@@ -1348,7 +1383,7 @@ allowance and rate-table presence. Their unused Store getters are removed.
 | `CapabilityRecord`, `CapabilityRecord.Validate` | Preserve and validate complete versioned authority alongside indexed projections. |
 | `Store.AuthGenerations` | Read the complete ancestor and membership cache fence. |
 | `Tenant.RevokeAuthority`, `Operator.RevokeAuthority` | Revoke authorized tenant or deployment authority and advance its generation atomically. |
-| `MembershipUpdate`, `Tenant.UpdateMembership` | Change or remove membership with the corresponding generation increment. |
+| `MembershipUpdate`, `Tenant.UpdateMembership` | Change or remove membership with current account authority, invitation withdrawal, minter revocation, session movement and the corresponding generation increment. |
 | `PaymentSettlement`, `Store.SettlePayment` | Deduplicate verified checkout events and commit their derived-team financial result. |
 
 `TestRewriteSchemaCapabilitiesPreserveAuthority` persists full capability envelopes
@@ -1852,7 +1887,7 @@ schema version is added.
 | Create | `pkg/store/run_spec.go` |
 | Create | `pkg/store/run_state.go` |
 | Create | `pkg/store/schema.sql` |
-| Create | `pkg/store/schema_contract.go` |
+| Create | `pkg/store/schema.go` |
 | Create | `pkg/store/source_release.go` |
 | Create | `pkg/store/state_contract.go` |
 
@@ -2107,14 +2142,14 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Tenant.LookupMemo` | LookupMemo applies the claim's repo/ref/pipeline scope and the verified default-branch fallback. |
 | `Tenant.LookupDepcache` | LookupDepcache follows the single restore-order table and runs cold on absent or invalid bytes. |
 
-### pkg/store/schema_contract.go
+### pkg/store/schema.go
 
 | Export | Purpose |
 |---|---|
-| `TranslateSchema` | TranslateSchema preserves the neutral schema's constraints on both engines. SQLite uses the input unchanged; PostgreSQL maps BLOB to BYTEA. Unsupported dialects or syntax return an error rather than dropping clauses. |
-| `SchemaOwner` | SchemaOwner makes deployment authority explicit even when an operator table carries an optional tenant for audit or binding checks. |
-| `SchemaTable` | SchemaTable classifies every baseline table so new state cannot evade the tenant-predicate guard by omission. |
-| `SchemaTables` | SchemaTables is the complete ownership inventory for schema.sql. Implementations must compare the created tables with this registry on both engines. |
+| `TranslateSchema` | TranslateSchema preserves neutral constraints and maps BLOB to BYTEA for PostgreSQL. |
+| `SchemaOwner` | SchemaOwner distinguishes tenant tables from deployment authority. |
+| `SchemaTable` | SchemaTable records the owner of a baseline table. |
+| `SchemaTables` | SchemaTables classifies every table created by the neutral schema. |
 
 ### pkg/store/source_release.go
 

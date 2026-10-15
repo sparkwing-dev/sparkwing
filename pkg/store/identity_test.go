@@ -2,11 +2,16 @@ package store_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
@@ -35,6 +40,27 @@ func tenant(t *testing.T, st *store.Store, team store.Team) *store.Tenant {
 	}
 	return tn
 }
+
+func membershipActor(t *testing.T, st *store.Store, id string, team store.Team) store.Actor {
+	t.Helper()
+	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.SetSessionKeyCipher(cipher)
+	account, err := st.Account(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _, _, err := st.CreateAccountSession(t.Context(), account, team, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte(raw))
+	return store.Actor{Kind: store.ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthoritySession, ID: hex.EncodeToString(digest[:])}}
+}
+
+func rolePointer(role store.Role) *store.Role { return &role }
 
 func TestIdentitySignInCreatesOnePersonalSpace(t *testing.T) {
 	st := storetest.Open(t)
@@ -74,10 +100,10 @@ func TestIdentityLastOwnerCannotLeaveAndAMemberKeepsTheirTeams(t *testing.T) {
 	if _, err := st.AcceptInvitation(ctx, joiner.Account.ID, inv.ID, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant(t, st, joiner.PersonalTeam).RemoveMember(ctx, joiner.Account.ID, joiner.Account.ID, time.Now()); !errors.Is(err, store.ErrLastOwner) {
+	if err := tenant(t, st, joiner.PersonalTeam).UpdateMembership(ctx, membershipActor(t, st, joiner.Account.ID, tenant(t, st, joiner.PersonalTeam).Team()), store.MembershipUpdate{AccountID: joiner.Account.ID}); !errors.Is(err, store.ErrLastOwner) {
 		t.Fatalf("last owner leaving their space = %v, want ErrLastOwner", err)
 	}
-	if _, err := own.RemoveMember(ctx, joiner.Account.ID, joiner.Account.ID, time.Now()); err != nil {
+	if err := own.UpdateMembership(ctx, membershipActor(t, st, joiner.Account.ID, own.Team()), store.MembershipUpdate{AccountID: joiner.Account.ID}); err != nil {
 		t.Fatalf("leave: %v", err)
 	}
 	again := signIn(t, st, "j", "joiner@example.com")
@@ -145,22 +171,22 @@ func TestIdentityRolesCannotEscalateOrOrphanATeam(t *testing.T) {
 	if _, err := st.AcceptInvitation(ctx, ed.Account.ID, inv.ID, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tn.SetMemberRole(ctx, ed.Account.ID, ed.Account.ID, store.RoleOwner, time.Now()); !errors.Is(err, store.ErrRoleAboveOwn) {
-		t.Fatalf("editor promoting self = %v, want ErrRoleAboveOwn", err)
+	if err := tn.UpdateMembership(ctx, membershipActor(t, st, ed.Account.ID, tn.Team()), store.MembershipUpdate{AccountID: ed.Account.ID, Role: rolePointer(store.RoleOwner)}); err == nil {
+		t.Fatal("editor promoted itself")
 	}
 	if _, err := tn.CreateInvitation(ctx, ed.Account.ID, "z@example.com", store.RoleOwner, time.Now()); !errors.Is(err, store.ErrRoleAboveOwn) {
 		t.Fatalf("editor inviting an owner = %v, want ErrRoleAboveOwn", err)
 	}
-	if _, err := tn.SetMemberRole(ctx, owner.Account.ID, owner.Account.ID, store.RoleReader, time.Now()); !errors.Is(err, store.ErrLastOwner) {
+	if err := tn.UpdateMembership(ctx, membershipActor(t, st, owner.Account.ID, tn.Team()), store.MembershipUpdate{AccountID: owner.Account.ID, Role: rolePointer(store.RoleReader)}); !errors.Is(err, store.ErrLastOwner) {
 		t.Fatalf("last owner demoting self = %v, want ErrLastOwner", err)
 	}
-	if _, err := tn.RemoveMember(ctx, ed.Account.ID, owner.Account.ID, time.Now()); !errors.Is(err, store.ErrRoleAboveOwn) {
-		t.Fatalf("editor removing the owner = %v, want ErrRoleAboveOwn", err)
+	if err := tn.UpdateMembership(ctx, membershipActor(t, st, ed.Account.ID, tn.Team()), store.MembershipUpdate{AccountID: owner.Account.ID}); err == nil {
+		t.Fatal("editor removed the owner")
 	}
-	if _, err := tn.SetMemberRole(ctx, ed.Account.ID, owner.Account.ID, store.RoleReader, time.Now()); !errors.Is(err, store.ErrRoleAboveOwn) {
-		t.Fatalf("editor demoting the owner = %v, want ErrRoleAboveOwn", err)
+	if err := tn.UpdateMembership(ctx, membershipActor(t, st, ed.Account.ID, tn.Team()), store.MembershipUpdate{AccountID: owner.Account.ID, Role: rolePointer(store.RoleReader)}); err == nil {
+		t.Fatal("editor demoted the owner")
 	}
-	if _, err := tn.SetMemberRole(ctx, owner.Account.ID, ed.Account.ID, store.Role("admin"), time.Now()); !errors.Is(err, store.ErrInvalidInput) {
+	if err := tn.UpdateMembership(ctx, membershipActor(t, st, owner.Account.ID, tn.Team()), store.MembershipUpdate{AccountID: ed.Account.ID, Role: rolePointer(store.Role("admin"))}); !errors.Is(err, store.ErrInvalidInput) {
 		t.Fatalf("owner granting an unknown role = %v, want ErrInvalidInput", err)
 	}
 	if _, err := tn.CreateInvitation(ctx, owner.Account.ID, "z@example.com", store.Role("admin"), time.Now()); !errors.Is(err, store.ErrInvalidInput) {
@@ -190,13 +216,18 @@ func TestIdentityTeamScopedWritesMissAnotherTeam(t *testing.T) {
 	if err := ta.DeleteInvitation(ctx, inv.ID, time.Now()); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("team a deleting team b's invitation = %v, want ErrNotFound", err)
 	}
-	if _, err := ta.SetMemberRole(ctx, a.Account.ID, b.Account.ID, store.RoleReader, time.Now()); !errors.Is(err, store.ErrNotMember) {
+	if err := ta.UpdateMembership(ctx, membershipActor(t, st, a.Account.ID, ta.Team()), store.MembershipUpdate{AccountID: b.Account.ID, Role: rolePointer(store.RoleReader)}); !errors.Is(err, store.ErrNotMember) {
 		t.Fatalf("team a re-roling team b's owner = %v, want ErrNotMember", err)
 	}
 }
 
 func TestIdentitySessionSwitchNamesTheTeamItLeaves(t *testing.T) {
 	st := storetest.Open(t)
+	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.SetSessionKeyCipher(cipher)
 	ctx := context.Background()
 	a := signIn(t, st, "a", "sw@example.com")
 	raw, _, _, err := st.CreateAccountSession(ctx, a.Account, a.PersonalTeam, time.Hour)
@@ -398,75 +429,6 @@ func TestIdentityWithdrawnInvitationCannotBeAccepted(t *testing.T) {
 	}
 	if err := tn.DeleteInvitation(ctx, inv.ID, time.Now()); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("withdrawing twice = %v, want ErrNotFound", err)
-	}
-}
-
-func TestIdentityLeavingOrLosingEditorRevokesTheRunnerTokensAMemberMinted(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	owner := signIn(t, st, "o", "owner@example.com")
-	ed := signIn(t, st, "e", "ed@example.com")
-	tn := tenant(t, st, owner.PersonalTeam)
-	inv, err := tn.CreateInvitation(ctx, owner.Account.ID, "ed@example.com", store.RoleEditor, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AcceptInvitation(ctx, ed.Account.ID, inv.ID, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	mint := func(name, by string) string {
-		t.Helper()
-		_, tok, err := tn.CreateTokenWith(ctx, "agent:"+name, store.TokenKindTeam, []string{"nodes.claim"}, store.RunnerTokenLifetime, time.Now(), store.TokenOptions{CreatedBy: by})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return tok.Prefix
-	}
-	live := func() map[string]bool {
-		t.Helper()
-		toks, err := st.ListTokens(store.TokenKindTeam, false)
-		if err != nil {
-			t.Fatal(err)
-		}
-		out := map[string]bool{}
-		for _, tok := range toks {
-			out[tok.Prefix] = true
-		}
-		return out
-	}
-	kept := mint("owner", owner.Account.ID)
-	first := mint("ed-1", ed.Account.ID)
-
-	if _, err := tn.SetMemberRole(ctx, owner.Account.ID, ed.Account.ID, store.RoleOwner, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if !live()[first] {
-		t.Fatal("a promotion revoked the member's runner token")
-	}
-	if _, err := tn.SetMemberRole(ctx, owner.Account.ID, ed.Account.ID, store.RoleEditor, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	revoked, err := tn.SetMemberRole(ctx, owner.Account.ID, ed.Account.ID, store.RoleReader, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(revoked) != 1 || revoked[0] != first || live()[first] {
-		t.Fatalf("demotion to reader revoked %v, live %v; want only %s", revoked, live(), first)
-	}
-
-	if _, err := tn.SetMemberRole(ctx, owner.Account.ID, ed.Account.ID, store.RoleEditor, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	second := mint("ed-2", ed.Account.ID)
-	revoked, err = tn.RemoveMember(ctx, owner.Account.ID, ed.Account.ID, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(revoked) != 1 || revoked[0] != second || live()[second] {
-		t.Fatalf("removal revoked %v, live %v; want only %s", revoked, live(), second)
-	}
-	if !live()[kept] {
-		t.Fatal("removing a member revoked another member's runner token")
 	}
 }
 

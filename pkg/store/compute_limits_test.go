@@ -515,7 +515,7 @@ func TestWallClockGuardRefusesAClaimOnAnOldRun(t *testing.T) {
 	_, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil)
 	limitRefusal(t, err, store.ComputeLimitRunSeconds)
 
-	ceiling, over, err := s.RunExceedsWallClock(ctx, "run-long", time.Now())
+	ceiling, over, err := tenant(t, s, store.DefaultTeam).RunExceedsWallClock(ctx, "run-long", time.Now())
 	if err != nil {
 		t.Fatalf("wall clock: %v", err)
 	}
@@ -533,7 +533,7 @@ func TestWallClockGuardReportsAFailedRead(t *testing.T) {
 
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, _, err := s.RunExceedsWallClock(cancelled, "run-long", time.Now()); err == nil {
+	if _, _, err := tenant(t, s, store.DefaultTeam).RunExceedsWallClock(cancelled, "run-long", time.Now()); err == nil {
 		t.Fatal("a cancelled read reported no error")
 	}
 

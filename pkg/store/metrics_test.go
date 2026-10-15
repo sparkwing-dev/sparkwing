@@ -107,11 +107,11 @@ SELECT team, id, 'a', ?, ?, 1, 0 FROM runs WHERE id = 'run-1'`)
 		t.Fatalf("a marker past the marker headroom = %v, want ErrNodeMetricLimit", err)
 	}
 
-	first, err := st.ListNodeMetricsPage(ctx, "run-1", "a", time.Time{}, 3)
+	first, err := tenant(t, st, store.DefaultTeam).ListNodeMetricsPage(ctx, "run-1", "a", time.Time{}, 3)
 	if err != nil || len(first) != 3 || first[0].CPUMillicores != 0 || first[2].CPUMillicores != 2 {
 		t.Fatalf("first page = %+v, %v", first, err)
 	}
-	second, err := st.ListNodeMetricsPage(ctx, "run-1", "a", first[2].TS, 3)
+	second, err := tenant(t, st, store.DefaultTeam).ListNodeMetricsPage(ctx, "run-1", "a", first[2].TS, 3)
 	if err != nil || len(second) != 3 || second[0].CPUMillicores != 3 {
 		t.Fatalf("second page = %+v, %v", second, err)
 	}

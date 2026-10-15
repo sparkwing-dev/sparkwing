@@ -142,15 +142,7 @@ func (t *Tenant) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]M
 	return t.ListNodeMetricsPage(ctx, runID, nodeID, time.Time{}, 0)
 }
 
-// ListNodeMetricsPage returns up to limit samples oldest-first whose
-// timestamps follow after; a zero after starts at the first sample and a
-// limit of zero or less returns them all. A node holds at most one sample
-// per timestamp, so the last sample's TS continues the listing.
-func (s *Store) ListNodeMetricsPage(ctx context.Context, runID, nodeID string, after time.Time, limit int) ([]MetricSample, error) {
-	return s.defaultTenant().ListNodeMetricsPage(ctx, runID, nodeID, after, limit)
-}
-
-// ListNodeMetricsPage is [Store.ListNodeMetricsPage] confined to t's team.
+// ListNodeMetricsPage returns a tenant job's metric samples after the cursor.
 func (t *Tenant) ListNodeMetricsPage(ctx context.Context, runID, nodeID string, after time.Time, limit int) ([]MetricSample, error) {
 	query := `
 SELECT ts, cpu_millicores, memory_bytes, cpu_time_nanos, kind

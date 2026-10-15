@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **store (Breaking):** Membership mutations use current authority
+  Removed the raw member role and removal APIs, three default-team reader twins, unused member-token cap symbols and the unused subscription-name repository lookup. `UpdateMembership` commits membership, invitation, session and capability revocation effects together. Runtime purge and tenant guards share the final schema inventory. GitHub subscription and automation records persist canonical repository keys, and subscription timestamps preserve nanoseconds. See [migration guide](docs/migrations/_unreleased.md#membership-mutations-use-current-authority).
+
 - **store (Breaking):** Remove the unused team token store API
   Member and machine provisioning, inventory and revocation use current capability authority. The old tenant token constructors, readers and revoker, token-family declarations and machine-principal helper are removed. See [migration guide](docs/migrations/_unreleased.md#team-token-store-api-removed).
 - **store (Breaking):** Secret calls require an explicit tenant

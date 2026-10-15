@@ -5,9 +5,7 @@ import (
 	"strings"
 )
 
-// safety: TranslateSchema preserves the neutral schema's constraints on both
-// engines. SQLite uses the input unchanged; PostgreSQL maps BLOB to BYTEA.
-// Unsupported dialects or syntax return an error rather than dropping clauses.
+// TranslateSchema preserves neutral constraints and maps BLOB to BYTEA for PostgreSQL.
 func TranslateSchema(neutral string, dialect Dialect) (string, error) {
 	if dialect != DialectSQLite && dialect != DialectPostgres {
 		return "", errors.New("unsupported schema dialect")
@@ -65,8 +63,7 @@ func TranslateSchema(neutral string, dialect Dialect) (string, error) {
 	return out.String(), nil
 }
 
-// safety: SchemaOwner makes deployment authority explicit even when an operator
-// table carries an optional tenant for audit or binding checks.
+// SchemaOwner distinguishes tenant tables from deployment authority.
 type SchemaOwner string
 
 const (
@@ -74,15 +71,13 @@ const (
 	SchemaOperator SchemaOwner = "operator"
 )
 
-// safety: SchemaTable classifies every baseline table so new state cannot evade
-// the tenant-predicate guard by omission.
+// SchemaTable records the owner of a baseline table.
 type SchemaTable struct {
 	Name  string
 	Owner SchemaOwner
 }
 
-// safety: SchemaTables is the complete ownership inventory for schema.sql.
-// Implementations must compare the created tables with this registry on both engines.
+// SchemaTables classifies every table created by the neutral schema.
 var SchemaTables = []SchemaTable{
 	{Name: "accounts", Owner: SchemaOperator},
 	{Name: "approvals", Owner: SchemaTenant},

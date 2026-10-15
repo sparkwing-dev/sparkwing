@@ -1244,3 +1244,37 @@ removed runs.args_json. The old missing-run and missing-trigger lookups query
 removed columns. These failures also reproduce with the session's changed Go
 files restored from HEAD through an overlay. They remain part of the legacy
 cutover, not passing final-schema evidence. No native cell is newly unskipped.
+
+## W1 membership and table inventory ports
+
+The identity role, last-owner and cross-team tests now use `UpdateMembership`
+with real account sessions. The old runner-token minter-revocation test is
+replaced by `TestMembershipRevokesOnlyTheAffectedMintersCredentialsProperty`.
+It generates removal, promotion, demotion, existing rotation grace, other
+creators, foreign teams, deployment roots and descendants. Separate tests cover
+invitation withdrawal and rollback after a refused revocation. The raw member
+mutation methods and token-table revocation helper are deleted.
+
+`TestTeamPurgeIsolationProperty` generates adversarial tenant keys and compares
+all surviving rows through two purges. It covers restrictive pins, blob/member
+references, tagged logs, billing intervals, quota holds and team-bound operator
+rows. This tests row deletion directly. Team-deletion admission and account
+anonymization still use legacy paths and are not proven by this check.
+
+The created-table checks and SQL guards use the final inventory. No native cell
+or acceptance registry changes. `pool_access_rules` and `repos` have no production
+writer. Their writer backlog is explicit rather than omitted from classification.
+
+`TestGitHubAppRepositoryKeysSurviveRenamesProperty` generates two-team numeric
+repository identities and renamed displays. Both subscription and automation
+writers retain canonical keys, and subscription reads retain nanoseconds.
+The legacy automation-admission test still fails on removed trigger columns.
+
+Metric pagination, wall-clock guard and trigger-claim identity fixtures select
+an explicit tenant after their unused default-team Store twins are removed.
+Their legacy fixture behavior is not new final-schema execution evidence.
+
+The membership session property covers refusal after the last membership and
+transfer to an existing reader membership. Capability-backed sessions retain
+their original team and end with the parent. The existing removed-member session
+and authority-generation properties retain their refusal assertions.

@@ -1,5 +1,23 @@
 # Migrating to the next release
 
+## Membership mutations use current authority
+
+`Tenant.SetMemberRole` and `RemoveMember` are removed. Use
+`Tenant.UpdateMembership(ctx, actor, MembershipUpdate{AccountID: id, Role: role})`.
+Pass a nil role to remove the member. The actor carries persisted session or
+capability authority. The transaction checks current account membership and
+administration authority, preserves the last owner, withdraws invitations above
+the new role, moves sessions on removal, and revokes the member's affected
+credentials. Failed writes roll back every effect.
+
+The default-team `Store.ListNodeMetricsPage`, `TriggerClaimant` and
+`RunExceedsWallClock` readers are removed. Select a tenant with `ForTeam` and
+call the existing tenant methods.
+
+The unused `MaxCLITokensPerMember`, `ErrCLITokenLimit` and
+`Tenant.GitHubAppSubscribedRepository` symbols are also removed. Source credential
+release uses the authorized sealed repository through `ReleaseSourceCredential`.
+
 ## Team token store API removed
 
 `Tenant.CreateMemberToken`, `CreateMachineToken`, `TeamTokens`, `TeamToken`
