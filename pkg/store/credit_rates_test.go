@@ -631,7 +631,7 @@ func TestAStoredRateTableNothingCanReadIsAnError(t *testing.T) {
 	if _, err := s.CreditRateTable(ctx); err == nil {
 		t.Fatal("an unreadable stored table read as a usable one")
 	}
-	if _, err := s.CreditState(ctx, time.Hour); err == nil {
+	if _, err := tenant(t, s, store.DefaultTeam).CreditState(ctx, time.Hour); err == nil {
 		t.Fatal("the credit state hid an unreadable rate table")
 	}
 }

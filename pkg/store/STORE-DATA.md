@@ -1,6 +1,9 @@
 # Store data persistence
 
 Financial writes use the same transaction as the state change that caused them.
+Billing state and grant history use `Tenant.CreditState` and
+`Tenant.ListCreditGrants`. Their raw Store twins are removed. Burn windows use
+the store clock and include charges at the window's lower boundary.
 Rate-table writes use `SetCreditSettings` with `CreditSettingsUpdate.RateTable`.
 The separate `SetCreditRateTable` wrapper is removed.
 `recordBillingAwardTx` stores immutable provenance and a reservation charge. The

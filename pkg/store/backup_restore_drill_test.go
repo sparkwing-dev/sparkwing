@@ -169,7 +169,7 @@ func fingerprintInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) i
 		t.Fatalf("read credit balance: %v", err)
 	}
 	f.Balance = balance
-	grants, err := st.ListCreditGrants(ctx, 100)
+	grants, err := tenant(t, st, store.DefaultTeam).ListCreditGrants(ctx, 100)
 	if err != nil {
 		t.Fatalf("list credit grants: %v", err)
 	}

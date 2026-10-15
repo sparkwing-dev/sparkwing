@@ -80,6 +80,20 @@ func CheckStoreBillingBoundary(ctx context.Context, root, id string) (err error)
 	if want := int64(10_000_000_000-30) - billed.ChargedMicro; balance != want {
 		return fmt.Errorf("fixture balance=%d, want %d", balance, want)
 	}
+	state, err := tenant.CreditState(ctx, 0)
+	if err != nil {
+		return err
+	}
+	if state.BalanceMicro != balance || state.GrantedMicro != 10_000_000_000 || state.ReversedMicro != 0 || state.ChargedMicro != 30+billed.ChargedMicro || state.StorageChargedMicro != billed.ChargedMicro {
+		return fmt.Errorf("tenant credit state includes a foreign ledger: %+v", state)
+	}
+	grants, err := tenant.ListCreditGrants(ctx, 100)
+	if err != nil {
+		return err
+	}
+	if len(grants) != 1 || grants[0].ID != "fund" || grants[0].AmountMicro != state.GrantedMicro {
+		return fmt.Errorf("tenant grant history includes a foreign grant: %+v", grants)
+	}
 	result, err := operator.MaintainRetention(ctx, store.RetentionRequest{Lease: lease, Limit: 100})
 	if err != nil {
 		return err
@@ -122,6 +136,17 @@ func CheckStoreBillingBoundary(ctx context.Context, root, id string) (err error)
 	if got != balance {
 		return fmt.Errorf("retention balance=%d, want %d", got, balance)
 	}
+	afterState, err := tenant.CreditState(ctx, 0)
+	if err != nil {
+		return err
+	}
+	afterGrants, err := tenant.ListCreditGrants(ctx, 100)
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(state, afterState) || !reflect.DeepEqual(grants, afterGrants) {
+		return errors.New("tenant credit state or grant history changed during run retention or restart")
+	}
 	return nil
 }
 
@@ -132,6 +157,9 @@ func seedStoreBillingBoundary(ctx context.Context, db *sql.DB) error {
 		query string
 		args  []any
 	}{
+		{`INSERT INTO teams(name,created_at,updated_at) VALUES ('neighbor_%''--',1,1)`, nil},
+		{`INSERT INTO credit_grants(id,team,kind,amount_micro,created_at) VALUES ('neighbor-fund','neighbor_%''--','paid',7000000000,?)`, []any{old}},
+		{`INSERT INTO credit_charges(id,team,run_id,node_id,capability_prefix,kind,seconds,amount_micro,charged_at) VALUES ('neighbor-compute','neighbor_%''--','other','job','other-award','usage',3,91,?)`, []any{old}},
 		{`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,finished_at,log_retention_class,log_retention_days) VALUES (?,'old',1,'fixture','failed',?,'fixture',1,'gh:1','host','execute',?,'fixture',?,?,'r30',30)`, []any{team, []byte(`{}`), []byte(`[]`), old, old}},
 		{`INSERT INTO log_streams(team,run_id,id,subject_kind,generation,unit_kind,prefix,retention_class,stored_bytes,created_at,updated_at) VALUES (?,'old','stream','owner_unit',1,'plan','fixture','r30',3,?,?)`, []any{team, old, old}},
 		{`INSERT INTO log_segments(team,run_id,stream_id,generation,n,stored_bytes,object_key,sha256,start_offset,end_offset) VALUES (?,'old','stream',1,0,3,'fixture','fixture',0,3)`, []any{team}},

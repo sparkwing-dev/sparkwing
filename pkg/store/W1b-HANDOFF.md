@@ -1,10 +1,87 @@
 # W1b handoff
 
-Continues `812583080`. W1b remains incomplete. This continuation is uncommitted.
+Continues `496ba5f1a`. W1b remains incomplete. This continuation is uncommitted.
 The lead owns review, commits, pipelines and native integration. W1 implementation
 files are unchanged. No Git write or candidate Sparkwing runtime was used.
 
 ## Current continuation
+
+Removed `Store.CreditState` and `Store.ListCreditGrants`, **15 legacy production
+Go lines**, including their comments and separating blank lines. Production
+callers already used tenant handles. Ten remaining test calls now use the
+existing tenant helper or their default-team handle. The default-tenant test
+uses a committed final-schema debit instead of the removed machine-token claim
+fixture. No W1 implementation file or other-package production caller changed.
+The source migration guide, changelog, mirrors and the two API snapshot entries
+record the hard cut.
+
+The billing-read invariant is that a tenant's state and history contain only its
+own ledger, and its burn window uses the store clock. The new generated property
+first failed because CreditState used wall time. The fix changes that one call
+to the existing store clock. All 64 generated cases pass, covering 128 tenant
+keys with Unicode and SQL metacharacters, grant ordering, reversals, storage and
+compute charges, refunds, exact window boundaries, zero windows, clock advance
+and database reopening. No sleep, new setting, schema, interface, runtime
+mechanism or environment variable was added.
+
+Extended `billing-ledger-survives-retention/store-data-sqlite`. Its real storage
+debit and financial snapshot now coexist with a separately seeded neighboring
+team's ledger. Tenant.CreditState and Tenant.ListCreditGrants must return only
+the selected team's rows, and their complete results must survive leased run
+retention and reopening. No new native acceptance cell or archived T1 inventory
+row is claimed complete.
+
+Verification uses the environment and base selection under Manual below, plus
+these migrated tests: TestCreditsBalanceIsGrantsMinusCharges,
+TestCreditHistoryLimitIsClampedToItsMaximum,
+TestCreditReversalNetsOutOfTheBalanceAndTheHistory,
+TestCreditGrantAmountIsBounded, TestCreditsDefaultTenantReadsItsLedger and
+TestGrantCreditsIsIdempotentByReference. The new property is already included by
+TestStoreData.
+
+- Whole-repository `go build -p 4 ./...` passed on the final Go tree.
+- `go vet -p 4 ./pkg/store/... ./internal/acceptance/... ./tests/acceptance/...`
+  passed.
+- The focused store selection passed **163 top-level tests / 427 cases**,
+  without skips.
+- Both acceptance trees passed **20 top-level tests / 208 cases**. All eleven
+  storage SQLite cells and the extended billing SQLite cell pass. The separate
+  native/platform skeleton retains **2,995 skips**.
+- Tenant SQL-scope, writer and twin guards passed.
+- Embedded documentation/changelog tests, sync-docs --check, whitespace,
+  session commentcheck and session sleepcheck passed.
+- Required `commentcheck -base main` reports the inherited W9 finding at
+  internal/controllerwire/contracts.go:47. It reports no W1b finding.
+
+The full legacy store suite, backup/restore drill, PostgreSQL, providers,
+physical backends, native placements, candidates and pipelines were not run.
+Migrated legacy claim-fixture tests compile, but no new runtime claim evidence
+is asserted for them. Review, aggregate API snapshot regeneration, native
+checks and pipelines remain with the lead.
+
+Amendments A1-24, A1-27 through A1-35 and A1-53 retain the implementation and
+integration disposition in the previous continuation below. Accounting helpers
+still have no production caller outside their owner file. W1 owns joining them
+to award/start/wait/renew/finish/reap transactions. C2 SettleBilling and W7's
+namespace/edge policies remain panic stubs, so their persistence tests use
+contract fakes. Verified payment settlement, result-record configuration,
+publication identities, physical blob/log transports and legacy caller
+retirement remain integration work. handoffs.md has no W1b entry.
+No new foreign contract shape or human question is added.
+
+Shared files touched: internal/acceptance/store_billing.go,
+pkg/store/backup_restore_drill_test.go, design/rewrite/contracts/c1-data.md,
+CHANGELOG.md, docs/migrations/_unreleased.md, its generated mirror,
+pkg/docs/changelog.md and .apidiff/pkg_store.txt. The remaining changes are
+owned credit implementation/tests, STORE-DATA.md and this handoff.
+
+Friction was cold compilation and the inherited W9 commentcheck finding.
+The injected-clock failure was reproduced and fixed. No Git writes, service
+starts or Sparkwing runtime commands occurred. Git author configuration remains
+Korey's default and has no core.worktree override. Scratch is deleted after
+final inspection.
+
+## Previous continuation (committed in 496ba5f1a)
 
 Activated `storage-owner-receipts-and-stream-verification/store-data-sqlite`.
 Trigger and plan uploads reserve and commit before jobs exist. The proof rejects

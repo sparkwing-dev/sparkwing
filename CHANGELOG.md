@@ -76,6 +76,7 @@ unlock.
 - **sdk:** describe lists each pipeline's declared secrets as `secrets`, which `sparkwing pipeline describe --secrets` prints
 
 ### Changed
+- **store (Breaking):** Remove `Store.CreditState` and `Store.ListCreditGrants`. Read billing state and grant history through a tenant handle. See [migration guide](docs/migrations/_unreleased.md#billing-reads-use-tenant-handles).
 - **store (Breaking):** Remove `Store.CreditRateTableSet`, `Store.CreditRateMicroPerSecond`, `Store.CreditGraceSeconds` and `Store.SetCreditRateTable`. Read presence, prices and grace through `CreditSettings` in one snapshot. Write rate tables through `SetCreditSettings`. See [migration guide](docs/migrations/_unreleased.md#rate-table-presence-uses-the-settings-snapshot).
 - **store:** Data authorization can run inside the transaction that owns a write. Receipt, reference, revocation and holder changes in that transaction govern access before commit.
 - **store + controller (Breaking):** Abandoned execution logs close as incomplete through `Operator.SealAbandonedLogStreams` under the maintenance lease. Tagged job streams keep their final tail grace, and owner streams check their own unit fences. The old `Store.AbandonedNodeLogs` API and periodic node-log sweep are removed. See [migration guide](docs/migrations/_unreleased.md#abandoned-logs-use-tagged-streams).

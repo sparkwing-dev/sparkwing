@@ -742,8 +742,12 @@ resuming billing starts a new interval. Storage charges remain runless.
 
 The `billing-ledger-survives-retention/store-data-sqlite` acceptance proof
 checks a real storage debit and preserves every financial row across leased
-retention and reopening. It does not exercise provider verification or native
-placements. The controller's billing caller uses this operator method. W1's
+retention and reopening. Tenant billing state and grant history exclude a
+neighboring team's ledger and survive the same retention and restart.
+`Tenant.CreditState` and `Tenant.ListCreditGrants` own these reads. Their raw
+Store twins are removed. Burn windows use the store clock.
+The proof does not exercise provider verification or native placements.
+The controller's billing caller uses this operator method. W1's
 maintenance coordinator owns the shared retention, quota and GC ordering.
 
 ### Storage policy and reports

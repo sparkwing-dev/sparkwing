@@ -686,15 +686,6 @@ func lockCreditLedgerTx(ctx context.Context, tx *storeTx) error {
 	return err
 }
 
-// CreditState reports the default team's ledger together with the rate, the
-// grace period, and the credits it burned over window.
-//
-// safety: the unscoped twin reads [DefaultTeam] for the same reason
-// [Store.CreditBalanceMicro] does.
-func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditState, error) {
-	return s.creditState(ctx, DefaultTeam, window)
-}
-
 // CreditState reports t's ledger together with the rate, the grace period,
 // and the credits t burned over window. The rate, the grace period and the
 // charge cap are the deployment's and are the same for every team.
@@ -727,7 +718,7 @@ func (s *Store) creditState(ctx context.Context, team Team, window time.Duration
 		var burn sql.NullInt64
 		if err := s.queryRow(ctx,
 			`SELECT SUM(amount_micro) FROM credit_charges WHERE team = ? AND charged_at >= ?`,
-			string(team), time.Now().Add(-window).UnixNano()).Scan(&burn); err != nil {
+			string(team), s.now().Add(-window).UnixNano()).Scan(&burn); err != nil {
 			return out, err
 		}
 		out.BurnMicro = burn.Int64
@@ -1262,12 +1253,6 @@ func clearTeamCreditExhaustedTx(ctx context.Context, tx *storeTx, team Team, now
 		  WHERE name = ? AND credit_exhausted_at != 0`,
 		nowNS, string(team))
 	return err
-}
-
-// ListCreditGrants returns the default team's grants newest first, at most
-// limit rows and never more than [CreditHistoryMaxLimit].
-func (s *Store) ListCreditGrants(ctx context.Context, limit int) (_ []CreditGrant, err error) {
-	return s.defaultTenant().ListCreditGrants(ctx, limit)
 }
 
 // ListCreditCharges returns the default team's charges newest first, at most

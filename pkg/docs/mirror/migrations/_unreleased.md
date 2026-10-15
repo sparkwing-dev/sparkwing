@@ -1,5 +1,11 @@
 # Migrating to the next release
 
+## Billing reads use tenant handles
+
+`Store.CreditState` and `Store.ListCreditGrants` are removed. Obtain a tenant
+with `Store.ForTeam`, then call `Tenant.CreditState` and `Tenant.ListCreditGrants`.
+Local stores use the handle for `store.DefaultTeam`.
+
 ## Rate-table presence uses the settings snapshot
 
 `Store.CreditRateTableSet`, `Store.CreditRateMicroPerSecond` and

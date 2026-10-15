@@ -14,7 +14,7 @@ import (
 
 func grantCount(t *testing.T, s *store.Store) int {
 	t.Helper()
-	grants, err := s.ListCreditGrants(context.Background(), 100)
+	grants, err := tenant(t, s, store.DefaultTeam).ListCreditGrants(context.Background(), 100)
 	if err != nil {
 		t.Fatalf("list grants: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestCreditReversalNetsOutOfTheBalanceAndTheHistory(t *testing.T) {
 		t.Fatalf("balance = %d, want %d", balance, want)
 	}
 
-	state, err := s.CreditState(ctx, 0)
+	state, err := tenant(t, s, store.DefaultTeam).CreditState(ctx, 0)
 	if err != nil {
 		t.Fatalf("state: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestCreditReversalNetsOutOfTheBalanceAndTheHistory(t *testing.T) {
 		t.Errorf("totals balance = %d, want %d", totals.BalanceMicro, want)
 	}
 
-	grants, err := s.ListCreditGrants(ctx, 10)
+	grants, err := tenant(t, s, store.DefaultTeam).ListCreditGrants(ctx, 10)
 	if err != nil {
 		t.Fatalf("history: %v", err)
 	}
@@ -335,7 +335,7 @@ func TestCreditGrantAmountIsBounded(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("a reversal of the whole payment was refused: %v", err)
 	}
-	state, err := s.CreditState(ctx, 0)
+	state, err := tenant(t, s, store.DefaultTeam).CreditState(ctx, 0)
 	if err != nil {
 		t.Fatalf("state: %v", err)
 	}

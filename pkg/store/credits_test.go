@@ -150,7 +150,7 @@ func TestCreditsBalanceIsGrantsMinusCharges(t *testing.T) {
 		t.Fatalf("balance = %d, want %d", balance, want)
 	}
 
-	grants, err := s.ListCreditGrants(ctx, 10)
+	grants, err := tenant(t, s, store.DefaultTeam).ListCreditGrants(ctx, 10)
 	if err != nil {
 		t.Fatalf("list grants: %v", err)
 	}
@@ -394,7 +394,7 @@ func TestChargeNodeCreditsBillsElapsedSecondsIdempotently(t *testing.T) {
 		t.Fatalf("third charge = %+v, want 15 seconds", res.Charge)
 	}
 
-	state, err := s.CreditState(ctx, 24*time.Hour)
+	state, err := tenant(t, s, store.DefaultTeam).CreditState(ctx, 24*time.Hour)
 	if err != nil {
 		t.Fatalf("state: %v", err)
 	}
@@ -950,7 +950,7 @@ func TestCreditHistoryLimitIsClampedToItsMaximum(t *testing.T) {
 		}
 	}
 	for _, limit := range []int{0, 1, store.CreditHistoryMaxLimit, store.CreditHistoryMaxLimit + 5000} {
-		grants, err := s.ListCreditGrants(ctx, limit)
+		grants, err := tenant(t, s, store.DefaultTeam).ListCreditGrants(ctx, limit)
 		if err != nil {
 			t.Fatalf("list with limit %d: %v", limit, err)
 		}
