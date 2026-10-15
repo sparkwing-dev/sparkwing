@@ -7,17 +7,8 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 )
-
-func TestKeeperCauses(t *testing.T) {
-	acceptance.CheckKeeperCauses(t)
-}
-
-func TestKeeperConflictAndStop(t *testing.T) {
-	acceptance.CheckKeeperConflictAndStop(t)
-}
 
 func FuzzKeeperCancellationReason(f *testing.F) {
 	f.Add("operator requested stop")

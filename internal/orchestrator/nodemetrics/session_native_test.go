@@ -5,6 +5,7 @@ package nodemetrics
 import (
 	"bufio"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"runtime"
@@ -16,6 +17,49 @@ import (
 
 	"golang.org/x/sys/unix"
 )
+
+func TestSessionSnapshotOmitsReapedMember(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestNativeResidentChild$")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stdin.Close()
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if cmd.ProcessState == nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+	}()
+	pid := cmd.Process.Pid
+	sampled := false
+	processes, ok := snapshotProcesses(func(all map[int]processSample) map[int]processSample {
+		child, present := all[pid]
+		if !present {
+			t.Fatal("live child is absent before resident-memory sampling")
+		}
+		if err := cmd.Process.Kill(); err != nil {
+			t.Fatal(err)
+		}
+		var exited *exec.ExitError
+		if err := cmd.Wait(); !errors.As(err, &exited) {
+			t.Fatalf("join killed child: %v", err)
+		}
+		sampled = true
+		return map[int]processSample{pid: child, os.Getpid(): all[os.Getpid()]}
+	})
+	if !ok || !sampled || !processes[os.Getpid()].valid {
+		t.Fatal("reaping another member invalidated the live process snapshot")
+	}
+	if _, present := processes[pid]; present {
+		t.Fatal("snapshot retained a member reaped before resident-memory sampling")
+	}
+}
 
 // safety: the node host's usage sampler reads only SessionProcesses, so the
 // oracles judge that reader: this process's own CPU against getrusage, and a

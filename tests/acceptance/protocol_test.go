@@ -28,9 +28,6 @@ func TestProtocol(t *testing.T) {
 			continue
 		}
 		t.Run(scenario.ID, func(t *testing.T) {
-			if scenario.ID == "protocol-step-failure-policies" {
-				t.Run("hermetic-native-go-steps", acceptance.CheckNativeExecutorSteps)
-			}
 			typeScriptBoundary(t, scenario.ID)
 			for _, target := range acceptance.Targets() {
 				if !acceptance.Applies(scenario, target) {

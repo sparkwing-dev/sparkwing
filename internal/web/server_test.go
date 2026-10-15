@@ -14,13 +14,13 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func seedRun(t *testing.T, paths orchestrator.Paths, runID, nodeID, msg string) {
+func seedRun(t *testing.T, paths paths.Paths, runID, nodeID, msg string) {
 	t.Helper()
 	ctx := context.Background()
 	if err := paths.EnsureRunDir(runID); err != nil {
@@ -65,7 +65,7 @@ func fixtureShell() fs.FS {
 	}
 }
 
-func startServer(t *testing.T, paths orchestrator.Paths) (string, func()) {
+func startServer(t *testing.T, paths paths.Paths) (string, func()) {
 	t.Helper()
 	st, err := store.Open(paths.StateDB())
 	if err != nil {
@@ -87,7 +87,7 @@ func startServer(t *testing.T, paths orchestrator.Paths) (string, func()) {
 
 func TestAPI_Logs(t *testing.T) {
 	root := t.TempDir()
-	paths := orchestrator.PathsAt(root)
+	paths := paths.PathsAt(root)
 
 	seedRun(t, paths, "run-web-ok", "web-ok", "web hello")
 
@@ -110,7 +110,7 @@ func TestAPI_Logs(t *testing.T) {
 
 func TestAPI_StaticIndexServed(t *testing.T) {
 	root := t.TempDir()
-	paths := orchestrator.PathsAt(root)
+	paths := paths.PathsAt(root)
 	base, stop := startServer(t, paths)
 	defer stop()
 
@@ -133,7 +133,7 @@ func TestAPI_StaticIndexServed(t *testing.T) {
 
 func TestAPI_LogsAcceptNegotiation(t *testing.T) {
 	root := t.TempDir()
-	paths := orchestrator.PathsAt(root)
+	paths := paths.PathsAt(root)
 
 	seedRun(t, paths, "run-web-ansi", "web-ansi", "\x1b[31mansi-hello\x1b[0m")
 

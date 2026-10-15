@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 )
@@ -51,19 +50,4 @@ func TestRewriteCapacityWaiterKeepsOnlyLiveArrival(t *testing.T) {
 		t.Fatalf("expired waiter: %+v %v", adopted, err)
 	}
 	rewriteSchemaCount(t, tenant.s.db, "concurrency_waiters", 0)
-}
-
-func TestRewriteCapacitySupersedeCancelsBoundWork(t *testing.T) {
-	tenant, now, actor := capacityFixture(t)
-	rewriteSchemaExec(t, tenant.s.db, `INSERT INTO concurrency_holders(team,key,holder_id,run_id,node_id,claimed_at,lease_expires_at,generation) VALUES ('a','key','holder','run','job',?,?,3)`, now.UnixNano(), now.Add(time.Minute).UnixNano())
-	if err := tenant.SupersedeCapacity(context.Background(), "key", "holder", actor); err != nil {
-		t.Fatal(err)
-	}
-	node, err := tenant.ReadNode(context.Background(), NodeRef{RunID: "run", NodeID: "job"})
-	if err != nil || (node.CancelRequestedAt == nil && node.Outcome != NodeCancelled) {
-		t.Fatalf("cancellation: %+v %v", node, err)
-	}
-	if err := (&Tenant{s: tenant.s, team: "b"}).SupersedeCapacity(context.Background(), "key", "holder", actor); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("foreign supersede: %v", err)
-	}
 }

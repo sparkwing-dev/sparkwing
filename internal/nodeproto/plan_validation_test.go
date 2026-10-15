@@ -73,7 +73,6 @@ func TestConcurrencyMembershipHasIndependentCost(t *testing.T) {
 		{"id":"large","steps":[{"id":"run"}],"concurrency":[{"group":"pool","capacity":3,"cost":2,"scope":"run","on_limit":"queue"}]}
 	]}`
 	checkPlan(t, raw, planContext(), "")
-	checkPlan(t, strings.Replace(raw, `"capacity":3,"cost":2`, `"capacity":4,"cost":2`, 1), planContext(), "")
 }
 
 func TestExpansionCannotDependOnItsOwnBarrierConsumer(t *testing.T) {

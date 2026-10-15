@@ -1,156 +1,85 @@
 package nodehost_test
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 )
 
-func nodeRow(status, outcome string) http.HandlerFunc {
-	return answer(http.StatusOK, map[string]string{"id": "x", "status": status, "outcome": outcome})
-}
-
-func outputPath(node string) string {
-	return "/node/v1/jobs/" + url.PathEscape(node) + "/output"
-}
+func outputPath(job string) string { return "/node/v1/jobs/" + url.PathEscape(job) + "/output" }
 
 func TestOutputReadsANodeOfTheSameRun(t *testing.T) {
-	s, logs := start(t)
-	c := newController(t)
-	grant := c.object("build-out", []byte(`{"digest":"sha256:abc"}`))
-	c.handle("GET /api/v1/runs/run-1/nodes/{node}", nodeRow("done", "success"))
-	c.handle("GET /api/v1/runs/run-1/nodes/{node}/output", answer(http.StatusOK, grant))
-	bearer, _ := admitClaim(t, s, "deploy", claimFor(t, c))
-
-	got := ask(t, s, http.MethodGet, "/node/v1/jobs/build%2Flinux/output", bearer, "")
+	s := start(t)
+	service := newService(t)
+	service.Output = func(_ context.Context, auth capability.Authorized, job string) (json.RawMessage, error) {
+		if auth.Binding.RunID != "run-1" || auth.Binding.NodeID != "deploy" || job != "build/linux" {
+			t.Fatalf("output scope=%+v job=%q", auth.Binding, job)
+		}
+		return json.RawMessage(`{"digest":"sha256:abc"}`), nil
+	}
+	got := ask(t, s, http.MethodGet, outputPath("build/linux"), admitService(t, s, service), "")
 	if got.status != http.StatusOK || got.body["output"].(map[string]any)["digest"] != "sha256:abc" {
 		t.Fatalf("status %d body %v", got.status, got.body)
 	}
-	asked := c.asked()
-	if asked[0] != "GET /api/v1/runs/run-1/nodes/build%2Flinux" {
-		t.Fatalf("forwarded %v", asked)
-	}
-	noLeak(t, logs)
 }
 
 func TestOutputRefusals(t *testing.T) {
-	cases := []struct {
-		name, node     string
-		row, out       http.HandlerFunc
-		status         int
-		code           string
-		reachesControl bool
-	}{
-		{
-			name: "unknown", node: "nope", row: answer(http.StatusNotFound, map[string]string{"error": "not found"}),
-			status: http.StatusNotFound, code: "unknown_job", reachesControl: true,
-		},
-		{
-			name: "running", node: "build", row: nodeRow("running", ""),
-			status: http.StatusConflict, code: "conflict", reachesControl: true,
-		},
-		{
-			name: "failed", node: "build", row: nodeRow("done", "failed"),
-			status: http.StatusNotFound, code: "not_found", reachesControl: true,
-		},
-		{
-			name: "not a dependency", node: "build", row: nodeRow("done", "success"),
-			out:    answer(http.StatusForbidden, map[string]string{"error": "output_not_ancestor"}),
-			status: http.StatusForbidden, code: "forbidden", reachesControl: true,
-		},
-		{
-			name: "claim ended", node: "build", row: answer(http.StatusForbidden, map[string]string{"error": "claim_ended"}),
-			status: http.StatusServiceUnavailable, code: "unavailable", reachesControl: true,
-		},
-		{
-			name: "controller error", node: "build", row: leak,
-			status: http.StatusServiceUnavailable, code: "unavailable", reachesControl: true,
-		},
-		{
-			name: "corrupt object", node: "build", row: nodeRow("done", "success"),
-			out:    answer(http.StatusOK, store.OutputReadGrant{URL: "/objects/x", SHA256: "00", Size: 2}),
-			status: http.StatusServiceUnavailable, code: "unavailable", reachesControl: true,
-		},
-		{name: "dot-dot", node: "../run-2/nodes/x", status: http.StatusBadRequest, code: "bad_request"},
-		{name: "backslash", node: `a\b`, status: http.StatusBadRequest, code: "bad_request"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			s, logs := start(t)
-			c := newController(t)
-			c.object("x", []byte("{}"))
-			if tc.row != nil {
-				c.handle("GET /api/v1/runs/run-1/nodes/{node}", tc.row)
+	for _, code := range []apierr.Code{apierr.UnknownJob, apierr.Conflict, apierr.NotFound, apierr.Forbidden, apierr.Unavailable} {
+		t.Run(string(code), func(t *testing.T) {
+			s := start(t)
+			service := newService(t)
+			service.Output = func(context.Context, capability.Authorized, string) (json.RawMessage, error) {
+				return nil, &apierr.Error{Code: code, Message: "output refused"}
 			}
-			if tc.out != nil {
-				c.handle("GET /api/v1/runs/run-1/nodes/{node}/output", tc.out)
-			}
-			bearer, _ := admitClaim(t, s, "deploy", claimFor(t, c))
-			wantRefusal(t, ask(t, s, http.MethodGet, outputPath(tc.node), bearer, ""), tc.status, tc.code)
-			if reached := len(c.asked()) > 0; reached != tc.reachesControl {
-				t.Fatalf("controller asked %v", c.asked())
-			}
-			noLeak(t, logs)
+			wantRefusal(t, ask(t, s, http.MethodGet, outputPath("build"), admitService(t, s, service), ""), apierr.Status(code), string(code))
 		})
+	}
+	for _, raw := range []json.RawMessage{nil, json.RawMessage(`{"bad"`)} {
+		s := start(t)
+		service := newService(t)
+		service.Output = func(context.Context, capability.Authorized, string) (json.RawMessage, error) { return raw, nil }
+		wantRefusal(t, ask(t, s, http.MethodGet, outputPath("build"), admitService(t, s, service), ""), http.StatusBadRequest, "protocol_error")
 	}
 }
 
 func TestPipelineLatestReadsADeclaredReference(t *testing.T) {
-	s, logs := start(t)
-	c := newController(t)
-	grant := c.object("ref", []byte(`"v1.2.3"`))
-	var asked store.ClaimInputRequest
-	c.handle("POST /api/v1/runs/run-1/nodes/deploy/claim/input", func(w http.ResponseWriter, r *http.Request) {
-		if !decodeJSON(r, &asked) {
-			t.Error("claim input body is not JSON")
+	s := start(t)
+	service := newService(t)
+	service.Latest = func(_ context.Context, auth capability.Authorized, pipeline, job string, age time.Duration) (nodehost.ProcessOutput, error) {
+		if auth.Binding.RunID != "run-1" || auth.Binding.NodeID != "deploy" || pipeline != "release" || job != "tag" || age != 5*time.Second {
+			t.Fatalf("latest scope=%+v %q %q %v", auth.Binding, pipeline, job, age)
 		}
-		answer(http.StatusOK, store.ClaimInput{RunID: "run-0", NodeID: "tag", Output: grant})(w, r)
-	})
-	bearer, _ := admitClaim(t, s, "deploy", claimFor(t, c))
-
-	got := ask(t, s, http.MethodGet, "/node/v1/pipelines/release/latest?job=tag&max_age_ms=5000", bearer, "")
+		return nodehost.ProcessOutput{RunID: "run-0", Output: json.RawMessage(`"v1.2.3"`)}, nil
+	}
+	got := ask(t, s, http.MethodGet, "/node/v1/pipelines/release/latest?job=tag&max_age_ms=5000", admitService(t, s, service), "")
 	if got.status != http.StatusOK || got.body["run_id"] != "run-0" || got.body["output"] != "v1.2.3" {
 		t.Fatalf("status %d body %v", got.status, got.body)
 	}
-	want := store.ClaimInputRequest{Kind: store.ClaimInputLastRun, Pipeline: "release", Node: "tag", MaxAgeMS: 5000}
-	if asked != want {
-		t.Fatalf("forwarded %+v, want %+v", asked, want)
-	}
-	noLeak(t, logs)
 }
 
 func TestPipelineLatestRefusals(t *testing.T) {
-	cases := []struct {
-		name, query string
-		input       http.HandlerFunc
-		status      int
-		code        string
-	}{
-		{"no run", "?job=tag", answer(http.StatusNotFound, map[string]string{"error": "not found"}), http.StatusNotFound, "not_found"},
-		{
-			"undeclared", "?job=tag", answer(http.StatusForbidden, map[string]string{"error": "input_undeclared"}),
-			http.StatusForbidden, "forbidden",
-		},
-		{"no output", "?job=tag", answer(http.StatusOK, store.ClaimInput{RunID: "run-0"}), http.StatusNotFound, "not_found"},
-		{"controller error", "?job=tag", leak, http.StatusServiceUnavailable, "unavailable"},
-		{"no node", "", nil, http.StatusBadRequest, "bad_request"},
-		{"negative age", "?job=tag&max_age_ms=-1", nil, http.StatusBadRequest, "bad_request"},
+	for _, query := range []string{"", "?job=tag&max_age_ms=-1", "?job=tag&max_age_ms=9223372036854775807", "?node=tag"} {
+		s := start(t)
+		service := newService(t)
+		service.Latest = func(context.Context, capability.Authorized, string, string, time.Duration) (nodehost.ProcessOutput, error) {
+			t.Fatal("malformed latest reached callback")
+			return nodehost.ProcessOutput{}, nil
+		}
+		wantRefusal(t, ask(t, s, http.MethodGet, "/node/v1/pipelines/release/latest"+query, admitService(t, s, service), ""), http.StatusBadRequest, "bad_request")
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			s, logs := start(t)
-			c := newController(t)
-			if tc.input != nil {
-				c.handle("POST /api/v1/runs/run-1/nodes/deploy/claim/input", tc.input)
-			}
-			bearer, _ := admitClaim(t, s, "deploy", claimFor(t, c))
-			wantRefusal(t, ask(t, s, http.MethodGet, "/node/v1/pipelines/release/latest"+tc.query, bearer, ""), tc.status, tc.code)
-			if tc.input == nil && len(c.asked()) > 0 {
-				t.Fatalf("a malformed request reached the controller: %v", c.asked())
-			}
-			noLeak(t, logs)
-		})
+	for _, code := range []apierr.Code{apierr.NotFound, apierr.Forbidden, apierr.Unavailable} {
+		s := start(t)
+		service := newService(t)
+		service.Latest = func(context.Context, capability.Authorized, string, string, time.Duration) (nodehost.ProcessOutput, error) {
+			return nodehost.ProcessOutput{}, &apierr.Error{Code: code, Message: "latest refused"}
+		}
+		wantRefusal(t, ask(t, s, http.MethodGet, "/node/v1/pipelines/release/latest?job=tag", admitService(t, s, service), ""), apierr.Status(code), string(code))
 	}
 }

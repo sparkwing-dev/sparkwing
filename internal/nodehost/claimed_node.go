@@ -65,10 +65,13 @@ func (h *ClaimedNodeHost) Execute(parent context.Context, input NodeInput) (err 
 		beat, err := h.Store.RenewNodeClaim(ctx, ref, actor)
 		return lease.Beat{CancelRequested: beat.CancelRequested, CancelReason: beat.CancelReason, Watched: beat.Watched, WatchedNodes: beat.WatchedNodes}, err
 	}
-	ctx, stop := startHostKeeper(parent, keeper)
+	ctx, stop := parent, func() {}
+	if !lease.Adopt(parent, lease.Identity{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID, Holder: actor.Holder, Generation: actor.Generation}, func() bool { return true }) {
+		ctx, stop = startHostKeeper(parent, keeper)
+	}
 	defer stop()
 	if err := context.Cause(ctx); err != nil {
-		return h.setupFailure(ctx, ref, actor, err)
+		return h.setupFailure(ctx, input, err)
 	}
 	acquire := h.Acquire
 	if acquire == nil {
@@ -76,12 +79,12 @@ func (h *ClaimedNodeHost) Execute(parent context.Context, input NodeInput) (err 
 	}
 	var accepted runspec.Spec
 	if err := json.Unmarshal(input.Accepted.Spec, &accepted); err != nil {
-		return h.setupFailure(ctx, ref, actor, err)
+		return h.setupFailure(ctx, input, err)
 	}
 	options := h.Source
 	options.Base, err = capturedBase(ctx, options.Base, h.Snapshots, accepted.Request.Request.Env)
 	if err != nil {
-		return h.setupFailure(ctx, ref, actor, err)
+		return h.setupFailure(ctx, input, err)
 	}
 	entry, err := acquire(ctx, spec, options)
 	if entry != nil {
@@ -92,7 +95,7 @@ func (h *ClaimedNodeHost) Execute(parent context.Context, input NodeInput) (err 
 		}()
 	}
 	if cause := context.Cause(ctx); cause != nil {
-		return h.setupFailure(ctx, ref, actor, cause)
+		return h.setupFailure(ctx, input, cause)
 	}
 	if err == nil {
 		switch {
@@ -107,7 +110,7 @@ func (h *ClaimedNodeHost) Execute(parent context.Context, input NodeInput) (err 
 		}
 	}
 	if err != nil {
-		return h.setupFailure(ctx, ref, actor, err)
+		return h.setupFailure(ctx, input, err)
 	}
 	input.Entry, input.Engine = entry, entry.Engine
 	err = h.Executor.Execute(ctx, input)
@@ -147,7 +150,7 @@ func (h *ClaimedNodeHost) sourceSpec(ctx context.Context, input NodeInput) (sour
 	return source.ForExecution(*snapshot.Run.Spec)
 }
 
-func (h *ClaimedNodeHost) setupFailure(ctx context.Context, ref store.NodeRef, actor store.Actor, failure error) error {
+func (h *ClaimedNodeHost) setupFailure(ctx context.Context, input NodeInput, failure error) error {
 	if cause := context.Cause(ctx); cause != nil {
 		var cancelled *lease.CancelError
 		if !errors.As(cause, &cancelled) {
@@ -163,10 +166,10 @@ func (h *ClaimedNodeHost) setupFailure(ctx context.Context, ref store.NodeRef, a
 	if ctx.Err() != nil {
 		result.Outcome, result.Reason = store.NodeCancelled, string(apierr.ReasonCancelled)
 	}
-	result = recordNodeFailure(ref.NodeID, result, h.Mask)
+	result = recordNodeFailure(input.NodeID, result, h.Mask)
 	reportCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.HeartbeatTimeout)
 	defer cancel()
-	_, err := h.Store.TransitionNode(reportCtx, store.NodeTransition{Ref: ref, Actor: actor, To: result.Outcome, Cause: store.CauseReport, Extra: store.TransitionExtra{Result: &result}})
+	_, err := h.Store.TransitionNode(reportCtx, store.NodeTransition{Ref: store.NodeRef{RunID: input.Accepted.RunID, NodeID: input.NodeID}, Actor: executorActor(input), To: result.Outcome, Cause: store.CauseReport, SourceAttempt: &input.Attempt, Extra: store.TransitionExtra{Result: &result}})
 	return errors.Join(context.Cause(ctx), &apierr.Error{Code: code, Message: result.MaskedError}, err)
 }
 

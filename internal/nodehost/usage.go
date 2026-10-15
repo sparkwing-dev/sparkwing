@@ -8,6 +8,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/nodemetrics"
 )
 
+const usageSampleInterval = 2 * time.Second
+
 // Usage is what one node's process session consumed.
 type Usage struct {
 	// CPUTime is user plus system time across every session member,
@@ -47,14 +49,12 @@ type UsageSampler struct {
 	sampled  bool
 }
 
-// StartUsage begins sampling the session whose id is sid, which is the
-// leader's pid for a process started with setsid. It samples at
-// nodemetrics.Interval.
+// StartUsage samples the process session identified by its leader's pid every two seconds.
 func StartUsage(sid int) *UsageSampler {
-	return startUsage(sid, nodemetrics.SessionProcesses)
+	return startUsage(sid, nodemetrics.SessionProcesses, usageSampleInterval)
 }
 
-func startUsage(sid int, snapshot func(int) (map[int]nodemetrics.SessionProcess, bool)) *UsageSampler {
+func startUsage(sid int, snapshot func(int) (map[int]nodemetrics.SessionProcess, bool), interval time.Duration) *UsageSampler {
 	s := &UsageSampler{
 		snapshot: snapshot,
 		sid:      sid,
@@ -63,7 +63,7 @@ func startUsage(sid int, snapshot func(int) (map[int]nodemetrics.SessionProcess,
 		done:     make(chan struct{}),
 	}
 	s.sample()
-	go s.run(nodemetrics.Interval())
+	go s.run(interval)
 	return s
 }
 

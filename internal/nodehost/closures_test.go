@@ -1,197 +1,92 @@
-//go:build unix
-
 package nodehost
 
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
+	"reflect"
 	"testing"
-	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func TestClosures(t *testing.T) {
-	if testing.Short() {
-		t.Skip("builds a pipeline binary; run without -short")
-	}
-	bin := filepath.Join(t.TempDir(), "attemptfixture")
-	if out, err := exec.Command("go", "build", "-o", bin, "./testdata/attemptfixture").CombinedOutput(); err != nil {
-		t.Fatalf("build the fixture: %v\n%s", err, out)
-	}
-	srv, err := Start(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = srv.Close() })
-	marker := t.TempDir()
-	args := map[string]string{"marker": marker, "hooks": "true"}
-	logs := &memLogs{records: map[string][]sparkwing.LogRecord{}}
-	attempts := &Attempts{
-		Routes: srv, Resolver: fixtureResolver{}, Masker: secrets.NewMasker(),
-		OpenLog: func(_ context.Context, _, node string) (NodeLog, error) { return memLog{logs: logs, node: node}, nil },
-	}
-	cfg := Config{
-		Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}},
-		Pipeline: "attempts", Args: args,
-		Run:   nodeproto.RunContext{RunID: "run-hooks"},
-		State: openStore(t), Logger: slog.New(slog.DiscardHandler),
-		Attempts: attempts,
-		Debug:    Debug{PauseBefore: []string{"skipped"}, PauseTimeout: time.Millisecond},
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
-	defer cancel()
-	res, err := Execute(ctx, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	trace := func(node string) string {
-		data, _ := os.ReadFile(filepath.Join(marker, node))
-		return string(data)
-	}
-	row := func(node string) *store.Node {
-		r, err := cfg.State.GetNode(t.Context(), "run-hooks", node)
-		if err != nil {
-			t.Fatalf("node %s: %v", node, err)
-		}
-		return r
-	}
-
-	t.Run("ASkipIfThatHoldsSkipsTheNodeBeforeItStarts", func(t *testing.T) {
-		r := row("skipped")
-		if r.Outcome != string(sparkwing.Skipped) || r.Error != "SkipIf predicate 1 returned true" || r.StartedAt != nil {
-			t.Errorf("skipped row outcome=%q error=%q started=%v, want skipped by predicate 1 and never started", r.Outcome, r.Error, r.StartedAt)
-		}
-		if got := trace("skipped"); got != "" {
-			t.Errorf("the skipped node's body ran: %q", got)
-		}
-	})
-
-	t.Run("APauseBeforeComesBeforeSkipIf", func(t *testing.T) {
-		pauses, err := cfg.State.(*store.Store).ListDebugPauses(t.Context(), "run-hooks")
-		if err != nil || len(pauses) != 1 || pauses[0].NodeID != "skipped" || pauses[0].Reason != store.PauseReasonBefore {
-			t.Errorf("pauses %+v err %v, want the skipped node paused before", pauses, err)
-		}
-	})
-
-	t.Run("ASkippedApprovalGateNeverAsks", func(t *testing.T) {
-		if r := row("skipped-gate"); r.Outcome != string(sparkwing.Skipped) || r.StartedAt != nil {
-			t.Errorf("gate row outcome=%q started=%v, want skipped and never started", r.Outcome, r.StartedAt)
-		}
-		if appr, err := cfg.State.GetApproval(t.Context(), "run-hooks", "skipped-gate"); err == nil {
-			t.Errorf("the skipped gate created an approval: %+v", appr)
-		}
-	})
-
-	t.Run("ASkipIfThatOverrunsDoesNotSkip", func(t *testing.T) {
-		if res.Nodes["kept"].Outcome != sparkwing.Success || trace("kept") != "body\n" {
-			t.Errorf("kept = %+v, trace %q, want its body run once", res.Nodes["kept"], trace("kept"))
-		}
-		if log := logs.text("kept"); !strings.Contains(log, "SkipIf predicate 0 exceeded 300ms budget") {
-			t.Errorf("kept log lacks the overrun:\n%s", log)
-		}
-	})
-
-	// safety: a guard that could not answer, as one whose secret would not resolve, must not let a deploy run.
-	t.Run("ASkipIfThatFailsFailsTheNodeWithoutItsBody", func(t *testing.T) {
-		r := row("guarded")
-		if r.Outcome != string(sparkwing.Failed) || !strings.Contains(r.Error, "SkipIf predicate 0 failed") || r.StartedAt != nil {
-			t.Errorf("guarded row outcome=%q error=%q started=%v, want failed by its predicate and never started", r.Outcome, r.Error, r.StartedAt)
-		}
-		if got := trace("guarded"); got != "" {
-			t.Errorf("the guarded node's body ran: %q", got)
-		}
-	})
-
-	t.Run("AFailingVerifyFailsTheAttemptAndAfterRunSeesIt", func(t *testing.T) {
-		r := row("unverified")
-		if r.Outcome != string(sparkwing.Failed) || r.FailureReason != store.FailureVerify || r.Error != "verify: health check: 503" {
-			t.Errorf("unverified row outcome=%q reason=%q error=%q, want failed with verify", r.Outcome, r.FailureReason, r.Error)
-		}
-		if got := trace("unverified"); got != "body\nafter:verify: health check: 503\n" {
-			t.Errorf("unverified trace = %q, want the body, then after_run with the verify error", got)
-		}
-	})
-
-	t.Run("AFailingVerifyNeverFansOut", func(t *testing.T) {
-		r := row("unverified-source")
-		if r.Outcome != string(sparkwing.Failed) || r.FailureReason != store.FailureVerify {
-			t.Errorf("source row outcome=%q reason=%q error=%q, want failed with verify", r.Outcome, r.FailureReason, r.Error)
-		}
-		if got := trace("unverified-source"); got != "" {
-			t.Errorf("source trace = %q, want the generator never run", got)
-		}
-		if _, err := cfg.State.GetNode(t.Context(), "run-hooks", "unverified-a"); err == nil {
-			t.Error("a node was generated from a source whose verify failed")
-		}
-	})
-
-	t.Run("AFailingBeforeRunEndsTheNodeWithoutItsBodyOrARetry", func(t *testing.T) {
-		r := res.Nodes["unready"]
-		if r.Outcome != sparkwing.Failed || !r.Final || r.Err == nil || r.Err.Error() != "BeforeRun hook 0: not ready" {
-			t.Errorf("unready = %+v, want a final failure from before_run", r)
-		}
-		if got := trace("unready"); got != "before\n" {
-			t.Errorf("unready trace = %q, want one before_run and neither body, retry nor after_run", got)
-		}
-	})
-
-	t.Run("AfterRunRunsOnlyInTheLastOfThreeAttempts", func(t *testing.T) {
-		if got := trace("flaky"); got != "before\nbody\nbody\nbody\nafter:step \"run\": still broken\n" {
-			t.Errorf("flaky trace = %q, want before_run once, three bodies, then after_run once with the error", got)
-		}
-	})
-
-	t.Run("ATimedOutAttemptStillRunsAfterRun", func(t *testing.T) {
-		r := row("slow")
-		if r.Outcome != string(sparkwing.Failed) || r.FailureReason != store.FailureTimeout {
-			t.Errorf("slow row outcome=%q reason=%q error=%q, want failed with timeout", r.Outcome, r.FailureReason, r.Error)
-		}
-		if got := trace("slow"); got != "body\nafter:timeout exceeded (500ms): context deadline exceeded\n" {
-			t.Errorf("slow trace = %q, want the body, then after_run with the timeout error", got)
-		}
-	})
-
-	t.Run("BeforeRunRunsOnceAcrossRetriesAndAfterRunInTheLast", func(t *testing.T) {
-		run, err := cfg.State.GetRun(t.Context(), "run-hooks")
-		if err != nil {
-			t.Fatal(err)
-		}
-		var doc nodeproto.PlanDoc
-		if err := json.Unmarshal(run.PlanSnapshot, &doc); err != nil {
-			t.Fatal(err)
-		}
-		var hooked nodeproto.JobSpec
-		for _, n := range doc.Jobs {
-			if n.ID == "hooked" {
-				hooked = n
+func TestClosuresRunOnceAroundRetries(t *testing.T) {
+	for _, mode := range []string{"retry-success", "retry-failure", "before-failure", "verify-failure"} {
+		t.Run(mode, func(t *testing.T) {
+			input, state, deps, processes := executorFixture(t)
+			input.Attempt, state.row.Attempt = 0, 0
+			executorRetryBudget(t, &input, state, 2)
+			job := input.Accepted.Plan.Jobs[0]
+			job.Closures = nodeproto.ClosureSpec{BeforeRun: []string{"before"}, Verify: "verify", AfterRun: []string{"after"}}
+			executorChangeJob(t, &input, state, job)
+			var trace []string
+			start := deps.Start
+			deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
+				process, err := start(ctx, in, activity)
+				p := process.(*executorProcess)
+				p.plan = input.Accepted.Plan
+				ordinal := len(*processes)
+				p.answer = func(_ context.Context, request nodeproto.Request) (any, error) {
+					if request.Op == nodeproto.OpRunStep {
+						trace = append(trace, "body")
+						if mode == "retry-failure" || mode == "retry-success" && ordinal == 1 {
+							return nodeproto.RunResult{Outcome: "failed", Error: &apierr.Error{Code: apierr.SDKError, Message: "body refused"}}, nil
+						}
+					}
+					if request.Op != nodeproto.OpEval {
+						return nil, nil
+					}
+					trace = append(trace, request.Closure)
+					if mode == "before-failure" && request.Closure == "before" || mode == "verify-failure" && request.Closure == "verify" {
+						return nodeproto.EvalResult{Error: &apierr.Error{Code: apierr.SDKError, Message: "hook refused"}}, nil
+					}
+					if request.Closure == "after" {
+						var result nodeproto.RunResult
+						if err := json.Unmarshal(request.Input, &result); err != nil {
+							t.Fatal(err)
+						}
+						if mode == "retry-success" && result.Outcome != "success" || mode != "retry-success" && (result.Outcome != "failed" || result.Error == nil) {
+							t.Errorf("after_run input=%s", request.Input)
+						}
+					}
+					return nodeproto.EvalResult{Value: json.RawMessage("null")}, nil
+				}
+				return process, err
 			}
-		}
-		if err := os.Remove(filepath.Join(marker, "hooked")); err != nil {
-			t.Fatal(err)
-		}
-		r := &Run{ID: "run-hooks", Doc: doc, Pipeline: "attempts", Args: args, Context: cfg.Run, State: cfg.State, Logger: cfg.Logger, validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
-		exec := attempts.executor(&cfg)
-		var retried []Result
-		first := exec(t.Context(), &NodeRun{Run: r, Plan: hooked, Attempt: 1, Retried: func(res Result) bool {
-			retried = append(retried, res)
-			return true
-		}})
-		second := exec(t.Context(), &NodeRun{Run: r, Plan: hooked, Attempt: 2})
-		if first.Outcome != sparkwing.Failed || second.Outcome != sparkwing.Success || len(retried) != 1 {
-			t.Errorf("attempts = %+v then %+v (retry asked %d times), want a failure then a success", first, second, len(retried))
-		}
-		if got := trace("hooked"); got != "before\nbody\nbody\nverify\nafter:<nil>\n" {
-			t.Errorf("hooked trace = %q, want before_run once, verify after the passing body and after_run in attempt 2 only", got)
-		}
-	})
+			executor, err := NewNodeExecutor(deps)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = executor.Execute(t.Context(), input)
+			want := map[string][]string{
+				"retry-success":  {"before", "body", "body", "verify", "after"},
+				"retry-failure":  {"before", "body", "body", "body", "after"},
+				"before-failure": {"before"},
+				"verify-failure": {"before", "body", "verify", "body", "verify", "body", "verify", "after"},
+			}[mode]
+			if !reflect.DeepEqual(trace, want) {
+				t.Fatalf("trace=%v, want %v (error=%v)", trace, want, err)
+			}
+			if (err != nil) != (mode == "before-failure") {
+				t.Fatalf("error=%v", err)
+			}
+			report := state.changes[len(state.changes)-1]
+			wantOutcome := store.NodeFailed
+			if mode == "retry-success" {
+				wantOutcome = store.NodeSuccess
+			}
+			if report.To != wantOutcome {
+				t.Fatalf("report=%+v", report)
+			}
+			if mode == "verify-failure" && (report.Extra.Result == nil || report.Extra.Result.Failure == nil || report.Extra.Result.Failure.Stage != "verify") {
+				t.Fatalf("verify failure lost its stage: %+v", report.Extra.Result)
+			}
+			for _, p := range *processes {
+				if p.closed != 1 || p.cleaned != 1 {
+					t.Fatal("closure execution leaked a process")
+				}
+			}
+		})
+	}
 }

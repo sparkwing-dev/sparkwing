@@ -34,9 +34,14 @@ func snapshotProcesses(selected func(map[int]processSample) map[int]processSampl
 		}
 		processes[pid], zombies[pid] = p, zombie
 	}
-	for pid, p := range selected(processes) {
+	processes = selected(processes)
+	for pid, p := range processes {
 		if !zombies[pid] {
 			raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/smaps_rollup")
+			if os.IsNotExist(err) || errors.Is(err, syscall.ESRCH) {
+				delete(processes, pid)
+				continue
+			}
 			p.rss, p.valid = processResidentBytes(string(raw))
 			p.valid = p.valid && err == nil
 		}

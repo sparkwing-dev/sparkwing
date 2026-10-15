@@ -9,7 +9,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
-func requestSource(sealed runspec.SealedRequest) (Spec, error) {
+// ForRequest projects the sealed source location and intake checkout policy.
+func ForRequest(sealed runspec.SealedRequest) (Spec, error) {
 	r := sealed.Request
 	location := r.Source.Location
 	if (location.RemoteURL == "") == (location.LocalCheckout == "") {
@@ -46,8 +47,9 @@ func requestSource(sealed runspec.SealedRequest) (Spec, error) {
 	return spec, validateSpec(spec)
 }
 
-func executionSource(sealed runspec.Spec) (Spec, error) {
-	spec, err := requestSource(sealed.Request)
+// ForExecution projects the accepted checkout policy and engine identity.
+func ForExecution(sealed runspec.Spec) (Spec, error) {
+	spec, err := ForRequest(sealed.Request)
 	if err != nil {
 		return Spec{}, err
 	}

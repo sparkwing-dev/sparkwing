@@ -2,7 +2,7 @@ package nodehost
 
 import (
 	"context"
-	"log/slog"
+	"encoding/json"
 	"slices"
 	"strconv"
 	"strings"
@@ -10,30 +10,14 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func hostWith(t *testing.T, ctx context.Context, st *store.Store, cfg Config, doc nodeproto.PlanDoc) RunResult {
-	t.Helper()
-	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
-		t.Fatal(err)
-	}
-	skips, err := onlySkips(doc, cfg.Only, cfg.StartAt, cfg.StopAt)
-	if err != nil {
-		t.Fatalf("only: %v", err)
-	}
-	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), onlySkips: skips, validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
-	res := RunResult{RunID: testRunID, Nodes: map[string]Result{}}
-	runPlanned(ctx, &cfg, run, &res)()
-	return res
-}
-
 func TestOnlyRunsTheMatchedNodesAndWhatTheyNeed(t *testing.T) {
-	st := openStore(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	fx := &fakeExec{}
 	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
 		{ID: "setup", Steps: []nodeproto.StepSpec{{ID: "body"}}},
 		{ID: "build-linux", Needs: deps("setup"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
@@ -42,20 +26,64 @@ func TestOnlyRunsTheMatchedNodesAndWhatTheyNeed(t *testing.T) {
 		{ID: "notify", OnFailureOf: "build-linux", Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}}
 
-	res := hostWith(t, ctx, st, Config{Execute: fx.run, Only: "build-l*"}, doc)
-	if res.Status != "success" {
-		t.Fatalf("status=%s err=%v, want success", res.Status, res.Err)
+	f := newStoreHostFixtureOn(t, openStore(t), doc, runspec.Options{Only: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "build-l*"}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag}}})
+	skips, err := onlySkips(doc, "build-l*", "", "")
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, id := range []string{"setup", "build-linux"} {
-		wantRow(t, st, id, sparkwing.Success, "")
+	executed := make(chan string, len(doc.Jobs))
+	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
+		executed <- input.NodeID
+		return f.report(ctx, input, store.NodeSuccess)
+	})
+	completion, err := f.Host.Run(ctx, f.Input)
+	if err != nil || completion.Outcome != "success" {
+		t.Fatalf("completion=%+v error=%v", completion, err)
 	}
-	for _, id := range []string{"build-mac", "deploy"} {
-		wantRow(t, st, id, sparkwing.Skipped, `outside --only="build-l*"`)
-		if fx.ran(id) {
-			t.Errorf("%s ran outside --sw-only", id)
+	close(executed)
+	var ran []string
+	for id := range executed {
+		ran = append(ran, id)
+	}
+	if !slices.Equal(ran, []string{"setup", "build-linux"}) {
+		t.Fatalf("executed=%v", ran)
+	}
+	events, err := f.Tenant.ListEventsAfter(ctx, f.Accepted.RunID, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"setup", "build-linux", "build-mac", "deploy", "notify"} {
+		row, err := f.Tenant.ReadNode(ctx, store.NodeRef{RunID: f.Accepted.RunID, NodeID: id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, reason := store.NodeSuccess, ""
+		if selected, ok := skips[id]; ok {
+			want, reason = store.NodeSkipped, selected
+		} else if id == "notify" {
+			want, reason = store.NodeSkipped, "parent_did_not_fail"
+		}
+		if row.Status != store.StatusDone || row.Outcome != want {
+			t.Errorf("%s: status=%s outcome=%s, want %s", id, row.Status, row.Outcome, want)
+		}
+		if want != store.NodeSkipped {
+			continue
+		}
+		ends := 0
+		for _, event := range events {
+			if event.NodeID != id || event.Kind != "job_skipped" {
+				continue
+			}
+			ends++
+			var result store.NodeResult
+			if err := json.Unmarshal(event.Payload, &result); err != nil || result.Reason != reason {
+				t.Errorf("%s: event=%s error=%v, want reason %q", id, event.Payload, err, reason)
+			}
+		}
+		if ends != 1 {
+			t.Errorf("%s: skipped events=%d, want 1", id, ends)
 		}
 	}
-	wantRow(t, st, "notify", sparkwing.Skipped, "did not fail")
 }
 
 func TestOnlyRefusesWhatTheDispatcherRefused(t *testing.T) {
@@ -71,20 +99,115 @@ func TestOnlyRefusesWhatTheDispatcherRefused(t *testing.T) {
 	}
 }
 
+func TestOnlyPreservesSchedulerDependencyKinds(t *testing.T) {
+	for _, generated := range []bool{false, true} {
+		t.Run(strconv.FormatBool(generated), func(t *testing.T) {
+			doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+				{ID: "prerequisite", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+				{ID: "consumer", NeedsIfPresent: []string{"prerequisite", "absent"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+				{ID: "outside", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			}}
+			if generated {
+				doc.Jobs[0].Closures.Generate = []string{"children"}
+				doc.Jobs[1].NeedsIfPresent = nil
+				doc.Jobs[1].NeedsGenerated = []string{"children"}
+			}
+			fixture := newStoreHostFixtureOn(t, openStore(t), doc, runspec.Options{Only: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "consumer"}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag}}})
+			fixture.Host.Expand = func(context.Context, EvaluationInput, store.NodeRow, StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
+				return json.RawMessage(`{"jobs":[{"id":"child","deps":["prerequisite"],"groups":["children"],"steps":[{"id":"body"}]}]}`), nil, nil
+			}
+			fixture.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
+				return fixture.report(ctx, input, store.NodeSuccess)
+			})
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			completion, err := fixture.Host.Run(ctx, fixture.Input)
+			if err != nil || completion.Outcome != "success" {
+				t.Fatalf("completion=%+v error=%v", completion, err)
+			}
+			for _, id := range []string{"prerequisite", "consumer", "outside"} {
+				row, err := fixture.Tenant.ReadNode(ctx, store.NodeRef{RunID: fixture.Accepted.RunID, NodeID: id})
+				want := store.NodeSuccess
+				if id == "outside" {
+					want = store.NodeSkipped
+				}
+				if err != nil || row.Status != store.StatusDone || row.Outcome != want {
+					t.Errorf("%s: row=%+v error=%v, want %s", id, row, err, want)
+				}
+			}
+			if generated {
+				row, err := fixture.Tenant.ReadNode(ctx, store.NodeRef{RunID: fixture.Accepted.RunID, NodeID: "child"})
+				if err != nil || row.Outcome != store.NodeSuccess {
+					t.Errorf("generated child: row=%+v error=%v", row, err)
+				}
+			}
+		})
+	}
+}
+
+func TestOwnerRefusesUnknownStepWindowBeforeDispatch(t *testing.T) {
+	for _, resumed := range []bool{false, true} {
+		t.Run(strconv.FormatBool(resumed), func(t *testing.T) {
+			state, host, input := newOwnerFixture(t, resumed)
+			options := runspec.Options{StartAt: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "missing"}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag}}}
+			state.snapshot.Run.Request.Request.Options = options
+			var err error
+			input.SealedRequest, err = json.Marshal(state.snapshot.Run.Request.Request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resumed {
+				state.snapshot.Run.Spec.Request = state.snapshot.Run.Request
+				state.snapshot.Run.Spec.Resolved.Settings.Options = options
+				accepted, err := ownerAccepted(state.snapshot.Run)
+				if err != nil {
+					t.Fatal(err)
+				}
+				input.Accepted = &accepted
+			}
+			completion, err := host.Run(t.Context(), input)
+			if err == nil || !strings.Contains(err.Error(), "unknown step") || completion.Outcome != "" {
+				t.Fatalf("completion=%+v error=%v", completion, err)
+			}
+			if state.accepted.RunID != "" || slices.Contains(state.trace, "start") {
+				t.Fatal("invalid window accepted a plan or started work")
+			}
+			if resumed {
+				if slices.Contains(state.trace, "acquire") || state.finished.Unit.RunID != "" {
+					t.Fatal("invalid resumed window acquired source or finished its accepted topology")
+				}
+			} else if state.finished.Transition.To != store.RunFailed {
+				t.Fatal("invalid initial window left its owner unfinished")
+			}
+		})
+	}
+}
+
 func TestDryRunEnvHandsTheSwitchToTheNode(t *testing.T) {
 	for _, dryRun := range []bool{true, false} {
-		cfg := Config{Session: SessionConfig{Env: []string{}}, Run: nodeproto.RunContext{DryRun: dryRun}}
-		planned, err := planSession(cfg)
+		input, state, _, _ := executorFixture(t)
+		var spec runspec.Spec
+		if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
+			t.Fatal(err)
+		}
+		spec.Resolved.Settings.Options.DryRun.Set, spec.Resolved.Settings.Options.DryRun.Value = true, dryRun
+		var err error
+		input.Accepted.Spec, err = json.Marshal(spec)
 		if err != nil {
 			t.Fatal(err)
 		}
-		attempt, _, err := attemptEnvironments(cfg.Session, &NodeRun{Run: &Run{Context: cfg.Run}})
+		policy := SDKEnvironment{Store: state}
+		planned, err := policy.planning(t.Context(), PlanningProcessInput{Run: nodeproto.RunContext{RunID: "run", Pipeline: "ci", DryRun: dryRun}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		attempt, err := policy.job(t.Context(), procenv.Attempt, input.Accepted, input.NodeID, input.Generation, input.SpecHash, input.GrantedRunner)
 		if err != nil {
 			t.Fatal(err)
 		}
 		want := "SPARKWING_DRY_RUN=" + strconv.FormatBool(dryRun)
-		if !slices.Contains(planned.Env, want) || !slices.Contains(attempt, want) {
-			t.Fatalf("plan=%v attempt=%v, want %s", planned.Env, attempt, want)
+		if !slices.Contains(planned, want) || !slices.Contains(attempt, want) {
+			t.Fatalf("plan=%v attempt=%v, want %s", planned, attempt, want)
 		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"time"
 
@@ -12,6 +13,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+)
+
+const (
+	defaultSkipBudget    = 30 * time.Second
+	memoKeyBudget        = 30 * time.Second
+	afterRunTimeoutLimit = 2 * time.Minute
 )
 
 // SkipEvaluation reports the guard decision and zero-based predicates that
@@ -137,4 +144,40 @@ func (h *OwnerEvaluator) policyError(ctx context.Context, err error) error {
 		code = structured.Code
 	}
 	return errors.Join(cause, &apierr.Error{Code: code, Message: boundedNodeErrText(h.deps.Mask(err.Error()))})
+}
+
+func (h *OwnerEvaluator) skipLayer(ctx context.Context, input EvaluationInput, row store.NodeRow, log func(context.Context, string, string, nodeproto.FrameLog) error) (OwnerLayerResult, error) {
+	result, err := h.SkipIf(ctx, input)
+	if err != nil {
+		return OwnerLayerResult{}, err
+	}
+	for _, index := range result.TimedOut {
+		err := log(ctx, input.Accepted.RunID, input.NodeID, nodeproto.FrameLog{
+			Level: "warn", Message: "SkipIf predicate exceeded its budget; continuing without skipping",
+			Attrs: json.RawMessage(fmt.Sprintf(`{"predicate":%d}`, index)),
+		})
+		if err != nil {
+			return OwnerLayerResult{}, err
+		}
+	}
+	if !result.Skip {
+		return OwnerLayerResult{}, nil
+	}
+	var job nodeproto.JobSpec
+	if err := json.Unmarshal(row.Spec, &job); err != nil {
+		return OwnerLayerResult{}, err
+	}
+	if job.Approval != nil {
+		return OwnerLayerResult{Transition: &store.NodeTransition{
+			To: store.NodeSuccess, Cause: store.CauseOwnerPolicy,
+			Extra: store.TransitionExtra{
+				OwnerPolicy: &store.OwnerPolicyResult{Kind: store.PolicyApprovalBypass, Generation: row.Generation},
+				Result:      &store.NodeResult{Outcome: store.NodeSuccess, Reason: "skip_if"},
+			},
+		}}, nil
+	}
+	return OwnerLayerResult{Transition: &store.NodeTransition{
+		To: store.NodeSkipped, Cause: store.CauseDependency,
+		Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeSkipped, Reason: "skip_if"}},
+	}}, nil
 }

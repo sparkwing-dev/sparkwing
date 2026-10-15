@@ -3,245 +3,322 @@ package nodehost
 import (
 	"context"
 	"errors"
-	"log/slog"
+	"fmt"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/lease"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-func hostDispatched(t *testing.T, ctx context.Context, st *store.Store, doc nodeproto.PlanDoc, dispatch Executor) RunResult {
+func releaseRemote(t *testing.T, f *storeHostFixture, node string) {
 	t.Helper()
-	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
+	f.Host.Local = func(store.NodeRow) bool { return false }
+	ref := store.NodeRef{RunID: f.Input.RunID, NodeID: node}
+	row, err := f.Tenant.ReadNode(t.Context(), ref)
+	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := Config{Dispatch: dispatch, ClaimedRowPoll: 5 * time.Millisecond}
-	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
-	res := RunResult{RunID: testRunID, Nodes: map[string]Result{}}
-	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg)}
-	if err := s.add(ctx, ctx, doc.Jobs, nil); err != nil {
-		t.Fatalf("add: %v", err)
+	entry, err := f.Host.Acquire(t.Context(), f.Input)
+	if err != nil {
+		t.Fatal(err)
 	}
-	s.loop(ctx)
-	res.Status, res.Err = s.verdict(ctx)
-	return res
-}
-
-// hack: a stand-in pod, which starts and finishes the node's row itself, as a node host under its own claim does.
-func remoteHost(st *store.Store, outcome sparkwing.Outcome, errMsg string, output []byte) Executor {
-	return func(ctx context.Context, n *NodeRun) Result {
-		if err := st.StartNode(ctx, n.Run.ID, n.Plan.ID); err != nil {
-			return Result{Outcome: sparkwing.Failed, Err: err}
-		}
-		if err := st.FinishNodeWithReason(ctx, n.Run.ID, n.Plan.ID, string(outcome), errMsg, output, store.FailureUnknown, nil); err != nil {
-			return Result{Outcome: sparkwing.Failed, Err: err}
-		}
-		return Result{Outcome: sparkwing.Failed, Err: errors.New("the dispatcher's own view, which the row overrides")}
+	if err := f.Host.release(t.Context(), f.Input, f.Accepted, entry, row, store.DecisionReady, func(context.Context, store.ReconcileRequest) error {
+		t.Fatal("remote work entered owner executor")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 
-// The row the remote host wrote is the node's result: the run host neither
-// rewrites it nor trusts the dispatcher's own reading over it, and a
-// dependent sees the outcome the row holds.
+func claimRemote(t *testing.T, f *storeHostFixture, node string) (store.UnitClaim, NodeInput) {
+	t.Helper()
+	claim, err := f.Store.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Control.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: f.Input.RunID, NodeID: node}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, err := f.Tenant.ReadNode(t.Context(), store.NodeRef{RunID: f.Input.RunID, NodeID: node})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := f.Host.Acquire(t.Context(), f.Input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, err := NewNodeInput(f.Accepted, row, entry.Engine, f.Input.GrantedRunner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return claim, input
+}
+
+func remotePlan() nodeproto.PlanDoc {
+	return nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "test", Needs: []string{"build"}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
+}
+
 func TestDispatchAdoptsTheRowTheRemoteHostWrote(t *testing.T) {
-	st := openStore(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
-	var downstream atomic.Bool
-	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-		{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "test", Needs: deps("build"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
-	}}, func(ctx context.Context, n *NodeRun) Result {
-		if n.Plan.ID == "test" {
-			downstream.Store(true)
+	f := newStoreHostFixture(t, remotePlan())
+	for _, id := range []string{"build", "test"} {
+		releaseRemote(t, f, id)
+		_, input := claimRemote(t, f, id)
+		if err := f.report(t.Context(), input, store.NodeSuccess); err != nil {
+			t.Fatal(err)
 		}
-		return remoteHost(st, sparkwing.Success, "", []byte(`{"digest":"abc"}`))(ctx, n)
-	})
-	if res.Status != "success" || !downstream.Load() {
-		t.Fatalf("run = %+v (downstream ran %v), want success with test dispatched after build", res, downstream.Load())
+		before, err := f.Tenant.ReadNode(t.Context(), store.NodeRef{RunID: f.Input.RunID, NodeID: id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := FollowReconciliation(t.Context(), f.State, store.ReconcileRequest{Ref: before.Ref, Actor: f.Actor, Policy: store.SourceNone}, nil)
+		if err != nil || result.Kind != store.KeepTerminal || result.Node.Outcome != store.NodeSuccess || result.Node.StateSeq != before.StateSeq || result.Node.Attempt != 1 || result.Node.Generation != input.Generation {
+			t.Fatalf("adopted = %+v, error %v", result, err)
+		}
 	}
-	row := nodeRow(t, st, "build")
-	if row.Outcome != string(sparkwing.Success) || row.Error != "" || row.OutputRef == nil {
-		t.Fatalf("build row = %+v, want the remote host's success and output left as written", row)
-	}
-}
-
-// A node the remote host never finished, such as one refused before its
-// claim, is finished by the run host with the dispatcher's result.
-func TestDispatchFinishesARowTheRemoteHostNeverWrote(t *testing.T) {
-	st := openStore(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}}},
-		func(context.Context, *NodeRun) Result {
-			return Result{Outcome: sparkwing.Failed, Err: errors.New("claim refused: credits exhausted")}
-		})
-	if res.Status != "failed" {
-		t.Fatalf("run = %+v, want failed", res)
+	completion, err := f.Host.Run(ctx, f.Input)
+	if err != nil || completion.Outcome != "success" {
+		t.Fatalf("completion = %+v, error %v", completion, err)
 	}
-	wantRow(t, st, "build", sparkwing.Failed, "claim refused")
 }
 
-// safety: retries and timeouts belong to the host that runs the node, so the
-// run host dispatches a node once however many attempts it declares; a
-// second dispatch would race the first pod for the same claim.
 func TestDispatchSendsANodeOnceWhateverItsRetries(t *testing.T) {
-	st := openStore(t)
-	var calls atomic.Int32
-	ctx := t.Context()
-	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{
-		ID: "flaky", TimeoutMS: new(int64(1)), Retry: &nodeproto.RetrySpec{Attempts: 3}, Steps: []nodeproto.StepSpec{{ID: "body"}},
-	}}}, func(ctx context.Context, n *NodeRun) Result {
-		calls.Add(1)
-		// safety: the remote host owns the node's timeout, so the run host's context carries no deadline of its own.
-		if _, bounded := ctx.Deadline(); bounded {
-			t.Error("the run host bounded a dispatched node by its timeout")
-		}
-		return remoteHost(st, sparkwing.Failed, "still broken", nil)(ctx, n)
-	})
-	if got := calls.Load(); got != 1 {
-		t.Fatalf("dispatched %d times, want once", got)
-	}
-	if res.Status != "failed" {
-		t.Fatalf("run = %+v, want failed", res)
-	}
-	wantRow(t, st, "flaky", sparkwing.Failed, "still broken")
-}
-
-// A run cancelled while a node is out stops the dispatch, and the node that
-// never reached a remote host is recorded cancelled; its dependents never go.
-func TestDispatchCancelledRunCancelsTheOutstandingNode(t *testing.T) {
-	st := openStore(t)
-	ctx, cancel := context.WithCancelCause(t.Context())
-	defer cancel(nil)
-	out := make(chan struct{})
-	var downstream atomic.Bool
-	go func() {
-		<-out
-		cancel(&lease.CancelError{Reason: "cancelled by operator"})
-	}()
-	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-		{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "test", Needs: deps("build"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
-	}}, func(ctx context.Context, n *NodeRun) Result {
-		if n.Plan.ID == "test" {
-			downstream.Store(true)
-		}
-		close(out)
-		<-ctx.Done()
-		return Result{Outcome: sparkwing.Cancelled, Err: ctx.Err()}
-	})
-	if res.Status != "cancelled" || downstream.Load() {
-		t.Fatalf("run = %+v (downstream dispatched %v), want cancelled with test never dispatched", res, downstream.Load())
-	}
-	wantRow(t, st, "build", sparkwing.Cancelled, "")
-	wantRow(t, st, "test", sparkwing.Cancelled, "")
-}
-
-// safety: a row another holder claims is that holder's to finish, so the run
-// host waits for that holder's result and takes it as the node's, rather than
-// fail the run with its own refused dispatch.
-func TestDispatchAdoptsTheResultOfTheHolderThatWonTheClaim(t *testing.T) {
-	st := openStore(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
-	finished := make(chan error, 1)
-	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}}},
-		func(ctx context.Context, n *NodeRun) Result {
-			won, err := st.ClaimNamedNode(ctx, store.ClaimIdentity{}, n.Run.ID, n.Plan.ID, "pool:other", time.Minute, store.NamedClaimOptions{})
-			if err != nil {
-				t.Errorf("claim: %v", err)
-				return Result{Outcome: sparkwing.Failed, Err: err}
-			}
-			fenced := store.WithNodeClaimFence(context.WithoutCancel(ctx), store.NodeClaimFence{
-				HolderID: won.ClaimedBy, MembershipID: won.ClaimMembershipID, ReservationID: won.ReservationID, ClaimGeneration: won.ClaimGeneration,
-			})
-			// safety: the holder may finish after the refused dispatch returns, so the host waits for its result.
-			go func() {
-				finished <- st.FinishNodeWithReason(fenced, n.Run.ID, n.Plan.ID, string(sparkwing.Success), "", nil, "", nil)
-			}()
-			return Result{Outcome: sparkwing.Failed, Err: store.ErrLockHeld}
-		})
-	if err := <-finished; err != nil {
-		t.Fatalf("the holder's finish: %v", err)
-	}
-	if res.Status != "success" {
-		t.Fatalf("run = %+v, want the holder's success", res)
-	}
-	if row := nodeRow(t, st, "build"); row.Outcome != string(sparkwing.Success) || row.ClaimedBy != "pool:other" {
-		t.Fatalf("build row = %s/%s claimed by %q, want the holder's success", row.Status, row.Outcome, row.ClaimedBy)
-	}
-}
-
-// safety: a holder that died leaves a claim whose lease lapses, and without a
-// reaper nothing clears it, so the run host stops waiting once the lease is
-// gone rather than block the run forever.
-func TestDispatchStopsWaitingOnAHolderWhoseLeaseLapsed(t *testing.T) {
-	st := openStore(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
-	res := hostDispatched(t, ctx, st, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}}},
-		func(ctx context.Context, n *NodeRun) Result {
-			if _, err := st.ClaimNamedNode(ctx, store.ClaimIdentity{}, n.Run.ID, n.Plan.ID, "pool:dead", time.Millisecond, store.NamedClaimOptions{}); err != nil {
-				t.Errorf("claim: %v", err)
-			}
-			return Result{Outcome: sparkwing.Failed, Err: store.ErrLockHeld}
-		})
-	if ctx.Err() != nil || res.Status != "failed" {
-		t.Fatalf("run = %+v (ctx %v), want it failed without waiting out the test", res, ctx.Err())
-	}
-}
-
-// safety: a resumed run keeps an earlier host's result only for the node it
-// plans now; a node planned differently fails the run as plan drift before any
-// row is written, so a live holder's row and a lost node's reason stand.
-func TestResumeRefusesARowPlannedUnderAnotherSpec(t *testing.T) {
-	st := openStore(t)
-	ctx := t.Context()
-	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
+	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "flaky", Retry: &nodeproto.RetrySpec{Attempts: 3}, Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
+	releaseRemote(t, f, "flaky")
+	_, input := claimRemote(t, f, "flaky")
+	ref := store.NodeRef{RunID: f.Input.RunID, NodeID: "flaky"}
+	held, err := f.Tenant.ReadNode(t.Context(), ref)
+	if err != nil {
 		t.Fatal(err)
 	}
-	for _, row := range []store.Node{
-		{RunID: testRunID, NodeID: "held", Status: "pending", SpecHash: jobHash(nodeproto.JobSpec{ID: "held", Steps: []nodeproto.StepSpec{{ID: "body"}}})},
-		{RunID: testRunID, NodeID: "lost", Status: "pending", SpecHash: jobHash(nodeproto.JobSpec{ID: "lost", Steps: []nodeproto.StepSpec{{ID: "body"}}})},
-		{RunID: testRunID, NodeID: "build", Status: "pending", SpecHash: jobHash(nodeproto.JobSpec{ID: "build", Optional: true, Steps: []nodeproto.StepSpec{{ID: "body"}}})},
-	} {
-		if err := st.CreateNode(ctx, row); err != nil {
+	for range 3 {
+		result, err := f.Tenant.ReconcileNode(t.Context(), store.ReconcileRequest{Ref: ref, Actor: f.Actor, Policy: store.SourceNone})
+		if err != nil || result.Kind != store.WaitHolder || result.Node.Generation != held.Generation || result.Node.StateSeq != held.StateSeq {
+			t.Fatalf("held reconciliation = %+v, error %v", result, err)
+		}
+	}
+	if _, err := f.Store.ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Control.CapabilityPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}, Available: match.Resources{Cores: 64, MemoryBytes: 64 << 30}}); err == nil {
+		t.Fatal("held node awarded twice")
+	}
+	if err := f.report(t.Context(), input, store.NodeFailed); err != nil {
+		t.Fatal(err)
+	}
+	completion, err := f.Host.Run(t.Context(), f.Input)
+	if err != nil || completion.Outcome != "failed" {
+		t.Fatalf("completion = %+v, error %v", completion, err)
+	}
+}
+
+func TestDispatchCancelledRunCancelsTheOutstandingNode(t *testing.T) {
+	f := newStoreHostFixture(t, remotePlan())
+	releaseRemote(t, f, "build")
+	_, input := claimRemote(t, f, "build")
+	ref := store.NodeRef{RunID: f.Input.RunID, NodeID: "build"}
+	if _, err := f.Tenant.TransitionRun(t.Context(), store.RunTransition{RunID: ref.RunID, Actor: f.Control, To: store.RunCancelled, Cause: store.RunCancel}); err != nil {
+		t.Fatal(err)
+	}
+	f.State.notify()
+	applied, err := f.State.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: f.Control, To: store.NodeCancelled, Cause: store.CauseCancel})
+	if err != nil || !applied.CancelRequested {
+		t.Fatalf("cancel = %+v, error %v", applied, err)
+	}
+	held, err := f.Tenant.ReadNode(t.Context(), ref)
+	if err != nil || held.ClaimedBy != input.Authority.Holder || held.Generation != input.Generation || held.Outcome != "" || held.CancelRequestedAt == nil {
+		t.Fatalf("cancelled holder = %+v, error %v", held, err)
+	}
+	if err := f.report(t.Context(), input, store.NodeCancelled); err != nil {
+		t.Fatal(err)
+	}
+	entry, err := f.Host.Acquire(t.Context(), f.Input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completion, err := f.Host.schedule(t.Context(), f.Input, f.Accepted, entry)
+	if err != nil || completion.Outcome != "cancelled" {
+		t.Fatalf("completion = %+v, error %v", completion, err)
+	}
+	dependent, err := f.Tenant.ReadNode(t.Context(), store.NodeRef{RunID: ref.RunID, NodeID: "test"})
+	if err != nil || dependent.Outcome != store.NodeCancelled || dependent.Attempt != 0 {
+		t.Fatalf("dependent = %+v, error %v", dependent, err)
+	}
+}
+
+func TestDispatchRetainsLocalSemaphoresUntilRemoteCompletion(t *testing.T) {
+	for _, scope := range []string{"run", "box"} {
+		for _, mode := range []string{"fresh", "ready", "claimed"} {
+			t.Run(scope+"/"+mode, func(t *testing.T) {
+				plan := remotePlan()
+				for i := range plan.Jobs {
+					plan.Jobs[i].Concurrency = []nodeproto.ConcurrencySpec{{Group: "db", Scope: new(scope)}}
+					plan.Jobs[i].Resources = &nodeproto.ResourceSpec{Cores: new(8.0), MemoryBytes: new(int64(8 << 30))}
+				}
+				f := newStoreHostFixture(t, plan)
+				claims := map[string]NodeInput{}
+				if mode != "fresh" {
+					releaseRemote(t, f, "build")
+				}
+				if mode == "claimed" {
+					_, claims["build"] = claimRemote(t, f, "build")
+				}
+				f.Host.Local = func(store.NodeRow) bool { return false }
+				d := newFakeDaemon()
+				d.hostGate = make(chan struct{})
+				configureNativeAdmission(&f.Host, &LocalAdmission{Daemon: d, BoxID: testBox}, &StoreAdmission{Store: f.Tenant, Owner: f.Actor})
+				d.admitted = make(chan wingwire.AdmissionRequest, 3)
+				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+				done := make(chan error, 1)
+				joined := make(chan struct{})
+				go func() {
+					defer close(joined)
+					completion, err := f.Host.Run(ctx, f.Input)
+					if err == nil && completion.Outcome != "success" {
+						err = fmt.Errorf("completion=%+v", completion)
+					}
+					done <- err
+				}()
+				defer func() { cancel(); <-joined }()
+				for _, id := range []string{"build", "test"} {
+					select {
+					case request := <-d.admitted:
+						if request.RunID == f.Input.RunID {
+							request = <-d.admitted
+						}
+						if request.RunID != wingwire.NodeSemaphoreParticipant(f.Input.RunID, id) {
+							t.Fatalf("unexpected remote admission: %+v", request)
+						}
+					case err := <-done:
+						t.Fatalf("host returned before remote admission: %v", err)
+					case <-ctx.Done():
+						t.Fatal(context.Cause(ctx))
+					}
+					for {
+						snapshot, err := f.Tenant.ReadSnapshot(ctx, f.Input.RunID)
+						if err != nil {
+							t.Fatal(err)
+						}
+						row, ok := ownerNode(snapshot, id)
+						if ok && row.ReadyAt != nil {
+							break
+						}
+						if err := f.Host.Wait(ctx, snapshot); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if live, _, _ := d.counts(); live != 2 {
+						t.Fatalf("ready remote job lost its semaphore: leases=%d", live)
+					}
+					input, claimed := claims[id]
+					if !claimed {
+						_, input = claimRemote(t, f, id)
+					}
+					if err := f.report(ctx, input, store.NodeSuccess); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := <-done; err != nil {
+					t.Fatal(err)
+				}
+				if live, granted, released := d.counts(); live != 0 || granted != 3 || released != 3 {
+					t.Fatalf("leases=%d/%d/%d", live, granted, released)
+				}
+				requests := d.requests()
+				for _, req := range requests[1:] {
+					if !req.SemaphoresOnly || req.Resources != (wingwire.HostResources{}) || !req.SubLease || req.OwnerRunID != f.Input.RunID || req.OwnerLeaseToken != "lease-"+f.Input.RunID || len(req.Semaphores) != 1 || req.Semaphores[0].Name != scopedConcurrencyKey("db", scope, f.Input.RunID, testBox) {
+						t.Fatalf("remote work reserved local resources or lost its binding: %+v", req)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestDispatchAdmissionEvictionDrainsTheRemoteHolder(t *testing.T) {
+	plan := remotePlan()
+	plan.Jobs = plan.Jobs[:1]
+	plan.Jobs[0].Concurrency = []nodeproto.ConcurrencySpec{{Group: "db", Scope: new("box"), OnLimit: new("cancel_others")}}
+	f := newStoreHostFixture(t, plan)
+	f.Host.Local = func(store.NodeRow) bool { return false }
+	d := newFakeDaemon()
+	configureNativeAdmission(&f.Host, &LocalAdmission{Daemon: d, BoxID: testBox}, &StoreAdmission{Store: f.Tenant, Owner: f.Actor})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	done := make(chan error, 1)
+	joined := make(chan struct{})
+	go func() {
+		defer close(joined)
+		_, err := f.Host.Run(ctx, f.Input)
+		done <- err
+	}()
+	defer func() { cancel(); <-joined }()
+	for {
+		snapshot, err := f.Tenant.ReadSnapshot(ctx, f.Input.RunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if row, _ := ownerNode(snapshot, "build"); row.ReadyAt != nil {
+			break
+		}
+		if err := f.Host.Wait(ctx, snapshot); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := st.ClaimNamedNode(ctx, store.ClaimIdentity{}, testRunID, "held", "pool:live", time.Hour, store.NamedClaimOptions{}); err != nil {
+	_, input := claimRemote(t, f, "build")
+	d.mu.Lock()
+	held := d.leases[wingwire.NodeSemaphoreParticipant(f.Input.RunID, "build")]
+	d.mu.Unlock()
+	held.evict <- wingwire.Evicted{Key: "db", SupersededBy: "newer"}
+	for {
+		snapshot, err := f.Tenant.ReadSnapshot(ctx, f.Input.RunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		row, _ := ownerNode(snapshot, "build")
+		if row.CancelRequestedAt != nil {
+			if row.Status == store.StatusDone || row.ClaimedBy != input.Authority.Holder || row.Generation != input.Generation {
+				t.Fatal("eviction replaced the holder's result authority")
+			}
+			break
+		}
+		if err := f.Host.Wait(ctx, snapshot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if live, _, _ := d.counts(); live != 2 {
+		t.Fatal("eviction released capacity before the remote holder drained")
+	}
+	if err := f.report(ctx, input, store.NodeCancelled); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.FinishNodeWithReason(ctx, testRunID, "lost", "failed", "holder lost", nil, store.FailureAgentLost, nil); err != nil {
-		t.Fatal(err)
+	if err := <-done; err == nil || !strings.Contains(err.Error(), "newer") {
+		t.Fatalf("eviction lost its cause: %v", err)
 	}
-	run := &Run{ID: testRunID, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
-	s := &scheduler{run: run, results: map[string]Result{}, started: map[string]bool{}, resume: true}
-	err := s.add(ctx, ctx, []nodeproto.JobSpec{
-		{ID: "held", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "lost", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-	}, nil)
-	var perr *apierr.Error
-	if !errors.As(err, &perr) || perr.Code != apierr.PlanDrift {
-		t.Fatalf("add = %v, want plan_drift", err)
-	}
-	if row := nodeRow(t, st, "held"); row.Status == "done" || row.ClaimedBy != "pool:live" {
-		t.Errorf("held = %s/%s claimed by %q, want left to its live holder", row.Status, row.Outcome, row.ClaimedBy)
-	}
-	if row := nodeRow(t, st, "lost"); row.FailureReason != store.FailureAgentLost {
-		t.Errorf("lost = %s/%s (%s), want its agent_lost record kept", row.Status, row.Outcome, row.FailureReason)
+	if live, granted, released := d.counts(); live != 0 || granted != released {
+		t.Fatalf("leases=%d/%d/%d", live, granted, released)
 	}
 }
 
-// safety: a resumed node's claim is what keeps it from running twice, so a
-// host that dispatches nothing cannot resume.
-func TestResumeNeedsDispatch(t *testing.T) {
-	_, err := Execute(t.Context(), Config{Run: nodeproto.RunContext{RunID: testRunID}, Resume: true, State: openStore(t)})
-	if err == nil || !strings.Contains(err.Error(), "Resume needs Dispatch") {
-		t.Fatalf("Execute = %v, want Resume refused without Dispatch", err)
-	}
+func FuzzRemoteAdmissionPreservesJobIdentity(f *testing.F) {
+	f.Add("run", "job", "spec", int64(3), int64(4), true)
+	f.Add("foreign", "job", "spec", int64(3), int64(4), true)
+	f.Add("run", "job", "spec", int64(2), int64(4), true)
+	f.Add("run", "job", "spec", int64(3), int64(3), true)
+	f.Add("run", "job", "spec", int64(3), int64(4), false)
+	f.Fuzz(func(t *testing.T, run, job, hash string, generation, sequence int64, terminal bool) {
+		before := store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, SpecHash: "spec", Generation: 3, StateSeq: 4}
+		row := store.NodeRow{Ref: store.NodeRef{RunID: run, NodeID: job}, SpecHash: hash, Generation: generation, StateSeq: sequence, Status: store.StatusPending}
+		if terminal {
+			row.Status, row.Outcome = store.StatusDone, store.NodeSuccess
+		}
+		s := &scriptedHostStore{readSnapshot: func(context.Context, string) (store.RunSnapshot, error) {
+			return store.RunSnapshot{Run: store.RunRow{ID: run}, Nodes: []store.NodeRow{row}}, nil
+		}}
+		host := OwnerHost{Store: s, Wait: func(context.Context, store.RunSnapshot) error { return errors.New("not terminal") }}
+		err := host.followRemote(t.Context(), t.Context(), store.Actor{}, before)
+		valid := run == before.Ref.RunID && job == before.Ref.NodeID && hash == before.SpecHash && generation >= before.Generation && sequence >= before.StateSeq && terminal
+		if (err == nil) != valid {
+			t.Fatalf("foreign, regressed or unfinished job settled: valid=%v error=%v", valid, err)
+		}
+	})
 }

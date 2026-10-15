@@ -57,7 +57,7 @@ func TestOwnerDelegatesOnlySourceExpansionAuthority(t *testing.T) {
 	if err := capability.ValidateDelegation(parent, child, now); err != nil {
 		t.Fatalf("source expansion narrowing refused: %v", err)
 	}
-	for _, name := range []string{"another run", "another lease", "another holder", "another generation", "eval lease", "nodehost expansion", "missing source", "missing source generation", "added reporting", "added discovery", "added source access", "without expansion grant", "unbound root", "work claim", "expired owner", "later deadline", "later claim window", "lost reservation", "source widening", "foreign data repo", "extra ref", "data writes", "claim data", "wrong data source", "wrong data generation", "wrong data attempt", "lost default guard", "parent data restricted"} {
+	for _, name := range []string{"another run", "another lease", "another holder", "another generation", "eval lease", "nodehost expansion", "missing source", "negative source generation", "added reporting", "added discovery", "added source access", "without expansion grant", "unbound root", "work claim", "expired owner", "later deadline", "later claim window", "lost reservation", "source widening", "foreign data repo", "extra ref", "data writes", "claim data", "wrong data source", "wrong data generation", "wrong data attempt", "lost default guard", "parent data restricted"} {
 		t.Run(name, func(t *testing.T) {
 			parent, child := ownerExpansionDelegation()
 			switch name {
@@ -75,8 +75,8 @@ func TestOwnerDelegatesOnlySourceExpansionAuthority(t *testing.T) {
 				child.Audience = capability.NodeHost
 			case "missing source":
 				child.Binding.NodeID = ""
-			case "missing source generation":
-				child.Binding.Generation = 0
+			case "negative source generation":
+				child.Binding.Generation = -1
 			case "added reporting":
 				child.Grants = append(child.Grants, capability.NodeResult)
 			case "added discovery":
@@ -138,4 +138,42 @@ func TestOwnerDelegatesOnlySourceExpansionAuthority(t *testing.T) {
 	if err := capability.ValidateDelegation(parent, child, now); err != nil {
 		t.Fatalf("claimed here owner expansion refused: %v", err)
 	}
+}
+
+func FuzzOwnerExpansionKeepsSourceAndOwnerFencesSeparate(f *testing.F) {
+	for _, generation := range []int64{-1, 0, 1, 4} {
+		f.Add(generation, int64(9), false)
+		f.Add(generation, int64(0), false)
+		f.Add(generation, int64(9), true)
+	}
+	f.Fuzz(func(t *testing.T, generation, ownerGeneration int64, widenData bool) {
+		parent, child := ownerExpansionDelegation()
+		parent.Capability.Binding.Generation = ownerGeneration
+		parent.Capability.Data.Generation = ownerGeneration
+		child.Binding.Expansion.Generation = ownerGeneration
+		child.Binding.Generation, child.Data.Generation = generation, generation
+		if widenData {
+			child.Data.Generation++
+		}
+		err := capability.ValidateDelegation(parent, child, time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC))
+		want := generation >= 0 && ownerGeneration > 0 && !widenData
+		if (err == nil) != want {
+			t.Fatalf("source=%d owner=%d widen=%v: err=%v", generation, ownerGeneration, widenData, err)
+		}
+		if !want {
+			return
+		}
+		parent.Authority.ID = "expansion"
+		parent.Capability.Binding, parent.Capability.Data = child.Binding, child.Data
+		parent.Capability.Grants = child.Grants
+		parent.Capability.Issuance = capability.Delegate
+		child.Parent = parent.Authority
+		child.Binding.Generation++
+		data := *child.Data
+		data.Generation++
+		child.Data = &data
+		if err := capability.ValidateDelegation(parent, child, time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)); err == nil {
+			t.Fatal("delegated terminal source generation widened")
+		}
+	})
 }
