@@ -34,7 +34,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		authState = "enabled"
 	}
 
-	if _, err := s.store.ListRuns(r.Context(), store.RunFilter{Limit: 1}); err != nil {
+	if err := s.store.DB().PingContext(r.Context()); err != nil {
 		s.logger.Error("controller health database check failed", "err", err)
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 			"status":   "degraded",

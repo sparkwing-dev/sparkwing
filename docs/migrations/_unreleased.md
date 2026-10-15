@@ -1665,3 +1665,41 @@ A successful write returns HTTP 200 with `{"recorded":true}`. Wait for that
 acknowledgement before emitting the step diagnostic. A source ordinal that no
 longer matches returns `lock_held`. Do not read the latest attempt to replace a
 captured ordinal when retrying the report.
+
+
+## Verified billing events and deployment bootstrap
+
+Automated billing callbacks use `POST /webhooks/stripe`. The signature verifier
+accepts checkout outcomes, `setup_intent.succeeded`, payment-intent success and
+failure, individual refund creation/update/failure, early fraud warning
+creation/update, and dispute creation/closure. It passes provider identities,
+minor-unit amounts and statuses to settlement. Provider metadata never selects
+a team, credit grant or card attempt. Card details are read from Stripe with the
+configured key and checked against the signed object. Test and live use the same
+path with different keys.
+
+The store must connect non-checkout outcomes to its committed billing records.
+That settlement integration is still incomplete. The removed service routes
+have no forwarding aliases. Keep provider retries enabled until settlement can
+commit their outcomes.
+
+Replace `swu_` bootstrap credentials with a `swk_` controller capability
+presentation. `EnsureBootstrapAdminToken` now takes a context, transactional
+issuer and raw presentation. It requires `BootstrapAdminIssuer` and forwards a
+trusted `ProvisionSpec.Seed` to its once-only transaction. It no longer calls
+`CreateTokenIfNoneExist` or accepts a caller clock. The transaction must use
+`Store.Issue`, keep only the digest, close the gate after the first admin
+credential and preserve revocation across restarts. Until that store adapter
+is installed, a configured bootstrap seed refuses startup. Bootstrap authority
+is operational only. Sign in with an account capability or OAuth for dashboard
+access.
+
+
+`EnableAuthFromStore` always requires credentials. It no longer disables
+authentication when the legacy token table is empty or unreadable. The
+single-team anonymous bootstrap mode is removed. Local access uses the
+controller's verified peer path. `--require-auth` retains a startup-readiness
+check for a live deployment administrator capability. The store must implement
+`HasDeploymentAdministrator(context.Context) (bool, error)` for that check.
+A missing reader refuses startup when the flag is set. It never falls back to
+`ListTokens`. Health reports authentication enabled before bootstrap completes.

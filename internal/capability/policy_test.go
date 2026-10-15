@@ -184,7 +184,7 @@ func TestPaymentCallbackRequiresProviderProof(t *testing.T) {
 			t.Fatal("unpaid session can grant credit")
 		}
 	}
-	if len(seen) != 4 {
+	if len(seen) != 14 {
 		t.Fatal("payment event inventory incomplete")
 	}
 }

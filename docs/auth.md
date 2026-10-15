@@ -445,15 +445,56 @@ error. Pricing and compute measurements come from the controller's observations.
 
 ## Buying credits
 
-The controller verifies Stripe webhook signatures. It derives the team, amount,
-checkout identity and credit grant from verified payment provenance. Settlement
-uses the committed checkout and deduplicates the payment event in its
-transaction. A caller's supplied team or amount is not payment proof.
+The controller verifies Stripe signatures at `POST /webhooks/stripe`. Checkout
+payments, failures and expiry carry the committed provider session identity.
+Card setup and card payment outcomes, individual refund updates, early fraud
+warnings and opened or closed disputes carry their provider identities and
+verified status. The verifier reads card details from Stripe when needed and
+checks their identity, customer and test/live mode. Metadata grants no team,
+credit, attempt or billing authority.
+
+Settlement derives the team and ledger effect from committed billing records
+and deduplicates provider events in its transaction. Checkout settlement is
+implemented. Settlement of card, refund, warning and dispute events still needs
+the store integration. A provider retry cannot safely be treated as a new
+credit grant.
 
 Test and live Stripe keys select configuration for the same implementation.
 Checkout, payment history, card operations, payment holds and reversals retain
 their account authorization. A signed payment event authorizes only its declared
 payment operation. It grants no general team or operator power.
+
+## Removed credential routes
+
+GitHub Actions enrollment uses `GET` and `POST /api/v1/runners/github` and
+`DELETE /api/v1/runners/github/{repository}`. The three
+`/api/v1/team/github-runners` registrations are removed. The dashboard uses
+the final paths. `POST /api/v1/tokens/{prefix}/metered` is removed. Runner
+metering uses the console-only
+`POST /api/v1/operator/runners/{runner}/metered`, selecting an enrolled root's
+capability prefix.
+
+The eight `credits.grant` service registrations for cards, card payments,
+refunds, freezes, warnings, unit reports and payment lookup are removed.
+Automated outcomes enter through the signed provider callback. No service
+bearer can submit a team or credit grant through the removed routes.
+
+## Deployment bootstrap
+
+The mounted `bootstrap-admin-token` must be a `swk_` controller capability.
+Startup supplies it to the once-only bootstrap transaction before opening the
+listener. That transaction stores only its digest and issues operational
+limits, object-store and token administration grants. It must refuse to issue
+another administrator or revive a revoked seed. It grants no operator-console
+or claim authority.
+
+The token-table bootstrap path is removed. Startup refuses a configured seed
+when the store has no seeded bootstrap transaction. That transaction remains a
+store integration requirement. An empty file input provisions no credential.
+Startup enables authentication even before credentials exist. An empty or
+unreadable token table cannot open private routes. `--require-auth` additionally
+requires a live deployment administrator capability and refuses startup when
+that capability read is unavailable. Local access uses verified peer identity.
 
 ## Operator console
 

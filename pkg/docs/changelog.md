@@ -28,6 +28,11 @@ unlock.
 
 ### Changed
 
+- **controller:** Verify Stripe card setup, payment, refund, warning and dispute events through the signed callback
+  Provider lookups verify card identity and mode. Non-checkout settlement still needs its store adapter.
+- **controller (Breaking):** Replace token-table startup seeding with the once-only capability bootstrap transaction
+  Configured seeds refuse startup without that adapter. Empty token tables no longer open private routes. `--require-auth` checks a live deployment administrator capability. See [migration guide](docs/migrations/_unreleased.md#verified-billing-events-and-deployment-bootstrap).
+
 - **controller (Breaking):** Remove the legacy trigger and node execution routes, claim-token middleware, raw event append, node output upload path and `Server.WithLocalExecution`. Execution uses the capability-backed run, job and data routes. Missing routes and methods return canonical errors before credential lookup. See [migration guide](docs/migrations/_unreleased.md#legacy-execution-credential-routes).
 
 - **controller (Breaking):** Browser identity linking uses the shared proof policy and canonical errors

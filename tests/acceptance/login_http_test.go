@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -49,6 +50,7 @@ func TestLoginHTTPAccountCapabilitySession(t *testing.T) {
 	h := f.server.WithDashboard(controller.Dashboard{}).Handler()
 	r := loginRequest(root.Raw, "browser-proof", "/runs?run=selected")
 	r.AddCookie(&http.Cookie{Name: "__Host-sw_session", Value: f.raw})
+	started := time.Now()
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	var raw string
@@ -69,6 +71,28 @@ func TestLoginHTTPAccountCapabilitySession(t *testing.T) {
 	session, err := f.store.LookupSession(t.Context(), raw)
 	if err != nil || session.AccountID != "member" || session.CapabilityPrefix != root.Capability.Prefix || session.Team != "team" {
 		t.Fatalf("session=%+v err=%v", session, err)
+	}
+	if session.ExpiresAt.Before(started.Add(7*24*time.Hour-time.Second)) || session.ExpiresAt.After(time.Now().Add(7*24*time.Hour+time.Second)) {
+		t.Fatalf("session lifetime: %s", session.ExpiresAt)
+	}
+	digest := sha256.Sum256([]byte(raw))
+	var stored, plaintext int
+	if err := f.store.DB().QueryRowContext(t.Context(), `SELECT COUNT(*), COUNT(CASE WHEN hash=? THEN 1 END) FROM sessions WHERE hash IN (?,?)`, raw, raw, hex.EncodeToString(digest[:])).Scan(&stored, &plaintext); err != nil || stored != 1 || plaintext != 0 {
+		t.Fatalf("session digest: stored=%d plaintext=%d err=%v", stored, plaintext, err)
+	}
+	columns, err := f.store.DB().QueryContext(t.Context(), `SELECT * FROM sessions LIMIT 0`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names, err := columns.Columns()
+	columns.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range names {
+		if name == "csrf_token" {
+			t.Fatal("plaintext CSRF column survives")
+		}
 	}
 	if _, err := f.store.LookupSession(t.Context(), f.raw); err == nil {
 		t.Fatal("replaced session survived")

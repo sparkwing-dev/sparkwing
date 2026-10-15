@@ -19,6 +19,42 @@ pending. This adds no archived source-function port identity.
 
 # Acceptance test port inventory
 
+W2 seeded-bootstrap and login ports: bootstrap_token_test.go no longer calls
+the removed token-table startup path. Its forwarding property checks the exact
+seed, fixed operational authority, issuer result and missing-adapter refusal.
+The old no-window, populated-table, malformed and empty-input cases split
+between those component tests and W1's pending once-only issuance transaction.
+No fake gate is counted as a durable race/restart proof.
+
+The three multi_team_auth_test.go functions and four auth_visibility_test.go
+functions move to TestEnableAuthFromStoreRefusesAnonymousBeforeBootstrapProperty.
+It runs without sockets against the actual final and legacy muxes with real
+SQLite. Single-team and both license-installation orders retain anonymous
+refusal, and health reports authentication enabled before seeding. The old
+single-team-open expectation retires with that removed startup mode. Late
+legacy-token acceptance retires with token-table startup provisioning.
+TestCheckRequireAuthUsesCapabilityRead ports the command's readiness check
+through the named read interface, including absence and backend errors.
+Production administrator-read integration remains W1 work.
+
+The two deleted files session_hash_test.go and session_lifetime_test.go held
+TestLogin_StoresOnlyTheSessionDigest and
+TestLoginSessionStartsWithSevenDaysOfValidity. Their assertions now run in
+TestLoginHTTPAccountCapabilitySession against actual account-capability login,
+real SQLite and the production handler. The final session is stored by digest,
+not raw presentation, the schema has no plaintext csrf_token column, and the
+fresh expiry is seven days. Operator bootstrap credentials cannot sign in.
+
+TestPaymentHTTPFinancialProviderHandoffProperty exercises actual signed HTTP
+refund, failed-payment and dispute handoffs in both modes, generated metadata
+and forged signatures. Existing HTTP refusals retain private ledger errors.
+TestPaymentProviderOutcomes covers card setup, paid-card and warning enrichment
+with a fake provider transport. These are verifier/HTTP component proofs.
+W1b's existing card/refund/warning/dispute tests still need their final
+SettlePayment ports and real ledger integration. No native matrix cell is
+newly unskipped.
+
+
 W2 execution credential retirement removes the seven tests in
 claim_route_internal_test.go with that router. Their principal-with-no-scopes
 expectation is replaced by the final credential/grant policy. The existing

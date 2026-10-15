@@ -4,6 +4,96 @@
 
 ## Amendment 1: selected routes and trusted adapters
 
+### Lead decisions: payment and bootstrap boundaries
+
+C2 extends PaymentEvent with verified non-checkout facts. The accepted provider
+inventory is:
+
+| Provider type | Kind | Required facts |
+| --- | --- | --- |
+| setup_intent.succeeded | card_setup | succeeded setup ID, customer, payment method, event creation time, fetched card fingerprint/brand/last4 |
+| payment_intent.succeeded | card_paid | succeeded intent, positive amount equal to received amount, currency, latest charge and fetched fingerprint |
+| payment_intent.payment_failed | card_failed | failed intent in requires_payment_method, positive amount, currency and optional decline code |
+| refund.created / refund.updated / refund.failed | refund | individual refund ID, payment, charge, positive amount, currency and explicit pending/requires_action/succeeded/failed/canceled status |
+| radar.early_fraud_warning.created / updated | warning | warning ID, payment, charge, explicit actionable and fetched fingerprint |
+| charge.dispute.created | dispute_opened | dispute ID, payment, charge, positive amount, currency, reason and open status |
+| charge.dispute.closed | dispute_closed | same identities and amount, with won/lost/warning_closed status |
+
+The existing four checkout policies and their projection remain unchanged.
+PaymentEvent stays comparable. ObjectID carries the setup, intent, refund,
+warning or dispute ID. PaymentID is the payment intent. CustomerID and MethodID
+identify the card setup. ChargeID selects the verified charge. Status, Reason,
+DeclineCode, Fingerprint, Brand, Last4, Created (provider event Unix seconds)
+and Actionable retain only provider facts. No team, credit value, local charge
+ID, attempt ID, or metadata field is accepted as authority.
+
+Signature, timestamp and configured event mode precede object decoding and
+provider access. Every non-checkout object must match the configured mode and
+carry a positive event creation time. Required references accept provider IDs
+or expanded objects. Card setup reads the payment method using the configured
+private API key and checks the exact method, customer, mode and card shape.
+Paid-card and warning events read the charge and check its exact payment-intent
+relation and mode before taking a fingerprint. Reads use fixed HTTPS Stripe
+collections, path-safe IDs, no redirects and the existing one-MiB JSON budget.
+Provider failure returns a safe unavailable error. No proof reaches settlement
+after a failed read. The provider has no SQL, ledger write or retry policy.
+The object forms follow Stripe's [setup](https://docs.stripe.com/api/setup_intents/object),
+[refund](https://docs.stripe.com/api/refunds/object),
+[warning](https://docs.stripe.com/api/radar/early_fraud_warnings/object) and
+[dispute](https://docs.stripe.com/api/disputes/object) contracts.
+
+W1b owns SettlePayment for these kinds. It must derive the team and local
+charge/attempt from committed provider identities, retain event-ID deduplication
+by payment mode, distinguish pending/failed refunds from completed reversals,
+and prevent several events for one refund from reversing twice. Card setup
+must retain stale-setup refusal. Warning-before-payment, refund-before-payment,
+dispute holds and closed-dispute outcomes keep the existing ledger rules.
+Unknown payments must never become metadata-selected grants. Checkout and
+payment-intent events for one payment must not credit it twice. W2's shared
+HTTP route forwards VerifiedPaymentEvent and acknowledges only after commit.
+The existing Store implementation refuses non-checkout kinds. No fallback to
+raw financial methods is added.
+
+ProvisionSpec gains Seed, excluded from JSON in both directions.
+ValidateProvisionSeed permits a supplied presentation only for
+ProvisionBootstrap and only in the strict swk_ reference encoding. W1 must call
+it in Issue and reject a supplied seed on every other origin.
+controller.BootstrapAdminIssuer declares
+EnsureBootstrapCapability(ctx, ProvisionSpec) (created bool, error).
+EnsureBootstrapAdminToken now accepts context, CredentialIssuer and raw seed.
+It fixes the unbound operator subject bootstrap:admin and grants only
+operator.tokens, operator.limits and operator.object_store. It forwards no
+caller clock and never calls the legacy token table. Empty input is a no-op.
+Missing BootstrapAdminIssuer returns policy_missing before any issuance.
+
+W1 must implement that interface as one gated Store.Issue transaction. Lock
+the deployment bootstrap gate, refuse a second admin credential, and store
+only the seeded presentation's digest under its indexed prefix. An existing
+seed is a no-op while live and must never be revived after revocation.
+Race and restart checks belong to that transaction. A configured seed refuses
+startup until this adapter exists. W2's tests use a fake transaction and do
+not claim durable once-only bootstrap evidence.
+
+EnableAuthFromStore always installs credential verification. It no longer
+consults ListTokens or opens legacy private routes when that read is empty or
+fails. The remaining legacy credential verifier still needs its final route
+cut. The controller's --require-auth readiness check consumes
+HasDeploymentAdministrator(ctx) (bool, error), refusing a missing reader.
+W1 must implement that read under its store clock with complete live ancestry.
+A deployment administrator is an unbound controller operator/service capability
+in the deployment scope with operator.tokens. The public health handler pings the opened
+database rather than calling the legacy run-list query. License-before,
+license-after and single-team HTTP properties all refuse anonymous private
+requests and report enabled authentication before any seed exists.
+
+Server.HTTP and EngineController.SyncLauncher were already implemented before
+this continuation. Their in-process tests pass. Local HTTP supplies shared
+API/dashboard handlers and consumes Wingd's verified peer context. Sync passes
+the authenticated authority and cloned observations to LauncherSyncReader,
+then strips bearer material from a copied response. W1 still must supply
+ReadLauncherSync and the local authority snapshot and mutation transactions.
+No native launcher or peer matrix cell is inferred from those component tests.
+
 ### Legacy execution credential cut
 
 The legacy trigger and node execution route families, raw POST run events,
@@ -165,9 +255,9 @@ The eight credits.grant service routes for reversals, freezes, cards, card
 payments, warnings, card refunds, units and payment lookup are deleted, along
 with their handlers and wire types. EnsureCheckoutToken, ScopeCreditsGrant,
 requireServiceScope and credits-token startup loading/seeding are removed.
-The signed checkout callback remains the only automated HTTP settlement
-boundary. Card, refund, warning and dispute provider events still require a
-joint verified-event contract with C1. No legacy bearer callback survives as
+The signed provider callback remains the only automated HTTP settlement
+boundary. Its verified card, refund, warning and dispute contract is declared
+above. Their ledger settlement remains C1 integration work. No legacy bearer callback survives as
 an interim implementation. Existing store regressions retain their financial
 invariants. Their final provider-HTTP ports remain open.
 
@@ -2227,13 +2317,11 @@ Amendment 1 ratifies the interpretations below. They are not approval gates.
    handler-policy lint checks must cover those actual registrations. W3/W4
    must provide node-host process facts through the same verifier boundary.
 
-6. **Card and dispute events.** The existing card setup, off-session charge,
-   refund, fraud warning and dispute callback routes are outside the four
-   checkout-only `PaymentEventPolicies`. C1 has no verified-event contract for
-   those outcomes. Extend that contract before replacing those remaining
-   service-bearer routes. No new event kinds or settlement semantics were
-   inferred here. The old external checkout service also needs to send paid
-   callbacks to `/webhooks/stripe` and commit checkout mode/currency through C1.
+6. **Card and dispute settlement.** C2 verifies the non-checkout provider
+   kinds listed above. C1 must settle them through SettlePayment against
+   committed billing records. The old service-bearer routes are deleted.
+   The external checkout service must use `/webhooks/stripe` and commit
+   checkout mode/currency through C1.
 
 7. **Console mutation rechecks.** Existing grant, trust, hold, deletion,
    waitlist, credit-settings and deployment-settings store methods do not accept `AuthorityRef`.

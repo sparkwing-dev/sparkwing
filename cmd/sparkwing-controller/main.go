@@ -278,10 +278,7 @@ func run(args []string) error {
 			"keeps a session over plain HTTP. Only for a dashboard published without TLS: the "+
 			"cookies then travel readable to every hop on the path")
 	requireAuth := fs.Bool("require-auth", false,
-		"refuse to start when the tokens table is empty, guarding against "+
-			"accidentally deploying an open controller. Leave unset for "+
-			"first-run bootstrap (minting the first token needs an open "+
-			"controller) and for laptop-local use.")
+		"refuse to start until a live deployment administrator capability exists; private routes always require credentials")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -417,7 +414,7 @@ func run(args []string) error {
 	defer func() { _ = tel.Shutdown(context.Background()) }()
 
 	bootstrapToken := creds.BootstrapAdminToken
-	created, bterr := controller.EnsureBootstrapAdminToken(st, bootstrapToken, time.Now().UTC())
+	created, bterr := controller.EnsureBootstrapAdminToken(ctx, st, bootstrapToken)
 	if bterr != nil {
 		return fmt.Errorf("bootstrap admin token: %w", bterr)
 	}
@@ -428,7 +425,7 @@ func run(args []string) error {
 					controller.BootstrapAdminPrincipal)
 		} else {
 			fmt.Fprintln(os.Stderr,
-				"sparkwing-controller: bootstrap admin token skipped: the tokens table already holds a token")
+				"sparkwing-controller: bootstrap admin token skipped: the capability bootstrap gate is closed")
 		}
 	}
 
@@ -506,8 +503,6 @@ func run(args []string) error {
 	if err := st.SetFreeTeamSlots(ctx, *freeTeamSlots); err != nil {
 		return fmt.Errorf("--free-team-slots: %w", err)
 	}
-	// safety: auth resolves after the license is installed, because the license decides
-	// whether an empty tokens table may serve unauthenticated.
 	srv.EnableAuthFromStore()
 	if err := configureSecrets(ctx, srv, st, creds, generatedKeyPath(p.StateDB())); err != nil {
 		return err
@@ -564,7 +559,8 @@ func run(args []string) error {
 		}()
 		srv = srv.WithDataObjects(objects)
 	}
-	if err := checkRequireAuth(st, *requireAuth); err != nil {
+	adminReader, _ := any(st).(deploymentAdminReader)
+	if err := checkRequireAuth(ctx, adminReader, *requireAuth); err != nil {
 		return err
 	}
 	srv.WithDashboard(dashboard(p, *hsts, *insecureCookies))
@@ -692,24 +688,25 @@ func splitCSV(s string) []string {
 	return out
 }
 
-// safety: asks the tokens table rather than whether auth is on, because a multi-team
-// license turns auth on with an empty table and --require-auth promises a usable token.
-func checkRequireAuth(st *store.Store, requireAuth bool) error {
-	if !requireAuth {
+type deploymentAdminReader interface {
+	HasDeploymentAdministrator(context.Context) (bool, error)
+}
+
+func checkRequireAuth(ctx context.Context, reader deploymentAdminReader, required bool) error {
+	if !required {
 		return nil
 	}
-	toks, err := st.ListTokens("", false)
+	if reader == nil {
+		return errors.New("--require-auth: administrator capability check is unavailable")
+	}
+	ready, err := reader.HasDeploymentAdministrator(ctx)
 	if err != nil {
-		return fmt.Errorf("--require-auth: read the tokens table: %w", err)
+		return fmt.Errorf("--require-auth: read deployment administrator capability: %w", err)
 	}
-	if len(toks) > 0 {
-		return nil
+	if !ready {
+		return errors.New("--require-auth: no live deployment administrator capability; supply the " + credBootstrapAdminToken + " credential")
 	}
-	return fmt.Errorf("--require-auth is set but " +
-		"the tokens table is empty; supply the first admin token as the " +
-		credBootstrapAdminToken + " credential, or " +
-		"mint one with the controller started unauthenticated and restart " +
-		"with --require-auth")
+	return nil
 }
 
 // safety: a free team is held to its allowance only by counters kept over the object

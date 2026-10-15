@@ -328,25 +328,8 @@ func (s *Server) WithTrustedProxyAddr(addr string) *Server {
 	return s
 }
 
-// EnableAuthFromStore wires the Authenticator against the server's
-// tokens table IF the table has any non-revoked rows. Empty table =
-// auth stays disabled (pass-through), and the server logs a loud
-// warning so an operator has a signal that every endpoint is open.
-// A multi-team controller is the exception: see requireAuthForTeams.
-//
-// The tokens-table check happens ONCE at startup: a fresh row added
-// via POST /api/v1/tokens takes effect on the next controller restart.
+// EnableAuthFromStore requires credentials before serving private routes.
 func (s *Server) EnableAuthFromStore() *Server {
-	if !s.tokensTableNonEmpty() && !s.MultiTeam() {
-		s.auth = nil
-		s.logger.Warn("controller serving unauthenticated: tokens table is empty, every endpoint is open; mint an admin token and restart to enable auth")
-		return s
-	}
-	if !s.tokensTableNonEmpty() {
-		s.logger.Warn("multi-team controller requires authentication with an empty tokens table: " +
-			"only signed-in sessions are accepted until an admin token exists; supply one with " +
-			"the bootstrap-admin-token file in the controller's --credentials-dir")
-	}
 	s.auth = s.storeAuthenticator()
 	return s
 }
@@ -368,23 +351,9 @@ func (s *Server) requireAuthForTeams() {
 	}
 }
 
-// AuthEnabled reports whether the controller is enforcing bearer-token
-// auth. False means every endpoint is served unauthenticated -- either
-// laptop-local mode (auth never wired) or a single-team cluster whose
-// tokens table was empty at startup.
+// AuthEnabled reports whether legacy private routes require credentials.
 func (s *Server) AuthEnabled() bool {
 	return s.auth != nil
-}
-
-func (s *Server) tokensTableNonEmpty() bool {
-	if s.store == nil {
-		return false
-	}
-	toks, err := s.store.ListTokens("", false)
-	if err != nil {
-		return false
-	}
-	return len(toks) > 0
 }
 
 // WithAuthenticator installs a pre-built Authenticator.

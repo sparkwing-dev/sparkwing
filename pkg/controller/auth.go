@@ -492,10 +492,7 @@ func (a *Authenticator) sweepFailures(now time.Time) {
 	})
 }
 
-// AuthDisabled reports whether the Authenticator has no backing token
-// store, in which case every request should be allowed through. An
-// empty tokens table means auth is off until a token is minted and
-// the controller restarts.
+// AuthDisabled reports whether the legacy verifier has no backing store.
 func (a *Authenticator) AuthDisabled() bool {
 	if a == nil {
 		return true

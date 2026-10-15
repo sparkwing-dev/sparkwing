@@ -44,6 +44,9 @@ type AuthorityRevoker interface {
 	RevokeAuthority(context.Context, store.Actor, capability.AuthorityRef) error
 }
 const BalanceCapCode = "balance_cap"
+type BootstrapAdminIssuer interface {
+	EnsureBootstrapCapability(context.Context, capability.ProvisionSpec) (bool, error)
+}
 const BootstrapAdminPrincipal = "bootstrap:admin"
 type BoundCipher interface {
 	Cipher
@@ -218,7 +221,7 @@ func (s *EngineController) RunDetail(ctx context.Context, a capability.Authorize
 func (s *EngineController) Snapshot(ctx context.Context, authorized capability.Authorized) (controllerwire.ScheduleSnapshot, error)
 func (s *EngineController) SyncLauncher(ctx context.Context, authorized capability.Authorized, body controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error)
 func (s *EngineController) TransitionJob(ctx context.Context, a capability.Authorized, body controllerwire.JobTransitionRequest) (controllerwire.Applied, error)
-func EnsureBootstrapAdminToken(st *store.Store, raw string, now time.Time) (bool, error)
+func EnsureBootstrapAdminToken(ctx context.Context, issuer CredentialIssuer, raw string) (bool, error)
 const EnvDefaultBranch = "GITHUB_DEFAULT_BRANCH"
 func ExpansionForStore(a capability.Authorized, body controllerwire.ExpansionSubmission) (store.ExpansionSubmission, error)
 type FilesystemDataSigner struct {
