@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -41,10 +42,10 @@ func (h *stepsHost) records(node, event string) map[string]sparkwing.LogRecord {
 func (h *stepsHost) outcomes(t *testing.T, node string) map[string]string {
 	t.Helper()
 	got := map[string]string{}
-	for id, r := range h.records(node, sparkwing.EventStepEnd) {
+	for id, r := range h.records(node, "step_end") {
 		got[id] = fmt.Sprint(r.Attrs["outcome"])
 	}
-	for id := range h.records(node, sparkwing.EventStepSkipped) {
+	for id := range h.records(node, "step_skipped") {
 		got[id] = "skipped"
 	}
 	return got
@@ -119,9 +120,9 @@ func TestHostDrivesSteps(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 		defer cancel()
 		cfg := Config{
-			Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second},
+			Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}},
 			Pipeline: "steps", Args: map[string]string{"set": set},
-			Run:   nodeproto.RunContextOld{RunID: runID},
+			Run:   nodeproto.RunContext{RunID: runID},
 			State: h.st, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
 			Attempts: &Attempts{
 				Routes: srv, Resolver: fixtureResolver{}, Masker: secrets.NewMasker(),
@@ -156,7 +157,7 @@ func TestHostDrivesSteps(t *testing.T) {
 			if got := h.rows(t, "order"); !equalMaps(got, want) {
 				t.Errorf("order step rows = %v, want %v", got, want)
 			}
-			if r := h.records("order", sparkwing.EventStepEnd)["b"]; r.Attrs["duration_ms"] == nil || r.JobID != "order" {
+			if r := h.records("order", "step_end")["b"]; r.Attrs["duration_ms"] == nil || r.JobID != "order" {
 				t.Errorf("step_end b = %+v, want a duration and the node", r)
 			}
 		})
@@ -175,13 +176,13 @@ func TestHostDrivesSteps(t *testing.T) {
 			if got := h.rows(t, "failfast"); got["slow"] != store.StepCancelled || got["pending"] != store.StepCancelled || got["reject"] != store.StepFailed || got["cleanup"] != store.StepPassed {
 				t.Errorf("failfast step rows = %v", got)
 			}
-			ff, ok := h.records("failfast", sparkwing.EventWorkFailFast)["reject"]
+			ff, ok := h.records("failfast", "work_fail_fast")["reject"]
 			if !ok || ff.Attrs["trigger_step"] != "reject" || fmt.Sprint(ff.Attrs["cancelled_steps"]) != "[pending slow]" || ff.Attrs["cancelled_siblings"] != 2 {
 				t.Errorf("work_fail_fast = %+v (found %v), want reject cancelling pending and slow", ff, ok)
 			}
 			failure, firstCancel := -1, -1
 			for i, r := range h.logs.records["failfast"] {
-				if r.Event != sparkwing.EventStepEnd {
+				if r.Event != "step_end" {
 					continue
 				}
 				if r.Msg == "reject" {
@@ -199,7 +200,7 @@ func TestHostDrivesSteps(t *testing.T) {
 		t.Run("CollectAllFinishesSiblingsButHoldsDependents", func(t *testing.T) {
 			h.wantNode(t, "collect", sparkwing.Failed, "rejected")
 			h.wantLog(t, "collect", []string{"independent finished"}, []string{"dependent ran"})
-			if _, ok := h.records("collect", sparkwing.EventWorkFailFast)["reject"]; ok {
+			if _, ok := h.records("collect", "work_fail_fast")["reject"]; ok {
 				t.Error("collect-all wrote a fail-fast record")
 			}
 		})
@@ -220,7 +221,7 @@ func TestHostDrivesSteps(t *testing.T) {
 		t.Run("SkipIfSkipsAStepAndSatisfiesItsDependents", func(t *testing.T) {
 			h.wantNode(t, "skips", sparkwing.Success, "")
 			h.wantLog(t, "skips", []string{"ran b"}, []string{"ran a"})
-			if r := h.records("skips", sparkwing.EventStepSkipped)["a"]; r.Attrs["outcome"] != "skipped" || r.Attrs["reason"] != nil {
+			if r := h.records("skips", "step_skipped")["a"]; r.Attrs["outcome"] != "skipped" || r.Attrs["reason"] != nil {
 				t.Errorf("step_skipped a = %+v, want outcome skipped and no reason", r)
 			}
 			if got := h.rows(t, "skips")["a"]; got != store.StepSkipped {
@@ -240,7 +241,7 @@ func TestHostDrivesSteps(t *testing.T) {
 		t.Run("StartAtSkipsUpstreamSteps", func(t *testing.T) {
 			h.wantNode(t, "range", sparkwing.Success, "")
 			h.wantLog(t, "range", []string{"ran r-b", "ran r-c"}, []string{"ran r-a"})
-			if r := h.records("range", sparkwing.EventStepSkipped)["r-a"]; r.Attrs["reason"] != "upstream of --start-at=r-b" {
+			if r := h.records("range", "step_skipped")["r-a"]; r.Attrs["reason"] != "upstream of --start-at=r-b" {
 				t.Errorf("step_skipped r-a = %+v, want the window's reason", r)
 			}
 		})
@@ -250,7 +251,7 @@ func TestHostDrivesSteps(t *testing.T) {
 		h := host(t, "run-dry", "dry", func(c *Config) { c.Run.DryRun = true })
 		h.wantNode(t, "dry", sparkwing.Success, "")
 		h.wantLog(t, "dry", []string{"dry body", "safe ran"}, []string{"real body", "plain ran"})
-		if r := h.records("dry", sparkwing.EventStepSkipped)["plain"]; r.Attrs["reason"] != "no_dry_run_defined" {
+		if r := h.records("dry", "step_skipped")["plain"]; r.Attrs["reason"] != "no_dry_run_defined" {
 			t.Errorf("step_skipped plain = %+v, want no_dry_run_defined", r)
 		}
 	})
@@ -267,11 +268,11 @@ func TestHostDrivesSteps(t *testing.T) {
 }
 
 func TestRangeSkips(t *testing.T) {
-	linear := []nodeproto.PlanStep{{ID: "a"}, {ID: "b", Needs: []string{"a"}}, {ID: "c", Needs: []string{"b"}}}
-	branching := []nodeproto.PlanStep{{ID: "root"}, {ID: "left", Needs: []string{"root"}}, {ID: "right", Needs: []string{"root"}}, {ID: "join", Needs: []string{"left", "right"}}}
+	linear := []nodeproto.StepSpec{{ID: "a"}, {ID: "b", Needs: []string{"a"}}, {ID: "c", Needs: []string{"b"}}}
+	branching := []nodeproto.StepSpec{{ID: "root"}, {ID: "left", Needs: []string{"root"}}, {ID: "right", Needs: []string{"root"}}, {ID: "join", Needs: []string{"left", "right"}}}
 	for _, tc := range []struct {
 		name        string
-		steps       []nodeproto.PlanStep
+		steps       []nodeproto.StepSpec
 		start, stop string
 		want        map[string]string
 	}{
@@ -302,19 +303,19 @@ func TestRangeSkips(t *testing.T) {
 }
 
 func TestValidateStepsRefusesAnUnorderableNode(t *testing.T) {
-	for name, steps := range map[string][]nodeproto.PlanStep{
+	for name, steps := range map[string][]nodeproto.StepSpec{
 		"duplicate":    {{ID: "a"}, {ID: "a"}},
 		"unknown need": {{ID: "a", Needs: []string{"ghost"}}},
 		"cycle":        {{ID: "a", Needs: []string{"b"}}, {ID: "b", Needs: []string{"a"}}},
 		"no id":        {{ID: ""}},
 	} {
-		err := validateNodes([]nodeproto.PlanNode{{ID: "n", Work: &nodeproto.PlanWork{Steps: steps}}})
-		if perr := (*nodeproto.Error)(nil); !errors.As(err, &perr) || perr.Code != nodeproto.CodePlanInvalid {
+		err := validateNodes([]nodeproto.JobSpec{{ID: "n", Steps: steps}}, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}})
+		if perr := (*apierr.Error)(nil); !errors.As(err, &perr) || perr.Code != apierr.PlanInvalid {
 			t.Errorf("%s: err = %v, want plan_invalid", name, err)
 		}
 	}
-	ok := []nodeproto.PlanStep{{ID: "a"}, {ID: "b", Needs: []string{"a"}}, {ID: "c", Needs: []string{"a", "b"}}}
-	if err := validateNodes([]nodeproto.PlanNode{{ID: "n", Work: &nodeproto.PlanWork{Steps: ok}}}); err != nil {
+	ok := []nodeproto.StepSpec{{ID: "a"}, {ID: "b", Needs: []string{"a"}}, {ID: "c", Needs: []string{"a", "b"}}}
+	if err := validateNodes([]nodeproto.JobSpec{{ID: "n", Steps: ok}}, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}); err != nil {
 		t.Errorf("a valid step graph: %v", err)
 	}
 }

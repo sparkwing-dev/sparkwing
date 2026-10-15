@@ -12,17 +12,17 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-const testGenerator = "targets/generator/0"
+const testGenerator = "targets/generate/0"
 
-func fanOutDoc() nodeproto.PlanDocOld {
-	return nodeproto.PlanDocOld{Nodes: []nodeproto.PlanNode{
-		{ID: "targets", Closures: &nodeproto.PlanClosures{Generator: []string{testGenerator}}},
-		{ID: "summary", Deps: deps("lint"), NeedsGenerated: []string{testGenerator}},
-		{ID: "lint"},
+func fanOutDoc() nodeproto.PlanDoc {
+	return nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+		{ID: "targets", Closures: nodeproto.ClosureSpec{Generate: []string{testGenerator}}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "summary", Needs: deps("lint"), NeedsGenerated: []string{testGenerator}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "lint", Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}}
 }
 
-func generates(nodes ...nodeproto.PlanNode) Executor {
+func generates(nodes ...nodeproto.JobSpec) Executor {
 	return func(context.Context, *NodeRun) Result {
 		return Result{Outcome: sparkwing.Success, expansions: []expansion{{closure: testGenerator, nodes: nodes}}}
 	}
@@ -30,9 +30,9 @@ func generates(nodes ...nodeproto.PlanNode) Executor {
 
 func TestExpansionFansOutAndHoldsItsWaiter(t *testing.T) {
 	st := openStore(t)
-	var children []nodeproto.PlanNode
+	var children []nodeproto.JobSpec
 	for i := range 5 {
-		children = append(children, nodeproto.PlanNode{ID: fmt.Sprintf("test-%d", i), Deps: deps("targets")})
+		children = append(children, nodeproto.JobSpec{ID: fmt.Sprintf("test-%d", i), Needs: deps("targets"), Steps: []nodeproto.StepSpec{{ID: "body"}}})
 	}
 	fx := &fakeExec{bodies: map[string]Executor{"targets": generates(children...)}}
 
@@ -61,7 +61,7 @@ func TestExpansionFansOutAndHoldsItsWaiter(t *testing.T) {
 }
 
 func TestExpansionFailureCancelsItsWaiter(t *testing.T) {
-	child := nodeproto.PlanNode{ID: "test-a", Deps: deps("targets")}
+	child := nodeproto.JobSpec{ID: "test-a", Needs: deps("targets"), Steps: []nodeproto.StepSpec{{ID: "body"}}}
 	cases := []struct {
 		name   string
 		source Executor
@@ -71,14 +71,14 @@ func TestExpansionFailureCancelsItsWaiter(t *testing.T) {
 			return Result{Outcome: sparkwing.Success, expansions: []expansion{{closure: testGenerator, err: errors.New("generator panicked")}}}
 		}, "expansion failed: generator panicked"},
 		{"SourceFailed", func(context.Context, *NodeRun) Result {
-			return Result{Outcome: sparkwing.Failed, Err: errors.New("broke"), expansions: []expansion{{closure: testGenerator, nodes: []nodeproto.PlanNode{child}}}}
+			return Result{Outcome: sparkwing.Failed, Err: errors.New("broke"), expansions: []expansion{{closure: testGenerator, nodes: []nodeproto.JobSpec{child}}}}
 		}, `expansion source "targets" did not succeed (outcome=failed)`},
 		{"SourceSkippedTheGenerator", func(context.Context, *NodeRun) Result {
 			return Result{Outcome: sparkwing.Skipped}
-		}, "generator targets/generator/0 did not run"},
-		{"DuplicateID", generates(child, nodeproto.PlanNode{ID: "lint", Deps: deps("targets")}), "the plan holds node lint twice"},
+		}, "generator targets/generate/0 did not run"},
+		{"DuplicateID", generates(child, nodeproto.JobSpec{ID: "lint", Needs: deps("targets"), Steps: []nodeproto.StepSpec{{ID: "body"}}}), "the plan holds node lint twice"},
 		{"DuplicateWithinTheBatch", generates(child, child), "the plan holds node test-a twice"},
-		{"NodeThatSkipsItsSource", generates(child, nodeproto.PlanNode{ID: "test-b"}), "does not need its source targets"},
+		{"NodeThatSkipsItsSource", generates(child, nodeproto.JobSpec{ID: "test-b", Steps: []nodeproto.StepSpec{{ID: "body"}}}), "does not need its source targets"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -106,13 +106,13 @@ func TestExpansionDuringCancellationCancelsTheGeneratedNodes(t *testing.T) {
 	st := openStore(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	child := nodeproto.PlanNode{ID: "test-a", Deps: deps("targets")}
+	child := nodeproto.JobSpec{ID: "test-a", Needs: deps("targets"), Steps: []nodeproto.StepSpec{{ID: "body"}}}
 	fx := &fakeExec{bodies: map[string]Executor{"targets": func(context.Context, *NodeRun) Result {
 		cancel()
-		return Result{Outcome: sparkwing.Success, expansions: []expansion{{closure: testGenerator, nodes: []nodeproto.PlanNode{child}}}}
+		return Result{Outcome: sparkwing.Success, expansions: []expansion{{closure: testGenerator, nodes: []nodeproto.JobSpec{child}}}}
 	}}}
 	doc := fanOutDoc()
-	doc.Nodes[1].Deps = nil
+	doc.Jobs[1].Needs = nil
 
 	res := hostDoc(t, ctx, st, doc, fx.run)
 
@@ -128,13 +128,13 @@ func TestExpansionDuringCancellationCancelsTheGeneratedNodes(t *testing.T) {
 
 func TestValidateNodesChecksGeneratedEdges(t *testing.T) {
 	doc := fanOutDoc()
-	doc.Nodes[1].NeedsGenerated = []string{"elsewhere/generator/0"}
-	if err := validateNodes(doc.Nodes); err == nil || !strings.Contains(err.Error(), "generator elsewhere/generator/0, which the plan does not hold") {
+	doc.Jobs[1].NeedsGenerated = []string{"elsewhere/generate/0"}
+	if err := validateNodes(doc.Jobs, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}); err == nil || !strings.Contains(err.Error(), "generator is absent or self-referential") {
 		t.Errorf("unknown generator: err = %v", err)
 	}
 	doc = fanOutDoc()
-	doc.Nodes[0].Deps = deps("summary")
-	if err := validateNodes(doc.Nodes); err == nil || !strings.Contains(err.Error(), "dependency cycle") {
+	doc.Jobs[0].Needs = deps("summary")
+	if err := validateNodes(doc.Jobs, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}); err == nil || !strings.Contains(err.Error(), "dependency cycle") {
 		t.Errorf("a source that needs its own waiter: err = %v", err)
 	}
 }

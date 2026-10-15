@@ -4,6 +4,7 @@ package nodehost
 
 import (
 	"context"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -68,7 +69,7 @@ func (f *retryFixture) run(ctx context.Context, id string, r *Rehydration, state
 	defer func() { _ = srv.Close() }()
 	logs := &memLogs{records: map[string][]sparkwing.LogRecord{}}
 	cfg := Config{
-		Session:  SessionConfig{Entry: pipelineentry.Binary(f.bin), Dir: f.dir, Grace: time.Second, Env: append(engineenv.Strip(os.Environ()), "GORACE=atexit_sleep_ms=0")},
+		Session:  SessionConfig{Entry: pipelineentry.Binary(f.bin), Dir: f.dir, Grace: time.Second, Env: append(engineenv.Strip(os.Environ()), "GORACE=atexit_sleep_ms=0"), Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}},
 		Pipeline: "probe", Args: map[string]string{"mode-file": filepath.Join(f.dir, "mode"), "trace-dir": f.dir},
 		State: state, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour, Rehydrate: r,
 		Attempts: &Attempts{

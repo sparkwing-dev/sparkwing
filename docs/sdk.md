@@ -1,1182 +1,433 @@
-# SDK Reference
+# Go SDK
 
-This guide covers pipeline authoring with the `sparkwing` package.
-The generated [API reference](sdk-reference.md) lists exported signatures;
-`sdk-<name>.md` pages cover subpackages. Read them offline with
-`sparkwing docs read --topic sdk-reference` or `--topic sdk-<name>`.
-See [Pipelines](pipelines.md) for the Plan/Work model and project YAML.
-
-Examples import `sparkwing` by its package name or the alias `sw`:
+The `sparkwing` package declares pipelines, jobs and steps. The engine hosts the
+run through [protocol 2](node-protocol.md), schedules the graph and owns retries,
+timeouts, admission, secrets, storage and masking. SDK processes execute the
+callbacks the host selects.
 
 ```go
 import sw "github.com/sparkwing-dev/sparkwing/sparkwing"
 ```
-
-## Read/write split
-
-DAG adders are package functions; container methods read the graph.
-Both layers use `sw.<Verb>(<container>, ...args).<modifier>(...)`.
-
-| Layer | Mutate (free funcs) | Read (methods) |
-|---|---|---|
-| Plan | `sw.Job(plan, id, x)` | `plan.Nodes()` |
-| Plan | `sw.JobFanOut(plan, name, items, fn)` | `plan.Job(id)` |
-| Plan | `sw.JobFanOutDynamic(plan, name, source, fn)` | `plan.LintWarnings()` |
-| Plan | `sw.JobApproval(plan, id, cfg)` | `plan.Expansions()` |
-| Plan | `sw.GroupJobs(plan, name, members...)` | `plan.IsDynamicNode(id)` / `plan.GroupSourceIDs(id)` |
-| Plan | `sw.RefTo[T](node)` | |
-| Work | `sw.Step(w, id, fn)` | `w.Steps()` / `w.StepByID(id)` |
-| Work | `sw.GroupSteps(w, name, steps...)` | |
-| Work | `sw.StepGet[T](ctx, step)` | |
-
-## The two-layer model
-
-A Plan holds jobs, which are dispatch units. Each job's Work graph holds
-steps that execute in the job's process. See [Pipelines](pipelines.md).
-
-`sparkwing run` hosts the run itself. It starts the compiled `.sparkwing`
-binary with `--sw-node-protocol`, asks it for the plan, and then runs each
-job in a process of its own, where the engine sends one request per step or
-callback. Retries, timeouts, caching, memo, artifacts, admission and log
-masking happen in the engine, not in the binary. A binary built against an
-older SDK does not answer the protocol and must be rebuilt.
-[Node protocol](node-protocol.md) is the contract, and its
-[limits](node-protocol.md#limits) table bounds a job's output, cleanups and
-route calls.
-
-## Plan() must be pure
-
-`Pipeline.Plan(ctx, plan, in, rc)` declares the DAG by registering
-nodes on the passed-in `*Plan` and returns `error`. The SDK
-constructs the `*Plan` and hands it in -- authors don't call
-`NewPlan()`. Plan() must not run work: calling `sparkwing.Bash` /
-`Exec`, anything in `sparkwing/docker`, anything in `sparkwing/git`,
-or any other helper that touches state inside `Plan()` panics at
-runtime with a message naming the helper and pointing back here.
-
-`Plan` and `Work` construct the graph during inspection as well as
-execution. Put side effects in registered job or step callbacks, and
-return typed outputs for downstream `Ref[T]` consumers.
-
-Every job's process plans the run again before it runs the job, and a job
-whose plan entry differs from the one the run accepted fails with
-`plan_drift`. `Plan` must build the same graph from the same inputs and run
-context, so read the clock, random values and the environment in callbacks,
-not in `Plan`.
-
-`.Inline()` selects the dispatcher's host. A local inline job still runs
-in its own process, and its `Work` method still constructs the graph
-before dispatch.
-
-Consumer-side helper packages can opt their own ctx-taking entry points into the
-guard by calling `planguard.Guard(ctx, "yourpkg.Helper")` at the top
-(import `github.com/sparkwing-dev/sparkwing/sparkwing/planguard`).
-
-## Plan() is sealed against side effects
-
-`Plan` receives a sealed context, and a guarded helper handed it refuses:
-
-```go
-func (p Deploy) Plan(ctx context.Context, plan *sparkwing.Plan, in In, rc sparkwing.RunContext) error {
-    sparkwing.Bash(ctx, "git rev-parse HEAD").String() // refused: Plan is sealed
-    ...
-}
-```
-
-The seal travels on the context, so a `Plan` body that mints a fresh one
-escapes it, and so does a helper the `Plan` calls that mints its own.
-`sparkwing pipeline lint` is what reports both: it flags plan-time I/O written
-in a `Plan` body whatever context it is handed -- an SDK side-effect helper,
-`os` and `os/exec`, `net/http`, and the like -- and follows the `Plan` one level
-into a package-level function it calls. It matches import paths, so a helper of
-your own that calls `planguard.Guard` is reported by the seal at run time rather
-than by the linter, and a method on the pipeline is not followed.
-
-## What each callback's context carries
-
-Which callback you are in decides whether a guarded helper runs, and
-what `NodeFromContext` and `StepFromContext` answer. A `JobNode.SkipIf` predicate and a
-`CacheKeyFn` carry the id of the node they decide about, and no step id.
-
-<!-- BEGIN measured-context-table -->
-| Callback | Side effects | Node id | Step id |
-|---|---|---|---|
-| Pipeline.Plan | no | no | no |
-| JobNode.SkipIf | yes | yes | no |
-| CacheKeyFn | yes | yes | no |
-| Job body step | yes | yes | yes |
-| Verify | yes | yes | no |
-| BeforeRun | yes | yes | no |
-| AfterRun | yes | yes | no |
-<!-- END measured-context-table -->
-
-A test renders that table from the requests a run's host sends and fails if
-this page and the SDK disagree.
-
-The table describes a run. `sparkwing pipeline plan` still runs the
-pipeline's `Plan`, as describe does, but no step action and no skip
-predicate: it reports a step with a SkipIf as `may_skip`, decided at run
-time.
-
-## Exec and Bash - running a shell command in a step
-
-Two entry points pick the kind of execution. Each returns a `*Cmd`
-builder you chain modifiers onto, then terminate with one verb that
-decides what to do with the output.
-
-```
-Bash(ctx, line)               *Cmd  // bash -c, no formatting; line is verbatim
-Exec(ctx, name, args...)      *Cmd  // no shell; arg-vector form
-WorkDir() string                    // pipeline working directory (repo root)
-```
-
-`Bash` shells out to the host's `bash`. macOS and Linux have it by
-default. **On Windows, install [Git for Windows](https://git-scm.com/download/win)
-and run `sparkwing` from its Git Bash terminal**. `Exec` runs an argument
-vector directly; use it for commands that need no shell features.
-
-`Bash` takes the shell program verbatim - there's no printf-style
-formatting. Splice dynamic *values* into a shell command by
-passing them through `.Env("KEY", value)` and referencing `"$KEY"`
-inside the line; the shell expands the variable safely. Splice dynamic
-*argv* through `Exec(ctx, name, args...)`.
-
-Modifiers (chain freely; each returns the same `*Cmd`):
-
-```
-.Dir(path)                          // run in path; relative resolves vs WorkDir()
-.Env(key, val)                      // add one env var
-.EnvMap(map)                        // merge a map of env vars
-```
-
-Terminators (one per call; pick the shape that matches the post-exec
-work):
-
-```
-.Run() (ExecResult, error)          // stream stdout/stderr to the run logger
-.Capture() (ExecResult, error)      // silent; full output in ExecResult
-.String() (string, error)           // captured + TrimSpace(stdout)
-.Lines() ([]string, error)          // captured stdout, split + trimmed, blanks dropped
-.JSON(out any) error                // captured stdout decoded via json.Unmarshal
-.MustBeEmpty(reason) error          // non-empty stdout becomes "<reason>:\n<stdout>"
-```
-
-Common shapes:
-
-```go
-sparkwing.Bash(ctx, "go test ./...").Run()
-sparkwing.Bash(ctx, `git -C "$R" diff --name-only`).Env("R", repo).MustBeEmpty("uncommitted changes")
-sha, _ := sparkwing.Exec(ctx, "git", "rev-parse", "HEAD").String()
-packages, _ := sparkwing.Bash(ctx, "go list ./...").Lines()
-var pods PodList
-sparkwing.Exec(ctx, "kubectl", "get", "pods", "-o", "json").JSON(&pods)
-sparkwing.Exec(ctx, "go", "test", "./...").Dir("internal").Env("CGO_ENABLED", "0").Run()
-```
-
-`ExecError` carries `Command`, `Stdout`, `Stderr`, `ExitCode`, and a
-wrapped `Cause`. `errors.As(err, &ee)` works through every terminator
-(including `JSON` and `MustBeEmpty`).
-
-### Tool caches
-
-```
-ToolCacheDir(tool) string              // durable cache scoped to this worktree
-```
-
-A tool that keys its cache on file content alone - golangci-lint among
-them - replays a stored result for identical input no matter which
-checkout produced it. Two worktrees of one repo sharing that tool's
-default cache therefore see each other's results: a run in one reports
-the other's file paths, including paths from a worktree that has since
-been deleted. Hand the tool a cache scoped to the worktree instead:
-
-```go
-sparkwing.Bash(ctx, "golangci-lint run ./...").
-    Env("GOLANGCI_LINT_CACHE", sparkwing.ToolCacheDir("golangci-lint")).
-    Run()
-```
-
-`ToolCacheDir` stores caches under `SPARKWING_HOME`, defaulting to
-`~/.sparkwing`, so they outlive the shell. Test binaries default to an isolated
-temporary home; set `SPARKWING_HOME` explicitly when testing persistence.
-`ToolCacheDir` derives its scope from `WorkDir()`: runs in one worktree share
-a cache, and each worktree has its own cache.
-
-`SaveLintCache` and `RestoreLintCache` operate on
-`ToolCacheDir("golangci-lint")` for the current `WorkDir()` and take no
-directory argument, so a fixed-workdir runner seeds the same cache it
-lints with.
-
-Each worktree keeps its own cache, and pays a cold first lint for it.
-A stored issue carries the absolute path of the tree that produced it,
-so a cache shared between worktrees replays paths that belong to
-another tree. Lending the run a stable alias path resolves those paths
-and breaks the report instead: git resolves the alias to the real
-worktree and calls that the repository root, so every replayed finding
-sits outside the diff and a baseline such as golangci-lint's
-`new-from-merge-base` drops it -- a tree with eight findings lints
-clean in three seconds.
-
-Running two lint jobs at once is a different problem, and a scoped
-cache does not touch it. golangci-lint takes its parallel-runner lock
-on `golangci-lint.lock` in the OS temp directory, so every run on the
-box contends on one file no matter where `GOLANGCI_LINT_CACHE` points -
-only `TMPDIR` moves it. By default a run that cannot take the lock
-retries for 5s and then exits `parallel golangci-lint is running`,
-which a gate reports as a lint failure against a tree that is fine.
-
-Pass `--allow-serial-runners` so the run waits its turn instead:
-
-```go
-sparkwing.Bash(ctx, "golangci-lint run --allow-serial-runners ./...").
-    Env("GOLANGCI_LINT_CACHE", sparkwing.ToolCacheDir("golangci-lint")).
-    Run()
-```
-
-It waits on golangci-lint's own lock, so it queues behind every other
-golangci-lint on the box, including runs that know nothing about
-sparkwing - one pipeline adopting it stops failing straight away, with
-no fleet-wide agreement needed. The flag waits indefinitely, so bound
-it with a context deadline, or one wedged linter pins every gate on the
-machine. A deadline that fires establishes that the step did not
-finish, never why: report it as could-not-run with the time waited, and
-keep the word contention for a run that printed `parallel golangci-lint
-is running`.
-
-`--allow-parallel-runners` drops the lock instead of waiting on it,
-which lets N linters share the box's CPU and memory at once. Prefer it
-only where the machine has headroom to spare.
-
-## Files
-
-```
-Path(parts...) string                       // join onto WorkDir(); abs first part wins
-ReadFile(path) ([]byte, error)              // os.ReadFile, relative -> WorkDir()
-WriteFile(path, data) error                 // os.WriteFile, perm 0o644
-Glob(pattern) ([]string, error)             // filepath.Glob, returns absolute paths
-```
-
-When invoked outside any sparkwing project (no `.sparkwing/`
-discoverable above cwd), the relative-path forms of `ReadFile` /
-`WriteFile` / `Glob` return `sparkwing.ErrNoProject` (wrapped). `Path`
-has no error return, so it panics with `ErrNoProject` instead.
-Absolute inputs work without a project.
-
-## Logging
-
-```
-Info(ctx, format, args...)                // info-level log on the current node
-Warn(ctx, format, args...)                // warn-level log
-Error(ctx, format, args...)               // error-level log
-Debug(ctx, format, args...)               // only when SPARKWING_DEBUG=1
-Annotate(ctx, msg)                        // persistent node-level summary
-```
-
-`Annotate` differs from the four log helpers: the message is appended
-to a persistent `annotations` list on the Job row instead of (only)
-appearing in the run log. The dashboard surfaces these summaries
-next to the node so operators see "processed 1,234 records · 12
-failed" without opening the log view. Multiple calls per node
-accumulate; calls outside a node context are a silent no-op.
-
-Per-level methods only -- the level lives in the verb name, no
-level-as-string arg. Same printf-style format-args contract across
-all four. Each call goes through the `Logger` installed in ctx and
-is stamped with the current Job and Job-stack envelope.
-
-Step boundaries are emitted automatically by `RunWork` as structured
-`step_start` / `step_end` events; the renderer surfaces them as a
-collapsible bucket in the CLI and dashboard.
-
-These helpers send node output to run records and the dashboard.
-
-## Plan - the outer DAG
-
-Every pipeline implements
-`Plan(ctx context.Context, plan *sw.Plan, in T, rc sw.RunContext) error`
-where `T` is the pipeline's typed Inputs struct. The SDK constructs
-the `*Plan` and passes it to the user's Plan(); authors register
-nodes on it via the free-function adders below.
-
-`in` carries the typed flag values (see "Typed Inputs" below). `rc`
-is a `sw.RunContext` - the run-time environment Plan branches on.
-Useful fields:
-
-```
-rc.RunID    string         // unique run identifier
-rc.Pipeline string         // registered pipeline name
-rc.Git      *Git           // repo state at the trigger SHA
-rc.Trigger  TriggerInfo    // {Source: "manual|push|schedule|webhook", User}
-```
-
-Most one-step Plans don't need `rc` at all - the parameter is named
-for the moment a Plan starts branching on trigger source / SHA.
-
-Free-function adders (writes; mutate the Plan):
-
-```
-sw.Job(plan, id, x any) *JobNode                                             // register a Job: x is sw.Workable or func(ctx) error
-sw.JobFanOut[T](plan, name, items, fn) *JobGroup                             // Plan-time static fan-out
-sw.JobFanOutDynamic[T](plan, name, source, fn) *JobGroup                     // runtime fan-out after source completes
-sw.JobApproval(plan, id, cfg) *ApprovalGate                                   // human-decision gate (see "Approval gates")
-sw.GroupJobs(plan, name, members...) *JobGroup                               // named cluster + Needs target (name="" = unnamed)
-sw.RefTo[T](node) sw.Ref[T]                                                   // typed Ref into node's typed output
-```
-
-`sw.Job`'s third argument is `any`: pass either an `sw.Workable`
-implementation (struct with `Work(w *Work) (*WorkStep, error)`) or a
-plain `func(ctx context.Context) error` for the single-closure
-case. Reflection at register time accepts either form. Anything else
-panics at materialize time.
-
-Approval gates register through `sw.JobApproval` and return an
-`*ApprovalGate` -- a narrower modifier surface than `*JobNode` so the
-modifiers that don't apply to gates (`Retry`, `Timeout`, `Memoize`,
-`Requires`, `Inline`) are physically absent and a misuse is a compile
-error:
-
-```go
-approve := sw.JobApproval(plan, "approve-prod", sw.ApprovalConfig{
-    Message:  fmt.Sprintf("Promote %s to prod?", git.SHA),
-    Timeout:  2 * time.Hour,
-    OnExpiry: sw.ApprovalFail,
-}).Needs(stagingChecks)
-
-sw.Job(plan, "fictional-deploy-prod", &Deploy{}).Needs(approve)
-```
-
-Available modifiers on `*ApprovalGate`: `Needs`, `NeedsOptional`,
-`OnFailure`, `BeforeRun`, `AfterRun`, `SkipIf`, `Optional`,
-`ContinueOnError`. Plus `Job()` as the accessor when an author
-needs the underlying `*JobNode`.
-
-`OnExpiry` defaults to fail; valid values are `sw.ApprovalFail`,
-`sw.ApprovalDeny`, `sw.ApprovalApprove`. Unknown values panic at
-plan time. `Job.Timeout()` bounds per-attempt execution.
-
-Plan accessors (reads; methods on `*Plan`):
-
-```
-plan.Nodes() []*JobNode                           // all registered nodes, in declaration order
-plan.Job(id) *JobNode                             // lookup by id, nil if absent
-plan.LintWarnings() []sw.LintWarning               // non-fatal Plan-time advisories
-plan.Expansions() []sw.Expansion                   // dynamic fan-out generators
-plan.IsDynamicNode(id) bool                        // node sources runtime-variable downstream work
-plan.GroupSourceIDs(id) []string                   // ExpandFrom group's source nodes
-```
-
-Job modifiers (chainable on `*JobNode`):
-
-```
-node.Needs(deps...) *JobNode                       // dependency edges
-node.Env(key, value) *JobNode                      // per-node env var
-group.Needs(deps...) *JobGroup                     // every member depends on deps; same chainable surface as *JobNode
-```
-
-`sw.GroupJobs(plan, name, members...)` returns a `*JobGroup` that is
-both a `Needs` target (a downstream `Needs(group)` depends on every
-member) and a dashboard cluster (members fold under the name; one
-arrow draws into the cluster instead of one-per-member). An empty
-name means "structural collection only" -- still a Needs target,
-but no UI cluster. The Work-layer twin is `sw.GroupSteps(w, name,
-steps...)`.
-
-Common Plan-layer modifiers (chainable on `*JobNode`):
-
-```
-.Retry(n, opts...)                 // retry n times on failure; RetryBackoff(d) and RetryAuto() compose
-.Timeout(d)                        // absolute per-attempt execution budget
-.NoProgressTimeout(d)              // per-attempt inactivity budget; node log records reset it
-.Verify(fn)                        // postcondition checked after the action succeeds; non-nil fails at StageVerify
-.OnFailure(id, job)                // recovery node if this node fails; job may be func(ctx, sparkwing.Failure) error to branch on stage
-.SkipIf(pred, opts...)             // skip when pred(ctx) returns true; SkipBudget(d) overrides budget
-.Requires(labels...)               // require runner labels (comma = OR within a term, AND across terms)
-.Memoize(key, TTL(d))                // content-addressed result memoization (+ in-flight dedupe)
-.Concurrency(group, cost...)       // join a shared concurrency budget (count-limit, gate, throttle)
-.BeforeRun(fn) / .AfterRun(fn)     // hooks
-.Inline()                          // run on the dispatcher's host, not a runner
-.ContinueOnError() / .Optional()   // failure-propagation knobs
-.NeedsOptional(deps...)            // soft upstream dep
-```
-
-Use `NoProgressTimeout` to stop attempts that cease producing observable
-progress. Each node log record resets the inactivity window, including step
-transitions, `Info` / `Warn` / `Error`, command starts, and complete output
-lines from `Exec(...).Run()`. The timer covers the action and its `Verify`
-postcondition. It starts fresh for each retry.
-
-Node admission, hooks, retry backoff, delegated child submission or execution,
-and tool-slot admission do not consume the inactivity budget. Cached nodes do
-not start it.
-Captured commands are silent after their command-start record, so a long
-`Capture`, `String`, `Lines`, `JSON`, or `MustBeEmpty` call can exceed the
-budget even while its subprocess is healthy. Use streaming `Run`, report
-progress from the job, or omit `NoProgressTimeout` when silence is expected.
-
-Pair it with a longer `Timeout` when continuing progress must not make an
-attempt unbounded:
-
-```go
-sw.Job(plan, "fictional-index", &Index{}).
-    NoProgressTimeout(2 * time.Minute).
-    Timeout(30 * time.Minute)
-```
-
-## Workable - the Work-bearing interface
-
-```go
-type Workable interface {
-    Work(w *sw.Work) (*sw.WorkStep, error)
-}
-```
-
-Every Job carries a Workable (a struct that exposes its inner DAG
-via `Work`). The orchestrator constructs the `*Work` and passes it
-in -- authors don't call `NewWork()`. The returned `*WorkStep` (or
-`nil` for an untyped job) selects the job's typed output.
-
-For Jobs with no typed output, return `nil`:
-
-```go
-type Build struct{ sw.Base }
-
-func (j *Build) Work(w *sw.Work) (*sw.WorkStep, error) {
-    fetch := sw.Step(w, "fetch", j.fetch)
-    sw.Step(w, "compile", j.compile).Needs(fetch)
-    return nil, nil
-}
-```
-
-A typed-output job embeds `sw.Produces[T]` and returns a step producing
-`T` from `Work`. A mismatch panics during materialization.
-
-For single-closure Jobs (one function, no inner DAG, no
-struct), pass the closure directly to `sw.Job` and skip the
-Workable entirely:
-
-```go
-sw.Job(plan, "fictional-lint", p.run)
-```
-
-The SDK wraps the closure into a Workable.
-
-## Work - the inner DAG
-
-The Work layer mirrors Plan's free-function grammar. Two adders
-plus one typed reader:
-
-```
-sw.Step(w, id, fn any) *WorkStep                          // register a step (untyped or typed; see below)
-sw.GroupSteps(w, name, steps...) *StepGroup               // named cluster + Needs target
-sw.StepGet[T](ctx, step) T                                // typed-read accessor for use inside step bodies
-```
-
-`sw.Step`'s `fn` is either a `func(ctx context.Context) error`
-(untyped) or a `func(ctx context.Context) (T, error)` (typed). The
-SDK validates the signature via reflection at register time and
-stores the step's `outType` (nil for untyped, T for typed). A
-wrong-shape `fn` panics at materialize time with a typed message.
-A single verb covers both shapes -- the function signature is the
-only declaration site for typing.
-
-Step modifiers (chainable on `*WorkStep`):
-
-```
-step.Needs(deps...) *WorkStep                             // accepts *WorkStep, *StepGroup; splat a slice: s.Needs(steps...)
-step.SkipIf(predicate) *WorkStep                          // OR-accumulating skip predicate
-step.Finally() *WorkStep                                 // cleanup after declared deps terminate, even after sibling failure
-step.DryRun(fn func(ctx) error) *WorkStep                 // no-mutation body run instead of the apply Fn under --sw-dry-run
-step.SafeWithoutDryRun() *WorkStep                        // mark the apply Fn as side-effect-free; runs unmodified under --sw-dry-run
-```
-
-Choose the parallel failure policy once per Work:
-
-```go
-w.ParallelFailures(sw.FailFast)
-w.ParallelFailures(sw.CollectAll)
-```
-
-Fail-fast records the triggering step, cancelled sibling count, and
-cancellation latency in `work_fail_fast` telemetry. Cancelled steps end with
-`outcome=cancelled`, never `failed`. Collect-all never turns a failed `.Needs()`
-prerequisite into success; a dependent dispatches only after success or when
-the prerequisite explicitly uses `.ContinueOnError()`. Cleanup steps should
-declare every item they clean up with `.Needs(...)` and add `.Finally()`; they
-run through the Job's parent context, so sibling failure does not cancel them
-while an operator cancellation still does.
-
-### Dry-run contract
-
-`sparkwing run <pipeline> --sw-dry-run` installs a dry-run flag on the
-run-wide ctx -- detect it with `IsDryRun(ctx)`. Each step's dispatch
-then picks one of three paths:
-
-- `step.DryRun(fn)` declared -> `fn` runs in place of the apply Fn.
-  The closure reports proposed changes without mutating state; it answers "what *would* the
-  apply do" the way `terraform plan`, `kubectl apply --dry-run=server`,
-  `helm upgrade --dry-run`, and similar tools do.
-- `step.SafeWithoutDryRun()` declared -> the apply Fn runs unchanged,
-  for steps whose execution has no side effects.
-- Neither declared -> the step soft-skips with `step_skipped` /
-  `skip_reason: no_dry_run_defined`.
-  Risk labels (`step.Risk("destructive", "prod", ...)`) are a separate
-  gate: they refuse a normal run unless every label is authorized with
-  `--sw-allow`, and `--sw-dry-run` bypasses that gate, so a
-  risk-labeled step with no dry-run contract still soft-skips.
-
-For step bodies that need to branch on the mode (e.g. emit a
-structured "would do X" log line for an op without a native
-dry-run flag), read `sparkwing.IsDryRun(ctx)` directly -- the public
-way to detect dry-run from inside a step.
-
-`sparkwing pipeline plan` does not preview dry-run: it reports
-`would_run`, `would_skip` from the step range, or `may_skip` for a step
-with a SkipIf, which only a run evaluates.
-
-Declare `step.DryRun(fn)` on mutating steps; `--sw-dry-run` selects
-those callbacks (see *Flag namespace* below).
-
-`*StepGroup` (returned by `sw.GroupSteps`) is both a `Needs` target
-(a downstream `step.Needs(group)` depends on every member) and a
-dashboard cluster (members fold under the name in the Work view).
-Its modifiers are:
-
-```
-group.Needs(deps...) *StepGroup                           // applies to every member
-group.SkipIf(predicate) *StepGroup                        // applies to every member
-```
-
-Reads on `*Work` stay methods: `w.Steps()`, `w.StepByID(id)`.
-Steps never create Jobs; add Jobs on the Plan, and use
-`sw.JobFanOutDynamic` when an earlier Job's output decides them.
-
-## Typed step composition
-
-Inside a step body, read another step's typed output via
-`sw.StepGet[T](ctx, step)`. It mirrors Plan's `Ref[T].Get(ctx)` and
-exists as a free function because Go forbids generic methods.
-
-Reach for it when a step needs to compose values from multiple
-typed steps into a single returned result:
-
-```go
-type BuildOut struct {
-    Tag, Platform, Hash string
-}
-
-type Build struct {
-    sw.Base
-    sw.Produces[BuildOut]
-}
-
-func (j *Build) Work(w *sw.Work) (*sw.WorkStep, error) {
-    tag      := sw.Step(w, "tag",      j.computeTag)
-    platform := sw.Step(w, "platform", j.detectPlatform)
-    hash     := sw.Step(w, "hash",     j.computeHash)
-
-    return sw.Step(w, "compose", func(ctx context.Context) (BuildOut, error) {
-        return BuildOut{
-            Tag:      sw.StepGet[string](ctx, tag),
-            Platform: sw.StepGet[string](ctx, platform),
-            Hash:     sw.StepGet[string](ctx, hash),
-        }, nil
-    }).Needs(tag, platform, hash), nil
-}
-```
-
-`StepGet` waits for the upstream step to finish and panics on a missing
-or mismatched type. When one step produces the job output, return that
-step from `Work`:
-
-```go
-func (j *Build) Work(w *sw.Work) (*sw.WorkStep, error) {
-    return sw.Step(w, "run", j.run), nil
-}
-```
-
-## Typed outputs (single field type for every routing)
-
-Every typed dependency on another node's output is a `sw.Ref[T]`
-field. The constructor in `Plan()` carries the routing detail:
-
-| Routing | Constructor | What it does |
-|---|---|---|
-| In-run sibling | `sw.RefTo[T](node)` | Read a `*JobNode` in the same DAG. Held in an exported job struct field, it makes the consumer depend on that node. A Ref captured by a closure still needs `.Needs(node)`. |
-| Cross-pipeline, passive | `sw.RefToLastRun[T](pipeline, nodeID, opts...)` | Read another pipeline's latest successful run. Does not trigger. |
-| Cross-pipeline, active | `sw.RunAndAwait[Out, In](ctx, ...)` (free fn) | Trigger a fresh run of another pipeline, wait, return its output. |
-
-```go
-type Build struct {
-    sw.Base
-    sw.Produces[BuildOut]
-}
-
-func (j *Build) Work(w *sw.Work) (*sw.WorkStep, error) {
-    return sw.Step(w, "run", j.run), nil
-}
-
-type Deploy struct {
-    sw.Base
-    Build    sw.Ref[BuildOut]
-    Manifest sw.Ref[Manifest]
-}
-
-build := sw.Job(plan, "fictional-build", &Build{})
-sw.Job(plan, "fictional-deploy", &Deploy{
-    Build:    sw.RefTo[BuildOut](build),
-    Manifest: sw.RefToLastRun[Manifest]("manifest-pipe", "out",
-                  sw.MaxAge(24*time.Hour)),
-}) // depends on fictional-build through its Build field
-b := j.Build.Get(ctx)
-m := j.Manifest.Get(ctx)
-```
-
-`sw.RefTo[T]` requires a job struct to embed `sw.Produces[T]`. It panics
-if that marker is missing or declares another output type.
-
-`Get` panics when the reference cannot be resolved. For a
-compare-to-last-run pipeline that is the normal first state --
-`sw.RefToLastRun` has no successful run to read on the pipeline's first
-run -- so read those refs with `TryGet`, which reports the miss instead:
-
-```go
-prev, ok := j.Prev.TryGet(ctx)
-if !ok {
-    return j.buildEverything(ctx) // bootstrap run: nothing to compare against
-}
-```
-
-`ok` is false for a genuine absence: the upstream node has not
-completed, the run that was found stored no output, or a cross-pipeline
-resolver reported `sparkwing.ErrRefAbsent`; the value is the zero `T`.
-Every miss is logged at warn naming the pipeline and node, because a
-store cannot tell a misspelled pipeline name from one that has never
-run, and a silent bootstrap branch would hide the typo forever.
-
-A resolver marks an absence by wrapping `sparkwing.ErrRefAbsent`. The
-orchestrator's resolver marks a pipeline with no successful run inside
-`MaxAge` and a run that holds no such node. A failure it leaves
-unmarked -- a store it could not reach -- panics instead, so an outage
-crashes the step rather than sending a compare-to-last-run pipeline
-down its bootstrap branch for as long as the outage lasts.
-
-One input divides the two accessors: a cross-pipeline run that stored
-empty or null output. `Get` renders that as the zero `T` and carries on;
-`TryGet` reports it as a miss. Swapping one for the other on such a ref
-changes which branch runs.
-
-`TryGet` panics for the failures a pipeline author cannot handle at
-runtime: no resolver in context, which happens only outside a dispatched
-step; stored output that does not fit `T`; a cancelled or expired
-context, which is the step being torn down rather than an upstream that
-is absent; and an unmarked resolver failure. Keep `Get` where a missing
-output is itself a programmer mistake.
-
-Untyped pipelines (no typed output) skip both `sw.Produces[T]` and
-`sw.RefTo[T]`; pass plain bytes via env vars or sibling steps.
-
-### Imperative cross-pipeline trigger
-
-```go
-out, err := sparkwing.RunAndAwait[Out, In](ctx, "fictional-build", "fictional-artifact",
-    sparkwing.WithFreshInputs(In{Service: "api"}),
-    sparkwing.WithFreshTimeout(10*time.Minute),
-)
-```
-
-Use `sparkwing.NoInputs` as the second type parameter when the target
-pipeline takes no flags. Cross-repo callers without import access to
-the target's Inputs type pass `sparkwing.NoInputs` and use the escape
-hatch `sparkwing.WithFreshArgs(map[string]string{...})`.
-
-When `RunAndAwait` inherits the caller job's `.Timeout(d)`, child
-plan-admission queue wait is excluded from that execution budget. An
-explicit `WithFreshTimeout(d)` is different: it bounds the total wait
-for the child run, including admission queue time.
-
-## Secrets and config
-
-```
-Secret(ctx, name) (string, error)        // resolve a cluster secret; auto-masked in logs
-MustSecret(ctx, name) string             // panic on miss
-Config(ctx, name) (string, error)        // unmasked config value
-MustConfig(ctx, name) string             // panic on miss
-```
-
-**Call from step bodies or CacheKey functions, not from `Plan()`.**
-The orchestrator installs the resolver on the run ctx at dispatch
-time, *after* every pipeline's `Plan()` has returned. Calling
-`Secret`/`Config` (or their `Must*` forms) from inside `Plan()`
-returns `no resolver installed` / panics. This is consistent with the
-"Plan() must be pure" rule above: `Plan()` declares the graph; values
-are resolved when the graph runs.
-
-```go
-func (b *Build) Plan(_ context.Context, plan *sw.Plan, _ sw.NoInputs, rc sw.RunContext) error {
-    sw.Job(plan, "fictional-build", func(ctx context.Context) error {
-        region, err := sw.Config(ctx, "REGION")
-        if err != nil { return err }
-        return doBuild(region)
-    })
-    return nil
-}
-```
-
-CacheKey functions also run at dispatch time, so they may call
-`Secret`/`Config` directly.
-
-Register a custom resolver for tests:
-`WithSecretResolver(ctx, SecretResolverFunc(...))`.
-
-### Declaring secrets
-
-A pipeline declares the secrets it reads with a `Secrets()` method that
-returns a pointer to a struct. Each field's `sw` tag names one secret. A
-field is required unless its tag ends in `,optional`; use `,optional` for a
-secret only some runs need, such as a deploy key read only on `main`.
-
-```go
-type ReleaseSecrets struct {
-    DeployToken string `sw:"DEPLOY_TOKEN"`
-    DeployKey   string `sw:"DEPLOY_KEY,optional"`
-}
-
-func (Release) Secrets() any { return &ReleaseSecrets{} }
-```
-
-Step bodies read the resolved struct with
-`sw.PipelineSecrets[ReleaseSecrets](ctx)`, or one value with `Secret`.
-Before the first node runs, every required secret is checked against the
-store the run reads from, and a run missing any of them fails with one
-message naming each and the `sparkwing secrets set` command that sets it; a
-missing optional secret leaves its field empty. On a controller a node may
-read only a secret its pipeline declares, and reading any other name fails
-with an error naming the tag to add. See
-[Pipelines: Secrets](pipelines.md#secrets) for the checks.
-
-## Trigger inputs from step bodies
-
-The pipeline's `Plan(ctx, plan, in T, rc)` method receives the typed
-Inputs once. To read the same value from a step body deep in the
-DAG without threading it through closures or job-struct fields,
-call `sw.Inputs[T](ctx)`:
-
-```go
-type DeployArgs struct {
-    Service string `flag:"service"`
-    Env     string `flag:"env" default:"staging"`
-}
-
-func (Deploy) Plan(ctx context.Context, plan *sw.Plan, _ DeployArgs, rc sw.RunContext) error {
-    sw.Job(plan, "fictional-deploy", func(ctx context.Context) error {
-        args := sw.Inputs[DeployArgs](ctx)
-        return runDeploy(ctx, args.Service, args.Env)
-    })
-    return nil
-}
-```
-
-Panics outside a dispatch ctx (no installer) or on a wrong concrete
-type. The orchestrator installs the parsed Inputs on every node's
-runner ctx automatically.
-
-There is no public helper for installing inputs on a ctx from
-external test code; inputs reach a node's ctx only through the
-orchestrator.
 
 ## Pipeline registration
 
-In `.sparkwing/jobs/<name>.go`:
+Implement `Pipeline[T]`, register a factory and call `sw.Main()` from the pipeline
+entry's `main` function. The factory creates a fresh pipeline for each invocation.
+The host supplies typed inputs and a `RunContext` to `Plan`.
 
 ```go
-import sw "github.com/sparkwing-dev/sparkwing/sparkwing"
+package main
+
+import (
+    "context"
+
+    sw "github.com/sparkwing-dev/sparkwing/sparkwing"
+)
 
 type Inputs struct {
-    SkipTests bool   `flag:"skip-tests" desc:"skip the test suite"`
-    Target    string `flag:"target" default:"local" enum:"local,staging,prod"`
+    Target string `flag:"target" default:"staging" enum:"staging,prod"`
 }
 
-type MyPipeline struct{ sw.Base }
+type Ship struct{ sw.Base }
 
-func (MyPipeline) Plan(ctx context.Context, plan *sw.Plan, in Inputs, rc sw.RunContext) error {
-    sw.Job(plan, "test", func(ctx context.Context) error {
-        if in.SkipTests { return nil }
-        _, err := sw.Bash(ctx, "go test ./...").Run()
+func (Ship) Plan(_ context.Context, plan *sw.Plan, in Inputs, _ sw.RunContext) error {
+    build := sw.Job(plan, "build", func(ctx context.Context) error {
+        _, err := sw.Exec(ctx, "go", "build", "./...").Run()
         return err
     })
+    sw.Job(plan, "deploy", func(ctx context.Context) error {
+        sw.Info(ctx, "deploying to %s", in.Target)
+        return nil
+    }).Needs(build)
     return nil
 }
 
-func init() {
-    sw.Register[Inputs]("my-pipeline", func() sw.Pipeline[Inputs] {
-        return MyPipeline{}
-    })
+func main() {
+    sw.Register[Inputs]("ship", func() sw.Pipeline[Inputs] { return Ship{} })
+    sw.Main()
 }
 ```
 
-For pipelines that take no flags, use `sw.NoInputs`:
+`sw.RegisterEntrypoint[T]` registers a named SDK entrypoint for a project alias.
+The invoked pipeline name travels in `RunContext.Pipeline`. Pipelines without
+flags use `sw.NoInputs`.
+
+Input structs support `flag`, `short`, `default`, `required`, `enum` and `desc`
+tags. `secret:"true"` classifies a flag value for masking. A `flag:",extra"`
+map receives extra flags. Typed job inputs use an embedded `sw.WithArgs[T]` and
+share the pipeline's flag namespace. The SDK checks required values, types,
+enums and name collisions before execution. Generated jobs bind their arguments
+from the original run snapshot.
+
+Secret flag values are masked in logs and diagnostics. Input masking does not
+remove those values from stored invocation arguments, so use declared secrets
+for credentials.
+
+The SDK describes registered inputs, defaults, help, risks and secret names to
+the host. A discovery error fails the whole description. Describe uses defaults
+without requiring execution-only arguments and does not execute generators.
+
+## Plan() must be pure
+
+`Plan(ctx, plan, inputs, runContext)` builds declarations. Put commands, file
+writes, network calls and secret reads inside execution callbacks. SDK helpers
+reject side effects on the planning context. `Work` methods also construct
+declarations and must follow the same rule.
+
+The host replans in execution processes to reconstruct code and compares the
+result with the accepted job declaration. The same inputs and context must
+produce the same graph. Read clocks, random values and mutable environment
+inside callbacks. A reconstruction mismatch fails with `plan_drift` before the
+body starts.
+
+`RunContext` contains `RunID`, `Pipeline`, `Git`, `Trigger`, `StartedAt`, `DryRun`
+and `NoMemo`. These are the host's run snapshot. `sw.Inputs[T](ctx)` reads typed
+pipeline inputs from an execution callback. `sw.Runner(ctx)` returns the granted
+runner identity, including its name, type and labels.
+
+## Jobs and steps
+
+A `Plan` holds the job graph. Each executable job contains a `Work` graph of
+steps running within its SDK process. `sw.Job(plan, id, body)` accepts a
+`Workable` value or a `func(context.Context) error`. A plain function becomes a
+single step named `run`.
+
+A `Workable` implements `Work(*sw.Work) (*sw.WorkStep, error)`. Its returned step
+selects the job's typed result. Return nil when the job has no output.
 
 ```go
-sw.Register[sw.NoInputs]("fictional-lint", func() sw.Pipeline[sw.NoInputs] {
-    return Lint{}
-})
-```
-
-The pipeline struct embeds `sw.Base` and optionally exposes
-`ShortHelp() / Help() / Examples()` for the `sparkwing run <name> --help`
-screen.
-
-## Typed Inputs
-
-Each pipeline declares exactly one Inputs type. Field tags drive CLI
-parsing, `--help`, schema introspection (`sparkwing pipeline describe
---name X -o json`), shell completion, and the dashboard run form.
-
-```
-`flag:"name"`            // Required on every input field. Uses dash-case.
-`short:"x"`              // Optional one-letter alias (e.g. -v alongside --verbose)
-`desc:"text"`            // Human description shown in --help
-`default:"value"`        // Default when flag is not provided
-`required:"true"`        // Errors when missing (mutex with default)
-`enum:"a,b,c"`           // Allowed values; requires default-or-required
-`secret:"true"`          // Redact in logs, run views, receipts, and dashboard
-`flag:",extra"`          // Catch-all for unknown flags; map[string]string only
-```
-
-### What `secret:"true"` covers
-
-A secret-marked input is redacted to `***` on every read surface: the
-`run_start` setup block `sparkwing run` prints, `runs list`,
-`runs status` and its `--view` renderings (including the receipt's
-`rerun` reproducer command), the controller's run API,
-and the dashboard's Setup panel. Node log bodies are masked separately
-by the run's masker, which replaces the value anywhere it appears in
-emitted text.
-
-Redaction is applied when a run is read, not when it is written. The
-run row keeps the plaintext argument, because the masker derives its
-redaction set from it and retrying or replaying a run re-executes with
-it. Treat the state database and its backups as holding the value in the
-clear, and protect them accordingly.
-
-Limits worth knowing:
-
-- A `flag:",extra"` bag is never redacted -- its keys are arbitrary and
-  carry no per-key opt-in.
-- Runs recorded before a pipeline declared the input secret render as
-  they always did. The classification is stamped on the run at start,
-  and there is no schema to reclassify an old row from.
-- A value that arrives from `sparkwing.yaml` -- the project's
-  `defaults.args` block or a pipeline entry's `args:` block -- is masked
-  in logs but does not appear on the run row at all, redacted or
-  otherwise. The row records the arguments the caller passed, and the
-  yaml layers are re-read from the checkout each run, so a retry picks
-  up the project's current value instead of a copy of the old one.
-- Trigger rows are not redacted. `sparkwing cluster triggers get`,
-  `sparkwing cluster triggers list`, and `GET /api/v1/triggers` show
-  argument values, because the same endpoint hands them to the runner
-  claiming the work.
-- A run pre-allocated by a fresh trigger shows its arguments while it
-  sits in `pending`, until the worker that starts it stamps the
-  classification on. Retries and replays inherit their source run's
-  classification and are covered for that window.
-- Redaction of the `rerun` reproducer is anchored on the argument name,
-  not the value. Pass the same value to a non-secret argument as well
-  and it is masked in logs -- where masking is value-anchored -- but
-  shown under that other argument's name.
-- `inputs_hash` is omitted when the caller supplied any `secret:"true"`
-  argument. This keeps run metadata, logs, receipts, and state dumps from
-  becoming an offline oracle for low-entropy values. The SQL migration also
-  removes hashes from classified rows written by older versions. Built-in
-  state backends reject an unsafe write; custom `storage.StateStore`
-  implementations should call `store.ValidateRunInvocation` in `CreateRun`.
-- Audit events are masked when they are written, not when they are
-  read. Events recorded before this behavior existed, and any future
-  event type that carries arguments without going through the masker,
-  are served as-is by `GET /api/v1/runs/{id}/events` and the dashboard
-  SSE stream.
-- Dispatch envelopes are masked only when a masker is present on the
-  context. A dispatch written outside a run's execution context is
-  stored as-is.
-
-Cluster executors are the one caller that needs the real values: a pod
-fetches the arguments it runs with from `GET /api/v1/runs/{id}`. They
-pass `?include=secret_values`, which the controller honors for an
-`admin` token and for a `nodes.claim` token holding an unexpired claim
-on one of the run's nodes. A controller running with authentication
-disabled honors it for everyone, because the whole API is open there
-and a redacted argument would execute as the literal `***`. Every other
-caller gets the redacted view whether or not it asks.
-
-Supported field types: `string`, `bool`, `int`, `int64`, `float64`,
-`time.Duration`, `[]string` (comma-separated on the wire), and
-`map[string]string` (only with `,extra`).
-
-Unknown flags are an error by default. To opt into forwarding (e.g.
-to wrap an inner tool), declare a single `map[string]string` field
-with `flag:",extra"`:
-
-```go
-type WrapperInputs struct {
-    Image string            `flag:"image" required:"true"`
-    Extra map[string]string `flag:",extra"`
-}
-```
-
-### Job args: `WithArgs[T]`
-
-A reusable job can declare its own flags by embedding
-`sw.WithArgs[T]`. `T` uses the Inputs tags above; a field without a
-`flag:` tag is not a flag. The job's flags join the pipeline's in
-`--help`, `pipeline describe` and completion, marked with the job id.
-
-```go
-type DeployArgs struct {
-    Replicas int    `flag:"replicas" default:"3" desc:"target replica count"`
-    Image    string `flag:"image" required:"true" desc:"OCI image ref"`
-    Strategy string `flag:"strategy" default:"rolling" enum:"rolling,recreate"`
+type BuildOutput struct {
+    Digest string
 }
 
-type Deploy struct {
+type Build struct {
     sw.Base
-    sw.WithArgs[DeployArgs]
+    sw.Produces[BuildOutput]
 }
 
-func (j *Deploy) Work(w *sw.Work) (*sw.WorkStep, error) {
-    return sw.Step(w, "rollout", func(ctx context.Context) error {
-        a := j.Args(ctx)
-        _, err := sw.Exec(ctx, "kubectl", "set", "image", "deploy/app", "app="+a.Image).Run()
+func (Build) Work(work *sw.Work) (*sw.WorkStep, error) {
+    compile := sw.Step(work, "compile", func(ctx context.Context) error {
+        _, err := sw.Exec(ctx, "go", "build", "./...").Run()
         return err
-    }), nil
+    })
+    result := sw.Step(work, "result", func(context.Context) (BuildOutput, error) {
+        return BuildOutput{Digest: "sha256:example"}, nil
+    }).Needs(compile)
+    return result, nil
 }
 ```
 
-The run resolves every job's args before any step runs, so a missing
-`required:"true"` value or a value outside `enum` fails the run up
-front. `Args(ctx)` panics when called from `Plan`. A job may not declare
-a flag or short alias that another job or the pipeline's Inputs declare. `secret:"true"` and `flag:",extra"` are
-pipeline-only and panic at registration: declare a secret on the
-pipeline's Inputs, where the run masks it.
+The host schedules steps when their dependencies settle. `sw.StepGet[T](ctx,
+step)` reads a completed step's local output. A new attempt resets those outputs.
+The protocol carries an explicit attempt ordinal and terminal-step snapshot for
+both step bodies and step conditions.
 
-### Flag namespace: `--sw-*` vs your flags
+`sw.GroupJobs(plan, name, jobs...)` groups jobs and provides a dependency target.
+`sw.JobFanOut(plan, name, items, fn)` declares a static fan-out.
+`sw.GroupSteps(work, name, steps...)` groups steps within a job.
 
-`sparkwing run` keeps its own control flags out of your way by
-using the `sw-` prefix for its long control options:
+| Declaration | Behavior |
+|---|---|
+| `job.Needs(deps...)` | Wait for required jobs |
+| `job.NeedsIfPresent(deps...)` | Wait for dependencies that exist in this plan |
+| `job.NeedsGenerated(generators...)` | Wait for generator settlement and generated jobs |
+| `step.Needs(deps...)` | Wait for steps in the same job |
+| `SkipIf(predicate)` | Skip when the predicate returns true |
+| `ContinueOnError()` | Allow dependents after failure |
+| `Optional()` | Exclude this job or step's failure from required success |
+| `step.Finally()` | Run cleanup work after dependencies settle, including failed dependencies |
+| `work.FailurePolicy(sw.FailFast)` | Cancel independent work after a step failure |
+| `work.FailurePolicy(sw.CollectAll)` | Let independent steps finish |
 
-```
-    --sw-ref REF          // compile the pipeline at a git ref
--v, --sw-verbose          // debug logging
-    --sw-start-at STEP    // start the run at STEP
-    --sw-stop-at STEP     // stop the run after STEP
-    --sw-only GLOB        // run only matching jobs (+ their Needs)
-    --sw-no-cache         // ignore cached per-node results
-    --sw-priority VALUE   // local admission priority: N, front, back
-    --sw-dry-run          // run each step's dry-run probe
-    --sw-allow LABEL,...  // authorize risk-labeled steps
-    --sw-no-update        // skip the sparks auto-resolve step
-```
+Final outcomes are `sw.Success`, `sw.Failed`, `sw.Cancelled`, `sw.Skipped`,
+`sw.Superseded` and `sw.Memoized`. Their wire values use snake_case. A separate
+reason distinguishes conditions such as a concurrency skip.
 
-The runner reserves `--sw-*` for control options. Unknown options with that
-prefix fail before execution setup. Other arguments pass to the pipeline.
-Put `--` before pipeline arguments that resemble runner options; every argument after
-the separator passes unchanged to the pipeline binary.
+## Typed outputs and references
 
-Before the separator, the runner also consumes `--profile`, `-C`, `-v`, and
-`--dry-run=true` / `--dry-run=false`. The pipeline owns `--target`.
-
-For a `--dry-run`-style flag, prefer `step.DryRun(fn)` on each mutating
-step (see *Work - the inner DAG > Dry-run contract*) over a
-`flag:"dry-run"` input; the runner-level `--sw-dry-run` then dispatches
-your DryRun callbacks.
-
-## Cache
-
-`.Memoize(key, opts...)` is content-addressed result memoization: same
-content, compute once, reuse the result. It carries no scope and no
-group -- that is [Concurrency](#concurrency)'s job.
+A job embedding `sw.Produces[T]` exposes its selected result as `T`.
+`sw.RefTo[T](job)` creates a typed reference. Declare its dependency with `Needs`.
+The host authorizes reads through declared edges.
 
 ```go
-sw.Key("go-mod", "1.26", "abc123")
-
-node := sw.Job(plan, "fictional-build", func(ctx context.Context) error { return nil })
-node.Memoize(func(ctx context.Context) (sw.CacheKey, error) {
-    return sw.Key("fictional-build", "linux", "amd64"), nil
-}, sw.TTL(24*time.Hour))
+build := sw.Job(plan, "build", Build{})
+output := sw.RefTo[BuildOutput](build)
+sw.Job(plan, "report", func(ctx context.Context) error {
+    sw.Info(ctx, "built %s", output.Get(ctx).Digest)
+    return nil
+}).Needs(build)
 ```
 
-- `CacheKeyFn` has signature `func(context.Context) (CacheKey, error)`.
-  It resolves after upstream dependencies complete and before dispatch,
-  so it can read `Ref[T]` output. Errors, panics, empty keys, and expired
-  resolution deadlines fail the node before its work starts.
-- `TTL(d)` bounds retention; omit for `DefaultCacheTTL` (7d), capped at
-  `MaxCacheTTL` (35d).
-- Return `sw.NoCache, nil` to run uncached for one invocation.
-- Identical content that is in flight dedupes automatically: one
-  computes, the rest wait and replay a successful result.
+`Ref.Get(ctx)` returns the decoded value. `Ref.TryGet(ctx)` also reports
+presence. A transport or decoding failure fails the callback. For a cross-run
+reference, JSON null is absent. An in-run null output is present and decodes to
+the type's zero value. Typed job and step outputs are bounded to 16 MiB each.
 
-See [caching.md](caching.md) for the full model. The `JobGroup` mirror
-is `group.Memoize(key, opts...)`.
+`sw.RefToLastRun[T](pipeline, jobID, sw.MaxAge(duration))` reads the latest
+successful run without starting another run. Store it in a job field so planning
+can declare the read edge.
+
+`sw.RunAndAwait[Out, In](ctx, pipeline, jobID, options...)` starts a child run and
+waits for its output. Options include `sw.WithFreshInputs(in)`,
+`sw.WithFreshArgs(args)` and `sw.WithFreshTimeout(duration)`. The host owns child
+submission, authorization, cancellation and cycle checks. Call it inside an
+execution callback. Compose reusable job types into a plan when the work belongs
+in the same run.
+
+## Generated jobs
+
+`job.Generate` registers a callback that declares jobs after a successful or
+memoized source result. Read that result through a typed reference. The returned
+`*sw.Generator` is a dependency target for `NeedsGenerated`.
+
+```go
+source := sw.Job(plan, "build", Build{})
+output := sw.RefTo[BuildOutput](source)
+generated := source.Generate(func(ctx context.Context, expansion *sw.Plan) error {
+    digest := output.Get(ctx).Digest
+    sw.Job(expansion, "inspect", func(ctx context.Context) error {
+        sw.Info(ctx, "inspecting %s", digest)
+        return nil
+    })
+    return nil
+})
+sw.Job(plan, "finish", func(context.Context) error { return nil }).
+    NeedsGenerated(generated)
+```
+
+Each registration has a stable ID. The host persists the accepted jobs and the
+barrier even when the callback generates zero jobs. The limit is 256 jobs per
+generator. Expansions declare jobs, while plan settings remain with the initial
+plan. Execution replay reconstructs code and must match the accepted declaration.
+Generator contexts exclude the source's body environment because it must not
+change reconstructed declarations. Failed, skipped, cancelled and superseded
+sources settle the barrier without running the generator.
+
+## Retry, timeouts and hooks
+
+`job.Retry(n, sw.Backoff(duration))` permits `n` additional application attempts.
+The host rejects retry declarations above its ceiling of 10. Backoff doubles
+between retries, up to five minutes. Application retries keep the claim and
+advance the attempt ordinal. Lease-loss recovery has a separate disruption
+allowance.
+
+`Timeout(duration)` bounds each attempt. `NoProgressTimeout(duration)` bounds
+inactivity during the body and verification. Observable log records reset the
+inactivity window. Streaming command output reports progress, while a captured
+command can remain silent until it finishes. Use a longer absolute timeout to
+bound work that keeps producing output.
+
+`BeforeRun` registers a callback before execution. `Verify` checks the successful
+body and fails the job when it returns an error. `AfterRun` receives the final
+error, with nil for success. `OnFailure(id, body)` declares a separate recovery
+job. Recovery callbacks can accept `sw.Failure` to inspect the failed job, stage
+and error. Recovery jobs may declare their own recovery chains.
+
+## Approvals
+
+Use `plan.Approval(id, sw.ApprovalConfig{...})` for a manual decision.
+
+```go
+gate := plan.Approval("promote", sw.ApprovalConfig{
+    Message:   "Promote this build?",
+    Timeout:   2 * time.Hour,
+    OnTimeout: sw.ApprovalDeny,
+}).Needs(build)
+sw.Job(plan, "release", func(context.Context) error { return nil }).Needs(gate)
+```
+
+`OnTimeout` accepts `sw.ApprovalFail`, `sw.ApprovalDeny` or
+`sw.ApprovalApprove`. Zero timeout waits indefinitely within the owner's
+deadline. Approvals support `Needs`, `NeedsIfPresent`, `NeedsGenerated`, `SkipIf`,
+`Optional`, `ContinueOnError` and `OnFailure`. The recovery job is executable.
+The gate itself only declares a decision.
+
+## Memo, caches and artifacts
+
+`Memo` reuses a successful job result. Its callback returns `sw.MemoValue` and an
+error. Build keys with `sw.MemoKey(parts...)`, set retention with
+`sw.MemoTTL(duration)`, and return `sw.NoMemo` to bypass reuse. Empty keys fail.
+The maximum memo TTL is 30 days. Missing or corrupt objects produce a miss.
+
+```go
+sw.Job(plan, "build", Build{}).
+    Memo(func(context.Context) (sw.MemoValue, error) {
+        return sw.MemoKey("build", "toolchain-v1"), nil
+    }, sw.MemoTTL(24*time.Hour))
+```
+
+The `sparkwing/inputs` package supplies `RepoFiles`, `Files`, `Tree`, `Env`,
+`Const` and `Compose` memo-key functions. Include every input that affects the
+result. The host scopes reuse by the accepted repository and trust policy.
+
+`Cache` restores and saves dependency directories. `sw.GoModules()` and
+`sw.Npm()` declare standard caches. `sw.Dir(path, sw.KeyFromFile(lockfile))`
+declares a custom directory cache. `DirCache.Key(workdir)` computes its input key
+without granting storage access. A dependency-cache failure runs the job cold.
+
+```go
+sw.Job(plan, "test", func(ctx context.Context) error {
+    _, err := sw.Exec(ctx, "go", "test", "./...").Run()
+    return err
+}).Cache(sw.GoModules())
+```
+
+`Artifacts(globs...)` publishes files. `Consumes(producer, sw.Into(prefix))`
+stages the producer's artifacts and adds its dependency. Paths remain inside the
+workspace. Artifact staging failure fails the job.
+
+```go
+build := sw.Job(plan, "build", Build{}).Artifacts("dist/**")
+sw.Job(plan, "package", func(context.Context) error { return nil }).
+    Consumes(build, sw.Into("input/build"))
+```
+
+## Environment and placement
+
+`job.Env(name, value)` applies body environment after planning. Use
+`sw.Startup()` for interpreter settings that must be present when the SDK starts.
+The engine also recognizes its fixed interpreter startup names. Startup values
+must not alter declarations. Commands and cleanups inherit the attempt's body
+environment.
+
+`Requires(labels...)` declares required runner labels. `Prefers(labels...)` holds
+remote work for a runner advertising those preferred labels when applicable.
+`NeedsTools(names...)` declares known tool requirements. `Inline()` selects the
+run host for execution. `sw.Runner(ctx)` reports the host-granted identity.
+
+`Resources(sw.Cores(value), sw.MemoryGB(value))` declares job or plan resources.
+Fractional cores are supported. `plan.Priority(value)` sets admission priority.
+`plan.ClaimWait(duration)` declares a positive maximum wait for a runner claim.
+`plan.Checkout(sw.Checkout{...})` declares source options with pointer fields for
+`Depth`, `FullHistory`, `Tags`, `Submodules` and `LFS`. Explicit values remain
+distinct from omission. The host resolves settings and refuses declarations over
+operator ceilings when it accepts the plan.
 
 ## Concurrency
 
-`.Concurrency(group, cost...)` enrolls a node in a named budget shared
-by its members: different work taking turns under a cap. Define the
-group once and pass the handle to each member.
+Create a shared budget with `sw.NewConcurrencyGroup` and attach it to a job or
+the plan. Membership cost defaults to one.
 
 ```go
-databaseGroup := sw.NewConcurrencyGroup("db", sw.ConcurrencyLimit{
-    Capacity:     8,
-    Scope:        sw.ScopeBox,
-    OnLimit:      sw.Queue,
-    QueueTimeout: 30 * time.Second,
-})
-sw.Job(plan, "fictional-shard-1", func(ctx context.Context) error { return nil }).Concurrency(databaseGroup, 4)
-sw.Job(plan, "fictional-shard-2", func(ctx context.Context) error { return nil }).Concurrency(databaseGroup, 4)
-```
-
-`Capacity` and `cost` are integers in author-defined units (a slot, a
-gigabyte, a database container, and similar quantities). Admission compares the summed `cost` of
-live members in the scope plus this member's cost against `Capacity`.
-For at most `N` concurrent members, set capacity to `N` and use each
-member's default cost of 1.
-
-```go
-deployGate := sw.NewConcurrencyGroup("fictional-deploy-prod", sw.ConcurrencyLimit{
+deploys := sw.NewConcurrencyGroup("deploys", sw.ConcurrencyLimit{
+    Scope:    sw.ScopeGlobal,
     Capacity: 1,
     OnLimit:  sw.Queue,
 })
-sw.Job(plan, "fictional-deploy", func(ctx context.Context) error { return nil }).Concurrency(deployGate)
+sw.Job(plan, "deploy", func(context.Context) error { return nil }).
+    Concurrency(deploys)
 ```
 
-### OnLimit
+Scopes are `sw.ScopeGlobal`, `sw.ScopeRun` and `sw.ScopeBox`. Policies are
+`sw.Queue`, `sw.Fail`, `sw.Skip` and `sw.CancelOthers`. Unset values resolve to
+global scope, capacity one, cost one and queueing. Explicit zero capacity or cost
+fails validation. Reused group definitions must agree on scope, capacity and
+policy. The host computes the scoped key. `QueueTimeout` bounds waiting and
+`CancelTimeout` bounds cancellation of existing holders.
 
-What a member does when its group is at capacity:
+`plan.Concurrency(group, cost...)` holds a budget for the whole run. Job
+memberships consume capacity around the job. Resource admission remains a
+separate host responsibility.
 
-- `Queue` (default) -- wait for room, then run. Waiters that fit run
-  oldest-first; a waiter that cannot fit in the available
-  weighted budget does not block later waiters that do fit unless younger
-  backfilled holders are what keep the older waiter from fitting. This
-  ordering is scoped to the `Concurrency()` group; local admission priority
-  is a separate run-level order.
-- `Fail` -- error immediately.
-- `Skip` -- resolve as a no-op without running.
-- `CancelOthers` -- evict running members oldest-first until this one
-  fits (best-effort; side effects already committed are not rolled
-  back).
+## Secrets and masking
 
-Concurrency groups schedule distinct work. Use [Cache](#cache) to reuse results.
-
-### Scope
-
-`Scope` selects how far the budget reaches; it folds into the
-coordination key as a scope tag plus a length-prefixed qualifier, so
-two scopes (or two qualifiers) can never fold onto one key:
-
-- `ScopeRun` -- key `r:<len>:<runID><name>`: only this run's nodes
-  share the budget.
-- `ScopeBox` -- key `b:<len>:<hostID><name>`: every run on one machine
-  shares it, even under a controller.
-- `ScopeGlobal` (the zero value) -- key `g:<name>`: the whole fleet
-  shares it through the coordination backend.
-
-`<len>` is the byte length of the qualifier that follows.
-
-`hostID` for `ScopeBox` is `os.Hostname()`, overridable by `machine.box_id`
-in [config.yaml](machine-config.md). Inside a container the hostname is
-per-container, so two containers on one physical host would each get their
-own box budget; set `machine.box_id` to the physical host identity when you
-want per-machine budgeting across containers.
-
-### Capacity skew: most-restrictive wins
-
-Two pipeline versions running against one controller can declare the
-same group with different `Capacity`. The store enforces the **minimum**
-over live participants, not the last writer -- a cap is a safety
-constraint, so the only value that honors every live participant is the
-smallest. Lowering takes effect immediately; raising waits for the
-last participant declaring the lower value to drain. A drift warning
-fires so the skew is visible.
-
-### Timeouts
-
-- `QueueTimeout` (with `Queue`) bounds the wait; on expiry the node
-  fails with `failure_reason: queue_timeout` and the waiter leaves the
-  queue, so a later release won't hand the slot to a run that gave up.
-  Zero waits indefinitely.
-- `CancelTimeout` (with `CancelOthers`) bounds how long the arrival
-  waits for evicted holders to release before the slot is force-freed.
-
-### Gate-shaped pipelines: queue, don't fail
-
-When several runs contend for one shared resource -- a deploy slot, a
-migration lock, a single-writer index -- reach for a capacity-1 group
-with `OnLimit: Queue`, not `Fail`. `Fail` pushes a poll-and-retry loop
-onto every caller and aborts the loser with "slot full". With capacity 1,
-`Queue` lines arrivals up FIFO and runs them one at a time, with `QueueTimeout`
-as the bounded way out. With weighted capacities, it can grant one later
-request when the head waiter cannot fit. After that backfill, the
-older waiter's full resource set is protected until it runs, even if external
-pressure still keeps it from fitting when the younger holder exits. Queue state
-reports the backfill count and protection reason; the rolling event summary
-retains younger-backfill and protected-waiter counts after the waiter departs.
-
-### Whole-run coordination
-
-A plan can take one unit of a group before any node dispatches and
-release it when the run reaches a terminal status. A plan never
-memoizes, so this is concurrency only:
+A pipeline implements `Secrets() any` to declare a typed secrets struct. Fields
+use `sw:"NAME,required"` or `sw:"NAME,optional"`. Required is the default.
+Declarations appear in describe. The host checks required names, and execution
+callbacks resolve values lazily.
 
 ```go
-plan.Concurrency(sw.NewConcurrencyGroup("whole-run-prod", sw.ConcurrencyLimit{
-    Capacity: 1,
-    OnLimit:  sw.Fail,
-}))
+type ShipSecrets struct {
+    Token string `sw:"DEPLOY_TOKEN,required"`
+}
+
+func (Ship) Secrets() any { return &ShipSecrets{} }
 ```
 
-Global plan groups are acquired before local host admission. A run waiting for
-host capacity therefore participates in `CancelOthers`: a newer group member
-supersedes it, and its next concurrency heartbeat cancels the run and withdraws
-its host request. Global `Skip` and `Fail` decisions also precede host admission.
-Plans acquire global groups before local groups, sorting each set by scoped key.
+`sw.PipelineSecrets[ShipSecrets](ctx)` returns the resolved struct.
+`sw.Secret(ctx, name)` reads a masked value. `sw.Variable(ctx, name)` reads an
+unmasked value. A classification mismatch fails the read. `MustSecret` and
+`MustVariable` panic on errors. Planning has no execution binding for these
+services.
 
-The `JobGroup` mirror is `group.Concurrency(handle, cost...)`.
+Call `sw.Mask(ctx, value)` before logging a dynamically obtained secret. It
+returns after the host acknowledges registration, and returns an error if that
+registration fails. Registered secret values cannot occur in job, step, group or
+approval IDs, including generated declarations. Validation reports the field
+path without echoing the value. Registration also refuses a value contained in
+an already accepted identifier.
 
-### Run priority
+`sw.OIDCToken(ctx, audience)` requests an identity token through the host.
+Credentials remain in the private process binding rather than the environment
+of commands a step starts.
 
-Local admission orders queued runs by an integer priority: higher
-admits first, equal priorities keep FIFO order. A plan can declare its
-own:
+## Commands, files and records
+
+`sw.Exec(ctx, program, args...)` runs argv directly. `sw.Bash(ctx, script)` runs a
+shell script. Both return a command builder with `Dir`, `Env` and `EnvMap`.
+Terminators include `Run`, `Capture`, `String`, `Lines`, `JSON` and `MustBeEmpty`.
+Handle returned errors to fail the step. `ExecError` carries exit status and
+captured output. `WorkDir()` returns the repository working directory.
+
+File helpers include `ReadFile`, `WriteFile`, `Glob` and similar operations.
+Call them inside execution callbacks when their result depends on workspace
+state. Subpackages provide Docker, git and service helpers.
+
+`sw.Info`, `sw.Warn` and `sw.Error` emit structured text records.
+`sw.Annotate(ctx, sw.Annotation{...})` writes a diagnostic with level, message,
+file and optional line, end-line and column. Positions are one-based when
+supplied. Levels are `debug`, `info`, `warn` and `error`, with `info` as the
+default. `sw.Summary(ctx, markdown)` replaces the job or step summary. The host
+assigns the job, filters debug records and masks text before applying limits.
+Annotation and summary write failures fail the callback.
+
+A step can declare `Risk(labels...)`, `DryRun(callback)` and
+`SafeWithoutDryRun()`. The host enforces approved risks and chooses the dry-run
+body. `sw.IsDryRun(ctx)` reads the mode inside a callback.
+
+`cleanup.Register(ctx, cleanup.Spec{Argv: argv, Description: text})` registers an
+idempotent teardown command for a resource outside the process tree. It returns
+a release function. Call release after normal teardown so the host can discard
+the registration. Import the `sparkwing/cleanup` subpackage for this helper.
+
+## Testing author code
+
+Import `github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest` to exercise
+author code with an isolated fake host. `Options` supplies runner and run
+context, classified secrets, job outputs and callbacks for OIDC, latest output
+and child runs.
 
 ```go
-plan.Priority(10)
+func TestJob(t *testing.T) {
+    host := sparkwingtest.New(sparkwingtest.Options{
+        Runner: sw.RunnerInfo{Name: "fixture", Type: "local"},
+        Secrets: map[string]sparkwingtest.Secret{
+            "TOKEN": {Value: "test-token", Masked: true},
+        },
+    })
+    t.Cleanup(func() {
+        if err := host.Close(); err != nil {
+            t.Error(err)
+        }
+    })
+    plan := sw.NewPlan()
+    sw.Job(plan, "check", func(ctx context.Context) error {
+        _, err := sw.Secret(ctx, "TOKEN")
+        return err
+    })
+    if _, err := host.RunStep(t.Context(), plan, "check", "run"); err != nil {
+        t.Fatal(err)
+    }
+}
 ```
 
-An operator can override that default per run with `sparkwing run --sw-priority VALUE`,
-where VALUE is an integer or one of `front` / `back`:
+`host.Plan(ctx, name, args)` invokes a registered planner and returns its wire
+plan. `RunStep` executes a declared step and returns JSON output. `Eval` invokes
+a declared closure with JSON input. `Context` installs the fixture's services.
+`Records` and `Masks` return snapshots for assertions. `Close` cancels and joins
+active operations and callbacks. Each fixture owns its state.
 
-```sh
-sparkwing run fictional-deploy --sw-priority 100   # explicit number
-sparkwing run fictional-deploy --sw-priority front # one past the highest queued
-sparkwing run fictional-deploy --sw-priority back  # one below the lowest queued
-```
-
-`front` and `back` are resolved once, when the run starts, against the
-queue as it stands then -- an empty queue answers 1 and -1. The
-resolved number is fixed for the life of the run, so the run's own
-admission and every node it later dispatches queue at the same place,
-and the run record carries both the number and where it came from.
-`sparkwing run --sw-detached --sw-priority` carries the request on the
-trigger and resolves it when the consumer launches the run, so `front`
-means ahead of the queue the run joins.
-
-Priority is a whole-run order, separate from `Concurrency()`: a group's
-members still take turns oldest-first inside the group.
-
-## Discovery
-
-- `sparkwing docs read --topic pipelines` - conceptual tour
-- `sparkwing docs read --topic sdk` - this page
-- `sparkwing docs read --all` - every doc concatenated (one stdout dump for agents)
-- `sparkwing pipeline plan --static --name X [-o json]` - render the full
-  Plan -> Job -> Work -> Step tree before running
-- [`pipelines.md`](pipelines.md) - the conceptual Plan/Work tour
+Planning cannot read service answers because it has no execution binding.
+Execution uses the same SDK declarations and operation rules as protocol
+serving. The fake host provides focused author tests. Real-host acceptance tests
+cover scheduling, storage and authorization integration.

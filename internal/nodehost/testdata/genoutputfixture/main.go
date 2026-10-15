@@ -14,15 +14,17 @@ import (
 	"io"
 	"net/http"
 	"os"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
-func readOutput(node string) error {
-	req, err := http.NewRequest(http.MethodGet, os.Getenv("SPARKWING_NODE_URL")+"/node/v1/nodes/"+node+"/output", nil)
+func readOutput(routes nodeproto.ProcessRoutes, node string) error {
+	req, err := http.NewRequest(http.MethodGet, routes.URL+"/node/v1/nodes/"+node+"/output", nil)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Sparkwing-Node-Protocol", "1")
-	req.Header.Set("Authorization", "Bearer "+os.Getenv("SPARKWING_NODE_TOKEN"))
+	req.Header.Set("Authorization", "Bearer "+routes.Bearer)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
@@ -36,27 +38,29 @@ func readOutput(node string) error {
 }
 
 func main() {
+	var routes nodeproto.ProcessRoutes
 	scenario, phase := os.Getenv("GENFIXTURE_SCENARIO"), os.Getenv("GENFIXTURE_PHASE")
-	generators := []string{"targets/generator/0"}
+	generators := []string{"targets/generate/0"}
 	if scenario == "multi" {
-		generators = append(generators, "targets/generator/1")
+		generators = append(generators, "targets/generate/1")
 	}
-	source := map[string]any{"id": "targets", "deps": []string{}, "closures": map[string]any{"generator": generators}, "modifiers": map[string]any{"timeout_ms": 5000}}
-	child := map[string]any{"id": "child", "deps": []string{"targets"}, "modifiers": map[string]any{"timeout_ms": 5000}}
-	recover := map[string]any{"id": "recover", "deps": []string{}, "on_failure_of": "child", "modifiers": map[string]any{"timeout_ms": 5000}}
+	source := map[string]any{"id": "targets", "steps": []any{map[string]any{"id": "body"}}, "result_step": "body", "deps": []string{}, "closures": map[string]any{"generate": generators}, "timeout_ms": 5000}
+	child := map[string]any{"id": "child", "steps": []any{map[string]any{"id": "body"}}, "result_step": "body", "groups": []string{"targets/generate/0"}, "deps": []string{"targets"}, "timeout_ms": 5000}
+	recover := map[string]any{"id": "recover", "steps": []any{map[string]any{"id": "body"}}, "result_step": "body", "groups": []string{"targets/generate/0"}, "deps": []string{}, "on_failure_of": "child", "timeout_ms": 5000}
 	if scenario == "nested" {
-		child["closures"] = map[string]any{"generator": []string{"child/generator/0"}}
+		child["closures"] = map[string]any{"generate": []string{"child/generate/0"}}
 	}
-	summary := map[string]any{"id": "summary", "deps": []string{}, "needs_generated": generators}
+	summary := map[string]any{"id": "summary", "steps": []any{map[string]any{"id": "body"}}, "result_step": "body", "deps": []string{}, "needs_generated": generators}
 	reqs := bufio.NewScanner(os.NewFile(3, "requests"))
 	reqs.Buffer(make([]byte, 1<<20), 1<<20)
 	frames := os.NewFile(4, "frames")
 	for reqs.Scan() {
 		var q struct {
-			ID      any    `json:"id"`
-			Op      string `json:"op"`
-			Closure string `json:"closure"`
-			Node    string `json:"node"`
+			ID      any                       `json:"id"`
+			Op      string                    `json:"op"`
+			Closure string                    `json:"closure"`
+			Job     string                    `json:"job"`
+			Binding *nodeproto.ProcessBinding `json:"binding"`
 			Run     struct {
 				RunID string `json:"run_id"`
 			} `json:"run"`
@@ -66,16 +70,21 @@ func main() {
 		}
 		var result any = map[string]any{}
 		switch q.Op {
+		case "hello":
+			if q.Binding != nil {
+				routes = q.Binding.Routes
+			}
+			result = nodeproto.HelloResult{Protocol: nodeproto.Version, SDK: nodeproto.SDKIdentity{Language: "go", Version: "test"}, Features: []string{}}
 		case "describe":
-			result = map[string]any{"protocol": "1", "pipelines": []any{map[string]any{"name": "probe", "args": []any{}}}}
+			result = map[string]any{"pipelines": []any{map[string]any{"name": "probe", "args": []any{}}}}
 		case "plan":
-			result = map[string]any{"protocol": "1", "pipeline": "probe", "run_id": q.Run.RunID, "nodes": []any{source, summary}}
+			result = map[string]any{"jobs": []any{source, summary}}
 		case "eval":
 			var value []any
 			var err error
 			switch q.Closure {
-			case "targets/generator/0":
-				err = readOutput("targets")
+			case "targets/generate/0":
+				err = readOutput(routes, "targets")
 				switch {
 				case phase == "omitted":
 					value = []any{}
@@ -84,23 +93,23 @@ func main() {
 				default:
 					value = []any{child}
 				}
-			case "child/generator/0":
-				err = readOutput("child")
-				value = []any{map[string]any{"id": "grandchild", "deps": []string{"child"}, "modifiers": map[string]any{"timeout_ms": 5000}}}
+			case "child/generate/0":
+				err = readOutput(routes, "child")
+				value = []any{map[string]any{"id": "grandchild", "steps": []any{map[string]any{"id": "body"}}, "result_step": "body", "groups": []string{"child/generate/0"}, "deps": []string{"child"}, "timeout_ms": 5000}}
 			default:
 				value = []any{}
 			}
 			if err != nil {
-				result = map[string]any{"error": err.Error()}
+				result = map[string]any{"error": &apierr.Error{Code: apierr.SDKError, Message: err.Error()}}
 			} else {
 				result = map[string]any{"value": value}
 			}
-		case "run_node", "run_step":
+		case "run_step":
 			switch {
-			case q.Node == "targets" || (q.Node == "child" && scenario == "nested"):
+			case q.Job == "targets" || (q.Job == "child" && scenario == "nested"):
 				result = map[string]any{"outcome": "success", "output": []string{"child"}}
-			case q.Node == "child":
-				result = map[string]any{"outcome": "failed", "error": "the child failed"}
+			case q.Job == "child":
+				result = map[string]any{"outcome": "failed", "error": &apierr.Error{Code: apierr.SDKError, Message: "the child failed"}}
 			default:
 				result = map[string]any{"outcome": "success"}
 			}

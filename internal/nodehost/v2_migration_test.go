@@ -18,7 +18,7 @@ import (
 )
 
 func TestV2SessionRequiresGrantedIdentity(t *testing.T) {
-	_, err := StartSession(t.Context(), SessionConfig{Entry: pipelineentry.Binary("/missing/sdk")})
+	_, err := StartSession(t.Context(), SessionConfig{Entry: pipelineentry.Binary("/missing/sdk"), Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}})
 	if err == nil || !strings.Contains(err.Error(), "granted runner") {
 		t.Fatalf("missing identity: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestV2SessionHelloKeepsAuthorityOffEnvironment(t *testing.T) {
 	runner := nodeproto.RunnerIdentity{Name: "granted-runner", Type: "cloud", Labels: []string{"linux"}}
 	sess, err := StartSession(t.Context(), SessionConfig{
 		Entry: pipelineentry.Command{executable, "-test.run=^TestV2SDKProcess$", "--"},
-		Env:   []string{"SPARKWING_TEST_V2_SDK=1"}, Engine: nodeproto.EngineIdentity{Version: "v1.2.3"}, Runner: runner, Binding: binding,
+		Env:   []string{"SPARKWING_TEST_V2_SDK=1"}, Engine: nodeproto.EngineIdentity{Version: "v1.2.3"}, Runner: runner, Binding: binding, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -130,9 +130,9 @@ func (l *v2Lease) Watch(func(wingwire.Evicted), func(wingwire.Cancel)) error { <
 func TestV2MultipleLocalConcurrencyGroupsShareResourceLease(t *testing.T) {
 	daemon := &v2Admitter{}
 	cores := 2.0
-	node := &NodeRun{Run: &Run{ID: "r", Pipeline: "ci"}, Plan: nodeproto.JobSpec{
+	node := &NodeRun{Run: &Run{ID: "r", Pipeline: "ci", validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}, Plan: nodeproto.JobSpec{
 		ID: "build", Resources: &nodeproto.ResourceSpec{Cores: &cores},
-		Concurrency: []nodeproto.ConcurrencySpec{{Group: "b", Scope: "run", Capacity: 1, Cost: 1, OnLimit: "queue"}, {Group: "a", Scope: "box", Capacity: 2, Cost: 1, OnLimit: "queue"}},
+		Concurrency: []nodeproto.ConcurrencySpec{{Group: "b", Scope: new(string("run")), Capacity: new(int(1)), Cost: new(int(1)), OnLimit: new(string("queue"))}, {Group: "a", Scope: new(string("box")), Capacity: new(int(2)), Cost: new(int(1)), OnLimit: new(string("queue"))}}, Steps: []nodeproto.StepSpec{{ID: "body"}},
 	}}
 	admission := &Admission{Daemon: daemon, BoxID: func() string { return "machine" }}
 	result := admission.admit(t.Context(), node, func(context.Context, *NodeRun) Result { return Result{Outcome: sparkwing.Success} })
@@ -153,7 +153,7 @@ func TestV2MultipleLocalConcurrencyGroupsShareResourceLease(t *testing.T) {
 
 func TestV2RetryBudgetCountsAdditionalAttempts(t *testing.T) {
 	timeout, backoff := int64(100), int64(10)
-	job := nodeproto.JobSpec{TimeoutMS: &timeout, Retry: &nodeproto.RetrySpec{Attempts: 2, BackoffMS: &backoff}}
+	job := nodeproto.JobSpec{TimeoutMS: &timeout, Retry: &nodeproto.RetrySpec{Attempts: 2, BackoffMS: &backoff}, Steps: []nodeproto.StepSpec{{ID: "body"}}}
 	if got := AttemptsBudget(job); got != 330*time.Millisecond {
 		t.Fatalf("budget = %v", got)
 	}

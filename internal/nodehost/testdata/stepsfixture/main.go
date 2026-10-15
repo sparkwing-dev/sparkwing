@@ -121,7 +121,7 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 	}))
 
 	sparkwing.Job(plan, "collect", work(func(w *sparkwing.Work) *sparkwing.WorkStep {
-		w.ParallelFailures(sparkwing.CollectAll)
+		w.FailurePolicy(sparkwing.CollectAll)
 		independentStarted, prerequisiteFailed := make(chan struct{}), make(chan struct{})
 		reject := sparkwing.Step(w, "reject", func(ctx context.Context) error {
 			if err := wait(ctx, independentStarted, "independent start"); err != nil {

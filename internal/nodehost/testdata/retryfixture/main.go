@@ -64,20 +64,26 @@ func (c check) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 
 func (pipeline) Plan(_ context.Context, p *sparkwing.Plan, in inputs, _ sparkwing.RunContext) error {
 	targets := sparkwing.Job(p, "targets", source{dir: in.TraceDir}).Timeout(400 * time.Millisecond)
-	checks := sparkwing.JobFanOutDynamic(p, "tests", targets, func(id string) (string, any) {
-		mode, err := os.ReadFile(in.ModeFile)
-		if err != nil {
-			panic(err)
+	checks := targets.Generate(func(ctx context.Context, expanded *sparkwing.Plan) error {
+		for _, item := range sparkwing.RefTo[[]string](targets).Get(ctx) {
+			id, body := (func(id string) (string, any) {
+				mode, err := os.ReadFile(in.ModeFile)
+				if err != nil {
+					panic(err)
+				}
+				if strings.TrimSpace(string(mode)) == "hang" {
+					select {}
+				}
+				return "test-" + id, check{mode: strings.TrimSpace(string(mode)), id: id, dir: in.TraceDir}
+			})(item)
+			sparkwing.Job(expanded, id, body).Needs(targets)
 		}
-		if strings.TrimSpace(string(mode)) == "hang" {
-			select {}
-		}
-		return "test-" + id, check{mode: strings.TrimSpace(string(mode)), id: id, dir: in.TraceDir}
+		return nil
 	})
 	sparkwing.Job(p, "summary", func(context.Context) error {
 		trace(in.TraceDir, "summary")
 		return nil
-	}).Needs(checks)
+	}).NeedsGenerated(checks)
 	return nil
 }
 

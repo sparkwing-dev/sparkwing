@@ -46,7 +46,7 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 	if in.Refuse {
 		return fmt.Errorf("plan refused %s", in.Pass)
 	}
-	build := sparkwing.Job(plan, "build", &buildJob{in: in}).EnvOld("FIXTURE_ENV", "from-plan").EnvOld("SPARKWING_RUNNER_LABELS", "local,gpu")
+	build := sparkwing.Job(plan, "build", &buildJob{in: in}).Env("FIXTURE_ENV", "from-plan").Env("SPARKWING_RUNNER_LABELS", "local,gpu")
 	if in.Counter != "" {
 		data, _ := os.ReadFile(in.Counter)
 		n, _ := strconv.Atoi(string(data))
@@ -54,7 +54,7 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 		if err := os.WriteFile(in.Counter, []byte(strconv.Itoa(n)), 0o600); err != nil {
 			return err
 		}
-		build.EnvOld("PLAN_SEQ", strconv.Itoa(n))
+		build.Env("PLAN_SEQ", strconv.Itoa(n))
 	}
 	if in.Crash {
 		sparkwing.Job(plan, "crash", func(ctx context.Context) error {
@@ -67,17 +67,23 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 	}
 	if in.FanOut != "" {
 		targets := sparkwing.Job(plan, "targets", &targetsJob{list: in.FanOut})
-		tests := sparkwing.JobFanOutDynamic(plan, "tests", targets, func(target string) (string, any) {
-			switch target {
-			case "boom":
-				panic("no target boom")
-			case "hang":
-				fmt.Println("generator hangs")
-				select {}
+		tests := targets.Generate(func(ctx context.Context, expanded *sparkwing.Plan) error {
+			for _, item := range sparkwing.RefTo[[]string](targets).Get(ctx) {
+				id, body := (func(target string) (string, any) {
+					switch target {
+					case "boom":
+						panic("no target boom")
+					case "hang":
+						fmt.Println("generator hangs")
+						select {}
+					}
+					return "test-" + target, func(context.Context) error { return nil }
+				})(item)
+				sparkwing.Job(expanded, id, body).Needs(targets)
 			}
-			return "test-" + target, func(context.Context) error { return nil }
+			return nil
 		})
-		sparkwing.Job(plan, "summary", func(context.Context) error { return nil }).Needs(tests)
+		sparkwing.Job(plan, "summary", func(context.Context) error { return nil }).NeedsGenerated(tests)
 	}
 	if in.Leak {
 		sparkwing.Job(plan, "leak", func(ctx context.Context) error {
@@ -95,7 +101,7 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 				return err
 			}
 			sparkwing.Summary(ctx, "summary "+token)
-			sparkwing.AnnotateOld(ctx, "note "+token)
+			sparkwing.Annotate(ctx, sparkwing.Annotation{Message: "note " + token})
 			// The command copies its own session ledger record, which exists
 			// only while it runs, into the marker directory.
 			script := `rec="$SPARKWING_HOME/sessions/$SPARKWING_RUN_ID/$SPARKWING_JOB_ID/$PPID-$$.json"; i=0; ` +
@@ -118,8 +124,8 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 
 // addMemo adds memoized nodes whose bodies write "body" to <marker>/<node>.
 func addMemo(plan *sparkwing.Plan, marker string) {
-	key := func(k sparkwing.CacheKey, err error) sparkwing.CacheKeyFn {
-		return func(context.Context) (sparkwing.CacheKey, error) { return k, err }
+	key := func(k sparkwing.MemoValue, err error) sparkwing.MemoKeyFn {
+		return func(context.Context) (sparkwing.MemoValue, error) { return k, err }
 	}
 	body := func(node string, fail bool) func(context.Context) (string, error) {
 		return func(ctx context.Context) (string, error) {
@@ -132,16 +138,22 @@ func addMemo(plan *sparkwing.Plan, marker string) {
 		}
 	}
 	group := sparkwing.NewConcurrencyGroup("memo-group", sparkwing.ConcurrencyLimit{Capacity: 1, OnLimit: sparkwing.Queue})
-	sparkwing.Job(plan, "memoized", &memoJob{body: body("memoized", false)}).Memoize(key("memo-v1", nil)).Concurrency(group)
-	sparkwing.Job(plan, "memo-flaky", &memoJob{body: body("memo-flaky", true)}).Memoize(key("flaky-v1", nil))
-	sparkwing.Job(plan, "nocache", &memoJob{body: body("nocache", false)}).Memoize(key(sparkwing.NoCache, nil))
-	sparkwing.Job(plan, "emptykey", &memoJob{body: body("emptykey", false)}).Memoize(key("", nil))
-	sparkwing.Job(plan, "keyfail", &memoJob{body: body("keyfail", false)}).Memoize(key("", errors.New("no lockfile")))
-	source := sparkwing.Job(plan, "memo-targets", &targetsJob{list: "x,y", marker: marker}).Memoize(key("targets-v1", nil))
-	tests := sparkwing.JobFanOutDynamic(plan, "memo-tests", source, func(target string) (string, any) {
-		return "memo-test-" + target, func(context.Context) error { return nil }
+	sparkwing.Job(plan, "memoized", &memoJob{body: body("memoized", false)}).Memo(key("memo-v1", nil)).Concurrency(group)
+	sparkwing.Job(plan, "memo-flaky", &memoJob{body: body("memo-flaky", true)}).Memo(key("flaky-v1", nil))
+	sparkwing.Job(plan, "nocache", &memoJob{body: body("nocache", false)}).Memo(key(sparkwing.NoMemo, nil))
+	sparkwing.Job(plan, "emptykey", &memoJob{body: body("emptykey", false)}).Memo(key("", nil))
+	sparkwing.Job(plan, "keyfail", &memoJob{body: body("keyfail", false)}).Memo(key("", errors.New("no lockfile")))
+	source := sparkwing.Job(plan, "memo-targets", &targetsJob{list: "x,y", marker: marker}).Memo(key("targets-v1", nil))
+	tests := source.Generate(func(ctx context.Context, expanded *sparkwing.Plan) error {
+		for _, item := range sparkwing.RefTo[[]string](source).Get(ctx) {
+			id, body := (func(target string) (string, any) {
+				return "memo-test-" + target, func(context.Context) error { return nil }
+			})(item)
+			sparkwing.Job(expanded, id, body).Needs(source)
+		}
+		return nil
 	})
-	sparkwing.Job(plan, "memo-summary", func(context.Context) error { return nil }).Needs(tests)
+	sparkwing.Job(plan, "memo-summary", func(context.Context) error { return nil }).NeedsGenerated(tests)
 }
 
 func traceBody(marker, node string) {
@@ -206,13 +218,19 @@ func addHooks(plan *sparkwing.Plan, marker string) {
 	sparkwing.Job(plan, "slow", func(ctx context.Context) error { trace("slow", "body"); <-ctx.Done(); return ctx.Err() }).
 		AfterRun(after("slow")).
 		Timeout(500 * time.Millisecond)
-	sparkwing.JobApproval(plan, "skipped-gate", sparkwing.ApprovalConfigOld{Message: "ship it?"}).
+	plan.Approval("skipped-gate", sparkwing.ApprovalConfig{Message: "ship it?"}).
 		SkipIf(func(context.Context) bool { return true })
 	source := sparkwing.Job(plan, "unverified-source", &targetsJob{list: "a"}).
 		Verify(func(context.Context) error { return errors.New("bad target list") })
-	sparkwing.JobFanOutDynamic(plan, "unverified-fanout", source, func(target string) (string, any) {
-		trace("unverified-source", "generated")
-		return "unverified-" + target, func(context.Context) error { return nil }
+	source.Generate(func(ctx context.Context, expanded *sparkwing.Plan) error {
+		for _, item := range sparkwing.RefTo[[]string](source).Get(ctx) {
+			id, body := (func(target string) (string, any) {
+				trace("unverified-source", "generated")
+				return "unverified-" + target, func(context.Context) error { return nil }
+			})(item)
+			sparkwing.Job(expanded, id, body).Needs(source)
+		}
+		return nil
 	})
 }
 
@@ -262,7 +280,7 @@ type targetsJob struct {
 func (j *targetsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return sparkwing.Step(w, "list", func(ctx context.Context) ([]string, error) {
 		if j.marker != "" {
-			traceBody(j.marker, sparkwing.NodeFromContext(ctx))
+			traceBody(j.marker, "memo-targets")
 		}
 		return strings.Split(j.list, ","), nil
 	}), nil
