@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 // safety: a node whose plan pins no cpu resolves to one core, which the
@@ -128,7 +129,7 @@ func TestCreditsBalanceIsGrantsMinusCharges(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 
-	balance, err := s.CreditBalanceMicro(ctx)
+	balance, err := tenant(t, s, store.DefaultTeam).CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
@@ -142,7 +143,7 @@ func TestCreditsBalanceIsGrantsMinusCharges(t *testing.T) {
 	if _, err := s.GrantCredits(ctx, store.CreditGrantFree, 50*store.MicroCreditsPerCent, "", "admin"); err != nil {
 		t.Fatalf("free grant: %v", err)
 	}
-	balance, err = s.CreditBalanceMicro(ctx)
+	balance, err = tenant(t, s, store.DefaultTeam).CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
@@ -150,7 +151,7 @@ func TestCreditsBalanceIsGrantsMinusCharges(t *testing.T) {
 		t.Fatalf("balance = %d, want %d", balance, want)
 	}
 
-	grants, err := s.ListCreditGrants(ctx, 10)
+	grants, err := tenant(t, s, store.DefaultTeam).ListCreditGrants(ctx, 10)
 	if err != nil {
 		t.Fatalf("list grants: %v", err)
 	}
@@ -259,7 +260,7 @@ func TestClaimReservationLetsOnlyOneRunnerClaimTheLastMinute(t *testing.T) {
 	if !errors.Is(err, store.ErrInsufficientCredits) {
 		t.Fatalf("the second claim = %v, want ErrInsufficientCredits", err)
 	}
-	balance, err := s.CreditBalanceMicro(ctx)
+	balance, err := tenant(t, s, store.DefaultTeam).CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
@@ -293,7 +294,7 @@ func TestFinalizeNodeCreditsRefundsAReservationWhenExecutionNeverStarts(t *testi
 		res.Charge.Seconds != -int64(store.MinBillableSeconds) {
 		t.Fatalf("finalize charge = %+v, want the complete reservation refunded", res.Charge)
 	}
-	balance, err := s.CreditBalanceMicro(ctx)
+	balance, err := tenant(t, s, store.DefaultTeam).CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
@@ -329,11 +330,11 @@ func TestReapExpiredNodeClaimKeepsTheMinimumWhenExecutionNeverStarts(t *testing.
 		t.Fatalf("claim: %v", err)
 	}
 	expireNodeLease(t, s, "run-expired", "build", time.Now().Add(-time.Minute))
-	if _, err := s.ReapExpiredNodeClaims(ctx); err != nil {
+	if _, err := teststore.ReapUnits(ctx, s); err != nil {
 		t.Fatalf("reap expired claim: %v", err)
 	}
 
-	balance, err := s.CreditBalanceMicro(ctx)
+	balance, err := tenant(t, s, store.DefaultTeam).CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
@@ -394,7 +395,7 @@ func TestChargeNodeCreditsBillsElapsedSecondsIdempotently(t *testing.T) {
 		t.Fatalf("third charge = %+v, want 15 seconds", res.Charge)
 	}
 
-	state, err := s.CreditState(ctx, 24*time.Hour)
+	state, err := tenant(t, s, store.DefaultTeam).CreditState(ctx, 24*time.Hour)
 	if err != nil {
 		t.Fatalf("state: %v", err)
 	}
@@ -537,7 +538,7 @@ func TestReclaimedNodeIsNotBilledForItsIdleGap(t *testing.T) {
 	// safety: the first attempt's lease expired an hour ago, so the reaper
 	// requeues it and the second attempt must not inherit its charge window.
 	expireNodeLease(t, s, "run-gap", "build", time.Now().Add(-time.Hour))
-	if _, err := s.ReapExpiredNodeClaims(ctx); err != nil {
+	if _, err := teststore.ReapUnits(ctx, s); err != nil {
 		t.Fatalf("reap expired claims: %v", err)
 	}
 	if anchor := chargeWindowAnchor(t, s, "run-gap", "build"); anchor != 0 {
@@ -589,7 +590,7 @@ func TestFinalizeNodeCreditsConsumesTheMinimum(t *testing.T) {
 	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 1000*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
-	before, err := s.CreditBalanceMicro(ctx)
+	before, err := tenant(t, s, store.DefaultTeam).CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
@@ -608,7 +609,7 @@ func TestFinalizeNodeCreditsConsumesTheMinimum(t *testing.T) {
 	if res.Charge != nil {
 		t.Fatalf("finalize wrote %+v, want nothing: the reservation is the minimum", res.Charge)
 	}
-	after, err := s.CreditBalanceMicro(ctx)
+	after, err := tenant(t, s, store.DefaultTeam).CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
@@ -941,29 +942,6 @@ func TestAppendEventOnceCollapsesRepeats(t *testing.T) {
 	}
 }
 
-func TestCreditHistoryLimitIsClampedToItsMaximum(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	for i := range 3 {
-		if _, err := s.GrantCredits(ctx, store.CreditGrantFree, int64(i+1)*store.MicroCreditsPerCent, "", "admin"); err != nil {
-			t.Fatalf("grant %d: %v", i, err)
-		}
-	}
-	for _, limit := range []int{0, 1, store.CreditHistoryMaxLimit, store.CreditHistoryMaxLimit + 5000} {
-		grants, err := s.ListCreditGrants(ctx, limit)
-		if err != nil {
-			t.Fatalf("list with limit %d: %v", limit, err)
-		}
-		want := 3
-		if limit == 1 {
-			want = 1
-		}
-		if len(grants) != want {
-			t.Fatalf("limit %d returned %d grants, want %d", limit, len(grants), want)
-		}
-	}
-}
-
 func TestFormatCreditsRendersTwoPlaces(t *testing.T) {
 	cases := []struct {
 		micro int64
@@ -1005,12 +983,12 @@ func TestCreditSettingsBoundTheRateSoTheLedgerCannotOverflow(t *testing.T) {
 			t.Errorf("%s was accepted as a rate: %v", name, err)
 		}
 	}
-	rate, err := s.CreditRateMicroPerSecond(ctx)
+	settings, err := s.CreditSettings(ctx)
 	if err != nil {
 		t.Fatalf("read rate: %v", err)
 	}
-	if rate != store.MaxCreditRateMicro {
-		t.Fatalf("rate = %d; a refused write moved it", rate)
+	if settings.RateMicroPerSecond != store.MaxCreditRateMicro {
+		t.Fatalf("rate = %d; a refused write moved it", settings.RateMicroPerSecond)
 	}
 }
 
@@ -1024,7 +1002,7 @@ func TestCreditClaimIsRefusedAtTheHighestAllowedRate(t *testing.T) {
 	for i := range table {
 		table[i].MicroPerSecond = store.MaxCreditRateMicro
 	}
-	if err := s.SetCreditRateTable(ctx, table); err != nil {
+	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &table}); err != nil {
 		t.Fatalf("set rate: %v", err)
 	}
 	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid,

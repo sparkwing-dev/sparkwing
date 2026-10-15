@@ -2,6 +2,32 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
+## From W7 amended merge and manifest fixtures
+
+**Completed W7 merge resolution.** All seven conflicted working paths are
+resolved. Amended C1 and W1 evidence remain alongside W7 behavior and migration
+notes. The obsolete grant/upload test deletions are preserved. API generation
+also removed snapshot entries resurrected by the merge for W7's earlier cuts.
+All generated snapshot contents match the merged implementation. The orphan
+`.apidiff/pkg_runner.txt` still needs W8/lead cleanup. The index remains unmerged
+because the swarm brief prohibits Git writes. The lead must stage and commit.
+
+**Completed W7 fixture migration.** Both physical manifest-record cells failed
+with `holder_rights` because W1 now requires a terminal imported attempt and the
+W7 fixture still inserted pending work. Twelve generated cases per backend now
+refuse an unfinished attempt even when its node is terminal, verify that no
+reservation remains, finish that exact attempt, and retain the earlier manifest
+metadata, unrelated-receipt and reopen assertions. Both cells pass, including with the race detector. Full storage acceptance
+passes with 79 events and 425 skips. No production authority changed.
+
+**W2 build-trust fixture.** The retained controller test now uses
+`Tenant.TrustLocalBuilds`, so all 173 repository test packages compile. Running
+`TestTeamOwnerCanChooseWhetherCloudTrustsLocalBinaries` still fails during
+`newAppFixture` with `no such table: tokens`, before reaching the handler. Migrate
+that authentication fixture to C2. The W1 record/memo/log-slot and W2 data-client
+handoffs below remain open. Removing only the physical-log skip in a temporary
+overlay still fails on segment 1 with the signing-slot mismatch.
+
 ## From W7 publication byte components
 
 **Completed W7 component evidence.** `TestStorage` cells
@@ -254,6 +280,37 @@ W3 also owns finding 1's retained test port. `go test -p 4 -gcflags=-e ./interna
 
 **W1: separate cancellation intent for W2.** W2's cancellation-reason persistence test fails because the store has no cancellation-intent field separate from the terminal reason. Add it to the store's authentication/cancellation snapshot (amendment A1-21), and finish the session digest and CSRF persistence W2 reads. W2 consumes it through the contract interface.
 
+W1 continuation status: cancellation reasons now persist independently on runs and
+jobs and reach job, owner and eval renewal. Session digest lookup, nanosecond
+writes, current membership, capability-parent ceilings and sealed CSRF-key
+persistence are implemented. `CreateTokenSession` is removed. Session creation and
+lookup no longer accept caller clocks. See `../w1-session11-progress.md` for caller
+migrations and evidence. W2 still needs to extend C2 `BindingState` with the
+cancellation reason before W1 can project it through `ReadAuthentication`. W1 has
+not changed that foreign contract. OAuth/browser middleware and roleless-session
+representation remain integration points.
+
+W1's unit-reaper cut is complete. The unfenced node, agent-loss and trigger
+reapers and dispatcher-expiry helpers are removed. Remaining callers use the
+leased `ReapUnits` contract. The elected controller pass preserves remote runs,
+and the SQLite local-orphan cell proves unstarted requeue and started failure
+through reopening. See `../w1-session13-progress.md` for migrated callers, ports
+and verification. W1b still owns settlement wiring. Its unused `expiredClaim`
+and `settleExpiredClaimTx` helper can retire after this cut is merged.
+
 **DESIGN approved (lead, pending Korey's ratification): SDK planning diagnostic sanitization, W5 and W4.** Invariant: no declared secret argument value (default or supplied, pipeline or job scope) appears in any error the SDK returns from describe, argument resolution or planning: not in message, hint, details or detail keys, in any encoding. Each SDK collects the nonempty declared secret values once at its discovery/planning boundary and passes every outgoing canonical error through one sanitizer, which keeps codes and field paths. That replaces the describe-only replacement. Host masking still owns execution output and dynamic service values. Both SDKs carry a property test over thrown values, canonical errors, overlapping values, encodings and both argument scopes. W5 implements it in TypeScript; W4 implements the same in the Go SDK. No cross-area contract change.
+
+**Contract change needed, W1/W9/W3: attempt identity on job transitions.**
+Invariant: an execution report affects only the attempt it names, and replay of
+that report cannot consume another attempt. C1 `NodeTransition` and C3
+`JobTransitionRequest` carry claim generation but no source attempt ordinal.
+Two successive identical retry failures therefore hash identically. A direct
+store probe with retry budget two starts attempt four, then the next failure
+returns `Replayed:true, Attempt:4` instead of starting five. A delayed report
+also lacks an attempt fence after retry under the same claim. Carry the source
+attempt through the request and adapter, check it in the committing transaction,
+and include it in replay identity. Start, unstarted refusal and reaper semantics
+must remain explicit. W1 has not changed the foreign wire shape. The reproducer
+and command are in `../w1-session12-progress.md`.
 
 **DESIGN: W9 Windows release packaging for the TypeScript SDK (from W5 review finding 6).** Invariant: every published TypeScript SDK package contains working protocol bridges for win32-x64 and win32-arm64. The release workflow builds both `native/win32-*/protocol.node` artifacts on native Windows runners, runs TestNativeProtocol and TestNativeConformance on each, stamps the SDK version, and makes publication depend on package assembly. W5's proposal is in `sdk/typescript/IMPLEMENTATION.md`.

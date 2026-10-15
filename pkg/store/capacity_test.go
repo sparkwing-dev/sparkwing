@@ -19,12 +19,12 @@ func TestPipelineProfile_RoundTripsPercentilesAndPeaks(t *testing.T) {
 		{CPUMeasured: true, Duration: 20 * time.Second, PeakCores: 4.0, PeakMemoryBytes: 2 << 30},
 		{CPUMeasured: true, Duration: 30 * time.Second, PeakCores: 8.0, PeakMemoryBytes: 3 << 30},
 	} {
-		if err := st.RecordProfileObservation(ctx, "demo", "", obs); err != nil {
+		if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "demo", "", obs); err != nil {
 			t.Fatalf("RecordProfileObservation: %v", err)
 		}
 	}
 
-	prof, err := st.GetPipelineProfile(ctx, "demo", "")
+	prof, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "demo", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestPipelineProfile_RoundTripsPercentilesAndPeaks(t *testing.T) {
 
 func TestPipelineProfile_AbsentReturnsNil(t *testing.T) {
 	st := storetest.Open(t)
-	prof, err := st.GetPipelineProfile(context.Background(), "never-run", "")
+	prof, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(context.Background(), "never-run", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestPipelineProfile_WindowAgesOutOldSamples(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i < 80; i++ {
-		if err := st.RecordProfileObservation(ctx, "demo", "", store.ProfileObservation{
+		if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "demo", "", store.ProfileObservation{
 			CPUMeasured: true,
 			Duration:    time.Duration(i) * time.Second,
 			PeakCores:   float64(i),
@@ -75,7 +75,7 @@ func TestPipelineProfile_WindowAgesOutOldSamples(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	prof, err := st.GetPipelineProfile(ctx, "demo", "")
+	prof, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "demo", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,17 +92,17 @@ func TestPipelineProfile_ListReturnsRollupAndNodeRows(t *testing.T) {
 	ctx := context.Background()
 
 	obs := store.ProfileObservation{CPUMeasured: true, Duration: time.Second, PeakCores: 1}
-	if err := st.RecordProfileObservation(ctx, "demo", "", obs); err != nil {
+	if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "demo", "", obs); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.RecordProfileObservation(ctx, "demo", "build", obs); err != nil {
+	if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "demo", "build", obs); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.RecordProfileObservation(ctx, "other", "", obs); err != nil {
+	if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "other", "", obs); err != nil {
 		t.Fatal(err)
 	}
 
-	demo, err := st.ListPipelineProfiles(ctx, "demo")
+	demo, err := tenantFor(t, st, store.DefaultTeam).ListPipelineProfiles(ctx, "demo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestPipelineProfile_ListReturnsRollupAndNodeRows(t *testing.T) {
 		t.Errorf("rollup should sort first: %+v", demo)
 	}
 
-	all, err := st.ListPipelineProfiles(ctx, "")
+	all, err := tenantFor(t, st, store.DefaultTeam).ListPipelineProfiles(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,11 +127,11 @@ func TestPartialProfileObservationOnlyRaisesResources(t *testing.T) {
 	ctx := t.Context()
 	seed := store.ProfileObservation{CPUMeasured: true, Duration: time.Minute, PeakCores: 4, SustainedCores: 2, PeakMemoryBytes: 1000}
 	for range 20 {
-		if err := st.RecordProfileObservation(ctx, "partial", "", seed); err != nil {
+		if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "partial", "", seed); err != nil {
 			t.Fatal(err)
 		}
 	}
-	before, err := st.ProfileSamples(ctx, "partial", "")
+	before, err := tenantFor(t, st, store.DefaultTeam).ProfileSamples(ctx, "partial", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,11 +139,11 @@ func TestPartialProfileObservationOnlyRaisesResources(t *testing.T) {
 		{CPUMeasured: true, Partial: true, Duration: time.Second, PeakCores: 1, SustainedCores: 1, PeakMemoryBytes: 10},
 		{CPUMeasured: true, Partial: true, Duration: time.Second, PeakCores: 4, SustainedCores: 2, PeakMemoryBytes: 1000},
 	} {
-		if err := st.RecordProfileObservation(ctx, "partial", "", obs); err != nil {
+		if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "partial", "", obs); err != nil {
 			t.Fatal(err)
 		}
 	}
-	unchanged, err := st.ProfileSamples(ctx, "partial", "")
+	unchanged, err := tenantFor(t, st, store.DefaultTeam).ProfileSamples(ctx, "partial", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,11 +151,11 @@ func TestPartialProfileObservationOnlyRaisesResources(t *testing.T) {
 		t.Fatalf("partial low evidence changed window: %v -> %v", before, unchanged)
 	}
 	for range 2 {
-		if err := st.RecordProfileObservation(ctx, "partial", "", store.ProfileObservation{CPUMeasured: true, Partial: true, Duration: 2 * time.Minute, PeakCores: 1, SustainedCores: 1, PeakMemoryBytes: 2000}); err != nil {
+		if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "partial", "", store.ProfileObservation{CPUMeasured: true, Partial: true, Duration: 2 * time.Minute, PeakCores: 1, SustainedCores: 1, PeakMemoryBytes: 2000}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	p, err := st.GetPipelineProfile(ctx, "partial", "")
+	p, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "partial", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,11 +173,11 @@ func TestPartialContendedProfileObservationNeverDecaysFloor(t *testing.T) {
 		{CPUMeasured: true, Contended: true, Partial: true, FloorCores: 1, FloorMemoryBytes: 2000},
 		{CPUMeasured: true, Contended: true, Partial: true, PlanHash: "new", FloorCores: 1, FloorMemoryBytes: 10},
 	} {
-		if err := st.RecordProfileObservation(ctx, "partial", "", obs); err != nil {
+		if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "partial", "", obs); err != nil {
 			t.Fatal(err)
 		}
 	}
-	p, err := st.GetPipelineProfile(ctx, "partial", "")
+	p, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "partial", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,11 +193,11 @@ func TestPartialProfilePlanTransitionKeepsResourceBounds(t *testing.T) {
 		{CPUMeasured: true, PlanHash: "old", Duration: time.Minute, PeakCores: 4, SustainedCores: 2, PeakMemoryBytes: 1000},
 		{CPUMeasured: true, Partial: true, PlanHash: "new", Duration: 2 * time.Minute, PeakCores: 1, SustainedCores: 1, PeakMemoryBytes: 2000},
 	} {
-		if err := st.RecordProfileObservation(ctx, "partial", "", obs); err != nil {
+		if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "partial", "", obs); err != nil {
 			t.Fatal(err)
 		}
 	}
-	p, err := st.GetPipelineProfile(ctx, "partial", "")
+	p, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "partial", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,15 +211,15 @@ func TestPartialProfileObservationNeverGraduates(t *testing.T) {
 	ctx := t.Context()
 	clean := store.ProfileObservation{CPUMeasured: true, Duration: time.Minute, PeakCores: 2, SustainedCores: 1, PeakMemoryBytes: 1000}
 	for range 2 {
-		if err := st.RecordProfileObservation(ctx, "graduation", "", clean); err != nil {
+		if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "graduation", "", clean); err != nil {
 			t.Fatal(err)
 		}
 	}
 	raising := store.ProfileObservation{CPUMeasured: true, Partial: true, Duration: time.Minute, PeakCores: 2, SustainedCores: 1, PeakMemoryBytes: 4000}
-	if err := st.RecordProfileObservation(ctx, "graduation", "", raising); err != nil {
+	if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "graduation", "", raising); err != nil {
 		t.Fatal(err)
 	}
-	p, err := st.GetPipelineProfile(ctx, "graduation", "")
+	p, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "graduation", "")
 	if err != nil {
 		t.Fatal(err)
 	}

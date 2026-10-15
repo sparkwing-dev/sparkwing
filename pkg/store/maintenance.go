@@ -6,8 +6,6 @@ import (
 )
 
 type storeMaintenanceFns struct {
-	ReapExpiredTriggers           func(s *Store, ctx context.Context) ([]string, error)
-	RecoverExpiredNodeClaims      func(s *Store, ctx context.Context) ([]AgentLossRecovery, error)
 	ReapStaleConcurrencyHolders   func(s *Store, ctx context.Context) ([]ConcurrencyHolder, error)
 	ReapStaleConcurrencyWaiters   func(s *Store, ctx context.Context, maxAge time.Duration) ([]ConcurrencyWaiter, error)
 	SweepExpiredConcurrencyCache  func(s *Store, ctx context.Context) (int64, error)
@@ -22,8 +20,6 @@ type storeMaintenanceFns struct {
 // External adopters should not reach for this. The supported Store
 // surface is the run/node CRUD and the HTTP API in pkg/controller.
 var Maintenance = storeMaintenanceFns{
-	ReapExpiredTriggers:           (*Store).reapExpiredTriggers,
-	RecoverExpiredNodeClaims:      (*Store).recoverExpiredNodeClaims,
 	ReapStaleConcurrencyHolders:   (*Store).reapStaleConcurrencyHolders,
 	ReapStaleConcurrencyWaiters:   (*Store).reapStaleConcurrencyWaiters,
 	SweepExpiredConcurrencyCache:  (*Store).sweepExpiredConcurrencyCache,

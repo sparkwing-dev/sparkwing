@@ -76,7 +76,7 @@ func TestFinishRunRetriesDoNotRepeatProfileObservations(t *testing.T) {
 				t.Errorf("retry changed terminal state: before=%+v after=%+v error=%v", before, after, err)
 			}
 			for _, id := range []string{"", "build"} {
-				profile, err := st.GetPipelineProfile(t.Context(), "finish-retry", id)
+				profile, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(t.Context(), "finish-retry", id)
 				if err != nil || profile == nil || profile.SampleCount != 1 {
 					t.Errorf("retried profile %q=%+v, %v; want one observation", id, profile, err)
 				}
@@ -86,7 +86,7 @@ func TestFinishRunRetriesDoNotRepeatProfileObservations(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, id := range []string{"", "build"} {
-				profile, err := st.GetPipelineProfile(t.Context(), "finish-retry", id)
+				profile, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(t.Context(), "finish-retry", id)
 				if err != nil || profile == nil || profile.SampleCount != 2 {
 					t.Errorf("distinct run profile %q=%+v, %v; want two observations", id, profile, err)
 				}

@@ -21,6 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -750,12 +751,12 @@ func TestResolveResources_ClearsControllerPinWhenNodeDeclaresNone(t *testing.T) 
 	}
 	defer func() { _ = st.Close() }()
 	ctx := context.Background()
-	if err := st.RecordProfileObservation(ctx, "deploy", "build", store.ProfileObservation{
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "deploy", "build", store.ProfileObservation{
 		Duration: time.Minute, PeakCores: 1.2, PeakMemoryBytes: 1 << 30, CPUMeasured: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.UpsertProfilePin(ctx, "deploy", "build", 0.25, 0); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).UpsertProfilePin(ctx, "deploy", "build", 0.25, 0); err != nil {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
@@ -764,7 +765,7 @@ func TestResolveResources_ClearsControllerPinWhenNodeDeclaresNone(t *testing.T) 
 	k8sRunner := &Runner{ctrl: client.New(srv.URL, nil), cfg: defaultsCfg}
 	_ = k8sRunner.resolveResources(ctx, runner.Request{Pipeline: "deploy", NodeID: "build"})
 
-	profile, err := st.GetPipelineProfile(ctx, "deploy", "build")
+	profile, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "deploy", "build")
 	if err != nil || profile == nil {
 		t.Fatalf("profile missing: %v", err)
 	}

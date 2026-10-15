@@ -179,14 +179,15 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change RunTran
 	if change.Cause == RunCancel {
 		if row.CancelRequestedAt == nil {
 			row.CancelRequestedAt = &now
+			row.CancelReason = change.Reason
 		}
-		if err := cancelRunNodesTx(ctx, tx, team, row.ID, change.Actor, now); err != nil {
+		if err := cancelRunNodesTx(ctx, tx, team, row.ID, change.Actor, row.CancelReason, now); err != nil {
 			return Applied{}, err
 		}
 		kind = "run_cancel_requested"
 	} else {
 		if change.Cause == RunOwnerLost || change.Cause == RunQueueTimeout {
-			if err := cancelRunNodesTx(ctx, tx, team, row.ID, change.Actor, now); err != nil {
+			if err := cancelRunNodesTx(ctx, tx, team, row.ID, change.Actor, row.CancelReason, now); err != nil {
 				return Applied{}, err
 			}
 		}
@@ -205,7 +206,7 @@ func transitionRunTx(ctx context.Context, tx *storeTx, team Team, change RunTran
 	if err != nil {
 		return Applied{}, err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE runs SET status=?,error=?,started_at=?,finished_at=?,cancel_requested_at=?,state_seq=?,state_digest=?,state_actor=? WHERE team=? AND id=? AND state_seq=?`, row.State, change.MaskedError, timeNS(row.StartedAt), timeNS(row.FinishedAt), timeNS(row.CancelRequestedAt), row.StateSeq, digest, actor, team, row.ID, row.StateSeq-1)
+	result, err := tx.ExecContext(ctx, `UPDATE runs SET status=?,error=?,started_at=?,finished_at=?,cancel_requested_at=?,cancel_reason=?,state_seq=?,state_digest=?,state_actor=? WHERE team=? AND id=? AND state_seq=?`, row.State, change.MaskedError, timeNS(row.StartedAt), timeNS(row.FinishedAt), timeNS(row.CancelRequestedAt), row.CancelReason, row.StateSeq, digest, actor, team, row.ID, row.StateSeq-1)
 	if err != nil {
 		return Applied{}, err
 	}
@@ -467,14 +468,14 @@ func startOwnerUnitTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef,
 	return nil
 }
 
-func cancelRunNodesTx(ctx context.Context, tx *storeTx, team Team, runID string, actor Actor, now time.Time) error {
+func cancelRunNodesTx(ctx context.Context, tx *storeTx, team Team, runID string, actor Actor, reason string, now time.Time) error {
 	snapshot, err := readSnapshotTx(ctx, tx, team, runID)
 	if err != nil {
 		return err
 	}
 	for _, row := range snapshot.Nodes {
 		if row.Status != StatusDone {
-			if _, err := transitionNodeStateTx(ctx, tx, team, NodeTransition{Ref: row.Ref, To: NodeCancelled, Actor: actor, Cause: CauseCancel}, now); err != nil {
+			if _, err := transitionNodeStateTx(ctx, tx, team, NodeTransition{Ref: row.Ref, To: NodeCancelled, Actor: actor, Cause: CauseCancel, Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeCancelled, Reason: reason}}}, now); err != nil {
 				return err
 			}
 		}

@@ -16,7 +16,7 @@ func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, 
 	var request, spec, lineage, pools, actor, plan []byte
 	var cancel, start, finish sql.NullInt64
 	var created, accepted int64
-	err := tx.QueryRowContext(ctx, `SELECT number,pipeline,status,request_json,spec_json,lineage_json,plan_json,plan_hash,dispatch,allowed_pools,cancel_requested_at,started_at,finished_at,state_seq,state_digest,state_actor,created_at,plan_accepted_generation FROM runs WHERE team=? AND id=?`, team, id).Scan(&v.Number, &v.Pipeline, &v.State, &request, &spec, &lineage, &plan, &v.PlanHash, &v.Dispatch, &pools, &cancel, &start, &finish, &v.StateSeq, &v.StateDigest, &actor, &created, &accepted)
+	err := tx.QueryRowContext(ctx, `SELECT number,pipeline,status,request_json,spec_json,lineage_json,plan_json,plan_hash,dispatch,allowed_pools,cancel_requested_at,cancel_reason,started_at,finished_at,state_seq,state_digest,state_actor,created_at,plan_accepted_generation FROM runs WHERE team=? AND id=?`, team, id).Scan(&v.Number, &v.Pipeline, &v.State, &request, &spec, &lineage, &plan, &v.PlanHash, &v.Dispatch, &pools, &cancel, &v.CancelReason, &start, &finish, &v.StateSeq, &v.StateDigest, &actor, &created, &accepted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return v, notFound("run", id)
 	}
@@ -67,13 +67,13 @@ func runClaimWait(run RunRow) runspec.Setting[time.Duration] {
 	return run.Request.Request.Options.ClaimWait
 }
 
-const nodeReadColumns = `status,outcome,status_detail,COALESCE(claimed_by,''),capability_prefix,owner_capability_prefix,generation,attempt,disruptions,ready_at,queue_started_at,lease_expires_at,started_at,finished_at,cancel_requested_at,state_seq,state_digest,state_actor,expansion,expansion_digest,execution_json,spec_json,spec_hash`
+const nodeReadColumns = `status,outcome,status_detail,COALESCE(claimed_by,''),capability_prefix,owner_capability_prefix,generation,attempt,disruptions,ready_at,queue_started_at,lease_expires_at,started_at,finished_at,cancel_requested_at,cancel_reason,state_seq,state_digest,state_actor,expansion,expansion_digest,execution_json,spec_json,spec_hash`
 
 func readNodeTx(ctx context.Context, tx *storeTx, team Team, ref NodeRef) (NodeRow, error) {
 	v := NodeRow{Ref: ref}
 	var ready, queued, lease, start, finish, cancel sql.NullInt64
 	var actor, execution []byte
-	err := tx.QueryRowContext(ctx, `SELECT `+nodeReadColumns+` FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, ref.RunID, ref.NodeID).Scan(&v.Status, &v.Outcome, &v.StatusDetail, &v.ClaimedBy, &v.CapabilityPrefix, &v.OwnerCapabilityPrefix, &v.Generation, &v.Attempt, &v.Disruptions, &ready, &queued, &lease, &start, &finish, &cancel, &v.StateSeq, &v.StateDigest, &actor, &v.Expansion, &v.ExpansionDigest, &execution, &v.Spec, &v.SpecHash)
+	err := tx.QueryRowContext(ctx, `SELECT `+nodeReadColumns+` FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, ref.RunID, ref.NodeID).Scan(&v.Status, &v.Outcome, &v.StatusDetail, &v.ClaimedBy, &v.CapabilityPrefix, &v.OwnerCapabilityPrefix, &v.Generation, &v.Attempt, &v.Disruptions, &ready, &queued, &lease, &start, &finish, &cancel, &v.CancelReason, &v.StateSeq, &v.StateDigest, &actor, &v.Expansion, &v.ExpansionDigest, &execution, &v.Spec, &v.SpecHash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return v, notFound("job", ref.NodeID)
 	}

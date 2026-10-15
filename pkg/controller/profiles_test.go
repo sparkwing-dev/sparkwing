@@ -26,13 +26,13 @@ func TestFinishRun_FoldsProfilesAndEmitsPinDrift(t *testing.T) {
 
 	pipeline := "deploy"
 	for range 2 {
-		if err := st.RecordProfileObservation(ctx, pipeline, "node-1", store.ProfileObservation{
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).RecordProfileObservation(ctx, pipeline, "node-1", store.ProfileObservation{
 			Duration: time.Minute, PeakCores: 1, PeakMemoryBytes: 1 << 30, CPUMeasured: true,
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := st.UpsertProfilePin(ctx, pipeline, "node-1", 4, 0); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).UpsertProfilePin(ctx, pipeline, "node-1", 4, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -64,7 +64,7 @@ func TestFinishRun_FoldsProfilesAndEmitsPinDrift(t *testing.T) {
 		t.Fatalf("finish run: %v", err)
 	}
 
-	prof, err := st.GetPipelineProfile(ctx, pipeline, "node-1")
+	prof, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, pipeline, "node-1")
 	if err != nil || prof == nil {
 		t.Fatalf("profile after fold: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestFinishRun_NoPinNoDrift(t *testing.T) {
 	ctx := context.Background()
 
 	for range 3 {
-		_ = st.RecordProfileObservation(ctx, "build", "node-1", store.ProfileObservation{
+		_ = teststore.ForTeam(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "build", "node-1", store.ProfileObservation{
 			Duration: time.Minute, PeakCores: 2, PeakMemoryBytes: 2 << 30, CPUMeasured: true,
 		})
 	}
@@ -128,7 +128,7 @@ func TestFinishRun_NoPinNoDrift(t *testing.T) {
 		t.Fatalf("finish run: %v", err)
 	}
 
-	profile, err := st.GetPipelineProfile(ctx, "build", "node-1")
+	profile, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "build", "node-1")
 	if err != nil || profile == nil || profile.SampleCount != 4 {
 		t.Fatalf("unpinned node was not folded: %+v, %v", profile, err)
 	}
@@ -162,7 +162,7 @@ func TestGetPipelineProfile_RoundTripsThroughController(t *testing.T) {
 		t.Errorf("unprofiled pipeline should return nil profile, got %+v", prof)
 	}
 
-	if err := st.RecordProfileObservation(ctx, "deploy", "node-1", store.ProfileObservation{
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "deploy", "node-1", store.ProfileObservation{
 		Duration: time.Minute, PeakCores: 3, PeakMemoryBytes: 4 << 30, CPUMeasured: true,
 	}); err != nil {
 		t.Fatal(err)
@@ -213,7 +213,7 @@ func TestFinishRunFoldsPartialSamplesRaiseOnly(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, id := range []string{"build", ""} {
-				if err := st.RecordProfileObservation(ctx, "demo", id, store.ProfileObservation{CPUMeasured: true, Duration: time.Minute, PeakCores: 1, SustainedCores: 1, PeakMemoryBytes: 1000}); err != nil {
+				if err := teststore.ForTeam(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "demo", id, store.ProfileObservation{CPUMeasured: true, Duration: time.Minute, PeakCores: 1, SustainedCores: 1, PeakMemoryBytes: 1000}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -236,7 +236,7 @@ func TestFinishRunFoldsPartialSamplesRaiseOnly(t *testing.T) {
 			if response.Code != http.StatusNoContent {
 				t.Fatalf("finish run: status %d, %s", response.Code, response.Body.String())
 			}
-			p, err := st.GetPipelineProfile(ctx, "demo", "build")
+			p, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "demo", "build")
 			if err != nil {
 				t.Fatal(err)
 			}

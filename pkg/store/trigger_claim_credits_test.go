@@ -11,6 +11,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func pendingTrigger(t *testing.T, st *store.Store, id string) {
@@ -83,7 +84,7 @@ func triggerFloor(t *testing.T, st *store.Store, pool store.ClaimIdentity) int64
 
 func balance(t *testing.T, st *store.Store) int64 {
 	t.Helper()
-	b, err := st.CreditBalanceMicro(context.Background())
+	b, err := tenant(t, st, store.DefaultTeam).CreditBalanceMicro(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,7 +345,7 @@ func TestMeteredTriggerReapSettlesOnlyTheTailAfterHeartbeat(t *testing.T) {
 		t.Fatal(err)
 	}
 	backdateTriggerClaim(t, st, "run-reap-tail", pastTriggerMinimum(8*time.Second), time.Now().Add(-100*time.Millisecond))
-	if _, err := store.Maintenance.ReapExpiredTriggers(st, ctx); err != nil {
+	if _, err := teststore.ReapUnits(ctx, st); err != nil {
 		t.Fatal(err)
 	}
 	if got := balance(t, st); got != 2*floor-7*rate {
@@ -382,7 +383,7 @@ func TestMeteredTriggerRequeueRefundsHeartbeatUsage(t *testing.T) {
 	for i := range table {
 		table[i].MicroPerSecond *= 2
 	}
-	if err := st.SetCreditRateTable(ctx, table); err != nil {
+	if _, err := st.SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &table}); err != nil {
 		t.Fatal(err)
 	}
 	backdateTriggerClaim(t, st, "run-unstarted-paid", pastTriggerMinimum(5*time.Second), time.Time{})
@@ -661,7 +662,7 @@ func TestTriggerReapAndRequeueSettleTheReservation(t *testing.T) {
 	}
 	now := time.Now()
 	backdateTriggerClaim(t, st, "run-lapsed", now.Add(-10*time.Minute), now.Add(-10*time.Minute+90*time.Second))
-	ids, err := store.Maintenance.ReapExpiredTriggers(st, ctx)
+	ids, err := teststore.ReapUnits(ctx, st)
 	if err != nil || len(ids) != 1 {
 		t.Fatalf("reap = %v, %v; want run-lapsed", ids, err)
 	}

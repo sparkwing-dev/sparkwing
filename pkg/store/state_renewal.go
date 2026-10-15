@@ -47,7 +47,10 @@ func (t *Tenant) renewNodeClaimTx(ctx context.Context, tx *storeTx, ref NodeRef,
 	if err != nil {
 		return err
 	}
-	*beat = LeaseBeat{ExpiresAt: expiry, CancelRequested: row.CancelRequestedAt != nil || run.CancelRequestedAt != nil}
+	*beat = LeaseBeat{ExpiresAt: expiry, CancelRequested: row.CancelRequestedAt != nil || run.CancelRequestedAt != nil, CancelReason: run.CancelReason}
+	if row.CancelRequestedAt != nil {
+		beat.CancelReason = row.CancelReason
+	}
 	return nil
 }
 
@@ -118,7 +121,7 @@ func (t *Tenant) renewOwnerTx(ctx context.Context, tx *storeTx, actor Actor, bea
 	if err = renewCapacityTx(ctx, tx, t.team, runID, "", now, expiry); err != nil {
 		return err
 	}
-	*beat = LeaseBeat{ExpiresAt: expiry, CancelRequested: run.CancelRequestedAt != nil || ownerCancelled}
+	*beat = LeaseBeat{ExpiresAt: expiry, CancelRequested: run.CancelRequestedAt != nil || ownerCancelled, CancelReason: run.CancelReason}
 	return nil
 }
 

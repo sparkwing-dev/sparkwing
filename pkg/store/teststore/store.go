@@ -6,9 +6,20 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+// ForTeam returns a registered tenant or fails the fixture.
+func ForTeam(t testing.TB, s *store.Store, team store.Team) *store.Tenant {
+	t.Helper()
+	tenant, err := s.ForTeam(t.Context(), team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tenant
+}
 
 var snapshot = sync.OnceValues(func() (seed []byte, err error) {
 	dir, err := os.MkdirTemp("", "sparkwing-test-schema-")

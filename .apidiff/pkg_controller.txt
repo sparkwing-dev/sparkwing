@@ -104,8 +104,9 @@ type Endpoint struct {
 	Handle         func(http.ResponseWriter, *http.Request, capability.Authorized) error
 }
 type EngineController struct {
-	Store        *store.Store
-	RunnerPolicy RunnerAdmissionPolicy
+	Store         *store.Store
+	RunnerPolicy  RunnerAdmissionPolicy
+	VersionPolicy *SignedEngineVersionPolicy
 }
 func (s *EngineController) AcceptExpansion(ctx context.Context, authorized capability.Authorized, body controllerwire.ExpansionSubmission) (controllerwire.ExpansionAccepted, error)
 func (s *EngineController) AcceptPlan(ctx context.Context, authorized capability.Authorized, body controllerwire.PlanSubmission) (controllerwire.PlanAccepted, error)
@@ -262,6 +263,7 @@ type Principal struct {
 }
 func (p *Principal) HasScope(s string) bool
 func PrincipalFromContext(ctx context.Context) (*Principal, bool)
+func PullRequestForTrigger(env map[string]string) *sparkwing.PullRequest
 const PurchaseLimitCode = "purchase_limit"
 const RecommendedHeartbeatsPerMinute = 1200
 type RequestBudget struct {
@@ -313,10 +315,9 @@ func (s *Server) ResealStoredSecrets(ctx context.Context) (store.SecretResealCou
 func (s *Server) RunStoragePass(ctx context.Context) (bool, error)
 func (s *Server) Shutdown(ctx context.Context) error
 func (s *Server) SignUpFreeTier(ctx context.Context) (FreeTierState, error)
-func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server
 func (s *Server) WithAuthenticator(a *Authenticator) *Server
 func (s *Server) WithBillingCheckout(url, token string) *Server
-func (s *Server) WithBucketUsage(a storage.ArtifactStore) *Server
+func (s *Server) WithBucketUsage(a storage.UsageReporter) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
 func (s *Server) WithDashboard(d Dashboard) *Server
 func (s *Server) WithDashboardURL(url string) *Server
@@ -359,6 +360,11 @@ type ServicesResponse struct {
 
 	MultiTeam bool
 }
+type SignedEngineVersionPolicy struct {
+	Resolver *engine.Resolver
+}
+func (p SignedEngineVersionPolicy) Compatibility(ctx context.Context, version string) (controllerwire.Compatibility, error)
+func (p SignedEngineVersionPolicy) Notices(ctx context.Context, version string) ([]engine.Notice, error)
 type SignedRunnerAdmission struct{ Resolver *engine.Resolver }
 func (p SignedRunnerAdmission) CheckRunner(ctx context.Context, version string) error
 const SpendLimitCode = "spend_limit"
@@ -423,13 +429,15 @@ func (t *optionalCreditRateTable) UnmarshalJSON(raw []byte) error
 func (pipeSink) Flush() error
 func (o s3LogObjects) Get(ctx context.Context, key string) (io.ReadCloser, error)
 func (o s3LogObjects) List(ctx context.Context, prefix string) ([]string, error)
-func (l segmentLogs) Append(context.Context, string, string, []byte) error
-func (l segmentLogs) DeleteRun(ctx context.Context, runID string) error
 func (l segmentLogs) NodeLogCompleteness(ctx context.Context, runID, nodeID string, node logseg.NodeProgress, now time.Time) (logseg.Completeness, bool, error)
 func (l segmentLogs) Read(ctx context.Context, runID, nodeID string, opts storage.ReadOpts) ([]byte, error)
 func (l segmentLogs) ReadRun(ctx context.Context, runID string) ([]byte, error)
 func (l segmentLogs) Stream(ctx context.Context, runID, nodeID string) (io.ReadCloser, error)
 func (r *setComputeLimitsReq) UnmarshalJSON(raw []byte) error
 func (r *setCreditSettingsReq) UnmarshalJSON(raw []byte) error
+func (sharedEngineVersionContracts) CompatibilityFor(release engine.VersionInfo) controllerwire.Compatibility
+func (sharedEngineVersionContracts) Evaluate(index engine.VerifiedIndex, version string, now time.Time) ([]engine.Notice, error)
+func (sharedEngineVersionContracts) Index(ctx context.Context, resolver *engine.Resolver, now time.Time) (engine.IndexResult, error)
+func (sharedEngineVersionContracts) Policy(index engine.VerifiedIndex) engine.VersionIndex
 func (r *statusRecorder) Unwrap() http.ResponseWriter
 func (r *statusRecorder) WriteHeader(code int)

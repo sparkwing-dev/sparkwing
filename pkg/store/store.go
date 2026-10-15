@@ -111,6 +111,7 @@ type Store struct {
 	cleanup          func() error
 	csrfKeyMu        sync.Mutex
 	csrfKey          []byte
+	csrfCipher       SessionKeyCipher
 	launchResumeMu   sync.Mutex
 	launchResume     *launchCursor
 	outputDir        string
@@ -3237,75 +3238,6 @@ func (s *Store) PrincipalHoldsProfileClaim(ctx context.Context, key string, clai
 	return false, nil
 }
 
-// ReapExpiredNodeClaims clears claimed_by/lease_expires_at on expired
-// claims; ready_at is left intact. An expired claim on a controller-dispatched
-// run ends as a lost attempt instead, through [Store.ReportAttempt]'s retry
-// and settle, in a pass of its own after this one. Returns reaped pairs.
-func (s *Store) ReapExpiredNodeClaims(ctx context.Context) (out [][2]string, err error) {
-	defer func() { out = append(out, s.expireDispatchClaimsLogged(ctx, time.Now())...) }()
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	now := time.Now().UnixNano()
-
-	rows, err := tx.QueryContext(ctx,
-		`SELECT run_id, node_id, credit_charged_through, lease_expires_at, claim_token_prefix FROM nodes
-		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
-		    AND lease_expires_at < ? AND kind = '' AND `+nodeNotDone+s.forUpdateSkipLocked(),
-		now)
-	if err != nil {
-		return nil, err
-	}
-	var pairs [][2]string
-	var lapsed []expiredClaim
-	for rows.Next() {
-		var rid, nid, prefix string
-		var chargeWindow, lease int64
-		if err := rows.Scan(&rid, &nid, &chargeWindow, &lease, &prefix); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		pairs = append(pairs, [2]string{rid, nid})
-		if chargeWindow != 0 {
-			lapsed = append(lapsed, expiredClaim{runID: rid, nodeID: nid, tokenPrefix: prefix, leaseNS: lease})
-		}
-	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if len(pairs) == 0 {
-		return nil, nil
-	}
-	for _, claim := range lapsed {
-		if err := s.settleExpiredClaimTx(ctx, tx, claim, now); err != nil {
-			return nil, err
-		}
-	}
-	// safety: only the rows this pass selected, locked and settled are
-	// cleared. On Postgres the select skips a row another transaction holds,
-	// and clearing every expired claim would clear that one too once its
-	// holder let go, dropping the tail nobody settled.
-	for _, pair := range pairs {
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE nodes SET claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
-			        claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
-			        claim_reservation = '', claim_slot = -1, lease_expires_at = NULL,
-			        credit_charged_through = 0
-			  WHERE run_id = ? AND node_id = ? AND claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
-			    AND lease_expires_at < ? AND `+nodeNotDone,
-			pair[0], pair[1], now); err != nil {
-			return nil, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return pairs, nil
-}
-
 // Event is one audit/wire record for a run; Seq is per-run monotonic.
 type Event struct {
 	RunID   string          `json:"run_id"`
@@ -4471,63 +4403,6 @@ func (t *Tenant) RequestCancel(ctx context.Context, id string) error {
 		return notFound("trigger", id)
 	}
 	return nil
-}
-
-func (s *Store) reapExpiredTriggers(ctx context.Context) ([]string, error) {
-	now := time.Now().UnixNano()
-
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	rows, err := tx.QueryContext(ctx,
-		`SELECT id FROM triggers
-		  WHERE status = ? AND lease_expires_at IS NOT NULL
-		    AND lease_expires_at < ?`+tx.forUpdate(),
-		triggerStatusClaimed, now)
-	if err != nil {
-		return nil, err
-	}
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if len(ids) == 0 {
-		return nil, nil
-	}
-	for _, id := range ids {
-		if err := settleTriggerCreditsTx(ctx, tx, id, time.Unix(0, now), false); err != nil {
-			return nil, err
-		}
-	}
-
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE triggers
-		    SET status = ?,
-		        claimed_at = NULL,
-		        lease_expires_at = NULL,
-		        claim_principal = '',
-		        claim_token_prefix = ''
-		  WHERE status = ? AND lease_expires_at IS NOT NULL
-		    AND lease_expires_at < ?`,
-		triggerStatusPending, triggerStatusClaimed, now); err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return ids, nil
 }
 
 // FinishTrigger closes a trigger, recording a failed run as a failed trigger; idempotent.

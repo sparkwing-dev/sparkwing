@@ -66,6 +66,56 @@ These declarations leave transaction implementation with W1.
   none. Application retry advances under the same generation. Start/retry return
   the authoritative ordinal in Applied. Owner/eval logs always use unit subjects.
 
+`Store.ReapUnits` is the sole unit-expiry entry point. Every pass requires the
+current `controller.reaper` lease and rechecks it in each unit transaction.
+`Store.ReapExpiredNodeClaims`, `Maintenance.RecoverExpiredNodeClaims`,
+`Maintenance.ReapExpiredTriggers` and `AgentLossRecovery` are removed. Recovery
+returns tagged `ReapedUnit` results and never creates a retry run. A local owner
+that has started fails in place after lease loss. An unstarted local owner
+requeues without consuming a disruption. Terminal owner timestamps stay recorded.
+The old dispatcher-expiry path and its application-retry accounting are removed.
+Metered recovery still needs W1b's final transactional settlement integration.
+
+Cancellation intent persists in `runs.cancel_reason` and `nodes.cancel_reason`,
+separately from terminal result fields. The first request owns that intent.
+`RunRow.CancelReason` and `NodeRow.CancelReason` retain it after draining and
+reopening. Renewal carries it in `LeaseBeat.CancelReason` for job, owner and eval
+units. A request-only edge never writes a holder's error, failure reason or exit
+code. Run cancellation passes its reason to affected jobs without replacing an
+earlier job request. C2's authentication snapshot still needs a reason field to
+transport the same intent through `AuthenticationReader`.
+
+Session creation and lookup use the store clock and Unix nanoseconds. The session
+row holds a SHA-256 digest. Every authentication reads current membership and
+complete capability ancestry. Account sessions follow current role grants.
+Capability-backed sessions also retain their parent's team, account and grant
+ceiling. The controller preserves those verified grants instead of replacing them
+with the full role. The removed `triggers.read` permission is absent from the role
+map because C2's final grant registry excludes it.
+
+`SessionKeyCipher` and `Store.SetSessionKeyCipher` configure row-bound encryption
+for `settings.session_csrf_key`. The row must be sealed and open under that cipher.
+A missing key is minted once, atomically invalidating sessions signed by no
+available key. Replicas open the same committed envelope. Wrong keys, malformed
+envelopes and missing cipher configuration refuse session operations. The
+controller's existing `WithSecretsCipher` installs its bound cipher on the store.
+No new key file, environment variable or encryption implementation is introduced.
+
+`CreateCapabilitySession(ctx, prefix, ttl)` replaces `CreateTokenSession`.
+It derives identity from an unbound account capability and retains that capability
+as its revocation parent. `Session.CapabilityPrefix` replaces `TokenPrefix`.
+`CreateAccountSession`, `CreateIdentityAccountSession`, `LookupSession` and
+`LookupSessionAndRenew` no longer accept caller clocks. Their callers select
+session identity and duration. The store supplies timestamps, digest persistence,
+current grants and the committing transaction.
+
+The SQLite session proof `credentials-session-digest-csrf/store-sqlite` checks
+creation, digest authentication, encrypted key storage, identical CSRF after store
+reopening, membership demotion and session revocation. It does not exercise OAuth,
+a native browser, production C2 middleware or a network listener. The controller
+component property separately exercises the registered session handler with
+sixteen generated grant subsets and a fake origin verifier.
+
 `IntakePolicyFacts.SourceLocation` is the server-verified acquisition location for
 the selected repository. Intake replaces the proposed location with that fact.
 A nonempty proposed location without this fact is refused before either run or
@@ -111,6 +161,35 @@ Their raw `Store` methods are removed. The unused raw `SetRetriedAs`,
 `ActiveConcurrencyHolder` and `ListSpawnedChildrenByRun` wrappers are removed.
 Their tenant methods remain while legacy callers migrate.
 
+`Tenant.ResetPipelineProfile`, `Tenant.ResetAllProfiles` and
+`Tenant.ProfileSamples` own capacity resets and sample reads. Their raw Store
+twins are removed. Local stats reset selects DefaultTeam explicitly. The local
+dashboard selects the request's tenant before reading profiles or samples.
+Query parameters cannot select another team's profiles.
+
+The remaining raw Store profile methods are removed: RecordProfileObservation,
+RecordWaitObservation, RecordContention, SetProfilePin, UpsertProfilePin,
+GetPipelineProfile, ListPipelineProfiles and CacheExcludedCounts. Tenant owns
+the complete profile API. Local orchestration, capacity stats and profile
+diagnostics select the registered DefaultTeam explicitly.
+
+Tenant owns concurrency acquisition, holder reads and renewal, release,
+follower resolution, promotion, waiter polling/cancellation and state reads.
+The raw Store twins and unused deployment-wide ListConcurrencyStates are removed.
+The local adapter selects the registered DefaultTeam and propagates handle errors.
+Acquisition and promotion persist the work's current generation. Queued arrivals
+also persist their lease. Expired waiters cannot keep arrival order or promote.
+Admission, polling, renewal and cache expiry use the store clock. Promotion and
+waiter maintenance use the owner lease or a live run job claim instead of the
+removed run heartbeat. Run queries carry the selected tenant key.
+
+The SQLite recovery proof `recovery-concurrency-continuous-adoption/store-sqlite`
+holds node and plan capacity through owner loss, remote claim renewal and store
+reopening. It reclaims the owner through ClaimUnit and adopts both holders.
+Job completion releases node capacity. Run completion releases plan capacity.
+Each release allows one queued competitor, and repeated promotion admits none.
+Enrollment is a contract fake. Native process recovery remains separate evidence.
+
 `Tenant.ReadOwnerSnapshot` reads the current owner authority, lease and scheduling
 state in one snapshot. A replaced, expired or revoked owner receives no snapshot.
 Cancellation remains readable while a held owner drains. The controller transports
@@ -152,6 +231,15 @@ Final run pruning uses `Operator.MaintainRetention`. The unleased
 `Store.PruneRunsOlderThan` API is removed. Finish time controls eligibility, and
 a failed pass rolls back every removal and discards its result counters.
 
+Identity expiry also uses `Operator.MaintainRetention`. The unleased
+`Store.PruneSpentIdentity` and `Store.ExpireSessions` methods, `IdentityPrune` and
+`SpentIdentityRetention` are removed. Invitations expire thirty days after
+acceptance, withdrawal or expiry. Invitation and email-delivery timestamps use
+nanoseconds. Each identity table observes the pass limit. Session expiry preserves
+any row named by a capability parent. `RetentionResult.Invitations` and
+`RetentionResult.Sessions` count only committed deletions. Controller maintenance
+calls this fenced pass once instead of running a second identity sweep.
+
 `Tenant.ReleaseSourceCredential` accepts C2's authorized authority reference and
 route target. In one write transaction it reloads ancestry, locks the owner, run
 and job, checks the live unstarted source binding and run deadline, and derives
@@ -180,8 +268,19 @@ enrollment and GitHub App issuance path remain separate integrations.
 
 ### Upload and record persistence
 
+`Tenant.TrustLocalBuilds` and `Tenant.SetTrustLocalBuilds` own the team's
+local binary execution opt-in. Their raw Store methods are removed. An absent
+row means false. Read errors or invalid stored flags cannot enable trust.
+Enabling trust does not change upload or record provenance. The controller's
+membership checks own who may read or change this policy. W7's
+`blob.CheckBinaryExecution` and W3's execution adapter must enforce the policy
+against the committed binary and digest.
+
 `blob.Authority.Upload` contains C2's resolved tagged uploader. W1 rechecks it
-against the exact job/attempt/generation, owner lease or published attempt.
+against the exact job/attempt/generation, owner lease or imported terminal
+published attempt. Attempt-scoped publication requires a persisted finish time
+through the shared authority resolver for upload admission, ticket lookup,
+commit, abort, data access and log commits.
 `RecordLookup.VerifiedDefaultOnly` selects only the authorized repository's
 verified default-branch entries before required bytes or member metadata are read.
 An excluded record is a miss. The evidence retains the App event key, SHA and
@@ -236,6 +335,22 @@ own-upload receipt. Retries before settlement retain staging. After settlement,
 the authenticated adapter replays the persisted receipt under current authority
 without repeating physical publication. Staging cleanup follows settlement.
 
+The `storage-cas-integrity/store-data-sqlite` proof refuses mismatched verified
+size, digest and tenant evidence. It reopens an expired interrupted upload,
+reserves a replacement under the same capacity, rolls back a receipt failure,
+then commits and replays the replacement. After reopening again, only the new
+uploader can read the digest and usage counts one blob. Authority and physical
+verification are contract fixtures. Native transfer integrity and EOF checks
+remain separate integration proofs.
+
+The `storage-owner-receipts-and-stream-verification/store-data-sqlite` proof
+commits trigger and plan uploads before jobs exist. It checks failed verification,
+exact tagged receipt replay, reopening and refusal to transfer the receipt or
+ticket to a job in the same run. Award issuance and physical verification are
+contract fixtures. Generated eval tests check both source and unit fences under
+explicit fake write authority. C2's issued eval grant table remains read-only.
+The native cell still requires signed transfer and stream EOF verification.
+
 Upload tickets reserve monthly bytes, lifetime run bytes and lifetime run objects
 in the existing quota tables. Each dimension has its own durable reservation.
 The aggregate keys are `storage`, `storage.run.bytes:<run>` and
@@ -252,6 +367,11 @@ an object reservation. The legacy `SetNodeArtifactManifestCharged` methods are
 removed with the legacy manifest-pointer endpoint. W7/W9 wire final publication
 and member validation through the record and result contracts. No manifest
 column or mutable pointer route is restored to the final schema.
+
+Record commits normalize expiry instants to UTC and clear values in unset optional
+expiry and manifest fields. Returned metadata matches persisted metadata across
+replay and reopening. A different expiry instant still conflicts with an immutable
+output or manifest record.
 
 The `storage-quota-settlement-crash-replay/store-data-sqlite` proof exercises
 upload admission, commit, abort and deduplication. Child processes exit without
@@ -495,6 +615,14 @@ the exact persisted attempt or publication binding. A refused attachment rolls
 back state, attempt closure and events. An exact result replay does not reattach
 records.
 
+`Store.SetResultBlobRecords` configures the blob implementation of
+`nodeResultRecords` before the store is shared. Attachment verifies exact
+destination result keys and all required bytes in the state transaction through
+the existing record reader. It requires `data.write`, rechecks live authority
+after manifest I/O, and preserves caller-owned commit and rollback. Missing,
+expired or corrupt records prevent the result and its event from committing.
+No synthetic attempt represents an unexecuted job or a published import.
+
 `IntakePolicy` resolves request options through C4 and supplies server ceilings,
 repository authority, verified App delivery facts and log retention. The store
 requires it before admission and rechecks the caller in the intake transaction.
@@ -549,8 +677,25 @@ The `storage-hasmany-read-set/store-data-sqlite` proof uses exact imported job
 attempts under a preseeded publication capability. It checks hidden unrelated and
 foreign existence, budget expiry, reservation and failed-commit refusal, independent
 verified receipts, deduplicated replica charging and persistence after reopening.
+Both `BindData` and `BindReadSet` dispatch through `Store.CheckBinding` to the
+transactional data checker in this SQLite proof. Generated store tests also
+check uncommitted receipt changes and caller-supplied principal forgeries.
 Presence metadata consumes neither download nor egress bytes. Physical verification,
 job-holder transports and native placements remain integration obligations.
+
+The `storage-hasmany-large-budget/store-data-sqlite` proof checks 1,025 distinct
+digests and their duplicates across reopening. All 257 readable digests appear
+once in request order. Unrelated and foreign bytes remain hidden. Presence reads
+leave upload, download and egress accounting unchanged. Generated store tests
+advance the injected clock across the final read and require an empty budget
+error once the deadline is reached. Trigger/plan owner receipt properties also
+check forged identities and refusal to transfer the receipt to a job in the same
+run. Physical stream verification and native placements remain separate proofs.
+
+Record commits and lookups recheck live authority after verified manifest I/O.
+Generated tests cross the job lease, leaf capability and ancestor expiry during
+that read through CommitRecord, LookupRecord, LookupMemo, LookupDepcache and
+CopyMemo. Refusals return no read set and persist no output or manifest record.
 
 The `storage-log-segments-and-fallback/store-data-sqlite` proof exercises
 immutable job segments, transactional rollback of a gapped batch, reopening,
@@ -675,6 +820,8 @@ rows return errors. A settings batch and its returned snapshot commit together.
 Rate-table reads use one snapshot so a concurrent update cannot mix its scalar
 price with another table. Operator table authority is checked under the shared
 advisory lock before any settings write.
+`Store.CreditRateMicroPerSecond` and `Store.CreditGraceSeconds` are removed.
+Their callers read the existing `CreditSettings` snapshot fields.
 
 `CreditSettings` supplies max-charge seconds, the storage price, the free storage
 allowance and rate-table presence. Their unused Store getters are removed.
@@ -733,6 +880,14 @@ bytes independently of their originating run. Upload-ticket expiry releases
 quota through the leased final retention pass. Physical GC wiring remains with
 the storage adapter.
 
+`Store.ExpiredOutputRuns`, `Store.ReleaseRunOutputs`, `Store.ForgetRunOutputs`,
+`ExpiredOutputRun` and the store's duplicate `OutputRetention` constant are removed
+with the controller's output-key sweep. Leased record expiry and reachability GC
+own output lifetime. A copied output and its transitive manifest members survive
+source-run deletion and reopening. Their bytes become collectible after the last
+copy disappears. Copies add no upload usage. The SQLite retention proof checks
+both deletion stages, and generated store tests race memo copying with collection.
+
 Usage rows are additive per team, period and replica. Reporting sums rows.
 Admission takes a shared team/quota lock and records each reservation durably;
 settlement is idempotent by reservation ID. Log reads meter egress exactly and
@@ -753,8 +908,32 @@ resuming billing starts a new interval. Storage charges remain runless.
 
 The `billing-ledger-survives-retention/store-data-sqlite` acceptance proof
 checks a real storage debit and preserves every financial row across leased
-retention and reopening. It does not exercise provider verification or native
-placements. The controller's billing caller uses this operator method. W1's
+retention and reopening. Tenant billing state, grant history and charge history
+exclude a neighboring team's ledger and survive the same retention and restart.
+Both history methods retain tenant attribution. Charge history reads the final
+capability column into CreditCharge.TokenPrefix and preserves the original
+run, job and awarded capability after those operational rows expire.
+`Tenant.CreditUsageByRun` nets reservations, usage and refunds, excluding storage
+and runless charges. Its per-run rows survive operational run retention and
+reopening alongside the tenant balance and history.
+`Store.CreditLedgerTotals` reads deployment-wide financial totals in one snapshot.
+For each open metered award it uses C2's billing calculator and the immutable
+intervals to subtract refundable seconds from the ledger's net compute seconds.
+Consumption beyond already charged seconds waits for a billing checkpoint.
+Open intervals stop at their persisted charged checkpoint for reporting. Closed
+intervals use their finish time. A delayed reaper cannot add unconfirmed time.
+Reporting cannot advance charged checkpoints or close intervals. Operational
+run, node, trigger and credential rows do not control these totals. Settled and
+unmetered awards need no calculator call. Generated store tests use a contract
+fake while C2's production calculator remains unimplemented. The retention proof
+also checks exact deployment totals across pruning and reopening, with storage
+seconds excluded. The unused `Store.RunFinished` pruning query is removed.
+`Tenant.CreditState` and `Tenant.ListCreditGrants` own these reads. Their raw
+Store twins are removed. Burn windows use the store clock.
+Balances use `Tenant.CreditBalanceMicro`. Its raw Store twin is removed.
+`Tenant.RecordCreditGrant` owns grant requests. Its raw Store twin is removed.
+The proof does not exercise provider verification or native placements.
+The controller's billing caller uses this operator method. W1's
 maintenance coordinator owns the shared retention, quota and GC ordering.
 
 ### Storage policy and reports
@@ -880,6 +1059,10 @@ still repeat their locking checks before persisting a receipt or reference.
 The `storage-reachability-and-retention-tails/store-data-sqlite` proof exercises
 leased record expiry, newest-success output pins, receipt roots, transitive
 members, persisted tombstones, grace and failed physical deletion. Collection
+requires the persisted maintenance fence even when no tombstones are ready.
+The proof refuses forged fences before and after reopening, then refuses an
+expired or superseded generation on an empty inventory. A same-holder takeover
+must acquire a new generation before collection resumes. Collection
 rechecks references added after marking, then removes tails after their last
 root disappears. An old source bundle survives its originating run and becomes
 collectible only after its record expires and the tombstone grace passes.

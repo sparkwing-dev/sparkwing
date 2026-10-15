@@ -8,7 +8,6 @@ type BatchSigner struct {
 }
 func (s BatchSigner) Sign(ctx context.Context, request blob.LogSigningRequest, class string) (blob.LogUploadBatch, error)
 const ClassFree = "r30"
-func ClassPrefix(class string) string
 const ClassStandard = "r90"
 type CommittedReader struct {
 	Records SegmentLookup
@@ -36,7 +35,6 @@ type End struct {
 var ErrBadManifest = errors.New("logseg: unreadable manifest")
 var ErrClosed = errors.New("logseg: the sink is closed")
 var ErrSealed = errors.New("logseg: the attempt already has a manifest")
-func EscapeNode(nodeID string) string
 type Gap struct {
 	From int64
 	To   int64
@@ -74,13 +72,10 @@ type Manifest struct {
 	Segments     []Segment
 }
 func (m Manifest) Marshal() ([]byte, error)
-func ManifestKey(prefix string) string
-const ManifestName = "manifest.json"
 const ManifestVersion = 1
 const MaxNodeBytes int64 = 64 << 20
 func NewSink(ctx context.Context, up Uploader, opts Options) (*Sink, error)
 func NewSubjectUploader(data Data) (*SubjectUploader, error)
-const NoTeam = "_"
 type NodeProgress struct {
 	Started    bool
 	Terminal   bool
@@ -122,7 +117,6 @@ const ReasonSequenceGap = "sequence gap"
 const ReasonStopped = "node stopped before its log was finished"
 const ReasonUnsealed = "writer did not seal"
 const ReasonUploadFailed = "upload failed"
-func RunPrefix(class, team, runID string) (string, error)
 func SealAbandoned(ctx context.Context, objs Objects, prefix string, base Manifest, reason string,
 	put func(ctx context.Context, key string, body []byte) error,
 ) (*Manifest, error)
@@ -140,11 +134,9 @@ type Segment struct {
 }
 const SegmentBytes = 1 << 20
 const SegmentInterval = 10 * time.Second
-func SegmentKey(prefix string, n int) string
 type SegmentLookup interface {
 	ReadLogSegments(context.Context, store.Actor, blob.LogReadRequest) (store.LogSegments, error)
 }
-func SegmentNumber(prefix, key string) (int, bool)
 type SegmentObjects interface {
 	Get(context.Context, string) (io.ReadCloser, error)
 }
@@ -165,7 +157,6 @@ const StateUnknown = "unknown"
 const StatusComplete = "complete"
 const StatusCutOff = "cut_off"
 const StatusIncomplete = "incomplete"
-func SubjectPrefix(class string, subject blob.LogSubject) (string, error)
 type SubjectUploader struct {
 }
 func (u *SubjectUploader) PutManifest(ctx context.Context, m Manifest) error

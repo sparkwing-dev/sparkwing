@@ -20,11 +20,11 @@ func TestRecordWaitObservation_PersistsWindowedPercentiles(t *testing.T) {
 	ctx := context.Background()
 
 	for _, w := range []time.Duration{time.Second, 2 * time.Second, 3 * time.Second, 4 * time.Second, 100 * time.Second} {
-		if err := st.RecordWaitObservation(ctx, "queuey", w); err != nil {
+		if err := tenantFor(t, st, store.DefaultTeam).RecordWaitObservation(ctx, "queuey", w); err != nil {
 			t.Fatalf("record wait: %v", err)
 		}
 	}
-	prof, err := st.GetPipelineProfile(ctx, "queuey", "")
+	prof, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "queuey", "")
 	if err != nil || prof == nil {
 		t.Fatalf("get profile: %v (prof=%v)", err, prof)
 	}
@@ -48,16 +48,16 @@ func TestRecordWaitObservation_AgesOutOldSamples(t *testing.T) {
 	ctx := context.Background()
 
 	for range 60 {
-		if err := st.RecordWaitObservation(ctx, "aged", time.Hour); err != nil {
+		if err := tenantFor(t, st, store.DefaultTeam).RecordWaitObservation(ctx, "aged", time.Hour); err != nil {
 			t.Fatalf("record old wait: %v", err)
 		}
 	}
 	for range 50 {
-		if err := st.RecordWaitObservation(ctx, "aged", time.Second); err != nil {
+		if err := tenantFor(t, st, store.DefaultTeam).RecordWaitObservation(ctx, "aged", time.Second); err != nil {
 			t.Fatalf("record new wait: %v", err)
 		}
 	}
-	prof, err := st.GetPipelineProfile(ctx, "aged", "")
+	prof, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "aged", "")
 	if err != nil || prof == nil {
 		t.Fatalf("get profile: %v", err)
 	}
@@ -77,19 +77,19 @@ func TestRecordWaitObservation_CoexistsWithProfileUpserts(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	ctx := context.Background()
 
-	if err := st.RecordWaitObservation(ctx, "mixed", 7*time.Second); err != nil {
+	if err := tenantFor(t, st, store.DefaultTeam).RecordWaitObservation(ctx, "mixed", 7*time.Second); err != nil {
 		t.Fatalf("record wait first: %v", err)
 	}
-	if err := st.RecordProfileObservation(ctx, "mixed", "", store.ProfileObservation{
+	if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "mixed", "", store.ProfileObservation{
 		Duration: time.Minute, PeakCores: 2, PeakMemoryBytes: 1 << 30, CPUMeasured: true,
 	}); err != nil {
 		t.Fatalf("record profile after wait: %v", err)
 	}
-	if err := st.RecordWaitObservation(ctx, "mixed", 9*time.Second); err != nil {
+	if err := tenantFor(t, st, store.DefaultTeam).RecordWaitObservation(ctx, "mixed", 9*time.Second); err != nil {
 		t.Fatalf("record wait after profile: %v", err)
 	}
 
-	prof, err := st.GetPipelineProfile(ctx, "mixed", "")
+	prof, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "mixed", "")
 	if err != nil || prof == nil {
 		t.Fatalf("get profile: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestPipelineProfile_ResourcePercentilesFromSamples(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 1; i <= 10; i++ {
-		if err := st.RecordProfileObservation(ctx, "spiky", "", store.ProfileObservation{
+		if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "spiky", "", store.ProfileObservation{
 			Duration:        time.Minute,
 			PeakCores:       float64(i),
 			PeakMemoryBytes: int64(i) << 20,
@@ -119,7 +119,7 @@ func TestPipelineProfile_ResourcePercentilesFromSamples(t *testing.T) {
 			t.Fatalf("record observation %d: %v", i, err)
 		}
 	}
-	prof, err := st.GetPipelineProfile(ctx, "spiky", "")
+	prof, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "spiky", "")
 	if err != nil || prof == nil {
 		t.Fatalf("get profile: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestPipelineProfile_ResourcePercentilesFromSamples(t *testing.T) {
 		t.Errorf("PeakCores = %v, want windowed p99 peak 10", prof.PeakCores)
 	}
 
-	list, err := st.ListPipelineProfiles(ctx, "spiky")
+	list, err := tenantFor(t, st, store.DefaultTeam).ListPipelineProfiles(ctx, "spiky")
 	if err != nil || len(list) != 1 {
 		t.Fatalf("list: %v (n=%d)", err, len(list))
 	}
@@ -169,14 +169,14 @@ func TestRecordProfileObservation_DropsPreviousCPUSampleSchema(t *testing.T) {
 	}
 	if _, err := st.DB().Exec(storetest.Rebind(st, `
 INSERT INTO pipeline_profiles
-    (pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, samples_json)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		"schema-shift", "", time.Minute.Milliseconds(), time.Minute.Milliseconds(), 14.0, int64(1<<30), 3, 1,
+    (team, pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, samples_json)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		store.DefaultTeam, "schema-shift", "", time.Minute.Milliseconds(), time.Minute.Milliseconds(), 14.0, int64(1<<30), 3, 1,
 		time.Now().UnixNano(), oldWindow); err != nil {
 		t.Fatalf("seed old profile window: %v", err)
 	}
 
-	prof, err := st.GetPipelineProfile(ctx, "schema-shift", "")
+	prof, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "schema-shift", "")
 	if err != nil || prof == nil {
 		t.Fatalf("get stale profile: %v (prof=%v)", err, prof)
 	}
@@ -190,7 +190,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		t.Errorf("stale profile resolved as %q, want default", got.Source)
 	}
 
-	if err := st.RecordProfileObservation(ctx, "schema-shift", "", store.ProfileObservation{
+	if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "schema-shift", "", store.ProfileObservation{
 		Duration:        5 * time.Second,
 		PeakCores:       2,
 		PeakMemoryBytes: 128 << 20,
@@ -199,7 +199,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		t.Fatalf("RecordProfileObservation: %v", err)
 	}
 
-	prof, err = st.GetPipelineProfile(ctx, "schema-shift", "")
+	prof, err = tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "schema-shift", "")
 	if err != nil || prof == nil {
 		t.Fatalf("get profile: %v (prof=%v)", err, prof)
 	}

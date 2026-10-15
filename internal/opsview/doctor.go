@@ -841,7 +841,11 @@ func scratchBuild(version string) bool {
 }
 
 func diagnosePoisonedProfiles(ctx context.Context, st *store.Store, queueState wingwire.QueueState, queueRead bool, report *DoctorReport) error {
-	profiles, err := st.ListPipelineProfiles(ctx, "")
+	tenant, err := st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return err
+	}
+	profiles, err := tenant.ListPipelineProfiles(ctx, "")
 	if err != nil {
 		return err
 	}

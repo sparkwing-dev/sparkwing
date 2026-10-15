@@ -151,7 +151,7 @@ func TestClientCapacityRoutesLandInTheSameRows(t *testing.T) {
 		t.Fatalf("RecordWaitObservation: %v", err)
 	}
 
-	stored, err := st.GetPipelineProfile(ctx, "demo", "")
+	stored, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "demo", "")
 	if err != nil || stored == nil {
 		t.Fatalf("store profile = %v, %v; want a row", stored, err)
 	}

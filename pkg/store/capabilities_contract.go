@@ -286,11 +286,11 @@ func readAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityR
 		node.principal.Capability = c
 		node.principal.Class = capability.CredentialBearer
 	} else {
-		var scopes, account, parent string
+		var account, parent string
 		var created, expires int64
 		var revoked sql.NullInt64
 		c := capability.Capability{Audience: capability.Controller, Binding: capability.Binding{Kind: capability.BindingNone}}
-		err := tx.QueryRowContext(ctx, "SELECT principal,team,scopes,account_id,capability_prefix,created_at,expires_at,revoked_at,auth_generation FROM sessions WHERE hash = ?"+suffix, ref.ID).Scan(&c.Subject.ID, &c.Team, &scopes, &account, &parent, &created, &expires, &revoked, &node.generation)
+		err := tx.QueryRowContext(ctx, "SELECT principal,team,account_id,capability_prefix,created_at,expires_at,revoked_at,auth_generation FROM sessions WHERE hash = ?"+suffix, ref.ID).Scan(&c.Subject.ID, &c.Team, &account, &parent, &created, &expires, &revoked, &node.generation)
 		if err != nil {
 			return node, err
 		}
@@ -307,14 +307,9 @@ func readAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityR
 		}
 		if parent != "" {
 			c.Parent = &capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: parent}
+			c.Issuance = capability.Delegate
 		}
-		for _, scope := range strings.FieldsFunc(scopes, func(r rune) bool { return r == ',' || r == ' ' }) {
-			grant := capability.Grant(scope)
-			if !slices.Contains(capability.Grants, grant) {
-				return node, authorityError(apierr.IntegrityFailure, "unknown session grant")
-			}
-			c.Grants = append(c.Grants, grant)
-		}
+
 		node.principal.Capability = c
 		node.principal.Class = capability.CredentialSession
 	}
@@ -332,7 +327,12 @@ func readAuthorityTx(ctx context.Context, tx *storeTx, ref capability.AuthorityR
 		}
 		if c.Unit == "" {
 			allowed := ScopesForRole(role)
-			node.principal.Capability.Grants = slices.DeleteFunc(slices.Clone(c.Grants), func(g capability.Grant) bool { return !slices.Contains(allowed, string(g)) })
+			if node.principal.Class == capability.CredentialSession {
+				for _, scope := range allowed {
+					node.principal.Capability.Grants = append(node.principal.Capability.Grants, capability.Grant(scope))
+				}
+			}
+			node.principal.Capability.Grants = slices.DeleteFunc(slices.Clone(node.principal.Capability.Grants), func(g capability.Grant) bool { return !slices.Contains(allowed, string(g)) })
 		}
 	}
 	return node, nil
@@ -370,6 +370,9 @@ func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.Authority
 	for i := len(chain) - 2; i >= 0; i-- {
 		child := &chain[i].principal.Capability
 		parent := chain[i+1].principal.Capability
+		if chain[i].principal.Class == capability.CredentialSession && (child.Team != parent.Team || child.Subject != parent.Subject || parent.Audience != capability.Controller || parent.Binding.Kind != capability.BindingNone || parent.Unit != "") {
+			return nil, authorityError(apierr.Unauthenticated, "session parent identity differs")
+		}
 		if child.Issuance == capability.Delegate {
 			child.Grants = slices.DeleteFunc(slices.Clone(child.Grants), func(g capability.Grant) bool { return !slices.Contains(parent.Grants, g) })
 		}

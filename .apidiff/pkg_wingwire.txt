@@ -206,8 +206,6 @@ type HelloAck struct {
 	APIReady *bool
 
 	APIError string
-
-	ArtifactStoreError string
 }
 type Holder struct {
 	RunID string

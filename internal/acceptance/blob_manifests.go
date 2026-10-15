@@ -67,7 +67,7 @@ func CheckBlobManifestRecords(ctx context.Context, root string, objects blob.Obj
 			return err
 		}
 		job := fmt.Sprintf("manifest-%d", i)
-		if _, err := s.DB().ExecContext(ctx, `INSERT INTO nodes(team,run_id,node_id,status,attempt,generation,spec_json,execution_json) VALUES (?,'upload',?,'pending',1,7,?,?)`, store.DefaultTeam, job, []byte(`{}`), []byte(`{}`)); err != nil {
+		if _, err := s.DB().ExecContext(ctx, `INSERT INTO nodes(team,run_id,node_id,status,outcome,finished_at,attempt,generation,spec_json,execution_json) VALUES (?,'upload',?,'done','success',2,1,7,?,?)`, store.DefaultTeam, job, []byte(`{}`), []byte(`{}`)); err != nil {
 			return err
 		}
 		if _, err := s.DB().ExecContext(ctx, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at) VALUES (?,'upload',?,1,7,'publisher','upload-boundary','local','publisher','local',1)`, store.DefaultTeam, job); err != nil {
@@ -81,6 +81,21 @@ func CheckBlobManifestRecords(ctx context.Context, root string, objects blob.Obj
 			return err
 		}
 		manifestDigest := blob.Digest(fmt.Sprintf("%x", sha256.Sum256(raw)))
+		unfinished := request
+		unfinished.ID = fmt.Sprintf("unfinished-%d", i)
+		unfinished.Intent.Digest, unfinished.Intent.Size = manifestDigest, int64(len(raw))
+		_, refused := tenant.ReserveBlobUpload(ctx, unfinished)
+		var illegal *store.ErrIllegalTransition
+		if !errors.As(refused, &illegal) || illegal.Reason != store.ReasonHolderRights {
+			return fmt.Errorf("case %d unfinished imported attempt reserved an upload: %v", i, refused)
+		}
+		var reserved int
+		if err := s.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM uploads WHERE team=? AND id=?", store.DefaultTeam, unfinished.ID).Scan(&reserved); err != nil || reserved != 0 {
+			return fmt.Errorf("case %d unfinished imported attempt left reservations=%d: %v", i, reserved, err)
+		}
+		if _, err := s.DB().ExecContext(ctx, "UPDATE node_attempts SET finished_at=2,outcome='success' WHERE team=? AND run_id='upload' AND node_id=?", store.DefaultTeam, job); err != nil {
+			return err
+		}
 		if err := settleManifestBlob(ctx, tenant, objects, transfers, request, fmt.Sprintf("manifest-%d", i), raw); err != nil {
 			return err
 		}

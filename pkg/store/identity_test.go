@@ -213,7 +213,7 @@ func TestIdentitySessionSwitchNamesTheTeamItLeaves(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	a := signIn(t, st, "a", "sw@example.com")
-	raw, _, _, err := st.CreateAccountSession(ctx, a.Account, a.PersonalTeam, time.Hour, time.Now())
+	raw, _, _, err := st.CreateAccountSession(ctx, a.Account, a.PersonalTeam, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestIdentitySessionSwitchNamesTheTeamItLeaves(t *testing.T) {
 	if err := st.SwitchSessionTeam(ctx, raw, a.Account.ID, a.PersonalTeam, "second"); err != nil {
 		t.Fatal(err)
 	}
-	sess, err := st.LookupSession(t.Context(), raw, time.Now())
+	sess, err := st.LookupSession(t.Context(), raw)
 	if err != nil || sess.Team != "second" || sess.AccountID != a.Account.ID {
 		t.Fatalf("session = %+v, %v", sess, err)
 	}

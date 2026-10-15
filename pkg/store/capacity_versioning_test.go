@@ -20,20 +20,20 @@ func openTestStore(t *testing.T) (*Store, context.Context) {
 func TestRecordProfileObservation_ContendedRaisesFloorNotPeak(t *testing.T) {
 	st, ctx := openTestStore(t)
 
-	if err := st.RecordProfileObservation(ctx, "demo", "", ProfileObservation{
+	if err := st.defaultTenant().RecordProfileObservation(ctx, "demo", "", ProfileObservation{
 		Duration: 10 * time.Second, PeakCores: 2, PeakMemoryBytes: 1 << 20,
 		CPUMeasured: true, PlanHash: "A",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.RecordProfileObservation(ctx, "demo", "", ProfileObservation{
+	if err := st.defaultTenant().RecordProfileObservation(ctx, "demo", "", ProfileObservation{
 		CPUMeasured: true, PlanHash: "A", Contended: true,
 		FloorCores: 5, FloorMemoryBytes: 4 << 20,
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	prof, err := st.GetPipelineProfile(ctx, "demo", "")
+	prof, err := st.defaultTenant().GetPipelineProfile(ctx, "demo", "")
 	if err != nil || prof == nil {
 		t.Fatalf("profile missing: %v", err)
 	}
@@ -54,13 +54,13 @@ func TestRecordProfileObservation_ContendedRaisesFloorNotPeak(t *testing.T) {
 func TestRecordProfileObservation_FloorRisesOnHigherEvidence(t *testing.T) {
 	st, ctx := openTestStore(t)
 	for _, c := range []float64{5, 7} {
-		if err := st.RecordProfileObservation(ctx, "demo", "", ProfileObservation{
+		if err := st.defaultTenant().RecordProfileObservation(ctx, "demo", "", ProfileObservation{
 			CPUMeasured: true, PlanHash: "A", Contended: true, FloorCores: c,
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	prof, _ := st.GetPipelineProfile(ctx, "demo", "")
+	prof, _ := st.defaultTenant().GetPipelineProfile(ctx, "demo", "")
 	if prof.FloorCores != 7 {
 		t.Errorf("FloorCores = %v, want 7 (higher contended evidence raises the floor)", prof.FloorCores)
 	}
@@ -70,7 +70,7 @@ func TestRecordProfileObservation_FloorDecaysTowardLowerEvidence(t *testing.T) {
 	st, ctx := openTestStore(t)
 	fold := func(cores float64, memBytes int64) {
 		t.Helper()
-		if err := st.RecordProfileObservation(ctx, "demo", "", ProfileObservation{
+		if err := st.defaultTenant().RecordProfileObservation(ctx, "demo", "", ProfileObservation{
 			CPUMeasured: true, PlanHash: "A", Contended: true,
 			FloorCores: cores, FloorMemoryBytes: memBytes,
 		}); err != nil {
@@ -80,7 +80,7 @@ func TestRecordProfileObservation_FloorDecaysTowardLowerEvidence(t *testing.T) {
 
 	fold(8, 8<<30)
 	fold(1, 1<<30)
-	prof, _ := st.GetPipelineProfile(ctx, "demo", "")
+	prof, _ := st.defaultTenant().GetPipelineProfile(ctx, "demo", "")
 	if prof.FloorCores != 4 {
 		t.Errorf("FloorCores = %v, want 4 (one under-floor run halves the floor)", prof.FloorCores)
 	}
@@ -90,7 +90,7 @@ func TestRecordProfileObservation_FloorDecaysTowardLowerEvidence(t *testing.T) {
 
 	fold(1, 1<<30)
 	fold(1, 1<<30)
-	prof, _ = st.GetPipelineProfile(ctx, "demo", "")
+	prof, _ = st.defaultTenant().GetPipelineProfile(ctx, "demo", "")
 	if prof.FloorCores != 1 {
 		t.Errorf("FloorCores = %v, want 1 (three halvings reach the run's own evidence)", prof.FloorCores)
 	}
@@ -100,7 +100,7 @@ func TestRecordProfileObservation_FloorDecaysTowardLowerEvidence(t *testing.T) {
 
 	fold(8, 8<<30)
 	fold(5, 5<<30)
-	prof, _ = st.GetPipelineProfile(ctx, "demo", "")
+	prof, _ = st.defaultTenant().GetPipelineProfile(ctx, "demo", "")
 	if prof.FloorCores != 5 {
 		t.Errorf("FloorCores = %v, want 5 (decay never falls below the run's own evidence)", prof.FloorCores)
 	}
@@ -113,27 +113,27 @@ func TestRecordProfileObservation_PlanHashChangeResetsWindow(t *testing.T) {
 	st, ctx := openTestStore(t)
 
 	for range 3 {
-		if err := st.RecordProfileObservation(ctx, "demo", "", ProfileObservation{
+		if err := st.defaultTenant().RecordProfileObservation(ctx, "demo", "", ProfileObservation{
 			Duration: 5 * time.Second, PeakCores: 4, PeakMemoryBytes: 8 << 20,
 			CPUMeasured: true, PlanHash: "A",
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := st.RecordProfileObservation(ctx, "demo", "", ProfileObservation{
+	if err := st.defaultTenant().RecordProfileObservation(ctx, "demo", "", ProfileObservation{
 		CPUMeasured: true, PlanHash: "A", Contended: true, FloorCores: 9,
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := st.RecordProfileObservation(ctx, "demo", "", ProfileObservation{
+	if err := st.defaultTenant().RecordProfileObservation(ctx, "demo", "", ProfileObservation{
 		Duration: 6 * time.Second, PeakCores: 1, PeakMemoryBytes: 2 << 20,
 		CPUMeasured: true, PlanHash: "B",
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	prof, _ := st.GetPipelineProfile(ctx, "demo", "")
+	prof, _ := st.defaultTenant().GetPipelineProfile(ctx, "demo", "")
 	if prof.PlanHash != "B" {
 		t.Errorf("PlanHash = %q, want B", prof.PlanHash)
 	}
@@ -150,19 +150,19 @@ func TestRecordProfileObservation_PlanHashChangeResetsWindow(t *testing.T) {
 
 func TestRecordProfileObservation_PeakIgnoresSingleOutlier(t *testing.T) {
 	st, ctx := openTestStore(t)
-	if err := st.RecordProfileObservation(ctx, "demo", "", ProfileObservation{
+	if err := st.defaultTenant().RecordProfileObservation(ctx, "demo", "", ProfileObservation{
 		Duration: time.Second, PeakCores: 40, CPUMeasured: true, PlanHash: "A",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	for range profileWindow - 1 {
-		if err := st.RecordProfileObservation(ctx, "demo", "", ProfileObservation{
+		if err := st.defaultTenant().RecordProfileObservation(ctx, "demo", "", ProfileObservation{
 			Duration: time.Second, PeakCores: 2, CPUMeasured: true, PlanHash: "A",
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	prof, _ := st.GetPipelineProfile(ctx, "demo", "")
+	prof, _ := st.defaultTenant().GetPipelineProfile(ctx, "demo", "")
 	if prof.SampleCount != profileWindow {
 		t.Fatalf("SampleCount = %d, want %d", prof.SampleCount, profileWindow)
 	}
@@ -174,20 +174,20 @@ func TestRecordProfileObservation_PeakIgnoresSingleOutlier(t *testing.T) {
 func TestRecordProfileObservation_WindowAgesOutOldCost(t *testing.T) {
 	st, ctx := openTestStore(t)
 	for range 5 {
-		if err := st.RecordProfileObservation(ctx, "demo", "", ProfileObservation{
+		if err := st.defaultTenant().RecordProfileObservation(ctx, "demo", "", ProfileObservation{
 			Duration: time.Second, PeakCores: 10, CPUMeasured: true, PlanHash: "A",
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for range profileWindow {
-		if err := st.RecordProfileObservation(ctx, "demo", "", ProfileObservation{
+		if err := st.defaultTenant().RecordProfileObservation(ctx, "demo", "", ProfileObservation{
 			Duration: time.Second, PeakCores: 2, CPUMeasured: true, PlanHash: "A",
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	prof, _ := st.GetPipelineProfile(ctx, "demo", "")
+	prof, _ := st.defaultTenant().GetPipelineProfile(ctx, "demo", "")
 	if prof.SampleCount != profileWindow {
 		t.Fatalf("SampleCount = %d, want %d (window bounded)", prof.SampleCount, profileWindow)
 	}
