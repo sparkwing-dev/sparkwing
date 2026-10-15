@@ -1041,5 +1041,17 @@ target-side reuse assertions from unverified source materialization and lists
 the retired legacy adapter assertions that still need native integration.
 
 The selection test remains in its old fixture because sealed selection fields
-are absent. The complete nodehost package does not pass. No native acceptance
-cell is added, unskipped or claimed complete.
+are absent. The complete nodehost package passes after the retained store ports.
+No native acceptance cell is added, unskipped or claimed complete.
+
+## W3 shared process transport port
+
+[The process transport cut](../w3-process-transport-cut-progress.md) removes
+Session and StartSession. Their retained real-pipe tests, split-secret/EOF/CRLF
+tests, describe withholding, generator fixtures, granted-identity fuzz property
+and step-window fixture now use ProtocolSession. The private writeFailed unit
+test retires with its method. Real-pipe SDK-exit and blocked-write tests remain.
+The late-reply fixture replies after request-pipe shutdown and checks that
+cancellation prevents successful settlement. Concurrent work uses distinct
+jobs because duplicate live job/step requests are refused. This ports transport
+evidence and does not establish native placement composition.

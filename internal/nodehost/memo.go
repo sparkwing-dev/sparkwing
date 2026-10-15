@@ -82,7 +82,7 @@ func memoLayer(cfg *Config, next Executor) Executor {
 func memoHash(ctx context.Context, cfg *Config, n *NodeRun) (string, Result) {
 	id := n.Plan.Closures.MemoKey
 	hash := ""
-	res := cfg.Attempts.process(ctx, cfg.Session, n, func(ctx context.Context, sess *Session, log *LogSink) Result {
+	res := cfg.Attempts.process(ctx, cfg.Session, n, func(ctx context.Context, sess *ProtocolSession, log *LogSink) Result {
 		keyFailed := func(err error) Result {
 			return failed(fmt.Errorf("resolve cache key for %s: %w", n.Plan.ID, err))
 		}
@@ -332,7 +332,7 @@ func memoGenerate(ctx context.Context, cfg *Config, n *NodeRun, output json.RawM
 	// safety: the eval runs the node's own code, so it is held to the node's timeout like an attempt; a hung
 	// generator would otherwise hold the scheduler until the run itself ends.
 	res := timeoutLayer(cfg, func(ctx context.Context, attempt *NodeRun) Result {
-		return cfg.Attempts.process(ctx, cfg.Session, attempt, func(ctx context.Context, sess *Session, _ *LogSink) Result {
+		return cfg.Attempts.process(ctx, cfg.Session, attempt, func(ctx context.Context, sess *ProtocolSession, _ *LogSink) Result {
 			if err := nodeReplan(ctx, sess, attempt); err != nil {
 				return failed(err)
 			}

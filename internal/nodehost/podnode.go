@@ -63,24 +63,38 @@ func PlanDocument(ctx context.Context, cfg SessionConfig, req PlanRequest) (Plan
 	if err != nil {
 		return PlannedRun{}, maskErr(req.Masker, err)
 	}
-	sess, err := StartSession(ctx, scfg)
+	transport, output, err := scfg.protocol(nil)
 	if err != nil {
 		return PlannedRun{}, err
 	}
+	sess, err := StartProtocolSession(ctx, transport)
+	if err == nil {
+		err = scfg.hello(ctx, sess)
+	}
+	if err != nil {
+		if sess != nil {
+			err = errors.Join(err, sess.Close())
+		} else {
+			output.close()
+		}
+		return PlannedRun{}, err
+	}
+	stop := context.AfterFunc(ctx, func() { sess.failProtocol(context.Cause(ctx)) })
+	defer stop()
 	var out PlannedRun
-	var known bool
-	out.Args, known, err = describeArgs(ctx, sess, req.Entrypoint, req.Args, req.Masker)
-	out.Secrets = slices.Clone(sess.secrets)
+	description, known, err := describeArgs(ctx, sess, scfg, req.Entrypoint, req.Args, req.Masker)
+	out.Args = description.Args
+	out.Secrets = describedSecrets(description.Description, false)
 	out.Requires = slices.Clone(req.Requires)
 	if err == nil && req.CheckArgs != nil {
 		err = req.CheckArgs(out.Args)
 	}
 	if err == nil && req.CheckSecrets != nil {
-		err = req.CheckSecrets(ctx, slices.Clone(sess.requiredSecrets))
+		err = req.CheckSecrets(ctx, describedSecrets(description.Description, true))
 	}
-	err = releaseDescribed(sess, known, err)
+	err = releaseDescribed(output, known, err)
 	if err == nil {
-		out.Doc, out.JSON, err = planRun(ctx, sess, req.Entrypoint, out.Args, req.Run)
+		out.Doc, out.JSON, err = planRun(ctx, sess, scfg.Validation, req.Entrypoint, out.Args, req.Run)
 	}
 	if err == nil {
 		err = validateStepRange(out.Doc, req.StartAt, req.StopAt)
@@ -92,7 +106,7 @@ func PlanDocument(ctx context.Context, cfg SessionConfig, req PlanRequest) (Plan
 			out.Doc, out.JSON, err = cutOutsideOnly(out.Doc, out.JSON, req.Only)
 		}
 	}
-	_, cerr := sess.Close()
+	cerr := sess.Close()
 	var perr *apierr.Error
 	if err == nil && errors.As(cerr, &perr) {
 		// safety: a process that broke the protocol after its reply cannot vouch for that plan.

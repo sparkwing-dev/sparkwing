@@ -39,6 +39,8 @@ type ProtocolSessionConfig struct {
 	ParseFrame      func([]byte) (nodeproto.Frame, error)
 	ValidateRequest func(nodeproto.Request) error
 	cleanupEnv      []string
+	output          *processOutput
+	grace           time.Duration
 }
 
 // Start launches an attempt with its validated grant and shared environment.
@@ -159,6 +161,9 @@ func StartProtocolSession(ctx context.Context, cfg ProtocolSessionConfig) (sessi
 	if len(cfg.Command) == 0 || cfg.Command[0] == "" {
 		return nil, errors.New("SDK process requires a command")
 	}
+	if cfg.grace <= 0 {
+		cfg.grace = procgroup.DefaultTerminationGrace
+	}
 	if cfg.ParseFrame == nil {
 		cfg.ParseFrame = nodeproto.ParseFrame
 	}
@@ -243,7 +248,7 @@ func (s *ProtocolSession) Request(ctx context.Context, request nodeproto.Request
 		}
 	case <-ctx.Done():
 		// safety: the SDK can consume a full frame before its writer publishes completion.
-		draining := time.NewTimer(procgroup.DefaultTerminationGrace)
+		draining := time.NewTimer(s.cfg.grace)
 		defer draining.Stop()
 		select {
 		case err := <-written:
@@ -395,6 +400,9 @@ func (s *ProtocolSession) readProtocolFrames(file *os.File) {
 func (s *ProtocolSession) deliverProtocolReply(reply nodeproto.Reply) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.failure != nil && !errors.Is(s.failure, errProtocolSessionClosed) {
+		return nil
+	}
 	call, ok := s.pending[reply.ID]
 	if !ok {
 		return protocolSessionError(apierr.ProtocolError, "SDK sent a duplicate or unsolicited reply")
@@ -442,6 +450,14 @@ func protocolScanner(file *os.File) *bufio.Scanner {
 func (s *ProtocolSession) readProtocolText(file *os.File, level string) {
 	defer s.streams.Done()
 	defer file.Close()
+	if s.cfg.output != nil {
+		index := 1
+		if level == LevelWarn {
+			index = 2
+		}
+		readQueuedText(file, s.cfg.output.queues[index])
+		return
+	}
 	scanner := protocolScanner(file)
 	for scanner.Scan() {
 		s.emitProtocolLog(nodeproto.FrameLog{TS: time.Now().UTC().Format(time.RFC3339Nano), Level: level, Message: scanner.Text()})
@@ -496,17 +512,17 @@ func (s *ProtocolSession) watchProtocolProcess() {
 		}
 	}
 	_ = s.requests.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), limits.CleanupTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*s.cfg.grace+reapTimeout)
 	defer cancel()
 	if s.awaitProtocol(s.process.LeaderExited()) {
-		s.reapErr = s.process.Finish(ctx, procgroup.DefaultTerminationGrace)
+		s.reapErr = s.process.Finish(ctx, s.cfg.grace)
 	} else {
-		s.reapErr = s.process.Terminate(ctx, procgroup.DefaultTerminationGrace)
+		s.reapErr = s.process.Terminate(ctx, s.cfg.grace)
 	}
 }
 
 func (s *ProtocolSession) awaitProtocol(done <-chan struct{}) bool {
-	timer := time.NewTimer(procgroup.DefaultTerminationGrace)
+	timer := time.NewTimer(s.cfg.grace)
 	defer timer.Stop()
 	select {
 	case <-done:
@@ -536,6 +552,9 @@ func (s *ProtocolSession) Close() error {
 			<-drained
 		}
 		s.stopLogs()
+		if s.cfg.output != nil {
+			s.cfg.output.close()
+		}
 		err := s.protocolFailure()
 		if errors.Is(err, errProtocolSessionClosed) {
 			err = nil

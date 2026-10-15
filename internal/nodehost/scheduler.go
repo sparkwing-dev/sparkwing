@@ -254,23 +254,38 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 		return RunResult{}, maskErr(masker, err)
 	}
 	scfg.HoldOutput, scfg.Masker = true, masker
-	sess, err := StartSession(ctx, scfg)
+	transport, output, err := scfg.protocol(nil)
 	if err != nil {
 		return RunResult{}, err
 	}
+	sess, err := StartProtocolSession(ctx, transport)
+	if err == nil {
+		err = scfg.hello(ctx, sess)
+	}
+	if err != nil {
+		if sess != nil {
+			err = errors.Join(err, sess.Close())
+		} else {
+			output.close()
+		}
+		return RunResult{}, err
+	}
+	stop := context.AfterFunc(ctx, func() { sess.failProtocol(context.Cause(ctx)) })
+	defer stop()
 	closeSession := func() {
-		if _, err := sess.Close(); err != nil {
+		if err := sess.Close(); err != nil {
 			cfg.Logger.Warn("nodehost: plan process", "err", err)
 		}
 	}
-	args, known, err := describeArgs(ctx, sess, cfg.Entrypoint, cfg.Args, masker)
+	description, known, err := describeArgs(ctx, sess, scfg, cfg.Entrypoint, cfg.Args, masker)
+	args := description.Args
 	if err == nil && cfg.CheckArgs != nil {
 		err = cfg.CheckArgs(args)
 	}
 	if err == nil && cfg.CheckSecrets != nil {
-		err = cfg.CheckSecrets(ctx, slices.Clone(sess.requiredSecrets))
+		err = cfg.CheckSecrets(ctx, describedSecrets(description.Description, true))
 	}
-	err = releaseDescribed(sess, known, err)
+	err = releaseDescribed(output, known, err)
 	if err == nil {
 		err = cfg.State.CreateRun(ctx, runRow(cfg, args))
 	}
@@ -299,7 +314,7 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 		}
 	}()
 
-	doc, raw, err := planRun(ctx, sess, cfg.Entrypoint, args, cfg.Run)
+	doc, raw, err := planRun(ctx, sess, scfg.Validation, cfg.Entrypoint, args, cfg.Run)
 	closeSession()
 	if err == nil {
 		err = validateStepRange(doc, cfg.StartAt, cfg.StopAt)
@@ -320,7 +335,7 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 		return res, nil
 	}
 	run := newRun(&cfg, doc, args, skips)
-	run.Secrets = slices.Clone(sess.secrets)
+	run.Secrets = describedSecrets(description.Description, false)
 	releaseLease = runPlanned(ctx, &cfg, run, &res)
 	return res, nil
 }

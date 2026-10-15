@@ -36,7 +36,7 @@ func skipIfLayer(cfg *Config, next Executor) Executor {
 			budget = time.Duration(value(m.SkipIfBudgetMS)) * time.Millisecond
 		}
 		reason := ""
-		res := cfg.Attempts.process(ctx, cfg.Session, n, func(ctx context.Context, sess *Session, log *LogSink) Result {
+		res := cfg.Attempts.process(ctx, cfg.Session, n, func(ctx context.Context, sess *ProtocolSession, log *LogSink) Result {
 			if err := nodeReplan(ctx, sess, n); err != nil {
 				return failed(err)
 			}
@@ -70,7 +70,7 @@ func skipIfLayer(cfg *Config, next Executor) Executor {
 // safety: a closure that errors, as one whose secrets would not resolve does,
 // fails the node rather than run what its guard may have meant to skip; one
 // that overruns its budget counts as don't-skip, as SkipBudget documents.
-func skipIfEval(ctx context.Context, sess *Session, log Sink, id string, i int, budget time.Duration) (bool, error) {
+func skipIfEval(ctx context.Context, sess *ProtocolSession, log Sink, id string, i int, budget time.Duration) (bool, error) {
 	bctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	var er nodeproto.EvalResult
@@ -99,7 +99,7 @@ func skipIfEval(ctx context.Context, sess *Session, log Sink, id string, i int, 
 
 // safety: the protocol's attempt order: before_run on attempt 1 only, verify after a successful body,
 // generators only once verify passes, and after_run only once no attempt follows.
-func withClosures(ctx context.Context, sess *Session, log Sink, n *NodeRun, body func() Result) Result {
+func withClosures(ctx context.Context, sess *ProtocolSession, log Sink, n *NodeRun, body func() Result) Result {
 	c := closuresOf(n)
 	if max(n.Attempt, 1) == 1 {
 		for i, id := range c.BeforeRun {
@@ -145,7 +145,7 @@ func afterRunDue(n *NodeRun, res Result) bool {
 
 // safety: a failed reply fails only a node that succeeded; a failed node keeps
 // its own error, which is the one worth reading.
-func afterRunEval(ctx context.Context, sess *Session, log Sink, ids []string, res Result) Result {
+func afterRunEval(ctx context.Context, sess *ProtocolSession, log Sink, ids []string, res Result) Result {
 	input, err := json.Marshal(afterRunArgOf(res))
 	if err != nil {
 		return failed(err)
@@ -171,7 +171,7 @@ func afterRunAfterTimeout(ctx context.Context, cfg *Config, n *NodeRun, res Resu
 	}
 	lctx, cancel := context.WithTimeout(ctx, afterRunTimeoutLimit)
 	defer cancel()
-	cfg.Attempts.process(lctx, cfg.Session, n, func(ctx context.Context, sess *Session, log *LogSink) Result {
+	cfg.Attempts.process(lctx, cfg.Session, n, func(ctx context.Context, sess *ProtocolSession, log *LogSink) Result {
 		if err := nodeReplan(ctx, sess, n); err != nil {
 			closureNote(log, "error", fmt.Sprintf("AfterRun hooks after the timeout: %v", err))
 			return failed(err)
@@ -192,7 +192,7 @@ func afterRunArgOf(res Result) nodeproto.RunResult {
 }
 
 // safety: msg is the closure's own error and err a failed reply or broken session, which callers treat differently.
-func closureEval(ctx context.Context, sess *Session, kind, id string, input json.RawMessage) (msg, err error) {
+func closureEval(ctx context.Context, sess *ProtocolSession, kind, id string, input json.RawMessage) (msg, err error) {
 	var er nodeproto.EvalResult
 	if err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpEval, Closure: id, Input: input}, &er); err != nil {
 		return nil, err

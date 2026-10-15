@@ -9,11 +9,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -99,14 +97,6 @@ func fakeSDK() {
 			ok("999", map[string]any{"outcome": "success"})
 		case req.Job == "close-frames":
 			_ = frames.Close()
-		case req.Job == "term-reply":
-			term := make(chan os.Signal, 1)
-			signal.Notify(term, syscall.SIGTERM)
-			log("", "armed")
-			<-term
-			ok(req.ID, map[string]any{"outcome": "success"})
-			log("", "replied")
-			os.Exit(0)
 		case req.Job == "grandchild":
 			child := exec.Command(os.Args[0])
 			child.Env = append(os.Environ(), fakeSDKEnv+"=sleep")
@@ -120,15 +110,24 @@ func fakeSDK() {
 	r := nodeproto.NewReader(requests)
 	// safety: written once the host closes the request pipe, so the break lands while Close drains.
 	garbageAtEOF := false
+	replyAtEOF := ""
 	for {
 		req, err := r.NextRequest()
 		if err != nil {
+			if replyAtEOF != "" {
+				ok(replyAtEOF, map[string]any{"outcome": "success"})
+				log("", "replied")
+			}
 			if garbageAtEOF {
 				_, _ = frames.WriteString("not a frame\n")
 			}
 			os.Exit(0)
 		}
 		switch req.Job {
+		case "term-reply":
+			replyAtEOF = req.ID
+			log("", "armed")
+			continue
 		case "reply-then-garbage":
 			ok(req.ID, map[string]any{"outcome": "success"})
 			garbageAtEOF = true
@@ -198,10 +197,10 @@ func checkNoNewPipes(t *testing.T, before map[string]bool) {
 	}
 }
 
-func startFake(t *testing.T, ctx context.Context, sink *recorder) *Session {
+func startFake(t *testing.T, ctx context.Context, sink *recorder) *ProtocolSession {
 	t.Helper()
 	before := openPipes(t)
-	s, err := StartSession(ctx, SessionConfig{
+	s, err := startConfiguredProcess(ctx, SessionConfig{
 		Entry: pipelineentry.Binary(os.Args[0]),
 		// bug: the race runtime otherwise sleeps a second at exit, past the grace.
 		Env:   append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0"),
@@ -212,7 +211,7 @@ func startFake(t *testing.T, ctx context.Context, sink *recorder) *Session {
 		t.Fatalf("start: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = s.Close()
+		_ = s.Close()
 		if s.cmd.ProcessState == nil {
 			t.Errorf("sdk process %d was left unreaped", s.cmd.Process.Pid)
 		}
@@ -228,7 +227,7 @@ func callCtx(t *testing.T) context.Context {
 }
 
 func runStep(node string) nodeproto.Request {
-	return nodeproto.Request{Op: nodeproto.OpRunStep, Job: node, Step: "body", Attempt: 1, Settled: []string{}}
+	return nodeproto.Request{ID: "step-caller", Op: nodeproto.OpRunStep, Job: node, Step: "body", Attempt: 1, Settled: []string{}}
 }
 
 func hostCode(err error) apierr.Code {
@@ -244,11 +243,11 @@ func TestSessionRequestReply(t *testing.T) {
 	s := startFake(t, context.Background(), sink)
 	ctx := callCtx(t)
 
-	reply, err := s.Call(ctx, nodeproto.Request{Op: nodeproto.OpDescribe})
-	if err != nil || !reply.OK || reply.ID != "2" {
+	reply, err := s.Request(ctx, nodeproto.Request{ID: "describe-caller", Op: nodeproto.OpDescribe})
+	if err != nil || !reply.OK || reply.ID != "describe-caller" {
 		t.Fatalf("describe = %+v, %v", reply, err)
 	}
-	reply, err = s.Call(ctx, runStep("echo"))
+	reply, err = s.Request(ctx, runStep("echo"))
 	if err != nil {
 		t.Fatalf("run_step: %v", err)
 	}
@@ -256,19 +255,17 @@ func TestSessionRequestReply(t *testing.T) {
 	if err := reply.Decode(&result); err != nil || string(result.Output) != `{"node":"echo"}` {
 		t.Fatalf("run_step result = %+v, %v", result, err)
 	}
-	usage, err := s.Close()
+	err = s.Close()
 	if err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	if usage.Wall <= 0 {
-		t.Errorf("usage = %+v, want a wall time", usage)
-	}
+
 	_, records := sink.snapshot()
 	if len(records) != 1 || records[0].Message != "hello" || records[0].Step != "" {
 		t.Errorf("records = %+v, want hello with the step of no in-flight run_step dropped", records)
 	}
-	if _, err := s.Call(ctx, runStep("echo")); !errors.Is(err, ErrClosed) {
-		t.Errorf("call after close = %v, want ErrClosed", err)
+	if _, err := s.Request(ctx, runStep("echo")); !errors.Is(err, errProtocolSessionClosed) {
+		t.Errorf("call after close = %v, want errProtocolSessionClosed", err)
 	}
 }
 
@@ -283,7 +280,7 @@ func TestSessionConcurrentEvalsAndSteps(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			reply, err := s.Call(ctx, req)
+			reply, err := s.Request(ctx, req)
 			if err == nil && !reply.OK {
 				err = reply.Error
 			}
@@ -293,18 +290,18 @@ func TestSessionConcurrentEvalsAndSteps(t *testing.T) {
 	for range 3 {
 		send(nodeproto.Request{Op: nodeproto.OpEval, Closure: "barrier/3"})
 	}
-	for range 2 {
-		send(nodeproto.Request{Op: nodeproto.OpRunStep, Job: "n", Step: "barrier/3", Attempt: 1, Settled: []string{}})
+	for i := range 2 {
+		send(nodeproto.Request{Op: nodeproto.OpRunStep, Job: fmt.Sprint("n", i), Step: "barrier/3", Attempt: 1, Settled: []string{}})
 	}
 	// safety: the steps' barrier needs a third step, so they stay in flight
 	// while the forbidden overlaps are tried.
 	waitArrivals(t, sink, "barrier/3", 2)
 	for _, req := range []nodeproto.Request{{Op: nodeproto.OpDescribe}} {
-		if _, err := s.Call(ctx, req); !errors.Is(err, ErrBusy) {
-			t.Errorf("%s during run_step = %v, want ErrBusy", req.Op, err)
+		if _, err := s.Request(ctx, req); hostCode(err) != apierr.ProtocolError {
+			t.Errorf("%s during run_step = %v, want protocol_error", req.Op, err)
 		}
 	}
-	send(nodeproto.Request{Op: nodeproto.OpRunStep, Job: "n", Step: "barrier/3", Attempt: 1, Settled: []string{}})
+	send(nodeproto.Request{Op: nodeproto.OpRunStep, Job: "n3", Step: "barrier/3", Attempt: 1, Settled: []string{}})
 	wg.Wait()
 	close(errs)
 	for err := range errs {
@@ -338,7 +335,7 @@ func waitArrivals(t *testing.T, sink *recorder, step string, n int) {
 func TestSessionStdoutCannotForgeReply(t *testing.T) {
 	sink := &recorder{}
 	s := startFake(t, context.Background(), sink)
-	reply, err := s.Call(callCtx(t), runStep("forge"))
+	reply, err := s.Request(callCtx(t), runStep("forge"))
 	if err != nil {
 		t.Fatalf("run_step: %v", err)
 	}
@@ -346,15 +343,15 @@ func TestSessionStdoutCannotForgeReply(t *testing.T) {
 	if err := reply.Decode(&result); err != nil || result.Outcome != "success" {
 		t.Fatalf("result = %+v, %v; the stdout reply must not count", result, err)
 	}
-	if _, err := s.Close(); err != nil {
+	if err := s.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 	text, _ := sink.snapshot()
-	want := []string{`info {"reply":"2","ok":true,"result":{"outcome":"failed"}}`, "warn warned"}
+	want := []string{`"outcome":"failed"`, "warn warned"}
 	for _, line := range want {
 		found := false
 		for _, got := range text {
-			found = found || got == line
+			found = found || strings.Contains(got, line)
 		}
 		if !found {
 			t.Errorf("text %q missing from %q", line, text)
@@ -368,21 +365,21 @@ func TestSessionEndsWithHostCode(t *testing.T) {
 		code apierr.Code
 		msg  string
 	}{
-		{"exit", apierr.SDKExited, "exit status 3"},
-		{"garbage", apierr.ProtocolError, "JSON object"},
-		{"unknown-reply", apierr.ProtocolError, "unknown request"},
+		{"exit", apierr.SDKExited, "exited"},
+		{"garbage", apierr.ProtocolError, "invalid SDK frame"},
+		{"unknown-reply", apierr.ProtocolError, "unsolicited reply"},
 		{"close-frames", apierr.FramesClosed, "frame pipe"},
 	} {
 		t.Run(tc.node, func(t *testing.T) {
 			s := startFake(t, context.Background(), &recorder{})
-			_, err := s.Call(callCtx(t), runStep(tc.node))
+			_, err := s.Request(callCtx(t), runStep(tc.node))
 			if hostCode(err) != tc.code || !strings.Contains(err.Error(), tc.msg) {
 				t.Fatalf("call = %v, want %s mentioning %q", err, tc.code, tc.msg)
 			}
-			if _, err := s.Call(callCtx(t), nodeproto.Request{Op: nodeproto.OpDescribe}); hostCode(err) != tc.code {
+			if _, err := s.Request(callCtx(t), nodeproto.Request{Op: nodeproto.OpDescribe}); hostCode(err) != tc.code {
 				t.Errorf("later call = %v, want the same %s", err, tc.code)
 			}
-			if _, err := s.Close(); hostCode(err) != tc.code {
+			if err := s.Close(); hostCode(err) != tc.code {
 				t.Errorf("close = %v, want %s", err, tc.code)
 			}
 		})
@@ -397,7 +394,7 @@ func TestSessionCancelKillsGrandchildren(t *testing.T) {
 
 	called := make(chan error, 1)
 	go func() {
-		_, err := s.Call(callCtx(t), runStep("grandchild"))
+		_, err := s.Request(callCtx(t), runStep("grandchild"))
 		called <- err
 	}()
 	var rec nodeproto.FrameLog
@@ -414,7 +411,7 @@ func TestSessionCancelKillsGrandchildren(t *testing.T) {
 	if err := <-called; !errors.Is(err, context.Canceled) {
 		t.Fatalf("call = %v, want the cancel", err)
 	}
-	if _, err := s.Close(); !errors.Is(err, context.Canceled) {
+	if err := s.Close(); !errors.Is(err, context.Canceled) {
 		t.Fatalf("close = %v, want the cancel", err)
 	}
 	processes, err := procgroup.List()
@@ -452,7 +449,7 @@ func TestSessionBlockedSinkNeitherStallsRepliesNorClose(t *testing.T) {
 	sink := &blockingSink{release: make(chan struct{})}
 	t.Cleanup(func() { close(sink.release) })
 	before := openPipes(t)
-	s, err := StartSession(context.Background(), SessionConfig{
+	s, err := startConfiguredProcess(context.Background(), SessionConfig{
 		Entry: pipelineentry.Binary(os.Args[0]),
 		Env:   append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0"),
 		Sink:  sink,
@@ -462,11 +459,11 @@ func TestSessionBlockedSinkNeitherStallsRepliesNorClose(t *testing.T) {
 		t.Fatalf("start: %v", err)
 	}
 	for range 3 {
-		if _, err := s.Call(callCtx(t), runStep("echo")); err != nil {
+		if _, err := s.Request(callCtx(t), runStep("echo")); err != nil {
 			t.Fatalf("run_step behind a blocked sink: %v", err)
 		}
 	}
-	if _, err := s.Close(); err != nil {
+	if err := s.Close(); err != nil {
 		t.Fatalf("close behind a blocked sink: %v", err)
 	}
 	checkNoNewPipes(t, before)
@@ -493,7 +490,7 @@ func TestSinkQueueCountsDrops(t *testing.T) {
 
 func TestSessionStuckWriteHonorsDeadlines(t *testing.T) {
 	s := startFake(t, context.Background(), &recorder{})
-	if _, err := s.Call(callCtx(t), runStep("deaf")); err != nil {
+	if _, err := s.Request(callCtx(t), runStep("deaf")); err != nil {
 		t.Fatalf("run_step: %v", err)
 	}
 	// safety: larger than any pipe buffer, so the write blocks once the fake
@@ -506,13 +503,13 @@ func TestSessionStuckWriteHonorsDeadlines(t *testing.T) {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 			defer cancel()
-			if _, err := s.Call(ctx, nodeproto.Request{Op: nodeproto.OpEval, Closure: "c", Input: big}); err == nil {
+			if _, err := s.Request(ctx, nodeproto.Request{Op: nodeproto.OpEval, Closure: "c", Input: big}); err == nil {
 				t.Error("a call whose write never finished succeeded")
 			}
 		}()
 	}
 	wg.Wait()
-	if _, err := s.Close(); hostCode(err) != apierr.ProtocolError {
+	if err := s.Close(); hostCode(err) != apierr.ProtocolError {
 		t.Fatalf("close = %v, want protocol_error", err)
 	}
 }
@@ -524,7 +521,7 @@ func TestSessionReplyAfterCancelIsNotSuccess(t *testing.T) {
 	s := startFake(t, ctx, sink)
 	called := make(chan error, 1)
 	go func() {
-		_, err := s.Call(callCtx(t), runStep("term-reply"))
+		_, err := s.Request(callCtx(t), runStep("term-reply"))
 		called <- err
 	}()
 	next := func(want string) {
@@ -539,14 +536,14 @@ func TestSessionReplyAfterCancelIsNotSuccess(t *testing.T) {
 	}
 	next("armed")
 	s.mu.Lock()
-	var pending call
-	for _, c := range s.inflight {
+	var pending protocolCall
+	for _, c := range s.pending {
 		pending = c
 	}
 	s.mu.Unlock()
 	cancel()
 	if err := <-called; !errors.Is(err, context.Canceled) {
-		t.Fatalf("call = %v, want the cancel even though the SDK replied on SIGTERM", err)
+		t.Fatalf("call = %v, want the cancel even though the SDK replied during shutdown", err)
 	}
 	// safety: the record follows the reply on the frame pipe, so the reply
 	// has been read by the time it arrives.
@@ -556,28 +553,12 @@ func TestSessionReplyAfterCancelIsNotSuccess(t *testing.T) {
 	}
 }
 
-func TestSessionWriteFailureDuringExitIsSDKExited(t *testing.T) {
-	s := startFake(t, context.Background(), &recorder{})
-	failed := make(chan struct{})
-	go func() {
-		s.writeFailed(errors.New("broken pipe"))
-		close(failed)
-	}()
-	if err := s.cmd.Process.Kill(); err != nil {
-		t.Fatalf("kill: %v", err)
-	}
-	<-failed
-	if err := s.failure(); hostCode(err) != apierr.SDKExited {
-		t.Fatalf("failure = %v, want sdk_exited for a write that broke as the SDK exited", err)
-	}
-}
-
 func TestSessionReapsLeaderWhenCleanupTimesOut(t *testing.T) {
 	defer func(old time.Duration) { reapTimeout = old }(reapTimeout)
 	reapTimeout = 100 * time.Millisecond
 	s := startFake(t, context.Background(), &recorder{})
-	s.proc.(groupProcess).SetDescendantProbe(func(int, bool, bool) (bool, error) { return false, nil })
-	if _, err := s.Close(); !errors.Is(err, procgroup.ErrCleanup) {
+	s.process.(groupProcess).SetDescendantProbe(func(int, bool, bool) (bool, error) { return false, nil })
+	if err := s.Close(); !errors.Is(err, procgroup.ErrCleanup) {
 		t.Fatalf("close = %v, want the cleanup timeout", err)
 	}
 	if s.cmd.ProcessState == nil {

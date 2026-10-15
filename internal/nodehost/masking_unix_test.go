@@ -75,13 +75,13 @@ func TestSessionMasksASecretSplitAtTheLineLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := StartSession(t.Context(), SessionConfig{
+	s, err := startConfiguredProcess(t.Context(), SessionConfig{
 		Entry: splitLineEntry(t), Dir: t.TempDir(), Env: []string{"PATH=/usr/bin:/bin"}, Sink: sink, Masker: masker, Grace: 2 * time.Second, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = s.Close()
+	_ = s.Close()
 	got := log.joined()
 	if strings.Contains(got, splitSecret[:10]) || !strings.Contains(got, "*** tail") {
 		t.Fatalf("log ends %q, want the split secret masked whole", got[max(0, len(got)-80):])
@@ -208,13 +208,13 @@ func TestSessionDeliversAPieceEndingExactlyAtEOF(t *testing.T) {
 	if err := os.WriteFile(entry, []byte("#!/bin/sh\n"+testHelloScript+"head -c 1048576 /dev/zero | tr '\\000' x\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	s, err := StartSession(t.Context(), SessionConfig{
+	s, err := startConfiguredProcess(t.Context(), SessionConfig{
 		Entry: pipelineentry.Binary(entry), Dir: t.TempDir(), Env: []string{"PATH=/usr/bin:/bin"}, Sink: sink, Masker: masker, Grace: 2 * time.Second, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = s.Close()
+	_ = s.Close()
 	n := 0
 	for _, r := range log.records {
 		n += len(r.Msg)
@@ -448,13 +448,13 @@ func TestSessionNormalizesACRLFSplitAtTheLineLimit(t *testing.T) {
 	if err := os.WriteFile(entry, []byte("#!/bin/sh\n"+testHelloScript+"head -c 1048575 /dev/zero | tr '\\000' x\nprintf '\\r\\nnext\\n'\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	s, err := StartSession(t.Context(), SessionConfig{
+	s, err := startConfiguredProcess(t.Context(), SessionConfig{
 		Entry: pipelineentry.Binary(entry), Dir: t.TempDir(), Env: []string{"PATH=/usr/bin:/bin"}, Sink: sink, Grace: 2 * time.Second, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = s.Close()
+	_ = s.Close()
 	got := log.joined()
 	if strings.Contains(got, "\r") || !strings.Contains(got, "next") {
 		t.Fatalf("a CRLF split at the limit left a carriage return or lost the next line")

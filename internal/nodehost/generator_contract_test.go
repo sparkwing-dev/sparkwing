@@ -23,15 +23,15 @@ func TestGeneratorFixturesUseValidatedV2Declarations(t *testing.T) {
 				t.Fatalf("build: %v\n%s", err, out)
 			}
 			validation := nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}
-			session, err := StartSession(t.Context(), SessionConfig{Entry: pipelineentry.Binary(bin), Env: []string{"GENFIXTURE_MODE=nested", "GENFIXTURE_SCENARIO=nested"}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}})
+			session, err := startConfiguredProcess(t.Context(), SessionConfig{Entry: pipelineentry.Binary(bin), Env: []string{"GENFIXTURE_MODE=nested", "GENFIXTURE_SCENARIO=nested"}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(func() {
-				if _, err := session.Close(); err != nil {
+			defer func() {
+				if err := session.Close(); err != nil {
 					t.Error(err)
 				}
-			})
+			}()
 			var raw json.RawMessage
 			if err := ask(t.Context(), session, nodeproto.Request{Op: nodeproto.OpPlan, Pipeline: "probe", Args: map[string]string{}, Run: &nodeproto.RunContext{RunID: "r", Pipeline: "probe"}}, &raw); err != nil {
 				t.Fatal(err)

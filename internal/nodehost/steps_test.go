@@ -129,13 +129,13 @@ func TestHostStepWindows(t *testing.T) {
 			sessionConfig := cfg.Session
 			sessionConfig.Sink, sessionConfig.Masker = sink, masker
 			sessionConfig.Binding = &nodeproto.ProcessBinding{RunID: runID, JobID: job.ID, Routes: nodeproto.ProcessRoutes{URL: "http://unused", Bearer: "step-window-fixture"}}
-			session, err := StartSession(ctx, sessionConfig)
+			session, err := startConfiguredProcess(ctx, sessionConfig)
 			if err != nil {
 				t.Fatal(err)
 			}
 			h.res.Order = append(h.res.Order, job.ID)
 			result := drive(ctx, session, sink, &NodeRun{Run: run, Plan: job, Attempt: 1})
-			_, closeErr := session.Close()
+			closeErr := session.Close()
 			if closeErr != nil {
 				t.Fatal(closeErr)
 			}

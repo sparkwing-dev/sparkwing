@@ -56,13 +56,13 @@ type Attempts struct {
 
 func (a *Attempts) executor(cfg *Config) Executor {
 	return func(ctx context.Context, n *NodeRun) Result {
-		return a.process(ctx, cfg.Session, n, func(ctx context.Context, sess *Session, sink *LogSink) Result {
+		return a.process(ctx, cfg.Session, n, func(ctx context.Context, sess *ProtocolSession, sink *LogSink) Result {
 			return drive(ctx, sess, sink, n)
 		})
 	}
 }
 
-type nodeProcessBody func(ctx context.Context, sess *Session, sink *LogSink) Result
+type nodeProcessBody func(ctx context.Context, sess *ProtocolSession, sink *LogSink) Result
 
 // safety: every message the process returns is masked, since the scheduler
 // stores it in the node row, past the log sink's masking.
@@ -113,12 +113,36 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	cfg.Env = env
 	cfg.Binding = &nodeproto.ProcessBinding{RunID: run.ID, JobID: id, Routes: nodeproto.ProcessRoutes{URL: a.Routes.URL(), Bearer: bearer}}
 	res := Result{}
-	sess, err := StartSession(ctx, cfg)
+	transport, output, err := cfg.protocol(func() error { revoke(); return nil })
+	if err != nil {
+		revoke()
+		return failed(err)
+	}
+	sess, err := StartProtocolSession(ctx, transport)
+	var sampler *UsageSampler
+	if sess != nil {
+		sampler = StartUsage(sess.cmd.Process.Pid)
+		if err == nil {
+			err = cfg.hello(ctx, sess)
+		}
+	}
+	var usage Usage
+	if err != nil {
+		if sess != nil {
+			err = errors.Join(err, sess.Close())
+			usage = sampler.Stop(sess.cmd.ProcessState)
+		} else {
+			output.close()
+		}
+	}
 	if err == nil {
+		stop := context.AfterFunc(ctx, func() { sess.failProtocol(context.Cause(ctx)) })
 		res = body(ctx, sess, sink)
-		usage, cerr := sess.Close()
-		if lost, ok := nlog.(LossRecorder); ok && sess.Lost() > 0 {
-			lost.RecordLoss(sess.Lost())
+		cerr := sess.Close()
+		stop()
+		usage = sampler.Stop(sess.cmd.ProcessState)
+		if lost, ok := nlog.(LossRecorder); ok && output.lost > 0 {
+			lost.RecordLoss(output.lost)
 		}
 		var perr *apierr.Error
 		switch {
@@ -145,14 +169,14 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	return res
 }
 
-func drive(ctx context.Context, sess *Session, sink *LogSink, n *NodeRun) Result {
+func drive(ctx context.Context, sess *ProtocolSession, sink *LogSink, n *NodeRun) Result {
 	if err := nodeReplan(ctx, sess, n); err != nil {
 		return failed(err)
 	}
 	return withClosures(ctx, sess, sink, n, func() Result { return attemptBody(ctx, sess, sink, n) })
 }
 
-func nodeReplan(ctx context.Context, sess *Session, n *NodeRun) error {
+func nodeReplan(ctx context.Context, sess *ProtocolSession, n *NodeRun) error {
 	run := n.Run
 	args := run.Args
 	if args == nil {
@@ -167,10 +191,10 @@ func nodeReplan(ctx context.Context, sess *Session, n *NodeRun) error {
 	case len(n.Generators) > 0:
 		return regenerate(ctx, sess, n)
 	}
-	return checkDrift(raw, n.Plan, sess.cfg.Validation)
+	return checkDrift(raw, n.Plan, n.Run.validation)
 }
 
-func attemptBody(ctx context.Context, sess *Session, sink *LogSink, n *NodeRun) Result {
+func attemptBody(ctx context.Context, sess *ProtocolSession, sink *LogSink, n *NodeRun) Result {
 	return driveSteps(ctx, sess, sink, n, max(n.Attempt, 1))
 }
 

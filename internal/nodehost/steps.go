@@ -13,7 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func driveSteps(ctx context.Context, sess *Session, sink *LogSink, n *NodeRun, attempt int) Result {
+func driveSteps(ctx context.Context, sess *ProtocolSession, sink *LogSink, n *NodeRun, attempt int) Result {
 	children := map[string][]string{}
 	for _, step := range n.Plan.Steps {
 		for _, need := range step.Needs {
@@ -61,7 +61,7 @@ func driveSteps(ctx context.Context, sess *Session, sink *LogSink, n *NodeRun, a
 			return recordHostedStep(ctx, sink, n, id, state, reason, started, failure)
 		},
 		cancel: func(ctx context.Context, id string) error {
-			_, err := sess.Call(ctx, nodeproto.Request{Op: nodeproto.OpCancel, Job: n.Plan.ID, Step: id})
+			_, err := sess.Request(ctx, nodeproto.Request{Op: nodeproto.OpCancel, Job: n.Plan.ID, Step: id})
 			return err
 		},
 		failFast: func(_ context.Context, trigger string, cancelled []string, latency time.Duration) error {

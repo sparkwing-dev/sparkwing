@@ -33,7 +33,7 @@ type genGroup struct {
 // body succeeds, because a generator reads the source's output and the SDK
 // holds it in that process; a separate process would read it back through the
 // controller, which grants a node only its dependencies' outputs.
-func generate(ctx context.Context, sess *Session, n *NodeRun) []expansion {
+func generate(ctx context.Context, sess *ProtocolSession, n *NodeRun) []expansion {
 	if len(n.Plan.Closures.Generate) == 0 {
 		return nil
 	}
@@ -46,7 +46,7 @@ func generate(ctx context.Context, sess *Session, n *NodeRun) []expansion {
 }
 
 // safety: generated jobs remain declarations; the host derives their stored hashes.
-func evalGenerator(ctx context.Context, sess *Session, closure string) (json.RawMessage, error) {
+func evalGenerator(ctx context.Context, sess *ProtocolSession, closure string) (json.RawMessage, error) {
 	var res nodeproto.EvalResult
 	if err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpEval, Closure: closure}, &res); err != nil {
 		return nil, err
@@ -181,7 +181,7 @@ func replayGeneratorJobs(ctx context.Context, n *NodeRun, closure string, raw js
 // safety: a generated node's code is in no process until its generators run
 // there, each source's before the next, so its attempt runs the chain and
 // compares the node the last returns with what the run accepted.
-func regenerate(ctx context.Context, sess *Session, n *NodeRun) error {
+func regenerate(ctx context.Context, sess *ProtocolSession, n *NodeRun) error {
 	var nodes []nodeproto.JobSpec
 	for _, closure := range n.Generators {
 		raw, err := evalGenerator(ctx, sess, closure)

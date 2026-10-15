@@ -30,8 +30,8 @@ func TestV2SessionRequiresGrantedIdentity(t *testing.T) {
 			case "labels":
 				cfg.Runner.Labels = nil
 			}
-			_, err := StartSession(t.Context(), cfg)
-			if err == nil || err.Error() != "sdk session needs the selected engine version and granted runner identity" {
+			_, err := startConfiguredProcess(t.Context(), cfg)
+			if err == nil || err.Error() != "sdk process needs the selected engine version and granted runner identity" {
 				t.Fatalf("missing %s identity: %v", missing, err)
 			}
 		})
@@ -52,8 +52,8 @@ func FuzzV2SessionRefusesIncompleteIdentity(f *testing.F) {
 		case 3:
 			cfg.Runner.Labels = nil
 		}
-		_, err := StartSession(t.Context(), cfg)
-		if err == nil || err.Error() != "sdk session needs the selected engine version and granted runner identity" {
+		_, err := startConfiguredProcess(t.Context(), cfg)
+		if err == nil || err.Error() != "sdk process needs the selected engine version and granted runner identity" {
 			t.Fatalf("incomplete identity reached process startup: %v", err)
 		}
 	})
@@ -69,7 +69,7 @@ func TestV2SessionHelloKeepsAuthorityOffEnvironment(t *testing.T) {
 	}
 	binding := &nodeproto.ProcessBinding{RunID: "r", JobID: "build", Routes: nodeproto.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "test-route-authority"}}
 	runner := nodeproto.RunnerIdentity{Name: "granted-runner", Type: "cloud", Labels: []string{"linux"}}
-	sess, err := StartSession(t.Context(), SessionConfig{
+	sess, err := startConfiguredProcess(t.Context(), SessionConfig{
 		Entry: pipelineentry.Command{executable, "-test.run=^TestV2SDKProcess$", "--"},
 		Env:   []string{"SPARKWING_TEST_V2_SDK=1"}, Engine: nodeproto.EngineIdentity{Version: "v1.2.3"}, Runner: runner, Binding: binding, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}},
 	})

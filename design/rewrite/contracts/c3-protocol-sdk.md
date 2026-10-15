@@ -1,5 +1,9 @@
 # C3 protocol and SDK contract
 
+[The process transport cut](../w3-process-transport-cut-progress.md) removes
+Session and StartSession. Retained planners and attempts use ProtocolSession.
+The legacy scheduler, services and native placement cutovers remain open.
+
 [Shared steps and alias callers](w3-ingress-lease-continuation.md#shared-steps-and-alias-caller-continuation)
 replaces the retained step scheduler with the common graph driver and carries
 alias selection through CLI parsing and the retained placement callers.

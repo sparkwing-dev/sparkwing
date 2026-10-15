@@ -17,7 +17,7 @@ import (
 func TestSessionCountsLinesItsStuckSinkNeverGot(t *testing.T) {
 	sink := &blockingSink{release: make(chan struct{})}
 	t.Cleanup(func() { close(sink.release) })
-	s, err := StartSession(context.Background(), SessionConfig{
+	s, err := startConfiguredProcess(context.Background(), SessionConfig{
 		Entry: pipelineentry.Binary(os.Args[0]),
 		Env:   append(os.Environ(), fakeSDKEnv+"=sdk", "GORACE=atexit_sleep_ms=0"),
 		Sink:  sink,
@@ -26,13 +26,13 @@ func TestSessionCountsLinesItsStuckSinkNeverGot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	if _, err := s.Call(callCtx(t), runStep("echo")); err != nil {
+	if _, err := s.Request(callCtx(t), runStep("echo")); err != nil {
 		t.Fatalf("run_step: %v", err)
 	}
-	if _, err := s.Close(); err != nil {
+	if err := s.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	if s.Lost() == 0 {
+	if s.cfg.output.lost == 0 {
 		t.Fatal("a session that abandoned its sink lost nothing")
 	}
 }
@@ -40,13 +40,13 @@ func TestSessionCountsLinesItsStuckSinkNeverGot(t *testing.T) {
 // A session whose sink kept up loses nothing.
 func TestSessionLosesNothingWhenItsSinkKeepsUp(t *testing.T) {
 	s := startFake(t, context.Background(), &recorder{})
-	if _, err := s.Call(callCtx(t), runStep("echo")); err != nil {
+	if _, err := s.Request(callCtx(t), runStep("echo")); err != nil {
 		t.Fatalf("run_step: %v", err)
 	}
-	if _, err := s.Close(); err != nil {
+	if err := s.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	if n := s.Lost(); n != 0 {
+	if n := s.cfg.output.lost; n != 0 {
 		t.Fatalf("lost %d lines with a sink that kept up", n)
 	}
 }
