@@ -16,6 +16,9 @@ func pendingScenarios(t *testing.T, group string) {
 		}
 		count++
 		t.Run(scenario.ID, func(t *testing.T) {
+			if check := storageBoundaryChecks()[scenario.ID]; check != nil {
+				t.Run("storage-components", check)
+			}
 			if check, ok := runspecConfigBoundaries()[scenario.ID]; ok {
 				t.Run("runspec-config", func(t *testing.T) {
 					if err := check(scenario.ID); err != nil {

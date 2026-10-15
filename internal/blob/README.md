@@ -194,3 +194,10 @@ live data authority and sealed digest. The cache-grant request client,
 legacy source byte transport and grant-based controller data handlers are
 deleted. The authenticated controller adapter and remaining output handlers
 still need binding to the store's upload transaction.
+
+The acceptance suite runs seven `storage-components` checks for receipt and
+namespace isolation, binary trust, verified streams, presence budgets and memo
+failure policy. Generated properties exercise the real storage functions with
+fake signing, transfer and record dependencies. These component checks run
+separately from the skipped native targets, whose controller, transaction,
+physical-backend and placement assertions still need their real drivers.

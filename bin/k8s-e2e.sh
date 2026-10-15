@@ -432,17 +432,6 @@ sparkwing-runner-bundle:
     labels: [cluster]
     maxClaimsBeforeRestart: 0
     alsoClaimTriggers: true
-  cache:
-    allowUnauthenticated: true
-    image:
-      repository: ${image_prefix}sparkwing-cache
-      tag: $image_tag
-      pullPolicy: $image_pull_policy
-    dependencyProxy:
-      enabled: false
-    storage:
-      enabled: true
-      keepOnUninstall: true
 EOF
 }
 
