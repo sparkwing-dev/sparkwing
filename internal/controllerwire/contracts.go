@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
@@ -35,7 +36,11 @@ const APIMajor = 1
 // using limits.ControllerCompatibilityMonths calendar months. It does not reject an
 // older release or decide revocation; internal/engine owns that separate policy.
 func CompatibilityFor(release engine.VersionInfo) Compatibility {
-	panic("unimplemented: controller-wire")
+	return Compatibility{
+		APIMajor: APIMajor, EngineRelease: release.Version,
+		ReleasedAt:      release.PublishedAt,
+		GuaranteedUntil: release.PublishedAt.AddDate(0, limits.ControllerCompatibilityMonths, 0),
+	}
 }
 
 // CreateRunRequest carries user input; authenticated authority and App facts are server-derived.
@@ -114,11 +119,11 @@ type ClaimResponse struct {
 	Claim *ClaimedUnit `json:"claim,omitempty"`
 }
 
-// LauncherObservation reports Kubernetes identity only; it cannot replace the stored claim fence.
+// LauncherObservation compares an immutable award and Kubernetes instance against stored ownership.
 type LauncherObservation struct {
-	UnitID  string `json:"unit_id"`
-	JobName string `json:"job_name"`
-	NodeUID string `json:"node_uid"`
+	Award   capability.LeaseRef `json:"award"`
+	Job     LauncherJobRef      `json:"job"`
+	NodeUID string              `json:"node_uid"`
 }
 
 // LauncherSyncRequest reconciles observed Jobs against the launcher's current awards.
@@ -129,8 +134,8 @@ type LauncherSyncRequest struct {
 // LauncherSyncResponse contains immutable execution inputs and cleanup identities, never new bearers.
 // Awards have an empty Capability. Lost bootstrap material recovers through lease expiry and re-award.
 type LauncherSyncResponse struct {
-	Awards []ClaimedUnit `json:"awards"`
-	Remove []string      `json:"remove"`
+	Awards []ClaimedUnit    `json:"awards"`
+	Remove []LauncherJobRef `json:"remove"`
 }
 
 // ExchangeResponse returns the original unit with its exchanged in-memory authority once.
@@ -156,21 +161,22 @@ type RenewalResponse struct {
 
 // JobResult references authorized records, so a raw digest cannot grant reachability.
 type JobResult struct {
-	Outcome  string          `json:"outcome"`
-	Reason   string          `json:"reason,omitempty"`
-	Error    *apierr.Error   `json:"error,omitempty"`
-	ExitCode *int            `json:"exit_code,omitempty"`
-	Output   *blob.RecordKey `json:"output,omitempty"`
-	Manifest *blob.RecordKey `json:"manifest,omitempty"`
+	Outcome  string                `json:"outcome"`
+	Reason   string                `json:"reason,omitempty"`
+	Failure  *nodeproto.JobFailure `json:"failure,omitempty"`
+	ExitCode *int                  `json:"exit_code,omitempty"`
+	Output   *blob.RecordKey       `json:"output,omitempty"`
+	Manifest *blob.RecordKey       `json:"manifest,omitempty"`
 }
 
 // JobTransitionRequest is the single report/transition body. The adapter derives
 // actor and claim fences from C2; the store derives events and its clock.
 type JobTransitionRequest struct {
-	To      string     `json:"to"`
-	Cause   string     `json:"cause"`
-	Result  *JobResult `json:"result,omitempty"`
-	RetryAt *time.Time `json:"retry_at,omitempty"`
+	To            string     `json:"to"`
+	Cause         string     `json:"cause"`
+	SourceAttempt *int64     `json:"source_attempt,omitempty"`
+	Result        *JobResult `json:"result,omitempty"`
+	RetryAt       *time.Time `json:"retry_at,omitempty"`
 }
 
 type Applied struct {
@@ -207,9 +213,17 @@ type ExpansionAccepted struct {
 
 // ReuseSource proposes a persisted source; its outcome is never caller-supplied.
 type ReuseSource struct {
-	Policy  string                  `json:"policy"`
-	Attempt runspec.AttemptIdentity `json:"attempt"`
-	Record  blob.RecordKey          `json:"record"`
+	Policy  string                    `json:"policy"`
+	Attempt runspec.AttemptIdentity   `json:"attempt"`
+	Record  blob.RecordKey            `json:"record"`
+	Result  *MaterializedResultSource `json:"result,omitempty"`
+}
+
+// MaterializedResultSource names a committed terminal result independently of execution attempts.
+type MaterializedResultSource struct {
+	RunID    string `json:"run_id"`
+	JobID    string `json:"job_id"`
+	StateSeq int64  `json:"state_seq"`
 }
 
 type ReconcileRequest struct {
@@ -259,22 +273,44 @@ type CancelRequest struct {
 	Reason string `json:"reason"`
 }
 type RetryRequest struct {
-	IdempotencyKey string `json:"idempotency_key"`
+	IdempotencyKey string    `json:"idempotency_key"`
+	Mode           RetryMode `json:"mode"`
+}
+
+// RetryMode selects reuse of successful jobs or execution of the complete sealed plan.
+// Neither mode changes the original request, plan, source trust or actor.
+type RetryMode string
+
+const (
+	RetryFailed RetryMode = "failed"
+	RetryAll    RetryMode = "all"
+)
+
+// Validate refuses an ambiguous retry before intake can allocate a new run.
+func (r RetryRequest) Validate() error {
+	if r.Mode != RetryFailed && r.Mode != RetryAll {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "retry requires mode failed or all"}
+	}
+	if r.IdempotencyKey == "" {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "retry requires an idempotency key"}
+	}
+	return nil
 }
 
 // JobDetail is a safe status view, not execution authority or a raw job declaration.
 type JobDetail struct {
-	ID                string     `json:"id"`
-	Status            string     `json:"status"`
-	Outcome           string     `json:"outcome,omitempty"`
-	StatusDetail      string     `json:"status_detail,omitempty"`
-	Generation        int64      `json:"generation"`
-	Attempt           int64      `json:"attempt"`
-	StateSeq          int64      `json:"state_seq"`
-	Expansion         string     `json:"expansion"`
-	StartedAt         *time.Time `json:"started_at,omitempty"`
-	FinishedAt        *time.Time `json:"finished_at,omitempty"`
-	CancelRequestedAt *time.Time `json:"cancel_requested_at,omitempty"`
+	Annotations       []Annotation `json:"annotations,omitempty"`
+	ID                string       `json:"id"`
+	Status            string       `json:"status"`
+	Outcome           string       `json:"outcome,omitempty"`
+	StatusDetail      string       `json:"status_detail,omitempty"`
+	Generation        int64        `json:"generation"`
+	Attempt           int64        `json:"attempt"`
+	StateSeq          int64        `json:"state_seq"`
+	Expansion         string       `json:"expansion"`
+	StartedAt         *time.Time   `json:"started_at,omitempty"`
+	FinishedAt        *time.Time   `json:"finished_at,omitempty"`
+	CancelRequestedAt *time.Time   `json:"cancel_requested_at,omitempty"`
 }
 
 type AttemptDetail struct {
@@ -299,6 +335,7 @@ type RunDetail struct {
 	Inputs            runspec.Display   `json:"inputs"`
 	Jobs              []JobDetail       `json:"jobs"`
 	Attempts          []AttemptDetail   `json:"attempts"`
+	Steps             []StepDetail      `json:"steps,omitempty"`
 	Logs              []blob.LogSubject `json:"logs"`
 	StartedAt         *time.Time        `json:"started_at,omitempty"`
 	FinishedAt        *time.Time        `json:"finished_at,omitempty"`
@@ -314,6 +351,7 @@ type ScheduleSnapshot struct {
 	RunID           string              `json:"run_id"`
 	StoreNow        time.Time           `json:"store_now"`
 	CancelRequested bool                `json:"cancel_requested"`
+	GuardRefusal    string              `json:"guard_refusal,omitempty"`
 	Jobs            []ScheduleJob       `json:"jobs"`
 	Generators      []ScheduleGenerator `json:"generators"`
 	Expansions      []AcceptedExpansion `json:"expansions"`
@@ -349,6 +387,7 @@ type Controller interface {
 	Exchange(context.Context) (ExchangeResponse, error)
 	Renew(context.Context, string, RenewalRequest) (RenewalResponse, error)
 	TransitionJob(context.Context, string, string, JobTransitionRequest) (Applied, error)
+	RecordStep(context.Context, string, string, StepReportRequest) error
 	ReconcileJob(context.Context, string, string, ReconcileRequest) (ReconcileResponse, error)
 	AcceptExpansion(context.Context, string, string, ExpansionSubmission) (ExpansionAccepted, error)
 	Finish(context.Context, string, FinishRequest) (Applied, error)

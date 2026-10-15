@@ -168,7 +168,7 @@ func TestInvalidVersionHoldBlocksUpdateBeforeDownload(t *testing.T) {
 		downloaded = true
 		return installedRelease{}, errors.New("unexpected download")
 	}
-	err := runUpdateBinary("v9.9.9", false, false)
+	_, err := updateBinary("v9.9.9", false, false)
 	if err == nil || !strings.Contains(err.Error(), "invalid version hold") || downloaded {
 		t.Fatalf("err=%v download=%v", err, downloaded)
 	}

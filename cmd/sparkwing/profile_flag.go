@@ -1,43 +1,67 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
+
+type namedProfile struct {
+	Name string
+	userconfig.Profile
+}
+
+func (p *namedProfile) ControllerURL() string {
+	if p == nil {
+		return ""
+	}
+	return p.Controller.URL
+}
+
+func (p *namedProfile) ControllerToken() string {
+	if p == nil || p.Controller.Token == nil {
+		return ""
+	}
+	return *p.Controller.Token
+}
+
+func loadProfiles() (map[string]userconfig.Profile, string, error) {
+	path, err := userconfig.Path()
+	if err != nil {
+		return nil, "", err
+	}
+	cfg, err := userconfig.ReadConfig(path)
+	return cfg.Profiles, path, err
+}
+
+func profileNames(profiles map[string]userconfig.Profile) []string {
+	names := make([]string, 0, len(profiles))
+	for name := range profiles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
 
 // safety: only the flag selects a profile, so a command without --profile acts
 // on this machine's store whatever the environment or project config holds.
-func resolveProfileChain(name string) (*profile.Profile, profile.Chain, string, error) {
-	path, err := profile.DefaultPath()
-	if err != nil {
-		return nil, profile.Chain{}, "", err
-	}
+func resolveProfileFlag(name string) (*namedProfile, error) {
 	if name == "" {
-		return nil, profile.Chain{Source: profile.ChainSourceNone}, path, nil
+		return nil, nil
 	}
-	cfg, err := profile.Load(path)
+	profiles, path, err := loadProfiles()
 	if err != nil {
-		return nil, profile.Chain{}, path, err
+		return nil, err
 	}
-	p, chain, err := profile.Resolve(name, cfg)
-	if err != nil {
-		if errors.Is(err, profile.ErrProfileNotFound) {
-			return nil, profile.Chain{}, path, fmt.Errorf(
-				"profile %q not found in %s.\nAvailable profiles: %s",
-				name, displayConfigPath(path), strings.Join(cfg.Names(), ", "))
-		}
-		return nil, profile.Chain{}, path, err
+	p, found := profiles[name]
+	if !found {
+		return nil, fmt.Errorf("profile %q not found in %s.\nAvailable profiles: %s",
+			name, displayConfigPath(path), strings.Join(profileNames(profiles), ", "))
 	}
-	return p, chain, path, nil
-}
-
-func resolveProfileFlag(name string) (*profile.Profile, error) {
-	p, _, _, err := resolveProfileChain(name)
-	return p, err
+	return &namedProfile{Name: name, Profile: p}, nil
 }
 
 func displayConfigPath(path string) string {

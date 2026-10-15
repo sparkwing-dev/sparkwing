@@ -8,17 +8,14 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"sort"
 	"strings"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/api"
 
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
@@ -34,302 +31,59 @@ func addCronsProfileFlag(fs *flag.FlagSet) *string {
 // safety: the profile name rides beside the client so every message names the
 // controller that answered.
 type cronsRemote struct {
-	name string
-	prof *profile.Profile
-	api  *client.Client
+	name  string
+	api   controllerwire.ScheduleRepositoryManager
+	close func()
 }
 
-func openCronsRemote(profileName, verb string) (*cronsRemote, error) {
-	prof, err := resolveProfile(profileName)
+func openCronsRemote(profileName, _ string) (*cronsRemote, error) {
+	options, closeTransport, err := controllerOptions(context.Background(), profileName)
 	if err != nil {
 		return nil, err
 	}
-	if err := requireController(prof, verb); err != nil {
+	manager, err := client.NewScheduleRepositoryManager(options)
+	if err != nil {
+		closeTransport()
 		return nil, err
 	}
-	return &cronsRemote{
-		name: prof.Name,
-		prof: prof,
-		api:  client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken()),
-	}, nil
+	return &cronsRemote{name: profileName, api: manager, close: closeTransport}, nil
 }
 
 func cronsRemoteContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), cronsProfileTimeout)
 }
 
-func (r *cronsRemote) rows(ctx context.Context) ([]crons.Row, crons.Health, error) {
-	overview, err := r.api.ListCrons(ctx)
-	if err != nil {
-		return nil, crons.Health{}, err
-	}
-	rows := make([]crons.Row, 0, len(overview.Schedules))
-	for _, view := range overview.Schedules {
-		rows = append(rows, crons.RowFromView(view))
-	}
-	return rows, crons.HealthFromView(overview.Health), nil
-}
-
-func runCronsStatusProfile(profileName, format string) error {
-	remote, err := openCronsRemote(profileName, "crons list --timer")
-	if err != nil {
-		return err
-	}
-	ctx, cancel := cronsRemoteContext()
-	defer cancel()
-	_, health, err := remote.rows(ctx)
-	if err != nil {
-		return fmt.Errorf("crons list --timer: %s: %w", remote.name, err)
-	}
-	if err := renderCronsHealth(os.Stdout, health, time.Now(), format); err != nil {
-		return err
-	}
-	if !health.Healthy() {
-		return exitErrorf(1, "crons list --timer: %s: %s", remote.name, health.Detail)
-	}
-	return nil
-}
-
-func runCronsListProfile(profileName, format string, all bool) error {
-	remote, err := openCronsRemote(profileName, "crons list")
-	if err != nil {
-		return err
-	}
-	ctx, cancel := cronsRemoteContext()
-	defer cancel()
-	rows, _, err := remote.rows(ctx)
-	if err != nil {
-		return fmt.Errorf("crons list: %s: %w", remote.name, err)
-	}
-	shown, hidden := rows, 0
-	if !all {
-		shown = shown[:0:0]
-		for _, row := range rows {
-			if row.State == crons.StateUndeclared {
-				hidden++
-				continue
-			}
-			shown = append(shown, row)
-		}
-	}
-	return renderCronsList(os.Stdout, shown, hidden, time.Now(), format)
-}
-
-func runCronsShowProfile(profileName, name, format string, fires int) error {
-	remote, err := openCronsRemote(profileName, "crons show")
-	if err != nil {
-		return err
-	}
-	ctx, cancel := cronsRemoteContext()
-	defer cancel()
-	detail, err := remote.api.GetCron(ctx, name)
-	if err != nil {
-		return fmt.Errorf("crons show: %s: %w", remote.name, err)
-	}
-	report := cronsShowReport{Row: crons.RowFromView(detail.Schedule)}
-	for i, fire := range detail.Fires {
-		if fires > 0 && i >= fires {
-			break
-		}
-		report.Fires = append(report.Fires, cronsFireView{
-			CronFire: crons.FireFromView(fire), RunStatus: fire.RunStatus,
-		})
-	}
-	return renderCronsShow(os.Stdout, report, format)
-}
-
-func runCronsNextProfile(profileName, name, format string, count int) error {
-	label := "crons list --next"
-	if name != "" {
-		label = "crons show --next"
-	}
-	remote, err := openCronsRemote(profileName, label)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := cronsRemoteContext()
-	defer cancel()
-	var wanted []crons.Row
-	if name != "" {
-		detail, derr := remote.api.GetCron(ctx, name)
-		if derr != nil {
-			return fmt.Errorf("%s: %s: %w", label, remote.name, derr)
-		}
-		wanted = []crons.Row{crons.RowFromView(detail.Schedule)}
-	} else {
-		rows, _, lerr := remote.rows(ctx)
-		if lerr != nil {
-			return fmt.Errorf("%s: %s: %w", label, remote.name, lerr)
-		}
-		for _, row := range rows {
-			if row.State == crons.StateArmed {
-				wanted = append(wanted, row)
-			}
-		}
-	}
-	now := time.Now()
-	var out []cronsUpcoming
-	for _, row := range wanted {
-		instants, uerr := crons.UpcomingAfter(row.Effective.Cron, row.Effective.TZ, now, count)
-		if uerr != nil {
-			return fmt.Errorf("%s: %s: %w", label, row.Display, uerr)
-		}
-		for _, at := range instants {
-			out = append(out, cronsUpcoming{Schedule: row.ID, Name: row.Display, At: at})
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].At.Before(out[j].At) })
-	if len(out) > count {
-		out = out[:count]
-	}
-	return renderCronsNext(os.Stdout, out, now, format)
-}
-
-func runCronsPauseResumeProfile(profileName, name, format string, pause bool) error {
-	verb := "--resume"
-	if pause {
-		verb = "--pause"
-	}
-	remote, err := openCronsRemote(profileName, "crons set "+verb)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := cronsRemoteContext()
-	defer cancel()
-	var view *api.ScheduleView
-	if pause {
-		view, err = remote.api.PauseCron(ctx, name)
-	} else {
-		view, err = remote.api.ResumeCron(ctx, name)
-	}
-	if err != nil {
-		return fmt.Errorf("crons set %s: %s: %w", verb, remote.name, err)
-	}
-	row := crons.RowFromView(*view)
-	switch format {
-	case "json":
-		return json.NewEncoder(os.Stdout).Encode(row)
-	case "plain":
-		_, perr := fmt.Fprintln(os.Stdout, row.ID)
-		return perr
-	}
-	fmt.Fprintf(os.Stdout, "%s is %s\n", row.Display, row.State)
-	if !pause && row.NextDueAt != nil {
-		fmt.Fprintf(os.Stdout, "  next: %s\n", cronAbsTime(*row.NextDueAt, row.Location))
-	}
-	return nil
-}
-
-func runCronsRunProfile(profileName, name, format string) error {
-	remote, err := openCronsRemote(profileName, "crons run")
-	if err != nil {
-		return err
-	}
-	ctx, cancel := cronsRemoteContext()
-	defer cancel()
-	launched, err := remote.api.RunCronNow(ctx, name)
-	if err != nil {
-		return fmt.Errorf("crons run: %s: %w", remote.name, err)
-	}
-	report := cronsRunReport{
-		Schedule: launched.Schedule.ID,
-		Name:     launched.Schedule.Name,
-		Pipeline: launched.Schedule.Pipeline,
-		RunID:    launched.RunID,
-	}
-	switch format {
-	case "json":
-		return json.NewEncoder(os.Stdout).Encode(report)
-	case "plain":
-		_, perr := fmt.Fprintln(os.Stdout, report.RunID)
-		return perr
-	}
-	fmt.Fprintf(os.Stdout, "run %s submitted on %s (%s)\n", report.RunID, remote.name, report.Pipeline)
-	fmt.Fprintf(os.Stdout, "  follow: sparkwing runs logs --run %s --profile %s --follow\n", report.RunID, remote.name)
-	return nil
-}
-
-func runCronsDisarmProfile(profileName, name, format string) error {
-	remote, err := openCronsRemote(profileName, "crons uninstall --name")
-	if err != nil {
-		return err
-	}
-	ctx, cancel := cronsRemoteContext()
-	defer cancel()
-	view, err := remote.api.DisarmCron(ctx, name)
-	if err != nil {
-		return fmt.Errorf("crons uninstall --name: %s: %w", remote.name, err)
-	}
-	report := cronsDisarmReport{Schedule: view.ID, Name: view.Name}
-	switch format {
-	case "json":
-		return json.NewEncoder(os.Stdout).Encode(report)
-	case "plain":
-		_, perr := fmt.Fprintln(os.Stdout, report.Name)
-		return perr
-	}
-	fmt.Fprintf(os.Stdout, "disarmed %s on %s; its history went with it\n", report.Name, remote.name)
-	return nil
-}
-
-func runCronsSetProfile(profileName, name, format string, req client.CronOverrideRequest) error {
-	remote, err := openCronsRemote(profileName, "crons set")
-	if err != nil {
-		return err
-	}
-	ctx, cancel := cronsRemoteContext()
-	defer cancel()
-	view, err := remote.api.SetCronOverride(ctx, name, req)
-	if err != nil {
-		return fmt.Errorf("crons set: %s: %w", remote.name, err)
-	}
-	return renderCronsOverride(crons.RowFromView(*view), format)
-}
-
-func runCronsResetProfile(profileName, name, format string) error {
-	remote, err := openCronsRemote(profileName, "crons set --reset")
-	if err != nil {
-		return err
-	}
-	ctx, cancel := cronsRemoteContext()
-	defer cancel()
-	view, err := remote.api.ClearCronOverride(ctx, name)
-	if err != nil {
-		return fmt.Errorf("crons set --reset: %s: %w", remote.name, err)
-	}
-	return renderCronsOverride(crons.RowFromView(*view), format)
-}
-
 // safety: a controller schedule's pin is the commit it clones, which moves only
 // when the repository is pushed again, so there is no separate lock to take.
 func cronsRemotePinError(flagName string) error {
 	return fmt.Errorf(
-		"crons set %s: a controller schedule is pinned by the commit it was pushed at; "+
-			"`sparkwing crons install --profile <name>` re-pins it at HEAD, and `--follow` makes it clone the branch tip",
+		"schedules set %s: a controller schedule is pinned by the commit it was pushed at; "+
+			"`sparkwing schedules install --profile <name>` re-pins it at HEAD, and `--unpinned` makes it clone the branch tip",
 		flagName)
 }
 
 func runCronsInstallProfile(profileName, root string, only []string, follow bool, format string) error {
-	remote, err := openCronsRemote(profileName, "crons install")
+	remote, err := openCronsRemote(profileName, "schedules install")
 	if err != nil {
 		return err
 	}
+	defer remote.close()
 	declared, err := crons.DeclaredSchedules(root)
 	if err != nil {
-		return fmt.Errorf("crons install: %w", err)
+		return fmt.Errorf("schedules install: %w", err)
 	}
 	selected, err := selectDeclaredForPush(declared, only, root)
 	if err != nil {
-		return fmt.Errorf("crons install: %w", err)
+		return fmt.Errorf("schedules install: %w", err)
 	}
 	report := cronsPushReport{Repo: root, Profile: remote.name}
-	var push []client.CronRepoSchedule
+	var push []controllerwire.ScheduleDeclaration
 	for _, d := range selected {
 		if d.Local() {
 			report.Local = append(report.Local, d.DisplayName())
 			continue
 		}
-		push = append(push, client.CronRepoSchedule{
+		push = append(push, controllerwire.ScheduleDeclaration{
 			Pipeline: d.Pipeline,
 			Name:     d.Name,
 			Cron:     d.Trigger.Cron,
@@ -342,13 +96,13 @@ func runCronsInstallProfile(profileName, root string, only []string, follow bool
 
 	branch, sha, repoSlug, repoURL := gitContextIn(root)
 	if repoURL == "" {
-		return fmt.Errorf("crons install: %s has no git origin. "+
+		return fmt.Errorf("schedules install: %s has no git origin. "+
 			"The cluster clones the pipeline source at each fire, so the repository needs one", root)
 	}
 	if repoSlug != "" {
 		repoURL = bincache.RepoURLFromGitHub(repoSlug)
 	} else if repoURL, err = sourceurl.ValidateCloneURL(repoURL); err != nil {
-		return fmt.Errorf("crons install: %s has an origin the cluster cannot clone: %w", root, err)
+		return fmt.Errorf("schedules install: %s has an origin the cluster cannot clone: %w", root, err)
 	}
 	if len(push) > 0 {
 		if err := checkPushableHead(root, follow); err != nil {
@@ -363,7 +117,7 @@ func runCronsInstallProfile(profileName, root string, only []string, follow bool
 
 	ctx, cancel := cronsRemoteContext()
 	defer cancel()
-	resp, err := remote.api.PutCronRepo(ctx, client.CronRepoRequest{
+	resp, err := remote.api.ReplaceSchedules(ctx, controllerwire.ScheduleRepoRequest{
 		RepoURL:   repoURL,
 		Branch:    branch,
 		SHA:       sha,
@@ -371,7 +125,7 @@ func runCronsInstallProfile(profileName, root string, only []string, follow bool
 		Schedules: push,
 	})
 	if err != nil {
-		return fmt.Errorf("crons install: %s: %w", remote.name, err)
+		return fmt.Errorf("schedules install: %s: %w", remote.name, err)
 	}
 	for _, view := range resp.Schedules {
 		report.Schedules = append(report.Schedules, cronsPushed{
@@ -398,7 +152,7 @@ func checkPushableHead(root string, follow bool) error {
 	}
 	if dirty, known := gitWorkingTreeDirty(root); known && dirty {
 		fmt.Fprintf(os.Stderr,
-			"crons install: %s has uncommitted edits; the controller clones the pushed commit, "+
+			"schedules install: %s has uncommitted edits; the controller clones the pushed commit, "+
 				"so they are not part of what fires\n", root)
 	}
 	_, sha, _, _ := gitContextIn(root)
@@ -406,7 +160,7 @@ func checkPushableHead(root string, follow bool) error {
 		return nil
 	}
 	return fmt.Errorf(
-		"crons install: %s is on a commit no origin branch carries, so every fire would fail at the clone. "+
+		"schedules install: %s is on a commit no origin branch carries, so every fire would fail at the clone. "+
 			"Push the branch first, or use --follow to clone the tip of %s at each fire instead",
 		root, dashIfEmpty(gitBranchName(root)))
 }
@@ -424,7 +178,7 @@ func gitBranchName(root string) string {
 	return branch
 }
 
-// safety: the same selection `crons install` applies on a host, so a name the
+// safety: the same selection `schedules install` applies on a host, so a name the
 // repository does not declare is refused before anything is pushed.
 func selectDeclaredForPush(declared []crons.Declared, only []string, root string) ([]crons.Declared, error) {
 	if len(only) == 0 {
@@ -451,24 +205,25 @@ func selectDeclaredForPush(declared []crons.Declared, only []string, root string
 }
 
 func runCronsUninstallProfile(profileName, root, format string) error {
-	remote, err := openCronsRemote(profileName, "crons uninstall")
+	remote, err := openCronsRemote(profileName, "schedules uninstall")
 	if err != nil {
 		return err
 	}
+	defer remote.close()
 	_, _, repoSlug, repoURL := gitContextIn(root)
 	if repoURL == "" {
-		return fmt.Errorf("crons uninstall: %s has no git origin, so its pushed schedules cannot be named", root)
+		return fmt.Errorf("schedules uninstall: %s has no git origin, so its pushed schedules cannot be named", root)
 	}
 	if repoSlug != "" {
 		repoURL = bincache.RepoURLFromGitHub(repoSlug)
 	} else if repoURL, err = sourceurl.ValidateCloneURL(repoURL); err != nil {
-		return fmt.Errorf("crons uninstall: %s has an origin the controller cannot name: %w", root, err)
+		return fmt.Errorf("schedules uninstall: %s has an origin the controller cannot name: %w", root, err)
 	}
 	ctx, cancel := cronsRemoteContext()
 	defer cancel()
-	resp, err := remote.api.DeleteCronRepo(ctx, repoURL)
+	resp, err := remote.api.DeleteSchedulesForRepo(ctx, repoURL)
 	if err != nil {
-		return fmt.Errorf("crons uninstall: %s: %w", remote.name, err)
+		return fmt.Errorf("schedules uninstall: %s: %w", remote.name, err)
 	}
 	switch format {
 	case "json":
@@ -519,7 +274,7 @@ func renderCronsPush(w io.Writer, report cronsPushReport, format string) error {
 		fmt.Fprintf(w, "pushed %s to %s (%s)\n", s.Name, report.Profile, dashIfEmpty(s.State))
 	}
 	for _, name := range report.Local {
-		fmt.Fprintf(w, "skipped %s: it fires from this host, so `sparkwing crons install` arms it here\n", name)
+		fmt.Fprintf(w, "skipped %s: it fires from this host, so `sparkwing schedules install` arms it here\n", name)
 	}
 	for _, name := range report.Withdrawals {
 		fmt.Fprintf(w, "withdrawn %s: the repo no longer declares it for the controller\n", name)
@@ -538,22 +293,3 @@ func renderCronsPush(w io.Writer, report cronsPushReport, format string) error {
 
 var errCronsProfileAndFleet = errors.New(
 	"--fleet arms every repo registered on this host; run it from one repo (or pass -C DIR) when pushing to a controller")
-
-// safety: the same edit the local path applies, spelled for the wire: a field
-// the operator did not name is left out, and args ride whole.
-func cronsOverrideRequest(fields crons.Override) client.CronOverrideRequest {
-	req := client.CronOverrideRequest{Args: fields.Args}
-	if fields.Cron != nil {
-		req.Cron = *fields.Cron
-	}
-	if fields.TZ != nil {
-		req.TZ = *fields.TZ
-	}
-	if fields.Overlap != nil {
-		req.Overlap = *fields.Overlap
-	}
-	if fields.CatchUp != nil {
-		req.CatchUp = fields.CatchUp.String()
-	}
-	return req
-}

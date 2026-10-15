@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -35,5 +36,19 @@ func TestModuleGoModKeepsAbsoluteReplacePath(t *testing.T) {
 	}
 	if !strings.Contains(got, "=> "+abs+"\n") {
 		t.Fatalf("absolute repo root not preserved in:\n%s", got)
+	}
+}
+
+func TestGoBlocksReportRemovedSDKSymbols(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := t.TempDir()
+	if err := os.WriteFile(filepath.Join(content, "guide.md"), []byte("```go\nsw.NoSuchPublicSDKFunction()\n```\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if checkGoBlocks(content, root) {
+		t.Fatal("removed SDK symbol passed the documentation compiler")
 	}
 }

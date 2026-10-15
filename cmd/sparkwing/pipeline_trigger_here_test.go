@@ -6,7 +6,7 @@ import (
 )
 
 func TestParseTriggerFlags_RunnerHere(t *testing.T) {
-	flags, err := parseTriggerFlags([]string{"release", "--profile", "prod", "--runner", "here", "--reason=INC-42 fleet down", "--version", "v1"})
+	flags, err := parseTriggerFlags([]string{"release", "--profile", "prod", "--runner", "here", "--reason=INC-42 fleet down", "--", "--version", "v1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +22,7 @@ func TestParseTriggerFlags_RunnerHere(t *testing.T) {
 		"working tree":  {"release", "--runner", "here", "--reason", "x", "--working-tree"},
 		"missing value": {"release", "--reason", "x", "--runner"},
 	} {
-		if _, err := parseTriggerFlags(args); err == nil {
+		if _, err := parseTriggerFlags(append(args, "--profile", "prod")); err == nil {
 			t.Errorf("%s: parseTriggerFlags(%q) accepted", name, args)
 		}
 	}

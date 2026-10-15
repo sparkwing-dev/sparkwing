@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -24,41 +25,6 @@ func ParseSearch(raw string) SearchTerms {
 		out.Include = append(out.Include, strings.ToLower(tok))
 	}
 	return out
-}
-
-func ParseLooseDuration(v string) (time.Duration, error) {
-	v = strings.ToLower(v)
-	if v == "" {
-		return 0, errors.New("empty duration")
-	}
-	last := v[len(v)-1]
-	switch last {
-	case 'd':
-		days, err := time.ParseDuration(v[:len(v)-1] + "h")
-		if err != nil {
-			return 0, err
-		}
-		return scaleDuration(days, 24, v)
-	case 'w':
-		weeks, err := time.ParseDuration(v[:len(v)-1] + "h")
-		if err != nil {
-			return 0, err
-		}
-		return scaleDuration(weeks, 24*7, v)
-	default:
-		return time.ParseDuration(v)
-	}
-}
-
-func scaleDuration(value time.Duration, factor int64, raw string) (time.Duration, error) {
-	const (
-		maxDuration = time.Duration(1<<63 - 1)
-		minDuration = time.Duration(-1 << 63)
-	)
-	if value > maxDuration/time.Duration(factor) || value < minDuration/time.Duration(factor) {
-		return 0, fmt.Errorf("duration %q overflows", raw)
-	}
-	return value * time.Duration(factor), nil
 }
 
 func SplitExcludes(values []string) (include, exclude []string) {
@@ -85,7 +51,7 @@ func ParseLooseDate(raw string) (time.Time, error) {
 		y := now.AddDate(0, 0, -1)
 		return time.Date(y.Year(), y.Month(), y.Day(), 0, 0, 0, 0, y.Location()), nil
 	}
-	if d, err := ParseLooseDuration(v); err == nil {
+	if d, err := clisurface.ParseLookback(v); err == nil {
 		return now.Add(-d), nil
 	}
 	for _, layout := range []string{

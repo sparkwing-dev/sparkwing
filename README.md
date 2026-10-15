@@ -5,7 +5,9 @@
 Pipelines as Go code. The public CLI + SDK for sparkwing.
 
 > **Status:** pre-release. Tester binaries are available; APIs may change.
-> Pre-1.0; expect churn outside the stable surface (`sparkwing/` package).
+> This source revision is in a rewrite. Native host, controller and managed-service
+> integration remains incomplete. Released binaries and this worktree have different
+> implementation coverage. See [local dashboard integration](docs/native-mode.md).
 
 ## Two paths
 
@@ -19,7 +21,7 @@ profiles, your own steps' downloads, and `sparkwing update` still need it
 
 **Sparkwing Cloud.** The hosted controller. A controller gives a team one
 dashboard, one run history, and one queue that its runners claim from.
-`sparkwing cloud connect --controller URL --token-stdin` stores the
+`sparkwing profiles add --controller URL --token-stdin` stores the
 token you were given and writes the profile, and reaches any controller you
 can reach, including one your team runs.
 
@@ -45,7 +47,7 @@ needs OpenSSL 3.0 or newer.
 
 Building from source via `go install` is supported, but the Next.js
 dashboard bundle is a generated artifact and is not checked into the
-repository, so a source build will refuse to start `sparkwing serve`
+repository, so a source build will refuse to start `sparkwing dashboard`
 with a clear message. Use a release binary for the dashboard, or
 generate the bundle locally first (`bash bin/build-web.sh && go install
 ./cmd/sparkwing` from a sparkwing checkout).
@@ -60,20 +62,20 @@ sparkwing pipeline new --name hello
 # Edit .sparkwing/jobs/hello.go to taste, then run it
 sparkwing run hello
 
-# Open the local dashboard
-sparkwing serve start
+# Dashboard lifecycle (requires the native runtime binding)
+sparkwing dashboard start
 ```
 
 When a team should see the same runs, connect the machine to a
 controller:
 
 ```sh
-sparkwing cloud connect --controller https://api.sparkwing.example --token-stdin
+sparkwing profiles add --controller https://api.sparkwing.example --token-stdin
 ```
 
 It stores the token on stdin in `~/.config/sparkwing/config.yaml` and
-prints the dashboard URL. An administrator mints those tokens with
-`--admin-token-stdin`. See
+prints the saved connection metadata with its credential redacted. A team
+administrator supplies an existing member credential. See
 [getting-started.md](docs/getting-started.md#sparkwing-cloud).
 
 Pipeline builds satisfy the Go floor declared in `.sparkwing/go.mod` and
@@ -136,9 +138,9 @@ for the full reference; [`docs/sdk.md`](./docs/sdk.md) is the SDK
 flat reference.
 
 A pipeline that declares an `on.schedule` cadence runs on a cadence from any
-machine you arm with `sparkwing crons install`: one OS timer per host calls
-`sparkwing crons tick` every minute and sparkwing evaluates the cron
-expressions itself. See [`docs/crons.md`](./docs/crons.md).
+machine whose schedules have been installed. The final timer contract uses a
+stable hidden tick entrypoint with the captured home. Native timer installation
+and controller-owned tick execution still need integration in this worktree. See [`docs/schedules.md`](./docs/schedules.md).
 
 ## Dashboard
 
@@ -154,7 +156,7 @@ cadence.
 
 The controller's HTTP API (served by `sparkwing-controller` in
 cluster mode and embedded in the `sparkwing` CLI for laptop mode
-via `sparkwing serve start`) is documented as an OpenAPI 3.0
+via `sparkwing dashboard start`) is documented as an OpenAPI 3.0
 spec at
 [`api/openapi.yaml`](./api/openapi.yaml). Every route, request
 shape, response shape, and security requirement is described there.

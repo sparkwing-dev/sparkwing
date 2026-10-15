@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -22,41 +21,21 @@ type riskBlockedError struct {
 }
 
 func (e *riskBlockedError) Error() string {
-	return fmt.Sprintf("step %q in pipeline %q requires --sw-allow %s to confirm (or --sw-dry-run to preview).", e.StepID, e.Pipeline, strings.Join(e.MissingLabels, ","))
+	return fmt.Sprintf("step %q in pipeline %q requires --sw-allow-risk %s to confirm (or --sw-dry-run to preview).", e.StepID, e.Pipeline, strings.Join(e.MissingLabels, ","))
 }
 
-// safety: a step declares its risk labels in Go, so they are legible only from
-// a build of the pipeline; the caller builds one before asking.
-func declaredRisks(ctx context.Context, sparkwingDir, pipelineName string) []stepRiskFinding {
-	schemas, err := readDescribeCache(ctx, sparkwingDir)
-	if err != nil || schemas == nil {
-		return nil
-	}
-	return risksIn(schemas, pipelineName)
-}
-
-func risksIn(schemas []nodeproto.PipelineDescription, pipelineName string) []stepRiskFinding {
-	for _, s := range schemas {
-		if s.Name != pipelineName {
+func risksIn(schema nodeproto.PipelineDescription) []stepRiskFinding {
+	var out []stepRiskFinding
+	for _, row := range schema.RisksByStep {
+		if len(row.Labels) == 0 {
 			continue
 		}
-		var out []stepRiskFinding
-		for _, row := range s.RisksByStep {
-			if len(row.Labels) == 0 {
-				continue
-			}
-			out = append(out, stepRiskFinding{
-				NodeID: row.JobID,
-				StepID: row.StepID,
-				Labels: row.Labels,
-			})
-		}
-		if len(out) == 0 && len(s.Risks) > 0 {
-			out = append(out, stepRiskFinding{Labels: s.Risks})
-		}
-		return out
+		out = append(out, stepRiskFinding{NodeID: row.JobID, StepID: row.StepID, Labels: row.Labels})
 	}
-	return nil
+	if len(out) == 0 && len(schema.Risks) > 0 {
+		out = append(out, stepRiskFinding{Labels: schema.Risks})
+	}
+	return out
 }
 
 func enforceRiskGate(
@@ -106,7 +85,11 @@ func enforceRiskGate(
 	if len(stepOrder) > 0 {
 		stepID = stepOrder[0]
 	}
-	return &riskBlockedError{Pipeline: pipelineName, StepID: stepID, MissingLabels: allMissing}
+	return &riskBlockedError{
+		Pipeline:      pipelineName,
+		StepID:        stepID,
+		MissingLabels: allMissing,
+	}
 }
 
 func contains(xs []string, s string) bool {

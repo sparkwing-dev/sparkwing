@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +16,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/testshell"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
 func isolateUpdateTests(t *testing.T) {
@@ -51,29 +50,34 @@ func isolateUpdateTests(t *testing.T) {
 	}
 }
 
+func runUpdateArtifactFixture(t *testing.T, args []string) error {
+	t.Helper()
+	calls := []string{}
+	command := updateCommand{
+		out: os.Stdout, install: updateBinary,
+		check: func(version string, force, override bool) updateCheckReport {
+			return gatherUpdateCheck("cli", version, force, override)
+		},
+		units: func(context.Context) (wingd.ManagedUnitManager, error) { return updateUnitsFixture{calls: &calls}, nil },
+	}
+	return command.run(t.Context(), args)
+}
+
 func updateMetadataFixture(t *testing.T) (*atomic.Int32, string) {
 	t.Helper()
 	var requests atomic.Int32
 	revision := strings.Repeat("a", 40)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	updateLookupRelease = func(_ context.Context, version string) error {
 		requests.Add(1)
-		if strings.HasPrefix(r.URL.Path, "/releases/tags/") {
-			tag := strings.TrimPrefix(r.URL.Path, "/releases/tags/")
-			if tag == "v9.99.99" {
-				http.NotFound(w, r)
-				return
-			}
-			fmt.Fprintf(w, `{"tag_name":%q,"draft":false}`, tag)
-			return
+		if version == "v9.99.99" {
+			return errors.New("release not found")
 		}
-		if strings.HasPrefix(r.URL.Path, "/git/ref/tags/") {
-			fmt.Fprintf(w, `{"object":{"type":"commit","sha":%q}}`, revision)
-			return
-		}
-		http.NotFound(w, r)
-	}))
-	t.Cleanup(server.Close)
-	updateReleaseAPI = server.URL
+		return nil
+	}
+	updateLookupRevision = func(context.Context, string) (string, error) {
+		requests.Add(1)
+		return revision, nil
+	}
 	return &requests, revision
 }
 
@@ -133,7 +137,7 @@ func TestUnifiedUpdateCheckReleaseStatesAndProvenance(t *testing.T) {
 			updateReadInstalled = func() updateIdentity {
 				return updateIdentity{Version: tc.current, Revision: tc.revision, Dirty: tc.dirty}
 			}
-			args := []string{"--check"}
+			args := []string{"--dry-run"}
 			if tc.target != "" {
 				args = append(args, "--version", tc.target)
 			}
@@ -179,7 +183,7 @@ func TestUnifiedUpdateCheckPreservesHoldAndOutputModes(t *testing.T) {
 		return updateIdentity{Version: "v0.48.0", Revision: revision, Dirty: &clean, Path: filepath.Join(os.Getenv("HOME"), "installed")}
 	}
 	writeVersionHold(t, "v0.48")
-	report, code := checkUpdate(t, "--check", "--cli")
+	report, code := checkUpdate(t, "--dry-run")
 	if code != 1 || report.BlockedReason == "" {
 		t.Fatalf("hold not reported: %+v %d", report, code)
 	}
@@ -188,7 +192,7 @@ func TestUnifiedUpdateCheckPreservesHoldAndOutputModes(t *testing.T) {
 	}
 	for _, mode := range []string{"plain", "pretty"} {
 		var err error
-		out := captureStdout(t, func() { err = runUpdate([]string{"--check", "-o", mode}) })
+		out := captureStdout(t, func() { err = runUpdate([]string{"--dry-run", "-o", mode}) })
 		if exitCodeFor(err) != 1 {
 			t.Fatalf("mode %s exit: %v", mode, err)
 		}
@@ -209,7 +213,7 @@ func TestUnifiedSameLabelLocalBuildStillReportsOperatorHold(t *testing.T) {
 		return updateIdentity{Version: "v0.49.0", Revision: strings.Repeat("b", 40), Dirty: &clean, Path: filepath.Join(os.Getenv("HOME"), "installed")}
 	}
 	writeVersionHold(t, "v0.48")
-	report, code := checkUpdate(t, "--check", "--version", "v0.49.0")
+	report, code := checkUpdate(t, "--dry-run", "--version", "v0.49.0")
 	if code != 2 || report.Status != "unknown" || !strings.Contains(report.BlockedReason, "operator CLI version hold") {
 		t.Fatalf("same-label local build hid hold: %+v %d", report, code)
 	}
@@ -232,7 +236,7 @@ func TestUnifiedUpdateRefusesUnreadableHoldEvenForCurrentVersion(t *testing.T) {
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	report, code := checkUpdate(t, "--check")
+	report, code := checkUpdate(t, "--dry-run")
 	if code != 2 || report.BlockedReason == "" || report.Status != "unknown" {
 		t.Fatalf("unsafe hold bypassed: %+v %d", report, code)
 	}
@@ -314,22 +318,16 @@ func TestUnifiedUpdateReceiptUsesInstalledArtifactAndReinstallsLocalSameLabel(t 
 		return installedRelease{path: path, version: version, digest: "fixture-sha256"}, nil
 	}
 	var commandError error
-	out := captureStdout(t, func() { commandError = runUpdate([]string{"--cli", "--version", "v0.49.0"}) })
-	if commandError != nil {
-		t.Fatal(commandError)
+	out := captureStdout(t, func() { commandError = runUpdateArtifactFixture(t, []string{"--version", "v0.49.0"}) })
+	if commandError == nil || out != "" || !called {
+		t.Fatalf("unconfirmed identity: err=%v output=%q installed=%t", commandError, out, called)
 	}
 	var result updateReceipt
-	if err := json.Unmarshal([]byte(out), &result); err != nil {
-		t.Fatalf("receipt polluted by progress: %v %q", err, out)
-	}
-	if !called || result.Kind != "update" || result.Status != "updated" || result.After.Version != "" || result.ResolvedRelease != "v0.49.0" || result.After.Path != path || result.After.Revision != "" {
-		t.Fatalf("false update receipt: %+v", result)
-	}
 	updateReadInstalled = func() updateIdentity {
 		return updateIdentity{Version: "v0.49.0", Revision: revision, Dirty: &clean, Path: filepath.Join(os.Getenv("HOME"), "installed")}
 	}
 	called = false
-	out = captureStdout(t, func() { commandError = runUpdate([]string{"--version", "v0.49.0"}) })
+	out = captureStdout(t, func() { commandError = runUpdateArtifactFixture(t, []string{"--version", "v0.49.0"}) })
 	if commandError != nil {
 		t.Fatal(commandError)
 	}
@@ -423,7 +421,7 @@ func TestRunUpdateReportsReleaseTagForPseudoVersionArtifact(t *testing.T) {
 	}
 	var commandError error
 	out := captureStdout(t, func() {
-		commandError = runUpdate([]string{"--cli"})
+		commandError = runUpdateArtifactFixture(t, nil)
 	})
 	if commandError != nil {
 		t.Fatal(commandError)
@@ -447,16 +445,10 @@ func TestRunUpdateReportsReleaseTagForPseudoVersionArtifact(t *testing.T) {
 		return installedRelease{path: mismatchedPath, version: version, digest: strings.Repeat("a", 64)}, nil
 	}
 	out = captureStdout(t, func() {
-		commandError = runUpdate([]string{"--cli"})
+		commandError = runUpdateArtifactFixture(t, nil)
 	})
-	if commandError != nil {
-		t.Fatal(commandError)
-	}
-	if err := json.Unmarshal([]byte(out), &receipt); err != nil {
-		t.Fatalf("mismatched receipt: %v %q", err, out)
-	}
-	if receipt.After.Version == "v0.52.8" {
-		t.Fatalf("mismatched artifact was labeled as the release: %+v", receipt.After)
+	if commandError == nil || out != "" {
+		t.Fatalf("mismatched identity received success: err=%v output=%q", commandError, out)
 	}
 
 	updateReadInstalled = func() updateIdentity {
@@ -470,7 +462,7 @@ func TestRunUpdateReportsReleaseTagForPseudoVersionArtifact(t *testing.T) {
 		return installedRelease{}, errors.New("unreachable")
 	}
 	out = captureStdout(t, func() {
-		commandError = runUpdate([]string{"--cli"})
+		commandError = runUpdateArtifactFixture(t, nil)
 	})
 	if commandError != nil {
 		t.Fatal(commandError)

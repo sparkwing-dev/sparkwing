@@ -166,8 +166,116 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+  typescript-native:
+    needs: [validate-tag]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-2025
+          - arch: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    env:
+      NODE_VERSION: 22.18.0
+      TAG: ${{ inputs.tag || github.ref_name }}
+      TARGET_ARCH: ${{ matrix.arch }}
+    defaults:
+      run:
+        working-directory: sdk/typescript
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.validate-tag.outputs.source_sha }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26.9"
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          architecture: ${{ matrix.arch }}
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+      - name: Install SDK dependencies
+        run: npm ci --ignore-scripts
+      - name: Download matching Node headers and import library
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = "v$env:NODE_VERSION"
+          $base = "https://nodejs.org/dist/$version"
+          $directory = Join-Path $env:RUNNER_TEMP 'node-sdk'
+          New-Item -ItemType Directory -Force $directory | Out-Null
+          $sums = (Invoke-WebRequest "$base/SHASUMS256.txt").Content
+          foreach ($asset in @("node-$version-headers.tar.gz", "win-$env:TARGET_ARCH/node.lib")) {
+            $matches = @($sums -split "`n" | Where-Object { ($_ -split '\s+')[-1].Trim() -eq $asset })
+            if ($matches.Count -ne 1) { throw "Missing unique checksum for $asset" }
+            $expected = ($matches[0] -split '\s+')[0]
+            $output = Join-Path $directory (Split-Path $asset -Leaf)
+            Invoke-WebRequest "$base/$asset" -OutFile $output
+            if ((Get-FileHash $output -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) {
+              throw "Checksum mismatch for $asset"
+            }
+          }
+          tar -xzf "$directory/node-$version-headers.tar.gz" -C $directory
+          if ($LASTEXITCODE -ne 0) { throw 'Node header extraction failed' }
+      - name: Verify Windows bridge
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do set "VSINSTALL=%%i"
+          if not defined VSINSTALL exit /b 1
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=%TARGET_ARCH% -host_arch=%TARGET_ARCH%
+          if errorlevel 1 exit /b 1
+          npm run release:native -- --version "%TAG%" --arch "%TARGET_ARCH%" --headers "%RUNNER_TEMP%\node-sdk\node-v%NODE_VERSION%\include\node" --node-lib "%RUNNER_TEMP%\node-sdk\node.lib"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: typescript-win32-${{ matrix.arch }}
+          path: sdk/typescript/native/win32-${{ matrix.arch }}
+          retention-days: 1
+          if-no-files-found: error
+
+  typescript-package:
+    needs: [validate-tag, typescript-native]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.validate-tag.outputs.source_sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.18.0"
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: typescript-win32-x64
+          path: sdk/typescript/native/win32-x64
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: typescript-win32-arm64
+          path: sdk/typescript/native/win32-arm64
+      - name: Assemble TypeScript package
+        working-directory: sdk/typescript
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts
+          mkdir -p "$GITHUB_WORKSPACE/typescript-dist"
+          npm run release:pack -- --version "$TAG" --destination "$GITHUB_WORKSPACE/typescript-dist"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-typescript
+          path: typescript-dist/*.tgz
+          retention-days: 1
+          if-no-files-found: error
+
   release:
-    needs: [validate-tag, build]
+    needs: [validate-tag, build, typescript-package]
     runs-on: ubuntu-latest
     concurrency:
       group: release-publication
@@ -206,6 +314,18 @@ jobs:
           pattern: bin-*
           path: dist
           merge-multiple: true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.18.0"
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-typescript
+          path: typescript-dist
+      - name: Check npm publication credential
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: test -n "$NODE_AUTH_TOKEN"
       - name: Ad-hoc-sign macOS binaries (rcodesign)
         working-directory: dist
         run: |
@@ -332,6 +452,21 @@ jobs:
           fi
           echo "==> release notes:"
           cat release-notes.md
+
+      - name: Publish TypeScript package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+          LATEST: ${{ steps.latest.outputs.eligible }}
+        run: |
+          set -euo pipefail
+          test -n "$NODE_AUTH_TOKEN"
+          packages=(typescript-dist/*.tgz)
+          test "${#packages[@]}" -eq 1
+          npm_tag="release-${TAG#v}"
+          if [ "$LATEST" = true ]; then npm_tag=latest; fi
+          if [[ "$TAG" = *-* ]]; then npm_tag=next; fi
+          node "$RELEASE_TOOLS/bin/publish-typescript.mjs" "${packages[0]}" "${TAG#v}" "$npm_tag"
 
       - name: Publish complete immutable release
         env:

@@ -12,6 +12,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
@@ -43,9 +44,9 @@ func runDocsList(args []string) error {
 	fs := flag.NewFlagSet(cmdDocsList.Path, flag.ContinueOnError)
 	var output string
 	var wf docsWebFlags
-	query := fs.StringP("query", "q", "", "match words against topic slug, title and summary")
+	query := fs.String("search", "", "match words against topic slug, title and summary")
 	var paging discoveryPaging
-	fs.IntVar(&paging.limit, "limit", 40, "maximum records; 0 returns every remaining match")
+	fs.IntVar(&paging.limit, "limit", 40, "maximum records; must be at least 1")
 	fs.StringVar(&paging.cursor, "cursor", "", "continue after next_cursor with the same filters")
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
 	guides := fs.Bool("guides", false, "list the task-sized topic sets instead of topics")
@@ -84,8 +85,8 @@ func runDocsList(args []string) error {
 		}
 		return renderDocsVersions(wf, output)
 	}
-	if paging.limit < 0 {
-		return fmt.Errorf("--limit must be zero or greater")
+	if paging.limit < 1 {
+		return fmt.Errorf("--limit must be at least 1")
 	}
 	ctx, cancel := newWebContext()
 	defer cancel()
@@ -134,7 +135,7 @@ func runDocsRead(args []string) error {
 	topic := fs.String("topic", "", "doc slug (e.g. getting-started, pipelines, auth)")
 	guide := fs.String("guide", "", "read a named set of topics instead of one (see `sparkwing docs list --guides`)")
 	section := fs.Int("section", 0, "read the embedded section whose start_line was returned by docs search")
-	all := fs.Bool("all", false, "read every embedded document")
+	all := fs.Bool("full", false, "read every embedded document")
 	var wf docsWebFlags
 	registerWebFlags(fs, &wf, true)
 	if err := parseAndCheck(cmdDocsRead, fs, args); err != nil {
@@ -146,23 +147,23 @@ func runDocsRead(args []string) error {
 	if *all {
 		var stray []string
 		fs.Visit(func(f *flag.Flag) {
-			if f.Name != "all" && f.Name != "output" {
+			if f.Name != "full" && f.Name != "output" {
 				stray = append(stray, "--"+f.Name)
 			}
 		})
 		if len(stray) > 0 {
-			return fmt.Errorf("docs read --all: reads the whole embedded corpus, so %s does not apply", strings.Join(stray, ", "))
+			return fmt.Errorf("docs read --full: reads the whole embedded corpus, so %s does not apply", strings.Join(stray, ", "))
 		}
 		if fs.NArg() > 0 {
-			return fmt.Errorf("docs read --all: unexpected positional %q", fs.Arg(0))
+			return fmt.Errorf("docs read --full: unexpected positional %q", fs.Arg(0))
 		}
 		return readAllDocs(*output)
 	}
 	if fs.Changed("section") && (*section < 1 || *guide != "" || wf.web) {
 		return fmt.Errorf("docs read: --section requires a positive start_line, an embedded --topic, and no --guide or --web")
 	}
-	if *topic == "" && fs.NArg() > 0 {
-		*topic = fs.Arg(0)
+	if fs.NArg() > 0 {
+		return &clisurface.UsageError{Path: cmdDocsRead.Path, Message: "use --topic or --guide"}
 	}
 	if *guide != "" {
 		if wf.web || wf.version != "" || wf.noCache {
@@ -191,7 +192,7 @@ func runDocsRead(args []string) error {
 	if !resolution.useWeb {
 		body, err := docs.Read(*topic)
 		if err != nil {
-			return fmt.Errorf("%w; use sparkwing docs list --query <topic>", err)
+			return fmt.Errorf("%w; use sparkwing docs list --search <topic>", err)
 		}
 		if *section > 0 {
 			sections, err := docs.Sections(*topic)
@@ -246,9 +247,9 @@ func runDocsSearch(args []string) error {
 	var output string
 	var topicsOnly, withBody bool
 	var paging discoveryPaging
-	fs.IntVar(&paging.limit, "limit", 20, "maximum records; 0 returns every remaining match")
+	fs.IntVar(&paging.limit, "limit", 20, "maximum records; must be at least 1")
 	fs.StringVar(&paging.cursor, "cursor", "", "continue after next_cursor with the same filters")
-	fs.StringVarP(&query, "query", "q", "", "search terms (every token must match somewhere)")
+	fs.StringVar(&query, "search", "", "search terms (every token must match somewhere)")
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
 	fs.BoolVar(&withBody, "body", false, "print each matching section in full instead of a snippet")
 	fs.BoolVar(&topicsOnly, "topics", false, "list matching topics instead of sections")
@@ -258,15 +259,15 @@ func runDocsSearch(args []string) error {
 		}
 		return err
 	}
-	if paging.limit < 0 {
-		return fmt.Errorf("--limit must be zero or greater")
+	if paging.limit < 1 {
+		return fmt.Errorf("--limit must be at least 1")
 	}
-	if query == "" && fs.NArg() > 0 {
-		query = strings.Join(fs.Args(), " ")
+	if fs.NArg() > 0 {
+		return &clisurface.UsageError{Path: cmdDocsSearch.Path, Message: "use --search"}
 	}
 	if query == "" {
 		PrintHelp(cmdDocsSearch, os.Stderr)
-		return errors.New("docs search: --query is required (e.g. --query \"pull_request\")")
+		return errors.New("docs search: --search is required (e.g. --search \"pull_request\")")
 	}
 	if topicsOnly {
 		return renderDocsPage(docs.Search(query), "", paging, output)
@@ -345,7 +346,7 @@ func renderDocsSections(hits []docs.Section, query string, withBody bool, output
 	case "pretty", "":
 		if len(hits) == 0 {
 			fmt.Printf("no section matches %q\n", query)
-			fmt.Printf("%s sparkwing docs search --query %q --topics\n",
+			fmt.Printf("%s sparkwing docs search --search %q --topics\n",
 				color.Dim("whole topics:"), query)
 			return nil
 		}

@@ -54,7 +54,7 @@ func (l *Launcher) Sync(ctx context.Context) error {
 		}
 		if !remove {
 			live[job.Name] = i
-			observations = append(observations, CloudJobObservation{Binding: binding, JobName: job.Name, NodeUID: reservation.NodeUID})
+			observations = append(observations, CloudJobObservation{Binding: binding, JobNamespace: job.Namespace, JobName: job.Name, JobUID: string(job.UID), NodeUID: reservation.NodeUID})
 		}
 		if remove {
 			if err := l.teardown(ctx, &job, reservation); err != nil && !errors.Is(err, ErrContainersRunning) {

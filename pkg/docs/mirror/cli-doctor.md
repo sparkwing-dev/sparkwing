@@ -6,68 +6,17 @@ Every `sparkwing doctor` command, flag, and argument, generated from the CLI's o
 
 ## `sparkwing doctor`
 
-Inspect and repair abandoned local state
+Inspect local controller and machine diagnostics
 
-Inspects local state and repairs entries whose owners have stopped.
---dry-run reports proposed repairs. The command preserves live processes,
-active daemon state, and cluster-scoped records.
-
-Repairs cover home permissions, abandoned local run records, ended local
-concurrency records, and orphaned run directories. Run-record repair requires
-a reachable daemon so held runs remain protected.
-
-Run-directory removal requires a local store with recorded runs and profiles
-that all use that store. Directories written within the grace period remain.
-Unaccounted directories are reported for inspection.
-
-On POSIX systems, permission repair removes group, other, and special bits
-while retaining existing owner access. The walk preserves symlinks without
-following them. Windows access permissions are reported as unverified.
-
-The report includes daemon reachability, repeated admission rejections,
-version mismatches, quarantined ledgers, and capacity measurement problems.
-It names the reset command for excessive learned demand floors.
-
-In a project, the Go toolchain finding reports the running Go version,
-GOTOOLCHAIN and its source, and the .sparkwing module's Go floor. It identifies
-fixed pins sparkwing will raise for builds and a blocking GOTOOLCHAIN=local,
-with the installation or unpinning command needed to proceed.
-
-Standalone stores are listed with run counts and the oldest run's age.
-Inspect their records before deleting a store directory.
-
-Settings files that config.yaml replaced are copied into it and left in place
-for older binaries. Doctor lists the ones already copied, which are safe to
-delete once nothing older reads them, apart from any it could not copy and
-any replaced path variable still set.
-
---timeout bounds the daemon and local-state checks, each taking a slice of it,
-so a daemon that accepts connections and answers nothing is reported as wedged
-rather than spending the whole budget. Recovering a wedged daemon means
-stopping the process holding its socket; a restart needs a handshake it will
-not answer. When the budget runs out mid-sweep, doctor prints what it reached
-alongside the error.
+Identify removed timer verbs, service version skew and incompatible store schemas through the local controller lifecycle. Inspection does not open state.db. Partial reports retain findings and exit nonzero when controller inspection fails.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--dry-run` | Report what would be repaired without changing anything |
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain |
-| `--timeout DURATION` | Budget for the daemon and local-state checks; each takes a slice of it (default: 10s) |
-
-### Examples
-
-```sh
-# Diagnose and repair now
-sparkwing doctor
-
-# Report without changing anything
-sparkwing doctor --dry-run
-
-# Agent-readable report
-sparkwing doctor -o json
-
-# Answer quickly on a machine that is already stuck
-sparkwing doctor --timeout 3s
-```
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--dry-run` | Preview with no side effects. |
+| `--timeout DURATION` | timeout |

@@ -139,7 +139,7 @@ func downloadDir(sparkwingDir string) string {
 	return os.TempDir()
 }
 
-// safety: a modules[] row is its own module and `inflate --module` must get that path,
+// safety: a modules[] row is its own module and `inflate --library` must get that path,
 // because a bare name resolves against sparks-core; a packages[] row is not a module at all.
 func blockValue(b sparkCatalogBlock) string {
 	if b.Module != "" {
@@ -230,12 +230,12 @@ func printSparkCatalog(summary sparkCatalogSummary, field, libModule string, blo
 		fmt.Printf("import: %s/<name>\n", libModule)
 	}
 	if field == "modules" {
-		fmt.Printf("edit one: sparkwing pipeline sparks inflate --module %s\n", blockValue(blocks[0]))
+		fmt.Printf("edit one: sparkwing pipeline sparks inflate --library %s\n", blockValue(blocks[0]))
 		return
 	}
 	if libModule != "" {
 		fmt.Printf("these are packages inside one Go module; edit the library: "+
-			"sparkwing pipeline sparks inflate --module %s\n", libModule)
+			"sparkwing pipeline sparks inflate --library %s\n", libModule)
 		return
 	}
 	fmt.Println("these are packages inside one Go module; inflate the library by its module path.")

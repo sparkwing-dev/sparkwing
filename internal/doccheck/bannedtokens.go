@@ -13,7 +13,18 @@ type bannedPattern struct {
 	want string
 }
 
+var bannedGuideRecipes = []bannedPattern{
+	{
+		regexp.MustCompile(`\bsparkwing-cache\b|\bgitcache\b|\bcache-grant-key\b`),
+		"removed; use controller-authorized data records and signed transfers, direct Git and standard package registries",
+	},
+}
+
 var banned = []bannedPattern{
+	{
+		regexp.MustCompile(`\bRetryAuto\b`),
+		"removed; application retries retain the claim and advance the attempt, while lease lapses use a separate disruption count",
+	},
 	{
 		regexp.MustCompile(`pipelines\.yaml`),
 		"the config file is sparkwing.yaml; the legacy pipelines.yaml name is a hard error",
@@ -154,7 +165,7 @@ func checkBannedTokens(contentDir, repoRoot string) bool {
 			return false
 		}
 		rel, _ := filepath.Rel(repoRoot, path)
-		patterns := append(append([]bannedPattern{}, banned...), bannedNarrative...)
+		patterns := append(append(append([]bannedPattern{}, banned...), bannedNarrative...), bannedGuideRecipes...)
 		for ln, line := range strings.Split(string(data), "\n") {
 			for _, b := range patterns {
 				if m := b.re.FindString(line); m != "" {
@@ -165,7 +176,7 @@ func checkBannedTokens(contentDir, repoRoot string) bool {
 	}
 
 	fmt.Printf("doccheck/banned-tokens: %d+%d pattern(s) over docs + help registry -- %d hit(s)\n",
-		len(banned), len(bannedNarrative), len(hits))
+		len(banned)+len(bannedGuideRecipes), len(bannedNarrative), len(hits))
 	if len(hits) > 0 {
 		fmt.Printf("\n%d dead token(s) that must not reappear:\n\n", len(hits))
 		for _, h := range hits {

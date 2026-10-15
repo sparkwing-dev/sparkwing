@@ -1,16 +1,9 @@
 # Self-hosting Sparkwing
 
-For the use cases that the former Compose example covered, choose one of these
-supported paths:
-
-- Run pipelines and the dashboard directly on one machine when you do not need
-  a shared controller.
-- Deploy the complete controller, dashboard, and runner stack to Kubernetes
-  with the `sparkwing-full` Helm chart.
-
-The former Docker Compose example was not a released or acceptance-tested
-distribution. It depended on private image coordinates and stale controller
-settings, so Sparkwing no longer presents it as an install path.
+Use the CLI and local controller on one machine, or deploy the controller and
+runner stack to Kubernetes. Native controller, source, storage and chart
+composition still need acceptance evidence. The sections below identify the
+shared contract and the remaining installation boundaries.
 
 ## Direct local execution
 
@@ -18,84 +11,45 @@ Run a pipeline on the machine where you invoke Sparkwing:
 
 ```bash
 sparkwing run build
-sparkwing serve start
+sparkwing dashboard start
 ```
 
-This path needs no controller or Kubernetes cluster. Runs, logs, and cache
-metadata stay under `~/.sparkwing/` unless the selected profile routes a
-backend elsewhere. See [Local execution](local-execution.md) for profiles,
-remote backends, and the distinction between running and triggering a
-pipeline.
+The local controller starts on demand and owns its home and state store. The
+CLI hosts the run. Profiles select controller connections. Publication and
+remote-cache reads are separate opt-ins. See [Local execution](local-execution.md)
+for the execution and lifecycle integration boundaries.
 
 ## Shared controller and dashboard
 
-Use the [`sparkwing-full` Helm chart](../charts/sparkwing-full/README.md) for a
-shared controller, dashboard, and Kubernetes runner. The
-chart requires Kubernetes and an explicitly compatible image set; its README
-lists the required values and install command. The controller starts with
-`--require-auth` by default, so the render refuses unless
-`controller.bootstrapAdminToken.name` names a Secret holding the first admin
-token, or `controller.allowOpenBootstrap=true` accepts a controller that
-serves every route unauthenticated until a token exists.
+The [`sparkwing-full` Helm chart](../charts/sparkwing-full/README.md) is the
+repository's Kubernetes deployment surface. It requires an explicitly compatible
+image set. The final deployment uses one controller, authorized object storage
+and runners or a launcher. Cloud Jobs require exclusive team nodes, Docker and
+enforced network isolation. Chart rendering alone does not prove those properties.
 
-The repository's opt-in `k8s-e2e` pipeline exercises this deployment against
-an explicit cluster and caller-supplied images. It does not create or delete a
-cluster.
+The opt-in `k8s-e2e` pipeline requires an explicit cluster and image set. It does
+not create or delete a cluster. Native deployment parity remains a launch check.
 
 ### Node log retention
 
-A controller with `--cache-blob-store` keeps node log segments in that
-bucket under one prefix per retention class: `<prefix>/logs/r90/` for a
-team with credits and for a single-team install, `<prefix>/logs/r30/` for a
-team without credits, and `<prefix>/logs/r<days>/` for each team
-`--log-retention team=days` names. The bucket's lifecycle rules expire
-them; the controller never writes rules, because a put replaces the
-bucket's whole configuration. It reads them on its first log request and
-again every 5 minutes while one is missing, and issues no upload URLs into
-a class without an enabled rule that expires the class prefix after
-exactly its days, naming the rule in its log and refusal; the runner then
-keeps that node's log on its own disk.
-Grant the controller `s3:GetLifecycleConfiguration` on the bucket and add
-the rules, merged with any the bucket already has:
+The log storage contract assigns a retention class before signing segment
+uploads. Object-store lifecycle rules must cover each class before URLs are
+issued. The shared free and funded classes are thirty and ninety days.
+Filesystem storage uses its backend's retention mechanism.
 
-```bash
-aws s3api put-bucket-lifecycle-configuration --bucket my-cache-bucket \
-  --lifecycle-configuration '{"Rules": [
-    {"ID": "sparkwing-logs-r90", "Status": "Enabled",
-     "Filter": {"Prefix": "cache/logs/r90/"}, "Expiration": {"Days": 90}},
-    {"ID": "sparkwing-logs-r30", "Status": "Enabled",
-     "Filter": {"Prefix": "cache/logs/r30/"}, "Expiration": {"Days": 30}}]}'
-```
-
-A controller without a cache bucket keeps segments in its output
-directory and expires nothing; deleting a run or a team deletes its logs.
-A controller with neither a cache bucket nor an output directory keeps no
-node logs: its runners keep each log on
-their own disk, and a laptop run whose profile keeps its state there fails
-at start naming the controller. `sparkwing cloud status` reports whether a
-profile's controller keeps node logs.
-On a multi-team controller a segment's stored bytes count against the
-team's log storage, and the hourly storage pass lists the segments to
-correct the count and, for a team without credits past its log share,
-deletes its least recently written finished runs' logs.
+Log reads reauthorize at the controller and cover tagged job-attempt and
+trigger, plan or eval subjects. Log expiry is independent of newest-successful
+run and output pins. Verify retention through persisted reads after completion.
+Native signing, lifecycle verification and final completeness still need
+integration evidence. See [log completeness](observability.md#log-completeness).
 
 ### Overlapping controllers during an upgrade
 
-Two controllers on one PostgreSQL store can overlap while a deployment
-replaces one pod with the next. The maintenance sweep, which fails runs and
-claims whose runners went silent, times out approvals and queued nodes, and
-records why waiting nodes have no agent, runs in one of them at a time under
-a store lease, as the cron tick and the storage pass do. A controller that
-dies mid-sweep holds the lease for at most a minute. A sweep that runs past
-that can overlap the next one; its writes are conditional on the state they
-read, and GitHub reports are guarded per run. The sweep judges a
-waiting node from the runners connected to the controller holding the lease,
-so a runner reporting only to the other one reads as offline until it
-reconnects. GitHub check runs and commit statuses are written under a
-per-run lock in the store, so the two create one check run per run between
-them. The overlap is meant to last a deploy: runner presence, the egress
-meter and the object-store budget still belong to each process, so run one
-controller otherwise. A SQLite store serves one controller process.
+One controller replica is the supported topology. SQLite has one controller
+owner. PostgreSQL coordination uses persistent claim fences and singleton leases
+for maintenance and recovery. Replica-safe storage alone does not establish
+cross-replica live-log fan-out or coordinated request limiting. Validate upgrades
+against the deployment's native acceptance driver.
 
 ### Controller credentials
 
@@ -110,7 +64,7 @@ these file names, mounted whole.
 | File | Holds | Without it |
 |---|---|---|
 | `pg-url` | PostgreSQL connection string for the state store | SQLite at `$SPARKWING_HOME/state.db` |
-| `secrets-key` | Key stored secrets are sealed under, 32 raw bytes or their base64 | see [Security](security.md#secrets-encryption-at-rest) |
+| `secrets-key` | Key stored secrets are sealed under, 32 raw bytes or their base64 | see [Security](security.md#secrets-at-rest) |
 | `secrets-key.previous` | Key values were sealed under before `secrets-key`, during a rotation | one key |
 | `bootstrap-admin-token` | First admin token, stored before the listener binds | no token is provisioned |
 | `license` | Signed multi-team license | one team |
@@ -129,10 +83,9 @@ Keep the directory readable by the controller's user alone (`0700`, files
 
 For object-store downloads through a public ingress, configure the controller
 with a CloudFront distribution domain, trusted key pair ID, and private key.
-Point `--cache-blob-store` at the S3 bucket and prefix used by the existing
-output handlers. This configuration supplies their signed downloads.
-Cache-grant authentication has been removed. Data routes use live capabilities
-and announce availability only when their authenticated adapters are configured.
+The selected storage backend verifies the object before the controller signs
+a download. Public ingress and in-cluster requests use that same authorization
+boundary. Native backend and ingress configuration still need integration proof.
 Pass `--cloudfront-domain` and `--cloudfront-key-pair-id`, then put the
 signing key in the `cloudfront-key`
 [credential](#controller-credentials). Keep it out of Helm values, command
@@ -206,9 +159,9 @@ the controller's `--external-url` to the address runners can reach. Without that
 setting, the URLs use the controller request's address. Uploads and downloads
 use the signed URL's authority and carry no runner token.
 
-Remote `--working-tree` submissions need an S3 cache bucket configured through
-`--cache-blob-store` to hold their uploaded source bundles. A filesystem-only
-controller runs submitted commits from the repository's pushed history.
+Working-tree source bundles use the source-bundle authority and upload contract.
+Native intake and bundle ownership remain integration requirements. The bundle
+can seed acquisition, which still verifies the sealed commit.
 
 ### Backups and upgrades
 
@@ -221,7 +174,7 @@ controller upgrade.
 
 Treat the Helm installation as a new deployment. Sparkwing provides no
 in-place conversion or automatic import for the old Compose volumes. Keep
-`controller-data`, `gitcache-data`, and `logs-data` until you decide whether
+the controller and log data volumes until you decide whether
 their history must be retained, then:
 
 1. Deploy `sparkwing-full` with one compatible image set.
@@ -234,37 +187,32 @@ instead.
 
 ## Add workstation capacity
 
-After a controller is running, a Linux or macOS workstation can run
-`sparkwing-runner` as a user service. With `sparkwing-runner` on PATH and a
-profile naming the controller, one command does the whole setup:
+Enrollment uses a named controller connection and a runner identity:
 
 ```bash
-go install github.com/sparkwing-dev/sparkwing/cmd/sparkwing-runner@latest
-sparkwing cluster runners add --profile prod --name dev-laptop
+sparkwing runners add --profile prod --runner dev-laptop
 ```
 
-Enrollment writes the validated `runner` section of
-`~/.config/sparkwing/config.yaml`, preserving other settings. The credential
-lives in a private `agent-token` file under `runner.credentials_dir`. It is
-absent from YAML and service arguments. `--allow-repo` writes `runner.repos`.
-The runner reads its credential once at startup.
+The CLI checks local prerequisites before minting a runner credential. It writes
+that credential to a private file under `runner.credentials_dir`, then updates
+the `runner` section of the complete machine file. Labels, repository patterns
+and capacity observations grant no authority beyond the controller's enrollment.
 
-The config and service manager are checked before minting. If enrollment then
-fails, it attempts revocation and removes its private files and any new
-service file. Cleanup errors remain part of the enrollment failure. A forced replacement restores the prior runner section
-and leaves its credential intact. Unrelated settings survive cleanup. If
-revocation also fails, the error includes a command to revoke the prefix.
+`--label` and `--repos` accept repeated values. `--no-service` writes the
+configuration for a machine supervised separately. `--force` permits replacing
+an enrollment. A configuration or service-install failure revokes the newly
+minted credential and removes only newly created files. Failed replacement
+restores the previous section without overwriting concurrent changes. Output
+contains metadata, never the bearer.
 
-`--max-concurrent`, `--contribution` and `--labels` set machine preferences.
-`--no-service` writes the configuration for a machine you supervise yourself.
-An existing runner section is replaced only with `--force`. Retire the
-machine with `sparkwing cluster runners remove --profile prod`, which stops the
-service and then revokes the token.
+Retire an enrollment with:
 
-From a source checkout, `bash bin/install.sh` installs both `sparkwing` and
-`sparkwing-runner` into `~/.local/bin` (or `SPARKWING_INSTALL_BIN`). Each run
-updates both binaries from the same checkout. Keep that directory on the
-service's PATH when using the source installer.
+```bash
+sparkwing runners remove --profile prod --runner dev-laptop
+```
+
+Removal validates its controller and credential kind before stopping the service
+and revoking authority. A failed or unconfirmed revocation is an error.
 
 GitHub Releases also contain `sparkwing-runner` binaries for amd64 and arm64
 on macOS, Linux, and Windows (Windows asset names end in `.exe`). Before
@@ -285,19 +233,9 @@ foreground. Linux uses a systemd user service. macOS uses a launchd agent.
 The service file names an existing machine configuration and contains no
 credential. The duplicate shell enrollment installer has been removed.
 
-<!-- design:begin -->
-
-The shared controller and host composition must be connected
-before the installed runner can execute work. An updater outside the runner's
-service can refresh the managed registration while preserving its config path
-and stopped state. Automatic self-update must hand service replacement to an
-external owner because a launchd reload stops the process performing it.
-
-<!-- design:end -->
-
-The native Windows runner uses the same YAML and
-`sparkwing-runner.exe start --config <path>`. Enrollment prints manual service
-steps on Windows. Supervise that command with your service manager.
+Windows enrollment prints manual supervision steps rather than
+installing a login service. See [runner reference](cli-runners.md) and
+[machine settings](machine-config.md).
 
 ### Operate the service
 
@@ -332,23 +270,23 @@ after replacing that file because it retains the credential read at startup.
 triggered and that the runner can reach the configured controller and logs
 URLs.
 
-**A private repository cannot be cloned.** Confirm that the controller has a
-cache URL, that the agent's claim is still live, and that the cache service can
-reach the repository with its configured Git credentials.
+**A private repository cannot be cloned.** Check the sealed source location,
+live claim, repository permission and source-release audit. A stored team
+credential also needs executor consent. See [team git credentials](git-credentials.md).
 
 **A Docker step fails.** Docker is a pipeline dependency, not a Sparkwing
 service requirement. Install and start Docker only on machines assigned jobs
 that invoke it.
 
-## Storage accounting
+## Object storage
 
-Sparkwing no longer ships a cache service. Remove its deployment and
-`controller-token` credential. Storage reservations, download charges and egress
-accounting belong to the controller's database. There is no cache-service
-counter API or service scope to configure.
+The final storage path uses controller-authorized signed `/data` transfers and
+logical records. It has no cache pod, Git mirror proxy or cache-service token.
+The storage owner selects filesystem or object storage and verifies bytes before
+publication. Local pipeline binaries stay in the machine's binary cache.
 
-`GET /api/v1/storage` shows a team what it holds. See [Tenant limits](limits.md)
-for the storage shares and download caps.
+Native backend and deployment wiring remains an integration requirement. See
+[data uploads](data-uploads.md) and [caching](caching.md).
 
 ## Bound storage growth
 
@@ -395,8 +333,10 @@ monthly budget while the run's byte and object totals continue across months.
 Deployment default-tier changes apply to the next ticket for teams without an
 explicit quota.
 
-Hold one team to a tier, or to limits of your own, with
-`PUT /api/v1/operator/object-store/quotas/{team}` (grant `operator.object_store`):
+The free tier configures ten megabytes per run, a gigabyte per month and a
+thousand objects per run. The paid tier configures a gigabyte per run, a hundred
+gigabytes per month and a hundred thousand objects per run. Set an explicit
+team policy with `PUT /api/v1/operator/object-store/quotas/{team}` with deployment `operator.object_store` authority:
 
 ```bash
 curl -sS -X PUT "$CONTROLLER/api/v1/operator/object-store/quotas/acme" \
@@ -417,7 +357,7 @@ consume bytes and objects when a verified upload first commits them.
 
 `storage_allowance_bytes` caps the retained byte count used for billing. Zero
 leaves that count uncapped. Set it independently of write limits with
-`PUT /api/v1/operator/object-store/quotas/{team}/allowance` (grant `operator.object_store`):
+`PUT /api/v1/operator/object-store/quotas/{team}/allowance` with deployment `operator.object_store` authority:
 
 ```bash
 curl -sS -X PUT "$CONTROLLER/api/v1/operator/object-store/quotas/acme/allowance" \

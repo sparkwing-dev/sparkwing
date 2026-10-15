@@ -2,182 +2,119 @@ package main
 
 import (
 	"context"
-	"errors"
+	"crypto/rand"
+	"encoding/json"
 	"fmt"
-	"os"
+	"io"
 	"text/tabwriter"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
-
-	flag "github.com/spf13/pflag"
-
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func runApprove(ctx context.Context, paths orchestrator.Paths, args []string) error {
-	return resolveApprovalVerb(ctx, paths, args, cmdApprove,
-		store.ApprovalResolutionApproved, "approved")
+func resolveRunReview(ctx context.Context, profile string) (controllerwire.RunReview, func(), error) {
+	options, closeTransport, err := controllerOptions(ctx, profile)
+	if err != nil {
+		return nil, nil, err
+	}
+	review, err := client.NewRunReview(options)
+	if err != nil {
+		closeTransport()
+		return nil, nil, err
+	}
+	return review, closeTransport, nil
 }
 
-func runDeny(ctx context.Context, paths orchestrator.Paths, args []string) error {
-	return resolveApprovalVerb(ctx, paths, args, cmdDeny,
-		store.ApprovalResolutionDenied, "denied")
-}
-
-func resolveApprovalVerb(ctx context.Context, paths orchestrator.Paths, args []string, cmd Command, resolution, pastTense string) error {
-	fs := flag.NewFlagSet(cmd.Path, flag.ContinueOnError)
-	on := fs.String("profile", "", "profile name (default: local)")
-	comment := fs.String("comment", "", "optional operator note recorded on the approval")
-	runIDFlag := fs.String("run", "", "run ID holding the approval gate")
-	nodeIDFlag := fs.String("node", "", "node ID of the approval gate")
-	if err := parseAndCheck(cmd, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if rest := fs.Args(); len(rest) > 0 {
-		return fmt.Errorf("%s: unexpected positional %q (use --run and --node)", cmd.Path, rest[0])
-	}
-	if *runIDFlag == "" || *nodeIDFlag == "" {
-		return fmt.Errorf("%s: --run and --node are required", cmd.Path)
-	}
-	runID := *runIDFlag
-	nodeID := *nodeIDFlag
-	var err error
-
-	approver := os.Getenv("USER")
-	if approver == "" {
-		approver = "unknown"
-	}
-
-	var got *store.Approval
-	if *on == "" {
-		got, err = resolveLocalApproval(ctx, paths, runID, nodeID, resolution, approver, *comment, cmd.Path)
-	} else {
-		prof, perr := resolveProfile(*on)
-		if perr != nil {
-			return perr
-		}
-		if err := requireController(prof, cmd.Path); err != nil {
-			return err
-		}
-		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
-		got, err = c.ResolveApproval(ctx, runID, nodeID, resolution, approver, *comment)
-	}
+func runReviewCommand(ctx context.Context, args []string, out io.Writer, resolve func(context.Context, string) (controllerwire.RunReview, func(), error)) error {
+	inv, err := clisurface.Parse("sparkwing", args)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stdout, "%s %s/%s by %s\n", pastTense, got.RunID, got.NodeID, got.Approver)
-	return nil
-}
-
-func resolveLocalApproval(
-	ctx context.Context,
-	paths orchestrator.Paths,
-	runID, nodeID, resolution, approver, comment, verb string,
-) (*store.Approval, error) {
-	if err := paths.EnsureRoot(); err != nil {
-		return nil, err
+	format := inv.Output(color.IsInteractiveStdout())
+	if inv.Help() || inv.Command.Path == cmdAnnotations.Path || inv.Command.Path == cmdApprovals.Path {
+		return writeCommandHelp(surfaceHelp(inv.Command), out, format)
 	}
-	st, _, done, err := orchestrator.OpenStoreForRunWrite(ctx, paths, runID, verb)
-	if err != nil {
-		return nil, err
+	if inv.Command.Path == cmdAnnotationsAdd.Path && inv.Value("job") == "" {
+		return &apierr.Error{Code: apierr.PolicyMissing, Message: "run-scoped annotations are unavailable", Hint: "use --job to annotate a job or one of its steps"}
 	}
-	defer done()
-	return st.ResolveApproval(ctx, runID, nodeID, resolution, approver, comment)
-}
-
-func runApprovalsList(ctx context.Context, paths orchestrator.Paths, args []string) error {
-	fs := flag.NewFlagSet(cmdApprovalsList.Path, flag.ContinueOnError)
-	on := fs.String("profile", "", "profile name (default: local)")
-	runID := fs.String("run", "", "restrict to one run's approvals (pending + history)")
-	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	if err := parseAndCheck(cmdApprovalsList, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	resolvedFmt, rerr := resolveOutputFormat(*outFmt, cmdApprovalsList.Path)
-	if rerr != nil {
-		return rerr
-	}
-	emitJSON := resolvedFmt == "json"
-
-	var rows []*store.Approval
-	var err error
-	if *on == "" {
-		rows, err = listLocalApprovals(ctx, paths, *runID)
-	} else {
-		prof, perr := resolveProfile(*on)
-		if perr != nil {
-			return perr
-		}
-		if err := requireController(prof, cmdApprovalsList.Path); err != nil {
-			return err
-		}
-		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
-		if *runID != "" {
-			rows, err = c.ListApprovalsForRun(ctx, *runID)
-		} else {
-			rows, err = c.ListPendingApprovals(ctx)
-		}
-	}
+	review, closeTransport, err := resolve(ctx, inv.Value("profile"))
 	if err != nil {
 		return err
 	}
-	if emitJSON {
-		return ndjson.Write(os.Stdout, rows)
+	defer closeTransport()
+	switch inv.Command.Path {
+	case cmdAnnotationsList.Path:
+		return writeAnnotationList(ctx, review, inv, out, format)
+	case cmdAnnotationsAdd.Path:
+		return writeAnnotation(ctx, review, inv, out, format)
+	case cmdApprovalsList.Path:
+		return writeApprovals(ctx, review, inv, out, format)
+	case cmdApprove.Path, cmdDeny.Path:
+		return writeApprovalDecision(ctx, review, inv, out, format)
+	default:
+		return &clisurface.UsageError{Path: inv.Command.Path, Message: "review subcommand required"}
 	}
-	return renderApprovalsTable(os.Stdout, rows)
 }
 
-func listLocalApprovals(ctx context.Context, paths orchestrator.Paths, runID string) ([]*store.Approval, error) {
-	if err := paths.EnsureRoot(); err != nil {
-		return nil, err
-	}
-	if runID != "" {
-		st, _, done, err := orchestrator.OpenStoreForRun(ctx, paths, runID)
-		if err != nil {
-			return nil, err
-		}
-		defer done()
-		return st.ListApprovalsForRun(ctx, runID)
-	}
-	st, err := store.Open(paths.StateDB())
+func writeApprovals(ctx context.Context, review controllerwire.RunReview, inv clisurface.Invocation, out io.Writer, format string) error {
+	result, err := review.ListApprovals(ctx, inv.Value("run"))
 	if err != nil {
-		return nil, err
+		return err
 	}
-	defer func() { _ = st.Close() }()
-	return st.ListPendingApprovals(ctx)
-}
-
-func renderApprovalsTable(w *os.File, rows []*store.Approval) error {
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "RUN\tNODE\tSTATUS\tREQUESTED\tPOLICY\tAPPROVER\tCOMMENT\tMESSAGE")
-	for _, a := range rows {
-		status := "pending"
-		if a.ResolvedAt != nil {
-			status = a.Resolution
+	if format == "json" {
+		return ndjson.Write(out, result.Approvals)
+	}
+	if format == "plain" {
+		for _, approval := range result.Approvals {
+			if _, err := fmt.Fprintf(out, "%s/%s\n", approval.RunID, approval.JobID); err != nil {
+				return err
+			}
 		}
-		age := time.Since(a.RequestedAt).Round(time.Second).String()
-		msg := truncateOneLine(a.Message, 60)
-		comment := truncateOneLine(a.Comment, 40)
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s ago\t%s\t%s\t%s\t%s\n",
-			a.RunID, a.NodeID, status, age,
-			orDashApproval(a.OnTimeout), orDashApproval(a.Approver),
-			orDashApproval(comment), msg)
+		return nil
+	}
+	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "RUN\tJOB\tSTATUS\tREQUESTED\tPOLICY\tAPPROVER\tCOMMENT\tMESSAGE")
+	for _, approval := range result.Approvals {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", approval.RunID, approval.JobID, approvalStatus(approval), approval.RequestedAt.Format(time.RFC3339), orDashApproval(approval.OnTimeout), orDashApproval(approval.Approver), orDashApproval(truncateOneLine(approval.Comment, 40)), truncateOneLine(approval.Message, 60))
 	}
 	return tw.Flush()
 }
 
-func orDashApproval(s string) string {
-	if s == "" {
+func writeApprovalDecision(ctx context.Context, review controllerwire.RunReview, inv clisurface.Invocation, out io.Writer, format string) error {
+	resolution := "approved"
+	if inv.Command.Path == cmdDeny.Path {
+		resolution = "denied"
+	}
+	result, err := review.ResolveApproval(ctx, inv.Value("run"), inv.Value("job"), controllerwire.ApprovalDecision{Resolution: resolution, Comment: inv.Value("comment"), IdempotencyKey: rand.Text()})
+	if err != nil {
+		return err
+	}
+	if format == "json" {
+		return json.NewEncoder(out).Encode(result)
+	}
+	if format == "plain" {
+		_, err = fmt.Fprintf(out, "%s/%s\n", result.Approval.RunID, result.Approval.JobID)
+		return err
+	}
+	_, err = fmt.Fprintf(out, "%s %s/%s by %s\n", result.Approval.Resolution, result.Approval.RunID, result.Approval.JobID, result.Approval.Approver)
+	return err
+}
+
+func approvalStatus(approval controllerwire.Approval) string {
+	if approval.ResolvedAt == nil {
+		return "pending"
+	}
+	return approval.Resolution
+}
+
+func orDashApproval(value string) string {
+	if value == "" {
 		return "-"
 	}
-	return s
+	return value
 }

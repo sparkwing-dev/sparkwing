@@ -3,7 +3,7 @@ package controller_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
@@ -55,16 +54,15 @@ func TestReceiptEndpoint_RoundTrip(t *testing.T) {
 	mustExec(t, st, "UPDATE nodes SET status='done', outcome='success', started_at=?, finished_at=?, output_json=? WHERE node_id=?",
 		start.Add(1*time.Hour).UnixNano(), end.UnixNano(), []byte(`{"ok":true}`), "deploy")
 
-	srv := httptest.NewServer(controller.New(st, nil).
+	handler := controller.New(st, nil).
 		WithCostRate(0.05, "controller config (cost_per_runner_hour=$0.05)").
-		Handler())
-	defer srv.Close()
-	c := client.New(srv.URL, nil)
-
-	body, err := c.GetRunReceipt(ctx, "run-recpt-1")
-	if err != nil {
-		t.Fatalf("GetRunReceipt: %v", err)
+		Handler()
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/runs/run-recpt-1/receipt", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("receipt: %d %s", response.Code, response.Body)
 	}
+	body := response.Body.Bytes()
 	var rec map[string]any
 	if err := json.Unmarshal(body, &rec); err != nil {
 		t.Fatalf("decode receipt: %v\n%s", err, body)
@@ -106,13 +104,10 @@ func TestReceiptEndpoint_NotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = st.Close() }()
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
-	defer srv.Close()
-	c := client.New(srv.URL, nil)
-
-	_, err = c.GetRunReceipt(context.Background(), "missing")
-	if !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("want ErrNotFound, got %v", err)
+	response := httptest.NewRecorder()
+	controller.New(st, nil).Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/runs/missing/receipt", nil))
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("want 404, got %d: %s", response.Code, response.Body)
 	}
 }
 

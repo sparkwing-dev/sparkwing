@@ -619,7 +619,7 @@ func parsePlanDoc(pipeline string, raw []byte) (repos.Plan, error) {
 		name = pipeline
 	}
 	plan := repos.Plan{Pipeline: name}
-	for _, n := range doc.Nodes {
+	for _, n := range doc.Jobs {
 		pn := repos.PlanNode{
 			ID:          n.ID,
 			Deps:        n.Deps,

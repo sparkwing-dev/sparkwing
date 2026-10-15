@@ -10,11 +10,12 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
@@ -35,13 +36,10 @@ func init() {
 }
 
 func main() {
-	if len(os.Args) < 2 || os.Args[1] != "__sdk-install" {
-		cleanupStaleUpdate()
-		toolchainActive = takeToolchainActive()
-	}
-
 	if err := runSparkwing(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, color.Red(color.Bold("sparkwing error:")), err)
+		if writeErr := writeInvocationError(os.Stderr, err, apierr.WriteJSON); writeErr != nil {
+			fmt.Fprintln(os.Stderr, "sparkwing: write diagnostic:", writeErr)
+		}
 		os.Exit(exitCodeFor(err))
 	}
 }
@@ -86,6 +84,10 @@ func exitCodeFor(err error) int {
 	if err == nil {
 		return 0
 	}
+	var usage *clisurface.UsageError
+	if errors.As(err, &usage) {
+		return int(clisurface.ExitUsage)
+	}
 	var commandError *cliError
 	if errors.As(err, &commandError) {
 		if commandError.code == 0 {
@@ -97,6 +99,10 @@ func exitCodeFor(err error) int {
 }
 
 func dispatchRun(args []string) error {
+	return dispatchRunWithEngine(args, switchToolchain)
+}
+
+func dispatchRunWithEngine(args []string, selectEngine func(string) error) error {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		if len(args) == 0 {
 			PrintHelp(cmdRun, os.Stderr)
@@ -115,6 +121,13 @@ func dispatchRun(args []string) error {
 	if flags.parseErr != nil {
 		return flags.parseErr
 	}
+	for _, option := range []struct{ name, value string }{
+		{"publish", flags.publish}, {"sw-cache-from", flags.cacheFrom}, {"target", flags.target},
+	} {
+		if option.value != "" {
+			return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "run: --" + option.name + " is unavailable in this build"}
+		}
+	}
 	var err error
 
 	if flags.profile != "" {
@@ -123,9 +136,6 @@ func dispatchRun(args []string) error {
 	}
 	if flags.unknownRunnerFlag != "" {
 		return fmt.Errorf("run: unknown runner flag %q; see `sparkwing run --help`, or put pipeline arguments after --", flags.unknownRunnerFlag)
-	}
-	if separator := slices.Index(passthrough, "--"); separator >= 0 {
-		passthrough = slices.Delete(passthrough, separator, separator+1)
 	}
 	priority := ""
 	if flags.prioritySet {
@@ -158,7 +168,7 @@ func dispatchRun(args []string) error {
 	}
 
 	// safety: the exec replays this command, so the pin must settle before any daemon, worktree, run, or output.
-	if err := switchToolchain(dir); err != nil {
+	if err := selectEngine(dir); err != nil {
 		return err
 	}
 
@@ -197,13 +207,7 @@ func dispatchRun(args []string) error {
 	}
 
 	env := os.Environ()
-	logFormat := os.Getenv("SPARKWING_LOG_FORMAT")
-	if logFormat == "" {
-		logFormat = logFormatJSON
-		if color.IsInteractiveStdout() {
-			logFormat = logFormatPretty
-		}
-	}
+	logFormat := flags.outputFormat
 	if flags.index != "" {
 		bound, bindErr := bindRunIndex(env, flags.index, os.Stdout, logFormat)
 		if bindErr != nil {
@@ -250,7 +254,7 @@ func dispatchRun(args []string) error {
 	if err != nil {
 		return run.finish(fmt.Errorf("%s: %w", pipelineName, err))
 	}
-	findings := declaredRisks(run.ctx, dir, run.pipeline.Entrypoint)
+	findings := risksIn(schema)
 	if err := enforceRiskGate(pipelineName, findings, flags); err != nil {
 		return run.finish(err)
 	}
@@ -324,28 +328,61 @@ func printPin(pipelineName string) {
 	}
 }
 
-func runSparkwing(args []string) error {
-	if len(args) > 0 && args[0] == "__sdk-install" {
-		return runSDKInstall(args[1:])
-	}
-	args, err := moveRootFlags(args)
+func runSparkwing(args []string) (result error) {
+	inv, err := clisurface.Parse("sparkwing", args)
+	defer func() {
+		if result != nil {
+			result = &invocationError{inv: inv, cause: result}
+		}
+	}()
 	if err != nil {
 		return err
 	}
-	toolchainReplayArgs = args
-	if cmd, ok := commandHelp(args); ok {
-		requested, _, err := requestedOutput(args)
-		if err != nil {
-			return err
-		}
-		mode, err := resolveOutputFormat(requested, cmd.Path)
-		if err != nil {
-			return err
-		}
-		return writeCommandHelp(*cmd, os.Stdout, mode)
+	if inv.Help() || inv.Command.Path != "sparkwing version" && len(childCommands(inv.Command.Path)) > 0 {
+		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
+	if checkout := inv.Value("checkout"); checkout != "" {
+		previous, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		if err := os.Chdir(checkout); err != nil {
+			return err
+		}
+		defer func() { result = errors.Join(result, os.Chdir(previous)) }()
+	}
+	if inv.Command.Path == "sparkwing __sdk-install" {
+		return runSDKInstall(invocationArgs(inv)[1:])
+	}
+	cleanupStaleUpdate()
+	args = invocationArgs(inv)
+	toolchainReplayArgs = args
 	gitenv.Unbind()
 	noteVersionTransition(os.Stderr, args[0])
+	return dispatchCommand(args)
+}
+
+func invocationArgs(inv clisurface.Invocation) []string {
+	args := strings.Fields(strings.TrimPrefix(inv.Command.Path, "sparkwing "))
+	if inv.Pipeline != "" {
+		args = append(args, inv.Pipeline)
+	}
+	for _, f := range append(clisurface.GlobalFlags(), inv.Command.Flags...) {
+		if f.Name == "checkout" || f.Name == "help" || f.Name == "help-all" {
+			continue
+		}
+		for _, value := range inv.Flags[f.Name] {
+			args = append(args, "--"+f.Name+"="+value)
+		}
+	}
+	if inv.Args != nil {
+		args = append(args, "--")
+		args = append(args, inv.Args...)
+	}
+	return args
+}
+
+func dispatchCommand(args []string) error {
 	switch args[0] {
 	case "info":
 		return runInfo(args[1:])
@@ -361,27 +398,36 @@ func runSparkwing(args []string) error {
 		return runCache(args[1:])
 	case "daemon":
 		return runDaemon(args[1:])
-
-	case "serve":
+	case "dashboard":
 		return runDashboard(args[1:])
-
 	case "repos":
 		return runRepos(args[1:])
-
-	case "crons":
-		return runCrons(args[1:])
-
-	case "cloud":
-		return runCloud(args[1:])
-	case "cluster":
-		return runCluster(args[1:])
+	case "schedules":
+		return runSchedules(context.Background(), args[1:])
+	case "runners":
+		if len(args) > 1 && args[1] == "list" {
+			return runRunnersList(context.Background(), args[2:])
+		}
+		return runRunners(args[1:])
+	case "tokens":
+		return runTokens(args[1:])
+	case "pools":
+		return runPools(context.Background(), args[1:])
+	case "profiles":
+		return runProfiles(args[1:])
+	case "operator":
+		switch args[1] {
+		case "limits":
+			return runOperatorLimits(args[2:])
+		case "object-store":
+			return runOperatorObjectStore(args[2:])
+		case "tokens":
+			return runTokenCommand(context.Background(), args[2:], true)
+		}
 	case "doctor":
 		return runDoctor(args[1:])
 	case "secrets":
 		return runSecret(args[1:])
-
-	case "configure":
-		return runConfigure(args[1:])
 	case "completion":
 		return runCompletion(args[1:])
 	case "examples":
@@ -390,101 +436,30 @@ func runSparkwing(args []string) error {
 		return runDocs(args[1:])
 	case "commands":
 		return runCommands(args[1:])
+	case "upgrade":
+		return runUpgrade(args[1:])
 	case "update":
 		return runUpdate(args[1:])
-	case "version", "--version", "-V":
+	case "version":
 		return runVersion(args[1:])
-
 	case "debug":
 		return runDebug(args[1:])
-
 	case "wingd":
 		return runWingd(args[1:])
-	case "__dashboard-supervise":
-		return runDashboardSupervise(args[1:])
-	case consumerSpawnVerb:
-		return runRunsConsumeDetached(args[1:])
+	case "__tick":
+		return runCronsTick(args[1:])
+	case "__sdk-install":
+		return runSDKInstall(args[1:])
 	case "__host-trigger":
 		return runTriggerHost(args[1:])
 	case "__complete":
 		return runInternalComplete(args[1:])
-	case "help", "-h", "--help":
-		PrintHelp(cmdSparkwing, os.Stdout)
-		return nil
-	default:
-		PrintHelp(cmdSparkwing, os.Stderr)
-		return fmt.Errorf("unknown subcommand %q", args[0])
 	}
+	return fmt.Errorf("%s: execution is not implemented", args[0])
 }
 
-func runRunsApprovals(contextValue context.Context, paths orchestrator.Paths, args []string) error {
-	if handleParentHelp(cmdApprovals, args) {
-		return nil
-	}
-	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return runApprovalsList(contextValue, paths, args)
-	}
-	switch args[0] {
-	case "list":
-		return runApprovalsList(contextValue, paths, args[1:])
-	case "approve":
-		return runApprove(contextValue, paths, args[1:])
-	case "deny":
-		return runDeny(contextValue, paths, args[1:])
-	default:
-		PrintHelp(cmdApprovals, os.Stderr)
-		return fmt.Errorf("runs approvals: unknown subcommand %q", args[0])
-	}
-}
-
-func runCluster(args []string) error {
-	if handleParentHelp(cmdCluster, args) {
-		return nil
-	}
-	if len(args) == 0 {
-		PrintHelp(cmdCluster, os.Stdout)
-		return nil
-	}
-	switch args[0] {
-	case "agents":
-		return runAgents(args[1:])
-	case "runners":
-		return runRunners(args[1:])
-	case "worker":
-		return runWorker(args[1:])
-	case "triggers":
-		return runTriggers(args[1:])
-	case "tokens":
-		return runTokens(args[1:])
-	case "limits":
-		return runComputeLimits(args[1:])
-	case "concurrency":
-		return runConcurrency(args[1:])
-	case "object-store":
-		return runClusterObjectStore(args[1:])
-	default:
-		PrintHelp(cmdCluster, os.Stderr)
-		return fmt.Errorf("cluster: unknown subcommand %q", args[0])
-	}
-}
-
-func runConfigure(args []string) error {
-	if handleParentHelp(cmdConfigure, args) {
-		return nil
-	}
-	if len(args) == 0 {
-		PrintHelp(cmdConfigure, os.Stdout)
-		return nil
-	}
-	switch args[0] {
-	case "init":
-		return runConfigureInit(args[1:])
-	case "profiles":
-		return runProfiles(args[1:])
-	default:
-		PrintHelp(cmdConfigure, os.Stderr)
-		return fmt.Errorf("configure: unknown subcommand %q", args[0])
-	}
+func runRunsApprovals(ctx context.Context, args []string) error {
+	return runReviewCommand(ctx, append([]string{"runs", "approvals"}, args...), os.Stdout, resolveRunReview)
 }
 
 func runJobs(args []string) error {
@@ -495,286 +470,21 @@ func runJobs(args []string) error {
 		PrintHelp(cmdJobs, os.Stderr)
 		return errors.New("jobs: subcommand required")
 	}
-	paths, err := orchestrator.DefaultPaths()
-	if err != nil {
-		return err
-	}
 	contextValue := context.Background()
 
 	switch args[0] {
 	case "approvals":
-		return runRunsApprovals(contextValue, paths, args[1:])
+		return runRunsApprovals(contextValue, args[1:])
 	case "annotations":
-		return runRunsAnnotations(contextValue, paths, args[1:])
+		return runRunsAnnotations(contextValue, args[1:])
 	case "list":
-		fs := flag.NewFlagSet(cmdJobsList.Path, flag.ContinueOnError)
-		limit := fs.Int("limit", 20, "runs per page")
-		outputFormat := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: table)")
-		quiet := fs.BoolP("quiet", "q", false, "print only run ids, one per line")
-		since := lookbackDuration(fs, "since", 0, "only runs newer than this (1h, 24h, 7d, and similar durations)")
-		pipelines := multiFlagVar(fs, "pipeline", "filter by pipeline (repeatable; OR semantics; prefix `!` to exclude)")
-		statuses := multiFlagVar(fs, "status", "filter by status (repeatable; OR semantics; prefix `!` to exclude)")
-		branches := multiFlagVar(fs, "branch", "filter by git branch (repeatable; prefix `!` to exclude)")
-		shas := multiFlagVar(fs, "sha", "filter by git sha prefix (repeatable; prefix `!` to exclude)")
-		errorSubstring := fs.String("error", "", "substring match against the persisted failure reason")
-		search := fs.String("search", "", "free-text search across pipeline/branch/sha/id/error; prefix a term with `-` to exclude")
-		startedAfter := fs.String("started-after", "", "only runs whose StartedAt >= this (today, yesterday, 24h, 7d, or a date)")
-		startedBefore := fs.String("started-before", "", "only runs whose StartedAt <= this")
-		finishedAfter := fs.String("finished-after", "", "only runs whose FinishedAt >= this (excludes still-running)")
-		finishedBefore := fs.String("finished-before", "", "only runs whose FinishedAt <= this (excludes still-running)")
-		cursor := fs.String("cursor", "", "continue after next_cursor with the same filters")
-		byPipeline := fs.Bool("by-pipeline", false, "pivot into one row per pipeline with a status sparkline of the last N runs")
-		sparkline := fs.Int("sparkline", 30, "length of the sparkline when --by-pipeline is set")
-		style := fs.String("style", "ascii", "sparkline glyph style: ascii|block|dot")
-		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block) instead of this machine's store")
-		repos := multiFlagVar(fs, "repo", "filter by repository owner/name (repeatable)")
-		rootOnly := fs.Bool("root-only", false, "exclude child runs")
-		wait := fs.Bool("wait", false, "block until at least one run matches")
-		waitTimeout := fs.Duration("wait-timeout", 2*time.Minute, "give up (exit 2) after this long when --wait is set")
-		watch := fs.BoolP("watch", "w", false, "keep polling and print each newer matching run as it appears")
-		groupBy := fs.String("group-by", "", "with --status failed: one failure row per run, or cluster by step or node (run|step|node)")
-		if err := parseAndCheck(cmdJobsList, fs, args[1:]); err != nil {
-			if errors.Is(err, errHelpRequested) {
-				return nil
-			}
-			return err
-		}
-		resolvedFormat, err := resolveOutputFormat(*outputFormat, "runs list")
-		if err != nil {
-			return err
-		}
-		if *limit == 0 {
-			return fmt.Errorf("runs list: --limit 0 is not a page size; page with --cursor instead, " +
-				"following next_cursor until truncated is false")
-		}
-		if *limit < 0 {
-			return fmt.Errorf("runs list: --limit must be greater than zero, got %d", *limit)
-		}
-
-		pipelineInc, pipelineExc := orchestrator.SplitExcludes(*pipelines)
-		statusInc, statusExc := orchestrator.SplitExcludes(*statuses)
-		branchInc, branchExc := orchestrator.SplitExcludes(*branches)
-		shaInc, shaExc := orchestrator.SplitExcludes(*shas)
-
-		pipelineSet := pipelineInc
-
-		compiled := orchestrator.CompiledFilter{
-			Branches:       branchInc,
-			BranchExcludes: branchExc,
-			SHAPrefixes:    shaInc,
-			SHAExcludes:    shaExc,
-			ErrorSubstr:    *errorSubstring,
-			StatusExcludes: statusExc,
-			PipelineExcl:   pipelineExc,
-			Search:         orchestrator.ParseSearch(*search),
-		}
-		for _, ts := range []struct {
-			raw  string
-			into *time.Time
-			name string
-		}{
-			{*startedAfter, &compiled.StartedAfter, "started-after"},
-			{*startedBefore, &compiled.StartedBefore, "started-before"},
-			{*finishedAfter, &compiled.FinishedAfter, "finished-after"},
-			{*finishedBefore, &compiled.FinishedBefore, "finished-before"},
-		} {
-			if ts.raw == "" {
-				continue
-			}
-			t, err := orchestrator.ParseLooseDate(ts.raw)
-			if err != nil {
-				return fmt.Errorf("runs list: --%s: %w", ts.name, err)
-			}
-			*ts.into = t
-		}
-
-		var sparklineStyle orchestrator.SparklineStyle
-		switch *style {
-		case "ascii", "":
-			sparklineStyle = orchestrator.SparkASCII
-		case "block":
-			sparklineStyle = orchestrator.SparkBlock
-		case "dot":
-			sparklineStyle = orchestrator.SparkDot
-		default:
-			return fmt.Errorf("runs list: --style must be ascii|block|dot, got %q", *style)
-		}
-
-		listOptions := orchestrator.ListOpts{
-			Limit:      *limit,
-			Pipelines:  pipelineSet,
-			Statuses:   statusInc,
-			Repos:      *repos,
-			RootOnly:   *rootOnly,
-			Since:      *since,
-			JSON:       resolvedFormat == "json",
-			Quiet:      *quiet,
-			Filter:     compiled,
-			Cursor:     *cursor,
-			ByPipeline: *byPipeline,
-			Pivot: orchestrator.PivotOpts{
-				SparklineLen: *sparkline,
-				Style:        sparklineStyle,
-			},
-		}
-
-		p, profileErr := resolveProfileFlag(*profileName)
-		if profileErr != nil {
-			return profileErr
-		}
-		listOptions.Profile = p
-		if *groupBy != "" {
-			return listFailures(contextValue, paths, listOptions, *groupBy, resolvedFormat == "json")
-		}
-		if (*wait || *watch) && clientSideFilter(compiled) {
-			return errors.New("runs list: --wait and --watch match on --pipeline, --status, --branch, --sha, --repo, --root-only and --since only")
-		}
-		if *wait {
-			if err := waitForMatchingRun(contextValue, paths, listOptions, *waitTimeout); err != nil {
-				return err
-			}
-		}
-		if err := orchestrator.ListJobs(contextValue, paths, listOptions, os.Stdout); err != nil {
-			return err
-		}
-		if *watch {
-			return watchNewRuns(contextValue, paths, listOptions, resolvedFormat == "json")
-		}
-		return nil
+		return runRunsList(contextValue, args[1:])
 
 	case "status":
-		fs := flag.NewFlagSet(cmdJobsStatus.Path, flag.ContinueOnError)
-		runID := fs.String("run", "", "run identifier")
-		outputFormat := fs.StringP("output", "o", "", "output format: json|table|plain (default: table)")
-		follow := fs.BoolP("follow", "f", false, "poll until the run reaches a terminal state")
-		steps := fs.Bool("steps", false, "render every step on every node in plain output")
-		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block) instead of this machine's store")
-		exitZero := fs.Bool("exit-zero", false,
-			"return exit code 0 even when the run failed/cancelled (opt out of the scriptable exit contract)")
-		view := fs.String("view", "", "render one view of the run: summary|timeline|receipt|errors|tree")
-		timeout := fs.Duration("timeout", 0, "with --follow, give up (exit 2) after this long; 0 waits without limit")
-		poll := fs.Duration("poll", 3*time.Second, "with --timeout, -o json or --view, the poll interval while following")
-		width := fs.Int("width", 60, "timeline bar width in characters (--view timeline)")
-		if err := parseAndCheck(cmdJobsStatus, fs, args[1:]); err != nil {
-			if errors.Is(err, errHelpRequested) {
-				return nil
-			}
-			return err
-		}
-		id, idErr := runIDFromArgs(cmdJobsStatus.Path, fs.Args(), *runID)
-		if idErr != nil {
-			return idErr
-		}
-		*runID = normalizeRunID(id)
-		resolvedFormat, err := resolveOutputFormat(*outputFormat, "runs status")
-		if err != nil {
-			return err
-		}
-		if *view == "receipt" && fs.Changed("output") && resolvedFormat != "json" {
-			return errors.New("runs status: --view receipt only renders json")
-		}
-		if *timeout != 0 && !*follow {
-			return errors.New("runs status: --timeout needs --follow")
-		}
-		statusOptions := orchestrator.StatusOpts{JSON: resolvedFormat == "json", Follow: *follow, Steps: *steps}
-		p, profileErr := resolveProfileFlag(*profileName)
-		if profileErr != nil {
-			return profileErr
-		}
-		statusOptions.Profile = p
-		if *follow && (*timeout > 0 || resolvedFormat != "pretty" || *view != "") {
-			if err := waitForTerminalRun(contextValue, paths, p, *runID, *timeout, *poll); err != nil {
-				return err
-			}
-			statusOptions.Follow = false
-		}
-		if *view != "" {
-			v := runView{name: *view, runID: *runID, format: resolvedFormat, steps: *steps, width: *width}
-			if *view == "receipt" {
-				v.format = "json"
-			}
-			if p != nil && (*profileName != "" || p.ControllerURL() != "") {
-				if err := requireController(p, "runs status --view"); err != nil {
-					return err
-				}
-				v.remote = p
-			}
-			if err := renderRunView(contextValue, paths, v); err != nil {
-				return err
-			}
-		} else if err := orchestrator.JobStatus(contextValue, paths, *runID, statusOptions, os.Stdout); err != nil {
-			return err
-		}
-		if *exitZero {
-			return nil
-		}
+		return runRunsStatus(contextValue, args[1:])
 
-		status, statusErr := orchestrator.RunStatus(contextValue, paths, p, *runID)
-		if statusErr != nil {
-			return statusErr
-		}
-		return statusExitCode(status)
-
-	case "logs":
-		fs := flag.NewFlagSet(cmdJobsLogs.Path, flag.ContinueOnError)
-		runID := fs.String("run", "", "run identifier")
-		node := fs.String("node", "", "limit output to one node id")
-		outputFormat := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
-		follow := fs.BoolP("follow", "f", false, "tail the log(s) until the run terminates")
-		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block) instead of this machine's store")
-		tail := fs.Int("tail", 0, "print only the last N lines (server-side in cluster mode)")
-		head := fs.Int("head", 0, "print only the first N lines (server-side in cluster mode)")
-		lines := fs.String("lines", "", "1-indexed inclusive line range A:B (server-side in cluster mode)")
-		grep := fs.String("grep", "", "substring filter (server-side in cluster mode)")
-		since := lookbackDuration(fs, "since", 0,
-			"only include output from nodes whose StartedAt >= now-D; with --grep and no --run, only runs newer than D (5m, 1h, 7d, and similar durations)")
-		tree := fs.Bool("tree", false, "merge parent run + descendants into one chronological stream (local only)")
-		eventsOnly := fs.Bool("events-only", false, "show run and step lifecycle events; stored runs use their recorded events")
-		noEvents := fs.Bool("no-events", false, "show node output only")
-		search := addLogSearchFlags(fs)
-		if err := parseAndCheck(cmdJobsLogs, fs, args[1:]); err != nil {
-			if errors.Is(err, errHelpRequested) {
-				return nil
-			}
-			return err
-		}
-		*runID = normalizeRunID(*runID)
-		resolvedFormat, err := resolveTTYAwareOutput(*outputFormat, "runs logs")
-		if err != nil {
-			return err
-		}
-		if *runID == "" && *grep == "" {
-			return errors.New("runs logs: --run is required; pass --grep without --run to search across runs")
-		}
-		if *runID == "" && *grep != "" {
-			return searchRunLogs(contextValue, paths, fs, search, *grep, *since, *profileName, resolvedFormat)
-		}
-		if search.changed(fs) {
-			return errors.New("runs logs: --pipeline, --status, --branch, --sha, --started-after, --started-before, --limit, --max-matches and --quiet search across runs; pass --grep without --run")
-		}
-		if *tail > 0 && *head > 0 {
-			return errors.New("runs logs: --tail and --head cannot be combined")
-		}
-		options := orchestrator.LogsOpts{
-			Node:       *node,
-			JSON:       resolvedFormat == "json",
-			Follow:     *follow,
-			Format:     resolvedFormat,
-			Tail:       *tail,
-			Head:       *head,
-			Lines:      *lines,
-			Grep:       *grep,
-			Since:      *since,
-			Tree:       *tree,
-			EventsOnly: *eventsOnly,
-			NoEvents:   *noEvents,
-		}
-		p, profileErr := resolveProfileFlag(*profileName)
-		if profileErr != nil {
-			return profileErr
-		}
-		options.Profile = p
-		return orchestrator.JobLogs(contextValue, paths, *runID, options, os.Stdout)
+	case "logs", "grep":
+		return runRunsLogs(contextValue, args[0], args[1:])
 
 	case "consumer":
 		return runRunsConsumer(args[1:])
@@ -786,7 +496,7 @@ func runJobs(args []string) error {
 		return runRunsPrune(contextValue, args[1:])
 
 	case "stats":
-		return runJobsStats(contextValue, paths, args[1:])
+		return runJobsStats(contextValue, args[1:])
 	default:
 		return fmt.Errorf("runs: unknown command %q", args[0])
 	}

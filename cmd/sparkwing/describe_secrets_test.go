@@ -12,7 +12,6 @@ const describeSecretsSource = `package main
 import (
 	"context"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/runner"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -31,7 +30,7 @@ func (*Fixture) Plan(_ context.Context, p *sparkwing.Plan, _ sparkwing.NoInputs,
 
 func main() {
 	sparkwing.Register("fixture", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Fixture{} })
-	runner.Main()
+	sparkwing.Main()
 }
 `
 
@@ -46,7 +45,7 @@ func TestPipelineDescribeSecretsFollowsTheSourceAndFailsLoudly(t *testing.T) {
 	describe := func(name string) {
 		t.Helper()
 		e.useHostedFixture(t, strings.Replace(describeSecretsSource, "NAME", name, 1))
-		stdout, stderr, err := e.runStdout("pipeline", "describe", "--name", "fixture", "--secrets", "-o", "json")
+		stdout, stderr, err := e.runStdout("pipeline", "describe", "--pipeline", "fixture", "--secrets", "-o", "json")
 		if err != nil {
 			t.Fatalf("describe --secrets: %v\n%s", err, stderr)
 		}
@@ -66,7 +65,7 @@ func TestPipelineDescribeSecretsFollowsTheSourceAndFailsLoudly(t *testing.T) {
 	describe("RENAMED_TOKEN")
 
 	writeSDKFixture(t, filepath.Join(e.repoDir, ".sparkwing"), "package main\n\nfunc main() { undefined() }\n")
-	if out, err := e.run("pipeline", "describe", "--name", "fixture", "--secrets", "-o", "json"); err == nil {
+	if out, err := e.run("pipeline", "describe", "--pipeline", "fixture", "--secrets", "-o", "json"); err == nil {
 		t.Fatalf("describe --secrets of a pipeline that cannot build succeeded:\n%s", out)
 	}
 }
