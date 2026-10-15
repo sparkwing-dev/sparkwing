@@ -109,6 +109,14 @@ func CheckStoreBillingBoundary(ctx context.Context, root, id string) (err error)
 	if !slices.Equal(usage, []store.RunCreditUsage{{RunID: "old", Seconds: 3, AmountMicro: 30, LastChargedAt: grants[0].CreatedAt}}) {
 		return fmt.Errorf("tenant run usage includes storage or a foreign ledger: %+v", usage)
 	}
+	totals, err := s.CreditLedgerTotals(ctx)
+	if err != nil {
+		return err
+	}
+	wantTotals := store.CreditLedgerTotals{GrantedPaidMicro: 17_000_000_000, ChargedMicro: 121, StorageMicro: billed.ChargedMicro, SettledSeconds: 6, BalanceMicro: 17_000_000_000 - 121 - billed.ChargedMicro}
+	if totals != wantTotals {
+		return fmt.Errorf("deployment totals include reserved or storage seconds: %+v, want %+v", totals, wantTotals)
+	}
 	result, err := operator.MaintainRetention(ctx, store.RetentionRequest{Lease: lease, Limit: 100})
 	if err != nil {
 		return err
@@ -169,6 +177,13 @@ func CheckStoreBillingBoundary(ctx context.Context, root, id string) (err error)
 	}
 	if !reflect.DeepEqual(state, afterState) || !reflect.DeepEqual(grants, afterGrants) || !reflect.DeepEqual(charges, afterCharges) || !slices.Equal(usage, afterUsage) {
 		return errors.New("tenant credit state or history changed during run retention or restart")
+	}
+	afterTotals, err := s.CreditLedgerTotals(ctx)
+	if err != nil {
+		return err
+	}
+	if afterTotals != totals {
+		return fmt.Errorf("deployment totals changed during run retention or restart: %+v, want %+v", afterTotals, totals)
 	}
 	return nil
 }

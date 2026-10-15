@@ -750,6 +750,18 @@ run, job and awarded capability after those operational rows expire.
 `Tenant.CreditUsageByRun` nets reservations, usage and refunds, excluding storage
 and runless charges. Its per-run rows survive operational run retention and
 reopening alongside the tenant balance and history.
+`Store.CreditLedgerTotals` reads deployment-wide financial totals in one snapshot.
+For each open metered award it uses C2's billing calculator and the immutable
+intervals to subtract refundable seconds from the ledger's net compute seconds.
+Consumption beyond already charged seconds waits for a billing checkpoint.
+Open intervals stop at their persisted charged checkpoint for reporting. Closed
+intervals use their finish time. A delayed reaper cannot add unconfirmed time.
+Reporting cannot advance charged checkpoints or close intervals. Operational
+run, node, trigger and credential rows do not control these totals. Settled and
+unmetered awards need no calculator call. Generated store tests use a contract
+fake while C2's production calculator remains unimplemented. The retention proof
+also checks exact deployment totals across pruning and reopening, with storage
+seconds excluded. The unused `Store.RunFinished` pruning query is removed.
 `Tenant.CreditState` and `Tenant.ListCreditGrants` own these reads. Their raw
 Store twins are removed. Burn windows use the store clock.
 Balances use `Tenant.CreditBalanceMicro`. Its raw Store twin is removed.

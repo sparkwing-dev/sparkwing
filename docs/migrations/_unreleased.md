@@ -1,5 +1,16 @@
 # Migrating to the next release
 
+## Financial totals use persisted awards
+
+`Store.CreditLedgerTotals` subtracts refundable reservations using the immutable
+billing awards and intervals. Reading a report leaves billing checkpoints and
+intervals unchanged. Unstarted metered awards contribute no settled seconds.
+Open compute intervals stop at the persisted charged checkpoint in reports.
+Storage charges affect balances but contribute no compute seconds.
+
+The unused `Store.RunFinished` method is removed. Leased retention and tagged
+log-stream maintenance own pruning.
+
 ## Grant requests use tenant handles
 
 `Store.RecordCreditGrant` is removed. Obtain a tenant with `Store.ForTeam`,

@@ -11,6 +11,15 @@ sort by descending row ID. Default and maximum history sizes are unchanged.
 `Tenant.CreditUsageByRun` nets reservation, usage and refund rows by run. Storage
 and runless charges affect the balance but stay outside this report. Per-run
 usage survives operational run retention and reopening.
+`Store.CreditLedgerTotals` reads deployment-wide grants and charges in one
+snapshot. Open metered awards exclude their refundable seconds using C2's
+calculator and immutable intervals. A report cannot advance charged checkpoints,
+close intervals or write settlement. It counts no storage seconds and consults
+no node, trigger or current credential rows. Settled and unmetered awards need
+no calculator call. C2's production calculator is still an integration dependency.
+Open intervals stop at `charged_through` in reports. Closed intervals use their
+persisted finish time. This keeps a late disruption from refunding time that a
+report counted only because the reaper had not run yet.
 Grant requests use `Tenant.RecordCreditGrant`. Its raw Store twin is removed.
 Rate-table writes use `SetCreditSettings` with `CreditSettingsUpdate.RateTable`.
 The separate `SetCreditRateTable` wrapper is removed.
@@ -166,6 +175,8 @@ segments after the writer ends. Log incompleteness never changes the job result.
 Segment replay counts retained bytes once. Refused content and byte-limit
 violations preserve the committed inventory. Run deletion cascades streams and
 segments. A later job finish cannot extend an attempt's persisted tail grace.
+The unused raw `Store.RunFinished` pruning query is removed. Leased retention
+and tagged-stream maintenance own log lifetime.
 
 `SealAbandonedLogStreams` closes existing execution streams as incomplete under
 the maintenance lease. Finished job attempts keep their final tail grace through

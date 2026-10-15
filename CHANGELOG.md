@@ -76,6 +76,8 @@ unlock.
 - **sdk:** describe lists each pipeline's declared secrets as `secrets`, which `sparkwing pipeline describe --secrets` prints
 
 ### Changed
+- **store:** Deployment billing totals use immutable awards and intervals to exclude refundable reservations without advancing billing checkpoints. Operational run retention cannot change the totals, and storage time stays outside compute seconds.
+- **store (Breaking):** Remove the unused `Store.RunFinished` pruning query. Leased retention and tagged log streams own log lifetime. See [migration guide](docs/migrations/_unreleased.md#financial-totals-use-persisted-awards).
 - **store (Breaking):** Remove `Store.RecordCreditGrant`. Submit grant requests through a tenant handle. See [migration guide](docs/migrations/_unreleased.md#grant-requests-use-tenant-handles).
 - **store:** Read charge history from the final capability column and return tenant attribution on grant and charge history. Ledger history remains readable after run retention.
 - **store (Breaking):** Remove `Store.CreditBalanceMicro`, `Store.CreditState` and `Store.ListCreditGrants`. Read balances, billing state and grant history through a tenant handle. See [migration guide](docs/migrations/_unreleased.md#billing-reads-use-tenant-handles).

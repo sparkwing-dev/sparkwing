@@ -746,80 +746,8 @@ type CreditLedgerTotals struct {
 	// StorageMicro is what retained bytes billed, which is the part of the
 	// ledger's spend that bought no runner time.
 	StorageMicro int64
-	// SettledSeconds is the runner seconds the ledger has finished charging
-	// for: every charge row less the part of an open reservation a finish
-	// would still refund. A reservation enters this total after execution
-	// starts and as the node consumes it, so the figure only ever grows and a
-	// caller may export it as a counter.
+	// SettledSeconds excludes the refundable part of unsettled awards.
 	SettledSeconds int64
-}
-
-// CreditLedgerTotals reports the ledger's lifetime sums under one repeatable
-// read, so the grant, charge and reservation figures agree with each other
-// even while claims land. A controller exports them as metrics, where they
-// survive a restart the way an in-process counter does not.
-//
-// Both sums scan a covering index over a table that is never pruned, so a
-// caller samples them on a slow timer rather than on every sweep.
-func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, err error) {
-	var out CreditLedgerTotals
-	tx, err := s.beginSnapshotReadTx(ctx)
-	if err != nil {
-		return out, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
-                        COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
-                        -COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0)
-                   FROM credit_grants`,
-		CreditGrantFree, CreditGrantPaid, CreditGrantReversal,
-	).Scan(&out.GrantedFreeMicro, &out.GrantedPaidMicro, &out.ReversedMicro); err != nil {
-		return out, err
-	}
-	// safety: a storage row bills bytes rather than runner time, so its
-	// interval stays out of the seconds total the cloud placement series is.
-	var settled, charged int64
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
-                        COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
-                        COALESCE(SUM(CASE WHEN kind = ? THEN -amount_micro ELSE 0 END), 0),
-                        COALESCE(SUM(CASE WHEN kind = ? THEN amount_micro ELSE 0 END), 0),
-                        COALESCE(SUM(amount_micro), 0),
-                        COALESCE(SUM(CASE WHEN kind = ? THEN 0 ELSE seconds END), 0)
-                   FROM credit_charges`,
-		CreditChargeReservation, CreditChargeUsage, CreditChargeRefund,
-		CreditChargeStorage, CreditChargeStorage,
-	).Scan(&out.ReservedMicro, &out.ChargedMicro, &out.RefundedMicro, &out.StorageMicro,
-		&settled, &charged); err != nil {
-		return out, err
-	}
-
-	// safety: counting a reservation whole would make the seconds total fall
-	// by its refund, so a reservation a finish could still return is held
-	// back: a node's until its machine starts on it, a trigger's until its
-	// claim settles. Past that point the minimum is consumed rather than
-	// refunded; only a setup the platform fails returns billed seconds, and
-	// that is the one refund that lowers this total.
-	var refundable int64
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(CASE WHEN credit_billing_from = 0 AND execution_started_at IS NULL
-	                                  THEN ? ELSE 0 END), 0)
-	                   FROM nodes WHERE credit_charged_through != 0`,
-		int64(MinBillableSeconds)).Scan(&refundable); err != nil {
-		return out, err
-	}
-	var triggerRefundable int64
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(COUNT(*), 0) * ? FROM triggers WHERE credit_reserved_at != 0`,
-		int64(MinBillableSeconds)).Scan(&triggerRefundable); err != nil {
-		return out, err
-	}
-	out.SettledSeconds = charged - refundable - triggerRefundable
-
-	out.BalanceMicro = out.GrantedFreeMicro + out.GrantedPaidMicro - out.ReversedMicro - settled
-	return out, tx.Commit()
 }
 
 // CreditSettings are the values the ledger prices work with. Every one of

@@ -1,9 +1,121 @@
 # W1b handoff
 
-Continues `00ed1f202`. W1b remains incomplete. This continuation is uncommitted.
-The lead owns review, commits, pipelines and native integration.
+Continues `3e1232e53` after merge `8941b0068`. W1b remains incomplete.
+This continuation is uncommitted. The lead owns review, commits, pipelines and
+native integration.
 
 ## Current continuation
+
+Moved `Store.CreditLedgerTotals` into owned credit_totals.go and replaced its
+legacy node/trigger refund queries with immutable billing awards and intervals.
+The invariant is that deployment totals use durable financial facts, exclude
+unconsumed reservations, and never change billing while being read. Open
+intervals stop at their persisted charged checkpoint. Closed intervals use their
+finish time. This prevents a delayed disruption settlement from refunding time
+that a report counted only because the reaper had not run yet. Compute beyond
+already charged seconds waits for a billing checkpoint. Storage seconds remain
+outside compute totals. Errors return no partial financial report.
+
+The old public implementation was probed through a compiler overlay. An
+unstarted final-schema award reserved 60 seconds and the old report incorrectly
+counted all 60 as settled. The replacement reports zero while preserving the
+600-micro reservation and 999400 balance. The schema still has the legacy
+operational billing columns. Their presence was verified after correcting an
+initial mistaken assumption that they had been deleted.
+
+The report uses the existing billingCalculator contract seam. The interval
+reader and settlement-result validator are shared with the accounting writer.
+The reader does not advance charged_through or close an interval. Six new tests
+cover final-ledger sums, unstarted reservations, confirmed renewal/disruption
+progress, calculator failures, and unmetered awards. A 64-case property covers
+128 generated tenant keys, all four unit kinds, both start policies, colliding
+run/job/capability/reservation names, customer wait gaps, and reopening. It
+checks the complete totals and unchanged interval checkpoints and finish times.
+C2's calculator is a contract fake for open metered awards. The public report
+needs no calculator for settled or unmetered awards.
+
+Removed unused `Store.RunFinished`: **13 production Go lines**, including its
+comments and separating blank line. It had no caller. No other-package caller
+changed. The old totals refund queries are replaced; moved code is not counted
+as deleted. No additional archived T1 inventory row is claimed complete. W1's
+mixed legacy queue/claim tests remain for W1's caller migration.
+
+Extended `billing-ledger-survives-retention/store-data-sqlite` to compare exact
+deployment totals before leased retention and after reopening. Both teams count
+once. Storage affects balance but contributes no compute seconds. All 12 existing
+SQLite data/billing cells remain active. No native cell is newly activated.
+
+Verification uses GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4,
+and GOCACHE/GOTMPDIR/TMPDIR beneath /tmp/sw-astra-W1b/. Go commands use
+`go -C /home/bombuntu/.xwing/envs/1088/sparkwing`.
+
+- Whole-repository `go build -p 4 ./...` passed on the final production tree.
+- Scoped `go vet -p 4 ./pkg/store/... ./pkg/controller/...
+  ./internal/acceptance/... ./tests/acceptance/...` passed.
+- The expanded store selection passed **190 top-level tests / 475 cases**,
+  without skips. This is the Manual selection below plus TestGrantCredits,
+  TestCreditGrant, TestCreditReversal, TestCreditHistory, TestCreditsBalanceIs,
+  TestCreditsDefaultTenant, TestTenantSQLScope, TestTenantWriters and
+  TestTenantTwins. The six new tests are selected by TestStoreData.
+- Both acceptance trees passed **20 top-level tests / 486 cases**. All **12
+  SQLite data/billing cells** pass. The native/platform skeleton retains
+  **2,991 skips**. No new native cell is activated.
+- Required `commentcheck -base main` passed across 896 files. Session
+  sleepcheck, documentation/changelog checks, sync-docs --check and whitespace
+  checks passed. No full documentation socket suite was run.
+- The final scope-guard selection passed after renaming its existing exemption.
+  The initial expanded run's only failure was that stale key.
+
+The default report's no-open-award path runs through the public API in the
+acceptance proof. Open-award tests use the existing private calculator seam,
+because C2's production calculator remains a panic stub. The complete legacy
+store suite and controller runtime suite were not run. Their W1-owned claim
+fixtures are not final billing evidence.
+
+Amendment disposition:
+
+- A1-24 retains the transactional data checker and merged binding integration.
+- A1-27 retains award/interval/settlement helpers. W1 must join its lifecycle
+  transactions. The agreed refund operation for an unstarted at_award claim and
+  explicit customer-runner wait operation remain missing. C2 SettleBilling is
+  still a panic stub. Open-award reporting is now also an explicit consumer of
+  that existing calculator contract. Its store tests use fakes.
+- A1-28 retains committed-checkout settlement. W2 owns provider verification,
+  verified routes, and removal of caller-selected paid grant authority.
+- A1-29 through A1-35 retain upload, receipt, member, reference, record, tombstone
+  and tagged-log persistence. W2/W7 transport, namespace/edge policy, physical
+  verification/deletion and proxy egress remain real integrations. Result
+  attachment needs its manifest reader. Materialization still lacks destination
+  identity for a never-executed terminal job. Published owner-log identities
+  still need a cross-owner contract.
+- A1-53 has these SQLite proofs. Native acceptance remains open. handoffs.md has
+  no new W1b assignment.
+
+No new foreign contract change or human question is added. C1 documents the
+local reporting interpretation and removed API. The shared API snapshot was
+updated only for W1b's method removal and the totals declaration. Generating a
+fresh snapshot under scratch found inherited W1 drift, including provision
+policy, operator method moves and egress_day removal. The lead still owns
+aggregate regeneration. No unrelated API snapshot change was copied back.
+
+Shared files touched: pkg/store/tenant_sql_scope_guard_test.go (rename only the
+existing deployment-totals exemption), internal/acceptance/store_billing.go,
+design/rewrite/contracts/c1-data.md, .apidiff/pkg_store.txt, CHANGELOG.md,
+docs/migrations/_unreleased.md and generated mirrors. Other edits are owned
+accounting/storage files, new credit_totals.go and its tests, STORE-DATA.md and
+this handoff. W1's admission, state, claim, reconciliation and reaping files are
+unchanged. No new schema, interface, price, setting, limit, environment variable
+or service is added.
+
+Friction was cold compilation, the moved scope-guard key and inherited API
+snapshot drift. The scope guard now retains the same reason under the moved
+method name. Native providers, PostgreSQL, physical backends, backup/restore,
+controller runtime tests, candidates and pipelines were not exercised. Migrated
+legacy runtime behavior is not claimed as new evidence. No Git writes, service
+starts or Sparkwing binaries ran. Git identity remains Korey's default with no
+core.worktree override. Scratch is deleted after final inspection.
+
+## Previous continuation (committed in 3e1232e53)
 
 Removed `Store.CreditBalanceMicro`, **10 production Go lines**, including its
 comments and separating blank line. Fourteen store-test calls and three
