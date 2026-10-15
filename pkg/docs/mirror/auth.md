@@ -1384,7 +1384,19 @@ license or failed proof cannot renew the session.
 requires the session's CSRF header and cookie plus same-origin proof, and
 clears the browser cookies on success. A body or query parameter cannot select
 another session. Both endpoints return `Cache-Control: no-store` and the
-canonical error envelope. Session storage and key failures return `unavailable`.
+canonical error envelope. Session-key and deletion failures return `unavailable`.
+
+Other policy routes accept the same Session header or one session cookie and
+check the configured absolute lifetime without renewing. A malformed header
+cannot fall back to a cookie. Dashboard requests reach that proof boundary
+before session renewal, so a failed CSRF check cannot extend a live session.
+
+The browser form posts to `POST /logout`. It requires a live session and a
+`csrf_token` field matching both the CSRF cookie and the stored session, plus
+same-origin proof. It deletes only that session, clears its browser cookies and
+redirects to `/login`. It never renews before checking proof. Refusals use the
+canonical error envelope. An unavailable session returns `401`; a key or
+deletion failure returns `503` and leaves the cookies in place.
 
 ## Dashboard authorization
 
@@ -1484,7 +1496,8 @@ argon2 memory bound.
 
 The sign-in and logout forms carry a CSRF token in both a
 `SameSite=Strict` cookie and a hidden field. The controller rejects a missing,
-cross-origin, or mismatched token with `403` before it checks a credential.
+cross-origin, or mismatched token with `403`. Logout checks the live session
+before returning form errors.
 Unsafe API requests (`POST`, `PUT`, `PATCH`, and `DELETE`) that the session
 cookie authenticates also require a same-origin request whose `X-CSRF-Token`
 header matches both the browser's CSRF cookie and the live session.
@@ -1694,9 +1707,10 @@ every request and the dashboard resolves the session on every protected
 request, so deleting a session or a user logs that browser out on its
 next request.
 
-A session expires seven days after its last use. Each successful use renews
-that term, but never past 30 days from creation. Reaching that age deletes the
-row and answers `401`, so the browser signs in again. An embedder changes the cap with
+A session renewal extends expiry by seven days, but never past 30 days from
+creation. Ordinary policy reads and writes check that lifetime without
+renewing. The renewal endpoint refuses an over-age or future-created session
+and removes its row. An embedder changes the cap with
 `controller.Server.WithSessionMaxLifetime`.
 
 ## When a runner's token dies

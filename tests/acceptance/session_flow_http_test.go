@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -28,6 +27,7 @@ type sessionFlow struct {
 	server *controller.Server
 	raw    string
 	csrf   string
+	logs   *bytes.Buffer
 }
 
 func newSessionFlow(t *testing.T) sessionFlow {
@@ -48,12 +48,13 @@ func newSessionFlow(t *testing.T) sessionFlow {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := controller.New(s, slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(cipher).WithLicense(lic)
+	logs := &bytes.Buffer{}
+	server := controller.New(s, slog.New(slog.NewTextHandler(logs, nil))).WithSecretsCipher(cipher).WithLicense(lic)
 	raw, csrf, _, err := s.CreateAccountSession(t.Context(), store.Account{ID: "member"}, "team", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return sessionFlow{store: s, server: server, raw: raw, csrf: csrf}
+	return sessionFlow{store: s, server: server, raw: raw, csrf: csrf, logs: logs}
 }
 
 func (f sessionFlow) request(method, path, body string) *http.Request {
@@ -94,7 +95,7 @@ func TestSessionFlowHTTPRenewsWithNamedProof(t *testing.T) {
 			Scopes    []string `json:"scopes"`
 			Expires   int64    `json:"expires_at"`
 		}
-		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Team != "team" || result.Role != "editor" || result.UserID != "member" || result.CSRF != f.csrf || len(result.Scopes) == 0 || strings.Contains(w.Body.String(), f.raw) || w.Header().Get("Cache-Control") != "no-store" {
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Principal != "member@example.test" || result.Team != "team" || result.Role != "editor" || result.UserID != "member" || result.CSRF != f.csrf || len(result.Scopes) == 0 || strings.Contains(w.Body.String(), f.raw) || w.Header().Get("Cache-Control") != "no-store" {
 			t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 		}
 		count, expires := f.state(t)

@@ -6,6 +6,30 @@
 
 ### Session lifecycle transport
 
+Ordinary capability-policy routes accept one Bearer or Session authorization
+header. A header selects its own presentation and cannot fall back to a cookie.
+With no header, the default controller reader accepts one session cookie and
+refuses duplicate or empty presentations. Its AuthenticationReader adapter uses
+the existing single store snapshot, then checks account-session licensing and
+the configured absolute lifetime against snapshot.Now for every session in
+the ancestry. The adapter reads no additional SQL and receives no raw secret.
+Noncanonical persistence faults become unavailable. Existing canonical
+authentication refusals retain their code. These routes do not renew sessions.
+
+The dashboard routes actual controller-policy registrations directly to the
+API proof boundary, using its existing router inventory. Legacy middleware
+cannot pre-renew those requests or replace canonical errors with a form error.
+Session-header mutations use the selected header's committed session identity
+for CSRF. A different session cookie supplies no authority.
+
+POST `/logout` uses PolicyRouter with AuthBrowserFlow. Its verifier reads the
+same live session proof without renewal, parses the bounded form, and requires
+same-origin proof plus a csrf_token matching the cookie and stored session.
+It shares the API logout's verified-session deletion and clears cookies only
+after deletion succeeds. Success redirects to /login. Refusals use canonical
+errors, including 401 for an unavailable session. Audit attribution comes
+from the verified account. The old renewing browser logout handler is removed.
+
 GET `/api/v1/auth/session` and POST `/api/v1/auth/logout` register through
 PolicyRouter with the existing AuthBrowserFlow proof. One Session authorization
 header or one session cookie supplies the presentation. A header takes

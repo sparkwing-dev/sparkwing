@@ -185,8 +185,13 @@ func (router *PolicyRouter) presentation(r *http.Request) (capability.Presentati
 	if len(values) != 0 {
 		if len(values) == 1 {
 			fields := strings.Fields(values[0])
-			if len(fields) == 2 && strings.EqualFold(fields[0], "Bearer") {
-				return capability.Presentation{Raw: fields[1], Class: capability.CredentialBearer}, nil
+			if len(fields) == 2 {
+				switch {
+				case strings.EqualFold(fields[0], "Bearer"):
+					return capability.Presentation{Raw: fields[1], Class: capability.CredentialBearer}, nil
+				case strings.EqualFold(fields[0], "Session"):
+					return capability.Presentation{Raw: fields[1], Class: capability.CredentialSession}, nil
+				}
 			}
 		}
 		return capability.Presentation{}, &apierr.Error{Code: apierr.Unauthenticated, Message: "invalid credential presentation"}

@@ -53,21 +53,8 @@ func (s *Server) sessionPresentation(r *http.Request) (string, error) {
 }
 
 func (s *Server) verifySessionFlow(r *http.Request) error {
-	raw, err := s.sessionPresentation(r)
+	session, err := s.readSessionFlow(r)
 	if err != nil {
-		return err
-	}
-	if s.store == nil {
-		return missingEndpointPolicy()
-	}
-	if !s.MultiTeam() {
-		return sessionUnavailable()
-	}
-	session, err := s.store.LookupSession(r.Context(), raw)
-	if err != nil {
-		return sessionFlowError(err)
-	}
-	if err := s.validateSessionFlow(session); err != nil {
 		return err
 	}
 	var role store.Role
@@ -76,6 +63,10 @@ func (s *Server) verifySessionFlow(r *http.Request) error {
 			return &apierr.Error{Code: apierr.Forbidden, Message: "invalid CSRF token"}
 		}
 	} else {
+		raw, err := s.sessionPresentation(r)
+		if err != nil {
+			return err
+		}
 		session, err = s.store.LookupSessionAndRenew(r.Context(), raw, sessionTTL, s.sessionMaxLifetime)
 		if err != nil {
 			return sessionFlowError(err)
@@ -90,6 +81,27 @@ func (s *Server) verifySessionFlow(r *http.Request) error {
 	}
 	*r = *r.WithContext(context.WithValue(r.Context(), sessionProofKey{}, sessionProof{session: session, role: role}))
 	return nil
+}
+
+func (s *Server) readSessionFlow(r *http.Request) (*store.Session, error) {
+	raw, err := s.sessionPresentation(r)
+	if err != nil {
+		return nil, err
+	}
+	if s.store == nil {
+		return nil, missingEndpointPolicy()
+	}
+	if !s.MultiTeam() {
+		return nil, sessionUnavailable()
+	}
+	session, err := s.store.LookupSession(r.Context(), raw)
+	if err != nil {
+		return nil, sessionFlowError(err)
+	}
+	if err := s.validateSessionFlow(session); err != nil {
+		return nil, err
+	}
+	return session, nil
 }
 
 func (s *Server) validateSessionFlow(session *store.Session) error {
@@ -119,10 +131,6 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request, _ capabil
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
-	proof, ok := r.Context().Value(sessionProofKey{}).(sessionProof)
-	if !ok || proof.session == nil {
-		return missingEndpointPolicy()
-	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1))
 	if err != nil {
 		return invalidEngineBody("session logout takes no body")
@@ -130,11 +138,22 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request, _ capabili
 	if len(body) != 0 {
 		return invalidEngineBody("session logout takes no body")
 	}
+	if err := s.endVerifiedSession(w, r); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func (s *Server) endVerifiedSession(w http.ResponseWriter, r *http.Request) error {
+	proof, ok := r.Context().Value(sessionProofKey{}).(sessionProof)
+	if !ok || proof.session == nil {
+		return missingEndpointPolicy()
+	}
 	if err := s.store.DeleteSession(proof.session.ID); err != nil {
 		return &apierr.Error{Code: apierr.Unavailable, Message: "session service unavailable"}
 	}
 	clearSessionCookies(w, s.cookiesSecure())
-	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 

@@ -68,32 +68,35 @@ func (s *Server) browserHandler(api http.Handler) http.Handler {
 	// credential rides this script.
 	browser.Handle("GET /sparkwing-runtime.js", web.RuntimeConfig(d.Version, !d.Local))
 	top := http.NewServeMux()
-	// safety: operator identity and CSRF are verified by the route policy before handler entry.
-	for _, endpoint := range s.operatorEndpoints() {
-		top.Handle(endpoint.Method+" "+endpoint.Pattern, api)
-	}
 	if d.Local {
 		browser.Handle("/", pages)
 		top.Handle("/api/", api)
 	} else {
 		s.signInRoutes(browser)
 		browser.Handle("/", s.pageGate(pages))
-		for _, endpoint := range s.sessionEndpoints() {
-			top.Handle(endpoint.Pattern, api)
-		}
-		// safety: a page on another site can make a visitor's browser send a write that needs no credential, which an
-		// open controller would take as its operator's; no browser on another site has a reason to write here.
-		top.Handle("/api/", originguard.RefuseCrossSiteWrites(s.cookieSessions(api)))
+		top.Handle("/api/", s.browserAPI(api))
 	}
 	top.Handle("/", s.pageOrAPI(api, s.logged(browser)))
 	return web.SecurityHeaders(d.HSTS, top)
+}
+
+func (s *Server) browserAPI(api http.Handler) http.Handler {
+	legacy := originguard.RefuseCrossSiteWrites(s.cookieSessions(api))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, router := s.routeProbe()
+		if routeRegistered(router, r) {
+			api.ServeHTTP(w, r)
+			return
+		}
+		legacy.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) signInRoutes(mux *http.ServeMux) {
 	signIn := func(h http.Handler) http.Handler { return s.loginLimit.middleware(h) }
 	mux.HandleFunc("GET /login", s.handleLoginPage)
 	mux.Handle("POST /login", signIn(s.formCSRF(s.handleLoginSubmit)))
-	mux.Handle("POST /logout", s.formCSRF(s.handleBrowserLogout))
+	s.registerPolicyEndpoints(mux, s.browserSessionEndpoints())
 	mux.Handle("GET /auth/{provider}/start", signIn(http.HandlerFunc(s.handleOAuthStart)))
 	mux.Handle("GET /auth/{provider}/callback", signIn(http.HandlerFunc(s.handleOAuthCallback)))
 	mux.Handle("POST /auth/{provider}/link", s.formCSRF(s.handleIdentityLinkStart))

@@ -2,6 +2,17 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
+**W2 session policy continuation.** Documented Session authorization headers now
+reach ordinary policy routes. The default controller reader applies the existing
+license and absolute lifetime to the store's single authentication snapshot,
+including session ancestors. Migrated dashboard routes bypass pre-renewal and
+retain canonical errors. Browser /logout uses the named browser proof and the
+shared verified-session deletion path. SQLite HTTP properties cover failed
+proof without renewal, ambiguous presentations, lifetime and cross-session
+selection. The old browser logout regression is ported. W1's roleless/console
+representation and LookupSession backend tagging remain open. See
+[W2-session-policy-handoff.md](../W2-session-policy-handoff.md).
+
 **W1/W2: session lifecycle continuation.** W2's renewal and API logout now use
 PolicyRouter's declared browser proof, real hashed sessions and the sealed CSRF
 key. Logout takes no body, verifies session-bound CSRF and same-origin proof,
@@ -96,3 +107,5 @@ and command are in `../w1-session12-progress.md`.
 **DESIGN approved (lead): W8 pending-claim outcomes.** Invariant: a committed award is always owned, and every independent stop reason (policy refusal, cancellation, idle, claim deadline, version) stays observable to the caller. The pending claim returns the award and the stop reason as independent results. Run adopts any returned award first, then applies the stop reason, joins the held hosts, and returns that reason; the joining defer never replaces a stop reason with success. Existing owners of cancellation, idle, claim-deadline and version checks stay as they are. `TestLoopPendingAwardPreservesPolicyDenial` must go green, plus a property test over interleavings of award delivery and each stop reason.
 
 **W1: authority-bearing secret reads for W2.** The secret-by-name HTTP cutover now uses C2's local SecretReader interface: Team() Team and ReadSecret(ctx, Authorized) (*Secret, error). Use one store-clock transaction to recheck ancestry, current membership, the selected route alternative and claim liveness/cancellation. Derive claim run/pipeline from its binding and seal, require declaration, enforce pipeline/shared precedence and only_on pools, and commit secret_released with selection. A missing run selector never detaches a claim from its bound run. Member run selectors stay tenant-scoped, and masked member reads are forbidden. Return no row after a failed audit or authority check. Tenant.ReleaseClaimSecret takes the retired ClaimToken and caller clock and is not an adapter. W2 tests the final HTTP/decryption path with fakes. The default refuses missing transactions with policy_missing. See [W2-secret-reads-handoff.md](../W2-secret-reads-handoff.md).
+
+**DESIGN approved (lead): W8 cancellation classification (third finding in the pending-claim mechanism).** Invariant: classifying a stop reason never panics and never confuses a caller's cancellation cause with a denial. Recognise cancellation only with `errors.Is(err, context.Canceled)` / `errors.Is(err, context.DeadlineExceeded)` (ctx.Err's comparable sentinels); never compare against `context.Cause(ctx)` with `==`. Run's joining defer returns the caller's arbitrary cause unchanged. Test nested wraps and joins, independent denials, and comparable and non-comparable custom causes, including a property test. Three bugs in one mechanism means it is too clever: while fixing this, cut the pending-claim stop logic to the smallest form that satisfies the approved outcome representation, and report the line count before and after.

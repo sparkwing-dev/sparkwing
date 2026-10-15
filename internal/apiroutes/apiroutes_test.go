@@ -69,6 +69,21 @@ func TestParseQueueEndpointUsesActualRegistration(t *testing.T) {
 	}
 }
 
+func TestParseBrowserSessionEndpointUsesNamedProof(t *testing.T) {
+	src := writeFile(t, "browser.go", "s.registerPolicyEndpoints(mux, s.browserSessionEndpoints())")
+	endpoint := `{Method: "POST", Pattern: "/logout", Authentication: capability.AuthBrowserFlow}`
+	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "browser_session_routes.go"), []byte(endpoint), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Parse(src, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []Route{{Method: "POST", Path: "/logout", Scope: "browser_flow_csrf_nonce"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("browser session registration=%+v want=%+v", got, want)
+	}
+}
+
 func TestParseSourceEndpointsUsesActualRegistrations(t *testing.T) {
 	src := writeFile(t, "server.go", "s.registerPolicyEndpoints(router, s.sourceEndpoints())")
 	endpoints := `{Method: "POST", Pattern: "/api/v1/runs/{run}/source-credential", Authentication: capability.AuthCapability},

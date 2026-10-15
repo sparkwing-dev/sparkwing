@@ -13,6 +13,11 @@ ends only the verified session and clears its browser cookies. Both endpoints
 return the common error envelope and no-store. Storage and key failures return
 `unavailable`. Configure the bound secrets cipher before serving sessions.
 
+Ordinary policy routes also accept the Session header and enforce the configured
+absolute lifetime without renewing. Browser logout posts a form to `/logout`
+with the session-bound `csrf_token`. It uses the shared proof boundary, returns
+canonical failures and redirects to `/login` only after successful deletion.
+
 ## Browser capability requests
 
 Shared policy routes authenticate browser sessions through their committed
