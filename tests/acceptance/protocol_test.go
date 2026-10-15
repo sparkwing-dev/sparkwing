@@ -28,6 +28,7 @@ func TestProtocol(t *testing.T) {
 			continue
 		}
 		t.Run(scenario.ID, func(t *testing.T) {
+			typeScriptBoundary(t, scenario.ID)
 			for _, target := range acceptance.Targets() {
 				if !acceptance.Applies(scenario, target) {
 					continue
