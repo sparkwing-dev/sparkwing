@@ -46,7 +46,13 @@ and slot availability without writing reservations. The legacy `Store.ReserveUpl
 `Store.UploadForTeam`, `Store.ReleaseStorage` and `UploadRequest` are removed.
 Their output-upload and output-commit HTTP writers are removed too. Generic
 `storage_reservations` and `storage_commit_receipts` no longer have writers.
-The legacy node-log transport retains its exact segment counter. Old output
+The legacy `Store.OpenNodeLog`, `SignNodeLogSegment`, `NodeLogSegments`,
+`MarkNodeLogSealed`, `GetNodeLog` and `CurrentNodeAttempt` APIs are removed.
+Their node `log-segments` and `log-manifest` HTTP writers and S3 signing code
+are removed too. No Go writer references `node_logs` or `node_log_segments`,
+and reads no longer seal abandoned logs. `Tenant.RecordSegments` and leased
+`Operator.SealAbandonedLogStreams` own tagged persistence and sealing.
+Legacy capabilities no longer advertise segment upload support. Old output
 reads and host/client interfaces still need their final record cutover.
 `SetNodeStatus` and `RevokeNodeReady` on Store, Tenant and Client are removed
 with their legacy HTTP handlers. Debug pauses use `status_detail` through
@@ -522,7 +528,7 @@ Legacy filesystem output and raw log paths have been removed.
 The sharded filesystem ArtifactStore, generic raw storage.ArtifactStore contract
 and portable conformance package are also removed. Filesystem deployment
 measurement uses fs.NewUsageReporter. It exposes totals without an object-read
-or write API. S3's remaining raw log reader/writer still needs its authenticated
+or write API. S3's remaining raw log reader still needs its authenticated
 cutover. Physical CAS reads and writes stay with the common object backend.
 
 `CommitObject` requires verified bytes at the exact ticket's staging key even
@@ -1260,8 +1266,9 @@ The service-token `/internal/storage/reserve`, `/internal/storage/commit`,
 `Store.RenewStorage`, `storageRenewRequest`, `recordStorageRenewTx` and
 `replayStorageRenewTx` are removed with that transport. Final upload tickets own
 reservation, verified commit, abort and immutable replay. Old cache RPC clients
-still need W7's hard cut. The direct-upload and log paths retain their internal
-legacy reservation code until their consumer cutovers.
+still need W7's hard cut. Legacy direct-upload and node-log writers and their
+internal reservation code are removed. Their old host/client and read surfaces
+remain pending final data and tagged-log bindings.
 
 `SetFreeTeamSlots` writes the final settings table through the existing checked
 writer. Negative or sealed updates fail without replacing the prior value.

@@ -1,5 +1,22 @@
 # Migrating to the next release
 
+## Log writes use tagged subjects
+
+`Store.OpenNodeLog`, `SignNodeLogSegment`, `NodeLogSegments`,
+`MarkNodeLogSealed`, `GetNodeLog` and `CurrentNodeAttempt` are removed, along
+with `POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments` and `log-manifest`.
+The capabilities response no longer advertises that legacy upload protocol.
+
+Persist segments and final seals through `Tenant.RecordSegments`, with an
+authorized tagged job-attempt or owner-unit subject. The elected
+`Operator.SealAbandonedLogStreams` pass seals lost writers. Reads do not write
+seals. This preserves the successful job outcome when its log tail is lost.
+
+The legacy client uploader still needs its final transport cutover. Old log
+reads still use retired tables and do not establish final log integration.
+C2's authenticated transport must compose signing, physical verification,
+commits and metered reads before that path is operational.
+
 ## Direct uploads use tenant blob tickets
 
 `Store.ReserveUpload`, `CommitUpload`, `UploadForTeam`, `ReleaseStorage` and
@@ -11,7 +28,7 @@ digest, exact size and expiry. Empty blobs consume object capacity.
 The node `output-upload` and `output-commit` endpoints are removed. Output
 publication uses authenticated data uploads and logical blob records. Legacy
 host/client output interfaces still need their record integration. Old raw
-output reads and node-log transport remain pending their cutover.
+output reads and host/client transport remain pending their cutover.
 
 The retired small-output overage policy has no equivalent in the final ticket
 contract because signing has no trusted intended-use field. That policy needs

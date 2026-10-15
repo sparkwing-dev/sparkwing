@@ -19,7 +19,7 @@ import (
 type segmentLogs struct {
 	s    *Server
 	team store.Team
-	objs logObjectStore
+	objs logseg.Objects
 }
 
 var _ storage.LogStore = segmentLogs{}
@@ -215,7 +215,7 @@ const segmentStreamPoll = 5 * time.Second
 
 // safety: offsets count bytes of the whole log, off how far the reader was sent and segEnd how far the segments
 // reach; the ring is joined only at off, so no line is sent twice or skipped. It returns once the manifest landed.
-func streamSegments(ctx context.Context, objs logObjectStore, live *liveLogs, rec store.NodeLog, off int64, out io.Writer,
+func streamSegments(ctx context.Context, objs logseg.Objects, live *liveLogs, rec store.NodeLog, off int64, out io.Writer,
 	id func(off int64) string,
 ) error {
 	var segEnd int64
@@ -291,9 +291,7 @@ func writeSSELines(out io.Writer, data []byte, base int64, id func(off int64) st
 	return nil
 }
 
-// NodeLogCompleteness reports the segment verdict for a node with a
-// segment record; false means the node has none. A finished node whose
-// writer never sealed its attempt past the grace is sealed here.
+// NodeLogCompleteness reports the segment verdict for a recorded node log.
 func (l segmentLogs) NodeLogCompleteness(ctx context.Context, runID, nodeID string, node logseg.NodeProgress, now time.Time) (logseg.Completeness, bool, error) {
 	rec, ok, err := l.record(ctx, runID, nodeID)
 	if err != nil {
@@ -308,11 +306,6 @@ func (l segmentLogs) NodeLogCompleteness(ctx context.Context, runID, nodeID stri
 	}
 	if err := log.Verify(ctx, l.objs); err != nil {
 		return logseg.Completeness{}, true, err
-	}
-	if log.Manifest == nil && node.Terminal && now.Sub(node.FinishedAt) >= logseg.SealGrace {
-		if log.Manifest, err = l.s.sealNodeLog(ctx, l.objs, rec, now); err != nil {
-			return logseg.Completeness{}, true, err
-		}
 	}
 	return log.Completeness(node, now), true, nil
 }

@@ -722,8 +722,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/finish", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleFinishNode))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/deps", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleUpdateNodeDeps))))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/output", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleGetNodeOutput)).orElse(requireScope(ScopeNodesClaim, s.readableRun(http.HandlerFunc(s.handleGetNodeOutput)))))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/log-segments", newClaimLogTailRoute(claimLogKinds, http.HandlerFunc(s.handleLogSegments)).orElse(requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleLogSegments)))))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/log-manifest", newClaimLogTailRoute(claimLogKinds, http.HandlerFunc(s.handleLogManifest)).orElse(requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleLogManifest)))))
 	mux.Handle("POST /api/v1/runs/{id}/children", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleEnqueueChildRun)))
 	mux.Handle("GET /api/v1/runs/{id}/children/{childID}", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleGetChildRun)))
 	mux.Handle("GET /api/v1/runs/{id}/children/{childID}/nodes/{nodeID}/output", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleGetChildNodeOutput)))

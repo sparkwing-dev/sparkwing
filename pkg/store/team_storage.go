@@ -79,14 +79,6 @@ VALUES (?, ?, 0, 0, 0, 0, ?) ON CONFLICT (team, store) DO NOTHING`,
 	return used, reserved, nil
 }
 
-func addLegacyLogStorageTx(ctx context.Context, tx *storeTx, team Team, bytes int64, now time.Time) error {
-	if _, _, err := lockTeamStorageTx(ctx, tx, team, StorageLogs, now); err != nil {
-		return err
-	}
-	_, err := tx.ExecContext(ctx, `UPDATE team_storage SET used_bytes = used_bytes + ?, committed_bytes = committed_bytes + ?, updated_at = ? WHERE team = ? AND store = ?`, bytes, bytes, now.UnixNano(), team, StorageLogs)
-	return err
-}
-
 func (s *Store) inTx(ctx context.Context, fn func(*storeTx) error) (err error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
