@@ -157,14 +157,18 @@ func TestCloudStoreBootstrapW8Components(t *testing.T) {
 				}, nil
 		},
 	}
+	restored, err := launcher.ReadBootstrapAward(bootstrapFile)
+	if err != nil {
+		t.Fatal(err)
+	}
 	host := launcher.BootstrapHost{ControllerURL: cfg.ControllerURL, NewController: transport, Host: hosting}
-	if err := host.RunFile(t.Context(), bootstrapFile); err != nil {
+	if err := host.Run(t.Context(), restored); err != nil {
 		t.Fatal(err)
 	}
 	if !executed || !joined || !closed {
 		t.Fatalf("Cloud lifecycle: executed=%v joined=%v closed=%v", executed, joined, closed)
 	}
-	if err := host.RunFile(t.Context(), bootstrapFile); err == nil {
+	if err := host.Run(t.Context(), restored); err == nil {
 		t.Fatal("Cloud bootstrap was usable twice")
 	}
 	tenant, err := server.Store.ForTeam(t.Context(), store.DefaultTeam)

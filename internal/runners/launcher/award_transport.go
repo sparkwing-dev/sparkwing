@@ -2,7 +2,6 @@ package launcher
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"path/filepath"
@@ -63,16 +62,4 @@ func decodeBootstrapAward(metadata, bootstrap []byte) (CloudJobAward, error) {
 		return CloudJobAward{}, err
 	}
 	return award, nil
-}
-
-// RunFile restores the private award before exchanging its bootstrap once.
-func (h BootstrapHost) RunFile(ctx context.Context, bootstrapFile string) error {
-	if err := context.Cause(ctx); err != nil {
-		return err
-	}
-	award, err := ReadBootstrapAward(bootstrapFile)
-	if err != nil {
-		return err
-	}
-	return h.Run(ctx, award)
 }

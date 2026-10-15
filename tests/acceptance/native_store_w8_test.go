@@ -170,7 +170,7 @@ func checkNativeStoreOwnerW8(t *testing.T, mode string) {
 	if direct {
 		executionErr = (runners.StoreHosting{Store: s, Bind: bind}).Host(ctx, unit)
 	} else if mode == "embedded_queue" {
-		runner, err := (localcontroller.Binding{Store: s, Controller: server}).NewQueue(runners.StoreRunnerConfig{
+		runner, err := runners.NewStoreRunner(server, runners.StoreRunnerConfig{
 			Bearer:          func(context.Context) (string, error) { return root.Raw, nil },
 			Loop:            runners.LoopConfig{Version: "v0.71.0", Kinds: []capability.UnitKind{capability.UnitTrigger}, MaxConcurrent: 1, MaxClaims: 1},
 			Bind:            bind,

@@ -4,7 +4,7 @@
 claimant transport. The host owns each award's execution lifetime. An embedded
 controller uses `NewStoreRunner` with its existing `EngineController` and store.
 The local controller constructs that queue in `Config.Open` from its service
-binder's `StoreRunnerConfig`. `Binding.NewQueue` also exposes the same constructor.
+binder's `StoreRunnerConfig`.
 An HTTP placement supplies `Hosting` with its award-specific controller factory,
 source preparation and shared host adapters.
 

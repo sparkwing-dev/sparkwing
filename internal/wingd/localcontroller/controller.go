@@ -32,14 +32,6 @@ type Binding struct {
 	Controller *controller.EngineController
 }
 
-// NewQueue binds the shared runner and native hosts to this elected controller.
-func (b Binding) NewQueue(cfg runners.StoreRunnerConfig) (*runners.Loop, error) {
-	if b.Controller == nil || b.Controller.Store != b.Store || b.Store == nil {
-		return nil, errors.New("wingd: queue requires the elected controller store")
-	}
-	return runners.NewStoreRunner(b.Controller, cfg)
-}
-
 // Services binds shared authorization, host execution and local state to one process.
 type Services struct {
 	State  State
@@ -93,7 +85,10 @@ func (cfg Config) Open(ctx context.Context, home string) (_ wingd.LocalControlle
 	if services.State == nil || services.HTTP.API == nil || services.HTTP.Dashboard == nil {
 		return nil, errors.New("wingd: local services require state and shared HTTP handlers")
 	}
-	queue, err := binding.NewQueue(services.Runner)
+	if binding.Controller.Store != s {
+		return nil, errors.New("wingd: queue requires the elected controller store")
+	}
+	queue, err := runners.NewStoreRunner(binding.Controller, services.Runner)
 	if err != nil {
 		return nil, err
 	}

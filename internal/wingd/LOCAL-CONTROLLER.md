@@ -24,9 +24,9 @@ maintenance. It opens `<home>/state.db`, selects `DefaultTeam`, and gives the
 shared service binder that store, tenant and `EngineController`. The binder
 returns the shared policy handlers, state projection and `StoreRunnerConfig`.
 `Config.Open` constructs the shared queue over its owned store before returning.
-`Binding.NewQueue` constructs that queue from the shared controller and
-`runners.StoreRunnerConfig`. It rejects another controller store and supplies
-`StoreHosting` over the owned handle. The controller needs its signed runner
+`runners.NewStoreRunner` constructs that queue from the shared controller and
+`runners.StoreRunnerConfig`. `Config.Open` rejects another controller store.
+The runner supplies `StoreHosting` over the owned handle. The controller needs its signed runner
 admission policy and the store needs its enrollment resolver. The bearer provider
 supplies a provisioned claimant credential.
 The native service binder supplies W3's source, process, logging and storage
@@ -111,6 +111,11 @@ The [transport contract](LOCAL-TRANSPORT.md) lists the native tests still requir
 Admission state and election files use `fssecure`. Admission state accepts only
 the current schema.
 
+`ResolveAdmissionPolicy` reads the complete machine configuration through
+`userconfig.ReadConfig`. The shared configuration package owns decoding and
+validation. The runtime converts its typed admission settings to scheduling and
+Jev policy, preserving explicit zero values and the defaults for omitted fields.
+
 <!-- design:begin -->
 
 ## Integration requirements
@@ -137,7 +142,7 @@ dashboard connection count. Its API server consumes the kernel identity on
 continue to execute in the CLI.
 
 The final state projection, peer authorization and native service binder remain
-unbound here. `Binding.NewQueue` supplies the shared consumer over the elected
+unbound here. `runners.NewStoreRunner` supplies the shared consumer over the elected
 store. The runtime tests still substitute its surrounding services.
 The final store also needs an activity projection and a typed incompatible-store error. No
 compatibility router or second store opener supplies those gaps.

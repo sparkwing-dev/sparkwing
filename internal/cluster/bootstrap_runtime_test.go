@@ -143,3 +143,14 @@ func TestBootstrapRuntimeFetchBindsParsedControllerWithoutExchange(t *testing.T)
 		t.Fatal(err)
 	}
 }
+
+func TestBootstrapFileCancellationPrecedesAcquisition(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(t.Context())
+	failure := errors.New("host stopped")
+	cancel(failure)
+	directory := t.TempDir()
+	options := BootstrapOptions{ControllerURL: "https://controller.example", RunID: "run", Generation: 7, BootstrapFile: filepath.Join(directory, "absent"), SourceDir: filepath.Join(directory, "source"), ModuleCache: filepath.Join(directory, "modules")}
+	if err := (BootstrapRuntime{}).Run(ctx, "run-node", bootstrapArguments(options)); !errors.Is(err, failure) {
+		t.Fatal("cancelled host attempted private file acquisition")
+	}
+}

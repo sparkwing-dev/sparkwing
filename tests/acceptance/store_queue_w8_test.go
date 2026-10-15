@@ -9,7 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
-	"github.com/sparkwing-dev/sparkwing/internal/wingd/localcontroller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -61,7 +60,7 @@ func FuzzStoreQueueClaimAuthorityW8(f *testing.F) {
 			}
 			want = apierr.Unauthenticated
 		}
-		runner, err := (localcontroller.Binding{Store: server.Store, Controller: server}).NewQueue(runners.StoreRunnerConfig{
+		runner, err := runners.NewStoreRunner(server, runners.StoreRunnerConfig{
 			Bearer: func(context.Context) (string, error) { return raw, nil },
 			Loop:   runners.LoopConfig{Version: "v0.71.0", MaxConcurrent: 1},
 			Bind: func(context.Context, runners.StoreBinding) (runners.NativeServices, error) {

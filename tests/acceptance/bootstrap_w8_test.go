@@ -102,7 +102,7 @@ func TestCloudBootstrapW8Components(t *testing.T) {
 				}
 				return nil
 			})}
-			if err := host.RunFile(t.Context(), bootstrapFile); err != nil || !reflect.DeepEqual(events, []string{"exchange", "host"}) {
+			if err := host.Run(t.Context(), restored); err != nil || !reflect.DeepEqual(events, []string{"exchange", "host"}) {
 				t.Fatalf("events=%v err=%v", events, err)
 			}
 		})
