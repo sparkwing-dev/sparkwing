@@ -1320,6 +1320,11 @@ artifacts and depcache, never write through that opt-in, and never fetch
 pipeline binaries. Published data stays local provenance under
 `trust_local_builds`. Only trusted cloud builders assert cloud provenance.
 
+Generic record HTTP selectors and public response metadata preserve that namespace:
+`manual:<ref>` decodes to RefScope{Ref: <ref>, Verified: false}, and a plain ref
+decodes to Verified: true. Neither selector inherits the current write's trust.
+The existing read-grant check still precedes record lookup.
+
 Signing follows authorization and atomic quota reservation. PUT signing binds
 size and SHA-256; commit verifies them before the immutable key becomes live.
 Data GET URLs last 60 seconds. Logs use batches of sixteen segment PUT URLs
