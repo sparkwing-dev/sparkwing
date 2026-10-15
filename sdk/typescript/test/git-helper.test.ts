@@ -79,6 +79,17 @@ test("Git helpers clone, fetch and protect tags against a real local remote", as
         await git.pushTag(ctx, clone, "sdk/v1.1.0", "existing local tag at HEAD");
         assert.equal(await git.tagExistsOnRemote(ctx, clone, "sdk/v1.1.0"), true);
         assert.equal(await git.latestTag(ctx, clone, "sdk/"), "sdk/v1.1.0");
+        for (const directory of ["ignored", "nested/ignored"]) {
+          const ignored = join(clone, directory, "payload.txt");
+          await fs.mkdir(join(clone, directory), { recursive: true });
+          await fs.writeFile(join(clone, ".dockerignore"), `${directory}\n`);
+          await fs.writeFile(ignored, "first ignored content");
+          const hash = await snapshot.filesetHash(ctx);
+          await fs.writeFile(ignored, "changed ignored content");
+          assert.equal(await snapshot.filesetHash(ctx), hash, `contents beneath ${directory} must be ignored`);
+          await fs.writeFile(join(clone, "file.txt"), directory);
+          assert.notEqual(await snapshot.filesetHash(ctx), hash, "included files must still change the hash");
+        }
         await fs.rm(remote, { recursive: true });
         await assert.rejects(git.tagExistsOnRemote(ctx, clone, "sdk/v2.0.0"), (error: unknown) => {
           assert.ok(error instanceof Error && "exitCode" in error);

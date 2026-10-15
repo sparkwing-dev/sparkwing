@@ -482,3 +482,37 @@ No Git write occurred. Initial discovery ran installed `sparkwing info
 --for-agent` before the swarm brief's no-binary rule was read. No further
 Sparkwing command, candidate or pipeline ran. The lead retains commits, review,
 pipelines and native verification.
+
+## Continuation: ignored directories in Git fileset hashes
+
+Git fileset hashing now omits descendants of literal directory paths listed in
+`.dockerignore`, including paths without a trailing slash. The matcher previously
+checked only the file's name, so editing an ignored directory's contents changed
+the hash. The real-Git fixture reproduced that failure before the fix. It now
+checks root and nested ignored directories and verifies that included file edits
+still change the hash. The README describes the behavior.
+
+All 127 TypeScript tests, strict typechecking and Prettier passed. Repository-wide
+`go build -p 4 ./...`, focused `go vet -p 4` and `go test -p 4` for
+`./sdk/typescript/test/nativehost ./internal/acceptance ./tests/acceptance` passed.
+The existing `protocol-host-layers-risk-cleanup/typescript_sdk_boundary` includes
+the regression. Linux native pipes passed. No new placement or Windows cell was
+enabled, and no additional T1 inventory test was ported.
+
+No shared file or contract changed. No further legacy code was deleted. The
+earlier deletion remains 2,896 lines. The fix adds no public API, dependency,
+environment variable or runtime mechanism.
+
+Native Windows x64/arm64 bridge builds and execution remain open. Package
+preflight rejects the missing x64 bridge, and Windows compiler/runtime tooling
+is unavailable in this sandbox. W4's parser and validator remain panic stubs.
+The W3 service-route, W4 job-only cancellation and concurrency-presence agreements
+remain open. Real W3/W4 hosting, W1/W2/W7 authorization and persistence,
+authenticated Git, DinD and placement integration still require their owners.
+
+Go checks used `GOWORK=off`, `GOFLAGS=-buildvcs=false`, `GOMAXPROCS=4` and caches
+and temporary files under `/tmp/sw-astra-W5`. TypeScript tests used that same
+temporary root and `--experimental-test-isolation=none`. The temporary directory
+was removed after verification. No Sparkwing binary or Git write ran. Shared
+Git config has no `core.worktree` override. The lead retains commits, review,
+pipelines and native verification.

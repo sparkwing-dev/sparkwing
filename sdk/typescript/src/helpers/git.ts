@@ -68,7 +68,10 @@ async function filesetHash(ctx: Context, directory: string): Promise<string> {
       .split("\n")
       .map((line) => line.trim())
       .filter((line) => line && !line.startsWith("#"))
-      .map(inputMatcher);
+      .map((pattern) => {
+        const matches = inputMatcher(pattern);
+        return (file: string) => matches(file) || file.startsWith(pattern + "/");
+      });
   } catch (error) {
     if (!isMissing(error)) throw error;
   }

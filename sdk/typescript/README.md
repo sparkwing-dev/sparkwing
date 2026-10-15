@@ -52,6 +52,10 @@ Service scopes also reject after cancellation when their callback returns normal
 They remove their containers before rejecting. If removal fails, host cleanup
 stays registered and the cancellation error is preserved.
 
+Git fileset hashes omit files beneath literal directory paths in `.dockerignore`,
+including paths written without a trailing slash. Included file edits still
+change the hash.
+
 The host starts `node <entry> --sw-node-protocol`. Protocol 2 begins with hello,
 which supplies granted runner identity and an optional in-memory service binding.
 Requests and frames use private pipes. Standard output and error remain author
