@@ -33,7 +33,7 @@ func UploadSourceBundle(ctx context.Context, data *SourceData, sha, src string) 
 	if data == nil || data.Bytes == nil || data.Records == nil {
 		return blob.Record{}, errors.New("source bundle storage binding is required")
 	}
-	if !directCommitRE.MatchString(sha) {
+	if !bundleCommitID.MatchString(sha) {
 		return blob.Record{}, errors.New("source bundle requires a full snapshot commit")
 	}
 	return uploadFileRecord(ctx, data.Bytes, data.Records, data.Authority, data.Identity, blob.KindSourceBundle, sha, src)
@@ -51,7 +51,7 @@ func FetchSourceBundle(ctx context.Context, data *SourceData, digest blob.Digest
 	if data == nil || data.Bytes == nil {
 		return "", errors.New("source bundle storage binding is required")
 	}
-	if !directCommitRE.MatchString(sha) {
+	if !bundleCommitID.MatchString(sha) {
 		return "", errors.New("source bundle requires a full snapshot commit")
 	}
 	if data.Budget.Deadline.IsZero() {
@@ -85,7 +85,7 @@ func FetchSourceBundle(ctx context.Context, data *SourceData, digest blob.Digest
 	checkout := filepath.Join(staging, "checkout")
 	git := func(args ...string) error {
 		cmd := exec.CommandContext(ctx, "git", args...)
-		cmd.Env = directLocalGitEnv(directGitEnv(os.Environ()))
+		cmd.Env = bundleGitEnv(os.Environ())
 		killGroupOnCancel(cmd)
 		if out, err := gitCommandCombinedOutput(cmd); err != nil {
 			return fmt.Errorf("git source import: %w: %s", errors.Join(err, ctx.Err()), strings.TrimSpace(string(out)))
@@ -120,7 +120,7 @@ func FetchSourceBundle(ctx context.Context, data *SourceData, digest blob.Digest
 			return "", err
 		}
 	}
-	if _, err := directSparkwingDir(checkout); err != nil {
+	if _, err := bundlePipelineDir(checkout); err != nil {
 		return "", err
 	}
 	if err := ctx.Err(); err != nil {
@@ -130,12 +130,12 @@ func FetchSourceBundle(ctx context.Context, data *SourceData, digest blob.Digest
 	if err := os.Rename(checkout, destination); err != nil {
 		return "", err
 	}
-	return directSparkwingDir(destination)
+	return bundlePipelineDir(destination)
 }
 
 func isWorkspaceSnapshotCommit(ctx context.Context, repoDir, sha string) (bool, error) {
 	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "cat-file", "commit", sha)
-	cmd.Env = directLocalGitEnv(directGitEnv(os.Environ()))
+	cmd.Env = bundleGitEnv(os.Environ())
 	killGroupOnCancel(cmd)
 	out, err := gitCommandOutput(cmd)
 	if err != nil {
@@ -160,7 +160,7 @@ func isWorkspaceSnapshotCommit(ctx context.Context, repoDir, sha string) (bool, 
 
 func restoreRawCheckout(ctx context.Context, repoDir, sha string) error {
 	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "ls-tree", "-rz", "--full-tree", sha)
-	cmd.Env = directLocalGitEnv(directGitEnv(os.Environ()))
+	cmd.Env = bundleGitEnv(os.Environ())
 	killGroupOnCancel(cmd)
 	out, err := gitCommandOutput(cmd)
 	if err != nil {
@@ -180,7 +180,7 @@ func restoreRawCheckout(ctx context.Context, repoDir, sha string) error {
 			return fmt.Errorf("inspect workspace tree: unsafe path %q", name)
 		}
 		cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "cat-file", "blob", string(fields[2]))
-		cmd.Env = directLocalGitEnv(directGitEnv(os.Environ()))
+		cmd.Env = bundleGitEnv(os.Environ())
 		killGroupOnCancel(cmd)
 		blob, blobErr := gitCommandOutput(cmd)
 		if blobErr != nil {

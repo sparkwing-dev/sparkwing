@@ -1,0 +1,37 @@
+W7 continuation from HEAD 8def7fae6. Git metadata was not changed.
+Working diff paths, including test callers and documentation:
+M	design/rewrite/contracts/w7-storage-report.md
+D	internal/bincache/credential_transport.go
+D	internal/bincache/credential_transport_windows_test.go
+D	internal/bincache/direct_credential.go
+D	internal/bincache/direct_credential_test.go
+D	internal/bincache/direct_isolation_test.go
+D	internal/bincache/direct_key_owner_unix.go
+D	internal/bincache/direct_key_owner_windows.go
+D	internal/bincache/direct_key_root_linux.go
+D	internal/bincache/direct_key_root_other.go
+D	internal/bincache/direct_key_root_test.go
+D	internal/bincache/direct_source.go
+D	internal/bincache/direct_source_fixture_test.go
+D	internal/bincache/direct_source_test.go
+D	internal/bincache/direct_source_unix.go
+D	internal/bincache/direct_source_windows.go
+D	internal/bincache/direct_submodules.go
+D	internal/bincache/direct_submodules_test.go
+M	internal/bincache/source_bundle.go
+M	internal/bincache/source_bundle_test.go
+D	internal/bincache/source_token.go
+D	internal/bincache/source_token_test.go
+D	internal/bincache/trusted_source.go
+D	internal/bincache/trusted_source_test.go
+M	internal/bincache/workspace_baseline.go
+M	internal/bincache/workspace_baseline_test.go
+M	internal/blob/README.md
+M	pkg/controller/retry_test.go
+M	pkg/controller/trigger_test.go
+
+New files:
+design/rewrite/contracts/w7-storage-pruned-files.txt
+internal/bincache/source_import.go
+internal/bincache/source_import_unix.go
+internal/bincache/source_import_windows.go

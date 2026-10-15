@@ -26,7 +26,8 @@ the record transaction.
 bytes under the lookup budget. It returns bytes only after EOF verification and
 successful close. Missing records and missing objects both fail. Memo reads use
 the same bounded output reader. Hosts must attach the resulting record key in
-their result transition. Authenticated controller and host binding construction remains pending.
+their result transition. `DataController.BindData` supplies the authenticated
+signer and record store. Production host construction must supply that binding.
 The common host output publisher calls `OutputData.Put` after checking SDK JSON
 and its exact-attempt result key.
 
@@ -91,8 +92,8 @@ to the controller and capability packages.
 returns its file metadata after verifying length, digest and successful close.
 `storage.BlobManifests` supplies that reader to `Tenant.BlobRecords`. The record
 transaction authorizes the manifest first and checks every member afterward.
-This physical read opens no nested database transaction. W2 still needs to install
-the adapter in its authenticated record binding.
+This physical read opens no nested database transaction. `Server.WithDataObjects`
+installs it for result verification and authenticated record operations.
 
 The filesystem and S3 manifest boundaries generate file metadata and reject
 tenant substitution, corrupt bytes, truncation and malformed members. The SQLite
@@ -255,8 +256,8 @@ executable only after EOF verification and successful close. An upload obtains
 the exact owner/job receipt before committing its binary record. The record
 store assigns provenance. The binding keeps the host's authority in memory.
 
-Remote runtime bindings remain pending. The old hosts compile into their
-machine's binary cache without a remote storage binding.
+Remote host construction must supply the live data binding. Local builds keep
+their machine's binary cache.
 
 `bincache.SourceData` uploads source-bundle records with the exact uploader
 receipt and imports a working-tree snapshot by its sealed blob digest.
@@ -265,13 +266,16 @@ Import verifies the declared snapshot commit and refuses a symlinked pipeline
 directory. The checkout is published only after those checks pass. Failed
 transfers or imports remove staging and preserve an existing checkout.
 
-The CLI and old hosts have no source storage binding. Working-tree triggers
-fail before upload or submission. Intake must supply live upload authority
-before the CLI can commit and seal the source digest. Hosts must pass their
-live data authority and sealed digest. The cache-grant request client,
-legacy source byte transport and grant-based controller data handlers are
-deleted. The authenticated controller adapter and remaining output handlers
-still need binding to the store's upload transaction.
+Source checkout acquisition belongs to `internal/source`. The obsolete
+`bincache` direct-fetch clients, credential exchange, SSH-key sweeper and
+checkout implementations are removed. The signed bundle importer retains only
+local Git commands. Those commands discard inherited Git routing, tracing and
+configuration controls. The snapshot baseline type remains for CLI capture.
+Its environment transport and remote adoption path are removed.
+
+Working-tree intake must supply live upload authority before committing and
+sealing a source digest. Production host construction must pass its current
+data authority and sealed digest to the shared source boundary.
 
 The acceptance suite runs nine `storage-components` checks for receipt and
 namespace isolation, binary trust, verified streams, presence budgets, memo
