@@ -45,6 +45,7 @@ type Server struct {
 	auth             *Authenticator
 	authorization    RouteAuthorization
 	operatorSettings operatorSettingsStore
+	engineController *EngineController
 
 	peerPrincipal func(*http.Request) *Principal
 
@@ -1079,6 +1080,7 @@ func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.Serve
 
 	router := http.NewServeMux()
 	s.registerOperatorRoutes(router)
+	s.registerEngineRoutes(router)
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
 	// safety: the cache proves itself with its storage.count service token,
 	// which these handlers check.

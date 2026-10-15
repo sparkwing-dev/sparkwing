@@ -8,7 +8,7 @@ interfaces. The policy evaluator, authentication verifier, HTTP policy router,
 delegation validator, data/source checks, billing calculation, payment verifier
 and error codec are implemented. Filesystem and S3 object signers implement the
 signing boundary. Persistent issuance and authentication reads still need the
-store implementation. The Stripe callback and twenty-three operator endpoints use this table in the existing
+store implementation. The Stripe callback, generator expansion and twenty-three operator endpoints use this table in the existing
 controller. The remaining routes have not switched to it.
 
 ## Ownership
@@ -122,6 +122,7 @@ All capability names below are in `internal/capability`.
 | `controller.Server.WithAuthorization` | Configure the shared verifier, bindings, transport identity and CSRF adapters before constructing the server handler. Missing adapters fail closed. |
 | `controller.RouteAuthorization`, `controller.Endpoint`, `controller.PolicyRouter` | Wire identity, decoding, CSRF, external proof and authorized handlers into the matched route. |
 | `controller.NewPolicyRouter`, `PolicyRouter.Register`, `PolicyRouter.Validate`, `PolicyRouter.Registrations` | Register handlers independently of the policy table and check their proof wiring. Combine controller and node-host registrations for the complete inventory check. |
+| `controller.RunTransactions`, `EngineController.ResolveTenant`, `EngineController.ResolveRunTeam`, `Server.WithEngineController` | Supply final intake/sealing transactions and resource ownership. Production uses the existing store methods. Embedded controllers and tests may supply the same contracts without SQL or alternate authorization. |
 
 The exported data tables are `Grants`, `AwardPolicies`, `LivenessPolicies`,
 `Routes`, `BootstrapGrants`, `BootstrapUnits`, `UnitBillingMappings`,
@@ -140,6 +141,14 @@ clients, SDKs or documentation generators.
   data scope and lifetime. Only controller-to-nodehost audience narrowing
   is allowed. The node-host memory adapter uses the same validation and
   revokes the bearer when its process exits.
+- A claimed trigger owner may delegate controller expansion authority for one
+  terminal source. That child carries only `expansion.submit` and/or `data.read`.
+  Its binding names the source generation while `Binding.Expansion` retains
+  the parent's exact trigger unit, holder and owner generation. Optional data
+  scope narrows run-wide `DataClaim` to source-bound, read-only `DataExpansion`,
+  preserving repository, read refs and verified-default restrictions. Here
+  reservations, claim windows, deadlines and ancestry stay bounded. Persistence
+  derives the selected source facts and rechecks the owner's live lease.
 - Award runs inside the transaction that owns the claim. `ClaimGrants` is
   any-of. Request fields select a unit; they cannot assert its team, holder,
   generation, pools, billing, repo or ref. Only `claims.launch` may award
@@ -579,6 +588,84 @@ The deployment cut's extra shared test edits are
 `docs/migrations/_unreleased.md`, `CHANGELOG.md` and `api/openapi.yaml`, with
 the matching `pkg/docs` copies. No persistent store contract was changed.
 
+`EngineController.CreateRun`, `AcceptPlan`, `AcceptExpansion`, `IntakeForStore`
+and `ExpansionForStore` have implementations. Intake preserves the tagged
+authority and idempotency key, derives actor and team, and removes caller App
+proof. Sessions supply no capability-prefix fence. Plan acceptance reads the
+persisted first seal and passes both author declaration layers unchanged.
+The store supplies the acceptance clock and revalidates settings. API intake
+and plan registrations still use their legacy handlers until the wider cutover.
+
+`POST /api/v1/runs/{run}/jobs/{job}/expansion` is registered on the actual
+server through `PolicyRouter`. Its decoder resolves team and source generation
+from store reads. The adapter compares that generation with the capability and
+body, derives the owner/eval lease actor, and sends success or structured
+failure to `Tenant.AcceptExpansion`. Generated job responses use committed
+declarations, hashes and settings. Empty generated lists encode as `[]`.
+Bad persisted declaration bytes fail rather than yielding an empty job.
+
+Expansion actor authority remains the capability reference. Its
+`ActorRunHost` carries the live expansion lease holder/generation and an
+`OwnerTrigger` or `OwnerEval` reference, including the separate source
+generation. Plan claims use `ActorHolder`. Trigger owners use `ActorRunHost`
+with their trigger owner reference. Publishers carry their tagged authority
+without an executable owner. C1 resolves these references again in its
+transaction. No persisted contract or actor kind was added.
+
+The expansion binding now checks the exact source job as well as the run.
+The HTTP refusal test reproduced a sibling-source acceptance when the
+relational checker returned success. The policy shape check closes that gap.
+Migrated route groups also send unsupported methods through `PolicyRouter`,
+which returns the shared JSON 405 and `Allow`, instead of legacy fallback.
+
+This is also a local C2 contract repair. Generic binding delegation rejected
+the owner's trigger-to-source narrowing and treated the source generation as
+an owner-generation replacement. `ValidateDelegation` now admits the precise
+owner expansion case described above. All other binding/data changes keep
+the ordinary subset checks. Unit tests refuse foreign leases, sources, refs,
+repositories, writes, reporting grants and widened time/reservation bounds.
+The HTTP owner case validates that narrowing and retains its full ancestry.
+No C1 signature changes are needed. C1 must apply this same validator in
+`Store.Issue` and derive the selected source facts from its records.
+
+`TestEngineExpansionHTTP` covers 27 real-server cases with fake committed
+authentication, resource reads and transaction results. Its successful cases
+include owner/eval authority, empty success, structured failure and replay
+projection. Refusals cover revoked ancestry, leases, cancellation, source
+selectors, stale generations, malformed errors, caller actor fields, trailing
+JSON, hidden lookup errors and corrupt persisted declarations. Four additional
+method checks assert JSON 405 and `Allow: POST`. Adapter tests cover tagged
+session/capability intake, one-time bearer projection, first-seal/declaration
+preservation and session-backed publication. A fake transaction refusal proves
+HTTP propagation, not a database race. No additional full T1 port or placement
+scenario is claimed complete.
+
+The added mechanism is `RunTransactions` with tenant and ownership resolver
+callbacks, plus `WithEngineController`. Direct calls to the unfinished
+`*store.Tenant` methods panic, so this boundary lets tests exercise the real
+adapter against those exact method signatures. The production default uses
+`Store.ForTeam`, `Operator.RunTeam`, `Tenant.ReadRun`, `ReadNode`, `AdmitRun`,
+`AcceptPlan` and `AcceptExpansion`. These persistence implementations, the
+committed authentication/binding adapters and W9's fetched-engine client
+remain real-integration points. No second issuer, store or credential cache
+was introduced.
+
+The expansion cut touches shared `internal/apiroutes` code/tests so generated
+references discover the actual engine endpoint declaration. It updates
+`api/openapi.yaml`, `docs/api-reference.md`, `docs/auth.md`, `CHANGELOG.md`
+and their embedded copies. The five replaced adapter stub bodies and their
+comments remove 31 lines from `engine_contract.go`. No legacy credential
+subsystem was deleted in this slice.
+
+Expansion/delegation verification passes the whole-repository build, scoped
+vet, all capability/API-error/acceptance/API-generator tests, and the focused
+controller policy-router, settings, signing and handler-policy tests. The
+comment policy check passes. Commands use `GOWORK=off`,
+`GOFLAGS=-buildvcs=false`, and at most four test-package workers. Tests use
+fake committed facts and transactions where C1 bodies are stubs. Native
+transport, real database mutation and placement scenarios remain unverified.
+The full legacy controller suite and Sparkwing pipelines were not run.
+
 The registered-route comparison must use actual rewritten router registrations,
 not a list generated from `Routes`. A separate handler-policy lint must reject
 authorization calls inside handlers. T1 owns runtime scenarios; C2's tests
@@ -615,7 +702,7 @@ exercise only available contract data and functions.
    audit transaction. C2 supplies no alternate SQL implementation. Persistent
    root, delegation, claim and exchange entry points must reach `Store.Issue`.
 5. **Controller cutover.** The running `Server` uses `PolicyRouter` for the
-   Stripe callback and twenty-three operator endpoints. Other routes retain legacy auth and
+   Stripe callback, generator expansion and twenty-three operator endpoints. Other routes retain legacy auth and
    registrations. Wire final handlers and decoders to `PolicyRouter`, provide
    account/console/verified-local identity and CSRF adapters, then delete the
    old auth stack and handler authorization. Final route-inventory and

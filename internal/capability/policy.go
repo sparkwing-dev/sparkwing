@@ -419,7 +419,7 @@ func bindingShape(p Principal, rule BindingRule, t Target) bool {
 	case BindPipelineOfBoundRun:
 		return isClaim(p) && t.Pipeline != ""
 	case BindExpansion:
-		return run && b.Expansion != nil
+		return run && b.NodeID != "" && b.NodeID == t.NodeID && b.Generation > 0 && b.Expansion != nil
 	case BindChildOfBoundNode, BindOwnCleanup:
 		return b.Kind == BindingNode && b.RunID != "" && b.NodeID != "" && (t.RunID == "" || run)
 	case BindDeclaredSecret, BindSource:

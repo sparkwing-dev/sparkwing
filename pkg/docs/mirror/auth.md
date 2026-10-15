@@ -3,6 +3,21 @@
 Sparkwing uses a shared-secret bearer token model with typed principals
 and per-endpoint scope annotations.
 
+## Generator expansion authority
+
+`POST /api/v1/runs/{run}/jobs/{job}/expansion` uses the shared capability
+policy. It requires `expansion.submit`, the bound source job and generation,
+and a live owner or eval lease. Eval also requires a live controller ownership
+lease. The ended source claim cannot submit an expansion.
+
+The body supplies `source_generation` and exactly one of `body` or `failure`.
+A successful empty expansion uses `"body":{"jobs":[]}`. A failure uses the
+shared inner error object with `code` and `message`. The controller derives
+the actor, holder and lease generation from authorization. Success and failure
+reach the same store transaction, which rechecks authority before acceptance
+and owns replay. Unsupported methods return a JSON `method_not_allowed` error
+with `Allow: POST`.
+
 ## Token format
 
 Raw tokens are `<prefix>_<entropy>`:

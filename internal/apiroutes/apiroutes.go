@@ -36,7 +36,7 @@ const Operator = "operator"
 
 var (
 	handleRE   = regexp.MustCompile(`(\w+)\.Handle(?:Func)?\("([A-Z]+) (/[^"]+)",\s*(.*)$`)
-	endpointRE = regexp.MustCompile(`\{Method: "([A-Z]+)", Pattern: "(/[^"]+)", Handle: `)
+	endpointRE = regexp.MustCompile(`\{Method: "([A-Z]+)", Pattern: "(/[^"]+)"`)
 
 	scopeRefRE = regexp.MustCompile(`\b((?:Scope|scope)[A-Za-z]\w*)\b`)
 
@@ -81,16 +81,22 @@ func Parse(file string, scopes map[string]string) ([]Route, error) {
 		return nil, fmt.Errorf("read routes: %w", err)
 	}
 	var routes []Route
-	if strings.Contains(string(data), "s.registerOperatorRoutes(router)") {
+	for _, group := range []struct{ registration, file string }{
+		{"s.registerOperatorRoutes(router)", "operator_routes.go"},
+		{"s.registerEngineRoutes(router)", "engine_routes.go"},
+	} {
+		if !strings.Contains(string(data), group.registration) {
+			continue
+		}
 		// safety: the reference follows actual endpoint declarations, independently of the policy table.
-		endpoints, err := os.ReadFile(filepath.Join(filepath.Dir(file), "operator_routes.go"))
+		endpoints, err := os.ReadFile(filepath.Join(filepath.Dir(file), group.file))
 		if err != nil {
-			return nil, fmt.Errorf("read operator endpoints: %w", err)
+			return nil, fmt.Errorf("read endpoints: %w", err)
 		}
 		for _, match := range endpointRE.FindAllStringSubmatch(string(endpoints), -1) {
 			policy, ok := capability.LookupRoute(match[1], match[2])
 			if !ok {
-				return nil, fmt.Errorf("operator endpoint lacks policy: %s %s", match[1], match[2])
+				return nil, fmt.Errorf("endpoint lacks policy: %s %s", match[1], match[2])
 			}
 			var alternatives []string
 			for _, access := range policy.Access {

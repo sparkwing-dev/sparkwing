@@ -7233,6 +7233,23 @@ paths:
               schema:
                 $ref: "#/components/schemas/StorageState"
 
+  /api/v1/runs/{run}/jobs/{job}/expansion:
+    parameters:
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: expansion.submit
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
+
 components:
   securitySchemes:
     bearerToken:

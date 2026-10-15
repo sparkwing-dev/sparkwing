@@ -11,37 +11,14 @@ import (
 // EngineController adapts the shared HTTP wire to C1's transactions. Middleware
 // supplies C2 Authorized values; bodies cannot supply actors, grants or fences.
 // Every mutation rechecks that authority transactionally through the store.
-type EngineController struct{ Store *store.Store }
-
-// ExpansionForStore is the only expansion adapter. It derives Source and Actor
-// from the authorized route/binding, compares the requested immutable source
-// generation, and requires Body XOR Failure. Both variants become the same
-// store.ExpansionSubmission; Failure.Code and masked Message are preserved.
-// No acceptance or state mutation happens before Tenant.AcceptExpansion.
-func ExpansionForStore(authorized capability.Authorized, body controllerwire.ExpansionSubmission) (store.ExpansionSubmission, error) {
-	panic("unimplemented: controller-wire")
-}
-
-func (s *EngineController) AcceptExpansion(ctx context.Context, authorized capability.Authorized, body controllerwire.ExpansionSubmission) (controllerwire.ExpansionAccepted, error) {
-	panic("unimplemented: controller-wire")
-}
-
-// IntakeForStore keeps tagged session or capability authority separate from the
-// claim prefix and preserves body.IdempotencyKey. The store derives its scope.
-// Verified App facts come from the authenticated delivery record.
-func IntakeForStore(authorized capability.Authorized, body controllerwire.CreateRunRequest) (store.IntakeRequest, error) {
-	panic("unimplemented: controller-wire")
-}
-
-func (s *EngineController) CreateRun(ctx context.Context, authorized capability.Authorized, body controllerwire.CreateRunRequest) (controllerwire.CreateRunResponse, error) {
-	panic("unimplemented: controller-wire")
-}
-
-// AcceptPlan carries body.Declarations unchanged into PlanAcceptance.Seal.Declarations.
-// The store validates the author-only layers and resolves against its stored request
-// and ceilings; a caller cannot supply replacement intake or operator authority.
-func (s *EngineController) AcceptPlan(ctx context.Context, authorized capability.Authorized, body controllerwire.PlanSubmission) (controllerwire.PlanAccepted, error) {
-	panic("unimplemented: controller-wire")
+type EngineController struct {
+	Store *store.Store
+	// ResolveTenant supplies the same transaction contract to embedded controllers and tests.
+	// A nil resolver uses Store.ForTeam.
+	ResolveTenant func(context.Context, store.Team) (RunTransactions, error)
+	// ResolveRunTeam supplies resource ownership before authorization. A nil
+	// resolver uses Store.AsOperator().RunTeam.
+	ResolveRunTeam func(context.Context, string) (store.Team, error)
 }
 
 // ReconcileJob uses C1 ReconcileRequest and returns its persisted node and claim.

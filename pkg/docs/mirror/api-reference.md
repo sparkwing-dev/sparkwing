@@ -186,6 +186,7 @@ Every route the controller registers, with the scope each requires, generated fr
 | `POST` | `/api/v1/runs/{id}/retry` | `runs.control` |
 | `POST` | `/api/v1/runs/{id}/source-credential` | `claim` |
 | `GET` | `/api/v1/runs/{id}/steps` | `runs.read` |
+| `POST` | `/api/v1/runs/{run}/jobs/{job}/expansion` | `expansion.submit` |
 | `GET` | `/api/v1/secrets` | `runs.read` or `team.admin` |
 | `POST` | `/api/v1/secrets` | `admin` or `team.admin` |
 | `POST` | `/api/v1/secrets/rotate` | `admin` |

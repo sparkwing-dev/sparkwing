@@ -224,10 +224,15 @@ func ValidateDelegation(parent Principal, child DelegateSpec, now time.Time) err
 	if !subset(child.Grants, Grants) || !subset(child.Grants, p.Grants) {
 		return forbidden(apierr.ReasonMissingGrant)
 	}
-	if !subset(child.Repositories, p.Repositories) || !narrowData(p.Data, child.Data) {
+	ownerExpansion := narrowOwnerExpansion(parent, child)
+	dataNarrowed := narrowData(p.Data, child.Data)
+	if ownerExpansion && child.Data != nil {
+		dataNarrowed = narrowOwnerExpansionData(p, child)
+	}
+	if !subset(child.Repositories, p.Repositories) || !dataNarrowed {
 		return forbidden(apierr.ReasonRepositoryUnauthorized)
 	}
-	if !narrowBinding(p.Binding, child.Binding) || !boundedExpiry(child.ExpiresAt, p.ExpiresAt, now) ||
+	if (!narrowBinding(p.Binding, child.Binding) && !ownerExpansion) || !boundedExpiry(child.ExpiresAt, p.ExpiresAt, now) ||
 		!boundedExpiry(child.ExpiresAt, p.Binding.Deadline, now) || !boundedExpiry(child.ExpiresAt, child.Binding.Deadline, now) {
 		return forbidden(apierr.ReasonBinding)
 	}
@@ -247,9 +252,19 @@ func narrowBinding(parent, child Binding) bool {
 			return false
 		}
 	}
+	if parent.Generation != 0 && child.Generation != parent.Generation || parent.Attempt != 0 && child.Attempt != parent.Attempt ||
+		parent.Holder != "" && child.Holder != parent.Holder {
+		return false
+	}
+	if parent.Expansion == nil && child.Expansion != nil || parent.Expansion != nil && (child.Expansion == nil || *child.Expansion != *parent.Expansion) {
+		return false
+	}
+	return narrowBindingScope(parent, child)
+}
+
+func narrowBindingScope(parent, child Binding) bool {
 	if parent.RunID != "" && child.RunID != parent.RunID || parent.NodeID != "" && child.NodeID != parent.NodeID ||
-		parent.Generation != 0 && child.Generation != parent.Generation || parent.Attempt != 0 && child.Attempt != parent.Attempt ||
-		parent.Holder != "" && child.Holder != parent.Holder || parent.Reservation != "" && child.Reservation != parent.Reservation {
+		parent.Reservation != "" && child.Reservation != parent.Reservation {
 		return false
 	}
 	if parent.ClaimBy != nil && (child.ClaimBy == nil || child.ClaimBy.After(*parent.ClaimBy)) ||
@@ -259,10 +274,33 @@ func narrowBinding(parent, child Binding) bool {
 	if parent.Push != nil && (child.Push == nil || *child.Push != *parent.Push) {
 		return false
 	}
-	if parent.Expansion == nil && child.Expansion != nil || parent.Expansion != nil && (child.Expansion == nil || *child.Expansion != *parent.Expansion) {
+	return true
+}
+
+// safety: a run owner may narrow to a terminal source while retaining its own
+// lease as expansion authority. The source generation is a separate fence.
+func narrowOwnerExpansion(parent Principal, child DelegateSpec) bool {
+	p, b, source := parent.Capability, parent.Capability.Binding, child.Binding
+	if !isClaim(parent) || p.Unit != UnitTrigger || p.UnitID == "" || b.Kind != BindingTrigger || b.NodeID != "" ||
+		(p.Purpose != PurposeTrigger && p.Purpose != PurposeHere) || b.Expansion != nil || b.Generation <= 0 || b.Holder == "" ||
+		!slices.Contains(p.Grants, ExpansionSubmit) || child.Audience != Controller ||
+		!subset(child.Grants, []Grant{ExpansionSubmit, DataRead}) || source.Kind != BindingNode || source.NodeID == "" || source.Generation <= 0 || source.Expansion == nil {
 		return false
 	}
-	return true
+	owner := LeaseRef{Kind: UnitTrigger, ID: p.UnitID, Generation: b.Generation, Holder: b.Holder}
+	return *source.Expansion == owner && narrowBindingScope(b, source)
+}
+
+func narrowOwnerExpansionData(parent Capability, child DelegateSpec) bool {
+	p, c := parent.Data, child.Data
+	if p == nil || c == nil || p.Use != DataClaim || c.Use != DataExpansion || p.RunID != parent.Binding.RunID ||
+		p.NodeID != "" || p.Attempt != 0 || p.Generation != 0 && p.Generation != parent.Binding.Generation || c.WriteRef != "" {
+		return false
+	}
+	source := *p
+	source.Use, source.NodeID = DataExpansion, child.Binding.NodeID
+	source.Generation, source.Attempt = child.Binding.Generation, child.Binding.Attempt
+	return narrowData(&source, c)
 }
 
 func narrowData(parent, child *DataScope) bool {
