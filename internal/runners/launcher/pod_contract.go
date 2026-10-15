@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 )
 
 // safety: CloudUnitKind selects host work without weakening the common Cloud isolation contract.
@@ -65,6 +66,7 @@ type CloudJobBinding struct {
 // Engine is required for eval/work; a first plan resolves its pin after source acquisition.
 type CloudJobAward struct {
 	Engine    *engine.Identity
+	Source    source.Spec
 	Binding   CloudJobBinding
 	Bootstrap []byte `json:"-"`
 	CPUCores  float64

@@ -1,14 +1,4 @@
-// Package userconfig owns config.yaml, the one settings file in the sparkwing
-// user config directory. Each top-level key is a section that belongs to one
-// package, which keeps its own typed struct and validation: admission and its
-// budget to internal/wingd, agent to internal/agentconfig, cache to
-// internal/bincache, profiles to internal/profile, repos to internal/repos,
-// and debug, logs, machine and run to internal/orchestrator.
-//
-// [Read] decodes one section and rejects unknown keys. [Update] and [Write]
-// rewrite one section under a lock, keeping every other section and the
-// comments outside the rewritten section. The file can carry credentials, so
-// it is read only when it is an owner-only regular file and written owner-only.
+// Package userconfig owns the complete machine settings schema and private file edits.
 package userconfig
 
 import (
@@ -38,24 +28,26 @@ const PathEnv = "SPARKWING_CONFIG"
 // The sections config.yaml accepts. Any other top-level key is an error.
 const (
 	Admission = "admission"
-	Agent     = "agent"
+	Runner    = "runner"
 	Cache     = "cache"
 	Debug     = "debug"
-	Logs      = "logs"
 	Machine   = "machine"
 	Profiles  = "profiles"
 	Repos     = "repos"
 	Run       = "run"
 )
 
-var sections = []string{Admission, Agent, Cache, Debug, Logs, Machine, Profiles, Repos, Run}
+var sections = []string{Admission, Runner, Cache, Debug, Machine, Profiles, Repos, Run}
 
 // Path reports the settings file: $SPARKWING_CONFIG when set, else config.yaml
 // in [fssecure.ConfigDir]. SPARKWING_HOME does not move it, because a profile
 // or a registered repo is a machine-wide fact that outlives any one home;
 // [configguard.ErrOutsideSandboxHome] is how a write says so.
 func Path() (string, error) {
-	if v := os.Getenv(PathEnv); v != "" {
+	if v, set := os.LookupEnv(PathEnv); set {
+		if strings.TrimSpace(v) == "" {
+			return "", Invalid("config_path", "SPARKWING_CONFIG must not be empty")
+		}
 		return v, nil
 	}
 	// safety: a test binary that sets neither variable would otherwise read and
@@ -72,10 +64,6 @@ func Path() (string, error) {
 // leaves out alone, when the file or the section is absent. A key out does not
 // declare, an unknown section, or a second YAML document is an error.
 func Read(path, section string, out any) (bool, error) {
-	path = legacyRedirect(path)
-	if err := migrateLegacy(path, section); err != nil {
-		return false, err
-	}
 	data, err := readFile(path)
 	if err != nil || data == nil {
 		return false, err
@@ -98,8 +86,7 @@ func ReadDefault(section string, out any) (string, bool, error) {
 // when the file or the section is absent. It is for an owner that must inspect
 // the section's shape before decoding it.
 func Node(path, section string) (*yaml.Node, error) {
-	path = legacyRedirect(path)
-	if err := migrateLegacy(path, section); err != nil {
+	if err := knownSection(section); err != nil {
 		return nil, err
 	}
 	data, err := readFile(path)
@@ -110,15 +97,15 @@ func Node(path, section string) (*yaml.Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, value := lookup(root, section)
+	value := YAMLField(root, section)
 	return value, nil
 }
 
 // Update rewrites section of the settings file at path under an exclusive
 // lock. It decodes the current section into out (see [Read]), calls change
 // with whether the section was present, and writes out back as the section.
-// An error from change leaves the file untouched. A section that encodes to
-// nothing is removed. what names the file's owner in a sandbox refusal; see
+// An error from change leaves the file untouched. A nil section is removed;
+// empty mappings remain explicit. what names the file's owner in a sandbox refusal; see
 // [configguard.GuardWrite].
 func Update(path, section, what string, out any, change func(found bool) error) error {
 	return update(path, section, what, out, out, change)
@@ -135,7 +122,6 @@ func update(path, section, what string, out, value any, change func(found bool) 
 	if err := knownSection(section); err != nil {
 		return err
 	}
-	path = legacyRedirect(path)
 	if err := configguard.GuardWrite(what, PathEnv, path); err != nil {
 		return err
 	}
@@ -153,9 +139,6 @@ func update(path, section, what string, out, value any, change func(found bool) 
 		return err
 	}
 	defer unlock()
-	if err := migrateLegacyLocked(path, section); err != nil {
-		return err
-	}
 
 	data, err := readFile(path)
 	if err != nil {
@@ -198,6 +181,9 @@ func writeDoc(path, section string, doc *yaml.Node) error {
 	}
 	if err := enc.Close(); err != nil {
 		return fmt.Errorf("encode %s: %w", path, err)
+	}
+	if _, err := Decode(path, buf.Bytes()); err != nil {
+		return err
 	}
 	return replace(path, buf.Bytes())
 }
@@ -263,53 +249,22 @@ func parseRoot(path string, data []byte) (*yaml.Node, error) {
 // safety: the document is never nil, so a comment-only file keeps its comment
 // when a section is added to it.
 func parseDoc(path string, data []byte) (*yaml.Node, *yaml.Node, error) {
-	doc := &yaml.Node{Kind: yaml.DocumentNode}
-	if len(data) == 0 {
-		return doc, nil, nil
+	var cfg Config
+	doc, err := DecodeYAML(path, data, &cfg)
+	if err != nil {
+		return nil, nil, err
 	}
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	if err := dec.Decode(doc); err != nil {
-		if errors.Is(err, io.EOF) {
-			// safety: yaml reports a comment-only file as empty, so its text is
-			// carried as the document's comment rather than dropped on write.
-			return &yaml.Node{Kind: yaml.DocumentNode, HeadComment: strings.TrimRight(string(data), "\n")}, nil, nil
-		}
-		return nil, nil, fmt.Errorf("parse %s: %w", path, err)
-	}
-	var trailing yaml.Node
-	if err := dec.Decode(&trailing); !errors.Is(err, io.EOF) {
-		if err == nil {
-			err = errors.New("multiple YAML documents are not allowed")
-		}
-		return nil, nil, fmt.Errorf("parse %s: %w", path, err)
+	if err := ValidateConfig(cfg); err != nil {
+		return nil, nil, LocateError(path, doc, err)
 	}
 	if len(doc.Content) == 0 {
+		doc.Kind = yaml.DocumentNode
+		doc.HeadComment = strings.TrimRight(string(data), "\n")
 		return doc, nil, nil
 	}
-	root := doc.Content[0]
-	if root.Kind == yaml.ScalarNode && root.Tag == "!!null" {
-		return doc, nil, nil
-	}
-	if root.Kind != yaml.MappingNode {
-		return nil, nil, fmt.Errorf("parse %s: line %d: the file must be a mapping of sections (%s)", path, root.Line, strings.Join(sections, ", "))
-	}
-	seen := map[string]bool{}
-	for i := 0; i+1 < len(root.Content); i += 2 {
-		key := root.Content[i]
-		if err := knownSection(key.Value); err != nil {
-			return nil, nil, fmt.Errorf("parse %s: line %d: unknown section %q; the sections are %s", path, key.Line, key.Value, strings.Join(sections, ", "))
-		}
-		if seen[key.Value] {
-			return nil, nil, fmt.Errorf("parse %s: line %d: section %q appears twice", path, key.Line, key.Value)
-		}
-		seen[key.Value] = true
-	}
-	return doc, root, nil
+	return doc, doc.Content[0], nil
 }
 
-// hack: a struct built at run time holds the one typed section beside bare
-// nodes for the others, so yaml's own unknown-field check runs and its errors
-// carry the file's line numbers.
 func decodeSection(path string, data []byte, section string, out any) (bool, error) {
 	if err := knownSection(section); err != nil {
 		return false, err
@@ -322,7 +277,7 @@ func decodeSection(path string, data []byte, section string, out any) (bool, err
 	if err != nil {
 		return false, err
 	}
-	_, value := lookup(root, section)
+	value := YAMLField(root, section)
 	if value == nil || (value.Kind == yaml.ScalarNode && value.Tag == "!!null") {
 		return false, nil
 	}
@@ -330,23 +285,10 @@ func decodeSection(path string, data []byte, section string, out any) (bool, err
 		*node = *value
 		return true, nil
 	}
-	nodeType := reflect.TypeOf(yaml.Node{})
-	fields := make([]reflect.StructField, len(sections))
-	own := 0
-	for i, s := range sections {
-		fields[i] = reflect.StructField{Name: fmt.Sprintf("S%d", i), Type: nodeType, Tag: reflect.StructTag(`yaml:"` + s + `"`)}
-		if s == section {
-			fields[i].Type = target.Type()
-			own = i
-		}
+	if err := value.Decode(out); err != nil {
+		return false, &FieldError{File: path, Key: section, Line: value.Line, Problem: "invalid section destination"}
 	}
-	holder := reflect.New(reflect.StructOf(fields))
-	holder.Elem().Field(own).Set(target)
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
-	if err := dec.Decode(holder.Interface()); err != nil {
-		return false, fmt.Errorf("parse %s: %s: %w", path, section, err)
-	}
+
 	return true, nil
 }
 
@@ -366,8 +308,7 @@ func lookup(root *yaml.Node, section string) (*yaml.Node, *yaml.Node) {
 // replaced, so comments, styles and anchors on the keys that survive stay put.
 func setSection(root *yaml.Node, section string, value *yaml.Node) {
 	empty := value.Kind == 0 ||
-		(value.Kind == yaml.ScalarNode && value.Tag == "!!null") ||
-		((value.Kind == yaml.MappingNode || value.Kind == yaml.SequenceNode) && len(value.Content) == 0)
+		(value.Kind == yaml.ScalarNode && value.Tag == "!!null")
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		if root.Content[i].Value != section {
 			continue

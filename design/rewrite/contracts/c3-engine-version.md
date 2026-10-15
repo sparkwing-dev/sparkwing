@@ -2,6 +2,26 @@
 
 <!-- design:begin -->
 
+## Amendment 1: selected-engine installation
+
+`install_contract.go` declares `Resolved.InstallSDK(SDKInstallRequest) SDKCommand`.
+Source acquisition resolves the exact pin before calling it. The verified selected
+Sparkwing executable implements hidden `__sdk-install`, reads request JSON on stdin,
+inherits only procenv.Install's environment, and writes one SDKCommand JSON value.
+Diagnostics go to masked stderr. The command contains locally built Go argv or
+Node/main argv without protocol flags or a preload. Installation rechecks the pin
+against Resolved and cannot substitute the host's engine or a remote pipeline binary.
+Eval/work use the accepted identity and the same selected engine's host operations.
+
+W8 retains historical signed asset matrices even after current cache-binary removal.
+W9 renders shared version notices and wires upgrade verification. W5/W9 package and
+stamp the TypeScript Windows bridge for supported architectures with its matching
+engine release. Decision 104 requires native Windows handle-inheritance evidence.
+These are integration obligations under decisions 102-104, not a new distribution
+origin, trust root, fallback-age cutoff or support-window expiry refusal.
+
+
+
 These are target contracts. All new functions remain panic stubs. The existing
 CLI, runner and launcher do not yet call them.
 

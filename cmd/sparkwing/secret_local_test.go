@@ -10,9 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -158,95 +156,5 @@ func TestSecretsWithoutAProfileUseTheDaemonsSealedStore(t *testing.T) {
 
 // An upgrade finds the per-file settings, the dotenv secret files and a runs
 // store holding history, and imports the dotenv files once.
-func TestUpgradeImportsLegacySettingsAndDotenvSecretsOnce(t *testing.T) {
-	home, dir := secretsHome(t)
-	writeFiles(t, dir, map[string]string{
-		"profiles.yaml": "profiles:\n  prod:\n    controller: {url: https://api.example}\n",
-		"secrets.env":   "TOKEN=from-dotenv\n",
-		"config.env":    "REGION=us-east-1\n",
-	})
-	st, err := store.Open(filepath.Join(home, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = st.Close()
-
-	configPath, err := userconfig.Path()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg, err := profile.Load(configPath); err != nil || cfg.Profiles["prod"] == nil {
-		t.Fatalf("profiles after the upgrade = %+v, %v; want prod copied from profiles.yaml", cfg, err)
-	}
-	stop := hostSecretsDaemon(t, home)
-	listed := captureStdout(t, func() {
-		if err := runSecretList(nil); err != nil {
-			t.Fatalf("list: %v", err)
-		}
-	})
-	if !strings.Contains(listed, "TOKEN") || !strings.Contains(listed, "REGION") {
-		t.Fatalf("list after the upgrade = %q, want both imported names", listed)
-	}
-
-	captureStdout(t, func() {
-		if err := runSecretDelete([]string{"--name", "TOKEN"}); err != nil {
-			t.Fatalf("delete: %v", err)
-		}
-	})
-	writeFiles(t, dir, map[string]string{"secrets.env": "TOKEN=from-dotenv\nLATER=added\n"})
-	stop()
-	hostSecretsDaemon(t, home)
-	listed = captureStdout(t, func() {
-		if err := runSecretList(nil); err != nil {
-			t.Fatalf("list after a restart: %v", err)
-		}
-	})
-	if strings.Contains(listed, "TOKEN") || strings.Contains(listed, "LATER") || !strings.Contains(listed, "REGION") {
-		t.Fatalf("list after a restart = %q, want REGION alone: the import runs once", listed)
-	}
-}
-
-func TestUpgradeWithAMalformedDotenvFileFailsSecretsUntilFixed(t *testing.T) {
-	home, dir := secretsHome(t)
-	writeFiles(t, dir, map[string]string{"secrets.env": "TOKEN=fine\n", "config.env": "not a dotenv line\n"})
-	st, err := store.Open(filepath.Join(home, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = st.Close()
-
-	stop := hostSecretsDaemon(t, home)
-	if err := runSecretList(nil); err == nil || !strings.Contains(err.Error(), "config.env:1") {
-		t.Fatalf("list with a malformed config.env = %v, want the import error naming config.env:1", err)
-	}
-	if err := runSecretSet([]string{"--name", "OTHER", "--value", "x"}); err == nil {
-		t.Fatal("set succeeded while the import had failed")
-	}
-
-	writeFiles(t, dir, map[string]string{"config.env": "REGION=us-east-1\n"})
-	stop()
-	hostSecretsDaemon(t, home)
-	listed := captureStdout(t, func() {
-		if err := runSecretList(nil); err != nil {
-			t.Fatalf("list after the fix and a restart: %v", err)
-		}
-	})
-	if !strings.Contains(listed, "TOKEN") || !strings.Contains(listed, "REGION") {
-		t.Fatalf("list after the fix = %q, want both names", listed)
-	}
-}
 
 // Dotenv secrets on a machine that never ran a pipeline: no state.db yet.
-func TestSecretsListImportsIntoAFreshHome(t *testing.T) {
-	home, dir := secretsHome(t)
-	writeFiles(t, dir, map[string]string{"secrets.env": "TOKEN=from-dotenv\n"})
-	hostSecretsDaemon(t, home)
-	listed := captureStdout(t, func() {
-		if err := runSecretList(nil); err != nil {
-			t.Fatalf("list: %v", err)
-		}
-	})
-	if !strings.Contains(listed, "TOKEN") {
-		t.Fatalf("list on a fresh home with secrets.env = %q, want TOKEN imported", listed)
-	}
-}

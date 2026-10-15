@@ -61,12 +61,15 @@ func validateAutomationPatterns(patterns []string) error {
 }
 
 func automationDeclarations(content []byte) ([]githubAppAutomationPipeline, string, error) {
-	cfg, err := projectconfig.ParseOld(content)
+	cfg, err := projectconfig.Parse(content)
 	if err != nil {
 		return nil, "invalid", err
 	}
 	out := []githubAppAutomationPipeline{}
 	for _, pipeline := range cfg.Pipelines {
+		if pipeline.On == nil {
+			continue
+		}
 		decl := githubAppAutomationPipeline{Pipeline: pipeline.Name, Branches: []string{}, Actions: []string{}, BaseBranches: []string{}}
 		if push := pipeline.On.Push; push != nil {
 			if len(push.Paths) != 0 {
