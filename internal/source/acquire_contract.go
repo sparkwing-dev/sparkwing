@@ -101,6 +101,9 @@ func Acquire(ctx context.Context, spec Spec, options Options) (*Entry, error) {
 // Close releases acquisition-owned resources without removing a user's checkout.
 func (e *Entry) Close() error { return e.close() }
 
+// CheckoutDirectory returns the acquired root that bounds checkout-derived file reads.
+func (e *Entry) CheckoutDirectory() string { return e.checkoutDirectory }
+
 // ForRequest uses the captured intake checkout policy for planning acquisition.
 // Code and checkout-derived policy can resolve only at AcceptPlan.
 // Source.Location supplies URL/local path/pipeline directory. Repo display is never a clone URL.

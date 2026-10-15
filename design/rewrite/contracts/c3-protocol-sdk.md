@@ -1,5 +1,9 @@
 # C3 protocol and SDK contract
 
+[Checkout planning](w3-checkout-continuation.md) connects the common owner to
+acquired project files, shared argument and guard resolution, and plan-dependent
+settings for the second seal. Native entry-point migration remains open.
+
 [W3 amendment implementation and remaining integration](w3-amendment-handoff.md)
 records the current host boundary. Native placement assembly remains incomplete.
 [Required artifact staging](w3-artifact-continuation.md) adds the verified read
@@ -120,6 +124,7 @@ are part of this contract.
 | `nodehost.OwnerEvaluator.SkipIf`, `SkipEvaluation`, `OwnerEvaluator.MemoKey` | Evaluate pre-dispatch conditions and memo keys without starting job attempts or writing lifecycle state. |
 | `nodehost.ProtocolSessionConfig.StartEvaluation` | Launches the owner evaluator with private pipes, run-log attribution and route revocation. |
 | `nodehost.SDKPlanner`, `PlanningProcessInput`, `PreparedPlanning` | Describe acquired code, resolve SDK argument defaults and supply lazy planning through the common cache boundary. |
+| `nodehost.CheckoutPlanningInput`, `SDKPlanner.PrepareCheckout`, `OwnerPlanning.Resolve` | Resolve acquired project declarations and guards, then compute the settings proposal from the validated fresh or cached plan before acceptance. |
 | `nodehost.ProtocolSessionConfig.StartPlanning` | Launches unbound describe/plan processes and routes every output stream through the planning secret gate. |
 | `nodehost.ClaimAuthority` | Refers to authenticated executor authority without granting it from a request body. |
 | `nodehost.NodeInput` | Binds an attempt to accepted spec, node, generation, runner and route bearer. |
@@ -177,6 +182,7 @@ are part of this contract.
 | `source.ForRequest`, `source.ForExecution` | Project intake acquisition inputs or the accepted execution checkout policy without rereading mutable settings. |
 | `source.Acquire` | Acquires source and builds or resolves the SDK entry through one placement-independent path. |
 | `source.Entry.Close` | Releases owned resources without removing the user's checkout. |
+| `source.Entry.CheckoutDirectory` | Exposes the acquired root that confines checkout-derived configuration reads. |
 
 ## Host invariants
 

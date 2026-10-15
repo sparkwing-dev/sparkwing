@@ -43,6 +43,8 @@ func pendingScenarios(t *testing.T, group string) {
 				t.Run("hermetic-native-environment-policy", acceptance.CheckSDKEnvironmentProjection)
 			case "environment-captured-local-base":
 				t.Run("hermetic-private-snapshots", acceptance.CheckCapturedHostEnvironment)
+			case "environment-origin-head-and-guards":
+				t.Run("hermetic-checkout-planning", acceptance.CheckCheckoutPlanning)
 			case "protocol-sdk-secrets-mask-annotations":
 				t.Run("hermetic-process-services", acceptance.CheckHostServices)
 			case "recovery-application-retry-ordinal":

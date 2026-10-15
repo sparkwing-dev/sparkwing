@@ -36,6 +36,7 @@ type OwnerPlanning struct {
 	Resolved     runspec.Resolved
 	Planning     PlanningInput
 	Functions    PlanningFunctions
+	Resolve      func(nodeproto.PlanDoc) (runspec.Resolved, error)
 }
 
 // OwnerLayerResult either proposes a store transition or an authorized reuse candidate.
@@ -59,6 +60,8 @@ type OwnerHost struct {
 	Source    source.Options
 	Acquire   func(context.Context, RunInput) (*source.Entry, error)
 	Prepare   func(context.Context, RunInput, *source.Entry) (OwnerPlanning, error)
+	Planner   *SDKPlanner
+	Planning  PlanningInput
 	Project   func(store.RunSnapshot) (store.ScheduleSnapshot, error)
 	Decide    func(store.ScheduleSnapshot) store.ScheduleDecision
 	Wait      func(context.Context, store.RunSnapshot) error
@@ -230,22 +233,17 @@ func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow
 	if input.Accepted != nil {
 		return AcceptedRun{}, errors.New("resume has no persisted acceptance")
 	}
-	if h.Prepare == nil {
-		return AcceptedRun{}, errors.New("new run requires checkout resolution and planning")
-	}
-	prepared, err := h.Prepare(ctx, input, entry)
+	prepared, err := h.prepare(ctx, input, row.Request, entry)
 	if err != nil {
 		return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
 	}
-	if row.Request.Request.SecretArgs.Set {
-		for _, name := range row.Request.Request.SecretArgs.Value {
-			if !slices.Contains(prepared.Resolved.SecretArgs, name) {
-				prepared.Resolved.SecretArgs = append(prepared.Resolved.SecretArgs, name)
-			}
-		}
-	}
 	if input.PlanCache != nil {
 		prepared.Planning.Cache = input.PlanCache
+	}
+	guards := prepared.Resolved.Guards
+	if !guards.Passed && (len(guards.When)+len(guards.Unless) != 0 || guards.Reason != "") {
+		prepared.Planning.Cache = nil
+		prepared.Functions.Plan = func(context.Context) (json.RawMessage, error) { return json.RawMessage(`{"jobs":[]}`), nil }
 	}
 	if h.Masks != nil {
 		prepared.Planning.Validation.Secrets = planningSecrets{prior: prepared.Planning.Validation.Secrets, masker: h.Masks.masker}
@@ -253,6 +251,19 @@ func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow
 	plan, err := PlanInitial(ctx, prepared.Planning, prepared.Functions)
 	if err != nil {
 		return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
+	}
+	if prepared.Resolve != nil {
+		prepared.Resolved, err = prepared.Resolve(plan.Plan)
+		if err != nil {
+			return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
+		}
+	}
+	if row.Request.Request.SecretArgs.Set {
+		for _, name := range row.Request.Request.SecretArgs.Value {
+			if !slices.Contains(prepared.Resolved.SecretArgs, name) {
+				prepared.Resolved.SecretArgs = append(prepared.Resolved.SecretArgs, name)
+			}
+		}
 	}
 	var accepted store.AcceptedPlan
 	commit := func() error {

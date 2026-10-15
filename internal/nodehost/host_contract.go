@@ -30,6 +30,7 @@ type RunInput struct {
 	Storage       StorageBinding
 	Engines       *engine.Resolver
 	PlanCache     PlanCache
+	GrantedRunner nodeproto.RunnerIdentity
 	RunID         string
 	SealedRequest json.RawMessage
 	RequestHash   string
