@@ -219,10 +219,6 @@ func Summary(ctx context.Context, markdown string) {
 	}))
 }
 
-// eventSummary is the LogRecord.Event value emitted by Summary.
-// Persistence layers observing the log stream should dispatch on
-// this constant rather than the raw string. Overwrite-on-write
-// semantics: the last record per (node, step) scope wins.
 const eventSummary = "summary"
 
 func emitLevel(ctx context.Context, level, format string, args ...any) {
