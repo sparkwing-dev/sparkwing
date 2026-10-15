@@ -20,6 +20,16 @@ Local transport also binds the absolute API socket path. Local clients use a raw
 socket transport under the same C2 route retry policy as HTTP clients, without
 an additional transport retry loop.
 
+Sealed here resume and retry follow public logs with the caller's display
+credential. The retained bearer selects the named owner claim, and the fresh
+award capability binds the host. The first interrupt requests cancellation with
+the caller's credential while hosting continues. A second interrupt cancels
+hosting and observation and joins both, including any pending cancel request.
+Host completion drains final persisted log segments. A log failure does not
+abandon a live host. An incomplete observation returns exit 3 independently of
+the recorded run outcome. These CLI adapters still require native shared-host
+construction and persisted-log completeness from their owning areas.
+
 NewDataClient uses the same HTTP/api.sock transport to provide blob.DataSigner
 and blob.RecordStore. Each call reauthorizes server-derived scope/uploader facts.
 The signed-object client never receives the reusable controller credential.

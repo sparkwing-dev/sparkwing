@@ -90,5 +90,11 @@ final sections above. Remove old `agent`, `logs`, `fleet`, `allow_repos`,
 `sparkwing runners add` and stores its credential in a private file under
 `runner.credentials_dir`.
 
+Enrollment leaves an omitted `--max-concurrent` unset in the file. The shared
+runner settings resolver defaults it to one. An explicit positive value is
+saved as supplied. Enrollment and removal validate the complete machine file.
+Removal reads `agent-token` as an owner-only regular file and checks its
+controller and runner selectors before stopping the service or revoking authority.
+
 See [the migration guide](migrations/_unreleased.md#machine-connection-profiles)
 for controller-profile changes.

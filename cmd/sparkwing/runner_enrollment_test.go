@@ -16,11 +16,12 @@ import (
 func TestRunnerEnrollmentWritesFinalSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	t.Setenv("SPARKWING_CONFIG", path)
-	cfg := agentFileConfig{Controller: "https://controller.example", Token: "private-runner-token", MaxConcurrent: 2, AllowRepos: []string{"github.com/acme/*"}}
-	if err := validateAgentFileConfig(cfg); err != nil {
+	cfg := userconfig.RunnerConfig{Controller: preferencePointer("https://controller.example"), MaxConcurrent: preferencePointer(2), Repos: []string{"github.com/acme/*"}}
+	bearer := "private-runner-token"
+	if err := validateRunnerEnrollment(cfg); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := finishRunnerEnrollment(path, cfg, false, runnerServicePlan{skipped: true}); err != nil {
+	if _, err := finishRunnerEnrollment(path, cfg, bearer, false, runnerServicePlan{skipped: true}); err != nil {
 		t.Fatal(err)
 	}
 	final, err := userconfig.ReadConfig(path)
@@ -28,27 +29,27 @@ func TestRunnerEnrollmentWritesFinalSchema(t *testing.T) {
 		t.Fatalf("invalid runner configuration: %+v %v", final.Runner, err)
 	}
 	runner, err := agentconfig.Load(path)
-	if err != nil || runner.Token != cfg.Token {
+	if err != nil || runner.Token != bearer {
 		t.Fatalf("runner could not load minted credential: %v", err)
 	}
 	body, err := os.ReadFile(path)
-	if err != nil || strings.Contains(string(body), cfg.Token) {
+	if err != nil || strings.Contains(string(body), bearer) {
 		t.Fatalf("credential exposed in YAML: %v", err)
 	}
-	previous := cfg.Token
-	cfg.Token = "replacement-runner-token"
-	if _, err := writeAgentConfig(path, cfg, false); err == nil || !strings.Contains(err.Error(), "--force") {
+	previous := bearer
+	bearer = "replacement-runner-token"
+	if _, err := writeRunnerConfig(path, cfg, bearer, false); err == nil || !strings.Contains(err.Error(), "--force") {
 		t.Fatalf("existing enrollment was not refused: %v", err)
 	}
 	runner, err = agentconfig.Load(path)
 	if err != nil || runner.Token != previous {
 		t.Fatalf("refused replacement changed the credential: %v", err)
 	}
-	if _, err := writeAgentConfig(path, cfg, true); err != nil {
+	if _, err := writeRunnerConfig(path, cfg, bearer, true); err != nil {
 		t.Fatal(err)
 	}
 	runner, err = agentconfig.Load(path)
-	if err != nil || runner.Token != cfg.Token {
+	if err != nil || runner.Token != bearer {
 		t.Fatalf("forced replacement did not load the new credential: %v", err)
 	}
 }
@@ -64,7 +65,7 @@ func TestRunnerEnrollmentReachesServiceFailure(t *testing.T) {
 			return "fixture service failure", errors.New("service failed")
 		},
 	}}
-	_, err := finishRunnerEnrollment(path, agentFileConfig{Controller: "https://controller.example", Token: "private-runner-token", MaxConcurrent: 2}, false, service)
+	_, err := finishRunnerEnrollment(path, userconfig.RunnerConfig{Controller: preferencePointer("https://controller.example"), MaxConcurrent: preferencePointer(2)}, "private-runner-token", false, service)
 	if !called || err == nil || !strings.Contains(err.Error(), "fixture service failure") {
 		t.Fatalf("failure did not reach service installation: %v", err)
 	}
@@ -77,7 +78,7 @@ func TestRunnerEnrollmentReachesServiceFailure(t *testing.T) {
 }
 
 func TestRunnerEnrollmentRejectsBadRepoPattern(t *testing.T) {
-	err := validateAgentFileConfig(agentFileConfig{Controller: "https://controller.example", MaxConcurrent: 2, AllowRepos: []string{"https://github.com/acme/*"}})
+	err := validateRunnerEnrollment(userconfig.RunnerConfig{Controller: preferencePointer("https://controller.example"), MaxConcurrent: preferencePointer(2), Repos: []string{"https://github.com/acme/*"}})
 	if err == nil || !strings.Contains(err.Error(), "runner.repos") || !strings.Contains(err.Error(), "invalid repository allow-list") {
 		t.Fatalf("expected repository pattern refusal: %v", err)
 	}
@@ -186,11 +187,11 @@ func TestRunnerEnrollmentRaceRevokesNewAuthorityAndPreservesConcurrentConfig(t *
 func TestRunnerEnrollmentRollbackPreservesConcurrentReplacement(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	t.Setenv("SPARKWING_CONFIG", path)
-	written, err := writeAgentConfig(path, agentFileConfig{Controller: "https://controller.example", Token: "original-private-token", HolderPrefix: "original", MaxConcurrent: 1}, false)
+	written, err := writeRunnerConfig(path, userconfig.RunnerConfig{Controller: preferencePointer("https://controller.example"), HolderPrefix: preferencePointer("original"), MaxConcurrent: preferencePointer(1)}, "original-private-token", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	concurrent, err := writeAgentConfig(path, agentFileConfig{Controller: "https://controller.example", Token: "replacement-private-token", HolderPrefix: "replacement", MaxConcurrent: 1}, true)
+	concurrent, err := writeRunnerConfig(path, userconfig.RunnerConfig{Controller: preferencePointer("https://controller.example"), HolderPrefix: preferencePointer("replacement"), MaxConcurrent: preferencePointer(1)}, "replacement-private-token", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +210,7 @@ func TestRunnerEnrollmentRollbackPreservesConcurrentReplacement(t *testing.T) {
 func TestRunnerEnrollmentRollbackPreservesReferencedCredentialWhenRestoreFails(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	t.Setenv("SPARKWING_CONFIG", path)
-	written, err := writeAgentConfig(path, agentFileConfig{Controller: "https://controller.example", Token: "original-private-token", HolderPrefix: "original", MaxConcurrent: 1}, false)
+	written, err := writeRunnerConfig(path, userconfig.RunnerConfig{Controller: preferencePointer("https://controller.example"), HolderPrefix: preferencePointer("original"), MaxConcurrent: preferencePointer(1)}, "original-private-token", false)
 	if err != nil {
 		t.Fatal(err)
 	}

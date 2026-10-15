@@ -25,6 +25,11 @@ Remove inline runner tokens and the old `agent:` and `allow_repos` keys.
 Re-enroll with `sparkwing runners add --runner NAME --profile PROFILE --force`.
 Its JSON receipt contains credential metadata rather than the bearer.
 
+Enrollment previously wrote `max_concurrent: 2` when the flag was absent.
+It now leaves that preference unset, using the shared default of one.
+Pass `--max-concurrent 2` to retain two concurrent jobs. Existing explicit
+values remain unchanged.
+
 If writing the configuration or installing its service fails, enrollment
 revokes the new credential and removes the new credential files. A failed
 replacement restores the previous runner section. Concurrent configuration

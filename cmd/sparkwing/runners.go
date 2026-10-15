@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,7 +19,6 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/agentservice"
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -27,6 +27,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -62,7 +63,7 @@ func runRunners(args []string) error {
 
 type runnerEnrollment struct {
 	path        string
-	config      agentFileConfig
+	config      userconfig.RunnerConfig
 	force       bool
 	service     runnerServicePlan
 	profileName string
@@ -96,7 +97,7 @@ func prepareRunnerEnrollment(args []string) (runnerEnrollment, *namedProfile, er
 	if err := checkAgentConfigAbsent(enrollment.path, enrollment.force); err != nil {
 		return enrollment, prof, err
 	}
-	if err := validateAgentFileConfig(enrollment.config); err != nil {
+	if err := validateRunnerEnrollment(enrollment.config); err != nil {
 		return enrollment, prof, err
 	}
 	enrollment.service, err = planRunnerService(enrollment.path, enrollment.service.skipped)
@@ -120,12 +121,13 @@ func parseRunnerEnrollment(args []string) (runnerEnrollment, *namedProfile, erro
 	if strings.TrimSpace(name) == "" {
 		return enrollment, nil, &clisurface.UsageError{Path: inv.Command.Path, Message: "--runner is required"}
 	}
-	maxConcurrent := 2
+	var maxConcurrent *int
 	if inv.Has("max-concurrent") {
-		maxConcurrent, err = strconv.Atoi(inv.Value("max-concurrent"))
-		if err != nil || maxConcurrent < 1 {
+		value, parseErr := strconv.Atoi(inv.Value("max-concurrent"))
+		if parseErr != nil || value < 1 {
 			return enrollment, nil, &clisurface.UsageError{Path: inv.Command.Path, Message: "--max-concurrent requires a positive integer"}
 		}
+		maxConcurrent = &value
 	}
 	if inv.Has("reserved-for") {
 		return enrollment, nil, &apierr.Error{Code: apierr.PolicyMissing, Message: "runner pool enrollment is unavailable", Hint: "the controller must support team-admin runner registration"}
@@ -147,18 +149,18 @@ func parseRunnerEnrollment(args []string) (runnerEnrollment, *namedProfile, erro
 	if inv.Has("contribution") {
 		contribution = inv.Value("contribution")
 	}
-	enrollment.config = agentFileConfig{Controller: strings.TrimRight(prof.ControllerURL(), "/"), MaxConcurrent: maxConcurrent, HolderPrefix: name, Labels: inv.Flags["label"], AllowRepos: inv.Flags["repos"], Contribution: contribution, LocalAdmission: true}
+	controller, localAdmission := strings.TrimRight(prof.ControllerURL(), "/"), true
+	enrollment.config = userconfig.RunnerConfig{Controller: &controller, MaxConcurrent: maxConcurrent, HolderPrefix: &name, Labels: inv.Flags["label"], Repos: inv.Flags["repos"], Contribution: &contribution, LocalAdmission: &localAdmission}
 	return enrollment, prof, nil
 }
 
 func enrollRunner(ctx context.Context, manager controllerwire.TokenManager, enrollment runnerEnrollment) error {
-	principal := "runner:" + enrollment.config.HolderPrefix
+	principal := "runner:" + *enrollment.config.HolderPrefix
 	minted, err := manager.CreateToken(ctx, controllerwire.TokenCreate{Kind: "runner", Principal: principal, Scopes: []capability.Grant{capability.NodesClaim, capability.TriggersClaim, capability.RunsState}, IdempotencyKey: rand.Text()})
 	if err != nil {
 		return err
 	}
-	enrollment.config.Token = minted.Token
-	service, err := finishRunnerEnrollment(enrollment.path, enrollment.config, enrollment.force, enrollment.service)
+	service, err := finishRunnerEnrollment(enrollment.path, enrollment.config, minted.Token, enrollment.force, enrollment.service)
 	if err != nil {
 		_, revokeErr := manager.RevokeToken(context.WithoutCancel(ctx), minted.Metadata.Prefix)
 		if revokeErr != nil {
@@ -186,7 +188,7 @@ type runnerEnrollmentResult struct {
 }
 
 func renderRunnerEnrollment(enrollment runnerEnrollment, token controllerwire.TokenMetadata, service runnerServiceResult) error {
-	result := runnerEnrollmentResult{Runner: enrollment.config.HolderPrefix, Profile: enrollment.profileName, Config: enrollment.path, Token: token, Service: service}
+	result := runnerEnrollmentResult{Runner: *enrollment.config.HolderPrefix, Profile: enrollment.profileName, Config: enrollment.path, Token: token, Service: service}
 	switch enrollment.format {
 	case "json":
 		return json.NewEncoder(os.Stdout).Encode(result)
@@ -212,8 +214,8 @@ func renderRunnerEnrollment(enrollment runnerEnrollment, token controllerwire.To
 	return nil
 }
 
-func finishRunnerEnrollment(path string, cfg agentFileConfig, force bool, service runnerServicePlan) (result runnerServiceResult, err error) {
-	written, err := writeAgentConfig(path, cfg, force)
+func finishRunnerEnrollment(path string, cfg userconfig.RunnerConfig, bearer string, force bool, service runnerServicePlan) (result runnerServiceResult, err error) {
+	written, err := writeRunnerConfig(path, cfg, bearer, force)
 	defer func() {
 		if err != nil {
 			err = errors.Join(err, written.rollback())
@@ -274,15 +276,26 @@ func prepareRunnerRemoval(args []string) (runnerRemoval, *namedProfile, error) {
 	if err != nil {
 		return removal, nil, err
 	}
-	raw, err := agentconfig.Load(path)
+	cfg, err := userconfig.ReadConfig(path)
 	if err != nil {
 		return removal, nil, err
 	}
-	if name := inv.Value("runner"); name != "" && name != raw.HolderPrefix {
-		return removal, nil, fmt.Errorf("%s holds runner %q, which does not match --runner %q", path, raw.HolderPrefix, name)
+	if cfg.Runner == nil {
+		return removal, nil, fmt.Errorf("%s has no runner section; sparkwing runners add writes one: %w", path, os.ErrNotExist)
+	}
+	raw := cfg.Runner
+	name := ""
+	if raw.HolderPrefix != nil {
+		name = *raw.HolderPrefix
+	}
+	if selectedName := inv.Value("runner"); selectedName != "" && selectedName != name {
+		return removal, nil, fmt.Errorf("%s holds runner %q, which does not match --runner %q", path, name, selectedName)
 	}
 	// safety: a connection for another controller must not revoke a same-prefix credential there.
-	configured, err := normalizeControllerURL(raw.Controller)
+	if raw.Controller == nil {
+		return removal, nil, fmt.Errorf("%s: runner controller is required", path)
+	}
+	configured, err := normalizeControllerURL(*raw.Controller)
 	if err != nil {
 		return removal, nil, fmt.Errorf("%s: invalid runner controller URL", path)
 	}
@@ -290,11 +303,22 @@ func prepareRunnerRemoval(args []string) (runnerRemoval, *namedProfile, error) {
 	if err != nil || configured != selected {
 		return removal, nil, fmt.Errorf("%s: runner controller differs from profile %q", path, prof.Name)
 	}
-	prefix, err := tokenPrefix(raw.Token)
+	if raw.CredentialsDir == nil || strings.TrimSpace(*raw.CredentialsDir) == "" {
+		return removal, nil, fmt.Errorf("%s: runner.credentials_dir is required", path)
+	}
+	credential, err := fssecure.OpenPrivateConfig(filepath.Join(*raw.CredentialsDir, "agent-token"))
+	if err != nil {
+		return removal, nil, err
+	}
+	value, readErr := io.ReadAll(credential)
+	if err := errors.Join(readErr, credential.Close()); err != nil {
+		return removal, nil, err
+	}
+	prefix, err := tokenPrefix(strings.TrimSpace(string(value)))
 	if err != nil {
 		return removal, nil, fmt.Errorf("%s: %w", path, err)
 	}
-	return runnerRemoval{path: path, profileName: prof.Name, tokenPrefix: prefix, noService: inv.Bool("no-service"), name: raw.HolderPrefix, format: format}, prof, nil
+	return runnerRemoval{path: path, profileName: prof.Name, tokenPrefix: prefix, noService: inv.Bool("no-service"), name: name, format: format}, prof, nil
 }
 
 func removeRunner(ctx context.Context, manager controllerwire.TokenManager, removal runnerRemoval) error {
@@ -343,33 +367,16 @@ func requireRunnerToken(ctx context.Context, manager controllerwire.TokenManager
 	return nil
 }
 
-func validateAgentFileConfig(cfg agentFileConfig) error {
-	body, err := yaml.Marshal(map[string]agentFileConfig{userconfig.Runner: cfg})
-	if err != nil {
-		return err
-	}
-	_, err = userconfig.Decode("runner configuration", body)
+func validateRunnerEnrollment(cfg userconfig.RunnerConfig) error {
+	_, _, err := settings.RunnerPreferences(settings.Inputs{Flags: settings.Values{RunnerPreferences: &cfg}})
 	return err
-}
-
-// safety: the claim-mode subset install/service-install.sh writes.
-type agentFileConfig struct {
-	Controller     string   `yaml:"controller"`
-	CredentialsDir string   `yaml:"credentials_dir,omitempty"`
-	Token          string   `yaml:"-"`
-	MaxConcurrent  int      `yaml:"max_concurrent"`
-	HolderPrefix   string   `yaml:"holder_prefix"`
-	Labels         []string `yaml:"labels,omitempty"`
-	AllowRepos     []string `yaml:"repos,omitempty"`
-	Contribution   string   `yaml:"contribution,omitempty"`
-	LocalAdmission bool     `yaml:"local_admission"`
 }
 
 func agentConfigPath(override string) (string, error) {
 	if override != "" {
 		return filepath.Abs(override)
 	}
-	return agentconfig.DefaultPath()
+	return userconfig.Path()
 }
 
 func checkAgentConfigAbsent(path string, force bool) error {
@@ -386,12 +393,12 @@ func errAgentSectionExists(path string) error {
 
 // safety: the absence check repeats under the settings lock, so a second
 // enrollment racing this one cannot overwrite the section it wrote.
-func writeAgentConfig(path string, cfg agentFileConfig, force bool) (runnerConfigWrite, error) {
+func writeRunnerConfig(path string, cfg userconfig.RunnerConfig, bearer string, force bool) (runnerConfigWrite, error) {
 	written := runnerConfigWrite{path: path}
-	if err := validateAgentFileConfig(cfg); err != nil {
+	if err := validateRunnerEnrollment(cfg); err != nil {
 		return written, err
 	}
-	if strings.TrimSpace(cfg.Token) == "" {
+	if strings.TrimSpace(bearer) == "" {
 		return written, errors.New("runner credential is empty")
 	}
 	var section yaml.Node
@@ -411,17 +418,34 @@ func writeAgentConfig(path string, cfg agentFileConfig, force bool) (runnerConfi
 			return err
 		}
 		written.credentialsDir = credentialDir
-		if err := fssecure.WriteFile(filepath.Join(credentialDir, "agent-token"), []byte(cfg.Token)); err != nil {
+		if err := fssecure.WriteFile(filepath.Join(credentialDir, "agent-token"), []byte(bearer)); err != nil {
 			return err
 		}
-		cfg.CredentialsDir = credentialDir
-		section = yaml.Node{}
-		if err := section.Encode(cfg); err != nil {
+		cfg.CredentialsDir = &credentialDir
+		section, err = runnerConfigNode(cfg)
+		if err != nil {
 			return err
 		}
 		return section.Decode(&written.current)
 	})
 	return written, err
+}
+
+func runnerConfigNode(cfg userconfig.RunnerConfig) (yaml.Node, error) {
+	var section yaml.Node
+	if err := section.Encode(cfg); err != nil {
+		return section, err
+	}
+	for _, name := range []string{"repos", "labels"} {
+		values := cfg.Repos
+		if name == "labels" {
+			values = cfg.Labels
+		}
+		if values != nil && len(values) == 0 {
+			section.Content = append(section.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: name}, &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"})
+		}
+	}
+	return section, nil
 }
 
 type runnerConfigWrite struct {
@@ -455,7 +479,9 @@ func (w runnerConfigWrite) rollback() error {
 		}
 		section = yaml.Node{}
 		if w.previous != nil {
-			return section.Encode(w.previous)
+			var err error
+			section, err = runnerConfigNode(*w.previous)
+			return err
 		}
 		return nil
 	})

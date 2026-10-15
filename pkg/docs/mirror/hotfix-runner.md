@@ -26,7 +26,9 @@ A stable run ID or team run number selects the existing run. Resume resolves its
 
 Resume accepts no new pipeline, arguments, reason, ref, working tree or detach option. It does not reread checkout or machine settings to replace sealed values. Source acquisition and execution use the awarded source and accepted plan.
 
-JSON success output contains `run_id` and `outcome`. Plain output contains the run ID. Private bearers, input values and seal hashes stay out of output and diagnostics. Incomplete hosting exits 3. A recorded failed or cancelled run exits 1. A recorded successful run exits 0.
+Resume follows public run logs while the shared host executes. It drains final persisted log segments before returning. The selected output mode applies to both logs and the final receipt. The JSON receipt contains `run_id` and `outcome`. The plain receipt contains the run ID. Private bearers, input values and seal hashes stay out of output and diagnostics.
+
+The first interrupt requests cancellation on the controller while the host keeps renewing its claim and draining work. A second interrupt stops hosting and log following, then joins both operations. A log-read failure stays visible while the host finishes its work. Incomplete hosting or observation exits 3. A recorded failed or cancelled run exits 1. A recorded successful run exits 0.
 
 `runs retry` also retains a here retry's one-time bearer before attempting hosting. An unavailable host leaves that private record intact and reports the allocated run in its JSON failure receipt.
 

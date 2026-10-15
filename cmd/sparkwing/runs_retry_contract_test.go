@@ -203,7 +203,10 @@ func TestRetryHereHandoffReceivesPrivateReceiptOnce(t *testing.T) {
 		Controller: retryController{retry: func(context.Context, string, controllerwire.RetryRequest) (controllerwire.CreateRunResponse, error) {
 			return response, nil
 		}},
-		here: func(_ context.Context, got controllerwire.CreateRunResponse) error {
+		here: func(_ context.Context, got controllerwire.CreateRunResponse, output string) error {
+			if output != "json" {
+				t.Errorf("here output = %q", output)
+			}
 			claimed++
 			if !reflect.DeepEqual(got, response) {
 				t.Fatal("here handoff lost private execution inputs")

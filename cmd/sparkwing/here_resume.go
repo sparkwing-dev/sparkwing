@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -21,6 +22,7 @@ type hereDependencies struct {
 	credentials func() (hereCredentials, error)
 	resolve     func(context.Context, client.EngineOptions) (hereRuntime, error)
 	version     string
+	attach      func(context.Context, client.EngineOptions, string, func(context.Context) (nodehost.RunCompletion, error)) (nodehost.RunCompletion, error)
 }
 
 type hereRuntime struct {
@@ -34,8 +36,13 @@ type hereHostSession struct {
 	close func() error
 }
 
-func defaultHereDependencies() hereDependencies {
-	return hereDependencies{credentials: localHereCredentials, version: installedVersion(), resolve: resolveHereRuntime}
+func defaultHereDependencies(output string) hereDependencies {
+	return hereDependencies{
+		credentials: localHereCredentials, version: installedVersion(), resolve: resolveHereRuntime,
+		attach: func(ctx context.Context, options client.EngineOptions, run string, host func(context.Context) (nodehost.RunCompletion, error)) (nodehost.RunCompletion, error) {
+			return attachHereRun(ctx, options, run, output, os.Stdout, host)
+		},
+	}
 }
 
 func resolveHereRuntime(context.Context, client.EngineOptions) (hereRuntime, error) {
@@ -56,11 +63,21 @@ func handoffHereRun(ctx context.Context, options client.EngineOptions, response 
 			return incompleteHereHandoff(response.RunID, err)
 		}
 	}
-	completion, err := resumeHereRun(ctx, options, response.RunID, deps)
+	completion, err := resumeAttachedHereRun(ctx, options, response.RunID, deps)
 	if err != nil {
 		return err
 	}
 	return statusExitCode(completion.Outcome)
+}
+
+func resumeAttachedHereRun(ctx context.Context, options client.EngineOptions, run string, deps hereDependencies) (nodehost.RunCompletion, error) {
+	host := func(ctx context.Context) (nodehost.RunCompletion, error) {
+		return resumeHereRun(ctx, options, run, deps)
+	}
+	if deps.attach != nil {
+		return deps.attach(ctx, options, run, host)
+	}
+	return host(ctx)
 }
 
 func incompleteHereHandoff(run string, cause error) error {

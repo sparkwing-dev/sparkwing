@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
@@ -60,11 +58,9 @@ func runPipelineTrigger(args []string) error {
 		return fmt.Errorf("pipeline trigger: %w", err)
 	}
 	if flags.resume != "" {
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer stop()
-		return runHereResumeCommand(ctx, flags, os.Stdout, controllerOptions, client.NewEngineClient,
+		return runHereResumeCommand(context.Background(), flags, os.Stdout, controllerOptions, client.NewEngineClient,
 			func(ctx context.Context, options client.EngineOptions, run string) (nodehost.RunCompletion, error) {
-				return resumeHereRun(ctx, options, run, defaultHereDependencies())
+				return resumeAttachedHereRun(ctx, options, run, defaultHereDependencies(flags.output))
 			})
 	}
 	if flags.pipelineRef != "" {

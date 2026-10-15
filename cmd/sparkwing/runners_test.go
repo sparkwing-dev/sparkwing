@@ -528,7 +528,7 @@ func TestRunnersRemoveRefusesANonRunnerToken(t *testing.T) {
 	f := newRunnersFixture(t)
 	raw := "swk_service1_secret"
 	f.tokens = append(f.tokens, controllerwire.TokenMetadata{Prefix: raw[:store.PrefixLen], Kind: "member", Principal: "runner:deploy-bot", Scopes: []capability.Grant{capability.RunsRead}})
-	if _, err := writeAgentConfig(f.config, agentFileConfig{Controller: "https://controller.example", Token: raw, HolderPrefix: "desk", MaxConcurrent: 1}, false); err != nil {
+	if _, err := writeRunnerConfig(f.config, userconfig.RunnerConfig{Controller: preferencePointer("https://controller.example"), HolderPrefix: preferencePointer("desk"), MaxConcurrent: preferencePointer(1)}, raw, false); err != nil {
 		t.Fatal(err)
 	}
 

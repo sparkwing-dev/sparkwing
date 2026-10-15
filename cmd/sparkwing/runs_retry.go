@@ -19,7 +19,7 @@ import (
 
 type retryConnection struct {
 	controllerwire.Controller
-	here  func(context.Context, controllerwire.CreateRunResponse) error
+	here  func(context.Context, controllerwire.CreateRunResponse, string) error
 	close func()
 }
 
@@ -37,8 +37,8 @@ func resolveRetryConnection(ctx context.Context, profile string) (retryConnectio
 		closeTransport()
 		return retryConnection{}, err
 	}
-	return retryConnection{Controller: controller, close: closeTransport, here: func(ctx context.Context, response controllerwire.CreateRunResponse) error {
-		return handoffHereRun(ctx, options, response, defaultHereDependencies())
+	return retryConnection{Controller: controller, close: closeTransport, here: func(ctx context.Context, response controllerwire.CreateRunResponse, output string) error {
+		return handoffHereRun(ctx, options, response, defaultHereDependencies(output))
 	}}, nil
 }
 
@@ -102,7 +102,7 @@ func retryRunIDs(ctx context.Context, connection retryConnection, ids []string, 
 			if connection.here == nil {
 				err = incompleteHereHandoff(response.RunID, &apierr.Error{Code: apierr.Unavailable, Message: "here hosting is unavailable in this build"})
 			} else {
-				err = connection.here(ctx, response)
+				err = connection.here(ctx, response, format)
 			}
 		}
 		if err != nil {

@@ -1,3 +1,140 @@
+# W9 runner schema and here attachment continuation
+
+This continuation started clean at 89f4556e0. W9 remains incomplete. No Git
+writes, Sparkwing executable, service, candidate or pipeline ran. All writes
+stayed in this worktree and /tmp/sw-astra-W9. The scratch directory is removed
+before the final report.
+
+## Implemented
+
+- Enrollment writes userconfig.RunnerConfig directly. The duplicate
+  agentFileConfig and its YAML validation round-trip are deleted. Bearers are
+  separate function inputs and never a member of the configuration model.
+  RunnerPreferences validates through the shared W6 resolver. Omitted
+  max-concurrent remains absent and resolves to the contracted default of one.
+- Explicit empty labels and repos survive serialization and failed-enrollment
+  rollback. Other supported runner preferences retain their presence. Removal
+  uses ReadConfig and fssecure.OpenPrivateConfig directly, checks the selected
+  controller/name, and refuses a public credential before stopping or revoking.
+  W9 production code no longer imports agentconfig. Existing tests that load
+  the written file through that older runner loader remain startup-consumer
+  regression evidence, not a claim that W8's final startup is bound.
+- Sealed here resume and retry share an attached session. Public logs use the
+  caller's display connection, claims use the retained private bearer, and the
+  host receives its fresh award capability. Explicit output modes reach logs
+  and receipts. Host success drains final persisted log segments. Log failure
+  remains visible while hosting finishes. Incomplete observation exits 3.
+- The first interrupt requests controller cancellation while hosting continues.
+  The second interrupts hosting and observation. The coordinator joins both
+  operations and any cancellation request before returning. The earlier resume
+  NotifyContext path that stopped hosting on the first interrupt is deleted.
+- Updated the here and machine guides, enrollment migration, W9 wire prose and changelog. Embedded
+  mirrors were generated with sync-docs.sh.
+
+The credential invariant is: no generated runner bearer appears in machine YAML;
+its only persisted copy is the private agent-token file. The new fuzz property
+checks arbitrary bearer payloads against that invariant. Existing here secrecy
+and controller/run-binding fuzz properties remain.
+
+The private attachment callbacks compose existing host/log/cancel operations and
+permit channel-driven tests. They add no service, protocol, flag, environment
+variable, credential authority or customer limit. The YAML node helper preserves
+empty-list presence lost by omitempty; it does not parse a second schema.
+
+## Verification and accounting
+
+Passed with GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, and GOCACHE,
+GOTMPDIR and TMPDIR below /tmp/sw-astra-W9. Test commands used -p 4 or lower.
+
+- Final whole-repository go build -p 4 ./....
+- Vet on cmd/sparkwing, internal/clisurface, internal/controllerwire,
+  pkg/controller/client and tests/acceptance; final cmd/sparkwing vet repeated
+  after its source changed.
+- Full clisurface/controllerwire/tests/acceptance suites. internal/acceptance
+  compiles and has no test files. Native scenario skips remain unchanged.
+- Focused CLI tests for here resume/attachment, retry, runner enrollment/removal,
+  log following and generated command reference.
+- Final race run for TestHere, TestRetry, TestRunnerEnrollment,
+  TestRunnerRemoval and TestRunners.
+- New runner credential fuzzer: 13 executions with two workers over three
+  seconds, with two seed inputs loaded.
+- Pkg/docs mirror/changelog/privacy/read/search/guide/catalog checks, full source
+  doccheck, sync-docs --check, commentcheck -base main, gofmt and diff --check.
+  Commentcheck is clean across 1,135 Go files.
+
+Added 13 CLI tests and one fuzz property. Existing enrollment, forced replacement,
+service-failure, concurrent rollback, revocation and typed retry fixtures were
+ported to the final model/callback signature. No parked T1 inventory row names a
+W9-owned source function. No new native acceptance cell is claimed.
+
+Tracked Go edits remove 60 production lines and 17 old test lines gross against
+this session's starting HEAD. No complete file was deleted. The three new Go
+files contain 121 production lines and 400 test lines. This is not a net code
+reduction claim.
+
+The first checks failed on the missing new adapters. The final-schema regression
+then caught empty labels becoming absent and passes after preserving the node.
+One new log fixture omitted required next_cursor/truncated fields; correcting
+that fixture made the real-client attachment test pass. No production decoder
+was relaxed.
+
+Whole-tree sleepcheck -base main still fails on existing W6
+internal/limits/deadline_test.go:58,66 and W4
+sparkwing/sparkwingtest/host_test.go:214. No W9 finding was printed. Native
+sockets/services and the broad legacy CLI suite were not exercised.
+
+## Amendment and handoff disposition
+
+Every amendment row naming W9 was checked. Earlier completed work was retained.
+
+| Rows | Disposition / remaining integration |
+| --- | --- |
+| A1-03, A1-08/09/55 | Existing strict errors, mixed/named claims and retained-bearer adapters remain. Here attachment now adds final logs and cancellation. Claim timing/ancestry remain W1/W2. |
+| A1-10/11 | Installer and typed source transport evidence remains. W3 source acquisition and W8 selected-engine installation are still stubs; local/initial-trigger source intake remains unfinished. |
+| A1-13/14/15/16/17/18 | Existing materialize-only, failure, cancel, private execution, expansion and attempt transport remains. Native owner/executor bindings remain W1/W2/W3/W8. |
+| A1-19; handoff finding 3 | Granted identity/exact engine transport remains. W3/W8 still need one real execution-input constructor and hello integration; W9's old local host has not been replaced. |
+| A1-20/22 | Existing server-derived provisioning/evidence contracts remain. Native issuer/authentication/audit integration belongs to W1/W2. |
+| A1-29/30/34/37 | Signed data/record and lint consumer work remains. Native RemoteCache/OpenRemoteCache and publication composition remain unfinished. |
+| A1-38/39 | Immutable cloud payload/sync/exchange wire remains. W8 still needs the unified concrete runner and host loop. |
+| A1-40/41/43 | Earlier lifecycle/foreground/update/notices adapters remain. Native runtime, managed units, tick and exact-engine verification remain open. |
+| A1-45/47 | Existing settings and guard grammar remain. Schedule intake/timer ownership and captured settings still need composition. |
+| A1-49 | W9 now uses the final complete runner schema and private file for enrollment/removal. W8 startup/service/refresh and W2 pool registration remain open. |
+| A1-50 | Sealed here public-log and interruption composition is implemented with fakes. Initial trigger, local/detached hosting, target/source selection, cache/publication and legacy client retirement remain unfinished. |
+| A1-51; handoff finding 7 | Alias metadata/inspection, v2 schemas and docs remain. W3 native execution must carry the resolved pair. This continuation updates the two changed guides and their mirrors. |
+| A1-52/53 | Windows bridge packaging/stamping and native platform/placement/real-repository QA remain unclaimed. Linux component evidence does not satisfy them. |
+
+## Contracts, integration and shared files
+
+No foreign contract was changed or newly requested. Existing questions still
+apply: a sealed here reason, publication/result-copy operations, schedule
+installation/tick ownership, sizing reset and runner pool registration need
+owner resolution. No new human decision is requested.
+
+Native here construction still needs W3/W8's shared RunHost, owner actor,
+claim-scoped storage/controller clients, source acquisition, captured env, exact
+engine, plan cache and lease keeper through resolveHereRuntime. W7 must provide
+persisted-log completeness. Initial trigger still uses its old intake/host path;
+this continuation adds no TriggerResponse conversion adapter. Local detached
+execution still uses the old consumer and needs the local-controller queue cut.
+
+W8's service renderer still emits sparkwing-runner agent --config in
+internal/agentservice/agentservice.go; it must use the final start command with
+final startup configuration. W9's manual receipt already names start. The
+renderer was not changed from this area. source.Acquire/ForRequest/ForExecution,
+wingd.NewLocalLifecycle and blob.OpenRemoteCache are still declared stubs.
+
+No production caller outside W9 ownership changed. Shared files touched are
+CHANGELOG.md, pkg/docs/changelog.md, generated pkg/docs/mirror/hotfix-runner.md
+and machine-config.md, the generated migration-guide mirror, this handoff, and W9-owned contract prose
+contracts/c3-controller-wire.md. No public Go API snapshot changed.
+
+Friction: cold fuzz/race compilation, existing W4/W6 sleepcheck findings and
+missing native owner implementations. Overwing discovery worked despite its
+installed-binary staleness notice. Git's identity remains Korey Gambill and
+core.worktree is unset. The lead retains review, commits, native gates and landing.
+
+---
+
 # W9 v2 merge and inspection continuation
 
 W9 remains incomplete. This continuation started at d448d9d8c with an in-progress
