@@ -1770,3 +1770,18 @@ uses the store's real revocation transaction. Both refuse before physical I/O or
 egress charging. Physical object bytes are fake. No native topology matrix cell
 is claimed by these HTTP components. The merged legacy launch-release test stays
 deleted, with the native release coverage listed above.
+
+
+### W2 native console settings and runner error ports
+
+`TestCreditSettingsHTTPPolicyWritesPersist` and
+`TestCreditSettingsHTTPInvalidBodiesLeavePolicyUnchanged` now create a real
+account session with a sealed CSRF key. Both reach the default console's SQLite
+commit gate. The fake session and CSRF bypass are removed from their fixture.
+
+`TestAgentRoutesMaskStoreFailures` is replaced by
+`TestRunnerRoutesMaskDependencyFailuresProperty`. Its authenticated requests use
+`GET /api/v1/runners` and `POST /api/v1/runners/claim`. Generated private dependency
+errors produce a canonical internal error and no private message. The retired
+agent and node-claim registrations stay absent. Inventory and runner policy are
+fake dependencies. These ports add no native acceptance matrix cell.
