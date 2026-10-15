@@ -65,7 +65,7 @@ func RunAndAwait[Out, In any](ctx context.Context, pipeline, nodeID string, opts
 	if aw == nil {
 		return zero, errors.New("sparkwing: RunAndAwait: no awaiter installed in context (called outside the orchestrator?)")
 	}
-	resolved, err := aw.Await(ctx, AwaitRequest{
+	resolved, err := aw.await(ctx, awaitRequest{
 		Pipeline: pipeline,
 		NodeID:   nodeID,
 		Args:     cfg.args,
@@ -158,7 +158,7 @@ func WithFreshBranch(branch string) AwaitOption {
 // AwaitRequest is the awaiter's input struct. Implementations POST a
 // trigger, poll for terminal state, and fetch the target node's
 // output.
-type AwaitRequest struct {
+type awaitRequest struct {
 	Pipeline string
 	NodeID   string
 	Args     map[string]string
@@ -175,19 +175,19 @@ type AwaitRequest struct {
 // PipelineAwaiter is the orchestrator-installed backend for
 // RunAndAwait. Both local mode and cluster-mode pod runners
 // provide an implementation; user code never implements this.
-type PipelineAwaiter interface {
-	Await(ctx context.Context, req AwaitRequest) (*ResolvedPipelineRef, error)
+type pipelineAwaiter interface {
+	await(ctx context.Context, req awaitRequest) (*resolvedPipelineRef, error)
 }
 
 // PipelineAwaiterFunc adapts a plain function to PipelineAwaiter.
-type PipelineAwaiterFunc func(ctx context.Context, req AwaitRequest) (*ResolvedPipelineRef, error)
+type pipelineAwaiterFunc func(ctx context.Context, req awaitRequest) (*resolvedPipelineRef, error)
 
-func (f PipelineAwaiterFunc) Await(ctx context.Context, req AwaitRequest) (*ResolvedPipelineRef, error) {
+func (f pipelineAwaiterFunc) await(ctx context.Context, req awaitRequest) (*resolvedPipelineRef, error) {
 	return f(ctx, req)
 }
 
-func pipelineAwaiterFromContext(ctx context.Context) PipelineAwaiter {
-	if a, ok := ctx.Value(keyPipelineAwaiter).(PipelineAwaiter); ok {
+func pipelineAwaiterFromContext(ctx context.Context) pipelineAwaiter {
+	if a, ok := ctx.Value(keyPipelineAwaiter).(pipelineAwaiter); ok {
 		return a
 	}
 	return nil

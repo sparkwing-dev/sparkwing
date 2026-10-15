@@ -11,7 +11,7 @@ import (
 
 type jobArgsDecl struct {
 	jobID  string
-	schema InputSchema
+	schema inputSchema
 	goType reflect.Type
 	holder argsHolder
 }
@@ -56,13 +56,13 @@ func registerJobArgs(p *Plan, id string, jobValue any) {
 // pipeline, in registration order, each stamped with its owning job id.
 // The describe cache, --help renderer and completion read this so job
 // flags share the envelope of pipeline-level Inputs fields.
-func (p *Plan) JobArgs() []DescribeArg {
+func (p *Plan) declaredArguments() []describeArg {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	var out []DescribeArg
+	var out []describeArg
 	for _, d := range p.jobArgs {
 		for _, f := range d.schema.Fields {
-			out = append(out, DescribeArg{
+			out = append(out, describeArg{
 				Name:     f.Name,
 				GoName:   f.GoName,
 				Short:    f.Short,
@@ -80,7 +80,7 @@ func (p *Plan) JobArgs() []DescribeArg {
 
 // safety: the CLI maps every flag and alias of the pipeline and its jobs
 // into one table, so a shared name would silently route a value to one owner.
-func assertJobArgsDisjoint(p *Plan, pipe InputSchema) error {
+func assertJobArgsDisjoint(p *Plan, pipe inputSchema) error {
 	names := map[string]bool{}
 	shorts := map[string]string{}
 	for _, f := range pipe.Fields {
@@ -148,7 +148,7 @@ func resolveAndBindJobArgs(p *Plan, args map[string]string) error {
 			problems = append(problems, fmt.Errorf("job %q: %w", d.jobID, err))
 			continue
 		}
-		if err := d.holder.BindFromAny(val.Interface()); err != nil {
+		if err := d.holder.bindFromAny(val.Interface()); err != nil {
 			problems = append(problems, fmt.Errorf("job %q: %w", d.jobID, err))
 		}
 	}
@@ -164,7 +164,7 @@ var keySkipArgResolve = keySkipArgResolveType{}
 // callers use it to walk the plan graph without failing on missing
 // required job args; run paths never set it, so a missing required
 // arg fails before any step runs.
-func SkipArgResolve(ctx context.Context) context.Context {
+func skipArgResolve(ctx context.Context) context.Context {
 	return context.WithValue(ctx, keySkipArgResolve, true)
 }
 

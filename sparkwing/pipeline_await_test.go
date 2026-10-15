@@ -10,18 +10,18 @@ import (
 )
 
 type stubAwaiter struct {
-	lastReq AwaitRequest
+	lastReq awaitRequest
 	runID   string
 	data    []byte
 	err     error
 }
 
-func (s *stubAwaiter) Await(_ context.Context, req AwaitRequest) (*ResolvedPipelineRef, error) {
+func (s *stubAwaiter) await(_ context.Context, req awaitRequest) (*resolvedPipelineRef, error) {
 	s.lastReq = req
 	if s.err != nil {
 		return nil, s.err
 	}
-	return &ResolvedPipelineRef{RunID: s.runID, Data: s.data}, nil
+	return &resolvedPipelineRef{RunID: s.runID, Data: s.data}, nil
 }
 
 type awaitOut struct {

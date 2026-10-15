@@ -238,7 +238,7 @@ func (r Ref[T]) getCrossPipeline(ctx context.Context) (T, bool, error) {
 func RefTo[T any](n *JobNode) Ref[T] {
 	var zero T
 	want := reflect.TypeOf(zero)
-	got := n.OutputType()
+	got := n.outType
 	if got == nil {
 		panic(fmt.Sprintf(
 			"sparkwing: RefTo[%T]: node %q does not embed sparkwing.Produces[%T] "+
@@ -330,8 +330,8 @@ func jsonResolverFromContext(ctx context.Context) func(context.Context, string) 
 // PipelineRefs returns the other pipelines' nodes this node's job holds a
 // RefToLastRun field for, in field order. A controller-dispatched node reads
 // only these, so a ref built elsewhere than a job field is refused there.
-func (n *JobNode) PipelineRefs() []RefTarget {
-	var out []RefTarget
+func (n *JobNode) pipelineRefs() []refTarget {
+	var out []refTarget
 	for _, r := range collectRefs(n.job) {
 		if r.Pipeline != "" {
 			out = append(out, r)
@@ -340,11 +340,11 @@ func (n *JobNode) PipelineRefs() []RefTarget {
 	return out
 }
 
-func (r Ref[T]) target() RefTarget { return RefTarget{Pipeline: r.Pipeline, NodeID: r.JobID} }
+func (r Ref[T]) target() refTarget { return refTarget{Pipeline: r.Pipeline, NodeID: r.JobID} }
 
-type refField interface{ target() RefTarget }
+type refField interface{ target() refTarget }
 
-func collectRefs(job any) []RefTarget {
+func collectRefs(job any) []refTarget {
 	v := reflect.ValueOf(job)
 	for v.Kind() == reflect.Pointer {
 		if v.IsNil() {
@@ -355,7 +355,7 @@ func collectRefs(job any) []RefTarget {
 	if v.Kind() != reflect.Struct {
 		return nil
 	}
-	var out []RefTarget
+	var out []refTarget
 	for i := range v.NumField() {
 		if !v.Type().Field(i).IsExported() {
 			continue
@@ -374,7 +374,7 @@ func collectRefs(job any) []RefTarget {
 // RefTarget is one (pipeline, node) pair discovered on a job struct
 // via collectRefs. Dashboard / audit code uses it to
 // annotate cross-pipeline dependencies.
-type RefTarget struct {
+type refTarget struct {
 	Pipeline string
 	NodeID   string
 }

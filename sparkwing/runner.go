@@ -43,7 +43,7 @@ type RunnerInfo struct {
 
 // HasLabel reports whether the runner advertises the given label
 // term. Honors the comma-OR within-a-term syntax used by
-// Job.Requires / Prefers / WhenRunner:
+// Job.Requires / Prefers:
 //
 //	r.HasLabel("os=linux")          // single label
 //	r.HasLabel("os=linux,os=macos") // OR within term

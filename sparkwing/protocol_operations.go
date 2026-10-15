@@ -1,0 +1,433 @@
+package sparkwing
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"runtime/debug"
+	"strings"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
+)
+
+type sdkOperations struct{}
+
+func init() { sdkserve.DefaultOperations = sdkOperations{} }
+func sdkVersion() string {
+	if b, ok := debug.ReadBuildInfo(); ok {
+		if b.Main.Path == "github.com/sparkwing-dev/sparkwing" {
+			return b.Main.Version
+		}
+		for _, d := range b.Deps {
+			if d.Path == "github.com/sparkwing-dev/sparkwing" {
+				return d.Version
+			}
+		}
+	}
+	return "development"
+}
+func (sdkOperations) Context(ctx context.Context, rc nodeproto.RunContext, runner nodeproto.RunnerIdentity, s sdkserve.Services) context.Context {
+	ctx = sdkserve.WithServices(ctx, s)
+	ctx = context.WithValue(ctx, keyLogger, protocolLogger{s: s})
+	ctx = context.WithValue(ctx, runnerCtxKey{}, &RunnerInfo{Name: runner.Name, Type: runner.Type, Labels: append([]string(nil), runner.Labels...)})
+	ctx = context.WithValue(ctx, dryRunKey{}, rc.DryRun)
+	ctx = context.WithValue(ctx, keySecretResolver, secretResolverFunc(func(ctx context.Context, name string) (string, bool, error) {
+		v, masked, err := s.Secret(ctx, name)
+		var e *apierr.Error
+		if errors.As(err, &e) && e.Code == apierr.NotFound {
+			err = errors.Join(ErrSecretMissing, err)
+		}
+		return v, masked, err
+	}))
+	ctx = context.WithValue(ctx, oidcTokenSourceKey{}, oIDCTokenSource(func(ctx context.Context, a string) (string, error) { return s.OIDC(ctx, a) }))
+	ctx = context.WithValue(ctx, keyJSONRefResolver, func(ctx context.Context, id string) ([]byte, error) {
+		raw, err := s.Output(ctx, id)
+		return raw, referenceError(err, false)
+	})
+	ctx = context.WithValue(ctx, keyPipelineResolver, pipelineResolverFunc(func(ctx context.Context, p, j string, age time.Duration) (*resolvedPipelineRef, error) {
+		raw, err := s.Latest(ctx, p, j, age)
+		return &resolvedPipelineRef{Data: raw}, referenceError(err, true)
+	}))
+	ctx = context.WithValue(ctx, keyPipelineAwaiter, pipelineAwaiterFunc(func(ctx context.Context, r awaitRequest) (*resolvedPipelineRef, error) {
+		if r.Timeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, r.Timeout)
+			defer cancel()
+		}
+		raw, err := s.RunPipeline(ctx, sdkserve.ChildRequest{Pipeline: r.Pipeline, Job: r.NodeID, Args: r.Args, Repo: r.Repo, Branch: r.Branch})
+		return &resolvedPipelineRef{Data: raw}, err
+	}))
+	return ctx
+}
+func (sdkOperations) Plan(ctx context.Context, name string, args map[string]string, run nodeproto.RunContext) (built any, document nodeproto.PlanDoc, failure error) {
+	defer func() {
+		if recover() != nil {
+			built = nil
+			document = nodeproto.PlanDoc{}
+			failure = sdkError(apierr.PlanFailed, "pipeline declaration panicked")
+		}
+	}()
+	reg, ok := lookup(name)
+	if !ok {
+		return nil, nodeproto.PlanDoc{}, sdkError(apierr.UnknownPipeline, "pipeline is not registered")
+	}
+	rc := RunContext{RunID: run.RunID, Pipeline: run.Pipeline, StartedAt: run.StartedAt, NoMemo: run.NoMemo, DryRun: run.DryRun}
+	if run.Git != nil {
+		g := run.Git
+		rc.Git = NewGit(WorkDir(), g.SHA, g.Branch, g.DefaultBranch, g.Repo, g.RepoURL)
+	}
+	if run.Trigger != nil {
+		v := run.Trigger
+		rc.Trigger = TriggerInfo{Source: v.Source, User: v.User}
+		if v.PullRequest != nil {
+			pr := v.PullRequest
+			rc.Trigger.PullRequest = &PullRequest{Number: pr.Number, Action: pr.Action, BaseRef: pr.BaseRef, BaseSHA: pr.BaseSHA, HeadRef: pr.HeadRef, HeadSHA: pr.HeadSHA}
+		}
+	}
+	p, err := reg.Invoke(ctx, args, rc)
+	if err != nil {
+		code := apierr.PlanFailed
+		var input *InputError
+		if errors.As(err, &input) {
+			code = apierr.InvalidArgs
+		}
+		return nil, nodeproto.PlanDoc{}, sdkError(code, maskText(err.Error(), reg.secretValues(args)))
+	}
+	p.registration = reg
+	p.secretInputs = reg.secretValues(args)
+	doc := planDocument(p)
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		return nil, doc, sdkError(apierr.PlanFailed, "plan cannot be encoded")
+	}
+	if _, err := nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: declarationSecrets(ctx, reg.secretValues(args))}); err != nil {
+		return nil, doc, err
+	}
+	return p, doc, nil
+}
+func (sdkOperations) RunStep(ctx context.Context, built any, req nodeproto.Request) (result nodeproto.RunResult, err error) {
+	p, ok := built.(*Plan)
+	if !ok {
+		return result, sdkError(apierr.NoPlan, "no SDK plan")
+	}
+	n := planJob(p, req.Job)
+	if n == nil {
+		return result, sdkError(apierr.UnknownJob, "job is not declared")
+	}
+	if n.work == nil {
+		return result, sdkError(apierr.UnknownStep, "job has no executable steps")
+	}
+	step := n.work.byID[req.Step]
+	if step == nil {
+		return result, sdkError(apierr.UnknownStep, "step is not declared")
+	}
+	result.Outcome = "failed"
+	defer func() {
+		if v := recover(); v != nil {
+			result.Error = sdkError(apierr.SDKError, fmt.Sprint(v))
+			err = nil
+		}
+	}()
+	ctx, err = executionContext(ctx, p, n, req)
+	if err != nil {
+		result.Error = sdkError(apierr.SDKError, err.Error())
+		return result, nil
+	}
+	out, bodyErr := runStep(ctx, n.work, step)
+	if bodyErr != nil {
+		if !errors.As(bodyErr, &result.Error) {
+			result.Error = sdkError(apierr.SDKError, bodyErr.Error())
+		}
+		return result, nil
+	}
+	result.Output, err = json.Marshal(out)
+	if err != nil {
+		return result, err
+	}
+	if int64(len(result.Output)) > limits.NodeOutputBytes {
+		result.Output = nil
+		result.Error = sdkError(apierr.SDKError, "step output exceeds the output limit")
+		return result, nil
+	}
+	result.Outcome = "success"
+	return result, nil
+}
+func executionContext(ctx context.Context, p *Plan, n *JobNode, req nodeproto.Request) (context.Context, error) {
+	ctx = context.WithValue(ctx, keyNode, n.id)
+	ctx = context.WithValue(ctx, keyInputs, p.inputs)
+	ctx = withStep(ctx, req.Step)
+	env := map[string]string{}
+	for k, v := range n.declaredEnv {
+		if !v.Startup {
+			env[k] = v.Value
+		}
+	}
+	ctx = WithCommandEnv(ctx, env)
+	if req.Failure != nil {
+		stage := StageAction
+		if req.Failure.Stage == "verify" {
+			stage = StageVerify
+		}
+		ctx = withFailure(ctx, Failure{Stage: stage, Err: req.Failure.Error})
+	}
+	if p.registration != nil {
+		ctx = context.WithValue(ctx, keySecretProvider, p.registration.instance)
+	}
+	return ctx, nil
+}
+func (sdkOperations) Eval(ctx context.Context, built any, req nodeproto.Request) (result nodeproto.EvalResult, err error) {
+	p, ok := built.(*Plan)
+	if !ok {
+		return result, sdkError(apierr.NoPlan, "no SDK plan")
+	}
+	p.evalMu.Lock()
+	defer p.evalMu.Unlock()
+	n := closureJob(p, req.Closure)
+	if n == nil || (req.Job != "" && n.id != req.Job) {
+		return result, sdkError(apierr.UnknownClosure, "closure is not declared for the bound job")
+	}
+	ctx, err = executionContext(ctx, p, n, req)
+	if err != nil {
+		return result, err
+	}
+	defer func() {
+		if v := recover(); v != nil {
+			result.Value = json.RawMessage("null")
+			result.Error = sdkError(apierr.SDKError, fmt.Sprint(v))
+			err = nil
+		}
+	}()
+	value, evalErr := evaluate(ctx, p, n, req.Closure, req.Input)
+	if evalErr != nil {
+		result.Value = json.RawMessage("null")
+		if !errors.As(evalErr, &result.Error) {
+			result.Error = sdkError(apierr.SDKError, evalErr.Error())
+		}
+		return result, nil
+	}
+	result.Value, err = json.Marshal(value)
+	return result, err
+}
+func evaluate(ctx context.Context, p *Plan, n *JobNode, id string, input json.RawMessage) (any, error) {
+	for i, f := range n.skipIf {
+		if id == closureID(n.id, "skip", i) {
+			return f(ctx), nil
+		}
+	}
+	for i, f := range n.beforeRun {
+		if id == closureID(n.id, "before", i) {
+			return nil, f(ctx)
+		}
+	}
+	for i, f := range n.afterRun {
+		if id == closureID(n.id, "after", i) {
+			f(ctx, failureFromContext(ctx).Err)
+			return nil, nil
+		}
+	}
+	if n.verify != nil && id == closureID(n.id, "verify", 0) {
+		return nil, n.verify(ctx)
+	}
+	if n.memoKey != nil && id == closureID(n.id, "memo", 0) {
+		v, err := n.memoKey(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if v == NoMemo {
+			return nil, nil
+		}
+		if v == "" {
+			return nil, fmt.Errorf("memo key must not be empty")
+		}
+		return string(v), nil
+	}
+	if n.work != nil {
+		for _, step := range n.work.steps {
+			for i, f := range step.skipIf {
+				if id == closureID(n.id, "step/"+step.id+"/skip", i) {
+					return f(ctx), nil
+				}
+			}
+		}
+	}
+	for _, g := range n.generators {
+		if id != g.id {
+			continue
+		}
+		if prior, ok := p.generated[g.id]; ok {
+			return prior, nil
+		}
+		expansion := NewPlan()
+		base := jsonResolverFromContext(ctx)
+		ctx = context.WithValue(ctx, keyJSONRefResolver, func(ctx context.Context, j string) ([]byte, error) {
+			if j == n.id && len(input) > 0 {
+				return input, nil
+			}
+			if base == nil {
+				return nil, fmt.Errorf("output unavailable")
+			}
+			return base(ctx, j)
+		})
+		if err := g.fn(ctx, expansion); err != nil {
+			return nil, err
+		}
+		for _, child := range expansion.nodes {
+			child.addNeed(n.id)
+			if child.onFailure != nil {
+				child.onFailure.addNeed(n.id)
+			}
+		}
+		members := append([]*JobNode(nil), expansion.nodes...)
+		for _, child := range expansion.nodes {
+			if child.onFailure != nil {
+				members = append(members, child.onFailure)
+			}
+		}
+		GroupJobs(expansion, g.id, members...)
+		for _, ancestor := range jobGroups(p, n) {
+			GroupJobs(expansion, ancestor, members...)
+		}
+		doc := planDocument(expansion)
+		raw, err := json.Marshal(doc)
+		if err != nil {
+			return nil, err
+		}
+		if _, err = nodeproto.ValidatePlan(raw, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: declarationSecrets(ctx, p.secretInputs), Expansion: true, ExistingJobs: planDocument(p).Jobs, SourceJob: n.id}); err != nil {
+			return nil, err
+		}
+		p.mu.Lock()
+		for _, child := range expansion.nodes {
+			p.nodes = append(p.nodes, child)
+			p.byID[child.id] = child
+		}
+		p.groups = append(p.groups, expansion.groups...)
+		if p.generated == nil {
+			p.generated = map[string][]nodeproto.JobSpec{}
+		}
+		p.generated[g.id] = doc.Jobs
+		p.mu.Unlock()
+		return doc.Jobs, nil
+	}
+	return nil, sdkError(apierr.UnknownClosure, "closure is not declared")
+}
+func sdkError(code apierr.Code, message string) *apierr.Error {
+	return &apierr.Error{Code: code, Message: message}
+}
+
+type protocolLogger struct{ s sdkserve.Services }
+
+func (l protocolLogger) Log(level, message string) { l.Emit(LogRecord{Level: level, Msg: message}) }
+func (l protocolLogger) Emit(r LogRecord) {
+	if r.TS.IsZero() {
+		r.TS = time.Now()
+	}
+	var attrs json.RawMessage
+	if r.Attrs != nil {
+		var err error
+		attrs, err = json.Marshal(r.Attrs)
+		if err != nil {
+			panic(err)
+		}
+	}
+	l.s.Emit(nodeproto.FrameLog{TS: r.TS.Format(time.RFC3339Nano), Level: r.Level, Step: r.Step, Event: r.Event, Message: r.Msg, Attrs: attrs})
+}
+
+type secretSet []string
+
+func (s secretSet) ContainsSecret(id string) bool {
+	for _, v := range s {
+		if v != "" && strings.Contains(id, v) {
+			return true
+		}
+	}
+	return false
+}
+
+func closureJob(p *Plan, id string) *JobNode {
+	for _, spec := range planDocument(p).Jobs {
+		if hasClosure(spec.Closures, id) {
+			return planJob(p, spec.ID)
+		}
+		for _, step := range spec.Steps {
+			if hasClosure(step.Closures, id) {
+				return planJob(p, spec.ID)
+			}
+		}
+	}
+	return nil
+}
+func hasClosure(c nodeproto.ClosureSpec, id string) bool {
+	if id == "" {
+		return false
+	}
+	if c.MemoKey == id || c.Verify == id {
+		return true
+	}
+	for _, ids := range [][]string{c.SkipIf, c.BeforeRun, c.AfterRun, c.Generate} {
+		for _, v := range ids {
+			if v == id {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func maskText(text string, values []string) string {
+	for _, v := range values {
+		if v != "" {
+			text = strings.ReplaceAll(text, v, "***")
+		}
+	}
+	return text
+}
+
+func (sdkOperations) Prepare(built any, job string) error {
+	p, ok := built.(*Plan)
+	if !ok {
+		return sdkError(apierr.NoPlan, "plan is required")
+	}
+	n := planJob(p, job)
+	if n == nil {
+		return sdkError(apierr.UnknownJob, "job is not declared")
+	}
+	for key, value := range n.declaredEnv {
+		if !value.Startup {
+			if err := os.Setenv(key, value.Value); err != nil {
+				return sdkError(apierr.PlanInvalid, "invalid job environment")
+			}
+		}
+	}
+	return nil
+}
+
+type combinedSecrets struct {
+	values secretSet
+	host   nodeproto.SecretMatcher
+}
+
+func (s combinedSecrets) ContainsSecret(id string) bool {
+	return s.values.ContainsSecret(id) || (s.host != nil && s.host.ContainsSecret(id))
+}
+func declarationSecrets(ctx context.Context, values []string) nodeproto.SecretMatcher {
+	host, _ := sdkserve.ServicesFrom(ctx).(nodeproto.SecretMatcher)
+	return combinedSecrets{values: values, host: host}
+}
+
+func referenceError(err error, latest bool) error {
+	var e *apierr.Error
+	if !errors.As(err, &e) {
+		return err
+	}
+	reason := fmt.Sprint(e.Details["reason"])
+	if (e.Code == apierr.NotFound && (latest || reason == string(apierr.ReasonNoOutput))) || (e.Code == apierr.Conflict && reason == string(apierr.ReasonNotReady)) {
+		return errors.Join(ErrRefAbsent, err)
+	}
+	return err
+}

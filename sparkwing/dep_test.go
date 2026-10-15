@@ -1,48 +1,29 @@
-package sparkwing_test
+package sparkwing
 
 import (
 	"context"
+	"slices"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func TestDep_MixedTypesCompose(t *testing.T) {
-	plan := sparkwing.NewPlan()
-	a := sparkwing.Job(plan, "a", &buildJob{})
-	gate := sparkwing.JobApproval(plan, "review", sparkwing.ApprovalConfigOld{
-		OnExpiry: sparkwing.ApprovalDeny,
-	})
-	group := sparkwing.GroupJobs(plan, "shards", a)
-	leaf := sparkwing.Job(plan, "leaf", &buildJob{}).
-		Needs(a, gate, group)
-
-	got := map[string]struct{}{}
-	for _, d := range leaf.DepIDs() {
-		got[d] = struct{}{}
-	}
-	for _, want := range []string{"a", "review"} {
-		if _, ok := got[want]; !ok {
-			t.Errorf("missing dep %q in %v", want, leaf.DepIDs())
-		}
+func TestJobDependenciesAcceptApprovalAndGroup(t *testing.T) {
+	plan := NewPlan()
+	build := Job(plan, "build", func(context.Context) error { return nil })
+	approval := plan.Approval("review", ApprovalConfig{OnTimeout: ApprovalDeny})
+	group := GroupJobs(plan, "shards", build)
+	leaf := Job(plan, "leaf", func(context.Context) error { return nil }).Needs(build, approval, group)
+	if !slices.Equal(leaf.needs, []string{"build", "review"}) {
+		t.Fatalf("job prerequisites = %v", leaf.needs)
 	}
 }
 
-func TestWorkDep_MixedTypesCompose(t *testing.T) {
-	w := sparkwing.NewWork()
-	a := sparkwing.Step(w, "a", func(ctx context.Context) error { return nil })
-	b := sparkwing.Step(w, "b", func(ctx context.Context) error { return nil })
-	grp := sparkwing.GroupSteps(w, "shards", a, b)
-	leaf := sparkwing.Step(w, "leaf", func(ctx context.Context) error { return nil }).
-		Needs(a, grp)
-
-	got := map[string]struct{}{}
-	for _, d := range leaf.DepIDs() {
-		got[d] = struct{}{}
-	}
-	for _, want := range []string{"a", "b"} {
-		if _, ok := got[want]; !ok {
-			t.Errorf("missing dep %q in %v", want, leaf.DepIDs())
-		}
+func TestStepDependenciesAcceptGroup(t *testing.T) {
+	work := NewWork()
+	a := Step(work, "a", func(context.Context) error { return nil })
+	b := Step(work, "b", func(context.Context) error { return nil })
+	group := GroupSteps(work, "shards", a, b)
+	leaf := Step(work, "leaf", func(context.Context) error { return nil }).Needs(a, group)
+	if !slices.Equal(leaf.needs, []string{"a", "b"}) {
+		t.Fatalf("step prerequisites = %v", leaf.needs)
 	}
 }

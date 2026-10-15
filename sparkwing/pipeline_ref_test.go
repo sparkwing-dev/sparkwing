@@ -20,14 +20,14 @@ type stubResolver struct {
 	err   error
 }
 
-func (s *stubResolver) resolve(_ context.Context, pipeline, nodeID string, maxAge time.Duration) (*ResolvedPipelineRef, error) {
+func (s *stubResolver) resolve(_ context.Context, pipeline, nodeID string, maxAge time.Duration) (*resolvedPipelineRef, error) {
 	s.lastPipeline = pipeline
 	s.lastNodeID = nodeID
 	s.lastMaxAge = maxAge
 	if s.err != nil {
 		return nil, s.err
 	}
-	return &ResolvedPipelineRef{RunID: s.runID, Data: s.data}, nil
+	return &resolvedPipelineRef{RunID: s.runID, Data: s.data}, nil
 }
 
 type buildOut struct {
@@ -115,7 +115,7 @@ func TestCollectRefs_DiscoversFilledRefFields(t *testing.T) {
 		InRun: Ref[buildOut]{JobID: "sibling"},
 	}
 	got := collectRefs(job)
-	want := []RefTarget{{Pipeline: "build", NodeID: "artifact"}, {NodeID: "sibling"}}
+	want := []refTarget{{Pipeline: "build", NodeID: "artifact"}, {NodeID: "sibling"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("collectRefs = %+v, want %+v", got, want)
 	}
@@ -123,9 +123,9 @@ func TestCollectRefs_DiscoversFilledRefFields(t *testing.T) {
 
 func TestPipelineResolverFunc_AdaptsPlainFunction(t *testing.T) {
 	called := false
-	fn := PipelineResolverFunc(func(_ context.Context, pipeline, nodeID string, maxAge time.Duration) (*ResolvedPipelineRef, error) {
+	fn := pipelineResolverFunc(func(_ context.Context, pipeline, nodeID string, maxAge time.Duration) (*resolvedPipelineRef, error) {
 		called = true
-		return &ResolvedPipelineRef{RunID: "fn-run", Data: []byte(`{"digest":"z","tag":"z"}`)}, nil
+		return &resolvedPipelineRef{RunID: "fn-run", Data: []byte(`{"digest":"z","tag":"z"}`)}, nil
 	})
 	ctx := context.WithValue(context.Background(), keyPipelineResolver, fn)
 	got := RefToLastRun[buildOut]("x", "y").Get(ctx)

@@ -158,5 +158,6 @@ type ValidationContext struct {
 // transaction. Structural validity alone never authorizes persistence or execution.
 // Errors implement C2 apierr's error contract; the full invariant list is in c3-protocol-sdk.md.
 func ValidatePlan(raw json.RawMessage, context ValidationContext) (PlanDoc, error) {
-	panic("unimplemented: c3-protocol-sdk")
+	plan, err := validatePlan(raw, context)
+	return plan, sanitizePlanError(err, context.Secrets)
 }

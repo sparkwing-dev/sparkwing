@@ -1,0 +1,623 @@
+{
+  "$defs": {
+    "ApprovalSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "on_timeout": {
+          "type": "string"
+        },
+        "timeout_ms": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "ArgumentDescription": {
+      "additionalProperties": true,
+      "properties": {
+        "default": {
+          "type": "string"
+        },
+        "desc": {
+          "type": "string"
+        },
+        "enum": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "job_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "secret": {
+          "type": "boolean"
+        },
+        "short": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "required"
+      ],
+      "type": "object"
+    },
+    "ArtifactInput": {
+      "additionalProperties": false,
+      "properties": {
+        "into": {
+          "type": "string"
+        },
+        "producer": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "producer"
+      ],
+      "type": "object"
+    },
+    "CacheSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "key_files": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "key_scope": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "resolver": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "key_files"
+      ],
+      "type": "object"
+    },
+    "ClosureSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "after_run": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "before_run": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "generate": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "memo_key": {
+          "type": "string"
+        },
+        "skip_if": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "verify": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ConcurrencySpec": {
+      "additionalProperties": false,
+      "properties": {
+        "cancel_timeout_ms": {
+          "type": "integer"
+        },
+        "capacity": {
+          "type": "integer"
+        },
+        "cost": {
+          "type": "integer"
+        },
+        "group": {
+          "type": "string"
+        },
+        "on_limit": {
+          "type": "string"
+        },
+        "queue_timeout_ms": {
+          "type": "integer"
+        },
+        "scope": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "group",
+        "scope",
+        "capacity",
+        "cost",
+        "on_limit"
+      ],
+      "type": "object"
+    },
+    "DescribeDoc": {
+      "additionalProperties": true,
+      "properties": {
+        "pipelines": {
+          "items": {
+            "$ref": "#/$defs/PipelineDescription"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "pipelines"
+      ],
+      "type": "object"
+    },
+    "EnvValue": {
+      "additionalProperties": false,
+      "properties": {
+        "startup": {
+          "type": "boolean"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "type": "object"
+    },
+    "EnvironmentDescription": {
+      "additionalProperties": true,
+      "properties": {
+        "default": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "JobSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "approval": {
+          "$ref": "#/$defs/ApprovalSpec"
+        },
+        "artifacts": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "caches": {
+          "items": {
+            "$ref": "#/$defs/CacheSpec"
+          },
+          "type": "array"
+        },
+        "closures": {
+          "$ref": "#/$defs/ClosureSpec"
+        },
+        "concurrency": {
+          "items": {
+            "$ref": "#/$defs/ConcurrencySpec"
+          },
+          "type": "array"
+        },
+        "consumes": {
+          "items": {
+            "$ref": "#/$defs/ArtifactInput"
+          },
+          "type": "array"
+        },
+        "continue_on_error": {
+          "type": "boolean"
+        },
+        "deps": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "deps_if_present": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "env": {
+          "additionalProperties": {
+            "$ref": "#/$defs/EnvValue"
+          },
+          "type": "object"
+        },
+        "failure_policy": {
+          "type": "string"
+        },
+        "groups": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "inline": {
+          "type": "boolean"
+        },
+        "memo": {
+          "$ref": "#/$defs/MemoSpec"
+        },
+        "needs_generated": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "no_progress_timeout_ms": {
+          "type": "integer"
+        },
+        "on_failure_of": {
+          "type": "string"
+        },
+        "optional": {
+          "type": "boolean"
+        },
+        "pipeline_refs": {
+          "items": {
+            "$ref": "#/$defs/PipelineReference"
+          },
+          "type": "array"
+        },
+        "prefers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "requires": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "resources": {
+          "$ref": "#/$defs/ResourceSpec"
+        },
+        "result_step": {
+          "type": "string"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetrySpec"
+        },
+        "skip_if_budget_ms": {
+          "type": "integer"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/StepSpec"
+          },
+          "type": "array"
+        },
+        "timeout_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "MemoSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "ttl_ms": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "PipelineDescription": {
+      "additionalProperties": true,
+      "properties": {
+        "args": {
+          "items": {
+            "$ref": "#/$defs/ArgumentDescription"
+          },
+          "type": "array"
+        },
+        "env_vars": {
+          "items": {
+            "$ref": "#/$defs/EnvironmentDescription"
+          },
+          "type": "array"
+        },
+        "examples": {
+          "items": {
+            "$ref": "#/$defs/UsageExample"
+          },
+          "type": "array"
+        },
+        "extra": {
+          "type": "boolean"
+        },
+        "help": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "risks": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "risks_by_step": {
+          "items": {
+            "$ref": "#/$defs/StepRisks"
+          },
+          "type": "array"
+        },
+        "secrets": {
+          "items": {
+            "$ref": "#/$defs/SecretDeclaration"
+          },
+          "type": "array"
+        },
+        "short": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "args"
+      ],
+      "type": "object"
+    },
+    "PipelineReference": {
+      "additionalProperties": false,
+      "properties": {
+        "job": {
+          "type": "string"
+        },
+        "pipeline": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "pipeline",
+        "job"
+      ],
+      "type": "object"
+    },
+    "PlanDoc": {
+      "additionalProperties": false,
+      "properties": {
+        "admission_class": {
+          "type": "string"
+        },
+        "claim_wait_ms": {
+          "type": "integer"
+        },
+        "concurrency": {
+          "items": {
+            "$ref": "#/$defs/ConcurrencySpec"
+          },
+          "type": "array"
+        },
+        "jobs": {
+          "items": {
+            "$ref": "#/$defs/JobSpec"
+          },
+          "type": "array"
+        },
+        "priority": {
+          "type": "integer"
+        },
+        "resources": {
+          "$ref": "#/$defs/ResourceSpec"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceSpec"
+        }
+      },
+      "required": [
+        "jobs"
+      ],
+      "type": "object"
+    },
+    "ResourceSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "cores": {
+          "type": "number"
+        },
+        "memory_bytes": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "RetrySpec": {
+      "additionalProperties": false,
+      "properties": {
+        "attempts": {
+          "type": "integer"
+        },
+        "backoff_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "attempts"
+      ],
+      "type": "object"
+    },
+    "SecretDeclaration": {
+      "additionalProperties": true,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "optional": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "SourceSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "depth": {
+          "type": "integer"
+        },
+        "full_history": {
+          "type": "boolean"
+        },
+        "lfs": {
+          "type": "boolean"
+        },
+        "submodules": {
+          "type": "boolean"
+        },
+        "tags": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "StepRisks": {
+      "additionalProperties": true,
+      "properties": {
+        "job_id": {
+          "type": "string"
+        },
+        "labels": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "step_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "step_id",
+        "labels"
+      ],
+      "type": "object"
+    },
+    "StepSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "closures": {
+          "$ref": "#/$defs/ClosureSpec"
+        },
+        "continue_on_error": {
+          "type": "boolean"
+        },
+        "finally": {
+          "type": "boolean"
+        },
+        "groups": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "has_dry_run": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "needs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "optional": {
+          "type": "boolean"
+        },
+        "risks": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "safe_without_dry_run": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "UsageExample": {
+      "additionalProperties": true,
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "comment": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "comment",
+        "command"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

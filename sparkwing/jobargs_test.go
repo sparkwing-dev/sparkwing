@@ -104,11 +104,11 @@ func TestJobArgs_DescribesTaggedFieldsOnly(t *testing.T) {
 	p := NewPlan()
 	Job(p, "deploy", &jobargsJob1{})
 
-	got := p.JobArgs()
+	got := p.declaredArguments()
 	if len(got) != 3 {
 		t.Fatalf("JobArgs = %+v, want the three flag-tagged fields", got)
 	}
-	byName := map[string]DescribeArg{}
+	byName := map[string]describeArg{}
 	for _, a := range got {
 		if a.JobID != "deploy" {
 			t.Errorf("--%s JobID = %q, want deploy", a.Name, a.JobID)
@@ -131,7 +131,7 @@ func TestJobArgs_NoneForJobsWithoutWithArgs(t *testing.T) {
 	p := NewPlan()
 	Job(p, "lint", &jobargsJobNoArgs{})
 	Job(p, "fn", func(_ context.Context) error { return nil })
-	if got := p.JobArgs(); got != nil {
+	if got := p.declaredArguments(); got != nil {
 		t.Errorf("JobArgs = %+v, want nil", got)
 	}
 }
@@ -228,13 +228,13 @@ func TestEmbeddedArgs_NilAndNonStructInputs(t *testing.T) {
 
 func TestWithArgs_BindFromAny(t *testing.T) {
 	j := &jobargsJob2{}
-	if err := j.BindFromAny(jobargsArgs2{Webhook: "https://hook"}); err != nil {
+	if err := j.bindFromAny(jobargsArgs2{Webhook: "https://hook"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := j.Args(context.Background()).Webhook; got != "https://hook" {
 		t.Errorf("Webhook = %q", got)
 	}
-	if err := j.BindFromAny("wrong"); err == nil || !strings.Contains(err.Error(), "type mismatch") {
+	if err := j.bindFromAny("wrong"); err == nil || !strings.Contains(err.Error(), "type mismatch") {
 		t.Errorf("BindFromAny(wrong type) = %v, want a type mismatch", err)
 	}
 }
@@ -288,12 +288,10 @@ func TestInvoke_RefusesJobFlagsThatShadowPipelineInputs(t *testing.T) {
 			pipe := "jobargs-collide-" + name
 			job := tc.job
 			Register[jobargsPipeInputs](pipe, func() Pipeline[jobargsPipeInputs] { return jobargsCollidePipe{job: job} })
-			reg, _ := Lookup(pipe)
-			for _, ctx := range []context.Context{context.Background(), SkipArgResolve(context.Background())} {
-				_, err := reg.Invoke(ctx, map[string]string{"target": "prod"}, RunContext{Pipeline: pipe})
-				if err == nil || !strings.Contains(err.Error(), tc.want) {
-					t.Fatalf("Invoke = %v, want an error containing %q", err, tc.want)
-				}
+			reg, _ := lookup(pipe)
+			_, err := reg.Invoke(context.Background(), map[string]string{"target": "prod"}, RunContext{Pipeline: pipe})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Invoke = %v, want an error containing %q", err, tc.want)
 			}
 		})
 	}

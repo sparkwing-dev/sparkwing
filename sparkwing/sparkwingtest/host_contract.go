@@ -38,4 +38,4 @@ type Host interface {
 }
 
 // safety: New isolates fixtures so concurrent tests cannot share secrets, outputs or protocol state.
-func New(opts Options) Host { panic("unimplemented: c3-protocol-sdk") }
+func New(opts Options) Host { return newHost(opts) }

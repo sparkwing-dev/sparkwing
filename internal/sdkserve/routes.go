@@ -1,113 +1,165 @@
 package sdkserve
 
 import (
+	"bytes"
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodeclient"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/internal/secretsource"
-	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 )
 
-// safety: every reach outside this process goes through the host's routes,
-// which add the controller credential; nothing here holds one.
-func withNodeRoutes(ctx context.Context, c *nodeclient.Client, planned *Planned, masker *secrets.Masker) context.Context {
-	ctx = sparkwing.WithSecretResolver(ctx, sparkwing.SecretResolverFunc(func(ctx context.Context, name string) (string, bool, error) {
-		value, masked, err := c.Secret(ctx, name)
-		if nodeclient.HasCode(err, nodeclient.CodeSecretNotFound) {
-			return "", false, fmt.Errorf("%w%.0w", err, secretsource.ErrMissing)
-		}
-		if err == nil && masked {
-			masker.Register(value)
-		}
-		return value, masked, err
-	}))
-	ctx = sparkwingruntime.WithOutputReader(ctx, func(ctx context.Context, node string) ([]byte, error) {
-		if data, ok := localOutput(planned, node); ok {
-			return data, nil
-		}
-		data, err := c.NodeOutput(ctx, node)
-		return data, absentOn(err, nodeclient.CodeUnknownNode, nodeclient.CodeNotReady, nodeclient.CodeNoOutput)
-	})
-	ctx = sparkwingruntime.WithPipelineResolver(ctx, sparkwing.PipelineResolverFunc(
-		func(ctx context.Context, pipeline, node string, maxAge time.Duration) (*sparkwing.ResolvedPipelineRef, error) {
-			runID, data, err := c.PipelineLatest(ctx, pipeline, node, maxAge)
-			if err != nil {
-				return nil, absentOn(err, nodeclient.CodeNoRun, nodeclient.CodeNoOutput)
-			}
-			return &sparkwing.ResolvedPipelineRef{RunID: runID, Data: data}, nil
-		}))
-	ctx = sparkwingruntime.WithPipelineAwaiter(ctx, sparkwing.PipelineAwaiterFunc(
-		func(ctx context.Context, req sparkwing.AwaitRequest) (*sparkwing.ResolvedPipelineRef, error) {
-			return awaitChild(ctx, c, req)
-		}))
-	return sparkwingruntime.WithOIDCTokenSource(ctx, func(ctx context.Context, audience string) (string, error) {
-		token, _, err := c.OIDCToken(ctx, audience)
-		if nodeclient.HasCode(err, nodeclient.CodeOIDCUnavailable) {
-			return "", fmt.Errorf("%w%.0w", err, sparkwing.ErrOIDCUnavailable)
-		}
-		if err == nil {
-			masker.Register(token)
-		}
-		return token, err
-	})
+type routeServices struct {
+	binding *nodeproto.ProcessBinding
+	emit    func(nodeproto.FrameLog)
 }
 
-// safety: only the codes that mean the output is not there mark an absence,
-// so Ref.TryGet never takes a refusal or an unreachable host for a miss.
-func absentOn(err error, codes ...string) error {
-	for _, code := range codes {
-		if nodeclient.HasCode(err, code) {
-			return fmt.Errorf("%w%.0w", err, sparkwing.ErrRefAbsent)
-		}
+func (s *routeServices) call(ctx context.Context, method, path string, body, out any) error {
+	if s.binding == nil {
+		return fmt.Errorf("host services require an execution binding")
 	}
-	return err
-}
-
-// safety: the host holds each await at most a minute, so the SDK asks again
-// until the child finishes. req.Timeout bounds the whole call, retries
-// included, through the context every request runs under.
-func awaitChild(parent context.Context, c *nodeclient.Client, req sparkwing.AwaitRequest) (*sparkwing.ResolvedPipelineRef, error) {
-	ctx := parent
-	if req.Timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(parent, req.Timeout)
-		defer cancel()
+	u, err := url.Parse(s.binding.Routes.URL)
+	if err != nil {
+		return fmt.Errorf("invalid node-host URL")
 	}
-	timedOut := func(what string, err error) error {
-		if parent.Err() == nil && ctx.Err() != nil {
-			return fmt.Errorf("%s did not finish within %s: %w", what, req.Timeout, context.DeadlineExceeded)
-		}
+	ip := net.ParseIP(u.Hostname())
+	if u.Scheme != "http" || ip == nil || !ip.IsLoopback() || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("node-host URL must be a loopback HTTP origin")
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
 		return err
 	}
-	run, err := c.StartChild(ctx, nodeclient.ChildRequest{Pipeline: req.Pipeline, Args: req.Args, Repo: req.Repo, Branch: req.Branch})
+	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(u.String(), "/")+path, bytes.NewReader(raw))
 	if err != nil {
-		return nil, timedOut("child run of "+req.Pipeline, fmt.Errorf("start child run: %w", err))
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+s.binding.Routes.Bearer)
+	req.Header.Set("Content-Type", "application/json")
+	client := http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, limits.NodeOutputBytes+limits.ProtocolEnvelopeBytes+1))
+	if err != nil {
+		return err
+	}
+	if int64(len(data)) > limits.NodeOutputBytes+limits.ProtocolEnvelopeBytes {
+		return fmt.Errorf("host response exceeds output limit")
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var envelope struct {
+			Error json.RawMessage `json:"error"`
+		}
+		if err := json.Unmarshal(data, &envelope); err != nil {
+			return fmt.Errorf("invalid host error response")
+		}
+		e, err := apierr.DecodeInner(envelope.Error)
+		if err != nil {
+			return err
+		}
+		return e
+	}
+	if out == nil {
+		return nil
+	}
+	return json.Unmarshal(data, out)
+}
+func (s *routeServices) Secret(ctx context.Context, name string) (string, bool, error) {
+	var out struct {
+		Value  string `json:"value"`
+		Masked bool   `json:"masked"`
+	}
+	err := s.call(ctx, "GET", "/node/v1/secrets/"+url.PathEscape(name), nil, &out)
+	return out.Value, out.Masked, err
+}
+func (s *routeServices) Output(ctx context.Context, job string) (json.RawMessage, error) {
+	var out struct {
+		Output json.RawMessage `json:"output"`
+	}
+	err := s.call(ctx, "GET", "/node/v1/jobs/"+url.PathEscape(job)+"/output", nil, &out)
+	return out.Output, err
+}
+func (s *routeServices) Latest(ctx context.Context, pipeline, job string, age time.Duration) (json.RawMessage, error) {
+	var out struct {
+		Output json.RawMessage `json:"output"`
+	}
+	err := s.call(ctx, "GET", "/node/v1/pipelines/"+url.PathEscape(pipeline)+"/latest?job="+url.QueryEscape(job)+"&max_age_ms="+strconv.FormatInt(age.Milliseconds(), 10), nil, &out)
+	return out.Output, err
+}
+func (s *routeServices) RunPipeline(ctx context.Context, request ChildRequest) (json.RawMessage, error) {
+	var started struct {
+		RunID string `json:"run_id"`
+	}
+	if err := s.call(ctx, "POST", "/node/v1/children", request, &started); err != nil {
+		return nil, err
+	}
+	if started.RunID == "" {
+		return nil, fmt.Errorf("child start returned no run ID")
 	}
 	for {
-		wait := nodeclient.MaxAwait
-		if deadline, ok := ctx.Deadline(); ok {
-			left := time.Until(deadline)
-			if left < time.Millisecond {
-				<-ctx.Done()
-				return nil, timedOut("child run "+run, ctx.Err())
-			}
-			wait = min(wait, left)
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
-		st, err := c.AwaitChild(ctx, run, req.NodeID, wait)
-		switch {
-		case err != nil:
-			return nil, timedOut("child run "+run, fmt.Errorf("await child run %s: %w", run, err))
-		case st.Status == "success":
-			return &sparkwing.ResolvedPipelineRef{RunID: run, Data: st.Output}, nil
-		case st.Status == "failed":
-			return nil, fmt.Errorf("child run %s failed: %s", run, st.Error)
-		case st.Status == "cancelled":
-			return nil, errors.New("child run " + run + " was cancelled")
+		var state struct {
+			Status string          `json:"status"`
+			Output json.RawMessage `json:"output"`
+			Error  json.RawMessage `json:"error"`
+		}
+		path := "/node/v1/children/" + url.PathEscape(started.RunID) + "/await?job=" + url.QueryEscape(request.Job) + "&wait_ms=" + strconv.FormatInt(limits.ChildAwait.Milliseconds(), 10)
+		if err := s.call(ctx, "GET", path, nil, &state); err != nil {
+			return nil, err
+		}
+		switch state.Status {
+		case "success", "memoized":
+			return state.Output, nil
+		case "pending", "running", "queued":
+			continue
+		case "failed", "cancelled", "skipped", "superseded":
+			if state.Error != nil {
+				failure, err := apierr.DecodeInner(state.Error)
+				if err != nil {
+					return nil, err
+				}
+				return nil, failure
+			}
+			return nil, fmt.Errorf("child run ended %s", state.Status)
+		default:
+			return nil, fmt.Errorf("invalid child state")
 		}
 	}
+}
+
+func (s *routeServices) OIDC(ctx context.Context, audience string) (string, error) {
+	var out struct {
+		Token string `json:"token"`
+	}
+	err := s.call(ctx, "POST", "/node/v1/oidc-token", map[string]string{"audience": audience}, &out)
+	return out.Token, err
+}
+func (s *routeServices) Mask(context.Context, string) error {
+	return &apierr.Error{Code: apierr.Unavailable, Message: "the host route contract does not provide mask registration"}
+}
+func (s *routeServices) Emit(r nodeproto.FrameLog) { s.emit(r) }
+
+func (s *routeServices) RegisterCleanup(ctx context.Context, argv []string, description string) (string, error) {
+	var out struct {
+		ID string `json:"id"`
+	}
+	err := s.call(ctx, "POST", "/node/v1/cleanups", map[string]any{"argv": argv, "description": description}, &out)
+	return out.ID, err
+}
+func (s *routeServices) ReleaseCleanup(ctx context.Context, id string) error {
+	return s.call(ctx, "DELETE", "/node/v1/cleanups/"+url.PathEscape(id), nil, nil)
 }

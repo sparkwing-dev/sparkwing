@@ -446,8 +446,8 @@ func TestRegistration_SecretValues(t *testing.T) {
 	Register[secretValuesCreds](name, func() Pipeline[secretValuesCreds] {
 		return secretValuesPipe{}
 	})
-	reg, _ := Lookup(name)
-	got := reg.SecretValues(map[string]string{
+	reg, _ := lookup(name)
+	got := reg.secretValues(map[string]string{
 		"token":   "from-args",
 		"visible": "not-secret",
 	})
@@ -466,7 +466,7 @@ func TestRegister_SchemaCarriesSecretBit(t *testing.T) {
 	captured := &secretPipe{}
 	name := inputsSchemaTestName("secret-bit-fixture-")
 	Register[secretInputs](name, func() Pipeline[secretInputs] { return captured })
-	reg, ok := Lookup(name)
+	reg, ok := lookup(name)
 	if !ok {
 		t.Fatal("not registered")
 	}
@@ -653,7 +653,7 @@ func TestRegister_EmbeddedArgsAppearInSchema(t *testing.T) {
 	captured := &embeddedRegPipe{}
 	name := inputsSchemaTestName("embedded-args-fixture-")
 	Register[embedOuter](name, func() Pipeline[embedOuter] { return captured })
-	reg, ok := Lookup(name)
+	reg, ok := lookup(name)
 	if !ok {
 		t.Fatal("not registered")
 	}

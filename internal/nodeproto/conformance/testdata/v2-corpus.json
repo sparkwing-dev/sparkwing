@@ -1,0 +1,40 @@
+{
+  "sessions": [
+    {
+      "name": "describe",
+      "requests": [
+        {"op": "describe", "contains": "conformance"}
+      ]
+    },
+    {
+      "name": "plan_once",
+      "requests": [
+        {"op": "plan", "contains": "task"},
+        {"op": "plan", "code": "protocol_error"}
+      ]
+    },
+    {
+      "name": "execution",
+      "binding": true,
+      "requests": [
+        {"op": "plan", "contains": "task"},
+        {"op": "run_step", "contains": "success"},
+        {"op": "eval", "kind": "skip", "contains": "false"},
+        {"op": "eval", "kind": "memo", "contains": "fixture-key"},
+        {"op": "eval", "kind": "generate", "contains": "generated"},
+        {"op": "cancel"}
+      ]
+    },
+    {
+      "name": "unknown_operation",
+      "requests": [
+        {"op": "future_operation", "code": "unknown_op"}
+      ]
+    },
+    {
+      "name": "major_mismatch",
+      "protocol": 1,
+      "requests": []
+    }
+  ]
+}

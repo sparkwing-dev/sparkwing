@@ -40,12 +40,13 @@ func mustKnowTools(caller string, names []string) {
 func (p *Plan) ClaimWait(d time.Duration) *Plan {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.claimWait = max(d, 0)
+	p.claimWait = d
+	p.claimWaitSet = true
 	return p
 }
 
 // ClaimWaitValue returns the wait ClaimWait set, or zero for the default.
-func (p *Plan) ClaimWaitValue() time.Duration {
+func (p *Plan) claimWaitValue() time.Duration {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.claimWait

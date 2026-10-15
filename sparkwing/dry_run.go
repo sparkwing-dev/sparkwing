@@ -46,9 +46,9 @@ func (s *WorkStep) SafeWithoutDryRun() *WorkStep {
 // HasDryRun reports whether a dry-run body has been installed.
 // Used by PreviewPlan to render `would_dry_run` for steps whose
 // dispatcher path under --dry-run would call DryRunFn.
-func (s *WorkStep) HasDryRun() bool { return s.dryRunFn != nil }
+func (s *WorkStep) hasDryRun() bool { return s.dryRunFn != nil }
 
 // IsSafeWithoutDryRun reports whether the step is marked safe.
 // Mirrors HasDryRun's PreviewPlan use: under --dry-run a safe step
 // renders `would_run` (apply Fn is what executes).
-func (s *WorkStep) IsSafeWithoutDryRun() bool { return s.safeWithoutDryRun }
+func (s *WorkStep) isSafeWithoutDryRun() bool { return s.safeWithoutDryRun }

@@ -18,7 +18,7 @@ import (
 // run there is no owner to sweep for, so nothing is written.
 func recordStepSession(ctx context.Context, cmd *exec.Cmd, display string, _ stepJob) func() {
 	run := os.Getenv("SPARKWING_RUN_ID")
-	node := NodeFromContext(ctx)
+	node := nodeFromContext(ctx)
 	if node == "" {
 		node = os.Getenv("SPARKWING_NODE_ID")
 	}

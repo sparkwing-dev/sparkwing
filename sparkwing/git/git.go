@@ -4,7 +4,7 @@
 //
 // Every function takes an explicit `repoDir` parameter. Callers
 // operating on the run's working tree usually go through
-// sparkwing.RunContext.Git / sparkwing.CurrentRuntime().Git; release
+// sparkwing.RunContext.Git; release
 // pipelines that operate on sibling clones import this package
 // directly.
 //
@@ -29,7 +29,7 @@ import (
 
 	"golang.org/x/mod/semver"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 )
 
 // ErrTagAlreadyExists is returned by PushTag when the tag already
@@ -407,7 +407,7 @@ func runGit(ctx context.Context, repoDir string, args ...string) (string, error)
 
 func runGitEnv(ctx context.Context, repoDir string, env []string, args ...string) (string, error) {
 	// safety: all public ctx-taking git helpers funnel through here; one guard covers them all.
-	planguard.Guard(ctx, "git "+firstWord(args))
+	sdkserve.RequireExecution(ctx, "git "+firstWord(args))
 	cmd := exec.CommandContext(ctx, "git", args...)
 	if repoDir != "" {
 		cmd.Dir = repoDir

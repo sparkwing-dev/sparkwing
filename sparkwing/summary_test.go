@@ -1,11 +1,8 @@
-package sparkwing_test
+package sparkwing
 
 import (
 	"context"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestSummary_EmitsStructuredRecord(t *testing.T) {
@@ -20,16 +17,16 @@ func TestSummary_EmitsStructuredRecord(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := &recordingEmitter{}
-			ctx := sparkwingruntime.WithLogger(context.Background(), rec)
-			ctx = sparkwingruntime.WithNode(ctx, "deploy")
-			sparkwing.Summary(ctx, tc.md)
+			ctx := withTestLogger(context.Background(), rec)
+			ctx = withTestNode(ctx, "deploy")
+			Summary(ctx, tc.md)
 
 			if len(rec.records) != 1 {
 				t.Fatalf("got %d records, want 1", len(rec.records))
 			}
 			r := rec.records[0]
-			if r.Event != sparkwing.EventNodeSummary {
-				t.Errorf("Event = %q, want %q", r.Event, sparkwing.EventNodeSummary)
+			if r.Event != eventSummary {
+				t.Errorf("Event = %q, want %q", r.Event, eventSummary)
 			}
 			if r.Msg != tc.md {
 				t.Errorf("Msg = %q, want %q", r.Msg, tc.md)
@@ -48,15 +45,15 @@ func TestSummary_EmitsStructuredRecord(t *testing.T) {
 }
 
 func TestSummary_NoLogger_NoPanic(t *testing.T) {
-	sparkwing.Summary(context.Background(), "## should be a no-op")
+	Summary(context.Background(), "## should be a no-op")
 }
 
 func TestSummary_CarriesStepFromContext(t *testing.T) {
 	rec := &recordingEmitter{}
-	ctx := sparkwingruntime.WithLogger(context.Background(), rec)
-	ctx = sparkwingruntime.WithNode(ctx, "deploy")
-	ctx = sparkwing.WithStep(ctx, "rollout")
-	sparkwing.Summary(ctx, "## Rollout complete")
+	ctx := withTestLogger(context.Background(), rec)
+	ctx = withTestNode(ctx, "deploy")
+	ctx = withStep(ctx, "rollout")
+	Summary(ctx, "## Rollout complete")
 
 	if len(rec.records) != 1 {
 		t.Fatalf("got %d records, want 1", len(rec.records))
@@ -72,10 +69,10 @@ func TestSummary_CarriesStepFromContext(t *testing.T) {
 
 func TestAnnotationsRequireNodeContext(t *testing.T) {
 	rec := &recordingEmitter{}
-	ctx := sparkwingruntime.WithLogger(context.Background(), rec)
-	sparkwing.AnnotateOld(ctx, "annotation")
-	sparkwing.Summary(ctx, "summary")
-	if len(rec.records) != 0 {
-		t.Fatalf("node-less context emitted %d persistent records", len(rec.records))
+	ctx := withTestLogger(context.Background(), rec)
+	Annotate(ctx, Annotation{Message: "annotation"})
+	Summary(ctx, "summary")
+	if len(rec.records) != 1 || rec.records[0].Event != "annotation" {
+		t.Fatalf("node-less context emitted unexpected records: %+v", rec.records)
 	}
 }

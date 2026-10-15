@@ -11,13 +11,13 @@ import "strings"
 //
 // JSON consumers (agents, dashboard) can pattern-match on the typed
 // fields rather than parsing the message.
-type RiskBlockedError struct {
+type riskBlockedError struct {
 	Pipeline      string
 	StepID        string
 	MissingLabels []string
 }
 
-func (e *RiskBlockedError) Error() string {
+func (e *riskBlockedError) Error() string {
 	return "step " + quote(e.StepID) + " in pipeline " + quote(e.Pipeline) +
 		" requires --sw-allow " + strings.Join(e.MissingLabels, ",") +
 		" to confirm (or --sw-dry-run to preview)."
@@ -45,15 +45,6 @@ func (s *WorkStep) Risk(labels ...string) *WorkStep {
 		s.addRisk(l)
 	}
 	return s
-}
-
-// Risks returns the labels declared on this step in declaration order
-// with duplicates collapsed. Empty when no label was declared -- the
-// canonical "no gate fires" state.
-func (s *WorkStep) Risks() []string {
-	out := make([]string, len(s.risks))
-	copy(out, s.risks)
-	return out
 }
 
 func (s *WorkStep) addRisk(label string) {

@@ -30,7 +30,7 @@ func (p *Plan) AdmissionClass(class AdmissionClass) *Plan {
 }
 
 // AdmissionClassValue returns the plan's explicit local contention class.
-func (p *Plan) AdmissionClassValue() AdmissionClass {
+func (p *Plan) admissionClassValue() AdmissionClass {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.admissionClass
@@ -38,18 +38,18 @@ func (p *Plan) AdmissionClassValue() AdmissionClass {
 
 // Admission is the resource share the scheduler reserved for the running job,
 // rather than the capacity of the machine it runs on.
-type Admission struct {
+type admission struct {
 	Cores       float64
 	MemoryBytes int64
 }
 
 // Admitted reports the share the scheduler reserved for the running job. The
 // second result is false where nothing reserved anything.
-func Admitted(ctx context.Context) (Admission, bool) {
+func admitted(ctx context.Context) (admission, bool) {
 	if ctx == nil {
-		return Admission{}, false
+		return admission{}, false
 	}
-	a, ok := ctx.Value(keyAdmission).(Admission)
+	a, ok := ctx.Value(keyAdmission).(admission)
 	return a, ok
 }
 
