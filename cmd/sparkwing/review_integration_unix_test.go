@@ -3,17 +3,14 @@
 package main
 
 import (
-	"bytes"
-	"context"
+	"encoding/json"
 	"io"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
-	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
@@ -49,13 +46,19 @@ func TestReviewProductionExecutionBindings(t *testing.T) {
 
 func TestReviewPublicDoctorSweepsAndWarnsForPrunedRun(t *testing.T) {
 	p := paths.PathsAt(t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("SPARKWING_HOME", p.Root)
+	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
 	st, err := teststore.Open(p.StateDB())
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err := st.Close(); err != nil {
-			t.Error(err)
+		if st != nil {
+			if err := st.Close(); err != nil {
+				t.Error(err)
+			}
 		}
 	})
 	if _, err := st.DB().ExecContext(t.Context(), `INSERT INTO runs
@@ -77,15 +80,12 @@ func TestReviewPublicDoctorSweepsAndWarnsForPrunedRun(t *testing.T) {
 	if _, err := st.DB().ExecContext(t.Context(), "DELETE FROM runs WHERE team='default' AND id='pruned'"); err != nil {
 		t.Fatal(err)
 	}
-	runtime, err := wingd.NewLocalRuntime(wingd.LocalRuntimeConfig{Admission: wingd.Config{Home: p.Root}, Open: openLocalController})
-	if err != nil {
+	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
-	services := dashboardServices{runtime: runtime, lifecycle: wingd.NewLocalLifecycle(runtime, nil)}
-	var out bytes.Buffer
-	err = runDoctorCommand(t.Context(), []string{"-o=json"}, &out, doctorDependencies{
-		version: "v1.2.3", machine: func(context.Context) doctorReport { return doctorReport{} },
-		local: func(context.Context) (dashboardServices, error) { return services, nil },
+	st = nil
+	out := captureStdout(t, func() {
+		err = runDoctor([]string{"-o=json"})
 	})
 	if err != nil {
 		t.Fatalf("successful cleanup failed: %v", err)
@@ -93,7 +93,17 @@ func TestReviewPublicDoctorSweepsAndWarnsForPrunedRun(t *testing.T) {
 	if left, err := ledger.List(); err != nil || len(left) != 0 {
 		t.Errorf("public doctor did not sweep: %d records, error %v", len(left), err)
 	}
-	if !strings.Contains(out.String(), "unrecorded_step_outcome") {
-		t.Errorf("public doctor hid unrecorded cleanup: %s", &out)
+	var report doctorReport
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("doctor report: %v; output %s", err, out)
 	}
+	if !report.ControllerChecked || report.ControllerError != "" {
+		t.Errorf("controller diagnostics incomplete: %+v", report)
+	}
+	for _, finding := range report.Findings {
+		if finding.Code == "unrecorded_step_outcome" && finding.Message != "" {
+			return
+		}
+	}
+	t.Errorf("public doctor hid unrecorded cleanup: %s", out)
 }
