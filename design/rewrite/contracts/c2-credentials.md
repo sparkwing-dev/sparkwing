@@ -160,8 +160,37 @@ member's manifest identity. Record reads select `kind`, `ref`, `pipeline`,
 `verified_default_only`. A remote-cache credential forces the latter true.
 Responses expose public record/member metadata, excluding authority, uploader,
 source and read-set snapshots. These routes cover generic RecordStore lookup
-and commit. Specialized memo/depcache fallback and memo-copy wire transport
-still need C2/W9 coordination. The in-process methods remain implemented.
+and commit.
+
+### Cache record transport
+
+POST `/api/v1/data/memo/lookup` takes `pipeline`, `job`, `hash` and optional
+RFC3339 `deadline`. POST `/api/v1/data/depcache/lookup` takes `name`, `key` and
+optional `deadline`. Both use the same read alternatives as generic records.
+POST `/api/v1/data/memo/copy` takes the memo selectors and requires both
+`data.read` and `data.write` on one live claim alternative. Copy has
+RetryExactBody. Lookups have RetrySafe.
+
+These flat request objects accept unique, known string fields. Repository,
+ref and authority come from DataBinding. Copy destination is its current
+attempt. Query parameters supply none of these facts. Memo responses contain
+`found`, optional `output` and `manifest` digests, and a `members` array.
+Depcache responses contain `found` and, on a hit, public `record` metadata
+and the winning restore `source`. Misses omit stale hit fields. No response
+contains the private ReadSet, uploader or source identity.
+
+The handlers call C1's existing LookupMemo, LookupDepcache and CopyMemo
+interfaces. C1 owns fallback order, verified-default restrictions, corruption
+and budget misses, and atomic destination edges. Remote-cache authority stays
+read-only. Bound CopyMemo checks both read and write policy before its transaction.
+
+These are local C2 route/wire declarations. W9's NewDataClient still needs
+these transports. C1 must complete the DataAccessChecker selection semantics:
+DataLookup reaches it before a digest is selected, and CopyMemo's DataRecord
+check has no digest before the transactional hit. The merged checker treats
+lookup as a digest-presence check and refuses empty digests. No SQL or policy
+fallback is added in W2. Production scope/metadata/charging adapters and W7's
+physical storage remain separate integrations.
 
 
 

@@ -39,6 +39,21 @@ fail with `bad_request`. A miss returns `{"found":false,"members":[]}`.
 A hit returns public record metadata and authorized member metadata. It omits
 private authority references, uploader identities and read-set snapshots.
 
+`POST /api/v1/data/memo/lookup` takes `pipeline`, `job`, `hash` and optional
+RFC3339 `deadline`. `POST /api/v1/data/depcache/lookup` takes `name`, `key`
+and optional `deadline`. The store applies memo's own-ref/default fallback
+and depcache's own-ref/PR-base/default order. Remote-cache credentials read
+only verified default-branch entries. Missing or corrupt cache data is a miss.
+
+`POST /api/v1/data/memo/copy` takes the memo selectors. It requires both
+`data.read` and `data.write` and copies authorized output and manifest edges
+to the claim's current attempt. The caller cannot choose the destination.
+
+These requests accept only unique, known string fields. Memo responses carry
+`found`, optional `output` and `manifest` digests, and public `members`.
+Depcache hits carry public `record` metadata and the winning restore `source`.
+Read-set snapshots and uploader identities stay private.
+
 Write requests cannot choose a team, repository, ref verification flag or
 provenance. Submitter-vouched writes use the sealed manual ref namespace.
 Remote-cache credentials always require verified default-branch records and

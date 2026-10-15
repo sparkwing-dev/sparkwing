@@ -39,6 +39,9 @@ func (s *Server) dataEndpoints() []Endpoint {
 		{Method: "GET", Pattern: "/api/v1/data/records", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDataRecordLookup},
 		{Method: "POST", Pattern: "/api/v1/data/download", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDataDownload},
 		{Method: "POST", Pattern: "/api/v1/data/has-many", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDataPresence},
+		{Method: "POST", Pattern: "/api/v1/data/memo/lookup", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDataMemo},
+		{Method: "POST", Pattern: "/api/v1/data/depcache/lookup", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDataDepcache},
+		{Method: "POST", Pattern: "/api/v1/data/memo/copy", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDataMemo},
 	}
 }
 

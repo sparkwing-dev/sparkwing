@@ -75,7 +75,8 @@ func TestDataRecordRequiresEveryReferenceEdge(t *testing.T) {
 				t.Fatal(err)
 			}
 			manifest, member := blob.Digest(strings.Repeat("c", 64)), blob.Digest(strings.Repeat("d", 64))
-			request := blob.CommitRecordRequest{Authority: binding.Authority, Source: binding.Authority.Upload.Value,
+			request := blob.CommitRecordRequest{
+				Authority: binding.Authority, Source: binding.Authority.Upload.Value,
 				Key: blob.RecordKey{Team: "team", Kind: blob.KindOutput, Scope: blob.Scope{Repo: "gh:12", Ref: blob.RefScope{Ref: "manual:main"}, Job: "job"}, Name: "output"}, Digest: dataDigest(),
 				ManifestDigest: runspec.Optional[blob.Digest]{Set: true, Value: manifest}, Members: []blob.Member{{Team: "team", ManifestDigest: manifest, Digest: member, Path: "file", Size: 1}},
 			}
@@ -142,6 +143,22 @@ func TestDataCacheOperationsPreserveBoundAuthorityAndDestination(t *testing.T) {
 	}
 }
 
+func TestDataMemoCopyRequiresReadAndWriteAtTheBoundInterface(t *testing.T) {
+	for _, grant := range []capability.Grant{capability.DataRead, capability.DataWrite} {
+		a := dataAuthorized()
+		a.Access.Grants = []capability.Grant{grant}
+		s, _, _, _, events := dataControllerFixture(a)
+		binding, err := s.BindData(t.Context(), a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := blob.CopyMemoRequest{Lookup: blob.MemoLookup{Authority: binding.Authority, Key: blob.MemoKey{Repo: "gh:12", Ref: binding.Authority.Ref.Scope, Pipeline: "build", Job: "job", Hash: "hash"}}, Destination: binding.Authority.Attempt.Value}
+		if _, err := binding.Records.CopyMemo(t.Context(), request); err == nil || slices.Contains(*events, "copy") {
+			t.Fatalf("single grant %s copied memo: %v %v", grant, err, *events)
+		}
+	}
+}
+
 func (f *dataTransactions) LookupRecord(_ context.Context, r blob.RecordLookup) (blob.RecordLookupResult, error) {
 	*f.events = append(*f.events, "lookup record")
 	f.lookup = r
@@ -202,8 +219,10 @@ func TestDataRemoteCacheForcesVerifiedDefaultLookup(t *testing.T) {
 
 func (f *dataTransactions) ReserveBlobUpload(_ context.Context, r store.UploadReservationRequest) (store.UploadReservation, error) {
 	*f.events = append(*f.events, "reserve")
-	f.ticket = store.UploadReservation{ID: r.ID, Identity: r.Intent.Identity, Blob: blob.Blob{Team: "team", Digest: r.Intent.Digest, Size: r.Intent.Size},
-		StagingKey: "teams/team/pending/" + r.ID, ObjectKey: "teams/team/cas/" + string(r.Intent.Digest), ExpiresAt: r.ExpiresAt}
+	f.ticket = store.UploadReservation{
+		ID: r.ID, Identity: r.Intent.Identity, Blob: blob.Blob{Team: "team", Digest: r.Intent.Digest, Size: r.Intent.Size},
+		StagingKey: "teams/team/pending/" + r.ID, ObjectKey: "teams/team/cas/" + string(r.Intent.Digest), ExpiresAt: r.ExpiresAt,
+	}
 	return f.ticket, f.reserveErr
 }
 
@@ -358,7 +377,8 @@ func dataControllerFixture(a capability.Authorized) (*controller.DataController,
 	f := &dataTransactions{events: &events}
 	o := &dataObjects{events: &events}
 	e := &dataEdges{events: &events}
-	s := &controller.DataController{Objects: o, Access: e,
+	s := &controller.DataController{
+		Objects: o, Access: e,
 		ChargeDownload:   func(context.Context, blob.Authority, blob.Blob) error { return nil },
 		ResolveAuthority: func(context.Context, capability.Authorized) (blob.Authority, error) { return dataAuthority(a), nil },
 		ResolveTenant: func(_ context.Context, team store.Team) (controller.DataTransactions, error) {
@@ -564,8 +584,10 @@ func TestDataOwnerAndPublicationUploadsHaveNoSyntheticAttempt(t *testing.T) {
 			s, f, _, _, _ := dataControllerFixture(a)
 			authority := dataAuthority(a)
 			authority.Attempt = runspec.Optional[runspec.AttemptIdentity]{}
-			upload := blob.UploadIdentity{Kind: blob.UploadOwnerUnit, Team: "team", RunID: "run", Principal: authority.Principal, CapabilityRef: authority.CapabilityRef,
-				Unit: runspec.Optional[blob.UploadUnit]{Set: true, Value: blob.UploadUnit{Kind: blob.UploadUnitKind(kind), ID: "claim", Generation: 4}}}
+			upload := blob.UploadIdentity{
+				Kind: blob.UploadOwnerUnit, Team: "team", RunID: "run", Principal: authority.Principal, CapabilityRef: authority.CapabilityRef,
+				Unit: runspec.Optional[blob.UploadUnit]{Set: true, Value: blob.UploadUnit{Kind: blob.UploadUnitKind(kind), ID: "claim", Generation: 4}},
+			}
 			if strings.Contains(kind, "publication") {
 				upload.Kind, upload.Unit = blob.UploadPublication, runspec.Optional[blob.UploadUnit]{}
 				if kind == "imported publication" {

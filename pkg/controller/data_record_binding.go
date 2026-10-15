@@ -169,6 +169,9 @@ func (s *boundData) CopyMemo(ctx context.Context, request blob.CopyMemoRequest) 
 	if err := s.recordScope(authority, key, false); err != nil {
 		return blob.MemoHit{}, err
 	}
+	if err := s.authorize(ctx, capability.DataLookup, authority, recordDataTarget(key, "")); err != nil {
+		return blob.MemoHit{}, err
+	}
 	key.Scope.Ref = authority.Ref.Scope
 	if err := s.recordScope(authority, key, true); err != nil {
 		return blob.MemoHit{}, err

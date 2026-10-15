@@ -21,6 +21,8 @@ unlock.
 ## [Unreleased]
 
 ### Changed
+- **controller:** Data routes expose scoped memo lookup, dependency-cache lookup and memo copy
+  Copy requires read and write authority and derives its destination from the live attempt. See [data records](docs/data-uploads.md).
 - **controller (Breaking):** GitHub Actions exchange issues a push-bound controller capability through the common issuer
   The request accepts only `id_token` and `team`. Grants and repository identity come from verified claims and the team's binding. The route uses canonical errors and does not retry a lost bearer response. See [GitHub Actions runners](docs/github-actions-runners.md#what-the-credential-can-do).
 - **controller (Breaking):** Member credential creation uses `/api/v1/tokens` with explicit grants. Sessions issue personal roots, bearer delegation keeps revocation ancestry, and the response returns its capability once. See [migration guide](docs/migrations/_unreleased.md#member-credential-issuance).
