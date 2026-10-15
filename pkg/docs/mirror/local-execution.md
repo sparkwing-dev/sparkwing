@@ -4,11 +4,16 @@
 submits it to a controller. Both placements use the shared run and job hosts,
 sealed inputs and matching SDK engine.
 
-This guide describes the rewrite contract. The foreground local caller uses
-sealed intake and an awarded shared host. Its native runtime binding is absent,
-so it refuses hosting before submitting a run. Local detachment and standalone
-execution still need integration and native acceptance evidence.
-See [rewrite integration](architecture.md) for that boundary.
+The command adapters use sealed intake and the shared host interfaces. The CLI
+no longer opens the runs database or starts a separate trigger consumer. Native
+local controller, source, private environment, storage and host factories remain
+unbound in this rewrite checkout, so execution refuses before intake where those
+bindings are required. The command's presence in help is not native execution
+evidence. See [rewrite integration](architecture.md).
+
+The old `pkg/localws` server, trigger-consumer election and `RunHosted` entrypoint
+are removed with their state, admission, logging and child-dispatch backends.
+They cannot serve as a fallback for missing native controller or host bindings.
 
 ## Execution commands
 
@@ -28,6 +33,15 @@ selects the controller for `pipeline trigger`, run observations and management.
 | `sparkwing run build --sw-detached` | The local controller queues and hosts work independently of the submitting terminal. |
 | `sparkwing pipeline trigger build --profile prod` | The selected controller queues the run for an eligible runner or launcher. |
 | `sparkwing pipeline trigger build --profile prod --runner here --reason repair` | This CLI hosts the controller's named here run. |
+
+An explicit empty `--sw-cache-from=` disables `run.cache_from` from the machine
+file. Publication still needs its authorized result/log publisher. A missing
+publisher fails before intake. It cannot change a completed local verdict.
+
+Local schedule registration, pins, timer installation and `__tick` now use
+controller/lifecycle adapters. Their remaining request and factory contracts must
+be connected before local schedules can run. Timers carry their absolute state
+home into resolution. The old CLI schedule writer is removed.
 
 ## Local execution
 
@@ -97,7 +111,7 @@ part of the model. A successful submission receipt identifies the allocated run.
 It does not prove that execution has started.
 
 `--sw-idempotency-key` gives repeated detached submissions one durable identity.
-`--sw-request-id` is echoed in the submission receipt and does not deduplicate work. JSON receipts
+`--sw-request-id` is a tracing field and does not deduplicate work. JSON receipts
 exclude raw arguments, captured environment values, private bearers and seal
 hashes. A log path is reported only when it exists.
 
@@ -154,6 +168,21 @@ sparkwing runs status --run RUN_ID --profile prod
 sparkwing runs logs --run RUN_ID --profile prod --follow
 ```
 
+The command prepares one sealed request and submits it to `POST /api/v1/runs`.
+Detached output includes the stable run ID, team number and replay flag. Preparation
+failures submit nothing. The old trigger request and separate here-host loop are
+removed.
+
+`--ref` selects the execution commit. `--pipeline-ref` selects the pipeline
+commit, subject to any configured source pin. That pipeline commit's
+`package.json` determines Go versus TypeScript before source acquisition and
+engine selection. A different SDK in the working tree or execution commit
+cannot change the selection. A malformed selected manifest fails preparation.
+
+GitHub numeric-ID lookup, private source access and captured environment delivery
+still need their native bindings. Initial here intake refuses before submission
+until its reason can survive the sealed request and replay.
+
 The selected controller owns the run's records. Its intake derives the caller's
 authority. A runner claims trigger and job units through one ordered queue. The
 launcher creates Jobs for awarded plan, eval and work units. Both use the shared
@@ -162,8 +191,8 @@ matcher and hosts. Inline jobs stay with the run host.
 The working-tree option submits an immutable source snapshot. Secret-shaped
 files require explicit review through the allowed-file option. Keep credentials
 in ignored files or outside the repository and inspect `git status` before
-submission. Final signed source-bundle upload and initial-trigger intake still
-need their controller and storage bindings. The option's presence in help is not
+submission. Signed source-bundle upload still needs its controller and storage
+bindings, so working-tree submission fails before intake. The option's presence in help is not
 native integration evidence.
 
 Here execution retains its one-time authority in an owner-only controller/run
@@ -178,6 +207,16 @@ The named claim supplies the original request and accepted plan. The first
 interrupt asks the controller to cancel while the host keeps renewing and
 draining. A second interrupt stops hosting and observation, then joins both.
 Incomplete hosting or observation exits 3. See [here execution](hotfix-runner.md).
+
+Hosting closes returned session resources before exiting, including when a
+binding fails after allocating them. A cleanup failure remains an incomplete
+handoff and preserves the binding or execution error.
+
+Local and here hosting use the earliest of the caller's deadline, the award's
+binding deadline, the owner deadline and the parent capability's expiry.
+Expired authority stops before host binding. Binding and hosting share that
+context. The host receives a copy of the awarded runner identity, so binding
+cannot change its labels.
 
 ### Team runners fetch source themselves
 
@@ -204,8 +243,7 @@ membership or repository permission. See [scheduling](scheduling.md),
 A local run captures its environment once. Children inherit that snapshot, and
 schedules capture theirs at installation. The daemon's ambient environment never
 replaces accepted values. The sealed spec records names and a digest. Values
-remain in private host storage, retained by digest for replacement owners and
-retries. Reading a snapshot preserves it for later attempts.
+remain in private host storage.
 
 Shared process policy filters every spawn. Remote submission passes only the
 minimal base, network/CA settings and explicitly allowed names. Credential-shaped

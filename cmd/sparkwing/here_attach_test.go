@@ -215,22 +215,22 @@ func TestHereAttachmentKeepsDisplayAndExecutionAuthoritySeparate(t *testing.T) {
 		attached = true
 		return attachHereRun(ctx, public, run, "json", &out, host)
 	}
-	deps.resolve = func(ctx context.Context, private client.EngineOptions) (runHostRuntime, error) {
+	deps.resolve = func(ctx context.Context, private client.EngineOptions) (hereRuntime, error) {
 		bearer, err := private.Bearer(ctx)
 		if err != nil || bearer != "retained-here-bearer" {
 			t.Error("owner claim did not use retained authority")
 		}
-		return runHostRuntime{
+		return hereRuntime{
 			controller: hereTestController{claim: func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
 				claimed = true
 				return controllerwire.ClaimResponse{Claim: &award}, nil
 			}},
-			bind: func(ctx context.Context, bound client.EngineOptions, _ controllerwire.ClaimedUnit) (runHostSession, error) {
+			bind: func(ctx context.Context, bound client.EngineOptions, _ controllerwire.ClaimedUnit) (hereHostSession, error) {
 				bearer, err := bound.Bearer(ctx)
 				if err != nil || bearer != award.Capability {
 					t.Error("host did not use awarded authority")
 				}
-				return runHostSession{host: hereTestHost(func(context.Context, nodehost.RunInput) (nodehost.RunCompletion, error) {
+				return hereHostSession{host: hereTestHost(func(context.Context, nodehost.RunInput) (nodehost.RunCompletion, error) {
 					hosted = true
 					return nodehost.RunCompletion{Outcome: "success"}, nil
 				}), close: func() error { closed = true; return nil }}, nil

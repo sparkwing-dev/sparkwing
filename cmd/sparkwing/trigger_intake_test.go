@@ -215,9 +215,9 @@ func TestInitialTriggerCancellationRetainsReceivedHereAuthority(t *testing.T) {
 		here: func(ctx context.Context, response controllerwire.CreateRunResponse) error {
 			return handoffHereRun(ctx, options, response, hereDependencies{
 				credentials: func() (hereCredentials, error) { return credentials, nil },
-				resolve: func(context.Context, client.EngineOptions) (runHostRuntime, error) {
+				resolve: func(context.Context, client.EngineOptions) (hereRuntime, error) {
 					t.Fatal("cancelled handoff started hosting")
-					return runHostRuntime{}, nil
+					return hereRuntime{}, nil
 				},
 			})
 		},
@@ -335,19 +335,19 @@ func TestInitialHereHandoffClaimsAndRunsSharedHost(t *testing.T) {
 	deps := hereDependencies{
 		credentials: func() (hereCredentials, error) { return credentials, nil },
 		version:     "v1.2.3",
-		resolve: func(ctx context.Context, opts client.EngineOptions) (runHostRuntime, error) {
+		resolve: func(ctx context.Context, opts client.EngineOptions) (hereRuntime, error) {
 			retained, err := credentials.load(options.URL, response.RunID)
 			presented, presentationErr := opts.Bearer(ctx)
 			if err != nil || presentationErr != nil || retained != response.HereBearer || presented != retained {
 				t.Fatalf("initial authority was not retained before claiming: %v %v", err, presentationErr)
 			}
-			return runHostRuntime{controller: controller, bind: func(ctx context.Context, opts client.EngineOptions, unit controllerwire.ClaimedUnit) (runHostSession, error) {
+			return hereRuntime{controller: controller, bind: func(ctx context.Context, opts client.EngineOptions, unit controllerwire.ClaimedUnit) (hereHostSession, error) {
 				calls = append(calls, "bind")
 				presented, err := opts.Bearer(ctx)
 				if err != nil || presented != award.Capability || unit.RunID != response.RunID {
 					t.Fatalf("binding did not receive the award: %v", err)
 				}
-				return runHostSession{host: hereTestHost(func(_ context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {
+				return hereHostSession{host: hereTestHost(func(_ context.Context, input nodehost.RunInput) (nodehost.RunCompletion, error) {
 					calls = append(calls, "host")
 					var sealed runspec.Request
 					if err := json.Unmarshal(input.SealedRequest, &sealed); err != nil || sealed.Pipeline != request.Request.Pipeline || input.RunID != response.RunID || input.RequestHash != string(response.Request.Hash) || input.Accepted != nil || input.Owner.Owner.Holder != award.Binding.Holder {

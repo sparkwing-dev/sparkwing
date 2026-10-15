@@ -162,6 +162,7 @@ func matchesSchedule(row controllerwire.ScheduleView, name string) bool {
 	name = strings.TrimSpace(name)
 	return validSchedule(row) && (row.ID == name || row.Name == name || row.Pipeline == name || row.ScheduleName != "" && row.Pipeline+"/"+row.ScheduleName == name)
 }
+
 func validSchedule(row controllerwire.ScheduleView) bool {
 	if !validRunnerTimestamp(row.ArmedAt, true) || !validRunnerTimestamp(row.UpdatedAt, true) || !validRunnerTimestamp(row.Override.SetAt, true) {
 		return false
@@ -177,6 +178,7 @@ func validSchedule(row controllerwire.ScheduleView) bool {
 func scheduleInputError(message string) error {
 	return &apierr.Error{Code: apierr.BadRequest, Message: message}
 }
+
 func scheduleProtocolError(message string) error {
 	return &apierr.Error{Code: apierr.ProtocolError, Message: message}
 }
@@ -193,8 +195,11 @@ func NewScheduleRepositoryManager(options EngineOptions) (controllerwire.Schedul
 	return c, nil
 }
 
-func (c *engineClient) ReplaceSchedules(ctx context.Context, input controllerwire.ScheduleRepoRequest) (controllerwire.ScheduleRepoWritten, error) {
+func (c *engineClient) WriteSchedules(ctx context.Context, input controllerwire.ScheduleRepoRequest) (controllerwire.ScheduleRepoWritten, error) {
 	var result controllerwire.ScheduleRepoWritten
+	if input.Mode != controllerwire.ScheduleReplace && input.Mode != controllerwire.ScheduleUpsert {
+		return result, scheduleInputError("schedule write mode must be replace or upsert")
+	}
 	if !validSelector(input.RepoURL) {
 		return result, scheduleInputError("repository selector is required")
 	}
@@ -222,6 +227,9 @@ func (c *engineClient) ReplaceSchedules(ctx context.Context, input controllerwir
 	err := c.request(ctx, "PUT", "/api/v1/schedules/repos", "/api/v1/schedules/repos", "", input, &result)
 	if err != nil {
 		return result, err
+	}
+	if input.Mode == controllerwire.ScheduleUpsert && len(result.Withdrawn) > 0 {
+		return result, scheduleProtocolError("controller withdrew schedules during a selective update")
 	}
 	identities := map[string]bool{}
 	for _, row := range result.Schedules {

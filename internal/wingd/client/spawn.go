@@ -14,7 +14,7 @@ import (
 
 const daemonLogTailLines = 8
 
-const DaemonSpawnVerb = "supervise"
+const DaemonSpawnVerb = "run"
 
 func defaultSpawn(home, version string) error {
 	self, err := os.Executable()

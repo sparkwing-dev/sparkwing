@@ -147,6 +147,9 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 			return completion, errors.New("resume differs from persisted acceptance")
 		}
 		input.Accepted = &persisted
+		if _, err := selectionSkips(persisted.Plan, snapshot.Run.Spec.Resolved.Settings.Options); err != nil {
+			return completion, err
+		}
 		if h.Masks != nil {
 			namespace := persisted.Plan
 			for _, row := range snapshot.Nodes {
@@ -280,6 +283,9 @@ func (h *OwnerHost) accept(ctx context.Context, input RunInput, row store.RunRow
 	}
 	plan, err := PlanInitial(ctx, prepared.Planning, prepared.Functions)
 	if err != nil {
+		return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
+	}
+	if _, err := selectionSkips(plan.Plan, row.Request.Request.Options); err != nil {
 		return AcceptedRun{}, h.preparationFailure(ctx, input, row, err)
 	}
 	if prepared.Resolve != nil {

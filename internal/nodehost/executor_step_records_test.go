@@ -27,6 +27,76 @@ type executorStepStore struct {
 	write   func(context.Context, store.StepReport) error
 }
 
+func TestNodeExecutorUsesSealedStepWindow(t *testing.T) {
+	for _, tc := range []struct {
+		start, stop string
+		want        []string
+	}{
+		{"second", "", []string{"second", "third"}},
+		{"", "second", []string{"first", "second"}},
+		{"second", "second", []string{"second"}},
+		{"other-job-step", "", []string{"first", "second", "third"}},
+	} {
+		t.Run(tc.start+"/"+tc.stop, func(t *testing.T) {
+			input, state, deps, processes := executorFixture(t)
+			job := input.Accepted.Plan.Jobs[0]
+			job.Steps = []nodeproto.StepSpec{{ID: "first"}, {ID: "second", Needs: []string{"first"}}, {ID: "third", Needs: []string{"second"}}}
+			executorChangeJob(t, &input, state, job)
+			var spec runspec.Spec
+			if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
+				t.Fatal(err)
+			}
+			spec.Resolved.Settings.Options.StartAt = runspec.Setting[string]{Optional: runspec.Optional[string]{Set: tc.start != "", Value: tc.start}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag}}
+			spec.Resolved.Settings.Options.StopAt = runspec.Setting[string]{Optional: runspec.Optional[string]{Set: tc.stop != "", Value: tc.stop}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag}}
+			spec.Request.Request.Options = spec.Resolved.Settings.Options
+			var err error
+			input.Accepted.Spec, err = json.Marshal(spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			records := &executorStepStore{NodeTransitionStore: state}
+			deps.Store = records
+			start := deps.Start
+			deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
+				process, err := start(ctx, in, activity)
+				process.(*executorProcess).plan = input.Accepted.Plan
+				return process, err
+			}
+			host, err := NewNodeExecutor(deps)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := host.Execute(t.Context(), input); err != nil {
+				t.Fatal(err)
+			}
+			var ran []string
+			for _, request := range (*processes)[0].requests {
+				if request.Op == nodeproto.OpRunStep {
+					ran = append(ran, request.Step)
+				}
+			}
+			if !reflect.DeepEqual(ran, tc.want) {
+				t.Fatalf("ran=%v, want=%v", ran, tc.want)
+			}
+			states := map[string]string{}
+			for _, report := range records.reports {
+				states[report.StepID] = report.State
+			}
+			for _, step := range job.Steps {
+				want := "skipped"
+				for _, id := range tc.want {
+					if step.ID == id {
+						want = "passed"
+					}
+				}
+				if states[step.ID] != want {
+					t.Errorf("%s=%s, want=%s", step.ID, states[step.ID], want)
+				}
+			}
+		})
+	}
+}
+
 func FuzzExecutorStepRecordFenceAndMask(f *testing.F) {
 	f.Add("holder:other", "private\"\nvalue", uint8(4))
 	f.Add("", "x", uint8(0))
@@ -252,7 +322,7 @@ func TestNodeExecutorStepWriteRefusalPreventsSuccessAndJoinsWork(t *testing.T) {
 }
 
 func TestNodeExecutorStepWriteRefusalJoinsParallelBodies(t *testing.T) {
-	for _, sink := range []string{"state", "diagnostic"} {
+	for _, sink := range []string{"state", "diagnostic", "window"} {
 		t.Run(sink, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
@@ -260,6 +330,19 @@ func TestNodeExecutorStepWriteRefusalJoinsParallelBodies(t *testing.T) {
 			job := input.Accepted.Plan.Jobs[0]
 			job.Steps = []nodeproto.StepSpec{{ID: "slow"}, {ID: "refuse"}, {ID: "cleanup", Needs: []string{"slow", "refuse"}, Finally: true}}
 			executorChangeJob(t, &input, st, job)
+			if sink == "window" {
+				var spec runspec.Spec
+				if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil {
+					t.Fatal(err)
+				}
+				spec.Resolved.Settings.Options.StopAt = runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "slow"}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag}}
+				spec.Request.Request.Options.StopAt = spec.Resolved.Settings.Options.StopAt
+				var err error
+				input.Accepted.Spec, err = json.Marshal(spec)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
 			entered, joined := make(chan struct{}), make(chan struct{})
 			refused := errors.New("terminal step write refused")
 			records := &executorStepStore{NodeTransitionStore: st, write: func(ctx context.Context, report store.StepReport) error {
@@ -271,6 +354,9 @@ func TestNodeExecutorStepWriteRefusalJoinsParallelBodies(t *testing.T) {
 				}
 				select {
 				case <-entered:
+					if report.State == "skipped" && sink == "window" {
+						return refused
+					}
 					return nil
 				case <-ctx.Done():
 					return context.Cause(ctx)
@@ -295,6 +381,9 @@ func TestNodeExecutorStepWriteRefusalJoinsParallelBodies(t *testing.T) {
 					}
 					if r.Step == "cleanup" {
 						t.Error("persistence failure started further author code")
+					}
+					if r.Step == "refuse" && sink == "window" {
+						t.Error("excluded step body ran")
 					}
 					if r.Step == "slow" {
 						close(entered)

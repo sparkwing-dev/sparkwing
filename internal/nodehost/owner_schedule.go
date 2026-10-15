@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -21,6 +22,14 @@ type ownerExecution struct {
 }
 
 func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted AcceptedRun, entry *source.Entry) (RunCompletion, error) {
+	var spec runspec.Spec
+	if err := json.Unmarshal(accepted.Spec, &spec); err != nil {
+		return RunCompletion{}, err
+	}
+	skips, err := selectionSkips(accepted.Plan, spec.Resolved.Settings.Options)
+	if err != nil {
+		return RunCompletion{}, err
+	}
 	ctx, cancel := context.WithCancelCause(parent)
 	var workers sync.WaitGroup
 	defer func() { cancel(context.Canceled); workers.Wait() }()
@@ -65,6 +74,20 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 		}
 		if snapshot.Run.ID != input.RunID {
 			return RunCompletion{}, errors.New("scheduling changed the run identity")
+		}
+		selected := false
+		for _, row := range snapshot.Nodes {
+			reason, excluded := skips[row.Ref.NodeID]
+			if !excluded || row.Status != store.StatusPending || row.ClaimedBy != "" || row.ReadyAt != nil || snapshot.Run.CancelRequestedAt != nil {
+				continue
+			}
+			if _, err := h.Store.TransitionNode(ctx, store.NodeTransition{Ref: row.Ref, Actor: input.Owner, To: store.NodeSkipped, Cause: store.CauseDependency, Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeSkipped, Reason: reason}}}); err != nil {
+				return RunCompletion{}, err
+			}
+			selected = true
+		}
+		if selected {
+			continue
 		}
 		for _, row := range snapshot.Nodes {
 			if row.Status != store.StatusDone || active[row.Ref.NodeID] {

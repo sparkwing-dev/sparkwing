@@ -11,15 +11,10 @@ import (
 	"slices"
 	"strings"
 
-	flag "github.com/spf13/pflag"
-
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
-	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
-	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
@@ -102,7 +97,7 @@ func dispatchRun(args []string) error {
 	return dispatchRunWithEngine(args, switchToolchain)
 }
 
-func dispatchRunWithEngine(args []string, selectEngine func(string) error) error {
+func dispatchRunWithEngine(args []string, selectEngine func(string, func()) error) error {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		if len(args) == 0 {
 			PrintHelp(cmdRun, os.Stderr)
@@ -121,151 +116,33 @@ func dispatchRunWithEngine(args []string, selectEngine func(string) error) error
 	if flags.parseErr != nil {
 		return flags.parseErr
 	}
-	for _, option := range []struct{ name, value string }{
-		{"publish", flags.publish}, {"sw-cache-from", flags.cacheFrom}, {"target", flags.target},
-	} {
-		if option.value != "" {
-			return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "run: --" + option.name + " is unavailable in this build"}
-		}
-	}
-	var err error
-
-	if flags.profile != "" {
-		return fmt.Errorf("run: --profile is removed; sparkwing run executes on this machine against its own store, so run on the profile's controller with sparkwing pipeline trigger %s --profile %s",
-			pipelineName, flags.profile)
-	}
-	if flags.unknownRunnerFlag != "" {
-		return fmt.Errorf("run: unknown runner flag %q; see `sparkwing run --help`, or put pipeline arguments after --", flags.unknownRunnerFlag)
-	}
-	priority := ""
-	if flags.prioritySet {
-		priority, err = validatePriorityFlag(flags.priority)
-		if err != nil {
+	helpRequested := slices.Contains(passthrough, "-h") || slices.Contains(passthrough, "--help")
+	if !helpRequested {
+		if err := validateLocalRunFlags(flags); err != nil {
 			return err
 		}
 	}
-	if flags.detached {
-		return runDetached(context.Background(), pipelineName, flags, passthrough)
-	}
-	if err := refuseDetachedOnlyFlags(flags); err != nil {
-		return err
-	}
-
 	dir, err := findSparkwingDir()
 	if err != nil {
 		return err
 	}
-	helpRequested := slices.Contains(passthrough, "-h") || slices.Contains(passthrough, "--help")
-	if !helpRequested {
-		entry, err := pinnedPipelineAt(dir, flags.ref, pipelineName)
-		if err != nil {
-			return fmt.Errorf("run: %w", err)
-		}
-		if err := orchestrator.RefusePinnedLocalRun(entry); err != nil {
-			return fmt.Errorf("run: %w", err)
-		}
+	if helpRequested {
+		return runSelectedHelp(dir, pipelineName, flags, selectEngine)
+	}
+	entry, err := pinnedPipelineAt(dir, flags.ref, pipelineName)
+	if err != nil {
+		return fmt.Errorf("run: %w", err)
+	}
+	if err := orchestrator.RefusePinnedLocalRun(entry); err != nil {
+		return fmt.Errorf("run: %w", err)
 	}
 
 	// safety: the exec replays this command, so the pin must settle before any daemon, worktree, run, or output.
-	if err := selectEngine(dir); err != nil {
+	if err := selectEngine(dir, nil); err != nil {
 		return err
 	}
 
-	// safety: errors dropped intentionally; read-only home shouldn't break dispatch.
-	_ = repos.AutoRegister(filepath.Dir(dir))
-
-	executionDir := dir
-	source, err := orchestrator.ResolvePipelineSource(context.Background(), filepath.Dir(dir), pipelineName, flags.pipelineRef)
-	if err != nil {
-		return err
-	}
-	if source != "" && flags.ref != "" {
-		return errors.New("a declared pipeline source cannot be combined with --sw-ref")
-	}
-	var afterChild func()
-	if flags.ref != "" {
-		_, pipelineDirectory, cleanup, err := setupRefWorktree(dir, flags.ref)
-		if err != nil {
-			return fmt.Errorf("--sw-ref %s: %w", flags.ref, err)
-		}
-		afterChild = cleanup
-		defer cleanup()
-		dir = pipelineDirectory
-	}
-
-	if source != "" {
-		_, selectedDir, cleanup, err := setupRefWorktree(dir, string(source))
-		if err != nil {
-			return err
-		}
-		afterChild = cleanup
-		defer cleanup()
-		dir = selectedDir
-	} else {
-		executionDir = ""
-	}
-
-	env := os.Environ()
-	logFormat := flags.outputFormat
-	if flags.index != "" {
-		bound, bindErr := bindRunIndex(env, flags.index, os.Stdout, logFormat)
-		if bindErr != nil {
-			return bindErr
-		}
-		env = bound
-	}
-	runHandle := ""
-	if flags.runHandleFile != "" {
-		path, pathErr := filepath.Abs(flags.runHandleFile)
-		if pathErr != nil {
-			return fmt.Errorf("--sw-run-handle-file %s: %w", flags.runHandleFile, pathErr)
-		}
-		runHandle = path
-	}
-	bincache.SetHashAllFiles(flags.hashAllFiles)
-	run := newPipelineRun(dir, compileOptions{
-		NoUpdate:     flags.noUpdate,
-		NoBincache:   flags.noBincache,
-		ExecutionDir: executionDir,
-		AfterChild:   afterChild,
-	})
-	defer run.stop()
-	run.ctx = gotoolchain.WithSession(run.ctx, env, nil)
-
-	run.sparkwingDir = dir
-	run.opts.ExecutionDir = executionDir
-	run.opts.AfterChild = afterChild
-	if err := run.materialize(env); err != nil {
-		return run.finish(err)
-	}
-	if helpRequested {
-		schema, err := run.describedPipeline(pipelineName)
-		if err == nil {
-			printPipelineHelp(os.Stdout, schema)
-		}
-		return run.finish(err)
-	}
-	schema, err := run.describedPipeline(pipelineName)
-	var pipelineArgs map[string]string
-	if err == nil {
-		pipelineArgs, err = parsePipelineArgs(schema, passthrough)
-	}
-	if err != nil {
-		return run.finish(fmt.Errorf("%s: %w", pipelineName, err))
-	}
-	findings := risksIn(schema)
-	if err := enforceRiskGate(pipelineName, findings, flags); err != nil {
-		return run.finish(err)
-	}
-
-	if !flags.dryRun {
-		ensureRunDaemonFn()
-	}
-	sweepStraySessionsBeforeRun()
-	return run.finish(run.host(hostedRun{
-		schema: schema, args: pipelineArgs, flags: flags, env: env, source: string(source),
-		priority: priority, logFormat: logFormat, runHandle: runHandle,
-	}))
+	return runLocalInvocation(pipelineName, flags, passthrough)
 }
 
 func pinnedPipeline(sparkwingDir, pipelineName string) (*pipelines.Pipeline, error) {
@@ -446,7 +323,7 @@ func dispatchCommand(args []string) error {
 	case "wingd":
 		return runWingd(args[1:])
 	case "__tick":
-		return runCronsTick(args[1:])
+		return runScheduleTick(args[1:])
 	case "__sdk-install":
 		return runSDKInstall(args[1:])
 	case "__host-trigger":
@@ -521,21 +398,6 @@ func isTerminalRunStatus(s string) bool {
 	return s == "success" || s == "failed" || s == "cancelled"
 }
 
-func runIDFromArgs(path string, rest []string, flagValue string) (string, error) {
-	switch {
-	case len(rest) == 0 && flagValue == "":
-		return "", fmt.Errorf("%s: a run id is required, as --run RUN_ID or as a positional", path)
-	case len(rest) == 0:
-		return flagValue, nil
-	case len(rest) > 1:
-		return "", fmt.Errorf("%s: unexpected positional %q", path, rest[1])
-	case flagValue != "":
-		return "", fmt.Errorf("%s: run id given twice; pass it as --run or as a positional", path)
-	default:
-		return rest[0], nil
-	}
-}
-
 func normalizeRunID(id string) string {
 	if id == "" || strings.HasPrefix(id, "run-") {
 		return id
@@ -548,12 +410,6 @@ func statusExitCode(status string) error {
 		return nil
 	}
 	return exitErrorf(1, "run status: %s", status)
-}
-
-func multiFlagVar(fs *flag.FlagSet, name, usage string) *[]string {
-	var dest []string
-	fs.StringSliceVar(&dest, name, nil, usage)
-	return &dest
 }
 
 func findSparkwingDir() (string, error) {
@@ -590,9 +446,4 @@ func findSparkwingDirFrom(start string) (string, error) {
 		}
 		dir = parent
 	}
-}
-
-func mustGetwd() string {
-	d, _ := os.Getwd()
-	return d
 }

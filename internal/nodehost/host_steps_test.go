@@ -42,8 +42,12 @@ func TestNativeExecutorSteps(t *testing.T) {
 		hello, plan = planNativeSDKFixture(t, ctx, bin, "steps", args, nodeproto.RunContext{RunID: "run", Pipeline: "steps", DryRun: dry}, runner)
 		plans[dry] = plan
 	}
-	for _, id := range []string{"order", "parallel", "failfast", "finally-chain", "collect", "continue", "optional", "skips", "skippanic", "panics", "dry"} {
+	for _, id := range []string{"order", "parallel", "failfast", "finally-chain", "collect", "continue", "optional", "skips", "window", "skippanic", "panics", "dry"} {
 		t.Run(id, func(t *testing.T) {
+			jobID := id
+			if id == "window" {
+				jobID = "skips"
+			}
 			var trace []string
 			var fakes []*scriptedSDK
 			var deps ExecutorDependencies
@@ -58,14 +62,14 @@ func TestNativeExecutorSteps(t *testing.T) {
 			plan := plans[id == "dry"]
 			var job nodeproto.JobSpec
 			for _, declared := range plan.Jobs {
-				if declared.ID == id {
+				if declared.ID == jobID {
 					job = declared
 				}
 			}
 			if job.ID == "" {
 				t.Fatal("fixture job is absent")
 			}
-			input.NodeID, input.RouteBinding.JobID, row.Ref.NodeID = id, id, id
+			input.NodeID, input.RouteBinding.JobID, row.Ref.NodeID = jobID, jobID, jobID
 			input.Engine.Identity.Pin.Version = hello.SDK.Version
 			input.Entry = &source.Entry{Engine: input.Engine}
 			input.GrantedRunner = runner
@@ -86,7 +90,11 @@ func TestNativeExecutorSteps(t *testing.T) {
 				t.Fatal(err)
 			}
 			spec.Request.Request.Pipeline, spec.Resolved.Entrypoint = "steps", "steps"
-			spec.Resolved.Settings.Jobs = map[string]runspec.JobExecutionSettings{id: input.Execution}
+			spec.Resolved.Settings.Jobs = map[string]runspec.JobExecutionSettings{jobID: input.Execution}
+			if id == "window" {
+				spec.Resolved.Settings.Options.StartAt = runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "b"}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag}}
+				spec.Request.Request.Options.StartAt = spec.Resolved.Settings.Options.StartAt
+			}
 			if id == "dry" {
 				spec.Resolved.Args = map[string]string{"set": "dry"}
 				spec.Resolved.Settings.Options.DryRun.Value = true
@@ -125,7 +133,7 @@ func TestNativeExecutorSteps(t *testing.T) {
 			var messages []string
 			var diagnostics []nodeproto.FrameLog
 			deps.Log = func(_ context.Context, in NodeInput, frame nodeproto.FrameLog) error {
-				if in.NodeID != id || in.Attempt != input.Attempt+1 || in.Generation != input.Generation {
+				if in.NodeID != jobID || in.Attempt != input.Attempt+1 || in.Generation != input.Generation {
 					t.Fatal("native diagnostic lost its attempt attribution")
 				}
 				diagnostics = append(diagnostics, frame)
@@ -178,6 +186,13 @@ func TestNativeExecutorSteps(t *testing.T) {
 			if child == nil || !child.closed || !child.cleaned || !revoked {
 				t.Fatal("SDK process was not joined")
 			}
+			if id == "window" {
+				for _, request := range child.requests {
+					if request.Op == nodeproto.OpEval || request.Op == nodeproto.OpRunStep && request.Step == "a" {
+						t.Fatal("excluded step invoked a predicate or body")
+					}
+				}
+			}
 			states := map[string]string{}
 			for _, report := range records.steps {
 				states[report.StepID] = report.State
@@ -191,6 +206,7 @@ func TestNativeExecutorSteps(t *testing.T) {
 				"continue":      {"reject": "failed", "dependent": "passed"},
 				"optional":      {"best-effort": "failed", "real-work": "passed"},
 				"skips":         {"a": "skipped", "b": "passed"},
+				"window":        {"a": "skipped", "b": "passed"},
 				"skippanic":     {"guarded": "failed"}, "panics": {"oops": "failed"},
 				"dry": {"with-dry": "passed", "safe": "passed", "plain": "skipped"},
 			}
@@ -247,11 +263,11 @@ func TestNativeExecutorSteps(t *testing.T) {
 			present := map[string][]string{
 				"order": {"b saw from-a after 2 checks"}, "failfast": {"slow saw its cancel", "cleanup saw env-7"},
 				"finally-chain": {"cleanup ran"}, "collect": {"independent finished"}, "continue": {"dependent ran"},
-				"optional": {"real work ran"}, "skips": {"ran b"}, "dry": {"dry body", "safe ran"},
+				"optional": {"real work ran"}, "skips": {"ran b"}, "window": {"ran b"}, "dry": {"dry body", "safe ran"},
 			}
 			absent := map[string][]string{
 				"failfast": {"pending ran"}, "finally-chain": {"pending ran"}, "collect": {"dependent ran"},
-				"skips": {"ran a"}, "skippanic": {"guarded ran"}, "dry": {"real body", "plain ran"},
+				"skips": {"ran a"}, "window": {"ran a"}, "skippanic": {"guarded ran"}, "dry": {"real body", "plain ran"},
 			}
 			text := strings.Join(messages, "\n")
 			for _, message := range present[id] {

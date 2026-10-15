@@ -26,20 +26,10 @@ func TestOnlyRunsTheMatchedNodesAndWhatTheyNeed(t *testing.T) {
 		{ID: "notify", OnFailureOf: "build-linux", Steps: []nodeproto.StepSpec{{ID: "body"}}},
 	}}
 
-	f := newStoreHostFixture(t, doc)
+	f := newStoreHostFixtureOn(t, openStore(t), doc, runspec.Options{Only: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "build-l*"}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag}}})
 	skips, err := onlySkips(doc, "build-l*", "", "")
 	if err != nil {
 		t.Fatal(err)
-	}
-	for id, reason := range skips {
-		_, err := f.State.TransitionNode(ctx, store.NodeTransition{
-			Ref: store.NodeRef{RunID: f.Accepted.RunID, NodeID: id}, Actor: f.Actor,
-			To: store.NodeSkipped, Cause: store.CauseDependency,
-			Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeSkipped, Reason: reason}},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
 	}
 	executed := make(chan string, len(doc.Jobs))
 	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
@@ -106,6 +96,44 @@ func TestOnlyRefusesWhatTheDispatcherRefused(t *testing.T) {
 		if _, err := onlySkips(doc, tc.only, tc.start, ""); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("only=%q start=%q: err=%v, want %q", tc.only, tc.start, err, tc.want)
 		}
+	}
+}
+
+func TestOwnerRefusesUnknownStepWindowBeforeDispatch(t *testing.T) {
+	for _, resumed := range []bool{false, true} {
+		t.Run(strconv.FormatBool(resumed), func(t *testing.T) {
+			state, host, input := newOwnerFixture(t, resumed)
+			options := runspec.Options{StartAt: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "missing"}, Origin: runspec.SettingOrigin{Layer: runspec.LayerFlag}}}
+			state.snapshot.Run.Request.Request.Options = options
+			var err error
+			input.SealedRequest, err = json.Marshal(state.snapshot.Run.Request.Request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resumed {
+				state.snapshot.Run.Spec.Request = state.snapshot.Run.Request
+				state.snapshot.Run.Spec.Resolved.Settings.Options = options
+				accepted, err := ownerAccepted(state.snapshot.Run)
+				if err != nil {
+					t.Fatal(err)
+				}
+				input.Accepted = &accepted
+			}
+			completion, err := host.Run(t.Context(), input)
+			if err == nil || !strings.Contains(err.Error(), "unknown step") || completion.Outcome != "" {
+				t.Fatalf("completion=%+v error=%v", completion, err)
+			}
+			if state.accepted.RunID != "" || slices.Contains(state.trace, "start") {
+				t.Fatal("invalid window accepted a plan or started work")
+			}
+			if resumed {
+				if slices.Contains(state.trace, "acquire") || state.finished.Unit.RunID != "" {
+					t.Fatal("invalid resumed window acquired source or finished its accepted topology")
+				}
+			} else if state.finished.Transition.To != store.RunFailed {
+				t.Fatal("invalid initial window left its owner unfinished")
+			}
+		})
 	}
 }
 

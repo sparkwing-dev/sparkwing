@@ -238,9 +238,18 @@ func (input ScheduleOverride) Validate() error {
 	return nil
 }
 
-// ScheduleRepoRequest proposes one repository's complete schedule declaration.
-// Repository authority and the credential's team come from the server.
+// ScheduleWriteMode separates complete reconciliation from selected declaration updates.
+type ScheduleWriteMode string
+
+// Schedule write modes preserve unselected declarations during upserts.
+const (
+	ScheduleReplace ScheduleWriteMode = "replace"
+	ScheduleUpsert  ScheduleWriteMode = "upsert"
+)
+
+// ScheduleRepoRequest proposes declarations within an explicit reconciliation scope.
 type ScheduleRepoRequest struct {
+	Mode      ScheduleWriteMode     `json:"mode"`
 	RepoURL   string                `json:"repo_url"`
 	Branch    string                `json:"branch,omitempty"`
 	SHA       string                `json:"sha,omitempty"`
@@ -271,9 +280,8 @@ type ScheduleRepoDeletion struct {
 	Removed int    `json:"removed"`
 }
 
-// ScheduleRepositoryManager replaces a complete declaration set in one request.
-// Selecting a subset in the CLI cannot grant repository access on a controller.
+// ScheduleRepositoryManager writes declarations atomically without withdrawing during upsert.
 type ScheduleRepositoryManager interface {
-	ReplaceSchedules(context.Context, ScheduleRepoRequest) (ScheduleRepoWritten, error)
+	WriteSchedules(context.Context, ScheduleRepoRequest) (ScheduleRepoWritten, error)
 	DeleteSchedulesForRepo(context.Context, string) (ScheduleRepoDeletion, error)
 }

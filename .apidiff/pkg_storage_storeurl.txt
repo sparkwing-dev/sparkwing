@@ -1,5 +1,3 @@
 # pkg/storage/storeurl
 
 func OpenMeasurementStore(ctx context.Context, raw string, maxPages int) (storage.UsageReporter, error)
-func OpenStateStoreFromSpec(ctx context.Context, spec backends.Spec, lookup ProfileLookup) (storage.StateStoreOld, error)
-type ProfileLookup func(name string) (controllerURL, token string, err error)

@@ -536,17 +536,18 @@ cannot start SDK code.
 The unfenced `RunNodeCommand` entry point and its environment-derived claim
 reader are removed. Runners and launcher bootstrap must supply the authenticated
 award and `ClaimStore`, source-access and executor adapters to `ClaimedNodeHost`.
-The older run-host caller still uses its dispatched-heartbeat helper until its
-own lifecycle cut. The old Job builders in `internal/runners/k8s` and
-`internal/runners/launcher` still emit `run-node` and need the authenticated
-bootstrap cut owned by the runner area.
+Session, Server, the legacy scheduler and layers, the pod host, the dispatched
+heartbeat helper and the local trigger consumer are removed. Claimed work uses
+`ClaimedNodeHost` and the common executor. Runner and launcher composition must
+provide authenticated awards and adapters through that boundary.
 
-The unused launcher execution function, its buffered attempt reporter and cache
-grant renewal loop are removed. `HostNode` and the claimed-mode pod branch are
-removed with them. The remaining legacy pod path executes dispatched work only.
-Its owner already applied skip, memo and admission. Claimed work uses
-`ClaimedNodeHost` and the common executor. Launcher bootstrap must provide its
-authenticated award and adapters through that boundary.
+The owner consumes sealed Only selections before releasing jobs, recording
+exclusions through store transitions without rewriting accepted topology.
+The executor consumes sealed StartAt and StopAt selections, records skipped
+steps and sends their settlement before invoking dependents. Initial planning
+refuses unknown step bounds before acceptance. Resume checks the persisted
+selection before acquiring source. See the [W3 merge and selection report](../w3-merge-step-window-progress.md)
+for the retained SQLite and native SDK evidence.
 
 `SDKPlanner.Prepare` runs describe with the acquired engine and granted runner
 identity. Describe and plan hello omit job bindings. All declared secret defaults,

@@ -1021,8 +1021,9 @@ type DoctorStraySession struct {
 	OwnerPID int    `json:"owner_pid"`
 	Command  string `json:"command"`
 	// Verdict is reaped, would-reap under --dry-run, or failed.
-	Verdict string `json:"verdict"`
-	Error   string `json:"error,omitempty"`
+	Verdict     string `json:"verdict"`
+	Error       string `json:"error,omitempty"`
+	RecordError string `json:"record_error,omitempty"`
 }
 
 // diagnoseStraySessions ends step sessions left behind by nodes that are
@@ -1041,18 +1042,14 @@ func diagnoseStraySessions(ctx context.Context, p paths.Paths, st *store.Store, 
 		if o.Err != nil {
 			entry.Error = o.Err.Error()
 		}
+		if !dryRun && st != nil {
+			if errs := sessionledger.RecordOutcomes(ctx, st, "doctor", []sessionledger.Outcome{o}); len(errs) > 0 {
+				entry.RecordError = errs[0].Error()
+			}
+		}
 		report.StrayStepSessions = append(report.StrayStepSessions, entry)
 	}
-	if err != nil {
-		return err
-	}
-	if dryRun || st == nil || !sessionledger.Acted(outcomes) {
-		return nil
-	}
-	if errs := sessionledger.RecordOutcomes(ctx, st, "doctor", outcomes); len(errs) > 0 {
-		return errs[0]
-	}
-	return nil
+	return err
 }
 
 // safety: a run directory with no row in this store is evidence the run is
@@ -1084,9 +1081,6 @@ func profilesKeepRunRowsLocal(p paths.Paths) bool {
 			if prof.State.Type != backends.TypeSQLite {
 				return false
 			}
-			// safety: profileStateSpec redirects a sqlite spec to this home
-			// only when its path is empty, so a spec naming another database
-			// records runs somewhere this doctor never reads.
 			if prof.State.Path != "" && filepath.Clean(prof.State.Path) != filepath.Clean(p.StateDB()) {
 				return false
 			}
@@ -1303,6 +1297,13 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 	}
 	fmt.Fprintf(w, "permission_audit_unverified\t%d\n", permissionUnverified)
 	fmt.Fprintf(w, "stray_step_sessions\t%d\n", len(r.StrayStepSessions))
+	unrecorded := 0
+	for _, session := range r.StrayStepSessions {
+		if session.RecordError != "" {
+			unrecorded++
+		}
+	}
+	fmt.Fprintf(w, "unrecorded_step_outcomes\t%d\n", unrecorded)
 	fmt.Fprintf(w, "dangling_run_dirs\t%d\n", len(r.DanglingRunDirs))
 	fmt.Fprintf(w, "unknown_run_dirs\t%d\n", len(r.UnknownRunDirs))
 	fmt.Fprintf(w, "stale_ref_worktrees\t%d\n", len(r.StaleRefWorktrees))
@@ -1412,6 +1413,9 @@ func renderDoctorPretty(w io.Writer, r DoctorReport) error {
 				line += " -- " + s.Error
 			}
 			fmt.Fprintf(tw, "%s\n", line)
+			if s.RecordError != "" {
+				fmt.Fprintf(tw, "  warning: could not record %s/%s cleanup outcome: %s\n", s.Run, s.Node, s.RecordError)
+			}
 		}
 	}
 	if n := len(r.DanglingRunDirs); n > 0 {

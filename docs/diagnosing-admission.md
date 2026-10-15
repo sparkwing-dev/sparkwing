@@ -146,5 +146,9 @@ The machine hook survey uses the final machine reader. Lifecycle tests with
 fakes cover the CLI composition. Native store-schema,
 service-skew and removed-timer checks still require the runtime implementation.
 Permission repair and process cleanup need controller-owned operations before
-they can be exposed again.
+they can be exposed again. The retained sweep implementation keeps successful
+cleanup results when an outcome-event write fails, including after run pruning.
+Its report carries a `record_error` warning beside that session. Plain reports
+count these as `unrecorded_step_outcomes`. A failed sweep still returns an error.
+This does not connect process cleanup to the lifecycle CLI.
 <!-- design:end -->

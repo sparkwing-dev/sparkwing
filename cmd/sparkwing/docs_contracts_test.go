@@ -19,6 +19,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
@@ -80,20 +81,40 @@ func TestDocsMentionEnvVarRequiresWholeIdentifierToken(t *testing.T) {
 }
 
 var userNamedEnvReads = map[string]string{
-	`internal/orchestrator/local_repo_resolver.go: "SPARKWING_REPO_" + envKeyForName(name)`: "one variable per repo, named after the repo",
-	"pkg/backends/backends.go: s.TokenEnv":                                                  "the backend config says which variable holds its token",
-	"sparkwing/inputs/memo_contract.go: name":                                               "a pipeline declares which variables its inputs read",
-	"internal/secretsource/secretsource.go: key":                                            "a secret source's configured prefix plus the secret's name",
+	"pkg/backends/backends.go: s.TokenEnv":       "the backend config says which variable holds its token",
+	"sparkwing/inputs/memo_contract.go: name":    "a pipeline declares which variables its inputs read",
+	"internal/secretsource/secretsource.go: key": "a secret source's configured prefix plus the secret's name",
 }
 
 // safety: a computed read hides the names it produces, so each one is listed
 // here and the page check covers them like any other read.
 var constructedEnvReads = map[string][]string{
-	"internal/executorinfo/platform.go: key":       {"WSL_INTEROP", "WSL_DISTRO_NAME"},
-	"internal/orchestrator/pod_node_host.go: name": {"GOPROXY", "npm_config_registry", "PIP_INDEX_URL", "PIP_TRUSTED_HOST"},
+	"internal/executorinfo/platform.go: key": {"WSL_INTEROP", "WSL_DISTRO_NAME"},
 }
 
 var envPageRow = regexp.MustCompile("(?m)^\\| `([A-Z][A-Z0-9_]*)` \\|")
+
+func TestDocsCoverAuthoritativeEnvironmentPolicy(t *testing.T) {
+	reference, err := docs.ReadRaw("environment-variables")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, variable := range procenv.Registry {
+		if !docsMentionEnvVar(reference, variable.Name) {
+			t.Errorf("environment reference omits policy variable %s", variable.Name)
+		}
+	}
+}
+
+func TestMigrationGuidanceUsesSealedRunIntake(t *testing.T) {
+	raw, err := docs.ReadRaw("migrations/_unreleased")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(raw, "EnqueueTriggerWithEnv") || !strings.Contains(raw, "CreateRunRequest") {
+		t.Fatal("migration guidance must use CreateRunRequest rather than the removed enqueue API")
+	}
+}
 
 func TestDocsNameEveryEnvironmentVariableTheCodeReads(t *testing.T) {
 	if testing.Short() {
@@ -122,6 +143,9 @@ func TestDocsNameEveryEnvironmentVariableTheCodeReads(t *testing.T) {
 		if !slices.Contains(dynamic, site) {
 			t.Errorf("constructedEnvReads lists %q, which the walk no longer finds; drop it", site)
 		}
+	}
+	for _, variable := range procenv.Registry {
+		names = append(names, variable.Name)
 	}
 	slices.Sort(names)
 	names = slices.Compact(names)

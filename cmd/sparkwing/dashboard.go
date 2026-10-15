@@ -32,10 +32,6 @@ func runDashboard(args []string) error {
 	return runDashboardCommand(ctx, args, os.Stdout, runtime.GOOS, resolveLocalServices)
 }
 
-func resolveLocalServices(context.Context) (dashboardServices, error) {
-	return dashboardServices{}, &apierr.Error{Code: apierr.Unavailable, Message: "local controller integration is unavailable in this build", Hint: "local runtime, managed units and log source are required"}
-}
-
 func dashboardUnavailable(dependency string) error {
 	return &apierr.Error{Code: apierr.Unavailable, Message: "dashboard requires " + dependency, Hint: "the local controller integration is unavailable in this build"}
 }

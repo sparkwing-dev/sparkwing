@@ -75,3 +75,9 @@ func TestValidatePriorityFlag(t *testing.T) {
 		}
 	}
 }
+
+func TestRunDetachedAcceptsSealedNumericPriority(t *testing.T) {
+	if err := validateLocalRunFlags(runFlags{detached: true, priority: "42", prioritySet: true}); err != nil {
+		t.Fatalf("numeric priority: %v", err)
+	}
+}

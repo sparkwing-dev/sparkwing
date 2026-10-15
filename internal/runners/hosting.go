@@ -55,17 +55,8 @@ func (h Hosting) Host(ctx context.Context, unit controllerwire.ClaimedUnit) (res
 	if strings.TrimSpace(h.ControllerURL) == "" || (unit.Unit == capability.UnitTrigger && h.PrepareRun == nil) || (unit.Unit == capability.UnitNode && h.PrepareNode == nil) {
 		return errors.New("runner host requires a controller URL and host preparation")
 	}
-	deadline := unit.Binding.Deadline
-	for _, bound := range []*time.Time{unit.OwnerDeadline, unit.ParentCapabilityExpiry} {
-		if bound != nil && (deadline == nil || bound.Before(*deadline)) {
-			deadline = bound
-		}
-	}
-	if deadline != nil {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithDeadline(ctx, *deadline)
-		defer cancel()
-	}
+	ctx, cancel := unit.HostContext(ctx)
+	defer cancel()
 	if err := context.Cause(ctx); err != nil {
 		return err
 	}

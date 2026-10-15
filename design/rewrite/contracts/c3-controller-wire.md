@@ -4,6 +4,43 @@
 
 ## Amendment 1: private execution and claim wire
 
+The CLI host-state adapter implements `nodehost.NativeHostStore` using the
+declared C3 plan, step, completion, reconciliation, expansion and renewal
+operations. Renewal reads current compute activity on each call. Actor authority
+and owner fences never enter these HTTP bodies. The accepted-plan response does
+not supply owner authority, so the adapter leaves that optional field absent.
+Private `ReadSnapshot`, `ReadNode`, `TransitionRun` and `TransitionNode` remain
+separate C1-shaped dependencies. The scheduling snapshot cannot replace them.
+Their authenticated remote transport and the elected local factory still need
+W2/W3 integration. Fake dependencies establish only the adapter boundary.
+
+The selected-engine CLI describe handoff reads the acquired SDK's protocol
+response for the configured entrypoint. The invoked alias, required pipeline/job
+argument metadata, risks and secret classifications survive that handoff.
+Source or protocol failure returns no successful description. Catalog caches
+cannot supply this selected-engine describe handoff.
+
+Local, standalone and here hosting share one session lifecycle. The award supplies
+the run-host kind and trigger owner fence. The trigger fence retains the run ID,
+holder and generation with an empty name, matching C1's persisted projection.
+Binding supplies the resolved authority reference, capability prefix, storage,
+engine resolver and plan cache. It cannot replace the owner fence, request,
+acceptance or granted runner. Cancellation preserves its cause through cleanup.
+
+Owner adapters serialize `runspec.Request` into `RunInput.SealedRequest`, as
+required by C3's host boundary. `RequestHash` remains the enclosing request seal's
+canonical hash. `RunInput.RunID` and `AcceptedRun.RunID` identify the awarded
+execution, including a retry whose original request/spec retain their source
+run ID. Local and here handoff share the award projection and reject invalid
+seals or mismatched claim bindings before native binding. Initial intake receipt
+validation separately requires the new seal's run ID to match its receipt.
+
+`ClaimedUnit.HostContext` bounds source/host binding and execution by the earliest
+caller, binding, owner or parent-capability deadline. Local, here and runner
+hosting share it. An already expired award stops before binding. Lease expiry
+still belongs to renewal and the store clock. Host binding receives a separate
+copy of the granted runner labels.
+
 `JobResult.Failure` carries the complete persisted `nodeproto.JobFailure` as
 `{job, stage, error}`. It replaces the error-only `JobResult.Error` field.
 The adapter passes the failure to `NodeResult.Failure` and derives the masked
@@ -108,9 +145,10 @@ W6 must implement `procenv.Build(procenv.Git, ...)`, which rejects the kind in t
 checkout. Native numeric-ID lookup, W3 source acquisition, W8 engine resolution,
 private environment retention and authorized working-tree bundle upload remain
 bindings. Native selected-engine process-tree cancellation remains unverified.
-The public command still uses its preceding preparation
-and intake path. Its cutover also requires a contract for persisting the required
-here reason. Neither `CreateRunRequest` nor C1 `IntakeRequest` carries
+The public command now uses this prepared request and sealed intake path.
+GitHub numeric-ID lookup, private source access and captured environment delivery
+still need native bindings. Initial here intake requires a contract for persisting
+the required reason and refuses before submission until that contract exists. Neither `CreateRunRequest` nor C1 `IntakeRequest` carries
 that reason. It must survive intake and replay before the CLI can replace the old
 path without dropping it. No foreign contract is changed by this component.
 
@@ -527,22 +565,45 @@ Only `member` metadata permits automatic connection-token revocation. Principal
 spelling never supplies credential kind. A lookup/revocation failure retains the
 saved connection. Machine credentials require explicit `--keep-token`.
 
-Runner enrollment uses `TokenManager.CreateToken` with kind `runner`, a display
-principal, the exact runner grants and a stable idempotency key. Removal uses
+`client.NewRunnerTokenManager` binds `EnrollRunner`, metadata reads and revocation
+to one authenticated HTTP/api.sock transport. Enrollment posts `EnrollRunnerRequest`
+to W2's existing `/api/v1/runners` route once, without a replay key or a retry.
+The request carries the name, repository patterns, optional reserved pools,
+narrowed grants and absolute expiry. The server derives authority and registration.
+Missing bearer, prefix, team or grants fails without returning partial issuance.
+Deployment token managers refuse enrollment before transport. Removal uses
 `ReadToken` and confirmed `RevokeToken`. Only explicit runner metadata permits
 removal. A principal prefix never supplies kind. The CLI checks the enrolled
 controller and optional name before touching its service. JSON receipts contain
 metadata and service results, never the bearer. Failure after issuance names the
-live prefix and final revoke command on stderr. The previous legacy Client token
-creation, lookup and revocation APIs and their untyped models are deleted.
+live prefix and final revoke command on stderr. The CLI's legacy Client wrapper
+and Client.EnrollRunner/CreateServiceToken methods are deleted.
 
-W6/W8 must still compose the final runner machine schema, private credentials
-directory and supervised start/refresh. The CLI retains its older file/service
-plumbing until that integration. `--reserved-for` additionally needs W2's
-team-admin registration/provisioning request contract. `TokenCreate` has no pool
-request field. The CLI refuses that proposal as `policy_missing` before issuance
-rather than minting an unreserved root. This is an unfinished contract seam,
-not a feature cut or a new provisioning rule. No C2 contract changed here.
+The CLI forwards repeated and comma-separated `--reserved-for` values through
+that registration request. They are proposals, never self-granted pools or local
+configuration authority. The existing private-file configuration and rollback
+path remains. Supervised runner start/refresh and native controller/store
+provisioning still need integration evidence. No C2 contract changed here.
+
+### Legacy client retirement
+
+The legacy raw/SSE log adapter, live-log reads and event listing are removed.
+Their callers use the final tagged `LogReader` pages and cursor polling.
+`Client.ListNodeSteps`, `ListDebugPauses` and `ListPendingApprovals` are removed
+with the unused declarations and local wrappers in `StateStoreOld`. Typed
+`RunReader`, `DebugReader` and `RunReview` own those public observations.
+The unused heartbeat watch observer and global host bridge are removed.
+Segment-upload watch callbacks remain with their writer. The unused
+log-capability probe and bearer getter are removed.
+
+`Client.CreateToken`, `ListTokens`, `LookupToken`, `RevokeToken`, `RotateToken`
+and `ListSecrets` are removed. Credential and secret management use the typed
+managers above. Their issuance and metadata messages remain shared with the
+controller. `Client.EnqueueTrigger` and its environment variant are removed. All intake
+uses sealed `CreateRunRequest` through `Controller.CreateRun`, retaining the
+captured environment digest and resolved options. The final engine constructors live
+in `engine_client.go`, and the data constructor lives beside its implementation
+in `data.go`.
 
 ### Schedule management
 
@@ -573,7 +634,8 @@ replay. `DeleteSchedule` deletes `/{schedule}` and returns canonical
 
 `ScheduleRepositoryManager` puts `/schedules/repos` using `ScheduleRepoRequest`:
 repository URL, branch, original SHA or follow policy, and the complete array of
-`ScheduleDeclaration` entries. `ScheduleRepoWritten` retains rows and withdrawn
+`ScheduleDeclaration` entries for the selected `replace` or `upsert` mode.
+`ScheduleRepoWritten` retains rows and withdrawn
 display names. Delete uses `repo_url` and returns the same URL and nonnegative
 removed count. These are proposals. C2 derives team/repository authority.
 
@@ -702,4 +764,32 @@ capture. W9's legacy env/attach readers and claim-prefix pod guessing are delete
 Debug resume still needs W2's declared release route, authority and replay body.
 Native controller, Kubernetes, Windows and Darwin integration remains open.
 
+The legacy `Client`, `New` and `NewWithToken` and their raw trigger, claim,
+state, secret, output, concurrency and log transports are removed. All production
+callers already use the shared clients. The retained retry helpers now belong
+only to the shared transport. The old local socket and direct-store secret
+sources and the legacy orchestrator host/consumer/backend graph are also removed.
+W3's retained scheduler still uses `StateStoreOld`.
+
+The controller's step handler does not yet consume `StepReportRequest` or return
+`StepRecorded`. It accepts the former body and returns an empty 204. A W9 overlay
+component passing the contracted report through the real EngineController with
+fake authentication and persistence fails with `invalid engine request` before a
+write. W2 must implement the existing declared contract. No old-body fallback is
+provided. Private execution snapshots, the elected controller factory and native
+host/data/log composition remain integration points.
+
 <!-- design:end -->
+
+### Schedule reconciliation scope
+
+`ScheduleRepoRequest.mode` is required: `replace` reconciles the complete
+repository declaration set, and `upsert` changes only the supplied declarations.
+`ScheduleRepositoryManager.WriteSchedules` uses the existing PUT repository route
+for both modes. Upsert cannot withdraw a schedule or change another schedule's
+source pin, overrides or pause state. An empty upsert is a no-op.
+The CLI selects upsert when `--schedule` is present and skips the write when all
+selected declarations run elsewhere. Local registration carries the same mode.
+The client rejects missing or unknown modes and a withdrawal in an upsert receipt.
+W2/W1 must apply the mode atomically; neither route authorization nor repository
+authority changes. Native repository handlers remain an integration dependency.

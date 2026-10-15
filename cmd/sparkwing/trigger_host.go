@@ -3,102 +3,51 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
+	"os"
 	"os/signal"
-
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-
-	flag "github.com/spf13/pflag"
+	"path/filepath"
+	"strings"
+	"syscall"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/limits"
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/runners"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 )
 
 func runTriggerHost(args []string) error {
-	fs := flag.NewFlagSet("__host-trigger", flag.ContinueOnError)
-	runID := fs.String("run", "", "the admitted run to claim and host")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if *runID == "" || fs.NArg() != 0 {
-		return errors.New("usage: sparkwing " + "__host-trigger" + " --run <run-id>")
-	}
-	ctx, stop := signal.NotifyContext(context.Background(), terminationSignals()...)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	options, closeTransport, err := controllerOptions(ctx, "")
+	return runLocalHostCommand(ctx, args, os.Stdout, localRunDependencies{resolve: resolveLocalRunRuntime, version: installedVersion()})
+}
+
+func runLocalHostCommand(ctx context.Context, args []string, out io.Writer, deps localRunDependencies) (resultErr error) {
+	inv, err := clisurface.Parse("sparkwing", append([]string{"__host-trigger"}, args...))
 	if err != nil {
 		return err
 	}
-	defer closeTransport()
-	return hostLocalTrigger(ctx, options, *runID, resolveHostRuntime)
-}
-
-func hostLocalTrigger(ctx context.Context, options client.EngineOptions, runID string, resolve func(context.Context, client.EngineOptions) (runHostRuntime, error)) error {
-	runtime, err := resolve(ctx, options)
+	if inv.Help() {
+		return writeCommandHelp(surfaceHelp(inv.Command), out, inv.Output(false))
+	}
+	options := localRunOptions{standaloneReason: strings.TrimSpace(inv.Value("standalone-reason")), stateDB: inv.Value("state-db"), environmentFile: inv.Value("env-file")}
+	if len(inv.Args) != 0 || inv.Value("run") == "" || options.standaloneReason == "" || !filepath.IsAbs(options.stateDB) || (options.environmentFile != "" && !filepath.IsAbs(options.environmentFile)) {
+		return &clisurface.UsageError{Path: inv.Command.Path, Message: "--run RUN, --standalone-reason REASON and absolute --state-db PATH are required; --env-file must be absolute when present"}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	runtime, err := deps.resolve(ctx, options)
 	if err != nil {
 		return err
 	}
-	if runtime.controller == nil || runtime.bind == nil {
-		return &apierr.Error{Code: apierr.PolicyMissing, Message: "local trigger requires a shared host binding"}
+	if runtime.close != nil {
+		defer func() { resultErr = errors.Join(resultErr, runtime.close()) }()
 	}
-	award, err := runtime.controller.Claim(ctx, controllerwire.ClaimRequest{RunID: runID, Kinds: []capability.UnitKind{capability.UnitTrigger}, RunnerVersion: installedVersion()})
+	if runtime.controller == nil || runtime.bind == nil || runtime.close == nil {
+		return &apierr.Error{Code: apierr.Unavailable, Message: "standalone run integration has incomplete controller or host bindings"}
+	}
+	completion, err := hostLocalRun(ctx, runtime, inv.Value("run"), "", deps.version)
 	if err != nil {
 		return err
 	}
-	if award.Claim != nil && award.Claim.RunID != runID {
-		return &apierr.Error{Code: apierr.ProtocolError, Message: "named local claim returned another run"}
-	}
-	if award.Claim == nil {
-		return &apierr.Error{Code: apierr.LockHeld, Message: "local trigger has no available owner claim"}
-	}
-	_, err = hostLocalAward(ctx, options, *award.Claim, runtime)
-	return err
-}
-
-func hostLocalAward(ctx context.Context, options client.EngineOptions, award controllerwire.ClaimedUnit, runtime runHostRuntime) (completion nodehost.RunCompletion, err error) {
-	masks := secrets.NewMasker()
-	masks.Register(award.Capability)
-	for _, value := range award.Request.Request.RequestedArgs {
-		masks.Register(value)
-	}
-	if award.Accepted != nil {
-		for _, value := range award.Accepted.Spec.Resolved.Args {
-			masks.Register(value)
-		}
-	}
-	defer func() {
-		if err != nil {
-			err = &maskedCLIError{err: err, masker: masks}
-		}
-	}()
-	hosting := runners.Hosting{
-		ControllerURL: options.URL, HTTP: options.HTTP, Lease: limits.DefaultLease, Interval: limits.Renew(limits.DefaultLease),
-		NewController: client.NewEngineClient,
-		PrepareRun: func(ctx context.Context, award controllerwire.ClaimedUnit, _ controllerwire.Controller) (nodehost.RunHost, nodehost.RunInput, func() error, error) {
-			scoped := options
-			scoped.Bearer = func(context.Context) (string, error) { return award.Capability, nil }
-			session, err := runtime.bind(ctx, scoped, award)
-			if session.host == nil || session.close == nil {
-				err = errors.Join(err, &apierr.Error{Code: apierr.PolicyMissing, Message: "local hosting requires a shared host and cleanup"})
-			}
-			return completingRunHost{host: session.host, completion: &completion}, session.input, session.close, err
-		},
-	}
-	err = hosting.Host(ctx, award)
-	return completion, err
-}
-
-type completingRunHost struct {
-	host       nodehost.RunHost
-	completion *nodehost.RunCompletion
-}
-
-func (h completingRunHost) Run(ctx context.Context, input nodehost.RunInput) (completion nodehost.RunCompletion, err error) {
-	completion, err = h.host.Run(ctx, input)
-	*h.completion = completion
-	return completion, err
+	return statusExitCode(completion.Outcome)
 }

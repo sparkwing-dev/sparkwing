@@ -19,17 +19,17 @@ import (
 
 type hereDependencies struct {
 	credentials func() (hereCredentials, error)
-	resolve     func(context.Context, client.EngineOptions) (runHostRuntime, error)
+	resolve     func(context.Context, client.EngineOptions) (hereRuntime, error)
 	version     string
 	attach      func(context.Context, client.EngineOptions, string, func(context.Context) (nodehost.RunCompletion, error)) (nodehost.RunCompletion, error)
 }
 
-type runHostRuntime struct {
+type hereRuntime struct {
 	controller controllerwire.Controller
-	bind       func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (runHostSession, error)
+	bind       func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (hereHostSession, error)
 }
 
-type runHostSession struct {
+type hereHostSession struct {
 	host  nodehost.RunHost
 	input nodehost.RunInput
 	close func() error
@@ -37,15 +37,15 @@ type runHostSession struct {
 
 func defaultHereDependencies(output string) hereDependencies {
 	return hereDependencies{
-		credentials: localHereCredentials, version: installedVersion(), resolve: resolveHostRuntime,
+		credentials: localHereCredentials, version: installedVersion(), resolve: resolveHereRuntime,
 		attach: func(ctx context.Context, options client.EngineOptions, run string, host func(context.Context) (nodehost.RunCompletion, error)) (nodehost.RunCompletion, error) {
 			return attachHereRun(ctx, options, run, output, os.Stdout, host)
 		},
 	}
 }
 
-func resolveHostRuntime(context.Context, client.EngineOptions) (runHostRuntime, error) {
-	return runHostRuntime{}, &apierr.Error{Code: apierr.Unavailable, Message: "native run hosting is unavailable in this build", Hint: "the shared run host, source, storage and lease keeper require a native binding"}
+func resolveHereRuntime(context.Context, client.EngineOptions) (hereRuntime, error) {
+	return hereRuntime{}, &apierr.Error{Code: apierr.Unavailable, Message: "here run hosting is unavailable in this build", Hint: "the shared run host, source, storage and lease keeper require a native binding"}
 }
 
 func handoffHereRun(ctx context.Context, options client.EngineOptions, response controllerwire.CreateRunResponse, deps hereDependencies) error {
@@ -136,64 +136,27 @@ func resumeHereRun(ctx context.Context, options client.EngineOptions, run string
 }
 
 func runHereAward(ctx context.Context, options client.EngineOptions, run string, award controllerwire.ClaimedUnit,
-	bind func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (runHostSession, error),
-) (completion nodehost.RunCompletion, resultErr error) {
+	bind func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (hereHostSession, error),
+) (completion nodehost.RunCompletion, err error) {
 	input, err := hereRunInput(run, award)
 	if err != nil {
 		return completion, incompleteHereHandoff(run, err)
 	}
-	if err := ctx.Err(); err != nil {
-		return completion, incompleteHereHandoff(run, err)
-	}
-	options.Bearer = func(context.Context) (string, error) { return award.Capability, nil }
-	session, err := bind(ctx, options, award)
+	completion, err = runOwnerSession(ctx, award, input, func(ctx context.Context, award controllerwire.ClaimedUnit) (hereHostSession, error) {
+		options.Bearer = func(context.Context) (string, error) { return award.Capability, nil }
+		return bind(ctx, options, award)
+	})
 	if err != nil {
 		return completion, incompleteHereHandoff(run, err)
-	}
-	defer func() {
-		if session.close != nil {
-			if err := session.close(); err != nil {
-				resultErr = errors.Join(resultErr, incompleteHereHandoff(run, err))
-			}
-		}
-	}()
-	if session.host == nil || session.close == nil {
-		return completion, incompleteHereHandoff(run, &apierr.Error{Code: apierr.Unavailable, Message: "here runtime returned no host or cleanup binding"})
-	}
-	if err := ctx.Err(); err != nil {
-		return completion, incompleteHereHandoff(run, err)
-	}
-	session.input.RunID, session.input.SealedRequest, session.input.RequestHash, session.input.Accepted = input.RunID, input.SealedRequest, input.RequestHash, input.Accepted
-	session.input.Owner.Kind, session.input.Owner.Owner = input.Owner.Kind, input.Owner.Owner
-	session.input.GrantedRunner = input.GrantedRunner
-	completion, runErr := session.host.Run(ctx, session.input)
-	if err := errors.Join(runErr, ctx.Err()); err != nil {
-		return completion, incompleteHereHandoff(run, err)
-	}
-	if !isTerminalRunStatus(completion.Outcome) {
-		return completion, incompleteHereHandoff(run, &apierr.Error{Code: apierr.ProtocolError, Message: "here host returned no terminal outcome"})
 	}
 	return completion, nil
 }
 
 func hereRunInput(run string, award controllerwire.ClaimedUnit) (nodehost.RunInput, error) {
-	input := nodehost.RunInput{RunID: run, RequestHash: string(award.Request.Hash)}
-	if award.Unit != capability.UnitTrigger || award.Purpose != capability.PurposeHere || award.Delivery != capability.DeliveryDirect || award.RunID != run || award.UnitID == "" || award.JobID != "" || award.Capability == "" || award.Binding.Kind != capability.BindingTrigger || award.Binding.RunID != run || award.Binding.Holder == "" || award.Binding.Generation <= 0 || !award.Request.Request.Options.Runner.Set || award.Request.Request.Options.Runner.Value.Kind != runspec.RunnerHere {
-		return input, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned an invalid here owner award"}
+	if !award.Request.Request.Options.Runner.Set || award.Request.Request.Options.Runner.Value.Kind != runspec.RunnerHere {
+		return nodehost.RunInput{}, localRunProtocolError("controller returned a different here runner selection")
 	}
-	hash, err := runspec.CanonicalHash(award.Request)
-	if err != nil || award.Request.Version != 1 || award.Request.Request.Version != 1 || award.Request.RunID == "" || award.Request.Hash == "" || hash != award.Request.Hash {
-		return input, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned an invalid here request seal"}
-	}
-	if award.Accepted != nil {
-		accepted := award.Accepted
-		_, sealErr := runspec.CheckSeal(accepted.Spec, accepted.Spec)
-		planHash, planErr := runspec.CanonicalHash(accepted.Plan)
-		if sealErr != nil || planErr != nil || planHash != accepted.PlanHash || accepted.Spec.Request.Hash != award.Request.Hash || accepted.Spec.PlanHash != accepted.PlanHash {
-			return input, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned inconsistent here seals"}
-		}
-	}
-	return nodehost.NewRunInput(award)
+	return ownerRunInput(run, award, capability.PurposeHere)
 }
 
 func runHereResumeCommand(ctx context.Context, flags triggerFlags, out io.Writer,

@@ -74,7 +74,7 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 	for attempt := 0; ; attempt++ {
 		resp, requestErr := c.http.Do(req)
 		if requestErr != nil {
-			if !mayRetry || attempt >= UnavailableRetries || ctx.Err() != nil || !transientExecutionStartError(requestErr) {
+			if !mayRetry || attempt >= unavailableRetries || ctx.Err() != nil || !retryableTransportError(requestErr) {
 				return requestErr
 			}
 			if err := waitFor(ctx, time.Duration(1<<attempt)*100*time.Millisecond); err != nil {
@@ -82,7 +82,7 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 			}
 		} else {
 			retry, err := c.readResponse(resp, output)
-			if !mayRetry || attempt >= UnavailableRetries || !retry {
+			if !mayRetry || attempt >= unavailableRetries || !retry {
 				return err
 			}
 			wait, ok := parseRetryAfter(resp)

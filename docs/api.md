@@ -81,6 +81,14 @@ plan together. Retry retains the original request, source authority, SHA and
 accepted seals, with the retrier recorded separately. It never rewrites the
 original seal's identity to match the new run ID.
 
+Owner handoff keeps the awarded execution run ID separate from that original
+seal ID. The host receives the inner request document and its canonical seal
+hash, plus the accepted spec and plan when resuming. Local, here and runner
+adapters preserve those inputs before host binding. Initial intake receipts still
+require the returned run ID to match their newly created seal. Local, standalone
+and here hosting derive the owner fence from the award and preserve the reason
+when authority cancellation ends hosting.
+
 Private claim and reconciliation responses carry execution settings, fences,
 accepted inputs and fresh capabilities. Public `RunDetail` and `JobDetail` carry
 safe display projections. Status clients never substitute a raw execution seal

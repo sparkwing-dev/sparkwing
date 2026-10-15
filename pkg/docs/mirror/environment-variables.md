@@ -1,10 +1,10 @@
 # Environment variables
 
-Every environment variable the code reads, what kind it is, and where it is
-described. The docs contract test walks the source for environment reads,
-including reads through an injected `os.Getenv` and scans of an environment
-slice, and fails when a variable is missing from this page, or when this page
-names a variable nothing reads.
+This reference covers the process environment registry and external environment
+reads. The documentation check combines `procenv.Registry` with source reads,
+including injected `os.Getenv` calls and environment slices. Registry entries
+include emitted runtime values, inherited tool settings and rejected transports.
+A variable remains documented while either owner uses or classifies it.
 
 Kinds:
 
@@ -25,19 +25,6 @@ The services (`sparkwing-controller` and
 `sparkwing-runner`) read their settings from flags and their secrets from
 the files in `--credentials-dir`, so no service configuration appears here.
 
-
-## Runtime: the Jobs and children a runner starts
-
-These inputs still have consumers in execution paths being replaced by the
-rewrite. Final credentials travel through private files or protocol hello. See
-[node protocol](node-protocol.md) and [runner setup](cli-runners.md).
-
-| Variable | Described in |
-|---|---|
-| `SPARKWING_AGENT_TOKEN` | [architecture](architecture.md), [auth](auth.md), [local-execution](local-execution.md), [threat-model](threat-model.md) |
-| `SPARKWING_CONTROLLER_URL` | [architecture](architecture.md), [auth](auth.md), [security](security.md), [self-hosting](self-hosting.md) |
-| `SPARKWING_GITCACHE_URL` | [cache storage](caching.md#storage) |
-| `SPARKWING_CACHE_URL` | [architecture](architecture.md), [caching](caching.md) |
 
 ## Configuration: the `sparkwing` CLI and local runs
 
@@ -60,34 +47,14 @@ rewrite. Final credentials travel through private files or protocol hello. See
 
 ## Runtime
 
-Read by pipeline code and execution paths. The job protocol defines final runtime
-identity. Entries for unported hosts remain here while their consumers exist.
+The job protocol supplies runtime identity. These names also have consumers in
+Sparkwing code. See [node protocol](node-protocol.md).
 
 | Variable | Described in |
 |---|---|
-| `SPARKWING_CACHE_GRANT` | [cache storage](caching.md#storage) |
 | `SPARKWING_JOB_ID` | [node protocol](node-protocol.md) |
 | `SPARKWING_RUN_ID` | [architecture](architecture.md) |
-| `SPARKWING_NODE_ID` | [architecture](architecture.md) |
-| `SPARKWING_DRY_RUN` | [sparks-core](sparks-core.md) |
-| `SPARKWING_SOURCE_DIR` | [git-credentials](git-credentials.md) |
-| `SPARKWING_NODE_CLAIM_GENERATION` | [local-execution](local-execution.md) |
-| `SPARKWING_NODE_CLAIM_HOLDER` | [local-execution](local-execution.md) |
-| `SPARKWING_NODE_CLAIM_LEASE_SECONDS` | [local-execution](local-execution.md) |
-| `SPARKWING_NODE_CLAIM_MEMBERSHIP` | [local-execution](local-execution.md) |
-| `SPARKWING_NODE_CLAIM_RESERVATION` | [local-execution](local-execution.md) |
 | `SPARKWING_GATE_INDEX` | [hooks](hooks.md) |
-
-## Plumbing
-
-These names still have consumers in hosts being replaced by the rewrite. Protocol v2 passes its delegated route bearer in hello and Windows pipe handles in argv. Its final transport is described in [node-protocol](node-protocol.md). This inventory does not make the old environment transport part of v2.
-
-| Variable | Why it stays |
-|---|---|
-| `SPARKWING_DEBUG_PAUSE_BEFORE` | The retained host reads it to pause before a job. |
-| `SPARKWING_DEBUG_PAUSE_AFTER` | The retained host reads it to pause after a job. |
-| `SPARKWING_DEBUG_PAUSE_ON_FAILURE` | The retained host reads it to pause after a job failure. |
-| `SPARKWING_WORKERS` | Legacy dispatcher concurrency input. Final run worker selection uses shared settings and `--sw-workers`. |
 
 ## Test
 
@@ -103,14 +70,9 @@ These names still have consumers in hosts being replaced by the rewrite. Protoco
 
 | Variable | Defined by |
 |---|---|
-| `ACTIONS_ID_TOKEN_REQUEST_TOKEN` | GitHub Actions; see [github-actions-runners](github-actions-runners.md) |
-| `ACTIONS_ID_TOKEN_REQUEST_URL` | GitHub Actions; see [github-actions-runners](github-actions-runners.md) |
 | `AWS_ENDPOINT_URL` | AWS SDK; see [deployment-modes](deployment-modes.md) |
 | `AWS_ENDPOINT_URL_S3` | AWS SDK; see [deployment-modes](deployment-modes.md) |
 | `GITHUB_REPOSITORY` | GitHub Actions |
-| `GITHUB_RUN_ID` | GitHub Actions |
-| `KUBECONFIG` | Kubernetes client configuration |
-| `POD_NAMESPACE` | Kubernetes downward API |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OpenTelemetry; see [observability](observability.md) |
 | `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` | OpenTelemetry |
 | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | OpenTelemetry |
@@ -126,14 +88,11 @@ These names still have consumers in hosts being replaced by the rewrite. Protoco
 | `GOPATH` | Go toolchain |
 | `GOPRIVATE` | Go toolchain |
 | `GOPROXY` | Go toolchain |
-| `PIP_INDEX_URL` | pip; a runner's dependency proxy setting, which a node process receives |
-| `PIP_TRUSTED_HOST` | pip; a runner's dependency proxy setting, which a node process receives |
 | `npm_config_registry` | npm; a runner's dependency proxy setting, which a node process receives |
 | `GOWORK` | Go toolchain |
 | `PATH` | the operating system |
 | `SHELL` | the operating system |
 | `LOCALAPPDATA` | Windows |
-| `MSYSTEM` | MSYS2 and Git for Windows |
 | `WSL_DISTRO_NAME` | Windows Subsystem for Linux |
 | `WSL_INTEROP` | Windows Subsystem for Linux |
 | `XDG_CACHE_HOME` | XDG Base Directory specification |
@@ -142,11 +101,117 @@ These names still have consumers in hosts being replaced by the rewrite. Protoco
 | `CI` | CI providers |
 | `CLICOLOR_FORCE` | terminal convention |
 | `NO_COLOR` | terminal convention |
-| `TERM` | terminal convention |
-| `TERM_PROGRAM` | terminal convention |
 
 ## Undecided
 
 | Variable | Why it stays |
 |---|---|
 | `SPARKS_GO_BIN` | The `go` binary the sparks resolver runs when it writes a pipeline's module overlay; nothing sets it. |
+
+## Process environment policy
+
+The registry owns these classifications. A trailing `*` denotes a name family.
+Credential and removed-transport rows describe exclusions, not configuration.
+Process-specific delivery rules come from `procenv.Policies()`: local pipeline
+processes use captured values, remote pipelines use the configured allow list,
+and Git receives the credential-free base plus proxy and CA settings.
+
+| Variable | Class | Policy |
+|---|---|---|
+| `SPARKWING_DEBUG` | Diagnostic | SDK diagnostic output selection. |
+| `SPARKWING_RUNNER_NAME` | RuntimeClass | Composed from the sealed run and granted runner identity. |
+| `SPARKWING_RUNNER_TYPE` | RuntimeClass | Composed from the sealed run and granted runner identity. |
+| `SPARKWING_RUNNER_LABELS` | RuntimeClass | Composed from the sealed run and granted runner identity. |
+| `SPARKWING_DRY_RUN` | RuntimeClass | Composed from the sealed run and granted runner identity. |
+| `SPARKWING_BRANCH` | RuntimeClass | Composed from the sealed run and granted runner identity. |
+| `SPARKWING_COMMIT` | RuntimeClass | Composed from the sealed run and granted runner identity. |
+| `SPARKWING_REPO` | RuntimeClass | Composed from the sealed run and granted runner identity. |
+| `SPARKWING_TRIGGER_SOURCE` | RuntimeClass | Composed from the sealed run and granted runner identity. |
+| `SPARKWING_TOOLCHAIN_ACTIVE` | Protocol | CLI or test marker; no pipeline inheritance. |
+| `SPARKWING_HOOK_SELFTEST` | Protocol | CLI or test marker; no pipeline inheritance. |
+| `SPARKWING_TEST_*` | Protocol | CLI or test marker; no pipeline inheritance. |
+| `HOME` | Tool | Minimal process base. |
+| `TMPDIR` | Tool | Minimal process base. |
+| `LANG` | Tool | Minimal process base. |
+| `LC_*` | Tool | Minimal process base. |
+| `TZ` | Tool | Minimal process base. |
+| `USER` | Tool | Minimal process base. |
+| `SystemRoot` | Tool | Minimal process base. |
+| `ComSpec` | Tool | Minimal process base. |
+| `PATHEXT` | Tool | Minimal process base. |
+| `TEMP` | Tool | Minimal process base. |
+| `TMP` | Tool | Minimal process base. |
+| `HTTP_PROXY` | Tool | Remote network and CA base; mask embedded credentials. |
+| `HTTPS_PROXY` | Tool | Remote network and CA base; mask embedded credentials. |
+| `NO_PROXY` | Tool | Remote network and CA base; mask embedded credentials. |
+| `http_proxy` | Tool | Remote network and CA base; mask embedded credentials. |
+| `https_proxy` | Tool | Remote network and CA base; mask embedded credentials. |
+| `no_proxy` | Tool | Remote network and CA base; mask embedded credentials. |
+| `NODE_EXTRA_CA_CERTS` | Tool | Remote network and CA base; mask embedded credentials. |
+| `SSL_CERT_FILE` | Tool | Remote network and CA base; mask embedded credentials. |
+| `GIT_SSL_CAINFO` | Tool | Git CA bundle path; inherited by source acquisition. |
+| `GIT_SSL_CAPATH` | Tool | Git CA directory; inherited by source acquisition. |
+| `NODE_OPTIONS` | Tool | Job assignment is always startup environment. |
+| `GODEBUG` | Tool | Job assignment is always startup environment. |
+| `GOMAXPROCS` | Tool | Job assignment is always startup environment. |
+| `TERM` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
+| `TERM_PROGRAM` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
+| `MSYSTEM` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
+| `GOCACHE` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
+| `GONOSUMDB` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
+| `GONOPROXY` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
+| `npm_config_cache` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
+| `PIP_INDEX_URL` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
+| `PIP_TRUSTED_HOST` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
+| `KUBECONFIG` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
+| `OTEL_*` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
+| `AWS_PROFILE` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
+| `AWS_REGION` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
+| `AWS_DEFAULT_REGION` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
+| `DOCKER_HOST` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
+| `AWS_ACCESS_KEY_ID` | Credential | External credential; never emitted by Build. |
+| `AWS_SECRET_ACCESS_KEY` | Credential | External credential; never emitted by Build. |
+| `AWS_SESSION_TOKEN` | Credential | External credential; never emitted by Build. |
+| `GITHUB_TOKEN` | Credential | External credential; never emitted by Build. |
+| `GH_TOKEN` | Credential | External credential; never emitted by Build. |
+| `ACTIONS_ID_TOKEN_REQUEST_TOKEN` | Credential | External credential; never emitted by Build. |
+| `ACTIONS_ID_TOKEN_REQUEST_URL` | Credential | External credential; never emitted by Build. |
+| `SPARKWING_NODE_TOKEN` | Credential | Removed transport; forbidden in all Build output. |
+| `SPARKWING_AGENT_TOKEN` | Credential | Removed transport; forbidden in all Build output. |
+| `SPARKWING_CACHE_GRANT` | Credential | Removed transport; forbidden in all Build output. |
+| `SPARKWING_SOURCE_TOKEN` | Credential | Removed transport; forbidden in all Build output. |
+| `SPARKWING_API_TOKEN` | Credential | Removed transport; forbidden in all Build output. |
+| `SPARKWING_LEASE_TOKEN` | Credential | Removed transport; forbidden in all Build output. |
+| `SPARKWING_NODE_URL` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_PROTOCOL_HANDLES` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_NODE_CLAIM_*` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_CONTROLLER_URL` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_NODE_ID` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_SOURCE_DIR` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_STATE_DB` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_STANDALONE_REASON` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_DEBUG_PAUSE_*` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_ADMISSION_CLASS` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_WORKERS` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_REPO_*` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_GITCACHE_URL` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_CACHE_URL` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_PG_URL` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_RERUN` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_RERUN_REFS_DIR` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_CONFIG_ENV` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_FLEET_CONFIG` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_PROFILES` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_REPOS` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_SECRETS` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_START_AT` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_STOP_AT` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_ONLY` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_NO_CACHE` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_REF` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_ALLOW` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_MODE` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_FLEET_PARENT_*` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_SOURCE_BUNDLE_OBJECT` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `SPARKWING_WORKTREE_BASE_*` | Protocol | Removed engine transport or option; never read as configuration or inherited. |
+| `_SPARKWING_*` | Protocol | Removed engine transport or option; never read as configuration or inherited. |

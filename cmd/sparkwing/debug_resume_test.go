@@ -1,0 +1,94 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+)
+
+func TestDebugResumeUsesObservedIdentityAndCommonOutput(t *testing.T) {
+	for _, format := range []string{"json", "plain", "pretty"} {
+		reader := debugReaderFixture()
+		calls, closed := 0, false
+		var out bytes.Buffer
+		err := runDebugResume(t.Context(), []string{"--run=412", "--job=build", "--profile=prod", "-o=" + format}, &out, func(_ context.Context, profile string) (debugResumer, error) {
+			if profile != "prod" {
+				t.Fatal("changed controller")
+			}
+			return debugResumer{reader: reader, resume: func(_ context.Context, run, job string) error {
+				calls++
+				if run != "run-1" || job != "build" {
+					t.Fatal("resume did not use observed identity")
+				}
+				return nil
+			}, close: func() error { closed = true; return nil }}, nil
+		})
+		if err != nil || calls != 1 || !closed {
+			t.Fatalf("calls=%d closed=%v err=%v", calls, closed, err)
+		}
+		if format == "json" && out.String() != "{\"run_id\":\"run-1\",\"job_id\":\"build\",\"resumed\":true}\n" {
+			t.Fatal(out.String())
+		}
+		if format == "plain" && out.String() != "run-1/build\n" {
+			t.Fatal(out.String())
+		}
+	}
+}
+
+func TestDebugResumeHasNoLegacyStoreFallback(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "absent-home")
+	t.Setenv("SPARKWING_HOME", home)
+	var out bytes.Buffer
+	err := runDebugResume(t.Context(), []string{"--run=run-1", "--job=build", "-o=json"}, &out, resolveDebugResumer)
+	var refusal *apierr.Error
+	if !errors.As(err, &refusal) || refusal.Code != apierr.PolicyMissing || out.Len() != 0 {
+		t.Fatalf("out=%s err=%v", &out, err)
+	}
+	if _, err := os.Stat(home); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("missing policy opened local state")
+	}
+}
+
+func TestDebugResumePreservesWriterFailure(t *testing.T) {
+	failure := &apierr.Error{Code: apierr.Forbidden, Message: "scope missing"}
+	var out bytes.Buffer
+	err := runDebugResume(t.Context(), []string{"--run=412", "--job=build", "-o=json"}, &out, func(context.Context, string) (debugResumer, error) {
+		return debugResumer{reader: debugReaderFixture(), resume: func(context.Context, string, string) error { return failure }, close: func() error { return nil }}, nil
+	})
+	if !errors.Is(err, failure) || out.Len() != 0 {
+		t.Fatalf("out=%s err=%v", &out, err)
+	}
+}
+
+func FuzzDebugResumeCannotSwitchIdentity(f *testing.F) {
+	f.Add("412", "build", "run-1", "build")
+	f.Add("other", "build", "run-1", "build")
+	f.Fuzz(func(t *testing.T, selector, job, returnedRun, returnedJob string) {
+		if strings.ContainsRune(selector, 0) || strings.ContainsRune(job, 0) {
+			return
+		}
+		view := controllerwire.DebugJob{RunID: returnedRun, Number: 412, Job: controllerwire.JobDetail{ID: returnedJob, Status: "running"}}
+		reader := &debugReaderFake{job: view}
+		writes := 0
+		err := runDebugResume(t.Context(), []string{"--run=" + selector, "--job=" + job, "-o=json"}, io.Discard, func(context.Context, string) (debugResumer, error) {
+			return debugResumer{reader: reader, resume: func(_ context.Context, run, id string) error {
+				writes++
+				if view.Validate(selector, job) != nil || run != returnedRun || id != returnedJob {
+					t.Fatal("resume switched observed identity")
+				}
+				return nil
+			}, close: func() error { return nil }}, nil
+		})
+		if err != nil && writes != 0 {
+			t.Fatal("refused read still resumed a job")
+		}
+	})
+}

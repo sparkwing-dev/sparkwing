@@ -92,3 +92,15 @@ func TestParseEveryCommandHelp(t *testing.T) {
 		})
 	}
 }
+
+func TestRunCacheProfileMayExplicitlyDisableMachineDefault(t *testing.T) {
+	inv, err := Parse("sparkwing", []string{"run", "ci", "--sw-cache-from="})
+	if err != nil || !inv.Has("sw-cache-from") || inv.Value("sw-cache-from") != "" {
+		t.Fatalf("explicit empty cache profile=%+v %v", inv, err)
+	}
+	for _, args := range [][]string{{"run", "ci", "--sw-output="}, {"run", "ci", "--publish="}} {
+		if _, err := Parse("sparkwing", args); err == nil {
+			t.Fatalf("accepted empty required option: %v", args)
+		}
+	}
+}

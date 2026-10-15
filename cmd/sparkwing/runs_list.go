@@ -12,7 +12,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
@@ -51,7 +50,7 @@ func parseRunQuery(inv clisurface.Invocation, now time.Time) (controllerwire.Run
 		if !inv.Has(item.name) {
 			continue
 		}
-		value, err := orchestrator.ParseLooseDate(inv.Value(item.name))
+		value, err := clisurface.ParseLooseDate(inv.Value(item.name))
 		if err != nil {
 			return invalid("--" + item.name + " requires a date or lookback duration")
 		}

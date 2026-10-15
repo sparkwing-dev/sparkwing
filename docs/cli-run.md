@@ -29,7 +29,7 @@ Cache-from reads only authorized verified-default-branch memo/artifacts/depcache
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--publish PROFILE` | Copy this local run's results to the named controller profile. |
-| `--sw-cache-from PROFILE` | Read authorized cache entries from the named controller profile. |
+| `--sw-cache-from PROFILE` | Read the authorized remote cache; an empty value disables the machine default. |
 | `--sw-pause-before JOB` | Pause before the selected job. Repeatable; comma-separated values are accepted. |
 | `--sw-pause-after JOB` | Pause after the selected job. Repeatable; comma-separated values are accepted. |
 | `--sw-pause-on-failure` | Keep failed jobs paused for inspection. |
@@ -55,3 +55,10 @@ Cache-from reads only authorized verified-default-branch memo/artifacts/depcache
 | `--sw-index PATH` | Pipeline discovery index path. |
 | `--sw-run-handle-file PATH` | Write the submitted run handle to this file. |
 | `--target TARGET` | Select a declared pipeline target. |
+
+`--sw-only` keeps matching jobs and their dependencies. Other declared jobs are
+skipped. Recovery jobs and jobs added by generators retain their normal rules.
+`--sw-start-at` and `--sw-stop-at` select a window in each job containing the
+named steps. A job containing neither bound runs all its steps. Unknown step
+names fail before work starts. `--sw-only` cannot be combined with either step
+bound. All three selections are sealed at intake and survive resume and retry.

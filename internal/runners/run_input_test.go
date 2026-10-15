@@ -3,6 +3,7 @@ package runners
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
@@ -14,6 +15,27 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+func TestRunInputRetainsOriginalRetryRequest(t *testing.T) {
+	unit := hostingAward(capability.UnitTrigger)
+	unit.Request.RunID = "source-run"
+	unit.Accepted = &controllerwire.PlanAccepted{
+		Spec: runspec.Spec{Request: unit.Request, Hash: "spec-hash"},
+		Plan: json.RawMessage(`{"jobs":[]}`), PlanHash: "plan-hash",
+	}
+	input, err := nodehost.NewRunInput(unit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var request runspec.Request
+	if err := json.Unmarshal(input.SealedRequest, &request); err != nil || !reflect.DeepEqual(request, unit.Request.Request) || input.RunID != unit.RunID || input.Accepted == nil || input.Accepted.RunID != unit.RunID {
+		t.Fatalf("retry input = %+v, error = %v", input, err)
+	}
+	var spec runspec.Spec
+	if err := json.Unmarshal(input.Accepted.Spec, &spec); err != nil || spec.Request.RunID != "source-run" {
+		t.Fatalf("retry changed its source seal: %+v, %v", spec, err)
+	}
+}
 
 func FuzzHostingNodeInputKeepsAwardSeals(f *testing.F) {
 	f.Add("other-run", "other-hash", int64(999))

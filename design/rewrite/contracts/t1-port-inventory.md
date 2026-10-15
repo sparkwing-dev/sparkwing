@@ -33,9 +33,10 @@ activated. Production placement migration remains incomplete.
 
 The [W3 nodehost green continuation](../w3-nodehost-green-progress.md) ports
 `TestOnlyRunsTheMatchedNodesAndWhatTheyNeed` to tenant intake, claims, accepted
-seals and the shared scheduler. Exclusions use the existing selection policy
-and final-store transitions. Sealed selection ingestion remains W9 integration
-work. The full nodehost suite passes. No acceptance cell is added or activated.
+seals and the shared scheduler. The [W3 merge and selection continuation](../w3-merge-step-window-progress.md)
+now drives those exclusions from sealed Only inputs through final-store
+transitions. Sealed StartAt and StopAt inputs reach the shared executor, with
+native Go SDK process evidence. No acceptance cell is added or activated.
 
 The [W3 owner assembly continuation](w3-owner-assembly-continuation.md) replaces
 the removed pre-intake stalled-describe assertion with native planning under a
@@ -609,7 +610,7 @@ their behavior requirements without retaining the removed claimed-mode runtime:
 | `TestLaunchedNode_RunsItsConcurrencyGroupThroughTheClaim` | Replace executor-owned admission with owner admission and claim-renewed holders. Native store/admission integration remains open. |
 | `TestLaunchedNode_PlanKeepsThePipelinesRequires` | Checkout declarations and accepted settings must retain YAML placement. Native configuration/acceptance wiring remains open. |
 | `TestLaunchedNode_MemoHitsThroughTheClaim` | Memo is an owner decision committed by reconciliation. Missing output, missing artifacts and refused manifest edges remain required under `storage-memo-materialization-failures`. Native store/storage materialization remains open. |
-| `TestLaunchedNode_HonorsTheTriggersRunFlags` | `TestSDKPlanningRetainsSealedRunContext` covers DryRun propagation. Native Only and step-range projection and execution remain open. |
+| `TestLaunchedNode_HonorsTheTriggersRunFlags` | `TestSDKPlanningRetainsSealedRunContext` covers DryRun propagation. `TestOnlyRunsTheMatchedNodesAndWhatTheyNeed`, `TestNodeExecutorUsesSealedStepWindow` and `TestNativeExecutorSteps/window` cover sealed selections through the owner, executor and real Go SDK process. Native launcher placement remains open. |
 | `TestLaunchedNode_NoCacheMissesTheMemo` | NoMemo remains an owner-side read bypass. `TestOwnerPolicyMemoKeyRequiresStringOrExplicitNull` covers key evaluation with that bypass. Native memo reads and writes remain open. |
 | `TestLaunchedNode_LayersTheCheckoutsYAMLArgsAndGuards` | `environment-origin-head-and-guards/hermetic-checkout-planning` covers shared YAML argument precedence and guard evaluation through owner acceptance. `TestOwnerHostReadsAcquiredProjectForSharedPlanning` reads real acquired checkout files. Native placement execution remains open. |
 | `TestLaunchedNode_AGuardJudgesTheSDKsDefaults` | The checkout-planning cell evaluates argument guards after SDK describe defaults. Refusals bypass SDK planning and plan cache, then seal refusal evidence through acceptance. Native placement execution remains open. |
@@ -887,8 +888,9 @@ step-log assertions to
 `protocol_test.go:TestProtocol/protocol-step-failure-policies/hermetic-native-go-steps`.
 Eleven cases use real Go SDK processes and the common executor. Seven SQLite
 step cases verify committed diagnostic ordering and refused writes. The old
-`TestHostDrivesSteps` becomes `TestHostStepWindows` and retains only the native
-window cases. Native placement and sealed StartAt/StopAt/Only inputs remain open.
+`TestHostDrivesSteps` window cases now use `TestNodeExecutorUsesSealedStepWindow`
+and `TestNativeExecutorSteps/window`, driven by sealed StartAt and StopAt.
+Only uses the owner/store test above. Native placement remains open.
 The same continuation ports the old orchestrator foreign-holder refusal to
 `lifecycle_test.go:TestLifecycle/lifecycle-transition-replay-and-fencing/hermetic-store-foreign-awards`.
 Four SQLite cases refuse changed holder, capability, generation and ordinal

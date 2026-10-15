@@ -1,11 +1,11 @@
 package nodehost
 
 import (
-	"encoding/json"
 	"fmt"
 	"path"
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 // safety: --sw-only keeps the matched nodes and what they depend on; OnFailure recovery nodes and nodes a
@@ -54,44 +54,9 @@ func onlySkips(doc nodeproto.PlanDoc, pattern, start, stop string) (map[string]s
 	return skip, nil
 }
 
-// safety: a controller-dispatched run has no host to record skips, so --sw-only cuts the nodes from the plan the
-// controller accepts; a recovery node goes with its cut parent, since nothing it recovers can run.
-func cutOutsideOnly(doc nodeproto.PlanDoc, raw []byte, pattern string) (nodeproto.PlanDoc, []byte, error) {
-	skips, err := onlySkips(doc, pattern, "", "")
-	if err != nil || len(skips) == 0 {
-		return doc, raw, err
+func selectionSkips(doc nodeproto.PlanDoc, options runspec.Options) (map[string]string, error) {
+	if err := validateStepRange(doc, options.StartAt.Value, options.StopAt.Value); err != nil {
+		return nil, err
 	}
-	keep := func(n nodeproto.JobSpec) bool {
-		_, cut := skips[n.ID]
-		_, parentCut := skips[n.OnFailureOf]
-		return !cut && (n.OnFailureOf == "" || !parentCut)
-	}
-	var fields map[string]json.RawMessage
-	var nodes []json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return doc, nil, err
-	}
-	if err := json.Unmarshal(fields["jobs"], &nodes); err != nil {
-		return doc, nil, err
-	}
-	if len(nodes) != len(doc.Jobs) {
-		return doc, nil, fmt.Errorf("--only: the plan lists %d nodes, its document %d", len(nodes), len(doc.Jobs))
-	}
-	var keptRaw []json.RawMessage
-	var kept []nodeproto.JobSpec
-	for i, n := range doc.Jobs {
-		if keep(n) {
-			kept, keptRaw = append(kept, n), append(keptRaw, nodes[i])
-		}
-	}
-	list, err := json.Marshal(keptRaw)
-	if err != nil {
-		return doc, nil, err
-	}
-	fields["jobs"] = list
-	if raw, err = json.Marshal(fields); err != nil {
-		return doc, nil, err
-	}
-	doc.Jobs = kept
-	return doc, raw, nil
+	return onlySkips(doc, options.Only.Value, options.StartAt.Value, options.StopAt.Value)
 }

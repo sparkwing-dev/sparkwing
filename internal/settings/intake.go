@@ -52,6 +52,15 @@ func ResolveRequest(in Inputs) (runspec.Options, error) {
 	if err = resolveValue(in, "output", Output, &out.Output, out.Origins); err != nil {
 		return runspec.Options{}, err
 	}
+	if err = resolveValue(in, "start_at", StartAt, &out.StartAt, out.Origins); err != nil {
+		return runspec.Options{}, err
+	}
+	if err = resolveValue(in, "stop_at", StopAt, &out.StopAt, out.Origins); err != nil {
+		return runspec.Options{}, err
+	}
+	if err = resolveValue(in, "only", Only, &out.Only, out.Origins); err != nil {
+		return runspec.Options{}, err
+	}
 	if err = resolveValue(in, "dry_run", DryRun, &out.DryRun, out.Origins); err != nil {
 		return runspec.Options{}, err
 	}
@@ -205,6 +214,9 @@ func unprojectOptions(options runspec.Options) Values {
 	unprojectValue(options.OwnerExecutionTimeout, &out.OwnerExecution, "owner_execution", out.Origins)
 	unprojectList(options.Requires, &out.Requires, "requires", out.Origins)
 	unprojectList(options.Prefers, &out.Prefers, "prefers", out.Origins)
+	unprojectValue(options.StartAt, &out.StartAt, "start_at", out.Origins)
+	unprojectValue(options.StopAt, &out.StopAt, "stop_at", out.Origins)
+	unprojectValue(options.Only, &out.Only, "only", out.Origins)
 	unprojectValue(options.DryRun, &out.DryRun, "dry_run", out.Origins)
 	unprojectValue(options.NoMemo, &out.NoMemo, "no_memo", out.Origins)
 	unprojectList(options.AllowRisk, &out.AllowRisk, "allow_risk", out.Origins)
