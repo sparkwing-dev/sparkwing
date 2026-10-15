@@ -177,6 +177,7 @@ func TestClaimUnitGrantedProfileKeys(t *testing.T) {
 		for _, requirement := range []string{"name=runner", "class=cloud", "gpu"} {
 			t.Run(map[bool]string{false: "named", true: "queue"}[queued]+"/"+requirement, func(t *testing.T) {
 				s, demand := unitClaimFixture(t)
+				fundUnitClaim(t, s)
 				if queued {
 					demand.Target = nil
 					demand.Kinds = []capability.UnitKind{capability.UnitNode}
@@ -226,6 +227,7 @@ func TestClaimUnitOwnerKindsAndEvalFences(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval} {
 		t.Run(string(kind), func(t *testing.T) {
 			s, demand := unitClaimFixture(t)
+			fundUnitClaim(t, s)
 			demand.Target = &UnitRef{Kind: kind, RunID: "run"}
 			if kind != capability.UnitTrigger {
 				root := authorityRoot("launcher", "")
@@ -523,5 +525,12 @@ func TestClaimUnitRefusesAcceptedGuardFailure(t *testing.T) {
 				t.Fatalf("owner cannot finish guard-refused run: %v", err)
 			}
 		})
+	}
+}
+
+func fundUnitClaim(t *testing.T, s *Store) {
+	t.Helper()
+	if _, err := (&Tenant{s: s, team: "a"}).RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantFree, AmountMicro: 100000000, Reference: "claim-fixture", CreatedBy: "fixture"}); err != nil {
+		t.Fatal(err)
 	}
 }

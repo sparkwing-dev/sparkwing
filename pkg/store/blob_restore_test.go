@@ -16,6 +16,7 @@ import (
 func blobRestoreFixture(t *testing.T) (*Store, *blobRecords, blob.UploadIntent) {
 	t.Helper()
 	s, records, intent := blobRecordFixture(t)
+	intent.Authority.Ref = blob.RefFacts{}
 	request := runspec.SealedRequest{Version: 1, Request: runspec.Request{
 		Git:         runspec.Git{Ref: "feature", SHA: "feature-sha", DefaultBranch: runspec.Optional[string]{Set: true, Value: "main"}, App: runspec.Optional[runspec.AppFacts]{Set: true, Value: runspec.AppFacts{Ref: "feature", SHA: "feature-sha", DeliveryKey: "feature-delivery", DefaultBranch: "main"}}},
 		PullRequest: runspec.Optional[runspec.PullRequest]{Set: true, Value: runspec.PullRequest{BaseRepo: "gh:1", BaseRef: "release"}},
@@ -45,11 +46,11 @@ func blobRestoreFixture(t *testing.T) (*Store, *blobRecords, blob.UploadIntent) 
 // safety: planted records exercise persisted provenance independently of the writer's validation.
 func plantBlobRestore(t *testing.T, s *Store, records *blobRecords, intent blob.UploadIntent, kind blob.Kind, ref string, facts blob.RefFacts, manifest bool) blob.RecordKey {
 	t.Helper()
-	key := blob.RecordKey{Team: "a", Kind: kind, Scope: blob.Scope{Repo: "gh:1", Ref: blob.RefScope{Ref: ref, Verified: true}, Key: "input-hash"}, Name: "modules"}
+	key := blob.RecordKey{Team: "a", Kind: kind, Scope: blob.Scope{Repo: "gh:1", Ref: blob.RefScope{Ref: ref, Verified: true}, Key: fixtureMemoHash}, Name: "modules"}
 	if kind == blob.KindMemo {
 		key.Scope.Pipeline, key.Scope.Job, key.Name = "ci", "job", "output"
 	}
-	namespace, err := records.rules.RecordNamespace(key)
+	namespace, err := blob.RecordNamespace(key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +59,7 @@ func plantBlobRestore(t *testing.T, s *Store, records *blobRecords, intent blob.
 		record.ManifestDigest = runspec.Optional[blob.Digest]{Set: true, Value: intent.Digest}
 	}
 	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		return persistBlobRecordTx(t.Context(), tx, record, namespace, intent.Identity)
+		return persistBlobRecordTx(t.Context(), tx, record, namespace, intent.Identity, nil)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +72,7 @@ func restoreFacts(ref string, isDefault bool) blob.RefFacts {
 
 func TestBlobRecordsDepcacheRestoreOrderAndVerifiedDefault(t *testing.T) {
 	s, records, intent := blobRestoreFixture(t)
-	request := blob.DepcacheLookup{Authority: intent.Authority, Key: blob.DepcacheKey{Repo: "gh:1", Ref: blob.RefScope{Ref: "feature", Verified: true}, Name: "modules", Key: "input-hash"}}
+	request := blob.DepcacheLookup{Authority: intent.Authority, Key: blob.DepcacheKey{Repo: "gh:1", Ref: blob.RefScope{Ref: "feature", Verified: true}, Name: "modules", Key: fixtureMemoHash}}
 	check := func(want blob.RestoreSource) {
 		t.Helper()
 		hit, err := records.LookupDepcache(t.Context(), request)
@@ -95,7 +96,7 @@ func TestBlobRecordsDepcacheRestoreOrderAndVerifiedDefault(t *testing.T) {
 
 func TestBlobRecordsMemoOwnScopePrecedesDefaultWithoutPRBaseFallback(t *testing.T) {
 	s, records, intent := blobRestoreFixture(t)
-	request := blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: blob.RefScope{Ref: "feature", Verified: true}, Pipeline: "ci", Job: "job", Hash: "input-hash"}}
+	request := blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: blob.RefScope{Ref: "feature", Verified: true}, Pipeline: "ci", Job: "job", Hash: fixtureMemoHash}}
 	plantBlobRestore(t, s, records, intent, blob.KindMemo, "release", restoreFacts("release", false), false)
 	if hit, err := records.LookupMemo(t.Context(), request); err != nil || hit.Found {
 		t.Fatalf("memo used PR-base fallback: %+v: %v", hit, err)
@@ -127,11 +128,11 @@ func TestBlobRecordsFallbackFiltersBeforeReadingManifest(t *testing.T) {
 				var err error
 				if kind == blob.KindMemo {
 					var hit blob.MemoHit
-					hit, err = records.LookupMemo(t.Context(), blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: blob.RefScope{Ref: "feature", Verified: true}, Pipeline: "ci", Job: "job", Hash: "input-hash"}})
+					hit, err = records.LookupMemo(t.Context(), blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: blob.RefScope{Ref: "feature", Verified: true}, Pipeline: "ci", Job: "job", Hash: fixtureMemoHash}})
 					found = hit.Found
 				} else {
 					var hit blob.DepcacheHit
-					hit, err = records.LookupDepcache(t.Context(), blob.DepcacheLookup{Authority: intent.Authority, Key: blob.DepcacheKey{Repo: "gh:1", Ref: blob.RefScope{Ref: "feature", Verified: true}, Name: "modules", Key: "input-hash"}})
+					hit, err = records.LookupDepcache(t.Context(), blob.DepcacheLookup{Authority: intent.Authority, Key: blob.DepcacheKey{Repo: "gh:1", Ref: blob.RefScope{Ref: "feature", Verified: true}, Name: "modules", Key: fixtureMemoHash}})
 					found = hit.Found
 				}
 				if err != nil || found || called {
@@ -146,12 +147,12 @@ func TestBlobRecordsExpiredCacheBudgetsRunCold(t *testing.T) {
 	s, records, intent := blobRestoreFixture(t)
 	key := plantBlobRestore(t, s, records, intent, blob.KindMemo, "feature", restoreFacts("feature", false), false)
 	budget := blob.Budget{Deadline: s.now().Add(-time.Nanosecond)}
-	hit, err := records.LookupMemo(t.Context(), blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: key.Scope.Repo, Ref: key.Scope.Ref, Pipeline: "ci", Job: "job", Hash: "input-hash"}, Budget: budget})
+	hit, err := records.LookupMemo(t.Context(), blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: key.Scope.Repo, Ref: key.Scope.Ref, Pipeline: "ci", Job: "job", Hash: fixtureMemoHash}, Budget: budget})
 	if err != nil || hit.Found {
 		t.Fatalf("expired memo budget=%+v: %v", hit, err)
 	}
 	plantBlobRestore(t, s, records, intent, blob.KindDepcache, "feature", restoreFacts("feature", false), false)
-	dep, err := records.LookupDepcache(t.Context(), blob.DepcacheLookup{Authority: intent.Authority, Key: blob.DepcacheKey{Repo: "gh:1", Ref: key.Scope.Ref, Name: "modules", Key: "input-hash"}, Budget: budget})
+	dep, err := records.LookupDepcache(t.Context(), blob.DepcacheLookup{Authority: intent.Authority, Key: blob.DepcacheKey{Repo: "gh:1", Ref: key.Scope.Ref, Name: "modules", Key: fixtureMemoHash}, Budget: budget})
 	if err != nil || dep.Found {
 		t.Fatalf("expired depcache budget=%+v: %v", dep, err)
 	}

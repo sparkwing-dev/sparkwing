@@ -24,106 +24,6 @@ type CreditReversal struct {
 	Created       bool
 }
 
-// ReversePayment takes back what a payment still has on the ledger: the paid
-// grant linked to paymentID, less what earlier reversals of it took back, or
-// amountMicro of it when that is positive and smaller, as a partial refund. It
-// writes one reversal under reference, which makes the call idempotent: a
-// repeat returns the reversal already written. The team is the one the
-// payment funded, and the balance may go below zero, because the credits may
-// already be spent; the claim path then refuses the team's new metered work.
-// A partial refund of a payment with an unapplied rest returns that rest
-// first, which takes nothing back.
-func (s *Store) ReversePayment(
-	ctx context.Context, paymentID, reference, createdBy string, amountMicro int64,
-) (_ CreditReversal, err error) {
-	paymentID, reference = strings.TrimSpace(paymentID), strings.TrimSpace(reference)
-	if paymentID == "" || reference == "" {
-		return CreditReversal{}, errors.New("credits: a reversal names the payment and its own reference")
-	}
-	if strings.HasPrefix(reference, unappliedPrefix) {
-		return CreditReversal{}, fmt.Errorf("%w: the reference prefix %q is reserved", ErrInvalidInput, unappliedPrefix)
-	}
-	id, err := newCreditID("grant")
-	if err != nil {
-		return CreditReversal{}, err
-	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return CreditReversal{}, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
-		return CreditReversal{}, err
-	}
-	paid, found, err := paidGrantForPaymentTx(ctx, tx, paymentID)
-	if err != nil {
-		return CreditReversal{}, err
-	}
-	if !found {
-		return CreditReversal{}, fmt.Errorf("%w: %q", ErrUnknownPayment, paymentID)
-	}
-	// safety: a lost dispute reverses under its dispute id, so a reference
-	// that names a dispute held for another payment is that dispute misapplied
-	// and must not take this payment back.
-	if _, err := refuseBoundDisputeTx(ctx, tx, reference, paid.Team, paymentID); err != nil {
-		return CreditReversal{}, err
-	}
-	out := CreditReversal{Team: paid.Team, PaidMicro: paid.AmountMicro}
-	existing, found, err := creditGrantByReferenceTx(ctx, tx, paid.Team, CreditGrantReversal, reference)
-	if err != nil {
-		return CreditReversal{}, err
-	}
-	if found {
-		if existing.Reverses != paid.Reference {
-			return CreditReversal{}, fmt.Errorf("%w: %q reverses %q, not %q",
-				ErrCreditGrantConflict, reference, existing.Reverses, paid.Reference)
-		}
-		out.Grant = &existing
-	}
-	already, err := reversedMicroTx(ctx, tx, paid.Team, paid.Reference)
-	if err != nil {
-		return CreditReversal{}, err
-	}
-	if out.Grant == nil && amountMicro > 0 {
-		released, err := releaseUnappliedTx(ctx, tx, paid.Team, paid.Reference, reference, createdBy, amountMicro)
-		if err != nil {
-			return CreditReversal{}, err
-		}
-		already -= released
-	}
-	if out.Grant == nil && already < paid.AmountMicro {
-		now := tx.now()
-		take := paid.AmountMicro - already
-		if amountMicro > 0 && amountMicro < take {
-			take = amountMicro
-		}
-		grant := CreditGrant{
-			ID: id, Team: paid.Team, Kind: CreditGrantReversal, AmountMicro: -take,
-			Reference: reference, Reverses: paid.Reference, CreatedBy: createdBy, CreatedAt: now,
-		}
-		if _, err := tx.ExecContext(ctx, `
-        INSERT INTO credit_grants (team, id, kind, amount_micro, reference, reverses, created_by, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			string(grant.Team), grant.ID, grant.Kind, grant.AmountMicro, grant.Reference, grant.Reverses,
-			grant.CreatedBy, now.UnixNano()); err != nil {
-			return CreditReversal{}, fmt.Errorf("credits: insert reversal: %w", err)
-		}
-		if err := recordGrantEventTx(tx, grant, "", ""); err != nil {
-			return CreditReversal{}, err
-		}
-		out.Grant, out.Created = &grant, true
-		already += take
-	}
-	out.ReversedMicro = already
-	if out.BalanceMicro, err = creditBalanceTx(ctx, tx, paid.Team); err != nil {
-		return CreditReversal{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return CreditReversal{}, err
-	}
-	return out, nil
-}
-
 // safety: a refund returns a payment's unapplied rest first, released here up
 // to amountMicro, so its reversal takes back only what it returns beyond it.
 func releaseUnappliedTx(
@@ -152,18 +52,6 @@ func releaseUnappliedTx(
 	return release, nil
 }
 
-// PaymentTeam returns the team a payment funded.
-func (s *Store) PaymentTeam(ctx context.Context, paymentID string) (Team, error) {
-	team, found, err := s.PaidGrantTeam(ctx, strings.TrimSpace(paymentID))
-	if err != nil {
-		return "", err
-	}
-	if !found {
-		return "", fmt.Errorf("%w: %q", ErrUnknownPayment, paymentID)
-	}
-	return team, nil
-}
-
 // TeamCreditFreeze is whether a team's cloud usage is held, and by which
 // disputes.
 type TeamCreditFreeze struct {
@@ -174,21 +62,6 @@ type TeamCreditFreeze struct {
 // ErrDisputeConflict is returned when a hold or a reversal names a dispute
 // already held for another payment or team: a dispute disputes one payment.
 var ErrDisputeConflict = errors.New("credits: the dispute is already held for another payment")
-
-// HoldTeamForDispute holds team's cloud usage for disputeID, which disputes
-// paymentID; an operator's hold by hand names no payment. A held team's
-// metered claims are refused, so no new cloud work starts, while work
-// already running finishes; the team stays held while any of its holds is
-// unreleased. Holding a dispute that already has a hold for the same payment
-// and team, released or not, writes nothing, so a replayed event never undoes
-// an operator's release; one held for another payment or team is refused
-// with [ErrDisputeConflict]. It reports whether it wrote the hold, and
-// returns [ErrUnknownTeam] for a team that is not registered.
-func (s *Store) HoldTeamForDispute(
-	ctx context.Context, team Team, disputeID, paymentID, reason string, now time.Time,
-) (bool, error) {
-	return s.holdTeam(ctx, team, disputeID, paymentID, reason, "", now)
-}
 
 // OperatorHoldPrefix begins the id of every hold an operator places by hand,
 // which keeps those holds apart from a payment dispute's.
@@ -202,59 +75,19 @@ func (t *Tenant) HoldByOperator(ctx context.Context, actor, reason string, now t
 		return "", err
 	}
 	id = OperatorHoldPrefix + id
-	_, err = t.s.holdTeam(ctx, t.team, id, "", reason, actor, now)
+	_, err = t.hold(ctx, id, "", reason, actor, now)
 	return id, err
 }
 
-func (s *Store) holdTeam(
-	ctx context.Context, team Team, disputeID, paymentID, reason, actor string, now time.Time,
-) (_ bool, err error) {
-	team = NormalizeTeam(team)
-	disputeID, paymentID = strings.TrimSpace(disputeID), strings.TrimSpace(paymentID)
-	if disputeID == "" {
-		return false, errors.New("credits: a hold names the dispute it is for")
-	}
-	tx, err := s.beginTx(ctx)
+func (t *Tenant) hold(ctx context.Context, disputeID, paymentID, reason, actor string, now time.Time) (created bool, err error) {
+	err = t.s.inTx(ctx, func(tx *storeTx) error {
+		created, err = holdCreditFreezeTx(ctx, tx, t.team, disputeID, paymentID, reason, actor, now)
+		return err
+	})
 	if err != nil {
 		return false, err
 	}
-	defer rollbackUnlessDone(tx, &err)
-	// safety: a metered claim reads the freeze under the ledger lock, so the
-	// hold takes the same lock; a claim that read the team as not frozen then
-	// commits before the hold does, and none can commit after it.
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
-		return false, err
-	}
-	var registered int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM teams WHERE name = ?`, string(team)).Scan(&registered); err != nil {
-		return false, err
-	}
-	if registered == 0 {
-		return false, fmt.Errorf("%w: %s", ErrUnknownTeam, team)
-	}
-	bound, err := refuseBoundDisputeTx(ctx, tx, disputeID, team, paymentID)
-	if err != nil || bound {
-		return false, err
-	}
-	// safety: the ledger lock serializes holds, and the dispute has no row
-	// yet, so the insert cannot meet a row another hold wrote.
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO credit_freezes (dispute_id, team, payment_id, reason, created_at) VALUES (?, ?, ?, ?, ?)`,
-		disputeID, string(team), paymentID, truncate(reason, 500), now.UnixNano()); err != nil {
-		return false, err
-	}
-	attrs := map[string]any{"payment_id": paymentID}
-	// safety: a dispute's reason is the card holder's free text and stays off
-	// the event; an operator's reason is the record of their decision.
-	if actor != "" {
-		attrs["reason"] = reason
-	}
-	if err := RecordBusinessEvent(tx, BusinessEvent{
-		At: now, Team: team, Kind: BusinessEventTeamFrozen, SubjectID: disputeID, Actor: actor, Attrs: attrs,
-	}); err != nil {
-		return false, err
-	}
-	return true, tx.Commit()
+	return created, err
 }
 
 func refuseBoundDisputeTx(ctx context.Context, tx *storeTx, disputeID string, team Team, paymentID string) (bool, error) {
@@ -279,61 +112,30 @@ func disputeHoldTx(ctx context.Context, tx *storeTx, disputeID string) (Team, st
 	return Team(team), payment, err == nil, err
 }
 
-// ReleaseCreditFreezes releases the one hold disputeID names on team, on
-// actor's word, and reports whether it released it (1) or found none (0). An
-// empty disputeID is refused rather than read as every hold, so a blank input
-// can never release a payment dispute's hold. The release and its business
-// event, naming actor and reason, commit together.
-func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID, actor, reason string, now time.Time) (int64, error) {
+// ReleaseCreditFreezes releases the named hold on this tenant and commits its audit event.
+func (t *Tenant) ReleaseCreditFreezes(ctx context.Context, disputeID, actor, reason string, now time.Time) (int64, error) {
 	if strings.TrimSpace(disputeID) == "" {
 		return 0, fmt.Errorf("%w: a release names the hold it releases", ErrInvalidInput)
 	}
-	return s.releaseFreezes(ctx, team, disputeID, false, actor, reason, now)
+	return t.releaseFreezes(ctx, disputeID, false, actor, reason, now)
 }
 
 // ReleaseOperatorHolds releases every hold an operator placed on t, and never
 // a payment dispute's. Each release and its business event, naming actor and
 // reason, commit together.
 func (t *Tenant) ReleaseOperatorHolds(ctx context.Context, actor, reason string, now time.Time) (int64, error) {
-	return t.s.releaseFreezes(ctx, t.team, "", true, actor, reason, now)
+	return t.releaseFreezes(ctx, "", true, actor, reason, now)
 }
 
-func (s *Store) releaseFreezes(
-	ctx context.Context, team Team, disputeID string, operatorOnly bool, actor, reason string, now time.Time,
-) (_ int64, err error) {
-	team = NormalizeTeam(team)
-	if team == "" {
-		return 0, errors.New("credits: a release names the team")
-	}
-	query := `UPDATE credit_freezes SET released_at = ? WHERE team = ? AND released_at IS NULL`
-	args := []any{now.UnixNano(), string(team)}
-	if disputeID = strings.TrimSpace(disputeID); disputeID != "" {
-		query, args = query+` AND dispute_id = ?`, append(args, disputeID)
-	}
-	if operatorOnly {
-		query, args = query+` AND dispute_id LIKE ?`, append(args, OperatorHoldPrefix+"%")
-	}
-	tx, err := s.beginTx(ctx)
+func (t *Tenant) releaseFreezes(ctx context.Context, disputeID string, operatorOnly bool, actor, reason string, now time.Time) (count int64, err error) {
+	err = t.s.inTx(ctx, func(tx *storeTx) error {
+		count, err = releaseCreditFreezesTx(ctx, tx, t.team, disputeID, operatorOnly, actor, reason, now)
+		return err
+	})
 	if err != nil {
 		return 0, err
 	}
-	defer rollbackUnlessDone(tx, &err)
-	released, err := releasedDisputesTx(ctx, tx, query+` RETURNING dispute_id`, args...)
-	if err != nil {
-		return 0, err
-	}
-	var releaseAttrs map[string]any
-	if actor != "" {
-		releaseAttrs = map[string]any{"reason": reason}
-	}
-	for _, id := range released {
-		if err := RecordBusinessEvent(tx, BusinessEvent{
-			At: now, Team: team, Kind: BusinessEventTeamUnfrozen, SubjectID: id, Actor: actor, Attrs: releaseAttrs,
-		}); err != nil {
-			return 0, err
-		}
-	}
-	return int64(len(released)), tx.Commit()
+	return count, err
 }
 
 func releasedDisputesTx(ctx context.Context, tx *storeTx, query string, args ...any) (_ []string, err error) {

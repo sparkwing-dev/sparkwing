@@ -20,6 +20,8 @@ unlock.
 
 ## [Unreleased]
 
+- **store (Breaking):** Remove legacy execution-attempt writers and the unused GitHub runner scope matcher. Attempt history requires an explicit tenant and reads committed node transitions. Cloud awards are always metered, including awards from unmetered launcher credentials. Verified non-checkout payment events use the final receipt and correlation schema. See [migration guide](docs/migrations/_unreleased.md#execution-attempts-and-cloud-metering).
+
 - **store (Breaking):** Remove the unused node queue and named trigger claim APIs, trigger heartbeat/finish writers and duplicate claim matcher. Current capability claims own their lifecycle. Console runner metering commits against the current operator session and leaves existing awards unchanged. Runner inventory honors rotation grace. See [migration guide](docs/migrations/_unreleased.md#sole-claim-queue-and-console-metering).
 
 - **store (Breaking):** Remove unused token-table credential readers and mutations, the raw here issuer and unused claim-origin readers. Capability snapshots, management and sealed intake own their replacements. Shared job claims honor configured local-first preferences using live persisted runner polls. See [migration guide](docs/migrations/_unreleased.md#store-credential-readers-and-local-first-claims).
@@ -148,6 +150,16 @@ unlock.
 - **here hosting:** Close partially returned session resources when host binding fails, and preserve cleanup failures alongside the original error.
 
 ### Changed
+- **store:** Reused results copy their committed output and manifest records atomically, verify all source bytes, and retain reads after source-run deletion. Missing or corrupt source bytes leave the job available to execute.
+- **store (Breaking):** Billing-policy writes use `Operator.SetCreditSettings`. The separate `SetOperatorCreditSettings` entry point is removed. Every caller now preserves installed rate tables against scalar overrides. See [migration guide](docs/migrations/_unreleased.md#billing-policy-writer).
+- **store (Breaking):** Remove `Tenant.GrantCredits`. Use `Tenant.RecordCreditGrant` with a typed request. Tenant credit reports now read balances, burn, storage charges and prices from one database snapshot. See [migration guide](docs/migrations/_unreleased.md#paid-credit-requires-verified-checkout-settlement).
+- **billing:** Fraud-warning replays retain their original payment and card. Conflicting payer evidence fails without recording a warning or freezing a team. Released warning holds remain released after restart and replay.
+- **store + controller (Breaking):** Remove legacy node-log upload, signing and seal APIs, their HTTP writers and the segment upload client. Tagged log bindings, commits and leased maintenance own uploads, persistence and abandoned-stream sealing. Physical manifest readers and object-side abandoned seals are removed. Completeness uses the selected attempt’s persisted finish time and the store clock. See [migration guide](docs/migrations/_unreleased.md#log-writes-use-tagged-subjects).
+- **store:** `Tenant.ReadBlob` returns committed blob metadata only after checking live tenant authority and read edges. Tombstoned digests return no metadata.
+- **store (Breaking):** Remove legacy direct-upload reservation, commit, lookup and release APIs and the two node output-upload writers. Tenant blob tickets own quota and verified settlement. See [migration guide](docs/migrations/_unreleased.md#direct-uploads-use-tenant-blob-tickets).
+- **store (Breaking):** Remove unused raw card-setup, dispute, warning, refund and payment-lookup Go entry points, plus `Store.SetTokenMetered`. Their transaction owners remain for verified-event settlement. Console hold and release operations retain their tenant handles. See [migration guide](docs/migrations/_unreleased.md#card-workers-use-operator).
+- **store (Breaking):** Remove `Store.BinaryObject`, `Store.CommittedObjectFor` and `Store.SourceBoundToRun`.
+  Logical blob records replace the unused binary lookup APIs. See [migration guide](docs/migrations/_unreleased.md#legacy-binary-lookups).
 
 - **schedule wire (Breaking):** Separate full repository replacement from selective upserts
   Repository writes require a `replace` or `upsert` mode through `WriteSchedules`. Selective updates preserve unselected declarations. Native controller handlers must implement the new mode before this path is enabled.
@@ -334,6 +346,7 @@ unlock.
   for that object.
 
 ### Removed
+- **store (Breaking):** Deployment card collection, settlement, fraud warnings and queued refunds move from Store to Operator. See [migration guide](docs/migrations/_unreleased.md#card-workers-use-operator).
 
 - **controller client (Breaking):** Remove duplicate legacy credential-management methods, the raw secret list and the environment-free trigger shortcut
   Use the typed token and secret managers. Remaining legacy host callers pass the trigger environment explicitly.
@@ -465,6 +478,7 @@ unlock.
 - **sdk:** describe lists each pipeline's declared secrets as `secrets`, which `sparkwing pipeline describe --secrets` prints
 
 ### Changed
+- **store:** (Breaking) deployment ledger totals use `Operator.CreditLedgerTotals`; the raw Store method is removed. Reports use the same billing calculator as unit settlement.
 - **controller wire:** reconciliation preserves materialized result identities by run, job and state sequence. Private snapshots retain sealed guard refusals alongside cancellation, using the store's scheduling projection. Native owner consumption and transactional result copying remain integration requirements.
 
 - **documentation:** guide route examples are checked against the final shared HTTP policy. Source, Actions, limits and log guides use claim-scoped source/data access, job routes and deployment operator namespaces. Native runtime boundaries remain explicit.
@@ -641,6 +655,8 @@ unlock.
 - **controller:** Preserve roleless sign-in sessions through renewal, persist one-use browser flow state, and include cancellation intent in authentication snapshots
 - **secrets:** Commit tenant key rotation across secret and git credentials together, retain nanosecond timestamps, and read committed source audits with capability identities
 - **controller:** Queue depth counts a held job once when it has no readiness timestamp; runner activity uses the store clock
+- **store:** Count compressed log payloads in retained storage and billing. Log cursors keep their decoded byte offsets, and replay preserves both byte counts.
+- **store:** Tenant record operations use the controller's configured manifest reader. Manifest commits and reads no longer fail with a missing-reader error after `WithDataObjects` setup. Corrupt physical manifests still refuse required reads and result attachment.
 - **controller:** Accept Session authorization headers on policy routes and enforce the configured session lifetime
   Dashboard requests and browser logout no longer renew sessions before a failed CSRF check. Browser logout returns canonical errors and deletes only the verified session.
 - **runner enrollment:** failed enrollment revokes its newly minted credential, removes its new private files and service registration, and restores the previous runner settings. Machine startup reads the credential file named by `runner.credentials_dir` once.
@@ -709,6 +725,9 @@ unlock.
 ### Removed
 - **store (Breaking):** Queue metrics move from Store to Operator; pending trigger counts require an explicit Tenant. See [migration guide](docs/migrations/_unreleased.md#queue-reads-use-explicit-store-owners).
 - **store + controller (Breaking):** Removed `UpdateNodeDeps` and its HTTP endpoint. Generated dependencies use accepted expansion membership. See [migration guide](docs/migrations/_unreleased.md#generated-dependencies-use-accepted-expansions).
+- **store (Breaking):** Removed `Store.ReserveStorage`, `Store.CommitStorage`, their request/response types and `DefaultStorageReservationTTL`. Uploads use tenant blob tickets with verified commit and abort. The controller's log-retention probe reads storage standing without writing a reservation. See [migration guide](docs/migrations/_unreleased.md#storage-reservations-use-blob-tickets).
+- **store + controller (Breaking):** Remove `POST /api/v1/credits/grants` and caller-selected paid grants. Paid credit uses verified provider events matched to committed checkouts. Free operator grants and payment-linked reversals keep their existing paths. See the [migration guide](docs/migrations/_unreleased.md#paid-credit-requires-verified-checkout-settlement).
+- **store + controller (Breaking):** retire bucket-listing storage reconciliation, free-share log pruning and legacy receipt/download-day pruning. `Server.WithStoragePass`, `RunStoragePass` and `StoragePassEvery`, plus the store mark/reconcile/pruning APIs, are removed. Leased maintenance uses committed blob and tagged-log inventory and preserves replica usage. See [migration guide](docs/migrations/_unreleased.md#storage-maintenance-uses-committed-inventory).
 
 - **runner (Breaking):** Removed cache-server source fetching; source and working-tree baselines use upstream Git
 - **engine (Breaking):** Removed the legacy artifact transport; publication and staging require authorized blob records

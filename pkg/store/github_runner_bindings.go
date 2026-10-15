@@ -3,17 +3,10 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"strings"
 	"time"
 )
-
-// GitHubRunnerPrincipalPrefix begins the principal of every credential a
-// GitHub Actions job exchanges its ID token for. The controller reads the
-// bound repository back out of the principal, so no other mint path may
-// produce a principal with this prefix.
-const GitHubRunnerPrincipalPrefix = "github:"
 
 // GitHubRunnerBinding is a team owner's consent that workflow jobs of one
 // GitHub repository may run that team's work for that repository.
@@ -96,27 +89,6 @@ const MaxGitHubRunnerCredentials = 20
 // [MaxGitHubRunnerCredentials] live GitHub Actions credentials.
 var ErrGitHubRunnerCredentialLimit = errors.New("store: this team already holds the maximum live GitHub Actions runner credentials")
 
-// GitHubRunnerPush is the branch, commit, and workflow run named by a GitHub
-// Actions job's ID token.
-type GitHubRunnerPush struct {
-	Branch string
-	SHA    string
-	RunID  string
-}
-
-// GitHubRunnerCredentialPush returns the push the GitHub Actions credential
-// with prefix was minted for, or [ErrNotFound].
-func (t *Tenant) GitHubRunnerCredentialPush(ctx context.Context, prefix string) (GitHubRunnerPush, error) {
-	var push GitHubRunnerPush
-	err := t.s.queryRow(ctx,
-		`SELECT branch, sha, run_id FROM github_runner_credentials WHERE team = ? AND prefix = ?`,
-		string(t.team), prefix).Scan(&push.Branch, &push.SHA, &push.RunID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return GitHubRunnerPush{}, ErrNotFound
-	}
-	return push, err
-}
-
 // GitHubRepo identifies a repository on github.com. App deliveries supply ID;
 // parsed slugs alone leave it zero.
 type GitHubRepo struct {
@@ -154,165 +126,4 @@ func (r GitHubRepo) Slug() string { return r.Owner + "/" + r.Name }
 // resolves owner and name case-insensitively.
 func (r GitHubRepo) CanonicalURL() string {
 	return "https://github.com/" + strings.ToLower(r.Slug())
-}
-
-func (r GitHubRepo) spellings() []string {
-	slug := strings.ToLower(r.Slug())
-	out := []string{slug}
-	for _, base := range []string{"https://github.com/", "http://github.com/", "github.com/", "ssh://git@github.com/", "git@github.com:"} {
-		out = append(out, base+slug, base+slug+".git")
-	}
-	return out
-}
-
-// TriggerNamesGitHubRepo reports whether tr is work of repo: every repository
-// field tr carries names repo, and its GitHub owner and name, which every
-// GitHub-origin trigger records, do.
-func TriggerNamesGitHubRepo(tr *Trigger, repo GitHubRepo) bool {
-	if tr == nil {
-		return false
-	}
-	if !strings.EqualFold(tr.GithubOwner, repo.Owner) || !strings.EqualFold(tr.GithubRepo, repo.Name) {
-		return false
-	}
-	names := func(v string) bool {
-		v = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(v), "/"))
-		for _, s := range repo.spellings() {
-			if v == s {
-				return true
-			}
-		}
-		return false
-	}
-	if tr.Repo != "" && !names(tr.Repo) {
-		return false
-	}
-	if tr.RepoURL != "" && !names(tr.RepoURL) {
-		return false
-	}
-	// safety: a worker clones GITHUB_REPOSITORY in preference to the other
-	// fields, so a trigger naming another repository there is another
-	// repository's work.
-	if env := tr.TriggerEnv["GITHUB_REPOSITORY"]; env != "" && !names(env) {
-		return false
-	}
-	return true
-}
-
-// GitHubRunnerScope confines a claim to one team's work for one push of one
-// repository. It is the claim restriction of a credential a GitHub Actions
-// job exchanged its ID token for.
-type GitHubRunnerScope struct {
-	Team Team
-	Repo GitHubRepo
-	// Push is the branch and commit the job's ID token names; the scope
-	// admits only triggers recorded for exactly that branch and commit.
-	Push GitHubRunnerPush
-}
-
-// safety: tr's team is checked by the caller's query.
-func (g GitHubRunnerScope) admits(tr *Trigger) bool {
-	return g.Push.Branch != "" && g.Push.SHA != "" &&
-		tr.TriggerSource == "github" && tr.TriggerEnv["GITHUB_EVENT_NAME"] == "push" &&
-		tr.WebhookDelivery != "" && tr.WebhookReplayKey != "" &&
-		tr.RetryOf == "" && tr.ParentRunID == "" && tr.ParentNodeID == "" &&
-		tr.GitBranch == g.Push.Branch && tr.GitSHA == g.Push.SHA && TriggerNamesGitHubRepo(tr, g.Repo)
-}
-
-type githubRunnerScopeKey struct{}
-
-// WithGitHubRunnerScope confines the node and trigger claims made under ctx
-// to scope.
-func WithGitHubRunnerScope(ctx context.Context, scope GitHubRunnerScope) context.Context {
-	return context.WithValue(ctx, githubRunnerScopeKey{}, scope)
-}
-
-// GitHubRunnerScopeFrom returns the scope [WithGitHubRunnerScope] set on ctx.
-func GitHubRunnerScopeFrom(ctx context.Context) (GitHubRunnerScope, bool) {
-	scope, ok := ctx.Value(githubRunnerScopeKey{}).(GitHubRunnerScope)
-	return scope, ok
-}
-
-// safety: trigger_env is a blob no dialect filters, so a caller checks it with
-// [TriggerNamesGitHubRepo] on the row it reads.
-func (g GitHubRunnerScope) triggerClause(alias string) (string, []any) {
-	col := func(name string) string {
-		if alias == "" {
-			return name
-		}
-		return alias + "." + name
-	}
-	spellings := g.Repo.spellings()
-	ph := strings.TrimSuffix(strings.Repeat("?,", len(spellings)), ",")
-	clause := ` AND ` + col("team") + ` = ?` +
-		` AND ` + col("trigger_source") + ` = 'github'` +
-		` AND ` + col("webhook_delivery") + ` != '' AND ` + col("webhook_replay_key") + ` != ''` +
-		` AND ` + col("retry_of") + ` = '' AND COALESCE(` + col("parent_run_id") + `, '') = '' AND ` + col("parent_node_id") + ` = ''` +
-		` AND LOWER(` + col("github_owner") + `) = ? AND LOWER(` + col("github_repo") + `) = ?` +
-		` AND (` + col("repo") + ` = '' OR LOWER(` + col("repo") + `) IN (` + ph + `))` +
-		` AND (` + col("repo_url") + ` = '' OR LOWER(` + col("repo_url") + `) IN (` + ph + `))` +
-		` AND ` + col("git_branch") + ` = ? AND ` + col("git_sha") + ` = ?`
-	args := []any{string(g.Team), strings.ToLower(g.Repo.Owner), strings.ToLower(g.Repo.Name)}
-	for range 2 {
-		for _, s := range spellings {
-			args = append(args, s)
-		}
-	}
-	return clause, append(args, g.Push.Branch, g.Push.SHA)
-}
-
-func (g GitHubRunnerScope) nodeClause() (string, []any) {
-	inner, innerArgs := g.triggerClause("gt")
-	return ` AND team = ? AND run_id IN (SELECT gt.id FROM triggers gt WHERE gt.team = ?` + inner + `)`,
-		append([]any{string(g.Team), string(g.Team)}, innerArgs...)
-}
-
-// GitHubRunnerAdmits reports whether scope admits runID: the run's trigger
-// belongs to the scope's team, was recorded for the scope's branch and
-// commit, and names the scope's repository in every repository field,
-// including the ones in its environment.
-func (s *Store) GitHubRunnerAdmits(ctx context.Context, scope GitHubRunnerScope, runID string) (bool, error) {
-	var tr Trigger
-	var envJSON []byte
-	err := s.queryRow(ctx, `
-		SELECT repo, repo_url, github_owner, github_repo, trigger_env, git_branch, git_sha,
-		       trigger_source, retry_of, COALESCE(parent_run_id, ''), parent_node_id,
-		       webhook_delivery, webhook_replay_key
-		FROM triggers WHERE team = ? AND id = ?`, string(scope.Team), runID).
-		Scan(&tr.Repo, &tr.RepoURL, &tr.GithubOwner, &tr.GithubRepo, &envJSON, &tr.GitBranch, &tr.GitSHA,
-			&tr.TriggerSource, &tr.RetryOf, &tr.ParentRunID, &tr.ParentNodeID, &tr.WebhookDelivery, &tr.WebhookReplayKey)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	env, decoded := decodeTriggerEnv(envJSON)
-	if !decoded {
-		return false, nil
-	}
-	tr.TriggerEnv = env
-	return scope.admits(&tr), nil
-}
-
-// safety: an environment that does not decode cannot be shown to name the
-// repository, so a caller refuses the trigger rather than skipping the check.
-func decodeTriggerEnv(blob []byte) (map[string]string, bool) {
-	if len(blob) == 0 {
-		return nil, true
-	}
-	var env map[string]string
-	return env, json.Unmarshal(blob, &env) == nil
-}
-
-func (g GitHubRunnerScope) admitsRun(ctx context.Context, s *Store, runID string, seen map[string]bool) (bool, error) {
-	if ok, cached := seen[runID]; cached {
-		return ok, nil
-	}
-	ok, err := s.GitHubRunnerAdmits(ctx, g, runID)
-	if err != nil {
-		return false, err
-	}
-	seen[runID] = ok
-	return ok, nil
 }

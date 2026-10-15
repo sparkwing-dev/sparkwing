@@ -474,8 +474,13 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change N
 	if err := writeNodeStateTx(ctx, tx, team, row); err != nil {
 		return Applied{}, err
 	}
+	if !edge.RequestOnly {
+		if err := persistNodeResultSelectorsTx(ctx, tx, team, row, change.Extra.Result); err != nil {
+			return Applied{}, err
+		}
+	}
 	if result := change.Extra.Result; result != nil && !edge.RequestOnly {
-		var failure, records []byte
+		var failure []byte
 		if result.Failure != nil {
 			if err := validateRecordedFailure(row.Ref, result.Failure); err != nil {
 				return Applied{}, err
@@ -485,17 +490,11 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change N
 				return Applied{}, err
 			}
 		}
-		if row.Status == StatusDone && (result.OutputRecord != nil || result.ManifestRecord != nil) {
-			records, err = json.Marshal(materializedRecords{Output: result.OutputRecord, Manifest: result.ManifestRecord})
-			if err != nil {
-				return Applied{}, err
-			}
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE nodes SET error=?,failure_reason=?,exit_code=?,failure_json=?,result_records=? WHERE team=? AND run_id=? AND node_id=?`, result.MaskedError, result.Reason, result.ExitCode, failure, records, team, row.Ref.RunID, row.Ref.NodeID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE nodes SET error=?,failure_reason=?,exit_code=?,failure_json=? WHERE team=? AND run_id=? AND node_id=?`, result.MaskedError, result.Reason, result.ExitCode, failure, team, row.Ref.RunID, row.Ref.NodeID); err != nil {
 			return Applied{}, err
 		}
 	} else if row.Status == StatusDone || change.To == NodeRunning {
-		if _, err := tx.ExecContext(ctx, `UPDATE nodes SET failure_json=NULL,result_records=NULL WHERE team=? AND run_id=? AND node_id=?`, team, row.Ref.RunID, row.Ref.NodeID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE nodes SET failure_json=NULL WHERE team=? AND run_id=? AND node_id=?`, team, row.Ref.RunID, row.Ref.NodeID); err != nil {
 			return Applied{}, err
 		}
 	}

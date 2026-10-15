@@ -109,10 +109,10 @@ func populateInstall(t *testing.T, st *store.Store, cipher *secrets.Cipher) {
 		}
 	}
 
-	if _, err := tenant(t, st, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid, 5_000_000, "drill-invoice-1", "operator"); err != nil {
+	if _, err := tenant(t, st, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 5_000_000, Reference: "drill-invoice-1", CreatedBy: "operator"}); err != nil {
 		t.Fatalf("grant credits: %v", err)
 	}
-	if _, err := tenant(t, st, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid, 2_500_000, "drill-invoice-2", "operator"); err != nil {
+	if _, err := tenant(t, st, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 2_500_000, Reference: "drill-invoice-2", CreatedBy: "operator"}); err != nil {
 		t.Fatalf("grant credits: %v", err)
 	}
 

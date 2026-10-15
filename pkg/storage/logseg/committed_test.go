@@ -42,7 +42,7 @@ func committedFixture(t *testing.T, subject blob.LogSubject) (logseg.CommittedRe
 		seg, body := subjectSegment(t, i, line)
 		key := blob.LogSegmentKey(prefix, i)
 		objects.put(key, body)
-		f.view.Segments = append(f.view.Segments, store.Segment{Index: int64(i), Offset: offset, Size: seg.Bytes, Digest: seg.SHA256, ObjectKey: key})
+		f.view.Segments = append(f.view.Segments, store.Segment{Index: int64(i), Offset: offset, Size: seg.Bytes, StoredBytes: seg.StoredBytes, Digest: seg.SHA256, ObjectKey: key})
 		offset += seg.Bytes
 		raw.WriteString(line)
 	}
@@ -71,14 +71,15 @@ func TestCommittedReadsVerifyBytesAndResume(t *testing.T) {
 
 func TestCommittedReadsRejectSubstitutedMetadata(t *testing.T) {
 	for name, change := range map[string]func(*store.LogSegments){
-		"subject":    func(v *store.LogSegments) { v.Subject = ownerSubject(blob.LogPlan) },
-		"generation": func(v *store.LogSegments) { a := *v.Subject.Attempt; a.Generation++; v.Subject.Attempt = &a },
-		"gap":        func(v *store.LogSegments) { v.Segments[1].Offset++ },
-		"overlap":    func(v *store.LogSegments) { v.Segments[1].Offset-- },
-		"index":      func(v *store.LogSegments) { v.Segments[1].Index++ },
-		"size":       func(v *store.LogSegments) { v.Segments[0].Size = -1 },
-		"digest":     func(v *store.LogSegments) { v.Segments[0].Digest = "" },
-		"object key": func(v *store.LogSegments) { v.Segments[0].ObjectKey = "teams/acme/cas/unrelated" },
+		"subject":     func(v *store.LogSegments) { v.Subject = ownerSubject(blob.LogPlan) },
+		"generation":  func(v *store.LogSegments) { a := *v.Subject.Attempt; a.Generation++; v.Subject.Attempt = &a },
+		"gap":         func(v *store.LogSegments) { v.Segments[1].Offset++ },
+		"overlap":     func(v *store.LogSegments) { v.Segments[1].Offset-- },
+		"index":       func(v *store.LogSegments) { v.Segments[1].Index++ },
+		"size":        func(v *store.LogSegments) { v.Segments[0].Size = -1 },
+		"stored size": func(v *store.LogSegments) { v.Segments[0].StoredBytes = 0 },
+		"digest":      func(v *store.LogSegments) { v.Segments[0].Digest = "" },
+		"object key":  func(v *store.LogSegments) { v.Segments[0].ObjectKey = "teams/acme/cas/unrelated" },
 		"foreign object": func(v *store.LogSegments) {
 			v.Segments[0].ObjectKey = strings.Replace(v.Segments[0].ObjectKey, "teams/acme/", "teams/other/", 1)
 		},
@@ -99,7 +100,7 @@ func TestCommittedReadsRejectSubstitutedMetadata(t *testing.T) {
 }
 
 func TestCommittedReadsStopBeforeCorruptBytes(t *testing.T) {
-	for _, fault := range []string{"corrupt", "wrong size", "missing"} {
+	for _, fault := range []string{"corrupt", "wrong size", "wrong stored size", "missing"} {
 		t.Run(fault, func(t *testing.T) {
 			r, f, objects, _ := committedFixture(t, jobSubject())
 			second := &f.view.Segments[1]
@@ -109,6 +110,8 @@ func TestCommittedReadsStopBeforeCorruptBytes(t *testing.T) {
 			case "wrong size":
 				second.Size++
 				f.view.Segments[2].Offset++
+			case "wrong stored size":
+				second.StoredBytes++
 			case "missing":
 				objects.mu.Lock()
 				delete(objects.objs, second.ObjectKey)
@@ -161,7 +164,6 @@ func TestCommittedReadsPreserveIncompleteAndEmptyTails(t *testing.T) {
 }
 
 type failedLogObjects struct {
-	logseg.Objects
 	body io.ReadCloser
 	err  error
 }
@@ -195,4 +197,38 @@ func TestCommittedReadsPreserveCancellation(t *testing.T) {
 	if !errors.Is(err, context.Canceled) || result.Bytes != 0 || f.calls != 0 {
 		t.Fatalf("read = %+v, %v; authorizations = %d", result, err, f.calls)
 	}
+}
+
+func FuzzCommittedReadsUseOnlyAuthorizedRecords(f *testing.F) {
+	f.Add([]byte("committed\n"), []byte("foreign\n"), false)
+	f.Add([]byte("committed\n"), []byte("foreign\n"), true)
+	f.Fuzz(func(t *testing.T, committed, foreign []byte, denied bool) {
+		if len(committed) == 0 || len(committed) > 1<<16 || len(foreign) > 1<<16 {
+			return
+		}
+		subject := jobSubject()
+		prefix, err := blob.LogSubjectPrefix("r90", subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		segment, body := subjectSegment(t, 1, string(committed))
+		objects := newMemObjects()
+		key := blob.LogSegmentKey(prefix, 1)
+		objects.put(key, body)
+		objects.put(blob.LogSegmentKey(prefix, 2), foreign)
+		objects.put(blob.LogManifestKey(prefix), foreign)
+		records := &committedRecords{view: store.LogSegments{Subject: subject, Complete: true, Segments: []store.Segment{{Index: 1, Size: segment.Bytes, StoredBytes: segment.StoredBytes, Digest: segment.SHA256, ObjectKey: key}}}}
+		if denied {
+			records.err = blob.ErrDigestNotReadable
+		}
+		var out bytes.Buffer
+		result, err := (logseg.CommittedReader{Records: records, Objects: objects}).Read(t.Context(), store.Actor{}, blob.LogReadRequest{Subject: subject}, &out)
+		if denied {
+			if !errors.Is(err, blob.ErrDigestNotReadable) || objects.getCount() != 0 || out.Len() != 0 || result.Bytes != 0 {
+				t.Fatalf("denied read=%+v, %v, %q", result, err, out.Bytes())
+			}
+		} else if err != nil || !bytes.Equal(out.Bytes(), committed) || !result.Complete || objects.getCount() != 1 {
+			t.Fatalf("authorized read=%+v, %v, %q", result, err, out.Bytes())
+		}
+	})
 }

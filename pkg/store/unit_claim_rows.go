@@ -157,7 +157,7 @@ func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, dem
 	if err != nil {
 		return UnitRef{}, err
 	}
-	metered := chain[len(chain)-1].principal.Capability.RootMetered
+	metered := meteredPlacement(c, chain[len(chain)-1].principal.Capability)
 	var candidates []queuedClaim
 	for _, kind := range kinds {
 		query, args := queuedClaimQuery(c, kind, tx.now().UnixNano())

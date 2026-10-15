@@ -16,6 +16,7 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"readPaymentCorrelationTx":      "verified provider mode and object resolve the payer from the persisted correlation before its tenant is known",
 	"hasDeploymentAdministratorTx":  "deployment readiness and the bootstrap gate select only credentials whose team is NULL, then validate their complete live ancestry",
 	"(*Store).LookupCapability":     "a presentation digest identifies the credential before its tenant is known",
 	"loadCapabilityRecordTx":        "globally unique prefixes resolve the complete authority envelope before its tenant and ancestry are checked",
@@ -23,7 +24,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"persistCapabilityTx":           "indexed columns, including nullable team, are serialized from the complete authority envelope in one INSERT",
 	"deleteRetentionCapabilitiesTx": "the elected deployment pass removes ended credentials across teams while preserving cross-team ancestry",
 
-	"paymentEventReplayTx":              "provider event identity is unique across teams and is checked before resolving the persisted payer",
 	"refundableBillingSecondsTx":        "the deployment credit sampler totals unsettled awards across teams from their immutable billing records",
 	"(*Operator).CollectBlobTombstones": "the elected blob collector visits expired tombstones across teams and deletes each exact tenant digest",
 	"(*Operator).maintainRetention":     "the elected maintenance pass counts retained pins and records across all teams",
@@ -43,22 +43,21 @@ var reviewedUnscopedSQL = map[string]string{
 	"paymentWarningTeamTx":                "a provider warning names a payment identity; its persisted grant or card attempt supplies the team",
 	"(*Store).settlePaymentFacts":         "a verified event resolves its committed checkout by configured mode and provider session, then rejects payment identities already used by any other checkout",
 
-	"(*Store).DueCardCharges": "the payment worker expires every team's stale pay-now attempts in one pass " +
+	"(*Operator).DueCardCharges": "the payment worker expires every team's stale pay-now attempts in one pass " +
 		"under the ledger lock",
 	"startDueAttemptsTx": "the payment worker starts the due attempts of every team's open charges; " +
 		"each row it touches is named by its global id",
-	"(*Store).SettleCardPayment": "a payment names its charge by global id, and the charge row it reads " +
+	"settleCardPaymentTx": "a payment names its charge by global id, and the charge row it reads " +
 		"is checked against the team the payment names",
-	"(*Store).FailCardAttempt":     "a decline names its attempt by global id; the team is read from that row",
-	"(*Store).DropCardAttempt":     "an attempt that never reached Stripe is closed by its global id",
-	"(*Store).RecordAttemptIntent": "the worker binds a payment to the attempt it names by global id",
-	"(*Store).DueCardRefunds":      "the payment worker lists every team's queued refunds in one pass",
-	"(*Store).ReportCardRefund": "Stripe names a refund by its payment and refund ids alone; the team is what " +
-		"the queued row says",
-	"globalRunnerRefusal":      "the global concurrent runner cap counts live claims from every team",
-	"globalRunsPerHourRefusal": "the global hourly cap counts runs from every team",
-	"runOwnerTx":               "asks which team owns an id, so an answer scoped to the asker is no answer",
-	"(*Store).NodeOutputKey":   "the run ID is global, and the key only names an attempt the upload's own check binds",
+	"failCardAttemptTx":               "a decline names its attempt by global id; the team is read from that row",
+	"(*Operator).DropCardAttempt":     "an attempt that never reached Stripe is closed by its global id",
+	"(*Operator).RecordAttemptIntent": "the worker binds a payment to the attempt it names by global id",
+	"reportCardRefundTx":              "a provider refund names its payment identity before its persisted team is known",
+	"(*Operator).DueCardRefunds":      "the payment worker lists every team's queued refunds in one pass",
+	"globalRunnerRefusal":             "the global concurrent runner cap counts live claims from every team",
+	"globalRunsPerHourRefusal":        "the global hourly cap counts runs from every team",
+	"runOwnerTx":                      "asks which team owns an id, so an answer scoped to the asker is no answer",
+	"(*Store).NodeOutputKey":          "the run ID is global, and the key only names an attempt the upload's own check binds",
 	"(*Store).RecordLocalOutput": "a laptop store records an output its own process wrote for a node it holds; " +
 		"the run ID is global and the row takes that node's team",
 	"(*Store).listRuns": "the team predicate comes from runFilterWhere at run time; " +

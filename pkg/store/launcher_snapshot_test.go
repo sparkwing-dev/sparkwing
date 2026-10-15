@@ -12,6 +12,7 @@ import (
 func launcherSnapshotFixture(t *testing.T, kind capability.UnitKind) (*Store, UnitDemand, UnitClaim, *time.Time) {
 	t.Helper()
 	s, demand := unitClaimFixture(t)
+	fundUnitClaim(t, s)
 	now := s.now()
 	s.clock = func() time.Time { return now }
 	root := authorityRoot("launcher", "")

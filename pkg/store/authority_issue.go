@@ -286,7 +286,7 @@ func awardCapabilityTx(ctx context.Context, tx *storeTx, spec capability.AwardSp
 	if here || parent.Capability.Purpose == capability.PurposeHere {
 		executor = "here"
 	}
-	c.Billing = &capability.BillingProvenance{PayerTeam: row.team, Metered: parent.Capability.RootMetered, ExecutorClass: executor, ReservationID: reservation, Start: start, Unit: billingUnitKind(spec.Unit)}
+	c.Billing = &capability.BillingProvenance{PayerTeam: row.team, Metered: meteredPlacement(claimant.Capability, parent.Capability), ExecutorClass: executor, ReservationID: reservation, Start: start, Unit: billingUnitKind(spec.Unit)}
 	return c, nil
 }
 

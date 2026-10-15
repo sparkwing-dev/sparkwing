@@ -11,6 +11,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
+func meteredPlacement(claimant, root capability.Capability) bool {
+	return launcherClaimant(claimant) || root.RootMetered
+}
+
 func persistUnitBillingTx(ctx context.Context, tx *storeTx, c capability.Capability) error {
 	if c.Purpose == capability.PurposeHere {
 		return nil

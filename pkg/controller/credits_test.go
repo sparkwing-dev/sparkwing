@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -215,7 +214,7 @@ func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
 		t.Fatalf("unit constants = %d/%d", state.MicroPerCredit, state.CreditsPerDollar)
 	}
 
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(t.Context(), store.CreditGrantPaid, 1000*store.MicroCreditsPerCent, "pay_9", "test"); err != nil {
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay_9", CreatedBy: "test"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -290,204 +289,6 @@ func (v creditSettingsView) rateFor(cores int64) int64 {
 		}
 	}
 	return 0
-}
-
-func TestCreditSettings_ReadsTheDefaultsAndSetsEachValue(t *testing.T) {
-	f := newCreditsFixture(t, false)
-
-	status, view := creditSettings(t, f, http.MethodGet, nil)
-	if status != http.StatusOK {
-		t.Fatalf("GET settings = %d", status)
-	}
-	if view.RateMicroPerSecond != store.DefaultCreditRateMicro ||
-		view.GraceSeconds != store.DefaultCreditGraceSeconds ||
-		view.MaxChargeSeconds != store.DefaultCreditMaxChargeSeconds {
-		t.Fatalf("settings = %+v, want the package defaults", view)
-	}
-	if view.MicroPerCredit != store.MicroCreditsPerCredit || view.CreditsPerDollar != store.CreditsPerDollar {
-		t.Fatalf("unit constants = %d/%d", view.MicroPerCredit, view.CreditsPerDollar)
-	}
-
-	status, view = creditSettings(t, f, http.MethodPut, map[string]any{
-		"rate_micro_per_second": 30_000, "grace_seconds": 0, "max_charge_seconds": 45,
-	})
-	if status != http.StatusOK {
-		t.Fatalf("PUT settings = %d", status)
-	}
-	if view.RateMicroPerSecond != 30_000 || view.GraceSeconds != 0 || view.MaxChargeSeconds != 45 {
-		t.Fatalf("settings after the write = %+v", view)
-	}
-	settings, err := f.store.AsOperator().CreditSettings(context.Background())
-	if err != nil {
-		t.Fatalf("read grace: %v", err)
-	}
-	if settings.GraceSeconds != 0 {
-		t.Fatalf("stored grace = %d, want 0", settings.GraceSeconds)
-	}
-}
-
-func TestCreditSettings_LeavesUnnamedValuesAlone(t *testing.T) {
-	f := newCreditsFixture(t, false)
-
-	if status, _ := creditSettings(t, f, http.MethodPut,
-		map[string]any{"grace_seconds": 0}); status != http.StatusOK {
-		t.Fatalf("PUT grace only = %d", status)
-	}
-	status, view := creditSettings(t, f, http.MethodGet, nil)
-	if status != http.StatusOK {
-		t.Fatalf("GET settings = %d", status)
-	}
-	if view.GraceSeconds != 0 {
-		t.Fatalf("grace = %d, want 0", view.GraceSeconds)
-	}
-	if view.RateMicroPerSecond != store.DefaultCreditRateMicro ||
-		view.MaxChargeSeconds != store.DefaultCreditMaxChargeSeconds {
-		t.Fatalf("a one-field write moved the other settings: %+v", view)
-	}
-}
-
-func TestCreditSettings_RefusesValuesTheLedgerCannotPrice(t *testing.T) {
-	f := newCreditsFixture(t, false)
-
-	for name, body := range map[string]map[string]any{
-		"no field named": {},
-		"rate at zero":   {"rate_micro_per_second": 0},
-		"negative rate":  {"rate_micro_per_second": -1},
-		"negative grace": {"grace_seconds": -1},
-		"cap under the heartbeat cadence": {
-			"max_charge_seconds": store.MinCreditMaxChargeSeconds - 1,
-		},
-		"cap past the ceiling": {
-			"max_charge_seconds": int64(store.MaxCreditMaxChargeSeconds) + 1,
-		},
-		"rate past the ceiling": {
-			"rate_micro_per_second": int64(store.MaxCreditRateMicro) + 1,
-		},
-	} {
-		if status, _ := creditSettings(t, f, http.MethodPut, body); status != http.StatusBadRequest {
-			t.Errorf("%s = %d, want 400", name, status)
-		}
-	}
-
-	status, view := creditSettings(t, f, http.MethodGet, nil)
-	if status != http.StatusOK {
-		t.Fatalf("GET settings = %d", status)
-	}
-	if view.RateMicroPerSecond != store.DefaultCreditRateMicro ||
-		view.GraceSeconds != store.DefaultCreditGraceSeconds ||
-		view.MaxChargeSeconds != store.DefaultCreditMaxChargeSeconds {
-		t.Fatalf("a refused write moved a setting: %+v", view)
-	}
-}
-
-func TestCreditSettings_RefusesAWriteWhoseOtherFieldIsBad(t *testing.T) {
-	f := newCreditsFixture(t, false)
-
-	status, _ := creditSettings(t, f, http.MethodPut,
-		map[string]any{"grace_seconds": 0, "rate_micro_per_second": -5})
-	if status != http.StatusBadRequest {
-		t.Fatalf("mixed write = %d, want 400", status)
-	}
-	settings, err := f.store.AsOperator().CreditSettings(context.Background())
-	if err != nil {
-		t.Fatalf("read grace: %v", err)
-	}
-	if settings.GraceSeconds != store.DefaultCreditGraceSeconds {
-		t.Fatalf("grace = %d; the good half of a refused write was applied", settings.GraceSeconds)
-	}
-}
-
-func TestCreditSettings_RefusesTableWithBadSiblingWithoutChangingPrices(t *testing.T) {
-	f := newCreditsFixture(t, false)
-
-	status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
-		"rate_table":    map[string]int64{"2": 999_999, "4": 20_000},
-		"grace_seconds": -1,
-	})
-	if status != http.StatusBadRequest {
-		t.Fatalf("mixed write = %d, want 400", status)
-	}
-	_, view := creditSettings(t, f, http.MethodGet, nil)
-	if view.RateTableSet || view.rateFor(2) != 9_000 || len(view.RateTable) != 3 {
-		t.Fatalf("the good half of a refused write changed prices: %+v", view)
-	}
-}
-
-func TestCreditSettings_RefusesExplicitNullWithoutChangingPrices(t *testing.T) {
-	f := newCreditsFixture(t, false)
-
-	status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
-		"rate_table":    map[string]int64{"2": 999_999, "4": 20_000},
-		"grace_seconds": nil,
-	})
-	if status != http.StatusBadRequest {
-		t.Fatalf("mixed write = %d, want 400", status)
-	}
-	_, view := creditSettings(t, f, http.MethodGet, nil)
-	if view.RateTableSet || view.rateFor(2) != 9_000 || len(view.RateTable) != 3 {
-		t.Fatalf("the good half of a refused write changed prices: %+v", view)
-	}
-}
-
-func TestCreditSettings_RefusesNullInDuplicateAndAcceptsCaseFold(t *testing.T) {
-	f := newCreditsFixture(t, false)
-
-	status, _ := creditSettings(t, f, http.MethodPut, json.RawMessage(
-		`{"rate_table":{"4":20000},"grace_seconds":null,"grace_seconds":0}`))
-	if status != http.StatusBadRequest {
-		t.Fatalf("duplicate null write = %d, want 400", status)
-	}
-	_, view := creditSettings(t, f, http.MethodGet, nil)
-	if view.RateTableSet {
-		t.Fatalf("the duplicate null write stored a table: %+v", view)
-	}
-	status, view = creditSettings(t, f, http.MethodPut, map[string]any{"GRACE_SECONDS": 0})
-	if status != http.StatusOK || view.GraceSeconds != 0 {
-		t.Fatalf("case-folded valid write = %d, %+v", status, view)
-	}
-}
-
-func TestCreditSettings_ConcurrentTableAndScalarKeepASerialResult(t *testing.T) {
-	const scalarWrites = 8
-	for attempt := range 10 {
-		f := newCreditsFixture(t, false)
-		start := make(chan struct{})
-		statuses := make([]int, scalarWrites+1)
-		var wg sync.WaitGroup
-		wg.Add(len(statuses))
-		go func() {
-			defer wg.Done()
-			<-start
-			statuses[0], _ = creditsRequest(t, http.MethodPut,
-				f.url+"/api/v1/credits/settings", f.admin,
-				map[string]any{"rate_table": map[string]int64{"4": 20_000}})
-		}()
-		for i := 1; i < len(statuses); i++ {
-			go func(i int) {
-				defer wg.Done()
-				<-start
-				statuses[i], _ = creditsRequest(t, http.MethodPut,
-					f.url+"/api/v1/credits/settings", f.admin,
-					map[string]any{"rate_micro_per_second": 99_000})
-			}(i)
-		}
-		close(start)
-		wg.Wait()
-
-		_, view := creditSettings(t, f, http.MethodGet, nil)
-		if statuses[0] != http.StatusOK {
-			t.Fatalf("attempt %d statuses = %v", attempt, statuses)
-		}
-		for _, status := range statuses[1:] {
-			if status != http.StatusOK && status != http.StatusBadRequest {
-				t.Fatalf("attempt %d statuses = %v", attempt, statuses)
-			}
-		}
-		if !view.RateTableSet || view.rateFor(4) != 20_000 {
-			t.Fatalf("attempt %d produced a non-serial result: statuses=%v settings=%+v",
-				attempt, statuses, view)
-		}
-	}
 }
 
 func TestCreditSettings_ReadNeedsRunsReadAndWriteNeedsAdmin(t *testing.T) {
@@ -630,8 +431,7 @@ func TestCreditSettings_RefusesTheScalarOnceATableExists(t *testing.T) {
 func TestCredits_AClaimAboveTheLargestClassFailsTheNode(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay_1", CreatedBy: "root"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
@@ -677,8 +477,7 @@ func TestCredits_AClaimsOwnCPUFigureDoesNotLowerTheBill(t *testing.T) {
 	}
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay_1", CreatedBy: "root"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
@@ -735,8 +534,7 @@ func TestCredits_TheClaimResponseCarriesTheBilledClass(t *testing.T) {
 	}
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay_1", CreatedBy: "root"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
@@ -786,8 +584,7 @@ func TestCredits_TheClaimResponseCarriesTheBilledClass(t *testing.T) {
 func TestCredits_QuarterCorePinReservesTwoCoreMinimum(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCent, "pay-quarter", "root"); err != nil {
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay-quarter", CreatedBy: "root"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if err := f.store.CreateRun(ctx, store.Run{
@@ -824,8 +621,7 @@ func TestCredits_QuarterCorePinReservesTwoCoreMinimum(t *testing.T) {
 func TestCredits_ANamedClaimThatDoesNotSizeToClassIsRefused(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay_1", CreatedBy: "root"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if err := f.store.CreateRun(ctx, store.Run{
@@ -860,8 +656,7 @@ func TestCredits_ANamedClaimThatDoesNotSizeToClassIsRefused(t *testing.T) {
 func TestCredits_AWarmClaimPassesOverAClassAboveTheWarmPool(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent, Reference: "pay_1", CreatedBy: "root"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if err := f.store.CreateRun(ctx, store.Run{

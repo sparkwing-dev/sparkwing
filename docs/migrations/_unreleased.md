@@ -1,5 +1,19 @@
 # Migrating to the next release
 
+## Execution attempts and Cloud metering
+
+`AcknowledgeNodeExecutionStart`, `FinishNodeExecutionAttempt`, `ExecutionStart`
+and `ExecutionAttemptFinish` are removed. Use `Tenant.TransitionNode` with the
+current award and source attempt ordinal. Select a tenant before calling
+`ListNodeExecutionAttempts`. It reads the current run's committed attempts.
+The unused coordinator ID API and GitHub runner scope APIs are removed.
+Capability push bindings and the shared matcher own repository restrictions.
+
+Cloud awards require credits regardless of the launcher's root metering flag.
+Customer runners keep their enrolled metering policy. Existing award facts stay
+fixed. Verified non-checkout payments persist their receipt and provider
+correlation in the final schema.
+
 ## Sole claim queue and console metering
 
 `Store.ClaimNextReadyNode`, `ClaimSpecificTrigger`, `ClaimSpecificTriggerFor`,
@@ -723,92 +737,6 @@ are removed. The elected pass cleans terminal capacity in every scope. Doctor's
 `dead_concurrency_holders` and `dead_concurrency_waiters` fields are removed with
 its independent repair path.
 
-## Egress accounting uses tenant and replica counters
-
-`Store.RecordEgressUsage`, `Store.ListEgressUsage` and `Store.PruneEgressUsage`
-are removed. Write additive bytes with `Tenant.AddUsage` using `egress_bytes`,
-a UTC day and the controller's trusted replica ID. Read day or month totals with
-`Tenant.EgressUsage`. Deployment reports use `Operator.EgressUsageAcrossTeams`.
-Pruning uses `Operator.PruneEgressUsage` with the maintenance lease.
-
-The controller records delivered successful-response bytes at request completion,
-including partial transfers and reads served without an in-memory meter. Logs
-consume egress while remaining exempt from download caps. Alarm reload uses team
-totals. A failed counter write emits an error. A controller crash before request
-completion can lose that request's egress sample. Thirteen months of reports stay
-available. There is no principal-based persistence or periodic flush.
-
-## Event charges use tenant handles and replica identity
-
-`Store.AppendEventCharged` is removed. Obtain a tenant with `Store.ForTeam`,
-then call `Tenant.AppendEventCharged(ctx, replicaID, runID, nodeID, kind, payload)`.
-The replica ID is the controller's trusted identity. The caller no longer
-selects a charged principal. The tenant supplies the team and the store owns time.
-
-Event writes, retained run counters, shared storage quotas and replica usage
-commit together. Pending uploads and events share monthly and run byte capacity.
-Events consume no object capacity. Usage is recorded without a configured quota.
-The existing event limits and free-tier policy keep their meaning. The HTTP
-request and response shapes stay the same.
-
-## Download charges use tenant handles and replica identity
-
-`Store.ChargeDownload` is removed. Obtain a tenant with `Store.ForTeam`, then
-call `Tenant.ChargeDownload`. `DownloadCharge.ReplicaID` identifies the trusted
-controller replica. The request no longer accepts `Team` or `Now`. The store
-selects the current UTC day under its shared quota lock.
-
-Admission and replica usage commit together. Free and funded caps keep their
-existing behavior, including finishing the download that crosses the cap and
-recording already delivered bytes. Logs stay exempt. Controller integrations
-use their existing lease-holder identity and require no new configuration.
-
-## Paid credit requires verified checkout settlement
-
-`POST /api/v1/credits/grants` is removed. `Tenant.GrantCredits` and
-`Tenant.RecordCreditGrant` refuse `paid` grants.
-Free operator grants keep their console path. Payment reversals require a
-verified provider event.
-
-Checkout integrations must supply C2's verified provider event to
-`Store.SettlePayment`. The committed checkout supplies the team and credit
-amount. The event must match its session, payment, amount, currency and test/live
-mode. Actionable fraud warnings refuse settlement before any credit or event
-receipt commits. Replayed events grant once. Provider verification and its
-controller adapter remain integration work.
-
-## Storage counters use verified upload tickets
-
-The `/internal/storage/reserve`, `/internal/storage/commit`,
-`/internal/storage/release` and `/internal/downloads/charge` endpoints are removed.
-Remove cache `controller-token` credentials and service-counter integrations.
-`Store.RenewStorage` and its rolling block receipts are removed.
-
-The final storage adapter reserves quota with `Tenant.ReserveBlobUpload`, verifies
-physical bytes, then commits with `Tenant.CommitBlobUpload`. Signing or transfer
-failure uses `Tenant.AbortBlobUpload`. The ticket binds the exact uploader and
-retains immutable replay state. The signed-data controller adapter remains an
-integration dependency. There is no service-token fallback.
-
-`SetFreeTeamSlots` writes the final settings table and refuses sealed values.
-Its slot count and signup behavior keep their existing meaning.
-
-## Storage maintenance uses committed inventory
-
-Remove `Server.WithStoragePass` and `Server.RunStoragePass` calls. The controller's
-existing maintenance timer runs leased retention, tagged-log sealing and storage
-billing. An embedding that serves `Handler` directly calls `Server.MaintainStorage`.
-`StoragePassEvery` is removed. `StorageMaintenanceInterval` names the timer period.
-
-`Store.StorageMarks`, `ReconcileStorage`, `TeamsOverFreeLogShare`,
-`PrunableNodeLogs`, `PruneStorageCommitReceipts` and `PruneDownloadDays` are removed.
-Use `Tenant.StorageRetainedBytes` for retained inventory and `Tenant.StorageUsageFor`
-for summed replica usage. `Operator.ChargeRetainedStorage` and `MaintainRetention`
-require the current maintenance lease. Bucket listings no longer replace usage
-counters. Log retention follows the run's persisted class. Allowance-driven
-physical eviction still requires the final storage adapter.
-
-
 ## OAuth browser callbacks
 
 OAuth start and callback use the shared route policy and browser-flow verifier.
@@ -1354,10 +1282,13 @@ that keep the logs service running.
   console-only `/api/v1/operator/runners/{runner}/metered` with an explicit
   boolean `metered`. The runner selector is the enrolled root's public
   capability prefix. The response contains `runner` and `metered`.
-- **Go:** pass the actor, the reason and the one hold's id to
-  `Store.ReleaseCreditFreezes`, which refuses an empty id; a
-  caller of the removed `Store.DisputeTeam` reads the team from the hold it
-  holds, or from `Tenant.CreditFreeze`.
+- **Go:** select the registered team with `Store.ForTeam`. Use
+  `Tenant.ReleaseCreditFreezes` to release a named hold. A release requires the
+  actor, reason and one hold ID. An empty ID is refused. Provider disputes and
+  refunds use verified payment-event settlement. Raw callback APIs and
+  `Store.PaidGrantTeam` are removed.
+  A caller of the removed `Store.DisputeTeam` reads the team from its hold
+  or from `Tenant.CreditFreeze`.
 
 ## Password users are removed
 
@@ -1873,7 +1804,7 @@ cannot commit, including a zero-byte ticket.
 ## Credit persistence uses explicit handles
 
 Deployment billing settings now use `store.AsOperator()`. This includes
-`CreditSettings`, `SetCreditSettings`, `SetOperatorCreditSettings`,
+`CreditSettings`, `SetCreditSettings`,
 `CreditRateTable` and `WarmCPUClassCores`. Their raw Store methods are removed.
 The settings, validation and update rules are unchanged.
 

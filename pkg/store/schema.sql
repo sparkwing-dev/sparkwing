@@ -134,7 +134,8 @@ CREATE TABLE nodes (
     retry_budget BIGINT NOT NULL DEFAULT 0,
     retry_backoff_ms BIGINT NOT NULL DEFAULT 0,
     failure_json BLOB,
-    result_records BLOB,
+    output_record BLOB,
+    manifest_record BLOB,
     kind TEXT NOT NULL DEFAULT '',
     spec_hash TEXT NOT NULL DEFAULT '',
     on_failure_of TEXT NOT NULL DEFAULT '',
@@ -160,7 +161,7 @@ CREATE TABLE nodes (
     CHECK(owner_capability_prefix = '' OR (claimed_by IS NOT NULL AND capability_prefix <> '')),
     CHECK((status = 'done') = (outcome <> '')),
     CHECK((status = 'done') = (finished_at IS NOT NULL)),
-    CHECK(result_records IS NULL OR status = 'done'),
+    CHECK((output_record IS NULL AND manifest_record IS NULL) OR status = 'done'),
     CHECK(status <> 'done' OR (claimed_by IS NULL AND lease_expires_at IS NULL AND capability_prefix = '')),
     FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE
 );
@@ -670,17 +671,39 @@ CREATE TABLE credit_checkouts (
 
 -- safety: provider-event deduplication and credit settlement survive operational run pruning.
 CREATE TABLE payment_events (
-    team TEXT NOT NULL REFERENCES teams(name),
+    team TEXT REFERENCES teams(name),
     payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
     event_id TEXT NOT NULL,
-    checkout_id TEXT NOT NULL,
+    checkout_id TEXT,
     payment_id TEXT NOT NULL DEFAULT '',
-    event_kind TEXT NOT NULL CHECK(event_kind IN ('checkout_paid','checkout_expired','checkout_failed')),
+    event_kind TEXT NOT NULL CHECK(event_kind IN ('checkout_paid','checkout_expired','checkout_failed','card_setup','card_paid','card_failed','refund','warning','dispute_opened','dispute_closed')),
     event_digest TEXT NOT NULL,
     grant_id TEXT REFERENCES credit_grants(id),
     processed_at BIGINT NOT NULL,
+    object_id TEXT NOT NULL DEFAULT '',
+    event_json TEXT,
+    settlement_json TEXT,
     PRIMARY KEY(payment_mode,event_id),
-    FOREIGN KEY(team,checkout_id,payment_mode) REFERENCES credit_checkouts(team,id,payment_mode)
+    FOREIGN KEY(team,checkout_id,payment_mode) REFERENCES credit_checkouts(team,id,payment_mode),
+    CHECK(team IS NOT NULL OR event_kind = 'warning'),
+    CHECK((event_kind IN ('checkout_paid','checkout_expired','checkout_failed') AND checkout_id IS NOT NULL AND team IS NOT NULL)
+       OR (event_kind NOT IN ('checkout_paid','checkout_expired','checkout_failed') AND checkout_id IS NULL AND object_id <> '' AND event_json IS NOT NULL AND settlement_json IS NOT NULL))
+);
+
+CREATE INDEX idx_payment_events_object ON payment_events(payment_mode,object_id);
+
+CREATE TABLE payment_correlations (
+    payment_mode TEXT NOT NULL CHECK(payment_mode IN ('test','live')),
+    provider_id TEXT NOT NULL CHECK(provider_id <> ''),
+    kind TEXT NOT NULL CHECK(kind IN ('setup','collection')),
+    team TEXT NOT NULL REFERENCES teams(name),
+    customer_id TEXT NOT NULL CHECK(customer_id <> ''),
+    currency TEXT NOT NULL DEFAULT '',
+    attempt_id TEXT NOT NULL DEFAULT '',
+    charge_id TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY(payment_mode,provider_id),
+    CHECK((kind = 'setup' AND currency = '' AND attempt_id = '' AND charge_id = '')
+       OR (kind = 'collection' AND currency <> '' AND attempt_id <> '' AND charge_id <> ''))
 );
 
 CREATE TABLE credit_freezes (

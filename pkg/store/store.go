@@ -6,7 +6,6 @@ package store
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	_ "embed"
@@ -1824,7 +1823,7 @@ func (t *Tenant) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
 		return nil, err
 	}
 	for _, n := range out {
-		attempts, err := t.s.ListNodeExecutionAttempts(ctx, runID, n.NodeID)
+		attempts, err := t.ListNodeExecutionAttempts(ctx, runID, n.NodeID)
 		if err != nil {
 			return nil, err
 		}
@@ -1847,7 +1846,7 @@ func (t *Tenant) GetNode(ctx context.Context, runID, nodeID string) (*Node, erro
 	if err := scanNodeRow(row, record); err != nil {
 		return nil, err
 	}
-	attempts, err := t.s.ListNodeExecutionAttempts(ctx, runID, nodeID)
+	attempts, err := t.ListNodeExecutionAttempts(ctx, runID, nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -2811,54 +2810,6 @@ type ClaimIdentity struct {
 }
 
 func (c ClaimIdentity) bound() bool { return c.TokenPrefix != "" }
-
-const metaKeyCoordinatorID = "coordinator_id"
-
-func (s *Store) CoordinatorID(ctx context.Context) (string, error) {
-	var id string
-	if err := s.queryRow(ctx, `SELECT value FROM sparkwing_meta WHERE key = ?`, metaKeyCoordinatorID).Scan(&id); err == nil && id != "" {
-		return id, nil
-	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return "", err
-	}
-	var suffix [16]byte
-	if _, err := rand.Read(suffix[:]); err != nil {
-		return "", err
-	}
-	candidate := "coord-" + hex.EncodeToString(suffix[:])
-	if _, err := s.exec(ctx, `INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT (key) DO NOTHING`,
-		metaKeyCoordinatorID, candidate, time.Now().UnixNano()); err != nil {
-		return "", err
-	}
-	if err := s.queryRow(ctx, `SELECT value FROM sparkwing_meta WHERE key = ?`, metaKeyCoordinatorID).Scan(&id); err != nil {
-		return "", err
-	}
-	return id, nil
-}
-
-func coordinatorIDTx(ctx context.Context, tx *storeTx) (string, error) {
-	var id string
-	err := tx.QueryRowContext(ctx, `SELECT value FROM sparkwing_meta WHERE key = ?`, metaKeyCoordinatorID).Scan(&id)
-	if err == nil && id != "" {
-		return id, nil
-	}
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return "", err
-	}
-	var suffix [16]byte
-	if _, err := rand.Read(suffix[:]); err != nil {
-		return "", err
-	}
-	id = "coord-" + hex.EncodeToString(suffix[:])
-	if _, err := tx.ExecContext(ctx, `INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT (key) DO NOTHING`,
-		metaKeyCoordinatorID, id, time.Now().UnixNano()); err != nil {
-		return "", err
-	}
-	if err := tx.QueryRowContext(ctx, `SELECT value FROM sparkwing_meta WHERE key = ?`, metaKeyCoordinatorID).Scan(&id); err != nil {
-		return "", err
-	}
-	return id, nil
-}
 
 // CreateTrigger inserts a new trigger with status='pending'.
 func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {

@@ -29,6 +29,9 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 	if _, err := tenant.AcceptPlan(ctx, plan); err != nil {
 		return err
 	}
+	if _, err := tenant.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100000000, Reference: "launcher-fixture", CreatedBy: "fixture"}); err != nil {
+		return err
+	}
 	runID := plan.RunID
 	if _, err := tenant.TransitionNode(ctx, store.NodeTransition{Ref: store.NodeRef{RunID: runID, NodeID: "alpha"}, Actor: plan.Actor, To: store.NodeReady, Cause: store.CauseRelease}); err != nil {
 		return err

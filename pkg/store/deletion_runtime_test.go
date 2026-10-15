@@ -21,6 +21,7 @@ func TestTeamPurgeIsolationProperty(t *testing.T) {
 			root := authorityRoot("deployment", "")
 			root.Subject.Kind = capability.SubjectService
 			authorityPersist(t, s, root)
+			rewriteSchemaExec(t, s.db, `INSERT INTO payment_events(payment_mode,event_id,event_kind,event_digest,processed_at,object_id,event_json,settlement_json) VALUES ('test','unbound','warning','digest',1,'warning','{}','{}')`)
 			for j, team := range teams {
 				seedPurgeScope(t, s, team, j)
 			}
@@ -56,6 +57,8 @@ func seedPurgeScope(t *testing.T, s *Store, team Team, index int) {
 	rewriteSchemaExec(t, s.db, `INSERT INTO accounts(id,email,created_at,updated_at) VALUES (?,?,1,1)`, id, id+"@example.com")
 	rewriteSchemaExec(t, s.db, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES (?,?,'',1,2,?,?)`, id, id, team, id)
 	rewriteSchemaExec(t, s.db, `INSERT INTO business_events(id,ts,team,kind) VALUES (?,1,?,'test')`, id, team)
+	rewriteSchemaExec(t, s.db, `INSERT INTO payment_correlations(payment_mode,provider_id,kind,team,customer_id) VALUES ('test',?,'setup',?,'customer')`, id, team)
+	rewriteSchemaExec(t, s.db, `INSERT INTO payment_events(team,payment_mode,event_id,event_kind,event_digest,processed_at,object_id,event_json,settlement_json) VALUES (?,'test',?,'card_setup','digest',1,?,'{}','{}')`, team, id, id)
 	rewriteSchemaExec(t, s.db, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES (?,?,1,'p','pending',?,'request',1,'gh:1','host','execute',?,'account',1,'r30',30)`, team, id, []byte(`{}`), []byte(`[]`))
 	rewriteSchemaExec(t, s.db, `INSERT INTO pipeline_success_pins(team,pipeline,run_id,finished_at) VALUES (?,'p',?,1)`, team, id)
 	rewriteSchemaExec(t, s.db, `INSERT INTO blobs(team,digest,size,created_at) VALUES (?,'manifest',1,1),(?,'member',1,1)`, team, team)
@@ -78,7 +81,7 @@ func purgeRows(t *testing.T, s *Store, team Team, target bool) []string {
 		}
 		predicate := ""
 		var args []any
-		if table.Owner == SchemaTenant || slices.Contains([]string{"business_events", "capabilities", "sessions"}, table.Name) {
+		if table.Owner == SchemaTenant || slices.Contains([]string{"business_events", "capabilities", "sessions", "payment_events"}, table.Name) {
 			predicate, args = " WHERE team IS NOT ?", []any{team}
 			if target {
 				predicate = " WHERE team = ?"

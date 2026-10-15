@@ -2,23 +2,12 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
-
-// PaidGrantTeam resolves a provider payment through its committed checkout or
-// card grant. Checkout payments use the configured test/live mode.
-func (s *Store) PaidGrantTeam(ctx context.Context, paymentID string) (team Team, found bool, err error) {
-	err = s.inTx(ctx, func(tx *storeTx) error {
-		grant, ok, err := paidGrantForPaymentTx(ctx, tx, paymentID)
-		team, found = grant.Team, ok
-		return err
-	})
-	return team, found, err
-}
 
 // safety: provider payment IDs identify the payer before any tenant is known.
 // Grant references are ledger identities; only the persisted checkout can link them.
@@ -69,15 +58,55 @@ func paidGrantForPaymentTx(ctx context.Context, tx *storeTx, paymentID string) (
 	return result, found, nil
 }
 
-func paymentWarningTeamTx(ctx context.Context, tx *storeTx, paymentID string) (Team, error) {
+func paymentWarningTeamTx(ctx context.Context, tx *storeTx, paymentID string, mode capability.PaymentMode) (Team, error) {
 	grant, found, err := paidGrantForPaymentTx(ctx, tx, paymentID)
-	if err != nil || found {
-		return grant.Team, err
+	if err != nil {
+		return "", err
 	}
 	var team Team
-	err = tx.QueryRowContext(ctx, "SELECT team FROM card_attempts WHERE payment_intent=? LIMIT 1", paymentID).Scan(&team)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
+	if found {
+		team = grant.Team
 	}
-	return team, err
+	rows, err := tx.QueryContext(ctx, "SELECT DISTINCT team FROM card_attempts WHERE payment_intent=?", paymentID)
+	if err != nil {
+		return "", err
+	}
+	for rows.Next() {
+		var owner Team
+		if err := rows.Scan(&owner); err != nil {
+			return "", errors.Join(err, rows.Close())
+		}
+		if team != "" && team != owner {
+			return "", errors.Join(ErrCreditGrantConflict, rows.Close())
+		}
+		team = owner
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return "", err
+	}
+	if mode == "" {
+		return team, nil
+	}
+	rows, err = tx.QueryContext(ctx, `SELECT team FROM credit_checkouts WHERE payment_mode=? AND payment_id=? UNION SELECT team FROM payment_correlations WHERE payment_mode=? AND provider_id=? AND kind='collection'`, mode, paymentID, mode, paymentID)
+	if err != nil {
+		return "", err
+	}
+	var associated Team
+	for rows.Next() {
+		var owner Team
+		if err := rows.Scan(&owner); err != nil {
+			return "", errors.Join(err, rows.Close())
+		}
+		if associated != "" && associated != owner {
+			return "", errors.Join(ErrCreditGrantConflict, rows.Close())
+		}
+		associated = owner
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return "", err
+	}
+	if team != "" && team != associated {
+		return "", authorityError(apierr.Conflict, "payment has no matching mode-scoped payer association")
+	}
+	return associated, nil
 }

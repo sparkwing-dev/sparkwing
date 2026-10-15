@@ -2,6 +2,7 @@
 
 type BlobManifests struct{ Objects blob.ObjectBackend }
 func (m BlobManifests) ReadBlobManifest(ctx context.Context, team store.Team, digest blob.Digest) ([]blob.Member, error)
+func (m BlobManifests) VerifyBlob(ctx context.Context, expected blob.Blob) error
 var ErrBadCursor = errors.New("storage: log stream cursor is not valid here")
 var ErrNotFound = errors.New("storage: not found")
 var ErrNotSupported = errors.New("storage: operation not supported")

@@ -19,4 +19,12 @@ func (m BlobManifests) ReadBlobManifest(ctx context.Context, team store.Team, di
 	return m.Objects.ReadManifest(ctx, string(team), digest)
 }
 
+// VerifyBlob verifies selected result bytes before a transactional copy.
+func (m BlobManifests) VerifyBlob(ctx context.Context, expected blob.Blob) error {
+	if m.Objects == nil {
+		return fmt.Errorf("result copy requires an object backend")
+	}
+	return m.Objects.VerifyBlob(ctx, expected)
+}
+
 var _ store.BlobManifestReader = BlobManifests{}

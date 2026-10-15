@@ -42,6 +42,14 @@ func publishedLogFixture(t *testing.T) (*Store, *Tenant, SegmentCommit) {
 
 func TestLogPersistencePublishedAttemptsNeedNoExecutionLease(t *testing.T) {
 	s, tenant, commit := publishedLogFixture(t)
+	counts := map[string]int{}
+	for _, table := range []string{"triggers", "eval_units", "billing_awards", "billable_intervals"} {
+		var count int
+		if err := s.db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		counts[table] = count
+	}
 	if err := tenant.RecordSegments(t.Context(), commit); err != nil {
 		t.Fatalf("published log after local completion: %v", err)
 	}
@@ -52,6 +60,7 @@ func TestLogPersistencePublishedAttemptsNeedNoExecutionLease(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	blobAccountingDiskStore(t, s)
 	reader := authorityMember(t, s, "published-log-reader", RoleReader)
 	got, err := tenant.ReadLogSegments(t.Context(), reader, blob.LogReadRequest{Subject: commit.Subject})
 	if err != nil || got.Complete || got.IncompleteReason != commit.IncompleteReason || len(got.Segments) != 1 || got.Segments[0] != commit.Segments[0] {
@@ -60,6 +69,12 @@ func TestLogPersistencePublishedAttemptsNeedNoExecutionLease(t *testing.T) {
 	var status, outcome string
 	if err := s.db.QueryRow("SELECT status,outcome FROM nodes WHERE team='a' AND run_id='run'").Scan(&status, &outcome); err != nil || status != "done" || outcome != "success" {
 		t.Fatalf("log completeness changed result: %s/%s: %v", status, outcome, err)
+	}
+	if retained, err := tenant.StorageRetainedBytes(t.Context()); err != nil || retained != 3 {
+		t.Fatalf("published retained bytes=%d, want 3: %v", retained, err)
+	}
+	for table, count := range counts {
+		rewriteSchemaCount(t, s.db, table, count)
 	}
 	commit.IncompleteReason = "changed tail"
 	if err := tenant.RecordSegments(t.Context(), commit); err == nil {

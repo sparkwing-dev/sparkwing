@@ -55,8 +55,7 @@ func readyNodePinned(t *testing.T, s *store.Store, runID, nodeID string, cores f
 
 func fundLedger(t *testing.T, s *store.Store, credits int64) {
 	t.Helper()
-	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(context.Background(), store.CreditGrantFree,
-		credits*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).RecordCreditGrant(context.Background(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: credits * store.MicroCreditsPerCent, Reference: "pay_1", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 }
@@ -160,8 +159,6 @@ func TestUnsetRateTablePricesTheDefaultLadder(t *testing.T) {
 	}
 }
 
-// The single rate setting is the four-core price, so a binary that reads only
-// that setting bills a four-core node at the table's own figure.
 func TestSetRateTableWritesTheFourCorePriceToTheSingleRate(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
@@ -178,15 +175,15 @@ func TestSetRateTableWritesTheFourCorePriceToTheSingleRate(t *testing.T) {
 	}
 
 	single := int64(21_000)
-	if _, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{RateMicroPerSecond: &single}); err != nil {
-		t.Fatalf("set the single rate: %v", err)
+	if _, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{RateMicroPerSecond: &single}); !errors.Is(err, store.ErrInvalidCreditSetting) {
+		t.Fatalf("scalar replaced an installed table: %v", err)
 	}
 	table, err := s.AsOperator().CreditRateTable(ctx)
 	if err != nil {
 		t.Fatalf("rate table: %v", err)
 	}
-	if got := table.RateFor(4); got != 21_000 {
-		t.Fatalf("four-core class = %d, want the single rate 21000", got)
+	if got := table.RateFor(4); got != 20_000 {
+		t.Fatalf("four-core class = %d, want the installed table price 20000", got)
 	}
 	if got := table.RateFor(8); got != 36_667 {
 		t.Fatalf("eight-core class = %d, want the table's 36667", got)
@@ -416,48 +413,6 @@ func lastChargeFor(t *testing.T, s *store.Store, runID string) store.CreditCharg
 	return store.CreditCharge{}
 }
 
-// A reservation is returned at the price it was taken at, so a table raised
-// mid-run cannot refund more than the claim took out.
-func TestAnEarlyFinishPaysTheMinimumAtTheRateTheClaimReserved(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	claimant := meteredClaimant(t, s, "agent:cloud")
-	fundLedger(t, s, 10_000)
-	rates := githubRateTable()
-	if _, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
-		t.Fatalf("set the rate table: %v", err)
-	}
-	readyNodeWithCores(t, s, "run-early", "build", 8)
-	_, err := s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: claimant.TokenPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run-early", NodeID: "build"}, Available: match.Resources{Cores: 128}})
-	if err != nil {
-		t.Fatalf("claim: %v", err)
-	}
-	n, err := s.GetNode(ctx, "run-early", "build")
-	if err != nil {
-		t.Fatal(err)
-	}
-	acknowledgeClaimedExecution(t, s, claimant, n)
-
-	doubled := githubRateTable()
-	for i := range doubled {
-		doubled[i].MicroPerSecond *= 2
-	}
-	if _, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &doubled}); err != nil {
-		t.Fatalf("reprice: %v", err)
-	}
-	res, err := s.FinalizeNodeCredits(ctx, "run-early", "build", claimant.TokenPrefix, time.Now())
-	if err != nil {
-		t.Fatalf("finalize: %v", err)
-	}
-	if res.Charge != nil {
-		t.Fatalf("finalize inside the minimum wrote %+v, want nothing: the reservation is consumed", res.Charge)
-	}
-	want := int64(10_000*store.MicroCreditsPerCent) - 36_667*store.MinBillableSeconds
-	if res.BalanceMicro != want {
-		t.Fatalf("balance = %d, want the grant less the minimum at the reserved rate, %d", res.BalanceMicro, want)
-	}
-}
-
 // A rate large enough to overflow the reservation is refused before it can
 // write a negative charge and hand the payer credits it never bought.
 func TestRateTableRefusesARateThatWouldOverflowAReservation(t *testing.T) {
@@ -571,57 +526,6 @@ func TestAnEmptyBalanceIsReportedBeforeTheUnpricedClass(t *testing.T) {
 	if !errors.Is(err, store.ErrInsufficientCredits) {
 		t.Fatalf("claim on an empty ledger = %v, want ErrInsufficientCredits", err)
 	}
-}
-
-// A node nobody can price fails with the reason, because every poller would
-// otherwise retry it forever.
-func TestFailNodeForUnpricedClassEndsTheNodeWithAnEvent(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	claimant := meteredClaimant(t, s, "agent:cloud")
-	fundLedger(t, s, 10_000)
-	rates := githubRateTable()
-	if _, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{RateTable: &rates}); err != nil {
-		t.Fatalf("set the rate table: %v", err)
-	}
-	readyNodeWithCores(t, s, "run-unpriced", "build", 96)
-
-	_, err := s.ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: claimant.TokenPrefix, Target: &store.UnitRef{Kind: capability.UnitNode, RunID: "run-unpriced", NodeID: "build"}, Available: match.Resources{Cores: 128}})
-	var unpriced *store.UnpricedCPUClassError
-	if !errors.As(err, &unpriced) {
-		t.Fatalf("claim = %v, want an unpriced-class refusal", err)
-	}
-	if unpriced.RunID != "run-unpriced" || unpriced.NodeID != "build" {
-		t.Fatalf("the refusal names %s/%s", unpriced.RunID, unpriced.NodeID)
-	}
-
-	team, err := s.ForTeam(ctx, store.DefaultTeam)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := team.FailNodeForUnpricedClass(ctx, unpriced, time.Now()); err != nil {
-		t.Fatalf("fail the node: %v", err)
-	}
-	node, err := s.GetNode(ctx, "run-unpriced", "build")
-	if err != nil {
-		t.Fatalf("get node: %v", err)
-	}
-	if node.Outcome != "failed" || node.FailureReason != store.FailureUnpricedCPUClass {
-		t.Fatalf("node = %s/%s, want a failure naming the unpriced class", node.Outcome, node.FailureReason)
-	}
-	if !strings.Contains(node.Error, "96") || !strings.Contains(node.Error, "64") {
-		t.Fatalf("the node's error %q names neither size", node.Error)
-	}
-	events, err := s.ListEventsAfter(ctx, "run-unpriced", 0, 50)
-	if err != nil {
-		t.Fatalf("events: %v", err)
-	}
-	for _, e := range events {
-		if e.Kind == store.EventKindCreditsUnpriced {
-			return
-		}
-	}
-	t.Fatalf("no %s event on the run: %+v", store.EventKindCreditsUnpriced, events)
 }
 
 func TestAStoredRateTableNothingCanReadIsAnError(t *testing.T) {

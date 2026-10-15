@@ -1,5 +1,24 @@
 # C1 data contract
 
+## Placement billing and execution-attempt retirement
+
+Cloud placement is metered regardless of the launcher's root metering flag.
+Award issuance and queue eligibility use the same placement rule. Customer
+runner placement retains the root's metering policy. Persisted award billing
+does not change when that root's policy changes.
+
+`AcknowledgeNodeExecutionStart`, `FinishNodeExecutionAttempt`, `ExecutionStart`
+and `ExecutionAttemptFinish` are removed with their local and trigger writers.
+`Tenant.TransitionNode` owns attempt ordinals, attribution, retry and completion.
+`Store.ListNodeExecutionAttempts` is removed. Its tenant method reads the final
+`node_attempts` table under a snapshot and refuses a foreign run or job.
+The unused coordinator ID reader and transaction helper are removed too.
+
+The unused `GitHubRunnerCredentialPush`, `GitHubRunnerPush`,
+`GitHubRunnerScope`, scope context helpers, `GitHubRunnerAdmits`,
+`TriggerNamesGitHubRepo` and principal-prefix constant are removed. Current
+push binding, enrollment and the shared matcher retain repository authority.
+
 ## Sole claim queue and console runner metering
 
 `Store.ClaimNextReadyNode`, `ClaimSpecificTrigger`, `ClaimSpecificTriggerFor`,
@@ -397,15 +416,198 @@ CSRF. Machine/service enrollment uses persisted capability registrations by defa
 Console sessions, host observations and native PostgreSQL remain
 integration obligations.
 
+## Committed result copies
+
+`NodeRow.OutputRecord` and `ManifestRecord` persist the exact selectors committed
+with terminal state. Materialized copies use `blob.MaterializedRecordKey` with
+the destination result sequence. The destination has no synthetic attempt.
+`SetResultBlobRecords` configures both attachment and materialization. Its reader
+also supplies `VerifyBlob(context.Context, blob.Blob)` for copies. The filesystem
+and S3 backends verify every selected object and manifest member before mutation.
+
+`CopyMaterializedRecords` retains source provenance and reassigns record lifetime
+to the destination run. It uses the shared record mutation owner, leaving commit
+and rollback to reconciliation. A materialization savepoint discards all copies
+on a missing, expired or corrupt source. A materialize-only miss returns Dispatch.
+An ordinary miss continues to execution admission. Authority errors stay errors.
+Memo sources name their exact record and need no source attempt or surviving run.
+
+The private execution wire carries both selectors unchanged. Native host storage
+reads select them directly. Trigger and plan owners can read selected terminal
+records in their run. Dependencies and pinned references require the exact selected
+record even when the producing result has no attempt. Digest equality grants no
+record metadata authority.
+
+`Tenant.ResolveBlobAuthority` exposes the transaction-local scope and uploader
+resolver to the data controller. It accepts only a data read or write grant and
+refuses caller hints that differ from persisted authority. Failed resolution
+returns no authority. `DataController` uses this resolver for capability records
+when no override is supplied. The materialization proof needs no custom data
+authority callback and checks identity substitution and revocation after binding.
+
+## Payment mutation transactions
+
+Card setup, collection, payment reversal, dispute hold/release, warning and
+refund-queue mutations have transaction-local owners. Their existing Tenant and
+Operator entry points call those owners in a store transaction. Payment receipt
+settlement can use the same owners without nesting transactions or committing
+financial state before its receipt. No new unverified payment entry point exists.
+
+Card setup ordering uses the supplied completion timestamp at nanosecond
+precision, or receipt time when completion time is absent. Older timestamps
+cannot replace the saved card. The subsecond migration marker is removed.
+Collection amounts must fit the credit ledger's integer representation.
+Refund retry state is read and updated under one transaction and ledger lock.
+
+`TestPaymentMutationsRollBackWithReceipt` exercises eight mutations against a
+failing receipt boundary and checks their financial state after reopening.
+Generated properties cover refund conservation, payer isolation, immutable
+replay, setup ordering and unrepresentable collection amounts. Verified event
+dispatch now consumes C2's expanded proof in `payment_provider_settlement.go`.
+The final schema includes the receipt and correlation tables below. The setup
+association still needs its trusted billing-page writer. Collection binding uses
+`Operator.RecordAttemptIntent`, which takes the customer used by the trusted
+worker's provider request. Provider tests use the final schema. Production
+provider composition remains separate evidence.
+
+### Non-checkout payment persistence contract
+
+`SettlePayment` dispatches verified setup, collection, refund, warning and dispute
+facts through the existing transaction-local owners. One locked transaction
+checks configured mode, immutable provider-object association and event replay,
+then commits the financial result and receipt. A receipt failure rolls back the
+financial mutation. C2 owns provider payload/status verification. C1 owns payer
+association, supported ledger currency, integer arithmetic and settlement.
+
+The final `schema.sql` implements these local C1 requirements. Payment receipts
+are operator-owned because an unbound warning has no team. A team purge removes
+its bound receipts and correlations while retaining unbound warnings.
+
+- `payment_events` keeps its existing columns and `(payment_mode,event_id)` key.
+  Its kind check admits all `capability.PaymentEventKind` values. `checkout_id`
+  becomes nullable for non-checkout events, and `team` becomes nullable only for
+  a warning with no committed payer yet. Checkout events retain their composite
+  checkout foreign key and required team/checkout association.
+- Add `object_id TEXT NOT NULL DEFAULT ''`, `event_json TEXT` and
+  `settlement_json TEXT` to that receipt. Non-checkout events require all three.
+  The JSON stores the verified facts and `PaymentSettlement`, respectively.
+  Checkout writes retain their existing shape. Index `(payment_mode,object_id)`.
+  Several event IDs can refer to one provider object. They cannot change its
+  payer association or a settled object's payment, amount, currency, method and
+  card. A payment-intent failure is an observation before settlement. Its amount,
+  method and latest charge can change before success while the persisted payer
+  and attempt remain fixed. Closing a dispute preserves its
+  terminal outcome and prevents a late open from restoring its hold.
+- Add `payment_correlations` with `payment_mode`, `provider_id`, `kind`, `team`,
+  `customer_id`, `currency`, `attempt_id` and `charge_id`, all non-null TEXT.
+  The primary key is `(payment_mode,provider_id)`. Mode is test/live, kind is
+  setup/collection, and team references `teams(name)`. Customer is nonempty.
+  Currency, attempt and charge default to empty for setup. Collection requires
+  its currency and exact persisted attempt/charge. These associations are
+  immutable and survive run retention.
+- The trusted billing-page completion transaction records a setup correlation
+  from its committed reservation and confirmed provider setup ID. The trusted
+  collection adapter records a collection correlation from its exact attempt,
+  internal charge, customer and confirmed payment-intent ID. It also binds
+  `card_attempts.payment_intent` before settlement. Provider metadata, callback
+  parameters and caller-selected teams cannot create these associations.
+
+`RecordAttemptIntent` persists the collection correlation and the exact attempt's
+payment intent in one ledger-locked transaction. It derives team and charge from
+the existing attempt and checks their same-team relation. Its customer argument
+comes from the trusted worker's provider request, retaining that identity across
+a concurrent saved-card replacement. A checkout payment cannot fund collection.
+Exact replay adds no write. Conflicting payer, customer, attempt, charge, kind,
+currency, mode or payment fails without changing the attempt or finances.
+The provider collection fixture uses this writer instead of inserting an
+association. Generated binding tests and receipt-failure tests exercise these
+owners against the declared schema fake.
+
+`providerPaymentFixture` supplies a schema fake for this contract. It drives all
+seven non-checkout outcomes, event/object replay, rollback, reopening, setup
+ordering, partial refunds, warning escalation and payer isolation through the
+real transaction owners. A signed refund also enters through C2's authenticator
+and the public opaque-proof `SettlePayment` entry point. No provider network or
+billing-page persistence integration is claimed.
+
+Refund and dispute owners resolve the mode-scoped checkout or collection payer
+before touching legacy financial rows. Unknown warnings may persist before a
+payment is associated, so later settlement can refuse the warned payment.
+Warnings escalate monotonically. Returning to non-actionable never removes
+recorded protection. Mode isolation of retained card fingerprints and legacy
+warning/collection rows still needs W1's final schema and writer cutover. This
+contract does not treat the raw legacy rows as a new provider association.
+
+## Persisted log readers
+
+`Store.LatestNodeLog`, `RunNodeLogs`, `NodeLogSettled` and the legacy `NodeLog`
+read model are removed. Controller log reads select tagged subjects through
+`Tenant.ReadRunView`, then use `logseg.CommittedReader` and `Tenant.ReadLogSegments`.
+Object listings and physical manifests grant no read authority. The reader binds
+its actor to the authenticated capability prefix or session digest. Each segment
+read and live-ring delivery rechecks current persisted authority. Log routes keep
+the existing response-byte egress meter and log download-cap exemption.
+
+Job reads select the newest attempt by ordinal and generation. Streams resume in
+that order. Whole-run reads include committed job, trigger, plan and eval subjects.
+Missing or corrupt committed bytes fail the read. Persisted incomplete seals add
+a loss line or a `log_incomplete` stream event. Completeness verifies bytes before
+reporting the persisted seal, and never changes the job result.
+
+`Segment`, `SegmentCommit`, `LogSegments`, `RecordSegments` and `ReadLogSegments`
+live in `pkg/store/result_logs.go`. Log subject validation uses
+`blob.LogSubject.Validate`. The remaining declarations in `result_contract.go`
+cover steps, annotations and summaries.
+
+The controller tests drive the final SQLite claim, start, segment commit and
+terminal transition through the reader. Revoking its capability refuses the next
+read before physical I/O. Generated fake-boundary tests cover arbitrary payloads,
+foreign actors and authority ending between inventory selection and segment read.
+Authenticated `LogTransport` signing/verification and host subject construction
+remain separate integrations.
+
+Remote log follow opens the stream without probing legacy segment capabilities.
+Stream refusals remain errors. The old segment-unavailable classification is removed.
+
+## Host log uploads
+
+The pod log sink consumes `logseg.Data` and uses `logseg.SubjectUploader` for
+signed uploads and transactional segment commits. Its subject comes from the
+authenticated binding. It never infers a team or attempt from an object prefix.
+An absent binding leaves the pod's stdout log intact and reports the missing
+binding. Job sinks keep live watch delivery under that exact attempt fence.
+
+`Client.LogSegment`, `SealLog`, `LogSegmentUploader`, `store.LogSegmentRequest`
+and `LogSegmentGrant` are removed with the unused `EngineNodeLog` wrapper.
+The generated sink property covers job, trigger, plan and eval subjects and
+mutated input identities. The watch test uses an in-process transport.
+W2 still supplies authenticated `LogTransport` and `SegmentRecorder` adapters.
+W3 still supplies the production `logseg.Data` binding to the pod host.
+
+## Log byte accounting
+
+`Segment.Offset` and `Segment.Size` describe decoded log bytes. `StoredBytes`
+and `Digest` describe the immutable compressed payload. Both sizes are positive
+and participate in replay identity. `log_segments.stored_bytes` and
+`log_streams.stored_bytes` count retained physical bytes. Segment start/end
+offsets and `uploaded_through` count decoded bytes. Reads return both sizes.
+The schema needs no new column because decoded size is `end_offset-start_offset`.
+The subject uploader supplies both sizes on append and final sealing. The
+committed reader verifies stored length and digest before emitting decoded bytes.
+
 ## Controller result verification
 
 `Server.WithDataObjects` installs `storage.BlobManifests{Objects: objects}` through
 `Store.SetResultBlobRecords` before serving or sharing the store. Terminal
 output and manifest attachments use that backend inside the live tenant
-transaction. The controller property test drives real claim/start, upload
+transaction. `Tenant.CommitRecord`, `LookupRecord`, `LookupMemo`, `LookupDepcache`
+and `CopyMemo` use the configured verified manifest reader too. An explicit
+`BlobRecords` reader overrides it. Without either reader, manifest operations
+fail. The controller property test drives real claim/start, upload
 reservation/settlement, record commit and terminal transitions. Corrupt physical
-manifest bytes refuse completion. Restoring them allows completion and exact
-replay. Authenticated data binding remains C2's separate contract.
+manifest bytes refuse record reads and completion. Restoring them allows
+completion and exact replay. Authenticated data binding remains C2's separate
+contract.
 
 The legacy `AttemptReport.OutputFrom`, `Store.FinishNodeCopyingOutput` and
 their `node_outputs` copy branches are removed. Host memo materialization
@@ -419,6 +621,14 @@ with `transactional materialization records are not configured`. W1b must
 implement the existing transaction-local copier so W1 can bind it inside its
 state transaction. Calling the public copy method before
 reconciliation would commit the records separately from the terminal state.
+
+`Store.SetResultBlobRecords` also binds the real `CopyMaterializedRecords`
+implementation to reconciliation's transaction. Retry and memo copies retain
+exact selectors, verify physical bytes and commit with terminal state. Coalesced
+copies still require a declared persisted read edge. A source ref and matching
+spec hash grant no authority. The final waiter schema excludes the legacy
+coalesce policy, so that table cannot establish a coalesced read. This path
+refuses until its owner declares the missing authority.
 
 `Tenant.StorageStanding` reports the selected team's policy, retained event,
 blob and tagged-log bytes, and live upload reservation bytes from one snapshot.
@@ -534,6 +744,31 @@ on initial submission and replay. The SQLite `lifecycle-generator-barrier/store-
 proof checks two members, an empty group, reopening, terminal replay and dependent
 release. Delegation issuance is seeded because C2's validator remains a stub.
 
+
+`Store.ReserveStorage`, `Store.CommitStorage`, `StorageReserve`,
+`StorageReservation`, `StorageCommit` and `DefaultStorageReservationTTL` are
+removed. Public uploads use tenant blob tickets with exact identity, size,
+digest, expiry and verified settlement. Generic byte deltas cannot mint a blob
+or receipt. The controller's retention probe reads `Tenant.StorageStanding`
+and slot availability without writing reservations. The legacy `Store.ReserveUpload`, `Store.CommitUpload`,
+`Store.UploadForTeam`, `Store.ReleaseStorage` and `UploadRequest` are removed.
+Their output-upload and output-commit HTTP writers are removed too. Generic
+`storage_reservations` and `storage_commit_receipts` no longer have writers.
+The legacy `Store.OpenNodeLog`, `SignNodeLogSegment`, `NodeLogSegments`,
+`MarkNodeLogSealed`, `GetNodeLog` and `CurrentNodeAttempt` APIs are removed.
+Their node `log-segments` and `log-manifest` HTTP writers and S3 signing code
+are removed too. No Go writer references `node_logs` or `node_log_segments`,
+and reads no longer seal abandoned logs. `Tenant.RecordSegments` and leased
+`Operator.SealAbandonedLogStreams` own tagged persistence and sealing.
+Legacy capabilities no longer advertise segment upload support. Old output
+reads and host/client interfaces still need their final record cutover.
+`Store.NodeIsAncestor` is removed. Its controller caller uses
+`Tenant.NodeIsAncestor`, which shares the blob read-set dependency resolver over
+sealed job specs, including optional, artifact and generated-group dependencies.
+The duplicate `MaxOutputBytes` and `MaxRunOutputBytes` constants are removed.
+Remaining output callers use `limits.NodeOutputBytes` (16 MiB) and
+`limits.RunOutputBytes` (1 GiB). File and signed-URL reads refuse bytes above
+the shared per-job bound even when their recorded size and digest match.
 `SetNodeStatus` and `RevokeNodeReady` on Store, Tenant and Client are removed
 with their legacy HTTP handlers. Debug pauses use `status_detail` through
 activity writes and leave lifecycle state intact. Queue withdrawal uses
@@ -929,6 +1164,13 @@ and enrollment remain C2's integration.
 
 ### Upload and record persistence
 
+`Tenant.ReadBlob(ctx, authority, digest)` supplies C2's live metadata read hook.
+It rechecks tenant authority and the digest's read edge in one transaction,
+then returns only untombstoned committed existence and size. An unreadable,
+missing or tombstoned digest returns no metadata. Reading creates no receipt
+or record edge. C2 still owns selecting the authenticated authority and wiring
+this tenant method into DataController.ReadBlob.
+
 `Tenant.TrustLocalBuilds` and `Tenant.SetTrustLocalBuilds` own the team's
 local binary execution opt-in. Their raw Store methods are removed. An absent
 row means false. Read errors or invalid stored flags cannot enable trust.
@@ -951,13 +1193,16 @@ facts. Setting the flag false cannot weaken DataRemoteCache authority. Returned
 `RecordLookupResult.Members` includes committed path/size/mode metadata after
 read-edge checks. Internal member reads confer no client read authority.
 
-`upload_contract.go` defines ReserveBlobUpload, LookupBlobUpload, CommitBlobUpload
+`blob_upload.go` defines upload tickets and verified evidence.
+`upload_runtime.go` implements ReserveBlobUpload, LookupBlobUpload, CommitBlobUpload
 and AbortBlobUpload using the existing uploads table. Reservation binds tenant,
 uploader, digest, size, expiry, provenance and ref facts before signing. The
 physical backend verifies size/digest before W1 commits existence and the exact
 receipt with quota settlement. Commit repeats live authority and fence checks.
 `VerifiedUploadCommit.ReplicaID` is trusted controller configuration, never a
 client-selected field. The ticket ID also binds the persisted quota reservation.
+It is one ASCII letter/digit/underscore/hyphen path segment selected by the
+trusted adapter within its tenant/principal idempotency scope.
 Existing CAS bytes grant no receipt. Failed settlement grants no edge. Abort or
 leased retention releases uncommitted reservations without deleting a live blob.
 
@@ -1011,7 +1256,7 @@ Legacy filesystem output and raw log paths have been removed.
 The sharded filesystem ArtifactStore, generic raw storage.ArtifactStore contract
 and portable conformance package are also removed. Filesystem deployment
 measurement uses fs.NewUsageReporter. It exposes totals without an object-read
-or write API. S3's remaining raw log reader/writer still needs its authenticated
+or write API. S3's remaining raw log reader still needs its authenticated
 cutover. Physical CAS reads and writes stay with the common object backend.
 
 `CommitObject` requires verified bytes at the exact ticket's staging key even
@@ -1029,13 +1274,14 @@ uploader can read the digest and usage counts one blob. Authority and physical
 verification are contract fixtures. Native transfer integrity and EOF checks
 remain separate integration proofs.
 
-The `storage-owner-receipts-and-stream-verification/store-data-sqlite` proof
-commits trigger and plan uploads before jobs exist. It checks failed verification,
-exact tagged receipt replay, reopening and refusal to transfer the receipt or
-ticket to a job in the same run. Award issuance and physical verification are
-contract fixtures. Generated eval tests check both source and unit fences under
-explicit fake write authority. C2's issued eval grant table remains read-only.
-The native cell still requires signed transfer and stream EOF verification.
+`TestBlobOwnerReceiptCannotTransferToAJob` and
+`TestBlobUploadOwnerTicketsRetainUnitIdentity` check tagged trigger/plan uploads
+before any job exists, reopening and refusal to transfer an owner's receipt or
+ticket to a job.
+`TestBlobUploadCommitRechecksTicketAndAuthority` checks failed verification.
+Generated eval tests check both source and unit fences under explicit fake write
+authority. C2's issued eval grant table remains read-only. The native cell still
+requires signed transfer and stream EOF verification.
 
 Upload tickets reserve monthly bytes, lifetime run bytes and lifetime run objects
 in the existing quota tables. Each dimension has its own durable reservation.
@@ -1069,12 +1315,17 @@ expiry and manifest fields. Returned metadata matches persisted metadata across
 replay and reopening. A different expiry instant still conflicts with an immutable
 output or manifest record.
 
-The `storage-quota-settlement-crash-replay/store-data-sqlite` proof exercises
-upload admission, commit, abort and deduplication. Child processes exit without
-closing their store at before/after commit and abort checkpoints. The parent
-reopens and verifies the persisted state before replay. Publication authority
-is preseeded and verification evidence is a contract fake. Native controller
-checkpoints, signing and transfer integrity remain integration obligations.
+`TestBlobUploadCrashReplay` exercises admission, commit, abort and deduplication
+through the store's shared upload fixture. Child processes exit without closing
+the database before and after commit and abort. The parent reopens the database
+and checks persisted tickets, quota holds, usage and replay capacity. Physical
+verification evidence is a contract fake. Native controller checkpoints, signing
+and transfer integrity remain integration obligations.
+
+The `TestReplica` tests use `pkg/store/internal/storetest` targets to check usage
+sums, quota races, reservation release, singleton election and download caps
+across independent clients and reopening. Quota setup uses ReserveQuota and
+SettleQuota. The suite's dialect selection applies to these tests.
 
 LookupRecord, LookupMemo, LookupDepcache, CommitRecord and CopyMemo remain the
 only record owners. W1 integrates receipt/read-set checks, members, unique-byte
@@ -1427,18 +1678,17 @@ Generated tests cross the job lease, leaf capability and ancestor expiry during
 that read through CommitRecord, LookupRecord, LookupMemo, LookupDepcache and
 CopyMemo. Refusals return no read set and persist no output or manifest record.
 
-The `storage-log-segments-and-fallback/store-data-sqlite` proof exercises
-immutable job segments, transactional rollback of a gapped batch, reopening,
-offset reads, final incomplete seals, exact replay, retained-byte accounting,
-subject isolation, revocation and leased abandoned-stream sealing across reopening.
-Its terminal-read check uses an expired attempt and a later node finish. The node
-finish cannot extend the attempt's read grace. Generated store tests check reads,
-segment commits, final seals and maintenance at the nanosecond before grace,
-at its exact boundary and after it. Historical reads and stored bytes survive
-sealing, and log loss leaves the successful job result unchanged.
-Claim authority and segment digests are
-preseeded contract facts. Physical bytes, owner-unit transport, ring fallback,
-signing, lifecycle expiry and proxy egress remain cross-area integrations.
+The `TestLogPersistence` tests own immutable segments, gapped-batch rollback,
+offset reads, incomplete seals, replay, retained-byte accounting, subject
+isolation, revocation and abandoned-stream maintenance. Job, publication and
+maintenance-seal metadata survive reopening. Publication adds no operational or
+financial units. A later node finish cannot extend an attempt's read grace.
+Generated tests check reads, segment commits, final seals and maintenance before,
+at and after the grace boundary. Historical reads and stored bytes survive
+sealing. Log loss leaves the successful job result unchanged. Claim authority
+and segment digests are contract fixtures. Physical bytes, owner-unit transport,
+ring fallback, signing, lifecycle expiry and proxy egress remain integration
+obligations.
 
 `Operator.SealAbandonedLogStreams(ctx, maintenanceLease, limit)` closes existing
 unsealed execution streams with `writer_lost`. Job attempts wait until strictly
@@ -1539,6 +1789,9 @@ checkout records at most one credit grant, even when multiple paid event IDs arr
 Failures and expiry cannot undo paid credit. Financial rows have no run cascade.
 Human grants, refunds and freezes remain console-only operations.
 
+`payment_settlement.go` owns settlement and receipt deduplication. The
+`settings.payment_mode` value is a required JSON string, `"test"` or `"live"`.
+
 Payment lookups and console refunds follow the checkout's persisted `grant_id`.
 The grant's ledger reference is not a provider payment ID. Refunds retain that
 ledger reference in `reverses`, count prior reversals and cap the total at the
@@ -1549,13 +1802,49 @@ is removed. Verified failure and expiry events own those outcomes.
 `CreditGrantRequest` carries no checkout session. Only verified payment
 settlement writes the checkout's paid timestamp and grant association.
 
+`Operator` owns deployment card collection and refund workers: `DueCardCharges`,
+`RecordAttemptIntent`, `SettleCardPayment`,
+`DueCardRefunds`, `MarkCardRefundMade`, `FailCardAttempt`
+and `DropCardAttempt`. Their raw Store methods are removed. Provider workers
+select Operator before operating on persisted attempt and payment identities.
+Tenant spend policy and recovery checkout keep their tenant handles.
+Raw card setup, warning and provider refund callback APIs are removed. Their
+transaction-local owners remain for verified payment-event settlement.
+The collection worker and webhook settlement retain their ledger lock,
+persisted payer attribution, replay rules and refund queue. This handle cut
+adds no provider verification contract. C2 still owns verified event delivery.
+
+Warning persistence and its payer hold share one transaction-local mutation owner.
+A warning ID retains its first payment and card fingerprint. A conflicting
+replay fails before applying a hold. Payer lookup compares every matching paid
+grant and card attempt. Conflicting tenant evidence rolls back the warning and
+hold. Shared-card warnings still hold each team when its own payment settles.
+Holds use the tenant-scoped warning identity. The legacy provider-only hold
+identity is removed. Replaying an exact warning after release cannot restore
+its hold. A failed audit rolls back both warning persistence and the hold.
+
+`Operator.ReversePayment`, `Operator.PaymentTeam`, `Tenant.SaveCard`,
+`Tenant.HoldForDispute`, `Operator.RecordPaymentWarning` and
+`Operator.ReportCardRefund` are removed. Verified event settlement owns provider
+mutations. Private transaction owners retain payment/grant resolution, refund
+conservation, setup ordering and immutable dispute attribution. A dispute stays
+bound to its first team and payment after release. Replay cannot restore a hold.
+`Tenant.ReleaseCreditFreezes` still requires a named hold, actor and reason.
+`Tenant.HoldByOperator` and `Tenant.ReleaseOperatorHolds` use those same owners.
+Console HTTP and break-glass callers retain their authenticated tenant selection.
+
 The raw `paid` grant path and `POST /api/v1/credits/grants` are removed.
-`Tenant.GrantCredits` and `Tenant.RecordCreditGrant`
-refuse caller-selected paid credit before opening a ledger transaction.
+`Tenant.GrantCredits` is removed. `Tenant.RecordCreditGrant` owns grant requests
+and refuses caller-selected paid credit before opening a ledger transaction.
 The existing free grant and payment-linked reversal paths remain. Checkout
 settlement checks actionable fraud warnings in the same transaction as the
 grant and event receipt. A refusal leaves the checkout and ledger unchanged.
 The verified-event implementation and HTTP adapter remain W2 integrations.
+
+`Operator.CreditLedgerTotals` owns deployment-wide ledger reports. Its raw Store
+method is removed. Reports use the same billing calculator as unit renewal and
+settlement and never advance financial checkpoints. The real claim/exchange/release
+regression checks an unstarted reservation before and after its refund.
 
 Credit pricing and storage-rate settings use unsealed JSON values in `settings`.
 Only missing keys select defaults. Malformed values, invalid prices and sealed
@@ -1707,28 +1996,44 @@ Open intervals stop at their persisted charged checkpoint for reporting. Closed
 intervals use their finish time. A delayed reaper cannot add unconfirmed time.
 Reporting cannot advance charged checkpoints or close intervals. Operational
 run, node, trigger and credential rows do not control these totals. Settled and
-unmetered awards need no calculator call. Generated store tests use a contract
-fake while C2's production calculator remains unimplemented. The retention proof
+unmetered awards need no calculator call. Generated store tests can use a contract
+fake. The SQLite billing-start boundary uses C2's production calculator through
+final settlement and replay after reopening. The retention proof
 also checks exact deployment totals across pruning and reopening, with storage
 seconds excluded. The unused `Store.RunFinished` pruning query is removed.
 `Operator.CreditSettings`, `Operator.CreditRateTable` and
 `Operator.WarmCPUClassCores` own deployment price and policy reads.
-`Operator.SetCreditSettings` preserves the existing programmatic update rules.
-`Operator.SetOperatorCreditSettings` preserves the operator rule that a stored
-rate table cannot be replaced by a scalar update. Validation, ledger locking,
-settings serialization and rollback stay in their existing transaction owners.
-The five raw Store methods are removed with every caller.
+`Operator.SetCreditSettings` owns every billing-policy update. A stored rate
+table refuses a scalar price update before any setting changes. The separate
+`SetOperatorCreditSettings` writer and the reader override for older binaries
+are removed. Explicit tables supply their own prices. An absent table derives
+the default ladder from the scalar rate. Validation, ledger locking, settings
+serialization and rollback stay in their existing transaction owners.
+The raw Store methods are removed with every caller.
 `Store.GrantCredits`, `Store.ListCreditCharges` and `Store.AppendEventOnce` are
 also removed. Callers select a Tenant explicitly before grants, charge history
 or idempotent events. The tenant methods keep their existing behavior.
 
 `Tenant.CreditState` and `Tenant.ListCreditGrants` own these reads. Their raw
-Store twins are removed. Burn windows use the store clock.
+Store twins are removed. Burn windows use the store clock. A credit-state read
+uses one snapshot for grants, charges, storage spend, burn, exhaustion and prices.
+The read-only SQLite property commits a concurrent ledger and price update
+between the aggregate and burn reads. The first report retains its original
+snapshot, and the next report sees the complete update.
 Balances use `Tenant.CreditBalanceMicro`. Its raw Store twin is removed.
 `Tenant.RecordCreditGrant` owns grant requests. Its raw Store twin is removed.
 The proof does not exercise provider verification or native placements.
 The controller's billing caller uses this operator method. W1's
 maintenance coordinator owns the shared retention, quota and GC ordering.
+
+The `billing-start-award-versus-start/store-sqlite` proof now lives in
+`pkg/store/store_unit_billing_boundary_test.go` as
+`TestStoreBillingStartAwardVersusStart`. It uses the store's existing metered
+claim fixtures with the production C2 calculator and reopens SQLite after execution
+starts. Finish and replay retain the award's original price after settings change.
+The ordinary-package
+`internal/acceptance/store_unit_billing.go` harness and its acceptance wrapper
+are removed. No native placement proof is implied.
 
 ### Storage policy and reports
 
@@ -1737,8 +2042,9 @@ The service-token `/internal/storage/reserve`, `/internal/storage/commit`,
 `Store.RenewStorage`, `storageRenewRequest`, `recordStorageRenewTx` and
 `replayStorageRenewTx` are removed with that transport. Final upload tickets own
 reservation, verified commit, abort and immutable replay. Old cache RPC clients
-still need W7's hard cut. The direct-upload and log paths retain their internal
-legacy reservation code until their consumer cutovers.
+still need W7's hard cut. Legacy direct-upload and node-log writers and their
+internal reservation code are removed. Their old host/client and read surfaces
+remain pending final data and tagged-log bindings.
 
 `SetFreeTeamSlots` writes the final settings table through the existing checked
 writer. Negative or sealed updates fail without replacing the prior value.
@@ -2321,12 +2627,9 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `StepReport` | StepReport fences step state to the attempt that produced it. |
 | `AnnotationWrite` | AnnotationWrite carries already masked text; the store rechecks the shared annotation byte limit without truncation. |
 | `SummaryWrite` | SummaryWrite carries masked job or step markdown under the writer's live binding. |
-| `Segment` | Segment describes one immutable log range; logs use their own signer and never a blob data download. |
-| `SegmentCommit` | Fences immutable segments and completeness to a tagged job attempt or owner unit. |
 | `Tenant.RecordStep` | RecordStep refuses stale attempts instead of letting delayed reports replace a later attempt's steps. |
 | `Tenant.WriteAnnotation` | WriteAnnotation refuses an oversized masked annotation so the store cannot split UTF-8 or reveal a raw suffix. |
 | `Tenant.WriteSummary` | WriteSummary stores job or step markdown only after the claim binding is rechecked. |
-| `Tenant.RecordSegments` | RecordSegments checks contiguity and attribution; incomplete logs never change the job's result. |
 | `Tenant.CommitRecord` | CommitRecord checks all member existence and reference authority before making any digest reachable. |
 | `Tenant.CopyMemo` | CopyMemo creates destination output and manifest edges atomically from a server-scoped cache hit. |
 | `Tenant.LookupRecord` | LookupRecord adds no authority merely because a key exists; all returned bytes must be in the caller's read set. |
@@ -2334,6 +2637,18 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Tenant.LookupDepcache` | LookupDepcache follows the single restore-order table and runs cold on absent or invalid bytes. |
 
 ### pkg/store/schema.go
+
+### pkg/store/result_logs.go
+
+| Export | Purpose |
+|---|---|
+| `Segment` | Separates decoded ranges from stored bytes and digest. |
+| `SegmentCommit` | Binds a contiguous batch and optional seal to its writer and tagged subject. |
+| `LogSegments` | Returns authorized persisted ranges and seal state. |
+| `Tenant.RecordSegments` | Commits immutable segments and seals under the current writer fence. |
+| `Tenant.ReadLogSegments` | Rechecks authority for the exact subject before selecting byte ranges. |
+
+### pkg/store/schema_contract.go
 
 | Export | Purpose |
 |---|---|
@@ -2428,5 +2743,9 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `Tenant.AdmitRun` | AdmitRun is the only intake for local, remote, retry, child and published runs. It derives authority and allowed pools in the transaction; published runs receive no executable owner unit. Retry intake loads Lineage.RetryOf from this Tenant, carries its seals unchanged and records the new ID outside them. |
 | `Tenant.AcceptPlan` | AcceptPlan validates the C3 plan, ceilings and declared secrets, then seals spec and inserts nodes atomically. Neither a request field nor an existing seal may change; a differing sealed hash returns spec_drift. Published plans require live publisher authority and create importable jobs without awarding an executable claim. |
 | `Tenant.AcceptExpansion` | Atomically accepts exactly one success body or structured failure, rechecking authority and persisting its canonical hash. |
+
+`Store.SetTokenMetered` is removed. Root capability metering uses C2's operator
+route. Legacy claim selection shares one private metering query until those
+claim APIs are retired.
 
 <!-- design:end -->

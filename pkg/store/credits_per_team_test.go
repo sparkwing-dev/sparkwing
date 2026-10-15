@@ -74,8 +74,7 @@ func TestCreditsDefaultTenantReadsItsLedger(t *testing.T) {
 	}
 
 	def := tenant(t, s, store.DefaultTeam)
-	if _, err := def.GrantCredits(ctx, store.CreditGrantFree,
-		100*store.MicroCreditsPerCent, "pay_local", "admin"); err != nil {
+	if _, err := def.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100 * store.MicroCreditsPerCent, Reference: "pay_local", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	floor := unpinnedNodeRateMicro * store.MinBillableSeconds
@@ -109,10 +108,10 @@ func TestCreditsGrantReferenceCannotCrossTeams(t *testing.T) {
 	globex := teamHandle(t, s, "globex")
 
 	amount := int64(10 * store.MicroCreditsPerCent)
-	if _, err := acme.GrantCredits(ctx, store.CreditGrantPaid, amount, "pay_shared", "admin"); err != nil {
+	if _, err := acme.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: amount, Reference: "pay_shared", CreatedBy: "admin"}); err != nil {
 		t.Fatalf("acme grant: %v", err)
 	}
-	if _, err := globex.GrantCredits(ctx, store.CreditGrantPaid, amount, "pay_shared", "admin"); !errors.Is(
+	if _, err := globex.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: amount, Reference: "pay_shared", CreatedBy: "admin"}); !errors.Is(
 		err, store.ErrCreditGrantConflict) {
 		t.Fatalf("globex replaying acme's payment = %v, want ErrCreditGrantConflict", err)
 	}

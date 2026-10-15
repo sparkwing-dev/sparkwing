@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func usageSeconds(t *testing.T, s *store.Store, runID, nodeID string) int64 {
@@ -29,6 +30,7 @@ func usageSeconds(t *testing.T, s *store.Store, runID, nodeID string) int64 {
 func TestAHoldWaitsForTheLedgerLock(t *testing.T) {
 	s := storetest.OpenPostgres(t)
 	ctx := context.Background()
+	tenant := teststore.ForTeam(t, s, store.DefaultTeam)
 	holder, err := s.DB().BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +41,7 @@ func TestAHoldWaitsForTheLedgerLock(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := s.HoldTeamForDispute(ctx, store.DefaultTeam, "dp_lock", "", "opened", time.Now())
+		_, err := tenant.TestOnlyHoldForDispute(ctx, "dp_lock", "", "opened", time.Now())
 		done <- err
 	}()
 	waited := false

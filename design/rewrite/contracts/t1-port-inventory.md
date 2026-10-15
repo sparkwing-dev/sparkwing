@@ -197,6 +197,35 @@ rows remain fixtures. The HTTP root proofs now use the production enrollment
 transaction. Bootstrap origin, provider proof, host observations and native
 placements remain separate integrations. No native cell is newly closed.
 
+## W1b raw cancellation writer retirement
+
+`TestMeteredUnpricedClaimLeavesWorkUnchanged` replaces
+`TestFailNodeForUnpricedClassEndsTheNodeWithAnEvent`. Named and queued claims on
+runner and Cloud paths refuse an unpriced resource request without changing the
+job, balance, attempts, events or billing rows. The uncalled cancellation writer
+and its separate event kind are removed. Final terminal changes require the
+state machine's current actor and attempt fence.
+
+`TestPaymentDeclineHoldsPrepaidClaimsUntilCollectionSucceeds` replaces
+`TestADeclineHoldsATeamWithPrepaidBalanceAtNew`. It submits trusted failure and
+success facts through the provider settlement owner, binds the retry through
+RecordAttemptIntent, and exercises the real ClaimUnit refusal while the team has
+prepaid credit. The hold lowers billing trust until collection succeeds. Event
+receipts commit with the outcomes. Provider verification and final payment schema
+remain contract fixtures.
+
+`TestMeteredFailureReportSettlesAndReleasesClaimProperty` replaces
+`TestCancelNodeForExhaustedCreditsFailsAndReleasesTheNode`,
+`TestCancelNodeForComputeLimitFailsTheNodeAndReleasesTheClaim` and
+`TestStaleCancellationSettlesAtTheExecutionStart`. It exercises real capability
+issuance, terminal transitions and settlement for runner and Cloud claims,
+before and after execution starts. It checks persisted failure reasons, claim
+release, closed compute intervals, nonnegative settlement, exact replay and
+refusal of changed replay. Job and attempt finish times use the store clock
+and cannot precede execution. Unstarted Cloud claims refund their reservation.
+This ports result persistence and settlement. Renewal-time exhaustion and grace
+remain separate integration requirements.
+
 W2 runner-observation ports: the five tests in agents_test.go move to
 TestRunnerInventoryHTTPUsesCommittedSnapshot,
 TestRunnerInventoryHTTPNameProperty, TestRunnerInventoryHTTPTenantProperty,
@@ -2071,3 +2100,26 @@ router, authentication, CSRF verification and store writer. Only provisioning
 origin verification is faked. `TestRegisteredAgentsHonorRotationGraceProperty`
 covers randomized deadlines and exact expiry. These are package tests. They add
 no native acceptance claim.
+
+## W1 execution-attempt and matcher retirement
+
+The raw execution writers and their local/trigger helpers have no production
+callers. Their tests no longer exercise the final schema. These replacements
+use real claims, transitions and persisted billing:
+
+| Retired tests | Current evidence |
+| --- | --- |
+| Local execution host/outcome, retry sequencing, replay and unnamed executor tests | `TestExecutionAttemptsStayInsideTheNodesTeamProperty`, `TestAttemptExecutorComesFromClaimAncestryProperty`, and current attempt-transition properties retain tenant isolation, stored attribution, ordinal and replay checks. |
+| Dispatched execution start and first-renewal billing, early finish and reserved grace fixtures | `TestMeteredUnitNodeLifecycleUsesImmutableAward`, `TestMeteredUnitCloudRenewalStartsComputeWithoutAnAttempt`, `TestMeteredUnitRenewalCheckpointsAfterComputeStarts`, `TestMeteredUnitApplicationRetryKeepsOneReservation` and `TestMeteredUnitSettlementFailureRollsBackResult` cover current reservations, starts, retries and rollback. Spend exhaustion and grace for all unit kinds remain open. |
+| `TestTriggerNamesGitHubRepoAcceptsEverySpellingOfTheRepository` | The name-based matcher is removed. `TestStoreActionsEnrollment`, `TestStoreQueueOrder`, `TestQueuedTriggerRepositoryScopeProperty` and current push-scope properties retain canonical repository and push authority. |
+| Old attempt-history lineage fixture | `TestExecutionAttemptsStayInsideTheNodesTeamProperty` uses real node transitions and generated hostile tenant/run selectors against final `node_attempts`. |
+
+`TestPlacementMeteringUsesEnrolledOriginProperty` covers all combinations of
+machine/service origin, root metering, direct/delegated claimant, named/queued
+claim and funded/unfunded payer. `TestMeteredRootPolicyCannotRewriteAwardProperty`
+now passes for Cloud awards from unmetered roots, including settlement replay.
+
+Provider-payment fixtures no longer replace the receipt and correlation schema.
+The existing provider payer, mode, replay, rollback and conservation properties
+exercise the installed final tables. `TestTeamPurgeIsolationProperty` also keeps
+unbound warnings and other teams' financial rows across repeated purges.

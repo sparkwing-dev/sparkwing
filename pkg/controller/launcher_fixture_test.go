@@ -28,6 +28,17 @@ func LauncherFixtureClaim(t *testing.T, st *store.Store, runID, nodeID string) s
 	if err != nil {
 		t.Fatal(err)
 	}
+	team, err := st.AsOperator().RunTeam(t.Context(), runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenant, err := st.ForTeam(t.Context(), team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100000000, Reference: "launcher:" + runID, CreatedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
 	unit := store.UnitRef{Kind: capability.UnitNode, RunID: runID, NodeID: nodeID}
 	if nodeID == store.PlanNodeID {
 		unit.Kind, unit.NodeID = capability.UnitPlan, ""
