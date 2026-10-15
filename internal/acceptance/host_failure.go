@@ -84,7 +84,7 @@ func CheckExecutorFailureMask(t *testing.T, value string, secretCode bool) {
 		t.Fatal("executor lost or exposed its failure")
 	}
 	var rendered *apierr.Error
-	if !errors.As(err, &rendered) || rendered.Details != nil || strings.Contains(string(rendered.Code)+rendered.Message+rendered.Hint, secret) {
+	if !errors.As(err, &rendered) || rendered.Details["value"] != "***" || strings.Contains(string(rendered.Code)+rendered.Message+rendered.Hint, secret) {
 		t.Fatal("rendered host error contains an SDK secret payload")
 	}
 	result := storage.reports[len(storage.reports)-1].Extra.Result

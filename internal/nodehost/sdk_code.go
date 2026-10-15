@@ -3,6 +3,7 @@ package nodehost
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -11,10 +12,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type sdkCode struct {
 	Store         EvaluationStore
+	ReadOutput    func(context.Context, store.NodeRef, int64) (json.RawMessage, error)
 	ValidatePlan  func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error)
 	CanonicalHash func(any) (runspec.Hash, error)
 	Validation    nodeproto.ValidationContext
@@ -102,6 +105,12 @@ func (h *sdkCode) replan(ctx context.Context, session *executorSession, input No
 	}
 	if string(hash) != input.Accepted.PlanHash {
 		return executorError(apierr.PlanDrift, "SDK plan differs from the accepted plan")
+	}
+	if len(input.Replay) == 0 && !slices.ContainsFunc(plan.Jobs, func(job nodeproto.JobSpec) bool { return job.ID == input.NodeID }) {
+		input.Replay, err = h.recordedReplay(ctx, input, plan.Jobs)
+		if err != nil {
+			return err
+		}
 	}
 	jobs, err := h.replay(ctx, session, input, plan.Jobs)
 	if err != nil {

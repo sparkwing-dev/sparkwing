@@ -3,16 +3,13 @@ package nodehost
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -49,7 +46,7 @@ type cleanupList struct {
 // safety: keyed by the bearer's hash, so a node reaches only its own list.
 type cleanupLedger struct {
 	mu    sync.Mutex
-	nodes map[[bearerHashSize]byte]*cleanupList
+	nodes map[[bearerHashSize]byte]*ProcessCleanups
 }
 
 // CleanupScope is where a node's cleanups run. Env is the node process's own
@@ -58,47 +55,6 @@ type CleanupScope struct {
 	Dir string
 	Env []string
 	Log io.Writer
-}
-
-func (s *Server) registerCleanup(w http.ResponseWriter, r *http.Request, g *grant) {
-	var req struct {
-		Argv        []string `json:"argv"`
-		Description string   `json:"description"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxCleanupBody)).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("a cleanup is a JSON object of at most %d bytes", maxCleanupBody))
-		return
-	}
-	if msg := checkCleanup(req.Argv, req.Description); msg != "" {
-		s.writeError(w, http.StatusBadRequest, "bad_request", msg)
-		return
-	}
-	l := &s.cleanups
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	// safety: RunCleanups requires the bearer revoked first, so a registration
-	// that races it is refused here instead of landing in a list nobody runs.
-	if g.ctx.Err() != nil {
-		s.writeError(w, http.StatusUnauthorized, "unauthorized", "a node bearer is required")
-		return
-	}
-	key := sha256.Sum256([]byte(g.bearer))
-	if l.nodes == nil {
-		l.nodes = map[[bearerHashSize]byte]*cleanupList{}
-	}
-	list := l.nodes[key]
-	if list == nil {
-		list = &cleanupList{}
-		l.nodes[key] = list
-	}
-	if len(list.items) >= maxCleanups {
-		s.writeError(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("a node may hold at most %d cleanups; release one first", maxCleanups))
-		return
-	}
-	list.next++
-	id := strconv.Itoa(list.next)
-	list.items = append(list.items, cleanup{id: id, argv: req.Argv, description: req.Description})
-	s.writeJSON(w, http.StatusCreated, map[string]string{"id": id})
 }
 
 func checkCleanup(argv []string, description string) string {
@@ -113,26 +69,6 @@ func checkCleanup(argv []string, description string) string {
 		return "argv may not contain NUL bytes"
 	}
 	return ""
-}
-
-func (s *Server) releaseCleanup(w http.ResponseWriter, r *http.Request, g *grant) {
-	id := r.PathValue("id")
-	l := &s.cleanups
-	l.mu.Lock()
-	list := l.nodes[sha256.Sum256([]byte(g.bearer))]
-	i := -1
-	if list != nil {
-		i = slices.IndexFunc(list.items, func(c cleanup) bool { return c.id == id })
-	}
-	if i >= 0 {
-		list.items = slices.Delete(list.items, i, i+1)
-	}
-	l.mu.Unlock()
-	if i < 0 {
-		s.writeError(w, http.StatusNotFound, "unknown_cleanup", "this node holds no cleanup with that id")
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // RunCleanups runs every cleanup the node process holding bearer registered
@@ -156,15 +92,7 @@ func (s *Server) RunCleanups(ctx context.Context, bearer string, scope CleanupSc
 	if list == nil {
 		return nil
 	}
-	log := scope.Log
-	if log == nil {
-		log = io.Discard
-	}
-	env := nodeEnv(scope.Env)
-	for _, c := range slices.Backward(list.items) {
-		runCleanup(ctx, c, scope.Dir, env, log)
-	}
-	return nil
+	return list.Run(ctx, scope)
 }
 
 // safety: failures name argv[0] only, since later arguments may carry secrets.

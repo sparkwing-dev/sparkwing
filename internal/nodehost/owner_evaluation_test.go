@@ -289,7 +289,17 @@ func TestOwnerEvaluationReconstructsNestedGeneratorSource(t *testing.T) {
 	hash, _ = executorHash(expansion)
 	raw, _ := json.Marshal(expansion)
 	st.expansions = []store.AcceptedExpansionRow{{Source: store.NodeRef{RunID: "run", NodeID: "root"}, SourceGeneration: 0, Body: raw, BodyHash: string(hash)}}
-	in.Replay = []GeneratorReplay{{SourceJob: "root", SourceGeneration: 0, GeneratorID: "ancestor", Output: json.RawMessage(`{"root":true}`)}}
+	rootBody, _ := json.Marshal(root)
+	rootHash, _ := executorHash(root)
+	st.nodes = map[string]store.NodeRow{"root": {Ref: store.NodeRef{RunID: "run", NodeID: "root"}, Status: store.StatusDone, Outcome: store.NodeSuccess, Spec: rootBody, SpecHash: string(rootHash)}}
+	deps.Store = recordedReplayStore{st}
+	readOutput := deps.ReadOutput
+	deps.ReadOutput = func(ctx context.Context, ref store.NodeRef, generation int64) (json.RawMessage, error) {
+		if ref == st.nodes["root"].Ref && generation == 0 {
+			return json.RawMessage(`{"root":true}`), nil
+		}
+		return readOutput(ctx, ref, generation)
+	}
 	replayed := 0
 	p.answer = func(_ context.Context, r nodeproto.Request) (any, error) {
 		if r.Op != nodeproto.OpEval {

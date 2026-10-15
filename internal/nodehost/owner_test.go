@@ -253,7 +253,7 @@ func TestOwnerHostDispatchesOnlyAfterSelfClaim(t *testing.T) {
 		return store.ScheduleDecision{Nodes: []store.NodeDecision{{NodeID: "job", Kind: store.DecisionReady}}}
 	}
 	h.Local = func(store.NodeRow) bool { return true }
-	h.Layer = func(_ context.Context, layer LayerSpec, _ AcceptedRun, _ store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
+	h.Layer = func(_ context.Context, layer LayerSpec, _ EvaluationInput, _ store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
 		f.record(layer.Name)
 		return OwnerLayerResult{}, nil
 	}

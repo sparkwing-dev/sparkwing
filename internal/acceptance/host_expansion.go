@@ -229,14 +229,18 @@ func CheckOwnerExpansion(t *testing.T) {
 				t.Fatal(err)
 			}
 			entry := &source.Entry{Engine: resolved}
-			host := nodehost.OwnerHost{Mask: func(value string) string { return value }, Store: s, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Acquire: func(context.Context, nodehost.RunInput) (*source.Entry, error) { return entry, nil }, Wait: func(context.Context, store.RunSnapshot) error { return errors.New("expansion did not settle") }, Expand: func(ctx context.Context, accepted nodehost.AcceptedRun, row store.NodeRow, binding nodehost.StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
+			runner := nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{}}
+			host := nodehost.OwnerHost{Mask: func(value string) string { return value }, Store: s, Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour}, Acquire: func(context.Context, nodehost.RunInput) (*source.Entry, error) { return entry, nil }, Wait: func(context.Context, store.RunSnapshot) error { return errors.New("expansion did not settle") }, Expand: func(ctx context.Context, input nodehost.EvaluationInput, row store.NodeRow, binding nodehost.StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
 				if s.finished.Transition.RunID != "" || s.count != 0 {
 					t.Fatal("owner settled before expansion")
 				}
-				return evaluator.Expand(ctx, nodehost.EvaluationInput{Engine: resolved, Accepted: accepted, NodeID: row.Ref.NodeID, Generation: row.Generation, SpecHash: row.SpecHash, Entry: entry, RouteBinding: nodeproto.ProcessBinding{RunID: "run", JobID: "source"}})
+				if input.Entry != entry || !reflect.DeepEqual(input.Engine, resolved) || !reflect.DeepEqual(input.GrantedRunner, runner) || input.Accepted.SpecHash != string(spec.Hash) || input.NodeID != row.Ref.NodeID || input.Generation != row.Generation || input.SpecHash != row.SpecHash || input.RouteBinding.RunID != row.Ref.RunID || input.RouteBinding.JobID != row.Ref.NodeID {
+					t.Fatal("expansion lost acquired code or persisted evaluation identity")
+				}
+				return evaluator.Expand(ctx, input)
 			}}
 			sealed, _ := json.Marshal(request.Request)
-			result, err := host.Run(ctx, nodehost.RunInput{RunID: "run", SealedRequest: sealed, RequestHash: "request", Owner: store.Actor{Kind: store.ActorRunHost, Owner: owner}})
+			result, err := host.Run(ctx, nodehost.RunInput{RunID: "run", SealedRequest: sealed, RequestHash: "request", GrantedRunner: runner, Owner: store.Actor{Kind: store.ActorRunHost, Owner: owner}})
 			if mode == "refused" {
 				if !errors.Is(err, refused) || s.finished.Transition.RunID != "" {
 					t.Fatalf("refused expansion finished: %+v, %v", s.finished, err)

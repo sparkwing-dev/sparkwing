@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -173,8 +174,8 @@ func TestCleanupFailuresNameOnlyTheProgramAndTheRestStillRun(t *testing.T) {
 	mustRegister(t, s, bearer, "sh", "-c", "exit 3", "s3cret-arg")
 	revoke()
 	var log syncBuffer
-	if err := s.RunCleanups(context.Background(), bearer, nodehost.CleanupScope{Dir: dir, Log: &log, Env: shellEnv()}); err != nil {
-		t.Fatal(err)
+	if err := s.RunCleanups(context.Background(), bearer, nodehost.CleanupScope{Dir: dir, Log: &log, Env: shellEnv()}); err == nil {
+		t.Fatal("failed cleanups returned success")
 	}
 	out := log.String()
 	for _, want := range []string{"cleanup sh failed: exit status 3", "cleanup no-such-program-xyz failed: not found"} {
@@ -199,8 +200,8 @@ func TestCleanupIsKilledAtItsDeadline(t *testing.T) {
 	var log syncBuffer
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
-	if err := s.RunCleanups(ctx, bearer, nodehost.CleanupScope{Dir: t.TempDir(), Log: &log, Env: shellEnv()}); err != nil {
-		t.Fatal(err)
+	if err := s.RunCleanups(ctx, bearer, nodehost.CleanupScope{Dir: t.TempDir(), Log: &log, Env: shellEnv()}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("cleanup deadline error=%v", err)
 	}
 	if out := log.String(); !strings.Contains(out, "cleanup sh failed: timed out") || strings.Contains(out, "s3cret-arg") {
 		t.Fatalf("cleanup log:\n%s\nwant a timeout naming only sh", out)
@@ -214,9 +215,9 @@ func TestCleanupsAreConfinedToTheirNode(t *testing.T) {
 	bearerB, revokeB := cleanupNode(t, s)
 	dir := t.TempDir()
 	id := mustRegister(t, s, bearerA, "sh", "-c", "touch a-ran")
-	if got := send(t, s, http.MethodDelete, "/node/v1/cleanups/"+id, bearerB, nil); got.status != http.StatusNotFound || got.body["code"] != "unknown_cleanup" ||
-		!strings.Contains(got.body["error"].(string), "no cleanup with that id") {
-		t.Fatalf("node B released node A's cleanup: status %d body %v, want 404 unknown_cleanup", got.status, got.body)
+	if got := send(t, s, http.MethodDelete, "/node/v1/cleanups/"+id, bearerB, nil); got.status != http.StatusNotFound || failureCode(got) != "not_found" ||
+		!strings.Contains(failureMessage(got), "no cleanup with that ID") {
+		t.Fatalf("node B released node A's cleanup: status %d body %v, want 404 not_found", got.status, got.body)
 	}
 	mustRegister(t, s, bearerB, "sh", "-c", "touch b-ran")
 	revokeA()
@@ -267,7 +268,7 @@ func TestCleanupRegistrationLimits(t *testing.T) {
 		"body over 16 KiB":  []byte(`{"argv":["x","` + strings.Repeat("a", 16<<10) + `"]}`),
 		"argv not a string": []byte(`{"argv":[1]}`),
 	} {
-		if got := send(t, s, http.MethodPost, "/node/v1/cleanups", bearer, body); got.status != http.StatusBadRequest || got.body["code"] != "bad_request" {
+		if got := send(t, s, http.MethodPost, "/node/v1/cleanups", bearer, body); got.status != http.StatusBadRequest || failureCode(got) != "bad_request" {
 			t.Fatalf("%s: status %d body %v, want 400 bad_request", name, got.status, got.body)
 		}
 	}

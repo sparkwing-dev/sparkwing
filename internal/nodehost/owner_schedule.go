@@ -77,7 +77,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 			}
 			if action.Kind == store.DecisionReady || action.Kind == store.DecisionApproval {
 				launch(action.NodeID, func() error {
-					request, err := h.release(ctx, input, accepted, row, action.Kind)
+					request, err := h.release(ctx, input, accepted, entry, row, action.Kind)
 					if err != nil || request == nil {
 						return err
 					}
@@ -85,7 +85,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 				})
 				continue
 			}
-			request, err := h.apply(ctx, input, accepted, row, action)
+			request, err := h.apply(ctx, input, accepted, entry, row, action)
 			if err != nil {
 				return RunCompletion{}, err
 			}
@@ -158,11 +158,11 @@ func ownerNode(snapshot store.RunSnapshot, id string) (store.NodeRow, bool) {
 	return store.NodeRow{}, false
 }
 
-func (h *OwnerHost) apply(ctx context.Context, input RunInput, accepted AcceptedRun, row store.NodeRow, action store.NodeDecision) (*store.ReconcileRequest, error) {
+func (h *OwnerHost) apply(ctx context.Context, input RunInput, accepted AcceptedRun, entry *source.Entry, row store.NodeRow, action store.NodeDecision) (*store.ReconcileRequest, error) {
 	change := store.NodeTransition{Ref: row.Ref, Actor: input.Owner}
 	switch action.Kind {
 	case store.DecisionReady, store.DecisionApproval:
-		return h.release(ctx, input, accepted, row, action.Kind)
+		return h.release(ctx, input, accepted, entry, row, action.Kind)
 	case store.DecisionTerminal:
 		change.To, change.Cause = store.NodeState(action.Outcome), store.CauseDependency
 		change.Extra.Result = &store.NodeResult{Outcome: change.To, Reason: action.Reason}
@@ -170,7 +170,7 @@ func (h *OwnerHost) apply(ctx context.Context, input RunInput, accepted Accepted
 		change.To, change.Cause = store.NodeCancelled, store.CauseCancel
 		change.Extra.Result = &store.NodeResult{Outcome: store.NodeCancelled, Reason: action.Reason}
 	case store.DecisionExpand:
-		return nil, h.expand(ctx, input, accepted, row)
+		return nil, h.expand(ctx, input, accepted, entry, row)
 	default:
 		return nil, fmt.Errorf("unknown scheduling decision %q", action.Kind)
 	}
@@ -178,7 +178,7 @@ func (h *OwnerHost) apply(ctx context.Context, input RunInput, accepted Accepted
 	return nil, err
 }
 
-func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted AcceptedRun, row store.NodeRow, kind store.DecisionKind) (*store.ReconcileRequest, error) {
+func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted AcceptedRun, entry *source.Entry, row store.NodeRow, kind store.DecisionKind) (*store.ReconcileRequest, error) {
 	if h.Layer == nil {
 		return nil, errors.New("run host requires owner layer policies before dispatch")
 	}
@@ -187,7 +187,7 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 		if layer.Side != OwnerSide {
 			continue
 		}
-		result, err := h.Layer(ctx, layer, accepted, row, input.Storage)
+		result, err := h.Layer(ctx, layer, ownerEvaluation(input, accepted, entry, row), row, input.Storage)
 		if err != nil {
 			return nil, err
 		}
@@ -248,11 +248,19 @@ func (h *OwnerHost) execute(ctx context.Context, storageBinding StorageBinding, 
 	return h.executionError(ctx, accepted.RunID, ownerExecution{nodeID: input.NodeID, err: h.Executor.Execute(ctx, input)})
 }
 
-func (h *OwnerHost) expand(ctx context.Context, input RunInput, accepted AcceptedRun, row store.NodeRow) error {
+func ownerEvaluation(input RunInput, accepted AcceptedRun, entry *source.Entry, row store.NodeRow) EvaluationInput {
+	return EvaluationInput{
+		Engine: entry.Engine, Accepted: accepted, Entry: entry, GrantedRunner: input.GrantedRunner,
+		NodeID: row.Ref.NodeID, Generation: row.Generation, SpecHash: row.SpecHash,
+		RouteBinding: nodeproto.ProcessBinding{RunID: accepted.RunID, JobID: row.Ref.NodeID},
+	}
+}
+
+func (h *OwnerHost) expand(ctx context.Context, input RunInput, accepted AcceptedRun, entry *source.Entry, row store.NodeRow) error {
 	if h.Expand == nil {
 		return errors.New("run host requires a generator evaluator")
 	}
-	body, failure, err := h.Expand(ctx, accepted, row, input.Storage)
+	body, failure, err := h.Expand(ctx, ownerEvaluation(input, accepted, entry, row), row, input.Storage)
 	if err != nil {
 		return err
 	}

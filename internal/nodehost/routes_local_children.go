@@ -3,9 +3,9 @@ package nodehost
 import (
 	"context"
 	"errors"
-	"net/http"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -31,34 +31,25 @@ type LocalChildren interface {
 // perf: a local store read is cheap, so a child's end reaches its parent within a quarter second.
 const localAwaitPoll = 250 * time.Millisecond
 
-func (s *Server) serveLocalStartChild(w http.ResponseWriter, r *http.Request, g *grant, req ChildRequest) {
-	ctx, cancel := context.WithTimeout(r.Context(), upstreamTimeout)
-	defer cancel()
-	id, err := g.Children.StartChild(ctx, ChildParent{RunID: g.RunID, NodeID: g.NodeID}, req)
-	switch {
-	case errors.Is(err, ErrChildCycle):
-		s.writeError(w, http.StatusConflict, "cycle", "pipeline "+quote(req.Pipeline)+" is already among this run's ancestors")
-	case err != nil:
-		s.localOutputFailed(w, g, "children", err)
-	default:
-		g.started.Store(id, true)
-		s.writeJSON(w, http.StatusCreated, map[string]string{"run_id": id})
+func (g *grant) localStartChild(ctx context.Context, request ChildRequest) (string, error) {
+	id, err := g.Children.StartChild(ctx, ChildParent{RunID: g.RunID, NodeID: g.NodeID}, request)
+	if errors.Is(err, ErrChildCycle) {
+		return "", routeFailure(apierr.Conflict, apierr.ReasonChildCycle, "pipeline is already an ancestor")
 	}
+	if err != nil {
+		return "", serviceUnavailable()
+	}
+	g.started.Store(id, true)
+	return id, nil
 }
 
-// safety: as with a claim, a node awaits only a child it started.
-func (s *Server) serveLocalAwaitChild(w http.ResponseWriter, r *http.Request, g *grant, child, node string, wait time.Duration) {
+func (g *grant) localAwaitChild(ctx context.Context, child, job string, wait time.Duration) (ProcessChildResult, error) {
 	if _, ok := g.started.Load(child); !ok {
-		s.logger.Warn("audit", "event", "child_unknown", "run", g.RunID, "node", g.NodeID, "child", child)
-		s.writeError(w, http.StatusNotFound, "unknown_child", "node "+quote(g.NodeID)+" did not start run "+quote(child))
-		return
+		return ProcessChildResult{}, executorError(apierr.NotFound, "process did not start this child")
 	}
-	// safety: a node blocked on its child prints nothing, so the await holds its no-progress timeout, as in-process.
 	if g.Pause != nil {
 		defer g.Pause()()
 	}
-	ctx := r.Context()
-	// safety: as in the dispatcher and docs/sdk.md, a child's wait in plan admission is not the parent's runtime.
 	var resumeWall func()
 	defer func() {
 		if resumeWall != nil {
@@ -66,19 +57,20 @@ func (s *Server) serveLocalAwaitChild(w http.ResponseWriter, r *http.Request, g 
 		}
 	}()
 	deadline := time.Now().Add(wait)
-	status, errMsg := "pending", ""
+	result := ProcessChildResult{RunID: child, Status: "pending"}
 	for {
 		run, err := g.Children.GetRun(ctx, child)
 		switch {
 		case errors.Is(err, store.ErrNotFound):
-			// safety: a queued trigger has no run row yet, so the child reads as pending.
 		case err != nil:
-			s.localOutputFailed(w, g, "await", err)
-			return
+			return ProcessChildResult{}, serviceUnavailable()
 		default:
-			status, errMsg = run.Status, run.Error
+			result.Status = run.Status
+			if run.Error != "" {
+				result.Error = &apierr.Error{Code: apierr.SDKError, Message: run.Error}
+			}
 		}
-		if g.Hold != nil && !terminalRun(status) {
+		if g.Hold != nil && !terminalRun(result.Status) {
 			queued, err := g.Children.Queued(ctx, child)
 			switch {
 			case err == nil && queued && resumeWall == nil:
@@ -88,33 +80,29 @@ func (s *Server) serveLocalAwaitChild(w http.ResponseWriter, r *http.Request, g 
 				resumeWall = nil
 			}
 		}
-		if terminalRun(status) || !time.Now().Before(deadline) {
+		if terminalRun(result.Status) || !time.Now().Before(deadline) {
 			break
 		}
+		timer := time.NewTimer(min(localAwaitPoll, time.Until(deadline)))
 		select {
 		case <-ctx.Done():
-			return
-		case <-time.After(min(localAwaitPoll, time.Until(deadline))):
+			timer.Stop()
+			return ProcessChildResult{}, ctx.Err()
+		case <-timer.C:
 		}
 	}
-	reply := map[string]any{"run_id": child, "status": status}
-	if errMsg != "" {
-		reply["error"] = errMsg
-	}
-	if status != "success" || node == "" {
-		s.writeJSON(w, http.StatusOK, reply)
-		return
+	if result.Status != "success" || job == "" {
+		return result, nil
 	}
 	if g.Local == nil {
-		s.writeError(w, http.StatusBadGateway, "upstream_unavailable", "this node has no runs store to read the child's output from")
-		return
+		return ProcessChildResult{}, serviceUnavailable()
 	}
-	if _, err := g.Local.GetNode(ctx, child, node); errors.Is(err, store.ErrNotFound) {
-		s.writeError(w, http.StatusNotFound, "unknown_node", "run "+quote(child)+" has no node "+quote(node))
-		return
+	if _, err := g.Local.GetNode(ctx, child, job); errors.Is(err, store.ErrNotFound) {
+		return ProcessChildResult{}, executorError(apierr.UnknownJob, "child has no such job")
 	} else if err != nil {
-		s.localOutputFailed(w, g, "await", err)
-		return
+		return ProcessChildResult{}, serviceUnavailable()
 	}
-	s.writeLocalOutput(ctx, w, g, "await", child, node, reply)
+	var err error
+	result.Output, err = g.readLocalOutput(ctx, child, job)
+	return result, err
 }

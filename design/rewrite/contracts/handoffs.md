@@ -1,5 +1,19 @@
 # Cross-area handoffs
 
+W3's [router and native assembly continuation](w3-router-native-continuation.md)
+cuts the production service router to v2 and joins owner and claimed execution
+through one native assembly. Per-process cleanup and child-wait activity come
+from the live delegation. The three reported daemon-policy tests pass. Full
+legacy tests, native placements and the legacy runtime cut remain open.
+
+**W4: default child arguments must serialize as an object.** The real host router
+refuses `sdkserve.ChildRequest{Pipeline: "compile", Job: "build"}` because its
+nil map serializes as `args:null`. `sparkwing.RunAndAwait` starts with that nil
+map when no argument option is supplied. Normalize it to `{}` at the SDK
+transport boundary and test the default through the registered host router.
+The shared service decoder keeps its null-collection refusal. W3 has not changed
+the foreign SDK implementation or added a compatibility request shape.
+
 W3's [native grant continuation](w3-native-grant-continuation.md) connects the
 validated revoker to native attempt/evaluation startup. The real Go SDK owner
 failure acceptance component replaces the legacy eval regression test. The

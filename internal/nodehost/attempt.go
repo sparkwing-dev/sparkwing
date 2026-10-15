@@ -96,6 +96,7 @@ func (a *Attempts) attempt(ctx context.Context, base SessionConfig, n *NodeRun, 
 	bearer, revoke, err := a.Routes.Admit(Node{
 		RunID: run.ID, NodeID: id, Secrets: names, Resolver: a.Resolver, Masker: a.Masker, Claim: a.Claim, Local: a.Local, Refs: n.Plan.References,
 		Children: a.Children, Pause: n.Pause, Hold: n.Hold, Output: n.memoOutput,
+		Job: n.Plan, Sink: sink,
 	})
 	if err != nil {
 		return failed(fmt.Errorf("admit node %s: %w", id, err))
@@ -254,7 +255,7 @@ func attemptEnv(base []string, nodeEnv map[string]nodeproto.EnvValue) []string {
 // limit goes in pieces, masked whole across them. Call Flush once writing
 // ends. It is unlocked, so one goroutine writes at a time.
 type LineWriter struct {
-	sink   *LogSink
+	sink   interface{ Text(string, string) }
 	level  string
 	stream *secrets.Stream
 	buf    []byte

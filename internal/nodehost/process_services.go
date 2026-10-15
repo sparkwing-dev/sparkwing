@@ -23,6 +23,7 @@ import (
 // Writers recheck Authorized in their transaction. Every sink uses Masks' shared masker.
 type ProcessServices struct {
 	lifetime   context.Context
+	activity   *nativeProcessActivity
 	RunID      string
 	Job        nodeproto.JobSpec
 	Masks      *MaskRegistry
@@ -67,7 +68,17 @@ func RegisterProcessServices(router ProcessEndpointRegistrar, resolve func(conte
 		endpoint.Handle = func(w http.ResponseWriter, request *http.Request, auth capability.Authorized) error {
 			service, err := resolve(request.Context(), auth)
 			if err != nil {
-				return maskHostError(err, func(string) string { return "resolve process service failed" })
+				code := apierr.Unavailable
+				var failure *apierr.Error
+				if errors.As(err, &failure) {
+					for _, definition := range apierr.Codes {
+						if failure.Code == definition.Code {
+							code = failure.Code
+							break
+						}
+					}
+				}
+				return executorError(code, "resolve process service failed")
 			}
 			if service == nil || service.Masks == nil || service.Masks.masker == nil || service.RunID != auth.Binding.RunID || service.Job.ID != auth.Binding.NodeID || service.RunID == "" || service.Job.ID == "" {
 				return executorError(apierr.SpecDrift, "service binding differs from its live process")

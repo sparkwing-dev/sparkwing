@@ -188,7 +188,7 @@ func CheckOwnerSeals(t *testing.T) {
 			}
 			if strings.HasPrefix(mode, "secret_") {
 				var rendered *apierr.Error
-				if !errors.Is(err, secretFailure) || !errors.As(err, &rendered) || rendered.Code != secretFailure.Code || strings.Contains(err.Error()+rendered.Message+rendered.Hint, secret) || rendered.Details != nil {
+				if !errors.Is(err, secretFailure) || !errors.As(err, &rendered) || rendered.Code != secretFailure.Code || strings.Contains(err.Error()+rendered.Message+rendered.Hint, secret) || rendered.Details["credential"] != "***" {
 					t.Fatalf("owner error lost its cause or exposed credentials: %v", err)
 				}
 			}

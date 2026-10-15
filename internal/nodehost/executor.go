@@ -76,6 +76,7 @@ type ExecutorDependencies struct {
 	PrepareLayer  func(context.Context, LayerSpec, NodeInput, nodeproto.JobSpec) (ExecutorFinalizer, error)
 	PublishOutput func(context.Context, NodeInput, json.RawMessage) (*blob.RecordKey, error)
 	ReadFailure   func(context.Context, store.NodeRef, int64) (*nodeproto.JobFailure, error)
+	ReadOutput    func(context.Context, store.NodeRef, int64) (json.RawMessage, error)
 	Mask          func(string) string
 }
 
@@ -99,7 +100,7 @@ func NewNodeExecutor(deps ExecutorDependencies) (NodeHost, error) {
 	if deps.ChildContext == nil {
 		deps.ChildContext = limits.ChildContext
 	}
-	return &nodeExecutor{deps: deps, sdkCode: sdkCode{Store: deps.Store, ValidatePlan: deps.ValidatePlan, CanonicalHash: deps.CanonicalHash, Validation: deps.Validation}}, nil
+	return &nodeExecutor{deps: deps, sdkCode: sdkCode{Store: deps.Store, ReadOutput: deps.ReadOutput, ValidatePlan: deps.ValidatePlan, CanonicalHash: deps.CanonicalHash, Validation: deps.Validation}}, nil
 }
 
 func (h *nodeExecutor) Execute(ctx context.Context, input NodeInput) (err error) {

@@ -44,7 +44,7 @@ func TestClaimedNodeHostMasksReadFailuresBeforeRenewal(t *testing.T) {
 	}
 	err := host.Execute(t.Context(), input)
 	var rendered *apierr.Error
-	if !errors.Is(err, failure) || !errors.As(err, &rendered) || strings.Contains(err.Error()+rendered.Message+rendered.Hint, secret) || rendered.Details != nil {
+	if !errors.Is(err, failure) || !errors.As(err, &rendered) || strings.Contains(err.Error()+rendered.Message+rendered.Hint, secret) || rendered.Details["credential"] != "***" {
 		t.Fatalf("claim read exposed credentials or lost its cause: %v", err)
 	}
 	if len(*processes) != 0 || len(state.changes) != 0 {

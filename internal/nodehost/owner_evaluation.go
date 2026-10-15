@@ -79,7 +79,7 @@ func NewOwnerEvaluator(deps EvaluationDependencies) (*OwnerEvaluator, error) {
 	if deps.ChildContext == nil {
 		deps.ChildContext = limits.ChildContext
 	}
-	return &OwnerEvaluator{deps: deps, sdkCode: sdkCode{Store: deps.Store, ValidatePlan: deps.ValidatePlan, CanonicalHash: deps.CanonicalHash, Validation: deps.Validation}}, nil
+	return &OwnerEvaluator{deps: deps, sdkCode: sdkCode{Store: deps.Store, ReadOutput: deps.ReadOutput, ValidatePlan: deps.ValidatePlan, CanonicalHash: deps.CanonicalHash, Validation: deps.Validation}}, nil
 }
 
 // Expand evaluates every declared generator from the source's recorded output

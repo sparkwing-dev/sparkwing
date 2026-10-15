@@ -1,122 +1,85 @@
 package nodehost
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
-	"strconv"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// safety: the run is always the grant's, so a node never names one.
-func (s *Server) serveNodeOutput(w http.ResponseWriter, r *http.Request, g *grant) {
-	node := r.PathValue("node")
-	if !validNodeID(node) {
-		s.writeError(w, http.StatusBadRequest, "bad_request", "the node id is malformed")
-		return
+func (g *grant) output(ctx context.Context, job string) (json.RawMessage, error) {
+	ctx, cancel := context.WithTimeout(ctx, upstreamTimeout)
+	defer cancel()
+	if !validNodeID(job) {
+		return nil, executorError(apierr.BadRequest, "invalid job id")
 	}
-	if node == g.NodeID && g.Output != nil {
-		s.writeJSON(w, http.StatusOK, map[string]any{"output": g.Output})
-		return
+	if job == g.NodeID && g.Output != nil {
+		return g.Output, nil
 	}
 	if g.Claim == nil && g.Local != nil {
-		s.serveLocalNodeOutput(w, r, g, node)
-		return
+		return g.localOutput(ctx, job)
 	}
-	claim, ctx, done, ok := s.forward(w, r, g)
-	if !ok {
-		return
+	if g.Claim == nil {
+		return nil, serviceUnavailable()
 	}
-	defer done()
 	var row struct {
 		Status  string `json:"status"`
 		Outcome string `json:"outcome"`
 	}
-	status, _, err := claim.call(ctx, http.MethodGet, runPath(g.RunID, "nodes", node), nil, &row)
-	switch {
-	case err != nil:
-		s.upstreamFailed(w, g, "output", status, err)
-		return
-	case status == http.StatusNotFound:
-		s.writeError(w, http.StatusNotFound, "unknown_node", "the run has no node "+quote(node))
-		return
-	case status != http.StatusOK:
-		s.upstreamFailed(w, g, "output", status, nil)
-		return
-	case row.Status != "done":
-		s.writeError(w, http.StatusConflict, "not_ready", "node "+quote(node)+" has not finished")
-		return
-	case row.Outcome != string(sparkwing.Success) && row.Outcome != string(sparkwing.Memoized):
-		s.writeError(w, http.StatusNotFound, "no_output", "node "+quote(node)+" finished without succeeding")
-		return
+	status, _, err := g.Claim.call(ctx, http.MethodGet, runPath(g.RunID, "nodes", job), nil, &row)
+	if status == http.StatusNotFound {
+		return nil, executorError(apierr.UnknownJob, "run has no such job")
 	}
-	var grant store.OutputReadGrant
-	status, code, err := claim.call(ctx, http.MethodGet, runPath(g.RunID, "nodes", node, "output"), nil, &grant)
-	switch {
-	case err != nil:
-		s.upstreamFailed(w, g, "output", status, err)
-		return
-	case status == http.StatusForbidden && code == "output_not_ancestor":
-		s.logger.Warn("audit", "event", "output_not_dependency", "run", g.RunID, "node", g.NodeID, "target", node)
-		s.writeError(w, http.StatusForbidden, "not_dependency",
-			"node "+quote(g.NodeID)+" reads only the outputs of nodes it depends on")
-		return
-	case status != http.StatusOK:
-		s.upstreamFailed(w, g, "output", status, nil)
-		return
+	if err != nil || status != http.StatusOK {
+		return nil, serviceUnavailable()
 	}
-	s.writeOutput(ctx, w, g, "output", grant, map[string]any{})
+	if row.Status != "done" {
+		return nil, routeFailure(apierr.Conflict, apierr.ReasonNotReady, "job has not finished")
+	}
+	if row.Outcome != string(sparkwing.Success) && row.Outcome != string(sparkwing.Memoized) {
+		return nil, routeFailure(apierr.NotFound, apierr.ReasonNoOutput, "job finished without output")
+	}
+	var output store.OutputReadGrant
+	status, code, err := g.Claim.call(ctx, http.MethodGet, runPath(g.RunID, "nodes", job, "output"), nil, &output)
+	if status == http.StatusForbidden && code == "output_not_ancestor" {
+		return nil, routeFailure(apierr.Forbidden, apierr.ReasonNotDependency, "job output is not a dependency")
+	}
+	if err != nil || status != http.StatusOK {
+		return nil, serviceUnavailable()
+	}
+	return g.Claim.output(ctx, output)
 }
 
-// safety: the controller resolves the run within the claim's team and only
-// for a reference the node's plan declares.
-func (s *Server) servePipelineLatest(w http.ResponseWriter, r *http.Request, g *grant) {
-	pipeline, node := r.PathValue("name"), r.URL.Query().Get("node")
-	maxAge, ageOK := int64(0), true
-	if raw := r.URL.Query().Get("max_age_ms"); raw != "" {
-		var err error
-		maxAge, err = strconv.ParseInt(raw, 10, 64)
-		ageOK = err == nil && maxAge >= 0
-	}
-	if !validName(pipeline) || !validNodeID(node) || !ageOK {
-		s.writeError(w, http.StatusBadRequest, "bad_request", "the pipeline, node or max_age_ms is malformed")
-		return
+func (g *grant) latest(ctx context.Context, pipeline, job string, age time.Duration) (ProcessOutput, error) {
+	ctx, cancel := context.WithTimeout(ctx, upstreamTimeout)
+	defer cancel()
+	if !validName(pipeline) || !validNodeID(job) {
+		return ProcessOutput{}, executorError(apierr.BadRequest, "invalid pipeline or job")
 	}
 	if g.Claim == nil && g.Local != nil {
-		s.serveLocalPipelineLatest(w, r, g, pipeline, node, time.Duration(maxAge)*time.Millisecond)
-		return
+		return g.localLatest(ctx, pipeline, job, age)
 	}
-	claim, ctx, done, ok := s.forward(w, r, g)
-	if !ok {
-		return
+	if g.Claim == nil {
+		return ProcessOutput{}, serviceUnavailable()
 	}
-	defer done()
 	var in store.ClaimInput
-	status, code, err := claim.call(ctx, http.MethodPost, runPath(g.RunID, "nodes", g.NodeID, "claim", "input"),
-		store.ClaimInputRequest{Kind: store.ClaimInputLastRun, Pipeline: pipeline, Node: node, MaxAgeMS: maxAge}, &in)
-	switch {
-	case err != nil:
-		s.upstreamFailed(w, g, "latest", status, err)
-		return
-	case status == http.StatusNotFound:
-		s.writeError(w, http.StatusNotFound, "no_run", "no successful run of "+quote(pipeline)+" matches")
-		return
-	case status == http.StatusForbidden && code == "input_undeclared":
-		s.referenceUndeclared(w, g, pipeline, node)
-		return
-	case status != http.StatusOK:
-		s.upstreamFailed(w, g, "latest", status, nil)
-		return
-	case in.Output.URL == "":
-		s.writeError(w, http.StatusNotFound, "no_output", "node "+quote(node)+" of the newest run recorded no output")
-		return
+	status, code, err := g.Claim.call(ctx, http.MethodPost, runPath(g.RunID, "nodes", g.NodeID, "claim", "input"), store.ClaimInputRequest{Kind: store.ClaimInputLastRun, Pipeline: pipeline, Node: job, MaxAgeMS: age.Milliseconds()}, &in)
+	if status == http.StatusNotFound {
+		return ProcessOutput{}, executorError(apierr.NotFound, "no successful pipeline run matches")
 	}
-	s.writeOutput(ctx, w, g, "latest", in.Output, map[string]any{"run_id": in.RunID})
-}
-
-func (s *Server) referenceUndeclared(w http.ResponseWriter, g *grant, pipeline, node string) {
-	s.logger.Warn("audit", "event", "reference_undeclared", "run", g.RunID, "node", g.NodeID, "pipeline", pipeline)
-	s.writeError(w, http.StatusForbidden, "reference_undeclared",
-		"node "+quote(g.NodeID)+" does not declare a reference to "+quote(pipeline+"/"+node))
+	if status == http.StatusForbidden && code == "input_undeclared" {
+		return ProcessOutput{}, routeFailure(apierr.Forbidden, apierr.ReasonReferenceUndeclared, "pipeline reference is not declared")
+	}
+	if err != nil || status != http.StatusOK {
+		return ProcessOutput{}, serviceUnavailable()
+	}
+	if in.Output.URL == "" {
+		return ProcessOutput{}, routeFailure(apierr.NotFound, apierr.ReasonNoOutput, "latest run recorded no output")
+	}
+	raw, err := g.Claim.output(ctx, in.Output)
+	return ProcessOutput{RunID: in.RunID, Output: raw}, err
 }

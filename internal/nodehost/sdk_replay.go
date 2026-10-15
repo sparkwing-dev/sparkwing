@@ -5,11 +5,99 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+func (h *sdkCode) recordedReplay(ctx context.Context, input NodeInput, initial []nodeproto.JobSpec) ([]GeneratorReplay, error) {
+	if h.ReadOutput == nil {
+		return nil, executorError(apierr.PlanDrift, "generated reconstruction requires authorized ancestor outputs")
+	}
+	snapshot, err := h.Store.ReadSnapshot(ctx, input.Accepted.RunID)
+	if err != nil {
+		return nil, err
+	}
+	if snapshot.Run.ID != input.Accepted.RunID {
+		return nil, executorError(apierr.PlanDrift, "generator ancestry belongs to another run")
+	}
+	declarations := map[string]nodeproto.JobSpec{}
+	for _, job := range initial {
+		declarations[job.ID] = job
+	}
+	parents := map[string]store.AcceptedExpansionRow{}
+	for _, expansion := range snapshot.Expansions {
+		var plan nodeproto.PlanDoc
+		if expansion.Source.RunID != input.Accepted.RunID || expansion.Source.NodeID == "" || expansion.SourceGeneration < 0 || json.Unmarshal(expansion.Body, &plan) != nil || plan.Jobs == nil {
+			return nil, executorError(apierr.PlanDrift, "generator ancestry has an invalid accepted expansion")
+		}
+		hash, err := h.CanonicalHash(expansion.Body)
+		if err != nil {
+			return nil, err
+		}
+		if string(hash) != expansion.BodyHash {
+			return nil, executorError(apierr.PlanDrift, "generator ancestry expansion hash differs from its body")
+		}
+		for _, job := range plan.Jobs {
+			if _, exists := declarations[job.ID]; exists || job.ID == "" {
+				return nil, executorError(apierr.PlanDrift, "generator ancestry has ambiguous job membership")
+			}
+			declarations[job.ID], parents[job.ID] = job, expansion
+		}
+	}
+	var replay []GeneratorReplay
+	visiting := map[string]bool{}
+	for id := input.NodeID; ; {
+		parent, generated := parents[id]
+		if !generated {
+			if _, exists := declarations[id]; !exists {
+				return nil, executorError(apierr.PlanDrift, "generated job has no accepted source")
+			}
+			break
+		}
+		if visiting[id] {
+			return nil, executorError(apierr.PlanDrift, "generator ancestry contains a cycle")
+		}
+		visiting[id] = true
+		row, ok := ownerNode(snapshot, parent.Source.NodeID)
+		if !ok || row.Generation != parent.SourceGeneration || row.Status != store.StatusDone || row.Outcome != store.NodeSuccess && row.Outcome != store.NodeMemoized {
+			return nil, executorError(apierr.PlanDrift, "generator ancestry lost its successful source generation")
+		}
+		declaration := declarations[row.Ref.NodeID]
+		hash, err := h.CanonicalHash(declaration)
+		if err != nil {
+			return nil, err
+		}
+		if len(declaration.Closures.Generate) == 0 || declaration.Closures.Generate[0] == "" || !json.Valid(row.Spec) {
+			return nil, executorError(apierr.PlanDrift, "generator ancestry has no persisted source generator")
+		}
+		persistedHash, err := h.CanonicalHash(row.Spec)
+		if err != nil {
+			return nil, err
+		}
+		if string(hash) != row.SpecHash || persistedHash != hash {
+			return nil, executorError(apierr.PlanDrift, "generator ancestry differs from its persisted source declaration")
+		}
+		replay = append(replay, GeneratorReplay{SourceJob: row.Ref.NodeID, SourceGeneration: row.Generation, GeneratorID: declaration.Closures.Generate[0]})
+		id = parent.Source.NodeID
+	}
+	slices.Reverse(replay)
+	for i := range replay {
+		if cause := context.Cause(ctx); cause != nil {
+			return nil, cause
+		}
+		replay[i].Output, err = h.ReadOutput(ctx, store.NodeRef{RunID: input.Accepted.RunID, NodeID: replay[i].SourceJob}, replay[i].SourceGeneration)
+		if err != nil {
+			return nil, err
+		}
+		if !json.Valid(replay[i].Output) {
+			return nil, executorError(apierr.PlanDrift, "generator ancestry output is missing or invalid JSON")
+		}
+	}
+	return replay, nil
+}
 
 func (h *sdkCode) replay(ctx context.Context, session *executorSession, input NodeInput, initial []nodeproto.JobSpec) ([]nodeproto.JobSpec, error) {
 	jobs := append([]nodeproto.JobSpec(nil), initial...)

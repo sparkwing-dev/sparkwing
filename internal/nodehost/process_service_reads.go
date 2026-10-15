@@ -28,7 +28,7 @@ type ProcessOIDCToken struct {
 type ProcessChildResult struct {
 	RunID  string          `json:"run_id"`
 	Status string          `json:"status"`
-	Error  string          `json:"error,omitempty"`
+	Error  *apierr.Error   `json:"error,omitempty"`
 	Output json.RawMessage `json:"output,omitempty"`
 }
 
@@ -161,6 +161,9 @@ func (s *ProcessServices) awaitChild(request *http.Request, auth capability.Auth
 	if s.AwaitChild == nil {
 		return nil, serviceUnavailable()
 	}
+	if s.activity != nil {
+		defer s.activity.wait()()
+	}
 	wait, ok := waitParam(request.URL.Query().Get("wait_ms"))
 	if !ok {
 		return nil, executorError(apierr.BadRequest, "invalid child wait_ms")
@@ -177,7 +180,12 @@ func (s *ProcessServices) awaitChild(request *http.Request, auth capability.Auth
 			return nil, err
 		}
 	}
-	result.Error = s.Masks.mask(result.Error)
+	if result.Error != nil {
+		masked := maskHostError(result.Error, s.Masks.mask)
+		if !errors.As(masked, &result.Error) {
+			return nil, executorError(apierr.Internal, "child error could not be encoded")
+		}
+	}
 	return result, nil
 }
 

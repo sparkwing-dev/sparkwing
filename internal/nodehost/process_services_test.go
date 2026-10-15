@@ -63,6 +63,23 @@ func (r *serviceRegistrar) Register(endpoint controller.Endpoint) error {
 	return nil
 }
 
+func TestProcessServicesPreserveResolutionRefusalCodes(t *testing.T) {
+	for _, definition := range apierr.Codes {
+		t.Run(string(definition.Code), func(t *testing.T) {
+			routes := &serviceRegistrar{}
+			failure := &apierr.Error{Code: definition.Code, Message: "private-credential", Hint: "private-credential", Details: map[string]any{"private-credential": "private-credential"}}
+			if err := RegisterProcessServices(routes, func(context.Context, capability.Authorized) (*ProcessServices, error) { return nil, failure }); err != nil {
+				t.Fatal(err)
+			}
+			_, err := callService(t, routes, capability.Authorized{}, "/node/v1/masks", `{"value":"mask-value"}`)
+			var rendered *apierr.Error
+			if !errors.As(err, &rendered) || rendered.Code != definition.Code || strings.Contains(rendered.Error(), "private-credential") || rendered.Hint != "" || rendered.Details != nil {
+				t.Fatalf("resolution refusal changed code or exposed diagnostics: %+v", rendered)
+			}
+		})
+	}
+}
+
 func serviceFixture(t *testing.T) (*serviceRegistrar, *ProcessServices, capability.Authorized) {
 	t.Helper()
 	masker := secrets.NewMasker()

@@ -44,7 +44,7 @@ func TestOwnerHostMasksEveryReturnedFailure(t *testing.T) {
 				t.Fatalf("owner exposed a %s failure: %v", stage, err)
 			}
 			var rendered *apierr.Error
-			if !errors.Is(err, failure) || !errors.As(err, &rendered) || rendered.Code != failure.Code || strings.Contains(rendered.Message+rendered.Hint, secret) || rendered.Details != nil {
+			if !errors.Is(err, failure) || !errors.As(err, &rendered) || rendered.Code != failure.Code || strings.Contains(rendered.Message+rendered.Hint, secret) || rendered.Details["credential"] != "***" {
 				t.Fatalf("owner lost the cause or exposed structured details: %v", err)
 			}
 		})
@@ -185,7 +185,7 @@ func TestOwnerHostPolicyFailureCannotHideBehindTerminalNode(t *testing.T) {
 		}
 		return store.ScheduleDecision{Nodes: []store.NodeDecision{{NodeID: "job", Kind: store.DecisionReady}}}
 	}
-	h.Layer = func(ctx context.Context, _ LayerSpec, _ AcceptedRun, row store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
+	h.Layer = func(ctx context.Context, _ LayerSpec, _ EvaluationInput, row store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
 		_, err := f.TransitionNode(ctx, store.NodeTransition{Ref: row.Ref, To: store.NodeSkipped})
 		return OwnerLayerResult{}, errors.Join(failure, err)
 	}

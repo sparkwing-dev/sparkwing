@@ -131,10 +131,10 @@ func TestProcessServicesReadUnderBoundAuthorityAndMaskBeforeDelivery(t *testing.
 		if child != "child" || got.Target.ChildRunID != child || id != "image" || got.Target.NodeID != id || wait != 5*time.Second {
 			t.Fatal("child wait selectors changed")
 		}
-		return ProcessChildResult{RunID: child, Status: "failed", Error: "private-secret"}, nil
+		return ProcessChildResult{RunID: child, Status: "failed", Error: &apierr.Error{Code: apierr.SDKError, Message: "private-secret", Hint: "private-secret", Details: map[string]any{"private-secret": "private-secret"}}}, nil
 	}
 	response = registeredServiceRequest(t, routes, auth, http.MethodGet, "/node/v1/children/child/await?job=image&wait_ms=5000", "")
-	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "private-secret") || !strings.Contains(response.Body.String(), `"error":"***"`) {
+	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "private-secret") || !strings.Contains(response.Body.String(), `"message":"***"`) {
 		t.Fatalf("child wait response=%d %s", response.Code, response.Body)
 	}
 }

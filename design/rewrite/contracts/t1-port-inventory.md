@@ -8,6 +8,14 @@ The primary inventory has 74 changed or added functions: 6 lifecycle, 6 state-ma
 
 ## Source snapshots
 
+W3's [router and native continuation](w3-router-native-continuation.md) ports the
+existing route and cleanup assertions to the shared v2 handlers. The three
+daemon lease-policy tests retain ownership, resources, priority/class and
+semaphore-only checks at the resolved W3 seam. Native assembly and automatic
+persisted generator reconstruction use existing process/replay components.
+No acceptance cell is added or activated by this continuation. The remaining
+legacy scheduler/store fixtures still fail against the removed schema.
+
 The unfenced node/trigger reapers and their dispatcher-expiry helpers are removed.
 `pkg/controller/reaper_test.go:TestReaperRecoversExpiredOwnerAndKeepsLiveOwner`
 replaces its private ticker-based reaper with the real elected controller pass.

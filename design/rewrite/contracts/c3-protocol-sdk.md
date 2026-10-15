@@ -1,5 +1,10 @@
 # C3 protocol and SDK contract
 
+[Native assembly and router cutover](w3-router-native-continuation.md) joins the
+owner and claimed-node host around one executor, transport, engine resolver and
+environment builder. The registered service router uses the v2 routes and errors.
+Native placements and the remaining legacy runtime cut stay open.
+
 [Native grant handoff](w3-native-grant-continuation.md) passes the validated
 revoker into native attempt and owner-evaluation startup. It ports real Go SDK
 closure failures, carries persisted cancellation reasons and removes the separate
@@ -143,6 +148,8 @@ are part of this contract.
 | `nodehost.RunCompletion` | Reports the verdict after atomic run/unit finish. |
 | `nodehost.RunHost.Run` | Runs acquire through completion for every run-host placement. |
 | `nodehost.OwnerHost`, `OwnerStore` | Coordinate renewal, planning, acceptance, scheduling and atomic finish through the Tenant contracts. |
+| `nodehost.NewNativeHost`, `NativeHostConfig` | Assemble owner and claimed execution with one native executor and register their delegated process services. |
+| `nodehost.NativeProcesses` | Bind native startup, attributed masked logs, child-wait activity and cleanup to one live process delegation. |
 | `nodehost.OwnerPlanning`, `OwnerLayerResult` | Supply checkout planning inputs and owner policy results without replacing intake or claim authority. |
 | `nodehost.GeneratorReplay` | Supplies recorded source output for code-only reconstruction. |
 | `nodehost.OwnerEvaluator`, `NewOwnerEvaluator`, `EvaluationInput`, `EvaluationDependencies`, `EvaluationStore` | Reconstruct accepted source code and evaluate every source generator through the common protocol and hash checks. |

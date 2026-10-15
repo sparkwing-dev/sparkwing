@@ -256,6 +256,9 @@ has stopped. That operation also receives its own reply.
 Bound SDK calls use the URL and bearer supplied by hello. Every request carries
 `Authorization: Bearer <bearer>`. Identifiers are opaque path segments, escaped
 before transport. The host derives run, job and claim authority from the bearer.
+Hello supplies the protocol negotiation. HTTP failures use the canonical error
+envelope, including its code and masked details. A failed child embeds the inner
+error object in its `error` member.
 
 <!-- node-routes:start -->
 | Method | Path | Request | Response |

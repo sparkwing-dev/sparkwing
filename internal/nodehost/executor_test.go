@@ -662,6 +662,168 @@ func TestNodeExecutorGeneratorReplayChecksCompleteAcceptedMembership(t *testing.
 	}
 }
 
+type recordedReplayStore struct{ *executorStore }
+
+func (s recordedReplayStore) ReadSnapshot(ctx context.Context, runID string) (store.RunSnapshot, error) {
+	snapshot, err := s.executorStore.ReadSnapshot(ctx, runID)
+	for _, row := range s.nodes {
+		snapshot.Nodes = append(snapshot.Nodes, row)
+	}
+	return snapshot, err
+}
+
+func recordedReplayFixture(t *testing.T) (NodeInput, *executorStore, ExecutorDependencies, *[]*executorProcess, *[]string) {
+	t.Helper()
+	input, state, deps, processes := executorFixture(t)
+	job := input.Accepted.Plan.Jobs[0]
+	job.Groups = []string{"children"}
+	executorChangeJob(t, &input, state, job)
+	root := nodeproto.JobSpec{ID: "root", Closures: nodeproto.ClosureSpec{Generate: []string{"ancestors"}}}
+	parent := nodeproto.JobSpec{ID: "parent", Groups: []string{"ancestors"}, Closures: nodeproto.ClosureSpec{Generate: []string{"children"}}}
+	unrelated := nodeproto.JobSpec{ID: "unrelated", Closures: nodeproto.ClosureSpec{Generate: []string{"other"}}}
+	input.Accepted.Plan = nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{root, unrelated}}
+	hash, _ := executorHash(input.Accepted.Plan)
+	input.Accepted.PlanHash = string(hash)
+	var spec runspec.Spec
+	_ = json.Unmarshal(input.Accepted.Spec, &spec)
+	spec.PlanHash = hash
+	input.Accepted.Spec, _ = json.Marshal(spec)
+	state.nodes = map[string]store.NodeRow{}
+	for i, declaration := range []nodeproto.JobSpec{root, parent, unrelated} {
+		body, _ := json.Marshal(declaration)
+		hash, _ := executorHash(declaration)
+		state.nodes[declaration.ID] = store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: declaration.ID}, Status: store.StatusDone, Outcome: store.NodeSuccess, Generation: int64(i + 2), Spec: body, SpecHash: string(hash)}
+	}
+	for i, declaration := range []nodeproto.JobSpec{parent, job, {ID: "unused", Groups: []string{"other"}}} {
+		body := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{declaration}}
+		raw, _ := json.Marshal(body)
+		hash, _ := executorHash(body)
+		state.expansions = append(state.expansions, store.AcceptedExpansionRow{Source: store.NodeRef{RunID: "run", NodeID: []string{"root", "parent", "unrelated"}[i]}, SourceGeneration: int64(i + 2), Body: raw, BodyHash: string(hash)})
+	}
+	reads := []string{}
+	deps.Store = recordedReplayStore{state}
+	deps.ReadOutput = func(_ context.Context, ref store.NodeRef, generation int64) (json.RawMessage, error) {
+		if ref.RunID != "run" || ref.NodeID != "root" && ref.NodeID != "parent" || generation != state.nodes[ref.NodeID].Generation {
+			t.Fatal("read outside the persisted ancestor generations")
+		}
+		reads = append(reads, ref.NodeID)
+		return json.Marshal(ref.NodeID)
+	}
+	start := deps.Start
+	deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
+		process, err := start(ctx, in, activity)
+		fake := process.(*executorProcess)
+		fake.plan = input.Accepted.Plan
+		fake.answer = func(_ context.Context, request nodeproto.Request) (any, error) {
+			if request.Op != nodeproto.OpEval {
+				return nil, nil
+			}
+			var generated nodeproto.JobSpec
+			switch request.Closure {
+			case "ancestors":
+				generated = parent
+				if string(request.Input) != `"root"` {
+					t.Fatal("ancestor replay lost the recorded root output")
+				}
+			case "children":
+				generated = job
+				if string(request.Input) != `"parent"` {
+					t.Fatal("child replay lost the recorded parent output")
+				}
+			default:
+				t.Fatal("evaluated an unrelated generator")
+			}
+			raw, _ := json.Marshal([]nodeproto.JobSpec{generated})
+			return nodeproto.EvalResult{Value: raw}, nil
+		}
+		return process, err
+	}
+	return input, state, deps, processes, &reads
+}
+
+func TestNodeExecutorReconstructsOnlyPersistedGeneratorAncestors(t *testing.T) {
+	input, _, deps, processes, reads := recordedReplayFixture(t)
+	host, err := NewNodeExecutor(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := host.Execute(t.Context(), input); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(*reads, []string{"root", "parent"}) {
+		t.Fatal("ancestor output reads:", *reads)
+	}
+	if len(*processes) != 1 || (*processes)[0].closed != 1 || (*processes)[0].cleaned != 1 {
+		t.Fatal("generated execution did not join its process")
+	}
+}
+
+func FuzzRecordedReplayValidatesLineageBeforeOutputReads(f *testing.F) {
+	for field := uint8(0); field < 10; field++ {
+		f.Add(field, "changed")
+	}
+	f.Fuzz(func(t *testing.T, field uint8, value string) {
+		input, state, deps, _, reads := recordedReplayFixture(t)
+		row := state.nodes["root"]
+		switch field % 10 {
+		case 0:
+			row.Generation++
+		case 1:
+			row.SpecHash = "changed:" + value
+		case 2:
+			state.expansions[0].BodyHash = "changed:" + value
+		case 3:
+			state.expansions[0].Source.RunID = "changed:" + value
+		case 4:
+			row.Status = store.StatusPending
+		case 5:
+			state.expansions = state.expansions[1:]
+		case 6:
+			state.expansions = append(state.expansions, state.expansions[0])
+		case 7:
+			row.Spec = json.RawMessage(`{"id":"changed"}`)
+		case 8:
+			row.Ref.NodeID = "changed:" + value
+		case 9:
+			state.expansions[0].SourceGeneration++
+		}
+		state.nodes["root"] = row
+		host, err := NewNodeExecutor(deps)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = host.(*nodeExecutor).recordedReplay(t.Context(), input, input.Accepted.Plan.Jobs)
+		if err == nil || len(*reads) != 0 {
+			t.Fatalf("invalid lineage read ancestor output: reads=%v error=%v", *reads, err)
+		}
+	})
+}
+
+func TestRecordedReplayRejectsCyclicAncestryBeforeOutputReads(t *testing.T) {
+	input, state, deps, _, reads := recordedReplayFixture(t)
+	root := input.Accepted.Plan.Jobs[0]
+	root.Groups = []string{"children"}
+	row := state.nodes[root.ID]
+	row.Spec, _ = json.Marshal(root)
+	hash, _ := executorHash(root)
+	row.SpecHash = string(hash)
+	state.nodes[root.ID] = row
+	var body nodeproto.PlanDoc
+	_ = json.Unmarshal(state.expansions[1].Body, &body)
+	body.Jobs = append(body.Jobs, root)
+	state.expansions[1].Body, _ = json.Marshal(body)
+	hash, _ = executorHash(body)
+	state.expansions[1].BodyHash = string(hash)
+	host, err := NewNodeExecutor(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = host.(*nodeExecutor).recordedReplay(t.Context(), input, input.Accepted.Plan.Jobs[1:])
+	if err == nil || len(*reads) != 0 {
+		t.Fatalf("cyclic ancestry read source output: reads=%v error=%v", *reads, err)
+	}
+}
+
 func TestNodeExecutorRecoveryReceivesPersistedFailure(t *testing.T) {
 	input, s, deps, processes := executorFixture(t)
 	job := input.Accepted.Plan.Jobs[0]

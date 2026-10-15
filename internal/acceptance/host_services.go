@@ -130,7 +130,7 @@ func checkRegisteredServiceReads(t *testing.T, routes *processServiceRoutes, ser
 		return "child", nil
 	}
 	service.AwaitChild = func(context.Context, capability.Authorized, string, string, time.Duration) (nodehost.ProcessChildResult, error) {
-		return nodehost.ProcessChildResult{RunID: "child", Status: "failed", Error: "released-secret"}, nil
+		return nodehost.ProcessChildResult{RunID: "child", Status: "failed", Error: &apierr.Error{Code: apierr.SDKError, Message: "released-secret"}}, nil
 	}
 	service.Cleanups = &nodehost.ProcessCleanups{}
 	for _, test := range []struct {
@@ -142,7 +142,7 @@ func checkRegisteredServiceReads(t *testing.T, routes *processServiceRoutes, ser
 		{"GET", "/node/v1/pipelines/{name}/latest", "/node/v1/pipelines/build/latest?job=producer", "", `"run_id":"prior"`, 200},
 		{"POST", "/node/v1/oidc-token", "/node/v1/oidc-token", `{"audience":"cloud"}`, `"token":"minted-credential"`, 200},
 		{"POST", "/node/v1/children", "/node/v1/children", `{"pipeline":"build"}`, `"run_id":"child"`, 201},
-		{"GET", "/node/v1/children/{run}/await", "/node/v1/children/child/await", "", `"error":"***"`, 200},
+		{"GET", "/node/v1/children/{run}/await", "/node/v1/children/child/await", "", `"message":"***"`, 200},
 		{"POST", "/node/v1/cleanups", "/node/v1/cleanups", `{"argv":["tool"]}`, `"id":"1"`, 201},
 		{"DELETE", "/node/v1/cleanups/{cleanup}", "/node/v1/cleanups/1", "", "", 204},
 	} {

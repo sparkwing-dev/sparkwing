@@ -1,0 +1,106 @@
+package nodehost
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+)
+
+// NativeHostStore supplies the persisted state shared by owner and claimed execution.
+type NativeHostStore interface {
+	OwnerStore
+	ClaimStore
+}
+
+// NativeHostConfig supplies policy adapters in nested configs; shared fields come from its top level.
+type NativeHostConfig struct {
+	Store         NativeHostStore
+	Lease         lease.Keeper
+	Source        source.Options
+	Snapshots     CapturedEnvironmentLoader
+	Masks         *MaskRegistry
+	Processes     *NativeProcesses
+	Router        ProcessEndpointRegistrar
+	Validation    nodeproto.ValidationContext
+	ValidatePlan  func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error)
+	CanonicalHash func(any) (runspec.Hash, error)
+	Owner         OwnerHost
+	Executor      ExecutorDependencies
+	Evaluation    EvaluationDependencies
+	Planner       SDKPlanner
+}
+
+// NewNativeHost configures its owned transport and returns shared hosts and an evaluator for owner policies.
+func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *OwnerEvaluator, error) {
+	if config.Store == nil || config.Source.Engines == nil || config.Masks == nil || config.Masks.masker == nil || config.Processes == nil || config.Processes.Authorities == nil || config.Processes.Log == nil || config.Router == nil {
+		return nil, nil, nil, errors.New("native host requires store, source engine, shared masks and process transport")
+	}
+	if config.Lease.Interval <= 0 || config.Lease.Lease <= config.Lease.Interval {
+		return nil, nil, nil, errors.New("native host requires a positive renewal interval below its lease")
+	}
+	if config.Owner.Wait == nil || config.Planner.Log == nil {
+		return nil, nil, nil, errors.New("native host requires state following and planning logs")
+	}
+	if config.Executor.Bind == nil || config.Evaluation.Bind == nil {
+		return nil, nil, nil, errors.New("native host requires fresh execution and evaluation delegation")
+	}
+	processes := config.Processes
+	processes.Masks = config.Masks
+	processes.Session.Environments.Store = config.Store
+	processes.Session.Environments.Base = config.Source.Base
+	processes.Session.Environments.Snapshots = config.Snapshots
+	validation := config.Validation
+	validation.Secrets = config.Masks
+	functions := (PlanningFunctions{Validate: config.ValidatePlan, Hash: config.CanonicalHash}).defaults()
+	execution := config.Executor
+	if execution.ReadOutput == nil {
+		execution.ReadOutput = config.Evaluation.ReadOutput
+	}
+	if execution.Log == nil {
+		execution.Log = func(ctx context.Context, input NodeInput, frame nodeproto.FrameLog) error {
+			return processes.Log(ctx, input.Accepted.RunID, input.NodeID, frame)
+		}
+	}
+	execution.Store, execution.Mask = config.Store, config.Masks.masker.Mask
+	execution.Start, execution.EnsureEngine = processes.Start, config.Source.Engines.Ensure
+	execution.Validation, execution.ValidatePlan, execution.CanonicalHash = validation, functions.Validate, functions.Hash
+	executor, err := NewNodeExecutor(execution)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	evaluation := config.Evaluation
+	evaluation.Store, evaluation.Mask = config.Store, config.Masks.masker.Mask
+	evaluation.Start, evaluation.EnsureEngine = processes.StartEvaluation, config.Source.Engines.Ensure
+	evaluation.Validation, evaluation.ValidatePlan, evaluation.CanonicalHash = validation, functions.Validate, functions.Hash
+	evaluator, err := NewOwnerEvaluator(evaluation)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	planner := config.Planner
+	planner.Start, planner.EnsureEngine = processes.StartPlanning, config.Source.Engines.Ensure
+	planner.Masker, planner.ValidatePlan, planner.CanonicalHash = config.Masks.masker, functions.Validate, functions.Hash
+	owner := config.Owner
+	owner.Store, owner.Lease, owner.Source = config.Store, config.Lease, config.Source
+	owner.Snapshots, owner.Masks, owner.Mask = config.Snapshots, config.Masks, config.Masks.masker.Mask
+	owner.Executor, owner.Planner = executor, &planner
+	owner.Planning.Validation = validation
+	if owner.Expand == nil {
+		owner.Expand = func(ctx context.Context, input EvaluationInput, _ store.NodeRow, _ StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
+			return evaluator.Expand(ctx, input)
+		}
+	}
+	claimed := &ClaimedNodeHost{
+		Store: config.Store, Lease: config.Lease, Source: config.Source, Snapshots: config.Snapshots,
+		Executor: executor, Mask: config.Masks.masker.Mask,
+	}
+	if err := RegisterProcessServices(config.Router, processes.Authorities.Resolve); err != nil {
+		return nil, nil, nil, err
+	}
+	return &owner, claimed, evaluator, nil
+}

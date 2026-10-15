@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -15,7 +17,7 @@ func TestOwnerHostApprovalStopsBeforeComputeLayers(t *testing.T) {
 	f.snapshot.Run.State = store.RunRunning
 	f.snapshot.Nodes = []store.NodeRow{{Ref: store.NodeRef{RunID: "run", NodeID: "gate"}, Status: store.StatusPending}}
 	var layers []string
-	host.Layer = func(_ context.Context, layer LayerSpec, _ AcceptedRun, _ store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
+	host.Layer = func(_ context.Context, layer LayerSpec, _ EvaluationInput, _ store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
 		layers = append(layers, layer.Name)
 		if layer.Name == "memo" || layer.Name == "admission" {
 			return OwnerLayerResult{}, errors.New("approval entered compute policy")
@@ -90,7 +92,7 @@ func TestOwnerHostBlockedLayerDoesNotBlockSibling(t *testing.T) {
 		}
 		return d
 	}
-	h.Layer = func(ctx context.Context, layer LayerSpec, _ AcceptedRun, row store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
+	h.Layer = func(ctx context.Context, layer LayerSpec, _ EvaluationInput, row store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
 		if layer.Name != "debug" {
 			t.Fatalf("unexpected layer after terminal transition: %s", layer.Name)
 		}
@@ -134,10 +136,10 @@ func TestOwnerHostRemoteDispatchNeverSelfClaims(t *testing.T) {
 	f, h, in := newOwnerFixture(t, true)
 	row := store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending}
 	f.snapshot.Nodes = []store.NodeRow{row}
-	h.Layer = func(context.Context, LayerSpec, AcceptedRun, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
+	h.Layer = func(context.Context, LayerSpec, EvaluationInput, store.NodeRow, StorageBinding) (OwnerLayerResult, error) {
 		return OwnerLayerResult{}, nil
 	}
-	request, err := h.release(t.Context(), in, *in.Accepted, row, store.DecisionReady)
+	request, err := h.release(t.Context(), in, *in.Accepted, &source.Entry{}, row, store.DecisionReady)
 	if err != nil || request != nil {
 		t.Fatalf("request=%+v error=%v", request, err)
 	}
@@ -223,7 +225,7 @@ func TestOwnerHostRemoteReuseProbesBeforeDispatch(t *testing.T) {
 			}
 			probe := &ownerReconcileProbe{OwnerStore: f, result: store.ReconciledNode{Kind: kind, Node: returned}}
 			h.Store = probe
-			h.Layer = func(_ context.Context, layer LayerSpec, _ AcceptedRun, _ store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
+			h.Layer = func(_ context.Context, layer LayerSpec, _ EvaluationInput, _ store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
 				if layer.Name == "admission" && kind != store.Dispatch {
 					t.Fatal("materialized hit took compute admission")
 				}
@@ -232,7 +234,7 @@ func TestOwnerHostRemoteReuseProbesBeforeDispatch(t *testing.T) {
 				}
 				return OwnerLayerResult{}, nil
 			}
-			request, err := h.release(t.Context(), input, *input.Accepted, row, store.DecisionReady)
+			request, err := h.release(t.Context(), input, *input.Accepted, &source.Entry{}, row, store.DecisionReady)
 			if err != nil || request != nil || !probe.request.MaterializeOnly || probe.request.Policy != store.SourceMemo {
 				t.Fatalf("probe=%+v returned=%+v error=%v", probe.request, request, err)
 			}
@@ -250,7 +252,7 @@ func TestOwnerHostRemoteReuseProbesBeforeDispatch(t *testing.T) {
 func TestOwnerHostRequestsHolderCancellationThroughTransition(t *testing.T) {
 	f, h, input := newOwnerFixture(t, true)
 	row := store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Generation: 4, Status: store.StatusRunning, ClaimedBy: "remote"}
-	if _, err := h.apply(t.Context(), input, *input.Accepted, row, store.NodeDecision{Kind: store.DecisionCancelHolder, NodeID: "job", Generation: 4}); err != nil {
+	if _, err := h.apply(t.Context(), input, *input.Accepted, &source.Entry{}, row, store.NodeDecision{Kind: store.DecisionCancelHolder, NodeID: "job", Generation: 4}); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(f.trace, []string{"cancelled"}) {
@@ -261,16 +263,21 @@ func TestOwnerHostRequestsHolderCancellationThroughTransition(t *testing.T) {
 func TestOwnerHostPassesOwnerStorageToLayerPolicies(t *testing.T) {
 	_, host, input := newOwnerFixture(t, true)
 	input.Storage = StorageBinding{Bytes: executorStorageBytes{}, Records: executorStorageRecords{}}
-	row := store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending}
+	input.GrantedRunner = nodeproto.RunnerIdentity{Name: "granted", Type: "agent", Labels: []string{"native"}}
+	entry := &source.Entry{Engine: engine.Resolved{Identity: engine.Identity{Version: "selected"}}}
+	row := store.NodeRow{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusPending, Generation: 7, SpecHash: "job-seal"}
 	policies := 0
-	host.Layer = func(_ context.Context, _ LayerSpec, _ AcceptedRun, _ store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
+	host.Layer = func(_ context.Context, _ LayerSpec, evaluation EvaluationInput, persisted store.NodeRow, binding StorageBinding) (OwnerLayerResult, error) {
 		if !reflect.DeepEqual(binding, input.Storage) {
 			t.Fatal("owner policy lost its bound storage clients")
+		}
+		if evaluation.Entry != entry || !reflect.DeepEqual(evaluation.Engine, entry.Engine) || !reflect.DeepEqual(evaluation.GrantedRunner, input.GrantedRunner) || !reflect.DeepEqual(evaluation.Accepted, *input.Accepted) || persisted.Ref != row.Ref || evaluation.NodeID != row.Ref.NodeID || evaluation.Generation != row.Generation || evaluation.SpecHash != row.SpecHash || evaluation.RouteBinding.RunID != input.RunID || evaluation.RouteBinding.JobID != row.Ref.NodeID {
+			t.Fatal("owner policy lost acquired code or persisted evaluation identity")
 		}
 		policies++
 		return OwnerLayerResult{}, nil
 	}
-	if _, err := host.release(t.Context(), input, *input.Accepted, row, store.DecisionReady); err != nil {
+	if _, err := host.release(t.Context(), input, *input.Accepted, entry, row, store.DecisionReady); err != nil {
 		t.Fatal(err)
 	}
 	if policies != 5 {
