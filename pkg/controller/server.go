@@ -28,6 +28,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -49,6 +50,7 @@ type Server struct {
 	authorization              RouteAuthorization
 	accountReads               AccountReader
 	accountWrites              AccountWriter
+	identityLinkWrites         IdentityLinkWriter
 	dataController             *DataController
 	sourceController           *SourceController
 	operatorSettings           operatorSettingsStore
@@ -150,7 +152,9 @@ type Server struct {
 	paymentLedger   PaymentSettler
 	operators       atomic.Pointer[map[string]bool]
 
-	dashboard *Dashboard
+	dashboard     *Dashboard
+	localHTTPOnce sync.Once
+	localHTTP     wingd.LocalHTTP
 }
 
 // WithLocalExecution marks this server as a host's own admission daemon or
@@ -695,8 +699,13 @@ func (s *Server) handler() http.Handler {
 	s.requireAuthForTeams()
 	mux, router := s.routers()
 	router.Handle("/", s.authenticated(mux, s.githubRunnerFence(s.hereRunnerFence(s.tokenBudgeted(s.teamBoundary(mux, unsupportedRouteFallback(mux)))))))
+	return s.observedHandler(router, mux)
+}
+
+func (s *Server) observedHandler(router *http.ServeMux, labels ...*http.ServeMux) http.Handler {
+	labels = append([]*http.ServeMux{router}, labels...)
 	h := withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
-		withRequestLog(router, s.logger, muxRouteLabeler(router, mux), func(r *http.Request) string {
+		withRequestLog(router, s.logger, muxRouteLabeler(labels...), func(r *http.Request) string {
 			return ratelimit.ClientIP(r)
 		})))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

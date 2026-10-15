@@ -22,6 +22,12 @@ as a local subject. Request headers and loopback addresses supply neither
 identity. The local store must implement peer authentication snapshots and
 transactional authority checks before those presentations can execute work.
 
+Embedded local controllers use `Server.HTTP()` for the API and dashboard
+handlers in `wingd.LocalHTTP`. The API reads the verified socket identity from
+Wingd's connection context. Explicit credentials keep precedence. Browser
+requests supply their own authentication. These handlers expose the shared
+policy routes and exclude the legacy route fallback.
+
 `GET /api/v1/queue` uses the shared capability policy. A member or verified
 local peer needs `runs.read` for its active team. Queue groups and advertised
 runner headroom belong to that team. Machine roots and work claims cannot read
@@ -506,6 +512,24 @@ Google and GitHub identities can be linked from an authenticated account.
 A matching email address alone must not merge two accounts. Linking and
 unlinking identities require the account's authorized session. A provider's
 verified identity and the application's team membership remain separate facts.
+
+Linking starts at `POST /auth/{provider}/link` with one `csrf_token` form field,
+the matching CSRF and session cookies, and same-origin proof. It requires the
+account's direct provider session from the last ten minutes. An account-token
+session cannot add sign-in methods. The flow binds its account, session,
+provider and PKCE verifier, expires after ten minutes, and can complete once.
+The existing limit is ten link attempts per account per minute.
+
+`GET /auth/{provider}/link/complete` uses that same session and flow cookie.
+It consumes the flow before provider access and attaches only the verified
+provider identity. Neither endpoint renews the session or accepts an
+Authorization header. Failures return the canonical error envelope. Embedded
+controllers supply `WithIdentityLinkWriter` for committing session and nonce
+checks. A missing writer returns `policy_missing`.
+
+A nonlocal dashboard requires a live session for its private pages, even when
+legacy bearer authentication is disabled. Its login page remains available to
+signed-out browsers. `Dashboard.Local` selects local pages without browser login.
 
 ### Sign-up gate
 

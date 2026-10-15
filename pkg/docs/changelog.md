@@ -28,6 +28,11 @@ unlock.
 
 ### Changed
 
+- **controller (Breaking):** Browser identity linking uses the shared proof policy and canonical errors
+  Linking requires the account's direct provider session and one-use state. Embedded controllers supply `WithIdentityLinkWriter`. Nonlocal dashboard pages always require a session. See [migration guide](docs/migrations/_unreleased.md#browser-identity-linking).
+
+- **controller:** `Server.HTTP()` supplies the elected local runtime's shared API and dashboard handlers. Socket identity comes from Wingd's verified connection context, and the local API excludes legacy routes.
+
 - **controller (Breaking):** OIDC minting requires a live run-bound `oidc.mint` capability and returns canonical errors. Machine roots and account tokens no longer mint. Embedded controllers supply `WithOIDCReader`. See [migration guide](docs/migrations/_unreleased.md#oidc-claim-authorization).
 
 - Account mutations require the selected account session and CSRF proof through the shared authorization policy. They no longer renew sessions, and closed invitations return the common `conflict` error.

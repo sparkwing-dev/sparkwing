@@ -425,6 +425,18 @@
       "kind": "api",
       "exempt": "Requires live scoped work or member authority and tenant concurrency transactions, absent from the dashboard corpus. Write probes must not change real admission state. Authorized latency, cold start and response bytes are unmeasured.",
       "baselines": {}
+    },
+    {
+      "route": "/auth/{provider}/link",
+      "kind": "api",
+      "exempt": "Requires a disposable recently signed-in provider session, CSRF and PKCE flow, and authority-bearing nonce and identity transactions. The dashboard corpus has no such fixture. Probing real accounts would change their sign-in methods. Authorized latency, cold start and response bytes are unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/auth/{provider}/link/complete",
+      "kind": "api",
+      "exempt": "Requires a disposable recently signed-in provider session, CSRF and PKCE flow, and authority-bearing nonce and identity transactions. The dashboard corpus has no such fixture. Probing real accounts would change their sign-in methods. Authorized latency, cold start and response bytes are unmeasured.",
+      "baselines": {}
     }
   ]
 }

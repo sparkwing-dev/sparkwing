@@ -101,6 +101,7 @@ func Parse(file string, scopes map[string]string) ([]Route, error) {
 		{"s.registerPolicyEndpoints(mux, s.browserSessionEndpoints())", "browser_session_routes.go"},
 		{"s.registerPolicyEndpoints(mux, s.loginEndpoints())", "browser_login_routes.go"},
 		{"s.registerPolicyEndpoints(mux, s.oauthEndpoints())", "browser_oauth_routes.go"},
+		{"s.registerPolicyEndpoints(mux, s.identityLinkEndpoints())", "identity_link_routes.go"},
 	} {
 		if !strings.Contains(string(data), group.registration) {
 			continue

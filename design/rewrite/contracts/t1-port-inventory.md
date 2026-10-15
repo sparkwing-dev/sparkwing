@@ -19,6 +19,29 @@ pending. This adds no archived source-function port identity.
 
 # Acceptance test port inventory
 
+W2 browser-link ports: the deleted
+TestLinkRefusesAStateFromAnotherAccountSessionOrAReplay,
+TestLinkCompletionNeedsARecentSignIn, TestLinkAttemptsAreRateLimitedPerAccount
+and TestLinkStartRefusesAProviderAlreadyLinked move to the IdentityLinkHTTP
+tests in tests/acceptance/identity_link_http_test.go. They exercise the final
+start/callback/completion handlers with real SQLite sessions, the actual GitHub
+provider client and fake committing nonce/identity adapters. Generated checks
+cover account/session selection, ambiguous cookies, form CSRF, state and PKCE
+mutation, and arbitrary provider errors. Real durable nonce races and identity
+attachment remain C1 integrations. The surviving legacy link/unlink tests still
+carry their separate persistence obligations.
+
+TestLoginHTTPOpenController is replaced by
+TestLoginHTTPNonlocalRequiresSession. Nonlocal page access and the login page
+follow browser-session proof independently of the legacy token authenticator.
+The local-mode exception is selected through Dashboard.Local.
+
+TestLocalControllerHTTPUsesSharedPolicy exercises Server.HTTP through Wingd's
+HTTP serving/drain code over net.Pipe. Generated requests check that explicit
+credentials cannot fall back to verified peer identity. Retired paths reach no
+legacy handler. This uses fake committed peer facts and does not complete a
+native api.sock or placement cell.
+
 W2 account mutation ports: the deleted `TestActiveTeamSwitchNeedsMembership`
 and `TestIdentityRoutesRefuseABearerToken` use
 `TestAccountMutationHTTPIdentityProperty`,
@@ -36,9 +59,9 @@ W2 browser-login ports: the ten tests in the deleted 271-line
 pkg/controller/browser_login_test.go move to TestLoginHTTPAccountCapabilitySession,
 TestLoginHTTPProofProperty, TestLoginHTTPPageAndMethods,
 TestLoginHTTPRefusesInvalidCredentialAndForm, TestLoginHTTPSafeReturnPath and
-TestLoginHTTPOpenController in tests/acceptance/login_http_test.go. These cover
+TestLoginHTTPNonlocalRequiresSession in tests/acceptance/login_http_test.go. These cover
 cookies, form proof, invalid credentials, safe next, stale sessions, replacement,
-open controllers, script escaping and audit attribution. The old admin-only
+nonlocal page authentication, script escaping and audit attribution. The old admin-only
 form rule is replaced by C1's unbound account-capability contract. Machine,
 service, deployment and executable credentials still cannot open a session.
 The logout audit half retains the prior active browser-logout HTTP port.

@@ -20,8 +20,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 )
 
-const oauthOrigin = "https://controller.test"
-const oauthRedirect = oauthOrigin + "/auth/github/callback"
+const (
+	oauthOrigin   = "https://controller.test"
+	oauthRedirect = oauthOrigin + "/auth/github/callback"
+)
 
 type oauthProvider struct {
 	challenge, code string
@@ -29,10 +31,14 @@ type oauthProvider struct {
 	spent           bool
 	failure         string
 	diagnostic      string
+	transportError  error
 }
 
 func (p *oauthProvider) RoundTrip(r *http.Request) (*http.Response, error) {
 	p.calls++
+	if p.transportError != nil {
+		return nil, p.transportError
+	}
 	body, status := "", http.StatusOK
 	switch r.URL.Path {
 	case "/token":

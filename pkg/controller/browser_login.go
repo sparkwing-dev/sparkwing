@@ -130,7 +130,7 @@ func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request, _ capab
 		return missingEndpointPolicy()
 	}
 	data := loginPageData{Next: safeNext(r.URL.Query().Get("next"))}
-	if !s.AuthEnabled() || proof.session != nil {
+	if proof.session != nil {
 		http.Redirect(w, r, data.Next, http.StatusSeeOther)
 		return nil
 	}

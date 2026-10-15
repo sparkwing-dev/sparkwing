@@ -97,8 +97,7 @@ func (s *Server) signInRoutes(mux *http.ServeMux) {
 	s.registerPolicyEndpoints(mux, s.loginEndpoints())
 	s.registerPolicyEndpoints(mux, s.browserSessionEndpoints())
 	s.registerPolicyEndpoints(mux, s.oauthEndpoints())
-	mux.Handle("POST /auth/{provider}/link", s.formCSRF(s.handleIdentityLinkStart))
-	mux.HandleFunc("GET /auth/{provider}/link/complete", s.handleIdentityLinkComplete)
+	s.registerPolicyEndpoints(mux, s.identityLinkEndpoints())
 	mux.Handle("POST /github/app/connect", s.formCSRF(s.handleGitHubAppConnect(false)))
 	mux.Handle("POST /github/app/connect/existing", s.formCSRF(s.handleGitHubAppConnect(true)))
 	mux.HandleFunc("GET /github/app/setup", s.handleGitHubAppSetup)
@@ -136,6 +135,10 @@ func (s *Server) pageGate(pages http.Handler) http.Handler {
 			pages.ServeHTTP(w, r)
 			return
 		}
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			writePolicyError(w, &apierr.Error{Code: apierr.MethodNotAllowed, Message: "page method is not registered"})
+			return
+		}
 		secure := s.cookiesSecure()
 		var session *store.Session
 		if raw := sessionCookie(r, secure); raw != "" {
@@ -150,7 +153,7 @@ func (s *Server) pageGate(pages http.Handler) http.Handler {
 				clearSessionCookies(w, secure)
 			}
 		}
-		if session == nil && s.AuthEnabled() {
+		if session == nil {
 			w.Header().Set("Cache-Control", "no-store")
 			query := url.Values{"next": {safeNext(r.URL.RequestURI())}}
 			http.Redirect(w, r, "/login?"+query.Encode(), http.StatusSeeOther)

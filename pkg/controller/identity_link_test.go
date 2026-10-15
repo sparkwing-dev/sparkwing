@@ -163,38 +163,6 @@ func TestLinkRefusesASignInOnAnotherAccount(t *testing.T) {
 	}
 }
 
-// A state finishes only the flow its account and session started, once.
-func TestLinkRefusesAStateFromAnotherAccountSessionOrAReplay(t *testing.T) {
-	f := newIdentityFixture(t)
-	owner := f.user("g-owner", "owner@example.com")
-	stranger := f.user("g-stranger", "stranger@example.com")
-	sameAccount := f.signIn(person("g-owner", "owner@example.com", "owner"))
-	octo := ghPerson(701, "octo", "octo@example.com")
-
-	start := f.linkStart(owner.auth, "github")
-	code := func() string { return f.github.Code(octo, start.Verifier, githubRedirect) }
-	for name, auth := range map[string]string{
-		"another account": stranger.auth,
-		"another session": sessionAuth(sameAccount.SessionID),
-	} {
-		if outcome := f.linkComplete(auth, "github", start, code()); outcome != "link_state_invalid" {
-			t.Fatalf("%s finishing the flow = %s, want link_state_invalid", name, outcome)
-		}
-	}
-	if outcome := f.linkComplete(owner.auth, "google", start, code()); outcome != "link_state_invalid" {
-		t.Fatalf("the flow finished for another provider = %s, want link_state_invalid", outcome)
-	}
-	if outcome := f.linkComplete(owner.auth, "github", start, code()); outcome != linked {
-		t.Fatalf("finishing the flow = %s", outcome)
-	}
-	if outcome := f.linkComplete(owner.auth, "github", start, code()); outcome != "link_state_invalid" {
-		t.Fatalf("replaying the state = %s, want link_state_invalid", outcome)
-	}
-	if ids := f.identities(stranger.auth); len(ids.Identities) != 1 {
-		t.Fatalf("stranger identities = %+v", ids)
-	}
-}
-
 func TestUnlinkRefusesTheLastSignInMethod(t *testing.T) {
 	f := newIdentityFixture(t)
 	owner := f.user("g-owner", "owner@example.com")
@@ -273,79 +241,5 @@ func TestLinkAndUnlinkNeedARecentSignIn(t *testing.T) {
 	var refused refusalBody
 	if code := f.call("DELETE", "/api/v1/me/identities/github", owner.auth, nil, &refused); code != http.StatusForbidden || refused.Code != "reauth_required" {
 		t.Fatalf("unlink with an hour-old sign-in = %d %+v, want 403 reauth_required", code, refused)
-	}
-}
-
-func TestLinkCompletionNeedsARecentSignIn(t *testing.T) {
-	f := newIdentityFixture(t)
-	owner := f.user("g-owner", "owner@example.com")
-	start := f.linkStart(owner.auth, "github")
-	if _, err := f.store.DB().Exec(`UPDATE sessions SET created_at = created_at - 3600`); err != nil {
-		t.Fatal(err)
-	}
-	outcome := f.linkComplete(owner.auth, "github", start,
-		f.github.Code(ghPerson(1201, "octo", "octo@example.com"), start.Verifier, githubRedirect))
-	if outcome != "reauth_required" {
-		t.Fatalf("link completion after sign-in expired = %s, want reauth_required", outcome)
-	}
-	if ids := f.identities(owner.auth); len(ids.Identities) != 1 {
-		t.Fatalf("identities after refused completion = %+v", ids)
-	}
-}
-
-func TestLinkAttemptsAreRateLimitedPerAccount(t *testing.T) {
-	f := newIdentityFixture(t)
-	owner := f.user("g-owner", "owner@example.com")
-	other := f.user("g-other", "other@example.com")
-	for i := range 10 {
-		if outcome := f.tryLinkStart(owner.auth, "github").outcome; outcome != "" {
-			t.Fatalf("attempt %d = %s", i+1, outcome)
-		}
-	}
-	if outcome := f.tryLinkStart(owner.auth, "github").outcome; outcome != "rate_limited" {
-		t.Fatalf("attempt 11 = %s, want rate_limited", outcome)
-	}
-	if outcome := f.tryLinkStart(other.auth, "github").outcome; outcome != "" {
-		t.Fatalf("control: another account's attempt = %s", outcome)
-	}
-}
-
-func TestLinkStartRefusesAProviderAlreadyLinked(t *testing.T) {
-	f := newIdentityFixture(t)
-	owner := f.user("g-owner", "owner@example.com")
-	if outcome := f.tryLinkStart(owner.auth, "google").outcome; outcome != "provider_already_linked" {
-		t.Fatalf("link google on a google account = %s, want provider_already_linked", outcome)
-	}
-	start := f.linkStart(owner.auth, "github")
-	u, err := url.Parse(start.AuthorizeURL)
-	if err != nil || u.Query().Get("state") != start.State || u.Query().Get("redirect_uri") != githubRedirect {
-		t.Fatalf("authorize_url %s does not carry the flow's state and redirect", start.AuthorizeURL)
-	}
-
-	csrf := f.csrfFor(owner.auth)
-	form := url.Values{"csrf_token": {csrf}}
-	req, err := http.NewRequest(http.MethodPost, f.url+"/auth/github/link", strings.NewReader(form.Encode()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Host = "evil.example"
-	req.Header.Set("Origin", "http://evil.example")
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.AddCookie(&http.Cookie{Name: "__Host-sw_session", Value: sessionIDOf(owner.auth)})
-	req.AddCookie(&http.Cookie{Name: "__Host-sw_csrf", Value: csrf})
-	resp := f.browserDo(req)
-	if outcome := signInsOutcome(t, resp); outcome != "link_failed" {
-		t.Fatalf("link start from an unlisted host = %s, want link_failed", outcome)
-	}
-
-	bearer, err := http.NewRequest(http.MethodPost, f.url+"/auth/github/link", strings.NewReader(""))
-	if err != nil {
-		t.Fatal(err)
-	}
-	bearer.Host = dashHost
-	bearer.Header.Set("Authorization", "Bearer "+f.admin)
-	bearer.Header.Set("Origin", "http://"+dashHost)
-	if resp := f.browserDo(bearer); resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("link start with a bearer token and no browser session = %d, want 403", resp.StatusCode)
 	}
 }

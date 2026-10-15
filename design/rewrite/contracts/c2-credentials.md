@@ -170,10 +170,9 @@ rate limits retain Retry-After through the canonical error envelope. HEAD and
 unsupported methods return the shared 405.
 
 The link callback carries a verified code/state flow to its same-site completion
-page. It redeems no code and creates no session. Link start and completion still
-need their policy cutover and C1's durable nonce consumption. The final schema
-has no identity_link_states table although ConsumeIdentityLinkState uses it.
-No schema or nonce fallback is added here.
+page. It redeems no code and creates no session. Link start and completion use
+the named browser proof below. Durable nonce consumption and the final identity
+transaction remain C1 integration requirements.
 
 Eight HTTP tests use the real GitHub client, a fake provider transport and real
 SQLite session persistence. Properties generate invalid browser proofs and PKCE
@@ -782,6 +781,60 @@ GitHub App minting and extra-repository release still need an audited C1
 contract before their runtime can be restored. W2 retains no unaudited App
 mint path. The source Access consumer in W3 and client projection in W9 must
 consume the new credential response with their existing sealed source facts.
+
+### Identity linking and local HTTP composition
+
+POST `/auth/{provider}/link` and GET `/auth/{provider}/link/complete` use
+PolicyRouter's AuthBrowserFlow proof. Both select exactly one live session
+cookie without renewal. Authorization headers are refused. Only a direct
+provider session can link identities. Capability-parented sessions cannot.
+The existing ten-minute sign-in window and ten attempts per account per minute
+remain. Start requires one bounded form containing only csrf_token, matching
+the sole CSRF cookie and the selected session, with same-origin proof.
+
+State is MAC-bound to the selected account, session, provider, nonce, expiry
+and PKCE verifier digest. Completion checks the flow and state before entering
+the writer or provider. It consumes the nonce before redeeming the provider
+code, then commits only that provider's verified profile to the selected account.
+Success clears the flow and redirects to the sign-in settings page. Refusals
+return the canonical envelope. Provider diagnostics and private flow values
+enter neither responses nor logs.
+
+C2 declares capability.IdentityLink with Authority, AccountID, Provider, Nonce
+and ExpiresAt. Authority is the committed session digest, never its presentation.
+controller.IdentityLinkWriter has these methods:
+
+```go
+ConsumeIdentityLink(context.Context, capability.IdentityLink) error
+LinkAccountIdentity(context.Context, capability.IdentityLink, store.SignInProfile) (store.Identity, error)
+```
+
+WithIdentityLinkWriter supplies them. The default requires Store to implement
+the interface. Missing adapters return policy_missing. C1 must use its store
+clock and recheck direct session ancestry, account, provider, recent sign-in, expiry and authority inside both transactions.
+Consumption atomically records the unique nonce and its complete binding.
+Attachment locks that consumed binding, rejects completed or mismatched claims,
+requires the matching verified provider profile and preserves account email.
+It commits identity uniqueness checks and nonce completion together. A session
+revoked during provider exchange cannot attach an identity. Reopening and
+multiple replicas must preserve both consumption and completion. The old
+ConsumeIdentityLinkState and LinkIdentity calls are not production adapters.
+No C1 signature, schema or implementation changes in this cut.
+
+Server.HTTP() supplies wingd.LocalHTTP's API and dashboard handlers. It builds
+the final controller registrations once and excludes the legacy router fallback.
+The API's transport adapter reads only wingd.LocalPeer's verified connection
+identity, derives a local subject with LocalSubject and passes it through the
+shared authentication and binding interfaces. Explicit credential headers and
+session cookies retain precedence. Browser requests do not inherit socket
+identity. Nonlocal dashboard pages require their own live session independently
+of legacy bearer-auth configuration. Dashboard.Local selects the local pages.
+
+The runtime still owns election, store recovery, hosting, worker shutdown and
+request drain. C1 peer authentication snapshots and authority-bearing mutations
+remain required. Net-pipe HTTP tests use the real Wingd serving/drain path and
+fake committed peer facts. They establish handler composition and identity
+precedence, not native UID/SID or full local-runtime acceptance.
 
 ## Ownership
 

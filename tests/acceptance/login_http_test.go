@@ -247,11 +247,18 @@ func TestLoginHTTPSafeReturnPath(t *testing.T) {
 	}
 }
 
-func TestLoginHTTPOpenController(t *testing.T) {
+func TestLoginHTTPNonlocalRequiresSession(t *testing.T) {
 	h := controller.New(nil, nil).WithDashboard(controller.Dashboard{}).Handler()
+	for _, path := range []string{"/", "/runs", "/operator"} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest("GET", "https://controller.test"+path, nil))
+		if w.Code != 303 || !strings.HasPrefix(w.Header().Get("Location"), "/login?next=") {
+			t.Fatalf("page %s HTTP %d %s", path, w.Code, w.Body.String())
+		}
+	}
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest("GET", "https://controller.test/login?next=%2Fruns", nil))
-	if w.Code != 303 || w.Header().Get("Location") != "/runs" {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "Account access token") {
 		t.Fatalf("HTTP %d %s", w.Code, w.Body.String())
 	}
 	for _, path := range []string{"/login/bootstrap", "/api/v1/auth/login"} {

@@ -273,6 +273,10 @@ type GitHubRunnerRegistry interface {
 	RevokeGitHubRunner(context.Context, capability.Authorized, int64) error
 }
 func GitHubRunnerWorkflow(controllerURL, team string) string
+type IdentityLinkWriter interface {
+	ConsumeIdentityLink(context.Context, capability.IdentityLink) error
+	LinkAccountIdentity(context.Context, capability.IdentityLink, store.SignInProfile) (store.Identity, error)
+}
 const IdleClaimPollJitterFactor = 1.25
 func IntakeForStore(a capability.Authorized, body controllerwire.CreateRunRequest) (store.IntakeRequest, error)
 type LauncherSyncReader interface {
@@ -457,6 +461,7 @@ func (s *Server) AuthEnabled() bool
 func (s *Server) CheckFreeTierSource()
 func (s *Server) EgressMeter() *egress.Meter
 func (s *Server) EnableAuthFromStore() *Server
+func (s *Server) HTTP() wingd.LocalHTTP
 func (s *Server) Handler() http.Handler
 func (s *Server) MaintainStorage(ctx context.Context)
 func (s *Server) Metering() bool
@@ -495,6 +500,7 @@ func (s *Server) WithGitHubRunnerRegistry(resolve func(context.Context, store.Te
 func (s *Server) WithGitHubRunners(cfg githuboidc.Config) *Server
 func (s *Server) WithGitHubSignIn(client *githubauth.Client, redirectURIs []string) *Server
 func (s *Server) WithGoogleSignIn(client *googleauth.Client, redirectURIs []string) *Server
+func (s *Server) WithIdentityLinkWriter(writer IdentityLinkWriter) *Server
 func (s *Server) WithIdleClaimPoll(max time.Duration) *Server
 func (s *Server) WithIdleClaimPollEnforced(on bool) *Server
 func (s *Server) WithLicense(lic *license.License) *Server

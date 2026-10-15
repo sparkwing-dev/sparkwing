@@ -1,5 +1,18 @@
 # Migrating to the next release
 
+## Browser identity linking
+
+Link start and completion use the shared browser proof policy. Use the account's
+direct provider session and the matching session-bound CSRF form. Account-token
+sessions and Authorization headers cannot link identities. Failures return the
+canonical JSON error envelope instead of a settings-page refusal redirect.
+Embedded controllers supply `WithIdentityLinkWriter` to recheck the session and
+commit one-use nonce consumption and identity attachment.
+
+Nonlocal dashboard pages always require a live session. `Dashboard.Local`
+selects local pages. Elected local controllers obtain the API and dashboard
+handlers from `Server.HTTP()` and supply them through `wingd.LocalHTTP`.
+
 ## Daemon event cursors
 
 Replace `daemon events --offset N` with the returned `--cursor`. Repeat the same
