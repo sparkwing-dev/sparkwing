@@ -108,10 +108,8 @@ func checkRelationTx(ctx context.Context, tx *storeTx, p capability.Principal, r
 		return bindingExpansionTx(ctx, tx, c, target)
 	case capability.BindReadSet, capability.BindData:
 		if target.Data != nil {
-			if checker, ok := any(tx).(capability.DataAccessChecker); ok {
-				return checker.CheckDataAccess(ctx, capability.Authorized{Principal: p, Binding: b, Target: target}, *target.Data)
-			}
-			return authorityError(apierr.Unavailable, "transactional data authorization is unavailable")
+			var checker capability.DataAccessChecker = tx
+			return checker.CheckDataAccess(ctx, capability.Authorized{Principal: p, Binding: b, Target: target}, *target.Data)
 		}
 		if rule == capability.BindReadSet {
 			return bindingDeclaredReadTx(ctx, tx, c, target)
@@ -229,5 +227,7 @@ func bindingMachineTx(ctx context.Context, tx *storeTx, c capability.Capability,
 	return nil
 }
 
-var _ capability.BindingChecker = (*Store)(nil)
-var _ capability.BindingChecker = (*storeTx)(nil)
+var (
+	_ capability.BindingChecker = (*Store)(nil)
+	_ capability.BindingChecker = (*storeTx)(nil)
+)

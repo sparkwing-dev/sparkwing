@@ -186,7 +186,7 @@ func TestClaimAttentionPassWrapsDespiteNewNodes(t *testing.T) {
 		seed(run, start.Add(-time.Minute))
 	}
 	srv.sweepClaimAttention(ctx, start, 2)
-	if err := st.SetNodeAttention(ctx, []store.NodeAttention{{Team: store.DefaultTeam, RunID: "run-a", NodeID: "work"}}); err != nil {
+	if err := st.AsOperator().SetNodeAttention(ctx, []store.NodeAttention{{Team: store.DefaultTeam, RunID: "run-a", NodeID: "work"}}); err != nil {
 		t.Fatal(err)
 	}
 	for i := 1; i <= 4; i++ {

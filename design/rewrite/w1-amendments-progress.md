@@ -1,428 +1,284 @@
-# W1 amendment handoff
+# W1 store handoff
 
-Continuation of b96641913. W1 is incomplete. The index is clean. The lead owns
-commits, independent review and delivery pipelines. W1b implementation files
-were left alone.
+W1 remains incomplete. This continuation starts from 5ede4a650. The inherited
+work is committed, and this continuation is left for the lead to review and
+commit. There are no unmerged index entries. W1b implementation files are
+unchanged. Earlier implementation evidence remains in Git and
+[w1-store-progress.md](w1-store-progress.md).
 
-## Latest continuation
+## This continuation
 
-Continues b96641913 with a clean index. Added the C1 team source-credential release
-transaction and current-owner consent mutation. Release reloads authority and
-enrollment, derives the host from the sealed source location, repeats the claim
-and deadline checks, and commits C2's complete audit before returning the sealed
-credential. The final clock check covers authority or lease expiry during policy
-work. The controller still owns decryption and HTTP authorization.
+Added store enforcement for bootstrap, machine registration, service registration
+and Actions roots. The existing member-root path remains. Provisioning requires
+trusted origin verification, rechecks current authority and expiry after that
+verification, and refuses execution fences, foreign scope, unknown/deleting teams
+and console grants. Deployment token authority controls metering and service
+issuance. Actions roots retain the verified repository/ref/SHA/workflow binding.
+Issued roots have no revocation parent. Machine roots record their account
+authorizer in created_by, so the existing consent API recognizes the actual owner.
 
-Security invariants: a release returns a credential only for the live source
-award and its sealed repository after the matching audit commits. Only the
-machine's current owner can change consent. Two property tests generate forged
-principal and target fields, account identities and consent choices. Component
-tests cover node, trigger and cloud plan awards, unconfirmed SSH, revoked parent
-authority, changed holders/generations, execution start, cancellation, deadline,
-lost consent, enrollment changes, fake cloud placement, policy refusal, and an
-audit-write or commit failure. They use the real store and a fake for C2's declared
-AuthorizeSourceRelease policy, which remains a stub on this branch.
+The security invariant is that provisioning cannot exceed its verified origin or
+current authorizer, and machine consent belongs to the recorded account owner.
+New tests cover all four origins, provider refusal, authority changes during
+verification, expiry, failed inserts, independent root lifetime and consent.
+Two property tests generate 384 forged scopes and execution fences.
 
-Local C1 additions are Tenant.ReleaseSourceCredential and
-Tenant.SetSourceMachineConsent. The five added source-audit columns implement
-fields already required by SourceReleaseAudit. No other area's contract changed.
-The new private source-policy dependency delegates to the existing C2 owner.
-No setting, limit, environment variable, service or compatibility alias was added.
+The local C1 contract adds ProvisionPolicy.AuthorizeProvision and
+Store.SetProvisionPolicy. The configured provider verifies bootstrap/enrollment
+or Actions evidence through the issuing transaction's authority resolver. A
+missing provider returns unavailable. This boundary is needed because W2 owns
+the external proof mechanisms. Hard-coding their evidence handling in Store
+would duplicate that owner. Removing the policy field, setter and call reverses
+this addition. No foreign contract type changed. W2 must supply the real provider.
 
-Deleted the unused Operator.ListRunsAcrossTeams and CountRunsAcrossTeams APIs
-(10 production lines) and their obsolete assertions (10 test lines). Neither had
-a runtime caller. No package outside pkg/store was changed. The larger legacy
-runtime APIs still have callers and remain open. W1b files are untouched.
+Added the passing SQLite cell
+TestCredentials/credentials-operator-console-split/store-sqlite. It checks trusted
+operator/service issuance, rejection of console grants, rollback of refused
+issuance, and independent root revocation. Origin verification is a fake. The
+native route matrix remains unimplemented. No archived test was ported in this
+continuation. Earlier ports remain listed in T1.
 
-Real integration still needs W2's policy, authenticated source route and decryptor,
-and enrollment that records the account owner in capabilities.created_by. The
-separate GitHub App mint/audit path remains open. The existing contract gaps below
-remain open. No native acceptance cell or inventory test port was claimed in this
-continuation.
+Retired seven raw Store entry points. ListRegisteredAgents now belongs to Tenant.
+ListWaitingNodes, SetNodeAttention and CountConcurrencyCache belong to Operator.
+Deleted the unused SetRetriedAs, ActiveConcurrencyHolder and
+ListSpawnedChildrenByRun wrappers: **9 implementation lines**, plus their
+obsolete documentation. Their tenant methods remain for legacy callers. No
+forwarding shim was added. The 22-line member-only provisioning implementation
+was replaced by the origin-aware issuer.
 
-Verification uses the scratch/cache environment recorded below. Whole-repository
-go build and scoped go vet pass. The final W1 selection passes 238 top-level
-tests / 685 cases without skips or failures. Add source_release_test.go and
-run_view_test.go to the two prior handoffs' file lists to reproduce it. All
-TestEngine controller tests pass, 21 top-level tests / 31 cases. The final focused
-source selection passes eight top-level tests / 29 cases. Schema and SQL-scope
-checks pass against the stricter audit columns. Repository key, machine identity
-and a positive claim generation are required on new audits.
+The production caller migration outside pkg/store is
+pkg/controller/claim_attention.go. Its fixture change is
+pkg/controller/claim_attention_internal_test.go. Other shared files are
+internal/acceptance/store_credentials.go, tests/acceptance/credentials_test.go,
+design/rewrite/contracts/c1-data.md and t1-port-inventory.md. Inside pkg/store,
+store.go gains only the policy dependency and wrapper removal. concurrency.go
+and claim_attention.go carry the handle changes. Their existing tests and the
+SQL-scope guard follow those changes. W1b files are unchanged.
 
-Full match, controllerwire and acceptance package commands pass. Acceptance still
-contains 2,995 native skeleton skips. The OpenAPI drift check and diff whitespace
-check pass. No local user.name, user.email or core.worktree override is present.
-The changed source and schema have no new dependency outside the worktree.
+Final verification uses GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
+GOCACHE=/tmp/sw-astra-W1/cache, GOTMPDIR=/tmp/sw-astra-W1/tmp and
+TMPDIR=/tmp/sw-astra-W1/tmp. Package parallelism is -p 4.
 
-Shared files touched are pkg/store/store.go and schema.sql, the C1 contract
-document and this handoff. Other source changes stay in pkg/store. Native HTTP,
-PostgreSQL interleavings, operating-system placements, races and delivery pipelines
-remain lead checks. The only fixture correction was to pair terminal run status
-with finished_at as the final schema requires. Aggregate API snapshots and the
-rewrite changelog remain integration work. No Git writes or Sparkwing binaries
-were run. Scratch is removed before the final report.
+- Whole-repository go build -p 4 ./... passes.
+- go vet -p 4 on pkg/store, pkg/controller, internal/acceptance and
+  tests/acceptance passes.
+- The earlier exact store selection plus provision_origins_test.go passes
+  254 top-level tests / 716 cases, without skips. The filenames for that
+  selection remain under Earlier verification.
+- Controller -run '^TestEngine' passes 33 top-level tests / 56 cases.
+- Full tests/acceptance passes 20 top-level tests / 205 executed cases, with
+  2,995 native/platform skips. internal/acceptance has no package tests.
+  Full pkg/match passes 14 top-level tests / 42 cases.
+- go run ./internal/commentcheck -base HEAD . is clean across 17 Go files.
+  The required -base main run still reports the pre-existing detached HereBearer
+  comment in internal/controllerwire/contracts.go. That W9 file is unchanged.
+- Edited Go files are formatted. git diff --check passes. No Git writes ran.
 
-## Previous status-reader continuation
+Native PostgreSQL, HTTP/api.sock, Windows/Darwin, Docker, race, lint, delivery
+pipelines and independent review remain lead checks. The legacy full store suite
+is still not claimed green. The existing final-schema/legacy-fixture mismatch
+remains outside this selection. No extra compatibility path or schema was added.
+The provisioning API has component coverage through its origin-policy fake.
+The real bootstrap gate, persisted enrollment/OIDC evidence and transport
+registration are unverified integration points.
 
-Implemented the persisted status portion of EngineController.RunDetail. The new
-local C1 API Tenant.ReadRunView returns status, ordered node-wide attempts and
-committed tagged log identities from one read snapshot. Read errors discard the
-whole result. It reads log identities from the agreed schema without changing
-W1b's log persistence files or granting log access. The public adapter uses W6's
-DisplayRequest/DisplaySpec and the destination run's lineage. It omits private
-seals, hashes, capabilities, job declarations and storage prefixes. Engine version
-comes from the accepted spec. Version-policy notices remain an engine integration
-point. The method currently returns an empty Notices list.
+## Earlier continuation
 
-The security invariants are that public status exposes no classified argument
-value or private seal, and that a tenant cannot read another tenant's status,
-attempts or log identities. New property tests generate argument values,
-classification states, a declassified second seal and foreign tenant keys.
-Runtime component tests cover multi-generation attempts, plan/eval log identities,
-timestamps, retry lineage, missing runs and failed snapshot reads.
+Fixed authorization reads that requested PostgreSQL row locks inside read-only
+snapshots. The invariant is that reads use one consistent snapshot, while writes
+lock current ancestry through commit. `storeTx` now records its snapshot mode.
+Its existing lock helpers omit row locks in that mode. Write transactions keep
+all three lock forms. A SQL-driver regression first failed with a row-lock error,
+then passed through the public binding adapter. It also verifies that mutation
+authorization locks both ancestors. This simulates PostgreSQL's read-only lock
+refusal over real SQLite data. Native PostgreSQL remains untested.
 
-The display tests port the redaction behavior of
-TestSecretArgs_ControllerGetRunRedactsByDefault and
-TestSecretArgs_ControllerRedactsEveryArgOfAnUnclassifiedRun from
-5ba4cb0ec1ec222defc58f5eaee6ca332a058303. They exercise the final adapter and
-shared display helpers. HTTP registration and route authorization remain W2's
-integration work. No native acceptance cell was activated.
+W1's binding adapter now calls W1b's implemented transaction DataAccessChecker
+directly. The unavailable type-assertion fallback is removed. Tests check receipt
+deletion in the owning transaction, rollback ownership and successful public
+snapshot checks. A property generates 96 forged principals and varies foreign
+teams, unrelated digests, leaf/parent revocation, generation and lease expiry.
+Both data binding rules must honor the persisted authority and read edges.
 
-Deleted pkg/store/secrets_legacy_import.go, including ImportSecrets and ImportMark.
-It contained 55 legacy lines and had no callers after the merged migration cut.
-No caller outside pkg/store needed migration for that deletion. The legacy
-StateStoreOld, plan/claim/trigger writers and offer-round path still have callers.
-They remain open. No W1b file was edited.
+Added two active SQLite store acceptance cells:
 
-The three conflicted files still contain resolved content with no conflict
-markers. Their unmerged index entries remain for the lead to stage because the
-swarm brief prohibits worker Git writes. No merge was aborted or Git state written.
+- `TestRecovery/recovery-cancel-beats-loss/store-sqlite`
+- `TestRecovery/recovery-reconciler-waits-and-reclaims/store-sqlite`
 
-Verification in this continuation uses the scratch/cache settings recorded below.
-Whole-repository go build and scoped go vet pass. The W1 store selection now
-passes 230 top-level tests / 656 cases with no skips or failures. All TestEngine
-tests pass, 21 top-level tests / 31 cases. The match, controllerwire and acceptance
-package commands pass. Acceptance skeleton success still includes blocked native
-cells and establishes no native execution. The OpenAPI drift check and diff
-whitespace check pass.
+They use final-schema authority fixtures and a contract fake for enrollment.
+Actual store transitions, reaping, reconciliation, attempts and events supply
+the results. Cancellation keeps a live holder, wins over subsequent loss and
+rejects late success. Both host-first and reaper-first orders refuse stale host
+and holder reports. Reconciliation waits before reaping, survives reopening,
+returns Dispatch for a memo miss and awards one self-claim under two concurrent
+reconciliations. Attempt history and application retry budget survive requeue.
+Exact job-event lists and state sequences check duplicate emission. The native
+placement cells stay skipped because these proofs start below HTTP and processes.
 
-To reproduce the new selection, add run_view_test.go to the store file list below
-and run all controller tests matching ^TestEngine. The new controller files are
-engine_detail.go and engine_detail_test.go. engine_contract.go calls the new
-reader. Local C1 additions are RunView and Tenant.ReadRunView, documented in
-c1-data.md. No external contract, setting, limit, environment variable, service,
-schema table or compatibility path was added. Source release, SyncLauncher,
-Compatibility, signed status notices, the contract gaps below, legacy retirement
-and real runtime integration remain open.
+Ported the two archived state-machine tests from 7b1fc6d111c272612d4c970d061063a369598e30:
+TestNodeRules_TheReaperEndsACancelledRunsLostNodeAsCancelled and both orders of
+TestNodeRules_AnAdoptedRowIsNotFinishedTwice. Their old bug-dependent skips and
+retry-run behavior are absent from the new proofs. T1's inventory names the cells.
 
-## Previous continuation
+Removed the unused egress_day table and both classifications: **11 legacy
+schema/classification lines**. There are no runtime callers to migrate for that
+table. The final baseline has 83 tables, 101 explicit indexes, 66 tenant tables
+and 17 operator tables. Tenant egress stays in egress_usage. Also removed seven
+narrative comment lines from two W1 private interfaces. No legacy runtime API
+was retired in this continuation.
 
-Added Store.CheckBinding and the transaction implementation for current
-authority and tenant, run, job, owner, plan, pipeline, child-generation,
-own-unit, token-owner, machine-owner, expansion, declared read, source and secret
-relations. The supplied Principal is a lookup reference. Persisted fields decide
-the result. Named selection shares the existing matching-input reader with
-locking disabled for the PostgreSQL read snapshot. Awarding still uses its
-locking path and the full matcher with observed capacity and labels.
+## Existing W1 implementation
 
-This adapter is incomplete in two places. BindSlotOfBoundNode returns unavailable
-because Target cannot name the declared concurrency key. Data selectors call
-capability.DataAccessChecker on the same store transaction when W1b supplies that
-implementation. This branch returns unavailable instead of granting an edge.
-Host process cleanup stays with C3. Machine ownership uses capabilities.created_by.
-The trusted machine provisioning path still has to persist the enrolling account
-there. Current generic capability persistence writes the subject ID.
+The earlier committed work includes intake and both seals, plan/expansion
+acceptance, the pure scheduling projection and decider, fenced node/run
+transitions, node-wide attempts, claims and matching, reconciliation, owner/unit
+reaping, continuous concurrency adoption, completion intents, singleton recovery
+and operational retention. Membership, ancestry and source credential release
+are rechecked in the owning transaction. Source release commits its audit before
+returning the sealed credential. Owner consent requires the current machine owner.
 
-Added Tenant.ReadOwnerSnapshot and implemented EngineController.Snapshot. The
-authority, owner lease, jobs and expansions come from one snapshot. Replaced,
-expired and revoked owners receive no state. The response retains accepted
-declarations, current state/attempts, exact expansion bytes/hash/source fence,
-and empty generators. An uncancelled guard refusal returns unavailable because
-the wire cannot carry it yet. Cancellation takes precedence and remains readable
-while the owner drains.
+The controller adapters cover intake, acceptance, private execution declarations,
+claims, exchange, renewal, expansion, owner snapshots, persisted public detail,
+failure reads, compatibility, signed version notices and elected controller
+recovery at startup and maintenance ticks. Instance identities fence controllers
+on the same machine. Public detail uses shared display helpers and excludes
+private seals, credentials and storage locations. Engine and wire policy owners
+remain external integrations where their implementation is absent.
 
-Ordinary delegation now retains immutable unit, purpose, delivery and billing
-identity. Its child still has the requested narrowed authority and a parent.
-It creates no second billing_awards row. Without that identity, controller
-own-unit authorization could not recognize narrowed award descendants.
+## Remaining W1 work
 
-Ported the concurrent-classification behavior from the inventory's
-TestCreateRun_ConcurrentWritersNeverShrinkTheSecretArgs into
-TestConcurrentClassificationNeverShrinksTheIntakeSeal. Two overlapping final
-AcceptPlan calls use the real W6 settings and seals, converge on one accepted
-spec and retain/redact the intake classification. W4 validation alone remains
-a contract fake. PostgreSQL interleaving is still required for the native cell.
-
-New tests cover forged Principal fields, current revocation, tenancy, named
-selection, complete claim-kind validation, declared dependency reads, child
-generation, source-start/lapse/cancellation fences, secret declarations and pools,
-token and machine ownership, narrowed unit identity, snapshot corruption and
-owner replacement. No native acceptance skip was removed.
-
-No legacy runtime API was deleted in this continuation: 0 legacy lines removed.
-The earlier 20-line duplicate-declaration deletion remains part of this worktree.
-StateStoreOld and the plan/claim/trigger/offer writers still need removal. Their
-runtime consumers remain, and W1b's billing tests still call old recovery APIs.
-W1b files were not edited.
-
-Additional contract work needed:
-
-- W2 Target needs the resolved concurrency key for the slot binding check.
-- W1b needs CheckDataAccess on storeTx so data authorization stays in the
-  committing transaction. Cross-run/memo/record read edges belong to that owner.
-- W2's trusted machine provisioning must persist its account authorizer in
-  created_by before owner consent can succeed for a provisioned machine root.
-- A generation-zero materialized generator needs a consistent source-fence
-  contract. Materialization retains generation zero before any award, but
-  eval_units.source_generation, eval claim validation, owner log source checks
-  and ExpansionForStore currently require positive source generations. This was
-  found by reading the paths, not established by a native runtime test. Do not
-  invent an execution attempt or self-claim to hide this gap.
-
-New shared files in this continuation are pkg/controller/engine_contract.go,
-engine_snapshot.go and engine_snapshot_test.go. No other package's caller was
-migrated or deleted. The C1 document records CheckBinding, ReadOwnerSnapshot and
-delegated award identity. No new interface, setting, environment variable, table,
-service or compatibility path was introduced. CheckBinding implements C2's
-existing interface. ReadOwnerSnapshot is the one local C1 API addition.
-
-The three conflicted files still have resolved contents and unmerged index
-entries. The lead must stage them because the brief prohibits worker Git writes.
-
-## Merge resolution
-
-The three conflicted files have resolved contents:
-
-- `internal/nodehost/scheduler.go` retains W1's removal of the legacy automatic
-  reset of lost jobs. Recovery remains with the reaper and reconciler.
-- `pkg/controller/engine_contract.go` combines W1's implemented adapters with
-  the amended controller declarations and private execution projection.
-- `pkg/store/state_contract.go` keeps the amended materialization probe contract
-  and the private bearer field.
-
-There are no conflict markers in these files. Their index entries still show
-unmerged because the swarm brief prohibits Git writes. The lead must stage the
-resolutions and finish the merge.
-
-## Implemented
-
-Materialization-only misses return Dispatch without releasing a pending job,
-claiming it or minting a bearer. Terminal, held and authorized source-hit behavior
-is preserved. Controller responses carry persisted execution declarations,
-settings, attempts, generations and expansion state. Expansion replay fills
-ExpandedJob.Current from the persisted row.
-
-Run hosts can cancel their own jobs. Held jobs receive one cancellation request
-and keep their holder's result rights. The controller preserves the supplied
-reason in the event. An identical run-host transition replay rechecks the live
-owner fence, so a replaced owner cannot replay cancellation successfully.
-
-NodeResult.Failure persists the masked JobFailure, including stage and structured
-error details. ReadFailure checks the exact source generation and the accepted
-recovery edge. A recovery holder can read only its own OnFailureOf source. A
-terminal status alone supplies no synthetic SDK error. Failed writes roll back
-state, attempt closure and events. Materialization retains a recorded failure.
-
-ReadAuthentication reads bearer/session authority, complete ancestry, membership,
-store time and bound unit facts in one snapshot. It retains the final job's
-attempt fence after claim clearing and reads log sealing from the tagged subject.
-Eval source generation, eval lease and elected controller fence remain separate.
-Plan bindings read their owner lease. Here claim history survives requeue.
-The unimplemented authentication cases are listed below.
-
-ReadClaimProfile exposes the same enrollment owner used in transactional matching.
-Matching re-reads enrolled total capacity instead of accepting a wider controller
-observation. Kinds are checked as a complete set before selection: empty queues,
-unknown/duplicate kinds and unauthorized mixed selections are refused. Invalid
-resource observations fail even when the queue is empty. Named internal targets
-still identify their one unit without a redundant Kinds list.
-
-EngineController.Claim uses server enrollment, available-resource observations,
-the shared store matcher and RunnerAdmissionPolicy. SignedRunnerAdmission calls
-the engine owner's verified index and EvaluateRunner. A queue miss returns no
-claim. A held award is never returned as a second bearer. The exchange adapter
-returns the committed original plan/job award once and ignores caller-selected
-team/run fields. Claim payloads include purpose, delivery, accepted engine,
-source generation and known expiry bounds.
-
-Member provisioning now creates a root without a session revocation parent.
-Current membership still governs it. Its optional expiry is independent of the
-issuing session. Ordinary delegation invokes C2's validation contract and keeps
-its parent. ProvisionCapability, DelegateCapability and ExchangeCapability share
-the same commit boundary and discard raw bearer output on errors.
-
-Local and here awards without an execution deadline remain renewable through
-their leases. They carry local/here executor identity instead of gaining a new
-deadline or being labelled as an ordinary runner.
-
-IntakePolicyFacts.SourceLocation supplies a server-verified acquisition location.
-Intake replaces a proposed location with this fact and refuses a nonempty proposal
-without it. Retry retains the original location and SHA. This prevents a typed
-repository ID from authorizing a different checkout URL or local path.
-
-Real W6 settings/seals now have a store integration test for resources, timeout,
-requirements, classification retention, replay and explicit-zero refusal. Only
-W4's still-declared plan validator is faked in that test. A separate contract fake
-proves that resolved concurrency winners survive store persistence.
-
-## Local C1 contract additions
-
-The C1 source document describes these additions:
-
-- IntakePolicyFacts.SourceLocation carries verified acquisition facts. W2's
-  production intake policy must fill it after checking repository identity,
-  credentials, local-store authority and the relative pipeline directory.
-- NodeResult.Failure carries the full masked JobFailure. W9's result adapter
-  still needs a wire field for its stage.
-- Store.ReadClaimProfile shares enrollment between controller observations and
-  transactional matching.
-- Store.ProvisionCapability and Store.DelegateCapability return committed
-  one-time issuance results for trusted adapters.
-
-RunnerAdmissionPolicy is the controller's injection boundary for the existing
-engine policy owner. The production adapter calls that owner. Component tests use
-a fake because the engine functions remain stubs in this merged tree. Delegation
-uses the same pattern for C2's ValidateDelegation. Neither seam creates a second
-policy implementation. No table, environment variable, service, compatibility
-alias or customer limit was added.
-
-Deleted 20 lines of duplicate enrollment/secret-opener declarations. The amended
-files now own those declarations and their implementations. No legacy runtime
-API or archived test was retired in this continuation. The previous five test
-ports remain in the W1 selection. Legacy API deletion is still required.
-
-## Amendment audit
-
-| Rows requiring W1 action | Result or remaining owner |
-| --- | --- |
-| A1-07 | Store persists typed concurrency winners. W6's real ResolvePlan currently omits concurrency entirely; its declaration is tested with a contract fake. |
-| A1-08 | Complete kind/grant validation and mixed queue tests pass. The existing shared ranked scan remains the selection owner. |
-| A1-11 | Verified source-location fact, refusal before insertion and unchanged retry source tests pass. W2 must install the real verifier. |
-| A1-13 | Probe miss/holder/terminal/hit tests and controller adapter pass. |
-| A1-14 | Store failure persistence/read and controller read adapter pass. Wire stage transport is still needed. |
-| A1-15 | Owner cancellation, cooperative holder drain, replay fencing and controller tests pass. |
-| A1-16 | Private execution projection and one-time claim delivery tests pass. |
-| A1-17 | Expansion Current and the remote Snapshot use persisted state. Snapshot carries exact expansion bodies and empty groups. An uncancelled guard refusal still needs W9's missing field. |
-| A1-18 | Existing zero/start/retry/disruption ordinal tests remain green, including Applied.Attempt. |
-| A1-20 | Member roots have no session parent. Ordinary delegation uses C2's validator contract and retains immutable award identity. Other trusted provisioning origins still lack transaction adapters. |
-| A1-21, A1-22 | Snapshot implementation covers persisted bearer/session and unit/log facts. Exact HTTP replay and the other credential classes remain open. |
-| A1-23 | Store-backed engine adapters have component evidence. W2 still owns actual route registration and process authority. |
-| A1-24 | AuthorityResolver and BindingChecker are implemented. Slot-key transport, transactional data edges and the final source-release adapter remain open. DataAccessChecker and record edges remain W1b work under the split. |
-| A1-25 | Duplicate secret-opener declarations are removed. Existing secret preflight/identifier/transaction tests pass. Verified App delivery transport remains a W2 integration gap. |
-| A1-26 | Enrollment reader, capacity recheck and controller claim adapter pass with a registered-profile fake. Actual enrollment persistence/transport is still needed. |
-| A1-27, A1-28 | W1b owns accounting and payment settlement. Metered awards still fail closed. Joint lifecycle integration remains required. |
-| A1-29, A1-31, A1-32, A1-33, A1-34, A1-35 | W1b owns blob/record/upload/receipt/read-edge persistence, quota settlement and its retention. W7/W2 own physical storage and signed transport. Their files were left alone. W1's transactional record interfaces still use fakes. |
-| A1-38 | Claim payload and single-use exchange adapters pass. Launcher sync still needs the observation correlation contract below. |
-| A1-40 | Existing owner reaping/controller reconciliation tests pass. Local/here no-deadline claims are fixed. Runtime readiness/drain integration remains W8 work. |
-| A1-44 | Real W6 seal integration preserves intake classifications. Plan and expansion preflight tests remain green. |
-| A1-45 | W6 owns admission-class precedence. Store sealing calls the shared resolver; no competing precedence rule was added. |
-| A1-51 | No competing wire vocabulary or compatibility surface was added. W3/W8 runtime retirement, W4/W5 fixtures and W9 generation remain open. |
-| A1-53 | No native acceptance cell was activated. T1/lead still owns the real placement drivers. |
-| A1-55 | Existing first-window/reclaim tests pass. Here ancestry stays tied to its requester; unbounded local/here leases remain renewable. |
+1. Integrate lifecycle accounting with W1b's reservation, interval and settlement
+   owner. Metered roots still fail closed at award. persistBillingAwardTx is the existing
+   unmetered path. Launcher awards must become metered regardless of root settings
+   when that integration replaces the path. Award, start, waits, renewal, release, terminal reports, owner
+   finish and reaping must use the shared transaction contracts. C2 still owns
+   the billing calculator. Do not edit W1b's implementation files.
+2. Supply materializationRecords and nodeResultRecords from W1b's record owner
+   inside their calling transactions. Existing component tests use fakes. Public
+   record methods that start another transaction cannot satisfy this requirement.
+3. Install W2's real ProvisionPolicy for bootstrap, machine/service enrollment
+   and Actions evidence. The store implementation and account-owner persistence
+   are implemented and tested through contract fakes.
+4. Retire StateStoreOld, the legacy plan/claim/trigger writers, offer rounds and
+   the remaining raw Store twins after migrating or deleting their callers.
+   W3/W8 runtime callers and W1b billing tests still reference legacy APIs.
+   RunReaperLeased remains in W1b's storage-lease file. No forwarding shim exists.
+5. Complete controller and maintenance integrations for completion delivery,
+   record retention, upload quota release and physical GC through their owners.
+   Owner reaping and controller-owned run reconciliation already run under
+   elected leases. W7 owns physical storage and W2/W9 own transport registration.
+6. Activate native placement cells after the HTTP, host and process drivers exist.
+   The acceptance New and Run driver bodies remain stubs. The two SQLite cells
+   establish store behavior only. Main still contains 2,995 native skeleton skips.
 
 ## Contract changes needed in other areas
 
-1. W9 ReuseSource still cannot name MaterializeSource.Result by state sequence.
-   ScheduleSnapshot still cannot carry the sealed GuardRefusal. W9 also needs to
-   transport the JobFailure stage with the result error so the adapter can fill
-   NodeResult.Failure without inferring it from text.
-2. W2 must carry the authenticated exact request-body digest and operation into
-   store result transactions. StateDigest hashes the C1 transition and cannot
-   substitute for that body digest. AuthenticationSnapshot.Binding.Result is
-   unfilled until that path exists, so terminal HTTP replay is not established.
-3. W2 must supply the trusted identity/persistence boundary for console, peer and
-   configured anonymous authentication. ReadAuthentication currently supports
-   persisted bearer/session lookup and refuses the other classes. ProcessAlive
-   belongs to the node host. Bootstrap, machine, service and Actions provisioning
-   also need trusted origin checks inside the issuance transaction; the member
-   origin is implemented, and the others return unavailable.
-4. W8/W9 must specify launcher observation correlation across claim generations
-   and what LauncherSyncResponse.Remove names. LauncherObservation has UnitID,
-   JobName and NodeUID but no generation, and C1 has no committed Kubernetes
-   identity mapping. A repeated unit ID alone cannot distinguish a stale Job
-   after re-award. SyncLauncher remains a declaration.
+These are existing gaps. This continuation changes no foreign contract shape.
 
-## Remaining integration and cleanup
+- W9 ReuseSource cannot name MaterializeSource.Result by job/state sequence.
+  ScheduleSnapshot cannot carry GuardRefusal. JobResult cannot carry the recorded
+  JobFailure stage. The implemented adapters refuse missing required state.
+- W2 must carry the authenticated exact request-body digest and operation into
+  result transactions for terminal HTTP replay. StateDigest is a transition
+  digest and cannot replace it. Binding.Result remains unfilled.
+- W2 must supply trusted console, peer and configured-anonymous persistence and
+  origin evidence. ReadAuthentication supports persisted bearer/session lookup.
+  Node-host process liveness belongs to C3.
+- W2 Target cannot carry the resolved concurrency key for BindSlotOfBoundNode.
+  That rule continues to return unavailable. Transactional data binding is now
+  integrated and no longer belongs on the missing-contract list.
+- W8/W9 must specify launcher observation correlation across claim generations
+  and what LauncherSyncResponse.Remove names. UnitID, JobName and NodeUID do not
+  include a generation, and C1 has no committed Kubernetes identity mapping.
+  SyncLauncher remains a declaration.
+- Generation-zero materialized generator sources still need a consistent fence
+  contract. Materialization may retain zero before any award, while eval units,
+  claims, owner logs and ExpansionForStore require positive source generations.
+  This remains an inspection finding, without a native runtime reproduction.
 
-W1b must connect its reservation/settlement owner to award, start, renewal,
-terminal result, finish and reaping. Existing persistBillingAwardTx is the
-unmetered path, not a substitute for its accounting contract. materializationRecords
-and nodeResultRecords still need W1b's implementation in their surrounding store
-transaction. Blob, upload, log and payment declarations imported by the merge
-were not represented as implemented by W1.
+W2 must install the intake policy, source policy/decryptor, plan secret opener,
+enrollment resolver, provisioning origin policy and real route authorization. The separate GitHub App
+credential mint/audit path remains open. W8 must supply the real engine resolver
+for SignedRunnerAdmission and SignedEngineVersionPolicy. W9 must implement the
+CompatibilityFor calendar helper. W6 concurrency resolution is tested through
+its contract fake. Other W6 settings/seals have real integration coverage.
 
-W2 must install the intake policy, plan secret opener and enrollment resolver,
-connect the real route verifier and finish slot/data/source integration.
-W8 must supply a working engine resolver to SignedRunnerAdmission. W3/W8/W9 must
-finish their host/runner callers. SyncLauncher and Compatibility still have
-declaration bodies. RunDetail reads persisted status but still needs signed
-version-policy notices. Remote Snapshot is implemented with the guard transport
-gap described above. The controller loops must invoke ReapUnits,
-ReconcileControllerRuns and completion delivery under their elected leases.
+The lead still needs to ratify the existing status-read choice: unavailable
+version policy returns an error rather than partial detail. No new customer
+restriction or human decision was introduced in this continuation.
 
-StateStoreOld, legacy plan/claim/trigger writers and offer rounds still have
-runtime callers. Their removal remains W1 work after migrating or deleting those
-callers. W1b's billing tests still call legacy sweep/requeue APIs, so those files
-were not changed here. No compatibility wrapper was introduced.
+## Earlier verification
 
-## Verification
-
-All Go commands used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
+Commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
 GOCACHE=/tmp/sw-astra-W1/cache, GOTMPDIR=/tmp/sw-astra-W1/tmp and
-TMPDIR=/tmp/sw-astra-W1/tmp. Test package parallelism was at most -p 4.
+TMPDIR=/tmp/sw-astra-W1/tmp. Test package parallelism is at most -p 4.
 
 - Whole-repository `go build -p 4 ./...` passes.
-- `go vet -p 4 ./pkg/store ./pkg/controller ./pkg/match ./internal/controllerwire`
-  passes.
-- The final W1 selection passes 228 top-level tests / 654 cases with no skips
-  or failures. It includes the new binding and classification files below.
-- All `^TestEngine` controller tests pass: 18 top-level tests / 28 cases.
-- Full pkg/match, internal/controllerwire, internal/acceptance and tests/acceptance
-  packages return success. The acceptance output contains 2,995 skipped tests.
-  Scaffold parents passing do not establish native cells.
-- `bin/check-api-spec.sh` and `git diff --check` pass. Edited Go files are formatted.
-- No local user.name, user.email or core.worktree override is present in Git config.
+- `go vet -p 4 ./pkg/store ./pkg/controller ./pkg/match ./internal/acceptance
+  ./tests/acceptance` passes.
+- The exact store selection passes 248 top-level tests / 695 cases, without skips.
+- Controller `-run '^TestEngine'` passes 33 top-level tests / 56 cases.
+- Full internal/acceptance, tests/acceptance and pkg/match pass. Acceptance has
+  20 top-level tests / 204 executed cases and 2,995 native/platform skips.
+- SQL-scope and tenant-writer guards pass. OpenAPI drift and diff whitespace
+  checks pass. Edited Go files are formatted.
+- Required `go run ./internal/commentcheck -base main .` reports one pre-existing
+  detached HereBearer comment in internal/controllerwire/contracts.go. That W9
+  file is unchanged. The two W1 findings from the prior report are removed.
+  `-base HEAD` is clean for this continuation.
 
-To reproduce the store selection, extract top-level Test names from the files in
-the previous W1 handoff plus these eleven files, join them into an anchored -run
-expression and run the pkg/store test command with -count=1:
+To reproduce the exact store selection, extract top-level Test names from these
+files under pkg/store, join them into an anchored alternation, and run
+`go test -p 4 ./pkg/store -count=1 -run "$expression"`:
 
-    amendment_reconcile_test.go amendment_claim_test.go failure_runtime_test.go
-    authentication_runtime_test.go plan_settings_integration_test.go
+    authority_runtime_test.go authority_adapters_test.go rewrite_authority_test.go
+    rewrite_schema_test.go state_runtime_test.go scheduling_contract_test.go
+    scheduling_guard_test.go concurrency_adoption_test.go maintenance_rewrite_test.go
+    expansion_runtime_test.go expansion_success_test.go owner_reaper_runtime_test.go
+    unit_deadlines_test.go unit_release_test.go result_runtime_test.go intake_plan_runtime_test.go
+    unit_claim_test.go unit_claim_lock_test.go reconcile_runtime_test.go materialize_runtime_test.go
+    state_result_records_test.go retry_recovery_runtime_test.go publication_runtime_test.go
+    unit_renewal_test.go queue_recovery_test.go tenant_sql_scope_guard_test.go
+    controller_recovery_test.go owner_liveness_test.go owner_dialect_test.go
+    finish_unit_runtime_test.go approval_reaper_runtime_test.go owner_reclaim_runtime_test.go
+    node_reaper_dialect_test.go recovery_matching_test.go registered_agents_test.go
+    waiting_nodes_test.go amendment_reconcile_test.go amendment_claim_test.go
+    failure_runtime_test.go authentication_runtime_test.go plan_settings_integration_test.go
     provision_runtime_test.go delegation_runtime_test.go source_intake_test.go
-    unit_local_claim_test.go
-    binding_runtime_test.go classification_race_test.go
+    unit_local_claim_test.go binding_runtime_test.go classification_race_test.go
+    source_release_test.go run_view_test.go maintenance_retention_test.go retention_run_test.go
+    authorization_snapshot_test.go binding_data_integration_test.go blob_data_access_test.go
 
-These are component proofs over SQLite and contract fakes. Native HTTP/api.sock,
-Postgres, Windows/Darwin, Docker, the full legacy suite, race checks, lint and
-delivery pipelines remain lead checks. Aggregate API snapshots and the rewrite
-changelog still need regeneration after integration. No Sparkwing binary,
-provider call, daemon, Git write, deployment or release was run.
+The broader prefix selection also ran a legacy TestOwnerLookupsKeepARunAndATriggerSharingAnIDApart
+fixture. It fails while creating a legacy run because sparkwing_meta is absent
+from the final schema. The exact W1 selection above excludes that old fixture.
+The full legacy suite is not claimed green. Native PostgreSQL interleavings,
+HTTP/api.sock, Windows/Darwin, Docker, race, lint, delivery pipelines and independent
+review remain lead checks. Aggregate API snapshots and the rewrite changelog
+remain integration work.
 
-## Shared files and friction
+## Earlier shared files, mechanisms and friction
 
-Outside pkg/store, changed production files are internal/nodehost/scheduler.go
-(merge resolution), pkg/controller/engine_contract.go, engine_store.go and the
-new engine_claim.go and engine_snapshot.go. engine_amendment_test.go and
-engine_snapshot_test.go add controller proofs. The C1
-contract document and this handoff record the seams and verification limits.
-The shared Store struct gains only the private C2 validation dependency field.
+Shared runtime support changed only in pkg/store/dialect.go, capabilities_contract.go,
+schema.sql, schema_contract.go and tenant.go. Other owned store changes are the
+binding adapter, its tests and private-interface comment cleanup. Outside
+pkg/store, this continuation adds internal/acceptance/store_recovery.go and
+changes tests/acceptance/recovery_test.go. No other package's production caller
+was migrated or deleted. C1, T1 and this handoff document the evidence.
 
-The merge duplicated interfaces already implemented in other W1 files. W9's
-amended private job type also required replacing the old public projection.
-The first broad selection found the session digest lookup's missing reviewed
-SQL-scope exemption; its globally unique digest precedes tenant resolution.
-Real W6 integration exposed missing concurrency resolution. Two recovery fixtures
-needed an explicit remote-owner deadline; a separate test exposed the real local
-deadline refusal, which is fixed. No failing final check was retried unchanged.
+The only runtime mechanism added is the private transaction snapshot-mode bit.
+Changing the binding entry point to an ordinary transaction would lose its
+consistent snapshot and leave owner/data snapshot readers with the same error.
+The bit preserves the existing read contract. No setting, environment variable,
+service, compatibility alias or billing policy was added.
 
-The latest continuation also required terminal-node timestamps, complete seal
-columns and a secret principal in the final-schema fixtures. Those fixture errors
-were corrected before the binding and snapshot checks passed. PostgreSQL's
-read-only snapshot excludes locking SQL, so named authorization uses the same
-matching-input reader with its locking parameter disabled. Actual PostgreSQL
-execution remains untested here. The generation-zero generator issue above is
-an inspection finding that still needs a runtime reproduction and amendment.
+The PostgreSQL lock regression ran red before the fix. New recovery fixtures
+needed nullable empty capability projections, a reaper actor for run cancellation
+and an enrollment fake for self-claim. The first port-reference note also needed
+its scenario suffix to satisfy the existing drift check. These were test/doc
+corrections. No production workaround was added for a fixture.
 
-The scratch directory is removed before the final report. The merge index and
-the remaining implementation work require continuation.
+No Sparkwing binary, provider call, daemon, Git write, deployment or release ran.
+W1b source files are unchanged. Scratch is deleted before the final report.
+
+STATUS: CONTINUE

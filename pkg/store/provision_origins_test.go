@@ -1,0 +1,224 @@
+package store
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"math/rand/v2"
+	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+)
+
+type provisionPolicyFunc func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error
+
+func (f provisionPolicyFunc) AuthorizeProvision(ctx context.Context, resolver capability.AuthorityResolver, spec capability.ProvisionSpec) error {
+	return f(ctx, resolver, spec)
+}
+
+func provisionOrigin(t *testing.T, kind capability.ProvisionKind) (*Store, capability.ProvisionSpec) {
+	t.Helper()
+	s := authorityStore(t)
+	expires := s.now().Add(time.Hour)
+	spec := capability.ProvisionSpec{Kind: kind, RegistrationID: "enrollment", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "machine"}, Grants: []capability.Grant{capability.NodesClaim}, Binding: capability.Binding{Kind: capability.BindingNone}, ExpiresAt: &expires}
+	switch kind {
+	case capability.ProvisionBootstrap:
+		spec.Team, spec.Subject = "", capability.Subject{Kind: capability.SubjectOperator, ID: "operator"}
+		spec.Grants = []capability.Grant{capability.OperatorTokens}
+	case capability.ProvisionMachine:
+		owner := authorityMember(t, s, "owner", RoleOwner)
+		spec.Authority = &owner.Authority
+	case capability.ProvisionService:
+		operator := authorityRoot("operator", "")
+		operator.Subject.Kind = capability.SubjectOperator
+		operator.Grants = []capability.Grant{capability.OperatorTokens}
+		authorityPersist(t, s, operator)
+		spec.Authority = &capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: operator.Prefix}
+		spec.Team, spec.Subject = "", capability.Subject{Kind: capability.SubjectService, ID: "launcher"}
+		spec.Grants = []capability.Grant{capability.ClaimsLaunch}
+		spec.Metered = true
+	case capability.ProvisionActions:
+		spec.Binding = capability.Binding{Kind: capability.BindingPush, Push: &capability.PushScope{RepositoryKey: "github.com/o/r", Ref: "refs/heads/main", SHA: "sha", WorkflowRunID: "workflow"}}
+		spec.Repositories = []string{"github.com/o/r"}
+	}
+	return s, spec
+}
+
+func TestProvisionOriginsRequireTrustedPolicy(t *testing.T) {
+	for _, kind := range []capability.ProvisionKind{capability.ProvisionBootstrap, capability.ProvisionMachine, capability.ProvisionService, capability.ProvisionActions} {
+		t.Run(string(kind), func(t *testing.T) {
+			s, spec := provisionOrigin(t, kind)
+			if issued, err := s.ProvisionCapability(t.Context(), spec); err == nil || issued.Raw != "" {
+				t.Fatal("unverified origin minted a bearer")
+			}
+			calls := 0
+			s.SetProvisionPolicy(provisionPolicyFunc(func(ctx context.Context, resolver capability.AuthorityResolver, got capability.ProvisionSpec) error {
+				calls++
+				if got.Kind != kind || got.RegistrationID != spec.RegistrationID {
+					t.Fatal("origin policy lost registration identity")
+				}
+				if got.Authority != nil {
+					_, err := resolver.ResolveAuthority(ctx, *got.Authority)
+					return err
+				}
+				return nil
+			}))
+			issued, err := s.ProvisionCapability(t.Context(), spec)
+			if err != nil || issued.Raw == "" || issued.Capability.Parent != nil || calls != 1 {
+				t.Fatalf("provision: %+v, %v, policy calls %d", issued.Capability, err, calls)
+			}
+			if _, err := s.LookupCapability(t.Context(), issued.Capability.Digest); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestProvisionMachineRecordsAccountOwner(t *testing.T) {
+	s, spec := provisionOrigin(t, capability.ProvisionMachine)
+	s.SetProvisionPolicy(provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil }))
+	issued, err := s.ProvisionCapability(t.Context(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenant := &Tenant{s: s, team: "a"}
+	if err := tenant.SetSourceMachineConsent(t.Context(), *spec.Authority, issued.Capability.Prefix, true); err != nil {
+		t.Fatalf("registered owner could not consent: %v", err)
+	}
+	other := authorityMember(t, s, "other", RoleOwner)
+	if err := tenant.SetSourceMachineConsent(t.Context(), other.Authority, issued.Capability.Prefix, false); err == nil {
+		t.Fatal("another team owner replaced machine ownership")
+	}
+	rewriteSchemaExec(t, s.db, `UPDATE sessions SET revoked_at=1 WHERE hash=?`, spec.Authority.ID)
+	if _, err := s.LookupCapability(t.Context(), issued.Capability.Digest); err != nil {
+		t.Fatalf("independent enrolled root inherited the authorizer's lifetime: %v", err)
+	}
+}
+
+func TestProvisionRechecksAuthorityAfterOriginPolicy(t *testing.T) {
+	for _, problem := range []string{"revoked", "membership", "expired", "policy", "commit"} {
+		t.Run(problem, func(t *testing.T) {
+			s, spec := provisionOrigin(t, capability.ProvisionMachine)
+			now := s.now()
+			s.clock = func() time.Time { return now }
+			s.SetProvisionPolicy(provisionPolicyFunc(func(ctx context.Context, resolver capability.AuthorityResolver, _ capability.ProvisionSpec) error {
+				tx := resolver.(*storeTx)
+				switch problem {
+				case "revoked":
+					_, err := tx.ExecContext(ctx, `UPDATE sessions SET revoked_at=1 WHERE hash=?`, spec.Authority.ID)
+					return err
+				case "membership":
+					_, err := tx.ExecContext(ctx, `DELETE FROM memberships WHERE team='a' AND account_id='owner'`)
+					return err
+				case "expired":
+					now = now.Add(2 * time.Hour)
+				case "policy":
+					return errors.New("enrollment is not approved")
+				case "commit":
+					_, err := tx.ExecContext(ctx, `CREATE TRIGGER refuse_root BEFORE INSERT ON capabilities BEGIN SELECT RAISE(ABORT,'refused'); END`)
+					return err
+				}
+				return nil
+			}))
+			issued, err := s.ProvisionCapability(t.Context(), spec)
+			if err == nil || issued.Raw != "" {
+				t.Fatal("failed verification or persistence returned a bearer")
+			}
+			rewriteSchemaCount(t, s.db, "capabilities", 0)
+		})
+	}
+}
+
+func TestProvisionOriginAuthorityProperty(t *testing.T) {
+	s, base := provisionOrigin(t, capability.ProvisionMachine)
+	s.SetProvisionPolicy(provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil }))
+	random := rand.New(rand.NewPCG(42, 91))
+	for i := range 128 {
+		spec := base
+		spec.Subject.ID = fmt.Sprintf("machine-%d", i)
+		spec.Grants = append([]capability.Grant(nil), base.Grants...)
+		switch random.IntN(8) {
+		case 0:
+			spec.Team = "b"
+		case 1:
+			spec.Metered = true
+		case 2:
+			spec.Grants = append(spec.Grants, capability.OperatorTokens)
+		case 3:
+			spec.Grants = append(spec.Grants, capability.ClaimsLaunch)
+		case 4:
+			spec.Grants = append(spec.Grants, capability.OperatorConsole)
+		case 5:
+			spec.Binding = capability.Binding{Kind: capability.BindingRun, RunID: fmt.Sprintf("run-%d", random.Uint64())}
+		case 6:
+			spec.Subject.Kind = capability.SubjectService
+		case 7:
+			spec.Authority = nil
+		}
+		issued, err := s.ProvisionCapability(t.Context(), spec)
+		if err == nil || issued.Raw != "" {
+			t.Fatalf("forged root %d minted authority: %+v", i, spec)
+		}
+	}
+	rewriteSchemaCount(t, s.db, "capabilities", 0)
+}
+
+func TestProvisionRootCannotAcquireAnExecutionFence(t *testing.T) {
+	for _, kind := range []capability.ProvisionKind{capability.ProvisionBootstrap, capability.ProvisionMachine, capability.ProvisionService, capability.ProvisionActions} {
+		t.Run(string(kind), func(t *testing.T) {
+			s, base := provisionOrigin(t, kind)
+			s.SetProvisionPolicy(provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil }))
+			random := rand.New(rand.NewPCG(17, 83))
+			for range 64 {
+				spec := base
+				switch random.IntN(8) {
+				case 0:
+					spec.Binding.RunID = fmt.Sprintf("run-%d", random.Uint64())
+				case 1:
+					spec.Binding.NodeID = fmt.Sprintf("job-%d", random.Uint64())
+				case 2:
+					spec.Binding.Holder = fmt.Sprintf("holder-%d", random.Uint64())
+				case 3:
+					spec.Binding.Generation = random.Int64N(1000) + 1
+				case 4:
+					spec.Binding.Attempt = random.Int64N(1000) + 1
+				case 5:
+					spec.Binding.Reservation = fmt.Sprintf("reservation-%d", random.Uint64())
+				case 6:
+					spec.Binding.ClaimBy = new(s.now())
+				case 7:
+					spec.Binding.Deadline = new(s.now().Add(time.Hour))
+				}
+				issued, err := s.ProvisionCapability(t.Context(), spec)
+				if err == nil || issued.Raw != "" {
+					t.Fatalf("root acquired forged execution fence: %+v", spec.Binding)
+				}
+			}
+			want := 0
+			if kind == capability.ProvisionService {
+				want = 1
+			}
+			rewriteSchemaCount(t, s.db, "capabilities", want)
+		})
+	}
+}
+
+func TestProvisionRejectsUnregisteredAndDeletingTeams(t *testing.T) {
+	for _, problem := range []string{"missing", "deleting"} {
+		t.Run(problem, func(t *testing.T) {
+			s, spec := provisionOrigin(t, capability.ProvisionActions)
+			s.SetProvisionPolicy(provisionPolicyFunc(func(context.Context, capability.AuthorityResolver, capability.ProvisionSpec) error { return nil }))
+			if problem == "missing" {
+				spec.Team = "missing"
+			} else {
+				rewriteSchemaExec(t, s.db, `INSERT INTO team_deletions(slug,requested_by,requested_at,state) VALUES ('a','owner',1,?)`, TeamDeletionPending)
+			}
+			issued, err := s.ProvisionCapability(t.Context(), spec)
+			if !errors.Is(err, ErrUnknownTeam) || issued.Raw != "" {
+				t.Fatalf("provisioned unregistered team: %+v, %v", issued.Capability, err)
+			}
+			rewriteSchemaCount(t, s.db, "capabilities", 0)
+		})
+	}
+}

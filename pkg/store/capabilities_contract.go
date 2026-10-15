@@ -380,7 +380,7 @@ func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.Authority
 	return chain, nil
 }
 
-// ResolveAuthority locks live ancestry until the surrounding mutation commits.
+// ResolveAuthority reads live ancestry and locks it in write transactions.
 func (tx *storeTx) ResolveAuthority(ctx context.Context, ref capability.AuthorityRef) (capability.Principal, error) {
 	chain, err := authorityChainTx(ctx, tx, ref, true)
 	if err != nil {

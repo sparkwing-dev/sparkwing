@@ -33,6 +33,16 @@ These declarations leave transaction implementation with W1.
   Member roots have their own optional expiry. The issuing session is checked at
   issuance and does not become their lifetime or revocation parent. Current
   account membership still constrains each subsequent use.
+- `provision_contract.go` declares `ProvisionPolicy.AuthorizeProvision` for trusted
+  bootstrap, machine/service enrollment and verified Actions evidence. W2 installs
+  the policy before serving. It receives the issuing transaction's authority
+  resolver and the complete trusted `ProvisionSpec`. Missing verification refuses
+  issuance. The store rechecks current authorizer scope, expiry, root shape and
+  registered team after verification. Only deployment token authority can set
+  metering or authorize service issuance. Provisioning never grants console
+  authority. Machine enrollment records the account authorizer in `created_by`,
+  so only that account can change source-credential consent. Roots retain no
+  revocation parent. The evidence providers remain W2's integration.
 - Claim selection checks every requested kind's grant before one ordered scan.
   Runner selection accepts trigger/node, launcher selection plan/eval/node. The
   named trigger path retains the exact here reservation's trigger.host exception. Unknown,
@@ -83,10 +93,23 @@ pipeline, child-generation, own-unit, declared dependency/recovery, source and
 secret relations. C2 still owns route grants and liveness classes. Named claim
 checks share the matching-input reader without taking write locks. The awarding
 transaction evaluates observed labels and available resources through the matcher.
-Data selectors use C2's `DataAccessChecker` on that transaction, supplied by the
-blob owner. Missing transactional data support returns unavailable. Concurrency
-binding also returns unavailable until C2's resolved target can name the declared
-key. Node-host process cleanup remains the host's binding check.
+Data selectors call the transaction's `DataAccessChecker`, supplied by the blob
+owner. Receipt and read-edge changes in that transaction govern its verdict.
+Concurrency binding returns unavailable until C2's resolved target can name the
+declared key. Node-host process cleanup remains the host's binding check.
+
+Snapshot transactions omit row locks because PostgreSQL refuses them in a
+read-only transaction. Authorization and owner snapshots use the same repeatable
+snapshot for ancestry and resource relations. Write transactions retain ancestry,
+run and resource locks through commit. The public binding check grants no right
+to skip the committing transaction's authority and fence checks.
+
+`Tenant.ListRegisteredAgents` reads only its team's enrolled claimants.
+`Operator.ListWaitingNodes`, `Operator.SetNodeAttention` and
+`Operator.CountConcurrencyCache` own deployment inspection and advisory writes.
+Their raw `Store` methods are removed. The unused raw `SetRetriedAs`,
+`ActiveConcurrencyHolder` and `ListSpawnedChildrenByRun` wrappers are removed.
+Their tenant methods remain while legacy callers migrate.
 
 `Tenant.ReadOwnerSnapshot` reads the current owner authority, lease and scheduling
 state in one snapshot. A replaced, expired or revoked owner receives no snapshot.
@@ -105,8 +128,29 @@ Log subjects expose identity only, without object prefixes, segment keys or
 signing authority. This reader does not write log persistence. The controller's
 `RunDetail` adapter projects seals through `runspec.DisplayRequest` or
 `DisplaySpec`, uses the destination row's retry lineage and omits private hashes,
-bearers and execution declarations. Version-policy notices still require the
-engine owner's integration.
+bearers and execution declarations. `EngineController.VersionPolicy` supplies
+read-time policy through the engine owner. `SignedEngineVersionPolicy` loads the
+verified index, preserves fallback warnings, and evaluates the accepted engine
+version. Active revocation/minimum errors become enforcement notices on stored
+runs. Other policy failures discard the response instead of returning partial
+status. A run without an accepted engine needs no version lookup.
+
+`EngineController.Compatibility` looks up the exact release in verified metadata
+and delegates calendar arithmetic to `controllerwire.CompatibilityFor`. Execution
+eligibility does not change that release's API guarantee. Missing configuration,
+failed index reads and unknown releases return errors. The engine index/evaluation
+and wire calendar helper remain their owners' runtime integrations.
+
+The controller calls `Operator.ReconcileControllerRuns` on startup and each
+maintenance tick under `controller.owner`. It pages across all teams and renews
+the exact fence between full pages. Election, renewal or reconciliation failure
+stops the pass. Every Server has a random instance lease identity, separate from
+the hostname displayed in schedule history. Another process on the same machine
+cannot reuse that holder's live fence.
+
+Final run pruning uses `Operator.MaintainRetention`. The unleased
+`Store.PruneRunsOlderThan` API is removed. Finish time controls eligibility, and
+a failed pass rolls back every removal and discards its result counters.
 
 `Tenant.ReleaseSourceCredential` accepts C2's authorized authority reference and
 route target. In one write transaction it reloads ancestry, locks the owner, run
@@ -674,6 +718,8 @@ Usage rows are additive per team, period and replica. Reporting sums rows.
 Admission takes a shared team/quota lock and records each reservation durably;
 settlement is idempotent by reservation ID. Log reads meter egress exactly and
 are exempt from download quota. Deferred plan counters add no enforcement here.
+The unused service-wide `egress_day` table is removed. Tenant egress remains in
+`egress_usage` with period and replica identity.
 
 `Operator.ChargeRetainedStorage(ctx, maintenanceLease)` bills unique `blobs`
 and committed `log_streams.stored_bytes`. Historical replica usage and reference
@@ -917,8 +963,8 @@ hold no competing idempotency fields.
 
 ## Schema inventory
 
-The final baseline contains 83 tables and 97 explicit indexes. `SchemaTables`
-classifies 65 tenant and 18 operator tables. It retains accounts, identity,
+The final baseline contains 83 tables and 101 explicit indexes. `SchemaTables`
+classifies 66 tenant and 17 operator tables. It retains accounts, identity,
 GitHub App/Actions, schedules, sizing, admission, approvals, logs, metrics,
 credits, cards, git credential opt-ins/audits and build trust. Obsolete token,
 output, memo, agent-loss, dispatch, bounce and duplicate-plan tables are removed.
