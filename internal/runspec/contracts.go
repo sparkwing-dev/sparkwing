@@ -163,6 +163,17 @@ type Source struct {
 	Ref          string           `json:"ref"`
 	Entrypoint   string           `json:"entrypoint"`
 	BundleDigest Optional[string] `json:"bundle_digest"`
+	Location     SourceLocation   `json:"location"`
+}
+
+// SourceLocation preserves acquisition input separately from repository identity and checkout policy.
+// RemoteURL is credential-free. LocalCheckout is permitted only in its machine-local store.
+// PipelineDir is checkout-relative and cannot escape the checkout. Git.SHA pins remote execution.
+// Intake verifies the location belongs to Git.Repository before sealing or releasing source authority.
+type SourceLocation struct {
+	RemoteURL     string `json:"remote_url,omitempty"`
+	LocalCheckout string `json:"local_checkout,omitempty"`
+	PipelineDir   string `json:"pipeline_dir"`
 }
 
 // safety: Lineage records retriers separately from immutable original actor and git facts.
@@ -228,6 +239,7 @@ type CheckoutPolicy struct {
 // JobExecutionSettings is frozen independently of the declaration used for code reconstruction.
 // An unset timeout means no job-specific bound; owner deadlines remain independent.
 type JobExecutionSettings struct {
+	Concurrency       []Concurrency          `json:"concurrency"`
 	Timeout           Setting[time.Duration] `json:"timeout"`
 	NoProgressTimeout Setting[time.Duration] `json:"no_progress_timeout"`
 	ApprovalWait      Setting[time.Duration] `json:"approval_wait"`
@@ -334,8 +346,21 @@ type Ceilings struct {
 // ExecutionSettings contains one sealed winner set for each declared job ID.
 // Expansions store additional job settings on their node rows without changing this seal.
 type ExecutionSettings struct {
-	Options Options                         `json:"options"`
-	Jobs    map[string]JobExecutionSettings `json:"jobs"`
+	Concurrency []Concurrency                   `json:"concurrency"`
+	Options     Options                         `json:"options"`
+	Jobs        map[string]JobExecutionSettings `json:"jobs"`
+}
+
+// Concurrency contains resolved author policy; the owner computes its scoped key.
+// Nil timeout preserves the retained unbounded wait meaning, never an implicit zero.
+type Concurrency struct {
+	Group           string `json:"group"`
+	Scope           string `json:"scope"`
+	Capacity        int    `json:"capacity"`
+	Cost            int    `json:"cost"`
+	OnLimit         string `json:"on_limit"`
+	QueueTimeoutMS  *int64 `json:"queue_timeout_ms,omitempty"`
+	CancelTimeoutMS *int64 `json:"cancel_timeout_ms,omitempty"`
 }
 
 // safety: Request is submitted to the one intake transaction on every placement.
@@ -403,6 +428,8 @@ type Guards struct {
 
 // safety: Resolved contains checkout-derived facts and C4-resolved settings for seal point two.
 // SecretArgs must be present (an empty, non-nil list means none) after describe.
+// It includes every secret classification already sealed at intake. Describe may add
+// classifications but cannot declassify a requested value or expose it through display.
 // Raw Args remain available for execution, retries and masking, never direct display.
 type Resolved struct {
 	// Engine pins the portable verified release identity; executors resolve their own platform asset.

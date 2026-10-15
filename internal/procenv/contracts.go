@@ -36,6 +36,7 @@ const (
 	Cleanup
 	Install
 	HostChild
+	Git
 )
 
 // Var is a registry row; Prefix matches a family, and engine ownership forbids inheritance.
@@ -73,6 +74,7 @@ func Policies() []Policy {
 		{Cleanup, "inherit attempt", "inherit attempt", "none", "none", "inherit attempt", "inherit attempt including body"},
 		{Install, "base only", "none", "none", "none", "none", "base; output masked"},
 		{HostChild, "captured snapshot", "none", "arguments", "none", "none", "captured snapshot; host binary via argument"},
+		{Git, "filtered base", "none", "explicit argv and private config files", "private file only", "none", "base without inherited git control variables"},
 	}
 }
 
@@ -122,6 +124,9 @@ func SplitJobEnv(env []Assignment) (JobEnv, error) { panic("unimplemented: c4-su
 // Cleanup and StepTool use AttemptEnv exactly. Remote allow-list values of at least twelve characters
 // are masked before any subprocess starts. Build drops envredact.CredentialName matches before
 // applying allow lists, even when Lookup classifies an unknown name as user-owned.
+// Git also drops inherited GIT_* except GIT_SSL_CAINFO and GIT_SSL_CAPATH, plus
+// SSH_ASKPASS and SSH_AUTH_SOCK. Source acquisition selects private credential/config files through argv.
+// Git never inherits a repository/index/config override or a credential helper from a caller.
 func Build(k Kind, b Base, rt Runtime) ([]string, error) { panic("unimplemented: c4-surface-config") }
 
 // Lookup uses exact rows before prefixes, case-insensitively on Windows; unknown names remain user-owned.

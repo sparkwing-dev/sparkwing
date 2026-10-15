@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"time"
+	"unicode/utf8"
 )
 
 // ErrNoTime means the parent's remaining budget cannot leave the requested settlement margin.
@@ -40,7 +41,22 @@ func JobDeadline(now, ownerDeadline, attemptDeadline time.Time) (time.Time, erro
 func Error(text string) string { panic("unimplemented: c4-surface-config") }
 
 // Record bounds already-masked UTF-8 summary or annotation text within AnnotationBytes with an elision note.
-func Record(text string) string { panic("unimplemented: c4-surface-config") }
+func Record(text string) string {
+	if int64(len(text)) <= AnnotationBytes {
+		return text
+	}
+	const note = "\n… (text elided)\n"
+	budget := int(AnnotationBytes) - len(note)
+	head := budget / 2
+	for head > 0 && !utf8.RuneStart(text[head]) {
+		head--
+	}
+	tail := len(text) - (budget - budget/2)
+	for tail < len(text) && !utf8.RuneStart(text[tail]) {
+		tail++
+	}
+	return text[:head] + note + text[tail:]
+}
 
 // Failure refuses an oversized already-masked failure record rather than producing malformed structured bytes.
 func Failure(raw []byte) ([]byte, error) { panic("unimplemented: c4-surface-config") }

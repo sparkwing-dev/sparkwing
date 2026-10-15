@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -26,6 +27,7 @@ type AcceptedRun struct {
 // Accepted is present on resume. A new run resolves and submits the second seal
 // and plan together before any scheduling or dispatch.
 type RunInput struct {
+	Storage       StorageBinding
 	Engines       *engine.Resolver
 	PlanCache     PlanCache
 	RunID         string
@@ -72,6 +74,7 @@ type ClaimAuthority struct {
 // GrantedRunner and RouteBinding come from the award and delegated node bearer;
 // SDK processes receive them in hello, never through process environment.
 type NodeInput struct {
+	Storage       StorageBinding
 	Engine        engine.Resolved
 	Accepted      AcceptedRun
 	NodeID        string
@@ -84,6 +87,16 @@ type NodeInput struct {
 	GrantedRunner nodeproto.RunnerIdentity
 	RouteBinding  nodeproto.ProcessBinding
 	Replay        []GeneratorReplay
+}
+
+// StorageBinding joins verified bytes and transactional records under one live unit authority.
+// Each attempt/generation gets a fresh binding. Clients reauthorize on every operation.
+// RemoteCache is present only for the explicit read-only profile opt-in.
+type StorageBinding struct {
+	Bytes       blob.Store
+	Records     blob.RecordStore
+	Authority   blob.Authority
+	RemoteCache blob.RemoteCache
 }
 
 // NodeHost runs executor layers, replans for drift, executes attempts and reports

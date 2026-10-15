@@ -2,6 +2,60 @@
 
 <!-- design:begin -->
 
+## Amendment 1: environment, presence and managed units
+
+[Amendments 1](amendments-1.md) records the cross-area consumers.
+
+- `procenv.Git` is the shared acquisition process kind. It uses the filtered base
+  and network/CA settings, drops inherited Git repository/index/config overrides,
+  SSH command/agent/askpass controls, preserves GIT_SSL_CAINFO/GIT_SSL_CAPATH,
+  and receives selected private configuration
+  through source-owned argv. Source authority may use approved owner credentials
+  under its repository allow-list. It never copies ambient credentials into env.
+  Install keeps the ordinary credential-free base. No arbitrary os.Environ fallback
+  is permitted in source acquisition.
+- Local, child and schedule execution retain captured snapshots rather than a
+  daemon's current environment. W3/W4/W8 consume procenv, startup/body splitting,
+  guard results and shared deadlines. Startup settings cannot change declarations.
+  Execution and inactivity budgets remain distinct.
+- Network proxy settings are the existing passed-and-masked exception. Register
+  credential components for URL and scheme-less proxy forms, including GOPROXY and
+  PIP_INDEX_URL. A mask of only the whole string is insufficient when tools print
+  just the embedded credential. Other credential-shaped input stays excluded.
+- Schedule inference chooses batch only when no explicit admission class wins.
+  It is a default, not a request override above pipeline code. The final guard
+  grammar uses where:local/controller. Shared parsing and YAML alias traversal
+  belong to W6, with each YAML graph node validated once per relevant context.
+- Concurrency optional scope/capacity/cost/on_limit remain absent on the wire until
+  ResolveConcurrency. Defaults are global/1/1/queue. Group is required. Explicit
+  zero capacity/cost fails. Resolved winners persist separately from declarations.
+- Source.Location stores immutable acquisition location. Secret argument
+  classifications may grow at the second seal but cannot shrink. Display never
+  exposes raw arguments, source credentials or secret-bearing hashes.
+- `limits.Record` is implemented at the existing 128 KiB limit. It bounds already
+  masked UTF-8 using a head, an elision note and a tail. Storage still refuses
+  oversized raw records. No new cap, deadline or environment variable is added.
+
+LocalRuntime declares AwaitReady, Status, SetStay and Drain beside Run. A runtime
+is bound to one home, owns one store and uses the shared controller, queue and UI.
+Readiness includes startup reconciliation. Drain joins shutdown. The four existing
+activity counts determine idle exit, with stay as an explicit override.
+
+Managed controller units call foreground `wingd run --stay --home <absolute-home>`.
+Managed timers call `__tick --home <absolute-home>`. Public dashboard start stays a
+lifecycle client. ManagedUnit retains Home and update re-renders both kinds before
+restarting installed services. These hidden home arguments replace environment
+plumbing and do not restore a public --home flag or removed command alias.
+
+Runner enrollment writes runner.repos and a private credential file under
+runner.credentials_dir. Startup reads that directory. Failed enrollment revokes
+newly minted authority and removes only files it created. W2/W6/W8/W9 share this
+contract. Cloud Job scratch remains the fixed aggregate 20 GiB including DinD,
+enforced by Kubernetes accounting/eviction. Real node/network evidence and full
+teardown remain W8 and deployment acceptance obligations.
+
+
+
 Status: target contracts for the frozen v4 architecture. Tables are populated;
 execution, parsing, resolution and lifecycle signatures panic until implemented.
 The current CLI and hosts are not wired to these contracts. An `Old` suffix marks

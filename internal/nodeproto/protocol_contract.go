@@ -40,6 +40,8 @@ type Request struct {
 	Failure  *JobFailure       `json:"failure,omitempty"`
 	Closure  string            `json:"closure,omitempty"`
 	Input    json.RawMessage   `json:"input,omitempty"`
+	// Target identifies the active request cancelled by OpCancel, including eval without job/step.
+	Target string `json:"target,omitempty"`
 }
 
 // safety: EngineIdentity permits actionable mismatch diagnostics without stamping every request.
@@ -143,6 +145,8 @@ func ParseRequest(line []byte) (Request, error) { panic("unimplemented: c3-proto
 func ParseFrame(line []byte) (Frame, error) { panic("unimplemented: c3-protocol-sdk") }
 
 // safety: Validate refuses fields that contradict the selected operation before invoking pipeline code.
+// Cancel selects Target alone, or Job with optional Step. Job without Step cancels all
+// active work for that job. Target may select eval; mixing selectors or selecting nothing fails.
 func (r Request) Validate() error { panic("unimplemented: c3-protocol-sdk") }
 
 // safety: Decode validates reply, RunResult and EvalResult errors with apierr.DecodeInner before returning typed results.

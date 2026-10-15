@@ -2,6 +2,9 @@
 package apierr
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 )
@@ -159,7 +162,74 @@ type Envelope struct {
 // Protocol replies, body failures, eval failures and recovery inputs all use this
 // decoder before accepting an Error. HTTP/CLI readers unwrap Envelope exactly once.
 func DecodeInner(data []byte) (*Error, error) {
-	panic("unimplemented: c2-credentials")
+	invalid := errors.New("invalid inner error object")
+	var fields map[string]any
+	if err := json.Unmarshal(data, &fields); err != nil || fields == nil {
+		return nil, invalid
+	}
+	if !uniqueJSONKeys(json.NewDecoder(bytes.NewReader(data))) {
+		return nil, invalid
+	}
+	if _, exists := fields["error"]; exists {
+		return nil, invalid
+	}
+	code, ok := fields["code"].(string)
+	if !ok || code == "" {
+		return nil, invalid
+	}
+	message, ok := fields["message"].(string)
+	if !ok {
+		return nil, invalid
+	}
+	failure := &Error{Code: Code(code), Message: message}
+	if hint, exists := fields["hint"]; exists {
+		failure.Hint, ok = hint.(string)
+		if !ok {
+			return nil, invalid
+		}
+	}
+	if details, exists := fields["details"]; exists {
+		failure.Details, ok = details.(map[string]any)
+		if !ok {
+			return nil, invalid
+		}
+	}
+	return failure, nil
+}
+
+func uniqueJSONKeys(decoder *json.Decoder) bool {
+	token, err := decoder.Token()
+	if err != nil {
+		return false
+	}
+	switch token {
+	case json.Delim('{'):
+		seen := make(map[string]bool)
+		for decoder.More() {
+			key, err := decoder.Token()
+			if err != nil {
+				return false
+			}
+			name, ok := key.(string)
+			if !ok || seen[name] {
+				return false
+			}
+			seen[name] = true
+			if !uniqueJSONKeys(decoder) {
+				return false
+			}
+		}
+	case json.Delim('['):
+		for decoder.More() {
+			if !uniqueJSONKeys(decoder) {
+				return false
+			}
+		}
+	default:
+		return true
+	}
+	_, err = decoder.Token()
+	return err == nil
 }
 
 // Status returns the registry status; an unregistered code is an internal failure.
