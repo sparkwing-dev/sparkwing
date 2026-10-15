@@ -27,9 +27,11 @@ type CloudControl interface {
 
 // CloudJobObservation retains the identities needed to reconcile after launcher restart.
 type CloudJobObservation struct {
-	Binding CloudJobBinding
-	JobName string
-	NodeUID string
+	Binding      CloudJobBinding
+	JobNamespace string
+	JobName      string
+	JobUID       string
+	NodeUID      string
 }
 
 // CloudJobState carries the controller's teardown decision for one immutable award.
@@ -135,7 +137,7 @@ func (l *Launcher) LaunchOne(ctx context.Context) (bool, error) {
 		return true, errors.Join(err, l.teardown(ctx, created, r.Reservation))
 	}
 	// safety: reservation probes and publication may outlive the award's execution authority.
-	retirements, err := l.retirements(ctx, []CloudJobObservation{{Binding: award.Binding, JobName: created.Name, NodeUID: r.Reservation.NodeUID}})
+	retirements, err := l.retirements(ctx, []CloudJobObservation{{Binding: award.Binding, JobNamespace: created.Namespace, JobName: created.Name, JobUID: string(created.UID), NodeUID: r.Reservation.NodeUID}})
 	if err == nil && retirements[created.Name] {
 		err = errors.New("Cloud award ended before Job activation")
 	}

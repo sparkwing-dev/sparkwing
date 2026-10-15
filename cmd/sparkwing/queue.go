@@ -1,152 +1,207 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"strings"
+	"text/tabwriter"
 	"time"
 
-	flag "github.com/spf13/pflag"
-
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/opsview"
-	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
+type queueDependencies struct {
+	connect    func(context.Context, string) (controllerwire.QueueManager, func(), error)
+	priority   func(context.Context, string, int, string) (queuePriorityResult, error)
+	resolveRun func(context.Context, string) (string, error)
+}
+
 func runQueue(args []string) error {
-	if len(args) > 0 && args[0] == "priority" {
-		return runQueuePriority(args[1:])
-	}
-	if len(args) > 0 && args[0] == "list" {
-		return runQueueList(cmdQueueList, args[1:])
-	}
-	return runQueueList(cmdQueue, args)
+	return runQueueCommand(context.Background(), args, os.Stdout, queueDependencies{
+		connect:    resolveQueueManager,
+		resolveRun: resolveQueueRun,
+		priority: func(ctx context.Context, run string, priority int, mode string) (queuePriorityResult, error) {
+			return applyQueuePriority(ctx, "", run, priority, mode)
+		},
+	})
 }
 
-// runQueueList serves both `sparkwing queue list` and bare `sparkwing queue`;
-// cmd only decides whose help and error prefix the invocation carries.
-func runQueueList(cmd Command, args []string) error {
-	fs := flag.NewFlagSet(cmd.Path, flag.ContinueOnError)
-	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-	on := addProfileFlag(fs)
-	if err := parseAndCheck(cmd, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
+func resolveQueueManager(ctx context.Context, profile string) (controllerwire.QueueManager, func(), error) {
+	options, closeTransport, err := controllerOptions(ctx, profile)
+	if err != nil {
+		return nil, nil, err
 	}
-	format, err := resolveTTYAwareOutput(*outFmt, cmd.Path)
+	manager, err := client.NewQueueManager(options)
+	if err != nil {
+		closeTransport()
+		return nil, nil, err
+	}
+	return manager, closeTransport, nil
+}
+
+func runQueueCommand(ctx context.Context, args []string, out io.Writer, deps queueDependencies) error {
+	inv, err := clisurface.Parse("sparkwing", append([]string{"queue"}, args...))
 	if err != nil {
 		return err
 	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("%s: unexpected positional %q (the listing takes flags only)", cmd.Path, fs.Arg(0))
+	format := inv.Output(color.IsInteractiveStdout())
+	if inv.Help() || inv.Command.Path == "sparkwing queue" {
+		return writeCommandHelp(surfaceHelp(inv.Command), out, format)
 	}
-
-	if *on != "" {
-		return runQueueProfile(cmd, *on, format)
+	group := inv.Value("group")
+	if inv.Has("group") {
+		if err := controllerwire.ValidateQueueGroupName(group); err != nil {
+			return &clisurface.UsageError{Path: inv.Command.Path, Message: err.Error()}
+		}
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	input, err := queuePriorityInput(inv)
+	if err != nil {
+		return err
+	}
+	timeout := 5 * time.Second
+	if inv.Value("profile") != "" {
+		timeout = 30 * time.Second
+	}
+	if inv.Command.Path == "sparkwing queue priority" {
+		timeout = queuePriorityTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-
-	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: "", Version: Version})
-	if err != nil {
-		if errors.Is(err, wingdclient.ErrDaemonUnreachable) {
-			if rerr := renderUnreachableDaemon(os.Stdout, format, err); rerr != nil {
-				return rerr
-			}
-			return exitError(4, fmt.Errorf("%s: %w", cmd.Path, err))
-		}
-		if errors.Is(err, wingdclient.ErrNoDaemon) {
-			if rerr := renderNoDaemon(os.Stdout, format); rerr != nil {
-				return rerr
-			}
-			return nil
-		}
-		return fmt.Errorf("%s: %w", cmd.Path, err)
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	if rerr := renderLocalQueue(os.Stdout, qs, format); rerr != nil {
-		return rerr
+	if inv.Command.Path == "sparkwing queue priority" && group == "" {
+		if strings.Trim(input.RunID, "0123456789") == "" {
+			input.RunID, err = deps.resolveRun(ctx, input.RunID)
+			if err != nil {
+				return err
+			}
+			if err := input.Validate(); err != nil {
+				return &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned an invalid run identity"}
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+		}
+		priority := 0
+		if input.Priority != nil {
+			priority = *input.Priority
+		}
+		result, err := deps.priority(ctx, input.RunID, priority, input.Mode)
+		if err != nil {
+			return err
+		}
+		return writeQueuePriority(out, result, format)
 	}
-	return nil
-}
-
-func runQueueProfile(cmd Command, profileName, format string) error {
-	prof, err := resolveProfile(profileName)
+	manager, closeTransport, err := deps.connect(ctx, inv.Value("profile"))
 	if err != nil {
 		return err
 	}
-	if err := requireController(prof, "queue"); err != nil {
+	defer closeTransport()
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	qs, err := fetchControllerQueueState(ctx, prof.ControllerURL(), prof.ControllerToken())
+	return manageQueue(ctx, inv, input, manager, out, format)
+}
+
+func resolveQueueRun(ctx context.Context, selector string) (string, error) {
+	reader, closeTransport, err := resolveRunReader(ctx, "")
 	if err != nil {
-		return fmt.Errorf("%s: %w", cmd.Path, err)
+		return "", err
 	}
-	return renderQueue(os.Stdout, qs, format)
-}
-
-func fetchControllerQueueState(ctx context.Context, baseURL, token string) (wingwire.QueueState, error) {
-	u := strings.TrimRight(baseURL, "/") + "/api/v1/queue"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	defer closeTransport()
+	run, err := reader.ReadRun(ctx, selector)
 	if err != nil {
-		return wingwire.QueueState{}, err
+		return "", err
 	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+	return run.ID, nil
+}
+
+func manageQueue(ctx context.Context, inv clisurface.Invocation, input controllerwire.QueuePriorityWrite, manager controllerwire.QueueManager, out io.Writer, format string) error {
+	group := inv.Value("group")
+	if inv.Command.Path == "sparkwing queue priority" {
+		result, err := manager.SetGroupPriority(ctx, group, input)
+		if err != nil {
+			return err
+		}
+		return writeQueuePriority(out, result, format)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	if group != "" {
+		result, err := manager.ReadQueueGroup(ctx, group)
+		if err != nil {
+			return err
+		}
+		return renderQueueGroup(out, result, format)
+	}
+	result, err := manager.ReadQueue(ctx)
 	if err != nil {
-		return wingwire.QueueState{}, err
+		return err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return wingwire.QueueState{}, fmt.Errorf("GET queue state: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	// safety: buffer the shared renderer because its text paths do not return write failures.
+	var buffer bytes.Buffer
+	if err := renderQueue(&buffer, result, format); err != nil {
+		return err
 	}
-	var qs wingwire.QueueState
-	if err := json.NewDecoder(resp.Body).Decode(&qs); err != nil {
-		return wingwire.QueueState{}, fmt.Errorf("decode queue state: %w", err)
-	}
-	return qs, nil
+	_, err = out.Write(buffer.Bytes())
+	return err
 }
 
-func renderNoDaemon(w io.Writer, format string) error {
-	return opsview.RenderNoDaemon(w, format)
+func writeQueuePriority(out io.Writer, result queuePriorityResult, format string) error {
+	if !result.Found {
+		return renderQueuePriorityMissing(out, format, result)
+	}
+	return renderQueuePriority(out, result, format)
 }
 
-func renderUnreachableDaemon(w io.Writer, format string, cause error) error {
-	return opsview.RenderUnreachableDaemon(w, format, cause)
+func renderQueueGroup(out io.Writer, group controllerwire.QueueGroup, format string) error {
+	if format == "json" {
+		return json.NewEncoder(out).Encode(group)
+	}
+	var buffer bytes.Buffer
+	var rows io.Writer = &buffer
+	var tw *tabwriter.Writer
+	if format == "pretty" {
+		tw = tabwriter.NewWriter(&buffer, 0, 0, 2, ' ', 0)
+		rows = tw
+	}
+	fmt.Fprintf(rows, "group\t%s\tcapacity\t%d\teffective\t%d\tused\t%d\n", group.Group, group.Capacity, group.EffectiveCapacity, group.UsedCost)
+	if format == "pretty" {
+		fmt.Fprintf(rows, "scope\t%s\n", orchestrator.ScopeLabelFromKey(group.Group))
+		fmt.Fprintln(rows, "STATE\tRUN\tJOB\tPOSITION\tCOST\tSUPERSEDED\tHOLDER / POLICY\tCLAIMED / ARRIVED\tLEASE EXPIRES")
+	}
+	for _, h := range group.Holders {
+		fmt.Fprintf(rows, "holder\t%s\t%s\t-\t%d\t%t\t%s\t%s\t%s\n", h.RunID, h.JobID, h.Cost, h.Superseded, h.HolderID, fmtQueueTime(h.ClaimedAt), fmtQueueTime(h.LeaseExpiresAt))
+	}
+	for _, w := range group.Waiters {
+		fmt.Fprintf(rows, "waiter\t%s\t%s\t%d\t%d\t-\t%s\t%s\t-\n", w.RunID, w.JobID, w.Position, w.Cost, w.Policy, fmtQueueTime(w.ArrivedAt))
+	}
+	if tw != nil {
+		if err := tw.Flush(); err != nil {
+			return err
+		}
+	}
+	_, err := out.Write(buffer.Bytes())
+	return err
 }
 
-func renderLocalQueue(w io.Writer, qs wingwire.QueueState, format string) error {
-	return opsview.RenderLocalQueue(w, qs, opsview.Serving(), format)
+func fmtQueueTime(value time.Time) string {
+	if value.IsZero() {
+		return "-"
+	}
+	return value.UTC().Format(time.RFC3339)
 }
 
 func renderQueue(w io.Writer, qs wingwire.QueueState, format string) error {
 	return opsview.RenderQueue(w, qs, format)
 }
-
-func renderQueuePretty(w io.Writer, qs wingwire.QueueState) error {
-	return opsview.RenderQueuePretty(w, qs)
-}
-
-func containerNote(c *wingwire.ContainerLimit) string { return opsview.ContainerNote(c) }
-
-func budgetNote(b *wingwire.BudgetState) string { return opsview.BudgetNote(b) }
-
-func fmtEventsLine(ev *wingwire.EventsWindow) string { return opsview.FmtEventsLine(ev) }
-
-func fmtDaemonHeader(qs wingwire.QueueState) string { return opsview.FmtDaemonHeader(qs) }
-
-func originWord(o wingwire.Origin) string { return opsview.OriginWord(o) }
-
-func externalPressureNote(qs wingwire.QueueState) string { return opsview.ExternalPressureNote(qs) }

@@ -208,6 +208,9 @@ with runner services. Release metadata survives XML-sensitive prerelease names.
 
 The W9 dashboard, schedule, update and doctor adapters still need to supply this
 manager. The foreground process still needs the shared-controller factory.
+The foreground CLI uses `runWingdRunCommand` and the shared flag registry. Its
+former second runtime constructor is removed. Election and factory-failure
+coverage now use that same command path.
 File and service-manager fixtures exercise these ports. They do not establish
 native login, crash, shutdown or Windows behavior.
 

@@ -8,15 +8,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/engine/npmcmd"
 	"github.com/sparkwing-dev/sparkwing/internal/engine/sdkinstall"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 )
 
 func TestEngineNativeNPMW8Components(t *testing.T) {
-	if _, err := npmcmd.Command("--version"); err != nil {
+	if _, err := pipelineentry.NPMCommand(t.Context(), runtime.GOOS, exec.LookPath, "--version"); err != nil {
 		t.Skipf("native npm is not installed: %v", err)
 	}
 	if _, err := exec.LookPath("node"); err != nil {

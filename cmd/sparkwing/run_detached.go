@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -626,10 +625,13 @@ func foregroundOnlyReasons(wf runFlags) []struct {
 		{"--sw-start-at", wf.startAt != "", "step-window selection is not carried on the trigger yet; run it in the foreground"},
 		{"--sw-stop-at", wf.stopAt != "", "step-window selection is not carried on the trigger yet; run it in the foreground"},
 		{"--sw-only", wf.only != "", "job filtering is not carried on the trigger yet; run it in the foreground"},
-		{"--sw-no-cache", wf.noCache, "cache-read suppression is not carried on the trigger yet; run it in the foreground"},
+		{"--sw-no-memo", wf.noCache, "cache-read suppression is not carried on the trigger yet; run it in the foreground"},
 		{"--sw-mode", wf.mode != "", "execution mode is not carried on the trigger yet; run it in the foreground"},
+		{"--sw-pause-before", wf.pauseBefore != nil, "pause selection for detached runs is unavailable in this build"},
+		{"--sw-pause-after", wf.pauseAfter != nil, "pause selection for detached runs is unavailable in this build"},
+		{"--sw-pause-on-failure", wf.pauseOnFailure != nil, "pause selection for detached runs is unavailable in this build"},
 		{"--sw-workers", wf.workers > 0, "worker capping is not carried on the trigger yet; run it in the foreground"},
-		{"--sw-allow", len(wf.allow) > 0, "risk authorization is not carried on the trigger yet; run it in the foreground"},
+		{"--sw-allow-risk", len(wf.allow) > 0, "risk authorization is not carried on the trigger yet; run it in the foreground"},
 		{"--sw-no-update", wf.noUpdate, "the consumer compiles the run, and the flag is not carried on the trigger; run it in the foreground"},
 		{"--sw-no-bincache", wf.noBincache, "the consumer compiles the run, and the flag is not carried on the trigger; run it in the foreground"},
 		{"--sw-hash-all-files", wf.hashAllFiles, "the consumer compiles the run, and the flag is not carried on the trigger; run it in the foreground"},
@@ -653,6 +655,10 @@ type riskGate struct {
 
 func (g riskGate) check(execDir, pinnedBinary string) error {
 	sparkwingDir := filepath.Join(execDir, ".sparkwing")
+	identity, err := pipelineIdentityAt(sparkwingDir, g.Pipeline)
+	if err != nil {
+		return err
+	}
 	declared := g.Declared
 	switch {
 	case pinnedBinary != "":
@@ -668,10 +674,11 @@ func (g riskGate) check(execDir, pinnedBinary string) error {
 			return fmt.Errorf("%s: read what %s declares: %w", g.Surface, g.Pipeline, err)
 		}
 	}
-	if !slices.ContainsFunc(declared, func(p nodeproto.PipelineDescription) bool { return p.Name == g.Pipeline }) {
-		return fmt.Errorf("%s: no selected source declares a pipeline named %q", g.Surface, g.Pipeline)
+	schema, err := boundPipelineSchema(declared, identity)
+	if err != nil {
+		return fmt.Errorf("%s: %w", g.Surface, err)
 	}
-	if err := enforceRiskGate(g.Pipeline, risksIn(declared, g.Pipeline), g.Flags); err != nil {
+	if err := enforceRiskGate(g.Pipeline, risksIn(schema), g.Flags); err != nil {
 		return fmt.Errorf("%s: %w\n"+
 			"A queued run carries neither an allow nor a dry run, so a pipeline that declares a risk "+
 			"runs in the foreground",

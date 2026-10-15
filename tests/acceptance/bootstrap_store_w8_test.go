@@ -137,11 +137,11 @@ func TestCloudStoreBootstrapW8Components(t *testing.T) {
 					if input.Engine.Identity != *award.Engine || input.Generation != award.Binding.Generation || input.Attempt != 0 || !reflect.DeepEqual(input.GrantedRunner, unit.Runner) {
 						t.Fatal("Cloud execution lost the accepted engine, runner or claim fence")
 					}
-					started, err := bound.TransitionJob(ctx, unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "running", Cause: "start"})
+					started, err := bound.TransitionJob(ctx, unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "running", Cause: "start", SourceAttempt: &input.Attempt})
 					if err != nil || started.Attempt != 1 {
 						t.Fatalf("Cloud start: attempt=%d error=%v", started.Attempt, err)
 					}
-					if _, err := bound.TransitionJob(ctx, unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "success", Cause: "report", Result: &controllerwire.JobResult{Outcome: "success"}}); err != nil {
+					if _, err := bound.TransitionJob(ctx, unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "success", Cause: "report", SourceAttempt: &started.Attempt, Result: &controllerwire.JobResult{Outcome: "success"}}); err != nil {
 						t.Fatal(err)
 					}
 				}), runnerIdentityInputW8(unit), func() error {

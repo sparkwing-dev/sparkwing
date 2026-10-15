@@ -35,7 +35,7 @@ func TestDiscoveryCommandsPaginationAndFullTreeCounts(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
 	}
-	all, allPage, _ := discoveryOutput(t, "commands", "--limit", "0")
+	all, allPage, _ := discoveryOutput(t, "commands", "--limit", "100000")
 	if len(all) < 80 || allPage["truncated"] != false {
 		t.Fatal("exhaustive index did not include the full tree")
 	}
@@ -75,11 +75,11 @@ func TestDiscoveryCommandsPaginationAndFullTreeCounts(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatal("pagination duplicated, omitted or reordered commands")
 	}
-	rows, _, _ := discoveryOutput(t, "commands", "--query", "version hold", "--limit", "1")
+	rows, _, _ := discoveryOutput(t, "commands", "--search", "version hold", "--limit", "1")
 	if len(rows) != 1 || rows[0]["path"] != "sparkwing version hold" {
 		t.Fatalf("query was applied after limit: %v", rows)
 	}
-	rows, _, _ = discoveryOutput(t, "commands", "--path", "runs", "--query", "runs", "--limit", "1")
+	rows, _, _ = discoveryOutput(t, "commands", "--path", "runs", "--search", "runs", "--limit", "1")
 	if rows[0]["path"] != "sparkwing runs" || rows[0]["subcommand_count"] != counts["sparkwing runs"] {
 		t.Fatal("query or page shrank the group's child count")
 	}
@@ -89,7 +89,7 @@ func TestDiscoveryDocsBudgetAndSelectedBody(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
 	}
-	rows, page, out := discoveryOutput(t, "docs", "search", "--query", "cache")
+	rows, page, out := discoveryOutput(t, "docs", "search", "--search", "cache")
 	if len(rows) != 20 || page["truncated"] != true || len(out) > 15_000 {
 		t.Fatalf("search exceeded bounded snippet contract: %v, %d bytes", page, len(out))
 	}
@@ -116,7 +116,7 @@ func TestDiscoveryDocsBudgetAndSelectedBody(t *testing.T) {
 	if err != nil || string(plain) != records[0]["text"] {
 		t.Fatalf("plain selected body differs: %v", err)
 	}
-	explicit, _, _ := discoveryOutput(t, "docs", "search", "--query", "cache", "--limit", "1", "--body")
+	explicit, _, _ := discoveryOutput(t, "docs", "search", "--search", "cache", "--limit", "1", "--body")
 	if explicit[0]["body"] == nil || explicit[0]["body"] == "" {
 		t.Fatal("explicit body access disappeared")
 	}
@@ -126,11 +126,11 @@ func TestDiscoveryDocsRankedPaginationAndListFiltering(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
 	}
-	all, _, _ := discoveryOutput(t, "docs", "search", "--query", "Memoize key", "--limit", "0")
+	all, _, _ := discoveryOutput(t, "docs", "search", "--search", "Memoize key", "--limit", "100000")
 	var got []map[string]any
 	cursor := ""
 	for {
-		args := []string{"docs", "search", "--query", "Memoize key", "--limit", "7"}
+		args := []string{"docs", "search", "--search", "Memoize key", "--limit", "7"}
 		if cursor != "" {
 			args = append(args, "--cursor", cursor)
 		}
@@ -160,11 +160,11 @@ func TestDiscoveryDocsRankedPaginationAndListFiltering(t *testing.T) {
 	if len(rows) != 40 || page["truncated"] != true {
 		t.Fatal("docs index is unbounded")
 	}
-	rows, _, _ = discoveryOutput(t, "docs", "list", "--query", "migrations/v0.46.0", "--limit", "1")
+	rows, _, _ = discoveryOutput(t, "docs", "list", "--search", "migrations/v0.46.0", "--limit", "1")
 	if len(rows) != 1 || rows[0]["slug"] != "migrations/v0.46.0" {
 		t.Fatalf("late topic was lost before filtering: %v", rows)
 	}
-	rows, page, _ = discoveryOutput(t, "commands", "--query", "not-a-real-command-query")
+	rows, page, _ = discoveryOutput(t, "commands", "--search", "not-a-real-command-query")
 	if len(rows) != 0 || page["total"] != float64(0) || page["truncated"] != false {
 		t.Fatal("empty search does not report an empty page")
 	}
@@ -176,9 +176,12 @@ func TestDiscoveryRejectsInvalidSelectionAndKeepsExportsExhaustive(t *testing.T)
 	}
 	for _, args := range [][]string{
 		{"commands", "--limit", "-1"},
+		{"commands", "--limit", "0"},
+		{"commands", "--query", "cache"},
+		{"commands", "--include-hidden"},
 		{"commands", "--cursor", "missing"},
 		{"commands", "--format", "markdown", "--limit", "2"},
-		{"docs", "search", "-q", "cache", "--cursor", "missing"},
+		{"docs", "search", "--search", "cache", "--cursor", "missing"},
 		{"docs", "list", "--limit", "-1"},
 		{"docs", "read", "--topic", "caching", "--section", "0"},
 		{"docs", "read", "--topic", "caching", "--section", "999999"},

@@ -46,11 +46,11 @@ func TestStoreLauncherW8(t *testing.T) {
 	remove := false
 	server.Launcher = storeLauncherSyncW8(func(ctx context.Context, ref capability.AuthorityRef, observed []controllerwire.LauncherObservation) (controllerwire.LauncherSyncResponse, error) {
 		reads++
-		if ref.ID != root.Capability.Prefix || len(observed) != 1 || observed[0].NodeUID != "uid" {
+		if ref.ID != root.Capability.Prefix || len(observed) != 1 || observed[0].NodeUID != "uid" || observed[0].Job.UID != "job-uid" {
 			t.Fatal("launcher lost its authenticated root or persisted Job")
 		}
 		if remove {
-			return controllerwire.LauncherSyncResponse{Remove: []string{observed[0].JobName}}, nil
+			return controllerwire.LauncherSyncResponse{Remove: []controllerwire.LauncherJobRef{observed[0].Job}}, nil
 		}
 		tenant, err := server.Store.ForTeam(ctx, store.DefaultTeam)
 		if err != nil {
@@ -68,8 +68,12 @@ func TestStoreLauncherW8(t *testing.T) {
 		if err != nil {
 			return controllerwire.LauncherSyncResponse{}, err
 		}
+		want := capability.LeaseRef{Kind: capability.UnitNode, ID: principal.Capability.UnitID, Holder: node.ClaimedBy, Generation: node.Generation}
+		if observed[0].Award != want {
+			t.Fatal("launcher changed its persisted award fence")
+		}
 		return controllerwire.LauncherSyncResponse{Awards: []controllerwire.ClaimedUnit{{
-			Unit: capability.UnitNode, UnitID: observed[0].UnitID, RunID: "run", JobID: "job", Purpose: capability.PurposeWork,
+			Unit: capability.UnitNode, UnitID: principal.Capability.UnitID, RunID: "run", JobID: "job", Purpose: capability.PurposeWork,
 			Delivery: capability.DeliveryBootstrap, Binding: principal.Capability.Binding, Request: row.Request,
 			OwnerDeadline: principal.Capability.Binding.Deadline, ParentCapabilityExpiry: root.Capability.ExpiresAt, Capability: "reader-must-not-return-this",
 		}}}, nil

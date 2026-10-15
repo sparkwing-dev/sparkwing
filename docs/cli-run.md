@@ -8,167 +8,50 @@ Every `sparkwing run` command, flag, and argument, generated from the CLI's own 
 
 Invoke a pipeline
 
-Compiles the nearest .sparkwing/ binary and hosts a run of the
-named pipeline. The engine asks the binary for the plan over the node
-protocol, then starts it once per job; retries, timeouts, caching, admission
-and logs stay in the engine. A run executes on this machine against its local
-store and secrets. A pipeline whose sparkwing.yaml entry names a profile: is
-pinned to that controller, and run refuses it. run takes no --profile; it
-refuses one with the 'sparkwing pipeline trigger' command that runs the
-pipeline on that profile's controller.
+Always executes locally, including detached work on the local controller. --profile is refused.
 
-Pipeline-module builds honor the highest go directive in go.mod and an active
-resolved overlay. A fixed GOTOOLCHAIN below that floor selects the required Go
-for the build only. GOTOOLCHAIN=local refuses with installation or unpinning
-guidance. Pipeline steps retain the original environment.
+Publication is one-way run/results/logs with local provenance; a publication failure never changes the local run verdict.
 
-Runner options use the --sw- prefix. Unknown --sw- options fail before
-execution setup. Other arguments pass to the pipeline. Put -- before
-pipeline arguments that resemble runner options; every argument after the
-separator passes through unchanged.
+Cache-from reads only authorized verified-default-branch memo/artifacts/depcache; no shared writes or remote binary fetch.
 
-For execution on a profile's controller, use
-'sparkwing pipeline trigger <name> --profile PROF'.
-
-Output: pretty on a terminal, compact NDJSON otherwise. JSON runs
-emit a start, at most 20 node completions and five diagnostics, and
-a terminal record with status, outcome counts and log commands.
-Child output remains in the stored logs. Display strings are capped
-at 256 bytes; truncation and omitted event/failure counts are explicit.
-Use --sw-verbose for the complete live event stream, or
-'sparkwing runs logs --run RUN_ID --follow' to read stored output.
-
-SPARKWING_LOG_FORMAT=pretty|json|quiet overrides terminal detection.
-quiet is the human summary used by managed git hooks. Explicit json
-uses the same compact records on a terminal; --sw-verbose expands it.
-
---sw-detached queues the run instead of executing it here. It
-returns as soon as the run is durable, and a resident consumer
-process on this machine owns it from then on: close the
-terminal, drop the ssh session, log out -- the run keeps going.
-The acknowledgment is a run id and the directory its logs land
-in. Address the run by that id afterwards:
-
-  sparkwing runs status --run RUN_ID
-  sparkwing runs logs   --run RUN_ID --follow
-  sparkwing runs cancel --run RUN_ID
-
-The following flags are read only by a detached launch and are refused
-without --sw-detached: --sw-idempotency-key,
---sw-request-id, --sw-consumer-idle, --sw-consumer-claim-lease,
-and --sw-output,
-which picks the acknowledgment's format (pretty on a TTY, json
-when piped; plain prints the bare id for scripting).
-
---sw-idempotency-key deduplicates on key plus pipeline: a repeat
-carrying a key an earlier launch used returns the original run
-id and its current status and creates nothing, which is what
-prevents duplicate launches after a dropped connection. Reusing a key
-with different arguments is refused, because a key names one
-intent and different arguments are a different request.
---sw-request-id is tracing only and never affects deduplication.
-
---sw-ref and --sw-priority both work detached. The ref resolves
-to a commit when you launch, so the run executes that commit
-even if the ref moves first; the consumer executes the worktree
-and removes it when the run ends. 'front' and 'back' stay
-unresolved until the consumer launches the run, so 'front' means
-ahead of the queue the run actually joins.
-
-A pipeline can declare source: origin/main in sparkwing.yaml. Every launch
-compiles that source while jobs execute in the submitting checkout.
-An explicit --sw-pipeline-ref must resolve to the declared source commit.
-Source-backed schedules use --follow rather than a pinned binary.
-
---sw-pipeline-ref works in foreground and detached runs. It compiles
-the pipeline from another commit while
-the run executes in the checkout it was launched from.
-The execution checkout must retain .sparkwing/sparkwing.yaml;
-its pipeline source may be missing or unbuildable.
-The ref resolves when you
-launch; its tree is checked out only to compile and is removed when
-the run ends. It cannot be combined with --sw-ref.
-
-A flag a detached run cannot carry (--sw-index, --sw-dry-run
-and the other run-shaping --sw- flags)
-is refused with the reason instead of ignored; run those in
-the foreground.
-
-PIPELINE resolves against the checkout you are standing in (or the
-one 'sparkwing -C DIR run' names) first, then the repo registry, and the chosen
-checkout is recorded on the run. A detached run executes with an
-allow-listed snapshot of the launching environment -- SPARKWING_*,
-GITHUB_*, PATH, HOME, HOSTNAME, KUBERNETES_SERVICE_HOST, XDG_CONFIG_HOME,
-AWS_ENDPOINT_URL and AWS_ENDPOINT_URL_S3 -- widened by the names and NAME_*
-prefixes listed in run.submit_env_allow in config.yaml. Windows also
-preserves its user profile, system, shell, temporary, and application
-data paths, plus absolute Sparkwing key-file paths. Credential values
-and credential-shaped names are filtered. A consumer starts automatically if none
-is running and exits after five idle minutes; see
-'sparkwing runs consumer'.
+--sw-output applies to foreground and detached runs; explicit --sw-output beats -o, then SPARKWING_LOG_FORMAT, then terminal detection.
 
 ### Arguments
 
-- `<pipeline>` (required) -- Pipeline name registered in .sparkwing/sparkwing.yaml
+- `<pipeline>` (required) -- Pipeline name
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--sw-ref REF` | Run the pipeline at REF (branch/tag/SHA) instead of the working tree |
-| `--sw-pipeline-ref REF` | Compile the pipeline at REF and execute it in this checkout; cannot be combined with --sw-ref |
-| `--sw-detached` | Queue the run for this machine's resident consumer and print its handle instead of executing here; the run outlives the terminal |
-| `--sw-idempotency-key KEY` | Detached only: deduplication token; a repeat carrying this key returns the original run instead of starting a second one |
-| `--sw-request-id ID` | Detached only: tracing identifier recorded on the run; never affects deduplication |
-| `--sw-consumer-idle DUR` | Detached only, and only if this starts a consumer: how long it stays alive with no work (default 5m) |
-| `--sw-consumer-claim-lease DUR` | Detached only, and only if this starts a consumer: the lease it stamps on each claimed run, renewed while the run executes (default 3m) |
-| `--sw-output FORMAT` | Detached only: run-handle format, pretty\|json\|plain (default: pretty on a TTY, json when piped) |
-| `-v, --sw-verbose` | Enable debug logging and the complete live JSON event stream |
-| `--sw-start-at STEP` | Start the run at STEP |
-| `--sw-stop-at STEP` | Stop the run after STEP |
-| `--sw-only GLOB` | Run only jobs whose ID matches GLOB (plus their Needs ancestors) |
-| `--sw-no-cache` | Ignore cached per-node results (writes still happen) |
-| `--sw-priority VALUE` | Local admission priority: an integer, or front/back for one step past the queue as it stands; overrides the plan's own Priority |
-| `--sw-no-update` | Compile against the committed sparks overlay instead of resolving sparks first; CI sets it so the runner needs no resolve |
-| `--sw-no-bincache` | Build a temporary pipeline binary with debug symbols instead of using the binary cache |
-| `--sw-hash-all-files` | Hash files Git ignores into the binary cache key, for a build that embeds them |
-| `--sw-allow-unadmitted` | Run without the admission daemon even when the pipeline reserves host capacity |
-| `--sw-dry-run` | Run each step's dry-run probe instead of its real action |
-| `--sw-allow LABEL[,LABEL...]` | Authorize risk-labeled steps (repeatable) |
-| `--sw-index PATH` | Judge the git index at PATH instead of the repository's own (prints an index_bound event naming it) |
-| `--sw-run-handle-file PATH` | Atomically publish the accepted run's machine-readable handle to PATH |
-| `--target TARGET` | Run against the named pipeline deployment target (e.g. dev, prod) |
-
-### Examples
-
-```sh
-# Run with no flags
-sparkwing run fictional-build
-
-# Pass a typed pipeline arg
-sparkwing run fictional-release --version v0.28.1
-
-# Run from a different git ref
-sparkwing run fictional-build --sw-ref feature/xyz
-
-# Queue a run that outlives the terminal
-sparkwing run nightly-report --sw-detached
-
-# Capture the id for scripting
-RUN=$(sparkwing run build --sw-detached --sw-output plain)
-
-# Compile the pipeline from another ref
-sparkwing run fictional-build --sw-detached --sw-pipeline-ref main
-
-# Deduplicate a detached retry
-sparkwing run deploy --sw-detached --sw-idempotency-key fictional-deploy-attempt --env staging
-
-# Detach a pipeline from another checkout
-sparkwing -C ~/code/other-project run lint --sw-detached
-
-# Retry a failed run
-sparkwing runs retry --run run-fictional --failed
-
-# Submit to a remote controller
-sparkwing pipeline trigger deploy --profile prod
-```
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--publish PROFILE` | Copy this local run's results to the named controller profile. |
+| `--sw-cache-from PROFILE` | Read authorized cache entries from the named controller profile. |
+| `--sw-pause-before JOB` | Pause before the selected job. Repeatable; comma-separated values are accepted. |
+| `--sw-pause-after JOB` | Pause after the selected job. Repeatable; comma-separated values are accepted. |
+| `--sw-pause-on-failure` | Keep failed jobs paused for inspection. |
+| `--sw-ref REF` | Build the pipeline and run against this Git ref. |
+| `--sw-pipeline-ref REF` | Load the pipeline from this Git ref. |
+| `--sw-detached` | Submit work to the local controller and return before it finishes. |
+| `--sw-workers N` | Positive foreground worker count; refused for detached runs. Must be at least 1. |
+| `--sw-idempotency-key KEY` | Deduplicate detached submissions using this key. |
+| `--sw-request-id ID` | Request identifier for a detached submission. |
+| `--sw-output FORMAT` | Format for run output. Values: pretty, json, plain. |
+| `-v, --sw-verbose` | Include detailed run output. |
+| `--sw-start-at STEP` | Start execution at the selected step. |
+| `--sw-stop-at STEP` | Stop execution after the selected step. |
+| `--sw-only GLOB` | Select jobs matching this pattern. |
+| `--sw-no-memo` | Execute jobs without reusing memoized results. |
+| `--sw-priority VALUE` | Scheduling priority for this run. |
+| `--sw-no-update` | Skip automatic updates for this invocation. |
+| `--sw-no-bincache` | Build without reusing the local pipeline binary cache. |
+| `--sw-hash-all-files` | Include all files when computing the local binary cache key. |
+| `--sw-allow-unadmitted` | Permit execution without local resource admission. |
+| `--sw-dry-run` | Preview the run without executing its jobs. |
+| `--sw-allow-risk LABEL[,LABEL...]` | Authorize the listed pipeline risks. Repeatable; comma-separated values are accepted. |
+| `--sw-index PATH` | Pipeline discovery index path. |
+| `--sw-run-handle-file PATH` | Write the submitted run handle to this file. |
+| `--target TARGET` | Select a declared pipeline target. |

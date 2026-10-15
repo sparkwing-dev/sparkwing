@@ -11,9 +11,9 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/depcache"
-	"github.com/sparkwing-dev/sparkwing/internal/engine/npmcmd"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 )
 
@@ -47,7 +47,7 @@ func (e SDKEnvironment) CacheDirectory(ctx context.Context, input NodeInput, cac
 	}
 	var command *exec.Cmd
 	if cache.Resolver == depcache.ResolverNpm {
-		command, err = npmcmd.ForPlatform(runtime.GOOS, lookPath, "config", "get", "cache")
+		command, err = pipelineentry.NPMCommand(ctx, runtime.GOOS, lookPath, "config", "get", "cache")
 	} else {
 		var executable string
 		executable, err = lookPath("go")

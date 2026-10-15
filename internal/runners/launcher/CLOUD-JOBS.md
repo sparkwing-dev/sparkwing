@@ -117,11 +117,15 @@ Each award must include resolved CPU and memory in `ClaimedUnit.Execution`.
 For eval, `Binding.Generation` fences the terminal source and
 `Binding.Expansion` identifies the eval's own live lease. Both survive dispatch.
 
-The Job's binding retains the controller unit ID. Sync sends that ID, the Job
-name and reserved node UID reconstructed from Kubernetes metadata. It accepts
-one live or removal decision per observed Job. Changed fences, duplicate or
-missing decisions and returned credentials fail before activation or teardown.
-No in-memory award map or replacement bootstrap is needed after restart.
+The Job's binding retains the controller unit ID, kind, holder and awarded
+generation. Sync sends that fence with the actual Job namespace, name and UID
+and the reserved node UID reconstructed from Kubernetes metadata. Different
+generations of one unit can coexist during teardown. Sync correlates each live
+award by its complete lease fence and each removal by its observed Job instance.
+Deletion retains that UID as a Kubernetes precondition. Changed fences,
+duplicate or missing decisions and returned credentials fail before activation
+or teardown. No in-memory award map or replacement bootstrap is needed after
+restart.
 
 `BootstrapHost` creates a separate controller client whose bearer callback holds
 only the Job's bootstrap. It calls exchange once. Before dispatch, it checks the
@@ -145,8 +149,8 @@ and generator replay. `NodeHost` owns policy checks at each process start.
 
 <!-- design:begin -->
 
-The HTTP client, persisted cleanup reader, deployment network probes and node
-cleanup must supply their declared interfaces. `TestStoreLauncherW8` constructs
+The shared HTTP client is implemented. The persisted cleanup reader, deployment
+network probes and node cleanup still need native bindings. `TestStoreLauncherW8` constructs
 the embedded launcher against SQLite and shared C2/controller issuance, then
 publishes and activates a Job and retires it after synchronization. The cleanup
 reader and Kubernetes API are fixtures. `FuzzStoreLauncherAuthorityW8` checks
@@ -160,7 +164,7 @@ composition from the owning areas.
 The private files carry the original CloudJobAward and its source input to the
 containers. The builder's eval/work arguments pass the shared CLI parser. The
 parser still requires a job for plan units, which have no job ID. Production
-entrypoints still need source acquisition, the shared host constructors and the
-HTTP client. Component exchange tests do not establish a working pod entrypoint.
+entrypoints still need source acquisition and shared host construction bound to
+the HTTP client. Component exchange tests do not establish a working pod entrypoint.
 
 <!-- design:end -->

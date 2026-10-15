@@ -34,45 +34,6 @@ func ParseMode(raw string) (Mode, error) {
 	}
 }
 
-// Action is the result of selecting an executable for a required release.
-type Action int
-
-const (
-	// Stay keeps the executable already running.
-	Stay Action = iota
-	// Switch runs the required release from the verified toolchain store.
-	Switch
-	// Refuse reports that local-only policy cannot serve the requirement.
-	Refuse
-)
-
-// Selection describes the versions and operator policy that govern selection.
-type Selection struct {
-	Installed   string
-	Required    string
-	Replacement string
-	Active      string
-	Mode        Mode
-}
-
-// Select decides whether a stable required release outranks the running one.
-func Select(selection Selection) Action {
-	switch {
-	case selection.Active != "" && selection.Active == selection.Required:
-		return Stay
-	case selection.Replacement != "" || selection.Required == "":
-		return Stay
-	case !buildinfo.IsReleaseVersion(selection.Installed) || !buildinfo.IsReleaseVersion(selection.Required):
-		return Stay
-	case semver.Compare(selection.Installed, selection.Required) >= 0:
-		return Stay
-	case selection.Mode == ModeLocal:
-		return Refuse
-	default:
-		return Switch
-	}
-}
-
 // Hold is an operator's maximum permitted release and its source.
 type Hold struct {
 	Value  string `json:"value"`

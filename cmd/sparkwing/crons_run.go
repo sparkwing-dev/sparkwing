@@ -15,101 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 )
 
-func runCronsPauseResume(session *cronsSession, name, format string, pause bool) error {
-	verb := "--resume"
-	if pause {
-		verb = "--pause"
-	}
-	ctx := context.Background()
-	sched, err := session.svc.Resolve(ctx, name)
-	if err != nil {
-		return err
-	}
-	if pause {
-		err = session.svc.Pause(ctx, sched.ID)
-	} else {
-		err = session.svc.Resume(ctx, sched.ID)
-	}
-	if err != nil {
-		return fmt.Errorf("crons set %s: %w", verb, err)
-	}
-	row, _, err := session.svc.Show(ctx, sched.ID, 1)
-	if err != nil {
-		return fmt.Errorf("crons set %s: %w", verb, err)
-	}
-	switch format {
-	case "json":
-		return json.NewEncoder(os.Stdout).Encode(row)
-	case "plain":
-		_, perr := fmt.Fprintln(os.Stdout, row.ID)
-		return perr
-	}
-	fmt.Fprintf(os.Stdout, "%s is %s\n", row.Display, row.State)
-	if !pause && row.NextDueAt != nil {
-		fmt.Fprintf(os.Stdout, "  next: %s\n", cronAbsTime(*row.NextDueAt, row.Location))
-	}
-	return nil
-}
-
-type cronsRunReport struct {
-	Schedule string `json:"schedule"`
-	Name     string `json:"name"`
-	Pipeline string `json:"pipeline"`
-	RunID    string `json:"run_id"`
-}
-
-func runCronsRun(args []string) error {
-	fs := flag.NewFlagSet(cmdCronsRun.Path, flag.ContinueOnError)
-	outFmt := cronsOutputFlag(fs)
-	on := addCronsProfileFlag(fs)
-	if err := parseAndCheck(cmdCronsRun, fs, args); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
-		return err
-	}
-	if fs.NArg() != 1 {
-		PrintHelp(cmdCronsRun, os.Stderr)
-		return errors.New("crons run: one schedule name is required")
-	}
-	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsRun.Path)
-	if err != nil {
-		return err
-	}
-	if *on != "" {
-		return runCronsRunProfile(*on, fs.Arg(0), format)
-	}
-	session, release, err := openCrons("")
-	if err != nil {
-		return fmt.Errorf("crons run: %w", err)
-	}
-	defer release()
-
-	ctx := context.Background()
-	sched, err := session.svc.Resolve(ctx, fs.Arg(0))
-	if err != nil {
-		return err
-	}
-	runID, err := session.svc.RunNow(ctx, sched.ID)
-	if err != nil {
-		return fmt.Errorf("crons run: %w", err)
-	}
-	report := cronsRunReport{
-		Schedule: sched.ID, Name: crons.DisplayName(sched), Pipeline: sched.Pipeline, RunID: runID,
-	}
-	switch format {
-	case "json":
-		return json.NewEncoder(os.Stdout).Encode(report)
-	case "plain":
-		_, perr := fmt.Fprintln(os.Stdout, report.RunID)
-		return perr
-	}
-	fmt.Fprintf(os.Stdout, "run %s submitted (%s)\n", report.RunID, report.Pipeline)
-	fmt.Fprintf(os.Stdout, "  follow: sparkwing runs logs --run %s --follow\n", report.RunID)
-	fmt.Fprintf(os.Stdout, "  cancel: sparkwing runs cancel --run %s\n", report.RunID)
-	return nil
-}
-
 // safety: matches TimeoutStartSec in the systemd unit, so a hung tick is cut
 // by whichever side notices first instead of holding the minute open.
 const cronsTickTimeout = 5 * time.Minute
@@ -131,7 +36,7 @@ func runCronsTick(args []string) error {
 	}
 	session, release, err := openCrons(*nowFlag)
 	if err != nil {
-		return fmt.Errorf("crons tick: %w", err)
+		return fmt.Errorf("__tick: %w", err)
 	}
 	defer release()
 
@@ -146,9 +51,9 @@ func runCronsTick(args []string) error {
 		fmt.Fprintln(os.Stdout, "tick: another tick is already running")
 		return nil
 	case errors.Is(err, context.DeadlineExceeded):
-		return fmt.Errorf("crons tick: gave up after %s; the store or a launch is not answering, and the next minute's tick will try again", cronsTickTimeout)
+		return fmt.Errorf("__tick: gave up after %s; the store or a launch is not answering, and the next minute's tick will try again", cronsTickTimeout)
 	case err != nil:
-		return fmt.Errorf("crons tick: %w", err)
+		return fmt.Errorf("__tick: %w", err)
 	}
 	return renderCronsTick(os.Stdout, report, *dryRun, format)
 }

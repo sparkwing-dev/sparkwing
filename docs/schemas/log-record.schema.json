@@ -1,68 +1,41 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Sparkwing node protocol: log record",
-  "description": "One log record frame a node process writes on its frame pipe. Each line is one JSON object terminated by a newline.",
-  "type": "object",
-  "properties": {
-    "ts": { "type": "string", "description": "RFC 3339 timestamp with fractional seconds. The host may replace it with its own receive time." },
-    "level": { "enum": ["debug", "info", "warn", "error"] },
-    "node": { "type": "string", "description": "Id of the node that wrote the record. The host overwrites it with the process's node." },
-    "step": { "type": "string", "description": "Id of the step the record belongs to. The host keeps it only while that step has a run_step in flight." },
-    "event": {
-      "type": "string",
-      "description": "Empty or absent for a plain message. Values an SDK writes: node_annotation, node_summary, exec_start, exec_line and exec_end. The host writes step_start, step_end, step_skipped, work_fail_fast, node_start, node_end, retry and similar values itself, and stores an SDK record carrying one of them as a plain message."
-    },
-    "msg": { "type": "string", "description": "The message. May carry raw ANSI from a child process; the other fields never do." },
-    "attrs": { "type": "object", "description": "Event-specific fields." }
-  },
-  "required": ["ts"],
-  "additionalProperties": false,
-  "allOf": [
-    {
-      "if": { "properties": { "event": { "const": "node_annotation" } }, "required": ["event"] },
-      "then": { "properties": { "attrs": { "$ref": "#/$defs/annotation" } }, "required": ["attrs"] }
-    },
-    {
-      "if": { "properties": { "event": { "const": "node_summary" } }, "required": ["event"] },
-      "then": { "properties": { "attrs": { "$ref": "#/$defs/summary" } }, "required": ["attrs"] }
-    },
-    {
-      "if": { "properties": { "event": { "const": "exec_end" } }, "required": ["event"] },
-      "then": { "properties": { "attrs": { "$ref": "#/$defs/execEnd" } }, "required": ["attrs"] }
-    }
-  ],
   "$defs": {
-    "annotation": {
-      "type": "object",
-      "description": "attrs of a node_annotation record.",
+    "frameLog": {
+      "additionalProperties": true,
       "properties": {
-        "message": { "type": "string" },
-        "level": { "enum": ["notice", "warning", "error"], "description": "The annotation's severity; absent means notice." },
-        "file": { "type": "string", "description": "Repository-relative path the annotation points at." },
-        "line": { "type": "integer", "minimum": 1, "description": "1-based line in file." },
-        "end_line": { "type": "integer", "minimum": 1, "description": "Last line of the range in file." }
+        "attrs": {
+          "type": "object"
+        },
+        "event": {
+          "type": "string"
+        },
+        "level": {
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ],
+          "type": "string"
+        },
+        "msg": {
+          "type": "string"
+        },
+        "step": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "string"
+        }
       },
-      "required": ["message"],
-      "additionalProperties": false
-    },
-    "summary": {
-      "type": "object",
-      "description": "attrs of a node_summary record.",
-      "properties": {
-        "markdown": { "type": "string" }
-      },
-      "required": ["markdown"],
-      "additionalProperties": false
-    },
-    "execEnd": {
-      "type": "object",
-      "description": "attrs of an exec_end record: per-command numbers an SDK reports when it has them. The host's own measurement of the process session is authoritative.",
-      "properties": {
-        "exit_code": { "type": "integer" },
-        "cpu_ms": { "type": "integer", "minimum": 0 },
-        "max_rss": { "type": "integer", "minimum": 0, "description": "Peak resident set size in bytes." }
-      },
-      "additionalProperties": false
+      "required": [
+        "ts"
+      ],
+      "type": "object"
     }
-  }
+  },
+  "$ref": "#/$defs/frameLog",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Generated from FrameLog. Host assigns job attribution and masks before persistence. Unknown additive fields and events remain readable.",
+  "title": "Sparkwing node protocol v2: SDK log record"
 }

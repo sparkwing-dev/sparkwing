@@ -33,7 +33,7 @@ func compileFloorFixture(t *testing.T, setting, floor, buildBody string) (string
 func TestCompilePipelineOverridesFixedPinForBuildOnly(t *testing.T) {
 	dir, log := compileFloorFixture(t, "go1.26.6", "1.26.8", "exit 0\n")
 	ctx := gotoolchain.WithSession(context.Background(), os.Environ(), func(string) {})
-	if err := bincache.CompilePipeline(ctx, dir, filepath.Join(dir, "pipeline")); err != nil {
+	if err := bincache.CompilePipeline(ctx, dir, filepath.Join(dir, "pipeline"), bincache.CompileOptions{Environment: os.Environ(), Diagnostics: os.Stderr}); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(log)
@@ -53,7 +53,7 @@ func TestCompilePipelineOverridesFixedPinForBuildOnly(t *testing.T) {
 
 func TestCompilePipelineExplainsLocalDependencyFloor(t *testing.T) {
 	dir, _ := compileFloorFixture(t, "local", "1.26.0", "printf 'go: example.com/dependency requires go >= 1.27.2 (running go 1.26.6; GOTOOLCHAIN=local)\\n' >&2\nexit 1\n")
-	err := bincache.CompilePipeline(context.Background(), dir, filepath.Join(dir, "pipeline"))
+	err := bincache.CompilePipeline(context.Background(), dir, filepath.Join(dir, "pipeline"), bincache.CompileOptions{Environment: os.Environ(), Diagnostics: os.Stderr})
 	var compileErr *bincache.CompileError
 	var floorErr *gotoolchain.Error
 	if !errors.As(err, &compileErr) || !errors.As(err, &floorErr) {

@@ -1,14 +1,8 @@
 package main
 
 import (
-	"net/http"
-	"net/http/httptest"
-	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
 
 func TestRunIDFromArgs(t *testing.T) {
@@ -44,34 +38,9 @@ func TestRunIDFromArgs(t *testing.T) {
 	}
 }
 
-func TestRunsReadVerbsAcceptABareRunID(t *testing.T) {
-	const runID = "run-20260910-090000-0123456789abcdef"
-	for _, verb := range []string{"status"} {
-		t.Run(verb, func(t *testing.T) {
-			var asked []string
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				asked = append(asked, r.URL.Path)
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"nodes":[]}`))
-			}))
-			t.Cleanup(srv.Close)
-
-			home := t.TempDir()
-			profiles := filepath.Join(home, "config.yaml")
-			body := "profiles:\n  prod:\n    controller:\n      url: " + srv.URL + "\n"
-			if err := fssecure.WriteFile(profiles, []byte(body)); err != nil {
-				t.Fatal(err)
-			}
-			t.Setenv("SPARKWING_CONFIG", profiles)
-			t.Setenv("SPARKWING_HOME", home)
-
-			// safety: status exits non-zero on a run with no terminal state, so the
-			// proof is the id reaching the controller, not the verb's exit.
-			var runErr error
-			captureStdout(t, func() { runErr = runJobs([]string{verb, runID, "--profile", "prod"}) })
-			if !slices.ContainsFunc(asked, func(path string) bool { return strings.Contains(path, runID) }) {
-				t.Fatalf("runs %s read %v, none of which names the run id it was given (err: %v)", verb, asked, runErr)
-			}
-		})
+func TestRunsStatusRequiresKindNamedSelector(t *testing.T) {
+	err := runRunsStatus(t.Context(), []string{"r1", "--profile", "prod"})
+	if exitCodeFor(err) != 2 {
+		t.Fatalf("bare run ID accepted: %v", err)
 	}
 }

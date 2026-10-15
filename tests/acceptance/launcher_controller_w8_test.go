@@ -107,6 +107,7 @@ func TestLauncherControllerW8Components(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	resources.Job.UID, other.Job.UID = "first-job-uid", "second-job-uid"
 	kube := fake.NewClientset(resources.Job, resources.BootstrapSecret, other.Job, other.BootstrapSecret)
 	demand := controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}, AvailableCores: 4, AvailableMemoryBytes: 8 << 30}
 	remove := false
@@ -120,10 +121,10 @@ func TestLauncherControllerW8Components(t *testing.T) {
 		},
 		sync: func(_ context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
 			want := []controllerwire.LauncherObservation{
-				{UnitID: award.Binding.UnitID, JobName: resources.Job.Name, NodeUID: resources.Reservation.NodeUID},
-				{UnitID: second.Binding.UnitID, JobName: other.Job.Name, NodeUID: other.Reservation.NodeUID},
+				{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: award.Binding.UnitID, Holder: award.Binding.Holder, Generation: award.Binding.Generation}, Job: controllerwire.LauncherJobRef{Namespace: resources.Job.Namespace, Name: resources.Job.Name, UID: string(resources.Job.UID)}, NodeUID: resources.Reservation.NodeUID},
+				{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: second.Binding.UnitID, Holder: second.Binding.Holder, Generation: second.Binding.Generation}, Job: controllerwire.LauncherJobRef{Namespace: other.Job.Namespace, Name: other.Job.Name, UID: string(other.Job.UID)}, NodeUID: other.Reservation.NodeUID},
 			}
-			slices.SortFunc(want, func(a, b controllerwire.LauncherObservation) int { return strings.Compare(a.JobName, b.JobName) })
+			slices.SortFunc(want, func(a, b controllerwire.LauncherObservation) int { return strings.Compare(a.Job.Name, b.Job.Name) })
 			if !slices.Equal(request.Observed, want) {
 				t.Fatalf("restart lost persisted observation: %+v", request.Observed)
 			}
@@ -133,7 +134,7 @@ func TestLauncherControllerW8Components(t *testing.T) {
 			response := controllerwire.LauncherSyncResponse{}
 			for _, binding := range []launcher.CloudJobBinding{second.Binding, award.Binding} {
 				if remove && binding.UnitID == award.Binding.UnitID {
-					response.Remove = append(response.Remove, resources.Job.Name)
+					response.Remove = append(response.Remove, controllerwire.LauncherJobRef{Namespace: resources.Job.Namespace, Name: resources.Job.Name, UID: string(resources.Job.UID)})
 					continue
 				}
 				b := binding

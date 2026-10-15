@@ -364,10 +364,11 @@ an already accepted identifier.
 Credentials remain in the private process binding rather than the environment
 of commands a step starts.
 
-## Commands, files and records
+## Exec and Bash step commands
 
 `sw.Exec(ctx, program, args...)` runs argv directly. `sw.Bash(ctx, script)` runs a
-shell script. Both return a command builder with `Dir`, `Env` and `EnvMap`.
+shell script for a step. Use Exec to run a command such as `go test ./...`.
+Both return a command builder with `Dir`, `Env` and `EnvMap`.
 Terminators include `Run`, `Capture`, `String`, `Lines`, `JSON` and `MustBeEmpty`.
 Handle returned errors to fail the step. `ExecError` carries exit status and
 captured output. `WorkDir()` returns the repository working directory.

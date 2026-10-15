@@ -1,9 +1,33 @@
 package main
 
 import (
+	"errors"
+	"io"
 	"strings"
 	"testing"
 )
+
+func TestProfileCompletionUsesFinalMachineConnections(t *testing.T) {
+	writeProfilesFixture(t, "profiles:\n  zebra: {controller: {url: https://z.example, token: private-credential}}\n  alpha: {controller: {url: https://a.example}}\n")
+	var out strings.Builder
+	if err := runInternalCompleteProfiles(&out, nil); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "alpha\nzebra\n" {
+		t.Fatalf("profile candidates: %q", out.String())
+	}
+	if err := runInternalCompleteProfiles(doctorFailedWriter{}, nil); !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("completion write error: %v", err)
+	}
+}
+
+func TestProfileCompletionRefusesInvalidMachineSettings(t *testing.T) {
+	writeProfilesFixture(t, "profiles:\n  prod: {controller: {url: https://api.example}}\nrunner: {allow_repos: []}\n")
+	var out strings.Builder
+	if err := runInternalCompleteProfiles(&out, nil); err != nil || out.Len() != 0 {
+		t.Fatalf("invalid machine settings produced candidates: %q, %v", out.String(), err)
+	}
+}
 
 func TestShellCompletionUsesLiveProfileFlag(t *testing.T) {
 	tests := []struct {

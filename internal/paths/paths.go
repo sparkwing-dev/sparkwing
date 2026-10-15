@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -191,20 +190,6 @@ func standaloneSchemaOf(entry os.DirEntry) (int, bool) {
 func isRegularFile(path string) bool {
 	info, err := os.Lstat(path)
 	return err == nil && info.Mode().IsRegular()
-}
-
-func (p Paths) ToolchainsDir() string { return filepath.Join(p.Root, "toolchains") }
-
-func (p Paths) ToolchainDir(version string) string {
-	return filepath.Join(p.ToolchainsDir(), version)
-}
-
-func (p Paths) ToolchainBinary(version string) string {
-	name := "sparkwing"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	return filepath.Join(p.ToolchainDir(version), name)
 }
 
 func (p Paths) VersionStampDir() string { return filepath.Join(p.Root, "last-version.d") }

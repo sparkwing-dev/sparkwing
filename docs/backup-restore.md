@@ -29,10 +29,11 @@ restores a controller that starts and still cannot do its job.
 What the state database does not hold, and what a restore therefore
 does not bring back:
 
-- Node log segments, which the controller keeps in its cache bucket or
-  output directory (see [self-hosting](self-hosting.md#node-log-retention)).
-- Node artifacts and caches, which the object store owns.
-- Run checkouts. Each fetches its Git objects from upstream.
+- Tagged job-attempt and owner-unit log segments in the selected storage backend
+  (see [self-hosting](self-hosting.md#node-log-retention)).
+- Artifact, output and dependency-cache bytes in the selected storage backend.
+- Machine-local pipeline binaries, which rebuild from source.
+- Run checkouts, which fetch their own Git objects from upstream.
 
 Back those up on their own schedule, or accept losing them; the
 controller serves run and node records without them.
@@ -222,32 +223,32 @@ restores only under a controller at the old schema.
 Run these after a restore and after an upgrade, against the controller
 you are judging. They are ordered so the first failure is the most
 informative. `--profile` names the profile pointing at that controller;
-register one with `sparkwing cloud connect` when verifying a
+register one with `sparkwing profiles add` when verifying a
 scratch controller on a spare port.
 
 ```bash
 # The controller answers, and the token still authenticates.
-sparkwing cloud status --profile prod
+sparkwing runs list --profile prod --limit 1
 
 # Run history is present, and reaches the most recent run you remember.
 sparkwing runs list --profile prod
 
 # One run still carries its nodes.
-sparkwing runs status <id> -o json --exit-zero --profile prod
+sparkwing runs status --run RUN -o json --exit-zero --profile prod
 
 # Secret rows are present.
 sparkwing secrets list --profile prod
 
 # The secrets key matches the database. This is the check that catches a
 # database restored without its key, and nothing else catches it.
-sparkwing secrets get --profile prod --name <name>
+sparkwing secrets get --profile prod --secret NAME
 
 # Runner and user credentials survived, so runners reconnect without
 # being added again.
-sparkwing cluster tokens list --profile prod
+sparkwing tokens list --profile prod
 
 # Runners have reconnected.
-sparkwing cluster agents list --profile prod
+sparkwing runners list --profile prod
 ```
 
 Sparkwing Cloud operators also verify the restored credit balance and ledger

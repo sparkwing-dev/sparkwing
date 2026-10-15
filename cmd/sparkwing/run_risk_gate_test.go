@@ -405,7 +405,7 @@ func riskWriteFixture(t *testing.T, declaration string) (repoDir, sparkwingDir s
 			"replace github.com/sparkwing-dev/sparkwing => %s\n",
 		riskFixtureModule, offlineRepoRoot(t)))
 	writeFile(t, filepath.Join(sparkwingDir, "sparkwing.yaml"),
-		"pipelines:\n  - name: risky\n    entrypoint: Risky\n    description: Declares a risk on its first step\n")
+		"pipelines:\n  - name: risky\n    entrypoint: risky\n    description: Declares a risk on its first step\n")
 	writeFile(t, filepath.Join(sparkwingDir, "jobs", "jobs.go"), fmt.Sprintf(riskFixtureJobs, declaration))
 	writeFile(t, filepath.Join(sparkwingDir, "main.go"), riskFixtureMain)
 	return repoDir, sparkwingDir
@@ -414,7 +414,6 @@ func riskWriteFixture(t *testing.T, declaration string) (repoDir, sparkwingDir s
 const riskFixtureJobs = `package jobs
 
 import (
-"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"context"
 	"errors"
 	"os"
@@ -457,11 +456,10 @@ func init() {
 const riskFixtureMain = `package main
 
 import (
-"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	_ "riskfixture/jobs"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/runner"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func main() { runner.Main() }
+func main() { sparkwing.Main() }
 `

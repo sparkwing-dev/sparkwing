@@ -62,7 +62,6 @@ import (
  "context"
  "os"
  "github.com/sparkwing-dev/sparkwing/sparkwing"
- "github.com/sparkwing-dev/sparkwing/pkg/runner"
 )
 type Fixture struct { sparkwing.Base }
 func (*Fixture) Plan(_ context.Context, p *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
@@ -71,6 +70,6 @@ func (*Fixture) Plan(_ context.Context, p *sparkwing.Plan, _ sparkwing.NoInputs,
 }
 func main() {
  sparkwing.Register("fixture", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Fixture{} })
- runner.Main()
+ sparkwing.Main()
 }
 `

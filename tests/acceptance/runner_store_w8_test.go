@@ -236,12 +236,12 @@ func TestRunnerStoreLifecycleW8Components(t *testing.T) {
 						t.Error("host input lost its granted execution identity")
 						return
 					}
-					started, err := bound.TransitionJob(ctx, unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "running", Cause: "start"})
+					started, err := bound.TransitionJob(ctx, unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "running", Cause: "start", SourceAttempt: &input.Attempt})
 					if err != nil || started.Attempt != 1 || unit.Binding.Attempt != 0 {
 						t.Errorf("initial start: attempt=%d error=%v", started.Attempt, err)
 						return
 					}
-					if _, err := bound.TransitionJob(ctx, unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "success", Cause: "report", Result: &controllerwire.JobResult{Outcome: "success"}}); err != nil {
+					if _, err := bound.TransitionJob(ctx, unit.RunID, unit.JobID, controllerwire.JobTransitionRequest{To: "success", Cause: "report", SourceAttempt: &started.Attempt, Result: &controllerwire.JobResult{Outcome: "success"}}); err != nil {
 						t.Error(err)
 					}
 				})

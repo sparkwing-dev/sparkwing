@@ -85,7 +85,7 @@ func TestCommandsRefusesAWhitespacePath(t *testing.T) {
 	}
 }
 
-func TestCommandsPointsAtIncludeHiddenWhenOnlyHiddenMatched(t *testing.T) {
+func TestCommandsPointsAtAllWhenOnlyHiddenMatched(t *testing.T) {
 	hidden := ""
 	for _, c := range allCommands {
 		if c.Hidden {
@@ -97,11 +97,11 @@ func TestCommandsPointsAtIncludeHiddenWhenOnlyHiddenMatched(t *testing.T) {
 		t.Skip("no hidden command in the registry")
 	}
 	err := runCommandsQuiet(t, "--path", hidden, "-o", "plain")
-	if err == nil || !strings.Contains(err.Error(), "--include-hidden") {
-		t.Fatalf("--path %q (hidden) = %v, want an error naming --include-hidden", hidden, err)
+	if err == nil || !strings.Contains(err.Error(), "--all") {
+		t.Fatalf("--path %q (hidden) = %v, want an error naming --all", hidden, err)
 	}
-	if err := runCommandsQuiet(t, "--path", hidden, "--include-hidden", "-o", "plain"); err != nil {
-		t.Fatalf("--path %q --include-hidden = %v, want it listed", hidden, err)
+	if err := runCommandsQuiet(t, "--path", hidden, "--all", "-o", "plain"); err != nil {
+		t.Fatalf("--path %q --all = %v, want it listed", hidden, err)
 	}
 }
 

@@ -278,7 +278,7 @@ func TestRunUpdateBinary_Failure_SpawnsNoGo(t *testing.T) {
 	testshell.Install(t, filepath.Join(shimDir, "go"), shim)
 	t.Setenv("PATH", shimDir)
 
-	err := runUpdateBinary("v9.9.9", false, false)
+	_, err := updateBinary("v9.9.9", false, false)
 	if err == nil {
 		t.Fatal("download failure was not terminal")
 	}

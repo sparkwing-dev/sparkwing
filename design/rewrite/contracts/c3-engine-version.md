@@ -50,6 +50,16 @@ engine release. Decision 104 requires native Windows handle-inheritance evidence
 These are integration obligations under decisions 102-104, not a new distribution
 origin, trust root, fallback-age cutoff or support-window expiry refusal.
 
+The CLI dispatches `__sdk-install` through the shared installer above. Local
+execution consumes `ReadPin`, `VersionForPin` and `Resolve` for both SDKs. It
+rechecks policy on every invocation and stops re-executing only when the current
+executable and resolved executable are the same file. Installed version ordering
+and an environment recursion marker cannot bypass that check. Resolver failures
+never select another release. Info reads pin metadata without fetching or
+guessing cache paths. The CLI downloader/cache and duplicate selection helpers
+are removed. Source/host composition and native platform evidence remain
+separate work.
+
 ## Ownership
 
 `internal/engine` owns exact SDK-to-engine selection, release verification,

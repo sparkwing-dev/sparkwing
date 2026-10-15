@@ -16,7 +16,7 @@ Start with the scaffold so the Go registration and YAML catalog entry are
 created together:
 
 ```sh
-sparkwing pipeline new --name deploy --template minimal
+sparkwing pipeline new --pipeline deploy --template minimal
 ```
 
 `sparkwing.Register` connects a name to its Go implementation in the
@@ -189,7 +189,7 @@ shell-injection risk; `Exec`, or `Bash` with `.Env()`, avoids it.
 
 ## Branching on the runtime environment (`plan-runtime-branch`)
 
-`Plan` renders the same DAG wherever it runs, so `explain` and dispatch
+`Plan` renders the same DAG wherever it runs, so plan inspection and dispatch
 agree on the shape. Reading `os.Getenv`, switching on `runtime.GOOS`, or
 calling `IsLocal()` in the body branches the structure on the host that
 happens to read it. Express the condition where it belongs: a job-level
@@ -228,12 +228,10 @@ below).
 
 ## Runner labels (`runner-label`)
 
-The linter rejects blank runner labels on `Requires`, `Prefers`, and
-`WhenRunner`. An empty string is dropped when labels are normalized, so the
+The linter rejects blank runner labels on `Requires` and `Prefers`. An empty string is dropped when labels are normalized, so the
 term vanishes; a whitespace label survives and matches no runner, so the term
 can never be satisfied. An `Inline()` job executes on the dispatcher's host,
-where `Requires` and `Prefers` select no runner; `WhenRunner` still applies
-there, matched against the inline runner.
+where `Requires` and `Prefers` select no runner.
 
 Avoid blank labels and labels on inline jobs:
 
@@ -275,7 +273,7 @@ sparkwing.Job(plan, "deploy", &Deploy{Build: out}).Needs(build)
 
 ## Shared cache across a group (`group-cache-shared`)
 
-`JobGroup.Memoize` applies one key function to every member. A constant
+`JobGroup.Memo` applies one key function to every member. A constant
 key makes every member share one result. Give members doing different
 work distinct keys.
 
@@ -284,8 +282,8 @@ Don't cache the group:
 ```go
 sparkwing.JobFanOut(plan, "matrix", goVersions, func(v string) (string, any) {
     return v, &Test{GoVersion: v}
-}).Memoize(func(ctx context.Context) (sparkwing.CacheKey, error) {
-    return sparkwing.Key("tests"), nil // one key for every Go version
+}).Memo(func(ctx context.Context) (sparkwing.MemoValue, error) {
+    return sparkwing.MemoKey("tests"), nil // one key for every Go version
 })
 ```
 
@@ -297,48 +295,41 @@ matrix := sparkwing.JobFanOut(plan, "matrix", goVersions, func(v string) (string
 })
 for _, member := range matrix.Members() {
     version := member.ID()
-    member.Memoize(func(ctx context.Context) (sparkwing.CacheKey, error) {
-        return sparkwing.Key("tests", version), nil
+    member.Memo(func(ctx context.Context) (sparkwing.MemoValue, error) {
+        return sparkwing.MemoKey("tests", version), nil
     })
 }
 ```
 
-A key callback returns `(CacheKey, error)`. Return errors when inputs
-cannot be read; return `sparkwing.NoCache, nil` to bypass memoization.
+A key callback returns `(MemoValue, error)`. Return errors when inputs
+cannot be read; return `sparkwing.NoMemo, nil` to bypass memoization.
 Errors, panics, empty keys, and resolution deadlines fail before dispatch.
-Use `.CacheDir()` to restore dependency directories before executing a job.
+Use `.Cache()` to restore dependency directories before executing a job.
 
-## Configuring a dynamic fan-out (`dynamic-group-inert`)
+## Configuring generated jobs
 
-`JobFanOutDynamic` builds its members from an upstream job's output, so the
-group is empty while `Plan()` runs. Every `JobGroup` setter applies to the
-members present when it is called, which on a dynamic group is none of them:
-the call compiles, reads as configuration, and is dropped.
-
-Don't configure the group:
+`source.Generate` receives a plan for jobs created after the source completes.
+Apply placement, retry and memo declarations to each generated job inside that
+callback. `NeedsGenerated` waits for the generator's settlement barrier, including
+an empty expansion.
 
 ```go
-shards := sparkwing.Job(plan, "discover", &Discover{})
-sparkwing.JobFanOutDynamic(plan, "bench", shards, func(s Shard) (string, any) {
-    return s.Name, &Bench{Shard: s}
-}).Requires("gpu").Retry(2) // neither reaches a generated job
+source := sparkwing.Job(plan, "discover", &Discover{})
+shards := sparkwing.RefTo[[]Shard](source)
+generated := source.Generate(func(ctx context.Context, expansion *sparkwing.Plan) error {
+    for _, shard := range shards.Get(ctx) {
+        sparkwing.Job(expansion, shard.Name, &Bench{Shard: shard}).
+            Requires("gpu").Retry(2)
+    }
+    return nil
+})
+sparkwing.Job(plan, "finish", func(context.Context) error { return nil }).
+    NeedsGenerated(generated)
 ```
 
-Do configure the jobs the callback returns. `Requires`, `Prefers`, and
-`WhenRunner` have provider interfaces a `Workable` implements, and each
-generated instance can answer from its own data:
-
-```go
-type Bench struct {
-    sparkwing.Base
-    Shard Shard
-}
-
-func (b Bench) Requires() []string { return []string{b.Shard.Runner} }
-```
-
-The group itself stays useful as a dependency target: `Needs(group)` on a
-downstream job waits for every generated member.
+The host validates the complete expansion before accepting it. Each generator
+can declare at most 256 jobs. A failed source settles the barrier without
+executing the callback. See [Generated jobs](sdk.md#generated-jobs).
 
 ## Declarative trigger filters and run guards
 
@@ -347,7 +338,7 @@ The `branches`, `paths`, and `actions` fields under `on.push` and
 named by the webhook URL without reading those fields.
 
 Use a pipeline guard when the policy depends on the branch Sparkwing checks
-out. `require: [git:branch=main]` blocks a run from any other checked-out
+out. `when: [git:branch=main]` blocks a run from any other checked-out
 branch before a step starts. The literal name matches the head branch; it does
 not match a pull request's base branch. `git:branch=default` matches the
 repository's default branch: a GitHub App trigger records it, and any other
@@ -360,11 +351,11 @@ custom pull-request actions, or pull-request base-branch matching;
 ## Unsatisfiable guards (`guard-misuse`)
 
 A pipeline's `guards:` block gates dispatch on where the run is
-dispatched, args, and git branch -- `profile:local` / `profile:controller`,
+dispatched, args, and git branch -- `where:local` / `where:controller`,
 `arg:FLAG=VALUE`, and `git:branch=NAME` /
-`git:branch=default`. `require` blocks the run when not every token
-matches; `reject` blocks it when any token matches. A token in both
-lists or a `require` naming two mutually exclusive profiles prevents
+`git:branch=default`. `when` blocks the run when not every token
+matches; `unless` blocks it when any token matches. A token in both
+lists or a `when` naming two mutually exclusive execution locations prevents
 dispatch. A duplicate token is redundant. The linter reports both kinds
 of defect. The
 `default` token matches only when the dispatch supplies default-branch
@@ -379,8 +370,8 @@ pipelines:
   - name: deploy
     entrypoint: Deploy
     guards:
-      require: [profile:local, profile:controller] # mutually exclusive
-      reject:  [profile:controller]                # also rejected -> contradiction
+      when: [where:local, where:controller] # mutually exclusive
+      unless:  [where:controller]                # also rejected -> contradiction
 ```
 
 Do pick tokens that can be satisfied together:
@@ -391,15 +382,15 @@ pipelines:
   - name: deploy
     entrypoint: Deploy
     guards:
-      require: [profile:controller]  # run only against a controller profile
-      reject:  [git:branch=main]     # never from the checked-out main branch
+      when: [where:controller]  # run only on a controller
+      unless:  [git:branch=main]     # never from the checked-out main branch
 ```
 
 ## Running the linter
 
 ```
-sparkwing pipeline lint --all            # every pipeline in the repo
-sparkwing pipeline lint --name deploy    # one pipeline by name
+sparkwing pipeline lint            # every pipeline in the repo
+sparkwing pipeline lint --pipeline deploy    # one pipeline by name
 sparkwing pipeline lint --rules          # print the rule charters
 ```
 

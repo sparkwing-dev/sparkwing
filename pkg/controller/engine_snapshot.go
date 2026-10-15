@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -48,9 +47,6 @@ func (s *EngineController) Snapshot(ctx context.Context, authorized capability.A
 }
 
 func schedulingResponse(snapshot store.RunSnapshot, graph store.ScheduleSnapshot) (controllerwire.ScheduleSnapshot, error) {
-	if graph.GuardRefusal != "" && !graph.CancelRequested {
-		return controllerwire.ScheduleSnapshot{}, &apierr.Error{Code: apierr.Unavailable, Message: "schedule transport cannot represent the sealed guard refusal"}
-	}
 	expansions, err := snapshotExpansions(snapshot)
 	if err != nil {
 		return controllerwire.ScheduleSnapshot{}, err
@@ -66,7 +62,7 @@ func schedulingResponse(snapshot store.RunSnapshot, graph store.ScheduleSnapshot
 		nodes[node.Ref.NodeID] = node
 	}
 	out := controllerwire.ScheduleSnapshot{
-		RunID: snapshot.Run.ID, StoreNow: snapshot.StoreNow, CancelRequested: graph.CancelRequested,
+		RunID: snapshot.Run.ID, StoreNow: snapshot.StoreNow, CancelRequested: graph.CancelRequested, GuardRefusal: graph.GuardRefusal,
 		Jobs: make([]controllerwire.ScheduleJob, 0, len(graph.Nodes)), Generators: make([]controllerwire.ScheduleGenerator, 0, len(graph.Expansions)),
 		Expansions: expansions,
 	}

@@ -18,8 +18,8 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/engine/npmcmd"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -228,7 +228,7 @@ func (r *Resolver) nativeCommand(ctx context.Context, dir, name string, args ...
 	command := exec.Command(name, args...)
 	if name == "npm" {
 		var err error
-		command, err = npmcmd.Command(args...)
+		command, err = pipelineentry.NPMCommand(ctx, runtime.GOOS, exec.LookPath, args...)
 		if err != nil {
 			return fmt.Errorf("resolve npm: %w", err)
 		}

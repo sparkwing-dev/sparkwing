@@ -6,46 +6,32 @@ Every `sparkwing commands` command, flag, and argument, generated from the CLI's
 
 ## `sparkwing commands`
 
-Index of every command: one path and synopsis per line
+Search the command index or export the CLI reference
 
-Search command paths and synopses with --query; every word must match.
---path narrows to a subtree, with or without the leading sparkwing.
-Results are lexical, at most 40 by default. JSON ends with a kind:page
-record reporting total, returned, truncated and next_cursor. Continue
-with --cursor and the same filters, or --limit 0 for every match.
-
-Rows carry path, synopsis and full-tree subcommand_count. Read a selected
-command with <path> --help. Hidden commands require --include-hidden.
-Plain prints paths only, with continuation on stderr.
-
---format markdown exports the full reference and rejects query/pagination
-flags. --split-dir writes generated files.
+Search command paths and summaries. Lists return bounded pages and a next_cursor when more matches exist. Markdown export includes the full selected command tree.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `-q, --query TEXT` | Match every word against paths and synopses |
-| `--limit N` | Maximum records; 0 returns every remaining match (default: 40) |
-| `--cursor CURSOR` | Continue after next_cursor with the same filters and binary version |
-| `--format markdown` | Export the full command reference as Markdown |
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
-| `--split-dir DIR` | With --format markdown: write one page per top-level command group into DIR (plus a cli-reference.md index), pruning stale generated pages |
-| `--path PREFIX` | Only emit commands at or under PREFIX, matched by whole path components, with or without the leading 'sparkwing' (runs, sparkwing runs, runs list, and similar paths); a prefix matching nothing is an error |
-| `--include-hidden` | Also emit Hidden:true commands (default: skip) |
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--search TEXT` | Match records; never scan log text. |
+| `--limit N` | Pagination count at least one, continued with --cursor; zero is invalid. |
+| `--cursor CURSOR` | Continue from next_cursor using the same filters. |
+| `--format markdown` | Artifact format; markdown exports the full command reference. |
+| `--split-dir DIR` | Directory for one generated Markdown page per command family. |
+| `--path PREFIX` | Command path prefix, with or without the sparkwing binary name. |
+| `--all` | Include entries normally hidden. |
 
 ### Examples
 
 ```sh
 # Find status commands
-sparkwing commands --query status
+sparkwing commands --search status
 
-# Just the pipelines subtree
-sparkwing commands --path pipeline
-
-# The same subtree, fully qualified
-sparkwing commands --path "sparkwing pipeline"
-
-# All paths, one per line
-sparkwing commands --limit 0 -o plain
+# Export the reference
+sparkwing commands --format markdown --output plain
 ```

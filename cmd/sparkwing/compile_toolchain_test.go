@@ -87,7 +87,7 @@ while [ $# -gt 0 ]; do
   shift
   cat > "$1" <<'PIPELINE'
 #!/bin/sh
-if [ "$1" = --sw-node-protocol ]; then read -r _ <&3; printf '{"reply":"1","ok":true,"result":{"protocol":"1","pipelines":[]}}\n' >&4; exit 0; fi
+if [ "$1" = --sw-node-protocol ]; then read -r _ <&3; printf '{"reply":"1","ok":true,"result":{"protocol":2,"sdk":{"language":"go","version":"fixture"},"features":[]}}\n' >&4; read -r _ <&3; printf '{"reply":"2","ok":true,"result":{"pipelines":[]}}\n' >&4; exit 0; fi
 PIPELINE
   chmod +x "$1"
   exit 0

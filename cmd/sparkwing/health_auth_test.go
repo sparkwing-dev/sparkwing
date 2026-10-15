@@ -1,38 +1,29 @@
 package main
 
 import (
-	"context"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/discovery"
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
-func healthProfile(url string) *profile.Profile {
-	return &profile.Profile{
-		Name:       "test",
-		Controller: &profile.ControllerSpec{URL: url},
-	}
+func healthProfile(url string) *namedProfile {
+	return connectionFixture("health", url, "")
 }
 
-func healthServer(t *testing.T, authField string) *httptest.Server {
+func mockControllerHealth(t *testing.T, authField string) {
 	t.Helper()
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/health", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok","auth":"` + authField + `"}`))
+	profileHTTPFixture(t, func(req *http.Request) (int, string) {
+		if req.Method != "GET" || req.URL.Path != "/api/v1/health" || req.Header.Get("Authorization") != "" {
+			t.Fatalf("health request: %s %s", req.Method, req.URL)
+		}
+		return 200, `{"status":"ok","auth":"` + authField + `"}`
 	})
-	return httptest.NewServer(mux)
 }
 
 func TestProbeController_WarnsWhenAuthDisabled(t *testing.T) {
-	srv := healthServer(t, "disabled")
-	defer srv.Close()
+	mockControllerHealth(t, "disabled")
 
-	r := probeController(context.Background(), healthProfile(srv.URL))
+	r := probeController(t.Context(), healthProfile("https://controller.example"))
 	if r.Status != "warn" {
 		t.Fatalf("status=%q want warn", r.Status)
 	}
@@ -42,30 +33,10 @@ func TestProbeController_WarnsWhenAuthDisabled(t *testing.T) {
 }
 
 func TestProbeController_OKWhenAuthEnabled(t *testing.T) {
-	srv := healthServer(t, "enabled")
-	defer srv.Close()
+	mockControllerHealth(t, "enabled")
 
-	r := probeController(context.Background(), healthProfile(srv.URL))
+	r := probeController(t.Context(), healthProfile("https://controller.example"))
 	if r.Status != "ok" {
 		t.Fatalf("status=%q want ok (detail=%q)", r.Status, r.Detail)
 	}
-}
-
-func logsProbeProfile(t *testing.T, logsAuth string) *profile.Profile {
-	t.Helper()
-	logs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok","auth":"` + logsAuth + `"}`))
-	}))
-	t.Cleanup(logs.Close)
-
-	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"logs":"` + logs.URL + `"}`))
-	}))
-	t.Cleanup(controller.Close)
-
-	discovery.ResetCache()
-	t.Cleanup(discovery.ResetCache)
-	return healthProfile(controller.URL)
 }

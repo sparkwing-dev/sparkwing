@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engineenv"
@@ -125,12 +126,10 @@ func TypeScript(sparkwingDir string) (Command, error) {
 // InstallTypeScript runs npm ci in sparkwingDir with env, less the engine's
 // own variables, writing npm's output to out.
 func InstallTypeScript(ctx context.Context, sparkwingDir string, env []string, out io.Writer) error {
-	npm, err := exec.LookPath("npm")
+	cmd, err := NPMCommand(ctx, runtime.GOOS, exec.LookPath, "ci", "--no-audit", "--no-fund")
 	if err != nil {
 		return fmt.Errorf("install the TypeScript pipeline's dependencies: %w", err)
 	}
-	// #nosec G204 -- npm from PATH with fixed arguments.
-	cmd := exec.CommandContext(ctx, npm, "ci", "--no-audit", "--no-fund")
 	cmd.Dir, cmd.Env = sparkwingDir, engineenv.Strip(env)
 	cmd.Stdout, cmd.Stderr = out, out
 	if err := cmd.Run(); err != nil {

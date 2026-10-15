@@ -17,8 +17,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"github.com/sparkwing-dev/sparkwing/internal/engine/npmcmd"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
+	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
@@ -153,7 +153,7 @@ func installTool(ctx context.Context, dir string, environment []string, name str
 	command := exec.Command(name, args...)
 	if name == "npm" {
 		var err error
-		command, err = npmcmd.Command(args...)
+		command, err = pipelineentry.NPMCommand(ctx, runtime.GOOS, exec.LookPath, args...)
 		if err != nil {
 			return nil, fmt.Errorf("resolve npm: %w", err)
 		}
