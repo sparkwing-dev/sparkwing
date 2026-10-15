@@ -213,7 +213,6 @@ var sparkwingCollectors = []prometheus.Collector{
 	liveRunnersGauge,
 	requestsByPrincipalTotal,
 	objectStoreCollector{},
-	hashingBudgetCollector{},
 	creditsCollector{},
 	nodeSecondsCollector{},
 	egress.NewCollector(publishedEgress.Load),
@@ -278,8 +277,11 @@ func (s *Server) metricsServer() *http.Server {
 	if s.metricsAddr == "" {
 		return nil
 	}
-	metricsMux := http.NewServeMux()
-	metricsMux.Handle("GET /metrics", metricsHandler())
+	metricsMux := newRegisteredMux()
+	s.registerControllerEndpoints(metricsMux, []Endpoint{metricsEndpoint()})
+	metricsMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		writeRouteMiss(w, allowedRouteMethods(metricsMux.ServeMux, r, routeProbeMethods))
+	})
 	return &http.Server{
 		Addr:              s.metricsAddr,
 		Handler:           metricsMux,
@@ -333,9 +335,6 @@ func setQueueDepth(counts map[string]int) {
 	}
 }
 
-// safety: a label-mismatched claim bumps ready_at while placement_hold_from
-// survives it, so the hold instant is the one that still says when the node
-// became claimable.
 func observeClaimWait(n *store.Node) {
 	if n == nil || n.ClaimGeneration > 1 {
 		return
@@ -605,23 +604,6 @@ func collectCeiling(ch chan<- prometheus.Metric, c objectguard.CeilingState) {
 		incomplete = 1
 	}
 	ch <- prometheus.MustNewConstMetric(objectStoreCeilingIncompleteDesc, prometheus.GaugeValue, incomplete)
-}
-
-var authHashingRejectedDesc = prometheus.NewDesc(
-	"sparkwing_auth_hashing_rejected_total",
-	"Credential verifications the argon2id memory budget shed rather than queued, answered 503 with a Retry-After.",
-	nil, nil,
-)
-
-// safety: read at scrape time from the store's own counter, so the budget stays the one place that knows what it shed.
-type hashingBudgetCollector struct{}
-
-func (hashingBudgetCollector) Describe(ch chan<- *prometheus.Desc) {
-	ch <- authHashingRejectedDesc
-}
-
-func (hashingBudgetCollector) Collect(ch chan<- prometheus.Metric) {
-	ch <- prometheus.MustNewConstMetric(authHashingRejectedDesc, prometheus.CounterValue, float64(store.Argon2Shed()))
 }
 
 var (

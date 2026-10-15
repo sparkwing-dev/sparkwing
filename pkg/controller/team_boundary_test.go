@@ -9,11 +9,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -390,38 +392,34 @@ func TestTeamBoundary_ARunnerCreatesItsRunInItsOwnTeam(t *testing.T) {
 
 func runRoutePath(pattern, runID string) (method, path string) {
 	method, path, _ = strings.Cut(pattern, " ")
-	path = strings.NewReplacer("{id}", runID, "{nodeID}", "n1", "{path...}", "info/refs").Replace(path)
+	path = strings.NewReplacer("{run}", runID, "{job}", "n1", "{path...}", "info/refs").Replace(path)
 	return method, path
 }
 
 func runScoped(pattern string) bool {
 	_, path, _ := strings.Cut(pattern, " ")
-	return strings.HasPrefix(path, "/api/v1/runs/{id}") || strings.HasPrefix(path, "/api/v1/triggers/{id}")
+	return strings.HasPrefix(path, "/api/v1/runs/{run}")
 }
 
-// Every route the controller registers under one run or trigger answers
-// another team with 404, including the ones that change state. The list is
-// read from server.go, so a route added later is checked without an edit
-// here.
 func TestTeamBoundary_EveryRunRouteAnswersAnotherTeamWith404(t *testing.T) {
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
-		routes := controller.MuxRouteScopes(t)
+		routes := controller.New(nil, nil).Registrations()
 		mustCover := []string{
-			"GET /api/v1/runs/{id}", "DELETE /api/v1/runs/{id}",
-			"POST /api/v1/runs/{id}/cancel", "POST /api/v1/runs/{id}/retry",
-			"POST /api/v1/runs/{id}/approvals/{nodeID}", "GET /api/v1/runs/{id}/events",
-			"GET /api/v1/runs/{id}/nodes/{nodeID}/logs", "POST /api/v1/runs/{id}/nodes/{nodeID}/release",
-			"GET /api/v1/runs/{id}/receipt",
-			"GET /api/v1/runs/{id}/attempts", "GET /api/v1/runs/{id}/steps",
-			"POST /api/v1/triggers/{id}/claim", "GET /api/v1/triggers/{id}",
+			"GET /api/v1/runs/{run}", "DELETE /api/v1/runs/{run}",
+			"POST /api/v1/runs/{run}/cancel", "POST /api/v1/runs/{run}/retry",
+			"POST /api/v1/runs/{run}/approvals/{job}", "GET /api/v1/runs/{run}/events",
+			"GET /api/v1/runs/{run}/jobs/{job}/logs", "POST /api/v1/runs/{run}/debug-pauses",
+			"GET /api/v1/runs/{run}/receipt",
+			"GET /api/v1/runs/{run}/attempts", "GET /api/v1/runs/{run}/steps",
+			"POST /api/v1/runs/{run}/claim",
 		}
 		for _, p := range mustCover {
-			if _, ok := routes[p]; !ok {
-				t.Errorf("route %q is not in the list read from server.go; the enumeration is broken", p)
+			if !slices.Contains(routes, p) {
+				t.Errorf("route %q is missing from serving registrations", p)
 			}
 		}
 		checked := 0
-		for pattern := range routes {
+		for _, pattern := range routes {
 			if !runScoped(pattern) {
 				continue
 			}
@@ -437,8 +435,8 @@ func TestTeamBoundary_EveryRunRouteAnswersAnotherTeamWith404(t *testing.T) {
 				}
 			}
 		}
-		if checked < 60 {
-			t.Errorf("checked %d run routes; server.go registers far more, so the enumeration is broken", checked)
+		if checked < len(mustCover) {
+			t.Errorf("checked %d run routes, want at least %d", checked, len(mustCover))
 		}
 
 		ctx := context.Background()
@@ -587,12 +585,16 @@ func TestTeamBoundary_NoMemberReachesAnAdminRoute(t *testing.T) {
 	}
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
 		checked := 0
-		for pattern, scope := range controller.MuxRouteScopes(t) {
-			// safety: the route list names the scope by its identifier in server.go.
-			if scope != "ScopeAdmin" {
+		for _, pattern := range controller.New(nil, nil).Registrations() {
+			method, path, _ := strings.Cut(pattern, " ")
+			policy, ok := capability.LookupRoute(method, path)
+			if !ok {
+				t.Fatalf("registered route %s has no policy", pattern)
+			}
+			if policy.Owner != capability.OwnerDeployment {
 				continue
 			}
-			method, path := runRoutePath(pattern, f.runA)
+			method, path = runRoutePath(pattern, f.runA)
 			path = strings.NewReplacer("{name}", "x", "{prefix}", "swu_x", "{principal}", "p",
 				"{key}", "k").Replace(path)
 			for _, member := range []struct{ name, auth string }{

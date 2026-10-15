@@ -454,15 +454,17 @@ func TestParseControllerBusinessRegistrations(t *testing.T) {
 		"POST /api/v1/team/billing/pay":                               false,
 		"PUT /api/v1/team/billing/budget":                             false,
 
-		"GET /api/v1/schedules":                   false,
-		"DELETE /api/v1/schedules/{schedule}":     false,
-		"POST /api/v1/schedules/{schedule}/run":   false,
-		"GET /api/v1/team/billing":                false,
-		"POST /api/v1/runs/{run}/approvals/{job}": false,
-		"POST /api/v1/runs/{run}/debug-pauses":    false,
-		"GET /metrics":                            false,
-		"GET /api/v1/runners":                     false,
-		"POST /api/v1/runners":                    false,
+		"GET /api/v1/schedules":                      false,
+		"DELETE /api/v1/schedules/{schedule}":        false,
+		"POST /api/v1/schedules/{schedule}/run":      false,
+		"GET /api/v1/team/billing":                   false,
+		"POST /api/v1/runs/{run}/approvals/{job}":    false,
+		"POST /api/v1/runs/{run}/debug-pauses":       false,
+		"GET /metrics":                               false,
+		"GET /api/v1/runners":                        false,
+		"POST /api/v1/runners":                       false,
+		"POST /api/v1/runs/{run}/jobs/{job}/metrics": false,
+		"POST /api/v1/runs/{run}/jobs/{job}/usage":   false,
 	}
 	for _, route := range routes {
 		key := route.Method + " " + route.Path

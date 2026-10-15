@@ -537,14 +537,23 @@ export async function triggerRun(
   args?: Record<string, string>,
   git?: TriggerGit,
 ): Promise<{ run_id: string } | null> {
-  const res = await authFetch(`${API_URL}/api/v1/triggers`, {
+  const res = await authFetch(`${API_URL}/api/v1/runs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      pipeline,
-      args: args || {},
-      trigger: { source: "dashboard" },
-      ...(git ? { git } : {}),
+      idempotency_key: crypto.randomUUID(),
+      request: {
+        version: 1,
+        pipeline,
+        mode: "execute",
+        origin: "trigger",
+        dispatch: "host",
+        requested_args: args || {},
+        ...(git ? {
+          git: { repository: { display: git.repo_url }, ref: git.branch },
+          source: { ref: git.repo_url },
+        } : {}),
+      },
     }),
   });
   if (!res.ok) {
@@ -557,6 +566,8 @@ export async function triggerRun(
 export async function cancelRun(runID: string): Promise<void> {
   const res = await authFetch(`${API_URL}/api/v1/runs/${pathSegment(runID)}/cancel`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason: "user_cancelled" }),
   });
   if (!res.ok && res.status !== 204) {
     throw new Error(`cancel failed: ${res.status}`);
@@ -710,10 +721,10 @@ export async function getNodeMetrics(
     const qs = new URLSearchParams({ limit: String(METRIC_PAGE) });
     if (cursor) qs.set("cursor", cursor);
     const res = await authFetch(
-      `${API_URL}/api/v1/runs/${pathSegment(runID)}/nodes/${pathSegment(nodeID)}/metrics?${qs}`,
+      `${API_URL}/api/v1/runs/${pathSegment(runID)}/jobs/${pathSegment(nodeID)}/metrics?${qs}`,
       { cache: "no-store" },
-    ).catch(() => null);
-    if (!res || !res.ok) return { points };
+    );
+    if (!res.ok) throw new Error(`metrics failed: ${res.status}`);
     const page: NodeMetrics & { next_cursor?: string } = await res.json();
     points.push(...(page.points ?? []));
     if (!page.next_cursor || page.next_cursor === cursor) return { points };
@@ -725,11 +736,12 @@ export async function retryRun(
   runID: string,
   opts?: { full?: boolean },
 ): Promise<Run | null> {
-  const qs = opts?.full ? "?full=1" : "";
-  const res = await authFetch(`${API_URL}/api/v1/runs/${pathSegment(runID)}/retry${qs}`, {
+  const res = await authFetch(`${API_URL}/api/v1/runs/${pathSegment(runID)}/retry`, {
     method: "POST",
-  }).catch(() => null);
-  if (!res || !res.ok) return null;
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ idempotency_key: crypto.randomUUID(), mode: opts?.full ? "all" : "failed" }),
+  });
+  if (!res.ok) throw new Error(`retry failed: ${res.status}`);
   return res.json();
 }
 
@@ -745,10 +757,10 @@ export interface PauseState {
 }
 
 export async function getPaused(runID: string): Promise<PauseState[]> {
-  const res = await authFetch(`${API_URL}/api/v1/runs/${pathSegment(runID)}/paused`, {
+  const res = await authFetch(`${API_URL}/api/v1/runs/${pathSegment(runID)}/debug-pauses`, {
     cache: "no-store",
-  }).catch(() => null);
-  if (!res || !res.ok) return [];
+  });
+  if (!res.ok) throw new Error(`debug pauses failed: ${res.status}`);
   return res.json();
 }
 
@@ -813,8 +825,12 @@ export async function releaseNode(
   nodeID: string,
 ): Promise<void> {
   const res = await authFetch(
-    `${API_URL}/api/v1/runs/${pathSegment(runID)}/nodes/${pathSegment(nodeID)}/release`,
-    { method: "POST" },
+    `${API_URL}/api/v1/runs/${pathSegment(runID)}/jobs/${pathSegment(nodeID)}/resume`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    },
   );
   if (!res.ok && res.status !== 204) {
     throw new Error(`release failed: ${res.status}`);

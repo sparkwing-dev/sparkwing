@@ -20,13 +20,21 @@ func (s *Server) teamReadEndpoints() []Endpoint {
 		{Method: "GET", Pattern: "/api/v1/storage", Decode: authorityTarget, Handle: s.handleStorageShow},
 	}
 	if s.metricsAddr == "" {
-		endpoints = append(endpoints, Endpoint{Method: "GET", Pattern: "/metrics", Decode: authorityTarget, Handle: func(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
-			metricsHandler().ServeHTTP(w, r)
-			return nil
-		}})
+		endpoints = append(endpoints, metricsEndpoint())
 	}
 	for i := range endpoints {
 		endpoints[i].Authentication = capability.AuthCapability
 	}
 	return endpoints
+}
+
+func metricsEndpoint() Endpoint {
+	return Endpoint{
+		Method: "GET", Pattern: "/metrics", Authentication: capability.AuthCapability,
+		Decode: authorityTarget,
+		Handle: func(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
+			metricsHandler().ServeHTTP(w, r)
+			return nil
+		},
+	}
 }

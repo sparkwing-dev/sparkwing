@@ -32,23 +32,15 @@ const cronTickLeaseTTL = 90 * time.Second
 // suffix, because pipelines branch on it.
 const cronTriggerSource = "schedule"
 
-// safety: the store prunes a schedule's history to 200, so serving that many is
-// serving all of it; `crons show --fires N` truncates the page it is given, and
-// a smaller number here would silently cap N.
 const cronDetailFires = 200
 
 const cronDetailUpcoming = 5
 
-// safety: a scheduled launch writes what an HTTP submission writes, so the
-// cluster claims, clones and executes it by exactly the same machinery.
 type cronLauncher struct {
 	server *Server
 }
 
-// Launch records the trigger, the pending run and the dispatch for one due
-// instant, in the team that armed the schedule. The idempotency key is the
-// schedule and the instant, so a second tick that resolves the same minute
-// reaches the first run instead of starting a second.
+// Launch records one run for a due schedule instant.
 func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time.Time) (string, error) {
 	repoURL, err := sourceurl.ValidateCloneURL(s.RepoPath)
 	if err != nil {
@@ -110,18 +102,9 @@ func (l cronLauncher) Active(ctx context.Context, sched store.CronSchedule, runI
 	case "running":
 		return true, nil
 	case "pending":
-		return time.Since(cronRunQueuedAt(run)) <= staleAfter, nil
+		return time.Since(run.CreatedAt) <= staleAfter, nil
 	}
 	return false, nil
-}
-
-// safety: CreatedAt is the intake stamp; StartedAt is all a row written before
-// that column has.
-func cronRunQueuedAt(run *store.Run) time.Time {
-	if !run.CreatedAt.IsZero() {
-		return run.CreatedAt
-	}
-	return run.StartedAt
 }
 
 // CronIdempotencyKey is the deduplication token a scheduled launch carries: the

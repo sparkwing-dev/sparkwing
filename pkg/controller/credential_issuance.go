@@ -49,7 +49,7 @@ func (s *Server) handleIssueCredential(w http.ResponseWriter, r *http.Request, a
 	p := a.Principal
 	var issued capability.Issued
 	var err error
-	if p.Class == capability.CredentialSession {
+	if p.DirectAccountSession() {
 		issued, err = s.credentialIssuer.ProvisionCapability(r.Context(), capability.ProvisionSpec{
 			Kind: capability.ProvisionMember, Authority: &p.Authority, Subject: p.Capability.Subject,
 			Team: a.Target.Team, Grants: request.Grants, Binding: capability.Binding{Kind: capability.BindingNone}, ExpiresAt: request.ExpiresAt,
@@ -66,8 +66,10 @@ func (s *Server) handleIssueCredential(w http.ResponseWriter, r *http.Request, a
 	if err != nil {
 		return engineLookupError(err)
 	}
-	writeJSON(w, http.StatusCreated, credentialResponse{Capability: issued.Raw, Prefix: issued.Capability.Prefix,
-		Team: issued.Capability.Team, Grants: append([]capability.Grant{}, issued.Capability.Grants...), ExpiresAt: issued.Capability.ExpiresAt})
+	writeJSON(w, http.StatusCreated, credentialResponse{
+		Capability: issued.Raw, Prefix: issued.Capability.Prefix,
+		Team: issued.Capability.Team, Grants: append([]capability.Grant{}, issued.Capability.Grants...), ExpiresAt: issued.Capability.ExpiresAt,
+	})
 	return nil
 }
 

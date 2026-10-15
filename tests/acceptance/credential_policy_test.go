@@ -146,6 +146,7 @@ func policyFixture(credential, binding, audience string, grants []capability.Gra
 		}
 	case "account_session":
 		p.Class = capability.CredentialSession
+		p.Authority.Kind = capability.AuthoritySession
 	case "launcher_service":
 		p.Capability.Subject.Kind = capability.SubjectService
 	case "deployment_admin":

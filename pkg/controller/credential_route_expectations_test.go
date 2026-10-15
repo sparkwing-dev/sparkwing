@@ -1,4 +1,4 @@
-package controller
+package controller_test
 
 type credentialRouteExpectation struct {
 	Method, Path, Audience, Owner, Authentication string

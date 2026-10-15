@@ -452,14 +452,11 @@ additionally export traces and structured logs via OTLP.
 
 Always active on every service; scrape it with your Prometheus.
 
-On its API listener the controller serves `/metrics` only to an `admin`
-bearer when authentication is on, because the run counters name every
-team's pipelines; with authentication off it serves it to anyone.
+The controller serves `/metrics` to a deployment bearer with `operator.limits`
+or an authorized operator-console session, because the run counters name every
+team's pipelines. The same policy applies on either listener.
 `sparkwing-controller --metrics-addr 127.0.0.1:9090` moves the endpoint onto its own listener,
-which serves it without a bearer, so bind it to a pod-local or
-cluster-internal address and leave it out of the ingress. The API
-listener then answers `401` for `/metrics` when authentication is on,
-and `404` when it is off. In `sparkwing-full`,
+and the API listener then answers `404` for `/metrics`. In `sparkwing-full`,
 `controller.metricsPort` passes that flag and exposes the port on the
 controller container only; the controller Service does not publish it,
 so an in-cluster scraper reaches it by pod address. The controller
@@ -500,7 +497,6 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_object_store_bucket_ceiling_freezes_total` | Counter | (none) | Times the bucket crossed its ceiling and began refusing object writes |
 | `sparkwing_object_store_bucket_ceiling_refused_total` | Counter | (none) | Object writes the ceiling refused |
 | `sparkwing_object_store_bucket_ceiling_measurement_incomplete` | Gauge | (none) | 1 while the last measurement stopped early and was discarded |
-| `sparkwing_auth_hashing_rejected_total` | Counter | (none) | Credential verifications the argon2id memory budget shed rather than queued, answered `503` with a `Retry-After` |
 | `sparkwing_principal_throttled_total` | Counter | `route_class` | Requests a request budget refused with `429` (`claim`, `heartbeat`, `idle_poll`, `token`) |
 | `sparkwing_request_rate_alarm_total` | Counter | (none) | Minutes in which the controller served more requests than `--requests-per-minute-alarm`; it refuses nothing |
 | `sparkwing_egress_day_bytes` | Gauge | (none) | Bytes the process has sent to clients in the current UTC day |

@@ -173,9 +173,6 @@ func (s *EngineController) intakeTarget(r *http.Request) (capability.RequestEvid
 		Team: body.Request.Team, BodyRunID: body.Request.Lineage.ParentRunID,
 		RunID: body.Request.Lineage.ParentRunID, NodeID: body.Request.Lineage.ParentJobID,
 	}
-	if target.Team == "" {
-		return capability.RequestEvidence{}, invalidEngineBody("request.team is required")
-	}
 	return capability.RequestEvidence{Target: target}, nil
 }
 

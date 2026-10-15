@@ -174,3 +174,55 @@ func TestPaymentProviderRefusals(t *testing.T) {
 		})
 	}
 }
+
+func TestPaymentProviderRequiresFinancialEvidenceProperty(t *testing.T) {
+	for _, kind := range []string{"payment_intent.succeeded", "radar.early_fraud_warning.created", "radar.early_fraud_warning.updated", "charge.dispute.created", "charge.dispute.closed"} {
+		t.Run(kind, func(t *testing.T) {
+			property := func(metadata string, shape uint8) bool {
+				v, _ := providerVerifier(t, PaymentTest)
+				var object map[string]any
+				if err := json.Unmarshal([]byte(financialObjects(PaymentTest)[kind]), &object); err != nil {
+					t.Fatal(err)
+				}
+				object["metadata"] = map[string]any{"fingerprint": metadata, "reason": metadata}
+				if strings.HasPrefix(kind, "charge.dispute.") {
+					switch shape % 3 {
+					case 0:
+						delete(object, "reason")
+					case 1:
+						object["reason"] = nil
+					case 2:
+						object["reason"] = ""
+					}
+				} else {
+					v.provider.client.Transport = paymentTransport(func(*http.Request) (*http.Response, error) {
+						charge := map[string]any{"id": "ch_paid", "object": "charge", "livemode": false, "payment_intent": "pi_paid", "metadata": map[string]any{"fingerprint": metadata}}
+						switch shape % 4 {
+						case 0:
+							charge["payment_method_details"] = nil
+						case 1:
+							charge["payment_method_details"] = map[string]any{"card": nil}
+						case 2:
+							charge["payment_method_details"] = map[string]any{"card": map[string]any{"fingerprint": ""}}
+						}
+						body, err := json.Marshal(charge)
+						if err != nil {
+							t.Fatal(err)
+						}
+						return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
+					})
+				}
+				encoded, err := json.Marshal(object)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body := verifiedProviderBody(PaymentTest, kind, string(encoded))
+				proof, err := v.VerifyPaymentEvent(t.Context(), PaymentPresentation{Body: body, Signature: paymentSignature(body, string(v.secret), v.now())})
+				return err != nil && proof == nil
+			}
+			if err := quick.Check(property, &quick.Config{MaxCount: 40}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

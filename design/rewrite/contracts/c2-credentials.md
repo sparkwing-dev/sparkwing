@@ -2874,3 +2874,22 @@ deleted. The port inventory records the test mappings. W2's snapshot tests use
 real member credential issuance/authentication and a fake reader. Claim attention
 and accepted-poll observations use real SQLite. No native cell or production
 ReadRunners adapter is claimed by these component checks.
+
+## Account-session origin and effective lifetime
+
+`Principal.DirectAccountSession()` identifies an authenticated account session
+whose committed ancestry has no capability parent. `CredentialAccount` uses
+this predicate for owner consent and account-authentication operations. Changing
+a bearer into a session preserves its capability parent. That session may
+continue using its grants but cannot establish independent account consent.
+
+`POST /api/v1/tokens` provisions a member root only for a direct account
+session. Bearers and capability-derived sessions delegate from their current
+tagged authority. `ValidateAuthority` returns the shortest expiry, revocation
+grace deadline or binding deadline in the complete live ancestry as the leaf's
+effective expiry. Omitted delegation expiry inherits that ceiling.
+
+W1 must use the same origin predicate in `checkMemberProvision` and
+`SetSourceMachineConsent` after resolving authority inside the committing
+transaction. The controller checks do not replace those store gates. The
+native bypass reproduction is preserved in `W2-review-reproductions.patch`.

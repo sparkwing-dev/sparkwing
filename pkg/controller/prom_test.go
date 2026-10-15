@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
@@ -293,7 +294,14 @@ func TestMetricsAddr_MovesMetricsOffTheAPIListener(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = metricsLn.Close() })
 	metricsAddr := metricsLn.Addr().String()
-	srv := controller.New(st, nil).WithMetricsListener(metricsLn)
+	var order []string
+	principal := capability.Principal{Class: capability.CredentialBearer, Capability: capability.Capability{
+		Audience: capability.Controller, Subject: capability.Subject{Kind: capability.SubjectOperator, ID: "operator"},
+		Grants: []capability.Grant{capability.OperatorLimits}, Binding: capability.Binding{Kind: capability.BindingNone},
+	}}
+	srv := controller.New(st, nil).WithMetricsListener(metricsLn).WithAuthorization(controller.RouteAuthorization{
+		Authenticator: policyAuth{principal: principal, order: &order}, Bindings: policyBindings{order: &order},
+	})
 
 	api := httptest.NewServer(srv.Handler())
 	t.Cleanup(api.Close)
@@ -321,6 +329,7 @@ func TestMetricsAddr_MovesMetricsOffTheAPIListener(t *testing.T) {
 	if rerr != nil {
 		t.Fatal(rerr)
 	}
+	req.Header.Set("Authorization", "Bearer operator")
 	metrics, gerr := http.DefaultClient.Do(req)
 	if gerr != nil {
 		t.Fatalf("metrics listener never answered: %v", gerr)

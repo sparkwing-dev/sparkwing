@@ -63,7 +63,7 @@ func (s *Server) WithDashboard(d Dashboard) *Server {
 func (s *Server) browserHandler(api http.Handler) http.Handler {
 	d := s.dashboard
 	pages := web.Pages(d.Bundle)
-	browser := http.NewServeMux()
+	browser := newRegisteredMux()
 	// safety: the page reaches the API on its own origin with its session cookie or the local serve token, so no
 	// credential rides this script.
 	browser.Handle("GET /sparkwing-runtime.js", web.RuntimeConfig(d.Version, !d.Local))
@@ -76,11 +76,11 @@ func (s *Server) browserHandler(api http.Handler) http.Handler {
 		browser.Handle("/", s.pageGate(pages))
 		top.Handle("/api/", api)
 	}
-	top.Handle("/", s.pageOrAPI(api, s.logged(browser)))
+	top.Handle("/", s.pageOrAPI(api, s.logged(browser.ServeMux)))
 	return web.SecurityHeaders(d.HSTS, top)
 }
 
-func (s *Server) signInRoutes(mux *http.ServeMux) {
+func (s *Server) signInRoutes(mux *registeredMux) {
 	s.registerPolicyEndpoints(mux, s.loginEndpoints())
 	s.registerPolicyEndpoints(mux, s.browserSessionEndpoints())
 	s.registerPolicyEndpoints(mux, s.oauthEndpoints())

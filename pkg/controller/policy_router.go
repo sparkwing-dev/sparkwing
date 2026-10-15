@@ -237,7 +237,7 @@ func writePolicyError(w http.ResponseWriter, err error) {
 	}
 }
 
-func (s *Server) registerControllerEndpoints(mux *http.ServeMux, endpoints []Endpoint) {
+func (s *Server) registerControllerEndpoints(mux *registeredMux, endpoints []Endpoint) {
 	policy := NewPolicyRouter(s.authorization)
 	for _, endpoint := range endpoints {
 		if err := policy.Register(s.budgetEndpoint(endpoint)); err != nil {
@@ -251,4 +251,24 @@ func (s *Server) registerControllerEndpoints(mux *http.ServeMux, endpoints []End
 		}
 		mux.Handle(endpoint.Method+" "+endpoint.Pattern, handler)
 	}
+}
+
+type registeredMux struct {
+	*http.ServeMux
+	registrations []string
+}
+
+func newRegisteredMux() *registeredMux {
+	return &registeredMux{ServeMux: http.NewServeMux()}
+}
+
+func (mux *registeredMux) Handle(pattern string, handler http.Handler) {
+	mux.ServeMux.Handle(pattern, handler)
+	if strings.Contains(pattern, " ") {
+		mux.registrations = append(mux.registrations, pattern)
+	}
+}
+
+func (mux *registeredMux) HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request)) {
+	mux.Handle(pattern, http.HandlerFunc(handler))
 }

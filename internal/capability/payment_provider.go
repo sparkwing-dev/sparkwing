@@ -67,8 +67,10 @@ func (a *paymentAuthenticator) providerEvent(ctx context.Context, id string, cre
 	if err := json.Unmarshal(body, &object); err != nil || object.ID == "" || object.LiveMode == nil || *object.LiveMode != (a.mode == PaymentLive) || created <= 0 {
 		return nil, invalidPaymentEvent()
 	}
-	event := PaymentEvent{EventID: id, ObjectID: object.ID, Created: created, Mode: a.mode, Kind: policy.Kind, Status: object.Status,
-		CustomerID: string(object.Customer), MethodID: string(object.PaymentMethod), PaymentID: string(object.PaymentIntent), ChargeID: string(object.Charge), Reason: object.Reason}
+	event := PaymentEvent{
+		EventID: id, ObjectID: object.ID, Created: created, Mode: a.mode, Kind: policy.Kind, Status: object.Status,
+		CustomerID: string(object.Customer), MethodID: string(object.PaymentMethod), PaymentID: string(object.PaymentIntent), ChargeID: string(object.Charge), Reason: object.Reason,
+	}
 	var err error
 	switch policy.Kind {
 	case PaymentCardSetup:
@@ -144,7 +146,7 @@ func refundEvent(object paymentObject, event *PaymentEvent) error {
 }
 
 func disputeEvent(object paymentObject, event *PaymentEvent) error {
-	if object.Object != "dispute" || event.PaymentID == "" || event.ChargeID == "" || object.Amount == nil || *object.Amount <= 0 || !validCurrency(object.Currency) {
+	if object.Object != "dispute" || event.PaymentID == "" || event.ChargeID == "" || object.Amount == nil || *object.Amount <= 0 || !validCurrency(object.Currency) || object.Reason == "" {
 		return invalidPaymentEvent()
 	}
 	if event.Kind == PaymentDisputeClosed {
@@ -167,7 +169,7 @@ func (a *paymentAuthenticator) chargeFingerprint(ctx context.Context, event *Pay
 	if err != nil {
 		return err
 	}
-	if string(charge.PaymentIntent) != event.PaymentID {
+	if string(charge.PaymentIntent) != event.PaymentID || charge.PaymentMethodDetails.Card.Fingerprint == "" {
 		return invalidPaymentEvent()
 	}
 	event.Fingerprint = charge.PaymentMethodDetails.Card.Fingerprint

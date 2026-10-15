@@ -71,9 +71,7 @@ func Scopes(files ...string) (map[string]string, error) {
 	return scopes, nil
 }
 
-// Parse returns every route registered in file, sorted by path then method.
-// A route registered on the `mux` receiver sits behind the authentication
-// middleware; anything else is reachable without a credential.
+// Parse returns registered routes sorted by path then method, using policy for endpoint authentication.
 func Parse(file string, scopes map[string]string) ([]Route, error) {
 	// #nosec G703 -- a build-time tool reading paths the operator names
 	data, err := os.ReadFile(file)
@@ -99,6 +97,7 @@ func Parse(file string, scopes map[string]string) ([]Route, error) {
 		{"s.sessionEndpoints()", "session_routes.go"},
 		{"s.accountEndpoints()", "account_routes.go"},
 		{"s.reportingEndpoints()", "reporting_routes.go"},
+		{"s.metricEndpoints()", "metrics.go"},
 		{"s.teamReadEndpoints()", "team_read_routes.go"},
 		{"s.scheduleEndpoints()", "schedule_routes.go"},
 		{"s.runControlEndpoints()", "run_control_routes.go"},

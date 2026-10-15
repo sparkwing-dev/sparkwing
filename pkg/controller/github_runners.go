@@ -12,9 +12,7 @@ import (
 // safety: GitHub's terms allow Actions only for the software project in the repository the
 // workflow runs in, so a job's credential reaches only runs of that one repository.
 
-// GitHubActionsLabel is the runner label a GitHub Actions job advertises. It
-// is not the local label, so the placement hold keeps a team's own machines
-// first and a job picks a node up only after the hold.
+// GitHubActionsLabel identifies a GitHub Actions runner observation.
 const GitHubActionsLabel = "github-actions"
 
 // safety: a job never outlives six hours and a node that outlives the

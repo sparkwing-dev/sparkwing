@@ -1,17 +1,118 @@
-package controller
+package controller_test
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"slices"
 	"strings"
 	"testing"
+	"testing/quick"
 
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 )
 
 func TestFinalCredentialRouteDeclarations(t *testing.T) {
 	expected := credentialRouteExpectations()
 	if err := compareCredentialRoutes(expected, capability.Routes); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFinalCredentialServingRegistrations(t *testing.T) {
+	for _, separateMetrics := range []bool{false, true} {
+		t.Run(fmt.Sprintf("separate_metrics=%t", separateMetrics), func(t *testing.T) {
+			actual := servingRegistrations(t, separateMetrics)
+			if err := compareServingRegistrations(credentialRouteExpectations(), actual); err != nil {
+				t.Fatal(err)
+			}
+			if err := capability.ValidateRoutes(actual); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func servingRegistrations(t *testing.T, separateMetrics bool) []string {
+	t.Helper()
+	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "https://controller.invalid", SigningKey: bytes.Repeat([]byte{42}, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := objects.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	server := controller.New(nil, nil).WithDataObjects(objects).WithDashboard(controller.Dashboard{})
+	if separateMetrics {
+		server.WithMetricsAddr("127.0.0.1:0")
+	}
+	actual := server.Registrations()
+	processes := controller.NewPolicyRouter(controller.RouteAuthorization{})
+	if err := nodehost.RegisterProcessServices(processes, func(context.Context, capability.Authorized) (*nodehost.ProcessServices, error) {
+		return nil, fmt.Errorf("route inventory must not resolve a process")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return append(actual, processes.Registrations()...)
+}
+
+func compareServingRegistrations(expected []credentialRouteExpectation, actual []string) error {
+	want := make(map[string]bool, len(expected))
+	for _, route := range expected {
+		want[route.Method+" "+route.Path] = true
+	}
+	seen := make(map[string]bool, len(actual))
+	var problems []string
+	for _, key := range actual {
+		if seen[key] {
+			problems = append(problems, "duplicate registration: "+key)
+		}
+		seen[key] = true
+		if !want[key] {
+			problems = append(problems, "unexpected registration: "+key)
+		}
+	}
+	for key := range want {
+		if !seen[key] {
+			problems = append(problems, "missing registration: "+key)
+		}
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	slices.Sort(problems)
+	return fmt.Errorf("serving route inventory differs:\n%s", strings.Join(problems, "\n"))
+}
+
+func TestFinalCredentialServingCoverageRejectsDriftProperty(t *testing.T) {
+	actual := servingRegistrations(t, false)
+	property := func(index uint32, suffix string) bool {
+		i := int(index % uint32(len(actual)))
+		missing := append(slices.Clone(actual[:i]), actual[i+1:]...)
+		extra := "POST /unclassified/" + fmt.Sprintf("%x", suffix)
+		cases := []struct {
+			actual []string
+			want   string
+		}{
+			{missing, "missing registration: " + actual[i]},
+			{append(slices.Clone(actual), actual[i]), "duplicate registration: " + actual[i]},
+			{append(slices.Clone(actual), extra), "unexpected registration: " + extra},
+		}
+		for _, change := range cases {
+			err := compareServingRegistrations(credentialRouteExpectations(), change.actual)
+			if err == nil || !strings.Contains(err.Error(), change.want) {
+				t.Logf("drift %q: %v", change.want, err)
+				return false
+			}
+		}
+		return true
+	}
+	if err := quick.Check(property, nil); err != nil {
 		t.Fatal(err)
 	}
 }

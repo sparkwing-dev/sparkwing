@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,9 +27,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// Server owns the route table, the backing store, and the
-// dispatcher. A single Server instance services all concurrent HTTP
-// requests; the store itself serializes writes.
+// Server serves controller HTTP requests.
 type Server struct {
 	store  *store.Store
 	logger *slog.Logger
@@ -184,14 +183,7 @@ type placementPolicy struct {
 	liveness       time.Duration
 }
 
-// WithLocalFirstPlacement holds a node back from a claim-mode runner
-// that does not advertise the node's Prefers, for hold measured from the node's
-// ready time, while another runner that does advertise it has polled within
-// liveness and has a free slot. After the hold any eligible runner takes the
-// node. defaultPrefers applies to nodes whose plan declares no Prefers of their
-// own; empty leaves those nodes to the first claimant. A hold of zero or less
-// disables the rule, which is the first-in-first-out behavior of a controller
-// that never calls this.
+// WithLocalFirstPlacement records the controller placement settings.
 func (s *Server) WithLocalFirstPlacement(defaultPrefers []string, hold, liveness time.Duration) *Server {
 	s.placement = placementPolicy{defaultPrefers: defaultPrefers, hold: hold, liveness: liveness}
 	return s
@@ -206,9 +198,7 @@ func (s *Server) WithSessionMaxLifetime(d time.Duration) *Server {
 	return s
 }
 
-// WithQueueTimeout overrides how long a trigger waits unclaimed before the
-// reaper fails its run. Zero disables that sweep. A ready node waits for its
-// claim wait instead, [match.DefaultClaimWait] unless its plan sets one.
+// WithQueueTimeout sets the queue timeout.
 func (s *Server) WithQueueTimeout(d time.Duration) *Server {
 	s.queueTimeout = d
 	return s
@@ -361,7 +351,11 @@ func (s *Server) observedHandler(router *http.ServeMux, labels ...*http.ServeMux
 }
 
 func (s *Server) routers() *http.ServeMux {
-	router := http.NewServeMux()
+	return s.registeredRouters().ServeMux
+}
+
+func (s *Server) registeredRouters() *registeredMux {
+	router := newRegisteredMux()
 	var endpoints []Endpoint
 	endpoints = append(endpoints, s.operatorEndpoints()...)
 	endpoints = append(endpoints, s.engineEndpoints()...)
@@ -412,6 +406,21 @@ func (s *Server) routeProbe() *http.ServeMux {
 		s.routeProbeMux = s.routers()
 	})
 	return s.routeProbeMux
+}
+
+// Registrations returns the method and pattern pairs installed by this server's serving routers.
+func (s *Server) Registrations() []string {
+	routes := s.registeredRouters().registrations
+	if s.dashboard != nil && !s.dashboard.Local {
+		browser := newRegisteredMux()
+		s.signInRoutes(browser)
+		routes = append(routes, browser.registrations...)
+	}
+	if metrics := s.metricsServer(); metrics != nil {
+		routes = append(routes, metrics.Handler.(*registeredMux).registrations...)
+	}
+	slices.Sort(routes)
+	return routes
 }
 
 // RegisteredRoute reports whether this server registers a handler for the

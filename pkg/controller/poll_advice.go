@@ -9,10 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// DefaultMaxIdleClaimPoll is the widest interval a controller suggests to a
-// claim loop that keeps finding no work. It sits far enough below the default
-// placement hold that a runner honoring it, jitter included, still polls
-// inside the window local-first placement measures a runner's liveness in.
+// DefaultMaxIdleClaimPoll caps the idle interval suggested by the controller.
 const DefaultMaxIdleClaimPoll = 5 * time.Second
 
 // IdleClaimPollJitterFactor is the widest a runner stretches a suggestion when
@@ -20,15 +17,10 @@ const DefaultMaxIdleClaimPoll = 5 * time.Second
 // window multiplies by this to get the longest a runner may actually wait.
 const IdleClaimPollJitterFactor = 1.25
 
-// MaxHonoredIdleClaimPoll bounds what a runner accepts however long a
-// controller suggests, so a misconfigured controller cannot park a fleet past
-// the default placement hold. Two of the longest wait it permits, spread
-// included, still fit inside that hold.
+// MaxHonoredIdleClaimPoll caps the interval accepted by a runner.
 const MaxHonoredIdleClaimPoll = 8 * time.Second
 
-// LongestHonoredIdlePoll reports how long a runner may actually wait after
-// being suggested d, jitter included. Operators and startup checks compare it
-// against the placement windows a silent runner falls out of.
+// LongestHonoredIdlePoll includes runner jitter in the capped poll interval.
 func LongestHonoredIdlePoll(d time.Duration) time.Duration {
 	if d <= 0 {
 		return 0
@@ -128,8 +120,7 @@ func (s *Server) admitIdleClaimPoll(w http.ResponseWriter, r *http.Request, key 
 	}
 	// safety: a refused poll is not charged again, so the bucket never owes
 	// more than the interval and the wait named here is never shorter than the
-	// real refill nor longer than one suggestion. Two of them, spread, are what
-	// the startup check fits inside the placement hold.
+	// real refill nor longer than one suggestion.
 	wait := s.idleClaimPoll
 	observePrincipalThrottled(budgetClassIdlePoll)
 	s.logger.Warn("claim shed",

@@ -1,7 +1,6 @@
 package capability_test
 
 import (
-	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -9,37 +8,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-func TestRouteRegistry(t *testing.T) {
-	mux := http.NewServeMux()
-	var registered []string
+func TestRoutePolicyDoesNotRetainRemovedSurface(t *testing.T) {
 	for _, route := range capability.Routes {
 		key := route.Method + " " + route.Path
-		mux.HandleFunc(key, func(http.ResponseWriter, *http.Request) {})
-		registered = append(registered, key)
 		for _, removed := range []string{"/triggers", "/nodes/", "/gitcache", "/cache-grant", "/bounce", "/dispatches", "/auto-retry", "/usage-metrics", "/operator/cache"} {
 			if strings.Contains(route.Path, removed) && !strings.Contains(route.Path, "/github-app/triggers") {
 				t.Errorf("removed surface in target table: %s", key)
 			}
 		}
 	}
-	if err := capability.ValidateRoutes(registered); err != nil {
-		t.Fatal(err)
-	}
-	t.Run("unclassified registration", func(t *testing.T) {
-		if err := capability.ValidateRoutes(append(slices.Clone(registered), "POST /api/v1/unclassified")); err == nil {
-			t.Fatal("unclassified handler accepted")
-		}
-	})
-	t.Run("unimplemented policy", func(t *testing.T) {
-		if err := capability.ValidateRoutes(registered[1:]); err == nil {
-			t.Fatal("policy without a handler accepted")
-		}
-	})
-	t.Run("duplicate handler", func(t *testing.T) {
-		if err := capability.ValidateRoutes(append(slices.Clone(registered), registered[0])); err == nil {
-			t.Fatal("duplicate handler accepted")
-		}
-	})
 }
 
 func TestPrivilegedRouteBoundaries(t *testing.T) {

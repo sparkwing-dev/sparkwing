@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
-	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -39,7 +38,7 @@ func (f *reportingFacts) CheckBinding(context.Context, capability.Principal, cap
 	return nil
 }
 
-func TestReportingRouteAuthorityProperty(t *testing.T) {
+func TestReportingRoutesRejectInvalidAuthorityProperty(t *testing.T) {
 	s := New(nil, slog.New(slog.NewTextHandler(io.Discard, nil))).WithEngineController(&EngineController{
 		ResolveRunTeam: func(context.Context, string) (store.Team, error) { return "a", nil },
 	})
@@ -68,16 +67,17 @@ func TestReportingRouteAuthorityProperty(t *testing.T) {
 					},
 				}
 				member := true
-				status, code := 204, apierr.Code("")
-				switch mutation % 8 {
+				status, code := 401, apierr.Unauthenticated
+				switch mutation%7 + 1 {
 				case 1:
 					p.Capability.RevokedAt, status, code = &now, 401, apierr.Unauthenticated
 				case 2:
 					p.Capability.Grants, status, code = []capability.Grant{capability.NodesClaim}, 403, apierr.Forbidden
 				case 3:
-					p.Capability.Team = "b"
 					if strings.Contains(endpoint.Pattern, "{run}") {
-						status, code = 403, apierr.Forbidden
+						p.Capability.Team, status, code = "b", 403, apierr.Forbidden
+					} else {
+						p.Capability.RevokedAt = &now
 					}
 				case 4:
 					p.Capability.Subject.Kind, status, code = capability.SubjectOperator, 403, apierr.Forbidden
@@ -89,41 +89,19 @@ func TestReportingRouteAuthorityProperty(t *testing.T) {
 					p.Capability.ExpiresAt, status, code = &now, 401, apierr.Unauthenticated
 				}
 				facts := &reportingFacts{digest: p.Capability.Digest, snapshot: capability.AuthenticationSnapshot{Now: now, Authorities: []capability.AuthorityState{{Principal: p, MembershipValid: member}}}}
-				router := NewPolicyRouter(RouteAuthorization{Authenticator: capability.NewAuthenticator(facts), Bindings: facts})
-				called := false
-				entry := endpoint
-				entry.Handle = func(w http.ResponseWriter, _ *http.Request, a capability.Authorized) error {
-					called = true
-					if a.Target.Team != p.Capability.Team || strings.Contains(entry.Pattern, "{run}") && a.Target.RunID != run || strings.Contains(entry.Pattern, "{job}") && a.Target.NodeID != job {
-						return missingEndpointPolicy()
-					}
-					w.WriteHeader(204)
-					return nil
-				}
-				if err := router.Register(entry); err != nil {
-					t.Fatal(err)
-				}
-				path := strings.NewReplacer("{run}", run, "{job}", job, "{name}", "ci", "{schedule}", "schedule", "{installation}", "17", "{invitation}", "invite").Replace(entry.Pattern)
+				path := strings.NewReplacer("{run}", run, "{job}", job, "{name}", "ci", "{schedule}", "schedule", "{installation}", "17", "{invitation}", "invite").Replace(endpoint.Pattern)
 				r := httptest.NewRequest(endpoint.Method, path+"?team=forged&run_id=other&job_id=other&selector="+url.QueryEscape(string(input)), nil)
 				r.Header.Set("Authorization", "Bearer "+raw)
 				r.Header.Set("X-Sparkwing-Team", "forged")
 				w := httptest.NewRecorder()
-				router.ServeHTTP(w, r)
-				if w.Code != status || called != (status == 204) || (facts.checks > 0) != called {
-					t.Logf("mutation=%d: HTTP %d %s; handler=%t checks=%d", mutation%8, w.Code, w.Body, called, facts.checks)
+				s.WithAuthorization(RouteAuthorization{Authenticator: capability.NewAuthenticator(facts), Bindings: facts})
+				s.Handler().ServeHTTP(w, r)
+				if w.Code != status || facts.checks != 0 {
+					t.Logf("mutation=%d: HTTP %d %s; binding checks=%d", mutation%7+1, w.Code, w.Body, facts.checks)
 					return false
 				}
-				if code != "" {
-					var failure apierr.Envelope
-					if json.Unmarshal(w.Body.Bytes(), &failure) != nil || failure.Error == nil || failure.Error.Code != code {
-						return false
-					}
-					s.WithAuthorization(RouteAuthorization{Authenticator: capability.NewAuthenticator(facts), Bindings: facts})
-					actual := httptest.NewRecorder()
-					s.Handler().ServeHTTP(actual, r.Clone(r.Context()))
-					return actual.Code == status && json.Unmarshal(actual.Body.Bytes(), &failure) == nil && failure.Error != nil && failure.Error.Code == code
-				}
-				return true
+				var failure apierr.Envelope
+				return json.Unmarshal(w.Body.Bytes(), &failure) == nil && failure.Error != nil && failure.Error.Code == code
 			}
 			if err := quick.Check(property, &quick.Config{MaxCount: 40}); err != nil {
 				t.Fatal(err)

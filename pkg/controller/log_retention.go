@@ -66,8 +66,6 @@ type logLifecycle struct {
 // without a restart, and a bucket is not asked on every request.
 const logLifecycleRecheck = 5 * time.Minute
 
-// safety: a controller that keeps logs on its own disk has no lifecycle to check; its logs stay until their run
-// is deleted, which the operator chose by configuring no bucket.
 func (s *Server) logClassReady(ctx context.Context, class string) error {
 	d := s.s3Logs
 	if d == nil {

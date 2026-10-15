@@ -76,6 +76,9 @@ unlock.
   Console access requires a configured operator account’s direct sign-in session, with session-bound CSRF on writes. Embedded controllers supply verified uid or SID subjects with `WithPeerIdentity`, replacing `WithPeerPrincipal`.
 ### Fixed
 
+- **controller authorization:** Preserve capability-derived browser-session ancestry and lifetime during credential issuance, and require direct sign-in for account-consent routes.
+- **dashboard API:** Send final run, job and pause routes with JSON cancellation and retry requests. Reporting read failures propagate to callers.
+
 - **cli intake:** Preserve output selections and their origins through sealing
   Detached receipts honor `-o`, `--output`, `--sw-output` and `SPARKWING_LOG_FORMAT`.
 - **pipeline selection:** Read trigger profile pins and run help from the selected revisions

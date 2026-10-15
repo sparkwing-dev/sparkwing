@@ -52,6 +52,12 @@ func scrapeRegistry(t *testing.T) string {
 	return string(body)
 }
 
+func TestMetricsExcludeCredentialHashingBudget(t *testing.T) {
+	if body := scrapeRegistry(t); strings.Contains(body, "sparkwing_auth_hashing_rejected_total") {
+		t.Fatal("controller publishes obsolete credential hashing telemetry")
+	}
+}
+
 func sampleValue(body, series string) (float64, bool) {
 	for line := range strings.SplitSeq(body, "\n") {
 		raw, ok := strings.CutPrefix(line, series+" ")

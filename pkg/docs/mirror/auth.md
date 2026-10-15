@@ -616,6 +616,12 @@ registered machine. Issuance checks the account or registration and cannot
 exceed its authority. Principal text is a display label. It cannot establish
 membership, machine identity, reserved pools or metering.
 
+A browser session opened with an account capability retains that capability as
+its authority parent. Credential issuance through that session delegates from
+its existing ancestry and inherits the shortest remaining lifetime. Independent
+member roots and owner-consent routes require a direct account sign-in session.
+Changing a token into a browser cookie does not establish that consent.
+
 ### Linked sign-ins
 
 Google and GitHub identities can be linked from an authenticated account.
