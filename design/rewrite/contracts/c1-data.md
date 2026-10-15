@@ -2,6 +2,30 @@
 
 <!-- design:begin -->
 
+## Claim lifecycle and credential mutation cuts
+
+`Store.StartClaimExecution`, `HeartbeatClaim` and `ClaimBeat` are removed.
+Their legacy HTTP claim-token branches and client helpers are removed.
+`Store.RenewUnit` owns capability-derived unit renewal and owner compute.
+Job execution starts use `Tenant.TransitionNode` with `CauseStart` and the
+source attempt ordinal. The separate raw runner heartbeat/start paths still
+need retirement with their consumers.
+
+`Tenant.PutGitCredential`, `ConfirmGitCredential` and `DeleteGitCredential`
+are removed. Callers use `WriteGitCredential`, `ConfirmGitCredentialFor` and
+`RemoveGitCredential`, which check current authority in the committing
+transaction. The remaining HTTP fakes seed their own persisted administration
+session and retain the authenticated actor only as their recorded test input.
+Their authority substitution is test-only. Store authority and release
+properties exercise real current membership, ancestry and holder fences.
+
+`Store.ResealSecrets`, `SecretResealCounts`, its batch reader and the controller's
+startup plaintext scan are removed under the pre-launch no-backfill rule.
+`SampleSealedSecrets` remains for missing-key detection and reads `TeamSecret`
+directly without the retired private rotation tuple. Keyless credential access
+still returns `ErrKeyRefused`. Credential HTTP encryption-failure properties
+continue to require no stored row after refusal.
+
 ## Source credential hard cut and recovery proofs
 
 The unused `Tenant.ReleaseGitCredential`, `GitCredentialReleases`,

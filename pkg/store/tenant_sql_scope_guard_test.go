@@ -69,7 +69,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"a scope with no team and no all-teams flag is refused there",
 	"(*Store).getLatestRun": "the team predicate comes from its scope at run time; " +
 		"a scope with no team and no all-teams flag is refused there",
-	"(*Store).secretsNotSealed":    "finds every team's secret still held as plaintext or a pre-team envelope, so the startup reseal binds each to its own team",
 	"(*Store).SampleSealedSecrets": "samples envelopes from any team to prove the configured key opens them before the startup reseal writes anything",
 	"(*Store).UnlinkIdentity":      "ends one account's sessions in every team, because the sign-in it removed could have opened any of them",
 	"(*Store).lookupSession":       "resolves the globally unique digest of the presented session before its team is known, renews only that session, and reads the token it names by a prefix that is unique across teams",

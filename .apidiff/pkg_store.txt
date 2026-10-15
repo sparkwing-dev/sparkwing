@@ -367,11 +367,6 @@ type ClaimAward struct {
 	Generation       int64
 	LeaseExpiresAt   time.Time
 }
-type ClaimBeat struct {
-	Cancel bool
-
-	Charge CreditChargeResult
-}
 const ClaimGenerationHeader = "X-Sparkwing-Claim-Generation"
 const ClaimHolderHeader = "X-Sparkwing-Claim-Holder"
 type ClaimIdentity struct {
@@ -2434,13 +2429,6 @@ type SecretPreflightError struct {
 func (e *SecretPreflightError) Detail() string
 func (e *SecretPreflightError) Error() string
 func (e *SecretPreflightError) Unwrap() error
-type SecretResealCounts struct {
-	Resealed int
-
-	Skipped int
-
-	Raced int
-}
 type Segment struct {
 	Index     int64
 	Offset    int64
@@ -2854,7 +2842,6 @@ func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error)
 func (s *Store) GitHubAppDeliverySeen(ctx context.Context, digest string) (bool, error)
 func (s *Store) GitHubRunnerAdmits(ctx context.Context, scope GitHubRunnerScope, runID string) (bool, error)
 func (s *Store) GrantFreeSlot(ctx context.Context, team Team, now time.Time) (err error)
-func (s *Store) HeartbeatClaim(ctx context.Context, tok ClaimToken, lease time.Duration, now time.Time) (beat ClaimBeat, err error)
 func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string, lease time.Duration) error
 func (s *Store) HeartbeatNodeClaimWithCredits(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string, lease time.Duration, meteringLicensed bool) (CreditChargeResult, bool, error)
 func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Duration) (cancelled bool, err error)
@@ -2932,7 +2919,6 @@ func (s *Store) ReplayClaimResult(ctx context.Context, tok ClaimToken, digest st
 func (s *Store) ReportAttempt(ctx context.Context, commit ClaimResultCommit, report AttemptReport, now time.Time) (replayed bool, err error)
 func (s *Store) ReportCardRefund(ctx context.Context, key, refundID, status string, now time.Time) (bool, error)
 func (s *Store) RequestCancel(ctx context.Context, id string) error
-func (s *Store) ResealSecrets(ctx context.Context, sealedPrefix string, batchSize int, reseal func(Team, Secret) (string, error)) (SecretResealCounts, error)
 func (s *Store) ReserveStorage(ctx context.Context, req StorageReserve) (_ StorageReservation, err error)
 func (s *Store) ReserveUpload(ctx context.Context, req UploadRequest) (_ Upload, err error)
 func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error)
@@ -2976,7 +2962,6 @@ func (s *Store) SignUpCounts(ctx context.Context, now time.Time) (SignUpCounts, 
 func (s *Store) SignUpGate(ctx context.Context) (SignUpGate, error)
 func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (s *Store) SourceBoundToRun(ctx context.Context, team Team, key, runID string) (bool, error)
-func (s *Store) StartClaimExecution(ctx context.Context, tok ClaimToken, now time.Time) (specHash string, err error)
 func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error
 func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (s *Store) SwitchSessionTeam(ctx context.Context, rawSession, accountID string, from, to Team) error
@@ -3079,7 +3064,6 @@ func (t *Tenant) ClearCronOverride(ctx context.Context, id string, now time.Time
 func (t *Tenant) CommitBlobUpload(ctx context.Context, request VerifiedUploadCommit) (blob.Receipt, error)
 func (t *Tenant) CommitRecord(ctx context.Context, request blob.CommitRecordRequest) (blob.Record, error)
 func (t *Tenant) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
-func (t *Tenant) ConfirmGitCredential(ctx context.Context, host, fingerprint string, now time.Time) (GitCredential, error)
 func (t *Tenant) ConfirmGitCredentialFor(ctx context.Context, a capability.Authorized, host, fingerprint string) (GitCredential, error)
 func (t *Tenant) CopyMemo(ctx context.Context, request blob.CopyMemoRequest) (blob.MemoHit, error)
 func (t *Tenant) CountPendingTriggers(ctx context.Context) (int, error)
@@ -3112,7 +3096,6 @@ func (t *Tenant) CreditState(ctx context.Context, window time.Duration) (CreditS
 func (t *Tenant) CreditUsageByRun(ctx context.Context, limit int) (_ []RunCreditUsage, err error)
 func (t *Tenant) DeleteCronSchedule(ctx context.Context, id string) (err error)
 func (t *Tenant) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (n int, err error)
-func (t *Tenant) DeleteGitCredential(ctx context.Context, host string) error
 func (t *Tenant) DeleteGitHubAppAutomation(ctx context.Context, repository int64) error
 func (t *Tenant) DeleteGitHubAppTrigger(ctx context.Context, repositoryID int64, pipeline string) error
 func (t *Tenant) DeleteInvitation(ctx context.Context, id string, now time.Time) error
@@ -3216,7 +3199,6 @@ func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now 
 func (t *Tenant) OwnsRun(ctx context.Context, id string) (bool, error)
 func (t *Tenant) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)
 func (t *Tenant) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error)
-func (t *Tenant) PutGitCredential(ctx context.Context, c GitCredential, now time.Time) (_ GitCredential, err error)
 func (t *Tenant) PutGitHubAppAutomation(ctx context.Context, a GitHubAppAutomation, now time.Time) error
 func (t *Tenant) PutGitHubAppTrigger(ctx context.Context, tr GitHubAppTrigger, now time.Time) (GitHubAppTrigger, error)
 func (t *Tenant) ReadCapability(ctx context.Context, a capability.Authorized) (capability.Metadata, error)

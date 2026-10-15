@@ -1,5 +1,25 @@
 # Migrating to the next release
 
+## Claim lifecycle and credential mutation APIs
+
+`Store.StartClaimExecution`, `Store.HeartbeatClaim`, `ClaimBeat` and the matching
+legacy client helpers are removed. Renew a capability-bound unit with
+`Store.RenewUnit`. Start a job through `Tenant.TransitionNode` using `CauseStart`
+and its current source attempt ordinal. Owner compute is reported through unit
+renewal. The old claim-token branches of the job heartbeat and start handlers
+are removed.
+
+`Tenant.PutGitCredential`, `ConfirmGitCredential` and `DeleteGitCredential` are
+removed. Use `WriteGitCredential(ctx, authorized, row)`,
+`ConfirmGitCredentialFor(ctx, authorized, host, fingerprint)` and
+`RemoveGitCredential(ctx, authorized, host)`. These transactions recheck current
+administration authority and use the store clock.
+
+`Store.ResealSecrets` and `SecretResealCounts` are removed with the startup
+plaintext scan. The pre-launch store has no automatic historical-secret
+conversion. Recreate disposable state with the final schema. Missing-key
+checks still inspect sealed samples, and keyless secret access remains refused.
+
 ## Source credentials use capability transactions
 
 `Tenant.ReleaseGitCredential`, `GitCredentialReleases`,

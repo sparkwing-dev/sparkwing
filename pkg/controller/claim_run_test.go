@@ -31,65 +31,6 @@ func (f *appFixture) launchNode(runID, nodeID string) string {
 	return controller.LauncherFixtureClaim(f.t, f.store, runID, nodeID)
 }
 
-// A pod's claim token reads its own run, beats its own claim, and starts its
-// execution once; after that the claim gets no source credential, and a cancel
-// reaches the pod through the beat while its reads are refused.
-func TestClaimRun_PodRoutesServeOnlyTheirOwnClaim(t *testing.T) {
-	f := newAppFixture(t)
-	olga := f.ghUser(501, "olga")
-	f.connect(olga, 501, 7, acmeAdmin)
-	plan := "Bearer " + f.launchedRun(olga, "run-pod", "acme", "widgets")
-	f.launchedRun(olga, "run-next", "acme", "widgets")
-
-	f.secretArg("run-pod")
-	var run store.Run
-	if code := f.call("GET", "/api/v1/runs/run-pod?include=secret_values", plan, nil, &run); code != http.StatusOK ||
-		run.Pipeline != "build" || run.Args["token"] == "s3cret" {
-		t.Fatalf("own run with a planning claim = %d %+v, want the secret argument redacted", code, run)
-	}
-	if code := f.call("GET", "/api/v1/triggers/run-pod", plan, nil, nil); code != http.StatusUnauthorized {
-		t.Errorf("the run's trigger, which holds its arguments unredacted = %d, want 401", code)
-	}
-	for _, path := range []string{"/api/v1/runs/run-next", "/api/v1/runs/run-next/nodes/plan/heartbeat", "/api/v1/runs/run-pod/nodes/other/heartbeat"} {
-		method := "POST"
-		if !strings.HasSuffix(path, "heartbeat") {
-			method = "GET"
-		}
-		if code := f.call(method, path, plan, map[string]int{}, nil); code != http.StatusForbidden {
-			t.Errorf("%s %s = %d, want 403", method, path, code)
-		}
-	}
-	var beat struct{ Cancel bool }
-	if code := f.call("POST", "/api/v1/runs/run-pod/nodes/plan/heartbeat", plan, map[string]int{"lease_secs": 120}, &beat); code != http.StatusOK || beat.Cancel {
-		t.Fatalf("beat = %d %+v", code, beat)
-	}
-	if code := f.call("POST", "/api/v1/runs/run-pod/nodes/plan/execution-start", plan, nil, nil); code != http.StatusOK {
-		t.Fatalf("execution start = %d", code)
-	}
-	var refused map[string]any
-	if code := f.call("POST", "/api/v1/runs/run-pod/source-credential", plan, nil, &refused); code != http.StatusForbidden ||
-		refused["error"] != "source_credential_spent" {
-		t.Fatalf("source credential after the start = %d %v, want 403 source_credential_spent", code, refused)
-	}
-	for _, path := range []string{"/api/v1/launcher/sync", "/api/v1/runs/run-pod/children"} {
-		if code := f.call("POST", path, plan, map[string]any{}, nil); code != http.StatusUnauthorized && code != http.StatusForbidden {
-			t.Errorf("POST %s with a plan claim = %d, want refused", path, code)
-		}
-	}
-	if err := f.teamOf(olga).RequestCancel(context.Background(), "run-pod"); err != nil {
-		t.Fatal(err)
-	}
-	if code := f.call("POST", "/api/v1/runs/run-pod/nodes/plan/heartbeat", plan, map[string]int{}, &beat); code != http.StatusOK || !beat.Cancel {
-		t.Fatalf("beat after cancel = %d %+v, want the cancel", code, beat)
-	}
-	if code := f.call("GET", "/api/v1/runs/run-pod", plan, nil, nil); code != http.StatusForbidden {
-		t.Fatalf("read after cancel = %d, want 403", code)
-	}
-	if code := f.call("POST", "/api/v1/runs/run-pod/nodes/plan/execution-start", plan, nil, nil); code != http.StatusForbidden {
-		t.Fatalf("execution start after cancel = %d, want 403", code)
-	}
-}
-
 // A node's child runs its parent's commit on the controller path, one child
 // per call however often the call is retried, and only its parent reads it.
 func TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt(t *testing.T) {

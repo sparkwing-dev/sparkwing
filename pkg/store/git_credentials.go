@@ -76,30 +76,6 @@ func scanGitCredential(row interface{ Scan(...any) error }) (GitCredential, erro
 	return c, nil
 }
 
-// PutGitCredential stores c for its host, replacing any credential the team
-// already holds there. An https credential is confirmed at once. A
-// replacement ssh credential stays confirmed only when it pins the same
-// fingerprint the owner confirmed before; any other ssh credential waits for
-// [Tenant.ConfirmGitCredential].
-func (t *Tenant) PutGitCredential(ctx context.Context, c GitCredential, now time.Time) (_ GitCredential, err error) {
-	if c.Host == "" || c.Secret == "" || (c.Kind != GitCredentialSSH && c.Kind != GitCredentialHTTPS) {
-		return GitCredential{}, fmt.Errorf("%w: a git credential needs a host, a kind and a secret", ErrInvalidInput)
-	}
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return GitCredential{}, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	if err := t.lockTeamTx(ctx, tx); err != nil {
-		return GitCredential{}, err
-	}
-	out, err := t.putGitCredentialTx(ctx, tx, c, now)
-	if err != nil {
-		return GitCredential{}, err
-	}
-	return out, tx.Commit()
-}
-
 func (t *Tenant) putGitCredentialTx(ctx context.Context, tx *storeTx, c GitCredential, now time.Time) (GitCredential, error) {
 	if c.Host == "" || c.Secret == "" || (c.Kind != GitCredentialSSH && c.Kind != GitCredentialHTTPS) {
 		return GitCredential{}, ErrInvalidInput
@@ -156,26 +132,6 @@ func (t *Tenant) putGitCredentialTx(ctx context.Context, tx *storeTx, c GitCrede
 	return out, nil
 }
 
-// ConfirmGitCredential marks the team's ssh credential for host usable,
-// once fingerprint is the one it pinned. A credential that is already
-// confirmed stays as it is.
-func (t *Tenant) ConfirmGitCredential(ctx context.Context, host, fingerprint string, now time.Time) (GitCredential, error) {
-	c, err := t.GitCredentialForHost(ctx, host)
-	if err != nil {
-		return GitCredential{}, err
-	}
-	if c.Kind != GitCredentialSSH || c.Fingerprint == "" || c.Fingerprint != fingerprint {
-		return GitCredential{}, ErrFingerprintMismatch
-	}
-	if _, err := t.s.exec(ctx, `
-		UPDATE git_credentials SET confirmed_at = ?, updated_at = ?
-		WHERE team = ? AND id = ? AND fingerprint = ? AND confirmed_at IS NULL`,
-		now.UTC().UnixNano(), now.UTC().UnixNano(), string(t.team), c.ID, fingerprint); err != nil {
-		return GitCredential{}, err
-	}
-	return t.GitCredentialForHost(ctx, host)
-}
-
 // GitCredentialForHost reads the team's credential for host, or ErrNotFound.
 func (t *Tenant) GitCredentialForHost(ctx context.Context, host string) (GitCredential, error) {
 	c, err := scanGitCredential(t.s.queryRow(ctx,
@@ -203,17 +159,4 @@ func (t *Tenant) GitCredentials(ctx context.Context) (_ []GitCredential, err err
 		out = append(out, c)
 	}
 	return out, rows.Err()
-}
-
-// DeleteGitCredential removes the team's credential for host, so no later
-// release finds it. ErrNotFound when the team holds none there.
-func (t *Tenant) DeleteGitCredential(ctx context.Context, host string) error {
-	res, err := t.s.exec(ctx, `DELETE FROM git_credentials WHERE team = ? AND host = ?`, string(t.team), host)
-	if err != nil {
-		return err
-	}
-	if n, err := res.RowsAffected(); err != nil || n != 1 {
-		return notFound("git credential", host)
-	}
-	return nil
 }

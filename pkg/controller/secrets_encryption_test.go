@@ -144,8 +144,6 @@ func TestSecrets_EnvelopeIsBoundToNameAndPipeline(t *testing.T) {
 	}
 }
 
-// An envelope sealed before team binding could have been copied from another
-// team's row, so a read refuses it; the startup reseal is what brings it back.
 func TestSecrets_ReadRefusesEnvelopesSealedBeforeTeamBinding(t *testing.T) {
 	key, _ := secrets.GenerateKey()
 	c, _ := secrets.NewCipher(key)

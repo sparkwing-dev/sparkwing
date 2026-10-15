@@ -314,99 +314,6 @@ func (s *Store) ClaimedRunFor(ctx context.Context, runID string, claimant ClaimI
 	return run, nil
 }
 
-// SecretResealCounts is what one [Store.ResealSecrets] pass did.
-type SecretResealCounts struct {
-	// Resealed rows now hold what reseal returned for them.
-	Resealed int
-	// Skipped rows are ones reseal refused; they keep their stored value.
-	Skipped int
-	// Raced rows changed between the read and the write, so the pass left
-	// them to whoever changed them.
-	Raced int
-}
-
-// ResealSecrets walks every team's secret rows whose stored value does not
-// begin with sealedPrefix, batchSize rows at a time in (team, name,
-// pipeline) order, and stores what reseal returns for each. A row reseal
-// errors on keeps its value and is counted skipped, so one unreadable row
-// does not hold back the rest. Each write names the value it replaces, so a
-// row rewritten meanwhile by a request or another controller keeps that
-// newer value. Running it again finds only the rows an earlier pass
-// skipped, which makes it safe to run on every start.
-//
-// Each row it touches moves from a state every reader refuses to one
-// every reader accepts; a large table would otherwise
-// be locked for the whole pass.
-func (s *Store) ResealSecrets(ctx context.Context, sealedPrefix string, batchSize int, reseal func(Team, Secret) (string, error)) (SecretResealCounts, error) {
-	var counts SecretResealCounts
-	if reseal == nil {
-		return counts, errors.New("secrets: reseal function required")
-	}
-	if sealedPrefix == "" {
-		return counts, errors.New("secrets: sealed prefix required")
-	}
-	if batchSize < 1 {
-		return counts, errors.New("secrets: batch size must be at least 1")
-	}
-	var after *teamSecret
-	for {
-		batch, err := s.secretsNotSealed(ctx, sealedPrefix, after, batchSize)
-		if err != nil {
-			return counts, err
-		}
-		for i := range batch {
-			row := &batch[i]
-			value, rerr := reseal(Team(row.team), row.Secret)
-			if rerr != nil {
-				counts.Skipped++
-				continue
-			}
-			res, err := s.exec(ctx,
-				`UPDATE secrets SET value = ? WHERE team = ? AND name = ? AND pipeline = ? AND value = ?`,
-				value, row.team, row.Secret.Name, row.Secret.Pipeline, row.Secret.Value)
-			if err != nil {
-				return counts, err
-			}
-			n, err := res.RowsAffected()
-			if err != nil {
-				return counts, err
-			}
-			if n == 0 {
-				counts.Raced++
-				continue
-			}
-			counts.Resealed++
-		}
-		if len(batch) < batchSize {
-			return counts, nil
-		}
-		after = &batch[len(batch)-1]
-	}
-}
-
-func (s *Store) secretsNotSealed(ctx context.Context, sealedPrefix string, after *teamSecret, limit int) (_ []teamSecret, err error) {
-	q := `
-        SELECT team, name, value, principal, pipeline, masked, shared, created_at, updated_at
-          FROM secrets
-         WHERE substr(value, 1, ?) <> ?`
-	args := []any{len(sealedPrefix), sealedPrefix}
-	if after != nil {
-		q += `
-           AND (team > ? OR (team = ? AND (name > ? OR (name = ? AND pipeline > ?))))`
-		args = append(args, after.team, after.team, after.Secret.Name, after.Secret.Name, after.Secret.Pipeline)
-	}
-	q += `
-         ORDER BY team, name, pipeline
-         LIMIT ?`
-	args = append(args, limit)
-	rows, err := s.query(ctx, q, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer closeRowsInto(rows, &err)
-	return scanTeamSecretRows(rows)
-}
-
 // TeamSecret is a secret row together with the team that owns it, for the
 // few readers that walk every team at once.
 type TeamSecret struct {
@@ -431,33 +338,16 @@ func (s *Store) SampleSealedSecrets(ctx context.Context, sealedPrefix string, li
 		return nil, err
 	}
 	defer closeRowsInto(rows, &err)
-	scanned, err := scanTeamSecretRows(rows)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]TeamSecret, 0, len(scanned))
-	for _, row := range scanned {
-		out = append(out, TeamSecret{Team: Team(row.team), Secret: row.Secret})
-	}
-	return out, nil
+	return scanTeamSecretRows(rows)
 }
 
-// safety: the team is not a field of [Secret], because that is the shape
-// a tenant reads and writes and a tenant never names its own team; a
-// rotation across every team still has to write each row back under the
-// team that owns it.
-type teamSecret struct {
-	Secret
-	team string
-}
-
-func scanTeamSecretRows(rows *sql.Rows) ([]teamSecret, error) {
-	var out []teamSecret
+func scanTeamSecretRows(rows *sql.Rows) ([]TeamSecret, error) {
+	var out []TeamSecret
 	for rows.Next() {
-		var row teamSecret
+		var row TeamSecret
 		var maskedInt, sharedInt int
 		var created, updated int64
-		if err := rows.Scan(&row.team, &row.Secret.Name, &row.Secret.Value, &row.Secret.Principal,
+		if err := rows.Scan(&row.Team, &row.Secret.Name, &row.Secret.Value, &row.Secret.Principal,
 			&row.Secret.Pipeline, &maskedInt, &sharedInt, &created, &updated); err != nil {
 			return nil, err
 		}

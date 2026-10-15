@@ -74,7 +74,7 @@ func (f *credentialMaintenance) SourceReleaseAudits(_ context.Context, limit int
 
 func maintenanceServer(t testing.TB, b *credentialBoundary, f *credentialMaintenance) *controller.Server {
 	t.Helper()
-	s := mutationServerConfig(nil, nil, b)
+	s := mutationServerConfig(t, nil, nil, b)
 	resolve := func(team store.Team) {
 		f.resolves++
 		if team != "team" {
@@ -133,7 +133,7 @@ func TestCredentialMaintenanceHTTPRequiresLiveAuthority(t *testing.T) {
 				case "binding":
 					b.bindingErr = &apierr.Error{Code: apierr.Forbidden, Message: "outside team"}
 				}
-				w := authorityHTTP(mutationServer(nil, nil, b), b, route.method, route.path, "")
+				w := authorityHTTP(mutationServer(t, nil, nil, b), b, route.method, route.path, "")
 				assertEngineError(t, w, apierr.Status(code), code)
 				if w.Header().Get("Cache-Control") != "no-store" {
 					t.Fatal("credential response is cacheable")
@@ -490,7 +490,7 @@ func TestCredentialMaintenanceHTTPMissingAdaptersNeverUseLegacyStore(t *testing.
 		}
 	}
 	b := authorityMember()
-	h := mutationServerConfig(s, cipher, b).
+	h := mutationServerConfig(t, s, cipher, b).
 		WithCredentialRotator(func(context.Context, store.Team) (controller.CredentialRotator, error) { return nil, nil }).
 		WithSourceAuditReader(func(context.Context, store.Team) (controller.SourceAuditReader, error) { return nil, nil }).Handler()
 	for _, route := range []struct{ method, path string }{{"POST", "/api/v1/secrets/rotate"}, {"GET", "/api/v1/team/git-credentials/releases"}} {
@@ -534,7 +534,7 @@ func TestCredentialMaintenanceHTTPUsesStoreTransactions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tenant.PutGitCredential(t.Context(), store.GitCredential{Host: "git.example.test", Kind: store.GitCredentialHTTPS, Secret: gitValue}, time.Now()); err != nil {
+	if _, err := tenant.WriteGitCredential(t.Context(), credentialSeedAuthority(t, f.store, "team"), store.GitCredential{Host: "git.example.test", Kind: store.GitCredentialHTTPS, Secret: gitValue}); err != nil {
 		t.Fatal(err)
 	}
 	handler := f.server.Handler()

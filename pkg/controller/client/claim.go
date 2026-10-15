@@ -7,37 +7,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
-
-// HeartbeatClaim renews the calling claim token's claim on runID/nodeID for
-// lease. It reports whether the run is being cancelled, and returns
-// [store.ErrLockHeld] once the claim is lost or its team cannot pay.
-func (c *Client) HeartbeatClaim(ctx context.Context, runID, nodeID string, lease time.Duration) (cancel bool, err error) {
-	var out struct {
-		Cancel  bool  `json:"cancel"`
-		Watched *bool `json:"watched"`
-	}
-	err = c.post(ctx, claimNodePath(runID, nodeID, "heartbeat"),
-		map[string]int{"lease_secs": max(int(lease.Seconds()), 1)}, http.StatusOK, &out)
-	if err == nil && out.Watched != nil {
-		c.reportWatch(WatchReport{RunID: runID, NodeID: nodeID, Watched: *out.Watched})
-	}
-	return out.Cancel, err
-}
-
-// StartClaimExecution records that the calling claim is about to run pipeline
-// code and returns the spec hash the run's accepted plan holds for the node.
-// The controller issues the claim no source credential after it.
-func (c *Client) StartClaimExecution(ctx context.Context, runID, nodeID string) (specHash string, err error) {
-	var out struct {
-		SpecHash string `json:"spec_hash"`
-	}
-	err = c.post(ctx, claimNodePath(runID, nodeID, "execution-start"), nil, http.StatusOK, &out)
-	return out.SpecHash, err
-}
 
 // ReportAttempt reports the end of the calling claim's attempt at its node.
 func (c *Client) ReportAttempt(ctx context.Context, runID, nodeID string, report store.AttemptReport) error {

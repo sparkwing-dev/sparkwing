@@ -1,3 +1,30 @@
+The legacy claim-token heartbeat/start cell
+`TestClaimRun_PodRoutesServeOnlyTheirOwnClaim` is retired with those store
+methods and HTTP branches. Its retained requirements run in
+`TestRenewUnitRecordsOwnerExecutionForRecovery`,
+`TestRenewUnitRefusesStaleAndRootAuthority`,
+`TestRenewUnitDeliversCancellationWithoutStarting`,
+`TestRenewUnitNodeRequiresCommittedStart`, `TestTransitionHolderRights`,
+`TestSourceReleaseRefusesChangedAuthorityBeforeReleasing` and the final
+engine lifecycle HTTP tests. `TestRenewUnitRequiresCurrentAwardProperty`
+generates 384 invalid root, unknown-prefix, ancestor-revocation, lease-expiry,
+generation and holder cases, retaining the lease after every refusal.
+The old source-mint-spent assertion described a retired counter and is removed.
+Three final transition HTTP subcases still fail strict request decoding against
+the session baseline as well. The continuation report records those failures.
+
+The three raw git-credential mutation APIs have no production callers.
+Their maintenance and HTTP fixtures now use the current mutation transactions
+or the package-private transaction writer when seeding a rotation fixture.
+The existing confirmation, replacement, deletion, tenant-isolation and
+credential-mutation properties retain the behavior. No W1b fixture is changed.
+
+The two resealing tests and startup plaintext-conversion test are retired
+because the final pre-launch schema has no historical backfill. The sealed
+sample test moves unchanged into `secrets_sample_test.go`. Keyless access is
+checked directly at its cipher boundary. HTTP key-refusal and encryption-failure
+properties retain transport status, private errors and no-persistence checks.
+
 Store recovery continuation moves `store_started.go`, `store_unstarted.go`,
 `store_retry.go`, `store_capacity.go`, `store_capacity_maintenance.go`,
 `store_orphans.go` and the cancellation/reconciliation checks in

@@ -16,64 +16,6 @@ var claimWorkKinds = []store.ClaimTokenKind{store.ClaimTokenWork}
 // routes take it as a claim, whose tail ClaimLogTail allows, rather than as the runner it acts for.
 var claimLogKinds = []store.ClaimTokenKind{store.ClaimTokenWork, store.ClaimTokenNode}
 
-// safety: every claim that runs a node's code reads that node's secrets
-// through its own claim, under the plan's declaration and with an event.
-
-type claimHeartbeatReq struct {
-	LeaseSecs int `json:"lease_secs"`
-}
-
-type claimBeatResp struct {
-	Cancel  bool `json:"cancel"`
-	Watched bool `json:"watched"`
-}
-
-// safety: a refused beat is 409 and renews nothing, which is how a claim that
-// was lost, superseded or can no longer be paid for reaches the pod.
-func (s *Server) handleClaimHeartbeat(w http.ResponseWriter, r *http.Request) {
-	tok, _ := claimTokenFromContext(r.Context())
-	var req claimHeartbeatReq
-	if err := decodeOptionalJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	beat, err := s.store.HeartbeatClaim(r.Context(), tok, time.Duration(req.LeaseSecs)*time.Second, time.Now())
-	if beat.Charge.Cancel {
-		if tenant, terr := s.tenantForTeam(r.Context(), tok.Team); terr != nil {
-			s.logger.Error("cancelling a run for exhausted credits failed", "run_id", tok.RunID, "err", terr)
-		} else {
-			if _, aerr := tenant.AppendEventOnce(r.Context(), tok.RunID, tok.NodeID, store.EventKindCreditsExhausted, nil); aerr != nil {
-				s.logger.Warn("recording an exhausted-credit cancellation failed", "run_id", tok.RunID, "err", aerr)
-			}
-			if cerr := tenant.RequestCancel(r.Context(), tok.RunID); cerr != nil {
-				s.logger.Error("cancelling a run for exhausted credits failed", "run_id", tok.RunID, "err", cerr)
-			}
-		}
-	}
-	switch {
-	case errors.Is(err, store.ErrLockHeld):
-		writeError(w, http.StatusConflict, store.ErrLockHeld)
-	case err != nil:
-		s.writeInternalError(w, r, "claim heartbeat", err)
-	default:
-		writeJSON(w, http.StatusOK, claimBeatResp{Cancel: beat.Cancel, Watched: s.liveLogs.Watched(tok.RunID, tok.NodeID)})
-	}
-}
-
-type claimExecutionResp struct {
-	SpecHash string `json:"spec_hash"`
-}
-
-func (s *Server) handleClaimExecutionStart(w http.ResponseWriter, r *http.Request) {
-	tok, _ := claimTokenFromContext(r.Context())
-	hash, err := s.store.StartClaimExecution(r.Context(), tok, time.Now())
-	if err != nil {
-		writeClaimRefusal(w, r, s, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, claimExecutionResp{SpecHash: hash})
-}
-
 type childRunReq struct {
 	Ordinal  int64             `json:"ordinal"`
 	Pipeline string            `json:"pipeline"`

@@ -135,7 +135,6 @@ func (c *Client) GetSecret(ctx context.Context, name string) (*Secret, error)
 func (c *Client) GetSecretForPipeline(ctx context.Context, name, pipeline string) (*Secret, error)
 func (c *Client) GetSecretForRun(ctx context.Context, name, runID string) (*Secret, error)
 func (c *Client) GetTrigger(ctx context.Context, triggerID string) (*store.Trigger, error)
-func (c *Client) HeartbeatClaim(ctx context.Context, runID, nodeID string, lease time.Duration) (cancel bool, err error)
 func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID string, lease time.Duration, headroom *Headroom) error
 func (c *Client) HeartbeatSlot(ctx context.Context, key, holderID string, lease time.Duration) (*HeartbeatSlotResponse, error)
 func (c *Client) HeartbeatTrigger(ctx context.Context, id string) (*HeartbeatStatus, error)
@@ -177,7 +176,6 @@ func (c *Client) SetPipelinePin(ctx context.Context, pipeline, nodeID string, co
 func (c *Client) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error
 func (c *Client) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (c *Client) SourceCredential(ctx context.Context, runID string) (*store.SourceCredential, error)
-func (c *Client) StartClaimExecution(ctx context.Context, runID, nodeID string) (specHash string, err error)
 func (c *Client) StartNode(ctx context.Context, runID, nodeID string) error
 func (c *Client) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (c *Client) StreamNodeLiveLog(ctx context.Context, runID, nodeID string, since int64) (io.ReadCloser, error)

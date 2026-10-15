@@ -40,9 +40,7 @@ func TestCredentialRotationPreservesTenantAndRowMetadataProperty(t *testing.T) {
 			}
 			originals[team] = append(originals[team], *row)
 		}
-		if _, err := tn.PutGitCredential(t.Context(), GitCredential{Host: "git.example.test", Kind: GitCredentialHTTPS, Secret: "old/key", CreatedBy: "author"}, now); err != nil {
-			t.Fatal(err)
-		}
+		seedMaintenanceGit(t, tn, GitCredential{Host: "git.example.test", Kind: GitCredentialHTTPS, Secret: "old/key", CreatedBy: "author"})
 	}
 	before, err := tenant.GitCredentialForHost(t.Context(), "git.example.test")
 	if err != nil {
@@ -90,9 +88,7 @@ func TestCredentialRotationRollsBackBothTables(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if _, err := tenant.PutGitCredential(t.Context(), GitCredential{Host: "git.example.test", Kind: GitCredentialHTTPS, Secret: "old"}, now); err != nil {
-				t.Fatal(err)
-			}
+			seedMaintenanceGit(t, tenant, GitCredential{Host: "git.example.test", Kind: GitCredentialHTTPS, Secret: "old"})
 			if failure == "demoted" {
 				rewriteSchemaExec(t, tenant.s.db, `UPDATE memberships SET role='reader' WHERE account_id='owner'`)
 			}
@@ -170,5 +166,15 @@ func TestSourceReleaseAuditsReadCommittedNanosecondsAndTenant(t *testing.T) {
 	rows, err = (&Tenant{s: tenant.s, team: "b"}).SourceReleaseAudits(t.Context(), 200)
 	if err != nil || rows == nil || len(rows) != 0 {
 		t.Fatalf("foreign audits: %+v,%v", rows, err)
+	}
+}
+
+func seedMaintenanceGit(t *testing.T, tenant *Tenant, row GitCredential) {
+	t.Helper()
+	if err := tenant.s.inTx(t.Context(), func(tx *storeTx) error {
+		_, err := tenant.putGitCredentialTx(t.Context(), tx, row, tx.now())
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -129,56 +130,15 @@ func TestConfigureSecrets_SingleTeamSQLiteRefusesASecondKeyForSealedRows(t *test
 	}
 }
 
-func TestConfigureSecrets_PlaintextRowsAreSealedAtStartup(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		features []string
-		creds    func(t *testing.T) controllerCredentials
-	}{
-		{"multi-team with a key", []string{license.FeatureMultiTeam}, func(t *testing.T) controllerCredentials {
-			key, err := secrets.GenerateKey()
-			if err != nil {
-				t.Fatal(err)
-			}
-			return controllerCredentials{SecretsKey: key}
-		}},
-		{"single-team SQLite without a key", nil, func(*testing.T) controllerCredentials { return controllerCredentials{} }},
+func TestKeylessCipherRefusesCredentialAccess(t *testing.T) {
+	cipher := keylessCipher{}
+	for _, access := range []func() (string, error){
+		func() (string, error) { return cipher.SealBound("team", "TOKEN", "build", false, true, "private") },
+		func() (string, error) { return cipher.OpenBound("team", "TOKEN", "build", false, true, "sealed") },
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			srv, st := secretsTestServer(t, tc.features...)
-			if err := st.CreateOrReplaceSecret(store.Secret{
-				Name: "TOKEN", Value: "written-before-the-key", Principal: "seed", Masked: true,
-			}, time.Now().UTC()); err != nil {
-				t.Fatal(err)
-			}
-			if err := configureSecrets(context.Background(), srv, st, tc.creds(t), keyFileIn(t)); err != nil {
-				t.Fatalf("configureSecrets: %v", err)
-			}
-			row, err := st.GetSecret("TOKEN")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !secrets.IsBound(row.Value) || strings.Contains(row.Value, "written-before-the-key") {
-				t.Fatalf("stored value after start = %.12q..., want a team-bound envelope", row.Value)
-			}
-		})
-	}
-}
-
-func TestKeylessControllerRefusesSecretWritesAndPlaintextRows(t *testing.T) {
-	srv, st := secretsTestServer(t)
-	srv.WithSecretsCipher(keylessCipher{})
-	code, body := postSecret(t, srv, "TOKEN", "v")
-	if code != http.StatusConflict || !strings.Contains(body, credSecretsKey) {
-		t.Fatalf("POST secret = %d %s, want 409 naming the %s credential", code, body, credSecretsKey)
-	}
-	if err := refusePlaintextSecrets(context.Background(), st); err != nil {
-		t.Fatalf("an empty store refused: %v", err)
-	}
-	if err := st.CreateOrReplaceSecret(store.Secret{Name: "OLD", Value: "plain", Principal: "seed"}, time.Now().UTC()); err != nil {
-		t.Fatal(err)
-	}
-	if err := refusePlaintextSecrets(context.Background(), st); err == nil || !strings.Contains(err.Error(), "1 secrets as plaintext") {
-		t.Fatalf("plaintext row = %v, want a refusal counting it", err)
+		value, err := access()
+		if value != "" || !errors.Is(err, secrets.ErrKeyRefused) || !strings.Contains(err.Error(), credSecretsKey) {
+			t.Fatalf("keyless credential access: %q, %v", value, err)
+		}
 	}
 }

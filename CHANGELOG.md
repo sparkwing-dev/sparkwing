@@ -21,6 +21,8 @@ unlock.
 ## [Unreleased]
 
 ### Changed
+- **store (Breaking):** Claim lifecycle and git-credential writes use current authority
+  Removed legacy claim-token start and heartbeat methods, raw git-credential mutations and automatic secret resealing. Unit renewal and job transitions use their capability fences. Git-credential mutations use the authority-bearing tenant methods. See [migration guide](docs/migrations/_unreleased.md#claim-lifecycle-and-credential-mutation-apis).
 - **store (Breaking):** Source credentials use capability transactions
   Removed the unused token-based release, audit and machine-consent APIs and their source-mint counter. Direct consumers use `ReleaseSourceCredential`, `SourceReleaseAudits` and `SetSourceMachineConsent`. See [migration guide](docs/migrations/_unreleased.md#source-credentials-use-capability-transactions).
 - **store (Breaking):** Run completion uses the fenced run-and-owner transaction
