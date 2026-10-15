@@ -85,10 +85,8 @@ var reviewedUnscopedSQL = map[string]string{
 		"a scope with no team and no all-teams flag is refused there",
 	"(*Operator).CountConcurrencyCache":      "an ops gauge of the whole table, which is what the ceiling is set against",
 	"(*Store).CountDeadLocalConcurrency":     "the dry run of that repair, and has to count what it would remove",
-	"(*Store).ListConcurrencyStates":         "enumerates the deployment's live keys with their teams and reads each through that team's handle",
 	"(*Store).PurgeDeadLocalConcurrency":     "repairs local-scope rows left by dead runs across the deployment, and deletes each through its own team",
 	"(*Store).reapStaleConcurrencyHolders":   "reaps every team's lease-expired holders, because a sweep that only reaped one team would leave the rest held",
-	"(*Store).reapStaleConcurrencyWaiters":   "reaps every team's abandoned waiters, for the same reason as the holder sweep",
 	"(*Store).reconcileConcurrencyKeys":      "enumerates every team's queued keys with their teams and promotes each through that team's handle",
 	"(*Store).sweepExpiredConcurrencyCache":  "an expiry sweep is the deployment's, and a memo past its TTL answers no team",
 	"(*Store).sweepLRUConcurrencyCache":      "the row ceiling is the deployment's, so eviction ranks every team's memos together",
@@ -144,7 +142,6 @@ var reviewedUnscopedSQL = map[string]string{
 
 	"(*Store).PruneEgressUsage": "drops every team's egress months past the window, which is a deployment-wide retention",
 	"(*Store).ExpireSessions":   "the identity prune deletes every team's expired sessions",
-	"txLiveRunningRunIDs":       "the concurrency reapers ask which of the runs they found in any team are still live",
 	"ownedTeamsTx": "lists the teams one account belongs to as owner, with each team's own owner and member counts, so the " +
 		"account deletion can tell sole ownership from shared",
 	"(*Store).ExpiredOutputRuns": "the output retention sweep finds every team's expired or deleted runs holding outputs, " +

@@ -123,6 +123,23 @@ GetPipelineProfile, ListPipelineProfiles and CacheExcludedCounts. Tenant owns
 the complete profile API. Local orchestration, capacity stats and profile
 diagnostics select the registered DefaultTeam explicitly.
 
+Tenant owns concurrency acquisition, holder reads and renewal, release,
+follower resolution, promotion, waiter polling/cancellation and state reads.
+The raw Store twins and unused deployment-wide ListConcurrencyStates are removed.
+The local adapter selects the registered DefaultTeam and propagates handle errors.
+Acquisition and promotion persist the work's current generation. Queued arrivals
+also persist their lease. Expired waiters cannot keep arrival order or promote.
+Admission, polling, renewal and cache expiry use the store clock. Promotion and
+waiter maintenance use the owner lease or a live run job claim instead of the
+removed run heartbeat. Run queries carry the selected tenant key.
+
+The SQLite recovery proof `recovery-concurrency-continuous-adoption/store-sqlite`
+holds node and plan capacity through owner loss, remote claim renewal and store
+reopening. It reclaims the owner through ClaimUnit and adopts both holders.
+Job completion releases node capacity. Run completion releases plan capacity.
+Each release allows one queued competitor, and repeated promotion admits none.
+Enrollment is a contract fake. Native process recovery remains separate evidence.
+
 `Tenant.ReadOwnerSnapshot` reads the current owner authority, lease and scheduling
 state in one snapshot. A replaced, expired or revoked owner receives no snapshot.
 Cancellation remains readable while a held owner drains. The controller transports

@@ -18,7 +18,7 @@ func TestDeleteRun_DropsMemoEntriesFromDeletedRun(t *testing.T) {
 		Key: "k", HolderID: "producer/n", RunID: "producer", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue, CacheKeyHash: "h1",
 	})
-	released, err := s.ReleaseConcurrencySlot(ctx, "k", "producer/n", "success", "producer/n", "h1", time.Hour)
+	released, err := tenantFor(t, s, store.DefaultTeam).ReleaseConcurrencySlot(ctx, "k", "producer/n", "success", "producer/n", "h1", time.Hour)
 	if err != nil || !released {
 		t.Fatalf("release: released=%v err=%v", released, err)
 	}

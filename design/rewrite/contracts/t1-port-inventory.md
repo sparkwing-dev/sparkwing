@@ -33,6 +33,19 @@ reconciliation keeps it terminal without another claim. The proof checks exact
 events and refuses stale reports after every loss. It adds coverage without a
 new archived source-function identity or native process evidence.
 
+`recovery_test.go:TestRecovery/recovery-concurrency-continuous-adoption/store-sqlite`
+checks node and plan capacity through owner loss, remote renewal, reopening and
+successor adoption. Node and run terminal transactions release their own groups.
+Each release admits exactly one queued competitor. Enrollment is a contract fake.
+Native processes and placement transports remain required.
+
+`pkg/store/concurrency_admission_runtime_test.go:TestHolderLivenessUsesStoreClock`
+replaces `TestConcurrencyGuard_CanonicalSQLSitesOnly` from design-found-hotfixes.
+Acquisition uses the injected clock. Expired capacity stops counting, heartbeat
+and adoption cannot revive it, and reacquisition creates a new lease. The
+96-case `TestConcurrencyExpiredCapacityNeverRevivesProperty` varies lease length
+and exact-expiry boundaries. The old source-count assertion is deleted.
+
 `placement_test.go:TestPlacement/placement-granted-identity-and-capacity/store-sqlite`
 extends the existing package ports into active SQLite acceptance. It checks
 named and queued claims for capacity, authenticated name, self-asserted labels,
@@ -155,7 +168,7 @@ The final three comparisons include all changes since the recorded merge base. E
 | `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/controller/github_runners_test.go` | `TestGitHubRunnerCredentialReadsOnlyAClaimedPipelinesProfile` | `TestGitHubRunnerCredentialReadsOnlyAClaimedPipelinesProfile` | Replace | `credentials_test.go:TestCredentials/credentials-holder-mutation-races/github_actions`. No claim and another pipeline are denied. An authorized missing sizing record returns not-found. Use `pipelineOfBoundRun` on the final sizing route. |
 | `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/controller/log_segments_internal_test.go` | `TestTriggerFencedLogWritesRefuseALiveHolder` | `TestTriggerFencedLogWritesRefuseALiveHolder` | Replace | `credentials_test.go:TestCredentials/credentials-holder-mutation-races/log_mutations`. A competing holder cannot append, sign or seal logs. Delete the unfenced-admin bypass. Recheck after request-body consumption and before mutation. |
 | `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/controller/runner_scopes_test.go` | `TestRunnerScopes_ProfileWritesAreScopedToTheClaimedPipeline` | `TestRunnerScopes_ProfileWritesAreScopedToTheClaimedPipeline` | Replace | `credentials_test.go:TestCredentials/credentials-holder-mutation-races/read_and_write`. Exact sealed repo and pipeline bind observations and pins. Delete shared bare-key authority. |
-| `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/store/concurrency_guard_test.go` | `TestConcurrencyGuard_CanonicalSQLSitesOnly` | `TestConcurrencyGuard_CanonicalSQLSitesOnly` | Replace | `pkg/store/concurrency_test.go:TestHolderLivenessUsesStoreClock`. Keep canonical liveness behavior. Old textual counts of 21 node helper calls and 11 trigger helper calls are not target requirements. |
+| `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/store/concurrency_guard_test.go` | `TestConcurrencyGuard_CanonicalSQLSitesOnly` | `TestConcurrencyGuard_CanonicalSQLSitesOnly` | Replace | Implemented in `pkg/store/concurrency_admission_runtime_test.go:TestHolderLivenessUsesStoreClock` and `pkg/store/concurrency_scope_property_test.go:TestConcurrencyExpiredCapacityNeverRevivesProperty`. Canonical liveness uses the injected store clock. Expired capacity cannot renew or adopt. The old source-count test is deleted. |
 | `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/store/controller_dispatch_test.go` | `TestReportAttempt_ARecoveryNodeWaitsOnItsOwnDeps` | `TestReportAttempt_ARecoveryNodeWaitsOnItsOwnDeps` | Keep | `lifecycle_test.go:TestLifecycle/lifecycle-dependency-verdicts/controller` and `pkg/store/decide_test.go:TestRecoveryDependencies`. Success of an own dependency releases recovery. Failure cancels it. A successful recovery does not erase the original run failure. |
 | `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/store/node_claim_fence_holder_test.go` | `TestTriggerFencedNodeWritesRefuseALiveHolder` | `TestTriggerFencedNodeWritesRefuseALiveHolder` | Replace | `credentials_test.go:TestCredentials/credentials-holder-mutation-races/node_mutations` and `recovery_test.go:TestRecovery/recovery-reconciler-waits-and-reclaims`. Refuse competing live writes and terminal reversal. Reverse the last old assertion allowing the host to finish after lease lapse. The reaper and reconciler own that recovery. Delete host lifecycle-event append and `ResetNodeForAutoRetry`. |
 | `design-found-hotfixes` | `c5aa3b88f1b6debf856e887bfc6df0894355b6cd` | `pkg/store/profile_claim_test.go` | `TestPrincipalHoldsProfileClaimMatchesTheClaimedRunsExactKey` | `TestPrincipalHoldsProfileClaimMatchesTheClaimedRunsExactKey`, subtests `build`, `ci/build`, `3:abcbuild` | Replace | `pkg/store/capability_test.go:TestSizingBinding` and `credentials_test.go:TestCredentials/credentials-holder-mutation-races/pipeline_names`. Preserve full pipeline names and exact repo identity. Delete authorization through bare shared profile keys. |

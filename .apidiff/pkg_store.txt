@@ -2837,7 +2837,6 @@ func (s *Store) AccountIdentities(ctx context.Context, accountID string) (_ []Id
 func (s *Store) AccountIdentity(ctx context.Context, accountID, provider string) (string, error)
 func (s *Store) AccountMemberships(ctx context.Context, accountID string) (_ []Membership, err error)
 func (s *Store) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, start ExecutionStart) error
-func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotRequest) (AcquireSlotResponse, error)
 func (s *Store) ActiveConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (s *Store) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample MetricSample) error
 func (s *Store) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) (err error)
@@ -2864,7 +2863,6 @@ func (s *Store) CancelNodeForExhaustedCredits(
 	ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time,
 ) error
 func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, error)
-func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (s *Store) ChargeDownload(ctx context.Context, c DownloadCharge) (_ DownloadCharged, err error)
 func (s *Store) CheckBinding(ctx context.Context, principal capability.Principal, rule capability.BindingRule, target capability.Target) error
 func (s *Store) CheckClaimKey(ctx context.Context, tok ClaimToken, key string) error
@@ -2892,7 +2890,6 @@ func (s *Store) CommittedObjectFor(ctx context.Context, team Team, key string, c
 func (s *Store) ComputeAlarmState(ctx context.Context) (runners, alarm int64, err error)
 func (s *Store) ComputeLimits(ctx context.Context) (_ ComputeLimits, err error)
 func (s *Store) ComputeUsage(ctx context.Context) (_ ComputeUsage, err error)
-func (s *Store) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (s *Store) ConsumeGitHubAppConnectState(ctx context.Context, nonce string, expires, now time.Time) (bool, error)
 func (s *Store) ConsumeIdentityLinkState(ctx context.Context, nonce string, expires, now time.Time) (bool, error)
 func (s *Store) CoordinatorID(ctx context.Context) (string, error)
@@ -2972,12 +2969,10 @@ func (s *Store) FinishRunsIfActive(ctx context.Context, runIDs []string, status,
 func (s *Store) FinishTrigger(ctx context.Context, id string) error
 func (s *Store) FinishTriggerAtGeneration(ctx context.Context, id string, seq int64) (bool, error)
 func (s *Store) ForTeam(ctx context.Context, team Team) (*Tenant, error)
-func (s *Store) ForceReleaseSupersededHolders(ctx context.Context, key string) ([]ConcurrencyHolder, error)
 func (s *Store) ForgetRunOutputs(ctx context.Context, team Team, runID string, deleted []Upload) (err error)
 func (s *Store) FreeSlots(ctx context.Context) (taken, limit int64, err error)
 func (s *Store) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*DebugPause, error)
 func (s *Store) GetApproval(ctx context.Context, runID, nodeID string) (*Approval, error)
-func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*ConcurrencyState, error)
 func (s *Store) GetCronSchedule(ctx context.Context, id string) (CronSchedule, error)
 func (s *Store) GetCronTick(ctx context.Context) (tick CronTick, err error)
 func (s *Store) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error)
@@ -2998,7 +2993,6 @@ func (s *Store) GrantCredits(
 ) (*CreditGrant, error)
 func (s *Store) GrantFreeSlot(ctx context.Context, team Team, now time.Time) (err error)
 func (s *Store) HeartbeatClaim(ctx context.Context, tok ClaimToken, lease time.Duration, now time.Time) (beat ClaimBeat, err error)
-func (s *Store) HeartbeatConcurrencySlot(ctx context.Context, key, holderID string, lease time.Duration) (expires time.Time, superseded bool, err error)
 func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string, lease time.Duration) error
 func (s *Store) HeartbeatNodeClaimWithCredits(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string, lease time.Duration, meteringLicensed bool) (CreditChargeResult, bool, error)
 func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Duration) (cancelled bool, err error)
@@ -3011,7 +3005,6 @@ func (s *Store) Issue(ctx context.Context, tx *storeTx, request capability.Issue
 func (s *Store) LatestNodeLog(ctx context.Context, team Team, runID, nodeID string) (NodeLog, error)
 func (s *Store) LinkIdentity(ctx context.Context, accountID string, p SignInProfile, now time.Time) (Identity, error)
 func (s *Store) ListApprovalsForRun(ctx context.Context, runID string) ([]*Approval, error)
-func (s *Store) ListConcurrencyStates(ctx context.Context) ([]*ConcurrencyState, error)
 func (s *Store) ListCreditCharges(ctx context.Context, limit int) (_ []CreditCharge, err error)
 func (s *Store) ListCreditGrants(ctx context.Context, limit int) (_ []CreditGrant, err error)
 func (s *Store) ListCronFires(ctx context.Context, scheduleID string, limit int) ([]CronFire, error)
@@ -3068,7 +3061,6 @@ func (s *Store) PrincipalHoldsProfileClaim(ctx context.Context, key string, clai
 func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) PrincipalHoldsTriggerClaim(ctx context.Context, triggerID string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)
-func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error)
 func (s *Store) ProvisionCapability(ctx context.Context, spec capability.ProvisionSpec) (capability.Issued, error)
 func (s *Store) PrunableNodeLogs(ctx context.Context, team Team, limit int) (_ []NodeLog, err error)
 func (s *Store) PruneDownloadDays(ctx context.Context, day string) (int64, error)
@@ -3093,9 +3085,7 @@ func (s *Store) RecordEgressUsage(ctx context.Context, usages []EgressUsage) (er
 func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string, now time.Time) error
 func (s *Store) RecordLocalOutput(ctx context.Context, runID, nodeID string, ref OutputRef, now time.Time) (err error)
 func (s *Store) RecordPaymentWarning(ctx context.Context, w PaymentWarning, now time.Time) (_ Team, err error)
-func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error)
 func (s *Store) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error)
-func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error)
 func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID, actor, reason string, now time.Time) (int64, error)
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (s *Store) ReleaseExpiredStorage(ctx context.Context, now time.Time) (int, error)
@@ -3117,10 +3107,8 @@ func (s *Store) ResetPipelineProfile(ctx context.Context, pipeline string) (Prof
 func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error)
 func (s *Store) ResolveAuthority(ctx context.Context, ref capability.AuthorityRef) (capability.Principal, error)
 func (s *Store) ResolveClaimInput(ctx context.Context, tok ClaimToken, req ClaimInputRequest, now time.Time) (ClaimInput, error)
-func (s *Store) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, leaderNodeID string) ([]ConcurrencyWaiter, error)
 func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time, next *time.Time, fire *CronFire, now time.Time) error
 func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpConditions, now time.Time) (SignInResult, error)
-func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (WaiterResolution, error)
 func (s *Store) ReversePayment(
 	ctx context.Context, paymentID, reference, createdBy string, amountMicro int64,
 ) (_ CreditReversal, err error)
