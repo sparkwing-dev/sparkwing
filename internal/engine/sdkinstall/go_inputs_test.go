@@ -30,20 +30,20 @@ func TestGoSDKInstallCacheIgnoresDisabledWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	var diagnostics bytes.Buffer
-	install := func() []string {
+	install := func() string {
 		t.Helper()
-		command, err := installGoSDK(t.Context(), dir, pin, os.Environ(), &diagnostics, secrets.NewMasker())
+		_, cached, err := installGoSDK(t.Context(), dir, t.TempDir(), pin, os.Environ(), &diagnostics, secrets.NewMasker())
 		if err != nil {
 			t.Fatalf("install: %v: %s", err, &diagnostics)
 		}
-		return command
+		return cached
 	}
 	first := install()
 	property := func(body []byte) bool {
 		writeInput(t, dependency, "unrelated.go", body)
 		next := install()
-		if first[0] != next[0] {
-			t.Logf("disabled workspace changed cache identity: %s -> %s", first[0], next[0])
+		if first != next {
+			t.Logf("disabled workspace changed cache identity: %s -> %s", first, next)
 			return false
 		}
 		return true
@@ -52,7 +52,7 @@ func TestGoSDKInstallCacheIgnoresDisabledWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeInput(t, root, "go.work", []byte("invalid ambient workspace"))
-	if next := install(); first[0] != next[0] {
-		t.Fatalf("disabled workspace contents changed cache identity: %s -> %s", first[0], next[0])
+	if next := install(); first != next {
+		t.Fatalf("disabled workspace contents changed cache identity: %s -> %s", first, next)
 	}
 }

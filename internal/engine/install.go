@@ -22,11 +22,12 @@ import (
 
 // SDKInstallRequest gives the verified matching engine its acquired source and filtered install base.
 type SDKInstallRequest struct {
-	Directory   string          `json:"directory"`
-	PipelineDir string          `json:"pipeline_dir"`
-	SDK         SDKKind         `json:"sdk"`
-	Environment []string        `json:"-"`
-	Masker      *secrets.Masker `json:"-"`
+	Directory           string          `json:"directory"`
+	PipelineDir         string          `json:"pipeline_dir"`
+	ExecutableDirectory string          `json:"executable_directory,omitempty"`
+	SDK                 SDKKind         `json:"sdk"`
+	Environment         []string        `json:"-"`
+	Masker              *secrets.Masker `json:"-"`
 }
 
 // UnmarshalJSON refuses ambiguous requests and credentials sent through the input pipe.
@@ -43,12 +44,22 @@ func (r *SDKInstallRequest) UnmarshalJSON(body []byte) error {
 
 // SDKCommand names the locally built Go command or Node/main command without protocol argv.
 type SDKCommand struct {
-	Directory string   `json:"directory"`
-	Command   []string `json:"command"`
+	Directory        string   `json:"directory"`
+	Command          []string `json:"command"`
+	CachedExecutable string   `json:"cached_executable,omitempty"`
+	ownedDirectory   string
+}
+
+// Close removes the installation-owned executable after its consumers finish.
+func (c SDKCommand) Close() error {
+	if c.ownedDirectory == "" {
+		return nil
+	}
+	return os.RemoveAll(c.ownedDirectory)
 }
 
 // InstallSDK installs the SDK using its verified matching engine and filtered environment.
-func (r Resolved) InstallSDK(ctx context.Context, request SDKInstallRequest) (SDKCommand, error) {
+func (r Resolved) InstallSDK(ctx context.Context, request SDKInstallRequest) (_ SDKCommand, resultErr error) {
 	if err := ctx.Err(); err != nil {
 		return SDKCommand{}, err
 	}
@@ -73,6 +84,19 @@ func (r Resolved) InstallSDK(ctx context.Context, request SDKInstallRequest) (SD
 	environment, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: request.Environment, Masker: masker}, procenv.Runtime{})
 	if err != nil {
 		return SDKCommand{}, err
+	}
+	ownedDirectory := ""
+	if request.SDK == GoSDK {
+		ownedDirectory, err = os.MkdirTemp("", "sparkwing-sdk-executable-")
+		if err != nil {
+			return SDKCommand{}, err
+		}
+		request.ExecutableDirectory = ownedDirectory
+		defer func() {
+			if resultErr != nil {
+				resultErr = errors.Join(resultErr, os.RemoveAll(ownedDirectory))
+			}
+		}()
 	}
 	body, err := json.Marshal(request)
 	if err != nil {
@@ -103,6 +127,23 @@ func (r Resolved) InstallSDK(ctx context.Context, request SDKInstallRequest) (SD
 			return SDKCommand{}, errors.New("selected engine returned protocol arguments or a preload in its SDK command")
 		}
 	}
+	if request.SDK == GoSDK {
+		name := "pipeline"
+		if runtime.GOOS == "windows" {
+			name += ".exe"
+		}
+		if len(result.Command) != 1 || result.Command[0] != filepath.Join(ownedDirectory, name) {
+			return SDKCommand{}, errors.New("selected engine returned an unowned Go executable")
+		}
+		info, err := os.Lstat(result.Command[0])
+		if err != nil {
+			return SDKCommand{}, err
+		}
+		if !info.Mode().IsRegular() {
+			return SDKCommand{}, errors.New("selected engine returned a nonregular Go executable")
+		}
+	}
+	result.ownedDirectory = ownedDirectory
 	return result, nil
 }
 

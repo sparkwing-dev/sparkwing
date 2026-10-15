@@ -60,7 +60,26 @@ func fixture() (*Launcher, *fake.Clientset, *boundaryFake, *controlFake) {
 	image := "registry/runner@sha256:" + strings.Repeat("a", 64)
 	control := &controlFake{award: &CloudJobAward{Binding: CloudJobBinding{UnitID: "unit", Kind: CloudWork, Team: "team", RunID: "run", NodeID: "job", Holder: "holder", Generation: 1, Attempt: 1, OwnerDeadline: now.Add(time.Hour), AttemptDeadline: now, ParentCapabilityExpiry: now.Add(2 * time.Hour)}, Bootstrap: []byte("bootstrap-secret"), CPUCores: 1.5, Memory: 2 << 30, Engine: &engine.Identity{Version: "v1.2.3", Pin: engine.Pin{SDK: engine.GoSDK, Version: "v1.2.3"}, ManifestDigest: strings.Repeat("a", 64)}}}
 	boundary := &boundaryFake{}
-	kube := fake.NewClientset()
+	kube := fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "cloud", Labels: map[string]string{"kubernetes.io/metadata.name": "cloud"}}}, AdmissionExemptionPolicy("cloud"), AdmissionExemptionBinding("cloud"))
+	kube.PrependReactor("create", "*", func(action ktesting.Action) (bool, runtime.Object, error) {
+		switch obj := action.(ktesting.CreateAction).GetObject().(type) {
+		case *batchv1.Job:
+			if obj.UID == "" {
+				obj.UID = "job-uid"
+			}
+		case *corev1.Secret:
+			if obj.UID == "" {
+				obj.UID = "secret-uid"
+			}
+		}
+		return false, nil, nil
+	})
+	kube.PrependReactor("create", "limitranges", func(action ktesting.Action) (bool, runtime.Object, error) {
+		if len(action.(ktesting.CreateActionImpl).CreateOptions.DryRun) == 0 {
+			return false, nil, nil
+		}
+		return true, nil, apierrors.NewForbidden(corev1.Resource("limitranges"), "probe", errors.New("ValidatingAdmissionPolicy 'sparkwing-cloud-exemption-cloud' with binding 'sparkwing-cloud-exemption-cloud' denied request:"))
+	})
 	l := &Launcher{Kube: kube, Control: control, Boundary: boundary, Config: CloudJobConfig{Namespace: "cloud", RunnerImage: image, DockerImage: image, ControllerURL: "https://controller.example", CPUCeiling: 4, MemoryCeiling: 8 << 30}}
 	return l, kube, boundary, control
 }

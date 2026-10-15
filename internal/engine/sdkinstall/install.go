@@ -4,7 +4,6 @@ package sdkinstall
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
@@ -57,53 +57,73 @@ func Run(ctx context.Context, version string, input io.Reader, output, diagnosti
 		return err
 	}
 	var command []string
+	var cachedExecutable string
 	if request.SDK == engine.GoSDK {
-		command, err = installGoSDK(ctx, dir, pin, environment, diagnostics, masker)
+		command, cachedExecutable, err = installGoSDK(ctx, dir, request.ExecutableDirectory, pin, environment, diagnostics, masker)
 	} else {
 		command, err = installTypeScriptSDK(ctx, dir, pin, environment, diagnostics, masker)
 	}
 	if err != nil {
 		return err
 	}
-	return json.NewEncoder(output).Encode(engine.SDKCommand{Directory: dir, Command: command})
+	return json.NewEncoder(output).Encode(engine.SDKCommand{Directory: dir, Command: command, CachedExecutable: cachedExecutable})
 }
 
-func installGoSDK(ctx context.Context, dir string, pin engine.Pin, environment []string, diagnostics io.Writer, masker *secrets.Masker) (command []string, result error) {
-	// safety: workspace and modfile overrides must not replace the SDK that selected this engine.
-	environment = append(environment, "GOWORK=off", "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH)
-	key, _, err := bincache.ExplainCacheKey(dir, environment)
-	if err != nil {
-		return nil, err
+func installGoSDK(ctx context.Context, dir, executableDirectory string, pin engine.Pin, environment []string, diagnostics io.Writer, masker *secrets.Masker) (command []string, cachedExecutable string, result error) {
+	if !filepath.IsAbs(executableDirectory) {
+		return nil, "", errors.New("Go installation requires an owned executable directory")
 	}
-	material, err := json.Marshal([]any{"sdk-install-v2", pin, key, environment})
-	if err != nil {
-		return nil, err
-	}
-	hash := fmt.Sprintf("%x", sha256.Sum256(material))
-	entry, err := bincache.PipelineEntry(hash[:8] + "-" + hash[8:16])
-	if err != nil {
-		return nil, err
-	}
-	lease, _, err := entry.AcquireOrMaterialize(ctx, func(destination string) error {
-		var module struct {
-			Version string
-			Replace any
+	flags := ""
+	for _, setting := range environment {
+		if value, ok := strings.CutPrefix(setting, "GOFLAGS="); ok {
+			flags = value
 		}
-		body, err := installTool(ctx, dir, environment, "go", "list", "-modfile=go.mod", "-m", "-json", engine.GoModule)
-		if err != nil {
-			return installDiagnostic(diagnostics, masker, body, err)
-		}
-		if err := json.Unmarshal(body, &module); err != nil || module.Version != pin.Version || module.Replace != nil {
-			return &apierr.Error{Code: apierr.IntegrityFailure, Message: "Go dependency selection changed the SDK pin"}
-		}
-		body, err = installTool(ctx, dir, environment, "go", "build", "-modfile=go.mod", "-trimpath", "-ldflags", "-s -w", "-o", destination, ".")
-		return installDiagnostic(diagnostics, masker, body, err)
-	})
-	if err != nil {
-		return nil, err
 	}
-	defer func() { result = errors.Join(result, lease.Release()) }()
-	return []string{lease.Path()}, nil
+	environment = append(environment, "GOWORK=off", "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH, "GOFLAGS="+flags+" -modfile=go.mod")
+	var buildDiagnostics bytes.Buffer
+	options := bincache.CompileOptions{Environment: environment, Diagnostics: &buildDiagnostics}
+	lease, _, err := bincache.MaterializePipeline(ctx, dir, options)
+	if lease != nil {
+		defer func() { result = errors.Join(result, lease.Release()) }()
+	}
+	if err := installDiagnostic(diagnostics, masker, buildDiagnostics.Bytes(), err); err != nil {
+		return nil, "", err
+	}
+	args := []string{"list"}
+	if overlay := bincache.EffectiveOverlay(dir, environment); overlay != "" {
+		args = append(args, "-modfile="+overlay)
+	}
+	args = append(args, "-m", "-json", engine.GoModule)
+	body, err := installTool(ctx, dir, environment, "go", args...)
+	if err != nil {
+		return nil, "", installDiagnostic(diagnostics, masker, body, err)
+	}
+	var module struct {
+		Version string
+		Replace any
+	}
+	if err := json.Unmarshal(body, &module); err != nil || module.Version != pin.Version || module.Replace != nil {
+		return nil, "", &apierr.Error{Code: apierr.IntegrityFailure, Message: "Go dependency selection changed the SDK pin"}
+	}
+	source, err := os.Open(lease.Path())
+	if err != nil {
+		return nil, "", err
+	}
+	defer func() { result = errors.Join(result, source.Close()) }()
+	name := "pipeline"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	path := filepath.Join(executableDirectory, name)
+	destination, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
+	if err != nil {
+		return nil, "", err
+	}
+	_, copyErr := io.Copy(destination, source)
+	if err := errors.Join(copyErr, destination.Close()); err != nil {
+		return nil, "", err
+	}
+	return []string{path}, lease.Path(), nil
 }
 
 func installTypeScriptSDK(ctx context.Context, dir string, pin engine.Pin, environment []string, diagnostics io.Writer, masker *secrets.Masker) ([]string, error) {

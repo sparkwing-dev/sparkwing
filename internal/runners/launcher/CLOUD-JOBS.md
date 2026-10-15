@@ -6,8 +6,7 @@ of the requested unit kinds. `Hosting` and `BootstrapHost` keep the caller's
 HTTP transport when opening award or exchange clients. Each uses its own bearer.
 The launcher component uses the default engine client, shared HTTP handlers and
 real store. Its transport invokes the handlers without sockets. The embedded
-local queue has no launcher adapter. The controller's transactional launcher
-sync reader remains a fake in this component.
+local queue has no launcher adapter. The controller uses the transactional launcher sync reader.
 
 `BuildJob` builds plan, eval and work Jobs from an awarded binding. It checks
 images, resources, deadlines and engine identity before reserving an exclusive
@@ -32,6 +31,22 @@ ceiling, the builder refuses it before reserving a node. Exact values such as
 2.007 cores stay exact through conversion. The pod shares its awarded CPU and
 memory across the host and Docker sidecar.
 
+Before claiming work, `Launcher.LaunchOne` verifies a namespace exemption from
+programmable mutating admission for Job and Pod CREATE/UPDATE. It reads the actual
+namespace labels, webhook configurations and mutating policy bindings.
+A matching mutator, unreadable configuration or a LimitRange refuses the claim.
+The chart installs a denying admission guard that preserves the canonical
+namespace-name exclusions and refuses later LimitRanges. The launcher compares
+its complete policy and binding, then requires a dry-run LimitRange request to
+be denied by that exact policy and binding before taking the configuration
+snapshot. An installed but inactive guard cannot authorize work. Existing policy
+bindings must exclude the namespace even if their policies only match other
+resources. Later policy edits cannot widen those bindings into Cloud Jobs.
+Object selectors and CEL match conditions cannot establish this exemption because
+mutators can change object fields. Operators must retain the namespace exemption
+while Cloud Jobs exist. Cluster administrators remain trusted to preserve it.
+`FuzzLauncherRequiresJobAndPodAdmissionExemption` exercises the claim entrypoint.
+
 `Launcher.LaunchOne` persists a suspended Job and checks the admitted response
 before creating the bootstrap Secret. Kubernetes defaults may fill unset fields.
 Changes to the authored placement, containers, private volumes, resource budget,
@@ -41,7 +56,7 @@ policy cannot turn an OOM failure into another pod execution.
 The admitted bootstrap Secret must retain its exact bytes, immutable flag, type
 and Job owner before activation. Extra data or altered ownership refuses launch
 and starts teardown without reading Secrets or exposing credential bytes. A
-renamed Secret's name and UID are recorded on the suspended Job before teardown.
+created Secret's name and UID are recorded on the suspended Job before teardown.
 `Sync` retries its UID-fenced deletion after a failure or launcher restart and
 retains the reservation and finalizer until cleanup succeeds. The record binds
 to the Job UID and must survive the admitted update. A cleanup record injected
@@ -67,10 +82,12 @@ in any order; each must match exactly one observed binding before any live Job
 is retired. Duplicate, changed, extra or missing decisions preserve live Jobs
 and return an error. Expired or locally terminal Jobs can still be cleaned up
 when the controller is unavailable.
-Teardown deletes the bootstrap Secret and retains the node reservation
+Teardown deletes only the recorded bootstrap UID and retains the node reservation
 while a Job container remains. `KubernetesBoundary.Release` also requires pod
 removal and reservation-scoped cleanup before another Job can reserve the node.
-If Job deletion fails, teardown still deletes its bootstrap after confirming
+Before Secret creation succeeds, including an AlreadyExists response, teardown
+deletes no Secret. Job garbage collection handles uncertain creation through its
+owner reference. If Job deletion fails, teardown still deletes its bootstrap after confirming
 that the persisted Job has the original UID. An unknown or replacement Job
 retains its bootstrap and reservation until ownership can be established.
 
@@ -174,8 +191,9 @@ bootstrap or changed execution inputs fail before the unit host runs. Cancellati
 before or after exchange also prevents dispatch. The unit host receives the complete
 exchanged claim and owns renewal, source acquisition and execution.
 Job construction, source initialization and bootstrap execution share one award
-deadline calculation. It uses `limits.JobDeadline` and the parent capability
-expiry. Exchange and host dispatch run under that deadline and any earlier caller
+deadline calculation. It uses `limits.JobDeadline`, constrained by an optional
+parent capability expiry. A service root without expiry does not add a deadline.
+The resulting Cloud execution deadline must remain bounded. Exchange and host dispatch run under that deadline and any earlier caller
 deadline. Expired awards fail before transport construction. Expiry during
 exchange prevents dispatch, and expiry during hosting cancels and joins the host.
 The exchanged source must match the private projection used by fetch-source,

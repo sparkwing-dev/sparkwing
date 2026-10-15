@@ -74,11 +74,23 @@ type SoftwareUpdate struct {
 
 // Upgrade verifies staged code before applying digest-fenced manifest and lockfile edits.
 func (r *Resolver) Upgrade(ctx context.Context, request UpgradeRequest, verifier UpgradeVerifier) (result UpgradeResult, err error) {
-	stage, plan, resolved, err := r.prepareUpgrade(ctx, request)
+	if !filepath.IsAbs(request.Checkout) {
+		return result, errors.New("upgrade requires an absolute checkout root")
+	}
+	request.Checkout, err = filepath.EvalSymlinks(request.Checkout)
+	if err != nil {
+		return result, err
+	}
+	pipeline, err := (SDKInstallRequest{Directory: request.Checkout, PipelineDir: ".sparkwing"}).PipelineDirectory()
+	if err != nil {
+		return result, err
+	}
+	stage, plan, resolved, err := r.prepareUpgrade(ctx, request, pipeline)
 	if err != nil {
 		return result, err
 	}
 	defer func() { err = errors.Join(err, os.RemoveAll(stage)) }()
+	stagePipeline := filepath.Join(stage, ".sparkwing")
 	result = UpgradeResult{Plan: plan, DryRun: request.DryRun}
 	if request.DryRun {
 		return result, nil
@@ -89,7 +101,7 @@ func (r *Resolver) Upgrade(ctx context.Context, request UpgradeRequest, verifier
 	if err := verifier.Verify(ctx, stage, resolved); err != nil {
 		return result, fmt.Errorf("SDK upgrade verification failed; repository pins are unchanged: %w", err)
 	}
-	after, err := ReadPin(stage, request.SDK)
+	after, err := ReadPin(stagePipeline, request.SDK)
 	if err != nil {
 		return result, err
 	}
@@ -98,13 +110,13 @@ func (r *Resolver) Upgrade(ctx context.Context, request UpgradeRequest, verifier
 	}
 	plan.After = after
 	plan.Engine.Pin = after
-	plan.Edits, err = collectPinEdits(stage, plan.Before, after, plan.inputDigests)
+	plan.Edits, err = collectPinEdits(stagePipeline, plan.Before, after, plan.inputDigests)
 	if err != nil {
 		return result, err
 	}
 	result.Plan = plan
 	result.Verified = true
-	currentInputs, err := readPinInputDigests(request.Checkout, request.SDK)
+	currentInputs, err := readPinInputDigests(pipeline, request.SDK)
 	if err != nil {
 		return result, err
 	}
@@ -120,11 +132,11 @@ func (r *Resolver) Upgrade(ctx context.Context, request UpgradeRequest, verifier
 	return result, nil
 }
 
-func (r *Resolver) prepareUpgrade(ctx context.Context, request UpgradeRequest) (stage string, plan UpgradePlan, resolved Resolved, result error) {
+func (r *Resolver) prepareUpgrade(ctx context.Context, request UpgradeRequest, pipeline string) (stage string, plan UpgradePlan, resolved Resolved, result error) {
 	if err := ctx.Err(); err != nil {
 		return "", plan, resolved, err
 	}
-	before, err := ReadPin(request.Checkout, request.SDK)
+	before, err := ReadPin(pipeline, request.SDK)
 	if err != nil {
 		return "", plan, resolved, err
 	}
@@ -146,6 +158,7 @@ func (r *Resolver) prepareUpgrade(ctx context.Context, request UpgradeRequest) (
 	if err != nil {
 		return "", plan, resolved, err
 	}
+	stagePipeline := filepath.Join(stage, ".sparkwing")
 	defer func() {
 		if result != nil {
 			result = errors.Join(result, os.RemoveAll(stage))
@@ -154,21 +167,21 @@ func (r *Resolver) prepareUpgrade(ctx context.Context, request UpgradeRequest) (
 	if err := copyCheckout(ctx, request.Checkout, stage); err != nil {
 		return stage, plan, resolved, err
 	}
-	snapshot, err := ReadPin(stage, request.SDK)
+	snapshot, err := ReadPin(stagePipeline, request.SDK)
 	if err != nil {
 		return stage, plan, resolved, err
 	}
 	if snapshot != before {
 		return stage, plan, resolved, &apierr.Error{Code: apierr.Conflict, Message: "Repository pins changed while staging the upgrade", Hint: "Retry the upgrade after the concurrent edit finishes."}
 	}
-	inputDigests, err := readPinInputDigests(stage, request.SDK)
+	inputDigests, err := readPinInputDigests(stagePipeline, request.SDK)
 	if err != nil {
 		return stage, plan, resolved, err
 	}
-	if err := r.updateNativePin(ctx, stage, request.SDK, version); err != nil {
+	if err := r.updateNativePin(ctx, stagePipeline, request.SDK, version); err != nil {
 		return stage, plan, resolved, err
 	}
-	after, err := ReadPin(stage, request.SDK)
+	after, err := ReadPin(stagePipeline, request.SDK)
 	if err != nil {
 		return stage, plan, resolved, err
 	}
@@ -183,7 +196,7 @@ func (r *Resolver) prepareUpgrade(ctx context.Context, request UpgradeRequest) (
 	if err != nil {
 		return stage, plan, resolved, err
 	}
-	edits, err := collectPinEdits(stage, before, after, inputDigests)
+	edits, err := collectPinEdits(stagePipeline, before, after, inputDigests)
 	if err != nil {
 		return stage, plan, resolved, err
 	}
@@ -370,7 +383,7 @@ func collectPinEdits(stage string, before, after Pin, inputs map[string]string) 
 		if beforeDigest == digest(updated) {
 			continue
 		}
-		edits = append(edits, PinEdit{Path: path, BeforeDigest: beforeDigest, After: updated})
+		edits = append(edits, PinEdit{Path: filepath.Join(".sparkwing", path), BeforeDigest: beforeDigest, After: updated})
 	}
 	return edits, nil
 }

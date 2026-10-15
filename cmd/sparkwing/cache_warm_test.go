@@ -209,10 +209,13 @@ func TestCacheWarmUsesSelectedEngineAndCapturedEnvironment(t *testing.T) {
 				if ctx.Err() != nil || got.Executable != selected.Executable || request.Directory != filepath.Dir(dir) || request.PipelineDir != filepath.Base(dir) || request.SDK != sdk || !reflect.DeepEqual(request.Environment, environment) {
 					t.Fatal("installation changed selected engine or captured input")
 				}
-				return engine.SDKCommand{Directory: dir, Command: []string{filepath.Join(dir, "pipeline")}}, nil
+				return engine.SDKCommand{Directory: dir, Command: []string{filepath.Join(dir, "pipeline")}, CachedExecutable: filepath.Join(dir, "cache", "pipeline")}, nil
 			})
 			if err != nil || !called || result.Language != string(sdk) || result.Status != "prepared" {
 				t.Fatalf("result=%+v called=%v err=%v", result, called, err)
+			}
+			if sdk == engine.GoSDK && result.Path != filepath.Join(dir, "cache", "pipeline") {
+				t.Fatalf("warm reported temporary executable: %q", result.Path)
 			}
 			if sdk == engine.TypeScriptSDK && result.Path != filepath.Join(dir, "node_modules") {
 				t.Fatalf("TypeScript path=%q", result.Path)

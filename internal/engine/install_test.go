@@ -19,11 +19,11 @@ import (
 )
 
 const installerFixtureSource = `package main
-import("encoding/json";"fmt";"os";"path/filepath";"strings")
+import("encoding/json";"fmt";"os";"path/filepath";"strings";"runtime")
 var Version="dev"
 func main(){
  if len(os.Args)!=2 || os.Args[1]!="__sdk-install" { os.Exit(20) }
- var req struct{Directory string;PipelineDir string ` + "`json:\"pipeline_dir\"`" + `;SDK string}
+ var req struct{Directory string;PipelineDir string ` + "`json:\"pipeline_dir\"`" + `;SDK string; ExecutableDirectory string ` + "`json:\"executable_directory\"`" + `}
  dec:=json.NewDecoder(os.Stdin); dec.DisallowUnknownFields()
  if dec.Decode(&req)!=nil { os.Exit(21) }
  if os.Getenv("SPARKWING_TOKEN")!="" || os.Getenv("AMBIENT_INSTALL_TEST")!="" { os.Exit(22) }
@@ -31,7 +31,9 @@ func main(){
  if os.Getenv("INSTALL_FAILURE")!="" { fmt.Fprintln(os.Stderr,os.Getenv("HTTPS_PROXY"));fmt.Fprintln(os.Stderr,strings.Repeat("a",(1<<20)-5)+os.Getenv("REGISTRY_NOTE"));os.Exit(24) }
  if reply:=os.Getenv("INSTALL_REPLY");reply!="" { fmt.Print(reply);return }
  dir:=filepath.Join(req.Directory,req.PipelineDir)
- json.NewEncoder(os.Stdout).Encode(map[string]any{"directory":dir,"command":[]string{filepath.Join(dir,"pipeline")}})
+ path:=filepath.Join(dir,"pipeline")
+ if req.SDK=="go" { name:="pipeline";if runtime.GOOS=="windows" {name+=".exe"};path=filepath.Join(req.ExecutableDirectory,name);if os.WriteFile(path,[]byte("fixture"),0700)!=nil {os.Exit(25)} }
+ json.NewEncoder(os.Stdout).Encode(map[string]any{"directory":dir,"command":[]string{path}})
 }`
 
 func TestInstallSDKUsesSelectedVerifiedEngineAndFilteredStdin(t *testing.T) {
@@ -67,8 +69,21 @@ func TestInstallSDKUsesSelectedVerifiedEngineAndFilteredStdin(t *testing.T) {
 			marker := filepath.Join(checkout, "installed")
 			request := SDKInstallRequest{Directory: checkout, PipelineDir: ".sparkwing", SDK: sdk, Environment: []string{"INSTALL_MARKER=" + marker, "SPARKWING_TOKEN=private-credential"}}
 			command, err := resolved.InstallSDK(t.Context(), request)
-			if err != nil || command.Directory != pipeline || len(command.Command) != 1 || command.Command[0] != filepath.Join(pipeline, "pipeline") {
+			if err != nil || command.Directory != pipeline || len(command.Command) != 1 {
 				t.Fatalf("install = %+v, %v", command, err)
+			}
+			t.Cleanup(func() {
+				if err := command.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			if sdk == GoSDK {
+				if err := command.Close(); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := os.Stat(command.Command[0]); !os.IsNotExist(err) {
+					t.Fatalf("installation did not release executable: %v", err)
+				}
 			}
 			body, err := os.ReadFile(marker)
 			if err != nil || string(body) != string(sdk) {

@@ -62,6 +62,7 @@ func (v *upgradeVerifier) Verify(ctx context.Context, checkout string, selected 
 		}
 	}
 	command, err := install(ctx, selected, engine.SDKInstallRequest{Directory: checkout, PipelineDir: ".sparkwing", SDK: sdk, Environment: installEnv})
+	defer func() { resultErr = errors.Join(resultErr, command.Close()) }()
 	if err := errors.Join(err, ctx.Err()); err != nil {
 		return fmt.Errorf("upgrade: install SDK: %w", err)
 	}

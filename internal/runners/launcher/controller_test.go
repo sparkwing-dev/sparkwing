@@ -256,7 +256,6 @@ func TestControllerClaimRejectsIncompleteOrConflictingAwards(t *testing.T) {
 		{"different_run", func(u *controllerwire.ClaimedUnit) { u.Binding.RunID = "other-run" }},
 		{"different_job", func(u *controllerwire.ClaimedUnit) { u.Binding.NodeID = "other-job" }},
 		{"negative_attempt", func(u *controllerwire.ClaimedUnit) { u.Binding.Attempt = -1 }},
-		{"missing_parent_expiry", func(u *controllerwire.ClaimedUnit) { u.ParentCapabilityExpiry = nil }},
 		{"missing_resources", func(u *controllerwire.ClaimedUnit) { u.Execution = nil }},
 		{"unset_cores", func(u *controllerwire.ClaimedUnit) { u.Execution.Resources.Value.Cores.Set = false }},
 		{"missing_accepted_spec", func(u *controllerwire.ClaimedUnit) { u.Accepted = nil }},

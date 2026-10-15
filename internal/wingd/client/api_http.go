@@ -12,7 +12,7 @@ import (
 // APIBaseURL addresses HTTP requests carried by the private controller socket.
 const APIBaseURL = "http://sparkwing-api"
 
-// NewAPIClient carries HTTP over the private socket without retries or redirects.
+// NewAPIClient carries HTTP over the private socket and refuses redirects.
 func NewAPIClient(socket string) *http.Client {
 	const requestTimeout = 45 * time.Second
 	return &http.Client{

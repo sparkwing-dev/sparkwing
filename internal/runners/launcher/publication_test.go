@@ -36,18 +36,19 @@ func TestSyncSuspendedJobRequiresRetirementEvidence(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			l, kube, boundary, control := fixture()
-			r, err := BuildJob(t.Context(), time.Now(), l.Config, *control.award, boundary)
-			if err != nil {
+			if _, err := l.LaunchOne(t.Context()); err != nil {
 				t.Fatal(err)
 			}
-			r.Job.Spec.Suspend = ptr(true)
+			jobsBefore, err := kube.BatchV1().Jobs(l.Config.Namespace).List(t.Context(), metav1.ListOptions{})
+			if err != nil || len(jobsBefore.Items) != 1 {
+				t.Fatalf("publication: %v", err)
+			}
+			job := jobsBefore.Items[0].DeepCopy()
+			job.Spec.Suspend = ptr(true)
 			if test.expired {
-				r.Job.Annotations[deadlineAnnotation] = time.Now().Add(-time.Second).Format(time.RFC3339Nano)
+				job.Annotations[deadlineAnnotation] = time.Now().Add(-time.Second).Format(time.RFC3339Nano)
 			}
-			if _, err := kube.BatchV1().Jobs(l.Config.Namespace).Create(t.Context(), r.Job, metav1.CreateOptions{}); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := kube.CoreV1().Secrets(l.Config.Namespace).Create(t.Context(), r.BootstrapSecret, metav1.CreateOptions{}); err != nil {
+			if _, err := kube.BatchV1().Jobs(l.Config.Namespace).Update(t.Context(), job, metav1.UpdateOptions{}); err != nil {
 				t.Fatal(err)
 			}
 			control.remove, control.fail = test.remove, test.failure

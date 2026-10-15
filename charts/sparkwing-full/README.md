@@ -72,7 +72,7 @@ fresh clone with no `helm dependency update` first.
   / equivalents on the sub-chart). The controller PVC is RWO.
 - `helm` v3.13+ (chart uses standard idioms; nothing exotic).
 
-### Pre-install Secrets (optional but recommended)
+### Pre-install Secrets
 
 Operators bring their own Secrets so they can rotate without
 `helm upgrade`. Create these in the install namespace before
@@ -80,11 +80,9 @@ running install:
 
 ```bash
 
-# The first admin token. The controller stores it as an admin credential
-# before it binds, so it never serves a request unauthenticated. Keep the
-# value: it is the admin bearer for `sparkwing tokens create`. The
-# umask makes the file 0600, so no other local account can read it.
-(umask 077 && printf 'swu_%s' "$(openssl rand -hex 24)" > "$HOME/sparkwing-bootstrap-admin")
+# The once-only operator bootstrap credential. Keep this value for
+# operator credential management. The umask restricts the file to its owner.
+(umask 077 && printf 'swk_%s' "$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')" > "$HOME/sparkwing-bootstrap-admin")
 kubectl -n sparkwing create secret generic sparkwing-bootstrap-admin \
     --from-file=token="$HOME/sparkwing-bootstrap-admin"
 
@@ -96,12 +94,12 @@ openssl rand -base64 32 > /tmp/sparkwing-key
 kubectl -n sparkwing create secret generic sparkwing-secrets-key \
     --from-file=key=/tmp/sparkwing-key
 
-# Bearer token for the runner bundle (claim loop). The controller only
-# accepts tokens IT minted, so mint it with the bootstrap admin token
-# after the first `helm install` -- see Auth below.
+# Machine root credential for the runner bundle's claim loop. Provision
+# the machine identity through operator credential management after the
+# first helm install, then create its Secret -- see Auth below.
 #   kubectl -n sparkwing create secret generic sparkwing-token \
-#       --from-literal=token=swr_...
-# A runner token needs `nodes.claim`, `triggers.claim` and `runs.state`.
+#       --from-literal=token=swk_...
+# Provision the machine with nodes.claim and triggers.claim grants.
 
 ```
 
@@ -122,13 +120,13 @@ sparkwing-runner-bundle:
 # Vendor the sub-chart into ./charts/ (one-time per chart change).
 helm dep up ./charts/sparkwing-full
 
-# Install the complete stack with an explicitly compatible image set. This
-# source-test configuration has no auth or encryption-at-rest,
-# so the controller must enable open bootstrap explicitly.
+# Install with the provisioned bootstrap credential and runner Secret.
+# Runner pods wait until their machine credential Secret exists.
 helm install sparkwing ./charts/sparkwing-full \
     --namespace sparkwing --create-namespace \
     -f compatible-images.yaml \
-    --set controller.allowOpenBootstrap=true
+    --set controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin \
+    --set sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token
 ```
 
 ### Verify the source stack in Kubernetes
@@ -188,9 +186,9 @@ helm install sparkwing ./charts/sparkwing-full \
 The Ingress publishes the whole controller: its API, webhooks, and
 dashboard. An Ingress fails to render with an empty `ingress.tls`, with
 `controller.requireAuth=false`, or with `controller.allowOpenBootstrap=true`
-and no `controller.bootstrapAdminToken.name`, because each one publishes a
-controller that anyone on the path can read or drive. Set
-`ingress.allowInsecure=true` to publish it unencrypted or open anyway; it
+and no `controller.bootstrapAdminToken.name`. These guards require TLS and
+startup credential provisioning for a published controller. Set
+`ingress.allowInsecure=true` to waive those chart guards; it
 must be a bool, since a quoted string fails the render instead of reading
 as an opt-out. Opting in without TLS also passes `--insecure-cookies` to
 the controller, so a browser keeps its session over plain HTTP. The
@@ -220,9 +218,9 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `controller.dashboardURL` | Query-free HTTP(S) dashboard base URL for GitHub App check run links; invalid values omit the link. | `""` |
 | `controller.secretsKey.name` | Secret holding the 32-byte encryption key, mounted as the `secrets-key` credential. | `""` |
 | `controller.secretsPreviousKey.name` | Secret holding the key values were sealed under before `secretsKey`; read-only fallback for the window before `sparkwing secrets rotate` runs. | `""` |
-| `controller.bootstrapAdminToken.name` | Secret holding the first admin token, stored as an admin credential before the listener binds when the tokens table is empty. | `""` |
-| `controller.requireAuth` | Refuse to start when no live token exists. Without `bootstrapAdminToken` the render refuses unless `allowOpenBootstrap` is true, because a fresh controller would have no way to mint its first token. | `true` |
-| `controller.allowOpenBootstrap` | Render without `bootstrapAdminToken` and drop `--require-auth`, so an empty tokens table serves every route unauthenticated until a token exists and the controller restarts. A controller that already holds a token stays authenticated. Bool only. | `false` |
+| `controller.bootstrapAdminToken.name` | Secret holding the operator bootstrap credential, accepted once by the provisioning gate before the listener binds. | `""` |
+| `controller.requireAuth` | Require a provisioned credential at startup. A fresh install needs `bootstrapAdminToken` or `bootstrap-admin-token` in `credentialsSecret`. | `true` |
+| `controller.allowOpenBootstrap` | Render without `bootstrapAdminToken` and omit `--require-auth`. Protected routes still require credentials; provision the administrator out of band before use. Bool only. | `false` |
 | `controller.argon2MemoryBudgetMB` | Memory ceiling in MiB for concurrent argon2id hashing; each hash holds 64 MiB. | `256` |
 | `controller.externalURL` | Base URL the controller answers on from outside the cluster, passed as `--external-url`. | `""` |
 | `controller.oauthRedirectURIs` | Comma-separated sign-in callback URLs, passed as `--oauth-redirect-uris`. | `""` |
@@ -278,56 +276,44 @@ you set top-level `nameOverride` or `fullnameOverride`, also set
 the chart stops at render time with this instruction when the URL is missing.
 Nested runner-bundle naming values control the runner resource names.
 
+A Cloud launcher configured through
+`sparkwing-runner-bundle.launcher.serviceAccountName` requires a dedicated
+namespace with no LimitRanges. Namespace selectors must explicitly exclude
+that namespace from mutating Job/Pod CREATE/UPDATE webhooks and all mutating
+admission policy bindings. The bundle installs a validating guard that preserves
+those exclusions. The launcher verifies the guard with read access and a dry-run
+LimitRange CREATE that must be denied by that exact guard. The probe persists
+nothing. Cluster administrators must preserve the guard while Jobs are live. The cluster must
+serve GA validating admission policy and binding APIs, and the mutating
+admission policy binding API. See the
+[runner-bundle setup](../sparkwing-runner-bundle/README.md).
 
 ## Auth
 
-API clients authenticate with **bearer tokens the controller mints**;
-each token carries scopes. Per decision 0001, SSO and advanced RBAC
-are explicitly *not* paid gates -- they may land in OSS later. For now:
+Protected API routes require current capability credentials. Provision the
+operator bootstrap credential with `controller.bootstrapAdminToken.name`
+or `bootstrap-admin-token` in `controller.credentialsSecret`. The controller
+validates the `swk_` presentation and commits the operator root through its
+once-only provisioning gate before the listener binds. Keep
+`controller.requireAuth=true` for a fresh deployment.
 
-1. Give the controller its first admin token with
-   `controller.bootstrapAdminToken.name` (see Pre-install above). It stores
-   that token before the listener binds and starts with `--require-auth`
-   (`controller.requireAuth`, on by default), so it never serves a request
-   unauthenticated. Without that Secret the render refuses, because a
-   controller whose tokens table is empty serves **every endpoint
-   unauthenticated**, token minting included, to anything that reaches its
-   Service.
+`controller.allowOpenBootstrap=true` permits rendering without a bootstrap
+Secret and omits `--require-auth`. It does not authorize anonymous API access
+or create an administrator. Use it only with an administrator provisioned
+out of band. It must be a bool; a quoted string fails the render.
 
-   `controller.allowOpenBootstrap=true` opts into that open window instead.
-   The chart then drops `--require-auth`; mint the first token through the
-   window, then restart to turn auth on:
+Use operator credential management to register and provision the runner's
+machine identity with `nodes.claim` and `triggers.claim` grants. Put that
+machine root credential in a Secret and reference it from
+`sparkwing-runner-bundle.controller.tokenSecret.name`. Kubernetes holds the
+runner pod until its configured Secret exists. Work executes with the
+awarded unit's claim authority; the machine root is used for claiming.
 
-   ```bash
-   kubectl -n sparkwing port-forward deploy/sparkwing-controller 9001:80 &
-   sparkwing tokens create --profile <profile-pointing-at-localhost:9001> \
-       --type member --principal admin --scope runs.read,runs.write
-   kubectl -n sparkwing rollout restart deploy/sparkwing-controller
-   ```
-
-   Auth only takes effect on that restart -- the tokens table is read
-   once at startup. `allowOpenBootstrap` must be a bool; a quoted string
-   fails the render.
-
-2. Mint the runner's token, stash it in a Secret (see Pre-install above),
-   and reference it from `sparkwing-runner-bundle.controller.tokenSecret.name`.
-
-   A configured Secret name requires a non-empty key. Kubernetes holds a
-   runner pod until its configured Secret is present.
-
-   The dashboard's log panes read node logs through the controller with
-   the signed-in browser's own credential, so the dashboard needs no token
-   Secret.
-
-3. The controller serves the dashboard and gates its pages behind `/login`
-   whenever it enforces tokens. The operator signs in with an admin token,
-   such as the bootstrap admin token; people sign in with Google or GitHub
-   where a multi-team license and an OAuth client offer them. During the
-   `allowOpenBootstrap` window the controller serves pages without sign-in.
-   Session cookies are `Secure` and `__Host-` prefixed, so configure
-   an HTTPS ingress before signing in; `ingress.allowInsecure=true` without
-   TLS passes `--insecure-cookies`, which drops both so a plain HTTP session
-   holds.
+The dashboard uses the signed-in browser's own authority for log reads and
+needs no token Secret. Session cookies are `Secure` and `__Host-` prefixed,
+so configure an HTTPS ingress before signing in. Without TLS,
+`ingress.allowInsecure=true` passes `--insecure-cookies` to permit plain HTTP
+sessions.
 
 ## Storage
 
@@ -440,13 +426,12 @@ helm upgrade sparkwing ./charts/sparkwing-full \
     --namespace sparkwing -f my-values.yaml
 ```
 
-Chart 0.2.0 defaults `controller.requireAuth` to `true`, and an upgrade
-from an earlier chart without `controller.bootstrapAdminToken.name` fails
-to render. Set `controller.bootstrapAdminToken.name`, which the controller
-ignores once a live token exists and which keeps `--require-auth` on, or
-`controller.allowOpenBootstrap=true`, which keeps a controller that already
-holds a token authenticated but reopens the window if its tokens table is
-ever emptied.
+Keep `controller.requireAuth=true` and supply
+`controller.bootstrapAdminToken.name` or a credentials Secret carrying
+`bootstrap-admin-token`. The operator bootstrap gate consumes that seed only
+once. For an already provisioned controller, `controller.allowOpenBootstrap=true`
+can omit the startup credential requirement; protected routes retain their
+authorization checks.
 
 The controller uses `strategy: Recreate` (RWO PVC -- can't
 multi-attach), so expect a brief downtime per upgrade, dashboard
@@ -505,9 +490,8 @@ inside the runner pod. See
 [`sparkwing-runner-bundle/README.md`](../sparkwing-runner-bundle/README.md#troubleshooting).
 
 **Dashboard redirects to /login and I have no account**
-A controller that enforces tokens offers no sign-up form. Sign in with an
-admin token, such as the bootstrap admin token, in the `/login` form's
-operator-token field.
+Provision the operator bootstrap credential before startup, then sign in
+with that operator credential in the `/login` form's operator-token field.
 
 **`helm template` fails with "missing in charts/ directory: sparkwing-runner-bundle"**
 The vendored sub-chart tarball was deleted. Restore it with

@@ -64,10 +64,15 @@ Selected-engine Go installation hashes the captured build environment with
 compilation cannot add graph inputs or make an otherwise usable cache entry fail.
 The generated workspace-mutation test covers this boundary.
 
-Go installation must preserve sparks overlays, populate missing checksums before
-cache hashing and hold or reacquire its executable lease through execution.
-The shared installer and source-host composition still need that integration
-review and native platform evidence.
+Go installation and the CLI use `bincache.MaterializePipeline` to populate
+effective checksums before hashing and preserve sparks overlays. The selected
+engine copies the executable into the caller's private `ExecutableDirectory`
+while retaining the cache lease. `SDKCommand.Close` removes that private copy
+after execution. `source.Entry.Close`, upgrade verification and cache warm join
+that cleanup. `CachedExecutable` identifies the durable cache entry for cache
+warm reports. It does not authorize execution after the lease is released.
+Real Go fixtures cover missing checksums, overlays, SDK replacement refusal and
+execution after cache pruning. Native platform evidence remains separate.
 
 Local dispatch consumes ReadPin, VersionForPin and Resolve for both SDKs. It
 rechecks policy on every invocation and stops re-executing only when the current
@@ -206,7 +211,10 @@ warning on each surface.
 `sparkwing upgrade` changes the current repository's SDK pin and native lockfiles.
 An explicit `--version` selects a permitted release, otherwise the signed latest
 release wins. `Upgrade` computes concrete edits in a private staging
-checkout. `UpgradeVerifier` resolves dependencies, compiles Go or type-checks
+checkout. `UpgradeRequest.Checkout` and `UpgradeVerifier.Verify` both receive
+the checkout root. Pin reads, native dependency edits and collected changes use
+its validated `.sparkwing` directory. Application manifests at the root remain
+separate inputs. `UpgradeVerifier` resolves dependencies, compiles Go or type-checks
 TypeScript, then runs describe/plan with the exact verified engine. Job bodies
 never run. Only verified changes apply, with each original digest rechecked to
 avoid overwriting concurrent edits. Failures leave original pins unchanged.

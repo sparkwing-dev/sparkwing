@@ -116,11 +116,14 @@ func cloudDeadline(now time.Time, binding CloudJobBinding) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, err
 	}
-	if !binding.ParentCapabilityExpiry.After(now) {
+	if !binding.ParentCapabilityExpiry.IsZero() && !binding.ParentCapabilityExpiry.After(now) {
 		return time.Time{}, limits.ErrNoTime
 	}
-	if deadline.IsZero() || binding.ParentCapabilityExpiry.Before(deadline) {
+	if !binding.ParentCapabilityExpiry.IsZero() && (deadline.IsZero() || binding.ParentCapabilityExpiry.Before(deadline)) {
 		deadline = binding.ParentCapabilityExpiry
+	}
+	if deadline.IsZero() {
+		return time.Time{}, errors.New("Cloud award requires a bounded execution deadline")
 	}
 	return deadline, nil
 }

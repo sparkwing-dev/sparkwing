@@ -928,3 +928,53 @@ func TestLoopPendingPolicyAcceptsArbitraryCancellationCause(t *testing.T) {
 		}
 	})
 }
+
+func TestLoopDrainedCompletionRepollsBeforeIdleExit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		finishHost := make(chan struct{})
+		policyBlocked, releasePolicy := make(chan struct{}), make(chan struct{})
+		claims, checks := 0, 0
+		loop := &Loop{
+			Config: LoopConfig{
+				Version: "v1.0.0", MaxConcurrent: 2, MaxClaims: 2,
+				PollInterval: time.Hour, IdleExit: time.Minute,
+			},
+			CheckVersion: func(context.Context, string) error {
+				checks++
+				if checks == 3 {
+					close(policyBlocked)
+					<-releasePolicy
+				}
+				return nil
+			},
+			Controller: claimFunc(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+				claims++
+				if claims == 2 {
+					return controllerwire.ClaimResponse{}, nil
+				}
+				return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{
+					Unit: capability.UnitNode, UnitID: fmt.Sprint(claims), RunID: "run", Capability: "private",
+				}}, nil
+			}),
+			Host: hostFunc(func(_ context.Context, unit controllerwire.ClaimedUnit) error {
+				if unit.UnitID == "1" {
+					<-finishHost
+				}
+				return nil
+			}),
+		}
+		done := make(chan error, 1)
+		go func() { done <- loop.Run(t.Context()) }()
+		<-policyBlocked
+		close(finishHost)
+		synctest.Wait()
+		start := time.Now()
+		close(releasePolicy)
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		if claims != 3 || !time.Now().Equal(start) {
+			t.Fatalf("completion left capacity idle: claims=%d elapsed=%v", claims, time.Since(start))
+		}
+	})
+}
