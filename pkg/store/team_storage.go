@@ -41,10 +41,6 @@ func (k StorageKind) share(allowance int64) int64 {
 
 func (k StorageKind) limitName() string { return "free_" + string(k) + "_share" }
 
-// DefaultStorageReservationTTL is how long a reservation holds its bytes
-// when the writer that took it never commits or releases it.
-const DefaultStorageReservationTTL = time.Hour
-
 func execStatements(ctx context.Context, tx *storeTx, script string) error {
 	for _, stmt := range splitStatements(script) {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
@@ -54,32 +50,18 @@ func execStatements(ctx context.Context, tx *storeTx, script string) error {
 	return nil
 }
 
-// StorageReserve asks for room in one of a team's stores.
-type StorageReserve struct {
-	Team Team
-	Kind StorageKind
-	// Bytes is the write's size. With UpTo it is the most the write may
-	// use, and zero or less asks for all the room there is.
-	Bytes int64
-	// UpTo grants as much of Bytes as the team has room for, at least one
-	// byte, for a write whose size is not known before it is read.
-	UpTo bool
-	// TTL defaults to [DefaultStorageReservationTTL].
-	TTL time.Duration
-	Now time.Time
-	// SmallOutput reserves a job output. One of at most
-	// [MaxUnpaidOutputBytes] is always granted, whatever room the team has,
-	// and still counts toward its storage.
+type storageReserve struct {
+	Team        Team
+	Kind        StorageKind
+	Bytes       int64
+	TTL         time.Duration
+	Now         time.Time
 	SmallOutput bool
 }
 
-// StorageReservation is room a writer holds until it commits or releases.
-type StorageReservation struct {
-	ID        string          `json:"reservation"`
-	Tier      TeamStorageTier `json:"tier"`
-	Granted   int64           `json:"granted_bytes"`
-	Unlimited bool            `json:"unlimited,omitempty"`
-	ExpiresAt time.Time       `json:"expires_at"`
+type storageReservation struct {
+	ID        string
+	ExpiresAt time.Time
 }
 
 func checkStorageTeam(team Team, kind StorageKind) error {
@@ -98,20 +80,6 @@ func newReservationID() (string, error) {
 		return "", err
 	}
 	return "sr_" + hex.EncodeToString(b[:]), nil
-}
-
-// ReserveStorage holds the team's room in one store, subject to cache share and free-slot availability.
-func (s *Store) ReserveStorage(ctx context.Context, req StorageReserve) (_ StorageReservation, err error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return StorageReservation{}, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	out, err := reserveStorageTx(ctx, tx, req)
-	if err != nil {
-		return StorageReservation{}, err
-	}
-	return out, tx.Commit()
 }
 
 // safety: the lock order puts the free tier before team_storage rows, so a
@@ -141,17 +109,17 @@ func takeStorageSlotTx(ctx context.Context, tx *storeTx, team Team, bytes int64,
 
 // safety: a refusal returns before the first write, so a caller that keeps
 // the transaction after one commits nothing of the reservation.
-func reserveStorageTx(ctx context.Context, tx *storeTx, req StorageReserve) (StorageReservation, error) {
+func reserveStorageTx(ctx context.Context, tx *storeTx, req storageReserve) (storageReservation, error) {
 	team := NormalizeTeam(req.Team)
 	if err := checkStorageTeam(team, req.Kind); err != nil {
-		return StorageReservation{}, err
+		return storageReservation{}, err
 	}
-	if req.Bytes < 0 && !req.UpTo {
-		return StorageReservation{}, fmt.Errorf("%w: a reservation of %d bytes", ErrInvalidInput, req.Bytes)
+	if req.Bytes < 0 {
+		return storageReservation{}, fmt.Errorf("%w: a reservation of %d bytes", ErrInvalidInput, req.Bytes)
 	}
 	ttl := req.TTL
 	if ttl <= 0 {
-		ttl = DefaultStorageReservationTTL
+		ttl = time.Hour
 	}
 	now := req.Now
 	if now.IsZero() {
@@ -159,16 +127,16 @@ func reserveStorageTx(ctx context.Context, tx *storeTx, req StorageReserve) (Sto
 	}
 	id, err := newReservationID()
 	if err != nil {
-		return StorageReservation{}, err
+		return storageReservation{}, err
 	}
 	standing, err := storageStandingTx(ctx, tx, team)
 	if err != nil {
-		return StorageReservation{}, err
+		return storageReservation{}, err
 	}
 	if standing.Tier == TeamTierNone {
 		open, err := freeSlotOpenTx(ctx, tx)
 		if err != nil {
-			return StorageReservation{}, err
+			return storageReservation{}, err
 		}
 		if open {
 			standing.Tier = TeamTierFree
@@ -176,7 +144,7 @@ func reserveStorageTx(ctx context.Context, tx *storeTx, req StorageReserve) (Sto
 	}
 	used, reserved, err := lockTeamStorageTx(ctx, tx, team, req.Kind, now)
 	if err != nil {
-		return StorageReservation{}, err
+		return storageReservation{}, err
 	}
 	// safety: a small output never fails its node, so with every slot taken
 	// or its share full it may still take a team a fixed overage past the
@@ -190,35 +158,30 @@ func reserveStorageTx(ctx context.Context, tx *storeTx, req StorageReserve) (Sto
 		small = used+reserved+req.Bytes <= share+MaxSmallOutputOverage
 	}
 	if standing.Tier == TeamTierNone && !small {
-		return StorageReservation{}, freeStoragePaused(team)
+		return storageReservation{}, freeStoragePaused(team)
 	}
-	out := StorageReservation{ID: id, Tier: standing.Tier, Granted: max(req.Bytes, 0), ExpiresAt: now.Add(ttl)}
+	out := storageReservation{ID: id, ExpiresAt: now.Add(ttl)}
 	if standing.Tier == TeamTierFree && req.Kind != StorageLogs && !small {
 		share := req.Kind.share(standing.AllowanceBytes)
 		room := share - used - reserved
-		if req.UpTo && (req.Bytes <= 0 || req.Bytes > room) {
-			out.Granted = room
-		}
-		if room <= 0 || out.Granted > room {
-			return StorageReservation{}, &StorageQuotaError{
+		if room <= 0 || req.Bytes > room {
+			return storageReservation{}, &StorageQuotaError{
 				Principal: string(team), Limit: req.Kind.limitName(), Unit: "bytes",
 				Used: used + reserved, Allowed: share, Requested: max(req.Bytes, 1),
 				Remedy: "the team has no credits, so its " + string(req.Kind) +
 					" keeps at most its share of the free allowance; add credits to store more",
 			}
 		}
-	} else if req.UpTo && req.Bytes <= 0 {
-		out.Unlimited = true
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO storage_reservations (id, team, store, bytes, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		id, string(team), string(req.Kind), out.Granted, now.UnixNano(), out.ExpiresAt.UnixNano()); err != nil {
-		return StorageReservation{}, err
+		id, string(team), string(req.Kind), req.Bytes, now.UnixNano(), out.ExpiresAt.UnixNano()); err != nil {
+		return storageReservation{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `
 UPDATE team_storage SET reserved_bytes = reserved_bytes + ?, updated_at = ? WHERE team = ? AND store = ?`,
-		out.Granted, now.UnixNano(), string(team), string(req.Kind)); err != nil {
-		return StorageReservation{}, err
+		req.Bytes, now.UnixNano(), string(team), string(req.Kind)); err != nil {
+		return storageReservation{}, err
 	}
 	return out, nil
 }
@@ -288,40 +251,15 @@ UPDATE team_storage SET reserved_bytes = CASE WHEN reserved_bytes > ? THEN reser
 	return err
 }
 
-// StorageCommit records what a write stored.
-type StorageCommit struct {
-	// ID is the reservation the write took; one that already expired, was
-	// never taken, or is not Team's still counts Bytes on its first commit.
-	// An identical retry within the receipt window counts once.
-	ID   string
-	Team Team
-	Kind StorageKind
-	// Bytes is what the write added to the store: its size, or for an
-	// overwrite the difference from what it replaced, which may be
-	// negative.
+type storageCommit struct {
+	ID    string
+	Team  Team
+	Kind  StorageKind
 	Bytes int64
 	Now   time.Time
 }
 
-// CommitStorage moves a reservation into the team's stored bytes: the
-// reservation is dropped and c.Bytes added. A reservation of another store
-// is refused.
-func (s *Store) CommitStorage(ctx context.Context, c StorageCommit) (err error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	if err := takeStorageSlotTx(ctx, tx, c.Team, c.Bytes, c.Now); err != nil {
-		return err
-	}
-	if _, err := commitStorageTx(ctx, tx, c); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-func commitStorageTx(ctx context.Context, tx *storeTx, c StorageCommit) (replayed bool, err error) {
+func commitStorageTx(ctx context.Context, tx *storeTx, c storageCommit) (replayed bool, err error) {
 	team := NormalizeTeam(c.Team)
 	if err := checkStorageTeam(team, c.Kind); err != nil {
 		return false, err

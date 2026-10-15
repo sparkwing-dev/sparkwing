@@ -15,6 +15,14 @@ and the leased blob-maintenance pass.
 
 ## Amendment 1: authority and execution seams
 
+`Store.ReserveStorage`, `Store.CommitStorage`, `StorageReserve`,
+`StorageReservation`, `StorageCommit` and `DefaultStorageReservationTTL` are
+removed. Public uploads use tenant blob tickets with exact identity, size,
+digest, expiry and verified settlement. Generic byte deltas cannot mint a blob
+or receipt. The controller's retention probe reads `Tenant.StorageStanding`
+and slot availability without writing reservations. Private exact-size helpers
+remain only for legacy direct-upload and node-log transport callers.
+
 [Amendments 1](amendments-1.md) records the worker requests and assignments.
 These declarations leave transaction implementation with W1.
 

@@ -156,7 +156,7 @@ func (s *Store) SignNodeLogSegment(ctx context.Context, l NodeLog, seg NodeLogSe
 	var charged int64
 	if charge {
 		charged = seg.StoredBytes
-		c := StorageCommit{Team: l.Team, Kind: StorageLogs, Bytes: charged, Now: now}
+		c := storageCommit{Team: l.Team, Kind: StorageLogs, Bytes: charged, Now: now}
 		if err := takeStorageSlotTx(ctx, tx, c.Team, c.Bytes, c.Now); err != nil {
 			return err
 		}
@@ -258,13 +258,6 @@ func (s *Store) DeleteRunNodeLogs(ctx context.Context, team Team, runID string) 
 }
 
 const nodeLogColumns = `team, run_id, node_id, attempt, generation, prefix, uploaded_through, stored_bytes, charged_bytes, sealed_at, created_at, updated_at`
-
-func nodeLogColumnsOf(alias string) string {
-	return alias + ".team, " + alias + ".run_id, " + alias + ".node_id, " + alias + ".attempt, " + alias + ".generation, " +
-		alias + ".prefix, " + alias + ".uploaded_through, " + alias + ".stored_bytes, " +
-		alias + ".charged_bytes, " + alias + ".sealed_at, " +
-		alias + ".created_at, " + alias + ".updated_at"
-}
 
 func scanNodeLog(row rowScanner) (NodeLog, error) {
 	var l NodeLog

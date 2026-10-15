@@ -4,6 +4,17 @@ This repository-owned inventory records every parked source function and its req
 
 Branch labels below retain the descriptive suffix of each source branch. Tracker prefixes are omitted because repository files cannot contain tracker identifiers. The full Git revision identifies the exact branch snapshot independently of ref movement. Resolve source files with `git show <revision>:<file>`; removed predecessors are present before the branch comparison range. This inventory requires no personal filesystem path or live branch ref.
 
+`Store.ReserveStorage` and `Store.CommitStorage` are removed with their raw
+byte-counter tests. Existing final ticket tests cover reserve/abort release,
+immutable verified bytes, forged tenant/uploader refusal, concurrent admission,
+replay, expiry, deduplication and reopening. These are in upload_runtime_test.go
+and upload_quota_runtime_test.go. Shrinking overwrites and partial-size grants
+are retired mechanisms. The legacy first-byte slot tests are not claimed as
+final-ticket coverage. Blob tickets lack a record kind before upload, while
+legacy small outputs bypass a full slot pool. That policy distinction needs a
+contract decision before adding a final-ticket slot gate. No archived source row
+or native acceptance cell is newly closed.
+
 The primary inventory has 74 changed or added functions: 6 lifecycle, 6 state-machine, 4 placement, 1 credential matrix, 23 run-input, 24 storage, and 10 state/security. Placement also contributes 10 existing functions. Six removed predecessors bring the total to 90 unique revision/file/function identities. Subcases do not increase that count. Source objects were inspected statically; this is not evidence that old or target product tests pass.
 
 ## Source snapshots

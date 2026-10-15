@@ -319,3 +319,12 @@ selection. The controller's maintenance timer uses the existing singleton lease,
 final retention, tagged-stream sealing and committed-inventory billing. Physical
 bucket bytes cannot overwrite replica counters or become retained billing facts.
 Allowance-driven physical eviction still requires the final record/log adapter.
+
+`Store.ReserveStorage`, `Store.CommitStorage`, their exported request/response
+models and `DefaultStorageReservationTTL` are removed. Tenant blob tickets own
+public reserve, verified commit and abort. The controller's log-retention probe
+uses `StorageStanding` and slot availability without mutating storage rows.
+Legacy direct uploads and node logs retain private reservation helpers and
+`ReleaseStorage` until their transports migrate. Their exact-size behavior and
+small-output exception are unchanged. The unused partial-size reservation mode
+and its response fields are removed.

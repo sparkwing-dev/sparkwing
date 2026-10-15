@@ -867,7 +867,6 @@ const DefaultSignUpDailyLimit = 500
 const DefaultSignUpHourlyLimit = 50
 const DefaultSignUpHourlyWarn = 20
 func DefaultSignUpLimits() SignUpLimits
-const DefaultStorageReservationTTL = time.Hour
 const DefaultTeam Team = "default"
 const DefaultTeamCloudNodes = 100
 const DefaultWarmCPUClassCores = 2
@@ -2725,14 +2724,6 @@ type StorageChargeSweep struct {
 
 	ChargedMicro int64
 }
-type StorageCommit struct {
-	ID   string
-	Team Team
-	Kind StorageKind
-
-	Bytes int64
-	Now   time.Time
-}
 const StorageCountScope = "storage.count"
 type StorageKind string
 func (k StorageKind) Valid() bool
@@ -2767,26 +2758,6 @@ type StorageQuotaError struct {
 }
 func (e *StorageQuotaError) Error() string
 func (e *StorageQuotaError) Unwrap() error
-type StorageReservation struct {
-	ID        string
-	Tier      TeamStorageTier
-	Granted   int64
-	Unlimited bool
-	ExpiresAt time.Time
-}
-type StorageReserve struct {
-	Team Team
-	Kind StorageKind
-
-	Bytes int64
-
-	UpTo bool
-
-	TTL time.Duration
-	Now time.Time
-
-	SmallOutput bool
-}
 type StorageSettings struct {
 	RunRetentionDays        int64
 	NodeMetricRetentionDays int64
@@ -2872,7 +2843,6 @@ func (s *Store) ClaimUnit(ctx context.Context, demand UnitDemand) (UnitClaim, er
 func (s *Store) ClaimedRunFor(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (ClaimedRun, error)
 func (s *Store) ClearCronOverride(ctx context.Context, id string, now time.Time) error
 func (s *Store) Close() error
-func (s *Store) CommitStorage(ctx context.Context, c StorageCommit) (err error)
 func (s *Store) CommitUpload(ctx context.Context, team Team, id, recordedUploader string, now time.Time) (err error)
 func (s *Store) CommittedObject(ctx context.Context, team Team, key string) (Upload, error)
 func (s *Store) CommittedObjectFor(ctx context.Context, team Team, key string, cloud bool) (Upload, error)
@@ -3049,7 +3019,6 @@ func (s *Store) ReportCardRefund(ctx context.Context, key, refundID, status stri
 func (s *Store) RequestCancel(ctx context.Context, id string) error
 func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error)
 func (s *Store) ResealSecrets(ctx context.Context, sealedPrefix string, batchSize int, reseal func(Team, Secret) (string, error)) (SecretResealCounts, error)
-func (s *Store) ReserveStorage(ctx context.Context, req StorageReserve) (_ StorageReservation, err error)
 func (s *Store) ReserveUpload(ctx context.Context, req UploadRequest) (_ Upload, err error)
 func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error)
 func (s *Store) ResolveAuthority(ctx context.Context, ref capability.AuthorityRef) (capability.Principal, error)

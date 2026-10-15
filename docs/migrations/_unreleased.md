@@ -1,5 +1,19 @@
 # Migrating to the next release
 
+## Storage reservations use blob tickets
+
+`Store.ReserveStorage`, `Store.CommitStorage`, `StorageReserve`,
+`StorageReservation`, `StorageCommit` and `DefaultStorageReservationTTL` are
+removed. Select a tenant and call `ReserveBlobUpload`, then `CommitBlobUpload`
+with server-verified bytes or `AbortBlobUpload` after a failed transfer.
+
+Tickets bind the uploader, digest, exact size and expiry before signing.
+Commit rechecks that identity and writes existence, receipts and quota settlement
+together. Arbitrary byte deltas and shrinking overwrites have no replacement.
+Read storage policy and retained inventory with `Tenant.StorageStanding`.
+The log-retention probe reads that report and available slots without creating
+or releasing a storage reservation.
+
 ## Egress accounting uses tenant and replica counters
 
 `Store.RecordEgressUsage`, `Store.ListEgressUsage` and `Store.PruneEgressUsage`

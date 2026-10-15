@@ -90,3 +90,17 @@ The raw Store `GrantCredits`, `ListCreditCharges` and `AppendEventOnce` wrappers
 are removed. Select a Tenant explicitly for their retained methods. Caller
 migrations in this checkout are complete. W1 lifecycle files changed only at
 two price-read callsites in `store.go`.
+
+W1b continuation: `Store.ReserveStorage`, `Store.CommitStorage`, their three
+exported models and `DefaultStorageReservationTTL` are removed. The controller's
+log-retention probe reads tenant standing and available slots without writing a
+reservation. Exact-size legacy upload/log helpers remain private until their
+transport cutovers.
+
+**Contract clarification needed, W1b/W7/lead: blob free-slot admission.** Final
+tickets do not acquire free slots. Legacy small outputs can store beyond a full
+slot pool, but final tickets have no record kind before signing. A blanket slot
+gate would remove that exception. Decide how a server-verified intended-use
+distinction should cross the upload contract, or explicitly ratify removing the
+exception, before adding the gate. The experimental gate was removed. No new
+storage restriction or foreign contract change remains in this continuation.

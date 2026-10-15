@@ -143,7 +143,7 @@ func (s *Store) ReserveUpload(ctx context.Context, req UploadRequest) (_ Upload,
 	if err := refuseSecondRefBinaryTx(ctx, tx, req.Team, req.Repo, req.Ref, req.Key, req.Provenance); err != nil {
 		return Upload{}, err
 	}
-	res, err := reserveStorageTx(ctx, tx, StorageReserve{
+	res, err := reserveStorageTx(ctx, tx, storageReserve{
 		Team: req.Team, Kind: req.Kind, Bytes: req.Size, TTL: DirectUploadTTL, Now: req.Now, SmallOutput: output,
 	})
 	if err != nil {
@@ -384,7 +384,7 @@ func (s *Store) CommitUpload(ctx context.Context, team Team, id, recordedUploade
 	if n == 0 {
 		return ErrObjectExists
 	}
-	if replayed, err := commitStorageTx(ctx, tx, StorageCommit{ID: id, Team: team, Kind: u.Kind, Bytes: u.Size, Now: now}); err != nil {
+	if replayed, err := commitStorageTx(ctx, tx, storageCommit{ID: id, Team: team, Kind: u.Kind, Bytes: u.Size, Now: now}); err != nil {
 		return err
 	} else if replayed {
 		return ErrInvalidInput

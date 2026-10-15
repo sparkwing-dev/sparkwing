@@ -457,16 +457,28 @@ func (s *Server) openNodeLog(w http.ResponseWriter, r *http.Request, want store.
 	}
 	tier := store.TeamTierFunded
 	if s.MultiTeam() {
-		res, err := s.store.ReserveStorage(r.Context(), store.StorageReserve{
-			Team: want.Team, Kind: store.StorageLogs, UpTo: true, Now: now,
-		})
+		tenant, err := s.store.ForTeam(r.Context(), want.Team)
 		if err != nil {
 			s.writeStorageRefusal(w, r, err)
 			return store.NodeLog{}, false
 		}
-		tier = res.Tier
-		if err := s.store.ReleaseStorage(r.Context(), want.Team, res.ID, now); err != nil {
-			s.logger.Warn("release a log standing probe", "team", string(want.Team), "err", err)
+		standing, err := tenant.StorageStanding(r.Context())
+		if err != nil {
+			s.writeStorageRefusal(w, r, err)
+			return store.NodeLog{}, false
+		}
+		tier = standing.Tier
+		if tier == store.TeamTierNone {
+			taken, limit, err := s.store.FreeSlots(r.Context())
+			if err != nil {
+				s.writeStorageRefusal(w, r, err)
+				return store.NodeLog{}, false
+			}
+			if taken >= limit {
+				s.writeStorageRefusal(w, r, store.ErrFreeStoragePaused)
+				return store.NodeLog{}, false
+			}
+			tier = store.TeamTierFree
 		}
 	}
 	class := s.logClassFor(want.Team, tier)
