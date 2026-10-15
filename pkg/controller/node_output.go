@@ -64,7 +64,7 @@ func (s *Server) handleGetNodeOutput(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if tok, ok := claimTokenFromContext(r.Context()); ok && runID == tok.RunID {
-		ancestor, err := s.store.NodeIsAncestor(r.Context(), tok.Team, runID, nodeID, tok.NodeID)
+		ancestor, err := tenant.NodeIsAncestor(r.Context(), runID, nodeID, tok.NodeID)
 		if err != nil {
 			s.writeInternalError(w, r, "node ancestry", err)
 			return

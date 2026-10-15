@@ -10,26 +10,18 @@ import (
 	"time"
 )
 
-// Spend limits per level, in cents. A team may spend its 30-day ceiling over
-// [SpendWindowDays] and its daily cap in one UTC day, whether prepaid or billed
-// to its card, and the card it pays with is held to the same limits across
-// every team it pays for; a trusted team with a card on file may also run its
-// balance down to twice its rung before new work waits for the charge.
 const (
 	NewSpendCeilingCents     = 5_000
 	NewDailyCapCents         = 2_500
 	TrustedSpendCeilingCents = 50_000
 	TrustedDailyCapCents     = 20_000
 	TrustedRungCents         = 10_000
-	// MinCardChargeCents is Stripe's smallest US card charge; a smaller debt
-	// waits for the next rung or month-end.
+	// MinCardChargeCents is Stripe's smallest US card charge; a smaller debt waits for the next rung or month-end.
 	MinCardChargeCents = 50
-	// SpendWindowDays is the ceiling's window: today plus 30 whole UTC days
-	// before it, so spend leaves the window up to a day late and never early.
+	// SpendWindowDays is the ceiling's window: today plus 30 whole UTC days before it, so spend leaves the window up to a day late and never early.
 	SpendWindowDays = 30
 )
 
-// Why a claim was refused, carried on [InsufficientCreditsError].
 const (
 	SpendLimitBalance      = "balance"
 	SpendLimitCeiling      = "ceiling"
@@ -40,7 +32,6 @@ const (
 	SpendLimitChargeFailed = "charge_failed"
 )
 
-// Business event kinds for card billing.
 const (
 	BusinessEventCardAdded      = "card.added"
 	BusinessEventCardCharged    = "card.charge_paid"
@@ -51,23 +42,19 @@ const (
 	BusinessEventCardChargeOpen = "card.charge_opened"
 )
 
-// Card charge and attempt states.
 const (
 	CardChargeOpen    = "open"
 	CardChargePaid    = "paid"
 	CardAttemptLive   = "live"
 	CardAttemptPaid   = "succeeded"
 	CardAttemptFailed = "failed"
-	// CardAttemptWarned is an attempt whose payment drew an early fraud
-	// warning; it is refunded and grants nothing.
+	// CardAttemptWarned is an attempt whose payment drew an early fraud warning; it is refunded and grants nothing.
 	CardAttemptWarned = "warned"
 
 	CardAttemptOffSession = "off_session"
 	CardAttemptRecovery   = "recovery"
 )
 
-// Why a team is held, on credit_freezes.cause. A hold written before v87
-// reads empty, which is a dispute or an operator's hold.
 const (
 	FreezeCauseDecline = "decline"
 	FreezeCauseWarning = "early_fraud_warning"
@@ -81,8 +68,6 @@ var cardRetryAfter = []time.Duration{24 * time.Hour, 3 * 24 * time.Hour, 7 * 24 
 // opens, after which the session can no longer be paid.
 const recoveryAttemptLife = 35 * time.Minute
 
-// perf: an off-session attempt answers within one call; one still live after
-// this is a worker that crashed mid-call, and is asked again.
 const stalledAttemptAge = 2 * time.Minute
 
 // safety: Stripe keeps an idempotency key for 24 hours. An attempt that never
@@ -150,8 +135,7 @@ type CardCharge struct {
 	OpenedAt      time.Time
 }
 
-// SpendStanding is what a team may still spend and why: its balance, the
-// credit its card extends, and its spend, and its card's, against each limit.
+// SpendStanding is what a team may still spend and why: its balance, the credit its card extends, and its spend, and its card's, against each limit.
 type SpendStanding struct {
 	Billing             BillingStanding
 	Card                Card
@@ -168,8 +152,7 @@ type SpendStanding struct {
 	CardSpentTodayMicro int64
 }
 
-// CardBilled reports that the team's usage is charged to its card: it is
-// trusted and has one on file.
+// CardBilled reports that the team's usage is charged to its card: it is trusted and has one on file.
 func (s SpendStanding) CardBilled() bool {
 	return s.Billing.Trusted && s.Card.PaymentMethod != ""
 }
@@ -334,21 +317,17 @@ func headroomTx(ctx context.Context, tx *storeTx, team Team, now time.Time) (int
 	return room, nil
 }
 
-// ErrStaleCardSetup is SaveCard's refusal of a setup completed before the
-// card already on file, such as a delayed delivery of an older setup.
+// ErrStaleCardSetup is SaveCard's refusal of a setup completed before the card already on file, such as a delayed delivery of an older setup.
 var ErrStaleCardSetup = errors.New("card billing: a newer card setup is already on file")
 
-// SaveCard records the card an owner added through Stripe. A charge that
-// failed on the old card is tried again at once. A non-zero c.AddedAt orders
-// saves by setup completion; without it the card is stamped now.
+// SaveCard records the card an owner added through Stripe.
 func (t *Tenant) SaveCard(ctx context.Context, c Card, actor string, now time.Time) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
 		return saveCardTx(ctx, tx, t.team, c, actor, now)
 	})
 }
 
-// SetSpendBudget sets the owner's budget, which stops Cloud usage when the
-// team's 30-day spend reaches it. Zero returns it to the ceiling.
+// SetSpendBudget sets the owner's budget, which stops Cloud usage when the team's 30-day spend reaches it.
 func (t *Tenant) SetSpendBudget(ctx context.Context, cents int64) error {
 	if cents < 0 || cents > MaxPurchaseLimitCents {
 		return fmt.Errorf("%w: a budget is between $0 and $%d", ErrInvalidInput, MaxPurchaseLimitCents/100)
@@ -357,10 +336,7 @@ func (t *Tenant) SetSpendBudget(ctx context.Context, cents int64) error {
 	return err
 }
 
-// CardChargeWork is one Stripe call the payment worker owes for an open
-// charge, under the attempt's id. PaymentIntent is empty until the worker has
-// created the payment and recorded it with [Operator.RecordAttemptIntent]; from
-// then on the payment is confirmed and read by that id.
+// CardChargeWork is one Stripe call the payment worker owes for an open charge, under the attempt's id.
 type CardChargeWork struct {
 	Team          Team
 	ChargeID      string
@@ -536,12 +512,10 @@ func insertCardAttemptTx(ctx context.Context, tx *storeTx, team Team, chargeID, 
 	return id, nil
 }
 
-// ErrNoPayableCharge is returned when an owner asks to pay a charge that is
-// not open, or one with an attempt already in flight.
+// ErrNoPayableCharge is returned when an owner asks to pay a charge that is not open, or one with an attempt already in flight.
 var ErrNoPayableCharge = errors.New("card billing: no charge is waiting for payment")
 
-// StartRecoveryAttempt opens a "pay now" attempt on t's open charge, for a
-// Checkout the owner pays by hand. It refuses while another attempt is live.
+// StartRecoveryAttempt opens a "pay now" attempt on t's open charge, for a Checkout the owner pays by hand.
 func (t *Tenant) StartRecoveryAttempt(ctx context.Context, now time.Time) (_ CardChargeWork, err error) {
 	tx, err := t.s.beginTx(ctx)
 	if err != nil {
@@ -584,8 +558,7 @@ type CardPayment struct {
 	AttemptID     string
 	PaymentIntent string
 	AmountCents   int64
-	// Fingerprint is the card that paid, which a pay-now Checkout may take
-	// from another card than the one on file.
+	// Fingerprint is the card that paid, which a pay-now Checkout may take from another card than the one on file.
 	Fingerprint string
 }
 
@@ -649,17 +622,14 @@ func paymentWarningTx(ctx context.Context, tx *storeTx, paymentIntent, fingerpri
 	return id, err
 }
 
-// WarnedCardPayment is a card payment whose payment or card drew an
-// actionable early fraud warning.
+// WarnedCardPayment is a card payment whose payment or card drew an actionable early fraud warning.
 type WarnedCardPayment struct {
 	WarningID string
-	// Repays is true when the payment settled the open charge as a debt
-	// repayment, even one a refunded reservation had already cleared.
+	// Repays is true when the payment settled the open charge as a debt repayment, even one a refunded reservation had already cleared.
 	Repays bool
 	// RepaidMicro is the debt the payment repaid; zero when it granted nothing.
 	RepaidMicro int64
-	// UnappliedMicro is the rest of the payment, which the ledger does not
-	// hold: returning it is the operator's decision.
+	// UnappliedMicro is the rest of the payment, which the ledger does not hold: returning it is the operator's decision.
 	UnappliedMicro int64
 }
 
@@ -748,13 +718,11 @@ type PaymentWarning struct {
 	WarningID     string
 	PaymentIntent string
 	Fingerprint   string
-	// Actionable is Stripe's word that the payment can still be refunded to
-	// head off a dispute; only such a warning stops a grant or holds a team.
+	// Actionable is Stripe's word that the payment can still be refunded to head off a dispute; only such a warning stops a grant or holds a team.
 	Actionable bool
 }
 
-// ErrPaymentWarned refuses granting a payment that drew an early fraud
-// warning; the warning's refund returns the money.
+// ErrPaymentWarned refuses granting a payment that drew an early fraud warning; the warning's refund returns the money.
 var ErrPaymentWarned = errors.New("credits: the payment drew an early fraud warning and is refunded, not granted")
 
 func refuseWarnedPaymentTx(ctx context.Context, tx *storeTx, paymentIntent string) error {
@@ -769,8 +737,6 @@ func refuseWarnedPaymentTx(ctx context.Context, tx *storeTx, paymentIntent strin
 	return ErrPaymentWarned
 }
 
-// Queued refund states. A refund is done only once Stripe reports it
-// succeeded; one that failed or was canceled is due again after a backoff.
 const (
 	CardRefundDue       = "due"
 	CardRefundPending   = "pending"
@@ -782,8 +748,7 @@ const (
 // credits for it.
 var cardRefundRetryAfter = []time.Duration{time.Hour, 6 * time.Hour, 24 * time.Hour}
 
-// CardRefundWork is a payment the worker must refund in full. Key is its
-// Stripe idempotency key, new for each retry after a failed refund.
+// CardRefundWork is a payment the worker must refund in full.
 type CardRefundWork struct {
 	Team          Team
 	PaymentIntent string

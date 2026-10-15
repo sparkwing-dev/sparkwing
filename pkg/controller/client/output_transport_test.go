@@ -1,8 +1,13 @@
 package client
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -12,8 +17,30 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+func TestOutputDownloadRejectsOversizedVerifiedBytes(t *testing.T) {
+	for _, size := range []int64{limits.NodeOutputBytes, limits.NodeOutputBytes + 1} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			body := bytes.Repeat([]byte("x"), int(size))
+			sum := sha256.Sum256(body)
+			transport := dataTransport(func(r *http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body)), Header: make(http.Header), Request: r}, nil
+			})
+			c := NewWithToken("https://controller.test", &http.Client{Transport: transport}, "credential")
+			value, err := c.fetchOutput(t.Context(), store.OutputReadGrant{URL: "/blob", SHA256: hex.EncodeToString(sum[:]), Size: size})
+			if size > limits.NodeOutputBytes {
+				if len(value) != 0 || !errors.Is(err, store.ErrOutputCorrupt) {
+					t.Fatalf("value=%d bytes, err=%v", len(value), err)
+				}
+			} else if err != nil || !bytes.Equal(value, body) {
+				t.Fatalf("value=%d bytes, err=%v", len(value), err)
+			}
+		})
+	}
+}
 
 func TestSignedOutputUploadUsesControllerSocketOnlyForSameOrigin(t *testing.T) {
 	for _, foreign := range []bool{false, true} {

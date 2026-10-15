@@ -121,6 +121,13 @@ and reads no longer seal abandoned logs. `Tenant.RecordSegments` and leased
 `Operator.SealAbandonedLogStreams` own tagged persistence and sealing.
 Legacy capabilities no longer advertise segment upload support. Old output
 reads and host/client interfaces still need their final record cutover.
+`Store.NodeIsAncestor` is removed. Its controller caller uses
+`Tenant.NodeIsAncestor`, which shares the blob read-set dependency resolver over
+sealed job specs, including optional, artifact and generated-group dependencies.
+The duplicate `MaxOutputBytes` and `MaxRunOutputBytes` constants are removed.
+Remaining output callers use `limits.NodeOutputBytes` (16 MiB) and
+`limits.RunOutputBytes` (1 GiB). File and signed-URL reads refuse bytes above
+the shared per-job bound even when their recorded size and digest match.
 `SetNodeStatus` and `RevokeNodeReady` on Store, Tenant and Client are removed
 with their legacy HTTP handlers. Debug pauses use `status_detail` through
 activity writes and leave lifecycle state intact. Queue withdrawal uses

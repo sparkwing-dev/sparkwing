@@ -509,50 +509,6 @@ func (s *Server) noteCreditsBlocked(r *http.Request, shortfall *store.Insufficie
 	}
 }
 
-// MeteredInProcessNodesCode is the machine-readable code on the 403 a metered
-// trigger claim gets when it names no node runner that claims each node.
-const MeteredInProcessNodesCode = "metered_inprocess_nodes"
-
-func (s *Server) refuseMeteredInProcessNodes(w http.ResponseWriter, r *http.Request, nodeRunner string) bool {
-	if nodeRunner == "k8s" {
-		return false
-	}
-	prefix, err := s.meteredTokenPrefix(r)
-	if err != nil {
-		s.writeInternalError(w, r, "read metered token", err)
-		return true
-	}
-	if prefix == "" {
-		return false
-	}
-	p, _ := PrincipalFromContext(r.Context())
-	writeAuthError(w, http.StatusForbidden, authErrorBody{
-		Code: MeteredInProcessNodesCode, Principal: p.label(),
-		Message: store.ErrMeteredInProcessNodes.Error() + "; run the trigger runner as k8s",
-	})
-	return true
-}
-
-// safety: a stored marker may outlive its license, so the controller checks
-// the license before treating that token as a billable claimant.
-func (s *Server) meteredTokenPrefix(r *http.Request) (string, error) {
-	if !s.Metering() {
-		return "", nil
-	}
-	prefix := claimIdentity(r).TokenPrefix
-	if prefix == "" {
-		return "", nil
-	}
-	metered, err := s.store.TokenMetered(r.Context(), prefix)
-	if err != nil {
-		return "", err
-	}
-	if !metered {
-		return "", nil
-	}
-	return prefix, nil
-}
-
 // safety: the node's own claim carries the credential the ledger priced the
 // work against, so a finish posted by another principal settles the same way,
 // and a node whose credential was revoked mid-run still releases its charge

@@ -13,11 +13,12 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// perf: an output is at most 64 MiB, which a slow link can take minutes to move.
+// perf: large outputs can take minutes to transfer over a slow link.
 const outputTransferTimeout = 10 * time.Minute
 
 // UploadNodeOutput stores a node's output bytes as a committed object and
@@ -109,12 +110,12 @@ func (c *Client) fetchOutput(ctx context.Context, grant store.OutputReadGrant) (
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("download output: %w", readHTTPError(resp))
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, store.MaxOutputBytes+1))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, limits.NodeOutputBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("download output: %w", err)
 	}
 	sum := sha256.Sum256(data)
-	if int64(len(data)) != grant.Size || hex.EncodeToString(sum[:]) != grant.SHA256 {
+	if int64(len(data)) > limits.NodeOutputBytes || int64(len(data)) != grant.Size || hex.EncodeToString(sum[:]) != grant.SHA256 {
 		return nil, fmt.Errorf("download output: %w", store.ErrOutputCorrupt)
 	}
 	return data, nil

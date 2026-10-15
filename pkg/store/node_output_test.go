@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -47,31 +48,6 @@ func TestFinishNodeWithOutputRef_RefusesAnotherRunsObject(t *testing.T) {
 	own := commitOutput(t.Context(), t, s, "run-fin-a", "n", []byte(`"a"`))
 	if err := s.FinishNodeWithOutputRef(ctx, "run-fin-a", "n", "success", "", &own, "", nil); err != nil {
 		t.Fatalf("finish naming its own output: %v", err)
-	}
-}
-
-func TestNodeIsAncestor_FollowsDepsTransitively(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := t.Context()
-	if err := s.CreateRun(ctx, store.Run{ID: "run-anc", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
-		t.Fatal(err)
-	}
-	for id, deps := range map[string][]string{"a": nil, "b": {"a"}, "c": {"b"}, "d": nil} {
-		if err := s.CreateNode(ctx, store.Node{RunID: "run-anc", NodeID: id, Status: "pending", Deps: deps}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	cases := []struct {
-		ancestor, node string
-		want           bool
-	}{
-		{"a", "c", true}, {"b", "c", true}, {"d", "c", false}, {"c", "a", false}, {"c", "c", false},
-	}
-	for _, tc := range cases {
-		got, err := s.NodeIsAncestor(ctx, store.DefaultTeam, "run-anc", tc.ancestor, tc.node)
-		if err != nil || got != tc.want {
-			t.Errorf("NodeIsAncestor(%s, %s) = %v, %v; want %v", tc.ancestor, tc.node, got, err, tc.want)
-		}
 	}
 }
 
@@ -117,9 +93,9 @@ func TestFinishNode_HoldsALocalRunToItsOutputLimit(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for i := range store.MaxRunOutputBytes / store.MaxOutputBytes {
+	for i := range limits.RunOutputBytes / limits.NodeOutputBytes {
 		key, _ := s.NodeOutputKey(ctx, "run-full", "big")
-		ref := store.OutputRef{Key: key, Size: store.MaxOutputBytes, SHA256: fmt.Sprintf("%064x", i)}
+		ref := store.OutputRef{Key: key, Size: limits.NodeOutputBytes, SHA256: fmt.Sprintf("%064x", i)}
 		if err := s.RecordLocalOutput(ctx, "run-full", "big", ref, time.Now()); err != nil {
 			t.Fatalf("output %d within the run's 1 GiB: %v", i, err)
 		}
