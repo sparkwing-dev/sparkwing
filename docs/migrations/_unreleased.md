@@ -1,5 +1,24 @@
 # Migrating to the next release
 
+## Pipeline sizing
+
+Replace `/api/v1/pipelines/{name}/profile` with
+`/api/v1/pipelines/{name}/sizing` for the read and its `pin`, `observations`,
+`contention` and `waits` operations. Replace the `node` query with `job`.
+The old paths are removed. The Go controller client uses the new paths.
+
+Reads require member `runs.read` or an executable claim with `source.read`
+and authority for the sealed repository and pipeline. A bare runner or
+Actions credential no longer reads arbitrary sizing records. Bootstrap
+credentials cannot read sizing. Writes require `node.report` on the bound
+pipeline. Admin grants cannot bypass the claim check.
+
+Controllers must configure the shared authentication and binding adapters.
+Sizing writes also require an authority-bearing transaction adapter through
+`WithSizingStore`. An absent adapter returns `policy_missing`. Implementations
+must recheck revocation, membership and the claim fence under the write lock,
+and avoid duplicating a measurement on an exact retry.
+
 ## Credential discovery
 
 `GET /api/v1/auth/whoami`, `GET /api/v1/services` and

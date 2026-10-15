@@ -96,11 +96,11 @@ Every route the controller registers, with the scope each requires, generated fr
 | `PUT` | `/api/v1/outputs/uploads/{id}` | `public` |
 | `GET` | `/api/v1/pipelines` | `runs.read` |
 | `GET` | `/api/v1/pipelines/{name}/latest` | `runs.read` |
-| `GET` | `/api/v1/pipelines/{name}/profile` | `nodes.claim` |
-| `POST` | `/api/v1/pipelines/{name}/profile/contention` | `runs.state` |
-| `POST` | `/api/v1/pipelines/{name}/profile/observations` | `runs.state` |
-| `PUT` | `/api/v1/pipelines/{name}/profile/pin` | `runs.state` |
-| `POST` | `/api/v1/pipelines/{name}/profile/waits` | `runs.state` |
+| `GET` | `/api/v1/pipelines/{name}/sizing` | `runs.read` or `source.read` |
+| `POST` | `/api/v1/pipelines/{name}/sizing/contention` | `node.report` |
+| `POST` | `/api/v1/pipelines/{name}/sizing/observations` | `node.report` |
+| `PUT` | `/api/v1/pipelines/{name}/sizing/pin` | `node.report` |
+| `POST` | `/api/v1/pipelines/{name}/sizing/waits` | `node.report` |
 | `GET` | `/api/v1/queue/state` | `runs.read` |
 | `POST` | `/api/v1/runners/github/exchange` | `public` |
 | `GET` | `/api/v1/runs` | `runs.read` |

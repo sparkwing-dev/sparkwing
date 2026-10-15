@@ -2598,20 +2598,20 @@ paths:
               schema: {$ref: "#/components/schemas/Run"}
         "404": {$ref: "#/components/responses/NotFound"}
 
-  /api/v1/pipelines/{name}/profile:
+  /api/v1/pipelines/{name}/sizing:
     parameters: [{$ref: "#/components/parameters/PipelineName"}]
     get:
-      x-sparkwing-scope: nodes.claim
+      x-sparkwing-scope: runs.read or source.read
       tags: [pipelines]
       summary: Read a pipeline's measured resource profile.
       description: |
         Returns the cores and memory sparkwing measured for past runs, plus
-        any operator pin. `?node=` narrows it to one node; omitting it
+        any operator pin. `?job=` narrows it to one job; omitting it
         answers the pipeline-wide profile. A runner reads this to size the
         work it is about to admit.
       parameters:
         - in: query
-          name: node
+          name: job
           schema: {type: string}
       responses:
         "200":
@@ -2622,22 +2622,23 @@ paths:
                 type: object
                 additionalProperties: true
         "401": {$ref: "#/components/responses/Unauthorized"}
-        "404": {description: No profile recorded for this pipeline or node.}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: No profile recorded for this pipeline or job.}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/pipelines/{name}/profile/pin:
+  /api/v1/pipelines/{name}/sizing/pin:
     parameters: [{$ref: "#/components/parameters/PipelineName"}]
     put:
-      x-sparkwing-scope: runs.state
+      x-sparkwing-scope: node.report
       tags: [pipelines]
       summary: Pin or clear a pipeline's resource profile.
       description: |
         A pin overrides what sparkwing measured. A body whose `cores` and
-        `memory_bytes` are both zero or negative clears the pin instead of
+        `memory_bytes` are both zero clears the pin instead of
         setting one.
       parameters:
         - in: query
-          name: node
+          name: job
           schema: {type: string}
       requestBody:
         required: true
@@ -2653,6 +2654,7 @@ paths:
         "204": {description: Pin written or cleared. Empty body.}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/gitcache/git/register:
@@ -2874,10 +2876,10 @@ paths:
         "502": {description: The cache is unreachable or answered badly.}
         "503": {description: No cache is configured on this controller.}
 
-  /api/v1/pipelines/{name}/profile/contention:
+  /api/v1/pipelines/{name}/sizing/contention:
     parameters: [{$ref: "#/components/parameters/PipelineName"}]
     post:
-      x-sparkwing-scope: runs.state
+      x-sparkwing-scope: node.report
       tags: [pipelines]
       summary: Count one contended run against a pipeline.
       description: |
@@ -2890,10 +2892,10 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/pipelines/{name}/profile/observations:
+  /api/v1/pipelines/{name}/sizing/observations:
     parameters: [{$ref: "#/components/parameters/PipelineName"}]
     post:
-      x-sparkwing-scope: runs.state
+      x-sparkwing-scope: node.report
       tags: [pipelines]
       summary: Fold one run's measurement into a pipeline's profile.
       description: |
@@ -2904,7 +2906,7 @@ paths:
         A `partial` observation may only raise resource dimensions or the floor.
       parameters:
         - in: query
-          name: node
+          name: job
           schema: {type: string}
       requestBody:
         required: true
@@ -2931,10 +2933,10 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/pipelines/{name}/profile/waits:
+  /api/v1/pipelines/{name}/sizing/waits:
     parameters: [{$ref: "#/components/parameters/PipelineName"}]
     post:
-      x-sparkwing-scope: runs.state
+      x-sparkwing-scope: node.report
       tags: [pipelines]
       summary: Record how long a run queued for admission.
       description: |

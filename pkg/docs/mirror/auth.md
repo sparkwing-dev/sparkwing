@@ -13,6 +13,21 @@ work or plan claims cannot read this private owner view. Cancellation and
 owner lease loss refuse new reads. A cancellation committed after
 authentication appears in the returned snapshot.
 
+Pipeline sizing uses `/api/v1/pipelines/{name}/sizing`. Members need
+`runs.read`. Executable claims need `source.read` and the bound run's exact
+sealed repository and pipeline. Bare runner and Actions roots cannot read
+sizing. Bootstrap credentials can acquire source but cannot read sizing.
+The `job` query selects one job. Omitting it selects the pipeline rollup.
+An authorized missing measurement returns `not_found`.
+
+Pins, observations, contention and waits use the `pin`, `observations`,
+`contention` and `waits` suffixes on that path. They require `node.report`
+and the same pipeline binding. Cancellation permits reporting while the
+claim remains live. Member and admin grants cannot bypass this binding.
+Writes require an authority-bearing sizing transaction adapter. Without one,
+the controller returns `policy_missing` before storing a measurement.
+The old `/profile` paths are removed.
+
 Token revocation and member updates use the same policy router. A team token is
 revoked at `DELETE /api/v1/tokens/{token}`. Deployment service/operator roots use
 `DELETE /api/v1/operator/tokens/{token}` with `operator.tokens` or an operator
@@ -704,7 +719,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `logs.read`       | GET `/api/v1/runs/{id}/logs`, `/runs/{id}/logs/{node}`, `/runs/{id}/logs/{node}/stream`, `/runs/{id}/logs/{node}/completeness`, `/runs/{id}/logs/search` and `/runs/grep` |
 | `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`. `/triggers/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
 | `triggers.claim`  | POST `/api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`, and GET the live claimed trigger and its run. The heartbeat and the done name a trigger, and each is bound to the claimant that trigger's row records |
-| `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, the offer-round routes `mark-ready`, `revoke-ready`, `finalize-ready`, `auto-retry/reset`, the slot routes `/concurrency/{key}/acquire`, `heartbeat`, `release`, `holder`, `resolve`, `cancel-waiter`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
+| `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, the offer-round routes `mark-ready`, `revoke-ready`, `finalize-ready`, `auto-retry/reset`, the slot routes `/concurrency/{key}/acquire`, `heartbeat`, `release`, `holder`, `resolve`, `cancel-waiter`. Every write naming a run is bound to a run the caller owns |
 | `secrets.read`    | Releases no secret. A bearer holding it without `admin` or `team.admin` is answered `403 claim_required` on GET `/api/v1/secrets/{name}`; a node reads its run's secrets with its claim token. Tokens minted with it keep authenticating, and no team token or runner token is minted with it |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
 | `team.admin`      | Administering the caller's own team: rename it, change roles, remove members, invitations, and revoking any of its machine tokens. A team owner holds it; it reaches no other team |
@@ -867,11 +882,6 @@ the trigger claim, which is why the trigger claim reads secrets; the first plan
 gets no node routes. The runner hosts the trigger's run with its own token,
 which never reaches the pipeline's processes.
 
-`PUT /pipelines/{name}/profile/pin` is the one `runs.state` write that names a
-pipeline instead of a run, and a pin becomes a hard Kubernetes limit for every
-later run of it. The caller must hold a live claim on some run of that
-pipeline, so a token executing one pipeline cannot pin another's. `admin`
-bypasses, which is what lets a dispatcher pin a pipeline it is not running.
 
 The two reads a node process opens with, `GET /api/v1/runs/{id}` and
 `GET /api/v1/triggers/{id}`, run the ownership check the other way: a caller

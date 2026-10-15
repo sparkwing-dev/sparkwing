@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -543,9 +544,9 @@ func (c *Client) AddNodeMetricSample(ctx context.Context, runID, nodeID string, 
 // nodeID is empty. Returns (nil, nil) when nothing has been measured yet,
 // so the caller falls back to its pin or a conservative default.
 func (c *Client) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*store.PipelineProfile, error) {
-	u := fmt.Sprintf("%s/api/v1/pipelines/%s/profile", c.baseURL, url.PathEscape(pipeline))
+	u := fmt.Sprintf("%s/api/v1/pipelines/%s/sizing", c.baseURL, url.PathEscape(pipeline))
 	if nodeID != "" {
-		u += "?node=" + url.QueryEscape(nodeID)
+		u += "?job=" + url.QueryEscape(nodeID)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -564,7 +565,24 @@ func (c *Client) GetPipelineProfile(ctx context.Context, pipeline, nodeID string
 		}
 		return &prof, nil
 	case http.StatusNotFound:
-		return nil, classifyNotFound(resp)
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		var envelope struct {
+			Error json.RawMessage `json:"error"`
+		}
+		if err := json.Unmarshal(data, &envelope); err != nil {
+			return nil, errors.New("invalid sizing error response")
+		}
+		failure, err := apierr.DecodeInner(envelope.Error)
+		if err != nil {
+			return nil, err
+		}
+		if failure.Code != apierr.NotFound {
+			return nil, failure
+		}
+		return nil, nil
 	default:
 		return nil, readHTTPError(resp)
 	}
@@ -574,9 +592,9 @@ func (c *Client) GetPipelineProfile(ctx context.Context, pipeline, nodeID string
 // applied for a (pipeline, node), so the controller can judge it against
 // measured peaks and surface drift. nodeID empty targets the rollup.
 func (c *Client) SetPipelinePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error {
-	u := fmt.Sprintf("%s/api/v1/pipelines/%s/profile/pin", c.baseURL, url.PathEscape(pipeline))
+	u := fmt.Sprintf("%s/api/v1/pipelines/%s/sizing/pin", c.baseURL, url.PathEscape(pipeline))
 	if nodeID != "" {
-		u += "?node=" + url.QueryEscape(nodeID)
+		u += "?job=" + url.QueryEscape(nodeID)
 	}
 	buf, _ := json.Marshal(map[string]any{"cores": cores, "memory_bytes": memoryBytes})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, bytes.NewReader(buf))
@@ -584,7 +602,6 @@ func (c *Client) SetPipelinePin(ctx context.Context, pipeline, nodeID string, co
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	setNodeClaimFenceHeaders(req, ctx)
 	resp, err := c.do(req)
 	if err != nil {
 		return err

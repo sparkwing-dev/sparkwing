@@ -28,6 +28,36 @@
   },
   "routes": [
     {
+      "route": "/api/v1/pipelines/{name}/sizing/waits",
+      "kind": "api",
+      "exempt": "Requires authorized sizing fixtures and committed claim bindings, absent from the local dashboard corpus. Writes also require the authority-bearing sizing transaction adapter. A probe without these measures rejection. Authorized latency, cold start and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/pipelines/{name}/sizing/contention",
+      "kind": "api",
+      "exempt": "Requires authorized sizing fixtures and committed claim bindings, absent from the local dashboard corpus. Writes also require the authority-bearing sizing transaction adapter. A probe without these measures rejection. Authorized latency, cold start and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/pipelines/{name}/sizing/observations",
+      "kind": "api",
+      "exempt": "Requires authorized sizing fixtures and committed claim bindings, absent from the local dashboard corpus. Writes also require the authority-bearing sizing transaction adapter. A probe without these measures rejection. Authorized latency, cold start and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/pipelines/{name}/sizing/pin",
+      "kind": "api",
+      "exempt": "Requires authorized sizing fixtures and committed claim bindings, absent from the local dashboard corpus. Writes also require the authority-bearing sizing transaction adapter. A probe without these measures rejection. Authorized latency, cold start and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/pipelines/{name}/sizing",
+      "kind": "api",
+      "exempt": "Requires authorized sizing fixtures and committed claim bindings, absent from the local dashboard corpus. Writes also require the authority-bearing sizing transaction adapter. A probe without these measures rejection. Authorized latency, cold start and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
       "route": "/api/v1/runs/{run}/snapshot",
       "kind": "api",
       "exempt": "Requires a live trigger-owner claim and a committed scheduling graph, absent from the local dashboard corpus. An unauthenticated probe measures rejection. Latency, cold start and response bytes remain unmeasured; baseline an authorized graph corpus and remove this exemption after store integration.",

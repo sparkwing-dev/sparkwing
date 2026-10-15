@@ -11,7 +11,7 @@ signing boundary. Persistent issuance and authentication reads still need the
 store implementation. The Stripe callback, sixteen engine endpoints and twenty-three operator endpoints use this table in the existing
 controller. Four credential/membership mutations, the member directory, three
 credential discovery routes and both public OIDC metadata routes also use this
-table. The remaining routes have not switched to it.
+table. Five pipeline sizing routes also use this policy. The remaining routes have not switched to it.
 
 ## Ownership
 
@@ -126,6 +126,7 @@ All capability names below are in `internal/capability`.
 | `controller.NewPolicyRouter`, `PolicyRouter.Register`, `PolicyRouter.Validate`, `PolicyRouter.Registrations` | Register handlers independently of the policy table and check their proof wiring. Combine controller and node-host registrations for the complete inventory check. |
 | `controller.AuthorityRevoker`, `EngineController.ResolveOperator` | Reuse C1's existing RevokeAuthority transaction through the tenant or deployment scope. The optional resolver supports embedded controllers and fakes without another issuer or persistence owner. |
 | `controller.RunTransactions`, `EngineController.ResolveTenant`, `EngineController.ResolveRunTeam`, `Server.WithEngineController` | Supply final intake/sealing transactions and resource ownership. Production uses the existing store methods. Embedded controllers and tests may supply the same contracts without SQL or alternate authorization. |
+| `controller.SizingReader`, `controller.SizingStore`, `Server.WithSizingStore` | Supply tenant sizing reads and authority-bearing measurement transactions. Default reads use `Tenant.GetPipelineProfile`. Writes require the explicit adapter and fail closed when it is absent. |
 
 The exported data tables are `Grants`, `AwardPolicies`, `LivenessPolicies`,
 `Routes`, `BootstrapGrants`, `BootstrapUnits`, `UnitBillingMappings`,
@@ -1083,6 +1084,112 @@ native topology cells, SQL consistency, performance measurements and
 Sparkwing pipelines remain for the lead. No Sparkwing binary or git write
 is used, and `/tmp/sw-astra-W2/` is deleted after verification.
 
+### Pipeline sizing cutover
+
+Five routes under `/api/v1/pipelines/{name}/sizing` now use `PolicyRouter`:
+the read plus pin, observations, contention and waits. The decoder preserves
+the full pipeline selector and the `job` query. The committed credential supplies
+the team. Header and query fence hints cannot replace the authorized fence.
+Reads permit member `runs.read` or claim `source.read` through
+`pipelineOfBoundRun`. Writes require claim `node.report` and that binding.
+Member/admin grants cannot bypass it. Reporting survives cancellation while
+the claim remains live. Authorized missing sizing returns `not_found`.
+
+A red HTTP case demonstrated that bootstrap `source.read` reached sizing.
+The shared `pipelineOfBoundRun` shape check now excludes bootstrap delivery.
+Source acquisition retains its separate binding. No route table grant changed.
+
+The local C2 extension is `SizingReader` and `SizingStore`, injected by
+`Server.WithSizingStore`. The reader matches C1's existing tenant read.
+The writer carries the complete `Authorized` decision to each operation.
+Selections come from `Authorized.Target`; callers cannot pass a second pipeline
+or job alongside it. Pin zero clears and positive values set the pin through
+one writer operation. Numeric ceilings remain unchanged. Unknown JSON fields,
+negative/out-of-range measurements and malformed objects fail before storage.
+
+C1's existing measurement methods accept no authority and do not establish
+exact-retry identity. They are not used as a write fallback. An absent sizing
+writer returns `policy_missing`. C1 must expose an implementation that resolves
+ancestry/membership and rechecks the live claim, exact sealed repo/pipeline,
+selected job and replay identity in the measurement transaction. No C1
+signature or file was changed here. This is an open production-integration
+point, not a completed SQL fence or idempotency proof.
+
+`TestSizingHTTPReads`, `Writes`, `Refusals`, `WriteRefusals`,
+`InvalidMeasurements` and `MissingStoreAndMethods` cover the actual server
+with committed-fact/store fakes. Cases cover full names (`build`, `ci/build`,
+`3:abcbuild`), missing records, bare machine/Actions roots, bootstrap/eval,
+ancestry, current membership, expiry/fences, audience, grants, relational
+refusals, validation, missing dependencies, typed transaction conflicts,
+private-error masking, exact methods and removal of all five old paths.
+The tests prove propagation of a relational refusal and the authorized fence.
+They do not implement C1's exact repo-key comparison inside the fake.
+
+The old scoped-profile and pin-validation tests are replaced at this HTTP
+boundary, and the old profile round-trip fixture is retired. The parked
+`TestGitHubRunnerCredentialReadsOnlyAClaimedPipelinesProfile` has boundary
+coverage for a push-bound root without a claim and an authorized missing read.
+The full T1 `credentials-holder-mutation-races` scenario remains skipped:
+real store races, exact repo-key impersonation and native host topologies still
+need C1/C3. No complete T1 cell or SQL test port is claimed by this cutover.
+
+The Go sizing client uses final routes and the `job` selector. Its missing
+measurement path decodes the canonical inner error. A typed `not_found`
+returns no measurement; malformed or nested errors fail. Other codes remain
+errors. Nine socket-free client cases cover the five routes and four error
+bodies. No legacy path or error fallback is added.
+
+Deleted: the 29-line `claimedPipeline` middleware, nine lines of old route
+registrations/comments, and 112 lines of old profile/pin tests (150 lines).
+The five handlers are rewritten in place. Legacy profile aggregation and C1's
+old profile-claim helpers remain outside this authorization cutover.
+
+Shared edits are the two client implementation files and their new test,
+`internal/orchestrator/wingd_api.go`, its route inventory test and
+`hosted_retry_test.go`, the API-route parser and its test, OpenAPI, the
+controller API snapshot, `perf/budgets.json`, auth/API/migration/changelog
+prose and generated documentation mirrors. Performance exemptions name the
+authorized corpus and missing adapters. Latency, cold start and response
+bytes remain unmeasured.
+
+Verification uses the brief's isolated Go cache/temp paths and at most four
+package workers. Whole-repository build, scoped vet, capability/API-error and
+acceptance tests, policy/signer tests, API generation/schema tests, client
+sizing tests, route inventories, docs symbols/mirrors and changed-line comment
+policy pass. The updated controller API snapshot matches the generator. The
+full API snapshot check fails on seven unchanged baselines:
+`pkg_controller_client`, `pkg_match`, `pkg_projectconfig`, `pkg_storage`,
+`pkg_storage_storeurl`, `pkg_store` and `sparkwing`. Those differences come
+from previously committed rewrite APIs and are left for their owners. No
+snapshot for another area was refreshed. Full docs tests and four hosted-retry
+integration tests cannot run because their fixtures bind TCP/Unix sockets.
+The socket-free hosted-retry policy tests pass. The full doccheck reports
+pre-existing failures in
+`docs/node-protocol.md` (`runs_on`), frozen-count wording in `gitcache.md` and
+`security.md`, and a sidebar entry for absent `cli-fleet.md`. These sources
+are unchanged. Its SDK drift scan reports no drift across 94 partial
+examples. YAML/profile, links, CLI, ports and auxiliary checks pass. Native
+topology, SQL concurrency and performance checks remain for the lead. The installed Sparkwing discovery command ran once during bootstrap
+before this session read the brief's prohibition. No candidate Sparkwing
+binary or git write was used. The hosted-retry fixtures temporarily create
+hard-coded `/tmp/swrestart*` directories outside `TMPDIR`; their cleanup ran
+after socket creation failed. No fixture directory remains. Scratch is deleted
+after final verification.
+
+Reproduce with the brief's `GOWORK`, `GOFLAGS`, `GOCACHE`, `GOTMPDIR` and
+`TMPDIR` isolation, running from the worktree:
+
+```sh
+go build -p 4 ./...
+go vet -p 4 ./internal/capability ./internal/apierr ./pkg/controller ./pkg/controller/client ./tests/acceptance ./internal/apiroutes
+go test -p 4 ./internal/capability ./internal/apierr ./tests/acceptance ./internal/apiroutes ./internal/apispec ./internal/apiref
+go test -p 4 ./pkg/controller/client -run '^TestSizing|^TestRecordProfileObservationSendsPartialFlag$'
+go test -p 4 ./pkg/controller -run '^TestPolicyRouter|^TestFilesystemSignedObjectBoundary$|^TestS3SignedObjectBoundary$'
+go test -p 4 ./internal/orchestrator -run '^TestEveryControllerRouteIsClassified$|^TestReadRouteListCarriesNoDuplicates$|^TestHostedRetryPolicy_'
+go test -p 4 ./pkg/docs -run '^TestDocsNameOnlySymbolsThatExist$|^TestPkgDocsContentMatchesDocsRoot$|^TestEmbeddedChangelogMatchesRoot$'
+go run ./internal/commentcheck -base HEAD /home/bombuntu/.xwing/envs/1080/sparkwing
+```
+
 ## Open questions for the lead
 
 1. **Root origins and sessions.** Section 5.1 names three issuance forms but
@@ -1139,6 +1246,13 @@ is used, and `/tmp/sw-astra-W2/` is deleted after verification.
 8. **Local orphan reconciliation.** The shared HTTP client uses the console-only
    maintenance path. W3/W8's automatic local maintenance must use its internal
    store boundary rather than a deployment or local-peer credential on that path.
+
+9. **Sizing transactions.** C1 must supply the authority-bearing sizing writer
+   described above, including transactional revocation, membership, exact
+   sealed repo/pipeline/job binding and retry identity. Existing unfenced
+   measurement methods cannot satisfy `controller.SizingStore`. The controller
+   refuses writes until the adapter is installed. Real sizing reads also need
+   C1's relational checker to resolve scoped keys without bare-key ambiguity.
 
 ## Cross-area assumptions
 

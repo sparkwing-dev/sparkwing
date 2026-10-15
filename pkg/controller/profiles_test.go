@@ -141,44 +141,6 @@ func TestFinishRun_NoPinNoDrift(t *testing.T) {
 	}
 }
 
-func TestGetPipelineProfile_RoundTripsThroughController(t *testing.T) {
-	dir := t.TempDir()
-	st, err := teststore.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-	ctx := context.Background()
-
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
-	defer srv.Close()
-	c := client.New(srv.URL, nil)
-
-	prof, err := c.GetPipelineProfile(ctx, "unknown", "node-1")
-	if err != nil {
-		t.Fatalf("get missing profile: %v", err)
-	}
-	if prof != nil {
-		t.Errorf("unprofiled pipeline should return nil profile, got %+v", prof)
-	}
-
-	if err := st.RecordProfileObservation(ctx, "deploy", "node-1", store.ProfileObservation{
-		Duration: time.Minute, PeakCores: 3, PeakMemoryBytes: 4 << 30, CPUMeasured: true,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := c.SetPipelinePin(ctx, "deploy", "node-1", 3, 4<<30); err != nil {
-		t.Fatalf("set pin: %v", err)
-	}
-	got, err := c.GetPipelineProfile(ctx, "deploy", "node-1")
-	if err != nil || got == nil {
-		t.Fatalf("get profile: %v", err)
-	}
-	if got.PeakCores != 3 || got.PinnedCores != 3 {
-		t.Errorf("profile round trip lost data: %+v", got)
-	}
-}
-
 func TestFinishRunFoldsPartialSamplesRaiseOnly(t *testing.T) {
 	cases := []struct {
 		name      string

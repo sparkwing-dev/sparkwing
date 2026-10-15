@@ -85,6 +85,7 @@ func Parse(file string, scopes map[string]string) ([]Route, error) {
 		{"s.registerOperatorRoutes(router)", "operator_routes.go"},
 		{"s.registerEngineRoutes(router)", "engine_routes.go"},
 		{"s.registerAuthorityRoutes(router)", "authority_routes.go"},
+		{"s.registerPolicyEndpoints(router, s.sizingEndpoints())", "sizing_routes.go"},
 	} {
 		if !strings.Contains(string(data), group.registration) {
 			continue

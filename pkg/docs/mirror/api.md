@@ -142,7 +142,7 @@ runs: it dispatches its own child triggers, and it measures what the run
 cost so the next run of the same pipeline is priced from evidence. Those
 reach the controller as routes too -- `/api/v1/runs/{id}/pending-triggers`
 and `/api/v1/triggers/{id}/claim` for the child-trigger loop,
-`/api/v1/pipelines/{name}/profile/observations`, `/contention`, and
+`/api/v1/pipelines/{name}/sizing/observations`, `/contention`, and
 `/waits` for the capacity profile, `/api/v1/runs/{id}/nodes/{nodeID}/usage`
 for a reaped process's accounting, and
 `/api/v1/maintenance/reconcile-orphans` for the sweep that closes runs
@@ -152,7 +152,9 @@ A capacity write names a pipeline rather than a run, so it is bound to a
 live claim on a run of that pipeline: a node claim for a runner executing
 one node, or the run's trigger claim for the orchestrator, which records
 the queue wait before the first node exists and the run's measurement
-after the last one is gone.
+after the last one is gone. Sizing writes require `node.report` and an
+authority-bearing transaction adapter that rechecks the sealed repository and
+pipeline. Without that adapter they return `policy_missing`.
 
 ## Concurrency
 

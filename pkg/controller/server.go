@@ -42,10 +42,11 @@ type Server struct {
 	sourceCredentialLimit perMinuteLimiter
 	identityLinkLimit     perMinuteLimiter
 
-	auth             *Authenticator
-	authorization    RouteAuthorization
-	operatorSettings operatorSettingsStore
-	engineController *EngineController
+	auth               *Authenticator
+	authorization      RouteAuthorization
+	operatorSettings   operatorSettingsStore
+	engineController   *EngineController
+	resolveSizingStore func(context.Context, store.Team) (SizingStore, error)
 
 	peerPrincipal func(*http.Request) *Principal
 
@@ -640,35 +641,6 @@ func (s *Server) runMember(readerScope string, next http.Handler) http.Handler {
 	})
 }
 
-// safety: a profile outlives the run that writes it, so a write needs a live claim
-// on a run of that pipeline: a node claim for a runner executing one node, or the
-// run's trigger claim for the orchestrator, which records the wait before the first
-// node exists and the measurement after the last one is gone. Admin bypasses.
-func (s *Server) claimedPipeline(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p, ok := PrincipalFromContext(r.Context())
-		if !ok || p.HasScope(ScopeAdmin) {
-			next.ServeHTTP(w, r)
-			return
-		}
-		pipeline := r.PathValue("name")
-		held, err := s.store.PrincipalHoldsProfileClaim(r.Context(), pipeline, claimIdentity(r), time.Now())
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		if !held {
-			writeAuthError(w, http.StatusForbidden, authErrorBody{
-				Code:      "claim_required",
-				Principal: p.label(),
-				Message:   "pipeline " + pipeline + " has no run claimed by this principal",
-			})
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 // WithTrustedProxyAddr serves the same API on a second address whose
 // requests key login throttling, the bearer failure budget and the
 // request log on their X-Real-IP. Only a proxy that overwrites that
@@ -869,15 +841,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 
 	mux.Handle("GET /api/v1/pipelines", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListPipelines)))
 	mux.Handle("GET /api/v1/pipelines/{name}/latest", requireScope(ScopeRunsRead, http.HandlerFunc(s.handlePipelineLatest)))
-	mux.Handle("GET /api/v1/pipelines/{name}/profile", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleGetPipelineProfile)))
-	// safety: a pin becomes a hard Kubernetes limit for every later run of that pipeline,
-	// so it is bound to a live claim on a run of that pipeline, not to the scope alone.
-	mux.Handle("PUT /api/v1/pipelines/{name}/profile/pin", requireScope(ScopeRunsState, s.claimedPipeline(http.HandlerFunc(s.handleSetPipelinePin))))
-	// safety: an observation moves the same measured price the pin does, so it
-	// carries the pin's claim gate rather than the scope alone.
-	mux.Handle("POST /api/v1/pipelines/{name}/profile/observations", requireScope(ScopeRunsState, s.claimedPipeline(http.HandlerFunc(s.handleRecordProfileObservation))))
-	mux.Handle("POST /api/v1/pipelines/{name}/profile/contention", requireScope(ScopeRunsState, s.claimedPipeline(http.HandlerFunc(s.handleRecordContention))))
-	mux.Handle("POST /api/v1/pipelines/{name}/profile/waits", requireScope(ScopeRunsState, s.claimedPipeline(http.HandlerFunc(s.handleRecordWaitObservation))))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/metrics", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleAddNodeMetric)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAddNodeMetric)))))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/metrics", requireScope(ScopeRunsRead, s.readableRun(http.HandlerFunc(s.handleGetNodeMetrics)), ScopeNodesClaim, ScopeTriggersClaim))
@@ -1034,6 +997,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	s.registerOperatorRoutes(router)
 	s.registerEngineRoutes(router)
 	s.registerAuthorityRoutes(router)
+	s.registerPolicyEndpoints(router, s.sizingEndpoints())
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
 	// safety: the cache proves itself with its storage.count service token,
 	// which these handlers check.

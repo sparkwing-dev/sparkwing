@@ -419,7 +419,7 @@ func bindingShape(p Principal, rule BindingRule, t Target) bool {
 	case BindPlanOwner:
 		return run && (p.Capability.Unit == UnitPlan && b.Kind == BindingRun || p.Capability.Unit == UnitTrigger && b.Kind == BindingTrigger)
 	case BindPipelineOfBoundRun:
-		return isClaim(p) && t.Pipeline != ""
+		return isClaim(p) && p.Capability.Delivery != DeliveryBootstrap && t.Pipeline != ""
 	case BindExpansion:
 		return run && b.NodeID != "" && b.NodeID == t.NodeID && b.Generation > 0 && b.Expansion != nil
 	case BindChildOfBoundNode, BindOwnCleanup:

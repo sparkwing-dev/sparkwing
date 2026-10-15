@@ -400,6 +400,7 @@ func (s *Server) WithSessionMaxLifetime(d time.Duration) *Server
 func (s *Server) WithSignUpApprovalNotifier(fn func(context.Context, store.Account) error) *Server
 func (s *Server) WithSignUpWaitlist(on bool) *Server
 func (s *Server) WithSignedDownloads(cache *teamblob.Store, client *s3.Client, domain, keyPairID, privateKey string) error
+func (s *Server) WithSizingStore(resolve func(context.Context, store.Team) (SizingStore, error)) *Server
 func (s *Server) WithStoragePass(cache *teamblob.Store) *Server
 func (s *Server) WithTeamDownloadCaps(free, funded int64) *Server
 func (s *Server) WithTeamStorage(ts TeamStorage) *Server
@@ -415,6 +416,16 @@ type ServicesResponse struct {
 	MultiTeam bool
 
 	DirectData bool
+}
+type SizingReader interface {
+	GetPipelineProfile(context.Context, string, string) (*store.PipelineProfile, error)
+}
+type SizingStore interface {
+	SizingReader
+	SetProfilePin(context.Context, capability.Authorized, float64, int64) error
+	RecordProfileObservation(context.Context, capability.Authorized, store.ProfileObservation) error
+	RecordContention(context.Context, capability.Authorized) error
+	RecordWaitObservation(context.Context, capability.Authorized, time.Duration) error
 }
 const SpendLimitCode = "spend_limit"
 const StaleCardSetupCode = "stale_card_setup"

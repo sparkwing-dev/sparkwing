@@ -161,6 +161,33 @@ func (s *Server) routes() {
 	}
 }
 
+func TestParseSizingEndpointsUsesActualRegistrations(t *testing.T) {
+	src := writeFile(t, "server.go", "s.registerPolicyEndpoints(router, s.sizingEndpoints())")
+	endpoints := `
+	{Method: "GET", Pattern: "/api/v1/pipelines/{name}/sizing"},
+	{Method: "PUT", Pattern: "/api/v1/pipelines/{name}/sizing/pin"},
+	{Method: "POST", Pattern: "/api/v1/pipelines/{name}/sizing/observations"},
+	{Method: "POST", Pattern: "/api/v1/pipelines/{name}/sizing/contention"},
+	{Method: "POST", Pattern: "/api/v1/pipelines/{name}/sizing/waits"},`
+	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "sizing_routes.go"), []byte(endpoints), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Parse(src, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Route{
+		{Method: "GET", Path: "/api/v1/pipelines/{name}/sizing", Scope: "runs.read` or `source.read"},
+		{Method: "POST", Path: "/api/v1/pipelines/{name}/sizing/contention", Scope: "node.report"},
+		{Method: "POST", Path: "/api/v1/pipelines/{name}/sizing/observations", Scope: "node.report"},
+		{Method: "PUT", Path: "/api/v1/pipelines/{name}/sizing/pin", Scope: "node.report"},
+		{Method: "POST", Path: "/api/v1/pipelines/{name}/sizing/waits", Scope: "node.report"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("sizing registrations=%+v want %+v", got, want)
+	}
+}
+
 func TestParseMissingFile(t *testing.T) {
 	if _, err := Parse(filepath.Join(t.TempDir(), "absent.go"), nil); err == nil {
 		t.Fatal("Parse on a missing file returned no error")
