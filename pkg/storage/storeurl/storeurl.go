@@ -1,4 +1,4 @@
-// Package storeurl opens state handles and read-only storage measurements.
+// Package storeurl opens read-only storage measurements.
 package storeurl
 
 import (

@@ -162,7 +162,14 @@ func checkStorageMaterialization(t *testing.T, objects blob.ObjectBackend, trans
 			}
 		}
 		materialized, err = blob.MaterializeMemo(t.Context(), store, records, request)
-		if err != nil || materialized.Hit.Found || len(materialized.Output) != 0 {
+		if fault == "refused_edge" {
+			if !errors.Is(err, blob.ErrDigestNotReadable) {
+				t.Fatalf("authority refusal became a miss: %v", err)
+			}
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		if materialized.Hit.Found || len(materialized.Output) != 0 {
 			t.Fatalf("%s became a memo hit: %+v, %v", fault, materialized, err)
 		}
 		if fault == "missing_bytes" || fault == "corrupt_member" || fault == "corrupt_manifest" {

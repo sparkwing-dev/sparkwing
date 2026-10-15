@@ -12,8 +12,7 @@ import (
 // ManifestVersion is the manifest format this package writes and reads.
 const ManifestVersion = 1
 
-// Manifest statuses. A reader derives streaming from a missing manifest
-// on a node that is still running.
+// Manifest statuses describe the writer's final payload.
 const (
 	StatusComplete   = "complete"
 	StatusIncomplete = "incomplete"
@@ -33,8 +32,7 @@ const (
 // SealedByNode identifies the writer of a physical manifest.
 const SealedByNode = "node"
 
-// Manifest seals one subject's log: which segments it holds, what
-// each one covers and its digest, and whether the log is whole.
+// Manifest describes one subject's final segments; persisted records and seals govern reads.
 type Manifest struct {
 	Subject      *blob.LogSubject `json:"subject"`
 	Version      int              `json:"version"`
@@ -124,11 +122,9 @@ func ParseManifest(raw []byte) (*Manifest, error) {
 const (
 	// StateStreaming identifies a log that can still receive bytes.
 	StateStreaming = "streaming"
-	// StateComplete: the manifest says every line arrived and every
-	// segment it lists verified.
+	// StateComplete identifies a persisted complete seal with verified segment bytes.
 	StateComplete = "complete"
-	// StateIncomplete: lines are missing, or a segment is missing or
-	// does not match its digest.
+	// StateIncomplete identifies a persisted seal reporting missing lines; unreadable bytes fail reads.
 	StateIncomplete = "incomplete"
 	// StateCutOff: the log stopped before its writer finished: the node
 	// was stopped, or the byte cap ended it.

@@ -92,7 +92,7 @@ func FetchSourceBundle(ctx context.Context, data *SourceData, digest blob.Digest
 		}
 		return nil
 	}
-	if err := git("-c", "init.templateDir=", "init", "--quiet", checkout); err != nil {
+	if err := git("-c", "init.templateDir=", "init", "--object-format=sha1", "--quiet", checkout); err != nil {
 		return "", err
 	}
 	if err := git("-C", checkout, "fetch", "--quiet", "--no-tags", "--", bundle, SeedRef(sha)); err != nil {

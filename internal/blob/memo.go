@@ -2,8 +2,11 @@ package blob
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 )
 
 // MaterializedMemo contains output verified after the store authorized and copied
@@ -33,13 +36,21 @@ func MaterializeMemo(ctx context.Context, bytes Store, records RecordStore, requ
 	}
 	hit, err := records.CopyMemo(readCtx, request)
 	if err != nil || !hit.Found {
-		return MaterializedMemo{}, ctx.Err()
+		return MaterializedMemo{}, memoFailure(ctx, err)
 	}
 	output, err := readMemoBytes(readCtx, bytes, request.Lookup.Authority, request.Destination.Team, hit)
 	if err != nil || readCtx.Err() != nil {
-		return MaterializedMemo{}, ctx.Err()
+		return MaterializedMemo{}, memoFailure(ctx, err)
 	}
 	return MaterializedMemo{Hit: hit, Output: output}, nil
+}
+
+func memoFailure(ctx context.Context, err error) error {
+	var failure *apierr.Error
+	if errors.Is(err, ErrDigestNotReadable) || (errors.As(err, &failure) && (failure.Code == apierr.Forbidden || failure.Code == apierr.Unauthenticated || failure.Code == apierr.LockHeld)) {
+		return errors.Join(err, ctx.Err())
+	}
+	return ctx.Err()
 }
 
 func readMemoBytes(ctx context.Context, bytes Store, authority Authority, team string, hit MemoHit) ([]byte, error) {

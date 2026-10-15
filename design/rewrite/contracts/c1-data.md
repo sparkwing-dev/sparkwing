@@ -679,13 +679,22 @@ creates the final key only if absent, and verifies final bytes before returning.
 A physical commit grants no record, existence row or receipt. Those remain W1's
 transactional responsibility after the controller repeats authorization.
 
-`ObjectBackend.ReadManifest(ctx, team, digest)` derives the tenant CAS key and
-returns file members only after verifying the full stored length, digest and
-successful close. `storage.BlobManifests` implements W1's `BlobManifestReader`
-with that physical reader. The record transaction authorizes the manifest before
-reading it and independently authorizes every returned member. This adapter opens
-no store transaction or authenticated data request, so it can run inside W1's
-existing transaction. Controller binding must supply it to `Tenant.BlobRecords`.
+`ObjectBackend.VerifyManifest(ctx, team, digest, members)` derives the tenant CAS
+key and streams the manifest against the commit request's submitted members.
+Decoder memory is bounded by the submitted path/digest metadata's worst-case JSON
+representation; object byte length never sets an allocation size. Whitespace runs
+outside strings consume constant memory. Unknown fields, surplus entries and
+metadata disagreements fail integrity checks. No manifest byte-size cap is added.
+Every original byte contributes to length and digest verification through EOF,
+and successful close is required before admission.
+
+`storage.BlobManifests` implements W1's `BlobManifestReader.VerifyBlobManifest`
+with that physical verifier. The record transaction authorizes the manifest
+before verification and independently authorizes each submitted member before
+mutation. `ReadBlobManifest` remains the separate admitted-record lookup path;
+it streams entries instead of buffering the raw object. These methods open no
+store transaction or authenticated data request, so they run inside W1's existing
+transaction. Controller binding supplies the adapter to `Tenant.BlobRecords`.
 
 `ObjectBackend.DeleteBlob` implements W1's existing `BlobDeleter` interface for
 filesystem and S3 collection. It derives the tenant CAS key from the selected
