@@ -629,6 +629,20 @@ don't skip and records the predicate index in `SkipEvaluation.TimedOut` for host
 diagnostics. The next predicate starts after close and cleanup join. Null and
 non-boolean results, drift, SDK failures and cleanup errors prevent dispatch.
 
+`NewNativeHost` installs this evaluator for the `skip_if` owner layer. Its
+caller-supplied `Owner.Layer` handles debug, approval, memo and admission. The
+native layer logs timeout indices and proposes a skipped transition only after
+evaluation, revocation and cleanup join. Approval SkipIf success still requires
+the missing C1 owner approval-success edge. The native layer refuses that case
+instead of recording the approval as a skipped job.
+
+Both session implementations use one platform process launcher. The duplicate
+native launch functions and their forwarding file are removed. Native owner
+assembly is exercised through `OwnerHost.Run`, self-claim, execution and atomic
+finish with explicit store and C2 validation fakes. See the
+[owner assembly continuation](w3-owner-assembly-continuation.md) for the remaining
+placement and legacy-runtime cuts.
+
 `OwnerEvaluator.MemoKey` evaluates the declared closure with its existing
 30-second budget. A nonempty string supplies the key; null disables memoization
 for the job. NoMemo bypasses reads while preserving key evaluation for later

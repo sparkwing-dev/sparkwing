@@ -1,5 +1,11 @@
 # Cross-area handoffs
 
+W3's [owner assembly continuation](w3-owner-assembly-continuation.md) connects
+native `skip_if` to the shared evaluator, exercises the owner through Run and
+finish, ports stalled describe to the native lifecycle and removes duplicate
+platform process launchers. Debug, approval, memo and admission composition,
+production placements and the larger legacy hosting cut remain open.
+
 W3's [shared steps and alias caller continuation](w3-ingress-lease-continuation.md#shared-steps-and-alias-caller-continuation)
 removes the separate retained step scheduler. The retained and common executors
 now use one graph driver. CLI argument parsing and local, trigger and pod planning

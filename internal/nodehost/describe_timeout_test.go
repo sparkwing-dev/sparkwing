@@ -16,9 +16,12 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
+	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -27,29 +30,46 @@ id=$(printf '%s' "$line" | sed 's/.*"id":"\([^"]*\)".*/\1/')
 printf '{"reply":"%s","ok":true,"result":{"protocol":2,"sdk":{"language":"go","version":"test"},"features":[]}}\n' "$id" >&4
 `
 
-func TestAStalledDescribeEndsTheRunBeforeItIsRecorded(t *testing.T) {
+func TestAStalledDescribeFinishesItsOwnerAndJoinsChildren(t *testing.T) {
 	dir := t.TempDir()
 	entry := filepath.Join(dir, "stall-describe")
-	script := "#!/bin/sh\n" + testHelloScript + fmt.Sprintf("trap '' TERM\n/bin/sleep 3600 &\necho $! > %s/child\nIFS= read -r line <&3\nwait\n", dir)
+	hello := strings.ReplaceAll(testHelloScript, `"version":"test"`, `"version":"v1.0.0"`)
+	script := "#!/bin/sh\n" + hello + fmt.Sprintf("trap '' TERM\n/bin/sleep 3600 &\necho $! > %s/child\nIFS= read -r line <&3\nwait\n", dir)
 	if err := os.WriteFile(entry, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	st := openStore(t)
+	state, host, input := newOwnerFixture(t, false)
+	acquire := host.Acquire
+	host.Acquire = func(ctx context.Context, input RunInput) (*source.Entry, error) {
+		code, err := acquire(ctx, input)
+		code.Command, code.Directory = []string{entry}, dir
+		return code, err
+	}
+	host.Prepare = func(ctx context.Context, input RunInput, code *source.Entry) (OwnerPlanning, error) {
+		bounded, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+		defer cancel()
+		config := ProtocolSessionConfig{Environments: sdkTestEnvironment(nil)}
+		config.Environments.Base.Captured = []string{"PATH=/usr/bin:/bin"}
+		planner := SDKPlanner{
+			Start: config.StartPlanning, Masker: secrets.NewMasker(),
+			EnsureEngine: func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+				return code.Engine, nil
+			},
+			Log: func(context.Context, nodeproto.FrameLog) error { return nil },
+		}
+		_, err := planner.Prepare(bounded, PlanningProcessInput{
+			Entry: code, Runner: input.GrantedRunner, Run: nodeproto.RunContext{RunID: input.RunID, Pipeline: "demo"},
+		}, PlanningInput{})
+		return OwnerPlanning{}, err
+	}
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	_, err := Execute(ctx, Config{
-		Session: SessionConfig{
-			Entry: pipelineentry.Binary(entry), Dir: dir, Env: []string{"PATH=/usr/bin:/bin"},
-			Grace: 50 * time.Millisecond, DescribeTimeout: 200 * time.Millisecond, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
-		},
-		Pipeline: "demo", Run: nodeproto.RunContext{RunID: "stalled-describe"},
-		State: st, Logger: slog.New(slog.DiscardHandler),
-	})
-	if err == nil || !strings.Contains(err.Error(), "describe failed: no reply within 200ms") {
+	_, err := host.Run(ctx, input)
+	if !errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
 		t.Fatalf("err = %v, want the describe deadline", err)
 	}
-	if _, err := st.GetRun(t.Context(), "stalled-describe"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("a run whose describe stalled was recorded: %v", err)
+	if state.accepted.RunID != "" || state.finished.Unit != input.Owner.Owner || state.finished.Transition.To != store.RunFailed {
+		t.Fatalf("stalled describe accepted topology or left its owner unfinished: %+v", state.finished)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "child"))
 	if err != nil {

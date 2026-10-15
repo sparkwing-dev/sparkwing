@@ -30,6 +30,10 @@ Go package initialization orders this before packages that import the SDK.
 Independent packages can initialize earlier, so pipeline packages should start
 commands inside execution callbacks.
 
+Owner, evaluation and attempt processes use the same platform launcher and
+process-tree cleanup. The Windows host clears inheritance on its protocol-handle
+copies after a successful or failed launch.
+
 Every process receives `hello` first. Its runner is the identity granted by the
 host, including the actual runner name, type and labels. Execution processes also
 receive a binding to one run and job, with a loopback route URL and a delegated

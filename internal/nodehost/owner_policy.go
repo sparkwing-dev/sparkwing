@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"time"
 
@@ -137,4 +138,34 @@ func (h *OwnerEvaluator) policyError(ctx context.Context, err error) error {
 		code = structured.Code
 	}
 	return errors.Join(cause, &apierr.Error{Code: code, Message: boundedNodeErrText(h.deps.Mask(err.Error()))})
+}
+
+func (h *OwnerEvaluator) skipLayer(ctx context.Context, input EvaluationInput, row store.NodeRow, log func(context.Context, string, string, nodeproto.FrameLog) error) (OwnerLayerResult, error) {
+	result, err := h.SkipIf(ctx, input)
+	if err != nil {
+		return OwnerLayerResult{}, err
+	}
+	for _, index := range result.TimedOut {
+		err := log(ctx, input.Accepted.RunID, input.NodeID, nodeproto.FrameLog{
+			Level: "warn", Message: "SkipIf predicate exceeded its budget; continuing without skipping",
+			Attrs: json.RawMessage(fmt.Sprintf(`{"predicate":%d}`, index)),
+		})
+		if err != nil {
+			return OwnerLayerResult{}, err
+		}
+	}
+	if !result.Skip {
+		return OwnerLayerResult{}, nil
+	}
+	var job nodeproto.JobSpec
+	if err := json.Unmarshal(row.Spec, &job); err != nil {
+		return OwnerLayerResult{}, err
+	}
+	if job.Approval != nil {
+		return OwnerLayerResult{}, executorError(apierr.IllegalTransition, "approval SkipIf requires an owner approval-success transition")
+	}
+	return OwnerLayerResult{Transition: &store.NodeTransition{
+		To: store.NodeSkipped, Cause: store.CauseDependency,
+		Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeSkipped, Reason: "skip_if"}},
+	}}, nil
 }

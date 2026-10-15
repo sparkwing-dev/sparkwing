@@ -90,6 +90,16 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	owner.Snapshots, owner.Masks, owner.Mask = config.Snapshots, config.Masks, config.Masks.masker.Mask
 	owner.Executor, owner.Planner = executor, &planner
 	owner.Planning.Validation = validation
+	layers := owner.Layer
+	owner.Layer = func(ctx context.Context, layer LayerSpec, input EvaluationInput, row store.NodeRow, storage StorageBinding) (OwnerLayerResult, error) {
+		if layer.Name == "skip_if" {
+			return evaluator.skipLayer(ctx, input, row, processes.Log)
+		}
+		if layers == nil {
+			return OwnerLayerResult{}, errors.New("native host requires the " + layer.Name + " owner policy adapter")
+		}
+		return layers(ctx, layer, input, row, storage)
+	}
 	if owner.Expand == nil {
 		owner.Expand = func(ctx context.Context, input EvaluationInput, _ store.NodeRow, _ StorageBinding) (json.RawMessage, *store.ExpansionFailure, error) {
 			return evaluator.Expand(ctx, input)

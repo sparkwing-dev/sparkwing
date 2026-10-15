@@ -1,5 +1,11 @@
 # Acceptance test port inventory
 
+The [W3 owner assembly continuation](w3-owner-assembly-continuation.md) replaces
+the removed pre-intake stalled-describe assertion with native planning under a
+live owner. Failure finishes the owner without accepting topology and joins its
+SDK child. The native assembly fixture now enters `OwnerHost.Run` and finishes
+after self-claimed execution. No acceptance cell is added or activated.
+
 The [concurrency and self-claim continuation](w3-ingress-lease-continuation.md#concurrency-and-self-claim-continuation)
 ports `TestRetryLeavesTheRowRunningThroughItsBackoff` to the common executor under
 synctest and replaces the owner input-rewrite test with a generated identity

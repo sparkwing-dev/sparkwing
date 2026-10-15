@@ -12,7 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
-func startProcess(cmd *exec.Cmd, requests, frames *os.File) (sessionProcess, error) {
+func startSDKProcess(cmd *exec.Cmd, requests, frames *os.File) (sessionProcess, error) {
 	cmd.ExtraFiles = []*os.File{requests, frames}
 	g, err := procgroup.StartSession(cmd)
 	if err != nil {

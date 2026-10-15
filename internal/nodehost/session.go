@@ -183,7 +183,7 @@ func StartSession(ctx context.Context, cfg SessionConfig) (*Session, error) {
 	}
 	cmd.Dir, cmd.Env = cfg.Dir, cfg.Env
 	cmd.Stdout, cmd.Stderr = child[2], child[3]
-	proc, err := startProcess(cmd, child[0], child[1])
+	proc, err := startSDKProcess(cmd, child[0], child[1])
 	closeAll(child)
 	if err != nil {
 		closeAll(parent)

@@ -17,19 +17,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/protofd"
 )
 
-// hack: Windows has neither descriptor numbering nor process sessions, so the pipes travel as inherited
-// handles named in argv and a kill-on-close job stands in for the session.
-func startProcess(cmd *exec.Cmd, requests, frames *os.File) (sessionProcess, error) {
+func startSDKProcess(cmd *exec.Cmd, requests, frames *os.File) (sessionProcess, error) {
 	handles := []syscall.Handle{syscall.Handle(requests.Fd()), syscall.Handle(frames.Fd())}
-	for _, h := range handles {
-		if err := windows.SetHandleInformation(windows.Handle(h), windows.HANDLE_FLAG_INHERIT, windows.HANDLE_FLAG_INHERIT); err != nil {
-			return nil, fmt.Errorf("inherit protocol pipe: %w", err)
+	for _, handle := range handles {
+		if err := windows.SetHandleInformation(windows.Handle(handle), windows.HANDLE_FLAG_INHERIT, windows.HANDLE_FLAG_INHERIT); err != nil {
+			return nil, err
 		}
+		defer func() { _ = windows.SetHandleInformation(windows.Handle(handle), windows.HANDLE_FLAG_INHERIT, 0) }()
 	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{AdditionalInheritedHandles: handles}
 	cmd.Args = append(cmd.Args, protofd.HandlesArg, fmt.Sprintf("%d,%d", handles[0], handles[1]))
-	// safety: an unnamed job has no handle but the host's, so no other
-	// process can keep it, and its members, alive past Close.
+	cmd.SysProcAttr = &syscall.SysProcAttr{AdditionalInheritedHandles: handles}
 	job, err := procgroup.NewJob("")
 	if err != nil {
 		return nil, err
@@ -40,16 +37,15 @@ func startProcess(cmd *exec.Cmd, requests, frames *os.File) (sessionProcess, err
 		}
 		return nil, errors.Join(err, job.Close())
 	}
-	p := &jobProcess{job: job, exited: make(chan struct{})}
+	process := &jobProcess{job: job, exited: make(chan struct{})}
 	go func() {
-		// safety: the exit status is read from cmd.ProcessState; only a failed wait is an error.
 		var exit *exec.ExitError
 		if err := cmd.Wait(); !errors.As(err, &exit) {
-			p.waitErr = err
+			process.waitErr = err
 		}
-		close(p.exited)
+		close(process.exited)
 	}()
-	return p, nil
+	return process, nil
 }
 
 type jobProcess struct {
