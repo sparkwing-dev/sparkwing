@@ -21,7 +21,7 @@ func TestCacheGrantRouteIsAbsent(t *testing.T) {
 }
 
 func TestServicesDoNotAnnounceRemovedDataRoutes(t *testing.T) {
-	server := &Server{dashboardURL: "https://controller.invalid", directUploads: &directUploadS3{}}
+	server := &Server{dashboardURL: "https://controller.invalid", s3Logs: &s3LogStorage{}}
 	response := httptest.NewRecorder()
 	if err := server.handleServices(response, httptest.NewRequest(http.MethodGet, "/api/v1/services", nil), capability.Authorized{}); err != nil {
 		t.Fatal(err)

@@ -222,20 +222,6 @@ type creditHistoryJSON struct {
 	Charges []creditChargeJSON `json:"charges"`
 }
 
-// safety: An unregistered team must read as not found, never as an empty operator balance.
-func (s *Server) namedTenant(w http.ResponseWriter, r *http.Request, slug string) (*store.Tenant, bool) {
-	t, err := s.tenantForTeam(r.Context(), store.Team(slug))
-	if errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
-		writeError(w, http.StatusNotFound, fmt.Errorf("team %q is not registered", slug))
-		return nil, false
-	}
-	if err != nil {
-		s.writeInternalError(w, r, "team handle", err)
-		return nil, false
-	}
-	return t, true
-}
-
 func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	tenant, err := s.creditReader(r.Context(), a.Target.Team)
 	if err != nil {

@@ -15,16 +15,12 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/aws/aws-sdk-go-v2/feature/cloudfront/sign"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
-
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
-	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -97,11 +93,7 @@ type Server struct {
 	computeAlarmOn bool
 
 	bucketUsageStore storage.UsageReporter
-	downloadStores   map[store.StorageKind]*teamblob.Store
-	downloadS3       *s3.PresignClient
-	downloadCDN      *sign.URLSigner
-	downloadDomain   string
-	directUploads    *directUploadS3
+	s3Logs           *s3LogStorage
 	logRetention     map[store.Team]int
 	logLifecycle     logLifecycle
 	egress           *egress.Meter

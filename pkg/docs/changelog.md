@@ -20,6 +20,9 @@ unlock.
 
 ## [Unreleased]
 
+- **controller (Breaking):** Use shared object backends for signing and capability subjects for authentication metrics
+  CloudFront download signing wraps the S3 backend. Duplicate signer types and legacy upload helpers are removed. Authenticated requests use subject-kind labels, and the token-cache metric is removed. See [migration guide](docs/migrations/_unreleased.md#data-signing-and-authentication-metrics).
+
 - **controller (Breaking):** Remove legacy Principal helpers and use final job metric routes
   Metric and deployment-setting writes require authority-bearing transactions. Runner budgets use authenticated holders, and egress concurrency refusals use the canonical error envelope. See [migration guide](docs/migrations/_unreleased.md#final-credential-helpers-and-reporting-writes).
 
@@ -519,7 +522,7 @@ unlock.
   Nothing converts the service's logs; they become unreadable when it retires. A controller without a cache bucket or output directory keeps no node logs. Read node logs with `client.NodeLogs` and their completeness with `pkg/storage/logseg`. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
 
 - **controller (Breaking):** `--logs-url`, `--logs-archive-store`, the `logs-delete-token` credential file, the `logs.write` and `logs.delete` scopes, `GET /api/v1/runs/{id}/log-access`, `POST /api/v1/runs/{id}/nodes/{nodeID}/claim/validate`, the `logs` field of `GET /api/v1/services` and signed `kind=log` downloads are removed
-  Read logs through `GET /api/v1/runs/{id}/logs/{node}`. Minting a token with a removed scope is refused, and runner tokens no longer carry `logs.write`. In Go, `Server.WithLogsURL`, `ScopeLogsWrite`, `ScopeLogsDelete`, `store.LogsDeleteScope`, `TeamStorage.LogsURL` and `LogsToken`, and `ServicesResponse.Logs` are gone, and `WithSignedDownloads` takes the cache store alone; `client.ProcessIdentity` names a process for `Client.WithRunnerIdentity`. Leased maintenance bills committed blob and tagged-log inventory. The independent bucket-listing reconciliation pass is removed. Team deletion deletes segments, and the storage counter routes answer only the cache's operator token. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
+  Read logs through `GET /api/v1/runs/{id}/logs/{node}`. Minting a token with a removed scope is refused, and runner tokens no longer carry `logs.write`. In Go, `Server.WithLogsURL`, `ScopeLogsWrite`, `ScopeLogsDelete`, `store.LogsDeleteScope`, `TeamStorage.LogsURL` and `LogsToken`, and `ServicesResponse.Logs` are gone; `client.ProcessIdentity` names a process for `Client.WithRunnerIdentity`. Leased maintenance bills committed blob and tagged-log inventory. The independent bucket-listing reconciliation pass is removed. Team deletion deletes segments, and the storage counter routes answer only the cache's operator token. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).
 
 - **runner (Breaking):** `--logs` on `sparkwing-runner runner` and `launch`, `--trigger-runner-logs-url`, `handle-trigger --runner-logs-url`, the agent config's `logs:` key and `SPARKWING_LOGS_EGRESS_*` are removed
   Runners upload node logs as segments through the controller and need no logs URL. An agent `config.yaml` with `logs:` fails to load with `field logs not found`. See [migration guide](docs/migrations/_unreleased.md#the-logs-service-is-removed).

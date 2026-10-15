@@ -1054,8 +1054,9 @@ All capability names below are in `internal/capability`.
 | `apierr.Status` | Select the registry's HTTP status. |
 | `apierr.WriteHTTP` | Write the error envelope and Retry-After without plain-text fallbacks. |
 | `apierr.WriteJSON` | Write one JSON error line for CLI stderr. |
-| `controller.NewFilesystemDataSigner`, `FilesystemDataSigner.Sign`, `FilesystemDataSigner.Verify` | Sign and verify exact filesystem transfer constraints. The blob owner verifies uploaded bytes before recording a receipt. |
-| `controller.NewS3DataSigner`, `S3DataSigner.Sign` | Sign one configured bucket's GET or checksum/size-bound PUT without making a storage request. |
+| `blob.NewFilesystem`, `blob.NewS3` | Physical backends own object validation, transfer signing and byte verification. |
+| `controller.NewCloudFrontDataBackend` | Wrap S3 downloads with CloudFront for public-ingress requests. Direct requests and uploads retain the backend signer. Physical operations and log deletion remain on S3. |
+| `Server.WithS3Logs` | Configure the S3 bucket and namespace for retained log readers. |
 | `controller.PaymentSettler`, `Server.WithPayments` | Supply C1 settlement to the signed Stripe callback. The server registers `/webhooks/stripe` through `PolicyRouter` and passes only verified events to the store. |
 | `controller.Server.WithAuthorization` | Configure the shared verifier, bindings, transport identity and CSRF adapters before constructing the server handler. Missing adapters fail closed. |
 | `controller.RouteAuthorization`, `controller.Endpoint`, `controller.PolicyRouter` | Wire identity, decoding, CSRF, external proof and authorized handlers into the matched route. |
@@ -1429,7 +1430,7 @@ controller integration. None of those parked findings is declared closed by
 these boundary tests.
 
 The filesystem transfer URL signs method, key, size, SHA-256 and expiry with
-HMAC-SHA256. Its upload path contains an opaque encoding of the staging key.
+HMAC-SHA256. Its upload path names the server-issued ticket. W7 owns the signer and transfer verifier. Controller-local duplicate signer types are removed.
 The blob owner retains the separate upload/receipt identity and commits only
 after checking the bytes. S3 uses the same constraints with SigV4. Data GETs
 are bounded by `limits.DataDownloadURLTTL`, and PUTs by
@@ -2813,3 +2814,12 @@ capability/management.go and controller/policy.go, engine.go and data.go. Their
 former *_contract.go files are deleted. W9's client declarations are unchanged.
 
 <!-- design:end -->
+
+## Signing implementation ownership
+
+The physical ObjectBackend owns filesystem/S3 validation and signing. The
+controller's CloudFront adapter embeds S3 and delegates to its Sign method before
+replacing an ingress GET URL. It uses the same validated key, digest, size and
+expiry. PUTs and direct requests retain the S3 signature. Ingress selection travels
+in a private request context and grants no object authority. No foreign interface
+changed. W1 data-authority, metadata and charging composition remains required.

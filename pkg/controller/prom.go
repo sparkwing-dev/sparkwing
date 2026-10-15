@@ -14,6 +14,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -116,14 +117,6 @@ var (
 		},
 	)
 
-	authTokenCacheTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "sparkwing_auth_token_cache_total",
-			Help: "Bearer verifications by how the verified-token cache answered them: hit, miss, or coalesced onto a verification already in flight for the same token.",
-		},
-		[]string{"result"},
-	)
-
 	queueDepthGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "sparkwing_queue_depth",
@@ -165,7 +158,7 @@ var (
 	requestsByPrincipalTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "sparkwing_requests_by_principal_total",
-			Help: "Requests that authenticated, by the kind of credential behind them. Principal names and token prefixes stay out of the label set.",
+			Help: "Requests that authenticated, by capability subject kind. Principal names and token prefixes stay out of the label set.",
 		},
 		[]string{"credential"},
 	)
@@ -175,8 +168,6 @@ const (
 	placementLocal = "local"
 	placementCloud = "cloud"
 )
-
-const claimRoute = "/api/v1/nodes/claim"
 
 // safety: the window sparkwing_active_runners already reports, so the two
 // liveness series answer the same question.
@@ -192,22 +183,12 @@ const maxRunnerLabelSets = 32
 // expensive by advertising a long list.
 const maxRunnerLabelSetBytes = 120
 
-const (
-	authCacheHit       = "hit"
-	authCacheMiss      = "miss"
-	authCacheCoalesced = "coalesced"
-)
-
 func observePrincipalThrottled(class string) {
 	principalThrottledTotal.WithLabelValues(class).Inc()
 }
 
 func observeRequestRateAlarm() {
 	requestRateAlarmTotal.Inc()
-}
-
-func observeAuthCache(result string) {
-	authTokenCacheTotal.WithLabelValues(result).Inc()
 }
 
 // safety: named rather than passed inline so the drift check can ask the same
@@ -223,7 +204,6 @@ var sparkwingCollectors = []prometheus.Collector{
 	activeRunnersGauge,
 	httpRequestsTotal,
 	httpRequestDurationSeconds,
-	authTokenCacheTotal,
 	principalThrottledTotal,
 	requestRateAlarmTotal,
 	queueDepthGauge,
@@ -259,11 +239,9 @@ func initZeroSeries() {
 	for _, state := range store.QueueStates() {
 		queueDepthGauge.WithLabelValues(state)
 	}
-	for _, result := range []string{authCacheHit, authCacheMiss, authCacheCoalesced} {
-		authTokenCacheTotal.WithLabelValues(result)
-	}
 	for _, credential := range []string{
-		store.TokenKindUser, store.TokenKindRunner, store.TokenKindService, otherLabel,
+		string(capability.SubjectAccount), string(capability.SubjectMachine), string(capability.SubjectService),
+		string(capability.SubjectOperator), string(capability.SubjectLocal), string(capability.SubjectAnonymous), otherLabel,
 	} {
 		requestsByPrincipalTotal.WithLabelValues(credential)
 	}
@@ -344,7 +322,7 @@ func observeHTTPRequest(route, method string, status int, d time.Duration) {
 	// safety: a claim answered 503 is a runner told to back off, which is the
 	// signal an operator pages on, so it gets a series of its own rather than
 	// a query over the route and status labels.
-	if route == claimRoute && status == http.StatusServiceUnavailable {
+	if (route == "/api/v1/runners/claim" || route == "/api/v1/launcher/claim" || route == "/api/v1/runs/{run}/claim") && status == http.StatusServiceUnavailable {
 		claimUnavailableTotal.Inc()
 	}
 }
@@ -378,12 +356,10 @@ func observeRequestPrincipal(kind string) {
 	requestsByPrincipalTotal.WithLabelValues(credentialLabel(kind)).Inc()
 }
 
-// safety: the kind reaches this from a token row, and a peer or loopback
-// principal may carry one the store never mints, so anything outside the set
-// collapses rather than minting a series.
 func credentialLabel(kind string) string {
 	switch kind {
-	case store.TokenKindUser, store.TokenKindRunner, store.TokenKindService:
+	case string(capability.SubjectAccount), string(capability.SubjectMachine), string(capability.SubjectService),
+		string(capability.SubjectOperator), string(capability.SubjectLocal), string(capability.SubjectAnonymous):
 		return kind
 	}
 	return otherLabel

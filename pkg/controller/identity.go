@@ -273,21 +273,6 @@ func (s *Server) oauthSignIn(ctx context.Context, name, code, verifier, redirect
 	return sess, raw, nil
 }
 
-func (s *Server) teamRef(ctx context.Context, team store.Team, accountID string) (*teamRefJSON, error) {
-	if team == "" {
-		return nil, nil
-	}
-	role, err := s.memberRole(ctx, team, accountID)
-	if err != nil || role == "" {
-		return nil, err
-	}
-	info, err := s.store.TeamInfo(ctx, team)
-	if err != nil {
-		return nil, err
-	}
-	return &teamRefJSON{Slug: string(info.Slug), DisplayName: info.Label(), Role: string(role)}, nil
-}
-
 type invitationRefJSON struct {
 	ID              string `json:"id"`
 	TeamSlug        string `json:"team_slug"`

@@ -2,11 +2,8 @@ package controller
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"net/http"
 	"slices"
-	"sort"
 	"sync"
 	"time"
 
@@ -79,16 +76,6 @@ func newFloodControl(p FloodPolicy) *floodControl {
 		f.depth = &queueDepthCache{teams: make(map[store.Team]queueDepth)}
 	}
 	return f
-}
-
-// safety: a refusal is written here, so a caller that gets false must return without writing its own answer.
-func (s *Server) admitTriggerSubmission(w http.ResponseWriter, r *http.Request, tenant *store.Tenant, key, source string) bool {
-	refusal := s.triggerFloodRefusal(r.Context(), tenant, key, source)
-	if refusal == nil {
-		return true
-	}
-	refusal.write(w)
-	return false
 }
 
 type floodRefusal struct {
@@ -283,35 +270,4 @@ func (w *warnEvery) due() bool {
 	}
 	w.last = now
 	return true
-}
-
-// safety: the digest covers everything that decides what the run does, so two
-// submissions differing anywhere a run can observe stay two runs.
-func submissionDigest(principal string, in triggerIntake) string {
-	sum := sha256.New()
-	write := func(parts ...string) {
-		for _, p := range parts {
-			sum.Write([]byte(p))
-			sum.Write([]byte{0})
-		}
-	}
-	// safety: a 409 names another caller's run id, so the digest is scoped to
-	// the principal and one tenant can never be answered with another's run.
-	write(principal)
-	write(in.Pipeline, in.Source, in.User, in.ParentRunID, in.ParentNodeID, in.RetryOf)
-	write(in.Git.Branch, in.Git.SHA, in.Git.Repo, in.Git.RepoURL, in.Git.GithubOwner, in.Git.GithubRepo)
-	writeSortedMap(write, in.Args)
-	writeSortedMap(write, in.Env)
-	return hex.EncodeToString(sum.Sum(nil))
-}
-
-func writeSortedMap(write func(...string), m map[string]string) {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		write(k, m[k])
-	}
 }

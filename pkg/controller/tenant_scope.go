@@ -57,16 +57,6 @@ func (s *Server) tenantForTeam(ctx context.Context, team store.Team) (*store.Ten
 	return t, nil
 }
 
-// safety: a sweep names a trigger id with no request behind it, so the trigger
-// is read through the team that owns the trigger rather than any team.
-func (s *Server) triggerAcrossTeams(ctx context.Context, id string) (*store.Trigger, error) {
-	team, err := s.store.AsOperator().TriggerTeam(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	return s.triggerInTeam(ctx, team, id)
-}
-
 // safety: a run's outcome is reported from the trigger in the run's own team;
 // another team may hold a trigger under the same id, and its check is not this
 // run's to touch.

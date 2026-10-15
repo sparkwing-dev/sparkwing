@@ -98,6 +98,7 @@ func withAuditRecord(ctx context.Context, id, route string) (context.Context, *a
 }
 
 func notePolicyPrincipal(ctx context.Context, p capability.Principal) {
+	observeRequestPrincipal(string(p.Capability.Subject.Kind))
 	if rec, ok := ctx.Value(auditCtxKey{}).(*auditRecord); ok {
 		rec.principalID, rec.kind, rec.team = clip(p.Capability.Subject.ID), string(p.Capability.Subject.Kind), p.Capability.Team
 	}

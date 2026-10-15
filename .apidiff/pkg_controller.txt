@@ -223,10 +223,6 @@ func (s *EngineController) TransitionJob(ctx context.Context, a capability.Autho
 func EnsureBootstrapAdminToken(ctx context.Context, issuer CredentialIssuer, raw string) (bool, error)
 const EnvDefaultBranch = "GITHUB_DEFAULT_BRANCH"
 func ExpansionForStore(a capability.Authorized, body controllerwire.ExpansionSubmission) (store.ExpansionSubmission, error)
-type FilesystemDataSigner struct {
-}
-func (s *FilesystemDataSigner) Sign(ctx context.Context, object capability.ObjectToSign) (capability.SignedObject, error)
-func (s *FilesystemDataSigner) Verify(r *http.Request) (capability.ObjectToSign, error)
 type FloodPolicy struct {
 	RunsPerPrincipalHour int
 
@@ -333,9 +329,8 @@ type MetricWriter interface {
 	WriteUsage(context.Context, capability.Authorized, store.NodeUsage) error
 }
 func New(st *store.Store, logger *slog.Logger) *Server
-func NewFilesystemDataSigner(baseURL string, key []byte) (*FilesystemDataSigner, error)
+func NewCloudFrontDataBackend(objects *blob.S3, domain, keyPairID, privateKey string) (blob.ObjectBackend, error)
 func NewPolicyRouter(authorization RouteAuthorization) *PolicyRouter
-func NewS3DataSigner(client *s3.Client, bucket string) (*S3DataSigner, error)
 const NoPayableChargeCode = "no_payable_charge"
 type OIDCReader interface {
 	Team() store.Team
@@ -438,9 +433,6 @@ type RunnerAdmissionPolicy interface {
 type RunnerMeteringWriter interface {
 	SetRunnerMetered(context.Context, capability.Authorized, string, bool) error
 }
-type S3DataSigner struct {
-}
-func (s *S3DataSigner) Sign(ctx context.Context, object capability.ObjectToSign) (capability.SignedObject, error)
 type ScheduleWriter interface {
 	Team() store.Team
 	ReplaceAuthorizedSchedules(context.Context, capability.Authorized, controllerwire.ScheduleRepoRequest) ([]string, []string, error)
@@ -488,7 +480,6 @@ func (s *Server) WithDashboard(d Dashboard) *Server
 func (s *Server) WithDashboardURL(url string) *Server
 func (s *Server) WithDataController(data *DataController) *Server
 func (s *Server) WithDataObjects(objects blob.ObjectBackend) *Server
-func (s *Server) WithDirectUploads(client *s3.Client, bucket, prefix string) *Server
 func (s *Server) WithEgressMeter(m *egress.Meter) *Server
 func (s *Server) WithEngineController(engine *EngineController) *Server
 func (s *Server) WithExternalURL(rawURL string) *Server
@@ -524,13 +515,13 @@ func (s *Server) WithQueueTimeout(d time.Duration) *Server
 func (s *Server) WithRequestBudget(b RequestBudget) *Server
 func (s *Server) WithRunControlWriter(resolve func(context.Context, store.Team) (RunControlWriter, error)) *Server
 func (s *Server) WithRunnerMeteringWriter(writer RunnerMeteringWriter) *Server
+func (s *Server) WithS3Logs(client *s3.Client, bucket, prefix string) *Server
 func (s *Server) WithScheduleWriter(resolve func(context.Context, store.Team) (ScheduleWriter, error)) *Server
 func (s *Server) WithSecretReader(resolve func(context.Context, store.Team) (SecretReader, error)) *Server
 func (s *Server) WithSecretsCipher(c Cipher) *Server
 func (s *Server) WithSessionMaxLifetime(d time.Duration) *Server
 func (s *Server) WithSignUpApprovalNotifier(fn func(context.Context, store.Account) error) *Server
 func (s *Server) WithSignUpWaitlist(on bool) *Server
-func (s *Server) WithSignedDownloads(cache *teamblob.Store, client *s3.Client, domain, keyPairID, privateKey string) error
 func (s *Server) WithSizingStore(resolve func(context.Context, store.Team) (SizingStore, error)) *Server
 func (s *Server) WithSourceAuditReader(resolve func(context.Context, store.Team) (SourceAuditReader, error)) *Server
 func (s *Server) WithSourceController(source *SourceController) *Server
@@ -638,6 +629,7 @@ func (s *boundData) LookupDepcache(ctx context.Context, request blob.DepcacheLoo
 func (s *boundData) LookupMemo(ctx context.Context, request blob.MemoLookup) (blob.MemoHit, error)
 func (s *boundData) LookupRecord(ctx context.Context, request blob.RecordLookup) (blob.RecordLookupResult, error)
 func (s *boundData) Upload(ctx context.Context, intent blob.UploadIntent) (blob.UploadTicket, error)
+func (b *cloudFrontDataBackend) Sign(ctx context.Context, object capability.ObjectToSign) (capability.SignedObject, error)
 func (t *creditRateTableIn) UnmarshalJSON(raw []byte) error
 func (creditsCollector) Collect(ch chan<- prometheus.Metric)
 func (creditsCollector) Describe(ch chan<- *prometheus.Desc)

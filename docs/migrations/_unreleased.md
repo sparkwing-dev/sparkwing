@@ -1,5 +1,22 @@
 # Migrating to the next release
 
+## Data signing and authentication metrics
+
+Embedded controllers use `blob.NewFilesystem` or `blob.NewS3` as their physical
+backend and pass it through `WithDataController` or `WithDataObjects`. The duplicate
+controller filesystem and S3 signer types and `WithSignedDownloads` are removed.
+Wrap an S3 backend with `controller.NewCloudFrontDataBackend` to sign public-ingress
+downloads through CloudFront. Direct requests retain regional S3 URLs. Uploads keep
+the backend's size and checksum constraints. `WithS3Logs` replaces
+`WithDirectUploads` for retained S3 log readers.
+
+Replace the `user` and `runner` credential labels on
+`sparkwing_requests_by_principal_total` with `account` and `machine`. The other
+labels are `service`, `operator`, `local`, `anonymous` and `other`. Requests count
+once authentication succeeds, including later authorization refusals. Remove
+queries for `sparkwing_auth_token_cache_total`, because the token-table cache is
+removed.
+
 ## Reporting credential routes
 
 Reporting reads use the shared capability policy and the authorized resource's team. This includes run lists, receipts, attempts, steps, events, approvals, debug pauses, pipeline lists and latest runs, trends, runner views, sizing and logs. Unbound machine roots and deployment credentials cannot substitute for team membership. Work and trigger claims receive only the read alternatives declared for their bindings.

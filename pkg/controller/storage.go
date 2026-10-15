@@ -166,22 +166,6 @@ func (s *Server) reportLargestTeams(ctx context.Context, settings store.StorageS
 	}
 }
 
-// safety: the charge rides inside the store call's own transaction, so this
-// only translates the refusal; nothing here may write on its own.
-func writeStorageWriteRefusal(w http.ResponseWriter, logger interface{ Warn(string, ...any) }, err error) bool {
-	switch {
-	case errors.Is(err, store.ErrStorageQuota):
-		logger.Warn("storage quota refused a write", "reason", err.Error())
-		writeError(w, http.StatusRequestEntityTooLarge, err)
-	case errors.Is(err, store.ErrInsufficientCredits):
-		logger.Warn("a spent balance refused a write that would store more", "reason", err.Error())
-		writeError(w, http.StatusPaymentRequired, err)
-	default:
-		return false
-	}
-	return true
-}
-
 type storageQuotaJSON struct {
 	Team                  store.Team `json:"team"`
 	Tier                  string     `json:"tier,omitempty"`

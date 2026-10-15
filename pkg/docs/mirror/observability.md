@@ -504,7 +504,6 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_object_store_bucket_ceiling_freezes_total` | Counter | (none) | Times the bucket crossed its ceiling and began refusing object writes |
 | `sparkwing_object_store_bucket_ceiling_refused_total` | Counter | (none) | Object writes the ceiling refused |
 | `sparkwing_object_store_bucket_ceiling_measurement_incomplete` | Gauge | (none) | 1 while the last measurement stopped early and was discarded |
-| `sparkwing_auth_token_cache_total` | Counter | `result` | Bearer verifications by how the verified-token cache answered them (`hit`, `miss`, `coalesced`) |
 | `sparkwing_auth_hashing_rejected_total` | Counter | (none) | Credential verifications the argon2id memory budget shed rather than queued, answered `503` with a `Retry-After` |
 | `sparkwing_principal_throttled_total` | Counter | `route_class` | Requests a request budget refused with `429` (`claim`, `heartbeat`, `idle_poll`, `token`) |
 | `sparkwing_request_rate_alarm_total` | Counter | (none) | Minutes in which the controller served more requests than `--requests-per-minute-alarm`; it refuses nothing |
@@ -526,7 +525,7 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_credits_charged_micro_total` | Counter | (none) | Micro-credits execution billed |
 | `sparkwing_credits_refunded_micro_total` | Counter | (none) | Micro-credits returned to claims whose machine never started, or whose setup the platform failed |
 | `sparkwing_credits_storage_micro_total` | Counter | (none) | Micro-credits retained bytes billed; this series buys no runner time, so the charged series does not carry it |
-| `sparkwing_requests_by_principal_total` | Counter | `credential` | Requests that authenticated, by the kind of credential behind them: `user`, `runner`, `service` or `other` |
+| `sparkwing_requests_by_principal_total` | Counter | `credential` | Requests that authenticated, by capability subject: `account`, `machine`, `service`, `operator`, `local`, `anonymous` or `other` |
 
 `sparkwing_node_seconds_total{placement="cloud"}` is the billing line, and it
 comes from the credit ledger rather than from a request handler. A metered claim

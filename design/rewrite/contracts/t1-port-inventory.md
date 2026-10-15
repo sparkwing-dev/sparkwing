@@ -19,6 +19,41 @@ pending. This adds no archived source-function port identity.
 
 # Acceptance test port inventory
 
+W2 signing/fixture cleanup ports: tokens_test.go's six scope validation tests move
+to TestCredentialIssuanceValidatesEveryGrant and RefusedGrantProperty. They exercise
+the final issuer with real SQLite, all declared grants, empty grants and generated
+unknown grants. Invalid/padded/duplicate grants refuse without creating a row.
+The source-scanning Scope* allowlist test retires with the old constants.
+
+The browser-session and page fixtures now use direct account sessions, row-bound
+CSRF protection and capability issuance. Session-header writes require CSRF, API
+refusals preserve cookies, and nonlocal pages require sign-in before bootstrap.
+OperatorPageServesOnlyTheOperatorsSession covers the configured gate and refuses
+a capability-parented session. The local-directory deletion port uses a fake
+committing TeamWriter. It proves post-commit directory handling and exact authority
+forwarding, not production deletion atomicity.
+
+The four chunked_body_test.go regressions move to EngineClaimHTTPChunkedBody and
+CapabilityRotationChunkedBodyPreservesGrace. Final claims keep decoded kinds and
+refuse removed pipeline/lease selectors. Empty claim bodies now refuse.
+
+The three execution_location_test.go tests retire with principal/holder-string
+inference. EngineClaimUsesEnrollmentAndChecksRunnerPolicy and
+EngineRunDetailReadsPersistedHistoryAndTaggedLogs retain granted runner identity
+and attempt generation/history through the final projections.
+
+Duplicate controller signer tests retire with their implementations. W7's shared
+backend tests and TestDataStorageSignedFilesystemRoutes retain transfer/signature
+proofs. CloudFrontDataBackendSignedObjectProperty checks generated exact-object
+policies, expiry and RSA signatures. DataReadHTTPChoosesCloudFrontOnlyForIngress
+checks the actual HTTP handoff and charge-before-sign order with fake data facts.
+RequestPrincipalMetricLabelsProperty bounds labels to seven constants, and
+RequestPrincipalMetricsCountsAuthenticatedPolicy checks counting through HTTP.
+The old token-cache/argon2 test retires with the removed cache. W1's retained
+legacy hashing collector is not asserted as final authentication behavior.
+These are component ports. No native credential-matrix cell is newly completed.
+
+
 W2 seeded-bootstrap and login ports: bootstrap_token_test.go no longer calls
 the removed token-table startup path. Its forwarding property checks the exact
 seed, fixed operational authority, issuer result and missing-adapter refusal.

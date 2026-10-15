@@ -516,21 +516,13 @@ func run(args []string) error {
 		}
 		srv = srv.WithBucketUsage(bucketStore)
 	}
-	if *cacheBlobStore != "" {
-		cache, err := openTeamStore(ctx, *cacheBlobStore)
-		if err != nil {
-			return fmt.Errorf("--cache-blob-store: %w", err)
-		}
-		privateKey := creds.CloudFrontKey
-		domain, keyPairID := *cloudFrontDomain, *cloudFrontKeyPairID
-		client, _, _, err := s3store.Open(ctx, *cacheBlobStore)
-		if err != nil {
-			return fmt.Errorf("download signer S3: %w", err)
-		}
-		if err := srv.WithSignedDownloads(cache, client, domain, keyPairID, privateKey); err != nil {
-			return err
-		}
+	if *cacheBlobStore != "" && !strings.HasPrefix(*cacheBlobStore, "s3://") {
+		return errors.New("--cache-blob-store must be an s3:// URL")
 	}
+	if (*cloudFrontDomain != "" || *cloudFrontKeyPairID != "" || creds.CloudFrontKey != "") && !strings.HasPrefix(*cacheBlobStore, "s3://") {
+		return errors.New("CloudFront downloads require an S3 data store")
+	}
+
 	retention, err := parseLogRetention(*logRetention)
 	if err != nil {
 		return fmt.Errorf("--log-retention: %w", err)
@@ -545,7 +537,14 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		srv = srv.WithDataObjects(objects).WithDirectUploads(client, bucket, prefix)
+		var backend blob.ObjectBackend = objects
+		if *cloudFrontDomain != "" || *cloudFrontKeyPairID != "" || creds.CloudFrontKey != "" {
+			backend, err = controller.NewCloudFrontDataBackend(objects, *cloudFrontDomain, *cloudFrontKeyPairID, creds.CloudFrontKey)
+			if err != nil {
+				return err
+			}
+		}
+		srv = srv.WithDataObjects(backend).WithS3Logs(client, bucket, prefix)
 	} else {
 		objects, err := openFilesystemData(p.Root, *externalURL, *addr)
 		if err != nil {
@@ -786,17 +785,6 @@ func configureMailer(ctx context.Context, srv *controller.Server, sender, config
 	}
 	srv.WithMailer(m)
 	return nil
-}
-
-func openTeamStore(ctx context.Context, raw string) (*teamblob.Store, error) {
-	if raw == "" {
-		return nil, nil
-	}
-	_, bucket, prefix, err := s3store.Open(ctx, raw)
-	if err != nil {
-		return nil, err
-	}
-	return teamblob.New(teamblob.Options{Bucket: bucket, Prefix: prefix})
 }
 
 // safety: a negative bound would silently remove the ceiling it names, so it stops the controller instead.

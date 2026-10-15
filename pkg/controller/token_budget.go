@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // TokenRequestBudget bounds ordinary authenticated requests and signed-data
@@ -62,16 +61,6 @@ func (t *tokenBudget) values() TokenRequestBudget {
 		return TokenRequestBudget{}
 	}
 	return t.policy
-}
-
-func (s *Server) allowDataRequest(w http.ResponseWriter, r *http.Request, team store.Team, prefix string) bool {
-	key := "client:" + s.loginLimit.client(r)
-	if team = store.NormalizeTeam(team); team != "" && team != store.DefaultTeam {
-		key = "team:" + string(team)
-	} else if prefix != "" {
-		key = "token:" + prefix
-	}
-	return s.allowTokenRequest(w, r, key)
 }
 
 func (s *Server) allowTokenRequest(w http.ResponseWriter, r *http.Request, key string) bool {

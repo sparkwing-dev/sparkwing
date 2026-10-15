@@ -136,15 +136,3 @@ func (s *Server) extraReposCovered(ctx context.Context, t *store.Tenant, repo st
 	}
 	return ids, 0, nil
 }
-
-func ownerExtraRepos(ctx context.Context, t *store.Tenant, repo store.GitHubRepo) ([]store.GitHubRepo, error) {
-	return t.GitHubAppExtraRepoRefs(ctx, repo.Slug())
-}
-
-func repoSlugs(repos []store.GitHubRepo) []string {
-	var out []string
-	for _, x := range repos {
-		out = append(out, x.Slug())
-	}
-	return out
-}

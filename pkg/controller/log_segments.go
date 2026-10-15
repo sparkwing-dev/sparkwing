@@ -3,12 +3,7 @@ package controller
 import (
 	"bytes"
 	"context"
-	"crypto/md5" // #nosec G501 -- S3's Content-MD5 integrity check, not a security digest
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -26,7 +21,7 @@ import (
 )
 
 const (
-	logSegmentURLTTL    = directUploadPutTTL
+	logSegmentURLTTL    = 15 * time.Minute
 	maxLogSegmentNumber = 1_000_000
 	maxLogManifestBytes = 4 << 20
 	maxLogSegmentBytes  = 8 << 20
@@ -45,8 +40,8 @@ type logObjectStore interface {
 }
 
 func (s *Server) logObjects() logObjectStore {
-	if s.directUploads != nil {
-		d := s.directUploads
+	if s.s3Logs != nil {
+		d := s.s3Logs
 		return s3LogObjects{d: d, objs: s3store.NewArtifactStore(d.bucket, d.prefix, d.client)}
 	}
 
@@ -54,7 +49,7 @@ func (s *Server) logObjects() logObjectStore {
 }
 
 type s3LogObjects struct {
-	d    *directUploadS3
+	d    *s3LogStorage
 	objs *s3store.ArtifactStore
 }
 
@@ -93,37 +88,6 @@ func sealedOnConflict(err error) error {
 		return logseg.ErrSealed
 	}
 	return err
-}
-
-func checkLogSegmentRequest(req store.LogSegmentRequest) error {
-	if req.N < 0 || req.N > maxLogSegmentNumber || req.Attempt < 0 || req.Generation < 0 {
-		return fmt.Errorf("n must be a segment number from 0 to %d, and attempt and generation must not be negative", maxLogSegmentNumber)
-	}
-	if req.N == 0 {
-		return nil
-	}
-	if digest, err := base64.StdEncoding.DecodeString(req.MD5); err != nil || len(digest) != md5.Size {
-		return errors.New("md5 must be the segment's base64 MD5")
-	}
-	if sum, err := hex.DecodeString(req.SHA256); err != nil || len(sum) != sha256.Size {
-		return errors.New("sha256 must be the segment's hex SHA-256")
-	}
-	if req.Size < 1 || req.Size > maxLogSegmentBytes {
-		return fmt.Errorf("size must be from 1 to %d bytes", maxLogSegmentBytes)
-	}
-	return nil
-}
-
-func (s *Server) writeStorageRefusal(w http.ResponseWriter, r *http.Request, err error) {
-	var quota *store.StorageQuotaError
-	switch {
-	case errors.As(err, &quota):
-		writeError(w, http.StatusRequestEntityTooLarge, err)
-	case errors.Is(err, store.ErrFreeStoragePaused):
-		writeError(w, http.StatusPaymentRequired, err)
-	default:
-		s.writeInternalError(w, r, "charge the node's log storage", err)
-	}
 }
 
 // safety: the URL signs the segment's size and MD5, so a holder stores exactly the bytes the controller charged;

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/hex"
 	"io"
 	"maps"
 	"net/http"
@@ -13,11 +14,13 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/quick"
 	"testing/synctest"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -223,7 +226,7 @@ func TestSetQueueDepthCoversEveryState(t *testing.T) {
 }
 
 func TestCredentialLabelClampsAnUnknownKind(t *testing.T) {
-	for _, kind := range []string{store.TokenKindUser, store.TokenKindRunner, store.TokenKindService} {
+	for _, kind := range []string{"account", "machine", "service", "operator", "local", "anonymous"} {
 		if got := credentialLabel(kind); got != kind {
 			t.Errorf("credentialLabel(%q) = %q", kind, got)
 		}
@@ -560,6 +563,8 @@ func TestReaperSamplesTheOperationalSeries(t *testing.T) {
 	}
 }
 
+const claimRoute = "/api/v1/runners/claim"
+
 func claimWithLabels(t *testing.T, base, holder string, labels []string) {
 	t.Helper()
 	body := `{"holder_id":"` + holder + `","lease_secs":60,"labels":["` + strings.Join(labels, `","`) + `"]}`
@@ -603,3 +608,73 @@ func describedMetrics() map[string][]string {
 }
 
 var describedNameRE = regexp.MustCompile(`fqName: "([^"]+)".*variableLabels: \{([^}]*)\}`)
+
+func TestRequestPrincipalMetricsCountsAuthenticatedPolicy(t *testing.T) {
+	s, raw := credentialSessionServer(t)
+	h := s.Handler()
+	const series = `sparkwing_requests_by_principal_total{credential="account"}`
+	before := mustSample(t, scrapeRegistry(t), series)
+	for _, tc := range []struct {
+		method, path, raw string
+		status            int
+	}{
+		{"GET", "/api/v1/auth/whoami", raw, 200},
+		{"POST", "/api/v1/runners/claim", raw, 403},
+		{"GET", "/api/v1/auth/whoami", "unknown", 401},
+		{"GET", "/api/v1/no-such-route", raw, 404},
+	} {
+		r := httptest.NewRequest(tc.method, tc.path, strings.NewReader(`{}`))
+		r.Header.Set("Authorization", "Session "+tc.raw)
+		r.Header.Set("Content-Type", "application/json")
+		if tc.method == "POST" {
+			r.Header.Set("Origin", "http://example.com")
+			r.Header.Set(csrfHeaderName, "session-csrf")
+			r.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "session-csrf"})
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != tc.status {
+			t.Fatalf("%s %s = %d %s", tc.method, tc.path, w.Code, w.Body)
+		}
+	}
+	if after := mustSample(t, scrapeRegistry(t), series); after != before+2 {
+		t.Fatalf("authenticated requests = %v, want %v", after, before+2)
+	}
+	if strings.Contains(scrapeRegistry(t), "sparkwing_auth_token_cache_total") {
+		t.Fatal("retired token cache metric remains")
+	}
+}
+
+func TestRequestPrincipalMetricLabelsProperty(t *testing.T) {
+	allowed := []string{"account", "machine", "service", "operator", "local", "anonymous", "other"}
+	property := func(input []byte, known bool, choice uint8) bool {
+		private := "private-" + hex.EncodeToString(input)
+		kind := private
+		if known {
+			kind = allowed[int(choice)%len(allowed)]
+		}
+		notePolicyPrincipal(context.Background(), capability.Principal{Capability: capability.Capability{Prefix: private, Team: private, Subject: capability.Subject{Kind: capability.SubjectKind(kind), ID: private}}})
+		families, err := metricsRegistry.Gather()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, family := range families {
+			if family.GetName() != "sparkwing_requests_by_principal_total" {
+				continue
+			}
+			if len(family.Metric) != len(allowed) {
+				return false
+			}
+			for _, metric := range family.Metric {
+				if len(metric.Label) != 1 || metric.Label[0].GetName() != "credential" || !slices.Contains(allowed, metric.Label[0].GetValue()) {
+					return false
+				}
+			}
+			return true
+		}
+		return false
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 64}); err != nil {
+		t.Fatal(err)
+	}
+}

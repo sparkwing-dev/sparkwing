@@ -539,7 +539,7 @@ func TestS3LogSegmentURLsSignTheSizeAndMD5(t *testing.T) {
 		Region: "us-west-2", BaseEndpoint: aws.String("https://s3.example.test"), UsePathStyle: true,
 		Credentials: credentials.NewStaticCredentialsProvider("test", "test", ""),
 	})
-	srv := New(nil, nil).WithDirectUploads(client, "bucket", "cache")
+	srv := New(nil, nil).WithS3Logs(client, "bucket", "cache")
 	md := md5.Sum([]byte("segment"))
 	digest := base64.StdEncoding.EncodeToString(md[:])
 	raw, headers, err := srv.logObjects().presignPut(t.Context(), httptest.NewRequest(http.MethodPost, "/", nil),

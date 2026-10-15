@@ -481,15 +481,6 @@ func (s *Server) handleGitHubAppShow(w http.ResponseWriter, r *http.Request, a c
 	return nil
 }
 
-func installationIDFrom(w http.ResponseWriter, r *http.Request) (int64, bool) {
-	id, err := strconv.ParseInt(r.PathValue("installation_id"), 10, 64)
-	if err != nil || id <= 0 {
-		writeError(w, http.StatusBadRequest, errors.New("installation_id is GitHub's numeric installation id"))
-		return 0, false
-	}
-	return id, true
-}
-
 func (s *Server) handleGitHubAppUnbind(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	if s.githubApp == nil {
 		return &apierr.Error{Code: apierr.NotFound, Message: errNoGitHubApp.Error()}

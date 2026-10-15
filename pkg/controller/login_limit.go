@@ -52,11 +52,6 @@ func (l *loginLimiter) client(r *http.Request) string {
 	return ratelimit.ClientIP(r)
 }
 
-// safety: keying a failure budget on the public prefix alone would let any stranger lock that token out.
-func failureKey(prefix, client string) string {
-	return prefix + "|" + client
-}
-
 func writeRetryAfter(w http.ResponseWriter, after time.Duration, message string) {
 	setRetryAfter(w, after)
 	writeError(w, http.StatusTooManyRequests, errors.New(message))

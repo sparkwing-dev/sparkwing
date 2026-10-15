@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"mime"
 	"net/http"
@@ -318,19 +317,6 @@ const (
 
 func decodeJSON(r *http.Request, v any) error {
 	return decodeJSONLimit(r, v, maxJSONBody)
-}
-
-// safety: a chunked body reports no content length, so a route whose body is
-// optional reads it whenever there is one and treats only an empty body as
-// absent; gating on a positive length dropped what a streaming client sent.
-func decodeOptionalJSON(r *http.Request, v any) error {
-	if r.Body == nil || r.ContentLength == 0 {
-		return nil
-	}
-	if err := decodeJSON(r, v); err != nil && !errors.Is(err, io.EOF) {
-		return err
-	}
-	return nil
 }
 
 func decodeJSONLimit(r *http.Request, v any, limit int64) error {
