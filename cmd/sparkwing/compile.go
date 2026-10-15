@@ -14,7 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
-	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
@@ -61,7 +60,7 @@ func (r *pipelineRun) materialize(env []string) error {
 	if err := resolveSparks(r.ctx, r.sparkwingDir, r.opts); err != nil {
 		return err
 	}
-	key, keyParts, err := bincache.ExplainCacheKey(r.sparkwingDir, env)
+	key, _, err := bincache.ExplainCacheKey(r.sparkwingDir, env)
 	if err != nil {
 		return fmt.Errorf("read .sparkwing/ to weigh what it declares: %w", err)
 	}
@@ -79,12 +78,12 @@ func (r *pipelineRun) materialize(env []string) error {
 		return nil
 	}
 
-	lease, source, err := pipelineBinary(r.ctx, r.sparkwingDir, key, keyParts, env, os.Stderr)
+	lease, source, err := pipelineBinary(r.ctx, r.sparkwingDir, env, os.Stderr)
 	if err != nil {
 		return err
 	}
 	r.lease, r.source, r.entry = lease, source, pipelineentry.Binary(lease.Path())
-	ensureDescribeCache(r.ctx, r.sparkwingDir, key, r.entry)
+	ensureDescribeCache(r.ctx, r.sparkwingDir, lease.Key(), r.entry)
 	return nil
 }
 
@@ -123,44 +122,16 @@ func (r *pipelineRun) finish(err error) error {
 
 // safety: the returned lease pins the cache entry the binary lives in, so the
 // caller releases it once the binary has run or been read.
-func pipelineBinary(
-	ctx context.Context,
-	sparkwingDir, key string,
-	keyParts []bincache.KeyPart,
-	env []string,
-	diagnostics io.Writer,
-) (*bincache.Lease, string, error) {
-	entry, err := bincache.PipelineEntry(key)
+func pipelineBinary(ctx context.Context, sparkwingDir string, env []string, diagnostics io.Writer) (*bincache.Lease, string, error) {
+	options := bincache.CompileOptions{Environment: env, Diagnostics: diagnostics}
+	lease, published, err := bincache.MaterializePipeline(ctx, sparkwingDir, options)
 	if err != nil {
 		return nil, "", err
 	}
 	source := "cached"
-	lease, _, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
-		if err := announceCompile(diagnostics); err != nil {
-			return err
-		}
-		options := bincache.CompileOptions{Environment: env, Diagnostics: diagnostics}
-		if compileErr := bincache.CompilePipeline(ctx, sparkwingDir, tempPath, options); compileErr != nil {
-			if !errors.Is(compileErr, bincache.ErrMissingGoSum) {
-				return compileErr
-			}
-			if _, err := fmt.Fprintln(diagnostics, color.Dim("==> populating go.sum (`go mod download`) and retrying compile...")); err != nil {
-				return err
-			}
-			if dlErr := bincache.RunGo(ctx, sparkwingDir, []string{"mod", "download"}, options); dlErr != nil {
-				return fmt.Errorf("recovery `go mod download` failed: %w", dlErr)
-			}
-			if compileErr := bincache.CompilePipeline(ctx, sparkwingDir, tempPath, options); compileErr != nil {
-				return compileErr
-			}
-		}
+	if published {
 		source = "compiled"
-		return nil
-	})
-	if err != nil {
-		return nil, "", err
 	}
-	lease.RecordUse(sparkwingDir, keyParts)
 	return lease, source, nil
 }
 
@@ -171,21 +142,6 @@ func ensureDescribeCache(ctx context.Context, sparkwingDir, key string, entry pi
 	if err := writeDescribeCache(ctx, sparkwingDir, entry); err != nil {
 		slog.Default().Debug("describe cache write failed", "err", err, "hash", key)
 	}
-}
-
-func announceCompile(out io.Writer) error {
-	firstEver := true
-	if entries, err := os.ReadDir(bincache.CacheRoot()); err == nil && len(entries) > 0 {
-		firstEver = false
-	}
-	var msg string
-	if firstEver {
-		msg = "==> compiling .sparkwing/ pipeline binary (first time on this machine; may download deps)"
-	} else {
-		msg = "==> recompiling .sparkwing/ binary (source changed since last run)"
-	}
-	_, err := fmt.Fprintln(out, color.Dim(msg))
-	return err
 }
 
 type compileOptions struct {

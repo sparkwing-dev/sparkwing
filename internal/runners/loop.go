@@ -138,6 +138,7 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 	claimed := 0
 	var hostErr error
 	finish := func(result unitResult) {
+		pollAt = time.Time{}
 		delete(active, result.key)
 		if len(active) == 0 {
 			idleSince = time.Now()
@@ -242,7 +243,6 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			}
 		case result := <-results:
 			finish(result)
-			pollAt = time.Time{}
 		case <-refresh.C:
 			if stop, err := l.checkPolicy(claims); stop {
 				return err, nil

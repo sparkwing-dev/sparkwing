@@ -1,5 +1,5 @@
 {{- if gt (int .Values.controller.replicas) 1 -}}
-{{- fail "sparkwing-full: controller.replicas above 1 corrupts the controller's local SQLite state DB, and its egress meter counts per process, so a second replica splits the daily alarm below its threshold. Keep controller.replicas at 1; HA controller is a paid feature" -}}
+{{- fail "sparkwing-full: controller.replicas above 1 is unsupported with the controller's local SQLite state DB. Keep controller.replicas at 1; HA controller is a paid feature" -}}
 {{- end -}}
 {{- $bundle := index .Values "sparkwing-runner-bundle" -}}
 {{- if and (index $bundle "enabled") (or .Values.nameOverride .Values.fullnameOverride) (not (index $bundle "controller" "url")) -}}
@@ -32,11 +32,11 @@
 {{- fail "sparkwing-full: controller.bootstrapAdminToken.key is required when controller.bootstrapAdminToken.name is set" -}}
 {{- end -}}
 {{- if not (kindIs "bool" .Values.controller.allowOpenBootstrap) -}}
-{{- fail "sparkwing-full: controller.allowOpenBootstrap must be a bool. A quoted value such as 'false' reads as true to the template, which would silently open the controller's bootstrap window" -}}
+{{- fail "sparkwing-full: controller.allowOpenBootstrap must be a bool. A quoted value such as 'false' reads as true to the template, which would silently omit --require-auth" -}}
 {{- end -}}
 {{- $hasBootstrap := include "sparkwing-full.controller.hasBootstrapAdminToken" . -}}
 {{- if and .Values.controller.requireAuth (not $hasBootstrap) (ne .Values.controller.allowOpenBootstrap true) -}}
-{{- fail "sparkwing-full: controller.requireAuth=true without controller.bootstrapAdminToken.name leaves a fresh controller no way to mint its first token. Set controller.bootstrapAdminToken.name to a Secret holding the first admin token, or put it in controller.credentialsSecret as bootstrap-admin-token, or set controller.allowOpenBootstrap=true to start without one: an empty tokens table then serves every route, token minting included, unauthenticated to anything that reaches the Service until a token exists and the controller restarts" -}}
+{{- fail "sparkwing-full: controller.requireAuth=true needs controller.bootstrapAdminToken.name or bootstrap-admin-token in controller.credentialsSecret for a fresh install. controller.allowOpenBootstrap=true permits rendering without one and omits --require-auth; protected routes still require credentials, so provision the administrator out of band before use" -}}
 {{- end -}}
 {{- if not (kindIs "bool" .Values.ingress.allowInsecure) -}}
 {{- fail "sparkwing-full: ingress.allowInsecure must be a bool. A quoted value such as 'false' reads as true to the template, which would silently drop the published-controller guard" -}}
@@ -46,6 +46,6 @@
 {{- fail "sparkwing-full: ingress.enabled=true with an empty ingress.tls publishes the controller API, its tokens and the dashboard's session cookies over plain HTTP, where anyone on the path can read them. Set ingress.tls, or set ingress.allowInsecure=true to publish it unencrypted anyway, which also passes --insecure-cookies so a browser keeps its session" -}}
 {{- end -}}
 {{- if not (include "sparkwing-full.controller.rendersRequireAuth" .) -}}
-{{- fail "sparkwing-full: ingress.enabled=true with controller.requireAuth=false, or with controller.allowOpenBootstrap=true and no controller.bootstrapAdminToken.name (a credentialsSecret does not count, since the chart cannot see whether it carries one), publishes the whole controller API: while its tokens table is empty, anyone reaching the Ingress can mint an admin token and drive every route. Set controller.bootstrapAdminToken.name and keep controller.requireAuth=true, or set ingress.allowInsecure=true to publish it open anyway" -}}
+{{- fail "sparkwing-full: ingress.enabled=true with controller.requireAuth=false, or with controller.allowOpenBootstrap=true and no controller.bootstrapAdminToken.name (a credentialsSecret does not count, since the chart cannot see whether it carries one), publishes a controller without the chart's startup credential requirement. Set controller.bootstrapAdminToken.name and keep controller.requireAuth=true, or set ingress.allowInsecure=true to waive this startup guard" -}}
 {{- end -}}
 {{- end -}}

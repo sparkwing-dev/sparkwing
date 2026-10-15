@@ -377,9 +377,10 @@ type renderedDeployment struct {
 }
 
 type renderedPolicyRule struct {
-	APIGroups []string `yaml:"apiGroups"`
-	Resources []string `yaml:"resources"`
-	Verbs     []string `yaml:"verbs"`
+	ResourceNames []string `yaml:"resourceNames"`
+	APIGroups     []string `yaml:"apiGroups"`
+	Resources     []string `yaml:"resources"`
+	Verbs         []string `yaml:"verbs"`
 }
 
 type renderedResource struct {
@@ -767,15 +768,12 @@ func TestRunnerGoCacheTakesAnExistingClaim(t *testing.T) {
 	}
 }
 
-// safety: the docs tell an operator to size an egress budget for one
-// process because the deployment runs one controller; a chart that
-// rendered two would make that sentence false without saying so.
 func TestControllerAboveOneReplicaFailsToRender(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
 	out := helmRenderError(t, "./sparkwing-full", "sparkwing", "controller.replicas=2")
-	for _, want := range []string{"controller.replicas above 1", "egress meter counts per process"} {
+	for _, want := range []string{"controller.replicas above 1", "local SQLite state DB"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("render error = %q, want it to name %q", out, want)
 		}
@@ -1669,7 +1667,7 @@ func TestPublishedControllerWithoutTLSFailsAtRender(t *testing.T) {
 	}
 }
 
-func TestPublishedOpenControllerFailsAtRender(t *testing.T) {
+func TestPublishedControllerWithoutStartupCredentialRequirementFailsAtRender(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
 	}
@@ -1679,8 +1677,8 @@ func TestPublishedOpenControllerFailsAtRender(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			out := helmRenderError(t, "./sparkwing-full", "sparkwing", sets...)
-			if !strings.Contains(out, "publishes the whole controller API") || !strings.Contains(out, "ingress.allowInsecure=true") {
-				t.Fatalf("render error does not name the open controller or its opt-out:\n%s", out)
+			if !strings.Contains(out, "without the chart's startup credential requirement") || !strings.Contains(out, "ingress.allowInsecure=true") {
+				t.Fatalf("render error does not name the startup credential guard or its opt-out:\n%s", out)
 			}
 		})
 	}
@@ -2050,7 +2048,7 @@ func TestFullChartAllowOpenBootstrapDropsRequireAuth(t *testing.T) {
 		"controller.allowOpenBootstrap=true",
 		"controller.bootstrapAdminToken.name=sparkwing-bootstrap-admin"))
 	if !slices.Contains(container.Args, "--require-auth") {
-		t.Fatalf("args = %+v, want --require-auth once a bootstrap token closes the window", container.Args)
+		t.Fatalf("args = %+v, want --require-auth with a bootstrap credential", container.Args)
 	}
 }
 
@@ -2063,7 +2061,7 @@ func TestFullChartIngressRefusesOpenBootstrapWithOnlyACredentialBundle(t *testin
 		"controller.credentialsSecret.name=sparkwing-credentials",
 		"ingress.enabled=true",
 		"ingress.tls[0].secretName=sparkwing-tls")
-	if !strings.Contains(out, "publishes the whole controller API") {
+	if !strings.Contains(out, "without the chart's startup credential requirement") {
 		t.Fatalf("render output = %s, want the published-controller refusal", out)
 	}
 }
@@ -2237,5 +2235,61 @@ func TestRunnerMetricsFlagFollowsMetricsPort(t *testing.T) {
 	}
 	if got, ok := hasFlag(render("runner.metricsPort=0"), "--metrics-addr"); !ok || got != "--metrics-addr=" {
 		t.Fatalf("metricsPort=0 metrics flag = %q, want --metrics-addr= to disable the listener", got)
+	}
+}
+
+func TestCloudLauncherCanVerifyAdmissionExemption(t *testing.T) {
+	for chart, settings := range map[string][]string{
+		"./sparkwing-runner-bundle": {"launcher.serviceAccountName=cloud-launcher"},
+		"./sparkwing-full":          {"sparkwing-runner-bundle.launcher.serviceAccountName=cloud-launcher"},
+	} {
+		t.Run(chart, func(t *testing.T) {
+			resources := renderedResources(t, helmRenderAll(t, chart, "sparkwing", "cloud-jobs", settings...))
+			for _, resource := range resources {
+				for _, rule := range resource.Rules {
+					if slices.Contains(rule.Resources, "mutatingadmissionpolicies") {
+						t.Error("launcher grants unused access to mutating admission policies")
+					}
+				}
+			}
+			for _, want := range []struct {
+				kind, group, resource string
+				verbs                 []string
+			}{
+				{"ClusterRole", "", "namespaces", []string{"get"}},
+				{"ClusterRole", "admissionregistration.k8s.io", "mutatingwebhookconfigurations", []string{"list"}},
+				{"ClusterRole", "admissionregistration.k8s.io", "mutatingadmissionpolicybindings", []string{"list"}},
+				{"ClusterRole", "admissionregistration.k8s.io", "validatingadmissionpolicies", []string{"get"}},
+				{"ClusterRole", "admissionregistration.k8s.io", "validatingadmissionpolicybindings", []string{"get"}},
+				{"Role", "", "limitranges", []string{"list", "create"}},
+			} {
+				found := false
+				for _, resource := range resources {
+					if resource.Kind != want.kind {
+						continue
+					}
+					for _, rule := range resource.Rules {
+						if slices.Contains(rule.APIGroups, want.group) && slices.Contains(rule.Resources, want.resource) {
+							found = true
+							if want.resource == "namespaces" && !reflect.DeepEqual(rule.ResourceNames, []string{"cloud-jobs"}) {
+								t.Errorf("namespace reads cover %v, want only cloud-jobs", rule.ResourceNames)
+							}
+							if strings.HasPrefix(want.resource, "validatingadmission") && !reflect.DeepEqual(rule.ResourceNames, []string{"sparkwing-cloud-exemption-cloud-jobs"}) {
+								t.Errorf("admission guard reads cover %v, want only sparkwing-cloud-exemption-cloud-jobs", rule.ResourceNames)
+							}
+							if want.kind == "Role" && resource.Metadata.Namespace != "cloud-jobs" {
+								t.Errorf("namespace permission in %q, want cloud-jobs", resource.Metadata.Namespace)
+							}
+							if !reflect.DeepEqual(rule.Verbs, want.verbs) {
+								t.Errorf("%s grants %v on %s, want only %v", want.kind, rule.Verbs, want.resource, want.verbs)
+							}
+						}
+					}
+				}
+				if !found {
+					t.Errorf("missing %s %v permission on %s/%s", want.kind, want.verbs, want.group, want.resource)
+				}
+			}
+		})
 	}
 }

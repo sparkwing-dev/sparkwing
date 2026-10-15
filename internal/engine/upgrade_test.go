@@ -19,6 +19,7 @@ type verifyFunc func(context.Context, string, Resolved) error
 func (f verifyFunc) Verify(ctx context.Context, dir string, resolved Resolved) error {
 	return f(ctx, dir, resolved)
 }
+
 func TestUpgradeStagesNativePinsAndLocksBeforeApplying(t *testing.T) {
 	for _, sdk := range []SDKKind{GoSDK, TypeScriptSDK} {
 		t.Run(string(sdk), func(t *testing.T) {
@@ -27,6 +28,9 @@ func TestUpgradeStagesNativePinsAndLocksBeforeApplying(t *testing.T) {
 			transport.release(t, "v0.20.0", target, signedBundle(t, key, "v0.20.0", target, fixtureExecutable(t, "v0.20.0", target)))
 			repo := t.TempDir()
 			createUpgradeRepo(t, repo, sdk)
+			application := []byte("application manifest must stay unchanged")
+			writeFixture(t, repo, "go.mod", application)
+			writeFixture(t, repo, "package.json", application)
 			r.command = func(ctx context.Context, stage, name string, args ...string) error {
 				if stage == repo {
 					t.Fatal("native resolver ran in original checkout")
@@ -45,24 +49,27 @@ func TestUpgradeStagesNativePinsAndLocksBeforeApplying(t *testing.T) {
 				return nil
 			}
 			request := UpgradeRequest{Checkout: repo, SDK: sdk, DryRun: true}
-			before, err := ReadPin(repo, sdk)
+			before, err := ReadPin(filepath.Join(repo, ".sparkwing"), sdk)
 			if err != nil {
 				t.Fatal(err)
 			}
 			called := false
 			verifier := verifyFunc(func(ctx context.Context, stage string, resolved Resolved) error {
 				called = true
+				if filepath.Base(stage) == ".sparkwing" {
+					t.Fatalf("verifier received pipeline instead of checkout root: %s", stage)
+				}
 				if stage == repo || resolved.Identity.Version != "v0.20.0" {
 					t.Fatalf("invalid verification boundary %s %+v", stage, resolved)
 				}
-				original, err := ReadPin(repo, sdk)
+				original, err := ReadPin(filepath.Join(repo, ".sparkwing"), sdk)
 				if err != nil {
 					return err
 				}
 				if original != before {
 					return fmt.Errorf("original changed before verification")
 				}
-				pin, err := ReadPin(stage, sdk)
+				pin, err := ReadPin(filepath.Join(stage, ".sparkwing"), sdk)
 				if err != nil {
 					return err
 				}
@@ -78,7 +85,12 @@ func TestUpgradeStagesNativePinsAndLocksBeforeApplying(t *testing.T) {
 			if preview.Applied || preview.Verified || called || len(preview.Plan.Edits) != 2 {
 				t.Fatalf("invalid dry run: %+v called=%v", preview, called)
 			}
-			actual, err := ReadPin(repo, sdk)
+			for _, edit := range preview.Plan.Edits {
+				if filepath.Dir(edit.Path) != ".sparkwing" {
+					t.Fatalf("preview addresses wrong directory: %s", edit.Path)
+				}
+			}
+			actual, err := ReadPin(filepath.Join(repo, ".sparkwing"), sdk)
 			if err != nil || actual != before {
 				t.Fatalf("dry run edited pin: %+v %v", actual, err)
 			}
@@ -90,9 +102,15 @@ func TestUpgradeStagesNativePinsAndLocksBeforeApplying(t *testing.T) {
 			if !result.Applied || !result.Verified || !called {
 				t.Fatalf("upgrade did not verify/apply: %+v", result)
 			}
-			actual, err = ReadPin(repo, sdk)
+			actual, err = ReadPin(filepath.Join(repo, ".sparkwing"), sdk)
 			if err != nil || actual != result.Plan.After {
 				t.Fatalf("wrong applied pin: %+v %v", actual, err)
+			}
+			for _, name := range []string{"go.mod", "package.json"} {
+				current, err := os.ReadFile(filepath.Join(repo, name))
+				if err != nil || string(current) != string(application) {
+					t.Fatalf("application manifest changed: %s %v", current, err)
+				}
 			}
 			content, err := os.ReadFile(filepath.Join(repo, "unrelated.txt"))
 			if err != nil || string(content) != "keep me" {
@@ -101,9 +119,14 @@ func TestUpgradeStagesNativePinsAndLocksBeforeApplying(t *testing.T) {
 		})
 	}
 }
+
 func createUpgradeRepo(t *testing.T, dir string, sdk SDKKind) {
 	t.Helper()
 	writeFixture(t, dir, "unrelated.txt", []byte("keep me"))
+	dir = filepath.Join(dir, ".sparkwing")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	if sdk == GoSDK {
 		writeFixture(t, dir, "go.mod", []byte("module fixture\ngo 1.26\nrequire github.com/sparkwing-dev/sparkwing v0.10.2\n"))
 		writeFixture(t, dir, "go.sum", []byte("original native checksums\n"))
@@ -112,6 +135,7 @@ func createUpgradeRepo(t *testing.T, dir string, sdk SDKKind) {
 		writeFixture(t, dir, "package-lock.json", []byte(`{"lockfileVersion":3,"packages":{"":{"dependencies":{"@sparkwing/sdk":"0.10.2"}},"node_modules/@sparkwing/sdk":{"version":"0.10.2"}}}`))
 	}
 }
+
 func TestFailedOrConcurrentUpgradeLeavesOriginalPins(t *testing.T) {
 	r, transport, key, _, _ := fixtureResolver(t)
 	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
@@ -124,7 +148,7 @@ func TestFailedOrConcurrentUpgradeLeavesOriginalPins(t *testing.T) {
 		t.Run(fmt.Sprintf("concurrent_%v", concurrent), func(t *testing.T) {
 			repo := t.TempDir()
 			createUpgradeRepo(t, repo, GoSDK)
-			original, err := os.ReadFile(filepath.Join(repo, "go.mod"))
+			original, err := os.ReadFile(filepath.Join(repo, ".sparkwing", "go.mod"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -132,7 +156,7 @@ func TestFailedOrConcurrentUpgradeLeavesOriginalPins(t *testing.T) {
 				if !concurrent {
 					return errors.New("fixture type-check failed")
 				}
-				writeFixture(t, repo, "go.mod", append(original, []byte("// concurrent user edit\n")...))
+				writeFixture(t, filepath.Join(repo, ".sparkwing"), "go.mod", append(original, []byte("// concurrent user edit\n")...))
 				return nil
 			})
 			result, err := r.Upgrade(context.Background(), UpgradeRequest{Checkout: repo, SDK: GoSDK}, verifier)
@@ -142,20 +166,21 @@ func TestFailedOrConcurrentUpgradeLeavesOriginalPins(t *testing.T) {
 			if concurrent {
 				requireCode(t, err, apierr.Conflict)
 			}
-			current, err := os.ReadFile(filepath.Join(repo, "go.mod"))
+			current, err := os.ReadFile(filepath.Join(repo, ".sparkwing", "go.mod"))
 			if err != nil {
 				t.Fatal(err)
 			}
 			if !strings.Contains(string(current), "v0.10.2") {
 				t.Fatal("original pin changed")
 			}
-			lock, err := os.ReadFile(filepath.Join(repo, "go.sum"))
+			lock, err := os.ReadFile(filepath.Join(repo, ".sparkwing", "go.sum"))
 			if err != nil || string(lock) != "original native checksums\n" {
 				t.Fatal("failure partially applied lock")
 			}
 		})
 	}
 }
+
 func TestBlockedRunnerCanFetchVerifiedReplacement(t *testing.T) {
 	r, transport, key, policy, now := fixtureResolver(t)
 	target := releaseasset.Target{Binary: releaseasset.SparkwingRunner, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
@@ -181,10 +206,10 @@ func TestBlockedRunnerCanFetchVerifiedReplacement(t *testing.T) {
 func TestUpgradeStagingDoesNotRecursivelyCopyItsOwnCache(t *testing.T) {
 	source := t.TempDir()
 	stage := filepath.Join(source, "engine-cache", "upgrade")
-	if err := os.MkdirAll(stage, 0700); err != nil {
+	if err := os.MkdirAll(stage, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(source, "fixture.txt"), []byte("source"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(source, "fixture.txt"), []byte("source"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := copyCheckout(t.Context(), source, stage); err != nil {

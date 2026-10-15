@@ -8,11 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	batchv1 "k8s.io/api/batch/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/kubernetes/fake"
-	ktesting "k8s.io/client-go/testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -31,11 +27,7 @@ func (f storeLauncherSyncW8) ReadLauncherSync(ctx context.Context, ref capabilit
 
 func TestStoreLauncherW8(t *testing.T) {
 	server, root := storedCloudClaimantW8(t)
-	kube, boundary := fake.NewClientset(), &cloudBoundaryFake{}
-	kube.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
-		action.(ktesting.CreateAction).GetObject().(*batchv1.Job).UID = "job-uid"
-		return false, nil, nil
-	})
+	kube, boundary := cloudKubeW8(), &cloudBoundaryFake{}
 	_, cfg, _ := cloudFixture(launcher.CloudWork)
 	handler := controller.New(server.Store, nil).WithEngineController(server).Handler()
 	var paths []string

@@ -77,6 +77,7 @@ type Entry struct {
 	DefaultBranch     string
 	ownedDirectory    string
 	checkoutDirectory string
+	releaseSDK        func() error
 }
 
 // CheckoutDirectory returns the acquired root that bounds checkout-derived file reads.

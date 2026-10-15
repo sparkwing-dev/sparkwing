@@ -40,5 +40,36 @@ API access. The chart creates no runner Role or RoleBinding. The launcher owns
 Kubernetes Jobs under its separate permissions. Set `runner.alsoClaimTriggers`
 to `false` for a pool that should claim only jobs.
 
+For a separately configured Cloud launcher, set `launcher.serviceAccountName`
+to provision its Kubernetes identity, permissions, and admission exemption guard.
+The cluster must serve the GA `admissionregistration.k8s.io/v1` validating
+admission policy and binding APIs, and mutating admission policy binding API.
+The launcher reads its namespace labels, mutating webhook configurations,
+mutating admission policy bindings, and namespace LimitRanges before publishing
+work. It also verifies the exact validating policy and binding installed by the
+chart. Namespace and validating guard reads are restricted to their expected
+resource names.
+
+The launcher needs LimitRange `list` and `create` permission to probe guard
+enforcement. It submits a valid LimitRange CREATE with Kubernetes dry-run enabled
+and requires a Forbidden response naming the exact validating guard. The probe
+persists nothing. The installed guard denies actual LimitRange creation in the
+Cloud Job namespace as well. A missing or inactive guard prevents publication.
+
+Use a dedicated Cloud Job namespace with no LimitRanges. Every mutating webhook
+that could change Job or Pod CREATE/UPDATE, and every mutating admission policy
+binding, must explicitly exclude the namespace using a namespace selector
+`matchExpressions` entry with key `kubernetes.io/metadata.name`, operator `NotIn`,
+and the release namespace in `values`. Object selectors do not prove exemption.
+Configure those exclusions before launching.
+
+The chart installs `sparkwing-cloud-exemption-<namespace>` as a
+ValidatingAdmissionPolicy and binding with denial on failure. This guard rejects
+future LimitRanges in the namespace, changes to its canonical namespace-name
+label, and webhook or mutating policy binding changes that remove the required
+exclusion. Cluster administrators must preserve the validating guard while Jobs
+are live. The launcher refuses publication if the required policy API is
+unavailable or the installed guard differs from its expected policy.
+
 `values.yaml` lists the supported chart values. Cache-service values, credentials,
 Deployments, Services, PVCs and NetworkPolicies have been removed.

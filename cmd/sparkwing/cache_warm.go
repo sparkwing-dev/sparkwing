@@ -150,6 +150,7 @@ func warmLocalPipelineWith(ctx context.Context, dir string, env []string, diagno
 		return result, err
 	}
 	prepared, err := install(ctx, selected, engine.SDKInstallRequest{Directory: filepath.Dir(dir), PipelineDir: filepath.Base(dir), SDK: sdk, Environment: env})
+	defer func() { err = errors.Join(err, prepared.Close()) }()
 	if err != nil {
 		return result, err
 	}
@@ -157,6 +158,9 @@ func warmLocalPipelineWith(ctx context.Context, dir string, env []string, diagno
 		return result, errors.New("SDK preparation returned an invalid command")
 	}
 	result.Language, result.Status, result.Path = string(sdk), "prepared", prepared.Command[0]
+	if prepared.CachedExecutable != "" {
+		result.Path = prepared.CachedExecutable
+	}
 	if ts {
 		result.Path = filepath.Join(dir, "node_modules")
 	}

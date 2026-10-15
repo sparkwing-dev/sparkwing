@@ -6,10 +6,7 @@ import (
 	"time"
 )
 
-// APIDrainWindow is how long a stopping daemon waits for the controller API
-// requests in flight to finish. It nests inside
-// [FinalizeDrainWindow] so the store handle the host closes when the daemon
-// returns outlives both drains.
+// APIDrainWindow bounds the API request drain before the finalization drain.
 const APIDrainWindow = 5 * time.Second
 
 // APIConn carries a verified transport identity for the shared controller's

@@ -25,11 +25,7 @@ import (
 func renamedBootstrapFixtureW8(t *testing.T) (*launcher.Launcher, *fake.Clientset, *cloudBoundaryFake, *cloudControlW8) {
 	t.Helper()
 	_, cfg, award := cloudFixture(launcher.CloudWork)
-	kube := fake.NewClientset()
-	kube.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
-		action.(ktesting.CreateAction).GetObject().(*batchv1.Job).UID = "job-uid"
-		return false, nil, nil
-	})
+	kube := cloudKubeW8()
 	kube.PrependReactor("create", "secrets", func(action ktesting.Action) (bool, runtime.Object, error) {
 		secret := action.(ktesting.CreateAction).GetObject().(*corev1.Secret)
 		secret.Name, secret.UID, secret.OwnerReferences = secret.Name+"-renamed", "secret-uid", nil
@@ -191,7 +187,7 @@ func TestLauncherRefusesChangedBootstrapW8Components(t *testing.T) {
 		} {
 			t.Run(string(kind)+"/"+test.name, func(t *testing.T) {
 				_, cfg, award := cloudFixture(kind)
-				kube := fake.NewClientset()
+				kube := cloudKubeW8()
 				kube.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
 					action.(ktesting.CreateAction).GetObject().(*batchv1.Job).UID = "job-uid"
 					return false, nil, nil
@@ -266,7 +262,7 @@ func TestLauncherPublicationSurvivesConcurrentReconciliationW8Components(t *test
 	for _, kind := range []launcher.CloudUnitKind{launcher.CloudPlan, launcher.CloudEval, launcher.CloudWork} {
 		t.Run(string(kind), func(t *testing.T) {
 			_, cfg, award := cloudFixture(kind)
-			kube := fake.NewClientset()
+			kube := cloudKubeW8()
 			boundary := &cloudBoundaryFake{}
 			control := &cloudControlW8{award: &award}
 			reconciler := &launcher.Launcher{Kube: kube, Control: control, Boundary: boundary, Config: cfg}
@@ -307,7 +303,7 @@ func TestLauncherCancellationDuringPublicationW8Components(t *testing.T) {
 	for _, kind := range []launcher.CloudUnitKind{launcher.CloudPlan, launcher.CloudEval, launcher.CloudWork} {
 		t.Run(string(kind), func(t *testing.T) {
 			_, cfg, award := cloudFixture(kind)
-			kube := fake.NewClientset()
+			kube := cloudKubeW8()
 			boundary := &cloudBoundaryFake{}
 			control := &cloudControlW8{award: &award}
 			l := &launcher.Launcher{Control: control, Boundary: boundary, Config: cfg}

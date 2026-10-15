@@ -66,6 +66,7 @@ func Acquire(ctx context.Context, spec Spec, options Options) (entry *Entry, err
 	if err != nil {
 		return entry, fmt.Errorf("install source entry: %w", err)
 	}
+	entry.releaseSDK = command.Close
 	if err := context.Cause(ctx); err != nil {
 		return entry, err
 	}

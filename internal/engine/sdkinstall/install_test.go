@@ -25,13 +25,15 @@ func main(){
   if os.MkdirAll(dir,0700)!=nil || os.WriteFile(filepath.Join(dir,"package.json"),[]byte("{\"version\":\"0.20.0\"}"),0600)!=nil { os.Exit(11) }
   return
  }
+ if len(os.Args)>1 && os.Args[1]=="env" { fmt.Print("auto\ngo1.26.9\noff\n");return }
+ if len(os.Args)>1 && os.Args[1]=="mod" { return }
  if len(os.Args)>1 && os.Args[1]=="list" { fmt.Print("{\"Path\":\"github.com/sparkwing-dev/sparkwing\",\"Version\":\"v0.20.0\"}");return }
  for i,arg:=range os.Args { if arg=="-o" && i+1<len(os.Args) { if os.WriteFile(os.Args[i+1],[]byte("locally-built-fixture"),0700)!=nil { os.Exit(12) };fmt.Fprintln(os.Stderr,os.Getenv("HTTPS_PROXY"));return } }
  os.Exit(13)
 }`
 
 func TestRunSDKInstallBuildsLocallyAndUsesNativeLockfile(t *testing.T) {
-	bin, suffix := installNativeToolFixture(t)
+	installNativeToolFixture(t)
 	secret := "proxy-secret-native-installer"
 	t.Setenv("HTTPS_PROXY", "http://user:"+secret+"@proxy.example")
 	for _, sdk := range []engine.SDKKind{engine.GoSDK, engine.TypeScriptSDK} {
@@ -48,7 +50,7 @@ func TestRunSDKInstallBuildsLocallyAndUsesNativeLockfile(t *testing.T) {
 			} else {
 				writeInput(t, dir, "main.go", []byte("package main\nfunc main(){}"))
 			}
-			body, err := json.Marshal(engine.SDKInstallRequest{Directory: dir, SDK: sdk})
+			body, err := json.Marshal(engine.SDKInstallRequest{Directory: dir, SDK: sdk, ExecutableDirectory: t.TempDir()})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -69,15 +71,17 @@ func TestRunSDKInstallBuildsLocallyAndUsesNativeLockfile(t *testing.T) {
 				}
 			} else {
 				first := command.Command[0]
-				if err := os.Remove(filepath.Join(bin, "go"+suffix)); err != nil {
+				stdout.Reset()
+				request := engine.SDKInstallRequest{Directory: dir, SDK: sdk, ExecutableDirectory: t.TempDir()}
+				body, err = json.Marshal(request)
+				if err != nil {
 					t.Fatal(err)
 				}
-				stdout.Reset()
 				if err := Run(t.Context(), "v0.20.0", bytes.NewReader(body), &stdout, &stderr); err != nil {
-					t.Fatalf("local binary cache miss: %v", err)
+					t.Fatalf("local binary cache: %v", err)
 				}
-				if err := json.Unmarshal(stdout.Bytes(), &command); err != nil || first != command.Command[0] {
-					t.Fatalf("cached command changed: %+v, %v", command, err)
+				if err := json.Unmarshal(stdout.Bytes(), &command); err != nil || first == command.Command[0] {
+					t.Fatalf("owned command did not change: %+v, %v", command, err)
 				}
 			}
 			for _, input := range [][]byte{[]byte(`{"directory":"a","directory":"b"}`), []byte(`{"directory":"a","Directory":"b","sdk":"go"}`), []byte(`{"sdk":"go","SDK":"typescript"}`), []byte(`{"environment":["TOKEN=credential"]}`), append(bytes.Clone(body), []byte(" {}")...)} {

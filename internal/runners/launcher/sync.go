@@ -138,7 +138,7 @@ func jobOwnership(job batchv1.Job) (CloudJobBinding, CloudNodeReservation, error
 
 func (l *Launcher) teardown(ctx context.Context, job *batchv1.Job, reservation CloudNodeReservation) error {
 	namespace := l.Config.Namespace
-	bootstrap := bootstrapReference{Name: job.Name}
+	bootstrap := bootstrapReference{}
 	if reference := job.Annotations[bootstrapAnnotation]; reference != "" {
 		bootstrap = bootstrapReference{}
 		if err := json.Unmarshal([]byte(reference), &bootstrap); err != nil || bootstrap.Name == "" || bootstrap.UID == "" || bootstrap.JobUID == "" || bootstrap.JobUID != job.UID {
@@ -189,10 +189,13 @@ func (l *Launcher) teardown(ctx context.Context, job *batchv1.Job, reservation C
 }
 
 func (l *Launcher) deleteBootstrap(ctx context.Context, bootstrap bootstrapReference) error {
-	options := metav1.DeleteOptions{}
-	if bootstrap.UID != "" {
-		options.Preconditions = &metav1.Preconditions{UID: &bootstrap.UID}
+	if bootstrap.Name == "" {
+		return nil
 	}
+	if bootstrap.UID == "" {
+		return errors.New("bootstrap cleanup requires an owned Secret UID")
+	}
+	options := metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &bootstrap.UID}}
 	err := l.Kube.CoreV1().Secrets(l.Config.Namespace).Delete(ctx, bootstrap.Name, options)
 	if apierrors.IsNotFound(err) {
 		return nil

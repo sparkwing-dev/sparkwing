@@ -29,11 +29,9 @@ controller:
   # installs should leave this false and set url explicitly.
   bundled: false
 
-  # Auth token the runner uses for controller claims and node log
-  # uploads, which go through the controller. Reference an existing
-  # Secret created out-of-band; the chart does NOT create the secret
-  # itself (so you can rotate it without `helm upgrade`). Pipeline code
-  # the runner executes can read this token.
+  # Machine root credential for controller claims. Node log uploads use
+  # the awarded claim authority. Reference an existing Secret created
+  # out of band so it can rotate independently of Helm.
   tokenSecret:
     # Name of the Secret in the install namespace.
     name: ""
@@ -62,16 +60,15 @@ runner:
     tag: "" # falls back to .Chart.AppVersion when empty
     pullPolicy: IfNotPresent
 
-  # --label flags advertised to the controller for RunsOn matching.
+  # --label flags advertised to the controller for Requires matching.
   # Each label entry can be a bare tag ("cluster") or a key=value
-  # ("arch=arm64"). Pipelines call .RunsOn("cluster") /
-  # .RunsOn("arch=arm64") to pin to this pool.
+  # ("arch=arm64"). Pipelines call .Requires("cluster") /
+  # .Requires("arch=arm64") to pin to this pool.
   labels:
     - cluster
 
-  # Max nodes a single runner pod will execute concurrently before
-  # backpressuring the claim loop. Memory-bound on the remote-compile
-  # fallback path; tune up if your compute is roomy.
+  # Maximum concurrent units per runner pod. Size for the CPU and memory
+  # required by the pipeline workloads.
   maxConcurrent: 2
 
   # Poll interval for the controller claim loop. 500ms is the prod
