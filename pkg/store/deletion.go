@@ -245,7 +245,7 @@ func (t *Tenant) markForDeletionTx(ctx context.Context, tx *storeTx, requestedBy
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE invitations SET withdrawn_at = ?
-		WHERE team = ? AND accepted_at IS NULL AND withdrawn_at IS NULL`, at, string(t.team)); err != nil {
+		WHERE team = ? AND accepted_at IS NULL AND withdrawn_at IS NULL`, now.UnixNano(), string(t.team)); err != nil {
 		return nil, err
 	}
 	if err := t.cancelActiveRunsTx(ctx, tx, now); err != nil {
@@ -637,7 +637,7 @@ func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Ti
 		{`DELETE FROM identities WHERE account_id = ?`, []any{accountID}},
 		{`DELETE FROM identity_unlinks WHERE account_id = ?`, []any{accountID}},
 		{`DELETE FROM invitations WHERE email = ?`, []any{acct.Email}},
-		{`UPDATE invitations SET withdrawn_at = ? WHERE invited_by = ? AND accepted_at IS NULL AND withdrawn_at IS NULL`, []any{at, accountID}},
+		{`UPDATE invitations SET withdrawn_at = ? WHERE invited_by = ? AND accepted_at IS NULL AND withdrawn_at IS NULL`, []any{now.UnixNano(), accountID}},
 		{`UPDATE invitations SET invited_by = '' WHERE invited_by = ?`, []any{accountID}},
 		{`UPDATE invitations SET accepted_by = '' WHERE accepted_by = ?`, []any{accountID}},
 		{`UPDATE github_runner_bindings SET created_by = '' WHERE created_by = ?`, []any{accountID}},
@@ -821,8 +821,8 @@ func (s *Store) ClaimInvitationEmail(ctx context.Context, invitationID string, n
 			return false, err
 		}
 	}
-	at := now.UTC().Unix()
-	since := at - int64((24 * time.Hour).Seconds())
+	at := now.UTC().UnixNano()
+	since := now.Add(-24 * time.Hour).UnixNano()
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM invitation_email_log WHERE address = ? AND sent_at <= ?`, address, since); err != nil {
 		return false, err

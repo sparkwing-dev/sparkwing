@@ -11,6 +11,19 @@ import (
 )
 
 func (h *OwnerEvaluator) withProcess(ctx context.Context, input EvaluationInput, spec runspec.Spec, evaluate func(*executorSession, NodeInput) error) (err error) {
+	var grant ProcessGrant
+	var process ExecutorProcess
+	defer func() {
+		if grant.Revoke != nil {
+			err = errors.Join(err, grant.Revoke())
+		}
+		if process != nil {
+			closeErr := process.Close()
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.CleanupTimeout)
+			defer cancel()
+			err = errors.Join(err, closeErr, process.Cleanup(cleanupCtx))
+		}
+	}()
 	resolved, err := h.deps.EnsureEngine(ctx, spec.Resolved.Engine, input.Engine.Target)
 	if err != nil {
 		return err
@@ -20,26 +33,18 @@ func (h *OwnerEvaluator) withProcess(ctx context.Context, input EvaluationInput,
 	}
 	input.Engine = resolved
 	if h.deps.Bind != nil {
-		binding, bindErr := h.deps.Bind(ctx, input)
-		if bindErr != nil {
-			return bindErr
-		}
-		if err := checkProcessBinding(input.RouteBinding, binding); err != nil {
+		grant, err = h.deps.Bind(ctx, input)
+		if err != nil {
 			return err
 		}
-		input.RouteBinding = binding
+		if err := grant.validate(input.RouteBinding); err != nil {
+			return err
+		}
+		input.RouteBinding = grant.Binding
 	} else if input.RouteBinding.Routes.Bearer != "" {
 		return errors.New("SDK evaluation requires a fresh process binding factory")
 	}
-	process, err := h.deps.Start(ctx, input)
-	if process != nil {
-		defer func() {
-			closeErr := process.Close()
-			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.CleanupTimeout)
-			defer cancel()
-			err = errors.Join(err, closeErr, process.Cleanup(cleanupCtx))
-		}()
-	}
+	process, err = h.deps.Start(ctx, input)
 	if err != nil {
 		return err
 	}

@@ -115,7 +115,7 @@ func TestFinishRun_FollowUpsSurviveARequestCancel(t *testing.T) {
 	if calls := github.CheckRunCalls(); len(calls) != 1 || calls[0].Conclusion != "success" {
 		t.Errorf("check run writes = %+v after the client went away, want the completed success", calls)
 	}
-	prof, err := st.GetPipelineProfile(context.Background(), "pr-gate", lastNode)
+	prof, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(context.Background(), "pr-gate", lastNode)
 	if err != nil {
 		t.Fatalf("GetPipelineProfile: %v", err)
 	}

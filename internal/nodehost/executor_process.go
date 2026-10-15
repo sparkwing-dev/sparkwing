@@ -22,6 +22,7 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 	}
 	ctx, activity, stopIdle := executorProgressContext(ctx, input.Execution.NoProgressTimeout.Value)
 	var process ExecutorProcess
+	var grant ProcessGrant
 	var session *executorSession
 	afterRun := false
 	stage := "action"
@@ -49,6 +50,12 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 				}
 			}
 		}
+		if grant.Revoke != nil {
+			if revokeErr := grant.Revoke(); revokeErr != nil {
+				err = errors.Join(err, revokeErr)
+				result = h.failure(err)
+			}
+		}
 		if process != nil {
 			closeErr := process.Close()
 			cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(parent), limits.CleanupTimeout)
@@ -70,14 +77,14 @@ func (h *nodeExecutor) attempt(ctx context.Context, input NodeInput, spec runspe
 	}
 	input.Engine = resolved
 	if h.deps.Bind != nil {
-		binding, bindErr := h.deps.Bind(ctx, input)
-		if bindErr != nil {
-			return h.failure(bindErr), bindErr
-		}
-		if err := checkProcessBinding(input.RouteBinding, binding); err != nil {
+		grant, err = h.deps.Bind(ctx, input)
+		if err != nil {
 			return h.failure(err), err
 		}
-		input.RouteBinding = binding
+		if err := grant.validate(input.RouteBinding); err != nil {
+			return h.failure(err), err
+		}
+		input.RouteBinding = grant.Binding
 	} else if input.RouteBinding.Routes.Bearer != "" {
 		err = errors.New("SDK execution requires a fresh process binding factory")
 		return h.failure(err), err

@@ -179,10 +179,10 @@ func executionHostFixture(t *testing.T, mode string, trace *[]string, processes 
 	input.RouteBinding.Routes.Bearer = "parent-authority"
 	dependencies := nodehost.ExecutorDependencies{
 		Store: s, Mask: func(text string) string { return strings.ReplaceAll(text, "private", "***") },
-		Bind: func(_ context.Context, in nodehost.NodeInput) (nodeproto.ProcessBinding, error) {
+		Bind: func(_ context.Context, in nodehost.NodeInput) (nodehost.ProcessGrant, error) {
 			binding := in.RouteBinding
 			binding.Routes.Bearer = fmt.Sprintf("process-%d", in.Attempt)
-			return binding, nil
+			return nodehost.ProcessGrant{Binding: binding, Revoke: func() error { return nil }}, nil
 		},
 		Start: func(_ context.Context, in nodehost.NodeInput, _ nodehost.ExecutorActivity) (nodehost.ExecutorProcess, error) {
 			process := &executionSDK{expansionSDK: expansionSDK{plan: plan}, input: in, mode: mode, trace: trace}

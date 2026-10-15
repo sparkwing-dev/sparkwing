@@ -758,10 +758,10 @@ func TestOwnerEvaluationNativeProcess(t *testing.T) {
 	}
 	in.Entry.Command = []string{exe, "-test.run=^TestProtocolSessionChild$", "--", "owner_expand"}
 	in.RouteBinding.Routes = nodeproto.ProcessRoutes{URL: "http://host", Bearer: "private-test-bearer"}
-	deps.Bind = func(_ context.Context, in EvaluationInput) (nodeproto.ProcessBinding, error) {
+	deps.Bind = func(_ context.Context, in EvaluationInput) (ProcessGrant, error) {
 		binding := in.RouteBinding
 		binding.Routes.Bearer = "private-test-bearer-child"
-		return binding, nil
+		return ProcessGrant{Binding: binding, Revoke: func() error { return nil }}, nil
 	}
 	revoked, cleaned := false, false
 	cfg := ProtocolSessionConfig{Environments: sdkTestEnvironment(st), ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil }, Revoke: func() error { revoked = true; return nil }, RunCleanups: func(context.Context, CleanupScope) error {

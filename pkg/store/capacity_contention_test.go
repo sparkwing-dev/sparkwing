@@ -13,16 +13,16 @@ func TestRecordContention_IncrementsRollupCount(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 
-	if err := st.RecordProfileObservation(ctx, "demo", "", store.ProfileObservation{CPUMeasured: true, Duration: 10 * time.Second}); err != nil {
+	if err := tenantFor(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "demo", "", store.ProfileObservation{CPUMeasured: true, Duration: 10 * time.Second}); err != nil {
 		t.Fatalf("RecordProfileObservation: %v", err)
 	}
 	for range 2 {
-		if err := st.RecordContention(ctx, "demo"); err != nil {
+		if err := tenantFor(t, st, store.DefaultTeam).RecordContention(ctx, "demo"); err != nil {
 			t.Fatalf("RecordContention: %v", err)
 		}
 	}
 
-	prof, err := st.GetPipelineProfile(ctx, "demo", "")
+	prof, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "demo", "")
 	if err != nil || prof == nil {
 		t.Fatalf("GetPipelineProfile: %v (prof=%v)", err, prof)
 	}
@@ -34,10 +34,10 @@ func TestRecordContention_IncrementsRollupCount(t *testing.T) {
 func TestRecordContention_NoProfileIsNoOp(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
-	if err := st.RecordContention(ctx, "never-run"); err != nil {
+	if err := tenantFor(t, st, store.DefaultTeam).RecordContention(ctx, "never-run"); err != nil {
 		t.Fatalf("RecordContention on absent profile should be a no-op, got %v", err)
 	}
-	prof, err := st.GetPipelineProfile(ctx, "never-run", "")
+	prof, err := tenantFor(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "never-run", "")
 	if err != nil {
 		t.Fatal(err)
 	}

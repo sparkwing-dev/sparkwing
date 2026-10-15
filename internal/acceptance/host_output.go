@@ -292,11 +292,11 @@ func CheckExecutorOutputCommit(t *testing.T) {
 			process := &executionSDK{expansionSDK: expansionSDK{plan: input.Accepted.Plan}, input: input, mode: "output_refused", trace: &trace}
 			executor, err := nodehost.NewNodeExecutor(nodehost.ExecutorDependencies{
 				Store: st, Mask: func(text string) string { return text }, PublishOutput: records.PublishOutput,
-				Bind: func(_ context.Context, in nodehost.NodeInput) (nodeproto.ProcessBinding, error) {
+				Bind: func(_ context.Context, in nodehost.NodeInput) (nodehost.ProcessGrant, error) {
 					binding := in.RouteBinding
 					binding.Routes.Bearer = "delegated-process"
 					process.input.RouteBinding = binding
-					return binding, nil
+					return nodehost.ProcessGrant{Binding: binding, Revoke: func() error { return nil }}, nil
 				},
 				Start: func(_ context.Context, in nodehost.NodeInput, _ nodehost.ExecutorActivity) (nodehost.ExecutorProcess, error) {
 					process.input = in

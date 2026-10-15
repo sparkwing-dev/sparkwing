@@ -57,8 +57,7 @@ type ExecutorActivity struct {
 // activity callbacks for the no-progress budget. Its context bounds startup;
 // Close owns the process lifetime. Execute's context must belong
 // to the claim's lease keeper, whose lost-authority cause suppresses reporting.
-// Bind delegates a fresh process bearer for each attempt. Start takes ownership
-// of that binding and must revoke it on failed startup as well as on Close.
+// Bind delegates a fresh process bearer for each attempt; the host revokes it before joining and cleanup.
 // A bearer-bearing input requires Bind; unbound transports may omit it.
 // BindStorage refreshes byte/record authority after each start or retry commit.
 // Configured storage requires this factory; failed refresh suppresses finalizer writes.
@@ -67,7 +66,7 @@ type ExecutorDependencies struct {
 	Log           func(context.Context, NodeInput, nodeproto.FrameLog) error
 	BindStorage   func(context.Context, NodeInput) (StorageBinding, error)
 	Store         NodeTransitionStore
-	Bind          func(context.Context, NodeInput) (nodeproto.ProcessBinding, error)
+	Bind          func(context.Context, NodeInput) (ProcessGrant, error)
 	Start         func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error)
 	EnsureEngine  func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error)
 	ValidatePlan  func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error)

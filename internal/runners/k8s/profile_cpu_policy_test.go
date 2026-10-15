@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestResolveResources_PodLimitsUsePeakCPU(t *testing.T) {
@@ -32,7 +33,7 @@ func TestResolveResources_PodLimitsUsePeakCPU(t *testing.T) {
 			t.Cleanup(func() { _ = st.Close() })
 			ctx := t.Context()
 			for range 3 {
-				if err := st.RecordProfileObservation(ctx, "deploy", "build", store.ProfileObservation{
+				if err := teststore.ForTeam(t, st, store.DefaultTeam).RecordProfileObservation(ctx, "deploy", "build", store.ProfileObservation{
 					Duration: time.Minute, PeakCores: 2, PeakMemoryBytes: 512 << 20,
 					SustainedCores: tc.sustained, CPUMeasured: true,
 				}); err != nil {
@@ -50,7 +51,7 @@ func TestResolveResources_PodLimitsUsePeakCPU(t *testing.T) {
 			if milli(resources.Requests[corev1.ResourceCPU]) != 2000 || milli(resources.Limits[corev1.ResourceCPU]) != 4000 || bytesOf(resources.Requests[corev1.ResourceMemory]) != 512<<20 || bytesOf(resources.Limits[corev1.ResourceMemory]) != 640<<20 {
 				t.Errorf("pod requests/limits = %+v; want CPU 2/4 cores and memory 512/640 MiB", resources)
 			}
-			profile, err := st.GetPipelineProfile(ctx, "deploy", "build")
+			profile, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "deploy", "build")
 			if err != nil {
 				t.Fatal(err)
 			}

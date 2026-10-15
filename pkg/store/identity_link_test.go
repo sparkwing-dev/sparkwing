@@ -215,7 +215,7 @@ func TestUnlinkBeforeIdentitySessionCreationRefusesStaleResolution(t *testing.T)
 		t.Fatal(err)
 	}
 	raw, _, _, err := st.CreateIdentityAccountSession(ctx, resolved.Account, resolved.Account.ActiveTeam,
-		profile.Provider, profile.Subject, time.Hour, time.Now())
+		profile.Provider, profile.Subject, time.Hour)
 	if !errors.Is(err, store.ErrIdentityUnlinked) || raw != "" {
 		t.Fatalf("session from stale identity resolution = %q, %v; want ErrIdentityUnlinked", raw, err)
 	}
@@ -254,7 +254,7 @@ func TestUnlinkRevokesConcurrentIdentitySessionPostgres(t *testing.T) {
 	sessionDone := make(chan sessionResult, 1)
 	go func() {
 		raw, _, _, err := st.CreateIdentityAccountSession(ctx, resolved.Account, resolved.Account.ActiveTeam,
-			profile.Provider, profile.Subject, time.Hour, time.Now())
+			profile.Provider, profile.Subject, time.Hour)
 		sessionDone <- sessionResult{raw, err}
 	}()
 	waitForDBLock := func(query string) {
@@ -317,7 +317,7 @@ func TestUnlinkRevokesConcurrentIdentitySessionPostgres(t *testing.T) {
 	if session.err != nil {
 		t.Fatalf("session creation: %v", session.err)
 	}
-	if _, err := st.LookupSession(t.Context(), session.raw, time.Now()); err == nil {
+	if _, err := st.LookupSession(t.Context(), session.raw); err == nil {
 		t.Fatal("session created during unlink survived revocation")
 	}
 }
@@ -474,11 +474,11 @@ func TestUnlinkedSignInNoLongerReachesTheAccount(t *testing.T) {
 	if back := resolve(t, st, gh("gh-1", "owner@example.com")); back.Account.ID != owner.Account.ID {
 		t.Fatal("control: the linked sign-in did not reach the account")
 	}
-	keep, _, _, err := st.CreateAccountSession(ctx, owner.Account, owner.PersonalTeam, time.Hour, now)
+	keep, _, _, err := st.CreateAccountSession(ctx, owner.Account, owner.PersonalTeam, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, _, _, err := st.CreateAccountSession(ctx, owner.Account, owner.PersonalTeam, time.Hour, now)
+	other, _, _, err := st.CreateAccountSession(ctx, owner.Account, owner.PersonalTeam, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,10 +490,10 @@ func TestUnlinkedSignInNoLongerReachesTheAccount(t *testing.T) {
 	if gone.Subject != "gh-1" || ended != 1 {
 		t.Fatalf("unlink = %+v, ended %d sessions; want gh-1 and one session", gone, ended)
 	}
-	if _, err := st.LookupSession(t.Context(), keep, now); err != nil {
+	if _, err := st.LookupSession(t.Context(), keep); err != nil {
 		t.Fatalf("the session that unlinked = %v, want it kept", err)
 	}
-	if _, err := st.LookupSession(t.Context(), other, now); err == nil {
+	if _, err := st.LookupSession(t.Context(), other); err == nil {
 		t.Fatal("another session of the account survived the unlink")
 	}
 

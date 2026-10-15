@@ -114,6 +114,7 @@ func RetentionRules() []RetentionRule {
 		{"capabilities", "capability_retention", days(7), days(7), "after expiry or revocation; descendants cannot outlive parent", "preserve independent billing evidence"},
 		{"run effects", "effect_retention", days(7), days(7), "terminal run and desired_rev=delivered_rev; age since delivery", "retain undelivered revisions"},
 		{"sessions and flow nonces", "expires_at", nil, nil, "existing configured expiry", "no financial deletion"},
+		{"invitations", "spent_identity_retention", days(30), days(30), "after acceptance, withdrawal or expiry", "preserve invitations counted by daily limits"},
 		{"webhook deliveries", "delivery_retention", nil, nil, "existing replay retention", "preserve accepted run trust facts"},
 	}
 }
@@ -141,6 +142,8 @@ type RetentionResult struct {
 	Records       int64
 	Capabilities  int64
 	Effects       int64
+	Invitations   int64
+	Sessions      int64
 	ReleasedBytes int64
 	PinnedRuns    int64
 	PinnedOutputs int64

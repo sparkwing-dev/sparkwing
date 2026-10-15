@@ -503,28 +503,48 @@ func (l localState) ReleaseClaimAtGeneration(ctx context.Context, id string, seq
 }
 
 func (l localState) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*store.PipelineProfile, error) {
-	return l.st.GetPipelineProfile(ctx, pipeline, nodeID)
+	tenant, err := l.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return nil, err
+	}
+	return tenant.GetPipelineProfile(ctx, pipeline, nodeID)
 }
 
 func (l localState) SetPipelinePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error {
+	tenant, err := l.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return err
+	}
 	// safety: mirrors the controller route, so a pin lands in the same row
 	// whether the run writes it here or over the wire.
 	if cores <= 0 && memoryBytes <= 0 {
-		return l.st.SetProfilePin(ctx, pipeline, nodeID, 0, 0)
+		return tenant.SetProfilePin(ctx, pipeline, nodeID, 0, 0)
 	}
-	return l.st.UpsertProfilePin(ctx, pipeline, nodeID, cores, memoryBytes)
+	return tenant.UpsertProfilePin(ctx, pipeline, nodeID, cores, memoryBytes)
 }
 
 func (l localState) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs store.ProfileObservation) error {
-	return l.st.RecordProfileObservation(ctx, pipeline, nodeID, obs)
+	tenant, err := l.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return err
+	}
+	return tenant.RecordProfileObservation(ctx, pipeline, nodeID, obs)
 }
 
 func (l localState) RecordContention(ctx context.Context, pipeline string) error {
-	return l.st.RecordContention(ctx, pipeline)
+	tenant, err := l.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return err
+	}
+	return tenant.RecordContention(ctx, pipeline)
 }
 
 func (l localState) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error {
-	return l.st.RecordWaitObservation(ctx, pipeline, wait)
+	tenant, err := l.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return err
+	}
+	return tenant.RecordWaitObservation(ctx, pipeline, wait)
 }
 
 type localLogs struct {
@@ -543,41 +563,81 @@ type localConcurrency struct {
 }
 
 func (l localConcurrency) AcquireSlot(ctx context.Context, req store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {
-	return l.st.AcquireConcurrencySlot(ctx, req)
+	tenant, err := l.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return store.AcquireSlotResponse{}, err
+	}
+
+	return tenant.AcquireConcurrencySlot(ctx, req)
 }
 
 func (l localConcurrency) State(ctx context.Context, key string) (*store.ConcurrencyState, error) {
-	return l.st.GetConcurrencyState(ctx, key)
+	tenant, err := l.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return nil, err
+	}
+
+	return tenant.GetConcurrencyState(ctx, key)
 }
 
 func (l localConcurrency) HeartbeatSlot(ctx context.Context, key, holderID string, lease time.Duration) (time.Time, bool, error) {
-	return l.st.HeartbeatConcurrencySlot(ctx, key, holderID, lease)
+	tenant, err := l.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+
+	return tenant.HeartbeatConcurrencySlot(ctx, key, holderID, lease)
 }
 
 func (l localConcurrency) ObserveSlot(ctx context.Context, key, holderID string) (*store.ConcurrencyHolder, error) {
-	return l.st.ConcurrencyHolder(ctx, key, holderID, time.Now())
+	tenant, err := l.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return nil, err
+	}
+
+	return tenant.ConcurrencyHolder(ctx, key, holderID, time.Now())
 }
 
 func (l localConcurrency) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error {
-	_, _, _, err := l.st.ReleaseAndNotify(ctx, key, holderID, outcome, outputRef, cacheKeyHash, ttl, store.DefaultConcurrencyLease)
+	tenant, err := l.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return err
+	}
+
+	_, _, _, err = tenant.ReleaseAndNotify(ctx, key, holderID, outcome, outputRef, cacheKeyHash, ttl, store.DefaultConcurrencyLease)
 	return err
 }
 
 func (l localConcurrency) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (store.WaiterResolution, error) {
-	return l.st.ResolveWaiter(ctx, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID, bypassRead)
+	tenant, err := l.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return store.WaiterResolution{}, err
+	}
+
+	return tenant.ResolveWaiter(ctx, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID, bypassRead)
 }
 
 func (l localConcurrency) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error) {
-	return l.st.CancelWaiter(ctx, key, runID, nodeID)
+	tenant, err := l.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return false, err
+	}
+
+	return tenant.CancelWaiter(ctx, key, runID, nodeID)
 }
 
 func (l localConcurrency) ForceReleaseSuperseded(ctx context.Context, key string) ([]store.ConcurrencyHolder, error) {
-	dropped, err := l.st.ForceReleaseSupersededHolders(ctx, key)
+	tenant, err := l.st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		return nil, err
+	}
+
+	dropped, err := tenant.ForceReleaseSupersededHolders(ctx, key)
 	if err != nil {
 		return nil, err
 	}
 	if len(dropped) > 0 {
-		if _, err := l.st.PromoteNextWaiters(ctx, key, store.DefaultConcurrencyLease); err != nil {
+		if _, err := tenant.PromoteNextWaiters(ctx, key, store.DefaultConcurrencyLease); err != nil {
 			return dropped, fmt.Errorf("force-release: promote: %w", err)
 		}
 	}

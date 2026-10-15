@@ -128,4 +128,74 @@ func CheckProcessAuthority(t *testing.T) {
 	if err := call(auth); err == nil || writes != 1 {
 		t.Fatal("revoked process reached its service")
 	}
+	for _, mode := range []string{"success", "retry", "binding_refused", "bind_error", "start_error"} {
+		t.Run("executor_"+mode, func(t *testing.T) {
+			parent.snapshot.Authorities[0].MembershipValid = true
+			var trace []string
+			var processes []*executionSDK
+			var issued []capability.Issued
+			input, _, host := executionHostFixture(t, mode, &trace, &processes, func(deps *nodehost.ExecutorDependencies) {
+				deps.Bind = func(ctx context.Context, in nodehost.NodeInput) (nodehost.ProcessGrant, error) {
+					binding = capability.Binding{Kind: capability.BindingNode, RunID: in.Accepted.RunID, NodeID: in.NodeID, Holder: in.Authority.Holder, Generation: in.Generation, Attempt: in.Attempt}
+					parent.snapshot.Authorities[0].Principal.Capability.Binding = binding
+					parent.snapshot.Binding.Current = binding
+					spec.Binding, service.Job = binding, in.Accepted.Plan.Jobs[0]
+					child, revoke, err := authorities.Delegate(ctx, lookup, spec, service)
+					if err != nil {
+						return nodehost.ProcessGrant{}, err
+					}
+					issued = append(issued, child)
+					grant := nodehost.ProcessGrant{
+						Binding: nodeproto.ProcessBinding{RunID: in.Accepted.RunID, JobID: in.NodeID, Routes: nodeproto.ProcessRoutes{URL: "http://host", Bearer: child.Raw}},
+						Revoke: func() error {
+							for _, process := range processes {
+								if process.input.Attempt == in.Attempt && (process.closed || process.cleaned) {
+									t.Error("bearer retained beyond process join or cleanup")
+								}
+							}
+							return revoke()
+						},
+					}
+					if mode == "binding_refused" {
+						grant.Binding.JobID = "foreign"
+					}
+					if mode == "bind_error" {
+						return grant, errors.New("binding failed after delegation")
+					}
+					return grant, nil
+				}
+				start := deps.Start
+				deps.Start = func(ctx context.Context, in nodehost.NodeInput, activity nodehost.ExecutorActivity) (nodehost.ExecutorProcess, error) {
+					processLookup := capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.NodeHost, Digest: sha256.Sum256([]byte(in.RouteBinding.Routes.Bearer))}
+					if _, err := authorities.ReadAuthentication(ctx, processLookup, capability.RequestEvidence{}); err != nil {
+						return nil, err
+					}
+					if mode == "start_error" {
+						return nil, errors.New("spawn failed")
+					}
+					return start(ctx, in, activity)
+				}
+			})
+			err := host.Execute(t.Context(), input)
+			if (err == nil) != (mode == "success" || mode == "retry") {
+				t.Fatalf("execution=%v trace=%v", err, trace)
+			}
+			want := 1
+			if mode == "retry" {
+				want = 3
+			}
+			if len(issued) != want {
+				t.Fatalf("delegations=%d want=%d", len(issued), want)
+			}
+			for _, child := range issued {
+				processLookup := capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.NodeHost, Digest: sha256.Sum256([]byte(child.Raw))}
+				if _, err := authorities.ReadAuthentication(t.Context(), processLookup, capability.RequestEvidence{}); err == nil {
+					t.Fatal("executor returned with a live process bearer")
+				}
+				if masker.Mask(child.Raw) != "***" {
+					t.Fatal("process bearer bypassed the shared masker")
+				}
+			}
+		})
+	}
 }

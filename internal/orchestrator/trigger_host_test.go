@@ -633,9 +633,6 @@ func TestProtocolTriggerSourceNamesEveryRecordedSource(t *testing.T) {
 	}
 }
 
-// safety: a trigger reclaimed after its runner stopped resumes the run its
-// rows record: a finished node keeps its result and is not run again, and one
-// the controller's lease recovery failed as agent_lost runs on the new host.
 func TestTriggerHost_AReclaimedTriggerResumesItsRun(t *testing.T) {
 	hold, pids := heldNodePID(t)
 	h := newHostedTrigger(t, map[string]string{"envout": filepath.Join(t.TempDir(), "env"), "hold": hold})
@@ -659,15 +656,11 @@ func TestTriggerHost_AReclaimedTriggerResumesItsRun(t *testing.T) {
 	if _, err := h.st.DB().ExecContext(t.Context(), `UPDATE nodes SET lease_expires_at = 1 WHERE run_id = ? AND node_id = 'held'`, h.trig.ID); err != nil {
 		t.Fatal(err)
 	}
-	// safety: the controller's own lease recovery, which fails a lost holder's node as agent_lost.
-	if recovered, err := store.Maintenance.RecoverExpiredNodeClaims(h.st, t.Context()); err != nil || len(recovered) != 1 {
-		t.Fatalf("recovered node claims = %+v, %v; want held's", recovered, err)
+	if recovered, err := teststore.ReapUnits(t.Context(), h.st); err != nil || len(recovered) != 2 {
+		t.Fatalf("recovered units = %+v, %v; want node and trigger", recovered, err)
 	}
-	if n := h.node(t, "held"); n.FailureReason != store.FailureAgentLost {
-		t.Fatalf("held after recovery = %s/%s (%s), want failed as agent_lost", n.Status, n.Outcome, n.FailureReason)
-	}
-	if triggers, err := store.Maintenance.ReapExpiredTriggers(h.st, t.Context()); err != nil || len(triggers) != 1 {
-		t.Fatalf("reaped triggers = %v, %v; want this run's", triggers, err)
+	if n := h.node(t, "held"); n.Status != "pending" || n.ClaimedBy != "" {
+		t.Fatalf("held after recovery = %s/%s, want unclaimed pending", n.Status, n.Outcome)
 	}
 	claimed, err := client.NewWithToken(h.url, nil, h.token).ClaimTriggerFor(t.Context(), nil, nil)
 	if err != nil || claimed == nil || claimed.ClaimSeq <= h.trig.ClaimSeq {

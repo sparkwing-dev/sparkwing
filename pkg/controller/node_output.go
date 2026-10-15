@@ -26,7 +26,6 @@ type outputStore interface {
 	grant(ctx context.Context, u store.Upload) (string, map[string]string, error)
 	commit(ctx context.Context, u store.Upload) error
 	resolve(r *http.Request, obj store.Upload) (string, time.Time, error)
-	deleteObjects(ctx context.Context, team store.Team, objs []store.Upload) error
 }
 
 var errOutputsUnavailable = errors.New("this controller has no output store")
@@ -68,20 +67,6 @@ func (o s3Outputs) resolve(r *http.Request, obj store.Upload) (string, time.Time
 		return "", time.Time{}, err
 	}
 	return o.s.signObjectURL(r, bucket, key)
-}
-
-func (o s3Outputs) deleteObjects(ctx context.Context, team store.Team, objs []store.Upload) error {
-	bucket := o.s.downloadStores[store.StorageCache]
-	if bucket == nil {
-		return errOutputsUnavailable
-	}
-	var errs []error
-	for _, obj := range objs {
-		if err := bucket.Delete(ctx, string(team), obj.Provenance+"/"+obj.Key); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
 }
 
 type fsOutputs struct {
@@ -127,40 +112,6 @@ func (o fsOutputs) resolve(r *http.Request, obj store.Upload) (string, time.Time
 	expires := time.Now().Add(outputReadTTL).UTC()
 	q := o.s.outputSigner.sign("get", string(obj.Team), obj.Key, expires.Unix())
 	return o.s.externalBaseURL(r) + "/api/v1/outputs/objects/" + obj.Key + "?" + q.Encode(), expires, nil
-}
-
-// safety: S3 expires pending/ by lifecycle; here an upload never committed is
-// removed once its reservation window has passed.
-func (o fsOutputs) sweepPending(now time.Time) error {
-	dir := filepath.Dir(o.pendingPath("x"))
-	entries, err := os.ReadDir(dir)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	var errs []error
-	for _, e := range entries {
-		info, err := e.Info()
-		if err == nil && now.Sub(info.ModTime()) > store.DirectUploadTTL {
-			err = os.Remove(filepath.Join(dir, e.Name()))
-		}
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
-}
-
-func (o fsOutputs) deleteObjects(_ context.Context, _ store.Team, objs []store.Upload) error {
-	var errs []error
-	for _, obj := range objs {
-		if err := os.Remove(store.OutputPath(o.dir, obj.Key)); err != nil && !errors.Is(err, os.ErrNotExist) {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
 }
 
 func checkOutputFile(path string, size int64, sha string) error {
@@ -505,54 +456,4 @@ func (s *Server) outputGrant(w http.ResponseWriter, r *http.Request, team store.
 	return store.OutputReadGrant{
 		URL: signed, SHA256: obj.SHA256, Size: obj.Size, Expires: expires, SourceRunID: runID,
 	}, true
-}
-
-// perf: one pass deletes at most this many runs, so a backlog drains over
-// several passes rather than holding one.
-const outputRetentionBatch = 500
-
-// safety: the refs go first, so nothing new can name a released object; then
-// its bytes, then its row, and a run whose bytes could not be deleted keeps
-// its retention row and is released again on the next pass.
-func (s *Server) pruneExpiredOutputs(ctx context.Context, now time.Time) error {
-	outputs := s.outputs()
-	if outputs == nil {
-		return nil
-	}
-	var errs []error
-	if fs, ok := outputs.(fsOutputs); ok {
-		errs = append(errs, fs.sweepPending(now))
-	}
-	expired, err := s.store.ExpiredOutputRuns(ctx, now, outputRetentionBatch)
-	if err != nil {
-		return errors.Join(append(errs, err)...)
-	}
-	for _, run := range expired {
-		objs, err := s.store.ReleaseRunOutputs(ctx, run.Team, run.RunID)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("release outputs of %s: %w", run.RunID, err))
-			continue
-		}
-		if err := outputs.deleteObjects(ctx, run.Team, objs); err != nil {
-			errs = append(errs, fmt.Errorf("delete outputs of %s: %w", run.RunID, err))
-			continue
-		}
-		if err := s.store.ForgetRunOutputs(ctx, run.Team, run.RunID, objs); err != nil {
-			errs = append(errs, fmt.Errorf("drop output rows of %s: %w", run.RunID, err))
-		}
-	}
-	return errors.Join(errs...)
-}
-
-// safety: a controller with a storage pass prunes outputs in that leased
-// pass; one without has a filesystem store, which is single-replica, so the
-// reaper prunes at the same hourly cadence.
-func (s *Server) pruneOutputsWithoutStoragePass(ctx context.Context, now time.Time) {
-	if s.storagePass != nil || now.Sub(s.lastOutputPrune) < StoragePassEvery {
-		return
-	}
-	s.lastOutputPrune = now
-	if err := s.pruneExpiredOutputs(ctx, now); err != nil {
-		s.logger.Error("prune expired outputs", "err", err)
-	}
 }

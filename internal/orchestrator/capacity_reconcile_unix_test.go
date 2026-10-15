@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestRecordRunProfile_CommandCPUIsStoredWithoutChangingIntervalRates(t *testing.T) {
@@ -45,7 +46,7 @@ func TestRecordRunProfile_CommandCPUIsStoredWithoutChangingIntervalRates(t *test
 		}
 		recordRunProfile(t.Context(), localState{st: st}, "command-native", "r1", nil, "", runCharge{}, false, start, start.Add(10*time.Second))
 		for _, node := range []string{"", "build"} {
-			profile, err := st.GetPipelineProfile(t.Context(), "command-native", node)
+			profile, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(t.Context(), "command-native", node)
 			if err != nil {
 				t.Fatal(err)
 			}

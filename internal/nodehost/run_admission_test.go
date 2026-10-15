@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
-
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -37,7 +37,7 @@ func hostPlanned(t *testing.T, ctx context.Context, st *store.Store, runID strin
 // superseded tombstone, so only a live hold or a waiter counts as unreleased.
 func wantNoLiveHold(t *testing.T, st *store.Store, key string) {
 	t.Helper()
-	state, err := st.GetConcurrencyState(t.Context(), key)
+	state, err := teststore.ForTeam(t, st, store.DefaultTeam).GetConcurrencyState(t.Context(), key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestPlanGroupLimitPoliciesAndEviction(t *testing.T) {
 		{
 			name: "store evict", onLimit: "cancel_others", status: "cancelled", err: "superseded", node: sparkwing.Cancelled,
 			evict: func(t *testing.T, st *store.Store, _ *fakeDaemon) {
-				resp, err := st.AcquireConcurrencySlot(t.Context(), store.AcquireSlotRequest{Key: "global:deploys", HolderID: "newer/-", RunID: "newer", Capacity: 1, Policy: "cancel_others"})
+				resp, err := teststore.ForTeam(t, st, store.DefaultTeam).AcquireConcurrencySlot(t.Context(), store.AcquireSlotRequest{Key: "global:deploys", HolderID: "newer/-", RunID: "newer", Capacity: 1, Policy: "cancel_others"})
 				if err != nil || resp.Kind != store.AcquireCancellingOthers {
 					t.Errorf("newer arrival: %+v %v", resp, err)
 				}
@@ -221,7 +221,7 @@ func TestPlanGroupLimitPoliciesAndEviction(t *testing.T) {
 					t.Fatalf("%d leases live after release", live)
 				}
 			} else if c.evict != nil {
-				state, err := st.GetConcurrencyState(t.Context(), key)
+				state, err := teststore.ForTeam(t, st, store.DefaultTeam).GetConcurrencyState(t.Context(), key)
 				if err != nil || slices.ContainsFunc(state.Holders, func(h store.ConcurrencyHolder) bool { return h.RunID == testRunID }) {
 					t.Fatalf("state %+v %v, want the evicted run's hold released", state, err)
 				}

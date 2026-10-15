@@ -19,14 +19,24 @@ import (
 
 // StoreRecoveryBoundaryScenarios lists SQLite persistence proofs, separate from native execution cells.
 func StoreRecoveryBoundaryScenarios() []string {
-	return []string{"recovery-cancel-beats-loss", "recovery-reconciler-waits-and-reclaims"}
+	return []string{"recovery-cancel-beats-loss", "recovery-reconciler-waits-and-reclaims", "recovery-unstarted-lapse", "recovery-started-lapse-cap", "recovery-concurrency-continuous-adoption", "recovery-application-retry-ordinal", "recovery-local-orphans"}
 }
 
 // CheckStoreRecoveryBoundary exercises the final transitions, reaper and reconciler against SQLite.
 func CheckStoreRecoveryBoundary(ctx context.Context, root, id string) error {
 	switch id {
+	case "recovery-local-orphans":
+		return checkRecoveryLocalOrphans(ctx, root)
+	case "recovery-application-retry-ordinal":
+		return checkRecoveryApplicationRetry(ctx, root)
 	case "recovery-cancel-beats-loss":
 		return checkRecoveryCancellation(ctx, root)
+	case "recovery-unstarted-lapse":
+		return checkRecoveryUnstarted(ctx, root)
+	case "recovery-started-lapse-cap":
+		return checkRecoveryStartedCap(ctx, root)
+	case "recovery-concurrency-continuous-adoption":
+		return checkRecoveryCapacity(ctx, root)
 	case "recovery-reconciler-waits-and-reclaims":
 		for _, order := range []string{"host_first", "reaper_first"} {
 			if err := checkRecoveryReconciliation(ctx, root, order); err != nil {
@@ -127,8 +137,16 @@ func seedRecoveryCapability(ctx context.Context, s *store.Store, c capability.Ca
 	if err != nil {
 		return err
 	}
-	_, err = s.DB().ExecContext(ctx, `INSERT INTO capabilities(prefix,digest,team,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,bind_run,bind_node,bind_holder,bind_generation,reserved_pools,created_at,created_by,expires_at,repo_scope)
-VALUES (?,?,?,'machine',?,'controller',?,'delegate',1,?,?,?,NULLIF(?,''),?,?,?,?,'fixture',?,?)`, c.Prefix, hex.EncodeToString(c.Digest[:]), c.Team, c.Subject.ID, grants, body, c.Binding.Kind, c.Binding.RunID, c.Binding.NodeID, c.Binding.Holder, c.Binding.Generation, []byte(`[]`), c.IssuedAt.UnixNano(), c.ExpiresAt.UnixNano(), []byte(`[]`))
+	pools, err := json.Marshal(c.ReservedPools)
+	if err != nil {
+		return err
+	}
+	repositories, err := json.Marshal(c.Repositories)
+	if err != nil {
+		return err
+	}
+	_, err = s.DB().ExecContext(ctx, `INSERT INTO capabilities(prefix,digest,team,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,bind_run,bind_node,bind_holder,bind_generation,reserved_pools,created_at,created_by,expires_at,repo_scope,metered)
+VALUES (?,?,?,'machine',?,'controller',?,'delegate',1,?,?,NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),NULLIF(?,0),?,?,'fixture',?,?,?)`, c.Prefix, hex.EncodeToString(c.Digest[:]), c.Team, c.Subject.ID, grants, body, c.Binding.Kind, c.Binding.RunID, c.Binding.NodeID, c.Binding.Holder, c.Binding.Generation, pools, c.IssuedAt.UnixNano(), c.ExpiresAt.UnixNano(), repositories, c.RootMetered)
 	return err
 }
 
@@ -178,7 +196,7 @@ func checkRecoveryCancellation(ctx context.Context, root string) (err error) {
 	}
 	defer func() { err = errors.Join(err, f.s.Close()) }()
 	actor := store.Actor{Kind: store.ActorReaper, Owner: store.OwnerLeaseRef{Kind: store.OwnerController, Name: f.lease.Name, Holder: f.lease.Holder, Generation: f.lease.Generation}}
-	request := store.RunTransition{RunID: "run", Actor: actor, To: store.RunCancelled, Cause: store.RunCancel}
+	request := store.RunTransition{RunID: "run", Actor: actor, To: store.RunCancelled, Cause: store.RunCancel, Reason: "user_cancelled"}
 	for range 2 {
 		if _, err := f.tenant.TransitionRun(ctx, request); err != nil {
 			return err
@@ -188,7 +206,7 @@ func checkRecoveryCancellation(ctx context.Context, root string) (err error) {
 	if err != nil {
 		return err
 	}
-	if row.Status != store.StatusRunning || row.ClaimedBy != "runner" || row.CancelRequestedAt == nil || row.FinishedAt != nil {
+	if row.Status != store.StatusRunning || row.ClaimedBy != "runner" || row.CancelRequestedAt == nil || row.FinishedAt != nil || row.CancelReason != "user_cancelled" {
 		return fmt.Errorf("cancellation stole a live holder: %+v", row)
 	}
 	if err := f.expireHolder(ctx); err != nil {
@@ -213,6 +231,13 @@ func checkRecoveryCancellation(ctx context.Context, root string) (err error) {
 	}
 	if err := f.reopen(ctx, filepath.Join(root, "cancel.db")); err != nil {
 		return err
+	}
+	row, err = f.tenant.ReadNode(ctx, store.NodeRef{RunID: "run", NodeID: "job"})
+	if err != nil {
+		return err
+	}
+	if row.CancelReason != "user_cancelled" {
+		return errors.New("reopening lost cancellation intent")
 	}
 	if err := f.refuseLateReports(ctx); err != nil {
 		return err

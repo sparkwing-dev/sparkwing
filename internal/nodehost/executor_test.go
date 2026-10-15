@@ -213,11 +213,11 @@ func TestNodeExecutorRetryReceivesFreshProcessBinding(t *testing.T) {
 	executorRetryBudget(t, &input, st, 1)
 	input.RouteBinding.Routes.Bearer = "parent"
 	issued := 0
-	deps.Bind = func(_ context.Context, in NodeInput) (nodeproto.ProcessBinding, error) {
+	deps.Bind = func(_ context.Context, in NodeInput) (ProcessGrant, error) {
 		issued++
 		binding := in.RouteBinding
 		binding.Routes.Bearer = fmt.Sprintf("child-%d", issued)
-		return binding, nil
+		return ProcessGrant{Binding: binding, Revoke: func() error { return nil }}, nil
 	}
 	start := deps.Start
 	deps.Start = func(ctx context.Context, in NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {

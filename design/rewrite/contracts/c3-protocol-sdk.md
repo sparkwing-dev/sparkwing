@@ -142,6 +142,7 @@ are part of this contract.
 | `nodehost.GeneratorReplay` | Supplies recorded source output for code-only reconstruction. |
 | `nodehost.OwnerEvaluator`, `NewOwnerEvaluator`, `EvaluationInput`, `EvaluationDependencies`, `EvaluationStore` | Reconstruct accepted source code and evaluate every source generator through the common protocol and hash checks. |
 | `nodehost.OwnerEvaluator.SkipIf`, `SkipEvaluation`, `OwnerEvaluator.MemoKey` | Evaluate pre-dispatch conditions and memo keys without starting job attempts or writing lifecycle state. |
+| `nodehost.ProcessGrant` | Transfers a process binding and its idempotent revoker to the executor or owner evaluator. |
 | `nodehost.ProtocolSessionConfig.StartEvaluation` | Launches the owner evaluator with private pipes, run-log attribution and route revocation. |
 | `nodehost.SDKPlanner`, `PlanningProcessInput`, `PreparedPlanning` | Describe acquired code, resolve SDK argument defaults and supply lazy planning through the common cache boundary. |
 | `nodehost.CheckoutPlanningInput`, `SDKPlanner.PrepareCheckout`, `OwnerPlanning.Resolve` | Resolve acquired project declarations and guards, then compute the settings proposal from the validated fresh or cached plan before acceptance. |
@@ -573,8 +574,12 @@ startup tests cover both identities with fake persistence and process policy.
 nodehost route bearer before each process startup. The factory uses authenticated
 owner or claim authority. The returned binding must keep the input's run and job
 identity and must not reuse that input bearer. Start receives the delegated
-binding and owns its revocation even if startup fails. SDK hello receives only
-that process binding. Unbound transports may omit the factory.
+binding. The factory returns `ProcessGrant`, including an idempotent revoker.
+The host retains that revoker before checking the binding or starting a process.
+It revokes before joining the process and running cleanup on every exit,
+including a factory that returns both a grant and an error. Revocation errors
+prevent successful execution or policy acknowledgement. SDK hello receives only
+the process binding. Unbound transports may omit the factory.
 
 `OwnerEvaluator.SkipIf` evaluates predicates in declaration order and stops at
 the first true result. Each predicate reconstructs and checks the accepted code

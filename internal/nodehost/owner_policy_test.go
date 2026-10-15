@@ -253,11 +253,11 @@ func TestOwnerPolicyProcessesReceiveFreshRouteBindings(t *testing.T) {
 	in.RouteBinding.Routes.Bearer = "parent"
 	bindings := []string{"first-child", "second-child"}
 	var issued, started int
-	deps.Bind = func(_ context.Context, input EvaluationInput) (nodeproto.ProcessBinding, error) {
+	deps.Bind = func(_ context.Context, input EvaluationInput) (ProcessGrant, error) {
 		binding := input.RouteBinding
 		binding.Routes.Bearer = bindings[issued]
 		issued++
-		return binding, nil
+		return ProcessGrant{Binding: binding, Revoke: func() error { return nil }}, nil
 	}
 	deps.Start = func(_ context.Context, input EvaluationInput) (ExecutorProcess, error) {
 		want := bindings[started]
@@ -341,7 +341,7 @@ func TestOwnerPolicyRefusesChangedProcessAuthority(t *testing.T) {
 			})
 			in.RouteBinding.Routes.Bearer = "parent"
 			if mode != "missing" {
-				deps.Bind = func(_ context.Context, in EvaluationInput) (nodeproto.ProcessBinding, error) {
+				deps.Bind = func(_ context.Context, in EvaluationInput) (ProcessGrant, error) {
 					binding := in.RouteBinding
 					binding.Routes.Bearer = "child"
 					switch mode {
@@ -354,7 +354,7 @@ func TestOwnerPolicyRefusesChangedProcessAuthority(t *testing.T) {
 					case "job":
 						binding.JobID = "other"
 					}
-					return binding, nil
+					return ProcessGrant{Binding: binding, Revoke: func() error { return nil }}, nil
 				}
 			}
 			host, err := NewOwnerEvaluator(deps)

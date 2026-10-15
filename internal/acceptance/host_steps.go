@@ -127,10 +127,10 @@ func CheckNativeExecutorSteps(t *testing.T) {
 			}
 			deps.ValidatePlan = nil
 			deps.Validation = nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: ownerSealSecrets{}}
-			deps.Bind = func(_ context.Context, in nodehost.NodeInput) (nodeproto.ProcessBinding, error) {
+			deps.Bind = func(_ context.Context, in nodehost.NodeInput) (nodehost.ProcessGrant, error) {
 				binding := in.RouteBinding
 				binding.Routes = nodeproto.ProcessRoutes{URL: "http://127.0.0.1:1", Bearer: "process-fixture"}
-				return binding, nil
+				return nodehost.ProcessGrant{Binding: binding, Revoke: func() error { return nil }}, nil
 			}
 			deps.EnsureEngine = func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 				return input.Engine, nil

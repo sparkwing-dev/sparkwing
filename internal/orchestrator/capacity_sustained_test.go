@@ -53,7 +53,7 @@ func TestRecordRunProfile_SustainedIsThePlateauNotTheBurst(t *testing.T) {
 
 	recordRunProfile(ctx, localState{st: st}, "spiky", "r1", nil, "", runCharge{}, false, start, end)
 
-	rollup, err := st.GetPipelineProfile(ctx, "spiky", "")
+	rollup, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "spiky", "")
 	if err != nil || rollup == nil {
 		t.Fatalf("rollup profile missing: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestRecordRunProfile_SustainedIsThePlateauNotTheBurst(t *testing.T) {
 	if rollup.PeakCores != 5.0 {
 		t.Errorf("rollup PeakCores = %v, want 5.0 still recorded", rollup.PeakCores)
 	}
-	node, err := st.GetPipelineProfile(ctx, "spiky", "build")
+	node, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "spiky", "build")
 	if err != nil || node == nil {
 		t.Fatalf("node profile missing: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestRecordRunProfile_ShortRunSustainedIsItsMaximum(t *testing.T) {
 
 			recordRunProfile(ctx, localState{st: st}, "short", "r1", nil, "", runCharge{}, false, start, end)
 
-			rollup, err := st.GetPipelineProfile(ctx, "short", "")
+			rollup, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "short", "")
 			if err != nil || rollup == nil {
 				t.Fatalf("rollup profile missing: %v", err)
 			}
@@ -144,7 +144,7 @@ func TestRecordRunProfile_CommandCPUDoesNotJoinSampledWindows(t *testing.T) {
 
 	recordRunProfile(ctx, localState{st: st}, "fan", "r1", nil, "", runCharge{}, false, start, start.Add(10*time.Second))
 
-	rollup, err := st.GetPipelineProfile(ctx, "fan", "")
+	rollup, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "fan", "")
 	if err != nil || rollup == nil {
 		t.Fatalf("rollup profile missing: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestRecordRunProfile_ContendedFloorResistsContentionDeflation(t *testing.T)
 
 	recordRunProfile(ctx, localState{st: st}, "spiky", "r1", nil, "A", runCharge{Cores: 4}, true, start, end)
 
-	rollup, err := st.GetPipelineProfile(ctx, "spiky", "")
+	rollup, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "spiky", "")
 	if err != nil || rollup == nil {
 		t.Fatalf("rollup profile missing: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestRecordRunProfile_ContendedBelowCeilingStillFloorsAtItsPeak(t *testing.T
 
 	recordRunProfile(ctx, localState{st: st}, "spiky", "r1", nil, "A", runCharge{Cores: 8}, true, start, end)
 
-	rollup, err := st.GetPipelineProfile(ctx, "spiky", "")
+	rollup, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(ctx, "spiky", "")
 	if err != nil || rollup == nil {
 		t.Fatalf("rollup profile missing: %v", err)
 	}

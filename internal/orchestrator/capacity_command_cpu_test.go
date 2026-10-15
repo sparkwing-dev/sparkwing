@@ -6,6 +6,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestRecordRunProfileCommandCPUDoesNotBecomeExitSpike(t *testing.T) {
@@ -23,7 +24,7 @@ func TestRecordRunProfileCommandCPUDoesNotBecomeExitSpike(t *testing.T) {
 		t.Fatalf("stored samples=%d, want 6: %v", len(samples), err)
 	}
 	recordRunProfile(t.Context(), localState{st: st}, "command", "r1", nil, "", runCharge{}, false, start, start.Add(10*time.Second))
-	p, err := st.GetPipelineProfile(t.Context(), "command", "")
+	p, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(t.Context(), "command", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +60,7 @@ func TestRecordRunProfileCommandOnlyBucketsAreNotSampledZeros(t *testing.T) {
 			}
 			recordRunProfile(t.Context(), localState{st: st}, "command", "r1", nil, "", runCharge{}, false, start, start.Add(30*time.Second))
 			for _, nodeID := range []string{"", "build"} {
-				p, err := st.GetPipelineProfile(t.Context(), "command", nodeID)
+				p, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(t.Context(), "command", nodeID)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -80,14 +81,14 @@ func TestRecordRunProfileCommandOnlyBucketsAreNotSampledZeros(t *testing.T) {
 func TestRecordRunProfileCommandOnlyUpdatesPins(t *testing.T) {
 	for _, cores := range []float64{0, 2} {
 		st, start := seedUsageRun(t, "command", []usageNode{{id: "build", dur: time.Second}})
-		if err := st.UpsertProfilePin(t.Context(), "command", "", 4, 512<<20); err != nil {
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).UpsertProfilePin(t.Context(), "command", "", 4, 512<<20); err != nil {
 			t.Fatal(err)
 		}
 		if err := st.AddNodeMetricSample(t.Context(), "r1", "build", store.MetricSample{Kind: store.MetricCommand, TS: start, CPUTime: time.Millisecond, CPUMillicores: 100}); err != nil {
 			t.Fatal(err)
 		}
 		recordRunProfile(t.Context(), localState{st: st}, "command", "r1", &capacity.Pin{Cores: cores}, "", runCharge{}, false, start, start.Add(time.Second))
-		p, err := st.GetPipelineProfile(t.Context(), "command", "")
+		p, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(t.Context(), "command", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -106,7 +107,7 @@ func TestRecordRunProfileUnknownKindPreventsLearning(t *testing.T) {
 	}
 	recordRunProfile(t.Context(), localState{st: st}, "unknown", "r1", nil, "", runCharge{}, false, start, start.Add(10*time.Second))
 	for _, nodeID := range []string{"", "build"} {
-		p, err := st.GetPipelineProfile(t.Context(), "unknown", nodeID)
+		p, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(t.Context(), "unknown", nodeID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -122,12 +123,12 @@ func TestRecordRunProfileCommandOnlyNodePreventsPartialRollup(t *testing.T) {
 		{id: "command-only", dur: 10 * time.Second, samples: []usageSample{command(time.Second, 1000, 600, time.Second)}},
 	})
 	recordRunProfile(t.Context(), localState{st: st}, "partial", "r1", nil, "", runCharge{}, false, start, start.Add(10*time.Second))
-	measured, err := st.GetPipelineProfile(t.Context(), "partial", "sampled")
+	measured, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(t.Context(), "partial", "sampled")
 	if err != nil || measured == nil || measured.SampleCount != 1 {
 		t.Fatalf("valid node observation lost: %+v, %v", measured, err)
 	}
 	for _, node := range []string{"", "command-only"} {
-		profile, err := st.GetPipelineProfile(t.Context(), "partial", node)
+		profile, err := teststore.ForTeam(t, st, store.DefaultTeam).GetPipelineProfile(t.Context(), "partial", node)
 		if err != nil {
 			t.Fatal(err)
 		}

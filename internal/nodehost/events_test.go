@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
@@ -238,7 +240,7 @@ func TestHostedRunEmitsConcurrencyEvents(t *testing.T) {
 		slots := storeSlots{st: st, queued: make(chan string, 1)}
 		go func() {
 			recv(t, ctx, slots.queued)
-			if _, _, _, err := st.ReleaseAndNotify(ctx, "global:db", "other/x", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
+			if _, _, _, err := teststore.ForTeam(t, st, store.DefaultTeam).ReleaseAndNotify(ctx, "global:db", "other/x", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
 				t.Errorf("release outside hold: %v", err)
 			}
 		}()

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -101,6 +102,32 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 				},
 			}
 			deps := host.Executor.(*nodeExecutor).deps
+			authorities, parent, parentLookup, delegation, services := processAuthorityFixture(t)
+			t.Cleanup(func() { _ = authorities.Close() })
+			var issuedLookup capability.CredentialLookup
+			deps.Bind = func(ctx context.Context, input NodeInput) (ProcessGrant, error) {
+				delegation.Binding = capability.Binding{Kind: capability.BindingNode, RunID: input.Accepted.RunID, NodeID: input.NodeID, Holder: input.Authority.Holder, Generation: input.Generation, Attempt: input.Attempt}
+				parent.snapshot.Authorities[0].Principal.Capability.Binding = delegation.Binding
+				parent.snapshot.Binding.Current = delegation.Binding
+				services.RunID, services.Job = input.Accepted.RunID, input.Accepted.Plan.Jobs[0]
+				issued, revoke, err := authorities.Delegate(ctx, parentLookup, delegation, services)
+				if err != nil {
+					return ProcessGrant{}, err
+				}
+				issuedLookup = processLookup(issued)
+				cfg.Revoke = revoke
+				cfg.RunCleanups = func(ctx context.Context, scope CleanupScope) error {
+					if _, err := authorities.ReadAuthentication(ctx, issuedLookup, capability.RequestEvidence{}); err == nil {
+						t.Error("cleanup began with live process authority")
+					}
+					cleaned = true
+					return nil
+				}
+				return ProcessGrant{Binding: nodeproto.ProcessBinding{RunID: input.Accepted.RunID, JobID: input.NodeID, Routes: nodeproto.ProcessRoutes{URL: "http://host", Bearer: issued.Raw}}, Revoke: func() error {
+					revoked = true
+					return revoke()
+				}}, nil
+			}
 			deps.Mask = host.Mask
 			deps.EnsureEngine = func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
 				return resolved, nil
@@ -122,6 +149,9 @@ func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
 			}
 			if !installed || session == nil || session.cmd.ProcessState == nil || !revoked || !cleaned {
 				t.Fatalf("installed=%t session=%v revoked=%t cleaned=%t", installed, session, revoked, cleaned)
+			}
+			if _, err := authorities.ReadAuthentication(t.Context(), issuedLookup, capability.RequestEvidence{}); err == nil {
+				t.Fatal("claim host returned with a live process bearer")
 			}
 			if _, err := os.Stat(filepath.Join(root, ".git")); err != nil {
 				t.Fatal("host removed the user's checkout:", err)

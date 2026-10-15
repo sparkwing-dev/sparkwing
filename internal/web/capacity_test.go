@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func capacityBackend(t *testing.T) (*store.Store, backend.Backend) {
@@ -28,7 +29,7 @@ func capacityBackend(t *testing.T) (*store.Store, backend.Backend) {
 func measure(t *testing.T, st *store.Store, pipeline string, n int) {
 	t.Helper()
 	for i := 1; i <= n; i++ {
-		if err := st.RecordProfileObservation(context.Background(), pipeline, "", store.ProfileObservation{
+		if err := teststore.ForTeam(t, st, store.DefaultTeam).RecordProfileObservation(context.Background(), pipeline, "", store.ProfileObservation{
 			Duration:        time.Duration(i) * time.Second,
 			PeakCores:       float64(i) * 2,
 			SustainedCores:  float64(i),
@@ -59,7 +60,7 @@ func TestCapacityProfiles_ChargesMeasuredSustainedCores(t *testing.T) {
 	measure(t, st, "demo", 10)
 
 	body := getJSON[capacityProfilesPayload](t,
-		CapacityProfilesHandler(profilesOf(b)), "/api/v1/capacity/profiles", http.StatusOK)
+		CapacityProfilesHandler(profilesOf(t, b)), "/api/v1/capacity/profiles", http.StatusOK)
 
 	if len(body.Profiles) != 1 {
 		t.Fatalf("profiles = %d, want 1: %+v", len(body.Profiles), body.Profiles)
@@ -96,7 +97,7 @@ func TestCapacityProfiles_ColdStartBeforeEnoughSamples(t *testing.T) {
 	measure(t, st, "fresh", 1)
 
 	body := getJSON[capacityProfilesPayload](t,
-		CapacityProfilesHandler(profilesOf(b)), "/api/v1/capacity/profiles", http.StatusOK)
+		CapacityProfilesHandler(profilesOf(t, b)), "/api/v1/capacity/profiles", http.StatusOK)
 
 	p := body.Profiles[0]
 	if p.Charge.Source != string(store.CostSourceDefault) {
@@ -110,12 +111,12 @@ func TestCapacityProfiles_ColdStartBeforeEnoughSamples(t *testing.T) {
 func TestCapacityProfiles_PinWinsAndDriftIsReported(t *testing.T) {
 	st, b := capacityBackend(t)
 	measure(t, st, "pinned", 10)
-	if err := st.SetProfilePin(context.Background(), "pinned", "", 16, 0); err != nil {
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).SetProfilePin(context.Background(), "pinned", "", 16, 0); err != nil {
 		t.Fatal(err)
 	}
 
 	body := getJSON[capacityProfilesPayload](t,
-		CapacityProfilesHandler(profilesOf(b)), "/api/v1/capacity/profiles", http.StatusOK)
+		CapacityProfilesHandler(profilesOf(t, b)), "/api/v1/capacity/profiles", http.StatusOK)
 
 	p := body.Profiles[0]
 	if p.Charge.Source != string(store.CostSourcePin) || p.Charge.Cores != 16 {
@@ -128,7 +129,7 @@ func TestCapacityProfiles_PinWinsAndDriftIsReported(t *testing.T) {
 
 func TestCapacityProfiles_UnsupportedBackend(t *testing.T) {
 	rec := httptest.NewRecorder()
-	CapacityProfilesHandler(profilesOf(&fakeBackend{}))(rec, httptest.NewRequest(http.MethodGet, "/api/v1/capacity/profiles", nil))
+	CapacityProfilesHandler(profilesOf(t, &fakeBackend{}))(rec, httptest.NewRequest(http.MethodGet, "/api/v1/capacity/profiles", nil))
 	if rec.Code != http.StatusNotImplemented {
 		t.Fatalf("status = %d, want 501; body = %s", rec.Code, rec.Body.String())
 	}
@@ -138,7 +139,7 @@ func TestCapacityExplain_MarksTheSampleThePriceCameFrom(t *testing.T) {
 	st, b := capacityBackend(t)
 	measure(t, st, "demo", 10)
 
-	body := getJSON[capacityExplainPayload](t, CapacityExplainHandler(profilesOf(b)),
+	body := getJSON[capacityExplainPayload](t, CapacityExplainHandler(profilesOf(t, b)),
 		"/api/v1/capacity/profiles/explain?pipeline=demo", http.StatusOK)
 
 	if len(body.Samples) != 10 {
@@ -173,7 +174,7 @@ func TestCapacityExplain_ChainMarksExactlyOneResolvedStep(t *testing.T) {
 	st, b := capacityBackend(t)
 	measure(t, st, "demo", 10)
 
-	body := getJSON[capacityExplainPayload](t, CapacityExplainHandler(profilesOf(b)),
+	body := getJSON[capacityExplainPayload](t, CapacityExplainHandler(profilesOf(t, b)),
 		"/api/v1/capacity/profiles/explain?pipeline=demo", http.StatusOK)
 
 	applied := []string{}
@@ -203,13 +204,13 @@ func TestCapacityExplain_ChainMarksExactlyOneResolvedStep(t *testing.T) {
 func TestCapacityExplain_NodeRowsAccompanyTheRollup(t *testing.T) {
 	st, b := capacityBackend(t)
 	measure(t, st, "demo", 4)
-	if err := st.RecordProfileObservation(context.Background(), "demo", "build", store.ProfileObservation{
+	if err := teststore.ForTeam(t, st, store.DefaultTeam).RecordProfileObservation(context.Background(), "demo", "build", store.ProfileObservation{
 		Duration: 5 * time.Second, PeakCores: 3, SustainedCores: 2, PeakMemoryBytes: 1 << 20, CPUMeasured: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	body := getJSON[capacityExplainPayload](t, CapacityExplainHandler(profilesOf(b)),
+	body := getJSON[capacityExplainPayload](t, CapacityExplainHandler(profilesOf(t, b)),
 		"/api/v1/capacity/profiles/explain?pipeline=demo", http.StatusOK)
 
 	if len(body.Nodes) != 1 || body.Nodes[0].NodeID != "build" {
@@ -234,7 +235,7 @@ func TestCapacityExplain_RejectsMissingAndUnknownPipelines(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			CapacityExplainHandler(profilesOf(b))(rec, httptest.NewRequest(http.MethodGet, tc.target, nil))
+			CapacityExplainHandler(profilesOf(t, b))(rec, httptest.NewRequest(http.MethodGet, tc.target, nil))
 			if rec.Code != tc.want {
 				t.Fatalf("status = %d, want %d; body = %s", rec.Code, tc.want, rec.Body.String())
 			}
@@ -246,7 +247,7 @@ func TestCapacityExplain_AcceptsRepoScopedKeys(t *testing.T) {
 	st, b := capacityBackend(t)
 	measure(t, st, "myrepo/ci", 4)
 
-	body := getJSON[capacityExplainPayload](t, CapacityExplainHandler(profilesOf(b)),
+	body := getJSON[capacityExplainPayload](t, CapacityExplainHandler(profilesOf(t, b)),
 		"/api/v1/capacity/profiles/explain?pipeline=myrepo%2Fci", http.StatusOK)
 
 	if body.Profile.Pipeline != "myrepo/ci" {
@@ -254,9 +255,9 @@ func TestCapacityExplain_AcceptsRepoScopedKeys(t *testing.T) {
 	}
 }
 
-func profilesOf(b backend.Backend) ProfileReader {
+func profilesOf(t *testing.T, b backend.Backend) ProfileReader {
 	if sb, ok := b.(*backend.StoreBackend); ok {
-		return sb.Store()
+		return teststore.ForTeam(t, sb.Store(), store.DefaultTeam)
 	}
 	return nil
 }

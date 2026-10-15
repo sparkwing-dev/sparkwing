@@ -41,13 +41,12 @@ type EvaluationInput struct {
 // EvaluationDependencies connects the evaluator to the same engine, protocol and
 // validation boundaries as execution. ReadOutput must authorize the persisted
 // terminal generation and return its recorded JSON, including explicit null.
-// Bind delegates a fresh process bearer for each startup. Start takes ownership
-// of that binding, including revocation on failed startup and on Close, and owns
-// run-log attribution, masking and environment. Bound input requires Bind.
+// Bind delegates a fresh process bearer; the host revokes it before joining and cleanup.
+// Start owns run-log attribution, masking and environment. Bound input requires Bind.
 // ChildContext applies the shared deadline policy to skip and memo evaluation.
 type EvaluationDependencies struct {
 	Store         EvaluationStore
-	Bind          func(context.Context, EvaluationInput) (nodeproto.ProcessBinding, error)
+	Bind          func(context.Context, EvaluationInput) (ProcessGrant, error)
 	Start         func(context.Context, EvaluationInput) (ExecutorProcess, error)
 	EnsureEngine  func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error)
 	ValidatePlan  func(json.RawMessage, nodeproto.ValidationContext) (nodeproto.PlanDoc, error)
