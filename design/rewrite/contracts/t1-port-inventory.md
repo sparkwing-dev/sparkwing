@@ -19,6 +19,12 @@ pending. This adds no archived source-function port identity.
 
 # Acceptance test port inventory
 
+The [W3 package-test cleanup](../w3-harness-cleanup-progress.md) moves the retained
+host checks into `internal/nodehost` and `internal/lease` test files, consolidates
+their fakes and removes duplicate runners. Lifecycle, step and foreign-award
+checks use tenant intake, acceptance and claims. No acceptance cell is added or
+activated. Production placement migration remains incomplete.
+
 The [W3 nodehost green continuation](../w3-nodehost-green-progress.md) ports
 `TestOnlyRunsTheMatchedNodesAndWhatTheyNeed` to tenant intake, claims, accepted
 seals and the shared scheduler. Exclusions use the existing selection policy

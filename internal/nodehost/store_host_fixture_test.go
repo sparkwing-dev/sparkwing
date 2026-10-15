@@ -23,7 +23,7 @@ type hostIntakePolicy struct{}
 
 func (hostIntakePolicy) ResolveIntake(ctx context.Context, resolver capability.AuthorityResolver, request store.IntakeRequest) (store.IntakePolicyFacts, error) {
 	_, err := resolver.ResolveAuthority(ctx, request.Authority)
-	return store.IntakePolicyFacts{Options: &request.Request.Options, RepositoryAuthorized: true, LogRetentionClass: "r30", LogRetentionDays: 30}, err
+	return store.IntakePolicyFacts{Options: &request.Request.Options, SourceLocation: &request.Request.Source.Location, RepositoryAuthorized: true, LogRetentionClass: "r30", LogRetentionDays: 30}, err
 }
 
 type hostEnrollment struct{}
@@ -79,6 +79,12 @@ func newStoreHostFixture(t *testing.T, plan nodeproto.PlanDoc) *storeHostFixture
 
 func newStoreHostFixtureOn(t *testing.T, database *store.Store, plan nodeproto.PlanDoc, options runspec.Options) *storeHostFixture {
 	t.Helper()
+	request := runspec.Request{Version: 1, Team: string(store.DefaultTeam), Pipeline: "p", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}, Options: options}
+	return newStoreHostFixtureForRequest(t, database, plan, request)
+}
+
+func newStoreHostFixtureForRequest(t *testing.T, database *store.Store, plan nodeproto.PlanDoc, request runspec.Request) *storeHostFixture {
+	t.Helper()
 	ctx := t.Context()
 	database.SetIntakePolicy(hostIntakePolicy{})
 	database.SetClaimProfileResolver(hostEnrollment{})
@@ -102,7 +108,6 @@ func newStoreHostFixtureOn(t *testing.T, database *store.Store, plan nodeproto.P
 		}
 	}
 	authority := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: root}
-	request := runspec.Request{Version: 1, Team: string(store.DefaultTeam), Pipeline: "p", Mode: runspec.IntakeExecute, Origin: runspec.OriginTrigger, Dispatch: runspec.DispatchHost, Git: runspec.Git{Repository: runspec.Repository{Key: "gh:1"}}, Options: options}
 	admitted, err := tenant.AdmitRun(ctx, store.IntakeRequest{Authority: authority, Request: request})
 	if err != nil {
 		t.Fatal(err)
