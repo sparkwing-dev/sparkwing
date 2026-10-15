@@ -415,7 +415,7 @@ func TestProtocolSessionChild(t *testing.T) {
 				version++
 			}
 			sdkVersion := "test"
-			if mode == "owner_expand" || mode == "owner_policy" || mode == "planner" {
+			if mode == "owner_expand" || mode == "owner_policy" || mode == "planner" || strings.HasPrefix(mode, "claimed_node") {
 				sdkVersion = "v1.0.0"
 			}
 			if mode == "planner" && request.Binding != nil {
@@ -434,6 +434,26 @@ func TestProtocolSessionChild(t *testing.T) {
 			continue
 		}
 		switch mode {
+		case "claimed_node", "claimed_node_hold":
+			switch request.Op {
+			case nodeproto.OpPlan:
+				reply(request, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
+			case nodeproto.OpRunStep:
+				if mode == "claimed_node_hold" {
+					held = append(held, request)
+					send(nodeproto.FrameLog{Level: "info", Message: "entered"})
+				} else {
+					reply(request, nodeproto.RunResult{Outcome: "success"})
+				}
+			case nodeproto.OpCancel:
+				reply(request, map[string]bool{"cancelled": true})
+				for _, pending := range held {
+					reply(pending, nodeproto.RunResult{Outcome: "cancelled"})
+				}
+				held = nil
+			default:
+				os.Exit(11)
+			}
 		case "planner":
 			switch request.Op {
 			case nodeproto.OpDescribe:

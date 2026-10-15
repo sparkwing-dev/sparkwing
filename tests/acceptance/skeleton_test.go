@@ -27,6 +27,7 @@ func pendingScenarios(t *testing.T, group string) {
 				t.Run("hermetic-library", acceptance.CheckOwnerSeals)
 			case "recovery-keeper-causes-and-backoff":
 				t.Run("hermetic-library", acceptance.CheckKeeperCauses)
+				t.Run("hermetic-claimed-node", acceptance.CheckClaimedNodeLifecycle)
 			case "recovery-keeper-conflict-and-stop-join":
 				t.Run("hermetic-library", acceptance.CheckKeeperConflictAndStop)
 			case "recovery-reconciler-waits-and-reclaims":

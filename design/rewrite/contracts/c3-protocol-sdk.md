@@ -65,6 +65,7 @@ are part of this contract.
 | `nodehost.NodeInput` | Binds an attempt to accepted spec, node, generation, runner and route bearer. |
 | `nodehost.NodeHost.Execute` | Replans, checks drift, runs executor layers and reports through store transitions. |
 | `nodehost.NewNodeExecutor`, `ExecutorDependencies`, `ExecutorProcess` | Connect the common executor to the fenced store, matched engine, SDK process and storage adapters. |
+| `nodehost.ClaimedNodeHost`, `ClaimStore` | Own source acquisition and renewal around the common executor for an awarded remote job. |
 | `nodehost.ExecutorActivity` | Reports progress and brackets authorized child awaits without extending the execution deadline. |
 | `nodehost.ProtocolSessionConfig`, `ProtocolSession`, `StartProtocolSession` | Launch protocol-v2 SDK processes with private pipes, request correlation, cancellation, log attribution and joined cleanup. |
 | `nodehost.LayerSide` | Distinguishes owner decisions from executor work. |
@@ -214,6 +215,29 @@ Its `PlanningFunctions` use the shared validator and canonical hasher by default
 passes `AcceptPlan`. Cache diagnostics omit input hashes and declaration contents.
 
 ## Host adapter boundaries
+
+`ClaimedNodeHost.Execute` checks its award against persisted acceptance and job
+settings, then waits for a successful claim renewal before acquiring source.
+`source.ForExecution` supplies the sealed checkout policy and engine. Acquisition
+uses explicit source options and passes its acquired entry to `NodeHost.Execute`.
+The adapter joins execution, closes its entry and stops its keeper before returning.
+Self-claimed jobs execute directly under the owner's keeper, which already renews
+them atomically with the owner.
+
+Setup failures report through `TransitionNode` with the awarded holder, capability
+prefix and generation. Requested cancellation reports a cancelled job. Lost
+authority or shutdown leaves reporting to recovery. Returned source errors are
+masked and structured. A refused report remains an error. Acquisition never runs
+under a rejected or silent claim. An acquisition that returns after lease loss
+cannot start SDK code.
+
+The unfenced `RunNodeCommand` entry point and its environment-derived claim
+reader are removed. Runners and launcher bootstrap must supply the authenticated
+award and `ClaimStore`, source-access and executor adapters to `ClaimedNodeHost`.
+The older run-host caller still uses its dispatched-heartbeat helper until its
+own lifecycle cut. The old Job builders in `internal/runners/k8s` and
+`internal/runners/launcher` still emit `run-node` and need the authenticated
+bootstrap cut owned by the runner area.
 
 `SDKPlanner.Prepare` runs describe with the acquired engine and granted runner
 identity. Describe and plan hello omit job bindings. All declared secret defaults,

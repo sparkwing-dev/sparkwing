@@ -1,0 +1,147 @@
+//go:build unix
+
+package nodehost
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"reflect"
+	"runtime"
+	"strings"
+	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+)
+
+type claimEngine struct{ resolved engine.Resolved }
+
+func (r claimEngine) Resolve(context.Context, engine.Pin, releaseasset.Target) (engine.Resolved, error) {
+	return engine.Resolved{}, errors.New("accepted execution must ensure its sealed engine")
+}
+func (r claimEngine) Ensure(_ context.Context, identity engine.Identity, target releaseasset.Target) (engine.Resolved, error) {
+	if identity != r.resolved.Identity || target != r.resolved.Target {
+		return engine.Resolved{}, errors.New("source changed the selected engine")
+	}
+	return r.resolved, nil
+}
+
+type claimInstaller func(context.Context, engine.Resolved, string, []string) ([]string, error)
+
+func (f claimInstaller) Install(ctx context.Context, engine engine.Resolved, directory string, env []string) ([]string, error) {
+	return f(ctx, engine, directory, env)
+}
+
+func TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK(t *testing.T) {
+	for _, lost := range []bool{false, true} {
+		t.Run(map[bool]string{false: "success", true: "lease_lost"}[lost], func(t *testing.T) {
+			input, s, host, _ := claimedNodeFixture(t)
+			host.Mask = func(s string) string { return s }
+			root := t.TempDir()
+			for _, args := range [][]string{
+				{"init", "--quiet"},
+				{"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "--allow-empty", "-m", "source"},
+			} {
+				cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", root}, args...)...)
+				cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("git: %v: %s", err, out)
+				}
+			}
+			cmd := exec.CommandContext(t.Context(), "git", "-C", root, "rev-parse", "HEAD")
+			sha, err := cmd.Output()
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.run.Spec.Request.Request.Options.RepoLocation.Value = root
+			s.run.Spec.Request.Request.Git.SHA = strings.TrimSpace(string(sha))
+			s.run.Spec.Resolved.Entrypoint = "."
+			input.Accepted.Spec, err = json.Marshal(s.run.Spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			exe, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			resolved := input.Engine
+			resolved.Executable, resolved.Target = exe, releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
+			mode := "claimed_node"
+			if lost {
+				mode = "claimed_node_hold"
+			}
+			host.Acquire = nil
+			installed := false
+			host.Source = source.Options{
+				Engines: claimEngine{resolved: resolved}, Target: resolved.Target, SDK: engine.GoSDK,
+				InstallEnvironment: []string{"PATH=" + os.Getenv("PATH")}, GitEnvironment: []string{"PATH=" + os.Getenv("PATH")},
+				ReadPin: func(string, engine.SDKKind) (engine.Pin, error) { return resolved.Identity.Pin, nil },
+				Installer: claimInstaller(func(_ context.Context, got engine.Resolved, directory string, env []string) ([]string, error) {
+					installed = true
+					if !reflect.DeepEqual(got, resolved) || directory != root || len(env) != 1 || !strings.HasPrefix(env[0], "PATH=") {
+						t.Error("installer lost sealed engine, source or base environment")
+					}
+					return []string{exe, "-test.run=^TestProtocolSessionChild$", "--", mode}, nil
+				}),
+			}
+			ctx, cancel := context.WithCancelCause(t.Context())
+			defer cancel(nil)
+			var session *ProtocolSession
+			revoked, cleaned := false, false
+			cfg := ProtocolSessionConfig{
+				Environment: []string{"GORACE=atexit_sleep_ms=0"}, ParseFrame: protocolTestCodec, ValidateRequest: func(nodeproto.Request) error { return nil },
+				Revoke:      func() error { revoked = true; return nil },
+				RunCleanups: func(context.Context) error { cleaned = true; return nil },
+				Log: func(_ context.Context, log nodeproto.FrameLog) error {
+					if log.Message == "entered" && lost {
+						cancel(lease.ErrLeaseLost)
+					}
+					return nil
+				},
+			}
+			deps := host.Executor.(*nodeExecutor).deps
+			deps.Mask = host.Mask
+			deps.EnsureEngine = func(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+				return resolved, nil
+			}
+			deps.Start = func(ctx context.Context, input NodeInput, activity ExecutorActivity) (ExecutorProcess, error) {
+				process, err := cfg.Start(ctx, input, activity)
+				if process != nil {
+					session = process.(*ProtocolSession)
+				}
+				return process, err
+			}
+			host.Executor, err = NewNodeExecutor(deps)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = host.Execute(ctx, input)
+			if lost && !errors.Is(err, lease.ErrLeaseLost) || !lost && err != nil {
+				t.Fatalf("execute = %v", err)
+			}
+			if !installed || session == nil || session.cmd.ProcessState == nil || !revoked || !cleaned {
+				t.Fatalf("installed=%t session=%v revoked=%t cleaned=%t", installed, session, revoked, cleaned)
+			}
+			if _, err := os.Stat(filepath.Join(root, ".git")); err != nil {
+				t.Fatal("host removed the user's checkout:", err)
+			}
+			if lost {
+				for _, change := range s.changes {
+					if change.Cause == store.CauseReport {
+						t.Fatal("lost authority reported a terminal result")
+					}
+				}
+			} else if len(s.changes) != 2 || s.changes[1].Extra.Result.Outcome != store.NodeSuccess {
+				t.Fatalf("transitions = %+v", s.changes)
+			}
+		})
+	}
+}

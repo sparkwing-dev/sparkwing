@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
@@ -128,25 +127,12 @@ func (h *OwnerHost) Run(parent context.Context, input RunInput) (completion RunC
 }
 
 func (h *OwnerHost) keepOwner(parent context.Context, actor store.Actor) (context.Context, func()) {
-	ready := make(chan struct{})
-	var once sync.Once
 	keeper := h.Lease
 	keeper.Renew = func(ctx context.Context) (lease.Beat, error) {
 		beat, err := h.Store.RenewOwner(ctx, actor)
 		return lease.Beat{CancelRequested: beat.CancelRequested, Watched: beat.Watched, WatchedNodes: beat.WatchedNodes}, err
 	}
-	keeper.Observe = func(beat lease.Beat) {
-		if h.Lease.Observe != nil {
-			h.Lease.Observe(beat)
-		}
-		once.Do(func() { close(ready) })
-	}
-	ctx, stop := keeper.Run(parent)
-	select {
-	case <-ctx.Done():
-	case <-ready:
-	}
-	return ctx, stop
+	return startHostKeeper(parent, keeper)
 }
 
 func ownerRequestMatches(input RunInput, row store.RunRow) error {

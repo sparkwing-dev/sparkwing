@@ -126,6 +126,26 @@ retry-auto, bounce and workers rows are removed from that proof.
 through `OwnerHost.Run`. Native placement and the risk/cleanup acceptance cell
 remain separate requirements.
 
+`CheckClaimedNodeLifecycle` adds five contract-fake cases under
+`recovery-keeper-causes-and-backoff/hermetic-claimed-node`: successful startup,
+startup rejection, requested cancellation, silence and lease loss during work.
+Every case checks joined renewal shutdown. Full native placement cells remain open.
+
+The removed `run_node_claim_test.go` command tests used environment-supplied
+claim fences. Their replacements are
+`TestClaimedNodeHostDoesNotRenewAChangedAward`,
+`TestClaimedNodeHostReportsSetupFailuresThroughTheClaim` and
+`TestClaimedNodeHostAcquiresSourceAndJoinsNativeSDK`. These check persisted award
+identity, fenced reports, exact-source acquisition, route revocation and process
+cleanup after lease loss. The native test uses real git and protocol pipes with
+fake store, engine policy, installer, validator, canonical hasher and protocol codecs.
+
+`TestDispatchedNodeFetchesAnSSHMirrorThroughItsOwnGrant` and the runner's
+`TestRunNodeDispatchesToTheSharedImplementation` are deleted with `run-node`.
+The cache-mirror protocol has no replacement. Direct SSH, App and HTTPS source
+behavior remains covered by `internal/source`. Native runner and launcher source
+release through the final controller authority remains an integration requirement.
+
 ### Complete old credential dimension
 
 | Exact old label | Final fixture and decision |
