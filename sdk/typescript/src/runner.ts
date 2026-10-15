@@ -1,401 +1,401 @@
-// The node runner loop. The engine starts this process with
-// --sw-node-protocol, writes requests to the request pipe, and reads replies
-// and log records from the frame pipe. A plan request comes first: bodies and
-// closures are captured while the plan function runs, so run_node, run_step
-// and eval use that plan.
-
+import { readFileSync } from "node:fs";
 import type { Readable } from "node:stream";
+import type { Args, Context, Failure, JobResult, PipelineDef, RunContext, RunnerInfo, Trigger } from "../index.d.ts";
 import { describe } from "./describe.ts";
-import { LogWriter, type LineSink } from "./log.ts";
-import {
-  Generated,
-  lookupPipeline,
-  Plan,
-  resolveArgs,
-  type Closure,
-  type Failure,
-  type Generator,
-  type GitInfo,
-  type Job,
-  type NodeContext,
-  type RunContext,
-  type Step,
-  type Trigger,
-  withRecoveries,
-} from "./plan.ts";
-import { MAX_OUTPUT_BYTES, OPS, ProtocolError, readRequests, writeReply, type Request } from "./protocol.ts";
-import type { NodeRoutes } from "./routes.ts";
+import { resolveArgs } from "./args.ts";
+import { Generated, lookupPipeline, Plan, type Closure } from "./plan.ts";
+import type { JobSpec } from "./plan-wire.ts";
+import { Git } from "./helpers/git.ts";
+import { noMemo } from "./helpers/memo.ts";
+import { makeContext } from "./context.ts";
+import { decodeError, errorFields, failure, messageOf, object, string } from "./errors.ts";
+import type { LineSink } from "./log.ts";
+import { jsonOutput, jsonValue, readRequests, stringMap, validateRequest, writeReply, type Request } from "./protocol.ts";
+import { NodeRoutes, type HostServices, type ProcessRoutes } from "./routes.ts";
+import { runScope } from "./scope.ts";
+import { StepState } from "./step-state.ts";
+import { PlanningDiagnostics } from "./diagnostics.ts";
 
 export interface ServeOptions {
-  /** The request pipe. */
   input: Readable;
-  /** The frame pipe: replies and log records. */
   output: LineSink;
-  /** The node routes; absent for a process the engine bound to no node. */
-  routes?: NodeRoutes;
+  services?: (routes: ProcessRoutes) => HostServices;
+  root?: string;
 }
-
-export interface NodeResult {
-  outcome: "success" | "failed";
-  output?: unknown;
-  error?: string;
-}
-
-interface EvalResult {
-  value: unknown;
-  error?: string;
-}
-
 interface Planned {
   plan: Plan;
   run: RunContext;
-  closures: Map<string, Closure>;
+  definition: PipelineDef;
+  rawArgs: Args;
+}
+interface Active {
+  job: string;
+  step?: string;
+  controller: AbortController;
+  done: Promise<void>;
+  finish: () => void;
 }
 
-/**
- * Answers engine requests until the request pipe ends. Every request runs as
- * soon as it arrives, since the engine may have several eval and run_step
- * requests in flight. End of input aborts whatever still runs and silences
- * the frame pipe, so serve returns without waiting for those requests.
- */
-export async function serve(opts: ServeOptions): Promise<void> {
-  const session = new Session(opts);
+export async function serve(options: ServeOptions): Promise<void> {
+  const session = new Session(options);
   try {
-    for await (const req of readRequests(opts.input)) {
-      void session.answer(req);
-    }
+    for await (const request of readRequests(options.input)) session.answer(request);
   } finally {
-    session.close();
+    await session.close();
   }
 }
-
-const needsPlan = new Set(["run_node", "run_step", "eval"]);
-
 class Session {
+  readonly #options: ServeOptions;
   readonly #frames: LineSink;
-  readonly #routes: NodeRoutes | undefined;
   #done = false;
+  #helloSeen = false;
+  #runner: RunnerInfo | undefined;
+  #binding: { run: string; job: string } | undefined;
+  #services: HostServices | undefined;
   #planSeen = false;
   #planned: Planned | undefined;
-  readonly #controllers = new Map<string, AbortController>();
-  readonly #stepOutputs = new Map<string, Map<string, unknown>>();
-  readonly #nodeOutputs = new Map<string, unknown>();
-  readonly #generated = new Set<string>();
-
-  constructor(opts: ServeOptions) {
-    // safety: after end of input the SDK writes nothing further, so every
-    // frame goes through this check, log records included.
+  readonly #ids = new Set<string>();
+  readonly #active = new Map<string, Active>();
+  readonly #steps = new Map<string, StepState>();
+  readonly #generated = new Map<string, unknown>();
+  #evalReady: Promise<void> = Promise.resolve();
+  readonly #originalEnv = new Map<string, string | undefined>();
+  constructor(options: ServeOptions) {
+    this.#options = options;
     this.#frames = {
-      write: (line: string) => (this.#done ? undefined : opts.output.write(line)),
+      write: (line) => {
+        if (!this.#done) options.output.write(line);
+      },
     };
-    this.#routes = opts.routes;
   }
-
-  close(): void {
+  async close(): Promise<void> {
     this.#done = true;
-    for (const c of this.#controllers.values()) c.abort();
-  }
-
-  async answer(req: Request | { id: string; error: ProtocolError }): Promise<void> {
-    try {
-      if ("error" in req && req.error instanceof ProtocolError) throw req.error;
-      const result = await this.#handle(req as Request);
-      writeReply(this.#frames, { reply: req.id, ok: true, result });
-    } catch (err) {
-      const error = err instanceof ProtocolError ? { code: err.code, message: err.message } : { message: messageOf(err) };
-      writeReply(this.#frames, { reply: req.id, ok: false, error });
+    for (const { controller } of this.#active.values()) controller.abort(new Error("host closed request pipe"));
+    await Promise.all([...this.#active.values()].map((active) => active.done));
+    for (const [key, value] of this.#originalEnv) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
     }
   }
-
+  answer(req: Request): void {
+    if (this.#ids.has(req.id)) throw failure("protocol_error", "duplicate request id");
+    this.#ids.add(req.id);
+    void this.#handle(req)
+      .then(
+        (result) => writeReply(this.#frames, { reply: req.id, ok: true, result }),
+        (error) => writeReply(this.#frames, { reply: req.id, ok: false, error: errorFields(error) }),
+      )
+      .finally(() => {
+        const active = this.#active.get(req.id);
+        this.#active.delete(req.id);
+        active?.finish();
+      });
+  }
   async #handle(req: Request): Promise<unknown> {
-    if (!(OPS as readonly string[]).includes(req.op)) throw new ProtocolError("unknown_op", `unknown op ${JSON.stringify(req.op)}`);
-    if (needsPlan.has(req.op) && !this.#planned) throw new ProtocolError("no_plan", `${req.op} needs a plan earlier in this process`);
+    validateRequest(req);
+    if (req.op === "hello") return this.#hello(req);
+    if (!this.#runner) throw failure("protocol_error", "hello must precede operations");
     switch (req.op) {
       case "describe":
-        return describe();
+        return runScope({ phase: "plan", root: this.#root() }, () => describe(this.#run({ run_id: "describe", pipeline: "describe" }, {})));
       case "plan":
         return this.#plan(req);
-      case "run_node": {
-        // hack: a body is the node's one step, so run_node runs it as the Go
-        // SDK runs a node's work; a node with several steps runs each with run_step.
-        const job = this.#job(req);
-        const [only, ...more] = job.steps;
-        if (!only || more.length > 0) {
-          throw new ProtocolError("bad_request", `node ${JSON.stringify(job.id)} has no single body to run; run each step with run_step`);
-        }
-        return this.#runStep(req, job, only);
-      }
-      case "run_step": {
-        const job = this.#job(req);
-        const stepId = str(req, "step");
-        const step = job.steps.find((s) => s.id === stepId);
-        if (!step) throw new ProtocolError("unknown_step", `node ${JSON.stringify(job.id)} has no step ${JSON.stringify(stepId)}`);
-        return this.#runStep(req, job, step);
-      }
-      case "cancel":
-        this.#controller(`${str(req, "node")}\u0000${str(req, "step")}`).abort();
-        return {};
+      case "run_step":
+        return this.#step(req);
       case "eval":
         return this.#eval(req);
+      case "cancel":
+        return this.#cancel(req);
     }
-    throw new ProtocolError("unknown_op", `unknown op ${JSON.stringify(req.op)}`);
+    throw failure("unknown_op", "unknown operation");
   }
-
-  async #runStep(req: Request, job: Job, step: Step): Promise<NodeResult> {
-    const body = this.#current().run.dryRun && step.dryRunBody ? step.dryRunBody : step.body;
-    const result = await this.#invoke(req, job, step.id, body);
-    if (result.outcome === "success") {
-      const outputs = this.#stepOutputs.get(job.id) ?? new Map<string, unknown>();
-      outputs.set(step.id, result.output);
-      this.#stepOutputs.set(job.id, outputs);
-    }
-    // safety: only the result step's output is the node's output; the host
-    // records whatever a run_step reply carries.
-    if (!step.isResult) delete result.output;
-    if (result.outcome === "success" && (step.isResult || !job.steps.some((s) => s.isResult))) {
-      // safety: a node with no result step has no output, and its own
-      // generator reads that null here rather than asking the host for a
-      // node still running.
-      this.#nodeOutputs.set(job.id, result.output ?? null);
-    }
-    return result;
+  async #cancel(req: Request): Promise<unknown> {
+    if (req.job !== undefined && req.job !== this.#binding?.job)
+      throw failure("protocol_error", "cancel does not match the process job binding");
+    const selected = [...this.#active.entries()].filter(
+      ([id, active]) =>
+        req.target === id || (req.target === undefined && active.job === req.job && (req.step === undefined || active.step === req.step)),
+    );
+    for (const [, active] of selected) active.controller.abort(new Error("cancelled by host"));
+    await Promise.all(selected.map(([, active]) => active.done));
+    return {};
   }
-
-  async #plan(req: Request): Promise<unknown> {
-    if (this.#planSeen) throw new ProtocolError("bad_request", "plan arrives at most once per process");
-    this.#planSeen = true;
-    const pipeline = str(req, "pipeline");
-    const rawArgs = stringMap(req["args"], "args");
-    const run = runContext(req["run"]);
-    const def = lookupPipeline(pipeline);
-    if (!def) throw new ProtocolError("unknown_pipeline", `pipeline ${JSON.stringify(pipeline)} is not registered`);
-    const args = resolveArgs(def, rawArgs);
-    if (typeof args === "string") throw new ProtocolError("invalid_args", args);
-    const ctx: RunContext = {
-      ...run,
-      pipeline,
-      args,
-      log: new LogWriter(this.#frames),
+  #state(job: string): StepState {
+    let state = this.#steps.get(job);
+    if (!state) {
+      state = new StepState();
+      this.#steps.set(job, state);
+    }
+    return state;
+  }
+  #hello(req: Request): unknown {
+    if (this.#helloSeen) throw failure("protocol_error", "hello occurs exactly once");
+    this.#helloSeen = true;
+    if (req.protocol !== 2) throw failure("protocol_mismatch", "rebuild .sparkwing with the matching SDK", { supported_majors: [2] });
+    const runner = Object.freeze({ ...(req.runner as RunnerInfo), labels: Object.freeze([...(req.runner as RunnerInfo).labels]) });
+    if (req.binding !== undefined) {
+      const binding = object(req.binding, "binding");
+      this.#binding = { run: String(binding.run_id), job: String(binding.job_id) };
+      const routes = binding.routes as unknown as ProcessRoutes;
+      this.#services = this.#options.services ? this.#options.services(routes) : new NodeRoutes(routes);
+    }
+    this.#runner = runner;
+    const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
+    return { protocol: 2, sdk: { language: "typescript", version: `v${version}` }, features: [] };
+  }
+  #root(): string {
+    return this.#options.root ?? process.cwd();
+  }
+  #run(raw: Record<string, unknown>, args: Args): RunContext {
+    const git = raw.git === undefined ? {} : object(raw.git, "run.git");
+    const trigger = raw.trigger === undefined ? { source: "manual" } : object(raw.trigger, "run.trigger");
+    const pr = trigger.pull_request === undefined ? undefined : object(trigger.pull_request, "pull_request");
+    const triggerInfo: Trigger = {
+      source: String(trigger.source),
+      ...(trigger.user === undefined ? {} : { user: String(trigger.user) }),
+      ...(pr
+        ? {
+            pullRequest: Object.freeze({
+              number: Number(pr.number),
+              ...(pr.action === undefined ? {} : { action: String(pr.action) }),
+              ...(pr.base_ref === undefined ? {} : { baseRef: String(pr.base_ref) }),
+              ...(pr.base_sha === undefined ? {} : { baseSHA: String(pr.base_sha) }),
+              ...(pr.head_ref === undefined ? {} : { headRef: String(pr.head_ref) }),
+              ...(pr.head_sha === undefined ? {} : { headSHA: String(pr.head_sha) }),
+            }),
+          }
+        : {}),
     };
-    const plan = new Plan();
-    let doc;
-    try {
-      await def.plan(plan, ctx);
-      doc = plan.toDoc(pipeline, run.runId);
-    } catch (err) {
-      throw new ProtocolError("plan_failed", messageOf(err));
-    }
-    const closures = new Map<string, Closure>();
-    this.#planned = { plan, run: ctx, closures };
-    this.#register(plan.allJobs());
-    return doc;
+    return Object.freeze({
+      id: String(raw.run_id),
+      pipeline: String(raw.pipeline),
+      args: Object.freeze({ ...args }),
+      dryRun: raw.dry_run === true,
+      noMemo: raw.no_memo === true,
+      ...(raw.started_at === undefined ? {} : { startedAt: String(raw.started_at) }),
+      runner: this.#runner!,
+      trigger: Object.freeze(triggerInfo),
+      git: new Git(this.#root(), {
+        repo: String(git.repo ?? ""),
+        branch: String(git.branch ?? ""),
+        commit: String(git.sha ?? ""),
+        ...(git.default_branch === undefined ? {} : { defaultBranch: String(git.default_branch) }),
+        ...(git.repo_url === undefined ? {} : { repoURL: String(git.repo_url) }),
+      }),
+    });
   }
-
-  #register(jobs: Job[]): void {
-    const { closures } = this.#current();
-    for (const job of jobs) {
-      for (const c of job.closures()) closures.set(c.id, c);
-    }
+  async #plan(req: Request): Promise<unknown> {
+    if (this.#planSeen) throw failure("protocol_error", "plan occurs at most once per process");
+    this.#planSeen = true;
+    const definition = lookupPipeline(String(req.pipeline));
+    if (!definition) throw failure("unknown_pipeline", "pipeline is not registered");
+    const rawArgs = stringMap(req.args, "args");
+    const plan = new Plan(new PlanningDiagnostics(definition.args, rawArgs));
+    return plan.diagnostics.run(async () => {
+      const args = resolvedArgs(definition.args ?? [], rawArgs, true);
+      const run = this.#run(object(req.run, "run"), args);
+      if (this.#binding && run.id !== this.#binding.run) throw failure("bad_request", "plan run does not match hello binding");
+      await runScope({ phase: "plan", root: this.#root() }, () => definition.plan(plan, run));
+      const doc = plan.toDoc();
+      const allSpecs = [...(definition.args ?? []), ...plan.jobs().flatMap((job) => job.argSpecs())];
+      resolvedArgs(allSpecs, rawArgs, definition.extra === true);
+      plan.seal();
+      this.#planned = { plan, run, definition, rawArgs };
+      return doc;
+    });
   }
-
-  async #eval(req: Request): Promise<EvalResult> {
-    const id = str(req, "closure");
-    const closure = this.#current().closures.get(id);
-    if (!closure) throw new ProtocolError("unknown_closure", `closure ${JSON.stringify(id)} is not in this process's plan`);
-    if (closure.kind === "generator") return this.#expand(req, closure.gen);
-    const input = closure.kind === "after_run" ? afterRunError(req["input"]) : undefined;
-    const ctx = this.#context(req, closure.job, closure.step?.id);
-    try {
-      return { value: await callClosure(closure, ctx, input) };
-    } catch (err) {
-      return { value: null, error: messageOf(err) };
-    } finally {
-      this.#release(req);
-    }
-  }
-
-  async #expand(req: Request, gen: Generator): Promise<EvalResult> {
-    if (this.#generated.has(gen.id))
-      throw new ProtocolError("bad_request", `generator ${JSON.stringify(gen.id)} already ran in this process`);
-    this.#generated.add(gen.id);
-    const ctx = this.#context(req, gen.source, undefined);
-    try {
-      // safety: the source's own attempt process holds its output; any other
-      // process reads the output the host recorded before it asked.
-      const output = this.#nodeOutputs.has(gen.source.id) ? this.#nodeOutputs.get(gen.source.id) : await ctx.output(gen.source.id);
-      const added = new Generated(gen.source);
-      await gen.fn(added, output as never, ctx);
-      const nodes = this.#current().plan.insert(added.jobs);
-      this.#register(withRecoveries(added.jobs));
-      return { value: nodes };
-    } catch (err) {
-      return { value: null, error: messageOf(err) };
-    } finally {
-      this.#release(req);
-    }
-  }
-
   #current(): Planned {
-    if (!this.#planned) throw new ProtocolError("no_plan", "this request needs a plan earlier in this process");
+    if (!this.#planned) throw failure("no_plan", "operation requires a successful plan");
     return this.#planned;
   }
-
-  #job(req: Request): Job {
-    const id = str(req, "node");
-    const job = this.#current().plan.lookup(id);
-    if (!job) throw new ProtocolError("unknown_node", `node ${JSON.stringify(id)} is not in this process's plan`);
-    return job;
+  #authorize(job: string, replay: boolean): void {
+    if (!this.#binding) throw failure("protocol_error", "execution requires a hello binding");
+    if (!replay && this.#binding.job !== job) throw failure("protocol_error", "job does not match hello binding");
   }
-
-  async #invoke(req: Request, job: Job, step: string | undefined, body: (ctx: NodeContext) => unknown): Promise<NodeResult> {
-    const attempt = req["attempt"];
-    if (typeof attempt !== "number" || !Number.isInteger(attempt) || attempt < 1) {
-      throw new ProtocolError("bad_request", "attempt must be an integer of at least 1");
+  #context(req: Request, spec: JobSpec, signal: AbortSignal, step?: string, replay = false): Context {
+    const { run, definition, plan, rawArgs } = this.#current();
+    for (const [key, value] of this.#originalEnv) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
     }
-    const ctx = this.#context(req, job, step, attempt);
-    const failure = failureOf(req["failure"]);
-    if (failure) ctx.failure = failure;
-    try {
-      ctx.signal.throwIfAborted();
-      const output = await body(ctx);
-      if (output === undefined) return { outcome: "success" };
-      const size = jsonSize(output);
-      if (size > MAX_OUTPUT_BYTES) {
-        return { outcome: "failed", error: `step output is ${size} bytes as JSON, over the ${MAX_OUTPUT_BYTES >> 20} MiB limit` };
+    const env: Record<string, string> = Object.create(null);
+    for (const [name, value] of Object.entries(replay ? {} : (spec.env ?? {})))
+      if (!value.startup && !["NODE_OPTIONS", "GODEBUG", "GOMAXPROCS"].includes(name)) {
+        if (!this.#originalEnv.has(name)) this.#originalEnv.set(name, Object.hasOwn(process.env, name) ? process.env[name] : undefined);
+        process.env[name] = value.value;
+        env[name] = value.value;
       }
-      return { outcome: "success", output };
-    } catch (err) {
-      return { outcome: "failed", error: messageOf(err) };
-    } finally {
-      this.#release(req);
+    let failureInfo: Failure | undefined;
+    if (req.failure !== undefined) {
+      const f = object(req.failure, "failure");
+      failureInfo = { job: String(f.job), stage: String(f.stage), message: decodeError(f.error).message };
     }
-  }
-
-  // safety: a cancel names a node and step, so a step's controller is keyed
-  // by both; a cancel read first leaves an aborted controller its run_step
-  // then starts with.
-  #controllerKey(req: Request): string {
-    return req.op === "run_step" ? `${String(req["node"])}\u0000${String(req["step"])}` : `#${req.id}`;
-  }
-
-  #controller(key: string): AbortController {
-    let c = this.#controllers.get(key);
-    if (!c) {
-      c = new AbortController();
-      if (this.#done) c.abort();
-      this.#controllers.set(key, c);
+    const inputs = { ...run.args, ...rawArgs };
+    const pipelineArgs = resolvedArgs(
+      [...(definition.args ?? []), ...plan.jobs().flatMap((job) => job.argSpecs())],
+      inputs,
+      definition.extra === true,
+    );
+    let args: Args;
+    try {
+      args = plan.findJob(spec.id)!.resolveArgs(pipelineArgs);
+    } catch (error) {
+      throw failure("invalid_args", messageOf(error));
     }
-    return c;
-  }
-
-  #release(req: Request): void {
-    this.#controllers.delete(this.#controllerKey(req));
-  }
-
-  #context(req: Request, job: Job, step: string | undefined, attempt?: number): NodeContext {
-    const { run } = this.#current();
-    const nodeLog = new LogWriter(this.#frames, { node: job.id });
-    const signal = this.#controller(this.#controllerKey(req)).signal;
-    const routes = (): NodeRoutes => {
-      if (!this.#routes) throw new Error("the engine gave this process no node routes");
-      return this.#routes;
-    };
-    return {
-      runId: run.runId,
-      nodeId: job.id,
-      attempt: attempt ?? 1,
-      args: run.args,
-      dryRun: run.dryRun,
-      log: step === undefined ? nodeLog : nodeLog.forStep(step),
+    const outputs = this.#state(spec.id).outputs;
+    return makeContext({
+      run,
+      jobId: spec.id,
+      ...(step === undefined ? {} : { stepId: step }),
+      args,
       signal,
-      secret: (name) => routes().secret(name, signal),
-      output: (id) => routes().output(id, signal),
-      stepOutput: <T>(id: string) => this.#stepOutputs.get(job.id)?.get(id) as T | undefined,
-    };
+      frames: this.#frames,
+      definition,
+      outputs,
+      bodyEnv: env,
+      ...(failureInfo === undefined ? {} : { failure: failureInfo }),
+      ...(this.#services === undefined ? {} : { services: this.#services }),
+    });
   }
-}
-
-function runContext(v: unknown): Omit<RunContext, "pipeline" | "args" | "log"> {
-  if (typeof v !== "object" || v === null || Array.isArray(v)) throw new ProtocolError("bad_request", "run must be an object");
-  const run = v as Record<string, unknown>;
-  if (typeof run["run_id"] !== "string" || run["run_id"] === "")
-    throw new ProtocolError("bad_request", "run.run_id must be a non-empty string");
-  const out: Omit<RunContext, "pipeline" | "args" | "log"> = {
-    runId: run["run_id"],
-    dryRun: run["dry_run"] === true,
-    noCache: run["no_cache"] === true,
-  };
-  if (typeof run["started_at"] === "string") out.startedAt = run["started_at"];
-  if (typeof run["trigger"] === "object" && run["trigger"] !== null) out.trigger = run["trigger"] as Trigger;
-  if (typeof run["git"] === "object" && run["git"] !== null) out.git = run["git"] as GitInfo;
-  return out;
-}
-
-// safety: a closure's own throw, or a value of the wrong type, is the closure
-// failing, which eval answers in a successful reply.
-async function callClosure(c: Exclude<Closure, { kind: "generator" }>, ctx: NodeContext, input: Error | undefined): Promise<unknown> {
-  switch (c.kind) {
-    case "skip_if": {
-      const v: unknown = await c.fn(ctx);
-      if (typeof v !== "boolean") throw new Error(`skip_if closure ${c.id} returned ${typeof v}, not a boolean`);
-      return v;
+  #activate(id: string, step?: string): AbortSignal {
+    const controller = new AbortController();
+    let finish!: () => void;
+    const done = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    this.#active.set(id, { job: this.#binding!.job, ...(step === undefined ? {} : { step }), controller, done, finish });
+    return controller.signal;
+  }
+  async #step(req: Request): Promise<unknown> {
+    const { plan, run } = this.#current();
+    const job = plan.findJob(String(req.job));
+    if (!job) throw failure("unknown_job", "job is not in this process's plan");
+    const step = job.findStep(String(req.step));
+    if (!step) throw failure("unknown_step", "step is not in this job");
+    const spec = plan.toDoc().jobs.find((value) => value.id === job.id)!;
+    this.#authorize(job.id, false);
+    const state = this.#state(job.id);
+    state.begin(spec, step.id, Number(req.attempt), req.settled as string[]);
+    try {
+      const ctx = this.#context(req, spec, this.#activate(req.id, step.id), step.id);
+      if (run.dryRun && !step.dryRunBody && !step.toSpec().safe_without_dry_run) throw failure("sdk_error", "step has no dry-run body");
+      const body = run.dryRun && step.dryRunBody ? step.dryRunBody : step.body;
+      ctx.signal.throwIfAborted();
+      const output = jsonOutput(await runScope({ phase: "execute", root: this.#root() }, () => body(ctx)));
+      ctx.signal.throwIfAborted();
+      state.outputs.set(step.id, output);
+      return { outcome: "success", ...(output === undefined ? {} : { output }) };
+    } catch (error) {
+      return { outcome: "failed", error: errorFields(error) };
+    } finally {
+      state.finish(step.id, true);
     }
-    case "cache_key": {
-      const v: unknown = await c.fn(ctx);
-      if (v !== null && typeof v !== "string") throw new Error(`cache_key closure ${c.id} returned ${typeof v}, not a string or null`);
-      return v;
+  }
+  async #eval(req: Request): Promise<unknown> {
+    const { plan } = this.#current();
+    const closure = plan.findClosure(String(req.closure));
+    if (!closure) throw failure("unknown_closure", "closure is not in this process's plan");
+    const spec = plan.toDoc().jobs.find((value) => value.id === closure.job.id)!;
+    this.#authorize(spec.id, closure.kind === "generate");
+    const signal = this.#activate(req.id, closure.step?.id);
+    const previous = this.#evalReady;
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.#evalReady = previous.then(() => released);
+    let stepStarted = false;
+    try {
+      await evalTurn(previous, signal);
+      if (closure.step) {
+        this.#state(spec.id).begin(spec, closure.step.id, Number(req.attempt), req.settled as string[]);
+        stepStarted = true;
+      } else if (req.attempt !== undefined || req.settled !== undefined)
+        throw failure("protocol_error", "job closure cannot carry step state");
+      const ctx = this.#context(req, spec, signal, closure.step?.id, closure.kind === "generate");
+      try {
+        const value = await runScope({ phase: "execute", root: this.#root() }, () => this.#call(closure, ctx, req));
+        return { value: jsonValue(value) ?? null };
+      } catch (error) {
+        return { value: null, error: errorFields(closure.kind === "generate" ? plan.diagnostics.error(error) : error) };
+      }
+    } finally {
+      if (stepStarted) this.#state(spec.id).finish(closure.step!.id, false);
+      release();
     }
-    case "after_run":
-      await c.fn(ctx, input);
+  }
+  async #call(closure: Closure, ctx: Context, req: Request): Promise<unknown> {
+    ctx.signal.throwIfAborted();
+    if (closure.kind === "generate") {
+      if (this.#generated.has(closure.id)) return structuredClone(this.#generated.get(closure.id));
+      const generated = new Generated(closure.generator.source, closure.id, this.#current().plan);
+      await closure.fn(generated, req.input ?? null, ctx);
+      ctx.signal.throwIfAborted();
+      const jobs = generated.toDoc().jobs;
+      const { definition, plan, rawArgs } = this.#current();
+      resolvedArgs(
+        [...(definition.args ?? []), ...[...plan.jobs(), ...generated.jobs()].flatMap((job) => job.argSpecs())],
+        rawArgs,
+        definition.extra === true,
+      );
+      plan.insert(generated);
+      this.#generated.set(closure.id, jobs);
+      return jobs;
+    }
+
+    if (closure.kind === "after_run") {
+      const result = object(req.input, "after_run input");
+      if (typeof result.outcome !== "string" || !["success", "failed"].includes(result.outcome))
+        throw failure("bad_request", "after_run requires a valid outcome");
+      if ((result.outcome === "failed") !== (result.error !== undefined))
+        throw failure("protocol_error", "after_run outcome requires a matching error");
+      const finalResult = { ...result } as unknown as JobResult<unknown>;
+      if (result.error !== undefined) {
+        const error = decodeError(result.error);
+        Object.assign(finalResult, {
+          failure: { job: ctx.jobId, stage: result.stage === "verify" ? "verify" : "action", message: error.message },
+        });
+      }
+      await closure.fn(ctx, finalResult);
+      ctx.signal.throwIfAborted();
       return null;
-    default:
-      await c.fn(ctx);
-      return null;
+    }
+    const result = await closure.fn(ctx);
+    ctx.signal.throwIfAborted();
+    if (closure.kind === "skip_if") {
+      if (typeof result !== "boolean") throw failure("sdk_error", "skip predicate must return a boolean");
+      return result;
+    }
+    if (closure.kind === "memo_key") {
+      if (result === noMemo) return null;
+      if (typeof result !== "string" || result === "") throw failure("sdk_error", "memo key must be nonempty or noMemo");
+      return result;
+    }
+    return null;
   }
 }
 
-function afterRunError(v: unknown): Error | undefined {
-  const input = typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
-  if (input["outcome"] === "success") return undefined;
-  if (input["outcome"] !== "failed") throw new ProtocolError("bad_request", "after_run input needs an outcome of success or failed");
-  return new Error(typeof input["error"] === "string" ? input["error"] : "");
-}
-
-function failureOf(v: unknown): Failure | undefined {
-  if (typeof v !== "object" || v === null) return undefined;
-  const f = v as Record<string, unknown>;
-  return {
-    node: String(f["node"] ?? ""),
-    stage: f["stage"] === "verify" ? "verify" : "action",
-    message: String(f["message"] ?? ""),
-  };
-}
-
-function messageOf(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
-function str(req: Request, key: string): string {
-  const v = req[key];
-  if (typeof v !== "string" || v === "") throw new ProtocolError("bad_request", `${key} must be a non-empty string`);
-  return v;
-}
-
-function stringMap(v: unknown, key: string): Record<string, string> {
-  if (typeof v !== "object" || v === null || Array.isArray(v))
-    throw new ProtocolError("bad_request", `${key} must be an object of strings`);
-  for (const [k, s] of Object.entries(v)) {
-    if (typeof s !== "string") throw new ProtocolError("bad_request", `${key}.${k} must be a string`);
-  }
-  return v as Record<string, string>;
-}
-
-// safety: a value with no JSON form never leaves this process, so only what
-// can be measured is held to the output limit.
-function jsonSize(value: unknown): number {
+async function evalTurn(previous: Promise<void>, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+  let abort!: () => void;
   try {
-    return Buffer.byteLength(JSON.stringify(value) ?? "");
-  } catch {
-    return 0;
+    await Promise.race([
+      previous,
+      new Promise<never>((_, reject) => {
+        abort = () => reject(signal.reason);
+        signal.addEventListener("abort", abort, { once: true });
+      }),
+    ]);
+    signal.throwIfAborted();
+  } finally {
+    signal.removeEventListener("abort", abort);
+  }
+}
+
+function resolvedArgs(specs: readonly import("../index.d.ts").ArgSpec[], raw: Args, allowUnknown: boolean): Record<string, string> {
+  try {
+    return resolveArgs(specs, raw, { allowUnknown });
+  } catch (error) {
+    throw failure("invalid_args", messageOf(error));
   }
 }

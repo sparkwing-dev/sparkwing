@@ -16,6 +16,7 @@ func pendingScenarios(t *testing.T, group string) {
 		}
 		count++
 		t.Run(scenario.ID, func(t *testing.T) {
+			typeScriptBoundary(t, scenario.ID)
 			if check, ok := runspecConfigBoundaries()[scenario.ID]; ok {
 				t.Run("runspec-config", func(t *testing.T) {
 					if err := check(scenario.ID); err != nil {
