@@ -21,6 +21,7 @@ unlock.
 ## [Unreleased]
 
 ### Changed
+- **controller (Breaking):** Job and step annotations, summaries and step reports move to `/api/v1/runs/{run}/jobs/{job}` under the shared capability policy. Reports carry server-derived authority and attempt fences. Annotations and summaries use the 128 KiB shared text limit. See [migration guide](docs/migrations/_unreleased.md#job-reporting).
 - **controller (Breaking):** Run intake, plan acceptance and lifecycle writes use the shared capability policy and controller wire. Raw run upserts and plan snapshots are removed. Child intake binds to its parent job, retries retain the source seal, and run finish commits its owner unit in the same transaction
 - **controller (Breaking):** Deployment limits, signup controls and object-store administration use separate grants under `/api/v1/operator`. Team storage reads omit deployment totals. Usage-metrics and repo-dispatch endpoints are removed. See [migration guide](docs/migrations/_unreleased.md#deployment-authorization).
 - **controller (Breaking):** Thirteen console endpoints use the shared authorization policy. Account/team deletion, installation unbinding, orphan reconciliation and credit-settings writes move under `/api/v1/operator` and refuse deployment bearers. Console mutations require CSRF proof and record the authenticated account ID. See [migration guide](docs/migrations/_unreleased.md#console-authorization).

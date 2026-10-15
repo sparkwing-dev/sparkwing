@@ -707,49 +707,79 @@ paths:
       responses:
         "204": {description: Touched.}
 
-  /api/v1/runs/{id}/nodes/{nodeID}/annotations:
+  /api/v1/runs/{run}/jobs/{job}/annotations:
     parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
     post:
-      x-sparkwing-scope: claim or nodes.claim
-      tags: [nodes]
-      summary: Append one annotation string to the node.
+      x-sparkwing-scope: node.report or node.report or data.write
+      tags: [jobs]
+      summary: Append one annotation string to the job.
+      description: Requires a live job claim, trigger owner, or local publisher. The controller derives authority and fences. Cancellation allows reporting. Ended claims cannot report. The transaction rechecks holder rights.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/controller.Server.handleAppendNodeAnnotation.body
+              x-sparkwing-go-type: pkg/controller.annotationRequest
               type: object
               required: [message]
               properties:
+                step_id: {type: string, description: "Omit on the job annotation route."}
                 message: {type: string}
+                level: {type: string}
+                file: {type: string}
+                line: {type: integer}
       responses:
         "204": {description: Appended.}
-        "413": {description: "The annotation exceeds 64 KiB, or the run's annotations would exceed 4 MiB JSON-encoded."}
+        "413": {description: "The annotation exceeds 128 KiB, or the run's annotations would exceed 4 MiB JSON-encoded."}
         "429": {description: The run already holds 1000 annotations.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or reporting attempt changed.}
+        "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/runs/{id}/nodes/{nodeID}/summary:
+  /api/v1/runs/{run}/jobs/{job}/summary:
     parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
     post:
-      x-sparkwing-scope: claim or nodes.claim
-      tags: [nodes]
-      summary: Overwrite the node-scoped run summary markdown.
+      x-sparkwing-scope: node.report or node.report or data.write
+      tags: [jobs]
+      summary: Overwrite the job-scoped run summary markdown.
+      description: Requires a live job claim, trigger owner, or local publisher. The controller derives authority and fences. Cancellation allows reporting. Ended claims cannot report. The transaction rechecks holder rights.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/controller.Server.handleSetNodeSummary.body
+              x-sparkwing-go-type: pkg/controller.EngineController.handleSummary.body
               type: object
               required: [markdown]
               properties:
+                step_id: {type: string, description: "Omit on the job summary route."}
                 markdown: {type: string}
       responses:
         "204": {description: Stored.}
+        "413": {description: "The masked summary exceeds 128 KiB."}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or reporting attempt changed.}
+        "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest:
     parameters:
@@ -1091,110 +1121,169 @@ paths:
                     type: array
                     items: {$ref: "#/components/schemas/DebugPause"}
 
-  /api/v1/runs/{id}/nodes/{nodeID}/steps/start:
+  /api/v1/runs/{run}/jobs/{job}/steps/start:
     parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
     post:
-      x-sparkwing-scope: claim or nodes.claim
-      tags: [node-steps]
-      summary: Mark a step within a node as running.
+      x-sparkwing-scope: node.report or node.report or data.write
+      tags: [job-steps]
+      summary: Mark a step within a job as running.
+      description: Requires a live job claim, trigger owner, or local publisher. The controller derives authority and fences. Cancellation allows reporting. Ended claims cannot report. The transaction rechecks holder rights.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/controller.Server.handleStartNodeStep.body
+              x-sparkwing-go-type: pkg/controller.stepStartRequest
               type: object
               required: [step_id]
               properties:
                 step_id: {type: string}
       responses:
         "204": {description: Started.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or reporting attempt changed.}
+        "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/runs/{id}/nodes/{nodeID}/steps/finish:
+  /api/v1/runs/{run}/jobs/{job}/steps/finish:
     parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
     post:
-      x-sparkwing-scope: claim or nodes.claim
-      tags: [node-steps]
-      summary: Transition a step to passed / failed.
+      x-sparkwing-scope: node.report or node.report or data.write
+      tags: [job-steps]
+      summary: Transition a step to passed, failed, or cancelled.
+      description: Requires a live job claim, trigger owner, or local publisher. The controller derives authority and fences. Cancellation allows reporting. Ended claims cannot report. The transaction rechecks holder rights.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/controller.Server.handleFinishNodeStep.body
+              x-sparkwing-go-type: pkg/controller.stepFinishRequest
               type: object
               required: [step_id, status]
               properties:
                 step_id: {type: string}
                 status:
                   type: string
-                  enum: [passed, failed]
+                  enum: [passed, failed, cancelled]
+                error: {$ref: "#/components/schemas/PolicyError/properties/error"}
       responses:
         "204": {description: Finished.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or reporting attempt changed.}
+        "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/runs/{id}/nodes/{nodeID}/steps/skip:
+  /api/v1/runs/{run}/jobs/{job}/steps/skip:
     parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
     post:
-      x-sparkwing-scope: claim or nodes.claim
-      tags: [node-steps]
+      x-sparkwing-scope: node.report or node.report or data.write
+      tags: [job-steps]
       summary: Record a step as skipped (SkipIf hit).
+      description: Requires a live job claim, trigger owner, or local publisher. The controller derives authority and fences. Cancellation allows reporting. Ended claims cannot report. The transaction rechecks holder rights.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/controller.Server.handleSkipNodeStep.body
+              x-sparkwing-go-type: pkg/controller.stepStartRequest
               type: object
               required: [step_id]
               properties:
                 step_id: {type: string}
       responses:
         "204": {description: Recorded.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or reporting attempt changed.}
+        "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/runs/{id}/nodes/{nodeID}/steps/annotations:
+  /api/v1/runs/{run}/jobs/{job}/steps/annotations:
     parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
     post:
-      x-sparkwing-scope: claim or nodes.claim
-      tags: [node-steps]
+      x-sparkwing-scope: node.report or node.report or data.write
+      tags: [job-steps]
       summary: Append one annotation to a step.
+      description: Requires a live job claim, trigger owner, or local publisher. The controller derives authority and fences. Cancellation allows reporting. Ended claims cannot report. The transaction rechecks holder rights.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/controller.Server.handleAppendStepAnnotation.body
+              x-sparkwing-go-type: pkg/controller.annotationRequest
               type: object
               required: [step_id, message]
               properties:
                 step_id: {type: string}
                 message: {type: string}
+                level: {type: string}
+                file: {type: string}
+                line: {type: integer}
       responses:
         "204": {description: Appended.}
-        "413": {description: "The annotation exceeds 64 KiB, or the run's annotations would exceed 4 MiB JSON-encoded."}
+        "413": {description: "The annotation exceeds 128 KiB, or the run's annotations would exceed 4 MiB JSON-encoded."}
         "429": {description: The run already holds 1000 annotations.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or reporting attempt changed.}
+        "500": {$ref: "#/components/responses/InternalError"}
 
-  /api/v1/runs/{id}/nodes/{nodeID}/steps/summary:
+  /api/v1/runs/{run}/jobs/{job}/steps/summary:
     parameters:
-      - {$ref: "#/components/parameters/RunID"}
-      - {$ref: "#/components/parameters/NodeID"}
+      - in: path
+        name: run
+        required: true
+        schema: {type: string}
+      - in: path
+        name: job
+        required: true
+        schema: {type: string}
     post:
-      x-sparkwing-scope: claim or nodes.claim
-      tags: [node-steps]
+      x-sparkwing-scope: node.report or node.report or data.write
+      tags: [job-steps]
       summary: Overwrite the step-scoped run-summary markdown.
+      description: Requires a live job claim, trigger owner, or local publisher. The controller derives authority and fences. Cancellation allows reporting. Ended claims cannot report. The transaction rechecks holder rights.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              x-sparkwing-go-type: pkg/controller.Server.handleSetStepSummary.body
+              x-sparkwing-go-type: pkg/controller.EngineController.handleSummary.body
               type: object
               required: [step_id, markdown]
               properties:
@@ -1202,6 +1291,12 @@ paths:
                 markdown: {type: string}
       responses:
         "204": {description: Stored.}
+        "413": {description: "The masked summary exceeds 128 KiB."}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The authority or reporting attempt changed.}
+        "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/steps:
     parameters: [{$ref: "#/components/parameters/RunID"}]

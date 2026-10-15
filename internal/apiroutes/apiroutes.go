@@ -36,7 +36,7 @@ const Operator = "operator"
 
 var (
 	handleRE   = regexp.MustCompile(`(\w+)\.Handle(?:Func)?\("([A-Z]+) (/[^"]+)",\s*(.*)$`)
-	endpointRE = regexp.MustCompile(`\{Method: "([A-Z]+)", Pattern: "(/[^"]+)"`)
+	endpointRE = regexp.MustCompile(`\{\s*Method: "([A-Z]+)", Pattern: "(/[^"]+)"`)
 
 	scopeRefRE = regexp.MustCompile(`\b((?:Scope|scope)[A-Za-z]\w*)\b`)
 

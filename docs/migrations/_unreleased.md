@@ -1,5 +1,18 @@
 # Migrating to the next release
 
+## Job reporting
+
+Annotations, summaries and step start, finish and skip requests use
+`/api/v1/runs/{run}/jobs/{job}`. Replace `/nodes/{nodeID}` in those seven
+reporting paths with `/jobs/{job}`. The Go controller client uses the new
+paths. The old paths are removed.
+
+Reports require an awarded job or trigger capability with `node.report`, or
+the run's local publication authority. Caller-supplied holder and generation
+headers grant no authority. Step finish accepts `passed`, `failed` and
+`cancelled`, plus an optional inner error with a code and masked message.
+Annotations and summaries accept at most 128 KiB of masked text.
+
 ## Node logs reach the controller as segments
 
 - **Before:** a Kubernetes Job, warm runner, self-hosted agent, GitHub

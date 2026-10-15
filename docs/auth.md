@@ -26,6 +26,19 @@ carries an idempotency key and leaves source seals unchanged. Run/job heartbeat
 responses carry the committed lease expiry, cancellation and watched jobs.
 Every request uses JSON. Bodies cannot replace authority, holders or fences.
 
+Job and step annotations, summaries and step transitions use the same policy
+under `/api/v1/runs/{run}/jobs/{job}`. A job claim reports only its own job.
+A trigger owner may report its run's jobs, subject to the transaction's holder
+check. A local publisher uses its separate run-bound publication authority.
+Cancellation permits reporting while the claim remains live. An ended claim
+cannot write these reports.
+
+Step start and skip take `step_id`. Step finish also takes `status` (`passed`,
+`failed` or `cancelled`) and an optional masked inner error. The controller
+derives the attempt from the claim or the persisted job, and the store owns
+timestamps and stale-attempt refusal. Annotations and summaries accept at most
+128 KiB of masked text. The old `/nodes/` reporting paths are removed.
+
 ## Generator expansion authority
 
 `POST /api/v1/runs/{run}/jobs/{job}/expansion` uses the shared capability

@@ -419,7 +419,7 @@ func (c *Client) TouchRunHeartbeat(ctx context.Context, runID string) error {
 // AppendNodeAnnotation POSTs a single persistent summary string to
 // append to the node's annotations list. Driven by sparkwing.AnnotateOld.
 func (c *Client) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {
-	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/annotations",
+	path := fmt.Sprintf("/api/v1/runs/%s/jobs/%s/annotations",
 		url.PathEscape(runID), url.PathEscape(nodeID))
 	return c.post(ctx, path,
 		map[string]string{"message": msg},
@@ -430,7 +430,7 @@ func (c *Client) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg st
 // Driven by sparkwing.Summary() emitted outside any step body. The
 // server overwrites the previous value.
 func (c *Client) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error {
-	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/summary",
+	path := fmt.Sprintf("/api/v1/runs/%s/jobs/%s/summary",
 		url.PathEscape(runID), url.PathEscape(nodeID))
 	return c.post(ctx, path,
 		map[string]string{"markdown": md},
@@ -440,7 +440,7 @@ func (c *Client) SetNodeSummary(ctx context.Context, runID, nodeID, md string) e
 // StartNodeStep POSTs the running transition for one step. Body
 // carries the step id; the server stamps started_at server-side.
 func (c *Client) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
-	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/steps/start",
+	path := fmt.Sprintf("/api/v1/runs/%s/jobs/%s/steps/start",
 		url.PathEscape(runID), url.PathEscape(nodeID))
 	return c.post(ctx, path,
 		map[string]string{"step_id": stepID},
@@ -450,7 +450,7 @@ func (c *Client) StartNodeStep(ctx context.Context, runID, nodeID, stepID string
 // FinishNodeStep POSTs the terminal status (passed | failed | cancelled) and
 // finished_at stamp for one step.
 func (c *Client) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error {
-	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/steps/finish",
+	path := fmt.Sprintf("/api/v1/runs/%s/jobs/%s/steps/finish",
 		url.PathEscape(runID), url.PathEscape(nodeID))
 	return c.post(ctx, path,
 		map[string]string{"step_id": stepID, "status": status},
@@ -461,7 +461,7 @@ func (c *Client) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, stat
 // guard fired, dry-run with no body, etc.). Server inserts a single
 // terminal row with started_at == finished_at.
 func (c *Client) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error {
-	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/steps/skip",
+	path := fmt.Sprintf("/api/v1/runs/%s/jobs/%s/steps/skip",
 		url.PathEscape(runID), url.PathEscape(nodeID))
 	return c.post(ctx, path,
 		map[string]string{"step_id": stepID},
@@ -472,7 +472,7 @@ func (c *Client) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string)
 // step's annotations list. Mirrors AppendNodeAnnotation but scoped
 // to a single step inside a node's inner Work DAG.
 func (c *Client) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error {
-	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/steps/annotations",
+	path := fmt.Sprintf("/api/v1/runs/%s/jobs/%s/steps/annotations",
 		url.PathEscape(runID), url.PathEscape(nodeID))
 	return c.post(ctx, path,
 		map[string]string{"step_id": stepID, "message": msg},
@@ -483,7 +483,7 @@ func (c *Client) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID
 // Driven by sparkwing.Summary() emitted inside a step body. The
 // server overwrites the previous value.
 func (c *Client) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error {
-	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/steps/summary",
+	path := fmt.Sprintf("/api/v1/runs/%s/jobs/%s/steps/summary",
 		url.PathEscape(runID), url.PathEscape(nodeID))
 	return c.post(ctx, path,
 		map[string]string{"step_id": stepID, "markdown": md},

@@ -38,9 +38,30 @@ type engineTransactions struct {
 	renewRef   store.NodeRef
 	beat       store.LeaseBeat
 	applied    store.Applied
+	annotation store.AnnotationWrite
+	summary    store.SummaryWrite
+	step       store.StepReport
 	writes     int
 	err        error
 	readErr    error
+}
+
+func (f *engineTransactions) WriteSummary(_ context.Context, summary store.SummaryWrite) error {
+	f.summary = summary
+	f.writes++
+	return f.err
+}
+
+func (f *engineTransactions) RecordStep(_ context.Context, step store.StepReport) error {
+	f.step = step
+	f.writes++
+	return f.err
+}
+
+func (f *engineTransactions) WriteAnnotation(_ context.Context, annotation store.AnnotationWrite) error {
+	f.annotation = annotation
+	f.writes++
+	return f.err
 }
 
 func (f *engineTransactions) TransitionNode(_ context.Context, change store.NodeTransition) (store.Applied, error) {

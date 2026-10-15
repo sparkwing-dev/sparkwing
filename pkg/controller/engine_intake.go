@@ -29,6 +29,9 @@ type RunTransactions interface {
 	FinishRunAndUnit(context.Context, store.FinishRunRequest) (store.Applied, error)
 	RenewOwner(context.Context, store.Actor) (store.LeaseBeat, error)
 	RenewNodeClaim(context.Context, store.NodeRef, store.Actor) (store.LeaseBeat, error)
+	WriteAnnotation(context.Context, store.AnnotationWrite) error
+	WriteSummary(context.Context, store.SummaryWrite) error
+	RecordStep(context.Context, store.StepReport) error
 }
 
 func (s *EngineController) runTransactions(ctx context.Context, team string) (RunTransactions, error) {

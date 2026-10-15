@@ -8,7 +8,7 @@ interfaces. The policy evaluator, authentication verifier, HTTP policy router,
 delegation validator, data/source checks, billing calculation, payment verifier
 and error codec are implemented. Filesystem and S3 object signers implement the
 signing boundary. Persistent issuance and authentication reads still need the
-store implementation. The Stripe callback, nine engine endpoints and twenty-three operator endpoints use this table in the existing
+store implementation. The Stripe callback, sixteen engine endpoints and twenty-three operator endpoints use this table in the existing
 controller. The remaining routes have not switched to it.
 
 ## Ownership
@@ -761,6 +761,60 @@ The full `pkg/docs` run cannot bind its web-client test sockets in the sandbox.
 Its symbol, changelog and mirror checks pass separately. The full legacy
 controller suite, native transports and Sparkwing pipelines were not run.
 
+### Job reporting cutover
+
+Seven reporting endpoints use `PolicyRouter`: job and step annotations and
+summaries, plus step start, finish and skip. Their paths use `/jobs/{job}`.
+The old `/nodes/{nodeID}` registrations and seven handler bodies are deleted.
+The existing Go client methods use the new paths. Bodies retain `step_id`,
+`message`, `markdown` and step-finish `status`. Annotations also accept the
+C1 level, file and line fields. Finish accepts an optional shared inner error.
+
+The adapter passes tagged authority and holder/generation fences to C1's
+existing `WriteAnnotation`, `WriteSummary` and `RecordStep` signatures through
+`RunTransactions`. Job claims supply their bound attempt. Trigger owners and
+publishers load the persisted job attempt without replacing their own actor
+or owner fence. An unstarted job has no reportable step attempt and returns
+`illegal_transition`. The store owns timestamps, replay and the final recheck.
+Annotations and summaries enforce `limits.AnnotationBytes` without truncation.
+
+The HTTP tests cover all three allowed authority alternatives, cancellation,
+revoked ancestry, missing grants, sibling jobs, caller actor fields, typed
+transaction refusals, malformed requests, exact text bounds, method refusals
+and removed paths. A request-body checkpoint changes the fixture generation
+after authentication. The original fence reaches the transaction and its
+refusal reaches HTTP. This is a fake-backed boundary proof, not a database
+race proof. The seven existing client methods also reach these handlers over
+an in-memory HTTP transport. The old standalone cancellation test is replaced
+by the new step-finish case. No additional full T1 scenario or native placement
+cell is claimed complete.
+
+Real integration still requires C1's transaction bodies, committed auth and
+binding readers, and production session/peer/CSRF adapters. C1 must verify
+annotation and summary attribution across application retries: their request
+contracts carry actor authority/generation but no expected attempt, unlike
+`StepReport`. The store/wire owners must confirm whether the persisted
+capability binding is sufficient or add that fence. No C1 signature is changed.
+
+Shared edits are the seven path strings in `pkg/controller/client/client.go`,
+the classification strings in `internal/orchestrator/wingd_api_routes_test.go`,
+and removal of the retired breaker read path from `internal/orchestrator/wingd_api.go`.
+The classification check also exposed stale entries from the earlier operator
+and lifecycle cutovers. They now match the registered paths. API references, OpenAPI,
+auth/migration docs, changelog and their embedded mirrors. The API route parser
+also accepts whitespace after an endpoint's opening brace. Its regression test
+reproduced omission of the real multiline engine declarations. It still finds
+registrations independently before reading the policy metadata. No issuer,
+cache, setting or environment variable is added.
+
+Verification passes the whole-repository build, scoped vet, capability and
+API-error tests, executable acceptance proofs, focused controller policy and
+signer tests, daemon route classification, OpenAPI generation, comment policy,
+documentation symbols and embedded mirrors. The new reporting file has 161
+passing HTTP cases and a seven-request client round-trip proof. The full
+legacy controller suite, native transports and Sparkwing pipelines were not
+run. The lead owns independent review and integration checks.
+
 ## Open questions for the lead
 
 1. **Root origins and sessions.** Section 5.1 names three issuance forms but
@@ -792,7 +846,7 @@ controller suite, native transports and Sparkwing pipelines were not run.
    audit transaction. C2 supplies no alternate SQL implementation. Persistent
    root, delegation, claim and exchange entry points must reach `Store.Issue`.
 5. **Controller cutover.** The running `Server` uses `PolicyRouter` for the
-   Stripe callback, nine engine endpoints and twenty-three operator endpoints. Other routes retain legacy auth and
+   Stripe callback, sixteen engine endpoints and twenty-three operator endpoints. Other routes retain legacy auth and
    registrations. Wire final handlers and decoders to `PolicyRouter`, provide
    account/console/verified-local identity and CSRF adapters, then delete the
    old auth stack and handler authorization. Final route-inventory and

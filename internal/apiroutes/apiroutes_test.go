@@ -38,7 +38,9 @@ func TestParseOperatorEndpointsUsesActualRegistrations(t *testing.T) {
 
 func TestParseEngineEndpointsUsesActualRegistrations(t *testing.T) {
 	src := writeFile(t, "server.go", "s.registerEngineRoutes(router)")
-	endpoints := `{Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/expansion", Authentication: capability.AuthCapability,`
+	endpoints := `{
+		Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/expansion", Authentication: capability.AuthCapability,
+	}`
 	if err := os.WriteFile(filepath.Join(filepath.Dir(src), "engine_routes.go"), []byte(endpoints), 0o600); err != nil {
 		t.Fatal(err)
 	}

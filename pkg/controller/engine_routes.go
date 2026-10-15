@@ -64,6 +64,34 @@ func (s *Server) engineEndpoints() []Endpoint {
 			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/expansion", Authentication: capability.AuthCapability,
 			Decode: engine.expansionTarget, Handle: engine.handleExpansion,
 		},
+		{
+			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/annotations", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleAnnotation,
+		},
+		{
+			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/steps/annotations", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleAnnotation,
+		},
+		{
+			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/summary", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleSummary,
+		},
+		{
+			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/steps/summary", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleSummary,
+		},
+		{
+			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/steps/start", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleStep,
+		},
+		{
+			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/steps/finish", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleStep,
+		},
+		{
+			Method: "POST", Pattern: "/api/v1/runs/{run}/jobs/{job}/steps/skip", Authentication: capability.AuthCapability,
+			Decode: engine.runTarget, Handle: engine.handleStep,
+		},
 	}
 }
 
