@@ -181,9 +181,10 @@ type Target struct {
 
 // Presentation is private authentication input. Raw never belongs in process env or diagnostics.
 type Presentation struct {
-	Raw   string
-	Class CredentialClass
-	Peer  Subject
+	Raw      string
+	Class    CredentialClass
+	Peer     Subject
+	Evidence RequestEvidence
 }
 
 // AuthorityResolver resolves persisted capability or session authority inside the caller's transaction.

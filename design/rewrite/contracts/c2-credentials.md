@@ -4,11 +4,11 @@
 
 This contract covers frozen architecture sections 3.6, 5, 6.5, 8 and 9.5,
 including A58, A59, A66, A68, A72 and A73. The Go files declare the target
-interfaces. The policy evaluator, delegation validator, data/source checks,
-billing calculation, payment verifier and error codec are implemented.
-Filesystem and S3 object signers implement the signing boundary. Persistent
-issuance and authentication still need the store implementation. The existing
-controller has not switched to this table.
+interfaces. The policy evaluator, authentication verifier, HTTP policy router,
+delegation validator, data/source checks, billing calculation, payment verifier
+and error codec are implemented. Filesystem and S3 object signers implement the
+signing boundary. Persistent issuance and authentication reads still need the
+store implementation. The existing controller has not switched to this table.
 
 ## Ownership
 
@@ -63,6 +63,12 @@ All capability names below are in `internal/capability`.
 | `RoutePolicy` | Attach all policy metadata to one method/path registration. |
 | `Target` | Carry decoded selectors and resolved resource ownership to binding checks. |
 | `Presentation` | Supply private bearer/session or verified peer authentication input. |
+| `RequestEvidence` | Carry decoded target selectors and the exact result-body digest into authentication. |
+| `CredentialLookup` | Hash the complete presentation without sending its reusable secret to persistence. |
+| `AuthorityState`, `AuthenticationSnapshot` | Read complete ancestry, current membership, binding facts and the store clock in one snapshot. |
+| `BindingState`, `ExpansionState`, `RecordedResult` | Supply current unit fences, independent expansion leases and committed result identity. |
+| `AuthenticationReader.ReadAuthentication` | Load committed facts for the verifier, including the awarded team's membership and cross-team ancestors. |
+| `NewAuthenticator`, `ValidateAuthority` | Verify fresh snapshots and share ancestry checks with transactional authority resolution. |
 | `AuthorityResolver.ResolveAuthority` | Resolve tagged capability/session authority and recheck ancestry and membership inside the store transaction. |
 | `AuthorityGeneration`, `AuthGenerations`, `AuthCacheEntry` | Bind cached credential facts to every ancestor and the awarded team's membership generation. |
 | `AuthCacheEntry.Reusable` | Require a fresh complete generation vector, an unexpired credential and age strictly below the shared cache TTL. |
@@ -111,6 +117,8 @@ All capability names below are in `internal/capability`.
 | `apierr.WriteJSON` | Write one JSON error line for CLI stderr. |
 | `controller.NewFilesystemDataSigner`, `FilesystemDataSigner.Sign`, `FilesystemDataSigner.Verify` | Sign and verify exact filesystem transfer constraints. The blob owner verifies uploaded bytes before recording a receipt. |
 | `controller.NewS3DataSigner`, `S3DataSigner.Sign` | Sign one configured bucket's GET or checksum/size-bound PUT without making a storage request. |
+| `controller.RouteAuthorization`, `controller.Endpoint`, `controller.PolicyRouter` | Wire identity, decoding, CSRF, external proof and authorized handlers into the matched route. |
+| `controller.NewPolicyRouter`, `PolicyRouter.Register`, `PolicyRouter.Validate`, `PolicyRouter.Registrations` | Register handlers independently of the policy table and check their proof wiring. Combine controller and node-host registrations for the complete inventory check. |
 
 The exported data tables are `Grants`, `AwardPolicies`, `LivenessPolicies`,
 `Routes`, `BootstrapGrants`, `BootstrapUnits`, `UnitBillingMappings`,
@@ -121,7 +129,8 @@ clients, SDKs or documentation generators.
 
 ## Issuance invariants
 
-- Tokens contain 256 random bits and an audience prefix, `swk_` or `swn_`.
+- Tokens contain 256 random bits encoded as 43 unpadded base64url characters
+  after the audience prefix, `swk_` or `swn_`.
   The lookup key is SHA-256 of the complete reference token. Raw values
   travel only in memory, a read-once private file or the protocol pipe.
 - Delegate narrows its parent's team, grants, binding, repository scope,
@@ -267,6 +276,53 @@ refuse cache reuse. Revocation and membership changes advance the affected
 generations in the same transaction. Expiry, route liveness and binding fences
 are rechecked on each request. TTL never substitutes for generation checks.
 
+### Authentication read boundary
+
+`AuthenticationReader` is the persistence seam. It returns one committed
+snapshot with the store clock, leaf-to-root authorities, current membership
+verdicts and the leaf's binding facts. Lookup uses the SHA-256 of the complete
+bearer or session value. The reader never receives that value. Peer lookup
+requires an identity verified by the transport. Anonymous authority requires
+explicit local configuration in the reader.
+
+Each authority carries its current permitted grants and membership in its own
+team. A cross-team launcher stays in the ancestry, and the awarded team's
+membership is checked separately. A missing authority, incomplete chain,
+cycle, expiry, effective revocation or membership loss refuses authentication.
+The original here Award also requires its immediate requester's current
+`runs.write`. Delegated here descendants preserve that check through the chain.
+`ValidateAuthority` supplies these checks to the transactional resolver too.
+
+The verifier reads a fresh snapshot for each request. It does not cache
+authority or liveness. An adapter that later caches facts must still satisfy
+`AuthCacheEntry.Reusable` and read fresh liveness on every request.
+
+`Presentation.Evidence` supplies decoded selectors and the exact request-body
+SHA-256. The verifier supplies method and pattern from the matched route.
+Replay requires the committed actor, operation, resource, generation, attempt
+and digest. Final job log flush also requires the unchanged fence, unsealed
+stream and finish-based grace. An eval capability, including its bootstrap,
+uses its own lease and controller ownership lease independently of its terminal
+source. Cancellation refuses sensitive operations while live reporting drains.
+An unclaimed here Award can discover and claim during its first-claim window.
+Once claimed, its reservation permits reclaim without a new window.
+
+`PolicyRouter` applies the boundary after matching a real handler registration.
+It returns decoder errors only after authentication because resource lookup
+failures must not disclose existence to dead credentials. Authorization headers
+take precedence over session or peer fallback. Session and console mutations
+require a CSRF verifier. External routes require their declared proof verifier.
+Missing policy, wrong proof wiring and missing dependencies refuse the request.
+Unknown routes and unsupported methods use the shared JSON error object.
+
+`PolicyRouter.Validate` checks each registered endpoint. The complete inventory
+check combines the controller and node-host `Registrations` and calls
+`capability.ValidateRoutes`. A production adapter must supply both checks.
+
+These additions are local C2 contract extensions. C1 must implement the reader
+against its transaction and sealed records. They introduce no storage tables,
+second issuer, credential cache or compatibility adapter.
+
 ## Data and source release
 
 `/api/v1/data/{download,upload,commit,has-many,records}` uses controller
@@ -386,6 +442,20 @@ deployment bearers and local peers. Its binding checker is a fixture, so this
 test establishes no store relations, HTTP/socket behavior or actual router
 registration coverage. The cross-placement scenario skeletons remain skipped.
 
+`TestCredentialHTTPAuthenticationBoundary`, `TestCredentialHTTPTerminalGrace`
+and `TestCredentialHTTPCancelDrainsReporting` run the real verifier, router and
+policy evaluator against a fake committed-fact reader. They assert successful
+handler entry, the 401/403/409 split, ancestry and membership refusal, path and
+audience isolation, result-body matching, log grace and cancellation draining.
+Their fake transaction refusal proves HTTP propagation of 409, not a database
+race. The fake binding checker establishes no persisted resource relation.
+
+Package tests cover here first claim/reclaim and requester grant loss, eval
+bootstrap source/exchange under its own lease, node-host process exit,
+malformed references, CSRF, external-proof wiring and safe internal errors.
+An independent review found the eval bootstrap liveness defect and preclaim
+here discovery refusal. Both have regression coverage.
+
 `TestDataRefScope` covers the data authority boundary, with edge decisions
 supplied by a fixture. Manual-ref delegation cannot widen to the verified ref.
 The full old cache-ref and credential-matrix ports still require store and
@@ -456,19 +526,18 @@ exercise only available contract data and functions.
    was specified. Trigger and plan grant rows contain the permissions needed
    by their named lifecycle responsibilities. C3/C4 and the lead must match
    these rows before wiring clients. Adjust this table rather than adding aliases.
-4. **Store authentication entry points.** W1 must expose presentation lookup
-   and route-specific liveness reads. The only authority resolver on the
-   integration contract is a method of private `storeTx`, and both it and
-   `Store.AuthGenerations` are stubs. No `BindingChecker`, `DataAccessChecker`
-   or source-release audit transaction implementation is exposed. Controller
-   code must not bypass that ownership with its own SQL. Persistent root,
-   delegation, claim and exchange entry points must reach the one issuer.
-5. **Authentication request evidence.** `Authenticator.Authenticate` receives
-   `Presentation` and `RoutePolicy`, but no decoded target, result digest or
-   log subject. C1/C2 must agree how authentication obtains those facts for
-   exact terminal replay, log-tail and own-eval checks before the middleware
-   can replace the existing route stack. This piece is blocked at the contract
-   boundary. No alternative lookup store or compatibility adapter was added.
+4. **Store authentication integration.** W1 must implement C2's
+   `AuthenticationReader` using one transaction and expose transactional
+   authority resolution through its existing `AuthorityResolver`. It must
+   also supply `BindingChecker`, `DataAccessChecker` and the source-release
+   audit transaction. C2 supplies no alternate SQL implementation. Persistent
+   root, delegation, claim and exchange entry points must reach `Store.Issue`.
+5. **Controller cutover.** The running `Server` still uses legacy auth and
+   registrations. Wire final handlers and decoders to `PolicyRouter`, provide
+   account/console/verified-local identity and CSRF adapters, then delete the
+   old auth stack and handler authorization. Final route-inventory and
+   handler-policy lint checks must cover those actual registrations. W3/W4
+   must provide node-host process facts through the same verifier boundary.
 
 ## Cross-area assumptions
 
@@ -477,7 +546,7 @@ exercise only available contract data and functions.
 | C1 data | `Capability`, `AuthorityRef`, `AuthorityResolver`, `AuthGenerations`, `VerifiedPaymentEvent`, `UnitKind`, `AwardPurpose`, `DeliveryPurpose`, `Binding`, `LeaseRef`, `IssueRequest`, `BillingProvenance`, `BillableInterval`, `BillingSettlement`, `DataScope`, `DataTarget`, `SourceReleaseAudit`; implement `BindingChecker` and `DataAccessChecker`, use the existing transaction wrapper in `Store.Issue`. |
 | C3 protocol and SDK | `apierr.Code`, `apierr.Error`, `apierr.Envelope`, `Audience`, `Binding`, `DelegateSpec`, `Authenticated`, `Authorized`, `Routes`; node-host admission and hello use the same fence and grant rules. |
 | C4 surface and config | `Routes`, `Grant`, `CredentialRule`, `ProvisionSpec`, `DataSigner`, `ObjectToSign`, `BillingRules`, `PaymentConfig`; own the TTLs, billing minimum constants, local peer identity, private files and profile options. |
-| T1 acceptance | `Routes`, `AwardPolicies`, `LivenessPolicies`, `apierr.Codes`, `Store.Issue`, `Authenticator`, `Authorize`, `AuthorizeData`, `AuthorizeSourceRelease`; runtime tests wait for these stubs to be implemented. |
+| T1 acceptance | `Routes`, `AwardPolicies`, `LivenessPolicies`, `apierr.Codes`, `Store.Issue`, `Authenticator`, `Authorize`, `AuthorizeData`, `AuthorizeSourceRelease`; runtime tests need the persistent adapters and final controller cutover. |
 
 C1's schema stores node identifiers internally while wire JSON uses job_id.
 Public node-host output paths likewise use `/node/v1/jobs/{job}/output`.
