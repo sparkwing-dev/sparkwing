@@ -195,26 +195,8 @@ func (o *Operator) RecordPaymentWarning(ctx context.Context, w PaymentWarning, n
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return "", err
 	}
-	actionable := 0
-	if w.Actionable {
-		actionable = 1
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO payment_warnings (warning_id, payment_intent, fingerprint, actionable,
-	    created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (warning_id) DO NOTHING`,
-		w.WarningID, w.PaymentIntent, w.Fingerprint, actionable, now.UnixNano()); err != nil {
-		return "", err
-	}
-	if !w.Actionable {
-		return "", tx.Commit()
-	}
-	team, err := paymentWarningTeamTx(ctx, tx, w.PaymentIntent)
+	team, err := recordPaymentWarningTx(ctx, tx, w, now)
 	if err != nil {
-		return "", err
-	}
-	if team == "" {
-		return "", tx.Commit()
-	}
-	if err := holdForWarningTx(ctx, tx, team, w.WarningID, w.PaymentIntent, now); err != nil {
 		return "", err
 	}
 	return team, tx.Commit()

@@ -32,7 +32,7 @@ func spend(t *testing.T, s *store.Store, team, id string, cents int64) {
 	now := time.Now().UnixNano()
 	amount := cents * store.MicroCreditsPerCent
 	if _, err := s.DB().Exec(fmt.Sprintf(
-		`INSERT INTO credit_charges (id, run_id, node_id, token_prefix, kind, seconds, amount_micro, charged_at, team)
+		`INSERT INTO credit_charges (id, run_id, node_id, capability_prefix, kind, seconds, amount_micro, charged_at, team)
 		 VALUES ('%s', 'run-x', 'build', 'pfx', 'usage', 60, %d, %d, '%s')`,
 		id, amount, now, team)); err != nil {
 		t.Fatalf("seed a charge: %v", err)

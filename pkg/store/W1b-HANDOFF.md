@@ -1,147 +1,147 @@
 # W1b handoff
 
-Continues `1333bceb3` and W1b-session1792071630.out. W1b remains incomplete.
-The lead owns review, commits and pipelines. This session made no Git writes.
-The worktree started clean with no merge in progress.
+Continues f6eb26100 and W1b-session1792072784.out. W1b remains incomplete.
+The worktree started clean. The lead retains review, commits and pipelines.
 
-## Implemented and deleted
+## Implemented
 
-Removed the legacy `Store.OpenNodeLog`, `SignNodeLogSegment`, `NodeLogSegments`,
-`MarkNodeLogSealed`, `GetNodeLog` and `CurrentNodeAttempt` APIs, their segment
-and error types, the node `log-segments` and `log-manifest` HTTP writers, and
-their S3 presigner. Removed the generic legacy log-storage counter writer.
-No production Go writer references `node_logs` or `node_log_segments`.
+Fraud-warning persistence and its payer hold now share recordPaymentWarningTx.
+A repeated warning ID cannot substitute its payment or card fingerprint. The
+store checks persisted identity before applying any hold. Payer resolution
+compares matching paid grants with every matching card attempt. Conflicting
+team evidence fails instead of selecting a first row or trusting one source.
+The warning, hold and business event roll back together on any failure.
 
-Legacy reads no longer write abandoned-log seals. The elected
-`Operator.SealAbandonedLogStreams` pass owns that operation on tagged streams.
-The legacy capabilities response no longer advertises segment upload support.
-The controller's read-only object helper now returns the shared `logseg.Objects`
-interface directly. Team deletion uses the existing shared log URL lifetime.
-No schema, quota, grace, price, setting, alias or compatibility wrapper was added.
+Invariant: a warning ID affects only its persisted payment and card, and a
+payment with conflicting payer evidence cannot freeze any tenant. The generated
+identity regression failed against the previous implementation. It now passes
+64 generated identity cases. Another property covers 64 ambiguous-payer cases.
+Shared-card payments still hold their own teams. Exact replay after release and
+reopening cannot restore a hold. Audit failure leaves no warning or hold.
 
-Production Go removes 603 lines and adds 14, for a net reduction of 589 lines.
-Sixteen tests for the retired transport are removed, totalling 825 test lines.
-The three unrelated heartbeat, live-ring and node-settlement tests remain.
-The old transport tests are not final HTTP or native integration evidence.
-No new archived T1 source-function identity is claimed ported or closed.
+Removed the provider-only legacy warning-hold identity lookup. Final holds use
+only the tenant-scoped identity. No provider metadata or caller-selected team
+was added as a replacement authority source.
 
-Earlier completed work remains: immutable metered award/interval accounting,
-A1-27 settlement joins, verified checkout settlement, operator credit/card
-handles, tenant blob upload tickets, exact uploader receipts, record/member
-and memo/depcache authorization, tombstones, result attachment, tagged logs,
-leased retention, replica accounting and the direct-upload writer cut.
+Production Go deletes 29 existing lines and adds 59, including the extracted
+37-line transaction owner, for a net increase of 30. Deleted the 220-line legacy
+warning test file. Its supported assertions move to final-schema fixtures.
+Tests net +73 lines. No W1 production file or foreign contract was edited.
 
-## Invariants and verification
+## Tests and acceptance
 
-Invariant: no request to a retired node-log segment or manifest route reaches
-an upload or persistence writer. `TestRetiredLogPersistenceRoutesHaveNoWriterProperty`
-checks 128 generated run/job/operation paths against the real router without a
-socket or store. Final signed-object immutability and leased tagged-log sealing
-also pass their controller regressions after the cut.
+Ported TestSharedFraudWarningHoldsEveryTeam to final card collection fixtures.
+It retains warning-first, payment-first and concurrent payments, both balances,
+shared-card holds, distinct tenant hold IDs, trust/headroom refusal, idempotent
+refunds, release/replay and the absence of unsolicited refund work. Existing
+TestFrozenTeamsMeteredClaimsAreRefused supplies the final claim-refusal proof.
+The unrelated-dispute row from TestWarningHoldRetainsLegacyReleaseAndUnrelatedDispute
+moves to TestPaymentWarningHoldDoesNotReplaceUnrelatedDispute. Its two legacy
+identity rows are dropped with the compatibility lookup. No new archived T1
+source-function identity is claimed complete. The spend test helper uses the
+final capability_prefix column, fixing its stale token_prefix fixture.
 
-Go commands used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4, -p 4,
-and GOCACHE/GOTMPDIR/TMPDIR under /tmp/sw-astra-W1b/.
+All Go commands used GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
+-p 4 where applicable, and cache/temp directories under /tmp/sw-astra-W1b/.
 
-- Whole-repository `go build -p 4 ./...` passes.
-- Vet passes for pkg/store, pkg/controller and both acceptance trees.
-- Focused store/controller selection passes 70 top-level tests / 320 cases.
-- Billing/storage acceptance passes 287 cases and skips 562 native/platform cases.
-- Fourteen existing SQLite store cells pass. These cover billing start and
-  ledger retention, blob integrity, quota replay, replica accounting, tagged
-  logs, read sets, budgeted presence checks, reachability, memo/depcache scope,
-  reference-edge authorization, publication, exact receipts and remote-cache opt-in.
-- Final signed log-object immutability, tagged maintenance, retention-class and
-  retired-writer controller regressions pass.
-- Final commentcheck against main passes across 2,117 Go files. API-spec tests,
-  API snapshot, docs mirror and whitespace checks pass. The API-reference
-  selection compiled but matched no tests.
+- Whole-repository go build -p 4 ./... passes.
+- go vet -p 4 ./pkg/store passes.
+- Focused store regressions pass 84 top-level tests / 343 cases.
+- TestBilling and TestStorage pass 287 cases and skip 562 native/platform cases.
+- Commentcheck against main passes across 2,118 Go files.
+- Documentation mirror and git diff --check pass.
 
-Reproduce the focused selection with:
+Fourteen existing SQLite acceptance cells pass. No new cell was activated:
 
-`go test -p 4 ./pkg/store ./pkg/controller -run '^(TestRetired(OutputUpload|LogPersistence)Routes|TestLogPersistence|TestLogPublication|TestLogMaintenance|TestMeteredAccounting|TestMeteredUnit|TestPayment|TestStoreDataMetered)' -count=1`
+- billing-start-award-versus-start/store-sqlite
+- billing-ledger-survives-retention/store-data-sqlite
+- storage-cas-integrity/store-data-sqlite
+- storage-replica-safe-accounting/store-data-sqlite
+- storage-quota-settlement-crash-replay/store-data-sqlite
+- storage-log-segments-and-fallback/store-data-sqlite
+- storage-hasmany-read-set/store-data-sqlite
+- storage-hasmany-large-budget/store-data-sqlite
+- storage-reachability-and-retention-tails/store-data-sqlite
+- storage-memo-and-depcache-scope/store-data-sqlite
+- storage-reference-edge-laundering/store-data-sqlite
+- storage-publish-one-way/store-data-sqlite
+- storage-owner-receipts-and-stream-verification/store-data-sqlite
+- storage-local-remote-cache-opt-in/store-data-sqlite
+
+Reproduce the store selection with:
+
+`go test -p 4 ./pkg/store -run '^(TestPayment|TestSharedFraudWarningHoldsEveryTeam|TestFrozenTeamsMeteredClaimsAreRefused|TestMeteredAccounting|TestMeteredUnit|TestStoreDataMetered|TestLogPersistence|TestLogPublication|TestLogMaintenance|TestCardCollection|TestADebt|TestConcurrentDebt|TestADeclineHoldsTheTeamUntilPaid|TestAnAttempt|TestAFailedQueued|TestARefundOutcome|TestAWarning|TestANonActionableWarning)' -count=1`
 
 Acceptance: `go test -p 4 ./tests/acceptance ./internal/acceptance -run '^(TestBilling|TestStorage)' -count=1`.
-
-One snapshot check detected the deleted read-only S3 wrapper after the first
-snapshot generation. Regenerating after the final source cut fixed that drift.
 No full-suite, PostgreSQL, provider, native placement, race or pipeline pass is claimed.
 
-## Amendment and handoff audit
+## Contract changes needed
 
-- A1-24, A1-29 through A1-35: tenant authority, metadata, read sets, records,
-  members, exact receipts, ticket settlement, depcache pointers, tombstones and
-  tagged persistence remain implemented. C2 must compose live data resolution,
-  ReadBlob, ChargeDownload and the physical manifest reader in production.
-- A1-27: real award/start/renewal/retry/finish/release/reaper settlement joins
-  are present and their focused tests pass. Spend/grace and legacy credit
-  retirement remain open. W1's billing and renewal files were not edited.
-- A1-28 and lead decision 07:40 item 2: committed checkout settlement and raw
-  paid-grant refusal remain done. Expanded provider settlement still requires
-  C2's verified-event contract. No foreign contract shape was changed.
-- The approved record-mutation owner, two approved catalog deletions and earlier
-  output/raw-storage/direct-upload cuts remain done. This session adds the
-  legacy log writer cut. It does not complete the old reader or client cutover.
-- A1-53: native, provider and PostgreSQL evidence remains with T1/lead.
-  No native acceptance cell was unblocked or marked passed.
+Lead decision 07:40 item 2 remains open. C2 PaymentEvent still has only checkout
+session/payment identity, amount, currency, mode and three checkout outcomes.
+The W2 branch has the same shape. There is no declared expanded interface or
+stub against which W1b can implement the missing verified-event dispatcher.
+SettlePayment therefore remains checkout-only. The brief forbids inventing or
+editing another area's contract. The warning transaction owner is ready for
+that dispatcher and is exercised through the real Operator path.
 
-## Contract changes needed and remaining work
+W2 must declare verified setup/customer/method/fingerprint/completion facts,
+collection attempt/payment correlation, refund identity/amount/status, warning
+identity/payment/card/actionability and dispute identity/payment/outcome. The
+provider handoff must retain those facts without accepting payer metadata.
 
-W1 must expose the spend/grace join and its durable per-award exhaustion state.
-The final billing_awards/billable_intervals tables have no exhaustion anchor.
-The existing old anchor is node-only. Renewal fills LeaseBeat before accounting,
-and accountUnitBillingTx returns only error. Job, host, plan and eval need one
-policy result delivered in the same committing renewal reply. Preserve existing
-grace/spend policy, prepaid runway, customer-wait exclusions and holder drain
-rights. Do not add a raw terminal-state writer or a caller clock.
+W1 must extend payment_events as well. Its checkout_id is required, its foreign
+key requires a credit_checkouts row, and its kind check permits only the three
+checkout outcomes. Card setup has no persisted pending setup/customer-to-tenant
+binding or commit API. Those correlations need a declared durable owner before
+settlement can derive the first card's team. Broader card/refund event correlation
+must retain the configured payment mode. No speculative schema was added.
 
-W2 must extend PaymentEvent/VerifiedPaymentEvent beyond checkout identity and its
-three outcomes. Card setup needs verified setup/customer/method/fingerprint facts.
-Collection needs persisted attempt/payment correlation. Refunds need verified
-identity, amount and status. Warnings/disputes need provider identity, payment
-correlation and outcome. W1b then extends SettlePayment, deriving teams/amounts
-from committed rows and retaining event idempotency. The lead already authorized
-building pending ratification. Missing contract shape remains the blocker.
+W1 spend/grace integration remains open. billing_awards has no durable per-award
+exhaustion anchor. LeaseBeat is filled before accounting. accountUnitBillingTx
+returns only error. W1 must expose the committing renewal policy result for job,
+host, plan and eval while preserving prepaid runway, customer-wait exclusions,
+existing grace/spend policy and holder drain rights. W1b will supply the policy
+once that join is declared. No raw terminal-state writer or caller clock was added.
 
-W1/W7 must complete the materialized-result record contract before the missing
-transactional copier can bind safely. CopyMaterializedRecords accepts memo,
-retry and coalesced results without requiring destination execution, while public
-CopyMemo requires a live positive destination attempt. The final state contract
-forbids synthetic attempts. Define the destination record identity and read edge
-for an unexecuted persisted result, then W1b can share its transaction-local
-mutation owner with reconciliation. Calling public CopyMemo separately cannot
-satisfy atomic state/record rollback. No speculative identity format was added.
+## Remaining area work and amendment audit
 
-W2/W3/W9 must compose the final blob.LogTransport signing, verification, commits,
-reads and metering. The retained Client.LogSegmentUploader targets the removed
-node writers. Legacy NodeLog/LatestNodeLog/RunNodeLogs and segmentLogs still read
-retired tables. They are not final transport adapters. WithLogRetention remains
-available for the final signing composition. This cut makes no claim that old
-host execution or log streaming works against the final schema.
+- A1-24 and A1-29 through A1-35 remain implemented on the persistence side.
+  C2 still needs live data resolution, ReadBlob, ChargeDownload and physical
+  manifest composition. Source-before-run binding and verified small-output
+  intended use remain open. Allowance-driven physical eviction remains open.
+- A1-27 real claim/start/renewal/retry/finish/release/reaper settlement joins remain
+  done. Spend/grace and the old claim-credit consumer cut remain open with W1.
+- A1-28 and decision 07:40 item 2 remain limited by the contracts above.
+- W1/W7 must define the unexecuted destination record identity/read edge before
+  transactional materialization can copy memo/retry/coalesced records. Public
+  CopyMemo requires a live positive attempt. Synthetic attempts are forbidden.
+- W2/W3/W9 still need final blob.LogTransport composition. Legacy log readers
+  use node_logs. LogSegmentUploader targets removed node writers. Old output
+  clients/local persistence also remain. These cuts require their final callers'
+  authority and subject bindings, rather than reintroducing removed APIs.
+- A1-53 native/provider/PostgreSQL evidence remains with T1/lead. No native cell
+  was unblocked or represented as passing. Lead-owned ledgers are unchanged.
 
-W1's old claim/trigger and lifecycle consumers still call legacy credit windows.
-Those callers must migrate before their billing helpers can be deleted. W3/W9's
-old output clients and local-output persistence also remain. Server-verified
-small-output intended use, source-before-run binding and allowance-driven physical
-eviction remain open. The two retired generic-storage and old log table catalog
-entries belong to W1's catalog cut and were not edited.
+## Shared files, assumptions and friction
 
-## Shared files and friction
+Outside pkg/store, only design/rewrite/contracts/c1-data.md, CHANGELOG.md and
+its generated pkg/docs/changelog.md mirror changed. W1 files, lead-owned
+handoffs/amendments, T1 inventories and API declarations are unchanged.
 
-Outside pkg/store, production caller changes are pkg/controller/deletion.go,
-identity.go, log_reads.go, log_segments.go, output_objects_s3.go, server.go and
-tenant_routes.go. Tests are log_segments_internal_test.go,
-node_claim_token_log_segments_internal_test.go (deleted), and
-log_upload_removed_test.go (added).
+The missing expanded C2 contract and checkout-only event schema block payment
+completion. The missing W1 renewal result/anchor blocks spend/grace completion.
+Legacy billing fixtures initially failed on token_prefix. Their shared helper
+now uses capability_prefix and the affected warning checks pass. The broad
+legacy suite is not represented as passing.
 
-Shared docs/generated files are design/rewrite/contracts/c1-data.md,
-CHANGELOG.md, docs/migrations/_unreleased.md, pkg/docs/changelog.md,
-pkg/docs/mirror/migrations/_unreleased.md, .apidiff/pkg_store.txt and
-.apidiff/pkg_controller.txt. Lead-owned handoffs/amendments and T1 inventories
-are untouched. No W1 production file changed.
+Mechanisms added: one private transaction-local warning owner, used by the
+existing Operator path. It replaces the scattered write/effect sequence so the
+verified-event dispatcher can use the same transaction. No configuration,
+price, quota, grace, schema, compatibility alias or public write API was added.
 
-No Sparkwing binary, candidate, pipeline, service, release, subagent or harness
-memory write ran. Git config has no local identity/worktree override. The only
-scratch root is /tmp/sw-astra-W1b/ and is deleted after the final checks.
-Mechanisms added: none. Independent review remains with the lead.
+No Git write, Sparkwing executable, candidate, pipeline, service, release,
+subagent or harness-memory write ran. Scratch /tmp/sw-astra-W1b/ is deleted
+after verification. Independent review remains with the lead.
 
 STATUS: CONTINUE

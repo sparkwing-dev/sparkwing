@@ -777,10 +777,9 @@ func settleWarnedTx(ctx context.Context, tx *storeTx, team Team, p CardPayment, 
 func holdForWarningTx(ctx context.Context, tx *storeTx, team Team, warning, paymentIntent string, now time.Time) error {
 	// safety: a length prefix prevents colons in team or provider IDs from colliding.
 	freezeID := fmt.Sprintf("early_fraud_warning:%d:%s:%s", len(team), team, warning)
-	// safety: legacy IDs, including released holds, must stay idempotent on replay.
 	if held, err := rowPresentTx(ctx, tx, `SELECT 1 FROM credit_freezes
-	    WHERE team = ? AND cause = ? AND dispute_id IN (?, ?)`,
-		string(team), FreezeCauseWarning, freezeID, warning); err != nil || held {
+	    WHERE team = ? AND cause = ? AND dispute_id = ?`,
+		string(team), FreezeCauseWarning, freezeID); err != nil || held {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO credit_freezes (dispute_id, team, payment_id, reason, cause, created_at)

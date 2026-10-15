@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"time"
 
@@ -60,13 +59,26 @@ func paidGrantForPaymentTx(ctx context.Context, tx *storeTx, paymentID string) (
 
 func paymentWarningTeamTx(ctx context.Context, tx *storeTx, paymentID string) (Team, error) {
 	grant, found, err := paidGrantForPaymentTx(ctx, tx, paymentID)
-	if err != nil || found {
-		return grant.Team, err
+	if err != nil {
+		return "", err
 	}
 	var team Team
-	err = tx.QueryRowContext(ctx, "SELECT team FROM card_attempts WHERE payment_intent=? LIMIT 1", paymentID).Scan(&team)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
+	if found {
+		team = grant.Team
 	}
-	return team, err
+	rows, err := tx.QueryContext(ctx, "SELECT DISTINCT team FROM card_attempts WHERE payment_intent=?", paymentID)
+	if err != nil {
+		return "", err
+	}
+	for rows.Next() {
+		var owner Team
+		if err := rows.Scan(&owner); err != nil {
+			return "", errors.Join(err, rows.Close())
+		}
+		if team != "" && team != owner {
+			return "", errors.Join(ErrCreditGrantConflict, rows.Close())
+		}
+		team = owner
+	}
+	return team, errors.Join(rows.Err(), rows.Close())
 }

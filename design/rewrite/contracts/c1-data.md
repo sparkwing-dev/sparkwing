@@ -1062,6 +1062,15 @@ The collection worker and webhook settlement retain their ledger lock,
 persisted payer attribution, replay rules and refund queue. This handle cut
 adds no provider verification contract. C2 still owns verified event delivery.
 
+Warning persistence and its payer hold share one transaction-local mutation owner.
+A warning ID retains its first payment and card fingerprint. A conflicting
+replay fails before applying a hold. Payer lookup compares every matching paid
+grant and card attempt. Conflicting tenant evidence rolls back the warning and
+hold. Shared-card warnings still hold each team when its own payment settles.
+Holds use the tenant-scoped warning identity. The legacy provider-only hold
+identity is removed. Replaying an exact warning after release cannot restore
+its hold. A failed audit rolls back both warning persistence and the hold.
+
 `Operator.ReversePayment` and `Operator.PaymentTeam` resolve provider payment
 identity across teams. Their raw Store methods are removed. The unused public
 PaidGrantTeam lookup is removed. The operator lookup and reversal share the
