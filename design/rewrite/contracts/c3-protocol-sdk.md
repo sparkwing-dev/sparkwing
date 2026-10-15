@@ -76,17 +76,16 @@ for Git and Install. Resolve the pin after acquisition, then call the selected
 engine's InstallSDK. Accepted executions Ensure the sealed engine identity before
 reconstruction. Host-version binaries and ambient runner identity are not substitutes.
 
-W8's `runners.NodePreparation` constructs accepted executor input and acquires
-source under `Hosting`'s keeper. Its default acquisition calls `source.ForExecution`
-and `source.Acquire`. It preserves the cleanup returned with partial acquisition.
-Bound host services supply the job hash, delegated routes, storage and replay.
-The node-input constructor captures accepted seals, job settings, engine,
-runner and claim identity before renewal or preparation. It owns their projection
-for every preparation path and copies nested mutable settings. The preparer
-acquires the accepted source and uses that constructor. `NewManagedRunner` composes one claim
-client and award clients over the same HTTP transport with separate bearers.
-Concrete shared host constructors and run/plan/eval execution identities remain
-with W3.
+W8's `StoreHosting` authenticates the award against its owned store and constructs
+the shared native hosts. `nodehost.ClaimedNodeHost` owns source acquisition and
+renewal. It receives an unacquired input and validates persisted acceptance,
+engine, execution settings and claim identity before acquiring source.
+The `Hosting` transport adapter captures accepted seals, job settings, engine,
+runner and claim identity before renewal or preparation and copies nested mutable
+settings. Bound services supply the job hash, delegated routes, storage and
+replay. `NewManagedRunner` composes claim and award clients over the same HTTP
+transport with separate bearers. Remote native-store construction and Cloud
+plan/eval execution remain W3 integration points.
 
 For trigger and here awards, Hosting constructs RunInput's run ID, first seal
 and accepted second seal before renewal or preparation. Prepared host services

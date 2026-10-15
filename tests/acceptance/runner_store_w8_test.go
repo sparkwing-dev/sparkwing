@@ -20,7 +20,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -248,13 +247,7 @@ func TestRunnerStoreLifecycleW8Components(t *testing.T) {
 				input := runnerIdentityInputW8(unit)
 				input.SpecHash = "fixture-job-hash"
 				input.RouteBinding = nodeproto.ProcessBinding{RunID: unit.RunID, JobID: unit.JobID, Routes: nodeproto.ProcessRoutes{URL: "http://node", Bearer: "fixture-delegated-node"}}
-				preparation := runners.NodePreparation{Host: executor, Input: input, Acquire: func(_ context.Context, spec runspec.Spec, _ source.Options) (*source.Entry, func() error, error) {
-					if spec.Request.RunID != unit.RunID || spec.Resolved.Engine != *unit.Engine {
-						t.Error("source acquisition lost the accepted run or engine")
-					}
-					return input.Entry, cleanup, nil
-				}}
-				return preparation.Prepare(ctx, unit, bound)
+				return executor, input, cleanup, nil
 			}
 			runner, err := runners.NewManagedRunner(t.Context(), runners.RuntimeConfig{
 				Controller: client.EngineOptions{URL: host.ControllerURL, HTTP: transport, Bearer: func(context.Context) (string, error) { return root.Raw, nil }},
