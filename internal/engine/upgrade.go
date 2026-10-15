@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,11 +14,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/procenv"
-	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
+
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/engine/npmcmd"
+	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
+	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
 // PrepareUpgrade previews concrete native pin edits in a private staging checkout.
@@ -77,6 +82,7 @@ func (r *Resolver) Upgrade(ctx context.Context, request UpgradeRequest, verifier
 	result.Applied = true
 	return result, nil
 }
+
 func (r *Resolver) prepareUpgrade(ctx context.Context, request UpgradeRequest) (stage string, plan UpgradePlan, resolved Resolved, result error) {
 	if err := ctx.Err(); err != nil {
 		return "", plan, resolved, err
@@ -147,6 +153,7 @@ func (r *Resolver) prepareUpgrade(ctx context.Context, request UpgradeRequest) (
 	plan = UpgradePlan{Before: before, After: after, Edits: edits, Engine: resolved.Identity, Notices: resolved.Notices, inputDigests: inputDigests}
 	return stage, plan, resolved, nil
 }
+
 func (r *Resolver) updateNativePin(ctx context.Context, dir string, sdk SDKKind, version string) error {
 	switch sdk {
 	case GoSDK:
@@ -165,7 +172,7 @@ func (r *Resolver) updateNativePin(ctx context.Context, dir string, sdk SDKKind,
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(filepath.Join(dir, "go.mod"), body, 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "go.mod"), body, 0o600); err != nil {
 			return err
 		}
 		return r.nativeCommand(ctx, dir, "go", "mod", "tidy")
@@ -205,7 +212,7 @@ func (r *Resolver) updateNativePin(ctx context.Context, dir string, sdk SDKKind,
 			return err
 		}
 		body = append(body, '\n')
-		if err := os.WriteFile(filepath.Join(dir, "package.json"), body, 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "package.json"), body, 0o600); err != nil {
 			return err
 		}
 		return r.nativeCommand(ctx, dir, "npm", "install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund")
@@ -213,23 +220,34 @@ func (r *Resolver) updateNativePin(ctx context.Context, dir string, sdk SDKKind,
 		return invalid("unknown SDK kind", "Select go or typescript.")
 	}
 }
+
 func (r *Resolver) nativeCommand(ctx context.Context, dir, name string, args ...string) error {
 	if r.command != nil {
 		return r.command(ctx, dir, name, args...)
 	}
-	command := exec.CommandContext(ctx, name, args...)
+	command := exec.Command(name, args...)
+	if name == "npm" {
+		var err error
+		command, err = npmcmd.Command(args...)
+		if err != nil {
+			return fmt.Errorf("resolve npm: %w", err)
+		}
+	}
 	command.Dir = dir
-	environment, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: os.Environ()}, procenv.Runtime{})
+	masker := secrets.NewMasker()
+	environment, err := procenv.Build(procenv.Install, procenv.Base{Local: true, Captured: os.Environ(), Masker: masker}, procenv.Runtime{})
 	if err != nil {
 		return err
 	}
 	command.Env = append(environment, "GOWORK=off")
-	output, err := command.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("resolve native dependency lockfiles: %w: %s", err, strings.TrimSpace(string(output)))
+	var output bytes.Buffer
+	command.Stdout, command.Stderr = &output, &output
+	if err := gotoolchain.Run(ctx, command); err != nil {
+		return fmt.Errorf("resolve native dependency lockfiles: %w: %s", err, strings.TrimSpace(masker.Mask(output.String())))
 	}
 	return nil
 }
+
 func copyCheckout(ctx context.Context, source, destination string) error {
 	source, err := filepath.Abs(source)
 	if err != nil {
@@ -262,7 +280,7 @@ func copyCheckout(ctx context.Context, source, destination string) error {
 		}
 		target := filepath.Join(destination, relative)
 		if entry.IsDir() {
-			return os.Mkdir(target, 0700)
+			return os.Mkdir(target, 0o700)
 		}
 		info, err := entry.Info()
 		if err != nil {
@@ -296,6 +314,7 @@ func copyCheckout(ctx context.Context, source, destination string) error {
 		return os.WriteFile(target, body, info.Mode().Perm())
 	})
 }
+
 func collectPinEdits(stage string, before, after Pin, inputs map[string]string) ([]PinEdit, error) {
 	paths := []string{before.Manifest}
 	if before.Lockfile != "" {
@@ -318,6 +337,7 @@ func collectPinEdits(stage string, before, after Pin, inputs map[string]string) 
 	}
 	return edits, nil
 }
+
 func applyPinEdits(ctx context.Context, checkout string, edits []PinEdit) error {
 	type original struct {
 		body    []byte
@@ -336,7 +356,7 @@ func applyPinEdits(ctx context.Context, checkout string, edits []PinEdit) error 
 			return err
 		}
 		hash := ""
-		mode := os.FileMode(0600)
+		mode := os.FileMode(0o600)
 		if !missing {
 			hash = digest(body)
 			info, err := os.Lstat(path)

@@ -10,7 +10,7 @@ cell or establish an HTTP, Cloud or OS deployment proof.
 | --- | --- |
 | A1-08 | The unified loop uses one ClaimRequest with both kinds. W9 NewEngineClient and W1 ordered claim selection remain stubs. No split queue client was restored. |
 | A1-09 | NewControllerControl implements the Cloud claim/sync adapter against the shared wire interface. Its transport must select EngineOptions.Launcher. NewEngineClient and final factory composition remain W9 integration. |
-| A1-10 | Implemented Resolved.InstallSDK, the selected-engine install adapter and the hidden CLI route. Two native adapter findings remain open below. Signed executable fixtures cover Go/TypeScript transport. Native tool fakes cover build/cache and npm lockfile behavior. source.Acquire remains a stub. |
+| A1-10 | Implemented Resolved.InstallSDK, the selected-engine install adapter and the hidden CLI route. Shared npm command construction now covers Windows shims, SDK install, upgrades and cache queries. Workspace-off cache hashing remains open below. Signed executable fixtures cover Go/TypeScript transport. Native tool fakes cover build/cache and npm lockfile behavior. source.Acquire remains a stub. |
 | A1-11 | ClaimedUnit retains the amended sealed request and source generation. Source acquisition and host preparation remain integration points. |
 | A1-12 | The retired cluster source paths stay deleted. Shared source.Acquire remains a stub and must consume Options.Base and procenv.Git. No private Git environment builder was added. |
 | A1-18 | Runner hosting and Cloud work now accept ordinal zero and preserve it until Start. New acceptance components cover both. Negative ordinals still fail. W1/W3 own the returned Applied.Attempt. |
@@ -31,7 +31,7 @@ cell or establish an HTTP, Cloud or OS deployment proof.
 | A1-49 | Enrollment writes runner.repos and an absolute private credentials_dir. Startup reads the file once into a transport callback. Failed enrollment attempts revocation, removes its new credential/service files and restores prior settings while preserving concurrent replacements. Component tests cover aliases, explicit empty collections and service-manager failure. Final capability issuance/HTTP and host composition remain open. |
 | A1-50 | Added the hidden selected-engine install route. Final here/cache/publish/upgrade/status adapters remain W9 integration against shared contracts. |
 | A1-51 | W8's retired cluster v1 host paths stay deleted. Shared Go/TS corpus parity, remaining orchestrator fixtures and generated references remain W3/W4/W5/W9 work. |
-| A1-52 | The install result has no preload. Windows npm shim/process-tree execution and the packaged TS bridge still need native evidence. No Linux fixture is counted as Windows proof. |
+| A1-52 | The install result has no preload. Windows npm shim argv uses Node through the shared npmcmd helper and process-group runner. Windows execution and the packaged TS bridge still need native evidence. No Linux fixture is counted as Windows proof. |
 | A1-53 | Native catalog cells stay blocked. Component acceptance passes only its component suite. No native driver or real-repository QA was available in this sandbox. |
 | A1-55 | The loop confines here work by RunID and preserves server claim deadlines. Named claim/reclaim, ancestry and one-time-bearer response-loss behavior still depend on the W1/W2/W9 implementations. |
 
@@ -50,22 +50,23 @@ removed API needed a production caller migration in this continuation.
 
 ## Contract changes needed and open review findings
 
-The independent review leaves two concrete findings open. These block completion
-of the native install adapter, while its component tests continue to pass.
+The independent review's native npm finding now has a shared implementation.
+Workspace-off hashing still blocks completion of the native install adapter.
 
-1. **Shared native npm invocation (W7/W8/W9).** Standard Windows npm resolves to
-   npm.cmd. Direct exec cannot run that shim. The existing private
-   depcache.npmCacheCommand already uses Node and npm-cli.js on Windows. Supply
-   that behavior through one shared native-command contract so the install adapter
-   can use it without copying a second helper. The current fixture uses npm.exe
-   and proves neither standard Windows installation nor process-tree cleanup.
-2. **Explicit binary-cache workspace policy (source/cache owner, W3/W7).** Add
+1. **Explicit binary-cache workspace policy (source/cache owner, W3/W7).** Add
    a cache-key operation that can hash the pipeline with workspace resolution off,
    matching the pinned install build. PipelineCacheKey currently reads the ambient
    go.work even though installGoSDK gives native Go GOWORK=off. A parent workspace
    with `use (./pipeline ./missing-unrelated-module)` causes an unrelated missing
    go.mod error before Go runs. The reviewer reproduced this through an overlay.
    Do not add a second hasher or mutate the host environment to hide it.
+
+`internal/engine/npmcmd.Command` replaces depcache.npmCacheCommand. SDK install,
+native lockfile updates and npm cache queries consume it and the existing
+process-group runner. Windows shim fixtures provide npm.cmd plus node.exe,
+without a native npm.exe escape path. An offline Linux component installs a
+local SDK tarball with the real Node/npm tools. Windows execution and process-tree
+proofs remain native acceptance work. No other area's frozen contract changes.
 
 Mixed-case JSON aliases were also identified. The final decoder accepts only the
 exact directory, pipeline_dir and sdk field spellings. Tests now reject both

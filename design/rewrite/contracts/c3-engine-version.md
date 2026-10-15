@@ -26,6 +26,15 @@ locally built entries separate from the retired remote binary path. TypeScript
 returns Node and its main file. Native tool diagnostics pass through the shared
 proxy masker. The hidden CLI route skips update and version-state startup hooks.
 
+`internal/engine/npmcmd.Command` constructs npm argv for installation, upgrades
+and cache-directory queries. Windows command shims use Node with the installed
+npm-cli.js. Native npm executables and Unix npm keep their direct invocation.
+Arguments never pass through a shell. Callers supply the environment and run
+through gotoolchain.Run so cancellation reaches the existing process group.
+Upgrade tools also receive procenv.Install with its proxy masker, and errors
+mask captured diagnostics before returning them.
+The Windows layout follows [npm's launcher](https://github.com/npm/cli/blob/latest/bin/npm.cmd).
+
 `SDKInstallRequest.UnmarshalJSON` rejects duplicate and unknown fields, including
 an attempted environment field. `PipelineDirectory` keeps both sides on the same
 checkout-relative path validation. These are W8-local additions. The install

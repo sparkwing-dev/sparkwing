@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/engine/npmcmd"
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -150,6 +151,13 @@ func installTypeScriptSDK(ctx context.Context, dir string, pin engine.Pin, envir
 
 func installTool(ctx context.Context, dir string, environment []string, name string, args ...string) ([]byte, error) {
 	command := exec.Command(name, args...)
+	if name == "npm" {
+		var err error
+		command, err = npmcmd.Command(args...)
+		if err != nil {
+			return nil, fmt.Errorf("resolve npm: %w", err)
+		}
+	}
 	command.Dir, command.Env = dir, environment
 	var stdout, stderr bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, &stderr

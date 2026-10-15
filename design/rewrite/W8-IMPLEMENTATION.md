@@ -1,7 +1,7 @@
 # W8 implementation handoff
 
-Latest continuation: runner award purpose, delivery and authority deadlines
-are recorded at the end of this file. W8 remains incomplete.
+Latest continuation: shared native npm invocation, upgrade proxy diagnostics
+and offline Node/npm acceptance are recorded at the end. W8 remains incomplete.
 
 W8 remains incomplete. The runner, engine, launcher and local process runtime
 are exercised with component fixtures. Installed process composition, the shared
@@ -1495,3 +1495,98 @@ Overwing's installed binary remains ten commits behind source but returned the
 applicable standards. Git config has no local author or core.worktree override.
 Scratch is removed after all checks finish. The lead retains staging and committing,
 including the new acceptance test that is absent from plain tracked diffs.
+
+## Continuation: shared native npm invocation
+
+The install adapter, native lockfile upgrade and dependency-cache query now use
+internal/engine/npmcmd.Command. Windows npm command shims run Node with the
+adjacent installed npm-cli.js. Native executables and Unix keep direct argv.
+No shell interprets arguments. Each caller supplies its environment and uses
+the existing gotoolchain.Run process-group runtime for cancellation.
+
+The removed private depcache.npmCacheCommand was 17 lines. Its four tests moved
+to npmcmd and now cover install arguments, missing npm/node and case-insensitive
+executable extensions. The Windows SDK-install fixture supplies npm.cmd plus
+node.exe instead of npm.exe. The shim exits unsuccessfully if run, so a native
+Windows execution will prove that the adapter takes the Node path.
+
+The upgrade tool now supplies the shared masker to procenv.Install. The previous
+implementation refused a credential-bearing proxy before launching a native tool.
+The old-source overlay reproduces that refusal. The new implementation runs the
+tool and masks both captured streams before returning a failure. The property
+test generates proxy credentials and checks that raw values, full URLs and base64
+encodings never appear in returned diagnostics. A separate property test checks
+that generated npm arguments remain separate, caller-independent argv values.
+
+TestEngineNativeNPMW8Components installs a local SDK tarball with the real Node/npm
+tools in offline mode, then executes the returned Node entry. It runs on Linux
+here. It establishes native npm invocation at the install boundary, not Windows
+execution, protocol bridging, host composition or a native acceptance-catalog cell.
+
+### Contracts, shared edits and remaining integration
+
+This closes the shared npm invocation request in the amendment audit at the
+component boundary. npmcmd.Command is a W8-local addition. The small child package
+is necessary because importing engine from depcache creates a cycle through
+procenv, secrets and the SDK. Restoring the private helper would leave the install
+and upgrade callers without a shared implementation. Undo removes this helper
+and restores those three callers. No new environment variable, setting, timeout,
+trust root or compatibility command is added.
+
+The only other-area production edit is internal/depcache/depcache.go, which removes
+the private helper and migrates its caller. internal/depcache/depcache_npm_test.go
+migrates its remaining callers and moves the helper tests. The new acceptance
+file, W8 handoff/audit and c3-engine-version.md are shared test/design artifacts.
+Production changes otherwise stay in internal/engine. Existing Go files lose
+98 old lines in total. No whole file is deleted and no additional T1 inventory
+test is ported.
+
+The binary-cache owner still needs an explicit workspace-off key operation.
+W8 has not changed that other area's contract or added a second hasher. Remaining
+real integration is W9's engine HTTP client and notices/verifier wiring; W3 source,
+keeper, host construction, delegated routes and replay; W1/W2 local controller,
+store, consumer and capability composition; runner/launcher/bootstrap factories
+and source handoff; Windows SID transport, schedules and SDK bridge; native managed
+service lifecycle; and deployed Cloud probes/node cleanup. These declared ports
+remain exercised with W8's existing fakes. No new product question is raised.
+
+### Verification
+
+All Go commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4,
+GOCACHE=/tmp/sw-astra-W8/cache, GOTMPDIR=/tmp/sw-astra-W8/gotmp and
+TMPDIR=/tmp/sw-astra-W8/tmp. Package parallelism is at most four.
+
+- Whole-repository `go build -p 4 ./...` passed.
+- `go vet -p 4 ./internal/engine/... ./internal/depcache ./tests/acceptance`
+  passed.
+- Full `go test -p 4` passed for internal/engine and its subpackages,
+  internal/runners and its subpackages, and tests/acceptance. internal/acceptance
+  has no runtime tests. The new offline npm component ran, rather than skipped.
+- Full internal/depcache testing could not finish: the existing
+  TestRemoteDepCacheMissSaveHitCycle panicked because httptest cannot bind a TCP
+  socket in this sandbox. Focused TestResolveNpmCache and TestDefaultNpmCache
+  tests passed. No socket fixture was changed or suppressed.
+- Focused `-race` tests passed for npmcmd, native upgrade proxy/cancellation,
+  SDK installation, depcache npm resolution and the new acceptance component.
+  Filters are TestNativeDependency, FuzzNativeDependency, TestNPMCommand,
+  FuzzNPMCommandArguments, TestRunSDKInstall, TestResolveNpmCache,
+  TestDefaultNpmCache and TestEngineNativeNPMW8Components.
+- FuzzNPMCommandArguments passed 164,764 generated cases in five seconds.
+  FuzzNativeDependencyDiagnostics passed 149 generated cases with native fixture
+  processes in its five-second fuzz window. Both used two workers.
+- Tests cross-compiled for windows/amd64 in engine, npmcmd, sdkinstall, depcache
+  and tests/acceptance. No native Windows execution is claimed.
+- Required `commentcheck -base main .` still fails on the existing W9 comment in
+  internal/controllerwire/contracts.go:47. The scoped `-base HEAD` check passes
+  across nine Go files. Scoped sleepcheck and `git diff --check` also pass.
+
+Source documentation is c3-engine-version.md. No generated documentation consumes
+that design source. Own diff inspection covered the import-cycle boundary,
+caller cancellation ownership, masking and moved tests. This continuation has
+no independent review; the lead retains that review and committing. The new
+untracked files must be included in that review and staging.
+
+No Sparkwing executable, service, deployment or Git metadata write ran. Native npm
+ran offline. Local Git configuration has no author or core.worktree override. The installed
+Overwing reports ten commits of staleness but returned all applicable cards.
+Worker scratch is deleted after verification. No native catalog cell is unskipped.

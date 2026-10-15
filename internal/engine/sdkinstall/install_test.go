@@ -4,21 +4,23 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
-	"os/exec"
 )
 
 const nativeInstallFixtureSource = `package main
 import("fmt";"os";"path/filepath";"strings")
 var Version="dev"
 func main(){
- if strings.Contains(filepath.Base(os.Args[0]),"npm") {
-  if len(os.Args)<2 || os.Args[1]!="ci" { os.Exit(10) }
+ args:=os.Args[1:]
+ if strings.Contains(filepath.Base(os.Args[0]),"node") && len(args)>0 && strings.HasSuffix(args[0],"npm-cli.js") { args=args[1:] }
+ if strings.Contains(filepath.Base(os.Args[0]),"npm") || strings.Contains(filepath.Base(os.Args[0]),"node") {
+  if len(args)<1 || args[0]!="ci" { os.Exit(10) }
   dir:=filepath.Join("node_modules","@sparkwing","sdk")
   if os.MkdirAll(dir,0700)!=nil || os.WriteFile(filepath.Join(dir,"package.json"),[]byte("{\"version\":\"0.20.0\"}"),0600)!=nil { os.Exit(11) }
   return
@@ -34,7 +36,7 @@ func TestRunSDKInstallBuildsLocallyAndUsesNativeLockfile(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", root)
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
 	source := filepath.Join(root, "tool.go")
-	if err := os.WriteFile(source, []byte(nativeInstallFixtureSource), 0600); err != nil {
+	if err := os.WriteFile(source, []byte(nativeInstallFixtureSource), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	toolPath := filepath.Join(root, "tool.exe")
@@ -47,7 +49,7 @@ func TestRunSDKInstallBuildsLocallyAndUsesNativeLockfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	bin := filepath.Join(root, "bin")
-	if err := os.Mkdir(bin, 0700); err != nil {
+	if err := os.Mkdir(bin, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	suffix := ""
@@ -55,7 +57,11 @@ func TestRunSDKInstallBuildsLocallyAndUsesNativeLockfile(t *testing.T) {
 		suffix = ".exe"
 	}
 	for _, name := range []string{"go", "npm", "node"} {
-		if err := os.WriteFile(filepath.Join(bin, name+suffix), tool, 0700); err != nil {
+		if runtime.GOOS == "windows" && name == "npm" {
+			writeInput(t, bin, "npm.cmd", []byte("@exit /b 99\r\n"))
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(bin, name+suffix), tool, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -124,7 +130,7 @@ func TestRunSDKInstallBuildsLocallyAndUsesNativeLockfile(t *testing.T) {
 
 func writeInput(t *testing.T, dir, name string, body []byte) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, name), body, 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, name), body, 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
