@@ -1,56 +1,73 @@
 # W1b handoff
 
-Continues `14cbe2891`. W1b remains incomplete. Changes are uncommitted.
+Continues `50f72efb5`. W1b remains incomplete. Changes are uncommitted.
 The lead owns review, committing, pipelines and native integration.
 No Git writes, Sparkwing binary runs or W1 implementation edits were made.
 
 ## Implemented
 
-Memo outputs now obey the existing 16 MiB output cap at record commit and lookup.
-An oversized persisted output produces an integrity error for a required lookup
-and a miss for memo lookup or copying. No destination edge is copied. A
-boundary-sized output still copies. Manifest-only records keep their separate
-artifact contract. W7 namespace and reference policy are tested through the
-existing contract fake, with real SQLite transactions.
+Added `Operator.SealAbandonedLogStreams` for the existing maintenance worker.
+It closes existing unsealed execution streams with `writer_lost` and preserves
+segments, stored bytes and execution results. Job attempts retain their final
+tail grace through the exact boundary. Trigger and plan logs use their own unit
+kind, generation, status and lease. Eval also checks its source generation.
+Published streams retain their publisher's final-commit contract because
+publication has no execution lease.
 
-Removed the legacy source/upload pruning APIs and the controller calls that
-used them. Controller cache listings have no age-expiry callback. The extended
-reachability acceptance proof keeps a 120-day-old source bundle through deletion
-of its originating run. Record expiry then makes it collectible only after the
-persisted tombstone grace. Physical deletion uses a contract fake.
+The bounded batch locks runs in tenant/run order, rechecks eligibility after
+locking, and checks the maintenance fence before writes and commit. Errors roll
+the whole batch back. Existing final seals remain unchanged. The controller's
+leased retention pass invokes the operation before retained-storage billing.
 
-The final upload reservation, receipt, quota, record, GC, accounting, payment and
-log implementations from earlier sessions remain in place.
+The final upload reservation, receipt, quota, record, GC, accounting, payment,
+output-limit and log implementations from earlier sessions remain in place.
 
 ## Deletion and ports
 
-Removed `Store.ClaimExpiredSourceBundles`, `Store.DeleteSourceBundleRows`,
-`Store.PruneExpiredUploads`, `DirectCacheMaxAge` and
-`controller.CacheObjectMaxAge`: **102 removed production lines** in the store and
-controller pruning files. Removed **249 old test/guard lines** and five API
-snapshot entries. These are gross deleted-line counts. Caller replacements and
-new tests are separate. The one-run source-binding test remains.
+Removed `Store.AbandonedNodeLogs`, the old controller `sealAbandonedLogs`
+implementation and its reaper call: **42 production Go lines** deleted.
+Removed **89 old test lines** and replaced one API snapshot entry. These are
+gross deleted-line counts. New implementations and tests are counted separately.
 
-Legacy source lifetime and pending-expiry concerns now use the final
-reachability and upload-quota proofs. Object-age deletion expectations are
-reversed to record reachability. No archived T1 inventory row is newly claimed
-fully ported or closed.
+Ported `TestAbandonedNodeLogsWaitForTheGraceAfterTheNodeFinished` to the final
+attempt finish/grace contract. The old live-trigger exemption does not extend a
+finished job's final tail grace. The running-subject assertion from
+`TestNodeLogRecordFollowsTheRunningAttempt` is covered by the SQLite acceptance
+proof and the generated liveness property.
+
+Ported the abandoned sealing and incomplete-result concerns from
+`TestControllerSealsAnAttemptItsRunnerAbandoned` to the final SQLite proof and
+the maintenance-fenced controller test. Its physical transfer/deletion concerns
+still need the final log transport. No archived T1 inventory row is newly
+claimed fully closed.
 
 ## Unit
 
-Added three tests in `blob_output_limits_test.go`. The oversized write and read
-cases failed before the fix, then passed. They verify the exact write refusal,
-integrity errors, cache misses, absence of partial copies, the inclusive size
-boundary and manifest-only behavior.
+Six new store tests cover the inclusive tail-grace boundary, live and lost
+trigger/plan/eval fences, source generations, publication, existing final seals,
+maintenance takeover, invalid input, bounded batches and rollback after an
+injected second-row failure. The generated property checks 64 adversarial
+subject/timing combinations against this invariant: a subject writable before
+maintenance stays writable after it, and its job state does not change.
 
-Nine SQLite persistence cells pass. No new native cell was unskipped:
+The job-grace and owner-loss tests ran red before their implementation, then
+passed. The property initially exposed an incomplete owner-fixture job row.
+That fixture now uses a valid pending job. No production workaround was added.
+
+The controller test checks refusal under a foreign maintenance lease and sealing
+after takeover. The extended acceptance proof checks preserved segments and an
+incomplete seal after closing and reopening SQLite, then idempotent replay and
+unchanged job state.
+
+Nine SQLite persistence cells pass. The log cell is extended. No new native
+cell was unskipped:
 
 - `billing-ledger-survives-retention/store-data-sqlite`
 - `storage-replica-safe-accounting/store-data-sqlite`
 - `storage-quota-settlement-crash-replay/store-data-sqlite`
 - `storage-log-segments-and-fallback/store-data-sqlite`
 - `storage-hasmany-read-set/store-data-sqlite`
-- `storage-reachability-and-retention-tails/store-data-sqlite` (extended)
+- `storage-reachability-and-retention-tails/store-data-sqlite`
 - `storage-memo-and-depcache-scope/store-data-sqlite`
 - `storage-reference-edge-laundering/store-data-sqlite`
 - `storage-publish-one-way/store-data-sqlite`
@@ -62,87 +79,86 @@ and GOCACHE/GOTMPDIR/TMPDIR beneath `/tmp/sw-astra-W1b/`. Run with
 `go -C /home/bombuntu/.xwing/envs/1088/sparkwing`.
 
 - Whole repository `go build -p 4 ./...` passed.
-- `go vet -p 4 ./pkg/store/... ./internal/acceptance/... ./tests/acceptance/... ./pkg/controller ./cmd/sparkwing-controller` passed.
+- `go vet -p 4 ./pkg/store/... ./internal/acceptance/... ./tests/acceptance/... ./pkg/controller` passed.
 - Store selection pattern:
   `^(TestStoreData|TestLogPersistence|TestResult|TestBlob|TestPayment|TestReversePaymentTakesBack|TestCreditSettings|TestSetCreditSettings|TestUnsetRateTable|TestSetRateTable|TestAStoredRateTable|TestATableWithoutAFourCore|TestStorage|TestBilling)`.
-  It passed with **131 top-level tests / 287 passes including subtests**, no skips.
+  It passed with **137 top-level tests / 374 passes including subtests**, no skips.
 - `go test -p 4 ./internal/acceptance/... ./tests/acceptance/... -count=1`
   passed with **20 top-level tests / 202 passes including subtests** and
   **2,995 existing native/platform skips**.
-- Controller and controller-command test packages compile with `-run '^$'`.
+- Four controller tests passed under the pattern
+  `^(TestStorageMaintenanceSealsAbandonedTaggedLogs|TestAMultiTeamStoragePassSeedsRetentionAndReleasesOldRuns|TestASingleTeamControllerKeepsItsOperatorsRetention|TestStorageRetentionPassRequiresMaintenanceFence)$`.
 - Documentation mirror and changelog drift tests passed. Commentcheck,
   sleepcheck and `git diff --check` passed.
-- Both tenant writer guards passed. The SQL scope guard still reports the same
-  **10 inherited W1 findings** in authority, awards and retention.
+- Both tenant writer guards passed. The SQL scope guard reports the same
+  **10 inherited W1 findings** in authority, awards and retention. It reports
+  no new W1b finding.
 - No local Git identity or core.worktree override was found.
 
-## Not tested or failing
+## Not tested
 
-The full `go test -p 4 ./pkg/store/... -count=1` run failed in **30 top-level
-pkg/store tests** and `teststore.TestOpenKeepsStateSeparate`. These concern old
-schema classification, execution policies, claims, concurrency, tokens, database
-paths and the SQL guard. Failures include missing `sparkwing_meta` and `tokens`
-tables, old profile fixtures and a token-test panic. The internal/storetest
-package passed. No W1b-focused test failed. The full package run does not prove
-all remaining tests because the token-test panic terminates that package.
-
+The full store suite was not rerun. The predecessor's unresolved full-suite
+failures concern removed-schema/token/claim fixtures, including a token-test
+panic. This continuation proves only the stated focused tests and compilation.
 No PostgreSQL, race, provider, daemon, native placement, browser, candidate,
 pipeline or release check was run. The brief assigns runtime pipelines and
 independent review to the lead because this sandbox cannot open sockets.
-API snapshots remove only this session's five symbols. Integration must
-regenerate the full snapshots after all areas finish their hard cuts.
+API snapshots update only this session's removed and added symbols. Integration
+must regenerate the full snapshots after all areas finish their cuts.
 
-## Contract changes needed and real integrations remaining
+## Contracts and real integrations remaining
 
-No foreign contract was changed or newly requested. No schema, setting, limit,
-exported interface or runtime mechanism was added. The memo cap enforces the
-existing frozen output limit. C1 notes and migration docs describe the hard cut.
+The local C1 contract adds `Operator.SealAbandonedLogStreams` and removes
+`Store.AbandonedNodeLogs`. No foreign interface, schema, setting, limit or
+environment variable changed. This is an operation on the existing leased
+maintenance worker. Retaining the legacy sweep would read retired tables and
+would omit tagged owner units. Removing the new operation and its controller
+call reverses the local addition.
 
 1. W1/W2 must define imported trigger/plan/eval identities for published owner
-   logs. Jobs use exact imported terminal attempts. Owner publication stays
-   refused because publish intake has no executable unit lease.
+   logs. Job publication uses exact imported terminal attempts. Owner publication
+   remains refused without that contract. No new foreign contract request here.
 2. W1 must join immutable billing awards, interval start/finish, periodic charges
    and settlement to issuance, starts, waits, renewal, release, finish and reaping.
    Memo edges and result state must materialize atomically. Published run, plan
    and attempt import precedes W1b blob/log publication.
-3. W2 must supply the real billing calculator, verified payment handoff and
-   data authorization/signing. Card attempts, warnings, refunds and freezes
-   still need end-to-end test/live identity coverage.
+3. W2 must supply the real billing calculator, verified payment handoff and data
+   authorization/signing. Card attempts, warnings, refunds and freezes still
+   need end-to-end test/live identity coverage.
 4. W7 must supply namespace/edge policy, verified manifest reads, physical
    verification/deletion and trusted replica identity. W1/W7 must wire final
    retention, upload quota release and tombstone GC to the elected worker.
    The legacy storage pass still reconciles raw counters and prunes old outputs
    and node logs. Its source and upload age-pruning calls are gone.
-5. W2/W7/W9 must wire final segment signing/transfer, publication, lifecycle
-   expiry, proxy egress and ring fallback. Old node-log persistence remains used
-   by controller log_segments.go, log_reads.go and storage_pass.go.
+5. W2/W7/W9 must wire final log signing, transfer, publication, lifecycle expiry,
+   proxy egress and ring fallback. The transport must register an empty stream
+   through `RecordSegments` before its first transfer so an abandoned empty tail
+   has a persisted identity. Maintenance seals existing streams only. Legacy
+   controller log readers/writers and read-time physical manifest sealing remain
+   until that transport replaces them. The old periodic sweep is gone.
 6. W1/W9 must define final custom-event append/sequence behavior before
-   AppendEventCharged and chargeStorageTx can go. W1 owns removal of egress_day
+   `AppendEventCharged` and `chargeStorageTx` can go. W1 owns removal of egress_day
    and remaining table classification/scope guard cleanup.
 7. Legacy claim credits, paid grants, raw storage counters, direct upload and
    output persistence still have W1/W2/W3/W7/W9 consumers. W7/W9 must retire
    StateStoreOld manifest consumers. No compatibility shims were added.
 
-No human decision is requested. Next work is final caller migration and atomic
-integration through those contracts, with fakes where their implementations are
-still unavailable.
+No human decision is requested. Next work is caller migration and atomic
+integration through those contracts, with fakes for unavailable implementations.
 
 ## Shared files and friction
 
-Caller changes outside pkg/store: `pkg/controller/storage_pass.go`,
-`pkg/controller/storage_pass_test.go`, `pkg/controller/direct_upload_test.go`
-and `cmd/sparkwing-controller/main.go`. They remove old pruning calls, retire
-old expectations and drop the cache age-expiry callback.
+Caller changes outside pkg/store: `pkg/controller/log_segments.go`,
+`pkg/controller/log_segments_internal_test.go`, `pkg/controller/server.go`,
+`pkg/controller/storage.go` and new `pkg/controller/log_maintenance_test.go`.
 
-Other shared changes: `internal/acceptance/store_reachability.go`,
-`design/rewrite/contracts/c1-data.md`, `docs/security.md`,
-`docs/migrations/_unreleased.md`, their embedded mirrors, `CHANGELOG.md`,
-`pkg/docs/changelog.md`, `.apidiff/pkg_store.txt` and `.apidiff/pkg_controller.txt`.
-Only W1b's obsolete SQL exemption changed in the shared store guard.
+Other shared changes: `internal/acceptance/store_logs.go`, new
+`internal/acceptance/store_abandoned_logs.go`, `design/rewrite/contracts/c1-data.md`,
+`docs/migrations/_unreleased.md`, its embedded mirror, `CHANGELOG.md`,
+`pkg/docs/changelog.md` and `.apidiff/pkg_store.txt`.
 
-Friction: missing foreign runtime owners and legacy-schema fixtures remain.
-The removed pruning paths had continued to reference retired tables. An unused
-controller test import after deletion was fixed. Scratch is deleted after final
-verification. No owned process remains.
+Friction: missing foreign runtime owners and inherited schema/scope fixtures
+remain. Cold compilation took longer than the focused tests. No W1 production
+file or SQL guard exemption changed. Scratch directory was deleted. No owned service or background process remains.
 
 STATUS: CONTINUE

@@ -119,6 +119,10 @@ func (s *Server) maintainRetainedData(ctx context.Context) {
 	if retained.Runs > 0 || retained.Metrics > 0 || retained.Records > 0 {
 		s.logger.Info("expired retained data", "runs", retained.Runs, "metrics", retained.Metrics, "records", retained.Records)
 	}
+	if _, err := operator.SealAbandonedLogStreams(ctx, lease, 5000); err != nil {
+		s.logger.Error("seal abandoned log streams failed", "err", err)
+		return
+	}
 	if !s.Metering() {
 		return
 	}

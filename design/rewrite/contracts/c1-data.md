@@ -266,9 +266,23 @@ job-holder transports and native placements remain integration obligations.
 The `storage-log-segments-and-fallback/store-data-sqlite` proof exercises
 immutable job segments, transactional rollback of a gapped batch, reopening,
 offset reads, final incomplete seals, exact replay, retained-byte accounting,
-subject isolation and revocation. Claim authority and segment digests are
+subject isolation, revocation and leased abandoned-stream sealing across reopening.
+Claim authority and segment digests are
 preseeded contract facts. Physical bytes, owner-unit transport, ring fallback,
 signing, lifecycle expiry and proxy egress remain cross-area integrations.
+
+`Operator.SealAbandonedLogStreams(ctx, maintenanceLease, limit)` closes existing
+unsealed execution streams with `writer_lost`. Job attempts wait until strictly
+after their persisted finish plus `limits.LogSealGrace`. Trigger and plan streams
+need no matching live unit generation. Eval checks its own generation and its
+immutable source generation separately. The operation locks each run, rechecks
+eligibility and the maintenance fence, and commits a bounded batch atomically.
+It preserves segments, stored-byte accounting, final seals and execution results.
+Publish-mode streams retain their publisher's final-commit contract because
+publication has no executable lease. The controller invokes this operation from
+its leased retention pass. The old `Store.AbandonedNodeLogs` query and unfenced
+controller sweep are removed. Physical manifests and ring fallback remain with
+the log transport.
 
 Persisted reads recheck a trigger's current owner lease even when its award has
 `runs.read`. Job-scoped readers retain their exact writer, attempt and generation
@@ -304,6 +318,7 @@ local publication transport and physical bytes remain integration obligations.
 | `blob.LogSigningRequest`, `blob.LogUploadURL`, `blob.LogUploadBatch` | Request and return bounded segment PUT slots for that identity. |
 | `blob.LogReadRequest`, `blob.LogTransport` | Sign uploads and proxy authenticated reads through the controller. |
 | `SegmentCommit`, `LogSegments`, `Tenant.ReadLogSegments` | Commit and read persisted segments under the same subject fence. |
+| `Operator.SealAbandonedLogStreams` | Seal abandoned execution streams under the maintenance lease without changing execution results. |
 
 ## Capability persistence, authority and payment settlement
 

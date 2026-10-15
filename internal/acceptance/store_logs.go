@@ -132,7 +132,7 @@ func checkStoreLogBoundary(ctx context.Context, root string) (err error) {
 	if _, err := tenant.ReadLogSegments(ctx, commit.Actor, request); err == nil {
 		return errors.New("revoked reader read persisted logs")
 	}
-	return nil
+	return checkStoreAbandonedLogBoundary(ctx, root)
 }
 
 func checkStoreTerminalLogReads(ctx context.Context, db *sql.DB, tenant *store.Tenant, commit store.SegmentCommit, request blob.LogReadRequest) error {

@@ -1,5 +1,14 @@
 # Migrating to the next release
 
+## Abandoned logs use tagged streams
+
+`Store.AbandonedNodeLogs` and the controller's old periodic node-log sweep are
+removed. `Operator.SealAbandonedLogStreams` closes existing execution streams as
+incomplete under the maintenance lease. Job attempts keep their 60-second final
+tail grace. Trigger, plan and eval streams use their own persisted unit fences.
+Sealing preserves committed segments and job outcomes. Published logs still
+require the publisher's final commit because they have no execution lease.
+
 ## Source bundles use record reachability
 
 `Store.ClaimExpiredSourceBundles`, `Store.DeleteSourceBundleRows`,

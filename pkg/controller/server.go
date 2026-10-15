@@ -1519,7 +1519,6 @@ func (s *Server) reap(ctx context.Context) {
 		}
 	}
 	s.sweepClaimAttention(ctx, time.Now(), claimAttentionBatch)
-	s.sealAbandonedLogs(ctx, time.Now())
 	if pairs, err := store.Maintenance.FailStaleQueuedNodes(s.store, ctx, match.DefaultClaimWait); err != nil {
 		s.logger.Error("queue-timeout sweep failed", "err", err)
 	} else {

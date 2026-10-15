@@ -46,9 +46,6 @@ func TestNodeLogRecordFollowsTheRunningAttempt(t *testing.T) {
 		t.Fatalf("another team reads the log: %v", err)
 	}
 
-	if abandoned, err := s.AbandonedNodeLogs(ctx, now.Add(time.Hour), 10); err != nil || len(abandoned) != 0 {
-		t.Fatalf("a running attempt reads as abandoned: %+v, %v", abandoned, err)
-	}
 	if err := s.MarkNodeLogSealed(ctx, open, 512, now); err != nil {
 		t.Fatal(err)
 	}
@@ -71,45 +68,6 @@ func TestNodeLogRecordFollowsTheRunningAttempt(t *testing.T) {
 
 func segment(n int, size int64, digest string) store.NodeLogSegment {
 	return store.NodeLogSegment{N: n, StoredBytes: size, MD5: "md5-" + digest, SHA256: "sha-" + digest}
-}
-
-func TestAbandonedNodeLogsWaitForTheGraceAfterTheNodeFinished(t *testing.T) {
-	f := newDispatchRun(t, "run-abandoned")
-	f.mustAccept(t, planOf("a"))
-	tok := f.claim(t, "a", store.ClaimTokenWork)
-	ctx, s := t.Context(), f.s
-	attempt, gen, err := s.CurrentNodeAttempt(ctx, store.DefaultTeam, f.run, "a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	opened := time.Now().Add(-time.Hour)
-	if _, err := s.OpenNodeLog(ctx, store.NodeLog{
-		Team: store.DefaultTeam, RunID: f.run, NodeID: "a",
-		Attempt: attempt, Generation: gen, Prefix: "p/",
-	}, opened); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.report(tok, store.AttemptReport{Outcome: "success"}); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := s.AbandonedNodeLogs(ctx, time.Now().Add(-time.Minute), 10); err != nil || len(got) != 0 {
-		t.Fatalf("a node that just finished reads as abandoned: %+v, %v", got, err)
-	}
-	got, err := s.AbandonedNodeLogs(ctx, time.Now().Add(time.Minute), 10)
-	if err != nil || len(got) != 1 || got[0].NodeID != "a" {
-		t.Fatalf("abandoned = %+v, %v", got, err)
-	}
-
-	if err := s.CreateTrigger(ctx, store.Trigger{ID: f.run, Pipeline: "demo", CreatedAt: time.Now(), TriggerSource: "runs-submit"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `UPDATE triggers SET status = 'claimed', lease_expires_at = ? WHERE id = ?`),
-		time.Now().Add(time.Hour).UnixNano(), f.run); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := s.AbandonedNodeLogs(ctx, time.Now().Add(time.Minute), 10); err != nil || len(got) != 0 {
-		t.Fatalf("a node whose trigger child still runs reads as abandoned: %+v, %v", got, err)
-	}
 }
 
 // Signing a segment charges the team exactly its size once: signing it

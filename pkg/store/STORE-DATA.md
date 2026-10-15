@@ -112,3 +112,11 @@ seal even empty streams, and only identical final bodies replay. Job tail grace
 uses the persisted finish time and original writer. Trigger, plan and eval logs
 retain their own live fences. A reader with run-read authority can read historical
 segments after the writer ends. Log incompleteness never changes the job result.
+
+`SealAbandonedLogStreams` closes existing execution streams as incomplete under
+the maintenance lease. Finished job attempts keep their final tail grace through
+its exact boundary. Trigger, plan and eval streams close when their persisted
+unit fence is gone. Eval also checks the source generation. The bounded batch
+locks runs and rechecks the maintenance fence before writing. Any error rolls
+the batch back. Existing final seals remain immutable. Publication streams keep
+their publisher's final-commit contract because publication has no lease.
