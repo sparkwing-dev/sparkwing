@@ -20,6 +20,13 @@ unlock.
 
 ## [Unreleased]
 
+- **storage (Breaking):** Configuring the controller's data backend also installs
+  transactional result verification against its physical manifests. Corrupt
+  manifests refuse completion without changing the job. Removed unused
+  `storage.SafeArtifactKey`, `storage.SafeRelPath`, `Store.PrunableNodeLogs`
+  and `Store.DeleteRunNodeLogs`. See
+  [migration steps](docs/migrations/_unreleased.md#storage-uses-record-backed-maintenance).
+
 - **storage (Breaking):** Run and team log cleanup uses the shared filesystem
   or S3 backend, including retired retention classes and late signed uploads.
   Removed `fs.ArtifactStore` and its sharded reader, writer and locks.

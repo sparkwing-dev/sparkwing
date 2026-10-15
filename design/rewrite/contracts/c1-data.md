@@ -2,6 +2,16 @@
 
 <!-- design:begin -->
 
+## Controller result verification
+
+`Server.WithDataObjects` installs `storage.BlobManifests{Objects: objects}` through
+`Store.SetResultBlobRecords` before serving or sharing the store. Terminal
+output and manifest attachments use that backend inside the live tenant
+transaction. The controller property test drives real claim/start, upload
+reservation/settlement, record commit and terminal transitions. Corrupt physical
+manifest bytes refuse completion. Restoring them allows completion and exact
+replay. Authenticated data binding remains C2's separate contract.
+
 ## Amendment 1: authority and execution seams
 
 [Amendments 1](amendments-1.md) records the worker requests and assignments.

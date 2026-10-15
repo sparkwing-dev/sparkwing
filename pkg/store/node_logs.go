@@ -203,20 +203,6 @@ func (s *Store) NodeLogSegments(ctx context.Context, l NodeLog) (_ []NodeLogSegm
 	return out, rows.Err()
 }
 
-// PrunableNodeLogs lists a team's log records of finished runs, least
-// recently written first, which is the order a team past its storage
-// share loses them in.
-func (s *Store) PrunableNodeLogs(ctx context.Context, team Team, limit int) (_ []NodeLog, err error) {
-	rows, err := s.query(ctx, `SELECT `+nodeLogColumnsOf("l")+` FROM node_logs l
-  JOIN runs r ON r.team = l.team AND r.id = l.run_id
- WHERE l.team = ? AND r.status IN (?, ?, ?)
- ORDER BY l.updated_at LIMIT ?`, string(team), "success", runStatusFailed, runStatusCancelled, limit)
-	if err != nil {
-		return nil, err
-	}
-	return collectNodeLogs(rows)
-}
-
 // MarkNodeLogSealed records that the attempt's manifest exists, with
 // the bytes its segments hold.
 func (s *Store) MarkNodeLogSealed(ctx context.Context, l NodeLog, storedBytes int64, now time.Time) error {
@@ -261,24 +247,7 @@ func (s *Store) RunNodeLogs(ctx context.Context, team Team, runID string) (_ []N
 	return collectNodeLogs(rows)
 }
 
-// DeleteRunNodeLogs forgets a run's log records once their objects are
-// gone.
-func (s *Store) DeleteRunNodeLogs(ctx context.Context, team Team, runID string) error {
-	if _, err := s.exec(ctx, `DELETE FROM node_log_segments WHERE team = ? AND run_id = ?`, string(team), runID); err != nil {
-		return err
-	}
-	_, err := s.exec(ctx, `DELETE FROM node_logs WHERE team = ? AND run_id = ?`, string(team), runID)
-	return err
-}
-
 const nodeLogColumns = `team, run_id, node_id, attempt, generation, prefix, uploaded_through, stored_bytes, charged_bytes, sealed_at, created_at, updated_at`
-
-func nodeLogColumnsOf(alias string) string {
-	return alias + ".team, " + alias + ".run_id, " + alias + ".node_id, " + alias + ".attempt, " + alias + ".generation, " +
-		alias + ".prefix, " + alias + ".uploaded_through, " + alias + ".stored_bytes, " +
-		alias + ".charged_bytes, " + alias + ".sealed_at, " +
-		alias + ".created_at, " + alias + ".updated_at"
-}
 
 func scanNodeLog(row rowScanner) (NodeLog, error) {
 	var l NodeLog

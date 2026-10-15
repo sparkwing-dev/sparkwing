@@ -5,12 +5,16 @@ import (
 	"fmt"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // WithDataObjects supplies the shared physical backend for data bindings and maintenance.
 func (s *Server) WithDataObjects(objects blob.ObjectBackend) *Server {
 	s.data = &DataController{Store: s.store, Objects: objects}
+	if s.store != nil {
+		s.store.SetResultBlobRecords(storage.BlobManifests{Objects: objects})
+	}
 	return s
 }
 

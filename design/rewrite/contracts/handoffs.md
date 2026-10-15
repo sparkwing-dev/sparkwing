@@ -2,6 +2,34 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
+## From W7 controller result verification and unused API retirement
+
+**Completed W7 runtime wiring.** `Server.WithDataObjects` now calls
+`Store.SetResultBlobRecords` with the configured backend's verified manifest
+reader. Both standalone backend paths already call this constructor. Without the
+hook, W1b refused terminal result attachment as unconfigured. The controller
+property test joins real claims, starts, upload reservations, physical signed
+filesystem transfers, receipt settlement and record commits. Twelve generated
+payloads refuse corrupt manifests without finishing the job, then complete and
+replay after the bytes are restored. HTTP authentication is not exercised.
+
+**Completed W7 hard cuts.** Removed unused storage.SafeRelPath/SafeArtifactKey,
+Store.PrunableNodeLogs/DeleteRunNodeLogs, their private helper and obsolete tests.
+The deleted retired-class fixture is covered by the existing common-backend
+team-purge/recheck test. SafeSegment remains because the controller uses it.
+
+**W3 caller still needs migration.** internal/nodehost/artifacts.go synthesizes
+manifest keys with Name=runID and no attempt key. W1's final result layout uses
+Name=result and Scope.Key=run/attempt/generation. The legacy host must obtain
+producer record keys from final tenant execution state or a bound input resolver.
+Its StateStoreOld view cannot name the producing attempt. The declared final
+StateStore.ReadNode can supply that identity. W7 left this foreign host interface
+unchanged. This is a source audit finding, not executed host proof.
+
+W2/W9's authenticated data/log bindings and segment-commit wire operation remain
+open. W1b's six mutation-expiry cases still fail. Expired upload staging cleanup
+still has no leased store seam. See [w7-storage-report.md](w7-storage-report.md).
+
 ## From W7 raw artifact interface retirement
 
 **Completed W7 hard cut.** Removed storage.ArtifactStore,

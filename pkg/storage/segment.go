@@ -3,7 +3,6 @@ package storage
 import (
 	"errors"
 	"fmt"
-	"strings"
 )
 
 // SafeSegment validates an identifier (run ID, node ID) used as a
@@ -24,45 +23,6 @@ func SafeSegment(id string) error {
 	for _, r := range id {
 		if r == '/' || r == '\\' || r < 0x20 || r == 0x7f {
 			return fmt.Errorf("storage: identifier %q contains a path separator or control character", id)
-		}
-	}
-	return nil
-}
-
-// SafeRelPath validates an identifier that may span several path
-// segments -- spawned node IDs are hierarchical ("parent/child") --
-// by requiring every "/"-separated segment to be a SafeSegment, so
-// the identifier can nest below its run directory but never step out
-// of it.
-func SafeRelPath(id string) error {
-	if id == "" {
-		return errors.New("storage: empty identifier")
-	}
-	for _, seg := range strings.Split(id, "/") {
-		if err := SafeSegment(seg); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// SafeArtifactKey validates an artifact key: a SafeRelPath whose segments
-// use only ASCII letters, digits, ".", "_", and "-" and never start with a
-// dot, so the key survives URL, object-store, and shard handling unchanged.
-func SafeArtifactKey(key string) error {
-	if err := SafeRelPath(key); err != nil {
-		return err
-	}
-	for _, seg := range strings.Split(key, "/") {
-		if seg[0] == '.' {
-			return fmt.Errorf("storage: artifact key segment %q starts with a dot", seg)
-		}
-		for _, r := range seg {
-			switch {
-			case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
-			default:
-				return fmt.Errorf("storage: artifact key %q contains %q", key, r)
-			}
 		}
 	}
 	return nil

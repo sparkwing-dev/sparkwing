@@ -674,37 +674,6 @@ func TestARefusedLogChargeStaysRefusedOnRetry(t *testing.T) {
 	}
 }
 
-// A team's logs written under a retention class the controller no longer
-// configures still go when the team is deleted, and at its recheck, after
-// the purge removed the records that named the class.
-func TestTeamDeletionReachesARetiredRetentionClass(t *testing.T) {
-	f := newLogSegmentFixture(t)
-	ctx := t.Context()
-	f.srv.WithLogRetention(map[store.Team]int{store.DefaultTeam: 365})
-	tok := f.claim(t, "a", store.ClaimTokenWork)
-	s, _ := f.sink(t, tok, "a")
-	if err := s.Append([]byte(logLine(1)), "", 0, 0); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.Close(ctx, logseg.End{}); err != nil {
-		t.Fatal(err)
-	}
-	rec, err := f.st.LatestNodeLog(ctx, store.DefaultTeam, "run-d", "a")
-	if err != nil || !strings.HasPrefix(rec.Prefix, "logs/r365/") {
-		t.Fatalf("record = %+v, %v; want the r365 class", rec, err)
-	}
-	f.srv.WithLogRetention(nil)
-	if err := f.st.DeleteRunNodeLogs(ctx, store.DefaultTeam, "run-d"); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.srv.purgeTeamLogs(ctx, store.DefaultTeam); err != nil {
-		t.Fatal(err)
-	}
-	if left, err := f.srv.logObjects().List(ctx, rec.Prefix); err != nil || len(left) != 0 {
-		t.Fatalf("after the purge the retired class still holds %v, %v", left, err)
-	}
-}
-
 // A new attempt's sink numbers its bytes from zero again, so the live ring
 // must start over for it instead of taking its first lines for the old
 // attempt's and dropping them.

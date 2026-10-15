@@ -2914,7 +2914,6 @@ func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Ti
 func (s *Store) DeleteCronSchedule(ctx context.Context, id string) error
 func (s *Store) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (int, error)
 func (s *Store) DeleteRun(ctx context.Context, runID string) error
-func (s *Store) DeleteRunNodeLogs(ctx context.Context, team Team, runID string) error
 func (s *Store) DeleteSecret(name, pipeline string) error
 func (s *Store) DeleteSession(rawSession string) error
 func (s *Store) Dialect() Dialect
@@ -3031,7 +3030,6 @@ func (s *Store) PrincipalHoldsProfileClaim(ctx context.Context, key string, clai
 func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) PrincipalHoldsTriggerClaim(ctx context.Context, triggerID string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) ProvisionCapability(ctx context.Context, spec capability.ProvisionSpec) (capability.Issued, error)
-func (s *Store) PrunableNodeLogs(ctx context.Context, team Team, limit int) (_ []NodeLog, err error)
 func (s *Store) PruneDownloadDays(ctx context.Context, day string) (int64, error)
 func (s *Store) PruneEgressUsage(ctx context.Context, before string) (int, error)
 func (s *Store) PruneStorageCommitReceipts(ctx context.Context, now time.Time) (int64, error)

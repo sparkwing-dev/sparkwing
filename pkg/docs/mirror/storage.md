@@ -137,6 +137,13 @@ artifact plug-in interface are removed. Filesystem deployment measurement uses
 `fs.NewUsageReporter` and counts physical files without a logical object layout.
 It grants no byte-read or record authority.
 
+`Server.WithDataObjects` installs the same physical backend's manifest reader
+through `Store.SetResultBlobRecords` before serving. Terminal result attachment
+uses the live tenant transaction and verifies physical manifest bytes. A corrupt
+manifest refuses completion without changing job state. Restoring the bytes
+permits completion and identical replay. Authenticated signing and record
+bindings remain separate.
+
 Physical log keys have one owner in `internal/blob`. Signed slots use
 `LogObjectKey`: zero names the final manifest and positive indexes name immutable
 segments. The physical uploader-to-store proofs use real tenant segment commits

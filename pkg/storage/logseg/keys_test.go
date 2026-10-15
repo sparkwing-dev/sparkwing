@@ -5,7 +5,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
 )
 
@@ -20,9 +19,6 @@ func TestJobSubjectPrefixLayout(t *testing.T) {
 	other, err := blob.LogSubjectPrefix(logseg.ClassFree, keySubject("acme", "run-1", "build__linux", 2, 7))
 	if err != nil || other == got {
 		t.Fatalf("hierarchical and flat node IDs share a prefix: %q, %v", other, err)
-	}
-	if err := storage.SafeArtifactKey(blob.LogSegmentKey(got, 1)); err != nil {
-		t.Fatalf("segment key is not a safe artifact key: %v", err)
 	}
 	if escaped, err := blob.LogSubjectPrefix(logseg.ClassFree, keySubject("acme", "r", ".hidden/a_b c", 1, 1)); err != nil || escaped != "logs/r30/teams/acme/runs/r/jobs/_2ehidden_2fa_5fb_20c/a1-g1/" {
 		t.Fatalf("escaped subject = %q: %v", escaped, err)

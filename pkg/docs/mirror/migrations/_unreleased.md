@@ -42,9 +42,10 @@ sink.Append(data, "", 0, 0)
 controllerClient.DeleteRun(ctx, runID)
 ```
 
-`storage.SafeLogIDs` is removed with the unused append-log surface. Use
-`blob.LogObjectKey` for tagged log slots. Custom path users can validate a run
-segment with `storage.SafeSegment` and a job path with `storage.SafeRelPath`.
+`storage.SafeLogIDs`, `SafeRelPath` and `SafeArtifactKey` are removed with
+unused raw storage surfaces. Use `blob.LogObjectKey` for tagged log slots and
+`blob.RecordNamespace` for record namespaces. Those helpers validate their
+structured inputs.
 
 ## Filesystem logs use tagged segments
 
@@ -789,6 +790,13 @@ Deployment usage reporting remains separate through `storage.UsageReporter`.
 Its filesystem constructor is `fs.NewUsageReporter`.
 
 ## Storage uses record-backed maintenance
+
+`Store.PrunableNodeLogs` and `Store.DeleteRunNodeLogs` are removed. Run and team
+deletion use the controller APIs and the shared backend. Retention uses the
+store's leased maintenance pass.
+
+`Server.WithDataObjects` also installs the backend's verified manifest reader
+for result attachment. Configure it before serving or sharing the store.
 
 Remove calls to `WithStoragePass` and `RunStoragePass`, references to
 `StoragePassEvery`, and readers of the `storage_pass` health field. No forwarding
