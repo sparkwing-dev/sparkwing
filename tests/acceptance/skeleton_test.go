@@ -16,6 +16,7 @@ func pendingScenarios(t *testing.T, group string) {
 		}
 		count++
 		t.Run(scenario.ID, func(t *testing.T) {
+			typeScriptBoundary(t, scenario.ID)
 			var areas []string
 			for _, area := range scenario.Requires {
 				areas = append(areas, string(area))

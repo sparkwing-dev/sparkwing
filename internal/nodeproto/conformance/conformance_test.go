@@ -82,8 +82,7 @@ func TestTypeScriptSDKConforms(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// safety: the suite starts the fixture exactly as a host starts a TypeScript entry, behind the bootstrap preload.
-	runSuite(t, "ts", pipelineentry.Node(node, filepath.Join(sdk, "src", "bootstrap.ts"), filepath.Join(sdk, "test", "fixtures", "conformance.ts")))
+	runSuite(t, "ts", pipelineentry.Node(node, filepath.Join(sdk, "test", "fixtures", "conformance.ts")))
 }
 
 // safety: sessions run in file order because same_plan_as compares a plan

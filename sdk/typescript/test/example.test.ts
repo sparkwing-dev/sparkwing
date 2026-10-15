@@ -1,250 +1,80 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createReadStream, createWriteStream, mkdtempSync, rmSync } from "node:fs";
-import { createServer } from "node:http";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
-import { createInterface } from "node:readline";
-import { fileURLToPath } from "node:url";
-import type { Req } from "./helpers.ts";
+import { tmpdir } from "node:os";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { createInterface } from "node:readline";
+import type { Readable, Writable } from "node:stream";
+import { hello } from "./helpers.ts";
 
-const fixture = (name: string) => fileURLToPath(new URL(name, import.meta.url));
-const example = fixture("../examples/hello/pipeline.ts");
-const bootstrap = new URL("../src/bootstrap.ts", import.meta.url).href;
-const forged = `{"reply":"1","ok":true,"result":{"forged":true}}`;
-const unix = process.platform === "win32" ? "the TypeScript SDK does not open Windows protocol handles yet" : false;
-
-interface Session {
-  code: number | null;
-  frames: Array<Record<string, unknown>>;
-  stdout: string;
-  stderr: string;
-}
-
-/**
- * Starts file the way a host does: behind the SDK's bootstrap preload with
- * exactly --sw-node-protocol, the request
- * pipe on descriptor 3, the frame pipe on 4 and stdin from the null device.
- * Each request goes out after the previous reply, then the request pipe
- * closes. Real FIFOs stand in for the host's pipes, since a Node.js "pipe"
- * stdio entry is a socket pair.
- */
-async function session(file: string, requests: Array<Req>, env: Record<string, string> = {}, slowStderr = false): Promise<Session> {
-  const dir = mkdtempSync(join(tmpdir(), "sw-ts-node-"));
-  const reqPath = join(dir, "requests");
-  const framePath = join(dir, "frames");
-  execFileSync("mkfifo", [reqPath, framePath]);
-  const base: Record<string, string> = {};
-  for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !k.startsWith("SPARKWING_")) base[k] = v;
-  const child = spawn("sh", ["-c", 'exec "$0" --import "$4" "$1" --sw-node-protocol 3<"$2" 4>"$3"', process.execPath, file, reqPath, framePath, bootstrap], {
-    env: { ...base, SPARKWING_PROTOCOL_HANDLES: "3,4", ...env },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  const guard = setTimeout(() => child.kill("SIGKILL"), 20_000);
-  let stdout = "";
-  let stderr = "";
-  child.stdout.on("data", (d) => (stdout += d));
-  child.stderr.on("data", (d) => {
-    stderr += d;
-    if (slowStderr) {
-      child.stderr.pause();
-      setTimeout(() => child.stderr.resume(), 5);
-    }
-  });
-  const closed = new Promise<number | null>((resolve) => child.on("close", resolve));
-  const req = createWriteStream(reqPath);
-  const lines = createInterface({
-    input: createReadStream(framePath),
-    crlfDelay: Infinity,
-  })[Symbol.asyncIterator]();
-  const frames: Array<Record<string, unknown>> = [];
-  try {
-    for (const r of requests) {
-      req.write(JSON.stringify(r) + "\n");
+const fixture = fileURLToPath(new URL("fixtures/conformance.ts", import.meta.url));
+test(
+  "native Unix protocol uses private pipes without preload and separates stdout from frames",
+  { skip: process.platform === "win32" ? "native raw-handle launch is run by the Windows acceptance host" : false },
+  async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sdk-protocol-"));
+    const reqPath = join(dir, "requests"),
+      framesPath = join(dir, "frames");
+    const mkfifo = spawn("mkfifo", [reqPath, framesPath], { stdio: "inherit" });
+    assert.equal(await new Promise((resolve) => mkfifo.on("close", resolve)), 0);
+    const child = spawn("sh", ["-c", 'exec "$0" "$1" --sw-node-protocol 3<"$2" 4>"$3"', process.execPath, fixture, reqPath, framesPath], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const closed = new Promise<number | null>((resolve, reject) => {
+      child.on("close", resolve);
+      child.on("error", reject);
+    });
+    const requests = createWriteStream(reqPath);
+    const frameStream = createReadStream(framesPath);
+    const frames = createInterface({ input: frameStream })[Symbol.asyncIterator]();
+    const records: any[] = [];
+    let stdout = "",
+      stderr = "";
+    child.stdout!.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr!.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    async function send(request: Record<string, unknown>): Promise<any> {
+      requests.write(JSON.stringify(request) + "\n");
       for (;;) {
-        const next = await lines.next();
-        if (next.done) throw new Error(`frame pipe ended before the reply to ${r.id}; stderr:\n${stderr}`);
-        const frame = JSON.parse(next.value) as Record<string, unknown>;
-        frames.push(frame);
-        if (frame["reply"] === r.id) break;
+        const frame = await frames.next();
+        assert.equal(frame.done, false, stderr);
+        const value = JSON.parse(frame.value!);
+        records.push(value);
+        if (value.reply === request.id) return value;
       }
     }
-    req.end();
-    for (let next = await lines.next(); !next.done; next = await lines.next())
-      frames.push(JSON.parse(next.value) as Record<string, unknown>);
-    const code = await closed;
-    return { code, frames, stdout, stderr };
-  } finally {
-    clearTimeout(guard);
-    req.destroy();
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
-
-const result = (s: Session, id: string) => s.frames.find((f) => f["reply"] === id)?.["result"];
-const run = { run_id: "r1" };
-
-test("a pipeline entry refuses any argument but --sw-node-protocol, a start without the bootstrap preload, and a process without the host's pipes", () => {
-  for (const args of [["--describe"], []]) {
-    const r = spawnSyncNode([example, ...args]);
-    assert.equal(r.status, 2);
-    assert.match(r.stderr, /usage: <pipeline file> --sw-node-protocol/);
-  }
-  const unloaded = spawnSyncNode([example, "--sw-node-protocol"]);
-  assert.equal(unloaded.status, 2);
-  assert.match(unloaded.stderr, /not started with node --import @sparkwing\/sdk\/bootstrap/);
-  const bare = spawnSyncNode(["--import", bootstrap, example, "--sw-node-protocol"]);
-  assert.equal(bare.status, 2);
-  assert.match(bare.stderr, /descriptor 3/);
-});
-
-test("neither the bootstrap nor the SDK's index exports what the preload captured", async () => {
-  assert.deepEqual(Object.keys(await import(bootstrap)), []);
-  const sdk = await import("../src/index.ts");
-  for (const name of ["take", "record", "startup"]) assert.equal(name in sdk, false, name);
-});
-
-function spawnSyncNode(args: string[]): { status: number | null; stderr: string } {
-  try {
-    execFileSync(process.execPath, args, {
-      stdio: ["ignore", "ignore", "pipe"],
-      encoding: "utf8",
-    });
-    return { status: 0, stderr: "" };
-  } catch (err) {
-    const e = err as { status: number | null; stderr: string };
-    return { status: e.status, stderr: e.stderr };
-  }
-}
-
-test("describe is a request on the request pipe", { skip: unix }, async () => {
-  const s = await session(example, [{ id: "1", op: "describe" }]);
-  assert.equal(s.code, 0, s.stderr);
-  const doc = result(s, "1") as {
-    protocol: string;
-    sdk: { language: string };
-    pipelines: Array<{ name: string }>;
-  };
-  assert.equal(doc.protocol, "1");
-  assert.equal(doc.sdk.language, "typescript");
-  assert.deepEqual(
-    doc.pipelines.map((p) => p.name),
-    ["hello"],
-  );
-});
-
-test("one process per node attempt plans, runs its node through the routes and exits at end of input", { skip: unix }, async () => {
-  const server = createServer((req, res) => {
-    const ok = req.headers.authorization === "Bearer tok" && req.headers["sparkwing-node-protocol"] === "1";
-    if (ok && req.url === "/node/v1/nodes/build/output") {
-      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ output: { digest: "sha-hello" } }));
-      return;
+    try {
+      const reply = await send({
+        ...hello,
+        binding: { run_id: "r", job_id: "build", routes: { url: "http://127.0.0.1:12345", bearer: "hello-only" } },
+      });
+      assert.equal(reply.result.protocol, 2);
+      const described = await send({ id: "describe", op: "describe" });
+      assert.equal(described.result.pipelines[0].name, "conformance");
+      const plan = await send({ id: "plan", op: "plan", pipeline: "conformance", args: {}, run: { run_id: "r", pipeline: "alias" } });
+      assert.equal(plan.result.jobs.length, 2);
+      assert.equal("protocol" in plan.result, false);
+      const run = await send({ id: "run", op: "run_step", job: "build", step: plan.result.jobs[0].steps[0].id, attempt: 1 });
+      assert.deepEqual(run.result.output, { message: "hello", runner: "granted", pipeline: "alias" });
+      requests.end();
+      assert.equal(await closed, 0, stderr);
+      assert.match(stdout, /forged/);
+      assert.equal(
+        records.some((record) => record.reply === "forged"),
+        false,
+      );
+      assert.ok(records.some((record) => record.level === "debug"));
+    } finally {
+      child.kill("SIGKILL");
+      requests.destroy();
+      frameStream.destroy();
+      await closed;
+      rmSync(dir, { recursive: true, force: true });
     }
-    res.writeHead(404).end();
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const env = {
-    SPARKWING_NODE_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
-    SPARKWING_NODE_TOKEN: "tok",
-  };
-  const plan = {
-    id: "1",
-    op: "plan",
-    pipeline: "hello",
-    args: { target: "prod" },
-    run,
-  };
-  try {
-    const build = await session(example, [plan, { id: "2", op: "run_node", node: "build", attempt: 1 }], env);
-    assert.equal(build.code, 0, build.stderr);
-    const planDoc = result(build, "1") as { nodes: unknown[] };
-    assert.deepEqual(planDoc.nodes[1], {
-      id: "publish",
-      deps: ["build"],
-      modifiers: { retry: 2, retry_backoff_ms: 1000, timeout_ms: 60000 },
-      work: { steps: [{ id: "run", is_result: true }], result_step: "run" },
-    });
-    assert.deepEqual(result(build, "2"), {
-      outcome: "success",
-      output: { digest: "sha-hello" },
-    });
-
-    const publish = await session(example, [plan, { id: "2", op: "run_node", node: "publish", attempt: 1 }], env);
-    assert.deepEqual(result(publish, "2"), { outcome: "success" }, publish.stderr);
-    assert.ok(
-      publish.frames.some((f) => f["node"] === "publish" && f["msg"] === "published sha-hello to prod"),
-      JSON.stringify(publish.frames),
-    );
-  } finally {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  }
-});
-
-test(
-  "customer text stays on stdout and stderr, and neither a command a body starts nor a module the entry imports before the SDK holds a pipe or the bearer",
-  { skip: unix },
-  async () => {
-    const s = await session(
-      fixture("./fixtures/pipes.ts"),
-      [
-        { id: "1", op: "plan", pipeline: "pipes", args: {}, run },
-        { id: "2", op: "run_node", node: "fds", attempt: 1 },
-      ],
-      { SPARKWING_NODE_URL: "http://127.0.0.1:9", SPARKWING_NODE_TOKEN: "tok" },
-    );
-    assert.equal(s.code, 0, s.stderr);
-    assert.deepEqual(result(s, "2"), {
-      outcome: "success",
-      output: { held: ["SPARKWING_NODE_URL"] },
-    });
-    assert.ok(s.stdout.includes(forged) && s.stderr.includes(forged));
-    assert.ok(!s.frames.some((f) => f["forged"] !== undefined || (f["result"] as { forged?: unknown } | undefined)?.forged !== undefined));
-  },
-);
-
-test("the node process exits at end of input even when a body left an interval running", { skip: unix }, async () => {
-  const s = await session(fixture("./fixtures/lingering.ts"), [
-    { id: "1", op: "plan", pipeline: "lingering", args: {}, run },
-    { id: "2", op: "run_node", node: "poll", attempt: 1 },
-  ]);
-  assert.equal(s.code, 0, `killed by the guard or failed: ${s.stderr}`);
-  assert.deepEqual(result(s, "2"), {
-    outcome: "success",
-    output: { started: true },
-  });
-});
-
-test("every stderr line a body wrote arrives before the node process exits", { skip: unix }, async () => {
-  const s = await session(fixture("./fixtures/noisy.ts"), [
-    { id: "1", op: "plan", pipeline: "noisy", args: {}, run },
-    { id: "2", op: "run_node", node: "shout", attempt: 1 },
-  ]);
-  assert.equal(s.code, 0);
-  const lines = s.stderr.split("\n").filter((l) => l !== "");
-  assert.equal(lines.length, 4096);
-  assert.match(lines[4095] ?? "", /^4095 x{1024}$/);
-});
-
-test(
-  "a slow reader and a write queued from a drain handler neither hang the exit nor lose bytes",
-  { timeout: 30_000, skip: unix },
-  async () => {
-    // The queued state depends on timing, so on Linux this detects the old drain
-    // wait's hang probabilistically: it failed roughly two runs in three against it.
-    const s = await session(
-      fixture("./fixtures/drainwriter.ts"),
-      [
-        { id: "1", op: "plan", pipeline: "drainwriter", args: {}, run },
-        { id: "2", op: "run_node", node: "flood", attempt: 1 },
-      ],
-      {},
-      true,
-    );
-    assert.equal(s.code, 0, "the guard killed a node that should have exited");
-    assert.deepEqual(result(s, "2"), { outcome: "success" });
-    assert.equal(s.stderr.length, 763 * 1024);
-    assert.ok(s.stderr.endsWith("z".repeat(63 * 1024)));
   },
 );

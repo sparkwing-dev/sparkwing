@@ -1,23 +1,38 @@
 {
   "name": "@sparkwing/sdk",
   "version": "0.0.0",
-  "private": true,
-  "description": "Prototype TypeScript SDK for Sparkwing engine-hosted execution",
+  "description": "TypeScript SDK for Sparkwing pipelines",
   "license": "Elastic-2.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./bootstrap": "./src/bootstrap.ts"
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./dist/index.js"
+    }
   },
   "engines": {
     "node": ">=22.18"
   },
   "scripts": {
     "test": "node --test \"test/**/*.test.ts\"",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build && node native/check-package.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "typescript": "^5.8.0"
+  },
+  "types": "./index.d.ts",
+  "main": "./dist/index.js",
+  "files": [
+    "dist",
+    "index.d.ts",
+    "README.md",
+    "native/win32-x64/protocol.node",
+    "native/win32-arm64/protocol.node"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }

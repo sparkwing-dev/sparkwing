@@ -1,104 +1,72 @@
-# Sparkwing TypeScript SDK (prototype)
+# @sparkwing/sdk
 
-This package is a prototype. It is not published, not part of a release, and
-its wire shapes change with the node protocol specification without notice.
-
-It shows how small a Sparkwing SDK becomes when the engine hosts execution:
-the SDK builds plans and runs bodies, and the engine owns scheduling,
-retries, timeouts, caching, secrets and log handling. The design is in
-[design/engine-hosted-execution.md](../../design/engine-hosted-execution.md);
-the wire shapes follow the node protocol specification (`docs/node-protocol.md`
-and its JSON Schemas).
-
-## What it contains
-
-| File | Purpose |
-|---|---|
-| `src/plan.ts` | The plan DSL: `definePipeline`, `Plan.job`, `Plan.approval`, the job envelope (`needs`, `retry`, `timeout`, `requires`, `concurrency`, `resources`, `cacheDir`, `memoize`, `onFailure`), its closures (`skipIf`, `beforeRun`, `verify`, `afterRun`, `generate`), and steps (`step`, `Step.result`, `skipIf`, `finally`, `dryRun`) |
-| `src/describe.ts` | The describe document (protocol version, SDK and pipelines) and the plan document types |
-| `src/protocol.ts` | Framing: requests on the request pipe, replies and log records on the frame pipe, and the reply error codes |
-| `src/runner.ts` | The loop that answers `describe`, `plan`, `run_node`, `run_step`, `cancel` and `eval` |
-| `src/bootstrap.ts` | The `./bootstrap` preload the engine starts every entry with: takes the bearer and the handle list out of the environment before any entry code runs |
-| `src/startup.ts` | Holds what the preload captured until `main` takes it; the package does not export it |
-| `src/main.ts` | The `--sw-node-protocol` entry: refuses a process started without the preload and finds the pipes on descriptors 3 and 4 |
-| `src/log.ts` | NDJSON log records with the engine's field names |
-| `src/routes.ts` | Clients for the node routes at `SPARKWING_NODE_URL`: a secret by name, and another node's output |
-| `examples/hello/pipeline.ts` | A two-job pipeline |
-
-## A pipeline
+Declare Sparkwing pipelines in TypeScript. The host schedules jobs and owns
+placement, retries, risk authorization, storage and credentials. SDK processes
+build declarations and execute the bodies and closures the host requests.
 
 ```ts
 import { definePipeline, main } from "@sparkwing/sdk";
 
 definePipeline({
-  name: "hello",
-  plan(plan) {
-    const build = plan.job("build", () => ({ digest: "sha-hello" }));
-    plan
-      .job("publish", async (ctx) => {
-        const out = await ctx.output<{ digest: string }>("build");
-        if (!out) throw new Error("build recorded no output");
-        ctx.log.info(`published ${out.digest}`);
-      })
-      .needs(build)
-      .retry(2)
-      .timeout(60_000);
+  name: "check",
+  args: [{ name: "target", type: "string", default: "all" }],
+  secrets: [{ name: "DEPLOY_TOKEN", optional: true }],
+  plan(plan, run) {
+    const build = plan.job("build", async ctx => {
+      await ctx.exec(["npm", "run", "build"]).run();
+      return { target: run.args.target };
+    }).artifacts("dist/**");
+    plan.job("report", async ctx => {
+      const output = await ctx.output(build);
+      await ctx.summary(`Built ${output?.target}`);
+    }).needs(build).consumes(build, { into: "build-output" });
   },
 });
 
-process.exitCode = await main();
+await main();
 ```
 
-A repository's `.sparkwing/package.json` depends on `@sparkwing/sdk` and names
-the pipeline file in `main`:
+Use an exact package version in `.sparkwing/package.json`. Its version selects
+the matching engine. The package requires Node.js 22.18 or later. The public
+API is [index.d.ts](index.d.ts).
 
-```json
-{ "type": "module", "main": "pipeline.ts", "dependencies": { "@sparkwing/sdk": "file:../sdk/typescript" } }
-```
+Durations are milliseconds and memory is bytes. Omitted options remain unset
+where the wire supports presence. Explicit zero remains zero, including an
+indefinite approval timeout. Argument values stay strings, including `int64`.
+String-array arguments use comma splitting, trimming and empty-item removal.
 
-Node.js strips types only outside `node_modules`, so until the SDK ships as
-JavaScript it installs from a `file:` link. The engine runs `npm ci` there
-when `node_modules` lacks the SDK, and then starts
-`node --import <the SDK's ./bootstrap> pipeline.ts --sw-node-protocol` with the request pipe
-on descriptor 3 and the frame pipe on descriptor 4, and sends one JSON request
-per line. stdout and stderr stay with pipeline code; the engine never parses
-them. The engine starts one process per node attempt and sends `plan` before
-the body. A job's body is its result step, named `run`, so the engine runs it
-with `run_step`:
+`Context` provides lazy secrets and plain variables, typed outputs, references,
+annotations, summaries, acknowledged masking, OIDC, child runs and cleanup.
+Command, Git, Docker, service, filesystem and memo helpers use the same context
+and cancellation signal. Plan callbacks declare work; helpers that perform I/O
+refuse calls during planning. Generated jobs reconstruct from recorded source
+output. The host validates the reconstructed declarations against accepted state.
 
-```text
--> {"id":"1","op":"plan","pipeline":"hello","args":{},"run":{"run_id":"r1"}}
-<- {"reply":"1","ok":true,"result":{"protocol":"1","pipeline":"hello","run_id":"r1","nodes":[...]}}
--> {"id":"2","op":"run_step","node":"build","step":"run","attempt":1}
-<- {"ts":"...","level":"info","node":"build","step":"run","msg":"building"}
-<- {"reply":"2","ok":true,"result":{"outcome":"success","output":{"digest":"sha-hello"}}}
-```
+The host starts `node <entry> --sw-node-protocol`. Protocol 2 begins with hello,
+which supplies granted runner identity and an optional in-memory service binding.
+Requests and frames use private pipes. Standard output and error remain author
+output. No preload or environment bearer is used. The SDK does not filter debug
+logs or assign job identity to log frames.
 
-A frame with `reply` answers a request; every other frame is a log record.
-Requests run as they arrive, since the engine may have several `eval` and
-`run_step` requests in flight. A failed reply carries the protocol's
-`error.code`, such as `no_plan` or `unknown_node`.
-
-The engine's conformance suite (`internal/nodeproto/conformance`) drives
-`test/fixtures/conformance.ts`, the same fixture pipeline the Go SDK
-implements, through every request and checks each reply against the node
-protocol's schemas.
-
-Not supported yet: Windows, where the protocol pipes are inherited handles;
-plan-level concurrency groups with `box` scope, whose key needs the engine's
-machine id; and the plan document fields the Go SDK has that this package
-does not declare (artifacts, pipeline references, tools, `whenRunner`,
-`inline`, step groups and risks, plan priority and admission class).
-
-## Running the tests
-
-The package has no runtime dependencies and needs Node.js 22.18 or newer,
-which runs TypeScript files directly.
+On Windows, the host supplies decimal handles through
+`--sw-protocol-handles <request>,<frame>`. A packaged native bridge converts them
+to Node descriptors and clears inheritance. Build the x64 and arm64 bridges in
+the matching Windows MSVC environments with:
 
 ```sh
-node --test "test/**/*.test.ts"
+node native/build.mjs --headers <node-headers/include/node> --node-lib <node.lib> --arch x64
 ```
 
-`npm run typecheck` needs the `typescript` and `@types/node` dev
-dependencies, which `npm ci` installs. The repository's `gate` pipeline runs
-both.
+The release package must contain `native/win32-x64/protocol.node` and
+`native/win32-arm64/protocol.node`. `npm pack` refuses a package missing either bridge. The bridge source is in
+[native/protocol.c](native/protocol.c). End users need no compiler.
+
+For development, run `npm ci`, `npm run typecheck`, `npm test` and `npm run build`.
+The build emits ESM into `dist/`; package exports expose only the public root.
+The release process stamps `package.json` and its lockfile with the engine
+release version. Hello reads that package version.
+
+The Go acceptance suite also runs SDK boundary tests for the protocol scenarios.
+These tests use native Unix pipes and fake bound services. Controller authorization,
+store transitions, artifact/memo persistence, native Windows handles, real DinD,
+and the six placement paths require their corresponding integration hosts.

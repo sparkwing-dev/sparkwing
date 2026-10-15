@@ -1,111 +1,178 @@
-// Thin clients for the /node/v1 routes the engine serves to a node-bound
-// process. The host resolves secrets and registers them with its masker
-// before it answers, so the SDK never masks anything itself.
+import type { Annotation, ChildOptions, CleanupRegistration, CleanupSpec, PipelineRef } from "../index.d.ts";
+import { decodeError, failure, object, string } from "./errors.ts";
+import { assertExecution } from "./scope.ts";
 
-import { NODE_TOKEN_ENV, NODE_URL_ENV } from "./startup.ts";
-import { PROTOCOL_VERSION } from "./describe.ts";
-
-export { NODE_TOKEN_ENV, NODE_URL_ENV };
-
-export interface NodeRouteConfig {
-  baseUrl: string;
-  token: string;
-  fetch?: typeof fetch;
+export interface ProcessRoutes {
+  url: string;
+  bearer: string;
+}
+export interface HostServices {
+  secret(name: string, signal: AbortSignal): Promise<string>;
+  output<T>(job: string, signal: AbortSignal): Promise<T | undefined>;
+  latest<T>(ref: PipelineRef<T>, signal: AbortSignal): Promise<T>;
+  annotate(annotation: Annotation, signal: AbortSignal): Promise<void>;
+  summary(markdown: string, signal: AbortSignal): Promise<void>;
+  mask(value: string, signal: AbortSignal): Promise<void>;
+  oidcToken(audience: string, signal: AbortSignal): Promise<string>;
+  runPipeline<T, In extends object>(pipeline: string, job: string, options: ChildOptions<In>, signal: AbortSignal): Promise<T>;
+  cleanup(spec: CleanupSpec, signal: AbortSignal): Promise<CleanupRegistration>;
 }
 
-/**
- * Reads the route location and bearer from the node environment the engine
- * sets. It returns undefined for a process bound to no node, which gets
- * neither variable.
- */
-export function routeConfigFromEnv(env: Record<string, string | undefined>): NodeRouteConfig | undefined {
-  const baseUrl = env[NODE_URL_ENV] ?? "";
-  const token = env[NODE_TOKEN_ENV] ?? "";
-  if (baseUrl === "" && token === "") return undefined;
-  if (!loopback(baseUrl)) {
-    // safety: the URL is not echoed, since a wrong one may carry userinfo.
-    throw new Error(`${NODE_URL_ENV} must be http://127.0.0.1:<port>, http://[::1]:<port> or http://localhost:<port>`);
-  }
-  if (token === "") throw new Error(`${NODE_TOKEN_ENV} is empty`);
-  return { baseUrl, token };
-}
-
-function loopback(raw: string): boolean {
-  let u: URL;
-  try {
-    u = new URL(raw);
-  } catch {
-    return false;
-  }
-  if (u.protocol !== "http:" || u.username !== "" || u.password !== "" || u.search !== "" || u.hash !== "" || u.pathname !== "/")
-    return false;
-  return u.port !== "" && ["127.0.0.1", "[::1]", "localhost"].includes(u.hostname);
-}
-
-/** A route answered with an error; code is the route's error code, such as secret_not_found. */
-export class RouteError extends Error {
-  readonly status: number;
-  readonly code: string | undefined;
-
-  constructor(route: string, status: number, message: string, code: string | undefined) {
-    super(`${route}: HTTP ${status}${code ? ` ${code}` : ""}${message ? `: ${message}` : ""}`);
-    this.status = status;
-    this.code = code;
-  }
-}
-
-export class NodeRoutes {
+export class NodeRoutes implements HostServices {
   readonly #base: string;
-  readonly #token: string;
+  readonly #bearer: string;
   readonly #fetch: typeof fetch;
-
-  constructor(cfg: NodeRouteConfig) {
-    this.#base = cfg.baseUrl.replace(/\/+$/, "");
-    this.#token = cfg.token;
-    this.#fetch = cfg.fetch ?? fetch;
-  }
-
-  /** Returns the secret's value; an unset secret is an error, never an empty string. */
-  async secret(name: string, signal?: AbortSignal): Promise<string> {
-    const body = (await this.#route("GET", `/node/v1/secrets/${encodeURIComponent(name)}`, signal)) as { value?: unknown } | null;
-    if (typeof body?.value !== "string") {
-      throw new Error(`secret ${name}: the engine answered without a string value`);
+  constructor(routes: ProcessRoutes, request: typeof fetch = fetch) {
+    let url: URL;
+    try {
+      url = new URL(routes.url);
+    } catch {
+      throw failure("bad_request", "invalid hello routes URL");
     }
-    return body.value;
+    if (
+      url.protocol !== "http:" ||
+      !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) ||
+      !url.port ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      url.pathname !== "/"
+    )
+      throw failure("bad_request", "hello routes must name a loopback HTTP port");
+    this.#base = url.origin;
+    this.#bearer = string(routes.bearer, "routes.bearer");
+    this.#fetch = request;
   }
-
-  /** Returns the JSON output another node of this run produced, or null when it recorded none. */
-  async output<T = unknown>(nodeId: string, signal?: AbortSignal): Promise<T | null> {
-    const body = (await this.#route("GET", `/node/v1/nodes/${encodeURIComponent(nodeId)}/output`, signal)) as { output?: unknown } | null;
-    if (body === null || !("output" in body)) throw new Error(`output of ${nodeId}: the engine answered without an output field`);
-    return (body.output ?? null) as T | null;
-  }
-
-  async #route(method: string, path: string, signal: AbortSignal | undefined): Promise<unknown> {
-    const headers: Record<string, string> = {
-      accept: "application/json",
-      authorization: `Bearer ${this.#token}`,
-      "sparkwing-node-protocol": PROTOCOL_VERSION,
-    };
-    // safety: a redirect could carry the bearer to another local service, so
-    // none is followed and a 3xx is an error.
-    const res = await this.#fetch(this.#base + path, {
+  async #request(method: string, path: string, signal: AbortSignal, body?: unknown): Promise<Record<string, unknown>> {
+    assertExecution();
+    signal.throwIfAborted();
+    const response = await this.#fetch(this.#base + path, {
       method,
-      headers,
-      redirect: "manual",
-      signal: signal ?? null,
+      signal,
+      redirect: "error",
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${this.#bearer}`,
+        ...(body === undefined ? {} : { "content-type": "application/json" }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
-    const text = await res.text();
-    if (res.status !== 200) {
-      let parsed: { error?: unknown; code?: unknown } = {};
-      try {
-        parsed = JSON.parse(text) as typeof parsed;
-      } catch {
-        // A body that is not the route error shape keeps only the status.
-      }
-      const message = typeof parsed.error === "string" ? parsed.error : "";
-      throw new RouteError(`${method} ${path}`, res.status, message, typeof parsed.code === "string" ? parsed.code : undefined);
+    const text = await response.text();
+    if (response.status === 204 && response.ok) return {};
+    let data: Record<string, unknown>;
+    try {
+      data = object(JSON.parse(text), "route response");
+    } catch {
+      throw failure("protocol_error", `invalid JSON response (HTTP ${response.status})`);
     }
-    return text === "" ? null : JSON.parse(text);
+    if (!response.ok) throw decodeError(data.error);
+    return data;
   }
+  async secret(name: string, signal: AbortSignal): Promise<string> {
+    const data = await this.#request("GET", `/node/v1/secrets/${encodeURIComponent(name)}`, signal);
+    if (typeof data.value !== "string") throw failure("protocol_error", "secret response requires a string value");
+    return data.value;
+  }
+  async output<T>(job: string, signal: AbortSignal): Promise<T | undefined> {
+    const data = await this.#request("GET", `/node/v1/jobs/${encodeURIComponent(job)}/output`, signal);
+    if (!("output" in data)) throw failure("protocol_error", "output response requires output");
+    return data.output as T;
+  }
+  async latest<T>(ref: PipelineRef<T>, signal: AbortSignal): Promise<T> {
+    const query = new URLSearchParams({ job: ref.jobId });
+    if (ref.maxAgeMs !== undefined) query.set("max_age_ms", String(ref.maxAgeMs));
+    const data = await this.#request("GET", `/node/v1/pipelines/${encodeURIComponent(ref.pipeline)}/latest?${query}`, signal);
+    if (!("output" in data)) throw failure("protocol_error", "latest response requires output");
+    return data.output as T;
+  }
+  async annotate(annotation: Annotation, signal: AbortSignal): Promise<void> {
+    const { endLine, ...fields } = annotation;
+    await this.#request("POST", "/node/v1/annotations", signal, { ...fields, ...(endLine === undefined ? {} : { end_line: endLine }) });
+  }
+  async summary(markdown: string, signal: AbortSignal): Promise<void> {
+    await this.#request("POST", "/node/v1/summary", signal, { markdown });
+  }
+  async mask(value: string, signal: AbortSignal): Promise<void> {
+    await this.#request("POST", "/node/v1/masks", signal, { value });
+  }
+  async oidcToken(audience: string, signal: AbortSignal): Promise<string> {
+    return string((await this.#request("POST", "/node/v1/oidc-token", signal, { audience })).token, "OIDC token");
+  }
+  async runPipeline<T, In extends object>(pipeline: string, job: string, options: ChildOptions<In>, signal: AbortSignal): Promise<T> {
+    const args: Record<string, string> = Object.create(null);
+    for (const [key, value] of Object.entries(options.inputs ?? {})) {
+      if (
+        typeof value !== "string" &&
+        typeof value !== "boolean" &&
+        !(typeof value === "number" && Number.isFinite(value)) &&
+        !(Array.isArray(value) && value.every((v) => typeof v === "string"))
+      )
+        throw failure("invalid_args", `child input ${key} must be a string, number, boolean or string array`);
+      args[key] = Array.isArray(value) ? value.join(",") : String(value);
+    }
+    for (const [key, value] of Object.entries(options.args ?? {})) {
+      if (typeof value !== "string") throw failure("invalid_args", `child argument ${key} must be a string`);
+      args[key] = value;
+    }
+    const waiting = childWait(signal, options.timeoutMs);
+    const waitSignal = waiting.signal;
+    try {
+      const child = await this.#request("POST", "/node/v1/children", waitSignal, {
+        pipeline,
+        args,
+        ...(options.repo === undefined ? {} : { repo: options.repo, branch: options.branch ?? "main" }),
+        ...(options.repo === undefined && options.branch !== undefined ? { branch: options.branch } : {}),
+      });
+      const id = string(child.run_id, "child.run_id");
+      const query = new URLSearchParams({ job, wait_ms: "60000" });
+      for (;;) {
+        const result = await this.#request("GET", `/node/v1/children/${encodeURIComponent(id)}/await?${query}`, waitSignal);
+        if (result.status === "success") {
+          if (!("output" in result)) throw failure("protocol_error", "child result requires output");
+          return result.output as T;
+        }
+        if (["failed", "cancelled", "superseded"].includes(String(result.status))) {
+          if (result.error !== undefined) throw decodeError(result.error);
+          throw failure("sdk_error", `child ${result.status}`);
+        }
+        if (!["pending", "running", "queued"].includes(String(result.status))) throw failure("protocol_error", "unknown child status");
+      }
+    } finally {
+      waiting.close();
+    }
+  }
+
+  async cleanup(spec: CleanupSpec, signal: AbortSignal): Promise<CleanupRegistration> {
+    const id = string((await this.#request("POST", "/node/v1/cleanups", signal, spec)).id, "cleanup.id");
+    return {
+      id,
+      unregister: async () => {
+        await this.#request("DELETE", `/node/v1/cleanups/${encodeURIComponent(id)}`, new AbortController().signal);
+      },
+    };
+  }
+}
+
+function childWait(parent: AbortSignal, timeoutMs: number | undefined): { signal: AbortSignal; close(): void } {
+  if (timeoutMs !== undefined && (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0))
+    throw failure("invalid_args", "child timeout must be nonnegative milliseconds");
+  if (!timeoutMs) return { signal: parent, close() {} };
+  const controller = new AbortController();
+  let timer: NodeJS.Timeout;
+  const schedule = (remaining: number): void => {
+    const duration = Math.min(remaining, 2 ** 31 - 1);
+    timer = setTimeout(() => {
+      if (remaining > duration) schedule(remaining - duration);
+      else controller.abort(new Error("child wait timed out"));
+    }, duration);
+    timer.unref();
+  };
+  schedule(timeoutMs);
+  return {
+    signal: AbortSignal.any([parent, controller.signal]),
+    close() {
+      clearTimeout(timer);
+    },
+  };
 }
