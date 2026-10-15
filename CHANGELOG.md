@@ -210,6 +210,7 @@ unlock.
 ### Fixed
 - **controller:** Accept Session authorization headers on policy routes and enforce the configured session lifetime
   Dashboard requests and browser logout no longer renew sessions before a failed CSRF check. Browser logout returns canonical errors and deletes only the verified session.
+- **runner enrollment:** failed enrollment revokes its newly minted credential, removes its new private files and service registration, and restores the previous runner settings. Machine startup reads the credential file named by `runner.credentials_dir` once.
 - **store:** Replaying an output or manifest commit accepts the same expiry instant in another timezone and preserves omitted metadata across restarts
 - **store:** Blob collection checks the persisted maintenance lease on empty passes and while tombstones are within their grace period. Expired and superseded collectors return a fence error.
 - **store:** HasMany returns a budget error when its final read reaches the deadline, with no partial presence result.

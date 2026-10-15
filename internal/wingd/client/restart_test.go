@@ -20,7 +20,7 @@ func TestRefreshRunning_ContextBoundsHandshake(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(socket), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	listener, err := net.Listen("unix", socket)
+	listener, err := wingd.ListenSocket(socket)
 	if err != nil {
 		t.Fatal(err)
 	}

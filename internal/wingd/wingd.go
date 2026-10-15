@@ -13,6 +13,8 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -20,16 +22,9 @@ import (
 
 var ErrNotElected = errors.New("wingd: another daemon is already elected")
 
-// FinalizeDrainWindow is how long a stopping daemon waits for the run
-// finalizes it started to reach the store. It is the middle of four windows
-// that must nest, so a finalize is neither cut short by its own deadline
-// before the drain can wait for it nor killed by the supervisor while the
-// drain still holds the process open:
-//
-//	orchestrator.FinalizeTimeout (one finalize)
-//	  < FinalizeDrainWindow (the daemon's drain)
-//	  <= supervise.DefaultTermGrace (before SIGKILL)
-//	  < the CLI's daemon-restart budget
+// FinalizeDrainWindow bounds the admission daemon's warning about a slow
+// finalizer. The local runtime still joins that finalizer before closing its
+// store. The supervisor's termination grace must outlast this window.
 //
 // Health probes run every 2s with a 3s timeout. A failed probe needs three
 // samples and 60s without heartbeat progress before replacement; continuous
@@ -42,7 +37,7 @@ const FinalizeDrainWindow = 10 * time.Second
 const HeartbeatStaleWindow = time.Minute
 
 const (
-	DefaultIdleTimeout = 5 * time.Minute
+	DefaultIdleTimeout = limits.LocalControllerIdleTimeout
 
 	DefaultGraceWindow = 2 * time.Minute
 
@@ -88,6 +83,8 @@ type Config struct {
 	OwnedCPUSampler OwnedCPUSampler
 
 	Now func() time.Time
+
+	Stay bool
 
 	IdleTimeout time.Duration
 
@@ -267,7 +264,7 @@ func resolveLayout(home string) (layout, error) {
 }
 
 func (l layout) ensureDir() error {
-	if err := os.MkdirAll(l.dir, 0o700); err != nil {
+	if err := fssecure.EnsureDir(l.dir); err != nil {
 		return fmt.Errorf("wingd: prepare %s: %w", l.dir, err)
 	}
 	return nil
@@ -391,11 +388,10 @@ func socketAlive(sock string) bool {
 	if err := ValidateSocketDir(sock); err != nil {
 		return false
 	}
-	info, err := os.Lstat(sock)
-	if err != nil || info.Mode()&os.ModeSocket == 0 {
+	if !socketPresent(sock) {
 		return false
 	}
-	c, err := net.DialTimeout("unix", sock, 100*time.Millisecond)
+	c, err := DialSocket(context.Background(), sock, 100*time.Millisecond)
 	if err != nil {
 		return false
 	}
@@ -410,6 +406,9 @@ func maxSunPath() int {
 }
 
 func ValidateSocketPath(sock string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
 	if m := maxSunPath(); len(sock) >= m {
 		return fmt.Errorf("wingd: socket path %q is %d bytes, over the %d-byte OS limit; use a shorter SPARKWING_HOME", sock, len(sock), m)
 	}

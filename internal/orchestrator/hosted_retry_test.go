@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -190,7 +191,7 @@ func TestHostedRetry_ConflictOnARetryIsTheFirstAttemptLanding(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":"UNIQUE constraint failed: nodes.run_id, nodes.node_id"}`))
 	}))
 
-	c := client.New(HostedAPIBaseURL, NewAPISocketClient(api.sock))
+	c := client.New(wingdclient.APIBaseURL, newHostedAPIClient(api.sock))
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
 	if err := c.CreateNode(ctx, store.Node{RunID: "r1", NodeID: "n1", Status: "pending"}); err != nil {
@@ -216,7 +217,7 @@ func TestHostedRetry_DoesNotRepeatAnAppendTheDaemonMayHaveTaken(t *testing.T) {
 		}
 	}))
 
-	c := client.New(HostedAPIBaseURL, NewAPISocketClient(api.sock))
+	c := client.New(wingdclient.APIBaseURL, newHostedAPIClient(api.sock))
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
 	if err := c.AppendEvent(ctx, "r1", "n1", "kind", []byte(`{}`)); err == nil {
@@ -232,9 +233,9 @@ func TestHostedRetry_GivesUpNamingTheDaemon(t *testing.T) {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
 	sock := filepath.Join(t.TempDir(), "api.sock")
-	transport := newHostedRetryTransport(apiSocketTransport(sock))
+	transport := newHostedRetryTransport(wingdclient.NewAPIClient(sock).Transport)
 	transport.budget = 300 * time.Millisecond
-	c := client.New(HostedAPIBaseURL, &http.Client{Timeout: wingdTestWait, Transport: transport})
+	c := client.New(wingdclient.APIBaseURL, &http.Client{Timeout: wingdTestWait, Transport: transport})
 
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
@@ -264,9 +265,9 @@ func TestHostedRetry_AWedgedDaemonDoesNotInviteASecondBudget(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":"admission daemon: the runs store does not exist yet"}`))
 	}))
 
-	transport := newHostedRetryTransport(apiSocketTransport(api.sock))
+	transport := newHostedRetryTransport(wingdclient.NewAPIClient(api.sock).Transport)
 	transport.budget = 300 * time.Millisecond
-	c := client.New(HostedAPIBaseURL, &http.Client{Timeout: wingdTestWait, Transport: transport})
+	c := client.New(wingdclient.APIBaseURL, &http.Client{Timeout: wingdTestWait, Transport: transport})
 
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
@@ -296,7 +297,7 @@ func TestHostedRetryPolicy_ANodeIDCannotBorrowAPolicy(t *testing.T) {
 		{"/api/v1/runs/r1/nodes/release/dispatch", hostedRetryUnsent},
 	}
 	for _, tc := range cases {
-		req, err := http.NewRequest(http.MethodPost, HostedAPIBaseURL+tc.path, nil)
+		req, err := http.NewRequest(http.MethodPost, wingdclient.APIBaseURL+tc.path, nil)
 		if err != nil {
 			t.Fatalf("%s: %v", tc.path, err)
 		}

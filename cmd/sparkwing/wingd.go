@@ -11,9 +11,9 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/supervise"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func runWingd(args []string) error {
@@ -31,6 +31,10 @@ func runWingd(args []string) error {
 }
 
 func runWingdRun(args []string) error {
+	return runWingdRunWith(args, nil)
+}
+
+func runWingdRunWith(args []string, open func(context.Context, string) (wingd.LocalController, error)) error {
 	fs := flag.NewFlagSet("wingd run", flag.ContinueOnError)
 	home := fs.String("home", "", "sparkwing home (default: $SPARKWING_HOME or ~/.sparkwing)")
 	version := fs.String("version", "", "binary version to advertise (default: this build)")
@@ -38,6 +42,12 @@ func runWingdRun(args []string) error {
 	budget := fs.String("budget", "", "machine budget cap (default: admission.budget in config.yaml); e.g. 6, 50%, 6,8gb, 50%,enforce")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if fs.NArg() != 0 {
+		return errors.New("wingd run accepts only flags")
+	}
+	if open == nil {
+		return errors.New("local controller composition is unavailable: shared controller authorization, store recovery and trigger hosting must be configured")
 	}
 
 	v := *version
@@ -57,18 +67,22 @@ func runWingdRun(args []string) error {
 	logger := log.New(os.Stderr, "", log.LstdFlags|log.LUTC)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	art, artFault := orchestrator.WingdArtifactStore(ctx)
-	return orchestrator.RunWingdDaemon(ctx, orchestrator.WingdOptions{
-		Home:                  *home,
-		Version:               v,
-		HeadroomFraction:      *headroom,
-		Budget:                resolvedBudget.Budget,
-		BudgetSource:          resolvedBudget.Source,
-		BudgetOrigin:          resolvedBudget.Origin,
-		AdmissionPolicy:       &admissionPolicy,
-		AdmissionPolicySource: admissionSource,
-		ArtifactStore:         art,
-		ArtifactStoreError:    artFault,
-		Logf:                  func(format string, args ...any) { logger.Printf(format, args...) },
+	runtime, err := wingd.NewLocalRuntime(wingd.LocalRuntimeConfig{
+		Admission: wingd.Config{
+			Home:               *home,
+			HeadroomFraction:   *headroom,
+			Budget:             resolvedBudget.Budget,
+			BudgetSource:       resolvedBudget.Source,
+			BudgetOrigin:       resolvedBudget.Origin,
+			AdmissionPolicy:    &admissionPolicy,
+			StoreSchemaVersion: store.ExpectedSchemaVersion(),
+			Logf:               logger.Printf,
+		},
+		Open: open,
 	})
+	if err != nil {
+		return err
+	}
+	logger.Printf("admission mode %s (%s)", admissionPolicy.Mode, admissionSource)
+	return runtime.Run(ctx, wingd.LocalStartOptions{Home: *home, Version: v})
 }

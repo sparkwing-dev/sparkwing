@@ -1,10 +1,13 @@
 package crontimer
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runners/service/unitfile"
 )
 
 func (h Host) unitBase() string {
@@ -17,10 +20,6 @@ func (h Host) unitBase() string {
 func (h Host) serviceName() string { return h.unitBase() + ".service" }
 
 func (h Host) timerName() string { return h.unitBase() + ".timer" }
-
-func unitHomeEntry(h Host) string {
-	return "Environment=" + systemdAssignment(homeEnv, h.SparkwingHome) + "\n"
-}
 
 // UnitDir reports the systemd user unit directory for a host.
 func UnitDir(h Host) string {
@@ -35,7 +34,7 @@ func linuxPaths(h Host) (service, timer string, err error) {
 	return filepath.Join(dir, h.serviceName()), filepath.Join(dir, h.timerName()), nil
 }
 
-func installLinux(h Host) (State, error) {
+func installLinux(ctx context.Context, h Host) (State, error) {
 	if err := requireBinary(h); err != nil {
 		return State{}, err
 	}
@@ -51,6 +50,12 @@ func installLinux(h Host) (State, error) {
 		return State{Path: timerPath, Foreign: true, Detail: foreignDetail(foreign)},
 			fmt.Errorf("crontimer: %s was not written by sparkwing (it lacks %q); move it aside before installing", foreign, Marker)
 	}
+	if service.exists && timerHome(unitfile.Arguments("linux", service.body)) != h.SparkwingHome {
+		return State{}, errors.New(otherHomeDetail(h, servicePath))
+	}
+	if _, err := refreshPreflight(ctx, h, timerPath); err != nil {
+		return State{}, err
+	}
 	if err := ensureLogDir(h.LogPath); err != nil {
 		return State{Path: timerPath}, err
 	}
@@ -61,45 +66,21 @@ func installLinux(h Host) (State, error) {
 		return State{Path: timerPath}, err
 	}
 
-	state := State{Installed: true, Path: timerPath, Binary: h.Binary}
-	if out, err := h.run("systemctl", "--user", "daemon-reload"); err != nil {
+	state := commandState(h, timerPath, serviceUnit(h))
+	if out, err := h.run(ctx, "systemctl", "--user", "daemon-reload"); err != nil {
 		state.Detail = "the timer's files are written but systemd did not reload them"
 		return state, fmt.Errorf("crontimer: systemctl --user daemon-reload: %w: %s", err, strings.TrimSpace(out))
 	}
-	if out, err := h.run("systemctl", "--user", "enable", "--now", h.timerName()); err != nil {
+	if out, err := h.run(ctx, "systemctl", "--user", "enable", "--now", h.timerName()); err != nil {
 		state.Detail = "the timer's files are written but systemd did not enable them"
 		return state, fmt.Errorf("crontimer: systemctl --user enable --now %s: %w: %s", h.timerName(), err, strings.TrimSpace(out))
 	}
 	state.Enabled = true
-	state.Detail = fmt.Sprintf("%s is enabled and runs %s crons tick every minute", h.timerName(), h.Binary)
-	if err := retireLegacyLinux(h); err != nil {
-		return state, err
-	}
+	state.Detail = fmt.Sprintf("%s is enabled and runs %s __tick every minute", h.timerName(), h.Binary)
 	return state, nil
 }
 
-func retireLegacyLinux(h Host) error {
-	if h.instance() == "" {
-		return nil
-	}
-	legacy := h
-	legacy.SparkwingHome = ""
-	servicePath, timerPath, err := linuxPaths(legacy)
-	if err != nil {
-		return err
-	}
-	service, timer, err := readLinuxFiles(servicePath, timerPath)
-	if err != nil {
-		return err
-	}
-	if !service.ours || !timer.ours || !strings.Contains(service.body, unitHomeEntry(h)) {
-		return nil
-	}
-	_, err = uninstallLinux(legacy)
-	return err
-}
-
-func statusLinux(h Host) (State, error) {
+func statusLinux(ctx context.Context, h Host) (State, error) {
 	servicePath, timerPath, err := linuxPaths(h)
 	if err != nil {
 		return State{}, err
@@ -112,20 +93,20 @@ func statusLinux(h Host) (State, error) {
 	if !state.Installed {
 		return state, nil
 	}
-	if servesOtherHome(h, service.body, unitHomeEntry(h)) {
+	if timerHome(unitfile.Arguments("linux", service.body)) != h.SparkwingHome {
 		state.Detail = otherHomeDetail(h, servicePath)
 		return state, nil
 	}
-	if loaded := loadedElsewhere(h, timerPath); loaded != "" {
+	if loaded := loadedElsewhere(ctx, h, timerPath); loaded != "" {
 		state.Detail = fmt.Sprintf("systemd runs %s from %s, not from %s", h.timerName(), loaded, timerPath)
 		return state, nil
 	}
-	enabledOut, enabledErr := h.run("systemctl", "--user", "is-enabled", h.timerName())
-	activeOut, activeErr := h.run("systemctl", "--user", "is-active", h.timerName())
+	enabledOut, enabledErr := h.run(ctx, "systemctl", "--user", "is-enabled", h.timerName())
+	activeOut, activeErr := h.run(ctx, "systemctl", "--user", "is-active", h.timerName())
 	switch {
 	case enabledErr == nil && activeErr == nil:
 		state.Enabled = true
-		state.Detail = fmt.Sprintf("%s is enabled and active, running %s crons tick every minute", h.timerName(), state.Binary)
+		state.Detail = fmt.Sprintf("%s is enabled and active, running %s __tick every minute", h.timerName(), state.Binary)
 	default:
 		state.Detail = fmt.Sprintf("%s is installed but systemd does not report it running: %s", h.timerName(),
 			joinOutput(enabledOut, activeOut))
@@ -136,7 +117,7 @@ func statusLinux(h Host) (State, error) {
 	return state, nil
 }
 
-func uninstallLinux(h Host) (State, error) {
+func uninstallLinux(ctx context.Context, h Host) (State, error) {
 	servicePath, timerPath, err := linuxPaths(h)
 	if err != nil {
 		return State{}, err
@@ -151,11 +132,14 @@ func uninstallLinux(h Host) (State, error) {
 	if !service.exists && !timer.exists {
 		return State{Path: timerPath, Detail: "no sparkwing cron timer is installed here"}, nil
 	}
+	if service.exists && timerHome(unitfile.Arguments("linux", service.body)) != h.SparkwingHome {
+		return State{}, errors.New(otherHomeDetail(h, servicePath))
+	}
 
 	var disableErr error
-	loaded := loadedElsewhere(h, timerPath)
+	loaded := loadedElsewhere(ctx, h, timerPath)
 	if loaded == "" {
-		if out, err := h.run("systemctl", "--user", "disable", "--now", h.timerName()); err != nil && !notLoaded(out) {
+		if out, err := h.run(ctx, "systemctl", "--user", "disable", "--now", h.timerName()); err != nil && !notLoaded(out) {
 			disableErr = fmt.Errorf("crontimer: systemctl --user disable --now %s: %w: %s", h.timerName(), err, strings.TrimSpace(out))
 		}
 	}
@@ -166,7 +150,7 @@ func uninstallLinux(h Host) (State, error) {
 	if loaded != "" {
 		state.Detail = fmt.Sprintf("the files under %s are removed; systemd still runs %s from %s, which is left alone", filepath.Dir(timerPath), h.timerName(), loaded)
 	}
-	if out, err := h.run("systemctl", "--user", "daemon-reload"); err != nil {
+	if out, err := h.run(ctx, "systemctl", "--user", "daemon-reload"); err != nil {
 		return state, errors.Join(disableErr, fmt.Errorf("crontimer: systemctl --user daemon-reload: %w: %s", err, strings.TrimSpace(out)))
 	}
 	if disableErr != nil {
@@ -196,10 +180,7 @@ func linuxFileState(h Host, service, timer managed) State {
 		state.Detail = "no sparkwing cron timer is installed here"
 		return state
 	}
-	state.Installed = true
-	state.Binary = execStartBinary(service.body)
-	state.Stale = staleAgainst(h, state.Binary)
-	return state
+	return commandState(h, timer.path, service.body)
 }
 
 func firstForeign(files ...managed) string {
@@ -231,16 +212,16 @@ func joinOutput(outs ...string) string {
 func serviceUnit(h Host) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s\n", Marker)
-	b.WriteString("[Unit]\nDescription=sparkwing crons tick\n\n")
+	b.WriteString("[Unit]\nDescription=sparkwing __tick\n\n")
 	// safety: a oneshot's cgroup is killed when its main process exits, which would take
 	// the run consumer and the admission daemon the tick just started with it.
 	b.WriteString("[Service]\nType=oneshot\nKillMode=process\n")
 	// safety: a tick that hangs on a lock or a store would otherwise hold the
 	// unit active and swallow every following minute.
 	b.WriteString("TimeoutStartSec=5m\n")
-	fmt.Fprintf(&b, "ExecStart=%s crons tick\n", systemdWord(h.Binary))
+	fmt.Fprintf(&b, "%s\nExecStart=%s\n", unitfile.VersionRecord("linux", h.Version), systemdCommand(h))
 	for _, kv := range envPairs(h) {
-		fmt.Fprintf(&b, "Environment=%s\n", systemdAssignment(kv[0], kv[1]))
+		fmt.Fprintf(&b, "Environment=%s\n", unitfile.Assignment(kv[0], kv[1]))
 	}
 	if h.LogPath != "" {
 		fmt.Fprintf(&b, "StandardOutput=append:%s\n", h.LogPath)
@@ -252,7 +233,7 @@ func serviceUnit(h Host) string {
 func timerUnit(h Host) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s\n", Marker)
-	b.WriteString("[Unit]\nDescription=sparkwing crons tick every minute\n\n")
+	b.WriteString("[Unit]\nDescription=sparkwing __tick every minute\n\n")
 	b.WriteString("[Timer]\n")
 	b.WriteString("OnCalendar=*-*-* *:*:00\n")
 	b.WriteString("AccuracySec=1s\n")
@@ -262,68 +243,10 @@ func timerUnit(h Host) string {
 	return b.String()
 }
 
-// safety: systemd splits an argument on whitespace and reads % as a specifier, so quote one and double the other.
-func systemdWord(v string) string {
-	escaped := strings.ReplaceAll(v, "%", "%%")
-	if v == "" {
-		return `""`
-	}
-	if !strings.ContainsAny(escaped, " \t\n\"'\\") {
-		return escaped
-	}
-	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
-	return `"` + replacer.Replace(escaped) + `"`
-}
-
-// safety: systemd quotes the whole KEY=VALUE assignment, not the value alone.
-func systemdAssignment(key, value string) string {
-	assignment := key + "=" + strings.ReplaceAll(value, "%", "%%")
-	if !strings.ContainsAny(assignment, " \t\n\"'\\") {
-		return assignment
-	}
-	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
-	return `"` + replacer.Replace(assignment) + `"`
-}
-
-// safety: the unit is the only record of the binary it runs; nothing keeps a sidecar.
-func execStartBinary(unit string) string {
-	for _, line := range strings.Split(unit, "\n") {
-		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "ExecStart=")
-		if !ok {
-			continue
-		}
-		return firstSystemdWord(rest)
-	}
-	return ""
-}
-
-func firstSystemdWord(s string) string {
-	s = strings.TrimLeft(s, " \t")
-	var b strings.Builder
-	if strings.HasPrefix(s, `"`) {
-		for i := 1; i < len(s); i++ {
-			if s[i] == '\\' && i+1 < len(s) {
-				i++
-				b.WriteByte(s[i])
-				continue
-			}
-			if s[i] == '"' {
-				break
-			}
-			b.WriteByte(s[i])
-		}
-	} else {
-		for i := 0; i < len(s) && s[i] != ' ' && s[i] != '\t'; i++ {
-			b.WriteByte(s[i])
-		}
-	}
-	return strings.ReplaceAll(b.String(), "%%", "%")
-}
-
 // safety: systemctl addresses units by name, so a ConfigHome that is not the session's would
 // otherwise be asked about, enabled, and disabled against a stranger's file.
-func loadedElsewhere(h Host, timerPath string) string {
-	out, err := h.run("systemctl", "--user", "show", "-p", "FragmentPath", "--value", h.timerName())
+func loadedElsewhere(ctx context.Context, h Host, timerPath string) string {
+	out, err := h.run(ctx, "systemctl", "--user", "show", "-p", "FragmentPath", "--value", h.timerName())
 	if err != nil {
 		return ""
 	}

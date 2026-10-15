@@ -2,4 +2,8 @@
 
 package wingd
 
-func (d *Daemon) startDiagnostics(<-chan struct{}) {}
+func (d *Daemon) startDiagnostics(<-chan struct{}) <-chan struct{} {
+	done := make(chan struct{})
+	close(done)
+	return done
+}
