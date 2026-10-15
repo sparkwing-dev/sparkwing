@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
@@ -38,7 +39,12 @@ func (tx *storeTx) CheckDataAccess(ctx context.Context, authorized capability.Au
 	switch target.Operation {
 	case capability.DataUpload, capability.DataCommit, capability.DataRecord:
 		return checkBlobDataWriteTx(ctx, tx, team, input, target)
-	case capability.DataDownload, capability.DataHasMany, capability.DataLookup:
+	case capability.DataLookup:
+		if target.Digest == "" {
+			return checkBlobSelectionTx(ctx, tx, team, input, target)
+		}
+		fallthrough
+	case capability.DataDownload, capability.DataHasMany:
 		presence, err := readableBlobsTx(ctx, tx, team, blob.HasManyRequest{Authority: input, Digests: []blob.Digest{blob.Digest(target.Digest)}})
 		if err != nil {
 			return err
@@ -52,6 +58,21 @@ func (tx *storeTx) CheckDataAccess(ctx context.Context, authorized capability.Au
 	}
 }
 
+func checkBlobSelectionTx(ctx context.Context, tx *storeTx, team Team, input blob.Authority, target capability.DataTarget) error {
+	a, err := resolveBlobAuthorityTx(ctx, tx, team, input, capability.DataRead)
+	if err != nil {
+		return err
+	}
+	kind := blob.Kind(target.RecordKind)
+	if target.RecordName == "" || !slices.Contains(blob.Kinds, kind) {
+		return authorityError(apierr.BadRequest, "logical lookup requires a record kind and name")
+	}
+	if a.capability.Data.Use == capability.DataRemoteCache && (kind == blob.KindBinary || kind == blob.KindSourceBundle) {
+		return blob.ErrDigestNotReadable
+	}
+	return nil
+}
+
 func checkBlobDataWriteTx(ctx context.Context, tx *storeTx, team Team, input blob.Authority, target capability.DataTarget) error {
 	resolved, err := resolveBlobAuthorityTx(ctx, tx, team, input, capability.DataWrite)
 	if err != nil {
@@ -63,6 +84,12 @@ func checkBlobDataWriteTx(ctx context.Context, tx *storeTx, team Team, input blo
 	}
 	if target.RecordKind != "" && !blobKindAllowed(source, blob.Kind(target.RecordKind)) {
 		return blob.ErrDigestNotReadable
+	}
+	if target.Operation == capability.DataRecord && target.Digest == "" && target.RecordKind == string(blob.KindMemo) && target.RecordName != "" {
+		if !resolved.authority.Attempt.Set || !slices.Contains(resolved.capability.Grants, capability.DataRead) {
+			return blob.ErrDigestNotReadable
+		}
+		return requireBlobMemoTx(ctx, tx, resolved)
 	}
 	if !validBlobDigest(blob.Digest(target.Digest)) {
 		return authorityError(apierr.BadRequest, "invalid blob digest")

@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func dollarsMicro(n int64) int64 { return n * 100 * store.MicroCreditsPerCent }
@@ -31,7 +32,7 @@ func spend(t *testing.T, s *store.Store, team, id string, cents int64) {
 	now := time.Now().UnixNano()
 	amount := cents * store.MicroCreditsPerCent
 	if _, err := s.DB().Exec(fmt.Sprintf(
-		`INSERT INTO credit_charges (id, run_id, node_id, token_prefix, kind, seconds, amount_micro, charged_at, team)
+		`INSERT INTO credit_charges (id, run_id, node_id, capability_prefix, kind, seconds, amount_micro, charged_at, team)
 		 VALUES ('%s', 'run-x', 'build', 'pfx', 'usage', 60, %d, %d, '%s')`,
 		id, amount, now, team)); err != nil {
 		t.Fatalf("seed a charge: %v", err)
@@ -115,10 +116,10 @@ func TestAutomaticTrustRuleBoundaries(t *testing.T) {
 	held := teamHandle(t, s, "held")
 	paidAt = payTeam(t, held, "pi_held", 50)
 	spend(t, s, "held", "ch_held", 5_000)
-	if _, err := s.HoldTeamForDispute(ctx, "held", "dp_1", "pi_held", "dispute", paidAt); err != nil {
+	if _, err := teststore.ForTeam(t, s, "held").TestOnlyHoldForDispute(ctx, "dp_1", "pi_held", "dispute", paidAt); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ReleaseCreditFreezes(ctx, "held", "dp_1", "", "", paidAt); err != nil {
+	if _, err := teststore.ForTeam(t, s, "held").ReleaseCreditFreezes(ctx, "dp_1", "", "", paidAt); err != nil {
 		t.Fatal(err)
 	}
 	if billingStanding(t, held, paidAt.Add(store.AutoTrustPaymentAge)).Trusted {
@@ -128,7 +129,7 @@ func TestAutomaticTrustRuleBoundaries(t *testing.T) {
 	reversed := teamHandle(t, s, "reversed")
 	paidAt = payTeam(t, reversed, "pi_rev", 50)
 	spend(t, s, "reversed", "ch_rev", 5_000)
-	if _, err := s.ReversePayment(ctx, "pi_rev", "re_1", "ops", 0); err != nil {
+	if _, err := s.AsOperator().TestOnlyReversePayment(ctx, "pi_rev", "re_1", "ops", 0); err != nil {
 		t.Fatal(err)
 	}
 	if billingStanding(t, reversed, paidAt.Add(store.AutoTrustPaymentAge)).Trusted {

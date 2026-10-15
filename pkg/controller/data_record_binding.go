@@ -35,14 +35,14 @@ func (s *boundData) recordScope(authority blob.Authority, key blob.RecordKey, wr
 		}
 		return dataForbidden()
 	}
-	if scope.Use != capability.DataRemoteCache && !slices.Contains(scope.ReadRefs, key.Scope.Ref.Ref) {
+	if scope.Use != capability.DataRemoteCache && !slices.Contains(scope.ReadRefs, key.Scope.Ref.CapabilityScope()) {
 		return dataForbidden()
 	}
 	return nil
 }
 
 func recordDataTarget(key blob.RecordKey, digest blob.Digest) capability.DataTarget {
-	return capability.DataTarget{RecordKind: string(key.Kind), RecordScope: key.Scope.Ref.Ref, RecordName: key.Name, Digest: string(digest)}
+	return capability.DataTarget{RecordKind: string(key.Kind), RecordScope: key.Scope.Ref.CapabilityScope(), RecordName: key.Name, Digest: string(digest)}
 }
 
 func (s *boundData) LookupRecord(ctx context.Context, request blob.RecordLookup) (blob.RecordLookupResult, error) {

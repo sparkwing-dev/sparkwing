@@ -37,13 +37,17 @@ type DataBinding struct {
 
 // DataAuthority resolves live uploader identity and sealed data scope from persisted authority.
 func (s *DataController) DataAuthority(ctx context.Context, authorized capability.Authorized) (blob.Authority, error) {
-	if s == nil || s.ResolveAuthority == nil {
+	if s == nil {
 		return blob.Authority{}, missingEndpointPolicy()
 	}
 	if err := ctx.Err(); err != nil {
 		return blob.Authority{}, err
 	}
-	authority, err := s.ResolveAuthority(ctx, authorized)
+	resolve := s.ResolveAuthority
+	if resolve == nil {
+		resolve = s.persistedDataAuthority
+	}
+	authority, err := resolve(ctx, authorized)
 	if err != nil {
 		return blob.Authority{}, engineLookupError(err)
 	}

@@ -19,22 +19,10 @@ func FuzzPaymentRawPaidGrantsCannotFundTeam(f *testing.F) {
 		}
 		tenant := &Tenant{s: s, team: team}
 		amount := (int64(cents)%CreditPurchaseMaxCents + 1) * MicroCreditsPerCent
-		grants := []func() error{
-			func() error {
-				_, err := tenant.GrantCredits(t.Context(), CreditGrantPaid, amount, reference, actor)
-				return err
-			},
-			func() error {
-				_, err := tenant.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantPaid, AmountMicro: amount, Reference: reference, CreatedBy: actor})
-				return err
-			},
-		}
 		refuse := func() {
 			t.Helper()
-			for _, grant := range grants {
-				if err := grant(); err == nil {
-					t.Fatal("caller-selected paid credit was accepted")
-				}
+			if _, err := tenant.RecordCreditGrant(t.Context(), CreditGrantRequest{Kind: CreditGrantPaid, AmountMicro: amount, Reference: reference, CreatedBy: actor}); err == nil {
+				t.Fatal("caller-selected paid credit was accepted")
 			}
 		}
 		refuse()

@@ -13,4 +13,5 @@ type ObjectBackend interface {
 	DeleteObject(context.Context, string) error
 	DeleteBlob(context.Context, Blob) error
 	ReadManifest(context.Context, string, Digest) ([]Member, error)
+	VerifyBlob(context.Context, Blob) error
 }

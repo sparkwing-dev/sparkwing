@@ -614,3 +614,8 @@ W2's review (`review/areas/W2-review-1792093521-final.md`, fixes in W2's `design
 ## Lead decision 14:40: the local controller is W8's first priority
 
 W9 is parked: local run, local-controller startup and local schedules all stop at the same missing owner, the object `LocalRuntimeConfig.Open` returns. W8 implements it now, ahead of budget cuts: the local controller (decision 91) supplying `RunStore`, orphan reconciliation, workers and activity reporting, `TypeSafeAPIKey`, the HTTP/UI handlers (W2 supplies them through `LocalController.HTTP()`), and joined cleanup; the local schedule service factory; and the local-run binding to W3's shared native host. Done means W9's `rewrite_integration` probes for local run, controller startup and schedules reach real code (sockets aside). W8 may make the minimal edits in `cmd/sparkwing` composition files needed to connect them and lists those files.
+
+## Lead decisions 15:40
+
+- **W1, top priority: Cloud awards go unmetered (billing defect found by W1b).** When the launcher root's metered flag is false, Cloud awards become unmetered. Invariant: every Cloud award is metered and charged regardless of how the launcher's root credential was minted; metering follows the placement, not the presenting credential. Reproduce through a real claim transaction, fix it at the single place metering is decided, and add a property test over credential origin and placement.
+- **Materialization is closed** (W1b: `TestMaterializedResultCopiesBytesThroughControllerAndHost` drives a memo through controller wire and host to exact bytes). W1b is parked. **W7 is relaunched** for its legacy S3 output and log cut.

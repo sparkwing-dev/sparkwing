@@ -5,19 +5,20 @@ import (
 	"context"
 	"errors"
 	"io"
-	"strings"
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/logseg"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type memObjects struct {
 	mu   sync.Mutex
 	objs map[string][]byte
 	gets []string
+	view store.LogSegments
 }
 
 func newMemObjects() *memObjects { return &memObjects{objs: map[string][]byte{}} }
@@ -33,16 +34,12 @@ func (m *memObjects) Get(_ context.Context, key string) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(b)), nil
 }
 
-func (m *memObjects) List(_ context.Context, prefix string) ([]string, error) {
+func (m *memObjects) ReadLogSegments(_ context.Context, _ store.Actor, _ blob.LogReadRequest) (store.LogSegments, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var out []string
-	for k := range m.objs {
-		if strings.HasPrefix(k, prefix) {
-			out = append(out, k)
-		}
-	}
-	return out, nil
+	view := m.view
+	view.Segments = append([]store.Segment(nil), view.Segments...)
+	return view, nil
 }
 
 func (m *memObjects) put(key string, body []byte) {
@@ -59,12 +56,6 @@ func (m *memObjects) putIfAbsent(_ context.Context, key string, body []byte) err
 	}
 	m.objs[key] = bytes.Clone(body)
 	return nil
-}
-
-func (m *memObjects) resetGets() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.gets = nil
 }
 
 func (m *memObjects) getCount() int {
@@ -84,6 +75,7 @@ type memUploader struct {
 }
 
 func newMemUploader(objs *memObjects, prefix string) *memUploader {
+	objs.view.Subject = keySubject("acme", "run-1", "build", 1, 1)
 	return &memUploader{objs: objs, prefix: prefix, stored: make(chan int, 1024)}
 }
 
@@ -96,7 +88,15 @@ func (u *memUploader) PutSegment(_ context.Context, seg logseg.Segment, body []b
 	if refuse {
 		return errUnreachable
 	}
-	u.objs.put(blob.LogSegmentKey(u.prefix, seg.N), body)
+	key := blob.LogSegmentKey(u.prefix, seg.N)
+	u.objs.mu.Lock()
+	u.objs.objs[key] = bytes.Clone(body)
+	var offset int64
+	for _, prior := range u.objs.view.Segments {
+		offset += prior.Size
+	}
+	u.objs.view.Segments = append(u.objs.view.Segments, store.Segment{Index: int64(seg.N), Offset: offset, Size: seg.Bytes, StoredBytes: seg.StoredBytes, Digest: seg.SHA256, ObjectKey: key})
+	u.objs.mu.Unlock()
 	u.stored <- seg.N
 	return nil
 }
@@ -112,7 +112,15 @@ func (u *memUploader) PutManifest(ctx context.Context, m logseg.Manifest) error 
 	if err != nil {
 		return err
 	}
-	return u.objs.putIfAbsent(ctx, blob.LogManifestKey(u.prefix), raw)
+	if err := u.objs.putIfAbsent(ctx, blob.LogManifestKey(u.prefix), raw); err != nil {
+		return err
+	}
+	u.objs.mu.Lock()
+	defer u.objs.mu.Unlock()
+	u.objs.view.Subject = *m.Subject
+	u.objs.view.Complete = m.Status == logseg.StatusComplete
+	u.objs.view.IncompleteReason = m.Reason
+	return nil
 }
 
 func (u *memUploader) kill() {

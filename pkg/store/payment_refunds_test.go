@@ -17,10 +17,10 @@ func TestPaymentRefundFollowsCheckoutGrantAndReplaysAfterRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if team, err := s.PaymentTeam(t.Context(), event.PaymentID); err != nil || team != paid.Team {
+	if team, err := s.AsOperator().TestOnlyPaymentTeam(t.Context(), event.PaymentID); err != nil || team != paid.Team {
 		t.Fatalf("payment team=%q: %v", team, err)
 	}
-	first, err := s.ReversePayment(t.Context(), event.PaymentID, "partial", "console", 300000)
+	first, err := s.AsOperator().TestOnlyReversePayment(t.Context(), event.PaymentID, "partial", "console", 300000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,15 +31,15 @@ func TestPaymentRefundFollowsCheckoutGrantAndReplaysAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.db = blobAccountingDB(t, path)
-	again, err := s.ReversePayment(t.Context(), event.PaymentID, "partial", "console", 300000)
+	again, err := s.AsOperator().TestOnlyReversePayment(t.Context(), event.PaymentID, "partial", "console", 300000)
 	if err != nil || again.Created || again.Grant == nil || again.Grant.ID != first.Grant.ID || again.BalanceMicro != 700000 {
 		t.Fatalf("refund replay=%+v: %v", again, err)
 	}
-	rest, err := s.ReversePayment(t.Context(), event.PaymentID, "rest", "console", 2000000)
+	rest, err := s.AsOperator().TestOnlyReversePayment(t.Context(), event.PaymentID, "rest", "console", 2000000)
 	if err != nil || !rest.Created || rest.Grant == nil || rest.Grant.AmountMicro != -700000 || rest.ReversedMicro != 1000000 || rest.BalanceMicro != 0 {
 		t.Fatalf("remaining refund=%+v: %v", rest, err)
 	}
-	finished, err := s.ReversePayment(t.Context(), event.PaymentID, "third", "console", 0)
+	finished, err := s.AsOperator().TestOnlyReversePayment(t.Context(), event.PaymentID, "third", "console", 0)
 	if err != nil || finished.Created || finished.Grant != nil || finished.ReversedMicro != 1000000 {
 		t.Fatalf("exhausted payment=%+v: %v", finished, err)
 	}
@@ -70,10 +70,10 @@ func TestPaymentRefundSelectsConfiguredMode(t *testing.T) {
 		if mode == capability.PaymentLive {
 			want = "b"
 		}
-		if team, err := s.PaymentTeam(t.Context(), event.PaymentID); err != nil || team != want {
+		if team, err := s.AsOperator().TestOnlyPaymentTeam(t.Context(), event.PaymentID); err != nil || team != want {
 			t.Fatalf("%s payment team=%q, want %q: %v", mode, team, want, err)
 		}
-		got, err := s.ReversePayment(t.Context(), event.PaymentID, "refund", "console", 0)
+		got, err := s.AsOperator().TestOnlyReversePayment(t.Context(), event.PaymentID, "refund", "console", 0)
 		if err != nil || got.Team != want || got.BalanceMicro != 0 || !got.Created {
 			t.Fatalf("%s refund=%+v: %v", mode, got, err)
 		}
@@ -113,7 +113,7 @@ func TestPaymentRefundRequiresProviderPaymentAndValidGrantAssociation(t *testing
 			case "ambiguous":
 				rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(id,team,kind,amount_micro,reference,created_by,created_at) VALUES ('card','b','paid',1000000,?,'card',1)`, payment)
 			}
-			if _, err := s.ReversePayment(t.Context(), payment, "refund", "console", 0); err == nil {
+			if _, err := s.AsOperator().TestOnlyReversePayment(t.Context(), payment, "refund", "console", 0); err == nil {
 				t.Fatal("invalid payment association refunded")
 			}
 			var reversals int
@@ -134,16 +134,16 @@ func TestPaymentRefundAuditFailureRollsBackAndPriorReversalsCount(t *testing.T) 
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_refund_audit BEFORE INSERT ON business_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
-	if _, err := s.ReversePayment(t.Context(), event.PaymentID, "refund", "console", 0); err == nil {
+	if _, err := s.AsOperator().TestOnlyReversePayment(t.Context(), event.PaymentID, "refund", "console", 0); err == nil {
 		t.Fatal("refund committed without its audit")
 	}
 	rewriteSchemaCount(t, s.db, "credit_grants", 2)
 	rewriteSchemaExec(t, s.db, "DROP TRIGGER refuse_refund_audit")
-	got, err := s.ReversePayment(t.Context(), event.PaymentID, "refund", "console", 0)
+	got, err := s.AsOperator().TestOnlyReversePayment(t.Context(), event.PaymentID, "refund", "console", 0)
 	if err != nil || got.Grant == nil || got.Grant.AmountMicro != -700000 || got.ReversedMicro != 1000000 || got.BalanceMicro != 0 {
 		t.Fatalf("refund after partial reversal=%+v: %v", got, err)
 	}
-	if _, err := s.ReversePayment(t.Context(), "unknown", "refund", "console", 0); !errors.Is(err, ErrUnknownPayment) {
+	if _, err := s.AsOperator().TestOnlyReversePayment(t.Context(), "unknown", "refund", "console", 0); !errors.Is(err, ErrUnknownPayment) {
 		t.Fatalf("unknown payment=%v", err)
 	}
 }
@@ -155,7 +155,7 @@ func TestPaymentWarningFindsCheckoutTeam(t *testing.T) {
 	}
 	warning := PaymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Actionable: true}
 	for range 2 {
-		team, err := s.RecordPaymentWarning(t.Context(), warning, s.now())
+		team, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), warning, s.now())
 		if err != nil || team != "a" {
 			t.Fatalf("warning team=%q: %v", team, err)
 		}
@@ -171,7 +171,7 @@ func TestAWarnedPurchaseIsNotGranted(t *testing.T) {
 	for _, actionable := range []bool{false, true} {
 		t.Run(map[bool]string{false: "informational", true: "actionable"}[actionable], func(t *testing.T) {
 			s, event := paymentFixture(t, capability.PaymentTest)
-			if _, err := s.RecordPaymentWarning(t.Context(), PaymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Actionable: actionable}, s.now()); err != nil {
+			if _, err := s.AsOperator().TestOnlyRecordPaymentWarning(t.Context(), PaymentWarning{WarningID: "warning", PaymentIntent: event.PaymentID, Actionable: actionable}, s.now()); err != nil {
 				t.Fatal(err)
 			}
 			_, err := s.settlePaymentFacts(t.Context(), event)
@@ -214,7 +214,7 @@ func TestPaymentRefundIndependentClientsCannotOverReverse(t *testing.T) {
 				}
 				go func() {
 					<-start
-					got, err := client.ReversePayment(t.Context(), event.PaymentID, reference, "console", 0)
+					got, err := client.AsOperator().TestOnlyReversePayment(t.Context(), event.PaymentID, reference, "console", 0)
 					results <- result{got, err}
 				}()
 			}

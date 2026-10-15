@@ -137,7 +137,7 @@ func (u *SubjectUploader) PutSegment(ctx context.Context, seg Segment, body []by
 	if err := u.put(ctx, int64(seg.N), slot.URL, slot.Headers, slot.ExpiresAt, body); err != nil {
 		return err
 	}
-	record := store.Segment{Index: int64(seg.N), Offset: u.bytes, Size: seg.Bytes, Digest: seg.SHA256, ObjectKey: blob.LogSegmentKey(u.prefix, seg.N)}
+	record := store.Segment{Index: int64(seg.N), Offset: u.bytes, Size: seg.Bytes, StoredBytes: seg.StoredBytes, Digest: seg.SHA256, ObjectKey: blob.LogSegmentKey(u.prefix, seg.N)}
 	if err := u.commit(ctx, []store.Segment{record}, false, ""); err != nil {
 		return err
 	}
@@ -300,7 +300,7 @@ func (u *SubjectUploader) PutManifest(ctx context.Context, m Manifest) error {
 	var records []store.Segment
 	var offset int64
 	for _, seg := range u.segments {
-		records = append(records, store.Segment{Index: int64(seg.N), Offset: offset, Size: seg.Bytes, Digest: seg.SHA256, ObjectKey: blob.LogSegmentKey(u.prefix, seg.N)})
+		records = append(records, store.Segment{Index: int64(seg.N), Offset: offset, Size: seg.Bytes, StoredBytes: seg.StoredBytes, Digest: seg.SHA256, ObjectKey: blob.LogSegmentKey(u.prefix, seg.N)})
 		offset += seg.Bytes
 	}
 	if err := u.commit(ctx, records, true, m.Reason); err != nil {

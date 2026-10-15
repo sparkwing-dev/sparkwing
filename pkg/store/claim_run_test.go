@@ -27,7 +27,7 @@ func TestLaunchBilling_ReleaseRefundsAndTheFirstBeatBills(t *testing.T) {
 	}
 	intake(t, paying, "run-billed", "korey", "probe")
 	const granted = 100 * store.MicroCreditsPerCent
-	if _, err := paying.GrantCredits(ctx, store.CreditGrantPaid, granted, "pay_launch", "admin"); err != nil {
+	if _, err := paying.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: granted, Reference: "pay_launch", CreatedBy: "admin"}); err != nil {
 		t.Fatal(err)
 	}
 	claim := func(at time.Time) store.LaunchJob {
@@ -80,7 +80,7 @@ func TestClaimLaunch_ReservesAtTheClaimAndBillsFromTheFirstRenewal(t *testing.T)
 	}
 	intake(t, team, "run-launch-bill", "korey", "probe")
 	granted := int64(100 * store.MicroCreditsPerCent)
-	if _, err := team.GrantCredits(ctx, store.CreditGrantPaid, granted, "pay_launch_bill", "admin"); err != nil {
+	if _, err := team.RecordCreditGrant(ctx, store.CreditGrantRequest{Kind: store.CreditGrantPaid, AmountMicro: granted, Reference: "pay_launch_bill", CreatedBy: "admin"}); err != nil {
 		t.Fatal(err)
 	}
 	balance := func() int64 {

@@ -34,11 +34,12 @@ func TestLogPersistenceRetainedBytesCountSegmentsOnce(t *testing.T) {
 			t.Fatal("conflicting or oversized segment accepted")
 		}
 	}
+	blobAccountingDiskStore(t, s)
 	key, err := blob.LogObjectKey(commit.Subject, "r30", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	commit.Segments = []Segment{{Index: 2, Offset: 3, Size: 2, Digest: commit.Segments[0].Digest, ObjectKey: key}}
+	commit.Segments = []Segment{{Index: 2, Offset: 3, Size: 2, StoredBytes: 2, Digest: commit.Segments[0].Digest, ObjectKey: key}}
 	commit.Final = true
 	for range 2 {
 		if err := tenant.RecordSegments(t.Context(), commit); err != nil {
@@ -103,6 +104,7 @@ func TestLogPersistenceAttemptByteLimitPreservesCommittedBytes(t *testing.T) {
 	for offset := int64(0); offset < limits.AttemptLogBytes; offset += segment.Size {
 		segment.Offset = offset
 		segment.Size = min(limits.LogSegmentUploadBytes, limits.AttemptLogBytes-offset)
+		segment.StoredBytes = segment.Size
 		key, err := blob.LogObjectKey(commit.Subject, "r30", segment.Index)
 		if err != nil {
 			t.Fatal(err)

@@ -697,7 +697,7 @@ func (s *Server) sampleCreditLedger(ctx context.Context) {
 		ledgerSnapshot.set(store.CreditLedgerTotals{})
 		return
 	}
-	totals, err := s.store.CreditLedgerTotals(ctx)
+	totals, err := s.store.AsOperator().CreditLedgerTotals(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
 			s.logger.Error("credit ledger sample failed", "err", err)

@@ -7,30 +7,18 @@ import (
 	"time"
 )
 
-// What a team may buy and hold. A purchase is between ten and five hundred
-// dollars, and a balance holds at most five thousand: a per-purchase limit
-// alone is defeated by buying twice, so the bound that matters is on the
-// balance. It caps both the harm of a conversion mistake and the prepaid
-// credit sitting unspent. The cap is held when a checkout opens, counting the
-// checkouts still open, because a payment that went through is granted
-// whatever the balance reads by then.
 const (
 	CreditPurchaseMinCents = 1_000
 	CreditPurchaseMaxCents = 50_000
 
-	// MaxTeamBalanceMicro is the most a team's balance may hold, five
-	// thousand dollars.
+	// MaxTeamBalanceMicro is the most a team's balance may hold, five thousand dollars.
 	MaxTeamBalanceMicro = 5_000 * 100 * MicroCreditsPerCent
 )
 
-// ErrCreditBalanceCap is returned when a checkout, or an operator's free
-// grant, would lift a team's balance above [MaxTeamBalanceMicro]. The refusal
-// is a [CreditBalanceCapError], which wraps it and names the figures.
+// ErrCreditBalanceCap is returned when a checkout, or an operator's free grant, would lift a team's balance above [MaxTeamBalanceMicro].
 var ErrCreditBalanceCap = errors.New("credits: the team balance cap refuses this amount")
 
-// CreditBalanceCapError refuses an amount that would take a team's balance
-// past the cap and says what the team holds, what its open checkouts may
-// still add, what it asked for, and the cap.
+// CreditBalanceCapError refuses an amount that would take a team's balance past the cap and says what the team holds, what its open checkouts may still add, what it asked for, and the cap.
 type CreditBalanceCapError struct {
 	BalanceMicro int64
 	OpenMicro    int64
@@ -81,8 +69,7 @@ func refuseAboveBalanceCapTx(ctx context.Context, tx *storeTx, team Team, amount
 	}
 }
 
-// RunCreditUsage is what one run cost a team in runner time: its nodes and
-// its trigger step, reservations, usage and refunds netted together.
+// RunCreditUsage is what one run cost a team in runner time: its nodes and its trigger step, reservations, usage and refunds netted together.
 type RunCreditUsage struct {
 	RunID         string
 	Seconds       int64
@@ -90,9 +77,7 @@ type RunCreditUsage struct {
 	LastChargedAt time.Time
 }
 
-// CreditUsageByRun returns the team's runner spend grouped by run, the most
-// recently charged run first, at most limit runs. Storage charges bill no run
-// and are left out.
+// CreditUsageByRun returns the team's runner spend grouped by run, the most recently charged run first, at most limit runs.
 func (t *Tenant) CreditUsageByRun(ctx context.Context, limit int) (_ []RunCreditUsage, err error) {
 	rows, err := t.s.query(ctx, `SELECT run_id, SUM(seconds), SUM(amount_micro), MAX(charged_at)
 	  FROM credit_charges WHERE team = ? AND kind != ? AND run_id != ''

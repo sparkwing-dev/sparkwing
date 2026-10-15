@@ -1,0 +1,61 @@
+package nodehost
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+)
+
+type selectedOutputRecords struct {
+	blob.RecordStore
+	t         *testing.T
+	key       blob.RecordKey
+	authority blob.Authority
+	reads     int
+}
+
+func (r *selectedOutputRecords) LookupRecord(_ context.Context, request blob.RecordLookup) (blob.RecordLookupResult, error) {
+	if request.Key != r.key || request.Authority != r.authority {
+		r.t.Fatal("host changed the committed selector or reader authority")
+	}
+	r.reads++
+	return blob.RecordLookupResult{Found: true, Record: blob.Record{Key: r.key, Digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}, nil
+}
+
+func TestOwnerEvaluationStorageReadsMaterializedSelector(t *testing.T) {
+	for _, missing := range []bool{false, true} {
+		t.Run(map[bool]string{false: "recorded", true: "missing"}[missing], func(t *testing.T) {
+			input, state, deps, process := evaluationFixture(t)
+			input.Generation, state.row.Generation, state.row.Attempt, state.row.Outcome = 0, 0, 0, store.NodeMemoized
+			key := blob.MaterializedRecordKey("a", state.row.Ref.RunID, state.row.Ref.NodeID, 4, "gh:1", blob.RefScope{}, "ci", blob.KindOutput)
+			state.row.OutputRecord = &key
+			if missing {
+				state.row.OutputRecord = nil
+			}
+			records := &selectedOutputRecords{t: t, key: key, authority: blob.Authority{CapabilityRef: "owner"}}
+			input.Storage = StorageBinding{Bytes: &memoTestBytes{body: `{"count":2}`}, Records: records, Authority: records.authority}
+			deps.ReadOutput = nil
+			process.answer = func(_ context.Context, request nodeproto.Request) (any, error) {
+				if request.Op == nodeproto.OpEval {
+					if string(request.Input) != `{"count":2}` {
+						t.Fatalf("generator lost copied output: %s", request.Input)
+					}
+					return nodeproto.EvalResult{Value: json.RawMessage(`[]`)}, nil
+				}
+				return nil, nil
+			}
+			host, err := NewOwnerEvaluator(deps)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, failure, err := host.Expand(t.Context(), input)
+			if err != nil || (failure != nil) != missing || !missing && (records.reads != 1 || string(body) != `{"jobs":[]}`) || missing && records.reads != 0 {
+				t.Fatalf("body=%s failure=%+v reads=%d: %v", body, failure, records.reads, err)
+			}
+		})
+	}
+}

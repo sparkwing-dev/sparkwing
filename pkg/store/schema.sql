@@ -134,6 +134,8 @@ CREATE TABLE nodes (
     retry_budget BIGINT NOT NULL DEFAULT 0,
     retry_backoff_ms BIGINT NOT NULL DEFAULT 0,
     failure_json BLOB,
+    output_record BLOB,
+    manifest_record BLOB,
     kind TEXT NOT NULL DEFAULT '',
     spec_hash TEXT NOT NULL DEFAULT '',
     on_failure_of TEXT NOT NULL DEFAULT '',
