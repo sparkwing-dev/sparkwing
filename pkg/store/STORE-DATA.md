@@ -53,6 +53,12 @@ completion, quota settlement and per-replica usage in one transaction. A job
 receipt retains team, run, job, attempt, generation and capability. Owner and
 publication identities remain tagged.
 
+Attempt-scoped publication requires an imported terminal attempt with a persisted
+finish time. Reservation, lookup, commit, abort, data checks and log commits use
+the same authority resolver. An unfinished row cannot authorize those operations,
+even if the publisher holds a ticket reserved before that row changed. Run-scoped
+publication uploads retain their separate identity.
+
 Only a new blob counts bytes and an object. A readable duplicate reserves zero
 additional bytes, so it can be uploaded at the quota ceiling. Unreadable bytes
 still require a full reservation, which prevents a quota-based existence oracle.

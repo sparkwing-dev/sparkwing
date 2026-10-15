@@ -154,10 +154,10 @@ func seedStorePresenceAttempts(ctx context.Context, db *sql.DB) (store.UploadRes
 		return request, err
 	}
 	for _, job := range []string{"a", "b", "unrelated"} {
-		if _, err := db.ExecContext(ctx, `INSERT INTO nodes(team,run_id,node_id,status,attempt,generation,spec_json,execution_json) VALUES (?,'upload',?,'pending',1,7,?,?)`, store.DefaultTeam, job, []byte(`{}`), []byte(`{}`)); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO nodes(team,run_id,node_id,status,outcome,finished_at,attempt,generation,spec_json,execution_json) VALUES (?,'upload',?,'done','success',2,1,7,?,?)`, store.DefaultTeam, job, []byte(`{}`), []byte(`{}`)); err != nil {
 			return request, err
 		}
-		if _, err := db.ExecContext(ctx, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at) VALUES (?,'upload',?,1,7,'publisher','upload-boundary','local','publisher','local',1)`, store.DefaultTeam, job); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at,finished_at,outcome) VALUES (?,'upload',?,1,7,'publisher','upload-boundary','local','publisher','local',1,2,'success')`, store.DefaultTeam, job); err != nil {
 			return request, err
 		}
 	}

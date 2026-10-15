@@ -1,7 +1,6 @@
 package store_test
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,45 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
-
-func TestDirectUploadReservesAndPublishesOnlyAfterCommit(t *testing.T) {
-	st := storetest.Open(t)
-	setFreeAllowance(t, st, 16<<10)
-	freeTeam(t, st, "team-a")
-	now := time.Now()
-	u, err := st.ReserveUpload(t.Context(), store.UploadRequest{
-		Team: "team-a", RunID: "run-a", Kind: store.StorageCache, Key: "artifacts/blobs/" + strings.Repeat("a", 64),
-		Size: 12 << 10, SHA256: strings.Repeat("a", 64), Principal: "runner-a", Provenance: "cloud", Now: now,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.CommittedObject(t.Context(), "team-a", u.Key); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("uncommitted object visible: %v", err)
-	}
-	if _, err := st.ReserveUpload(t.Context(), store.UploadRequest{
-		Team: "team-a", RunID: "run-a", Kind: store.StorageCache, Key: "artifacts/blobs/" + strings.Repeat("b", 64),
-		Size: 1, SHA256: strings.Repeat("b", 64), Principal: "runner-a", Provenance: "cloud", Now: now,
-	}); !errors.Is(err, store.ErrStorageQuota) {
-		t.Fatalf("oversize reserve: %v", err)
-	}
-	if err := st.CommitUpload(t.Context(), "team-b", u.ID, u.Principal, now); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("cross-team commit: %v", err)
-	}
-	if err := st.CommitUpload(t.Context(), "team-a", u.ID, u.Principal, now); err != nil {
-		t.Fatal(err)
-	}
-	got, err := st.CommittedObject(t.Context(), "team-a", u.Key)
-	if err != nil || got.Principal != "runner-a" || got.Provenance != "cloud" || got.SHA256 != u.SHA256 {
-		t.Fatalf("published object: %+v, %v", got, err)
-	}
-	if v := usageOf(t, st, "team-a", store.StorageCache); v.UsedBytes != u.Size || v.ReservedBytes != 0 {
-		t.Fatalf("storage after commit: %+v", v)
-	}
-	if err := st.CommitUpload(context.Background(), "team-a", u.ID, u.Principal, now); err != nil {
-		t.Fatalf("retry commit: %v", err)
-	}
-}
 
 func TestSourceBundleBindsOneRun(t *testing.T) {
 	st := storetest.Open(t)

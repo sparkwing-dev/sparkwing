@@ -1,10 +1,86 @@
 # W1b handoff
 
-Continues `8da501ade`. W1b remains incomplete. This continuation is uncommitted.
+Continues `4ffe3830a`. W1b remains incomplete. This continuation is uncommitted.
 The lead owns review, commits, pipelines and native integration. W1 implementation
 files are unchanged. No Git write or candidate Sparkwing runtime was used.
 
 ## Current continuation
+
+Fixed attempt-scoped publication authorization in the shared blob resolver.
+The invariant is that a publisher can act for an imported attempt only after
+that attempt has a persisted finish time. The new property first reproduced
+acceptance of unfinished attempts through reservation, lookup, commit, abort
+and both upload/commit data checks. It now passes 96 generated ordinal and
+generation pairs. Each refused case preserves existence and receipts. Restoring
+the imported terminal attempt permits the ticket to be released again.
+
+Logs use the same terminal-attempt check. Removed the duplicate query from
+log_publication.go, a net reduction of **10 production Go lines**. Publication
+fixtures now supply terminal imported attempts. No API, table, setting, limit,
+environment variable or foreign interface was added. The C1 documentation
+clarifies the existing publication identity requirement.
+
+Activated `storage-cas-integrity/store-data-sqlite`. It rejects mismatched
+verified digest, size, tenant and ticket evidence without existence or receipts.
+It reopens an expired interrupted ticket, reserves its replacement at the same
+quota ceiling, rolls back a receipt insertion failure and replays the successful
+commit. After another reopen, only the replacement uploader can read the digest.
+Usage counts exactly three bytes and one object. This uses preseeded publication
+authority and a fake physical verification handoff. Signed transfers, backend
+checksum verification and download EOF checks remain native integration work.
+
+Ported `TestDirectUploadReservesAndPublishesOnlyAfterCommit` to final upload
+coverage and removed **40 legacy test lines**, including its unused import.
+Final ticket tests cover its
+pending visibility, quota, tenant refusal, receipt attribution, settlement and
+replay assertions. The new CAS cell also ports store-side assertions from
+archived `TestDirectCommitAdoptsVerifiedCopyAfterOldReservationExpires` and
+`TestDirectCommitRefusesExistingObjectWithDifferentChecksum`. Their complete T1
+rows remain open because those require real physical bytes and controller paths.
+Legacy production APIs still have callers and remain for that cutover.
+
+Whole-repository build, scoped vet, the focused store selection under Manual,
+both acceptance trees, final publication properties, tenant scope/writer/twin
+guards and documentation mirror checks pass. The ten storage SQLite cells and
+the billing-retention SQLite cell pass. No native cell was activated.
+The CAS cell was rerun after simplifying its reopen fixture. The publication
+selection was rerun after removing the legacy test. Required commentcheck
+against main still reports the same three inherited W1/W9 comments below.
+Commentcheck against HEAD, session sleepcheck and whitespace checks pass.
+
+Amendment disposition for this split:
+
+- A1-24 and A1-29 through A1-35 have their store-side transaction, upload,
+  receipt, member and record implementations. The CAS and publication proofs
+  extend that evidence. W2/W7 transport and physical integration remain open.
+- A1-27 remains open at W1's callers. authority_issue.go still inserts
+  unmetered awards directly instead of invoking recordBillingAwardTx. Final
+  start, wait, renewal, finish and reap paths still need the accounting helpers.
+  W1 owns those files, which this continuation leaves unchanged.
+- A1-28 has the final store settlement API, but W2 must replace the old paid
+  grant route with its verified provider handoff. C2 SettleBilling and payment
+  verification remain panic stubs in this checkout. Accounting tests use the
+  existing calculator seam rather than calling the stub.
+- A1-53 remains open for native controller, PostgreSQL, filesystem/S3 and
+  placement evidence. handoffs.md contains no entry assigned to W1b.
+
+No new foreign contract shape or human question is added. The existing W1
+publication-attempt import and materialized destination identity gaps below
+remain. W2 must configure result-record verification with W7's reader.
+W7 namespace/edge policy, physical verification/deletion and log transports
+remain real integration points. The old upload, log and billing consumers
+still prevent their production API removal. No cross-package production caller
+changed because no API was removed.
+
+Shared files touched are internal/acceptance/store_data.go,
+internal/acceptance/store_presence.go, new internal/acceptance/store_cas.go and
+design/rewrite/contracts/c1-data.md. Other edits are clearly owned store data
+files and this handoff. W1 implementation files are unchanged. Friction was
+the foreign stubs and inherited commentcheck failures. Scratch is removed at
+the end. No Git writes or Sparkwing runtime commands ran. The lead owns review,
+commits, native integration and pipelines.
+
+## Previous continuation (committed in 19950f26c)
 
 Implemented `nodeResultRecords` on the existing blob record owner. Configure it
 with `Store.SetResultBlobRecords(manifestReader)` before sharing the store.

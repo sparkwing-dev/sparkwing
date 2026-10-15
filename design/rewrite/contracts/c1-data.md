@@ -137,7 +137,10 @@ enrollment and GitHub App issuance path remain separate integrations.
 ### Upload and record persistence
 
 `blob.Authority.Upload` contains C2's resolved tagged uploader. W1 rechecks it
-against the exact job/attempt/generation, owner lease or published attempt.
+against the exact job/attempt/generation, owner lease or imported terminal
+published attempt. Attempt-scoped publication requires a persisted finish time
+through the shared authority resolver for upload admission, ticket lookup,
+commit, abort, data access and log commits.
 `RecordLookup.VerifiedDefaultOnly` selects only the authorized repository's
 verified default-branch entries before required bytes or member metadata are read.
 An excluded record is a miss. The evidence retains the App event key, SHA and
@@ -156,6 +159,14 @@ receipt with quota settlement. Commit repeats live authority and fence checks.
 client-selected field. The ticket ID also binds the persisted quota reservation.
 Existing CAS bytes grant no receipt. Failed settlement grants no edge. Abort or
 leased retention releases uncommitted reservations without deleting a live blob.
+
+The `storage-cas-integrity/store-data-sqlite` proof refuses mismatched verified
+size, digest and tenant evidence. It reopens an expired interrupted upload,
+reserves a replacement under the same capacity, rolls back a receipt failure,
+then commits and replays the replacement. After reopening again, only the new
+uploader can read the digest and usage counts one blob. Authority and physical
+verification are contract fixtures. Native transfer integrity and EOF checks
+remain separate integration proofs.
 
 Upload tickets reserve monthly bytes, lifetime run bytes and lifetime run objects
 in the existing quota tables. Each dimension has its own durable reservation.
