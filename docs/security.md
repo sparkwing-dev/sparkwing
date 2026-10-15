@@ -34,9 +34,9 @@ who reaches them, not the name, and a service that reads these names must not
 treat one as a boundary.
 
 **Operators and service credentials have separate authority.** `admin` is
-deployment authority. Service scopes such as `credits.grant` and `claims.launch`
-cross teams for their documented operations. Team membership
-does not grant them, and `admin` does not stand in for `credits.grant`.
+deployment authority. Service scopes such as `claims.launch`
+and `storage.count` cross teams for their documented operations. Team membership
+does not grant them. Payment outcomes require the signed provider callback.
 Operator powers over a team's billing standing and the sign-up waitlist answer
 only a listed operator's own console session, never a bearer token; see
 [Operator console](auth.md#operator-console). Operators who control the database, encryption keys or
@@ -156,7 +156,7 @@ reads the repository the App's webhook recorded, or a repository the run names
 by hand only when one of the team's App trigger subscriptions names it, so
 typing a private repository of the installation into a run yields no token for
 it. Only a claim token of the run receives a source credential, through
-`POST /api/v1/runs/{id}/source-credential`, and each issue is recorded with
+`POST /api/v1/runs/{run}/source-credential`, and each issue is recorded with
 the team's git credential releases. The operator's launcher token
 receives claim tokens for every team's ready nodes, so whoever holds it reaches
 every team's run secrets, source credentials and cache grants; keep it
@@ -199,8 +199,8 @@ argon2id hashes, and never logged in full. The complete model -- token
 kinds, the scope set, per-endpoint enforcement, the unauthenticated
 endpoints, and first-visit admin bootstrap -- is in
 [auth.md](auth.md). Sparkwing does not have a "root token"; the `admin`
-scope is the superset of the deployment's scopes, short of `credits.grant` and
-the operator console.
+scope passes legacy scope checks. Operator console routes require session
+proof and cannot be reached by a deployment bearer.
 
 ### Team boundary route table
 

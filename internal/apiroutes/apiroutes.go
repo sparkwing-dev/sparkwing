@@ -10,9 +10,12 @@ package apiroutes
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // Public marks a route registered outside the authentication middleware, so
@@ -32,7 +35,8 @@ const Claim = "claim"
 const Operator = "operator"
 
 var (
-	handleRE = regexp.MustCompile(`(\w+)\.Handle(?:Func)?\("([A-Z]+) (/[^"]+)",\s*(.*)$`)
+	handleRE   = regexp.MustCompile(`(\w+)\.Handle(?:Func)?\("([A-Z]+) (/[^"]+)",\s*(.*)$`)
+	endpointRE = regexp.MustCompile(`\{\s*Method: "([A-Z]+)", Pattern: "(/[^"]+)"`)
 
 	scopeRefRE = regexp.MustCompile(`\b((?:Scope|scope)[A-Za-z]\w*)\b`)
 
@@ -77,6 +81,62 @@ func Parse(file string, scopes map[string]string) ([]Route, error) {
 		return nil, fmt.Errorf("read routes: %w", err)
 	}
 	var routes []Route
+	for _, group := range []struct{ registration, file string }{
+		{"s.registerOperatorRoutes(router)", "operator_routes.go"},
+		{"s.registerEngineRoutes(router)", "engine_routes.go"},
+		{"s.registerPolicyEndpoints(router, s.claimEndpoints())", "engine_claim_routes.go"},
+		{"s.registerAuthorityRoutes(router)", "authority_routes.go"},
+		{"s.registerPolicyEndpoints(router, s.capabilityEndpoints())", "capability_management.go"},
+		{"s.registerCredentialRoutes(router)", "credential_inventory.go"},
+		{"s.registerPolicyEndpoints(router, s.sizingEndpoints())", "sizing_routes.go"},
+		{"s.registerPolicyEndpoints(router, s.creditEndpoints())", "credit_routes.go"},
+		{"s.registerPolicyEndpoints(router, s.queueEndpoints())", "queue_view.go"},
+		{"s.registerPolicyEndpoints(router, s.dataEndpoints())", "data_routes.go"},
+		{"s.registerPolicyEndpoints(router, s.sourceEndpoints())", "source_controller.go"},
+		{"s.registerPolicyEndpoints(router, s.actionsEndpoints())", "github_actions_exchange.go"},
+		{"s.registerPolicyEndpoints(router, s.githubRunnerEndpoints())", "github_runner_admin.go"},
+		{"s.registerPolicyEndpoints(router, s.sessionEndpoints())", "session_routes.go"},
+		{"s.registerPolicyEndpoints(mux, s.browserSessionEndpoints())", "browser_session_routes.go"},
+		{"s.registerPolicyEndpoints(mux, s.oauthEndpoints())", "browser_oauth_routes.go"},
+	} {
+		if !strings.Contains(string(data), group.registration) {
+			continue
+		}
+		// safety: the reference follows actual endpoint declarations, independently of the policy table.
+		endpoints, err := os.ReadFile(filepath.Join(filepath.Dir(file), group.file))
+		if err != nil {
+			return nil, fmt.Errorf("read endpoints: %w", err)
+		}
+		for _, match := range endpointRE.FindAllStringSubmatch(string(endpoints), -1) {
+			policy, ok := capability.LookupRoute(match[1], match[2])
+			if !ok {
+				return nil, fmt.Errorf("endpoint lacks policy: %s %s", match[1], match[2])
+			}
+			var alternatives []string
+			for _, access := range policy.Access {
+				if access.Credential == capability.CredentialOperator {
+					alternatives = append(alternatives, Operator)
+					continue
+				}
+				if len(access.Grants) == 0 {
+					alternatives = append(alternatives, Authenticated)
+					continue
+				}
+				var grants []string
+				for _, grant := range access.Grants {
+					grants = append(grants, string(grant))
+				}
+				alternatives = append(alternatives, strings.Join(grants, " + "))
+			}
+			scope := strings.Join(alternatives, "` or `")
+			if policy.Authentication == capability.AuthPublic {
+				scope = Public
+			} else if policy.Authentication != capability.AuthCapability {
+				scope = string(policy.Authentication)
+			}
+			routes = append(routes, Route{Method: match[1], Path: match[2], Scope: scope})
+		}
+	}
 	for line := range strings.SplitSeq(string(data), "\n") {
 		m := handleRE.FindStringSubmatch(line)
 		if m == nil {

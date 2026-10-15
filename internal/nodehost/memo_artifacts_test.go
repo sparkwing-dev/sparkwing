@@ -14,7 +14,7 @@ import (
 
 // safety: node "build" declares outputs, so a copy checks its artifacts; a miss runs a body that records it ran.
 func memoArtifactRun(h *artifactHarness, src func() (MemoSource, error), ran *bool) *memoRun {
-	m := &Memo{Slots: storeSlots{st: h.st}, Claimed: true, Source: func(context.Context, store.ClaimInputRequest, string, string) (MemoSource, error) {
+	m := &Memo{Slots: storeSlots{st: h.st}, Source: func(context.Context, store.ClaimInputRequest, string, string) (MemoSource, error) {
 		return src()
 	}}
 	return &memoRun{

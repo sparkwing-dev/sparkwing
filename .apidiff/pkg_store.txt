@@ -2791,7 +2791,6 @@ func (s *Store) AsOperator() *Operator
 func (s *Store) AuthGenerations(ctx context.Context, authority capability.AuthorityRef, team string) (capability.AuthGenerations, error)
 func (s *Store) AuthorizeClaimToken(ctx context.Context, raw string, class ClaimRouteClass, now time.Time) (ClaimToken, error)
 func (s *Store) AuthorizeRunnerClaim(ctx context.Context, raw string, now time.Time) (RunnerClaim, error)
-func (s *Store) BinaryObject(ctx context.Context, team Team, input string, cloud bool, repo string, refs []string) (Upload, error)
 func (s *Store) BindGitHubAppDeliveryEvent(ctx context.Context, digest, event, delivery string, now time.Time) (bool, error)
 func (s *Store) CancelNodeForComputeLimit(
 	ctx context.Context, runID, nodeID, tokenPrefix, limit string, now time.Time,
@@ -2820,7 +2819,6 @@ func (s *Store) ClaimedRunFor(ctx context.Context, runID string, claimant ClaimI
 func (s *Store) Close() error
 func (s *Store) CommitUpload(ctx context.Context, team Team, id, recordedUploader string, now time.Time) (err error)
 func (s *Store) CommittedObject(ctx context.Context, team Team, key string) (Upload, error)
-func (s *Store) CommittedObjectFor(ctx context.Context, team Team, key string, cloud bool) (Upload, error)
 func (s *Store) ComputeAlarmState(ctx context.Context) (runners, alarm int64, err error)
 func (s *Store) ComputeLimits(ctx context.Context) (_ ComputeLimits, err error)
 func (s *Store) ComputeUsage(ctx context.Context) (_ ComputeUsage, err error)
@@ -3025,7 +3023,6 @@ func (s *Store) SignNodeLogSegment(ctx context.Context, l NodeLog, seg NodeLogSe
 func (s *Store) SignUpCounts(ctx context.Context, now time.Time) (SignUpCounts, error)
 func (s *Store) SignUpGate(ctx context.Context) (SignUpGate, error)
 func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
-func (s *Store) SourceBoundToRun(ctx context.Context, team Team, key, runID string) (bool, error)
 func (s *Store) StartClaimExecution(ctx context.Context, tok ClaimToken, now time.Time) (specHash string, err error)
 func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error
 func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error

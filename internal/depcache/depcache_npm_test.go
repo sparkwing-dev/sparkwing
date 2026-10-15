@@ -27,7 +27,7 @@ func TestNpmCacheCommandUsesWindowsNodeCLI(t *testing.T) {
 		}
 		return "", exec.ErrNotFound
 	}
-	command, err := npmCacheCommand(t.Context(), "windows", lookPath)
+	command, err := NpmCacheCommand(t.Context(), "windows", lookPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestNpmCacheCommandUsesWindowsNodeCLI(t *testing.T) {
 func TestNpmCacheCommandPreservesUnixNpmInvocation(t *testing.T) {
 	npm := filepath.Join("npm directory with spaces", "npm")
 	for _, goos := range []string{"linux", "darwin"} {
-		command, err := npmCacheCommand(t.Context(), goos, func(name string) (string, error) {
+		command, err := NpmCacheCommand(t.Context(), goos, func(name string) (string, error) {
 			if name != "npm" {
 				t.Fatalf("unexpected %s lookup", name)
 			}
@@ -56,7 +56,7 @@ func TestNpmCacheCommandPreservesUnixNpmInvocation(t *testing.T) {
 }
 
 func TestNpmCacheCommandPropagatesMissingNode(t *testing.T) {
-	command, err := npmCacheCommand(t.Context(), "windows", func(name string) (string, error) {
+	command, err := NpmCacheCommand(t.Context(), "windows", func(name string) (string, error) {
 		if name == "npm" {
 			return "npm.cmd", nil
 		}
@@ -68,7 +68,7 @@ func TestNpmCacheCommandPropagatesMissingNode(t *testing.T) {
 }
 
 func TestNpmCacheCommandAllowsNativeWindowsNpm(t *testing.T) {
-	command, err := npmCacheCommand(t.Context(), "windows", func(name string) (string, error) {
+	command, err := NpmCacheCommand(t.Context(), "windows", func(name string) (string, error) {
 		if name != "npm" {
 			t.Fatalf("unexpected %s lookup", name)
 		}
@@ -125,7 +125,7 @@ func TestResolveNpmCacheWindowsUppercaseEnvironment(t *testing.T) {
 }
 
 func TestResolveNpmCacheUsesProjectNpmrc(t *testing.T) {
-	if _, err := npmCacheCommand(context.Background(), goruntime.GOOS, exec.LookPath); err != nil {
+	if _, err := NpmCacheCommand(context.Background(), goruntime.GOOS, exec.LookPath); err != nil {
 		t.Skipf("npm not installed: %v", err)
 	}
 	t.Setenv("npm_config_cache", "")
@@ -140,7 +140,7 @@ func TestResolveNpmCacheUsesProjectNpmrc(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".npmrc"), []byte("cache="+filepath.ToSlash(want)+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	probe, probeErr := npmCacheCommand(t.Context(), goruntime.GOOS, exec.LookPath)
+	probe, probeErr := NpmCacheCommand(t.Context(), goruntime.GOOS, exec.LookPath)
 	if probeErr != nil {
 		t.Fatal(probeErr)
 	}

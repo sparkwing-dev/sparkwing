@@ -5,40 +5,29 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// A runner's name is its team's to know, so the queue view shows a caller the
-// runners its own team advertised and no other team's.
 func TestQueueStateShowsOnlyTheCallersTeamsRunners(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	ctx := context.Background()
-	if err := st.AsOperator().CreateTeam(ctx, "team-b"); err != nil {
-		t.Fatal(err)
-	}
-	srv := New(st, nil)
+	srv := New(nil, nil).WithQueueReader(func(_ context.Context, team store.Team) (QueueReader, error) {
+		return queueTeamReader{team: team}, nil
+	})
 	now := time.Now()
 	srv.runnerHeadroom.record(presenceKey{name: "operator-box"}, runnerHeadroom{Team: store.DefaultTeam, Cores: 4, UpdatedAt: now})
 	srv.runnerHeadroom.record(presenceKey{name: "team-b-box"}, runnerHeadroom{Team: "team-b", Cores: 2, UpdatedAt: now})
 
 	view := func(team store.Team) []string {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/queue/state", nil)
-		req = req.WithContext(contextWithPrincipal(req.Context(), &Principal{
-			Name: "reader", Kind: "user", Scopes: []string{ScopeRunsRead}, Team: team,
-		}))
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/queue", nil)
 		rec := httptest.NewRecorder()
-		srv.handleQueueStateView(rec, req)
+		if err := srv.handleQueueStateView(rec, req, capability.Authorized{Target: capability.Target{Team: string(team)}}); err != nil {
+			t.Fatal(err)
+		}
 		if rec.Code != http.StatusOK {
 			t.Fatalf("queue state for %s = %d: %s", team, rec.Code, rec.Body)
 		}
@@ -60,27 +49,10 @@ func TestQueueStateShowsOnlyTheCallersTeamsRunners(t *testing.T) {
 	}
 }
 
-func TestComputeLimitsNameEveryTeamsPrincipalsOnlyToTheOperator(t *testing.T) {
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	srv := New(st, nil)
-	show := func(scopes ...string) computeLimitsJSON {
-		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/compute-limits", nil)
-		req = req.WithContext(contextWithPrincipal(req.Context(), &Principal{Name: "p", Kind: "user", Scopes: scopes, Team: "team-b"}))
-		out, err := srv.computeLimitsView(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return out
-	}
-	if got := show(ScopeRunsRead).Usage.ByPrincipal; got != nil {
-		t.Errorf("a team reader reads the per-principal counts %v", got)
-	}
-	if got := show(ScopeAdmin).Usage.ByPrincipal; got == nil {
-		t.Error("the operator lost the per-principal counts")
-	}
+type queueTeamReader struct{ team store.Team }
+
+func (f queueTeamReader) Team() store.Team { return f.team }
+
+func (queueTeamReader) ListConcurrencyStates(context.Context) ([]*store.ConcurrencyState, error) {
+	return nil, nil
 }

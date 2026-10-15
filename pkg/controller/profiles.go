@@ -8,27 +8,26 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func (s *Server) handleGetPipelineProfile(w http.ResponseWriter, r *http.Request) {
-	pipeline := r.PathValue("name")
-	nodeID := r.URL.Query().Get("node")
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	prof, err := tenant.GetPipelineProfile(r.Context(), pipeline, nodeID)
+func (s *Server) handleGetPipelineProfile(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	tenant, err := s.sizingReader(r.Context(), a.Target.Team)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return err
+	}
+	prof, err := tenant.GetPipelineProfile(r.Context(), a.Target.Pipeline, a.Target.NodeID)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	if prof == nil {
-		writeError(w, http.StatusNotFound, store.ErrNotFound)
-		return
+		return &apierr.Error{Code: apierr.NotFound, Message: "sizing record not found"}
 	}
 	writeJSON(w, http.StatusOK, prof)
+	return nil
 }
 
 type setPinReq struct {
@@ -45,33 +44,24 @@ func (b setPinReq) validate() error {
 	return boundedProfileValue("memory_bytes", float64(b.MemoryBytes), maxProfileBytes)
 }
 
-func (s *Server) handleSetPipelinePin(w http.ResponseWriter, r *http.Request) {
-	pipeline := r.PathValue("name")
-	nodeID := r.URL.Query().Get("node")
+func (s *Server) handleSetPipelinePin(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	var body setPinReq
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeEngineRequest(r, &body); err != nil {
+		return err
 	}
 	if err := body.validate(); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return invalidEngineBody(err.Error())
 	}
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
-	}
-	var err error
-	if body.Cores <= 0 && body.MemoryBytes <= 0 {
-		err = tenant.SetProfilePin(r.Context(), pipeline, nodeID, 0, 0)
-	} else {
-		err = tenant.UpsertProfilePin(r.Context(), pipeline, nodeID, body.Cores, body.MemoryBytes)
-	}
+	tenant, err := s.sizingStore(r.Context(), a.Target.Team)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return err
+	}
+	err = tenant.SetProfilePin(r.Context(), a, body.Cores, body.MemoryBytes)
+	if err != nil {
+		return engineLookupError(err)
 	}
 	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 // safety: omit sustained cores because these profiles become hard Kubernetes
@@ -290,38 +280,35 @@ func (b profileObservationReq) observation() store.ProfileObservation {
 	}
 }
 
-func (s *Server) handleRecordProfileObservation(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleRecordProfileObservation(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	var body profileObservationReq
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeEngineRequest(r, &body); err != nil {
+		return err
 	}
 	if err := body.validate(); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return invalidEngineBody(err.Error())
 	}
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+	tenant, err := s.sizingStore(r.Context(), a.Target.Team)
+	if err != nil {
+		return err
 	}
-	if err := tenant.RecordProfileObservation(r.Context(), r.PathValue("name"),
-		r.URL.Query().Get("node"), body.observation()); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+	if err := tenant.RecordProfileObservation(r.Context(), a, body.observation()); err != nil {
+		return engineLookupError(err)
 	}
 	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
-func (s *Server) handleRecordContention(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+func (s *Server) handleRecordContention(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
+	tenant, err := s.sizingStore(r.Context(), a.Target.Team)
+	if err != nil {
+		return err
 	}
-	if err := tenant.RecordContention(r.Context(), r.PathValue("name")); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+	if err := tenant.RecordContention(r.Context(), a); err != nil {
+		return engineLookupError(err)
 	}
 	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 type waitObservationReq struct {
@@ -332,24 +319,21 @@ func (b waitObservationReq) validate() error {
 	return boundedProfileValue("wait_nanos", float64(b.WaitNanos), float64(maxProfileDuration))
 }
 
-func (s *Server) handleRecordWaitObservation(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleRecordWaitObservation(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	var body waitObservationReq
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if err := decodeEngineRequest(r, &body); err != nil {
+		return err
 	}
 	if err := body.validate(); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+		return invalidEngineBody(err.Error())
 	}
-	tenant, ok := s.requestTenant(w, r)
-	if !ok {
-		return
+	tenant, err := s.sizingStore(r.Context(), a.Target.Team)
+	if err != nil {
+		return err
 	}
-	if err := tenant.RecordWaitObservation(r.Context(), r.PathValue("name"),
-		time.Duration(body.WaitNanos)); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+	if err := tenant.RecordWaitObservation(r.Context(), a, time.Duration(body.WaitNanos)); err != nil {
+		return engineLookupError(err)
 	}
 	w.WriteHeader(http.StatusNoContent)
+	return nil
 }

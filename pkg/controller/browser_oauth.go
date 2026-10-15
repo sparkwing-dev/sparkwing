@@ -5,7 +5,8 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // safety: the flow cookie is what proves the browser finishing a sign-in is the one that started it; without it a
@@ -27,8 +28,10 @@ type oauthFlow struct {
 
 func (s *Server) readOAuthFlow(r *http.Request) (oauthFlow, bool) {
 	var flow oauthFlow
-	if !readFlowCookie(r, oauthFlowCookieName, s.cookiesSecure(), &flow) ||
-		flow.Provider == "" || flow.State == "" || flow.Verifier == "" {
+	if len(r.CookiesNamed(cookieName(oauthFlowCookieName, s.cookiesSecure()))) != 1 ||
+		!readFlowCookie(r, oauthFlowCookieName, s.cookiesSecure(), &flow) ||
+		flow.Provider == "" || flow.State == "" || flow.Verifier == "" ||
+		flow.Mode != "" && flow.Mode != oauthFlowLink {
 		return oauthFlow{}, false
 	}
 	return flow, true
@@ -38,91 +41,35 @@ func oauthCallbackPath(provider string) string {
 	return "/auth/" + provider + "/callback"
 }
 
-func (s *Server) refuseOAuth(w http.ResponseWriter, r *http.Request, status int, message string) {
-	s.renderLoginPage(w, r, s.withSignInProviders(loginPageData{Next: "/", Error: message}), status)
+func (s *Server) handleOAuthStart(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
+	proof, ok := r.Context().Value(oauthProofKey{}).(oauthProof)
+	if !ok || proof.grant.AuthorizeURL == "" {
+		return missingEndpointPolicy()
+	}
+	if !setFlowCookie(w, oauthFlowCookieName, proof.flow, s.cookiesSecure()) {
+		return &apierr.Error{Code: apierr.Internal, Message: "could not start sign-in"}
+	}
+	http.Redirect(w, r, proof.grant.AuthorizeURL, http.StatusSeeOther)
+	return nil
 }
 
-func (s *Server) handleOAuthStart(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	name := r.PathValue("provider")
-	label, known := providerLabels[name]
-	if !known {
-		http.NotFound(w, r)
-		return
+func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request, _ capability.Authorized) error {
+	proof, ok := r.Context().Value(oauthProofKey{}).(oauthProof)
+	if !ok {
+		return missingEndpointPolicy()
 	}
-	next := safeNext(r.URL.Query().Get("next"))
-	grant, err := s.oauthBegin(name, browserURL(r, oauthCallbackPath(name)))
-	if err != nil {
-		status := http.StatusBadGateway
-		if refused, ok := refusalOf(err); ok {
-			status = refused.status
-		} else {
-			s.logger.Error("oauth start", "provider", name, "error", err.Error())
-		}
-		s.renderLoginPage(w, r, s.withSignInProviders(loginPageData{
-			Next: next, Error: label + " sign-in is unavailable right now.",
-		}), status)
-		return
+	if proof.flow.Mode == oauthFlowLink {
+		return s.continueIdentityLink(w, r, proof.flow)
 	}
-	if !setFlowCookie(w, oauthFlowCookieName, oauthFlow{Provider: name, State: grant.State, Verifier: grant.Verifier, Next: next}, s.cookiesSecure()) {
-		http.Error(w, "could not start sign-in", http.StatusInternalServerError)
-		return
-	}
-	http.Redirect(w, r, grant.AuthorizeURL, http.StatusSeeOther)
-}
-
-func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	name := r.PathValue("provider")
-	label, known := providerLabels[name]
-	if !known {
-		http.NotFound(w, r)
-		return
-	}
-	query := r.URL.Query()
-	flow, started := s.readOAuthFlow(r)
-	if started && flow.Mode == oauthFlowLink && flow.Provider == name {
-		s.identityLinkCallback(w, r, name, flow)
-		return
-	}
-	if query.Get("error") != "" {
-		s.refuseOAuth(w, r, http.StatusUnauthorized, label+" sign-in was not completed.")
-		return
-	}
-	if !started {
-		s.refuseOAuth(w, r, http.StatusBadRequest, "This sign-in was not started in this browser. Start again.")
-		return
-	}
-	// safety: the cookie survives a mismatch, so one forged callback cannot discard a sign-in this browser has in
-	// flight. The provider is part of the match, so a code from one provider never meets another's verifier.
-	if !constantTimeEqual(query.Get("state"), flow.State) || flow.Provider != name {
-		s.refuseOAuth(w, r, http.StatusBadRequest, "This sign-in could not be verified. Start again.")
-		return
+	if proof.session == nil || proof.raw == "" {
+		return missingEndpointPolicy()
 	}
 	clearFlowCookie(w, oauthFlowCookieName, s.cookiesSecure())
-	code := query.Get("code")
-	if code == "" {
-		s.refuseOAuth(w, r, http.StatusBadRequest, label+" sign-in was not completed.")
-		return
-	}
-	sess, raw, err := s.oauthSignIn(r.Context(), name, code, flow.Verifier, browserURL(r, oauthCallbackPath(name)))
-	if err != nil {
-		refused, ok := refusalOf(err)
-		if !ok || refused.status >= http.StatusInternalServerError {
-			if !ok {
-				s.logger.Error("oauth sign-in", "provider", name, "error", err.Error())
-			}
-			s.refuseOAuth(w, r, http.StatusBadGateway, label+" sign-in could not be completed.")
-			return
-		}
-		s.refuseOAuth(w, r, refused.status, refused.message)
-		return
-	}
-	noteAuditPrincipal(r.Context(), &Principal{Kind: store.TokenKindUser, AccountID: sess.AccountID, Team: sess.Team})
 	noteAuditWrite(r.Context())
-	s.endPriorSession(r, raw)
-	setSessionCookies(w, raw, sess.CSRFToken, s.cookiesSecure())
-	renderPage(w, http.StatusOK, signedInTmpl, safeNext(flow.Next))
+	s.endPriorSession(r, proof.raw)
+	setSessionCookies(w, proof.raw, proof.session.CSRFToken, s.cookiesSecure())
+	renderPage(w, http.StatusOK, signedInTmpl, safeNext(proof.flow.Next))
+	return nil
 }
 
 // safety: the provider returns through this origin before the browser follows the vetted next path, so the session
@@ -217,39 +164,19 @@ func (s *Server) handleIdentityLinkStart(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// safety: the callback keeps the provider code in the flow cookie and resumes on this origin before checking the
-// account-link state against the session.
-func (s *Server) identityLinkCallback(w http.ResponseWriter, r *http.Request, name string, flow oauthFlow) {
-	label := providerLabels[name]
-	query := r.URL.Query()
-	if query.Get("error") != "" {
-		clearFlowCookie(w, oauthFlowCookieName, s.cookiesSecure())
-		redirectToSignIns(w, r, url.Values{"refused": {"provider_rejected"}, "provider": {name}})
-		return
-	}
-	// safety: the cookie survives a mismatch, so one forged return cannot discard a link in flight.
-	if !constantTimeEqual(query.Get("state"), flow.State) || query.Get("code") == "" {
-		renderFlowPage(w, http.StatusBadRequest, flowPage{
-			Title:       label + " was not linked",
-			Message:     "This link could not be verified. Start again.",
-			ActionHref:  signInsSettingsPath,
-			ActionLabel: "Back to linked sign-ins",
-		})
-		return
-	}
-	flow.Code = query.Get("code")
+func (s *Server) continueIdentityLink(w http.ResponseWriter, r *http.Request, flow oauthFlow) error {
 	if !setFlowCookie(w, oauthFlowCookieName, flow, s.cookiesSecure()) {
-		http.Error(w, "could not continue linking", http.StatusInternalServerError)
-		return
+		return &apierr.Error{Code: apierr.Internal, Message: "could not continue linking"}
 	}
-	next := "/auth/" + name + "/link/complete"
+	next := "/auth/" + flow.Provider + "/link/complete"
 	renderFlowPage(w, http.StatusOK, flowPage{
-		Title:       "Linking " + label,
+		Title:       "Linking " + providerLabels[flow.Provider],
 		Message:     "Finishing the link.",
 		Refresh:     next,
 		ActionHref:  next,
 		ActionLabel: "Continue",
 	})
+	return nil
 }
 
 func (s *Server) handleIdentityLinkComplete(w http.ResponseWriter, r *http.Request) {

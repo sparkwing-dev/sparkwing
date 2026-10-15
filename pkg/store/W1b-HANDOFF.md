@@ -1,86 +1,83 @@
 # W1b handoff
 
-Continues 94167e3b6. W1b remains incomplete. The lead owns staging, the merge
-commit, independent review, pipelines and native integration.
+Continues 2c5b5a7d2 and W1b-session1792067157.out. W1b remains incomplete.
+The lead owns staging, the merge commit, review, pipelines and native integration.
 
 ## Merge resolution
 
-All nine conflicted file contents are resolved. No conflict markers remain.
-The Git index remains unmerged because SWARM-BRIEF prohibits Git writes.
-The lead must stage the resolutions and finish the merge.
+All six conflict contents are resolved. The index remains unmerged because
+SWARM-BRIEF forbids worker Git writes. The lead must stage the resolutions.
 
-- `handoffs.md` is byte-identical to the integration branch's stage-three version.
-- C1 retains both areas' completed cuts. T1 retains both port inventories.
-- Migration source and mirror retain both areas' changes.
-- The obsolete finalize-claim-round fixture is deleted. The removed unstarted
-  requeue tests stay removed, matching W1's API retirement.
-- The SQL scope catalog drops entries for the three retired mechanisms present
-  in its conflict. No removed API is restored.
-- The store API snapshot is regenerated from the merged implementation.
+- `design/rewrite/contracts/handoffs.md` is the exact stage-three integration version.
+- `t1-port-inventory.md` also takes the integration version. It already contains
+  the W1b egress/caller inventory once, after W1's inventory.
+- The migration source retains W1b's sections plus the merged integration sections.
+  The embedded mirror is regenerated from the source.
+- The controller-client and storage API snapshots drop the retired
+  SetNodeArtifactManifest entries, matching their merged implementation.
 
-The nine paths were `.apidiff/pkg_store.txt`, contracts `c1-data.md`,
-`handoffs.md`, `t1-port-inventory.md`, both migration copies, and store tests
-`finalize_event_deadlock_test.go`, `tenant_sql_scope_guard_test.go` and
-`trigger_claim_credits_test.go`.
+No amendment file or W1 implementation file is edited.
 
-## Implemented and removed
+## Implemented and deleted
 
-Four missed `SetCreditSettings` callers in W1's unit-billing test and SQLite
-acceptance fixture now select Operator. Those missed migrations prevented both
-the store tests and whole-repository build from compiling after the merge.
-W1's lifecycle implementation files are unchanged.
+Removed the unused Store exports `BinaryObject`, `CommittedObjectFor` and
+`SourceBoundToRun`. They had no production callers. Binary and provenance
+lookups use authorized logical blob records rather than `data_objects`.
+This deletes 84 production lines and 212 test lines. Production Go shrinks
+by 57 lines after the data-authorization fix.
 
-`Operator.CreditLedgerTotals` replaces the raw Store export without an alias.
-The controller's deployment sampler and all callers select that owner. Reports
-use the same calculator as lifecycle settlement. A regression first reproduced
-the public report reaching C2's panic stub despite the lifecycle fixture having
-a calculator installed. The strengthened test uses real claim, bootstrap
-exchange and unstarted release, and checks the report before and after refund.
+Four tests retire with that removed key-based resolver:
+TestCloudBinaryLookupRefusesLocalProvenanceUntilTeamTrustsIt,
+TestSameBinaryCanBeCommittedByLocalAndCloudRunners,
+TestCloudBinaryLookupNeverReturnsLocalDuringCloudExpiry, and
+TestClaimBinaryCacheIsScopedToItsRefAndImmutable. No archived T1 source identity
+or native binary-provenance cell is newly claimed. W7 still owns final binary
+execution policy. The retained direct-upload tests cover paths still present.
 
-Three unused billing wrappers are removed: `settleBillingAwardTx`,
-`settleBillingAwardWithTx` and `chargeBillingAwardTx`. Production lifecycle
-settlement already uses `accountBillingAwardTx`. Tests now use that same owner.
-The unmetered proof supplies no calculator.
+The W2 logical-record handoff is fixed. `CheckDataAccess` resolves persisted
+read authority for named DataLookup selectors before a digest is selected.
+Remote-cache selection still refuses executable binaries and source bundles.
+The selector-only DataRecord precheck is limited to memo copying under a live
+job with both read and write grants and declared memoization. Downloads,
+presence, uploads and ordinary record publication keep their digest checks.
+Actual record selection, memo copying and member-edge authorization remain in
+the existing transaction owners.
 
-The wrapper cut removes 15 production Go lines. Together with the totals-owner
-change, production Go has a net reduction of 11 lines. The controller sampler
-fixture port removes 23 lines and adds five. Merge resolution preserves W1's
-removal of the 59-line finalize fixture and 98 lines in the trigger-credit test.
-Those merge deletions are W1's cuts, not new W1b ports.
+Invariant: a selector precheck grants no byte or reference authority. The new
+regression first failed with `invalid blob digest`. It now checks selector-only
+lookup/copy, strict byte operations and an unrelated job's final record refusal.
+A 96-case property checks persisted scope against forged hints, revocation,
+expiry, tenant substitution, remote binary/source selection and write attempts.
+The record tests use contract fakes for W7 namespace/edge behavior.
 
-The sampler fixture now uses the final-schema store fixture and the presence
-registry boundary. It retains its queue-depth, free-grant and live-runner metric
-assertions. Its old CreateRun call failed on removed `args_json`. This component
-proof makes no HTTP claim-registration claim.
-
-Two other generated API snapshots are refreshed for W1's retired client/status
-and heartbeat APIs. The stale snapshot for the deleted runner package is removed.
-The complete generated API directory now matches the tracked snapshot files.
+The existing public ledger report/unstarted release regression now calls C2's
+real SettleBilling calculator. C2's calculator is implemented on this merged
+branch. It is no longer a panic-stub integration dependency. W1's lifecycle
+implementation and its separate test calculator are unchanged here.
 
 ## Verification
 
-Commands use `GOWORK=off GOFLAGS=-buildvcs=false GOMAXPROCS=4`, with `-p 4`
-for build, vet and tests. Go cache and temporary directories are under
-`/tmp/sw-astra-W1b/`. That scratch directory is deleted after verification.
+Go commands use `GOWORK=off GOFLAGS=-buildvcs=false GOMAXPROCS=4`, `-p 4`,
+and GOCACHE/GOTMPDIR/TMPDIR under `/tmp/sw-astra-W1b/`.
 
 - Whole-repository `go build -p 4 ./...` passes.
-- Scoped vet passes for store, controller and both acceptance packages.
-- The final store selection passes 202 top-level tests / 619 cases, no skips.
-- Seven controller tests pass, including the migrated sampler and the existing
-  event/egress regressions.
-- Storage/billing acceptance passes 44 cases, with 562 native/platform skips.
-  Thirteen SQLite proofs pass. No native cell is newly unskipped.
-- Commentcheck against main, sleepcheck against HEAD, gofmt, diff whitespace,
-  changelog, documentation mirrors and full API snapshot comparison pass.
+- Vet passes for store, controller and both acceptance packages.
+- The W1b store selection passes 204 top-level tests / 621 cases with no skips.
+- The migrated ledger report/release test and C2's operational classification,
+  billing minima and settlement tests pass with the real calculator.
+- Storage, billing and cache HTTP acceptance selections pass. Thirteen existing
+  SQLite cells pass. There are 562 skipped native/platform cases. No new native
+  cell is unskipped.
+- Commentcheck against main, gofmt, diff whitespace, changelog, docs mirrors and
+  the complete generated API snapshot comparison pass.
 
 Store selection:
 `^(TestBlob|TestLogPersistence|TestLogPublication|TestLogMaintenance|TestStoreData|TestRetainedStorage|TestPaymentSettlement|TestMeteredAccounting|TestMeteredUnit|TestTenantSQLScope|TestTenantWriters|TestTenantTwins|TestGrantCredits|TestCreditGrantRequest|TestCreditsBalance|TestCreditReversal|TestPayment.*(Cap|Spend))`
 
-Controller selection:
-`^(TestControllerEgress.*|TestControllerEventsUseTenantAndReplica|TestCreditsCollectorReportsTheSampledLedger|TestSamplersFillTheOperationalSeries)$`
+Acceptance selection:
+`^(TestStorage|TestBilling|TestDataCacheHTTP)` in internal/acceptance and tests/acceptance.
 
-Acceptance selection: `^(TestStorage|TestBilling)$` in internal/acceptance and
-tests/acceptance. Passing SQLite cells:
+Passing SQLite cells:
 
 - billing-start-award-versus-start/store-sqlite
 - billing-ledger-survives-retention/store-data-sqlite
@@ -96,69 +93,69 @@ tests/acceptance. Passing SQLite cells:
 - storage-publish-one-way/store-data-sqlite
 - storage-owner-receipts-and-stream-verification/store-data-sqlite
 
-No archived T1 source identity is newly claimed complete. Existing disruption,
-mutation-authority, upload, record, log and settlement properties still pass.
-No full legacy suite, PostgreSQL, provider, physical-backend, native-placement or
-race pass is claimed. The lead runs independent review and pipeline gates.
+A supplementary `Test.*Billing.*` regex was too broad. It ran two retained
+legacy fixtures that fail before the changed behavior:
+
+- TestLaunchBilling_ReleaseRefundsAndTheFirstBeatBills fails at tokens insertion
+  because the final schema has no tokens table.
+- TestTriggersAreNeverRefusedForBilling fails at trigger insertion because the
+  final triggers table has no pipeline column.
+
+The narrowed real-calculator checks pass. These legacy fixtures remain part of
+the unfinished claim/trigger cutover. No full package, PostgreSQL, physical
+backend, provider, native-placement or race pass is claimed.
 
 ## Assignment audit and remaining work
 
-- Approved record-mutation authorization and the two output catalog removals
-  remain implemented. The generated mutation-authority test passes in the selection.
-- A1-24's store boundary remains implemented. W2 DataAuthority and BindData are
-  still panic stubs in this checkout. No SQL or credential adapter is duplicated.
-- A1-27's W1 lifecycle join is now merged and verified with contract calculators.
-  Awards, starts, renewal, application retry, finish, release and reaping use the
-  immutable billing owner. The award-versus-start SQLite cell also passes.
-  C2's production SettleBilling remains a panic stub. W3 must report current owner
-  compute, including false during customer-runner waits. W1b still owns
-  spend-exhaustion/grace enforcement and legacy claim-credit retirement.
-  The redundant unmetered calculator override in W1's unit helper can be removed
-  by W1 because the shared helper already bypasses calculation for unmetered work.
-- A1-28's committed-checkout settlement and raw-paid-grant refusal remain done.
-  W2 still owns verified provider events and its HTTP adapter.
-- A1-29 through A1-35 retain the implemented store contracts for records/members,
-  tagged receipts and uploader identity, immutable upload tickets, memo/depcache,
-  read sets, tombstones and tagged logs. W7 RecordNamespace, AuthorizeEdge and
-  signed/log transport construction remain stubs. Physical verification/deletion,
-  manifest-reader setup, signed transfers, binary policy, proxy egress and
-  allowance-driven physical eviction remain real-integration work.
-- Legacy ReserveUpload/CommitUpload, output objects, ReleaseStorage and node-log
-  transports still need consumer cuts. Legacy trigger/node credit windows also
-  remain and must retire with their consumers. This session does not claim those
-  paths or spend/grace enforcement complete.
-- A1-53 remains unverified for native/provider/PostgreSQL/physical-backend drivers.
+- The approved record-mutation owner, two output catalog removals, retired
+  expired-claim helper and explicit blobResultFixture attempt remain done.
+- A1-24: store authority/binding/data-edge contracts remain implemented. The new
+  selector fix closes W2's named logical-record request. W2's DataAuthority and
+  BindData implementations now exist. Concrete ResolveAuthority, ReadBlob and
+  ChargeDownload callback wiring and physical adapters still need integration.
+- A1-27: W1's issuance/start/renewal/retry/finish/release/reaper join remains
+  implemented and passes its selected tests. C2's production calculator is now
+  exercised by the ledger/release regression. Spend-exhaustion/grace enforcement
+  and legacy trigger/node credit-window retirement remain W1b work. W3 must
+  report actual owner compute, including false during customer-runner waits.
+- A1-28: committed-checkout settlement and raw-paid-grant refusal remain done.
+  Verified provider and production deployment evidence remain W2/T1 work.
+- A1-29 through A1-35: store records/members, read sets, tagged uploader receipts,
+  immutable upload tickets, memo/depcache pointers, tombstones and tagged log
+  persistence remain implemented. W7 namespace/edge, signed-store, binary policy,
+  log transport and physical backend implementations remain integration points.
+- A1-53: native/provider/PostgreSQL/physical-backend cells remain unverified.
 
-## Contract question
+Next cutovers still include ReserveUpload/CommitUpload, ReleaseStorage, old
+output objects and old node-log transport. Their live controller/client and
+legacy lifecycle callers remain. Final upload tickets, logical records and
+segment persistence already supply the replacement store contracts.
+Allowance-driven physical eviction and final manifest-reader setup remain open.
 
 No new foreign contract change is requested. The existing free-slot question
-remains unresolved: final tickets have no server-verified intended use before
-signing, while legacy small outputs may bypass a full slot pool. A blanket gate
-would remove that exception. The lead/C1/W7 must supply the intended-use contract
-or an explicit product decision. No slot gate or restriction is added here.
+remains: final tickets have no server-verified intended use before signing,
+while legacy small outputs can bypass a full slot pool. The lead/C1/W7 must
+supply intended-use authority or an explicit policy decision. No slot gate or
+new customer restriction is added here.
 
 ## Shared files and friction
 
-Shared production caller: `pkg/controller/server.go`.
-Shared fixtures: `pkg/controller/prom_internal_test.go`,
-`internal/acceptance/store_billing.go`, `internal/acceptance/store_unit_billing.go`,
-`pkg/store/unit_billing_test.go`, `pkg/store/credits_test.go` and
-`pkg/store/queue_state_counts_test.go`. Changes outside W1b implementation files
-are caller migrations, the sampler fixture port and the required merge resolutions.
+No production caller outside pkg/store changes in this session. Shared paths
+are CHANGELOG.md, docs/migrations/_unreleased.md, pkg/docs/changelog.md,
+pkg/docs/mirror/migrations/_unreleased.md, and API snapshots for store,
+controller client and storage. Handoffs and T1 inventory change only through
+the required integration-side conflict resolution. W1b implementation paths
+are blob_data_access.go, blob_selection_access_test.go, direct_upload.go and
+its test, credit_totals_runtime_test.go and this report.
 
-Shared prose/generated files: C1 and T1 contracts, the integration handoff
-resolution, CHANGELOG.md, migration source/mirror, pkg/docs/changelog.md, and
-API snapshots for store, controller client, storage and the retired runner.
-No amendment file is edited. The only handoffs.md operation restores the exact
-integration version required by SWARM-BRIEF.
-
-Friction: four missed settings-owner migrations broke compilation. The public
-ledger report bypassed the lifecycle calculator. The sampler used removed-schema
-fixtures. Three API snapshots were stale. Each is corrected above. Runtime
-calculator/data/blob/log integrations and the free-slot contract question remain.
+Friction: W2's preflight selected no digest, while C1 required one. The new
+selector path fixes that mismatch without moving record/member authorization.
+The supplementary billing regex also reached retained pre-rewrite fixtures.
+The original failure and narrowed verification are both recorded above.
 
 No Git write, candidate installation, pipeline, service, deployment, release or
-harness-memory write ran. The shared Git config has no local identity or worktree override. Session scratch
-is deleted after all checks.
+harness-memory write ran. The lead still owns the six unmerged index entries.
+The shared Git configuration has no local identity or worktree override.
+Session scratch is deleted after all checks.
 
 STATUS: CONTINUE

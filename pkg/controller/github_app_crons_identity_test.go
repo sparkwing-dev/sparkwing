@@ -78,7 +78,7 @@ func TestGitHubAppCronLifecycleWithdrawsOldBindings(t *testing.T) {
 					t.Fatalf("team unbind = %d", code)
 				}
 			case "operator_unbind":
-				if code := f.call("DELETE", "/api/v1/github-app/installations/7", "Bearer "+f.admin, nil, nil); code != http.StatusNoContent {
+				if code := f.call("DELETE", "/api/v1/operator/github-app/installations/7", f.consoleAuth(), nil, nil); code != http.StatusNoContent {
 					t.Fatalf("operator unbind = %d", code)
 				}
 			case "suspend":

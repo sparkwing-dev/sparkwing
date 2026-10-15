@@ -6,7 +6,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
@@ -32,7 +34,18 @@ func (r *pipelineRun) describedPipeline(pipelineName string) (nodeproto.Pipeline
 		}
 		schemas = doc.Pipelines
 	}
-	return findPipelineSchema(schemas, pipelineName)
+	_, config, err := projectconfig.Discover(bindDir)
+	if err != nil {
+		return nodeproto.PipelineDescription{}, err
+	}
+	selection := nodehost.ResolvePipeline(config, pipelineName)
+	schema, err := findPipelineSchema(schemas, selection.Entrypoint)
+	if err != nil {
+		return schema, err
+	}
+	r.pipeline = selection
+	schema.Name = selection.Invoked
+	return schema, nil
 }
 
 func findPipelineSchema(schemas []nodeproto.PipelineDescription, pipelineName string) (nodeproto.PipelineDescription, error) {

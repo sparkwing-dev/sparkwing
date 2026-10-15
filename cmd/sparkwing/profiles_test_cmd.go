@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/health"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
@@ -125,9 +125,9 @@ func probeAuth(ctx context.Context, prof *profile.Profile) profileProbeResult {
 		r.Detail = "token authenticates (whoami unavailable)"
 		return r
 	}
-	if who.Principal == authwire.AnonymousPrincipal || who.Kind == authwire.AnonymousKind {
+	if who.Kind == string(capability.SubjectAnonymous) {
 		r.Status = "warn"
-		r.Detail = "serving unauthenticated: no tokens configured, the controller accepts any bearer"
+		r.Detail = "controller identifies this request as anonymous"
 		return r
 	}
 	r.Status = "ok"

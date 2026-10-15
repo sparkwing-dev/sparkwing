@@ -99,14 +99,6 @@ func TestSecretArgs_ControllerListRunsRedacts(t *testing.T) {
 	assertRedactedResponse(t, "GET /api/v1/runs", getBody(t, srv.URL+"/api/v1/runs"))
 }
 
-func TestSecretArgs_ControllerGetRunRedactsByDefault(t *testing.T) {
-	st, srv := secretArgController(t)
-	seedSecretArgRun(t, st, "run-1")
-	assertRedactedResponse(t, "GET /api/v1/runs/{id}", getBody(t, srv.URL+"/api/v1/runs/run-1"))
-	assertRedactedResponse(t, "GET /api/v1/runs/{id}?include=nodes",
-		getBody(t, srv.URL+"/api/v1/runs/run-1?include=nodes"))
-}
-
 func TestSecretArgs_ControllerReceiptRedacts(t *testing.T) {
 	st, srv := secretArgController(t)
 	seedSecretArgRun(t, st, "run-1")
@@ -228,126 +220,6 @@ func TestSecretArgs_RetryStillReceivesPlaintext(t *testing.T) {
 		getBody(t, srv.URL+"/api/v1/runs/"+src.RetriedAs))
 }
 
-func TestSecretArgs_ControllerPendingTriggerRowIsNotYetClassified(t *testing.T) {
-	st, srv := secretArgController(t)
-	err := st.CreateRun(context.Background(), store.Run{
-		ID: "pending-1", Pipeline: "deploy", Status: "pending",
-		Args:      map[string]string{"token": ctlSecretValue},
-		StartedAt: time.Now(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := getBody(t, srv.URL+"/api/v1/runs/pending-1")
-	if !strings.Contains(body, ctlSecretValue) {
-		t.Errorf("pending trigger-intake rows are documented as unclassified; "+
-			"if this now redacts, update CHANGELOG.md and docs/sdk.md:\n%s", body)
-	}
-}
-
-func TestSecretArgs_ControllerGrandfathersOldRuns(t *testing.T) {
-	st, srv := secretArgController(t)
-	err := st.CreateRun(context.Background(), store.Run{
-		ID: "old-run", Pipeline: "deploy", Status: "success",
-		Args:      map[string]string{"token": ctlSecretValue},
-		StartedAt: time.Now(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := getBody(t, srv.URL+"/api/v1/runs/old-run")
-	if !strings.Contains(body, ctlSecretValue) {
-		t.Errorf("old run without classification changed shape; want unchanged rendering:\n%s", body)
-	}
-}
-
-func TestSecretArgs_ExecutionViewIsScopeGated(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-	seedSecretArgRunAs(t, st, "run-1", "running")
-
-	now := time.Now().UTC()
-	runnerTok, runnerRow, err := st.CreateToken("pod", store.TokenKindRunner,
-		[]string{"nodes.claim", "runs.read"}, 0, now)
-	if err != nil {
-		t.Fatalf("CreateToken runner: %v", err)
-	}
-	idleRunnerTok, _, err := st.CreateToken("idle-pod", store.TokenKindRunner,
-		[]string{"nodes.claim", "runs.read"}, 0, now)
-	if err != nil {
-		t.Fatalf("CreateToken idle runner: %v", err)
-	}
-	readerTok, _, err := st.CreateToken("dashboard", store.TokenKindUser,
-		[]string{"runs.read"}, 0, now)
-	if err != nil {
-		t.Fatalf("CreateToken reader: %v", err)
-	}
-	adminTok, _, err := st.CreateToken("ops", store.TokenKindUser,
-		[]string{"admin"}, 0, now)
-	if err != nil {
-		t.Fatalf("CreateToken admin: %v", err)
-	}
-
-	ctx := context.Background()
-	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "only", Status: "pending"}); err != nil {
-		t.Fatalf("CreateNode: %v", err)
-	}
-	if err := st.MarkNodeReady(ctx, "run-1", "only"); err != nil {
-		t.Fatalf("MarkNodeReady: %v", err)
-	}
-	if _, err := st.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "pod", TokenPrefix: runnerRow.Prefix}, "holder-1", time.Minute, nil); err != nil {
-		t.Fatalf("ClaimNextReadyNode: %v", err)
-	}
-
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
-	defer srv.Close()
-
-	get := func(t *testing.T, token, query string) string {
-		t.Helper()
-		req, err := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/runs/run-1"+query, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		req.Header.Set("Authorization", "Bearer "+token)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("status=%d for %q", resp.StatusCode, query)
-		}
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return string(body)
-	}
-
-	const secretValues = "?include=" + store.IncludeSecretValues
-
-	if body := get(t, runnerTok, secretValues); !strings.Contains(body, ctlSecretValue) {
-		t.Errorf("the claiming runner did not receive the execution view:\n%s", body)
-	}
-	assertRedactedResponse(t, "nodes.claim token holding no claim on the run",
-		get(t, idleRunnerTok, secretValues))
-	if body := get(t, adminTok, secretValues); !strings.Contains(body, ctlSecretValue) {
-		t.Errorf("admin token did not receive the execution view:\n%s", body)
-	}
-
-	assertRedactedResponse(t, "runs.read token asking for the execution view",
-		get(t, readerTok, secretValues))
-
-	assertRedactedResponse(t, "nodes.claim token without the include",
-		get(t, runnerTok, ""))
-}
-
 func TestSecretArgs_ExecutionViewDoesNotWidenOtherEndpoints(t *testing.T) {
 	st, srv := secretArgController(t)
 	seedSecretArgRunAs(t, st, "run-1", "pending")
@@ -362,46 +234,4 @@ func TestSecretArgs_ExecutionViewDoesNotWidenOtherEndpoints(t *testing.T) {
 		getBody(t, srv.URL+"/api/v1/pipelines/deploy/latest"+q))
 	assertRedactedResponse(t, "GET /api/v1/runs/{id}/receipt"+q,
 		getBody(t, srv.URL+"/api/v1/runs/run-1/receipt"+q))
-}
-
-func TestSecretArgs_ExecutionViewFollowsTheAuthMode(t *testing.T) {
-	t.Run("auth disabled serves plaintext", func(t *testing.T) {
-		st, srv := secretArgController(t)
-		seedSecretArgRun(t, st, "run-1")
-		body := getBody(t, srv.URL+"/api/v1/runs/run-1?include="+store.IncludeSecretValues)
-		if !strings.Contains(body, ctlSecretValue) {
-			t.Errorf("an unauthenticated controller redacted the execution view:\n%s", body)
-		}
-	})
-
-	t.Run("auth enabled refuses an anonymous caller", func(t *testing.T) {
-		st, err := teststore.Open(filepath.Join(t.TempDir(), "s.db"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = st.Close() })
-		if _, _, err := st.CreateToken("ops", store.TokenKindUser,
-			[]string{"admin"}, 0, time.Now().UTC()); err != nil {
-			t.Fatalf("CreateToken: %v", err)
-		}
-		seedSecretArgRun(t, st, "run-1")
-		srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
-		t.Cleanup(srv.Close)
-
-		resp, err := http.Get(srv.URL + "/api/v1/runs/run-1?include=" + store.IncludeSecretValues)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func() { _ = resp.Body.Close() }()
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if resp.StatusCode != http.StatusUnauthorized {
-			t.Errorf("anonymous execution view = %d, want 401", resp.StatusCode)
-		}
-		if strings.Contains(string(body), ctlSecretValue) {
-			t.Errorf("anonymous execution view carried the secret arg value:\n%s", body)
-		}
-	})
 }

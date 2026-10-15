@@ -578,7 +578,7 @@ func TestGitHubAppRerequestedNeedsTheBinding(t *testing.T) {
 	if n := len(f.triggers(bob.team)); n != 0 {
 		t.Fatalf("bob's team got %d runs", n)
 	}
-	if code := f.call("DELETE", "/api/v1/github-app/installations/7", "Bearer "+f.admin, nil, nil); code != http.StatusNoContent {
+	if code := f.call("DELETE", "/api/v1/operator/github-app/installations/7", f.consoleAuth(), nil, nil); code != http.StatusNoContent {
 		t.Fatalf("operator unbind = %d", code)
 	}
 	if _, out := f.deliver("check_run", checkRunPayload(7, "rerequested", build), ""); out["status"] != "ignored" {

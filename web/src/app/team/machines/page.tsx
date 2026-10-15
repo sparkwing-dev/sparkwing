@@ -20,7 +20,6 @@ import {
   canConnectMachines,
   canManageTeam,
   cliTokenStartsRuns,
-  controllerURLPlaceholder,
   listMembers,
   listTeamTokens,
   memberLabel,
@@ -30,7 +29,6 @@ import {
   parseRepoPatterns,
   revokeTeamToken,
   runnerConnectCommand,
-  unixSecondsISO,
 } from "@/lib/teams";
 import { setMachineGitCredentials } from "@/lib/gitCredentials";
 import { fmtDateTime } from "@/lib/timeFormat";
@@ -67,7 +65,7 @@ function Machines({ me }: { me: Me }) {
   }, []);
 
   async function revoke(t: TeamToken) {
-    const label = t.name || t.prefix;
+    const label = t.subject.id || t.prefix;
     if (
       !window.confirm(
         `Revoke ${label}? A machine using this token stops taking work at once.`,
@@ -88,7 +86,7 @@ function Machines({ me }: { me: Me }) {
   }
 
   async function setGitCredentials(t: TeamToken, enabled: boolean) {
-    const label = t.name || t.prefix;
+    const label = t.subject.id || t.prefix;
     setBusy(t.prefix);
     try {
       await setMachineGitCredentials(t.prefix, enabled);
@@ -107,12 +105,12 @@ function Machines({ me }: { me: Me }) {
   }
 
   const owner = canManageTeam(role);
-  const machines = tokens?.filter((t) => t.family === "machine") ?? null;
-  const cliTokens = tokens?.filter((t) => t.family === "member") ?? null;
+  const machines = tokens?.filter((t) => t.subject.kind === "machine") ?? null;
+  const cliTokens = tokens?.filter((t) => t.subject.kind === "account") ?? null;
 
   // An editor may revoke only the tokens they minted; the controller decides,
   // so the button is offered to editors and a refusal is shown as it comes back.
-  const mayRevoke = canConnectMachines(role);
+  const mayRevoke = role === "owner" || role === "editor";
 
   return (
     <>
@@ -120,7 +118,7 @@ function Machines({ me }: { me: Me }) {
         <ConnectForm team={me.active_team.display_name} onMinted={load} />
       ) : (
         <div className="mb-6 text-sm text-[var(--muted)]">
-          Editors and owners connect machines to this team.
+          An owner connects machines to this team.
         </div>
       )}
       <Panel
@@ -143,21 +141,21 @@ function Machines({ me }: { me: Me }) {
                 className="flex items-center gap-3 px-4 py-3 border-b border-[var(--border)] last:border-0"
               >
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm truncate">{t.name || t.prefix}</div>
+                  <div className="text-sm truncate">{t.subject.id || t.prefix}</div>
                   <div className="text-xs text-[var(--muted)] font-mono truncate">
                     {t.prefix}
                     {creatorSuffix(t, members)}
-                    {t.created_at
-                      ? ` · ${fmtDateTime(unixSecondsISO(t.created_at))}`
+                    {t.issued_at
+                      ? ` · ${fmtDateTime(t.issued_at)}`
                       : ""}
                     {t.expires_at
-                      ? ` · expires ${fmtDateTime(unixSecondsISO(t.expires_at))}`
+                      ? ` · expires ${fmtDateTime(t.expires_at)}`
                       : ""}
                   </div>
                 </div>
                 {t.last_used_at ? (
                   <span className="text-xs text-[var(--muted)]">
-                    last seen {fmtDateTime(unixSecondsISO(t.last_used_at))}
+                    last seen {fmtDateTime(t.last_used_at)}
                   </span>
                 ) : null}
                 {owner ? (
@@ -259,7 +257,7 @@ function CLIAccess({
     <div className="mt-6">
       <Panel
         title="CLI access"
-        hint={`A personal token lets the sparkwing CLI start and follow ${team}'s runs as you. It lapses after 90 days and goes when you leave the team.`}
+        hint={`A personal token lets the sparkwing CLI start and follow ${team}'s runs as you. It loses access when you leave the team.`}
       >
         <div className="flex items-center gap-2 p-4">
           <button
@@ -277,16 +275,16 @@ function CLIAccess({
               This token is shown once. Sparkwing keeps only its prefix,{" "}
               <span className="font-mono">{minted.prefix}</span>.
             </div>
-            {cliTokenStartsRuns(minted.scopes) ? null : (
+            {cliTokenStartsRuns(minted.grants) ? null : (
               <div className="text-xs text-[var(--muted)]">
                 Your role reads runs, so this token cannot start one.
               </div>
             )}
             <div>
               <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1">
-                1. Save it as the {minted.profile} profile
+                1. Save it as the {minted.team} profile
               </div>
-              <CopyField value={minted.setup} label="Setup command" multiline />
+              <CopyField value={`sparkwing cloud connect --controller ${window.location.origin} --name ${minted.team} --token-stdin`} label="Setup command" multiline />
               <div className="text-xs text-[var(--muted)] mt-1">
                 Paste the token below when the command asks for it.
               </div>
@@ -295,14 +293,14 @@ function CLIAccess({
               <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1">
                 Token
               </div>
-              <CopyField value={minted.token} label="CLI token" />
+              <CopyField value={minted.capability} label="CLI token" />
             </div>
-            {cliTokenStartsRuns(minted.scopes) ? (
+            {cliTokenStartsRuns(minted.grants) ? (
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1">
                   2. Start a run from a checkout of a pushed commit
                 </div>
-                <CopyField value={minted.run} label="Run command" />
+                <CopyField value={`sparkwing pipeline trigger <pipeline> --profile ${minted.team}`} label="Run command" />
               </div>
             ) : null}
           </div>
@@ -325,15 +323,15 @@ function CLIAccess({
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-mono truncate">{t.prefix}</div>
                   <div className="text-xs text-[var(--muted)] truncate">
-                    {cliTokenStartsRuns(t.scopes) ? "starts runs" : "read-only"}
-                    {t.created_at
-                      ? ` · ${fmtDateTime(unixSecondsISO(t.created_at))}`
+                    {cliTokenStartsRuns(t.grants) ? "starts runs" : "read-only"}
+                    {t.issued_at
+                      ? ` · ${fmtDateTime(t.issued_at)}`
                       : ""}
                     {t.expires_at
-                      ? ` · expires ${fmtDateTime(unixSecondsISO(t.expires_at))}`
+                      ? ` · expires ${fmtDateTime(t.expires_at)}`
                       : ""}
                     {t.last_used_at
-                      ? ` · last used ${fmtDateTime(unixSecondsISO(t.last_used_at))}`
+                      ? ` · last used ${fmtDateTime(t.last_used_at)}`
                       : ""}
                   </div>
                 </div>
@@ -365,7 +363,7 @@ function ConnectForm({
   const [repos, setRepos] = useState("");
   const [minting, setMinting] = useState(false);
   const [minted, setMinted] = useState<
-    (MintedMachineToken & { repos: string[] }) | null
+    (MintedMachineToken & { name: string; repos: string[] }) | null
   >(null);
 
   const repoPatterns = parseRepoPatterns(repos);
@@ -377,7 +375,7 @@ function ConnectForm({
     setMinting(true);
     try {
       const out = await mintMachineToken(n, repoPatterns);
-      setMinted({ ...out, repos: repoPatterns });
+      setMinted({ ...out, name: n, repos: repoPatterns });
       setName("");
       setRepos("");
       await onMinted();
@@ -389,7 +387,7 @@ function ConnectForm({
   }
 
   const command = minted
-    ? runnerConnectCommand(minted, minted.name, minted.repos)
+    ? runnerConnectCommand(minted, minted.name, minted.repos, window.location.origin)
     : "";
 
   return (
@@ -449,19 +447,12 @@ function ConnectForm({
               Run on {minted.name}
             </div>
             <CopyField value={command} label="Connect command" multiline />
-            {minted.command ? null : (
-              <div className="text-xs text-[var(--muted)] mt-1">
-                Replace{" "}
-                <span className="font-mono">{controllerURLPlaceholder}</span>{" "}
-                with the URL this machine reaches the controller on.
-              </div>
-            )}
           </div>
           <div>
             <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1">
               Token
             </div>
-            <CopyField value={minted.token} label="Runner token" />
+            <CopyField value={minted.capability} label="Runner token" />
           </div>
         </div>
       ) : null}

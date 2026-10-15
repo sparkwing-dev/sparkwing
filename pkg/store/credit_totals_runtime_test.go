@@ -34,7 +34,7 @@ func TestStoreDataLedgerTotalsUseFinancialRows(t *testing.T) {
 func TestStoreDataLedgerTotalsExcludeUnstartedReservation(t *testing.T) {
 	s, demand, _ := meteredUnitFixture(t, true)
 	claim, _ := meteredUnitClaim(t, s, demand)
-	calculate := s.billing
+	calculate := capability.SettleBilling
 	calls := 0
 	s.billing = func(p capability.BillingProvenance, intervals []capability.BillableInterval) (capability.BillingSettlement, error) {
 		calls++

@@ -86,6 +86,7 @@ func (r *pipelineRun) host(h hostedRun) error {
 	r.stopSignals()
 	_, err := orchestrator.RunHostedCommand(context.WithoutCancel(r.ctx), opts, orchestrator.HostedEntry{
 		Command: r.entry, Dir: repoRoot, Env: h.env, SecretArgs: secretArgs,
+		Pipeline:         r.pipeline,
 		Engine:           nodeproto.EngineIdentity{Version: installedVersion()},
 		Runner:           nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 		PipelineRevision: h.source, BinarySource: r.source, Flags: extra,

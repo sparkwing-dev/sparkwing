@@ -204,20 +204,6 @@ func (s *Store) UploadForTeam(ctx context.Context, team Team, id string) (Upload
 	return u, nil
 }
 
-// SourceBoundToRun proves that one committed source was bound to this run.
-func (s *Store) SourceBoundToRun(ctx context.Context, team Team, key, runID string) (bool, error) {
-	if _, ok := SourceKeyDigest(key); !ok || runID == "" {
-		return false, nil
-	}
-	var found int
-	err := s.queryRow(ctx, `SELECT 1 FROM uploads WHERE team = ? AND key = ? AND run_id = ? AND committed_at > 0`,
-		string(NormalizeTeam(team)), key, runID).Scan(&found)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	return found == 1, err
-}
-
 // CommittedObject reports the digest and uploader only after the object was
 // copied to its immutable key and its storage transaction committed.
 func (s *Store) CommittedObject(ctx context.Context, team Team, key string) (Upload, error) {
@@ -235,76 +221,6 @@ func (s *Store) CommittedObject(ctx context.Context, team Team, key string) (Upl
 	}
 	u.Team, u.Kind, u.Key, u.CommittedAt = NormalizeTeam(team), StorageKind(kind), key, time.Unix(0, committed)
 	return u, nil
-}
-
-// CommittedObjectFor resolves one immutable object using the reader's build trust policy.
-func (s *Store) CommittedObjectFor(ctx context.Context, team Team, key string, cloud bool) (Upload, error) {
-	tenant, err := s.ForTeam(ctx, team)
-	if err != nil {
-		return Upload{}, err
-	}
-	trust, err := tenant.TrustLocalBuilds(ctx)
-	if err != nil {
-		return Upload{}, err
-	}
-	query := `SELECT store, size, sha256, principal, provenance, committed_at FROM data_objects WHERE team = ? AND key = ?`
-	if cloud && !trust {
-		query += ` AND provenance = 'cloud'`
-	}
-	query += ` ORDER BY CASE provenance WHEN 'cloud' THEN 0 ELSE 1 END LIMIT 1`
-	var u Upload
-	var kind string
-	var committed int64
-	err = s.queryRow(ctx, query, string(NormalizeTeam(team)), key).Scan(&kind, &u.Size, &u.SHA256, &u.Principal, &u.Provenance, &committed)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Upload{}, ErrNotFound
-	}
-	if err != nil {
-		return Upload{}, err
-	}
-	u.Team, u.Kind, u.Key, u.CommittedAt = NormalizeTeam(team), StorageKind(kind), key, time.Unix(0, committed)
-	return u, nil
-}
-
-// BinaryObject resolves an input hash to a content-addressed binary this team
-// committed for repo under the first of refs that holds one, newest first
-// within a ref. A reader that is not a claim token passes the empty repo and
-// the empty ref alone. Cloud readers see only cloud provenance unless trust for
-// local builds is on.
-func (s *Store) BinaryObject(ctx context.Context, team Team, input string, cloud bool, repo string, refs []string) (Upload, error) {
-	if len(input) != 17 || input[8] != '-' {
-		return Upload{}, ErrInvalidInput
-	}
-	for i, c := range input {
-		if i != 8 && (c < '0' || c > '9') && (c < 'a' || c > 'f') {
-			return Upload{}, ErrInvalidInput
-		}
-	}
-	tenant, err := s.ForTeam(ctx, team)
-	if err != nil {
-		return Upload{}, err
-	}
-	trust, err := tenant.TrustLocalBuilds(ctx)
-	if err != nil {
-		return Upload{}, err
-	}
-	query := `SELECT key FROM data_objects WHERE team = ? AND store = ? AND key LIKE ? AND repo = ? AND ref = ?`
-	if cloud && !trust {
-		query += ` AND provenance = 'cloud'`
-	}
-	query += ` ORDER BY committed_at DESC, key DESC LIMIT 1`
-	for _, ref := range refs {
-		var key string
-		err = s.queryRow(ctx, query, string(NormalizeTeam(team)), string(StorageCache), "bin/"+input+"/%", repo, ref).Scan(&key)
-		if errors.Is(err, sql.ErrNoRows) {
-			continue
-		}
-		if err != nil {
-			return Upload{}, err
-		}
-		return s.CommittedObjectFor(ctx, team, key, cloud)
-	}
-	return Upload{}, ErrNotFound
 }
 
 // safety: a repository's ref holds one binary per input, the first committed,

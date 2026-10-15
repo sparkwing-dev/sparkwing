@@ -75,32 +75,6 @@ func TestARetryCopiesWhatItsSourceRunAlreadySucceededAt(t *testing.T) {
 	}
 }
 
-func TestAnAutomaticRetryRunsOnlyItsCausesAndWhatTheyReach(t *testing.T) {
-	st := openStore(t)
-	sourceRun(t, st, map[string]string{"a": "success", "b": "failed", "c": "cancelled", "d": "failed", "rescue": "skipped"})
-	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-		{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "b", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "c", Needs: []string{"b"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "d", Needs: []string{"a"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "rescue", OnFailureOf: "b", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-	}}
-	f, res := rehydratedRun(t, st, &Rehydration{SourceRunID: sourceRunID, Causes: []string{"b"}}, doc)
-	slices.Sort(f.calls)
-	if !slices.Equal(f.calls, []string{"b", "c"}) {
-		t.Fatalf("ran %v, want the cause b and its dependent c", f.calls)
-	}
-	if got := skippedFromRetry(t, st); !slices.Equal(got, []string{"a", "d"}) {
-		t.Errorf("node_skipped_from_retry for %v, want a and d", got)
-	}
-	if d := res.Nodes["d"]; d.Outcome != sparkwing.Failed {
-		t.Errorf("d = %s, want its source failure copied: an automatic retry copies every node it does not name", d.Outcome)
-	}
-	if r := res.Nodes["rescue"]; r.Outcome != sparkwing.Skipped {
-		t.Errorf("rescue = %s, want skipped, as b succeeded on the retry", r.Outcome)
-	}
-}
-
 type outputGone struct{ *store.Store }
 
 func (outputGone) GetNodeOutput(context.Context, string, string) ([]byte, error) {
@@ -168,12 +142,12 @@ func TestARetryWithoutAnEvalProcessRunsAGeneratorAgain(t *testing.T) {
 	}
 }
 
-func TestAnAutomaticRetryRunsTheWaiterOfAGeneratorItRuns(t *testing.T) {
+func TestARetryRunsTheWaiterOfAFailedGenerator(t *testing.T) {
 	st := openStore(t)
 	sourceRun(t, st, map[string]string{"targets": "failed", "lint": "success", "summary": "cancelled"})
 	doc := fanOutDoc()
 	f := &fakeExec{bodies: map[string]Executor{"targets": generates(nodeproto.JobSpec{ID: "test-a", Needs: deps("targets"), Steps: []nodeproto.StepSpec{{ID: "body"}}})}}
-	res := scheduled(t, st, Config{Execute: f.run, Rehydrate: &Rehydration{SourceRunID: sourceRunID, Causes: []string{"targets"}}}, doc, nil)
+	res := scheduled(t, st, Config{Execute: f.run, Rehydrate: &Rehydration{SourceRunID: sourceRunID}}, doc, nil)
 	if res.Status != "success" || !f.ran("summary") || f.ran("lint") {
 		t.Fatalf("status %s ran %v: summary waits on the rerun generator's nodes, so it runs; lint copies", res.Status, f.calls)
 	}
