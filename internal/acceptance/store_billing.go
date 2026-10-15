@@ -46,7 +46,7 @@ func CheckStoreBillingBoundary(ctx context.Context, root, id string) (err error)
 		}
 	}
 	rate, free := int64(store.StorageBytesPerGB), int64(3)
-	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate, StorageFreeAllowanceBytes: &free}); err != nil {
+	if _, err := s.AsOperator().SetCreditSettings(ctx, store.CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate, StorageFreeAllowanceBytes: &free}); err != nil {
 		return err
 	}
 	operator := s.AsOperator()

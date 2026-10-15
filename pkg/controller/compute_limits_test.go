@@ -192,7 +192,7 @@ func TestComputeLimits_RefusesExplicitNullWithoutChangingGuards(t *testing.T) {
 func TestComputeLimits_ClaimRefusedByTheRunnerGuard(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
 		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
@@ -255,7 +255,7 @@ func TestComputeLimits_HeartbeatCancelsANodePastTheWallClockGuard(t *testing.T) 
 	}
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
 		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
@@ -365,7 +365,7 @@ func TestComputeLimits_RefusalStaysInsideTheRefusedPrincipal(t *testing.T) {
 	}
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
 		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
@@ -396,7 +396,7 @@ func TestComputeLimits_GlobalRunnerGuardRefusesAnUnownedClaim(t *testing.T) {
 	}
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
+	if _, err := teamTenant(t, f.store, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantPaid,
 		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}

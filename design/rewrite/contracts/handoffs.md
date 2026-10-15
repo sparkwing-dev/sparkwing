@@ -76,3 +76,17 @@ and command are in `../w1-session12-progress.md`.
 **DESIGN approved (lead): W8 cancellation classification (third finding in the pending-claim mechanism).** Invariant: classifying a stop reason never panics and never confuses a caller's cancellation cause with a denial. Recognise cancellation only with `errors.Is(err, context.Canceled)` / `errors.Is(err, context.DeadlineExceeded)` (ctx.Err's comparable sentinels); never compare against `context.Cause(ctx)` with `==`. Run's joining defer returns the caller's arbitrary cause unchanged. Test nested wraps and joins, independent denials, and comparable and non-comparable custom causes, including a property test. Three bugs in one mechanism means it is too clever: while fixing this, cut the pending-claim stop logic to the smallest form that satisfies the approved outcome representation, and report the line count before and after.
 
 **Lead decision for W3: "the W4 expansion-concurrency mismatch question" is settled by c3-protocol-notes.md line 66.** A generated job's concurrency membership must match the existing plan or job definition of that group on capacity, scope and on_limit; cost may differ; a mismatch refuses the expansion with `plan_invalid` naming the field path. The host supplies existing definitions through `ExistingConcurrency`. W3 implements this in the strict raw-bytes expansion validation (handoff "W3 expansion acceptance"). If a W4 membership test accepts a mismatch on capacity, scope or on_limit, W3 corrects that test as a minimal shared-file edit and lists it. No further lead input is needed.
+
+W1b continuation: shared `accountBillingAwardTx` now bypasses the calculator
+for unmetered awards, including checkpoint, final settlement and replay. W1's
+`accountUnitBillingTx` can remove its duplicate unmetered calculator override
+after the branches join. This checkout still lacks W1's `unit_billing.go` and
+metered issuance changes. The real lifecycle join remains open here.
+
+W1b also moved `CreditSettings`, `SetCreditSettings`,
+`SetOperatorCreditSettings`, `CreditRateTable` and `WarmCPUClassCores` from
+Store to Operator without aliases. W1's pending callers use `AsOperator()`.
+The raw Store `GrantCredits`, `ListCreditCharges` and `AppendEventOnce` wrappers
+are removed. Select a Tenant explicitly for their retained methods. Caller
+migrations in this checkout are complete. W1 lifecycle files changed only at
+two price-read callsites in `store.go`.

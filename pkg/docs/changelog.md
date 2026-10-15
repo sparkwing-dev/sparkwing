@@ -76,6 +76,7 @@ unlock.
 - **sdk:** describe lists each pipeline's declared secrets as `secrets`, which `sparkwing pipeline describe --secrets` prints
 
 ### Changed
+- **store (Breaking):** Move deployment credit settings to `Operator` and remove default-team grant, charge-history and event wrappers. Select a tenant before its accounting operations. Prices and policy limits are unchanged. See [migration guide](docs/migrations/_unreleased.md#credit-persistence-uses-explicit-handles).
 - **store + controller (Breaking):** Egress accounting sums tenant and replica counters. Delivered successful-response bytes are recorded at request completion, including partial transfers and reads without an in-memory meter. Alarm reload uses team totals. The raw `Store.RecordEgressUsage`, `Store.ListEgressUsage` and `Store.PruneEgressUsage` paths and periodic principal flush are removed. See the [migration guide](docs/migrations/_unreleased.md#egress-accounting-uses-tenant-and-replica-counters).
 - **store + controller:** [(Breaking)](docs/migrations/_unreleased.md#event-charges-use-tenant-handles-and-replica-identity) Event charges use tenant handles and additive replica accounting
   `Tenant.AppendEventCharged` replaces the raw Store writer. Events and pending uploads share storage capacity. Event, quota and usage writes commit together, and usage survives reopening.

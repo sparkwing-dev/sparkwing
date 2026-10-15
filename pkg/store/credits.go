@@ -365,19 +365,7 @@ func (req CreditGrantRequest) validate() error {
 	return nil
 }
 
-// GrantCredits adds credits to the default team's balance and returns the row
-// it holds for them. A grant that lifts that balance above zero clears the
-// team's exhaustion stamp, so a node cancelled for an empty balance is the
-// last one cancelled. A non-empty reference is idempotent: the row already
-// written under that kind and reference is returned instead of a second one.
-func (s *Store) GrantCredits(
-	ctx context.Context, kind string, amountMicro int64, reference, createdBy string,
-) (*CreditGrant, error) {
-	return grantCredits(ctx, s.defaultTenant().RecordCreditGrant, kind, amountMicro, reference, createdBy)
-}
-
-// GrantCredits adds credits to t's balance and returns the row it holds for
-// them. It reads the same as [Store.GrantCredits] otherwise.
+// GrantCredits writes a free grant or payment-linked reversal for this tenant.
 func (t *Tenant) GrantCredits(
 	ctx context.Context, kind string, amountMicro int64, reference, createdBy string,
 ) (*CreditGrant, error) {
@@ -669,7 +657,7 @@ func (s *Store) creditState(ctx context.Context, team Team, window time.Duration
 		out.BurnMicro = burn.Int64
 	}
 
-	settings, err := s.CreditSettings(ctx)
+	settings, err := s.AsOperator().CreditSettings(ctx)
 	if err != nil {
 		return out, err
 	}
@@ -758,82 +746,6 @@ type CreditSettingsUpdate struct {
 	MaxChargeSeconds          *int64
 	StorageRateMicroPerGBDay  *int64
 	StorageFreeAllowanceBytes *int64
-}
-
-// CreditSettings reads every setting together. A controller that set none of
-// them reads the defaults.
-func (s *Store) CreditSettings(ctx context.Context) (_ CreditSettings, err error) {
-	var out CreditSettings
-	tx, err := s.beginSnapshotReadTx(ctx)
-	if err != nil {
-		return out, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	out, err = creditSettingsTx(ctx, tx)
-	if err != nil {
-		return out, err
-	}
-	return out, tx.Commit()
-}
-
-// SetCreditSettings validates every value the update names and writes them in
-// one transaction, so a refused field leaves the ledger exactly as it was. It
-// answers the settings in force after the write. An update naming nothing is
-// refused, as is a rate outside one micro-credit to MaxCreditRateMicro, a
-// scalar rate beside a rate table, a negative grace period, and a charge cap
-// outside MinCreditMaxChargeSeconds to MaxCreditMaxChargeSeconds. Every
-// refusal is an ErrInvalidCreditSetting. Programmatic callers may update the
-// scalar after storing a table; operator surfaces use
-// [Store.SetOperatorCreditSettings] to keep the table authoritative.
-func (s *Store) SetCreditSettings(ctx context.Context, up CreditSettingsUpdate) (_ CreditSettings, err error) {
-	writes, err := creditSettingsWrites(up)
-	if err != nil {
-		return CreditSettings{}, err
-	}
-	tx, err := s.beginCreditSettingsTx(ctx)
-	if err != nil {
-		return CreditSettings{}, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	out, err := writeCreditSettingsTx(ctx, tx, writes)
-	if err != nil {
-		return CreditSettings{}, err
-	}
-	return out, tx.Commit()
-}
-
-// SetOperatorCreditSettings applies an operator's settings update and keeps a
-// stored rate table authoritative. A scalar rate may win before the first
-// table is stored; after that, the operator must update the table. The
-// authority check and every write share one serialized transaction.
-func (s *Store) SetOperatorCreditSettings(
-	ctx context.Context, up CreditSettingsUpdate,
-) (_ CreditSettings, err error) {
-	writes, err := creditSettingsWrites(up)
-	if err != nil {
-		return CreditSettings{}, err
-	}
-	tx, err := s.beginCreditSettingsTx(ctx)
-	if err != nil {
-		return CreditSettings{}, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	if up.RateMicroPerSecond != nil && up.RateTable == nil {
-		raw, err := creditSettingRawTx(ctx, tx, metaKeyCreditRateTable)
-		if err != nil {
-			return CreditSettings{}, err
-		}
-		if raw != "" {
-			return CreditSettings{}, fmt.Errorf(
-				"%w: rate_micro_per_second is the four-core entry of the rate table; write rate_table instead",
-				ErrInvalidCreditSetting)
-		}
-	}
-	out, err := writeCreditSettingsTx(ctx, tx, writes)
-	if err != nil {
-		return CreditSettings{}, err
-	}
-	return out, tx.Commit()
 }
 
 func creditSettingsWrites(up CreditSettingsUpdate) (map[string]string, error) {
@@ -987,12 +899,6 @@ func validWarmCPUClass(cores int64) error {
 	return nil
 }
 
-// WarmCPUClassCores returns the largest cpu class a warm runner pool serves. A
-// controller that set none serves [DefaultWarmCPUClassCores].
-func (s *Store) WarmCPUClassCores(ctx context.Context) (int64, error) {
-	return s.creditSetting(ctx, metaKeyWarmCPUClass, DefaultWarmCPUClassCores)
-}
-
 func validCreditGrace(secs int64) error {
 	if secs < 0 {
 		return fmt.Errorf("%w: the grace period must not be negative, got %d",
@@ -1126,12 +1032,6 @@ func clearTeamCreditExhaustedTx(ctx context.Context, tx *storeTx, team Team, now
 		  WHERE name = ? AND credit_exhausted_at != 0`,
 		nowNS, string(team))
 	return err
-}
-
-// ListCreditCharges returns the default team's charges newest first, at most
-// limit rows and never more than [CreditHistoryMaxLimit].
-func (s *Store) ListCreditCharges(ctx context.Context, limit int) (_ []CreditCharge, err error) {
-	return s.defaultTenant().ListCreditCharges(ctx, limit)
 }
 
 func creditLimit(limit int) int {
@@ -1937,15 +1837,7 @@ func (s *Store) SetTokenMetered(ctx context.Context, prefix string, metered bool
 	return nil
 }
 
-// AppendEventOnce writes an event on a default-team run unless the run or
-// node already carries one of that kind, which keeps a condition a poller
-// re-observes every half second to one row. It reports whether it wrote.
-func (s *Store) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (bool, error) {
-	return s.defaultTenant().AppendEventOnce(ctx, runID, nodeID, kind, payload)
-}
-
-// AppendEventOnce is [Store.AppendEventOnce] on one of t's runs. A run of
-// another team reads as [ErrNotFound].
+// AppendEventOnce writes a tenant run event unless that run or job already has its kind.
 func (t *Tenant) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (_ bool, err error) {
 	// safety: the common call finds the event already there, so the read comes
 	// before the transaction rather than inside one opened twice a second.

@@ -21,10 +21,6 @@ func FuzzPaymentRawPaidGrantsCannotFundTeam(f *testing.F) {
 		amount := (int64(cents)%CreditPurchaseMaxCents + 1) * MicroCreditsPerCent
 		grants := []func() error{
 			func() error {
-				_, err := s.GrantCredits(t.Context(), CreditGrantPaid, amount, reference, actor)
-				return err
-			},
-			func() error {
 				_, err := tenant.GrantCredits(t.Context(), CreditGrantPaid, amount, reference, actor)
 				return err
 			},

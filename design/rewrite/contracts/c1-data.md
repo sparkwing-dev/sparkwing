@@ -784,7 +784,7 @@ is removed. Verified failure and expiry events own those outcomes.
 settlement writes the checkout's paid timestamp and grant association.
 
 The raw `paid` grant path and `POST /api/v1/credits/grants` are removed.
-`Store.GrantCredits`, `Tenant.GrantCredits` and `Tenant.RecordCreditGrant`
+`Tenant.GrantCredits` and `Tenant.RecordCreditGrant`
 refuse caller-selected paid credit before opening a ledger transaction.
 The existing free grant and payment-linked reversal paths remain. Checkout
 settlement checks actionable fraud warnings in the same transaction as the
@@ -839,7 +839,9 @@ terminal effects expire seven days after delivery; undelivered effects remain du
 Credit grants, charges, checkouts, freezes, cards, refunds, Stripe evidence,
 storage usage, immutable billing awards and billable intervals never cascade
 from a run. Removing a run must not restore spent credit. Award snapshots survive
-capability pruning. Plan/eval compute has no minimum; job compute retains its
+capability pruning. Unmetered checkpoint and final settlement need no billing
+calculator and write no charge or spend row. They retain award closure and
+exact replay. Plan/eval compute has no minimum; job compute retains its
 60-second minimum; customer-runner waits produce no billable interval. Billing
 keys are configuration, so test-key and live-key deployments use the same schema.
 
@@ -943,6 +945,17 @@ unmetered awards need no calculator call. Generated store tests use a contract
 fake while C2's production calculator remains unimplemented. The retention proof
 also checks exact deployment totals across pruning and reopening, with storage
 seconds excluded. The unused `Store.RunFinished` pruning query is removed.
+`Operator.CreditSettings`, `Operator.CreditRateTable` and
+`Operator.WarmCPUClassCores` own deployment price and policy reads.
+`Operator.SetCreditSettings` preserves the existing programmatic update rules.
+`Operator.SetOperatorCreditSettings` preserves the operator rule that a stored
+rate table cannot be replaced by a scalar update. Validation, ledger locking,
+settings serialization and rollback stay in their existing transaction owners.
+The five raw Store methods are removed with every caller.
+`Store.GrantCredits`, `Store.ListCreditCharges` and `Store.AppendEventOnce` are
+also removed. Callers select a Tenant explicitly before grants, charge history
+or idempotent events. The tenant methods keep their existing behavior.
+
 `Tenant.CreditState` and `Tenant.ListCreditGrants` own these reads. Their raw
 Store twins are removed. Burn windows use the store clock.
 Balances use `Tenant.CreditBalanceMicro`. Its raw Store twin is removed.

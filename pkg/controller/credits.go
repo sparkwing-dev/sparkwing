@@ -278,7 +278,7 @@ func (s *Server) writeCreditState(w http.ResponseWriter, r *http.Request, tenant
 }
 
 func (s *Server) handleCreditsSettingsShow(w http.ResponseWriter, r *http.Request) {
-	settings, err := s.store.CreditSettings(r.Context())
+	settings, err := s.store.AsOperator().CreditSettings(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -292,7 +292,7 @@ func (s *Server) handleCreditsSettingsSet(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	settings, err := s.store.SetOperatorCreditSettings(r.Context(), body.update())
+	settings, err := s.store.AsOperator().SetOperatorCreditSettings(r.Context(), body.update())
 	if err != nil {
 		if errors.Is(err, store.ErrInvalidCreditSetting) {
 			writeError(w, http.StatusBadRequest, err)

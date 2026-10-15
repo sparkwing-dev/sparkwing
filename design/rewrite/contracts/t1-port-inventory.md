@@ -422,3 +422,13 @@ write-failure proofs in `egress_accounting_internal_test.go`. Timer-flush and
 closing-month backlog expectations retire with that implementation.
 The SQLite replica acceptance cell reads public egress totals after reopening.
 Native/platform cells remain unclaimed.
+
+The raw default-team `Store.GrantCredits`, `Store.ListCreditCharges` and
+`Store.AppendEventOnce` wrappers are retired. Remaining fixtures select the
+intended Tenant explicitly. The raw-paid-grant property now probes the retained
+tenant entry points. Deployment price and policy fixtures use Operator.
+Existing final-schema settings proofs retain defaults, validation, corruption,
+restart, atomic rollback and serialized table-update checks through that owner.
+`TestStoreDataUnmeteredSettlementNeedsNoCalculator` closes the shared settlement
+helper's dependency on a calculator for unmetered work. No native cell is newly
+marked complete by these caller migrations.

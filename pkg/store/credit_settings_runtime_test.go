@@ -42,7 +42,7 @@ func TestStoreDataCreditSettingsUseFinalSchemaAndSurviveRestart(t *testing.T) {
 	s := authorityStore(t)
 	s.clock = func() time.Time { return time.Unix(1000, 0).UTC() }
 	path := blobAccountingDiskStore(t, s)
-	initial, err := s.CreditSettings(t.Context())
+	initial, err := s.AsOperator().CreditSettings(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestStoreDataCreditSettingsUseFinalSchemaAndSurviveRestart(t *testing.T) {
 	}
 	table := CreditRateTable{{Cores: 8, MicroPerSecond: 40000}, {Cores: 4, MicroPerSecond: 20000}, {Cores: 2, MicroPerSecond: 10000}}
 	warm, grace, capSeconds, rent, free := int64(4), int64(0), int64(45), int64(123), int64(1<<30)
-	want, err := s.SetOperatorCreditSettings(t.Context(), CreditSettingsUpdate{
+	want, err := s.AsOperator().SetOperatorCreditSettings(t.Context(), CreditSettingsUpdate{
 		RateTable: &table, WarmCPUClassCores: &warm, GraceSeconds: &grace,
 		MaxChargeSeconds: &capSeconds, StorageRateMicroPerGBDay: &rent, StorageFreeAllowanceBytes: &free,
 	})
@@ -87,11 +87,11 @@ func TestStoreDataCreditSettingsUseFinalSchemaAndSurviveRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.db = blobAccountingDB(t, path)
-	got, err := s.CreditSettings(t.Context())
+	got, err := s.AsOperator().CreditSettings(t.Context())
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("reopened settings=%+v, want %+v: %v", got, want, err)
 	}
-	if got, err := s.WarmCPUClassCores(t.Context()); err != nil || got != warm {
+	if got, err := s.AsOperator().WarmCPUClassCores(t.Context()); err != nil || got != warm {
 		t.Fatalf("warm CPU class=%d, want %d: %v", got, warm, err)
 	}
 }
@@ -118,7 +118,7 @@ func TestStoreDataCreditSettingsCorruptionNeverChoosesAnotherPrice(t *testing.T)
 		t.Run(tc.key+"/"+tc.raw, func(t *testing.T) {
 			s := authorityStore(t)
 			rewriteSchemaExec(t, s.db, "INSERT INTO settings(key,value) VALUES (?,?)", tc.key, []byte(tc.raw))
-			if _, err := s.CreditSettings(t.Context()); !errors.Is(err, ErrInvalidCreditSetting) {
+			if _, err := s.AsOperator().CreditSettings(t.Context()); !errors.Is(err, ErrInvalidCreditSetting) {
 				t.Fatalf("corrupt setting read as defaults: %v", err)
 			}
 		})
@@ -127,17 +127,17 @@ func TestStoreDataCreditSettingsCorruptionNeverChoosesAnotherPrice(t *testing.T)
 
 func TestStoreDataCreditSettingsFailureRollsBackBatch(t *testing.T) {
 	s := authorityStore(t)
-	before, err := s.CreditSettings(t.Context())
+	before, err := s.AsOperator().CreditSettings(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_rate_table BEFORE INSERT ON settings WHEN NEW.key='credit_rate_table' BEGIN SELECT RAISE(ABORT,'rate table refused'); END`)
 	grace := int64(0)
 	table := CreditRateTable{{Cores: 4, MicroPerSecond: 20000}}
-	if _, err := s.SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table, GraceSeconds: &grace}); err == nil {
+	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table, GraceSeconds: &grace}); err == nil {
 		t.Fatal("rejected rate table committed")
 	}
-	got, err := s.CreditSettings(t.Context())
+	got, err := s.AsOperator().CreditSettings(t.Context())
 	if err != nil || !reflect.DeepEqual(got, before) {
 		t.Fatalf("failed batch changed settings=%+v: %v", got, err)
 	}
@@ -148,11 +148,11 @@ func TestStoreDataCreditSettingsCannotReplaceSealedValues(t *testing.T) {
 	s := authorityStore(t)
 	original := []byte(`20000`)
 	rewriteSchemaExec(t, s.db, "INSERT INTO settings(key,value,sealed) VALUES (?,?,1)", metaKeyCreditRateMicro, original)
-	if _, err := s.CreditSettings(t.Context()); !errors.Is(err, ErrInvalidCreditSetting) {
+	if _, err := s.AsOperator().CreditSettings(t.Context()); !errors.Is(err, ErrInvalidCreditSetting) {
 		t.Fatalf("sealed price read=%v", err)
 	}
 	rate, grace := int64(30000), int64(0)
-	if _, err := s.SetCreditSettings(t.Context(), CreditSettingsUpdate{RateMicroPerSecond: &rate, GraceSeconds: &grace}); err == nil {
+	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateMicroPerSecond: &rate, GraceSeconds: &grace}); err == nil {
 		t.Fatal("sealed setting was overwritten")
 	}
 	var raw []byte
@@ -173,12 +173,12 @@ func TestStoreDataCreditSettingsIndependentWritersPreserveRateAuthority(t *testi
 	results := make(chan error, 2)
 	go func() {
 		<-start
-		_, err := s.SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table})
+		_, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateTable: &table})
 		results <- err
 	}()
 	go func() {
 		<-start
-		_, err := other.SetOperatorCreditSettings(t.Context(), CreditSettingsUpdate{RateMicroPerSecond: &scalar})
+		_, err := other.AsOperator().SetOperatorCreditSettings(t.Context(), CreditSettingsUpdate{RateMicroPerSecond: &scalar})
 		results <- err
 	}()
 	close(start)
@@ -187,7 +187,7 @@ func TestStoreDataCreditSettingsIndependentWritersPreserveRateAuthority(t *testi
 			t.Fatal(err)
 		}
 	}
-	got, err := s.CreditSettings(t.Context())
+	got, err := s.AsOperator().CreditSettings(t.Context())
 	if err != nil || !got.RateTableSet || got.RateMicroPerSecond != 20000 {
 		t.Fatalf("concurrent settings=%+v: %v", got, err)
 	}

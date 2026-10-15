@@ -105,7 +105,7 @@ func checkMeteredDisruption(t *testing.T, unitIndex, elapsed, tariff uint8, atAw
 	rewriteSchemaExec(t, s.db, "DELETE FROM capabilities")
 	rewriteSchemaExec(t, s.db, "UPDATE teams SET card_fingerprint='replacement' WHERE name='a'")
 	newRate := price.MicroPerSecond + 10000
-	if _, err := s.SetCreditSettings(t.Context(), CreditSettingsUpdate{RateMicroPerSecond: &newRate}); err != nil {
+	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{RateMicroPerSecond: &newRate}); err != nil {
 		t.Fatal(err)
 	}
 	rollbackMeteredDisruption(t, s, lapse, calculate)

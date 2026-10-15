@@ -479,7 +479,11 @@ func TestSamplersFillTheOperationalSeries(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create node: %v", err)
 	}
-	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, 4_000_000, "trial", "admin"); err != nil {
+	billingTenant, err := st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := billingTenant.GrantCredits(ctx, store.CreditGrantFree, 4_000_000, "trial", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 
@@ -583,7 +587,11 @@ func TestSettleFinishedNodeClearsTheWindowForAnUnmeteredFinisher(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	if _, err := st.GrantCredits(ctx, store.CreditGrantPaid, 20_000_000, "invoice", "admin"); err != nil {
+	billingTenant, err := st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := billingTenant.GrantCredits(ctx, store.CreditGrantPaid, 20_000_000, "invoice", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	_, tok, err := st.CreateTokenWith(ctx, "pool", store.TokenKindRunner,

@@ -193,7 +193,7 @@ func warmPool(t *testing.T, st *store.Store, n int) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := st.CreditSettings(context.Background()); err != nil {
+			if _, err := st.AsOperator().CreditSettings(context.Background()); err != nil {
 				t.Error(err)
 			}
 		}()

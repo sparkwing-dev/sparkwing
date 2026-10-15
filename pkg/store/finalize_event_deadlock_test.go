@@ -42,7 +42,7 @@ func TestFinalizeClaimRoundSurvivesConcurrentRunEvents(t *testing.T) {
 			})
 			wg.Go(func() {
 				kind := fmt.Sprintf("credits_blocked_%d", round)
-				if _, err := st.AppendEventOnce(ctx, runID, nodeID, kind, []byte(`{}`)); err != nil {
+				if _, err := tenant(t, st, store.DefaultTeam).AppendEventOnce(ctx, runID, nodeID, kind, []byte(`{}`)); err != nil {
 					errs <- fmt.Errorf("round %d append event %s: %w", round, nodeID, err)
 				}
 			})

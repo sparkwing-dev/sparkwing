@@ -42,8 +42,8 @@ use their existing lease-holder identity and require no new configuration.
 
 ## Paid credit requires verified checkout settlement
 
-`POST /api/v1/credits/grants` is removed. `Store.GrantCredits`,
-`Tenant.GrantCredits` and `Tenant.RecordCreditGrant` refuse `paid` grants.
+`POST /api/v1/credits/grants` is removed. `Tenant.GrantCredits` and
+`Tenant.RecordCreditGrant` refuse `paid` grants.
 Free operator grants and payment-linked reversals keep their existing paths.
 
 Checkout integrations must supply C2's verified provider event to
@@ -824,3 +824,14 @@ the duplicate `free_slots.event_bytes` column. Rebuild the disposable store.
 `Store.ReleaseExpiredStorage` is removed. Final upload reservations expire
 through quota admission and leased blob maintenance. An expired upload ticket
 cannot commit, including a zero-byte ticket.
+
+## Credit persistence uses explicit handles
+
+Deployment billing settings now use `store.AsOperator()`. This includes
+`CreditSettings`, `SetCreditSettings`, `SetOperatorCreditSettings`,
+`CreditRateTable` and `WarmCPUClassCores`. Their raw Store methods are removed.
+The settings, validation and update rules are unchanged.
+
+`Store.GrantCredits`, `Store.ListCreditCharges` and `Store.AppendEventOnce` are
+removed. Select the intended team with `ForTeam` and call its Tenant method.
+Local callers that mean the default team must select `store.DefaultTeam`.

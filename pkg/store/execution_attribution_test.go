@@ -47,7 +47,7 @@ func TestTriggerOwnedAttemptRecordsClaimant(t *testing.T) {
 func TestMeteredTriggerOwnedAttemptRecordsCloudHost(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	if _, err := s.GrantCredits(ctx, store.CreditGrantFree, 1000*store.MicroCreditsPerCent, "", "operator"); err != nil {
+	if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, 1000*store.MicroCreditsPerCent, "", "operator"); err != nil {
 		t.Fatal(err)
 	}
 	_, token, err := s.CreateTokenWith(ctx, "agent:cloud-helper", store.TokenKindRunner,
@@ -169,7 +169,7 @@ func TestClaimedAttemptRecordsJobPodAndMeteredRunner(t *testing.T) {
 			s := storetest.Open(t)
 			ctx := context.Background()
 			if tc.metered {
-				if _, err := s.GrantCredits(ctx, store.CreditGrantFree, 1000*store.MicroCreditsPerCent, "", "operator"); err != nil {
+				if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(ctx, store.CreditGrantFree, 1000*store.MicroCreditsPerCent, "", "operator"); err != nil {
 					t.Fatal(err)
 				}
 			}

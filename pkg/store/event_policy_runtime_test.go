@@ -76,7 +76,7 @@ func TestStoreDataEventsConcurrentCapsAndKindValidation(t *testing.T) {
 func TestStoreDataEventsPreserveFundingAndFreeShare(t *testing.T) {
 	s, tenant, _, _ := resultFixture(t)
 	allowance := int64(1600)
-	if _, err := s.SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageFreeAllowanceBytes: &allowance}); err != nil {
+	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageFreeAllowanceBytes: &allowance}); err != nil {
 		t.Fatal(err)
 	}
 	appendBytes := func(size int) error {
@@ -116,7 +116,7 @@ func TestStoreDataEventsPricedStorageRequiresCreditWithOrWithoutQuota(t *testing
 			t.Fatal(err)
 		}
 		rate := int64(CloudStorageRateMicroPerGBDay)
-		if _, err := s.SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate}); err != nil {
+		if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate}); err != nil {
 			t.Fatal(err)
 		}
 		before := eventAccountingSnapshot(t, s)

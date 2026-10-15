@@ -15,7 +15,7 @@ import (
 
 func setFreeAllowance(t *testing.T, st *store.Store, bytes int64) {
 	t.Helper()
-	if _, err := st.SetCreditSettings(context.Background(), store.CreditSettingsUpdate{
+	if _, err := st.AsOperator().SetCreditSettings(context.Background(), store.CreditSettingsUpdate{
 		StorageFreeAllowanceBytes: &bytes,
 	}); err != nil {
 		t.Fatalf("set the free allowance: %v", err)

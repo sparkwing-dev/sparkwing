@@ -45,7 +45,7 @@ func TestStorageMaintenanceUsesFinalInventoryAndLeavesReplicaUsage(t *testing.T)
 		}
 	}
 	rate := int64(store.CloudStorageRateMicroPerGBDay)
-	if _, err := s.SetCreditSettings(t.Context(), store.CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate}); err != nil {
+	if _, err := s.AsOperator().SetCreditSettings(t.Context(), store.CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate}); err != nil {
 		t.Fatal(err)
 	}
 	pub, priv := licensetest.NewKey(t)

@@ -272,3 +272,45 @@ func TestStoreDataMeteredPauseCannotUndoRenewedCompute(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestStoreDataUnmeteredSettlementNeedsNoCalculator(t *testing.T) {
+	for _, unit := range []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
+		for _, start := range []capability.BillingStart{capability.BillingAtAward, capability.BillingAtStart} {
+			t.Run(string(unit)+"/"+string(start), func(t *testing.T) {
+				s, award := meteringFixture(t, unit, start)
+				award.RootMetered, award.Billing.Metered = false, false
+				reserveMetering(t, s, award)
+				want := capability.BillingSettlement{ReservationID: award.Billing.ReservationID}
+				unavailable := func(capability.BillingProvenance, []capability.BillableInterval) (capability.BillingSettlement, error) {
+					return capability.BillingSettlement{}, errors.New("unmetered settlement called calculator")
+				}
+				if err := s.inTx(t.Context(), func(tx *storeTx) error {
+					got, err := accountBillingAwardTx(t.Context(), tx, "a", want.ReservationID, s.now(), false, unavailable)
+					if err == nil && got != want {
+						t.Fatalf("checkpoint=%+v, want %+v", got, want)
+					}
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+				rewriteSchemaExec(t, s.db, "DELETE FROM capabilities")
+				for range 2 {
+					if err := s.inTx(t.Context(), func(tx *storeTx) error {
+						got, err := settleBillingAwardTx(t.Context(), tx, "a", want.ReservationID, s.now())
+						if err == nil && got != want {
+							t.Fatalf("settlement=%+v, want %+v", got, want)
+						}
+						return err
+					}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				rewriteSchemaCount(t, s.db, "billing_awards WHERE settled_at IS NOT NULL", 1)
+				rewriteSchemaCount(t, s.db, "credit_charges", 0)
+				rewriteSchemaCount(t, s.db, "billable_intervals", 0)
+				rewriteSchemaCount(t, s.db, "team_spend_days", 0)
+				rewriteSchemaCount(t, s.db, "card_spend_days", 0)
+			})
+		}
+	}
+}

@@ -2694,11 +2694,11 @@ func (s *Store) warmClassFilter(ctx context.Context, claimant ClaimIdentity) (wa
 	if err != nil || !metered {
 		return warmClassFilter{}, err
 	}
-	table, err := s.CreditRateTable(ctx)
+	table, err := s.AsOperator().CreditRateTable(ctx)
 	if err != nil {
 		return warmClassFilter{}, err
 	}
-	cores, err := s.WarmCPUClassCores(ctx)
+	cores, err := s.AsOperator().WarmCPUClassCores(ctx)
 	if err != nil {
 		return warmClassFilter{}, err
 	}

@@ -18,7 +18,7 @@ func retainedBillingFixture(t *testing.T) (*Store, SingletonLease, *time.Time) {
 		t.Fatal(err)
 	}
 	rate := int64(CloudStorageRateMicroPerGBDay)
-	if _, err := s.SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate}); err != nil {
+	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate}); err != nil {
 		t.Fatal(err)
 	}
 	return s, lease, &now
@@ -42,7 +42,7 @@ func TestStoreDataRetainedStoragePricesUniqueBytesAndTenantAllowance(t *testing.
 	s, lease, now := retainedBillingFixture(t)
 	const gb = int64(StorageBytesPerGB)
 	free := gb
-	if _, err := s.SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageFreeAllowanceBytes: &free}); err != nil {
+	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageFreeAllowanceBytes: &free}); err != nil {
 		t.Fatal(err)
 	}
 	retainedBlob(t, s, "a", "a", 3*gb, now.Add(-time.Hour))
@@ -187,7 +187,7 @@ func TestStoreDataRetainedStorageLogsAndBlobsShareOneFreeAllowance(t *testing.T)
 		t.Fatal(err)
 	}
 	rate, free := int64(StorageBytesPerGB), int64(StorageBytesPerGB/2)
-	if _, err := s.SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate, StorageFreeAllowanceBytes: &free}); err != nil {
+	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate, StorageFreeAllowanceBytes: &free}); err != nil {
 		t.Fatal(err)
 	}
 	commit := logCommit(actor, attempt)
@@ -241,13 +241,13 @@ func TestStoreDataRetainedStorageDisabledPriceAndClockRegression(t *testing.T) {
 	s, lease, now := retainedBillingFixture(t)
 	retainedBlob(t, s, "a", "a", StorageBytesPerGB, *now)
 	zero := int64(0)
-	if _, err := s.SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &zero}); err != nil {
+	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &zero}); err != nil {
 		t.Fatal(err)
 	}
 	retainedBill(t, s, lease)
 	rewriteSchemaCount(t, s.db, "team_storage", 0)
 	rate := int64(CloudStorageRateMicroPerGBDay)
-	if _, err := s.SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate}); err != nil {
+	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate}); err != nil {
 		t.Fatal(err)
 	}
 	retainedBill(t, s, lease)
@@ -259,12 +259,12 @@ func TestStoreDataRetainedStorageDisabledPriceAndClockRegression(t *testing.T) {
 	if billed := retainedBill(t, s, lease); billed.ChargedMicro != rate {
 		t.Fatalf("clock recovery=%+v", billed)
 	}
-	if _, err := s.SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &zero}); err != nil {
+	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &zero}); err != nil {
 		t.Fatal(err)
 	}
 	retainedBill(t, s, lease)
 	*now = now.Add(24 * time.Hour)
-	if _, err := s.SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate}); err != nil {
+	if _, err := s.AsOperator().SetCreditSettings(t.Context(), CreditSettingsUpdate{StorageRateMicroPerGBDay: &rate}); err != nil {
 		t.Fatal(err)
 	}
 	if billed := retainedBill(t, s, lease); len(billed.Charges) != 0 {

@@ -60,8 +60,8 @@ financial storage usage counters survive deletion and remain separate.
 Final upload expiry uses quota admission and leased blob maintenance. Empty
 uploads reserve object capacity too, and expired tickets cannot commit.
 
-The raw paid-credit grant path is removed. `Store.GrantCredits`,
-`Tenant.GrantCredits` and `Tenant.RecordCreditGrant` accept no `paid` kind.
+The raw paid-credit grant path is removed. `Tenant.GrantCredits` and
+`Tenant.RecordCreditGrant` accept no `paid` kind.
 Paid checkout credit uses `Store.SettlePayment`, which derives the team and
 amount from the committed checkout. Actionable fraud warnings refuse that
 transaction before a grant or event receipt commits. C2's verified-event
@@ -104,7 +104,15 @@ Open intervals stop at `charged_through` in reports. Closed intervals use their
 persisted finish time. This keeps a late disruption from refunding time that a
 report counted only because the reaper had not run yet.
 Grant requests use `Tenant.RecordCreditGrant`. Its raw Store twin is removed.
-Rate-table writes use `SetCreditSettings` with `CreditSettingsUpdate.RateTable`.
+Deployment price and policy reads use `Operator.CreditSettings`,
+`Operator.CreditRateTable` and `Operator.WarmCPUClassCores`.
+Rate-table writes use `Operator.SetCreditSettings` with `CreditSettingsUpdate.RateTable`.
+The operator-facing setter is `Operator.SetOperatorCreditSettings`, which
+preserves a stored table against a scalar override. The raw Store methods are
+removed. The transaction owners, defaults, validation and prices are unchanged.
+`Store.GrantCredits`, `Store.ListCreditCharges` and `Store.AppendEventOnce` are
+removed too. Each caller must select a Tenant for its grants, charge history
+and idempotent events.
 The separate `SetCreditRateTable` wrapper is removed.
 `recordBillingAwardTx` stores immutable provenance and a reservation charge. The
 charge snapshots the CPU class, rate and card fingerprint. Its caller must pass
@@ -120,8 +128,11 @@ the reservation and use separate interval keys.
 
 `chargeBillingAwardTx` charges new elapsed compute during renewal without
 closing the interval. `settleBillingAwardTx` closes open intervals and settles
-once. A reaper passes the persisted lease lapse. Both call C2's `SettleBilling`
-for per-unit minimums and elapsed seconds. Settlement reads the award and ledger,
+once. A reaper passes the persisted lease lapse. Metered settlement calls C2's `SettleBilling`
+for per-unit minimums and elapsed seconds. Unmetered checkpoint and final
+settlement return zero cost without invoking a calculator or writing a charge.
+Final settlement still closes the immutable award, and exact replay returns
+that zero result after claimant pruning. Settlement reads the award and ledger,
 so deleting a run or revoking its claimant cannot change its payer or rate.
 Refunds retain the reservation's card and spend day. Callers keep renewal,
 transition and accounting in one transaction. They apply the existing spend

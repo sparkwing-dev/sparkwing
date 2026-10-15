@@ -64,7 +64,7 @@ func TestANewTeamStopsAtItsDailyCap(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := storetest.Open(t)
 			claimant, _ := fundedMeteredNode(t, s, "run-cap")
-			if _, err := s.GrantCredits(context.Background(), store.CreditGrantPaid, dollarsMicro(30), "pay_more", "admin"); err != nil {
+			if _, err := tenant(t, s, store.DefaultTeam).GrantCredits(context.Background(), store.CreditGrantPaid, dollarsMicro(30), "pay_more", "admin"); err != nil {
 				t.Fatal(err)
 			}
 			spentOn(t, s, "default", tc.day, store.NewDailyCapCents)

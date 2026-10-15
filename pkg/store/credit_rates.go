@@ -235,15 +235,6 @@ func DefaultCreditRateTable(rate int64) CreditRateTable {
 	return out
 }
 
-// CreditRateTable returns the price of a cloud runner second at every cpu
-// class. An installation that never set a table reads
-// [DefaultCreditRateTable], whose four-core class is
-// credit_rate_micro_per_second.
-func (s *Store) CreditRateTable(ctx context.Context) (CreditRateTable, error) {
-	settings, err := s.CreditSettings(ctx)
-	return settings.RateTable, err
-}
-
 func creditRateTableTx(ctx context.Context, tx *storeTx) (CreditRateTable, error) {
 	rate, err := creditSettingTx(ctx, tx, metaKeyCreditRateMicro, DefaultCreditRateMicro)
 	if err != nil {

@@ -1,162 +1,172 @@
 # W1b handoff
 
-Continues session 7 at HEAD 201145e74. W1b remains incomplete. The lead owns
-commits, independent review, pipelines and native integration.
+Continues b0cc55c27. W1b remains incomplete. The lead owns commits,
+independent review, pipelines and native integration.
 
-## This continuation
+## Implemented and deleted
 
-The first two lead handoffs remain complete. The full generated
-TestBlobRecordsMutationCannotOutliveAuthority test passes. The retired output
-catalog entries remain absent. W1 lifecycle implementation files were not edited.
+Eight raw Store methods are gone. Deployment billing settings now belong to
+Operator: CreditSettings, SetCreditSettings, SetOperatorCreditSettings,
+CreditRateTable and WarmCPUClassCores. Their existing transaction owners,
+validation, defaults and update rules are unchanged. The implementation lives
+in operator_credit_settings.go. There are no forwarding methods.
 
-The third lead handoff advances by retiring principal egress persistence.
-Store.RecordEgressUsage, Store.ListEgressUsage and Store.PruneEgressUsage are gone.
-Tenant.AddUsage writes additive egress bytes with trusted replica identity.
-Tenant.EgressUsage reports one team's UTC day or month across replicas.
-Operator.EgressUsageAcrossTeams supplies team aggregates for alarm reload.
-Operator.PruneEgressUsage uses the maintenance lease and store clock to preserve
-thirteen months. No schema change was required.
+Store.GrantCredits, Store.ListCreditCharges and Store.AppendEventOnce are
+removed. Their retained Tenant methods require callers to select a team
+explicitly. Every Go caller is migrated. The paid-grant refusal property now
+probes the retained tenant APIs. Its deleted callback named a removed method.
 
-Invariant: delivered bytes add once to the authenticated tenant, and one replica
-cannot replace another replica's usage. Generated SQLite tests vary hostile
-replica identities and byte counts through independent clients. They check
-foreign-team isolation and public day/month totals. The initial regression failed
-because the replacement tenant and operator APIs did not exist.
+The shared billing helper no longer calls C2's calculator for unmetered awards.
+Invariant: unmetered provenance produces zero cost without consulting a price
+calculator or writing a financial row. Checkpoint, final settlement and replay
+retain the reservation identity. Final settlement closes the award. Claimant
+pruning cannot change the result. Metered computation still uses C2.
 
-The controller records delivered successful-response bytes at request completion.
-Its existing lease-holder identity supplies the replica. Request query fields
-cannot select either team or replica. HEAD and error bodies add nothing. A short
-write counts only bytes actually delivered. Cancelled request contexts cannot
-cancel the accounting write. The optional process meter still owns concurrency
-and alarms. Durable usage also works without that meter. Logs remain exempt from
-download caps while consuming egress bytes. A failed accounting write logs an
-error. A process exit before request completion can lose that request's sample.
-This limitation is documented in the contract and migration guide.
+The new regression failed in all eight unit/start combinations before the
+change. It now exercises trigger, plan, eval and job under at_award and at_start,
+including checkpoints, final settlement and replay through the production helper.
+It asserts no charge, billable interval, team spend or card spend. The calculator
+fake fails if invoked. Final settlement uses the real wrapper whose C2 default
+is still a panic stub, so that path also proves the bypass.
 
-The store rejects malformed reporting periods, negative persisted counters and
-overflow. Counter overflow leaves the existing row unchanged. Pruning refuses a
-stale maintenance fence. Reports and expiration survive reopening. Account
-deletion leaves egress rows intact because they contain no user identity.
+Production Go changes remove 132 existing lines and add 97, including the new
+operator file, for a net reduction of 35 lines. Five methods moved and three
+wrappers retired. No storage table, setting, price, policy limit, environment
+variable, service or queue changed. No legacy module is claimed fully retired.
 
-Startup alarm reload preserves both day and month totals beyond the process
-meter's principal cardinality. The real 10,002-team controller regression first
-returned month=10,001. The loader now supplies the summed month through the
-meter's existing aggregate restoration field. The regression passes.
-
-Deleted 139 legacy store implementation lines: all 125 lines of egress.go and the
-14-line obsolete account-relabel block. Deleted 312 old test lines: 117 in the
-store and 195 in the controller. Across all non-test Go changes, 167 lines were
-added and 243 removed, a net reduction of 76 lines.
-
-## Ports and acceptance
-
-Ported the three store egress tests to final-schema replica conservation,
-round-trip, ordering, invalid inputs, overflow and leased expiration proofs.
-The controller's obsolete flush/backlog/retry expectations retire with its timer.
-Replacement checks prove actual delivery, authenticated attribution, nil-meter
-persistence, partial writes, cancelled contexts, loud failures and alarm reload.
-The internal egress writer has a direct delivered-byte test with and without a
-meter. Its existing stream-control implementation remains shared.
-
-storage-replica-safe-accounting/store-data-sqlite now reads real public egress
-day/month totals after reopening. All 12 existing SQLite storage/billing proofs
-pass. No native cell or archived T1 source row is newly marked complete.
-
-## Verification
+## Verification and acceptance
 
 Go commands use GOWORK=off, GOFLAGS=-buildvcs=false, GOMAXPROCS=4 and -p 4.
-GOCACHE, GOTMPDIR and TMPDIR are under /tmp/sw-astra-W1b/.
+GOCACHE, GOTMPDIR and TMPDIR are beneath /tmp/sw-astra-W1b/.
 
-- Whole-repository go build -p 4 ./... passed.
-- Scoped go vet passed for store, controller, egress and both acceptance trees.
-- The inherited store-data selection passed 175 top-level tests / 578 cases.
-  The additional corruption/overflow test passed separately, totaling 176 tests
-  and 579 cases. The three egress tests also passed together after formatting.
-- Five focused controller tests passed, including the four egress proofs and the
-  tenant event proof. All internal/egress tests passed except two socket tests
-  excluded because this sandbox cannot create a listener.
-- TestStorage and TestBilling passed 43 cases, including all 12 SQLite proofs.
-  The 562 platform/native skeleton skips remain unclaimed.
+- Whole-repository go build -p 4 ./... passes.
+- Scoped go vet passes for store, controller and both acceptance trees.
+- The inherited store-data selection plus the existing grant/reversal checks
+  passes 182 top-level tests / 585 cases without skips.
+- The affected billing selection passes 10 top-level tests / 130 cases after
+  the helper change, including the one new top-level test / nine cases.
+  The union is 183 top-level tests / 594 cases.
+- The raw paid-grant fuzz property's three seed cases pass after deleting its
+  removed-API callback.
+- Both store and controller test packages compile with -run '^$'.
+- The five existing controller egress/event regressions pass.
+- TestStorage and TestBilling pass 43 cases, including all 12 existing SQLite
+  storage/billing proofs. No new native cell is unskipped. The selection retains
+  563 native/platform skips, which are not claimed as evidence.
 - commentcheck -base main, sleepcheck -base HEAD, gofmt, git diff --check,
-  sync-docs.sh --check and check-changelog.sh passed.
-- The regenerated store API snapshot matches. Full directory comparison still
-  finds inherited .apidiff/pkg_runner.txt for a package no longer generated.
+  sync-docs.sh --check and check-changelog.sh pass.
+- The regenerated store API snapshot matches. Full snapshot comparison still
+  finds the inherited pkg_runner.txt snapshot for a removed package.
 
-The store selection is
-^(TestBlob|TestLogPersistence|TestLogPublication|TestLogMaintenance|TestStoreData|TestRetainedStorage|TestPaymentSettlement|TestMeteredAccounting|TestTenantSQLScope|TestTenantWriters|TestTenantTwins).
-The controller selection is
-^(TestControllerEgress.*|TestControllerEventsUseTenantAndReplica)$.
-Internal egress uses -skip
-^(TestServeKeepsTheStreamControlsAHandlerAsksFor|TestServeForwardsHijack)$.
-Acceptance uses ^(TestStorage|TestBilling)$ on both acceptance trees.
+Store selection:
+^(TestBlob|TestLogPersistence|TestLogPublication|TestLogMaintenance|TestStoreData|TestRetainedStorage|TestPaymentSettlement|TestMeteredAccounting|TestTenantSQLScope|TestTenantWriters|TestTenantTwins|TestGrantCredits|TestCreditGrantRequest|TestCreditsBalance|TestCreditReversal)
 
-An earlier broader component regex reached TestHandleClaimNode_NamesAPollIntervalWhileIdle
-and TestHandleClaimTrigger_WithholdsAdviceRightAfterAnAward. Their old fixtures
-fail on missing sparkwing_meta or triggers.pipeline. Controller's
-TestHeadRequestsChargeNothingAndHoldNoSlot and
-TestConcurrentDownloadsAreCappedPerPrincipal fail on the removed tokens table.
-The internal egress stream-control test panics when httptest cannot bind a socket.
-These failures remain reported. No full-store, full-controller, PostgreSQL,
-physical-backend, provider or native-platform pass is claimed. The minimally
-migrated deletion fixtures still depend on the unrelated legacy identity APIs.
+Post-change billing selection: ^(TestStoreDataMetered|TestStoreDataUnmetered).
+Controller selection: ^(TestControllerEgress.*|TestControllerEventsUseTenantAndReplica)$.
+Acceptance selection: ^(TestStorage|TestBilling)$ on both acceptance packages.
 
-## Remaining assignments and real integration
+No new archived T1 source row is claimed complete. Existing final-schema settings
+ports now run through Operator. They preserve defaults, validation, corruption
+refusal, restart, failed-batch rollback and serialized table authority.
+
+No full legacy store/controller suite, PostgreSQL, race, provider, physical
+backend or native-placement pass is claimed. The predecessor's old-schema
+fixture failures were not rerun or waived as passes.
+
+## Assignments and real integration
+
+The approved record-mutation owner and the two retired output catalog entries
+remain complete. The lead's legacy-cutover priority is still in progress.
 
 - A1-24 remains implemented at the store boundary. W2's real DataAuthority and
   BindData adapters remain open.
-- A1-27 still needs W1's parallel lifecycle join merged. This checkout's
-  authority_issue.go still refuses metered roots. unit_billing.go is absent.
-  W1's session-18 report contains the issuance/start/renewal/finish/reap join.
-  C2 SettleBilling remains a panic stub. W1b's calculators remain tested through
-  contract fakes. Spend/grace enforcement and the old claim-credit cut remain.
-  W3 must report owner compute so customer-runner waits stay excluded.
+- A1-27: W1's session-18 lifecycle join is implemented on its parallel worktree,
+  but absent here. This branch still refuses metered issuance in authority_issue.go
+  and has no unit_billing.go. W1 files were not copied or reimplemented. The
+  shared unmetered settlement fix is ready for that join. W1 can then delete its
+  duplicate unmetered-calculator override. C2 SettleBilling remains a panic stub.
+  W3 still must report owner compute to exclude customer-runner waits. The
+  legacy claim-credit cut and spend/grace enforcement remain W1b work.
 - A1-28's committed-checkout settlement and raw paid-grant refusal remain done.
-  W2 still owns provider verification and the HTTP adapter. VerifiedPaymentEvent
-  remains a stub. Card billing retains its payment-linked settlement contract.
-- A1-29 through A1-35 remain implemented behind the store contracts: tagged
-  uploads and receipts, provenance, records and members, memo/depcache, read-set
-  authorization, tombstones and logs. W7 RecordNamespace and AuthorizeEdge remain
-  panic stubs. Physical verification/deletion, manifest-reader setup, GC,
-  signed transfers, binary policy and proxy egress remain real integration work.
-  Allowance-driven physical eviction stays open.
-- The principal event and egress cuts are complete. Legacy raw storage
+  W2 still owns provider verification, VerifiedPaymentEvent and the HTTP adapter.
+- A1-29 through A1-35 retain the implemented store contracts for tagged uploads,
+  receipts, provenance, records/members, memo/depcache, read sets, tombstones and
+  tagged logs. W7 RecordNamespace and AuthorizeEdge remain panic stubs here.
+  Physical verification/deletion, manifest-reader setup, GC, signed transfers,
+  binary execution policy and proxy egress remain real integration points.
+  Allowance-driven physical eviction remains open.
+- Principal event and egress cuts remain complete. Legacy raw storage
   reservations, output objects, direct uploads, claim-credit and node-log
-  transports still need consumer cuts. The cache-grant source/artifact/binary
-  download adapter, capability event transport, materialization and imported
-  owner-log identity remain open.
+  transports still need consumer cuts. Capability data/event transport,
+  materialization and imported owner-log identity remain open.
 - A1-53 remains with the lead and integrating areas for PostgreSQL, provider,
   physical-backend and native-placement evidence.
 
-No new foreign contract change or unresolved product decision is raised. The
-first two lead entries are done. The third is still in progress.
+No new foreign contract change or product decision is requested. The local C1
+contract records the Operator/tenant hard cut and unmetered settlement behavior.
 
-## Shared files and assumptions
+## Shared files
 
-Shared production caller migrations: pkg/controller/egress.go, server.go and
-storage.go, plus internal/egress/egress.go. The egress Handle method returns actual
-delivered bytes through its existing writer, preserving flush/hijack controls.
-Shared acceptance change: internal/acceptance/store_data.go.
-Shared controller test: egress_accounting_internal_test.go replaces the retired
-egress_internal_test.go.
+The only shared production caller changes are pkg/controller/credits.go and
+internal/acceptance/store_billing.go. The controller selects Operator for its
+already-authorized deployment-settings handlers. The acceptance fixture selects
+Operator for storage pricing. W1-owned store.go changes only two callsites in
+warmClassFilter, adding AsOperator() to the existing rate and class reads.
+No admission, claim, transition, reconciliation or reaping behavior changed.
 
-Minimal W1 file edits: deletion.go removes only the obsolete egress relabel SQL.
-deletion_review_test.go migrates only egress columns and assertions.
-tenant_sql_scope_guard_test.go replaces the retired egress exemptions with the
-named operator read and leased prune. No admission, claim, transition,
-reconciliation or reaping code changed.
+Shared Go caller and fixture files:
+- internal/acceptance/store_billing.go
+- pkg/controller/compute_limits_test.go
+- pkg/controller/credits.go
+- pkg/controller/credits_test.go
+- pkg/controller/direct_source_test.go
+- pkg/controller/metering_license_test.go
+- pkg/controller/node_claim_named_test.go
+- pkg/controller/prom_internal_test.go
+- pkg/controller/storage_allowance_test.go
+- pkg/controller/storage_inventory_internal_test.go
 
-Shared docs: contracts/c1-data.md, contracts/t1-port-inventory.md, CHANGELOG.md,
-docs/limits.md, docs/migrations/_unreleased.md, .apidiff/pkg_store.txt and generated
-copies under pkg/docs. STORE-DATA.md records the persistence owner.
+Store test callers changed only to name the retained API owner, except the
+new billing regression and the deleted paid-grant callback described above:
+- pkg/store/backup_restore_drill_test.go
+- pkg/store/card_billing_test.go
+- pkg/store/claim_attention_test.go
+- pkg/store/claim_team_boundary_test.go
+- pkg/store/compute_limits_test.go
+- pkg/store/credit_billing_start_test.go
+- pkg/store/credit_rates_test.go
+- pkg/store/credit_settings_runtime_test.go
+- pkg/store/credits_per_team_test.go
+- pkg/store/credits_test.go
+- pkg/store/event_policy_runtime_test.go
+- pkg/store/execution_attribution_test.go
+- pkg/store/execution_start_contention_test.go
+- pkg/store/finalize_event_deadlock_test.go
+- pkg/store/free_tier_test.go
+- pkg/store/metered_disruption_test.go
+- pkg/store/node_claim_named_test.go
+- pkg/store/payment_authority_test.go
+- pkg/store/queue_state_counts_test.go
+- pkg/store/retained_storage_billing_test.go
+- pkg/store/storage_credits_test.go
+- pkg/store/team_storage_test.go
+- pkg/store/terminal_parent_claim_test.go
+- pkg/store/terminal_parent_race_test.go
+- pkg/store/trigger_claim_credits_test.go
 
-Mechanisms added: tenant and operator egress reports replace the deleted raw
-surface using the existing replica table and AddUsage writer. Request completion
-replaces the controller's periodic principal flush. The existing maintenance
-lease owns expiration. The old high-water API could not represent summed replica
-usage or write the final schema. Undo would restore those APIs and their callers.
-No new table, setting, environment variable, cap, timeout, queue or service exists.
+Shared prose and generated files: contracts/c1-data.md, handoffs.md,
+t1-port-inventory.md, CHANGELOG.md, docs/migrations/_unreleased.md,
+.apidiff/pkg_store.txt, pkg/docs/changelog.md and its migration mirror.
+STORE-DATA.md records the persistence behavior.
 
-The lead still needs independent review. No Git write, Sparkwing binary,
-candidate, pipeline, service, deployment, release or harness-memory write ran.
-HEAD remains 201145e74. The shared Git config has no local user identity or
-core.worktree override. Scratch is deleted after the final checks.
+## Friction and cleanup
+
+The W1 join is not merged into this branch, and C2/W7 production seams are still
+stubs. Contract fakes continue to exercise metered persistence without treating
+those dependencies as implementation. The stale runner snapshot prevents a
+clean whole-directory API comparison. Native/socket/provider checks remain
+with the lead. No new operational blocker or product question is raised.
+
+The shared Git config has no local user identity or core.worktree override.
+No Git write, Sparkwing binary, candidate, pipeline, service, deployment,
+release or harness-memory write ran. Scratch is deleted after the final checks.
