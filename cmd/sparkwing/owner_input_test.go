@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"testing"
 	"testing/quick"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
 )
 
 func TestOwnerAwardMismatchCannotReachBindingProperty(t *testing.T) {
@@ -73,5 +75,43 @@ func TestOwnerAwardMismatchCannotReachBindingProperty(t *testing.T) {
 	}
 	if err := quick.Check(property, &quick.Config{MaxCount: 256}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestOwnerInputMatchesPersistedTriggerFence(t *testing.T) {
+	award := localTestAward(t)
+	state, err := teststore.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := state.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	request, err := json.Marshal(award.Request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO teams(name,created_at,updated_at) VALUES ('team',1,1)`, nil},
+		{`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,allowed_pools,created_principal,created_at,log_retention_class,log_retention_days) VALUES ('team',?,1,'ci','running',?,?,1,?,'host','execute',?,'account',1,'r30',30)`, []any{award.RunID, request, string(award.Request.Hash), string(award.Request.Request.Git.Repository.Key), []byte(`[]`)}},
+		{`INSERT INTO triggers(team,id,unit_kind,status,claimed_by,generation,available_at,created_at,needs_labels,prefers_labels) VALUES ('team',?,'trigger','claimed',?,?,1,1,?,?)`, []any{award.RunID, award.Binding.Holder, award.Binding.Generation, []byte(`[]`), []byte(`[]`)}},
+	} {
+		if _, err := state.DB().ExecContext(t.Context(), statement.query, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tenant := teststore.ForTeam(t, state, "team")
+	snapshot, err := tenant.ReadSnapshot(t.Context(), award.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, err := localRunInput(award.RunID, award.Request.Hash, award)
+	if err != nil || snapshot.Run.Owner == nil || input.Owner.Owner != *snapshot.Run.Owner {
+		t.Fatalf("projected owner=%+v persisted owner=%+v error=%v", input.Owner.Owner, snapshot.Run.Owner, err)
 	}
 }

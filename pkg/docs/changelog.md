@@ -22,6 +22,7 @@ unlock.
 
 ### Fixed
 
+- **owner hosting:** Local, standalone and here sessions derive their owner fence from the award, preserve authority-cancellation causes, and share resource cleanup.
 - **owner hosting:** Pass the sealed request body expected by the shared host. Local and runner retries retain the original seal while using the newly awarded execution run ID.
 - **local and here hosting:** Apply awarded authority deadlines before host binding and retain the granted runner labels when a binder changes its copy.
 - **pipeline trigger:** Select Go or TypeScript from the selected pipeline commit's manifest before engine resolution. Working-tree changes and a different execution commit cannot select another SDK.

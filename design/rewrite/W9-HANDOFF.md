@@ -1,5 +1,104 @@
 # W9 handoff
 
+## Continuation from 771a21140
+
+This section supersedes conflicting status below. W9 remains incomplete because
+native controller construction, private execution-state transport and placement
+acceptance remain open. The worktree started clean. The lead owns commits,
+pipelines and native QA.
+
+### Implementation and deletion
+
+- Invariant: host binding cannot replace the award's owner kind, run, holder or
+  generation. The shared owner projection now constructs that trigger fence.
+  C1's SQLite snapshot confirms its Name is empty. The binder supplies only the
+  resolved authority reference and capability prefix on the actor.
+- Local, standalone and here hosting use one session lifecycle for authority
+  deadlines, binding, execution and exactly-once cleanup. It builds host input
+  from the verified projection and copies storage, engine resolver and plan cache
+  from the session. It preserves context cancellation causes through cleanup.
+- Removed the duplicated local/here session lifecycle: production Go versus HEAD
+  is **66 added, 65 removed, net +1**. W9 versus main is **-8,837**, within the
+  -2,900 budget. Counts include untracked owner_host.go and exclude tests,
+  testdata, acceptance and contract declaration paths. No legacy production file
+  was deleted in this continuation. The committed host/client cuts and
+  W9-CLIENT-CUT-FILES.md remain applicable.
+
+### Verification and acceptance
+
+Every Go command used GOWORK=off, GOFLAGS=-buildvcs=false,
+GOCACHE=/tmp/sw-gocache and TMPDIR/GOTMPDIR=/tmp/sw-astra-W9. Tests used -p 4.
+
+- Whole-repository `go build -p 4 ./...` passes. Scoped CLI, clisurface,
+  controllerwire and controller/client vet passes.
+- Full clisurface, controllerwire, controller/client and doccheck tests pass.
+  Focused CLI suites pass with `-run
+  '^(TestOwner|TestCLIOwner|TestHere|TestLocal|TestRunLocal|TestStandalone)'`.
+- `TestOwnerBindingsCannotReplaceOwnerFenceProperty` failed before the fix and
+  passes 128 generated cases for both local and here hosting. It also verifies
+  that the binder's resolved authority reference and capability prefix survive.
+  The retained runner/seal properties pass. The deadline property now verifies
+  preservation of a custom authority-loss cause instead of only context.Canceled.
+- `TestOwnerInputMatchesPersistedTriggerFence` uses a current-schema SQLite store
+  and its real ReadSnapshot projection. Its fixture seeds only team/run/trigger
+  rows. It verifies projection shape, not authenticated persistence writes.
+- `TestCLIOwnerCompositionPreservesRetrySeals` now constructs W3's real
+  NewNativeHost, ProcessAuthorities and W2 PolicyRouter. Its eight local/here,
+  initial/retry and completion-write combinations still pass with a binder that
+  proposes a foreign actor. Store, source acquisition and engine/authority
+  boundaries remain fakes. Unexpected engine/process/output calls fail. The
+  accepted plan is empty, so this proves construction and owner completion,
+  not SDK hello or job execution.
+- Owner/here/local-run/standalone tests pass under -race. `TestSurface` and the
+  existing surface/here contract tests pass with
+  `go test -p 4 ./tests/acceptance -run '^(TestSurface|TestHere)' -count=1`.
+  Native scenario cells remain skipped. No archived T1 port is newly completed.
+- Commentcheck against main is clean across 2,030 files. Embedded documentation
+  equality and whitespace checks pass. This continuation adds no sleeps or waits.
+  Full CLI tests remain outside the socket-restricted sandbox's evidence.
+
+### Contracts and integration left open
+
+The earlier amendment/handoff audit remains applicable. Lead decisions 07:40
+items 1 and 6, the doctor fix and Windows packaging were already committed and
+were not reimplemented. Lead decisions 09:40 add no W9-owned harness migration.
+No foreign interface or wire shape changed in this continuation.
+
+W2 still needs the elected wingd.LocalController factory, owned state/queue,
+reconciliation, leased maintenance and authenticated API/dashboard bindings.
+W3 RemoteOwnerStore still cannot satisfy NativeHostStore: private snapshots,
+acceptance, transitions, finish, step persistence and renewal need an authorized
+transport. The C3 Controller has no private execution snapshot operation.
+W2's step decoder still uses step_id/status and an empty 204 rather than the
+contracted StepReportRequest and StepRecorded acknowledgement. These are carried
+contract/integration requests, not substitute public projections.
+
+Native local/here composition still needs captured-environment retention/delivery,
+source access, process delegation, data/log bindings and joined owner policies.
+The native Git process builder still rejects procenv.Git. Numeric GitHub identity,
+source-bundle intake, persisted here reasons, schedules/pins/ticks, result/log
+publication and debug release retain their previous gaps. Publication failure
+must preserve the completed local verdict. Windows runtime and native backend,
+platform and placement acceptance remain with their owners and the lead.
+
+### Shared files, assumptions and friction
+
+Production/test edits are all under cmd/sparkwing. No foreign caller migrated
+and no API was removed in this continuation. C3's W9 wire notes, docs/api.md,
+CHANGELOG.md and their generated pkg/docs mirrors are updated. Lead-owned
+handoffs.md and amendments remain unchanged.
+
+The shared session function replaces two used lifecycles. It adds no interface,
+flag, environment variable, timeout value, retry policy or dependency. Inlining
+it would restore the duplication. C1's real projection required correcting the
+older fake's trigger Owner.Name. W2 engineActor still sets that Name to UnitID;
+future private adapters must preserve C1's canonical host projection rather than
+copying that actor wholesale. This continuation makes the CLI projection canonical
+without changing W2's store-write actor.
+
+Git resolves Korey's identity without a core.worktree override. Session scratch
+is removed at shutdown. The shared build cache is retained.
+
 ## Continuation from d526ef30b
 
 This section supersedes conflicting status below. W9 remains incomplete because

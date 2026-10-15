@@ -231,42 +231,20 @@ func hostLocalRun(ctx context.Context, runtime localRunRuntime, run string, requ
 	if err != nil {
 		return completion, err
 	}
-	ctx, cancel := award.HostContext(ctx)
-	defer cancel()
-	if err := ctx.Err(); err != nil {
-		return completion, err
-	}
-	session, err := runtime.bind(ctx, award)
-	if session.close != nil {
-		defer func() { resultErr = errors.Join(resultErr, session.close()) }()
-	}
-	if err != nil {
-		return completion, err
-	}
-	if session.host == nil || session.close == nil {
-		return completion, &apierr.Error{Code: apierr.Unavailable, Message: "local run integration returned no host or cleanup binding"}
-	}
-	session.input.RunID, session.input.RequestHash = input.RunID, input.RequestHash
-	session.input.SealedRequest, session.input.Accepted = input.SealedRequest, input.Accepted
-	session.input.GrantedRunner = input.GrantedRunner
-	session.input.Storage.RemoteCache = nil
-	if award.Request.Request.Options.CacheFrom.Value != "" {
-		if runtime.remoteCache == nil {
-			return completion, &apierr.Error{Code: apierr.Unavailable, Message: "local host requires its sealed remote-cache binding"}
+	return runOwnerSession(ctx, award, input, func(ctx context.Context, award controllerwire.ClaimedUnit) (hereHostSession, error) {
+		session, err := runtime.bind(ctx, award)
+		if err != nil {
+			return session, err
 		}
-		session.input.Storage.RemoteCache = runtime.remoteCache
-	}
-	if err := ctx.Err(); err != nil {
-		return completion, err
-	}
-	completion, err = session.host.Run(ctx, session.input)
-	if err := errors.Join(err, ctx.Err()); err != nil {
-		return completion, err
-	}
-	if !isTerminalRunStatus(completion.Outcome) {
-		return completion, localRunProtocolError("local host returned no terminal outcome")
-	}
-	return completion, nil
+		session.input.Storage.RemoteCache = nil
+		if award.Request.Request.Options.CacheFrom.Value != "" {
+			if runtime.remoteCache == nil {
+				return session, &apierr.Error{Code: apierr.Unavailable, Message: "local host requires its sealed remote-cache binding"}
+			}
+			session.input.Storage.RemoteCache = runtime.remoteCache
+		}
+		return session, nil
+	})
 }
 
 func localRunInput(run string, requestHash runspec.Hash, award controllerwire.ClaimedUnit) (nodehost.RunInput, error) {

@@ -137,42 +137,17 @@ func resumeHereRun(ctx context.Context, options client.EngineOptions, run string
 
 func runHereAward(ctx context.Context, options client.EngineOptions, run string, award controllerwire.ClaimedUnit,
 	bind func(context.Context, client.EngineOptions, controllerwire.ClaimedUnit) (hereHostSession, error),
-) (completion nodehost.RunCompletion, resultErr error) {
+) (completion nodehost.RunCompletion, err error) {
 	input, err := hereRunInput(run, award)
 	if err != nil {
 		return completion, incompleteHereHandoff(run, err)
 	}
-	ctx, cancel := award.HostContext(ctx)
-	defer cancel()
-	if err := ctx.Err(); err != nil {
-		return completion, incompleteHereHandoff(run, err)
-	}
-	options.Bearer = func(context.Context) (string, error) { return award.Capability, nil }
-	session, err := bind(ctx, options, award)
-	defer func() {
-		if session.close != nil {
-			if err := session.close(); err != nil {
-				resultErr = errors.Join(resultErr, incompleteHereHandoff(run, err))
-			}
-		}
-	}()
+	completion, err = runOwnerSession(ctx, award, input, func(ctx context.Context, award controllerwire.ClaimedUnit) (hereHostSession, error) {
+		options.Bearer = func(context.Context) (string, error) { return award.Capability, nil }
+		return bind(ctx, options, award)
+	})
 	if err != nil {
 		return completion, incompleteHereHandoff(run, err)
-	}
-	if session.host == nil || session.close == nil {
-		return completion, incompleteHereHandoff(run, &apierr.Error{Code: apierr.Unavailable, Message: "here runtime returned no host or cleanup binding"})
-	}
-	if err := ctx.Err(); err != nil {
-		return completion, incompleteHereHandoff(run, err)
-	}
-	session.input.RunID, session.input.SealedRequest, session.input.RequestHash, session.input.Accepted = input.RunID, input.SealedRequest, input.RequestHash, input.Accepted
-	session.input.GrantedRunner = input.GrantedRunner
-	completion, runErr := session.host.Run(ctx, session.input)
-	if err := errors.Join(runErr, ctx.Err()); err != nil {
-		return completion, incompleteHereHandoff(run, err)
-	}
-	if !isTerminalRunStatus(completion.Outcome) {
-		return completion, incompleteHereHandoff(run, &apierr.Error{Code: apierr.ProtocolError, Message: "here host returned no terminal outcome"})
 	}
 	return completion, nil
 }

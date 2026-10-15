@@ -21,7 +21,10 @@ func TestOwnerHostsCannotOutliveAwardProperty(t *testing.T) {
 			}
 			base := time.Now().Add(time.Hour)
 			want := base.Add(time.Duration(parent) * time.Minute)
-			ctx, cancel := context.WithDeadline(t.Context(), want)
+			deadlineCtx, stopDeadline := context.WithDeadline(t.Context(), want)
+			ctx, cancelCause := context.WithCancelCause(deadlineCtx)
+			cancel := func() { cancelCause(nil); stopDeadline() }
+			lostAuthority := errors.New("owner authority ended")
 			bound := func(value uint8) *time.Time {
 				if value == 0 {
 					return nil
@@ -44,7 +47,7 @@ func TestOwnerHostsCannotOutliveAwardProperty(t *testing.T) {
 				end, ok := ctx.Deadline()
 				valid = valid && ok && end.Equal(want)
 				if cancelBinding {
-					cancel()
+					cancelCause(lostAuthority)
 				}
 				return hereHostSession{
 					close: func() error { closed++; return nil },
@@ -75,7 +78,7 @@ func TestOwnerHostsCannotOutliveAwardProperty(t *testing.T) {
 					return false
 				}
 			} else if cancelBinding {
-				if !valid || !errors.Is(err, context.Canceled) || boundCalls != 1 || hosted != 0 || closed != 1 {
+				if !valid || !errors.Is(err, lostAuthority) || boundCalls != 1 || hosted != 0 || closed != 1 {
 					return false
 				}
 			} else if !valid || err != nil || completion.Outcome != "success" || boundCalls != 1 || hosted != 1 || closed != 1 {

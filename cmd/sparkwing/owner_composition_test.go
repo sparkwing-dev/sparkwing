@@ -10,17 +10,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type cliOwnerStore struct {
-	nodehost.OwnerStore
+	nodehost.NativeHostStore
 	mu       sync.Mutex
 	snapshot store.RunSnapshot
 	actor    store.Actor
@@ -78,7 +84,7 @@ func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
 					}
 					award.Accepted = &controllerwire.PlanAccepted{Spec: spec, Plan: plan, PlanHash: spec.PlanHash}
 					actor := store.Actor{Kind: store.ActorRunHost, Owner: store.OwnerLeaseRef{
-						Kind: store.OwnerTrigger, Name: award.UnitID, RunID: award.RunID,
+						Kind: store.OwnerTrigger, RunID: award.RunID,
 						Holder: award.Binding.Holder, Generation: award.Binding.Generation,
 					}}
 					state := &cliOwnerStore{actor: actor, snapshot: store.RunSnapshot{Run: store.RunRow{
@@ -89,7 +95,7 @@ func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
 						state.failure = errors.New("completion was not committed")
 					}
 					acquired, closed := 0, 0
-					host := &nodehost.OwnerHost{
+					owner := nodehost.OwnerHost{
 						Store: state, Mask: func(s string) string { return s },
 						Lease: lease.Keeper{Interval: time.Minute, Lease: time.Hour},
 						Wait:  func(context.Context, store.RunSnapshot) error { return errors.New("unexpected wait") },
@@ -102,8 +108,9 @@ func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
 							return &source.Entry{}, nil
 						},
 					}
+					host := cliNativeOwner(t, state, owner)
 					bind := func(context.Context, controllerwire.ClaimedUnit) (hereHostSession, error) {
-						return hereHostSession{host: host, input: nodehost.RunInput{Owner: actor}, close: func() error { closed++; return nil }}, nil
+						return hereHostSession{host: host, input: nodehost.RunInput{Owner: store.Actor{Kind: store.ActorController, Owner: store.OwnerLeaseRef{RunID: "foreign-run"}}}, close: func() error { closed++; return nil }}, nil
 					}
 					var completion nodehost.RunCompletion
 					if here {
@@ -133,4 +140,63 @@ func TestCLIOwnerCompositionPreservesRetrySeals(t *testing.T) {
 			}
 		}
 	}
+}
+
+type cliNativeBoundaries struct{}
+
+func (cliNativeBoundaries) Resolve(context.Context, engine.Pin, releaseasset.Target) (engine.Resolved, error) {
+	return engine.Resolved{}, errors.New("unexpected engine resolution")
+}
+
+func (cliNativeBoundaries) Ensure(context.Context, engine.Identity, releaseasset.Target) (engine.Resolved, error) {
+	return engine.Resolved{}, errors.New("unexpected engine verification")
+}
+
+func (cliNativeBoundaries) ReadAuthentication(context.Context, capability.CredentialLookup, capability.RequestEvidence) (capability.AuthenticationSnapshot, error) {
+	return capability.AuthenticationSnapshot{}, errors.New("unexpected process authentication")
+}
+
+func (cliNativeBoundaries) CheckBinding(context.Context, capability.Principal, capability.BindingRule, capability.Target) error {
+	return errors.New("unexpected process binding")
+}
+
+func cliNativeOwner(t *testing.T, state nodehost.NativeHostStore, owner nodehost.OwnerHost) *nodehost.OwnerHost {
+	t.Helper()
+	boundary := cliNativeBoundaries{}
+	authorities, err := nodehost.NewProcessAuthorities(nodehost.ProcessAuthorityDependencies{Parent: boundary, Bindings: boundary})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := authorities.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	router := controller.NewPolicyRouter(controller.RouteAuthorization{})
+	host, _, _, err := nodehost.NewNativeHost(nodehost.NativeHostConfig{
+		Store: state, Lease: owner.Lease, Owner: owner,
+		Source: source.Options{Engines: boundary}, Masks: nodehost.NewMaskRegistry(secrets.NewMasker()), Router: router,
+		Processes: &nodehost.NativeProcesses{Authorities: authorities, Log: func(context.Context, string, string, nodeproto.FrameLog) error {
+			return errors.New("unexpected execution log")
+		}},
+		Planner: nodehost.SDKPlanner{Log: func(context.Context, nodeproto.FrameLog) error { return errors.New("unexpected planning log") }},
+		Executor: nodehost.ExecutorDependencies{Bind: func(context.Context, nodehost.NodeInput) (nodehost.ProcessGrant, error) {
+			return nodehost.ProcessGrant{}, errors.New("unexpected execution delegation")
+		}},
+		Evaluation: nodehost.EvaluationDependencies{
+			Bind: func(context.Context, nodehost.EvaluationInput) (nodehost.ProcessGrant, error) {
+				return nodehost.ProcessGrant{}, errors.New("unexpected evaluation delegation")
+			},
+			ReadOutput: func(context.Context, store.NodeRef, int64) (json.RawMessage, error) {
+				return nil, errors.New("unexpected output read")
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(router.Registrations()) == 0 {
+		t.Fatal("native host registered no process routes")
+	}
+	return host
 }
