@@ -1025,3 +1025,25 @@ No native catalog cell is newly closed. Remaining full placement scenarios are
 recorded in `../W8-ORPHAN-TRIGGER-CUT.md`. The earlier run-node retirement's
 repository allow-list helpers remain in `run_node_remote.go` pending the real
 machine source-authority binding.
+## W8 shared dispatched executor retirement
+
+The orphan `nodehost.HostDispatchedNode`, pod reconstruction helpers and old
+row-polling dispatcher are removed. Their `Config.Dispatch`, `Resume` and
+`ClaimedRowPoll` fields had no production caller. The local planner stays in
+`plan_document.go`. Remaining scheduler fixtures use an execution callback.
+
+| Removed or migrated case | Final evidence |
+| --- | --- |
+| Generated recovery pod | `TestNodeExecutorGeneratedRecoveryUsesRecordedFailure` replays recorded ancestors and delivers the failed source's persisted failure to the body. |
+| Nested generated pod and one generator call | `TestNodeExecutorGeneratedReplayRunsEachAncestorOnce` checks the exact ancestor evaluation order through execution. |
+| Generator bounded by its job timeout | `TestNodeExecutorGeneratedReplayUsesAttemptTimeout` expires the attempt during replay, checks the failed deadline report, suppresses the body and joins the process. |
+| Long generator chain | `TestNodeExecutorReconstructsLongRecordedGeneratorChain` checks 70 recorded generations and ordered authorized output reads. |
+| Cyclic and altered ancestry | `TestRecordedReplayRejectsCyclicAncestryBeforeOutputReads` and `FuzzRecordedReplayValidatesLineageBeforeOutputReads` retain the final refusal boundary. |
+| Pod outer-layer and refused-output masking | `FuzzNodeExecutorMasksOuterAndPublicationFailures` checks that registered secrets reach neither the returned error nor transition payloads. The retained scheduler tests use their text sink because their old row writer no longer matches the final schema. |
+| Old dispatcher result adoption, cancellation and claim loss | Existing final owner/claimed-host and executor suites cover committed results, live claim adoption, source cancellation, lease loss, unchanged retry generation and persisted retry ordinals. Launcher restart and W8 native-store components cover placement wiring. |
+| Old scheduler resume/spec mismatch | The unchanged assertion remains in `resume_drift_test.go`. The final owner uses `TestOwnerHostRefusesChangedResumeBeforeAcquisition`. |
+
+The removed `TestResumeNeedsDispatch` tested the deleted configuration API.
+These ports use the final process/store interfaces with scripted fakes. Native
+generated recovery, retry and placement remain acceptance work. The retained
+legacy SQLite scheduler fixtures still require W3's final store migration.

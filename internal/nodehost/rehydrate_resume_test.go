@@ -8,7 +8,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // safety: an earlier host of the retry copied the generator and stopped before its nodes were added.
@@ -26,11 +25,10 @@ func TestAResumedRetryRegeneratesTheGeneratorItAdopts(t *testing.T) {
 	if err := st.FinishNodeWithReason(ctx, testRunID, "targets", "success", "", []byte(`"from-targets"`), "", nil); err != nil {
 		t.Fatal(err)
 	}
-	cfg := Config{Dispatch: remoteHost(st, sparkwing.Success, "", nil)}
 	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
 	var regenerated json.RawMessage
 	s := &scheduler{
-		run: run, results: map[string]Result{}, started: map[string]bool{}, exec: chain(&cfg), resume: true,
+		run: run, results: map[string]Result{}, started: map[string]bool{}, exec: successfulExecution, resume: true,
 		rehydrate: &Rehydration{SourceRunID: sourceRunID}, rerun: map[string]bool{},
 		regenerate: func(_ context.Context, n *NodeRun, out json.RawMessage) []expansion {
 			regenerated = out
@@ -80,10 +78,9 @@ func TestARetryNeverCopiesOverARowItsRunAlreadyHolds(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			cfg := Config{Dispatch: remoteHost(st, sparkwing.Success, "", nil)}
 			run := &Run{ID: testRunID, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
 			s := &scheduler{
-				run: run, results: map[string]Result{}, started: map[string]bool{}, exec: chain(&cfg), resume: true,
+				run: run, results: map[string]Result{}, started: map[string]bool{}, exec: successfulExecution, resume: true,
 				rehydrate: &Rehydration{SourceRunID: sourceRunID}, rerun: map[string]bool{},
 			}
 			if err := s.add(ctx, ctx, []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}}, nil); err != nil {
@@ -101,7 +98,6 @@ func TestARetryNeverCopiesOverARowItsRunAlreadyHolds(t *testing.T) {
 					t.Fatalf("a pending row was not copied from the source: %+v", row)
 				}
 			case "claimed":
-				// safety: the fake dispatch ignores claims, which a real one honors; what is checked is no copy.
 				if got := skippedFromRetry(t, st); len(got) != 0 {
 					t.Fatalf("another holder's live row was overwritten with the source's result (%v)", got)
 				}

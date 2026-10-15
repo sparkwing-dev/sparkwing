@@ -5,10 +5,7 @@ package nodehost
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"log/slog"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -16,130 +13,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
-
-// hack: the rows are recorded through the scheduler's own expansion path, as a run host records them, without a run.
-func genPod(t *testing.T, mode string) (Config, *store.Store, string) {
-	t.Helper()
-	if testing.Short() {
-		t.Skip("builds a protocol fixture")
-	}
-	bin := filepath.Join(t.TempDir(), "genfixture")
-	if out, err := exec.Command("go", "build", "-o", bin, "./testdata/genfixture").CombinedOutput(); err != nil {
-		t.Fatalf("build fixture: %v\n%s", err, out)
-	}
-	st := openStore(t)
-	routes, err := Start(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = routes.Close() })
-	trace := filepath.Join(t.TempDir(), "evals")
-	logs := &memLogs{records: map[string][]sparkwing.LogRecord{}}
-	cfg := Config{
-		Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Env: []string{"GENFIXTURE_MODE=" + mode, "GENFIXTURE_TRACE=" + trace}, Grace: 20 * time.Millisecond, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}},
-		Pipeline: "probe", Run: nodeproto.RunContext{RunID: "run-probe"}, State: st, Logger: slog.New(slog.DiscardHandler),
-		Attempts: &Attempts{
-			Routes: routes, Local: st, Resolver: fixtureResolver{}, Masker: secrets.NewMasker(),
-			OpenLog: func(_ context.Context, _, node string) (NodeLog, error) { return memLog{logs: logs, node: node}, nil },
-		},
-	}
-	if err := st.CreateRun(t.Context(), store.Run{ID: "run-probe", Pipeline: "probe", Status: "running"}); err != nil {
-		t.Fatal(err)
-	}
-	source := nodeproto.JobSpec{ID: "targets", Steps: []nodeproto.StepSpec{{ID: "body"}}, ResultStep: "body", Closures: nodeproto.ClosureSpec{Generate: []string{"targets/generate/0"}}, TimeoutMS: new(int64(20))}
-	run := &Run{ID: "run-probe", Doc: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{source}}, State: st, Logger: cfg.Logger, validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
-	s := &scheduler{run: run, results: map[string]Result{}, started: map[string]bool{}}
-	if err := s.add(t.Context(), t.Context(), []nodeproto.JobSpec{source}, nil); err != nil {
-		t.Fatal(err)
-	}
-	child := nodeproto.JobSpec{ID: "child", Steps: []nodeproto.StepSpec{{ID: "body"}}, ResultStep: "body", Groups: []string{"targets/generate/0"}, Needs: []string{"targets"}, TimeoutMS: new(int64(20))}
-	if mode == "nested" {
-		child.Closures.Generate = []string{"child/generate/0"}
-	}
-	children := []nodeproto.JobSpec{child, {ID: "recover", Steps: []nodeproto.StepSpec{{ID: "body"}}, ResultStep: "body", Groups: []string{"targets/generate/0"}, OnFailureOf: "child"}}
-	if err := s.addGenerated(t.Context(), "targets", expansion{closure: "targets/generate/0", nodes: children}); err != nil {
-		t.Fatal(err)
-	}
-	if mode == "nested" {
-		grandchild := []nodeproto.JobSpec{{ID: "grandchild", Steps: []nodeproto.StepSpec{{ID: "body"}}, ResultStep: "body", Groups: []string{"child/generate/0"}, Needs: []string{"child"}}}
-		if err := s.addGenerated(t.Context(), "child", expansion{closure: "child/generate/0", nodes: grandchild}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return cfg, st, trace
-}
-
-func hostGenerated(t *testing.T, ctx context.Context, cfg Config, st *store.Store, id string) Result {
-	t.Helper()
-	row, err := st.GetNode(ctx, "run-probe", id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return HostDispatchedNode(ctx, cfg, id, row.SpecHash)
-}
-
-func evals(t *testing.T, trace string) []string {
-	t.Helper()
-	data, err := os.ReadFile(trace)
-	if err != nil && !os.IsNotExist(err) {
-		t.Fatal(err)
-	}
-	return strings.Fields(string(data))
-}
-
-// A generated recovery node needs no source of its own: its host runs the
-// spec its row records, loading its code with the generator that returned it.
-func TestAPodRunsAGeneratedRecoveryNode(t *testing.T) {
-	cfg, st, _ := genPod(t, "normal")
-	if err := st.FinishNodeWithReason(t.Context(), "run-probe", "child", "failed", "body failed", nil, "", nil); err != nil {
-		t.Fatal(err)
-	}
-	if res := hostGenerated(t, t.Context(), cfg, st, "recover"); res.Outcome != sparkwing.Success {
-		t.Fatalf("generated recovery = %s (%s): %v", res.Outcome, res.Reason, res.Err)
-	}
-}
-
-// A node a generated node generated is loaded by running each generator of
-// the chain in turn, its source's first.
-func TestAPodRunsANestedGeneratedNode(t *testing.T) {
-	cfg, st, trace := genPod(t, "nested")
-	if res := hostGenerated(t, t.Context(), cfg, st, "grandchild"); res.Outcome != sparkwing.Success {
-		t.Fatalf("nested generated node = %s (%s): %v", res.Outcome, res.Reason, res.Err)
-	}
-	if got := strings.Join(evals(t, trace), ","); got != "targets/generate/0,child/generate/0" {
-		t.Fatalf("evals = %s, want the chain from the plan's source", got)
-	}
-}
-
-// perf: the pod reads the node's spec from its row, so the only generator run
-// is the one that loads the node's code in its attempt.
-func TestAGeneratedNodesPodRunsItsGeneratorOnce(t *testing.T) {
-	cfg, st, trace := genPod(t, "normal")
-	if res := hostGenerated(t, t.Context(), cfg, st, "child"); res.Outcome != sparkwing.Success {
-		t.Fatalf("generated node = %s: %v", res.Outcome, res.Err)
-	}
-	if got := evals(t, trace); len(got) != 1 {
-		t.Fatalf("generator runs in one pod = %v, want 1", got)
-	}
-}
-
-// safety: the generator that loads a generated node's code runs inside its
-// attempt, so the node's own timeout bounds a generator that hangs.
-func TestAGeneratedNodesTimeoutBoundsItsGenerator(t *testing.T) {
-	cfg, st, _ := genPod(t, "hang")
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
-	if res := hostGenerated(t, ctx, cfg, st, "child"); res.Reason != store.FailureTimeout || ctx.Err() != nil {
-		t.Fatalf("hung generator = %s (%s): %v, want the child's 20ms timeout", res.Outcome, res.Reason, res.Err)
-	}
-}
 
 func resumedFanOut(t *testing.T, sourceOutcome, childOutcome string) (*scheduler, *store.Store, *int) {
 	t.Helper()
@@ -168,11 +47,10 @@ func resumedFanOut(t *testing.T, sourceOutcome, childOutcome string) (*scheduler
 			t.Fatal(err)
 		}
 	}
-	cfg := Config{Dispatch: remoteHost(st, sparkwing.Success, "", nil)}
 	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
 	generated := 0
 	s := &scheduler{
-		run: run, results: map[string]Result{}, started: map[string]bool{}, exec: chain(&cfg), resume: true,
+		run: run, results: map[string]Result{}, started: map[string]bool{}, exec: successfulExecution, resume: true,
 		regenerate: func(_ context.Context, n *NodeRun, _ json.RawMessage) []expansion {
 			generated++
 			return []expansion{{closure: testGenerator, nodes: []nodeproto.JobSpec{{ID: "test-a", Needs: deps(n.Plan.ID), Steps: []nodeproto.StepSpec{{ID: "body"}}}}}}
@@ -230,9 +108,6 @@ func outputHost(t *testing.T, scenario string) (*Config, *store.Store) {
 			Routes: routes, Local: st, Resolver: fixtureResolver{}, Masker: secrets.NewMasker(),
 			OpenLog: func(_ context.Context, _, id string) (NodeLog, error) { return memLog{logs: logs, node: id}, nil },
 		},
-	}
-	cfg.Dispatch = func(ctx context.Context, n *NodeRun) Result {
-		return HostDispatchedNode(ctx, *cfg, n.Plan.ID, jobHash(n.Plan))
 	}
 	return cfg, st
 }
@@ -309,9 +184,8 @@ func resumeAfter(t *testing.T, doc nodeproto.PlanDoc, record func(*scheduler), r
 	}
 	record(first)
 	calls := 0
-	cfg := Config{Dispatch: remoteHost(st, sparkwing.Success, "", nil)}
 	s := &scheduler{
-		run: run, results: map[string]Result{}, started: map[string]bool{}, exec: chain(&cfg), resume: true,
+		run: run, results: map[string]Result{}, started: map[string]bool{}, exec: successfulExecution, resume: true,
 		regenerate: func(context.Context, *NodeRun, json.RawMessage) []expansion { calls++; return regen },
 	}
 	if err := s.add(ctx, ctx, doc.Jobs, nil); err != nil {
@@ -384,50 +258,6 @@ func TestARegeneratedBatchThatDropsARecordedNodeDrifts(t *testing.T) {
 	}
 }
 
-func generatedChain(t *testing.T, st *store.Store, depth int, cycle bool) (*Run, string, string) {
-	t.Helper()
-	ctx := t.Context()
-	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
-		t.Fatal(err)
-	}
-	run := &Run{ID: testRunID, Doc: nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "n0", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, State: st, validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
-	var last nodeproto.JobSpec
-	for i := 1; i <= depth; i++ {
-		source := fmt.Sprintf("n%d", i-1)
-		if cycle && i == 1 {
-			source = fmt.Sprintf("n%d", depth)
-		}
-		last = nodeproto.JobSpec{ID: fmt.Sprintf("n%d", i), Needs: deps(source), Steps: []nodeproto.StepSpec{{ID: "body"}}}
-		row := pendingRow(run, last)
-		if err := (&expansionFrom{source: source, closure: source + "/generate/0"}).record(&row, last, 1); err != nil {
-			t.Fatal(err)
-		}
-		if err := st.CreateNode(ctx, row); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return run, last.ID, jobHash(last)
-}
-
-// A pod follows a long chain of generated sources back to the plan.
-func TestAPodFollowsALongGeneratorChain(t *testing.T) {
-	run, id, hash := generatedChain(t, openStore(t), 70, false)
-	_, chain, err := podGenerated(t.Context(), run, id, hash)
-	if err != nil || len(chain) != 70 || chain[0] != "n0/generate/0" {
-		t.Fatalf("chain of %d (%v), first %v: want 70 generators from n0's", len(chain), err, chain[:min(1, len(chain))])
-	}
-}
-
-// safety: recorded sources that loop back are refused rather than followed.
-func TestAPodRefusesACycleOfRecordedSources(t *testing.T) {
-	run, id, hash := generatedChain(t, openStore(t), 3, true)
-	_, _, err := podGenerated(t.Context(), run, id, hash)
-	var perr *apierr.Error
-	if !errors.As(err, &perr) || perr.Code != apierr.PlanDrift {
-		t.Fatalf("cyclic sources = %v, want plan_drift", err)
-	}
-}
-
 func onlySource() nodeproto.PlanDoc {
 	doc := fanOutDoc()
 	doc.Jobs = doc.Jobs[:1]
@@ -472,10 +302,9 @@ func TestARetryOfADriftedBatchWithoutAWaiterFails(t *testing.T) {
 	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	cfg := Config{Dispatch: remoteHost(st, sparkwing.Success, "", nil)}
 	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
 	s := &scheduler{
-		run: run, results: map[string]Result{}, started: map[string]bool{}, exec: chain(&cfg),
+		run: run, results: map[string]Result{}, started: map[string]bool{}, exec: successfulExecution,
 		rehydrate: &Rehydration{SourceRunID: sourceRunID}, rerun: map[string]bool{},
 		regenerate: func(context.Context, *NodeRun, json.RawMessage) []expansion {
 			return []expansion{{closure: testGenerator, nodes: []nodeproto.JobSpec{childB}}}
@@ -512,9 +341,8 @@ func TestRecoveringABatchEvaluatesOnlyItsGenerator(t *testing.T) {
 	if err := first.addGenerated(ctx, "targets", expansion{closure: testGenerator, nodes: []nodeproto.JobSpec{childA}}); err != nil {
 		t.Fatal(err)
 	}
-	cfg := Config{Dispatch: remoteHost(st, sparkwing.Success, "", nil)}
 	s := &scheduler{
-		run: run, results: map[string]Result{}, started: map[string]bool{}, exec: chain(&cfg), resume: true,
+		run: run, results: map[string]Result{}, started: map[string]bool{}, exec: successfulExecution, resume: true,
 		regenerate: func(_ context.Context, n *NodeRun, _ json.RawMessage) []expansion {
 			asked = append(asked, n.Plan.Closures.Generate...)
 			return []expansion{{closure: secondGenerator}}

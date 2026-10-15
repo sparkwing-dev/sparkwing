@@ -93,3 +93,12 @@ and the runner environment ports cover the former install-output and allow-list
 regressions. The retired native fixture does not establish final native placement
 coverage. Production source authorization, service factories and Cloud plan/eval
 hosting remain integration work.
+
+The shared host's orphan pod executor and row-polling dispatcher are removed.
+`OwnerHost`, `ClaimedNodeHost` and `NodeExecutor` supply the claim and execution
+paths. The local planner remains in `nodehost/plan_document.go`. Generator ports
+exercise recorded recovery, nested ancestor order, one evaluation per ancestor,
+attempt timeout and a 70-generation lineage through the final executor contract.
+The error-masking property covers both outer layers and output publication.
+These use scripted process and store boundaries. They do not establish native
+Cloud plan/eval hosting or deployed placement.

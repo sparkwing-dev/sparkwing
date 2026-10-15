@@ -59,24 +59,8 @@ type Config struct {
 	CheckSecrets func(context.Context, []string) error
 	// Memo reuses memoized nodes' earlier results; nil runs every node.
 	Memo *Memo
-	// Dispatch, when set, runs each admitted node elsewhere, whole: the
-	// remote host runs its artifacts, caches, retries, timeouts and attempts
-	// and records its start and result. Debug pauses, skip_if, approvals,
-	// memo and admission stay in this host, with Attempts for their eval
-	// processes and logs. Nil runs every node in this process.
-	Dispatch Executor
 	// ParentRunID, RetryOf and RetrySource are the run row's lineage.
 	ParentRunID, RetryOf, RetrySource string
-	// Resume reuses the node rows an earlier host of this run left, as a
-	// trigger reclaimed after its runner stopped has: a finished node keeps
-	// its result, and an unfinished one, or one whose holder was lost, runs
-	// again. A row planned under another spec_hash fails the run with
-	// plan_drift. It needs Dispatch, whose claims keep a node from running
-	// twice.
-	Resume bool
-	// ClaimedRowPoll is how often a dispatched node's row is read while
-	// another holder claims it; zero means 5 seconds.
-	ClaimedRowPoll time.Duration
 	// Only, as --sw-only, runs only the plan's nodes whose ID matches the
 	// glob and the nodes they depend on, skipping the rest.
 	Only string
@@ -235,9 +219,6 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 	if cfg.Run.RunID == "" {
 		return RunResult{}, errors.New("nodehost: the run has no id")
 	}
-	if cfg.Resume && cfg.Dispatch == nil {
-		return RunResult{}, errors.New("nodehost: Resume needs Dispatch, whose claims keep a resumed node from running twice")
-	}
 	if cfg.Run.StartedAt.IsZero() {
 		cfg.Run.StartedAt = time.Now().UTC()
 	}
@@ -329,7 +310,7 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 // run row is terminal.
 func runPlanned(ctx context.Context, cfg *Config, run *Run, res *RunResult) (release func()) {
 	release = func() {}
-	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(cfg), resume: cfg.Resume}
+	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(cfg)}
 	s.rehydrate, s.rerun = cfg.Rehydrate, map[string]bool{}
 	if cfg.Attempts != nil {
 		s.regenerate = func(ctx context.Context, n *NodeRun, output json.RawMessage) []expansion {
@@ -395,9 +376,6 @@ func runRow(cfg Config, args map[string]string) store.Run {
 }
 
 func chain(cfg *Config) Executor {
-	if cfg.Dispatch != nil {
-		return dispatchChain(cfg)
-	}
 	exec := cfg.Execute
 	if exec == nil && cfg.Attempts != nil {
 		exec = cfg.Attempts.executor(cfg)
@@ -778,10 +756,7 @@ func (s *scheduler) nodeVerdict() (string, error) {
 	return "success", nil
 }
 
-// safety: the one writer of a node's result, for the scheduler and a pod host. A refused output fails the node in
-// its row too, so the row never stays running, and a result the store never took never reads as a success. Layers
-// outside the attempt, and the store itself, fail with text no attempt masked, so the result is masked after its
-// last change and every text it records is masked before it is bounded.
+// safety: output refusal becomes a failed result, and every error is masked before truncation.
 func recordResult(ctx context.Context, run *Run, id string, res Result) Result {
 	writeCtx := context.WithoutCancel(ctx)
 	var err error
