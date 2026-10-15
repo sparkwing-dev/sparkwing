@@ -11,9 +11,9 @@ func TestStepWindowsRemainSealedAcrossAcceptanceAndRetry(t *testing.T) {
 	property := func(start, stop, only string) bool {
 		request := base.Request.Request
 		origin := SettingOrigin{Layer: LayerFlag}
-		request.Options.StartAt = Setting[string]{Set: true, Value: start, Origin: origin}
-		request.Options.StopAt = Setting[string]{Set: true, Value: stop, Origin: origin}
-		request.Options.Only = Setting[string]{Set: true, Value: only, Origin: origin}
+		request.Options.StartAt = Setting[string]{Optional: Optional[string]{Set: true, Value: start}, Origin: origin}
+		request.Options.StopAt = Setting[string]{Optional: Optional[string]{Set: true, Value: stop}, Origin: origin}
+		request.Options.Only = Setting[string]{Optional: Optional[string]{Set: true, Value: only}, Origin: origin}
 		sealed, err := SealRequest(request, IntakeFacts{RunID: "source"})
 		if err != nil {
 			return false

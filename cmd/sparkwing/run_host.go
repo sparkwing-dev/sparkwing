@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -157,8 +158,12 @@ func validateLocalRunFlags(flags runFlags) error {
 		name string
 		set  bool
 	}{
-		{"sw-no-update", flags.noUpdate}, {"sw-no-bincache", flags.noBincache}, {"sw-hash-all-files", flags.hashAllFiles},
-		{"sw-allow-unadmitted", flags.allowUnadmitted}, {"sw-index", flags.index != ""}, {"target", flags.target != ""},
+		{"sw-no-update", flags.noUpdate},
+		{"sw-no-bincache", flags.noBincache},
+		{"sw-hash-all-files", flags.hashAllFiles},
+		{"sw-allow-unadmitted", flags.allowUnadmitted},
+		{"sw-index", flags.index != ""},
+		{"target", flags.target != ""},
 	} {
 		if option.set {
 			return &apierr.Error{Code: apierr.CapabilityUnsupported, Message: "run: --" + option.name + " requires a retained source, admission or private-file binding before intake"}
@@ -228,6 +233,8 @@ func hostLocalRun(ctx context.Context, runtime localRunRuntime, run string, requ
 	if err != nil {
 		return completion, err
 	}
+	ctx, cancel := award.HostContext(ctx)
+	defer cancel()
 	if err := ctx.Err(); err != nil {
 		return completion, err
 	}
@@ -243,7 +250,7 @@ func hostLocalRun(ctx context.Context, runtime localRunRuntime, run string, requ
 	}
 	session.input.RunID, session.input.RequestHash = input.RunID, input.RequestHash
 	session.input.SealedRequest, session.input.Accepted = input.SealedRequest, input.Accepted
-	session.input.GrantedRunner = award.Runner
+	session.input.GrantedRunner = input.GrantedRunner
 	session.input.Storage.RemoteCache = nil
 	if award.Request.Request.Options.CacheFrom.Value != "" {
 		if runtime.remoteCache == nil {
@@ -265,7 +272,8 @@ func hostLocalRun(ctx context.Context, runtime localRunRuntime, run string, requ
 }
 
 func localRunInput(run string, requestHash runspec.Hash, award controllerwire.ClaimedUnit) (nodehost.RunInput, error) {
-	input := nodehost.RunInput{RunID: run, RequestHash: string(award.Request.Hash)}
+	input := nodehost.RunInput{RunID: run, RequestHash: string(award.Request.Hash), GrantedRunner: award.Runner}
+	input.GrantedRunner.Labels = slices.Clone(award.Runner.Labels)
 	if award.Unit != capability.UnitTrigger || award.Purpose != capability.PurposeTrigger || award.Delivery != capability.DeliveryDirect || award.RunID != run || award.UnitID == "" || award.JobID != "" || award.Capability == "" || award.Binding.Kind != capability.BindingTrigger || award.Binding.RunID != run || award.Binding.NodeID != "" || award.Binding.Holder == "" || award.Binding.Generation <= 0 || award.LeaseExpiresAt.IsZero() {
 		return input, localRunProtocolError("controller returned an invalid local owner award")
 	}

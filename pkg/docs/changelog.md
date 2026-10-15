@@ -22,6 +22,7 @@ unlock.
 
 ### Fixed
 
+- **local and here hosting:** Apply awarded authority deadlines before host binding and retain the granted runner labels when a binder changes its copy.
 - **pipeline trigger:** Select Go or TypeScript from the selected pipeline commit's manifest before engine resolution. Working-tree changes and a different execution commit cannot select another SDK.
 - **here hosting:** Close partially returned session resources when host binding fails, and preserve cleanup failures alongside the original error.
 

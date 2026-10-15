@@ -4,6 +4,12 @@
 
 ## Amendment 1: private execution and claim wire
 
+`ClaimedUnit.HostContext` bounds source/host binding and execution by the earliest
+caller, binding, owner or parent-capability deadline. Local, here and runner
+hosting share it. An already expired award stops before binding. Lease expiry
+still belongs to renewal and the store clock. Host binding receives a separate
+copy of the granted runner labels.
+
 `JobResult.Failure` carries the complete persisted `nodeproto.JobFailure` as
 `{job, stage, error}`. It replaces the error-only `JobResult.Error` field.
 The adapter passes the failure to `NodeResult.Failure` and derives the masked

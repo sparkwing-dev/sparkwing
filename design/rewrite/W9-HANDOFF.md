@@ -1,5 +1,105 @@
 # W9 handoff
 
+## Continuation from efb4f6c61
+
+This section supersedes conflicting status below. The worktree started clean.
+W9 remains incomplete. Native factories, private execution-state transport and
+placement acceptance remain open. No Git write or Sparkwing executable ran.
+Lead-owned handoffs and amendments are unchanged.
+
+### Changes and invariants
+
+- Invariant: host binding and execution cannot outlive the caller or the awarded
+  binding, owner or parent-capability deadline. ClaimedUnit.HostContext owns the
+  shared context bound. Local and here hosting apply it before binding. W8's
+  Hosting uses it in place of its duplicate selection block. An expired award
+  stops before binding. Cancellation during binding still closes returned resources.
+  Renewable lease expiry stays with the lease keeper and store clock.
+- Invariant: binding cannot change the runner identity delivered to the host.
+  Local and here input preparation copy the granted labels before calling the
+  binder. Both host paths use that retained input. The generated regression
+  reproduces the shared-slice mutation before the fix.
+- Renamed runspec/step_windows_test.go to step_window_test.go. Go had treated the
+  former filename as Windows-only, so earlier Linux runs did not execute it.
+  Once enabled, it failed compilation because the literals initialized promoted
+  fields directly. The test now initializes Optional explicitly. Its 256
+  generated seal/acceptance/retry cases pass on Linux. Earlier reports' Linux
+  sealed-window test claims are superseded by this executed result.
+- Source docs, the C3 contract report, changelog and generated embedded docs now
+  describe the deadline and identity boundaries. No wire shape changed.
+
+Production Go versus HEAD: **34 added, 15 removed, net +19**. W9-owned paths
+account for **+28**. The shared W8 caller migration is net -9. W9 versus main
+is **-8,830**, within the -2,900 budget. Tests, testdata, acceptance and contract
+file paths are excluded. No legacy production file was deleted this session.
+The committed host/raw-client cuts and W9-CLIENT-CUT-FILES.md remain applicable.
+
+### Verification
+
+All Go commands use GOWORK=off, GOFLAGS=-buildvcs=false,
+GOCACHE=/tmp/sw-gocache and TMPDIR/GOTMPDIR=/tmp/sw-astra-W9. Tests use -p 4.
+
+- Whole-repository go build -p 4 ./... passes. Vet passes for CLI, clisurface,
+  controllerwire, controller/client, runners and runspec.
+- Full clisurface, controllerwire, controller/client, runners, runspec and
+  doccheck suites pass. Focused CLI local/standalone/here/trigger/owner tests,
+  release-workflow checks and environment-inventory checks pass.
+- TestOwnerHostsCannotOutliveAwardProperty and
+  TestOwnerBindingsCannotMutateGrantedRunnerProperty each pass 128 generated
+  combinations for both local and here hosting, including under -race.
+  TestHostContextLeavesRenewableLeaseLivenessToKeeper passes.
+- TestStepWindowsRemainSealedAcrossAcceptanceAndRetry actually runs and passes.
+  Doctor's pruned-run regression, TestSurface components and TypeScript bridge
+  packaging workflow/publication checks pass. Native Windows execution remains CI
+  evidence. No native acceptance cell or archived T1 port is newly completed.
+- Full cmd/sparkwing testing cannot finish in this sandbox. The existing
+  TestResolveSparks_WithManifest_WritesOverlay panics when httptest.NewServer
+  attempts a forbidden socket. The focused command suite above runs without it.
+- Commentcheck against main passes. Sleepcheck against main still reports the
+  unchanged tests/acceptance/session_flow_http_test.go:102 wall-clock comparison.
+  This session adds no sleep or waiting loop. Formatting, whitespace and embedded
+  documentation equality checks pass.
+
+### Remaining integration and contract requests
+
+The assignment audit below still applies. Lead decisions 07:40 items 1 and 6,
+Windows packaging and doctor are implemented. The portable step-window coverage
+correction above is new. No foreign contract change is requested this session.
+
+W2 still needs the elected wingd.LocalController factory and its owned store,
+queue, reconciliation, maintenance and authenticated HTTP/dashboard bindings.
+W3 NewNativeHost exists, but RemoteOwnerStore does not implement NativeHostStore:
+private RunSnapshot, acceptance, transitions, completion, steps and renewal need
+an authorized transport. W2's step decoder still uses step_id/status and an empty
+204 instead of StepReportRequest and StepRecorded. Public scheduling/detail
+projections cannot replace the private execution snapshots.
+
+Native local/here construction also needs captured-environment delivery,
+process delegation, authorized data/log bindings and joined owner policies.
+Numeric GitHub identity/source authority, source-bundle intake, a sealed here
+reason, schedules/pins/ticks, publication result-copy and debug release remain
+open. Publication failure must preserve the completed local verdict. Native
+HTTP/api.sock, Windows/Darwin/backend/placement evidence and real-repository QA
+remain with the lead and area owners. No unused factory or alternate authority
+transport was added to hide these gaps.
+
+### Shared files and friction
+
+Shared implementation change: internal/runners/hosting.go only, replacing its
+inline deadline selection with the W9 wire helper. Shared test change:
+internal/runspec/step_windows_test.go is replaced by step_window_test.go with the
+same property and valid embedded-field literals. Other implementation/tests are
+W9-owned. C3, source docs, CHANGELOG.md and generated pkg/docs copies are updated.
+
+Both new CLI properties failed before their production fixes. Enabling the
+step-window test exposed a separate compile error, then passed after correction.
+The socket denial and existing sleepcheck finding remain visible. The new helper
+extracts W8's existing award deadline rule because the three callers must share
+it. It adds no timeout value, limit, flag, environment variable or retry policy.
+Git still resolves Korey's identity without a core.worktree override. Scratch
+is removed at shutdown. The shared build cache is retained.
+
+
 ## Continuation from fad836987
 
 This section supersedes earlier status. The worktree started clean. W9 remains

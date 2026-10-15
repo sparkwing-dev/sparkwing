@@ -212,6 +212,12 @@ Hosting closes returned session resources before exiting, including when a
 binding fails after allocating them. A cleanup failure remains an incomplete
 handoff and preserves the binding or execution error.
 
+Local and here hosting use the earliest of the caller's deadline, the award's
+binding deadline, the owner deadline and the parent capability's expiry.
+Expired authority stops before host binding. Binding and hosting share that
+context. The host receives a copy of the awarded runner identity, so binding
+cannot change its labels.
+
 ### Team runners fetch source themselves
 
 Source acquisition clones the sealed SHA directly from the authorized Git host.

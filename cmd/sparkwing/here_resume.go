@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -143,6 +144,8 @@ func runHereAward(ctx context.Context, options client.EngineOptions, run string,
 	if err != nil {
 		return completion, incompleteHereHandoff(run, err)
 	}
+	ctx, cancel := award.HostContext(ctx)
+	defer cancel()
 	if err := ctx.Err(); err != nil {
 		return completion, incompleteHereHandoff(run, err)
 	}
@@ -165,7 +168,7 @@ func runHereAward(ctx context.Context, options client.EngineOptions, run string,
 		return completion, incompleteHereHandoff(run, err)
 	}
 	session.input.RunID, session.input.SealedRequest, session.input.RequestHash, session.input.Accepted = input.RunID, input.SealedRequest, input.RequestHash, input.Accepted
-	session.input.GrantedRunner = award.Runner
+	session.input.GrantedRunner = input.GrantedRunner
 	completion, runErr := session.host.Run(ctx, session.input)
 	if err := errors.Join(runErr, ctx.Err()); err != nil {
 		return completion, incompleteHereHandoff(run, err)
@@ -177,7 +180,8 @@ func runHereAward(ctx context.Context, options client.EngineOptions, run string,
 }
 
 func hereRunInput(run string, award controllerwire.ClaimedUnit) (nodehost.RunInput, error) {
-	input := nodehost.RunInput{RunID: run, RequestHash: string(award.Request.Hash)}
+	input := nodehost.RunInput{RunID: run, RequestHash: string(award.Request.Hash), GrantedRunner: award.Runner}
+	input.GrantedRunner.Labels = slices.Clone(award.Runner.Labels)
 	if award.Unit != capability.UnitTrigger || award.Purpose != capability.PurposeHere || award.Delivery != capability.DeliveryDirect || award.RunID != run || award.UnitID == "" || award.JobID != "" || award.Capability == "" || award.Binding.Kind != capability.BindingTrigger || award.Binding.RunID != run || award.Binding.Holder == "" || award.Binding.Generation <= 0 || !award.Request.Request.Options.Runner.Set || award.Request.Request.Options.Runner.Value.Kind != runspec.RunnerHere {
 		return input, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned an invalid here owner award"}
 	}
