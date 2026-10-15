@@ -17,6 +17,34 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
+// Segment separates decoded byte offsets and size from the stored payload's bytes and digest.
+type Segment struct {
+	Index       int64
+	Offset      int64
+	Size        int64
+	StoredBytes int64
+	Digest      string
+	ObjectKey   string
+}
+
+// SegmentCommit fences attribution and completeness to a job attempt or owner unit.
+type SegmentCommit struct {
+	Subject          blob.LogSubject
+	Actor            Actor
+	Segments         []Segment
+	Final            bool
+	IncompleteReason string
+	RetentionClass   string
+}
+
+// LogSegments is the persisted read model for one tagged subject, including an empty tail.
+type LogSegments struct {
+	Subject          blob.LogSubject
+	Segments         []Segment
+	Complete         bool
+	IncompleteReason string
+}
+
 type logStreamIdentity struct {
 	id                                            string
 	generation                                    int64
@@ -25,43 +53,20 @@ type logStreamIdentity struct {
 
 func logIdentity(subject blob.LogSubject) (logStreamIdentity, error) {
 	identity := logStreamIdentity{}
-	if subject.Team == "" || subject.RunID == "" {
-		return identity, authorityError(apierr.BadRequest, "log team and run are required")
+	if err := subject.Validate(); err != nil {
+		return identity, authorityError(apierr.BadRequest, err.Error())
 	}
-	switch subject.Kind {
-	case blob.LogJobAttempt:
-		a := subject.Attempt
-		if a == nil || subject.Unit != nil || a.Team != subject.Team || a.RunID != subject.RunID || a.NodeID == "" || a.Attempt <= 0 || a.Generation <= 0 {
-			return identity, authorityError(apierr.BadRequest, "invalid job log identity")
-		}
+	if subject.Kind == blob.LogJobAttempt {
 		identity.node = subject.Attempt.NodeID
 		identity.attempt = subject.Attempt.Attempt
 		identity.generation = subject.Attempt.Generation
-	case blob.LogOwnerUnit:
-		u := subject.Unit
-		if subject.Attempt != nil || u == nil || u.Generation <= 0 {
-			return identity, authorityError(apierr.BadRequest, "invalid owner log identity")
-		}
-		switch u.Kind {
-		case blob.LogTrigger, blob.LogPlan:
-			if u.Source != nil {
-				return identity, authorityError(apierr.BadRequest, "trigger and plan logs have no source")
-			}
-		case blob.LogEval:
-			if u.Source == nil || u.Source.NodeID == "" || u.Source.Generation <= 0 {
-				return identity, authorityError(apierr.BadRequest, "eval logs require a fenced source")
-			}
-		default:
-			return identity, authorityError(apierr.BadRequest, "unknown owner log unit")
-		}
+	} else {
 		identity.unit = string(subject.Unit.Kind)
 		identity.generation = subject.Unit.Generation
 		if subject.Unit.Source != nil {
 			identity.source = subject.Unit.Source.NodeID
 			identity.sourceGeneration = subject.Unit.Source.Generation
 		}
-	default:
-		return identity, authorityError(apierr.BadRequest, "unknown log identity")
 	}
 	body, err := json.Marshal(subject)
 	if err != nil {
@@ -72,7 +77,8 @@ func logIdentity(subject blob.LogSubject) (logStreamIdentity, error) {
 	return identity, nil
 }
 
-func (t *Tenant) recordSegments(ctx context.Context, commit SegmentCommit) error {
+// RecordSegments atomically commits contiguous segments and seals under the current writer fence.
+func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error {
 	if commit.Subject.Team != string(t.team) {
 		return authorityError(apierr.Forbidden, "log subject belongs to another team")
 	}
@@ -292,7 +298,8 @@ func checkOwnerLogWriterTx(ctx context.Context, tx *storeTx, team Team, subject 
 	return nil
 }
 
-func (t *Tenant) readLogSegments(ctx context.Context, actor Actor, request blob.LogReadRequest) (LogSegments, error) {
+// ReadLogSegments reauthorizes the exact tagged subject and selects its persisted byte ranges.
+func (t *Tenant) ReadLogSegments(ctx context.Context, actor Actor, request blob.LogReadRequest) (LogSegments, error) {
 	result := LogSegments{Subject: request.Subject}
 	if request.Subject.Team != string(t.team) {
 		return result, authorityError(apierr.Forbidden, "log subject belongs to another team")

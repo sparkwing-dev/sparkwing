@@ -23,6 +23,34 @@ replay, setup ordering and unrepresentable collection amounts. Verified event
 dispatch beyond checkout still requires C2's expanded proof and the matching
 payment receipt and setup correlation schema.
 
+## Persisted log readers
+
+`Store.LatestNodeLog`, `RunNodeLogs`, `NodeLogSettled` and the legacy `NodeLog`
+read model are removed. Controller log reads select tagged subjects through
+`Tenant.ReadRunView`, then use `logseg.CommittedReader` and `Tenant.ReadLogSegments`.
+Object listings and physical manifests grant no read authority. The reader binds
+its actor to the authenticated capability prefix or session digest. Each segment
+read and live-ring delivery rechecks current persisted authority. Log routes keep
+the existing response-byte egress meter and log download-cap exemption.
+
+Job reads select the newest attempt by ordinal and generation. Streams resume in
+that order. Whole-run reads include committed job, trigger, plan and eval subjects.
+Missing or corrupt committed bytes fail the read. Persisted incomplete seals add
+a loss line or a `log_incomplete` stream event. Completeness verifies bytes before
+reporting the persisted seal, and never changes the job result.
+
+`Segment`, `SegmentCommit`, `LogSegments`, `RecordSegments` and `ReadLogSegments`
+live in `pkg/store/result_logs.go`. Log subject validation uses
+`blob.LogSubject.Validate`. The remaining declarations in `result_contract.go`
+cover steps, annotations and summaries.
+
+The controller tests drive the final SQLite claim, start, segment commit and
+terminal transition through the reader. Revoking its capability refuses the next
+read before physical I/O. Generated fake-boundary tests cover arbitrary payloads,
+foreign actors and authority ending between inventory selection and segment read.
+Authenticated `LogTransport` signing/verification and host subject construction
+remain separate integrations.
+
 ## Log byte accounting
 
 `Segment.Offset` and `Segment.Size` describe decoded log bytes. `StoredBytes`
@@ -1915,17 +1943,24 @@ The existing `Store`, `Tenant`, `Operator`, `Open`, `ForTeam`, `AsOperator` and
 | `StepReport` | StepReport fences step state to the attempt that produced it. |
 | `AnnotationWrite` | AnnotationWrite carries already masked text; the store rechecks the shared annotation byte limit without truncation. |
 | `SummaryWrite` | SummaryWrite carries masked job or step markdown under the writer's live binding. |
-| `Segment` | Segment separates decoded byte offsets and size from the stored payload's bytes and digest. |
-| `SegmentCommit` | Fences immutable segments and completeness to a tagged job attempt or owner unit. |
 | `Tenant.RecordStep` | RecordStep refuses stale attempts instead of letting delayed reports replace a later attempt's steps. |
 | `Tenant.WriteAnnotation` | WriteAnnotation refuses an oversized masked annotation so the store cannot split UTF-8 or reveal a raw suffix. |
 | `Tenant.WriteSummary` | WriteSummary stores job or step markdown only after the claim binding is rechecked. |
-| `Tenant.RecordSegments` | RecordSegments checks contiguity and attribution; incomplete logs never change the job's result. |
 | `Tenant.CommitRecord` | CommitRecord checks all member existence and reference authority before making any digest reachable. |
 | `Tenant.CopyMemo` | CopyMemo creates destination output and manifest edges atomically from a server-scoped cache hit. |
 | `Tenant.LookupRecord` | LookupRecord adds no authority merely because a key exists; all returned bytes must be in the caller's read set. |
 | `Tenant.LookupMemo` | LookupMemo applies the claim's repo/ref/pipeline scope and the verified default-branch fallback. |
 | `Tenant.LookupDepcache` | LookupDepcache follows the single restore-order table and runs cold on absent or invalid bytes. |
+
+### pkg/store/result_logs.go
+
+| Export | Purpose |
+|---|---|
+| `Segment` | Separates decoded ranges from stored bytes and digest. |
+| `SegmentCommit` | Binds a contiguous batch and optional seal to its writer and tagged subject. |
+| `LogSegments` | Returns authorized persisted ranges and seal state. |
+| `Tenant.RecordSegments` | Commits immutable segments and seals under the current writer fence. |
+| `Tenant.ReadLogSegments` | Rechecks authority for the exact subject before selecting byte ranges. |
 
 ### pkg/store/schema_contract.go
 

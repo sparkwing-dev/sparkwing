@@ -90,40 +90,17 @@ func TestTheLiveRingStartsOverForANewAttempt(t *testing.T) {
 }
 
 func TestNodeLogSettlesOnlyWithNoRetryToCome(t *testing.T) {
-	f := newLogSegmentFixture(t)
-	ctx := t.Context()
-	set := func(q string) {
-		t.Helper()
-		if _, err := f.st.DB().ExecContext(ctx, q); err != nil {
-			t.Fatal(err)
-		}
-	}
-	settled := func() bool {
-		t.Helper()
-		got, found, err := f.st.NodeLogSettled(ctx, store.DefaultTeam, "run-d", "a")
-		if err != nil || !found {
-			t.Fatalf("settled = %v, %v, %v", got, found, err)
-		}
-		return got
-	}
-	for name, q := range map[string]string{
-		"retry backoff with no budget recorded": `UPDATE nodes SET status = 'done', outcome = 'failed', attempts_consumed = 1, retry_budget = 0 WHERE run_id = 'run-d' AND node_id = 'a'`,
-		"inline failure":                        `UPDATE nodes SET status = 'done', outcome = 'failed', attempts_consumed = 0, retry_budget = 0 WHERE run_id = 'run-d' AND node_id = 'a'`,
-	} {
-		set(q)
-		if settled() {
-			t.Fatalf("%s: a failed node of a running run reads as settled", name)
-		}
-	}
-	set(`UPDATE runs SET status = 'failed' WHERE id = 'run-d'`)
-	if !settled() {
-		t.Fatal("a failed node of a finished run reads as unsettled")
-	}
-	set(`UPDATE runs SET status = 'running' WHERE id = 'run-d'`)
-	for _, outcome := range []string{"success", "skipped", "cancelled"} {
-		set(`UPDATE nodes SET outcome = '` + outcome + `' WHERE run_id = 'run-d' AND node_id = 'a'`)
-		if !settled() {
-			t.Fatalf("a node done with outcome %s reads as unsettled", outcome)
+	now := time.Unix(100, 0)
+	for _, outcome := range []store.NodeState{store.NodeFailed, store.NodeSuccess, store.NodeSkipped, store.NodeCancelled} {
+		for _, finished := range []*time.Time{nil, &now} {
+			view := store.RunView{Snapshot: store.RunSnapshot{Run: store.RunRow{FinishedAt: finished}, Nodes: []store.NodeRow{{Ref: store.NodeRef{RunID: "run", NodeID: "job"}, Status: store.StatusDone, Outcome: outcome}}}}
+			settled, known := logNodeSettled(view, "job")
+			if want := finished != nil || outcome != store.NodeFailed; !known || settled != want {
+				t.Fatalf("outcome=%s finished=%v: settled=%v known=%v", outcome, finished, settled, known)
+			}
+			if settled, known := logNodeSettled(view, "missing"); settled || known {
+				t.Fatal("unknown job settled")
+			}
 		}
 	}
 }
