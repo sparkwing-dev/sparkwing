@@ -12,7 +12,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 )
 
-func acquire(ctx context.Context, spec Spec, options Options) (entry *Entry, err error) {
+// Acquire installs the acquired checkout with its verified selected engine.
+func Acquire(ctx context.Context, spec Spec, options Options) (entry *Entry, err error) {
 	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}

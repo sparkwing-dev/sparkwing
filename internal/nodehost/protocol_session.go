@@ -39,6 +39,7 @@ type ProtocolSessionConfig struct {
 	ParseFrame      func([]byte) (nodeproto.Frame, error)
 	ValidateRequest func(nodeproto.Request) error
 	cleanupEnv      []string
+	grace           time.Duration
 }
 
 // Start launches an attempt with its validated grant and shared environment.
@@ -159,6 +160,9 @@ func StartProtocolSession(ctx context.Context, cfg ProtocolSessionConfig) (sessi
 	if len(cfg.Command) == 0 || cfg.Command[0] == "" {
 		return nil, errors.New("SDK process requires a command")
 	}
+	if cfg.grace <= 0 {
+		cfg.grace = procgroup.DefaultTerminationGrace
+	}
 	if cfg.ParseFrame == nil {
 		cfg.ParseFrame = nodeproto.ParseFrame
 	}
@@ -184,7 +188,7 @@ func StartProtocolSession(ctx context.Context, cfg ProtocolSessionConfig) (sessi
 	cmd := pipelineentry.Command(cfg.Command).Exec()
 	cmd.Dir, cmd.Env = cfg.Directory, append([]string{}, cfg.Environment...)
 	cmd.Stdout, cmd.Stderr = child[2], child[3]
-	process, err := startProtocolProcess(cmd, child[0], child[1])
+	process, err := startSDKProcess(cmd, child[0], child[1])
 	closeProtocolFiles(child)
 	if err != nil {
 		closeProtocolFiles(parent)
@@ -242,13 +246,18 @@ func (s *ProtocolSession) Request(ctx context.Context, request nodeproto.Request
 			return nodeproto.Reply{}, err
 		}
 	case <-ctx.Done():
+		// safety: the SDK can consume a full frame before its writer publishes completion.
+		draining := time.NewTimer(s.cfg.grace)
+		defer draining.Stop()
 		select {
 		case err := <-written:
 			if err != nil {
 				s.failProtocol(err)
 				return nodeproto.Reply{}, err
 			}
-		default:
+		case <-s.done:
+			return nodeproto.Reply{}, errors.Join(context.Cause(ctx), s.protocolFailure())
+		case <-draining.C:
 			s.failProtocol(protocolSessionError(apierr.ProtocolError, "SDK request write interrupted"))
 			<-s.joined
 			return nodeproto.Reply{}, context.Cause(ctx)
@@ -390,6 +399,9 @@ func (s *ProtocolSession) readProtocolFrames(file *os.File) {
 func (s *ProtocolSession) deliverProtocolReply(reply nodeproto.Reply) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.failure != nil && !errors.Is(s.failure, errProtocolSessionClosed) {
+		return nil
+	}
 	call, ok := s.pending[reply.ID]
 	if !ok {
 		return protocolSessionError(apierr.ProtocolError, "SDK sent a duplicate or unsolicited reply")
@@ -491,17 +503,17 @@ func (s *ProtocolSession) watchProtocolProcess() {
 		}
 	}
 	_ = s.requests.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), limits.CleanupTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*s.cfg.grace+reapTimeout)
 	defer cancel()
 	if s.awaitProtocol(s.process.LeaderExited()) {
-		s.reapErr = s.process.Finish(ctx, procgroup.DefaultTerminationGrace)
+		s.reapErr = s.process.Finish(ctx, s.cfg.grace)
 	} else {
-		s.reapErr = s.process.Terminate(ctx, procgroup.DefaultTerminationGrace)
+		s.reapErr = s.process.Terminate(ctx, s.cfg.grace)
 	}
 }
 
 func (s *ProtocolSession) awaitProtocol(done <-chan struct{}) bool {
-	timer := time.NewTimer(procgroup.DefaultTerminationGrace)
+	timer := time.NewTimer(s.cfg.grace)
 	defer timer.Stop()
 	select {
 	case <-done:

@@ -273,7 +273,7 @@ func expansionLive(b Binding, state BindingState, now time.Time) bool {
 		expansion.Lease.ID == "" || expansion.Lease.Holder == "" || expansion.Lease.Generation <= 0 ||
 		state.RunCancelled || state.RunFinished || state.FinishedAt == nil ||
 		b.RunID == "" || b.RunID != state.Current.RunID || b.NodeID == "" || b.NodeID != state.Current.NodeID ||
-		b.Generation <= 0 || b.Generation != state.Current.Generation || !now.Before(expansion.ExpiresAt) {
+		b.Generation < 0 || b.Generation != state.Current.Generation || !now.Before(expansion.ExpiresAt) {
 		return false
 	}
 	if expansion.Lease.Kind == UnitEval {

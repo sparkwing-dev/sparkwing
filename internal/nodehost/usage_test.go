@@ -87,7 +87,7 @@ func TestUsageWithoutSessionSnapshotsFallsBackToLeader(t *testing.T) {
 	if err := cmd.Run(); err != nil {
 		t.Fatal(err)
 	}
-	s := startUsage(10, func(int) (map[int]proc, bool) { return nil, false })
+	s := startUsage(10, func(int) (map[int]proc, bool) { return nil, false }, usageSampleInterval)
 	u := s.Stop(cmd.ProcessState)
 	if u.SessionWide {
 		t.Fatal("SessionWide with no successful snapshot")

@@ -13,8 +13,16 @@ import (
 )
 
 func (h *nodeExecutor) steps(ctx, parent context.Context, session *executorSession, input NodeInput, spec runspec.Spec, job nodeproto.JobSpec) (json.RawMessage, error) {
+	children := map[string][]string{}
+	for _, step := range job.Steps {
+		for _, need := range step.Needs {
+			children[need] = append(children[need], step.ID)
+		}
+	}
+	options := spec.Resolved.Settings.Options
 	graph := stepGraph{
-		job: job,
+		skips: rangeSkips(job.Steps, children, options.StartAt.Value, options.StopAt.Value),
+		job:   job,
 		step: func(ctx context.Context, step nodeproto.StepSpec, settled []string) (json.RawMessage, string, string, error) {
 			return h.step(ctx, session, input, spec, step, settled)
 		},

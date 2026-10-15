@@ -14,6 +14,7 @@ import (
 
 // NativeProcesses binds native SDK startup to the delegated process's services and cleanup ledger.
 type NativeProcesses struct {
+	compute     processCompute
 	Authorities *ProcessAuthorities
 	Masks       *MaskRegistry
 	URL         string
@@ -45,7 +46,7 @@ func (p *NativeProcesses) Start(ctx context.Context, input NodeInput, activity E
 	if err != nil {
 		return nil, err
 	}
-	return config.Start(ctx, input, activity)
+	return p.compute.start(input.Accepted.RunID, func() (ExecutorProcess, error) { return config.Start(ctx, input, activity) })
 }
 
 // StartEvaluation launches an owner closure with its live delegated services.
@@ -54,15 +55,17 @@ func (p *NativeProcesses) StartEvaluation(ctx context.Context, input EvaluationI
 	if err != nil {
 		return nil, err
 	}
-	return config.StartEvaluation(ctx, input)
+	return p.compute.start(input.Accepted.RunID, func() (ExecutorProcess, error) { return config.StartEvaluation(ctx, input) })
 }
 
 // StartPlanning uses the shared environment and planner's secret-discovery log gate.
 func (p *NativeProcesses) StartPlanning(ctx context.Context, input PlanningProcessInput, log func(context.Context, nodeproto.FrameLog) error) (ExecutorProcess, error) {
 	config := p.Session
 	config.Revoke, config.RunCleanups = nil, nil
-	return config.StartPlanning(ctx, input, log)
+	return p.compute.start(input.Run.RunID, func() (ExecutorProcess, error) { return config.StartPlanning(ctx, input, log) })
 }
+
+func (p *NativeProcesses) computing(runID string) bool { return p.compute.active(runID) }
 
 func (p *NativeProcesses) configuration(ctx context.Context, binding nodeproto.ProcessBinding, revoke func() error, activity ExecutorActivity) (ProtocolSessionConfig, error) {
 	config := p.Session

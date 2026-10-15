@@ -94,3 +94,11 @@ func releaseCapacityTx(ctx context.Context, tx *storeTx, team Team, runID, nodeI
 	_, err := tx.ExecContext(ctx, `DELETE FROM concurrency_waiters WHERE team = ? AND run_id = ? AND (? = '' OR node_id = ?)`, team, runID, nodeID, nodeID)
 	return err
 }
+
+func rebindCapacityGenerationTx(ctx context.Context, tx *storeTx, team Team, ref NodeRef, previous, generation int64) error {
+	if err := lockBoundCapacityTx(ctx, tx, team, ref.RunID, ref.NodeID, false); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE concurrency_holders SET generation=? WHERE team=? AND run_id=? AND node_id=? AND generation=? AND lease_expires_at>? AND superseded=0`, generation, team, ref.RunID, ref.NodeID, previous, tx.now().UnixNano())
+	return err
+}

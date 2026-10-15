@@ -19,6 +19,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 )
 
+var logLevels = map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
+
 // ProcessServices supplies one live process's accepted declaration and record writers.
 // Writers recheck Authorized in their transaction. Every sink uses Masks' shared masker.
 type ProcessServices struct {
@@ -64,7 +66,7 @@ func RegisterProcessServices(router ProcessEndpointRegistrar, resolve func(conte
 		{http.MethodDelete, "/node/v1/cleanups/{cleanup}"},
 	} {
 		path := route.path
-		endpoint := controller.Endpoint{Method: route.method, Pattern: path, Authentication: capability.AuthCapability, Decode: serviceEvidence}
+		endpoint := controller.Endpoint{Method: route.method, Pattern: path, Authentication: capability.AuthCapability, Decode: serviceEvidence, ResolveTarget: processServiceTarget}
 		endpoint.Handle = func(w http.ResponseWriter, request *http.Request, auth capability.Authorized) error {
 			service, err := resolve(request.Context(), auth)
 			if err != nil {
@@ -93,12 +95,12 @@ func RegisterProcessServices(router ProcessEndpointRegistrar, resolve func(conte
 				request = request.WithContext(ctx)
 			}
 			if err := context.Cause(request.Context()); err != nil {
-				return err
+				return processServiceError(err, service.Masks.mask)
 			}
 			body, status, err := service.serve(request, auth, path)
 			err = errors.Join(err, context.Cause(request.Context()))
 			if err != nil {
-				return maskHostError(err, service.Masks.mask)
+				return processServiceError(err, service.Masks.mask)
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Cache-Control", "no-store")
@@ -113,6 +115,36 @@ func RegisterProcessServices(router ProcessEndpointRegistrar, resolve func(conte
 		}
 	}
 	return nil
+}
+
+func processServiceError(err error, mask func(string) string) error {
+	var canonical *apierr.Error
+	if !errors.As(err, &canonical) {
+		switch {
+		case errors.Is(err, context.DeadlineExceeded):
+			err = errors.Join(executorError(apierr.DeadlineExceeded, "process service deadline exceeded"), err)
+		case errors.Is(err, context.Canceled):
+			err = errors.Join(executorError(apierr.Cancelled, "process service was cancelled"), err)
+		}
+	}
+	return maskHostError(err, mask)
+}
+
+func processServiceTarget(principal capability.Principal, target capability.Target) (capability.Target, error) {
+	bound := principal.Capability.Binding
+	if target.Team == "" {
+		target.Team = principal.Capability.Team
+	}
+	if target.RunID == "" {
+		target.RunID = bound.RunID
+	}
+	if target.NodeID == "" {
+		target.NodeID = bound.NodeID
+	}
+	if target.BodyRunID == "" {
+		target.BodyRunID = bound.RunID
+	}
+	return target, nil
 }
 
 func serviceEvidence(request *http.Request) (capability.RequestEvidence, error) {

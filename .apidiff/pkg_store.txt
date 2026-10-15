@@ -354,6 +354,7 @@ const CauseCancel TransitionCause = "cancel"
 const CauseDependency TransitionCause = "dependency"
 const CauseLeaseLapse TransitionCause = "lease_lapse"
 const CauseMaterialize TransitionCause = "materialize"
+const CauseOwnerPolicy TransitionCause = "owner_policy"
 const CausePublish TransitionCause = "publish"
 const CauseQueueTimeout TransitionCause = "queue_timeout"
 const CauseRelease TransitionCause = "release"
@@ -1281,6 +1282,7 @@ const GuardExpired EdgeGuard = "expired_claim"
 const GuardHolder EdgeGuard = "live_exact_holder"
 const GuardMaterialize EdgeGuard = "unclaimed_or_self_claimed_and_readable_source"
 const GuardOwner EdgeGuard = "live_owner"
+const GuardOwnerPolicy EdgeGuard = "typed_owner_policy"
 const GuardPublication EdgeGuard = "live_run_bound_publisher_and_publish_intake"
 const GuardQueueDeadline EdgeGuard = "queue_or_owner_deadline"
 const GuardRetry EdgeGuard = "retryable_failure_with_budget"
@@ -1838,6 +1840,11 @@ type OwnerLeaseRef struct {
 	Holder           string
 	Generation       int64
 }
+type OwnerPolicyKind string
+type OwnerPolicyResult struct {
+	Kind       OwnerPolicyKind
+	Generation int64
+}
 const OwnerTrigger OwnerLeaseKind = "trigger"
 var PaidTierQuota = StorageQuota{
 	Tier:             StorageTierPaid,
@@ -1927,6 +1934,7 @@ type PlanAcceptance struct {
 	Actor Actor
 	Seal  runspec.SealInput
 }
+func PlanDependencyClosure(plan nodeproto.PlanDoc, selected []string) (map[string]bool, error)
 const PlanNodeID = "plan"
 type PlanPipelineRef struct {
 	Pipeline string
@@ -1935,6 +1943,10 @@ type PlanPipelineRef struct {
 type PlanSecretOpener interface {
 	OpenPlanSecret(context.Context, Team, Secret) (string, error)
 }
+const PolicyAdmissionFail OwnerPolicyKind = "admission_fail"
+const PolicyAdmissionSkip OwnerPolicyKind = "admission_skip"
+const PolicyApprovalBypass OwnerPolicyKind = "approval_bypass"
+const PolicyQueueTimeout OwnerPolicyKind = "admission_queue_timeout"
 const PoolHeartbeatInterval = 3 * time.Second
 const PrefixLen = 12
 type ProfileObservation struct {
@@ -2188,6 +2200,7 @@ const RunFilterVersion = "3"
 const RunFinish RunCause = "finish"
 const RunOwnerLost RunCause = "owner_lost"
 const RunPending RunState = "pending"
+const RunPolicyRefused RunCause = "policy_refused"
 const RunPublish RunCause = "publish"
 type RunPullRequest struct {
 	Number  int
@@ -2233,6 +2246,7 @@ const RunStart RunCause = "start"
 type RunState string
 const RunSuccess RunState = "success"
 type RunTransition struct {
+	OwnerPolicy *OwnerPolicyResult
 	RunID       string
 	To          RunState
 	Actor       Actor
@@ -2300,6 +2314,8 @@ type ScheduleNode struct {
 	Generation      int64
 	Ready           bool
 	Claimed         bool
+	CancelRequested bool
+	CancelReason    string
 	Deps            []string
 	DepsIfPresent   []string
 	NeedsGenerated  []string
@@ -2991,7 +3007,7 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 func (t *Tenant) AcceptPlan(ctx context.Context, request PlanAcceptance) (AcceptedPlan, error)
 func (t *Tenant) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, start ExecutionStart) error
 func (t *Tenant) AcknowledgeRunEffect(ctx context.Context, delivery EffectDelivery) error
-func (t *Tenant) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotRequest) (AcquireSlotResponse, error)
+func (t *Tenant) AcquireCapacity(ctx context.Context, req AcquireSlotRequest, binding CapacityBinding, actor Actor) (AcquireSlotResponse, error)
 func (t *Tenant) ActiveConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (t *Tenant) AddGitHubRunnerBinding(ctx context.Context, b GitHubRunnerBinding, now time.Time) (GitHubRunnerBinding, error)
 func (t *Tenant) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample MetricSample) error
@@ -3012,7 +3028,6 @@ func (t *Tenant) BlobRecords(manifests BlobManifestReader) blob.RecordStore
 func (t *Tenant) BusinessEvents(ctx context.Context, kind string) (_ []BusinessEvent, err error)
 func (t *Tenant) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error)
 func (t *Tenant) CancelPendingTrigger(ctx context.Context, id string) (bool, error)
-func (t *Tenant) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (t *Tenant) ChargeDownload(ctx context.Context, c DownloadCharge) (_ DownloadCharged, err error)
 func (t *Tenant) CheckDataAccess(ctx context.Context, authorized capability.Authorized, target capability.DataTarget) error
 func (t *Tenant) ClearCronOverride(ctx context.Context, id string, now time.Time) error
@@ -3072,7 +3087,6 @@ func (t *Tenant) FinishRunIfActive(ctx context.Context, runID, status, errMsg st
 func (t *Tenant) FinishRunsIfActive(ctx context.Context, runIDs []string, status, errMsg string) error
 func (t *Tenant) FinishTrigger(ctx context.Context, id string) error
 func (t *Tenant) FinishTriggerAtGeneration(ctx context.Context, id string, seq int64) (bool, error)
-func (t *Tenant) ForceReleaseSupersededHolders(ctx context.Context, key string) ([]ConcurrencyHolder, error)
 func (t *Tenant) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*DebugPause, error)
 func (t *Tenant) GetApproval(ctx context.Context, runID, nodeID string) (*Approval, error)
 func (t *Tenant) GetConcurrencyState(ctx context.Context, key string) (*ConcurrencyState, error)
@@ -3106,7 +3120,6 @@ func (t *Tenant) GitHubCommitTriggers(ctx context.Context, repo GitHubRepo, sha 
 func (t *Tenant) GitHubRunnerBinding(ctx context.Context, repositoryID int64) (GitHubRunnerBinding, error)
 func (t *Tenant) GitHubRunnerBindings(ctx context.Context) (_ []GitHubRunnerBinding, err error)
 func (t *Tenant) GitHubRunnerCredentialPush(ctx context.Context, prefix string) (GitHubRunnerPush, error)
-func (t *Tenant) HeartbeatConcurrencySlot(ctx context.Context, key, holderID string, lease time.Duration) (expires time.Time, superseded bool, err error)
 func (t *Tenant) HeartbeatTrigger(ctx context.Context, id string, lease time.Duration) (cancelled bool, err error)
 func (t *Tenant) HoldByOperator(ctx context.Context, actor, reason string, now time.Time) (string, error)
 func (t *Tenant) Info(ctx context.Context) (TeamInfo, error)
@@ -3153,7 +3166,6 @@ func (t *Tenant) OldestWaitingReadyNodeForPrincipal(
 func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now time.Time, hold time.Duration) (_ string, err error)
 func (t *Tenant) OwnsRun(ctx context.Context, id string) (bool, error)
 func (t *Tenant) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)
-func (t *Tenant) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error)
 func (t *Tenant) PutGitCredential(ctx context.Context, c GitCredential, now time.Time) (_ GitCredential, err error)
 func (t *Tenant) PutGitHubAppAutomation(ctx context.Context, a GitHubAppAutomation, now time.Time) error
 func (t *Tenant) PutGitHubAppTrigger(ctx context.Context, tr GitHubAppTrigger, now time.Time) (GitHubAppTrigger, error)
@@ -3177,10 +3189,8 @@ func (t *Tenant) RecordProfileObservation(ctx context.Context, pipeline, nodeID 
 func (t *Tenant) RecordSegments(ctx context.Context, commit SegmentCommit) error
 func (t *Tenant) RecordStep(ctx context.Context, report StepReport) error
 func (t *Tenant) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error
-func (t *Tenant) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error)
 func (t *Tenant) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error)
 func (t *Tenant) ReleaseClaimSecret(ctx context.Context, tok ClaimToken, name string, now time.Time) (_ *Secret, err error)
-func (t *Tenant) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error)
 func (t *Tenant) ReleaseCreditFreezes(ctx context.Context, disputeID, actor, reason string, now time.Time) (int64, error)
 func (t *Tenant) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (t *Tenant) ReleaseGitCredential(ctx context.Context, tok ClaimToken, rel GitCredentialRelease, now time.Time) (_ GitCredential, _ SourceSpend, err error)
@@ -3203,9 +3213,8 @@ func (t *Tenant) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, err
 func (t *Tenant) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error)
 func (t *Tenant) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error)
 func (t *Tenant) ResolveBlobAuthority(ctx context.Context, selector blob.Authority, grant capability.Grant) (blob.Authority, error)
-func (t *Tenant) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, leaderNodeID string) ([]ConcurrencyWaiter, error)
+func (t *Tenant) ResolveCapacityWaiter(ctx context.Context, key string, binding CapacityBinding, actor Actor) (WaiterResolution, error)
 func (t *Tenant) ResolveCronDue(ctx context.Context, id string, cursor time.Time, next *time.Time, fire *CronFire, now time.Time) (err error)
-func (t *Tenant) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (WaiterResolution, error)
 func (t *Tenant) RetryRunEffect(ctx context.Context, delivery EffectDelivery, nextAt time.Time) error
 func (t *Tenant) RevokeAuthority(ctx context.Context, actor Actor, target capability.AuthorityRef) error
 func (t *Tenant) RevokeTeamToken(ctx context.Context, prefix string, now time.Time) error
@@ -3243,7 +3252,6 @@ func (t *Tenant) StorageQuota(ctx context.Context) (StorageQuota, error)
 func (t *Tenant) StorageRetainedBytes(ctx context.Context) (int64, error)
 func (t *Tenant) StorageStanding(ctx context.Context) (_ StorageStanding, err error)
 func (t *Tenant) StorageUsageFor(ctx context.Context, runID, month string) (StorageUsage, error)
-func (t *Tenant) SupersedeCapacity(ctx context.Context, key, holderID string, actor Actor) error
 func (t *Tenant) Team() Team
 func (t *Tenant) TeamOwnerEmails(ctx context.Context) (_ []string, err error)
 func (t *Tenant) TeamToken(ctx context.Context, prefix string) (Token, error)
@@ -3307,6 +3315,7 @@ const TokenPrefixTeam = "swt"
 const TokenPrefixUser = "swu"
 type TransitionCause string
 type TransitionExtra struct {
+	OwnerPolicy *OwnerPolicyResult
 	Result      *NodeResult
 	Materialize *MaterializeSource
 	Approval    *ApprovalResolution
@@ -3482,6 +3491,7 @@ type VerifiedUploadCommit struct {
 const WaitHolder ReconcileKind = "wait_holder"
 const WaiterCached WaiterStatus = "cached"
 const WaiterCancelled WaiterStatus = "cancelled"
+const WaiterExpired WaiterStatus = "expired"
 const WaiterLeaderFinished WaiterStatus = "leader_finished"
 const WaiterPromoted WaiterStatus = "promoted"
 type WaiterResolution struct {

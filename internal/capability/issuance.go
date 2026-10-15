@@ -259,7 +259,8 @@ func narrowBinding(parent, child Binding) bool {
 			return false
 		}
 	}
-	if parent.Generation != 0 && child.Generation != parent.Generation || parent.Attempt != 0 && child.Attempt != parent.Attempt ||
+	if (parent.Generation != 0 || parent.Expansion != nil) && child.Generation != parent.Generation ||
+		(parent.Attempt != 0 || parent.Expansion != nil) && child.Attempt != parent.Attempt ||
 		parent.Holder != "" && child.Holder != parent.Holder {
 		return false
 	}
@@ -291,7 +292,7 @@ func narrowOwnerExpansion(parent Principal, child DelegateSpec) bool {
 	if !isClaim(parent) || p.Unit != UnitTrigger || p.UnitID == "" || b.Kind != BindingTrigger || b.NodeID != "" ||
 		(p.Purpose != PurposeTrigger && p.Purpose != PurposeHere) || b.Expansion != nil || b.Generation <= 0 || b.Holder == "" ||
 		!slices.Contains(p.Grants, ExpansionSubmit) || child.Audience != Controller ||
-		!subset(child.Grants, []Grant{ExpansionSubmit, DataRead}) || source.Kind != BindingNode || source.NodeID == "" || source.Generation <= 0 || source.Expansion == nil {
+		!subset(child.Grants, []Grant{ExpansionSubmit, DataRead}) || source.Kind != BindingNode || source.NodeID == "" || source.Generation < 0 || source.Attempt < 0 || source.Expansion == nil {
 		return false
 	}
 	owner := LeaseRef{Kind: UnitTrigger, ID: p.UnitID, Generation: b.Generation, Holder: b.Holder}
@@ -301,7 +302,8 @@ func narrowOwnerExpansion(parent Principal, child DelegateSpec) bool {
 func narrowOwnerExpansionData(parent Capability, child DelegateSpec) bool {
 	p, c := parent.Data, child.Data
 	if p == nil || c == nil || p.Use != DataClaim || c.Use != DataExpansion || p.RunID != parent.Binding.RunID ||
-		p.NodeID != "" || p.Attempt != 0 || p.Generation != 0 && p.Generation != parent.Binding.Generation || c.WriteRef != "" {
+		p.NodeID != "" || p.Attempt != 0 || p.Generation != 0 && p.Generation != parent.Binding.Generation || c.WriteRef != "" ||
+		c.Generation != child.Binding.Generation || c.Attempt != child.Binding.Attempt {
 		return false
 	}
 	source := *p
@@ -320,7 +322,8 @@ func narrowData(parent, child *DataScope) bool {
 	return (child.WriteRef == "" || child.WriteRef == parent.WriteRef) && subset(child.ReadRefs, parent.ReadRefs) &&
 		(!parent.VerifiedDefaultOnly || child.VerifiedDefaultOnly) &&
 		(parent.RunID == "" || child.RunID == parent.RunID) && (parent.NodeID == "" || child.NodeID == parent.NodeID) &&
-		(parent.Attempt == 0 || child.Attempt == parent.Attempt) && (parent.Generation == 0 || child.Generation == parent.Generation)
+		(parent.Attempt == 0 && parent.Use != DataExpansion || child.Attempt == parent.Attempt) &&
+		(parent.Generation == 0 && parent.Use != DataExpansion || child.Generation == parent.Generation)
 }
 
 // ValidateProvisionSeed confines supplied presentations to the bootstrap origin.

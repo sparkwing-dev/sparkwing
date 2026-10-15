@@ -2,25 +2,22 @@ package nodehost
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
-	"unicode/utf8"
 
-	"github.com/sparkwing-dev/sparkwing/internal/apierr"
-	"github.com/sparkwing-dev/sparkwing/internal/lease"
+	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 const testRunID = "run-sched"
@@ -35,137 +32,58 @@ func openStore(t *testing.T) *store.Store {
 	return st
 }
 
-type fakeExec struct {
-	mu     sync.Mutex
-	calls  []string
-	bodies map[string]Executor
-	seen   map[string]*NodeRun
-}
-
-func (f *fakeExec) run(ctx context.Context, n *NodeRun) Result {
-	f.mu.Lock()
-	f.calls = append(f.calls, n.Plan.ID)
-	if f.seen == nil {
-		f.seen = map[string]*NodeRun{}
-	}
-	f.seen[n.Plan.ID] = n
-	body := f.bodies[n.Plan.ID]
-	f.mu.Unlock()
-	if body == nil {
-		return Result{Outcome: sparkwing.Success}
-	}
-	return body(ctx, n)
-}
-
-func (f *fakeExec) ran(id string) bool {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return slices.Contains(f.calls, id)
-}
-
-func hostDoc(t *testing.T, ctx context.Context, st storage.StateStoreOld, doc nodeproto.PlanDoc, exec Executor) RunResult {
-	t.Helper()
-	if err := st.CreateRun(ctx, store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
-		return RunResult{Status: "failed", Err: err}
-	}
-	if err := validateNodes(doc.Jobs, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}); err != nil {
-		return RunResult{Status: "failed", Err: err}
-	}
-	return hostAccepted(t, ctx, st, doc, exec)
-}
-
-func hostAccepted(t *testing.T, ctx context.Context, st storage.StateStoreOld, doc nodeproto.PlanDoc, exec Executor) RunResult {
-	t.Helper()
-	cfg := Config{Execute: exec}
-	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), adds: make(chan addRequest), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
-	res := RunResult{RunID: testRunID, Nodes: map[string]Result{}}
-	s := &scheduler{run: run, results: res.Nodes, started: map[string]bool{}, exec: chain(&cfg)}
-	if err := s.add(ctx, ctx, doc.Jobs, nil); err != nil {
-		return RunResult{Status: "failed", Err: err}
-	}
-	s.loop(ctx)
-	res.Order = s.order
-	res.Status, res.Err = s.verdict(ctx)
-	return res
-}
-
-func awaitHostedResult(t *testing.T, ctx context.Context, done <-chan RunResult) RunResult {
-	t.Helper()
-	select {
-	case result := <-done:
-		return result
-	case <-ctx.Done():
-		t.Fatal("host did not finish:", context.Cause(ctx))
-		return RunResult{}
-	}
-}
-
-func nodeRow(t *testing.T, st *store.Store, id string) *store.Node {
-	t.Helper()
-	row, err := st.GetNode(t.Context(), testRunID, id)
-	if err != nil {
-		t.Fatalf("node %s: %v", id, err)
-	}
-	return row
-}
-
-func wantRow(t *testing.T, st *store.Store, id string, outcome sparkwing.Outcome, errHas string) {
-	t.Helper()
-	row := nodeRow(t, st, id)
-	if row.Status != "done" || row.Outcome != string(outcome) || !strings.Contains(row.Error, errHas) {
-		t.Errorf("node %s row status=%q outcome=%q error=%q, want done/%s containing %q", id, row.Status, row.Outcome, row.Error, outcome, errHas)
-	}
-}
-
 func deps(ids ...string) []string { return ids }
 
 func TestSchedulerRunsADiamondInOrderAndInParallel(t *testing.T) {
-	st := openStore(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
-	bIn, cIn := make(chan struct{}), make(chan struct{})
-	meet := func(mine, theirs chan struct{}) Executor {
-		return func(ctx context.Context, _ *NodeRun) Result {
-			close(mine)
-			select {
-			case <-theirs:
-				return Result{Outcome: sparkwing.Success, Output: []byte(`{"ok":true}`)}
-			case <-ctx.Done():
-				return Result{Outcome: sparkwing.Failed, Err: errors.New("b and c never ran together")}
-			}
-		}
-	}
-	fx := &fakeExec{bodies: map[string]Executor{"b": meet(bIn, cIn), "c": meet(cIn, bIn)}}
-	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
 		{ID: "d", Needs: deps("b", "c"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
 		{ID: "b", Needs: deps("a"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
 		{ID: "c", Needs: deps("a"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
 		{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-	}}
-
-	res := hostDoc(t, ctx, st, doc, fx.run)
-	if res.Status != "success" || res.Err != nil {
-		t.Fatalf("status=%s err=%v, want success", res.Status, res.Err)
+	}})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	b, c := make(chan struct{}), make(chan struct{})
+	var mu sync.Mutex
+	var order []string
+	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
+		mu.Lock()
+		order = append(order, input.NodeID)
+		mu.Unlock()
+		var mine, other chan struct{}
+		if input.NodeID == "b" {
+			mine, other = b, c
+		}
+		if input.NodeID == "c" {
+			mine, other = c, b
+		}
+		if mine != nil {
+			close(mine)
+			select {
+			case <-other:
+			case <-ctx.Done():
+				return context.Cause(ctx)
+			}
+		}
+		return f.report(ctx, input, store.NodeSuccess)
+	})
+	completion, err := f.Host.Run(ctx, f.Input)
+	if err != nil || completion.Outcome != "success" {
+		t.Fatalf("completion=%+v error=%v", completion, err)
 	}
-	if len(res.Order) != 4 || res.Order[0] != "a" || res.Order[3] != "d" {
-		t.Errorf("order = %v, want a first and d last", res.Order)
+	if len(order) != 4 || order[0] != "a" || order[3] != "d" {
+		t.Fatalf("order=%v", order)
 	}
 	for _, id := range []string{"a", "b", "c", "d"} {
-		wantRow(t, st, id, sparkwing.Success, "")
-	}
-	out, err := st.GetNodeOutput(t.Context(), testRunID, "b")
-	if err != nil || string(out) != `{"ok":true}` {
-		t.Errorf("b output = %s (err %v), want the executor's output", out, err)
+		row, err := f.Tenant.ReadNode(ctx, store.NodeRef{RunID: f.Accepted.RunID, NodeID: id})
+		if err != nil || row.Status != store.StatusDone || row.Outcome != store.NodeSuccess {
+			t.Errorf("%s row=%+v error=%v", id, row, err)
+		}
 	}
 }
 
 func TestSchedulerPropagatesFailureAsTheDispatcherDoes(t *testing.T) {
-	st := openStore(t)
-	fail := func(context.Context, *NodeRun) Result {
-		return Result{Outcome: sparkwing.Failed, Err: errors.New("broke"), Reason: store.FailureVerify}
-	}
-	fx := &fakeExec{bodies: map[string]Executor{"build": fail, "lint": fail, "flaky": fail, "maybe": fail}}
-	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
 		{ID: "build", Steps: []nodeproto.StepSpec{{ID: "body"}}},
 		{ID: "test", Needs: deps("build"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
 		{ID: "deploy", Needs: deps("test"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
@@ -177,390 +95,227 @@ func TestSchedulerPropagatesFailureAsTheDispatcherDoes(t *testing.T) {
 		{ID: "flaky", Steps: []nodeproto.StepSpec{{ID: "body"}}},
 		{ID: "after-flaky", NeedsIfPresent: deps("flaky", "absent"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
 		{ID: "maybe", Optional: true, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-	}}
-
-	res := hostDoc(t, t.Context(), st, doc, fx.run)
-
-	wantRow(t, st, "build", sparkwing.Failed, "broke")
-	wantRow(t, st, "test", sparkwing.Cancelled, "upstream-failed")
-	wantRow(t, st, "deploy", sparkwing.Cancelled, "upstream-failed")
-	wantRow(t, st, "build-recover", sparkwing.Success, "")
-	wantRow(t, st, "docs-recover", sparkwing.Skipped, `parent "docs" did not fail`)
-	wantRow(t, st, "after-lint", sparkwing.Success, "")
-	wantRow(t, st, "after-flaky", sparkwing.Cancelled, "upstream-failed")
-	wantRow(t, st, "maybe", sparkwing.Failed, "broke")
-	for _, id := range []string{"test", "deploy", "docs-recover", "after-flaky"} {
-		if fx.ran(id) {
-			t.Errorf("node %s ran", id)
+	}})
+	var mu sync.Mutex
+	ran := map[string]bool{}
+	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
+		mu.Lock()
+		ran[input.NodeID] = true
+		mu.Unlock()
+		outcome := store.NodeSuccess
+		if slices.Contains([]string{"build", "lint", "flaky", "maybe"}, input.NodeID) {
+			outcome = store.NodeFailed
+		}
+		return f.report(ctx, input, outcome)
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	completion, err := f.Host.Run(ctx, f.Input)
+	if err != nil || completion.Outcome != "failed" {
+		t.Fatalf("completion=%+v error=%v", completion, err)
+	}
+	for id, want := range map[string]store.NodeState{"build": store.NodeFailed, "test": store.NodeCancelled, "deploy": store.NodeCancelled, "build-recover": store.NodeSuccess, "docs-recover": store.NodeSkipped, "after-lint": store.NodeSuccess, "after-flaky": store.NodeCancelled, "maybe": store.NodeFailed} {
+		row, err := f.Tenant.ReadNode(ctx, store.NodeRef{RunID: f.Accepted.RunID, NodeID: id})
+		if err != nil || row.Outcome != want || row.Status != store.StatusDone {
+			t.Errorf("%s row=%+v error=%v, want %s", id, row, err, want)
 		}
 	}
-	if f := fx.seen["build-recover"].Failure; f == nil || f.Job != "build" || f.Stage != "verify" || f.Error == nil || f.Error.Message != "broke" {
-		t.Errorf("recovery failure = %+v, want build's verify failure", f)
-	}
-	want := "nodes failed: [build lint flaky]; 3 more cancelled with the run"
-	if res.Status != "failed" || res.Err == nil || res.Err.Error() != want {
-		t.Errorf("status=%s err=%v, want failed with %q", res.Status, res.Err, want)
+	for _, id := range []string{"test", "deploy", "docs-recover", "after-flaky"} {
+		if ran[id] {
+			t.Errorf("%s ran", id)
+		}
 	}
 }
 
 func TestSchedulerOptionalFailureLeavesTheRunGreen(t *testing.T) {
-	st := openStore(t)
-	fx := &fakeExec{bodies: map[string]Executor{"maybe": func(context.Context, *NodeRun) Result {
-		return Result{Outcome: sparkwing.Failed, Err: errors.New("broke")}
-	}}}
-	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
 		{ID: "maybe", Optional: true, Steps: []nodeproto.StepSpec{{ID: "body"}}},
 		{ID: "after", NeedsIfPresent: deps("absent"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
-	}}
-	res := hostDoc(t, t.Context(), st, doc, fx.run)
-	if res.Status != "success" {
-		t.Errorf("status=%s err=%v, want success: an optional node's failure does not fail the run", res.Status, res.Err)
-	}
-	wantRow(t, st, "after", sparkwing.Success, "")
-}
-
-func TestSchedulerCancelMidRunFinishesEveryRow(t *testing.T) {
-	st := openStore(t)
-	ctx, cancel := context.WithCancelCause(t.Context())
-	defer cancel(nil)
-	fx := &fakeExec{bodies: map[string]Executor{"slow": func(ctx context.Context, _ *NodeRun) Result {
-		cancel(&lease.CancelError{Reason: "interrupted by SIGINT"})
-		<-ctx.Done()
-		return Result{Outcome: sparkwing.Failed, Err: ctx.Err()}
-	}}}
-	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
-		{ID: "slow", Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "next", Needs: deps("slow"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{ID: "later", Needs: deps("next"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
-	}}
-
-	res := hostDoc(t, ctx, st, doc, fx.run)
-	if res.Status != "cancelled" || res.Err == nil || res.Err.Error() != "interrupted by SIGINT" {
-		t.Errorf("status=%s err=%v, want cancelled with the cause", res.Status, res.Err)
-	}
-	wantRow(t, st, "slow", sparkwing.Cancelled, "cancelled: run failing")
-	wantRow(t, st, "next", sparkwing.Cancelled, "ctx-cancelled")
-	wantRow(t, st, "later", sparkwing.Cancelled, "ctx-cancelled")
-	if fx.ran("next") || fx.ran("later") {
-		t.Error("a node started after the run was cancelled")
-	}
-}
-
-func TestSchedulerAStalledPlanFailsItsPendingNodes(t *testing.T) {
-	st := openStore(t)
-	if err := st.CreateRun(t.Context(), store.Run{ID: testRunID, Pipeline: "p", Status: "running"}); err != nil {
-		t.Fatal(err)
-	}
-	fx := &fakeExec{}
-	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "a", Needs: deps("b"), Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "b", Needs: deps("a"), Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
-	cfg := Config{Execute: fx.run}
-	run := &Run{ID: testRunID, Doc: doc, State: st, Logger: slog.New(slog.DiscardHandler), validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}}
-	s := &scheduler{run: run, results: map[string]Result{}, started: map[string]bool{}, exec: chain(&cfg), nodes: doc.Jobs}
-	for _, n := range doc.Jobs {
-		if err := st.CreateNode(t.Context(), pendingRow(run, n)); err != nil {
-			t.Fatal(err)
+	}})
+	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
+		outcome := store.NodeSuccess
+		if input.NodeID == "maybe" {
+			outcome = store.NodeFailed
 		}
+		return f.report(ctx, input, outcome)
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	completion, err := f.Host.Run(ctx, f.Input)
+	if err != nil || completion.Outcome != "success" {
+		t.Fatalf("completion=%+v error=%v", completion, err)
 	}
-	s.loop(t.Context())
-	if len(s.order) != 0 || len(fx.calls) != 0 {
-		t.Fatalf("started %v from a plan where nothing is ready", s.order)
+	row, err := f.Tenant.ReadNode(ctx, store.NodeRef{RunID: f.Accepted.RunID, NodeID: "after"})
+	if err != nil || row.Outcome != store.NodeSuccess {
+		t.Fatalf("row=%+v error=%v", row, err)
 	}
-	wantRow(t, st, "a", sparkwing.Failed, "never became ready")
-	wantRow(t, st, "b", sparkwing.Failed, "never became ready")
-}
-
-func TestSchedulerWithoutAnExecutorFailsTheNode(t *testing.T) {
-	st := openStore(t)
-	res := hostDoc(t, t.Context(), st, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, nil)
-	if res.Status != "failed" {
-		t.Errorf("status = %s, want failed", res.Status)
-	}
-	wantRow(t, st, "a", sparkwing.Failed, "no attempt executor")
-}
-
-func TestSchedulerAddsNodesWhileTheRunGoes(t *testing.T) {
-	st := openStore(t)
-	var addErrs []error
-	fx := &fakeExec{bodies: map[string]Executor{"targets": func(ctx context.Context, n *NodeRun) Result {
-		addErrs = append(addErrs,
-			n.Run.Add(ctx, nodeproto.JobSpec{ID: "test-linux", Needs: deps("targets"), Steps: []nodeproto.StepSpec{{ID: "body"}}}, nodeproto.JobSpec{ID: "test-darwin", Needs: deps("targets"), Steps: []nodeproto.StepSpec{{ID: "body"}}}),
-			n.Run.Add(ctx, nodeproto.JobSpec{ID: "targets", Steps: []nodeproto.StepSpec{{ID: "body"}}}))
-		return Result{Outcome: sparkwing.Success}
-	}}}
-	res := hostDoc(t, t.Context(), st, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "targets", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, fx.run)
-	if res.Status != "success" || !slices.Equal(res.Order[:1], []string{"targets"}) || len(res.Order) != 3 {
-		t.Fatalf("status=%s order=%v, want targets then its two generated nodes", res.Status, res.Order)
-	}
-	if addErrs[0] != nil {
-		t.Errorf("add: %v", addErrs[0])
-	}
-	var perr *apierr.Error
-	if !errors.As(addErrs[1], &perr) || perr.Code != apierr.PlanInvalid {
-		t.Errorf("adding a duplicate node: err = %v, want plan_invalid", addErrs[1])
-	}
-	wantRow(t, st, "test-linux", sparkwing.Success, "")
-	wantRow(t, st, "test-darwin", sparkwing.Success, "")
 }
 
 func TestSchedulerWritesPendingRowsFromThePlan(t *testing.T) {
-	st := openStore(t)
-	fx := &fakeExec{bodies: map[string]Executor{"gpu": func(ctx context.Context, n *NodeRun) Result {
-		row, err := st.GetNode(ctx, testRunID, n.Plan.ID)
-		if err != nil || row.Status != "running" || row.StartedAt == nil {
-			return Result{Outcome: sparkwing.Failed, Err: errors.New("row not started before the executor ran")}
-		}
-		return Result{Outcome: sparkwing.Success}
-	}}}
-	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
 		{ID: "base", Requires: []string{"linux"}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-		{
-			ID: "gpu", Needs: deps("base"), NeedsIfPresent: deps("extra"),
-			Requires: []string{"gpu", "linux", "big"}, Prefers: []string{"fast"}, Resources: &nodeproto.ResourceSpec{Cores: new(float64(4)), MemoryBytes: new(int64(1 << 30))}, Steps: []nodeproto.StepSpec{{ID: "body"}},
-		},
-	}}
-	res := hostDoc(t, t.Context(), st, doc, fx.run)
-	if res.Status != "success" {
-		t.Fatalf("status=%s err=%v", res.Status, res.Err)
+		{ID: "gpu", Needs: deps("base"), NeedsIfPresent: deps("extra"), Requires: []string{"gpu", "linux", "big"}, Prefers: []string{"fast"}, Resources: &nodeproto.ResourceSpec{Cores: new(float64(4)), MemoryBytes: new(int64(1 << 30))}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
+	}})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	snapshot, err := f.Tenant.ReadSnapshot(ctx, f.Accepted.RunID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	row := nodeRow(t, st, "gpu")
-	if !slices.Equal(row.Deps, []string{"base", "extra"}) || !slices.Equal(row.NeedsLabels, []string{"gpu", "linux", "big"}) ||
-		!slices.Equal(row.PrefersLabels, []string{"fast"}) || row.RequestedCores != 4 || row.RequestedMemoryBytes != 1<<30 {
-		t.Errorf("gpu row deps=%v needs=%v prefers=%v cores=%v mem=%d", row.Deps, row.NeedsLabels, row.PrefersLabels, row.RequestedCores, row.RequestedMemoryBytes)
-	}
-	if base := nodeRow(t, st, "base"); !slices.Equal(base.NeedsLabels, []string{"linux"}) {
-		t.Errorf("base needs %v, want the pipeline's requires", base.NeedsLabels)
+	for _, row := range snapshot.Nodes {
+		if row.Status != store.StatusPending || row.StartedAt != nil {
+			t.Errorf("initial row=%+v", row)
+		}
+		if row.Ref.NodeID == "gpu" {
+			var job nodeproto.JobSpec
+			if err := json.Unmarshal(row.Spec, &job); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(job.Needs, []string{"base"}) || !slices.Equal(job.NeedsIfPresent, []string{"extra"}) || !slices.Equal(row.Execution.Requires.Value, []string{"gpu", "linux", "big"}) || !slices.Equal(row.Execution.Prefers.Value, []string{"fast"}) || row.Execution.Resources.Value.Cores.Value != 4 || row.Execution.Resources.Value.MemoryBytes.Value != 1<<30 {
+				t.Fatalf("job=%+v execution=%+v", job, row.Execution)
+			}
+		}
 	}
 }
 
-func TestValidateNodesRefusesAnInvalidPlan(t *testing.T) {
-	for name, tc := range map[string]struct {
-		nodes []nodeproto.JobSpec
-		want  string
-	}{
-		"cycle": {
-			nodes: []nodeproto.JobSpec{{ID: "a", Needs: deps("c"), Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "b", Needs: deps("a"), Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "c", Needs: deps("b"), Steps: []nodeproto.StepSpec{{ID: "body"}}}},
-			want:  "dependency cycle",
-		},
-		"missing dep":      {nodes: []nodeproto.JobSpec{{ID: "a", Needs: deps("ghost"), Steps: []nodeproto.StepSpec{{ID: "body"}}}}, want: "job dependency is absent"},
-		"duplicate node":   {nodes: []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}}, want: "duplicate job ID"},
-		"no id":            {nodes: []nodeproto.JobSpec{{Steps: []nodeproto.StepSpec{{ID: "body"}}}}, want: "identifier is empty"},
-		"missing recovery": {nodes: []nodeproto.JobSpec{{ID: "r", OnFailureOf: "ghost", Steps: []nodeproto.StepSpec{{ID: "body"}}}}, want: "recovery source is absent"},
-		"optional dep cycle": {
-			nodes: []nodeproto.JobSpec{{ID: "a", NeedsIfPresent: deps("b"), Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "b", Needs: deps("a"), Steps: []nodeproto.StepSpec{{ID: "body"}}}},
-			want:  "dependency cycle",
-		},
-		"duplicate closure": {
-			nodes: []nodeproto.JobSpec{
-				{ID: "a", Closures: nodeproto.ClosureSpec{SkipIf: []string{"x"}}, Steps: []nodeproto.StepSpec{{ID: "body"}}},
-				{ID: "b", Steps: []nodeproto.StepSpec{{ID: "s", Closures: nodeproto.ClosureSpec{Verify: "x"}}}},
-			},
-			want: "closure ID is not unique",
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			err := validateNodes(tc.nodes, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}})
-			var perr *apierr.Error
-			if !errors.As(err, &perr) || perr.Code != apierr.PlanInvalid || !strings.Contains(perr.Message, tc.want) {
-				t.Fatalf("err = %v, want plan_invalid naming %q", err, tc.want)
+func TestSchedulerCancelMidRunFinishesEveryRow(t *testing.T) {
+	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+		{ID: "slow", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "next", Needs: deps("slow"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+		{ID: "later", Needs: deps("next"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+	}})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
+		if input.NodeID != "slow" {
+			return errors.New("downstream body started during cancellation")
+		}
+		ref := store.NodeRef{RunID: f.Accepted.RunID, NodeID: input.NodeID}
+		actor := store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: input.Authority.CapabilityPrefix}, Holder: input.Authority.Holder, CapabilityPrefix: input.Authority.CapabilityPrefix, Generation: input.Generation}
+		started, err := f.State.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: new(input.Attempt)})
+		if err != nil {
+			return err
+		}
+		if _, err := f.Tenant.TransitionRun(ctx, store.RunTransition{RunID: f.Accepted.RunID, Actor: f.Control, To: store.RunCancelled, Cause: store.RunCancel, Reason: "interrupted by SIGINT"}); err != nil {
+			return err
+		}
+		_, err = f.State.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeCancelled, Cause: store.CauseReport, SourceAttempt: new(started.Attempt), Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeCancelled, Reason: "interrupted by SIGINT"}}})
+		return err
+	})
+	completion, err := f.Host.Run(ctx, f.Input)
+	if err != nil || completion.Outcome != "cancelled" {
+		t.Fatalf("completion=%+v error=%v", completion, err)
+	}
+	snapshot, err := f.Tenant.ReadSnapshot(ctx, f.Accepted.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Run.State != store.RunCancelled || snapshot.Run.CancelReason != "interrupted by SIGINT" || snapshot.Run.FinishedAt == nil {
+		t.Fatalf("run=%+v", snapshot.Run)
+	}
+	for _, row := range snapshot.Nodes {
+		if row.Status != store.StatusDone || row.Outcome != store.NodeCancelled || row.Ref.NodeID != "slow" && row.StartedAt != nil {
+			t.Errorf("cancelled row=%+v", row)
+		}
+	}
+}
+
+func TestSchedulerCallerCancellationStopsDownstreamDispatch(t *testing.T) {
+	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+				{ID: "slow", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+				{ID: "next", Needs: deps("slow"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			}})
+			bounded, stop := context.WithTimeout(t.Context(), 5*time.Second)
+			defer stop()
+			ctx, cancel := context.WithCancelCause(bounded)
+			defer cancel(nil)
+			f.Host.Executor = ownerNodeFunc(func(ctx context.Context, input NodeInput) error {
+				if input.NodeID != "slow" {
+					return errors.New("downstream body started after host cancellation")
+				}
+				cancel(cause)
+				return context.Cause(ctx)
+			})
+			_, err := f.Host.Run(ctx, f.Input)
+			if !errors.Is(err, cause) {
+				t.Fatalf("error=%v, want %v", err, cause)
+			}
+			row, err := f.Tenant.ReadNode(bounded, store.NodeRef{RunID: f.Accepted.RunID, NodeID: "next"})
+			if err != nil || row.StartedAt != nil || row.ClaimedBy != "" {
+				t.Fatalf("downstream row=%+v error=%v", row, err)
 			}
 		})
 	}
-	if err := validateNodes([]nodeproto.JobSpec{{ID: "a", NeedsIfPresent: deps("absent"), Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "r", OnFailureOf: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}}, nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}); err != nil {
-		t.Errorf("a plan with an absent optional dependency and a recovery node: %v", err)
-	}
 }
 
-func TestSchedulerDeadlineFailsTheRun(t *testing.T) {
-	st := openStore(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+func TestSchedulerWithoutAnExecutorFailsLoudly(t *testing.T) {
+	f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}}})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	fx := &fakeExec{bodies: map[string]Executor{"slow": func(ctx context.Context, _ *NodeRun) Result {
-		<-ctx.Done()
-		return Result{Outcome: sparkwing.Failed, Err: ctx.Err()}
-	}}}
-	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "slow", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "next", Needs: deps("slow"), Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
-
-	res := hostDoc(t, ctx, st, doc, fx.run)
-	want := "nodes failed: [slow]; 1 more cancelled with the run"
-	if res.Status != "failed" || res.Err == nil || res.Err.Error() != want {
-		t.Errorf("status=%s err=%v, want failed with %q", res.Status, res.Err, want)
+	_, err := f.Host.Run(ctx, f.Input)
+	if err == nil || !strings.Contains(err.Error(), "node host") {
+		t.Fatalf("error=%v", err)
 	}
-	wantRow(t, st, "slow", sparkwing.Failed, "deadline exceeded")
-	wantRow(t, st, "next", sparkwing.Cancelled, "ctx-cancelled")
-}
-
-func TestSchedulerPlainCancelFailsTheRun(t *testing.T) {
-	st := openStore(t)
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	fx := &fakeExec{bodies: map[string]Executor{"a": func(context.Context, *NodeRun) Result {
-		cancel()
-		return Result{Outcome: sparkwing.Success}
-	}}}
-	res := hostDoc(t, ctx, st, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "a", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, fx.run)
-	if res.Status != "failed" || !errors.Is(res.Err, context.Canceled) {
-		t.Errorf("status=%s err=%v, want failed with the cancel", res.Status, res.Err)
+	row, err := f.Tenant.ReadNode(ctx, store.NodeRef{RunID: f.Accepted.RunID, NodeID: "a"})
+	if err != nil || row.StartedAt != nil {
+		t.Fatalf("row=%+v error=%v", row, err)
 	}
 }
 
-type refusingOutput struct{ *store.Store }
-
-func (r refusingOutput) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error {
-	if output != nil {
-		return fmt.Errorf("%w: over the 64 MiB limit", store.ErrOutputNotStored)
-	}
-	return r.Store.FinishNodeWithReason(ctx, runID, nodeID, outcome, errMsg, output, reason, exitCode)
-}
-
-func TestSchedulerARefusedOutputFailsTheNodeRow(t *testing.T) {
-	st := openStore(t)
-	fx := &fakeExec{bodies: map[string]Executor{"big": func(context.Context, *NodeRun) Result {
-		return Result{Outcome: sparkwing.Success, Output: []byte(`"huge"`)}
-	}}}
-	doc := nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "big", Steps: []nodeproto.StepSpec{{ID: "body"}}}, {ID: "after", Needs: deps("big"), Steps: []nodeproto.StepSpec{{ID: "body"}}}}}
-	res := hostDoc(t, t.Context(), refusingOutput{st}, doc, fx.run)
-	if res.Status != "failed" {
-		t.Errorf("status=%s err=%v, want failed", res.Status, res.Err)
-	}
-	wantRow(t, st, "big", sparkwing.Failed, "the node's output was not stored")
-	wantRow(t, st, "after", sparkwing.Cancelled, "upstream-failed")
-}
-
-// safety: an upload's refusal can quote megabytes of its failed request, and the finish that records it is
-// held to the controller's 1 MiB body cap.
-type refusingOutputLoudly struct{ *store.Store }
-
-func (r refusingOutputLoudly) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error {
-	if output != nil {
-		return fmt.Errorf("%w: %s", store.ErrOutputNotStored, strings.Repeat("upload failed\n", 200<<10))
-	}
-	return cappedFinish(r).FinishNodeWithReason(ctx, runID, nodeID, outcome, errMsg, output, reason, exitCode)
-}
-
-func TestSchedulerARefusedOutputWithAHugeReasonStillFailsTheNodeRow(t *testing.T) {
-	st := openStore(t)
-	fx := &fakeExec{bodies: map[string]Executor{"big": func(context.Context, *NodeRun) Result {
-		return Result{Outcome: sparkwing.Success, Output: []byte(`"huge"`)}
-	}}}
-	res := hostDoc(t, t.Context(), refusingOutputLoudly{st}, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "big", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, fx.run)
-	if res.Status != "failed" {
-		t.Errorf("status=%s err=%v, want failed", res.Status, res.Err)
-	}
-	if row := nodeRow(t, st, "big"); row.Outcome != string(sparkwing.Failed) || len(row.Error) > 1<<20 {
-		t.Fatalf("row outcome %q with a %d-byte error, want failed with the bounded reason", row.Outcome, len(row.Error))
-	}
-}
-
-// safety: stands in for the controller's node finish route, which refuses a
-// JSON body over 1 MiB.
-type cappedFinish struct{ *store.Store }
-
-func (c cappedFinish) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error {
-	if len(errMsg) > 1<<20 {
-		return errors.New("controller 400: http: request body too large")
-	}
-	return c.Store.FinishNodeWithReason(ctx, runID, nodeID, outcome, errMsg, output, reason, exitCode)
-}
-
-func TestSchedulerRecordsAFailedCommandWithHugeOutput(t *testing.T) {
-	st := openStore(t)
-	huge := "command failed (exit 1): go test ./...\n" +
-		strings.Repeat("=== RUN   TestSomething\n--- PASS: TestSomething (0.00s)\n", 64<<10) +
-		"--- FAIL: TestBroken (0.01s)\nFAIL\tgithub.com/acme/broken\t0.2s\n"
-	fx := &fakeExec{bodies: map[string]Executor{"test": func(context.Context, *NodeRun) Result {
-		return Result{Outcome: sparkwing.Failed, Err: errors.New(huge)}
-	}}}
-	res := hostDoc(t, t.Context(), cappedFinish{st}, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "test", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, fx.run)
-	if res.Status != "failed" {
-		t.Errorf("status=%s err=%v, want failed", res.Status, res.Err)
-	}
-	row := nodeRow(t, st, "test")
-	if row.Status != "done" || row.Outcome != string(sparkwing.Failed) {
-		t.Fatalf("node row status=%q outcome=%q, want done/failed", row.Status, row.Outcome)
-	}
-	if len(row.Error) > nodeErrTextMaxBytes {
-		t.Errorf("recorded error is %d bytes, want at most %d", len(row.Error), nodeErrTextMaxBytes)
-	}
-	for _, want := range []string{"command failed (exit 1): go test ./...\n", "bytes of this error elided", "FAIL\tgithub.com/acme/broken\t0.2s\n"} {
-		if !strings.Contains(row.Error, want) {
-			t.Errorf("recorded error lacks %q:\n%s", want, row.Error)
-		}
-	}
-}
-
-type recordingLog struct{ records []sparkwing.LogRecord }
-
-func (l *recordingLog) Emit(rec sparkwing.LogRecord) { l.records = append(l.records, rec) }
-
-// A cut taken before masking would leave a fragment of a secret the masker no
-// longer recognizes, so after_run's input keeps the whole error, and a bounded
-// recorded error is cut only from text already masked.
-func TestNodeErrorBoundingNeverSplitsASecret(t *testing.T) {
-	secret := "private-token-ABCDEFGHIJKLMN"
-	for name, tc := range map[string]struct{ raw, fragment string }{
-		"head": {strings.Repeat("H", 500) + secret + "\n" + strings.Repeat("filler\n", 1800), "private-toke"},
-		"tail": {"failed\n" + strings.Repeat("X", 2600) + secret + strings.Repeat("Y", 7540), "HIJKLMN"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			masker := secrets.NewMasker()
-			masker.Register(secret)
-			arg := afterRunArgOf(Result{Outcome: sparkwing.Failed, Err: errors.New(tc.raw)})
-			if arg.Error == nil || arg.Error.Message != tc.raw {
-				t.Errorf("after_run input is %d bytes, want the whole %d-byte error", len(arg.Error.Message), len(tc.raw))
+func TestSchedulerARefusedOutputFailsTheNodeAndDependants(t *testing.T) {
+	for _, message := range []string{"output refused", strings.Repeat("upload refused\n", 200<<10)} {
+		t.Run(fmt.Sprintf("%d-bytes", len(message)), func(t *testing.T) {
+			f := newStoreHostFixture(t, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{
+				{ID: "big", ResultStep: "body", Steps: []nodeproto.StepSpec{{ID: "body"}}},
+				{ID: "after", Needs: deps("big"), Steps: []nodeproto.StepSpec{{ID: "body"}}},
+			}})
+			_, _, dependencies, _ := executorFixture(t)
+			dependencies.Store = f.State
+			dependencies.Start = func(context.Context, NodeInput, ExecutorActivity) (ExecutorProcess, error) {
+				return &executorProcess{plan: f.Accepted.Plan, result: nodeproto.RunResult{Outcome: "success", Output: json.RawMessage(`"huge"`)}}, nil
 			}
-			log := &recordingLog{}
-			sink, err := NewLogSink(t.Context(), LogSinkConfig{RunID: "run", NodeID: "node", State: noState{}, Log: log, Masker: masker})
+			refused := errors.New(message)
+			dependencies.PublishOutput = func(context.Context, NodeInput, json.RawMessage) (*blob.RecordKey, error) { return nil, refused }
+			executor, err := NewNodeExecutor(dependencies)
 			if err != nil {
 				t.Fatal(err)
 			}
-			sink.Record(nodeproto.FrameLog{Level: "error", Message: arg.Error.Message})
-			if len(log.records) != 1 || strings.Contains(log.records[0].Msg, tc.fragment) {
-				t.Errorf("a hook logging its error leaked %q: %+v", tc.fragment, log.records)
+			f.Host.Executor = executor
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			completion, err := f.Host.Run(ctx, f.Input)
+			if err != nil || completion.Outcome != "failed" {
+				t.Fatalf("completion=%+v error=%v", completion, err)
 			}
-			recorded := recordedErrText(maskErr(masker, errors.New(tc.raw)))
-			if strings.Contains(recorded, tc.fragment) || len(recorded) > nodeErrTextMaxBytes {
-				t.Errorf("recorded error is %d bytes and leaks %q: %q", len(recorded), tc.fragment, recorded)
+			for id, outcome := range map[string]store.NodeState{"big": store.NodeFailed, "after": store.NodeCancelled} {
+				row, err := f.Tenant.ReadNode(ctx, store.NodeRef{RunID: f.Accepted.RunID, NodeID: id})
+				if err != nil || row.Outcome != outcome {
+					t.Fatalf("%s row=%+v error=%v", id, row, err)
+				}
+			}
+			events, err := f.Tenant.ReadStateEvents(ctx, f.Accepted.RunID, 0, 100)
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, event := range events {
+				if event.NodeID != "big" || event.Kind != "job_failed" {
+					continue
+				}
+				var result store.NodeResult
+				if err := json.Unmarshal(event.Payload, &result); err != nil {
+					t.Fatal(err)
+				}
+				if len(result.MaskedError) > int(limits.ErrorBytes) || !strings.Contains(result.MaskedError, "refused") {
+					t.Fatalf("failure has %d bytes: %q", len(result.MaskedError), result.MaskedError)
+				}
+				found = true
+			}
+			if !found {
+				t.Fatal("output refusal has no committed failure")
 			}
 		})
-	}
-}
-
-func TestBoundedNodeErrTextKeepsUTF8AndShortText(t *testing.T) {
-	if got := boundedNodeErrText("short"); got != "short" {
-		t.Errorf("short text = %q, want it unchanged", got)
-	}
-	got := boundedNodeErrText(strings.Repeat("é", nodeErrTextMaxBytes))
-	if !utf8.ValidString(got) || len(got) > nodeErrTextMaxBytes {
-		t.Errorf("bounded text is %d bytes, valid UTF-8 %v", len(got), utf8.ValidString(got))
-	}
-}
-
-type stallingCreate struct{ *store.Store }
-
-func (s stallingCreate) CreateNode(ctx context.Context, n store.Node) error {
-	if n.NodeID == "child" {
-		<-ctx.Done()
-		return ctx.Err()
-	}
-	return s.Store.CreateNode(ctx, n)
-}
-
-func TestSchedulerAddHonoursTheCallersDeadline(t *testing.T) {
-	st := openStore(t)
-	var addErr error
-	fx := &fakeExec{bodies: map[string]Executor{"gen": func(ctx context.Context, n *NodeRun) Result {
-		addCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
-		defer cancel()
-		addErr = n.Run.Add(addCtx, nodeproto.JobSpec{ID: "child", Needs: deps("gen"), Steps: []nodeproto.StepSpec{{ID: "body"}}})
-		return Result{Outcome: sparkwing.Success}
-	}}}
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
-	res := hostDoc(t, ctx, stallingCreate{st}, nodeproto.PlanDoc{Jobs: []nodeproto.JobSpec{{ID: "gen", Steps: []nodeproto.StepSpec{{ID: "body"}}}}}, fx.run)
-	if !errors.Is(addErr, context.DeadlineExceeded) {
-		t.Errorf("add err = %v, want the caller's deadline", addErr)
-	}
-	if res.Status != "success" || ctx.Err() != nil {
-		t.Errorf("status=%s err=%v ctx=%v, want the run to finish without its node", res.Status, res.Err, ctx.Err())
 	}
 }

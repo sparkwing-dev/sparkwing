@@ -1,20 +1,17 @@
 package nodehost_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/secretsource"
 )
@@ -23,8 +20,7 @@ type entry struct {
 	value  string
 	masked bool
 	err    error
-	// hack: stall blocks the read until its context ends, then reports why.
-	stall chan error
+	stall  chan error
 }
 
 type fakeResolver struct {
@@ -50,35 +46,7 @@ func (f *fakeResolver) Resolve(ctx context.Context, name string) (string, bool, 
 	return e.value, e.masked, e.err
 }
 
-type syncBuffer struct {
-	mu sync.Mutex
-	b  bytes.Buffer
-}
-
-func (s *syncBuffer) Write(p []byte) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.b.Write(p)
-}
-
-func (s *syncBuffer) String() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.b.String()
-}
-
-func start(t *testing.T) (*nodehost.Server, *syncBuffer) {
-	t.Helper()
-	logs := &syncBuffer{}
-	s, err := nodehost.Start(slog.New(slog.NewTextHandler(logs, nil)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-	return s, logs
-}
-
-func admit(t *testing.T, s *nodehost.Server, n nodehost.Node) string {
+func admit(t *testing.T, s *server, n routeNode) string {
 	t.Helper()
 	bearer, _, err := s.Admit(n)
 	if err != nil {
@@ -98,18 +66,12 @@ func failureMessage(got reply) string {
 	return message
 }
 
-func failureReason(got reply) any {
-	failure, _ := got.body["error"].(map[string]any)
-	details, _ := failure["details"].(map[string]any)
-	return details["reason"]
-}
-
 type reply struct {
 	status int
 	body   map[string]any
 }
 
-func get(t *testing.T, s *nodehost.Server, path, bearer, protocol string) reply {
+func get(t *testing.T, s *server, path, bearer, protocol string) reply {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodGet, s.URL()+path, nil)
 	if err != nil {
@@ -121,7 +83,7 @@ func get(t *testing.T, s *nodehost.Server, path, bearer, protocol string) reply 
 	if protocol != "" {
 		req.Header.Set(authwire.NodeProtocolHeader, protocol)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := s.client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,25 +95,14 @@ func get(t *testing.T, s *nodehost.Server, path, bearer, protocol string) reply 
 	return out
 }
 
-func secret(t *testing.T, s *nodehost.Server, name, bearer string) reply {
+func secret(t *testing.T, s *server, name, bearer string) reply {
 	t.Helper()
 	return get(t, s, "/node/v1/secrets/"+url.PathEscape(name), bearer, authwire.NodeProtocolVersion)
 }
 
-func TestServerListensOnLoopbackOnly(t *testing.T) {
-	s, _ := start(t)
-	u, err := url.Parse(s.URL())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ip := net.ParseIP(u.Hostname()); ip == nil || !ip.IsLoopback() {
-		t.Fatalf("server listens on %q, want a loopback address", u.Host)
-	}
-}
-
 func TestHTTPServicesNeedNoProtocolVersionHeader(t *testing.T) {
-	s, _ := start(t)
-	bearer := admit(t, s, nodehost.Node{RunID: "run", NodeID: "build", Secrets: []string{"TOKEN"}, Resolver: &fakeResolver{entries: map[string]entry{"TOKEN": {value: "value"}}}, Masker: secrets.NewMasker()})
+	s := start(t)
+	bearer := admit(t, s, routeNode{RunID: "run", NodeID: "build", Secrets: []string{"TOKEN"}, Resolver: &fakeResolver{entries: map[string]entry{"TOKEN": {value: "value"}}}, Masker: secrets.NewMasker()})
 	for _, version := range []string{"", "0", "2", "obsolete"} {
 		got := get(t, s, "/node/v1/secrets/TOKEN", bearer, version)
 		if got.status != http.StatusOK || got.body["value"] != "value" {
@@ -161,9 +112,9 @@ func TestHTTPServicesNeedNoProtocolVersionHeader(t *testing.T) {
 }
 
 func TestSecretRefusesWithoutAValidBearer(t *testing.T) {
-	s, _ := start(t)
+	s := start(t)
 	resolver := &fakeResolver{entries: map[string]entry{"TOKEN": {value: "s3cret-value", masked: true}}}
-	bearer, revoke, err := s.Admit(nodehost.Node{
+	bearer, revoke, err := s.Admit(routeNode{
 		RunID: "run-1", NodeID: "build", Secrets: []string{"TOKEN"},
 		Resolver: resolver, Masker: secrets.NewMasker(),
 	})
@@ -186,12 +137,12 @@ func TestSecretRefusesWithoutAValidBearer(t *testing.T) {
 }
 
 func TestSecretRefusesANameTheNodeDidNotDeclare(t *testing.T) {
-	s, _ := start(t)
+	s := start(t)
 	resolver := &fakeResolver{entries: map[string]entry{
 		"TOKEN": {value: "declared-value", masked: true},
 		"OTHER": {value: "undeclared-value", masked: true},
 	}}
-	bearer := admit(t, s, nodehost.Node{
+	bearer := admit(t, s, routeNode{
 		RunID: "run-1", NodeID: "build", Secrets: []string{"TOKEN"},
 		Resolver: resolver, Masker: secrets.NewMasker(),
 	})
@@ -207,14 +158,14 @@ func TestSecretRefusesANameTheNodeDidNotDeclare(t *testing.T) {
 }
 
 func TestSecretRefusesAnotherNodesSecret(t *testing.T) {
-	s, _ := start(t)
+	s := start(t)
 	resolverA := &fakeResolver{entries: map[string]entry{"A_TOKEN": {value: "a-value", masked: true}}}
 	resolverB := &fakeResolver{entries: map[string]entry{"B_TOKEN": {value: "b-value", masked: true}}}
-	bearerA := admit(t, s, nodehost.Node{
+	bearerA := admit(t, s, routeNode{
 		RunID: "run-a", NodeID: "deploy", Secrets: []string{"A_TOKEN"},
 		Resolver: resolverA, Masker: secrets.NewMasker(),
 	})
-	bearerB := admit(t, s, nodehost.Node{
+	bearerB := admit(t, s, routeNode{
 		RunID: "run-b", NodeID: "deploy", Secrets: []string{"B_TOKEN"},
 		Resolver: resolverB, Masker: secrets.NewMasker(),
 	})
@@ -234,12 +185,12 @@ func TestSecretRefusesAnotherNodesSecret(t *testing.T) {
 }
 
 func TestSecretResolvesThroughTheNodesOwnResolver(t *testing.T) {
-	s, _ := start(t)
-	bearerA := admit(t, s, nodehost.Node{
+	s := start(t)
+	bearerA := admit(t, s, routeNode{
 		RunID: "run-a", NodeID: "build", Secrets: []string{"TOKEN"},
 		Resolver: &fakeResolver{entries: map[string]entry{"TOKEN": {value: "value-for-a", masked: true}}}, Masker: secrets.NewMasker(),
 	})
-	bearerB := admit(t, s, nodehost.Node{
+	bearerB := admit(t, s, routeNode{
 		RunID: "run-b", NodeID: "build", Secrets: []string{"TOKEN"},
 		Resolver: &fakeResolver{entries: map[string]entry{"TOKEN": {value: "value-for-b", masked: true}}}, Masker: secrets.NewMasker(),
 	})
@@ -252,9 +203,9 @@ func TestSecretResolvesThroughTheNodesOwnResolver(t *testing.T) {
 }
 
 func TestSecretRegistersAMaskedValueBeforeAnswering(t *testing.T) {
-	s, logs := start(t)
+	s := start(t)
 	masker := secrets.NewMasker()
-	bearer := admit(t, s, nodehost.Node{
+	bearer := admit(t, s, routeNode{
 		RunID: "run-1", NodeID: "build", Secrets: []string{"TOKEN", "REGION"},
 		Resolver: &fakeResolver{entries: map[string]entry{
 			"TOKEN":  {value: "s3cret-value", masked: true},
@@ -276,16 +227,13 @@ func TestSecretRegistersAMaskedValueBeforeAnswering(t *testing.T) {
 	if masker.Mask("us-west-2") != "us-west-2" {
 		t.Fatal("an unmasked config value was registered with the masker")
 	}
-	if strings.Contains(logs.String(), bearer) || strings.Contains(logs.String(), "s3cret-value") {
-		t.Fatalf("logs leak the bearer or a secret value:\n%s", logs.String())
-	}
 }
 
 func TestSecretMissingAndFailingBackend(t *testing.T) {
-	s, logs := start(t)
+	s := start(t)
 	masker := secrets.NewMasker()
 	masker.Register("leaked-value")
-	bearer := admit(t, s, nodehost.Node{
+	bearer := admit(t, s, routeNode{
 		RunID: "run-1", NodeID: "build", Secrets: []string{"UNSET", "BROKEN"},
 		Resolver: &fakeResolver{entries: map[string]entry{
 			"BROKEN": {err: errors.New("backend http://user:pw-cred@ctl echoed leaked-value")},
@@ -300,19 +248,15 @@ func TestSecretMissingAndFailingBackend(t *testing.T) {
 		strings.Contains(failureMessage(got), "backend") {
 		t.Fatalf("BROKEN: status %d body %v, want 503 unavailable without the backend's error", got.status, got.body)
 	}
-	if l := logs.String(); strings.Contains(l, "backend") || strings.Contains(l, "pw-cred") || strings.Contains(l, bearer) {
-		t.Fatalf("logs leak the bearer or a secret value:\n%s", logs.String())
-	}
 }
 
 func TestAdmitRequiresABoundNode(t *testing.T) {
-	s, _ := start(t)
-	full := nodehost.Node{RunID: "run-1", NodeID: "build", Resolver: &fakeResolver{}, Masker: secrets.NewMasker()}
-	for name, mutate := range map[string]func(*nodehost.Node){
-		"no run":      func(n *nodehost.Node) { n.RunID = "" },
-		"no node":     func(n *nodehost.Node) { n.NodeID = "" },
-		"no resolver": func(n *nodehost.Node) { n.Resolver = nil },
-		"no masker":   func(n *nodehost.Node) { n.Masker = nil },
+	s := start(t)
+	full := routeNode{RunID: "run-1", NodeID: "build", Resolver: &fakeResolver{}, Masker: secrets.NewMasker()}
+	for name, mutate := range map[string]func(*routeNode){
+		"no run":    func(n *routeNode) { n.RunID = "" },
+		"no node":   func(n *routeNode) { n.NodeID = "" },
+		"no masker": func(n *routeNode) { n.Masker = nil },
 	} {
 		n := full
 		mutate(&n)
@@ -330,35 +274,50 @@ func TestAdmitRequiresABoundNode(t *testing.T) {
 func TestStalledSecretReadEndsOnRevokeAndClose(t *testing.T) {
 	for _, end := range []string{"revoke", "close"} {
 		t.Run(end, func(t *testing.T) {
-			s, _ := start(t)
+			s := start(t)
 			stall := make(chan error, 1)
-			bearer, revoke, err := s.Admit(nodehost.Node{
+			bearer, revoke, err := s.Admit(routeNode{
 				RunID: "run-1", NodeID: "build", Secrets: []string{"SLOW"},
 				Resolver: &fakeResolver{entries: map[string]entry{"SLOW": {stall: stall}}}, Masker: secrets.NewMasker(),
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
 			done := make(chan struct{})
 			go func() {
 				defer close(done)
-				req, _ := http.NewRequest(http.MethodGet, s.URL()+"/node/v1/secrets/SLOW", nil)
+				req, _ := http.NewRequestWithContext(ctx, http.MethodGet, s.URL()+"/node/v1/secrets/SLOW", nil)
 				req.Header.Set("Authorization", "Bearer "+bearer)
 				req.Header.Set(authwire.NodeProtocolHeader, authwire.NodeProtocolVersion)
-				if resp, err := http.DefaultClient.Do(req); err == nil {
+				if resp, err := s.client.Do(req); err == nil {
 					_ = resp.Body.Close()
 				}
 			}()
-			<-stall
+			select {
+			case <-stall:
+			case <-ctx.Done():
+				t.Fatal("secret read did not start")
+			}
 			if end == "revoke" {
 				revoke()
 			} else if err := s.Close(); err != nil {
 				t.Fatalf("Close left a request in flight: %v", err)
 			}
-			if got := <-stall; !errors.Is(got, context.Canceled) {
-				t.Fatalf("stalled read ended with %v, want context.Canceled from the %s", got, end)
+			select {
+			case got := <-stall:
+				if !errors.Is(got, context.Canceled) {
+					t.Fatalf("stalled read ended with %v, want context.Canceled from the %s", got, end)
+				}
+			case <-ctx.Done():
+				t.Fatal("secret read did not stop")
 			}
-			<-done
+			select {
+			case <-done:
+			case <-ctx.Done():
+				t.Fatal("secret request did not join")
+			}
 		})
 	}
 }

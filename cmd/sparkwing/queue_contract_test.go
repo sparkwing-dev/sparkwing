@@ -83,8 +83,13 @@ func TestQueueCommandUsesOneControllerProjection(t *testing.T) {
 
 func TestQueueCommandPreflight(t *testing.T) {
 	for _, args := range [][]string{
-		{"list", "unexpected"}, {"list", "-o", "yaml"}, {"list", "--unknown"}, {"list", "--group", ".."},
-		{"priority", "--set", "3"}, {"priority", "--run", "r1"}, {"priority", "--run", "r1", "--set", "bad"},
+		{"list", "unexpected"},
+		{"list", "-o", "yaml"},
+		{"list", "--unknown"},
+		{"list", "--group", ".."},
+		{"priority", "--set", "3"},
+		{"priority", "--run", "r1"},
+		{"priority", "--run", "r1", "--set", "bad"},
 		{"priority", "--run", "r1", "--set", "2", "extra"},
 	} {
 		var out bytes.Buffer
@@ -125,7 +130,8 @@ func TestQueueCommandKeepsFailureDistinctFromEmptyQueue(t *testing.T) {
 func TestQueueCommandPreservesGroupFacts(t *testing.T) {
 	at := time.Date(2026, 10, 14, 1, 2, 3, 0, time.UTC)
 	for _, format := range []string{"json", "plain", "pretty"} {
-		manager := &queueManagerFake{group: controllerwire.QueueGroup{Group: "deploy", Capacity: 2, EffectiveCapacity: 1, UsedCost: 2,
+		manager := &queueManagerFake{group: controllerwire.QueueGroup{
+			Group: "deploy", Capacity: 2, EffectiveCapacity: 1, UsedCost: 2,
 			Holders: []controllerwire.QueueGroupHolder{{HolderID: "h1", RunID: "r1", JobID: "job1", Cost: 2, Superseded: true, ClaimedAt: at, LeaseExpiresAt: at.Add(time.Minute)}},
 			Waiters: []controllerwire.QueueGroupWaiter{{RunID: "r2", JobID: "job2", Position: 1, Policy: "queue", Cost: 1, ArrivedAt: at}},
 		}}
