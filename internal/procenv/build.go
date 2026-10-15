@@ -64,6 +64,15 @@ func validName(name string) bool { return name != "" && !strings.ContainsAny(nam
 // Build applies the process policy before execution. Local input comes only from Captured;
 // remote input comes from Ambient and the explicit allow list. Masker must be supplied when
 // accepted remote values or embedded proxy credentials require registration.
+// Build excludes credential-class values from both local snapshots and remote inputs under Policies.
+// This includes tool-owned credentials in a local snapshot. Plan never receives job Startup;
+// Attempt and Eval receive it before process start. The SDK adds Body only after plan succeeds.
+// Cleanup and StepTool use AttemptEnv exactly. Remote allow-list values of at least twelve characters
+// are masked before any subprocess starts. Build drops envredact.CredentialName matches before
+// applying allow lists, even when Lookup classifies an unknown name as user-owned.
+// Git also drops inherited GIT_* except GIT_SSL_CAINFO and GIT_SSL_CAPATH, plus
+// SSH_ASKPASS and SSH_AUTH_SOCK. Source acquisition selects private credential/config files through argv.
+// Git never inherits a repository/index/config override or a credential helper from a caller.
 func Build(k Kind, b Base, rt Runtime) ([]string, error) {
 	if k > HostChild {
 		return nil, errors.New("unknown process environment kind")
