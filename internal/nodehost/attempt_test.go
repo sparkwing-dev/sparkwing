@@ -135,7 +135,7 @@ func TestAttemptExecutor(t *testing.T) {
 			},
 			Pipeline: "attempts", Args: args,
 			Run:   nodeproto.RunContext{RunID: runID},
-			State: h.st, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
+			State: h.st, Logger: slog.New(slog.DiscardHandler),
 			Attempts: &Attempts{
 				Routes: srv, Resolver: fixtureResolver{}, Masker: h.plan.masker,
 				OpenLog: func(_ context.Context, _, node string) (NodeLog, error) {

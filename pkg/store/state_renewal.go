@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 )
 
@@ -51,7 +52,13 @@ func (t *Tenant) renewNodeClaimTx(ctx context.Context, tx *storeTx, ref NodeRef,
 	if row.CancelRequestedAt != nil {
 		beat.CancelReason = row.CancelReason
 	}
-	return nil
+	unit := UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID}
+	if !beat.CancelRequested {
+		if err := computeUnitBillingTx(ctx, tx, t.team, unit, row.Generation, row.Attempt, true); err != nil {
+			return err
+		}
+	}
+	return accountUnitBillingTx(ctx, tx, t.team, unit, row.Generation, tx.now(), false)
 }
 
 // RenewOwner renews owner-bound jobs and capacity within the owner lease transaction.
@@ -122,6 +129,12 @@ func (t *Tenant) renewOwnerTx(ctx context.Context, tx *storeTx, actor Actor, bea
 		return err
 	}
 	*beat = LeaseBeat{ExpiresAt: expiry, CancelRequested: run.CancelRequestedAt != nil || ownerCancelled, CancelReason: run.CancelReason}
+	if err := chargeOwnedNodesBillingTx(ctx, tx, t.team, actor, now); err != nil {
+		return err
+	}
+	if actor.Owner.Kind == OwnerTrigger {
+		return accountOwnerBillingTx(ctx, tx, t.team, runID, actor.Owner.Generation, now, false)
+	}
 	return nil
 }
 

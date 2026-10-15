@@ -25,7 +25,7 @@ func lockClaimOwnerTx(ctx context.Context, tx *storeTx, team Team, unit UnitRef)
 }
 
 func checkClaimantBindingTx(ctx context.Context, tx *storeTx, c capability.Capability, unit UnitRef) error {
-	if c.Binding.Kind == capability.BindingNone {
+	if c.Binding.Kind == capability.BindingNone || c.Binding.Kind == capability.BindingPush {
 		return nil
 	}
 	if c.Binding.Kind != capability.BindingTrigger || c.Binding.RunID != unit.RunID {
@@ -146,12 +146,18 @@ func writeOwnerClaimTx(ctx context.Context, tx *storeTx, claim UnitClaim) error 
 }
 
 type queuedClaim struct {
+	team    Team
 	unit    UnitRef
 	created int64
 	score   int
 }
 
 func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, demand UnitDemand, kinds []capability.UnitKind) (UnitRef, error) {
+	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: c.Prefix}, false)
+	if err != nil {
+		return UnitRef{}, err
+	}
+	metered := chain[len(chain)-1].principal.Capability.RootMetered
 	var candidates []queuedClaim
 	for _, kind := range kinds {
 		query, args := queuedClaimQuery(c, kind, tx.now().UnixNano())
@@ -161,7 +167,7 @@ func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, dem
 		}
 		for rows.Next() {
 			v := queuedClaim{unit: UnitRef{Kind: kind}}
-			if err = rows.Scan(&v.unit.RunID, &v.unit.NodeID, &v.unit.SourceGeneration, &v.created); err != nil {
+			if err = rows.Scan(&v.team, &v.unit.RunID, &v.unit.NodeID, &v.unit.SourceGeneration, &v.created); err != nil {
 				_ = rows.Close()
 				return UnitRef{}, err
 			}
@@ -184,6 +190,14 @@ func queuedUnitTx(ctx context.Context, tx *storeTx, c capability.Capability, dem
 		verdict := match.Evaluate(profile, requirements)
 		if !verdict.OK() || !match.Fits(profile.Capacity, demand.Available, requirements.Request).OK() {
 			continue
+		}
+		if metered {
+			if err := eligibleUnitBillingTx(ctx, tx, candidate.team, candidate.unit, requirements.Request); err != nil {
+				if errors.Is(err, ErrInsufficientCredits) {
+					continue
+				}
+				return UnitRef{}, err
+			}
 		}
 		candidate.score = verdict.PreferenceScore
 		eligible = append(eligible, candidate)
@@ -226,13 +240,13 @@ func queuedClaimQuery(c capability.Capability, kind capability.UnitKind, now int
 	args := []any{}
 	switch kind {
 	case capability.UnitNode:
-		query = `SELECT r.id,n.node_id,0,r.created_at FROM runs r JOIN nodes n ON n.team=r.team AND n.run_id=r.id WHERE n.status='pending' AND n.ready_at IS NOT NULL AND n.ready_at<=? AND n.claimed_by IS NULL AND n.cancel_requested_at IS NULL AND (r.claim_wait_ns<=0 OR n.queue_started_at>?-r.claim_wait_ns)`
+		query = `SELECT r.team,r.id,n.node_id,0,r.created_at FROM runs r JOIN nodes n ON n.team=r.team AND n.run_id=r.id WHERE n.status='pending' AND n.ready_at IS NOT NULL AND n.ready_at<=? AND n.claimed_by IS NULL AND n.cancel_requested_at IS NULL AND (r.claim_wait_ns<=0 OR n.queue_started_at>?-r.claim_wait_ns)`
 		args = append(args, now, now)
 	case capability.UnitEval:
-		query = `SELECT r.id,e.source_node_id,e.source_generation,r.created_at FROM runs r JOIN eval_units e ON e.team=r.team AND e.run_id=r.id JOIN nodes n ON n.team=e.team AND n.run_id=e.run_id AND n.node_id=e.source_node_id JOIN leases l ON l.name=e.owner_lease_name WHERE e.status='pending' AND e.claimed_by IS NULL AND (e.expires_at IS NULL OR e.expires_at>?) AND l.name='controller.owner' AND l.until>? AND n.generation=e.source_generation AND n.outcome IN ('success','memoized') AND n.expansion='expected'`
+		query = `SELECT r.team,r.id,e.source_node_id,e.source_generation,r.created_at FROM runs r JOIN eval_units e ON e.team=r.team AND e.run_id=r.id JOIN nodes n ON n.team=e.team AND n.run_id=e.run_id AND n.node_id=e.source_node_id JOIN leases l ON l.name=e.owner_lease_name WHERE e.status='pending' AND e.claimed_by IS NULL AND (e.expires_at IS NULL OR e.expires_at>?) AND l.name='controller.owner' AND l.until>? AND n.generation=e.source_generation AND n.outcome IN ('success','memoized') AND n.expansion='expected'`
 		args = append(args, now, now)
 	default:
-		query = `SELECT r.id,'',0,r.created_at FROM runs r JOIN triggers t ON t.team=r.team AND t.id=r.id WHERE t.unit_kind=? AND t.status='pending' AND t.claimed_by IS NULL AND t.cancel_requested_at IS NULL AND t.available_at<=? AND (t.started_at IS NOT NULL OR r.claim_wait_ns<=0 OR r.created_at>?-r.claim_wait_ns)`
+		query = `SELECT r.team,r.id,'',0,r.created_at FROM runs r JOIN triggers t ON t.team=r.team AND t.id=r.id WHERE t.unit_kind=? AND t.status='pending' AND t.claimed_by IS NULL AND t.cancel_requested_at IS NULL AND t.available_at<=? AND (t.started_at IS NOT NULL OR r.claim_wait_ns<=0 OR r.created_at>?-r.claim_wait_ns)`
 		args = append(args, string(kind), now, now)
 	}
 	query += ` AND r.status IN ('pending','running') AND r.cancel_requested_at IS NULL AND r.intake_mode='execute' AND NOT EXISTS (SELECT 1 FROM triggers deadline WHERE deadline.team=r.team AND deadline.id=r.id AND deadline.expires_at<=?)`

@@ -38,7 +38,7 @@ func blobResultFixture(t *testing.T) (*Store, *blobRecords, NodeTransition) {
 	s.resultRecords = records
 	a := intent.Identity.Attempt.Value
 	actor := Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: intent.Authority.CapabilityRef}, CapabilityPrefix: intent.Authority.CapabilityRef, Holder: "machine", Generation: a.Generation}
-	change := NodeTransition{Ref: NodeRef{a.RunID, a.NodeID}, Actor: actor, To: NodeSuccess, Cause: CauseReport, Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &output.Key, ManifestRecord: &request.Key}}}
+	change := NodeTransition{Ref: NodeRef{a.RunID, a.NodeID}, Actor: actor, To: NodeSuccess, Cause: CauseReport, SourceAttempt: sourceAttempt(a.Attempt), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeSuccess, OutputRecord: &output.Key, ManifestRecord: &request.Key}}}
 	return s, records, change
 }
 

@@ -19,10 +19,6 @@ func TestFinishedTriggerIsNeverReturnedToTheQueue(t *testing.T) {
 			}
 			return err
 		},
-		"RequeueUnstartedClaim": func(s *store.Store, ctx context.Context, id string) error {
-			_, err := s.RequeueUnstartedClaim(ctx, id)
-			return err
-		},
 		"ReleaseClaimAtGeneration": func(s *store.Store, ctx context.Context, id string) error {
 			seq, err := s.TriggerClaimGeneration(ctx, id)
 			if err != nil {

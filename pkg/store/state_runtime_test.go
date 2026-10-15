@@ -167,7 +167,7 @@ func TestTransitionApplicationRetryKeepsClaimAndOrdinal(t *testing.T) {
 	tenant, _, actor := liveHolderFixture(t)
 	ctx := context.Background()
 	ref := NodeRef{"run", "job"}
-	applied, err := tenant.TransitionNode(ctx, NodeTransition{Ref: ref, To: NodeRunning, Actor: actor, Cause: CauseRetry, Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: "verify"}}})
+	applied, err := tenant.TransitionNode(ctx, NodeTransition{Ref: ref, To: NodeRunning, Actor: actor, Cause: CauseRetry, SourceAttempt: sourceAttempt(3), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeFailed, Reason: "verify"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestTransitionApplicationRetryKeepsClaimAndOrdinal(t *testing.T) {
 	if row.ClaimedBy != "runner" || row.ApplicationRetries != 1 || row.Disruptions != 0 {
 		t.Fatalf("retry row = %+v", row)
 	}
-	result := NodeTransition{Ref: ref, To: NodeSuccess, Actor: actor, Cause: CauseReport, Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeSuccess}}}
+	result := NodeTransition{Ref: ref, To: NodeSuccess, Actor: actor, Cause: CauseReport, SourceAttempt: sourceAttempt(4), Extra: TransitionExtra{Result: &NodeResult{Outcome: NodeSuccess}}}
 	if _, err = tenant.TransitionNode(ctx, result); err != nil {
 		t.Fatal(err)
 	}
@@ -215,6 +215,7 @@ func TestTransitionHolderRights(t *testing.T) {
 	}
 	holder.Generation++
 	change.Actor = holder
+	change.SourceAttempt = sourceAttempt(3)
 	if _, err := tenant.TransitionNode(t.Context(), change); err == nil {
 		t.Fatal("wrong generation finished job")
 	}
