@@ -56,8 +56,6 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).awardScannedNodeTx": "the award carries the same runtime predicate; the read that follows " +
 		"it is of the row the award just proved in team",
 	"(*Store).ClaimNamedNode": "shares the claim scan's runtime predicate and its refusal",
-	"refuseEventOverLimitsTx": "reads one run's event counters for a cap on that run; the run id " +
-		"names one team's row and the fence checked before it proves the caller holds that run",
 	"(*Store).runnerTeams": "asks which team each live runner's credential belongs to, so an " +
 		"answer scoped to the asker is no answer; it is how another team's runner is dropped",
 	"(*Store).ClaimNextTriggerFor": "shares the claim scan's runtime predicate and its refusal; the " +
@@ -191,9 +189,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"every team's tokens",
 	"(*Store).CreateTokenIfNoneExist": "the bootstrap mints the deployment operator's first token only while no live token " +
 		"exists in any team, because an install with any credential already has an operator path",
-	"(*Store).chargeStorageTx": "storage usage rows are keyed by the charged principal, team:<slug> for every team but the " +
-		"default, so the principal names the team; no writer sets their team column yet, and scoping these reads before " +
-		"a backfill would read every quota as unlimited",
 }
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a

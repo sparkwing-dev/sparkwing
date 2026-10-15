@@ -182,7 +182,10 @@ func CheckStoreDataBoundary(ctx context.Context, root, id string, crash StoreUpl
 	if err := storeDataSingletonRace(ctx, clients); err != nil {
 		return err
 	}
-	return checkStoreDownloadBoundary(ctx, root)
+	if err := checkStoreDownloadBoundary(ctx, root); err != nil {
+		return err
+	}
+	return checkStoreEventBoundary(ctx, root)
 }
 
 func storeDataSingletonRace(ctx context.Context, clients []*store.Store) error {

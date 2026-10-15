@@ -18,6 +18,17 @@ property varies byte counts and hostile replica strings while checking tenant
 isolation and conservation. Expired generic download holds release without
 double subtraction. Failed counter writes and overflow roll back admission.
 
+Event accounting ports the five charged-storage tests and seven event-cap tests
+from `pkg/store/storage_test.go` and `event_limits_test.go` to
+`event_accounting_runtime_test.go` and `event_policy_runtime_test.go`.
+The no-quota assertion now requires additive usage because final counters record
+all tenant writes. The ports retain byte/month/run/count caps, kind validation,
+kind byte cost, concurrent admission, uncharged event counters and failed-write
+rollback. They add shared upload capacity, reopening, month rollover, funding,
+free share and a generated tenant-isolation/conservation property.
+The replica SQLite acceptance cell now races the real event writer and verifies
+its remaining capacity after reopening. No native source row is marked complete.
+
 The existing `storage-replica-safe-accounting/store-data-sqlite` cell now includes
 real tenant download charges, their last-capacity race and exhausted-budget
 reopening. The controller proof exercises delivered-byte accounting, trusted

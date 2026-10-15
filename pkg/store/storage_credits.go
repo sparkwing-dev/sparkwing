@@ -64,9 +64,9 @@ func validStorageFreeAllowance(bytes int64) error {
 // safety: the balance and the write that grows the team's bytes share one
 // transaction, so a refused write is never recorded.
 func refuseStorageGrowthOnEmptyBalanceTx(
-	ctx context.Context, tx *storeTx, team Team, principal string, bytes int64,
+	ctx context.Context, tx *storeTx, team Team, bytes int64,
 ) error {
-	room, err := headroomTx(ctx, tx, team, time.Now())
+	room, err := headroomTx(ctx, tx, team, tx.now())
 	if err != nil || room > 0 {
 		return err
 	}
@@ -77,7 +77,7 @@ func refuseStorageGrowthOnEmptyBalanceTx(
 	return fmt.Errorf(
 		"%w: team %s cannot store %d more bytes on a balance of %s credits; "+
 			"add credits, and retention releases what is already stored",
-		ErrInsufficientCredits, principal, bytes, FormatCredits(balance))
+		ErrInsufficientCredits, team, bytes, FormatCredits(balance))
 }
 
 // safety: the product of a byte count, a rate and an interval outgrows int64

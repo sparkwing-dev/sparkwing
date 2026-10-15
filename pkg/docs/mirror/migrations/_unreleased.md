@@ -1,5 +1,18 @@
 # Migrating to the next release
 
+## Event charges use tenant handles and replica identity
+
+`Store.AppendEventCharged` is removed. Obtain a tenant with `Store.ForTeam`,
+then call `Tenant.AppendEventCharged(ctx, replicaID, runID, nodeID, kind, payload)`.
+The replica ID is the controller's trusted identity. The caller no longer
+selects a charged principal. The tenant supplies the team and the store owns time.
+
+Event writes, retained run counters, shared storage quotas and replica usage
+commit together. Pending uploads and events share monthly and run byte capacity.
+Events consume no object capacity. Usage is recorded without a configured quota.
+The existing event limits and free-tier policy keep their meaning. The HTTP
+request and response shapes stay the same.
+
 ## Download charges use tenant handles and replica identity
 
 `Store.ChargeDownload` is removed. Obtain a tenant with `Store.ForTeam`, then

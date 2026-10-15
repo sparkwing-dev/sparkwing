@@ -2827,9 +2827,6 @@ func (s *Store) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID
 func (s *Store) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample MetricSample) error
 func (s *Store) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) (err error)
 func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
-func (s *Store) AppendEventCharged(
-	ctx context.Context, principal, runID, nodeID, kind string, payload []byte,
-) (_ int64, err error)
 func (s *Store) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (bool, error)
 func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
 func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
@@ -3203,6 +3200,7 @@ func (t *Tenant) AddUsage(ctx context.Context, delta UsageDelta) error
 func (t *Tenant) AdmitRun(ctx context.Context, request IntakeRequest) (AdmissionResult, error)
 func (t *Tenant) AdoptCapacity(ctx context.Context, key, id string, binding CapacityBinding, actor Actor) (CapacityAdoption, error)
 func (t *Tenant) AllGitHubAppExtraRepos(ctx context.Context) (_ map[string][]string, err error)
+func (t *Tenant) AppendEventCharged(ctx context.Context, replica, runID, nodeID, kind string, payload []byte) (int64, error)
 func (t *Tenant) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (_ bool, err error)
 func (t *Tenant) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
 func (t *Tenant) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error

@@ -8,6 +8,17 @@ usage, raw storage counters and other tenants cannot change retained byte totals
 Corrupt inventory or an overflowing total returns an error and no partial report.
 The controller's team storage report consumes this snapshot.
 
+`Tenant.AppendEventCharged` replaces the raw Store event writer. Its trusted
+replica identity comes from the controller. The method accepts no principal,
+team or clock. It locks the tenant's run and commits the event, retained run
+counters, shared storage admission and additive replica usage together. Event
+bytes include the kind and payload. Events consume monthly and lifetime run
+bytes alongside pending uploads, without consuming object capacity. Monthly
+admission resets with the store clock. Run capacity survives month changes.
+The existing event caps, free share, funding and claim fences remain in force.
+Usage is recorded even when no quota is configured. Failed writes and overflow
+return no sequence and roll back every accounting row.
+
 Download accounting uses `Tenant.ChargeDownload`. The raw Store method is
 removed. The request accepts a trusted replica ID and the existing cap policy,
 with no team or caller clock. The tenant owns the team and the store owns time.

@@ -39,7 +39,7 @@ func TestAnEmptyBalanceRefusesATeamWithNoQuotaRow(t *testing.T) {
 		t.Fatalf("set storage settings: %v", err)
 	}
 	seedRunWithNode(t, st, "r1", "n1", "running")
-	_, err := st.AppendEventCharged(ctx, "nomad", "r1", "n1", "log", []byte("bytes"))
+	_, err := storageTestTenant(t, st).AppendEventCharged(ctx, "replica", "r1", "n1", "log", []byte("bytes"))
 	if !errors.Is(err, store.ErrInsufficientCredits) {
 		t.Fatalf("append = %v, want an insufficient-credits refusal", err)
 	}
@@ -51,11 +51,11 @@ func TestAnEmptyBalanceRefusesAWriteThatGrowsRetainedBytes(t *testing.T) {
 	chargeableTeam(t, st, "acme", store.CloudStorageRateMicroPerGBDay, gib)
 	seedRunWithNode(t, st, "r1", "n1", "running")
 
-	_, err := st.AppendEventCharged(ctx, "acme", "r1", "n1", "log", []byte("more bytes"))
+	_, err := storageTestTenant(t, st).AppendEventCharged(ctx, "replica", "r1", "n1", "log", []byte("more bytes"))
 	if !errors.Is(err, store.ErrInsufficientCredits) {
 		t.Fatalf("append on an empty balance = %v, want an insufficient-credits refusal", err)
 	}
-	if !strings.Contains(err.Error(), "acme") {
+	if !strings.Contains(err.Error(), string(store.DefaultTeam)) {
 		t.Fatalf("refusal = %v, want one naming the team", err)
 	}
 	if got := countRows(t, st, `SELECT COUNT(*) FROM events`); got != 0 {
@@ -66,7 +66,7 @@ func TestAnEmptyBalanceRefusesAWriteThatGrowsRetainedBytes(t *testing.T) {
 		"", "operator"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
-	if _, err := st.AppendEventCharged(ctx, "acme", "r1", "n1", "log", []byte("more bytes")); err != nil {
+	if _, err := storageTestTenant(t, st).AppendEventCharged(ctx, "replica", "r1", "n1", "log", []byte("more bytes")); err != nil {
 		t.Fatalf("append once the balance holds credit: %v", err)
 	}
 	retained, err := storageTestTenant(t, st).StorageRetainedBytes(ctx)

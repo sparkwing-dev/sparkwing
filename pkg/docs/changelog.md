@@ -76,6 +76,8 @@ unlock.
 - **sdk:** describe lists each pipeline's declared secrets as `secrets`, which `sparkwing pipeline describe --secrets` prints
 
 ### Changed
+- **store + controller:** [(Breaking)](docs/migrations/_unreleased.md#event-charges-use-tenant-handles-and-replica-identity) Event charges use tenant handles and additive replica accounting
+  `Tenant.AppendEventCharged` replaces the raw Store writer. Events and pending uploads share storage capacity. Event, quota and usage writes commit together, and usage survives reopening.
 - **store:** [(Breaking)](docs/migrations/_unreleased.md#download-charges-use-tenant-handles-and-replica-identity) Download charges use tenant handles, store time and additive replica accounting
   `Tenant.ChargeDownload` replaces the raw Store method. The controller's signed and streamed downloads share one daily admission lock. Existing caps and log-read exemptions stay the same.
 - **controller + store (Breaking):** Remove the service-token storage and download counter routes and `Store.RenewStorage`. Verified upload tickets own quota reservation and settlement. The signup slot setting writes the final settings table. See [migration guide](docs/migrations/_unreleased.md#storage-counters-use-verified-upload-tickets).
