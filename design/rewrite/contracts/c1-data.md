@@ -450,6 +450,9 @@ The `storage-hasmany-read-set/store-data-sqlite` proof uses exact imported job
 attempts under a preseeded publication capability. It checks hidden unrelated and
 foreign existence, budget expiry, reservation and failed-commit refusal, independent
 verified receipts, deduplicated replica charging and persistence after reopening.
+Both `BindData` and `BindReadSet` dispatch through `Store.CheckBinding` to the
+transactional data checker in this SQLite proof. Generated store tests also
+check uncommitted receipt changes and caller-supplied principal forgeries.
 Presence metadata consumes neither download nor egress bytes. Physical verification,
 job-holder transports and native placements remain integration obligations.
 
@@ -461,6 +464,11 @@ advance the injected clock across the final read and require an empty budget
 error once the deadline is reached. Trigger/plan owner receipt properties also
 check forged identities and refusal to transfer the receipt to a job in the same
 run. Physical stream verification and native placements remain separate proofs.
+
+Record commits and lookups recheck live authority after verified manifest I/O.
+Generated tests cross the job lease, leaf capability and ancestor expiry during
+that read through CommitRecord, LookupRecord, LookupMemo, LookupDepcache and
+CopyMemo. Refusals return no read set and persist no output or manifest record.
 
 The `storage-log-segments-and-fallback/store-data-sqlite` proof exercises
 immutable job segments, transactional rollback of a gapped batch, reopening,

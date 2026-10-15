@@ -107,6 +107,11 @@ func (r *blobRecords) CommitRecord(ctx context.Context, request blob.CommitRecor
 	if err != nil {
 		return blob.Record{}, err
 	}
+	// safety: verified manifest I/O can outlast the uploader's authority.
+	a, err = resolveBlobAuthorityTx(ctx, tx, r.tenant.team, request.Authority, capability.DataWrite)
+	if err != nil {
+		return blob.Record{}, err
+	}
 	scope, err := r.rules.RecordNamespace(request.Key)
 	if err != nil {
 		return blob.Record{}, err

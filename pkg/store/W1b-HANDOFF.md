@@ -1,10 +1,59 @@
 # W1b handoff
 
-Continues `dd33fc542`. W1b remains incomplete. This continuation is uncommitted.
+Continues `2ed7a93aa`. W1b remains incomplete. This continuation is uncommitted.
 The lead owns review, commits, pipelines and native integration. W1 implementation
 files are unchanged. No Git write or candidate Sparkwing runtime was used.
 
 ## Current continuation
+
+Fixed authority surviving a slow verified manifest read. The invariant is that
+manifest I/O cannot carry expired authority into a record, a memo attachment or
+an authorized read result. CommitRecord and the shared record lookup recheck the
+existing authority owner after manifest I/O. This adds ten production lines,
+including two safety comments. No new mechanism, API, setting or schema is added.
+
+The first generated test failed through all five record APIs before the fix.
+It now passes 720 cases across CommitRecord, LookupRecord, LookupMemo,
+LookupDepcache and CopyMemo. The reader advances an injected clock across the
+job lease, leaf capability or ancestor expiry. Refusals return no read set and
+persist no output or manifest edge. Namespace and edge policy remain contract
+fakes because W7's implementations are still stubs.
+
+Added a real W1 CheckBinding integration property. Both BindData and BindReadSet
+see receipt changes in their owning transaction, leave rollback to the caller,
+and ignore forged principal hints in 96 generated cases. The SQLite HasMany
+acceptance cell now calls both binding rules for readable and hidden digests
+before receipt commit, after failed verification and after reopening. Its
+publication authority remains a preseeded contract fixture.
+
+Verification uses the environment under Manual below. The repository build and
+scoped vet pass. The store selection passes **146 top-level tests / 393 cases**
+without skips. Both acceptance trees pass **20 top-level tests / 203 cases**,
+including the same **10 SQLite persistence cells**, with **2,995 native/platform
+skips**. No new acceptance cell or archived T1 port is claimed complete.
+
+All selected tenant SQL-scope, writer and twin guards pass on this merged tree.
+The documentation mirror check, session commentcheck/sleepcheck and whitespace
+checks pass. Required commentcheck against main still reports three inherited
+findings: internal/controllerwire/contracts.go:47, pkg/store/state_materialize.go:15
+and pkg/store/state_result_records.go:9. W1/W9 own those untouched files.
+
+Legacy deletion is **0 lines**. Existing callers still require the old APIs.
+No foreign contract change or human question is added. The SQLite binding join
+is verified, but PostgreSQL and its read-only/locking transaction mismatch remain
+open. Billing issuance/interval/settlement, published owner identity, physical
+storage, native log transports and the legacy hard cut remain the integrations
+listed below. Independent review and pipelines belong to the lead.
+
+Owned edits are blob_record_runtime.go, blob_lookup.go, the two new blob test
+files, STORE-DATA.md and this handoff. Shared files are only
+internal/acceptance/store_presence.go and design/rewrite/contracts/c1-data.md.
+No W1 implementation file or cross-package production caller changed. Friction
+was cold compilation and the inherited commentcheck findings. Scratch is removed
+after the final checks. No Git writes or Sparkwing runtime commands were used
+after bootstrap discovery.
+
+## Previous continuation (committed in 12816e241)
 
 Fixed HasMany completing its final read after the deadline and returning success.
 `readableBlobsTx` checks the deadline after the full scan and discards presence

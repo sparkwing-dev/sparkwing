@@ -83,6 +83,11 @@ func (r *blobRecords) lookupRecordTx(ctx context.Context, tx *storeTx, a blobAct
 	if err != nil {
 		return result, err
 	}
+	// safety: manifest I/O must not carry expired read or holder rights into a result.
+	a, err = resolveBlobAuthorityTx(ctx, tx, r.tenant.team, a.authority, capability.DataRead)
+	if err != nil {
+		return result, err
+	}
 	digests := []blob.Digest{record.Digest}
 	if record.ManifestDigest.Set {
 		digests = append(digests, record.ManifestDigest.Value)

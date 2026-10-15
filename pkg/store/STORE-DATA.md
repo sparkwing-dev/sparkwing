@@ -104,6 +104,12 @@ that transaction's receipt, reference, revocation and holder changes and leave
 commit or rollback to the caller. `Tenant` uses the same checks. Supplied
 principal fields cannot widen persisted capability authority.
 
+Record commits and lookups recheck live authority after verified manifest I/O.
+A read that crosses the job lease, leaf capability or ancestor expiry returns
+no authorized result. It cannot publish a record or attach memo outputs.
+SQLite checks exercise both data binding rules through `Store.CheckBinding`
+and through the transaction that owns receipt changes.
+
 `ReadableBlobs` returns each readable digest once in request order, including
 large requests. It checks the budget after its final read and returns an empty
 presence result with `blob.ErrBudget` when the deadline has passed.

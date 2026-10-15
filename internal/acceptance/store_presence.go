@@ -63,7 +63,7 @@ func checkStorePresenceBoundary(ctx context.Context, root string) (err error) {
 		if err != nil || !slices.Equal(presence.Present, want) {
 			return fmt.Errorf("presence for %s=%+v, want %v: %v", request.Intent.Identity.Attempt.Value.NodeID, presence, want, err)
 		}
-		return checkStorePresenceAccess(ctx, tenant, request.Intent.Authority, query.Digests, want)
+		return checkStorePresenceAccess(ctx, s, tenant, request.Intent.Authority, query.Digests, want)
 	}
 	if err := check([]blob.Digest{first.Blob.Digest}); err != nil {
 		return err
@@ -121,9 +121,10 @@ func checkStorePresenceBoundary(ctx context.Context, root string) (err error) {
 	return checkStorePresenceUsage(ctx, tenant, s.DB())
 }
 
-func checkStorePresenceAccess(ctx context.Context, tenant *store.Tenant, authority blob.Authority, digests, present []blob.Digest) error {
+func checkStorePresenceAccess(ctx context.Context, s *store.Store, tenant *store.Tenant, authority blob.Authority, digests, present []blob.Digest) error {
 	a := authority.Attempt.Value
 	authorized := capability.Authorized{Principal: capability.Principal{Capability: capability.Capability{Prefix: authority.CapabilityRef, Team: a.Team}}}
+	authorized.Principal.Authority = capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: authority.CapabilityRef}
 	for _, operation := range []capability.DataOperation{capability.DataDownload, capability.DataHasMany, capability.DataLookup} {
 		for _, digest := range digests {
 			target := capability.DataTarget{Operation: operation, Digest: string(digest), RunID: a.RunID, NodeID: a.NodeID, Attempt: a.Attempt, Generation: a.Generation}
@@ -134,6 +135,13 @@ func checkStorePresenceAccess(ctx context.Context, tenant *store.Tenant, authori
 				}
 			} else if !errors.Is(err, blob.ErrDigestNotReadable) {
 				return fmt.Errorf("%s exposed unreadable digest: %v", operation, err)
+			}
+			for _, rule := range []capability.BindingRule{capability.BindData, capability.BindReadSet} {
+				selected := capability.Target{Team: a.Team, RunID: a.RunID, NodeID: a.NodeID, Data: &target}
+				err := s.CheckBinding(ctx, authorized.Principal, rule, selected)
+				if slices.Contains(present, digest) && err != nil || !slices.Contains(present, digest) && !errors.Is(err, blob.ErrDigestNotReadable) {
+					return fmt.Errorf("%s/%s binding exposed the wrong read set: %v", operation, rule, err)
+				}
 			}
 		}
 	}
