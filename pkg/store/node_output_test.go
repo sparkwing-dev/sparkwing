@@ -2,6 +2,8 @@ package store_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -34,40 +36,6 @@ func commitOutput(ctx context.Context, t *testing.T, s *store.Store, team store.
 	return store.OutputRef{Key: key, Size: int64(len(data)), SHA256: sha}
 }
 
-func TestReportAttempt_RecordsOnlyItsOwnCommittedOutput(t *testing.T) {
-	f := newDispatchRun(t, "run-output-ref")
-	f.mustAccept(t, planOf("a", "b"))
-	tok := f.claim(t, "a", store.ClaimTokenWork)
-	own := commitOutput(t.Context(), t, f.s, store.DefaultTeam, f.run, "a", []byte(`{"v":1}`))
-	other := commitOutput(t.Context(), t, f.s, store.DefaultTeam, f.run, "b", []byte(`{"v":2}`))
-	uncommitted, _ := f.s.NodeOutputKey(t.Context(), f.run, "a")
-
-	refused := map[string]store.OutputRef{
-		"another node's object": other,
-		"an uncommitted key":    {Key: uncommitted, Size: own.Size, SHA256: own.SHA256},
-		"a different size":      {Key: own.Key, Size: own.Size + 1, SHA256: own.SHA256},
-		"a different digest":    {Key: own.Key, Size: own.Size, SHA256: other.SHA256},
-	}
-	for name, ref := range refused {
-		if _, err := f.report(tok, store.AttemptReport{Outcome: "success", Output: &ref}); !errors.Is(err, store.ErrAttemptInvalid) {
-			t.Fatalf("report naming %s: err = %v, want refused", name, err)
-		}
-	}
-	if _, err := f.report(tok, store.AttemptReport{Outcome: "success", Output: &own}); err != nil {
-		t.Fatalf("report naming its own committed output: %v", err)
-	}
-	if a := f.node(t, "a"); a.OutputRef == nil || *a.OutputRef != own {
-		t.Fatalf("node output ref = %+v, want %+v", a.OutputRef, own)
-	}
-	obj, err := f.s.NodeOutputObject(t.Context(), store.DefaultTeam, f.run, "a")
-	if err != nil || obj.SHA256 != own.SHA256 || obj.Size != own.Size {
-		t.Fatalf("output object = %+v, %v", obj, err)
-	}
-	if _, err := f.s.NodeOutputObject(t.Context(), store.DefaultTeam, f.run, "b"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("a committed object no report named is readable as b's output: %v", err)
-	}
-}
-
 func TestFinishNodeWithOutputRef_RefusesAnotherRunsObject(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := t.Context()
@@ -86,31 +54,6 @@ func TestFinishNodeWithOutputRef_RefusesAnotherRunsObject(t *testing.T) {
 	own := commitOutput(t.Context(), t, s, store.DefaultTeam, "run-fin-a", "n", []byte(`"a"`))
 	if err := s.FinishNodeWithOutputRef(ctx, "run-fin-a", "n", "success", "", &own, "", nil); err != nil {
 		t.Fatalf("finish naming its own output: %v", err)
-	}
-}
-
-func TestReportAttempt_ARetryDropsTheFailedAttemptsOutput(t *testing.T) {
-	f := newDispatchRun(t, "run-output-retry")
-	f.mustAccept(t, planOf(`a|"modifiers":{"retry":1,"retry_auto":true}`))
-	tok := f.claim(t, "a", store.ClaimTokenWork)
-	ref := commitOutput(t.Context(), t, f.s, store.DefaultTeam, f.run, "a", []byte(`{"try":1}`))
-	if _, err := f.report(tok, store.AttemptReport{Outcome: "failed", Output: &ref}); err != nil {
-		t.Fatal(err)
-	}
-	a := f.node(t, "a")
-	if a.Status == "done" {
-		t.Fatalf("the failed attempt was not retried: %+v", a)
-	}
-	if a.OutputRef != nil {
-		t.Fatalf("a retried node kept its failed attempt's output: %+v", a.OutputRef)
-	}
-	retry := f.claim(t, "a", store.ClaimTokenWork)
-	if _, err := f.report(retry, store.AttemptReport{Outcome: "success", Output: &ref}); !errors.Is(err, store.ErrAttemptInvalid) {
-		t.Fatalf("a retry naming the failed attempt's object: err = %v, want refused", err)
-	}
-	fresh := commitOutput(t.Context(), t, f.s, store.DefaultTeam, f.run, "a", []byte(`{"try":2}`))
-	if _, err := f.report(retry, store.AttemptReport{Outcome: "success", Output: &fresh}); err != nil {
-		t.Fatalf("a retry naming its own object: %v", err)
 	}
 }
 
@@ -387,4 +330,9 @@ func TestGetNodeOutput_ReportsBadOrMissingBytes(t *testing.T) {
 	if out, err := s.GetNodeOutput(ctx, "run-a", "n"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("a lost output file = %s, %v; want not found", out, err)
 	}
+}
+
+func digestOf(body []byte) string {
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
 }

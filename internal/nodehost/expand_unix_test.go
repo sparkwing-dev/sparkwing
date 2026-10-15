@@ -92,7 +92,7 @@ func TestFanOutEndToEnd(t *testing.T) {
 			Session:  SessionConfig{Entry: pipelineentry.Binary(bin), Dir: t.TempDir(), Grace: 2 * time.Second, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLocal, Secrets: noV2Secrets{}}, Engine: nodeproto.EngineIdentity{Version: "test"}, Runner: nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}}},
 			Pipeline: "attempts", Args: map[string]string{"fanout": fanout},
 			Run:   nodeproto.RunContext{RunID: runID},
-			State: st, Logger: slog.New(slog.DiscardHandler), Heartbeat: time.Hour,
+			State: st, Logger: slog.New(slog.DiscardHandler),
 			Attempts: &Attempts{
 				Routes: srv, Resolver: fixtureResolver{}, Masker: secrets.NewMasker(), Claim: outputController(t, st),
 				OpenLog: func(_ context.Context, _, node string) (NodeLog, error) {

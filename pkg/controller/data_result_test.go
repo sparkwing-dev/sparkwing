@@ -17,7 +17,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -27,7 +26,14 @@ func TestDataStorageAttachesVerifiedResultRecords(t *testing.T) {
 	property := func(payload [16]byte) bool {
 		engine, tenant := engineRuntimeStore(t)
 		authorized := engineRuntimeClaim(t, engine, capability.UnitNode)
-		started, err := engine.TransitionJob(t.Context(), authorized, controllerwire.JobTransitionRequest{To: "running", Cause: "start"})
+		actor, err := engineActor(authorized)
+		if err != nil {
+			t.Log(err)
+			return false
+		}
+		ref := store.NodeRef{RunID: "run", NodeID: "job"}
+		ordinal := int64(0)
+		started, err := tenant.TransitionNode(t.Context(), store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: &ordinal})
 		if err != nil {
 			t.Log(err)
 			return false
@@ -77,8 +83,9 @@ func TestDataStorageAttachesVerifiedResultRecords(t *testing.T) {
 			t.Log(err)
 			return false
 		}
-		request := controllerwire.JobTransitionRequest{To: "success", Cause: "report", Result: &controllerwire.JobResult{Outcome: "success", Output: &outputKey, Manifest: &manifestKey}}
-		if _, err := engine.TransitionJob(t.Context(), authorized, request); !errors.Is(err, blob.ErrIntegrity) {
+		ordinal = started.Attempt
+		request := store.NodeTransition{Ref: ref, Actor: actor, To: store.NodeSuccess, Cause: store.CauseReport, SourceAttempt: &ordinal, Extra: store.TransitionExtra{Result: &store.NodeResult{Outcome: store.NodeSuccess, OutputRecord: &outputKey, ManifestRecord: &manifestKey}}}
+		if _, err := tenant.TransitionNode(t.Context(), request); !errors.Is(err, blob.ErrIntegrity) {
 			t.Logf("corrupt result: %v", err)
 			return false
 		}
@@ -92,7 +99,7 @@ func TestDataStorageAttachesVerifiedResultRecords(t *testing.T) {
 			return false
 		}
 		for i := range 2 {
-			applied, err := engine.TransitionJob(t.Context(), authorized, request)
+			applied, err := tenant.TransitionNode(t.Context(), request)
 			if err != nil || applied.Replayed != (i == 1) {
 				t.Logf("verified result %d: %+v: %v", i, applied, err)
 				return false

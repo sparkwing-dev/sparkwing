@@ -2,522 +2,14 @@
 
 Each worker acts on every entry naming its area. Entries come from area reviews and fixes; mark an entry done in your report.
 
-## From W7 output-copy retirement and reconciliation probe
-
-**Completed W7 hard cut.** Removed AttemptReport.OutputFrom, the output_from
-attempt payload, Store.FinishNodeCopyingOutput, sourceOutputRefTx, copySource
-and their copy branches. Removed localState.FinishNodeCopyingOutput and its
-copiedOutput type, plus the unused StoreBackend/ClientBackend.GetNodeOutput
-methods. The host memo layer already calls blob.RecordStore.CopyMemo. Its
-existing real-store replay, rollback, edge and collection tests pass.
-
-Removed the obsolete output-copy assertions from the old claim/input test.
-The tenant-call guard removes the retired copy wrapper's exemption and seventeen
-stale profile/concurrency exemptions reported by its execution. Source docs,
-the store API snapshot and OpenAPI agree with the cut. The API generator also
-exposed stale filesystem output endpoints. Those descriptions are removed and
-the registered signed filesystem data transfers are documented.
-
-**W1 transactional materialization is still unbound.** Invariant: authorized
-record copies and the terminal state commit together. The private
-Store.materializations field has assignments only in materialize_runtime_test.go.
-An overlay removing only materializationFixture's test-copier assignment makes
-TestReconcileMaterializesPersistedOutcomeOnce fail for manual_retry, memo and
-coalesced with `transactional materialization records are not configured`.
-These are seeded store fixtures, not native authenticated runs. No overlay or
-failing test remains in the working tree.
-
-Implement the existing CopyMaterializedRecords transaction seam in pkg/store.
-W7 cannot install a private store transaction implementation from the byte
-backend. Calling the public CopyMemo before ReconcileNode would break atomicity.
-No foreign contract declaration was changed for this probe.
-
-**W1/W3 materialized artifact identity needs a contract.** ReadNode supplies an
-executed producer's attempt and generation. It does not supply its committed
-result-record keys. TestReconcileRetryCanReuseMaterializedResult explicitly
-preserves attempt zero for materialized jobs. W3 must not synthesize a positive
-attempt to build a manifest key. Settle how the state/result reader exposes
-that persisted identity before replacing artifacts.go's legacy key assembly.
-This source finding has not been exercised through a native artifact stage.
-
-Existing TestStorage passes with 81 passing events, no failures and 424 skips.
-No acceptance cell was added or unskipped. W2 data bindings, the segment-commit
-wire operation, W1b expired-staging cleanup and W3/W8 host construction remain
-the other recorded integration points.
-
-## From W7 controller result verification and unused API retirement
-
-**Completed W7 runtime wiring.** `Server.WithDataObjects` now calls
-`Store.SetResultBlobRecords` with the configured backend's verified manifest
-reader. Both standalone backend paths already call this constructor. Without the
-hook, W1b refused terminal result attachment as unconfigured. The controller
-property test joins real claims, starts, upload reservations, physical signed
-filesystem transfers, receipt settlement and record commits. Twelve generated
-payloads refuse corrupt manifests without finishing the job, then complete and
-replay after the bytes are restored. HTTP authentication is not exercised.
-
-**Completed W7 hard cuts.** Removed unused storage.SafeRelPath/SafeArtifactKey,
-Store.PrunableNodeLogs/DeleteRunNodeLogs, their private helper and obsolete tests.
-The deleted retired-class fixture is covered by the existing common-backend
-team-purge/recheck test. SafeSegment remains because the controller uses it.
-
-**W3 caller still needs migration.** internal/nodehost/artifacts.go synthesizes
-manifest keys with Name=runID and no attempt key. W1's final result layout uses
-Name=result and Scope.Key=run/attempt/generation. The legacy host must obtain
-producer record keys from final tenant execution state or a bound input resolver.
-Its StateStoreOld view cannot name the producing attempt. The declared final
-StateStore.ReadNode can supply that identity. W7 left this foreign host interface
-unchanged. This is a source audit finding, not executed host proof.
-
-W2/W9's authenticated data/log bindings and segment-commit wire operation remain
-open. W1b's six mutation-expiry cases still fail. Expired upload staging cleanup
-still has no leased store seam. See [w7-storage-report.md](w7-storage-report.md).
-
-## From W7 raw artifact interface retirement
-
-**Completed W7 hard cut.** Removed storage.ArtifactStore,
-ErrListNotSupported, pkg/storage/conformance, the unused S3 Delete method and
-the entire sharded filesystem reader/listing surface. Deployment filesystem
-measurement now uses fs.NewUsageReporter through storeurl.OpenMeasurementStore.
-The existing byte/record, receipt, manifest and tagged-log real-store joins remain.
-This session removes 664 tracked Go lines and adds 156, for a net cut of 508.
-
-**Minimal caller migrations.** The orchestrator pod/trigger masking fixtures and
-launcher e2e fixture read logs through client.NodeLogs. Completeness assertions
-use the controller's completeness query. They no longer open store-local output
-directories or legacy node-log records. Those host fixtures compile but are not
-claimed as passing final authenticated integration. The dropped-line test now
-runs the real sink with an uploader fake, and passes as a unit test.
-
-**Remaining joins.** DataAuthority, BindData, NewDataClient and PolicyRouter still
-panic. W2/W9 must construct LogTransport and SegmentRecorder bindings and declare
-the segment-commit wire operation. W1b's leased expired-staging cleanup seam is
-still absent. Fresh host/wingd bindings and server-derived repo-only record
-lookup remain open. The S3 output/log handlers, their clients and host sinks,
-raw S3 log reader/writer and store-local output APIs are still live and still
-need their hard cut. No replacement authority protocol was added.
-
-**Known W1b regression.** TestBlobRecordsMutationCannotOutliveAuthority still
-fails all six commit/copy lease, leaf and ancestor expiry cases. The approved
-transaction-local mutation redesign remains assigned to W1b. W7 changed none
-of that mechanism.
-
-Whole-repository build and test compilation, storage package tests, focused
-vet, commentcheck, current-diff sleepcheck and embedded-document drift checks
-pass. Existing TestStorage passes in 161.198 seconds with 81 passing events and
-424 native/platform skips. No acceptance cell was added or unskipped.
-See [w7-storage-report.md](w7-storage-report.md) for the full scope and limits.
-
-## From W7 scoped physical log deletion
-
-**Completed W7 cleanup construction.** Run deletion and team purge/recheck now
-use the configured common backend's `blob.LogDeleter.DeleteLogs`. Filesystem
-and S3 remove the selected tenant/run across stored classes, including retired
-classes, without consulting legacy node-log tables. Invalid selectors fail before
-I/O. Filesystem traversal follows no symlink. S3 validates listed keys and
-pagination. Listings grant no read or record authority. This is a W7-local
-contract addition. The existing deletion lease still belongs to the controller.
-
-Removed the old controller prefix deleter and class-listing adapter. Removed
-the unused sharded filesystem writer, Delete method, conditional-write locks
-and obsolete writer tests. The read-only filesystem fixture/measurement paths
-remain. The pod-host fixture now asks only for `logseg.Objects`. No new
-acceptance cell or native skip change was added.
-
-Ported competing-writer immutability to signed common-backend transfers and
-late-upload purge to the registered physical router. Generated filesystem and
-S3 properties cover tenant/run separation, retired classes, replay and CAS
-preservation. These prove physical cleanup, not the unfinished authentication
-or final-schema team-deletion workflow. The replaced fixture failed while
-creating a removed `tokens` row.
-
-**W1b record mutation redesign remains open.** The existing
-`TestBlobRecordsMutationCannotOutliveAuthority` still fails all six
-CommitRecord/CopyMemo lease/leaf/ancestor expiry cases. W7 changed no part of
-that mechanism. The approved transaction-local redesign below remains W1b's.
-
-**Remaining W1b/W2/W3/W8/W9 joins.** Authenticated DataAuthority, BindData,
-NewDataClient and PolicyRouter remain stubs. Bound LogTransport and
-SegmentRecorder construction and the segment-commit wire operation are still
-missing. Expired staging needs its leased store contract. Hosts and wingd need
-fresh storage construction. Legacy S3 output/log handlers, clients and
-store-local output/read paths remain live and are unfinished hard cuts.
-See [w7-storage-report.md](w7-storage-report.md).
-
-## From W7 filesystem startup and transport cut
-
-**Completed W7 filesystem construction.** A standalone controller without the
-S3 backend now opens the common filesystem backend under its home/data and
-supplies it through WithDataObjects. Its public router mounts the declared signed
-data upload, object download and log upload paths. The signed token binds method,
-object, byte checks and expiry. External proxy prefixes stay in generated URLs,
-while verification uses the registered controller path. Filesystem.VerifyTransfer
-is available for C2 Endpoint.Verify. This closes standalone construction from the
-maintenance handoff below. New wingd construction still belongs to W8.
-
-**Completed W7 filesystem hard cut.** Removed fsOutputs, its output MAC and
-WithOutputSignKey, old output PUT/GET routes, fsLogObjects and the old log PUT
-handler. The orchestrator API no longer owns the removed signing key or routes.
-The common data backend supplies signed physical transfers. No compatibility
-handler was added. Legacy S3 output/log handlers and store-local output files
-remain live and still need their final caller cutover.
-
-Existing filesystem acceptance fixtures now transfer through the production
-controller Handler, including real tenant blob-record, upload and log-record
-proofs. Authorization and issuance remain seeded or contract fixtures. No new
-acceptance cell was added. Signature and immutable-log properties exercise the
-registered physical routes. The record, archive and log cells still pass.
-The full report lists verification, removed test coverage and shared files.
-
-**W1b/W2/W3/W8/W9 remaining integration.** BindData, DataAuthority, NewDataClient
-and PolicyRouter remain unimplemented. LogTransport and SegmentRecorder still
-need authenticated construction and a declared segment-commit wire operation.
-Hosts need fresh attempt/generation StorageBindings. Repo-only exact record
-lookup still needs the server's tenant/default-ref selector. Expired staging
-cleanup still needs a leased operator contract returning its keys or invoking
-ObjectBackend.DeleteObject. No W7 SQL copy or foreign contract change was added.
-The approved W1b record-mutation redesign is still assigned to W1b.
-
-A broad acceptance invocation also reached TypeScript native tests, which fail
-because sdk/typescript/node_modules/typescript/bin/tsc is absent. This is separate
-from the passing TestStorage run. See [w7-storage-report.md](w7-storage-report.md).
-
-## From W7 controller maintenance cutover
-
-**Completed W7 maintenance integration.** The retained-data worker now passes
-its configured ObjectBackend to W1's real MarkBlobTombstones and
-CollectBlobTombstones APIs under a renewed maintenance fence. Configured
-filesystem objects also run class expiry after renewal. Standalone S3 startup
-installs the backend through WithDataObjects and the declared DataController
-fields. Authenticated data methods remain W2's implementation.
-
-Deleted the separate bucket-reconciliation worker, free-share log pruning,
-listing-derived tenant accounting, storage_pass health projection and unused
-teamblob measurement API. The cut removes 881 Go lines, including 432 obsolete
-test lines. Physical collection errors do not skip retained-storage billing.
-A signed-license regression proves the zero-rate watermark still resets after
-backend deletion fails. The existing key-containment property has no S3 fixture. A real
-SQLite/filesystem controller property checks 64 generated tenant objects,
-references, tombstone grace and replay. A foreign lease prevents physical expiry.
-No new acceptance cell was added.
-
-**W1b/W2 staging cleanup contract needed.** Quota expiry is wired through W1's
-marking transaction. Expired or abandoned pending objects are separate from live
-CAS blobs. W7 has no leased operator seam returning their staging keys or
-invoking ObjectBackend.DeleteObject. Declare that seam before physical cleanup;
-W7 will not duplicate uploads SQL or infer authority from bucket listings.
-
-**W2/W3/W8/W9 remaining construction.** The existing LogTransport and
-SegmentRecorder need bound client construction and the controller wire needs a
-segment-commit operation. Authenticated data methods, filesystem startup/route
-mounting and fresh host StorageBinding construction remain open. The older
-output/log handlers, clients, host sinks and raw backends remain live until that
-cutover. No new foreign contract or compatibility protocol was added.
-
-Build, storage tests, the new controller integration tests, vet, commentcheck,
-current-diff sleepcheck and embedded-doc drift pass. TestStorage passes with
-81 passing events and 424 native/platform skips. Sleepcheck against main
-still reports internal/limits/deadline_test.go:58/:66 and
-sparkwing/sparkwingtest/host_test.go:214, outside W7's change. See
-[w7-storage-report.md](w7-storage-report.md) for command scope and final acceptance.
-
-## From W7 merged-store wiring
-
-**Completed W7 record-layout integration.** Output and artifact capture now use
-W1's persisted exact-attempt layout through `blob.ResultRecordKey`. Memo writers
-and exact readers use `MemoRecordName=output`. W1 admission, copy destinations
-and result attachment consume the shared builder. The former
-`store.ResultBlobKey` is deleted and every caller is migrated. C1's W7 layout
-paragraphs now match these real persistence APIs. No schema changed.
-
-Invariant: a result key identifies the exact tenant/run/job/attempt/generation,
-and a caller cannot select another run/job or supply the result scope key.
-A 96-case generated property covers key separation and refused selectors.
-The existing filesystem/S3 archive cells also write output, capture artifacts,
-commit memo, reopen SQLite, materialize memo and stage artifacts using real
-`Tenant.BlobRecords` and verified physical manifests. Only authenticated binding
-and physical S3 service are fixtures. No component-only cell was added.
-
-**Completed W7 physical log wiring.** `Tenant.RecordSegments` now uses
-`blob.LogObjectKey`, and persisted segment numbering starts at one. The duplicate
-`store.LogSegmentObjectKey` and its callers' old layouts are removed. Store and
-acceptance fixtures use the common slots. The existing filesystem-records cell
-is unskipped. The former S3 component cell now uses real tenant segment commits,
-reopens and reads through the committed reader, and is named `s3-records`.
-Both backends exercise lost PUT replies, exact replay, offsets, retained bytes
-and revoked-reader refusal. This closes the physical-log-slot handoff below.
-
-**Remaining W1/W2/W3/W8/W9 integration.** Authenticated DataAuthority, BindData,
-NewDataClient and policy-router methods still panic as unimplemented. Hosts
-still need fresh StorageBinding values. Repo-reader exact lookup still needs
-server-derived tenant/default-ref selection. The controllerwire client has no
-segment-commit method or factory for the declared LogTransport. W2/W9 must bind
-those existing interfaces before the older output/log clients and their host
-callers can be cut over. W7 has not invented a second authentication protocol.
-Physical collection and filesystem expiry still need maintenance construction.
-
-**DESIGN: record mutation authorization.** The known W1b regression still fails.
-CommitRecord and CopyMemo can persist one output and expose a read set after a
-namespace callback crosses a job lease, leaf capability or ancestor expiry.
-W7 reproduced all six cases and left the mechanism unchanged under the brief's
-two-strikes rule. The lead's transaction-local publication redesign remains open.
-
-Full TestStorage passes with 81 passing events and 424 native/platform skips.
-Whole-repository build, all 173 package compilations, storage tests, scoped store
-and host tests, vet, commentcheck, sleepcheck and embedded-doc drift pass.
-The store selection excludes that separately reproduced red regression.
-The two duplicate key builders remove 23 legacy definition lines. The remaining
-output/log transports are still live and remain an unfinished hard cut.
-
-## From W7 amended merge and manifest fixtures
-
-**Completed W7 merge resolution.** All seven conflicted working paths are
-resolved. Amended C1 and W1 evidence remain alongside W7 behavior and migration
-notes. The obsolete grant/upload test deletions are preserved. API generation
-also removed snapshot entries resurrected by the merge for W7's earlier cuts.
-All generated snapshot contents match the merged implementation. The orphan
-`.apidiff/pkg_runner.txt` still needs W8/lead cleanup. The index remains unmerged
-because the swarm brief prohibits Git writes. The lead must stage and commit.
-
-**Completed W7 fixture migration.** Both physical manifest-record cells failed
-with `holder_rights` because W1 now requires a terminal imported attempt and the
-W7 fixture still inserted pending work. Twelve generated cases per backend now
-refuse an unfinished attempt even when its node is terminal, verify that no
-reservation remains, finish that exact attempt, and retain the earlier manifest
-metadata, unrelated-receipt and reopen assertions. Both cells pass, including with the race detector. Full storage acceptance
-passes with 79 events and 425 skips. No production authority changed.
-
-**W2 build-trust fixture.** The retained controller test now uses
-`Tenant.TrustLocalBuilds`, so all 173 repository test packages compile. Running
-`TestTeamOwnerCanChooseWhetherCloudTrustsLocalBinaries` still fails during
-`newAppFixture` with `no such table: tokens`, before reaching the handler. Migrate
-that authentication fixture to C2. The W1 record/memo/log-slot and W2 data-client
-handoffs below remain open. Removing only the physical-log skip in a temporary
-overlay still fails on segment 1 with the signing-slot mismatch.
-
-## From W7 publication byte components
-
-**Completed W7 component evidence.** `TestStorage` cells
-`storage-publish-one-way/filesystem-components` and `s3-components` each pass
-128 generated imported attempts and payloads, including empty output. They join
-output writes, artifact capture, signed transfers, immutable physical publication,
-verified reads and artifact staging. Ten altered uploader selectors per case fail
-before upload. Refused record updates preserve prior records, readable output
-and local files. Both cells pass with the race detector.
-
-Invariant: only the bound imported attempt can publish output or artifact bytes,
-and a refused record update cannot replace an earlier committed result.
-
-Signer/record callbacks are contract fakes because W2's authenticated binding
-remains unimplemented. W1/W2/W3/W9 still own published intake, local provenance,
-`trust_local_builds`, terminal results, log transport and separate CLI publication
-failure. These component cells do not close the native publication proof.
-Whole-repository build, storage tests, focused vet, documentation drift checks,
-commentcheck and sleepcheck pass. Full `TestStorage` reports 76 passing events
-and the existing 425 skips. No contract or runtime API changed. No additional
-legacy deletion is claimed while its final production bindings remain open.
-
-## From W7 remote archive integration and log-reader cut
-
-**Completed W7 fix.** The signed filesystem and S3 remote archive proofs first
-failed with `empty or invalid record namespace component`. `NewRemoteReader`
-leaves ref selection to the server, but `RemoteCache.Depcache` applied the
-write-namespace validator to that empty ref. Remote memo and depcache lookups
-now validate logical key fields and leave ref resolution to the existing
-verified-default-only record query. Their public signatures are unchanged.
-
-Invariant: a local ref cannot select remote bytes, failed verification preserves
-the destination, and a local save cannot publish into the shared cache.
-The ref-selection fuzz test passes 1,000 cases. New `TestStorage` cells
-`storage-local-remote-cache-opt-in/filesystem-archives` and `s3-archives` each
-pass 128 generated cases through signed upload, immutable publication, trusted
-record lookup, verified download, archive extraction and local save/restore.
-Forged record scopes, equal-length corruption and missing objects fail. Local
-saves restore with the remote object still absent. Both cells pass with race
-detection. Record/authentication callbacks are fakes, so these are component
-proofs. W2/W3/W9 still own authenticated transport and host/profile construction.
-
-**Completed W7 cut.** Removed the unused log-reader `Append` and `DeleteRun`
-methods, their controller/client adapters and `storage.SafeLogIDs`. Runtime
-files delete 41 lines and add two replacement GoDoc lines. The internal
-run-deletion path remains the owner of physical log cleanup. Shared runtime
-files touched are `pkg/controller/log_reads.go` and
-`pkg/controller/client/logs.go`. The storage snapshot is regenerated. The client
-snapshot removes only those two methods. Its unrelated stale
-`ResetNodeForAutoRetry` entry remains for W3/W9/lead.
-
-Whole-repository build, storage tests, focused vet, both document drift guards,
-commentcheck and sleepcheck pass. `TestStorage` reports 74 passing test events
-and 425 skips. The existing W1 result/memo/log layout and W2 data-adapter gaps
-remain open. No cross-area contract change or new runtime mechanism is needed.
-
-## From W7 merge resolution and log conformance cut
-
-**Completed W7 cuts.** The acceptance dispatcher keeps both storage checks and
-the incoming TypeScript boundary check. Its conflict markers are removed. The
-index still lists it as unmerged because the swarm brief prohibits Git writes.
-The lead must stage the resolved file before completing the merge.
-
-The append/delete `conformance.TestLogStore` suite, its only caller
-`segmentLogStore`, and its unused deletion helper are removed. That deletes
-384 legacy code/test lines. Filter assertions now call the real sink and reader
-across immutable cuts. Seven cases cover full reads, head, tail, grep, line
-ranges, combined filters and empty selections. Invalid ranges also fail.
-The suite's fake deletion and stream opt-out supplied no production coverage.
-Physical expiry and committed-reader coverage remain in their existing tests.
-The API snapshot, versioning page, migration guide and embedded docs match the cut.
-
-W7 package tests, vet, commentcheck and the whole-repository build pass.
-`TestStorage` still reports 72 passing events and 425 skips. No native cell is
-newly claimed. W1's record layouts, W2's authenticated data adapters and W3/W8/W9
-host/profile construction remain open as detailed below. No new contract change
-or product decision is requested.
-
-**W4/W9 docs symbol cutover.** `go test -p 4 ./pkg/docs -run
-'^TestDocsNameOnlySymbolsThatExist$' -count=1` fails on 17 removed Go SDK
-symbols: Await, CacheDir, CacheKey, CacheKeyFn, DefaultCacheTTL, DescribePipeline,
-JobApproval, JobFanOutDynamic, MaxCacheTTL, Memoize, NoCache, NpmCache, Resolve,
-TTL, ToolCacheDir, ToolSlot and WhenRunner. The affected pages are
-`docs/sdk-reference.md`, `docs/caching.md`, `docs/authoring-pipelines.md`,
-`docs/pipelines.md`, `docs/sdk-inputs.md`, `docs/cli.md` and
-`docs/local-execution.md`. Both the SDK and these pages are unchanged relative
-to W7's HEAD. W4/W9 should migrate the pages to the final SDK surface and sync
-the embedded copies. W7's two embedded-document drift guards pass.
-
-## From W7 tagged-sink acceptance and unused backend deletion
-
-**Completed W7 cuts.** The unused `fs.LogStore` and `fs.NewLogStore`, their
-append test, example and mixed-fixture tests are deleted. Their only callers
-were tests. Concurrent numbered writers now run through the real tagged sink,
-filesystem and S3 signed transfers, spool and committed reader in
-`storage-log-segments-and-fallback/filesystem-sink` and `s3-sink`. Each backend
-receives 128 generated cases. Duplicate delivery, writer ordering, live offsets,
-lost PUT responses, byte-offset reads, generation mismatch and spool cleanup
-pass, including under the race detector. Authorization and records are fakes.
-
-The dead `artifact_store_error` diagnostic is removed from the daemon config,
-handshake, probe, CLI and wire snapshot. Its source docs and embedded copies
-are updated. The field had no producer after cache-backend construction was
-removed. W8/W9 should keep it deleted while migrating the remaining daemon
-surface. No replacement field or fallback was added.
-
-Storage acceptance reports 72 passing events and 425 skips. W1's existing
-result/memo and log-slot layout handoffs, W2's authenticated bindings and
-W3/W8's host construction remain open. These two sink cells do not close
-native acceptance. Full bincache/docs HTTP fixtures and daemon socket tests
-are unavailable in this sandbox. Their focused storage, drift and display
-checks pass.
-
-## From W7 archive integration and cache delivery cleanup
-
-**W7 archive transactions now pass with both physical backends.**
-`storage-memo-and-depcache-scope/filesystem-archives` and `s3-archives` join
-signed transfers, SQLite upload reservations, physical publication, receipt
-settlement, record commits and reopened archive restores. Each backend receives
-128 generated payloads. Forged repo/ref/attempt selectors fail. Equal-length
-corruption and missing objects preserve the destination. Failed work cannot
-replace a cache record. Successful cold work can publish a replacement.
-Authority and claim intake are seeded. The signing adapter is a contract fake,
-so W2 authentication and W3/W8 host construction remain open.
-
-**Cache image fixture cut completed.** The current release fixtures now expect
-only controller and runner images. Both previously failing release tests pass.
-Three commands targeting the removed Git cache package were deleted from
-`bin/pre-release-test.sh`. Historical release-asset matrices remain unchanged.
-W9/lead should retire or migrate that standalone script's other obsolete package
-paths. Its syntax passes, but the full script was not run and is not claimed as
-a release check. The current release scripts were exercised with a fake registry.
-
-## From W7 whole-branch verification
-
-**W6/W4 test timing.** `go run ./internal/sleepcheck -base main .` reports
-three violations outside W7's changed files: `internal/limits/deadline_test.go`
-at lines 58 and 66, and `sparkwing/sparkwingtest/host_test.go` at line 214.
-W6 owns the deadline fixture. W4 owns the host fixture. Port their timing to
-signals or `testing/synctest`. Whole-repository build and compile-only tests
-pass. This checker result does not establish a product runtime failure.
-
-## From W7 materialization and measurement
-
-**W1/W2/W3/W8 integration remains open.** The new
-`storage-memo-materialization-failures/filesystem-components` and
-`s3-components` cells join W7's output, capture, memo and staging implementations
-through real signed byte transfers. Their record transactions are contract
-fakes because W1's result layout and W2's authenticated binding remain open.
-They preserve the failure assertions behind the follower-output,
-manifest-commit and retry-artifact tests. They do not close the native host
-ports or prove a store-owned terminal transition. The existing W7 physical-log,
-manifest-admission and host-binding handoffs below still apply.
-
-**Raw factory cut completed.** `storeurl.OpenArtifactStore`,
-`storage.Usage` and the unused `Server.WithArtifactStore` fallback are deleted.
-`OpenMeasurementStore` and `Server.WithBucketUsage` now take the read-only
-`storage.UsageReporter` contract. The controller's configured measurement path
-still uses the shared S3 client constructor, retains its page cap and bypasses
-the serving request budget. The repository builds without the removed APIs.
-Remaining raw backends serve the old log routes and still need deletion at
-the final tagged-log cutover.
-
-## From W7 physical log integration
-
-**W1 log slot contract.** W7 now provides `blob.LogObjectKey(subject, class, index)`
-and the shared prefix/filename helpers in `internal/blob/log_keys.go`. They have
-no store dependency. Index zero selects the manifest. Segment indexes start at
-one in the signed log contract. The `logseg` copies are deleted and all
-their callers use the physical owner.
-
-The new `CheckBlobLogRecords` proof joins the real signed filesystem uploader to
-`Tenant.RecordSegments`, then reopens SQLite and checks verified offset reads and
-revocation. It fails on the first segment with
-`log segment object belongs to another signing slot`. `LogSegmentObjectKey`
-instead derives `teams/<team>/logs/<class>/<run>/<subject-hash>/<index>`, and
-`appendSegmentsTx` starts records at zero. W1 must settle the record-slot contract
-before this integration can pass. W7 recommends using the shared physical key
-owner, starting records at one and porting the store-only zero-based fixtures.
-That avoids a second layout or an index translation. Remove the explicit skip in
-`checkStorageFilesystemLogRecords` when that boundary passes. Command:
-`go test -p 4 ./tests/acceptance -run '^TestStorage/storage-log-segments-and-fallback/filesystem-records$' -count=1`.
-
-The initial failure was executed before the explicit skip was added. The cell
-remains blocked and does not count as passing acceptance evidence. W7 changed
-its own helper contract only. W1's persistence implementation is untouched.
-
-W7 reproduced the same first-segment refusal after resolving the integration
-merge, using a temporary Go overlay to remove only this skip. The new
-`s3-components` cell passes with real signing, lifecycle checks, SDK transfers,
-uncertain-PUT verification and offset reads. Its record callbacks are fakes,
-so it does not close the SQLite record-slot mismatch.
-
-## From W7 manifest admission
-
-**W2 verified manifest binding.** `storage.BlobManifests{Objects: objects}` now
-implements W1's existing `BlobManifestReader` for filesystem and S3. Supply it
-to `Tenant.BlobRecords` in `BindData`. It verifies the selected tenant's full CAS
-object and closes it before returning members, without opening a nested store
-transaction. Physical reads grant no receipt or reference edge. Real SQLite
-boundaries cover forged metadata, unrelated same-run receipts, independent
-uploads and reopening. Controller authentication remains W2's integration.
-
-**W1 C1 record layout integration.** Output and manifest writers use the run ID
-as `Name` with an empty `Scope.Key`, as C1 declares. `ResultBlobKey` still uses
-`Name=result` and a run/attempt/generation key. The W7 physical/store fixture
-passes using that W1 key. A temporary overlay with the C1 key reproduces
-`result key differs from attempt fence`. Memo writers/readers use
-`MemoRecordName=result` with optional manifest/members. W1 still writes and
-looks up `output` and `manifest`. Align admission, copy destinations and the
-output-size check with C1. The repo-bound remote client also leaves tenant and
-verified-default-ref selection to the server, while W1's exact lookup still
-requires those fields. W7's component readers and physical adapters are ready.
-
-**W3 post-merge storage layers.** W7 resolved the protocol conflicts and migrated
-its memo/artifact tests to JobSpec, Artifacts and Memoized. The retained
-`TestHostedRunEmitsTheDispatchersEvents/local` now compiles but fails with
-`no such table: sparkwing_meta` through the legacy state path. Migrate that test
-with the final state owner. The cache layer now consumes the existing storage
-callback before restore and refreshes it after execution before save. Connect
-that callback to each fresh StorageBinding when constructing the final hosts.
-Generated tests cover changed attempt/generation and refused bindings without
-falling back to an ambient local archive. Final host construction remains W3/W8.
+W1's offer-round cut is complete. The finalizer, timer, idle-registry path,
+warm-dispatch caller, factory and HTTP/client endpoint are removed. Legacy
+readiness writers remain until host migration, but open no offer rounds. Shared
+matching now accepts scoped Actions claims and checks every push ancestor during
+matching and award issuance. The SQLite ordered-matching cell and adversarial
+claim properties pass. W2/W8 still own production Actions evidence, enrollment
+and runner wiring. Old offer columns remain until legacy claim/credit retirement.
+See `../w1-session15-progress.md` for the caller list and evidence.
 
 ## From W4 review fixes (2026-10-15)
 
@@ -567,20 +59,44 @@ and `settleExpiredClaimTx` helper can retire after this cut is merged.
 
 **DESIGN approved (lead, pending Korey's ratification): SDK planning diagnostic sanitization, W5 and W4.** Invariant: no declared secret argument value (default or supplied, pipeline or job scope) appears in any error the SDK returns from describe, argument resolution or planning: not in message, hint, details or detail keys, in any encoding. Each SDK collects the nonempty declared secret values once at its discovery/planning boundary and passes every outgoing canonical error through one sanitizer, which keeps codes and field paths. That replaces the describe-only replacement. Host masking still owns execution output and dynamic service values. Both SDKs carry a property test over thrown values, canonical errors, overlapping values, encodings and both argument scopes. W5 implements it in TypeScript; W4 implements the same in the Go SDK. No cross-area contract change.
 
-**Contract change needed, W1/W9/W3: attempt identity on job transitions.**
+**W1 done, W9/W3 contract change needed: attempt identity on job transitions.**
 Invariant: an execution report affects only the attempt it names, and replay of
-that report cannot consume another attempt. C1 `NodeTransition` and C3
-`JobTransitionRequest` carry claim generation but no source attempt ordinal.
-Two successive identical retry failures therefore hash identically. A direct
-store probe with retry budget two starts attempt four, then the next failure
-returns `Replayed:true, Attempt:4` instead of starting five. A delayed report
-also lacks an attempt fence after retry under the same claim. Carry the source
-attempt through the request and adapter, check it in the committing transaction,
-and include it in replay identity. Start, unstarted refusal and reaper semantics
-must remain explicit. W1 has not changed the foreign wire shape. The reproducer
-and command are in `../w1-session12-progress.md`.
+that report cannot consume another attempt. C1 `NodeTransition.SourceAttempt`
+now requires an explicit nonnegative ordinal on holder start, retry, report and
+unstarted release. It participates in the digest and must match the locked row
+unless the complete transition replays. Other causes and actors omit it.
+Initial start uses zero, resumed start uses the retained ordinal, and unstarted
+refusal/release consumes none. The generated store property and strengthened
+SQLite retry cell prove repeated identical failures and delayed-report refusal.
+W9 must add the ordinal to `JobTransitionRequest` and its adapter. W3 must send
+the captured source ordinal and consume `Applied.Attempt`. W1 has not changed
+the foreign wire shape. Its omission now fails loudly, so the two controller
+execution-path tests remain blocked on that amendment. W1b must also supply the
+existing attempt in its `blobResultFixture` transition. See
+`../w1-session16-progress.md` for evidence and the exact pending callers.
 
 **DESIGN: W9 Windows release packaging for the TypeScript SDK (from W5 review finding 6).** Invariant: every published TypeScript SDK package contains working protocol bridges for win32-x64 and win32-arm64. The release workflow builds both `native/win32-*/protocol.node` artifacts on native Windows runners, runs TestNativeProtocol and TestNativeConformance on each, stamps the SDK version, and makes publication depend on package assembly. W5's proposal is in `sdk/typescript/IMPLEMENTATION.md`.
+
+W1's concurrency-maintenance cut is complete. `Operator.MaintainConcurrency`
+requires the elected `controller.reaper` fence and commits holder cleanup, waiter
+cleanup and promotion atomically. The raw Store method, `Maintenance` registry,
+six unfenced operations and obsolete concurrency-memo sweep are removed. Controller
+startup and periodic work use the leased pass. The local daemon acquires its own
+reaper fence. The SQLite `recovery-concurrency-no-revival/store-sqlite` cell proves
+promotion, reopening and returning-owner queue order. See
+`../w1-session14-progress.md` for caller migrations and evidence. W1b's record
+retention remains separate and unchanged. The independent doctor repair,
+PurgeDeadLocalConcurrency and CountDeadLocalConcurrency are also removed. Terminal
+capacity is cleaned in every scope by the same elected pass.
+
+**Contract gap confirmed, W8/W9 launcher synchronization (A1-38).**
+`LauncherObservation` carries UnitID, JobName and NodeUID, but not claim generation.
+Store UnitID is stable across re-awards: plan/trigger use RunID, and work/eval
+encode UnitRef without claim generation. NodeUID identifies a Kubernetes node,
+not the Job instance. A sync adapter cannot distinguish a former award's Job from
+its replacement using these fields. W8/W9 must supply the immutable award fence
+and Kubernetes instance correlation before W1 can implement safe cleanup.
+`EngineController.SyncLauncher` remains a stub. No foreign wire type was changed.
 
 **DESIGN approved (lead): W1b record mutation authorization.** Invariant: no record, manifest or memo copy persists unless the writer, ancestor and holder authority is current at the moment of the write. Record publication has one transaction-local mutation owner used by both CommitRecord and CopyMemo: prepare namespaces and verified members first (any I/O happens here), then take the existing blob locks, recheck current authority against the store clock inside the same transaction, and persist the complete destination batch through that owner. That final recheck is the linearization boundary; nothing writes after it without passing it. Preserve immutable replay, all-or-nothing output and manifest copies, and caller-owned rollback. Remove the scattered per-path checks this replaces. TestBlobRecordsMutationCannotOutliveAuthority must go green with its full generated-case run.
 
@@ -590,6 +106,83 @@ and command are in `../w1-session12-progress.md`.
 
 **DESIGN approved (lead): W8 pending-claim outcomes.** Invariant: a committed award is always owned, and every independent stop reason (policy refusal, cancellation, idle, claim deadline, version) stays observable to the caller. The pending claim returns the award and the stop reason as independent results. Run adopts any returned award first, then applies the stop reason, joins the held hosts, and returns that reason; the joining defer never replaces a stop reason with success. Existing owners of cancellation, idle, claim-deadline and version checks stay as they are. `TestLoopPendingAwardPreservesPolicyDenial` must go green, plus a property test over interleavings of award delivery and each stop reason.
 
+W1's schedule handle cut is complete. Thirteen implicit-default-team Store
+methods are removed. Local constructors select DefaultTeam. Controller requests
+use their authenticated Tenant, and deployment ticks select each enumerated team.
+Tick metadata belongs to Operator and settings. Arming writes the canonical
+repository key, and non-run history stores a nullable run reference. The SQLite
+surface-schedules-and-managed-timers/store-sqlite cell passes through rollback
+and reopening. W9/W6 still own old cron YAML fixtures and timer/HTTP integration.
+Unverified GitHub push callers must supply resolved repository identity before
+arming. W1 has not changed foreign contracts or W1b implementation files.
+
 **DESIGN approved (lead): W8 cancellation classification (third finding in the pending-claim mechanism).** Invariant: classifying a stop reason never panics and never confuses a caller's cancellation cause with a denial. Recognise cancellation only with `errors.Is(err, context.Canceled)` / `errors.Is(err, context.DeadlineExceeded)` (ctx.Err's comparable sentinels); never compare against `context.Cause(ctx)` with `==`. Run's joining defer returns the caller's arbitrary cause unchanged. Test nested wraps and joins, independent denials, and comparable and non-comparable custom causes, including a property test. Three bugs in one mechanism means it is too clever: while fixing this, cut the pending-claim stop logic to the smallest form that satisfies the approved outcome representation, and report the line count before and after.
 
+W1's A1-27 lifecycle join now uses W1b's billing helpers for issuance, starts,
+renewal, release, plan/expansion acceptance, finish and reaping. Pricing comes
+from sealed resources. Reservations keep the existing minute window, while C2
+applies each unit's final minimum. Queued matching passes over unfunded work and
+award issuance repeats its deadline check after accounting. Cloud job renewal
+can start billing without creating an execution attempt. The SQLite
+`billing-start-award-versus-start/store-sqlite` proof covers the real award,
+exchange and start transactions through reopening. W2 still owns the production
+calculator. W3 must report current owner compute with Executing, including false
+during customer-runner waits. W1b still owns spend-exhaustion/grace policy and
+legacy credit retirement. W1b implementation files are unchanged. The legacy
+store API cuts and the previously recorded foreign contract gaps remain open.
+
+W1's legacy plan-acceptance cut is complete. `Store.AcceptPlan`, its separate
+validator and inserter, `Client.SubmitPlan`, the controller's old claim-token
+acceptance branch and the old launched planner are removed. `Tenant.AcceptPlan`
+retains required-secret diagnostics under the current owner and store clock.
+The SQLite `lifecycle-request-and-plan-seals/store-sqlite` cell passes through
+second-insert rollback, replay, drift and reopening. Shared strict-validator,
+identifier secrecy, child intake and stale result-record ports pass.
+
+The lead's caller-migration exception is used for `node_output_test.go` and one
+`SourceAttempt` addition in W1b's `blob_result_records_test.go`. W1b persistence
+and accounting implementations are unchanged. `CreatePlanNode` still has four
+legacy controller/log fixture callers. StateStoreOld, raw lifecycle, readiness,
+claim/trigger writers and old controller fixtures still need retirement. W2's
+calculator and cancellation-reason shape, W9/W3 source-attempt transport and
+W8/W9 launcher correlation remain foreign integration points. See
+`../w1-session19-progress.md` for the cut, ports and verification.
 **Lead decision for W3: "the W4 expansion-concurrency mismatch question" is settled by c3-protocol-notes.md line 66.** A generated job's concurrency membership must match the existing plan or job definition of that group on capacity, scope and on_limit; cost may differ; a mismatch refuses the expansion with `plan_invalid` naming the field path. The host supplies existing definitions through `ExistingConcurrency`. W3 implements this in the strict raw-bytes expansion validation (handoff "W3 expansion acceptance"). If a W4 membership test accepts a mismatch on capacity, scope or on_limit, W3 corrects that test as a minimal shared-file edit and lists it. No further lead input is needed.
+
+W1's raw unstarted-requeue cut is complete. `Store.RequeueUnstartedClaim` and
+its Tenant twin are removed with every Go caller. Expired owners use the leased
+`ReapUnits` pass. Generated tests cover repeated award generations, stale
+release/renewal/finish, terminal absorption and settlement with future-dated
+ledger rows. The SQLite unstarted-lapse cell now also covers real owner intake,
+repeated requeue/reclaim, stale plan refusal and reopening. The lead's caller
+exception is used only for legacy credit-test retirement. W1b implementation
+files are unchanged. StateStoreOld, raw lifecycle/readiness and the remaining
+legacy claim/trigger writers still need retirement. See
+`../w1-session20-progress.md` for ports, shared files and evidence.
+
+W1's run-row heartbeat cut is complete. `TouchRunHeartbeat` on Store, Tenant
+and Client, `TouchNodeHeartbeat` on the same handles, `Run.LastHeartbeatAt`,
+the independent scheduler and Kubernetes dispatcher timestamp loops, their legacy
+HTTP handlers and Doctor's heartbeat-age finalizer are removed. The generated
+owner-liveness property proves owner renewal, expiry at the exact boundary,
+remote-job isolation and failed-renewal atomicity. All eight SQLite recovery
+cells pass. The unstarted-owner proof also checks persisted renewal. W2's final
+owner-heartbeat policy route remains declared and needs its production binding
+to `EngineController.Renew`. Production watched-job delivery remains with that
+integration. W1b implementation files are unchanged. The remaining legacy API
+cuts and previously recorded foreign gaps remain open. See
+`../w1-session21-progress.md` for ports, shared caller files and verification.
+
+W1's raw node-status and readiness-withdrawal cut is complete. `SetNodeStatus`
+and `RevokeNodeReady` are removed from Store, Tenant and Client with their HTTP
+handlers and retry entries. Debug pauses use activity detail. Queue withdrawal
+uses `TransitionNode` with `CauseRevoke`. A generated property preserves holders,
+state and events under refused writes. The SQLite
+`lifecycle-transition-replay-and-fencing/store-sqlite` cell passes through
+withdrawal, reopening, stale-start refusal and terminal replay. The retry-policy
+fixture also drops its stale run-heartbeat assertion. W3's debug fixture fails
+before a pause because CreateRun still writes the removed args_json column.
+W4/W9's SDK symbol-doc drift remains separate. StateStoreOld, CreatePlanNode,
+raw readiness publication and other legacy lifecycle/claim/trigger APIs remain
+open, along with the earlier foreign contract gaps. W1b implementation files
+are unchanged. See `../w1-session22-progress.md` for evidence and shared files.

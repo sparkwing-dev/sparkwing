@@ -11,6 +11,9 @@ import (
 )
 
 func checkRecoveryUnstarted(ctx context.Context, root string) (err error) {
+	if err := checkOwnerUnstartedRecovery(ctx, root); err != nil {
+		return err
+	}
 	path := filepath.Join(root, "unstarted.db")
 	f, err := newStoreRecoveryFixture(ctx, path, false)
 	if err != nil {
@@ -58,7 +61,7 @@ func checkRecoveryUnstarted(ctx context.Context, root string) (err error) {
 		kinds = append(kinds, "job_ready", "job_claimed")
 		f.holder = store.Actor{Kind: store.ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: next.Claim.CapabilityPrefix}, CapabilityPrefix: next.Claim.CapabilityPrefix, Holder: next.Claim.Holder, Generation: next.Claim.Generation}
 	}
-	applied, err := f.tenant.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: f.holder, To: store.NodeRunning, Cause: store.CauseStart})
+	applied, err := f.tenant.TransitionNode(ctx, store.NodeTransition{Ref: ref, Actor: f.holder, To: store.NodeRunning, Cause: store.CauseStart, SourceAttempt: recoverySourceAttempt(0)})
 	if err != nil {
 		return err
 	}

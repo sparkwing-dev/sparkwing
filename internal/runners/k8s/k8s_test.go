@@ -299,55 +299,6 @@ func TestRunNode_MissingJobReturnsFailed(t *testing.T) {
 	}
 }
 
-func TestRunNode_MissingJobFinalizesDoneNodeWithEmptyOutcome(t *testing.T) {
-	ctx := context.Background()
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
-	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
-		t.Fatalf("CreateRun: %v", err)
-	}
-	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "pending"}); err != nil {
-		t.Fatalf("CreateNode: %v", err)
-	}
-	if err := st.MarkNodeReady(ctx, "run-1", "build"); err != nil {
-		t.Fatalf("MarkNodeReady: %v", err)
-	}
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
-	defer srv.Close()
-
-	// safety: a done node refuses a named claim, so the node turns done with
-	// no outcome only once the Job exists, which is the state a pod that died
-	// between its two writes leaves.
-	kcli := fake.NewSimpleClientset()
-	kcli.PrependReactor("create", "jobs", func(k8stesting.Action) (bool, runtime.Object, error) {
-		if err := st.SetNodeStatus(ctx, "run-1", "build", "done"); err != nil {
-			t.Errorf("SetNodeStatus: %v", err)
-		}
-		return false, nil, nil
-	})
-	kcli.PrependReactor("get", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: "batch", Resource: "jobs"}, action.(k8stesting.GetAction).GetName())
-	})
-	r := New(kcli, client.New(srv.URL, nil), Config{
-		Namespace:             "default",
-		Image:                 "runner",
-		ControllerURL:         srv.URL,
-		PollInterval:          time.Millisecond,
-		MissingJobGracePeriod: time.Millisecond,
-	}, nil)
-
-	res := r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build"})
-	if res.Outcome != sparkwing.Failed {
-		t.Fatalf("outcome = %q, want failed", res.Outcome)
-	}
-	if res.Err == nil || !strings.Contains(res.Err.Error(), "disappeared before reaching a terminal condition") {
-		t.Fatalf("err = %v, want missing-job failure", res.Err)
-	}
-}
-
 func TestRunNode_MissingJobUsesTerminalNodeDuringGrace(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {

@@ -45,9 +45,7 @@ func TestWingdAPIServesARunOverTheSocketAndMintsNoToken(t *testing.T) {
 	if len(list) != 1 || list[0].ID != "r1" {
 		t.Fatalf("ListRuns returned %d runs, want the one the client created", len(list))
 	}
-	if err := c.TouchNodeHeartbeat(ctx, "r1", "n1"); err != nil {
-		t.Fatalf("TouchNodeHeartbeat: %v", err)
-	}
+
 	if err := c.AppendEvent(ctx, "r1", "n1", "node.log", []byte(`{"line":"hello"}`)); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}

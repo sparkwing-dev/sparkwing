@@ -115,8 +115,15 @@ func TestDebugPausesHoldTheNodeUntilReleased(t *testing.T) {
 
 			done := make(chan RunResult, 1)
 			go func() { done <- hostDebug(t, ctx, ds, doc, tc.dbg, fx.run) }()
-			if got := <-ds.paused; got != "build:"+tc.reason {
-				t.Fatalf("paused %q, want build:%s", got, tc.reason)
+			select {
+			case got := <-ds.paused:
+				if got != "build:"+tc.reason {
+					t.Fatalf("paused %q, want build:%s", got, tc.reason)
+				}
+			case result := <-done:
+				t.Fatalf("run ended before pause: %+v", result)
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
 			}
 			if fx.ran("build") != tc.ranOnce {
 				t.Errorf("build ran before release = %v, want %v", fx.ran("build"), tc.ranOnce)
@@ -124,13 +131,17 @@ func TestDebugPausesHoldTheNodeUntilReleased(t *testing.T) {
 			if fx.ran("deploy") {
 				t.Error("deploy ran while build was paused")
 			}
-			if row := nodeRow(t, ds.Store, "build"); row.Status != "paused" {
-				t.Errorf("build row status %q while paused, want paused", row.Status)
+			if row := nodeRow(t, ds.Store, "build"); row.StatusDetail != "paused" {
+				t.Errorf("build row detail %q while paused, want paused", row.StatusDetail)
 			}
 			if err := ds.ReleaseDebugPause(ctx, testRunID, "build", "alice", store.PauseReleaseManual); err != nil {
 				t.Fatal(err)
 			}
-			<-done
+			select {
+			case <-done:
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
 			wantRow(t, ds.Store, "build", tc.outcome, "")
 			if !fx.ran("deploy") && tc.outcome == sparkwing.Success {
 				t.Error("deploy never ran after build resumed")

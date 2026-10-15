@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -136,12 +138,12 @@ func TestArmPinsTheCompiledBinaryAndSkipsControllerEntries(t *testing.T) {
 	if len(report.Controller) != 1 || report.Controller[0] != "svc/sweep/cluster" {
 		t.Fatalf("controller entries: %+v", report.Controller)
 	}
-	if _, err := h.store.GetCronSchedule(ctx, ScheduleID(root, "sweep", "cluster")); !errors.Is(err, store.ErrNotFound) {
+	if _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, ScheduleID(root, "sweep", "cluster")); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("a controller entry was armed here: %v", err)
 	}
 
 	head := git(t, root, "rev-parse", "HEAD")
-	quick, err := h.store.GetCronSchedule(ctx, ScheduleID(root, "sweep", "quick"))
+	quick, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, ScheduleID(root, "sweep", "quick"))
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -188,7 +190,7 @@ func TestArmPinsTheCompiledBinaryAndSkipsControllerEntries(t *testing.T) {
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{Prove: compiler.prove}); err != nil {
 		t.Fatalf("re-Arm: %v", err)
 	}
-	repinned, err := h.store.GetCronSchedule(ctx, quick.ID)
+	repinned, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, quick.ID)
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -219,7 +221,7 @@ func TestArmOnlyRestrictsTheEntriesAndRefusesAnUnknownName(t *testing.T) {
 			t.Errorf("error %q does not name %q", err, want)
 		}
 	}
-	rows, err := h.store.ListCronSchedules(ctx)
+	rows, err := teststore.ForTeam(t, h.store, store.DefaultTeam).ListCronSchedules(ctx)
 	if err != nil {
 		t.Fatalf("ListCronSchedules: %v", err)
 	}
@@ -251,7 +253,7 @@ func TestArmFollowLeavesTheScheduleOnTheCheckout(t *testing.T) {
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{Follow: true, Prove: compiler.prove}); err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
-	sched, err := h.store.GetCronSchedule(ctx, ScheduleID(root, "every-minute", ""))
+	sched, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, ScheduleID(root, "every-minute", ""))
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -277,7 +279,7 @@ func TestArmWithoutProofPinsNothing(t *testing.T) {
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{}); err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
-	sched, err := h.store.GetCronSchedule(ctx, ScheduleID(root, "every-minute", ""))
+	sched, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, ScheduleID(root, "every-minute", ""))
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -306,10 +308,10 @@ func TestDisarmRemovesOneScheduleAndItsPin(t *testing.T) {
 	if _, err := os.Stat(pinDir); !os.IsNotExist(err) {
 		t.Errorf("the pinned directory outlived the schedule: %v", err)
 	}
-	if _, err := h.store.GetCronSchedule(ctx, quick); !errors.Is(err, store.ErrNotFound) {
+	if _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, quick); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("the row survived: %v", err)
 	}
-	if _, err := h.store.GetCronSchedule(ctx, ScheduleID(root, "nightly", "")); err != nil {
+	if _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, ScheduleID(root, "nightly", "")); err != nil {
 		t.Errorf("disarming one entry took a sibling with it: %v", err)
 	}
 }
@@ -379,7 +381,7 @@ func TestRefreshDerivesDriftAndLeavesALockedDeclarationAlone(t *testing.T) {
 	if report.Updated != 0 || report.Locked != 1 {
 		t.Fatalf("refresh read the working tree of a locked schedule: %+v", report)
 	}
-	stored, err := h.store.GetCronSchedule(ctx, id)
+	stored, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, id)
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -441,7 +443,7 @@ func TestRefreshFollowsTheCheckoutForAnUnlockedSchedule(t *testing.T) {
 	if report.Updated != 1 || report.Locked != 0 {
 		t.Fatalf("refresh: %+v", report)
 	}
-	stored, err := h.store.GetCronSchedule(ctx, ScheduleID(root, "every-minute", ""))
+	stored, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, ScheduleID(root, "every-minute", ""))
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -541,7 +543,7 @@ func TestSetOverrideRefusesACadenceThatWouldNotEvaluate(t *testing.T) {
 	if _, err := h.svc.SetOverride(ctx, id, Override{Cron: &bad}); err == nil {
 		t.Fatal("an unparseable cron was accepted")
 	}
-	stored, err := h.store.GetCronSchedule(ctx, id)
+	stored, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, id)
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -588,7 +590,7 @@ func TestTickFiresTheEffectiveCadenceAndRecordsItsArgs(t *testing.T) {
 	if report.Decisions[0].Args["depth"] != "deep" {
 		t.Errorf("the decision carries %v", report.Decisions[0].Args)
 	}
-	fires, err := h.store.ListCronFires(ctx, id, 0)
+	fires, err := teststore.ForTeam(t, h.store, store.DefaultTeam).ListCronFires(ctx, id, 0)
 	if err != nil {
 		t.Fatalf("ListCronFires: %v", err)
 	}
@@ -607,7 +609,7 @@ func TestTickRecordsAnOverrideThatStoppedEvaluating(t *testing.T) {
 	id := ScheduleID(root, "every-minute", "")
 	// safety: the store takes any zone string, so an override naming a zone
 	// this host cannot load is what a tick has to survive.
-	if err := h.store.SetCronOverride(ctx, id, store.CronOverride{TZ: "Mars/Olympus"}, h.clock.now()); err != nil {
+	if err := teststore.ForTeam(t, h.store, store.DefaultTeam).SetCronOverride(ctx, id, store.CronOverride{TZ: "Mars/Olympus"}, h.clock.now()); err != nil {
 		t.Fatalf("SetCronOverride: %v", err)
 	}
 
@@ -625,7 +627,7 @@ func TestTickRecordsAnOverrideThatStoppedEvaluating(t *testing.T) {
 	if !strings.Contains(report.Errors[0], "--reset") {
 		t.Errorf("the reason does not say how to drop the override: %q", report.Errors[0])
 	}
-	fires, err := h.store.ListCronFires(ctx, id, 0)
+	fires, err := teststore.ForTeam(t, h.store, store.DefaultTeam).ListCronFires(ctx, id, 0)
 	if err != nil {
 		t.Fatalf("ListCronFires: %v", err)
 	}
@@ -638,7 +640,7 @@ func TestTickRecordsAnOverrideThatStoppedEvaluating(t *testing.T) {
 	if _, err := h.svc.Tick(ctx, false); err != nil {
 		t.Fatalf("second Tick: %v", err)
 	}
-	if fires, err = h.store.ListCronFires(ctx, id, 0); err != nil {
+	if fires, err = teststore.ForTeam(t, h.store, store.DefaultTeam).ListCronFires(ctx, id, 0); err != nil {
 		t.Fatalf("ListCronFires: %v", err)
 	}
 	if len(fires) != 1 {
@@ -655,7 +657,7 @@ func TestTickFailsAScheduleWhosePinnedBinaryIsGone(t *testing.T) {
 		t.Fatalf("Arm: %v", err)
 	}
 	id := ScheduleID(root, "every-minute", "")
-	sched, err := h.store.GetCronSchedule(ctx, id)
+	sched, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, id)
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -671,7 +673,7 @@ func TestTickFailsAScheduleWhosePinnedBinaryIsGone(t *testing.T) {
 	if report.Failed != 1 || len(h.launcher.launches()) != 0 {
 		t.Fatalf("tick: %+v, launches %v", report, h.launcher.launches())
 	}
-	fires, err := h.store.ListCronFires(ctx, id, 0)
+	fires, err := teststore.ForTeam(t, h.store, store.DefaultTeam).ListCronFires(ctx, id, 0)
 	if err != nil {
 		t.Fatalf("ListCronFires: %v", err)
 	}
@@ -681,7 +683,7 @@ func TestTickFailsAScheduleWhosePinnedBinaryIsGone(t *testing.T) {
 	if !strings.Contains(fires[0].Detail, "crons install") {
 		t.Errorf("the failure does not say how to fix it: %q", fires[0].Detail)
 	}
-	stored, err := h.store.GetCronSchedule(ctx, id)
+	stored, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, id)
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -779,7 +781,7 @@ func TestArmFollowDropsAnExistingPinnedBinary(t *testing.T) {
 	if _, err := h.svc.Arm(ctx, root, ArmOptions{Follow: true, Prove: compiler.prove}); err != nil {
 		t.Fatalf("re-Arm with --follow: %v", err)
 	}
-	stored, err := h.store.GetCronSchedule(ctx, id)
+	stored, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -820,7 +822,7 @@ func TestRefreshKeepsTheLockOfARowItRepublishes(t *testing.T) {
 	// carried through, and Refresh skips a row with a pinned binary, so the
 	// row carries a ref alone -- the shape `crons install --no-prove` leaves.
 	lock := store.CronLock{Ref: "0123456789abcdef0123456789abcdef01234567"}
-	if err := h.store.SetCronScheduleLock(ctx, id, lock, h.clock.now()); err != nil {
+	if err := teststore.ForTeam(t, h.store, store.DefaultTeam).SetCronScheduleLock(ctx, id, lock, h.clock.now()); err != nil {
 		t.Fatalf("SetCronScheduleLock: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, ".sparkwing", "sparkwing.yaml"),
@@ -834,7 +836,7 @@ func TestRefreshKeepsTheLockOfARowItRepublishes(t *testing.T) {
 	if report.Updated != 1 {
 		t.Fatalf("refresh: %+v", report)
 	}
-	stored, err := h.store.GetCronSchedule(ctx, id)
+	stored, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -924,7 +926,7 @@ func TestTickLeavesTheOtherSidesSchedulesAlone(t *testing.T) {
 
 	// safety: a controller row that reached this store fires from the
 	// controller, never from the host's timer.
-	if _, _, err := h.store.ArmCronSchedule(ctx, store.CronSchedule{
+	if _, _, err := teststore.ForTeam(t, h.store, store.DefaultTeam).ArmCronSchedule(ctx, store.CronSchedule{
 		ID: "crn_pushed", RepoPath: "https://github.com/acme/widgets.git", Pipeline: "nightly",
 		Name: store.CronScheduleDefaultName, Cron: "* * * * *", TZ: "UTC",
 		Overlap: store.CronOverlapSkip, CatchUp: time.Hour, Where: store.CronWhereController,
@@ -945,7 +947,7 @@ func TestTickLeavesTheOtherSidesSchedulesAlone(t *testing.T) {
 			t.Errorf("the local tick resolved %s, which fires from the controller", d.Schedule.ID)
 		}
 	}
-	pushed, err := h.store.GetCronSchedule(ctx, "crn_pushed")
+	pushed, err := teststore.ForTeam(t, h.store, store.DefaultTeam).GetCronSchedule(ctx, "crn_pushed")
 	if err != nil {
 		t.Fatal(err)
 	}

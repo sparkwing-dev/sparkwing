@@ -45,8 +45,6 @@ type Config struct {
 	Execute  Executor
 	Attempts *Attempts
 	Logger   *slog.Logger
-	// Heartbeat is the run heartbeat interval; zero means 30 seconds.
-	Heartbeat time.Duration
 	// Admission admits each node before it runs; nil admits every node at once.
 	Admission *Admission
 	// Debug selects the run's operator pauses.
@@ -298,8 +296,6 @@ func Execute(ctx context.Context, cfg Config) (res RunResult, err error) {
 			res.Status, res.Err = "failed", errors.Join(res.Err, fmt.Errorf("persist run state: %w", ferr))
 		}
 	}()
-	stopHeartbeat := heartbeat(ctx, cfg, res.RunID)
-	defer stopHeartbeat()
 
 	doc, raw, err := planRun(ctx, sess, cfg.Pipeline, args, cfg.Run)
 	closeSession()
@@ -391,31 +387,6 @@ func runRow(cfg Config, args map[string]string) store.Run {
 		row.GithubOwner, row.GithubRepo = sparkwing.GithubOwnerRepo(g.Repo)
 	}
 	return row
-}
-
-func heartbeat(ctx context.Context, cfg Config, runID string) (stop func()) {
-	interval := cfg.Heartbeat
-	if interval <= 0 {
-		interval = 30 * time.Second
-	}
-	hbCtx, cancel := context.WithCancel(ctx)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		t := time.NewTicker(interval)
-		defer t.Stop()
-		for {
-			if err := cfg.State.TouchRunHeartbeat(hbCtx, runID); err != nil && hbCtx.Err() == nil {
-				cfg.Logger.Warn("nodehost: run heartbeat", "run", runID, "err", err)
-			}
-			select {
-			case <-hbCtx.Done():
-				return
-			case <-t.C:
-			}
-		}
-	}()
-	return func() { cancel(); <-done }
 }
 
 func chain(cfg *Config) Executor {

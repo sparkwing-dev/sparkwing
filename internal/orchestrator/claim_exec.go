@@ -12,14 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
-	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
-	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
-	"github.com/sparkwing-dev/sparkwing/internal/runflags"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -80,9 +74,6 @@ func runLaunchedNode(ctx context.Context, controllerURL, runID, nodeID, token st
 		return fail(fmt.Errorf("build the pipeline: %w", err))
 	}
 	defer binary.release()
-	if nodeID == store.PlanNodeID {
-		return planLaunchedRun(ctx, c, src, binary.entry, runID, fail)
-	}
 	row, err := c.GetNode(ctx, runID, nodeID)
 	if err != nil {
 		return fail(fmt.Errorf("read the node's attempts: %w", err))
@@ -110,50 +101,6 @@ func runLaunchedNode(ctx context.Context, controllerURL, runID, nodeID, token st
 
 // hack: a variable so tests stand in a prebuilt binary for the build.
 var resolveLaunchedBinary = resolveRemoteBinary
-
-// safety: the plan is the team's code, so it runs in the pipeline's own
-// process with the minimal environment, and only the host's stamped and
-// validated plan document reaches the controller.
-func planLaunchedRun(ctx context.Context, c *client.Client, src string, entry pipelineentry.Command, runID string, fail func(error) error) error {
-	run, err := c.GetRunForExecution(ctx, runID)
-	if err != nil {
-		return fail(fmt.Errorf("read run %s: %w", runID, err))
-	}
-	requires, err := PipelineRequires(src, run.Pipeline)
-	if err != nil {
-		return fail(err)
-	}
-	flags := runflags.FromInvocation(run.Invocation)
-	args, guards, err := checkoutRunArgs(src, run.Pipeline, run.Args)
-	if err != nil {
-		return fail(err)
-	}
-	recorded, _ := run.Invocation[runflags.DefaultBranchKey].(string)
-	checkArgs := guardCheck(run.Pipeline, guards, pipelines.GuardContext{GitBranch: run.GitBranch}, func() string {
-		return checkoutDefaultBranch(ctx, recorded, src)
-	})
-	masker := secrets.NewMasker()
-	env, err := podProcessEnv(masker, slog.Default())
-	if err != nil {
-		return fail(err)
-	}
-	sink, err := newPodPlanSink(ctx, runID, masker, os.Stderr)
-	if err != nil {
-		return fail(err)
-	}
-	plan, err := nodehost.PlanDocument(ctx, nodehost.SessionConfig{Entry: entry, Dir: src, Sink: sink, Env: env, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLauncher, Secrets: masker}},
-		nodehost.PlanRequest{
-			Pipeline: run.Pipeline, Args: args, Run: podRunContext(run), Requires: requires, Masker: masker,
-			StartAt: flags.StartAt, StopAt: flags.StopAt, Only: flags.Only, CheckArgs: checkArgs,
-		})
-	if err != nil {
-		return fail(fmt.Errorf("the pipeline could not plan the run: %w", err))
-	}
-	if err := c.SubmitPlan(ctx, runID, plan.JSON); err != nil {
-		return fail(fmt.Errorf("submit the plan: %w", err))
-	}
-	return nil
-}
 
 // safety: a refused beat means the claim was lost, superseded or can no
 // longer be paid for, and a controller silent for a whole lease has let it

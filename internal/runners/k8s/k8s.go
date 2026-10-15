@@ -177,10 +177,6 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 		}
 	}()
 
-	hbCtx, stopHB := context.WithCancel(ctx)
-	defer stopHB()
-	go heartbeatLoop(hbCtx, r.ctrl, req.RunID, req.NodeID, r.logger)
-
 	_ = r.ctrl.UpdateNodeActivity(ctx, req.RunID, req.NodeID, "job created")
 	var lastDetail string
 	var unschedulableSince time.Time
@@ -473,43 +469,6 @@ func (r *Runner) observePodPhase(ctx context.Context, jobName string) string {
 		}
 	}
 	return string(p.Status.Phase)
-}
-
-// safety: a dead token stops the heartbeat but leaves the Job alone, because
-// the pod renews its node claim with its own credential and decides its fate
-// by that claim.
-func heartbeatLoop(ctx context.Context, ctrl nodeHeartbeater, runID, nodeID string, logger *slog.Logger) {
-	beat := func() (stop bool) {
-		err := ctrl.TouchNodeHeartbeat(ctx, runID, nodeID)
-		if client.IsTokenDead(err) {
-			logger.Error("k8s: the controller refuses this dispatcher's token; stopping the node heartbeat",
-				"run_id", runID, "node_id", nodeID, "err", err)
-			return true
-		}
-		if err != nil {
-			logger.Debug("k8s: heartbeat failed", "run_id", runID, "node_id", nodeID, "err", err)
-		}
-		return false
-	}
-	if beat() {
-		return
-	}
-	t := time.NewTicker(5 * time.Second)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			if beat() {
-				return
-			}
-		}
-	}
-}
-
-type nodeHeartbeater interface {
-	TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
 }
 
 // ClaimLease is the lease the dispatcher takes on a node it executes through a

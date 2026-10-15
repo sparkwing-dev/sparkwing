@@ -1,4 +1,67 @@
+The final unit-billing suite in `pkg/store/unit_billing_test.go` ports the
+unfunded-claim, last-reservation race, unstarted-refund and consumed-minimum
+assertions from the retained `pkg/store/credits_test.go` tests. It uses final
+ClaimUnit, TransitionNode, RenewUnit, ReleaseUnit, FinishRunAndUnit and ReapUnits
+with W1b's real ledger helpers and a C2 calculator fake. Two properties cover
+stale reports against replacement awards and expiry during issuance. The new
+`TestBilling/billing-start-award-versus-start/store-sqlite` cell proves award,
+exchange, price and compute-start persistence through reopening. Native billing
+and provider cells remain pending. No additional archived source identity below
+is claimed closed by these retained-suite ports.
+
+The retained `pkg/store/crons_test.go` suite now uses Tenant for schedule
+operations and Operator for tick metadata. Fired history fixtures seed the final
+same-team run reference. Non-run entries store NULL. Existing cursor, override,
+pause, retention, deduplication and tenant assertions remain active. The SQLite
+`surface_test.go:TestSurface/surface-schedules-and-managed-timers/store-sqlite`
+cell adds rollback and reopening evidence. Native timer and HTTP cells remain
+pending. This adds no archived source-function port identity.
+
 # Acceptance test port inventory
+
+The raw `RequeueUnstartedClaim` suite and its controller/orchestrator callers are
+retired. `TestOwnerUnstartedRecoveryFencesPriorAwardsProperty` varies initial
+generations, pending/running runs, runner/launcher owners and repeated recovery.
+It retains claimant clearing, no execution/disruption consumption, no repeated
+refund, stale renewal/release/finish refusal and terminal absorption. Existing
+owner-reaper and cancellation tests retain started-local failure, remote recovery,
+cancellation precedence, team scope and the elected fence. The impossible
+trigger-without-run fixture is removed because final owner rows require a run.
+C2's at-award compute keeps its charge. Unstarted pod reservations refund.
+The old metered tests that refunded already-started host compute are removed
+with their raw API. The final unit-billing suite retains immutable prices,
+settlement and generation-specific reservations.
+
+`recovery-unstarted-lapse/store-sqlite` now also uses real intake and claiming
+for a trigger owner. It proves three unstarted requeues and reclaims through
+SQLite reopening, stable intake identity, stale plan/renewal refusal and final
+plan acceptance by the replacement. Intake and enrollment remain contract fakes.
+The removed legacy HTTP tests do not count as final HTTP integration evidence.
+No additional archived source-function identity is claimed closed by this port.
+
+`TestPlacement/placement-ordered-matching/store-sqlite` adds final-store evidence
+for scoped trigger order, job requirements and soft preferences. The claim queue
+property generates 32 selectors and checks that failed polls change no row or
+event. Push properties vary repository/ref/SHA across named and queued node and
+trigger claims, delegated credentials and awarded hosts. Direct issuance also
+refuses an out-of-scope award. The old offer-window, idle-registry and concurrent
+finalization tests are deleted with the warm dispatcher. Their matching,
+tenant-scope and no-fallback concerns move to the final claim proofs. Enrollment
+remains a fake and native Actions/launcher transport is still required.
+
+`pkg/store/concurrency_maintenance_fence_test.go` ports expired-holder promotion,
+aged-waiter liveness, abandoned-work cleanup and repeated-pass assertions from the
+old maintenance suite. The fence property generates forged names, holders and
+generations. Rollback tests cover statement failure and lease expiry during the
+pass. The SQLite `recovery-concurrency-no-revival/store-sqlite` cell also checks
+reopening and returning-owner queue order. Obsolete concurrency-cache sweeps are
+removed because blob records own memo retention. Missing-run capacity is prevented
+by cascading run foreign keys. The isolated zero-age no-op helper is removed with
+the unfenced API. A zero age on the final pass retains its existing default.
+`TestLeasedConcurrencyMaintenanceRemovesTerminalWorkInEveryScope` ports the old
+local-repair liveness and idempotency assertions. Terminal global holders now
+release with local holders. The separate repair-count API is removed.
+
 
 This repository-owned inventory records every parked source function and its required port. Acceptance destinations name existing skeletons; package destinations name required focused proofs to implement with their owning area. A scenario is complete only when every mapped case is implemented. Product skeletons remain skipped until their required areas exist; a wrong result must fail once activated.
 
@@ -59,10 +122,12 @@ Each release admits exactly one queued competitor. Enrollment is a contract fake
 Native processes and placement transports remain required.
 
 `recovery_test.go:TestRecovery/recovery-application-retry-ordinal/store-sqlite`
-adds persistence evidence for a failed attempt followed by a successful retry.
+adds persistence evidence for two identical failed attempts followed by success.
 It checks the unchanged holder, generation and lease, zero disruptions, distinct
-attempt ordinals, terminal replay and exactly one retry event. Native process
-continuity remains required. The old local
+source ordinals, delayed-report refusal, retry replay after reopening, terminal
+replay and exactly two retry events. `TestHolderReportsAffectOnlyTheirSourceAttemptProperty`
+generates repeated failures, replay counts and invalid source ordinals at the
+same store boundary. Native process continuity remains required. The old local
 `TestReapExpiredNodeClaims_KeepsTheClaimGeneration` fixture is deleted because
 the active unstarted-lapse and reconciler cells already check exact generation
 preservation on reaping and advancement on each next award.
@@ -334,3 +399,66 @@ The source reports describe residual failures that their committed tests do not 
 - Final positive permission tests use valid requests. Expected grants come from independent architecture cases, not from the policy table's own output.
 - Race cases coordinate at a real transaction or request-body boundary. A sleep that merely hopes to produce an ordering is insufficient evidence.
 - Run package tests for local invariants and acceptance scenarios for cross-process behavior. The parked test counts are inventory counts, not launch coverage claims.
+
+## W1 legacy planner retirement
+
+The legacy dispatchRun fixture and its planner tests are removed with
+`Store.AcceptPlan`. The retained concerns use the final contracts below.
+These are SQLite or package proofs. No native placement or HTTP cell is closed
+by this cut, and no additional archived T1 source identity is claimed closed.
+
+| Retired tests or mechanism | Retained evidence |
+| --- | --- |
+| AcceptPlan insertion, one-plan replay and invalid-plan rollback | `TestPlanSealPersistsReplayAndExecutionSettings`, `TestPlanControllerHandoffKeepsExactReplay`, `TestAcceptedPlanUsesSharedStrictValidator` and `TestLifecycle/lifecycle-request-and-plan-seals/store-sqlite`. The SQLite cell also refuses the second insert and proves full rollback. |
+| Required-secret scope diagnostics and optional absence | `TestPlanSecretPreflightNamesUnreadableScopes` checks every unreadable scope, the persisted detail, canonical error, one diagnostic, store time and successful admission of the readable required subset. Optional names are absent from that subset by the resolved contract. |
+| Identifier secrecy and stale diagnostic writes | `TestAcceptedPlanIdentifierSecretsProperty` generates short, escaped and Unicode values across job, step and group IDs. `TestPreflightDiagnosticCannotOutlivePlanOwnerProperty` varies the owner's deadline across acceptance and diagnostic transactions. |
+| Source depth validation and silent resource/retry clamping | Strict validation refuses negative source depth and explicit zero resources. Shared settings tests retain ceilings and resolved winners. Silent clamps, caller-selected spec hashes, v1 modifiers and RetryAuto are removed by the frozen design. |
+| ReportAttempt output ownership and failed-attempt reuse | `TestBlobResultRecordsRejectForgedResultKeys` covers record team, namespace, job, run, attempt and generation. `TestResultRecordsFromAnEarlierAttemptCannotFinishARetry` refuses the earlier record before and after the retry ordinal advances. W1b's result fixture supplies SourceAttempt. |
+| Child invocation deduplication and live-parent rights | `TestChildIntakePersistsLineageAndInvocationReplay` uses explicit intake keys. `TestChildIntakeCannotEscapeItsLiveParentProperty` varies parent run, job, team, generation, cancellation and terminal state. New invocation keys replace implicit live-child reuse. |
+| Dependency verdicts, cancellation and application retry | Existing scheduling, cancellation-intent, holder-ordinal, leased-recovery and unit-billing tests retain these concerns through the final interfaces. The old settle-based automatic retries are removed. |
+| Old launcher Job synchronization tests | `ReleaseUnit`, renewal and unit billing retain the store concerns. Safe real Job synchronization remains open on the W8/W9 award-generation and Job-instance contract gap. |
+
+The selected package files are in `../w1-session19-tests.txt`. The session report
+lists the remaining legacy surfaces and shared caller changes.
+
+## W1 run-row heartbeat retirement
+
+`TouchRunHeartbeat`, `TouchNodeHeartbeat`, `Run.LastHeartbeatAt`, and the
+independent scheduler and Kubernetes dispatcher timestamp loops are removed with
+Doctor's heartbeat-age finalizer. The following ports replace
+those mechanisms' retained concerns. They close no additional archived T1
+source-function identity or native placement cell.
+
+| Retired concern | Retained evidence |
+| --- | --- |
+| Owner liveness, heartbeat expiry and unrelated job activity | `TestOwnerLeaseAloneDeterminesLivenessProperty` varies 24 renewal timelines through real claims. The exact owner lease alone controls recovery. Expired renewal refuses without changing work. Remote renewal preserves only the remote claim. |
+| Doctor orphan finalization and recent-run grace | `TestRecovery/recovery-local-orphans/store-sqlite` uses the elected reaper, store clock and owner execution state through reopening. Started local orphans fail in place. Unstarted owners requeue. A separate heartbeat-age grace no longer governs recovery. |
+| Owner renewal persistence and stale-host refusal | `TestRecovery/recovery-unstarted-lapse/store-sqlite` checks committed owner renewal before expiry, then recovery/reclaim and stale renewal/plan refusal through reopening. |
+| Viewer notifications | Existing unit renewal fields and `EngineController.Renew` retain the owner transport contract. The legacy node-claim observer test retains node watch delivery. Real owner watched-job delivery and W2's production route binding remain integration obligations. |
+
+The two Kubernetes dispatch-loop tests retire with that loop. The final store
+renewal tests retain revoked, expired and stale-fence refusal. Native host shutdown
+on renewal loss still needs W8's lease-keeper integration. The PostgreSQL
+execution-start contention fixture now races its existing activity mutation
+against starts. It remains a legacy fixture and has not been run here. The node
+ordering fixture still updates rows in reverse order through StartNode. The local
+API contention fixture uses its existing activity route instead of the removed
+touch route. These are caller migrations, not final native proofs.
+
+The package selection is in `../w1-session21-tests.txt`.
+
+## W1 raw node status and withdrawal retirement
+
+`SetNodeStatus` and `RevokeNodeReady` are removed from Store, Tenant and Client
+with their HTTP handlers. Debug pauses use activity detail. The raw readiness
+publisher remains pending its caller migrations.
+
+| Retired coverage | Final proof or remaining integration |
+| --- | --- |
+| `TestNodeClaim_RevokeOnlyWhenUnclaimed` and the HTTP revoke assertions | `TestReadinessWithdrawalPreservesHolderAndAuthorityProperty` varies 32 sequences of withdrawal, replay and republication before probing expired or forged owners and claimed, running or terminal jobs. Refused transactions preserve the complete snapshot and event list. |
+| Ready withdrawal, holder exclusion and terminal replay | `TestLifecycle/lifecycle-transition-replay-and-fencing/store-sqlite` uses real admission, plan acceptance, claims and transitions. It checks withdrawal after reopening, stale-start refusal, cleared terminal claims, absorbing terminal state and one continuous event sequence. Enrollment is a contract fake. |
+| Raw status writes in client, scope and tenant fixtures | Redundant status writes retire. Existing activity writes carry debug detail. W3's debug fixture still calls CreateRun against the final schema and fails on the removed args_json column before reaching a pause. Production debug lifecycle evidence remains open with that integration. |
+| `TestRunNode_MissingJobFinalizesDoneNodeWithEmptyOutcome` | Retired with the raw setter's two-write terminal state. Final completion records outcome and terminal state atomically. The adjacent missing-Job tests retain the Kubernetes dispatch behavior. Native Job and launcher correlation remain W8/W9 obligations. |
+
+The package selection is in `../w1-session22-tests.txt`. Native route and
+platform cells remain pending.

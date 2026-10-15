@@ -70,6 +70,7 @@ func TestRunHostCancelPreservesHolderResultRights(t *testing.T) {
 	}
 	change.Actor = Actor{Kind: ActorHolder, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "claim"}, CapabilityPrefix: "claim", Holder: "runner", Generation: 2}
 	change.Cause = CauseReport
+	change.SourceAttempt = sourceAttempt(3)
 	if _, err := tenant.TransitionNode(t.Context(), change); err != nil {
 		t.Fatal(err)
 	}

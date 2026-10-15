@@ -174,6 +174,19 @@ func claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDemand, unit UnitR
 	if err != nil {
 		return UnitClaim{}, err
 	}
+	deadline := until
+	if unit.Kind == capability.UnitEval {
+		var ownerUntil int64
+		if err := tx.QueryRowContext(ctx, `SELECT until FROM leases WHERE name='controller.owner'`).Scan(&ownerUntil); err != nil {
+			return UnitClaim{}, err
+		}
+		if ownerUntil < deadline.UnixNano() {
+			deadline = time.Unix(0, ownerUntil).UTC()
+		}
+	}
+	if !deadline.After(tx.now()) {
+		return UnitClaim{}, holderRefusal()
+	}
 	if unit.Kind == capability.UnitTrigger || unit.Kind == capability.UnitPlan {
 		claim.Owner = OwnerLeaseRef{Kind: OwnerTrigger, RunID: unit.RunID, Holder: row.holder, Generation: row.generation}
 	}
