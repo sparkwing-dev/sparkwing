@@ -150,6 +150,18 @@ They close no additional parked memo/materialization row. Real fallback and
 provenance transactions, memo reuse, native composition and the legacy host
 cut remain open. See [the continuation](w3-depcache-continuation.md).
 
+`storage-memo-materialization-failures/hermetic-memo-records` verifies local
+memo lookup/copy responses through the declared byte and record interfaces.
+Missing output/manifest/member references or bytes, refused atomic copies,
+budget failures and integrity/close failures produce a miss. It carries the
+read-side requirements behind follower-output, manifest-commit and retry-artifact
+ports. The fixture exercises the real W3 adapter, with fake W1/W7 transactions.
+`storage-local-remote-cache-opt-in/hermetic-memo-opt-in` checks explicit remote
+reads without local authority widening or remote writes. Fuzz drivers generate
+failed streams and mismatched copy scopes. These checks close no additional
+parked row because native owner/follower composition and C1's single terminal
+transaction remain unimplemented. See [the memo continuation](w3-memo-continuation.md).
+
 Amendment 1 adds `CheckHostServices` under the secret-identifier and SDK service
 scenarios. It drives registered endpoint handlers with policy/persistence fakes,
 checks acknowledged dynamic masks, short identifier collisions, optional step

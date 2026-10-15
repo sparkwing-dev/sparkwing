@@ -145,6 +145,11 @@ func (o OutputRecords) ReadOutput(ctx context.Context, request blob.RecordLookup
 		return nil, errors.New("output lookup changed its requested record")
 	}
 	reader, err := o.Blobs.Get(ctx, blob.GetRequest{Authority: request.Authority, Digest: lookup.Record.Digest})
+	return readOutput(ctx, reader, err)
+}
+
+func readOutput(ctx context.Context, reader blob.VerifiedReader, readErr error) (value json.RawMessage, err error) {
+	err = readErr
 	if reader != nil {
 		defer func() {
 			err = errors.Join(err, reader.Close())

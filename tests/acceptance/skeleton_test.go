@@ -32,8 +32,11 @@ func pendingScenarios(t *testing.T, group string) {
 			case "storage-memo-and-depcache-scope":
 				t.Run("hermetic-depcache-layer", acceptance.CheckDepcacheRecords)
 				t.Run("hermetic-executor-depcache", acceptance.CheckExecutorDepcache)
+			case "storage-memo-materialization-failures":
+				t.Run("hermetic-memo-records", acceptance.CheckMemoRecords)
 			case "storage-local-remote-cache-opt-in":
 				t.Run("hermetic-depcache-opt-in", acceptance.CheckRemoteDepcache)
+				t.Run("hermetic-memo-opt-in", acceptance.CheckRemoteMemo)
 			case "lifecycle-generator-reconstruct-code":
 				t.Run("hermetic-replay", acceptance.CheckGeneratorReplay)
 			case "environment-startup-versus-body":

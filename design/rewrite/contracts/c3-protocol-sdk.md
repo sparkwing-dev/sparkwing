@@ -8,6 +8,9 @@ boundary and its executor acceptance checks.
 artifact layer. Native placement and cache assembly remain open.
 [Directory caching](w3-depcache-continuation.md) adds the executor depcache layer,
 package-manager resolution and opt-in remote directory-cache reads.
+[Memo verification](w3-memo-continuation.md) adds verified lookup/copy results
+and remote memo reads. Owner-side source selection and atomic materialization
+still need the C1 contract completions listed there.
 
 ## Amendment 1: shared host inputs
 
@@ -125,6 +128,7 @@ are part of this contract.
 | `nodehost.OutputRecords`, `nodehost.JobUpload` | Publish typed output through verified uploads and record commits; read authorized output only after verified EOF. JobUpload supplies the common attempt/scope binding for output and artifact writes. |
 | `nodehost.ArtifactRecords`, `ArtifactRecords.Stage`, `ArtifactRecords.Publish`, `ArtifactRecords.Prepare` | Stage authorized manifest members and capture workspace files through verified uploads and a transactional manifest commit. The artifact layer stages once and publishes after retries with the last attempt's binding. |
 | `nodehost.DepcacheRecords`, `DepcacheRecords.Prepare` | Restore declared directories once and save cold successful caches after retries through the current storage binding. |
+| `nodehost.MemoRecords`, `MemoRecords.Lookup`, `MemoRecords.Copy` | Verify scoped lookup and copy results, including explicit remote reads, before returning reusable references. They grant no claim and write no lifecycle state. |
 | `nodehost.SDKEnvironment.CacheDirectory` | Resolve Go/npm cache directories with the captured environment, persisted job values and platform tool invocation. |
 | `nodehost.ClaimedNodeHost`, `ClaimStore` | Own source acquisition and renewal around the common executor for an awarded remote job. |
 | `nodehost.ExecutorActivity` | Reports progress and brackets authorized child awaits without extending the execution deadline. |
@@ -242,6 +246,36 @@ are part of this contract.
     scheduling snapshots come from trusted host/store adapters. Capabilities,
     holders and generations supplied by an SDK or arbitrary HTTP body grant no
     authority. The store derives binding from authenticated capability records.
+
+## Memo candidate verification
+
+`MemoRecords.Lookup` calls the supplied transactional record client with the
+bound repository/ref and declared job key. Local hits require authoritative
+`HasMany` presence for output, manifest and member digests. Downloads must verify
+through EOF and close. Output must also satisfy the shared JSON/size rule.
+Declared output and artifacts require their references. Explicit JSON null and
+an empty artifact manifest remain valid. Missing, refused, corrupt, malformed or
+over-budget results return an empty miss. Parent cancellation remains an error.
+Diagnostics contain only a constant message.
+
+`MemoRecords.Copy` sends the supplied CopyMemoRequest unchanged after checking
+its authority and destination against the binding. It verifies the returned hit
+by the same rules. The record store owns the atomic copy and repeats live
+authorization. The host cannot make a successful verdict from a failed copy.
+Copy requires the positive destination attempt declared by C1. It cannot serve
+owner hits before execution until C1 resolves the destination-identity gap.
+
+Explicit RemoteCache enables a remote lookup only after a clean local miss.
+Every remote download uses RemoteCache.Artifact. No remote digest reaches the
+local byte client, and these reads never call CopyMemo or CommitRecord. W7 owns
+the remote user's live authorization and verified-default provenance.
+
+These APIs verify candidates. ReconcileNode still owns terminal materialization
+and the sole lifecycle event. LookupMemo does not yet identify a definitive
+MaterializeSource, and the record contract does not specify memo publication
+encoding for optional outputs. Native owner composition, publication, coalesced
+followers and remote-to-local import remain open. The continuation lists the
+required contracts without changing another area's declarations.
 
 ## Executor directory caches
 

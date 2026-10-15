@@ -108,10 +108,16 @@ func artifactDigestValid(digest blob.Digest) bool {
 }
 
 func (a ArtifactRecords) copyVerified(ctx context.Context, authority blob.Authority, digest blob.Digest, dst io.Writer, expected int64) (size int64, err error) {
+	return copyVerified(ctx, func(ctx context.Context, digest blob.Digest) (blob.VerifiedReader, error) {
+		return a.Blobs.Get(ctx, blob.GetRequest{Authority: authority, Digest: digest})
+	}, digest, dst, expected)
+}
+
+func copyVerified(ctx context.Context, get func(context.Context, blob.Digest) (blob.VerifiedReader, error), digest blob.Digest, dst io.Writer, expected int64) (size int64, err error) {
 	if err := context.Cause(ctx); err != nil {
 		return 0, err
 	}
-	reader, err := a.Blobs.Get(ctx, blob.GetRequest{Authority: authority, Digest: digest})
+	reader, err := get(ctx, digest)
 	if reader != nil {
 		defer func() { err = errors.Join(err, reader.Close()) }()
 	}
