@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/runner"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -84,5 +83,5 @@ func (pipeline) Plan(_ context.Context, p *sparkwing.Plan, in inputs, _ sparkwin
 
 func main() {
 	sparkwing.Register[inputs]("probe", func() sparkwing.Pipeline[inputs] { return pipeline{} })
-	runner.Main()
+	sparkwing.Main()
 }

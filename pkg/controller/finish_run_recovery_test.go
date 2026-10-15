@@ -10,7 +10,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/teststore"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestFinishRunRetryReportsCommittedOutcomeWithoutRefolding(t *testing.T) {
@@ -21,7 +20,7 @@ func TestFinishRunRetryReportsCommittedOutcomeWithoutRefolding(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = st.Close() })
-			if err := st.CreateTrigger(t.Context(), store.Trigger{ID: "run", Pipeline: "profile", TriggerSource: "github", Repo: "example/project", GithubOwner: "example", GithubRepo: "project", GithubRepoID: 701, TriggerEnv: map[string]string{envGitHubAppInstallation: "7", sparkwing.EnvGitHubEventName: sparkwing.EventPullRequest, sparkwing.EnvPRHeadSHA: strings.Repeat("1", 40)}, CreatedAt: time.Now()}); err != nil {
+			if err := st.CreateTrigger(t.Context(), store.Trigger{ID: "run", Pipeline: "profile", TriggerSource: "github", Repo: "example/project", GithubOwner: "example", GithubRepo: "project", GithubRepoID: 701, TriggerEnv: map[string]string{envGitHubAppInstallation: "7", "GITHUB_EVENT_NAME": "pull_request", "GITHUB_HEAD_SHA": strings.Repeat("1", 40)}, CreatedAt: time.Now()}); err != nil {
 				t.Fatal(err)
 			}
 			if err := st.CreateRun(t.Context(), store.Run{ID: "run", Pipeline: "profile", Status: "running", StartedAt: time.Now()}); err != nil {

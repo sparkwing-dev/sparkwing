@@ -20,7 +20,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/runner"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -304,5 +303,5 @@ func (j *targetsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 
 func main() {
 	sparkwing.Register[inputs]("podnode", func() sparkwing.Pipeline[inputs] { return pipeline{} })
-	runner.Main()
+	sparkwing.Main()
 }

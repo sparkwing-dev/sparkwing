@@ -21,8 +21,27 @@
         {"op": "run_step", "contains": "success"},
         {"op": "eval", "kind": "skip", "contains": "false"},
         {"op": "eval", "kind": "memo", "contains": "fixture-key"},
+        {"op": "eval", "kind": "before", "contains": "null"},
+        {"op": "eval", "kind": "verify", "contains": "null"},
+        {"op": "eval", "kind": "after", "contains": "null"},
         {"op": "eval", "kind": "generate", "contains": "generated"},
         {"op": "cancel"}
+      ]
+    },
+    {
+      "name": "body_failure",
+      "binding": true,
+      "requests": [
+        {"op": "plan", "name": "fail-body"},
+        {"op": "run_step", "contains": "fixture body failed"}
+      ]
+    },
+    {
+      "name": "hook_failure",
+      "binding": true,
+      "requests": [
+        {"op": "plan", "name": "fail-eval"},
+        {"op": "eval", "kind": "before", "contains": "fixture hook failed"}
       ]
     },
     {

@@ -263,8 +263,11 @@ func (v *planValidator) validateConcurrency(specs []ConcurrencySpec, path string
 		if spec.QueueTimeoutMS != nil && *spec.QueueTimeoutMS < 0 || spec.CancelTimeoutMS != nil && *spec.CancelTimeoutMS < 0 {
 			return planInvalid(at, "timeout is negative")
 		}
-		if previous, exists := v.concurrency[spec.Group]; exists && !reflect.DeepEqual(previous, spec) {
-			return planInvalid(at+".group", "concurrency group has conflicting definitions")
+		if previous, exists := v.concurrency[spec.Group]; exists {
+			previous.Cost = spec.Cost
+			if !reflect.DeepEqual(previous, spec) {
+				return planInvalid(at+".group", "concurrency group has conflicting definitions")
+			}
 		}
 		v.concurrency[spec.Group] = spec
 	}

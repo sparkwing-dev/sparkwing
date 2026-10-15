@@ -76,8 +76,8 @@ func TestSecret_RejectsUnmaskedEntry(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for masked=false entry")
 	}
-	if !strings.Contains(err.Error(), "use sparkwing.Config") {
-		t.Fatalf("err = %v, want hint to use Config", err)
+	if !strings.Contains(err.Error(), "use sparkwing.Variable") {
+		t.Fatalf("err = %v, want hint to use Variable", err)
 	}
 }
 

@@ -10,11 +10,13 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/internal/runflags"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -97,9 +99,9 @@ func HostClaimedTrigger(ctx context.Context, triggerID, program string) error {
 		Trigger: sparkwing.TriggerInfo{
 			Source:      trigger.TriggerSource,
 			User:        trigger.TriggerUser,
-			PullRequest: sparkwing.PullRequestFromEnv(trigger.TriggerEnv),
+			PullRequest: controller.PullRequestForTrigger(trigger.TriggerEnv),
 		},
-		Git: sparkwing.NewGit(dir, trigger.GitSHA, trigger.GitBranch, "", trigger.Repo, trigger.RepoURL),
+		Git: &sparkwing.Git{SHA: trigger.GitSHA, Branch: trigger.GitBranch, Repo: trigger.Repo, RepoURL: trigger.RepoURL},
 	}
 	// safety: the run keeps the store this process read its trigger from, which is a standalone parent's own.
 	if local, ok := backends.State.(localState); ok {
@@ -113,6 +115,8 @@ func HostClaimedTrigger(ctx context.Context, triggerID, program string) error {
 	}
 	entry := HostedEntry{
 		Command: command, Dir: dir, Env: os.Environ(),
+		Engine:           nodeproto.EngineIdentity{Version: sparkwingModuleVersion()},
+		Runner:           nodeproto.RunnerIdentity{Name: boxHostID(), Type: "local", Labels: []string{}},
 		PipelineRevision: trigger.TriggerEnv[PipelineRevKey], BinarySource: "source",
 	}
 	if trigger.TriggerEnv[crons.PinnedBinaryEnvKey] != "" {

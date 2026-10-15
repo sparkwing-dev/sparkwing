@@ -66,6 +66,39 @@ func TestRequestValidateRejectsCrossOperationFields(t *testing.T) {
 	}
 }
 
+func TestProtocolRejectsNestedNullsAndDuplicateFields(t *testing.T) {
+	for name, line := range map[string]string{
+		"null_argument":         `{"id":"p","op":"plan","pipeline":"p","args":{"x":null},"run":{"run_id":"r","pipeline":"p"}}`,
+		"duplicate_argument":    `{"id":"p","op":"plan","pipeline":"p","args":{"x":"a","x":"b"},"run":{"run_id":"r","pipeline":"p"}}`,
+		"null_runner_label":     `{"id":"h","op":"hello","protocol":2,"engine":{"version":"v1"},"runner":{"name":"local","type":"local","labels":[null]}}`,
+		"duplicate_runner_name": `{"id":"h","op":"hello","protocol":2,"engine":{"version":"v1"},"runner":{"name":"local","name":"other","type":"local","labels":[]}}`,
+		"null_dry_run":          `{"id":"p","op":"plan","pipeline":"p","args":{},"run":{"run_id":"r","pipeline":"p","dry_run":null}}`,
+		"aliased_dry_run":       `{"id":"p","op":"plan","pipeline":"p","args":{},"run":{"run_id":"r","pipeline":"p","dry_run":false,"DRY_RUN":true}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseRequest([]byte(line)); err == nil {
+				t.Fatal("malformed request was accepted")
+			}
+		})
+	}
+	for name, raw := range map[string]string{
+		"null_feature":       `{"protocol":2,"sdk":{"language":"go","version":"v1"},"features":[null]}`,
+		"duplicate_language": `{"protocol":2,"sdk":{"language":"go","language":"typescript","version":"v1"},"features":[]}`,
+		"aliased_language":   `{"protocol":2,"sdk":{"language":"go","LANGUAGE":"typescript","version":"v1"},"features":[]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var hello HelloResult
+			if err := (Reply{ID: "h", OK: true, Result: json.RawMessage(raw)}).Decode(&hello); err == nil {
+				t.Fatal("malformed hello result was accepted")
+			}
+		})
+	}
+	line := `{"id":"h","op":"hello","protocol":2,"engine":{"version":"v1","future":null},"runner":{"name":"local","type":"local","labels":[],"future":{"x":null}}}`
+	if _, err := ParseRequest([]byte(line)); err != nil {
+		t.Fatalf("unknown additive fields were rejected: %v", err)
+	}
+}
+
 func TestParseFrameV2ReplyAndLogWithoutError(t *testing.T) {
 	reply, err := ParseFrame([]byte(`{"reply":"1","ok":true,"result":{"x":1}}`))
 	if err != nil || reply.Reply == nil || reply.Log != nil {

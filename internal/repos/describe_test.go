@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
 )
@@ -20,6 +21,8 @@ func fakeSDK(t *testing.T, body string) (bin, requests string) {
 	dir := t.TempDir()
 	bin, requests = filepath.Join(dir, "pipeline"), filepath.Join(dir, "requests")
 	script := "#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --sw-node-protocol ] || exit 9\n" +
+		"read -r line <&3\n" +
+		"printf '%s\\n' '{\"reply\":\"1\",\"ok\":true,\"result\":{\"protocol\":2,\"sdk\":{\"language\":\"go\",\"version\":\"fixture\"},\"features\":[]}}' >&4\n" +
 		"read -r line <&3\nprintf '%s\\n' \"$line\" > " + requests + "\n" + body + "\n"
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -29,7 +32,7 @@ func fakeSDK(t *testing.T, body string) (bin, requests string) {
 
 func TestDescribeReadsTheReplyPastLogRecords(t *testing.T) {
 	bin, requests := fakeSDK(t, `printf '{"ts":"2026-10-12T00:00:00Z","msg":"planning"}\n' >&4
-printf '{"reply":"1","ok":true,"result":{"protocol":"1","sdk":{"language":"go","version":"v1.2.3"},"pipelines":[{"name":"demo","args":[{"name":"env","go_name":"Env","type":"string","required":true}]}]}}\n' >&4`)
+printf '{"reply":"2","ok":true,"result":{"pipelines":[{"name":"demo","args":[{"name":"env","type":"string","required":true}]}]}}\n' >&4`)
 	doc, err := Describe(context.Background(), pipelineentry.Binary(bin), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -41,25 +44,33 @@ printf '{"reply":"1","ok":true,"result":{"protocol":"1","sdk":{"language":"go","
 	if err != nil {
 		t.Fatal(err)
 	}
-	req, err := nodeproto.ParseRequestOld([]byte(strings.TrimSpace(string(raw))))
-	if err != nil || req.Op != nodeproto.OpDescribeOld {
+	req, err := nodeproto.ParseRequest([]byte(strings.TrimSpace(string(raw))))
+	if err != nil || req.Op != nodeproto.OpDescribe {
 		t.Fatalf("request = %+v, %v", req, err)
 	}
 }
 
 func TestDescribeRefusesAnotherProtocolVersion(t *testing.T) {
-	bin, _ := fakeSDK(t, `printf '{"reply":"1","ok":true,"result":{"protocol":"0","sdk":{"language":"go","version":"v0.1.0"},"pipelines":[]}}\n' >&4`)
-	_, err := Describe(context.Background(), pipelineentry.Binary(bin), t.TempDir())
-	if err == nil || !strings.Contains(err.Error(), `node protocol "0"`) || !strings.Contains(err.Error(), "go SDK v0.1.0") {
-		t.Fatalf("err = %v, want a protocol refusal naming the SDK", err)
+	bin, _ := fakeSDK(t, `exit 0`)
+	raw, err := os.ReadFile(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := strings.Replace(string(raw), `"protocol":2`, `"protocol":1`, 1)
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err = Describe(context.Background(), pipelineentry.Binary(bin), t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "invalid hello result") {
+		t.Fatalf("err = %v, want a protocol refusal", err)
 	}
 }
 
 func TestDescribeReturnsAFailedReply(t *testing.T) {
-	bin, _ := fakeSDK(t, `printf '{"reply":"1","ok":false,"error":{"code":"plan_failed","message":"boom"}}\n' >&4`)
+	bin, _ := fakeSDK(t, `printf '{"reply":"2","ok":false,"error":{"code":"plan_failed","message":"boom"}}\n' >&4`)
 	_, err := Describe(context.Background(), pipelineentry.Binary(bin), t.TempDir())
-	var perr *nodeproto.Error
-	if !errors.As(err, &perr) || perr.Code != nodeproto.CodePlanFailed {
+	var perr *apierr.Error
+	if !errors.As(err, &perr) || perr.Code != apierr.PlanFailed {
 		t.Fatalf("err = %v, want the reply's plan_failed error", err)
 	}
 }
@@ -74,7 +85,7 @@ func TestDescribeReportsAnExitWithoutAReply(t *testing.T) {
 
 func TestDescribeFailsAProtocolViolationAtOnce(t *testing.T) {
 	for name, body := range map[string]string{
-		"unknown reply id": `printf '{"reply":"2","ok":true,"result":{}}\n' >&4; exec sleep 300`,
+		"unknown reply id": `printf '{"reply":"3","ok":true,"result":{}}\n' >&4; exec sleep 300`,
 		"garbage frame":    `printf 'not json\n' >&4; exec sleep 300`,
 		// safety: the child stays blocked writing the rest of a line the host
 		// stopped reading, which is the wait that must not happen.
@@ -83,8 +94,8 @@ func TestDescribeFailsAProtocolViolationAtOnce(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			bin, _ := fakeSDK(t, body)
 			_, err := Describe(context.Background(), pipelineentry.Binary(bin), t.TempDir())
-			var perr *nodeproto.Error
-			if !errors.As(err, &perr) || perr.Code != nodeproto.CodeProtocolError {
+			var perr *apierr.Error
+			if !errors.As(err, &perr) || perr.Code != apierr.ProtocolError {
 				t.Fatalf("err = %v, want protocol_error", err)
 			}
 		})
@@ -101,7 +112,7 @@ func TestDescribeStopsAtTheDeadline(t *testing.T) {
 }
 
 func TestResolverDescribesOverTheProtocol(t *testing.T) {
-	bin, _ := fakeSDK(t, `printf '{"reply":"1","ok":true,"result":{"protocol":"1","pipelines":[{"name":"build"},{"name":""},{"name":"deploy"}]}}\n' >&4`)
+	bin, _ := fakeSDK(t, `printf '{"reply":"2","ok":true,"result":{"pipelines":[{"name":"build"},{"name":""},{"name":"deploy"}]}}\n' >&4`)
 	schemas, err := describePipelines(pipelineentry.Binary(bin), t.TempDir())
 	if err != nil {
 		t.Fatal(err)

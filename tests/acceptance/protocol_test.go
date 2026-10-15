@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/acceptance"
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
 	"github.com/sparkwing-dev/sparkwing/tests/acceptance/testdata/protocolgo"
@@ -32,6 +33,10 @@ func TestProtocol(t *testing.T) {
 					continue
 				}
 				t.Run(target.ID, func(t *testing.T) {
+					if scenario.ID == "protocol-mask-acknowledgement" && target.ID == "local-go-"+runtime.GOOS {
+						t.Run("sdk-service-contract", testGoSDKMaskAcknowledgement)
+						t.Skip("real-host registration requires the missing C2 acknowledged Mask route contract")
+					}
 					if scenario.ID == "protocol-go-sdk-fake-host-and-linkage" && target.ID == "local-go-"+runtime.GOOS {
 						t.Run("sdk-linkage", func(t *testing.T) {
 							linked, err := acceptance.GoSDKLinkage(t.Context())
@@ -41,8 +46,9 @@ func TestProtocol(t *testing.T) {
 						})
 						t.Run("public-fake-host", testGoSDKFakeHost)
 						t.Run("real-process-plan-and-output", testGoSDKProcessPlanOutput)
+						t.Run("real-process-body-failure", testGoSDKProcessFailure)
 						t.Run("real-process-host-routes", testGoSDKProcessRoutes)
-						t.Skip("failure-result decoding still depends on the unfinished C2 error decoder")
+						return
 					}
 					t.Skipf("contract skeleton: %s on %s requires its placement driver", scenario.ID, target.ID)
 				})
@@ -51,10 +57,29 @@ func TestProtocol(t *testing.T) {
 	}
 }
 
-func testGoSDKProcessPlanOutput(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("fd3/fd4 process fixture applies to Unix; Windows handle execution has a separate cell")
+func testGoSDKProcessFailure(t *testing.T) {
+	actual, err := acceptance.RunGoSDKProcessFixture(t.Context(), "", "failure")
+	if err != nil {
+		t.Fatal(err)
 	}
+	got := actual.Steps["failure"]
+	if got.Outcome != "failed" || got.Error == nil || got.Error.Code != apierr.SDKError || got.Error.Message != "fixture failure" {
+		t.Fatalf("process body failure = %+v", got)
+	}
+	host := sparkwingtest.New(sparkwingtest.Options{})
+	t.Cleanup(func() { _ = host.Close() })
+	plan := sparkwing.NewPlan()
+	if err := (protocolgo.Pipeline{}).Plan(t.Context(), plan, protocolgo.Inputs{Name: "demo"}, sparkwing.RunContext{}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = host.RunStep(t.Context(), plan, "failure", "run")
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || !reflect.DeepEqual(failure, got.Error) {
+		t.Fatalf("fake and process body failures differ: fake=%v process=%+v", err, got.Error)
+	}
+}
+
+func testGoSDKProcessPlanOutput(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	actual, err := acceptance.RunGoSDKProcessFixture(ctx, "", "producer")
@@ -65,9 +90,6 @@ func testGoSDKProcessPlanOutput(t *testing.T) {
 }
 
 func testGoSDKProcessRoutes(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("fd3/fd4 process fixture applies to Unix; Windows handle execution has a separate cell")
-	}
 	var outputReads, secretReads, plainReads atomic.Int32
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
@@ -114,7 +136,7 @@ func compareGoSDKResults(t *testing.T, ctx context.Context, actual acceptance.Go
 	t.Helper()
 	protocolgo.Register()
 	host := sparkwingtest.New(sparkwingtest.Options{
-		Runner: sparkwing.RunnerInfo{Name: "local", Type: "local", Labels: []string{"os=linux"}},
+		Runner: sparkwing.RunnerInfo{Name: "local", Type: "local", Labels: []string{"os=" + runtime.GOOS}},
 		Run:    sparkwing.RunContext{RunID: "r", Pipeline: protocolgo.Name},
 		Secrets: map[string]sparkwingtest.Secret{
 			"TOKEN": {Value: "fixture-secret", Masked: true},

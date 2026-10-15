@@ -80,8 +80,11 @@ func TestRefResolvesFromContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := withTestJSONResolver(t.Context(), func(id string) ([]byte, bool) {
-		return raw, id == "build"
+	ctx := withTestJSONResolver(t.Context(), func(_ context.Context, id string) ([]byte, error) {
+		if id != "build" {
+			return nil, ErrRefAbsent
+		}
+		return raw, nil
 	})
 	if got := (Ref[sanityBuildOut]{JobID: "build"}).Get(ctx); got != want {
 		t.Fatalf("reference = %+v, want %+v", got, want)

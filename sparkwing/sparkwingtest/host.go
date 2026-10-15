@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
@@ -140,6 +141,15 @@ func (h *host) OIDC(ctx context.Context, a string) (string, error) {
 	}
 	return token, err
 }
+
+func (h *host) RegisterCleanup(context.Context, []string, string) (string, error) {
+	return "", &apierr.Error{Code: apierr.Unavailable, Message: "fake host does not execute cleanups"}
+}
+
+func (h *host) ReleaseCleanup(context.Context, string) error {
+	return &apierr.Error{Code: apierr.Unavailable, Message: "fake host does not execute cleanups"}
+}
+
 func (h *host) Mask(ctx context.Context, value string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -187,6 +197,9 @@ func (h *host) Emit(frame nodeproto.FrameLog) {
 	message := mask(frame.Message)
 	if (frame.Event == "annotation" || frame.Event == "summary") && int64(len(message)) > limits.AnnotationBytes {
 		message = limits.Record(message)
+	}
+	if frame.Event == "summary" {
+		attrs["markdown"] = message
 	}
 	h.records = append(h.records, sparkwing.LogRecord{TS: ts, Level: frame.Level, Step: frame.Step, Event: frame.Event, Msg: message, Attrs: attrs})
 }

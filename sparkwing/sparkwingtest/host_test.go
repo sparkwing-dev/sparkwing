@@ -5,11 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/sdkserve"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/cleanup"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/sparkwingtest"
 )
 
@@ -221,5 +227,45 @@ func TestFakeHostReportsGeneratorFailure(t *testing.T) {
 	if _, err := host.Eval(t.Context(), plan, "source", generated.ID(), nil); err == nil ||
 		!strings.Contains(err.Error(), "expansion failed") {
 		t.Fatalf("generator failure = %v", err)
+	}
+}
+
+func TestFakeHostCleanupDoesNotUseAmbientLedger(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	t.Setenv("SPARKWING_RUN_ID", "ambient-run")
+	t.Setenv("SPARKWING_NODE_ID", "ambient-job")
+	host := sparkwingtest.New(sparkwingtest.Options{})
+	t.Cleanup(func() { _ = host.Close() })
+	release, err := cleanup.Register(host.Context(t.Context()), cleanup.Spec{Argv: []string{"fixture-cleanup"}})
+	defer release()
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || failure.Code != apierr.Unavailable {
+		t.Errorf("cleanup error = %v, want unavailable", err)
+	}
+	entries, err := os.ReadDir(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("fake cleanup wrote ambient files: %v", entries)
+	}
+}
+
+func TestFakeHostSummaryUsesMessageForMarkdown(t *testing.T) {
+	host := sparkwingtest.New(sparkwingtest.Options{Secrets: map[string]sparkwingtest.Secret{
+		"TOKEN": {Value: "fixture-secret", Masked: true},
+	}})
+	t.Cleanup(func() { _ = host.Close() })
+	attrs, err := json.Marshal(map[string]string{"markdown": strings.Repeat("x", int(limits.AnnotationBytes)+1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sdkserve.ServicesFrom(host.Context(t.Context())).Emit(nodeproto.FrameLog{
+		Event: "summary", Message: "fixture-secret", Attrs: attrs,
+	})
+	records := host.Records()
+	if len(records) != 1 || records[0].Msg != "***" || records[0].Attrs["markdown"] != records[0].Msg {
+		t.Fatal("summary markdown did not use the masked message")
 	}
 }

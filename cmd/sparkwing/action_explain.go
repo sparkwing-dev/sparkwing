@@ -95,7 +95,7 @@ func runPipelineExplain(args []string) error {
 	if err != nil {
 		return err
 	}
-	var snap nodeproto.PlanDocOld
+	var snap nodeproto.PlanDoc
 	err = withPipelineEntry(pipeline, func(ctx context.Context, entry pipelineentry.Command, dir string) error {
 		planned, err := planOverProtocol(ctx, entry, dir, pipeline, passthrough, "explain")
 		snap = planned.doc
@@ -108,6 +108,7 @@ func runPipelineExplain(args []string) error {
 		return json.NewEncoder(os.Stdout).Encode(snap)
 	}
 	printPin(pipeline)
+	fmt.Printf("Plan: %s\n", pipeline)
 	printPlanSnapshot(&snap)
 
 	fmt.Println()
@@ -136,7 +137,7 @@ func runPipelineExplainAll(format string) error {
 		row := allExplainResult{Pipeline: p.Name}
 		err := withPipelineEntry(p.Name, func(ctx context.Context, entry pipelineentry.Command, dir string) error {
 			planned, err := planOverProtocol(ctx, entry, dir, p.Name, nil, "explain")
-			row.Nodes = len(planned.doc.Nodes)
+			row.Nodes = len(planned.doc.Jobs)
 			return err
 		})
 		switch {
@@ -197,22 +198,19 @@ func printAllExplainTable(results []allExplainResult, failed int) {
 	}
 }
 
-func printPlanSnapshot(snap *nodeproto.PlanDocOld) {
-	if snap.Pipeline != "" {
-		fmt.Printf("Plan: %s\n", snap.Pipeline)
-	}
-	if len(snap.Nodes) == 0 {
+func printPlanSnapshot(snap *nodeproto.PlanDoc) {
+	if len(snap.Jobs) == 0 {
 		fmt.Println("(no nodes)")
 		return
 	}
-	for _, n := range snap.Nodes {
+	for _, n := range snap.Jobs {
 		printNode(&n, "  ")
 	}
 	fmt.Println()
-	printPlanEdges(snap.Nodes)
+	printPlanEdges(snap.Jobs)
 }
 
-func printNode(n *nodeproto.PlanNode, indent string) {
+func printNode(n *nodeproto.JobSpec, indent string) {
 	tag := "Node"
 	if n.Approval != nil {
 		tag = "Approval"
@@ -228,95 +226,71 @@ func printNode(n *nodeproto.PlanNode, indent string) {
 			msg = "(default prompt)"
 		}
 		fmt.Printf("%s  prompt: %s\n", indent, msg)
-		if n.Approval.TimeoutMS > 0 {
+		if n.Approval.TimeoutMS != nil && *n.Approval.TimeoutMS > 0 {
 			fmt.Printf("%s  timeout: %s (on_timeout=%s)\n",
-				indent, time.Duration(n.Approval.TimeoutMS)*time.Millisecond, n.Approval.OnTimeout)
+				indent, time.Duration(*n.Approval.TimeoutMS)*time.Millisecond, n.Approval.OnTimeout)
 		}
 	}
-	if n.Work != nil {
-		printWork(n.Work, indent+"  ")
+	if len(n.Steps) > 0 {
+		printWork(n, indent+"  ")
 	}
 }
 
-func nodeModifiersSuffix(n *nodeproto.PlanNode) string {
+func nodeModifiersSuffix(n *nodeproto.JobSpec) string {
 	var bits []string
-	if n.Dynamic {
-		bits = append(bits, "dynamic")
-	}
 	if len(n.Groups) > 0 {
 		bits = append(bits, "groups="+strings.Join(n.Groups, ","))
 	}
 	if n.OnFailureOf != "" {
 		bits = append(bits, "on_failure_of="+n.OnFailureOf)
 	}
-	if m := n.Modifiers; m != nil {
-		if m.Retry > 0 {
-			label := "Retry"
-			if m.RetryAuto {
-				label = "Retry(auto)"
-			}
-			s := fmt.Sprintf("%s=%d", label, m.Retry)
-			if m.RetryBackoffMS > 0 {
-				s += "@" + (time.Duration(m.RetryBackoffMS) * time.Millisecond).String()
-			}
-			bits = append(bits, s)
+	if retry := n.Retry; retry != nil {
+		label := fmt.Sprintf("Retry=%d", retry.Attempts)
+		if retry.BackoffMS != nil {
+			label += "@" + (time.Duration(*retry.BackoffMS) * time.Millisecond).String()
 		}
-		if m.TimeoutMS > 0 {
-			bits = append(bits, "Timeout="+(time.Duration(m.TimeoutMS)*time.Millisecond).String())
+		bits = append(bits, label)
+	}
+	if n.TimeoutMS != nil {
+		bits = append(bits, "Timeout="+(time.Duration(*n.TimeoutMS)*time.Millisecond).String())
+	}
+	if len(n.Requires) > 0 {
+		bits = append(bits, "Requires="+strings.Join(n.Requires, ","))
+	}
+	if n.Memo != nil {
+		label := "Memo"
+		if n.Memo.TTLMS != nil {
+			label += "(ttl=" + (time.Duration(*n.Memo.TTLMS) * time.Millisecond).String() + ")"
 		}
-		if len(m.RunsOn) > 0 {
-			bits = append(bits, "Requires="+strings.Join(m.RunsOn, ","))
+		bits = append(bits, label)
+	}
+	for _, membership := range n.Concurrency {
+		parts := []string{"group=" + membership.Group, fmt.Sprintf("cap=%d", membership.Capacity), fmt.Sprintf("cost=%d", membership.Cost), "scope=" + membership.Scope, membership.OnLimit}
+		if membership.QueueTimeoutMS != nil {
+			parts = append(parts, "queue_timeout="+(time.Duration(*membership.QueueTimeoutMS)*time.Millisecond).String())
 		}
-		if m.Cache {
-			s := "Cache"
-			if m.CacheTTLMS > 0 {
-				s += "(ttl=" + (time.Duration(m.CacheTTLMS) * time.Millisecond).String() + ")"
-			}
-			bits = append(bits, s)
+		if membership.CancelTimeoutMS != nil {
+			parts = append(parts, "cancel_timeout="+(time.Duration(*membership.CancelTimeoutMS)*time.Millisecond).String())
 		}
-		if m.ConcGroup != "" {
-			parts := []string{"group=" + m.ConcGroup}
-			if m.ConcCapacity > 0 {
-				parts = append(parts, fmt.Sprintf("cap=%d", m.ConcCapacity))
-			}
-			if m.ConcCost > 1 {
-				parts = append(parts, fmt.Sprintf("cost=%d", m.ConcCost))
-			}
-			if m.ConcScope != "" && m.ConcScope != "global" {
-				parts = append(parts, "scope="+m.ConcScope)
-			}
-			if m.ConcOnLimit != "" && m.ConcOnLimit != "queue" {
-				parts = append(parts, m.ConcOnLimit)
-			}
-			if m.ConcQueueTimeoutMS > 0 {
-				parts = append(parts, "queue_timeout="+(time.Duration(m.ConcQueueTimeoutMS)*time.Millisecond).String())
-			}
-			if m.ConcCancelTimeoutMS > 0 {
-				parts = append(parts, "cancel_timeout="+(time.Duration(m.ConcCancelTimeoutMS)*time.Millisecond).String())
-			}
-			bits = append(bits, "Concurrency("+strings.Join(parts, " ")+")")
-		}
-		if m.Inline {
-			bits = append(bits, "Inline")
-		}
-		if m.Optional {
-			bits = append(bits, "Optional")
-		}
-		if m.ContinueOnError {
-			bits = append(bits, "ContinueOnError")
-		}
-		if m.OnFailure != "" {
-			bits = append(bits, "OnFailure="+m.OnFailure)
-		}
-		if m.HasBeforeRun {
-			bits = append(bits, "BeforeRun")
-		}
-		if m.HasAfterRun {
-			bits = append(bits, "AfterRun")
-		}
-		if m.HasSkipIf {
-			bits = append(bits, "SkipIf")
-		}
+		bits = append(bits, "Concurrency("+strings.Join(parts, " ")+")")
+	}
+	if n.Inline {
+		bits = append(bits, "Inline")
+	}
+	if n.Optional {
+		bits = append(bits, "Optional")
+	}
+	if n.ContinueOnError {
+		bits = append(bits, "ContinueOnError")
+	}
+	if len(n.Closures.BeforeRun) > 0 {
+		bits = append(bits, "BeforeRun")
+	}
+	if len(n.Closures.AfterRun) > 0 {
+		bits = append(bits, "AfterRun")
+	}
+	if len(n.Closures.SkipIf) > 0 {
+		bits = append(bits, "SkipIf")
 	}
 	if len(bits) == 0 {
 		return ""
@@ -324,29 +298,20 @@ func nodeModifiersSuffix(n *nodeproto.PlanNode) string {
 	return " (" + strings.Join(bits, " ") + ")"
 }
 
-func printWork(w *nodeproto.PlanWork, indent string) {
+func printWork(w *nodeproto.JobSpec, indent string) {
 	fmt.Printf("%sWork\n", indent)
-	groupByStep := map[string][]string{}
-	for _, g := range w.StepGroups {
-		if g.Name == "" {
-			continue
-		}
-		for _, m := range g.Members {
-			groupByStep[m] = append(groupByStep[m], g.Name)
-		}
-	}
 	for _, s := range w.Steps {
 		marker := ""
-		if s.IsResult {
+		if s.ID == w.ResultStep {
 			marker = " [result]"
 		}
-		if s.HasSkipIf {
+		if len(s.Closures.SkipIf) > 0 {
 			marker += " [skip_if]"
 		}
 		if len(s.Risks) > 0 {
 			marker += " [" + strings.Join(s.Risks, ",") + "]"
 		}
-		if names := groupByStep[s.ID]; len(names) > 0 {
+		if names := s.Groups; len(names) > 0 {
 			marker += " (groups=" + strings.Join(names, ",") + ")"
 		}
 		needs := ""
@@ -357,11 +322,11 @@ func printWork(w *nodeproto.PlanWork, indent string) {
 	}
 }
 
-func printPlanEdges(nodes []nodeproto.PlanNode) {
+func printPlanEdges(nodes []nodeproto.JobSpec) {
 	type edge struct{ From, To string }
 	var edges []edge
 	for _, n := range nodes {
-		deps := append([]string(nil), n.Deps...)
+		deps := append([]string(nil), n.Needs...)
 		sort.Strings(deps)
 		for _, d := range deps {
 			edges = append(edges, edge{From: d, To: n.ID})

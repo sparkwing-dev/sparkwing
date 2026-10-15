@@ -20,7 +20,7 @@ var ErrSecretMissing = errors.New("secret missing")
 
 // SecretResolver resolves a stored value to (plain, masked) at the
 // moment of the call. The orchestrator installs a resolver on the
-// run ctx; jobs read values through the package-level Secret / Config
+// run ctx; jobs read values through the package-level Secret / Variable
 // helpers.
 //
 // Resolution is on-demand: no plan-time declaration, no dispatch-time
@@ -28,7 +28,7 @@ var ErrSecretMissing = errors.New("secret missing")
 // results per-run and register masked values with the run's log masker.
 //
 // The masked return drives strict matching at the SDK call site:
-// Secret errors on masked=false entries, Config errors on masked=true
+// Secret errors on masked=false entries, Variable errors on masked=true
 // ones, so classification drift surfaces loudly.
 type secretResolver interface {
 	resolve(ctx context.Context, name string) (value string, masked bool, err error)
@@ -60,7 +60,7 @@ func secretResolverFromContext(ctx context.Context) secretResolver {
 // Secret resolves a masked value through the resolver installed on
 // ctx. Errors when no resolver is installed, the source can't produce
 // a value, or the entry exists but was stored with masked=false (use
-// Config for those). Lazy by design: a misspelled name fails at the
+// Variable for those). Lazy by design: a misspelled name fails at the
 // call site, not at run start.
 //
 //	token, err := sparkwing.Secret(ctx, "ARGOCD_TOKEN")
@@ -71,7 +71,7 @@ func Secret(ctx context.Context, name string) (string, error) {
 		return "", err
 	}
 	if !masked {
-		return "", fmt.Errorf("sparkwing: Secret(%q): entry is stored with masked=false; use sparkwing.Config", name)
+		return "", fmt.Errorf("sparkwing: Secret(%q): entry is stored with masked=false; use sparkwing.Variable", name)
 	}
 	return v, nil
 }

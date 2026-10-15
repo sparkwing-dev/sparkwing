@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"time"
 
@@ -189,7 +190,7 @@ func (sdkOperations) Eval(ctx context.Context, built any, req nodeproto.Request)
 	p.evalMu.Lock()
 	defer p.evalMu.Unlock()
 	n := closureJob(p, req.Closure)
-	if n == nil || (req.Job != "" && n.id != req.Job) {
+	if n == nil || (req.Job != "" && n.id != req.Job && !generatorClosure(n, req.Closure)) {
 		return result, sdkError(apierr.UnknownClosure, "closure is not declared for the bound job")
 	}
 	ctx, err = executionContext(ctx, p, n, req)
@@ -227,7 +228,15 @@ func evaluate(ctx context.Context, p *Plan, n *JobNode, id string, input json.Ra
 	}
 	for i, f := range n.afterRun {
 		if id == closureID(n.id, "after", i) {
-			f(ctx, failureFromContext(ctx).Err)
+			var final nodeproto.RunResult
+			if err := (nodeproto.Reply{ID: id, OK: true, Result: input}).Decode(&final); err != nil {
+				return nil, err
+			}
+			var failure error
+			if final.Error != nil {
+				failure = final.Error
+			}
+			f(ctx, failure)
 			return nil, nil
 		}
 	}
@@ -388,12 +397,18 @@ func maskText(text string, values []string) string {
 	return text
 }
 
-func (sdkOperations) Prepare(built any, job string) error {
+func (sdkOperations) Prepare(built any, request nodeproto.Request) error {
 	p, ok := built.(*Plan)
 	if !ok {
 		return sdkError(apierr.NoPlan, "plan is required")
 	}
-	n := planJob(p, job)
+	if request.Op == nodeproto.OpEval {
+		if source := closureJob(p, request.Closure); source != nil && generatorClosure(source, request.Closure) {
+			// safety: ancestor replay reconstructs the target before its body environment can be applied.
+			return nil
+		}
+	}
+	n := planJob(p, request.Job)
 	if n == nil {
 		return sdkError(apierr.UnknownJob, "job is not declared")
 	}
@@ -405,6 +420,10 @@ func (sdkOperations) Prepare(built any, job string) error {
 		}
 	}
 	return nil
+}
+
+func generatorClosure(job *JobNode, closure string) bool {
+	return slices.ContainsFunc(job.generators, func(generator *Generator) bool { return generator.id == closure })
 }
 
 type combinedSecrets struct {

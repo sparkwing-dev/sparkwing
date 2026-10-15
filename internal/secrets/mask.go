@@ -363,3 +363,15 @@ func (m *Masker) Values() []string {
 	copy(out, m.values)
 	return out
 }
+
+// ContainsSecret reports whether an identifier contains a registered masking pattern.
+func (m *Masker) ContainsSecret(identifier string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, value := range m.values {
+		if strings.Contains(identifier, value) {
+			return true
+		}
+	}
+	return false
+}

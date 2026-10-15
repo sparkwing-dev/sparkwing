@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/runner"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/cleanup"
 )
@@ -271,5 +270,5 @@ func (j *targetsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 
 func main() {
 	sparkwing.Register[inputs]("attempts", func() sparkwing.Pipeline[inputs] { return pipeline{} })
-	runner.Main()
+	sparkwing.Main()
 }

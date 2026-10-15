@@ -122,7 +122,10 @@ func (w *Writer) Send(v any) error {
 	if len(b)+1 > w.max {
 		return ErrLineTooLong
 	}
-	_, err = w.w.Write(append(b, '\n'))
+	n, err := w.w.Write(append(b, '\n'))
+	if err == nil && n != len(b)+1 {
+		return io.ErrShortWrite
+	}
 	return err
 }
 

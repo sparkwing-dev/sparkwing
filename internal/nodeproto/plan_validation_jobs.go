@@ -283,6 +283,14 @@ func detectCycle[T any](vertices map[string]T, edges func(string) []string, path
 
 func (v *planValidator) validateGraph() error {
 	edges := map[string][]string{}
+	members := map[string][]string{}
+	for _, job := range v.jobs {
+		for _, group := range job.Groups {
+			if _, generated := v.generators[group]; generated {
+				members[group] = append(members[group], job.ID)
+			}
+		}
+	}
 	for _, id := range v.orderedJobs() {
 		job := v.jobs[id]
 		path := v.paths[id]
@@ -313,6 +321,7 @@ func (v *planValidator) validateGraph() error {
 				return planInvalid(fmt.Sprintf("%s.needs_generated[%d]", path, i), "generator is absent or self-referential")
 			}
 			edges[id] = append(edges[id], owner)
+			edges[id] = append(edges[id], members[generator]...)
 		}
 		if job.OnFailureOf != "" {
 			if _, exists := v.jobs[job.OnFailureOf]; !exists || job.OnFailureOf == id {

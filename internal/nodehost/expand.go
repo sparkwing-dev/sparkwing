@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -14,7 +15,7 @@ import (
 
 type expansion struct {
 	closure string
-	nodes   []nodeproto.PlanNode
+	nodes   []nodeproto.JobSpec
 	err     error
 	// safety: set when err is a recorded batch the generator no longer reproduces; nodes are what it recorded.
 	drifted bool
@@ -31,42 +32,36 @@ type genGroup struct {
 // holds it in that process; a separate process would read it back through the
 // controller, which grants a node only its dependencies' outputs.
 func generate(ctx context.Context, sess *Session, n *NodeRun) []expansion {
-	if n.Plan.Closures == nil {
+	if len(n.Plan.Closures.Generate) == 0 {
 		return nil
 	}
-	out := make([]expansion, 0, len(n.Plan.Closures.Generator))
-	for _, id := range n.Plan.Closures.Generator {
+	out := make([]expansion, 0, len(n.Plan.Closures.Generate))
+	for _, id := range n.Plan.Closures.Generate {
 		nodes, err := evalGenerator(ctx, sess, id)
 		out = append(out, expansion{closure: id, nodes: nodes, err: err})
 	}
 	return out
 }
 
-// safety: the host stamps each spec_hash itself, as it does the plan's, so a
-// generator never picks the hash its node is later checked against.
-func evalGenerator(ctx context.Context, sess *Session, closure string) ([]nodeproto.PlanNode, error) {
-	var res nodeproto.EvalResultOld
-	if err := ask(ctx, sess, nodeproto.RequestOld{Op: nodeproto.OpEvalOld, Closure: closure}, &res); err != nil {
+// safety: generated jobs remain declarations; the host derives their stored hashes.
+func evalGenerator(ctx context.Context, sess *Session, closure string) ([]nodeproto.JobSpec, error) {
+	var res nodeproto.EvalResult
+	if err := ask(ctx, sess, nodeproto.Request{Op: nodeproto.OpEval, Closure: closure}, &res); err != nil {
 		return nil, err
 	}
-	if res.Error != nil {
-		return nil, fmt.Errorf("generator %s: %s", closure, *res.Error)
+	if err := res.ValidateValue("generate"); err != nil {
+		return nil, err
 	}
 	var raws []json.RawMessage
 	if err := json.Unmarshal(res.Value, &raws); err != nil {
 		return nil, invalid("generator %s returned no array of node documents: %v", closure, err)
 	}
-	nodes := make([]nodeproto.PlanNode, 0, len(raws))
+	nodes := make([]nodeproto.JobSpec, 0, len(raws))
 	for i, raw := range raws {
-		hash, err := nodeproto.SpecHash(raw)
-		if err != nil {
-			return nil, fmt.Errorf("generator %s node %d: %w", closure, i, err)
-		}
-		var node nodeproto.PlanNode
+		var node nodeproto.JobSpec
 		if err := json.Unmarshal(raw, &node); err != nil {
 			return nil, invalid("generator %s node %d: %v", closure, i, err)
 		}
-		node.SpecHash = hash
 		nodes = append(nodes, node)
 	}
 	return nodes, nil
@@ -76,7 +71,7 @@ func evalGenerator(ctx context.Context, sess *Session, closure string) ([]nodepr
 // there, each source's before the next, so its attempt runs the chain and
 // compares the node the last returns with what the run accepted.
 func regenerate(ctx context.Context, sess *Session, n *NodeRun) error {
-	var nodes []nodeproto.PlanNode
+	var nodes []nodeproto.JobSpec
 	for _, closure := range n.Generators {
 		var err error
 		if nodes, err = evalGenerator(ctx, sess, closure); err != nil {
@@ -88,24 +83,24 @@ func regenerate(ctx context.Context, sess *Session, n *NodeRun) error {
 		if got.ID != n.Plan.ID {
 			continue
 		}
-		if got.SpecHash != n.Plan.SpecHash {
-			return &nodeproto.Error{Code: nodeproto.CodePlanDrift, Message: fmt.Sprintf(
+		if jobHash(got) != jobHash(n.Plan) {
+			return &apierr.Error{Code: apierr.PlanDrift, Message: fmt.Sprintf(
 				"generator %s builds node %s differently than when the run added it; a generator must return the same nodes for the same source output", last, n.Plan.ID)}
 		}
 		return nil
 	}
-	return &nodeproto.Error{Code: nodeproto.CodePlanDrift, Message: fmt.Sprintf(
+	return &apierr.Error{Code: apierr.PlanDrift, Message: fmt.Sprintf(
 		"generator %s no longer returns node %s; a generator must return the same nodes for the same source output", last, n.Plan.ID)}
 }
 
 // safety: every generator of a finished source settles here, whatever its
 // outcome, so a node that needs its nodes never waits on a group that cannot finish.
 func (s *scheduler) expand(ctx context.Context, source string, res Result) {
-	i := slices.IndexFunc(s.nodes, func(n nodeproto.PlanNode) bool { return n.ID == source })
-	if i < 0 || s.nodes[i].Closures == nil {
+	i := slices.IndexFunc(s.nodes, func(n nodeproto.JobSpec) bool { return n.ID == source })
+	if i < 0 || len(s.nodes[i].Closures.Generate) == 0 {
 		return
 	}
-	for _, id := range s.nodes[i].Closures.Generator {
+	for _, id := range s.nodes[i].Closures.Generate {
 		j := slices.IndexFunc(res.expansions, func(e expansion) bool { return e.closure == id })
 		var err error
 		switch {
@@ -152,7 +147,7 @@ func (s *scheduler) addGenerated(ctx context.Context, source string, e expansion
 		ids[n.ID] = true
 	}
 	for _, n := range e.nodes {
-		if !slices.Contains(n.Deps, source) && !ids[n.OnFailureOf] {
+		if !slices.Contains(n.Needs, source) && !ids[n.OnFailureOf] {
 			return invalid("generator %s returned node %s, which does not need its source %s", e.closure, n.ID, source)
 		}
 	}
@@ -177,7 +172,7 @@ func (s *scheduler) addGenerated(ctx context.Context, source string, e expansion
 		if !slices.Contains(w.NeedsGenerated, e.closure) {
 			continue
 		}
-		deps := append(slices.Clone(w.Deps), w.OptionalDeps...)
+		deps := append(slices.Clone(w.Needs), w.NeedsIfPresent...)
 		for _, id := range w.NeedsGenerated {
 			if g := s.groups[id]; g != nil {
 				deps = append(deps, g.members...)
@@ -203,7 +198,7 @@ func (s *scheduler) group(closure string) *genGroup {
 }
 
 // safety: an on_failure node waits on its parent alone, as in waitsOn.
-func (s *scheduler) generatedWaits(n nodeproto.PlanNode, waits []string) (_ []string, ready bool, err error) {
+func (s *scheduler) generatedWaits(n nodeproto.JobSpec, waits []string) (_ []string, ready bool, err error) {
 	if n.OnFailureOf != "" {
 		return waits, true, nil
 	}
@@ -231,13 +226,13 @@ func (s *scheduler) generators(id string) []string {
 }
 
 // safety: a memo hit's copy, outcome cached, adds its generators' nodes as its leader did.
-func generatesNodes(n nodeproto.PlanNode, outcome sparkwing.Outcome) bool {
-	return n.Closures != nil && len(n.Closures.Generator) > 0 && (outcome == sparkwing.Success || outcome == sparkwing.Cached)
+func generatesNodes(n nodeproto.JobSpec, outcome sparkwing.Outcome) bool {
+	return len(n.Closures.Generate) > 0 && (outcome == sparkwing.Success || outcome == sparkwing.Memoized)
 }
 
 type expansionFrom struct{ source, closure string }
 
-func (f *expansionFrom) record(row *store.Node, n nodeproto.PlanNode, batch int) error {
+func (f *expansionFrom) record(row *store.Node, n nodeproto.JobSpec, batch int) error {
 	if f == nil {
 		return nil
 	}
@@ -268,8 +263,8 @@ type recordedBatch struct {
 // safety: the expansion's membership is the rows the run recorded, so a later host adds every node the run
 // accepted, finished or not, and never one a generator would return now. A generator with no batch recorded, as an
 // empty one records nothing, or only part of one, as a host stopped mid-add leaves it, is incomplete.
-func storedExpansions(ctx context.Context, st storage.StateStoreOld, runID string, n nodeproto.PlanNode) ([]recordedBatch, error) {
-	out := make([]recordedBatch, 0, len(n.Closures.Generator))
+func storedExpansions(ctx context.Context, st storage.StateStoreOld, runID string, n nodeproto.JobSpec) ([]recordedBatch, error) {
+	out := make([]recordedBatch, 0, len(n.Closures.Generate))
 	var rows []*store.Node
 	if lister, ok := st.(nodeLister); ok {
 		var err error
@@ -277,7 +272,7 @@ func storedExpansions(ctx context.Context, st storage.StateStoreOld, runID strin
 			return nil, fmt.Errorf("read the nodes %s generated: %w", n.ID, err)
 		}
 	}
-	for _, closure := range n.Closures.Generator {
+	for _, closure := range n.Closures.Generate {
 		b := recordedBatch{expansion: expansion{closure: closure}}
 		size := 0
 		for _, row := range rows {
@@ -285,7 +280,7 @@ func storedExpansions(ctx context.Context, st storage.StateStoreOld, runID strin
 			if g == nil || g.Source != n.ID || g.Generator != closure {
 				continue
 			}
-			var node nodeproto.PlanNode
+			var node nodeproto.JobSpec
 			if err := json.Unmarshal(g.Spec, &node); err != nil {
 				return nil, fmt.Errorf("read generated node %s: %w", row.NodeID, err)
 			}
@@ -303,7 +298,7 @@ func allRecorded(batches []recordedBatch) bool {
 
 // safety: each generator's batch stands on its own: a complete one is added as recorded, and only an incomplete
 // one is generated, once, from the source's recorded output in an eval process, keeping every node it recorded.
-func (s *scheduler) recordedExpansions(ctx context.Context, n nodeproto.PlanNode, batches []recordedBatch, output func() (json.RawMessage, error)) []expansion {
+func (s *scheduler) recordedExpansions(ctx context.Context, n nodeproto.JobSpec, batches []recordedBatch, output func() (json.RawMessage, error)) []expansion {
 	var regenerated []expansion
 	var genErr error
 	var incomplete []string
@@ -321,9 +316,9 @@ func (s *scheduler) recordedExpansions(ctx context.Context, n nodeproto.PlanNode
 			if out, genErr = output(); genErr == nil {
 				// perf: a complete sibling's generator is not run again, so it can neither cost an eval nor abort one.
 				only := n
-				closures := *n.Closures
-				closures.Generator = incomplete
-				only.Closures = &closures
+				closures := n.Closures
+				closures.Generate = incomplete
+				only.Closures = closures
 				regenerated = s.regenerate(ctx, &NodeRun{Run: s.run, Plan: only, Generators: s.generators(n.ID)}, out)
 			}
 		}
@@ -363,9 +358,9 @@ func reconcileRecorded(b recordedBatch, regenerated []expansion, genErr error) e
 		return e
 	}
 	for _, rec := range b.nodes {
-		k := slices.IndexFunc(regenerated[j].nodes, func(got nodeproto.PlanNode) bool { return got.ID == rec.ID })
-		if k < 0 || regenerated[j].nodes[k].SpecHash != rec.SpecHash {
-			e.err = &nodeproto.Error{Code: nodeproto.CodePlanDrift, Message: fmt.Sprintf(
+		k := slices.IndexFunc(regenerated[j].nodes, func(got nodeproto.JobSpec) bool { return got.ID == rec.ID })
+		if k < 0 || jobHash(regenerated[j].nodes[k]) != jobHash(rec) {
+			e.err = &apierr.Error{Code: apierr.PlanDrift, Message: fmt.Sprintf(
 				"generator %s no longer returns node %s as the run recorded it; a generator must return the same nodes for the same source output",
 				b.closure, rec.ID)}
 			return e

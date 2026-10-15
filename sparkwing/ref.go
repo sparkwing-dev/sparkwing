@@ -155,13 +155,6 @@ func (r Ref[T]) TryGet(ctx context.Context) (T, bool) {
 // Every failure a resolver leaves unmarked is treated as unreachable.
 var ErrRefAbsent = errors.New("sparkwing: referenced output is absent")
 
-// absentInRun names an upstream sibling that has not completed. The
-// marker prints nothing, so the warn log unwraps this error and shows
-// what it names.
-func absentInRun(nodeID string) error {
-	return fmt.Errorf("node %q has not completed%.0w", nodeID, ErrRefAbsent)
-}
-
 func (r Ref[T]) describe() string {
 	if r.Pipeline != "" {
 		return fmt.Sprintf("%s/%s", r.Pipeline, r.JobID)
@@ -313,18 +306,8 @@ func RefToLastRun[T any](pipeline, nodeID string, opts ...RefOption) Ref[T] {
 // with ErrRefAbsent, from one it failed to read, which Ref.TryGet must not
 // take for a miss; a resolver returning a bool cannot.
 func jsonResolverFromContext(ctx context.Context) func(context.Context, string) ([]byte, error) {
-	switch f := ctx.Value(keyJSONRefResolver).(type) {
-	case func(context.Context, string) ([]byte, error):
-		return f
-	case func(string) ([]byte, bool):
-		return func(_ context.Context, nodeID string) ([]byte, error) {
-			if data, ok := f(nodeID); ok {
-				return data, nil
-			}
-			return nil, absentInRun(nodeID)
-		}
-	}
-	return nil
+	f, _ := ctx.Value(keyJSONRefResolver).(func(context.Context, string) ([]byte, error))
+	return f
 }
 
 // PipelineRefs returns the other pipelines' nodes this node's job holds a

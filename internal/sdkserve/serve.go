@@ -43,7 +43,6 @@ type server struct {
 	hello      *nodeproto.Request
 	planned    any
 	planSeen   bool
-	prepared   bool
 	run        nodeproto.RunContext
 	stop       context.CancelFunc
 	closeInput func()
@@ -67,6 +66,8 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, cfg Config) error {
 	if closer, ok := in.(io.Closer); ok {
 		s.closeInput = func() { _ = closer.Close() }
 	}
+	stopClose := context.AfterFunc(ctx, s.closeInput)
+	defer stopClose()
 	reader := nodeproto.NewReader(in)
 	var readErr error
 	for {
@@ -118,14 +119,13 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, cfg Config) error {
 				if req.Op == nodeproto.OpEval {
 					req.Job = s.hello.Binding.JobID
 				}
-				if !s.prepared {
-					if prepare, ok := s.cfg.Operations.(interface{ Prepare(any, string) error }); ok {
-						if err := prepare.Prepare(s.planned, s.hello.Binding.JobID); err != nil {
-							s.reply(req.ID, nil, err)
-							continue
-						}
+				if prepare, ok := s.cfg.Operations.(interface {
+					Prepare(any, nodeproto.Request) error
+				}); ok {
+					if err := prepare.Prepare(s.planned, req); err != nil {
+						s.reply(req.ID, nil, err)
+						continue
 					}
-					s.prepared = true
 				}
 			}
 			rctx, stop := context.WithCancel(ctx)
@@ -149,6 +149,9 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, cfg Config) error {
 				s.execute(rctx, req)
 			}()
 		}
+	}
+	if ctx.Err() != nil {
+		readErr = ctx.Err()
 	}
 	cancel()
 	s.workers.Wait()

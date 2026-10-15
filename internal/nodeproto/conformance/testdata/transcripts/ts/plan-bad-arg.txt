@@ -1,2 +1,0 @@
--> {"args":{"count":"many","env":"prod"},"id":"1","op":"plan","pipeline":"conformance","run":{"git":{"branch":"main","repo":"acme/app","sha":"4f2c1e0"},"run_id":"run-1","trigger":{"source":"push"}}}
-<- {"error":{"code":"invalid_args","message":"--count: \"many\" is not an integer"},"ok":false,"reply":"1"}

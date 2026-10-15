@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"reflect"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -150,6 +151,9 @@ func ParseRequest(line []byte) (Request, error) {
 	if err := json.Unmarshal(line, &r); err != nil {
 		return Request{}, fmt.Errorf("%w: request: %v", ErrMalformed, err)
 	}
+	if err := checkProtocolValue(line, reflect.TypeFor[Request]()); err != nil {
+		return r, err
+	}
 	if err := requestFields(obj, r.Op); err != nil {
 		return r, err
 	}
@@ -214,6 +218,9 @@ func ParseFrame(line []byte) (Frame, error) {
 		return Frame{}, fmt.Errorf("%w: log.attrs must be an object", ErrMalformed)
 	}
 	var log FrameLog
+	if err := checkProtocolValue(line, reflect.TypeFor[FrameLog]()); err != nil {
+		return Frame{}, err
+	}
 	if err := json.Unmarshal(line, &log); err != nil {
 		return Frame{}, fmt.Errorf("%w: log: %v", ErrMalformed, err)
 	}
@@ -299,6 +306,9 @@ func (r Reply) Decode(result any) error {
 		return fmt.Errorf("%w: missing result destination", ErrMalformed)
 	}
 	if _, err := protocolObject(r.Result); err != nil {
+		return err
+	}
+	if err := checkProtocolValue(r.Result, reflect.TypeOf(result)); err != nil {
 		return err
 	}
 	if err := json.Unmarshal(r.Result, result); err != nil {

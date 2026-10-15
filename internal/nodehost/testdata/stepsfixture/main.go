@@ -13,7 +13,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/runner"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -175,5 +174,5 @@ func (pipeline) Plan(_ context.Context, plan *sparkwing.Plan, in inputs, _ spark
 
 func main() {
 	sparkwing.Register[inputs]("steps", func() sparkwing.Pipeline[inputs] { return pipeline{} })
-	runner.Main()
+	sparkwing.Main()
 }

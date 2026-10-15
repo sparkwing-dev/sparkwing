@@ -5,9 +5,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"testing"
+	"testing/synctest"
 
 	"github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
@@ -180,6 +182,28 @@ func TestServeInputCloseJoinsRunningStep(t *testing.T) {
 	if replies := readWireReplies(t, output.Bytes()); len(replies) != 3 || !replies["step"].OK {
 		t.Fatalf("step reply after input close: %+v", replies)
 	}
+}
+
+func TestServeCancellationClosesIdleInput(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		in, writer := io.Pipe()
+		defer writer.Close()
+		done := make(chan error, 1)
+		go func() { done <- Serve(ctx, in, io.Discard, Config{Operations: &wireOperations{}}) }()
+		synctest.Wait()
+		cancel()
+		synctest.Wait()
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("cancelled server: %v", err)
+			}
+		default:
+			t.Fatal("server remained blocked on input after cancellation")
+		}
+	})
 }
 
 func TestServeEvalUsesClosureWithoutJob(t *testing.T) {

@@ -67,6 +67,33 @@ func TestValidatePlanStrictJSON(t *testing.T) {
 	}
 }
 
+func TestConcurrencyMembershipHasIndependentCost(t *testing.T) {
+	raw := `{"jobs":[
+		{"id":"small","steps":[{"id":"run"}],"concurrency":[{"group":"pool","capacity":3,"cost":1,"scope":"run","on_limit":"queue"}]},
+		{"id":"large","steps":[{"id":"run"}],"concurrency":[{"group":"pool","capacity":3,"cost":2,"scope":"run","on_limit":"queue"}]}
+	]}`
+	checkPlan(t, raw, planContext(), "")
+	checkPlan(t, strings.Replace(raw, `"capacity":3,"cost":2`, `"capacity":4,"cost":2`, 1), planContext(), apierr.PlanInvalid)
+}
+
+func TestExpansionCannotDependOnItsOwnBarrierConsumer(t *testing.T) {
+	base := checkPlan(t, `{"jobs":[
+		{"id":"source","steps":[{"id":"run"}],"closures":{"generate":["generator"]}},
+		{"id":"consumer","steps":[{"id":"run"}],"needs_generated":["generator"]}
+	]}`, planContext(), "")
+	ctx := planContext()
+	ctx.Expansion, ctx.SourceJob, ctx.ExistingJobs = true, "source", base.Jobs
+	checkPlan(t, `{"jobs":[{"id":"child","steps":[{"id":"run"}],"groups":["generator"],"deps":["consumer"]}]}`, ctx, apierr.PlanInvalid)
+	checkPlan(t, `{"jobs":[{"id":"child","steps":[{"id":"run"}],"groups":["generator"],"deps":["source"]}]}`, ctx, "")
+
+	base.Jobs = append(base.Jobs, JobSpec{ID: "child", Steps: []StepSpec{{ID: "run"}}, Groups: []string{"generator"}, Needs: []string{"consumer"}})
+	raw, err := json.Marshal(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkPlan(t, string(raw), planContext(), apierr.PlanInvalid)
+}
+
 func TestValidatePlanGraph(t *testing.T) {
 	for name, raw := range map[string]string{
 		"duplicate job":             `{"jobs":[{"id":"a","steps":[{"id":"s"}]},{"id":"a","steps":[{"id":"s"}]}]}`,

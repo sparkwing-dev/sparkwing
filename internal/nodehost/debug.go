@@ -86,7 +86,7 @@ func debugPause(ctx context.Context, d Debug, n *NodeRun, reason string) bool {
 		run.Logger.Error("nodehost: debug pause", "run", run.ID, "node", id, "reason", reason, "err", err)
 		return true
 	}
-	debugSetStatus(writeCtx, n, sparkwing.Paused)
+	debugSetStatus(writeCtx, n, "paused")
 	debugEvent(writeCtx, n, "node_paused", map[string]any{"reason": reason, "expires_at": p.ExpiresAt})
 
 	ticker := time.NewTicker(debugPausePoll)

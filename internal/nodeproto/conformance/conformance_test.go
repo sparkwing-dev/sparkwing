@@ -35,6 +35,7 @@ type corpusStep struct {
 	Kind     string       `json:"kind,omitempty"`
 	Code     string       `json:"code,omitempty"`
 	Contains string       `json:"contains,omitempty"`
+	Name     string       `json:"name,omitempty"`
 }
 
 func TestGoSDKConformsV2(t *testing.T) {
@@ -103,6 +104,12 @@ func TestGoSDKConformsV2(t *testing.T) {
 				}
 				if step.Op == nodeproto.OpDescribe {
 					p.validate(t, p.documents, "DescribeDoc", got.Result)
+				}
+				if step.Op == nodeproto.OpRunStep {
+					p.validate(t, p.wire, "RunResult", got.Result)
+				}
+				if step.Op == nodeproto.OpEval {
+					p.validate(t, p.wire, "EvalResult", got.Result)
 				}
 				if step.Contains != "" && !bytes.Contains(got.Result, []byte(step.Contains)) {
 					t.Fatalf("%s result %s lacks %q", step.Op, got.Result, step.Contains)
@@ -187,19 +194,25 @@ func (p *fixtureProcess) reply(t *testing.T) nodeproto.Reply {
 		if err != nil {
 			t.Fatalf("frame read: %v; stderr: %s", err, p.stderr.String())
 		}
-		frame, err := nodeproto.ParseFrame(line)
-		if err != nil {
-			t.Fatalf("frame %s: %v", line, err)
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(line, &fields); err != nil {
+			t.Fatal(err)
 		}
-		if frame.Log != nil {
+		if _, isReply := fields["reply"]; !isReply {
 			p.validate(t, p.wire, "FrameLog", line)
-			if frame.Log.TS == "" {
-				t.Fatalf("log without timestamp: %s", line)
-			}
 			continue
 		}
 		p.validate(t, p.wire, "Reply", line)
-		return *frame.Reply
+		var reply nodeproto.Reply
+		if err := json.Unmarshal(line, &reply); err != nil {
+			t.Fatal(err)
+		}
+		_, hasResult := fields["result"]
+		_, hasError := fields["error"]
+		if reply.OK != hasResult || reply.OK == hasError || (hasError && reply.Error == nil) {
+			t.Fatalf("inconsistent reply envelope: %s", line)
+		}
+		return reply
 	}
 }
 
@@ -228,6 +241,9 @@ func (p *fixtureProcess) makeRequest(step corpusStep, index int) nodeproto.Reque
 	case nodeproto.OpPlan:
 		r.Pipeline = "conformance"
 		r.Args = map[string]string{"name": "demo"}
+		if step.Name != "" {
+			r.Args["name"] = step.Name
+		}
 		r.Run = &nodeproto.RunContext{RunID: "r", Pipeline: "conformance"}
 	case nodeproto.OpRunStep:
 		r.Job, r.Step, r.Attempt = "task", "run", 1
@@ -240,6 +256,13 @@ func (p *fixtureProcess) makeRequest(step corpusStep, index int) nodeproto.Reque
 				r.Closure = p.plan.Jobs[0].Closures.MemoKey
 			case "generate":
 				r.Closure = p.plan.Jobs[0].Closures.Generate[0]
+			case "before":
+				r.Closure = p.plan.Jobs[0].Closures.BeforeRun[0]
+			case "verify":
+				r.Closure = p.plan.Jobs[0].Closures.Verify
+			case "after":
+				r.Closure = p.plan.Jobs[0].Closures.AfterRun[0]
+				r.Input = json.RawMessage(`{"outcome":"success"}`)
 			}
 		}
 	case nodeproto.OpCancel:

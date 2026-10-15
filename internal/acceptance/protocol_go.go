@@ -57,15 +57,15 @@ type GoSDKProcessResult struct {
 
 // RunGoSDKProcessFixture executes the same pipeline used by the public fake-host comparison.
 func RunGoSDKProcessFixture(ctx context.Context, routeOrigin string, jobs ...string) (GoSDKProcessResult, error) {
-	if runtime.GOOS == "windows" {
-		return GoSDKProcessResult{}, fmt.Errorf("fd3/fd4 process fixture requires Unix")
-	}
 	dir, err := os.MkdirTemp("", "sparkwing-go-process-*")
 	if err != nil {
 		return GoSDKProcessResult{}, err
 	}
 	defer os.RemoveAll(dir)
 	bin := filepath.Join(dir, "pipeline")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
 	build := exec.CommandContext(ctx, "go", "build", "-p", "4", "-o", bin, goSDKModule+"/tests/acceptance/testdata/protocolgo/cmd")
 	build.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-buildvcs=false")
 	if output, err := build.CombinedOutput(); err != nil {
@@ -116,7 +116,11 @@ func runGoSDKSession(ctx context.Context, bin, dir, job, routeOrigin string) (no
 			command.Env = append(command.Env, item)
 		}
 	}
-	command.ExtraFiles = []*os.File{requestR, frameW}
+	if err := goSDKCommandPipes(command, requestR, frameW); err != nil {
+		_ = requestR.Close()
+		_ = frameW.Close()
+		return nodeproto.PlanDoc{}, nodeproto.RunResult{}, err
+	}
 	var stdout, stderr bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, &stderr
 	if err := command.Start(); err != nil {
@@ -137,7 +141,7 @@ func runGoSDKSession(ctx context.Context, bin, dir, job, routeOrigin string) (no
 	hello := nodeproto.Request{
 		ID: "hello", Op: nodeproto.OpHello, Protocol: nodeproto.Version,
 		Engine: &nodeproto.EngineIdentity{Version: "fixture"},
-		Runner: &nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{"os=linux"}},
+		Runner: &nodeproto.RunnerIdentity{Name: "local", Type: "local", Labels: []string{"os=" + runtime.GOOS}},
 	}
 	if job != "" {
 		origin := routeOrigin
@@ -186,8 +190,17 @@ func runGoSDKSession(ctx context.Context, bin, dir, job, routeOrigin string) (no
 		if err != nil {
 			return plan, step, err
 		}
-		if err := reply.Decode(&step); err != nil {
+		if !reply.OK {
+			return plan, step, fmt.Errorf("%s invocation failed: %+v", job, reply.Error)
+		}
+		// safety: this fake host decodes the emitted body independently of the engine's error decoder.
+		if err := json.Unmarshal(reply.Result, &step); err != nil {
 			return plan, step, fmt.Errorf("%s step: %w", job, err)
+		}
+		if step.Outcome != "success" && step.Outcome != "failed" ||
+			(step.Outcome == "failed") != (step.Error != nil) ||
+			step.Error != nil && step.Error.Code == "" {
+			return plan, step, fmt.Errorf("%s has an invalid body result", job)
 		}
 	}
 	if err := requestW.Close(); err != nil {

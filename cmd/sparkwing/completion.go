@@ -181,7 +181,7 @@ func runInternalCompletePipelineFlags(args []string) error {
 	schema, err := pipelineFlagsFromCache(context.Background(), sparkwingDir, pipelineName)
 	if err == nil && len(schema) > 0 {
 		for _, a := range schema {
-			body := a.Desc
+			body := a.Description
 			if body == "" {
 				body = a.Type
 			}

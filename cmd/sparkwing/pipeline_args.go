@@ -3,19 +3,21 @@ package main
 import (
 	"fmt"
 	"io"
+	"slices"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // safety: a cache miss describes the binary again so the reason it cannot
 // describe reaches the operator instead of an empty pipeline list. A run that
 // executes in another checkout binds that checkout's pipeline names, so it is
 // described there and never from the source's cache.
-func (r *pipelineRun) describedPipeline(pipelineName string) (sparkwing.DescribePipeline, error) {
-	var schemas []sparkwing.DescribePipeline
+func (r *pipelineRun) describedPipeline(pipelineName string) (nodeproto.PipelineDescription, error) {
+	var schemas []nodeproto.PipelineDescription
 	bindDir := r.opts.ExecutionDir
 	if bindDir == "" {
 		bindDir = r.sparkwingDir
@@ -26,14 +28,14 @@ func (r *pipelineRun) describedPipeline(pipelineName string) (sparkwing.Describe
 	if schemas == nil {
 		doc, err := describeEntry(r.ctx, bindDir, r.entry)
 		if err != nil {
-			return sparkwing.DescribePipeline{}, err
+			return nodeproto.PipelineDescription{}, err
 		}
 		schemas = doc.Pipelines
 	}
 	return findPipelineSchema(schemas, pipelineName)
 }
 
-func findPipelineSchema(schemas []sparkwing.DescribePipeline, pipelineName string) (sparkwing.DescribePipeline, error) {
+func findPipelineSchema(schemas []nodeproto.PipelineDescription, pipelineName string) (nodeproto.PipelineDescription, error) {
 	names := make([]string, 0, len(schemas))
 	for _, s := range schemas {
 		if s.Name == pipelineName {
@@ -45,12 +47,12 @@ func findPipelineSchema(schemas []sparkwing.DescribePipeline, pipelineName strin
 	if suggestion := sparkwingruntime.SuggestClosest(pipelineName, names); suggestion != "" {
 		msg += fmt.Sprintf("; did you mean %q?", suggestion)
 	}
-	return sparkwing.DescribePipeline{}, fmt.Errorf("%s", msg)
+	return nodeproto.PipelineDescription{}, fmt.Errorf("%s", msg)
 }
 
-func parsePipelineArgs(schema sparkwing.DescribePipeline, args []string) (map[string]string, error) {
-	byName := map[string]sparkwing.DescribeArg{}
-	byShort := map[string]sparkwing.DescribeArg{}
+func parsePipelineArgs(schema nodeproto.PipelineDescription, args []string) (map[string]string, error) {
+	byName := map[string]nodeproto.ArgumentDescription{}
+	byShort := map[string]nodeproto.ArgumentDescription{}
 	for _, a := range schema.Args {
 		byName[a.Name] = a
 		if a.Short != "" {
@@ -93,8 +95,8 @@ func parsePipelineArgs(schema sparkwing.DescribePipeline, args []string) (map[st
 			value = args[i]
 		}
 		if found {
-			if err := arg.CheckEnum(value); err != nil {
-				return nil, err
+			if len(arg.Enum) > 0 && !slices.Contains(arg.Enum, value) {
+				return nil, fmt.Errorf("flag --%s: %q is not one of %s", name, value, strings.Join(arg.Enum, ", "))
 			}
 		}
 		out[name] = value
@@ -102,7 +104,7 @@ func parsePipelineArgs(schema sparkwing.DescribePipeline, args []string) (map[st
 	return out, nil
 }
 
-func printPipelineHelp(w io.Writer, schema sparkwing.DescribePipeline) {
+func printPipelineHelp(w io.Writer, schema nodeproto.PipelineDescription) {
 	if schema.Help != "" {
 		fmt.Fprintf(w, "DESCRIPTION\n  %s\n\n", schema.Help)
 	}
@@ -142,7 +144,7 @@ func printPipelineHelp(w io.Writer, schema sparkwing.DescribePipeline) {
 		fmt.Fprintln(w)
 	}
 	fmt.Fprintln(w, "SPARKWING FLAGS")
-	for _, d := range sparkwing.SparkwingFlagDocs() {
+	for _, d := range runFlagSpecs {
 		head := "--" + d.Name
 		if d.Short != "" {
 			head = "-" + d.Short + ", " + head
@@ -155,7 +157,7 @@ func printPipelineHelp(w io.Writer, schema sparkwing.DescribePipeline) {
 	fmt.Fprintln(w, "\nSee `sparkwing run --help` for prose explanations of each sparkwing flag.")
 }
 
-func pipelineFlagLine(a sparkwing.DescribeArg) string {
+func pipelineFlagLine(a nodeproto.ArgumentDescription) string {
 	tag := "[optional]"
 	if a.Required {
 		tag = "[required]"
@@ -166,8 +168,8 @@ func pipelineFlagLine(a sparkwing.DescribeArg) string {
 	}
 	head += " <" + a.Type + ">"
 	var suffix strings.Builder
-	if a.Default != "" {
-		fmt.Fprintf(&suffix, " (default: %s)", a.Default)
+	if a.Default != nil {
+		fmt.Fprintf(&suffix, " (default: %s)", *a.Default)
 	}
 	if len(a.Enum) > 0 {
 		fmt.Fprintf(&suffix, " [enum: %s]", strings.Join(a.Enum, "|"))
@@ -178,5 +180,5 @@ func pipelineFlagLine(a sparkwing.DescribeArg) string {
 	if a.JobID != "" {
 		fmt.Fprintf(&suffix, " [from job %s]", a.JobID)
 	}
-	return fmt.Sprintf("  %-30s %s %s  %s%s", head, tag, a.Type, a.Desc, suffix.String())
+	return fmt.Sprintf("  %-30s %s %s  %s%s", head, tag, a.Type, a.Description, suffix.String())
 }

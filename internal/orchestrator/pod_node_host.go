@@ -38,6 +38,8 @@ type podNode struct {
 	controllerURL, token, runID, nodeID string
 	// safety: the accepted plan's hash for the node, which the pod's own plan of it must match.
 	specHash string
+	engine   nodeproto.EngineIdentity
+	identity nodeproto.RunnerIdentity
 	// safety: the claim's 1-based attempt ordinal, which decides before_run and after_run under retry_auto.
 	attempt int
 	// safety: a node a run host dispatched already ran its skip_if, memo and admission there, and its accepted
@@ -101,7 +103,7 @@ func hostPodNode(ctx context.Context, p podNode) (nodehost.Result, error) {
 		return nodehost.Result{}, err
 	}
 	cfg := nodehost.Config{
-		Session:  nodehost.SessionConfig{Entry: p.entry, Dir: p.dir, Sink: planSink, Env: env},
+		Session:  nodehost.SessionConfig{Entry: p.entry, Dir: p.dir, Sink: planSink, Env: env, Engine: p.engine, Runner: p.identity, Validation: nodeproto.ValidationContext{Placement: nodeproto.PlacementLauncher, Secrets: masker}},
 		Pipeline: run.Pipeline, Args: args, Run: podRunContext(run),
 		StartAt: flags.StartAt, StopAt: flags.StopAt,
 		State: p.state, Artifacts: p.artifacts, Logger: p.logger,
@@ -316,10 +318,10 @@ func PipelineRequires(dir, pipeline string) ([]string, error) {
 }
 
 // safety: the planning claim and every node's pod plan from one context, so their spec hashes compare.
-func podRunContext(run *store.Run) nodeproto.RunContextOld {
+func podRunContext(run *store.Run) nodeproto.RunContext {
 	flags := runflags.FromInvocation(run.Invocation)
-	rc := nodeproto.RunContextOld{
-		RunID: run.ID, StartedAt: run.StartedAt, DryRun: flags.DryRun, NoCache: flags.NoCache,
+	rc := nodeproto.RunContext{
+		RunID: run.ID, Pipeline: run.Pipeline, StartedAt: run.StartedAt, DryRun: flags.DryRun, NoMemo: flags.NoCache,
 		Git:     &nodeproto.Git{SHA: run.GitSHA, Branch: run.GitBranch, Repo: run.DeclaredRepo, RepoURL: run.RepoURL},
 		Trigger: &nodeproto.Trigger{Source: protocolTriggerSource(run.TriggerSource), User: run.TriggerUser},
 	}

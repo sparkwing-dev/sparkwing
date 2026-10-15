@@ -1,7 +1,5 @@
 package main
 
-import "github.com/sparkwing-dev/sparkwing/sparkwing"
-
 func helpExampleScratchDir(name string) string {
 	return "./" + name
 }
@@ -1053,22 +1051,30 @@ and exits zero.`,
 	},
 }
 
-var runFlagSpecs = runFlagSpecsFromDocs()
-
-func runFlagSpecsFromDocs() []FlagSpec {
-	docs := sparkwing.SparkwingFlagDocs()
-	out := make([]FlagSpec, 0, len(docs))
-	for _, document := range docs {
-		out = append(out, FlagSpec{
-			Name:     document.Name,
-			Short:    document.Short,
-			Argument: document.Argument,
-			Desc:     document.Desc,
-			Group:    document.Group,
-			Hot:      document.Hot,
-		})
-	}
-	return out
+var runFlagSpecs = []FlagSpec{
+	{Name: "sw-ref", Argument: "REF", Desc: "Run the pipeline at REF (branch/tag/SHA) instead of the working tree", Group: "System", Hot: true},
+	{Name: "sw-pipeline-ref", Argument: "REF", Desc: "Compile the pipeline at REF and execute it in this checkout; cannot be combined with --sw-ref", Group: "System"},
+	{Name: "sw-detached", Desc: "Queue the run for this machine's resident consumer and print its handle instead of executing here; the run outlives the terminal", Group: "System", Hot: true},
+	{Name: "sw-idempotency-key", Argument: "KEY", Desc: "Detached only: deduplication token; a repeat carrying this key returns the original run instead of starting a second one", Group: "System"},
+	{Name: "sw-request-id", Argument: "ID", Desc: "Detached only: tracing identifier recorded on the run; never affects deduplication", Group: "System"},
+	{Name: "sw-consumer-idle", Argument: "DUR", Desc: "Detached only, and only if this starts a consumer: how long it stays alive with no work (default 5m)", Group: "System"},
+	{Name: "sw-consumer-claim-lease", Argument: "DUR", Desc: "Detached only, and only if this starts a consumer: the lease it stamps on each claimed run, renewed while the run executes (default 3m)", Group: "System"},
+	{Name: "sw-output", Argument: "FORMAT", Desc: "Detached only: run-handle format, pretty|json|plain (default: pretty on a TTY, json when piped)", Group: "System"},
+	{Name: "sw-verbose", Short: "v", Desc: "Enable debug logging and the complete live JSON event stream", Group: "System"},
+	{Name: "sw-start-at", Argument: "STEP", Desc: "Start the run at STEP", Group: "System", Hot: true},
+	{Name: "sw-stop-at", Argument: "STEP", Desc: "Stop the run after STEP", Group: "System", Hot: true},
+	{Name: "sw-only", Argument: "GLOB", Desc: "Run only jobs whose ID matches GLOB (plus their Needs ancestors)", Group: "System", Hot: true},
+	{Name: "sw-no-cache", Desc: "Ignore cached per-node results (writes still happen)", Group: "System", Hot: true},
+	{Name: "sw-priority", Argument: "VALUE", Desc: "Local admission priority: an integer, or front/back for one step past the queue as it stands; overrides the plan's own Priority", Group: "System", Hot: true},
+	{Name: "sw-no-update", Desc: "Compile against the committed sparks overlay instead of resolving sparks first; CI sets it so the runner needs no resolve", Group: "System"},
+	{Name: "sw-no-bincache", Desc: "Build a temporary pipeline binary with debug symbols instead of using the binary cache", Group: "System"},
+	{Name: "sw-hash-all-files", Desc: "Hash files Git ignores into the binary cache key, for a build that embeds them", Group: "System"},
+	{Name: "sw-allow-unadmitted", Desc: "Run without the admission daemon even when the pipeline reserves host capacity", Group: "System"},
+	{Name: "sw-dry-run", Desc: "Run each step's dry-run probe instead of its real action", Group: "System", Hot: true},
+	{Name: "sw-allow", Argument: "LABEL[,LABEL...]", Desc: "Authorize risk-labeled steps (repeatable)", Group: "System"},
+	{Name: "sw-index", Argument: "PATH", Desc: "Judge the git index at PATH instead of the repository's own (prints an index_bound event naming it)", Group: "System"},
+	{Name: "sw-run-handle-file", Argument: "PATH", Desc: "Atomically publish the accepted run's machine-readable handle to PATH", Group: "System"},
+	{Name: "target", Argument: "TARGET", Desc: "Run against the named pipeline deployment target (e.g. dev, prod)", Group: "System", Hot: true},
 }
 
 var cmdPipeline = Command{

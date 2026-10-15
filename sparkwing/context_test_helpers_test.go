@@ -10,7 +10,7 @@ func withTestNode(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, keyNode, id)
 }
 
-func withTestJSONResolver(ctx context.Context, resolver func(string) ([]byte, bool)) context.Context {
+func withTestJSONResolver(ctx context.Context, resolver func(context.Context, string) ([]byte, error)) context.Context {
 	return context.WithValue(ctx, keyJSONRefResolver, resolver)
 }
 

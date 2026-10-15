@@ -99,6 +99,16 @@ func TestWriterRefusesOversizeAndKeepsLinesWhole(t *testing.T) {
 	}
 }
 
+type shortWriter struct{}
+
+func (shortWriter) Write(p []byte) (int, error) { return len(p) - 1, nil }
+
+func TestWriterReportsIncompleteFrame(t *testing.T) {
+	if err := NewWriter(shortWriter{}).Send(FrameLog{TS: "now", Message: "x"}); !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("partial protocol frame reported success: %v", err)
+	}
+}
+
 func TestTracker(t *testing.T) {
 	var tr Tracker
 	a, b := tr.Start(OpPlan), tr.Start(OpEval)

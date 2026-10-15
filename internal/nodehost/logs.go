@@ -81,11 +81,11 @@ var streamLevels = [2]string{LevelInfo, LevelWarn}
 
 // safety: an allowlist, so an event the SDK invents can never pass as a host lifecycle record.
 var sdkEvents = map[string]bool{
-	sparkwing.EventNodeAnnotation: true,
-	sparkwing.EventNodeSummary:    true,
-	"exec_start":                  true,
-	"exec_line":                   true,
-	"exec_end":                    true,
+	"job_annotation": true,
+	"job_summary":    true,
+	"exec_start":     true,
+	"exec_line":      true,
+	"exec_end":       true,
 }
 
 var logLevels = map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
@@ -158,8 +158,8 @@ func (s *LogSink) safeCut(text string) int {
 
 // Record stores one frame-pipe record. A host-reserved or unknown event is
 // stored as a plain message, so an SDK cannot forge step or node lifecycle.
-func (s *LogSink) Record(rec nodeproto.LogRecord) {
-	out := sparkwing.LogRecord{Level: rec.Level, Step: rec.Step, Msg: s.cfg.Masker.Mask(rec.Msg)}
+func (s *LogSink) Record(rec nodeproto.FrameLog) {
+	out := sparkwing.LogRecord{Level: rec.Level, Step: rec.Step, Msg: s.cfg.Masker.Mask(rec.Message)}
 	if !logLevels[out.Level] {
 		out.Level = LevelInfo
 	}
@@ -207,7 +207,7 @@ func (s *LogSink) maskAttrs(raw json.RawMessage) map[string]any {
 func (s *LogSink) persist(rec sparkwing.LogRecord) error {
 	c, run, node := s.cfg, s.cfg.RunID, s.cfg.NodeID
 	switch rec.Event {
-	case sparkwing.EventNodeAnnotation:
+	case "job_annotation":
 		message := boundedRecord(attrString(rec.Attrs, "message", rec.Msg), "annotation")
 		switch {
 		case message == "":
@@ -217,7 +217,7 @@ func (s *LogSink) persist(rec sparkwing.LogRecord) error {
 		default:
 			return c.State.AppendNodeAnnotation(s.ctx, run, node, message)
 		}
-	case sparkwing.EventNodeSummary:
+	case "job_summary":
 		markdown := boundedRecord(attrString(rec.Attrs, "markdown", rec.Msg), "summary")
 		if rec.Step != "" {
 			return c.State.SetStepSummary(s.ctx, run, node, rec.Step, markdown)

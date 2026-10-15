@@ -54,7 +54,7 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 	measured := false
 	hasRunCPU := false
 	for _, n := range nodes {
-		if n.Outcome == string(sparkwing.Cached) {
+		if n.Outcome == string(sparkwing.Memoized) {
 			continue
 		}
 		attempts := 0
@@ -268,7 +268,7 @@ func cacheDominant(nodes []*store.Node) bool {
 			continue
 		}
 		total++
-		if n.Outcome == string(sparkwing.Cached) {
+		if n.Outcome == string(sparkwing.Memoized) {
 			cached++
 		}
 	}
